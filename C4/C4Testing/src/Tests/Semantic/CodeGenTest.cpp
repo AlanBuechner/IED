@@ -3,6 +3,7 @@
 #include "Compiler/Toolchain.h"
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 #include <llvm/IR/Constants.h>
@@ -246,6 +247,44 @@ namespace Testing
 		TEST_ASSERT(widths);
 		TEST_ASSERT(Contains(plain, "c4_alloc_typed_noscan") && !Contains(plain, "c4_alloc_typed"));
 		TEST_ASSERT(Contains(linked, "c4_alloc_typed") && !Contains(linked, "c4_alloc_typed_noscan"));
+	}
+
+	// The text of a census record's name constant.
+	static std::string RecordName(const llvm::ConstantStruct& record)
+	{
+		const auto* text = llvm::dyn_cast<llvm::GlobalVariable>(record.getOperand(0));
+		const auto* bytes = text && text->hasInitializer() ? llvm::dyn_cast<llvm::ConstantDataSequential>(text->getInitializer()) : nullptr;
+		return bytes ? bytes->getAsCString().str() : std::string();
+	}
+
+	void CodeGenTest::NewGivesTheCensusItsTypesRecord()
+	{
+		// `new` passes c4_alloc_typed its type's census record: the name, and a function that counts the native memory
+		// an object holds, null for a type that holds none.
+		// The module dies with LowerAndInspect: what it holds is read inside.
+		CompilerInstance compiler;
+		std::map<std::string, std::string> counters; // record name -> its counter's name, "null" or "?"
+		std::vector<std::string> counted;
+		TEST_ASSERT(LowerAndInspect(compiler,
+			"struct Buffer { public int64 bytes; [operator(\"native_bytes\")] public int64 NativeBytes() const { return bytes; } }\n"
+			"struct Holder { public Buffer[2] buffers; public Holder* next; }\n"
+			"struct Plain { public int32 v; }\n"
+			"int32 main() { Holder* h = new Holder; Plain* p = new Plain; return (int32)h->buffers[0].bytes + p->v; }", [&](llvm::Module& m) {
+				for (const llvm::GlobalVariable& global : m.globals())
+					if (global.getName().starts_with("c4.census_type") && global.hasInitializer())
+						if (const auto* record = llvm::dyn_cast<llvm::ConstantStruct>(global.getInitializer()))
+						{
+							const llvm::Constant* counter = record->getOperand(1);
+							const auto* function = llvm::dyn_cast<llvm::Function>(counter);
+							counters[RecordName(*record)] = function ? function->getName().str() : llvm::isa<llvm::ConstantPointerNull>(counter) ? "null" : "?";
+						}
+				if (const llvm::Function* counter = m.getFunction("__c4_native_bytes.Holder"))
+					if (!counter->isDeclaration() && counter->hasInternalLinkage()) counted = CalleesOf(*counter);
+			}));
+		TEST_ASSERT(counters["Holder"] == "__c4_native_bytes.Holder");
+		TEST_ASSERT(counters["Plain"] == "null");
+		TEST_ASSERT(std::any_of(counted.begin(), counted.end(), [](const std::string& name) { return name.find("NativeBytes") != std::string::npos; }));
+		TEST_PASSED();
 	}
 
 	void CodeGenTest::GcRootsListEveryPointerHoldingGlobal()

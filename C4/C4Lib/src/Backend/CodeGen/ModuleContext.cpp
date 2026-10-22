@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/ModuleContext.h"
+#include "Backend/CodeGen/CensusTypes.h"
 #include "Backend/CodeGen/DebugInfo.h"
 #include "Backend/CodeGen/NormalizedConversion.h"
 #include "Backend/CodeGen/EhTables.h"
@@ -38,6 +39,7 @@ namespace Scripting
 		m_Rtti = std::make_unique<RttiEmitter>(*m_Module);
 		m_Vtables = std::make_unique<VtableEmitter>(*this, *m_Rtti);
 		m_Eh = std::make_unique<EhTables>(*m_Module, *m_Rtti, [this](const FunctionRecord& rec) { return GetOrCreateFunction(rec); });
+		m_Census = std::make_unique<CensusTypes>(*this);
 	}
 
 	ModuleContext::~ModuleContext() = default;

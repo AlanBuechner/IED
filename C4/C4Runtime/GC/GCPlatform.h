@@ -46,6 +46,8 @@ uint64_t gc_os_this_thread_id(void);
 // The calling thread's return addresses into `frames` (room for `capacity`), from `from` out when it is among them
 // (the runtime's own frames left out), else from the caller's: how many.
 uint32_t gc_os_capture_stack(void** frames, uint32_t capacity, const void* from);
+// `count(object)`, or 0 when it faults reading memory.
+int64_t gc_os_count_guarded(int64_t (*count)(const void* object), const void* object);
 void gc_os_yield(void);
 
 // Stops `thread` and waits until it has stopped (0 when it cannot be stopped); resume starts it again.

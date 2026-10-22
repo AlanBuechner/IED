@@ -1,0 +1,3 @@
+struct Pair { public int64 a; public int64 b; }
+Pair Make() { Pair p; return p; }
+int32 main() { return (int32)native_bytes_of(Make()); }

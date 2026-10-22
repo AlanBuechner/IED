@@ -14,6 +14,7 @@ namespace Core
 		[operator("create")] public void Init(int64 bits) { Resize(bits); }
 		[operator("copy")] public void CopyFrom(const BitSet& other);
 		[operator("delete")] public void Delete();
+		[operator("native_bytes")] public int64 NativeBytes() const { return wordCapacity * 8; }
 
 		public int64 Count() const { return bitCount; }   // how many bits it holds, set or not
 		public bool IsEmpty() const { return bitCount == 0; }

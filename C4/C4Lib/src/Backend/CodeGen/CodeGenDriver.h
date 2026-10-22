@@ -102,6 +102,7 @@ namespace Scripting
 		/// fails to lower.
 		bool EmitReachable(ProgramModel& model, Core::Vector<const FunctionRecord*> batch, std::string* errorMessage);
 		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore);
+		void LowerCensusFunctions(ProgramModel& model, std::vector<const HIRFunction*>& lowered);
 		/// `__c4_global_init`, registered to run before main: it runs the rounds of Backend/HIR/GlobalInit in
 		/// order, each emitted with the functions it reaches, then attaches the main thread. `__c4_thread_start`
 		/// runs the thread_local rounds on a thread that attaches. False, with the diagnostics, when a start or a

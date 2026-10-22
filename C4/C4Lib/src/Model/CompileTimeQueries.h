@@ -1,4 +1,5 @@
 #pragma once
+#include "Model/ConstantValue.h"
 #include "Model/QueryResult.h"
 #include "Lexer/Token.h"
 #include "Core/Core.h"
@@ -14,6 +15,7 @@ namespace Scripting
 	QueryResult<int64> AlignOfType(const Type* type);
 	QueryResult<int64> OffsetOfField(const Type* type, const Core::Vector<Token>& path);
 
-	/// The value of `sizeof` / `alignof` / `offsetof` once its operand's type is known.
-	QueryResult<int64> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType);
+	/// The value of `sizeof` / `alignof` / `offsetof` (an int64) or `holds_native_bytes` (a bool) once its operand's
+	/// type is known.
+	QueryResult<ConstantValue> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType);
 }

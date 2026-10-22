@@ -87,6 +87,13 @@ Every container keeps its elements in storage from `Core::AllocateElements<T>(co
 than the 16 bytes `raw_alloc` guarantees, so an element such as a `packed float[8]` (32) or `packed float[16]`
 (64) can be read with aligned AVX instructions.
 
+Every container that owns native memory says how much through `[operator("native_bytes")] int64 NativeBytes() const`
+(what `native_bytes_of` and the GC census read, [language/14](../language/14-builtins.md#1-compiler-intrinsics)): its
+storage by capacity, plus what its live elements hold, walked only when `holds_native_bytes` of the element type is
+true. `Array`, `List`, `Queue`, `HashMap`, `HashSet`, `BitSet`, `String`, `StringBuilder`, `Serialization::DomDoc` and
+`Threading::JobQueue` have one; `Stack`, `PriorityQueue` and `LruCache` add up the containers they are made of. A
+`List`'s walk follows at most `Count()` nodes.
+
 ### `Core::Array<T>` - growable contiguous array (`array.ch`)
 
 | Group | Members |
@@ -658,9 +665,9 @@ as `[link]` declarations, with no wrappers.
 |---|---|
 | `Collect()` | collect now (also while disabled) |
 | `GetStats()` | `GC::Stats { allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs, nativeBytes }`; `nativeBytes` is the native memory in use beside the GC heap: `raw_alloc`'s blocks and container buffers (`Array`, `String`, `HashMap`, ...) |
-| `ThreadAllocated()` | `GC::AllocCounts { objects, bytes, nativeBytes }`: the calling thread's allocations since it started, never reset (a pool slot counts at its size when `Take` hands it out), and the native memory it took (`raw_alloc`'s blocks and the bytes container buffers grew by); its own counters, no lock, so a profiler can read it around any scope |
+| `ThreadAllocated()` | `GC::AllocCounts { objects, bytes, nativeBytes, nativeFreed }`: the calling thread's allocations since it started, never reset (a pool slot counts at its size when `Take` hands it out), the native memory it took (`raw_alloc`'s blocks and the bytes container buffers grew by) and the native memory it gave back (by the same measure, whichever thread took it); its own counters, no lock, so a profiler can read it around any scope |
 | `Allocated()` | every thread's `AllocCounts` so far, threads that ended included (takes the collector's lock) |
-| `SetCensus(bool on)`, `LastCensus(CensusEntry* out, int32 capacity)` | the live objects by type: while on, every `new` notes its type, and each collection counts the live objects by it into `GC::CensusEntry { type, objects, bytes }` (`type` the qualified name, `T[]` for an array of T, `nullptr` for objects of no known type: made before it was on, by native code or in a Pool), one entry a name, by name; `LastCensus` returns how many entries there are (read it in a collection-result callback). It costs 8 bytes beside each slot of the spans allocated from and a walk of the live objects at each collection |
+| `SetCensus(bool on)`, `LastCensus(CensusEntry* out, int32 capacity)` | the live objects by type: while on, every `new` notes its type, and each collection counts the live objects by it into `GC::CensusEntry { type, objects, bytes, nativeBytes }` (`type` the qualified name, `T[]` for an array of T, `nullptr` for objects of no known type: made before it was on, by native code or in a Pool; `nativeBytes` the native memory they hold, `native_bytes_of` each), one entry a name, by name; `LastCensus` returns how many entries there are (read it in a collection-result callback). It costs 8 bytes beside each slot of the spans allocated from and a walk of the live objects at each collection, with a call of `native_bytes_of` for each one whose type holds native memory |
 | `SetAllocSampling(uint64 everyBytes)` | records about one allocation in every `everyBytes` a thread allocates, with its call stack, at points drawn at random so each sample stands for `everyBytes` bytes on average; 0 (default) turns it off; returns the previous setting. The calling thread takes a change up at once, another within 64 KiB |
 | `TakeAllocSamples(AllocSample* out, int32 capacity)` | moves up to `capacity` of the oldest waiting samples to `out` as `GC::AllocSample { bytes, timeNs, threadId, frameCount, frames[32] }` (return addresses, the allocating function's first; `timeNs` on `LastPauses`' clock); returns how many. The latest 4096 are kept |
 | `LastPauses(Pause* out, int32 capacity)` | the last collection's stops of the program, oldest first, as `GC::Pause { startNs, endNs }` in nanoseconds of the high-resolution counter (`Platform::Ticks()` scaled by 1e9 / `TickFrequency()`); returns how many there were: one for a stop-the-world collection, one per root copy and one to finish for a concurrent cycle. Read it in a collection callback for exact GC lanes in a profiler |
@@ -1369,11 +1376,11 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 75 files, 663 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 76 files, 675 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

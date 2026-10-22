@@ -1,0 +1,147 @@
+// native_bytes_of and holds_native_bytes (docs/language/14 section 1): the native memory a value holds, what the
+// [operator("native_bytes")] of its type, its bases, its fields and its fixed arrays' elements count; and the containers'
+// operators.
+
+include "bedrock.ch"
+
+struct NativePlain { public int32 a; public double b; public NativePlain* next; }
+struct NativeHolder { public int32 id; public Core::Array<int32> numbers; public Core::Array<uint8>* elsewhere; }
+struct NativeDerived : NativeHolder { public Core::Array<int64> wide; }
+struct NativeRun { public Core::Array<uint8>[3] parts; }
+struct NativeCounted {
+	public Core::Array<uint8> ignored;
+	[operator("native_bytes")] public int64 NativeBytes() const { return 1000; }
+}
+
+[test("native_bytes")]
+class NativeBytesTests {
+	[test("plain_values_hold_none")]
+	public static void TestPlainValuesHoldNone() {
+		NativePlain plain;
+		int32 number = 5;
+		assert_true(!holds_native_bytes(NativePlain) && !holds_native_bytes(int32) && !holds_native_bytes(Core::Array<int32>*), "no native memory in these");
+		assert_true(holds_native_bytes(Core::Array<int32>) && holds_native_bytes(NativeDerived) && holds_native_bytes(NativeRun), "some in these");
+		assert_eq(native_bytes_of(plain), 0, "a plain struct");
+		assert_eq(native_bytes_of(number), 0, "a number");
+	}
+
+	[test("an_array_is_its_buffer")]
+	public static void TestAnArrayIsItsBuffer() {
+		Core::Array<int32> numbers;
+		assert_eq(native_bytes_of(numbers), 0, "no buffer yet");
+		numbers.Reserve(100);
+		assert_eq(native_bytes_of(numbers), numbers.Capacity() * 4, "its buffer, by capacity");
+	}
+
+	[test("elements_add_what_they_hold")]
+	public static void TestElementsAddWhatTheyHold() {
+		Core::Array<Core::Array<uint8>> nested;
+		nested.Resize(3);
+		nested[0].Reserve(10);
+		nested[2].Reserve(50);
+		const int64 expected = nested.Capacity() * (int64)sizeof(Core::Array<uint8>) + nested[0].Capacity() + nested[2].Capacity();
+		assert_eq(native_bytes_of(nested), expected, "the outer buffer and each inner one");
+	}
+
+	[test("fields_and_bases_add_up")]
+	public static void TestFieldsAndBasesAddUp() {
+		NativeDerived value;
+		value.numbers.Reserve(10);
+		value.wide.Reserve(4);
+		Core::Array<uint8> other;
+		other.Reserve(1000);
+		value.elsewhere = &other;
+		assert_eq(native_bytes_of(value), value.numbers.Capacity() * 4 + value.wide.Capacity() * 8, "the base's field and its own, not through the pointer");
+		assert_eq(native_bytes_of(value.numbers), value.numbers.Capacity() * 4, "a field alone");
+		NativeHolder* asBase = &value;
+		assert_eq(native_bytes_of(*asBase), value.numbers.Capacity() * 4, "through a pointer, as the type it points to");
+	}
+
+	[test("fixed_arrays_count_each_element")]
+	public static void TestFixedArraysCountEachElement() {
+		NativeRun run;
+		run.parts[0].Reserve(7);
+		run.parts[2].Reserve(9);
+		assert_eq(native_bytes_of(run), run.parts[0].Capacity() + run.parts[2].Capacity(), "every element");
+		assert_eq(native_bytes_of(run.parts[2]), run.parts[2].Capacity(), "one element");
+	}
+
+	[test("an_operator_answers_for_its_type")]
+	public static void TestAnOperatorAnswersForItsType() {
+		NativeCounted counted;
+		counted.ignored.Reserve(64);
+		assert_eq(native_bytes_of(counted), 1000, "what the operator says, not its fields");
+		const NativeCounted& seen = counted;
+		assert_eq(native_bytes_of(seen), 1000, "through a reference");
+	}
+
+	[test("a_run_through_a_pointer")]
+	public static void TestARunThroughAPointer() {
+		Core::Array<Core::String> names;
+		names.Push(Core::String("first"));
+		names.Push(Core::String("second name, longer"));
+		const int64 strings = native_bytes_of(names.Data(), names.Count());
+		assert_eq(strings, names[0].Capacity() + 1 + names[1].Capacity() + 1, "each string's buffer");
+		assert_eq(native_bytes_of(names), names.Capacity() * (int64)sizeof(Core::String) + strings, "the array adds its own");
+		assert_eq(native_bytes_of(names.Data(), 0), 0, "no elements");
+	}
+
+	[test("operands_are_evaluated_once")]
+	public static void TestOperandsAreEvaluatedOnce() {
+		Core::Array<Core::Array<uint8>> nested;
+		nested.Resize(2);
+		nested[1].Reserve(16);
+		int64 i = 0;
+		const int64 first = native_bytes_of(nested[i++]);
+		int32 n = 0;
+		const int64 none = native_bytes_of(&n, i++);
+		assert_true(first == 0 && none == 0 && i == 2, "each operand once, whether the type holds any or not");
+	}
+
+	[test("hash_tables")]
+	public static void TestHashTables() {
+		Core::HashMap<int32, Core::String> map;
+		map.Insert(1, Core::String("one"));
+		map.Insert(2, Core::String("two and more"));
+		const int64 table = map.Capacity() * (int64)sizeof(Core::KeyValue<int32, Core::String>) + map.Capacity() + 16;
+		const int64 strings = map.Find(1)->Capacity() + 1 + map.Find(2)->Capacity() + 1;
+		assert_eq(native_bytes_of(map), table + strings, "its table and its live strings");
+		Core::HashSet<int64> set;
+		set.Add(5);
+		assert_eq(native_bytes_of(set), set.Capacity() * 8 + set.Capacity() + 16, "a table of numbers");
+	}
+
+	[test("a_queue_that_wraps")]
+	public static void TestAQueueThatWraps() {
+		Core::Queue<Core::Array<uint8>> queue;
+		queue.Reserve(4);
+		for (int32 i = 0; i < 3; ++i) queue.Push(Core::Array<uint8>());
+		queue.Pop();
+		queue.Pop();
+		for (int32 i = 0; i < 3; ++i) {
+			Core::Array<uint8> bytes;
+			bytes.Reserve(100);
+			queue.Push(take(bytes));
+		}
+		int64 held = 0;
+		for (const Core::Array<uint8>& bytes : queue) held += bytes.Capacity();
+		assert_true(queue.Count() == 4 && held >= 300, "four, the last three holding bytes, around the end");
+		assert_eq(native_bytes_of(queue), queue.Capacity() * (int64)sizeof(Core::Array<uint8>) + held, "its buffer and both runs");
+	}
+
+	[test("lists_bits_and_text")]
+	public static void TestListsBitsAndText() {
+		Core::List<Core::String> list;
+		list.PushBack(Core::String("a"));
+		list.PushBack(Core::String("bb"));
+		int64 strings = 0;
+		for (const Core::String& text : list) strings += text.Capacity() + 1;
+		assert_eq(native_bytes_of(list), 2 * (int64)sizeof(Core::ListNode<Core::String>) + strings, "its nodes and their strings");
+		Core::BitSet bits;
+		bits.Resize(1000);
+		assert_true(native_bytes_of(bits) >= 125, "its words");
+		Core::StringBuilder text;
+		text.Append("hello");
+		assert_true(native_bytes_of(text) >= 6, "its buffer");
+	}
+}

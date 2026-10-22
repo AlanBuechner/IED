@@ -1,5 +1,6 @@
 #include "Backend/CodeGen/CodeGenDriver.h"
 #include "Backend/CodeGen/DataImage.h"
+#include "Backend/CodeGen/CensusTypes.h"
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Backend/CodeGen/DebugInfo.h"
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -15,6 +16,7 @@
 #include "Backend/HIR/HIR.h"
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/HIR/InvokeThunk.h"
+#include "Backend/HIR/NativeBytes.h"
 #include "Model/Types/VirtualTables.h"
 #include <set>
 #include <string>
@@ -82,6 +84,7 @@ namespace Scripting
 				lowered.push_back(m_Trees.back().get());
 				NoteUse(model, *rec, errorsBefore);
 			}
+			LowerCensusFunctions(model, lowered);
 			batch.Clear();
 			if (LoweringFailed(errorMessage)) return false;
 			if (lowered.empty()) return true;
@@ -95,6 +98,17 @@ namespace Scripting
 					batch.Push(rec);
 				}
 			}
+		}
+	}
+
+	// The census functions of the types `new` made in the code emitted last (CensusTypes).
+	void CodeGenDriver::LowerCensusFunctions(ProgramModel& model, std::vector<const HIRFunction*>& lowered)
+	{
+		for (const CensusTypes::Function& census : m_MCtx.census().TakeFunctions())
+		{
+			m_Trees.push_back(std::make_unique<HIRFunction>(
+				NativeBytes::LowerCensusFunction(model, m_LoweringErrors, census.type, census.countBytes, *census.record)));
+			lowered.push_back(m_Trees.back().get());
 		}
 	}
 

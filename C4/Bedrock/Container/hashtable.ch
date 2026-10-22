@@ -74,4 +74,14 @@ namespace Core
 	void FreeTable(HashTable& table, void* entries, int64 entryAlign);
 	// Every slot empty again, the storage kept (the live entries must be destroyed first).
 	void EmptyTable(HashTable& table);
+
+	// The native memory of a table of `entryBytes` entries: the control bytes and the entries.
+	int64 TableBytes(const HashTable& table, int64 entryBytes);
+	// What the live entries hold (native_bytes_of each); nothing is read when an E holds no native memory.
+	template<E> int64 LiveNativeBytes(const HashTable& table, const E* entries) {
+		int64 total = 0;
+		if (holds_native_bytes(E))
+			for (int64 slot = NextLiveSlot(table, 0); slot < table.capacity; slot = NextLiveSlot(table, slot + 1)) total += native_bytes_of(entries[slot]);
+		return total;
+	}
 }

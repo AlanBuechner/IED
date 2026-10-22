@@ -57,6 +57,10 @@ namespace Serialization
 	public:
 		[operator("create")] public void Init() {}
 		[operator("delete")] public void Delete();
+		// The arena: records, string pool and children.
+		[operator("native_bytes")] public int64 NativeBytes() const {
+			return (int64)recordCapacity * (int64)sizeof(DomRecord) + (int64)poolCapacity + (int64)childCapacity * (int64)sizeof(int32);
+		}
 
 		public DomNode NewNull() { return Append(DomKind::Null, 0); }
 		public DomNode NewBool(bool value) { return Append(DomKind::Bool, value ? 1 : 0); }

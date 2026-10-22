@@ -32,6 +32,8 @@ namespace Core
 		[operator("create")] public void Init(int64 capacity) { Reserve(capacity); }
 		[operator("copy")] public void CopyFrom(const Queue<T>& other);
 		[operator("delete")] public void Delete();
+		// Its buffer, and what its elements hold.
+		[operator("native_bytes")] public int64 NativeBytes() const;
 
 		public int64 Count() const { return count; }
 		public int64 Capacity() const { return capacity; }

@@ -29,6 +29,8 @@ namespace Core
 		[operator("create")] public void Init(InitList<T> values);
 		[operator("copy")] public void CopyFrom(const HashSet<T, Traits>& other);
 		[operator("delete")] public void Delete();
+		// Its table, and what its values hold.
+		[operator("native_bytes")] public int64 NativeBytes() const { return TableBytes(table, (int64)sizeof(T)) + LiveNativeBytes(table, values); }
 
 		public int64 Count() const { return table.count; }
 		public int64 Capacity() const { return table.capacity; }

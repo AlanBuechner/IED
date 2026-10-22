@@ -32,10 +32,8 @@ namespace Scripting
 			uint64 stride;
 		};
 
-		/// The allocator for `type`, given its name for a census (c4_alloc_typed / _noscan).
-		llvm::Value* AllocateTyped(const Type* type, const std::string& name, llvm::Value* size, uint64 align);
-		/// A constant holding `name`, one in the program whatever the module (a comdat).
-		llvm::Constant* TypeName(const std::string& name);
+		/// The allocator for `type`, given its census record (c4_alloc_typed / _noscan).
+		llvm::Value* AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align);
 		llvm::Value* EmitNewArray(const NewNode* n);
 		llvm::Value* AllocateRun(const NewNode* n, llvm::Value* count, llvm::Value* bytes);
 		llvm::Value* ZeroedRun(const NewNode* n, llvm::Value* bytes);

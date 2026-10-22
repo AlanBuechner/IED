@@ -103,6 +103,7 @@ through a const access chain.
 | `sizeof(T)`, `sizeof(expr)`, `sizeof expr` | the byte size of a type, or of an expression's type, as an `int64` compile-time constant (section 4.1) |
 | `alignof(T)`, `alignof(expr)` | the alignment, an `int64` constant |
 | `offsetof(T, field)`, `offsetof(T, a.b)` | the byte offset of a (nested) field, an `int64` constant |
+| `holds_native_bytes(T)` | whether a value of `T` can hold native memory, a `bool` constant ([14](14-builtins.md#1-compiler-intrinsics)) |
 | `__uuidof(T)` | pointer to the `_GUID` from `[uuid("...")]` ([13](13-interop.md)); error if `T` has none |
 | `nameof(T)`, `nameof(expr)` | the qualified name of a type, or of an expression's type, as reflection registers it (`Core::Array<Geo::Point>`, D-72): a string constant; in a template, of the argument |
 | `new T`, `new T(args)`, `new T{args}` | heap allocation (GC managed), see section 9 |
@@ -145,6 +146,8 @@ int64 d = offsetof(Outer, inner.value);
 - A reference measures what it refers to. `sizeof(void)` and an incomplete type are errors.
 - `offsetof` names a non-static field, through nested fields with `.`: an unknown or static field is an
   error.
+- `holds_native_bytes(T)` takes a type only, and is a `bool` constant
+  ([14](14-builtins.md#1-compiler-intrinsics)).
 - In a constant (an array extent, a `const` initializer) an expression operand is a variable, an element
   (`a[0]`), a field (`s.x`, `p->x`), a dereference, a literal or a cast; inside a function body it may be any
   expression.

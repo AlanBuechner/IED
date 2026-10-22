@@ -1,5 +1,6 @@
 #include "Model/CompileTimeQueries.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/NativeMemory.h"
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/UnionType.h"
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
@@ -86,14 +87,25 @@ namespace Scripting
 		return QueryResult<int64>::Success(offset);
 	}
 
-	QueryResult<int64> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType)
+	namespace
+	{
+		QueryResult<ConstantValue> Measure(const QueryResult<int64>& measured)
+		{
+			if (!measured.Ok()) return QueryResult<ConstantValue>::Fail(measured.error, measured.message);
+			return QueryResult<ConstantValue>::Success(ConstantValue::Int(measured.value));
+		}
+	}
+
+	QueryResult<ConstantValue> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType)
 	{
 		switch (query.GetKind())
 		{
-		case TypeOfExpressionNode::Kind::SizeOf: return SizeOfType(operandType);
-		case TypeOfExpressionNode::Kind::AlignOf: return AlignOfType(operandType);
-		case TypeOfExpressionNode::Kind::OffsetOf: return OffsetOfField(operandType, query.GetFieldPath());
-		default: return QueryResult<int64>::Fail(QueryError::NotAValue, "'" + query.ToString() + "' is not a constant");
+		case TypeOfExpressionNode::Kind::SizeOf: return Measure(SizeOfType(operandType));
+		case TypeOfExpressionNode::Kind::AlignOf: return Measure(AlignOfType(operandType));
+		case TypeOfExpressionNode::Kind::OffsetOf: return Measure(OffsetOfField(operandType, query.GetFieldPath()));
+		case TypeOfExpressionNode::Kind::HoldsNativeBytes:
+			return QueryResult<ConstantValue>::Success(ConstantValue::Bool(NativeMemory::Holds(TypeHandle::UnwrapToValue(operandType))));
+		default: return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + query.ToString() + "' is not a constant");
 		}
 	}
 }

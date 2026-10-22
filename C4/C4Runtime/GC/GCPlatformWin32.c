@@ -269,6 +269,14 @@ uint32_t gc_os_capture_stack(void** frames, uint32_t capacity, const void* from)
 	return taken;
 }
 
+static int read_fault(DWORD code) { return code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR; }
+
+int64_t gc_os_count_guarded(int64_t (*count)(const void* object), const void* object)
+{
+	__try { return count(object); }
+	__except (read_fault(GetExceptionCode()) ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return 0; }
+}
+
 void gc_os_yield(void) { SwitchToThread(); }
 
 int gc_os_suspend(const GCOsThread* thread)

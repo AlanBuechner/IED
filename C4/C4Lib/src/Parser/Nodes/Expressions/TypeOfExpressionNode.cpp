@@ -13,6 +13,7 @@ namespace Scripting
 			if (text == "offsetof") return Kind::OffsetOf;
 			if (text == "__uuidof") return Kind::UuidOf;
 			if (text == "nameof") return Kind::NameOf;
+			if (text == "holds_native_bytes") return Kind::HoldsNativeBytes;
 			return Kind::SizeOf;
 		}
 
@@ -33,7 +34,8 @@ namespace Scripting
 
 	bool TypeOfExpressionNode::IsKeyword(const Core::String& text)
 	{
-		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof" || text == "nameof";
+		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof" || text == "nameof" ||
+			text == "holds_native_bytes";
 	}
 
 	Ref<TypeOfExpressionNode> TypeOfExpressionNode::TryParse(ParserState& state)

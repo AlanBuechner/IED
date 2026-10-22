@@ -20,6 +20,7 @@ namespace Scripting
 	class RttiEmitter;
 	class VtableEmitter;
 	class EhTables;
+	class CensusTypes;
 
 	/// Program-wide LLVM state (doc 03). Owns the single llvm::Module every function, global, and vtable is
 	/// emitted into, the C4-type -> LLVM-type cache, the Abi brick, and the function-signature cache. Created
@@ -110,6 +111,8 @@ namespace Scripting
 		RttiEmitter& rtti() { return *m_Rtti; }
 		VtableEmitter& vtables() { return *m_Vtables; }
 		EhTables& eh() { return *m_Eh; }
+		/// The census's record of each type `new` makes.
+		CensusTypes& census() { return *m_Census; }
 
 		// The model GlobalAddress uses to resolve function-pointer initializers (`funcptr<R(a)> g = F;`
 		// must start at @F, not null). Set once before any lowering.
@@ -145,6 +148,7 @@ namespace Scripting
 		std::unique_ptr<RttiEmitter> m_Rtti;
 		std::unique_ptr<VtableEmitter> m_Vtables;
 		std::unique_ptr<EhTables> m_Eh;
+		std::unique_ptr<CensusTypes> m_Census;
 		std::unique_ptr<class DebugInfo> m_Debug;
 		AliasTags m_AliasTags;
 	};

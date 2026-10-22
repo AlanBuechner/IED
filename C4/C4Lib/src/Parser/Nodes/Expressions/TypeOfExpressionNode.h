@@ -7,17 +7,18 @@
 namespace Scripting
 {
 	/// A compile-time query (docs/language/10 4): `sizeof(T)` / `sizeof(expr)` / `sizeof expr`, `alignof(T)` /
-	/// `alignof(expr)`, `offsetof(T, field.field)`, `__uuidof(T)`, `nameof(T)` / `nameof(expr)` and `sizeof...(pack)`.
+	/// `alignof(expr)`, `offsetof(T, field.field)`, `holds_native_bytes(T)`, `__uuidof(T)`, `nameof(T)` / `nameof(expr)`
+	/// and `sizeof...(pack)`.
 	///
 	/// A parenthesized single name (`sizeof(x)`) parses as a type: whether it names a type or a value is the
 	/// model's call, so the operand of that form is the type node and the lowering falls back to the value.
 	struct TypeOfExpressionNode : public AstNode
 	{
-		enum class Kind { SizeOf, AlignOf, OffsetOf, UuidOf, NameOf, SizeOfPack };
+		enum class Kind { SizeOf, AlignOf, OffsetOf, UuidOf, NameOf, SizeOfPack, HoldsNativeBytes };
 
 		TypeOfExpressionNode() = default;
 
-		/// `sizeof`, `alignof`, `offsetof`, `__uuidof` or `nameof`.
+		/// `sizeof`, `alignof`, `offsetof`, `holds_native_bytes`, `__uuidof` or `nameof`.
 		static bool IsKeyword(const Core::String& text);
 		/// The query at the keyword `token` (already peeked, not consumed); null when it is not one.
 		static Ref<TypeOfExpressionNode> TryParse(ParserState& state);

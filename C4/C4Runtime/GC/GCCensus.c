@@ -3,10 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The entries of a census being taken, found by the address of their type's name (open addressing).
+// The entries of a census being taken, one per type record, found by its address (open addressing).
 typedef struct Tally
 {
 	c4_gc_census_entry* entries;
+	const c4_gc_type** types;  // each entry's record
 	int32_t count;
 	int32_t capacity;
 	int32_t* slots;          // entry index + 1, 0: empty
@@ -23,14 +24,14 @@ bool gc_census_set(GCCensus* census, bool on)
 
 bool gc_census_prepare(GCSpan* span, uint32_t epoch)
 {
-	if (!span->tags) span->tags = (const char**)gc_mem_alloc(span->nelems * sizeof(const char*));
-	else memset((void*)span->tags, 0, span->nelems * sizeof(const char*));
+	if (!span->tags) span->tags = (const c4_gc_type**)gc_mem_alloc(span->nelems * sizeof(const c4_gc_type*));
+	else memset((void*)span->tags, 0, span->nelems * sizeof(const c4_gc_type*));
 	if (!span->tags) return false;
 	span->tagsEpoch = epoch;
 	return true;
 }
 
-static uint32_t slot_of(const char* type, uint32_t mask)
+static uint32_t slot_of(const c4_gc_type* type, uint32_t mask)
 {
 	uint64_t h = (uint64_t)(uintptr_t)type * 0x9E3779B97F4A7C15ULL;
 	return (uint32_t)(h >> 40) & mask;
@@ -43,25 +44,27 @@ static void rehash(Tally* tally, uint32_t slotCount)
 	tally->slotMask = slotCount - 1u;
 	for (int32_t i = 0; i < tally->count; ++i)
 	{
-		uint32_t s = slot_of(tally->entries[i].type, tally->slotMask);
+		uint32_t s = slot_of(tally->types[i], tally->slotMask);
 		while (tally->slots[s]) s = (s + 1u) & tally->slotMask;
 		tally->slots[s] = i + 1;
 	}
 }
 
 // The entry of `type`, added when it is new.
-static c4_gc_census_entry* entry_of(Tally* tally, const char* type)
+static c4_gc_census_entry* entry_of(Tally* tally, const c4_gc_type* type)
 {
 	uint32_t s = slot_of(type, tally->slotMask);
 	for (; tally->slots[s]; s = (s + 1u) & tally->slotMask)
-		if (tally->entries[tally->slots[s] - 1].type == type) return &tally->entries[tally->slots[s] - 1];
+		if (tally->types[tally->slots[s] - 1] == type) return &tally->entries[tally->slots[s] - 1];
 	if (tally->count == tally->capacity)
 	{
 		tally->capacity *= 2;
 		tally->entries = (c4_gc_census_entry*)gc_mem_realloc(tally->entries, (size_t)tally->capacity * sizeof(c4_gc_census_entry));
+		tally->types = (const c4_gc_type**)gc_mem_realloc(tally->types, (size_t)tally->capacity * sizeof(const c4_gc_type*));
 	}
 	c4_gc_census_entry* entry = &tally->entries[tally->count];
-	entry->type = type;
+	entry->type = type ? type->name : NULL;
+	tally->types[tally->count] = type;
 	tally->slots[s] = ++tally->count;
 	if ((uint32_t)tally->count * 2u > tally->slotMask) rehash(tally, (tally->slotMask + 1u) * 2u);
 	return entry;
@@ -78,6 +81,13 @@ static void count_untyped_span(Tally* tally, const GCSpan* span)
 	entry->bytes += objects * span->elemSize;
 }
 
+// What the object at `object` says it holds; it may be in the middle of a change on a thread that stopped there.
+static uint64_t native_bytes(const c4_gc_type* type, const void* object)
+{
+	const int64_t bytes = gc_os_count_guarded(type->nativeBytes, object);
+	return bytes > 0 ? (uint64_t)bytes : 0;
+}
+
 static void count_span(Tally* tally, const GCSpan* span, uint32_t epoch)
 {
 	if (!span->tags || span->tagsEpoch != epoch)
@@ -85,15 +95,18 @@ static void count_span(Tally* tally, const GCSpan* span, uint32_t epoch)
 		count_untyped_span(tally, span);
 		return;
 	}
-	const char* const* tags = span->tags;
+	const c4_gc_type* const* tags = span->tags;
+	const c4_gc_type* current = NULL;
 	c4_gc_census_entry* entry = NULL;
 	for (uint32_t w = 0; w < GC_SPAN_WORDS; ++w)
 		for (uint64_t bits = span->allocBits[w]; bits; bits &= bits - 1u)
 		{
-			const char* type = tags[w * 64u + (uint32_t)__builtin_ctzll(bits)];
-			if (!entry || entry->type != type) entry = entry_of(tally, type);
+			const uint32_t slot = w * 64u + (uint32_t)__builtin_ctzll(bits);
+			const c4_gc_type* type = tags[slot];
+			if (!entry || type != current) entry = entry_of(tally, current = type);
 			entry->objects += 1;
 			entry->bytes += span->elemSize;
+			if (type && type->nativeBytes) entry->nativeBytes += native_bytes(type, gc_span_slot_base(span, slot));
 		}
 }
 
@@ -116,6 +129,7 @@ static int32_t merge_names(c4_gc_census_entry* entries, int32_t count)
 		{
 			entries[kept - 1].objects += entries[i].objects;
 			entries[kept - 1].bytes += entries[i].bytes;
+			entries[kept - 1].nativeBytes += entries[i].nativeBytes;
 		}
 		else entries[kept++] = entries[i];
 	}
@@ -124,15 +138,17 @@ static int32_t merge_names(c4_gc_census_entry* entries, int32_t count)
 
 void gc_census_take(GCCensus* census, const GCHeap* heap)
 {
-	Tally tally = { census->last, 0, census->capacity > 0 ? census->capacity : 64, NULL, 0 };
+	Tally tally = { census->last, NULL, 0, census->capacity > 0 ? census->capacity : 64, NULL, 0 };
 	if (!tally.entries) tally.entries = (c4_gc_census_entry*)gc_mem_alloc((size_t)tally.capacity * sizeof(c4_gc_census_entry));
 	memset(tally.entries, 0, (size_t)tally.capacity * sizeof(c4_gc_census_entry));
+	tally.types = (const c4_gc_type**)gc_mem_alloc((size_t)tally.capacity * sizeof(const c4_gc_type*));
 	rehash(&tally, 256u);
 	const uint32_t epoch = census->epoch;
 	for (uint32_t c = 0; c < GC_SPAN_CLASSES; ++c)
 		for (const GCSpan* span = heap->classes[c].all; span; span = span->next) count_span(&tally, span, epoch);
 	for (const GCSpan* span = heap->large; span; span = span->next) count_span(&tally, span, epoch);
 	gc_mem_free(tally.slots);
+	gc_mem_free((void*)tally.types);
 	census->last = tally.entries;
 	census->capacity = tally.capacity;
 	census->count = merge_names(tally.entries, tally.count);

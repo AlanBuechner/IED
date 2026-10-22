@@ -189,7 +189,7 @@ Emission:
 | `Call` | `CallEmitter`: direct, indirect through a funcptr, or virtual through the receiver's vptr; hidden params and aggregate args/returns per `Abi::Signature`; created by `IRContext::Call`, which makes it an `invoke` whenever an enclosing cleanup or try must see an exception |
 | `DynamicCast` | `c4_dynamic_cast(p, TypeDescriptor)` or `c4_instance_of(...) != 0` |
 | `Ternary`, `&&`, `||` | three blocks + PHI, insert point left at the join |
-| `New` | `c4_alloc_typed(size, align, name)` (zeroed; `name` the type's QualifiedName for a census) or, for placement, the given storage zeroed with a store; every vptr; constructor (through `CallEmitter`) with `this` = the new pointer or positional field fill; `c4_gc_register_finalizer` with the type's full destruction when it has one (never for placement) |
+| `New` | `c4_alloc_typed(size, align, type)` (zeroed; `type` the type's census record, `CensusTypes`) or, for placement, the given storage zeroed with a store; every vptr; constructor (through `CallEmitter`) with `this` = the new pointer or positional field fill; `c4_gc_register_finalizer` with the type's full destruction when it has one (never for placement) |
 | `Relocate` | `memmove` of the object's bytes, then the source zeroed with its own vptrs |
 | `Delete` | `c4_free(p)` - the runtime runs the registered finalizer once, then frees |
 | `Construct` | entry-block temporary, zero-init at the use site, every vptr, constructor or field fill, yields the value |
@@ -269,10 +269,13 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 
 1. **Stores.** Every typed store goes through `ExprEmitter::GcStore`. The collector needs no barrier, so it
    is a plain store; a future generational or concurrent collector adds its barrier there.
-2. **Allocation.** `new` -> `c4_alloc_typed(size, align, name)`, or `c4_alloc_typed_noscan` for a type that holds
-   no pointers (`TypeHandle::MayHoldPointers`); `name` is a constant holding the type's QualifiedName (`T[]` for
-   `new T[n]`), one per program (a comdat named by its bytes), which the runtime notes only while a census runs;
-   finalizer registration when `[operator("delete")]` exists.
+2. **Allocation.** `new` -> `c4_alloc_typed(size, align, type)`, or `c4_alloc_typed_noscan` for a type that holds
+   no pointers (`TypeHandle::MayHoldPointers`); `type` is the type's census record (`CensusTypes`, one private
+   `c4_gc_type { name, nativeBytes }` per name in the module): its QualifiedName (`T[]` for `new T[n]`) and, for a
+   type that holds native memory (`NativeMemory::Holds`), an internal `__c4_native_bytes.<name>` function that
+   returns `native_bytes_of` the object (or of a counted array's elements). The driver lowers those functions in
+   `EmitReachable` (`NativeBytes::LowerCensusFunction`) with the bodies emitted code reaches. The runtime notes the
+   record only while a census runs; finalizer registration when `[operator("delete")]` exists.
    `new T[n]` (`ObjectEmitter::EmitNewArray`, `ArrayStorage`): one allocation of `n * sizeof(T)` bytes (at least
    one, so the pointer to the first element is always inside it). When the elements need destruction an `int64`
    element count comes first, padded to `T`'s alignment, and after HIR's `initialize` block has started every

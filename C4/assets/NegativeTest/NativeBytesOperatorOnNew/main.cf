@@ -1,0 +1,5 @@
+class Odd {
+	public int64 bytes;
+	[operator("native_bytes")] public static int64 NativeBytes() { return 0; }
+}
+int32 main() { Odd* odd = new Odd(); return (int32)odd->bytes; }

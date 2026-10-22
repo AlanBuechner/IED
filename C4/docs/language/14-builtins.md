@@ -40,12 +40,19 @@ Rules:
 | `new (p) T(args)` | builds a `T` in the storage `p` points to (any pointer): zeroes it, then constructs as `T(args)` does (a create, an aggregate fill, or a copy for `new (p) T(x)` with `x` a `T`); yields `p` as a `T*`. Nothing is registered with the GC: the caller destroys it |
 | `destroy(p)` | runs the destruction of the `T` at `p` (a `T*`, not `void*`); the storage is then raw memory. Does nothing for a type with nothing to destroy. One object: destroy an array element by element |
 | `relocate(dst, src)` | moves the `T` at `src` into the raw storage at `dst` (both `T*`, neither pointing to const) by copying its bytes, and leaves `*src` zero. Nothing is constructed or destroyed |
+| `native_bytes_of(x)` / `native_bytes_of(p, count)` | the native memory (outside the GC heap) the variable, field, element or `*p` `x` holds, or the `count` elements a `T*` `p` points to hold: an `int64`. A type's `[operator("native_bytes")] int64 NativeBytes() const` answers for its whole object; a type without one adds up its bases, its fields (not static, not in an anonymous union) and its fixed arrays' elements; pointers, references and unions hold none, since what a pointer points at is counted on its own. A type that can hold none gives 0. The operands are evaluated once either way. Bedrock's containers count their buffers by capacity plus what their elements hold. The GC census sums it per type ([runtime/01](../runtime/01-memory-and-gc.md)) |
+| `holds_native_bytes(T)` | whether a value of `T` can hold native memory (`native_bytes_of` is not always 0 for it): a `bool` constant, as `sizeof` is an `int64` one. A container skips walking elements that hold none: `if (holds_native_bytes(E)) ...` |
 
 The last three are how a container manages objects in a raw buffer (Bedrock's `Array`, `Queue`, `Stack`
 and `HashMap` do): construct into a free slot, destroy a removed element, relocate elements when the
 buffer moves. Copying the bytes of a whole range of live objects is also a valid relocation, because
-objects are trivially relocatable. A program function named `take`, `destroy` or `relocate` wins over
-the intrinsic.
+objects are trivially relocatable. A program function named `take`, `destroy`, `relocate` or `native_bytes_of` wins
+over the intrinsic.
+
+The census calls a type's `native_bytes` operator while every other thread is stopped wherever it was, so the
+operator only reads: no allocation, no locks, nothing it would not do in the middle of another thread's change to the
+object (a read that faults counts 0). An operator that is static, takes arguments or returns a non-integer is an error
+where `native_bytes_of` or `new` of the type needs it.
 
 ## 2. C memory and strings
 

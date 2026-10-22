@@ -2,6 +2,17 @@ include "list.ch"
 
 namespace Core
 {
+	// At most `count` nodes are followed: the census may read a list another thread stopped in the middle of linking.
+	template<T>
+	public int64 List::NativeBytes() const {
+		int64 total = count * (int64)sizeof(ListNode<T>);
+		if (holds_native_bytes(T)) {
+			const ListNode<T>* node = head;
+			for (int64 i = 0; i < count && node; ++i, node = node->next) total += native_bytes_of(node->value);
+		}
+		return total;
+	}
+
 	template<T>
 	private ListNode<T>* List::NewNode(T value) {
 		ListNode<T>* node = AllocateElements<ListNode<T>>(1);

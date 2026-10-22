@@ -133,20 +133,22 @@ typedef struct c4_gc_stats
 
 c4_gc_stats c4_gc_get_stats(void);
 
-// Allocations counted as they are made: objects, and the bytes asked for (an occupied pool slot's size); and native
-// memory taken: c4_raw_alloc's blocks and the bytes container buffers (c4_buffer_resize) grew by.
+// Allocations counted as they are made: objects, and the bytes asked for (an occupied pool slot's size); native
+// memory taken: c4_raw_alloc's blocks and the bytes container buffers (c4_buffer_resize) grew by; and native memory
+// given back, by the same measure, whichever thread took it.
 typedef struct c4_gc_alloc_counts
 {
 	uint64_t objects;
 	uint64_t bytes;
 	uint64_t nativeBytes;
+	uint64_t nativeFreed;
 } c4_gc_alloc_counts;
 // The calling thread's allocations since it registered, never reset: a read of the thread's own counters, no lock.
 c4_gc_alloc_counts c4_gc_thread_allocated(void);
 // Every thread's, those that ended included (takes the lock).
 c4_gc_alloc_counts c4_gc_allocated(void);
-// Native memory beside the collector's: `bytes` taken (counted for the calling thread when it is registered) or given
-// back. c4_raw_alloc and the container buffers report through these; c4_gc_stats.nativeBytes is what is in use.
+// Native memory beside the collector's: `bytes` taken or given back (counted for the calling thread when it is
+// registered). c4_raw_alloc and the container buffers report through these; c4_gc_stats.nativeBytes is what is in use.
 void c4_gc_native_taken(uint64_t bytes);
 void c4_gc_native_given(uint64_t bytes);
 
@@ -167,21 +169,31 @@ uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes);
 // Moves up to `capacity` of the oldest waiting samples to `out`: how many. The runtime keeps the latest 4096.
 int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity);
 
-// c4_alloc for an object of a known type: `type` is its name (a string that lives as long as the program), noted
-// while a census is on. `new` allocates through these.
-void* c4_alloc_typed(size_t size, size_t align, const char* type);
-void* c4_alloc_typed_noscan(size_t size, size_t align, const char* type);
+// A type `new` makes, as the census knows it: its qualified name (`T[]` for an array of T) and the function that
+// counts the native memory one of its objects holds (the type's native_bytes_of, docs/language/14), or NULL when the
+// type holds none. The compiler writes one per type; it lives as long as the program.
+typedef struct c4_gc_type
+{
+	const char* name;
+	int64_t (*nativeBytes)(const void* object);
+} c4_gc_type;
+// c4_alloc for an object of a known type, noted while a census is on. `new` allocates through these.
+void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type);
+void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type);
 
 // The census of live objects by type: while on, every allocation notes its type, and each collection counts the
-// live objects by it. Objects made before it was on, by c4_alloc or in a pool are of no known type (NULL). It costs 8
-// bytes beside each slot of the spans allocated from and a walk of the live objects at each collection. Returns
-// whether it was on.
+// live objects by it, and the native memory they hold. Objects made before it was on, by c4_alloc or in a pool are of
+// no known type (NULL). It costs 8 bytes beside each slot of the spans allocated from and a walk of the live objects at
+// each collection, with a call of its type's nativeBytes for each one that has it. Those calls run with every other
+// thread stopped wherever it was: one that faults (a buffer freed by a thread stopped before it stored the new one)
+// counts 0. Returns whether it was on.
 bool c4_gc_set_census(bool on);
 typedef struct c4_gc_census_entry
 {
 	const char* type;                     // the type's qualified name, `T[]` for an array of T; NULL: not known
 	uint64_t objects;
 	uint64_t bytes;                       // the slots they occupy
+	uint64_t nativeBytes;                 // the native memory they hold (c4_gc_type.nativeBytes)
 } c4_gc_census_entry;
 // The last census (taken at the end of the last collection while it was on) into `out` (room for `capacity`), one
 // entry a type name, by name, the unknown first: how many entries it has. Read it in a collection-result callback.

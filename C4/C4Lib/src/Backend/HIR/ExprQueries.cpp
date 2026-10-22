@@ -11,8 +11,8 @@
 
 namespace Scripting
 {
-	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), __uuidof (the
-	// address of a COM GUID), nameof (a type's qualified name) and sizeof...(pack). Nothing runs: an expression operand
+	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), holds_native_bytes (a
+	// bool), __uuidof (the address of a COM GUID), nameof (a type's qualified name) and sizeof...(pack). Nothing runs: an expression operand
 	// is typed, not evaluated.
 
 	QueryResult<Value> ExprLowerer::ResolveTypeOf(const TypeOfExpressionNode* n)
@@ -24,7 +24,8 @@ namespace Scripting
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, operand.message));
 		auto value = CompileTimeQueryValue(*n, operand.value);
 		if (!value.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(value.error, value.message));
-		return Constant(m_Ctx.queries().TypeStore()->Builtin(TypeKind::Int64), ConstantValue::Int(value.value));
+		const bool truth = value.value.kind == ConstantValue::Kind::Bool;
+		return Constant(m_Ctx.queries().TypeStore()->Builtin(truth ? TypeKind::Bool : TypeKind::Int64), value.value);
 	}
 
 	// The type the query measures: the type operand when it names a type, else the expression operand's type

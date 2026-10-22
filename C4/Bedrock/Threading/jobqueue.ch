@@ -25,6 +25,7 @@ namespace Threading
 	struct JobQueue
 	{
 		[operator("delete")] public void Delete();   // frees the cells; never copied
+		[operator("native_bytes")] public int64 NativeBytes() const { return cells ? (mask + 1) * (int64)sizeof(JobCell) : 0; }
 
 		// `capacity` is rounded up to a power of two.
 		public void Reserve(int64 capacity);

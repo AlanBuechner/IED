@@ -20,6 +20,13 @@ namespace Core
 		capacity = 0;
 	}
 
+	// The live elements are two runs: from `head` to the end of the buffer, and the rest from its start.
+	template<T>
+	public int64 Queue::NativeBytes() const {
+		const int64 first = count < capacity - head ? count : capacity - head;
+		return capacity * (int64)sizeof(T) + native_bytes_of(data + head, first) + native_bytes_of(data, count - first);
+	}
+
 	template<T>
 	public void Queue::Clear() {
 		for (int64 k = 0; k < count; ++k) destroy(&data[(head + k) & (capacity - 1)]);

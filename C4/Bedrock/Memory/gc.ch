@@ -25,12 +25,14 @@ namespace GC
 	[link("c4_gc_get_stats")] Stats GetStats();
 
 	// Allocations counted as they are made: objects, and the bytes asked for (a slot's size when a Pool hands one out);
-	// and native memory taken: raw_alloc's blocks and the bytes container buffers (Array, String, ...) grew by.
+	// native memory taken: raw_alloc's blocks and the bytes container buffers (Array, String, ...) grew by; and native
+	// memory given back, by the same measure, whichever thread took it.
 	struct AllocCounts
 	{
 		public uint64 objects;
 		public uint64 bytes;
 		public uint64 nativeBytes;
+		public uint64 nativeFreed;
 	}
 	// The calling thread's allocations since it started, never reset; reads the thread's own counters, no lock, so a
 	// profiler can take it around any scope.
@@ -60,10 +62,13 @@ namespace GC
 		public const char* type;    // its qualified name (Reflection's), `T[]` for an array of T; nullptr: not known
 		public uint64 objects;
 		public uint64 bytes;        // the slots they occupy
+		public uint64 nativeBytes;  // the native memory they hold: native_bytes_of each (docs/language/14)
 	}
-	// While on, every `new` notes its type, and each collection counts the live objects by it (LastCensus); objects
-	// made before it was on, by native code or in a Pool are of no known type. It costs 8 bytes beside each slot of the
-	// spans allocated from and a walk of the live objects at each collection. Returns whether it was on.
+	// While on, every `new` notes its type, and each collection counts the live objects by it and the native memory they
+	// hold (LastCensus); objects made before it was on, by native code or in a Pool are of no known type. It costs 8
+	// bytes beside each slot of the spans allocated from and a walk of the live objects at each collection, with
+	// native_bytes_of each one whose type holds native memory. Those run with every other thread stopped wherever it
+	// was, so a [operator("native_bytes")] only reads; one that faults counts 0. Returns whether it was on.
 	[link("c4_gc_set_census")] bool SetCensus(bool on);
 	// The last census (taken by the last collection while it was on) into `out` (room for `capacity`), one entry a
 	// type name, by name, the unknown first: how many entries it has. Read it in a collection-result callback.

@@ -39,6 +39,8 @@ namespace Core
 		[operator("create")] public void Init(InitList<T> items);
 		[operator("copy")] public void CopyFrom(const List<T>& other);
 		[operator("delete")] public void Delete() { Clear(); }
+		// Its nodes, and what their values hold.
+		[operator("native_bytes")] public int64 NativeBytes() const;
 
 		public int64 Count() const { return count; }
 		public bool IsEmpty() const { return count == 0; }

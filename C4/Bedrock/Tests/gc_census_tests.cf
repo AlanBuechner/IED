@@ -9,6 +9,8 @@ class CensusPlum { public int64 index; public CensusPlum* next; }
 class CensusFig { public int64 index; public CensusFig* next; }
 class CensusKiwi { public int64 index; public CensusKiwi* next; }
 class CensusLime { public int64 index; public CensusLime* next; }
+class CensusMelon { public int64 index; public CensusMelon* next; public Core::Array<uint8> seeds; }
+class CensusDate { public int64 index; public CensusDate* next; }
 
 // `count` objects, each reached from the next: the last one made.
 template<T> static T* Chain(int32 count) {
@@ -75,6 +77,29 @@ class GcCensusTests {
 		GC::SetCensus(was);
 		assert_true(run[7].index == 7, "the run");
 		assert_true(figs.objects == 1u && figs.bytes >= 8u * sizeof(CensusFig), "one run of eight");
+	}
+
+	[test("native_memory_by_type")]
+	public static void TestNativeMemoryByType() {
+		const bool was = GC::SetCensus(true);
+		CensusMelon* melons = Chain<CensusMelon>(20);
+		int64 held = 0;
+		for (CensusMelon* melon = melons; melon; melon = melon->next) {
+			melon->seeds.Reserve(1000 + melon->index);
+			held += native_bytes_of(*melon);
+		}
+		CensusMelon* run = new CensusMelon[3];
+		run[1].seeds.Reserve(300);
+		CensusDate* dates = Chain<CensusDate>(4);
+		GC::Collect();
+		const GC::CensusEntry each = CensusOf("CensusMelon");
+		const GC::CensusEntry runs = CensusOf("CensusMelon[]");
+		const GC::CensusEntry plain = CensusOf("CensusDate");
+		GC::SetCensus(was);
+		assert_true(melons->index == 19 && held >= 20 * 1000, "the melons and their seeds");
+		assert_true(each.objects == 20u && each.nativeBytes == (uint64)held, "what each holds, added up");
+		assert_true(runs.objects == 1u && runs.nativeBytes == (uint64)run[1].seeds.Capacity(), "an array's elements");
+		assert_true(dates->index == 3 && plain.objects == 4u && plain.nativeBytes == 0u, "a type that holds none");
 	}
 
 	[test("objects_from_before_have_no_type")]

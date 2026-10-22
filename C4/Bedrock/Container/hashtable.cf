@@ -66,6 +66,10 @@ namespace Core
 
 	static int64 ControlBytes(int64 capacity) { return capacity + kControlGroup; }
 
+	int64 TableBytes(const HashTable& table, int64 entryBytes) {
+		return table.capacity > 0 ? table.capacity * entryBytes + ControlBytes(table.capacity) : 0;
+	}
+
 	void* AllocateTable(HashTable& table, int64 capacity, int64 entryBytes, int64 entryAlign) {
 		const uint64 bytes = (uint64)(capacity * entryBytes);
 		void* entries = (uint64)entryAlign > kRawAllocAlignment ? raw_alloc_aligned(bytes, (uint64)entryAlign) : raw_alloc(bytes);

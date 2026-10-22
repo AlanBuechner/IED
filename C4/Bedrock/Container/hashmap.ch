@@ -48,6 +48,8 @@ namespace Core
 		[operator("create")] public void Init(int64 capacity) { Reserve(capacity); }
 		[operator("copy")] public void CopyFrom(const HashMap<K, V, Traits>& other);
 		[operator("delete")] public void Delete();
+		// Its table, and what its live entries hold.
+		[operator("native_bytes")] public int64 NativeBytes() const { return TableBytes(table, (int64)sizeof(KeyValue<K, V>)) + LiveNativeBytes(table, entries); }
 
 		public int64 Count() const { return table.count; }
 		public int64 Capacity() const { return table.capacity; }

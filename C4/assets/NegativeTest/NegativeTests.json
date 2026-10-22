@@ -2638,5 +2638,17 @@
     "AliasRedefinedAcrossFiles": {
         "expect": ["redefinition of alias 'Count': it is already a type (", "a.cf:5)"],
         "reason": "BUG-294: an alias redefined in another file must say what the name already is and where, as types and functions do (BUG-291)."
+    },
+    "NativeBytesOperatorTakesArguments": {
+        "expect": ["[operator(\"native_bytes\")] of Odd must be a method that takes nothing and returns int64"],
+        "reason": "native_bytes_of calls a type's operator with no arguments: one that takes some is an error at its use."
+    },
+    "NativeBytesOperatorOnNew": {
+        "expect": ["[operator(\"native_bytes\")] of Odd must be a method that takes nothing and returns int64"],
+        "reason": "`new` writes the census's counter for the type, which calls the operator: a static one is an error even with no native_bytes_of in the program."
+    },
+    "NativeBytesOfValue": {
+        "expect": ["native_bytes_of(x) counts x where it is: a variable, field, element or *p"],
+        "reason": "native_bytes_of reads the value in place; a temporary has no place to read."
     }
 }

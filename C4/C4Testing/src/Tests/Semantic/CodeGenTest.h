@@ -45,6 +45,9 @@ namespace Testing
 		void PointerFreeObjectsAllocateNoscan();
 
 		TEST_FUNC(Semantic.CodeGen)
+		void NewGivesTheCensusItsTypesRecord();
+
+		TEST_FUNC(Semantic.CodeGen)
 		void GcRootsListEveryPointerHoldingGlobal();
 
 		TEST_FUNC(Semantic.CodeGen)

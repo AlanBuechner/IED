@@ -1,0 +1,5 @@
+struct Odd {
+	public int64 bytes;
+	[operator("native_bytes")] public int64 NativeBytes(int32 scale) const { return bytes * scale; }
+}
+int32 main() { Odd odd; return (int32)native_bytes_of(odd); }

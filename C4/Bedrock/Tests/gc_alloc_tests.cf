@@ -101,10 +101,12 @@ class GcAllocTests {
 			assert_true(((uint64)&wide[0] & 63u) == 0u && text.ByteLength() == 5000, "the containers");
 		}
 		const uint64 inUseAfter = GC::GetStats().nativeBytes;
+		const uint64 freed = GC::ThreadAllocated().nativeFreed - before.nativeFreed;
 		const uint64 held = large + 4000u + 5000u + 6400u;
 		assert_true(taken >= held, "this thread took their buffers");
 		assert_true(inUseDuring >= inUseBefore + held, "which were in use");
 		assert_true(inUseAfter + held <= inUseDuring, "and given back when the containers went");
+		assert_true(freed >= held, "this thread gave them back");
 	}
 
 	[test("all_threads_count")]

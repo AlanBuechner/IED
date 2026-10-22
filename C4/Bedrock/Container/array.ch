@@ -38,6 +38,8 @@ namespace Core
 		[operator("create")] public void Init(InitList<T> items);
 		[operator("copy")] public void CopyFrom(const Array<T>& other);
 		[operator("delete")] public void Delete();
+		// The native memory it holds (native_bytes_of): its buffer, and what its elements hold.
+		[operator("native_bytes")] public int64 NativeBytes() const { return capacity * (int64)sizeof(T) + native_bytes_of(data, count); }
 
 		public int64 Count() const { return count; }
 		public int64 Capacity() const { return capacity; }

@@ -16,6 +16,7 @@ namespace Core
 		[operator("create")] public void Init(int64 reserve);   // empty, with room for `reserve` bytes
 		[operator("copy")] public void CopyFrom(const String& other);
 		[operator("delete")] public void Delete();
+		[operator("native_bytes")] public int64 NativeBytes() const { return buffer ? capacity + 1 : 0; }
 
 		public int64 ByteLength() const { return length; }
 		public int64 CharCount() const { return chars; }

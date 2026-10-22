@@ -311,6 +311,9 @@ Bedrock's `Core::HashMap<K, V>` hashes a key through `key.operator_hash()` and c
 (its default `Core::KeyTraits<K>`, with built-in traits for numbers and pointers; see
 [../library/bedrock.md](../library/bedrock.md)).
 
+One custom operator the compiler itself calls: `[operator("native_bytes")] int64 NativeBytes() const`, the native
+memory an object holds, which `native_bytes_of(x)` and the GC census use ([14](14-builtins.md#1-compiler-intrinsics)).
+
 ## 6.10 Iteration protocol: `begin` / `end`
 
 **Status:** **Implemented**

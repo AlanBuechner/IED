@@ -68,6 +68,7 @@ static void on_thread_exit(void* data)
 	gc->ended.objects += thread->allocated.objects;
 	gc->ended.bytes += thread->allocated.bytes;
 	gc->ended.nativeBytes += thread->allocated.nativeBytes;
+	gc->ended.nativeFreed += thread->allocated.nativeFreed;
 	gc->endedNativeInUse += thread->nativeInUse;
 	gc_threads_remove(&gc->threads, thread);
 	gc_os_unlock();
@@ -241,7 +242,7 @@ __attribute__((noinline)) static void* allocate_slow(GCThread* self, GCAllocRequ
 
 // The census's note of the object `self` just allocated: in its cache's span for a small one, found by address when the
 // object came from elsewhere (a large one, or a span the slow path gave the cache).
-__attribute__((noinline)) static void note_type(GCThread* self, GCAllocRequest request, void* p, const char* type)
+__attribute__((noinline)) static void note_type(GCThread* self, GCAllocRequest request, void* p, const c4_gc_type* type)
 {
 	const int spanClass = gc_heap_small_class(request);
 	GCSpan* span = spanClass >= 0 ? self->cache.spans[spanClass] : NULL;
@@ -252,7 +253,7 @@ __attribute__((noinline)) static void note_type(GCThread* self, GCAllocRequest r
 
 // Inline into each entry point: the cache's slot, counted, with nothing called unless the cache is empty, a sample is
 // due or a census runs.
-static inline __attribute__((always_inline)) void* allocate(GCAllocRequest request, const void* caller, const char* type)
+static inline __attribute__((always_inline)) void* allocate(GCAllocRequest request, const void* caller, const c4_gc_type* type)
 {
 	GCThread* self = this_thread();
 	const int spanClass = gc_heap_small_class(request);
@@ -272,12 +273,12 @@ static GCAllocRequest request_of(size_t size, size_t align, int noscan)
 void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0), __builtin_return_address(0), NULL); }
 void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1), __builtin_return_address(0), NULL); }
 
-void* c4_alloc_typed(size_t size, size_t align, const char* type)
+void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type)
 {
 	return allocate(request_of(size, align, 0), __builtin_return_address(0), type);
 }
 
-void* c4_alloc_typed_noscan(size_t size, size_t align, const char* type)
+void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type)
 {
 	return allocate(request_of(size, align, 1), __builtin_return_address(0), type);
 }
@@ -593,8 +594,13 @@ void c4_gc_native_taken(uint64_t bytes)
 void c4_gc_native_given(uint64_t bytes)
 {
 	GCThread* self = t_self;
-	if (self) self->nativeInUse -= (int64_t)bytes;
-	else __atomic_sub_fetch(&g_nativeInUse, (int64_t)bytes, __ATOMIC_RELAXED);
+	if (!self)
+	{
+		__atomic_sub_fetch(&g_nativeInUse, (int64_t)bytes, __ATOMIC_RELAXED);
+		return;
+	}
+	self->allocated.nativeFreed += bytes;
+	self->nativeInUse -= (int64_t)bytes;
 }
 
 c4_gc_alloc_counts c4_gc_thread_allocated(void) { return this_thread()->allocated; }
@@ -644,6 +650,7 @@ c4_gc_alloc_counts c4_gc_allocated(void)
 		total.objects += thread->allocated.objects;
 		total.bytes += thread->allocated.bytes;
 		total.nativeBytes += thread->allocated.nativeBytes;
+		total.nativeFreed += thread->allocated.nativeFreed;
 	}
 	gc_os_unlock();
 	return total;

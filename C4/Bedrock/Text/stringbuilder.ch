@@ -12,6 +12,7 @@ namespace Core
 		[operator("create")] public void Init(int64 capacity);   // empty, with room for `capacity` bytes
 		[operator("copy")] public void CopyFrom(const StringBuilder& other);
 		[operator("delete")] public void Delete();
+		[operator("native_bytes")] public int64 NativeBytes() const { return buffer ? capacity + 1 : 0; }
 
 		public void Append(StringView text);
 		public void Append(const char* text) { Append(StringView(text)); }

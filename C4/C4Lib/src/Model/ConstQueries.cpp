@@ -24,9 +24,7 @@ namespace Scripting
 			return PackLength(query.GetPackName().GetText(), bindingScope);
 		auto operand = QueryOperandType(query, unitId, bindingScope);
 		if (!operand.Ok()) return QueryResult<ConstantValue>::Fail(operand.error, operand.message);
-		auto value = CompileTimeQueryValue(query, operand.value);
-		if (!value.Ok()) return QueryResult<ConstantValue>::Fail(value.error, value.message);
-		return QueryResult<ConstantValue>::Success(ConstantValue::Int(value.value));
+		return CompileTimeQueryValue(query, operand.value);
 	}
 
 	QueryResult<const Type*> ConstEvaluator::QueryOperandType(const TypeOfExpressionNode& query, uint32 unitId, Scope* bindingScope) const
