@@ -157,25 +157,41 @@ function dropEmptyGroups(root) {
 function prune(node, keep) {
 	if (isGroup(node)) return keep(node) ? node : null;
 	if (!isSplit(node)) return null;
+	const parts = node.children.map((child, i) => ({ node: prune(child, keep), size: node.sizes[i] }));
+	parts.forEach((part, i) => {
+		if (part.node) return;
+		const heir = heirOf(parts, i);
+		if (heir) heir.size += part.size;
+	});
 	const children = [];
 	const sizes = [];
-	node.children.forEach((child, i) => {
-		const pruned = prune(child, keep);
-		if (!pruned) return;
+	for (const { node: pruned, size } of parts) {
+		if (!pruned) continue;
 		if (isSplit(pruned) && pruned.dir === node.dir) {
 			pruned.children.forEach((inner, j) => {
 				children.push(inner);
-				sizes.push(node.sizes[i] * pruned.sizes[j]);
+				sizes.push(size * pruned.sizes[j]);
 			});
 		}
 		else {
 			children.push(pruned);
-			sizes.push(node.sizes[i]);
+			sizes.push(size);
 		}
-	});
+	}
 	if (children.length === 0) return null;
 	if (children.length === 1) return children[0];
 	return { kind: "split", dir: node.dir, sizes: fixSizes(sizes, children.length), children };
+}
+
+// Who gets the room of the part at `index` that went: a neighbor holding documents (tool windows keep their size, as in
+// VS), the one before it first, else the nearest one left.
+function heirOf(parts, index) {
+	const nearest = (step) => {
+		for (let i = index + step; i >= 0 && i < parts.length; i += step) if (parts[i].node) return parts[i];
+		return null;
+	};
+	const neighbors = [nearest(-1), nearest(1)].filter(Boolean);
+	return neighbors.find((part) => wellsOf(part.node).length > 0) || neighbors[0] || null;
 }
 
 export function fixSizes(sizes, count) {

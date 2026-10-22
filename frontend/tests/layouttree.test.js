@@ -116,6 +116,24 @@ test("layout: dropping on a group's edge splits it", () => {
 	assertEqual(same, tree, "splitting a group by its only tab changes nothing");
 });
 
+test("layout: a group that empties gives its room to the documents beside it, never to a tool window", () => {
+	const start = { kind: "split", dir: "row", sizes: [0.2, 0.8], children: [L.group(["chats"]), L.group(["chat:a", "chat:b"], { well: true })] };
+	const percents = (tree) => tree.sizes.map((s) => Math.round(s * 100));
+	for (const zone of ["right", "left"]) {
+		let tree = L.moveTab(L.normalize(start), "chat:b", [1], zone);
+		assertEqual(percents(tree), [20, 40, 40], "docked to the " + zone);
+		tree = L.moveTab(tree, "chat:b", L.pathOf(tree, L.groupOf(tree, "chat:a")), "center");
+		assertEqual([shape(tree), percents(tree)], ["row(G[chats|chats] W[chat:a,chat:b|chat:b])", [20, 80]], "docked back from the " + zone + ": the Chats list keeps its width");
+	}
+	const tools = { kind: "split", dir: "row", sizes: [0.2, 0.6, 0.2], children: [L.group(["explorer"]), L.group(["doc:a"], { well: true }), L.group(["props"])] };
+	assertEqual(percents(L.closeTab(L.normalize(tools), "props")), [20, 80], "a tool window closed: the documents take its room");
+	const column = { kind: "split", dir: "column", sizes: [0.5, 0.3, 0.2], children: [L.group(["a"]), L.group(["b"]), { kind: "split", dir: "row", sizes: [0.5, 0.5], children: [L.group(["c"]), L.group(["doc:a"], { well: true })] }] };
+	assertEqual(percents(L.closeTab(L.normalize(column), "b")), [50, 50], "documents after it, a tool window before: the documents");
+	const toolsOnly = { kind: "split", dir: "column", sizes: [0.5, 0.3, 0.2], children: [L.group(["a"]), L.group(["b"]), L.group(["c"])] };
+	const beside = L.normalize({ kind: "split", dir: "row", sizes: [0.5, 0.5], children: [toolsOnly, L.group(["doc:z"], { well: true })] });
+	assertEqual(percents(L.closeTab(beside, "b").children[0]), [80, 20], "no neighbor holds documents: the one before it");
+});
+
 test("layout: dropping on the activity's edge", () => {
 	let tree = L.defaultTree(TOOLS);
 	tree = L.moveTab(tree, "output", [], "left");

@@ -1538,6 +1538,28 @@ def chat_tabs_dock(run):
 	check(page.is_visible(".chats-sec[data-section='open'] .chats-row[data-chat='%s']" % chat_id), "the Chats list counts a chat open in another activity")
 
 
+@scenario(viewports=("desktop",))
+def chat_list_keeps_its_width(run):
+	"""A chat dragged to the side of its group and back leaves the Chats list as wide as it was: the room of a group that
+	empties goes to the documents beside it, never to a tool window (docs/15 "Docking"; the owner saw the list grow)."""
+	page = open_chat(run)
+	other = run.request("chat.create", {"wsId": page.evaluate("ied_shell.wsId"), "mode": "ask", "title": "Beside"})["chatId"]
+	page.click(".chats-row[data-chat='%s']" % other)
+	host = ".dock-host[data-activity='ied.chat'] "
+	page.wait_for_selector(host + ".dock-group.well .tab[data-ref='chat:%s']" % other)
+	width = lambda: page.eval_on_selector(host + ".dock-group:not(.well)", "el => el.getBoundingClientRect().width")
+	box = lambda selector: page.eval_on_selector(selector, "el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+	before = width()
+	tab, well = box(host + ".tab[data-ref='chat:%s']" % other), box(host + ".dock-group.well")
+	drag(page, (tab[0] + tab[2] / 2, tab[1] + tab[3] / 2), (well[0] + well[2] - 30, well[1] + well[3] / 2))
+	page.wait_for_function("document.querySelectorAll(\"%s.dock-group.well\").length === 2" % host)
+	tab, strip = box(host + ".tab[data-ref='chat:%s']" % other), box(host + ".dock-group.well .tabs")
+	drag(page, (tab[0] + tab[2] / 2, tab[1] + tab[3] / 2), (strip[0] + strip[2] - 60, strip[1] + strip[3] / 2))
+	page.wait_for_function("document.querySelectorAll(\"%s.dock-group.well\").length === 1" % host)
+	check(abs(width() - before) < 2, "the Chats list kept its width: %.0f px, was %.0f" % (width(), before))
+	run.shot("back")
+
+
 @scenario(viewports=("desktop", "phone"))
 def chat_delete_and_restore(run):
 	"""Deleting a chat keeps it (docs/04 "Deleting a chat"): it moves under Deleted in the Chats list with how long it is
