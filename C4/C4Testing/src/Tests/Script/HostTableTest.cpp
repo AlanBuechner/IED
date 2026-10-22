@@ -61,6 +61,36 @@ namespace Testing
 			return f && !f->isDeclaration();
 		}
 
+		// The only chunk of a small program's inline bodies.
+		std::string OneChunk(const std::vector<std::string>& chunks)
+		{
+			TEST_ASSERT_EQ(chunks.size(), size_t(1));
+			return chunks.empty() ? std::string() : chunks.front();
+		}
+
+		// `count` functions returning text of their own, and a main calling each.
+		std::string ManyTexts(int count)
+		{
+			std::string program, calls;
+			for (int i = 0; i < count; ++i)
+			{
+				program += "const char* Text" + std::to_string(i) + "() { return \"text" + std::to_string(i) + "\"; }\n";
+				calls += "printf(\"%s\", Text" + std::to_string(i) + "());\n";
+			}
+			return program + "int32 main() {\n" + calls + "return 0; }\n";
+		}
+
+		// The text of a private constant `module` defines, or "".
+		std::vector<std::string> PrivateTexts(const llvm::Module& module)
+		{
+			std::vector<std::string> texts;
+			for (const llvm::GlobalVariable& g : module.globals())
+				if (g.hasPrivateLinkage() && g.hasInitializer())
+					if (const auto* data = llvm::dyn_cast<llvm::ConstantDataArray>(g.getInitializer()); data && data->isCString())
+						texts.push_back(data->getAsCString().str());
+			return texts;
+		}
+
 		std::string ManyStatements()
 		{
 			std::string body = "int32 Long(int32 v) { int32 s = v;\n";
@@ -133,16 +163,19 @@ namespace Testing
 			auto* user = new llvm::GlobalVariable(*module, llvm::PointerType::get(module->getContext(), 0), true,
 				llvm::GlobalValue::ExternalLinkage, declared, "test_table_user");
 			const std::vector<std::string> names = HostSymbols(*module, {});
-			std::array<uint8, 16> id{};
-			id[0] = 0xAB;
-			id[15] = 0xCD;
 			std::string error;
-			TEST_ASSERT(EmitHostTable(*module, names, id, &error));
+			TEST_ASSERT(EmitHostTable(*module, names, &error));
 			const llvm::GlobalVariable* table = module->getNamedGlobal("__c4_script_table");
 			TEST_ASSERT(table != nullptr && table->hasInitializer() && table->isConstant());
 			TEST_ASSERT(user->getInitializer() == table);
 			const auto* fields = llvm::cast<llvm::ConstantStruct>(table->getInitializer());
-			const auto* idBytes = llvm::cast<llvm::ConstantDataArray>(fields->getOperand(0));
+			const auto* buildId = llvm::cast<llvm::GlobalVariable>(fields->getOperand(0));
+			TEST_ASSERT(buildId->getName() == "__c4_script_build_id" && buildId->isDeclaration()); // the inline bodies come later
+			std::array<uint8, 16> id{};
+			id[0] = 0xAB;
+			id[15] = 0xCD;
+			EmitBuildId(*module, id);
+			const auto* idBytes = llvm::cast<llvm::ConstantDataArray>(buildId->getInitializer());
 			TEST_ASSERT(idBytes->getElementAsInteger(0) == 0xAB && idBytes->getElementAsInteger(15) == 0xCD);
 			TEST_ASSERT_EQ(llvm::cast<llvm::ConstantInt>(fields->getOperand(1))->getZExtValue(), (uint64_t)names.size());
 			const auto* entries = llvm::cast<llvm::ConstantArray>(fields->getOperand(2));
@@ -156,7 +189,7 @@ namespace Testing
 		Lowered(kProgram, [](llvm::Module* module) {
 			TEST_ASSERT(module != nullptr);
 			std::string error;
-			TEST_ASSERT(!EmitHostTable(*module, { "Add_2int32int32", "Nowhere_0" }, {}, &error));
+			TEST_ASSERT(!EmitHostTable(*module, { "Add_2int32int32", "Nowhere_0" }, &error));
 			TEST_ASSERT(error.find("Nowhere_0") != std::string::npos);
 		});
 		TEST_PASSED();
@@ -166,7 +199,7 @@ namespace Testing
 	{
 		Lowered(kProgram, [](llvm::Module* module) {
 			TEST_ASSERT(module != nullptr);
-			const std::string bitcode = InlineBodies(*module, HostSymbols(*module, {}));
+			const std::string bitcode = OneChunk(InlineBodies(*module, HostSymbols(*module, {})));
 			llvm::LLVMContext context;
 			std::unique_ptr<llvm::Module> bodies = ParseBodies(bitcode, context);
 			TEST_ASSERT(bodies != nullptr);
@@ -180,7 +213,7 @@ namespace Testing
 	{
 		Lowered(std::string(kProgram) + ManyStatements(), [](llvm::Module* module) {
 			TEST_ASSERT(module != nullptr);
-			const std::string bitcode = InlineBodies(*module, HostSymbols(*module, {}));
+			const std::string bitcode = OneChunk(InlineBodies(*module, HostSymbols(*module, {})));
 			llvm::LLVMContext context;
 			std::unique_ptr<llvm::Module> bodies = ParseBodies(bitcode, context);
 			TEST_ASSERT(bodies != nullptr);
@@ -195,7 +228,7 @@ namespace Testing
 	{
 		Lowered(kProgram, [](llvm::Module* module) {
 			TEST_ASSERT(module != nullptr);
-			const std::string bitcode = InlineBodies(*module, HostSymbols(*module, {}));
+			const std::string bitcode = OneChunk(InlineBodies(*module, HostSymbols(*module, {})));
 			llvm::LLVMContext context;
 			std::unique_ptr<llvm::Module> bodies = ParseBodies(bitcode, context);
 			TEST_ASSERT(bodies != nullptr && Defines(*bodies, "Greeting_0"));
@@ -205,6 +238,36 @@ namespace Testing
 					if (const auto* data = llvm::dyn_cast<llvm::ConstantDataArray>(g.getInitializer()))
 						hasText |= data->isCString() && data->getAsCString() == "hello" && g.hasPrivateLinkage();
 			TEST_ASSERT(hasText);
+		});
+		TEST_PASSED();
+	}
+
+	// A chunk per kInlineBodiesPerGroup bodies, in the module's order, each with the constants its bodies name and no
+	// other's.
+	void HostTableTest::BodiesComeInChunksWithTheirConstants()
+	{
+		Lowered(ManyTexts(250), [](llvm::Module* module) {
+			TEST_ASSERT(module != nullptr);
+			const std::vector<std::string> chunks = InlineBodies(*module, HostSymbols(*module, {}), 64);
+			TEST_ASSERT_EQ(chunks.size(), size_t(2));
+			int defined = 0;
+			for (const std::string& chunk : chunks)
+			{
+				llvm::LLVMContext context;
+				std::unique_ptr<llvm::Module> bodies = ParseBodies(chunk, context);
+				TEST_ASSERT(bodies != nullptr);
+				std::vector<std::string> texts = PrivateTexts(*bodies);
+				for (int i = 0; i < 250; ++i)
+				{
+					const std::string name = "Text" + std::to_string(i) + "_0";
+					const bool here = Defines(*bodies, name.c_str());
+					const bool text = std::find(texts.begin(), texts.end(), "text" + std::to_string(i)) != texts.end();
+					TEST_ASSERT_EQ(here, text);
+					defined += here ? 1 : 0;
+				}
+			}
+			TEST_ASSERT_EQ(defined, 250);
+			TEST_ASSERT_EQ(InlineBodies(*module, HostSymbols(*module, {}), 1).size(), size_t(1));
 		});
 		TEST_PASSED();
 	}

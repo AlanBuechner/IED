@@ -1,6 +1,7 @@
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/AggregateCopies.h"
 #include "Compiler/CodeViewLocations.h"
+#include "Compiler/IrVerification.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
@@ -23,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -38,7 +40,7 @@ namespace Scripting
 		constexpr uint64_t kInstructionsPerPartitionO0 = 3000;
 		constexpr uint64_t kInstructionsPerPartition = 1000;
 		// Partitions are also the unit of the object cache: more of them reassemble less after a small edit.
-		constexpr uint64_t kMaxPartitions = 32;
+		constexpr uint64_t kMaxPartitions = 64;
 
 		// LLVM's target registry is process-wide; registering X86 twice is harmless but wasted work. The assembly parser
 		// assembles inline asm.
@@ -187,6 +189,7 @@ namespace Scripting
 			std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics);
 			if (!machine) return;
 			const size_t before = diagnostics.size();
+			if (settings.optimizePartitions && settings.optLevel == 0) LowerAggregateCopies(module);
 			if (settings.optimizePartitions) RunPipeline(module, *machine, settings.optLevel);
 			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
@@ -211,11 +214,25 @@ namespace Scripting
 			std::string bitcode;
 			std::string objPath;
 			std::vector<ObjectDiagnostic> diagnostics;
+			CachedObjects::Assembled assembled;
 		};
+
+		double SecondsSince(std::chrono::steady_clock::time_point start)
+		{
+			return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+		}
+
+		bool Verified(const llvm::Module& module, const ObjectSettings& settings, std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			const std::optional<std::string> invalid = settings.verify ? InvalidIr(module) : std::nullopt;
+			if (invalid) diagnostics.push_back({ 0, *invalid });
+			return !invalid;
+		}
 
 		// Assembled on a thread of its own, in a context of its own.
 		void AssemblePartition(Partition& partition, const ObjectSettings& settings)
 		{
+			const auto start = std::chrono::steady_clock::now();
 			llvm::LLVMContext context;
 			llvm::Expected<std::unique_ptr<llvm::Module>> module = llvm::parseBitcodeFile(
 				llvm::MemoryBufferRef(partition.bitcode, partition.objPath), context);
@@ -224,20 +241,35 @@ namespace Scripting
 				partition.diagnostics.push_back({ 0, "cannot read a partition of the module back: " + llvm::toString(module.takeError()) });
 				return;
 			}
+			partition.assembled.instructions = InstructionCount(**module);
+			if (!Verified(**module, settings, partition.diagnostics)) return;
 			AssembleInto(**module, settings, partition.objPath, partition.diagnostics);
+			partition.assembled.seconds = SecondsSince(start);
 		}
 
-		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache)
+		// A module kept whole is its own partition, and its extracts are built from it here.
+		SplitBitcode Whole(llvm::Module& module, const Extracts& extracts)
 		{
-			const PartitionOptimization optimization = settings.optimizePartitions ? PartitionOptimization::After : PartitionOptimization::Before;
-			std::vector<std::string> bitcode = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) }
-				: SplitModuleToBitcode(module, count, optimization, settings.threads);
-			std::vector<Partition> partitions(bitcode.size());
-			for (size_t i = 0; i < bitcode.size(); ++i)
+			SplitBitcode whole;
+			whole.partitions.push_back(ModuleBitcode(module));
+			for (const std::vector<const llvm::GlobalValue*>& group : extracts.groups)
+				whole.extracted.push_back(extracts.finish(*ExtractDefinitions(module, group)));
+			return whole;
+		}
+
+		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache,
+			const Extracts& extracts, std::vector<std::string>& extracted)
+		{
+			const PartitionOptimization optimization = !settings.optimizePartitions ? PartitionOptimization::Before
+				: settings.optLevel == 0 ? PartitionOptimization::AfterAtO0 : PartitionOptimization::After;
+			SplitBitcode split = count == 1 ? Whole(module, extracts) : SplitModuleAndExtract(module, count, optimization, settings.threads, extracts);
+			std::vector<Partition> partitions(split.partitions.size());
+			for (size_t i = 0; i < split.partitions.size(); ++i)
 			{
-				partitions[i].objPath = cache.ObjectFor(bitcode[i]).string();
-				partitions[i].bitcode = std::move(bitcode[i]);
+				partitions[i].objPath = cache.ObjectFor(split.partitions[i]).string();
+				partitions[i].bitcode = std::move(split.partitions[i]);
 			}
+			extracted = std::move(split.extracted);
 			return partitions;
 		}
 
@@ -261,14 +293,21 @@ namespace Scripting
 			for (std::thread& thread : threads) thread.join();
 		}
 
-		// A module kept whole is assembled from memory; the bitcode was only needed to name its object. How many were
+		// A module kept whole is assembled from memory; the bitcode was only needed to name its object. The partitions
 		// assembled.
-		size_t AssembleMissing(llvm::Module& module, std::vector<Partition>& partitions, const ObjectSettings& settings)
+		std::vector<Partition*> AssembleMissing(llvm::Module& module, std::vector<Partition>& partitions, const ObjectSettings& settings)
 		{
 			std::vector<Partition*> missing = NotCached(partitions);
-			if (partitions.size() == 1 && missing.size() == 1) AssembleInto(module, settings, missing[0]->objPath, missing[0]->diagnostics);
+			if (partitions.size() == 1 && missing.size() == 1)
+			{
+				const auto start = std::chrono::steady_clock::now();
+				missing[0]->assembled.instructions = InstructionCount(module);
+				if (Verified(module, settings, missing[0]->diagnostics))
+					AssembleInto(module, settings, missing[0]->objPath, missing[0]->diagnostics);
+				missing[0]->assembled.seconds = SecondsSince(start);
+			}
 			else AssembleInParallel(missing, settings);
-			return missing.size();
+			return missing;
 		}
 	}
 
@@ -304,7 +343,7 @@ namespace Scripting
 	}
 
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
-		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts)
 	{
 		InitializeX86(); // the bitcode that names an object lists its file-scope assembly's symbols only once X86 is in
 		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
@@ -313,8 +352,11 @@ namespace Scripting
 			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });
 			return {};
 		}
-		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache);
-		const size_t assembled = AssembleMissing(module, parts, settings);
+		const auto start = std::chrono::steady_clock::now();
+		std::vector<std::string> extracted;
+		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache, extracts, extracted);
+		const double splitSeconds = SecondsSince(start);
+		const std::vector<Partition*> assembled = AssembleMissing(module, parts, settings);
 		const size_t before = diagnostics.size();
 		std::vector<std::filesystem::path> used;
 		for (const Partition& partition : parts)
@@ -326,7 +368,10 @@ namespace Scripting
 		cache.KeepOnly(used);
 		CachedObjects objects;
 		for (const Partition& partition : parts) objects.paths.push_back(partition.objPath);
-		objects.reused = parts.size() - assembled;
+		objects.reused = parts.size() - assembled.size();
+		objects.splitSeconds = splitSeconds;
+		objects.extracted = std::move(extracted);
+		for (const Partition* partition : assembled) objects.assembled.push_back(partition->assembled);
 		return objects;
 	}
 }

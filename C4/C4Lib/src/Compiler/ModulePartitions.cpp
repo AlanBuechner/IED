@@ -50,6 +50,14 @@ namespace Scripting
 			for (llvm::GlobalVariable& variable : module.globals()) KeepDefinition(variable);
 		}
 
+		// What a split module's definitions become: every local a hidden global, and, when each partition is optimized
+		// alone, every linkonce definition weak.
+		void MakeSplit(llvm::Module& module, bool after)
+		{
+			MakeLocalsGlobal(module);
+			if (after) KeepDefinitions(module);
+		}
+
 		void CopyComdat(llvm::GlobalObject& to, const llvm::GlobalObject& from, llvm::Module& partition)
 		{
 			if (!from.hasComdat()) return;
@@ -354,16 +362,26 @@ namespace Scripting
 			bool keepsProgramWide = false;
 		};
 
+		std::vector<std::vector<Place>> PlacesOf(const llvm::Module& module, const std::vector<std::vector<const llvm::GlobalValue*>>& groups)
+		{
+			const llvm::DenseMap<const llvm::GlobalValue*, Place> places = PlacesIn(module);
+			std::vector<std::vector<Place>> placed(groups.size());
+			for (size_t i = 0; i < groups.size(); ++i)
+				for (const llvm::GlobalValue* member : groups[i]) placed[i].push_back(places.lookup(member));
+			return placed;
+		}
+
 		std::vector<PartitionPlan> Plans(const llvm::Module& module, const std::vector<std::vector<const llvm::GlobalValue*>>& members,
-			bool withImports)
+			PartitionOptimization optimization)
 		{
 			const llvm::DenseMap<const llvm::GlobalValue*, Place> places = PlacesIn(module);
 			std::vector<PartitionPlan> plans(members.size());
 			for (size_t i = 0; i < members.size(); ++i)
 			{
 				for (const llvm::GlobalValue* member : members[i]) plans[i].members.push_back(places.lookup(member));
-				if (withImports)
-					for (const llvm::Function* import : ImportsFor(members[i])) plans[i].imports.push_back(places.lookup(import));
+				if (optimization != PartitionOptimization::Before)
+					for (const llvm::Function* import : ImportsFor(members[i], optimization == PartitionOptimization::AfterAtO0))
+						plans[i].imports.push_back(places.lookup(import));
 				plans[i].keepsProgramWide = i == 0;
 			}
 			return plans;
@@ -378,10 +396,20 @@ namespace Scripting
 			return contents;
 		}
 
-		// A thread's share of the partitions, each built from the thread's own copy of the module (bodies read in as
-		// partitions need them) and written to its slot of `partitions`; a copy that cannot be read leaves them empty.
-		void BuildPartitions(const std::string& whole, const std::vector<PartitionPlan>& plans, std::atomic<size_t>& next,
-			std::vector<std::string>& partitions)
+		// What the split's threads build: the extracts (from the program as it was), then the partitions (from it split).
+		struct Work
+		{
+			std::vector<std::vector<Place>> extracts;
+			std::string (*finish)(llvm::Module&) = nullptr;
+			std::vector<PartitionPlan> plans;
+			bool after = false;
+			size_t Count() const { return extracts.size() + plans.size(); }
+		};
+
+		// A thread's share of the work, each module built from the thread's own copy of the module (bodies read in as
+		// they are needed) and written to its slot of `out`; a copy that cannot be read leaves them empty. The extracts
+		// come first in the work, so a thread splits its copy once, before its first partition.
+		void BuildShare(const std::string& whole, const Work& work, std::atomic<size_t>& next, SplitBitcode& out)
 		{
 			llvm::LLVMContext context;
 			llvm::Expected<std::unique_ptr<llvm::Module>> copy = llvm::getLazyBitcodeModule(llvm::MemoryBufferRef(whole, "module"), context, true);
@@ -397,8 +425,21 @@ namespace Scripting
 			}
 			const Directory directory(**copy);
 			const DescribedGlobals described = DescribedDefinitions(**copy);
-			for (size_t i = next++; i < plans.size(); i = next++)
-				partitions[i] = ModuleBitcode(*Partition(**copy, ContentsIn(directory, plans[i]), described));
+			bool split = false;
+			for (size_t i = next++; i < work.Count(); i = next++)
+			{
+				if (i < work.extracts.size())
+				{
+					Contents contents;
+					for (Place place : work.extracts[i]) contents.members.push_back(directory.Materialized(place));
+					out.extracted[i] = work.finish(*Partition(**copy, contents, described));
+					continue;
+				}
+				if (!split) MakeSplit(**copy, work.after);
+				split = true;
+				const size_t partition = i - work.extracts.size();
+				out.partitions[partition] = ModuleBitcode(*Partition(**copy, ContentsIn(directory, work.plans[partition]), described));
+			}
 		}
 	}
 
@@ -418,21 +459,32 @@ namespace Scripting
 
 	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization, unsigned threads)
 	{
+		return SplitModuleAndExtract(module, count, optimization, threads, Extracts{}).partitions;
+	}
+
+	// The module is written as the program made it; each thread's copy, and then the module, are split from there.
+	SplitBitcode SplitModuleAndExtract(llvm::Module& module, unsigned count, PartitionOptimization optimization, unsigned threads,
+		const Extracts& extracts)
+	{
 		// Assigned before the locals are renamed, so a symbol's home is found by the names the program gave it.
 		const std::vector<std::vector<const llvm::GlobalValue*>> members = AssignDefinitions(module, count);
-		MakeLocalsGlobal(module);
-		const bool after = optimization == PartitionOptimization::After;
-		if (after) KeepDefinitions(module);
-		const std::vector<PartitionPlan> plans = Plans(module, members, after);
+		Work work;
+		work.after = optimization != PartitionOptimization::Before;
+		work.plans = Plans(module, members, optimization);
+		work.extracts = PlacesOf(module, extracts.groups);
+		work.finish = extracts.finish;
 		const std::string whole = ModuleBitcode(module);
-		std::vector<std::string> partitions(count);
+		MakeSplit(module, work.after);
+		SplitBitcode out;
+		out.partitions.resize(count);
+		out.extracted.resize(extracts.groups.size());
 		std::atomic<size_t> next = 0;
 		std::vector<std::thread> workers;
-		const unsigned workerCount = std::clamp(threads, 1u, count);
+		const unsigned workerCount = static_cast<unsigned>(std::clamp<size_t>(threads, 1, work.Count()));
 		for (unsigned i = 1; i < workerCount; ++i)
-			workers.emplace_back([&] { BuildPartitions(whole, plans, next, partitions); });
-		BuildPartitions(whole, plans, next, partitions);
+			workers.emplace_back([&] { BuildShare(whole, work, next, out); });
+		BuildShare(whole, work, next, out);
 		for (std::thread& worker : workers) worker.join();
-		return partitions;
+		return out;
 	}
 }

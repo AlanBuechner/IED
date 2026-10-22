@@ -21,6 +21,8 @@ namespace Testing
 		void KeepOnlyRemovesEverythingElse();
 		TEST_FUNC(Compiler.ObjectCache)
 		void ADeepFolderKeepsAndReusesItsObjects();
+		TEST_FUNC(Compiler.ObjectCache)
+		void InvalidCodeIsReportedWhenItsPartitionIsAssembled();
 
 		TEST_FUNC(Compiler.ModulePartitions)
 		void EveryPartitionReadsBackAndVerifies();
@@ -46,5 +48,9 @@ namespace Testing
 		void Bug328MovingAFilesLinesChangesOnlyItsPartition();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void SeveralThreadsSplitAsOneDoes();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void DataNoFileNamesHasTheFirstPartitionAlone();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void ExtractsSeeTheProgramAsItWas();
 	};
 } // namespace Testing

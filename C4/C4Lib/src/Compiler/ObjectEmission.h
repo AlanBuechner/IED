@@ -1,5 +1,6 @@
 #pragma once
 #include "Compiler/CpuTarget.h"
+#include "Compiler/ModulePartitions.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -18,6 +19,7 @@ namespace Scripting
 		const CpuTarget* target = nullptr;
 		unsigned threads = 1; // how many partitions are assembled at once
 		bool optimizePartitions = false; // incremental (D-76): each partition is optimized alone, after the split
+		bool verify = false; // each partition assembled is verified first (CodeGenDriver::VerifyLater)
 	};
 
 	/// An error the backend reports. `cookie` is the inline-asm location cookie (AsmEmitter::LocationCookie) of the
@@ -47,12 +49,18 @@ namespace Scripting
 	{
 		std::vector<std::string> paths;
 		size_t reused = 0;
+		double splitSeconds = 0;       // splitting the module into partitions and writing each one's bitcode
+		struct Assembled { uint64_t instructions = 0; double seconds = 0; };
+		std::vector<Assembled> assembled;   // each partition assembled (not reused): its size and how long it took
+		std::vector<std::string> extracted; // the bitcode of each group of the extracts asked for, in order
 	};
 
 	/// The module as `partitions` objects kept in `cache` (ModulePartitions splits it): a partition whose code is
 	/// unchanged since a build that kept it reuses its object, the others are assembled (and with
 	/// `settings.optimizePartitions`, optimized first) on up to `settings.threads` threads. No paths, with diagnostics,
 	/// when the optimizer or the assembler fails.
+	/// With `extracts`, their groups are built on the split's threads too (SplitModuleAndExtract), or here when the
+	/// module is kept whole.
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
-		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts = {});
 }

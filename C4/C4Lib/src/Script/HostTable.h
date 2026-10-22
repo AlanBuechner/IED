@@ -29,10 +29,14 @@ namespace Scripting
 	/// object in `error`, when one cannot be read.
 	std::optional<std::vector<std::string>> ForeignDefinitions(const std::vector<std::string>& objectPaths, std::string* error);
 
-	/// `__c4_script_table = { build id, count, address[count] }`, address i being `symbols[i]`, external and
-	/// constant. It replaces the declaration the scripting API's [link] made. Every entry is referenced, so no
-	/// listed function or global is dropped by the optimizer or the linker. False, naming it in `error`, when a
-	/// symbol is not in the module.
-	bool EmitHostTable(llvm::Module& module, const std::vector<std::string>& symbols, const std::array<uint8, 16>& buildId,
-		std::string* error);
+	/// `__c4_script_table = { &__c4_script_build_id, count, address[count] }`, address i being `symbols[i]`, external
+	/// and constant. It replaces the declaration the scripting API's [link] made. Every entry is referenced, so no
+	/// listed function or global is dropped by the optimizer or the linker. The build id, which covers the inline
+	/// bodies, is only declared here (EmitBuildId defines it), so the table does not wait for them. False, naming it in
+	/// `error`, when a symbol is not in the module.
+	bool EmitHostTable(llvm::Module& module, const std::vector<std::string>& symbols, std::string* error);
+
+	/// `__c4_script_build_id`, the 16 bytes of the interface's build id (InterfaceBuilder), defined in `module`: the
+	/// program's own when its inline bodies came before its code was split, else a module of its own linked with it.
+	void EmitBuildId(llvm::Module& module, const std::array<uint8, 16>& buildId);
 } // namespace Scripting

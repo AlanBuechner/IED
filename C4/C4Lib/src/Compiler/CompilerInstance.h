@@ -82,10 +82,14 @@ namespace Scripting
 		/// parallel. Does not build the model - call AnalyzeProgram() for that.
 		void CompileAll();
 
-		/// Merge every unit's includes into its root AST (LSP navigation walks the merged tree),
-		/// then build the single program-wide model: one ModelBuilder over all units' own
-		/// declarations. Must run after CompileAll(). Re-runnable (tests rebuild in place).
+		/// Build the single program-wide model: one ModelBuilder over all units' own declarations.
+		/// Must run after CompileAll(). Re-runnable (tests rebuild in place).
 		bool AnalyzeProgram();
+
+		/// Splice every unit's includes into its root AST, for what walks a document's tree to a
+		/// declaration in a header it includes (LSP navigation, --pretty-print). The model and the
+		/// backend read each unit's own declarations and never need it.
+		void MergeIncludes();
 
 		// ------------------------------------------------------------------
 		// The program model (docs/compiler/02-program-model.md). ONE ModelBuilder resolves ALL units' own

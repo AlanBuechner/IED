@@ -12,8 +12,8 @@ namespace llvm
 namespace Scripting
 {
 	/// When a split module is optimized: whole, before the split, or each partition alone after it (an incremental
-	/// build, D-76).
-	enum class PartitionOptimization { Before, After };
+	/// build, D-76), at -O0 only by the always-inliner, so a partition copies only the `inline` functions it calls.
+	enum class PartitionOptimization { Before, After, AfterAtO0 };
 
 	/// `module` split into `count` partitions that link back into the same program, each as bitcode so another thread
 	/// can read it into a context of its own. A definition goes where AssignDefinitions places it (by its source file,
@@ -27,6 +27,26 @@ namespace Scripting
 	/// so their bitcode is the same whatever the count.
 	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count,
 		PartitionOptimization optimization = PartitionOptimization::Before, unsigned threads = 1);
+
+	/// Modules of other definitions of a module, built on the split's threads from the module as it was before the
+	/// split (names and linkage as the program gave them): each group of definitions with declarations of what it
+	/// reaches (ExtractDefinitions), made bitcode by `finish`.
+	struct Extracts
+	{
+		std::vector<std::vector<const llvm::GlobalValue*>> groups;
+		std::string (*finish)(llvm::Module&) = nullptr;
+	};
+
+	/// The partitions of SplitModuleToBitcode, and the bitcode of each group of `extracts`, in order.
+	struct SplitBitcode
+	{
+		std::vector<std::string> partitions;
+		std::vector<std::string> extracted;
+	};
+
+	/// SplitModuleToBitcode, building `extracts` on the same threads, first.
+	SplitBitcode SplitModuleAndExtract(llvm::Module& module, unsigned count, PartitionOptimization optimization, unsigned threads,
+		const Extracts& extracts);
 
 	/// A module, in `module`'s context, of `definitions` (in that order) and declarations of only what they reach, built
 	/// as a partition is: for a part of a program that leaves it (Script/InlineBodies).

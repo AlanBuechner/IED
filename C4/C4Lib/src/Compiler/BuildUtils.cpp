@@ -35,8 +35,6 @@ namespace Scripting
 		};
 
 		constexpr unsigned kMaxCount = 64;
-		// More threads than this by default only adds memory pressure: the gain flattens past four partitions.
-		constexpr unsigned kDefaultThreads = 4;
 
 		// A count of threads or objects, 1 to kMaxCount; 0 with the error recorded.
 		unsigned ParseCount(const std::string& v, const char* option, CompileOptions& o)
@@ -131,7 +129,7 @@ namespace Scripting
 		// What the command line leaves open: the thread count follows the processors; -c writes one object.
 		void ResolveCodeGeneration(CompileOptions& opts, unsigned processors)
 		{
-			if (opts.threads == 0) opts.threads = std::clamp(processors, 1u, kDefaultThreads);
+			if (opts.threads == 0) opts.threads = std::clamp(processors, 1u, kMaxCount);
 			if (opts.compileOnly && opts.partitions > 1) opts.error = "--partitions needs a link: -c writes one object";
 			if (opts.compileOnly && opts.incremental) opts.error = "--incremental needs a link: -c writes one object";
 		}

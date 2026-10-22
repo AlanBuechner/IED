@@ -7,6 +7,7 @@
 #include "Interop/InteropPass.h"
 #include "Macro/MacroTable.h"
 #include "Script/HostInterface.h"
+#include "Script/InterfaceBuilder.h"
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -37,6 +38,10 @@ public:
 
 	bool Write(llvm::Module& module);
 
+	/// Whether the program's partitions are optimized each alone, after the split, and verified as they are assembled
+	/// (so lowering leaves the module unverified: CodeGenDriver::VerifyLater).
+	static bool OptimizesPartitions(const Scripting::CompileOptions& options);
+
 private:
 	// The .pdb a link writes, and the name it is written under until the program is in place.
 	struct DebugInfoPaths
@@ -55,14 +60,24 @@ private:
 	static std::string CacheSalt(const Scripting::ObjectSettings& settings);
 	bool WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath);
 	std::vector<std::string> Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache);
+	void ReportPartitions(const Scripting::CachedObjects& objects, unsigned partitions, unsigned threads) const;
 	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects);
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
-	bool PrepareScriptHost(llvm::Module& module, std::optional<Scripting::HostInterface>& host);
+	bool PrepareScriptHost(llvm::Module& module);
+	bool FinishInterface(llvm::Module& module);
+	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
+		std::vector<std::string>& objects);
 	bool WriteScriptInterface(const Scripting::HostInterface& host);
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
 	void Timed(const char* phase, std::chrono::steady_clock::time_point since);
 
+	/// At most this many chunks of inline bodies, extracted on the split's threads.
+	static constexpr unsigned kInlineBodyChunks = 64;
+
 	Inputs m_In;
+	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
+	Scripting::Extracts m_InlineBodies;                    // the inline bodies the split extracts for it
+	std::optional<Scripting::HostInterface> m_Interface;   // what goes beside the program
 };

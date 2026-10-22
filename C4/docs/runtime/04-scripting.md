@@ -122,7 +122,7 @@ The host image exports nothing, and its runtime is linked statically, so the scr
 code by name through the OS. Instead the build compiles a table into the image:
 
 ```
-__c4_script_table = { build id (16 bytes), count, address[count] }
+__c4_script_table = { &__c4_script_build_id (16 bytes), count, address[count] }
 ```
 
 `address[i]` is the address of the host symbol whose name is entry `i` of the interface's symbol list (section
@@ -140,8 +140,12 @@ RTTI and exception tables name them image-relatively, so a script makes its own,
 also keeps the linker and the optimizer from removing any of them, so a script can call a host function nothing in
 the host calls. A C function the table does not list is found among the exports of the DLLs the process loaded.
 
-The build id is a hash of the whole interface; the image's table carries the same id, and a script host refuses
-an interface whose id differs from its image's.
+The build id is a hash of the whole interface; the image carries the same id in `__c4_script_build_id`, which the
+table points at, and a script host refuses an interface whose id differs from its image's. The id covers the inline
+bodies (section 3.3), so it is known only once they are; the table does not wait for it. A build that splits its
+module before optimizing it (`--incremental`, D-76) extracts the inline bodies on the split's threads and then
+assembles the id as an object of its own (`<int>/<name>.build-id.obj`), linked with the program's; any other build
+extracts them first and defines the id in its module (`Script/HostTable`: `EmitHostTable`, `EmitBuildId`).
 
 ### 3.2 The interface (`.c4i`)
 
@@ -149,7 +153,7 @@ One binary file:
 
 | Section | Content |
 |---|---|
-| Header | magic `C4IF`, format version (3), build id, compiler version |
+| Header | magic `C4IF`, format version (4), build id, compiler version |
 | Target | the host's LLVM CPU name and feature string (D-62); a target the reading compiler does not know is refused |
 | Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
 | Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
@@ -157,7 +161,7 @@ One binary file:
 | Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text** and the macros it exports |
 | Symbols | the names of the table's entries, in table order |
 | Reflected types | the qualified names of the types the host registered, so a script does not register them again |
-| Inline bodies | LLVM bitcode of the host functions a script may inline (section 4.4) |
+| Inline bodies | chunks of LLVM bitcode of the host functions a script may inline (section 3.3) |
 
 A file's **interface text** is its text after the preprocessor and the interop pass (macros expanded,
 conditional blocks resolved, bindings appended), with the body of every function that is not part of a template
@@ -178,9 +182,13 @@ a declaration is all a script needs of a non-template function.
 To keep script code as fast as host code, small host functions are inlined into scripts across the boundary.
 The build writes the lowered (not yet optimized) IR of every host function that is small enough (at most
 `kInlineBodyLimit`, 160, instructions) and refers only to what a script can name (table symbols, intrinsics and
-private constants, which are copied with it) and no `thread_local`, as one bitcode module (`Script/InlineBodies`). An optimized script imports a body as `available_externally` when it calls the function, and the bodies those
-call, two calls deep (`kInlineImportDepth`, `Script/InlineImport`): the optimizer may inline them, and every call
-it does not inline goes to the host's code. Only the imported bodies are read from the bitcode; importing every
+private constants, which are copied with it) and no `thread_local` (`Script/InlineBodies`). The bodies are kept in
+chunks of the module's order, one per 100 of them and at most 64, each a bitcode module with the private constants
+its bodies name: an incremental build extracts the chunks on the threads that split its module (D-76), from the
+module as lowering finished it, so they cost the build no time of its own. An optimized script imports a body as
+`available_externally` when it calls the function, and the bodies those call, two calls deep
+(`kInlineImportDepth`, `Script/InlineImport`), whichever chunk each is in: the optimizer may inline them, and every
+call it does not inline goes to the host's code. Only the imported bodies are read from the bitcode; importing every
 body a script reaches transitively made a 78-line IED plugin carry thousands of host functions through the
 optimizer for the same machine code. An unoptimized script imports none. Template instances the host made need no
 bitcode: the script lowers their bodies from the template (section 4.3).

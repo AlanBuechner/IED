@@ -25,7 +25,7 @@ in `C4Lib`.
         |   x's include closure is folded into the requester's closure
         v
  [4] AnalyzeProgram
-        |   MergeIncludes (LSP navigation only), DetectUserMain
+        |   DetectUserMain
         |   ModelBuilder: pass 1 REGISTER shells -> pass 2 RESOLVE fixed point -> FinalizeLayouts
         |   -> one ProgramModel; diagnostics = parse errors + model errors
         |   any front-end error stops here
@@ -134,21 +134,23 @@ path. Diagnostics still report original file names.
 
 ## 4. Analyze (`CompilerInstance::AnalyzeProgram`)
 
-1. `MergeIncludes()` splices included ASTs into each unit's root. This exists for LSP navigation only; the
-   model does not use merged trees.
-2. `DetectUserMain()` scans entry files for a lowercase global `main`.
-3. One `ModelBuilder` runs over every reachable unit's OWN top-level declarations. Each declaration is owned
+1. `DetectUserMain()` scans entry files for a lowercase global `main`.
+2. One `ModelBuilder` runs over every reachable unit's OWN top-level declarations. Each declaration is owned
    by the unit it is written in, so the union of all units yields every definition exactly once - no AST
    merge, no per-file re-analysis. Units with parse errors are skipped (their errors still surface).
-4. Builder passes (details in [02-program-model.md](02-program-model.md#build-passes)):
+3. Builder passes (details in [02-program-model.md](02-program-model.md#build-passes)):
    pass 1 registers every shell; pass 2 resolves to a fixed point (types, bases, fields, packed regions,
    methods, free and extension functions, out-of-line bodies, constant folding); then template
    specializations named inside bodies are instantiated and `TypeStore::FinalizeLayouts` computes layouts.
    The prelude (`Bedrock/Prelude/prelude.ch`, which `SourceManager::RegisterIncludedLibraryFiles` always
    registers) is visited after the program, and every unit's include closure contains it (D-43).
-5. Diagnostics from the parse and the model are one list (`GetAllDiagnostics`), reported once by
+4. Diagnostics from the parse and the model are one list (`GetAllDiagnostics`), reported once by
    `DiagnosticReporter` as `file (line:col) error: message` with source context. Any front-end error stops
    the build before codegen.
+
+`CompilerInstance::MergeIncludes()` splices included ASTs into each unit's root, for what walks a document's
+tree to a declaration in a header it includes (the language server, `--pretty-print`). The model and the
+backend never use merged trees, so a build does not merge.
 
 ## 5. Backend (`Backend/CodeGen/CodeGenDriver::Lower`)
 
@@ -195,21 +197,26 @@ straight from the module in memory).
   the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
 - Partitions (`Compiler/ModulePartitions`): after the whole module is optimized (inlining across the program is
   unchanged), it is split into partitions that link back into the same program. Where a definition goes
-  (`Compiler/PartitionPlacement`): with debug info, by the source file it names, so a file's code shares a partition
-  (a large file is spread by name over one partition per 8,000 instructions, rounded down to a power of two) and an
-  edit that moves a file's lines, which its debug info records, changes only that file's partitions and those that
-  copy its small functions; without debug info, by its name. A comdat's members stay together (by the comdat's name
+  (`Compiler/PartitionPlacement`): data no source file names (the reflection image and its rows, the GC roots table)
+  in the first partition, alone, so an edit that changes it reassembles no code with it (the IED server's reflection
+  is 13 MB of data); anything else in the others: with debug info, by the source file it names, so a file's code
+  shares a partition (a large file is spread by name over one partition per 8,000 instructions, rounded down to a
+  power of two) and an edit that moves a file's lines, which its debug info records, changes only that file's
+  partitions and those that copy its small functions; without debug info, by its name. A comdat's members stay together (by the comdat's name
   and its leader's file); private data goes with the user whose name sorts first, so a literal travels with its
   function. Each partition is built from its own definitions plus declarations of only what they reach, so it changes
   only when its own code does; its debug-info compile unit lists only the globals it defines. Local symbols become
   hidden globals with a `.local` suffix, which no C or C++ symbol can have, so they meet no foreign object's names in
   the link; file-scope assembly and the compile unit's program-wide lists (enums, retained types, imports) stay in the
   first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
-  where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 32, so the count changes
+  where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 64, so the count changes
   only when the program doubles or halves. Partitions are built and assembled on up to `-j` threads (default: the
-  processors, at most 4): the module is written once as bitcode, each thread reads a copy of it lazily into a context
-  of its own and builds its share of the partitions from that copy (a definition found by its place in the module's
-  lists), so a partition's bitcode is the same whatever the thread count. `-c` always writes one object.
+  processors): the module is written once as bitcode as the program made it, each thread reads a copy of it
+  lazily into a context of its own, builds what else was asked of the split from it (a script host's inline bodies,
+  `SplitModuleAndExtract`), then makes its locals hidden globals and builds its share of the partitions (a definition
+  found by its place in the module's lists), so a partition's bitcode is the same whatever the thread count. `-c`
+  always writes one object. `-ftime` shows the split as a phase of its own and a line on the partitions: how many
+  were reused, and of those assembled the longest, the total and the largest.
 - The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
   `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
   and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses
@@ -221,12 +228,15 @@ straight from the module in memory).
   and reflection tables are named after their content; exception and RTTI records after the type they describe), so
   an edit renames nothing it did not change. On the Bedrock tests at `-O0` (32 partitions): a cold build 0.96 s, an
   unchanged rebuild 0.41 s, adding a test 0.46 s (28 objects reused), editing one 0.43 s (31 reused).
-- Incremental builds (`--incremental`, D-76, roadmap 5.3): from `-O1` on, the module is split before it is optimized
+- Incremental builds (`--incremental`, D-76, roadmap 5.3): the module is split before it is optimized
   and each partition is optimized alone, on its own thread, so an unchanged partition skips the optimizer as well as
   the assembler. A partition carries `available_externally` copies of the small functions its code calls from other
   partitions (`Compiler/PartitionImports`: up to 100 instructions of unoptimized IR for a direct callee, 70% of that
   for each level further, three levels, as ThinLTO imports; nothing for `minsize` callers such as reflection's invoke
   thunks, nothing `noinline`), so they still inline; its bitcode, and with it the cache key, includes those copies.
+  At `-O0` only the always-inliner and the aggregate copies run, so a partition copies only the `inline` functions it
+  calls. Lowering leaves the module unverified and each partition is verified as it is assembled; a script host's
+  inline bodies are extracted on the split's threads.
   Linkonce definitions become weak in this mode, since a partition's optimizer would drop one that only another
   partition uses. The cache salt says `incremental`, so its objects never mix with a whole-program build's. On the
   60k-line ScaleTest at `-O2` (32 partitions, `-j 3`): a cold build 9.1 s (the whole-program build: 12.5 s), an

@@ -16,6 +16,8 @@
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
+#include <algorithm>
+#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <system_error>
@@ -27,22 +29,30 @@ bool ProgramOutput::Write(llvm::Module& module)
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
 	if (base.empty()) return false;
-	std::optional<Scripting::HostInterface> host;
-	if (!PrepareScriptHost(module, host)) return false;
+	if (!PrepareScriptHost(module)) return false;
 	if (!WriteProgram(module, base)) return false;
-	return !host || WriteScriptInterface(*host); // only beside the program it describes: a failed link keeps the old pair
+	return !m_Interface || WriteScriptInterface(*m_Interface); // only beside the program it describes: a failed link keeps the old pair
 }
 
 bool ProgramOutput::WriteProgram(llvm::Module& module, const std::string& base)
 {
 	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
 	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
-	const bool optimizePartitions = m_In.options.incremental && m_In.options.optLevel > 0; // -O0 optimizes nothing to cache
-	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, optimizePartitions };
+	const bool optimizePartitions = OptimizesPartitions(m_In.options);
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, optimizePartitions,
+		optimizePartitions };
 	if (!optimizePartitions && !Optimize(module, settings)) return false;
 	if (m_In.options.compileOnly) return WriteCompiledObject(module, settings, base + ".obj"); // -c: the object is the output
-	const std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
-	return !objects.empty() && Link(objects);
+	std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
+	if (objects.empty()) return false;
+	if (m_HostBuild && !FinishScriptHost(module, settings, base, objects)) return false;
+	return Link(objects);
+}
+
+// Incremental (D-76): at -O0 too, whose always-inliner and aggregate copies then run on the partitions' threads.
+bool ProgramOutput::OptimizesPartitions(const Scripting::CompileOptions& options)
+{
+	return options.incremental && !options.emitIR && !options.emitBitcode && !options.compileOnly;
 }
 
 // The compiler owns its output location: a missing folder is created, as every toolchain does.
@@ -145,13 +155,32 @@ std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const Scr
 	const auto start = std::chrono::steady_clock::now();
 	const unsigned partitions = PartitionsFor(module, settings);
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
-	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics);
+	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics, m_InlineBodies);
 	Report(diagnostics);
-	Timed(settings.optimizePartitions ? "optimize+codegen" : "codegen", start);
+	if (m_HostBuild) m_HostBuild->inlineBodies = std::move(objects.extracted);
+	m_In.compiler.AddPhaseTime("split", objects.splitSeconds);
+	m_In.compiler.AddPhaseTime(settings.optimizePartitions ? "optimize+codegen" : "codegen",
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() - objects.splitSeconds);
+	if (m_In.options.timePhases) ReportPartitions(objects, partitions, settings.threads);
 	if (m_In.options.verbose)
 		std::cout << Scripting::InstructionCount(module) << " instructions in " << partitions << " object(s), " << objects.reused
 			<< " reused, the rest assembled on up to " << settings.threads << " thread(s), in " << cache.Folder().string() << std::endl;
 	return objects.paths;
+}
+
+// The partitions assembled, how long the longest took and all of them together: how well the threads were used.
+void ProgramOutput::ReportPartitions(const Scripting::CachedObjects& objects, unsigned partitions, unsigned threads) const
+{
+	double longest = 0, total = 0;
+	uint64_t largest = 0;
+	for (const Scripting::CachedObjects::Assembled& assembled : objects.assembled)
+	{
+		longest = std::max(longest, assembled.seconds);
+		total += assembled.seconds;
+		largest = std::max(largest, assembled.instructions);
+	}
+	std::printf("partitions: %u (%zu reused), %zu assembled on %u thread(s): longest %.3f s, all %.3f s, largest %llu instructions\n",
+		partitions, objects.reused, objects.assembled.size(), threads, longest, total, (unsigned long long)largest);
 }
 
 void ProgramOutput::Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics)
@@ -233,10 +262,11 @@ bool ProgramOutput::PlaceDebugInfo(const DebugInfoPaths& paths)
 	return false;
 }
 
-// --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table, and the interface `host` that
-// goes beside the program once it is built. A program that uses the scripting API without it has no table to link
-// against: an error that says what to do.
-bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Scripting::HostInterface>& host)
+// --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table, and the interface that goes
+// beside the program once it is built. The interface's build id covers the inline bodies: a build that splits its
+// module before optimizing it extracts them on the split's threads (FinishScriptHost), any other here. A program that
+// uses the scripting API without it has no table to link against: an error that says what to do.
+bool ProgramOutput::PrepareScriptHost(llvm::Module& module)
 {
 	if (!m_In.options.scriptHost)
 	{
@@ -259,19 +289,56 @@ bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Script
 	}
 	const std::vector<std::string> prelude = Scripting::PreludeFunctionSymbols(model);
 	listed->insert(listed->begin(), prelude.begin(), prelude.end());
-	Scripting::HostBuild build;
-	build.symbols = Scripting::HostSymbols(module, *listed);
-	build.inlineBodies = Scripting::InlineBodies(module, build.symbols);
-	build.reflectedTypes = Scripting::ReflectedTypeNames(model);
-	build.debugInfo = m_In.options.debugInfo;
-	host = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(build), &error);
-	if (!host || !Scripting::EmitHostTable(module, host->symbols, host->buildId, &error))
+	m_HostBuild.emplace();
+	m_HostBuild->symbols = Scripting::HostSymbols(module, *listed);
+	m_HostBuild->reflectedTypes = Scripting::ReflectedTypeNames(model);
+	m_HostBuild->debugInfo = m_In.options.debugInfo;
+	if (!Scripting::EmitHostTable(module, m_HostBuild->symbols, &error))
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;
 	}
+	const bool whileSplitting = OptimizesPartitions(m_In.options);
+	if (whileSplitting)
+		m_InlineBodies = { Scripting::InlineBodyGroups(module, m_HostBuild->symbols, kInlineBodyChunks), Scripting::InlineBodyBitcode };
+	else
+		m_HostBuild->inlineBodies = Scripting::InlineBodies(module, m_HostBuild->symbols);
 	Timed("script host", start);
+	return whileSplitting || FinishInterface(module);
+}
+
+// The interface, now that the inline bodies are in, and its build id in `module`.
+bool ProgramOutput::FinishInterface(llvm::Module& module)
+{
+	std::string error;
+	m_Interface = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(*m_HostBuild), &error);
+	m_HostBuild.reset();
+	if (!m_Interface)
+	{
+		m_In.result.AddBackendError(Core::String(error.c_str()));
+		return false;
+	}
+	Scripting::EmitBuildId(module, m_Interface->buildId);
 	return true;
+}
+
+// The interface of a build whose split extracted the inline bodies, and its build id as an object of its own, linked
+// with the program's.
+bool ProgramOutput::FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
+	std::vector<std::string>& objects)
+{
+	const auto start = std::chrono::steady_clock::now();
+	llvm::Module buildId("build-id", program.getContext());
+	buildId.setTargetTriple(program.getTargetTriple());
+	buildId.setDataLayout(program.getDataLayout());
+	if (!FinishInterface(buildId)) return false;
+	std::vector<Scripting::ObjectDiagnostic> diagnostics;
+	const std::string path = base + ".build-id.obj";
+	const bool written = Scripting::WriteObject(buildId, settings, path, diagnostics);
+	Report(diagnostics);
+	if (written) objects.push_back(path);
+	Timed("interface", start);
+	return written;
 }
 
 bool ProgramOutput::WriteScriptInterface(const Scripting::HostInterface& host)

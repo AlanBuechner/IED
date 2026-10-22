@@ -211,7 +211,7 @@ namespace Scripting
 
 	std::optional<HostSymbolTable> HostSymbolTable::Read(const HostInterface& host, const void* table, std::string* error)
 	{
-		struct Layout { uint8 id[16]; uint64 count; void* entries[1]; };
+		struct Layout { const uint8* id; uint64 count; void* entries[1]; };
 		const auto* image = static_cast<const Layout*>(table);
 		if (!image)
 		{

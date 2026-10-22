@@ -29,6 +29,8 @@ namespace Testing
 		TEST_FUNC(Script.HostTable)
 		void ConstantsTravelWithTheirBodies();
 		TEST_FUNC(Script.HostTable)
+		void BodiesComeInChunksWithTheirConstants();
+		TEST_FUNC(Script.HostTable)
 		void NoBodiesWithoutSymbols();
 	};
 } // namespace Testing

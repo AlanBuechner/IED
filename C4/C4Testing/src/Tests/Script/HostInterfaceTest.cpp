@@ -43,7 +43,7 @@ namespace Testing
 			host.files = { header, prelude };
 			host.symbols = { "Think_1int32", "g_score", "c4_alloc" };
 			host.reflectedTypes = { "Ai::Brain", "Box<int32>" };
-			host.inlineBodies = std::string("BC\xC0\xDE\0\x01", 6);
+			host.inlineBodies = { std::string("BC\xC0\xDE\0\x01", 6), std::string("BC\xC0\xDE\0\x02", 6) };
 			return host;
 		}
 	}

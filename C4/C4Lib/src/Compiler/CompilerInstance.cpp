@@ -289,15 +289,15 @@ namespace Scripting
 
 	bool CompilerInstance::AnalyzeProgram()
 	{
-		// LSP navigation walks a document's merged tree (a reference may land in an included
-		// header), so splice every unit's include closure into its root AST first. This is pure
-		// AST prep - it produces no semantic state and the program model does not depend on it.
+		DetectUserMain();
+		return BuildProgramModel();
+	}
+
+	void CompilerInstance::MergeIncludes()
+	{
 		for (auto& [id, unit] : m_CompilationUnits)
 			if (unit)
 				unit->MergeIncludes();
-
-		DetectUserMain();
-		return BuildProgramModel();
 	}
 
 	bool CompilerInstance::BuildProgramModel()

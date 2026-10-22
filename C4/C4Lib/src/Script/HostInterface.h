@@ -44,7 +44,7 @@ namespace Scripting
 		std::vector<InterfaceFile> files;          // in unit-id order
 		std::vector<std::string> symbols;          // the symbol table's entries, in its order
 		std::vector<std::string> reflectedTypes;   // the qualified names of the types the host registered
-		std::string inlineBodies;                  // LLVM bitcode (Script/InlineBodies.h); empty for none
+		std::vector<std::string> inlineBodies;     // chunks of LLVM bitcode (Script/InlineBodies.h); none for none
 	};
 
 	/// The interface as the bytes of a `.c4i` file: magic `C4IF`, a format version, then each field in order.

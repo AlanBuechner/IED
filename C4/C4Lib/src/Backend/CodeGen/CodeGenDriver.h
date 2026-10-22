@@ -77,6 +77,10 @@ namespace Scripting
 		/// the program makes one, so a script's objects of the program's classes use the program's, which outlive it.
 		void ShareVtables() { m_ShareVtables = true; }
 
+		/// Lower leaves the module unverified: the build verifies each partition as it assembles it
+		/// (ObjectSettings::verify), on its threads, and a partition an earlier build assembled needs no second look.
+		void VerifyLater() { m_VerifyLater = true; }
+
 		/// Lower a script (docs/runtime/04 section 4.2), with no entry point: the host's definitions and storage win
 		/// (Script/ScriptModulePasses), the host's globals are not started, the script's start from
 		/// `__c4_script_init`, the reflection image registers through the loader, and exits and throws go through the
@@ -169,6 +173,7 @@ namespace Scripting
 		ErrorTracker m_LoweringErrors;
 		bool m_DebugInfo = false;
 		bool m_ShareVtables = false;
+		bool m_VerifyLater = false;
 		Core::String m_ReflectionTag;
 		std::optional<ScriptLowering> m_Script;
 		std::set<const FunctionRecord*> m_Emitted; // lowered (a failed one too: no retry)

@@ -154,6 +154,7 @@ namespace
 			if (m_Options.debugInfo) driver.EnableDebugInfo();
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.scriptHost) driver.ShareVtables();
+			if (ProgramOutput::OptimizesPartitions(m_Options)) driver.VerifyLater();
 			driver.SetReflectionTag(m_Options.reflectTag);
 			auto phaseStart = std::chrono::steady_clock::now();
 			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, m_Options.runTests ? &tests : nullptr);
@@ -394,6 +395,7 @@ namespace
 		{
 			if (!m_Options.prettyPrint)
 				return;
+			m_Compiler.MergeIncludes();
 
 			for (uint32 id = 1; id <= m_Compiler.SourceCount(); ++id)
 			{

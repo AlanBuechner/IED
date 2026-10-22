@@ -9,7 +9,7 @@ namespace Scripting
 	namespace
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
-		constexpr uint32 kFormatVersion = 3;
+		constexpr uint32 kFormatVersion = 4;
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
 		class Writer
@@ -197,7 +197,7 @@ namespace Scripting
 		for (const InterfaceFile& file : host.files) WriteFile(out, file);
 		out.Texts(host.symbols);
 		out.Texts(host.reflectedTypes);
-		out.Text(host.inlineBodies);
+		out.Texts(host.inlineBodies);
 		return out.Take();
 	}
 
@@ -224,7 +224,7 @@ namespace Scripting
 		for (uint32 i = 0; i < files && in.Ok(); ++i) read.files.push_back(ReadFile(in));
 		read.symbols = in.Texts();
 		read.reflectedTypes = in.Texts();
-		read.inlineBodies = in.Text();
+		read.inlineBodies = in.Texts();
 		if (!in.Ok()) return Fail(error, "the interface ends early (a truncated or damaged .c4i file)");
 		if (!in.AtEnd()) return Fail(error, "the interface has bytes past its end (a damaged .c4i file)");
 		std::string why;

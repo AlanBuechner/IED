@@ -91,8 +91,10 @@ namespace Scripting
 						m_FileInstructions[subprogram->getFile()] += function.getInstructionCount();
 			}
 
-			// By its home's file, over the file's share of partitions by name; by name alone without debug info. A comdat
-			// goes by its name and its leader's file. A definition keeps its partition while the program changes around it.
+			// Data no source file names (the reflection image and its rows, the GC roots table) in the first partition, so
+			// an edit that changes it reassembles data and no code. Code and the rest by the home's file, over the file's
+			// share of the other partitions by name; by name alone without debug info. A comdat goes by its name and its
+			// leader's file. A definition keeps its partition while the program changes around it.
 			unsigned PartitionOf(const llvm::GlobalValue& value) const
 			{
 				if (const auto* alias = llvm::dyn_cast<llvm::GlobalAlias>(&value))
@@ -100,9 +102,11 @@ namespace Scripting
 				const llvm::GlobalValue& home = value.hasComdat() ? value : Home(value);
 				const llvm::StringRef key = home.hasComdat() ? home.getComdat()->getName() : home.getName();
 				const llvm::DIFile* file = SourceFileOf(home.hasComdat() ? Leader(home) : home);
+				if (m_Count == 1 || (!file && !llvm::isa<llvm::Function>(home))) return 0;
 				const uint64_t byName = llvm::xxh3_64bits(key);
-				if (!file) return static_cast<unsigned>(byName % m_Count);
-				return static_cast<unsigned>((FileHash(*file) + byName % Share(*file)) % m_Count);
+				const uint64_t others = m_Count - 1;
+				if (!file) return static_cast<unsigned>(1 + byName % others);
+				return static_cast<unsigned>(1 + (FileHash(*file) + byName % Share(*file)) % others);
 			}
 
 		private:
@@ -110,7 +114,7 @@ namespace Scripting
 			{
 				const auto found = m_FileInstructions.find(&file);
 				const uint64_t instructions = found == m_FileInstructions.end() ? 0 : found->second;
-				return std::bit_floor(std::clamp<uint64_t>(instructions / kInstructionsPerFileShare, 1, m_Count));
+				return std::bit_floor(std::clamp<uint64_t>(instructions / kInstructionsPerFileShare, 1, m_Count - 1));
 			}
 
 			unsigned m_Count;

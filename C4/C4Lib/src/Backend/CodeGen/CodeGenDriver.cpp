@@ -8,6 +8,7 @@
 #include "Backend/CodeGen/TargetAttributes.h"
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
+#include "Compiler/IrVerification.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/CodeGen/UseSites.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
@@ -28,8 +29,6 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Verifier.h>
-#include <llvm/Support/raw_ostream.h>
 
 namespace Scripting
 {
@@ -414,7 +413,7 @@ namespace Scripting
 		if (!EmitStaticState(model, errorMessage)) return false;
 		if (!EmitReflection(model, errorMessage)) return false;
 		FinishModule(model);
-		return Verify(errorMessage);
+		return m_VerifyLater || Verify(errorMessage);
 	}
 
 	void CodeGenDriver::EmitFileAssembly(const ProgramModel& model)
@@ -503,21 +502,10 @@ namespace Scripting
 		if (DebugInfo* debug = m_MCtx.Debug()) debug->Finish();
 	}
 
-	// The module is verified once (which checks every function too); only a failure goes through the functions one by
-	// one, so the diagnostic names the culprit (a bare verifyModule reports the first error without saying where).
 	bool CodeGenDriver::Verify(std::string* errorMessage)
 	{
-		if (!llvm::verifyModule(m_MCtx.module())) return true;
-		std::string err;
-		llvm::raw_string_ostream os(err);
-		for (llvm::Function& F : m_MCtx.module())
-			if (llvm::verifyFunction(F, &os))
-			{
-				if (errorMessage) *errorMessage = "IR verification failed in function '" + F.getName().str() + "': " + err;
-				return false;
-			}
-		llvm::verifyModule(m_MCtx.module(), &os);
-		if (errorMessage) *errorMessage = "IR verification failed: " + err;
-		return false;
+		const std::optional<std::string> invalid = InvalidIr(m_MCtx.module());
+		if (invalid && errorMessage) *errorMessage = *invalid;
+		return !invalid;
 	}
 } // namespace Scripting

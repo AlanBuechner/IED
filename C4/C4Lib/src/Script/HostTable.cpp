@@ -6,6 +6,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Object/ObjectFile.h>
 #include <llvm/Support/Error.h>
+#include <tuple>
 #include <unordered_set>
 
 namespace Scripting
@@ -13,13 +14,26 @@ namespace Scripting
 	namespace
 	{
 		constexpr const char* kTableSymbol = "__c4_script_table";
+		constexpr const char* kBuildIdSymbol = "__c4_script_build_id";
 		constexpr const char* kAccessorPrefix = "__c4_tls_";
 
 		// The module's own tables: the runtime reads them from the host image, a script has its own.
 		bool OwnTable(llvm::StringRef name)
 		{
 			return name == "__c4_reflect_image" || name == "__c4_gc_roots" || name == "__c4_gc_thread_root_count" || name == kTableSymbol ||
-				name == "__ImageBase";
+				name == kBuildIdSymbol || name == "__ImageBase";
+		}
+
+		llvm::ArrayType* BuildIdType(llvm::LLVMContext& context)
+		{
+			return llvm::ArrayType::get(llvm::Type::getInt8Ty(context), std::tuple_size_v<std::array<uint8, 16>>);
+		}
+
+		llvm::GlobalVariable* BuildIdIn(llvm::Module& module)
+		{
+			if (llvm::GlobalVariable* id = module.getNamedGlobal(kBuildIdSymbol)) return id;
+			return new llvm::GlobalVariable(module, BuildIdType(module.getContext()), true, llvm::GlobalValue::ExternalLinkage, nullptr,
+				kBuildIdSymbol);
 		}
 
 		bool ListedFunction(const llvm::Function& f, const std::unordered_set<std::string>& always)
@@ -126,8 +140,7 @@ namespace Scripting
 		return names;
 	}
 
-	bool EmitHostTable(llvm::Module& module, const std::vector<std::string>& symbols, const std::array<uint8, 16>& buildId,
-		std::string* error)
+	bool EmitHostTable(llvm::Module& module, const std::vector<std::string>& symbols, std::string* error)
 	{
 		llvm::LLVMContext& context = module.getContext();
 		llvm::Type* ptr = llvm::PointerType::get(context, 0);
@@ -142,11 +155,10 @@ namespace Scripting
 			}
 			addresses.push_back(value);
 		}
-		auto* idType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context), buildId.size());
 		auto* entriesType = llvm::ArrayType::get(ptr, addresses.size());
-		auto* tableType = llvm::StructType::get(context, { idType, llvm::Type::getInt64Ty(context), entriesType });
+		auto* tableType = llvm::StructType::get(context, { ptr, llvm::Type::getInt64Ty(context), entriesType });
 		llvm::Constant* table = llvm::ConstantStruct::get(tableType, {
-			llvm::ConstantDataArray::get(context, llvm::ArrayRef<uint8_t>(buildId.data(), buildId.size())),
+			BuildIdIn(module),
 			llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), addresses.size()),
 			llvm::ConstantArray::get(entriesType, addresses) });
 		auto* global = new llvm::GlobalVariable(module, tableType, true, llvm::GlobalValue::ExternalLinkage, table, "__c4_script_table.new");
@@ -157,5 +169,10 @@ namespace Scripting
 		}
 		global->setName(kTableSymbol);
 		return true;
+	}
+
+	void EmitBuildId(llvm::Module& module, const std::array<uint8, 16>& buildId)
+	{
+		BuildIdIn(module)->setInitializer(llvm::ConstantDataArray::get(module.getContext(), llvm::ArrayRef<uint8_t>(buildId.data(), buildId.size())));
 	}
 } // namespace Scripting

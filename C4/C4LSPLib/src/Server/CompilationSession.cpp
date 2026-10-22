@@ -80,11 +80,12 @@ namespace C4LSP::Server
 
 		m_Compiler->CompileAll();
 
-		// Semantic analysis is a single program-wide pass: it merges each unit's includes into its
-		// root AST (for navigation) and runs ONE analyzer over all units' own declarations. The LSP
-		// serves diagnostics and semantic information from that one result - the same source of truth
-		// the compiler uses - so it can never report errors the build does not produce.
+		// Semantic analysis is a single program-wide pass: ONE analyzer over all units' own declarations.
+		// The LSP serves diagnostics and semantic information from that one result - the same source of
+		// truth the compiler uses - so it can never report errors the build does not produce. Each unit's
+		// includes are spliced into its root AST for navigation.
 		m_Compiler->AnalyzeProgram();
+		m_Compiler->MergeIncludes();
 
 		// Body-level type checking: run the compiler's OWN HIR lowering over every complete body and
 		// collect its diagnostics (RunLoweringPass). Together with GetAllDiagnostics() these are exactly

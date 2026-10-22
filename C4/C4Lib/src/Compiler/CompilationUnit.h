@@ -53,9 +53,8 @@ namespace Scripting
 		/// the const GetProgramModel().
 		ProgramModel& GetProgramModelForLowering();
 
-		// Splice this unit's include closure into its root AST (nodes shared by Ref). Pure AST prep:
-		// LSP position-walks and the program-model build both need the merged tree, but no semantic
-		// state is produced here. Safe to call more than once after an edit.
+		// Splice this unit's include closure into its root AST (nodes shared by Ref). Pure AST prep for
+		// LSP position-walks; no semantic state is produced here. Safe to call more than once after an edit.
 		void MergeIncludes();
 
 	private:

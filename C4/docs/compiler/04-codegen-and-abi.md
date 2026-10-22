@@ -79,7 +79,10 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
    `[target(...)]` then gets the build's features with its own on (`ApplyFunctionTargets`, `CpuTarget::With`).
    **Debug information** (`-g`): `DebugInfo::Finish` completes the metadata (the subprograms, variables and
    globals were described as their functions and globals were emitted).
-10. **Verify.** `verifyFunction` per function (the diagnostic names the culprit), then `verifyModule`.
+10. **Verify.** `verifyModule`; on a failure `verifyFunction` per function, so the diagnostic names the culprit
+    (`Compiler/IrVerification`). A build that optimizes its partitions alone (`--incremental`) leaves the
+    module unverified here (`CodeGenDriver::VerifyLater`) and verifies each partition as it is assembled, on its
+    thread; a partition an earlier build assembled has the same bitcode and needs no second look.
 
 ## Type mapping (`ModuleContext::Lower`)
 

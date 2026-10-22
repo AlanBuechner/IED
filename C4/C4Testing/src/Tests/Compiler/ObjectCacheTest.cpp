@@ -268,6 +268,29 @@ namespace Testing
 		fs::remove_all(LongPath(DeepRoot()), ec);
 	}
 
+	// A build whose lowering left the module unverified (CodeGenDriver::VerifyLater) verifies each partition it
+	// assembles, a module kept whole too: the culprit is named, and nothing is assembled from it.
+	void ObjectCacheTest::InvalidCodeIsReportedWhenItsPartitionIsAssembled()
+	{
+		const std::string invalid = "define i32 @bad(i1 %c) {\nentry:\n br i1 %c, label %a, label %b\na:\n %x = add i32 1, 2\n"
+			" br label %b\nb:\n ret i32 %x\n}\n";
+		for (unsigned partitions : { 2u, 1u })
+		{
+			const fs::path folder = FreshFolder("invalid");
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = Parse("target triple = \"x86_64-pc-windows-msvc\"\n" + ProgramText(invalid), context);
+			TEST_ASSERT(module != nullptr);
+			const CpuTarget target;
+			const ObjectSettings settings{ 0, &target, 2, false, true };
+			std::vector<ObjectDiagnostic> diagnostics;
+			const CachedObjects objects = WriteCachedObjects(*module, settings, partitions, ObjectCache(folder, "salt"), diagnostics);
+			TEST_ASSERT(objects.paths.empty());
+			TEST_ASSERT_EQ(diagnostics.size(), size_t(1));
+			TEST_ASSERT(diagnostics.front().message.find("IR verification failed in function 'bad'") == 0);
+			fs::remove_all(folder);
+		}
+	}
+
 	void ObjectCacheTest::EveryPartitionReadsBackAndVerifies()
 	{
 		const std::vector<std::string> partitions = Split(ProgramText(""));
@@ -417,6 +440,43 @@ namespace Testing
 				TEST_ASSERT(Split(text, optimization, 3) == one);
 				TEST_ASSERT(Split(text, optimization, 8) == one);
 			}
+	}
+
+	// The reflection image is such data: an edit that changes it reassembles no code with it.
+	void ObjectCacheTest::DataNoFileNamesHasTheFirstPartitionAlone()
+	{
+		const std::vector<std::string> plain = Split(ProgramText(""));
+		TEST_ASSERT_EQ(DefinedIn(plain, "counter"), 0);
+		for (int i = 0; i < 12; ++i) TEST_ASSERT(DefinedIn(plain, "f" + std::to_string(i)) > 0);
+		TEST_ASSERT(DefinedIn(plain, "helper.local") > 0);
+		TEST_ASSERT(DefinedIn(plain, "only.local") > 0); // private data goes with its function
+		const std::vector<std::string> described = Split(DescribedProgramText(4));
+		for (int i = 0; i < 4; ++i) TEST_ASSERT(DefinedIn(described, "g" + std::to_string(i)) > 0); // a file names it
+	}
+
+	// What the split's threads extract besides the partitions (a script host's inline bodies) has the names and linkage
+	// the program gave it, whatever the threads; the partitions are what the split alone makes.
+	void ObjectCacheTest::ExtractsSeeTheProgramAsItWas()
+	{
+		for (unsigned threads : { 1u, 3u })
+		{
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = Parse(ProgramText(""), context);
+			TEST_ASSERT(module != nullptr);
+			Extracts extracts;
+			extracts.groups = { { module->getNamedGlobal("only"), module->getFunction("f0") }, { module->getFunction("helper") } };
+			extracts.finish = [](llvm::Module& group) { return ModuleBitcode(group); };
+			const SplitBitcode split = SplitModuleAndExtract(*module, kPartitions, PartitionOptimization::After, threads, extracts);
+			TEST_ASSERT(split.partitions == Split(ProgramText(""), PartitionOptimization::After, threads));
+			TEST_ASSERT_EQ(split.extracted.size(), size_t(2));
+			llvm::LLVMContext readContext;
+			std::unique_ptr<llvm::Module> first = ReadBack(split.extracted[0], readContext);
+			TEST_ASSERT(first != nullptr && first->getFunction("f0") && !first->getFunction("f0")->isDeclaration());
+			TEST_ASSERT(first->getNamedGlobal("only") != nullptr && first->getNamedGlobal("only")->hasPrivateLinkage());
+			std::unique_ptr<llvm::Module> second = ReadBack(split.extracted[1], readContext);
+			TEST_ASSERT(second != nullptr && second->getFunction("helper") && second->getFunction("helper")->hasInternalLinkage());
+			TEST_ASSERT(module->getFunction("helper.local") != nullptr); // the module itself is split afterwards
+		}
 	}
 
 	void ObjectCacheTest::AddingAFunctionLeavesTheOtherPartitionsUnchanged()
