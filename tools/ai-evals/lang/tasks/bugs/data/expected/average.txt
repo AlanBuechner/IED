@@ -1,0 +1,4 @@
+1 a 1.08
+2 b 1.09
+orders 2 total 2.17
+average 1.09

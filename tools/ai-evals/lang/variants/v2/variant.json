@@ -1,0 +1,4 @@
+{
+	"description": "v1, and the C4 docs as reference docs the AI searches and reads (docs_search, docs_read): needs a server with them (build/bin/langeval-docs)",
+	"toolchainCopies": [["docs", "ied/docs"]]
+}

@@ -1,0 +1,19 @@
+include "spans.ch"
+
+[test("spans.add.merges_touching")]
+static void AddMergesTouchingSpans() {
+	Spans::SpanSet set;
+	set.Add(1, 3);
+	set.Add(3, 5);
+	assert_eq((int64)1, set.Count(), "one span");
+	assert_eq((int64)4, set.Covered(), "four integers");
+}
+
+[test("spans.remove.splits")]
+static void RemoveSplitsASpan() {
+	Spans::SpanSet set;
+	set.Add(0, 10);
+	set.Remove(4, 6);
+	assert_eq((int64)2, set.Count(), "two spans");
+	assert_true(set.Contains(3) && !set.Contains(4) && !set.Contains(5) && set.Contains(6), "the hole");
+}

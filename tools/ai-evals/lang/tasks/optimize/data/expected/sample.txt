@@ -1,0 +1,24 @@
+requests 20000
+skipped 0
+unique_ips 5006
+bytes 901872410
+top_paths
+/api/orders/0 3069
+/api/items/1 1544
+/api/search/2 1003
+/api/users/3 723
+/api/cart/4 590
+/api/cart/5 473
+/api/users/6 419
+/api/search/7 371
+/api/search/8 347
+/api/items/9 313
+latency_2xx 33 124 217
+latency_4xx 33 128 239
+latency_5xx 34 129 210
+top_error_ips
+10.165.77.102 26
+10.24.37.211 11
+10.44.222.108 10
+10.63.114.162 10
+10.29.109.10 8

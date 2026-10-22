@@ -1,0 +1,26 @@
+include "stats.ch"
+
+[test("logstats.parse.line")]
+static void ParsesALine() {
+	LogStats::LogLine line;
+	assert_true(LogStats::ParseLine(Core::StringView("2024-05-01T00:00:00Z 10.0.0.1 GET /api/items/1 200 35 5120"), line), "parses");
+	assert_true(line.ip == "10.0.0.1" && line.path == "/api/items/1" && line.status == 200 && line.latencyMs == 35 && line.bytes == 5120, "fields");
+	assert_true(!LogStats::ParseLine(Core::StringView("2024-05-01T00:00:00Z 10.0.0.1 GET /x 200 35"), line), "six fields");
+	assert_true(!LogStats::ParseLine(Core::StringView("2024-05-01T00:00:00Z 10.0.0.1 GET /x 700 35 1"), line), "bad status");
+}
+
+[test("logstats.percentile.nearest_rank")]
+static void NearestRank() {
+	Core::Array<int64> values = { 5, 1, 4, 2, 3 };
+	assert_eq((int64)3, LogStats::Percentile(values, 50), "p50");
+	assert_eq((int64)5, LogStats::Percentile(values, 95), "p95");
+	assert_eq((int64)1, LogStats::Percentile(values, 1), "p1");
+}
+
+[test("logstats.report.small")]
+static void ReportsASmallLog() {
+	LogStats::Stats stats = LogStats::Analyze(Core::StringView("t 1.1.1.1 GET /a 200 10 100\nt 2.2.2.2 GET /b 503 50 10\nbroken\nt 1.1.1.1 GET /a 404 5 1\n"));
+	assert_eq((int64)3, stats.requests, "requests");
+	assert_eq((int64)1, stats.skipped, "skipped");
+	assert_eq((int64)2, stats.ips.Count(), "ips");
+}

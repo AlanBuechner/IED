@@ -1,0 +1,36 @@
+include "grades.ch"
+
+namespace Gradebook
+{
+	const int64 kHundredths = 100;
+	const int64[kKinds] kWeightPercent = { 30, 20, 50 };
+	const int64 kA = 9000;
+	const int64 kB = 8000;
+	const int64 kC = 7000;
+	const int64 kD = 6000;
+
+	int64 RoundedMean(int64 sum, int64 count) { return count == 0 ? 0 : (sum * 2 + count) / (2 * count); }
+
+	int64 TallyAverage(const Tally& tally) { return RoundedMean(tally.sum * kHundredths, tally.count); }
+
+	int64 WeightedAverage(const Student& student) {
+		int64 weighted = 0;
+		for (int64 kind = 0; kind < kKinds; ++kind) weighted += TallyAverage(student.tallies[kind]) * kWeightPercent[kind];
+		return (weighted + kHundredths / 2) / kHundredths;
+	}
+
+	const char* Letter(int64 averageHundredths) {
+		if (averageHundredths >= kA) return "A";
+		if (averageHundredths >= kB) return "B";
+		if (averageHundredths >= kC) return "C";
+		if (averageHundredths >= kD) return "D";
+		return "F";
+	}
+
+	void AppendTenths(Core::StringBuilder& out, int64 hundredths) {
+		const int64 tenths = (hundredths + 5) / 10;
+		out.AppendInt(tenths / 10);
+		out.Append(".");
+		out.AppendInt(tenths % 10);
+	}
+}

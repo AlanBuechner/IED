@@ -1,0 +1,71 @@
+include "bedrock.ch"
+include "range.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static int32 Usage() {
+	Platform::WriteError(Core::StringView("usage: semver compare <a> <b> | semver satisfies <version> <range> | semver sort <file>\n"));
+	return kExitUsage;
+}
+
+static int32 Fail(Core::StringView what, Core::StringView text) {
+	Platform::WriteError((Core::String("error: ") + what + " " + text + "\n").View());
+	return kExitError;
+}
+
+static int32 CompareCommand(Core::StringView first, Core::StringView second) {
+	Semver::Version a;
+	Semver::Version b;
+	if (!Semver::ParseVersion(first, a)) return Fail(Core::StringView("invalid version"), first);
+	if (!Semver::ParseVersion(second, b)) return Fail(Core::StringView("invalid version"), second);
+	Core::StringBuilder out;
+	out.AppendInt(Semver::Compare(a, b));
+	out.Append("\n");
+	Platform::WriteOutput(out.View());
+	return 0;
+}
+
+static int32 SatisfiesCommand(Core::StringView versionText, Core::StringView rangeText) {
+	Semver::Version version;
+	Semver::Range range;
+	if (!Semver::ParseVersion(versionText, version)) return Fail(Core::StringView("invalid version"), versionText);
+	if (!Semver::ParseRange(rangeText, range)) return Fail(Core::StringView("invalid range"), rangeText);
+	Platform::WriteOutput(Core::StringView(Semver::Satisfies(version, range) ? "yes\n" : "no\n"));
+	return 0;
+}
+
+static int32 SortCommand(const char* path) {
+	FS::File file = FS::File(path, "rb");
+	if (!file.IsOpen()) return Fail(Core::StringView("cannot read"), Core::StringView(path));
+	Core::String text = file.ReadText();
+	Core::Array<Semver::Version> versions;
+	Core::StringView rest = text.View();
+	while (!rest.IsEmpty()) {
+		int64 end = rest.IndexOf('\n', 0);
+		if (end < 0) end = rest.ByteLength();
+		const Core::StringView line = rest.Substring(0, end).Trimmed();
+		rest = rest.Substring(end + 1, rest.ByteLength());
+		if (line.IsEmpty()) continue;
+		Semver::Version version;
+		if (!Semver::ParseVersion(line, version)) return Fail(Core::StringView("invalid version"), line);
+		versions.Push(take(version));
+	}
+	Semver::SortVersions(versions);
+	Core::StringBuilder out;
+	for (const Semver::Version& version : versions) {
+		out.Append(version.ToString().View());
+		out.Append("\n");
+	}
+	Platform::WriteOutput(out.View());
+	return 0;
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc < 2) return Usage();
+	const Core::StringView command = Core::StringView(argv[1]);
+	if (command == "compare" && argc == 4) return CompareCommand(Core::StringView(argv[2]), Core::StringView(argv[3]));
+	if (command == "satisfies" && argc == 4) return SatisfiesCommand(Core::StringView(argv[2]), Core::StringView(argv[3]));
+	if (command == "sort" && argc == 3) return SortCommand(argv[2]);
+	return Usage();
+}

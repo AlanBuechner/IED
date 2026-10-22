@@ -1,0 +1,3 @@
+date,account,category,amount,memo
+2024-01-01,card,food,-1.00,ok
+2024-01-02,card,food,-1.0,bad

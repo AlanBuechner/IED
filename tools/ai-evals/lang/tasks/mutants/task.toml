@@ -1,0 +1,367 @@
+title = "Write thorough unit tests for a working semantic-versioning library, graded by mutation testing"
+category = "tests"
+set = "holdout"
+timeout_minutes = 45
+
+[c4]
+project = "semver"
+prompt = """
+`semver` is a small C4 program (a Nuke workspace) that implements Semantic Versioning 2.0.0: it parses versions, compares their precedence and checks versions against ranges, with a command-line tool on top (`semver compare`, `semver satisfies`, `semver sort`). README.md describes its rules. It works, but it has no tests at all.
+
+Write thorough unit tests for the library in the project's usual place for tests (`src/tests/`). Cover every rule of parsing, precedence and ranges, including the edge cases, so that a future change that breaks any of them makes a test fail. Do not change how the library behaves. Build and run the tests before you finish; they must all pass.
+"""
+
+[go]
+project = "semver"
+prompt = """
+`semver` is a small Go program (package main in this module) that implements Semantic Versioning 2.0.0: it parses versions, compares their precedence and checks versions against ranges, with a command-line tool on top (`semver compare`, `semver satisfies`, `semver sort`). README.md describes its rules. It works, but it has no tests at all.
+
+Write thorough unit tests for the library in the usual place for Go tests (`_test.go` files beside the code). Cover every rule of parsing, precedence and ranges, including the edge cases, so that a future change that breaks any of them makes a test fail. Do not change how the library behaves. Build and run the tests before you finish; they must all pass.
+"""
+
+# --- The program still behaves -------------------------------------------------------------------------------------
+
+[[checks]]
+name = "compare-numbers"
+args = ["compare", "1.2.3", "1.10.0"]
+stdout = "-1"
+
+[[checks]]
+name = "compare-prerelease-numbers"
+args = ["compare", "1.0.0-alpha.10", "1.0.0-alpha.9"]
+stdout = "1"
+
+[[checks]]
+name = "compare-release-above-prerelease"
+args = ["compare", "1.0.0", "1.0.0-rc.1"]
+stdout = "1"
+
+[[checks]]
+name = "compare-numeric-below-alphanumeric"
+args = ["compare", "1.0.0-1", "1.0.0-alpha"]
+stdout = "-1"
+
+[[checks]]
+name = "compare-build-ignored"
+args = ["compare", "1.0.0+build.1", "1.0.0+build.2"]
+stdout = "0"
+
+[[checks]]
+name = "satisfies-caret"
+args = ["satisfies", "1.9.9", "^1.2.3"]
+stdout = "yes"
+
+[[checks]]
+name = "satisfies-caret-next-major"
+args = ["satisfies", "2.0.0", "^1.2.3"]
+stdout = "no"
+
+[[checks]]
+name = "satisfies-caret-zero-major"
+args = ["satisfies", "0.3.0", "^0.2.3"]
+stdout = "no"
+
+[[checks]]
+name = "satisfies-caret-zero-minor"
+args = ["satisfies", "0.0.4", "^0.0.3"]
+stdout = "no"
+
+[[checks]]
+name = "satisfies-tilde"
+args = ["satisfies", "1.2.9", "~1.2.3"]
+stdout = "yes"
+
+[[checks]]
+name = "satisfies-tilde-next-minor"
+args = ["satisfies", "1.3.0", "~1.2.3"]
+stdout = "no"
+
+[[checks]]
+name = "satisfies-conjunction"
+args = ["satisfies", "1.5.0", ">=1.0.0 <2.0.0"]
+stdout = "yes"
+
+[[checks]]
+name = "satisfies-conjunction-below"
+args = ["satisfies", "0.5.0", ">=1.0.0 <2.0.0"]
+stdout = "no"
+
+[[checks]]
+name = "satisfies-prerelease-same-core"
+args = ["satisfies", "1.2.3-beta.2", ">=1.2.3-beta.1 <1.3.0"]
+stdout = "yes"
+
+[[checks]]
+name = "satisfies-prerelease-other-core"
+args = ["satisfies", "1.3.0-beta", ">=1.2.0"]
+stdout = "no"
+
+[[checks]]
+name = "sort"
+args = ["sort", "{data}/versions.txt"]
+stdout_file = "data/expected/sorted.txt"
+
+[[checks]]
+name = "sort-empty"
+args = ["sort", "{data}/empty.txt"]
+stdout = ""
+
+[[checks]]
+name = "sort-invalid-line"
+args = ["sort", "{data}/bad.txt"]
+exit = 1
+stderr_contains = "error: invalid version 1.02.3"
+
+[[checks]]
+name = "sort-missing-file"
+args = ["sort", "{data}/no-such.txt"]
+exit = 1
+stderr_contains = "error: cannot read"
+
+[[checks]]
+name = "invalid-version"
+args = ["compare", "1.2", "1.2.3"]
+exit = 1
+stderr_contains = "error: invalid version 1.2"
+
+[[checks]]
+name = "invalid-range"
+args = ["satisfies", "1.2.3", ">=1.2"]
+exit = 1
+stderr_contains = "error: invalid range >=1.2"
+
+[[checks]]
+name = "usage"
+args = []
+exit = 2
+stderr_contains = "usage: semver"
+
+[[checks]]
+name = "usage-missing-argument"
+args = ["compare", "1.2.3"]
+exit = 2
+stderr_contains = "usage: semver"
+
+# --- Mutants: one realistic bug each; the agent's tests must fail with it --------------------------------------------
+# The code under test is src/<file>.cf in C4 and <file>.go in Go, so each mutant names its file per language.
+
+[[mutants]]
+name = "core-leading-zero-accepted"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "IsNumeric(text) && !HasLeadingZero(text) && Core::ParseInt64(text, value)"
+c4_replace = "IsNumeric(text) && Core::ParseInt64(text, value)"
+go_find = "if !isNumeric(text) || hasLeadingZero(text) {"
+go_replace = "if !isNumeric(text) {"
+
+[[mutants]]
+name = "prerelease-leading-zero-accepted"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "return IsIdentifier(text) && !(IsNumeric(text) && HasLeadingZero(text));"
+c4_replace = "return IsIdentifier(text);"
+go_find = "return isIdentifier(text) && !(isNumeric(text) && hasLeadingZero(text))"
+go_replace = "return isIdentifier(text)"
+
+[[mutants]]
+name = "alphanumeric-leading-zero-rejected"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "!(IsNumeric(text) && HasLeadingZero(text))"
+c4_replace = "!HasLeadingZero(text)"
+go_find = "!(isNumeric(text) && hasLeadingZero(text))"
+go_replace = "!hasLeadingZero(text)"
+
+[[mutants]]
+name = "build-checked-like-prerelease"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "ParseIdentifiers(build, IsIdentifier, parsed.build)"
+c4_replace = "ParseIdentifiers(build, IsPrereleaseIdentifier, parsed.build)"
+go_find = "splitIdentifiers(build, isIdentifier)"
+go_replace = "splitIdentifiers(build, isPrereleaseIdentifier)"
+
+[[mutants]]
+name = "empty-identifier-accepted"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "if (!IsIdentifierChar(text.ByteAt(i))) return false;\n\t\treturn !text.IsEmpty();"
+c4_replace = "if (!IsIdentifierChar(text.ByteAt(i))) return false;\n\t\treturn true;"
+go_find = "if !isIdentifierChar(text[i]) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn text != \"\""
+go_replace = "if !isIdentifierChar(text[i]) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true"
+
+[[mutants]]
+name = "letters-between-Z-and-a-accepted"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+find = "(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')"
+replace = "(c >= 'A' && c <= 'z')"
+
+[[mutants]]
+name = "hyphen-rejected"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+find = " || c == '-'"
+replace = ""
+
+[[mutants]]
+name = "extra-core-part-ignored"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "parts.Count() == 3"
+c4_replace = "parts.Count() >= 3"
+go_find = "len(parts) != 3"
+go_replace = "len(parts) < 3"
+
+[[mutants]]
+name = "patch-not-compared"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "\t\tif (order == 0) order = CompareNumbers(a.patch, b.patch);\n"
+c4_replace = ""
+go_find = "\t\tcmp.Compare(a.Patch, b.Patch),\n"
+go_replace = ""
+
+[[mutants]]
+name = "minor-difference-not-sign"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "CompareNumbers(a.minor, b.minor)"
+c4_replace = "(int32)(a.minor - b.minor)"
+go_find = "cmp.Compare(a.Minor, b.Minor)"
+go_replace = "int(a.Minor - b.Minor)"
+
+[[mutants]]
+name = "prerelease-above-release"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "CompareNumbers(b.Count(), a.Count())"
+c4_replace = "CompareNumbers(a.Count(), b.Count())"
+go_find = "cmp.Compare(len(b), len(a))"
+go_replace = "cmp.Compare(len(a), len(b))"
+
+[[mutants]]
+name = "longer-prerelease-lower"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "return CompareNumbers(a.Count(), b.Count());"
+c4_replace = "return CompareNumbers(b.Count(), a.Count());"
+go_find = "return cmp.Compare(len(a), len(b))"
+go_replace = "return cmp.Compare(len(b), len(a))"
+
+[[mutants]]
+name = "numeric-above-alphanumeric"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "if (aNumeric) return -1;\n\t\tif (bNumeric) return 1;"
+c4_replace = "if (aNumeric) return 1;\n\t\tif (bNumeric) return -1;"
+go_find = "case aNumeric:\n\t\treturn -1\n\tcase bNumeric:\n\t\treturn 1"
+go_replace = "case aNumeric:\n\t\treturn 1\n\tcase bNumeric:\n\t\treturn -1"
+
+[[mutants]]
+name = "numeric-identifiers-as-text"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "if (aNumeric && bNumeric) return CompareNumeric(a, b);"
+c4_replace = "if (aNumeric && bNumeric) return CompareText(a, b);"
+go_find = "return compareNumeric(a, b)"
+go_replace = "return strings.Compare(a, b)"
+
+[[mutants]]
+name = "format-drops-build"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "\t\tAppendIdentifiers(out, \"+\", build);\n"
+c4_replace = ""
+go_find = "\tif len(v.Build) > 0 {\n\t\tb.WriteString(\"+\" + strings.Join(v.Build, \".\"))\n\t}\n"
+go_replace = ""
+
+[[mutants]]
+name = "sort-descending"
+c4_file = "src/semver.cf"
+go_file = "semver.go"
+c4_find = "Compare(versions[a], versions[b])"
+c4_replace = "Compare(versions[b], versions[a])"
+go_find = "slices.SortStableFunc(versions, Compare)"
+go_replace = "slices.SortStableFunc(versions, func(a, b Version) int { return Compare(b, a) })"
+
+[[mutants]]
+name = "greater-inclusive"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "case Operator::Greater: return order > 0;"
+c4_replace = "case Operator::Greater: return order >= 0;"
+go_find = "return order > 0"
+go_replace = "return order >= 0"
+
+[[mutants]]
+name = "less-or-equal-exclusive"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "case Operator::LessOrEqual: return order <= 0;"
+c4_replace = "case Operator::LessOrEqual: return order < 0;"
+go_find = "return order <= 0"
+go_replace = "return order < 0"
+
+[[mutants]]
+name = "caret-zero-major-like-one"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "if (version.major > 0)"
+c4_replace = "if (version.major >= 0)"
+go_find = "case v.Major > 0:"
+go_replace = "case v.Major >= 0:"
+
+[[mutants]]
+name = "caret-zero-minor-like-minor"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "else if (version.minor > 0)"
+c4_replace = "else if (version.minor >= 0)"
+go_find = "case v.Minor > 0:"
+go_replace = "case v.Minor >= 0:"
+
+[[mutants]]
+name = "tilde-like-caret"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "limit.major = version.major;\n\t\tlimit.minor = version.minor + 1;"
+c4_replace = "limit.major = version.major + 1;"
+go_find = "return Version{Major: v.Major, Minor: v.Minor + 1}"
+go_replace = "return Version{Major: v.Major + 1}"
+
+[[mutants]]
+name = "last-comparator-wins"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "parsed.comparators.Append(comparators);"
+c4_replace = "parsed.comparators = comparators;"
+go_find = "r = append(r, comparators...)"
+go_replace = "r = comparators"
+
+[[mutants]]
+name = "empty-range-accepted"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "\t\tif (parsed.comparators.IsEmpty()) return false;\n"
+c4_replace = ""
+go_find = "\tif len(r) == 0 {\n\t\treturn nil, invalidRange(text)\n\t}\n"
+go_replace = ""
+
+[[mutants]]
+name = "prerelease-rule-dropped"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "return version.prerelease.IsEmpty() || AllowsPrerelease(range, version);"
+c4_replace = "return true;"
+go_find = "return len(v.Prerelease) == 0 || r.allowsPrerelease(v)"
+go_replace = "return true"
+
+[[mutants]]
+name = "prerelease-rule-any-core"
+c4_file = "src/range.cf"
+go_file = "range.go"
+c4_find = "!comparator.version.prerelease.IsEmpty() && SameCore(comparator.version, version)"
+c4_replace = "!comparator.version.prerelease.IsEmpty()"
+go_find = "len(c.Version.Prerelease) > 0 && sameCore(c.Version, v)"
+go_replace = "len(c.Version.Prerelease) > 0"

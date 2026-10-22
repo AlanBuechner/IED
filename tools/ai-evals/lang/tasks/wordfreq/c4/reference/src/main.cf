@@ -1,0 +1,26 @@
+include "bedrock.ch"
+include "wordcount.ch"
+
+const int64 kDefaultLimit = 10;
+const int32 kExitCannotRead = 1;
+const int32 kExitUsage = 2;
+
+static int32 Usage() {
+	Platform::WriteError(Core::StringView("usage: wordfreq <file> [N]\n"));
+	return kExitUsage;
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc < 2 || argc > 3) return Usage();
+	int64 limit = kDefaultLimit;
+	if (argc == 3 && (!Core::ParseInt64(Core::StringView(argv[2]), limit) || limit < 0)) return Usage();
+	FS::File file = FS::File(argv[1], "rb");
+	if (!file.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + argv[1] + "\n").View());
+		return kExitCannotRead;
+	}
+	Core::String text = file.ReadText();
+	Core::String report = WordFreq::Render(WordFreq::TopWords(WordFreq::CountWords(text.View()), limit));
+	Platform::WriteOutput(report.View());
+	return 0;
+}

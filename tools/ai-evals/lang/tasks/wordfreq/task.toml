@@ -1,0 +1,89 @@
+title = "Word frequency command-line tool, from an empty project"
+category = "scratch"
+set = "tune"
+timeout_minutes = 45
+
+[c4]
+project = "wordfreq"
+prompt = """
+This workspace is a new, empty C4 program, `wordfreq` (a Nuke workspace: `nuke.toml`, entry point `src/main.cf`). Write the program:
+
+`wordfreq <file> [N]` reads the file and prints its N most frequent words (N defaults to 10), one per line as `<word> <count>`.
+- A word is a maximal run of ASCII letters (a-z, A-Z); every other byte separates words. Words are compared case-insensitively and printed in lowercase.
+- Order: higher count first; equal counts by word, in ascending byte order.
+- Fewer than N distinct words: print them all. N = 0 prints nothing.
+- No file argument, or an N that is not a non-negative integer: print `usage: wordfreq <file> [N]` to standard error and exit with code 2.
+- A file that cannot be read: print `error: cannot read <file>` to standard error and exit with code 1.
+- It must stay fast and lean on large inputs (hundreds of megabytes).
+
+Keep the counting and ranking in their own functions, apart from main, with unit tests. Build and test it before you finish.
+"""
+
+[go]
+project = "wordfreq"
+prompt = """
+This workspace is a new, empty Go module, `wordfreq` (`go.mod`). Write the program, package main in this folder:
+
+`wordfreq <file> [N]` reads the file and prints its N most frequent words (N defaults to 10), one per line as `<word> <count>`.
+- A word is a maximal run of ASCII letters (a-z, A-Z); every other byte separates words. Words are compared case-insensitively and printed in lowercase.
+- Order: higher count first; equal counts by word, in ascending byte order.
+- Fewer than N distinct words: print them all. N = 0 prints nothing.
+- No file argument, or an N that is not a non-negative integer: print `usage: wordfreq <file> [N]` to standard error and exit with code 2.
+- A file that cannot be read: print `error: cannot read <file>` to standard error and exit with code 1.
+- It must stay fast and lean on large inputs (hundreds of megabytes).
+
+Keep the counting and ranking in their own functions, apart from main, with unit tests. Build and test it before you finish.
+"""
+
+[[checks]]
+name = "top5"
+args = ["{data}/sample1.txt", "5"]
+stdout_file = "data/sample1.top5"
+
+[[checks]]
+name = "default-n-and-ties"
+args = ["{data}/ties.txt"]
+stdout_file = "data/ties.top10"
+
+[[checks]]
+name = "separators"
+args = ["{data}/separators.txt", "100"]
+stdout_file = "data/separators.all"
+
+[[checks]]
+name = "n-zero"
+args = ["{data}/sample1.txt", "0"]
+stdout = ""
+
+[[checks]]
+name = "empty-file"
+args = ["{data}/empty.txt"]
+stdout = ""
+
+[[checks]]
+name = "missing-file"
+args = ["{data}/no-such-file.txt"]
+exit = 1
+stderr_contains = "error: cannot read"
+
+[[checks]]
+name = "no-arguments"
+args = []
+exit = 2
+stderr_contains = "usage: wordfreq <file> [N]"
+
+[[checks]]
+name = "bad-n"
+args = ["{data}/sample1.txt", "-3"]
+exit = 2
+stderr_contains = "usage: wordfreq <file> [N]"
+
+[bench]
+generate = "data/gen.py"
+args = ["{bench}/input.txt", "25"]
+runs = 3
+
+[idioms.c4]
+good = [["Core::HashMap", "a hash map for the counts"], ["SortBy|Core::Sort", "Bedrock sorting"]]
+[idioms.go]
+good = [["map\\[string\\]int", "a map for the counts"], ["sort\\.|slices\\.Sort", "library sorting"]]

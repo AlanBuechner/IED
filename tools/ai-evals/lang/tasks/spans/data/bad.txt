@@ -1,0 +1,4 @@
+add 1 5
+count
+add x 5
+count

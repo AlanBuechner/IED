@@ -1,0 +1,95 @@
+include "stats.ch"
+
+namespace LogStats
+{
+	const int64 kTopPaths = 10;
+	const int64 kTopErrorIps = 5;
+	const int64 kServerError = 500;
+	const int64 kClientError = 400;
+	const int64 kRedirect = 300;
+	const int64 kSuccess = 200;
+
+	static void CountIp(Stats& stats, const Core::String& ip) {
+		for (const Core::String& seen : stats.ips)
+			if (seen == ip) return;
+		stats.ips.Push(ip);
+	}
+
+	static void CountPath(Stats& stats, const Core::String& path) {
+		for (PathCount& entry : stats.paths)
+			if (entry.path == path) {
+				entry.count += 1;
+				return;
+			}
+		stats.paths.Push(PathCount{ path, 1 });
+	}
+
+	static void CountServerError(Stats& stats, const Core::String& ip) {
+		for (IpCount& entry : stats.serverErrors)
+			if (entry.ip == ip) {
+				entry.count += 1;
+				return;
+			}
+		stats.serverErrors.Push(IpCount{ ip, 1 });
+	}
+
+	void AddLine(Stats& stats, const LogLine& line) {
+		stats.requests += 1;
+		stats.bytes += line.bytes;
+		CountIp(stats, line.ip);
+		CountPath(stats, line.path);
+		if (line.status >= kSuccess && line.status < kRedirect) stats.latencies2xx.Push(line.latencyMs);
+		if (line.status >= kClientError && line.status < kServerError) stats.latencies4xx.Push(line.latencyMs);
+		if (line.status >= kServerError) {
+			stats.latencies5xx.Push(line.latencyMs);
+			CountServerError(stats, line.ip);
+		}
+	}
+
+	Stats Analyze(Core::StringView log) {
+		Stats stats;
+		for (const Core::String& text : Split(log, '\n')) {
+			Core::StringView row = text.View();
+			if (row.EndsWith(Core::StringView("\r"))) row = row.Substring(0, row.ByteLength() - 1);
+			if (row.IsEmpty()) continue;
+			LogLine line;
+			if (ParseLine(row, line)) AddLine(stats, line);
+			else stats.skipped += 1;
+		}
+		return stats;
+	}
+
+	int64 Percentile(const Core::Array<int64>& values, int64 percent) {
+		Core::Array<int64> sorted = values;
+		sorted.Sort();
+		int64 rank = (percent * sorted.Count() + 99) / 100;
+		if (rank < 1) rank = 1;
+		return sorted[rank - 1];
+	}
+
+	static void AppendLatency(Core::StringBuilder& out, const char* name, const Core::Array<int64>& values) {
+		out.Append("latency_");
+		out.Append(name);
+		if (values.IsEmpty()) {
+			out.Append(" none\n");
+			return;
+		}
+		Core::Format(&out, " {0:D} {1:D} {2:D}\n", Percentile(values, 50), Percentile(values, 95), Percentile(values, 99));
+	}
+
+	Core::String Report(const Stats& stats) {
+		Core::StringBuilder out;
+		Core::Format(&out, "requests {0:D}\nskipped {1:D}\nunique_ips {2:D}\nbytes {3:D}\ntop_paths\n", stats.requests, stats.skipped, stats.ips.Count(), stats.bytes);
+		Core::Array<PathCount> paths = stats.paths;
+		paths.SortBy([](const PathCount& a, const PathCount& b) -> bool { return a.count != b.count ? a.count > b.count : a.path < b.path; });
+		for (int64 i = 0; i < paths.Count() && i < kTopPaths; ++i) Core::Format(&out, "{0:s} {1:D}\n", paths[i].path.CStr(), paths[i].count);
+		AppendLatency(out, "2xx", stats.latencies2xx);
+		AppendLatency(out, "4xx", stats.latencies4xx);
+		AppendLatency(out, "5xx", stats.latencies5xx);
+		out.Append("top_error_ips\n");
+		Core::Array<IpCount> errors = stats.serverErrors;
+		errors.SortBy([](const IpCount& a, const IpCount& b) -> bool { return a.count != b.count ? a.count > b.count : a.ip < b.ip; });
+		for (int64 i = 0; i < errors.Count() && i < kTopErrorIps; ++i) Core::Format(&out, "{0:s} {1:D}\n", errors[i].ip.CStr(), errors[i].count);
+		return out.ToString();
+	}
+}

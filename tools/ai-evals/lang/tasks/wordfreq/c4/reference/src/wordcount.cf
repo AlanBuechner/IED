@@ -1,0 +1,58 @@
+include "wordcount.ch"
+
+namespace WordFreq
+{
+	static bool IsLetter(uint8 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+	static int32 Lowered(uint8 c) { return c >= 'A' && c <= 'Z' ? (int32)c + 32 : (int32)c; }
+
+	static void Count(Core::HashMap<Core::String, int64>& counts, Core::StringView word) {
+		int64* found = counts.FindAs(word);
+		if (found) {
+			*found += 1;
+			return;
+		}
+		counts.Insert(Core::String(word), 1);
+	}
+
+	Core::HashMap<Core::String, int64> CountWords(Core::StringView text) {
+		Core::HashMap<Core::String, int64> counts;
+		Core::StringBuilder word;
+		const char* bytes = text.Data();
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			uint8 c = (uint8)bytes[i];
+			if (IsLetter(c)) {
+				word.AppendByte(Lowered(c));
+				continue;
+			}
+			if (!word.IsEmpty()) {
+				Count(counts, word.View());
+				word.Clear();
+			}
+		}
+		if (!word.IsEmpty()) Count(counts, word.View());
+		return counts;
+	}
+
+	static bool Before(const WordCount& a, const WordCount& b) {
+		return a.count != b.count ? a.count > b.count : a.word < b.word;
+	}
+
+	Core::Array<WordCount> TopWords(const Core::HashMap<Core::String, int64>& counts, int64 limit) {
+		Core::Array<WordCount> ranked = Core::Array<WordCount>(counts.Count());
+		for (const Core::KeyValue<Core::String, int64>& entry : counts) ranked.Push(WordCount{ entry.key, entry.value });
+		ranked.SortBy(Before);
+		if (ranked.Count() > limit) ranked.Resize(limit);
+		return ranked;
+	}
+
+	Core::String Render(const Core::Array<WordCount>& ranked) {
+		Core::StringBuilder out;
+		for (const WordCount& each : ranked) {
+			out.Append(each.word.View());
+			out.Append(" ");
+			out.AppendInt(each.count);
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+}

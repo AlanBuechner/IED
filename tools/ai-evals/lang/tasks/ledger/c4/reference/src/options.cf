@@ -1,0 +1,31 @@
+include "options.ch"
+
+namespace Ledger
+{
+	const int64 kMonthLength = 7;
+	const int32 kMonthsInYear = 12;
+
+	bool ParseOptions(int32 argc, char** argv, Options& options) {
+		if (argc < 3) return false;
+		options.file = Core::String(argv[1]);
+		options.command = Core::String(argv[2]);
+		for (int32 i = 3; i < argc; i += 2) {
+			if (i + 1 >= argc) return false;
+			Core::StringView name = Core::StringView(argv[i]);
+			if (name == "--account") options.account = Core::String(argv[i + 1]);
+			else if (name == "--month") options.month = Core::String(argv[i + 1]);
+			else return false;
+		}
+		return true;
+	}
+
+	static bool IsDigit(int32 c) { return c >= '0' && c <= '9'; }
+
+	bool IsMonth(Core::StringView text) {
+		if (text.ByteLength() != kMonthLength || text.ByteAt(4) != '-') return false;
+		for (int64 i = 0; i < kMonthLength; ++i)
+			if (i != 4 && !IsDigit(text.ByteAt(i))) return false;
+		const int32 month = (text.ByteAt(5) - '0') * 10 + (text.ByteAt(6) - '0');
+		return month >= 1 && month <= kMonthsInYear;
+	}
+}

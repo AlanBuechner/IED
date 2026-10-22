@@ -1,0 +1,16 @@
+include "options.ch"
+
+namespace Ledger
+{
+	bool ParseOptions(int32 argc, char** argv, Options& options) {
+		if (argc < 3) return false;
+		options.file = Core::String(argv[1]);
+		options.command = Core::String(argv[2]);
+		for (int32 i = 3; i < argc; i += 2) {
+			if (i + 1 >= argc) return false;
+			if (Core::StringView(argv[i]) == "--account") options.account = Core::String(argv[i + 1]);
+			else return false;
+		}
+		return true;
+	}
+}

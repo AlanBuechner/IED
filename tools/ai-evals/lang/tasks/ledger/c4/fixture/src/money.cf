@@ -1,0 +1,42 @@
+include "money.ch"
+
+namespace Ledger
+{
+	const int64 kCentsPerUnit = 100;
+
+	static bool ParseDigits(Core::StringView text, int64& value) {
+		if (text.IsEmpty()) return false;
+		value = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c < '0' || c > '9') return false;
+			value = value * 10 + (c - '0');
+		}
+		return true;
+	}
+
+	bool ParseCents(Core::StringView text, int64& cents) {
+		const bool negative = text.StartsWith(Core::StringView("-"));
+		Core::StringView rest = negative ? text.Substring(1, text.ByteLength() - 1) : text;
+		const int64 dot = rest.IndexOf('.', 0);
+		int64 units = 0;
+		int64 fraction = 0;
+		if (dot < 0) {
+			if (!ParseDigits(rest, units)) return false;
+		} else {
+			Core::StringView decimals = rest.Substring(dot + 1, rest.ByteLength() - dot - 1);
+			if (!ParseDigits(rest.Substring(0, dot), units) || decimals.ByteLength() != 2 || !ParseDigits(decimals, fraction)) return false;
+		}
+		cents = units * kCentsPerUnit + fraction;
+		if (negative) cents = -cents;
+		return true;
+	}
+
+	void AppendMoney(Core::StringBuilder& out, int64 cents) {
+		if (cents < 0) out.Append("-");
+		const int64 magnitude = cents < 0 ? -cents : cents;
+		out.AppendInt(magnitude / kCentsPerUnit);
+		out.Append(".");
+		out.AppendIntBase(magnitude % kCentsPerUnit, 10, 2);
+	}
+}

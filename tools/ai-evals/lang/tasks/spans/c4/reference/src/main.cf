@@ -1,0 +1,47 @@
+include "bedrock.ch"
+include "commands.ch"
+
+const int32 kExitBadLine = 1;
+const int32 kExitNoCommands = 2;
+const int64 kFlushBytes = 1 << 16;
+
+static int32 BadLine(int64 number) {
+	Core::StringBuilder message;
+	Core::Format(&message, "error: line {0:D}\n", number);
+	Platform::WriteError(message.View());
+	return kExitBadLine;
+}
+
+static int32 Run(Core::StringView commands) {
+	Spans::SpanSet set;
+	Core::StringBuilder out;
+	Core::StringView rest = commands;
+	int64 number = 0;
+	while (!rest.IsEmpty()) {
+		int64 end = rest.IndexOf('\n', 0);
+		if (end < 0) end = rest.ByteLength();
+		Core::StringView line = rest.Substring(0, end);
+		rest = rest.Substring(end + 1, rest.ByteLength());
+		++number;
+		if (!Spans::RunCommand(set, line, out)) {
+			Platform::WriteOutput(out.View());
+			return BadLine(number);
+		}
+		if (out.ByteLength() > kFlushBytes) {
+			Platform::WriteOutput(out.View());
+			out.Clear();
+		}
+	}
+	Platform::WriteOutput(out.View());
+	return 0;
+}
+
+int32 main(int32 argc, char** argv) {
+	FS::File file = argc == 2 ? FS::File(argv[1], "rb") : FS::File();
+	if (!file.IsOpen()) {
+		Platform::WriteError(Core::StringView("error: cannot read commands\n"));
+		return kExitNoCommands;
+	}
+	Core::String commands = file.ReadText();
+	return Run(commands.View());
+}

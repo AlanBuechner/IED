@@ -1,0 +1,16 @@
+include "transaction.ch"
+
+[test("ledger.transaction.parse")]
+static void ParsesALine() {
+	Ledger::Transaction row;
+	Core::String why;
+	assert_true(Ledger::ParseTransaction(Core::StringView("2024-03-05,checking,groceries,-45.20,Weekly shop"), row, why), "parses");
+	assert_true(row.account == "checking" && row.category == "groceries" && row.cents == -4520 && row.memo == "Weekly shop", "fields");
+	assert_true(!Ledger::ParseTransaction(Core::StringView("2024-03-05,checking,-45.20"), row, why), "too few fields");
+}
+
+[test("ledger.transaction.error_line")]
+static void ReportsTheBadLine() {
+	Ledger::LoadResult result = Ledger::ParseLedger(Core::StringView("date,account,category,amount,memo\n2024-01-01,a,b,1.00,x\n2024-13,a,b,1.00,x\n"));
+	assert_true(result.error == "line 3: bad date", "line 3");
+}

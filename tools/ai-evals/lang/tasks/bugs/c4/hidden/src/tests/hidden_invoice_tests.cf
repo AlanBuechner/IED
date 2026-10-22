@@ -1,0 +1,55 @@
+include "pricing.ch"
+include "orders.ch"
+
+static Invoice::OrderLine HiddenLine(Invoice::Tier tier, int64 quantity, int64 unitCents) {
+	Invoice::OrderLine line;
+	line.order = Core::String("9");
+	line.customer = Core::String("h");
+	line.tier = tier;
+	line.sku = Core::String("s");
+	line.quantity = quantity;
+	line.unitCents = unitCents;
+	return line;
+}
+
+[test("hidden.invoice.percent_half_up")]
+static void HiddenPercentHalfUp() {
+	assert_eq((int64)81, Invoice::PercentOf(1007, 8), "80.56");
+	assert_eq((int64)80, Invoice::PercentOf(1006, 8), "80.48");
+	assert_eq((int64)1, Invoice::PercentOf(10, 5), "0.5 rounds up");
+	assert_eq((int64)0, Invoice::PercentOf(9, 5), "0.45 rounds down");
+}
+
+[test("hidden.invoice.bulk_threshold")]
+static void HiddenBulkThreshold() {
+	assert_eq((int64)900, Invoice::LineCents(9, 100), "nine");
+	assert_eq((int64)900, Invoice::LineCents(10, 100), "ten");
+	assert_eq((int64)990, Invoice::LineCents(11, 100), "eleven");
+}
+
+[test("hidden.invoice.gold_on_subtotal")]
+static void HiddenGoldOnSubtotal() {
+	Core::Array<Invoice::OrderLine> lines;
+	lines.Push(HiddenLine(Invoice::Tier::Gold, 20, 100));
+	lines.Push(HiddenLine(Invoice::Tier::Gold, 12, 40));
+	Invoice::Totals totals = Invoice::PriceOrder(lines);
+	assert_eq((int64)2232, totals.subtotal, "subtotal");
+	assert_eq((int64)112, totals.goldDiscount, "gold");
+	assert_eq((int64)170, totals.tax, "tax");
+	assert_eq((int64)2290, totals.total, "total");
+}
+
+[test("hidden.invoice.standard_no_gold")]
+static void HiddenStandardNoGold() {
+	Core::Array<Invoice::OrderLine> lines;
+	lines.Push(HiddenLine(Invoice::Tier::Standard, 1, 1007));
+	Invoice::Totals totals = Invoice::PriceOrder(lines);
+	assert_eq((int64)0, totals.goldDiscount, "no gold");
+	assert_eq((int64)1088, totals.total, "total");
+}
+
+[test("hidden.invoice.empty_report")]
+static void HiddenEmptyReport() {
+	Core::Array<Invoice::Order> none;
+	assert_true(Invoice::Report(none) == "orders 0 total 0.00\naverage 0.00\n", "no orders");
+}

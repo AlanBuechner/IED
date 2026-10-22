@@ -1,0 +1,15 @@
+date,account,category,amount,memo
+2024-01-02,checking,salary,3200.00,January pay
+2024-01-03,checking,rent,-1200.00,Rent
+2024-01-05,card,groceries,-82.45,Market
+2024-01-09,card,dining,-34.10,Pizza night
+2024-01-15,savings,transfer,500.00,Monthly saving
+2024-01-15,checking,transfer,-500.00,Monthly saving
+2024-01-20,card,groceries,-61.30,Market
+2024-02-01,checking,salary,3200.00,February pay
+2024-02-03,checking,rent,-1200.00,Rent
+2024-02-07,card,groceries,-75.00,Market
+2024-02-11,card,fuel,-48.25,Gas station
+2024-02-14,card,dining,-96.80,Dinner out
+2024-02-20,checking,utilities,-130.15,Power and water
+2024-03-01,checking,salary,3200.00,March pay

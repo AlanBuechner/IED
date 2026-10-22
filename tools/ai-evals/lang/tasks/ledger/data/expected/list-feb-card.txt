@@ -1,0 +1,3 @@
+2024-02-07 card groceries -75.00 Market
+2024-02-11 card fuel -48.25 Gas station
+2024-02-14 card dining -96.80 Dinner out

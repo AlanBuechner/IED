@@ -1,0 +1,8 @@
+[workspace]
+name = "logstats"
+toolchain = "dev"
+default-project = "logstats"
+
+[project]
+name = "logstats"
+kind = "executable"

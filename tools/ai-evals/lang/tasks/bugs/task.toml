@@ -1,0 +1,66 @@
+title = "Find and fix reported bugs in an existing program"
+category = "debug"
+set = "tune"
+timeout_minutes = 45
+
+[c4]
+project = "invoice"
+prompt = """
+Users report problems with `invoice`, a small C4 program (a Nuke workspace) that totals orders from a CSV file. README.md has its pricing rules; `data/orders.csv` is an example.
+
+- An order of exactly 10 of an item does not get the bulk discount.
+- Gold customers who order in bulk pay less than they should.
+- Some totals are off by a cent.
+- It crashes on a file that has no orders.
+
+Find and fix the causes, add a regression test for each, and build and test before you finish.
+"""
+
+[go]
+project = "invoice"
+prompt = """
+Users report problems with `invoice`, a small Go program (package main in this module) that totals orders from a CSV file. README.md has its pricing rules; `data/orders.csv` is an example.
+
+- An order of exactly 10 of an item does not get the bulk discount.
+- Gold customers who order in bulk pay less than they should.
+- Some totals are off by a cent.
+- It crashes on a file that has no orders.
+
+Find and fix the causes, add a regression test for each, and build and test before you finish.
+"""
+
+[[checks]]
+name = "example"
+args = ["{data}/orders.csv"]
+stdout_file = "data/expected/orders.txt"
+
+[[checks]]
+name = "bulk-at-ten"
+args = ["{data}/bulk10.csv"]
+stdout_file = "data/expected/bulk10.txt"
+
+[[checks]]
+name = "gold-bulk"
+args = ["{data}/goldbulk.csv"]
+stdout_file = "data/expected/goldbulk.txt"
+
+[[checks]]
+name = "cents"
+args = ["{data}/cents.csv"]
+stdout_file = "data/expected/cents.txt"
+
+[[checks]]
+name = "no-orders"
+args = ["{data}/empty.csv"]
+stdout_file = "data/expected/empty.txt"
+
+[[checks]]
+name = "average-unchanged"
+args = ["{data}/average.csv"]
+stdout_file = "data/expected/average.txt"
+
+[[checks]]
+name = "missing-file-unchanged"
+args = ["{data}/no-such.csv"]
+exit = 1
+stderr_contains = "error: cannot read"

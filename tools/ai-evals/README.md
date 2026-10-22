@@ -3,6 +3,12 @@
 Checks with the fake model (`tools/server-checks`) prove the tools work; these runs show whether a real model chooses
 them and uses them well, so prompts, tool descriptions and error messages can be tuned from what it actually does.
 
+## lang/ - whole tasks in a language
+
+`lang/run.py` gives a model whole programming tasks in IED's Agent mode - from-scratch programs, features, bugs,
+refactors, optimizations, long ports, tests - in C4 and, to compare, in Go, and measures tokens, time, tool calls,
+the result's quality (hidden tests, program checks, mutants) and its runtime (time and memory): `lang/README.md`.
+
 ## codenav_eval.py - navigating code (`docs/13` "Navigating code")
 
 Eight questions about the IED server's own sources (which function picks a document's language server, a class's

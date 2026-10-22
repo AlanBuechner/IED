@@ -1,0 +1,22 @@
+include "wordcount.ch"
+
+[test("wordfreq.count.case_and_separators")]
+static void CountsFoldCaseAndSplitOnNonLetters() {
+	Core::HashMap<Core::String, int64> counts = WordFreq::CountWords(Core::StringView("Dog dog, DOG9cat"));
+	assert_eq((int64)2, counts.Count(), "distinct words");
+	assert_eq((int64)3, counts.Get(Core::String("dog")), "dog");
+	assert_eq((int64)1, counts.Get(Core::String("cat")), "cat");
+}
+
+[test("wordfreq.rank.ties_by_word")]
+static void RanksByCountThenWord() {
+	Core::Array<WordFreq::WordCount> ranked = WordFreq::TopWords(WordFreq::CountWords(Core::StringView("b a c b a")), 2);
+	assert_eq((int64)2, ranked.Count(), "limit");
+	assert_true(ranked[0].word == "a", "a first");
+	assert_true(ranked[1].word == "b", "b second");
+}
+
+[test("wordfreq.rank.empty")]
+static void EmptyTextRanksNothing() {
+	assert_eq((int64)0, WordFreq::TopWords(WordFreq::CountWords(Core::StringView("")), 10).Count(), "nothing");
+}

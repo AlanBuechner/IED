@@ -1,0 +1,137 @@
+title = "A span set library with a given interface, and a command-line driver, from an empty project"
+category = "scratch-library"
+set = "tune"
+timeout_minutes = 45
+
+[c4]
+project = "spans"
+prompt = """
+This workspace is a new, empty C4 program, `spans` (a Nuke workspace: `nuke.toml`, entry point `src/main.cf`).
+
+1. Write a span set: a set of int64 integers kept as disjoint, half-open spans [start, end). Put it in `src/spans.ch` and `src/spans.cf` with exactly this interface (add the private fields you need):
+
+```
+include "bedrock.ch"
+
+namespace Spans
+{
+	struct Span
+	{
+		public int64 start;   // inclusive
+		public int64 end;     // exclusive
+	}
+
+	class SpanSet
+	{
+		// Adds every integer of [start, end); a range with end <= start does nothing.
+		public void Add(int64 start, int64 end);
+		// Removes every integer of [start, end); a range with end <= start does nothing.
+		public void Remove(int64 start, int64 end);
+		public bool Contains(int64 point) const;
+		// How many disjoint spans the set is: spans that touch or overlap are one ([1,3) and [3,5) are [1,5)).
+		public int64 Count() const;
+		// How many integers the set holds.
+		public int64 Covered() const;
+		// The spans, in ascending order.
+		public Core::Array<Span> All() const;
+	}
+}
+```
+
+A new SpanSet is empty. Contains must take O(log n) time; Add and Remove must not rebuild the whole set on every call - the set will hold hundreds of thousands of spans.
+
+2. Make the program run the commands of a file, `spans <file>`, one command per line, answering as it goes:
+- `add A B` and `remove A B`: change the set, print nothing.
+- `contains X`: print `yes` or `no`.
+- `count` and `covered`: print the number.
+- `list`: print the spans on one line as `[a,b)` separated by single spaces (an empty line for an empty set).
+- Blank lines are skipped. A missing argument or a file that cannot be read: print `error: cannot read commands` to standard error and exit with code 2. Any other line (an unknown command, a missing or extra word, a number that does not parse): print `error: line N` (N counting from 1) to standard error and exit with code 1.
+
+Write unit tests for SpanSet, then build and test before you finish.
+"""
+
+[go]
+project = "spans"
+prompt = """
+This workspace is a new, empty Go module, `spans` (`go.mod`); the program is package main in this folder.
+
+1. Write a span set: a set of int64 integers kept as disjoint, half-open spans [start, end), in `spans.go` with exactly this interface (add the unexported fields you need):
+
+```go
+// Span is the half-open range [Start, End).
+type Span struct {
+	Start int64 // inclusive
+	End   int64 // exclusive
+}
+
+// SpanSet is a set of integers as disjoint spans; its zero value is an empty set.
+type SpanSet struct { /* your fields */ }
+
+// Add adds every integer of [start, end); a range with end <= start does nothing.
+func (s *SpanSet) Add(start, end int64)
+// Remove removes every integer of [start, end); a range with end <= start does nothing.
+func (s *SpanSet) Remove(start, end int64)
+func (s *SpanSet) Contains(point int64) bool
+// Count is how many disjoint spans the set is: spans that touch or overlap are one ([1,3) and [3,5) are [1,5)).
+func (s *SpanSet) Count() int
+// Covered is how many integers the set holds.
+func (s *SpanSet) Covered() int64
+// All returns the spans in ascending order.
+func (s *SpanSet) All() []Span
+```
+
+Contains must take O(log n) time; Add and Remove must not rebuild the whole set on every call - the set will hold hundreds of thousands of spans.
+
+2. Make the program run the commands of a file, `spans <file>`, one command per line, answering as it goes:
+- `add A B` and `remove A B`: change the set, print nothing.
+- `contains X`: print `yes` or `no`.
+- `count` and `covered`: print the number.
+- `list`: print the spans on one line as `[a,b)` separated by single spaces (an empty line for an empty set).
+- Blank lines are skipped. A missing argument or a file that cannot be read: print `error: cannot read commands` to standard error and exit with code 2. Any other line (an unknown command, a missing or extra word, a number that does not parse): print `error: line N` (N counting from 1) to standard error and exit with code 1.
+
+Write unit tests for SpanSet, then build and test before you finish.
+"""
+
+[[checks]]
+name = "basic"
+args = ["{data}/basic.txt"]
+stdout_file = "data/basic.expected"
+
+[[checks]]
+name = "edges"
+args = ["{data}/edges.txt"]
+stdout_file = "data/edges.expected"
+
+[[checks]]
+name = "large-values"
+args = ["{data}/large.txt"]
+stdout_file = "data/large.expected"
+
+[[checks]]
+name = "blank-lines"
+args = ["{data}/blank.txt"]
+stdout_file = "data/blank.expected"
+
+[[checks]]
+name = "bad-line"
+args = ["{data}/bad.txt"]
+exit = 1
+stdout = "1"
+stderr_contains = "error: line 3"
+
+[[checks]]
+name = "no-file"
+args = ["{data}/missing.txt"]
+exit = 2
+stderr_contains = "error: cannot read commands"
+
+[bench]
+generate = "data/gen.py"
+args = ["{bench}/input.txt"]
+runs = 3
+timeout = 300
+
+[idioms.c4]
+good = [["LowerBound|UpperBound|LowerBoundBy|UpperBoundBy", "Bedrock binary search"], ["Core::Array<", "an array of spans"]]
+[idioms.go]
+good = [["sort\\.Search|slices\\.BinarySearch", "library binary search"]]

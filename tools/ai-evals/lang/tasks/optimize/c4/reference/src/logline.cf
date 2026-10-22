@@ -1,0 +1,45 @@
+include "logline.ch"
+
+namespace LogStats
+{
+	const int64 kFields = 7;
+	const int64 kLowestStatus = 100;
+	const int64 kHighestStatus = 599;
+
+	Core::Array<Core::String> Split(Core::StringView text, int32 separator) {
+		Core::Array<Core::String> parts;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && text.ByteAt(i) != separator) continue;
+			parts.Push(Core::String(text.Substring(start, i - start)));
+			start = i + 1;
+		}
+		return parts;
+	}
+
+	// The fields of `text` between spaces, at most `most`; how many there were (most + 1 when there are more).
+	static int64 SplitFields(Core::StringView text, Core::StringView* fields, int64 most) {
+		int64 count = 0;
+		int64 start = 0;
+		const char* bytes = text.Data();
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && bytes[i] != ' ') continue;
+			if (count == most) return most + 1;
+			fields[count++] = text.Substring(start, i - start);
+			start = i + 1;
+		}
+		return count;
+	}
+
+	bool ParseLine(Core::StringView text, LogLine& line) {
+		Core::StringView[kFields] fields;
+		if (SplitFields(text, &fields[0], kFields) != kFields) return false;
+		if (!Core::ParseInt64(fields[4], line.status) || !Core::ParseInt64(fields[5], line.latencyMs) || !Core::ParseInt64(fields[6], line.bytes)) return false;
+		if (line.status < kLowestStatus || line.status > kHighestStatus || line.latencyMs < 0 || line.bytes < 0) return false;
+		line.timestamp = fields[0];
+		line.ip = fields[1];
+		line.method = fields[2];
+		line.path = fields[3];
+		return true;
+	}
+}

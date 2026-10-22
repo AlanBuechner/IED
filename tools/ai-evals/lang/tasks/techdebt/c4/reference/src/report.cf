@@ -1,0 +1,79 @@
+include "report.ch"
+
+namespace Gradebook
+{
+	struct Ranked
+	{
+		public Core::String name;
+		public Core::String section;
+		public int64 average;
+	}
+
+	static Core::Array<Ranked> RankAll(const Core::Array<Student>& students) {
+		Core::Array<Ranked> ranked;
+		for (const Student& student : students) ranked.Push(Ranked{ student.name, student.section, WeightedAverage(student) });
+		ranked.SortBy([](const Ranked& a, const Ranked& b) -> bool { return a.average != b.average ? a.average > b.average : a.name < b.name; });
+		return ranked;
+	}
+
+	static Core::Array<Core::String> SectionNames(const Core::Array<Ranked>& ranked) {
+		Core::HashSet<Core::String> seen;
+		Core::Array<Core::String> names;
+		for (const Ranked& each : ranked)
+			if (seen.Add(each.section)) names.Push(each.section);
+		names.Sort();
+		return names;
+	}
+
+	int64 MedianOfRanked(const Core::Array<int64>& ranked) {
+		const int64 middle = ranked.Count() / 2;
+		if (ranked.Count() % 2 == 1) return ranked[middle];
+		return (ranked[middle - 1] + ranked[middle] + 1) / 2;
+	}
+
+	static void AppendSection(Core::StringBuilder& out, const Core::String& section, const Core::Array<Ranked>& ranked) {
+		Core::Array<int64> averages;
+		int64 sum = 0;
+		Core::Format(&out, "section {0:s}\n", section.CStr());
+		for (const Ranked& each : ranked) {
+			if (each.section != section) continue;
+			Core::Format(&out, "  {0:s} ", each.name.CStr());
+			AppendTenths(out, each.average);
+			Core::Format(&out, " {0:s}\n", Letter(each.average));
+			averages.Push(each.average);
+			sum += each.average;
+		}
+		out.Append("  mean ");
+		AppendTenths(out, RoundedMean(sum, averages.Count()));
+		out.Append(" median ");
+		AppendTenths(out, MedianOfRanked(averages));
+		out.Append("\n");
+	}
+
+	static void AppendHonorRoll(Core::StringBuilder& out, const Core::Array<Ranked>& ranked) {
+		Core::Array<Core::String> names;
+		for (const Ranked& each : ranked)
+			if (Letter(each.average)[0] == 'A') names.Push(each.name);
+		names.Sort();
+		out.Append("honor roll: ");
+		if (names.IsEmpty()) out.Append("none");
+		for (int64 i = 0; i < names.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(names[i].View());
+		}
+		out.Append("\n");
+	}
+
+	Core::String Report(const Core::Array<Student>& students) {
+		Core::Array<Ranked> ranked = RankAll(students);
+		Core::StringBuilder out;
+		int64 total = 0;
+		for (const Core::String& section : SectionNames(ranked)) AppendSection(out, section, ranked);
+		for (const Ranked& each : ranked) total += each.average;
+		out.Append("overall mean ");
+		AppendTenths(out, RoundedMean(total, ranked.Count()));
+		out.Append("\n");
+		AppendHonorRoll(out, ranked);
+		return out.ToString();
+	}
+}

@@ -1,0 +1,82 @@
+include "commands.ch"
+include "money.ch"
+
+namespace Ledger
+{
+	struct CategorySpending
+	{
+		public Core::String category;
+		public int64 cents;
+	}
+
+	Core::Array<Transaction> Filter(const Core::Array<Transaction>& rows, Core::StringView account, Core::StringView month) {
+		Core::Array<Transaction> kept;
+		for (const Transaction& row : rows)
+			if ((account.IsEmpty() || row.account == account) && row.date.View().StartsWith(month)) kept.Push(row);
+		return kept;
+	}
+
+	Core::String Balance(const Core::Array<Transaction>& rows) {
+		Core::HashMap<Core::String, int64> balances;
+		for (const Transaction& row : rows) balances[row.account] += row.cents;
+		Core::Array<Core::String> accounts;
+		for (const Core::KeyValue<Core::String, int64>& entry : balances) accounts.Push(entry.key);
+		accounts.Sort();
+		Core::StringBuilder out;
+		for (const Core::String& account : accounts) {
+			out.Append(account.View());
+			out.Append(" ");
+			AppendMoney(out, balances.Get(account));
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String List(const Core::Array<Transaction>& rows) {
+		Core::StringBuilder out;
+		for (const Transaction& row : rows) {
+			out.Append(row.date.View());
+			out.Append(" ");
+			out.Append(row.account.View());
+			out.Append(" ");
+			out.Append(row.category.View());
+			out.Append(" ");
+			AppendMoney(out, row.cents);
+			out.Append(" ");
+			out.Append(row.memo.View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	int64 PercentTenths(int64 part, int64 whole) { return (part * 2000 + whole) / (2 * whole); }
+
+	static Core::Array<CategorySpending> SpendingByCategory(const Core::Array<Transaction>& rows) {
+		Core::HashMap<Core::String, int64> spent;
+		for (const Transaction& row : rows)
+			if (row.cents < 0) spent[row.category] -= row.cents;
+		Core::Array<CategorySpending> ranked;
+		for (const Core::KeyValue<Core::String, int64>& entry : spent) ranked.Push(CategorySpending{ entry.key, entry.value });
+		ranked.SortBy([](const CategorySpending& a, const CategorySpending& b) -> bool { return a.cents != b.cents ? a.cents > b.cents : a.category < b.category; });
+		return ranked;
+	}
+
+	Core::String Report(const Core::Array<Transaction>& rows) {
+		Core::Array<CategorySpending> ranked = SpendingByCategory(rows);
+		int64 total = 0;
+		for (const CategorySpending& each : ranked) total += each.cents;
+		if (total == 0) return Core::String("no spending\n");
+		Core::StringBuilder out;
+		for (const CategorySpending& each : ranked) {
+			const int64 tenths = PercentTenths(each.cents, total);
+			out.Append(each.category.View());
+			out.Append(" ");
+			AppendMoney(out, each.cents);
+			Core::Format(&out, " {0:D}.{1:D}%\n", tenths / 10, tenths % 10);
+		}
+		out.Append("total ");
+		AppendMoney(out, total);
+		out.Append("\n");
+		return out.ToString();
+	}
+}

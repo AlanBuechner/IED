@@ -1,0 +1,62 @@
+include "commands.ch"
+
+namespace Spans
+{
+	const int64 kMostWords = 4;
+
+	static int64 SplitWords(Core::StringView line, Core::StringView* words) {
+		int64 count = 0;
+		int64 i = 0;
+		while (i < line.ByteLength()) {
+			while (i < line.ByteLength() && Core::IsSpace(line.ByteAt(i))) ++i;
+			const int64 start = i;
+			while (i < line.ByteLength() && !Core::IsSpace(line.ByteAt(i))) ++i;
+			if (i == start) break;
+			if (count == kMostWords) return kMostWords + 1;
+			words[count++] = line.Substring(start, i - start);
+		}
+		return count;
+	}
+
+	static void AppendList(const SpanSet& set, Core::StringBuilder& out) {
+		bool first = true;
+		for (const Span& span : set.All()) {
+			if (!first) out.Append(" ");
+			first = false;
+			out.Append("[");
+			out.AppendInt(span.start);
+			out.Append(",");
+			out.AppendInt(span.end);
+			out.Append(")");
+		}
+		out.Append("\n");
+	}
+
+	bool RunCommand(SpanSet& set, Core::StringView line, Core::StringBuilder& out) {
+		Core::StringView[kMostWords] words;
+		const int64 count = SplitWords(line, &words[0]);
+		if (count == 0) return true;
+		int64 a = 0;
+		int64 b = 0;
+		const Core::StringView name = words[0];
+		if ((name == "add" || name == "remove") && count == 3 && Core::ParseInt64(words[1], a) && Core::ParseInt64(words[2], b)) {
+			if (name == "add") set.Add(a, b);
+			else set.Remove(a, b);
+			return true;
+		}
+		if (name == "contains" && count == 2 && Core::ParseInt64(words[1], a)) {
+			out.Append(set.Contains(a) ? "yes\n" : "no\n");
+			return true;
+		}
+		if ((name == "count" || name == "covered") && count == 1) {
+			out.AppendInt(name == "count" ? set.Count() : set.Covered());
+			out.Append("\n");
+			return true;
+		}
+		if (name == "list" && count == 1) {
+			AppendList(set, out);
+			return true;
+		}
+		return false;
+	}
+}

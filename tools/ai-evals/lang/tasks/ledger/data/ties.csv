@@ -1,0 +1,6 @@
+date,account,category,amount,memo
+2024-05-01,card,c,-1.00,x
+2024-05-02,card,b,-7.00,y
+2024-05-03,cash,c,-1.00,z
+2024-05-04,cash,a,-2.00,w
+2024-06-01,card,b,-2.00,v

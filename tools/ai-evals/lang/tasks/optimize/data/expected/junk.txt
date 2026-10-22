@@ -1,0 +1,9 @@
+requests 0
+skipped 1
+unique_ips 0
+bytes 0
+top_paths
+latency_2xx none
+latency_4xx none
+latency_5xx none
+top_error_ips

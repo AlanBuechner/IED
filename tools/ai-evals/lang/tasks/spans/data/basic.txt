@@ -1,0 +1,18 @@
+add 1 5
+add 10 20
+list
+count
+covered
+add 5 10
+list
+count
+contains 0
+contains 1
+contains 19
+contains 20
+remove 3 12
+list
+covered
+remove 0 100
+list
+count

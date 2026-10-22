@@ -1,0 +1,4 @@
+order,customer,tier,sku,quantity,unit_price
+7,gus,gold,bolt,20,1.00
+7,gus,gold,nut,12,0.40
+8,hal,gold,nut,3,0.40

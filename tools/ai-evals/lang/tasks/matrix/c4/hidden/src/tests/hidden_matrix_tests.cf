@@ -1,0 +1,153 @@
+include "matrix.ch"
+
+static Linear::Matrix HiddenOf(int64 rows, int64 columns, const Core::Array<double>& values) {
+	Linear::Matrix m = Linear::Matrix(rows, columns);
+	for (int64 i = 0; i < values.Count(); ++i) m.Set(i / columns, i % columns, values[i]);
+	return m;
+}
+
+static bool HiddenIs(const Linear::Matrix& m, int64 rows, int64 columns, const Core::Array<double>& values) {
+	if (m.Rows() != rows || m.Columns() != columns) return false;
+	for (int64 i = 0; i < values.Count(); ++i)
+		if (fabs(m.Get(i / columns, i % columns) - values[i]) > 1e-9) return false;
+	return true;
+}
+
+static bool HiddenIsEmpty(const Linear::Matrix& m) {
+	return m.Rows() == 0 && m.Columns() == 0;
+}
+
+[test("hidden.matrix.construction_and_shape")]
+static void HiddenConstruction() {
+	Linear::Matrix m = Linear::Matrix(2, 3);
+	assert_eq((int64)2, m.Rows(), "rows");
+	assert_eq((int64)3, m.Columns(), "columns");
+	assert_true(HiddenIs(m, 2, 3, { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }), "all zero");
+	assert_true(HiddenIsEmpty(Linear::Matrix(0, 0)), "a 0x0 matrix");
+}
+
+[test("hidden.matrix.get_set")]
+static void HiddenGetSet() {
+	Linear::Matrix m = Linear::Matrix(3, 2);
+	m.Set(0, 1, 2.5);
+	m.Set(2, 0, -4.0);
+	m.Set(0, 1, 7.25);
+	assert_feq(7.25, m.Get(0, 1), 0.0, "overwritten");
+	assert_feq(-4.0, m.Get(2, 0), 0.0, "last row");
+	assert_true(HiddenIs(m, 3, 2, { 0.0, 7.25, 0.0, 0.0, -4.0, 0.0 }), "the others stay zero");
+}
+
+[test("hidden.matrix.add_subtract")]
+static void HiddenAddSubtract() {
+	Linear::Matrix a = HiddenOf(2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 });
+	Linear::Matrix b = HiddenOf(2, 3, { 0.5, -1.0, 10.0, 4.0, 0.0, -6.0 });
+	assert_true(HiddenIs(a + b, 2, 3, { 1.5, 1.0, 13.0, 8.0, 5.0, 0.0 }), "sum");
+	assert_true(HiddenIs(a - b, 2, 3, { 0.5, 3.0, -7.0, 0.0, 5.0, 12.0 }), "difference");
+	assert_true(HiddenIs(a, 2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 }), "the left operand is unchanged");
+	assert_true(HiddenIs(b, 2, 3, { 0.5, -1.0, 10.0, 4.0, 0.0, -6.0 }), "the right operand is unchanged");
+}
+
+[test("hidden.matrix.multiply_operator")]
+static void HiddenMultiply() {
+	Linear::Matrix a = HiddenOf(2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 });
+	Linear::Matrix b = HiddenOf(3, 2, { 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 });
+	assert_true(HiddenIs(a * b, 2, 2, { 58.0, 64.0, 139.0, 154.0 }), "2x3 times 3x2");
+	assert_true(HiddenIs(b * a, 3, 3, { 39.0, 54.0, 69.0, 49.0, 68.0, 87.0, 59.0, 82.0, 105.0 }), "3x2 times 2x3");
+}
+
+[test("hidden.matrix.scale_operator")]
+static void HiddenScale() {
+	Linear::Matrix a = HiddenOf(2, 3, { 1.0, -2.0, 3.0, 0.0, 5.5, -6.0 });
+	assert_true(HiddenIs(a * 2.0, 2, 3, { 2.0, -4.0, 6.0, 0.0, 11.0, -12.0 }), "times two");
+	assert_true(HiddenIs(a * -0.5, 2, 3, { -0.5, 1.0, -1.5, 0.0, -2.75, 3.0 }), "times minus a half");
+}
+
+[test("hidden.matrix.equality")]
+static void HiddenEquality() {
+	Linear::Matrix a = HiddenOf(2, 2, { 1.0, 2.0, 3.0, 4.0 });
+	assert_true(a == HiddenOf(2, 2, { 1.0, 2.0, 3.0, 4.0 }), "the same values");
+	assert_true(!(a == HiddenOf(2, 2, { 1.0, 2.0, 3.0, 4.5 })), "one value differs");
+	assert_true(!(Linear::Matrix(2, 3) == Linear::Matrix(3, 2)), "the shapes differ");
+	assert_true(Linear::Matrix(0, 0) == Linear::Matrix(0, 0), "two empty matrices");
+}
+
+[test("hidden.matrix.transposed")]
+static void HiddenTransposed() {
+	Linear::Matrix a = HiddenOf(2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 });
+	assert_true(HiddenIs(a.Transposed(), 3, 2, { 1.0, 4.0, 2.0, 5.0, 3.0, 6.0 }), "transposed");
+	assert_true(a.Transposed().Transposed() == a, "transposed twice");
+}
+
+[test("hidden.matrix.identity")]
+static void HiddenIdentity() {
+	Linear::Matrix identity = Linear::Matrix::Identity(3);
+	assert_true(HiddenIs(identity, 3, 3, { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 }), "identity");
+	Linear::Matrix a = HiddenOf(3, 2, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 });
+	assert_true(identity * a == a, "identity times a");
+	assert_true(a * Linear::Matrix::Identity(2) == a, "a times identity");
+}
+
+[test("hidden.matrix.inverse_3x3")]
+static void HiddenInverse() {
+	Linear::Matrix a = HiddenOf(3, 3, { 0.0, 1.0, 2.0, 1.0, 0.0, 3.0, 4.0, -3.0, 8.0 });
+	Linear::Matrix inverse;
+	assert_true(a.TryInverse(inverse), "invertible");
+	assert_feq(-2.0, a.Determinant(), 1e-9, "its determinant");
+	assert_true(HiddenIs(a, 3, 3, { 0.0, 1.0, 2.0, 1.0, 0.0, 3.0, 4.0, -3.0, 8.0 }), "the matrix is unchanged");
+	assert_true(inverse.Rows() == 3 && inverse.Columns() == 3, "3x3");
+	if (inverse.Rows() != 3 || inverse.Columns() != 3) return;
+	Core::Array<double> expected = { -4.5, 7.0, -1.5, -2.0, 4.0, -1.0, 1.5, -2.0, 0.5 };
+	for (int64 i = 0; i < expected.Count(); ++i) assert_feq(expected[i], inverse.Get(i / 3, i % 3), 1e-9, "an element of the inverse");
+	assert_true(HiddenIs(a * inverse, 3, 3, { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 }), "a times its inverse");
+}
+
+[test("hidden.matrix.inverse_refused")]
+static void HiddenInverseRefused() {
+	Linear::Matrix kept = HiddenOf(1, 1, { 42.0 });
+	assert_true(!HiddenOf(3, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0 }).TryInverse(kept), "singular");
+	assert_true(!HiddenOf(2, 2, { 1.0, 1.0, 1.0, 1.0 + 1e-14 }).TryInverse(kept), "a pivot below 1e-12");
+	assert_true(!HiddenOf(2, 3, { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0 }).TryInverse(kept), "not square");
+	assert_true(HiddenIs(kept, 1, 1, { 42.0 }), "the inverse is untouched");
+}
+
+[test("hidden.matrix.determinant")]
+static void HiddenDeterminant() {
+	assert_feq(-14.0, HiddenOf(2, 2, { 3.0, 8.0, 4.0, 6.0 }).Determinant(), 1e-9, "2x2");
+	assert_feq(-306.0, HiddenOf(3, 3, { 6.0, 1.0, 1.0, 4.0, -2.0, 5.0, 2.0, 8.0, 7.0 }).Determinant(), 1e-9, "3x3");
+	assert_feq(-1.0, HiddenOf(2, 2, { 0.0, 1.0, 1.0, 0.0 }).Determinant(), 1e-9, "a row swap");
+	assert_feq(-32.0, HiddenOf(4, 4, { 2.0, 0.0, 1.0, 3.0, 1.0, 1.0, 0.0, 2.0, 0.0, 3.0, 1.0, 1.0, 4.0, 1.0, 2.0, 0.0 }).Determinant(), 1e-9, "4x4");
+	assert_feq(0.0, HiddenOf(3, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0 }).Determinant(), 1e-9, "singular");
+	assert_feq(1.0, Linear::Matrix::Identity(5).Determinant(), 1e-9, "identity");
+	assert_feq(0.0, HiddenOf(2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 }).Determinant(), 1e-9, "not square");
+}
+
+[test("hidden.matrix.mismatched_shapes")]
+static void HiddenMismatchedShapes() {
+	Linear::Matrix a = HiddenOf(2, 3, { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 });
+	assert_true(HiddenIsEmpty(a + Linear::Matrix(3, 2)), "sum");
+	assert_true(HiddenIsEmpty(a - Linear::Matrix(2, 2)), "difference");
+	assert_true(HiddenIsEmpty(a * a), "product");
+}
+
+[test("hidden.matrix.large_product")]
+static void HiddenLargeProduct() {
+	const int64 size = 300;
+	Linear::Matrix a = Linear::Matrix(size, size);
+	Linear::Matrix b = Linear::Matrix(size, size);
+	for (int64 i = 0; i < size; ++i) {
+		for (int64 j = 0; j < size; ++j) {
+			a.Set(i, j, (double)((i * 7 + j * 3) % 11));
+			b.Set(i, j, (double)((i * 5 + j * 2) % 13));
+		}
+	}
+	const int64 started = clock_now_ns();
+	Linear::Matrix product = a * b;
+	const double seconds = (double)(clock_now_ns() - started) / 1e9;
+	assert_true(seconds < 5.0, "a 300x300 product in under 5 seconds");
+	assert_true(product.Rows() == size && product.Columns() == size, "300x300");
+	if (product.Rows() != size || product.Columns() != size) return;
+	assert_feq(8990.0, product.Get(0, 0), 1e-9, "(0, 0)");
+	assert_feq(9044.0, product.Get(17, 123), 1e-9, "(17, 123)");
+	assert_feq(8935.0, product.Get(150, 7), 1e-9, "(150, 7)");
+	assert_feq(8982.0, product.Get(299, 299), 1e-9, "(299, 299)");
+}

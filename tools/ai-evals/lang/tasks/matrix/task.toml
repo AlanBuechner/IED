@@ -1,0 +1,94 @@
+title = "A dense matrix library with a given interface and operators, from an empty project"
+category = "scratch-library"
+set = "tune"
+timeout_minutes = 45
+
+[c4]
+project = "matrix"
+prompt = """
+This workspace is a new, empty C4 program, `matrix` (a Nuke workspace: `nuke.toml`, entry point `src/main.cf`).
+
+Write a dense matrix of doubles in `src/matrix.ch` and `src/matrix.cf` with exactly this interface (the private fields are your choice):
+
+```
+include "bedrock.ch"
+
+namespace Linear
+{
+	class Matrix
+	{
+		// A rows x columns matrix of zeros; a zero-size matrix (0x0) is allowed.
+		[operator("create")] public void Init(int64 rows, int64 columns);
+		public int64 Rows() const;
+		public int64 Columns() const;
+		public double Get(int64 row, int64 column) const;
+		public void Set(int64 row, int64 column, double value);
+		// Element by element; a 0x0 matrix when the shapes differ.
+		[operator("+")] public Matrix Add(const Matrix& other) const;
+		[operator("-")] public Matrix Subtract(const Matrix& other) const;
+		// The matrix product; a 0x0 matrix when this matrix's column count is not the other's row count.
+		[operator("*")] public Matrix Multiply(const Matrix& other) const;
+		// Every element times `factor`.
+		[operator("*")] public Matrix Scale(double factor) const;
+		// True when both have the same shape and every element is equal.
+		[operator("==")] public bool Equals(const Matrix& other) const;
+		public Matrix Transposed() const;
+		// The size x size identity matrix.
+		public static Matrix Identity(int64 size);
+		// Gauss-Jordan elimination with partial pivoting. Returns false, leaving `inverse` untouched, for a
+		// non-square matrix or when a pivot's absolute value is below 1e-12.
+		public bool TryInverse(Matrix& inverse) const;
+		// Square matrices only; 0 for a non-square matrix.
+		public double Determinant() const;
+	}
+}
+```
+
+So `a + b`, `a - b`, `a * b`, `a * 2.0` and `a == b` work on matrices. Only Set (and TryInverse, through `inverse`) changes a matrix. Multiply must stay fast on 300x300 matrices. The program itself is not graded: `src/main.cf` may stay as it is.
+
+Write unit tests for Matrix, then build and test before you finish.
+"""
+
+[go]
+project = "matrix"
+prompt = """
+This workspace is a new, empty Go module, `matrix` (`go.mod`); the program is package main in this folder.
+
+Write a dense matrix of float64 values in `matrix.go` with exactly this interface (the unexported fields are your choice; keep the receivers as shown: only Set has a pointer receiver):
+
+```go
+// Matrix is a dense matrix of float64 values.
+type Matrix struct { /* your unexported fields */ }
+
+// NewMatrix returns a rows x columns matrix of zeros; a zero-size matrix (0x0) is allowed.
+func NewMatrix(rows, columns int) Matrix
+func (m Matrix) Rows() int
+func (m Matrix) Columns() int
+func (m Matrix) At(row, column int) float64
+func (m *Matrix) Set(row, column int, value float64)
+// Add and Sub work element by element; they return a 0x0 matrix when the shapes differ.
+func (m Matrix) Add(other Matrix) Matrix
+func (m Matrix) Sub(other Matrix) Matrix
+// Mul is the matrix product; it returns a 0x0 matrix when m's column count is not other's row count.
+func (m Matrix) Mul(other Matrix) Matrix
+// Scale multiplies every element by factor.
+func (m Matrix) Scale(factor float64) Matrix
+// Equal reports whether both have the same shape and every element is equal.
+func (m Matrix) Equal(other Matrix) bool
+func (m Matrix) Transposed() Matrix
+// Identity returns the size x size identity matrix.
+func Identity(size int) Matrix
+// Inverse uses Gauss-Jordan elimination with partial pivoting. It returns a 0x0 matrix and false for a
+// non-square matrix or when a pivot's absolute value is below 1e-12.
+func (m Matrix) Inverse() (Matrix, bool)
+// Determinant is for square matrices only; it is 0 for a non-square matrix.
+func (m Matrix) Determinant() float64
+```
+
+Only Set changes a matrix: every other method leaves m and its argument as they were. Mul must stay fast on 300x300 matrices. The program itself is not graded: a `main.go` with an empty `func main() {}` is enough.
+
+Write unit tests for Matrix, then build and test before you finish.
+"""
+
+[idioms.c4]
+good = [["\\[operator\\(", "operators as annotated methods"]]

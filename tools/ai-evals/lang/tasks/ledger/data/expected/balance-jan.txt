@@ -1,0 +1,3 @@
+card -177.85
+checking 1500.00
+savings 500.00

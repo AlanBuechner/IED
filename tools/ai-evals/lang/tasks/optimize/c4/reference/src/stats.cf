@@ -1,0 +1,100 @@
+include "stats.ch"
+
+namespace LogStats
+{
+	const int64 kTopPaths = 10;
+	const int64 kTopErrorIps = 5;
+	const int64 kServerError = 500;
+	const int64 kClientError = 400;
+	const int64 kRedirect = 300;
+	const int64 kSuccess = 200;
+
+	struct NameCount
+	{
+		public Core::StringView name;
+		public int64 count;
+	}
+
+	static void Count(Core::HashMap<Core::String, int64>& counts, Core::StringView key) {
+		int64* found = counts.FindAs(key);
+		if (found) *found += 1;
+		else counts.Insert(Core::String(key), 1);
+	}
+
+	void AddLine(Stats& stats, const LogLine& line) {
+		stats.requests += 1;
+		stats.bytes += line.bytes;
+		if (!stats.ips.ContainsAs(line.ip)) stats.ips.Add(Core::String(line.ip));
+		Count(stats.paths, line.path);
+		if (line.status >= kSuccess && line.status < kRedirect) stats.latencies2xx.Push(line.latencyMs);
+		if (line.status >= kClientError && line.status < kServerError) stats.latencies4xx.Push(line.latencyMs);
+		if (line.status >= kServerError) {
+			stats.latencies5xx.Push(line.latencyMs);
+			Count(stats.serverErrors, line.ip);
+		}
+	}
+
+	Stats Analyze(Core::StringView log) {
+		Stats stats;
+		Core::StringView rest = log;
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView row = rest.Substring(0, end > 0 && rest.ByteAt(end - 1) == '\r' ? end - 1 : end);
+			rest = rest.Substring(end + 1, rest.ByteLength());
+			if (row.IsEmpty()) continue;
+			LogLine line;
+			if (ParseLine(row, line)) AddLine(stats, line);
+			else stats.skipped += 1;
+		}
+		return stats;
+	}
+
+	int64 PercentileOfSorted(const Core::Array<int64>& sorted, int64 percent) {
+		int64 rank = (percent * sorted.Count() + 99) / 100;
+		if (rank < 1) rank = 1;
+		return sorted[rank - 1];
+	}
+
+	int64 Percentile(const Core::Array<int64>& values, int64 percent) {
+		Core::Array<int64> sorted = values;
+		sorted.Sort();
+		return PercentileOfSorted(sorted, percent);
+	}
+
+	static void AppendLatency(Core::StringBuilder& out, const char* name, const Core::Array<int64>& values) {
+		out.Append("latency_");
+		out.Append(name);
+		if (values.IsEmpty()) {
+			out.Append(" none\n");
+			return;
+		}
+		Core::Array<int64> sorted = values;
+		sorted.Sort();
+		Core::Format(&out, " {0:D} {1:D} {2:D}\n", PercentileOfSorted(sorted, 50), PercentileOfSorted(sorted, 95), PercentileOfSorted(sorted, 99));
+	}
+
+	static void AppendTop(Core::StringBuilder& out, const Core::HashMap<Core::String, int64>& counts, int64 most) {
+		Core::Array<NameCount> ranked = Core::Array<NameCount>(counts.Count());
+		for (const Core::KeyValue<Core::String, int64>& entry : counts) ranked.Push(NameCount{ entry.key.View(), entry.value });
+		ranked.SortBy([](const NameCount& a, const NameCount& b) -> bool { return a.count != b.count ? a.count > b.count : a.name < b.name; });
+		for (int64 i = 0; i < ranked.Count() && i < most; ++i) {
+			out.Append(ranked[i].name);
+			out.Append(" ");
+			out.AppendInt(ranked[i].count);
+			out.Append("\n");
+		}
+	}
+
+	Core::String Report(const Stats& stats) {
+		Core::StringBuilder out;
+		Core::Format(&out, "requests {0:D}\nskipped {1:D}\nunique_ips {2:D}\nbytes {3:D}\ntop_paths\n", stats.requests, stats.skipped, stats.ips.Count(), stats.bytes);
+		AppendTop(out, stats.paths, kTopPaths);
+		AppendLatency(out, "2xx", stats.latencies2xx);
+		AppendLatency(out, "4xx", stats.latencies4xx);
+		AppendLatency(out, "5xx", stats.latencies5xx);
+		out.Append("top_error_ips\n");
+		AppendTop(out, stats.serverErrors, kTopErrorIps);
+		return out.ToString();
+	}
+}

@@ -1,0 +1,39 @@
+include "commands.ch"
+include "money.ch"
+
+namespace Ledger
+{
+	Core::String Balance(const Core::Array<Transaction>& rows) {
+		Core::HashMap<Core::String, int64> balances;
+		for (const Transaction& row : rows) balances[row.account] += row.cents;
+		Core::Array<Core::String> accounts;
+		for (const Core::KeyValue<Core::String, int64>& entry : balances) accounts.Push(entry.key);
+		accounts.Sort();
+		Core::StringBuilder out;
+		for (const Core::String& account : accounts) {
+			out.Append(account.View());
+			out.Append(" ");
+			AppendMoney(out, balances.Get(account));
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String List(const Core::Array<Transaction>& rows, Core::StringView account) {
+		Core::StringBuilder out;
+		for (const Transaction& row : rows) {
+			if (!account.IsEmpty() && row.account != account) continue;
+			out.Append(row.date.View());
+			out.Append(" ");
+			out.Append(row.account.View());
+			out.Append(" ");
+			out.Append(row.category.View());
+			out.Append(" ");
+			AppendMoney(out, row.cents);
+			out.Append(" ");
+			out.Append(row.memo.View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+}

@@ -1,0 +1,136 @@
+include "matrix.ch"
+
+namespace Linear
+{
+	const double kSmallestPivot = 1e-12;
+
+	public void Matrix::Init(int64 rows, int64 columns) {
+		this.rows = rows;
+		this.columns = columns;
+		values.Resize(rows * columns);
+	}
+
+	public int64 Matrix::Rows() const { return rows; }
+	public int64 Matrix::Columns() const { return columns; }
+	public double Matrix::Get(int64 row, int64 column) const { return values[row * columns + column]; }
+	public void Matrix::Set(int64 row, int64 column, double value) { values[row * columns + column] = value; }
+
+	private bool Matrix::SameShape(const Matrix& other) const { return rows == other.rows && columns == other.columns; }
+
+	public Matrix Matrix::Add(const Matrix& other) const {
+		if (!SameShape(other)) return Matrix(0, 0);
+		Matrix sum = Matrix(rows, columns);
+		for (int64 i = 0; i < values.Count(); ++i) sum.values[i] = values[i] + other.values[i];
+		return sum;
+	}
+
+	public Matrix Matrix::Subtract(const Matrix& other) const {
+		if (!SameShape(other)) return Matrix(0, 0);
+		Matrix difference = Matrix(rows, columns);
+		for (int64 i = 0; i < values.Count(); ++i) difference.values[i] = values[i] - other.values[i];
+		return difference;
+	}
+
+	public Matrix Matrix::Multiply(const Matrix& other) const {
+		if (columns != other.rows) return Matrix(0, 0);
+		const int64 width = other.columns;
+		Matrix product = Matrix(rows, width);
+		for (int64 i = 0; i < rows; ++i) {
+			for (int64 k = 0; k < columns; ++k) {
+				const double factor = values[i * columns + k];
+				for (int64 j = 0; j < width; ++j) product.values[i * width + j] += factor * other.values[k * width + j];
+			}
+		}
+		return product;
+	}
+
+	public Matrix Matrix::Scale(double factor) const {
+		Matrix scaled = Matrix(rows, columns);
+		for (int64 i = 0; i < values.Count(); ++i) scaled.values[i] = values[i] * factor;
+		return scaled;
+	}
+
+	public bool Matrix::Equals(const Matrix& other) const {
+		if (!SameShape(other)) return false;
+		for (int64 i = 0; i < values.Count(); ++i)
+			if (values[i] != other.values[i]) return false;
+		return true;
+	}
+
+	public Matrix Matrix::Transposed() const {
+		Matrix transposed = Matrix(columns, rows);
+		for (int64 row = 0; row < rows; ++row)
+			for (int64 column = 0; column < columns; ++column) transposed.Set(column, row, Get(row, column));
+		return transposed;
+	}
+
+	public static Matrix Matrix::Identity(int64 size) {
+		Matrix identity = Matrix(size, size);
+		for (int64 i = 0; i < size; ++i) identity.Set(i, i, 1.0);
+		return identity;
+	}
+
+	private void Matrix::SwapRows(int64 a, int64 b) {
+		for (int64 column = 0; column < columns; ++column) {
+			const double kept = Get(a, column);
+			Set(a, column, Get(b, column));
+			Set(b, column, kept);
+		}
+	}
+
+	private void Matrix::SubtractRow(int64 target, int64 source, double factor) {
+		for (int64 column = 0; column < columns; ++column) Set(target, column, Get(target, column) - factor * Get(source, column));
+	}
+
+	private void Matrix::ScaleRow(int64 row, double factor) {
+		for (int64 column = 0; column < columns; ++column) Set(row, column, Get(row, column) * factor);
+	}
+
+	private int64 Matrix::PivotRow(int64 column) const {
+		int64 best = column;
+		for (int64 row = column + 1; row < rows; ++row)
+			if (fabs(Get(row, column)) > fabs(Get(best, column))) best = row;
+		return best;
+	}
+
+	public bool Matrix::TryInverse(Matrix& inverse) const {
+		if (rows != columns) return false;
+		Matrix work = *this;
+		Matrix result = Identity(rows);
+		for (int64 column = 0; column < columns; ++column) {
+			const int64 pivot = work.PivotRow(column);
+			const double value = work.Get(pivot, column);
+			if (fabs(value) < kSmallestPivot) return false;
+			work.SwapRows(pivot, column);
+			result.SwapRows(pivot, column);
+			work.ScaleRow(column, 1.0 / value);
+			result.ScaleRow(column, 1.0 / value);
+			for (int64 row = 0; row < rows; ++row) {
+				const double factor = work.Get(row, column);
+				if (row == column || factor == 0.0) continue;
+				work.SubtractRow(row, column, factor);
+				result.SubtractRow(row, column, factor);
+			}
+		}
+		inverse = result;
+		return true;
+	}
+
+	public double Matrix::Determinant() const {
+		if (rows != columns) return 0.0;
+		Matrix work = *this;
+		double determinant = 1.0;
+		for (int64 column = 0; column < columns; ++column) {
+			const int64 pivot = work.PivotRow(column);
+			const double value = work.Get(pivot, column);
+			if (value == 0.0) return 0.0;
+			if (pivot != column) {
+				work.SwapRows(pivot, column);
+				determinant = -determinant;
+			}
+			determinant *= value;
+			for (int64 row = column + 1; row < rows; ++row) work.SubtractRow(row, column, work.Get(row, column) / value);
+		}
+		return determinant;
+	}
+}

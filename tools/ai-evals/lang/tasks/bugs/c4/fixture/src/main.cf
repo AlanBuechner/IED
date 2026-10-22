@@ -1,0 +1,24 @@
+include "bedrock.ch"
+include "orders.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static int32 Fail(Core::StringView message) {
+	Platform::WriteError((Core::String("error: ") + message + "\n").View());
+	return kExitError;
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 2) {
+		Platform::WriteError(Core::StringView("usage: invoice <orders.csv>\n"));
+		return kExitUsage;
+	}
+	FS::File file = FS::File(argv[1], "rb");
+	if (!file.IsOpen()) return Fail((Core::String("cannot read ") + argv[1]).View());
+	Core::String text = file.ReadText();
+	Invoice::ParseResult parsed = Invoice::ParseOrders(text.View());
+	if (!parsed.error.IsEmpty()) return Fail(parsed.error.View());
+	Platform::WriteOutput(Invoice::Report(Invoice::GroupOrders(parsed.lines)).View());
+	return 0;
+}

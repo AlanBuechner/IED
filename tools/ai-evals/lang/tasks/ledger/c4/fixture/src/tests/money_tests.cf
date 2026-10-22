@@ -1,0 +1,24 @@
+include "money.ch"
+
+static Core::String Money(int64 cents) {
+	Core::StringBuilder out;
+	Ledger::AppendMoney(out, cents);
+	return out.ToString();
+}
+
+[test("ledger.money.parse")]
+static void ParsesAmounts() {
+	int64 cents = 0;
+	assert_true(Ledger::ParseCents(Core::StringView("12.34"), cents) && cents == 1234, "12.34");
+	assert_true(Ledger::ParseCents(Core::StringView("-0.50"), cents) && cents == -50, "-0.50");
+	assert_true(Ledger::ParseCents(Core::StringView("7"), cents) && cents == 700, "7");
+	assert_true(!Ledger::ParseCents(Core::StringView("1.5"), cents), "one decimal");
+	assert_true(!Ledger::ParseCents(Core::StringView("abc"), cents), "letters");
+}
+
+[test("ledger.money.format")]
+static void FormatsAmounts() {
+	assert_true(Money(-1234) == "-12.34", "negative");
+	assert_true(Money(5) == "0.05", "cents");
+	assert_true(Money(0) == "0.00", "zero");
+}

@@ -1,0 +1,148 @@
+// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar and how C4LSP's semantic
+// tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink, `preprocessor` gray), C4LSP - one server per
+// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - C4DAP,
+// the c4 and c4-test problem matchers and output links, the c4.nuke task preset (IED's `nuke` preset with C4's matchers
+// and Launch configuration, IED docs/06, docs/25, docs/26), and how C4 files and projects look (teal "C4", a header
+// "h"), and the AI skills of this version of the language (skills/). Ships in every toolchain as <toolchain>/ied/
+// (MakeToolchain.py); a solution names it in its localPlugins.
+{
+	"manifestVersion": 1,
+	"id": "c4",
+	"name": "C4 Language",
+	"version": "0.1.0",
+	"description": "C4 sources: the language, its grammar and C4LSP (diagnostics, completion, navigation, formatting, refactoring).",
+	"publisher": "C4",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
+	"contributes": {
+		"fileIcons": [
+			{ "languageId": "c4", "extensions": [".cf"], "label": "C4", "color": "--hue-teal" },
+			{ "languageId": "c4", "extensions": [".ch"], "label": "h", "color": "--hue-teal" }
+		],
+		"projectIcons": [
+			{ "languageId": "c4", "label": "C4", "color": "--hue-teal", "presets": ["c4.nuke"] }
+		],
+		"outputLinks": [
+			{ "id": "c4", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\"'|*?]+?\\.[A-Za-z0-9_+-]+) \\((\\d+):(\\d+)\\)", "file": 1, "line": 2, "column": 3 },
+			{ "id": "c4-test", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		],
+		"languages": [
+			{
+				"id": "c4",
+				"aliases": ["C4"],
+				"extensions": [".cf", ".ch"],
+				"fences": ["c4", "cf", "ch"],
+				"lineComment": "//",
+				"blockComment": ["/*", "*/"],
+				"brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+				"autoClosingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["\"", "\""], ["'", "'"]],
+				"indentation": { "increasePattern": "^.*\\{[^}\"']*$", "decreasePattern": "^\\s*\\}" },
+				"grammar": "grammars/c4.monarch.json",
+				"taskComments": ["TODO", "HACK", "FIXME", "NOTE"]
+			}
+		],
+		"semanticTokenColors": [
+			{
+				"languageId": "c4",
+				"label": "Visual Assist style",
+				"rules": {
+					"namespace": "--syntax-namespace",
+					"type": "--syntax-type",
+					"type.builtin": "--syntax-keyword",
+					"class": "--syntax-type",
+					"enum": "--syntax-type",
+					"interface": "--syntax-type",
+					"struct": "--syntax-type",
+					"typeParameter": "--syntax-type",
+					"parameter": "--syntax-parameter",
+					"variable": "--syntax-variable",
+					"field": "--syntax-member",
+					"property": "--syntax-member",
+					"function": "--syntax-function",
+					"method": "--syntax-function",
+					"macro": "--syntax-macro",
+					"keyword": "--syntax-keyword",
+					"modifier": "--syntax-keyword",
+					"controlFlow": "--syntax-control",
+					"preprocessor": "--syntax-preprocessor",
+					"comment": "--syntax-comment",
+					"number": "--syntax-number",
+					"string": "--syntax-string"
+				}
+			}
+		],
+		"headerSourcePairs": [ { "extensions": [".ch", ".cf"] } ],
+		"problemMatchers": [
+			{
+				"id": "c4",
+				"source": "c4",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}/src", "${cwd}"] },
+				"patterns": [ { "regexp": "^(.+?) \\((\\d+):(\\d+)\\) (fatal error|error|warning|note): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 } ],
+				"severityMap": { "fatal error": "error", "note": "info" }
+			},
+			{
+				"id": "c4-test",
+				"source": "c4-test",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}/src", "${cwd}"] },
+				"patterns": [ { "regexp": "^FAIL: (.+?):(\\d+): (.*)$", "file": 1, "line": 2, "message": 3 } ],
+				"defaultSeverity": "error"
+			}
+		],
+		"taskPresets": [
+			{
+				"id": "c4.nuke",
+				"label": "C4 (Nuke)",
+				"detect": "nuke.toml",
+				"extends": "nuke",
+				"problemMatcher": ["c4", "c4-test"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "c4", "request": "launch", "program": "${projectOutput}", "cwd": "${projectRoot}", "stopOnEntry": false, "preLaunchTask": "build" }
+					}
+				}
+			}
+		],
+		"dapProviders": [
+			{
+				"type": "c4",
+				"label": "C4",
+				"command": "${pluginDir}/../tools/C4DAP/C4DAP.exe",
+				"env": { "C4_HOME": "${pluginDir}/.." },
+				"launchMode": "staged",
+				"languages": ["c4"],
+				"when": "workspaceTrusted"
+			}
+		],
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },
+		"skills": ["skills"],
+		"systemMessageSections": [
+			{ "id": "c4", "when": "workspaceLanguage.c4", "maxTokens": 520, "text": "C4 (.cf sources, .ch headers) looks like C++ but is not, and C++ habits are its usual compile errors. Read the c4-language skill before writing C4, c4-testing before writing tests. What every program needs:\n- One program per project: all .cf/.ch files of src/ compile together. `include \"x.ch\"` (no #include, no ../). File-scope names (constants, static helpers) share one scope per namespace across ALL files: two files may not both define `kMax` or `static Parse`.\n- Entry: `int32 main(int32 argc, char** argv)`. Types: int32, int64, uint8, float, double, bool, char8. No `auto`: write the type. Arrays and pointers belong to the type: `int32[4] a;`, not `int a[4]`.\n- Class members are private unless marked, each one: `public int64 count;`. Constructors, destructors and operators are annotated methods: `[operator(\"create\")] public void Init(int64 n) { ... }`, `[operator(\"delete\")]`, `[operator(\"==\")]`. Make objects with `T x = T(args);` or `T x(args);`; `new T(args)` is garbage collected. A lambda that returns a value names its type: `[](int32 x) -> bool { return x > 0; }`.\n- Library: `include \"bedrock.ch\"`; there is no std::. Core::String (made explicitly: `Core::String(\"text\")`; `s == \"text\"` works), Core::StringView, Core::StringBuilder, Core::Array<T> (Push, Count, Sort, SortBy), Core::HashMap<K, V> (Find, Insert, m[k]), Core::ParseInt64, FS::File, Platform::WriteOutput / WriteError (a StringView). Counts are int64. printf and Core::Format take C strings: pass `s.CStr()`, never a Core::String. There is no standard-input API.\n- Look up a Bedrock type's exact members with code_members (`code_members({\"symbol\": \"Core::HashMap\"})`) instead of guessing C++ names (Push, not push_back; Count, not size).\n- Tests: `[test(\"group.name\")] static void F() { assert_eq((int64)2, Count(), \"why\"); }` in src/tests/*.cf. Build and test with build_run (task \"test\"); run with arguments through shell_run: `nuke run -- <args>`." }
+		],
+		"lspProfiles": [
+			{
+				"id": "c4-language-server",
+				"label": "C4LSP",
+				"command": "${pluginDir}/../tools/C4LSP/C4LSP.exe",
+				"env": { "C4_HOME": "${pluginDir}/.." },
+				"selector": { "languages": ["c4"] },
+				"scope": "project",
+				"initializationOptionsFile": "${workspaceDir}/.ied/local/lsp-options/${projectName}.json",
+				"pluginCodeOption": "scripts",
+				"launchMode": "staged",
+				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
+				"codeActionsNeedClientFilter": true,
+				"aiExposedRequests": [
+					{
+						"method": "c4/expandMacro",
+						"purpose": "expandMacro",
+						"description": "The C4 macro used at a position and what that use expands to: {textDocument, position} -> {name, expansion}, or null where no macro is used."
+					}
+				],
+				"when": "config.c4.languageServer"
+			}
+		]
+	}
+}

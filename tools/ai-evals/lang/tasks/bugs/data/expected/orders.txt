@@ -1,0 +1,6 @@
+1001 alice 48.21
+1002 bob 34.56
+1003 carol 64.77
+1004 dave 18.06
+orders 4 total 165.60
+average 41.40

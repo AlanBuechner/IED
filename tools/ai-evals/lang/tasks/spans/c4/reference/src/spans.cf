@@ -1,0 +1,58 @@
+include "spans.ch"
+
+namespace Spans
+{
+	static int64 Length(const Span& span) { return span.end - span.start; }
+
+	public int64 SpanSet::FirstEndingFrom(int64 point) const {
+		Span probe = { point, point };
+		return spans.LowerBoundBy(probe, [](const Span& a, const Span& b) -> bool { return a.end < b.end; });
+	}
+
+	public int64 SpanSet::FirstStartingAfter(int64 point) const {
+		Span probe = { point, point };
+		return spans.UpperBoundBy(probe, [](const Span& a, const Span& b) -> bool { return a.start < b.start; });
+	}
+
+	public void SpanSet::Replace(int64 first, int64 end, const Span* with, int64 count) {
+		for (int64 i = first; i < end; ++i) covered -= Length(spans[i]);
+		for (int64 i = 0; i < count; ++i) covered += Length(with[i]);
+		const int64 overwritten = end - first < count ? end - first : count;
+		for (int64 i = 0; i < overwritten; ++i) spans[first + i] = with[i];
+		if (end - first > count) spans.RemoveRange(first + count, end);
+		for (int64 i = overwritten; i < count; ++i) spans.Insert(first + i, with[i]);
+	}
+
+	public void SpanSet::Add(int64 start, int64 end) {
+		if (end <= start) return;
+		const int64 first = FirstEndingFrom(start);
+		const int64 last = FirstStartingAfter(end);
+		Span merged = { start, end };
+		if (first < last) {
+			if (spans[first].start < merged.start) merged.start = spans[first].start;
+			if (spans[last - 1].end > merged.end) merged.end = spans[last - 1].end;
+		}
+		Replace(first, last, &merged, 1);
+	}
+
+	public void SpanSet::Remove(int64 start, int64 end) {
+		if (end <= start) return;
+		const int64 first = FirstEndingFrom(start + 1);
+		const int64 last = FirstStartingAfter(end - 1);
+		if (first >= last) return;
+		Span[2] kept;
+		int64 count = 0;
+		if (spans[first].start < start) kept[count++] = Span{ spans[first].start, start };
+		if (spans[last - 1].end > end) kept[count++] = Span{ end, spans[last - 1].end };
+		Replace(first, last, &kept[0], count);
+	}
+
+	public bool SpanSet::Contains(int64 point) const {
+		const int64 index = FirstEndingFrom(point + 1);
+		return index < spans.Count() && spans[index].start <= point;
+	}
+
+	public int64 SpanSet::Count() const { return spans.Count(); }
+	public int64 SpanSet::Covered() const { return covered; }
+	public Core::Array<Span> SpanSet::All() const { return spans; }
+}

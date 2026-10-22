@@ -1,0 +1,35 @@
+include "logline.ch"
+
+namespace LogStats
+{
+	const int64 kFields = 7;
+	const int64 kLowestStatus = 100;
+	const int64 kHighestStatus = 599;
+
+	Core::Array<Core::String> Split(Core::StringView text, int32 separator) {
+		Core::Array<Core::String> parts;
+		Core::String current;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			if (text.ByteAt(i) == separator) {
+				parts.Push(current);
+				current = Core::String();
+				continue;
+			}
+			current = current + text.Substring(i, 1);
+		}
+		parts.Push(current);
+		return parts;
+	}
+
+	bool ParseLine(Core::StringView text, LogLine& line) {
+		Core::Array<Core::String> fields = Split(text, ' ');
+		if (fields.Count() != kFields) return false;
+		if (!Core::ParseInt64(fields[4].View(), line.status) || !Core::ParseInt64(fields[5].View(), line.latencyMs) || !Core::ParseInt64(fields[6].View(), line.bytes)) return false;
+		if (line.status < kLowestStatus || line.status > kHighestStatus || line.latencyMs < 0 || line.bytes < 0) return false;
+		line.timestamp = fields[0];
+		line.ip = fields[1];
+		line.method = fields[2];
+		line.path = fields[3];
+		return true;
+	}
+}

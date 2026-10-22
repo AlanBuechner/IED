@@ -1,0 +1,85 @@
+include "records.ch"
+
+namespace Gradebook
+{
+	const int64 kFieldsPerLine = 3;
+
+	// Calls `each(line, number)` for every non-empty line after the header; stops when it returns false and gives that
+	// line's number, else 0.
+	template<F> static int64 EachRecord(Core::StringView text, F each) {
+		Core::StringView rest = text;
+		int64 number = 0;
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView line = rest.Substring(0, end > 0 && rest.ByteAt(end - 1) == '\r' ? end - 1 : end);
+			rest = rest.Substring(end + 1, rest.ByteLength());
+			++number;
+			if (number > 1 && !line.IsEmpty() && !each(line)) return number;
+		}
+		return 0;
+	}
+
+	// The three comma-separated fields of `line`; false when there are not exactly three.
+	static bool SplitFields(Core::StringView line, Core::StringView* fields) {
+		int64 count = 0;
+		int64 start = 0;
+		for (int64 i = 0; i <= line.ByteLength(); ++i) {
+			if (i < line.ByteLength() && line.ByteAt(i) != ',') continue;
+			if (count == kFieldsPerLine) return false;
+			fields[count++] = line.Substring(start, i - start);
+			start = i + 1;
+		}
+		return count == kFieldsPerLine;
+	}
+
+	static bool ParseKind(Core::StringView text, int64& kind) {
+		if (text == "homework") kind = (int64)Kind::Homework;
+		else if (text == "quiz") kind = (int64)Kind::Quiz;
+		else if (text == "exam") kind = (int64)Kind::Exam;
+		else return false;
+		return true;
+	}
+
+	Roster ParseStudents(Core::StringView text) {
+		Roster roster;
+		roster.badLine = EachRecord(text, [&roster](Core::StringView line) -> bool {
+			Core::StringView[kFieldsPerLine] fields;
+			if (!SplitFields(line, &fields[0]) || fields[0].IsEmpty() || fields[1].IsEmpty() || fields[2].IsEmpty()) return false;
+			Student student;
+			student.id = Core::String(fields[0]);
+			student.name = Core::String(fields[1]);
+			student.section = Core::String(fields[2]);
+			roster.students.Push(take(student));
+			return true;
+		});
+		return roster;
+	}
+
+	static Core::HashMap<Core::String, int64> IndexById(const Core::Array<Student>& students) {
+		Core::HashMap<Core::String, int64> index;
+		for (int64 i = 0; i < students.Count(); ++i) index.Insert(students[i].id, i);
+		return index;
+	}
+
+	ScoreResult ApplyScores(Core::StringView text, Core::Array<Student>& students) {
+		ScoreResult result;
+		Core::HashMap<Core::String, int64> index = IndexById(students);
+		result.badLine = EachRecord(text, [&result, &students, &index](Core::StringView line) -> bool {
+			Core::StringView[kFieldsPerLine] fields;
+			int64 kind = 0;
+			int64 score = 0;
+			if (!SplitFields(line, &fields[0]) || fields[0].IsEmpty() || !Core::ParseInt64(fields[2], score) || score < 0 || score > kMaxScore || !ParseKind(fields[1], kind)) return false;
+			int64* found = index.FindAs(fields[0]);
+			if (!found) {
+				result.unknownIds.Push(Core::String(fields[0]));
+				return true;
+			}
+			Tally& tally = students[*found].tallies[kind];
+			tally.sum += score;
+			tally.count += 1;
+			return true;
+		});
+		return result;
+	}
+}

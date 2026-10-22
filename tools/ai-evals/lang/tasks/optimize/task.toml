@@ -1,0 +1,57 @@
+title = "Make a slow log analyzer at least 10x faster without changing its output"
+category = "optimize"
+set = "tune"
+timeout_minutes = 50
+fixture_files = [["data/sample.log", "data/sample.log"]]
+
+[c4]
+project = "logstats"
+prompt = """
+`logstats` is a small C4 program (a Nuke workspace) that summarizes a web server access log: `logstats <file>`. `data/sample.log` is a 20,000-line example. On our real logs, which have millions of lines, it is far too slow and uses too much memory.
+
+Make it at least 10 times faster on a 1,000,000-line log, and leaner, without changing its output in any way (the same text for every input, malformed lines included). Measure before and after on a large log (for example `data/sample.log` repeated many times), keep the code clean, keep the existing tests passing and add tests for anything you change. Build and test before you finish, and report the timings you measured.
+"""
+
+[go]
+project = "logstats"
+prompt = """
+`logstats` is a small Go program (package main in this module) that summarizes a web server access log: `logstats <file>`. `data/sample.log` is a 20,000-line example. On our real logs, which have millions of lines, it is far too slow and uses too much memory.
+
+Make it at least 10 times faster on a 1,000,000-line log, and leaner, without changing its output in any way (the same text for every input, malformed lines included). Measure before and after on a large log (for example `data/sample.log` repeated many times), keep the code clean, keep the existing tests passing and add tests for anything you change. Build and test before you finish, and report the timings you measured.
+"""
+
+[[checks]]
+name = "sample"
+args = ["{data}/sample.log"]
+stdout_file = "data/expected/sample.txt"
+
+[[checks]]
+name = "malformed"
+args = ["{data}/junk.log"]
+stdout_file = "data/expected/junk.txt"
+
+[[checks]]
+name = "no-server-errors"
+args = ["{data}/no5xx.log"]
+stdout_file = "data/expected/no5xx.txt"
+
+[[checks]]
+name = "empty"
+args = ["{data}/empty.log"]
+stdout_file = "data/expected/empty.txt"
+
+[[checks]]
+name = "missing-file"
+args = ["{data}/no-such.log"]
+exit = 1
+stderr_contains = "error: cannot read"
+
+[bench]
+generate = "data/gen.py"
+args = ["{bench}/input.log"]
+runs = 3
+timeout = 600
+
+[requirements]
+speedup_min = 10.0
+weight = 0.6

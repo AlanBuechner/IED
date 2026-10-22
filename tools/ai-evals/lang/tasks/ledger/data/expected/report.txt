@@ -1,0 +1,7 @@
+rent 2400.00 70.0%
+transfer 500.00 14.6%
+groceries 218.75 6.4%
+dining 130.90 3.8%
+utilities 130.15 3.8%
+fuel 48.25 1.4%
+total 3428.05

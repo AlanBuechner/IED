@@ -1,0 +1,30 @@
+include "bedrock.ch"
+include "commands.ch"
+include "options.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static int32 Usage() {
+	Platform::WriteError(Core::StringView("usage: ledger <file> <balance|list> [--account NAME]\n"));
+	return kExitUsage;
+}
+
+static int32 Fail(Core::StringView message) {
+	Platform::WriteError((Core::String("error: ") + message + "\n").View());
+	return kExitError;
+}
+
+int32 main(int32 argc, char** argv) {
+	Ledger::Options options;
+	if (!Ledger::ParseOptions(argc, argv, options)) return Usage();
+	if (options.command != "balance" && options.command != "list") return Usage();
+	FS::File file = FS::File(options.file.CStr(), "rb");
+	if (!file.IsOpen()) return Fail((Core::String("cannot read ") + options.file.View()).View());
+	Core::String text = file.ReadText();
+	Ledger::LoadResult ledger = Ledger::ParseLedger(text.View());
+	if (!ledger.error.IsEmpty()) return Fail(ledger.error.View());
+	Core::String report = options.command == "balance" ? Ledger::Balance(ledger.rows) : Ledger::List(ledger.rows, options.account.View());
+	Platform::WriteOutput(report.View());
+	return 0;
+}

@@ -1,0 +1,36 @@
+include "matrix.ch"
+
+static Linear::Matrix Square2(double a, double b, double c, double d) {
+	Linear::Matrix m = Linear::Matrix(2, 2);
+	m.Set(0, 0, a);
+	m.Set(0, 1, b);
+	m.Set(1, 0, c);
+	m.Set(1, 1, d);
+	return m;
+}
+
+[test("matrix.multiply.two_by_two")]
+static void MultiplyTwoByTwo() {
+	Linear::Matrix product = Square2(1.0, 2.0, 3.0, 4.0) * Square2(5.0, 6.0, 7.0, 8.0);
+	assert_true(product == Square2(19.0, 22.0, 43.0, 50.0), "product");
+}
+
+[test("matrix.inverse.undoes_the_matrix")]
+static void InverseUndoesTheMatrix() {
+	Linear::Matrix m = Square2(4.0, 7.0, 2.0, 6.0);
+	Linear::Matrix inverse;
+	assert_true(m.TryInverse(inverse), "invertible");
+	Linear::Matrix back = m * inverse;
+	assert_feq(1.0, back.Get(0, 0), 1e-12, "(0,0)");
+	assert_feq(0.0, back.Get(0, 1), 1e-12, "(0,1)");
+	assert_feq(0.0, back.Get(1, 0), 1e-12, "(1,0)");
+	assert_feq(1.0, back.Get(1, 1), 1e-12, "(1,1)");
+	assert_feq(10.0, m.Determinant(), 1e-12, "determinant");
+}
+
+[test("matrix.zero_size")]
+static void ZeroSize() {
+	Linear::Matrix empty = Linear::Matrix(0, 0);
+	assert_eq((int64)0, empty.Rows(), "rows");
+	assert_true(empty == Linear::Matrix(0, 0) + Linear::Matrix(2, 2), "a mismatch is 0x0");
+}

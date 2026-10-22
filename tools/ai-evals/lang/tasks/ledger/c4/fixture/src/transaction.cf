@@ -1,0 +1,76 @@
+include "transaction.ch"
+include "money.ch"
+
+namespace Ledger
+{
+	const int64 kFields = 5;
+	const int64 kDateLength = 10;
+
+	static int64 SplitFields(Core::StringView line, Core::StringView* fields) {
+		int64 count = 0;
+		int64 start = 0;
+		for (int64 i = 0; i <= line.ByteLength(); ++i) {
+			if (i < line.ByteLength() && line.ByteAt(i) != ',') continue;
+			if (count == kFields) return kFields + 1;
+			fields[count++] = line.Substring(start, i - start);
+			start = i + 1;
+		}
+		return count;
+	}
+
+	static bool IsDate(Core::StringView text) {
+		if (text.ByteLength() != kDateLength || text.ByteAt(4) != '-' || text.ByteAt(7) != '-') return false;
+		for (int64 i = 0; i < kDateLength; ++i)
+			if (i != 4 && i != 7 && (text.ByteAt(i) < '0' || text.ByteAt(i) > '9')) return false;
+		return true;
+	}
+
+	bool ParseTransaction(Core::StringView line, Transaction& row, Core::String& why) {
+		Core::StringView[kFields] fields;
+		if (SplitFields(line, &fields[0]) != kFields) {
+			why = Core::String("expected 5 fields");
+			return false;
+		}
+		if (!IsDate(fields[0])) {
+			why = Core::String("bad date");
+			return false;
+		}
+		if (fields[1].IsEmpty() || fields[2].IsEmpty()) {
+			why = Core::String("empty account or category");
+			return false;
+		}
+		if (!ParseCents(fields[3], row.cents)) {
+			why = Core::String("bad amount");
+			return false;
+		}
+		row.date = Core::String(fields[0]);
+		row.account = Core::String(fields[1]);
+		row.category = Core::String(fields[2]);
+		row.memo = Core::String(fields[4]);
+		return true;
+	}
+
+	LoadResult ParseLedger(Core::StringView text) {
+		LoadResult result;
+		Core::StringView rest = text;
+		int64 number = 0;
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView line = rest.Substring(0, end > 0 && rest.ByteAt(end - 1) == '\r' ? end - 1 : end);
+			rest = rest.Substring(end + 1, rest.ByteLength());
+			++number;
+			if (number == 1 || line.IsEmpty()) continue;
+			Transaction row;
+			Core::String why;
+			if (!ParseTransaction(line, row, why)) {
+				Core::StringBuilder error;
+				Core::Format(&error, "line {0:D}: {1:s}", number, why.CStr());
+				result.error = error.ToString();
+				return result;
+			}
+			result.rows.Push(take(row));
+		}
+		return result;
+	}
+}

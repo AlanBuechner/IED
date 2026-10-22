@@ -1,0 +1,111 @@
+include "range.ch"
+
+namespace Semver
+{
+	static Comparator MakeComparator(Operator op, const Version& version) {
+		Comparator comparator;
+		comparator.op = op;
+		comparator.version = version;
+		return comparator;
+	}
+
+	// The first version ^V excludes: the next major, or for 0.y.z the next minor, or for 0.0.z the next patch.
+	static Version CaretLimit(const Version& version) {
+		Version limit;
+		if (version.major > 0) limit.major = version.major + 1;
+		else if (version.minor > 0) limit.minor = version.minor + 1;
+		else limit.patch = version.patch + 1;
+		return limit;
+	}
+
+	// The first version ~V excludes: the next minor.
+	static Version TildeLimit(const Version& version) {
+		Version limit;
+		limit.major = version.major;
+		limit.minor = version.minor + 1;
+		return limit;
+	}
+
+	// Takes the operator off the front of a comparator, the longer ones first so that ">=" is not read as ">".
+	static Core::StringView CutOperator(Core::StringView field, Core::StringView& op) {
+		const char*[7] operators = { ">=", "<=", ">", "<", "=", "^", "~" };
+		for (const char* candidate : operators) {
+			const Core::StringView prefix = Core::StringView(candidate);
+			if (field.StartsWith(prefix)) {
+				op = prefix;
+				return field.Substring(prefix.ByteLength(), field.ByteLength());
+			}
+		}
+		op = Core::StringView("=");
+		return field;
+	}
+
+	static Operator OperatorOf(Core::StringView op) {
+		if (op == ">") return Operator::Greater;
+		if (op == ">=") return Operator::GreaterOrEqual;
+		if (op == "<") return Operator::Less;
+		if (op == "<=") return Operator::LessOrEqual;
+		return Operator::Equal;
+	}
+
+	static bool ParseComparator(Core::StringView field, Core::Array<Comparator>& comparators) {
+		Core::StringView op;
+		Version version;
+		if (!ParseVersion(CutOperator(field, op), version)) return false;
+		if (op == "^" || op == "~") {
+			comparators.Push(MakeComparator(Operator::GreaterOrEqual, version));
+			comparators.Push(MakeComparator(Operator::Less, op == "^" ? CaretLimit(version) : TildeLimit(version)));
+		} else {
+			comparators.Push(MakeComparator(OperatorOf(op), version));
+		}
+		return true;
+	}
+
+	// The next run of non-space characters at or after `at`, which moves past it; empty at the end.
+	static Core::StringView NextField(Core::StringView text, int64& at) {
+		while (at < text.ByteLength() && Core::IsSpace(text.ByteAt(at))) ++at;
+		const int64 start = at;
+		while (at < text.ByteLength() && !Core::IsSpace(text.ByteAt(at))) ++at;
+		return text.Substring(start, at - start);
+	}
+
+	bool ParseRange(Core::StringView text, Range& range) {
+		Range parsed;
+		int64 at = 0;
+		for (Core::StringView field = NextField(text, at); !field.IsEmpty(); field = NextField(text, at)) {
+			Core::Array<Comparator> comparators;
+			if (!ParseComparator(field, comparators)) return false;
+			parsed.comparators.Append(comparators);
+		}
+		if (parsed.comparators.IsEmpty()) return false;
+		range = take(parsed);
+		return true;
+	}
+
+	static bool Holds(const Comparator& comparator, const Version& version) {
+		const int32 order = Compare(version, comparator.version);
+		switch (comparator.op) {
+			case Operator::Greater: return order > 0;
+			case Operator::GreaterOrEqual: return order >= 0;
+			case Operator::Less: return order < 0;
+			case Operator::LessOrEqual: return order <= 0;
+			default: return order == 0;
+		}
+	}
+
+	static bool SameCore(const Version& a, const Version& b) {
+		return a.major == b.major && a.minor == b.minor && a.patch == b.patch;
+	}
+
+	static bool AllowsPrerelease(const Range& range, const Version& version) {
+		for (const Comparator& comparator : range.comparators)
+			if (!comparator.version.prerelease.IsEmpty() && SameCore(comparator.version, version)) return true;
+		return false;
+	}
+
+	bool Satisfies(const Version& version, const Range& range) {
+		for (const Comparator& comparator : range.comparators)
+			if (!Holds(comparator, version)) return false;
+		return version.prerelease.IsEmpty() || AllowsPrerelease(range, version);
+	}
+}

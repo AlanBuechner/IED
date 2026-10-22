@@ -1,0 +1,8 @@
+[workspace]
+name = "semver"
+toolchain = "dev"
+default-project = "semver"
+
+[project]
+name = "semver"
+kind = "executable"

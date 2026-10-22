@@ -1,0 +1,2 @@
+orders 0 total 0.00
+average 0.00

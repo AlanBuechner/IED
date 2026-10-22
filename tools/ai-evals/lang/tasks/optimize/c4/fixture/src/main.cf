@@ -1,0 +1,20 @@
+include "bedrock.ch"
+include "stats.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 2) {
+		Platform::WriteError(Core::StringView("usage: logstats <file>\n"));
+		return kExitUsage;
+	}
+	FS::File file = FS::File(argv[1], "rb");
+	if (!file.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + argv[1] + "\n").View());
+		return kExitError;
+	}
+	Core::String log = file.ReadText();
+	Platform::WriteOutput(LogStats::Report(LogStats::Analyze(log.View())).View());
+	return 0;
+}

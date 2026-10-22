@@ -1,0 +1,109 @@
+title = "Add options and a report command to an existing multi-file program"
+category = "feature"
+set = "tune"
+timeout_minutes = 45
+
+[c4]
+project = "ledger"
+prompt = """
+`ledger` is a small C4 program (a Nuke workspace) that reads a CSV ledger of transactions and prints balances or lists transactions; `data/sample.csv` is an example. Extend it:
+
+1. A `--month YYYY-MM` option that every command accepts, keeping only the transactions of that month. A value that is not a valid month (four digits, `-`, two digits from 01 to 12) prints `error: bad month <value>` to standard error and exits with code 2, before the file is read.
+2. Make `--account NAME` work with every command too (today only `list` uses it). Options can come in any order after the command.
+3. A new `report` command: the spending (negative amounts) per category, one line per category as `<category> <total> <percent>%`, where total is the money spent as a positive amount with two decimals and percent is the category's share of all the spending with one decimal, rounded half up. Order by total spent, highest first; equal totals by category name. Then a last line `total <all spending>`. When nothing was spent, print `no spending`.
+4. The usage line becomes `usage: ledger <file> <balance|list|report> [--account NAME] [--month YYYY-MM]`.
+
+Keep the existing behavior otherwise and follow the code's existing structure. Add unit tests for the new logic, and build and test before you finish.
+"""
+
+[go]
+project = "ledger"
+prompt = """
+`ledger` is a small Go program (package main in this module) that reads a CSV ledger of transactions and prints balances or lists transactions; `data/sample.csv` is an example. Extend it:
+
+1. A `--month YYYY-MM` option that every command accepts, keeping only the transactions of that month. A value that is not a valid month (four digits, `-`, two digits from 01 to 12) prints `error: bad month <value>` to standard error and exits with code 2, before the file is read.
+2. Make `--account NAME` work with every command too (today only `list` uses it). Options can come in any order after the command.
+3. A new `report` command: the spending (negative amounts) per category, one line per category as `<category> <total> <percent>%`, where total is the money spent as a positive amount with two decimals and percent is the category's share of all the spending with one decimal, rounded half up. Order by total spent, highest first; equal totals by category name. Then a last line `total <all spending>`. When nothing was spent, print `no spending`.
+4. The usage line becomes `usage: ledger <file> <balance|list|report> [--account NAME] [--month YYYY-MM]`.
+
+Keep the existing behavior otherwise and follow the code's existing structure. Add unit tests for the new logic, and build and test before you finish.
+"""
+
+[[checks]]
+name = "balance-unchanged"
+args = ["{data}/sample.csv", "balance"]
+stdout_file = "data/expected/balance.txt"
+
+[[checks]]
+name = "list-account-unchanged"
+args = ["{data}/sample.csv", "list", "--account", "card"]
+stdout_file = "data/expected/list-card.txt"
+
+[[checks]]
+name = "report"
+args = ["{data}/sample.csv", "report"]
+stdout_file = "data/expected/report.txt"
+
+[[checks]]
+name = "report-month"
+args = ["{data}/sample.csv", "report", "--month", "2024-02"]
+stdout_file = "data/expected/report-feb.txt"
+
+[[checks]]
+name = "balance-month"
+args = ["{data}/sample.csv", "balance", "--month", "2024-01"]
+stdout_file = "data/expected/balance-jan.txt"
+
+[[checks]]
+name = "list-account-month"
+args = ["{data}/sample.csv", "list", "--account", "card", "--month", "2024-02"]
+stdout_file = "data/expected/list-card-feb.txt"
+
+[[checks]]
+name = "list-month-account"
+args = ["{data}/sample.csv", "list", "--month", "2024-02", "--account", "card"]
+stdout_file = "data/expected/list-feb-card.txt"
+
+[[checks]]
+name = "report-nothing-spent"
+args = ["{data}/sample.csv", "report", "--account", "checking", "--month", "2024-03"]
+stdout_file = "data/expected/report-nothing.txt"
+
+[[checks]]
+name = "report-rounding"
+args = ["{data}/rounding.csv", "report"]
+stdout_file = "data/expected/report-rounding.txt"
+
+[[checks]]
+name = "report-ties"
+args = ["{data}/ties.csv", "report"]
+stdout_file = "data/expected/report-ties.txt"
+
+[[checks]]
+name = "balance-account"
+args = ["{data}/ties.csv", "balance", "--account", "cash"]
+stdout_file = "data/expected/balance-cash.txt"
+
+[[checks]]
+name = "bad-month"
+args = ["{data}/sample.csv", "report", "--month", "2024-13"]
+exit = 2
+stderr_contains = "error: bad month 2024-13"
+
+[[checks]]
+name = "bad-month-before-file"
+args = ["{data}/no-such.csv", "balance", "--month", "2024-1"]
+exit = 2
+stderr_contains = "error: bad month 2024-1"
+
+[[checks]]
+name = "usage"
+args = ["{data}/sample.csv", "summary"]
+exit = 2
+stderr_contains = "usage: ledger <file> <balance|list|report> [--account NAME] [--month YYYY-MM]"
+
+[[checks]]
+name = "bad-line-unchanged"
+args = ["{data}/bad.csv", "report"]
+exit = 1
+stderr_contains = "error: line 3: bad amount"

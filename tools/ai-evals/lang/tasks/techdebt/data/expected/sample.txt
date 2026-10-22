@@ -1,0 +1,26 @@
+section blue
+  Dev 85.9 B
+  Ada 85.8 B
+  Pia 78.7 C
+  Jun 75.4 C
+  Gus 73.0 C
+  Mo 57.4 F
+  mean 76.0 median 77.0
+section green
+  Ivo 81.6 B
+  Oz 78.1 C
+  Lea 66.6 D
+  Rae 61.3 D
+  Cleo 58.0 F
+  Fay 56.5 F
+  mean 67.0 median 63.9
+section red
+  Ben 95.9 A
+  Quin 67.4 D
+  Eli 66.8 D
+  Kai 61.5 D
+  Nia 58.6 F
+  Hana 56.4 F
+  mean 67.8 median 64.2
+overall mean 70.3
+honor roll: Ben

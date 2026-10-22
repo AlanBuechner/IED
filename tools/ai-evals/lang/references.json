@@ -1,0 +1,46 @@
+{
+	"wordfreq": {
+		"c4": {
+			"benchSeconds": 0.337,
+			"benchMB": 99.6
+		},
+		"go": {
+			"benchSeconds": 0.428,
+			"benchMB": 134.3
+		}
+	},
+	"spans": {
+		"c4": {
+			"benchSeconds": 0.484,
+			"benchMB": 27.3,
+			"startSeconds": 0.007
+		},
+		"go": {
+			"benchSeconds": 0.367,
+			"benchMB": 18.9
+		}
+	},
+	"optimize": {
+		"c4": {
+			"benchSeconds": 0.195,
+			"benchMB": 99.6,
+			"startSeconds": 9.073
+		},
+		"go": {
+			"benchSeconds": 0.249,
+			"benchMB": 57.2,
+			"startSeconds": 5.135
+		}
+	},
+	"jsonagg": {
+		"c4": {
+			"benchSeconds": 0.669,
+			"benchMB": 348.5,
+			"startSeconds": 0.006
+		},
+		"go": {
+			"benchSeconds": 0.646,
+			"benchMB": 169.2
+		}
+	}
+}

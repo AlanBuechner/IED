@@ -1,0 +1,8 @@
+[workspace]
+name = "ledger"
+toolchain = "dev"
+default-project = "ledger"
+
+[project]
+name = "ledger"
+kind = "executable"

@@ -1,0 +1,152 @@
+include "semver.ch"
+
+namespace Semver
+{
+	static bool IsDigit(int32 c) {
+		return c >= '0' && c <= '9';
+	}
+
+	static bool IsIdentifierChar(int32 c) {
+		return IsDigit(c) || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-';
+	}
+
+	static bool IsNumeric(Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (!IsDigit(text.ByteAt(i))) return false;
+		return !text.IsEmpty();
+	}
+
+	static bool HasLeadingZero(Core::StringView text) {
+		return text.ByteLength() > 1 && text.ByteAt(0) == '0';
+	}
+
+	static bool IsIdentifier(Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (!IsIdentifierChar(text.ByteAt(i))) return false;
+		return !text.IsEmpty();
+	}
+
+	static bool IsPrereleaseIdentifier(Core::StringView text) {
+		return IsIdentifier(text) && !(IsNumeric(text) && HasLeadingZero(text));
+	}
+
+	// The parts of the text between dots; "a..b" has an empty one.
+	static Core::Array<Core::StringView> SplitDots(Core::StringView text) {
+		Core::Array<Core::StringView> parts;
+		int64 start = 0;
+		for (int64 dot = text.IndexOf('.', 0); dot >= 0; dot = text.IndexOf('.', start)) {
+			parts.Push(text.Substring(start, dot - start));
+			start = dot + 1;
+		}
+		parts.Push(text.Substring(start, text.ByteLength() - start));
+		return parts;
+	}
+
+	// Splits the text at its first `separator`: the text keeps what comes before it and `after` gets the rest.
+	static bool Cut(Core::StringView& text, char separator, Core::StringView& after) {
+		const int64 at = text.IndexOf(separator, 0);
+		if (at < 0) return false;
+		after = text.Substring(at + 1, text.ByteLength());
+		text = text.Substring(0, at);
+		return true;
+	}
+
+	static bool ParseNumber(Core::StringView text, int64& value) {
+		return IsNumeric(text) && !HasLeadingZero(text) && Core::ParseInt64(text, value);
+	}
+
+	static bool ParseCore(Core::StringView text, Version& version) {
+		Core::Array<Core::StringView> parts = SplitDots(text);
+		return parts.Count() == 3 && ParseNumber(parts[0], version.major) && ParseNumber(parts[1], version.minor) &&
+			ParseNumber(parts[2], version.patch);
+	}
+
+	static bool ParseIdentifiers(Core::StringView text, funcptr<bool(Core::StringView)> valid, Core::Array<Core::String>& identifiers) {
+		for (Core::StringView part : SplitDots(text)) {
+			if (!valid(part)) return false;
+			identifiers.Push(Core::String(part));
+		}
+		return true;
+	}
+
+	bool ParseVersion(Core::StringView text, Version& version) {
+		Core::StringView rest = text;
+		Core::StringView build;
+		Core::StringView prerelease;
+		const bool hasBuild = Cut(rest, '+', build);
+		const bool hasPrerelease = Cut(rest, '-', prerelease);
+		Version parsed;
+		bool ok = ParseCore(rest, parsed);
+		if (ok && hasPrerelease) ok = ParseIdentifiers(prerelease, IsPrereleaseIdentifier, parsed.prerelease);
+		if (ok && hasBuild) ok = ParseIdentifiers(build, IsIdentifier, parsed.build);
+		if (ok) version = take(parsed);
+		return ok;
+	}
+
+	static void AppendIdentifiers(Core::StringBuilder& out, const char* separator, const Core::Array<Core::String>& identifiers) {
+		for (int64 i = 0; i < identifiers.Count(); ++i) {
+			out.Append(i == 0 ? separator : ".");
+			out.Append(identifiers[i].View());
+		}
+	}
+
+	Core::String Version::ToString() const {
+		Core::StringBuilder out;
+		Core::Format(&out, "{0:D}.{1:D}.{2:D}", major, minor, patch);
+		AppendIdentifiers(out, "-", prerelease);
+		AppendIdentifiers(out, "+", build);
+		return out.ToString();
+	}
+
+	static int32 CompareNumbers(int64 a, int64 b) {
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+
+	static int32 CompareText(Core::StringView a, Core::StringView b) {
+		return a < b ? -1 : b < a ? 1 : 0;
+	}
+
+	// Digit strings without leading zeros, by value whatever their length.
+	static int32 CompareNumeric(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return CompareNumbers(a.ByteLength(), b.ByteLength());
+		return CompareText(a, b);
+	}
+
+	static int32 CompareIdentifiers(Core::StringView a, Core::StringView b) {
+		const bool aNumeric = IsNumeric(a);
+		const bool bNumeric = IsNumeric(b);
+		if (aNumeric && bNumeric) return CompareNumeric(a, b);
+		if (aNumeric) return -1;
+		if (bNumeric) return 1;
+		return CompareText(a, b);
+	}
+
+	static int32 ComparePrerelease(const Core::Array<Core::String>& a, const Core::Array<Core::String>& b) {
+		if (a.IsEmpty() || b.IsEmpty()) return CompareNumbers(b.Count(), a.Count());
+		for (int64 i = 0; i < a.Count() && i < b.Count(); ++i) {
+			const int32 order = CompareIdentifiers(a[i].View(), b[i].View());
+			if (order != 0) return order;
+		}
+		return CompareNumbers(a.Count(), b.Count());
+	}
+
+	int32 Compare(const Version& a, const Version& b) {
+		int32 order = CompareNumbers(a.major, b.major);
+		if (order == 0) order = CompareNumbers(a.minor, b.minor);
+		if (order == 0) order = CompareNumbers(a.patch, b.patch);
+		if (order == 0) order = ComparePrerelease(a.prerelease, b.prerelease);
+		return order;
+	}
+
+	void SortVersions(Core::Array<Version>& versions) {
+		Core::Array<int64> order;
+		for (int64 i = 0; i < versions.Count(); ++i) order.Push(i);
+		order.SortBy([&versions](int64 a, int64 b) -> bool {
+			const int32 precedence = Compare(versions[a], versions[b]);
+			return precedence != 0 ? precedence < 0 : a < b;
+		});
+		Core::Array<Version> sorted;
+		for (int64 i : order) sorted.Push(versions[i]);
+		versions = take(sorted);
+	}
+}

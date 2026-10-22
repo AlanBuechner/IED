@@ -1,0 +1,8 @@
+[workspace]
+name = "invoice"
+toolchain = "dev"
+default-project = "invoice"
+
+[project]
+name = "invoice"
+kind = "executable"

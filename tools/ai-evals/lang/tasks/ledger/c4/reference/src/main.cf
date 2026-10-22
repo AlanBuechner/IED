@@ -1,0 +1,40 @@
+include "bedrock.ch"
+include "commands.ch"
+include "options.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static int32 Usage() {
+	Platform::WriteError(Core::StringView("usage: ledger <file> <balance|list|report> [--account NAME] [--month YYYY-MM]\n"));
+	return kExitUsage;
+}
+
+static int32 Fail(Core::StringView message) {
+	Platform::WriteError((Core::String("error: ") + message + "\n").View());
+	return kExitError;
+}
+
+static bool IsCommand(const Core::String& command) { return command == "balance" || command == "list" || command == "report"; }
+
+static Core::String Run(const Core::String& command, const Core::Array<Ledger::Transaction>& rows) {
+	if (command == "balance") return Ledger::Balance(rows);
+	if (command == "list") return Ledger::List(rows);
+	return Ledger::Report(rows);
+}
+
+int32 main(int32 argc, char** argv) {
+	Ledger::Options options;
+	if (!Ledger::ParseOptions(argc, argv, options) || !IsCommand(options.command)) return Usage();
+	if (!options.month.IsEmpty() && !Ledger::IsMonth(options.month.View())) {
+		Platform::WriteError((Core::String("error: bad month ") + options.month.View() + "\n").View());
+		return kExitUsage;
+	}
+	FS::File file = FS::File(options.file.CStr(), "rb");
+	if (!file.IsOpen()) return Fail((Core::String("cannot read ") + options.file.View()).View());
+	Core::String text = file.ReadText();
+	Ledger::LoadResult ledger = Ledger::ParseLedger(text.View());
+	if (!ledger.error.IsEmpty()) return Fail(ledger.error.View());
+	Platform::WriteOutput(Run(options.command, Ledger::Filter(ledger.rows, options.account.View(), options.month.View())).View());
+	return 0;
+}

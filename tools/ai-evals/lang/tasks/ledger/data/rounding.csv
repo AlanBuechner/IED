@@ -1,0 +1,4 @@
+date,account,category,amount,memo
+2024-05-01,card,tiny,-0.01,Gum
+2024-05-02,card,big,-19.99,Book
+2024-05-03,card,refund,5.00,Refund

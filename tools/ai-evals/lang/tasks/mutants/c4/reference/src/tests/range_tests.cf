@@ -1,0 +1,110 @@
+include "range.ch"
+
+static bool RangeParses(const char* text) {
+	Semver::Range range;
+	return Semver::ParseRange(Core::StringView(text), range);
+}
+
+static bool Satisfied(const char* versionText, const char* rangeText) {
+	Semver::Version version;
+	Semver::Range range;
+	assert_true(Semver::ParseVersion(Core::StringView(versionText), version), versionText);
+	assert_true(Semver::ParseRange(Core::StringView(rangeText), range), rangeText);
+	return Semver::Satisfies(version, range);
+}
+
+static const char* OperatorText(Semver::Operator op) {
+	switch (op) {
+		case Semver::Operator::Greater: return ">";
+		case Semver::Operator::GreaterOrEqual: return ">=";
+		case Semver::Operator::Less: return "<";
+		case Semver::Operator::LessOrEqual: return "<=";
+		default: return "=";
+	}
+}
+
+// The parsed range's comparators written back as text: "^1.2.3" is ">=1.2.3 <2.0.0".
+static Core::String Expanded(const char* text) {
+	Semver::Range range;
+	assert_true(Semver::ParseRange(Core::StringView(text), range), text);
+	Core::StringBuilder out;
+	for (const Semver::Comparator& comparator : range.comparators) {
+		if (!out.IsEmpty()) out.Append(" ");
+		out.Append(OperatorText(comparator.op));
+		out.Append(comparator.version.ToString().View());
+	}
+	return out.ToString();
+}
+
+[test("semver.range.parse")]
+static void ParsesComparators() {
+	assert_true(Expanded(">=1.2.3 <2.0.0") == ">=1.2.3 <2.0.0", ">= and <");
+	assert_true(Expanded(">1.0.0 <=1.5.0-rc.1") == ">1.0.0 <=1.5.0-rc.1", "> and <=");
+	assert_true(Expanded("=1.2.3") == "=1.2.3" && Expanded("1.2.3") == "=1.2.3", "= and a bare version");
+	assert_true(Expanded("^1.2.3") == ">=1.2.3 <2.0.0", "^1.2.3");
+	assert_true(Expanded("^0.2.3") == ">=0.2.3 <0.3.0", "^0.2.3");
+	assert_true(Expanded("^0.0.3") == ">=0.0.3 <0.0.4", "^0.0.3");
+	assert_true(Expanded("~1.2.3") == ">=1.2.3 <1.3.0", "~1.2.3");
+	assert_true(Expanded("~0.0.3 >0.0.1") == ">=0.0.3 <0.1.0 >0.0.1", "a tilde and another comparator");
+}
+
+[test("semver.range.invalid")]
+static void RejectsInvalidRanges() {
+	const char*[11] bad = { "", "   ", ">=1.2", ">= 1.2.3", "=>1.2.3", "!1.2.3", "^^1.2.3", "~>1.2.3", ">=1.2.3 x", "1.2.3,2.0.0", "<01.0.0" };
+	for (const char* text : bad) assert_true(!RangeParses(text), text);
+}
+
+[test("semver.range.equal")]
+static void MatchesExactly() {
+	assert_true(Satisfied("1.2.3", "=1.2.3") && !Satisfied("1.2.4", "=1.2.3") && !Satisfied("1.2.2", "=1.2.3"), "=");
+	assert_true(Satisfied("1.2.3", "1.2.3") && !Satisfied("1.3.3", "1.2.3"), "a bare version");
+	assert_true(Satisfied("1.2.3+build", "=1.2.3"), "build metadata ignored");
+	assert_true(Satisfied("1.2.3-rc.1", "=1.2.3-rc.1") && !Satisfied("1.2.3", "=1.2.3-rc.1"), "a pre-release");
+}
+
+[test("semver.range.inequalities")]
+static void ComparesWithBounds() {
+	assert_true(!Satisfied("1.2.3", ">1.2.3") && Satisfied("1.2.4", ">1.2.3") && !Satisfied("1.2.2", ">1.2.3"), ">");
+	assert_true(Satisfied("1.2.3", ">=1.2.3") && Satisfied("2.0.0", ">=1.2.3") && !Satisfied("1.2.2", ">=1.2.3"), ">=");
+	assert_true(!Satisfied("1.2.3", "<1.2.3") && Satisfied("1.2.2", "<1.2.3") && !Satisfied("1.3.0", "<1.2.3"), "<");
+	assert_true(Satisfied("1.2.3", "<=1.2.3") && Satisfied("0.9.0", "<=1.2.3") && !Satisfied("1.2.4", "<=1.2.3"), "<=");
+}
+
+[test("semver.range.caret")]
+static void CaretAllowsCompatibleChanges() {
+	assert_true(Satisfied("1.2.3", "^1.2.3") && Satisfied("1.3.0", "^1.2.3") && Satisfied("1.99.99", "^1.2.3"), "^1.2.3 inside");
+	assert_true(!Satisfied("1.2.2", "^1.2.3") && !Satisfied("2.0.0", "^1.2.3") && !Satisfied("2.1.0", "^1.2.3"), "^1.2.3 outside");
+	assert_true(Satisfied("0.2.3", "^0.2.3") && Satisfied("0.2.9", "^0.2.3"), "^0.2.3 inside");
+	assert_true(!Satisfied("0.3.0", "^0.2.3") && !Satisfied("0.2.2", "^0.2.3") && !Satisfied("1.0.0", "^0.2.3"), "^0.2.3 outside");
+	assert_true(Satisfied("0.0.3", "^0.0.3") && !Satisfied("0.0.4", "^0.0.3") && !Satisfied("0.0.2", "^0.0.3") && !Satisfied("0.1.0", "^0.0.3"), "^0.0.3");
+	assert_true(Satisfied("0.0.0", "^0.0.0") && !Satisfied("0.0.1", "^0.0.0"), "^0.0.0");
+}
+
+[test("semver.range.tilde")]
+static void TildeAllowsPatches() {
+	assert_true(Satisfied("1.2.3", "~1.2.3") && Satisfied("1.2.9", "~1.2.3"), "~1.2.3 inside");
+	assert_true(!Satisfied("1.3.0", "~1.2.3") && !Satisfied("1.2.2", "~1.2.3") && !Satisfied("2.0.0", "~1.2.3"), "~1.2.3 outside");
+	assert_true(Satisfied("0.2.5", "~0.2.3") && !Satisfied("0.3.0", "~0.2.3"), "~0.2.3");
+}
+
+[test("semver.range.conjunction")]
+static void RequiresEveryComparator() {
+	assert_true(!Satisfied("0.5.0", ">=1.0.0 <2.0.0") && !Satisfied("2.0.0", ">=1.0.0 <2.0.0"), "outside");
+	assert_true(Satisfied("1.0.0", ">=1.0.0 <2.0.0") && Satisfied("1.5.0", ">=1.0.0 <2.0.0"), "inside");
+	assert_true(!Satisfied("0.5.0", "<2.0.0 >=1.0.0"), "in any order");
+	assert_true(Satisfied("1.5.0", "  >=1.0.0 \t <2.0.0  "), "extra spaces");
+	assert_true(Satisfied("1.4.0", "^1.2.3 <1.5.0") && !Satisfied("1.6.0", "^1.2.3 <1.5.0"), "with a caret");
+	assert_true(!Satisfied("1.0.0", ">1.0.0 <1.0.0"), "empty intersection");
+}
+
+[test("semver.range.prerelease")]
+static void PrereleasesNeedTheSameCore() {
+	assert_true(!Satisfied("1.3.0-beta", ">=1.2.0"), "no comparator with a pre-release");
+	assert_true(Satisfied("1.2.3-beta.2", ">=1.2.3-beta.1 <1.3.0"), "same core");
+	assert_true(!Satisfied("1.2.3-alpha", ">=1.2.3-beta.1"), "same core, lower");
+	assert_true(!Satisfied("1.2.4-beta", ">=1.2.3-alpha") && !Satisfied("1.3.3-beta", ">=1.2.3-alpha"), "another patch or minor");
+	assert_true(!Satisfied("2.2.3-beta", ">=1.2.3-alpha"), "another major");
+	assert_true(Satisfied("1.2.3-rc.1", "^1.2.3-beta") && !Satisfied("1.2.4-rc.1", "^1.2.3-beta"), "caret");
+	assert_true(!Satisfied("2.0.0-rc.1", "^1.2.3") && !Satisfied("2.0.0-rc.1", "<2.0.0"), "an upper bound");
+	assert_true(Satisfied("1.2.4", ">=1.2.3-alpha"), "a release still satisfies it");
+}

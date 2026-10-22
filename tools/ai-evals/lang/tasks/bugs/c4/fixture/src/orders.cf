@@ -1,0 +1,52 @@
+include "orders.ch"
+include "pricing.ch"
+
+namespace Invoice
+{
+	static void AppendMoney(Core::StringBuilder& out, int64 cents) {
+		out.AppendInt(cents / kCentsPerUnit);
+		out.Append(".");
+		out.AppendIntBase(cents % kCentsPerUnit, 10, 2);
+	}
+
+	Core::Array<Order> GroupOrders(const Core::Array<OrderLine>& lines) {
+		Core::Array<Order> orders;
+		Core::HashMap<Core::String, int64> indexOf;
+		for (const OrderLine& line : lines) {
+			int64* index = indexOf.Find(line.order);
+			if (!index) {
+				Order order;
+				order.id = line.order;
+				order.customer = line.customer;
+				order.tier = line.tier;
+				indexOf.Insert(line.order, orders.Count());
+				orders.Push(take(order));
+				index = indexOf.Find(line.order);
+			}
+			orders[*index].lines.Push(line);
+		}
+		return orders;
+	}
+
+	Core::String Report(const Core::Array<Order>& orders) {
+		Core::StringBuilder out;
+		int64 sum = 0;
+		for (const Order& order : orders) {
+			const int64 total = PriceOrder(order.lines).total;
+			sum += total;
+			out.Append(order.id.View());
+			out.Append(" ");
+			out.Append(order.customer.View());
+			out.Append(" ");
+			AppendMoney(out, total);
+			out.Append("\n");
+		}
+		const int64 average = (sum + orders.Count() / 2) / orders.Count();
+		Core::Format(&out, "orders {0:D} total ", orders.Count());
+		AppendMoney(out, sum);
+		out.Append("\naverage ");
+		AppendMoney(out, average);
+		out.Append("\n");
+		return out.ToString();
+	}
+}

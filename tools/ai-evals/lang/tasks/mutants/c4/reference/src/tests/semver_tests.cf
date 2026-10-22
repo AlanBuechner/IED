@@ -1,0 +1,164 @@
+include "semver.ch"
+
+static bool Parses(const char* text) {
+	Semver::Version version;
+	return Semver::ParseVersion(Core::StringView(text), version);
+}
+
+static Semver::Version Parsed(const char* text) {
+	Semver::Version version;
+	assert_true(Semver::ParseVersion(Core::StringView(text), version), text);
+	return version;
+}
+
+static int32 CompareTexts(const char* a, const char* b) {
+	return Semver::Compare(Parsed(a), Parsed(b));
+}
+
+// The identifiers joined by "|", so that a whole list is checked at once (and an empty one is never indexed).
+static Core::String Joined(const Core::Array<Core::String>& identifiers) {
+	Core::StringBuilder out;
+	for (int64 i = 0; i < identifiers.Count(); ++i) {
+		if (i > 0) out.Append("|");
+		out.Append(identifiers[i].View());
+	}
+	return out.ToString();
+}
+
+[test("semver.parse.core")]
+static void ParsesTheCore() {
+	Semver::Version version = Parsed("1.20.300");
+	assert_eq((int64)1, version.major, "major");
+	assert_eq((int64)20, version.minor, "minor");
+	assert_eq((int64)300, version.patch, "patch");
+	assert_true(version.prerelease.IsEmpty() && version.build.IsEmpty(), "no identifiers");
+	assert_true(Parses("0.0.0") && Parses("10.20.30"), "zeros and several digits");
+	assert_eq((int64)9223372036854775807, Parsed("9223372036854775807.0.0").major, "the largest int64");
+}
+
+[test("semver.parse.identifiers")]
+static void ParsesIdentifiers() {
+	Semver::Version version = Parsed("1.0.0-alpha.1.x-y.0a+build.001.exp-2");
+	assert_true(Joined(version.prerelease) == "alpha|1|x-y|0a", "pre-release");
+	assert_true(Joined(version.build) == "build|001|exp-2", "build");
+}
+
+[test("semver.parse.build_only")]
+static void ParsesBuildWithoutPrerelease() {
+	Semver::Version version = Parsed("1.0.0+build-1.2");
+	assert_true(version.prerelease.IsEmpty(), "a hyphen after + belongs to the build");
+	assert_true(Joined(version.build) == "build-1|2", "build");
+	assert_true(Parses("1.0.0+20130313144700") && Parses("1.0.0-beta+exp.sha.5114f85"), "spec examples");
+}
+
+[test("semver.parse.hyphens")]
+static void AcceptsHyphensInIdentifiers() {
+	assert_true(Joined(Parsed("1.2.3-x-y").prerelease) == "x-y", "x-y");
+	assert_true(Joined(Parsed("1.2.3--").prerelease) == "-", "a lone hyphen");
+	assert_true(Joined(Parsed("1.2.3-alpha--1.-").prerelease) == "alpha--1|-", "alpha--1.-");
+	assert_true(Joined(Parsed("1.2.3+-").build) == "-", "a hyphen in the build");
+}
+
+[test("semver.parse.leading_zeros")]
+static void RejectsLeadingZeros() {
+	assert_true(!Parses("01.2.3") && !Parses("1.02.3") && !Parses("1.2.03") && !Parses("00.0.0"), "core");
+	assert_true(!Parses("1.2.3-01") && !Parses("1.2.3-alpha.007") && !Parses("1.2.3-00"), "numeric pre-release");
+	assert_true(Parses("1.2.3-0") && Parses("1.2.3-0a") && Parses("1.2.3-0-1") && Parses("1.2.3-00a"), "zero, alphanumeric");
+	assert_true(Parses("1.2.3+001") && Parses("1.2.3+0.00") && Parses("1.2.3-rc.1+007"), "build allows them");
+}
+
+[test("semver.parse.missing_and_extra_parts")]
+static void RejectsBadCores() {
+	const char*[12] bad = { "", "1", "1.2", "1.2.", ".1.2", "1..3", "1.2.3.4", "a.b.c", "-1.2.3", "v1.2.3", "1.2.x", "1.2.3.alpha" };
+	for (const char* text : bad) assert_true(!Parses(text), text);
+	assert_true(!Parses("99999999999999999999.0.0") && !Parses("1.9223372036854775808.0"), "beyond int64");
+}
+
+[test("semver.parse.empty_identifiers")]
+static void RejectsEmptyIdentifiers() {
+	const char*[9] bad = { "1.2.3-", "1.2.3+", "1.2.3-a..b", "1.2.3-.a", "1.2.3-a.", "1.2.3+a..b", "1.2.3+.a", "1.2.3-+b", "1.2.3-a+" };
+	for (const char* text : bad) assert_true(!Parses(text), text);
+}
+
+[test("semver.parse.characters")]
+static void RejectsOtherCharacters() {
+	const char*[11] bad = { "1.2.3-a_b", "1.2.3-a^b", "1.2.3-a`b", "1.2.3-[a]", "1.2.3-a b", "1.2.3-a$", "1.2.3+a_b", "1.2.3+a+b",
+		" 1.2.3", "1.2.3 ", "1.2.3-alpha!" };
+	for (const char* text : bad) assert_true(!Parses(text), text);
+	assert_true(Parses("1.2.3-AZaz09") && Parses("1.2.3+AZaz09-"), "letters, digits and hyphens");
+}
+
+[test("semver.parse.keeps_output_on_failure")]
+static void LeavesTheVersionOnFailure() {
+	Semver::Version version = Parsed("4.5.6");
+	assert_true(!Semver::ParseVersion(Core::StringView("1.2"), version), "invalid");
+	assert_eq((int64)4, version.major, "unchanged");
+}
+
+[test("semver.format")]
+static void FormatsVersions() {
+	const char*[6] texts = { "1.2.3", "0.0.0", "1.0.0-alpha.1", "1.0.0+build.5", "1.0.0-rc.1+build.5", "10.20.30-x-y.0a+001.exp-2" };
+	for (const char* text : texts) assert_true(Parsed(text).ToString() == text, text);
+}
+
+[test("semver.compare.numbers")]
+static void ComparesNumbersByValue() {
+	assert_eq(-1, CompareTexts("1.2.3", "1.2.4"), "patch");
+	assert_eq(1, CompareTexts("1.2.10", "1.2.9"), "patch numerically");
+	assert_eq(-1, CompareTexts("1.2.0", "1.4.0"), "minor, always -1");
+	assert_eq(1, CompareTexts("1.3.0", "1.2.9"), "minor before patch");
+	assert_eq(-1, CompareTexts("1.9.0", "1.10.0"), "minor numerically");
+	assert_eq(1, CompareTexts("3.0.0", "1.99.99"), "major before minor, always 1");
+	assert_eq(0, CompareTexts("1.2.3", "1.2.3"), "equal");
+}
+
+[test("semver.compare.prerelease_below_release")]
+static void ComparesPrereleaseBelowRelease() {
+	assert_eq(-1, CompareTexts("1.0.0-alpha", "1.0.0"), "pre-release first");
+	assert_eq(1, CompareTexts("1.0.0", "1.0.0-rc.1"), "release last");
+	assert_eq(1, CompareTexts("1.0.1-alpha", "1.0.0"), "the core decides first");
+}
+
+[test("semver.compare.spec_order")]
+static void FollowsTheSpecExample() {
+	const char*[8] ordered = { "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11",
+		"1.0.0-rc.1", "1.0.0" };
+	for (int64 i = 0; i + 1 < 8; ++i) {
+		assert_eq(-1, CompareTexts(ordered[i], ordered[i + 1]), ordered[i]);
+		assert_eq(1, CompareTexts(ordered[i + 1], ordered[i]), ordered[i + 1]);
+	}
+}
+
+[test("semver.compare.identifiers")]
+static void ComparesIdentifiers() {
+	assert_eq(-1, CompareTexts("1.0.0-9", "1.0.0-10"), "numeric by value");
+	assert_eq(1, CompareTexts("1.0.0-alpha.10", "1.0.0-alpha.9"), "numeric by value after a match");
+	assert_eq(-1, CompareTexts("1.0.0-99999999999999999999", "1.0.0-100000000000000000000"), "beyond int64");
+	assert_eq(-1, CompareTexts("1.0.0-1", "1.0.0-alpha"), "numeric below alphanumeric");
+	assert_eq(1, CompareTexts("1.0.0-0a", "1.0.0-999"), "alphanumeric above numeric");
+	assert_eq(-1, CompareTexts("1.0.0-Beta", "1.0.0-alpha"), "ASCII order: upper case first");
+	assert_eq(-1, CompareTexts("1.0.0-alpha", "1.0.0-alpha.0"), "a shorter list first");
+	assert_eq(1, CompareTexts("1.0.0-alpha.beta.1", "1.0.0-alpha.beta"), "a longer list last");
+	assert_eq(0, CompareTexts("1.0.0-rc.1", "1.0.0-rc.1"), "equal");
+}
+
+[test("semver.compare.build_ignored")]
+static void IgnoresBuildMetadata() {
+	assert_eq(0, CompareTexts("1.0.0+a", "1.0.0+b"), "builds differ");
+	assert_eq(0, CompareTexts("1.0.0-rc.1+build.9", "1.0.0-rc.1"), "build against none");
+	assert_eq(-1, CompareTexts("1.0.0-rc.1+zzz", "1.0.0"), "a build does not make a release");
+}
+
+[test("semver.sort")]
+static void SortsByPrecedenceKeepingTies() {
+	const char*[7] input = { "1.10.0", "1.0.0+b", "1.0.0-rc.1", "0.9.0", "1.0.0+a", "1.0.0", "1.2.0" };
+	Core::Array<Semver::Version> versions;
+	for (const char* text : input) versions.Push(Parsed(text));
+	Semver::SortVersions(versions);
+	Core::Array<Core::String> sorted;
+	for (const Semver::Version& version : versions) sorted.Push(version.ToString());
+	assert_true(Joined(sorted) == "0.9.0|1.0.0-rc.1|1.0.0+b|1.0.0+a|1.0.0|1.2.0|1.10.0", "ascending, ties in input order");
+	Core::Array<Semver::Version> none;
+	Semver::SortVersions(none);
+	assert_true(none.IsEmpty(), "empty");
+}

@@ -1,0 +1,3 @@
+order,customer,tier,sku,quantity,unit_price
+1,a,standard,x,1,1.00
+2,b,standard,x,1,1.01

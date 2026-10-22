@@ -1,0 +1,39 @@
+include "commands.ch"
+include "options.ch"
+
+static Ledger::Transaction Spent(const char* category, int64 cents) {
+	Ledger::Transaction row;
+	row.date = Core::String("2024-05-01");
+	row.account = Core::String("card");
+	row.category = Core::String(category);
+	row.cents = cents;
+	return row;
+}
+
+[test("ledger.report.rounds_half_up")]
+static void RoundsHalfUp() {
+	assert_eq((int64)1, Ledger::PercentTenths(1, 2000), "0.05% is 0.1%");
+	assert_eq((int64)125, Ledger::PercentTenths(1, 8), "12.5%");
+}
+
+[test("ledger.report.orders_and_totals")]
+static void OrdersByTotalThenName() {
+	Core::Array<Ledger::Transaction> rows;
+	rows.Push(Spent("b", -200));
+	rows.Push(Spent("a", -200));
+	rows.Push(Spent("c", -600));
+	rows.Push(Spent("pay", 1000));
+	assert_true(Ledger::Report(rows) == "c 6.00 60.0%\na 2.00 20.0%\nb 2.00 20.0%\ntotal 10.00\n", "report");
+}
+
+[test("ledger.report.nothing")]
+static void NothingSpent() {
+	Core::Array<Ledger::Transaction> rows;
+	assert_true(Ledger::Report(rows) == "no spending\n", "empty");
+}
+
+[test("ledger.options.month")]
+static void ChecksMonths() {
+	assert_true(Ledger::IsMonth(Core::StringView("2024-01")) && Ledger::IsMonth(Core::StringView("1999-12")), "valid");
+	assert_true(!Ledger::IsMonth(Core::StringView("2024-13")) && !Ledger::IsMonth(Core::StringView("2024-00")) && !Ledger::IsMonth(Core::StringView("2024-1")), "invalid");
+}
