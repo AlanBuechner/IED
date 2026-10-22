@@ -3,7 +3,8 @@
 # and sha256 together, then run `setup.bat --only <name> --force`.
 #
 # group: core   = needed to build the C4 compiler and run Nuke (always installed)
-#        ied    = the IED web client's libraries (installed by default; --without ied skips them)
+#        ied    = the IED web client's libraries and the web search services (installed by default; --without ied
+#                 skips them)
 #        extras = optional, for later milestones (--with extras)
 
 [packages.llvm]
@@ -79,12 +80,43 @@ strip = 1
 probe = "include/vulkan/vulkan_core.h"
 
 [packages.searxng]
-group = "extras"
+group = "ied"
 version = "d47cb96bfb79240d487bdb2336886d0dc59f2f30"
-description = "the bundled metasearcher for AI web search (docs/21); a tarball because 4 of its files have names Windows cannot create"
+description = "the metasearcher the ied.websearch plugin runs for web_search (docs/29); a tarball because 4 of its files have names Windows cannot create"
 url = "https://codeload.github.com/searxng/searxng/tar.gz/d47cb96bfb79240d487bdb2336886d0dc59f2f30"
 sha256 = "e0a721c5e47982c3a59111c905c36e27872db0feeeb945a0161412f788afc944"
 dest = "vendor/searxng"
 format = "tgz"
 strip = 1
 probe = "searx/__init__.py"
+
+[packages.pip]
+group = "ied"
+version = "26.2.2"
+description = "pip for the private Python, only to install searxng-packages"
+url = "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl"
+sha256 = "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+dest = "vendor/pip"
+format = "zip"
+probe = "pip/__main__.py"
+
+# Not an archive: pip installs the hash-pinned requirements file into dest (kind "pip"); it is reinstalled when that file
+# changes.
+[packages.searxng-packages]
+group = "ied"
+kind = "pip"
+version = "for searxng d47cb96"
+description = "SearXNG's Python packages and waitress, for the private Python (docs/29)"
+requirements = "tools/setup/searxng-requirements.txt"
+dest = "vendor/searxng-packages"
+probe = "waitress/__init__.py"
+
+[packages.tor]
+group = "ied"
+version = "15.0.26"
+description = "the Tor Expert Bundle: tor.exe, which the ied.tor plugin runs so web searches leave through Tor (docs/29)"
+url = "https://archive.torproject.org/tor-package-archive/torbrowser/15.0.26/tor-expert-bundle-windows-x86_64-15.0.26.tar.gz"
+sha256 = "c1988c701de2f24f7d098d1d6d7f507b58f27740d097f29c246e0524d639b252"
+dest = "vendor/tor"
+format = "tgz"
+probe = "tor/tor.exe"

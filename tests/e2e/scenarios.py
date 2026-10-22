@@ -1331,6 +1331,28 @@ def developer_settings_page(run):
 	run.shot("developer")
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def web_search_settings_page(run):
+	"""Web > Search (docs/29): SearXNG's and Tor's state from their topics, the engines with SearXNG's categories, Test
+	engines, and the window's own rows for the other keys; Web > Tor's generic rows. Nothing is searched: that needs the
+	network and Tor."""
+	page = run.open()
+	open_settings(run, page)
+	page.click(".set-node[data-page='custom:ied.websearch.search']")
+	pane = ".set-custom[data-page='custom:ied.websearch.search']"
+	run.wait_text(pane + " .ws-state", "next search starts it")
+	check(page.locator(pane + " .ws-engine").count() == 7, "the default engines")
+	if not run.phone:
+		page.wait_for_selector(pane + " .ws-engine[data-engine='wikipedia'] .ws-engine-cats:has-text('general')")
+	check(page.is_visible(pane + " button:has-text('Test engines')"), "engines can be tested")
+	page.wait_for_selector(pane + " .set-row[data-key='websearch.useTor'] input[type='checkbox']")
+	check(not page.is_visible(pane + " .set-row[data-key='websearch.engines']"), "the engines are drawn by the page, not as a row")
+	run.shot("search")
+	page.click(".set-node[data-page='page:Web/Tor']")
+	page.wait_for_selector(".set-row[data-key='tor.exitCountries']")
+	run.shot("tor")
+
+
 @scenario(viewports=("desktop",))
 def model_settings(run):
 	page = run.open()

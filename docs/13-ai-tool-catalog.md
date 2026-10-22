@@ -104,8 +104,10 @@ Every tool definition sent costs context at every step, and the list grows with 
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-WEB-1 | `web_search(query, engines?, n?)` | net | Bundled SearXNG via the egress proxy. |
-| T-WEB-2 | `web_fetch(url, mode?: markdown|raw|summary, max_tokens?)` | net | HTML -> clean markdown; PDF -> text; summary uses the `summarizer` role. |
+| T-WEB-1 | `web_search(query, engines?, count?, page?, time_range?, language?)` | net | The `ied.websearch` plugin's SearXNG, its engines asked through Tor (`ied.tor`). |
+| T-WEB-2 | `web_fetch(url, format?: markdown|text|raw, start?, max_chars?)` | net | The `ied.webfetch` plugin: fetched looking like a browser, HTML -> Markdown, long pages a window at a time. Not yet: PDF -> text, a `summary` format (the `summarizer` role). |
+
+**As built (2026-10-21, `docs/29`):** both are C4 functions of their plugins over their bindings (`websearch.search`, `webfetch.fetch`), in the `web` group, deferred; each plugin adds a one-line system-message section naming its tool. `web_search` lists numbered results (title, URL, snippet, the engines that found it, a date) with SearXNG's answers, suggestions and the engines that failed; a search that engines refused through the Tor exit is tried once more on new circuits. `web_fetch` returns a header (URL, status, type, title, length) and a window of the text, names bot checks ("Just a moment...") and suggests `browser_open` for them, PDFs and pages drawn by scripts.
 
 ### `browser` (headless Edge via CDP, server-side; built in `plugins/browser`, `docs/27`)
 

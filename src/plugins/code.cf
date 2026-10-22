@@ -283,7 +283,7 @@ namespace Ied
 			if (instance->queue.IsEmpty()) break;
 			CodeJob* job = instance->queue.Pop();
 			{
-				Threading::UnlockGuard unlocked(server->lock);
+				CodeUnlocked unlocked(server);
 				job->body();
 			}
 			job->done = true;
@@ -304,7 +304,7 @@ namespace Ied
 			return false;
 		}
 		if (CurrentCode() == instance) {
-			Threading::UnlockGuard unlocked(server->lock);
+			CodeUnlocked unlocked(server);
 			body(instance);
 			return true;
 		}

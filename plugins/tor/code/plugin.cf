@@ -1,0 +1,19 @@
+// The ied.tor plugin's entry (runtime.entry "Tor::Activate"): the tor.* bindings over one TorService.
+
+include "service.ch"
+
+namespace Tor
+{
+	void Activate(IED::PluginContext& context) {
+		TorService* tor = new TorService(&context);
+		tor->Start();
+		context.Provide(Core::StringView("tor.proxy"), [tor](const Serialization::DomNode& args) -> IED::Result { return IED::Answer(tor->Proxy().View()); });
+		context.Provide(Core::StringView("tor.newCircuit"), [tor](const Serialization::DomNode& args) -> IED::Result { return IED::Answer(tor->NewCircuit().View()); });
+		context.Provide(Core::StringView("tor.status"), [tor](const Serialization::DomNode& args) -> IED::Result { return IED::Answer(tor->Status().View()); });
+		context.Provide(Core::StringView("tor.stop"), [tor](const Serialization::DomNode& args) -> IED::Result {
+			tor->Stop(false);
+			return IED::Answer(Core::StringView("{}"));
+		});
+		context.OnDeactivate([tor]() { tor->Stop(true); });
+	}
+}

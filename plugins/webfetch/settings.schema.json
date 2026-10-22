@@ -1,0 +1,49 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Web fetch settings",
+	"type": "object",
+	"properties": {
+		"webfetch.maxChars": {
+			"type": "integer",
+			"minimum": 1000,
+			"maximum": 100000,
+			"default": 20000,
+			"x-ied-tiers": ["app"],
+			"description": "How many characters of a page web_fetch gives the AI at once when it does not say; it reads on with start."
+		},
+		"webfetch.maxBytes": {
+			"type": "integer",
+			"minimum": 65536,
+			"maximum": 104857600,
+			"default": 5242880,
+			"x-ied-tiers": ["app"],
+			"description": "The most of a page's body web_fetch downloads; a larger page is cut there and says so."
+		},
+		"webfetch.timeoutSeconds": {
+			"type": "integer",
+			"minimum": 5,
+			"maximum": 300,
+			"default": 30,
+			"x-ied-tiers": ["app"],
+			"description": "How long a fetch may take, redirects included."
+		},
+		"webfetch.impersonate": {
+			"enum": ["chrome", "edge", "safari", "firefox", "off"],
+			"default": "chrome",
+			"x-ied-tiers": ["app"],
+			"description": "The browser web_fetch looks like to the sites it reads: its TLS and HTTP/2 fingerprint and headers (curl_cffi, installed with SearXNG's packages), which many bot checks let through where plain curl is refused. off: Windows' curl.exe with webfetch.userAgent, as it is when those packages are not installed."
+		},
+		"webfetch.userAgent": {
+			"type": "string",
+			"default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+			"x-ied-tiers": ["app"],
+			"description": "The User-Agent curl.exe sends when web_fetch does not impersonate a browser (which sends its own). A desktop browser's by default: many sites refuse or simplify pages for unknown clients."
+		},
+		"webfetch.curl": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The curl.exe web_fetch runs when it does not impersonate a browser. Empty: Windows' own (System32\\curl.exe)."
+		}
+	}
+}

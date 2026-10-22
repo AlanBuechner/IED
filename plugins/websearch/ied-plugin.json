@@ -1,0 +1,65 @@
+// Web search (docs/29 "SearXNG"): a SearXNG the server runs itself, its engines' requests sent through Tor (the ied.tor
+// plugin), for the AI's web_search tool and any plugin (websearch.search). Its server code (code/) is compiled into the
+// server; its UI module draws Settings > Web > Search.
+{
+	"manifestVersion": 1,
+	"id": "ied.websearch",
+	"name": "Web Search",
+	"version": "0.1.0",
+	"description": "Web search for the AI through a SearXNG IED runs itself, its engines asked through Tor.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "WebSearch::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "net.egress", "ai.tools"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Web/Search" },
+		"skills": ["skills"],
+		"settingsPages": [
+			{
+				"id": "ied.websearch.search",
+				"page": "Web",
+				"title": "Search",
+				"view": "SearchSettings",
+				"keys": ["websearch.engines", "websearch.useTor", "websearch.results", "websearch.safeSearch", "websearch.language", "websearch.timeoutSeconds", "websearch.newCircuitOnBlock", "websearch.stopAfterSeconds", "websearch.instanceUrl", "websearch.python", "websearch.searxngFolder"]
+			}
+		],
+		"bindings": {
+			"provides": [
+				{ "name": "websearch.search", "version": "1", "kind": "function", "description": "A web search: {query, engines?, count?, page?, time_range?, language?} -> {query, viaTor, text, results: [{title, url, content, engines, published?}], total, answers, suggestions, failed: [[engine, reason]]}" },
+				{ "name": "websearch.status", "version": "1", "kind": "function", "description": "{} -> {state, url?, summary?, error?, viaTor, engines, unknownEngines, lastSearch?}" }
+			],
+			"consumes": [
+				{ "name": "websearch.search", "version": "1" },
+				{ "name": "tor.proxy", "version": "1", "optional": true },
+				{ "name": "tor.newCircuit", "version": "1", "optional": true }
+			]
+		},
+		"systemMessageSections": [
+			{ "id": "websearch", "text": "web_search(query) searches the web: results from several engines at once, through a SearXNG on this machine whose requests leave through Tor. Search when the answer lies outside the workspace - current documentation, an error message, a library's API - and say where an answer came from." }
+		],
+		"toolCalls": [
+			{
+				"name": "web_search",
+				"description": "Search the web: the results of several engines at once (title, URL, snippet, which engines found it, a date when known), through a SearXNG on this machine whose requests leave through Tor. engines narrows it to some of the configured engines (github and stackoverflow for code); time_range keeps recent results; page gives the next ones. Example: web_search(query: \"tokio select! cancellation safety\", engines: [\"github\", \"stackoverflow\"]).",
+				"class": "net",
+				"group": "web",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"query": { "type": "string", "description": "What to search for, as you would type it into a search engine." },
+						"engines": { "type": "array", "items": { "type": "string" }, "description": "Only these engines (SearXNG's names, from the configured ones); all configured ones when absent." },
+						"count": { "type": "integer", "minimum": 1, "maximum": 20, "description": "How many results to show (the owner's default when absent)." },
+						"page": { "type": "integer", "minimum": 1, "maximum": 10 },
+						"time_range": { "enum": ["day", "week", "month", "year"] },
+						"language": { "type": "string", "description": "A language code (en, de, fr-CA); the owner's default when absent." }
+					},
+					"required": ["query"],
+					"additionalProperties": false
+				},
+				"function": "WebSearch::SearchTool",
+				"timeoutSeconds": 180,
+				"resultBudgetTokens": 4000
+			}
+		]
+	}
+}

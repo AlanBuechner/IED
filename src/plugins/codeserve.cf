@@ -33,6 +33,18 @@ namespace Ied
 		server->lock.Unlock();
 	}
 
+	void CodeUnlocked::Init(Server* server) {
+		this.server = server;
+		held = tHostLockHeld;
+		tHostLockHeld = false;
+		server->lock.Unlock();
+	}
+
+	void CodeUnlocked::Delete() {
+		server->lock.Lock();
+		tHostLockHeld = held;
+	}
+
 	CodeInstance* ApiCaller(Core::String& problem) {
 		CodeInstance* instance = CurrentCode();
 		if (!instance) problem = Core::String("the plugin API is for a plugin's code, on its thread");
@@ -83,7 +95,7 @@ namespace Ied
 		bool ran = false;
 		instance->running += 1;
 		{
-			Threading::UnlockGuard unlocked(server->lock);
+			CodeUnlocked unlocked(server);
 			CodeScope scope(instance);
 			ran = GuardedCall(instance, [answer, request, run]() {
 				try {

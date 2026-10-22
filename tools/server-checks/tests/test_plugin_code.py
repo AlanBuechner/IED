@@ -107,6 +107,31 @@ namespace Serve
 '''
 
 
+# A binding that calls the plugin's own binding (which runs at once, on its thread), which calls another plugin's: the
+# web search tool's shape (its tool calls websearch.search, which calls tor.proxy).
+RELAY = r'''include "api/plugin.ch"
+
+namespace Relay
+{
+	IED::Result Inner(const Serialization::DomNode& args)
+	{
+		return IED::CallBinding(Core::StringView("probe.echo"), Core::StringView("{\"text\":\"relayed\"}"));
+	}
+
+	IED::Result Outer(const Serialization::DomNode& args)
+	{
+		return IED::CallBinding(Core::StringView("relay.inner"), Core::StringView("{}"));
+	}
+
+	void Activate(IED::PluginContext& context)
+	{
+		context.Provide(Core::StringView("relay.inner"), Inner);
+		context.Provide(Core::StringView("relay.outer"), Outer);
+	}
+}
+'''
+
+
 def probe_manifest(plugin_id="test.probe", **fields):
 	body = {
 		"manifestVersion": 1, "id": plugin_id, "name": "Probe", "version": "1.0.0", "ied": {"api": "^1"},
@@ -252,6 +277,20 @@ class PluginCodeTests(ServerTestCase):
 		while (await self.echo("x"))["heard"] == 0 and time.monotonic() < deadline:
 			await asyncio.sleep(0.2)
 		self.assertGreater((await self.echo("x"))["heard"], 0, "tree.changed reached the plugin")
+
+	async def test_a_binding_through_its_own_binding_reaches_another_plugin(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})
+		self.builtin(probe_manifest("test.relay", runtime={"kind": "c4", "entry": "Relay::Activate"}, contributes={"bindings": {
+			"provides": [{"name": "relay.inner", "version": "1.0.0", "kind": "function"}, {"name": "relay.outer", "version": "1.0.0", "kind": "function"}],
+			"consumes": [{"name": "relay.inner", "version": "1.0.0"}, {"name": "probe.echo", "version": "1.0.0"}]}}), {"code/relay.cf": RELAY})
+		self.start()
+		await self.connect()
+		await self.settled("test.probe")
+		self.assertEqual("active", (await self.settled("test.relay"))["state"])
+		# Its own binding runs with the server lock released; the nested call must take it again, not think it holds it.
+		answer = await asyncio.wait_for(self.client.request("plugins.call", {"name": "relay.outer"}), 30)
+		self.assertEqual("relayed", answer["result"]["said"])
+		self.assertTrue((await self.client.request("ws.list"))["workspaces"], "and the server still answers")
 
 	async def test_a_fault_fails_the_plugin_not_the_server(self):
 		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})

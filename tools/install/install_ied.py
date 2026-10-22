@@ -48,6 +48,16 @@ TREES = (
 	("third_party/codicons/src/template", ()),
 )
 
+# The services the web plugins run (docs/29), installed by setup.bat: the private Python, SearXNG's own package (its
+# searx/ folder) and Python packages, and the Tor Expert Bundle. Copied when present; without them web search says what
+# is missing, and web fetch uses Windows' curl.
+SERVICES = (
+	("vendor/python", ("__pycache__",)),
+	("vendor/searxng/searx", ("__pycache__",)),
+	("vendor/searxng-packages", ("__pycache__", "bin")),
+	("vendor/tor", ("docs",)),
+)
+
 
 def default_target():
 	return os.path.join(os.environ["LOCALAPPDATA"], "Programs", "IED")
@@ -134,7 +144,7 @@ def write_record(target, record):
 
 
 def install(bin_root, target):
-	report = {"copied": 0, "removed": 0, "in_use": []}
+	report = {"copied": 0, "removed": 0, "in_use": [], "missing": []}
 	os.makedirs(target, exist_ok=True)
 	remove_old(target)
 	for program, files in PROGRAMS.items():
@@ -148,6 +158,12 @@ def install(bin_root, target):
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
 		mirror(source, os.path.join(target, tree), set(skip), report)
+	for tree, skip in SERVICES:
+		source = os.path.join(REPO, tree)
+		if os.path.isdir(source):
+			mirror(source, os.path.join(target, tree), set(skip), report)
+		else:
+			report["missing"].append(tree)
 	head, dirty = checkout_state(REPO)
 	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000)))
 	return report
@@ -266,6 +282,8 @@ def main(argv):
 		parser.error("--bin is needed to install")
 	report = install(args.bin, target)
 	print("install-ied: %s - %d files copied, %d removed" % (target, report["copied"], report["removed"]))
+	if report["missing"]:
+		print("install-ied: without %s (setup.bat installs them): web search will say it cannot run" % ", ".join(report["missing"]))
 	if report["in_use"]:
 		print("install-ied: IED was running from here (%s); restart it to use the new one: `ied stop`, then open IED" % ", ".join(report["in_use"]))
 	if not args.no_register:

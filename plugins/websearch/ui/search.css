@@ -1,0 +1,48 @@
+/* Settings > Web > Search (docs/29): theme tokens only; color only where it means something (ok, busy, failed). */
+
+.ws-head { font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); color: var(--text-0); margin: var(--space-6) 0 var(--space-3); }
+.ws-status { display: grid; gap: var(--space-2); max-width: 900px; padding: var(--space-4) var(--space-5); background: var(--bg-1); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-3); font-size: var(--font-size-sm); }
+.ws-state { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-2); transform: translateY(-1px); }
+.ws-label { width: 64px; flex: none; color: var(--text-2); }
+.ws-text { color: var(--text-0); overflow-wrap: anywhere; min-width: 0; }
+.ws-state.ws-ok .ws-dot { background: var(--accent-saved); }
+.ws-state.ws-busy .ws-dot { background: var(--accent-info); }
+.ws-state.ws-bad .ws-dot { background: var(--accent-error); }
+.ws-state.ws-bad .ws-text { color: var(--accent-error); }
+.ws-last { color: var(--text-1); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.ws-status .set-bar { margin-bottom: 0; }
+
+.ws-note { font-size: var(--font-size-sm); color: var(--text-1); overflow-wrap: anywhere; }
+.ws-note.ws-ok { color: var(--accent-saved); }
+.ws-note.ws-busy { color: var(--accent-info); }
+.ws-note.ws-bad { color: var(--accent-error); }
+
+.ws-engine-list { display: grid; max-width: 900px; font-size: var(--font-size-sm); border-top: var(--border-width) solid var(--border-0); }
+.ws-engine { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: var(--space-4); align-items: center; min-height: var(--row-h); padding: 0 0 0 var(--space-2); border-bottom: var(--border-width) solid var(--border-0); }
+.ws-engine-name { color: var(--text-0); font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); }
+.ws-engine-cats { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-engine-test { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-engine-test.ws-ok { color: var(--accent-saved); }
+.ws-engine-test.ws-warn { color: var(--accent-warn); }
+.ws-engine-test.ws-bad { color: var(--accent-error); }
+.ws-engine .btn.flat .ci { width: 14px; height: 14px; }
+.ws-add { width: min(280px, 100%); }
+
+.ws-query { width: min(520px, 100%); }
+.ws-results { display: grid; gap: var(--space-4); max-width: 900px; margin-top: var(--space-3); }
+.ws-hit { display: grid; gap: var(--space-1); font-size: var(--font-size-sm); }
+.ws-hit-title { color: var(--accent-info); font-size: var(--font-size-ui); text-decoration: none; overflow-wrap: anywhere; }
+.ws-hit-title:hover { text-decoration: underline; }
+.ws-hit-url { color: var(--text-2); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.ws-hit-snippet { color: var(--text-1); }
+.ws-hit-by { color: var(--text-2); font-size: var(--font-size-xs); }
+
+@media (max-width: 700px) {
+	.ws-status { padding: var(--space-3) var(--space-4); }
+	.ws-engine { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0; padding: var(--space-2) 0 var(--space-2) var(--space-2); }
+	.ws-engine-cats { display: none; }
+	.ws-engine-test { grid-column: 1; grid-row: 2; }
+	.ws-engine-test:empty { display: none; }
+	.ws-engine .btn.flat { grid-column: 2; grid-row: 1 / span 2; }
+}

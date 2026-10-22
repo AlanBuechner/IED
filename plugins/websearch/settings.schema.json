@@ -1,0 +1,81 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Web search settings",
+	"type": "object",
+	"properties": {
+		"websearch.engines": {
+			"type": "array",
+			"items": { "type": "string", "minLength": 1 },
+			"minItems": 1,
+			"default": ["brave", "duckduckgo", "google", "bing", "wikipedia", "stackoverflow", "github"],
+			"x-ied-tiers": ["app"],
+			"description": "The SearXNG engines a search asks, by SearXNG's names. Behind Tor some refuse some exits (Google nearly always does); Test engines on this page shows which answer now. Yahoo serves Bing's results: asking both ranks Bing's first."
+		},
+		"websearch.useTor": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "Send the engines' requests through Tor (the Tor plugin), so they see a Tor exit instead of this machine and a block is answered with a new circuit. Off: SearXNG asks the engines directly."
+		},
+		"websearch.results": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 20,
+			"default": 8,
+			"x-ied-tiers": ["app"],
+			"description": "How many results web_search gives the AI when it does not say."
+		},
+		"websearch.safeSearch": {
+			"enum": ["off", "moderate", "strict"],
+			"default": "off",
+			"x-ied-tiers": ["app"],
+			"description": "The engines' safe search filter."
+		},
+		"websearch.language": {
+			"type": "string",
+			"default": "auto",
+			"x-ied-tiers": ["app"],
+			"description": "The language results are asked in (en, en-US, de, ...); auto lets SearXNG tell from the query."
+		},
+		"websearch.timeoutSeconds": {
+			"type": "integer",
+			"minimum": 2,
+			"maximum": 60,
+			"default": 8,
+			"x-ied-tiers": ["app"],
+			"description": "How long SearXNG waits for each engine (through Tor, answers take a few seconds)."
+		},
+		"websearch.newCircuitOnBlock": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "When engines refuse a search's Tor exit (a CAPTCHA, access denied, too many requests) and it comes back with almost nothing, or half the engines asked refused, search once more on new circuits (another exit)."
+		},
+		"websearch.stopAfterSeconds": {
+			"type": "integer",
+			"minimum": 0,
+			"default": 1800,
+			"x-ied-tiers": ["app"],
+			"description": "SearXNG stops when nothing searched this long, and starts again with the next search (a few seconds). 0: it runs until IED stops."
+		},
+		"websearch.instanceUrl": {
+			"type": "string",
+			"pattern": "^(http://.+)?$",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "Use a SearXNG you run instead of starting one (http://host:port, with json among its search formats). Tor is then that instance's business. Empty: IED runs its own."
+		},
+		"websearch.python": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The Python that runs SearXNG. Empty: IED's own (vendor/python)."
+		},
+		"websearch.searxngFolder": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "SearXNG's source folder (searx/ inside); its packages are the searxng-packages folder beside it. Empty: the one setup.bat installs (vendor/searxng)."
+		}
+	}
+}

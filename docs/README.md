@@ -40,6 +40,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [26-plugin-packages-and-languages](26-plugin-packages-and-languages.md) | A plugin is a package (C4 code in the script host, configuration, a Python Nuke driver, browser UI, skills, prompts, tool calls); the plugin API; one plugin per language; builds native first, Nuke opt-in |
 | [27-desktop-and-browser](27-desktop-and-browser.md) | The desktop app (`ied-desktop`, a C4 WebView2 window that starts the server) and the browser (`plugins/browser`): server-side pages in headless Edge over CDP, the Browser tab, the AI's browser tools |
 | [28-developer-mode](28-developer-mode.md) | Developer mode: when IED runs from its source, a chat can fix the C4 compiler, Bedrock, Nuke or IED itself while it works (`ied:/` paths, always-asked writes, rebuild and gate tools) |
+| [29-web-search-fetch-and-tor](29-web-search-fetch-and-tor.md) | Web search, web fetch and Tor as three plugins: SearXNG run by the server with its engines asked through Tor, new circuits when an exit is refused, `web_search` / `web_fetch`, HTML as Markdown in C4, Settings > Web |
 
 ## Doc conventions
 

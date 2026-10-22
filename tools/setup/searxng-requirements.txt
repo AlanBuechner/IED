@@ -1,0 +1,36 @@
+# SearXNG's Python packages (docs/29), installed by setup.py into vendor/searxng-packages with
+# pip --require-hashes --only-binary=:all: for the private Python (CPython 3.12, win_amd64). Made from the pinned
+# SearXNG's requirements.txt plus waitress; bump with the searxng package in deps.toml and regenerate the hashes
+# (pip download --platform win_amd64 --python-version 3.12 --only-binary=:all:, then sha256 of each wheel).
+annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101
+babel==2.18.0 --hash=sha256:e2b422b277c2b9a9630c1d7903c2a00d0830c409c59ac8cae9081c92f1aeba35
+blinker==1.9.0 --hash=sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc
+certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+cffi==2.1.1 --hash=sha256:f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a
+click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+colorama==0.4.6 --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+curl-cffi==0.16.3 --hash=sha256:fe87b66e324ed7318166698e02169f3208dbda32b872a27d2bc61a9c19b335eb
+flask==3.1.3 --hash=sha256:f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c
+flask-babel==4.0.0 --hash=sha256:638194cf91f8b301380f36d70e2034c77ee25b98cb5d80a1626820df9a6d4625
+isodate==0.7.2 --hash=sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15
+itsdangerous==2.2.0 --hash=sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef
+jinja2==3.1.6 --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+lxml==6.1.3 --hash=sha256:3e9a00d1c2c30936f7add097c41afc5da6556c580909104aafd382cac92a855c
+markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+markupsafe==3.0.4 --hash=sha256:11935df9bf455ed0c04eb87bcd720f02b1fe5e02128a9430f23aed6f93336fc7
+mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+msgspec==0.22.0 --hash=sha256:6ad64f5c260866b0d543f89f50cee43628989c1433c5de7ce820281fa28a2611
+pycparser==3.11 --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80
+pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+python-dateutil==2.9.0.post0 --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+pytz==2026.5 --hash=sha256:e658af3757f9e26a9d25dd2aff38335acd92bc9104f890a894b2c1ba28311b03
+pyyaml==6.0.3 --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b
+rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
+six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+typer==0.27.3 --hash=sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff
+typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+valkey==6.1.1 --hash=sha256:e2691541c6e1503b53c714ad9a35551ac9b7c0bbac93865f063dbc859a46de92
+waitress==3.0.2 --hash=sha256:c56d67fd6e87c2ee598b76abdd4e96cfad1f24cacdea5078d382b1f9d7b5ed2e
+werkzeug==3.1.9 --hash=sha256:6392e50c78460ba618e5b21f08a71f59c99ce99cdc6cf6e3dd7e6ccca8754fab
+whitenoise==6.12.0 --hash=sha256:fc5e8c572e33ebf24795b47b6a7da8da3c00cff2349f5b04c02f28d0cc5a3cc2

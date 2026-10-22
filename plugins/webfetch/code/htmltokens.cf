@@ -1,0 +1,233 @@
+include "htmltokens.ch"
+
+namespace WebFetch
+{
+	static bool IsSpace(int32 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
+	static bool IsLetter(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+	static bool IsAlnum(int32 c) { return IsLetter(c) || (c >= '0' && c <= '9'); }
+	static int32 Lower(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	// How much of `name` is a reference a page may write without its ';' ("ampy" -> 3, for &amp); 0 when none.
+	static int64 LegacyLength(Core::StringView name) {
+		const char*[7] legacy = { "nbsp", "quot", "copy", "amp", "reg", "lt", "gt" };
+		for (int64 i = 0; i < 7; ++i)
+			if (name.StartsWith(Core::StringView(legacy[i]))) return Core::StringView(legacy[i]).ByteLength();
+		return 0;
+	}
+
+	// A no-break space becomes a space: the writer collapses white space, and the model gains nothing from the difference.
+	static void AppendCode(Core::StringBuilder& out, int64 code) {
+		if (code == 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) code = 0xFFFD;
+		if (code == 160) code = ' ';
+		out.AppendCodePoint((int32)code);
+	}
+
+	// A character reference at `at` (on its '&'): its length, with its character appended to `out`; 0 when there is none.
+	static int64 Reference(Core::StringView text, int64 at, Core::StringBuilder& out) {
+		const int64 n = text.ByteLength();
+		int64 i = at + 1;
+		if (i < n && text.ByteAt(i) == '#') {
+			i += 1;
+			const bool hex = i < n && (text.ByteAt(i) == 'x' || text.ByteAt(i) == 'X');
+			if (hex) i += 1;
+			int64 code = 0;
+			const int64 digits = i;
+			while (i < n && i - digits < 8) {
+				const int32 c = Lower(text.ByteAt(i));
+				int32 digit = -1;
+				if (c >= '0' && c <= '9') digit = c - '0';
+				else if (hex && c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+				if (digit < 0) break;
+				code = code * (hex ? 16 : 10) + digit;
+				i += 1;
+			}
+			if (i == digits) return 0;
+			if (i < n && text.ByteAt(i) == ';') i += 1;
+			AppendCode(out, code);
+			return i - at;
+		}
+		while (i < n && i - at <= 32 && IsAlnum(text.ByteAt(i))) i += 1;
+		Core::StringView name = text.Substring(at + 1, i - at - 1);
+		const bool closed = i < n && text.ByteAt(i) == ';';
+		if (!closed) {
+			const int64 legacy = LegacyLength(name);
+			if (legacy == 0) return 0;
+			name = name.Substring(0, legacy);
+			i = at + 1 + legacy;
+		}
+		const int32 code = NamedEntity(name);
+		if (code < 0) return 0;
+		AppendCode(out, code);
+		return i - at + (closed ? 1 : 0);
+	}
+
+	Core::String DecodeEntities(Core::StringView text) {
+		if (text.IndexOf('&', 0) < 0) return Core::String(text);
+		Core::StringBuilder out;
+		int64 i = 0;
+		while (i < text.ByteLength()) {
+			const int32 c = text.ByteAt(i);
+			const int64 used = c == '&' ? Reference(text, i, out) : 0;
+			if (used > 0) i += used;
+			else {
+				out.AppendByte(c);
+				i += 1;
+			}
+		}
+		return out.ToString();
+	}
+
+	Core::StringView AttributeOf(const HtmlToken& token, const char* name) {
+		for (const HtmlAttribute& attribute : token.attributes)
+			if (attribute.name.View() == name) return attribute.value.View();
+		return Core::StringView("");
+	}
+
+	bool HasAttribute(const HtmlToken& token, const char* name) {
+		for (const HtmlAttribute& attribute : token.attributes)
+			if (attribute.name.View() == name) return true;
+		return false;
+	}
+
+	// Where "</name" (any case) starts at or after `from`; the text's end when it never does.
+	static int64 FindClose(Core::StringView html, int64 from, Core::StringView name) {
+		const int64 n = html.ByteLength();
+		for (int64 i = from; i + 1 < n; ++i) {
+			if (html.ByteAt(i) != '<' || html.ByteAt(i + 1) != '/') continue;
+			bool same = i + 2 + name.ByteLength() <= n;
+			for (int64 j = 0; same && j < name.ByteLength(); ++j) same = Lower(html.ByteAt(i + 2 + j)) == name.ByteAt(j);
+			const int64 after = i + 2 + name.ByteLength();
+			if (same && (after >= n || !IsAlnum(html.ByteAt(after)))) return i;
+		}
+		return n;
+	}
+
+	static Core::String LowerName(Core::StringView html, int64 from, int64 to) {
+		Core::StringBuilder name;
+		for (int64 i = from; i < to; ++i) name.AppendByte(Lower(html.ByteAt(i)));
+		return name.ToString();
+	}
+
+	static bool IsNameChar(int32 c) { return IsAlnum(c) || c == '-' || c == ':' || c == '_' || c == '.'; }
+
+	// The attributes after a start tag's name, from `i` through its '>': where the tag ends.
+	static int64 ReadAttributes(Core::StringView html, int64 i, HtmlToken& token) {
+		const int64 n = html.ByteLength();
+		while (i < n) {
+			while (i < n && IsSpace(html.ByteAt(i))) i += 1;
+			if (i >= n) break;
+			const int32 c = html.ByteAt(i);
+			if (c == '>') return i + 1;
+			if (c == '/') {
+				if (i + 1 < n && html.ByteAt(i + 1) == '>') {
+					token.selfClosing = true;
+					return i + 2;
+				}
+				i += 1;
+				continue;
+			}
+			const int64 start = i;
+			while (i < n && !IsSpace(html.ByteAt(i)) && html.ByteAt(i) != '=' && html.ByteAt(i) != '>' && (html.ByteAt(i) != '/' || i == start)) i += 1;
+			HtmlAttribute attribute;
+			attribute.name = LowerName(html, start, i);
+			while (i < n && IsSpace(html.ByteAt(i))) i += 1;
+			if (i < n && html.ByteAt(i) == '=') {
+				i += 1;
+				while (i < n && IsSpace(html.ByteAt(i))) i += 1;
+				int64 valueStart = i;
+				int64 valueEnd = i;
+				if (i < n && (html.ByteAt(i) == '"' || html.ByteAt(i) == '\'')) {
+					const int32 quote = html.ByteAt(i);
+					valueStart = i + 1;
+					valueEnd = html.IndexOf((char)quote, valueStart);
+					if (valueEnd < 0) valueEnd = n;
+					i = valueEnd < n ? valueEnd + 1 : n;
+				}
+				else {
+					while (i < n && !IsSpace(html.ByteAt(i)) && html.ByteAt(i) != '>') i += 1;
+					valueEnd = i;
+				}
+				attribute.value = DecodeEntities(html.Substring(valueStart, valueEnd - valueStart));
+			}
+			if (!attribute.name.IsEmpty()) token.attributes.Push(attribute);
+			if (i == start) i += 1;
+		}
+		return n;
+	}
+
+	static void PushText(Core::Array<HtmlToken>& tokens, Core::StringView raw) {
+		if (raw.IsEmpty()) return;
+		HtmlToken token;
+		token.kind = TokenKind::Text;
+		token.text = DecodeEntities(raw);
+		tokens.Push(token);
+	}
+
+	Core::Array<HtmlToken> Tokenize(Core::StringView html) {
+		Core::Array<HtmlToken> tokens;
+		const int64 n = html.ByteLength();
+		int64 i = 0;
+		int64 textStart = 0;
+		while (i < n) {
+			if (html.ByteAt(i) != '<' || i + 1 >= n) {
+				i += 1;
+				continue;
+			}
+			const int32 next = html.ByteAt(i + 1);
+			const bool end = next == '/' && i + 2 < n && IsLetter(html.ByteAt(i + 2));
+			if (!IsLetter(next) && next != '!' && next != '?' && !end) {
+				i += 1;
+				continue;
+			}
+			PushText(tokens, html.Substring(textStart, i - textStart));
+			if (next == '!' || next == '?') {
+				const bool comment = i + 3 < n && html.ByteAt(i + 2) == '-' && html.ByteAt(i + 3) == '-';
+				int64 stop = -1;
+				if (comment) {
+					Core::StringView rest = html.Substring(i + 4, n - i - 4);
+					const int64 found = rest.IndexOf(Core::StringView("-->"));
+					stop = found < 0 ? n : i + 4 + found + 3;
+				}
+				else {
+					const int64 found = html.IndexOf('>', i);
+					stop = found < 0 ? n : found + 1;
+				}
+				i = stop;
+				textStart = i;
+				continue;
+			}
+			HtmlToken token;
+			int64 nameStart = end ? i + 2 : i + 1;
+			int64 nameEnd = nameStart;
+			while (nameEnd < n && IsNameChar(html.ByteAt(nameEnd))) nameEnd += 1;
+			token.name = LowerName(html, nameStart, nameEnd);
+			if (end) {
+				token.kind = TokenKind::End;
+				const int64 close = html.IndexOf('>', nameEnd);
+				i = close < 0 ? n : close + 1;
+			}
+			else {
+				token.kind = TokenKind::Start;
+				i = ReadAttributes(html, nameEnd, token);
+			}
+			textStart = i;
+			const Core::StringView name = token.name.View();
+			const bool raw = token.kind == TokenKind::Start && !token.selfClosing;
+			if (raw && (name == "script" || name == "style")) {
+				const int64 close = FindClose(html, i, name);
+				const int64 after = close < n ? html.IndexOf('>', close) : -1;
+				i = after < 0 ? n : after + 1;
+				textStart = i;
+				continue;
+			}
+			tokens.Push(token);
+			if (!raw || (name != "title" && name != "textarea")) continue;
+			const int64 close = FindClose(html, i, name);
+			PushText(tokens, html.Substring(i, close - i));
+			i = close;
+			textStart = i;
+		}
+		PushText(tokens, html.Substring(textStart, n - textStart));
+		return tokens;
+	}
+}

@@ -10,6 +10,9 @@ One folder per built-in plugin: its `ied-plugin.json` manifest, UI modules, skil
 | `terminal/` | Always-present bottom terminal (ConPTY), AI terminals per chat |
 | `sandbox/` | Docker / WSL / SSH sandboxes with egress control and AI tools |
 | `profiler/` | Tracy-class profiler on the ITP trace protocol (Tracy is a feature reference only) |
+| `websearch/` | `web_search`: a SearXNG the server runs, its engines asked through Tor; Settings > Web > Search (`docs/29`) |
+| `webfetch/` | `web_fetch`: pages fetched looking like a browser, HTML as Markdown, a window at a time (`docs/29`) |
+| `tor/` | Tor on demand for other plugins: the SOCKS proxy web search uses, new circuits (`docs/29`) |
 
 Default sidebar order: chat, editor, git, then plugin activities. All six are disable-able; IED must stay usable with only editor + terminal.
 

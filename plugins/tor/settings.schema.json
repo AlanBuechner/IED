@@ -1,0 +1,27 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Tor settings",
+	"type": "object",
+	"properties": {
+		"tor.executable": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The tor.exe to run. Empty: the Tor Expert Bundle setup.bat installs (vendor/tor)."
+		},
+		"tor.exitCountries": {
+			"type": "array",
+			"items": { "type": "string", "pattern": "^[A-Za-z]{2}$" },
+			"default": [],
+			"x-ied-tiers": ["app"],
+			"description": "Leave Tor only through exits in these countries (two-letter codes such as de, nl, us). Empty: any exit. Fewer exits are slower and easier for a site to block."
+		},
+		"tor.stopAfterSeconds": {
+			"type": "integer",
+			"minimum": 0,
+			"default": 1800,
+			"x-ied-tiers": ["app"],
+			"description": "Tor stops when nothing has asked for it this long, and starts again when asked (a warm start takes a few seconds). 0: it runs until IED stops."
+		}
+	}
+}

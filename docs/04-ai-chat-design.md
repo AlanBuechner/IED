@@ -99,7 +99,7 @@ MCP client for stdio and streamable-HTTP servers (Blender, a game engine, anythi
 
 ## Web egress and secure mode
 
-- **SearXNG bundled** and managed by the host (`docs/21`); `web_search` goes through it.
+- **SearXNG bundled** (`docs/21`); `web_search` goes through it. As built (`docs/29`): run by the `ied.websearch` plugin, not the host, its engines asked through Tor (the `ied.tor` plugin) - Tor carries web search only for now (owner, 2026-10-21); `web_fetch` (`ied.webfetch`) goes direct, looking like a browser. The egress proxy below is not built.
 - **Egress proxy:** all AI-originated HTTP (fetch, search upstreams, browser tool, MCP HTTP) goes through the host's proxy with a per-workspace policy `direct | tor | proxy:<profile>`; untrusted workspaces have egress off.
 - **tor** bundled (managed process, new circuit on rate limiting); **VPN profiles** are SOCKS5/HTTP proxy endpoints (a provider's proxy, or a `gluetun` container started via the sandbox plugin for WireGuard/OpenVPN providers).
 

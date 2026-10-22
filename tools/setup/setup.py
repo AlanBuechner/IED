@@ -39,7 +39,9 @@ def load_packages():
 	for name, package in packages.items():
 		package["name"] = name
 		package.setdefault("strip", 0)
-		if "format" not in package:
+		if package.get("kind") == "pip":
+			package["sha256"] = sha256_of(os.path.join(ROOT, *package["requirements"].split("/")))
+		elif "format" not in package:
 			package["format"] = _format_of(package["url"])
 	return packages
 
@@ -198,7 +200,27 @@ def remove_installed(dest):
 		shutil.rmtree(dest, ignore_errors=True)
 
 
-def install(package, force, keep_downloads):
+def install_with_pip(package, packages, keep_downloads):
+	"""pip, itself a package, installs a hash-pinned requirements file into the package's folder for the private
+	Python: binary wheels only, nothing the file does not name."""
+	install(packages["pip"], packages, force=False, keep_downloads=keep_downloads)
+	dest = dest_of(package)
+	staging = dest + ".setup-tmp"
+	shutil.rmtree(staging, ignore_errors=True)
+	log(f"installing {package['name']} with pip into {os.path.relpath(dest, ROOT)}")
+	command = [sys.executable, "-I", os.path.join(dest_of(packages["pip"]), "pip"), "install", "--disable-pip-version-check",
+		"--no-input", "--no-warn-script-location", "--no-deps", "--require-hashes", "--only-binary=:all:", "--target", staging,
+		"-r", os.path.join(ROOT, *package["requirements"].split("/"))]
+	if subprocess.run(command).returncode != 0:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise SetupError(f"pip could not install {package['name']} (see above)")
+	remove_installed(dest)
+	os.replace(staging, dest)
+	with open(os.path.join(dest, MARKER), "w", encoding="utf-8") as f:
+		json.dump({"name": package["name"], "version": package["version"], "sha256": package["sha256"]}, f, indent=2)
+
+
+def install(package, packages, force, keep_downloads):
 	state = installed_state(package)
 	if state == "missing" and not force and link_from_main_checkout(package):
 		return
@@ -207,6 +229,10 @@ def install(package, force, keep_downloads):
 		return
 	if state == "unverified" and not force:
 		log(f"{package['name']}: found an existing copy in {package['dest']} that setup did not install; keeping it (--force replaces it)")
+		return
+	if package.get("kind") == "pip":
+		install_with_pip(package, packages, keep_downloads)
+		log(f"{package['name']} {package['version']}: installed")
 		return
 	archive = download(package)
 	extract(package, archive)
@@ -322,7 +348,7 @@ def main(argv):
 		if not options.no_submodules and not options.only:
 			update_submodules()
 		for package in selected(packages, options):
-			install(package, options.force, options.keep_downloads)
+			install(package, packages, options.force, options.keep_downloads)
 		if options.toolchain:
 			build_toolchain()
 		offer_path(options)

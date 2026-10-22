@@ -70,8 +70,8 @@ Per workspace: `.ied/` (committed) and `.ied/local/` (gitignored) as in `docs/03
 
 SearXNG is a Python web app; it is not officially supported on Windows (its production deployment uses uWSGI, which does not run on Windows). Plan:
 
-1. **Primary - embedded Python, no Docker:** ship the CPython *embeddable* distribution plus pre-built wheels for SearXNG's dependencies in `services\searxng\`. The server starts SearXNG's WSGI app with a pure-Python/Windows-capable WSGI server (waitress, or SearXNG's own Flask entry for development) bound to `127.0.0.1:<random port>`, with a generated `settings.yml` (secret key, limiter off for loopback, JSON output enabled, outgoing proxy = IED's egress proxy). **This needs a spike** (M0/M10): confirm SearXNG master runs on Windows under waitress with its current dependency set (lxml, etc. have Windows wheels), and pin a working commit. The vendored tarball (`third_party/searxng`) is the starting point; the four uWSGI template files with Windows-illegal names are not needed at runtime.
-2. **Fallback - isolated auto-install:** if the spike fails, IED installs SearXNG into a dedicated WSL distro or a Docker container on first use (owner's "auto install isolated"), managed the same way (start/stop/health), and says so in Settings > Egress.
+1. **Primary - embedded Python, no Docker:** ship the CPython *embeddable* distribution plus pre-built wheels for SearXNG's dependencies. The server starts SearXNG's WSGI app with a pure-Python/Windows-capable WSGI server (waitress) bound to `127.0.0.1:<random port>`, with a generated `settings.yml` (limiter off for loopback, JSON output enabled, outgoing proxy = Tor). **Spike done (2026-10-21), built:** the pinned commit runs on Windows under waitress with every dependency as a `win_amd64` wheel; `setup.bat` installs SearXNG's source, a hash-pinned set of its packages and the Tor Expert Bundle into `vendor/`, `nuke install-ied` copies them into the install, and the `ied.websearch` plugin (not the host) runs it - `docs/29`. The four uWSGI template files with Windows-illegal names are not needed at runtime.
+2. **Fallback - isolated auto-install:** not needed (the spike succeeded); an owner's own SearXNG can be named instead (`websearch.instanceUrl`, `docs/29`).
 3. **Degraded mode:** with no SearXNG, `web_search` returns a clear error and `web_fetch` still works; search can fall back to a single configured engine's HTML endpoint through the egress proxy (opt-in; rate-limit-prone).
 
 Egress: SearXNG's outgoing requests are pointed at IED's egress proxy, so secure mode (tor/VPN) applies to search automatically (`docs/04`).
@@ -79,7 +79,7 @@ Egress: SearXNG's outgoing requests are pointed at IED's egress proxy, so secure
 ## tor
 
 - `tor.exe` started on demand by the host with a generated `torrc` (SOCKS on a random loopback port, ControlPort with cookie auth, data dir under `%LOCALAPPDATA%\IED\services\tor`).
-- Health: bootstrap percentage shown in Settings > Egress and the status bar while egress is `tor`.
+- Health: bootstrap percentage shown in Settings > Web > Search. As built by the `ied.tor` plugin, for web search only (owner): `docs/29`.
 - `NEWNYM` (new circuit) on rate limiting/captcha detection, throttled per tor's rules.
 
 ## First run

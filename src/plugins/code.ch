@@ -229,6 +229,18 @@ namespace Ied
 	bool HostLockHeld();
 	void SetHostLockHeld(bool held);
 
+	// The server lock released for plugin code to run in for a scope (a job, a method, a call into the plugin's own
+	// binding), with the thread's HostLockHeld cleared meanwhile, so the code's API calls take the lock again instead of
+	// believing they hold it; both come back when the scope ends. The thread holds the lock when it begins.
+	class CodeUnlocked
+	{
+		[operator("create")] public void Init(Server* server);
+		[operator("delete")] public void Delete();
+
+		private Server* server;
+		private bool held;
+	}
+
 	// The thread's running code for a call made on another thread than the plugin's (a method, a pulled snapshot).
 	class CodeScope
 	{

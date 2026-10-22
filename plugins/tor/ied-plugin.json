@@ -1,0 +1,25 @@
+// Tor (docs/29 "Tor"): tor.exe run on demand as a SOCKS proxy other plugins send traffic through - web search's engine
+// requests leave through it. Its server code (code/) is compiled into the server: the tor.* bindings and the tor:status
+// topic.
+{
+	"manifestVersion": 1,
+	"id": "ied.tor",
+	"name": "Tor",
+	"version": "0.1.0",
+	"description": "Runs Tor on demand: a SOCKS proxy for other plugins' traffic (web search), with new circuits when sites block an exit.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Tor::Activate" },
+	"permissions": ["process.spawn", "net.egress"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Web/Tor" },
+		"bindings": {
+			"provides": [
+				{ "name": "tor.proxy", "version": "1", "kind": "function", "description": "Starts Tor when it is not running and answers at once: {} -> {state, progress, summary, error?, socks?, host?, port?}; socks (\"socks5h://127.0.0.1:<port>\") once state is ready. Call again to follow a start." },
+				{ "name": "tor.newCircuit", "version": "1", "kind": "function", "description": "New circuits for new connections (NEWNYM; Tor allows one every 10 s): {} -> {changed, waitSeconds}" },
+				{ "name": "tor.status", "version": "1", "kind": "function", "description": "{} -> {state, progress, summary, error?, socks?}, starting nothing" },
+				{ "name": "tor.stop", "version": "1", "kind": "function", "description": "{} -> {}: Tor stops until it is asked for again" }
+			]
+		}
+	}
+}

@@ -94,11 +94,11 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
 | F-AIR-80 | Egress proxy in the host: every AI-originated HTTP request (fetch, search backends, browser tool, MCP HTTP) goes through it; policy per workspace: `direct | tor | proxy:<profile>`; untrusted workspaces: off | P0 (direct + off), P1 (tor/proxy) | US-WEB-2 |
-| F-AIR-81 | Bundled SearXNG managed by the host (start on demand, health, engine config in settings, upstream via the egress proxy) | P0 | US-WEB-1 |
-| F-AIR-82 | Bundled tor (managed process, SOCKS port, bootstrap status, new-identity on rate limit) | P1 | US-WEB-2 |
+| F-AIR-81 | Bundled SearXNG managed by the host (start on demand, health, engine config in settings, upstream via the egress proxy). Built as the `ied.websearch` plugin, upstream through Tor (`docs/29`) | P0 | US-WEB-1 |
+| F-AIR-82 | Bundled tor (managed process, SOCKS port, bootstrap status, new-identity on rate limit). Built as the `ied.tor` plugin (`docs/29`) | P1 | US-WEB-2 |
 | F-AIR-83 | VPN profiles = SOCKS5/HTTP proxy endpoints (a provider's proxy, or a `gluetun` container started via the sandbox plugin for WireGuard/OpenVPN providers) | P1 | US-WEB-2 |
-| F-AIR-84 | `web_fetch` converts HTML to clean markdown (readability-style), handles PDFs to text, caps size, and summarizes big pages with the `summarizer` role when asked | P0 | US-WEB-3 |
-| F-AIR-85 | Rate-limit awareness: per-domain backoff, circuit breaker for engines that start returning captchas, rotate tor circuit | P1 | US-WEB-2 |
+| F-AIR-84 | `web_fetch` converts HTML to clean markdown (readability-style), handles PDFs to text, caps size, and summarizes big pages with the `summarizer` role when asked. Built as the `ied.webfetch` plugin but for PDFs and summaries (`docs/29`) | P0 | US-WEB-3 |
+| F-AIR-85 | Rate-limit awareness: per-domain backoff, circuit breaker for engines that start returning captchas, rotate tor circuit. Built for search: SearXNG rests refusing engines, a refused search is tried again on new circuits (`docs/29`) | P1 | US-WEB-2 |
 
 ## Cloud usage (Claude)
 
