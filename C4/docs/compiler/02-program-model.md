@@ -284,7 +284,9 @@ an ordinary struct to every later phase (the ABI returns it like one); reflectio
 While HIR lowers a body it changes scopes ONLY through the model's RAII API (`Model/LoweringScopes`):
 
 - `PushScope(kind, name)` returns a `ScopeGuard` that pops its layer on destruction, including on early
-  return after an error, so a leak into the next function is structurally impossible.
+  return after an error, so a leak into the next function is structurally impossible. The layer is pushed on the
+  calling thread's `ScopeCursor` (one per `LowerFunction`, so lowerings on several threads keep their layers
+  apart), else on the table's own position.
 - `RegisterLocal(name, info)` adds a local to the current layer; every query sees it until the layer pops
   (innermost wins: shadowing falls out of the lookup order).
 - `RegisterLocalType(decl)`, `RegisterLocalAlias(alias)`, `RegisterLocalFunction(fn)`: a struct/class/enum,
@@ -298,6 +300,19 @@ While HIR lowers a body it changes scopes ONLY through the model's RAII API (`Mo
   fields are the captures (`ClosureCapture`: by value, by reference as a pointer, `this` as a pointer,
   `*this` as a copy) with an `[operator("call")]` method record (static when nothing is captured), built
   while the enclosing function lowers. Closures are not reflected.
+
+## Changes and the frozen model
+
+The model changes after it is built only while bodies are lowered (instances, compiler-written lifecycle
+functions, closures, local types, lazily kept answers), and lowering runs on several threads
+([03-hir](03-hir.md#lowering-on-several-threads)). So every change asks the model's `ModelWrites` first
+(`ProgramModel::Writes()`): `TypeStore::Own`, `SymbolTable::AddFunctionRecord`, `CreateScope` of a class or
+namespace scope, `Scope::Register` on a permanent scope, `ObjectType::AddField` / `AddMethod` / `AddBaseType` /
+`CalculateLayout`, `EnsureSynthesizedLifecycle`, `LifecycleMethodsOf`'s memo, `StorePack`, `CreateClosure`, the
+template instantiators' misses. A frozen model answers with `ModelFrozen` instead; a template instance's miss
+carries how to make it (`ModelFrozen::make`). `ProgramModel::Settle()` makes every lazily kept answer lowering
+reads, so a frozen model is never asked for one. Interning is not a change: the type store's caches are read
+under a shared lock and filled under their own.
 
 ## Constant evaluation
 

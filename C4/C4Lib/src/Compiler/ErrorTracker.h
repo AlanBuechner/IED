@@ -27,6 +27,11 @@ namespace Scripting
 			return false;
 		}
 		Core::Vector<CompilationError>& GetErrorsMutable() { return m_Errors; }
+		/// Every diagnostic `other` holds, after these and in its order (a function lowered on a thread of its own).
+		void Append(const ErrorTracker& other)
+		{
+			for (const CompilationError& error : other.m_Errors) m_Errors.Push(error);
+		}
 		void Clear();
 
 		/// A syntax error leaves the parser at the token it could not use, so what it reports there afterwards follows

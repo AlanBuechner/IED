@@ -25,6 +25,7 @@ namespace Scripting
 		def.declScope = scope;
 		def.memberOf = owner;
 		def.bindingParent = binding;
+		model.Writes().Ask("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 		return QueryResult<void>::Success();
 	}
@@ -39,6 +40,7 @@ namespace Scripting
 		def.memberOf = owner;
 		def.bindingParent = binding;
 		def.ownerNames = ownerNames;
+		model.Writes().Ask("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 	}
 

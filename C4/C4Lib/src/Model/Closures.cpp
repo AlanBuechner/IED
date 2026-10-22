@@ -42,6 +42,7 @@ namespace Scripting
 
 	const Closure* ClosureTypes::Create(ProgramModel& model, const ClosureSpec& spec)
 	{
+		model.Writes().Ask("a closure");
 		// Named for the code that writes it and its place there, so every program with that code names it alike.
 		const uint32 index = model.m_ClosuresByOwner[spec.owner]++;
 		const Core::String name = "__c4_closure_" + spec.owner + "_" + std::to_string(index);

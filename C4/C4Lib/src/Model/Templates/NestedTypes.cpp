@@ -18,6 +18,7 @@ namespace Scripting
 		def.bindingParent = owner.binding;
 		if (nested.IsTemplated())
 		{
+			model.Writes().Ask("a nested template");
 			model.m_TypeTemplates[name].push_back(def);
 			return QueryResult<void>::Success();
 		}
@@ -55,6 +56,7 @@ namespace Scripting
 			en->AddMember({ member->GetNameToken().GetText(), value });
 			next = value + 1;
 		}
+		model.Writes().Ask("a nested enum");
 		model.m_EnumTypes.Push(en);
 		Register(owner, name, TypeSymbol(en));
 		if (nested.IsScoped()) return QueryResult<void>::Success();

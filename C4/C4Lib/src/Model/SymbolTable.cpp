@@ -2,10 +2,17 @@
 
 namespace Scripting
 {
+	namespace
+	{
+		// The ScopeCursor of the lowering running on this thread, innermost first (each points at its outer one).
+		thread_local ScopeCursor* t_Cursor = nullptr;
+	}
+
 	// --- Scope ---
 
 	bool Scope::Register(const Core::String& name, const SymbolInfo& info, const FunctionRecord* fn)
 	{
+		if (m_Writes) m_Writes->Ask("a name in a permanent scope");
 		if (!m_Symbols) m_Symbols = std::make_unique<Symbols>();
 		auto it = m_Symbols->find(name);
 		if (it != m_Symbols->end())
@@ -89,11 +96,37 @@ namespace Scripting
 
 	// --- ScopeGuard ---
 
-	ScopeGuard::ScopeGuard(SymbolTable* table, Scope* scope) : m_Table(table), m_Scope(scope) {}
+	// --- ScopeCursor ---
+
+	ScopeCursor::ScopeCursor(SymbolTable& table) : m_Table(table), m_Outer(t_Cursor), m_Position(table.Current())
+	{
+		t_Cursor = this;
+	}
+
+	ScopeCursor::~ScopeCursor()
+	{
+		t_Cursor = m_Outer;
+		m_Table.Adopt(*this);
+	}
+
+	const std::vector<SymbolInfo>* ScopeCursor::KeepPack(std::vector<SymbolInfo> elements)
+	{
+		m_Packs->push_back(std::move(elements));
+		return &m_Packs->back();
+	}
+
+	// --- ScopeGuard ---
+
+	ScopeGuard::ScopeGuard(SymbolTable* table, ScopeCursor* cursor, Scope* scope) : m_Table(table), m_Cursor(cursor), m_Scope(scope) {}
 
 	ScopeGuard::~ScopeGuard()
 	{
 		if (!m_Scope) return;
+		if (m_Cursor)
+		{
+			if (m_Cursor->m_Position == m_Scope) m_Cursor->m_Position = m_Scope->GetParent();
+			return; // the cursor keeps the layer until it ends
+		}
 		if (m_Table->m_Current == m_Scope) m_Table->m_Current = m_Scope->GetParent();
 		// A popped layer leaves the tree but stays alive: records made in it (a local function) keep naming it.
 		if (m_Scope->GetParent()) m_Table->m_Retired.Push(m_Scope->GetParent()->TakeChild(m_Scope));
@@ -101,28 +134,63 @@ namespace Scripting
 
 	// --- SymbolTable ---
 
-	SymbolTable::SymbolTable()
+	SymbolTable::SymbolTable(const ModelWrites* writes) : m_Writes(writes)
 	{
 		m_Root = std::make_unique<Scope>(Scope::Kind::File, "program");
+		m_Root->m_Writes = writes;
 		m_Current = m_Root.get();
+	}
+
+	ScopeCursor* SymbolTable::ActiveCursor() const
+	{
+		return t_Cursor && &t_Cursor->m_Table == this ? t_Cursor : nullptr;
+	}
+
+	Scope* SymbolTable::Current() const
+	{
+		const ScopeCursor* cursor = ActiveCursor();
+		return cursor ? cursor->m_Position : m_Current;
 	}
 
 	ScopeGuard SymbolTable::PushScope(Scope::Kind kind, const Core::String& name)
 	{
 		auto scope = std::make_unique<Scope>(kind, name);
 		Scope* raw = scope.get();
+		if (ScopeCursor* cursor = ActiveCursor())
+		{
+			raw->m_Parent = cursor->m_Position;
+			cursor->m_Layers.Push(std::move(scope));
+			cursor->m_Position = raw;
+			return ScopeGuard(this, cursor, raw);
+		}
 		raw->m_Parent = m_Current;
 		m_Current->m_Children.Push(std::move(scope));
 		m_Current = raw; // the newest layer is the lowering position until its guard pops
-		return ScopeGuard(this, raw);
+		return ScopeGuard(this, nullptr, raw);
+	}
+
+	void SymbolTable::Adopt(ScopeCursor& cursor)
+	{
+		const std::lock_guard<std::mutex> adopting(m_Adopting);
+		for (auto& layer : cursor.m_Layers) m_Retired.Push(std::move(layer));
+		m_RetiredPacks.Push(std::move(cursor.m_Packs));
 	}
 
 	Scope* SymbolTable::CreateScope(Scope::Kind kind, const Core::String& name, Scope* parent)
 	{
-		Scope* base = parent ? parent : m_Current;
+		Scope* base = parent ? parent : Current();
 		auto scope = std::make_unique<Scope>(kind, name);
 		Scope* raw = scope.get();
 		raw->m_Parent = base;
+		// A block made while a lowering runs (a template's binding, a pack element's) holds names, never storage, and
+		// no walk of the tree looks into blocks: it is the lowering's, kept as long as the model like its layers.
+		if (ScopeCursor* cursor = ActiveCursor(); cursor && kind == Scope::Kind::Block)
+		{
+			cursor->m_Layers.Push(std::move(scope));
+			return raw;
+		}
+		if (m_Writes) m_Writes->Ask("a class or namespace scope");
+		raw->m_Writes = m_Writes;
 		base->m_Children.Push(std::move(scope));
 		return raw; // permanent: owned by its parent, not the lowering position
 	}
@@ -142,6 +210,7 @@ namespace Scripting
 
 	const FunctionRecord* SymbolTable::AddFunctionRecord(FunctionRecord record)
 	{
+		if (m_Writes) m_Writes->Ask("a function record");
 		if (!record.isBuiltin && !record.isLinked && !record.mangledName.empty())
 			for (uint32 n = 1; !m_ClaimedSymbols.insert(record.mangledName).second; ++n)
 				record.mangledName += "_" + std::to_string(n);

@@ -62,6 +62,7 @@ namespace Scripting
 	// ---------------------------------------------------------------------------
 	QueryResult<const Type*> LoweringScopes::RegisterLocalType(ProgramModel& model, const AstNode& decl)
 	{
+		model.Writes().Ask("a local type");
 		Scope* layer = model.m_Symbols->Current();
 		if (!layer) return QueryResult<const Type*>::Fail(QueryError::NotFound, "no scope to register a local type in");
 
@@ -219,6 +220,7 @@ namespace Scripting
 
 	QueryResult<const FunctionRecord*> LoweringScopes::RegisterLocalFunction(ProgramModel& model, const FunctionDefinitionNode& fn)
 	{
+		model.Writes().Ask("a local function");
 		Scope* layer = model.m_Symbols->Current();
 		if (!layer) return QueryResult<const FunctionRecord*>::Fail(QueryError::NotFound, "no scope to register a local function in");
 

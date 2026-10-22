@@ -94,6 +94,9 @@ namespace Scripting
 
 		const Core::String key = DefinitionKey(name, def, complete.value);
 		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(cached);
+		model.Writes().Ask("a class template instance", [&model, name, declScope, &args, unitId, outerBinding, argContext] {
+			(void)model.InstantiateTypeTemplate(name, declScope, args, unitId, outerBinding, argContext);
+		});
 
 		if (def->isAlias && def->aliasTarget)
 		{
@@ -148,6 +151,7 @@ namespace Scripting
 	QueryResult<const Type*> TemplateInstantiator::InstantiateObject(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
 		const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding, uint32 unitId) const
 	{
+		model.Writes().Ask("a class template instance");
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
 		obj->SetAbstract(def.objectBody->IsAbstract());
 		obj->SetFinal(def.objectBody->IsFinal());
@@ -183,6 +187,7 @@ namespace Scripting
 	QueryResult<const Type*> TemplateInstantiator::InstantiateMemberType(const ProgramModel& model, const ProgramModel::TemplateDef& def,
 		const Core::String& name, const MemberTypeSite& site) const
 	{
+		model.Writes().Ask("a member type");
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
 		obj->SetAbstract(def.objectBody->IsAbstract());
 		obj->SetFinal(def.objectBody->IsFinal());
@@ -244,6 +249,9 @@ namespace Scripting
 	{
 		const Core::String key = FunctionKey(name, def, args, receiver);
 		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached);
+		model.Writes().Ask("a function template instance", [&model, &def, name, args, binding, receiver, unitId] {
+			(void)TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver, unitId);
+		});
 
 		auto expanded = FunctionSignature(model, *def.functionBody, binding, unitId);
 		if (!expanded.Ok()) return QueryResult<const FunctionRecord*>::Fail(expanded.error, "cannot instantiate " + name + ": " + expanded.message);
@@ -364,6 +372,7 @@ namespace Scripting
 				out.source.push_back(index);
 			}
 		}
+		model.Writes().Ask("a function template instance's signature");
 		FunctionType* sig = new FunctionType(rt.value, params, fn.IsVariadic());
 		out.type = model.m_Types->Own(sig);
 		return Result::Success(out);

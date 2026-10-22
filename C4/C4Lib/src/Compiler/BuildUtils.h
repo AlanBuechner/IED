@@ -37,7 +37,7 @@ namespace Scripting
 	bool gcStats = false; // install the GC runtime's default stats printer in the entry point
 	bool timePhases = false; // -ftime: print a per-phase compile timing breakdown (parse/semantic/HIR/codegen)
 	int optLevel = 0; // -O<n>: optimization level (0..3). Default 0 = debug, matches C++ compilers.
-	unsigned threads = 0;    // -j <n>: threads that generate code; 0 until ParseArgs picks the default
+	unsigned threads = 0;    // -j <n>: threads that lower function bodies and generate code; 0 until ParseArgs picks the default
 	unsigned partitions = 0; // --partitions <n>: objects the program is assembled into; 0: by the module's size
 	bool incremental = false; // --incremental: each partition optimized alone, so an edit reoptimizes only its own (D-76)
 	std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>, in order (D-62)

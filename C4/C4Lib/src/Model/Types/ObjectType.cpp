@@ -67,6 +67,7 @@ namespace Scripting
 
 	void ObjectType::AddPackedRegion(const SwizzleType* region, const AstNode* declared)
 	{
+		Asking("a field");
 		FieldInfo storage;
 		storage.mName = "__packed" + std::to_string(m_PackedViews.Count());
 		storage.m_Type = region;
@@ -158,6 +159,7 @@ namespace Scripting
 	{
 		if (m_LaidOut || m_LayingOut) return; // done, or a by-value cycle is on this stack
 		if (!IsDefined()) return;             // still a shell / body not fully walked
+		Asking("a layout");                   // before the guard is set: a frozen model leaves it unset
 		m_LayingOut = true;
 		const_cast<ObjectType*>(this)->CalculateLayout();
 		m_LayingOut = false;
@@ -177,6 +179,7 @@ namespace Scripting
 
 	void ObjectType::CalculateLayout()
 	{
+		Asking("a layout");
 		// A pure packed vector IS its SIMD region: its size is the vector's byte count (e.g. 8 for
 		// <2 x f32>), NOT rounded up to the SIMD alignment. This matches the standalone `swizzle`
 		// sizeof and is what lets it pass in one XMM register instead of being padded to a hidden-pointer sret.

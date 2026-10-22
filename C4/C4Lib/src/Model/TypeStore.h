@@ -1,9 +1,11 @@
 #pragma once
 #include "Model/Types.h"
+#include "Model/ModelWrites.h"
 #include "Core/Core.h"
 #include <functional>
 #include <map>
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -16,7 +18,8 @@ namespace Scripting
 	class TypeStore
 	{
 	public:
-		TypeStore();
+		/// `writes` is asked before every new type (a frozen model makes none); none for a store of names only.
+		explicit TypeStore(const ModelWrites* writes = nullptr);
 
 		// --- Builtins (interned singletons per kind) -----------------------------------
 		/// The canonical primitive for a kind: the same instance every time (pointer identity is
@@ -28,17 +31,23 @@ namespace Scripting
 		static bool IsBuiltinName(const Core::String& name);
 
 		// --- User types (owned, returned by pointer) ------------------------------------
-		/// Take ownership of a user-defined type and return the stable pointer to it.
+		/// Take ownership of a user-defined type and return the stable pointer to it. An object type asks the model's
+		/// writes before it changes from then on (ObjectType::WatchWrites).
 		template <typename T>
 		const T* Own(T* type)
 		{
+			Asking("a type");
+			Watch(type);
+			const std::unique_lock<std::shared_mutex> writing(m_Interning);
 			m_Owned.Push(std::unique_ptr<Type>(type));
 			return type;
 		}
 
 		// --- Wrapper interning (one canonical instance per logical type) -----------------
 		/// `const T*`, `T&`, `T[N]`, and funcptr types are interned: a logical type is ONE
-		/// canonical instance within this program, so pointer identity compares them correctly.
+		/// canonical instance within this program, so pointer identity compares them correctly. Interning is no
+		/// change to what lowering reads (an interned type is the same whoever makes it first, and nothing walks the
+		/// store), so lowerings on several threads intern at once.
 		const Type* Pointer(const Type* pointee, bool constReferent = false);
 		const Type* Reference(const Type* referent, bool constReferent = false);
 		const Type* Array(const Type* element, uint64 count);
@@ -72,6 +81,34 @@ namespace Scripting
 		const Core::Vector<std::unique_ptr<Type>>& All() const { return m_Owned; }
 
 	private:
+		void Asking(const char* what) const
+		{
+			if (m_Writes) m_Writes->Ask(what);
+		}
+		void Watch(Type* type) const;
+
+		/// The type `cache` keeps for `key`, else the one `make` builds (new and unowned), kept: read under a shared
+		/// lock, filled under the lock alone, so two threads asking at once keep one.
+		template <typename Value, typename Cache, typename Key, typename Make>
+		const Value* Interned(Cache& cache, const Key& key, Make&& make)
+		{
+			{
+				const std::shared_lock<std::shared_mutex> reading(m_Interning);
+				if (auto it = cache.find(key); it != cache.end()) return it->second;
+			}
+			std::unique_ptr<Value> made(make());
+			const std::unique_lock<std::shared_mutex> writing(m_Interning);
+			if (auto it = cache.find(key); it != cache.end()) return it->second;
+			const Value* kept = made.get();
+			Watch(made.get());
+			m_Owned.Push(std::unique_ptr<Type>(made.release()));
+			cache.emplace(key, kept);
+			return kept;
+		}
+
+		std::shared_mutex m_Interning; // the caches and m_Owned
+
+		const ModelWrites* m_Writes = nullptr;
 		Core::Vector<PrimitiveType*> m_Builtins; // one per TypeKind index, nullptr until made
 		std::unordered_map<Core::String, const Type*> m_BuiltinByName;
 		Core::Vector<std::unique_ptr<Type>> m_Owned;

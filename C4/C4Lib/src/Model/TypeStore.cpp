@@ -13,7 +13,7 @@ namespace Scripting
 		};
 	}
 
-	TypeStore::TypeStore() : m_Builtins(64, nullptr)
+	TypeStore::TypeStore(const ModelWrites* writes) : m_Writes(writes), m_Builtins(64, nullptr)
 	{
 		// Seed every primitive singleton and its name so FindBuiltin answers "int32", "float", ...; a built-in
 		// alias names the same singleton (D-01, D-02), so `int` and `int32` are one type.
@@ -38,8 +38,16 @@ namespace Scripting
 		int32 idx = static_cast<int32>(kind);
 		if (idx < 0 || idx >= static_cast<int32>(m_Builtins.Count())) return nullptr;
 		if (!m_Builtins[idx])
+		{
+			Asking("a built-in type");
 			m_Builtins[idx] = new PrimitiveType(kind);
+		}
 		return m_Builtins[idx];
+	}
+
+	void TypeStore::Watch(Type* type) const
+	{
+		if (auto* object = dynamic_cast<ObjectType*>(type)) object->WatchWrites(m_Writes);
 	}
 
 	bool TypeStore::IsBuiltinName(const Core::String& name)
@@ -57,96 +65,69 @@ namespace Scripting
 	const Type* TypeStore::Pointer(const Type* pointee, bool constReferent)
 	{
 		if (!pointee) return nullptr;
-		auto key = std::make_pair(pointee, constReferent);
-		auto it = m_PointerCache.find(key);
-		if (it != m_PointerCache.end()) return it->second;
-		const Type* t = Own(new PointerType(pointee, constReferent));
-		m_PointerCache.emplace(key, t);
-		return t;
+		return Interned<Type>(m_PointerCache, std::make_pair(pointee, constReferent), [&] { return new PointerType(pointee, constReferent); });
 	}
 
 	const Type* TypeStore::Reference(const Type* referent, bool constReferent)
 	{
 		if (!referent) return nullptr;
-		auto key = std::make_pair(referent, constReferent);
-		auto it = m_ReferenceCache.find(key);
-		if (it != m_ReferenceCache.end()) return it->second;
-		const Type* t = Own(new ReferenceType(referent, constReferent));
-		m_ReferenceCache.emplace(key, t);
-		return t;
+		return Interned<Type>(m_ReferenceCache, std::make_pair(referent, constReferent), [&] { return new ReferenceType(referent, constReferent); });
 	}
 
 	const Type* TypeStore::Array(const Type* element, uint64 count)
 	{
 		if (!element || count == 0) return nullptr;
-		auto key = std::make_pair(element, count);
-		auto it = m_ArrayCache.find(key);
-		if (it != m_ArrayCache.end()) return it->second;
-		const Type* t = Own(new ArrayType(element, count));
-		m_ArrayCache.emplace(key, t);
-		return t;
+		return Interned<Type>(m_ArrayCache, std::make_pair(element, count), [&] { return new ArrayType(element, count); });
 	}
 
 	const Type* TypeStore::Swizzle(const Type* element, uint32 laneCount)
 	{
 		if (!element || laneCount == 0) return nullptr;
-		auto key = std::make_pair(element, laneCount);
-		auto it = m_SwizzleCache.find(key);
-		if (it != m_SwizzleCache.end()) return it->second;
-		SwizzleType* raw = new SwizzleType("packed " + element->GetName() + "[" + std::to_string(laneCount) + "]", element);
-		raw->SetRegionPacked(true);
-		for (uint32 i = 0; i < laneCount; ++i) raw->AddLaneAt(Core::String(1, (char)('a' + i)), true, i);
-		raw->CalculateLayout();
-		const Type* t = Own(raw);
-		m_SwizzleCache.emplace(key, t);
-		return t;
+		return Interned<Type>(m_SwizzleCache, std::make_pair(element, laneCount), [&] {
+			SwizzleType* raw = new SwizzleType("packed " + element->GetName() + "[" + std::to_string(laneCount) + "]", element);
+			raw->SetRegionPacked(true);
+			for (uint32 i = 0; i < laneCount; ++i) raw->AddLaneAt(Core::String(1, (char)('a' + i)), true, i);
+			raw->CalculateLayout();
+			return raw;
+		});
 	}
 
 	const Type* TypeStore::InitList(const Type* elementType)
 	{
 		if (!elementType) return nullptr;
-		auto it = m_InitListCache.find(elementType);
-		if (it != m_InitListCache.end()) return it->second;
-		InitListType* t = new InitListType(elementType);
-		t->SetMembers(Pointer(elementType), Builtin(TypeKind::UInt64)); // data = T* @0, size = uint64 @8
-		const Type* owned = Own(t);
-		m_InitListCache.emplace(elementType, owned);
-		return owned;
+		const Type* data = Pointer(elementType);
+		const Type* size = Builtin(TypeKind::UInt64);
+		return Interned<Type>(m_InitListCache, elementType, [&] {
+			InitListType* t = new InitListType(elementType);
+			t->SetMembers(data, size); // data = T* @0, size = uint64 @8
+			return t;
+		});
 	}
 
 	const Type* TypeStore::BracedList(uint32 entries)
 	{
-		auto it = m_BracedListCache.find(entries);
-		if (it != m_BracedListCache.end()) return it->second;
-		const Type* owned = Own(new BracedListType(entries));
-		m_BracedListCache.emplace(entries, owned);
-		return owned;
+		return Interned<Type>(m_BracedListCache, entries, [&] { return new BracedListType(entries); });
 	}
 
 	const Type* TypeStore::FunPtr(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		auto [entry, fresh] = m_FunPtrCache.try_emplace(KeyOf(returnType->GetName(), paramTypes, false), nullptr);
-		if (fresh) entry->second = Own(new FunPtrType(returnType, paramTypes));
-		return entry->second;
+		return Interned<Type>(m_FunPtrCache, KeyOf(returnType->GetName(), paramTypes, false), [&] { return new FunPtrType(returnType, paramTypes); });
 	}
 
 	const Type* TypeStore::Func(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		auto [entry, fresh] = m_FuncCache.try_emplace(KeyOf(returnType->GetName(), paramTypes, false), nullptr);
-		if (fresh) entry->second = Own(new FuncType(returnType, paramTypes));
-		return entry->second;
+		return Interned<Type>(m_FuncCache, KeyOf(returnType->GetName(), paramTypes, false), [&] { return new FuncType(returnType, paramTypes); });
 	}
 
 	const FunctionType* TypeStore::Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes, bool variadic)
 	{
-		auto [entry, fresh] = m_FunctionCache.try_emplace(KeyOf(returnType, paramTypes, variadic), nullptr);
-		if (!fresh) return entry->second;
-		Core::Vector<FunctionType::ParameterInfo> infos;
-		for (const Type* p : paramTypes) { FunctionType::ParameterInfo pi; pi.m_Type = p; infos.Push(pi); }
-		entry->second = Own(new FunctionType(returnType, infos, variadic));
-		return entry->second;
+		return Interned<FunctionType>(m_FunctionCache, KeyOf(returnType, paramTypes, variadic), [&] {
+			Core::Vector<FunctionType::ParameterInfo> infos;
+			for (const Type* p : paramTypes) { FunctionType::ParameterInfo pi; pi.m_Type = p; infos.Push(pi); }
+			return new FunctionType(returnType, infos, variadic);
+		});
 	}
 
 	void TypeStore::FinalizeLayouts()

@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 13 done).
+  progress (steps 1 to 14 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1714,15 +1714,22 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   skipped; a script host's build id object is kept by the id. An unchanged rebuild of the IED server 1.38 s / 1.08 s.
   lld's own time on an edit is 262 ms, two thirds of it the `.pdb` (symbol merging 60 ms, commit 29 ms): only an
   incremental `.pdb` would cut it.
-- **Next:** HIR lowering (about 0.5 s of an edit, the largest serial part) on several threads. What it takes, found
-  reading it: a scope position per lowering context (`SymbolTable::PushScope` moves the table's one `m_Current` and
-  hangs each block's layer under the shared tree for good, since the trees point at their locals); the model's
-  memos made safe to fill from several threads (`LifecycleMethodsOf`, the synthesized lifecycle records, the
-  instantiation maps, the type store's interning); and errors gathered per function and merged in order. AST nodes
-  already answer `Children()` without writing anything (step 10), so two threads may walk one body. Windows has no
-  thread sanitizer, so each piece needs a test that runs it on several threads. What is left inside one thread is
-  spread thin: the arenas' blocks (each tree's own) and the destructor each node with a vector registers, the
-  remaining casts, the model's lookups.
+- **Done notes (step 14):** function bodies are lowered on `-j` threads (`ParallelLowering`,
+  [03-hir](../compiler/03-hir.md#lowering-on-several-threads)): each lowering has its own `ScopeCursor` and
+  diagnostics (merged in the batch's order); a batch is lowered in rounds against a frozen model (`ModelWrites`:
+  every change lowering could read asks first, a frozen model stops the asking lowering); template instances a
+  round asked for are made between rounds, in order, other changes by lowering those bodies alone after; the
+  store's interning takes locks instead; what lowering made on first use and kept lazily is made before each batch
+  (compiler-written lifecycle functions, layouts, lifecycle methods). One thread runs the same rounds, so the
+  program is the same whatever the threads (IED server: the same 131 objects and interface at -j 1, 4 and 16, run to
+  run; `ParallelLoweringTest` builds a 60-function program's module on one thread and on eight and compares it).
+  IED server: 11161 bodies in 31 rounds, 1329 instances made between rounds, 417 lowered alone (most hold a lambda);
+  `lower` 0.51 s / 0.35 s (interleaved A/B, median of eight).
+- **Next:** what is left of `lower` is mostly not lowering: emission (by partition, already on threads), the
+  reflection image's description (serial, about 0.08 s), invoke thunks and imports. Bodies with a lambda are lowered
+  alone: a closure keyed by its lambda would let the round make it. Past that, the front end (about 0.3 s for a
+  one-file edit) is the next serial part; a resident compiler keeping unchanged files' trees and model is the way
+  past it.
 
 ### Testing framework
 

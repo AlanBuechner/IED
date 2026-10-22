@@ -112,5 +112,17 @@ namespace Scripting
 				return QueryResult<void>::Fail(result.error, "'" + obj->GetName() + "' cannot be copied memberwise: " + result.message);
 			return result;
 		}
+
+		void MakeCompilerWritten(ProgramModel& model)
+		{
+			const ModelQueries q(&model);
+			for (const ObjectType* type : model.ObjectTypes())
+			{
+				const OwnMethods& own = Own(q, type);
+				if (!own.defaultCreate && NeedsConstruct(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Create);
+				if (!own.destroy && NeedsDestroy(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Delete);
+				if (!own.copy && !own.assign && NeedsCopy(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Copy);
+			}
+		}
 	}
 } // namespace Scripting

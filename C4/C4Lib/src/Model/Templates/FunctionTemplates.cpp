@@ -89,6 +89,7 @@ namespace Scripting
 		named.written = nullptr;
 		named.argTypes = nullptr;
 		const ProgramModel* owner = &model;
+		model.Writes().Ask("a template name's type");
 		auto* type = new TemplateNameType(LastSegment(call.name), [owner, named](const SignatureType& target) {
 			return ForTarget(*owner, named, target);
 		});
@@ -292,6 +293,7 @@ namespace Scripting
 	void FunctionTemplates::AttachAsMethod(const ProgramModel& model, const ObjectType* instance, const FunctionRecord* rec,
 		const FunctionDefinitionNode& fn)
 	{
+		model.Writes().Ask("an extension method");
 		model.m_ExtensionMethods[instance].Push(rec);
 		ObjectType::MethodInfo m;
 		m.mName = rec->name;

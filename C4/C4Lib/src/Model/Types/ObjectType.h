@@ -1,6 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 #include "Model/ConstantValue.h"
+#include "Model/ModelWrites.h"
 #include "Parser/AstNode.h" // AccessModifier (member visibility)
 #include <unordered_map>
 #include <vector>
@@ -116,7 +117,7 @@ namespace Scripting
 		const PackedViewRegion* FindPackedArrayAlias(const Core::String& name) const;
 		const Core::Vector<MethodInfo>& GetMethods() const { return m_Methods; }
 
-		void AddField(const FieldInfo& field) { m_Fields.Push(field); m_LaidOut = false; }
+		void AddField(const FieldInfo& field) { Asking("a field"); m_Fields.Push(field); m_LaidOut = false; }
 		// A packed lane region (`union { packed float x, y; }` at `declared`) and the field that stores it, placed
 		// after the fields written before it (fields resolve in any order, so it goes in by source position).
 		void AddPackedRegion(const SwizzleType* region, const AstNode* declared);
@@ -124,6 +125,7 @@ namespace Scripting
 		const FieldInfo* PackedStorage(const PackedViewRegion& region) const;
 		void AddMethod(const MethodInfo& method)
 		{
+			Asking("a method");
 			m_MethodsNamed[method.mName].Push(m_Methods.Count());
 			for (const Core::String& annotation : method.m_OperatorAnnotations) m_MethodsWithOperator[annotation].Push(m_Methods.Count());
 			m_DeclaresVirtual = m_DeclaresVirtual || (!method.m_IsStatic && (method.m_IsVirtual || method.m_IsOverride));
@@ -184,11 +186,11 @@ namespace Scripting
 		uint32 GetMethodCount() const { return m_Methods.Count(); }
 
 		const Core::Vector<const ObjectType*>& GetBaseTypes() const { return m_BaseTypes; }
-		void AddBaseType(const ObjectType* base) { m_BaseTypes.Push(base); }
+		void AddBaseType(const ObjectType* base) { Asking("a base"); m_BaseTypes.Push(base); }
 
 		/// Extension methods registered for this type (from `extends` functions).
 		const Core::Vector<MethodInfo>& GetExtensionMethods() const { return m_ExtensionMethods; }
-		void AddExtensionMethod(const MethodInfo& method) { m_ExtensionMethods.Push(method); }
+		void AddExtensionMethod(const MethodInfo& method) { Asking("an extension method"); m_ExtensionMethods.Push(method); }
 
 		// True when this object's ONLY storage is a single packed SIMD region (no base, no vptr,
 		// every non-static field belongs to that one region). Such an object IS a vector: it lowers
@@ -244,6 +246,10 @@ namespace Scripting
 
 		void CalculateLayout();
 
+		/// The model's writes, asked before this type changes from when the model owns it (TypeStore::Own): its
+		/// members, bases and layout are read by lowering on several threads while the model is frozen.
+		void WatchWrites(const ModelWrites* writes) { m_Writes = writes; }
+
 		// Force this object's layout to be computed now (post-order over bases) so GetSize/GetAlignment
 		// return real values. No-op when the type is not yet fully defined or is already laid out. Used by
 		// sizeof() evaluation so a `sizeof(T)` in an array size folds to T's true size even before the
@@ -266,6 +272,10 @@ namespace Scripting
 
 	private:
 		void LayOutUnionRegions();
+		void Asking(const char* what) const
+		{
+			if (m_Writes) m_Writes->Ask(what);
+		}
 
 		ObjectKind m_ObjectKind = ObjectKind::Class;
 		Core::String m_FullName;
@@ -299,6 +309,7 @@ namespace Scripting
 		// own fields are resolved - not only after the end-of-pass-2 FinalizeLayouts sweep.
 		mutable bool m_LaidOut = false;
 		mutable bool m_LayingOut = false;
+		const ModelWrites* m_Writes = nullptr;
 		const AstNode* m_DeclNode = nullptr;
 		Core::Vector<Core::String> m_Groups; // [group("name")] annotations (reflection, plan 14)
 		GuidParts m_Guid;

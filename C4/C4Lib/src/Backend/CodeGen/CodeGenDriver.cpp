@@ -91,17 +91,15 @@ namespace Scripting
 		while (true)
 		{
 			TakeNewFunctions(batch);
-			std::vector<Placed> lowered;
+			std::vector<const FunctionRecord*> bodies;
 			for (const FunctionRecord* rec : batch)
 			{
 				if (!HasBody(*rec) || rec->isLocal || m_Emitted.count(rec)) continue; // nested bodies come with their parent
 				m_Emitted.insert(rec);
-				const size_t errorsBefore = m_LoweringErrors.GetErrors().Count();
-				m_Trees.push_back(std::make_unique<HIRFunction>(LowerFunction(model, m_LoweringErrors, rec)));
-				lowered.push_back({ m_Trees.back().get(), PartitionOf(*rec) });
-				m_TreeOf.emplace(rec, m_Trees.back().get());
-				NoteUse(model, *rec, errorsBefore);
+				bodies.push_back(rec);
 			}
+			std::vector<Placed> lowered;
+			for (LoweredBody& body : m_Lowering.Lower(model, bodies)) Keep(model, std::move(body), lowered);
 			LowerCensusFunctions(model, lowered);
 			batch.Clear();
 			if (LoweringFailed(errorMessage)) return false;
@@ -166,13 +164,21 @@ namespace Scripting
 	}
 
 	// A template-made body's diagnostics name the instance and where the program first uses it.
-	void CodeGenDriver::NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore)
+	void CodeGenDriver::NoteUse(const ProgramModel& model, const FunctionRecord& rec, ErrorTracker& errors)
 	{
-		Core::Vector<CompilationError>& errors = m_LoweringErrors.GetErrorsMutable();
-		if (errors.Count() == errorsBefore) return;
+		if (errors.GetErrors().Count() == 0) return;
 		const auto user = m_FirstUsers.find(&rec);
 		const Core::String note = UseNote(model, rec, user == m_FirstUsers.end() ? nullptr : user->second);
-		for (size_t i = errorsBefore; i < errors.Count(); ++i) errors[i].message += note;
+		for (CompilationError& error : errors.GetErrorsMutable()) error.message += note;
+	}
+
+	void CodeGenDriver::Keep(const ProgramModel& model, LoweredBody body, std::vector<Placed>& lowered)
+	{
+		NoteUse(model, *body.record, body.errors);
+		m_LoweringErrors.Append(body.errors);
+		m_Trees.push_back(std::move(body.tree));
+		lowered.push_back({ m_Trees.back().get(), PartitionOf(*body.record) });
+		m_TreeOf.emplace(body.record, m_Trees.back().get());
 	}
 
 	bool CodeGenDriver::LoweringFailed(std::string* errorMessage) const

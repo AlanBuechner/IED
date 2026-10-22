@@ -170,9 +170,11 @@ namespace
 			if (ProgramOutput::OptimizesPartitions(m_Options)) driver.VerifyLater();
 			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, m_Options.threads, m_Options.optLevel == 0);
 			driver.SetReflectionTag(m_Options.reflectTag);
+			driver.LowerOn(m_Options.threads);
 			auto phaseStart = std::chrono::steady_clock::now();
 			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, m_Options.runTests ? &tests : nullptr);
 			m_Compiler.AddPhaseTime("lower", SecondsSince(phaseStart));
+			if (m_Options.timePhases) ReportLowering(driver.LoweringStatistics());
 			if (!ok)
 			{
 				ReportBackendFailure(driver, backendError);
@@ -188,6 +190,21 @@ namespace
 			const Scripting::KeyedModule image{ driver.ReflectionImageKey(),
 				[&driver](llvm::LLVMContext& context) { return driver.BuildReflectionModule(context); } };
 			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions, image);
+		}
+
+		// -ftime: how many bodies were lowered at once, and what stopped the others (ParallelLowering).
+		static void ReportLowering(const Scripting::LoweringStats& stats)
+		{
+			std::printf("lowering: %llu bodies in %llu round(s) (%.3f s), %llu changes made between rounds, %llu lowered alone (%.3f s), "
+				"%llu lowerings in all", (unsigned long long)stats.bodies, (unsigned long long)stats.rounds, stats.atOnceSeconds,
+				(unsigned long long)stats.made, (unsigned long long)stats.alone, stats.aloneSeconds, (unsigned long long)stats.attempts);
+			const char* separator = " (";
+			for (const auto& [what, count] : stats.changes)
+			{
+				std::printf("%s%s %llu", separator, what.c_str(), (unsigned long long)count);
+				separator = ", ";
+			}
+			std::printf("%s\n", stats.changes.empty() ? "" : ")");
 		}
 
 		// --- Phase 1: input registration -------------------------------------------------

@@ -4,6 +4,7 @@
 #include "Backend/CodeGen/FunctionEmitter.h"
 #include "Backend/CodeGen/PartitionEmitter.h"
 #include "Backend/CodeGen/ProgramPlacement.h"
+#include "Backend/CodeGen/ParallelLowering.h"
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/ErrorTracker.h"
@@ -64,6 +65,11 @@ namespace Scripting
 
 		/// The located diagnostics of a failed HIR lowering (empty when lowering succeeded).
 		const Core::Vector<CompilationError>& LoweringErrors() const { return m_LoweringErrors.GetErrors(); }
+
+		/// Function bodies are lowered on up to `threads` threads (ParallelLowering), with the result of lowering them
+		/// one after another; one before Lower. How it went, for -ftime.
+		void LowerOn(unsigned threads) { m_Lowering = ParallelLowering(threads); }
+		const LoweringStats& LoweringStatistics() const { return m_Lowering.Stats(); }
 
 		llvm::Module* module() { return &m_MCtx.module(); } // owned by this driver until destruction or TakeModule
 		/// The module Lower built, which the caller then owns (a script compile keeps it past the driver).
@@ -137,7 +143,9 @@ namespace Scripting
 		/// references for the first time, until none is left (D-16). False, with the diagnostics, when a body
 		/// fails to lower.
 		bool EmitReachable(ProgramModel& model, Core::Vector<const FunctionRecord*> batch, std::string* errorMessage);
-		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore);
+		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, ErrorTracker& errors);
+		/// A lowered body joins the program: its diagnostics after the ones before it, its tree in `lowered`.
+		void Keep(const ProgramModel& model, LoweredBody body, std::vector<Placed>& lowered);
 		void LowerCensusFunctions(ProgramModel& model, std::vector<Placed>& lowered);
 		/// `__c4_global_init`, registered to run before main: it runs the rounds of Backend/HIR/GlobalInit in
 		/// order, each emitted with the functions it reaches, then attaches the main thread. `__c4_thread_start`
@@ -220,6 +228,7 @@ namespace Scripting
 		std::vector<std::unique_ptr<HIRFunction>> m_Trees; // the lowered bodies, alive for the whole emit
 		FunctionEmitter m_Emitter;
 		ErrorTracker m_LoweringErrors;
+		ParallelLowering m_Lowering{ 1 };
 		bool m_DebugInfo = false;
 		bool m_ShareVtables = false;
 		bool m_VerifyLater = false;

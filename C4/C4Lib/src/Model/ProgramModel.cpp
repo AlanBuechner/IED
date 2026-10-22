@@ -10,6 +10,7 @@
 #include "Model/LoweringScopes.h"      // doc 06 scopes: the lowering verbs delegate to it
 #include "Model/SymbolQueries.h"       // name queries: the query verbs delegate to it
 #include "Model/Types/QualifiedName.h"
+#include "Model/Templates/TemplateMethodDefinitions.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
@@ -26,7 +27,22 @@
 
 namespace Scripting
 {
-	ProgramModel::ProgramModel() : m_Types(std::make_unique<TypeStore>()), m_Symbols(std::make_unique<SymbolTable>()) {}
+	ProgramModel::ProgramModel()
+		: m_Writes(std::make_unique<ModelWrites>()), m_Types(std::make_unique<TypeStore>(m_Writes.get())),
+		  m_Symbols(std::make_unique<SymbolTable>(m_Writes.get()))
+	{
+	}
+
+	void ProgramModel::Settle() const
+	{
+		for (const ObjectType* type : m_ObjectTypes)
+		{
+			type->GetSize();
+			LifecycleMethodsOf(type);
+		}
+		for (const UnionType* type : m_UnionTypes) type->GetSize();
+		for (const TemplateMethodDef& def : m_TemplateMethodDefs) TemplateMethodDefinitions::OwnerScope(*this, def);
+	}
 	ProgramModel::~ProgramModel() = default;
 
 	ProgramModel::ProgramModel(ProgramModel&& other) noexcept = default;
@@ -44,6 +60,7 @@ namespace Scripting
 	const FunctionRecord* ProgramModel::EnsureSynthesizedLifecycle(const ObjectType* type, LifecycleOp op) const
 	{
 		if (const FunctionRecord* existing = SynthesizedLifecycle(type, op)) return existing;
+		m_Writes->Ask("a compiler-written lifecycle function");
 		static const char* const kNames[] = { "", "create", "delete", "copy" };
 		Core::Vector<const Type*> params;
 		FunctionRecord rec;
@@ -122,10 +139,12 @@ namespace Scripting
 	{
 		const auto records = m_MethodRecords.find(type);
 		const uint32 recordCount = records == m_MethodRecords.end() ? 0 : records->second.Count();
-		auto [entry, fresh] = m_LifecycleMethods.try_emplace(type);
-		KnownLifecycle& known = entry->second;
-		if (fresh || known.methods != type->GetMethodCount() || known.records != recordCount)
-			known = { type->GetMethodCount(), recordCount, FindLifecycleMethods(*this, type) };
+		const auto kept = m_LifecycleMethods.find(type);
+		if (kept != m_LifecycleMethods.end() && kept->second.methods == type->GetMethodCount() && kept->second.records == recordCount)
+			return kept->second.found;
+		m_Writes->Ask("lifecycle methods");
+		KnownLifecycle& known = m_LifecycleMethods[type];
+		known = { type->GetMethodCount(), recordCount, FindLifecycleMethods(*this, type) };
 		return known.found;
 	}
 
@@ -331,6 +350,7 @@ namespace Scripting
 
 	const std::vector<SymbolInfo>* ProgramModel::StorePack(std::vector<SymbolInfo> elements) const
 	{
+		m_Writes->Ask("a pack");
 		m_PackStorage.push_back(std::move(elements));
 		return &m_PackStorage.back();
 	}

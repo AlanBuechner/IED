@@ -2,9 +2,12 @@
 #include <vector>
 #include "Model/Types.h"
 #include "Model/ConstantValue.h"
+#include "Model/ModelWrites.h"
 #include "Compiler/ErrorTracker.h"
 #include "Core/Core.h"
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
@@ -210,6 +213,9 @@ namespace Scripting
 		Kind m_Kind;
 		Core::String m_Name;
 		Scope* m_Parent = nullptr;
+		// Asked before a name joins this layer: a permanent layer (the root, a namespace, a class, a template's
+		// binding) has the model's; a lowering's own layer, which no other lowering sees, has none.
+		const ModelWrites* m_Writes = nullptr;
 		static constexpr size_t kComparedNames = 4; // Entries compares names in a layer of at most this many
 		using Symbols = std::unordered_map<Core::String, Core::Vector<std::unique_ptr<SymbolInfo>>>;
 		// Made by the first Register: most of lowering's block layers declare nothing, and an empty map allocates.
@@ -266,6 +272,34 @@ namespace Scripting
 	Core::String MethodSymbol(const Scope* typeScope, const ObjectType& owner, const Core::String& name,
 		const FunctionType& signature, bool isConst);
 
+	class SymbolTable;
+
+	/// One lowering's place in the scope tree (doc 06): the innermost layer it pushed. Each lowering has its own, so
+	/// lowerings on several threads never see each other's locals. While it lives it is its thread's lowering position
+	/// (SymbolTable::Current); a lowering inside another on the same thread (a lambda's body, a local function's)
+	/// starts where the outer one is. Its layers hang under that place without joining the tree's children, and the
+	/// table keeps them when it ends: a local function's record names the layer it was declared in.
+	class ScopeCursor
+	{
+	public:
+		explicit ScopeCursor(SymbolTable& table);
+		~ScopeCursor();
+		ScopeCursor(const ScopeCursor&) = delete;
+		ScopeCursor& operator=(const ScopeCursor&) = delete;
+
+		/// The elements of a pack this lowering binds (`args` of `Ts... args`), kept as long as its layers.
+		const std::vector<SymbolInfo>* KeepPack(std::vector<SymbolInfo> elements);
+
+	private:
+		friend class SymbolTable;
+		friend class ScopeGuard;
+		SymbolTable& m_Table;
+		ScopeCursor* m_Outer;   // the thread's cursor before this one
+		Scope* m_Position;
+		Core::Vector<std::unique_ptr<Scope>> m_Layers;
+		std::unique_ptr<std::deque<std::vector<SymbolInfo>>> m_Packs = std::make_unique<std::deque<std::vector<SymbolInfo>>>();
+	};
+
 	/// RAII scope handle (doc 06): pops its layer on destruction, including across early returns
 	/// and error bails. This is the only way lowering-time scopes change.
 	class ScopeGuard
@@ -282,11 +316,10 @@ namespace Scripting
 	private:
 		friend class SymbolTable;
 		SymbolTable* m_Table = nullptr;
+		ScopeCursor* m_Cursor = nullptr; // the lowering whose layer this is; none for a layer on the table's own position
 		Scope* m_Scope = nullptr;
-		ScopeGuard(SymbolTable* table, Scope* scope);
+		ScopeGuard(SymbolTable* table, ScopeCursor* cursor, Scope* scope);
 	};
-
-	class SymbolTable; // forward for ScopeGuard's friend use below
 
 	/// Scoped name resolution for one program (doc 03/06). Owns the scope tree and every
 	/// FunctionRecord. Visibility is enforced at lookup time from the asking unit: a symbol is
@@ -295,7 +328,8 @@ namespace Scripting
 	class SymbolTable
 	{
 	public:
-		SymbolTable();
+		/// `writes` is asked before a permanent layer, a name in one, or a record is added (a frozen model adds none).
+		explicit SymbolTable(const ModelWrites* writes = nullptr);
 
 		/// The program root scope; every namespace and file-scope declaration hangs under it.
 		Scope* GetRoot() const { return m_Root.get(); }
@@ -310,16 +344,19 @@ namespace Scripting
 		void ForEachGlobalVariable(const std::function<void(const SymbolInfo&, const Scope&)>& visit) const;
 
 		// --- Lowering-time scope management (doc 06) -------------------------------------
-		/// Push a new layer under the current lowering position. The caller keeps the returned guard alive for
-		/// exactly as long as the layer must exist; its end makes the layer's parent current again.
+		/// Push a new layer under the current lowering position: the calling thread's ScopeCursor's, or the
+		/// table's own when it has none. The caller keeps the returned guard alive for exactly as long as the layer
+		/// must exist; its end makes the layer's parent current again.
 		ScopeGuard PushScope(Scope::Kind kind, const Core::String& name);
 
 		/// Create a PERMANENT layer under `parent` (builder registration: class and namespace
-		/// scopes live for the model's lifetime and are not RAII). Not the lowering position.
+		/// scopes live for the model's lifetime and are not RAII). Not the lowering position. A block made while a
+		/// lowering runs is that lowering's (ScopeCursor): alive as long, outside the tree's children.
 		Scope* CreateScope(Scope::Kind kind, const Core::String& name, Scope* parent);
 
-		/// The current lowering position (innermost pushed layer, or the root when none).
-		Scope* Current() const { return m_Current; }
+		/// The current lowering position: the calling thread's ScopeCursor's, else the innermost layer pushed on the
+		/// table's own position, or the root when none.
+		Scope* Current() const;
 
 		// --- Records ----------------------------------------------------------------------
 		/// Own a FunctionRecord for a symbol. Stable for the model's lifetime. A C4 function's symbol that
@@ -348,9 +385,16 @@ namespace Scripting
 		void ForEachScopedSymbol(const std::function<void(const Core::String&, SymbolInfo*, const Scope&)>& visit) const;
 
 	private:
-		friend class ScopeGuard; // pops m_Current on destruction
+		friend class ScopeGuard;  // pops m_Current on destruction
+		friend class ScopeCursor; // hands its layers over when it ends
+		ScopeCursor* ActiveCursor() const;
+		void Adopt(ScopeCursor& cursor);
+
+		const ModelWrites* m_Writes = nullptr;
 		std::unique_ptr<Scope> m_Root;
 		Core::Vector<std::unique_ptr<Scope>> m_Retired; // popped lowering layers, kept so pointers into them stay valid
+		Core::Vector<std::unique_ptr<std::deque<std::vector<SymbolInfo>>>> m_RetiredPacks; // the packs their lowerings bound
+		std::mutex m_Adopting; // lowerings on several threads end at once
 		Scope* m_Current = nullptr;
 		Core::Vector<std::unique_ptr<FunctionRecord>> m_Records;
 		std::unordered_set<Core::String> m_ClaimedSymbols; // the symbols of the C4 functions recorded so far

@@ -15,15 +15,15 @@ namespace Scripting
 {
 	namespace
 	{
-		// `args` of `Ts... args` names the parameters that are its elements (D-19).
-		void BindParameterPacks(ProgramModel& model, LoweringContext& ctx, const FunctionRecord& record)
+		// `args` of `Ts... args` names the parameters that are its elements (D-19), kept by the lowering's cursor.
+		void BindParameterPacks(ScopeCursor& cursor, LoweringContext& ctx, const FunctionRecord& record)
 		{
 			for (const FunctionRecord::ParameterPack& pack : record.parameterPacks)
 			{
 				std::vector<SymbolInfo> elements;
 				for (uint32 i = pack.first; i < pack.first + pack.count; ++i)
 					if (const SymbolInfo* param = ctx.queries().FindLocal(record.paramNames[i])) elements.push_back(*param);
-				SymbolInfo sym; sym.kind = SymbolKind::Variable; sym.definingUnit = 0; sym.packElements = model.StorePack(std::move(elements));
+				SymbolInfo sym; sym.kind = SymbolKind::Variable; sym.definingUnit = 0; sym.packElements = cursor.KeepPack(std::move(elements));
 				ctx.queries().RegisterLocal(pack.name, sym);
 			}
 		}
@@ -71,7 +71,9 @@ namespace Scripting
 		ctx.primitiveThis = record->primitiveReceiverType; // a primitive receiver (extension method) is a pointer this
 		ctx.scope = record->scope; // the function's enclosing namespace/class - unqualified type lookup context
 
-		// The function's scope layer: parameters + locals live here for the whole body.
+		// This lowering's own place in the scope tree, so lowerings on other threads never see its locals; then the
+		// function's layer: parameters + locals live here for the whole body.
+		ScopeCursor cursor(*model.Symbols());
 		ScopeGuard fnScope = ctx.queries().PushScope(Scope::Kind::Function, record->mangledName);
 
 		// Template bindings: a body made from a template sees its parameters (T := int32, N := 4) as names in
@@ -98,7 +100,7 @@ namespace Scripting
 			}
 			ctx.BindLocal(record->paramNames[i], sym, slot, isReference, refersToConst);
 		}
-		BindParameterPacks(model, ctx, *record);
+		BindParameterPacks(cursor, ctx, *record);
 
 		// A lambda's call method: its captures are names bound to the closure's fields (docs/language/07).
 		if (const Closure* closure = model.ClosureOf(record->containingType)) EnterClosureBody(ctx, *closure);

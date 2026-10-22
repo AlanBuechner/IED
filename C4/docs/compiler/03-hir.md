@@ -11,7 +11,8 @@ yields diagnostics rather than crashes.
 1. **Input:** one `FunctionRecord` plus the `ProgramModel`. Nothing else - no AST outside the record's
    body, no shared "current function" state.
 2. **Output:** an `HIRFunction` returned by value (it owns its node arena), and diagnostics in the
-   `ErrorTracker`. `complete == false` means lowering failed; codegen never emits an incomplete tree.
+   `ErrorTracker` it is given (each body its own: see "Lowering on several threads"). `complete == false` means
+   lowering failed; codegen never emits an incomplete tree.
 3. **Every node's `type` is concrete.** No aliases to chase, no template parameters, no unresolved names.
    Implicit conversions are explicit `ConvertNode`s; operator calls are explicit `CallNode`s with the
    chosen record; virtual calls carry their vtable slot.
@@ -22,10 +23,10 @@ yields diagnostics rather than crashes.
 6. **No optimization in HIR.** Lowering is a direct mapping; optimization is LLVM's job (`-O<n>`).
 
 Entry point: `HIRFunction LowerFunction(ProgramModel&, ErrorTracker&, const FunctionRecord*)`
-(`LoweringDriver`). It creates a transient `LoweringContext`, pushes the function scope, binds parameters
-as locals (names from the record, reference params as auto-deref lvalues), and for an instantiated
-template body pushes the fake-alias bindings so `T`/`N` resolve through ordinary lookup. Every layer pops
-by RAII, even on error.
+(`LoweringDriver`). It creates a transient `LoweringContext` and the lowering's own `ScopeCursor`, pushes the
+function scope, binds parameters as locals (names from the record, reference params as auto-deref lvalues), and
+for an instantiated template body pushes the fake-alias bindings so `T`/`N` resolve through ordinary lookup.
+Every layer pops by RAII, even on error.
 
 ## Files
 
@@ -184,8 +185,15 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
 
 ## Scopes and labels
 
-- Every block pushes a model scope layer and pops it by RAII at the end of its own lowering, including when
-  an error aborts the function. A nested `{ }` is its own child `BlockNode`, so shadowing is real nesting.
+- Every block pushes a scope layer and pops it by RAII at the end of its own lowering, including when an error
+  aborts the function. A nested `{ }` is its own child `BlockNode`, so shadowing is real nesting.
+- The layers are the lowering's own (`ScopeCursor`, `Model/SymbolTable`): each `LowerFunction` has a cursor that
+  is its thread's lowering position (`SymbolTable::Current`) while it lives, so lowerings on several threads never
+  see each other's locals. A lowering inside another on the same thread (a lambda's body, a local function's)
+  starts where the outer one is. The layers hang under that place without joining the tree's children, and the
+  table keeps them when the lowering ends (a local function's record names its layer). A block the model makes
+  while a lowering runs (a template's binding, a pack element's) is the lowering's too; class and namespace scopes
+  stay the model's.
 - A local is registered AFTER its initializer is lowered, so `int32 x = x;` cannot see itself.
 - Control-flow bodies are child blocks owned by the control node, not siblings in the parent region.
 - `break` targets the innermost loop or switch and `continue` the innermost loop (two independent label
@@ -197,9 +205,41 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
   checks every goto: undefined label, a label in a nested block, or a forward jump across a declaration or
   defer of the label's block are errors.
 
+## Lowering on several threads
+
+`ParallelLowering` (`Backend/CodeGen`) lowers each batch of `CodeGenDriver::EmitReachable` on `-j` threads
+(`CodeGenDriver::LowerOn`), and the program is the same whatever the threads: one thread runs the same rounds.
+
+- **The frozen model.** Every place that changes what lowering reads asks the model's `ModelWrites` first
+  (`Model/ModelWrites.h`): a type the store takes (`TypeStore::Own`), a record (`SymbolTable::AddFunctionRecord`),
+  a class or namespace scope, a name in a permanent scope, an object type's member, base or layout, a template
+  instance, a compiler-written lifecycle function, a closure, a local type or function, a pack, a lazily kept
+  answer (lifecycle methods, a template method's owner). While the model is frozen the asking lowering stops with
+  `ModelFrozen`, so threads reading the model never see it change.
+- **What is not a change.** Interning (`T*`, `T&`, `T[N]`, signatures, funcptr and braced-list types) is the
+  same whoever interns first and nothing walks the store, so the store's caches are read under a shared lock and
+  filled under their own, and lowerings intern at once.
+- **Before a batch.** `Prepare` makes what lowering would make on first use and keeps lazily: every object type's
+  compiler-written create, delete and copy that it needs and declares none of (`LifecycleFacts::MakeCompilerWritten`,
+  in the model's order of types; one nothing calls is never emitted), and `ProgramModel::Settle` (layouts,
+  lifecycle methods, template method owners).
+- **Rounds.** A round lowers the pending bodies at once against the frozen model, each with its own diagnostics
+  and scope cursor (a `WorkerPool` keeps the threads between rounds). A body that stopped for a change that can be
+  made apart from its lowering - a function or class template instance, made from its template and arguments
+  alone (`ModelFrozen::make`) - has it made after the round, in the batch's order, and goes to the next round,
+  which finds it made. After four rounds, or for a change only its lowering can make (a closure, a local type),
+  the bodies left are lowered alone, in the batch's order, making their changes.
+- **What a body sees.** A body never sees a change another body of its batch made unless it needed that change
+  itself (it then stops and finds it next round), and the changes are made in one order, so record order and
+  symbol names (`_1` for a second record with a symbol) do not depend on the threads.
+- `-ftime` prints the rounds, the changes made between them, the bodies lowered alone and what stopped bodies,
+  by kind. IED server: 11161 bodies in 31 rounds (0.05 s), 1329 instances made between rounds, 417 lowered alone
+  (0.03 s; most hold a lambda); the `lower` phase 0.51 s / 0.35 s (the rest is emission and reflection).
+
 ## Diagnostics
 
-- One channel: `LoweringContext::Fail` / `Report` write to the build's `ErrorTracker`. The first failure in a
+- One channel: `LoweringContext::Fail` / `Report` write to the body's `ErrorTracker`, which `CodeGenDriver` adds
+  to the build's after the bodies before it (with where a template-made body is first used). The first failure in a
   statement aborts that statement and is its only report (the layers the failure propagates through add
   nothing); the statements after it still lower (`StmtLowerer::LowerEach`), so a function reports one error per
   failed statement (BUG-361), and its tree stays incomplete. Other functions keep lowering, so one run

@@ -156,10 +156,11 @@ namespace Scripting
 	const Scope* TemplateMethodDefinitions::OwnerScope(const ProgramModel& model, const ProgramModel::TemplateMethodDef& def)
 	{
 		if (def.ownerKnown) return def.ownerScope;
-		def.ownerKnown = true;
+		model.Writes().Ask("a template method's owner");
 		const Scope* from = QualifierScope(model, def);
 		const ProgramModel::TemplateDef* chosen = from ? TemplateInstantiator().ChooseTypeDefinition(model, def.owner, from) : nullptr;
 		def.ownerScope = chosen ? chosen->declScope : nullptr;
+		def.ownerKnown = true;
 		return def.ownerScope;
 	}
 

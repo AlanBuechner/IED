@@ -259,6 +259,15 @@ namespace Scripting
 		/// The closure facts of a lambda's type; null for every other type.
 		const Closure* ClosureOf(const Type* t) const;
 
+		// --- Lowering on several threads ------------------------------------------------
+		/// Whether the model may change now: asked before every change lowering could read. Lowering freezes it while
+		/// several threads read it (CodeGenDriver::LowerInParallel).
+		ModelWrites& Writes() const { return *m_Writes; }
+		/// Makes every answer the model keeps lazily that lowering reads (layouts, lifecycle methods, the owners of
+		/// out-of-line template methods), so lowering on several threads finds them made instead of asking a frozen
+		/// model to make them.
+		void Settle() const;
+
 		// --- Introspection (LSP/DAP/tests + HIR lowering) ------------------------------
 		SymbolTable* Symbols() const { return m_Symbols.get(); }
 		TypeStore* TypeStorePtr() const { return m_Types.get(); }
@@ -372,6 +381,7 @@ namespace Scripting
 		/// nullptr when any segment is missing or not visible. Every name query goes through this.
 		const SymbolInfo* FindVisibleQualified(const Core::String& name, uint32 unitId, const Scope* context = nullptr) const;
 
+		std::unique_ptr<ModelWrites> m_Writes; // before the store and the table, which ask it
 		std::unique_ptr<TypeStore> m_Types;
 		std::unique_ptr<SymbolTable> m_Symbols;
 		mutable Core::Vector<std::pair<Core::String, ConstantValue>> m_Constants; // folded: qualified name -> value

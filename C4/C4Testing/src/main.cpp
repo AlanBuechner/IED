@@ -49,6 +49,7 @@ LINK_REFLECTION_DATA
 #include "Tests/Semantic/DeclarationNodesTest.h"
 #include "Tests/Semantic/ReflectedAnnotationsTest.h"
 #include "Tests/Semantic/HIRLoweringTest.h"
+#include "Tests/Semantic/ParallelLoweringTest.h"
 #include "Tests/Semantic/CodeGenTest.h"
 #include "Tests/Semantic/IsolatedCorpusModelTest.h"
 #include "Tests/Semantic/ObjectModelTest.h"

@@ -87,7 +87,7 @@ namespace Scripting
 					o.defines.push_back(ParseMacroDefine(v)); }, true },
 				{ { "-O" }, "<n>", "Optimization level of the generated code, 0 to 3 (default 0)", [](CompileOptions& o, const std::string& v) {
 					o.optLevel = v.size() == 1 && v[0] >= '0' && v[0] <= '3' ? v[0] - '0' : -1; }, true },
-				{ { "-j", "--threads" }, "<n>", "Threads that generate code, 1 to 64 (default: the processors, at most 4)",
+				{ { "-j", "--threads" }, "<n>", "Threads that lower function bodies and generate code, 1 to 64 (default: the processors)",
 					[](CompileOptions& o, const std::string& v) { o.threads = ParseCount(v, "-j", o); }, true },
 				{ { "--partitions" }, "<n>", "Assemble the program into <n> objects, 1 to 256 (default: by its size)",
 					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o, kMaxPartitions); } },
