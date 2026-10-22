@@ -188,8 +188,8 @@ run = ["${python}", "tools/cook.py", "${project.dir}/assets", "${int}/cooked"]  
 # python = "tools/cook.py:cook"    # ... or a function(ctx) in a Python file (or "module:function")
 cwd = "tools"                      # default: the project folder (workspace folder for workspace steps)
 env = { COOK_LEVEL = "high" }
-inputs = ["assets/**/*.png"]       # with outputs: the step is skipped while every output is newer than
-outputs = ["${int}/cooked/**"]     #   every input and its expanded command is unchanged
+inputs = ["assets/**/*.png"]       # with outputs: the step is skipped while every output exists, every input
+outputs = ["${int}/cooked/**"]     #   is as it was when its last good run began, and its command is unchanged
 configs = ["Development", "Dist"]  # run only in these configurations
 ```
 
@@ -298,10 +298,11 @@ C4.exe --projects <int>/projects.toml -O<n> [-g] [-D NAME=VALUE (configuration d
        --int-dir build/int/<cfg>/P -o build/bin/<cfg>/P/P.exe
 ```
 
-It is rebuilt when the output is missing, the command line or description changed, a tracked file was
-added or deleted, or a tracked file - every file under the modules' sources and includes, and the toolchain's
-`C4.exe`, `Bedrock/` and `C4Runtime/` - is newer than the output. The stamps are written only after a
-successful compile. Compiler output streams as it happens. An output that is running (a server under test, the IDE
+It is rebuilt when the output is missing, the command line or description changed, or a tracked file - every file
+under the modules' sources and includes, and the toolchain's `C4.exe`, `Bedrock/` and `C4Runtime/` - was added,
+removed or changed since the last successful compile began. Each file's state (mtime and size) is taken before the
+compiler runs and stamped only after it succeeds, so a source edited while a build ran (another session's build
+finishing later included) is compiled by the next build, never reported up to date. Compiler output streams as it happens. An output that is running (a server under test, the IDE
 built from this checkout) cannot be written on Windows, so it is renamed to `<output>.<ms>.old` first and the old
 program keeps running; a later build removes the `.old` copies nothing runs any more.
 

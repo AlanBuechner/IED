@@ -37,6 +37,19 @@ def mtime(path):
 		return 0.0
 
 
+def input_states(paths):
+	"""Each file's state as `path<TAB>mtime_ns<TAB>size` lines ("missing" for one that is not there): taken before a
+	build reads its inputs, it says whether any changed since, even while the build ran."""
+	lines = []
+	for path in paths:
+		try:
+			info = os.stat(path)
+			lines.append(f"{path}\t{info.st_mtime_ns}\t{info.st_size}\n")
+		except OSError:
+			lines.append(f"{path}\tmissing\n")
+	return "".join(lines)
+
+
 def ensure_dir(path):
 	os.makedirs(path, exist_ok=True)
 

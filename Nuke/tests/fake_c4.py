@@ -1,6 +1,7 @@
 """A stand-in for C4.exe in Nuke's tests: records its arguments and writes the output it is asked for.
 FAKE_C4_FAIL=<code> makes it fail with that exit code; FAKE_C4_WITHOUT=<option>,... plays an older compiler that
-neither lists nor accepts those options."""
+neither lists nor accepts those options; FAKE_C4_EDIT=<path> appends to that file while it compiles, as another session
+editing a source during the build would."""
 
 import json
 import os
@@ -26,6 +27,10 @@ def main(args):
 		with open(log, "a", encoding="utf-8") as f:
 			f.write(json.dumps(args) + "\n")
 	print("fake-c4: compiling")
+	edited = os.environ.get("FAKE_C4_EDIT")
+	if edited:
+		with open(edited, "a", encoding="utf-8") as f:
+			f.write("// edited while compiling\n")
 	if os.environ.get("FAKE_C4_FAIL"):
 		print("main.cf (1:1) error: forced failure")
 		return int(os.environ["FAKE_C4_FAIL"])

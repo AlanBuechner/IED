@@ -164,7 +164,7 @@ class IncrementalStepTests(WorkspaceTest):
 		self.files({"App/cook.py": f"import os\nos.makedirs(r'{bin_dir}', exist_ok=True)\n"
 			f"open(r'{bin_dir}/cooked.txt', 'w').write('x')\nprint('cooking')\n"})
 
-	def test_skips_when_outputs_are_newer_than_inputs(self):
+	def test_skips_when_nothing_changed(self):
 		code, out = self.nuke("build")
 		self.assertIn("cooking", out)
 		code, out = self.nuke("build")
@@ -179,6 +179,16 @@ class IncrementalStepTests(WorkspaceTest):
 		self.assertIn("cooking", self.nuke("build")[1])
 		os.remove(self.path("build", "bin", "Development-windows-x64", "App", "cooked.txt"))
 		self.assertIn("cooking", self.nuke("build")[1])
+
+	def test_reruns_when_an_input_was_edited_while_it_ran(self):
+		asset = self.path("App", "assets", "a.txt").replace("\\", "/")
+		bin_dir = self.path("build", "bin", "Development-windows-x64", "App").replace("\\", "/")
+		cook = f"import os\nos.makedirs(r'{bin_dir}', exist_ok=True)\nopen(r'{bin_dir}/cooked.txt', 'w').write('x')\nprint('cooking')\n"
+		self.files({"App/cook.py": f"open(r'{asset}', 'a').write('b')\n" + cook})
+		self.assertIn("cooking", self.nuke("build")[1])
+		self.files({"App/cook.py": cook})
+		self.assertIn("cooking", self.nuke("build")[1])
+		self.assertIn("build step 'cook': up to date", self.nuke("build")[1])
 
 	def test_reruns_when_the_configuration_changes_the_command(self):
 		self.nuke("build")

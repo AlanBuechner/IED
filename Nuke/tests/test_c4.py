@@ -128,6 +128,19 @@ class C4BuildTests(WorkspaceTest):
 		self.nuke("build")
 		self.assertEqual(len(self.compiles()), 2)
 
+	def test_an_edit_made_while_compiling_rebuilds(self):
+		os.environ["FAKE_C4_EDIT"] = self.path("Game", "src", "main.cf")
+		try:
+			self.nuke("build")
+		finally:
+			del os.environ["FAKE_C4_EDIT"]
+		self.assertLessEqual(os.path.getmtime(self.path("Game", "src", "main.cf")), os.path.getmtime(self.bin("Game", "Game.exe")))
+		code, out = self.nuke("build")
+		self.assertNotIn("Game: up to date", out)
+		self.assertEqual(len(self.compiles()), 2)
+		code, out = self.nuke("build")
+		self.assertIn("Game: up to date", out)
+
 	def test_a_new_file_rebuilds(self):
 		self.nuke("build")
 		self.files({"Game/src/extra.cf": ""})

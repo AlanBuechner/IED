@@ -1,5 +1,6 @@
-"""Running manifest and extension steps. A step with `outputs` is skipped while its outputs are newer than its
-inputs and its expanded command is unchanged (recorded in a stamp under the int folder)."""
+"""Running manifest and extension steps. A step with `outputs` is skipped while its outputs exist, its expanded
+command is unchanged and its inputs are as they were when its last successful run began (recorded in a stamp under
+the int folder), so an input edited while the step ran is not taken for done."""
 
 import hashlib
 import json
@@ -68,12 +69,13 @@ def run_step(session, step, project=None):
 		return
 	session.log.note(f"{label}{' - ' + step.description if step.description else ''}")
 	_make_output_folders(outputs, base)
+	before = _stamp_text(signature, inputs, base)
 	with session.timed(label):
 		code = _execute(session, step, project, variables, command, cwd, env)
 	if code:
 		raise StepFailed(label, code)
 	if outputs:
-		fsutil.write_if_changed(stamp, signature)
+		fsutil.write_if_changed(stamp, before)
 
 
 def _command(step, variables, cwd):
@@ -139,14 +141,12 @@ def _signature(command, cwd, env, inputs, outputs):
 	return json.dumps({"command": command, "cwd": cwd, "env": env, "inputs": inputs, "outputs": outputs}, sort_keys=True)
 
 
+def _stamp_text(signature, inputs, base):
+	return signature + "\n" + fsutil.input_states(fsutil.expand_globs(inputs, base))
+
+
 def _up_to_date(stamp, signature, inputs, outputs, base):
-	if fsutil.read_text(stamp) != signature:
-		return False
 	produced = fsutil.expand_globs(outputs, base)
 	if not produced or not all(os.path.exists(p) for p in produced):
 		return False
-	consumed = fsutil.expand_globs(inputs, base)
-	if any(not os.path.exists(p) for p in consumed):
-		return False
-	newest_input = max((fsutil.mtime(p) for p in consumed), default=0.0)
-	return newest_input <= min(fsutil.mtime(p) for p in produced)
+	return fsutil.read_text(stamp) == _stamp_text(signature, inputs, base)

@@ -1,9 +1,10 @@
 """Compiling one C4 program (or test harness): the C4.exe command line, the incremental check and the run.
 
-A project is rebuilt when its output is missing, the command line or build description changed, the set of
-tracked files changed (one added or deleted), or any tracked file - the workspace sources and the toolchain's
-compiler, default library and runtime - is newer than the output. The stamps are written only after a
-successful compile, so a failed compile is never mistaken for an up-to-date one."""
+A project is rebuilt when its output is missing, the command line or build description changed, or any tracked
+file - the workspace sources and the toolchain's compiler, default library and runtime - was added, removed or
+changed since the last successful compile began: their states (mtime and size) are taken before the compiler runs
+and written only after it succeeds, so an edit made while it ran (another build finishing later included) and a
+failed compile are never mistaken for an up-to-date build."""
 
 import os
 from dataclasses import dataclass
@@ -98,10 +99,7 @@ def is_up_to_date(job):
 		return False
 	if fsutil.read_text(job.description_path) != job.description_text:
 		return False
-	if fsutil.read_text(fsutil.join(job.int_dir, DEPENDENCY_STAMP)) != "\n".join(job.tracked) + "\n":
-		return False
-	built = fsutil.mtime(job.output)
-	return all(fsutil.mtime(path) <= built for path in job.tracked)
+	return fsutil.read_text(fsutil.join(job.int_dir, DEPENDENCY_STAMP)) == fsutil.input_states(job.tracked)
 
 
 def compile_program(session, job):
@@ -119,9 +117,10 @@ def compile_program(session, job):
 	if aside:
 		session.log.note(f"{os.path.basename(job.output)} is running: moved aside to {os.path.basename(aside)}")
 	session.log.note(f"compiling {job.label} with {session.toolchain().describe()}")
+	inputs = fsutil.input_states(job.tracked)
 	code = process.run(list(job.argv), session.log, cwd=job.cwd)
 	if code != 0:
 		raise StepFailed(f"compiling {job.label}", code)
 	fsutil.write_if_changed(fsutil.join(job.int_dir, ARGS_STAMP), _stamp_text(job))
-	fsutil.write_if_changed(fsutil.join(job.int_dir, DEPENDENCY_STAMP), "\n".join(job.tracked) + "\n")
+	fsutil.write_if_changed(fsutil.join(job.int_dir, DEPENDENCY_STAMP), inputs)
 	return True
