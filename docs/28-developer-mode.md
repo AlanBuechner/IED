@@ -63,8 +63,9 @@ The settings page keeps the desktop app current with the checkout without a term
   `Failed (exit 1) after 0:42` in red. **Cancel** (`ied.developer/cancel`) ends the build and every process it started
   (Bedrock's `Process::Child` runs it in a job); a build longer than an hour is ended the same way. One build at a time:
   a second `rebuild` is refused with `conflict`.
-- **Rebuild and relaunch** (the desktop app only) does the same, then, when the build succeeds, calls
-  `window.iedDesktop.relaunch()` (`docs/27`): the app records its windows and the workspace each shows, stops the
+- **Rebuild and relaunch** (the desktop app only) does the same, then, when that build succeeds, calls
+  `window.iedDesktop.relaunch()` (`docs/27`) from the window that asked, whether or not its settings page is still
+  open (`relaunchWhenBuilt`; a failed or canceled build relaunches nothing): the app records its windows and the workspace each shows, stops the
   server, starts the new install and opens the windows again. Every chat, build and terminal resumes from disk
   (`docs/12` restart rules). **Relaunch** alone is offered after a build that succeeded.
 - **In a browser,** or a desktop app from before relaunch, the page says "Restart IED to use the new build: `ied stop`,

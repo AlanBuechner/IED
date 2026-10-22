@@ -2,7 +2,7 @@
 // build's one line, whether the window can relaunch, and what DEV says of a build.
 
 import { test, assertEqual, assertTrue } from "./harness.js";
-import { buildLine, canRelaunch, duration, installRows, shortCommit } from "/plugins/ied.developer/ui/buildpage.js";
+import { buildLine, canRelaunch, duration, installRows, relaunchWhenBuilt, shortCommit } from "/plugins/ied.developer/ui/buildpage.js";
 import { statusOf } from "/plugins/ied.developer/ui/index.js";
 
 const HEAD = "0f458b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f70";
@@ -55,6 +55,69 @@ test("developer: only the desktop app with relaunch can relaunch", () => {
 	assertEqual(canRelaunch({}), false);
 	assertEqual(canRelaunch({ iedDesktop: { newWindow() {} } }), false, "an older desktop app");
 	assertEqual(canRelaunch({ iedDesktop: { relaunch() {} } }), true);
+});
+
+// A client whose ied.developer/state is driven by hand: `send(state)` delivers a snapshot first, then changed events.
+function fakeClient() {
+	const client = { subscribers: 0, handlers: null };
+	client.subscribe = (topic, handlers) => {
+		client.subscribers += 1;
+		client.handlers = handlers;
+		return () => { client.subscribers -= 1; };
+	};
+	client.send = (buildState, first) => {
+		const data = state({ build: { state: buildState } });
+		if (first) client.handlers.snap(data);
+		else client.handlers.evt("changed", data);
+	};
+	return client;
+}
+
+function desktop() {
+	const win = { relaunched: 0 };
+	win.iedDesktop = { relaunch: () => { win.relaunched += 1; } };
+	return win;
+}
+
+test("developer: relaunch waits for the next build to succeed, not the last one", () => {
+	const client = fakeClient();
+	const win = desktop();
+	relaunchWhenBuilt(client, win);
+	client.send("succeeded", true);
+	assertEqual(win.relaunched, 0, "the build before this one");
+	client.send("running");
+	client.send("running");
+	assertEqual(win.relaunched, 0);
+	client.send("succeeded");
+	assertEqual([win.relaunched, client.subscribers], [1, 0], "once, and it stops listening");
+	client.handlers.evt("changed", state({ build: { state: "succeeded" } }));
+	assertEqual(win.relaunched, 1, "never twice");
+});
+
+test("developer: a failed or canceled build, or a refused one, relaunches nothing", () => {
+	for (const ending of ["failed", "canceled"]) {
+		const client = fakeClient();
+		const win = desktop();
+		relaunchWhenBuilt(client, win);
+		client.send("idle", true);
+		client.send("running");
+		client.send(ending);
+		assertEqual([win.relaunched, client.subscribers], [0, 0], ending);
+	}
+	const client = fakeClient();
+	const win = desktop();
+	const stop = relaunchWhenBuilt(client, win);
+	client.send("idle", true);
+	stop();
+	stop();
+	assertEqual(client.subscribers, 0, "the request was refused; stopping twice is stopping once");
+	const restarted = fakeClient();
+	relaunchWhenBuilt(restarted, win);
+	restarted.send("idle", true);
+	restarted.send("running");
+	restarted.handlers.snap(state({ build: { state: "idle" } }));
+	assertEqual(restarted.subscribers, 0, "a server that restarted lost the build");
+	assertEqual(win.relaunched, 0);
 });
 
 test("developer: DEV says when a build runs, fails or the checkout is ahead", () => {

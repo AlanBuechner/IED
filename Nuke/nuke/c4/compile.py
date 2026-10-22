@@ -115,6 +115,9 @@ def compile_program(session, job):
 		if os.path.exists(fsutil.join(job.int_dir, stamp)):
 			os.remove(fsutil.join(job.int_dir, stamp))
 	fsutil.write_if_changed(job.description_path, job.description_text)
+	aside = fsutil.move_aside_if_running(job.output)
+	if aside:
+		session.log.note(f"{os.path.basename(job.output)} is running: moved aside to {os.path.basename(aside)}")
 	session.log.note(f"compiling {job.label} with {session.toolchain().describe()}")
 	code = process.run(list(job.argv), session.log, cwd=job.cwd)
 	if code != 0:

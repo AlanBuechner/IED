@@ -1,9 +1,11 @@
-"""File helpers: normalized paths, globbing, newest/oldest mtimes and copy-if-newer mirroring."""
+"""File helpers: normalized paths, globbing, newest/oldest mtimes, copy-if-newer mirroring and moving a running program
+aside."""
 
 import fnmatch
 import glob
 import os
 import shutil
+import time
 
 # NTFS keeps 1-2 s mtime granularity on some volumes: a copy is stamped older than its source so a
 # later edit of the source is always seen as newer.
@@ -37,6 +39,26 @@ def mtime(path):
 
 def ensure_dir(path):
 	os.makedirs(path, exist_ok=True)
+
+
+def move_aside_if_running(path):
+	"""Windows will not let a running program's file be written, but lets it be renamed: one is moved to
+	<path>.<ms>.old, so a build can write the new program while the old one keeps running. Copies moved aside before
+	that nothing runs any more are removed. Returns where it went, or None when nothing had to move."""
+	for old in glob.glob(glob.escape(path) + ".*.old"):
+		try:
+			os.remove(old)
+		except OSError:
+			pass
+	if not os.path.isfile(path):
+		return None
+	try:
+		with open(path, "r+b"):
+			return None
+	except PermissionError:
+		aside = "%s.%d.old" % (path, int(time.time() * 1000))
+		os.replace(path, aside)
+		return aside
 
 
 def files_under(folder, extensions=None):

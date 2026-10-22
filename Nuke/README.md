@@ -301,7 +301,9 @@ C4.exe --projects <int>/projects.toml -O<n> [-g] [-D NAME=VALUE (configuration d
 It is rebuilt when the output is missing, the command line or description changed, a tracked file was
 added or deleted, or a tracked file - every file under the modules' sources and includes, and the toolchain's
 `C4.exe`, `Bedrock/` and `C4Runtime/` - is newer than the output. The stamps are written only after a
-successful compile. Compiler output streams as it happens.
+successful compile. Compiler output streams as it happens. An output that is running (a server under test, the IDE
+built from this checkout) cannot be written on Windows, so it is renamed to `<output>.<ms>.old` first and the old
+program keeps running; a later build removes the `.old` copies nothing runs any more.
 
 **Tests.** `nuke test` compiles each test-bearing C4 project separately with `-test -test-json
 <int>/tests/results.json` into `<bin>/<P>-tests.exe` (a plain build never includes the harness), runs it from

@@ -46,13 +46,44 @@ export function canRelaunch(win) {
 	return Boolean(win.iedDesktop && typeof win.iedDesktop.relaunch === "function");
 }
 
+// Relaunches `win` once the next build has run and succeeded, whether or not the page that asked is still open; a build
+// that fails, is canceled or is lost (a server that restarted shows none) ends the wait. Gives the function that stops
+// waiting.
+export function relaunchWhenBuilt(client, win) {
+	let ran = false;
+	let done = false;
+	let stop = null;
+	const end = () => {
+		if (done) return;
+		done = true;
+		if (stop) stop();
+	};
+	const watch = (data) => {
+		const state = data.build.state;
+		if (done) return;
+		if (state === "idle") {
+			if (ran) end();
+			return;
+		}
+		if (state === "running") {
+			ran = true;
+			return;
+		}
+		if (!ran) return;
+		end();
+		if (state === "succeeded" && canRelaunch(win)) win.iedDesktop.relaunch();
+	};
+	stop = client.subscribe(STATE_TOPIC, { snap: watch, evt: (kind, data) => kind === "changed" && watch(data) });
+	if (done) stop();
+	return end;
+}
+
 export class BuildPage {
 	// ctx: {el, ied, settings} (a settings page's context)
 	constructor(ctx) {
 		this.ied = ctx.ied;
 		this.settings = ctx.settings;
 		this.state = null;
-		this.relaunchAfter = false;
 		this.setting = h("div.dev-setting");
 		this.rows = h("div.dev-rows");
 		this.actions = h("div.dev-actions");
@@ -84,14 +115,12 @@ export class BuildPage {
 	}
 
 	shown(data) {
-		const was = this.state ? this.state.build.state : null;
 		this.state = data;
 		replace(this.rows, ...installRows(data).flatMap(([label, value]) => [h("span.k", null, label), h("span.v", null, value)]));
 		replace(this.log, data.build.lines.join("\n"));
 		this.log.scrollTop = this.log.scrollHeight;
 		this.renderActions();
 		this.renderStatus();
-		if (was === "running" && data.build.state === "succeeded" && this.relaunchAfter) this.relaunch();
 	}
 
 	changed(kind, data) {
@@ -128,23 +157,21 @@ export class BuildPage {
 	}
 
 	async rebuild(relaunchAfter) {
-		this.relaunchAfter = relaunchAfter;
+		const stopWaiting = relaunchAfter ? relaunchWhenBuilt(this.ied.client, window) : null;
 		try {
 			await this.ied.client.request("ied.developer/rebuild", {});
 		}
 		catch (e) {
-			this.relaunchAfter = false;
+			if (stopWaiting) stopWaiting();
 			this.ied.toast(e.message, { level: "error" });
 		}
 	}
 
 	cancel() {
-		this.relaunchAfter = false;
 		this.ied.client.request("ied.developer/cancel", {}).catch((e) => this.ied.toast(e.message, { level: "error" }));
 	}
 
 	relaunch() {
-		this.relaunchAfter = false;
 		if (canRelaunch(window)) window.iedDesktop.relaunch();
 	}
 }
