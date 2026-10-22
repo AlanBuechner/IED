@@ -101,7 +101,7 @@ namespace
 	}
 
 	int Usage() {
-		fprintf(stderr, "usage: flashbang-replay --rpc | <capture> [--no-device] [--debug-layer] info|events|resources|messages|state <eid>|calls <eid>|timing [repeat]|png <id> <eid> <out.png> [mip]|history <id> <eid> <x> <y> [mip]\n");
+		fprintf(stderr, "usage: flashbang-replay --rpc | <capture> [--no-device] [--debug-layer] info|events|resources|messages|state <eid>|calls <eid>|timing [repeat]|png <id> <eid> <out.png> [mip]|history <id> <eid> <x> <y> [mip]|debug <eid> ps <x> <y> / vs <vertex> [instance] / cs <x> <y> <z>\n");
 		return 2;
 	}
 }

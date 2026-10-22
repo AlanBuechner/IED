@@ -57,7 +57,8 @@ namespace GpuDebug
 		Serialization::DomNode steps = invocations.At(which - 1).Member("steps");
 		const int64 limit = IntArg(args, "max", kDebugSteps);
 		for (int64 k = 0; k < steps.Count() && k < limit; k += 1) {
-			const int64 line = sites.At(steps.At(k).At(0).AsInt()).At(0).AsInt();
+			Serialization::DomNode site = sites.At(steps.At(k).At(0).AsInt());
+			const int64 line = site.At(0).AsInt();
 			text.Append("  ");
 			text.AppendInt(line + 1);
 			text.Append(": ");
@@ -67,6 +68,11 @@ namespace GpuDebug
 				text.Append(listing.Substring(begin, end - begin).Trimmed());
 			}
 			text.Append(" => ");
+			// DXBC sites name the register they wrote.
+			if (site.Count() > 4) {
+				text.Append(site.At(4).AsView());
+				text.Append(" = ");
+			}
 			text.Append(steps.At(k).At(1).AsView());
 			text.Append("\n");
 		}

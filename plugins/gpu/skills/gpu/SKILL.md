@@ -31,7 +31,8 @@ Words the tools use:
 6. `gpu_buffer` - a buffer's bytes as floats, uints, ints or hex, from a binding's offset (gpu_event_state gives it).
 7. `gpu_shader` - a stage's reflection and disassembly (DXBC, DXIL or SPIR-V): which registers or bindings it reads.
 8. `gpu_debug_shader` - one shader invocation stepped on the replay GPU: every line it ran with the value it made
-   (a fragment at a pixel, a vertex, a compute thread). Vulkan captures for now.
+   (a fragment at a pixel, a vertex, a compute thread). Vulkan, and D3D12 shaders of Shader Model 5.1 (DXBC); DXIL
+   (Shader Model 6) not yet.
 9. `gpu_timing` - where the GPU time goes, by pass or by the costliest draws, measured on the replay GPU.
 
 ## Common questions

@@ -154,7 +154,7 @@
 			},
 			{
 				"name": "gpu_debug_shader",
-				"description": "Steps one invocation of a draw's or dispatch's shader on the replay GPU and gives every line it ran with the value it made, in order (texture samples and math are the GPU's own): a fragment at a pixel (stage fs, or ps; x, y), a vertex (stage vs; vertex, instance) or a compute thread (stage cs; thread [x, y, z]). A pixel can have several fragments (one per primitive covering it): `invocation` picks one. Vulkan (SPIR-V) captures for now.",
+				"description": "Steps one invocation of a draw's or dispatch's shader on the replay GPU and gives every line it ran with the value it made, in order (texture samples and math are the GPU's own): a fragment at a pixel (stage fs, or ps; x, y), a vertex (stage vs; vertex, instance) or a compute thread (stage cs; thread [x, y, z]). A pixel can have several fragments (one per primitive covering it): `invocation` picks one. D3D12 shaders of Shader Model 5.1 (DXBC) and Vulkan shaders (SPIR-V); not yet DXIL.",
 				"class": "read",
 				"group": "gpu",
 				"parallelSafe": true,

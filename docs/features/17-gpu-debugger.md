@@ -50,7 +50,7 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
 | F-GPU-40 | Pixel History: every event that touched a pixel with before/after, shader output, the test that failed, and a plain-words summary | P1 | US-GPU-2 | the summary sentence; built 2026-10-21 but the shader output |
-| F-GPU-41 | Shader debugger for a pixel, vertex or compute thread: source-level (PDB or embedded debug info), step in/over/out, breakpoints set in the editor, watch, locals, per-lane values, disassembly toggle | P1 | US-GPU-2 | stepping inside an IED editor surface with LSP; built 2026-10-21 for Vulkan at the disassembly level |
+| F-GPU-41 | Shader debugger for a pixel, vertex or compute thread: source-level (PDB or embedded debug info), step in/over/out, breakpoints set in the editor, watch, locals, per-lane values, disassembly toggle | P1 | US-GPU-2 | stepping inside an IED editor surface with LSP; built 2026-10-21 for Vulkan and D3D12 DXBC (Shader Model 5.1) at the disassembly level |
 | F-GPU-42 | Edit and Replay: edit the shader in the editor, recompile with the shader language plugin's compiler, replay, show an output diff; save as a real file change | P1 | US-GPU-8 | output diff, and the edit is a normal document change |
 | F-GPU-43 | Time-travel shader debugging (step backward) by instrumented replay on the real GPU | P2 | US-GPU-9 | none of the three step backward; built with F-GPU-41 |
 | F-GPU-44 | NaN/Inf hunt: scan a target across events and bisect the first event that wrote a bad value | P1 | US-GPU-5 | automated |

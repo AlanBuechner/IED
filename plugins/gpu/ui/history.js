@@ -5,12 +5,13 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { DOT } from "./format.js";
 
-// A texel's values as a CSS color: three or more channels as RGB, one as gray, each clamped to 0..1.
+// A texel's values as a CSS color - the pixel's own data, not a theme color: three or more channels as RGB, one as
+// gray, each clamped to 0..1.
 function swatchColor(values) {
 	const v = (values || []).map((x) => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0));
 	if (!v.length) return "transparent";
 	const [r, g, b] = v.length >= 3 ? v : [v[0], v[0], v[0]];
-	return "rgb(" + Math.round(r * 255) + ", " + Math.round(g * 255) + ", " + Math.round(b * 255) + ")";
+	return "color(srgb " + r.toFixed(4) + " " + g.toFixed(4) + " " + b.toFixed(4) + ")";
 }
 
 function texel(value) {

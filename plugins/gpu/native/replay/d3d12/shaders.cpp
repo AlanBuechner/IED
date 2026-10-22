@@ -11,6 +11,19 @@
 
 namespace fb::replay::d3d12
 {
+	bool IsDxil(const D3D12_SHADER_BYTECODE& code) {
+		const u8* bytes = (const u8*)code.pShaderBytecode;
+		if (code.BytecodeLength < 32 || memcmp(bytes, "DXBC", 4) != 0) return false;
+		u32 parts = 0;
+		memcpy(&parts, bytes + 28, 4);
+		for (u32 i = 0; i < parts && 32 + (size_t)i * 4 + 4 <= code.BytecodeLength; ++i) {
+			u32 offset = 0;
+			memcpy(&offset, bytes + 32 + i * 4, 4);
+			if ((size_t)offset + 4 <= code.BytecodeLength && memcmp(bytes + offset, "DXIL", 4) == 0) return true;
+		}
+		return false;
+	}
+
 	namespace
 	{
 		using DisassembleFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, UINT, LPCSTR, ID3DBlob**);
@@ -40,19 +53,6 @@ namespace fb::replay::d3d12
 				return module ? module : LoadLibraryW(L"dxcompiler.dll");
 			}();
 			return module;
-		}
-
-		bool IsDxil(const D3D12_SHADER_BYTECODE& code) {
-			const u8* bytes = (const u8*)code.pShaderBytecode;
-			if (code.BytecodeLength < 32 || memcmp(bytes, "DXBC", 4) != 0) return false;
-			u32 parts = 0;
-			memcpy(&parts, bytes + 28, 4);
-			for (u32 i = 0; i < parts && 32 + (size_t)i * 4 + 4 <= code.BytecodeLength; ++i) {
-				u32 offset = 0;
-				memcpy(&offset, bytes + 32 + i * 4, 4);
-				if ((size_t)offset + 4 <= code.BytecodeLength && memcmp(bytes + offset, "DXIL", 4) == 0) return true;
-			}
-			return false;
 		}
 
 		std::string TypeText(ID3D12ShaderReflectionType* type) {
@@ -309,6 +309,33 @@ namespace fb::replay::d3d12
 			reflection->Release();
 		}
 		return layouts;
+	}
+
+	std::string DxbcListing(const D3D12_SHADER_BYTECODE& code, std::map<u32, u32>& lines) {
+		HMODULE module = Compiler47();
+		auto disassemble = module ? (DisassembleFn)GetProcAddress(module, "D3DDisassemble") : nullptr;
+		ID3DBlob* text = nullptr;
+		if (!disassemble || FAILED(disassemble(code.pShaderBytecode, code.BytecodeLength, D3D_DISASM_ENABLE_INSTRUCTION_OFFSET, nullptr, &text))) return "";
+		std::string raw((const char*)text->GetBufferPointer(), text->GetBufferSize());
+		text->Release();
+		// Each instruction's line starts "0x0000001C: "; the listing keeps what follows.
+		std::string listing;
+		u32 line = 0;
+		for (size_t at = 0; at < raw.size();) {
+			size_t end = raw.find('\n', at);
+			if (end == std::string::npos) end = raw.size();
+			std::string one = raw.substr(at, end - at);
+			at = end + 1;
+			while (!one.empty() && (one.back() == '\r' || one.back() == '\0')) one.pop_back();
+			unsigned offset = 0;
+			if (one.size() >= 12 && one.compare(0, 2, "0x") == 0 && one[10] == ':' && sscanf(one.c_str(), "0x%x:", &offset) == 1) {
+				lines[offset] = line;
+				one = one.substr(12);
+			}
+			listing += one + "\n";
+			++line;
+		}
+		return listing;
 	}
 
 	bool ShaderWritesStorage(const D3D12_SHADER_BYTECODE& code, bool& known) {

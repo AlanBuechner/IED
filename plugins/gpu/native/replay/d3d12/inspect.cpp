@@ -10,7 +10,7 @@
 
 namespace fb::replay::d3d12
 {
-	static ID3D12Resource* MakeReadback(ID3D12Device* device, u64 bytes) {
+	ID3D12Resource* MakeReadback(ID3D12Device* device, u64 bytes) {
 		D3D12_HEAP_PROPERTIES heap = {D3D12_HEAP_TYPE_READBACK};
 		D3D12_RESOURCE_DESC desc = {D3D12_RESOURCE_DIMENSION_BUFFER, 0, std::max<u64>(bytes, 256), 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0}, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_RESOURCE_FLAG_NONE};
 		ID3D12Resource* buffer = nullptr;

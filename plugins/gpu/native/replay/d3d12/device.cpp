@@ -268,7 +268,7 @@ namespace fb::replay::d3d12
 	ID3D12PipelineState* ReplayDevice::Variant(u64 pipeline, const std::function<void(PipelineCreate&)>& change) {
 		const ObjectEntry* entry = model_.Find(pipeline);
 		PipelineCreate p = {};
-		if (!entry || !model_.Decode(entry->record, entry->recordSize, p, this) || p.kind == PipelineKind::Compute) return nullptr;
+		if (!entry || !model_.Decode(entry->record, entry->recordSize, p, this)) return nullptr;
 		change(p);
 		HRESULT hr = E_FAIL;
 		return MakePipeline(p, hr);

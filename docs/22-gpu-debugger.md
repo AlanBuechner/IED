@@ -98,7 +98,7 @@ One process per open capture, started by the server with the capture's path. Mes
 | `mesh {eid}` | the draw's vertex inputs: attributes with formats, indices, vertex data (binary) |
 | `shader {eid, stage}` | entry, kind, reflection (signature, bindings, constant buffers), disassembly |
 | `timing {repeat}` | per action GPU time (median of `repeat` replays with timestamp queries) and pipeline statistics |
-| `debugShader {eid, stage, x?, y?, vertex?, instance?, thread?}` | one invocation's steps ("Shader debugging" below): `listing`, `sites` (`[line, type, components, store]`), `invocations` (each `{steps: [[site, value]], truncated}`) |
+| `debugShader {eid, stage, x?, y?, vertex?, instance?, thread?}` | one invocation's steps ("Shader debugging" below): `listing`, `sites` (`[line, type, components, store, name?]`; type 0 float, 1 int, 2 uint, 3 bool, 4 raw bits; DXBC names the register), `invocations` (each `{steps: [[site, value]], truncated}`) |
 | `pixelHistory {id, eid, x, y, mip?, slice?}` | every event up to `eid` that wrote the pixel or tried to ("Pixel History" below): `start`, `events` (each `{eid, kind, name, result, text, samples?, tests?, before, after, changed}`), `end`, `summary`, `unattributed?` |
 | `messages {}` | the debug layer's messages during replay, each with its event |
 | `shutdown {}` | ends the process |
@@ -135,8 +135,8 @@ targets (they cannot be read back yet), and D3D12 render passes' load clears (`B
 
 ### Shader debugging
 
-`debugShader` steps one invocation by **instrumented replay** on the real GPU (built 2026-10-21 for Vulkan): the
-event's stage is rewritten (`replay/vulkan/vkinstrument.cpp`) so the chosen invocations - the fragments at a pixel
+`debugShader` steps one invocation by **instrumented replay** on the real GPU (built 2026-10-21 for Vulkan and for
+D3D12's DXBC): the event's stage is rewritten so the chosen invocations - the fragments at a pixel
 (`fs`), one vertex (`vs`, by vertex and instance index), one compute thread (`cs`, by global id) - log every value
 they make, in the order they make it: each instruction's result of a 32-bit scalar or vector type (bool, int, uint,
 float) and each store's value. The trace buffer is a storage buffer bound in a descriptor set after the pipeline
@@ -145,16 +145,33 @@ was. Values are logged where they are made, and an invocation that was not chose
 no block is added: control flow, phis and merges stay as compiled, and what the trace shows is what the GPU computed,
 texture samples and derivatives included. Up to 8 invocations are kept (a pixel's fragments, one per primitive
 covering it, each one), 16384 steps each. Stepping back is reading the trace backwards - the "time travel" of the
-design costs nothing more. The listing is the stage's SPIR-V disassembly; a step names its line.
+design costs nothing more. A step names its listing line.
+
+- **Vulkan** (`replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`): the SPIR-V is rewritten; the listing is its
+  disassembly.
+- **D3D12, DXBC of Shader Model 5.1** (`common/dxbc.cpp`, `replay/d3d12/debug.cpp`): the program's tokens are
+  rewritten - the chosen invocation (by `SV_Position`, by `SV_VertexID` and `SV_InstanceID`, by `vThreadID`; a vertex
+  shader that does not take them gets them added to its signature) takes a region of a raw UAV with an atomic add,
+  and after each instruction that writes a register, and each store, appends a record inside an `if`: DXBC is a
+  register machine with structured flow, so the shader's own flow, derivatives and samples stay as compiled. Output
+  registers are write-only, so an instruction writing one writes a spare temp, which is logged and moved to the
+  output. The shader's declared inputs are logged first, at their declarations - a vertex's attributes, a pixel's
+  interpolants, the thread's id. The container is written back with its checksum (DXBC's MD5), without the embedded
+  root signature: the replay makes the list's root signature again with a root UAV for the trace after its
+  parameters, at register 0 of the first space from 900 it leaves free (failing when the 64 DWORDs are taken), binds
+  every root argument again for the instrumented draw, and the list's own afterwards. The listing is d3dcompiler_47's
+  disassembly, its lines found by instruction offset; each site names the register it wrote (`r0.xy`, `o0.w`), so the
+  values pane merges partial writes into one register.
 
 The UI's Shader Debugger opens in the viewer's place from the Debug button on a picked pixel, a draw's row in Pixel
 History, a vertex in the Mesh table, or the thread form of a compute shader; it shows the listing with the lines that
 ran, steps forward and back (F10, Shift+F10, run to a clicked line), picks the invocation, and lists the step's value
 and every value so far. The AI's `gpu_debug_shader` gives the same steps as text.
 
-Not yet: D3D12 (DXBC instrumentation is next, then DXIL, which needs a bitcode writer); source-level stepping (from
-the module's debug info, NonSemantic.Shader.DebugInfo or OpLine); values of other widths, matrices and structs;
-breakpoints set in the editor; which of a pixel's fragments won the depth test.
+Not yet: DXIL (Shader Model 6, which needs a bitcode writer), DXBC of Shader Model 5.0 and earlier (their resources
+have no spaces), subroutines (`call`), hull, domain and geometry shaders; source-level stepping (from the module's
+debug info, NonSemantic.Shader.DebugInfo or OpLine, or DXBC's SDBG and PDBs); values of other widths, matrices and
+structs; breakpoints set in the editor; which of a pixel's fragments won the depth test.
 
 ## Server and protocol (plugin `ied.gpu`)
 
@@ -245,8 +262,9 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
 - **Pixel History** ("Pixel History" above): both replayers (`replay/d3d12/history.cpp`, `replay/vulkan/vkhistory.cpp`,
   `common/pixelhistory.cpp`), the viewer's History panel (`ui/history.js`), and in `gpu_pixel`'s answer.
-- **Shader debugging** ("Shader debugging" above), Vulkan: `replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`, the UI's
-  `ui/debugger.js`, and `gpu_debug_shader`.
+- **Shader debugging** ("Shader debugging" above): Vulkan (`replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`) and D3D12
+  DXBC of Shader Model 5.1 (`common/dxbc.cpp`, `replay/d3d12/debug.cpp`), the UI's `ui/debugger.js`, and
+  `gpu_debug_shader`.
 - **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
   the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample

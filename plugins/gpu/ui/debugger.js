@@ -6,12 +6,21 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { DOT } from "./format.js";
 
-// A site's name as its listing line gives it: the result ("%color = ..."), else what a store writes ("OpStore %p %v").
-function siteName(line, store) {
+// A site's name: the replayer's (DXBC: "r0.xy", "o0.w", "U1"), else as its listing line gives it - the result
+// ("%color = ..."), or what a store writes ("OpStore %p %v").
+function siteName(site, line) {
+	if (site[4]) return site[4];
+	const store = site[3];
 	const text = (line || "").trim();
 	if (store) return text.split(/\s+/)[1] || "?";
 	const at = text.indexOf(" = ");
 	return at > 0 ? text.slice(0, at) : text.split(/\s+/)[0];
+}
+
+// A named register write's register and components ("r0.xy" -> r0, xy), so partial writes merge into one value.
+function registerOf(site) {
+	const m = site[4] && !site[3] ? /^(.+)\.([xyzw]+)$/.exec(site[4]) : null;
+	return m ? { base: m[1], components: m[2] } : null;
 }
 
 export class ShaderDebugPanel {
@@ -47,15 +56,16 @@ export class ShaderDebugPanel {
 	show(trace, what) {
 		this.trace = trace;
 		this.lines = trace.listing.split("\n");
-		const stage = { vs: "Vertex", fs: "Fragment", cs: "Compute" }[trace.stage] || trace.stage;
+		const stage = { vs: "Vertex", fs: "Fragment", ps: "Pixel", cs: "Compute" }[trace.stage] || trace.stage;
+		const pixel = trace.stage === "fs" || trace.stage === "ps";
 		this.title.textContent = stage + " shader " + DOT + " " + what + " " + DOT + " EID " + trace.eid + " " + DOT + " " + trace.pipeline;
 		const count = trace.invocations.length;
-		replace(this.invocationSelect, trace.invocations.map((_, i) => h("option", { value: String(i) }, (trace.stage === "fs" ? "Fragment " : "Invocation ") + (i + 1) + " of " + count)));
+		replace(this.invocationSelect, trace.invocations.map((_, i) => h("option", { value: String(i) }, (pixel ? "Fragment " : "Invocation ") + (i + 1) + " of " + count)));
 		this.invocationSelect.hidden = count < 2;
 		if (!count) {
 			this.counter.textContent = "";
 			replace(this.values);
-			replace(this.listing, h("div.gpu-state-msg", null, "No invocation ran for this " + (trace.stage === "fs" ? "pixel: the draw covers no fragment there." : trace.stage === "vs" ? "vertex." : "thread.")));
+			replace(this.listing, h("div.gpu-state-msg", null, "No invocation ran for this " + (pixel ? "pixel: the draw covers no fragment there." : trace.stage === "vs" ? "vertex." : "thread.")));
 			return;
 		}
 		this.pick(0, 0);
@@ -105,19 +115,28 @@ export class ShaderDebugPanel {
 		const latest = new Map();
 		for (let k = 0; k <= this.step; k++) {
 			const [siteIndex, value] = steps[k];
-			const [line, , , store] = this.trace.sites[siteIndex];
-			const name = siteName(this.lines[line], store);
-			latest.delete(name);
-			latest.set(name, { value, line, step: k });
+			const site = this.trace.sites[siteIndex];
+			const register = registerOf(site);
+			const key = register ? register.base : siteName(site, this.lines[site[0]]);
+			const seen = { value, line: site[0], step: k, parts: register ? { ...(latest.get(key) || {}).parts } : null };
+			if (register) value.split(", ").forEach((part, i) => { seen.parts[register.components[i]] = part; });
+			latest.delete(key);
+			latest.set(key, seen);
 		}
 		const [siteIndex, value] = steps[this.step];
-		const [line, , , store] = this.trace.sites[siteIndex];
+		const site = this.trace.sites[siteIndex];
+		const line = site[0];
 		const rows = [h("div.gpu-srow.hd", null, h("span.k", null, "This step"), h("span.v", null, "line " + (line + 1))),
-			h("div.gpu-srow", { style: { "--d": 1 } }, h("span.k", null, siteName(this.lines[line], store)), h("span.v", null, value)),
+			h("div.gpu-srow", { style: { "--d": 1 } }, h("span.k", null, siteName(site, this.lines[line])), h("span.v", null, value)),
 			h("div.gpu-srow.hd", null, h("span.k", null, "Values so far"), h("span.v", null, String(latest.size)))];
-		for (const [name, seen] of [...latest.entries()].reverse())
+		for (const [key, seen] of [...latest.entries()].reverse()) {
+			// A register shows every component written so far.
+			const known = seen.parts ? [..."xyzw"].filter((c) => c in seen.parts) : null;
+			const name = known ? key + "." + known.join("") : key;
+			const shown = known ? known.map((c) => seen.parts[c]).join(", ") : seen.value;
 			rows.push(h("div.gpu-srow.link" + (seen.step === this.step ? ".sel" : ""), { style: { "--d": 1 }, title: "Step " + (seen.step + 1), on: { click: () => this.go(seen.step) } },
-				h("span.k", null, name), h("span.v", null, seen.value)));
+				h("span.k", null, name), h("span.v", null, shown)));
+		}
 		replace(this.values, rows);
 	}
 

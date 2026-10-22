@@ -26,6 +26,13 @@ namespace fb::replay::d3d12
 		u32 count = 0;
 	};
 
+	// Whether a shader is DXIL (Shader Model 6) rather than DXBC.
+	bool IsDxil(const D3D12_SHADER_BYTECODE& code);
+	// A DXBC shader's listing for the shader debugger, and each instruction's line in it by its byte offset in the
+	// program (common/dxbc.h); empty when d3dcompiler_47.dll cannot disassemble it.
+	std::string DxbcListing(const D3D12_SHADER_BYTECODE& code, std::map<u32, u32>& lines);
+	// A buffer in a readback heap of at least `bytes`, in the copy destination state; the caller releases it.
+	ID3D12Resource* MakeReadback(ID3D12Device* device, u64 bytes);
 	// Whether a shader binds anything it can write (a UAV); `known` false when its reflection is not available.
 	bool ShaderWritesStorage(const D3D12_SHADER_BYTECODE& code, bool& known);
 	// Each constant buffer the pipeline's shaders declare, by (space, register): the layout the buffer view reads it with.

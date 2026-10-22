@@ -182,6 +182,22 @@ class D3D12CaptureReplay(unittest.TestCase):
 		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
 		check_history(self, replay(self.capture, "history", str(hdr), str(self.events["events"][-1][0]), "640", "240"), "ClearRenderTargetView")
 
+	def test_shader_debugger_steps_each_stage(self):
+		cube = self.draws_under("Cube B")[0][0]
+		pixel = replay(self.capture, "debug", str(cube), "ps", "640", "240")
+		self.assertGreaterEqual(len(pixel["invocations"]), 1, "a pixel of Cube B ran at the pixel")
+		lines = pixel["listing"].split("\n")
+		ran = [lines[pixel["sites"][step[0]][0]] for step in pixel["invocations"][0]["steps"]]
+		self.assertTrue(any(line.startswith("sample") for line in ran), ran)
+		self.assertTrue(any(line.startswith("mov o0.w") for line in ran), "the target's alpha, written through a spare temp")
+		vertex = replay(self.capture, "debug", str(cube), "vs", "3")
+		self.assertEqual(1, len(vertex["invocations"]))
+		first = vertex["invocations"][0]["steps"][0]
+		self.assertEqual(("v0.xyz", "0.5, 0.5, 0.5"), (vertex["sites"][first[0]][4], first[1]), "vertex 3's position, its first input")
+		dispatch = [e for e in self.events["events"] if e[2] == "dispatch"][0][0]
+		thread = replay(self.capture, "debug", str(dispatch), "cs", "5", "7", "0")
+		self.assertEqual("5, 7, 0", thread["invocations"][0]["steps"][0][1], "the thread's global id, its first input")
+
 
 def check_history(test, history, clear):
 	"""The pixel under Cube B with Hidden behind it: cleared first, Cube B on top, Hidden kept out by the depth test."""

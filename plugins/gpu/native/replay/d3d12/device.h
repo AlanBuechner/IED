@@ -37,8 +37,8 @@ namespace fb::replay::d3d12
 		ID3D12Device* Device() const { return device_; }
 		ID3D12Resource* Resource(u64 id) const;
 		D3D12_RESOURCE_STATES StateOf(u64 id, u32 subresource) const;
-		// A graphics pipeline made from `pipeline`'s creation with `change` applied (null when it cannot be made); the
-		// caller releases it.
+		// A pipeline made from `pipeline`'s creation with `change` applied (null when it cannot be made); the caller
+		// releases it.
 		ID3D12PipelineState* Variant(u64 pipeline, const std::function<void(PipelineCreate&)>& change);
 		// Records `command` again, for a hook that runs a draw with other state.
 		void Repeat(ID3D12GraphicsCommandList* list, const CommandRef& command);
