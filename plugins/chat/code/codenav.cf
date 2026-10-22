@@ -145,8 +145,49 @@ namespace Ai
 	// Whether `symbol` is of the kind the model asked for ("class", "function", ...).
 	static bool KindMatches(const CodeSymbol* symbol, Core::StringView kind) { return kind.IsEmpty() || Core::StringView(SymbolKindName(symbol->kind)) == kind; }
 
+	static Core::String Lower(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			out.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return out.ToString();
+	}
+
+	// How many of `words` the symbol's qualified name holds, ignoring case.
+	static int64 WordsHeld(const CodeSymbol* symbol, const Core::Array<Core::String>& words) {
+		Core::String name = Lower(symbol->Qualified().View());
+		int64 held = 0;
+		for (const Core::String& word : words)
+			if (name.View().Contains(Lower(word.View()).View())) held += 1;
+		return held;
+	}
+
+	// For a name nothing has ("LanguageServerPool", "language server pool"): the symbols named with its words, those
+	// holding the most of them first; empty when it has no words but itself.
+	static Core::Array<CodeSymbol*> ByWords(CodeQuery& query, Core::StringView text, const Core::Array<Core::String>& words) {
+		Core::Array<CodeSymbol*> found;
+		Core::Array<int64> held;
+		if (words.Count() < 2 && (words.IsEmpty() || words[0].View() == text)) return found;
+		for (const Core::String& word : words)
+			for (CodeSymbol* symbol : query.Search(word.View())) {
+				bool seen = false;
+				for (CodeSymbol* kept : found) seen = seen || (kept->Qualified() == symbol->Qualified() && kept->selection.path == symbol->selection.path && kept->selection.startLine == symbol->selection.startLine);
+				if (seen) continue;
+				const int64 score = WordsHeld(symbol, words);
+				int64 at = found.Count();
+				while (at > 0 && held[at - 1] < score) at -= 1;
+				found.Insert(at, symbol);
+				held.Insert(at, score);
+			}
+		return found;
+	}
+
 	static ToolOutcome SearchRun(CodeQuery& query, Core::StringView text, Core::StringView kind) {
 		Core::Array<CodeSymbol*> found = query.Search(text);
+		Core::Array<Core::String> words = NameWords(text);
+		const bool byWords = found.IsEmpty();
+		if (byWords) found = ByWords(query, text, words);
 		Core::Array<CodeSymbol*> shown;
 		for (int64 pass = 0; pass < 2; ++pass)
 			for (CodeSymbol* symbol : found) {
@@ -154,10 +195,24 @@ namespace Ai
 				if (KindMatches(symbol, kind) && exact == (pass == 0)) shown.Push(symbol);
 			}
 		Core::StringBuilder out;
-		out.AppendInt(shown.Count());
-		out.Append(shown.Count() == 1 ? " symbol for \"" : " symbols for \"");
-		out.Append(text);
-		out.Append("\"\n");
+		if (byWords && !shown.IsEmpty()) {
+			out.Append("Nothing is named \"");
+			out.Append(text);
+			out.Append("\"; ");
+			out.AppendInt(shown.Count());
+			out.Append(" symbols are named with its words (");
+			for (int64 i = 0; i < words.Count(); ++i) {
+				if (i > 0) out.Append(", ");
+				out.Append(words[i].View());
+			}
+			out.Append("), those with the most first:\n");
+		}
+		else {
+			out.AppendInt(shown.Count());
+			out.Append(shown.Count() == 1 ? " symbol for \"" : " symbols for \"");
+			out.Append(text);
+			out.Append("\"\n");
+		}
 		for (int64 i = 0; i < shown.Count() && i < kCodeOutlineMost; ++i) {
 			out.Append(SymbolKindName(shown[i]->kind));
 			out.Append(" ");
@@ -166,7 +221,7 @@ namespace Ai
 			out.Append(WhereOf(shown[i]->selection, query.Shown(shown[i]->selection.path.View()).View()).View());
 			out.Append("\n");
 		}
-		if (shown.IsEmpty()) out.Append("[nothing; the servers match names, not text - search_text finds text]\n");
+		if (shown.IsEmpty()) out.Append("[nothing; symbols are found by a part of their name as code writes it (\"Pool\", \"Serving\"); fs_glob finds files by name, search_text finds exact text such as a message]\n");
 		Core::StringBuilder preview;
 		preview.AppendInt(shown.Count());
 		preview.Append(" symbols");
@@ -175,7 +230,8 @@ namespace Ai
 
 	static ToolOutcome SymbolsRun(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.ws);
-		Core::String path = IED::NormalizePath(call.args.Member("path").AsView());
+		Core::String path = query.FileOf(call.args.Member("path").AsView());
+		if (!path.IsEmpty() && FS::IsDirectory((FS::Path(call.ws.root.View()) / path.View()).CStr())) return ToolError((Core::String("code_symbols: ") + path.View() + " is a folder; give one of its files (fs_list lists them), or query to search by name").View());
 		if (!path.IsEmpty()) return OutlineRun(query, path.View(), call.args.Member("depth").IsValid() ? call.args.Member("depth").AsInt() : 100);
 		Core::StringView text = call.args.Member("query").AsView();
 		if (text.IsEmpty()) return ToolError(Core::StringView("code_symbols: give path (a file's outline) or query (symbols named like it across the workspace)"));
@@ -352,6 +408,50 @@ namespace Ai
 		return ToolResult(out.View(), preview.View());
 	}
 
+	// --- What a server may have missed ----------------------------------------------------------------------------------------
+
+	Core::String TargetName(CodeQuery& query, const CodeTarget& target) {
+		if (target.symbols.IsEmpty()) return query.NameAt(target.at);
+		Core::Array<Core::String> parts = NameParts(target.symbols[0]->name.View());
+		return parts.IsEmpty() ? Core::String() : parts[parts.Count() - 1];
+	}
+
+	void AppendUnlisted(Core::StringBuilder& out, CodeQuery& query, Core::StringView name, const Core::Array<CodeSpan>& listed) {
+		if (name.ByteLength() < kCodeUnlistedNameBytes) return;
+		IED::SearchQuery search;
+		search.text = (Core::String("\\b") + name) + "\\b";
+		search.regex = true;
+		search.caseSensitive = true;
+		search.exclude = IED::DefaultExcludes();
+		search.useIgnoreFiles = true;
+		search.maxResults = kCodeUnlistedSearched;
+		Threading::Atomic<bool> never;
+		IED::SearchResult result;
+		Core::String problem;
+		if (!IED::Search(query.ws, search, &never, result, problem)) return;
+		Core::Array<IED::SearchMatch> unlisted;
+		for (const IED::SearchMatch& match : result.matches) {
+			bool known = false;
+			for (const CodeSpan& span : listed) known = known || (span.path == match.path && span.startLine == match.line);
+			if (!known) unlisted.Push(match);
+		}
+		if (unlisted.IsEmpty()) return;
+		out.Append("[the language server did not list these lines that name ");
+		out.Append(name);
+		out.Append(" - uses it can miss (through a pointer, a macro) or other symbols of that name; check them:]\n");
+		for (int64 i = 0; i < unlisted.Count() && i < kCodeUnlistedShown; ++i) {
+			out.Append("  ");
+			out.Append(unlisted[i].path.View());
+			out.Append(":");
+			out.AppendInt(unlisted[i].line + 1);
+			out.Append(": ");
+			Core::StringView text = unlisted[i].preview.View().Trimmed();
+			out.Append(text.Substring(0, text.ByteLength() < kCodeLineShownBytes ? text.ByteLength() : kCodeLineShownBytes));
+			out.Append("\n");
+		}
+		if (unlisted.Count() > kCodeUnlistedShown || result.truncated) out.Append("[more; search_text for it lists them all]\n");
+	}
+
 	// --- code_references -----------------------------------------------------------------------------------------------------
 
 	static bool Before(const CodeSpan& a, const CodeSpan& b) { return a.path < b.path || (a.path == b.path && a.startLine < b.startLine); }
@@ -414,6 +514,10 @@ namespace Ai
 			out.AppendInt(spans.Count() - limit);
 			out.Append(" more; give a larger limit]\n");
 		}
+		if (spans.IsEmpty()) out.Append("[none from here: a language server may answer only from a place the name is used (path and line of a use)]\n");
+		Core::Array<CodeSpan> listed = spans;
+		for (CodeSymbol* symbol : target.symbols) listed.Push(symbol->selection);
+		AppendUnlisted(out, query, TargetName(query, target).View(), listed);
 		Core::StringBuilder preview;
 		preview.AppendInt(spans.Count());
 		preview.Append(" references in ");

@@ -112,6 +112,8 @@ namespace IED
 
 	bool LocalPathOf(Core::StringView uri, Core::String& path) { return Ied::PathOfFileUri(uri, path); }
 
+	Core::String FileUriOfPath(Core::StringView path) { return Ied::CanonicalFileUri(Ied::FileUriOf(path).View()); }
+
 	bool LspFileText(const Workspace& ws, Core::StringView uri, Core::String& text, Core::String& problem) {
 		Core::String path;
 		if (WorkspacePathOf(ws, uri, path)) return TextAsEdited(ws, path.View(), text, problem);

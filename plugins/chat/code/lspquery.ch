@@ -49,6 +49,9 @@ namespace Ai
 	Core::String NumberedSpan(Core::StringView text, int64 first, int64 last, int64 most);
 	// `name` split at "::" and "." into its parts.
 	Core::Array<Core::String> NameParts(Core::StringView name);
+	// The words of a name or phrase: split at anything but letters and digits and where a lower-case letter meets an
+	// upper-case one ("LanguageServerPool" -> Language, Server, Pool; "LSPPool" -> LSP, Pool), each at least 3 bytes.
+	Core::Array<Core::String> NameWords(Core::StringView text);
 	// Whether `qualified` ("Ai::Ring::Push") is `want` ("Ring::Push") or ends with "::" and it; "." counts as "::".
 	bool QualifiedMatches(Core::StringView qualified, Core::StringView want);
 
@@ -71,12 +74,17 @@ namespace Ai
 		public Core::StringView Text(Core::StringView path);
 		// One line of the file without its break; empty past its end.
 		public Core::StringView Line(Core::StringView path, int64 line);
+		// The identifier at a place; empty when none is there.
+		public Core::String NameAt(const CodeSpan& at);
 		// The file's lines; a final break starts no line.
 		public int64 LineCount(Core::StringView path);
 		// The file as the model is shown it: its workspace path, or its absolute path outside the workspace.
 		public Core::String Shown(Core::StringView path) const;
 		// The workspace path an answer's URI names, or the file: URI itself for a file outside it.
 		public Core::String PathOf(Core::StringView uri) const;
+		// The file a tool's `path` argument names: a workspace path, normalized (also when given as its absolute path); a
+		// file outside the workspace - by its absolute path, as the tools show one, or its file: URI - as its file: URI.
+		public Core::String FileOf(Core::StringView given) const;
 		// A Location {uri, range} or LocationLink {targetUri, targetRange, targetSelectionRange}: its name's span with
 		// `selection`, else its whole one.
 		public CodeSpan SpanOf(const Serialization::DomNode& location, bool selection) const;

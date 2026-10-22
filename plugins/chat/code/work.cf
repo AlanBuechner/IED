@@ -32,6 +32,11 @@ namespace Ai
 		return plan;
 	}
 
+	// Whether a literal pattern reads like a regex a model meant: an alternation, `.*`, a class or an escape.
+	static bool LooksLikeRegex(Core::StringView pattern) {
+		return pattern.Contains(Core::StringView("|")) || pattern.Contains(Core::StringView(".*")) || pattern.Contains(Core::StringView("\\b")) || pattern.Contains(Core::StringView("\\s")) || pattern.Contains(Core::StringView("\\(")) || pattern.Contains(Core::StringView("\\w")) || (pattern.Contains(Core::StringView("[")) && pattern.Contains(Core::StringView("]")));
+	}
+
 	static ToolOutcome SearchRun(const ToolInvocation& call) {
 		IED::SearchQuery query;
 		query.text = Core::String(call.args.Member("pattern").AsView());
@@ -45,7 +50,18 @@ namespace Ai
 		IED::SearchResult result;
 		Core::String problem;
 		if (!IED::Search(call.ws, query, &never, result, problem)) return ToolError((Core::String("search_text: ") + problem.View()).View());
+		bool asRegex = false;
+		if (result.matches.IsEmpty() && !query.regex && LooksLikeRegex(query.text.View())) {
+			query.regex = true;
+			IED::SearchResult again;
+			Core::String ignored;
+			if (IED::Search(call.ws, query, &never, again, ignored) && !again.matches.IsEmpty()) {
+				result = again;
+				asRegex = true;
+			}
+		}
 		Core::StringBuilder out;
+		if (asRegex) out.Append("[nothing matched the pattern as text, so it was read as a regex; set regex true for one]\n");
 		for (const IED::SearchMatch& match : result.matches) {
 			out.Append(match.path.View());
 			out.Append(":");
@@ -55,7 +71,7 @@ namespace Ai
 			out.Append("\n");
 		}
 		if (result.truncated) out.Append("[stopped at 100 matches; narrow the pattern or add a glob]\n");
-		if (result.matches.IsEmpty()) out.Append("[no matches]\n");
+		if (result.matches.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
 		Core::StringBuilder preview;
 		preview.AppendInt(result.matches.Count());
 		preview.Append(result.matches.Count() == 1 ? " match" : " matches");
@@ -272,7 +288,7 @@ namespace Ai
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for text (or a regex), skipping build output; returns path:line: text. Example: search_text({\"pattern\": \"RingSink\", \"glob\": \"src/**\"})",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"src/**\"})",
 			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->plan = SearchPlan;

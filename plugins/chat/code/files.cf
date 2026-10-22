@@ -1,6 +1,7 @@
 include "api/plugin.ch"
 include "files.ch"
 include "linediff.ch"
+include "lspquery.ch"
 
 namespace Ai
 {
@@ -125,17 +126,25 @@ namespace Ai
 
 	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return IED::NormalizePath(call.args.Member(name).AsView()); }
 
+	// The file fs_read reads: a workspace path, or - by its absolute path, as the code tools show one - a file outside
+	// the workspace that a language server named (its file: URI).
+	static Core::String ReadPath(const ToolInvocation& call) { return CodeQuery(call.ws).FileOf(call.args.Member("path").AsView()); }
+
 	static ToolPlan ReadPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.subject = (Core::String("fs.read(") + PathArgument(call, "path").View()) + ")";
+		plan.subject = (Core::String("fs.read(") + ReadPath(call).View()) + ")";
 		plan.summary = Core::String("Read ") + call.args.Member("path").AsView();
 		return plan;
 	}
 
 	static ToolOutcome ReadRun(const ToolInvocation& call) {
-		Core::String path = PathArgument(call, "path");
+		Core::String path = ReadPath(call);
 		Core::String text;
-		{
+		Core::String problem;
+		if (path.View().StartsWith(Core::StringView("file:"))) {
+			if (!IED::LspFileText(call.ws, path.View(), text, problem)) return ToolError((Core::String("fs_read: ") + problem.View()).View());
+		}
+		else {
 			IED::HostLock guard(*call.context);
 			text = TextAsEdited(call.ws, path.View());
 		}
@@ -310,7 +319,7 @@ namespace Ai
 	}
 
 	void AddFileTools(ToolRegistry& registry) {
-		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers. Up to 400 lines per call; use offset to read on. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
+		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers - a workspace file, or by its absolute path a file outside it that the code tools named. Up to 400 lines per call; use offset to read on. For one function or type, code_read_symbol reads just it. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		read->plan = ReadPlan;

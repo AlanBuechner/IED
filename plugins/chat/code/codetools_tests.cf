@@ -20,6 +20,22 @@ class CodeToolsTests {
 		assert_true(symbol.Qualified().View() == "game::Ring::Push", "an out-of-line definition's name under its namespace");
 		assert_true(Core::StringView(Ai::SymbolKindName(6)) == "method" && Core::StringView(Ai::SymbolKindName(99)) == "symbol", "kinds");
 		assert_true(Ai::HoldsMembers(5) && Ai::HoldsMembers(10) && !Ai::HoldsMembers(12), "classes and enums hold members, functions do not");
+		Core::Array<Core::String> words = Ai::NameWords(Text("LanguageServerPool"));
+		assert_true(words.Count() == 3 && words[0].View() == "Language" && words[2].View() == "Pool", "camel case");
+		words = Ai::NameWords(Text("LSPPool of the ws_id"));
+		assert_true(words.Count() == 3 && words[0].View() == "LSP" && words[1].View() == "Pool" && words[2].View() == "the", "an acronym, spaces and underscores; short words left out");
+	}
+
+	[test("paths_given")]
+	public static void TestPaths() {
+		IED::Workspace ws;
+		ws.root = Core::String("C:/Work/Game");
+		Ai::CodeQuery query = Ai::CodeQuery(ws);
+		assert_true(query.FileOf(Text("src\\a.cf")).View() == "src/a.cf", "a workspace path, normalized");
+		assert_true(query.FileOf(Text("C:\\Work\\Game\\src\\a.cf")).View() == "src/a.cf", "the workspace's file by its absolute path");
+		Core::String outside = query.FileOf(Text("C:\\Lib\\Bedrock\\core.ch"));
+		assert_true(outside.View().StartsWith(Text("file:")) && outside.View().EndsWith(Text("/Lib/Bedrock/core.ch")), outside.CStr());
+		assert_true(query.FileOf(Text("file:///C:/Lib/x.ch")).View() == "file:///C:/Lib/x.ch", "a file: URI as it is");
 	}
 
 	[test("numbered_spans")]
@@ -67,8 +83,9 @@ class CodeToolsTests {
 		Core::Array<Core::String> none;
 		Core::String request = registry->RequestTools(Ai::ChatMode::Plan, none);
 		assert_true(request.View().Contains(Text("\"name\":\"code_read_symbol\"")) && request.View().Contains(Text("\"name\":\"code_references\"")), "the core code tools, in Plan mode too");
+		assert_true(request.View().Contains(Text("\"name\":\"code_members\"")) && request.View().Contains(Text("\"name\":\"code_call_hierarchy\"")), "with members and the call hierarchy, which a model never loads itself");
 		Core::String index = registry->DeferredIndex(Ai::ChatMode::Ask, none);
-		assert_true(index.View().Contains(Text("- code_members: ")) && index.View().Contains(Text("(code)\n")), "the code group is deferred");
+		assert_true(index.View().Contains(Text("- code_hover: ")) && index.View().Contains(Text("(code)\n")), "the rest of the code group is deferred");
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		assert_eq((int64)0, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"outgoing\", \"depth\": 2}"), *doc).root).Count(), "a good call");
 		assert_eq((int64)1, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"up\"}"), *doc).root).Count(), "a direction it does not take");

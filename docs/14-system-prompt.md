@@ -6,7 +6,7 @@ IDEplan: "a strong system prompt to help the ai design and write high quality co
 
 | File | Role | Tier where it can be overridden |
 |---|---|---|
-| `plugins/chat/prompts/base-system.md` | Identity, working method, tool discipline, honesty, output rules. Language-agnostic. | App (Settings > AI > Prompts: edit / diff vs default / reset) |
+| `plugins/chat/prompts/base-system.md` | Identity, working method, tool discipline, navigating code (which code tool for which question, tuned with `tools/ai-evals/codenav_eval.py`), honesty, output rules. Language-agnostic. | App (Settings > AI > Prompts: edit / diff vs default / reset) |
 | `plugins/chat/prompts/style-default.md` | The owner's coding standards (tabs; single purpose; one level of abstraction; honest functions; no global mutable state; minimal comments; real tests; no dead code; explicit errors; performance). Derived from the family's `AGENTS.md` standards. | App ("my style"), solution `AGENTS.md` adds/overrides per project |
 | `plugins/chat/prompts/harness-notes.md` | Exact texts of recovery nudges (`docs/12`). | Not user-facing (tuned with the eval suite) |
 
@@ -14,7 +14,7 @@ IDEplan: "a strong system prompt to help the ai design and write high quality co
 
 Built per request, cached per chat; the order is fixed so the prefix stays byte-identical across steps (prefix caching on llama.cpp and Anthropic):
 
-1. **Base** (`base-system.md`) - ~650 tokens.
+1. **Base** (`base-system.md`) - ~900 tokens.
 2. **Style** (`style-default.md` or the owner's override) - ~550 tokens.
 3. **Mode instructions** (Ask / Plan / Agent / custom) - 50-300 tokens.
 4. **Solution `AGENTS.md`** (verbatim; for federations, each member's file headed by the member name). Soft cap 2,500 tokens per file; above it, the head is included plus a note "AGENTS.md continues; read it with fs_read".

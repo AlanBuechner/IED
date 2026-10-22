@@ -12,6 +12,7 @@
 | `schema-check/` | Validates `shared/host-api` schemas (unknown keywords and dangling `$ref`s are errors) and the examples, or any `.iedsln/.iedproj/.iedfed`, `ied-plugin.json`, `.ied/modes/*.json`, `*.frames.jsonl` | `python -I tools/schema-check/schema_check.py [path...]` |
 | `pylib/` | Shared stdlib code: `jsonc.py`, `minischema.py` (the validator), `frames.py`, `ws.py` (RFC 6455 client + server framing) | - |
 | `selftest.py` | Runs all of the above: pylib tests, schema-check, mock fixtures, conformance vs the mock, fake-model scripts (~40 s) | `python -I tools/selftest.py` |
+| [`ai-evals/`](ai-evals/README.md) | How a real model (an `ai.models` profile of your app settings) uses IED's tools: `codenav_eval.py` asks it code-navigation questions about the server's sources and scores its tool choice and misuses | `vendor\python\python.exe -I tools/ai-evals/codenav_eval.py --server <exe> --setup` |
 
 Python is already part of the toolchain (`setup.bat` installs 3.12 into `vendor/python` for Nuke; these tools are also tested on 3.14). Everything here is **stdlib only**: `python -I` ignores user site-packages, so a pip dependency would silently be missing. Because `-I` also drops the script's folder from `sys.path`, every entry script adds `tools/pylib` (and its own folder) explicitly. Sources are ASCII with tab indentation.
 

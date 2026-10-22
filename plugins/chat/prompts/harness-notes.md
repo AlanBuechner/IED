@@ -30,7 +30,7 @@ Tasks {tasks} are still open. Complete them, or mark them skipped with a reason,
 The arguments for {tool} were invalid: {error}. Expected schema: {schema_excerpt}. Call it again with corrected arguments.
 
 ## unknown_tool
-There is no tool named {name}. Did you mean {suggestions}? Tool groups can be enabled with tools_enable.
+There is no tool named {name}. Did you mean {suggestions}? Tools listed under "Tools you can load" are loaded with tool_search.
 
 ## unknown_clip
 {tool} did not run: its arguments paste {{clip:{name}}}, and there is no clip {name} ({clips}). Copy it with clipboard_copy first. To write {{clip:{name}}} as text, write {{!clip:{name}}}.
@@ -45,7 +45,7 @@ The call {tool} ({call_id}) was interrupted by a restart; its effect is unknown.
 You have used {percent}% of this run's {budget} budget. Wrap up: finish the current task, verify, and report.
 
 ## context_compressed
-Earlier parts of this conversation were summarized to save space. Use history_search or history_read if you need exact details from them.
+Earlier parts of this conversation were summarized to save space. Read the files or symbols again if you need their exact contents.
 
 ## unparsed_tool_call
 Your reply wrote a tool call as text that could not be read. Call the tool again in the tool-calling format, with complete JSON arguments.

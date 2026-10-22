@@ -370,8 +370,9 @@ namespace Ai
 		out.AppendInt(item.Member("selectionRange").Member("start").Member("line").AsInt() + 1);
 	}
 
-	// The calls into or out of `item`, `depth` levels down; `count` nodes written so far.
-	static void WalkCalls(Core::StringBuilder& out, CodeQuery& query, const Serialization::DomNode& item, bool incoming, int64 depth, int64 indent, Core::Array<Core::String>& visited, int64& count) {
+	// The calls into or out of `item`, `depth` levels down; `count` nodes written so far. Its direct callers' call sites go
+	// to `sites` when there is one.
+	static void WalkCalls(Core::StringBuilder& out, CodeQuery& query, const Serialization::DomNode& item, bool incoming, int64 depth, int64 indent, Core::Array<Core::String>& visited, int64& count, Core::Array<CodeSpan>* sites) {
 		Core::String path = query.PathOf(item.Member("uri").AsView());
 		Serialization::DomNode calls = query.Request(path.View(), Core::StringView(incoming ? "callHierarchy/incomingCalls" : "callHierarchy/outgoingCalls"), (Core::String("{\"item\": ") + IED::NodeJson(item).View() + "}").View(), false);
 		for (int64 i = 0; i < calls.Count() && count < kCodeHierarchyNodesMost; ++i) {
@@ -382,13 +383,19 @@ namespace Ai
 			for (int64 r = 0; r < ranges.Count(); ++r) {
 				if (r > 0) out.Append(", ");
 				out.AppendInt(ranges.At(r).Member("start").Member("line").AsInt() + 1);
+				if (!sites) continue;
+				CodeSpan site;
+				site.path = query.PathOf(other.Member("uri").AsView());
+				site.startLine = ranges.At(r).Member("start").Member("line").AsInt();
+				site.endLine = site.startLine;
+				sites->Push(site);
 			}
 			out.Append(")\n");
 			count += 1;
 			Core::String key = Visit(query.PathOf(other.Member("uri").AsView()).View(), other.Member("selectionRange").Member("start").Member("line").AsInt());
 			if (depth <= 1 || visited.Contains(key)) continue;
 			visited.Push(key);
-			WalkCalls(out, query, other, incoming, depth - 1, indent + 1, visited, count);
+			WalkCalls(out, query, other, incoming, depth - 1, indent + 1, visited, count, nullptr);
 		}
 	}
 
@@ -421,14 +428,26 @@ namespace Ai
 		if (items.Count() == 0) return ToolError((Core::String("code_call_hierarchy: no function is at ") + target.label.View()).View());
 		Core::StringBuilder out;
 		Core::Array<Core::String> visited;
+		Core::Array<CodeSpan> sites;
 		int64 count = 0;
 		for (int64 i = 0; i < items.Count(); ++i) {
 			AppendItem(out, query, items.At(i), 0);
 			out.Append(incoming ? " is called by:\n" : " calls:\n");
-			WalkCalls(out, query, items.At(i), incoming, DepthOf(call, 2), 1, visited, count);
+			WalkCalls(out, query, items.At(i), incoming, DepthOf(call, 2), 1, visited, count, incoming ? &sites : nullptr);
 		}
 		if (count == 0) out.Append(incoming ? "  [no callers]\n" : "  [no calls]\n");
 		if (count >= kCodeHierarchyNodesMost) out.Append("[stopped at 150 entries; give a smaller depth]\n");
+		if (incoming) {
+			for (int64 i = 0; i < items.Count(); ++i) {
+				CodeSpan own;
+				own.path = query.PathOf(items.At(i).Member("uri").AsView());
+				own.startLine = items.At(i).Member("selectionRange").Member("start").Member("line").AsInt();
+				own.endLine = own.startLine;
+				sites.Push(own);
+			}
+			for (CodeSymbol* symbol : target.symbols) sites.Push(symbol->selection);
+			AppendUnlisted(out, query, TargetName(query, target).View(), sites);
+		}
 		Core::StringBuilder preview;
 		preview.AppendInt(count);
 		preview.Append(incoming ? " callers" : " callees");
@@ -502,7 +521,7 @@ namespace Ai
 
 	static ToolOutcome CustomRun(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.ws);
-		Core::String path = IED::NormalizePath(call.args.Member("path").AsView());
+		Core::String path = query.FileOf(call.args.Member("path").AsView());
 		Core::StringView method = call.args.Member("method").AsView();
 		Serialization::DomNode requests = query.Serving(path.View()).Member("aiRequests");
 		bool exposed = false;
@@ -535,7 +554,7 @@ namespace Ai
 		hover->run = HoverRun;
 		registry.Add(hover);
 		ToolSpec* members = CodeToolSpec("code_members", "A type's members - fields, methods, constructors, nested types, enum values - each with its declaration as the server shows it (types, return type, parameters, static, const, inline, virtual), modifiers and doc summary; inherited adds its base types' members. Example: code_members({\"symbol\": \"Ring\", \"inherited\": true})",
-			CodeTargetSchema(", \"inherited\": {\"type\": \"boolean\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 300}").View(), true);
+			CodeTargetSchema(", \"inherited\": {\"type\": \"boolean\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 300}").View(), false);
 		members->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List members of"); };
 		members->run = MembersRun;
 		registry.Add(members);
@@ -550,7 +569,7 @@ namespace Ai
 		implementations->run = [](const ToolInvocation& call) -> ToolOutcome { return PlacesRun(call, "code_implementations", "textDocument/implementation", "implementationProvider", "implementation", "implementations"); };
 		registry.Add(implementations);
 		ToolSpec* calls = CodeToolSpec("code_call_hierarchy", "Who calls a function (incoming) or what it calls (outgoing), as a tree with the lines of each call. Example: code_call_hierarchy({\"symbol\": \"Ring::Push\", \"direction\": \"incoming\", \"depth\": 2})",
-			CodeTargetSchema(", \"direction\": {\"enum\": [\"incoming\", \"outgoing\"]}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 5}").View(), true);
+			CodeTargetSchema(", \"direction\": {\"enum\": [\"incoming\", \"outgoing\"]}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 5}").View(), false);
 		calls->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Call hierarchy of"); };
 		calls->run = CallHierarchyRun;
 		registry.Add(calls);

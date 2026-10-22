@@ -20,6 +20,7 @@ from test_chat import REPO, ChatCase, call_step, text_step, write
 CLANGD = os.path.join(REPO, "vendor", "llvm", "bin", "clangd.exe")
 FAKE_LSP = os.path.join(REPO, "tools", "server-checks", "fake_lsp.py")
 C4LSP = os.path.join(REPO, "toolchains", "c4", "dev", "tools", "C4LSP", "C4LSP.exe")
+BEDROCK_QUEUE = os.path.join(REPO, "toolchains", "c4", "dev", "Bedrock", "Container", "priorityqueue.ch")
 NUKE = os.path.join(REPO, "nuke.bat")
 TURN_SECONDS = 120
 
@@ -258,9 +259,7 @@ class ClangdCodeToolTests(CodeToolCase):
 @unittest.skipUnless(os.path.exists(C4LSP), "no dev C4 toolchain (nuke build makes it)")
 class C4CodeToolTests(CodeToolCase):
 	"""A C4 project as `nuke init --ied` makes one and `nuke build` describes it to C4LSP, the toolchain's `c4` plugin
-	pinned by the solution. Not checked until C4LSP answers them (reported to the C4 session 2026-10-22): references
-	asked at a declaration, the type definition of a variable, implementations as methods, and macros in
-	workspace/symbol."""
+	pinned by the solution."""
 
 	def prepare(self):
 		def nuke(*words):
@@ -281,12 +280,19 @@ class C4CodeToolTests(CodeToolCase):
 			("r3", "code_read_symbol", {"path": "src/ring.cf", "line": 7}),
 			("d1", "code_definition", {"path": "src/ring.cf", "line": 15, "symbol": "Push"}),
 			("f1", "code_references", {"path": "src/ring.cf", "line": 15, "symbol": "Push"}),
+			("f2", "code_references", {"symbol": "Ring::Push"}),
 			("h1", "code_hover", {"symbol": "Ring::Count"}),
 			("m1", "code_members", {"symbol": "Ring", "inherited": True}),
 			("c1", "code_call_hierarchy", {"symbol": "Ring::Push", "direction": "incoming", "depth": 2}),
 			("c2", "code_call_hierarchy", {"symbol": "Fill", "direction": "outgoing"}),
 			("y1", "code_type_hierarchy", {"symbol": "ISink", "direction": "subtypes"}),
-			("x1", "code_expand_macro", {"path": "src/ring.cf", "line": 15, "symbol": "TWICE"}))
+			("x1", "code_expand_macro", {"path": "src/ring.cf", "line": 15, "symbol": "TWICE"}),
+			("t1", "code_type_definition", {"path": "src/main.cf", "line": 5, "symbol": "ring"}),
+			("i1", "code_implementations", {"symbol": "ISink::Write"}),
+			("p1", "code_read_symbol", {"symbol": "TWICE"}),
+			("b1", "code_symbols", {"query": "PriorityQueue", "kind": "class"}),
+			("b2", "fs_read", {"path": BEDROCK_QUEUE, "limit": 5}),
+			("g1", "code_symbols", {"path": "src"}))
 		self.assertIn("method Game::Ring::Push  src/ring.cf:6\nmethod Game::Ring::Push  src/ring.ch:21\n", results["s1"], "the project's first, Bedrock's after")
 		self.assertIn("function TWICE: macro  [5]", results["o1"], "a macro is a symbol")
 		self.assertIn("  class Ring: class : ISink  [16-30]", results["o1"])
@@ -302,6 +308,15 @@ class C4CodeToolTests(CodeToolCase):
 		self.assertIn("4 references to src/ring.cf:15 in 2 files", results["f1"])
 		self.assertIn("  12 (in Game::Ring::Write): void Ring::Write(int32 value) { Push(value); }", results["f1"])
 		self.assertIn("  21 (in Game::Ring::Push): public void Push(int32 value);", results["f1"])
+		self.assertNotIn("did not list", results["f1"], "nothing unlisted when the server found them all")
+		self.assertIn("4 references to Game::Ring::Push in 2 files", results["f2"], "asked from the declaration too")
+		self.assertNotIn("did not list", results["f2"])
+		self.assertIn("1 type definition for src/main.cf:5:\nclass Game::Ring", results["t1"], "a variable's type")
+		self.assertIn("method Game::Ring::Write", results["i1"], "the method that implements it, not its class")
+		self.assertIn("#define TWICE(x) ((x) * 2)", results["p1"], "a macro read by name")
+		self.assertIn(BEDROCK_QUEUE, results["b1"], "a library's file shown by its absolute path")
+		self.assertTrue(results["b2"].startswith("1\t"), "and fs_read takes that path: %s" % results["b2"][:200])
+		self.assertIn("src is a folder", results["g1"])
 		self.assertIn("public int32 Game::Ring::Count() const", results["h1"])
 		self.assertIn("How many values it holds.", results["h1"])
 		self.assertIn("  L24  method  public static int32 Game::Ring::Capacity()", results["m1"], "static")
@@ -327,6 +342,7 @@ class FakeServerCodeToolTests(CodeToolCase):
 			"contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}],
 				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]}, "aiExposedRequests": requests}]}}))
 		write(os.path.join(self.repo, "a.fk"), "use MAKE_IT here\n")
+		write(os.path.join(self.repo, "b.fk"), "MAKE_ITS\nagain MAKE_IT\n")
 		for i in range(18):
 			write(os.path.join(self.repo, "f%d.fk" % i), "word %d\n" % i)
 
@@ -342,13 +358,18 @@ class FakeServerCodeToolTests(CodeToolCase):
 			("x1", "code_expand_macro", {"path": "a.fk", "line": 1, "symbol": "MAKE_IT"}),
 			("u1", "code_custom", {"method": "fake/echo", "path": "a.fk", "line": 1, "symbol": "here", "params": {"extra": 1}}),
 			("u2", "code_custom", {"method": "fake/nope", "path": "a.fk"}),
-			("n1", "code_hover", {"path": "src/main.c", "line": 1}))
+			("n1", "code_hover", {"path": "src/main.c", "line": 1}),
+			("r1", "code_references", {"path": "a.fk", "line": 1, "symbol": "MAKE_IT"}))
 		self.assertIn("MAKE_IT at a.fk:1 expands to:", results["x1"], "the request its profile names for the purpose")
 		self.assertIn("make_it(1)", results["x1"])
 		self.assertIn('"extra":1', results["u1"], "the params given")
 		self.assertIn('"position":{"line":0,"character":12}', results["u1"], "and the place, at the symbol on the line")
 		self.assertIn("does not expose fake/nope; it exposes fake/expand, fake/echo", results["u2"])
 		self.assertIn("no language server serves src/main.c", results["n1"])
+		self.assertIn("0 references to a.fk:1", results["r1"])
+		self.assertIn("did not list these lines that name MAKE_IT", results["r1"], "a server that finds none: the lines naming it, to check")
+		self.assertIn("  b.fk:2: again MAKE_IT\n", results["r1"])
+		self.assertNotIn("MAKE_ITS", results["r1"], "whole words only")
 		self.assertEqual(["a.fk"], self.uris("textDocument/didOpen"), "opened on the server once for the asking")
 
 	async def test_files_nobody_has_open(self):

@@ -41,6 +41,28 @@ namespace Ai
 		return parts;
 	}
 
+	static bool IsLetterOrDigit(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+	static bool IsUpper(int32 c) { return c >= 'A' && c <= 'Z'; }
+
+	Core::Array<Core::String> NameWords(Core::StringView text) {
+		Core::Array<Core::String> words;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			while (at < text.ByteLength() && !IsLetterOrDigit(text.ByteAt(at))) at += 1;
+			int64 end = at;
+			while (end < text.ByteLength() && IsLetterOrDigit(text.ByteAt(end))) {
+				end += 1;
+				if (end >= text.ByteLength() || !IsUpper(text.ByteAt(end))) continue;
+				if (!IsUpper(text.ByteAt(end - 1))) break;
+				if (end + 1 < text.ByteLength() && !IsUpper(text.ByteAt(end + 1)) && IsLetterOrDigit(text.ByteAt(end + 1))) break;
+			}
+			Core::String word = Core::String(text.Substring(at, end - at));
+			if (word.ByteLength() >= 3 && !words.Contains(word)) words.Push(word);
+			at = end;
+		}
+		return words;
+	}
+
 	bool QualifiedMatches(Core::StringView qualified, Core::StringView want) {
 		Core::String have = Normalized(qualified);
 		Core::String asked = Normalized(want);
@@ -334,7 +356,30 @@ namespace Ai
 
 	// --- A call's target ---------------------------------------------------------------------------------------------------
 
+	// A drive's path or a share's; a leading "/" alone is taken for a workspace path.
+	static bool IsAbsolute(Core::StringView path) {
+		const bool drive = path.ByteLength() >= 3 && path.ByteAt(1) == ':' && (path.ByteAt(2) == '\\' || path.ByteAt(2) == '/');
+		return drive || path.StartsWith(Core::StringView("\\\\"));
+	}
+
+	Core::String CodeQuery::FileOf(Core::StringView given) const {
+		if (given.StartsWith(Core::StringView("file:"))) return Core::String(given);
+		Core::String relative;
+		if (IsAbsolute(given) && IED::RelativeTo(ws.root.View(), given, relative)) return IED::NormalizePath(relative.View());
+		if (IsAbsolute(given)) return IED::FileUriOfPath(given);
+		return IED::NormalizePath(given);
+	}
+
 	static bool IsWordByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 0x80; }
+
+	Core::String CodeQuery::NameAt(const CodeSpan& at) {
+		Core::StringView line = Line(at.path.View(), at.startLine);
+		int64 start = Core::ByteOffsetOfUtf16(line, at.startCharacter);
+		int64 end = start;
+		while (start > 0 && IsWordByte(line.ByteAt(start - 1))) start -= 1;
+		while (end < line.ByteLength() && IsWordByte(line.ByteAt(end))) end += 1;
+		return Core::String(line.Substring(start, end - start));
+	}
 
 	// The byte where `word` stands alone on `line`; -1 when it does not.
 	static int64 WordAt(Core::StringView line, Core::StringView word) {
@@ -364,7 +409,7 @@ namespace Ai
 
 	static CodeTarget PlaceTarget(CodeQuery& query, const Serialization::DomNode& args) {
 		CodeTarget target;
-		Core::String path = IED::NormalizePath(args.Member("path").AsView());
+		Core::String path = query.FileOf(args.Member("path").AsView());
 		if (path.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("line needs path"));
 		const int64 line = args.Member("line").AsInt() - 1;
 		Core::StringView text = query.Line(path.View(), line);
@@ -424,8 +469,8 @@ namespace Ai
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) {
 		if (args.Member("line").IsValid()) return PlaceTarget(query, args);
 		Core::StringView name = args.Member("symbol").AsView();
-		if (name.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give symbol (a name; Ring::Push narrows it), or path and line"));
-		Core::String path = IED::NormalizePath(args.Member("path").AsView());
+		if (name.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give symbol (a name; Ring::Push narrows it), or path and line; code_symbols with a path lists a file's symbols"));
+		Core::String path = query.FileOf(args.Member("path").AsView());
 		CodeTarget target;
 		target.symbols = WithoutMembersOfFound(query.Find(name, path.View()));
 		if (target.symbols.IsEmpty()) {

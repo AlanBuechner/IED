@@ -23,4 +23,6 @@ namespace IED
 	bool WorkspacePathOf(const Workspace& ws, Core::StringView uri, Core::String& path);
 	// The absolute path a file: URI names; false for another URI.
 	bool LocalPathOf(Core::StringView uri, Core::String& path);
+	// The canonical file: URI of an absolute path, as servers' answers name a file outside the workspace.
+	Core::String FileUriOfPath(Core::StringView path);
 }
