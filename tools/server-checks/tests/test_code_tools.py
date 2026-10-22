@@ -222,6 +222,7 @@ class ClangdCodeToolTests(CodeToolCase):
 		for call_id in ("s1", "o1", "r1", "r2", "r3", "d1", "f1", "h1", "m1", "t1", "i1", "c1", "c2", "y1", "x1"):
 			self.assertNotIn("did not run", results[call_id], call_id)
 		self.assertIn("method game::Ring::Push  src/ring.cpp:8", results["s1"], "the servers started and indexed for the first search")
+		self.assertIn("Its source, src/ring.cpp:\n7\t// Adds the value at the end.\n8\tvoid Ring::Push(int value) {", results["s1"], "a lone match comes with its definition")
 		self.assertIn("class Ring", results["o1"])
 		self.assertIn("Push", results["o1"])
 		self.assertIn("8\tvoid Ring::Push(int value) {", results["r1"], "the definition, with its body")
@@ -274,6 +275,7 @@ class C4CodeToolTests(CodeToolCase):
 	async def test_navigating_a_c4_project(self):
 		results = await self.results(
 			("s1", "code_symbols", {"query": "Push"}),
+			("s2", "code_symbols", {"query": "ISink"}),
 			("o1", "code_symbols", {"path": "src/ring.ch"}),
 			("r1", "code_read_symbol", {"symbol": "Ring::Push"}),
 			("r2", "code_read_symbol", {"symbol": "Game::Ring::Push", "declaration": True}),
@@ -294,6 +296,8 @@ class C4CodeToolTests(CodeToolCase):
 			("b2", "fs_read", {"path": BEDROCK_QUEUE, "limit": 5}),
 			("g1", "code_symbols", {"path": "src"}))
 		self.assertIn("method Game::Ring::Push  src/ring.cf:6\nmethod Game::Ring::Push  src/ring.ch:21\n", results["s1"], "the project's first, Bedrock's after")
+		self.assertNotIn("Its source", results["s1"], "a name several symbols have is only listed")
+		self.assertIn("1 symbol for \"ISink\"\ninterface Game::ISink  src/ring.ch:10\nIts source, src/ring.ch:\n9\t\t// Something values can be written to.\n10\t\tinterface ISink\n", results["s2"], "the only one, with its source")
 		self.assertIn("function TWICE: macro  [5]", results["o1"], "a macro is a symbol")
 		self.assertIn("  class Ring: class : ISink  [16-30]", results["o1"])
 		self.assertIn("    method Capacity: static int32 ()  [24]", results["o1"], "a member's kind and signature")
@@ -319,11 +323,11 @@ class C4CodeToolTests(CodeToolCase):
 		self.assertIn("src is a folder", results["g1"])
 		self.assertIn("public int32 Game::Ring::Count() const", results["h1"])
 		self.assertIn("How many values it holds.", results["h1"])
-		self.assertIn("  L24  method  public static int32 Game::Ring::Capacity()", results["m1"], "static")
-		self.assertIn("  L29  field  public static const int32 Game::Ring::kLimit = ((64) * 2)", results["m1"], "static const with its value")
-		self.assertIn("  L19  constructor  [operator(\"create\")] public void Game::Ring::Init()", results["m1"], "annotations")
-		self.assertIn("  L23  method  public int32 Game::Ring::Count() const  - How many values it holds.", results["m1"], "const and the doc summary")
-		self.assertIn("from ISink (src/ring.ch:10)\n  L13  method  void Game::ISink::Write(int32 value)  - Writes one value.", results["m1"], "inherited")
+		self.assertIn("  L24  method  public static int32 Capacity()", results["m1"], "static")
+		self.assertIn("  L29  field  public static const int32 kLimit = ((64) * 2)", results["m1"], "static const with its value")
+		self.assertIn("  L19  constructor  [operator(\"create\")] public void Init()", results["m1"], "annotations")
+		self.assertIn("  L23  method  public int32 Count() const  - How many values it holds.", results["m1"], "const and the doc summary")
+		self.assertIn("from ISink (src/ring.ch:10)\n  L13  method  void Write(int32 value)  - Writes one value.", results["m1"], "inherited")
 		self.assertIn("  method Write (Game::Ring::Write) - src/ring.cf:12 (call at line 12)\n    function Fill (Game::Fill) - src/ring.cf:14 (call at line 16)", results["c1"])
 		self.assertIn("function main - src/main.cf:4 (call at line 6)", results["c1"], "callers two levels up")
 		self.assertIn("  method Count (Game::Ring::Count) - src/ring.cf:10 (call at line 17)", results["c2"])
@@ -342,7 +346,7 @@ class FakeServerCodeToolTests(CodeToolCase):
 			"contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}],
 				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]}, "aiExposedRequests": requests}]}}))
 		write(os.path.join(self.repo, "a.fk"), "use MAKE_IT here\n")
-		write(os.path.join(self.repo, "b.fk"), "MAKE_ITS\nagain MAKE_IT\n")
+		write(os.path.join(self.repo, "b.fk"), "MAKE_ITS\nagain MAKE_IT(1)\n// MAKE_IT in a comment\nsay(\"MAKE_IT in a string\")\nMAKE_IT alone\n")
 		for i in range(18):
 			write(os.path.join(self.repo, "f%d.fk" % i), "word %d\n" % i)
 
@@ -367,9 +371,11 @@ class FakeServerCodeToolTests(CodeToolCase):
 		self.assertIn("does not expose fake/nope; it exposes fake/expand, fake/echo", results["u2"])
 		self.assertIn("no language server serves src/main.c", results["n1"])
 		self.assertIn("0 references to a.fk:1", results["r1"])
-		self.assertIn("did not list these lines that name MAKE_IT", results["r1"], "a server that finds none: the lines naming it, to check")
-		self.assertIn("  b.fk:2: again MAKE_IT\n", results["r1"])
+		self.assertIn("did not list these lines that use MAKE_IT", results["r1"], "a server that finds none: the lines using it, to check")
+		self.assertIn("  b.fk:2: again MAKE_IT(1)\n", results["r1"])
 		self.assertNotIn("MAKE_ITS", results["r1"], "whole words only")
+		for noise in ("in a comment", "in a string", "MAKE_IT alone"):
+			self.assertNotIn(noise, results["r1"], "only uses as code: called, or reached through . -> ::")
 		self.assertEqual(["a.fk"], self.uris("textDocument/didOpen"), "opened on the server once for the asking")
 
 	async def test_files_nobody_has_open(self):

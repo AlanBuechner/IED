@@ -37,6 +37,37 @@ namespace Ai
 		return pattern.Contains(Core::StringView("|")) || pattern.Contains(Core::StringView(".*")) || pattern.Contains(Core::StringView("\\b")) || pattern.Contains(Core::StringView("\\s")) || pattern.Contains(Core::StringView("\\(")) || pattern.Contains(Core::StringView("\\w")) || (pattern.Contains(Core::StringView("[")) && pattern.Contains(Core::StringView("]")));
 	}
 
+	// `line` and a newline; a line longer than kSearchLineShownBytes is cut at a character's start, "..." after it.
+	static void AppendShortLine(Core::StringBuilder& out, Core::StringView line) {
+		int64 cut = line.ByteLength() < kSearchLineShownBytes ? line.ByteLength() : kSearchLineShownBytes;
+		while (cut > 0 && cut < line.ByteLength() && ((uint8)line.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		out.Append(line.Substring(0, cut));
+		if (cut < line.ByteLength()) out.Append("...");
+		out.Append("\n");
+	}
+
+	Core::String SearchListing(const IED::SearchResult& result) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < result.matches.Count(); ++i) {
+			const IED::SearchMatch& match = result.matches[i];
+			if (i == 0 || match.path.View() != result.matches[i - 1].path.View()) {
+				out.Append(match.path.View());
+				out.Append("\n");
+			}
+			out.Append("  ");
+			out.AppendInt(match.line + 1);
+			out.Append(": ");
+			AppendShortLine(out, match.preview.View().Trimmed());
+		}
+		if (result.truncated) {
+			out.Append("[stopped at ");
+			out.AppendInt(kSearchToolMatches);
+			out.Append(" matches; narrow the pattern or add a glob]\n");
+		}
+		if (result.matches.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		return Core::String(out.View());
+	}
+
 	static ToolOutcome SearchRun(const ToolInvocation& call) {
 		IED::SearchQuery query;
 		query.text = Core::String(call.args.Member("pattern").AsView());
@@ -62,16 +93,7 @@ namespace Ai
 		}
 		Core::StringBuilder out;
 		if (asRegex) out.Append("[nothing matched the pattern as text, so it was read as a regex; set regex true for one]\n");
-		for (const IED::SearchMatch& match : result.matches) {
-			out.Append(match.path.View());
-			out.Append(":");
-			out.AppendInt(match.line + 1);
-			out.Append(": ");
-			out.Append(match.preview.View().Trimmed());
-			out.Append("\n");
-		}
-		if (result.truncated) out.Append("[stopped at 100 matches; narrow the pattern or add a glob]\n");
-		if (result.matches.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		out.Append(SearchListing(result).View());
 		Core::StringBuilder preview;
 		preview.AppendInt(result.matches.Count());
 		preview.Append(result.matches.Count() == 1 ? " match" : " matches");

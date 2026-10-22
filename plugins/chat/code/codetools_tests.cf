@@ -50,6 +50,22 @@ class CodeToolsTests {
 		assert_true(Ai::PositionParams(at, Text("\"context\": {}")).View() == "{\"position\": {\"line\": 4, \"character\": 7}, \"context\": {}}", "a position, then more");
 	}
 
+	[test("uses_as_code")]
+	public static void TestUsesAsCode() {
+		Core::StringView name = Text("LspPool");
+		assert_true(Ai::UsesAsCode(Text("\t\tlsp = new LspPool(self);"), name), "constructed");
+		assert_true(Ai::UsesAsCode(Text("\tvoid LspPool::Init(Server* server) {"), name), "an owner's qualifier");
+		assert_true(Ai::UsesAsCode(Text("\tpublic LspPool* lsp;"), name), "a pointer declared");
+		assert_true(Ai::UsesAsCode(Text("void Fill(LspPool& pool)"), name), "a reference parameter");
+		assert_true(Ai::UsesAsCode(Text("Core::Array<LspPool*> pools = Ied::LspPool::All();"), Text("All")), "a call through ::");
+		assert_true(Ai::UsesAsCode(Text("server->lsp->Serving(doc)"), Text("Serving")), "a call through ->");
+		assert_true(!Ai::UsesAsCode(Text("// LspPool(self) in a comment"), name), "a comment line");
+		assert_true(!Ai::UsesAsCode(Text("say(\"LspPool(self)\");"), name), "inside a string");
+		assert_true(!Ai::UsesAsCode(Text("the LspPool alone"), name), "a bare word");
+		assert_true(!Ai::UsesAsCode(Text("MyLspPool(1)"), name), "part of a longer name");
+		assert_true(!Ai::UsesAsCode(Text("LspPool *"), name), "a star with nothing declared");
+	}
+
 	[test("hover_declaration_and_summary")]
 	public static void TestHover() {
 		Core::StringView clangd = Text("### field `values`\n\n---\nType: `int[64]`\n\nOffset: 8 bytes\n\nSize: 256 bytes, alignment 4 bytes\n\n---\n```cpp\n// In Ring\nprivate: int values[64]\n```");

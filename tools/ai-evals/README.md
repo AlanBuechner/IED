@@ -18,15 +18,21 @@ vendor\python\python.exe -I tools/ai-evals/codenav_eval.py --server <exe> --mode
 
 - `--setup` (first run, or after the sources change) copies `src/` and the plugin code its `nuke.toml` names into
   `build/ai-evals/Srv`, runs `nuke init --ied` and `nuke build ied-server`.
-- Results land in `build/ai-evals/<time>/`: `report.json` (each turn's calls, answer, tokens, time) and `summary.md`: per
-  question its time, calls, `code_*` / `search_text` / `fs_read` counts, whether it used the tool the question calls for,
-  and its misuses (a text search for an identifier, a regex sent as literal text, a whole source file read, failed
-  calls), then each turn's calls in order.
+- Results land in `build/ai-evals/<time>/`: `report.json` (each turn's calls, answer, tokens, time, each step's stats)
+  and `summary.md`: per question its quality (the facts a right answer states, found in it: the functions, files and
+  constants it must name), time, steps (requests to the model), calls, prompt and output tokens, thinking and answer
+  size, whether it used the tool the question calls for and its misuses (a text search for an identifier, a regex sent
+  as literal text, a whole source file read, failed calls); then the time split into prompt processing, generation and
+  the rest (tools, the server), each tool's calls and result sizes, and each turn's calls in order.
+- `--temperature` (default 0) makes runs repeatable enough to compare one change with the last; a change is kept when
+  quality holds and time, steps or tokens fall.
 - Use the repository's Python (`vendor\python`): a Microsoft Store Python reads its own private copy of AppData and does
   not see the app settings.
-- `--parallel` (default 4) is how many turns run at once; match the model server's slots.
+- `--parallel` (default 1) is how many turns run at once. More than one makes them share the model server's GPU: they
+  finish sooner together but each takes several times longer, so their times do not compare with a sequential run.
 
-The answers are not graded automatically; read them in `report.json` when a route looks wrong.
+The fact checks catch an answer that misses what matters, not one that is wrong around it; read the answers in
+`report.json` when a number moves.
 
 ### Runs
 

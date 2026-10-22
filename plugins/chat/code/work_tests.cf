@@ -1,0 +1,43 @@
+// search_text's listing (docs/13 T-SRCH-1): a file's path once with its lines under it, a long line cut where a
+// character starts, and what it says when it stopped early or found nothing.
+
+include "work.ch"
+
+static IED::SearchMatch Match(const char* path, int64 line, Core::StringView preview) {
+	IED::SearchMatch match;
+	match.path = Core::String(path);
+	match.line = line;
+	match.preview = Core::String(preview);
+	return match;
+}
+
+static Core::String Repeated(char c, int64 count) {
+	Core::StringBuilder out;
+	for (int64 i = 0; i < count; ++i) out.AppendByte(c);
+	return Core::String(out.View());
+}
+
+[test("server.ai.work")]
+class WorkToolsTests {
+	[test("search_listing")]
+	public static void TestSearchListing() {
+		IED::SearchResult result;
+		result.matches.Push(Match("src/a.cf", 4, Core::StringView("\tPush(1);  ")));
+		result.matches.Push(Match("src/a.cf", 9, Core::StringView("Push(2);")));
+		result.matches.Push(Match("src/b.cf", 0, Core::StringView("Push(3);")));
+		assert_se("src/a.cf\n  5: Push(1);\n  10: Push(2);\nsrc/b.cf\n  1: Push(3);\n", Ai::SearchListing(result).CStr(), "a file's path once, its trimmed lines under it");
+
+		result.truncated = true;
+		assert_true(Ai::SearchListing(result).View().EndsWith(Core::StringView("[stopped at 100 matches; narrow the pattern or add a glob]\n")), "it says where it stopped");
+
+		Core::String prefix = Repeated('x', Ai::kSearchLineShownBytes - 1);
+		IED::SearchResult wide;
+		wide.matches.Push(Match("w.txt", 0, (prefix + "\xC3\xA9 and more").View()));
+		assert_se((Core::String("w.txt\n  1: ") + prefix.View() + "...\n").CStr(), Ai::SearchListing(wide).CStr(), "a long line is cut before the character it would split");
+		wide.matches[0].preview = prefix + Core::StringView("y");
+		assert_se((Core::String("w.txt\n  1: ") + prefix.View() + "y\n").CStr(), Ai::SearchListing(wide).CStr(), "a line of exactly the limit is whole");
+
+		IED::SearchResult none;
+		assert_true(Ai::SearchListing(none).View().StartsWith(Core::StringView("[no matches;")), "nothing matched");
+	}
+}

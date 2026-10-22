@@ -3,10 +3,12 @@
 // (docs/06) with the problems it found, and problems_list over the Error List.
 
 include "tool.ch"
+include "fs/search.ch"
 
 namespace Ai
 {
 	const int64 kSearchToolMatches = 100;
+	const int64 kSearchLineShownBytes = 160;   // a longer matching line is cut, "..." after it
 	const int64 kShellTailLines = 200;
 	const int64 kShellTailBytes = 16 * 1024;
 	const int64 kShellDefaultSeconds = 120;
@@ -16,6 +18,9 @@ namespace Ai
 	const char* kAiOutputSource = "ai";
 
 	void AddWorkTools(ToolRegistry& registry);
+	// What search_text shows of `result`: each file's path once with its matching lines under it, numbered, a long
+	// line cut at kSearchLineShownBytes; then whether it stopped at kSearchToolMatches, or that nothing matched.
+	Core::String SearchListing(const IED::SearchResult& result);
 	// The last `lines` lines of `text`, at most `bytes` of them.
 	Core::String TailOf(Core::StringView text, int64 lines, int64 bytes);
 	// What a command started for a tool call needs: its argv or shell text, the folder it runs in (workspace-relative)

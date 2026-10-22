@@ -201,7 +201,32 @@ namespace Ai
 		return out.ToString();
 	}
 
-	static void AppendMember(Core::StringBuilder& out, CodeQuery& query, const MemberFacts* facts, const CodeSymbol* member) {
+	// `declaration` without its owner's qualification (`Ied::LspPool::Find` -> `Find`): the type's heading names it.
+	static Core::String WithoutOwner(Core::StringView declaration, Core::StringView owner) {
+		Core::String text = Core::String(declaration);
+		Core::Array<Core::String> parts = NameParts(owner);
+		while (!parts.IsEmpty()) {
+			Core::StringBuilder prefix;
+			for (const Core::String& part : parts) {
+				prefix.Append(part.View());
+				prefix.Append("::");
+			}
+			Core::StringBuilder kept;
+			Core::StringView rest = text.View();
+			for (;;) {
+				const int64 found = rest.IndexOf(prefix.View());
+				if (found < 0) break;
+				kept.Append(rest.Substring(0, found));
+				rest = rest.Substring(found + prefix.ByteLength(), rest.ByteLength() - found - prefix.ByteLength());
+			}
+			kept.Append(rest);
+			text = kept.ToString();
+			parts.RemoveAt(0);
+		}
+		return text;
+	}
+
+	static void AppendMember(Core::StringBuilder& out, CodeQuery& query, const MemberFacts* facts, Core::StringView owner, const CodeSymbol* member) {
 		Core::String hover;
 		if (facts->hovers) {
 			try {
@@ -210,7 +235,7 @@ namespace Ai
 			catch (IED::RpcError& error) {
 			}
 		}
-		Core::String declaration = HoverDeclaration(hover.View());
+		Core::String declaration = WithoutOwner(HoverDeclaration(hover.View()).View(), owner);
 		if (declaration.IsEmpty()) {
 			declaration = member->name;
 			if (!member->detail.IsEmpty()) declaration = (declaration + ": ") + member->detail.View();
@@ -236,9 +261,10 @@ namespace Ai
 
 	static void AppendMembers(Core::StringBuilder& out, CodeQuery& query, const CodeSymbol* type, int64& budget) {
 		MemberFacts* facts = FactsOf(query, type->range.path.View());
+		Core::String owner = type->Qualified();
 		for (CodeSymbol* member : type->children) {
 			if (budget <= 0) return;
-			AppendMember(out, query, facts, member);
+			AppendMember(out, query, facts, owner.View(), member);
 			budget -= 1;
 		}
 	}

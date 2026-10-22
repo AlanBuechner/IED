@@ -14,7 +14,10 @@ namespace Ai
 	const int64 kCodeReferenceFilesNamed = 20; // files whose references are named by the symbol they sit in
 	const int64 kCodeUnlistedNameBytes = 3;    // shorter names are not checked against the text
 	const int64 kCodeUnlistedSearched = 200;
-	const int64 kCodeUnlistedShown = 15;
+	const int64 kCodeUnlistedShown = 8;
+	const int64 kCodeUnlistedMost = 25;        // a name more lines use is a common one: they are counted, not listed
+	const int64 kCodeWordMatchesMost = 25;     // symbols a search by a name's words shows
+	const int64 kCodeSearchSourceLines = 40;   // a search's lone match this short comes with its source
 
 	void AddCodeNavTools(ToolRegistry& registry);
 	// A code tool: read class, offered in Plan mode, `deferred` in the `code` group.
@@ -32,9 +35,13 @@ namespace Ai
 	CodeSymbol* SymbolAt(CodeQuery& query, const CodeSpan& span);
 	// A place an answer named: the symbol there (SymbolHeading) and its declaration's lines, or the place and its lines.
 	void AppendPlace(Core::StringBuilder& out, CodeQuery& query, const CodeSpan& span);
-	// The lines of the workspace's files that name `name` as a whole word and `listed` leaves out - uses a language server
-	// can miss (through a pointer or a macro) or other symbols of that name - as a note to check them; nothing when none.
+	// The lines of the workspace's files that use `name` as code (UsesAsCode) and `listed` leaves out - uses a language
+	// server can miss (through a pointer or a macro) or other symbols of that name - as a note to check them: listed when
+	// no other symbol has the name or few lines use it, else only counted, as a common name; nothing when none.
 	void AppendUnlisted(Core::StringBuilder& out, CodeQuery& query, Core::StringView name, const Core::Array<CodeSpan>& listed);
+	// Whether `line` uses `name` as code does - calls it, reaches it through ".", "->" or "::", or declares a pointer or
+	// reference of it ("Ring* ring") - outside a comment and a string.
+	bool UsesAsCode(Core::StringView line, Core::StringView name);
 	// The name a target names: its symbol's last part, or the identifier at its place.
 	Core::String TargetName(CodeQuery& query, const CodeTarget& target);
 	// A code tool's parameters: the target's properties (kCodeTargetProperties) and `more` (", "-led members).
