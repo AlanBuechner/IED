@@ -7,6 +7,7 @@ namespace Profile
 	// The site's id in `session`, its definitions queued the first time.
 	static uint64 SiteId(Session* session, Site& site) {
 		if (atomic_load(&site.session, MemoryOrder::Acquire) == session->number) return site.id;
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		if (site.session == session->number) return site.id;
 		const uint64 name = session->Intern(Core::StringView(site.name));
@@ -30,6 +31,7 @@ namespace Profile
 
 	// The site of a zone named at run time: one per distinct name, kept by the session.
 	static uint64 NamedSiteId(Session* session, Core::StringView name) {
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		uint64 id;
 		if (session->namedSites.TryGet(Core::String(name), id)) return id;
@@ -53,6 +55,7 @@ namespace Profile
 	// The lock's id in `session`, its name, its place and its LockDef queued the first time.
 	static uint64 LockId(Session* session, LockSite& lock) {
 		if (atomic_load(&lock.session, MemoryOrder::Acquire) == session->number) return lock.id;
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		if (lock.session == session->number) return lock.id;
 		const uint64 name = session->Intern(Core::StringView(lock.name));
@@ -81,17 +84,20 @@ namespace Profile
 	}
 
 	static uint64 Interned(Session* session, Core::StringView text) {
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		return session->Intern(text);
 	}
 
 	static uint64 Once(Session* session, Core::StringView text) {
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		return session->Once(text);
 	}
 
 	// A timed event of the calling thread with one varint field.
 	static void ThreadEvent(Session* session, Event type, uint64 field) {
+		ProfilerWork work;
 		EventBuffer* buffer = ThreadBuffer(session);
 		const int64 now = Now();
 		Threading::LockGuard held(buffer->lock);
@@ -101,6 +107,7 @@ namespace Profile
 
 	// An untimed event that describes the calling thread's innermost zone.
 	static void ZoneDetail(Session* session, Event type, uint64 field) {
+		ProfilerWork work;
 		EventBuffer* buffer = ThreadBuffer(session);
 		Threading::LockGuard held(buffer->lock);
 		PutEvent(buffer->bytes, type);
@@ -159,14 +166,15 @@ namespace Profile
 
 	// --- Zones ----------------------------------------------------------------------------------------------------
 
-	// The count is read after the zone's begin is recorded and before its end is, so what the profiler allocates to
-	// register a site is not the zone's.
+	// A zone counts what its thread allocated from after its begin is recorded to before its end is, less what the
+	// profiler took meanwhile (its nested zones' sites, names, events), so only the program's own allocations are its.
 	void Zone::Init(Site& site) {
 		Session* running = Running();
 		if (!running) return;
 		session = running->number;
 		ThreadEvent(running, Event::ZoneBegin, SiteId(running, site));
 		allocated = GC::ThreadAllocated();
+		profilerTook = t_profilerTook;
 	}
 
 	void Zone::Init(Core::StringView name) {
@@ -175,20 +183,26 @@ namespace Profile
 		session = running->number;
 		ThreadEvent(running, Event::ZoneBegin, NamedSiteId(running, name));
 		allocated = GC::ThreadAllocated();
+		profilerTook = t_profilerTook;
 	}
 
 	void Zone::Delete() {
 		if (session == 0) return;
 		Session* running = Running();
 		if (!running || running->number != session) return;
-		const GC::AllocCounts counts = GC::ThreadAllocated();
+		const GC::AllocCounts own = Less(Less(GC::ThreadAllocated(), allocated), Less(t_profilerTook, profilerTook));
+		ProfilerWork work;
 		EventBuffer* buffer = ThreadBuffer(running);
 		const int64 now = Now();
 		Threading::LockGuard held(buffer->lock);
-		if (counts.objects != allocated.objects || counts.bytes != allocated.bytes) {
+		if (own.objects != 0 || own.bytes != 0) {
 			PutEvent(buffer->bytes, Event::ZoneAllocs);
-			PutVarint(buffer->bytes, counts.objects - allocated.objects);
-			PutVarint(buffer->bytes, counts.bytes - allocated.bytes);
+			PutVarint(buffer->bytes, own.objects);
+			PutVarint(buffer->bytes, own.bytes);
+		}
+		if (own.nativeBytes != 0) {
+			PutEvent(buffer->bytes, Event::ZoneNative);
+			PutVarint(buffer->bytes, own.nativeBytes);
 		}
 		buffer->Timed(Event::ZoneEnd, now);
 	}
@@ -210,6 +224,7 @@ namespace Profile
 	// A frame mark and the process's allocations so far at the same time.
 	static void MarkFrame(Session* session, uint64 set) {
 		const GC::AllocCounts allocated = GC::Allocated();
+		ProfilerWork work;
 		EventBuffer* buffer = ThreadBuffer(session);
 		const int64 now = Now();
 		{
@@ -242,6 +257,7 @@ namespace Profile
 
 	// The id of the plot `name`, its PlotDef queued the first time.
 	static uint64 PlotId(Session* session, Core::StringView name) {
+		ProfilerWork work;
 		Threading::LockGuard held(session->lock);
 		uint64 id;
 		if (session->plots.TryGet(Core::String(name), id)) return id;
@@ -261,6 +277,7 @@ namespace Profile
 	void Plot(Core::StringView name, double value) {
 		Session* running = Running();
 		if (!running) return;
+		ProfilerWork work;
 		const uint64 id = PlotId(running, name);
 		EventBuffer* buffer = ThreadBuffer(running);
 		const int64 now = Now();
@@ -273,6 +290,7 @@ namespace Profile
 	void Message(Core::StringView text, Severity severity) {
 		Session* running = Running();
 		if (!running) return;
+		ProfilerWork work;
 		const uint64 id = Once(running, text);
 		EventBuffer* buffer = ThreadBuffer(running);
 		const int64 now = Now();
@@ -284,6 +302,7 @@ namespace Profile
 	}
 
 	void SetThreadName(Core::StringView name) {
+		ProfilerWork work;
 		Threading::Thread::SetCurrentName(Core::String(name).CStr());
 		Session* running = Running();
 		if (running) ThreadEvent(running, Event::ThreadName, Interned(running, name));
@@ -294,6 +313,7 @@ namespace Profile
 	uint64 TaskBegin(Core::StringView name, uint64 parent) {
 		Session* running = Running();
 		if (!running) return 0;
+		ProfilerWork work;
 		const uint64 text = Interned(running, name);
 		const uint64 id = atomic_fetch_add(&running->nextTask, 1, MemoryOrder::Relaxed) + 1;
 		EventBuffer* buffer = ThreadBuffer(running);
@@ -328,6 +348,7 @@ namespace Profile
 
 	// An allocation event in the global buffer: allocations and frees from every thread stay in one order.
 	static void MemoryEvent(Session* session, Event type, uint32 pool, const void* address, int64 size) {
+		ProfilerWork work;
 		const uint64 thread = ThreadBuffer(session)->thread;
 		const int64 now = Now();
 		Threading::LockGuard held(session->global.lock);
@@ -354,6 +375,7 @@ namespace Profile
 	void PoolName(uint32 pool, Core::StringView name) {
 		Session* running = Running();
 		if (!running) return;
+		ProfilerWork work;
 		const uint64 text = Interned(running, name);
 		Threading::LockGuard held(running->global.lock);
 		PutEvent(running->global.bytes, Event::PoolDef);
@@ -364,6 +386,7 @@ namespace Profile
 	void PoolReset(uint32 pool) {
 		Session* running = Running();
 		if (!running) return;
+		ProfilerWork work;
 		const int64 now = Now();
 		Threading::LockGuard held(running->global.lock);
 		running->global.Timed(Event::PoolReset, now);

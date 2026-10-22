@@ -28,6 +28,28 @@ namespace Profile
 		return (int64)((high << 32) | low);
 	}
 
+	GC::AllocCounts Less(GC::AllocCounts a, GC::AllocCounts b) {
+		GC::AllocCounts counts;
+		counts.objects = a.objects - b.objects;
+		counts.bytes = a.bytes - b.bytes;
+		counts.nativeBytes = a.nativeBytes - b.nativeBytes;
+		return counts;
+	}
+
+	void ProfilerWork::Init() {
+		if (t_workDepth == 0) before = GC::ThreadAllocated();
+		t_workDepth += 1;
+	}
+
+	void ProfilerWork::Delete() {
+		t_workDepth -= 1;
+		if (t_workDepth != 0) return;
+		const GC::AllocCounts took = Less(GC::ThreadAllocated(), before);
+		t_profilerTook.objects += took.objects;
+		t_profilerTook.bytes += took.bytes;
+		t_profilerTook.nativeBytes += took.nativeBytes;
+	}
+
 	void EventBuffer::Timed(Event type, int64 ticks) {
 		PutEvent(bytes, type);
 		PutZigzag(bytes, ticks - last);
@@ -90,6 +112,7 @@ namespace Profile
 	EventBuffer* ThreadBuffer(Session* session) {
 		if (t_buffer && t_bufferSession == session->number) return t_buffer;
 		EventBuffer* buffer = new EventBuffer();
+		buffer->bytes.Reserve(kThreadBufferBytes);
 		buffer->last = session->startTicks;
 		buffer->base = session->startTicks;
 		{
@@ -139,6 +162,9 @@ namespace Profile
 			session->global.Timed(Event::PlotValue, now);
 			PutVarint(session->global.bytes, session->processPlot);
 			PutDouble(session->global.bytes, (double)process.privateBytes);
+			session->global.Timed(Event::PlotValue, now);
+			PutVarint(session->global.bytes, session->nativePlot);
+			PutDouble(session->global.bytes, (double)stats.nativeBytes);
 		}
 		QueueAllocCount(session, allocated, now);
 	}
@@ -168,11 +194,13 @@ namespace Profile
 		}
 	}
 
-	// Takes a buffer's events (the lock held only while it swaps them); false when it had none.
+	// Takes a buffer's events (the lock held only while it swaps them); false when it had none. The flusher reserves the
+	// room for the next round itself, so that native memory is counted on its thread, not in the zones of the writer.
 	static bool Take(EventBuffer* buffer, Core::Array<uint8>& bytes, int64& base) {
 		Threading::LockGuard held(buffer->lock);
 		if (buffer->bytes.IsEmpty()) return false;
 		buffer->bytes.Swap(bytes);
+		buffer->bytes.Reserve(bytes.Count());
 		base = buffer->base;
 		buffer->base = buffer->last;
 		return true;
@@ -292,11 +320,14 @@ namespace Profile
 			problem = Core::String("the profiler closed the connection");
 			return false;
 		}
-		session->nextPlot = 2;
+		session->nextPlot = 3;
 		session->heapPlot = 1;
 		session->processPlot = 2;
+		session->nativePlot = 3;
+		session->global.bytes.Reserve(kThreadBufferBytes);
 		DefineMemoryPlot(session, session->heapPlot, "GC heap");
 		DefineMemoryPlot(session, session->processPlot, "Process memory");
+		DefineMemoryPlot(session, session->nativePlot, "Native memory");
 		QueueCalibration(session, session->startTicks);
 		g_session = session;
 		WatchCollector(session);

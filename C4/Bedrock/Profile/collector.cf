@@ -82,10 +82,12 @@ namespace Profile
 	}
 
 	// After each collection, without the collector's lock: its stops and the census it took. The runtime times the
-	// stops on the system's counter; `now` on both clocks maps them onto the session's.
+	// stops on the system's counter; `now` on both clocks maps them onto the session's. It runs on the thread that
+	// collected, so what it allocates is the profiler's work, not that thread's zone's.
 	static void OnCollection(void* user) {
 		Session* session = (Session*)user;
 		if (atomic_load(&session->stopping, MemoryOrder::Acquire) != 0) return;
+		ProfilerWork work;
 		GC::Pause[kMostPauses] pauses;
 		const int32 stops = GC::LastPauses(&pauses[0], kMostPauses);
 		const int32 count = stops < kMostPauses ? stops : kMostPauses;

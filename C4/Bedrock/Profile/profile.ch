@@ -31,7 +31,7 @@ namespace Profile
 	}
 
 	// A zone: from its creation to the end of its scope, on the calling thread, with what the thread allocated in it
-	// (the collector's own count, its nested zones' included).
+	// (the collector's own count, its nested zones' included) and the native memory it took (containers' buffers).
 	struct Zone
 	{
 		[operator("create")] public void Init(Site& site);
@@ -44,7 +44,8 @@ namespace Profile
 		public void Value(uint64 value);
 
 		private int64 session;
-		private GC::AllocCounts allocated;   // the thread's count when the zone began
+		private GC::AllocCounts allocated;      // the thread's count when the zone began
+		private GC::AllocCounts profilerTook;   // and what the profiler had taken on it by then
 	}
 
 	// The end of a frame of the default frame set (call it once per presented frame), or of the set `name`; the

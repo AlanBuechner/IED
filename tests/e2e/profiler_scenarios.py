@@ -181,7 +181,8 @@ def profiler_locks_and_notes(run):
 
 def send_collected_game(env):
 	"""A collected program's finished capture (1 ns ticks, ten 16 ms frames) that counts its allocations instead of
-	sending each one: Frame holds Particles::Spawn (300 objects, 7200 bytes) and Cache::Remember (one of 32 bytes); the
+	sending each one: Frame holds Particles::Spawn (300 objects, 7200 bytes) and Cache::Remember (one of 32 bytes, and
+	4 KiB of native memory its thread took); the
 	process's count with each frame mark; its GC heap (a sawtooth) and process memory (climbing) plotted; a collection
 	that did not say what the heap held before; a census each frame in which CacheEntry grows by 100 KB; an allocation
 	sampled each frame with its call stack, in SpawnParticles but once in Remember."""
@@ -210,8 +211,8 @@ def send_collected_game(env):
 			break
 		main.event("ZoneBegin", t + 1 * MS, srcLocId=frame)
 		main.event("ZoneBegin", t + 2 * MS, srcLocId=spawn).event("ZoneAllocs", objects=300, bytes=7200).event("ZoneEnd", t + 4 * MS)
-		main.event("ZoneBegin", t + 5 * MS, srcLocId=cache).event("ZoneAllocs", objects=1, bytes=32).event("ZoneEnd", t + 6 * MS)
-		main.event("ZoneAllocs", objects=301, bytes=7232).event("ZoneEnd", t + 12 * MS)
+		main.event("ZoneBegin", t + 5 * MS, srcLocId=cache).event("ZoneAllocs", objects=1, bytes=32).event("ZoneNative", bytes=4096).event("ZoneEnd", t + 6 * MS)
+		main.event("ZoneAllocs", objects=301, bytes=7232).event("ZoneNative", bytes=4096).event("ZoneEnd", t + 12 * MS)
 		if f == 3:
 			counts.event("GcBegin", t + 13 * MS, kind=0, generation=0)
 			counts.event("GcEnd", t + 14 * MS, bytesBefore=0, bytesAfter=100_000, objectsFreed=0, pinned=0, roots=0)
@@ -280,7 +281,7 @@ def profiler_collected_memory(run):
 	check("freed" not in memory, "nothing said of what a collection freed when the program did not size it")
 	rows = run.texts(doc + " .prof-memory-right .prof-leak summary")
 	check("Particles::Spawn" in rows[0] and "3,000x" in rows[0] and "300 a frame" in rows[0] and "main.cf:20" in rows[0], "Spawn allocated the most, 300 a frame: %s" % rows)
-	check("Cache::Remember" in rows[1], "then Cache::Remember: %s" % rows)
+	check("Cache::Remember" in rows[1] and "+40.0 KiB native" in rows[1], "then Cache::Remember, with the native memory it took: %s" % rows)
 	check("CacheEntry" in memory and "keeps accumulating" in memory, "the census's growing type is marked")
 	run.shot("memory")
 	page.select_option(doc + " .prof-panel select", "function")
@@ -297,6 +298,7 @@ def profiler_collected_memory(run):
 	side = page.inner_text(doc + " .prof-side")
 	check("IN THIS ZONE" in side.upper(), "the details say what happened in the zone")
 	check("301 (7.1 KiB)" in side and "self 0 (0 B)" in side, "it allocated 301, all in its children: %s" % side[:400])
+	check("Native memory" in side and "4.0 KiB" in side, "and its children took 4 KiB of native memory: %s" % side[:400])
 	run.shot("zone")
 	known.add(capture)
 	send_native_game(listed["connect"]["env"])

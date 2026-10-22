@@ -54,6 +54,7 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x12) return "vvv";
 	if (type == 0x23 || type == 0x24) return "v";
 	if (type == 0x27) return "vv";
+	if (type == 0x28) return "v";
 	if (type == 0x6A) return "tvv";
 	if (type == 0x6B) return "tv";
 	if (type == 0x6C) return "vvv";
@@ -282,7 +283,10 @@ class ProfileTests {
 		bool processPlotted = false;
 		for (const TracedEvent& e : events)
 			if (e.type == 0x50 && *strings.Find(e.fields[1]) == "Process memory" && e.fields[2] == 1) processPlotted = true;
-		assert_true(CountOf(events, 0x50) >= 3 && processPlotted, "the GC heap and the process's memory are plotted too");
+		bool nativePlotted = false;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x50 && *strings.Find(e.fields[1]) == "Native memory" && e.fields[2] == 1) nativePlotted = true;
+		assert_true(CountOf(events, 0x50) >= 4 && processPlotted && nativePlotted, "the GC heap, the process's memory and the native memory are plotted too");
 		const TracedEvent* message = First(events, 0x52);
 		assert_true(message && message->fields[0] == 3 && *strings.Find(message->fields[1]) == "loaded", "the message, its severity and text");
 		assert_true(CountOf(events, 0x30) == 1 && CountOf(events, 0x32) == 1 && CountOf(events, 0x33) == 1 && CountOf(events, 0x31) == 1, "the task's life");
@@ -390,6 +394,15 @@ class ProfileTests {
 		{
 			Profile::Zone quiet(Core::StringView("Quiet"));
 		}
+		{
+			Profile::Zone grow(Core::StringView("Grow"));
+			Core::Array<uint8> grown;
+			grown.Resize(65536);
+		}
+		{
+			Profile::Zone collects(Core::StringView("Collects"));
+			GC::Collect();
+		}
 		Profile::Frame();
 		Profile::Stop();
 
@@ -401,8 +414,10 @@ class ProfileTests {
 		for (const TracedEvent& e : events)
 			if (e.type == 0x27) counted.Push(&e);
 		assert_eq(2, counted.Count(), "Inner and Outer said what they allocated; Quiet allocated nothing and said nothing");
-		assert_true(counted[0]->fields[0] >= 100 && counted[0]->fields[1] >= 100 * 64, "Inner's hundred blobs");
-		assert_true(counted[1]->fields[0] >= counted[0]->fields[0] + 1, "Outer's include Inner's and its own");
+		assert_true(counted[0]->fields[0] == 100 && counted[0]->fields[1] == 100 * 64, "Inner's hundred blobs, exactly: the profiler's own work in it is left out");
+		assert_true(counted[1]->fields[0] == 101 && counted[1]->fields[1] == 101 * 64, "Outer's include Inner's and its own, not what the profiler took to name Inner");
+		assert_eq(1, CountOf(events, 0x28), "only Grow took native memory: the profiler's own buffers, and the census its collection callback read on the collecting thread, are not the zones'");
+		assert_true(First(events, 0x28)->fields[0] >= 65536, "Grow's array, 64 KiB");
 		int64 frameCounts = 0;
 		uint64 first = 0;
 		uint64 last = 0;

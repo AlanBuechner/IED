@@ -1213,7 +1213,7 @@ Profile::Frame();
 
 | API | What it records |
 |---|---|
-| `Site`, `Zone(Site&)`, `Zone(StringView)`, `Zone::Text`, `Zone::Value` | a zone of the calling thread from its creation to its scope's end, with what the thread allocated in it (`GC::ThreadAllocated` read as it begins and ends: objects and bytes, its nested zones' included, sent only when it allocated); a static `Site` is registered once per session, a run-time name looked up each time; `PROFILE_ZONE(name)` declares both |
+| `Site`, `Zone(Site&)`, `Zone(StringView)`, `Zone::Text`, `Zone::Value` | a zone of the calling thread from its creation to its scope's end, with what the thread allocated in it (`GC::ThreadAllocated` read as it begins and ends: objects and bytes, and the native memory it took - containers' buffers growing, raw blocks - as `ZoneNative`; its nested zones' included, what the profiler's own work took meanwhile left out, sent only when it allocated); a static `Site` is registered once per session, a run-time name looked up each time; `PROFILE_ZONE(name)` declares both |
 | `Frame()`, `Frame(set)`, `FrameBegin(set)`, `FrameEnd(set)` | the end of a frame of the default set or a named one, with the process's allocations so far (`GC::Allocated`) at the same time, so a frame's are the difference between its marks; discontinuous frames |
 | `Plot(name, value)`, `Message(text, severity)` | a value over time; a log line (`Severity::Trace` .. `Fatal`) |
 | `SetThreadName(name)` | the calling thread's name from now on (call it again when a pooled thread takes another role: the profiler keeps the history); the system's thread is named too (`Thread::SetCurrentName`), and a thread the system already knows by a name starts with it |
@@ -1228,8 +1228,11 @@ the worker that ran it (`Threading::SetJobObserver`, installed as the session st
 
 Collections are reported from the runtime's collection callback, a `GcBegin`/`GcEnd` pair for each time the collection
 stopped the program (`GC::LastPauses`: one for `GC::Collect`, several for a concurrent cycle). Ten times a second the
-GC heap's size and the process's private bytes are plotted (`Platform::GetProcessMemory`: containers' buffers live
-outside the GC heap, so a leak in them shows only there), with the process's allocations so far. While a session runs
+GC heap's size, the process's private bytes (`Platform::GetProcessMemory`) and the runtime's native memory in use
+(`GC::Stats.nativeBytes`: containers' buffers and raw blocks, outside the GC heap) are plotted, with the process's
+allocations so far. Each thread's event buffer starts with 16 KiB reserved and the flusher reserves its room again as it
+takes the events, and what the profiler's own work allocates on a thread (names, sites, events) is counted apart, so a
+zone's counts are the program's alone. While a session runs
 the collector also takes a census after each collection (`GC::SetCensus`), sent as a `HeapCensus` of the live objects by
 type (those made before the session, by native code or in a `Pool` as "(type not known)"), and samples about one
 allocation in every 64 KiB (`GC::SetAllocSampling`; a rate the program set is kept): the flusher sends each as a
@@ -1247,8 +1250,9 @@ Covered by `Bedrock/Tests/profile_tests.cf` (9 tests): a session to a file read 
 `Hello`, definitions before their use, zones on two threads with times that only grow across chunks, frames, plots,
 messages, renames, tasks, a pool, a collection and `Bye`; a thread named by the system starting with that name, a
 `GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; a `Profile::Mutex` one thread waits for while
-another holds it (its definition, the wait, both holds); zones that say what they allocated (a hundred objects, nested
-zones' included, nothing from a zone that allocated nothing) and frames with the process's count; a census after a
+another holds it (its definition, the wait, both holds); zones that say what they allocated (exactly a hundred objects,
+nested zones' included and the profiler's naming of them left out, 64 KiB of native memory from a zone that grew an array
+and none from the others, nothing from a zone that allocated nothing) and frames with the process's count; a census after a
 collection (a hundred live objects by their type's name, what came before under a name of its own, the census off again
 after); allocations sampled with the function that made them (on the allocating thread, each for 64 KiB, its stack
 defined first, sampling off again after); `JobSystem` jobs as

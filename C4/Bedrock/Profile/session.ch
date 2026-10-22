@@ -23,7 +23,24 @@ namespace Profile
 	const int64 kHeapPlotEveryNs = 100000000;
 	const int32 kConnectWaitMs = 2000;
 	const int32 kSendWaitMs = 5000;
+	const int64 kThreadBufferBytes = 16384;   // reserved up front, so a thread's zones rarely see the profiler's own buffer grow
 	const uint64 kEstimatedClock = 1;
+
+	// What the profiler's own work allocated on this thread (names, sites, events, a collection's census), which zones
+	// leave out.
+	thread_local GC::AllocCounts t_profilerTook;
+	thread_local int32 t_workDepth = 0;
+
+	GC::AllocCounts Less(GC::AllocCounts a, GC::AllocCounts b);
+
+	// The profiler's work on the calling thread: the outermost scope adds what it allocated to t_profilerTook.
+	struct ProfilerWork
+	{
+		[operator("create")] public void Init();
+		[operator("delete")] public void Delete();
+
+		private GC::AllocCounts before;
+	}
 
 	// Events since the flusher last took them, each time a delta from the one before; `base` is the time the first
 	// delta of these bytes is from (the last time when the flusher took the ones before).
@@ -74,6 +91,7 @@ namespace Profile
 		public int64 lastHeapPlot;
 		public uint64 heapPlot;
 		public uint64 processPlot;           // the process's private bytes: containers' buffers too, which the GC heap is not
+		public uint64 nativePlot;            // the runtime's native memory in use: containers' buffers and raw blocks
 		public Core::HashMap<uint64, uint64> threadOfSystem;   // the system's thread ids to the session's (under `lock`)
 		public StackNames stacks;
 		public uint64 sampleEveryBytes;      // what one sampled allocation stands for

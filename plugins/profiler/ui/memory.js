@@ -130,7 +130,8 @@ export class MemoryPanel {
 		const range = picked ? " in the selection" : "";
 		this.listHead.textContent = mode === "samples"
 			? samples(answer.samples) + ", " + bytes(answer.weight) + range
-			: count(answer.count) + " (" + bytes(answer.bytes) + ")" + range + (answer.frames ? ", " + count(answer.frames.medianCount) + " a frame" : "");
+			: count(answer.count) + " (" + bytes(answer.bytes) + ")" + range + (answer.frames ? ", " + count(answer.frames.medianCount) + " a frame" : "")
+				+ (answer.inZoneNativeBytes ? ", " + bytes(answer.inZoneNativeBytes) + " native" : "");
 		replace(this.list, answer.groups.map((g) => this.allocatedRow(g, mode)));
 	}
 
@@ -144,7 +145,9 @@ export class MemoryPanel {
 			this.openSource(g);
 		};
 		return h("details.prof-leak", null,
-			h("summary", null, h("span.mono", null, bytes(size)), h("span.meta", null, times), h("span.ellip.grow", null, g.label),
+			h("summary", null, h("span.mono", null, bytes(size)), h("span.meta", null, times),
+				g.nativeBytes ? h("span.meta", { title: "Native memory its zones took: containers' buffers and raw blocks" }, "+" + bytes(g.nativeBytes) + " native") : null,
+				h("span.ellip.grow", null, g.label),
 				source && this.openSource ? h("a.mono.prof-link", { href: "#", title: g.file, on: { click: open } }, source) : null),
 			g.callstack && g.callstack.length ? h("div.mono.prof-stack", null, g.callstack.map((frame) => h("div", null, frame))) : null);
 	}

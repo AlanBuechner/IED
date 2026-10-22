@@ -6,16 +6,19 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { bytes, duration, count, instant } from "./format.js";
 
-// What happened in a zone on its thread (prof.zone's `inside`): what it allocated, its children's included, and its
-// own share; its lock waits, the longest first; the collections that stopped it; its messages.
+// What happened in a zone on its thread (prof.zone's `inside`): what it allocated and the native memory it took, its
+// children's included, and its own share; its lock waits, the longest first; the collections that stopped it; its
+// messages.
 function happenedInside(inside) {
 	if (!inside) return null;
 	const a = inside.allocations;
 	const allocated = a && a.count ? count(a.count) + " (" + bytes(a.bytes) + ")"
 		+ (a.selfCount !== a.count ? " \u00b7 self " + count(a.selfCount) + " (" + bytes(a.selfBytes) + ")" : "")
 		+ (a.freedInside > 0 ? " \u00b7 " + count(a.freedInside) + " freed in it" : "") : null;
+	const native = a && a.nativeBytes ? bytes(a.nativeBytes) + (a.selfNativeBytes !== a.nativeBytes ? " \u00b7 self " + bytes(a.selfNativeBytes) : "") : null;
 	const kv = [
 		allocated ? ["Allocated", allocated] : null,
+		native ? ["Native memory", native] : null,
 		inside.waitNs ? ["Lock waits", duration(inside.waitNs)] : null,
 		inside.gcCount ? ["Collections", count(inside.gcCount) + ", paused " + duration(inside.gcPauseNs)] : null,
 		inside.messageCount ? ["Messages", count(inside.messageCount)] : null,
