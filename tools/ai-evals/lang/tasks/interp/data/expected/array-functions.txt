@@ -1,0 +1,9 @@
+add 24
+subtract 16
+multiply 80
+divide 5
+doubled [6, 2, 8, 2, 10, 18, 4, 12]
+odd [3, 1, 1, 5, 9]
+sum 31 product 135
+adders [1, 101, 201, 301]
+pipeline 50! [<fn map>, <fn filter>, <builtin print>]

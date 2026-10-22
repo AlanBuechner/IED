@@ -1,0 +1,127 @@
+include "parser.ch"
+
+// An expression as nested prefix forms: 1 + 2 * 3 is (+ 1 (* 2 3)).
+static void AppendTree(Core::StringBuilder& out, Calc::Expr* expr);
+
+static void AppendOperation(Core::StringBuilder& out, Calc::TokenKind op, Calc::Expr* left, Calc::Expr* right) {
+	out.Append("(");
+	out.Append(Calc::Spelling(op));
+	out.Append(" ");
+	AppendTree(out, left);
+	if (right != null) {
+		out.Append(" ");
+		AppendTree(out, right);
+	}
+	out.Append(")");
+}
+
+static void AppendCall(Core::StringBuilder& out, Calc::CallExpr* call) {
+	out.Append("(call ");
+	AppendTree(out, call->callee);
+	for (Calc::Expr* argument : call->arguments) {
+		out.Append(" ");
+		AppendTree(out, argument);
+	}
+	out.Append(")");
+}
+
+static void AppendFunctionTree(Core::StringBuilder& out, Calc::FunctionExpr* function) {
+	out.Append("(fn ");
+	out.Append(function->name.View());
+	out.Append("(");
+	for (int64 i = 0; i < function->parameters.Count(); ++i) {
+		if (i > 0) out.Append(" ");
+		out.Append(function->parameters[i].View());
+	}
+	out.Append("))");
+}
+
+static void AppendTree(Core::StringBuilder& out, Calc::Expr* expr) {
+	switch (expr->kind) {
+		case Calc::ExprKind::Literal: Calc::AppendValue(out, ((Calc::LiteralExpr*)expr)->value); break;
+		case Calc::ExprKind::Variable: out.Append(((Calc::VariableExpr*)expr)->name.View()); break;
+		case Calc::ExprKind::Unary: AppendOperation(out, ((Calc::UnaryExpr*)expr)->op, ((Calc::UnaryExpr*)expr)->operand, null); break;
+		case Calc::ExprKind::Binary: AppendOperation(out, ((Calc::BinaryExpr*)expr)->op, ((Calc::BinaryExpr*)expr)->left, ((Calc::BinaryExpr*)expr)->right); break;
+		case Calc::ExprKind::Logical: AppendOperation(out, ((Calc::LogicalExpr*)expr)->op, ((Calc::LogicalExpr*)expr)->left, ((Calc::LogicalExpr*)expr)->right); break;
+		case Calc::ExprKind::Call: AppendCall(out, (Calc::CallExpr*)expr); break;
+		case Calc::ExprKind::Function: AppendFunctionTree(out, (Calc::FunctionExpr*)expr); break;
+	}
+}
+
+static Calc::Stmt* ParseOne(const char* source) {
+	Core::Array<Calc::Stmt*> program = Calc::Parse(Core::StringView(source));
+	assert_eq(1, program.Count(), source);
+	return program[0];
+}
+
+// The tree of the expression statement `source`.
+static Core::String TreeOf(const char* source) {
+	Calc::Stmt* stmt = ParseOne(source);
+	assert_true(stmt->kind == Calc::StmtKind::Expression, source);
+	Core::StringBuilder out;
+	AppendTree(out, ((Calc::ExpressionStmt*)stmt)->expression);
+	return out.ToString();
+}
+
+static Core::String ParseError(const char* source) {
+	try {
+		Calc::Parse(Core::StringView(source));
+	} catch (const Calc::ScriptError& error) {
+		return error.Describe();
+	}
+	return Core::String();
+}
+
+[test("calc.parser.precedence")]
+static void ParsesWithPrecedence() {
+	assert_se("(+ 1 (* 2 3))", TreeOf("1 + 2 * 3;").CStr(), "product before sum");
+	assert_se("(* (+ 1 2) 3)", TreeOf("(1 + 2) * 3;").CStr(), "parentheses");
+	assert_se("(- (- 1 2) 3)", TreeOf("1 - 2 - 3;").CStr(), "left to right");
+	assert_se("(* (% (/ 8 4) 3) 2)", TreeOf("8 / 4 % 3 * 2;").CStr(), "one level");
+	assert_se("(|| a (&& b (== c (< d (+ e (* f (- g)))))))", TreeOf("a || b && c == d < e + f * -g;").CStr(), "every level");
+	assert_se("(== (! a) b)", TreeOf("!a == b;").CStr(), "unary binds tighter");
+	assert_se("(- (- a))", TreeOf("--a;").CStr(), "double negation");
+	assert_se("(!= a (>= b c))", TreeOf("a != b >= c;").CStr(), "comparison before equality");
+}
+
+[test("calc.parser.calls_and_functions")]
+static void ParsesCallsAndFunctions() {
+	assert_se("(call (call f 1 (call g x)) 2)", TreeOf("f(1, g(\"x\"))(2);").CStr(), "calls");
+	Calc::Stmt* let = ParseOne("let k = fn (a, b) { return a; };");
+	assert_true(let->kind == Calc::StmtKind::Let, "let");
+	Core::StringBuilder literal;
+	AppendTree(literal, ((Calc::LetStmt*)let)->value);
+	assert_se("(fn (a b))", literal.CStr(), "function literal");
+	Calc::Stmt* declaration = ParseOne("fn add(a, b) { let c = a + b; return c; }");
+	assert_true(declaration->kind == Calc::StmtKind::Function, "function statement");
+	Calc::FunctionExpr* function = ((Calc::FunctionStmt*)declaration)->function;
+	assert_true(function->name == "add" && function->body.Count() == 2, "name and body");
+}
+
+[test("calc.parser.statements")]
+static void ParsesStatements() {
+	Core::Array<Calc::Stmt*> program = Calc::Parse(Core::StringView("let x = 1;\nx = 2;\n{ print(x); }\nif (x) { } else if (y) { } else { x = 3; }"));
+	assert_eq(4, program.Count(), "statements");
+	assert_true(program[1]->kind == Calc::StmtKind::Assign && program[1]->line == 2, "assignment");
+	assert_true(((Calc::AssignStmt*)program[1])->name == "x", "assigned name");
+	assert_true(program[2]->kind == Calc::StmtKind::Block && ((Calc::BlockStmt*)program[2])->statements.Count() == 1, "block");
+	assert_true(program[3]->kind == Calc::StmtKind::If, "if");
+	Calc::Stmt* elseIf = ((Calc::IfStmt*)program[3])->elseBranch;
+	assert_true(elseIf != null && elseIf->kind == Calc::StmtKind::If, "else if");
+	Calc::Stmt* last = ((Calc::IfStmt*)elseIf)->elseBranch;
+	assert_true(last != null && last->kind == Calc::StmtKind::Block && ((Calc::BlockStmt*)last)->statements.Count() == 1, "else");
+}
+
+[test("calc.parser.errors")]
+static void ReportsParseErrors() {
+	assert_se("line 2: expected ';' but found 'print'", ParseError("let x = 1\nprint(x);").CStr(), "semicolon");
+	assert_se("line 1: expected identifier but found '5'", ParseError("let 5 = 1;").CStr(), "let name");
+	assert_se("line 1: expected expression but found ';'", ParseError("let x = ;").CStr(), "expression");
+	assert_se("line 1: expected ')' but found ';'", ParseError("print(1;").CStr(), "closing parenthesis");
+	assert_se("line 3: expected '}' but found end of input", ParseError("if (x) {\n  print(x);\n").CStr(), "closing brace");
+	assert_se("line 1: expected '(' but found 'x'", ParseError("if x { }").CStr(), "condition");
+	assert_se("line 1: invalid assignment target", ParseError("1 = 2;").CStr(), "target");
+	assert_se("line 1: return outside of a function", ParseError("return 1;").CStr(), "return");
+	assert_se("line 1: expected identifier but found '1'", ParseError("fn f(a, 1) { }").CStr(), "parameter");
+	assert_se("line 1: expected ';' but found '\"b\"'", ParseError("let s = \"a\" \"b\";").CStr(), "string token");
+}

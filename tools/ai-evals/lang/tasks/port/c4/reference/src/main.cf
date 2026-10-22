@@ -1,0 +1,21 @@
+// mdhtml <file.md>: the Markdown file as HTML on standard output.
+include "bedrock.ch"
+include "document.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 2) {
+		Platform::WriteError(Core::StringView("usage: mdhtml <file.md>\n"));
+		return kExitUsage;
+	}
+	FS::File file = FS::File(argv[1], "rb");
+	if (!file.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + argv[1] + "\n").View());
+		return kExitError;
+	}
+	Core::String text = file.ReadText();
+	Platform::WriteOutput(MdHtml::RenderDocument(text.View()).View());
+	return 0;
+}

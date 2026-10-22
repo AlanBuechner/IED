@@ -1,0 +1,288 @@
+include "inline.ch"
+include "text.ch"
+
+namespace MdHtml
+{
+	// ASCII punctuation: what a backslash escapes.
+	static bool IsPunctuation(int32 c) {
+		return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
+	}
+
+	// The whitespace that decides whether a run of '*' can open or close emphasis; '\n' joins a block's lines.
+	static bool IsInlineSpace(int32 c) { return c == ' ' || c == '\t' || c == '\n'; }
+
+	static int64 RunLength(Core::StringView text, int64 at, int32 c) {
+		int64 end = at;
+		while (end < text.ByteLength() && text.ByteAt(end) == c) ++end;
+		return end - at;
+	}
+
+	// Where the next run of exactly `length` backticks at or after `from` starts.
+	static bool FindBacktickRun(Core::StringView text, int64 from, int64 length, int64& found) {
+		int64 at = from;
+		while (at < text.ByteLength()) {
+			if (text.ByteAt(at) != '`') {
+				++at;
+				continue;
+			}
+			const int64 run = RunLength(text, at, '`');
+			if (run == length) {
+				found = at;
+				return true;
+			}
+			at += run;
+		}
+		return false;
+	}
+
+	// A code span's content: line breaks become spaces, then one space comes off each end when both ends have one
+	// and the content is not all spaces.
+	static Core::String CodeSpanText(Core::StringView raw) {
+		Core::StringBuilder text;
+		bool allSpaces = true;
+		for (int64 i = 0; i < raw.ByteLength(); ++i) {
+			const int32 c = raw.ByteAt(i) == '\n' ? ' ' : raw.ByteAt(i);
+			if (c != ' ') allSpaces = false;
+			text.AppendByte(c);
+		}
+		Core::StringView view = text.View();
+		const bool padded = view.ByteLength() >= 2 && view.ByteAt(0) == ' ' && view.ByteAt(view.ByteLength() - 1) == ' ';
+		if (padded && !allSpaces) return Core::String(view.Substring(1, view.ByteLength() - 2));
+		return text.ToString();
+	}
+
+	// The ']' that closes the '[' at `open`: brackets nest, and escaped characters and code spans are skipped.
+	static bool FindLabelEnd(Core::StringView text, int64 open, int64& end) {
+		int32 depth = 0;
+		int64 at = open;
+		while (at < text.ByteLength()) {
+			const int32 c = text.ByteAt(at);
+			if (c == '\\') {
+				at += 2;
+				continue;
+			}
+			if (c == '`') {
+				const int64 ticks = RunLength(text, at, '`');
+				int64 close = 0;
+				at = FindBacktickRun(text, at + ticks, ticks, close) ? close + ticks : at + ticks;
+				continue;
+			}
+			if (c == '[') ++depth;
+			if (c == ']') {
+				--depth;
+				if (depth == 0) {
+					end = at;
+					return true;
+				}
+			}
+			++at;
+		}
+		return false;
+	}
+
+	struct Destination
+	{
+		public Core::String url;   // escapes resolved
+		public int64 end;          // just past the ')'
+	}
+
+	// "(url)" at `at`: the url runs to the first unescaped ')' and holds no whitespace.
+	static bool ReadDestination(Core::StringView text, int64 at, Destination& destination) {
+		if (at >= text.ByteLength() || text.ByteAt(at) != '(') return false;
+		Core::StringBuilder url;
+		for (int64 i = at + 1; i < text.ByteLength(); ++i) {
+			int32 c = text.ByteAt(i);
+			if (c == ')') {
+				destination.url = url.ToString();
+				destination.end = i + 1;
+				return true;
+			}
+			if (IsInlineSpace(c)) return false;
+			if (c == '\\' && i + 1 < text.ByteLength() && IsPunctuation(text.ByteAt(i + 1))) {
+				++i;
+				c = text.ByteAt(i);
+			}
+			url.AppendByte(c);
+		}
+		return false;
+	}
+
+	// A piece of text on its way to HTML: finished HTML, or a run of '*' that may open or close emphasis.
+	struct Token
+	{
+		public bool delimiter;
+		public Core::String html;      // the finished HTML of a piece that is not a delimiter
+		public int32 count;            // the '*' of a delimiter not used by emphasis
+		public bool canOpen;           // followed by a character that is not whitespace
+		public bool canClose;          // preceded by a character that is not whitespace
+		public bool active = true;     // false once inside a matched pair, which nothing outside can reach
+		public Core::String closing;   // the tags it closes, written before its unused '*'
+		public Core::String opening;   // the tags it opens, written after them
+	}
+
+	class InlineParser
+	{
+		[operator("create")] public void Init(Core::StringView text, bool linksAllowed) {
+			this.text = text;
+			this.linksAllowed = linksAllowed;
+		}
+
+		public Core::String Render();
+
+		private void Tokenize();
+		private void AppendHtml(Core::StringView html);
+		private void AppendText(Core::StringView plain);
+		private int64 ReadEscape(int64 at);
+		private int64 ReadCodeSpan(int64 at);
+		private int64 ReadLink(int64 at);
+		private int64 ReadDelimiter(int64 at);
+		private void MatchEmphasis();
+		private bool FindOpener(int64 closer, int64& opener) const;
+		private void Pair(int64 opener, int64 closer);
+
+		private Core::StringView text;
+		private bool linksAllowed;
+		private Core::Array<Token> tokens;
+	}
+
+	Core::String InlineParser::Render() {
+		Tokenize();
+		MatchEmphasis();
+		Core::StringBuilder html;
+		for (const Token& token : tokens) {
+			if (!token.delimiter) {
+				html.Append(token.html.View());
+				continue;
+			}
+			html.Append(token.closing.View());
+			for (int32 i = 0; i < token.count; ++i) html.AppendByte('*');
+			html.Append(token.opening.View());
+		}
+		return html.ToString();
+	}
+
+	void InlineParser::Tokenize() {
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int32 c = text.ByteAt(at);
+			if (c == '\\') {
+				at = ReadEscape(at);
+			} else if (c == '`') {
+				at = ReadCodeSpan(at);
+			} else if (c == '[' && linksAllowed) {
+				at = ReadLink(at);
+			} else if (c == '*') {
+				at = ReadDelimiter(at);
+			} else {
+				AppendText(text.Substring(at, 1));
+				++at;
+			}
+		}
+	}
+
+	void InlineParser::AppendHtml(Core::StringView html) {
+		if (tokens.IsEmpty() || tokens.Back().delimiter) tokens.Push(Token());
+		tokens.Back().html += html;
+	}
+
+	void InlineParser::AppendText(Core::StringView plain) {
+		Core::StringBuilder html;
+		AppendEscaped(html, plain);
+		AppendHtml(html.View());
+	}
+
+	// "\*" is a literal '*'; a backslash before anything but ASCII punctuation is itself.
+	int64 InlineParser::ReadEscape(int64 at) {
+		if (at + 1 < text.ByteLength() && IsPunctuation(text.ByteAt(at + 1))) {
+			AppendText(text.Substring(at + 1, 1));
+			return at + 2;
+		}
+		AppendText(Core::StringView("\\"));
+		return at + 1;
+	}
+
+	// A run of backticks opens a code span closed by the next run of the same length; without one it is text.
+	int64 InlineParser::ReadCodeSpan(int64 at) {
+		const int64 ticks = RunLength(text, at, '`');
+		int64 close = 0;
+		if (!FindBacktickRun(text, at + ticks, ticks, close)) {
+			AppendText(text.Substring(at, ticks));
+			return at + ticks;
+		}
+		AppendHtml(Core::StringView("<code>"));
+		AppendText(CodeSpanText(text.Substring(at + ticks, close - at - ticks)).View());
+		AppendHtml(Core::StringView("</code>"));
+		return close + ticks;
+	}
+
+	// "[text](url)"; the text is parsed on its own, without links. Anything else leaves the '[' as text.
+	int64 InlineParser::ReadLink(int64 at) {
+		int64 close = 0;
+		Destination destination;
+		if (!FindLabelEnd(text, at, close) || !ReadDestination(text, close + 1, destination)) {
+			AppendText(Core::StringView("["));
+			return at + 1;
+		}
+		Core::StringBuilder html;
+		html.Append("<a href=\"");
+		AppendEscaped(html, destination.url.View());
+		html.Append("\">");
+		InlineParser label = InlineParser(text.Substring(at + 1, close - at - 1), false);
+		html.Append(label.Render().View());
+		html.Append("</a>");
+		AppendHtml(html.View());
+		return destination.end;
+	}
+
+	int64 InlineParser::ReadDelimiter(int64 at) {
+		const int64 run = RunLength(text, at, '*');
+		Token token;
+		token.delimiter = true;
+		token.count = (int32)run;
+		token.canOpen = at + run < text.ByteLength() && !IsInlineSpace(text.ByteAt(at + run));
+		token.canClose = at > 0 && !IsInlineSpace(text.ByteAt(at - 1));
+		tokens.Push(take(token));
+		return at + run;
+	}
+
+	// Each closer, left to right, pairs with the nearest opener before it while both have '*' left.
+	void InlineParser::MatchEmphasis() {
+		for (int64 closer = 0; closer < tokens.Count(); ++closer) {
+			if (!tokens[closer].delimiter || !tokens[closer].canClose) continue;
+			while (tokens[closer].count > 0) {
+				int64 opener = 0;
+				if (!FindOpener(closer, opener)) break;
+				Pair(opener, closer);
+			}
+		}
+	}
+
+	bool InlineParser::FindOpener(int64 closer, int64& opener) const {
+		for (int64 i = closer - 1; i >= 0; --i) {
+			const Token& token = tokens[i];
+			if (token.delimiter && token.active && token.canOpen && token.count > 0) {
+				opener = i;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Two '*' from each side make <strong> when both have two, else one makes <em>; what lies between is sealed.
+	void InlineParser::Pair(int64 opener, int64 closer) {
+		Token& open = tokens[opener];
+		Token& close = tokens[closer];
+		const int32 used = open.count >= 2 && close.count >= 2 ? 2 : 1;
+		const char* tag = used == 2 ? "strong" : "em";
+		open.count -= used;
+		close.count -= used;
+		open.opening = Core::String("<") + tag + ">" + open.opening;
+		close.closing = close.closing + "</" + tag + ">";
+		for (int64 i = opener + 1; i < closer; ++i) tokens[i].active = false;
+	}
+
+	Core::String RenderInline(Core::StringView text) {
+		InlineParser parser = InlineParser(text, true);
+		return parser.Render();
+	}
+}

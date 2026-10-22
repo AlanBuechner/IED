@@ -1,0 +1,103 @@
+include "lines.ch"
+
+static bool KindIs(const char* line, MdHtml::LineKind kind) { return MdHtml::Classify(Core::StringView(line)) == kind; }
+
+[test("mdhtml.lines.classify")]
+static void ClassifiesLines() {
+	assert_true(KindIs("   ", MdHtml::LineKind::Blank), "blank");
+	assert_true(KindIs("```go", MdHtml::LineKind::Fence), "fence");
+	assert_true(KindIs("### Title", MdHtml::LineKind::Heading), "heading");
+	assert_true(KindIs("- - -", MdHtml::LineKind::Rule), "rule");
+	assert_true(KindIs("  > quoted", MdHtml::LineKind::Quote), "quote");
+	assert_true(KindIs("12. item", MdHtml::LineKind::ListItem), "list item");
+	assert_true(KindIs("plain text", MdHtml::LineKind::Text), "text");
+}
+
+[test("mdhtml.lines.fences")]
+static void ReadsFences() {
+	MdHtml::Fence fence;
+	assert_true(MdHtml::MatchFence(Core::StringView("  ````python extra words"), fence), "fence");
+	assert_eq(4, fence.ticks, "ticks");
+	assert_true(fence.language == "python", "language");
+	assert_true(MdHtml::MatchFence(Core::StringView("```"), fence) && fence.language.IsEmpty(), "no language");
+	assert_true(!MdHtml::MatchFence(Core::StringView("``"), fence), "two ticks");
+	assert_true(!MdHtml::MatchFence(Core::StringView("```a`b"), fence), "backtick in the info");
+}
+
+[test("mdhtml.lines.closing_fences")]
+static void ClosesFencesWithEnoughTicks() {
+	assert_true(MdHtml::ClosesFence(Core::StringView("````"), 3), "more ticks");
+	assert_true(MdHtml::ClosesFence(Core::StringView("  ```  "), 3), "whitespace around");
+	assert_true(!MdHtml::ClosesFence(Core::StringView("```"), 4), "fewer ticks");
+	assert_true(!MdHtml::ClosesFence(Core::StringView("``` x"), 3), "text after");
+}
+
+[test("mdhtml.lines.headings")]
+static void ReadsHeadings() {
+	MdHtml::Heading heading;
+	assert_true(MdHtml::MatchHeading(Core::StringView("##   Title  "), heading), "heading");
+	assert_eq(2, heading.level, "level");
+	assert_true(heading.text == "Title", "text");
+	assert_true(MdHtml::MatchHeading(Core::StringView("######"), heading) && heading.level == 6, "six");
+	assert_true(!MdHtml::MatchHeading(Core::StringView("####### seven"), heading), "seven");
+	assert_true(!MdHtml::MatchHeading(Core::StringView("#hashtag"), heading), "no space");
+}
+
+static bool HeadingTextIs(const char* line, const char* text) {
+	MdHtml::Heading heading;
+	return MdHtml::MatchHeading(Core::StringView(line), heading) && heading.text == text;
+}
+
+[test("mdhtml.lines.closing_hashes")]
+static void StripsClosingHashes() {
+	assert_true(HeadingTextIs("# Title ###", "Title"), "closing run");
+	assert_true(HeadingTextIs("# C#", "C#"), "no space before");
+	assert_true(HeadingTextIs("# ###", ""), "only hashes");
+	assert_true(HeadingTextIs("# a \\#", "a \\#"), "escaped");
+}
+
+[test("mdhtml.lines.rules")]
+static void ReadsRules() {
+	assert_true(MdHtml::IsRule(Core::StringView("---")), "dashes");
+	assert_true(MdHtml::IsRule(Core::StringView(" * * * * ")), "spaced stars");
+	assert_true(!MdHtml::IsRule(Core::StringView("--")), "two");
+	assert_true(!MdHtml::IsRule(Core::StringView("-*-")), "mixed");
+	assert_true(!MdHtml::IsRule(Core::StringView("--- x")), "text");
+}
+
+static bool QuoteContentIs(const char* line, const char* content) {
+	Core::StringView inner;
+	return MdHtml::MatchQuote(Core::StringView(line), inner) && inner == content;
+}
+
+[test("mdhtml.lines.quotes")]
+static void ReadsQuotes() {
+	assert_true(QuoteContentIs("> text", "text"), "space");
+	assert_true(QuoteContentIs(">text", "text"), "no space");
+	assert_true(QuoteContentIs(">  two", " two"), "one space taken");
+	assert_true(QuoteContentIs("> > nested", "> nested"), "nested");
+	Core::StringView inner;
+	assert_true(!MdHtml::MatchQuote(Core::StringView("quote >"), inner), "not a quote");
+}
+
+[test("mdhtml.lines.list_markers")]
+static void ReadsListMarkers() {
+	MdHtml::ListMarker bullet;
+	assert_true(MdHtml::MatchListItem(Core::StringView("    *   star "), bullet), "bullet");
+	assert_true(bullet.indent == 4 && !bullet.ordered && bullet.text == "star", "bullet fields");
+	MdHtml::ListMarker numbered;
+	assert_true(MdHtml::MatchListItem(Core::StringView("007. bond"), numbered), "numbered");
+	assert_true(numbered.ordered && numbered.number == 7, "numbered fields");
+	MdHtml::ListMarker empty;
+	assert_true(MdHtml::MatchListItem(Core::StringView("-"), empty) && empty.text.IsEmpty(), "empty item");
+}
+
+[test("mdhtml.lines.no_list_markers")]
+static void RejectsWhatIsNoListMarker() {
+	MdHtml::ListMarker marker;
+	assert_true(!MdHtml::MatchListItem(Core::StringView("-item"), marker), "no space");
+	assert_true(!MdHtml::MatchListItem(Core::StringView("**bold**"), marker), "bold");
+	assert_true(!MdHtml::MatchListItem(Core::StringView("1.5 pounds"), marker), "decimal");
+	assert_true(!MdHtml::MatchListItem(Core::StringView("1) one"), marker), "parenthesis");
+	assert_true(!MdHtml::MatchListItem(Core::StringView("1234567890. ten digits"), marker), "ten digits");
+}

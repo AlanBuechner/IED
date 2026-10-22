@@ -1,0 +1,21 @@
+// FizzBuzz from 1 to 30, then a count of each kind.
+let i = 1;
+let fizz = 0;
+let buzz = 0;
+let both = 0;
+while (i <= 30) {
+    if (i % 15 == 0) {
+        print("FizzBuzz");
+        both = both + 1;
+    } else if (i % 3 == 0) {
+        print("Fizz");
+        fizz = fizz + 1;
+    } else if (i % 5 == 0) {
+        print("Buzz");
+        buzz = buzz + 1;
+    } else {
+        print(i);
+    }
+    i = i + 1;
+}
+print("fizz", fizz, "buzz", buzz, "fizzbuzz", both);

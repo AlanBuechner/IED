@@ -1,0 +1,70 @@
+// Arrays of functions, and functions over arrays.
+let operations = [
+    fn (a, b) { return a + b; },
+    fn (a, b) { return a - b; },
+    fn (a, b) { return a * b; },
+    fn (a, b) { return a / b; }
+];
+let names = ["add", "subtract", "multiply", "divide"];
+let i = 0;
+while (i < len(operations)) {
+    print(names[i], operations[i](20, 4));
+    i = i + 1;
+}
+
+fn map(list, f) {
+    let result = [];
+    let i = 0;
+    while (i < len(list)) {
+        push(result, f(list[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+fn filter(list, keep) {
+    let result = [];
+    let i = 0;
+    while (i < len(list)) {
+        if (keep(list[i])) {
+            push(result, list[i]);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+fn reduce(list, f, start) {
+    let result = start;
+    let i = 0;
+    while (i < len(list)) {
+        result = f(result, list[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+let numbers = [3, 1, 4, 1, 5, 9, 2, 6];
+let doubled = map(numbers, fn (x) { return x * 2; });
+let odd = filter(numbers, fn (x) { return x % 2 == 1; });
+print("doubled", doubled);
+print("odd", odd);
+print("sum", reduce(numbers, operations[0], 0), "product", reduce(odd, operations[2], 1));
+
+let adders = [];
+let k = 0;
+while (k < 4) {
+    let amount = k * 100;
+    push(adders, fn (x) { return x + amount; });
+    k = k + 1;
+}
+print("adders", map(adders, fn (f) { return f(1); }));
+
+let pipeline = [fn (x) { return x + 1; }, fn (x) { return x * 10; }, str];
+let value = 4;
+i = 0;
+while (i < len(pipeline)) {
+    value = pipeline[i](value);
+    i = i + 1;
+}
+print("pipeline", value + "!", [map, filter, print]);

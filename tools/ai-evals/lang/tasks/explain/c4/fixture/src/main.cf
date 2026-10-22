@@ -1,0 +1,27 @@
+include "bedrock.ch"
+include "interpreter.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static int32 Fail(Core::StringView message) {
+	Platform::WriteError((Core::String("error: ") + message + "\n").View());
+	return kExitError;
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 2) {
+		Platform::WriteError(Core::StringView("usage: calc <script>\n"));
+		return kExitUsage;
+	}
+	FS::File file = FS::File(argv[1], "rb");
+	if (!file.IsOpen()) return Fail((Core::String("cannot read ") + argv[1]).View());
+	const Core::String source = file.ReadText();
+	Calc::ConsoleOutput console;
+	try {
+		Calc::RunScript(source.View(), &console);
+	} catch (const Calc::ScriptError& error) {
+		return Fail(error.Describe().View());
+	}
+	return 0;
+}

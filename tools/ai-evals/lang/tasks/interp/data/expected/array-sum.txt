@@ -1,0 +1,6 @@
+[4, 8, 15, 16, 23, 42]
+count 6 first 4 last 42
+sum 108 largest 42 mean 18
+squares [1, 4, 9, 16, 25, 36, 49, 64] 8
+even squares [4, 16, 36, 64]
+empty [] 0 [1] [nil] [true, false]

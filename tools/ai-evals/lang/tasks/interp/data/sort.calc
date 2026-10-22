@@ -1,0 +1,48 @@
+// Sorting in place, and a binary search that returns from inside its loop.
+fn insertionSort(list) {
+    let i = 1;
+    while (i < len(list)) {
+        let value = list[i];
+        let j = i - 1;
+        while (j >= 0 && list[j] > value) {
+            list[j + 1] = list[j];
+            j = j - 1;
+        }
+        list[j + 1] = value;
+        i = i + 1;
+    }
+}
+
+fn indexOf(sorted, target) {
+    let low = 0;
+    let high = len(sorted) - 1;
+    while (low <= high) {
+        let middle = (low + high) / 2;
+        if (sorted[middle] == target) {
+            return middle;
+        } else if (sorted[middle] < target) {
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+    return -1;
+}
+
+let data = [38, 27, 43, 3, 9, 82, 10, -5, 27, 0];
+let alias = data;
+insertionSort(data);
+print("sorted", alias);
+print("find 43", indexOf(data, 43), "find 27", indexOf(data, 27), "find 5", indexOf(data, 5));
+
+let swapped = [1, 2];
+let t = swapped[0];
+swapped[0] = swapped[1];
+swapped[1] = t;
+print("swapped", swapped);
+
+let single = [7];
+insertionSort(single);
+let none = [];
+insertionSort(none);
+print(single, none);

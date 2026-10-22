@@ -1,0 +1,51 @@
+include "operators.ch"
+
+namespace Calc
+{
+	Value ApplyUnary(TokenKind op, const Value& operand, int64 line) {
+		if (op == TokenKind::Bang) return Value::Bool(!IsTruthy(operand));
+		if (operand.kind != ValueKind::Int) throw ScriptError(line, Core::String("cannot apply '") + Spelling(op) + "' to " + operand.TypeName());
+		return Value::Int(-operand.integer);
+	}
+
+	// / or %, both truncating toward zero.
+	static Value Divide(TokenKind op, int64 a, int64 b, int64 line) {
+		if (b == 0) throw ScriptError(line, Core::String("division by zero"));
+		// the smallest int64 divided by -1 traps on x64; it wraps here as the other operators do
+		if (b == -1) return Value::Int(op == TokenKind::Slash ? (int64)(0 - (uint64)a) : 0);
+		return Value::Int(op == TokenKind::Slash ? a / b : a % b);
+	}
+
+	static Value CompareIntegers(TokenKind op, int64 a, int64 b) {
+		switch (op) {
+			case TokenKind::Less: return Value::Bool(a < b);
+			case TokenKind::LessEqual: return Value::Bool(a <= b);
+			case TokenKind::Greater: return Value::Bool(a > b);
+			default: return Value::Bool(a >= b);
+		}
+	}
+
+	static Value ApplyIntegers(TokenKind op, int64 a, int64 b, int64 line) {
+		switch (op) {
+			case TokenKind::Plus: return Value::Int(a + b);
+			case TokenKind::Minus: return Value::Int(a - b);
+			case TokenKind::Star: return Value::Int(a * b);
+			case TokenKind::Slash:
+			case TokenKind::Percent: return Divide(op, a, b, line);
+			default: return CompareIntegers(op, a, b);
+		}
+	}
+
+	Value ApplyBinary(TokenKind op, const Value& left, const Value& right, int64 line) {
+		if (op == TokenKind::Equal) return Value::Bool(ValuesEqual(left, right));
+		if (op == TokenKind::NotEqual) return Value::Bool(!ValuesEqual(left, right));
+		if (op == TokenKind::Plus && left.kind == ValueKind::String && right.kind == ValueKind::String) {
+			Value joined = left;
+			joined.text += right.text;
+			return joined;
+		}
+		if (left.kind != ValueKind::Int || right.kind != ValueKind::Int)
+			throw ScriptError(line, Core::String("cannot apply '") + Spelling(op) + "' to " + left.TypeName() + " and " + right.TypeName());
+		return ApplyIntegers(op, left.integer, right.integer, line);
+	}
+}

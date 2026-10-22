@@ -1,0 +1,138 @@
+title = "Port a C++ Markdown-to-HTML converter, with a small context window"
+category = "longrun"
+set = "holdout"
+timeout_minutes = 75
+max_steps = 250
+context_window = 32768
+
+[c4]
+project = "mdhtml"
+prompt = """
+`cpp/` holds `mdhtml`, a C++ program that converts a Markdown file to HTML; `cpp/README.md` describes its rules. Port it to C4 in this Nuke workspace (`nuke.toml`, entry point `src/main.cf`): the same command line, exit codes and error messages, and exactly the same output for every input.
+
+- Keep its structure: one C4 file pair (`.ch` and `.cf`) under `src/` for each C++ source pair, with the same functions and types, and `main` in `src/main.cf`.
+- Port its unit tests (`cpp/tests/`) too, as C4 tests under `src/tests/`.
+- Leave `cpp/` as it is.
+
+Build and run the tests before you finish.
+"""
+
+[go]
+project = "mdhtml"
+prompt = """
+`cpp/` holds `mdhtml`, a C++ program that converts a Markdown file to HTML; `cpp/README.md` describes its rules. Port it to Go, package main in this module (`go.mod`, `main.go`): the same command line, exit codes and error messages, and exactly the same output for every input.
+
+- Keep its structure: one Go file for each C++ source pair (`text.go` for `text.h` and `text.cpp`, and so on), with the same functions and types, and `main` in `main.go`.
+- Port its unit tests (`cpp/tests/`) too, as Go tests.
+- Leave `cpp/` as it is.
+
+Build and run the tests before you finish.
+"""
+
+[[checks]]
+name = "headings"
+args = ["{data}/headings.md"]
+stdout_file = "data/expected/headings.html"
+
+[[checks]]
+name = "paragraphs"
+args = ["{data}/paragraphs.md"]
+stdout_file = "data/expected/paragraphs.html"
+
+[[checks]]
+name = "blank"
+args = ["{data}/blank.md"]
+stdout_file = "data/expected/blank.html"
+
+[[checks]]
+name = "empty"
+args = ["{data}/empty.md"]
+stdout_file = "data/expected/empty.html"
+
+[[checks]]
+name = "fences"
+args = ["{data}/fences.md"]
+stdout_file = "data/expected/fences.html"
+
+[[checks]]
+name = "blockquotes"
+args = ["{data}/blockquotes.md"]
+stdout_file = "data/expected/blockquotes.html"
+
+[[checks]]
+name = "lists"
+args = ["{data}/lists.md"]
+stdout_file = "data/expected/lists.html"
+
+[[checks]]
+name = "ordered"
+args = ["{data}/ordered.md"]
+stdout_file = "data/expected/ordered.html"
+
+[[checks]]
+name = "nested"
+args = ["{data}/nested.md"]
+stdout_file = "data/expected/nested.html"
+
+[[checks]]
+name = "rules"
+args = ["{data}/rules.md"]
+stdout_file = "data/expected/rules.html"
+
+[[checks]]
+name = "emphasis"
+args = ["{data}/emphasis.md"]
+stdout_file = "data/expected/emphasis.html"
+
+[[checks]]
+name = "codespans"
+args = ["{data}/codespans.md"]
+stdout_file = "data/expected/codespans.html"
+
+[[checks]]
+name = "links"
+args = ["{data}/links.md"]
+stdout_file = "data/expected/links.html"
+
+[[checks]]
+name = "escapes"
+args = ["{data}/escapes.md"]
+stdout_file = "data/expected/escapes.html"
+
+[[checks]]
+name = "html"
+args = ["{data}/html.md"]
+stdout_file = "data/expected/html.html"
+
+[[checks]]
+name = "mixed"
+args = ["{data}/mixed.md"]
+stdout_file = "data/expected/mixed.html"
+
+[[checks]]
+name = "tabs"
+args = ["{data}/tabs.md"]
+stdout_file = "data/expected/tabs.html"
+
+[[checks]]
+name = "guide"
+args = ["{data}/guide.md"]
+stdout_file = "data/expected/guide.html"
+
+[[checks]]
+name = "usage-no-file"
+args = []
+exit = 2
+stderr_contains = "usage: mdhtml <file.md>"
+
+[[checks]]
+name = "usage-two-files"
+args = ["{data}/headings.md", "{data}/lists.md"]
+exit = 2
+stderr_contains = "usage: mdhtml <file.md>"
+
+[[checks]]
+name = "missing-file"
+args = ["{data}/no-such.md"]
+exit = 1
+stderr_contains = "error: cannot read"

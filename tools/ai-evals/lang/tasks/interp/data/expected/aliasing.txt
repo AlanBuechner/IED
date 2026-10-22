@@ -1,0 +1,8 @@
+a [1, 2, 3, 4] b [1, 2, 3, 4]
+a[0] 100 same true
+equal contents are not the same array false true
+after function [100, 2, 3, 4, x, x] 6
+set through b first
+shared rows [[0, 5], [0, 5], [0, 5]]
+holder [[kept]]
+closure array [1, 2] 2

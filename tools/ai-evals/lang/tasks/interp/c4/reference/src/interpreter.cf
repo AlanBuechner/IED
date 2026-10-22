@@ -1,0 +1,202 @@
+include "interpreter.ch"
+include "builtins.ch"
+include "operators.ch"
+include "parser.ch"
+
+namespace Calc
+{
+	static void CheckArgumentCount(int64 expected, int64 got, int64 line) {
+		if (expected == got) return;
+		Core::StringBuilder message;
+		message.Append("expected ");
+		message.AppendInt(expected);
+		message.Append(expected == 1 ? " argument but got " : " arguments but got ");
+		message.AppendInt(got);
+		throw ScriptError(line, message.ToString());
+	}
+
+	// The position `index` names in `array`, checking that `array` is an array and `index` one of its positions.
+	static int64 ElementPosition(const Value& array, const Value& index, int64 line) {
+		if (array.kind != ValueKind::Array) throw ScriptError(line, Core::String("cannot index ") + array.TypeName());
+		if (index.kind != ValueKind::Int) throw ScriptError(line, Core::String("index must be an int"));
+		if (index.integer < 0 || index.integer >= array.array->elements.Count()) throw ScriptError(line, Core::String("index out of range"));
+		return index.integer;
+	}
+
+	static Flow Returned(Value value) {
+		Flow flow;
+		flow.returned = true;
+		flow.value = take(value);
+		return flow;
+	}
+
+	void RunScript(Core::StringView source, IOutput* output) {
+		Core::Array<Stmt*> program = Parse(source);
+		Interpreter interpreter = Interpreter(output);
+		interpreter.Run(program);
+	}
+
+	void Interpreter::Init(IOutput* output) {
+		this.output = output;
+		globals = new Environment(null);
+		DefineBuiltins(globals);
+	}
+
+	void Interpreter::Run(const Core::Array<Stmt*>& program) {
+		ExecuteBlock(program, globals);
+	}
+
+	Flow Interpreter::ExecuteBlock(const Core::Array<Stmt*>& statements, Environment* env) {
+		for (Stmt* stmt : statements) {
+			Flow flow = Execute(stmt, env);
+			if (flow.returned) return flow;
+		}
+		return Flow();
+	}
+
+	Flow Interpreter::Execute(Stmt* stmt, Environment* env) {
+		switch (stmt->kind) {
+			case StmtKind::Let: ExecuteLet((LetStmt*)stmt, env); break;
+			case StmtKind::Assign: ExecuteAssign((AssignStmt*)stmt, env); break;
+			case StmtKind::IndexAssign: ExecuteIndexAssign((IndexAssignStmt*)stmt, env); break;
+			case StmtKind::Expression: Evaluate(((ExpressionStmt*)stmt)->expression, env); break;
+			case StmtKind::Block: return ExecuteBlock(((BlockStmt*)stmt)->statements, new Environment(env));
+			case StmtKind::If: return ExecuteIf((IfStmt*)stmt, env);
+			case StmtKind::While: return ExecuteWhile((WhileStmt*)stmt, env);
+			case StmtKind::Function: {
+				FunctionExpr* function = ((FunctionStmt*)stmt)->function;
+				env->Define(function->name.View(), Value::Function(new FunctionValue(function, env)));
+				break;
+			}
+			case StmtKind::Return: return ExecuteReturn((ReturnStmt*)stmt, env);
+		}
+		return Flow();
+	}
+
+	void Interpreter::ExecuteLet(LetStmt* stmt, Environment* env) {
+		env->Define(stmt->name.View(), Evaluate(stmt->value, env));
+	}
+
+	void Interpreter::ExecuteAssign(AssignStmt* stmt, Environment* env) {
+		const Value value = Evaluate(stmt->value, env);
+		if (!env->Assign(stmt->name.View(), value)) throw ScriptError(stmt->line, Core::String("undefined variable '") + stmt->name + "'");
+	}
+
+	Flow Interpreter::ExecuteIf(IfStmt* stmt, Environment* env) {
+		if (IsTruthy(Evaluate(stmt->condition, env))) return Execute(stmt->thenBlock, env);
+		if (stmt->elseBranch != null) return Execute(stmt->elseBranch, env);
+		return Flow();
+	}
+
+	// The array, the index and the value are evaluated in that order.
+	void Interpreter::ExecuteIndexAssign(IndexAssignStmt* stmt, Environment* env) {
+		const Value array = Evaluate(stmt->target->array, env);
+		const Value index = Evaluate(stmt->target->index, env);
+		Value value = Evaluate(stmt->value, env);
+		const int64 position = ElementPosition(array, index, stmt->line);
+		array.array->elements[position] = take(value);
+	}
+
+	// The body runs, a new scope each time, while the condition holds.
+	Flow Interpreter::ExecuteWhile(WhileStmt* stmt, Environment* env) {
+		while (IsTruthy(Evaluate(stmt->condition, env))) {
+			Flow flow = Execute(stmt->body, env);
+			if (flow.returned) return flow;
+		}
+		return Flow();
+	}
+
+	Flow Interpreter::ExecuteReturn(ReturnStmt* stmt, Environment* env) {
+		if (stmt->value == null) return Returned(Value::Nil());
+		return Returned(Evaluate(stmt->value, env));
+	}
+
+	Value Interpreter::Evaluate(Expr* expr, Environment* env) {
+		switch (expr->kind) {
+			case ExprKind::Literal: return ((LiteralExpr*)expr)->value;
+			case ExprKind::Variable: return LookupVariable((VariableExpr*)expr, env);
+			case ExprKind::Unary: {
+				UnaryExpr* unary = (UnaryExpr*)expr;
+				return ApplyUnary(unary->op, Evaluate(unary->operand, env), unary->line);
+			}
+			case ExprKind::Binary: return EvaluateBinary((BinaryExpr*)expr, env);
+			case ExprKind::Logical: return EvaluateLogical((LogicalExpr*)expr, env);
+			case ExprKind::Call: return EvaluateCall((CallExpr*)expr, env);
+			case ExprKind::Array: return EvaluateArray((ArrayExpr*)expr, env);
+			case ExprKind::Index: return EvaluateIndex((IndexExpr*)expr, env);
+			case ExprKind::Function: return Value::Function(new FunctionValue((FunctionExpr*)expr, env));
+		}
+		return Value::Nil();
+	}
+
+	Value Interpreter::LookupVariable(VariableExpr* expr, Environment* env) {
+		Value value;
+		if (!env->Lookup(expr->name.View(), value)) throw ScriptError(expr->line, Core::String("undefined variable '") + expr->name + "'");
+		return value;
+	}
+
+	Value Interpreter::EvaluateBinary(BinaryExpr* expr, Environment* env) {
+		const Value left = Evaluate(expr->left, env);
+		const Value right = Evaluate(expr->right, env);
+		return ApplyBinary(expr->op, left, right, expr->line);
+	}
+
+	Value Interpreter::EvaluateArray(ArrayExpr* expr, Environment* env) {
+		ArrayValue* array = new ArrayValue();
+		array->elements = EvaluateAll(expr->elements, env);
+		return Value::Array(array);
+	}
+
+	// The array is evaluated before the index.
+	Value Interpreter::EvaluateIndex(IndexExpr* expr, Environment* env) {
+		const Value array = Evaluate(expr->array, env);
+		const Value index = Evaluate(expr->index, env);
+		const int64 position = ElementPosition(array, index, expr->line);
+		return array.array->elements[position];
+	}
+
+	// && and ||: the right side is evaluated only when the left one does not decide the result.
+	Value Interpreter::EvaluateLogical(LogicalExpr* expr, Environment* env) {
+		const bool left = IsTruthy(Evaluate(expr->left, env));
+		if (expr->op == TokenKind::Or && left) return Value::Bool(true);
+		if (expr->op == TokenKind::And && !left) return Value::Bool(false);
+		return Value::Bool(IsTruthy(Evaluate(expr->right, env)));
+	}
+
+	Value Interpreter::EvaluateCall(CallExpr* expr, Environment* env) {
+		const Value callee = Evaluate(expr->callee, env);
+		const Core::Array<Value> arguments = EvaluateAll(expr->arguments, env);
+		if (callee.kind == ValueKind::Function) return CallFunction(callee.function, arguments, expr->line);
+		if (callee.kind == ValueKind::Builtin) return CallBuiltin(callee.builtin, arguments, expr->line);
+		throw ScriptError(expr->line, Core::String("cannot call ") + callee.TypeName());
+	}
+
+	// The values of `exprs`, evaluated left to right.
+	Core::Array<Value> Interpreter::EvaluateAll(const Core::Array<Expr*>& exprs, Environment* env) {
+		Core::Array<Value> values = Core::Array<Value>(exprs.Count());
+		for (Expr* expr : exprs) values.Push(Evaluate(expr, env));
+		return values;
+	}
+
+	// The body runs in a new environment whose parent is the function's closure, so it sees the variables of
+	// the scope the function was defined in; the parameters are defined in that environment, bound to the
+	// arguments in order.
+	Value Interpreter::CallFunction(FunctionValue* function, const Core::Array<Value>& arguments, int64 line) {
+		const Core::Array<Core::String>& parameters = function->declaration->parameters;
+		CheckArgumentCount(parameters.Count(), arguments.Count(), line);
+		Environment* env = new Environment(function->closure);
+		for (int64 i = 0; i < parameters.Count(); ++i) env->Define(parameters[i].View(), arguments[i]);
+		Flow flow = ExecuteBlock(function->declaration->body, env);
+		if (!flow.returned) return Value::Nil();
+		return take(flow.value);
+	}
+
+	Value Interpreter::CallBuiltin(BuiltinValue* builtin, const Core::Array<Value>& arguments, int64 line) {
+		if (builtin->arity != kAnyArgumentCount) CheckArgumentCount(builtin->arity, arguments.Count(), line);
+		BuiltinCall call;
+		call.arguments = arguments;
+		call.line = line;
+		call.output = output;
+		return builtin->call(call);
+	}
+}

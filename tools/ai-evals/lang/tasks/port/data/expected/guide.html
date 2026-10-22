@@ -1,0 +1,143 @@
+<h1>Tidewater: a field guide for contributors</h1>
+<p>Tidewater is a small <strong>tide-table service</strong>: it reads harbor gauge readings, predicts the next high and
+low water for each station, and serves the tables over HTTP. This guide is for people who want to change
+it. If you only want to <em>run</em> it, read <a href="docs/operators.md">the operator notes</a> instead.</p>
+<blockquote>
+<p><strong>Note:</strong> the service is in maintenance mode. We take bug fixes and small features; large rewrites need
+an issue first, so that nobody spends a weekend on something we cannot merge.</p>
+</blockquote>
+<h2>Contents</h2>
+<ol>
+<li><a href="#getting-the-code">Getting the code</a></li>
+<li><a href="#building-and-testing">Building and testing</a></li>
+<li><a href="#how-a-prediction-is-made">How a prediction is made</a></li>
+<li><a href="#style">Style</a></li>
+<li><a href="#sending-a-change">Sending a change</a></li>
+</ol>
+<hr />
+<h2>Getting the code</h2>
+<p>Clone the repository and fetch the sample gauge data (about 40 MB):</p>
+<pre><code class="language-sh">git clone https://example.org/tidewater.git
+cd tidewater
+./tools/fetch-samples.sh --stations=north,harbor-mouth
+</code></pre>
+<p>The samples land in <code>data/samples/</code>. They are <em>not</em> checked in: the files are large, and the harbor
+authority asks that copies stay out of public mirrors.</p>
+<h3>Requirements</h3>
+<ul>
+<li>A C++20 compiler (clang 17 or later, or MSVC 19.38)</li>
+<li>CMake 3.28 or later</li>
+<li>Python 3.12 for the tools under <code>tools/</code>
+<ul>
+<li><code>numpy</code> for the plotting scripts</li>
+<li><code>requests</code> for <code>fetch-samples.sh</code></li>
+</ul>
+</li>
+<li>About 2 GB of free disk space</li>
+</ul>
+<h2>Building and testing</h2>
+<p>The usual CMake dance works:</p>
+<pre><code>cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+</code></pre>
+<p>Every pull request runs the same steps in CI, plus <code>clang-tidy</code> with the checks listed in
+<code>.clang-tidy</code>. A warning is a failure: please fix it rather than silencing it with <code>// NOLINT</code>.</p>
+<blockquote>
+<p>Tip: <code>ctest -R harmonic</code> runs only the harmonic-analysis tests, which is handy when you are
+working on <code>src/predict/</code>.</p>
+<pre><code class="language-sh">ctest --test-dir build -R harmonic -j 8
+</code></pre>
+</blockquote>
+<h3>Test data</h3>
+<p>Tests read fixtures from <code>tests/fixtures/</code>. Each fixture is a CSV file with a header line:</p>
+<pre><code class="language-csv">station,timestamp,level_cm
+north,2024-03-01T00:00:00Z,212
+north,2024-03-01T00:06:00Z,215
+</code></pre>
+<p>Keep fixtures <strong>small</strong> (a few hundred rows) and <em>deterministic</em>. If a test needs a long series,
+generate it in the test with <code>make_series(station, start, count)</code> rather than checking in a file.</p>
+<h2>How a prediction is made</h2>
+<p>A prediction goes through three stages:</p>
+<ol>
+<li><strong>Cleaning.</strong> Readings outside the gauge's range are dropped, and gaps shorter than 30 minutes
+are filled by linear interpolation.</li>
+<li><strong>Fitting.</strong> The cleaned series is fitted to the station's constituents (M2, S2, N2, K1, O1 and
+friends) by least squares. See <code>fit_constituents()</code> in <code>src/predict/fit.cpp</code>.</li>
+<li><strong>Extrapolating.</strong> The fitted constituents are summed forward in time, and the turning points of
+the sum become the high and low waters.
+<ul>
+<li>Turning points closer than 2 hours are merged.</li>
+<li>A turning point less than 5 cm from its neighbor is ignored.</li>
+</ul>
+</li>
+</ol>
+<p>The constants live in <code>src/predict/constants.h</code>; change them only with a test that shows why.</p>
+<h3>Why least squares?</h3>
+<p>It is <em>boring</em>, and boring is good here. Fancier fits (Kalman filters, neural nets) were tried in
+2021 and gave predictions that were better on average but <strong>much</strong> worse on the days that matter:
+storm surges. The discussion is in <a href="https://example.org/tidewater/issues/112">issue 112</a>.</p>
+<h2>Style</h2>
+<p>We follow the <a href="https://example.org/style">house style</a> with a few local rules:</p>
+<ul>
+<li>Names say what a thing <em>is</em>: <code>high_water_time</code>, not <code>hwt</code> or <code>t2</code>.</li>
+<li>Functions do one thing. If a function needs a comment that says &quot;first ... then ...&quot;, split it.</li>
+<li>No global mutable state. The station table is passed in, not reached for.</li>
+<li>Errors are values: return <code>std::expected&lt;T, Error&gt;</code>; throw only for programming errors.</li>
+<li>Units go in names when they are not obvious: <code>level_cm</code>, <code>interval_s</code>.</li>
+</ul>
+<p>A few things are <strong>not</strong> style questions and are checked by CI:</p>
+<ul>
+<li>formatting (<code>clang-format</code>, config in <code>.clang-format</code>)</li>
+<li>includes sorted and minimal (<code>include-what-you-use</code>)</li>
+<li>no <code>using namespace</code> in headers</li>
+</ul>
+<blockquote>
+<p>A good rule of thumb from a former maintainer:</p>
+<blockquote>
+<p>If the reviewer has to ask what it does, the name is wrong.</p>
+</blockquote>
+</blockquote>
+<h2>Sending a change</h2>
+<ol>
+<li>Open an issue, unless the change is a small fix.</li>
+<li>Make a branch from <code>main</code> named after the issue: <code>fix/112-surge-offset</code>.</li>
+<li>Write the test first when you can. A bug fix <strong>must</strong> come with a test that fails without it.</li>
+<li>Keep commits focused; squash fixups before asking for review.</li>
+<li>Open the pull request and fill in the template:
+<ul>
+<li>what changed and why</li>
+<li>how you tested it</li>
+<li>anything the reviewer should look at first</li>
+</ul>
+</li>
+</ol>
+<p>Reviews usually take a day or two. If nobody has looked after a week, ping <code>@tidewater/maintainers</code>
+in the pull request.</p>
+<h3>Changing the HTTP API</h3>
+<p>The API is used by the harbor's display boards, which are updated <em>twice a year</em>. So:</p>
+<ul>
+<li>never remove a field; add a new one and mark the old one deprecated</li>
+<li>never change a field's unit</li>
+<li>new endpoints go under <code>/v2/</code></li>
+</ul>
+<p>An example response, for reference:</p>
+<pre><code class="language-json">{
+  &quot;station&quot;: &quot;north&quot;,
+  &quot;next&quot;: [
+    { &quot;kind&quot;: &quot;high&quot;, &quot;time&quot;: &quot;2024-03-01T05:42:00Z&quot;, &quot;level_cm&quot;: 381 },
+    { &quot;kind&quot;: &quot;low&quot;, &quot;time&quot;: &quot;2024-03-01T11:57:00Z&quot;, &quot;level_cm&quot;: 64 }
+  ]
+}
+</code></pre>
+<h2>Troubleshooting</h2>
+<p><strong>The build fails with <code>error: 'expected' file not found</code>.</strong> Your compiler is too old, or it is
+using an old standard library. On Linux, install <code>libstdc++-14-dev</code>; on macOS, use the Xcode 16
+toolchain.</p>
+<p><strong>Predictions are off by exactly one hour.</strong> The station's time zone is set instead of UTC. Every
+time in Tidewater is UTC; the display boards convert. See <code>docs/time.md</code>.</p>
+<p><strong><code>fetch-samples.sh</code> says &quot;403 Forbidden&quot;.</strong> The harbor authority rotates its download keys each
+quarter. Ask in the chat for the current one, and <em>never</em> commit it.</p>
+<hr />
+<p>Thanks for helping! Questions go to the chat, bugs to the <a href="https://example.org/tidewater/issues">issue tracker</a>,
+and anything about the harbor data itself to the authority's contact, <code>data@example.org</code> &amp;mdash; not to us.</p>

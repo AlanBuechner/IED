@@ -1,0 +1,110 @@
+include "lines.ch"
+include "text.ch"
+
+namespace MdHtml
+{
+	const int32 kMinFenceTicks = 3;
+	const int32 kMaxHeadingLevel = 6;
+	const int32 kMinRuleMarks = 3;
+	const int64 kMaxNumberDigits = 9;
+
+	static bool IsDigit(int32 c) { return c >= '0' && c <= '9'; }
+
+	static int32 CountLeading(Core::StringView text, int32 c) {
+		int64 count = 0;
+		while (count < text.ByteLength() && text.ByteAt(count) == c) ++count;
+		return (int32)count;
+	}
+
+	// A closing run of '#' goes when it is all there is or follows whitespace: "Title ##" is "Title", "C#" stays.
+	static Core::StringView StripClosingHashes(Core::StringView text) {
+		int64 end = text.ByteLength();
+		while (end > 0 && text.ByteAt(end - 1) == '#') --end;
+		if (end == text.ByteLength() || (end > 0 && !IsSpace(text.ByteAt(end - 1)))) return text;
+		return Trim(text.Substring(0, end));
+	}
+
+	LineKind Classify(Core::StringView line) {
+		Fence fence;
+		Heading heading;
+		Core::StringView content;
+		ListMarker marker;
+		if (IsBlank(line)) return LineKind::Blank;
+		if (MatchFence(line, fence)) return LineKind::Fence;
+		if (MatchHeading(line, heading)) return LineKind::Heading;
+		if (IsRule(line)) return LineKind::Rule;
+		if (MatchQuote(line, content)) return LineKind::Quote;
+		if (MatchListItem(line, marker)) return LineKind::ListItem;
+		return LineKind::Text;
+	}
+
+	bool MatchFence(Core::StringView line, Fence& fence) {
+		Core::StringView rest = TrimStart(line);
+		const int32 ticks = CountLeading(rest, '`');
+		if (ticks < kMinFenceTicks) return false;
+		Core::StringView info = Trim(rest.Substring(ticks, -1));
+		if (info.IndexOf('`', 0) >= 0) return false;
+		int64 word = 0;
+		while (word < info.ByteLength() && !IsSpace(info.ByteAt(word))) ++word;
+		fence.ticks = ticks;
+		fence.language = info.Substring(0, word);
+		return true;
+	}
+
+	bool ClosesFence(Core::StringView line, int32 ticks) {
+		Core::StringView rest = TrimStart(line);
+		const int32 run = CountLeading(rest, '`');
+		return run >= ticks && IsBlank(rest.Substring(run, -1));
+	}
+
+	bool MatchHeading(Core::StringView line, Heading& heading) {
+		Core::StringView rest = TrimStart(line);
+		const int32 level = CountLeading(rest, '#');
+		if (level == 0 || level > kMaxHeadingLevel) return false;
+		if (level < rest.ByteLength() && !IsSpace(rest.ByteAt(level))) return false;
+		heading.level = level;
+		heading.text = StripClosingHashes(Trim(rest.Substring(level, -1)));
+		return true;
+	}
+
+	bool IsRule(Core::StringView line) {
+		int32 mark = 0;
+		int32 count = 0;
+		for (int64 i = 0; i < line.ByteLength(); ++i) {
+			const int32 c = line.ByteAt(i);
+			if (IsSpace(c)) continue;
+			if ((c != '-' && c != '*') || (mark != 0 && c != mark)) return false;
+			mark = c;
+			++count;
+		}
+		return count >= kMinRuleMarks;
+	}
+
+	bool MatchQuote(Core::StringView line, Core::StringView& content) {
+		Core::StringView rest = TrimStart(line);
+		if (rest.IsEmpty() || rest.ByteAt(0) != '>') return false;
+		rest = rest.Substring(1, -1);
+		if (!rest.IsEmpty() && IsSpace(rest.ByteAt(0))) rest = rest.Substring(1, -1);
+		content = rest;
+		return true;
+	}
+
+	bool MatchListItem(Core::StringView line, ListMarker& marker) {
+		Core::StringView rest = TrimStart(line);
+		ListMarker item;
+		item.indent = Indentation(line);
+		int64 length = 1;
+		if (rest.IsEmpty() || (rest.ByteAt(0) != '-' && rest.ByteAt(0) != '*')) {
+			int64 digits = 0;
+			while (digits < rest.ByteLength() && IsDigit(rest.ByteAt(digits))) ++digits;
+			if (digits == 0 || digits > kMaxNumberDigits || digits == rest.ByteLength() || rest.ByteAt(digits) != '.') return false;
+			item.ordered = true;
+			for (int64 i = 0; i < digits; ++i) item.number = item.number * 10 + (rest.ByteAt(i) - '0');
+			length = digits + 1;
+		}
+		if (length < rest.ByteLength() && !IsSpace(rest.ByteAt(length))) return false;
+		item.text = Trim(rest.Substring(length, -1));
+		marker = item;
+		return true;
+	}
+}

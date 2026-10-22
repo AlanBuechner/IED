@@ -1,0 +1,15 @@
+22 12 85 3 2
+-3 -2 -3 2
+11 -5 89
+true false true false true false
+hello, calc!
+quote: "x" slash: \ two
+lines
+compare true false false true true
+false true false true false
+true true
+negative zero small large
+1234 nil false <fn describe>
+<fn describe> <fn> <builtin print> <builtin str>
+
+done

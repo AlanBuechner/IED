@@ -76,7 +76,10 @@ against the reference".
 | `optimize` | tune | performance | a naive log analyzer 10x faster, output unchanged |
 | `techdebt` | tune | refactor | one 150-line main with globals made clean, behavior unchanged |
 | `matrix` | tune | from scratch, fixed API | a matrix class with operators (C4: `[operator]` methods), inverse and determinant, hidden tests |
+| `interp` | holdout | large project | while loops, arrays and two builtins added to a 1750-line interpreter (lexer, Pratt parser, closures) |
+| `explain` | holdout | questions | how that interpreter parses precedence and binds a call's arguments, answered from the code (Ask mode) |
 | `mutants` | holdout | tests | unit tests for a working semver library, graded by 25 mutants |
+| `port` | holdout | long run | a 770-line C++ Markdown-to-HTML converter ported with its tests, in a 32k context (compression) |
 
 ## Metrics (`report.py`)
 

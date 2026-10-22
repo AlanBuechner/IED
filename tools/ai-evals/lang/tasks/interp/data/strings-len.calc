@@ -1,0 +1,27 @@
+// len of strings and arrays, and str of arrays.
+print(len(""), len("a"), len("hello world"), len("tab\\n"), len("line\n"));
+
+let words = ["alpha", "be", "gamma", "", "delta!"];
+let i = 0;
+let longest = "";
+while (i < len(words)) {
+    if (len(words[i]) > len(longest)) {
+        longest = words[i];
+    }
+    print(words[i] + ": " + str(len(words[i])));
+    i = i + 1;
+}
+print("longest", longest);
+
+let text = "";
+let n = 0;
+while (len(text) < 10) {
+    text = text + str(n);
+    n = n + 1;
+}
+print(text, len(text));
+
+let described = str([1, "two", [3]]);
+print(described, len(described));
+print("[" + "] is not an array: " + str(len("[]")));
+print(str([]) + str([[]]), len(str([nil])));

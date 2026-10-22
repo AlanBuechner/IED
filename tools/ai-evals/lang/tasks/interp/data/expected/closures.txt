@@ -1,0 +1,13 @@
+fib 0 1 55 17711
+fact 120 2432902008176640000
+counters 3 20 4
+compose 12 11
+apply 1024
+block inner
+nested changed inner
+block again changed inner
+after outer
+total 12
+gcd 21 1
+nothing nil nil
+defined later

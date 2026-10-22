@@ -1,0 +1,58 @@
+include "lexer.ch"
+
+static Core::String LexError(const char* source) {
+	try {
+		Calc::Tokenize(Core::StringView(source));
+	} catch (const Calc::ScriptError& error) {
+		return error.Describe();
+	}
+	return Core::String();
+}
+
+[test("calc.lexer.operators_and_keywords")]
+static void LexesOperatorsAndKeywords() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("let x = a <= b && !c || d != e; fn if else return true false nil"));
+	Core::Array<Calc::TokenKind> want = {
+		Calc::TokenKind::Let, Calc::TokenKind::Identifier, Calc::TokenKind::Assign, Calc::TokenKind::Identifier,
+		Calc::TokenKind::LessEqual, Calc::TokenKind::Identifier, Calc::TokenKind::And, Calc::TokenKind::Bang,
+		Calc::TokenKind::Identifier, Calc::TokenKind::Or, Calc::TokenKind::Identifier, Calc::TokenKind::NotEqual,
+		Calc::TokenKind::Identifier, Calc::TokenKind::Semicolon, Calc::TokenKind::Fn, Calc::TokenKind::If,
+		Calc::TokenKind::Else, Calc::TokenKind::Return, Calc::TokenKind::True, Calc::TokenKind::False,
+		Calc::TokenKind::Nil, Calc::TokenKind::EndOfInput };
+	assert_eq(want.Count(), tokens.Count(), "token count");
+	for (int64 i = 0; i < want.Count() && i < tokens.Count(); ++i) assert_true(tokens[i].kind == want[i], "token kind");
+}
+
+[test("calc.lexer.numbers_and_strings")]
+static void LexesNumbersAndStrings() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("42 \"a\\nb\\\"c\\\\\" letter_1"));
+	assert_true(tokens[0].kind == Calc::TokenKind::Number && tokens[0].number == 42, "number");
+	assert_true(tokens[1].kind == Calc::TokenKind::String, "string kind");
+	assert_se("a\nb\"c\\", tokens[1].text.CStr(), "string value");
+	assert_se("\"a\\nb\\\"c\\\\\"", tokens[1].lexeme.CStr(), "string lexeme");
+	assert_true(tokens[2].kind == Calc::TokenKind::Identifier && tokens[2].lexeme == "letter_1", "identifier");
+}
+
+[test("calc.lexer.lines_and_comments")]
+static void CountsLinesAndSkipsComments() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("a // comment ( \"\n\r\n  b"));
+	assert_eq(3, tokens.Count(), "count");
+	assert_eq(1, tokens[0].line, "first line");
+	assert_eq(3, tokens[1].line, "third line");
+	assert_true(tokens[1].lexeme == "b", "after the comment");
+}
+
+[test("calc.lexer.errors")]
+static void ReportsLexErrors() {
+	assert_se("line 2: unexpected character '#'", LexError("let a = 1;\nlet b = #;").CStr(), "character");
+	assert_se("line 1: unterminated string", LexError("\"open\nx").CStr(), "unterminated");
+	assert_se("line 1: unknown escape '\\t'", LexError("\"bad \\t\"").CStr(), "escape");
+	assert_se("line 1: number too large", LexError("99999999999999999999").CStr(), "too large");
+	assert_se("line 1: unexpected character '&'", LexError("a & b").CStr(), "single &");
+}
+
+[test("calc.lexer.largest_integer")]
+static void LexesTheLargestInteger() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("9223372036854775807"));
+	assert_true(tokens[0].number == 9223372036854775807, "int64 max");
+}

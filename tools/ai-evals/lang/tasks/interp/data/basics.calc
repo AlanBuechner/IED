@@ -1,0 +1,33 @@
+// Arithmetic, strings, comparisons and logic.
+let a = 17;
+let b = 5;
+print(a + b, a - b, a * b, a / b, a % b);
+print(-a / b, -a % b, a / -b, a % -b);
+print(2 + 3 * 4 - 6 / 2, (2 + 3) * (4 - 6) / 2, 100 - 10 - 1);
+print(a > b, a < b, a >= 17, b <= 4, a == 17, a != 17);
+
+let greeting = "hello";
+let name = "calc";
+print(greeting + ", " + name + "!");
+print("quote: \"x\"", "slash: \\", "two\nlines");
+print("compare", "abc" == "abc", "abc" == "abd", "1" == 1, nil == nil, true != false);
+
+print(true && false, true || false, !true, !nil, !0);
+print(nil || "fallback", 0 && "zero is true");
+
+fn describe(n) {
+    if (n < 0) {
+        return "negative";
+    } else if (n == 0) {
+        return "zero";
+    } else if (n < 10) {
+        return "small";
+    } else {
+        return "large";
+    }
+}
+print(describe(-4), describe(0), describe(7), describe(42));
+print(str(12) + str(34), str(nil), str(false), str(describe));
+print(describe, fn (x) { return x; }, print, str);
+print();
+print("done");

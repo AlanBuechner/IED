@@ -1,0 +1,71 @@
+// Functions, recursion, closures and scopes.
+fn fib(n) {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+print("fib", fib(0), fib(1), fib(10), fib(22));
+
+fn fact(n) {
+    if (n <= 1) { return 1; }
+    return n * fact(n - 1);
+}
+print("fact", fact(5), fact(20));
+
+fn makeCounter(step) {
+    let count = 0;
+    return fn () {
+        count = count + step;
+        return count;
+    };
+}
+let ones = makeCounter(1);
+let tens = makeCounter(10);
+ones();
+ones();
+tens();
+print("counters", ones(), tens(), ones());
+
+fn compose(f, g) {
+    return fn (x) { return f(g(x)); };
+}
+let double = fn (x) { return x * 2; };
+let increment = fn (x) { return x + 1; };
+print("compose", compose(double, increment)(5), compose(increment, double)(5));
+
+fn applyTimes(f, n, x) {
+    if (n == 0) { return x; }
+    return applyTimes(f, n - 1, f(x));
+}
+print("apply", applyTimes(double, 10, 1));
+
+let shadow = "outer";
+{
+    let shadow = "inner";
+    print("block", shadow);
+    {
+        shadow = "changed inner";
+        print("nested", shadow);
+    }
+    print("block again", shadow);
+}
+print("after", shadow);
+
+let total = 0;
+fn addToTotal(n) { total = total + n; }
+addToTotal(5);
+addToTotal(7);
+print("total", total);
+
+fn gcd(a, b) {
+    if (b == 0) { return a; }
+    return gcd(b, a % b);
+}
+print("gcd", gcd(1071, 462), gcd(17, 5));
+
+fn noReturn() { let unused = 1; }
+fn bareReturn() { return; }
+print("nothing", noReturn(), bareReturn());
+
+let later = fn () { return lateName; };
+let lateName = "defined later";
+print(later());

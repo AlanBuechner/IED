@@ -1,0 +1,163 @@
+include "lexer.ch"
+
+namespace Calc
+{
+	const int64 kLargestInteger = 9223372036854775807;
+
+	static bool IsDigit(int32 c) { return c >= '0' && c <= '9'; }
+
+	static bool IsIdentifierStart(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+
+	static bool IsIdentifierPart(int32 c) { return IsIdentifierStart(c) || IsDigit(c); }
+
+	static bool TwoCharOperator(int32 first, int32 second, TokenKind& kind) {
+		if (first == '=' && second == '=') kind = TokenKind::Equal;
+		else if (first == '!' && second == '=') kind = TokenKind::NotEqual;
+		else if (first == '<' && second == '=') kind = TokenKind::LessEqual;
+		else if (first == '>' && second == '=') kind = TokenKind::GreaterEqual;
+		else if (first == '&' && second == '&') kind = TokenKind::And;
+		else if (first == '|' && second == '|') kind = TokenKind::Or;
+		else return false;
+		return true;
+	}
+
+	static bool OneCharOperator(int32 c, TokenKind& kind) {
+		switch (c) {
+			case '(': kind = TokenKind::LeftParen; return true;
+			case ')': kind = TokenKind::RightParen; return true;
+			case '{': kind = TokenKind::LeftBrace; return true;
+			case '}': kind = TokenKind::RightBrace; return true;
+			case ',': kind = TokenKind::Comma; return true;
+			case ';': kind = TokenKind::Semicolon; return true;
+			case '=': kind = TokenKind::Assign; return true;
+			case '+': kind = TokenKind::Plus; return true;
+			case '-': kind = TokenKind::Minus; return true;
+			case '*': kind = TokenKind::Star; return true;
+			case '/': kind = TokenKind::Slash; return true;
+			case '%': kind = TokenKind::Percent; return true;
+			case '!': kind = TokenKind::Bang; return true;
+			case '<': kind = TokenKind::Less; return true;
+			case '>': kind = TokenKind::Greater; return true;
+			default: return false;
+		}
+	}
+
+	Core::Array<Token> Tokenize(Core::StringView source) {
+		Lexer lexer = Lexer(source);
+		Core::Array<Token> tokens;
+		while (true) {
+			Token token = lexer.Next();
+			const bool atEnd = token.kind == TokenKind::EndOfInput;
+			tokens.Push(take(token));
+			if (atEnd) return tokens;
+		}
+	}
+
+	Token Lexer::Next() {
+		SkipSpaceAndComments();
+		if (position >= source.ByteLength()) return MakeToken(TokenKind::EndOfInput, position);
+		const int32 c = source.ByteAt(position);
+		if (IsDigit(c)) return LexNumber();
+		if (IsIdentifierStart(c)) return LexWord();
+		if (c == '"') return LexString();
+		return LexOperator();
+	}
+
+	int32 Lexer::PeekAt(int64 offset) const {
+		if (position + offset >= source.ByteLength()) return 0;
+		return source.ByteAt(position + offset);
+	}
+
+	void Lexer::SkipSpaceAndComments() {
+		while (position < source.ByteLength()) {
+			const int32 c = source.ByteAt(position);
+			if (c == '\n') {
+				++line;
+				++position;
+			} else if (c == ' ' || c == '\t' || c == '\r') {
+				++position;
+			} else if (c == '/' && PeekAt(1) == '/') {
+				SkipComment();
+			} else {
+				return;
+			}
+		}
+	}
+
+	void Lexer::SkipComment() {
+		while (position < source.ByteLength() && source.ByteAt(position) != '\n') ++position;
+	}
+
+	Token Lexer::MakeToken(TokenKind kind, int64 start) const {
+		Token token;
+		token.kind = kind;
+		token.lexeme = Core::String(source.Substring(start, position - start));
+		token.line = line;
+		return token;
+	}
+
+	Token Lexer::LexNumber() {
+		const int64 start = position;
+		int64 value = 0;
+		while (position < source.ByteLength() && IsDigit(source.ByteAt(position))) {
+			const int64 digit = source.ByteAt(position) - '0';
+			if (value > (kLargestInteger - digit) / 10) throw ScriptError(line, Core::String("number too large"));
+			value = value * 10 + digit;
+			++position;
+		}
+		Token token = MakeToken(TokenKind::Number, start);
+		token.number = value;
+		return token;
+	}
+
+	Token Lexer::LexWord() {
+		const int64 start = position;
+		while (position < source.ByteLength() && IsIdentifierPart(source.ByteAt(position))) ++position;
+		TokenKind kind = TokenKind::Identifier;
+		KeywordKind(source.Substring(start, position - start), kind);
+		return MakeToken(kind, start);
+	}
+
+	// A string literal ends on the line it starts.
+	Token Lexer::LexString() {
+		const int64 start = position;
+		++position;
+		Core::StringBuilder text;
+		while (true) {
+			if (position >= source.ByteLength() || source.ByteAt(position) == '\n') throw ScriptError(line, Core::String("unterminated string"));
+			char8 c = (char8)source.ByteAt(position);
+			++position;
+			if (c == '"') break;
+			if (c == '\\') c = LexEscape();
+			text.AppendByte(c);
+		}
+		Token token = MakeToken(TokenKind::String, start);
+		token.text = text.ToString();
+		return token;
+	}
+
+	// The character after a backslash: \n, \" or \\.
+	char8 Lexer::LexEscape() {
+		if (position >= source.ByteLength() || source.ByteAt(position) == '\n') throw ScriptError(line, Core::String("unterminated string"));
+		const char8 c = (char8)source.ByteAt(position);
+		++position;
+		if (c == 'n') return '\n';
+		if (c == '"' || c == '\\') return c;
+		throw ScriptError(line, Core::String("unknown escape '\\") + source.Substring(position - 1, 1) + "'");
+	}
+
+	Token Lexer::LexOperator() {
+		const int64 start = position;
+		const int32 c = source.ByteAt(position);
+		TokenKind kind = TokenKind::EndOfInput;
+		if (TwoCharOperator(c, PeekAt(1), kind)) {
+			position += 2;
+			return MakeToken(kind, start);
+		}
+		if (OneCharOperator(c, kind)) {
+			++position;
+			return MakeToken(kind, start);
+		}
+		throw ScriptError(line, Core::String("unexpected character '") + source.Substring(start, 1) + "'");
+	}
+}

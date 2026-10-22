@@ -1,0 +1,45 @@
+// Arrays are references: every variable holding one sees its changes.
+let a = [1, 2, 3];
+let b = a;
+push(b, 4);
+print("a", a, "b", b);
+
+b[0] = 100;
+print("a[0]", a[0], "same", a == b);
+
+let c = [100, 2, 3, 4];
+print("equal contents are not the same array", a == c, a != c);
+
+fn appendTwice(list, value) {
+    push(list, value);
+    push(list, value);
+}
+appendTwice(a, "x");
+print("after function", a, len(b));
+
+fn setFirst(list, value) {
+    list[0] = value;
+}
+setFirst(b, "first");
+print("set through b", a[0]);
+
+let row = [0, 0];
+let grid = [row, row, row];
+grid[0][1] = 5;
+print("shared rows", grid);
+
+let holder = [[]];
+let inner = holder[0];
+push(inner, "kept");
+print("holder", holder);
+
+fn makeStack() {
+    let items = [];
+    return [fn (x) { push(items, x); }, fn () { return items; }];
+}
+let stack = makeStack();
+let pushItem = stack[0];
+let items = stack[1];
+pushItem(1);
+pushItem(2);
+print("closure array", items(), len(items()));

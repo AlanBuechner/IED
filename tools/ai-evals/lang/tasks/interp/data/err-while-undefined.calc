@@ -1,0 +1,9 @@
+// An undefined variable inside a loop body is found when the body runs.
+let total = 0;
+let i = 1;
+while (i <= 3) {
+    print("adding", i);
+    total = totl + i;
+    i = i + 1;
+}
+print(total);

@@ -1,0 +1,48 @@
+include "text.ch"
+
+namespace MdHtml
+{
+	bool IsSpace(int32 c) { return c == ' ' || c == '\t'; }
+
+	Core::StringView TrimStart(Core::StringView text) {
+		int64 start = 0;
+		while (start < text.ByteLength() && IsSpace(text.ByteAt(start))) ++start;
+		return text.Substring(start, text.ByteLength() - start);
+	}
+
+	Core::StringView Trim(Core::StringView text) {
+		Core::StringView rest = TrimStart(text);
+		int64 end = rest.ByteLength();
+		while (end > 0 && IsSpace(rest.ByteAt(end - 1))) --end;
+		return rest.Substring(0, end);
+	}
+
+	bool IsBlank(Core::StringView line) { return TrimStart(line).IsEmpty(); }
+
+	int32 Indentation(Core::StringView line) { return (int32)(line.ByteLength() - TrimStart(line).ByteLength()); }
+
+	Core::Array<Core::StringView> SplitLines(Core::StringView text) {
+		Core::Array<Core::StringView> lines;
+		int64 start = 0;
+		while (start < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', start);
+			if (end < 0) end = text.ByteLength();
+			int64 length = end - start;
+			if (length > 0 && text.ByteAt(end - 1) == '\r') --length;
+			lines.Push(text.Substring(start, length));
+			start = end + 1;
+		}
+		return lines;
+	}
+
+	void AppendEscaped(Core::StringBuilder& out, Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == '&') out.Append("&amp;");
+			else if (c == '<') out.Append("&lt;");
+			else if (c == '>') out.Append("&gt;");
+			else if (c == '"') out.Append("&quot;");
+			else out.AppendByte(c);
+		}
+	}
+}

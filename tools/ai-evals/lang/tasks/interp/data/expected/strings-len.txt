@@ -1,0 +1,11 @@
+0 1 11 5 5
+alpha: 5
+be: 2
+gamma: 5
+: 0
+delta!: 6
+longest delta!
+0123456789 10
+[1, two, [3]] 13
+[] is not an array: 2
+[][[]] 5

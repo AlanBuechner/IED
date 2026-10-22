@@ -1,0 +1,67 @@
+include "lists.ch"
+
+static MdHtml::ListItem Bullet(int32 level, const char* text) {
+	MdHtml::ListItem item;
+	item.level = level;
+	item.text = Core::String(text);
+	return item;
+}
+
+static MdHtml::ListItem Numbered(int32 level, int32 number, const char* text) {
+	MdHtml::ListItem item = Bullet(level, text);
+	item.ordered = true;
+	item.number = number;
+	return item;
+}
+
+static void ExpectList(const Core::Array<MdHtml::ListItem>& items, const char* html) {
+	Core::StringBuilder out;
+	MdHtml::RenderList(items, out);
+	assert_se(html, out.CStr(), "list");
+}
+
+[test("mdhtml.lists.flat")]
+static void RendersAFlatList() {
+	ExpectList({ Bullet(0, "a"), Bullet(0, "*b*") }, "<ul>\n<li>a</li>\n<li><em>b</em></li>\n</ul>\n");
+}
+
+[test("mdhtml.lists.nesting")]
+static void NestsDeeperItems() {
+	ExpectList({ Bullet(0, "a"), Bullet(1, "b"), Bullet(0, "c") }, "<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul>\n</li>\n<li>c</li>\n</ul>\n");
+}
+
+[test("mdhtml.lists.start")]
+static void StartsOrderedListsAtTheirFirstNumber() {
+	ExpectList({ Numbered(0, 3, "x"), Numbered(0, 9, "y") }, "<ol start=\"3\">\n<li>x</li>\n<li>y</li>\n</ol>\n");
+	ExpectList({ Numbered(0, 1, "x") }, "<ol>\n<li>x</li>\n</ol>\n");
+}
+
+[test("mdhtml.lists.kind_change")]
+static void StartsANewListWhereTheKindChanges() {
+	ExpectList({ Bullet(0, "a"), Numbered(0, 1, "b") }, "<ul>\n<li>a</li>\n</ul>\n<ol>\n<li>b</li>\n</ol>\n");
+	ExpectList({ Bullet(0, "a"), Numbered(1, 1, "x"), Bullet(1, "y") },
+		"<ul>\n<li>a\n<ol>\n<li>x</li>\n</ol>\n<ul>\n<li>y</li>\n</ul>\n</li>\n</ul>\n");
+}
+
+[test("mdhtml.lists.skipped_levels")]
+static void NestsSkippedLevelsOnce() {
+	ExpectList({ Bullet(0, "a"), Bullet(3, "b"), Bullet(1, "c") },
+		"<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul>\n<ul>\n<li>c</li>\n</ul>\n</li>\n</ul>\n");
+}
+
+[test("mdhtml.lists.below_first_level")]
+static void StartsAnotherListBelowTheFirstLevel() {
+	ExpectList({ Bullet(2, "a"), Bullet(0, "b") }, "<ul>\n<li>a</li>\n</ul>\n<ul>\n<li>b</li>\n</ul>\n");
+}
+
+[test("mdhtml.lists.from_markers")]
+static void MakesItemsFromMarkers() {
+	MdHtml::ListMarker marker;
+	marker.indent = 5;
+	marker.ordered = true;
+	marker.number = 12;
+	marker.text = Core::StringView("text");
+	MdHtml::ListItem item = MdHtml::MakeListItem(marker);
+	assert_eq(2, item.level, "level");
+	assert_true(item.ordered && item.number == 12 && item.text == "text", "fields");
+}

@@ -1,0 +1,97 @@
+include "inline.ch"
+
+static void ExpectInline(const char* markdown, const char* html) {
+	Core::String got = MdHtml::RenderInline(Core::StringView(markdown));
+	assert_se(html, got.CStr(), markdown);
+}
+
+[test("mdhtml.inline.emphasis")]
+static void RendersEmphasisAndStrong() {
+	ExpectInline("*em* and **strong**", "<em>em</em> and <strong>strong</strong>");
+	ExpectInline("***both***", "<em><strong>both</strong></em>");
+	ExpectInline("2*3*4", "2<em>3</em>4");
+	ExpectInline("*a\nb*", "<em>a\nb</em>");
+}
+
+[test("mdhtml.inline.nesting")]
+static void NestsEmphasis() {
+	ExpectInline("*a **b** c*", "<em>a <strong>b</strong> c</em>");
+	ExpectInline("**a *b* c**", "<strong>a <em>b</em> c</strong>");
+	ExpectInline("*a**b*", "<em>a</em><em>b</em>");
+}
+
+[test("mdhtml.inline.unmatched_stars")]
+static void LeavesUnmatchedStarsAsText() {
+	ExpectInline("*open", "*open");
+	ExpectInline("close*", "close*");
+	ExpectInline("**a*", "*<em>a</em>");
+	ExpectInline("*a**", "<em>a</em>*");
+	ExpectInline("a * b", "a * b");
+	ExpectInline("* not em *", "* not em *");
+	ExpectInline("a *\nb*", "a *\nb*");
+}
+
+[test("mdhtml.inline.code_spans")]
+static void RendersCodeSpans() {
+	ExpectInline("`code`", "<code>code</code>");
+	ExpectInline("``a ` b``", "<code>a ` b</code>");
+	ExpectInline("` a `", "<code>a</code>");
+	ExpectInline("`  `", "<code>  </code>");
+	ExpectInline("`a\nb`", "<code>a b</code>");
+	ExpectInline("`*not em* \\*`", "<code>*not em* \\*</code>");
+	ExpectInline("`<tag>`", "<code>&lt;tag&gt;</code>");
+}
+
+[test("mdhtml.inline.unclosed_backticks")]
+static void LeavesUnclosedBackticksAsText() {
+	ExpectInline("`unclosed", "`unclosed");
+	ExpectInline("```a``", "```a``");
+}
+
+[test("mdhtml.inline.links")]
+static void RendersLinks() {
+	ExpectInline("[text](http://x.com)", "<a href=\"http://x.com\">text</a>");
+	ExpectInline("[*em* text](u)", "<a href=\"u\"><em>em</em> text</a>");
+	ExpectInline("[a [b] c](u)", "<a href=\"u\">a [b] c</a>");
+	ExpectInline("[`]`](u)", "<a href=\"u\"><code>]</code></a>");
+	ExpectInline("[a]()", "<a href=\"\">a</a>");
+}
+
+[test("mdhtml.inline.links_do_not_nest")]
+static void LinksDoNotNest() {
+	ExpectInline("[outer [inner](i)](o)", "<a href=\"o\">outer [inner](i)</a>");
+	ExpectInline("*[a*](u)", "*<a href=\"u\">a*</a>");
+}
+
+[test("mdhtml.inline.link_destinations")]
+static void EscapesLinkDestinations() {
+	ExpectInline("[a](u\\)v)", "<a href=\"u)v\">a</a>");
+	ExpectInline("[a](x?a=1&b=\"2\")", "<a href=\"x?a=1&amp;b=&quot;2&quot;\">a</a>");
+	ExpectInline("[a](<b>)", "<a href=\"&lt;b&gt;\">a</a>");
+}
+
+[test("mdhtml.inline.no_links")]
+static void LeavesWhatIsNoLinkAsText() {
+	ExpectInline("[no url]", "[no url]");
+	ExpectInline("[a](b c)", "[a](b c)");
+	ExpectInline("[a] (u)", "[a] (u)");
+	ExpectInline("[a](u", "[a](u");
+}
+
+[test("mdhtml.inline.backslash_escapes")]
+static void AppliesBackslashEscapes() {
+	ExpectInline("\\*not\\*", "*not*");
+	ExpectInline("\\a", "\\a");
+	ExpectInline("a\\", "a\\");
+	ExpectInline("\\\\", "\\");
+	ExpectInline("\\`code\\`", "`code`");
+	ExpectInline("\\[a](b)", "[a](b)");
+	ExpectInline("\\<b\\>", "&lt;b&gt;");
+}
+
+[test("mdhtml.inline.html_escaping")]
+static void EscapesHtmlInText() {
+	ExpectInline("a < b & c > \"d\"", "a &lt; b &amp; c &gt; &quot;d&quot;");
+	ExpectInline("<b>bold</b>", "&lt;b&gt;bold&lt;/b&gt;");
+	ExpectInline("&amp;", "&amp;amp;");
+}

@@ -1,0 +1,7 @@
+// push needs an array.
+let names = ["ada"];
+push(names, "grace");
+print(names);
+let count = len(names);
+push(count, "linus");
+print("never printed");

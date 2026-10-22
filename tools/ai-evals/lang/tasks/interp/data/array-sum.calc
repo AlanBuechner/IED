@@ -1,0 +1,37 @@
+// Building an array and reducing it.
+let numbers = [4, 8, 15, 16, 23, 42];
+print(numbers);
+print("count", len(numbers), "first", numbers[0], "last", numbers[len(numbers) - 1]);
+
+let sum = 0;
+let largest = numbers[0];
+let i = 0;
+while (i < len(numbers)) {
+    sum = sum + numbers[i];
+    if (numbers[i] > largest) {
+        largest = numbers[i];
+    }
+    i = i + 1;
+}
+print("sum", sum, "largest", largest, "mean", sum / len(numbers));
+
+let squares = [];
+let n = 1;
+while (n <= 8) {
+    push(squares, n * n);
+    n = n + 1;
+}
+print("squares", squares, len(squares));
+
+let evens = [];
+i = 0;
+while (i < len(squares)) {
+    if (squares[i] % 2 == 0) {
+        push(evens, squares[i]);
+    }
+    i = i + 1;
+}
+print("even squares", evens);
+
+let empty = [];
+print("empty", empty, len(empty), [1], [nil], [true, false]);

@@ -1,0 +1,68 @@
+// A small stack machine: each program is an array of instructions [operation, argument].
+fn makeStack() {
+    let items = [];
+    let size = 0;
+    fn pushValue(value) {
+        if (size < len(items)) {
+            items[size] = value;
+        } else {
+            push(items, value);
+        }
+        size = size + 1;
+    }
+    fn popValue() {
+        size = size - 1;
+        return items[size];
+    }
+    fn depth() { return size; }
+    return [pushValue, popValue, depth];
+}
+
+fn run(program) {
+    let stack = makeStack();
+    let pushValue = stack[0];
+    let popValue = stack[1];
+    let depth = stack[2];
+    let pc = 0;
+    let output = [];
+    while (pc < len(program)) {
+        let op = program[pc][0];
+        if (op == "push") {
+            pushValue(program[pc][1]);
+        } else if (op == "add") {
+            pushValue(popValue() + popValue());
+        } else if (op == "mul") {
+            pushValue(popValue() * popValue());
+        } else if (op == "sub") {
+            let right = popValue();
+            pushValue(popValue() - right);
+        } else if (op == "dup") {
+            let top = popValue();
+            pushValue(top);
+            pushValue(top);
+        } else if (op == "print") {
+            push(output, popValue());
+        } else if (op == "jumpIfPositive") {
+            let top = popValue();
+            pushValue(top);
+            if (top > 0) {
+                pc = program[pc][1] - 1;
+            }
+        }
+        pc = pc + 1;
+    }
+    return [output, depth()];
+}
+
+print(run([["push", 2], ["push", 3], ["add", nil], ["push", 4], ["mul", nil], ["print", nil]]));
+
+// count down from 5, printing each number
+let countdown = [
+    ["push", 5],
+    ["dup", nil], ["print", nil],
+    ["push", 1], ["sub", nil],
+    ["jumpIfPositive", 1],
+    ["print", nil]
+];
+let result = run(countdown);
+print("printed", result[0], "left on the stack", result[1]);

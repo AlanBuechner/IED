@@ -1,0 +1,39 @@
+include "text.ch"
+
+[test("mdhtml.text.split_lines")]
+static void SplitsLinesAndDropsCarriageReturns() {
+	Core::Array<Core::StringView> lines = MdHtml::SplitLines(Core::StringView("a\r\nb\n\nc"));
+	assert_eq((int64)4, lines.Count(), "four lines");
+	assert_true(lines[0] == "a" && lines[1] == "b" && lines[2] == "" && lines[3] == "c", "their text");
+}
+
+[test("mdhtml.text.final_newline")]
+static void AFinalNewlineStartsNoLine() {
+	assert_eq((int64)1, MdHtml::SplitLines(Core::StringView("a\n")).Count(), "a, newline");
+	assert_eq((int64)0, MdHtml::SplitLines(Core::StringView("")).Count(), "empty");
+	assert_eq((int64)1, MdHtml::SplitLines(Core::StringView("\n")).Count(), "newline");
+	assert_eq((int64)2, MdHtml::SplitLines(Core::StringView("a\n\n")).Count(), "a, two newlines");
+}
+
+[test("mdhtml.text.trim")]
+static void TrimsSpacesAndTabsOnly() {
+	assert_true(MdHtml::Trim(Core::StringView(" \t a b\t ")) == "a b", "both ends");
+	assert_true(MdHtml::TrimStart(Core::StringView("\t x  ")) == "x  ", "start");
+	assert_true(MdHtml::Trim(Core::StringView("\n")) == "\n", "newline stays");
+	assert_true(MdHtml::IsBlank(Core::StringView(" \t ")) && MdHtml::IsBlank(Core::StringView("")), "blank");
+	assert_true(!MdHtml::IsBlank(Core::StringView("  .")), "not blank");
+}
+
+[test("mdhtml.text.indentation")]
+static void CountsIndentation() {
+	assert_eq(4, MdHtml::Indentation(Core::StringView("    x")), "spaces");
+	assert_eq(2, MdHtml::Indentation(Core::StringView("\t x")), "tab and space");
+	assert_eq(0, MdHtml::Indentation(Core::StringView("x  ")), "none");
+}
+
+[test("mdhtml.text.escape")]
+static void EscapesHtml() {
+	Core::StringBuilder out;
+	MdHtml::AppendEscaped(out, Core::StringView("a & b < c > d \"e\" 'f'"));
+	assert_se("a &amp; b &lt; c &gt; d &quot;e&quot; 'f'", out.CStr(), "escaped");
+}

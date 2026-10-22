@@ -1,0 +1,8 @@
+[workspace]
+name = "calc"
+toolchain = "dev"
+default-project = "calc"
+
+[project]
+name = "calc"
+kind = "executable"

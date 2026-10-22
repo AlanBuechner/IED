@@ -1,0 +1,6 @@
+// mdhtml - entry point.
+include "bedrock.ch"
+
+int32 main() {
+	return 0;
+}

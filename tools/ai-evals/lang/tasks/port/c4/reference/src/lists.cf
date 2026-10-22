@@ -1,0 +1,61 @@
+include "lists.ch"
+include "inline.ch"
+
+namespace MdHtml
+{
+	const int32 kSpacesPerLevel = 2;
+
+	// A list still open while items are written, with its last item still open too.
+	struct OpenList
+	{
+		public int32 level;
+		public bool ordered;
+		public bool itemHasList;   // the open item already holds a nested list
+	}
+
+	static void AppendOpeningTag(Core::StringBuilder& out, const ListItem& item) {
+		if (!item.ordered) {
+			out.Append("<ul>\n");
+		} else if (item.number == 1) {
+			out.Append("<ol>\n");
+		} else {
+			Core::Format(&out, "<ol start=\"{0:d}\">\n", item.number);
+		}
+	}
+
+	static void CloseList(Core::Array<OpenList>& open, Core::StringBuilder& out) {
+		out.Append(open.Back().ordered ? "</li>\n</ol>\n" : "</li>\n</ul>\n");
+		open.Pop();
+	}
+
+	ListItem MakeListItem(const ListMarker& marker) {
+		ListItem item;
+		item.level = marker.indent / kSpacesPerLevel;
+		item.ordered = marker.ordered;
+		item.number = marker.number;
+		item.text = Core::String(marker.text);
+		return item;
+	}
+
+	void RenderList(const Core::Array<ListItem>& items, Core::StringBuilder& out) {
+		Core::Array<OpenList> open;
+		for (const ListItem& item : items) {
+			while (!open.IsEmpty() && open.Back().level > item.level) CloseList(open, out);
+			if (!open.IsEmpty() && open.Back().level == item.level && open.Back().ordered != item.ordered) CloseList(open, out);
+			if (!open.IsEmpty() && open.Back().level == item.level) {
+				out.Append("</li>\n");
+				open.Back().itemHasList = false;
+			} else {
+				if (!open.IsEmpty() && !open.Back().itemHasList) {
+					out.Append("\n");
+					open.Back().itemHasList = true;
+				}
+				AppendOpeningTag(out, item);
+				open.Push(OpenList{ item.level, item.ordered, false });
+			}
+			out.Append("<li>");
+			out.Append(RenderInline(item.text.View()).View());
+		}
+		while (!open.IsEmpty()) CloseList(open, out);
+	}
+}

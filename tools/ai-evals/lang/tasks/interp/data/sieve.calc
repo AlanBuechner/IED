@@ -1,0 +1,24 @@
+// The primes up to 100 by the sieve of Eratosthenes.
+let limit = 100;
+let composite = [];
+let i = 0;
+while (i <= limit) {
+    push(composite, false);
+    i = i + 1;
+}
+
+let primes = [];
+let n = 2;
+while (n <= limit) {
+    if (!composite[n]) {
+        push(primes, n);
+        let multiple = n * n;
+        while (multiple <= limit) {
+            composite[multiple] = true;
+            multiple = multiple + n;
+        }
+    }
+    n = n + 1;
+}
+print(primes);
+print("count", len(primes), "largest", primes[len(primes) - 1]);

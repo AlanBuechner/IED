@@ -1,0 +1,126 @@
+include "parser.ch"
+
+namespace Calc
+{
+	// Binding strengths of the binary operators, loosest first.
+	const int32 kPrecedenceNone = 0;
+	const int32 kPrecedenceOr = 1;
+	const int32 kPrecedenceAnd = 2;
+	const int32 kPrecedenceEquality = 3;
+	const int32 kPrecedenceComparison = 4;
+	const int32 kPrecedenceSum = 5;
+	const int32 kPrecedenceProduct = 6;
+
+	int32 Precedence(TokenKind kind) {
+		switch (kind) {
+			case TokenKind::Or: return kPrecedenceOr;
+			case TokenKind::And: return kPrecedenceAnd;
+			case TokenKind::Equal:
+			case TokenKind::NotEqual: return kPrecedenceEquality;
+			case TokenKind::Less:
+			case TokenKind::LessEqual:
+			case TokenKind::Greater:
+			case TokenKind::GreaterEqual: return kPrecedenceComparison;
+			case TokenKind::Plus:
+			case TokenKind::Minus: return kPrecedenceSum;
+			case TokenKind::Star:
+			case TokenKind::Slash:
+			case TokenKind::Percent: return kPrecedenceProduct;
+			default: return kPrecedenceNone;
+		}
+	}
+
+	static Expr* NewBinary(const Token& op, Expr* left, Expr* right) {
+		if (op.kind == TokenKind::And || op.kind == TokenKind::Or) return new LogicalExpr(op.line, op.kind, left, right);
+		return new BinaryExpr(op.line, op.kind, left, right);
+	}
+
+	Expr* Parser::ParseExpression() {
+		return ParseBinary(kPrecedenceOr);
+	}
+
+	// Precedence climbing: the right side of an operator is parsed one level tighter, so `1 + 2 * 3` takes
+	// `2 * 3` as the right side of +, and operators of one level group to the left.
+	Expr* Parser::ParseBinary(int32 minPrecedence) {
+		Expr* left = ParseUnary();
+		while (true) {
+			const int32 precedence = Precedence(Peek().kind);
+			if (precedence == kPrecedenceNone || precedence < minPrecedence) return left;
+			const Token op = Advance();
+			Expr* right = ParseBinary(precedence + 1);
+			left = NewBinary(op, left, right);
+		}
+	}
+
+	Expr* Parser::ParseUnary() {
+		if (!Check(TokenKind::Minus) && !Check(TokenKind::Bang)) return ParseCall();
+		const Token op = Advance();
+		Expr* operand = ParseUnary();
+		return new UnaryExpr(op.line, op.kind, operand);
+	}
+
+	Expr* Parser::ParseCall() {
+		Expr* expr = ParsePrimary();
+		while (Check(TokenKind::LeftParen) || Check(TokenKind::LeftBracket)) {
+			const Token open = Advance();
+			if (open.kind == TokenKind::LeftParen) expr = new CallExpr(open.line, expr, ParseExpressionList(TokenKind::RightParen));
+			else expr = FinishIndex(open, expr);
+		}
+		return expr;
+	}
+
+	// The rest of `array[index]` once the opening bracket is read.
+	Expr* Parser::FinishIndex(const Token& open, Expr* array) {
+		Expr* index = ParseExpression();
+		Expect(TokenKind::RightBracket);
+		return new IndexExpr(open.line, array, index);
+	}
+
+	// `a, b, c` up to and including the closing token.
+	Core::Array<Expr*> Parser::ParseExpressionList(TokenKind closing) {
+		Core::Array<Expr*> items;
+		if (Match(closing)) return items;
+		do {
+			items.Push(ParseExpression());
+		} while (Match(TokenKind::Comma));
+		Expect(closing);
+		return items;
+	}
+
+	Expr* Parser::ParsePrimary() {
+		const Token& token = Peek();
+		switch (token.kind) {
+			case TokenKind::Number: return Literal(Value::Int(token.number));
+			case TokenKind::String: return Literal(Value::Str(token.text.View()));
+			case TokenKind::True: return Literal(Value::Bool(true));
+			case TokenKind::False: return Literal(Value::Bool(false));
+			case TokenKind::Nil: return Literal(Value::Nil());
+			case TokenKind::Identifier: {
+				const Token name = Advance();
+				return new VariableExpr(name.line, name.lexeme.View());
+			}
+			case TokenKind::LeftParen: return ParseGroup();
+			case TokenKind::LeftBracket: return ParseArray();
+			case TokenKind::Fn: return ParseFunction();
+			default: throw ScriptError(token.line, Core::String("expected expression but found ") + Describe(token));
+		}
+	}
+
+	// The current token as the literal `value`.
+	Expr* Parser::Literal(Value value) {
+		const Token token = Advance();
+		return new LiteralExpr(token.line, take(value));
+	}
+
+	Expr* Parser::ParseArray() {
+		const Token open = Advance();
+		return new ArrayExpr(open.line, ParseExpressionList(TokenKind::RightBracket));
+	}
+
+	Expr* Parser::ParseGroup() {
+		Advance();
+		Expr* expr = ParseExpression();
+		Expect(TokenKind::RightParen);
+		return expr;
+	}
+}

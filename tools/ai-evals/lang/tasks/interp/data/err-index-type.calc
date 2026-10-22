@@ -1,0 +1,7 @@
+// An index must be an int, also when assigning.
+let grid = [[1, 2], [3, 4]];
+grid[1][0] = 30;
+print(grid);
+let key = "0";
+grid[key][1] = 5;
+print("never printed");

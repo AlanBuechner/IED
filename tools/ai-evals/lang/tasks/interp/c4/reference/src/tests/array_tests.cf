@@ -1,0 +1,82 @@
+include "script_runs.ch"
+
+static Calc::Expr* ExpressionOf(const char* source) {
+	Core::Array<Calc::Stmt*> program = Calc::Parse(Core::StringView(source));
+	assert_true(program.Count() == 1 && program[0]->kind == Calc::StmtKind::Expression, source);
+	return ((Calc::ExpressionStmt*)program[0])->expression;
+}
+
+[test("calc.arrays.lexes")]
+static void LexesBrackets() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("a[0]"));
+	assert_true(tokens[1].kind == Calc::TokenKind::LeftBracket, "left");
+	assert_true(tokens[3].kind == Calc::TokenKind::RightBracket, "right");
+}
+
+[test("calc.arrays.parses")]
+static void ParsesArraysAndIndexes() {
+	Calc::Expr* expr = ExpressionOf("[1, [2], []][0][1 + 1];");
+	assert_true(expr->kind == Calc::ExprKind::Index, "outer index");
+	Calc::IndexExpr* outer = (Calc::IndexExpr*)expr;
+	assert_true(outer->index->kind == Calc::ExprKind::Binary, "index expression");
+	assert_true(outer->array->kind == Calc::ExprKind::Index, "inner index");
+	Calc::Expr* literal = ((Calc::IndexExpr*)outer->array)->array;
+	assert_true(literal->kind == Calc::ExprKind::Array, "literal");
+	Core::Array<Calc::Expr*>& elements = ((Calc::ArrayExpr*)literal)->elements;
+	assert_eq(3, elements.Count(), "three elements");
+	assert_true(elements[2]->kind == Calc::ExprKind::Array && ((Calc::ArrayExpr*)elements[2])->elements.Count() == 0, "empty literal");
+	assert_true(ExpressionOf("f(1)[2](3);")->kind == Calc::ExprKind::Call, "calls and indexes chain");
+}
+
+[test("calc.arrays.parses_index_assignment")]
+static void ParsesIndexAssignment() {
+	Core::Array<Calc::Stmt*> program = Calc::Parse(Core::StringView("grid[1][2] = 5;"));
+	assert_true(program[0]->kind == Calc::StmtKind::IndexAssign, "index assignment");
+	Calc::IndexAssignStmt* assign = (Calc::IndexAssignStmt*)program[0];
+	assert_true(assign->target->array->kind == Calc::ExprKind::Index, "nested target");
+	assert_true(assign->value->kind == Calc::ExprKind::Literal, "value");
+	assert_se("line 1: expected ']' but found ';'", ParseErrorOf("[1, 2;").CStr(), "unclosed literal");
+	assert_se("line 1: expected ']' but found ';'", ParseErrorOf("a[1;").CStr(), "unclosed index");
+	assert_se("line 1: expected expression but found ']'", ParseErrorOf("[1,];").CStr(), "trailing comma");
+	assert_se("line 1: invalid assignment target", ParseErrorOf("f() = 1;").CStr(), "call target");
+}
+
+[test("calc.arrays.values")]
+static void Arrays() {
+	ExpectOutput("let a = [1, 2, 3];\nprint(a, a[0] + a[2], len(a));", "[1, 2, 3] 4 3\n");
+	ExpectOutput("print([], len([]), [[1, [2]], \"s\", nil, true, [\"x\", \"y\"]]);", "[] 0 [[1, [2]], s, nil, true, [x, y]]\n");
+	ExpectOutput("fn id(x) { return x; }\nprint([id, print, fn () { }]);", "[<fn id>, <builtin print>, <fn>]\n");
+	ExpectOutput("let a = [1, 2];\na[1] = a[0] + 10;\nprint(a, str([a, 3]));", "[1, 11] [[1, 11], 3]\n");
+	ExpectOutput("let m = [[1, 2], [3, 4]];\nm[1][0] = 9;\nprint(m[1], m[1][0]);", "[9, 4] 9\n");
+	ExpectOutput("let a = [];\nprint(push(a, 1), push(a, \"two\"), a, len(a));", "nil nil [1, two] 2\n");
+	ExpectOutput("print(len(\"\"), len(\"hello\"), len(\"a\\nb\"));", "0 5 3\n");
+}
+
+[test("calc.arrays.shared")]
+static void ArraysAreShared() {
+	ExpectOutput("let a = [1];\nlet b = a;\npush(b, 2);\nb[0] = 7;\nprint(a, a == b, a == [7, 2], [] == []);", "[7, 2] true false false\n");
+	ExpectOutput("fn fill(list, n) { let i = 0; while (i < n) { push(list, i); i = i + 1; } }\nlet xs = [];\nfill(xs, 3);\nprint(xs);", "[0, 1, 2]\n");
+	ExpectOutput("let inner = [1];\nlet outer = [inner, inner];\ninner[0] = 5;\nprint(outer);", "[[5], [5]]\n");
+}
+
+[test("calc.arrays.functions")]
+static void ArraysOfFunctions() {
+	ExpectOutput("let ops = [fn (a, b) { return a + b; }, fn (a, b) { return a * b; }];\nlet i = 0;\nwhile (i < len(ops)) { print(ops[i](3, 4)); i = i + 1; }", "7\n12\n");
+}
+
+[test("calc.arrays.errors")]
+static void ArrayErrors() {
+	ExpectError("let a = [1, 2];\nprint(a[1]);\nprint(a[2]);", "2\n", "line 3: index out of range");
+	ExpectError("let a = [1];\nprint(a[-1]);", "", "line 2: index out of range");
+	ExpectError("let a = [];\na[0] = 1;", "", "line 2: index out of range");
+	ExpectError("let a = [1];\nprint(a[\"0\"]);", "", "line 2: index must be an int");
+	ExpectError("let a = [1];\na[true] = 2;", "", "line 2: index must be an int");
+	ExpectError("let s = \"abc\";\nprint(s[0]);", "", "line 2: cannot index string");
+	ExpectError("let n = 5;\nn[0] = 1;", "", "line 2: cannot index int");
+	ExpectError("print(len(5));", "", "line 1: len expects an array or a string");
+	ExpectError("push(1, 2);", "", "line 1: push expects an array");
+	ExpectError("push([1]);", "", "line 1: expected 2 arguments but got 1");
+	ExpectError("print(len([1], [2]));", "", "line 1: expected 1 argument but got 2");
+	ExpectError("print([1] + [2]);", "", "line 1: cannot apply '+' to array and array");
+	ExpectError("print([1, missing]);", "", "line 1: undefined variable 'missing'");
+}

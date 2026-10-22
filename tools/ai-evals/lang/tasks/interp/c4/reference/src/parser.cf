@@ -1,0 +1,164 @@
+include "parser.ch"
+
+namespace Calc
+{
+	Core::Array<Stmt*> Parse(Core::StringView source) {
+		Parser parser = Parser(Tokenize(source));
+		return parser.ParseProgram();
+	}
+
+	Core::Array<Stmt*> Parser::ParseProgram() {
+		Core::Array<Stmt*> statements;
+		while (!Check(TokenKind::EndOfInput)) statements.Push(ParseStatement());
+		return statements;
+	}
+
+	Stmt* Parser::ParseStatement() {
+		switch (Peek().kind) {
+			case TokenKind::Let: return ParseLet();
+			case TokenKind::If: return ParseIf();
+			case TokenKind::While: return ParseWhile();
+			case TokenKind::Return: return ParseReturn();
+			case TokenKind::LeftBrace: return ParseBlock();
+			case TokenKind::Fn:
+				if (PeekAt(1).kind == TokenKind::Identifier) return ParseFunctionStatement();
+				return ParseExpressionStatement();
+			default: return ParseExpressionStatement();
+		}
+	}
+
+	BlockStmt* Parser::ParseBlock() {
+		const Token open = Expect(TokenKind::LeftBrace);
+		BlockStmt* block = new BlockStmt(open.line);
+		while (!Check(TokenKind::RightBrace) && !Check(TokenKind::EndOfInput)) block->statements.Push(ParseStatement());
+		Expect(TokenKind::RightBrace);
+		return block;
+	}
+
+	Stmt* Parser::ParseLet() {
+		const Token keyword = Advance();
+		const Token name = Expect(TokenKind::Identifier);
+		Expect(TokenKind::Assign);
+		return new LetStmt(keyword.line, name.lexeme.View(), ParseTerminatedExpression());
+	}
+
+	Stmt* Parser::ParseIf() {
+		const Token keyword = Advance();
+		Expr* condition = ParseCondition();
+		IfStmt* stmt = new IfStmt(keyword.line, condition, ParseBlock());
+		if (!Match(TokenKind::Else)) return stmt;
+		if (Check(TokenKind::If)) stmt->elseBranch = ParseIf();
+		else stmt->elseBranch = ParseBlock();
+		return stmt;
+	}
+
+	Stmt* Parser::ParseWhile() {
+		const Token keyword = Advance();
+		Expr* condition = ParseCondition();
+		return new WhileStmt(keyword.line, condition, ParseBlock());
+	}
+
+	// The parenthesized condition of an if or a while.
+	Expr* Parser::ParseCondition() {
+		Expect(TokenKind::LeftParen);
+		Expr* condition = ParseExpression();
+		Expect(TokenKind::RightParen);
+		return condition;
+	}
+
+	Stmt* Parser::ParseFunctionStatement() {
+		return new FunctionStmt(ParseFunction());
+	}
+
+	// `fn name(parameters) { body }`, the name optional.
+	FunctionExpr* Parser::ParseFunction() {
+		const Token keyword = Advance();
+		FunctionExpr* function = new FunctionExpr(keyword.line);
+		if (Check(TokenKind::Identifier)) function->name = Advance().lexeme;
+		function->parameters = ParseParameters();
+		++functionDepth;
+		BlockStmt* body = ParseBlock();
+		--functionDepth;
+		function->body = take(body->statements);
+		return function;
+	}
+
+	Core::Array<Core::String> Parser::ParseParameters() {
+		Expect(TokenKind::LeftParen);
+		Core::Array<Core::String> names;
+		if (Match(TokenKind::RightParen)) return names;
+		do {
+			names.Push(Expect(TokenKind::Identifier).lexeme);
+		} while (Match(TokenKind::Comma));
+		Expect(TokenKind::RightParen);
+		return names;
+	}
+
+	Stmt* Parser::ParseReturn() {
+		const Token keyword = Advance();
+		if (functionDepth == 0) throw ScriptError(keyword.line, Core::String("return outside of a function"));
+		if (Match(TokenKind::Semicolon)) return new ReturnStmt(keyword.line, null);
+		return new ReturnStmt(keyword.line, ParseTerminatedExpression());
+	}
+
+	// `expression;`, or an assignment when an = follows the expression.
+	Stmt* Parser::ParseExpressionStatement() {
+		Expr* expr = ParseExpression();
+		if (Check(TokenKind::Assign)) return ParseAssignment(expr);
+		Expect(TokenKind::Semicolon);
+		return new ExpressionStmt(expr->line, expr);
+	}
+
+	// The rest of `target = value;` once the target is read.
+	Stmt* Parser::ParseAssignment(Expr* target) {
+		const Token equals = Advance();
+		if (target->kind != ExprKind::Variable && target->kind != ExprKind::Index) throw ScriptError(equals.line, Core::String("invalid assignment target"));
+		Expr* value = ParseTerminatedExpression();
+		if (target->kind == ExprKind::Index) return new IndexAssignStmt((IndexExpr*)target, value);
+		VariableExpr* variable = (VariableExpr*)target;
+		return new AssignStmt(variable->line, variable->name.View(), value);
+	}
+
+	// An expression and the ; after it.
+	Expr* Parser::ParseTerminatedExpression() {
+		Expr* expr = ParseExpression();
+		Expect(TokenKind::Semicolon);
+		return expr;
+	}
+
+	// --- Reading tokens ------------------------------------------------------------------------------------------
+
+	const Token& Parser::Peek() const {
+		return PeekAt(0);
+	}
+
+	// The token `offset` places ahead; past the end, the final EndOfInput.
+	const Token& Parser::PeekAt(int64 offset) const {
+		if (position + offset >= tokens.Count()) return tokens.Back();
+		return tokens[position + offset];
+	}
+
+	Token Parser::Advance() {
+		Token token = Peek();
+		if (position < tokens.Count() - 1) ++position;
+		return token;
+	}
+
+	bool Parser::Check(TokenKind kind) const {
+		return Peek().kind == kind;
+	}
+
+	// Consumes the next token when it is of `kind`.
+	bool Parser::Match(TokenKind kind) {
+		if (!Check(kind)) return false;
+		Advance();
+		return true;
+	}
+
+	// Consumes the next token, which must be of `kind`.
+	Token Parser::Expect(TokenKind kind) {
+		const Token& token = Peek();
+		if (token.kind != kind) throw ScriptError(token.line, Core::String("expected ") + KindText(kind) + " but found " + Describe(token));
+		return Advance();
+	}
+}

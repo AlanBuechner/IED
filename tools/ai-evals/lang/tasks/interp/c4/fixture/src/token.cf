@@ -1,0 +1,79 @@
+include "token.ch"
+
+namespace Calc
+{
+	static Core::StringView OperatorSpelling(TokenKind kind) {
+		switch (kind) {
+			case TokenKind::Plus: return Core::StringView("+");
+			case TokenKind::Minus: return Core::StringView("-");
+			case TokenKind::Star: return Core::StringView("*");
+			case TokenKind::Slash: return Core::StringView("/");
+			case TokenKind::Percent: return Core::StringView("%");
+			case TokenKind::Bang: return Core::StringView("!");
+			case TokenKind::Equal: return Core::StringView("==");
+			case TokenKind::NotEqual: return Core::StringView("!=");
+			case TokenKind::Less: return Core::StringView("<");
+			case TokenKind::LessEqual: return Core::StringView("<=");
+			case TokenKind::Greater: return Core::StringView(">");
+			case TokenKind::GreaterEqual: return Core::StringView(">=");
+			case TokenKind::And: return Core::StringView("&&");
+			case TokenKind::Or: return Core::StringView("||");
+			default: return Core::StringView();
+		}
+	}
+
+	static Core::StringView PunctuationSpelling(TokenKind kind) {
+		switch (kind) {
+			case TokenKind::LeftParen: return Core::StringView("(");
+			case TokenKind::RightParen: return Core::StringView(")");
+			case TokenKind::LeftBrace: return Core::StringView("{");
+			case TokenKind::RightBrace: return Core::StringView("}");
+			case TokenKind::Comma: return Core::StringView(",");
+			case TokenKind::Semicolon: return Core::StringView(";");
+			case TokenKind::Assign: return Core::StringView("=");
+			default: return OperatorSpelling(kind);
+		}
+	}
+
+	Core::StringView Spelling(TokenKind kind) {
+		switch (kind) {
+			case TokenKind::Let: return Core::StringView("let");
+			case TokenKind::Fn: return Core::StringView("fn");
+			case TokenKind::If: return Core::StringView("if");
+			case TokenKind::Else: return Core::StringView("else");
+			case TokenKind::Return: return Core::StringView("return");
+			case TokenKind::True: return Core::StringView("true");
+			case TokenKind::False: return Core::StringView("false");
+			case TokenKind::Nil: return Core::StringView("nil");
+			default: return PunctuationSpelling(kind);
+		}
+	}
+
+	bool KeywordKind(Core::StringView word, TokenKind& kind) {
+		if (word == "let") kind = TokenKind::Let;
+		else if (word == "fn") kind = TokenKind::Fn;
+		else if (word == "if") kind = TokenKind::If;
+		else if (word == "else") kind = TokenKind::Else;
+		else if (word == "return") kind = TokenKind::Return;
+		else if (word == "true") kind = TokenKind::True;
+		else if (word == "false") kind = TokenKind::False;
+		else if (word == "nil") kind = TokenKind::Nil;
+		else return false;
+		return true;
+	}
+
+	Core::String KindText(TokenKind kind) {
+		switch (kind) {
+			case TokenKind::EndOfInput: return Core::String("end of input");
+			case TokenKind::Number: return Core::String("number");
+			case TokenKind::String: return Core::String("string");
+			case TokenKind::Identifier: return Core::String("identifier");
+			default: return Core::String("'") + Spelling(kind) + "'";
+		}
+	}
+
+	Core::String Describe(const Token& token) {
+		if (token.kind == TokenKind::EndOfInput) return Core::String("end of input");
+		return Core::String("'") + token.lexeme.View() + "'";
+	}
+}

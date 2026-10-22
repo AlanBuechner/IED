@@ -1,0 +1,41 @@
+title = "Explain how an interpreter parses operators and calls functions"
+category = "explain"
+set = "holdout"
+timeout_minutes = 20
+mode = "ask"
+
+# What a right answer names, as the code writes it (the same names in both languages): precedence climbing in
+# Parser.ParseBinary with the table in Precedence (expressions.go / expressions.cf); CallFunction makes a new
+# Environment whose parent is the function's closure (FunctionValue's Closure / closure) and Defines the parameters
+# in it, bound to the arguments.
+answer_facts = [
+	"ParseBinary",
+	"Precedence",
+	"CallFunction",
+	"Environment",
+	"Define",
+	"(?i)closure",
+	"(?i)parent",
+]
+
+[c4]
+project = "calc"
+prompt = """
+I'm new to this code base: `calc` is an interpreter for a small scripting language, written in C4 (a Nuke workspace), and README.md describes the language. Two questions, so I can find my way around:
+
+1. How does a binary expression like `1 + 2 * 3` get parsed so that `*` binds tighter than `+` and `10 - 4 - 3` groups to the left? Which functions take part, and where is the precedence of each operator defined?
+2. What happens when a script calls a function it defined: where are the arguments bound to the parameters, and how does the function's body see the variables of the scope where the function was defined, even after that scope has ended?
+
+Name the functions and types involved and the files they are in. Please don't change any code.
+"""
+
+[go]
+project = "calc"
+prompt = """
+I'm new to this code base: `calc` is an interpreter for a small scripting language, written in Go (package main in this module), and README.md describes the language. Two questions, so I can find my way around:
+
+1. How does a binary expression like `1 + 2 * 3` get parsed so that `*` binds tighter than `+` and `10 - 4 - 3` groups to the left? Which functions take part, and where is the precedence of each operator defined?
+2. What happens when a script calls a function it defined: where are the arguments bound to the parameters, and how does the function's body see the variables of the scope where the function was defined, even after that scope has ended?
+
+Name the functions and types involved and the files they are in. Please don't change any code.
+"""

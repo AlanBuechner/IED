@@ -1,0 +1,30 @@
+<pre><code class="language-go">package main
+
+func main() {
+	fmt.Println(&quot;&lt;hello&gt; &amp; \&quot;bye\&quot; *not emphasis*&quot;)
+}
+</code></pre>
+<pre><code>```
+Four backticks hold a line of three.
+``` not a closing fence: it has text after it
+</code></pre>
+<pre><code class="language-python">print(1)
+</code></pre>
+<pre><code></code></pre>
+<pre><code class="language-js">  indented fence lines are kept as they are
+</code></pre>
+<p>After the fence.</p>
+<pre><code class="language-c++">int x = a &lt; b ? 1 : 2;
+</code></pre>
+<p>```a<code>b</code> is no fence: its info string holds a backtick</p>
+<blockquote>
+<pre><code>unclosed fence in a quote
+    keeps its indentation
+</code></pre>
+</blockquote>
+<p>ends with the quote</p>
+<pre><code>an unclosed fence runs to the end
+
+# not a heading
+- not a list item
+</code></pre>

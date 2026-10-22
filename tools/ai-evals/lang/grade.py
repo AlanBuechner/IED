@@ -431,6 +431,7 @@ def function_lengths(text, lang):
 	"""(name, lines) of each function body."""
 	clean = common.strip_c_comments(text)
 	clean = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', clean)
+	clean = re.sub(r"'(?:\\.|[^'\\\n])'", "' '", clean)
 	found = []
 	for match in FUNCTION_START[lang].finditer(clean):
 		name = match.group(1)
@@ -460,7 +461,7 @@ def globals_count(text, lang):
 	count, depth, namespace_depths = 0, 0, set()
 	for line in clean.split("\n"):
 		stripped = line.strip()
-		if depth - len(namespace_depths) == 0 and re.match(r"^(static\s+)?(?!const\b|return\b|namespace\b|include\b|class\b|struct\b|enum\b|interface\b|template\b|typedef\b|using\b)[\w:<>,\*& ]+\s+\w+\s*(=[^;]*)?;$", stripped) and "(" not in stripped.split("=")[0]:
+		if depth - len(namespace_depths) == 0 and re.match(r"^(static\s+)?(?!const\b|return\b|namespace\b|include\b|class\b|struct\b|enum\b|interface\b|template\b|typedef\b|using\b|alias\b)[\w:<>,\*& ]+\s+\w+\s*(=[^;]*)?;$", stripped) and "(" not in stripped.split("=")[0]:
 			count += 1
 		if re.match(r"^namespace\b", stripped):
 			namespace_depths.add(depth + 1)

@@ -1,0 +1,49 @@
+include "builtins.ch"
+include "errors.ch"
+
+namespace Calc
+{
+	// Writes the arguments separated by spaces, then a line break.
+	static Value BuiltinPrint(const BuiltinCall& call) {
+		Core::StringBuilder line;
+		for (int64 i = 0; i < call.arguments.Count(); ++i) {
+			if (i > 0) line.Append(" ");
+			AppendValue(line, call.arguments[i]);
+		}
+		line.Append("\n");
+		call.output->Write(line.View());
+		return Value::Nil();
+	}
+
+	// The argument as print writes it.
+	static Value BuiltinStr(const BuiltinCall& call) {
+		return Value::Str(FormatValue(call.arguments[0]).View());
+	}
+
+	// The number of elements of an array or of bytes of a string.
+	static Value BuiltinLen(const BuiltinCall& call) {
+		const Value& value = call.arguments[0];
+		if (value.kind == ValueKind::Array) return Value::Int(value.array->elements.Count());
+		if (value.kind == ValueKind::String) return Value::Int(value.text.ByteLength());
+		throw ScriptError(call.line, Core::String("len expects an array or a string"));
+	}
+
+	// Appends the second argument to the array that is the first.
+	static Value BuiltinPush(const BuiltinCall& call) {
+		const Value& array = call.arguments[0];
+		if (array.kind != ValueKind::Array) throw ScriptError(call.line, Core::String("push expects an array"));
+		array.array->elements.Push(call.arguments[1]);
+		return Value::Nil();
+	}
+
+	static void DefineBuiltin(Environment* globals, BuiltinValue* builtin) {
+		globals->Define(builtin->name.View(), Value::Builtin(builtin));
+	}
+
+	void DefineBuiltins(Environment* globals) {
+		DefineBuiltin(globals, new BuiltinValue(Core::StringView("print"), kAnyArgumentCount, BuiltinPrint));
+		DefineBuiltin(globals, new BuiltinValue(Core::StringView("str"), 1, BuiltinStr));
+		DefineBuiltin(globals, new BuiltinValue(Core::StringView("len"), 1, BuiltinLen));
+		DefineBuiltin(globals, new BuiltinValue(Core::StringView("push"), 2, BuiltinPush));
+	}
+}

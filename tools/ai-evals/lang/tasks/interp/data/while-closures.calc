@@ -1,0 +1,88 @@
+// Loops and closures together.
+fn makeCounter(start) {
+    let n = start;
+    return fn () {
+        n = n + 1;
+        return n;
+    };
+}
+
+// Each counter made in the loop keeps its own count.
+let i = 0;
+let total = 0;
+while (i < 4) {
+    let counter = makeCounter(i * 10);
+    counter();
+    total = total + counter();
+    i = i + 1;
+}
+print("total", total);
+
+// A closure sees the variable it captured change.
+let seen = fn () { return i; };
+while (i > 0) {
+    i = i - 1;
+}
+print("seen", seen());
+
+// Each pass of the body is a scope of its own: closures keep their pass's variables.
+let first = nil;
+let last = nil;
+let j = 0;
+while (j < 3) {
+    let snapshot = j * j + 100;
+    if (first == nil) {
+        first = fn () { return snapshot; };
+    }
+    last = fn () { return snapshot; };
+    j = j + 1;
+}
+print("first", first(), "last", last());
+
+// A closure called from a loop accumulates.
+fn makeSum() {
+    let sum = 0;
+    return fn (x) {
+        sum = sum + x;
+        return sum;
+    };
+}
+let add = makeSum();
+let k = 1;
+let result = 0;
+while (k <= 10) {
+    result = add(k);
+    k = k + 1;
+}
+print("sum", result);
+
+// Loops inside functions, and a return from inside a loop.
+fn firstSquareOver(limit) {
+    let n = 1;
+    while (true) {
+        if (n * n > limit) {
+            return n;
+        }
+        n = n + 1;
+    }
+}
+print("square", firstSquareOver(200), firstSquareOver(0));
+
+// Nested loops.
+let row = 1;
+while (row <= 4) {
+    let col = 1;
+    let line = "";
+    while (col <= row) {
+        line = line + str(row * col) + " ";
+        col = col + 1;
+    }
+    print(line + "|");
+    row = row + 1;
+}
+
+// A loop that never runs.
+while (false) {
+    print("never");
+}
+print("done");

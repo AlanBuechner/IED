@@ -1,0 +1,30 @@
+include "environment.ch"
+
+namespace Calc
+{
+	void Environment::Define(Core::StringView name, Value value) {
+		values[Core::String(name)] = take(value);
+	}
+
+	bool Environment::Assign(Core::StringView name, const Value& value) {
+		for (Environment* scope = this; scope != null; scope = scope->parent) {
+			Value* found = scope->values.FindAs(name);
+			if (found) {
+				*found = value;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool Environment::Lookup(Core::StringView name, Value& value) {
+		for (Environment* scope = this; scope != null; scope = scope->parent) {
+			Value* found = scope->values.FindAs(name);
+			if (found) {
+				value = *found;
+				return true;
+			}
+		}
+		return false;
+	}
+}

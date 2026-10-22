@@ -1,0 +1,105 @@
+include "value.ch"
+include "ast.ch"
+
+namespace Calc
+{
+	Value Value::Nil() {
+		Value value;
+		value.kind = ValueKind::Nil;
+		return value;
+	}
+
+	Value Value::Int(int64 integer) {
+		Value value;
+		value.kind = ValueKind::Int;
+		value.integer = integer;
+		return value;
+	}
+
+	Value Value::Bool(bool boolean) {
+		Value value;
+		value.kind = ValueKind::Bool;
+		value.boolean = boolean;
+		return value;
+	}
+
+	Value Value::Str(Core::StringView text) {
+		Value value;
+		value.kind = ValueKind::String;
+		value.text = Core::String(text);
+		return value;
+	}
+
+	Value Value::Function(FunctionValue* function) {
+		Value value;
+		value.kind = ValueKind::Function;
+		value.function = function;
+		return value;
+	}
+
+	Value Value::Builtin(BuiltinValue* builtin) {
+		Value value;
+		value.kind = ValueKind::Builtin;
+		value.builtin = builtin;
+		return value;
+	}
+
+	Core::StringView Value::TypeName() const {
+		switch (kind) {
+			case ValueKind::Int: return Core::StringView("int");
+			case ValueKind::Bool: return Core::StringView("bool");
+			case ValueKind::String: return Core::StringView("string");
+			case ValueKind::Function: return Core::StringView("function");
+			case ValueKind::Builtin: return Core::StringView("function");
+			default: return Core::StringView("nil");
+		}
+	}
+
+	bool IsTruthy(const Value& value) {
+		if (value.kind == ValueKind::Bool) return value.boolean;
+		return value.kind != ValueKind::Nil;
+	}
+
+	bool ValuesEqual(const Value& a, const Value& b) {
+		if (a.kind != b.kind) return false;
+		switch (a.kind) {
+			case ValueKind::Int: return a.integer == b.integer;
+			case ValueKind::Bool: return a.boolean == b.boolean;
+			case ValueKind::String: return a.text == b.text;
+			case ValueKind::Function: return a.function == b.function;
+			case ValueKind::Builtin: return a.builtin == b.builtin;
+			default: return true;
+		}
+	}
+
+	static void AppendFunction(Core::StringBuilder& out, const FunctionValue* function) {
+		if (function->declaration->name.IsEmpty()) {
+			out.Append("<fn>");
+			return;
+		}
+		out.Append("<fn ");
+		out.Append(function->declaration->name.View());
+		out.Append(">");
+	}
+
+	void AppendValue(Core::StringBuilder& out, const Value& value) {
+		switch (value.kind) {
+			case ValueKind::Int: out.AppendInt(value.integer); break;
+			case ValueKind::Bool: out.Append(value.boolean ? "true" : "false"); break;
+			case ValueKind::String: out.Append(value.text.View()); break;
+			case ValueKind::Function: AppendFunction(out, value.function); break;
+			case ValueKind::Builtin:
+				out.Append("<builtin ");
+				out.Append(value.builtin->name.View());
+				out.Append(">");
+				break;
+			default: out.Append("nil"); break;
+		}
+	}
+
+	Core::String FormatValue(const Value& value) {
+		Core::StringBuilder out;
+		AppendValue(out, value);
+		return out.ToString();
+	}
+}

@@ -1,0 +1,9 @@
+// A runtime error stops the script after what it printed.
+fn label(n) {
+    return "item " + str(n);
+}
+print(label(1));
+print(label(2));
+let count = 3;
+print("count: " + count);
+print("never printed");

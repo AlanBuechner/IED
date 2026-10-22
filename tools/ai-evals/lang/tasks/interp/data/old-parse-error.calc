@@ -1,0 +1,4 @@
+// A parse error stops the script before anything runs.
+print("not printed");
+let x = 1
+print(x);

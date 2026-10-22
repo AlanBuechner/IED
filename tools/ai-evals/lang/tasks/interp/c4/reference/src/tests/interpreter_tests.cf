@@ -1,0 +1,78 @@
+include "script_runs.ch"
+
+[test("calc.interpreter.arithmetic")]
+static void Arithmetic() {
+	ExpectOutput("print(1 + 2 * 3, (1 + 2) * 3, 10 - 4 - 3);", "7 9 3\n");
+	ExpectOutput("print(7 / 2, -7 / 2, 7 % 3, -7 % 3, 7 % -3);", "3 -3 1 -1 1\n");
+	ExpectOutput("print(-(2 - 5), --4);", "3 4\n");
+}
+
+[test("calc.interpreter.comparisons_and_logic")]
+static void ComparisonsAndLogic() {
+	ExpectOutput("print(1 < 2, 2 <= 2, 3 > 4, 4 >= 5, 1 == 1, 1 != 1);", "true true false false true false\n");
+	ExpectOutput("print(\"a\" == \"a\", \"a\" == \"b\", 1 == \"1\", nil == nil, true == true, nil == false);", "true false false true true false\n");
+	ExpectOutput("print(!true, !nil, !0, !\"\");", "false true false false\n");
+	ExpectOutput("print(true && 1, nil && 1, false || nil, 0 || false);", "true false false true\n");
+}
+
+[test("calc.interpreter.short_circuit")]
+static void ShortCircuit() {
+	ExpectOutput("print(false && missing, true || missing);", "false true\n");
+}
+
+[test("calc.interpreter.strings")]
+static void Strings() {
+	ExpectOutput("print(\"con\" + \"cat\", str(12) + \"!\", str(nil), str(true), str(\"s\"));", "concat 12! nil true s\n");
+	ExpectOutput("print(\"tab\\\\here\", \"quote\\\"\", \"two\\nlines\");", "tab\\here quote\" two\nlines\n");
+}
+
+[test("calc.interpreter.print_formats")]
+static void PrintFormats() {
+	ExpectOutput("fn add(a, b) { return a + b; }\nprint(add, fn (x) { return x; }, print, nil, -5);", "<fn add> <fn> <builtin print> nil -5\n");
+	ExpectOutput("print();", "\n");
+}
+
+[test("calc.interpreter.scopes")]
+static void Scopes() {
+	ExpectOutput("let x = 1;\n{ let x = 2; print(x); x = 3; print(x); }\nprint(x);", "2\n3\n1\n");
+	ExpectOutput("let x = 1;\n{ x = 5; }\nprint(x);", "5\n");
+	ExpectOutput("let x = 1;\nlet x = x + 1;\nprint(x);", "2\n");
+	ExpectOutput("if (true) { let inner = 1; }\nlet inner = 2;\nprint(inner);", "2\n");
+}
+
+[test("calc.interpreter.if_chains")]
+static void IfChains() {
+	ExpectOutput("fn sign(n) { if (n < 0) { return \"neg\"; } else if (n == 0) { return \"zero\"; } else { return \"pos\"; } }\nprint(sign(-3), sign(0), sign(8));", "neg zero pos\n");
+	ExpectOutput("if (nil) { print(1); }\nif (0) { print(2); }", "2\n");
+}
+
+[test("calc.interpreter.functions_and_closures")]
+static void FunctionsAndClosures() {
+	ExpectOutput("fn fib(n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); }\nprint(fib(15));", "610\n");
+	ExpectOutput("fn counter() { let n = 0; return fn () { n = n + 1; return n; }; }\nlet a = counter();\nlet b = counter();\na(); a();\nprint(a(), b());", "3 1\n");
+	ExpectOutput("fn adder(x) { return fn (y) { return x + y; }; }\nprint(adder(3)(4));", "7\n");
+	ExpectOutput("fn twice(f, x) { return f(f(x)); }\nprint(twice(fn (v) { return v * 3; }, 2));", "18\n");
+	ExpectOutput("fn nothing() { }\nfn early() { return; print(1); }\nprint(nothing(), early());", "nil nil\n");
+}
+
+[test("calc.interpreter.closures_see_later_assignments")]
+static void ClosuresSeeLaterAssignments() {
+	ExpectOutput("let x = 1;\nfn get() { return x; }\nx = 2;\nprint(get());", "2\n");
+}
+
+[test("calc.interpreter.runtime_errors")]
+static void RuntimeErrors() {
+	ExpectError("print(1);\nprint(y);", "1\n", "line 2: undefined variable 'y'");
+	ExpectError("z = 1;", "", "line 1: undefined variable 'z'");
+	ExpectError("let s = \"a\";\nprint(s + 1);", "", "line 2: cannot apply '+' to string and int");
+	ExpectError("print(1 < \"b\");", "", "line 1: cannot apply '<' to int and string");
+	ExpectError("print(-\"x\");", "", "line 1: cannot apply '-' to string");
+	ExpectError("print(10 / (5 - 5));", "", "line 1: division by zero");
+	ExpectError("print(1 % 0);", "", "line 1: division by zero");
+	ExpectError("let n = 3;\nn(1);", "", "line 2: cannot call int");
+	ExpectError("fn f(a, b) { return a; }\nf(1);", "", "line 2: expected 2 arguments but got 1");
+	ExpectError("fn g(a) { return a; }\ng(1, 2);", "", "line 2: expected 1 argument but got 2");
+	ExpectError("str();", "", "line 1: expected 1 argument but got 0");
+	ExpectError("fn inner() {\n  return nil + 1;\n}\ninner();", "", "line 2: cannot apply '+' to nil and int");
+	ExpectError("print(true * 2);", "", "line 1: cannot apply '*' to bool and int");
+}

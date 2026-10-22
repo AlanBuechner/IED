@@ -1,0 +1,8 @@
+[workspace]
+name = "mdhtml"
+toolchain = "dev"
+default-project = "mdhtml"
+
+[project]
+name = "mdhtml"
+kind = "executable"

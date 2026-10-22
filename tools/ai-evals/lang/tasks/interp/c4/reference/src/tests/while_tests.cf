@@ -1,0 +1,48 @@
+include "script_runs.ch"
+
+[test("calc.while.lexes")]
+static void LexesWhile() {
+	Core::Array<Calc::Token> tokens = Calc::Tokenize(Core::StringView("while whilst"));
+	assert_true(tokens[0].kind == Calc::TokenKind::While, "keyword");
+	assert_true(tokens[1].kind == Calc::TokenKind::Identifier, "identifier");
+}
+
+[test("calc.while.parses")]
+static void ParsesWhile() {
+	Core::Array<Calc::Stmt*> program = Calc::Parse(Core::StringView("while (i < 3) { i = i + 1; print(i); }"));
+	assert_eq(1, program.Count(), "one statement");
+	assert_true(program[0]->kind == Calc::StmtKind::While, "while");
+	Calc::WhileStmt* loop = (Calc::WhileStmt*)program[0];
+	assert_true(loop->condition->kind == Calc::ExprKind::Binary && ((Calc::BinaryExpr*)loop->condition)->op == Calc::TokenKind::Less, "condition");
+	assert_eq(2, loop->body->statements.Count(), "body");
+	assert_se("line 1: expected '(' but found 'i'", ParseErrorOf("while i < 3 { }").CStr(), "parenthesis");
+	assert_se("line 1: expected '{' but found 'i'", ParseErrorOf("while (true) i;").CStr(), "brace");
+	assert_se("line 2: expected '}' but found end of input", ParseErrorOf("while (true) {\n").CStr(), "unclosed");
+	assert_se("line 1: expected identifier but found 'while'", ParseErrorOf("let while = 1;").CStr(), "keyword");
+	assert_se("line 1: expected expression but found '}'", ParseErrorOf("while (x) { } }").CStr(), "stray brace");
+}
+
+[test("calc.while.loops")]
+static void WhileLoops() {
+	ExpectOutput("let i = 0;\nwhile (i < 3) { print(i); i = i + 1; }\nprint(\"done\", i);", "0\n1\n2\ndone 3\n");
+	ExpectOutput("while (false) { print(1); }\nwhile (nil) { print(2); }", "");
+	ExpectOutput("let n = 0;\nlet total = 0;\nwhile (n < 100) { n = n + 1; if (n % 2 == 0) { total = total + n; } }\nprint(total);", "2550\n");
+}
+
+[test("calc.while.body_scope")]
+static void WhileBodyIsAScopeEachTime() {
+	ExpectOutput("let i = 0;\nlet first = nil;\nwhile (i < 3) { let j = i * 10; if (i == 0) { first = fn () { return j; }; } i = i + 1; }\nprint(first());", "0\n");
+}
+
+[test("calc.while.return")]
+static void ReturnLeavesALoop() {
+	ExpectOutput("fn firstOver(limit) { let n = 1; while (true) { if (n * n > limit) { return n; } n = n + 1; } }\nprint(firstOver(50));", "8\n");
+}
+
+[test("calc.while.errors")]
+static void WhileErrors() {
+	ExpectError("let i = 0;\nwhile (i < limit) { i = i + 1; }", "", "line 2: undefined variable 'limit'");
+	ExpectError("let i = 0;\nwhile (i < 2) {\n  print(i);\n  i = i + missing;\n}", "0\n", "line 4: undefined variable 'missing'");
+	ExpectError("while (1 + \"a\") { }", "", "line 1: cannot apply '+' to int and string");
+	ExpectError("let i = 0;\nwhile (i < 2) { let x = i; i = i + 1; }\nprint(x);", "", "line 3: undefined variable 'x'");
+}

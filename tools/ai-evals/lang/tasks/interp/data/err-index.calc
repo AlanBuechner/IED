@@ -1,0 +1,8 @@
+// Reading past the end of an array is an error on the line of the index.
+let scores = [90, 75, 60];
+let i = 0;
+while (i <= len(scores)) {
+    print("score", i, scores[i]);
+    i = i + 1;
+}
+print("never printed");

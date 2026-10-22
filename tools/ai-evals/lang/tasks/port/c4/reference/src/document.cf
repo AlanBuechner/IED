@@ -1,0 +1,141 @@
+include "document.ch"
+include "inline.ch"
+include "lines.ch"
+include "lists.ch"
+include "text.ch"
+
+namespace MdHtml
+{
+	class BlockParser
+	{
+		[operator("create")] public void Init(const Core::Array<Core::StringView>& lines, Core::StringBuilder& out) {
+			this.lines = &lines;
+			this.out = out;
+		}
+
+		public void Run();
+
+		private Core::StringView Line(int64 at) const { return (*lines)[at]; }
+
+		private void WriteCodeBlock();
+		private void WriteHeading();
+		private void WriteRule();
+		private void WriteQuote();
+		private void WriteList();
+		private bool ListResumesAfter(int64 blank) const;
+		private void WriteParagraph();
+
+		private const Core::Array<Core::StringView>* lines;
+		private Core::StringBuilder& out;
+		private int64 pos;
+	}
+
+	void BlockParser::Run() {
+		while (pos < lines->Count()) {
+			switch (Classify(Line(pos))) {
+				case LineKind::Blank: ++pos; break;
+				case LineKind::Fence: WriteCodeBlock(); break;
+				case LineKind::Heading: WriteHeading(); break;
+				case LineKind::Rule: WriteRule(); break;
+				case LineKind::Quote: WriteQuote(); break;
+				case LineKind::ListItem: WriteList(); break;
+				case LineKind::Text: WriteParagraph(); break;
+			}
+		}
+	}
+
+	// The lines up to a closing fence, or to the end of the lines when none comes, kept as they are.
+	void BlockParser::WriteCodeBlock() {
+		Fence fence;
+		MatchFence(Line(pos++), fence);
+		out.Append("<pre><code");
+		if (!fence.language.IsEmpty()) {
+			out.Append(" class=\"language-");
+			AppendEscaped(out, fence.language);
+			out.Append("\"");
+		}
+		out.Append(">");
+		while (pos < lines->Count() && !ClosesFence(Line(pos), fence.ticks)) {
+			AppendEscaped(out, Line(pos++));
+			out.Append("\n");
+		}
+		if (pos < lines->Count()) ++pos;
+		out.Append("</code></pre>\n");
+	}
+
+	void BlockParser::WriteHeading() {
+		Heading heading;
+		MatchHeading(Line(pos++), heading);
+		Core::Format(&out, "<h{0:d}>", heading.level);
+		out.Append(RenderInline(heading.text).View());
+		Core::Format(&out, "</h{0:d}>\n", heading.level);
+	}
+
+	void BlockParser::WriteRule() {
+		out.Append("<hr />\n");
+		++pos;
+	}
+
+	// Consecutive quote lines; their content is parsed as blocks of its own.
+	void BlockParser::WriteQuote() {
+		Core::Array<Core::StringView> content;
+		Core::StringView inner;
+		while (pos < lines->Count() && MatchQuote(Line(pos), inner)) {
+			content.Push(inner);
+			++pos;
+		}
+		out.Append("<blockquote>\n");
+		RenderBlocks(content, out);
+		out.Append("</blockquote>\n");
+	}
+
+	// List lines and the text lines that continue their items; blank lines only between two list lines.
+	void BlockParser::WriteList() {
+		Core::Array<ListItem> items;
+		while (pos < lines->Count()) {
+			const LineKind kind = Classify(Line(pos));
+			if (kind == LineKind::ListItem) {
+				ListMarker marker;
+				MatchListItem(Line(pos), marker);
+				items.Push(MakeListItem(marker));
+			} else if (kind == LineKind::Text) {
+				items.Back().text += "\n";
+				items.Back().text += Trim(Line(pos));
+			} else if (kind != LineKind::Blank || !ListResumesAfter(pos)) {
+				break;
+			}
+			++pos;
+		}
+		RenderList(items, out);
+	}
+
+	bool BlockParser::ListResumesAfter(int64 blank) const {
+		int64 next = blank;
+		while (next < lines->Count() && IsBlank(Line(next))) ++next;
+		return next < lines->Count() && Classify(Line(next)) == LineKind::ListItem;
+	}
+
+	// Consecutive text lines, trimmed and joined with '\n'; any other kind of line ends the paragraph.
+	void BlockParser::WriteParagraph() {
+		Core::StringBuilder text;
+		text.Append(Trim(Line(pos++)));
+		while (pos < lines->Count() && Classify(Line(pos)) == LineKind::Text) {
+			text.Append("\n");
+			text.Append(Trim(Line(pos++)));
+		}
+		out.Append("<p>");
+		out.Append(RenderInline(text.View()).View());
+		out.Append("</p>\n");
+	}
+
+	Core::String RenderDocument(Core::StringView text) {
+		Core::StringBuilder out;
+		RenderBlocks(SplitLines(text), out);
+		return out.ToString();
+	}
+
+	void RenderBlocks(const Core::Array<Core::StringView>& lines, Core::StringBuilder& out) {
+		BlockParser parser = BlockParser(lines, out);
+		parser.Run();
+	}
+}

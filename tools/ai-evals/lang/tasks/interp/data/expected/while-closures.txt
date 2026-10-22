@@ -1,0 +1,10 @@
+total 68
+seen 0
+first 100 last 104
+sum 55
+square 15 1
+1 |
+2 4 |
+3 6 9 |
+4 8 12 16 |
+done

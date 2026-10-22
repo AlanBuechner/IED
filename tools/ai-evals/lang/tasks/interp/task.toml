@@ -1,0 +1,142 @@
+title = "Add while loops and arrays to an interpreter"
+category = "large"
+set = "holdout"
+timeout_minutes = 60
+
+[c4]
+project = "calc"
+prompt = """
+`calc` is an interpreter for a small scripting language, written in C4 (a Nuke workspace): `calc <script>` runs a script. README.md describes the language and `examples/` has two scripts. Add to the language:
+
+1. `while (condition) { ... }` loops, which run their body (a block, as with `if`) as long as the condition is truthy.
+2. Arrays: literals such as `[1, 2, 3]` and `[]`, indexing from 0 with `a[i]`, and assignment to an element with `a[i] = v;`. Indexes and calls can follow each other: `grid[1][2]`, `handlers[0](x)`. Arrays are references: after `let b = a;` both name the same array, so a change made through one shows through the other, also when an array is passed to a function.
+3. `print` and `str` write an array as `[1, 2, 3]`: the elements separated by `, `, each written the way `print` writes it (strings without quotes, nested arrays the same way), and `[]` when it is empty.
+4. Two builtins: `len(x)`, the number of elements of an array or of bytes of a string, and `push(a, v)`, which appends `v` to the array `a` in place and returns nil.
+5. New runtime errors, reported like the existing ones (`error: line N: <message>` on standard error and exit code 1, N being the line of the problem): `index out of range` for an index outside the array (negative ones included), `index must be an int` for an index that is not an int, `cannot index <type>` for indexing something that is not an array (an array's type name is `array`, as in `cannot apply '+' to array and int`), `len expects an array or a string`, and `push expects an array`.
+
+Keep everything else working as it does and follow the existing structure of the code. Add unit tests for the new features, and build and test before you finish.
+"""
+
+[go]
+project = "calc"
+prompt = """
+`calc` is an interpreter for a small scripting language, written in Go (package main in this module): `calc <script>` runs a script. README.md describes the language and `examples/` has two scripts. Add to the language:
+
+1. `while (condition) { ... }` loops, which run their body (a block, as with `if`) as long as the condition is truthy.
+2. Arrays: literals such as `[1, 2, 3]` and `[]`, indexing from 0 with `a[i]`, and assignment to an element with `a[i] = v;`. Indexes and calls can follow each other: `grid[1][2]`, `handlers[0](x)`. Arrays are references: after `let b = a;` both name the same array, so a change made through one shows through the other, also when an array is passed to a function.
+3. `print` and `str` write an array as `[1, 2, 3]`: the elements separated by `, `, each written the way `print` writes it (strings without quotes, nested arrays the same way), and `[]` when it is empty.
+4. Two builtins: `len(x)`, the number of elements of an array or of bytes of a string, and `push(a, v)`, which appends `v` to the array `a` in place and returns nil.
+5. New runtime errors, reported like the existing ones (`error: line N: <message>` on standard error and exit code 1, N being the line of the problem): `index out of range` for an index outside the array (negative ones included), `index must be an int` for an index that is not an int, `cannot index <type>` for indexing something that is not an array (an array's type name is `array`, as in `cannot apply '+' to array and int`), `len expects an array or a string`, and `push expects an array`.
+
+Keep everything else working as it does and follow the existing structure of the code. Add unit tests for the new features, and build and test before you finish.
+"""
+
+# --- The language as it was ----------------------------------------------------------------------------------------
+
+[[checks]]
+name = "basics-unchanged"
+args = ["{data}/basics.calc"]
+stdout_file = "data/expected/basics.txt"
+
+[[checks]]
+name = "closures-unchanged"
+args = ["{data}/closures.calc"]
+stdout_file = "data/expected/closures.txt"
+
+[[checks]]
+name = "type-error-unchanged"
+args = ["{data}/old-type-error.calc"]
+exit = 1
+stdout_file = "data/expected/old-type-error.txt"
+stderr_contains = "error: line 8: cannot apply '+' to string and int"
+
+[[checks]]
+name = "parse-error-unchanged"
+args = ["{data}/old-parse-error.calc"]
+exit = 1
+stdout = ""
+stderr_contains = "error: line 4: expected ';' but found 'print'"
+
+# --- while ---------------------------------------------------------------------------------------------------------
+
+[[checks]]
+name = "fizzbuzz"
+args = ["{data}/fizzbuzz.calc"]
+stdout_file = "data/expected/fizzbuzz.txt"
+
+[[checks]]
+name = "while-closures"
+args = ["{data}/while-closures.calc"]
+stdout_file = "data/expected/while-closures.txt"
+
+# --- arrays --------------------------------------------------------------------------------------------------------
+
+[[checks]]
+name = "array-sum"
+args = ["{data}/array-sum.calc"]
+stdout_file = "data/expected/array-sum.txt"
+
+[[checks]]
+name = "nested-arrays"
+args = ["{data}/nested-arrays.calc"]
+stdout_file = "data/expected/nested-arrays.txt"
+
+[[checks]]
+name = "aliasing"
+args = ["{data}/aliasing.calc"]
+stdout_file = "data/expected/aliasing.txt"
+
+[[checks]]
+name = "len-of-strings"
+args = ["{data}/strings-len.calc"]
+stdout_file = "data/expected/strings-len.txt"
+
+[[checks]]
+name = "arrays-of-functions"
+args = ["{data}/array-functions.calc"]
+stdout_file = "data/expected/array-functions.txt"
+
+[[checks]]
+name = "sort-in-place"
+args = ["{data}/sort.calc"]
+stdout_file = "data/expected/sort.txt"
+
+[[checks]]
+name = "sieve"
+args = ["{data}/sieve.calc"]
+stdout_file = "data/expected/sieve.txt"
+
+[[checks]]
+name = "stack-machine"
+args = ["{data}/stack-machine.calc"]
+stdout_file = "data/expected/stack-machine.txt"
+
+# --- errors --------------------------------------------------------------------------------------------------------
+
+[[checks]]
+name = "index-out-of-range"
+args = ["{data}/err-index.calc"]
+exit = 1
+stdout_file = "data/expected/err-index.txt"
+stderr_contains = "error: line 5: index out of range"
+
+[[checks]]
+name = "push-non-array"
+args = ["{data}/err-push.calc"]
+exit = 1
+stdout_file = "data/expected/err-push.txt"
+stderr_contains = "error: line 6: push expects an array"
+
+[[checks]]
+name = "while-undefined-variable"
+args = ["{data}/err-while-undefined.calc"]
+exit = 1
+stdout_file = "data/expected/err-while-undefined.txt"
+stderr_contains = "error: line 6: undefined variable 'totl'"
+
+[[checks]]
+name = "index-not-an-int"
+args = ["{data}/err-index-type.calc"]
+exit = 1
+stdout_file = "data/expected/err-index-type.txt"
+stderr_contains = "error: line 6: index must be an int"
