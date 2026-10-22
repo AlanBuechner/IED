@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
 		"bindings": {
 			"provides": [
-				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
 			],
 			"consumes": [
 				{ "name": "gpu.query", "version": "1" }
@@ -58,7 +58,7 @@
 		],
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, and gpu_timing. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, and gpu_timing. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
 		],
 		"toolCalls": [
 			{
@@ -117,11 +117,11 @@
 			},
 			{
 				"name": "gpu_pixel",
-				"description": "One texel of a texture after an event, as stored: its typed value and raw bits. The texture defaults to what the event writes (its render target, else depth, else storage texture).",
+				"description": "One texel of a texture after an event, as stored: its typed value and raw bits, then its Pixel History - every event up to that one that wrote the pixel or tried to, the test that kept a draw out (outside the scissor, culled, depth or stencil test failed), the values before and after, and a summary sentence (history: false leaves it out). The texture defaults to what the event writes (its render target, else depth, else storage texture).",
 				"class": "read",
 				"group": "gpu",
 				"parallelSafe": true,
-				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "mip": { "type": "integer", "minimum": 0 }, "slice": { "type": "integer", "minimum": 0 } }, "required": ["eid", "x", "y"], "additionalProperties": false },
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "mip": { "type": "integer", "minimum": 0 }, "slice": { "type": "integer", "minimum": 0 }, "history": { "type": "boolean" } }, "required": ["eid", "x", "y"], "additionalProperties": false },
 				"function": "GpuDebug::PixelTool"
 			},
 			{
@@ -151,6 +151,16 @@
 				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "check": { "enum": ["nan", "inf", "negative"] } }, "additionalProperties": false },
 				"function": "GpuDebug::ScanTool",
 				"timeoutSeconds": 600
+			},
+			{
+				"name": "gpu_debug_shader",
+				"description": "Steps one invocation of a draw's or dispatch's shader on the replay GPU and gives every line it ran with the value it made, in order (texture samples and math are the GPU's own): a fragment at a pixel (stage fs, or ps; x, y), a vertex (stage vs; vertex, instance) or a compute thread (stage cs; thread [x, y, z]). A pixel can have several fragments (one per primitive covering it): `invocation` picks one. Vulkan (SPIR-V) captures for now.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The draw or dispatch, by its EID from gpu_events." }, "stage": { "enum": ["vs", "fs", "ps", "cs"] }, "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "vertex": { "type": "integer", "minimum": 0 }, "instance": { "type": "integer", "minimum": 0 }, "thread": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "maxItems": 3 }, "invocation": { "type": "integer", "minimum": 1 }, "max": { "type": "integer", "minimum": 1, "maximum": 5000 } }, "required": ["eid", "stage"], "additionalProperties": false },
+				"function": "GpuDebug::DebugShaderTool",
+				"timeoutSeconds": 300
 			},
 			{
 				"name": "gpu_timing",

@@ -164,6 +164,11 @@ class GpuTests(ServerTestCase):
 		self.assertEqual(("R16G16B16A16_SFLOAT", 320, 180), (reply["result"]["format"], reply["result"]["width"], reply["result"]["height"]))
 		blob = self.server.request("GET", "/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
 		self.assertEqual(320 * 180 * 16, len(blob.body))
+		cube = [e[0] for e in events if e[2] == "draw"][2]   # Floor, Cube A, Cube B
+		stepped = (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "debug",
+			"args": {"capture": capture["id"], "eid": cube, "stage": "fs", "x": 640, "y": 240}}}))["result"]["text"]
+		self.assertIn("step by step", stepped)
+		self.assertIn("OpImageSampleImplicitLod", stepped, "the fragment's texture samples are among its steps")
 		await self.client.request("gpu.close", {"sessionId": session})
 
 	async def test_the_ai_reads_captures_through_the_binding(self):
@@ -194,7 +199,11 @@ class GpuTests(ServerTestCase):
 		self.assertIn("1280x720 R16G16B16A16_FLOAT", texture["text"])
 		self.assertIn("NaN 0, Inf 0", texture["text"])
 		self.assertTrue(os.path.isfile(os.path.join(self.repo, texture["image"])), texture["image"])
-		self.assertIn(f"after EID {cube}: ", await text("pixel", eid=cube, x=640, y=360))
+		pixel = await text("pixel", eid=cube, x=640, y=360)
+		self.assertIn(f"after EID {cube}: ", pixel)
+		self.assertIn("History (EID: event; result; before -> after):", pixel)
+		self.assertIn("Written by", pixel, "the history's summary")
+		self.assertNotIn("History", await text("pixel", eid=cube, x=640, y=360, history=False))
 		self.assertIn("none after the frame's last action", await text("scan"))
 		timing = await text("timing", repeat=2)
 		self.assertIn("GPU time of the frame: ", timing)

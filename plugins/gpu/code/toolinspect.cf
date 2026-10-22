@@ -169,6 +169,35 @@ namespace GpuDebug
 
 	// --- gpu_pixel ----------------------------------------------------------------------------------------------------
 
+	// The pixel's history: what wrote it, or tried to, up to the event, and the replayer's summary.
+	static void AppendHistory(Core::StringBuilder& text, const Serialization::DomNode& history) {
+		text.Append("History (EID: event; result; before -> after):\n  start: ");
+		text.Append(history.Member("start").Member("text").AsView());
+		text.Append("\n");
+		Serialization::DomNode events = history.Member("events");
+		for (int64 i = 0; i < events.Count(); i += 1) {
+			Serialization::DomNode e = events.At(i);
+			text.Append("  ");
+			text.AppendInt(e.Member("eid").AsInt());
+			text.Append(": ");
+			text.Append(e.Member("name").AsView());
+			text.Append("; ");
+			text.Append(e.Member("text").AsView());
+			if (e.Member("samples").IsValid()) {
+				text.Append(" (");
+				text.AppendInt(e.Member("samples").AsInt());
+				text.Append(" samples)");
+			}
+			text.Append("; ");
+			text.Append(e.Member("before").Member("text").AsView());
+			text.Append(" -> ");
+			text.Append(e.Member("after").Member("text").AsView());
+			text.Append("\n");
+		}
+		text.Append(history.Member("summary").AsView());
+		text.Append("\n");
+	}
+
 	Core::String PixelText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args) {
 		const int64 eid = RequiredInt(args, "eid");
 		const int64 x = RequiredInt(args, "x"), y = RequiredInt(args, "y");
@@ -208,6 +237,9 @@ namespace GpuDebug
 		text.Append("  (");
 		text.Append(pixel.Member("format").AsView());
 		text.Append(")\n");
+		Serialization::DomNode history = args.Member("history");
+		if (history.IsValid() && !history.IsNull() && !history.AsBool()) return text.ToString();
+		AppendHistory(text, AskTool(debugger, target, "pixelHistory", params.View()));
 		return text.ToString();
 	}
 

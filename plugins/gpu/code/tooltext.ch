@@ -55,4 +55,5 @@ namespace GpuDebug
 	Core::String BufferText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	ToolAnswer TextureAnswer(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String ScanText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
+	Core::String DebugText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 }

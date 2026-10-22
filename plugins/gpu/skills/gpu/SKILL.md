@@ -30,7 +30,9 @@ Words the tools use:
 5. `gpu_pixel` - one texel's stored value, when the exact number matters.
 6. `gpu_buffer` - a buffer's bytes as floats, uints, ints or hex, from a binding's offset (gpu_event_state gives it).
 7. `gpu_shader` - a stage's reflection and disassembly (DXBC, DXIL or SPIR-V): which registers or bindings it reads.
-8. `gpu_timing` - where the GPU time goes, by pass or by the costliest draws, measured on the replay GPU.
+8. `gpu_debug_shader` - one shader invocation stepped on the replay GPU: every line it ran with the value it made
+   (a fragment at a pixel, a vertex, a compute thread). Vulkan captures for now.
+9. `gpu_timing` - where the GPU time goes, by pass or by the costliest draws, measured on the replay GPU.
 
 ## Common questions
 
@@ -40,7 +42,10 @@ Words the tools use:
   the viewport or scissor zero, are the vertex buffers the expected ones (`gpu_buffer` with the binding's offset)?
 - **NaN or Inf (black or white speckles, a frame that turns black).** `gpu_scan` finds the first action after which
   the texture holds them; `gpu_texture` there says where; `gpu_shader` and the constant buffers (`gpu_buffer`) of
-  that draw usually show the division by zero, the normalize of a zero vector, or the uninitialized constant.
+  that draw usually show the division by zero, the normalize of a zero vector, or the uninitialized constant;
+  `gpu_debug_shader` at that pixel shows the very step that made it.
+- **Why did this draw lose the pixel?** `gpu_pixel` gives the pixel's history: each draw's test result (outside the
+  scissor, culled, depth or stencil test failed) with the values before and after.
 - **Too slow.** `gpu_timing` by pass, then by event for the costly pass. High pixel-shader invocations against the
   target's size mean overdraw; many primitives in a small pass mean geometry that could be culled.
 

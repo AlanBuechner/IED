@@ -98,13 +98,63 @@ One process per open capture, started by the server with the capture's path. Mes
 | `mesh {eid}` | the draw's vertex inputs: attributes with formats, indices, vertex data (binary) |
 | `shader {eid, stage}` | entry, kind, reflection (signature, bindings, constant buffers), disassembly |
 | `timing {repeat}` | per action GPU time (median of `repeat` replays with timestamp queries) and pipeline statistics |
-| `pixelHistory {id, x, y, eid}` | every event before `eid` that wrote the pixel, with values before and after |
+| `debugShader {eid, stage, x?, y?, vertex?, instance?, thread?}` | one invocation's steps ("Shader debugging" below): `listing`, `sites` (`[line, type, components, store]`), `invocations` (each `{steps: [[site, value]], truncated}`) |
+| `pixelHistory {id, eid, x, y, mip?, slice?}` | every event up to `eid` that wrote the pixel or tried to ("Pixel History" below): `start`, `events` (each `{eid, kind, name, result, text, samples?, tests?, before, after, changed}`), `end`, `summary`, `unattributed?` |
 | `messages {}` | the debug layer's messages during replay, each with its event |
 | `shutdown {}` | ends the process |
 
 **Vulkan replay** (`native/replay/vulkan/`) creates its own instance and device on the GPU with the capture's vendor and device ID when there is one (else the first), with the captured device extensions the GPU has and the captured features, then the capture's objects in three passes (memory, buffers and images; their bindings; everything else). Swap chain images become plain images. SPIR-V is disassembled and reflected by Flashbang's own code (`vkspirv.cpp`), with no SPIRV-Tools dependency; the shader panel shows bindings by set and binding, uniform blocks and push constants with their members, and the stage's inputs and outputs by location.
 
 Replaying to an event re-applies the initial contents and replays every submission before it, then the event's command list up to the event (closing an open render pass or query so the list stays valid), and waits for the GPU. Pipeline state, resource states and bindings at an event are simulated on the CPU from the records, so the Pipeline view needs no GPU work.
+
+### Pixel History
+
+`pixelHistory` answers for one pixel of one subresource, up to an event (built 2026-10-21, both APIs):
+
+1. **Candidates**, found on the CPU from the recorded commands: draws with the subresource bound as a render or depth
+   target (the state simulation at each draw), clears, copies, resolves and discards into it (D3D12 decodes their
+   destinations; Vulkan decodes which objects a command names, a view or framebuffer resolved to its image, and
+   which passes clear it on load), and dispatches when the resource allows unordered access or storage writes.
+2. **Tests**, in one replay to the event: each candidate draw runs with its scissor clamped to the pixel inside an
+   occlusion query - clamping changes nothing at the pixel, so the depth and stencil there evolve as in the real
+   frame - after three copies of it whose pipelines write nothing: depth, stencil and culling off with only the pixel
+   as scissor (covered), with the pipeline's culling (facing), and with its depth test (depth). A draw then reads as
+   passed, outside its scissor, culled, failed the depth test, or failed the stencil test; one that covers nothing at
+   the pixel is left out. A pipeline whose shaders bind writable storage (a copy would write it again), or whose
+   dynamic state could undo the copies (Vulkan's extended dynamic depth, stencil, cull and color-write state), is
+   measured without the copies: passed or not. A Vulkan pipeline with a static scissor runs as a clamped copy of
+   itself. The replay is forgotten afterwards (its clamped draws left the rest of the frame unwritten).
+3. **Values**: the pixel read after each candidate that wrote (a replay to it), the value at the frame's start and
+   at the event. A clear or a copy into the pixel shows even when it leaves the value as it was; any other candidate
+   only when it changed the value. `unattributed` says the value at the event differs from what the listed events
+   leave - a writer the candidates missed (a pixel shader's storage write, say).
+4. **Summary**: one sentence naming the writes by their markers, the draws kept out and why, and the final value.
+
+A draw's row opens the shader debugger at the pixel. Not yet: the shader's output before blending, multisampled
+targets (they cannot be read back yet), and D3D12 render passes' load clears (`BeginRenderPass`) as clears.
+
+### Shader debugging
+
+`debugShader` steps one invocation by **instrumented replay** on the real GPU (built 2026-10-21 for Vulkan): the
+event's stage is rewritten (`replay/vulkan/vkinstrument.cpp`) so the chosen invocations - the fragments at a pixel
+(`fs`), one vertex (`vs`, by vertex and instance index), one compute thread (`cs`, by global id) - log every value
+they make, in the order they make it: each instruction's result of a 32-bit scalar or vector type (bool, int, uint,
+float) and each store's value. The trace buffer is a storage buffer bound in a descriptor set after the pipeline
+layout's own; the replay binds the instrumented pipeline in the action's place, runs it once, then the action as it
+was. Values are logged where they are made, and an invocation that was not chosen writes a scratch record instead, so
+no block is added: control flow, phis and merges stay as compiled, and what the trace shows is what the GPU computed,
+texture samples and derivatives included. Up to 8 invocations are kept (a pixel's fragments, one per primitive
+covering it, each one), 16384 steps each. Stepping back is reading the trace backwards - the "time travel" of the
+design costs nothing more. The listing is the stage's SPIR-V disassembly; a step names its line.
+
+The UI's Shader Debugger opens in the viewer's place from the Debug button on a picked pixel, a draw's row in Pixel
+History, a vertex in the Mesh table, or the thread form of a compute shader; it shows the listing with the lines that
+ran, steps forward and back (F10, Shift+F10, run to a clicked line), picks the invocation, and lists the step's value
+and every value so far. The AI's `gpu_debug_shader` gives the same steps as text.
+
+Not yet: D3D12 (DXBC instrumentation is next, then DXIL, which needs a bitcode writer); source-level stepping (from
+the module's debug info, NonSemantic.Shader.DebugInfo or OpLine); values of other widths, matrices and structs;
+breakpoints set in the editor; which of a pixel's fragments won the depth test.
 
 ## Server and protocol (plugin `ied.gpu`)
 
@@ -135,7 +185,7 @@ PIX's structure, restyled with IED's tokens: a capture opens as a **document tab
 | Mesh Viewer | VS input/output, mesh/task output, table + 3D preview with camera from the capture |
 | Resources | all resources with usage, format, size, lifetime (first/last EID), memory heap, aliasing; per-resource history of writes and reads |
 | API Calls | the calls inside the selected event, parameters, callstack if captured |
-| Pixel History | every event that touched a pixel: before/after values, shader output, which test failed (depth, stencil, scissor, culling, blend), plain-words summary |
+| Pixel History | every event that touched a pixel: before/after values, shader output, which test failed (depth, stencil, scissor, culling, blend), plain-words summary. **Built**: the viewer's History button on a picked pixel opens it in the viewer's place, a row selects its event and the panel stays; at phone width too |
 | Shader Debugger | source in an editor surface (LSP from the shader-language plugin), breakpoints, step in/over/out (and back), watch, locals, per-lane view, disassembly toggle |
 | Messages | debug layer output tied to EIDs |
 | Performance | passes grid with A/B columns (A ms, B ms, delta) and statistics, counters grid for the selected range with throughput bars and a limiter verdict, Analysis findings, the timeline with counter plots |
@@ -193,6 +243,10 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   and Performance; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
   NaN / Inf / negative visualizing, mips and slices, picks), the buffer view, the shader and Mesh panels, and the API Calls, Messages,
   Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
+- **Pixel History** ("Pixel History" above): both replayers (`replay/d3d12/history.cpp`, `replay/vulkan/vkhistory.cpp`,
+  `common/pixelhistory.cpp`), the viewer's History panel (`ui/history.js`), and in `gpu_pixel`'s answer.
+- **Shader debugging** ("Shader debugging" above), Vulkan: `replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`, the UI's
+  `ui/debugger.js`, and `gpu_debug_shader`.
 - **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
   the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
@@ -203,7 +257,7 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   (launch, capture, open, replay, blobs, comment, delete, refusals; a Vulkan launch through the layer), Bedrock
   `gpu_tests.cf`.
 
-Not yet: Pixel History and the rest of G2.
+Not yet: the rest of G2.
 
 ## Risks
 

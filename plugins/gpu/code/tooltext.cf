@@ -417,6 +417,7 @@ namespace GpuDebug
 		else if (tool == "buffer") answer.text = BufferText(debugger, target, args);
 		else if (tool == "texture") answer = TextureAnswer(debugger, target, args);
 		else if (tool == "scan") answer.text = ScanText(debugger, target, args);
+		else if (tool == "debug") answer.text = DebugText(debugger, target, args);
 		else throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no GPU tool ") + tool).View());
 		return answer;
 	}
