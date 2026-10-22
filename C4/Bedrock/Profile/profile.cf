@@ -204,6 +204,10 @@ namespace Profile
 			PutEvent(buffer->bytes, Event::ZoneNative);
 			PutVarint(buffer->bytes, own.nativeBytes);
 		}
+		if (own.nativeFreed != 0) {
+			PutEvent(buffer->bytes, Event::ZoneNativeFreed);
+			PutVarint(buffer->bytes, own.nativeFreed);
+		}
 		buffer->Timed(Event::ZoneEnd, now);
 	}
 

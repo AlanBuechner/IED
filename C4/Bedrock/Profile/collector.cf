@@ -63,7 +63,8 @@ namespace Profile
 		return census;
 	}
 
-	// The live objects by type as one HeapCensus at `at`, the type no census knew named as such.
+	// The live objects by type as one HeapCensus at `at`, each with the native memory it holds; the type no census knew
+	// named as such.
 	static void QueueCensus(Session* session, const Core::Array<GC::CensusEntry>& census, int64 at) {
 		Core::Array<uint64> names;
 		{
@@ -74,10 +75,11 @@ namespace Profile
 		session->global.Timed(Event::HeapCensus, at);
 		PutVarint(session->global.bytes, (uint64)census.Count());
 		for (int64 i = 0; i < census.Count(); ++i) {
-			PutEvent(session->global.bytes, Event::HeapCensusType);
+			PutEvent(session->global.bytes, Event::HeapCensusTypeNative);
 			PutVarint(session->global.bytes, names[i]);
 			PutVarint(session->global.bytes, census[i].objects);
 			PutVarint(session->global.bytes, census[i].bytes);
+			PutVarint(session->global.bytes, census[i].nativeBytes);
 		}
 	}
 

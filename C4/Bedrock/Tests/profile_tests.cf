@@ -54,10 +54,11 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x12) return "vvv";
 	if (type == 0x23 || type == 0x24) return "v";
 	if (type == 0x27) return "vv";
-	if (type == 0x28) return "v";
+	if (type == 0x28 || type == 0x29) return "v";
 	if (type == 0x6A) return "tvv";
 	if (type == 0x6B) return "tv";
 	if (type == 0x6C) return "vvv";
+	if (type == 0x6D) return "vvvv";
 	if (type == 0x81) return "vl";
 	if (type == 0x82) return "tvvvv";
 	if (type == 0x83) return "vvvv";
@@ -197,6 +198,14 @@ class Blob
 }
 
 static Blob*[101] s_blobs;
+
+// An object that owns a buffer: the census counts the buffer as native memory it holds.
+class Holder
+{
+	public Core::Array<uint8> data;
+}
+
+static Holder*[10] s_holders;
 
 // Two megabytes in blobs, so the sampler takes about thirty of them here.
 static void AllocateMany() {
@@ -418,6 +427,10 @@ class ProfileTests {
 		assert_true(counted[1]->fields[0] == 101 && counted[1]->fields[1] == 101 * 64, "Outer's include Inner's and its own, not what the profiler took to name Inner");
 		assert_eq(1, CountOf(events, 0x28), "only Grow took native memory: the profiler's own buffers, and the census its collection callback read on the collecting thread, are not the zones'");
 		assert_true(First(events, 0x28)->fields[0] >= 65536, "Grow's array, 64 KiB");
+		bool gaveBack = false;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x29 && e.fields[0] >= 65536) gaveBack = true;
+		assert_true(gaveBack, "and Grow gave it back as its scope ended");
 		int64 frameCounts = 0;
 		uint64 first = 0;
 		uint64 last = 0;
@@ -439,6 +452,10 @@ class ProfileTests {
 		Core::String problem;
 		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
 		for (int32 i = 0; i < 100; ++i) s_blobs[i] = new Blob();
+		for (int32 i = 0; i < 10; ++i) {
+			s_holders[i] = new Holder();
+			s_holders[i]->data.Resize(8192);
+		}
 		GC::Collect();
 		Profile::Stop();
 		assert_true(!GC::SetCensus(false), "the census is off again once the session stopped");
@@ -452,17 +469,21 @@ class ProfileTests {
 		int64 lines = 0;
 		uint64 blobs = 0;
 		uint64 blobBytes = 0;
+		uint64 blobNative = 1;
+		uint64 holderNative = 0;
 		bool unknownNamed = false;
 		for (int64 i = 0; i < events.Count(); ++i) {
 			if (&events[i] == census) {
 				for (int64 k = 1; k <= (int64)census->fields[0]; ++k) {
 					const TracedEvent& line = events[i + k];
-					if (line.type != 0x6C) continue;
+					if (line.type != 0x6D) continue;
 					lines += 1;
 					if (*strings.Find(line.fields[0]) == "Blob") {
 						blobs = line.fields[1];
 						blobBytes = line.fields[2];
+						blobNative = line.fields[3];
 					}
+					if (*strings.Find(line.fields[0]) == "Holder") holderNative = line.fields[3];
 					if (*strings.Find(line.fields[0]) == "(type not known)") unknownNamed = true;
 				}
 				break;
@@ -470,8 +491,10 @@ class ProfileTests {
 		}
 		assert_eq((int64)census->fields[0], lines, "one line a type right after it");
 		assert_true(blobs >= 100 && blobBytes >= 100 * 64, "the hundred live blobs, by their type's name");
+		assert_true(blobNative == 0 && holderNative >= 10 * 8192, "and the native memory each type holds: none for a blob, the ten holders' buffers");
 		assert_true(unknownNamed, "what was made before the census is counted under a name of its own");
 		for (int32 i = 0; i < 100; ++i) s_blobs[i] = null;
+		for (int32 i = 0; i < 10; ++i) s_holders[i] = null;
 		FS::RemoveFile(path.CStr());
 	}
 

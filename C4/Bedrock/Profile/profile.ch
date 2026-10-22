@@ -31,7 +31,8 @@ namespace Profile
 	}
 
 	// A zone: from its creation to the end of its scope, on the calling thread, with what the thread allocated in it
-	// (the collector's own count, its nested zones' included) and the native memory it took (containers' buffers).
+	// (the collector's own count, its nested zones' included) and the native memory it took and gave back (containers'
+	// buffers).
 	struct Zone
 	{
 		[operator("create")] public void Init(Site& site);

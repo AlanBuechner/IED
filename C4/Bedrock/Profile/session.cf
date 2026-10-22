@@ -33,6 +33,7 @@ namespace Profile
 		counts.objects = a.objects - b.objects;
 		counts.bytes = a.bytes - b.bytes;
 		counts.nativeBytes = a.nativeBytes - b.nativeBytes;
+		counts.nativeFreed = a.nativeFreed - b.nativeFreed;
 		return counts;
 	}
 
@@ -48,6 +49,7 @@ namespace Profile
 		t_profilerTook.objects += took.objects;
 		t_profilerTook.bytes += took.bytes;
 		t_profilerTook.nativeBytes += took.nativeBytes;
+		t_profilerTook.nativeFreed += took.nativeFreed;
 	}
 
 	void EventBuffer::Timed(Event type, int64 ticks) {
