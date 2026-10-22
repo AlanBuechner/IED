@@ -31,6 +31,50 @@ def replay(capture, *args, device=True):
 	return json.loads(result.stdout)
 
 
+def sample_hlsl():
+	"""The D3D12 sample's shaders, as its source holds them."""
+	with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "samples", "d3d12", "main.cpp"), encoding="ascii") as f:
+		source = f.read()
+	start = source.index('R"(') + 3
+	return source[start:source.index(')"', start)]
+
+
+def check_edit_and_replay(test, capture, eid, stage, language, edit, broken):
+	"""Edits the stage at `eid` with `edit` (the source shaderSource gives -> the edited one), checks the output changes
+	and the diff says so, that `broken` answers with a diagnostic at its line, and that reverting brings the frame back."""
+	client = RpcClient()
+	try:
+		client.call("initialize", {"capture": capture})
+		call = lambda method, params: client.call(method, params)[0]["result"]
+		source = call("shaderSource", {"eid": eid, "stage": stage})
+		test.assertFalse(source["edited"])
+		test.assertIn(language, source["languages"])
+		target = [r["id"] for r in call("resources", {})["resources"] if r["name"] == "HDR"][0]
+		pixel = {"id": target, "eid": eid, "x": 640, "y": 240}
+		before = call("pixel", pixel)["text"]
+		text = edit(source.get("source") if source["language"] == language else None)
+		edited = call("editShader", {"eid": eid, "stage": stage, "language": language, "source": text, "entry": source["entry"] if language != "hlsl" else "PSMain"})
+		test.assertTrue(edited["ok"], edited["diagnostics"])
+		test.assertIn("Lit", edited["pipelines"])
+		after = call("pixel", pixel)["text"]
+		test.assertNotEqual(before, after)
+		diff = call("editDiff", {"eid": eid})
+		test.assertGreater(diff["changed"], 0)
+		test.assertEqual("|captured - edited|", diff["view"])
+		again = call("shaderSource", {"eid": eid, "stage": stage})
+		test.assertTrue(again["edited"])
+		test.assertEqual(text, again["source"], "the editor reopens on the edit")
+		bad, line = broken(text)
+		failed = call("editShader", {"eid": eid, "stage": stage, "language": language, "source": bad, "entry": edited["entry"]})
+		test.assertFalse(failed["ok"])
+		test.assertEqual(line, failed["diagnostics"][0]["line"], failed["diagnostics"])
+		test.assertEqual(after, call("pixel", pixel)["text"], "a failed edit leaves the last one in place")
+		test.assertEqual(1, call("revertShader", {})["reverted"])
+		test.assertEqual(before, call("pixel", pixel)["text"], "reverted, the frame is the captured one")
+	finally:
+		client.close()
+
+
 class RpcClient:
 	def __init__(self):
 		self.process = subprocess.Popen([os.path.join(BIN, "flashbang-replay.exe"), "--rpc"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -197,6 +241,15 @@ class D3D12CaptureReplay(unittest.TestCase):
 		dispatch = [e for e in self.events["events"] if e[2] == "dispatch"][0][0]
 		thread = replay(self.capture, "debug", str(dispatch), "cs", "5", "7", "0")
 		self.assertEqual("5, 7, 0", thread["invocations"][0]["steps"][0][1], "the thread's global id, its first input")
+
+	def test_edit_and_replay(self):
+		cube = self.draws_under("Cube B")[0][0]
+		opening = "float4 PSMain(VSOut i) : SV_Target {"
+		red = lambda _: sample_hlsl().replace(opening, opening + "\n\treturn float4(1, 0, 0, 1);")
+		def broken(text):
+			bad = text.replace("return float4(1, 0, 0, 1);", "return colr;")
+			return bad, bad[:bad.index("colr")].count("\n") + 1
+		check_edit_and_replay(self, self.capture, cube, "ps", "hlsl", red, broken)
 
 	def test_compare_with_a_later_frame(self):
 		folder = tempfile.mkdtemp(prefix="flashbang-compare-")
@@ -380,6 +433,15 @@ class VulkanCaptureReplay(unittest.TestCase):
 	def test_pixel_history_says_why(self):
 		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
 		check_history(self, replay(self.capture, "history", str(hdr), str(self.events[-1][0]), "640", "240"), "vkCmdBeginRenderPass")
+
+	def test_edit_and_replay(self):
+		cube = self.draws_under("Cube B")[0][0]
+		# The fragment shader's SPIR-V listing, its lighting's 0.8 made 0.3 and read back by Flashbang's assembler.
+		dimmer = lambda listing: listing.replace("OpConstant %float 0.800000012", "OpConstant %float 0.3", 1)
+		def broken(text):
+			bad = text.replace("OpFMul", "OpFMull", 1)
+			return bad, bad[:bad.index("OpFMull")].count("\n") + 1
+		check_edit_and_replay(self, self.capture, cube, "fs", "spirv", dimmer, broken)
 
 	def test_shader_debugger_steps_each_stage(self):
 		cube = self.draws_under("Cube B")[0][0]

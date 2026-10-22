@@ -40,6 +40,18 @@ namespace fb::replay
 		virtual void Shader(const JsonValue& params, JsonWriter& out) = 0;
 		virtual void Timing(const JsonValue& params, JsonWriter& out, const Progress& progress) = 0;
 		virtual void Messages(JsonWriter& out) = 0;
+
+		// Edit and Replay (docs/22 "Edit and Replay"). shaderSource {eid, stage}: the stage's shader `key`, `kind`,
+		// `profile`, `entry`, and the text an edit starts from. editShader {eid, stage, language, source, entry?,
+		// profile?}: the edit compiled into every pipeline that used the shader, for the replays after; `ok` false with
+		// `diagnostics` when it did not compile. revertShader {key?}: one shader put back, or all.
+		virtual void ShaderSource(const JsonValue& params, JsonWriter& out) = 0;
+		virtual void EditShader(const JsonValue& params, JsonWriter& out) = 0;
+		virtual void RevertShader(const JsonValue& params, JsonWriter& out) = 0;
+		// edits {}: [{key, stage, language, entry, profile, pipelines}].
+		virtual void Edits(JsonWriter& out) = 0;
+		// The edits in the replays after, or the captured shaders (the output diff replays both ways).
+		virtual void UseEdits(bool on) = 0;
 	};
 
 	std::unique_ptr<ApiReplay> MakeD3D12Replay();

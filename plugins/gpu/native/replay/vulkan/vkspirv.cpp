@@ -2,6 +2,7 @@
 // for graphics and compute use; anything else is printed by number).
 #include "vkspirv.h"
 
+#include <cmath>
 #include <cstring>
 #include <set>
 
@@ -365,6 +366,79 @@ namespace fb::replay::vulkan
 			}
 			return true;
 		}
+
+		// Friendly names: the module's names, else types and scalar constants named by what they are.
+		std::map<u32, std::string> FriendlyNames(const u32* words, size_t count, Info& info) {
+			std::map<u32, std::string> names;
+			std::set<std::string> taken;
+			auto give = [&](u32 id, std::string name) {
+				for (char& c : name)
+					if (!isalnum((unsigned char)c) && c != '_') c = '_';
+				std::string unique = name;
+				for (int n = 1; taken.count(unique); ++n) unique = name + "_" + std::to_string(n);
+				taken.insert(unique);
+				names[id] = unique;
+			};
+			for (const auto& name : info.names)
+				if (!name.second.empty()) give(name.first, name.second);
+			size_t at = 5;
+			while (at < count) {
+				const u32 length = words[at] >> 16, op = words[at] & 0xFFFF;
+				if (!length || at + length > count) break;
+				const u32* w = words + at;
+				if (op >= 19 && op <= 33 && length >= 2 && !names.count(w[1])) {
+					std::string name;
+					switch (op) {
+						case 32: {
+							const char* storage = NameIn(kStorage, w[2]);
+							name = std::string("_ptr_") + (storage ? storage : "S") + "_" + (names.count(w[3]) ? names[w[3]] : std::to_string(w[3]));
+							break;
+						}
+						case 33: name = "fn_" + std::to_string(w[1]); break;
+						case 30: name = "struct_" + std::to_string(w[1]); break;
+						default: name = TypeText(info, w[1]); break;
+					}
+					give(w[1], name);
+				}
+				if (op == 43 && length == 4 && names.count(w[1]) && !names.count(w[2])) {
+					auto type = info.types.find(w[1]);
+					std::string value = std::to_string(w[3]);
+					if (type != info.types.end() && type->second[0] == 22) {
+						float f;
+						memcpy(&f, &w[3], 4);
+						value = Format("%g", f);
+					}
+					else if (type != info.types.end() && type->second[0] == 21 && type->second[2]) value = std::to_string((i32)w[3]);
+					for (char& c : value)
+						if (c == '-') c = 'n';
+					give(w[2], names[w[1]] + "_" + value);
+				}
+				at += length;
+			}
+			return names;
+		}
+
+		// A constant's literal words as its type reads them: floats exactly (%.9g reads back to the same bits), integers
+		// signed or not; `used` gets how many words it took. Raw bits in hex for a NaN, an Inf or a type it does not know.
+		std::string ConstantText(const Info& info, u32 type, const u32* w, size_t left, size_t& used) {
+			auto found = info.types.find(type);
+			const std::vector<u32>* t = found != info.types.end() ? &found->second : nullptr;
+			const u32 width = t && t->size() > 1 ? (*t)[1] : 32;
+			used = width == 64 && left >= 2 ? 2 : 1;
+			const u64 bits = used == 2 ? (u64)w[0] | (u64)w[1] << 32 : w[0];
+			if (t && (*t)[0] == 22 && width == 32) {
+				float f;
+				memcpy(&f, w, 4);
+				return std::isfinite(f) ? Format("%.9g", f) : Format("0x%08x", w[0]);
+			}
+			if (t && (*t)[0] == 22 && width == 64) {
+				double d;
+				memcpy(&d, &bits, 8);
+				return std::isfinite(d) ? Format("%.17g", d) : Format("0x%016llx", (unsigned long long)bits);
+			}
+			if (t && (*t)[0] == 21 && t->size() > 2 && (*t)[2]) return used == 2 ? std::to_string((i64)bits) : std::to_string((i32)w[0]);
+			return std::to_string(bits);
+		}
 	}
 
 	const char* ExecutionModelName(u32 model) {
@@ -451,63 +525,73 @@ namespace fb::replay::vulkan
 		return info && (typed || info->pattern[0] == 'R');
 	}
 
+	std::map<u32, std::string> SpirvNames(const u32* words, size_t count) {
+		Info info;
+		SpirvModule header;
+		if (!words || !Gather(words, count, info, header)) return {};
+		return FriendlyNames(words, count, info);
+	}
+
+	bool SpirvOpNamed(const std::string& name, u32& op, const char*& pattern) {
+		for (const OpInfo& info : kOps)
+			if (name == info.name) {
+				op = info.op;
+				pattern = info.pattern;
+				return true;
+			}
+		return false;
+	}
+
+	bool SpirvEnumerant(char kind, const std::string& name, u32& value) {
+		auto in = [&](const Enumerant* table, size_t count) {
+			for (size_t i = 0; i < count; ++i)
+				if (name == table[i].name) {
+					value = table[i].value;
+					return true;
+				}
+			return false;
+		};
+#define FB_IN(table) in(table, sizeof(table) / sizeof(table[0]))
+		switch (kind) {
+			case 's': return FB_IN(kStorage);
+			case 'd': return FB_IN(kDecoration);
+			case 'b': return FB_IN(kBuiltIn);
+			case 'm': return FB_IN(kModel);
+			case 'x': return FB_IN(kMode);
+			case 'c': return FB_IN(kCapability);
+			case 'a': return FB_IN(kAddressing);
+			case 'y': return FB_IN(kMemory);
+			case 'g': return FB_IN(kLanguage);
+			case 'i': return FB_IN(kDim);
+			case 'f': return FB_IN(kImageFormat);
+			default: return false;
+		}
+#undef FB_IN
+	}
+
+	bool SpirvGlslInstruction(const std::string& name, u32& value) {
+		for (u32 i = 1; i < sizeof(kGlsl) / sizeof(kGlsl[0]); ++i)
+			if (kGlsl[i] && name == kGlsl[i]) {
+				value = i;
+				return true;
+			}
+		return false;
+	}
+
 	std::string DisassembleSpirv(const u32* words, size_t count, std::map<size_t, u32>* lines) {
 		Info info;
 		SpirvModule header;
 		if (!words || !Gather(words, count, info, header)) return "; not SPIR-V";
-		// Friendly names: the module's names, else types and scalar constants named by what they are.
-		std::map<u32, std::string> names;
-		std::set<std::string> taken;
-		auto give = [&](u32 id, std::string name) {
-			for (char& c : name)
-				if (!isalnum((unsigned char)c) && c != '_') c = '_';
-			std::string unique = name;
-			for (int n = 1; taken.count(unique); ++n) unique = name + "_" + std::to_string(n);
-			taken.insert(unique);
-			names[id] = unique;
+		const std::map<u32, std::string> names = FriendlyNames(words, count, info);
+		auto id = [&](u32 v) {
+			auto name = names.find(v);
+			return "%" + (name != names.end() ? name->second : std::to_string(v));
 		};
-		for (const auto& name : info.names)
-			if (!name.second.empty()) give(name.first, name.second);
-		size_t at = 5;
-		while (at < count) {
-			const u32 length = words[at] >> 16, op = words[at] & 0xFFFF;
-			if (!length || at + length > count) break;
-			const u32* w = words + at;
-			if (op >= 19 && op <= 33 && length >= 2 && !names.count(w[1])) {
-				std::string name;
-				switch (op) {
-					case 32: {
-						const char* storage = NameIn(kStorage, w[2]);
-						name = std::string("_ptr_") + (storage ? storage : "S") + "_" + (names.count(w[3]) ? names[w[3]] : std::to_string(w[3]));
-						break;
-					}
-					case 33: name = "fn_" + std::to_string(w[1]); break;
-					case 30: name = "struct_" + std::to_string(w[1]); break;
-					default: name = TypeText(info, w[1]); break;
-				}
-				give(w[1], name);
-			}
-			if (op == 43 && length == 4 && names.count(w[1]) && !names.count(w[2])) {
-				auto type = info.types.find(w[1]);
-				std::string value = std::to_string(w[3]);
-				if (type != info.types.end() && type->second[0] == 22) {
-					float f;
-					memcpy(&f, &w[3], 4);
-					value = Format("%g", f);
-				}
-				else if (type != info.types.end() && type->second[0] == 21 && type->second[2]) value = std::to_string((i32)w[3]);
-				for (char& c : value)
-					if (c == '-') c = 'n';
-				give(w[2], names[w[1]] + "_" + value);
-			}
-			at += length;
-		}
-		auto id = [&](u32 v) { return "%" + (names.count(v) ? names[v] : std::to_string(v)); };
 
 		std::string text = Format("; SPIR-V %u.%u, generator 0x%08x, bound %u\n", (header.version >> 16) & 0xFF, (header.version >> 8) & 0xFF, header.generator, header.bound);
 		u32 lineCount = 1;
 		bool inFunction = false;
-		at = 5;
+		size_t at = 5;
 		while (at < count) {
 			const u32 length = words[at] >> 16, op = words[at] & 0xFFFF;
 			if (!length || at + length > count) {
@@ -531,6 +615,11 @@ namespace fb::replay::vulkan
 							break;
 						case 'l': line += " " + std::to_string(words[o++]); break;
 						case '+':
+							if ((op == 43 || op == 50) && length >= 4) {
+								size_t used = 1;
+								line += " " + ConstantText(info, words[at + 1], words + o, end - o, used);
+								o += used;
+							}
 							while (o < end) {
 								if (decoration == 11) {
 									const char* builtin = NameIn(kBuiltIn, words[o]);

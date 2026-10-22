@@ -55,6 +55,12 @@ namespace fb::replay::d3d12
 		void Shader(const JsonValue& params, JsonWriter& out) override;
 		void Timing(const JsonValue& params, JsonWriter& out, const Progress& progress) override;
 		void Messages(JsonWriter& out) override;
+		void ShaderSource(const JsonValue& params, JsonWriter& out) override;
+		void EditShader(const JsonValue& params, JsonWriter& out) override;
+		void RevertShader(const JsonValue& params, JsonWriter& out) override;
+		void Edits(JsonWriter& out) override;
+		void UseEdits(bool on) override;
+		~D3D12Replay() override;
 
 		// The device, made at Open unless the options asked for none (a model-only replay, for tests and the CLI).
 		ReplayDevice& Device();
@@ -73,8 +79,28 @@ namespace fb::replay::d3d12
 			last_ = Readback();
 		}
 
+		// Edit and Replay (edit.cpp): each edited shader, by its key, and each pipeline state built with edits. While the
+		// edits are on the device holds the edited states and these keep the captured ones; off, the other way round.
+		struct ShaderEdit
+		{
+			std::string key, stage, language, entry, profile, source;
+			std::vector<u8> code;
+			std::vector<u64> pipelines;
+		};
+		struct EditedPipeline
+		{
+			IUnknown* captured = nullptr;
+			IUnknown* edited = nullptr;
+		};
+		// Makes `pipelines` again with every edit that applies to them (with none, the captured state comes back); the
+		// names of those that could not be made.
+		std::vector<std::string> Rebuild(const std::vector<u64>& pipelines);
+
 		Model model_;
 		std::unique_ptr<ReplayDevice> device_;
+		std::vector<ShaderEdit> edits_;
+		std::map<u64, EditedPipeline> editedPipelines_;
+		bool editsOn_ = true;
 		std::map<u64, Usage> usage_;
 		Readback last_;
 		u32 replayedTo_ = UINT32_MAX;

@@ -27,6 +27,11 @@ def write(path, value):
 		f.write(value if isinstance(value, str) else json.dumps(value, indent="\t"))
 
 
+def write_text(path, text):
+	with open(path, "w", encoding="utf-8", newline="\n") as f:
+		f.write(text)
+
+
 def gpu_manifest():
 	"""The plugin's manifest as shipped, without its UI module (the checks need its server side only)."""
 	with open(os.path.join(REPO, "plugins", "gpu", "ied-plugin.json"), encoding="utf-8") as f:
@@ -248,6 +253,54 @@ class GpuTests(ServerTestCase):
 		self.assertNotIn("compareWith", stopped["session"])
 		with self.assertRaises(RpcFailure):
 			await self.replay(session, "compareEvents")
+		await self.client.request("gpu.close", {"sessionId": session})
+
+	async def test_edit_and_replay(self):
+		capture = await self.capture_frame()
+		session = (await self.client.request("gpu.open", {"wsId": "w1", "captureId": capture["id"]}))["sessionId"]
+		events = (await self.replay(session, "events"))["result"]["events"]
+		marker = next(e for e in events if e[6] == "Cube B")[0]
+		cube = next(e for e in events if e[1] == marker and e[2] == "draw")[0]
+		hdr = next(r for r in (await self.replay(session, "resources"))["result"]["resources"] if r["name"] == "HDR")["id"]
+		pixel = {"id": hdr, "eid": cube, "x": 640, "y": 240}
+		before = (await self.replay(session, "pixel", pixel))["result"]["text"]
+		# The program's shader as a workspace file, edited to draw red.
+		with open(os.path.join(REPO, "plugins", "gpu", "native", "samples", "d3d12", "main.cpp"), encoding="ascii") as f:
+			sample = f.read()
+		hlsl = sample[sample.index('R"(') + 3:sample.index(')"', sample.index('R"('))]
+		opening = "float4 PSMain(VSOut i) : SV_Target {"
+		os.makedirs(os.path.join(self.repo, "shaders"))
+		write_text(os.path.join(self.repo, "shaders", "scene.hlsl"), hlsl.replace(opening, opening + "\n\treturn float4(1, 0, 0, 1);"))
+		source = await self.client.request("gpu.shaderSource", {"sessionId": session, "eid": cube, "stage": "ps"})
+		self.assertEqual(("DXBC", "ps_5_1", False), (source["kind"], source["profile"], source["edited"]))
+		self.assertNotIn("link", source)
+		with self.assertRaises(RpcFailure) as caught:
+			await self.replay(session, "editShader", {"eid": cube, "stage": "ps", "language": "hlsl", "source": hlsl})
+		self.assertEqual("bad_request", caught.exception.code, "the session's edits are the server's to keep")
+		await self.client.sub(["gpurs:" + session])
+		edited = await self.client.request("gpu.editShader", {"sessionId": session, "eid": cube, "stage": "ps", "language": "hlsl", "path": "shaders/scene.hlsl", "entry": "PSMain"})
+		self.assertTrue(edited["ok"], edited["diagnostics"])
+		state = await self.client.wait_for("gpurs:" + session, lambda f: f.get("kind") == "state" and f["data"].get("edits"), timeout=20)
+		self.assertEqual(["Lit"], state[-1]["data"]["edits"][0]["pipelines"])
+		self.assertEqual("1, 0, 0, 1", (await self.replay(session, "pixel", pixel))["result"]["text"])
+		self.assertGreater((await self.replay(session, "editDiff", {"eid": cube}))["result"]["changed"], 0)
+		linked = await self.client.request("gpu.shaderSource", {"sessionId": session, "eid": cube, "stage": "ps"})
+		self.assertEqual({"path": "shaders/scene.hlsl", "entry": "PSMain", "profile": "ps_5_1", "language": "hlsl"}, linked["link"], "the next edit starts from the same file")
+		self.assertTrue(linked["edited"])
+		await self.client.request("gpu.revertShader", {"sessionId": session})
+		await self.client.wait_for("gpurs:" + session, lambda f: f.get("kind") == "state" and "edits" not in f["data"], timeout=20)
+		self.assertEqual(before, (await self.replay(session, "pixel", pixel))["result"]["text"])
+		async def edit(**args):
+			return (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "edit", "args": args}}))["result"]["text"]
+		text = await edit(capture=capture["id"], eid=cube, stage="ps", path="shaders/scene.hlsl", entry="PSMain")
+		self.assertIn("Edited the ps shader", text)
+		self.assertIn("in 1 pipeline: Lit", text)
+		self.assertIn("Output HDR (1280x720): ", text)
+		self.assertIn("The captured shader is back", text)
+		self.assertEqual(before, (await self.replay(session, "pixel", pixel))["result"]["text"], "the tool put the shader back")
+		broken = await edit(eid=cube, stage="ps", source=hlsl.replace(opening, opening + "\n\treturn colr;"), entry="PSMain")
+		self.assertIn("did not go in", broken)
+		self.assertIn("source:" + str(hlsl[:hlsl.index(opening)].count("\n") + 2) + ":", broken, "the error's line")
 		await self.client.request("gpu.close", {"sessionId": session})
 
 	async def test_the_ai_captures_a_frame(self):

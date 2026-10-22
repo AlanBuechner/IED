@@ -3,6 +3,7 @@
 // through dxcompiler.dll from the Windows SDK (FLASHBANG_DXCOMPILER names another), when it is there.
 #include "bufferlayout.h"
 #include "d3d12replay.h"
+#include "hlsl.h"
 
 #include <d3d12shader.h>
 #include <d3dcompiler.h>
@@ -29,31 +30,8 @@ namespace fb::replay::d3d12
 		using DisassembleFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, UINT, LPCSTR, ID3DBlob**);
 		using ReflectFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, REFIID, void**);
 
-		HMODULE Compiler47() {
-			static HMODULE module = LoadLibraryW(L"d3dcompiler_47.dll");
-			return module;
-		}
-
-		HMODULE DxCompiler() {
-			static HMODULE module = [] {
-				wchar_t named[MAX_PATH * 2] = {};
-				if (GetEnvironmentVariableW(L"FLASHBANG_DXCOMPILER", named, MAX_PATH * 2)) return LoadLibraryW(named);
-				WIN32_FIND_DATAW found;
-				std::wstring newest;
-				const std::wstring root = L"C:\\Program Files (x86)\\Windows Kits\\10\\bin\\";
-				HANDLE search = FindFirstFileW((root + L"10.*").c_str(), &found);
-				if (search != INVALID_HANDLE_VALUE) {
-					do {
-						const std::wstring candidate = root + found.cFileName + L"\\x64\\dxcompiler.dll";
-						if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES && candidate > newest) newest = candidate;
-					} while (FindNextFileW(search, &found));
-					FindClose(search);
-				}
-				HMODULE module = newest.empty() ? nullptr : LoadLibraryW(newest.c_str());
-				return module ? module : LoadLibraryW(L"dxcompiler.dll");
-			}();
-			return module;
-		}
+		HMODULE Compiler47() { return (HMODULE)fb::Compiler47(); }
+		HMODULE DxCompiler() { return (HMODULE)fb::DxCompiler(); }
 
 		std::string TypeText(ID3D12ShaderReflectionType* type) {
 			D3D12_SHADER_TYPE_DESC desc;

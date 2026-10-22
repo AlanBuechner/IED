@@ -36,6 +36,10 @@ Words the tools use:
 9. `gpu_timing` - where the GPU time goes, by pass or by the costliest draws, measured on the replay GPU.
 10. `gpu_compare` - a capture beside another (`other`): the events only one has and the calls that changed, at an
     `eid` the state and output pixels that differ, and each pass's time in both.
+11. `gpu_replay_with_shader` - try a shader change on the captured frame: a workspace file (as the editor holds it)
+    or source, compiled into every pipeline using that shader; it says how the output at the event changed, or the
+    compiler's errors, and puts the captured shader back unless `keep`. D3D12 shaders in HLSL (give `entry`, such as
+    PSMain); Vulkan shaders as the SPIR-V listing `gpu_shader` shows, or HLSL.
 
 ## Common questions
 
@@ -52,6 +56,8 @@ Words the tools use:
 - **It changed since the last build (or frame).** Capture both, then `gpu_compare` with the old one as `other`:
   the events that appeared or went, then `eid` at the first pass whose output differs for the state behind it; the
   pass times say which got slower.
+- **Would this fix it?** Edit the shader (its file, or the listing) and `gpu_replay_with_shader` at the event that
+  showed the problem: the changed pixels say whether the fix reaches the output, before anything is rebuilt.
 - **Too slow.** `gpu_timing` by pass, then by event for the costly pass. High pixel-shader invocations against the
   target's size mean overdraw; many primitives in a small pass mean geometry that could be culled.
 

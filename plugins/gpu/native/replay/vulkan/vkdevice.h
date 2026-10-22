@@ -120,6 +120,9 @@ namespace fb::replay::vulkan
 		void* Object(u64 id) override;
 		std::string Name(u64 id) override { return model_.NameOf(id); }
 		u64 IdOfHandle(u64 handle) const;
+		// Puts `handle` in the place of object `id` for the replays after (Edit and Replay's pipelines); the handle it
+		// replaces comes back.
+		u64 Swap(u64 id, u64 handle);
 
 		VkCommandBuffer BeginOwn();
 		void SubmitOwn(VkCommandBuffer cb);

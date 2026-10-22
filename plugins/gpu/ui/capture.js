@@ -1,7 +1,9 @@
 // capture.js - a capture as a document (F-GPU-14), PIX's layout: a bar with Collect Timing Data and the filter, the
 // view tabs (Overview, Pipeline, Performance, Compare), the timing timeline, then per view - Pipeline: the events grid, the
 // state tree beside the resource viewer (or the buffer view, a shader, a draw's vertex inputs), and the docked API Calls, Messages,
-// Resources and Warnings grids. Everything comes from the capture's replay session on the server.
+// Resources and Warnings grids. A shader edited there (Edit and Replay) changes the frame every view shows, until
+// reverted; the bar says so, and Diff shows how the output differs from the captured frame. Everything comes from the
+// capture's replay session on the server.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { EventsGrid } from "./events.js";
@@ -13,6 +15,7 @@ import { BufferPanel } from "./bufview.js";
 import { PixelHistoryPanel } from "./history.js";
 import { ShaderDebugPanel } from "./debugger.js";
 import { CompareView } from "./compare.js";
+import { EditPane } from "./editpane.js";
 import { ReplaySession } from "./session.js";
 import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
@@ -56,7 +59,9 @@ export class CaptureView {
 		this.tree = new StateTree({ onResource: (id, item) => this.pinResource(id, item), onShader: (stage) => this.showShader(stage) });
 		this.viewer = new TextureViewer({ onPick: (x, y) => this.pick(x, y), onHistory: (x, y) => this.showHistory(x, y), onDebug: (x, y) => this.debugPixel(this.outputEid, x, y) });
 		this.viewer.onChange = (what, v) => this.reloadTexture({ [what]: v });
-		this.shader = new ShaderPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugThread: (thread) => this.debug({ eid: this.outputEid, stage: "cs", thread }, "thread (" + thread.join(", ") + ")") });
+		this.shader = new ShaderPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugThread: (thread) => this.debug({ eid: this.outputEid, stage: "cs", thread }, "thread (" + thread.join(", ") + ")"),
+			onEdit: (stage) => this.editShader(stage) });
+		this.editPane = new EditPane({ ied: this.ied, onClose: () => this.showPanel(this.viewer.el), onApply: (request) => this.applyEdit(request), onRevert: (key) => this.revertEdit(key) });
 		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugVertex: (vertex) => this.debug({ eid: this.outputEid, stage: "vs", vertex, instance: 0 }, "vertex " + vertex) });
 		this.debugger = new ShaderDebugPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); } });
 		this.history = new PixelHistoryPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); }, onSelect: (eid) => this.select(eid), onDebug: (eid, x, y) => this.debugPixel(eid, x, y) });
@@ -69,7 +74,13 @@ export class CaptureView {
 		this.filter = h("input.input-field.gpu-filter.gpu-wide", { placeholder: "Filter events: kind:draw Cube >0.01ms", on: { input: () => this.events.setFilter(this.filter.value) } });
 		this.backend = h("span.gpu-backend.gpu-wide");
 		this.meshButton = h("button.btn.flat.gpu-wide", { title: "The selected draw's vertex inputs", on: { click: () => this.showMesh() } }, icon("symbol-structure"), "Mesh");
-		this.bar = h("div.gpu-bar", null, this.timingButton, this.timingChip, this.filter, this.meshButton, h("span.grow"), this.backend);
+		this.editDiff = false;
+		this.editsShown = "[]";
+		this.editCount = h("span");
+		this.diffButton = h("button.btn.flat", { title: "Show how the output differs from the captured frame", on: { click: () => this.toggleEditDiff() } }, icon("diff-multiple"), "Diff");
+		this.editChip = h("span.chip.gpu-edit-chip", { hidden: true }, icon("edit", "sm"), this.editCount, this.diffButton,
+			h("button.btn.flat", { title: "Put every captured shader back", on: { click: () => this.revertEdit("") } }, icon("discard"), "Revert"));
+		this.bar = h("div.gpu-bar", null, this.timingButton, this.timingChip, this.filter, this.meshButton, this.editChip, h("span.grow"), this.backend);
 		this.vtabs = h("div.gpu-vtabs");
 		this.calls = h("div.gpu-calls");
 		this.bottomBody = h("div.gpu-bbody");
@@ -136,7 +147,11 @@ export class CaptureView {
 
 	showPanel(el) {
 		replace(this.panel, el);
-		if (el === this.viewer.el) this.viewer.draw();
+		if (el !== this.viewer.el) return;
+		// Edits made while another panel showed replay the output now.
+		if (this.viewerStale && this.resource) this.reloadTexture();
+		else this.viewer.draw();
+		this.viewerStale = false;
 	}
 
 	// --- Opening ---------------------------------------------------------------------------------------------------
@@ -161,6 +176,7 @@ export class CaptureView {
 
 	sessionChanged(session) {
 		if (this.compare) this.compare.sessionChanged(session);
+		this.editsChanged(session.edits || []);
 		if (session.state === "failed") this.failed("The replay stopped: " + (session.problem || "the replayer exited") + ". Reopen starts it again.");
 	}
 
@@ -274,7 +290,8 @@ export class CaptureView {
 		const view = this.viewer.view;
 		const maxSize = Math.min(4096, Math.max(512, Math.round(Math.max(view.clientWidth, view.clientHeight) * (window.devicePixelRatio || 1) * 1.5)));
 		try {
-			const { result, binary } = await this.session.call("texture", { id: this.resource.id, eid: this.outputEid, mip: this.textureParams.mip, slice: this.textureParams.slice, maxSize });
+			const diff = this.editDiff && this.editsShown !== "[]";
+			const { result, binary } = await this.session.call(diff ? "editDiff" : "texture", { id: this.resource.id, eid: this.outputEid, mip: this.textureParams.mip, slice: this.textureParams.slice, maxSize });
 			if (generation !== this.generation) return;
 			result.mip = this.textureParams.mip;
 			result.slice = this.textureParams.slice;
@@ -341,6 +358,49 @@ export class CaptureView {
 		catch (e) {
 			this.shader.message(e.message || String(e));
 		}
+	}
+
+	// --- Edit and Replay -------------------------------------------------------------------------------------------
+
+	async editShader(stage) {
+		this.showPanel(this.editPane.el);
+		this.editPane.message("Reading the shader...");
+		try {
+			if (!this.session.sessionId) await this.session.open();
+			const source = await this.ied.client.request("gpu.shaderSource", { sessionId: this.session.sessionId, eid: this.outputEid, stage });
+			this.editPane.show(source, this.outputEid);
+		}
+		catch (e) {
+			this.editPane.message(e.message || String(e), true);
+		}
+	}
+
+	applyEdit(request) {
+		return this.ied.client.request("gpu.editShader", Object.assign({ sessionId: this.session.sessionId }, request));
+	}
+
+	revertEdit(key) {
+		return this.ied.client.request("gpu.revertShader", { sessionId: this.session.sessionId, key }).catch((e) => this.ied.report("Revert failed", e));
+	}
+
+	// The session's edits changed (here, in another client, or by the AI): the bar says so and the output is replayed.
+	editsChanged(edits) {
+		const shown = JSON.stringify(edits);
+		if (shown === this.editsShown) return;
+		this.editsShown = shown;
+		this.editChip.hidden = !edits.length;
+		this.editCount.textContent = edits.length === 1 ? "1 shader edited" : edits.length + " shaders edited";
+		if (!edits.length) this.editDiff = false;
+		this.diffButton.classList.toggle("on", this.editDiff);
+		if (this.resource && this.panel.firstChild === this.viewer.el) this.reloadTexture();
+		else this.viewerStale = true;
+	}
+
+	toggleEditDiff() {
+		this.editDiff = !this.editDiff;
+		this.diffButton.classList.toggle("on", this.editDiff);
+		if (this.panel.firstChild !== this.viewer.el) this.showPanel(this.viewer.el);
+		this.reloadTexture();
 	}
 
 	async showMesh() {

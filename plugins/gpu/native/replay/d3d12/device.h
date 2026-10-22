@@ -40,6 +40,9 @@ namespace fb::replay::d3d12
 		// A pipeline made from `pipeline`'s creation with `change` applied (null when it cannot be made); the caller
 		// releases it.
 		ID3D12PipelineState* Variant(u64 pipeline, const std::function<void(PipelineCreate&)>& change);
+		// Puts `object` in the place of object `id` for the replays after (Edit and Replay's pipeline states); the object
+		// it replaces comes back, with the device's reference.
+		IUnknown* Swap(u64 id, IUnknown* object);
 		// Records `command` again, for a hook that runs a draw with other state.
 		void Repeat(ID3D12GraphicsCommandList* list, const CommandRef& command);
 		// A list on the direct queue for the caller's own copies: Begin, record, then Run (executes and waits).

@@ -59,5 +59,6 @@ namespace GpuDebug
 	IED::ToolResult ScanTool(const IED::ToolCall& call) { return Through("scan", call); }
 	IED::ToolResult DebugShaderTool(const IED::ToolCall& call) { return Through("debug", call); }
 	IED::ToolResult CompareTool(const IED::ToolCall& call) { return Through("compare", call); }
+	IED::ToolResult ReplayWithShaderTool(const IED::ToolCall& call) { return Through("edit", call); }
 	IED::ToolResult TimingTool(const IED::ToolCall& call) { return Through("timing", call); }
 }

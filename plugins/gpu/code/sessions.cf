@@ -24,6 +24,7 @@ namespace GpuDebug
 		if (!problem.IsEmpty()) json.Field("problem", problem.View());
 		if (!summary.IsEmpty()) json.RawField("summary", summary.View());
 		if (!compareId.IsEmpty()) json.Field("compareWith", compareId.View());
+		if (!edits.IsEmpty()) json.RawField("edits", edits.View());
 		json.EndObject();
 		return json.ToString();
 	}

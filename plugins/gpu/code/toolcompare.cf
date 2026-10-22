@@ -81,7 +81,7 @@ namespace GpuDebug
 		if (differences.Count() > kCompareLines) text.Append("  ...\n");
 	}
 
-	static void AppendImage(Core::StringBuilder& text, const Serialization::DomNode& image) {
+	void AppendImageDifference(Core::StringBuilder& text, const Serialization::DomNode& image) {
 		const int64 changed = image.Member("changed").AsInt(), pixels = image.Member("pixels").AsInt();
 		text.Append("Output ");
 		text.Append(image.Member("a").Member("name").AsView());
@@ -194,7 +194,7 @@ namespace GpuDebug
 				params.EndObject();
 				AppendState(text, AskTool(debugger, target, "compareState", params.View()));
 				try {
-					AppendImage(text, AskTool(debugger, target, "compareTexture", params.View()));
+					AppendImageDifference(text, AskTool(debugger, target, "compareTexture", params.View()));
 				}
 				catch (IED::RpcError failed) {
 					text.Append("Output: ");

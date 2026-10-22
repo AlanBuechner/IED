@@ -6,8 +6,9 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { DOT, value } from "./format.js";
 
 export class ShaderPanel {
-	constructor({ onClose, onDebugThread }) {
+	constructor({ onClose, onDebugThread, onEdit }) {
 		this.title = h("b");
+		this.editButton = h("button.btn.flat", { title: "Edit and Replay: edit this shader and replay the frame with it", hidden: true, on: { click: () => this.stage && onEdit(this.stage) } }, icon("edit"), "Edit");
 		this.reflection = h("div.refl");
 		this.code = h("pre");
 		// A compute shader's thread to debug: its global id.
@@ -15,7 +16,7 @@ export class ShaderPanel {
 		this.threadForm = h("div.gpu-rv-tools", { hidden: true }, h("span.range", null, "Thread"), this.thread,
 			h("button.btn.flat", { title: "Debug this compute thread", on: { click: () => onDebugThread(this.thread.map((input) => +input.value || 0)) } }, icon("debug-alt"), "Debug"));
 		this.el = h("div.gpu-shader", null,
-			h("div.gpu-rv-tools", null, icon("symbol-method"), this.title, h("span.grow"),
+			h("div.gpu-rv-tools", null, icon("symbol-method"), this.title, h("span.grow"), this.editButton,
 				h("button.ib", { title: "Back to the resource", "aria-label": "Close", on: { click: onClose } }, icon("close"))),
 			this.threadForm, this.reflection, this.code);
 	}
@@ -23,12 +24,15 @@ export class ShaderPanel {
 	message(text) {
 		this.title.textContent = "Shader";
 		this.threadForm.hidden = true;
+		this.editButton.hidden = true;
 		replace(this.reflection);
 		this.code.textContent = text;
 	}
 
 	show(shader) {
 		this.threadForm.hidden = shader.stage !== "cs";
+		this.stage = shader.stage;
+		this.editButton.hidden = false;
 		const stage = {
 			vs: "Vertex", ps: "Pixel", cs: "Compute", hs: "Hull", ds: "Domain", gs: "Geometry", as: "Amplification", ms: "Mesh",
 			fs: "Fragment", tcs: "Tessellation control", tes: "Tessellation evaluation", task: "Task", mesh: "Mesh",

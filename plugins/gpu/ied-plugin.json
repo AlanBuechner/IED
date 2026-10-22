@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
 		"bindings": {
 			"provides": [
-				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing|compare, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing|compare|edit, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
 			],
 			"consumes": [
 				{ "name": "gpu.query", "version": "1" }
@@ -58,7 +58,7 @@
 		],
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, gpu_timing, and gpu_compare to set two captures side by side (two builds, two frames). gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, gpu_timing, gpu_compare to set two captures side by side (two builds, two frames), and gpu_replay_with_shader to try a shader change on the captured frame. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
 		],
 		"toolCalls": [
 			{
@@ -171,6 +171,16 @@
 				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "The capture compared, by id from gpu_captures, or \"latest\" (the default)." }, "other": { "type": "string", "description": "The capture to compare it with, by id from gpu_captures." }, "eid": { "type": "integer", "minimum": 1, "description": "An event of `capture`: compare the state and output image there with the aligned event of `other`." }, "timing": { "type": "boolean", "description": "Measure each pass's GPU time in both (default true)." }, "repeat": { "type": "integer", "minimum": 1, "maximum": 20 } }, "required": ["other"], "additionalProperties": false },
 				"function": "GpuDebug::CompareTool",
 				"timeoutSeconds": 600
+			},
+			{
+				"name": "gpu_replay_with_shader",
+				"description": "Edit and Replay: replaces a draw's or dispatch's shader stage with an edit and replays the frame with it - every pipeline using that shader gets the edit - then says how the output at the event differs from the captured frame (changed pixels, largest difference, where). The edit is a workspace file as the editor holds it (`path`, unsaved changes included) or `source`. D3D12 shaders in HLSL (entry and profile, e.g. PSMain and ps_5_1); Vulkan shaders as the SPIR-V listing gpu_shader shows (language spirv) or in HLSL. A compile error comes back with its lines. The captured shader is put back after, unless `keep` (then the UI shows the edit). Changes no file.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": false,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The draw or dispatch whose shader is edited, and whose output is compared." }, "stage": { "enum": ["vs", "ps", "fs", "cs", "gs", "hs", "ds"] }, "path": { "type": "string", "description": "A workspace file with the edited shader." }, "source": { "type": "string", "description": "The edited shader's text." }, "language": { "enum": ["hlsl", "spirv"] }, "entry": { "type": "string" }, "profile": { "type": "string", "description": "HLSL's target profile, e.g. ps_5_1; the captured shader's by default." }, "keep": { "type": "boolean", "description": "Leave the edit in the replay (default false)." } }, "required": ["eid", "stage"], "additionalProperties": false },
+				"function": "GpuDebug::ReplayWithShaderTool",
+				"timeoutSeconds": 300
 			},
 			{
 				"name": "gpu_timing",

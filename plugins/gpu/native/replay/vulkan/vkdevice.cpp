@@ -37,6 +37,13 @@ namespace fb::replay::vulkan
 		return found == ids_.end() ? 0 : found->second;
 	}
 
+	u64 ReplayDevice::Swap(u64 id, u64 handle) {
+		const u64 old = handles_[id];
+		handles_[id] = handle;
+		ids_[handle] = id;
+		return old;
+	}
+
 	void ReplayDevice::Set(u64 id, u64 handle) {
 		if (!handle) return;
 		handles_[id] = handle;

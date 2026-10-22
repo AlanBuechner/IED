@@ -96,6 +96,12 @@ namespace fb::replay::vulkan
 		void Shader(const JsonValue& params, JsonWriter& out) override;
 		void Timing(const JsonValue& params, JsonWriter& out, const Progress& progress) override;
 		void Messages(JsonWriter& out) override;
+		void ShaderSource(const JsonValue& params, JsonWriter& out) override;
+		void EditShader(const JsonValue& params, JsonWriter& out) override;
+		void RevertShader(const JsonValue& params, JsonWriter& out) override;
+		void Edits(JsonWriter& out) override;
+		void UseEdits(bool on) override;
+		~VulkanReplay() override;
 
 		ReplayDevice& Device();
 		const Model& GetModel() const { return model_; }
@@ -113,8 +119,30 @@ namespace fb::replay::vulkan
 			last_.valid = false;
 		}
 
+		// Edit and Replay (vkedit.cpp): each edited shader, by its key, with its module, and each pipeline made with
+		// edits. While the edits are on the device holds the edited pipelines and these keep the captured ones.
+		struct ShaderEdit
+		{
+			std::string key, stage, language, entry, profile, source;
+			std::vector<u32> words;
+			VkShaderModule module = VK_NULL_HANDLE;
+			std::vector<u64> pipelines;
+		};
+		struct EditedPipeline
+		{
+			u64 captured = 0;
+			u64 edited = 0;
+		};
+		// Makes `pipelines` again with every edit that applies to them (with none, the captured pipeline comes back); the
+		// names of those that could not be made.
+		std::vector<std::string> Rebuild(const std::vector<u64>& pipelines);
+		void Forget(ShaderEdit& edit);
+
 		Model model_;
 		std::unique_ptr<ReplayDevice> device_;
+		std::vector<ShaderEdit> edits_;
+		std::map<u64, EditedPipeline> editedPipelines_;
+		bool editsOn_ = true;
 		std::map<u64, Usage> usage_;
 		Readback last_;
 		u32 replayedTo_ = UINT32_MAX;

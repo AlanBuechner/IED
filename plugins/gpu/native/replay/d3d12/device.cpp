@@ -274,6 +274,13 @@ namespace fb::replay::d3d12
 		return MakePipeline(p, hr);
 	}
 
+	IUnknown* ReplayDevice::Swap(u64 id, IUnknown* object) {
+		IUnknown*& slot = objects_[id];
+		IUnknown* old = slot;
+		slot = object;
+		return old;
+	}
+
 	void ReplayDevice::Repeat(ID3D12GraphicsCommandList* list, const CommandRef& command) {
 		std::vector<u8> args;
 		RunCommand(list, command, args);

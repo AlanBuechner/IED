@@ -87,6 +87,7 @@ namespace GpuDebug
 		public Core::String problem;
 		public Core::String summary;     // initialize's result
 		public Core::String compareId;   // the capture it is compared with (docs/22 "Compare"); "" when none
+		public Core::String edits;       // the replayer's edits list (docs/22 "Edit and Replay"); "" when none
 		public Process::Child* child;
 		public Threading::Mutex lock;
 		public Threading::ConditionVariable answered;
@@ -96,8 +97,20 @@ namespace GpuDebug
 		public bool alive;
 
 		public Core::String Topic() const { return Core::String("gpurs:") + id.View(); }
-		// {sessionId, wsId, captureId, state, problem?, summary?, compareWith?}
+		// {sessionId, wsId, captureId, state, problem?, summary?, compareWith?, edits?}
 		public Core::String Json() const;
+	}
+
+	// An edit to compile (gpu.editShader, gpu_replay_with_shader): a workspace file's text as edited (`path`), else `text`.
+	class ShaderEditRequest
+	{
+		public int64 eid;
+		public Core::String stage;
+		public Core::String language;
+		public Core::String path;
+		public Core::String text;
+		public Core::String entry;
+		public Core::String profile;
 	}
 
 	class Debugger
@@ -137,6 +150,16 @@ namespace GpuDebug
 		// Opens `other` beside the session's capture in its replayer (compareOpen): compareOpen's result. Null stops
 		// comparing and lets the other capture go.
 		public Core::String Compare(Session* session, Capture* other);
+
+		// --- Edit and Replay (edits.cf) ---
+		// shaderSource's answer for the session's capture, with the file the shader was last edited from (`link`).
+		public Core::String ShaderSource(Session* session, const IED::Workspace& ws, Capture* capture, int64 eid, Core::StringView stage);
+		// Compiles an edit into the session's replay: editShader's answer; the session's edits are published, and an edit
+		// from a file that compiled is remembered for the shader.
+		public Core::String EditShader(Session* session, const IED::Workspace& ws, Capture* capture, const ShaderEditRequest& edit);
+		// One shader put back by its key, or all with an empty key: revertShader's answer.
+		public Core::String RevertShader(Session* session, Core::StringView key);
+		public void RefreshEdits(Session* session);
 
 	private:
 		private void Watch(Target* target);

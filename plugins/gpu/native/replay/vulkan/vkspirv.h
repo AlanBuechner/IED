@@ -63,4 +63,17 @@ namespace fb::replay::vulkan
 	// Whether opcode `op` has a result id, and whether a result type comes before it.
 	bool SpirvResult(u32 op, bool& typed);
 	const char* ExecutionModelName(u32 model);
+
+	// The names the listing gives a module's ids: its own names, else types and scalar constants by what they are.
+	std::map<u32, std::string> SpirvNames(const u32* words, size_t count);
+	// What the assembler reads the listing back with: an opcode by name with its operand pattern (the disassembler's), an
+	// enumerant by its kind's letter in the patterns ('b' a built-in) and name, a GLSL.std.450 instruction by name.
+	bool SpirvOpNamed(const std::string& name, u32& op, const char*& pattern);
+	bool SpirvEnumerant(char kind, const std::string& name, u32& value);
+	bool SpirvGlslInstruction(const std::string& name, u32& value);
+
+	// A module from a listing in DisassembleSpirv's form, edited (vkassemble.cpp). The names a listing of `original`
+	// gives keep their ids, so a number the listing prints for an id still means it; a new name gets a new id. False with
+	// `log` ("line N: ..." per problem) when the text does not read.
+	bool AssembleSpirv(const std::string& text, const u32* original, size_t count, std::vector<u32>& words, std::string& log);
 }

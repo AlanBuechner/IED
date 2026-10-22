@@ -88,6 +88,11 @@ namespace fb::replay
 			else if (method == "messages") Side(params).Messages(out);
 			else if (method == "compareOpen") CompareOpen(params, out);
 			else if (method == "compareClose") other_.reset(), otherFile_.reset();
+			else if (method == "shaderSource") replay_->ShaderSource(params, out);
+			else if (method == "editShader") replay_->EditShader(params, out);
+			else if (method == "revertShader") replay_->RevertShader(params, out);
+			else if (method == "edits") replay_->Edits(out);
+			else if (method == "editDiff") EditDiff(params, out, answer.binary);
 			else if (method == "compareEvents") CompareEvents(out);
 			else if (method == "compareState") CompareState(params, out);
 			else if (method == "compareTexture") CompareTexture(params, out, answer.binary);

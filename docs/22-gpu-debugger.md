@@ -105,6 +105,9 @@ One process per open capture, started by the server with the capture's path. Mes
 | `compareEvents {}`, `compareState {eid, otherEid}`, `compareTexture {eid, otherEid, id?, otherId?, mip?, slice?, maxSize?, threshold?}`, `compareTiming {repeat}` | the two captures compared ("Compare" below); `compareTexture`'s difference image comes as binary |
 | `compareClose {}` | lets the second capture go |
 | any method with `side: "b"` | answered from the second capture |
+| `shaderSource {eid, stage}` | what an edit of the stage's shader starts from ("Edit and Replay" below): `key`, `kind`, `profile`, `entry`, `languages`, `source?`, `embedded?`, `edited` |
+| `editShader {eid, stage, language, source, entry?, profile?}`, `revertShader {key?}`, `edits {}` | an edit compiled into every pipeline using the shader (`ok`, `diagnostics`, `pipelines`); one or all put back; the list. Only the server sends the first two (`gpu.editShader`) |
+| `editDiff {eid, id?, mip?, slice?, maxSize?}` | the output with the captured shaders against the edits, as `compareTexture` answers (binary: the difference) |
 | `shutdown {}` | ends the process |
 
 **Vulkan replay** (`native/replay/vulkan/`) creates its own instance and device on the GPU with the capture's vendor and device ID when there is one (else the first), with the captured device extensions the GPU has and the captured features, then the capture's objects in three passes (memory, buffers and images; their bindings; everything else). Swap chain images become plain images. SPIR-V is disassembled and reflected by Flashbang's own code (`vkspirv.cpp`), with no SPIRV-Tools dependency; the shader panel shows bindings by set and binding, uniform blocks and push constants with their members, and the stage's inputs and outputs by location.
@@ -214,6 +217,53 @@ AI's `gpu_compare` gives the same as text.
 Not yet: textures other than the render targets in the view (the request takes `id` and `otherId`); a visual
 regression bisect across commits (F-GPU-61).
 
+### Edit and Replay
+
+A shader of the capture is replaced by an edit (built 2026-10-22, both APIs), and every replay after it - the viewer,
+picks, Pixel History, timing, compare, the AI's tools - draws the frame with the edit, with a diff of the output against
+the captured frame.
+
+- **What an edit starts from** (`shaderSource {eid, stage}`): the stage's shader `key` (FNV-1a 64 of its bytecode, so
+  the same compiled shader has the same key in every capture of the program), `kind` (DXBC, DXIL, SPIR-V), `profile`
+  (`ps_5_1`; for a Vulkan stage the HLSL profile an HLSL edit compiles with), `entry`, the `languages` it can be edited
+  in, and a text when there is one: a Vulkan stage's SPIR-V listing (the disassembly, which Flashbang's own assembler
+  reads back: no SPIR-V tools dependency), the source a module embeds (OpSource) as `embedded`, or the current edit's
+  own text. A compiled DXBC or DXIL shader keeps no source unless built with debug information: its edit starts from
+  a file.
+- **Compiling** (`editShader {eid, stage, language, source, entry?, profile?}`): `hlsl` through Windows' compilers
+  (`common/hlsl.cpp`): d3dcompiler_47 for Shader Model 5.x, the Windows SDK's dxcompiler for 6.x, and for Vulkan a
+  dxcompiler with SPIR-V code generation (the Vulkan SDK's; `FLASHBANG_SPIRV_DXCOMPILER` names one); `spirv` through
+  the assembler (`replay/vulkan/vkassemble.cpp`): the listing's names keep the ids the captured module had, so a number
+  the listing prints for an id still means it, and a new name gets a new id; constants read by their type (0.5 for a
+  float). The edit goes into every pipeline that used the same shader in that stage - D3D12 pipeline states by the
+  bytecode, Vulkan pipelines by the module - made again with every edit that applies to them, the captured ones kept to
+  put back (`ReplayDevice::Swap`). A compile error, a module without the pipeline's entry point, or a pipeline the edit
+  no longer fits answers `ok: false` with `diagnostics` (`[{line, column, severity, text}]`, read from fxc's, dxc's and
+  glslang's logs and the assembler's), and the replay keeps what it had.
+- **Undoing and the diff**: `revertShader {key?}` puts one shader back, or all; `edits {}` lists them; `editDiff
+  {eid, id?, mip?, maxSize?}` reads the event's output with the captured shaders, then with the edits, and diffs them
+  texel by texel as compare does (`|captured - edited|`, changed pixels, largest and mean difference, the box).
+- **The server** (`code/edits.cf`): `gpu.shaderSource {sessionId, eid, stage}` adds `link`, the workspace file the
+  shader was last edited from with its entry, profile and language (kept per program and shader key in
+  `.ied/local/gpu-captures/shader-links.json`, so the next capture's edit starts from the same file); `gpu.editShader
+  {sessionId, eid, stage, language, path?, text?, entry?, profile?}` compiles a workspace file as the editor holds it
+  (`IED::TextAsEdited`: an open document's unsaved text, else the file) or the given text, remembers the file, and
+  keeps the session's edits (`edits` on `gpurs:<sessionId>`, so a client that comes back sees them); `gpu.revertShader
+  {sessionId, key?}`. `gpu.replay` does not forward `editShader` or `revertShader`: the session's list stays the
+  server's.
+- **The UI** (`ui/editpane.js`): the Shader panel's Edit opens the edit pane in the viewer's place: a workspace file
+  (Open shows it in IED's editor, where the edit is an ordinary document change, saved or not) or the text inline
+  (the SPIR-V listing, pasted HLSL); entry and profile for HLSL; Apply (Ctrl+Enter) compiles and replays, problems
+  list with their lines and a click goes there (the editor for a file, the text inline). The bar shows how many shaders
+  are edited, with Diff (the viewer shows `|captured - edited|`) and Revert; the output replays when the edits change,
+  here or in another client.
+- **The AI**: `gpu_replay_with_shader` applies an edit (a file or source), says how the output at the event changed,
+  and puts the captured shader back unless `keep`.
+
+Not yet: GLSL edits (no GLSL compiler is a dependency; the Vulkan SDK's glslang could be one), DXBC or DXIL assembly,
+sources from debug information (DXBC's SPDB, DXIL's SRCI); the shader debugger and the Shader panel show the captured
+shader while an edit is in place; a shader plugin's own compiler through a binding.
+
 ## Server and protocol (plugin `ied.gpu`)
 
 | Method | Does |
@@ -225,9 +275,10 @@ regression bisect across commits (F-GPU-61).
 | `gpu.open {wsId, captureId}` | the capture's replay session (started, or the running one): `{sessionId}`; its state on `gpurs:<sessionId>` |
 | `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`); not `initialize`, `png`, `compareOpen` or `compareClose`, which name files |
 | `gpu.compare {sessionId, captureId}` | the session's capture compared with another capture of its workspace ("Compare" above; `""` stops): `{session, result}` |
+| `gpu.shaderSource {sessionId, eid, stage}`, `gpu.editShader {sessionId, eid, stage, language, path?, text?, entry?, profile?}`, `gpu.revertShader {sessionId, key?}` | Edit and Replay ("Edit and Replay" above): the source with the file it was last edited from, an edit compiled (a workspace file as the editor holds it, or text), one or all put back |
 | `gpu.close {sessionId}` | ends the session for everyone |
 
-Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem, compareWith}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
+Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem, compareWith, edits}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
 
 ## Views
 
@@ -263,7 +314,7 @@ Phone (one pane at a time, `docs/15`): capture library, event list with timings,
 
 GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the owner does: list and search events, read state, read pixel values and histories, run shader debugging and get the trace as data, scan a render target for NaN/Inf, bisect which event first wrote a bad value, fetch timing and counters, compare two captures, and look at a texture (vision models only; privacy rules apply). Typical asks: "why is this pixel black?", "which pass got slower since yesterday's build?", "why does the shadow pass take 3 ms?". Answers cite EIDs, which the UI turns into links.
 
-Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section; then the pixel history (in `gpu_pixel`), `gpu_debug_shader` and `gpu_compare`. Not yet: edit-and-replay.
+Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section; then the pixel history (in `gpu_pixel`), `gpu_debug_shader`, `gpu_compare` and `gpu_replay_with_shader`.
 
 ## Integrations
 
@@ -307,6 +358,9 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
 - **Shader debugging** ("Shader debugging" above): Vulkan (`replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`) and D3D12
   DXBC of Shader Model 5.1 (`common/dxbc.cpp`, `replay/d3d12/debug.cpp`), the UI's `ui/debugger.js`, and
   `gpu_debug_shader`.
+- **Edit and Replay** ("Edit and Replay" above): `common/hlsl.cpp`, `common/shaderedit.cpp`, `replay/d3d12/edit.cpp`,
+  `replay/vulkan/vkedit.cpp` and `vkassemble.cpp`, `replay/sessionedit.cpp`, `code/edits.cf`, the UI's `ui/editpane.js`,
+  and `gpu_replay_with_shader`.
 - **Compare** ("Compare" above): `common/compare.cpp`, `replay/sessioncompare.cpp`, `gpu.compare`, the UI's
   `ui/compare.js`, and `gpu_compare`.
 - **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and

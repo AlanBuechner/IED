@@ -15,6 +15,34 @@ namespace fb::replay
 		std::vector<u8> binary;
 	};
 
+	// A replay's answer, parsed.
+	template <class Call> JsonValue Parsed(Call call) {
+		JsonWriter writer;
+		writer.BeginObject();
+		call(writer);
+		writer.EndObject();
+		JsonValue value;
+		std::string error;
+		if (!JsonValue::Parse(writer.Text().data(), writer.Text().size(), value, error)) Fail("a replay's answer does not parse: %s", error.c_str());
+		return value;
+	}
+
+	// Request params from a writer holding one object.
+	inline JsonValue Params(const JsonWriter& writer) {
+		JsonValue value;
+		std::string error;
+		JsonValue::Parse(writer.Text().data(), writer.Text().size(), value, error);
+		return value;
+	}
+
+	// The first render target a state answer names; 0 when it names none.
+	u64 FirstTarget(const JsonValue& state);
+	// Two texture answers of one size and their RGBA32F pixels, diffed texel by texel (compare.h) into `out` as an image
+	// the viewer shows (`view` names it), with the changed pixels, the largest and mean difference and their box, then
+	// the two answers as `a` and `b`; the difference image to `binary`.
+	void WriteDifference(const JsonValue& params, const JsonValue& a, const std::vector<u8>& pixelsA, const JsonValue& b, const std::vector<u8>& pixelsB, const char* view,
+		JsonWriter& out, std::vector<u8>& binary);
+
 	class Session
 	{
 	public:
@@ -34,6 +62,8 @@ namespace fb::replay
 		void CompareTexture(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary);
 		void CompareTiming(const JsonValue& params, JsonWriter& out, const Progress& progress);
 		ApiReplay& Other();
+		// sessionedit.cpp: the event's output with the captured shaders against the edits.
+		void EditDiff(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary);
 		bool SameApi() const { return otherFile_ && file_->GetApi() == otherFile_->GetApi(); }
 
 		std::unique_ptr<CaptureReader> file_;

@@ -193,9 +193,10 @@ namespace GpuDebug
 	static Core::String ReplayMethod(Debugger* debugger, const IED::Request& request) {
 		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
 		Core::String method = request.params.Str("method");
-		// What names a file on the server stays the server's: the capture it opens, the PNG it writes.
+		// What names a file on the server stays the server's: the capture it opens, the PNG it writes; the session's
+		// edits are the server's to keep (gpu.editShader).
 		Core::StringView name = method.View();
-		if (name == "initialize" || name == "png" || name == "compareOpen" || name == "compareClose")
+		if (name == "initialize" || name == "png" || name == "compareOpen" || name == "compareClose" || name == "editShader" || name == "revertShader")
 			throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("gpu.replay does not send ") + method.View()).View());
 		Serialization::DomNode params = request.params.Field("params");
 		Core::String blob;
@@ -223,6 +224,41 @@ namespace GpuDebug
 		return json.ToString();
 	}
 
+	static IED::Workspace WorkspaceOfSession(Session* session) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(session->wsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("the session's workspace is closed"));
+		return ws;
+	}
+
+	// gpu.shaderSource {sessionId, eid, stage}: what an edit of the stage's shader starts from (docs/22 "Edit and Replay").
+	static Core::String ShaderSourceMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
+		Capture* capture = CaptureOf(debugger, session->wsId.View(), session->captureId.View());
+		return debugger->ShaderSource(session, WorkspaceOfSession(session), capture, request.params.Int("eid", 0), request.params.Str("stage").View());
+	}
+
+	// gpu.editShader {sessionId, eid, stage, path?, text?, language?, entry?, profile?}: the edit compiled into the replay.
+	static Core::String EditShaderMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
+		Capture* capture = CaptureOf(debugger, session->wsId.View(), session->captureId.View());
+		ShaderEditRequest edit;
+		edit.eid = request.params.Int("eid", 0);
+		edit.stage = request.params.Str("stage");
+		edit.language = request.params.Str("language", Core::StringView(""));
+		edit.path = request.params.Str("path", Core::StringView(""));
+		edit.text = request.params.Str("text", Core::StringView(""));
+		edit.entry = request.params.Str("entry", Core::StringView(""));
+		edit.profile = request.params.Str("profile", Core::StringView(""));
+		if (edit.language.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("language is required: hlsl or spirv"));
+		return debugger->EditShader(session, WorkspaceOfSession(session), capture, edit);
+	}
+
+	// gpu.revertShader {sessionId, key?}: one edited shader put back, or all.
+	static Core::String RevertShaderMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
+		return debugger->RevertShader(session, request.params.Str("key", Core::StringView("")).View());
+	}
+
 	static Core::String CloseMethod(Debugger* debugger, const IED::Request& request) {
 		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
 		debugger->Close(session, Core::StringView("closed"));
@@ -246,6 +282,9 @@ namespace GpuDebug
 		Register(debugger, "gpu.open", OpenMethod);
 		Register(debugger, "gpu.replay", ReplayMethod);
 		Register(debugger, "gpu.compare", CompareMethod);
+		Register(debugger, "gpu.shaderSource", ShaderSourceMethod);
+		Register(debugger, "gpu.editShader", EditShaderMethod);
+		Register(debugger, "gpu.revertShader", RevertShaderMethod);
 		Register(debugger, "gpu.close", CloseMethod);
 	}
 

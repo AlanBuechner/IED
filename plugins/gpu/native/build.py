@@ -16,18 +16,19 @@ VULKAN_INCLUDE = os.path.join(REPO, "vendor", "vulkan-headers", "include")
 
 COMMON = ["common"]
 
-# name: kind, source folders (relative to native/), system libraries
+# name: kind, source folders or single sources (relative to native/), system libraries
 TARGETS = {
 	"flashbang": ("dll", COMMON + ["capture", "capture/d3d12", "capture/vulkan"], ["kernel32", "user32", "advapi32", "ole32", "dxgi", "dxguid"]),
 	"flashbang-replay": ("exe", COMMON + ["replay", "replay/d3d12", "replay/vulkan"], ["kernel32", "user32", "advapi32", "d3d12", "dxgi", "dxguid", "ole32"]),
 	"fb-sample-d3d12": ("exe", ["samples/d3d12"], ["kernel32", "user32", "d3d12", "dxgi", "d3dcompiler"]),
 	"fb-sample-vulkan": ("exe", ["samples/vulkan"], ["kernel32", "user32"]),
-	"flashbang-tests": ("exe", COMMON + ["tests"], ["kernel32", "user32", "advapi32", "ole32"]),
+	"flashbang-tests": ("exe", COMMON + ["tests", "replay/vulkan/vkspirv.cpp", "replay/vulkan/vkassemble.cpp"], ["kernel32", "user32", "advapi32", "ole32"]),
 }
 
 # Headers a target's sources include that a script writes first (into the target's int folder, on its include path).
 GENERATED = {
 	"fb-sample-vulkan": [("samples/vulkan/make_shaders.py", "shaders.h")],
+	"flashbang-tests": [("samples/vulkan/make_shaders.py", "shaders.h")],
 }
 
 CONFIGS = {
@@ -45,6 +46,9 @@ def sources_of(folders):
 	found = []
 	for folder in folders:
 		path = os.path.join(HERE, folder)
+		if os.path.isfile(path):
+			found.append(path)
+			continue
 		if not os.path.isdir(path):
 			continue
 		for name in sorted(os.listdir(path)):
