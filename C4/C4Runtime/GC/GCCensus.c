@@ -21,19 +21,13 @@ bool gc_census_set(GCCensus* census, bool on)
 	return was;
 }
 
-void gc_census_note(const GCCensus* census, const GCHeap* heap, void* p, const char* type)
+bool gc_census_prepare(GCSpan* span, uint32_t epoch)
 {
-	GCSpan* span = gc_pages_span_of(&heap->pages, (uintptr_t)p);
-	if (!span || span->state == GC_SPAN_POOL) return;
-	const uint32_t epoch = __atomic_load_n(&census->epoch, __ATOMIC_ACQUIRE);
 	if (!span->tags) span->tags = (const char**)gc_mem_alloc(span->nelems * sizeof(const char*));
-	if (!span->tags) return;
-	if (span->tagsEpoch != epoch)
-	{
-		memset((void*)span->tags, 0, span->nelems * sizeof(const char*));
-		span->tagsEpoch = epoch;
-	}
-	span->tags[gc_span_slot(span, (size_t)((uint8_t*)p - span->base))] = type;
+	else memset((void*)span->tags, 0, span->nelems * sizeof(const char*));
+	if (!span->tags) return false;
+	span->tagsEpoch = epoch;
+	return true;
 }
 
 static uint32_t slot_of(const char* type, uint32_t mask)
@@ -73,14 +67,30 @@ static c4_gc_census_entry* entry_of(Tally* tally, const char* type)
 	return entry;
 }
 
+// A span whose table is not this census's holds only objects of no known type: counted at once.
+static void count_untyped_span(Tally* tally, const GCSpan* span)
+{
+	uint64_t objects = 0;
+	for (uint32_t w = 0; w < GC_SPAN_WORDS; ++w) objects += (uint64_t)__builtin_popcountll(span->allocBits[w]);
+	if (objects == 0) return;
+	c4_gc_census_entry* entry = entry_of(tally, NULL);
+	entry->objects += objects;
+	entry->bytes += objects * span->elemSize;
+}
+
 static void count_span(Tally* tally, const GCSpan* span, uint32_t epoch)
 {
-	const char* const* tags = span->tags && span->tagsEpoch == epoch ? span->tags : NULL;
+	if (!span->tags || span->tagsEpoch != epoch)
+	{
+		count_untyped_span(tally, span);
+		return;
+	}
+	const char* const* tags = span->tags;
 	c4_gc_census_entry* entry = NULL;
 	for (uint32_t w = 0; w < GC_SPAN_WORDS; ++w)
 		for (uint64_t bits = span->allocBits[w]; bits; bits &= bits - 1u)
 		{
-			const char* type = tags ? tags[w * 64u + (uint32_t)__builtin_ctzll(bits)] : NULL;
+			const char* type = tags[w * 64u + (uint32_t)__builtin_ctzll(bits)];
 			if (!entry || entry->type != type) entry = entry_of(tally, type);
 			entry->objects += 1;
 			entry->bytes += span->elemSize;

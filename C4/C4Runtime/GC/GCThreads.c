@@ -89,18 +89,3 @@ void gc_threads_flush_caches(GCThreads* threads, GCHeap* heap, uint64_t* allocs)
 	for (GCThread* thread = threads->all; thread; thread = thread->next) gc_thread_flush_cache(thread, heap, allocs);
 }
 
-void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, int spanClass)
-{
-	// The flag goes up before the cache is read: a collection that stopped this thread with the flag down has
-	// flushed the cache, so the read finds it empty and takes the slow path.
-	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_SEQ_CST);
-	GCSpan* span = thread->cache.spans[spanClass];
-	void* p = span ? gc_heap_alloc_slot(heap, span) : NULL;
-	if (p)
-	{
-		thread->cache.allocatedBytes += span->elemSize;
-		thread->cache.allocs++;
-	}
-	__atomic_store_n(&thread->inAllocator, 0, __ATOMIC_RELEASE);
-	return p;
-}

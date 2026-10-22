@@ -52,4 +52,22 @@ void gc_thread_flush_cache(GCThread* thread, GCHeap* heap, uint64_t* allocs);
 
 // A small object of `spanClass` from the thread's own span, or NULL when it has none with a free slot (the slow
 // path refills it under the lock). Runs without the lock, on the thread itself.
-void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, int spanClass);
+// A slot from the thread's own cache, or NULL. The flag goes up before the cache is read: a collection that stopped
+// this thread with the flag down has flushed the cache, so the read finds it empty and takes the slow path. The
+// collector reads the flag only once the thread has really stopped (GetThreadContext), when its stores are visible, so
+// the flag needs only to stay in order with this thread's own reads and writes: compiler fences, no locked instruction.
+static inline void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, int spanClass)
+{
+	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_RELAXED);
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+	GCSpan* span = thread->cache.spans[spanClass];
+	void* p = span ? gc_heap_alloc_slot(heap, span) : NULL;
+	if (p)
+	{
+		thread->cache.allocatedBytes += span->elemSize;
+		thread->cache.allocs++;
+	}
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+	__atomic_store_n(&thread->inAllocator, 0, __ATOMIC_RELAXED);
+	return p;
+}

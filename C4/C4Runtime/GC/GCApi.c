@@ -74,15 +74,20 @@ static void on_thread_exit(void* data)
 	t_self = NULL;
 }
 
-// The calling thread, registered with the collector the first time it asks.
-static GCThread* this_thread(void)
+__attribute__((noinline)) static GCThread* register_this_thread(void)
 {
-	if (t_self) return t_self;
 	gc_os_lock();
 	t_self = gc_threads_add(&collector()->threads);
 	gc_os_unlock();
 	gc_os_on_thread_exit(on_thread_exit, t_self);
 	return t_self;
+}
+
+// The calling thread, registered with the collector the first time it asks.
+static inline GCThread* this_thread(void)
+{
+	GCThread* self = t_self;
+	return self ? self : register_this_thread();
 }
 
 void c4_gc_register_thread(void) { this_thread(); }
@@ -184,7 +189,7 @@ static int cycle_outrun(const GCState* gc)
 	return gc_concurrent_busy(gc) && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection * 2;
 }
 
-static void sample(GCThread* self, uint64_t bytes, const void* caller)
+__attribute__((noinline)) static void sample(GCThread* self, uint64_t bytes, const void* caller)
 {
 	GCState* gc = collector();
 	c4_gc_alloc_sample record;
@@ -197,25 +202,25 @@ static void sample(GCThread* self, uint64_t bytes, const void* caller)
 	gc_os_unlock();
 }
 
-// Counts an allocation `caller` made on `self`, and samples it when its turn has come.
-static void note_allocation(GCThread* self, uint64_t bytes, const void* caller)
+// The sampler's countdown ran out: a sample when its turn has come, and the next countdown.
+__attribute__((noinline)) static void check_sampler(GCThread* self, uint64_t bytes, const void* caller)
 {
-	self->allocated.objects += 1;
-	self->allocated.bytes += bytes;
-	self->sampler.untilCheck -= (int64_t)bytes;
-	if (self->sampler.untilCheck >= 0) return;
 	const uint64_t seed = (uint64_t)(uintptr_t)self ^ gc_os_now_ns();
 	if (gc_sampler_due(&self->sampler, &collector()->sampling, bytes, seed)) sample(self, bytes, caller);
 }
 
-static void* allocate_object(GCThread* self, GCAllocRequest request)
+// Counts an allocation `caller` made on `self`, and samples it when its turn has come.
+static inline void note_allocation(GCThread* self, uint64_t bytes, const void* caller)
 {
-	const int spanClass = gc_heap_small_class(request);
-	if (spanClass >= 0)
-	{
-		void* p = gc_thread_alloc_fast(self, &g_gc.heap, spanClass);
-		if (p) return p;
-	}
+	self->allocated.objects += 1;
+	self->allocated.bytes += bytes;
+	self->sampler.untilCheck -= (int64_t)bytes;
+	if (self->sampler.untilCheck < 0) check_sampler(self, bytes, caller);
+}
+
+// What the thread's cache cannot give: a large object, a new span, a collection.
+__attribute__((noinline)) static void* allocate_slow(GCThread* self, GCAllocRequest request)
+{
 	for (;;)
 	{
 		gc_os_lock();
@@ -234,12 +239,27 @@ static void* allocate_object(GCThread* self, GCAllocRequest request)
 	}
 }
 
-static void* allocate(GCAllocRequest request, const void* caller, const char* type)
+// The census's note of the object `self` just allocated: in its cache's span for a small one, found by address when the
+// object came from elsewhere (a large one, or a span the slow path gave the cache).
+__attribute__((noinline)) static void note_type(GCThread* self, GCAllocRequest request, void* p, const char* type)
+{
+	const int spanClass = gc_heap_small_class(request);
+	GCSpan* span = spanClass >= 0 ? self->cache.spans[spanClass] : NULL;
+	if (!span || (uint8_t*)p < span->base || (uint8_t*)p >= span->base + gc_span_bytes(span))
+		span = gc_pages_span_of(&g_gc.heap.pages, (uintptr_t)p);
+	gc_census_note(&g_gc.census, span, p, type);
+}
+
+// Inline into each entry point: the cache's slot, counted, with nothing called unless the cache is empty, a sample is
+// due or a census runs.
+static inline __attribute__((always_inline)) void* allocate(GCAllocRequest request, const void* caller, const char* type)
 {
 	GCThread* self = this_thread();
-	void* p = allocate_object(self, request);
+	const int spanClass = gc_heap_small_class(request);
+	void* p = spanClass >= 0 ? gc_thread_alloc_fast(self, &g_gc.heap, spanClass) : NULL;
+	if (!p) p = allocate_slow(self, request);
 	note_allocation(self, request.size, caller);
-	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) gc_census_note(&g_gc.census, &g_gc.heap, p, type);
+	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) note_type(self, request, p, type);
 	return p;
 }
 

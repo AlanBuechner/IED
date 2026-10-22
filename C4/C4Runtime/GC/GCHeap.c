@@ -34,14 +34,6 @@ void gc_heap_note_free_slot(GCHeap* heap, GCSpan* span)
 // ------------------------------------------------------------------------------------------------
 // Small objects
 
-int gc_heap_small_class(GCAllocRequest request)
-{
-	const size_t align = request.align < GC_MIN_ALIGN ? GC_MIN_ALIGN : request.align;
-	const size_t size = ((request.size ? request.size : 1) + align - 1) & ~(align - 1);
-	if (size > GC_SMALL_MAX || align > GC_SMALL_ALIGN_MAX) return -1;
-	return (int)(gc_class_of(size) * 2u + (request.noscan ? 1u : 0u));
-}
-
 static size_t pages_for_slots(uint32_t size)
 {
 	for (size_t n = (size + GC_PAGE_SIZE - 1) / GC_PAGE_SIZE;; ++n)
@@ -88,51 +80,6 @@ void gc_heap_disown(GCHeap* heap, GCSpan* span)
 	if (__atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) < span->nelems) gc_heap_note_free_slot(heap, span);
 }
 
-// The first clear bit in [from, limit), or limit.
-static uint32_t find_clear_bit(const uint64_t* bits, uint32_t from, uint32_t limit)
-{
-	for (uint32_t w = from >> 6; (w << 6) < limit; ++w)
-	{
-		uint64_t clear = ~__atomic_load_n(&bits[w], __ATOMIC_RELAXED);
-		if (w == (from >> 6)) clear &= ~(uint64_t)0 << (from & 63u);
-		if (!clear) continue;
-		const uint32_t i = (w << 6) + (uint32_t)__builtin_ctzll(clear);
-		return i < limit ? i : limit;
-	}
-	return limit;
-}
-
-// Claims slot `i` unless another claim got there first.
-static int claim(uint64_t* bits, uint32_t i)
-{
-	const uint64_t mask = (uint64_t)1 << (i & 63u);
-	return (__atomic_fetch_or(&bits[i >> 6], mask, __ATOMIC_ACQ_REL) & mask) == 0;
-}
-
-static uint32_t take_slot(GCSpan* span)
-{
-	for (;;)
-	{
-		uint32_t slot = find_clear_bit(span->allocBits, span->freeIndex, span->nelems);
-		if (slot == span->nelems) slot = find_clear_bit(span->allocBits, 0, span->nelems);
-		if (slot == span->nelems) return slot;
-		if (!claim(span->allocBits, slot)) continue;
-		__atomic_fetch_add(&span->allocCount, 1u, __ATOMIC_RELAXED);
-		span->freeIndex = slot + 1;
-		return slot;
-	}
-}
-
-void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span)
-{
-	if (__atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) >= span->nelems) return NULL;
-	const uint32_t slot = take_slot(span);
-	if (slot == span->nelems) return NULL;
-	uint8_t* p = gc_span_slot_base(span, slot);
-	if (__atomic_load_n(&span->needsZero, __ATOMIC_ACQUIRE)) memset(p, 0, span->elemSize);
-	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, slot); // markers claim beside it
-	return p;
-}
 
 // ------------------------------------------------------------------------------------------------
 // Large objects

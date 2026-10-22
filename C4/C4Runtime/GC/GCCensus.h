@@ -18,8 +18,18 @@ typedef struct GCCensus
 
 // Turns the census on or off and returns whether it was on. Under the lock.
 bool gc_census_set(GCCensus* census, bool on);
-// Notes `type` beside the object at `p`, of a span the calling thread owns or a large span it just made.
-void gc_census_note(const GCCensus* census, const GCHeap* heap, void* p, const char* type);
+// Gives `span` a table of no types for the census of `epoch` (made the first time, cleared after); false when no memory.
+bool gc_census_prepare(GCSpan* span, uint32_t epoch);
+
+// Notes `type` beside the object at `p` in `span` (one the calling thread owns, or a large span it just made). Inline:
+// every allocation passes here while a census runs.
+static inline void gc_census_note(const GCCensus* census, GCSpan* span, void* p, const char* type)
+{
+	if (!span || span->state == GC_SPAN_POOL) return;
+	const uint32_t epoch = __atomic_load_n(&census->epoch, __ATOMIC_RELAXED);
+	if ((!span->tags || span->tagsEpoch != epoch) && !gc_census_prepare(span, epoch)) return;
+	span->tags[gc_span_slot(span, (size_t)((uint8_t*)p - span->base))] = type;
+}
 // Counts the heap's objects by the types noted: after a sweep, with every thread stopped and no span owned.
 void gc_census_take(GCCensus* census, const GCHeap* heap);
 // Copies up to `capacity` of the last census's entries to `out`: how many types it had.
