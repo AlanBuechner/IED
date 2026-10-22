@@ -216,8 +216,11 @@ a generic addition to the settings page API, `docs/07`). Web > Fetch and Web > T
   SearXNG's Python packages (`searxng-packages`, a package of kind `pip`: `pip install --target vendor/searxng-packages
   --require-hashes --only-binary=:all: --no-deps` from `tools/setup/searxng-requirements.txt`, every package pinned with
   its `win_amd64`/`cp312` wheel's hash; installed again when that file changes) and the Tor Expert Bundle (`tor`).
-- `nuke install-ied` copies `vendor/python`, `vendor/searxng/searx`, `vendor/searxng-packages` and `vendor/tor` into the
-  install when they are present, and says which are missing.
+- `nuke install-ied` first has setup install those four packages into the checkout (only what is missing or out of
+  date; offline it says so and installs without them), then copies `vendor/python`, `vendor/searxng/searx`,
+  `vendor/searxng-packages` and `vendor/tor` into the install, so an installed IED (the desktop app included) searches
+  with no setup of its own. A file of them in use - a running SearXNG's `.pyd`, `tor.exe` - is renamed aside and
+  replaced, as a running program is.
 - Without them the tools still load and say what is missing ("SearXNG is not installed: run setup.bat ..., or set
   websearch.instanceUrl"); `web_fetch` falls back to Windows' curl.
 

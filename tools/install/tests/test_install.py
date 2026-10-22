@@ -56,6 +56,18 @@ class MirrorTests(unittest.TestCase):
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
 
 
+class ServicesTests(unittest.TestCase):
+	def test_setup_installs_the_services_through_the_private_python(self):
+		repo = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, repo, True)
+		command = install_ied.services_command(repo)
+		self.assertEqual(["cmd", "/d", "/c", os.path.join(repo, "setup.bat")], command[:4], "without the private Python, setup.bat installs it first")
+		write(os.path.join(repo, "vendor", "python", "python.exe"), "")
+		command = install_ied.services_command(repo)
+		self.assertEqual([os.path.join(repo, "vendor", "python", "python.exe"), "-I", os.path.join(repo, "tools", "setup", "setup.py")], command[:3])
+		self.assertEqual(["--only", "searxng,pip,searxng-packages,tor", "--no-path"], command[3:], "only the services, never PATH")
+
+
 class RecordTests(unittest.TestCase):
 	def test_the_record_names_its_checkout(self):
 		root = tempfile.mkdtemp(prefix="ied-install-")
@@ -123,6 +135,27 @@ class ProgramInUseTests(unittest.TestCase):
 		self.process.wait(10)
 		install_ied.remove_old(self.root)
 		self.assertEqual([], [name for name in os.listdir(self.root) if name.endswith(".old")], "the next install removes it")
+
+	def test_a_service_in_use_is_renamed_aside_in_a_tree(self):
+		ping = os.path.join(os.environ["SystemRoot"], "System32", "PING.EXE")
+		source = os.path.join(self.root, "source")
+		target = os.path.join(self.root, "target")
+		write(os.path.join(source, "tor", "geoip"), "data")
+		os.makedirs(os.path.join(source, "tor"), exist_ok=True)
+		shutil.copy2(ping, os.path.join(source, "tor", "tor.exe"))
+		install_ied.mirror(source, target, set(), report())
+		self.process = subprocess.Popen([os.path.join(target, "tor", "tor.exe"), "-n", "30", "127.0.0.1"], stdout=subprocess.DEVNULL)
+		time.sleep(0.5)
+		with open(os.path.join(source, "tor", "tor.exe"), "ab") as f:
+			f.write(b"\0" * 16)
+		result = report()
+		install_ied.mirror(source, target, set(), result)
+		self.assertEqual(["tor.exe"], result["in_use"], "a running Tor (or a loaded .pyd) does not stop the install")
+		self.assertEqual(os.path.getsize(os.path.join(source, "tor", "tor.exe")), os.path.getsize(os.path.join(target, "tor", "tor.exe")))
+		self.process.kill()
+		self.process.wait(10)
+		install_ied.mirror(source, target, set(), report())
+		self.assertEqual(["geoip", "tor.exe"], sorted(os.listdir(os.path.join(target, "tor"))), "the next install removes the old copy")
 
 	def test_an_uninstall_leaves_a_running_install_whole(self):
 		installed = os.path.join(self.root, "IED")

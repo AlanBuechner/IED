@@ -1,6 +1,8 @@
 """Installs IED from this checkout's build (docs/21 "Install shape"): the programs and what the server serves and loads
-- the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries - copied
-into %LOCALAPPDATA%\\Programs\\IED (only what changed), then `ied-desktop --register` puts IED in the Start menu and
+- the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries, and the
+services web search runs (the private Python, SearXNG with its packages and Tor, which setup installs into the checkout
+first when they are missing, docs/29) - copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
+`ied-desktop --register` puts IED in the Start menu and
 makes IED's solution files (.iedsln, .iedfed) open in it, and the folder goes on the user's PATH, so `ied <folder>`
 works in a terminal opened afterwards.
 
@@ -8,8 +10,9 @@ works in a terminal opened afterwards.
 	python -I tools/install/install_ied.py --uninstall [--to <folder>]
 	nuke install-ied                     (builds first; `nuke install-ied dist` installs an optimized build)
 
-An installed IED that is running keeps running: a program in use is renamed aside (*.old) and the new one copied in
-its place, and the old copies are removed by the next install once nothing uses them. Restart IED (`ied stop`, then
+An installed IED that is running keeps running: a program or library in use (a running SearXNG's or Tor's too) is
+renamed aside (*.old) and the new one copied in its place, and the old copies are removed by the next install once
+nothing uses them. Restart IED (`ied stop`, then
 open it) to run the new one. --uninstall takes IED out of the Start menu and the PATH and removes the folder (close IED
 first). Exit code 0 when everything was done.
 """
@@ -48,15 +51,32 @@ TREES = (
 	("third_party/codicons/src/template", ()),
 )
 
-# The services the web plugins run (docs/29), installed by setup.bat: the private Python, SearXNG's own package (its
-# searx/ folder) and Python packages, and the Tor Expert Bundle. Copied when present; without them web search says what
-# is missing, and web fetch uses Windows' curl.
+# The services the web plugins run (docs/29): the private Python, SearXNG's own package (its searx/ folder) and Python
+# packages, and the Tor Expert Bundle. Each install first has setup install them into the checkout's vendor/ (only what
+# is missing or out of date), then copies them; without them web search says what is missing, and web fetch uses
+# Windows' curl.
 SERVICES = (
 	("vendor/python", ("__pycache__",)),
 	("vendor/searxng/searx", ("__pycache__",)),
 	("vendor/searxng-packages", ("__pycache__", "bin")),
 	("vendor/tor", ("docs",)),
 )
+SERVICE_PACKAGES = ("searxng", "pip", "searxng-packages", "tor")
+
+
+def services_command(repo):
+	"""setup for the services' packages: through the private Python when it is there, else setup.bat (which installs
+	it first). Never touches PATH."""
+	python = os.path.join(repo, "vendor", "python", "python.exe")
+	options = ["--only", ",".join(SERVICE_PACKAGES), "--no-path"]
+	if os.path.isfile(python):
+		return [python, "-I", os.path.join(repo, "tools", "setup", "setup.py")] + options
+	return ["cmd", "/d", "/c", os.path.join(repo, "setup.bat")] + options
+
+
+def ensure_services(repo):
+	"""Whether setup left the services installed in the checkout (it says what it did; offline it fails)."""
+	return subprocess.run(services_command(repo), cwd=repo).returncode == 0
 
 
 def default_target():
@@ -67,18 +87,38 @@ def same(source, target):
 	return os.path.exists(target) and os.path.getsize(source) == os.path.getsize(target) and filecmp.cmp(source, target, shallow=True)
 
 
-def copy_program(source, target, report):
-	"""Copies a program; one in use is renamed aside first (Windows lets a running program's file be renamed)."""
-	if same(source, target):
-		return
+def aside(path):
+	"""Renames a file in use out of the way (Windows lets a running program's file, or a loaded DLL, be renamed); the
+	next install removes it."""
+	os.replace(path, "%s.%d.old" % (path, int(time.time() * 1000)))
+
+
+def replace_file(source, target, report):
+	"""Copies `source` over `target`; a target in use is renamed aside first."""
 	try:
 		shutil.copy2(source, target)
 	except PermissionError:
-		aside = "%s.%d.old" % (target, int(time.time() * 1000))
-		os.replace(target, aside)
+		aside(target)
 		shutil.copy2(source, target)
 		report["in_use"].append(os.path.basename(target))
 	report["copied"] += 1
+
+
+def discard(path, report):
+	"""Removes a file the source no longer has; one in use is renamed aside (an aside one is left for the next time)."""
+	try:
+		os.remove(path)
+	except PermissionError:
+		if path.endswith(".old"):
+			return
+		aside(path)
+	report["removed"] += 1
+
+
+def copy_program(source, target, report):
+	"""Copies a program; one in use is renamed aside first."""
+	if not same(source, target):
+		replace_file(source, target, report)
 
 
 def remove_old(folder):
@@ -103,16 +143,14 @@ def mirror(source, target, skip, report):
 			destination = os.path.join(target, path)
 			if not same(os.path.join(folder, name), destination):
 				os.makedirs(os.path.dirname(destination), exist_ok=True)
-				shutil.copy2(os.path.join(folder, name), destination)
-				report["copied"] += 1
+				replace_file(os.path.join(folder, name), destination, report)
 	if not os.path.isdir(target):
 		return
 	for folder, _, files in os.walk(target, topdown=False):
 		for name in files:
 			path = os.path.normpath(os.path.relpath(os.path.join(folder, name), target))
 			if path not in wanted:
-				os.remove(os.path.join(folder, name))
-				report["removed"] += 1
+				discard(os.path.join(folder, name), report)
 		if folder != target and not os.listdir(folder):
 			os.rmdir(folder)
 
@@ -158,6 +196,8 @@ def install(bin_root, target):
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
 		mirror(source, os.path.join(target, tree), set(skip), report)
+	if not ensure_services(REPO):
+		print("install-ied: setup could not install the web search services (see above); installing without what is missing")
 	for tree, skip in SERVICES:
 		source = os.path.join(REPO, tree)
 		if os.path.isdir(source):
@@ -283,7 +323,7 @@ def main(argv):
 	report = install(args.bin, target)
 	print("install-ied: %s - %d files copied, %d removed" % (target, report["copied"], report["removed"]))
 	if report["missing"]:
-		print("install-ied: without %s (setup.bat installs them): web search will say it cannot run" % ", ".join(report["missing"]))
+		print("install-ied: without %s: web search will say what is missing (run setup.bat, then install again)" % ", ".join(report["missing"]))
 	if report["in_use"]:
 		print("install-ied: IED was running from here (%s); restart it to use the new one: `ied stop`, then open IED" % ", ".join(report["in_use"]))
 	if not args.no_register:
