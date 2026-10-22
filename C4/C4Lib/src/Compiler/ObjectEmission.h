@@ -63,4 +63,9 @@ namespace Scripting
 	/// module is kept whole.
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts = {});
+
+	/// The objects of a program emitted in partitions (D-81), from each partition's bitcode (PartitionBitcode), as
+	/// above: an unchanged partition reuses its object.
+	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, const ObjectSettings& settings, const ObjectCache& cache,
+		std::vector<ObjectDiagnostic>& diagnostics);
 }

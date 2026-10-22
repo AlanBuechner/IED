@@ -9,6 +9,8 @@
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Compiler/IrVerification.h"
+#include "Compiler/ParallelFor.h"
+#include "Backend/CodeGen/ImportPlanner.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/CodeGen/UseSites.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
@@ -72,43 +74,79 @@ namespace Scripting
 	{
 		while (true)
 		{
-			for (const FunctionRecord* rec : m_MCtx.TakeNewFunctions()) batch.Push(rec);
-			std::vector<const HIRFunction*> lowered;
+			TakeNewFunctions(batch);
+			std::vector<Placed> lowered;
 			for (const FunctionRecord* rec : batch)
 			{
 				if (!HasBody(*rec) || rec->isLocal || m_Emitted.count(rec)) continue; // nested bodies come with their parent
 				m_Emitted.insert(rec);
 				const size_t errorsBefore = m_LoweringErrors.GetErrors().Count();
 				m_Trees.push_back(std::make_unique<HIRFunction>(LowerFunction(model, m_LoweringErrors, rec)));
-				lowered.push_back(m_Trees.back().get());
+				lowered.push_back({ m_Trees.back().get(), PartitionOf(*rec) });
+				m_TreeOf.emplace(rec, m_Trees.back().get());
 				NoteUse(model, *rec, errorsBefore);
 			}
 			LowerCensusFunctions(model, lowered);
 			batch.Clear();
 			if (LoweringFailed(errorMessage)) return false;
 			if (lowered.empty()) return true;
-			for (const HIRFunction* tree : lowered)
+			EmitPlaced(model, lowered, batch);
+		}
+	}
+
+	// What the code emitted so far referenced for the first time, in every partition, in partition order.
+	void CodeGenDriver::TakeNewFunctions(Core::Vector<const FunctionRecord*>& batch)
+	{
+		for (unsigned i = 0; i < PartitionCount(); ++i)
+			for (const FunctionRecord* rec : Partition(i).TakeNewFunctions()) batch.Push(rec);
+	}
+
+	// Each complete tree into its partition, the partitions at once, each its trees in the batch's order; what their
+	// code references for the first time is the next batch, in partition order, so nothing depends on the threads.
+	void CodeGenDriver::EmitPlaced(const ProgramModel& model, const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch)
+	{
+		std::vector<std::vector<const HIRFunction*>> trees(PartitionCount());
+		for (const Placed& placed : lowered)
+			if (placed.tree->complete) trees[placed.partition].push_back(placed.tree);
+		using FirstUse = std::pair<const FunctionRecord*, const HIRFunction*>;
+		std::vector<std::vector<FirstUse>> firstUses(PartitionCount());
+		if (PartitionCount() > 1) SettleLayouts(model);
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+			for (const HIRFunction* tree : trees[i])
 			{
-				if (!tree->complete) continue;
-				m_Emitter.Emit(*tree);
-				for (const FunctionRecord* rec : m_MCtx.TakeNewFunctions())
-				{
-					m_FirstUsers.emplace(rec, tree);
-					batch.Push(rec);
-				}
+				EmitterOf(static_cast<unsigned>(i)).Emit(*tree);
+				for (const FunctionRecord* rec : Partition(static_cast<unsigned>(i)).TakeNewFunctions()) firstUses[i].push_back({ rec, tree });
+			}
+		});
+		for (size_t i = 0; i < trees.size(); ++i)
+		{
+			for (const HIRFunction* tree : trees[i])
+				if (tree->record) m_Defined.insert(tree->record);
+			for (const auto& [rec, tree] : firstUses[i])
+			{
+				m_FirstUsers.emplace(rec, tree);
+				batch.Push(rec);
 			}
 		}
 	}
 
-	// The census functions of the types `new` made in the code emitted last (CensusTypes).
-	void CodeGenDriver::LowerCensusFunctions(ProgramModel& model, std::vector<const HIRFunction*>& lowered)
+	void CodeGenDriver::SettleLayouts(const ProgramModel& model) const
 	{
-		for (const CensusTypes::Function& census : m_MCtx.census().TakeFunctions())
-		{
-			m_Trees.push_back(std::make_unique<HIRFunction>(
-				NativeBytes::LowerCensusFunction(model, m_LoweringErrors, census.type, census.countBytes, *census.record)));
-			lowered.push_back(m_Trees.back().get());
-		}
+		for (const ObjectType* type : model.ObjectTypes()) type->GetSize();
+		for (const UnionType* type : model.UnionTypes()) type->GetSize();
+	}
+
+	// The census functions of the types `new` made in the code emitted last (CensusTypes), each emitted in the
+	// partition whose record calls it.
+	void CodeGenDriver::LowerCensusFunctions(ProgramModel& model, std::vector<Placed>& lowered)
+	{
+		for (unsigned i = 0; i < PartitionCount(); ++i)
+			for (const CensusTypes::Function& census : Partition(i).census().TakeFunctions())
+			{
+				m_Trees.push_back(std::make_unique<HIRFunction>(
+					NativeBytes::LowerCensusFunction(model, m_LoweringErrors, census.type, census.countBytes, *census.record)));
+				lowered.push_back({ m_Trees.back().get(), i });
+			}
 	}
 
 	// A template-made body's diagnostics name the instance and where the program first uses it.
@@ -169,15 +207,17 @@ namespace Scripting
 		return EmitReachable(model, {}, errorMessage);
 	}
 
+	// Each global's data goes into its storage, in the partition that defines it.
 	void CodeGenDriver::StartAsData(std::vector<ConstantStart>& constants, HIRFunction& round)
 	{
 		for (ConstantStart& constant : constants)
 		{
-			llvm::GlobalVariable* storage = m_MCtx.GlobalAddress(*constant.variable);
-			const llvm::DataLayout& layout = m_MCtx.module().getDataLayout();
+			ModuleContext& home = Partition(PartitionOf(*constant.variable));
+			llvm::GlobalVariable* storage = home.GlobalAddress(*constant.variable);
+			const llvm::DataLayout& layout = home.module().getDataLayout();
 			const bool fits = layout.getTypeAllocSize(storage->getValueType()) == constant.data.bytes.size();
 			llvm::Constant* data = fits ? DataImage(storage->getValueType(), constant.data, 0, layout,
-				[this](const ConstantValue& text) -> llvm::Constant* { return m_MCtx.StringGlobal(text); }) : nullptr;
+				[&home](const ConstantValue& text) -> llvm::Constant* { return home.StringGlobal(text); }) : nullptr;
 			if (!data)
 			{
 				round.root->stmts.push_back(constant.start);
@@ -293,7 +333,7 @@ namespace Scripting
 
 	bool CodeGenDriver::HasCallableCode(const ProgramModel& model, const FunctionRecord& rec)
 	{
-		if (m_Emitted.count(&rec) && !m_MCtx.GetOrCreateFunction(rec)->isDeclaration()) return true;
+		if (m_Defined.count(&rec)) return true;
 		const ObjectType::MethodInfo* method = model.MethodForRecord(rec);
 		return method && VirtualTables::IsVirtual(rec.containingType, *method);
 	}
@@ -342,13 +382,16 @@ namespace Scripting
 		return EmitReachable(model, {}, errorMessage);
 	}
 
+	// Each in the partition that defines it, described there. A constant with no symbol (an unscoped enum's member)
+	// has none: code uses its value, and reflection lists no nameless variable.
 	void CodeGenDriver::MaterializeGlobals(ProgramModel& model)
 	{
 		model.Symbols()->ForEachGlobalVariable([&](const SymbolInfo& info, const Scope& declaredIn)
 			{
-				if (info.kind != SymbolKind::Variable || !info.type) return;
-				llvm::GlobalVariable* gv = m_MCtx.GlobalAddress(info);
-				if (DebugInfo* debug = m_MCtx.Debug()) debug->DescribeGlobal(*gv, info, declaredIn);
+				if (info.kind != SymbolKind::Variable || !info.type || info.mangledName.empty()) return;
+				ModuleContext& home = Partition(PartitionOf(info));
+				llvm::GlobalVariable* gv = home.GlobalAddress(info);
+				if (DebugInfo* debug = home.Debug()) debug->DescribeGlobal(*gv, info, declaredIn);
 			});
 	}
 
@@ -396,9 +439,55 @@ namespace Scripting
 		UseScriptRuntime(m_MCtx.module());
 	}
 
+	void CodeGenDriver::SplitInto(unsigned count, unsigned threads, bool onlyAlwaysInline)
+	{
+		m_Others.clear();
+		for (unsigned i = 1; i < count; ++i) m_Others.push_back(std::make_unique<PartitionEmitter>());
+		m_Threads = std::max(threads, 1u);
+		m_OnlyAlwaysInline = onlyAlwaysInline;
+	}
+
+	// The facts of each partition's functions, gathered on its thread; the copies planned from all of them.
+	std::vector<std::vector<const FunctionRecord*>> CodeGenDriver::PlanImports()
+	{
+		std::vector<FactsByRecord> facts(PartitionCount());
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+			ModuleContext& partition = Partition(static_cast<unsigned>(i));
+			facts[i] = FactsOf(partition.module(), partition.RecordsOfFunctions());
+		});
+		FactsByRecord all;
+		std::vector<std::vector<const FunctionRecord*>> own(PartitionCount());
+		for (size_t i = 0; i < facts.size(); ++i)
+			for (auto& [record, fact] : facts[i])
+			{
+				own[i].push_back(record);
+				all.emplace(record, std::move(fact));
+			}
+		const auto home = [this](const FunctionRecord& rec) { return PartitionOf(rec); };
+		std::vector<std::vector<const FunctionRecord*>> imports(PartitionCount());
+		for (unsigned i = 0; i < PartitionCount(); ++i) imports[i] = ImportsOf(i, own[i], all, home, m_OnlyAlwaysInline);
+		return imports;
+	}
+
+	// A copy references only what its function's own partition emitted with it, except the census counters of the
+	// types it makes, which each partition has of its own: EmitReachable lowers and emits those.
+	bool CodeGenDriver::EmitImports(ProgramModel& model, std::string* errorMessage)
+	{
+		const std::vector<std::vector<const FunctionRecord*>> imports = PlanImports();
+		SettleLayouts(model);
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+			for (const FunctionRecord* record : imports[i])
+				if (const auto tree = m_TreeOf.find(record); tree != m_TreeOf.end())
+					EmitterOf(static_cast<unsigned>(i)).EmitImport(*tree->second);
+			Partition(static_cast<unsigned>(i)).TakeNewFunctions();
+		});
+		return EmitReachable(model, {}, errorMessage);
+	}
+
 	bool CodeGenDriver::Lower(ProgramModel& model, const Core::String& entryName, std::string* errorMessage, const TestHarnessOptions* tests)
 	{
 		setvbuf(stderr, nullptr, _IONBF, 0); // unbuffered so EH debug markers survive a crash
+		if (!m_Others.empty()) m_Placement.emplace(model, PartitionCount());
 		LowerTypes(model);
 		EmitFileAssembly(model);
 		if (m_Script)
@@ -412,6 +501,7 @@ namespace Scripting
 		if (!EmitReachable(model, {}, errorMessage)) return false; // what the test harness or the entry wrapper references
 		if (!EmitStaticState(model, errorMessage)) return false;
 		if (!EmitReflection(model, errorMessage)) return false;
+		if (m_Placement && !EmitImports(model, errorMessage)) return false;
 		FinishModule(model);
 		return m_VerifyLater || Verify(errorMessage);
 	}
@@ -432,10 +522,18 @@ namespace Scripting
 
 	void CodeGenDriver::LowerTypes(ProgramModel& model)
 	{
-		m_MCtx.SetModel(&model); // GlobalAddress resolves funcptr initializers (`funcptr<R(a)> g = F;`) against it
-		if (m_DebugInfo) m_MCtx.EnableDebugInfo(model.SourcePaths());
-		for (const ObjectType* obj : model.ObjectTypes())
-			m_MCtx.FillStruct(obj);
+		if (PartitionCount() > 1) SettleLayouts(model);
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t index) {
+			const unsigned i = static_cast<unsigned>(index);
+			ModuleContext& partition = Partition(i);
+			partition.SetModel(&model); // GlobalAddress resolves funcptr initializers (`funcptr<R(a)> g = F;`) against it
+			if (m_Placement) partition.ShareModel(&m_ModelLock);
+			if (m_Placement) partition.SetPartition([this, i](const SymbolInfo& global) { return m_Placement->Of(global) == i; });
+			if (!m_StrictAliasing) partition.aliasTags().Disable();
+			if (m_DebugInfo) partition.EnableDebugInfo(model.SourcePaths());
+			for (const ObjectType* obj : model.ObjectTypes())
+				partition.FillStruct(obj);
+		});
 	}
 
 	// A runtime or interop name is declared once, by its record; template-made and compiler-written functions are
@@ -494,18 +592,33 @@ namespace Scripting
 	// Every body is emitted, so every static local and every global exists for the GC roots.
 	void CodeGenDriver::FinishModule(ProgramModel& model)
 	{
+		DeclareOthersStaticStorage();
 		EmitGcRoots(m_MCtx, model, m_Script ? m_Script->hostSymbols : nullptr);
 		if (m_Script) ApplyScriptLowering(); // after the roots: it removes host thread_locals the module's caches point at
-		AlignVectorAccesses(m_MCtx.module());
-		ApplyTarget(m_MCtx.module(), model.Target());
-		ApplyFunctionTargets(m_MCtx.module(), model);
-		if (DebugInfo* debug = m_MCtx.Debug()) debug->Finish();
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+			ModuleContext& partition = Partition(static_cast<unsigned>(i));
+			AlignVectorAccesses(partition.module());
+			ApplyTarget(partition.module(), model.Target());
+			ApplyFunctionTargets(partition, model);
+			if (DebugInfo* debug = partition.Debug()) debug->Finish();
+		});
+	}
+
+	void CodeGenDriver::DeclareOthersStaticStorage()
+	{
+		for (const std::unique_ptr<PartitionEmitter>& other : m_Others)
+			for (const ModuleContext::StaticStorage& s : other->mctx().StaticStorages())
+				m_MCtx.DeclareStaticStorage(s.storage->getName().str(), s.type, s.storage->isThreadLocal());
 	}
 
 	bool CodeGenDriver::Verify(std::string* errorMessage)
 	{
-		const std::optional<std::string> invalid = InvalidIr(m_MCtx.module());
-		if (invalid && errorMessage) *errorMessage = *invalid;
-		return !invalid;
+		for (unsigned i = 0; i < PartitionCount(); ++i)
+			if (const std::optional<std::string> invalid = InvalidIr(PartitionModule(i)))
+			{
+				if (errorMessage) *errorMessage = *invalid;
+				return false;
+			}
+		return true;
 	}
 } // namespace Scripting

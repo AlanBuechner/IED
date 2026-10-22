@@ -157,6 +157,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-78 | Pools for custom allocators | An allocator that keeps objects of one size together (components, particles) gets a pool: the collector's pages, carved into spans of 512 equal slots (`GC_SPAN_POOL`), whose allocation bits only the allocator sets (occupy, vacate). Finding and marking a pool object is then finding and marking any object - a pointer into a slot keeps that object, not the block - so per-object liveness costs nothing new in the mark loop. The allocator decides what may be collected: `keep_all` makes every occupied object a root, a `keep` callback is asked about each occupied object nothing reached (after the drain, before finalizer selection, draining after each one kept), and the rest are vacated in the sweep and handed to a `release` callback after the collection, without the lock - the pool's form of finalization, so `delete` and finalizers do not apply. Bedrock's `GC::Pool` keeps the free list and collects once before it reports a full pool. | [memory and GC 3](../runtime/01-memory-and-gc.md#engine-hooks) |
 | D-79 | Concurrent marking without a write barrier | A mostly-concurrent mark-sweep (Boehm, Demers and Shenker 1991), as .NET's first concurrent collector did it, rather than a compiler write barrier: threads are suspended at any instruction, so a barrier's flag check and its store can straddle the stop that turns marking on, and closing that window needs safepoints C4 does not have. The OS tracks written pages instead (`MEM_WRITE_WATCH`): the cycle forgets them, stops the program to copy its roots, marks from the copies beside the program, rescans the marked objects on written pages (a few passes, each with fresh root copies), and a final stop marks from the roots and the pages written since before the sweep. Native code, memcpy and atomics need nothing. Objects allocated during a cycle start unmarked, so frame garbage dies in the cycle it was made in. Heaps past 16 MiB live by default; `Collect()` stays stop-the-world; a verification mode compares each cycle with a fresh mark. | [memory and GC 2](../runtime/01-memory-and-gc.md#2-the-collector) |
 | D-80 | Native memory each object holds | Most of a game's memory sits in container buffers outside the GC heap, so a census of objects by type says little about a leak until it says what they hold. A type answers through a custom operator, `[operator("native_bytes")] int64 NativeBytes() const` (Bedrock's containers: storage by capacity plus their live elements'), and the compiler composes the rest: `native_bytes_of(x)` adds up a type's bases, fields and fixed arrays, never through a pointer (what it points at is its own object, counted on its own), and is a constant 0 for a type that can hold none; `holds_native_bytes(T)` lets a container skip an element walk at compile time. Each type `new` makes gets a record `{ name, counter }` (`c4_gc_type`), the counter a compiler-written `native_bytes_of` of one object or of a counted array's elements, so the census adds what each survivor holds with no cost to allocation. The census runs with the program stopped at any instruction, so the counters only read, under a guard that counts a faulting read as 0. | [builtins 1](../language/14-builtins.md#1-compiler-intrinsics), [memory and GC](../runtime/01-memory-and-gc.md) |
+| D-81 | Partitioned emission | An incremental build's edit loop is serial work around a little code generation: the split writes the whole module as bitcode on one thread and every thread reads a copy of it, and IR emission runs on one thread. The program is emitted into its partitions directly, each into a module context of its own on its own thread, so emission, bitcode, hashing and verification use every core and no whole-module copy exists; HIR lowering stays on one thread (it changes the model), and the coordinator decides placement and the order of everything, so the output does not depend on the thread count. A record's partition is decided from its source file before its code exists; partition 0 holds the program's own code and data. Every cross-partition rule (static storage as hidden globals, one vtable per program, globals defined in their file's partition) holds with one partition too, so whole-program builds and scripts take the same path with one partition. | [compiler 05](../compiler/05-partitioned-emission.md) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1534,6 +1535,49 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** Bedrock `serialization.jsonc.*` (2) and `serialization.schema.*` (8): every keyword, pointer escapes,
   boolean schemas, `oneOf` discriminators, refs local, cross-document and dangling, the refusals. The IED tree's
   `tools/schema-check/crosscheck.py` compares both validators on 453 documents: no difference. Bedrock passes 530 tests.
+
+#### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
+- **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
+  progress (steps 1 and 2 done).
+- **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
+  reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
+  the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
+  4.5 s in serial work and 0.2 s (`-O0`) to 1.7 s (`-O3`) generating code. Then: splicing includes into each unit's
+  tree (half the model phase) is the language server's step (`CompilerInstance::MergeIncludes`); an incremental build
+  verifies each partition as it assembles it, on its thread (`CodeGenDriver::VerifyLater`, `Compiler/IrVerification`);
+  `-j` defaults to the processors (was at most 4); up to 64 partitions (was 32); data no source file names (the
+  reflection image, 13 MB in the IED server) has the first partition alone; a script host's inline bodies are
+  extracted on the split's threads in chunks (interface format 4) and its build id is `__c4_script_build_id`, an
+  object of its own; `-O0` incremental builds run their pipeline per partition.
+- **Done notes (step 2, D-81):** an incremental build emits the program straight into its partitions, each a
+  `ModuleContext` in an LLVM context of its own (`PartitionEmitter`), on `-j` threads: `ProgramPlacement` places each
+  function and global from the model before its code exists, `CodeGenDriver` lowers HIR on one thread and has the
+  partitions emit each round at once, merging what they reference in partition order; locals other partitions name are
+  hidden `.local` globals from the start; partition 0 holds the program's own code and data; the model is read-only
+  while partitions emit (layouts settled before each round, two lookups behind a shared lock); `ImportPlanner` and
+  `FunctionEmitter::EmitImport` give each partition `available_externally` copies of the small functions it calls,
+  from their HIR trees; a script host's accessors, symbols, table and inline bodies work across partitions. Each
+  partition's bitcode, verification and inline bodies come from its own thread; the whole-module bitcode, the lazy
+  copies and the cloning of the split are gone for these builds. An unscoped enum's members (constants with no symbol)
+  no longer get storage, which every program carried as `c4_global.N`. `ApplyFunctionTargets` finds a function by its
+  record, so a file-static `[target(...)]` function keeps its features under its partition name.
+  IED server, 16 threads (before B69 / after step 1 / after step 2; seconds):
+
+  | Build | -O0 | -O3 |
+  |---|---|---|
+  | cold | 5.20 / 4.05 / 2.66 | 19.0 (4 threads) / 12.5 / 8.38 |
+  | nothing changed | 4.32 / 3.23 / 1.83 | 4.12 / 3.48 / 2.12 |
+  | a statement in one function | 4.51 / 3.31 / 1.85 | 5.83 / 4.46 / 3.25 |
+  | a constant in a header | 4.66 / 3.42 / 1.90 | 7.08 / 5.18 / 3.44 |
+
+  Peak memory of an edit fell from 3.1 GB to 1.6 GB.
+- **Tests:** C4Testing `Compiler.IncludeMerge` (2), `Compiler.ObjectCache.InvalidCodeIsReportedWhenItsPartitionIsAssembled`,
+  `Compiler.ModulePartitions.DataNoFileNamesHasTheFirstPartitionAlone` and `.ExtractsSeeTheProgramAsItWas`,
+  `Script.HostTable.BodiesComeInChunksWithTheirConstants`, `Semantic.SplitEmission` (6); TestCode `-Incremental`
+  (e2e-incremental) builds TestCode in partitions; the IED server's 248 tests pass built in partitions;
+  `Benchmarks/buildspeed` measures C4 against Go and Rust.
+- **Next:** what is left of an edit is serial: HIR lowering (about 0.45 s), the link (0.3 s), the model (0.15 s),
+  parsing and macros (0.2 s).
 
 ### Testing framework
 

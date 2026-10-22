@@ -34,9 +34,8 @@ namespace Scripting
 	// `int64(void* object)`, declared now and lowered by the driver.
 	llvm::Constant* CensusTypes::Counter(const Type* type, uint64 countBytes)
 	{
-		TypeStore* types = m_MCtx.model()->TypeStorePtr();
 		FunctionRecord& record = m_Functions.emplace_back();
-		record.type = types->Function(types->Builtin(TypeKind::Int64), { types->Pointer(types->Builtin(TypeKind::Void)) });
+		record.type = m_MCtx.CensusCounterType();
 		record.mangledName = "__c4_native_bytes." + QualifiedName(type) + (countBytes ? "[]" : "");
 		llvm::Function* function = m_MCtx.GetOrCreateFunction(record);
 		function->setLinkage(llvm::GlobalValue::InternalLinkage);

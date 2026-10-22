@@ -6,6 +6,7 @@
 #include "Backend/CodeGen/RttiEmitter.h"
 #include "Backend/CodeGen/StableNames.h"
 #include "Backend/CodeGen/VtableEmitter.h"
+#include "Compiler/ModulePartitions.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/FunPtrType.h"
@@ -233,9 +234,9 @@ namespace Scripting
 		// into the exported symbol table and matches C's `static` semantics exactly.
 		bool fileStatic = rec.isStatic && !rec.containingType && !rec.primitiveReceiverType &&
 			rec.scope && rec.scope->HoldsFileStatics();
-		llvm::Function* fn = llvm::Function::Create(fty,
-			fileStatic ? llvm::Function::InternalLinkage : llvm::Function::ExternalLinkage,
-			rec.mangledName.c_str(), m_Module);
+		llvm::Function* fn = llvm::Function::Create(fty, llvm::Function::ExternalLinkage,
+			fileStatic ? LocalName(rec.mangledName.c_str()) : std::string(rec.mangledName.c_str()), m_Module);
+		if (fileStatic) MakeLocal(*fn);
 		if (DeclaredInline(rec)) fn->addFnAttr(llvm::Attribute::AlwaysInline);
 		m_FuncCache[&rec] = fn;
 		m_NewFunctions.push_back(&rec);
@@ -281,6 +282,8 @@ namespace Scripting
 			return gv;
 		}
 
+		if (m_DefinesGlobal && !m_DefinesGlobal(sym)) return DeclareGlobal(sym);
+
 		// One GlobalVariable per model global, named by the model's canonical symbol (doc 04 interop: the
 		// name is what links against foreign objects and what __c4_gc_roots points at). A global whose constant
 		// initializer folded to a value (const OR non-const) starts with that value; anything else starts zero.
@@ -307,8 +310,10 @@ namespace Scripting
 					Core::Vector<const Type*> ptypes;
 					for (const auto* pt : fp->GetParameterTypes()) ptypes.Push(pt);
 					const FunctionRecord* rec = nullptr;
+					std::unique_lock<std::mutex> shared = m_ModelLock ? std::unique_lock<std::mutex>(*m_ModelLock) : std::unique_lock<std::mutex>();
 					auto sigR = m_Model->QueryFunction(fnName, nullptr, nullptr, ptypes,
 						LookupContext{ sym.definingUnit, nullptr, nullptr }, &rec);
+					shared = {};
 					if (sigR.Ok() && rec) init = GetOrCreateFunction(*rec);
 				}
 			}
@@ -316,13 +321,83 @@ namespace Scripting
 		// A polymorphic global starts with its vptrs set: its initial bytes are an image of the zeroed object.
 		if (!init) init = m_Vtables->ZeroImage(sym.type);
 		if (!init) init = llvm::Constant::getNullValue(ty);
-		auto* gv = new llvm::GlobalVariable(*m_Module, init->getType(), sym.IsFoldedConstant(),
-			sym.isStatic ? llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::ExternalLinkage,
-			init, sym.mangledName.empty() ? "c4_global" : sym.mangledName.c_str());
+		auto* gv = new llvm::GlobalVariable(*m_Module, init->getType(), sym.IsFoldedConstant(), llvm::GlobalValue::ExternalLinkage,
+			init, GlobalName(sym));
+		if (sym.isStatic) MakeLocal(*gv);
 		gv->setThreadLocal(sym.isThreadLocal);
 		if (sym.type && sym.type->GetAlignment() > 1) gv->setAlignment(llvm::Align(sym.type->GetAlignment()));
 		m_GlobalCache[&sym] = gv;
 		return gv;
+	}
+
+	std::string ModuleContext::GlobalName(const SymbolInfo& sym) const
+	{
+		const std::string name = sym.mangledName.empty() ? "c4_global" : sym.mangledName.c_str();
+		return sym.isStatic ? LocalName(name) : name;
+	}
+
+	// The storage another partition defines.
+	llvm::GlobalVariable* ModuleContext::DeclareGlobal(const SymbolInfo& sym)
+	{
+		auto* gv = new llvm::GlobalVariable(*m_Module, Lower(sym.type), sym.IsFoldedConstant(), llvm::GlobalValue::ExternalLinkage,
+			nullptr, GlobalName(sym));
+		if (sym.isStatic) gv->setVisibility(llvm::GlobalValue::HiddenVisibility);
+		gv->setThreadLocal(sym.isThreadLocal);
+		if (sym.type && sym.type->GetAlignment() > 1) gv->setAlignment(llvm::Align(sym.type->GetAlignment()));
+		m_GlobalCache[&sym] = gv;
+		return gv;
+	}
+
+	const FunctionType* ModuleContext::CensusCounterType()
+	{
+		std::unique_lock<std::mutex> shared = m_ModelLock ? std::unique_lock<std::mutex>(*m_ModelLock) : std::unique_lock<std::mutex>();
+		TypeStore* types = m_Model->TypeStorePtr();
+		return types->Function(types->Builtin(TypeKind::Int64), { types->Pointer(types->Builtin(TypeKind::Void)) });
+	}
+
+	void ModuleContext::SetPartition(std::function<bool(const SymbolInfo&)> definesGlobal)
+	{
+		m_Split = true;
+		m_DefinesGlobal = std::move(definesGlobal);
+	}
+
+	void ModuleContext::MakeLocal(llvm::GlobalValue& value) const
+	{
+		if (!m_Split)
+		{
+			value.setLinkage(llvm::GlobalValue::InternalLinkage);
+			return;
+		}
+		value.setLinkage(llvm::GlobalValue::ExternalLinkage);
+		value.setVisibility(llvm::GlobalValue::HiddenVisibility);
+	}
+
+	std::string ModuleContext::LocalName(const std::string& name) const
+	{
+		return m_Split ? name + kLocalSuffix : name;
+	}
+
+	void ModuleContext::DeclareStaticStorage(const std::string& name, const Type* type, bool threadLocal)
+	{
+		llvm::GlobalVariable* storage = DeclaredLocal(name, Lower(type), threadLocal);
+		if (type && type->GetAlignment() > 1) storage->setAlignment(llvm::Align(type->GetAlignment()));
+		NoteStaticStorage(storage, type);
+	}
+
+	llvm::GlobalVariable* ModuleContext::DeclaredLocal(const std::string& name, llvm::Type* type, bool threadLocal)
+	{
+		if (llvm::GlobalVariable* known = m_Module->getNamedGlobal(name)) return known; // a copy of its function declared it
+		auto* local = new llvm::GlobalVariable(*m_Module, type, false, llvm::GlobalValue::ExternalLinkage, nullptr, name);
+		local->setVisibility(llvm::GlobalValue::HiddenVisibility);
+		local->setThreadLocal(threadLocal);
+		return local;
+	}
+
+	std::unordered_map<const llvm::Function*, const FunctionRecord*> ModuleContext::RecordsOfFunctions() const
+	{
+		std::unordered_map<const llvm::Function*, const FunctionRecord*> records;
+		for (const auto& [record, function] : m_FuncCache) records.emplace(function, record);
+		return records;
 	}
 
 	void ModuleContext::FillStruct(const ObjectType* obj)

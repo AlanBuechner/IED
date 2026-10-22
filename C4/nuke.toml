@@ -121,6 +121,12 @@ name = "script-debug-O2"
 phase = "gates"
 run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-DebugScripts", "-O2"]
 
+# Every case again with its host built in partitions (D-81): the table, the inline bodies and the build id across them.
+[[project.steps]]
+name = "script-incremental-O2"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-Incremental", "-O2"]
+
 [[project.steps]]
 name = "tools"
 phase = "gates"

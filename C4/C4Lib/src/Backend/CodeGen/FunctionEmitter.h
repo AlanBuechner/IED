@@ -16,7 +16,13 @@ namespace Scripting
 		// Emit `hir`'s body into its (already declared) llvm::Function, and any nested functions it owns.
 		void Emit(const HIRFunction& hir);
 
+		/// A copy of `hir`'s function, defined in another partition of a split program (D-81), for the optimizer to
+		/// inline and then drop (`available_externally`): its static storage, guards and nested functions are the
+		/// defining partition's, declared here.
+		void EmitImport(const HIRFunction& hir);
+
 	private:
+		void EmitBody(const HIRFunction& hir);
 		void PrepareDefinition(llvm::Function& fn);
 
 		ModuleContext& m_MCtx;

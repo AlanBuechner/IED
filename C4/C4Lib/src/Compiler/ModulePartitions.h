@@ -11,6 +11,14 @@ namespace llvm
 
 namespace Scripting
 {
+	/// What a split program's local symbols are named with, as hidden globals another partition can name: no C or C++
+	/// symbol contains a '.', so they meet no foreign object's names in the link.
+	constexpr const char* kLocalSuffix = ".local";
+
+	/// The name the program gave `value`: a split program's local without kLocalSuffix (what a script host's interface
+	/// and its scripts know it by), any other value's own.
+	std::string ProgramName(const llvm::GlobalValue& value);
+
 	/// When a split module is optimized: whole, before the split, or each partition alone after it (an incremental
 	/// build, D-76), at -O0 only by the always-inliner, so a partition copies only the `inline` functions it calls.
 	enum class PartitionOptimization { Before, After, AfterAtO0 };
@@ -53,4 +61,8 @@ namespace Scripting
 	std::unique_ptr<llvm::Module> ExtractDefinitions(const llvm::Module& module, const std::vector<const llvm::GlobalValue*>& definitions);
 
 	std::string ModuleBitcode(const llvm::Module& module);
+
+	/// The bitcode of a partition of a program emitted in partitions (D-81): optimized alone after it, its linkonce
+	/// definitions are weak, since its optimizer would drop one only another partition uses.
+	std::string PartitionBitcode(llvm::Module& partition, PartitionOptimization optimization);
 }

@@ -26,8 +26,8 @@ namespace Scripting
 		const std::vector<std::string>& hostSymbols, unsigned maxGroups);
 
 	/// A group's module (ExtractDefinitions of it, from the program as Lower finished it) as the interface keeps it:
-	/// its functions external, as the host table names them, without debug information, as bitcode. What a body names
-	/// is declared under the same name.
+	/// its functions external, as the host table names them (a split program's local by ProgramName), without debug
+	/// information, as bitcode. What a body names is declared under the name the table lists.
 	std::string InlineBodyBitcode(llvm::Module& group);
 
 	/// Each of InlineBodyGroups' groups extracted from `module` and made bitcode, one after another: for a build that

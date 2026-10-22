@@ -10,6 +10,7 @@
 #include <llvm/IR/Module.h>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -62,6 +63,12 @@ namespace Scripting
 		// out-ptr prepended when the return is a too-large aggregate, params per the Abi brick. Centralizing
 		// signature building here guarantees the forward-decl pass and the body pass emit identical types.
 		llvm::Function* GetOrCreateFunction(const FunctionRecord& rec);
+		/// `rec`'s function when this module has it, else null.
+		llvm::Function* FunctionIfDeclared(const FunctionRecord& rec) const
+		{
+			const auto found = m_FuncCache.find(&rec);
+			return found == m_FuncCache.end() ? nullptr : found->second;
+		}
 		/// The LLVM type of `rec`'s function: its hidden parameters, then the declared ones as the ABI passes them.
 		llvm::FunctionType* FunctionTypeOf(const FunctionRecord& rec);
 		/// The records whose functions were created since the last call: what emitted code referenced for
@@ -118,6 +125,11 @@ namespace Scripting
 		// must start at @F, not null). Set once before any lowering.
 		void SetModel(const ProgramModel* model) { m_Model = model; }
 		const ProgramModel* model() const { return m_Model; }
+		/// Partitions emitting at once (D-81) share the model: what emission asks of it that can change it (a census
+		/// counter's signature, the function a function-pointer global starts at) goes through `lock`.
+		void ShareModel(std::mutex* lock) { m_ModelLock = lock; }
+		/// `int64(void* object)`, the type of a census counter (CensusTypes).
+		const FunctionType* CensusCounterType();
 
 		/// `-g` (B28): the module carries debug information; null when it does not.
 		void EnableDebugInfo(std::unordered_map<uint32, std::string> sourcePaths);
@@ -126,11 +138,35 @@ namespace Scripting
 		/// The alias tags of the program's loads and stores (D-64); `-fno-strict-aliasing` disables them.
 		AliasTags& aliasTags() { return m_AliasTags; }
 
+		/// This module is one partition of a split program (D-81): a symbol that would be local, which another partition
+		/// may name, is a hidden global named with kLocalSuffix, and a global's storage is defined only where
+		/// `definesGlobal` says (declared elsewhere).
+		void SetPartition(std::function<bool(const SymbolInfo&)> definesGlobal);
+		bool InSplitProgram() const { return m_Split; }
+		/// `value` (just created) as a local of the program: internal, or in a split program a hidden global another
+		/// partition reaches by its name.
+		void MakeLocal(llvm::GlobalValue& value) const;
+		/// The name a local of the program takes in this module.
+		std::string LocalName(const std::string& name) const;
+		/// A declaration of a static local another partition defines, listed with this module's own (StaticStorages).
+		void DeclareStaticStorage(const std::string& name, const Type* type, bool threadLocal);
+		/// While a function another partition defines is copied here (FunctionEmitter::EmitImport), its static storage
+		/// and once guards are that partition's: Storage declares them.
+		void SetImporting(bool importing) { m_Importing = importing; }
+		bool Importing() const { return m_Importing; }
+		/// A local of the program named `name` that another partition defines, declared once (`type`, as it is stored).
+		llvm::GlobalVariable* DeclaredLocal(const std::string& name, llvm::Type* type, bool threadLocal);
+		/// Every function this module has, by the record it is for.
+		std::unordered_map<const llvm::Function*, const FunctionRecord*> RecordsOfFunctions() const;
+
 	private:
 		struct StructPiece { size_t offset = 0; llvm::Type* type = nullptr; size_t size = 0; };
+		std::string GlobalName(const SymbolInfo& sym) const;
+		llvm::GlobalVariable* DeclareGlobal(const SymbolInfo& sym);
 		std::vector<StructPiece> StructPieces(const ObjectType* obj);
 
 		const ProgramModel* m_Model = nullptr;
+		std::mutex* m_ModelLock = nullptr;
 		llvm::LLVMContext& m_Context;
 		std::unique_ptr<llvm::Module> m_OwnedModule;
 		llvm::Module* m_Module = nullptr;
@@ -151,5 +187,8 @@ namespace Scripting
 		std::unique_ptr<CensusTypes> m_Census;
 		std::unique_ptr<class DebugInfo> m_Debug;
 		AliasTags m_AliasTags;
+		bool m_Split = false;
+		bool m_Importing = false;
+		std::function<bool(const SymbolInfo&)> m_DefinesGlobal;
 	};
 } // namespace Scripting

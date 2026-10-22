@@ -309,6 +309,26 @@ namespace Scripting
 			else AssembleInParallel(missing, settings);
 			return missing;
 		}
+
+		// The objects of `parts`, or none, with every partition's diagnostics, when one failed; the cache keeps only them.
+		CachedObjects Collected(const std::vector<Partition>& parts, const std::vector<Partition*>& assembled, const ObjectCache& cache,
+			std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			const size_t before = diagnostics.size();
+			std::vector<std::filesystem::path> used;
+			for (const Partition& partition : parts)
+			{
+				diagnostics.insert(diagnostics.end(), partition.diagnostics.begin(), partition.diagnostics.end());
+				used.push_back(partition.objPath);
+			}
+			if (diagnostics.size() != before) return {};
+			cache.KeepOnly(used);
+			CachedObjects objects;
+			for (const Partition& partition : parts) objects.paths.push_back(partition.objPath);
+			objects.reused = parts.size() - assembled.size();
+			for (const Partition* partition : assembled) objects.assembled.push_back(partition->assembled);
+			return objects;
+		}
 	}
 
 	uint64_t InstructionCount(const llvm::Module& module)
@@ -357,21 +377,30 @@ namespace Scripting
 		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache, extracts, extracted);
 		const double splitSeconds = SecondsSince(start);
 		const std::vector<Partition*> assembled = AssembleMissing(module, parts, settings);
-		const size_t before = diagnostics.size();
-		std::vector<std::filesystem::path> used;
-		for (const Partition& partition : parts)
-		{
-			diagnostics.insert(diagnostics.end(), partition.diagnostics.begin(), partition.diagnostics.end());
-			used.push_back(partition.objPath);
-		}
-		if (diagnostics.size() != before) return {};
-		cache.KeepOnly(used);
-		CachedObjects objects;
-		for (const Partition& partition : parts) objects.paths.push_back(partition.objPath);
-		objects.reused = parts.size() - assembled.size();
+		CachedObjects objects = Collected(parts, assembled, cache, diagnostics);
 		objects.splitSeconds = splitSeconds;
 		objects.extracted = std::move(extracted);
-		for (const Partition* partition : assembled) objects.assembled.push_back(partition->assembled);
 		return objects;
+	}
+
+	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, const ObjectSettings& settings, const ObjectCache& cache,
+		std::vector<ObjectDiagnostic>& diagnostics)
+	{
+		InitializeX86();
+		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
+		if (ec)
+		{
+			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });
+			return {};
+		}
+		std::vector<Partition> parts(partitions.size());
+		for (size_t i = 0; i < partitions.size(); ++i)
+		{
+			parts[i].objPath = cache.ObjectFor(partitions[i]).string();
+			parts[i].bitcode = std::move(partitions[i]);
+		}
+		const std::vector<Partition*> missing = NotCached(parts);
+		AssembleInParallel(missing, settings);
+		return Collected(parts, missing, cache, diagnostics);
 	}
 }

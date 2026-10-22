@@ -1,4 +1,5 @@
 #include "Script/HostTable.h"
+#include "Compiler/ModulePartitions.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -54,6 +55,20 @@ namespace Scripting
 			return !g.isDeclaration() || !g.use_empty() || always.count(g.getName().str());
 		}
 
+		// `value` of another partition, declared in `module` when it does not have the name.
+		void DeclareIn(llvm::Module& module, const llvm::GlobalValue& value)
+		{
+			if (value.getParent() == &module || module.getNamedValue(value.getName())) return;
+			llvm::GlobalValue* declared = nullptr;
+			if (llvm::isa<llvm::Function>(value))
+				declared = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(module.getContext()), false),
+					llvm::GlobalValue::ExternalLinkage, value.getName(), module);
+			else
+				declared = new llvm::GlobalVariable(module, llvm::Type::getInt8Ty(module.getContext()), false, llvm::GlobalValue::ExternalLinkage,
+					nullptr, value.getName());
+			declared->setVisibility(value.getVisibility());
+		}
+
 		// A declaration for a name the table lists although the module never declared it; the table needs only the
 		// address, so the signature does not matter.
 		void DeclareIfMissing(llvm::Module& module, const std::string& name)
@@ -91,7 +106,7 @@ namespace Scripting
 		auto* type = llvm::FunctionType::get(llvm::PointerType::get(module.getContext(), 0), false);
 		for (llvm::GlobalVariable* g : threadLocals)
 		{
-			auto* accessor = llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, kAccessorPrefix + g->getName().str(), module);
+			auto* accessor = llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, kAccessorPrefix + ProgramName(*g), module);
 			llvm::IRBuilder<> B(llvm::BasicBlock::Create(module.getContext(), "entry", accessor));
 			B.CreateRet(B.CreateThreadLocalAddress(g));
 		}
@@ -99,15 +114,37 @@ namespace Scripting
 
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed)
 	{
+		return HostSymbols(std::vector<llvm::Module*>{ &module }, alsoListed);
+	}
+
+	// The first partition declares what the others define, so its table can take each one's address: a function as
+	// `void()`, anything else as a byte; a local of the program hidden, as its definition is. Another partition's own
+	// locals (a census counter, a vtable's copy) are its helpers, which no other partition can name.
+	std::vector<std::string> HostSymbols(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
+	{
+		llvm::Module& first = *partitions.front();
 		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
 		for (const char* name : ScriptRuntimeEntryPoints()) always.insert(name);
-		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(module, name); // in a fixed order: the table's
-		for (const std::string& name : alsoListed) DeclareIfMissing(module, name);
+		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(first, name); // in a fixed order: the table's
+		for (const std::string& name : alsoListed) DeclareIfMissing(first, name);
 		std::vector<std::string> names;
-		for (const llvm::Function& f : module)
-			if (ListedFunction(f, always)) names.push_back(f.getName().str());
-		for (const llvm::GlobalVariable& g : module.globals())
-			if (ListedGlobal(g, always)) names.push_back(g.getName().str());
+		std::unordered_set<std::string> seen;
+		for (llvm::Module* partition : partitions)
+		{
+			const bool isFirst = partition == &first;
+			for (const llvm::Function& f : *partition)
+				if (ListedFunction(f, always) && (isFirst || !f.hasLocalLinkage()) && seen.insert(ProgramName(f)).second)
+				{
+					names.push_back(ProgramName(f));
+					DeclareIn(first, f);
+				}
+			for (const llvm::GlobalVariable& g : partition->globals())
+				if (ListedGlobal(g, always) && (isFirst || !g.hasLocalLinkage()) && seen.insert(ProgramName(g)).second)
+				{
+					names.push_back(ProgramName(g));
+					DeclareIn(first, g);
+				}
+		}
 		return names;
 	}
 
@@ -148,6 +185,7 @@ namespace Scripting
 		for (const std::string& name : symbols)
 		{
 			llvm::GlobalValue* value = module.getNamedValue(name);
+			if (!value) value = module.getNamedValue(name + kLocalSuffix); // a split program's local: hidden under its suffix
 			if (!value)
 			{
 				if (error) *error = "the script host table names '" + name + "', which the program does not have";

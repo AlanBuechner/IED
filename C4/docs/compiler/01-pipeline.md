@@ -228,16 +228,17 @@ straight from the module in memory).
   and reflection tables are named after their content; exception and RTTI records after the type they describe), so
   an edit renames nothing it did not change. On the Bedrock tests at `-O0` (32 partitions): a cold build 0.96 s, an
   unchanged rebuild 0.41 s, adding a test 0.46 s (28 objects reused), editing one 0.43 s (31 reused).
-- Incremental builds (`--incremental`, D-76, roadmap 5.3): the module is split before it is optimized
-  and each partition is optimized alone, on its own thread, so an unchanged partition skips the optimizer as well as
-  the assembler. A partition carries `available_externally` copies of the small functions its code calls from other
-  partitions (`Compiler/PartitionImports`: up to 100 instructions of unoptimized IR for a direct callee, 70% of that
-  for each level further, three levels, as ThinLTO imports; nothing for `minsize` callers such as reflection's invoke
-  thunks, nothing `noinline`), so they still inline; its bitcode, and with it the cache key, includes those copies.
-  At `-O0` only the always-inliner and the aggregate copies run, so a partition copies only the `inline` functions it
-  calls. Lowering leaves the module unverified and each partition is verified as it is assembled; a script host's
-  inline bodies are extracted on the split's threads.
-  Linkonce definitions become weak in this mode, since a partition's optimizer would drop one that only another
+- Incremental builds (`--incremental`, D-76, roadmap 5.3): the program is emitted straight into its partitions, on
+  as many threads as `-j` allows ([05-partitioned-emission.md](05-partitioned-emission.md), D-81), and each partition
+  is optimized alone, on its own thread, so an unchanged partition skips the optimizer as well as the assembler. A
+  partition carries `available_externally` copies of the small functions its code calls from other partitions (up
+  to 100 instructions of unoptimized IR for a direct callee, 70% of that for each level further, three levels, as
+  ThinLTO imports; nothing for `minsize` callers such as reflection's invoke thunks, nothing `noinline`), so they
+  still inline; its bitcode, and with it the cache key, includes those copies. At `-O0` only the always-inliner and
+  the aggregate copies run, so a partition copies only the `inline` functions it calls. Lowering leaves the
+  partitions unverified and each is verified as it is assembled; a script host's inline bodies are extracted per
+  partition. A program of one partition (under 48 functions) takes the module path above, with the split and
+  `Compiler/PartitionImports`. Linkonce definitions become weak in this mode, since a partition's optimizer would drop one that only another
   partition uses. The cache salt says `incremental`, so its objects never mix with a whole-program build's. On the
   60k-line ScaleTest at `-O2` (32 partitions, `-j 3`): a cold build 9.1 s (the whole-program build: 12.5 s), an
   unchanged rebuild 2.0 s (front end 1.1 s, split and hash 0.8 s), a one-module edit 2.6 s (31 objects reused); the

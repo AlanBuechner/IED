@@ -6,11 +6,13 @@
 # host (a target such as -march=x86-64-v3, which its scripts then compile for too). Scratch output goes to
 # assets/build-output/script.
 #
-# Usage:  .\RunTests.ps1 [-Filter "Reload"] [-O2] [-DebugScripts]
+# Usage:  .\RunTests.ps1 [-Filter "Reload"] [-O2] [-DebugScripts] [-Incremental]
+# (-Incremental: each host built --incremental in 4 partitions, emitted on threads of their own, D-81)
 param(
     [string]$Filter = "",
     [switch]$O2,
     [switch]$DebugScripts,
+    [switch]$Incremental,
     [int]$TimeoutSeconds = 180
 )
 $ErrorActionPreference = "Continue"
@@ -53,6 +55,7 @@ foreach ($case in $cases) {
     $buildArgs = @($hostDir, "-o", $exe, "--script-host")
     if ($O2) { $buildArgs += "-O2" }
     if ($DebugScripts) { $buildArgs += "-g" }
+    if ($Incremental) { $buildArgs += @("--incremental", "--partitions", "4") }
     $flagsFile = Join-Path $case.FullName "flags.txt"
     if (Test-Path $flagsFile) { $buildArgs += @((Get-Content $flagsFile -Raw).Split(@(" ", "`t", "`r", "`n"), [StringSplitOptions]::RemoveEmptyEntries)) }
     $build = & $compiler @buildArgs 2>&1

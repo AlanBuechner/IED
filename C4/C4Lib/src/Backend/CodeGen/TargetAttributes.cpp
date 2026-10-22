@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/TargetAttributes.h"
+#include "Backend/CodeGen/ModuleContext.h"
 #include "Model/ProgramModel.h"
 #include "Model/TargetAnnotation.h"
 #include <llvm/IR/Module.h>
@@ -16,14 +17,14 @@ namespace Scripting
 		}
 	}
 
-	void ApplyFunctionTargets(llvm::Module& module, const ProgramModel& model)
+	void ApplyFunctionTargets(ModuleContext& mctx, const ProgramModel& model)
 	{
 		Core::Vector<const FunctionRecord*> records;
 		model.AllFunctionRecords(records);
 		for (const FunctionRecord* rec : records)
 		{
 			const std::vector<std::string> features = TargetFeaturesOf(*rec);
-			llvm::Function* function = features.empty() ? nullptr : module.getFunction(rec->mangledName.c_str());
+			llvm::Function* function = features.empty() ? nullptr : mctx.FunctionIfDeclared(*rec);
 			std::string error;
 			const std::optional<CpuTarget> target = function && !function->isDeclaration() ? model.Target().With(features, error) : std::nullopt;
 			if (target) function->addFnAttr("target-features", target->LlvmFeatures());

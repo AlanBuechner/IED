@@ -28,7 +28,7 @@ namespace Scripting
 
 			bool FunctionQualifies(const llvm::Function& f)
 			{
-				if (f.isDeclaration() || !HasAtMostInstructions(f, kInlineBodyLimit) || !m_Host.count(f.getName().str())) return false;
+				if (f.isDeclaration() || !HasAtMostInstructions(f, kInlineBodyLimit) || !m_Host.count(ProgramName(f))) return false;
 				for (const llvm::BasicBlock& block : f)
 					for (const llvm::Instruction& instruction : block)
 						for (const llvm::Use& operand : instruction.operands())
@@ -50,10 +50,10 @@ namespace Scripting
 			bool GlobalAllowed(const llvm::GlobalValue& global)
 			{
 				if (const auto* function = llvm::dyn_cast<llvm::Function>(&global))
-					return function->isIntrinsic() || m_Host.count(function->getName().str());
+					return function->isIntrinsic() || m_Host.count(ProgramName(*function));
 				const auto* variable = llvm::dyn_cast<llvm::GlobalVariable>(&global);
 				if (!variable || variable->isThreadLocal()) return false;
-				if (variable->getName() == "__ImageBase" || m_Host.count(variable->getName().str())) return true;
+				if (variable->getName() == "__ImageBase" || m_Host.count(ProgramName(*variable))) return true;
 				if (!IsCopied(*variable)) return false;
 				auto [known, fresh] = m_Constants.try_emplace(variable, true);
 				if (!fresh) return known->second; // a cycle through constants (an RTTI table and its descriptor) is fine
@@ -114,8 +114,16 @@ namespace Scripting
 		return grouped;
 	}
 
+	// A split program's locals take the names the table lists them by.
 	std::string InlineBodyBitcode(llvm::Module& group)
 	{
+		for (llvm::GlobalValue& value : group.global_values())
+			if (!value.hasLocalLinkage())
+				if (const std::string name = ProgramName(value); name != value.getName())
+				{
+					value.setName(name);
+					value.setVisibility(llvm::GlobalValue::DefaultVisibility);
+				}
 		for (llvm::Function& f : group)
 			if (!f.isDeclaration()) f.setLinkage(llvm::GlobalValue::ExternalLinkage); // named as the table names it
 		llvm::StripDebugInfo(group);

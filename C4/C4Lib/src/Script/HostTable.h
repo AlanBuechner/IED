@@ -24,6 +24,11 @@ namespace Scripting
 	/// module's own tables (reflection image, GC roots). In module order, deterministic.
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed);
 
+	/// HostSymbols of a program emitted in partitions (D-81): every partition's in partition order, each name once, a
+	/// local by the name the program gave it (ProgramName), which scripts know. The first partition, which holds the
+	/// table, declares the names the others define.
+	std::vector<std::string> HostSymbols(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed);
+
 	/// The external functions and globals the host's C and C++ objects define (`extern "c" source`, binding shims):
 	/// listed so a script reaches every binding the host imported, not only those its code calls. Empty, naming the
 	/// object in `error`, when one cannot be read.

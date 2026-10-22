@@ -26,7 +26,7 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
 | RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
 | StressTest | `assets/StressTest/Dx12Game/` | a large DX12 + Win32 game program compiles clean | `assets/StressTest/RunTests.ps1 [-Run]` |
 | ScaleTest | `assets/ScaleTest/` | a generated 60k-line, 401-file program (classes, templates, containers, strings, GC objects, cross-module calls) compiles at `-O0` and `-O2` and runs on several threads with every result matching the single-threaded one | `python assets/ScaleTest/run.py [--seconds n --threads n --modules n]` |
-| ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2`; with `-DebugScripts` every host is built `-g`, so its scripts are DLLs with PDBs | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2] [-DebugScripts]` |
+| ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2`; with `-DebugScripts` every host is built `-g`, so its scripts are DLLs with PDBs; with `-Incremental` every host is built `--incremental` in 4 partitions (D-81) | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2] [-DebugScripts] [-Incremental]` |
 | ToolsTest | `assets/ToolsTest/` | the install and a toolchain outside the repository, every compiler flag, `nuke toolchain install` / `nuke init` / `nuke run` | `assets/ToolsTest/RunTests.ps1` |
 | Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
 | DifferentialTest | `assets/DifferentialTest/` | random programs (every primitive type, operators, conversions, control flow, struct parameters and results, pointers) print the same as the same program compiled as C by clang, at `-O0` and `-O2` | `python assets/DifferentialTest/run.py [--start n --count n --size x]` |
@@ -344,6 +344,15 @@ reading and optimizing every host inline body the script reached transitively (4
 read lazily, none at `-O0`), and full code generation for `-O0` scripts (now the fast instruction selector).
 With the compiled-script cache (`Host::UseCache`, docs/runtime/04 section 4.6) the same script loads in 4 ms.
 
+`Benchmarks/buildspeed/` (`python Benchmarks/buildspeed/run.py [--modules 200] [--only c4,go,rust] [--jobs n]`):
+build speed against Go and Rust. The scale test's program (`assets/ScaleTest/generate.py`: 200 modules of a record,
+a ledger over a container and a map, a generic, a heap-allocated chain, twelve arithmetic steps and a function that
+calls the module before it) is written in Go (`golang.py`, a package per module) and in Rust (`rust.py`, one crate,
+a module per module, wrapping arithmetic), and each is built cold, again with nothing changed, after a constant in
+one function of the middle module changes, and after it changes back: C4 as Nuke's Debug (`-O0 -g --incremental`),
+Development (`-O3 -g --incremental`) and Dist (`-O3`) build it, Go with `go build` (a fresh `GOCACHE`), Rust with
+`cargo build` and `cargo build --release` (a fresh target folder). A toolchain that is not installed is skipped.
+
 `Benchmarks/bedrock/` (`run-benchmark.ps1`): Bedrock against the C++ standard library at `-O2`, the same kernels
 over the same pseudo-random data in `bedrock.cf` and `bedrock.cpp`, each timed in process (median of 5 runs) with a
 checksum both sides must print alike: `HashMap` (1M `int64` keys: insert, hits, misses, removes; 200k text keys:
@@ -396,7 +405,8 @@ benchmarks (item 11) on their own.
 5. IsolatedTest: `assets/IsolatedTest/RunTests.ps1` (and `-DebugInfo` when touching codegen or debug info).
 6. Bedrock: `C4.exe Bedrock\Tests -test` build + run, exit 0.
 7. RuntimeTest and StressTest (compile) when touching the runtime, ABI or interop.
-8. ScriptTest at `-O0` and `-O2`, and both again with `-DebugScripts`: `assets/ScriptTest/RunTests.ps1`, `-O2`, `-DebugScripts` and `-DebugScripts -O2`.
+8. ScriptTest at `-O0` and `-O2`, and both again with `-DebugScripts`, and at `-O2` with every host built in
+   partitions: `assets/ScriptTest/RunTests.ps1`, `-O2`, `-DebugScripts`, `-DebugScripts -O2` and `-Incremental -O2`.
 9. ToolsTest: `assets/ToolsTest/RunTests.ps1`.
 10. DifferentialTest: `python assets/DifferentialTest/run.py` (150 seeds at `-O0` and `-O2`); after codegen or
    conversion changes also a long run (`--start 1000 --count 5000 --size 1.5`).

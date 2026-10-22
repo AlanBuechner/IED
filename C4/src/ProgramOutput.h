@@ -36,7 +36,9 @@ public:
 
 	explicit ProgramOutput(const Inputs& inputs) : m_In(inputs) {}
 
-	bool Write(llvm::Module& module);
+	/// The program's output from its module, or, emitted in partitions (D-81), its partitions' (the first holding the
+	/// program's own code and data).
+	bool Write(const std::vector<llvm::Module*>& partitions);
 
 	/// Whether the program's partitions are optimized each alone, after the split, and verified as they are assembled
 	/// (so lowering leaves the module unverified: CodeGenDriver::VerifyLater).
@@ -53,6 +55,7 @@ private:
 	bool MakeOutputFolder();
 	std::string IntermediateBase();
 	bool WriteProgram(llvm::Module& module, const std::string& base);
+	bool WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const std::string& base);
 	bool WriteIR(const llvm::Module& module, const std::string& path);
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
 	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);
@@ -61,11 +64,12 @@ private:
 	bool WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath);
 	std::vector<std::string> Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache);
 	void ReportPartitions(const Scripting::CachedObjects& objects, unsigned partitions, unsigned threads) const;
+	void ReportObjects(uint64_t instructions, unsigned objects, size_t reused, unsigned threads, const Scripting::ObjectCache& cache) const;
 	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects);
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
-	bool PrepareScriptHost(llvm::Module& module);
+	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
 	bool FinishInterface(llvm::Module& module);
 	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);
@@ -75,6 +79,8 @@ private:
 
 	/// At most this many chunks of inline bodies, extracted on the split's threads.
 	static constexpr unsigned kInlineBodyChunks = 64;
+	/// Of a program emitted in partitions, at most this many of each partition's.
+	static constexpr unsigned kInlineBodyChunksPerPartition = 4;
 
 	Inputs m_In;
 	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in

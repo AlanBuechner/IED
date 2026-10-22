@@ -2,6 +2,8 @@
 #include "Model/ProgramModel.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/CodeGen/FunctionEmitter.h"
+#include "Backend/CodeGen/PartitionEmitter.h"
+#include "Backend/CodeGen/ProgramPlacement.h"
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/ErrorTracker.h"
@@ -14,6 +16,7 @@
 #include <unordered_map>
 #include <set>
 #include <deque>
+#include <mutex>
 
 namespace Scripting
 {
@@ -43,6 +46,13 @@ namespace Scripting
 	public:
 		explicit CodeGenDriver(llvm::LLVMContext& ctx);
 
+		/// A lowered body and the partition it is emitted into.
+		struct Placed
+		{
+			const HIRFunction* tree = nullptr;
+			unsigned partition = 0;
+		};
+
 		// Build the module from the model. Returns true on success (module verified). `entryName` names the
 		// user function the generated main calls ("" = no entry point emitted, e.g. a library build). The model
 		// is non-const: lowering registers function-local scopes and template bindings into it (doc 06). On
@@ -68,7 +78,7 @@ namespace Scripting
 		void EnableDebugInfo() { m_DebugInfo = true; }
 
 		/// `-fno-strict-aliasing` (D-64): loads and stores carry no alias tags, so any may touch any memory.
-		void DisableStrictAliasing() { m_MCtx.aliasTags().Disable(); }
+		void DisableStrictAliasing() { m_StrictAliasing = false; }
 
 		/// `-reflect-tag`: the program's reflection registers under `tag` (a hot-reload source) instead of "".
 		void SetReflectionTag(const Core::String& tag) { m_ReflectionTag = tag; }
@@ -80,6 +90,16 @@ namespace Scripting
 		/// Lower leaves the module unverified: the build verifies each partition as it assembles it
 		/// (ObjectSettings::verify), on its threads, and a partition an earlier build assembled needs no second look.
 		void VerifyLater() { m_VerifyLater = true; }
+
+		/// The program is emitted into `count` partitions (D-81), each function and global in the one ProgramPlacement
+		/// gives it: partition 0 is module(), with the program's own code and data; every other is a module of its own
+		/// in an LLVM context of its own. The partitions emit at once on up to `threads` threads. Each copies the small
+		/// functions it calls from the others (ImportPlanner), only `inline` ones with `onlyAlwaysInline` (-O0). Before
+		/// Lower.
+		void SplitInto(unsigned count, unsigned threads, bool onlyAlwaysInline);
+		unsigned PartitionCount() const { return 1 + static_cast<unsigned>(m_Others.size()); }
+		/// Partition `i`'s module (0: module()).
+		llvm::Module& PartitionModule(unsigned i) { return Partition(i).module(); }
 
 		/// Lower a script (docs/runtime/04 section 4.2), with no entry point: the host's definitions and storage win
 		/// (Script/ScriptModulePasses), the host's globals are not started, the script's start from
@@ -106,7 +126,7 @@ namespace Scripting
 		/// fails to lower.
 		bool EmitReachable(ProgramModel& model, Core::Vector<const FunctionRecord*> batch, std::string* errorMessage);
 		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore);
-		void LowerCensusFunctions(ProgramModel& model, std::vector<const HIRFunction*>& lowered);
+		void LowerCensusFunctions(ProgramModel& model, std::vector<Placed>& lowered);
 		/// `__c4_global_init`, registered to run before main: it runs the rounds of Backend/HIR/GlobalInit in
 		/// order, each emitted with the functions it reaches, then attaches the main thread. `__c4_thread_start`
 		/// runs the thread_local rounds on a thread that attaches. False, with the diagnostics, when a start or a
@@ -166,6 +186,20 @@ namespace Scripting
 		void ApplyScriptLowering();
 
 	private:
+		ModuleContext& Partition(unsigned i) { return i == 0 ? m_MCtx : m_Others[i - 1]->mctx(); }
+		FunctionEmitter& EmitterOf(unsigned i) { return i == 0 ? m_Emitter : m_Others[i - 1]->emitter(); }
+		unsigned PartitionOf(const FunctionRecord& rec) const { return m_Placement ? m_Placement->Of(rec) : 0; }
+		unsigned PartitionOf(const SymbolInfo& global) const { return m_Placement ? m_Placement->Of(global) : 0; }
+		void TakeNewFunctions(Core::Vector<const FunctionRecord*>& batch);
+		void EmitPlaced(const ProgramModel& model, const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch);
+		/// The static locals every other partition defines, declared in partition 0 for its GC roots.
+		void DeclareOthersStaticStorage();
+		/// Every object type laid out before partitions read layouts at once (a type laid out on its first query).
+		void SettleLayouts(const ProgramModel& model) const;
+		/// Each partition's copies of the small functions it calls from the others, then what they reach.
+		bool EmitImports(ProgramModel& model, std::string* errorMessage);
+		std::vector<std::vector<const FunctionRecord*>> PlanImports();
+
 		llvm::LLVMContext& m_Context;
 		ModuleContext m_MCtx;
 		std::vector<std::unique_ptr<HIRFunction>> m_Trees; // the lowered bodies, alive for the whole emit
@@ -174,6 +208,14 @@ namespace Scripting
 		bool m_DebugInfo = false;
 		bool m_ShareVtables = false;
 		bool m_VerifyLater = false;
+		bool m_StrictAliasing = true;
+		std::vector<std::unique_ptr<PartitionEmitter>> m_Others; // partitions 1..n-1 of a split program
+		unsigned m_Threads = 1;                                  // how many partitions emit at once
+		bool m_OnlyAlwaysInline = false;                         // -O0: a partition copies only `inline` functions
+		std::unordered_map<const FunctionRecord*, const HIRFunction*> m_TreeOf; // the lowered body of each record
+		std::mutex m_ModelLock;                                  // what emission asks of the model that can change it
+		std::optional<ProgramPlacement> m_Placement;            // where a split program's functions and globals go
+		std::set<const FunctionRecord*> m_Defined;              // lowered completely and emitted
 		Core::String m_ReflectionTag;
 		std::optional<ScriptLowering> m_Script;
 		std::set<const FunctionRecord*> m_Emitted; // lowered (a failed one too: no retry)

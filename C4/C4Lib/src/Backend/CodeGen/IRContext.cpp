@@ -41,11 +41,15 @@ namespace Scripting
 	{
 		// A static local is program-lifetime storage: a module global that starts zeroed with its vptrs set, or
 		// holding its constant start. The name embeds the function's symbol so two functions' statics differ.
+		const Core::String fnMangled = m_Hir.record ? m_Hir.record->mangledName : "fn";
+		if (m_MCtx.Importing()) // the partition that defines the function has the storage
+			return m_MCtx.DeclaredLocal(m_MCtx.LocalName("static." + std::string(fnMangled.c_str()) + "." + slot.name.c_str()),
+				m_MCtx.Lower(slot.type), slot.isThreadLocal);
 		llvm::Constant* init = slot.initial ? m_MCtx.ConstantOf(slot.initial->value, slot.type) : m_MCtx.vtables().ZeroImage(slot.type);
 		if (!init) init = llvm::Constant::getNullValue(m_MCtx.Lower(slot.type));
-		const Core::String fnMangled = m_Hir.record ? m_Hir.record->mangledName : "fn";
 		auto* storage = new llvm::GlobalVariable(m_MCtx.module(), init->getType(), false,
-			llvm::GlobalValue::InternalLinkage, init, "static." + fnMangled + "." + slot.name);
+			llvm::GlobalValue::InternalLinkage, init, m_MCtx.LocalName("static." + std::string(fnMangled.c_str()) + "." + slot.name.c_str()));
+		m_MCtx.MakeLocal(*storage); // the GC roots and a script host's table name it
 		storage->setThreadLocal(slot.isThreadLocal);
 		if (slot.type && slot.type->GetAlignment() > 1) storage->setAlignment(llvm::Align(slot.type->GetAlignment()));
 		m_MCtx.NoteStaticStorage(storage, slot.type);

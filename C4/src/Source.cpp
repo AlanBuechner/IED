@@ -112,6 +112,15 @@ namespace
 		}
 
 	private:
+		// How many partitions the program is emitted into (D-81): one unless an incremental build links it; then
+		// `--partitions`, or as many as its size is worth.
+		unsigned EmittedPartitions()
+		{
+			if (!ProgramOutput::OptimizesPartitions(m_Options)) return 1;
+			if (m_Options.partitions) return m_Options.partitions;
+			return Scripting::ProgramPlacement::CountFor(m_Compiler.GetProgramModel());
+		}
+
 		// -w drops the warnings; -Werror makes each one an error (B22).
 		void ApplyWarningOptions()
 		{
@@ -155,6 +164,7 @@ namespace
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.scriptHost) driver.ShareVtables();
 			if (ProgramOutput::OptimizesPartitions(m_Options)) driver.VerifyLater();
+			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, m_Options.threads, m_Options.optLevel == 0);
 			driver.SetReflectionTag(m_Options.reflectTag);
 			auto phaseStart = std::chrono::steady_clock::now();
 			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, m_Options.runTests ? &tests : nullptr);
@@ -169,7 +179,9 @@ namespace
 				m_Result.errors.Push(e); // a successful lowering reports warnings only
 			ApplyWarningOptions();
 			if (m_Result.HasErrors()) return false;
-			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(*driver.module());
+			std::vector<llvm::Module*> partitions;
+			for (unsigned i = 0; i < driver.PartitionCount(); ++i) partitions.push_back(&driver.PartitionModule(i));
+			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions);
 		}
 
 		// --- Phase 1: input registration -------------------------------------------------

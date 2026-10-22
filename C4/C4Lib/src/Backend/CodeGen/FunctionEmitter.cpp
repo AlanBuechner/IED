@@ -15,7 +15,25 @@ namespace Scripting
 	void FunctionEmitter::Emit(const HIRFunction& hir)
 	{
 		if (!hir.record || !hir.root || !hir.complete) return; // declarations and incomplete trees emit nothing
+		EmitBody(hir);
+		// Nested functions declared inside this body are siblings: emit each with its own context.
+		for (const auto& nested : hir.nestedFunctions)
+			Emit(*nested);
+	}
 
+	void FunctionEmitter::EmitImport(const HIRFunction& hir)
+	{
+		if (!hir.record || !hir.root || !hir.complete) return;
+		m_MCtx.SetImporting(true);
+		EmitBody(hir);
+		m_MCtx.SetImporting(false);
+		llvm::Function* fn = m_MCtx.GetOrCreateFunction(*hir.record);
+		fn->setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+		fn->setDLLStorageClass(llvm::GlobalValue::DefaultStorageClass);
+	}
+
+	void FunctionEmitter::EmitBody(const HIRFunction& hir)
+	{
 		llvm::Function* fn = m_MCtx.GetOrCreateFunction(*hir.record);
 		PrepareDefinition(*fn);
 		Abi& abi = m_MCtx.abi();
@@ -90,9 +108,5 @@ namespace Scripting
 				else if (returnsZero) ctx.builder().CreateRet(llvm::Constant::getNullValue(fn->getReturnType()));
 				else ctx.builder().CreateUnreachable();
 			}
-
-		// Nested functions declared inside this body are siblings: emit each with its own context.
-		for (const auto& nested : hir.nestedFunctions)
-			Emit(*nested);
 	}
 } // namespace Scripting

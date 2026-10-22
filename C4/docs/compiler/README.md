@@ -12,6 +12,7 @@ and [../tools/05-test-suites.md](../tools/05-test-suites.md).
 | [02-program-model.md](02-program-model.md) | `ProgramModel`: data structure, query verbs, scopes, templates, overloads, const eval, OperatorTable |
 | [03-hir.md](03-hir.md) | HIR contract, node taxonomy, lvalues/values, lowering walks, RAII scopes, diagnostics |
 | [04-codegen-and-abi.md](04-codegen-and-abi.md) | LLVM emission design, Windows x64 ABI, vtables, EH funclets, GC emission, test harness, entry point, LLVM traps |
+| [05-partitioned-emission.md](05-partitioned-emission.md) | How an incremental build emits the program into its partitions on all threads (D-81): the coordinator, placement, symbols across partitions, imports, a script host |
 
 ## Architecture principles (non-negotiable)
 

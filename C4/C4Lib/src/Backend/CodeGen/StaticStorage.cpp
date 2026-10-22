@@ -51,8 +51,10 @@ namespace Scripting
 	{
 		llvm::Type* i32 = llvm::Type::getInt32Ty(m.context());
 		llvm::StructType* type = llvm::StructType::get(m.context(), { i32, i32 });
+		if (m.Importing()) return m.DeclaredLocal(m.LocalName("static.once." + std::string(name.c_str())), type, false);
 		auto* guard = new llvm::GlobalVariable(m.module(), type, false, llvm::GlobalValue::InternalLinkage,
-			llvm::ConstantAggregateZero::get(type), ("static.once." + std::string(name.c_str())).c_str());
+			llvm::ConstantAggregateZero::get(type), m.LocalName("static.once." + std::string(name.c_str())));
+		m.MakeLocal(*guard); // a script host's table names it
 		guard->setAlignment(llvm::Align(kGuardAlign));
 		return guard;
 	}
@@ -60,8 +62,10 @@ namespace Scripting
 	llvm::GlobalVariable* StaticStorage::NewThreadOnceGuard(ModuleContext& m, const Core::String& name)
 	{
 		llvm::Type* i32 = llvm::Type::getInt32Ty(m.context());
+		if (m.Importing()) return m.DeclaredLocal(m.LocalName("thread.once." + std::string(name.c_str())), i32, true);
 		auto* guard = new llvm::GlobalVariable(m.module(), i32, false, llvm::GlobalValue::InternalLinkage,
-			llvm::ConstantInt::get(i32, 0), ("thread.once." + std::string(name.c_str())).c_str());
+			llvm::ConstantInt::get(i32, 0), m.LocalName("thread.once." + std::string(name.c_str())));
+		m.MakeLocal(*guard);
 		guard->setThreadLocal(true);
 		guard->setAlignment(llvm::Align(kGuardAlign));
 		return guard;

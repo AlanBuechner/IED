@@ -17,9 +17,6 @@ namespace Scripting
 {
 	namespace
 	{
-		// No C or C++ symbol can contain a '.', so a foreign object never defines one of these names.
-		constexpr const char* kLocalSuffix = ".local";
-
 		// A partition may reach a local symbol another partition defines, so every local becomes a hidden global,
 		// renamed first so it cannot meet a foreign object's symbol of the same name in the link.
 		void MakeGlobal(llvm::GlobalValue& value)
@@ -455,6 +452,19 @@ namespace Scripting
 		llvm::WriteBitcodeToFile(module, out);
 		out.flush();
 		return bitcode;
+	}
+
+	std::string ProgramName(const llvm::GlobalValue& value)
+	{
+		const llvm::StringRef name = value.getName();
+		const llvm::StringRef suffix(kLocalSuffix);
+		return (value.hasHiddenVisibility() && name.ends_with(suffix) ? name.drop_back(suffix.size()) : name).str();
+	}
+
+	std::string PartitionBitcode(llvm::Module& partition, PartitionOptimization optimization)
+	{
+		if (optimization != PartitionOptimization::Before) KeepDefinitions(partition);
+		return ModuleBitcode(partition);
 	}
 
 	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization, unsigned threads)
