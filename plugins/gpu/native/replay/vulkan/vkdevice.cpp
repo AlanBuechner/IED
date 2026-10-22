@@ -633,9 +633,9 @@ namespace fb::replay::vulkan
 					}
 					currentEid = command.eid;
 					const bool action = IsAction(command.command);
-					if (action && hooks) hooks->BeforeAction(cb, command.eid);
+					if (action && hooks) hooks->BeforeAction(cb, command, pass);
 					RunCommand(cb, command, pass);
-					if (action && hooks) hooks->AfterAction(cb, command.eid);
+					if (action && hooks) hooks->AfterAction(cb, command, pass);
 					if (command.eid == eid) stop = true;
 				}
 				if (stop) break;

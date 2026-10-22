@@ -97,34 +97,40 @@ namespace fb::replay
 		return WritePng(path, width, height, bytes.data(), (size_t)width * 4);
 	}
 
-	void PixelValues(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y, JsonWriter& out) {
+	TexelValue ReadTexel(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y) {
+		TexelValue texel;
 		if (IsBlock(info.codec)) {
 			float block[16 * 4];
 			const u8* at = data + (y / 4) * rowPitch + (x / 4) * info.bytes;
 			DecodeRows(info, at, rowPitch, 4, 4, block);
 			const float* t = &block[((y % 4) * 4 + (x % 4)) * 4];
-			out.BeginArray("values");
-			for (int c = 0; c < 4; ++c) out.Double(t[c]);
-			out.EndArray();
-			out.String("text", Format("%.6g, %.6g, %.6g, %.6g", t[0], t[1], t[2], t[3]));
-			return;
+			texel.values.assign(t, t + 4);
+			texel.text = Format("%.6g, %.6g, %.6g, %.6g", t[0], t[1], t[2], t[3]);
+			return texel;
 		}
-		const u8* texel = data + (size_t)y * rowPitch + (size_t)x * info.bytes;
+		const u8* bytes = data + (size_t)y * rowPitch + (size_t)x * info.bytes;
 		double values[4];
 		u32 count = 0;
-		TexelValues(info, texel, values, count);
-		std::string raw;
-		for (u32 i = 0; i < info.bytes; ++i) raw += Format("%02X", texel[info.bytes - 1 - i]);
-		out.String("raw", raw);
-		out.BeginArray("values");
-		for (u32 c = 0; c < count; ++c) out.Double(values[c]);
-		out.EndArray();
-		std::string text;
+		TexelValues(info, bytes, values, count);
+		for (u32 i = 0; i < info.bytes; ++i) texel.raw += Format("%02X", bytes[info.bytes - 1 - i]);
+		texel.values.assign(values, values + count);
 		const bool integer = info.component == Component::UInt || info.component == Component::SInt;
 		for (u32 c = 0; c < count; ++c) {
-			if (c) text += ", ";
-			text += integer ? Format("%.0f", values[c]) : Format("%.6g", values[c]);
+			if (c) texel.text += ", ";
+			texel.text += integer ? Format("%.0f", values[c]) : Format("%.6g", values[c]);
 		}
-		out.String("text", text);
+		return texel;
+	}
+
+	void WriteTexel(const TexelValue& texel, JsonWriter& out) {
+		if (!texel.raw.empty()) out.String("raw", texel.raw);
+		out.BeginArray("values");
+		for (double v : texel.values) out.Double(v);
+		out.EndArray();
+		out.String("text", texel.text);
+	}
+
+	void PixelValues(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y, JsonWriter& out) {
+		WriteTexel(ReadTexel(info, data, rowPitch, x, y), out);
 	}
 }

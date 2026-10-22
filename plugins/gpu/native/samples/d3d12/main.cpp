@@ -526,11 +526,13 @@ int wmain(int argc, wchar_t** argv) {
 		frameConstants->viewProj = Transposed(viewProj);
 		frameConstants->time = time;
 
-		const Item items[4] = {
+		// Hidden sits behind Cube B: every fragment it has fails the depth test (Pixel History's case).
+		const Item items[5] = {
 			{L"Floor", Scale(3.0f, 1.0f, 3.0f), {1.0f, 1.0f, 1.0f}, 1, true},
 			{L"Cube A", Multiply(Translation(-1.4f, 0.5f, 0.0f), RotationY(time * 0.7f)), {1.0f, 0.55f, 0.35f}, 0, false},
 			{L"Cube B", Multiply(Translation(0.0f, 0.5f, 0.6f), RotationY(-time * 0.5f)), {0.4f, 0.9f, 0.5f}, 0, false},
 			{L"Cube C", Multiply(Translation(1.4f, 0.5f, 0.0f), RotationY(time * 0.3f)), {0.45f, 0.6f, 1.0f}, 1, false},
+			{L"Hidden", Multiply(Translation(0.0f, 0.4f, 1.6f), Scale(0.4f, 0.4f, 0.4f)), {1.0f, 0.2f, 0.8f}, 0, false},
 		};
 
 		Check(allocator->Reset(), "allocator Reset");

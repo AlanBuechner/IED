@@ -40,16 +40,16 @@ namespace fb::replay::vulkan
 				device_.SubmitOwn(cb);
 			}
 
-			void BeforeAction(VkCommandBuffer cb, u32 eid) override {
+			void BeforeAction(VkCommandBuffer cb, const CommandRef& command, PassState& pass) override {
 				const u32 index = (u32)order_.size();
 				if (index >= actions_) return;
-				order_.push_back(eid);
+				order_.push_back(command.eid);
 				device_.vk.vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, times_, index * 2);
 				if (stats_) device_.vk.vkCmdBeginQuery(cb, stats_, index, 0);
 			}
 
-			void AfterAction(VkCommandBuffer cb, u32 eid) override {
-				if (order_.empty() || order_.back() != eid) return;
+			void AfterAction(VkCommandBuffer cb, const CommandRef& command, PassState& pass) override {
+				if (order_.empty() || order_.back() != command.eid) return;
 				const u32 index = (u32)order_.size() - 1;
 				if (stats_) device_.vk.vkCmdEndQuery(cb, stats_, index);
 				device_.vk.vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, times_, index * 2 + 1);

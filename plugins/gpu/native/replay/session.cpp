@@ -69,6 +69,7 @@ namespace fb::replay
 			else if (method == "texture") replay_->Texture(params, out, answer.binary);
 			else if (method == "png") Png(params, out);
 			else if (method == "pixel") replay_->Pixel(params, out);
+			else if (method == "pixelHistory") replay_->PixelHistory(params, out);
 			else if (method == "buffer") replay_->Buffer(params, out, answer.binary);
 			else if (method == "mesh") replay_->Mesh(params, out, answer.binary);
 			else if (method == "shader") replay_->Shader(params, out);

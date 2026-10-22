@@ -3,6 +3,7 @@
 #pragma once
 
 #include "vkdevice.h"
+#include "texels.h"
 
 #include <array>
 
@@ -88,6 +89,7 @@ namespace fb::replay::vulkan
 		void Resources(JsonWriter& out) override;
 		void Texture(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Pixel(const JsonValue& params, JsonWriter& out) override;
+		void PixelHistory(const JsonValue& params, JsonWriter& out) override;
 		void Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Shader(const JsonValue& params, JsonWriter& out) override;
@@ -102,6 +104,13 @@ namespace fb::replay::vulkan
 		const Readback& Read(u32 eid, u64 id, VkImageAspectFlagBits aspect, u32 mip, u32 layer);
 		void ReadBuffer(u32 eid, u64 id, u64 offset, u64 size, std::vector<u8>& out);
 		void ReplayTo(u32 eid);
+		// The texel the pixel request `params` names, after event `eid` (0: at the frame's start); `format` gets its name.
+		TexelValue PixelAt(u32 eid, const JsonValue& params, std::string& format);
+		// Forgets what the last replay left, after one that changed the frame (the pixel history's clamped draws).
+		void Unreplayed() {
+			replayed_ = false;
+			last_.valid = false;
+		}
 
 		Model model_;
 		std::unique_ptr<ReplayDevice> device_;

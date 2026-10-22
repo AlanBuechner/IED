@@ -25,7 +25,7 @@ namespace fb::replay::vulkan
 	X(vkGetBufferMemoryRequirements) X(vkBindBufferMemory) X(vkCreateImage) X(vkDestroyImage) X(vkGetImageMemoryRequirements) \
 	X(vkBindImageMemory) X(vkCreateImageView) X(vkCreateBufferView) X(vkCreateSampler) X(vkCreateShaderModule) X(vkCreateDescriptorSetLayout) \
 	X(vkCreatePipelineLayout) X(vkCreateDescriptorPool) X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) X(vkCreateRenderPass) \
-	X(vkCreateRenderPass2) X(vkCreateFramebuffer) X(vkCreateGraphicsPipelines) X(vkCreateComputePipelines) X(vkCreateQueryPool) \
+	X(vkCreateRenderPass2) X(vkCreateFramebuffer) X(vkCreateGraphicsPipelines) X(vkCreateComputePipelines) X(vkDestroyPipeline) X(vkCreateQueryPool) \
 	X(vkDestroyQueryPool) X(vkGetQueryPoolResults) X(vkCreateCommandPool) X(vkDestroyCommandPool) X(vkAllocateCommandBuffers) \
 	X(vkResetCommandBuffer) X(vkBeginCommandBuffer) X(vkEndCommandBuffer) X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) \
 	X(vkResetFences) X(vkCmdBindPipeline) X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdSetViewportWithCount) X(vkCmdSetScissorWithCount) \
@@ -56,15 +56,6 @@ namespace fb::replay::vulkan
 #undef FB_VKR_DECLARE
 	};
 
-	// What a replay tells its caller as it goes (timing brackets every action with queries).
-	class ReplayHooks
-	{
-	public:
-		virtual ~ReplayHooks() = default;
-		virtual void Begin(VkCommandBuffer cb) {}
-		virtual void BeforeAction(VkCommandBuffer cb, u32 eid) {}
-		virtual void AfterAction(VkCommandBuffer cb, u32 eid) {}
-	};
 
 	struct ImageState
 	{
@@ -99,6 +90,17 @@ namespace fb::replay::vulkan
 		std::vector<std::pair<VkQueryPool, u32>> queries;
 		bool graphicsMissing = false;       // the bound pipeline could not be made here: its draws are skipped
 		bool computeMissing = false;
+	};
+
+	// What a replay tells its caller as it goes: timing brackets every action with queries, the pixel history runs
+	// draws again with other state (the action's command and the pass it is in, for RunCommand).
+	class ReplayHooks
+	{
+	public:
+		virtual ~ReplayHooks() = default;
+		virtual void Begin(VkCommandBuffer cb) {}
+		virtual void BeforeAction(VkCommandBuffer cb, const CommandRef& command, PassState& pass) {}
+		virtual void AfterAction(VkCommandBuffer cb, const CommandRef& command, PassState& pass) {}
 	};
 
 	class ReplayDevice : public SerReadMap

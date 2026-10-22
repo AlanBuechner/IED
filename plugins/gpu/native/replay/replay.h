@@ -30,6 +30,8 @@ namespace fb::replay
 		virtual void Resources(JsonWriter& out) = 0;
 		virtual void Texture(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) = 0;
 		virtual void Pixel(const JsonValue& params, JsonWriter& out) = 0;
+		// pixelHistory {id, eid, x, y, mip?, slice?}: pixelhistory.h's answer.
+		virtual void PixelHistory(const JsonValue& params, JsonWriter& out) = 0;
 		virtual void Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) = 0;
 		virtual void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) = 0;
 		virtual void Shader(const JsonValue& params, JsonWriter& out) = 0;

@@ -4,6 +4,7 @@
 
 #include "device.h"
 #include "simulate.h"
+#include "texels.h"
 
 namespace fb::replay::d3d12
 {
@@ -25,6 +26,8 @@ namespace fb::replay::d3d12
 		u32 count = 0;
 	};
 
+	// Whether a shader binds anything it can write (a UAV); `known` false when its reflection is not available.
+	bool ShaderWritesStorage(const D3D12_SHADER_BYTECODE& code, bool& known);
 	// Each constant buffer the pipeline's shaders declare, by (space, register): the layout the buffer view reads it with.
 	std::map<std::pair<u32, u32>, std::string> ConstantBufferLayouts(const PipelineCreate& pso);
 
@@ -38,6 +41,7 @@ namespace fb::replay::d3d12
 		void Resources(JsonWriter& out) override;
 		void Texture(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Pixel(const JsonValue& params, JsonWriter& out) override;
+		void PixelHistory(const JsonValue& params, JsonWriter& out) override;
 		void Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Shader(const JsonValue& params, JsonWriter& out) override;
@@ -53,6 +57,13 @@ namespace fb::replay::d3d12
 		const Readback& Read(u32 eid, u64 id, u32 subresource);
 		void ReadBuffer(u32 eid, u64 id, u64 offset, u64 size, std::vector<u8>& out);
 		u32 Subresource(u64 id, const JsonValue& params, D3D12_RESOURCE_DESC& desc);
+		// The texel the pixel request `params` names, after event `eid` (0: at the frame's start); `format` gets its name.
+		TexelValue PixelAt(u32 eid, const JsonValue& params, std::string& format);
+		// Forgets what the last replay left, after one that changed the frame (the pixel history's clamped draws).
+		void Unreplayed() {
+			replayedTo_ = UINT32_MAX;
+			last_ = Readback();
+		}
 
 		Model model_;
 		std::unique_ptr<ReplayDevice> device_;

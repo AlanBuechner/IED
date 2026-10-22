@@ -255,8 +255,32 @@ namespace fb::replay::d3d12
 	void ReplayDevice::CreatePipeline(const ObjectEntry& entry) {
 		PipelineCreate p = {};
 		if (!model_.Decode(entry.record, entry.recordSize, p, this)) return;
-		ID3D12PipelineState* made = nullptr;
 		HRESULT hr = E_FAIL;
+		ID3D12PipelineState* made = MakePipeline(p, hr);
+		if (!made) {
+			warnings.push_back(Format("pipeline state %s could not be made (0x%08lx)", model_.NameOf(entry.id).c_str(), (unsigned long)hr));
+			return;
+		}
+		made->SetName(Widen(model_.NameOf(entry.id)).c_str());
+		objects_[entry.id] = made;
+	}
+
+	ID3D12PipelineState* ReplayDevice::Variant(u64 pipeline, const std::function<void(PipelineCreate&)>& change) {
+		const ObjectEntry* entry = model_.Find(pipeline);
+		PipelineCreate p = {};
+		if (!entry || !model_.Decode(entry->record, entry->recordSize, p, this) || p.kind == PipelineKind::Compute) return nullptr;
+		change(p);
+		HRESULT hr = E_FAIL;
+		return MakePipeline(p, hr);
+	}
+
+	void ReplayDevice::Repeat(ID3D12GraphicsCommandList* list, const CommandRef& command) {
+		std::vector<u8> args;
+		RunCommand(list, command, args);
+	}
+
+	ID3D12PipelineState* ReplayDevice::MakePipeline(const PipelineCreate& p, HRESULT& hr) {
+		ID3D12PipelineState* made = nullptr;
 		if (device2_) {
 			std::vector<u8> stream;
 			AddSubobject(stream, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, p.rootSignature);
@@ -310,12 +334,7 @@ namespace fb::replay::d3d12
 			D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {p.rootSignature, p.cs, p.nodeMask, {}, p.flags};
 			hr = device_->CreateComputePipelineState(&desc, __uuidof(ID3D12PipelineState), (void**)&made);
 		}
-		if (FAILED(hr)) {
-			warnings.push_back(Format("pipeline state %s could not be made (0x%08lx)", model_.NameOf(entry.id).c_str(), (unsigned long)hr));
-			return;
-		}
-		made->SetName(Widen(model_.NameOf(entry.id)).c_str());
-		objects_[entry.id] = made;
+		return SUCCEEDED(hr) ? made : nullptr;
 	}
 
 	// --- Descriptors ---------------------------------------------------------------------------------------------------

@@ -6,6 +6,7 @@
 //   flashbang-replay <capture> state|calls <eid>
 //   flashbang-replay <capture> timing [repeat]
 //   flashbang-replay <capture> png <resource id> <eid> <out.png> [mip]
+//   flashbang-replay <capture> history <resource id> <eid> <x> <y> [mip]
 #include "session.h"
 
 #include <cstdio>
@@ -100,7 +101,7 @@ namespace
 	}
 
 	int Usage() {
-		fprintf(stderr, "usage: flashbang-replay --rpc | <capture> [--no-device] [--debug-layer] info|events|resources|messages|state <eid>|calls <eid>|timing [repeat]|png <id> <eid> <out.png> [mip]\n");
+		fprintf(stderr, "usage: flashbang-replay --rpc | <capture> [--no-device] [--debug-layer] info|events|resources|messages|state <eid>|calls <eid>|timing [repeat]|png <id> <eid> <out.png> [mip]|history <id> <eid> <x> <y> [mip]\n");
 		return 2;
 	}
 }
@@ -145,6 +146,12 @@ int main(int argc, char** argv) {
 		request.BeginObject().Uint("id", strtoull(argv[at + 1], nullptr, 10)).Uint("eid", strtoul(argv[at + 2], nullptr, 10)).String("path", argv[at + 3]);
 		request.Uint("mip", at + 4 < argc ? strtoul(argv[at + 4], nullptr, 10) : 0).Uint("maxSize", 8192).EndObject();
 		answer = run("png", request.Text());
+	}
+	else if (command == "history" && at + 4 < argc) {
+		JsonWriter request;
+		request.BeginObject().Uint("id", strtoull(argv[at + 1], nullptr, 10)).Uint("eid", strtoul(argv[at + 2], nullptr, 10)).Uint("x", strtoul(argv[at + 3], nullptr, 10));
+		request.Uint("y", strtoul(argv[at + 4], nullptr, 10)).Uint("mip", at + 5 < argc ? strtoul(argv[at + 5], nullptr, 10) : 0).EndObject();
+		answer = run("pixelHistory", request.Text());
 	}
 	else return Usage();
 	if (!answer.error.empty()) {

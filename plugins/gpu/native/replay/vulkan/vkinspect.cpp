@@ -3,7 +3,7 @@
 #include "vkreplay.h"
 #include "vkspirv.h"
 
-#include "replay/texels.h"
+#include "texels.h"
 
 namespace fb::replay::vulkan
 {
@@ -77,17 +77,22 @@ namespace fb::replay::vulkan
 		out.Uint("channels", r.info->channels);
 	}
 
-	void VulkanReplay::Pixel(const JsonValue& params, JsonWriter& out) {
-		const u32 eid = (u32)params["eid"].Uint(0);
-		const u64 id = params["id"].Uint(0);
+	TexelValue VulkanReplay::PixelAt(u32 eid, const JsonValue& params, std::string& format) {
 		const ImageRead r = Describe(model_, params);
 		const u32 x = (u32)params["x"].Uint(0), y = (u32)params["y"].Uint(0);
 		if (x >= r.width || y >= r.height) Fail("(%u, %u) is outside the %u x %u image", x, y, r.width, r.height);
-		const Readback& read = Read(eid, id, r.aspect, r.mip, r.layer);
-		out.Uint("x", x);
-		out.Uint("y", y);
-		out.String("format", EnumName(r.record.info.format) ? EnumName(r.record.info.format) : r.info->name);
-		PixelValues(*r.info, read.bytes.data() + (size_t)r.z * r.slicePitch, r.rowPitch, x, y, out);
+		const Readback& read = Read(eid, params["id"].Uint(0), r.aspect, r.mip, r.layer);
+		format = EnumName(r.record.info.format) ? EnumName(r.record.info.format) : r.info->name;
+		return ReadTexel(*r.info, read.bytes.data() + (size_t)r.z * r.slicePitch, r.rowPitch, x, y);
+	}
+
+	void VulkanReplay::Pixel(const JsonValue& params, JsonWriter& out) {
+		std::string format;
+		const TexelValue texel = PixelAt((u32)params["eid"].Uint(0), params, format);
+		out.Uint("x", params["x"].Uint(0));
+		out.Uint("y", params["y"].Uint(0));
+		out.String("format", format);
+		WriteTexel(texel, out);
 	}
 
 	void VulkanReplay::Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) {

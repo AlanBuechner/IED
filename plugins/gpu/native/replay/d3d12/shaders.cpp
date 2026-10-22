@@ -310,4 +310,23 @@ namespace fb::replay::d3d12
 		}
 		return layouts;
 	}
+
+	bool ShaderWritesStorage(const D3D12_SHADER_BYTECODE& code, bool& known) {
+		known = !code.pShaderBytecode || !code.BytecodeLength;
+		if (known) return false;
+		ID3D12ShaderReflection* reflection = Reflect(code);
+		D3D12_SHADER_DESC desc;
+		if (!reflection || FAILED(reflection->GetDesc(&desc))) {
+			if (reflection) reflection->Release();
+			return false;
+		}
+		known = true;
+		bool writes = false;
+		for (UINT i = 0; i < desc.BoundResources && !writes; ++i) {
+			D3D12_SHADER_INPUT_BIND_DESC bind;
+			if (SUCCEEDED(reflection->GetResourceBindingDesc(i, &bind))) writes = !strcmp(Letter(bind.Type), "u");
+		}
+		reflection->Release();
+		return writes;
+	}
 }

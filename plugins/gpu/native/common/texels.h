@@ -15,6 +15,16 @@ namespace fb::replay
 	// The shown image (ShowTexels' answer `shown`, with the API's `linear`, and its RGBA32F `rgba`) as an 8-bit PNG at
 	// `path`: [lo, hi] spans the 8 bits, NaN reads 0, linear values are sRGB-encoded, alpha is opaque.
 	bool SaveShownPng(const JsonValue& shown, const std::vector<u8>& rgba, double lo, double hi, const std::wstring& path);
+	// One texel's typed values: its bits as hex (empty for block formats), the values, and the text the UI shows.
+	struct TexelValue
+	{
+		std::string raw;
+		std::vector<double> values;
+		std::string text;
+	};
+	TexelValue ReadTexel(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y);
+	// Writes raw (when known), values and text.
+	void WriteTexel(const TexelValue& texel, JsonWriter& out);
 	// Writes values, text and (for uncompressed formats) raw for the texel at (x, y).
 	void PixelValues(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y, JsonWriter& out);
 }

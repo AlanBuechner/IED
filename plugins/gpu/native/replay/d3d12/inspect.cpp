@@ -2,7 +2,7 @@
 // textures decoded to RGBA32F for the browser's viewer, the exact texel of a pixel pick, and a draw's vertex inputs
 // for the mesh viewer.
 #include "d3d12replay.h"
-#include "replay/texels.h"
+#include "texels.h"
 #include "d3d12_names.h"
 #include "formats.h"
 
@@ -154,23 +154,29 @@ namespace fb::replay::d3d12
 		out.Uint("channels", info->channels);
 	}
 
-	void D3D12Replay::Pixel(const JsonValue& params, JsonWriter& out) {
-		const u32 eid = (u32)params["eid"].Uint(0);
+	TexelValue D3D12Replay::PixelAt(u32 eid, const JsonValue& params, std::string& format) {
 		const u64 id = params["id"].Uint(0);
 		D3D12_RESOURCE_DESC desc;
 		const u32 subresource = Subresource(id, params, desc);
 		const Readback& r = Read(eid, id, subresource);
 		const u32 x = (u32)params["x"].Uint(0), y = (u32)params["y"].Uint(0);
 		if (x >= r.footprint.Width || y >= r.footprint.Height) Fail("(%u, %u) is outside the %u x %u texture", x, y, r.footprint.Width, r.footprint.Height);
-		const DXGI_FORMAT format = ViewFormat(params, desc.Format, (u32)params["plane"].Uint(0));
-		const FormatInfo* info = DxgiFormat(format);
-		if (!info) Fail("format %s cannot be read", DxgiFormatName(format) ? DxgiFormatName(format) : "?");
+		const DXGI_FORMAT view = ViewFormat(params, desc.Format, (u32)params["plane"].Uint(0));
+		const FormatInfo* info = DxgiFormat(view);
+		if (!info) Fail("format %s cannot be read", DxgiFormatName(view) ? DxgiFormatName(view) : "?");
 		const u32 z = desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? std::min<u32>((u32)params["slice"].Uint(0), r.footprint.Depth - 1) : 0;
 		const u8* slice = r.bytes.data() + (size_t)z * r.footprint.RowPitch * r.rows;
-		out.Uint("x", x);
-		out.Uint("y", y);
-		out.String("format", info->name);
-		PixelValues(*info, slice, r.footprint.RowPitch, x, y, out);
+		format = info->name;
+		return ReadTexel(*info, slice, r.footprint.RowPitch, x, y);
+	}
+
+	void D3D12Replay::Pixel(const JsonValue& params, JsonWriter& out) {
+		std::string format;
+		const TexelValue texel = PixelAt((u32)params["eid"].Uint(0), params, format);
+		out.Uint("x", params["x"].Uint(0));
+		out.Uint("y", params["y"].Uint(0));
+		out.String("format", format);
+		WriteTexel(texel, out);
 	}
 
 	void D3D12Replay::Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) {

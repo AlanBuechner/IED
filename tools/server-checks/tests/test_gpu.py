@@ -117,7 +117,7 @@ class GpuTests(ServerTestCase):
 		self.assertEqual(["eid", "parent", "kind", "hidden", "last", "queue", "name"], events["columns"])
 		self.assertEqual(meta["events"], len(events["events"]))
 		names = [e[6] for e in events["events"] if e[2] == "marker" and not e[3]]
-		self.assertEqual(["Frame", "Generate pattern", "Scene", "Floor", "Cube A", "Cube B", "Cube C", "Tonemap"], names)
+		self.assertEqual(["Frame", "Generate pattern", "Scene", "Floor", "Cube A", "Cube B", "Cube C", "Hidden", "Tonemap"], names)
 		last_draw = [e[0] for e in events["events"] if e[2] == "draw"][-1]
 
 		state = (await self.replay(session, "state", {"eid": last_draw}))["result"]
@@ -178,7 +178,7 @@ class GpuTests(ServerTestCase):
 		draws = [line for line in (await text("events", filter="kind:draw")).splitlines() if line[:1].isdigit()]
 		self.assertTrue(draws and all("  draw  " in line for line in draws), draws)
 		last_draw = int(draws[-1].split()[0])
-		cube = int(draws[2].split()[0])   # Cube B: Floor, Cube A, Cube B, Cube C, Tonemap
+		cube = int(draws[2].split()[0])   # Cube B: Floor, Cube A, Cube B, Cube C, Hidden, Tonemap
 
 		state = await text("state", eid=cube)
 		self.assertIn(f"Pipeline state at EID {cube}, pipeline Lit", state)

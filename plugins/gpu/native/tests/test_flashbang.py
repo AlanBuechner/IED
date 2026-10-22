@@ -1,7 +1,7 @@
 # Captures the sample programs with the capture library and replays the captures (docs/22): the files a capture leaves,
-# the replayer's events, state, readbacks, timing and its ied-gpu/1 framing on stdio; the C4 sample (samples/c4) built
-# with --c4 and captured through Bedrock's Gpu::Capture with manual frame bounds. A machine without a D3D12 (or Vulkan)
-# GPU skips what it cannot run. Stdlib only.
+# the replayer's events, state, readbacks, timing, pixel history and its ied-gpu/1 framing on stdio; the C4 sample
+# (samples/c4) built with --c4 and captured through Bedrock's Gpu::Capture with manual frame bounds. A machine without a
+# D3D12 (or Vulkan) GPU skips what it cannot run. Stdlib only.
 #   python -I test_flashbang.py --bin build/bin/Development-windows-x64/flashbang [--c4 toolchains/c4/dev/C4.exe]
 import argparse
 import glob
@@ -178,6 +178,26 @@ class D3D12CaptureReplay(unittest.TestCase):
 		finally:
 			client.close()
 
+	def test_pixel_history_says_why(self):
+		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
+		check_history(self, replay(self.capture, "history", str(hdr), str(self.events["events"][-1][0]), "640", "240"), "ClearRenderTargetView")
+
+
+def check_history(test, history, clear):
+	"""The pixel under Cube B with Hidden behind it: cleared first, Cube B on top, Hidden kept out by the depth test."""
+	events = history["events"]
+	test.assertIn(clear, events[0]["name"])
+	results = {e["name"].split(":")[0]: e["result"] for e in events}
+	test.assertEqual("passed", results["Cube B"])
+	test.assertEqual("depth", results["Hidden"])
+	hidden = [e for e in events if e["name"].startswith("Hidden")][0]
+	test.assertEqual(hidden["before"], hidden["after"])
+	test.assertEqual(0, hidden["tests"]["depth"])
+	test.assertGreater(hidden["tests"]["covered"], 0)
+	test.assertEqual(hidden["after"]["text"], history["end"]["text"])
+	test.assertNotIn("unattributed", history)
+	test.assertIn("failed the depth test", history["summary"])
+
 
 def read_bmp(path):
 	"""A top-down 32-bit BMP's width, height and BGRA bytes."""
@@ -306,6 +326,10 @@ class VulkanCaptureReplay(unittest.TestCase):
 				worst = max(worst, difference)
 				total += difference
 		self.assertLessEqual(worst, 2, "the replayed frame differs from the program's")
+
+	def test_pixel_history_says_why(self):
+		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
+		check_history(self, replay(self.capture, "history", str(hdr), str(self.events[-1][0]), "640", "240"), "vkCmdBeginRenderPass")
 
 	def test_mesh_shader_and_timing(self):
 		draw = self.draws_under("Cube A")[0][0]
