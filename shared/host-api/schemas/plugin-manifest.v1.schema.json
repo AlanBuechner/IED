@@ -323,8 +323,10 @@
 				"title": { "type": "string" },
 				"icon": { "$ref": "#/$defs/icon" },
 				"order": { "type": "integer", "description": "Lower = higher in the sidebar. Built-ins: chat 0, editor 10, git 20." },
-				"view": { "type": "string", "description": "UI module export that renders the activity." },
-				"phoneSlot": { "type": "boolean", "description": "Request a primary slot in the phone bottom nav (host decides)." }
+				"view": { "type": "string", "description": "UI module export that renders the activity. Without one the activity is a dock host: a document well and its tool windows." },
+				"phoneSlot": { "type": "boolean", "description": "Request a primary slot in the phone bottom nav (host decides)." },
+				"documents": { "type": "array", "items": { "type": "string" }, "description": "A dock host's tab kinds: tabs of these open in its document well, others in a dock host that takes them. Absent: any kind." },
+				"emptyWell": { "type": "array", "items": { "type": "string" }, "description": "Commands its empty document well offers, first." }
 			}
 		},
 		"toolWindow": {
@@ -347,6 +349,7 @@
 					"additionalProperties": { "$ref": "#/$defs/toolWindowPlacement" }
 				},
 				"activity": { "type": "string", "description": "Activity it belongs to; default 'ied.editor'." },
+				"phoneNav": { "type": "boolean", "description": "false: no slot in the phone's bottom nav or its More list; its activity's pane reaches it (shell.showView)." },
 				"when": { "$ref": "#/$defs/when" }
 			}
 		},

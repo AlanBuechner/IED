@@ -313,6 +313,12 @@ Per chat, under `.ied/local/chats/<chatId>/` - the workspace's local state, `doc
 
 Only the active window of each chat stays in server memory; older turns load lazily on scroll.
 
+## Deleting a chat (built, 2026-10-22)
+
+Deleting a chat keeps it (owner, 2026-10-22: "it will get archived for 30 days before it gets fully deleted that way you can recover it later"). `chat.delete` moves the chat's folder whole to `chats-deleted/<chatId>/` beside `chats/` in the local state, with `deleted.json {deletedMs}`; the chat leaves the workspace's chats (its topic and Claude Code session go) and is listed under `deleted` on `chats:<wsId>` with `purgeMs`, when it goes for good. `chat.restore` moves it back and loads it as it was - turns, tasks, queue, allowed rules, its Claude session id - and `chat.purge` removes it at once. The server purges a chat deleted `ai.chats.keepDeletedDays` (30 by default, app or solution tier) ago when its workspace opens and every hour after (`plugins/chat/code/deletedchats.cf`). A running chat cannot be deleted (`conflict`): stop it first.
+
+In the Chats list (`docs/15` "Chat activity") Delete needs no confirmation - the toast offers Undo, and the Deleted section (folded by default) lists each deleted chat with the days it is still kept, Restore (which opens it) and Delete Permanently (confirmed).
+
 ## Chats talk to each other (built, 2026-10-21)
 
 A chat can hand work to another chat of its workspace and hear back, the way a lead hands a task to a colleague. The tools are the deferred group `chats` (`docs/13`), loaded with `tool_search` or by calling one:

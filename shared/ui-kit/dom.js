@@ -55,14 +55,14 @@ export function icon(name, extraClass) {
 	return el;
 }
 
-// An icon as a manifest gives it: "$(name)" is a codicon, anything else an SVG path relative to `base` (a plugin's folder
-// URL); or a file icon's spec (fileglyphs.js): a drawn shape, or {icon, base, color} for a plugin's own picture in a
-// theme color. Null when there is none.
+// An icon as a manifest gives it: "$(name)" is a codicon ("$(name~spin)" turning), anything else an SVG path relative to
+// `base` (a plugin's folder URL); or a file icon's spec (fileglyphs.js): a drawn shape, or {icon, base, color} for a
+// plugin's own picture in a theme color. Null when there is none.
 export function iconFrom(spec, base, extraClass) {
 	if (!spec) return null;
 	if (typeof spec === "object") return isGlyph(spec) ? glyph(spec, extraClass) : tinted(iconFrom(spec.icon, spec.base || base, extraClass), spec.color);
-	const codicon = /^\$\(([a-z0-9-]+)\)$/.exec(spec);
-	if (codicon) return icon(codicon[1], extraClass);
+	const codicon = /^\$\(([a-z0-9-]+)(~spin)?\)$/.exec(spec);
+	if (codicon) return icon(codicon[1], codicon[2] ? (extraClass ? extraClass + " spin" : "spin") : extraClass);
 	const el = document.createElement("span");
 	el.className = extraClass ? "ci " + extraClass : "ci";
 	el.style.setProperty("--ci", "url(" + JSON.stringify(new URL(spec, base || location.href).href) + ")");

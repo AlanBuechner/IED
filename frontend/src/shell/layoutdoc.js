@@ -81,6 +81,13 @@ export function withPhonePane(doc, pane) {
 	return Object.assign({}, doc, { phone: { pane, back: back.filter((p) => p !== pane) } });
 }
 
+// Without `ref` in the phone's back stack (a tab closed while another shows).
+export function withoutPhoneBack(doc, ref) {
+	const phone = doc.phone || { pane: null, back: [] };
+	if (!phone.back.includes(ref)) return doc;
+	return Object.assign({}, doc, { phone: { pane: phone.pane, back: phone.back.filter((p) => p !== ref) } });
+}
+
 export function phoneBack(doc) {
 	const phone = doc.phone || { pane: null, back: [] };
 	if (!phone.back.length) return doc;

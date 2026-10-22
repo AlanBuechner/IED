@@ -40,31 +40,29 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 ## Chat activity
 
-**As built (M4, first slice):** the `chat` plugin's activity (`docs/05` "chat"), checked by screenshot at 1366x768 and 375x812 against mockup 02: a running turn with an approval card and the right panel, the same card at phone width as a bottom-stacked button grid, and the resume path: a page reloaded mid-turn gets the turn's text so far from the snapshot and keeps streaming to the end (e2e `chat_reload_mid_turn`), and after a server restart the chats come back from disk (a turn the restart cut off ends `interrupted` and its chat waits paused: server checks). A turn against a real local model (llama.cpp) streamed its thinking, ran its tool calls and finished. On a phone the right panel is a sheet over the transcript, opened from the tab bar's details button and closed by its own; opening a file or a page from it closes it (2026-10-21). A chat opens as a tab of the editor area too ("Open in Editor Area" on its tab's menu; `chat:<chatId>`, titled by the chat), so it can stand beside the page it drives: what it opens from its details panel opens beside it, tethered. A chat narrower than 640 px (a tab in a side group) shows its details as that sheet too.
+**As built (M4, first slice):** the `chat` plugin's activity (`docs/05` "chat"), checked by screenshot at 1366x768 and 375x812 against mockup 02: a running turn with an approval card and the right panel, the same card at phone width as a bottom-stacked button grid, and the resume path: a page reloaded mid-turn gets the turn's text so far from the snapshot and keeps streaming to the end (e2e `chat_reload_mid_turn`), and after a server restart the chats come back from disk (a turn the restart cut off ends `interrupted` and its chat waits paused: server checks). A turn against a real local model (llama.cpp) streamed its thinking, ran its tool calls and finished. On a phone the right panel is a sheet over the transcript, opened from the tab bar's details button and closed by its own; opening a file or a page from it closes it (2026-10-21). A chat narrower than 640 px (a tab in a side group) shows its details as that sheet too.
+
+**Dockable chats and the Chats list (2026-10-22, owner: "the tabs in the chat view ... dockable and ... a side bar on the left that shows all the chats and their status with the open ones grouped at the top"):** the Chat activity is a dock host like the Editor (its manifest names no `view`): its document well holds chats as ordinary tabs - `chat:<chatId>`, titled by the chat, its icon the chat's state (a spinner while it runs; a shield, question mark or pause while it waits on its owner) - split into groups, dragged, auto-hidden or moved to the Editor's well ("Move to Editor" on the tab's menu; a file tab moves to the Chat's the same way), with Rename and Delete on the menu too. `documents: ["chat"]` keeps other tabs out of it: a file opened from a chat opens in the Editor, a page the chat drives opens beside it, tethered. New Chat (Ctrl+Alt+N, the empty well's first hint) opens `chat:new`, a draft whose first message makes the chat; the chat's tab then takes the draft's place. The **Chats** tool window (`ied.chat.list`, docked left) lists every chat of the workspace with its state, tasks or last activity: those open as tabs in this window first (each shown one marked), then the rest, then **Deleted** (folded; `docs/04` "Deleting a chat"), with a search box and New Chat. A click opens a chat (or shows it where it is open); its menu opens, renames (F2, in place), closes its tab or deletes it (Del) - with an Undo toast and no confirmation, since a deleted chat is kept; a deleted row restores (Enter, double-click, its button) or is deleted permanently. On a phone the Chat slot shows the open chat, else the Chats list (it takes no slot of its own, `phoneNav: false`); a chat's header has a button back to the list. e2e `chat_tabs_dock`, `chat_delete_and_restore`.
 
 ```
-+----+-------------------------------------------------------------------------+------------------+
-|    | [Port logging *] [Fix test 3/7] [General]  [+]                           | v Context  62%   |
-|    +-------------------------------------------------------------------------+   system   4.1k  |
-|    | You: port the logging subsystem from RefEngine                   10:02  |   AGENTS   2.0k  |
-|    |                                                                         |   messages 38k   |
-|    | > Thinking  (12 s, 1.2k tok)                                            |   tools    31k   |
-|    | [code_symbols Log*]  ok 38 ms                                           | v Tasks  3/7     |
-|    | [fs_read RefEngine/Log.cpp 1-200]  ok 4 ms                              |   [x] read ref   |
-|    | [shell_run nuke build]  ok 18.2 s   exit 0                              |   [>] port sink  |
-|    | [fs_edit Engine/src/Core/Log.cf]  awaiting approval                     |   [ ] tests      |
-|    |  +-------------------------------------------------------------------+  | v Modified (4)   |
-|    |  | diff ...                                    [Allow] [Always] [Deny]|  |   Log.cf  +120   |
-|    |  +-------------------------------------------------------------------+  | v Scratchpad     |
-|    | -- harness: continued after max_tokens (1x) --                          | v Sub-agents     |
-|    +-------------------------------------------------------------------------+ v Run info        |
-|    | [@ attach] message...                              [Queue] [Inject] [>] |                  |
-|    | group: plan-claude/impl-local v  effort: high v  mode: Agent v  [lock]  |                  |
-|    | 41.3k in / 3.9k out | 38.2 tok/s | TTFT 1.4 s | ctx [######----] 62%   |                  |
-+----+-------------------------------------------------------------------------+------------------+
++----+----------------------+--------------------------------------------------------+-----------------+
+|    | Chats                | (*) Port logging  x | (!) Fix test x |                   | v Context  62%  |
+|    | [search chats ] [+]  +--------------------------------------------------------+   system   4.1k |
+|    | v OPEN            2  | You: port the logging subsystem from RefEngine  10:02  |   messages 38k  |
+|    | |(*) Port logging now| > Thinking  (12 s, 1.2k tok)                           | v Tasks  3/7    |
+|    |  (!) Fix test   3/7  | [fs_read RefEngine/Log.cpp 1-200]  ok 4 ms             |   [x] read ref  |
+|    | v RECENT          9  | [fs_edit Engine/src/Core/Log.cf]  awaiting approval    |   [>] port sink |
+|    |  ( ) General     2h  |  +--------------------------------------------------+  | v Modified (4)  |
+|    |  ( ) Shaders     3d  |  | diff ...                  [Allow] [Always] [Deny]|  |   Log.cf  +120  |
+|    | > DELETED         2  |  +--------------------------------------------------+  |                 |
+|    |                      | -- harness: continued after max_tokens (1x) --         |                 |
+|    |                      +--------------------------------------------------------+                 |
+|    |                      | [@ attach] message...                [Queue] [Inject] [>]                 |
+|    |                      | group: plan-claude/impl-local v  effort: high v  mode: Agent v           |
++----+----------------------+--------------------------------------------------------+-----------------+
 ```
 
-- Tab glyphs: `*` running, `!` needs approval, `3/7` task progress, dot = unread result.
+- A chat tab's icon is its state; the Chats list adds the tasks done (`3/7`) and says "Needs approval" / "Needs an answer" / "Paused" in amber.
 - Approval cards and questions are inline and also aggregated in the notification center.
 - Harness notes (nudges, continues, retries, routing) are thin grey rows - always visible, never hidden in a log.
 - A reply reads as prose, colored the way Claude Code colors its output (owner, 2026-10-22: easy on the eyes in a dark room): body text softer than the UI's and set larger and looser (`--prose-*`, `docs/07` "Prose"), headings and list markers warm, inline code lavender on a faint tint, links blue, the agent's name in the AI accent. Fenced code takes the editor's syntax colors through `editor.colorize` (once its closing fence arrives, cached by text so a streaming reply does not flicker), and a change's diff in an approval card or a tool result is colored as its file's language. The prose column is at most 940 px wide; the composer's Send button is a step dimmer than white.

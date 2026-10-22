@@ -2,7 +2,7 @@
 // segments, tool states and what the chat waits on; the list of chats; and the small facts the views show.
 
 import { test, assertEqual } from "./harness.js";
-import { ChatList, ChatModel, argsLine, compact, contextBar, diffRows, duration, effortLabel, effortRows, tabGlyphs, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
+import { ChatList, ChatModel, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortRows, keptFor, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
 import { chatStatusText } from "/plugins/ied.chat/ui/index.js";
 import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
@@ -81,9 +81,30 @@ test("chat: the list keeps the latest first", () => {
 	assertEqual([list.chats.length, list.find("c3"), list.find("c2").chatId], [2, null, "c2"]);
 });
 
+test("chat: deleted chats are kept apart, restored and purged", () => {
+	const list = new ChatList();
+	list.snapshot({ chats: [{ chatId: "c1", updatedMs: 1 }, { chatId: "c2", updatedMs: 5 }], deleted: [{ chatId: "c9", deletedMs: 3 }] });
+	list.event("chat.deleted", { chatId: "c1", deleted: { chatId: "c1", deletedMs: 8 } });
+	assertEqual([list.chats.map((c) => c.chatId), list.deleted.map((d) => d.chatId)], [["c2"], ["c1", "c9"]], "the latest deleted first");
+	list.event("chat.restored", { chatId: "c1", updatedMs: 9 });
+	assertEqual([list.chats.map((c) => c.chatId), list.deleted.map((d) => d.chatId)], [["c1", "c2"], ["c9"]]);
+	list.event("chat.purged", { chatId: "c9" });
+	assertEqual(list.deleted, []);
+	assertEqual(list.keepsDeleted, true);
+	list.snapshot({ chats: [] });
+	assertEqual(list.keepsDeleted, false, "an older server lists no deleted chats: it deletes for good");
+});
+
+test("chat: when a chat was active, and how long a deleted one is kept", () => {
+	const now = Date.UTC(2026, 9, 22, 12, 0, 0);
+	assertEqual([ago(now - 20000, now), ago(now - 5 * 60000, now), ago(now - 3 * 3600000, now), ago(now - 2 * 86400000, now)], ["now", "5m", "3h", "2d"]);
+	assertEqual([keptFor(now + 30 * 86400000 - 5, now), keptFor(now + 86400000, now), keptFor(now + 3600000, now)], ["30 days left", "1 day left", "less than a day left"]);
+});
+
 test("chat: what tabs and the status bar say", () => {
-	assertEqual(tabGlyphs({ state: "running", tasksDone: 3, tasksTotal: 7 }), { running: true, attention: false, tasks: "3/7" });
-	assertEqual(tabGlyphs({ state: "paused", tasksTotal: 0 }), { running: false, attention: true, tasks: "" });
+	assertEqual(chatLook({ state: "running", tasksDone: 3, tasksTotal: 7 }), { tasks: "3/7", icon: "$(loading~spin)", tone: "c-info", attention: false });
+	assertEqual(chatLook({ state: "paused", tasksTotal: 0 }), { tasks: "", icon: "$(debug-pause)", tone: "c-warn", attention: true });
+	assertEqual(chatLook({ state: "something new" }).icon, "$(comment-discussion)", "a state it does not know looks idle");
 	assertEqual(chatStatusText([{ state: "idle" }]), null);
 	assertEqual(chatStatusText([{ state: "running" }, { state: "running" }, { state: "awaiting_approval" }]), { text: "AI: 2 running, 1 needs you", attention: true });
 });

@@ -129,9 +129,19 @@ class ChatTests(MockCase):
 		self.assertEqual(("New chat", "plan", "plan"), (created["title"], created["mode"], created["permission"]))
 		changed = await client.request("chat.set", {"chatId": created["chatId"], "title": "Plans", "permission": "auto"})
 		self.assertEqual(("Plans", "auto"), (changed["title"], changed["permission"]))
+		deleted = (await client.request("chat.delete", {"chatId": created["chatId"]}))["deleted"]
+		self.assertEqual(("Plans", 30 * 24 * 60 * 60 * 1000), (deleted["title"], deleted["purgeMs"] - deleted["deletedMs"]))
+		listed = await client.request("chat.list", {"wsId": "w1"})
+		self.assertNotIn(created["chatId"], [c["chatId"] for c in listed["chats"]])
+		self.assertEqual(created["chatId"], listed["deleted"][0]["chatId"], "the latest deleted first")
+		restored = await client.request("chat.restore", {"chatId": created["chatId"]})
+		self.assertEqual("Plans", restored["title"])
 		await client.request("chat.delete", {"chatId": created["chatId"]})
-		kinds = self.kinds(await client.wait_for("chats:w1", lambda f: f.get("kind") == "chat.deleted"))
-		self.assertEqual(["chat.created", "chat.changed", "chat.deleted"], kinds)
+		await client.request("chat.purge", {"chatId": created["chatId"]})
+		kinds = self.kinds(await client.wait_for("chats:w1", lambda f: f.get("kind") == "chat.purged"))
+		self.assertEqual(["chat.created", "chat.changed", "chat.deleted", "chat.restored", "chat.deleted", "chat.purged"], kinds)
+		listed = await client.request("chat.list", {"wsId": "w1"})
+		self.assertNotIn(created["chatId"], [d["chatId"] for d in listed["deleted"]])
 
 	async def test_history_pages_older_turns(self):
 		client = await self.client()

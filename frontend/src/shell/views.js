@@ -67,6 +67,11 @@ export class ViewHost {
 	mount(entry, resolved) {
 		const factory = resolved.factory();
 		if (typeof factory !== "function") {
+			const plugin = resolved.plugin === "shell" ? null : this.shell.contributions.plugin(resolved.plugin);
+			if (plugin && !plugin.loaded) {
+				entry.waiting = true;   // its UI module is still importing: mountWaiting() mounts it once it has
+				return;
+			}
 			this.failed(entry, "Plugin '" + resolved.plugin + "' has no view for this tab (its UI module did not load, or exports no such view).");
 			return;
 		}
@@ -91,10 +96,24 @@ export class ViewHost {
 			tab: {
 				setTitle: (title) => this.changeEntry(entry, { title }),
 				setDirty: (dirty) => this.changeEntry(entry, { dirty: Boolean(dirty) }),
+				// A manifest-style icon ("$(name)", "$(name~spin)"): a tab that shows a state (a chat running).
+				setIcon: (spec) => this.changeEntry(entry, { icon: spec || resolved.icon }),
 				pin: () => this.shell.pinTab(entry.ref),
 				close: () => this.shell.closeTab(entry.ref),
 			},
 		};
+	}
+
+	// Mounts the views shown before their plugin's UI module had imported (contributions.on, after every import).
+	mountWaiting() {
+		for (const entry of this.entries.values()) {
+			if (!entry.waiting) continue;
+			const resolved = this.resolve(entry.ref);
+			const plugin = resolved && resolved.plugin !== "shell" ? this.shell.contributions.plugin(resolved.plugin) : null;
+			if (plugin && !plugin.loaded) continue;
+			entry.waiting = false;
+			if (resolved) this.mount(entry, resolved);
+		}
 	}
 
 	failed(entry, message, error) {

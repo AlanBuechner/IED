@@ -57,6 +57,12 @@ export class DockView {
 		for (const tab of this.frame.querySelectorAll(".tab, .tw-tab, .ah-tab")) {
 			if (tab.dataset.ref !== entry.ref) continue;
 			tab.querySelector(".name").textContent = entry.title;
+			const shown = tab.querySelector(".tab-icon");
+			const made = shown && tab.dataset.icon !== JSON.stringify(entry.icon) ? iconFrom(entry.icon, entry.base, "tab-icon") : null;
+			if (made) {
+				shown.replaceWith(made);
+				tab.dataset.icon = JSON.stringify(entry.icon);
+			}
 			const dot = tab.querySelector(".dirty");
 			if (entry.dirty && !dot && tab.classList.contains("tab")) tab.querySelector(".name").after(h("span.dirty", { title: "Unsaved changes" }));
 			else if (!entry.dirty && dot) dot.remove();
@@ -152,7 +158,7 @@ export class DockView {
 		const entry = this.host.views.get(ref);
 		const document = cls === "tab";
 		const el = h("div." + cls + (on ? ".on" : "") + (preview ? ".preview" : ""), {
-			role: "tab", tabindex: on ? "0" : "-1", "aria-selected": on ? "true" : "false", title: ref, dataset: { ref },
+			role: "tab", tabindex: on ? "0" : "-1", "aria-selected": on ? "true" : "false", title: ref, dataset: { ref, icon: JSON.stringify(entry.icon) },
 			on: {
 				pointerdown: (event) => this.press(event, ref),
 				click: () => this.host.activate(ref),
@@ -164,7 +170,7 @@ export class DockView {
 				keydown: (event) => this.tabKey(event, ref),
 			},
 		},
-		document ? iconFrom(entry.icon, entry.base) : null,
+		document ? iconFrom(entry.icon, entry.base, "tab-icon") : null,
 		h("span.name", null, entry.title),
 		document && entry.dirty ? h("span.dirty", { title: "Unsaved changes" }) : null,
 		this.tetherGlyph(ref),

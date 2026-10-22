@@ -1,20 +1,24 @@
-// index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, a chat as a tab of the editor
-// area ("chat:<chatId>"), the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>) and Claude's plan usage (from
-// aiusage), Settings > AI > Models, Model Groups and Claude, and the commands that open the activity, start a chat, stop
-// the turn and show Claude's usage.
+// index.js - the chat plugin's UI module (docs/04, docs/15 "Chat activity"): chats as tabs ("chat:<chatId>"; "chat:new"
+// a draft) in the Chat activity's document well, the Chats tool window (every chat and its state, the deleted ones),
+// the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>) and Claude's plan usage (from aiusage), Settings >
+// AI > Models, Model Groups and Claude, and the commands that open the activity, start, stop, rename and delete chats and
+// show Claude's usage.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { ChatActivityView } from "./activity.js";
-import { ChatTabView } from "./chattab.js";
+import { ChatTabView, DRAFT } from "./chattab.js";
+import { ChatsView } from "./chatsview.js";
 import { ChatList } from "./chatmodel.js";
+import { deleteChat, renameChat } from "./chatactions.js";
 import { ModelsPage } from "./modelsettings.js";
 import { ModelGroupsPage } from "./groupsettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 
-const views = new Set();
+const tabViews = new Set();   // this window's chat tabs, the one focused last at the end
 
-function last() {
-	return [...views].pop() || null;
+// The chat tab a command means: the one its menu was opened on ({ref}), else the one focused last.
+function tabOf(args) {
+	const views = [...tabViews];
+	return args && args.ref ? views.find((view) => view.ctx.ref === args.ref) || null : views.pop() || null;
 }
 
 export function activate(ied) {
@@ -22,24 +26,39 @@ export function activate(ied) {
 	ied.commands.handle("ied.chat.show", () => ied.commands.run("shell.showActivity", { id: "ied.chat" }));
 	ied.commands.handle("ied.chat.new", async () => {
 		await ied.commands.run("shell.showActivity", { id: "ied.chat" });
-		if (last()) last().newChat();
+		ied.tabs.open("chat:" + DRAFT, { preview: false });
 	});
-	ied.commands.handle("ied.chat.stop", () => last() && last().stop());
+	ied.commands.handle("ied.chat.stop", (args) => tabOf(args) && tabOf(args).stop());
+	ied.commands.handle("ied.chat.rename", (args) => {
+		const view = tabOf(args);
+		if (view && view.summary) renameChat(ied, view.chatId, view.summary.title);
+	});
+	ied.commands.handle("ied.chat.delete", (args) => {
+		const view = tabOf(args);
+		if (view && view.summary) deleteChat(ied, view.chatId, view.summary.title, view.keepsDeleted);
+	});
 	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
-	ied.tabs.kind("chat", { view: "ChatTab", title: () => "Chat", icon: () => "$(comment-discussion)" });
-}
-
-export function ChatActivity(ctx) {
-	const view = new ChatActivityView(ctx);
-	views.add(view);
-	return { dispose: () => {
-		views.delete(view);
-		view.dispose();
-	} };
+	ied.tabs.kind("chat", { view: "ChatTab", title: (arg) => (arg === DRAFT ? "New chat" : "Chat"), icon: (arg) => (arg === DRAFT ? "$(add)" : "$(comment-discussion)") });
 }
 
 export function ChatTab(ctx) {
-	return new ChatTabView(ctx, ctx.ref.slice("chat:".length));
+	const view = new ChatTabView(ctx, ctx.ref.slice("chat:".length));
+	tabViews.add(view);
+	ctx.el.addEventListener("focusin", () => {
+		tabViews.delete(view);
+		tabViews.add(view);
+	});
+	return {
+		focus: () => view.focus(),
+		dispose: () => {
+			tabViews.delete(view);
+			view.dispose();
+		},
+	};
+}
+
+export function ChatsList(ctx) {
+	return new ChatsView(ctx);
 }
 
 // Settings > AI > Models and Model Groups (the settingsPages of the manifest).

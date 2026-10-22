@@ -131,6 +131,13 @@
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Model requests one turn may make before it pauses; 0 is no limit (docs/12 Budgets). Loop and no-progress detection still pause a turn that runs away."
 		},
+		"ai.chats.keepDeletedDays": {
+			"type": "integer",
+			"minimum": 1,
+			"default": 30,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Days a deleted chat is kept, whole and restorable from the Chats list's Deleted section, before it is removed for good (docs/04 Deleting a chat)."
+		},
 		"ai.claude.command": {
 			"type": "array",
 			"items": { "type": "string" },

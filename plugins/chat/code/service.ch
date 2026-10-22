@@ -16,6 +16,8 @@ namespace Ai
 {
 	const int64 kChatSnapshotTurns = 20;
 	const char* kNewChatTitle = "New chat";
+	// What a call a restart interrupted gets as its result (chatstore.ch LoadChats).
+	const char* kInterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
 
 	class Chats
 	{
@@ -78,14 +80,28 @@ namespace Ai
 		private Core::String ApproveMethod(const IED::Request& request);
 		private Core::String AnswerMethod(const IED::Request& request);
 		private Core::String HistoryMethod(const IED::Request& request);
-		private Core::String DeleteMethod(const IED::Request& request);
 		private Core::String ProbeMethod(const IED::Request& request);
+
+		// Deleted chats (docs/04 "Deleting a chat", deletedchats.cf): chat.delete moves a chat among them, chat.restore
+		// brings it back, chat.purge removes it for good, and so does the keeper ai.chats.keepDeletedDays after.
+		private Core::String DeleteMethod(const IED::Request& request);
+		private Core::String RestoreMethod(const IED::Request& request);
+		private Core::String PurgeMethod(const IED::Request& request);
+		private void LoadDeleted(const IED::Workspace& ws);
+		private void WriteDeleted(IED::JsonWriter& json, Core::StringView wsId) const;
+		private DeletedChat* DeletedOf(Core::StringView chatId) const;
+		private void Purge(DeletedChat* chat);
+		// The deleted chats kept past ai.chats.keepDeletedDays, purged; the lock is held.
+		private void PurgeExpired();
+		// The thread that purges expired deleted chats every kPurgeEveryMs.
+		private void DeletedKeeper();
 		// The thread that asks for Claude's usage every ai.claude.usageRefreshMinutes and stops idle sessions.
 		private void ClaudeKeeper();
 		// Stops the Claude sessions no turn used for kClaudeIdleMs; the lock is held.
 		private void StopIdleSessions();
 
 		private Core::Array<Chat*> chats;
+		private Core::Array<DeletedChat*> deleted;
 		private Core::HashMap<Core::String, ClaudeSession*> claudeSessions;   // by chat
 		private bool stopping;
 	}

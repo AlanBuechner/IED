@@ -278,8 +278,10 @@ export class DesktopChrome {
 	emptyWell(activityId) {
 		const shell = this.shell;
 		const hint = (label, keys, command, args) => h("button.hint", { on: { click: () => shell.commands.run(command, args) } }, h("span", null, label), h("span.kbd", null, keys));
+		const activity = shell.contributions.activity(activityId);
+		const own = ((activity && activity.emptyWell) || []).map((id) => hint((shell.commands.get(id) || { title: id }).title, shell.keybindings.labelFor(id), id));
 		const tools = shell.contributions.toolsOf(activityId).map((t) => hint(t.title, shell.keybindings.labelFor("shell.showView", { id: t.id }), "shell.showView", { id: t.id }));
 		const plugins = tools.length ? null : hint("Manage Plugins", shell.keybindings.labelFor("shell.plugins"), "shell.plugins");
-		return h("div.empty-well", null, h("div.hints", null, hint("Command Palette", shell.keybindings.labelFor("shell.commandPalette"), "shell.commandPalette"), ...tools, plugins));
+		return h("div.empty-well", null, h("div.hints", null, ...own, hint("Command Palette", shell.keybindings.labelFor("shell.commandPalette"), "shell.commandPalette"), ...tools, plugins));
 	}
 }

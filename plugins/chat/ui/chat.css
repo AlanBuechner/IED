@@ -1,4 +1,5 @@
-/* chat.css - the Chat activity (mockup 02): tabs, transcript, cards, composer and the details panel. Theme tokens only. */
+/* chat.css - the Chat activity (mockup 02): a chat tab's transcript, cards, composer and details panel, and the Chats
+	tool window. Theme tokens only. */
 
 .chat-act { display: flex; height: 100%; min-height: 0; background: var(--bg-2); position: relative; container: chat / inline-size; }
 .chat-act .chat-phone-only { display: none; }
@@ -13,40 +14,40 @@
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-col { max-width: 940px; margin: 0 auto; padding: 0 var(--space-7); }
 
-/* ---------- tabs ---------- */
-.chat-tabbar { display: flex; align-items: stretch; height: var(--tab-h); background: var(--bg-1); flex: none; min-width: 0; border-bottom: var(--border-width) solid var(--border-0); }
-.chat-tabbar > .ib { align-self: center; margin: 0 var(--space-1); }
-.chat-tabhead-title { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); min-width: 0; color: var(--text-1); }
-.chat-tabhead-title .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-tabs { display: flex; min-width: 0; overflow: hidden; }
-.chat-tab {
-	display: flex;
-	align-items: center;
-	gap: var(--space-3);
-	padding: 0 var(--space-2) 0 var(--space-4);
-	color: var(--text-2);
-	border-right: var(--border-width) solid var(--border-0);
-	white-space: nowrap;
-	font-size: var(--font-size-sm);
-	min-width: 0;
-	max-width: 240px;
-	flex: none;
-	position: relative;
-	cursor: default;
-	user-select: none;
-}
-.chat-tab:hover { color: var(--text-1); }
-.chat-tab .ci { width: 14px; height: 14px; }
-.chat-tab .name { overflow: hidden; text-overflow: ellipsis; }
-.chat-tab .glyph { font-size: var(--font-size-xs); color: var(--text-2); font-weight: var(--font-weight-semibold); }
-.chat-tab .glyph.attn { color: var(--accent-warn); }
-.chat-tab .x { width: 18px; height: 18px; visibility: hidden; }
-.chat-tab .x .ci { width: 12px; height: 12px; }
-.chat-tab:hover .x, .chat-tab.on .x { visibility: visible; }
-.chat-tab.on { background: var(--bg-2); color: var(--text-0); }
-.chat-tab.on::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--text-0); }
-.chat-tab:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
-.chat-rename { height: calc(var(--tab-h) - 6px); min-width: 140px; }
+/* ---------- a chat tab's header (chattab.js): its state while it needs saying, the details panel's buttons ---------- */
+.chat-tabbar { display: flex; align-items: center; height: var(--tab-h); background: var(--bg-2); flex: none; min-width: 0; border-bottom: var(--border-width) solid var(--border-0); padding: 0 var(--space-2) 0 var(--space-5); }
+.chat-tabbar > .ib { margin: 0 var(--space-1); }
+.chat-tabhead-state { font-size: var(--font-size-sm); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- the Chats tool window (chatsview.js) ---------- */
+.chats { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-1); }
+.chats-bar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); flex: none; }
+.chats-filter { flex: 1; min-width: 0; }
+.chats-body { flex: 1; overflow: auto; padding-bottom: var(--space-4); outline: none; }
+.chats-sec-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 24px; padding: 0 var(--space-4) 0 var(--space-2); background: none; border: 0; color: var(--text-2); font: inherit; font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; text-align: left; }
+.chats-sec-head:hover { color: var(--text-1); }
+.chats-sec-head .ci { width: 14px; height: 14px; }
+.chats-sec-head .meta { margin-left: auto; font-weight: var(--font-weight-normal); font-variant-numeric: tabular-nums; }
+.chats-row { position: relative; display: flex; align-items: center; gap: var(--space-3); height: var(--row-h); padding: 0 var(--space-4) 0 var(--space-6); color: var(--text-1); font-size: var(--font-size-ui); white-space: nowrap; cursor: pointer; user-select: none; outline: none; }
+.chats-row:hover { background: var(--veil); color: var(--text-0); }
+.chats-row:focus-visible { box-shadow: inset 0 0 0 1px var(--focus); }
+.chats-row.shown { background: var(--selection); color: var(--text-0); }
+.chats-row.shown::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent-ai); }
+.chats-row .chats-state { width: 14px; height: 14px; flex: none; color: var(--text-2); }
+.chats-row .chats-state.c-info { color: var(--accent-info); }
+.chats-row .chats-state.c-warn { color: var(--accent-warn); }
+.chats-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chats-row .meta { color: var(--text-2); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; flex: none; }
+.chats-flag { flex: none; font-size: var(--font-size-xs); color: var(--accent-warn); padding: 0 var(--space-2); border-radius: var(--radius-2); background: var(--tint-warn); }
+.chats-row.deleted { color: var(--text-2); }
+.chats-row.deleted .name { text-decoration: line-through; text-decoration-color: var(--text-3); }
+.chats-row.deleted:hover .name { text-decoration: none; }
+.chats-restore { width: 20px; height: 20px; visibility: hidden; flex: none; }
+.chats-restore .ci { width: 14px; height: 14px; }
+.chats-row.deleted:hover .chats-restore, .chats-row.deleted:focus-visible .chats-restore { visibility: visible; }
+.chats-rename { flex: 1; min-width: 0; height: calc(var(--row-h) - 4px); }
+.chats-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); padding: var(--space-5) var(--space-5); font-size: var(--font-size-sm); }
+.chats-empty p { margin: 0; }
 
 /* ---------- transcript ---------- */
 .chat-transcript { flex: 1; overflow: auto; padding: var(--space-5) 0 var(--space-6); min-height: 0; }
@@ -264,11 +265,13 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
 	.chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-col { padding: 0 var(--space-4); }
-	.chat-tabbar { height: auto; padding: var(--space-3) var(--space-4); gap: var(--space-3); background: var(--bg-1); }
-	.chat-tabs { gap: var(--space-3); overflow-x: auto; scrollbar-width: none; }
-	.chat-tab { height: 32px; padding: 0 var(--space-5); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-3); max-width: 200px; }
-	.chat-tab.on { border-color: var(--text-2); }
-	.chat-tab.on::before, .chat-tab .x { display: none; }
+	.chat-tabbar { height: 40px; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-2); }
+	.chat-tabbar > .ib { width: 40px; height: 40px; }
+	.chats-row { padding-left: var(--space-6); }
+	.chats-row .chats-state { width: 16px; height: 16px; }
+	.chats-restore { visibility: visible; width: 36px; height: 36px; }
+	.chats-sec-head { height: 36px; font-size: var(--font-size-sm); }
+	.chats-bar { padding: var(--space-3) var(--space-4); }
 	.chat-transcript { padding-top: var(--space-3); }
 	.chat-tool-head { height: 36px; }
 	.chat-tool-head .tname, .chat-tool-head .targs { font-size: var(--font-size-sm); }

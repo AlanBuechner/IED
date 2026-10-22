@@ -201,7 +201,7 @@ namespace Ai
 		ForgetRunningTurn(state, chat);
 	}
 
-	static Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
+	Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
 		FS::Path folder = ChatFolder(state, chatId);
 		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
 		if (header.Kind() != Serialization::DomKind::Object) {
@@ -234,5 +234,71 @@ namespace Ai
 		return chats;
 	}
 
-	void DeleteChatFiles(const FS::Path& state, Core::StringView chatId) { FS::RemoveAll(ChatFolder(state, chatId).CStr()); }
+	// --- Deleted chats ------------------------------------------------------------------------------------------------
+
+	FS::Path DeletedChatFolder(const FS::Path& state, Core::StringView chatId) { return state / "chats-deleted" / chatId; }
+
+	static bool MoveFolder(const FS::Path& from, const FS::Path& to, Core::String& problem) {
+		FS::MakeDirectories(to.Parent().CStr());
+		FS::RemoveAll(to.CStr());
+		if (FS::Rename(from.CStr(), to.CStr())) return true;
+		problem = (Core::String("could not move ") + from.View()) + " to " + to.View();
+		return false;
+	}
+
+	bool MoveToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem) {
+		FS::Path folder = DeletedChatFolder(state, chatId);
+		if (!MoveFolder(ChatFolder(state, chatId), folder, problem)) return false;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("deletedMs", nowMs);
+		json.EndObject();
+		WriteWhole(folder / "deleted.json", json.View());
+		return true;
+	}
+
+	bool MoveFromDeleted(const FS::Path& state, Core::StringView chatId, Core::String& problem) {
+		if (!MoveFolder(DeletedChatFolder(state, chatId), ChatFolder(state, chatId), problem)) return false;
+		FS::RemoveFile((ChatFolder(state, chatId) / "deleted.json").CStr());
+		return true;
+	}
+
+	static int64 CountLines(Core::StringView text) {
+		int64 lines = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.Data()[i] == '\n') lines += 1;
+		return lines;
+	}
+
+	static DeletedChat* LoadDeletedChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::Array<Core::String>& problems) {
+		FS::Path folder = DeletedChatFolder(state, chatId);
+		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
+		Serialization::DomNode deleted = ParseJson(ReadWhole(folder / "deleted.json").View());
+		if (header.Kind() != Serialization::DomKind::Object || deleted.Kind() != Serialization::DomKind::Object) {
+			problems.Push((Core::String("deleted chat ") + chatId) + ": chat.json or deleted.json is missing or not JSON");
+			return nullptr;
+		}
+		DeletedChat* chat = new DeletedChat();
+		chat->chatId = Core::String(chatId);
+		chat->wsId = Core::String(wsId);
+		chat->title = Core::String(header.Member("title").AsView());
+		chat->updatedMs = header.Member("updatedMs").AsInt();
+		chat->deletedMs = deleted.Member("deletedMs").AsInt();
+		chat->turnCount = CountLines(ReadWhole(folder / "turns.jsonl").View());
+		return chat;
+	}
+
+	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems) {
+		Core::Array<DeletedChat*> chats;
+		FS::Directory folder = FS::Directory((state / "chats-deleted").CStr());
+		if (!folder.IsOpen()) return chats;
+		for (FS::DirectoryEntry& entry : folder) {
+			if (entry.kind != FS::EntryKind::Directory) continue;
+			DeletedChat* chat = LoadDeletedChat(state, wsId, entry.name.View(), problems);
+			if (chat) chats.Push(chat);
+		}
+		return chats;
+	}
+
+	void PurgeDeletedChat(const FS::Path& state, Core::StringView chatId) { FS::RemoveAll(DeletedChatFolder(state, chatId).CStr()); }
 }

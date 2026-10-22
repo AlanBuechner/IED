@@ -15,7 +15,7 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
+import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
@@ -44,7 +44,10 @@ export class Shell {
 		this.menuHost = new MenuHost(document.body);
 		this.views = new ViewHost(this);
 		this.tabCloseHandlers = new Map();
+		this.tabListeners = new Set();    // ied.tabs.onChange
+		this.tabsShown = null;            // the tabs state they heard last, as JSON
 		this.contributions = new Contributions(this);
+		this.contributions.on(() => this.views.mountWaiting());
 		this.modules = new Map();
 		this.apis = new Map();
 		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
@@ -318,7 +321,33 @@ export class Shell {
 		this.doc = doc;
 		this.render();
 		this.releaseUnused();
+		this.tabsChanged();
 		this.openLaunched();
+	}
+
+	// The tabs open in this window's layout - every dock host's, a phone's pane and back stack - and those shown (each
+	// group's active one, the phone's pane): what ied.tabs.state() answers.
+	tabsState() {
+		const phone = (this.doc && this.doc.phone) || {};
+		if (this.deviceClass === "phone") return { open: [phone.pane, ...(phone.back || [])].filter(Boolean), shown: phone.pane ? [phone.pane] : [] };
+		const open = new Set();
+		const shown = new Set();
+		for (const activity of this.contributions.activities) {
+			if (activity.view) continue;
+			const tree = this.treeOf(activity.id);
+			for (const ref of T.refsOf(tree)) open.add(ref);
+			for (const group of T.groupsOf(tree)) if (group.active) shown.add(group.active);
+		}
+		return { open: [...open], shown: [...shown] };
+	}
+
+	// Tells the ied.tabs.onChange listeners when the tabs open or shown changed.
+	tabsChanged() {
+		const state = this.tabsState();
+		const text = JSON.stringify(state);
+		if (text === this.tabsShown) return;
+		this.tabsShown = text;
+		for (const fn of [...this.tabListeners]) fn(state);
 	}
 
 	// The file a launch URL names (`ied open`, docs/10), shown once its workspace's layout is in place by the command of
@@ -382,11 +411,23 @@ export class Shell {
 		return Boolean(activity) && !activity.view;
 	}
 
-	// The dock host a tab opens into: the current activity when it is one, else the first.
-	dockActivity() {
+	// Whether dock host `activityId`'s document well takes tabs like `ref`: its `documents` (tab kinds) name the ref's
+	// kind, or it names none.
+	takesTab(activityId, ref) {
+		const activity = this.contributions.activity(activityId);
+		if (!activity || activity.view) return false;
+		const kind = ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : null;
+		return !activity.documents || activity.documents.includes(kind);
+	}
+
+	// The dock host a tab opens into: the current activity when it takes the tab, else the first that names its kind,
+	// else the first that takes any.
+	dockActivity(ref) {
 		const current = this.currentActivity();
-		if (current && this.isDockHost(current)) return current;
-		const host = this.contributions.activities.find((a) => !a.view);
+		if (current && this.takesTab(current, ref)) return current;
+		const kind = ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : null;
+		const hosts = this.contributions.activities.filter((a) => !a.view);
+		const host = hosts.find((a) => a.documents && a.documents.includes(kind)) || hosts.find((a) => !a.documents) || hosts[0];
 		return host ? host.id : null;
 	}
 
@@ -463,7 +504,8 @@ export class Shell {
 		this.openTab("shell:settings");
 	}
 
-	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone.
+	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone. A tab open
+	// already is shown where it is; with {activity}, it opens in that dock host, leaving another it was in.
 	openTab(ref, options) {
 		const opts = options || {};
 		if (!this.views.has(ref)) {
@@ -474,7 +516,10 @@ export class Shell {
 			this.layout.update((doc) => withPhonePane(doc, ref));
 			return;
 		}
-		const activityId = this.dockActivity();
+		const asked = opts.activity && this.isDockHost(opts.activity) ? opts.activity : null;
+		const where = this.activityOf(ref);
+		if (asked && where && where !== asked) this.changeTree(where, (tree) => T.closeTab(tree, ref));
+		const activityId = asked || where || this.dockActivity(ref);
 		const groupPath = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
 		this.layout.update((doc) => withActivity(doc, activityId));
 		this.changeTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
@@ -560,6 +605,10 @@ export class Shell {
 	closeTab(ref) {
 		if (this.deviceClass === "phone" && this.doc.phone && this.doc.phone.pane === ref) {
 			this.layout.update((doc) => phoneBack(doc));
+			return;
+		}
+		if (this.deviceClass === "phone" && this.doc.phone && this.doc.phone.back.includes(ref)) {
+			this.layout.update((doc) => withoutPhoneBack(doc, ref));
 			return;
 		}
 		const activityId = this.activityOf(ref);
@@ -671,6 +720,8 @@ export class Shell {
 	tabKeys(ref) {
 		const activityId = ref ? this.activityOf(ref) : null;
 		const owner = activityId ? T.groupOf(this.treeOf(activityId), ref) : null;
+		this.context.set("tabRef", ref || undefined);
+		this.context.set("tabKind", ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : undefined);
 		this.context.set("tabTethered", (ref && partnersOf(this.doc, ref).length > 0) || undefined);
 		this.context.set("tabInToolGroup", (owner && !owner.well) || undefined);
 		this.context.set("tabAutoHidden", (owner && T.hiddenIn(owner, ref)) || undefined);
@@ -731,6 +782,14 @@ export class Shell {
 				untether: (ref) => shell.untether(ref),
 				// `fn(ref)` when the person closes a tab of `kind` in this window.
 				onClose: (kind, fn) => shell.onTabClose(kind, fn),
+				close: (ref) => shell.closeTab(ref),
+				// {open: [ref], shown: [ref]}: the tabs open in this window's layout, and those shown.
+				state: () => shell.tabsState(),
+				// `fn(state)` each time state() would answer differently; returns the function that stops it.
+				onChange: (fn) => {
+					shell.tabListeners.add(fn);
+					return () => shell.tabListeners.delete(fn);
+				},
 			},
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
 			contributions: Object.assign((point) => shell.contributions.of(point), { on: (fn) => shell.contributions.on(fn) }),

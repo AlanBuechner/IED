@@ -105,7 +105,7 @@ export class PhoneChrome {
 		const activity = (a) => ({ pane: "activity:" + a.id, title: a.title, icon: a.icon, base: a.plugin.base, run: () => shell.showActivity(a.id) });
 		const all = [
 			...activities.filter((a) => a.phoneSlot).map(activity),
-			...shell.contributions.toolWindows.filter((t) => shell.context.holds(t.when)).map((t) => ({ pane: t.id, title: t.title, icon: t.icon, base: t.plugin.base, run: () => shell.showView(t.id) })),
+			...shell.contributions.toolWindows.filter((t) => t.phoneNav !== false && shell.context.holds(t.when)).map((t) => ({ pane: t.id, title: t.title, icon: t.icon, base: t.plugin.base, run: () => shell.showView(t.id) })),
 			...activities.filter((a) => !a.phoneSlot).map(activity),
 		];
 		return { shown: all.slice(0, SLOTS), more: all.slice(SLOTS) };

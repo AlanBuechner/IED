@@ -324,3 +324,12 @@ test("layout doc: tethers pair tabs, and a follower closes with its lead", () =>
 	assertTrue(!D.emptyDocument().tethers, "an old document has none");
 	assertEqual(D.partnersOf(D.emptyDocument(), "doc:a"), []);
 });
+
+test("layout doc: a phone's tab closed while another shows leaves its back stack", () => {
+	let doc = D.withPhonePane(D.emptyDocument(), "chat:new");
+	doc = D.withPhonePane(doc, "chat:c4");
+	assertEqual(doc.phone, { pane: "chat:c4", back: ["chat:new"] });
+	doc = D.withoutPhoneBack(doc, "chat:new");
+	assertEqual(doc.phone, { pane: "chat:c4", back: [] }, "back goes where the draft came from, not to the draft");
+	assertEqual(D.withoutPhoneBack(doc, "chat:z"), doc, "nothing to drop");
+});

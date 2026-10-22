@@ -24,6 +24,7 @@ export class Contributions {
 		this.panel = null;
 		this.icons = new Icons((point) => this.of(point));
 		this.listeners = new Set();
+		this.imported = new Map();   // a UI module's URL -> {module, error}, once imported
 	}
 
 	// `fn()` each time the contributions are read again or cleared, once every UI module is activated; returns the
@@ -36,11 +37,16 @@ export class Contributions {
 	// Reads the contributions of `wsId` and registers them; resolves once every UI module is imported and activated.
 	async load(wsId) {
 		const answer = await this.shell.client.request("plugins.contributions", { wsId });
-		this.plugins = answer.plugins.map((p) => ({
-			id: p.id, source: p.source, contributes: p.contributes || {}, ui: p.ui || null,
-			base: p.source === "project" ? "/w/" + encodeURIComponent(wsId) + "/plugins/" + encodeURIComponent(p.id) + "/" : "/plugins/" + encodeURIComponent(p.id) + "/",
-			module: null,
-		}));
+		// A module imported before keeps serving its views at once: one shown while the others import (a reload after a
+		// trust or plugin change) must not find it missing.
+		this.plugins = answer.plugins.map((p) => {
+			const known = p.ui ? this.imported.get(p.ui) : null;
+			return {
+				id: p.id, source: p.source, contributes: p.contributes || {}, ui: p.ui || null,
+				base: p.source === "project" ? "/w/" + encodeURIComponent(wsId) + "/plugins/" + encodeURIComponent(p.id) + "/" : "/plugins/" + encodeURIComponent(p.id) + "/",
+				module: known ? known.module : null, error: known ? known.error : null, loaded: Boolean(known) || !p.ui,
+			};
+		});
 		this.register();
 		await Promise.all(this.plugins.map((plugin) => this.importModule(plugin)));
 		this.changed();
@@ -97,8 +103,10 @@ export class Contributions {
 		const cache = this.shell.modules;
 		if (!cache.has(plugin.ui)) cache.set(plugin.ui, this.activate(plugin));
 		const loaded = await cache.get(plugin.ui);
+		this.imported.set(plugin.ui, loaded);
 		plugin.module = loaded.module;
 		plugin.error = loaded.error;
+		plugin.loaded = true;
 	}
 
 	// Imports a UI module and calls its activate(ied); a failure is reported and kept, so its views say why.

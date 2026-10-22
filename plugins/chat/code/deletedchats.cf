@@ -1,0 +1,155 @@
+// Deleted chats (docs/04 "Deleting a chat", docs/10 "Chats"): chat.delete moves a chat's folder among the deleted ones
+// and lists it on chats:<wsId> as deleted; chat.restore brings it back whole; chat.purge removes it for good, as the
+// keeper does once it has been kept ai.chats.keepDeletedDays (30 by default) - at a workspace's load and every hour.
+
+include "api/plugin.ch"
+include "service.ch"
+
+namespace Ai
+{
+	const int64 kKeepDeletedDaysDefault = 30;
+	const int64 kDayMs = 24 * 60 * 60 * 1000;
+	const int64 kPurgeEveryMs = 60 * 60 * 1000;
+	const int64 kDeletedKeeperTickNs = 15000000000;   // how often the keeper looks whether the plugin stops
+
+	static int64 KeepDeletedDays(IED::PluginContext* context, Core::StringView wsId) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode days = Serialization::ReadJson(context->Setting(Core::StringView("ai.chats.keepDeletedDays"), wsId).View(), *doc).root;
+		return days.Kind() == Serialization::DomKind::Int && days.AsInt() > 0 ? days.AsInt() : kKeepDeletedDaysDefault;
+	}
+
+	// {chatId, wsId, title, updatedMs, deletedMs, purgeMs, turnCount}: purgeMs when the keeper removes it for good.
+	static void WriteDeletedChat(IED::JsonWriter& json, const DeletedChat* chat, int64 keepDays) {
+		json.BeginObject();
+		json.Field("chatId", chat->chatId.View());
+		json.Field("wsId", chat->wsId.View());
+		json.Field("title", chat->title.View());
+		json.IntField("updatedMs", chat->updatedMs);
+		json.IntField("deletedMs", chat->deletedMs);
+		json.IntField("purgeMs", chat->deletedMs + keepDays * kDayMs);
+		json.IntField("turnCount", chat->turnCount);
+		json.EndObject();
+	}
+
+	void Chats::LoadDeleted(const IED::Workspace& ws) {
+		Core::Array<Core::String> problems;
+		for (DeletedChat* chat : LoadDeletedChats(LocalStateOf(ws), ws.id.View(), problems)) deleted.Push(chat);
+		for (const Core::String& problem : problems) context->Log(problem.View());
+	}
+
+	// The workspace's deleted chats, the latest deleted first.
+	void Chats::WriteDeleted(IED::JsonWriter& json, Core::StringView wsId) const {
+		Core::Array<DeletedChat*> listed;
+		for (DeletedChat* chat : deleted)
+			if (chat->wsId.View() == wsId) listed.Push(chat);
+		listed.SortBy([](DeletedChat* a, DeletedChat* b) -> bool { return a->deletedMs > b->deletedMs; });
+		const int64 keepDays = KeepDeletedDays(context, wsId);
+		json.BeginArray();
+		for (DeletedChat* chat : listed) WriteDeletedChat(json, chat, keepDays);
+		json.EndArray();
+	}
+
+	DeletedChat* Chats::DeletedOf(Core::StringView chatId) const {
+		for (DeletedChat* chat : deleted)
+			if (chat->chatId.View() == chatId) return chat;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no deleted chat ") + chatId).View());
+	}
+
+	Core::String Chats::DeleteMethod(const IED::Request& request) {
+		Chat* chat = Get(request.params.Str("chatId").View());
+		if (chat->run) throw IED::RpcError(IED::ErrorCode::Conflict, "the chat is running a turn: stop it first");
+		IED::Workspace ws = WorkspaceOf(chat);
+		DeletedChat* gone = new DeletedChat();
+		gone->chatId = chat->chatId;
+		gone->wsId = chat->wsId;
+		gone->title = chat->title;
+		gone->updatedMs = chat->updatedMs;
+		gone->deletedMs = ChatNowMs();
+		gone->turnCount = chat->turns.Count();
+		Core::String problem;
+		if (!MoveToDeleted(LocalStateOf(ws), chat->chatId.View(), gone->deletedMs, problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+		for (int64 i = 0; i < chats.Count(); ++i)
+			if (chats[i] == chat) {
+				chats.RemoveAt(i);
+				break;
+			}
+		ClaudeSession* session = nullptr;
+		if (claudeSessions.TryGet(chat->chatId, session)) {
+			session->Stop();
+			claudeSessions.Remove(chat->chatId);
+		}
+		context->RemoveTopic(chat->Topic().View());
+		deleted.Push(gone);
+		IED::JsonWriter entry;
+		WriteDeletedChat(entry, gone, KeepDeletedDays(context, WsId(ws)));
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("chatId", gone->chatId.View());
+		data.RawField("deleted", entry.View());
+		data.EndObject();
+		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.deleted", data.View());
+		return data.ToString();
+	}
+
+	Core::String Chats::RestoreMethod(const IED::Request& request) {
+		DeletedChat* gone = DeletedOf(request.params.Str("chatId").View());
+		IED::Workspace ws = OpenWorkspace(gone->wsId.View());
+		FS::Path state = LocalStateOf(ws);
+		Core::String problem;
+		if (!MoveFromDeleted(state, gone->chatId.View(), problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+		Core::Array<Core::String> problems;
+		Chat* chat = LoadChat(state, gone->wsId.View(), gone->chatId.View(), Core::StringView(kInterruptedNote), problems);
+		if (!chat) throw IED::RpcError(IED::ErrorCode::Internal, problems.IsEmpty() ? Core::StringView("the chat could not be read") : problems[0].View());
+		for (int64 i = 0; i < deleted.Count(); ++i)
+			if (deleted[i] == gone) {
+				deleted.RemoveAt(i);
+				break;
+			}
+		chats.Push(chat);
+		AddTopic(chat);
+		Core::String summary = chat->SummaryJson();
+		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.restored", summary.View());
+		return summary;
+	}
+
+	Core::String Chats::PurgeMethod(const IED::Request& request) {
+		Purge(DeletedOf(request.params.Str("chatId").View()));
+		return Core::String("{}");
+	}
+
+	// Gone for good: its folder removed, chat.purged on its workspace's chats: topic.
+	void Chats::Purge(DeletedChat* chat) {
+		IED::Workspace ws;
+		if (IED::FindWorkspace(chat->wsId.View(), ws)) PurgeDeletedChat(LocalStateOf(ws), chat->chatId.View());
+		for (int64 i = 0; i < deleted.Count(); ++i)
+			if (deleted[i] == chat) {
+				deleted.RemoveAt(i);
+				break;
+			}
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("chatId", chat->chatId.View());
+		data.EndObject();
+		context->Publish(ChatsTopic(chat->wsId.View()).View(), "chat.purged", data.View());
+	}
+
+	void Chats::PurgeExpired() {
+		const int64 now = ChatNowMs();
+		Core::Array<DeletedChat*> expired;
+		for (DeletedChat* chat : deleted)
+			if (now >= chat->deletedMs + KeepDeletedDays(context, chat->wsId.View()) * kDayMs) expired.Push(chat);
+		for (DeletedChat* chat : expired) Purge(chat);
+	}
+
+	void Chats::DeletedKeeper() {
+		int64 purgedMs = ChatNowMs();
+		for (;;) {
+			Threading::Thread::Sleep(kDeletedKeeperTickNs);
+			IED::HostLock guard(*context);
+			if (stopping) return;
+			if (ChatNowMs() - purgedMs < kPurgeEveryMs) continue;
+			purgedMs = ChatNowMs();
+			PurgeExpired();
+		}
+	}
+}

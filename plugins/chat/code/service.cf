@@ -5,7 +5,6 @@ include "sent.ch"
 
 namespace Ai
 {
-	const char* kInterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
 	const int64 kTitleMostBytes = 48;
 	const int64 kProbeWaitSliceNs = 50000000;
 
@@ -36,8 +35,11 @@ namespace Ai
 		Register("chat.history", [self](const IED::Request& request) -> Core::String { return self->HistoryMethod(request); });
 		Register("ai.probe", [self](const IED::Request& request) -> Core::String { return self->ProbeMethod(request); });
 		Register("chat.delete", [self](const IED::Request& request) -> Core::String { return self->DeleteMethod(request); });
+		Register("chat.restore", [self](const IED::Request& request) -> Core::String { return self->RestoreMethod(request); });
+		Register("chat.purge", [self](const IED::Request& request) -> Core::String { return self->PurgeMethod(request); });
 		claude = new ClaudeAccount(context);
 		context->StartThread([self]() { self->ClaudeKeeper(); });
+		context->StartThread([self]() { self->DeletedKeeper(); });
 		context->OnDeactivate([self]() {
 			IED::HostLock guard(*self->context);
 			self->stopping = true;
@@ -66,6 +68,8 @@ namespace Ai
 			AddTopic(chat);
 		}
 		for (const Core::String& problem : problems) context->Log(problem.View());
+		LoadDeleted(ws);
+		PurgeExpired();
 	}
 
 	Chat* Chats::Get(Core::StringView chatId) const {
@@ -132,6 +136,8 @@ namespace Ai
 			json.EndObject();
 		}
 		json.EndArray();
+		json.Key(Core::StringView("deleted"));
+		WriteDeleted(json, wsId);
 		json.EndObject();
 		return json.ToString();
 	}
@@ -476,30 +482,6 @@ namespace Ai
 		return json.ToString();
 	}
 
-	Core::String Chats::DeleteMethod(const IED::Request& request) {
-		const IED::Params& params = request.params;
-		Chat* chat = Get(params.Str("chatId").View());
-		if (chat->run) throw IED::RpcError(IED::ErrorCode::Conflict, "the chat is running a turn: stop it first");
-		IED::Workspace ws = WorkspaceOf(chat);
-		for (int64 i = 0; i < chats.Count(); ++i)
-			if (chats[i] == chat) {
-				chats.RemoveAt(i);
-				break;
-			}
-		ClaudeSession* session = nullptr;
-		if (claudeSessions.TryGet(chat->chatId, session)) {
-			session->Stop();
-			claudeSessions.Remove(chat->chatId);
-		}
-		DeleteChatFiles(LocalStateOf(ws), chat->chatId.View());
-		context->RemoveTopic(chat->Topic().View());
-		IED::JsonWriter data;
-		data.BeginObject();
-		data.Field("chatId", chat->chatId.View());
-		data.EndObject();
-		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.deleted", data.View());
-		return Core::String("{}");
-	}
 	// --- Model probes ------------------------------------------------------------------------------------------------
 
 	class ProbeJob

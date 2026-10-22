@@ -211,20 +211,30 @@ function normalTurn(turn) {
 	return Object.assign({ segments: [], recoveries: [], stop: null, tokensIn: 0, tokensOut: 0 }, turn, { segments: (turn.segments || []).map((s) => Object.assign({ text: "", argsText: "" }, s)) });
 }
 
-// The chats of a workspace (chats:<wsId>), most recently active first.
+// The chats of a workspace (chats:<wsId>), most recently active first, and its deleted chats (docs/04 "Deleting a
+// chat"), the latest deleted first.
 export class ChatList {
 	constructor() {
 		this.chats = [];
+		this.deleted = [];
+		this.keepsDeleted = false;   // the server keeps deleted chats (an older one lists no `deleted`)
 	}
 
 	snapshot(data) {
 		this.chats = (data.chats || []).slice();
+		this.deleted = (data.deleted || []).slice();
+		this.keepsDeleted = Array.isArray(data.deleted);
 		this.sort();
 	}
 
 	event(kind, data) {
-		if (kind === "chat.deleted") this.chats = this.chats.filter((c) => c.chatId !== data.chatId);
-		else if (kind === "chat.created" || kind === "chat.changed") {
+		if (kind === "chat.deleted") {
+			this.chats = this.chats.filter((c) => c.chatId !== data.chatId);
+			if (data.deleted) this.deleted = [data.deleted, ...this.deleted.filter((d) => d.chatId !== data.chatId)];
+		}
+		else if (kind === "chat.purged") this.deleted = this.deleted.filter((d) => d.chatId !== data.chatId);
+		else if (kind === "chat.created" || kind === "chat.changed" || kind === "chat.restored") {
+			this.deleted = this.deleted.filter((d) => d.chatId !== data.chatId);
 			const index = this.chats.findIndex((c) => c.chatId === data.chatId);
 			if (index >= 0) this.chats[index] = data;
 			else this.chats.push(data);
@@ -234,6 +244,7 @@ export class ChatList {
 
 	sort() {
 		this.chats.sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0));
+		this.deleted.sort((a, b) => (b.deletedMs || 0) - (a.deletedMs || 0));
 	}
 
 	find(chatId) {
@@ -241,13 +252,41 @@ export class ChatList {
 	}
 }
 
-// What a tab shows beside the title: a spinner while running, "!" when the chat waits on its owner, and the tasks.
-export function tabGlyphs(summary) {
-	return {
-		running: summary.state === "running",
-		attention: summary.state === "awaiting_approval" || summary.state === "awaiting_answer" || summary.state === "paused",
-		tasks: summary.tasksTotal ? summary.tasksDone + "/" + summary.tasksTotal : "",
-	};
+const STATE_LOOKS = {
+	idle: { icon: "$(comment-discussion)", tone: "", attention: false },
+	running: { icon: "$(loading~spin)", tone: "c-info", attention: false },
+	awaiting_approval: { icon: "$(shield)", tone: "c-warn", attention: true },
+	awaiting_answer: { icon: "$(question)", tone: "c-warn", attention: true },
+	paused: { icon: "$(debug-pause)", tone: "c-warn", attention: true },
+};
+
+// How a chat's state shows on its tab and in the Chats list: a manifest-style icon, its color class, whether the chat
+// waits on its owner, and its tasks done.
+export function chatLook(summary) {
+	const look = STATE_LOOKS[summary.state] || STATE_LOOKS.idle;
+	return Object.assign({ tasks: summary.tasksTotal ? summary.tasksDone + "/" + summary.tasksTotal : "" }, look);
+}
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+// When a chat was last active, as the Chats list says it: "now", "5m", "3h", "2d", then the date.
+export function ago(ms, now) {
+	const passed = Math.max(0, now - ms);
+	if (passed < MINUTE_MS) return "now";
+	if (passed < HOUR_MS) return Math.floor(passed / MINUTE_MS) + "m";
+	if (passed < DAY_MS) return Math.floor(passed / HOUR_MS) + "h";
+	if (passed < 7 * DAY_MS) return Math.floor(passed / DAY_MS) + "d";
+	return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// How long a deleted chat is still kept: "27 days left", "1 day left", "less than a day left".
+export function keptFor(purgeMs, now) {
+	const left = purgeMs - now;
+	if (left < DAY_MS) return "less than a day left";
+	const days = Math.ceil(left / DAY_MS);
+	return days + (days === 1 ? " day left" : " days left");
 }
 
 // A tool call's arguments on one line, as the card's head shows them: the path or command first.

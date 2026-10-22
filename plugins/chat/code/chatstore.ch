@@ -18,7 +18,28 @@ namespace Ai
 	void ForgetRunningTurn(const FS::Path& state, const Chat* chat);
 	// The chats saved for a workspace; `interruptedNote` is what an interrupted call's result tells the model.
 	Core::Array<Chat*> LoadChats(const FS::Path& state, Core::StringView wsId, Core::StringView interruptedNote, Core::Array<Core::String>& problems);
-	void DeleteChatFiles(const FS::Path& state, Core::StringView chatId);
+	// One saved chat, or null with a problem.
+	Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView interruptedNote, Core::Array<Core::String>& problems);
+
+	// A deleted chat (docs/04 "Deleting a chat"): its folder moved to the local state's chats-deleted/<chatId>/, with
+	// deleted.json saying when, kept there whole until it is restored or purged.
+	class DeletedChat
+	{
+		public Core::String chatId;
+		public Core::String wsId;
+		public Core::String title;
+		public int64 updatedMs;
+		public int64 deletedMs;
+		public int64 turnCount;
+	}
+
+	FS::Path DeletedChatFolder(const FS::Path& state, Core::StringView chatId);
+	// Moves the chat's folder among the deleted ones, deleted at `nowMs`; false with `problem` when it cannot.
+	bool MoveToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem);
+	// Moves a deleted chat's folder back among the chats; false with `problem` when it cannot.
+	bool MoveFromDeleted(const FS::Path& state, Core::StringView chatId, Core::String& problem);
+	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems);
+	void PurgeDeletedChat(const FS::Path& state, Core::StringView chatId);
 	// Every call of the turn's messages that has no result gets `note` as its result, so the conversation stays one a
 	// model accepts (each call answered).
 	void CloseOpenCalls(Turn* turn, Core::StringView note);

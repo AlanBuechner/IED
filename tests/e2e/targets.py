@@ -97,6 +97,12 @@ class RealTarget(Target):
 		shutil.copytree(FIXTURE, workspace)
 		make_repository(workspace)
 		self.workspace = workspace
+		# The machine's own Claude Code CLI stays out: a server that finds it signed in sets Claude up as the default group
+		# by itself, minutes into a run, and the chats lose the fake model (docs/04 "Setting it up").
+		app = os.path.join(self.root, "data", "app")
+		os.makedirs(app)
+		with open(os.path.join(app, "settings.json"), "w", encoding="utf-8") as f:
+			json.dump({"ai.claude.command": [os.path.join(self.root, "no-claude", "claude.exe")]}, f)
 		argv = [self.executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", "ied-e2e-" + secrets.token_hex(6),
 			"--test-hooks", "--quiet", "--static", FRONTEND, "--workspace", workspace]
 		self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

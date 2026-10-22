@@ -18,6 +18,8 @@ MODES = ("ask", "plan", "agent")
 PERMISSIONS = ("plan", "ask", "acceptEdits", "auto")
 MENTION_KINDS = ("file", "folder", "symbol", "terminal", "output", "problems", "diff", "chat")
 MOST_ATTACHMENTS = 16
+DAY_MS = 24 * 60 * 60 * 1000
+KEEP_DELETED_DAYS = 30
 
 
 def sent_mentions(mentions):
@@ -34,6 +36,12 @@ def sent_mentions(mentions):
 
 def now_ms():
 	return int(time.time() * 1000)
+
+
+def deleted_entry(chat, deleted_ms):
+	"""A deleted chat as chats:<wsId> lists it (docs/10 "Chats")."""
+	return {"chatId": chat.chat_id, "wsId": chat.ws_id, "title": chat.title, "updatedMs": chat.updated_ms, "deletedMs": deleted_ms,
+		"purgeMs": deleted_ms + KEEP_DELETED_DAYS * DAY_MS, "turnCount": len(chat.turns)}
 
 
 class Segment:
@@ -148,18 +156,22 @@ class Chats:
 	def __init__(self, server):
 		self.server = server
 		self.items = {}
+		self.deleted = {}   # chatId -> (chat, deletedMs)
+		self.made = 0       # chats made, so an id is never used twice
 		ws_id = next(iter(server.workspace.items))
 		server.hub.add("chats:" + ws_id, lambda: self.list_snapshot(ws_id))
 		self._seed(self._create(ws_id, "Player movement", "agent"))
 		self._create(ws_id, "Scratch", "ask")
+		self._delete(self._create(ws_id, "Old renderer notes", "ask"), now_ms() - 3 * DAY_MS)
 		server.rpc.register("ai.probe", self.m_ai_probe)
 		server.hub.add("aiusage", self.usage_snapshot)
 		server.rpc.register("ai.usage", self.m_ai_usage)
-		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete"):
+		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete", "chat.restore", "chat.purge"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def _create(self, ws_id, title, mode):
-		chat = Chat("c%d" % (len(self.items) + 1), ws_id, title, mode)
+		self.made += 1
+		chat = Chat("c%d" % self.made, ws_id, title, mode)
 		self.items[chat.chat_id] = chat
 		self.server.hub.add(chat.topic, lambda: self.snapshot(chat))
 		return chat
@@ -174,7 +186,8 @@ class Chats:
 			chat.turns.append(turn)
 
 	def list_snapshot(self, ws_id):
-		return {"chats": [c.summary() for c in self.items.values() if c.ws_id == ws_id]}
+		deleted = sorted((d for d in self.deleted.values() if d[0].ws_id == ws_id), key=lambda d: -d[1])
+		return {"chats": [c.summary() for c in self.items.values() if c.ws_id == ws_id], "deleted": [deleted_entry(chat, ms) for chat, ms in deleted]}
 
 	def snapshot(self, chat):
 		recent = chat.turns[-SNAPSHOT_TURNS:]
@@ -388,13 +401,37 @@ class Chats:
 		self.publish(chat, "question.resolved", {"questionId": question.data["questionId"], "answer": question.decision, "by": call.client_id})
 		return {}
 
+	# --- deleted chats (docs/04 "Deleting a chat"): kept KEEP_DELETED_DAYS, restorable until purged -------------------
+
+	def _delete(self, chat, deleted_ms):
+		del self.items[chat.chat_id]
+		self.server.hub.remove(chat.topic)
+		self.deleted[chat.chat_id] = (chat, deleted_ms)
+		return deleted_entry(chat, deleted_ms)
+
 	async def m_chat_delete(self, call, p):
 		chat = self.get(p.str("chatId"))
 		if chat.runner is not None:
 			raise RpcError("conflict", "the chat is running a turn: stop it first")
-		del self.items[chat.chat_id]
-		self.server.hub.remove(chat.topic)
-		self.server.hub.publish("chats:" + chat.ws_id, "chat.deleted", {"chatId": chat.chat_id})
+		data = {"chatId": chat.chat_id, "deleted": self._delete(chat, now_ms())}
+		self.server.hub.publish("chats:" + chat.ws_id, "chat.deleted", data)
+		return data
+
+	def _deleted(self, chat_id):
+		if chat_id not in self.deleted:
+			raise RpcError("not_found", "no deleted chat %r" % chat_id)
+		return self.deleted.pop(chat_id)[0]
+
+	async def m_chat_restore(self, call, p):
+		chat = self._deleted(p.str("chatId"))
+		self.items[chat.chat_id] = chat
+		self.server.hub.add(chat.topic, lambda: self.snapshot(chat))
+		self.server.hub.publish("chats:" + chat.ws_id, "chat.restored", chat.summary())
+		return chat.summary()
+
+	async def m_chat_purge(self, call, p):
+		chat = self._deleted(p.str("chatId"))
+		self.server.hub.publish("chats:" + chat.ws_id, "chat.purged", {"chatId": chat.chat_id})
 		return {}
 
 	# --- playing a script --------------------------------------------------------------------------------------------

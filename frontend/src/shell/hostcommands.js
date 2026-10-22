@@ -51,6 +51,7 @@ const COMMANDS = [
 	{ id: "shell.closeAllTabs", title: "Close All", category: "Window", run: (shell, args) => tabOf(shell, args) && shell.closeGroupTabs(tabOf(shell, args), true) },
 	{ id: "shell.moveTabRight", title: "Move to New Group Right", category: "Window", run: (shell, args) => tabOf(shell, args) && shell.splitTab(tabOf(shell, args), "right") },
 	{ id: "shell.moveTabDown", title: "Move to New Group Below", category: "Window", run: (shell, args) => tabOf(shell, args) && shell.splitTab(tabOf(shell, args), "bottom") },
+	{ id: "shell.moveTabToActivity", title: "Move to Activity", category: "Window", run: (shell, args) => tabOf(shell, args) && args && args.activity && shell.openTab(tabOf(shell, args), { activity: args.activity }) },
 	{ id: "shell.copyTabRef", title: "Copy Reference", category: "Window", run: (shell, args) => tabOf(shell, args) && copyText(shell, tabOf(shell, args)) },
 	{ id: "shell.tetherBeside", title: "Tether with the Tab Beside", category: "Window", icon: "$(link)", run: (shell, args) => tetherBeside(shell, tabOf(shell, args)) },
 	{ id: "shell.untetherTab", title: "Untether", category: "Window", enablement: "tabTethered", run: (shell, args) => tabOf(shell, args) && shell.untether(tabOf(shell, args)) },
@@ -142,6 +143,16 @@ export function registerShellCommands(shell) {
 	for (const [menuId, items] of Object.entries(MENUS)) for (const item of items) shell.menus.add(menuId, item, "shell");
 	for (const binding of KEYS) shell.keybindings.define(binding, "shell");
 	shell.menus.provide("menubar/view", () => toolWindowItems(shell));
+	shell.menus.provide("tab/context", () => moveToActivityItems(shell));
+}
+
+// A document tab moves to another dock host (F-SHL-14: a chat into the Editor's well, a file into the Chat's).
+function moveToActivityItems(shell) {
+	const ref = shell.context.get("tabRef");
+	const where = ref ? shell.activityOf(ref) : null;
+	if (!where || shell.context.get("tabInToolGroup")) return [];
+	return shell.contributions.activities.filter((a) => !a.view && a.id !== where)
+		.map((a, i) => ({ command: "shell.moveTabToActivity", args: { ref, activity: a.id }, title: "Move to " + a.title, group: "2_groups", order: 10 + i }));
 }
 
 // View lists every tool window and every activity, VS style.

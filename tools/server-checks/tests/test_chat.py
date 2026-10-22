@@ -19,6 +19,7 @@ from server import REPO, IedServer, ServerTestCase, local_state
 FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 MAIN = "int main(void)\n{\n\treturn 0;\n}\n"
 TURN_SECONDS = 60
+DAY_MS = 24 * 60 * 60 * 1000
 
 
 def write(path, value):
@@ -936,16 +937,66 @@ class ChatTests(ChatCase):
 		await self.client.next_frame(topic)
 		self.assertEqual("finished", (await self.turn(chat_id, "continue"))["stop"], "a paused chat continues with the next message")
 
-	async def test_delete_removes_the_chat_and_its_files(self):
-		chat_id, _ = await self.chat()
+	async def test_delete_keeps_the_chat_restorable_until_it_is_purged(self):
+		chat_id, topic = await self.chat()
 		self.model.queue("ok-text")
 		await self.turn(chat_id)
-		folder = os.path.join(local_state(self.data, self.repo), "chats", chat_id)
+		state = local_state(self.data, self.repo)
+		folder = os.path.join(state, "chats", chat_id)
+		kept = os.path.join(state, "chats-deleted", chat_id)
 		self.assertTrue(os.path.exists(os.path.join(folder, "turns.jsonl")))
 		self.assertFalse(os.path.exists(os.path.join(self.repo, ".ied", "local")), "a folder's chats live in the app data, never in the folder")
-		await self.client.request("chat.delete", {"chatId": chat_id})
+		await self.client.sub(["chats:w1"])
+		await self.client.next_frame("chats:w1")
+		reply = await self.client.request("chat.delete", {"chatId": chat_id})
 		self.assertFalse(os.path.exists(folder))
-		self.assertEqual([], [c for c in (await self.client.request("chat.list", {"wsId": "w1"}))["chats"] if c["chatId"] == chat_id])
+		self.assertTrue(os.path.exists(os.path.join(kept, "turns.jsonl")), "kept whole among the deleted chats")
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual([], [c for c in listed["chats"] if c["chatId"] == chat_id])
+		entry = listed["deleted"][0]
+		self.assertEqual((chat_id, 1, 30 * DAY_MS), (entry["chatId"], entry["turnCount"], entry["purgeMs"] - entry["deletedMs"]), "kept 30 days by default")
+		self.assertEqual(entry, reply["deleted"])
+		restored = await self.client.request("chat.restore", {"chatId": chat_id})
+		self.assertEqual((chat_id, 1), (restored["chatId"], restored["turnCount"]))
+		self.assertFalse(os.path.exists(kept))
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual(([chat_id], []), ([c["chatId"] for c in listed["chats"]], listed["deleted"]))
+		await self.client.sub([topic])
+		await self.client.next_frame(topic)
+		self.model.queue("ok-text")
+		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"], "a restored chat goes on")
+		await self.client.request("chat.delete", {"chatId": chat_id})
+		await self.client.request("chat.purge", {"chatId": chat_id})
+		self.assertFalse(os.path.exists(kept))
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual(([], []), (listed["chats"], listed["deleted"]))
+		frames = await self.client.wait_for("chats:w1", lambda f: f.get("kind") == "chat.purged")
+		kinds = [f["kind"] for f in frames if f.get("kind") in ("chat.deleted", "chat.restored", "chat.purged")]
+		self.assertEqual(["chat.deleted", "chat.restored", "chat.deleted", "chat.purged"], kinds)
+		with self.assertRaises(RpcFailure) as gone:
+			await self.client.request("chat.restore", {"chatId": chat_id})
+		self.assertEqual("not_found", gone.exception.code)
+
+	async def test_a_deleted_chat_is_purged_once_kept_its_days(self):
+		old_id, _ = await self.chat()
+		new_id, _ = await self.chat()
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.keepDeletedDays", "value": 2})
+		await self.client.request("chat.delete", {"chatId": old_id})
+		await self.client.request("chat.delete", {"chatId": new_id})
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		state = local_state(self.data, self.repo)
+		marker = os.path.join(state, "chats-deleted", old_id, "deleted.json")
+		with open(marker, encoding="utf-8") as f:
+			deleted_ms = json.load(f)["deletedMs"]
+		write(marker, json.dumps({"deletedMs": deleted_ms - 3 * DAY_MS}))
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		deleted = (await self.client.request("chat.list", {"wsId": "w1"}))["deleted"]
+		self.assertEqual([new_id], [d["chatId"] for d in deleted], "the one kept past ai.chats.keepDeletedDays went at load")
+		self.assertEqual(2 * DAY_MS, deleted[0]["purgeMs"] - deleted[0]["deletedMs"])
+		self.assertFalse(os.path.exists(os.path.join(state, "chats-deleted", old_id)))
 
 	async def test_chats_an_older_server_left_in_the_folder_move_to_the_app_data(self):
 		chat_id, _ = await self.chat()
