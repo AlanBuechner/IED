@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-362**
+Next ID: **BUG-363**
 
 ## Rules for this file
 
@@ -47,6 +47,7 @@ Next ID: **BUG-362**
 | BUG-359 | Core::Format cuts an int64 under `{n}` to 32 bits without a word | Bedrock | Medium |
 | BUG-360 | No way to read standard input | Bedrock | High |
 | BUG-361 | C++ forms and STL names get diagnostics that do not name the C4 form | Diagnostics | Low |
+| BUG-362 | A `const T&` field cannot be bound in its object's create | HIR | Medium |
 
 ---
 
@@ -68,6 +69,21 @@ Next ID: **BUG-362**
   Format (variadic templates exist) would remove BUG-359 too.
 
 ## HIR and codegen
+
+### BUG-362 A `const T&` field cannot be bound in its object's create
+- **Area:** HIR
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** a reference field to const is bound by an assignment in its object's create, as language/04-types.md
+  4.4 allows, but the compiler reads the binding as a write through the const reference:
+  `error: cannot write through this location: it is reached through a pointer or reference to const`. The same code
+  with an `int32&` field builds and runs. A C++ class holding `const std::vector<T>& lines_` (IED's language eval
+  ports one) cannot be written the same way in C4.
+- **Repro:** `class Reader { [operator("create")] public void Init(const int32& source) { this.value = source; }
+  public int32 Get() const { return value; } private const int32& value; }`, then `int32 n = 42; Reader r = Reader(n);`.
+- **Where:** `C4/C4Lib/src/Backend/HIR/ReadOnly.cpp` (`ReadOnlyReason`) likely, where the binding assignment is
+  classified.
 
 ## Interop, runtime and Bedrock
 
