@@ -145,7 +145,11 @@ table points at, and a script host refuses an interface whose id differs from it
 bodies (section 3.3), so it is known only once they are; the table does not wait for it. A build that splits its
 module before optimizing it (`--incremental`, D-76) extracts the inline bodies on the split's threads and then
 assembles the id as an object of its own (`<int>/<name>.build-id.obj`), linked with the program's; any other build
-extracts them first and defines the id in its module (`Script/HostTable`: `EmitHostTable`, `EmitBuildId`).
+extracts them first and defines the id in its module (`Script/HostTable`: `EmitHostTable`, `EmitBuildId`). A
+program emitted in partitions (D-81) has the table in an object of its own (`HostTableModule`, which declares each
+entry), kept in the object cache by a key of what it lists (`HostTableKey`), so the partitions do not change with it;
+partition 0's own locals, the shared vtables among them, become hidden globals there for it to reach, and another
+partition's own helpers (its internal symbols) are not listed.
 
 ### 3.2 The interface (`.c4i`)
 

@@ -47,6 +47,18 @@ namespace Scripting
 			for (llvm::GlobalVariable& variable : module.globals()) KeepDefinition(variable);
 		}
 
+		// What only another module names (the reflection image's targets, which partition 0 once declared) would change
+		// the partition whenever that module's contents did.
+		void DropUnusedDeclarations(llvm::Module& module)
+		{
+			std::vector<llvm::GlobalValue*> unused;
+			for (llvm::Function& function : module)
+				if (function.isDeclaration() && function.use_empty()) unused.push_back(&function);
+			for (llvm::GlobalVariable& variable : module.globals())
+				if (variable.isDeclaration() && variable.use_empty()) unused.push_back(&variable);
+			for (llvm::GlobalValue* value : unused) value->eraseFromParent();
+		}
+
 		// What a split module's definitions become: every local a hidden global, and, when each partition is optimized
 		// alone, every linkonce definition weak.
 		void MakeSplit(llvm::Module& module, bool after)
@@ -463,6 +475,7 @@ namespace Scripting
 
 	std::string PartitionBitcode(llvm::Module& partition, PartitionOptimization optimization)
 	{
+		DropUnusedDeclarations(partition);
 		if (optimization != PartitionOptimization::Before) KeepDefinitions(partition);
 		return ModuleBitcode(partition);
 	}

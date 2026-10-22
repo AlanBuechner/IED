@@ -75,6 +75,7 @@ bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitio
 	const Scripting::ObjectCache cache(base + ".objects", CacheSalt(settings));
 	std::vector<Scripting::KeyedModule> keyed;
 	if (!image.key.empty()) keyed.push_back(image);
+	if (m_HostBuild) keyed.push_back(HostTable(*partitions.front()));
 	const unsigned count = static_cast<unsigned>(partitions.size() + keyed.size());
 	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(std::move(bitcode), std::move(keyed), settings, cache, diagnostics);
 	Report(diagnostics);
@@ -337,13 +338,22 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 	const std::vector<std::string> prelude = Scripting::PreludeFunctionSymbols(model);
 	listed->insert(listed->begin(), prelude.begin(), prelude.end());
 	m_HostBuild.emplace();
-	m_HostBuild->symbols = Scripting::HostSymbols(partitions, *listed);
 	m_HostBuild->reflectedTypes = Scripting::ReflectedTypeNames(model);
 	m_HostBuild->debugInfo = m_In.options.debugInfo;
-	if (!Scripting::EmitHostTable(module, m_HostBuild->symbols, &error))
+	if (partitions.size() > 1)
 	{
-		m_In.result.AddBackendError(Core::String(error.c_str()));
-		return false;
+		m_HostEntries = Scripting::HostEntries(partitions, *listed); // the table is an object of its own (HostTable)
+		m_HostBuild->symbols = Scripting::HostNamesOf(m_HostEntries);
+		m_AlwaysListed = std::move(*listed);
+	}
+	else
+	{
+		m_HostBuild->symbols = Scripting::HostSymbols(module, *listed);
+		if (!Scripting::EmitHostTable(module, m_HostBuild->symbols, &error))
+		{
+			m_In.result.AddBackendError(Core::String(error.c_str()));
+			return false;
+		}
 	}
 	const bool whileSplitting = OptimizesPartitions(m_In.options);
 	if (partitions.size() == 1)
@@ -357,12 +367,12 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 }
 
 // A script host's inline bodies, each partition's from the inline body cache (D-81): an edit extracts only those of the
-// partitions it changed, or all of them when it changed the host table's names.
+// partitions it changed. A partition's bodies name only what it lists itself and what every table lists.
 bool ProgramOutput::CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode,
 	const std::string& base, const Scripting::ObjectSettings& settings)
 {
 	const auto start = std::chrono::steady_clock::now();
-	const Scripting::InlineBodyCache cache(base + ".inline", CacheSalt(settings) + " " + Scripting::HostNamesSalt(m_HostBuild->symbols));
+	const Scripting::InlineBodyCache cache(base + ".inline", CacheSalt(settings) + " " + Scripting::HostNamesSalt(m_AlwaysListed));
 	const Scripting::HostNames names(m_HostBuild->symbols);
 	std::string error;
 	const auto chunks = cache.Chunks(partitions, bitcode, names, kInlineBodyChunksPerPartition, settings.threads, error);
@@ -375,6 +385,15 @@ bool ProgramOutput::CollectInlineBodies(const std::vector<llvm::Module*>& partit
 		m_HostBuild->inlineBodies.insert(m_HostBuild->inlineBodies.end(), partition.begin(), partition.end());
 	Timed("inline bodies", start);
 	return true;
+}
+
+// The script table of a program emitted in partitions, an object of its own kept by what it lists: a partition changes
+// only with its own code, and an edit that adds a function makes this small object again, not partition 0.
+Scripting::KeyedModule ProgramOutput::HostTable(const llvm::Module& program) const
+{
+	const std::string triple = program.getTargetTriple().str(), layout = program.getDataLayoutStr();
+	return { "host-table-" + Scripting::HostTableKey(m_HostEntries, triple + " " + layout),
+		[this, triple, layout](llvm::LLVMContext& context) { return Scripting::HostTableModule(context, m_HostEntries, triple, layout); } };
 }
 
 // The interface, now that the inline bodies are in, and its build id in `module`.

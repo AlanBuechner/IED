@@ -1,11 +1,16 @@
 #pragma once
 #include "Core/Core.h"
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace llvm { class Module; }
+namespace llvm
+{
+	class LLVMContext;
+	class Module;
+}
 
 namespace Scripting
 {
@@ -24,10 +29,35 @@ namespace Scripting
 	/// module's own tables (reflection image, GC roots). In module order, deterministic.
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed);
 
-	/// HostSymbols of a program emitted in partitions (D-81): every partition's in partition order, each name once, a
-	/// local by the name the program gave it (ProgramName), which scripts know. The first partition, which holds the
-	/// table, declares the names the others define.
-	std::vector<std::string> HostSymbols(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed);
+	/// A name the table of a program emitted in partitions lists (D-81): the name scripts know (ProgramName), and what
+	/// the table's own module declares to take its address: the partition's symbol, a function or data, hidden for a
+	/// local of the program.
+	struct HostEntry
+	{
+		std::string name;
+		std::string symbol;
+		bool function = true;
+		bool hidden = false;
+	};
+
+	/// HostSymbols of a program emitted in partitions: every partition's in partition order, then the runtime entry
+	/// points and `alsoListed` none of them declares, each name once. The table is a module of its own
+	/// (HostTableModule), so no partition changes with what another holds: partition 0's own locals (the shared vtables
+	/// of a host among them) become hidden globals there, as the program's locals are, for the table to reach; another
+	/// partition's own locals (a census counter, a vtable's copy) are its helpers and are not listed.
+	std::vector<HostEntry> HostEntries(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed);
+
+	/// The names of `entries`, in order, as the interface lists them.
+	std::vector<std::string> HostNamesOf(const std::vector<HostEntry>& entries);
+
+	/// The table of a program emitted in partitions (EmitHostTable) in a module of its own in `context`, for the
+	/// target `triple` and data `layout`, declaring each entry. It reads no partition: any thread may build it.
+	std::unique_ptr<llvm::Module> HostTableModule(llvm::LLVMContext& context, const std::vector<HostEntry>& entries,
+		const std::string& triple, const std::string& layout);
+
+	/// What a HostTableModule for `target` (its triple and data layout) is made of, as 32 hex digits: the key its
+	/// object is kept by.
+	std::string HostTableKey(const std::vector<HostEntry>& entries, const std::string& target);
 
 	/// The external functions and globals the host's C and C++ objects define (`extern "c" source`, binding shims):
 	/// listed so a script reaches every binding the host imported, not only those its code calls. Empty, naming the

@@ -63,7 +63,8 @@ namespace Scripting
 
 	std::string ModuleBitcode(const llvm::Module& module);
 
-	/// The bitcode of a partition of a program emitted in partitions (D-81): optimized alone after it, its linkonce
-	/// definitions are weak, since its optimizer would drop one only another partition uses.
+	/// The bitcode of a partition of a program emitted in partitions (D-81), which keeps only the declarations its own
+	/// code uses, so it changes only with that code. Optimized alone after it, its linkonce definitions are weak, since
+	/// its optimizer would drop one only another partition uses.
 	std::string PartitionBitcode(llvm::Module& partition, PartitionOptimization optimization);
 }

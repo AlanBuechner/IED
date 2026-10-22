@@ -106,10 +106,10 @@ namespace Scripting
 		return chunks;
 	}
 
-	std::string HostNamesSalt(const std::vector<std::string>& symbols)
+	std::string HostNamesSalt(const std::vector<std::string>& names)
 	{
 		std::string joined;
-		for (const std::string& symbol : symbols) joined.append(symbol).push_back('\0');
+		for (const std::string& name : names) joined.append(name).push_back('\0');
 		return Hex(llvm::xxh3_64bits(llvm::StringRef(joined)));
 	}
 } // namespace Scripting

@@ -7,6 +7,7 @@
 #include "Interop/InteropPass.h"
 #include "Macro/MacroTable.h"
 #include "Script/HostInterface.h"
+#include "Script/HostTable.h"
 #include "Script/InterfaceBuilder.h"
 #include <chrono>
 #include <filesystem>
@@ -74,6 +75,7 @@ private:
 	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
 	bool CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode, const std::string& base,
 		const Scripting::ObjectSettings& settings);
+	Scripting::KeyedModule HostTable(const llvm::Module& program) const;
 	bool FinishInterface(llvm::Module& module);
 	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);
@@ -89,6 +91,8 @@ private:
 	Inputs m_In;
 	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
 	Scripting::Extracts m_InlineBodies;                    // the inline bodies the split extracts for it
+	std::vector<Scripting::HostEntry> m_HostEntries;       // a program in partitions: what its table lists
+	std::vector<std::string> m_AlwaysListed;               // and the names every table lists beside the runtime's
 	std::optional<Scripting::HostInterface> m_Interface;   // what goes beside the program
 	std::string m_InterfaceBytes;                          // its bytes, made once with its build id
 };

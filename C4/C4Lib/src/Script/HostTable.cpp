@@ -7,7 +7,10 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Object/ObjectFile.h>
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/xxhash.h>
+#include <cstdio>
 #include <tuple>
 #include <unordered_set>
 
@@ -56,18 +59,34 @@ namespace Scripting
 			return !g.isDeclaration() || !g.use_empty() || always.count(g.getName().str());
 		}
 
-		// `value` of another partition, declared in `module` when it does not have the name.
-		void DeclareIn(llvm::Module& module, const llvm::GlobalValue& value)
+		// An entry declared in the table's module: the table needs only its address, so a function is `void()` and data
+		// a byte.
+		void Declare(llvm::Module& module, const HostEntry& entry)
 		{
-			if (value.getParent() == &module || module.getNamedValue(value.getName())) return;
 			llvm::GlobalValue* declared = nullptr;
-			if (llvm::isa<llvm::Function>(value))
+			if (entry.function)
 				declared = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(module.getContext()), false),
-					llvm::GlobalValue::ExternalLinkage, value.getName(), module);
+					llvm::GlobalValue::ExternalLinkage, entry.symbol, module);
 			else
 				declared = new llvm::GlobalVariable(module, llvm::Type::getInt8Ty(module.getContext()), false, llvm::GlobalValue::ExternalLinkage,
-					nullptr, value.getName());
-			declared->setVisibility(value.getVisibility());
+					nullptr, entry.symbol);
+			if (entry.hidden) declared->setVisibility(llvm::GlobalValue::HiddenVisibility);
+		}
+
+		// Partition 0's own local, which the table listed when it was in partition 0 (a host's shared vtables are such):
+		// a hidden global under the suffix the program's locals take, so the table's module reaches it as it does theirs.
+		void ShareLocal(llvm::GlobalValue& value)
+		{
+			value.setName(value.getName() + kLocalSuffix);
+			value.setLinkage(llvm::GlobalValue::ExternalLinkage);
+			value.setVisibility(llvm::GlobalValue::HiddenVisibility);
+		}
+
+		void AppendText(std::string& bytes, const std::string& text)
+		{
+			const uint64_t size = text.size();
+			bytes.append(reinterpret_cast<const char*>(&size), sizeof(size));
+			bytes += text;
 		}
 
 		// A declaration for a name the table lists although the module never declared it; the table needs only the
@@ -113,40 +132,88 @@ namespace Scripting
 		}
 	}
 
+	// The table is in the module, so its locals are listed too.
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed)
 	{
-		return HostSymbols(std::vector<llvm::Module*>{ &module }, alsoListed);
-	}
-
-	// The first partition declares what the others define, so its table can take each one's address: a function as
-	// `void()`, anything else as a byte; a local of the program hidden, as its definition is. Another partition's own
-	// locals (a census counter, a vtable's copy) are its helpers, which no other partition can name.
-	std::vector<std::string> HostSymbols(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
-	{
-		llvm::Module& first = *partitions.front();
 		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
 		for (const char* name : ScriptRuntimeEntryPoints()) always.insert(name);
-		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(first, name); // in a fixed order: the table's
-		for (const std::string& name : alsoListed) DeclareIfMissing(first, name);
+		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(module, name); // in a fixed order: the table's
+		for (const std::string& name : alsoListed) DeclareIfMissing(module, name);
 		std::vector<std::string> names;
 		llvm::DenseSet<llvm::StringRef> seen; // the values' own names, which outlive the walk
+		for (const llvm::Function& f : module)
+			if (ListedFunction(f, always) && seen.insert(ProgramName(f)).second) names.push_back(ProgramName(f).str());
+		for (const llvm::GlobalVariable& g : module.globals())
+			if (ListedGlobal(g, always) && seen.insert(ProgramName(g)).second) names.push_back(ProgramName(g).str());
+		return names;
+	}
+
+	std::vector<HostEntry> HostEntries(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
+	{
+		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
+		for (const char* name : ScriptRuntimeEntryPoints()) always.insert(name);
+		std::vector<HostEntry> entries;
+		llvm::DenseSet<llvm::StringRef> seen; // the values' own names and the listed ones, which outlive the walk
+		auto add = [&](llvm::GlobalValue& value, bool first) {
+			if (value.hasLocalLinkage())
+			{
+				if (!first) return; // another partition's helper
+				ShareLocal(value);
+			}
+			if (!seen.insert(ProgramName(value)).second) return;
+			entries.push_back({ ProgramName(value).str(), value.getName().str(), llvm::isa<llvm::Function>(value), value.hasHiddenVisibility() });
+		};
 		for (llvm::Module* partition : partitions)
 		{
-			const bool isFirst = partition == &first;
-			for (const llvm::Function& f : *partition)
-				if (ListedFunction(f, always) && (isFirst || !f.hasLocalLinkage()) && seen.insert(ProgramName(f)).second)
-				{
-					names.push_back(ProgramName(f).str());
-					DeclareIn(first, f);
-				}
-			for (const llvm::GlobalVariable& g : partition->globals())
-				if (ListedGlobal(g, always) && (isFirst || !g.hasLocalLinkage()) && seen.insert(ProgramName(g)).second)
-				{
-					names.push_back(ProgramName(g).str());
-					DeclareIn(first, g);
-				}
+			const bool first = partition == partitions.front();
+			for (llvm::Function& f : *partition)
+				if (ListedFunction(f, always)) add(f, first);
+			for (llvm::GlobalVariable& g : partition->globals())
+				if (ListedGlobal(g, always)) add(g, first);
 		}
+		auto addMissing = [&](llvm::StringRef name) {
+			if (seen.insert(name).second) entries.push_back({ name.str(), name.str(), true, false });
+		};
+		for (const char* name : ScriptRuntimeEntryPoints()) addMissing(name);
+		for (const std::string& name : alsoListed) addMissing(name);
+		return entries;
+	}
+
+	std::vector<std::string> HostNamesOf(const std::vector<HostEntry>& entries)
+	{
+		std::vector<std::string> names;
+		names.reserve(entries.size());
+		for (const HostEntry& entry : entries) names.push_back(entry.name);
 		return names;
+	}
+
+	std::unique_ptr<llvm::Module> HostTableModule(llvm::LLVMContext& context, const std::vector<HostEntry>& entries,
+		const std::string& triple, const std::string& layout)
+	{
+		auto module = std::make_unique<llvm::Module>("c4_script_table", context);
+		module->setTargetTriple(llvm::Triple(triple));
+		module->setDataLayout(layout);
+		for (const HostEntry& entry : entries) Declare(*module, entry);
+		std::string error;
+		EmitHostTable(*module, HostNamesOf(entries), &error); // every entry is declared
+		return module;
+	}
+
+	std::string HostTableKey(const std::vector<HostEntry>& entries, const std::string& target)
+	{
+		std::string bytes;
+		AppendText(bytes, target);
+		for (const HostEntry& entry : entries)
+		{
+			AppendText(bytes, entry.name);
+			AppendText(bytes, entry.symbol);
+			bytes.push_back(entry.function ? 'f' : 'd');
+			bytes.push_back(entry.hidden ? 'h' : 'v');
+		}
+		const llvm::XXH128_hash_t hash = llvm::xxh3_128bits(llvm::arrayRefFromStringRef(bytes));
+		char key[33];
+		snprintf(key, sizeof(key), "%016llx%016llx", static_cast<unsigned long long>(hash.high64), static_cast<unsigned long long>(hash.low64));
+		return key;
 	}
 
 	std::optional<std::vector<std::string>> ForeignDefinitions(const std::vector<std::string>& objectPaths, std::string* error)

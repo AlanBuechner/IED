@@ -4,6 +4,7 @@
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/Toolchain.h"
 #include "Script/HostTable.h"
+#include "Script/InlineBodies.h"
 #include <algorithm>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -36,12 +37,13 @@ namespace Testing
 			return text;
 		}
 
-		// Lowers the program, with `library` as its shapes.ch, into `count` partitions and hands the driver to `inspect`.
+		// Lowers the program, with `library` as its shapes.ch and `main` as its main.cf, into `count` partitions and hands
+		// the driver to `inspect`.
 		template <typename Inspect>
-		bool LowerSplitDriver(unsigned count, const std::string& library, Inspect inspect)
+		bool LowerSplitDriver(unsigned count, const std::string& library, Inspect inspect, const std::string& main = kMain)
 		{
 			CompilerInstance compiler;
-			compiler.RegisterInMemory("main.cf", kMain);
+			compiler.RegisterInMemory("main.cf", main.c_str());
 			compiler.RegisterInMemory("shapes.ch", library.c_str());
 			compiler.RegisterIncludedLibraryFiles(Toolchain::Bedrock());
 			compiler.CompileAll();
@@ -217,6 +219,34 @@ namespace Testing
 		TEST_ASSERT(keys[3] != keys[0]);
 	}
 
+	// A partition's inline bodies depend on its own code alone (with the names every table lists, the runtime's and the
+	// prelude's): every name a body may use is one its own partition lists. So the inline body cache keys them by the
+	// partition, and a function added in another file reuses every other partition's.
+	void SplitEmissionTest::APartitionsInlineBodiesDependOnItsOwnCode()
+	{
+		using Bodies = std::map<std::string, std::vector<std::string>>; // each partition's inline bodies, by its bitcode
+		auto collect = [](Bodies& bodies) {
+			return [&bodies](CodeGenDriver& driver) {
+				std::vector<llvm::Module*> modules;
+				for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
+				const std::vector<std::string> symbols = HostNamesOf(HostEntries(modules, {}));
+				const HostNames names(symbols);
+				for (llvm::Module* module : modules) bodies[ModuleBitcode(*module)] = InlineBodies(*module, names, 4);
+			};
+		};
+		Bodies before, after;
+		TEST_ASSERT(LowerSplitDriver(8, kLibrary, collect(before)));
+		TEST_ASSERT(LowerSplitDriver(8, kLibrary, collect(after), std::string(kMain) + "int32 Added() { return g_other + 1; }" + char(10)));
+		int reused = 0;
+		for (const auto& [bitcode, bodies] : after)
+			if (const auto same = before.find(bitcode); same != before.end())
+			{
+				TEST_ASSERT(same->second == bodies);
+				reused += bodies.empty() ? 0 : 1;
+			}
+		TEST_ASSERT(reused > 0);
+	}
+
 	// An unscoped enum's members are constants the model lists with the globals: no partition gives them storage, so
 	// none names one after the order it made it in.
 	void SplitEmissionTest::ConstantsWithoutASymbolHaveNoStorage()
@@ -237,17 +267,30 @@ namespace Testing
 		}));
 	}
 
-	// A script knows a host's locals by the names the program gave them: the table lists those, and finds each under
-	// its partition name.
+	// A script knows a host's locals by the names the program gave them: the table lists those, and its own module
+	// declares each under its partition name. Partition 0's own locals are listed as they were when the table was in
+	// it, now hidden globals it defines; another partition's are its helpers. No partition gains a declaration.
 	void SplitEmissionTest::AHostListsItsLocalsByTheirProgramNames()
 	{
 		TEST_ASSERT(LowerSplit(4, [](const std::vector<llvm::Module*>& modules) {
-			const std::vector<std::string> symbols = HostSymbols(modules, {});
-			TEST_ASSERT(std::find(symbols.begin(), symbols.end(), "static.Count_0.calls") != symbols.end());
-			for (const std::string& symbol : symbols) TEST_ASSERT(!llvm::StringRef(symbol).ends_with(kLocalSuffix));
-			std::string error;
-			TEST_ASSERT(EmitHostTable(*modules[0], symbols, &error));
-			TEST_ASSERT_EQ(error, std::string());
+			const size_t functions = modules[0]->size(), globals = modules[0]->global_size();
+			const std::vector<HostEntry> entries = HostEntries(modules, {});
+			TEST_ASSERT_EQ(modules[0]->size(), functions);
+			TEST_ASSERT_EQ(modules[0]->global_size(), globals);
+			const std::vector<std::string> names = HostNamesOf(entries);
+			TEST_ASSERT(std::find(names.begin(), names.end(), "static.Count_0.calls") != names.end());
+			TEST_ASSERT(std::find(names.begin(), names.end(), "__c4_reflect_init") != names.end()); // partition 0's own local
+			const llvm::Function* init = modules[0]->getFunction(std::string("__c4_reflect_init") + kLocalSuffix);
+			TEST_ASSERT(init && !init->isDeclaration() && init->hasHiddenVisibility() && !init->hasLocalLinkage());
+			TEST_ASSERT(std::find(names.begin(), names.end(), "c4_script_module_create") != names.end());
+			for (const std::string& name : names) TEST_ASSERT(!llvm::StringRef(name).ends_with(kLocalSuffix));
+			llvm::LLVMContext context;
+			const std::unique_ptr<llvm::Module> table = HostTableModule(context, entries, modules[0]->getTargetTriple().str(),
+				modules[0]->getDataLayoutStr());
+			const llvm::GlobalVariable* defined = table->getNamedGlobal("__c4_script_table");
+			TEST_ASSERT(defined && !defined->isDeclaration());
+			const llvm::GlobalValue* calls = table->getNamedValue("static.Count_0.calls.local");
+			TEST_ASSERT(calls && calls->isDeclaration() && calls->hasHiddenVisibility());
 		}));
 	}
 } // namespace Testing

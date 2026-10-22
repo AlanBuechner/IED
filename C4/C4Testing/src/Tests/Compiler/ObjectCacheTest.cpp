@@ -337,6 +337,23 @@ namespace Testing
 		fs::remove_all(folder.parent_path());
 	}
 
+	// A partition emitted on its own (D-81) keeps only the declarations its code uses: one only another module names
+	// would change it with that module.
+	void ObjectCacheTest::APartitionKeepsOnlyTheDeclarationsItUses()
+	{
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> partition = Parse("target triple = \"x86_64-pc-windows-msvc\"\n"
+			"declare void @used()\ndeclare void @unused()\n@unusedData = external global i32\n"
+			"define void @f() {\n call void @used()\n ret void\n}\n", context);
+		TEST_ASSERT(partition != nullptr);
+		llvm::LLVMContext other;
+		std::unique_ptr<llvm::Module> back = ReadBack(PartitionBitcode(*partition, PartitionOptimization::After), other);
+		TEST_ASSERT(back != nullptr);
+		TEST_ASSERT(back->getFunction("used") != nullptr && back->getFunction("f") != nullptr);
+		TEST_ASSERT(back->getFunction("unused") == nullptr);
+		TEST_ASSERT(back->getNamedGlobal("unusedData") == nullptr);
+	}
+
 	void ObjectCacheTest::EveryPartitionReadsBackAndVerifies()
 	{
 		const std::vector<std::string> partitions = Split(ProgramText(""));

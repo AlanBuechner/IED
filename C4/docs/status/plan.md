@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 8 done).
+  progress (steps 1 to 9 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1665,10 +1665,26 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   and inline bodies fell from 0.19 s to about 0.05 s, the rest is noise); a no-op's peak memory 1.97 -> 1.78 GB.
   Adding a function took 2.97 s: it changed the host table, then in partition 0 (65k instructions, 1.2 s at `-O3`),
   and every partition's inline-body key.
-- **Next:** HIR lowering (about 0.55 s of an edit, the largest serial part) needs a scope chain per lowering context
-  instead of the symbol table's one cursor, a locked type store and instantiation, and errors gathered per function
-  to run on several threads. What is left inside it is spread thin: the arenas' blocks (each function's own), vector
-  growth, the remaining casts.
+- **Done notes (step 9):** a script host emitted in partitions has its table in an object of its own
+  (`HostTableModule`), kept by a key of what it lists (`HostTableKey`); the walk (`HostEntries`) adds no declaration
+  to a partition, makes partition 0's own locals (a host's shared vtables) hidden `.local` globals there for the table
+  to reach, and lists no other partition's helpers (a first cut left partition 0's out, and ScriptTest `Reload`
+  crashed: a script's object of a host class lost its vtable when the script unloaded). A partition's bitcode keeps only the declarations its code uses (partition 0
+  declared every reflected function for the image's bookkeeping). A partition's inline bodies are keyed by its own
+  code and the names every table lists, not the whole table: every name a body may use is one its partition lists
+  (`Semantic.SplitEmission.APartitionsInlineBodiesDependOnItsOwnCode`). IED server: adding a function 2.97 -> 2.06 s
+  and removing it 3.10 -> 2.00 s (partition 0, 65k instructions, is no longer reassembled; inline bodies 0.28 ->
+  0.03 s); other edits unchanged within noise.
+- **Next:** HIR lowering (about 0.55 s of an edit, the largest serial part) on several threads. What it takes, found
+  reading it: a scope position per lowering context (`SymbolTable::PushScope` moves the table's one `m_Current` and
+  hangs each block's layer under the shared tree for good, since the trees point at their locals); the model's
+  memos made safe to fill from several threads (`LifecycleMethodsOf`, the synthesized lifecycle records, the
+  instantiation maps, the type store's interning); errors gathered per function and merged in order; and AST nodes
+  that answer `Children()` without rebuilding a cached vector (cast, safe cast, type check, for, if, the simple
+  statements, switch, try and while still do, which two threads walking one body would race on). Windows has no
+  thread sanitizer, so each piece needs a test that runs it on several threads. What is left inside one thread is
+  spread thin: the arenas' blocks, a default-constructed `unordered_map` per block layer (two allocations each),
+  method lookup scanning every method of a class (`SymbolQueries::CollectMethods`), the remaining casts.
 
 ### Testing framework
 

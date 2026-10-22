@@ -56,5 +56,7 @@ namespace Testing
 		void DataNoFileNamesHasTheFirstPartitionAlone();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void ExtractsSeeTheProgramAsItWas();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void APartitionKeepsOnlyTheDeclarationsItUses();
 	};
 } // namespace Testing

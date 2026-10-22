@@ -10,9 +10,10 @@ namespace llvm { class Module; }
 namespace Scripting
 {
 	/// A split program's inline bodies kept between builds in a folder of their own (docs/compiler/05): a partition's
-	/// chunks (InlineBodies) are named after the hash of its bitcode and of `salt` (the compiler, the target and the host
-	/// table's names, HostNamesSalt), so a partition whose code and table are unchanged reads them back instead of
-	/// extracting them. The folder keeps only the latest build's.
+	/// chunks (InlineBodies) are named after the hash of its bitcode and of `salt` (the compiler, the target and the
+	/// names every table lists, HostNamesSalt), so a partition whose code is unchanged reads them back instead of
+	/// extracting them. Its bodies name only what it lists itself (HostEntries) and those. The folder keeps only the
+	/// latest build's.
 	class InlineBodyCache
 	{
 	public:
@@ -29,6 +30,7 @@ namespace Scripting
 		std::string m_Salt;
 	};
 
-	/// What a host table's names add to an InlineBodyCache's salt: which functions a body may name.
-	std::string HostNamesSalt(const std::vector<std::string>& symbols);
+	/// What the names every table lists beside the runtime's (HostEntries' `alsoListed`) add to an InlineBodyCache's
+	/// salt: a body may name them whether or not its partition does.
+	std::string HostNamesSalt(const std::vector<std::string>& names);
 } // namespace Scripting
