@@ -75,6 +75,7 @@ def prepare_home(variant, name=None):
 	for part in HOME_PARTS:
 		common.mirror(os.path.join(common.REPO, part), os.path.join(target, part), ignore=lambda rel: os.path.basename(rel) in ("target", "__pycache__", "node_modules"))
 	common.overlay(os.path.join(variant, "home"), target)
+	common.merge_overlay(os.path.join(variant, "home-merge"), target)
 	return target
 
 

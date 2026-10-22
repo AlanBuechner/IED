@@ -100,6 +100,33 @@ def mirror(source, target, ignore=None):
 			shutil.rmtree(root, ignore_errors=True)
 
 
+def deep_merge(base, extra):
+	"""`extra`'s keys put into `base`, objects merged key by key, anything else replaced."""
+	for key, value in extra.items():
+		if isinstance(value, dict) and isinstance(base.get(key), dict):
+			deep_merge(base[key], value)
+		else:
+			base[key] = value
+	return base
+
+
+def merge_overlay(source, target):
+	"""Each JSON file of `source` merged into the file of the same path under `target` (deep_merge): a variant adds
+	to a file the tree keeps changing, such as a schema, without replacing it with an old copy."""
+	if not os.path.isdir(source):
+		return 0
+	count = 0
+	for root, _, files in os.walk(source):
+		for name in files:
+			dst = os.path.join(target, os.path.relpath(os.path.join(root, name), source))
+			merged = deep_merge(read_json(dst, {}), read_json(os.path.join(root, name), {}))
+			with open(dst, "w", encoding="utf-8", newline="\n") as f:
+				json.dump(merged, f, indent="\t")
+				f.write("\n")
+			count += 1
+	return count
+
+
 def overlay(source, target):
 	"""Copies every file of `source` over `target` (a variant's changed prompts, skills, docs)."""
 	if not os.path.isdir(source):

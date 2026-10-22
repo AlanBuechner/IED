@@ -1,0 +1,37 @@
+{
+	"$defs": {
+		"contributes": {
+			"properties": {
+				"aiDocs": {
+					"type": "array",
+					"description": "Reference docs the AI searches and reads with docs_search and docs_read: Markdown files under a folder inside the plugin.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"pattern": "^[a-z][a-z0-9-]*$",
+								"description": "The first part of the docs' paths for the AI (c4/library/bedrock.md)."
+							},
+							"title": {
+								"type": "string",
+								"minLength": 1
+							},
+							"folder": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Relative to the plugin's folder, inside it."
+							}
+						},
+						"required": [
+							"id",
+							"title",
+							"folder"
+						],
+						"additionalProperties": false
+					}
+				}
+			}
+		}
+	}
+}
