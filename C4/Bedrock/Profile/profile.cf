@@ -159,11 +159,14 @@ namespace Profile
 
 	// --- Zones ----------------------------------------------------------------------------------------------------
 
+	// The count is read after the zone's begin is recorded and before its end is, so what the profiler allocates to
+	// register a site is not the zone's.
 	void Zone::Init(Site& site) {
 		Session* running = Running();
 		if (!running) return;
 		session = running->number;
 		ThreadEvent(running, Event::ZoneBegin, SiteId(running, site));
+		allocated = GC::ThreadAllocated();
 	}
 
 	void Zone::Init(Core::StringView name) {
@@ -171,15 +174,22 @@ namespace Profile
 		if (!running) return;
 		session = running->number;
 		ThreadEvent(running, Event::ZoneBegin, NamedSiteId(running, name));
+		allocated = GC::ThreadAllocated();
 	}
 
 	void Zone::Delete() {
 		if (session == 0) return;
 		Session* running = Running();
 		if (!running || running->number != session) return;
+		const GC::AllocCounts counts = GC::ThreadAllocated();
 		EventBuffer* buffer = ThreadBuffer(running);
 		const int64 now = Now();
 		Threading::LockGuard held(buffer->lock);
+		if (counts.objects != allocated.objects || counts.bytes != allocated.bytes) {
+			PutEvent(buffer->bytes, Event::ZoneAllocs);
+			PutVarint(buffer->bytes, counts.objects - allocated.objects);
+			PutVarint(buffer->bytes, counts.bytes - allocated.bytes);
+		}
 		buffer->Timed(Event::ZoneEnd, now);
 	}
 
@@ -197,14 +207,27 @@ namespace Profile
 
 	// --- Frames, plots, messages, names ---------------------------------------------------------------------------
 
+	// A frame mark and the process's allocations so far at the same time.
+	static void MarkFrame(Session* session, uint64 set) {
+		const GC::AllocCounts allocated = GC::Allocated();
+		EventBuffer* buffer = ThreadBuffer(session);
+		const int64 now = Now();
+		{
+			Threading::LockGuard held(buffer->lock);
+			buffer->Timed(Event::FrameMark, now);
+			PutVarint(buffer->bytes, set);
+		}
+		QueueAllocCount(session, allocated, now);
+	}
+
 	void Frame() {
 		Session* running = Running();
-		if (running) ThreadEvent(running, Event::FrameMark, 0);
+		if (running) MarkFrame(running, 0);
 	}
 
 	void Frame(Core::StringView name) {
 		Session* running = Running();
-		if (running) ThreadEvent(running, Event::FrameMark, Interned(running, name));
+		if (running) MarkFrame(running, Interned(running, name));
 	}
 
 	void FrameBegin(Core::StringView name) {

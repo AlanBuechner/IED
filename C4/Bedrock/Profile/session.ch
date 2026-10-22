@@ -12,6 +12,7 @@ include "Threading/thread.ch"
 include "Net/tcp.ch"
 include "FS/file.ch"
 include "Container/hashmap.ch"
+include "Memory/gc.ch"
 include "Text/string.ch"
 
 namespace Profile
@@ -62,6 +63,7 @@ namespace Profile
 		public int64 lastCalibration;
 		public int64 lastHeapPlot;
 		public uint64 heapPlot;
+		public uint64 processPlot;           // the process's private bytes: containers' buffers too, which the GC heap is not
 
 		// The id of `text` (0 for empty), its StringDef queued the first time. The lock is held.
 		public uint64 Intern(Core::StringView text);
@@ -83,6 +85,9 @@ namespace Profile
 	bool StartSession(Core::StringView target, Core::StringView app, Core::String& problem);
 	// Sends what is buffered and Bye, and closes the session; events after it are dropped.
 	void StopSession();
+	// The process's allocations so far (`counts`, read before any of the session's locks: the collector takes its own)
+	// as an AllocCount at `now`.
+	void QueueAllocCount(Session* session, GC::AllocCounts counts, int64 now);
 	// Every JobSystem's jobs as tasks (Threading::SetJobObserver), named as they were submitted: on while a session
 	// runs.
 	void ObserveJobs(bool on);

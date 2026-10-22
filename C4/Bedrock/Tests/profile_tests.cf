@@ -52,6 +52,8 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x11) return "vvvvvv";
 	if (type == 0x12) return "vvv";
 	if (type == 0x23 || type == 0x24) return "v";
+	if (type == 0x27) return "vv";
+	if (type == 0x6A) return "tvv";
 	if (type == 0x13 || type == 0x20 || type == 0x31 || type == 0x32 || type == 0x33 || type == 0x40 || type == 0x41 || type == 0x42) return "tv";
 	if (type == 0x22) return "t";
 	if (type == 0x30) return "tvvv";
@@ -172,6 +174,14 @@ static Core::String s_systemName;
 static Profile::Mutex s_queue = Profile::Mutex("Queue", "game.cf", 30);
 static int32 s_waiting = 0;
 
+// 64 bytes the allocation test makes a hundred of, kept alive until it has read the trace.
+class Blob
+{
+	public int64[8] payload;
+}
+
+static Blob*[101] s_blobs;
+
 static void TakeQueue() {
 	atomic_store(&s_waiting, 1, MemoryOrder::Release);
 	Profile::MutexGuard held(s_queue);
@@ -242,7 +252,10 @@ class ProfileTests {
 		for (const TracedEvent& e : events)
 			if (e.type == 0x51 && e.fields[0] == entities && e.number == 3.5) plotted = true;
 		assert_true(entities != 0 && plotted, "the plot and its value");
-		assert_true(CountOf(events, 0x50) >= 2, "the GC heap is plotted too");
+		bool processPlotted = false;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x50 && *strings.Find(e.fields[1]) == "Process memory" && e.fields[2] == 1) processPlotted = true;
+		assert_true(CountOf(events, 0x50) >= 3 && processPlotted, "the GC heap and the process's memory are plotted too");
 		const TracedEvent* message = First(events, 0x52);
 		assert_true(message && message->fields[0] == 3 && *strings.Find(message->fields[1]) == "loaded", "the message, its severity and text");
 		assert_true(CountOf(events, 0x30) == 1 && CountOf(events, 0x32) == 1 && CountOf(events, 0x33) == 1 && CountOf(events, 0x31) == 1, "the task's life");
@@ -330,6 +343,51 @@ class ProfileTests {
 			if (e.type == 0x73 && e.thread != wait->thread && releasedFirst < 0) releasedFirst = e.ticks;
 		}
 		assert_true(wait->ticks < obtained && releasedFirst <= obtained, "the waiter got the lock only once the main thread let it go");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("zones_and_frames_count_what_is_allocated")]
+	public static void TestAllocations() {
+		Core::String path = TracePath("bedrock-profile-allocations.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		Profile::Frame();
+		{
+			Profile::Zone outer(Core::StringView("Outer"));
+			{
+				Profile::Zone inner(Core::StringView("Inner"));
+				for (int32 i = 0; i < 100; ++i) s_blobs[i] = new Blob();
+			}
+			s_blobs[100] = new Blob();
+		}
+		{
+			Profile::Zone quiet(Core::StringView("Quiet"));
+		}
+		Profile::Frame();
+		Profile::Stop();
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		Core::Array<const TracedEvent*> counted;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x27) counted.Push(&e);
+		assert_eq(2, counted.Count(), "Inner and Outer said what they allocated; Quiet allocated nothing and said nothing");
+		assert_true(counted[0]->fields[0] >= 100 && counted[0]->fields[1] >= 100 * 64, "Inner's hundred blobs");
+		assert_true(counted[1]->fields[0] >= counted[0]->fields[0] + 1, "Outer's include Inner's and its own");
+		int64 frameCounts = 0;
+		uint64 first = 0;
+		uint64 last = 0;
+		for (const TracedEvent& e : events) {
+			if (e.type != 0x6A) continue;
+			if (frameCounts == 0) first = e.fields[0];
+			last = e.fields[0];
+			frameCounts += 1;
+		}
+		assert_true(frameCounts >= 2, "each frame came with the process's count");
+		assert_true(last >= first + 101, "the count grew by what the zones allocated");
+		for (int32 i = 0; i <= 100; ++i) s_blobs[i] = null;
 		FS::RemoveFile(path.CStr());
 	}
 

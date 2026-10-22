@@ -122,12 +122,39 @@ namespace Profile
 		PutVarint(session->global.bytes, (uint64)Platform::UnixTimeNs());
 	}
 
+	void QueueAllocCount(Session* session, GC::AllocCounts counts, int64 now) {
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(Event::AllocCount, now);
+		PutVarint(session->global.bytes, counts.objects);
+		PutVarint(session->global.bytes, counts.bytes);
+	}
+
 	static void QueueHeapPlot(Session* session, int64 now) {
 		const GC::Stats stats = GC::GetStats();
-		Threading::LockGuard held(session->global.lock);
-		session->global.Timed(Event::PlotValue, now);
-		PutVarint(session->global.bytes, session->heapPlot);
-		PutDouble(session->global.bytes, (double)(stats.heapBytes - stats.freeBytes));
+		const GC::AllocCounts allocated = GC::Allocated();
+		const Platform::ProcessMemory process = Platform::GetProcessMemory();
+		{
+			Threading::LockGuard held(session->global.lock);
+			session->global.Timed(Event::PlotValue, now);
+			PutVarint(session->global.bytes, session->heapPlot);
+			PutDouble(session->global.bytes, (double)(stats.heapBytes - stats.freeBytes));
+			session->global.Timed(Event::PlotValue, now);
+			PutVarint(session->global.bytes, session->processPlot);
+			PutDouble(session->global.bytes, (double)process.privateBytes);
+		}
+		QueueAllocCount(session, allocated, now);
+	}
+
+	// A memory plot the session keeps itself (kind 1, bytes).
+	static void DefineMemoryPlot(Session* session, uint64 id, const char* name) {
+		Threading::LockGuard held(session->lock);
+		const uint64 text = session->Intern(Core::StringView(name));
+		Threading::LockGuard global(session->global.lock);
+		PutEvent(session->global.bytes, Event::PlotDef);
+		PutVarint(session->global.bytes, id);
+		PutVarint(session->global.bytes, text);
+		PutVarint(session->global.bytes, 1);
+		PutVarint(session->global.bytes, 0);
 	}
 
 	static void QueuePeriodic(Session* session) {
@@ -313,18 +340,11 @@ namespace Profile
 			problem = Core::String("the profiler closed the connection");
 			return false;
 		}
-		session->nextPlot = 1;
+		session->nextPlot = 2;
 		session->heapPlot = 1;
-		{
-			Threading::LockGuard held(session->lock);
-			const uint64 name = session->Intern(Core::StringView("GC heap"));
-			Threading::LockGuard global(session->global.lock);
-			PutEvent(session->global.bytes, Event::PlotDef);
-			PutVarint(session->global.bytes, session->heapPlot);
-			PutVarint(session->global.bytes, name);
-			PutVarint(session->global.bytes, 1);
-			PutVarint(session->global.bytes, 0);
-		}
+		session->processPlot = 2;
+		DefineMemoryPlot(session, session->heapPlot, "GC heap");
+		DefineMemoryPlot(session, session->processPlot, "Process memory");
 		QueueCalibration(session, session->startTicks);
 		g_session = session;
 		GC::RegisterCollectionResult((void*)&g_gcKey, OnCollection, null);

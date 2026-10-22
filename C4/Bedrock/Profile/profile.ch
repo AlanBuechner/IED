@@ -30,7 +30,8 @@ namespace Profile
 		public int64 session;
 	}
 
-	// A zone: from its creation to the end of its scope, on the calling thread.
+	// A zone: from its creation to the end of its scope, on the calling thread, with what the thread allocated in it
+	// (the collector's own count, its nested zones' included).
 	struct Zone
 	{
 		[operator("create")] public void Init(Site& site);
@@ -43,9 +44,11 @@ namespace Profile
 		public void Value(uint64 value);
 
 		private int64 session;
+		private GC::AllocCounts allocated;   // the thread's count when the zone began
 	}
 
-	// The end of a frame of the default frame set (call it once per presented frame), or of the set `name`.
+	// The end of a frame of the default frame set (call it once per presented frame), or of the set `name`; the
+	// process's allocations so far go with it, so a frame's are the difference between its marks.
 	void Frame();
 	void Frame(Core::StringView name);
 	// A discontinuous frame of the set `name` (a level load, a fixed-step tick).

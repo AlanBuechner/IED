@@ -27,6 +27,7 @@ namespace Profiler
 	const int64 kFloorRises = 7;                // of 9 steps
 	const double kFloorGrowth = 1.1;
 	const int64 kLeastGrowthBytes = 1048576;
+	const int64 kLargeGrowthBytes = 4194304;    // growth this large counts whatever the series started at
 	const double kHeapAfterGrowth = 1.2;
 	const int64 kLeastLeaked = 100;
 	const double kGcPauseShare = 0.02;
@@ -353,7 +354,34 @@ namespace Profiler
 	static bool SeriesGrows(const Serialization::DomNode& s) {
 		const double start = s.Member("floorStart").AsFloat();
 		const double peak = s.Member("floorPeak").AsFloat();
-		return s.Member("floorRises").AsInt() >= kFloorRises && peak >= start * kFloorGrowth && peak - start >= (double)kLeastGrowthBytes;
+		const double growth = peak - start;
+		return s.Member("floorRises").AsInt() >= kFloorRises && growth >= (double)kLeastGrowthBytes && (peak >= start * kFloorGrowth || growth >= (double)kLargeGrowthBytes);
+	}
+
+	// The memory series that did not grow while another did: the growth is not in them. A collected heap's floor is
+	// what its collections left, so a small one beside a growing process means memory outside the collected objects.
+	static void FlatSeriesEvidence(Finding* finding, const Serialization::DomNode& series, const Serialization::DomNode& after) {
+		if (after.IsValid() && !after.IsNull() && after.Member("last").AsInt() - after.Member("first").AsInt() < kLeastGrowthBytes) {
+			Core::StringBuilder line;
+			line.Append("the collected heap left after each collection stays small (");
+			line.Append(Bytes(after.Member("first").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Bytes(after.Member("last").AsInt()).View());
+			line.Append("): the growth is outside the collector's objects - containers' buffers or native memory");
+			finding->evidence.Push(line.ToString());
+		}
+		for (int64 i = 0; i < series.Count(); ++i) {
+			Serialization::DomNode s = series.At(i);
+			if (SeriesGrows(s) || s.Member("floorPeak").AsFloat() - s.Member("floorStart").AsFloat() >= (double)kLeastGrowthBytes) continue;
+			Core::StringBuilder line;
+			line.Append(s.Member("name").AsView());
+			line.Append(" stays flat (its floor ");
+			line.Append(Bytes((int64)s.Member("floorStart").AsFloat()).View());
+			line.Append(" -> ");
+			line.Append(Bytes((int64)s.Member("floorPeak").AsFloat()).View());
+			line.Append("): the growth is not there");
+			finding->evidence.Push(line.ToString());
+		}
 	}
 
 	static bool HeapAfterGrows(const Serialization::DomNode& after) {
@@ -443,6 +471,7 @@ namespace Profiler
 			finding->evidence.Push(line.ToString());
 		}
 		Serialization::DomNode after = trend.Member("gc").Member("heapAfter");
+		if (finding) FlatSeriesEvidence(finding, series, after);
 		if (HeapAfterGrows(after)) {
 			Core::StringBuilder line;
 			line.Append("the heap left after each collection grew from ");

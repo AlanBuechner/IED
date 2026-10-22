@@ -1210,8 +1210,8 @@ Profile::Frame();
 
 | API | What it records |
 |---|---|
-| `Site`, `Zone(Site&)`, `Zone(StringView)`, `Zone::Text`, `Zone::Value` | a zone of the calling thread from its creation to its scope's end; a static `Site` is registered once per session, a run-time name looked up each time; `PROFILE_ZONE(name)` declares both |
-| `Frame()`, `Frame(set)`, `FrameBegin(set)`, `FrameEnd(set)` | the end of a frame of the default set or a named one; discontinuous frames |
+| `Site`, `Zone(Site&)`, `Zone(StringView)`, `Zone::Text`, `Zone::Value` | a zone of the calling thread from its creation to its scope's end, with what the thread allocated in it (`GC::ThreadAllocated` read as it begins and ends: objects and bytes, its nested zones' included, sent only when it allocated); a static `Site` is registered once per session, a run-time name looked up each time; `PROFILE_ZONE(name)` declares both |
+| `Frame()`, `Frame(set)`, `FrameBegin(set)`, `FrameEnd(set)` | the end of a frame of the default set or a named one, with the process's allocations so far (`GC::Allocated`) at the same time, so a frame's are the difference between its marks; discontinuous frames |
 | `Plot(name, value)`, `Message(text, severity)` | a value over time; a log line (`Severity::Trace` .. `Fatal`) |
 | `SetThreadName(name)` | the calling thread's name from now on (call it again when a pooled thread takes another role: the profiler keeps the history); the system's thread is named too (`Thread::SetCurrentName`), and a thread the system already knows by a name starts with it |
 | `TaskBegin(name, parent) -> id`, `TaskEnd`, `TaskSuspend`, `TaskResume`, `TaskScope` | units of work the profiler's Tasks view groups by name wherever they ran |
@@ -1224,20 +1224,22 @@ While a session runs, every `JobSystem` job is a task by itself, named as it was
 the worker that ran it (`Threading::SetJobObserver`, installed as the session starts and removed as it stops).
 
 Collections are reported from the runtime's collection callback, a `GcBegin`/`GcEnd` pair for each time the collection
-stopped the program (`GC::LastPauses`: one for `GC::Collect`, several for a concurrent cycle), and the GC heap's size
-is plotted ten times a second. Events are stamped with the processor's time stamp counter (its
+stopped the program (`GC::LastPauses`: one for `GC::Collect`, several for a concurrent cycle). Ten times a second the
+GC heap's size and the process's private bytes are plotted (`Platform::GetProcessMemory`: containers' buffers live
+outside the GC heap, so a leak in them shows only there), with the process's allocations so far. Events are stamped with the processor's time stamp counter (its
 frequency measured against `Platform::Ticks` at start; calibration pairs every second let the profiler correct it),
 written by each thread into a buffer of its own under an uncontended lock, and sent by a flusher thread every 10 ms -
 each thread's events taken first, then the global buffer's, sent first, so a definition always precedes its first use. A
 failed send ends the session. One session runs per process, kept in globals (the module's documented exception to the
 no-globals convention). `-D PROFILE=0` compiles the `PROFILE_*` macros to nothing; direct calls stay and cost one load.
 
-Covered by `Bedrock/Tests/profile_tests.cf` (6 tests): a session to a file read back event by event - the preamble and
+Covered by `Bedrock/Tests/profile_tests.cf` (7 tests): a session to a file read back event by event - the preamble and
 `Hello`, definitions before their use, zones on two threads with times that only grow across chunks, frames, plots,
 messages, renames, tasks, a pool, a collection and `Bye`; a thread named by the system starting with that name, a
 `GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; a `Profile::Mutex` one thread waits for while
-another holds it (its definition, the wait, both holds); `JobSystem` jobs as tasks of their names on the named workers,
-and none once the session stopped; and nothing recorded without a session, an unreachable or malformed target refused.
+another holds it (its definition, the wait, both holds); zones that say what they allocated (a hundred objects, nested
+zones' included, nothing from a zone that allocated nothing) and frames with the process's count; `JobSystem` jobs as
+tasks of their names on the named workers, and none once the session stopped; and nothing recorded without a session, an unreachable or malformed target refused.
 
 ---
 
