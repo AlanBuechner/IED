@@ -74,7 +74,7 @@ static Profiler::Capture* CountedCapture() {
 	return Read(w);
 }
 
-static void SampleStack(Profiler::WireWriter& w, uint64 id, uint64 address, uint64 name) {
+static void SampleStack(Profiler::WireWriter& w, uint64 id, uint64 address, uint64 name, uint64 file, uint64 line) {
 	w.Type(Profiler::EventType::CallstackDef);
 	w.Varint(id);
 	w.Varint(2);
@@ -83,8 +83,8 @@ static void SampleStack(Profiler::WireWriter& w, uint64 id, uint64 address, uint
 	w.Type(Profiler::EventType::SymbolDef);
 	w.Varint(address);
 	w.Varint(name);
-	w.Varint(0);
-	w.Varint(0);
+	w.Varint(file);
+	w.Varint(line);
 }
 
 // The counted capture, and the collector's samples of the main thread's allocations (64 KiB each, in the global chunk
@@ -99,8 +99,11 @@ static Profiler::Capture* SampledCapture() {
 	w.Type(Profiler::EventType::StringDef);
 	w.Varint(21);
 	w.Text(Core::StringView("Cache::Remember"));
-	SampleStack(w, 1, 0x1000, 20);
-	SampleStack(w, 2, 0x3000, 21);
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(22);
+	w.Text(Core::StringView("src/main.cf"));
+	SampleStack(w, 1, 0x1000, 20, 22, 24);
+	SampleStack(w, 2, 0x3000, 21, 0, 0);
 	for (int64 i = 0; i < 10; ++i) {
 		w.Type(Profiler::EventType::Sample);
 		w.Time(i * 40 + 15);
@@ -370,9 +373,10 @@ class ProfilerCountedTests {
 		int32 main;
 		assert_true(capture->trackOf.TryGet(1, main) && capture->samples[0].track == main, "each sample the thread it names");
 		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
-		assert_true(text.View().Contains(Core::StringView("sampled: Particles::Spawn allocated 90.0%")), "the diagnosis names the function that allocated");
+		assert_true(text.View().Contains(Core::StringView("sampled: Particles::Spawn allocated 90.0% of the sampled bytes, at src/main.cf:24")), "the diagnosis names the function that allocated, and its line when the client knew it");
+		assert_true(text.View().Contains(Core::StringView("sampled: Cache::Remember allocated 10.0% of the sampled bytes\n")), "and none when it did not");
 		Core::String stacks = Profiler::AllocationsText(*capture, Json(Core::String("{\"group_by\":\"callstack\"}")));
-		assert_true(stacks.View().Contains(Core::StringView("    Particles::Spawn\n    (1 more frame, without a name)\n")), "a stack's unnamed tail is counted, not listed");
+		assert_true(stacks.View().Contains(Core::StringView("    Particles::Spawn (src/main.cf:24)\n    (1 more frame, without a name)\n")), "a stack's unnamed tail is counted, not listed");
 		Profiler::AllocAsk none;
 		none.groupBy = Profiler::AllocGroup::Function;
 		assert_true(Json(Profiler::Allocations(*CountedCapture(), none)).Member("source").AsView() == "zones", "without samples, by zone however asked");

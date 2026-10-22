@@ -298,6 +298,12 @@ namespace Profiler
 			line.Append(" allocated ");
 			line.Append(Percent(groups.At(i).Member("share").AsFloat()).View());
 			line.Append(" of the sampled bytes");
+			if (!groups.At(i).Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(groups.At(i).Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(groups.At(i).Member("line").AsInt());
+			}
 			finding->evidence.Push(line.ToString());
 		}
 	}
