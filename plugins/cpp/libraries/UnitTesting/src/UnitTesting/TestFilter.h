@@ -35,6 +35,4 @@ namespace Testing
 	/// Recursively collect the max test-name length under a group (for column alignment).
 	uint32 CollectMaxTestNameLength(TestGroup& group);
 
-	/// Increment the global total test count (for summary reporting in filtered runs).
-	void IncrementTotalTestCount();
 }

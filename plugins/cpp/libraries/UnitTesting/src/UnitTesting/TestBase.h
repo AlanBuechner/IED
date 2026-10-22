@@ -42,6 +42,10 @@ namespace Testing
 		uint32 timeoutMs;
 	};
 
+	/// Runs one test on a thread of its own (an 8 MiB stack, its timeout), prints its name and how it ended (Passed,
+	/// Failed, Crashed) and counts it: whether it passed. The whole run and a filtered run both go through it.
+	bool RunSingleTest(const TestEntry& entry, uint32 indent, uint32 nameFieldWidth);
+
 	struct TestGroup
 	{
 		Core::String name;

@@ -85,8 +85,15 @@ LINK_REFLECTION_DATA
 #include "Tests/LSP/TextDocumentStoreTest.h"
 #include "Tests/LSP/TextDocumentSyncTest.h"
 
+// --filter, --benchmark-filter, --list-tests and --list-benchmarks, as CoreTesting and ReflectionTesting take them.
 int main(int argc, char** argv)
 {
+	Core::Vector<Core::String> args;
+	for (int i = 1; i < argc; i++)
+		args.Push(argv[i]);
+	Core::ArgList argList(args);
+	if (Testing::ProcessCliArgs(argList))
+		return 0;
 	Testing::RunTestsAndBenchmarks();
 	return Testing::GetExitCode();
 }

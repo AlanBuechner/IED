@@ -136,11 +136,6 @@ namespace Testing
 
 	// --- Filtered test runner --------------------------------------------
 
-	void IncrementTotalTestCount()
-	{
-		++s_TotalTests;
-	}
-
 	uint32 RunFilteredTests(TestGroup& group, const Core::String& prefix,
 	                        const Core::String& filter, uint32 indent, uint32 nameFieldWidth)
 	{
@@ -169,53 +164,7 @@ namespace Testing
 			continue;
 
 		executedCount++;
-		IncrementTotalTestCount();
-
-		Core::String testLabel = indentStr + "  Test: " + entry.func->GetName();
-		std::cout << std::left << std::setw(static_cast<int>(nameFieldWidth + static_cast<uint32>(indentStr.length()) + 8))
-		          << testLabel;
-
-		// Invoke the test method on its owning instance.
-		// Use crash handler to catch SEH exceptions and C++ exceptions without disrupting the suite.
-		CrashInfo crashInfo;
-		auto result = InvokeWithCrashHandling([&entry]() {
-			entry.func->Invoke(entry.ownerInstance, {});
-		}, &crashInfo);
-
-		switch (result)
-		{
-		case InvocationResult::Success:
-			// Test completed normally - it should have called TEST_PASSED().
-			break;
-		case InvocationResult::TestFailed:
-			// Failure already reported by the assertion macro; just skip TEST_PASSED().
-			break;
-		default:
-			Testing::s_FailedTests++;
-			Logging::Logger::SetConsoleColor(Logging::Logger::Error);
-
-			switch (result)
-			{
-			case InvocationResult::SehCrash:
-				if (crashInfo.description.empty())
-					std::cout << "Crashed: SEH exception" << std::endl;
-				else
-					std::cout << "Crashed: SEH " << crashInfo.description << std::endl;
-				break;
-			case InvocationResult::StdException:
-				std::cout << "Crashed: unhandled standard exception" << std::endl;
-				break;
-			case InvocationResult::UnknownException:
-				std::cout << "Crashed: unknown exception" << std::endl;
-				break;
-			default:
-				std::cout << "Failed" << std::endl;
-				break;
-			}
-
-			Logging::Logger::SetConsoleColor(Logging::Logger::Trace);
-			break;
-		}
+		RunSingleTest(entry, indent, nameFieldWidth);
 	}
 
 	for (TestGroup& subGroup : group.subGroups)

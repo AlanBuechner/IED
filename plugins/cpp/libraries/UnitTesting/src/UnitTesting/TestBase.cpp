@@ -131,7 +131,7 @@ namespace Testing
 	/// - Hung tests are terminated after their timeout
 	/// Returns true if the test passed, false otherwise.
 
-	static bool RunSingleTest(const TestEntry& entry, uint32 indent, uint32 nameFieldWidth)
+	bool RunSingleTest(const TestEntry& entry, uint32 indent, uint32 nameFieldWidth)
 	{
 		const Core::String indentStr(indent * 2, ' ');
 		Core::String testLabel = indentStr + "  Test: " + entry.func->GetName();
