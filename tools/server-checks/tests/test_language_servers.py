@@ -1,7 +1,7 @@
 """Language servers (docs/24): a plugin's profile starts its server when a document it serves opens; documents reach it
 from the store; diagnostics land on diag:<wsId> in UTF-16; lsp.request adds the document, converts positions both ways
 and maps URIs; a server that exits is started again; lsp.status, lsp.capabilities and lsp.restart; a profile's
-pluginCodeOption gets the workspace's plugin code scopes (docs/26)."""
+pluginCodeOption gets the plugin code scopes: those loaded for the workspace and those it holds (docs/26)."""
 
 import json
 import os
@@ -22,28 +22,52 @@ def write(path, text):
 		f.write(text if isinstance(text, str) else json.dumps(text, indent="\t"))
 
 
+def code_plugin(folder, plugin_id, sources=None):
+	"""A c4 plugin's manifest and code in `folder`; `sources` its runtime.sources (default code/)."""
+	runtime = {"kind": "c4", "entry": "Scripted::Activate"}
+	if sources:
+		runtime["sources"] = sources
+	write(os.path.join(folder, "ied-plugin.json"), {"manifestVersion": 1, "id": plugin_id, "name": plugin_id, "version": "1.0.0", "ied": {"api": "^1"}, "runtime": runtime})
+	for source in sources or ["code"]:
+		path = os.path.join(folder, source)
+		write(path if path.endswith(".cf") else os.path.join(path, "scripted.cf"), 'include "api/plugin.ch"\n\nnamespace Scripted\n{\n\tvoid Activate(IED::PluginContext& context) {}\n}\n')
+
+
+def fake_home(home, log):
+	"""A server home with the fake language server's plugin, whose profile asks for plugin code scopes, and a c4 plugin."""
+	shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(home, "shared", "host-api", "schemas"))
+	plugin = os.path.join(home, "plugins", "fake")
+	os.makedirs(plugin)
+	shutil.copy(os.path.join(HERE, "fake_lsp.py"), plugin)
+	write(os.path.join(plugin, "ied-plugin.json"), {
+		"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+		"contributes": {
+			"languages": [{"id": "fake", "extensions": [".fk"]}],
+			"settings": {"schema": "settings.schema.json"},
+			"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", log, "${config:fake.flags}"], "selector": {"languages": ["fake"]},
+				"initializationOptions": {"mine": 1}, "pluginCodeOption": "scripts"}]}})
+	write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": ["--from-setting", "two words"]}}})
+	code_plugin(os.path.join(home, "plugins", "scripted"), "scripted")
+
+
+def received(log, method):
+	with open(log, encoding="utf-8") as f:
+		return [m for m in map(json.loads, f) if m.get("method") == method]
+
+
 class LanguageServerTests(ServerTestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-lsp-")
 		self.home = os.path.join(self.root, "home")
 		self.workspace = os.path.join(self.root, "work")
 		self.log = os.path.join(self.root, "fake-lsp.jsonl")
-		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
-		plugin = os.path.join(self.home, "plugins", "fake")
-		os.makedirs(plugin)
-		shutil.copy(os.path.join(HERE, "fake_lsp.py"), plugin)
-		write(os.path.join(plugin, "ied-plugin.json"), {
-			"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
-			"contributes": {
-				"languages": [{"id": "fake", "extensions": [".fk"]}],
-				"settings": {"schema": "settings.schema.json"},
-				"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log, "${config:fake.flags}"], "selector": {"languages": ["fake"]},
-					"initializationOptions": {"mine": 1}, "pluginCodeOption": "scripts"}]}})
-		code = os.path.join(self.home, "plugins", "scripted")
-		write(os.path.join(code, "ied-plugin.json"), {"manifestVersion": 1, "id": "scripted", "name": "Scripted", "version": "1.0.0", "ied": {"api": "^1"},
-			"runtime": {"kind": "c4", "entry": "Scripted::Activate"}})
-		write(os.path.join(code, "code", "scripted.cf"), 'include "api/plugin.ch"\n\nnamespace Scripted\n{\n\tvoid Activate(IED::PluginContext& context) {}\n}\n')
-		write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": ["--from-setting", "two words"]}}})
+		fake_home(self.home, self.log)
+		# Plugins the workspace holds, as IED's own source does: a copy of the loaded one, one not loaded with a folder
+		# and a file as its sources, and two with no code.
+		code_plugin(os.path.join(self.workspace, "plugins", "scripted"), "scripted")
+		code_plugin(os.path.join(self.workspace, "plugins", "held"), "held", ["src", "extra/one.cf"])
+		write(os.path.join(self.workspace, "plugins", "shown", "ied-plugin.json"), {"manifestVersion": 1, "id": "shown", "name": "Shown", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"}})
+		write(os.path.join(self.workspace, "plugins", "loose", "code", "loose.cf"), "")
 		write(os.path.join(self.workspace, "a.fk"), "é bad\nok\n")
 		write(os.path.join(self.workspace, "b.fk"), "b\n")
 		write(os.path.join(self.workspace, "notes.txt"), "plain\n")
@@ -66,8 +90,7 @@ class LanguageServerTests(ServerTestCase):
 		self.client.abort()
 
 	def received(self, method):
-		with open(self.log, encoding="utf-8") as f:
-			return [m for m in map(json.loads, f) if m.get("method") == method]
+		return received(self.log, method)
 
 	async def diagnostics(self, path):
 		frames = await self.client.wait_for("diag:w1", lambda f: f["t"] == "evt" and f["data"]["path"] == path, timeout=20)
@@ -150,11 +173,16 @@ class LanguageServerTests(ServerTestCase):
 		options = self.received("initialize")[0]["params"]["initializationOptions"]
 		self.assertEqual(1, options["mine"], "the profile's own options stay")
 		scopes = options["scripts"]
-		self.assertEqual(1, len(scopes), scopes)
-		self.assertEqual([os.path.join(self.home, "plugins", "scripted", "code")], [os.path.normpath(f) for f in scopes[0]["folders"]])
+		self.assertEqual(3, len(scopes), scopes)
+		folders = [[os.path.normpath(f) for f in scope["folders"]] for scope in scopes]
+		self.assertEqual([os.path.join(self.home, "plugins", "scripted", "code")], folders[0], "the loaded plugin first")
+		held = os.path.join(self.workspace, "plugins")
+		self.assertEqual(sorted([[os.path.join(held, "held", "src"), os.path.join(held, "held", "extra")], [os.path.join(held, "scripted", "code")]]), sorted(folders[1:]),
+			"then the workspace's own, its copy of the loaded one too; a file source checks its folder; no plugin without code")
+		self.assertEqual(1, len({scope["interface"] for scope in scopes}), "one interface for all")
 		self.assertEqual("ied-server.c4i", os.path.basename(scopes[0]["interface"]), "the interface beside the server")
 		self.assertTrue(os.path.isabs(scopes[0]["interface"]))
-		self.assertEqual(["api/"], scopes[0]["allow"])
+		self.assertEqual([["api/"]] * 3, [scope["allow"] for scope in scopes])
 
 	async def test_workspace_symbols(self):
 		await self.open("a.fk")
@@ -208,6 +236,38 @@ class LanguageServerTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as refused:
 			await self.client.request("lsp.restart", {"wsId": "w1", "profile": "nope"})
 		self.assertEqual("not_found", refused.exception.code)
+
+
+class HeldPluginCodeTests(ServerTestCase):
+	"""Plugin code a workspace holds (docs/26 "Editing plugin code"), with the server's home as the workspace, as a server
+	run from its own source has: a plugin it loaded from there is listed once, and a workspace folder that is itself a
+	plugin's is checked as one."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-lsp-held-")
+		self.home = os.path.join(self.root, "home")
+		self.log = os.path.join(self.root, "fake-lsp.jsonl")
+		fake_home(self.home, self.log)
+		code_plugin(self.home, "rooted")
+		write(os.path.join(self.home, "a.fk"), "bad\n")
+		self.server = IedServer(extra=("--home", self.home, "--workspace", self.home))
+		self.assertTrue(self.server.started, self.server.error)
+
+	def tearDown(self):
+		self.server.stop()
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	async def test_a_loaded_plugin_once_and_the_workspace_folder_as_a_plugin(self):
+		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await client.sub(["diag:w1"])
+		await client.next_frame("diag:w1")
+		await client.request("doc.open", {"wsId": "w1", "path": "a.fk"})
+		await client.wait_for("diag:w1", lambda f: f["t"] == "evt" and f["data"]["path"] == "a.fk", timeout=20)
+		scopes = received(self.log, "initialize")[0]["params"]["initializationOptions"]["scripts"]
+		folders = [[os.path.normpath(f) for f in scope["folders"]] for scope in scopes]
+		self.assertEqual([[os.path.join(self.home, "plugins", "scripted", "code")], [os.path.join(self.home, "code")]], folders)
+		self.assertEqual([], client.violations)
+		client.abort()
 
 
 class ProjectScopeTests(ServerTestCase):

@@ -125,33 +125,73 @@ namespace Ied
 	}
 
 	// The folder of each source: itself for a folder, the one it is in for a file.
-	static Core::Array<Core::String> SourceFolders(const CodeInstance* instance) {
+	static Core::Array<Core::String> SourceFolders(const FS::Path& folder, const Core::Array<Core::String>& sources) {
 		Core::Array<Core::String> folders;
-		for (const Core::String& source : instance->sources) {
-			FS::Path path = instance->folder / source.View();
-			Core::String folder = Core::String((FS::IsDirectory(path.CStr()) ? path : path.Parent()).View());
-			if (!folders.Contains(folder)) folders.Push(folder);
+		for (const Core::String& source : sources) {
+			FS::Path path = folder / source.View();
+			Core::String named = Core::String((FS::IsDirectory(path.CStr()) ? path : path.Parent()).View());
+			if (!folders.Contains(named)) folders.Push(named);
 		}
 		return folders;
 	}
 
+	// The c4 plugins `ws` holds, loaded or not: its folder itself when that is a plugin, and each plugins/<name>/ - the
+	// layout of the server's home, so an installed server checks the code of the source it was installed from too.
+	static Core::Array<Manifest*> HeldPlugins(Server* server, Workspace* ws) {
+		Core::Array<FS::Path> candidates;
+		candidates.Push(ws->root);
+		FS::Path plugins = ws->root / "plugins";
+		if (FS::IsDirectory(plugins.CStr())) {
+			FS::Directory listing = FS::Directory(plugins.CStr());
+			for (FS::DirectoryEntry& entry : listing)
+				if (entry.kind == FS::EntryKind::Directory) candidates.Push(plugins / entry.name.View());
+		}
+		Core::Array<Manifest*> held;
+		for (const FS::Path& folder : candidates) {
+			if (!FS::FileExists((folder / kManifestFile).CStr())) continue;
+			Manifest* manifest = ReadManifest(folder, PluginSource::Project, *server->schemas.registry, server->schemas.Name(kManifestSchema).View());
+			if (manifest->kind.View() == "c4") held.Push(manifest);
+		}
+		return held;
+	}
+
+	static bool AnyListed(const Core::Array<Core::String>& listed, const Core::Array<Core::String>& folders) {
+		for (const Core::String& folder : folders)
+			if (listed.Contains(TrustKey(folder.View()))) return true;
+		return false;
+	}
+
+	static void WriteScope(JsonWriter& json, const Core::Array<Core::String>& folders, Core::StringView interfaceFile) {
+		json.BeginObject();
+		json.Key(Core::StringView("folders"));
+		json.BeginArray();
+		for (const Core::String& folder : folders) json.String(folder.View());
+		json.EndArray();
+		json.Field("interface", interfaceFile);
+		json.Key(Core::StringView("allow"));
+		json.BeginArray();
+		json.String(Core::StringView(kCodeAllowed));
+		json.EndArray();
+		json.EndObject();
+	}
+
 	Core::String CodeRuntime::ScopesJson(Workspace* ws) const {
 		const Core::String interfaceFile = Core::String(Platform::ExecutablePath().WithExtension(Core::StringView(".c4i")).View());
+		Core::Array<Core::String> listed;
 		JsonWriter json;
 		json.BeginArray();
 		for (CodeInstance* instance : instances) {
 			if (instance->builtin || !LoadedIn(instance, ws)) continue;
-			json.BeginObject();
-			json.Key(Core::StringView("folders"));
-			json.BeginArray();
-			for (const Core::String& folder : SourceFolders(instance)) json.String(folder.View());
-			json.EndArray();
-			json.Field("interface", interfaceFile.View());
-			json.Key(Core::StringView("allow"));
-			json.BeginArray();
-			json.String(Core::StringView(kCodeAllowed));
-			json.EndArray();
-			json.EndObject();
+			Core::Array<Core::String> folders = SourceFolders(instance->folder, instance->sources);
+			WriteScope(json, folders, interfaceFile.View());
+			for (const Core::String& folder : folders) listed.Push(TrustKey(folder.View()));
+		}
+		Core::Array<Manifest*> held = ws ? HeldPlugins(server, ws) : Core::Array<Manifest*>();
+		for (Manifest* manifest : held) {
+			Core::Array<Core::String> folders = SourceFolders(manifest->folder, manifest->sources);
+			if (AnyListed(listed, folders)) continue;
+			WriteScope(json, folders, interfaceFile.View());
+			for (const Core::String& folder : folders) listed.Push(TrustKey(folder.View()));
 		}
 		json.EndArray();
 		return json.ToString();
