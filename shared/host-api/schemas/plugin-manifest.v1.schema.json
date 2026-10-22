@@ -326,7 +326,8 @@
 				"view": { "type": "string", "description": "UI module export that renders the activity. Without one the activity is a dock host: a document well and its tool windows." },
 				"phoneSlot": { "type": "boolean", "description": "Request a primary slot in the phone bottom nav (host decides)." },
 				"documents": { "type": "array", "items": { "type": "string" }, "description": "A dock host's tab kinds: tabs of these open in its document well, others in a dock host that takes them. Absent: any kind." },
-				"emptyWell": { "type": "array", "items": { "type": "string" }, "description": "Commands its empty document well offers, first." }
+				"emptyWell": { "type": "array", "items": { "type": "string" }, "description": "Commands its empty document well offers, first." },
+				"newTab": { "type": "string", "description": "The command a document strip's \"+\" (and a double click on the strip's free end) runs, with that strip's group focused so the new tab opens there - a browser's new tab." }
 			}
 		},
 		"toolWindow": {

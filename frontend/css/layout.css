@@ -184,14 +184,21 @@ a { color: var(--link); text-decoration: none; }
 	border-right: var(--border-width) solid var(--border-0);
 	white-space: nowrap;
 	font-size: var(--font-size-sm);
-	min-width: 0;
+	min-width: 64px;
 	max-width: 240px;
-	flex: none;
+	flex: 0 1 auto;
 	position: relative;
 	touch-action: none;
 	user-select: none;
 }
 .tab:hover { color: var(--text-1); }
+/* "+" after the last tab, as in a browser (an activity's newTab) */
+.tabs-new { flex: none; align-self: center; width: 22px; height: 22px; margin: 0 var(--space-2); }
+.tabs-new .ci { width: 14px; height: 14px; }
+/* a tab dragged along its strip (tabslide.js): it rides the pointer, the others slide aside */
+.tabs.sliding .tab, .tw-tabs.sliding .tw-tab { transition: transform var(--motion-normal); }
+.tabs.sliding .tab.lifted, .tw-tabs.sliding .tw-tab.lifted { transition: none; z-index: 2; background: var(--bg-3); color: var(--text-0); box-shadow: var(--shadow-popup); cursor: grabbing; }
+.tabs.sliding .tabs-new { visibility: hidden; }
 .tab .ci { width: 14px; height: 14px; }
 .tab .name { overflow: hidden; text-overflow: ellipsis; }
 .tab .tether { display: inline-flex; color: var(--text-2); flex: none; }
@@ -285,6 +292,7 @@ a { color: var(--link); text-decoration: none; }
 	border-radius: var(--radius-2);
 	transition: left var(--motion-fast), top var(--motion-fast), width var(--motion-fast), height var(--motion-fast);
 }
+.dock-drop[data-zone="insert"] { background: var(--accent-info); border: 0; border-radius: 1px; }
 .dock-ghost {
 	position: fixed;
 	z-index: 31;

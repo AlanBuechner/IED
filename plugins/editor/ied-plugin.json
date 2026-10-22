@@ -35,7 +35,7 @@
 			]
 		},
 		"activities": [
-			{ "id": "ied.editor", "title": "Editor", "icon": "$(code)", "order": 10, "phoneSlot": true }
+			{ "id": "ied.editor", "title": "Editor", "icon": "$(code)", "order": 10, "phoneSlot": true, "newTab": "ied.editor.newFile" }
 		],
 		"toolWindows": [
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
@@ -72,6 +72,7 @@
 			{ "id": "ied.explorer.delete", "title": "Delete", "category": "Solution Explorer", "icon": "$(trash)" },
 			{ "id": "ied.output.clear", "title": "Clear All", "category": "Output", "icon": "$(clear-all)" },
 			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" },
+			{ "id": "ied.editor.newFile", "title": "New File", "category": "File", "icon": "$(new-file)" },
 			{ "id": "ied.editor.save", "title": "Save", "category": "File", "icon": "$(save)" },
 			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" },
 			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" },
@@ -189,6 +190,7 @@
 				{ "command": "ied.navigate.forward", "group": "1_navigate", "order": 1 }
 			],
 			"menubar/file": [
+				{ "command": "ied.editor.newFile", "group": "0_new" },
 				{ "command": "ied.editor.save", "group": "5_save" },
 				{ "command": "ied.editor.saveAll", "group": "5_save", "order": 1 }
 			],
@@ -272,6 +274,7 @@
 			{ "command": "ied.editor.toggleWordWrap", "key": "ctrl+e ctrl+w", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.editor.zoomIn", "key": "ctrl+shift+.", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.editor.zoomOut", "key": "ctrl+shift+,", "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.newFile", "key": "ctrl+n" },
 			{ "command": "ied.editor.save", "key": "ctrl+s" },
 			{ "command": "ied.explorer.rename", "key": "f2", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },

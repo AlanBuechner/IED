@@ -268,6 +268,20 @@ export class DesktopChrome {
 			resizeAutoHidden: (ref, share) => shell.resizeAutoHidden(ref, share),
 			hold: (on) => shell.layout && shell.layout.hold(on),
 			focused: (ref, path, well) => shell.focused(activityId, ref, path, well),
+			// The activity's `newTab` command, run with the group whose "+" was clicked focused, so the tab opens there.
+			get newTab() {
+				const activity = shell.contributions.activity(activityId);
+				if (!activity || !activity.newTab) return null;
+				return (path, active) => {
+					shell.focused(activityId, active, path, true);
+					shell.commands.run(activity.newTab);
+				};
+			},
+			get newTabTitle() {
+				const activity = shell.contributions.activity(activityId);
+				const command = activity && activity.newTab ? shell.commands.get(activity.newTab) : null;
+				return command ? command.title : "New Tab";
+			},
 		}, container);
 		dock.container = container;
 		this.docks.set(activityId, dock);

@@ -40,7 +40,7 @@
 			{ "id": "ied.chat.claude", "page": "AI", "title": "Claude", "view": "ClaudeSettings", "keys": ["ai.claude.command", "ai.claude.usageRefreshMinutes"] }
 		],
 		"activities": [
-			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "documents": ["chat"], "emptyWell": ["ied.chat.new"] }
+			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "documents": ["chat"], "emptyWell": ["ied.chat.new"], "newTab": "ied.chat.new" }
 		],
 		"toolWindows": [
 			{ "id": "ied.chat.list", "title": "Chats", "icon": "$(comment-discussion)", "view": "ChatsList", "activity": "ied.chat", "defaultDock": "left", "defaultSize": 0.2, "phoneNav": false }

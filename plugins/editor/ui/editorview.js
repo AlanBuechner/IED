@@ -1,6 +1,7 @@
 // editorview.js - a server document in Monaco ("doc:<path>" tabs; F-EDT-1, docs/10): DocumentSync keeps the text with
 // the server, the lease decides who types (a bar offers "Edit Here" to the others), typing pins a preview tab, the tab
-// shows unsaved changes, and Ctrl+S saves. Language features come from the language servers (language.js). A file
+// shows unsaved changes, and Ctrl+S saves (an untitled file asks where to, untitled.js; until then it is saved where it
+// is as it is typed). Language features come from the language servers (language.js). A file
 // mixing line endings opens read-only: Monaco would make them one kind and the positions it reports would no longer be
 // the server's.
 
@@ -10,8 +11,11 @@ import { themeName } from "./monaco.js";
 import { optionsOf } from "./editorsettings.js";
 import { ChangeMargin } from "./changemargin.js";
 import { displayPath, isFileUri } from "/ui-kit/fileuris.js";
+import { isUntitled, saveUntitledAs } from "./untitled.js";
 
 const NOTICE_MS = 8000;
+// An untitled file is saved this long after its last edit (untitled.js): it lives in the local state, not the workspace.
+const UNTITLED_SAVE_MS = 1000;
 // Narrower than this an editor is not laid out yet (a hidden or just-opened tab).
 const MIN_REVEAL_WIDTH = 40;
 
@@ -29,6 +33,8 @@ export class CodeEditor {
 		this.model = null;
 		this.applying = false;
 		this.mixedEndings = false;
+		this.untitled = isUntitled(path);
+		this.untitledTimer = 0;
 		this.bar = h("div.ed-bar", { hidden: true });
 		this.host = h("div.ed-fill.code-host");
 		ctx.el.append(this.bar, this.host);
@@ -49,6 +55,10 @@ export class CodeEditor {
 
 	dispose() {
 		cancelAnimationFrame(this.scrollFrame);
+		if (this.untitledTimer) {
+			clearTimeout(this.untitledTimer);
+			this.sync.save().catch(() => {});
+		}
 		this.editors.delete(this);
 		if (this.detach) this.detach();
 		for (const dispose of this.attachments) if (typeof dispose === "function") dispose();
@@ -158,6 +168,13 @@ export class CodeEditor {
 		this.ctx.tab.pin();
 		this.changed();
 		this.margin.changed();
+		if (this.untitled) {
+			clearTimeout(this.untitledTimer);
+			this.untitledTimer = setTimeout(() => {
+				this.untitledTimer = 0;
+				this.sync.save().catch(() => {});
+			}, UNTITLED_SAVE_MS);
+		}
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -236,8 +253,15 @@ export class CodeEditor {
 		this.sync.takeLease().then(() => this.editor.focus(), (e) => this.ied.report("taking over the document: " + e.message, e));
 	}
 
+	// Ctrl+S; an untitled file asks where it goes in the workspace first.
 	save() {
-		return this.sync.save().catch((e) => this.ied.report("saving " + this.path + ": " + e.message, e));
+		const write = () => this.sync.save().catch((e) => this.ied.report("saving " + this.path + ": " + e.message, e));
+		if (!this.untitled) return write();
+		clearTimeout(this.untitledTimer);
+		this.untitledTimer = 0;
+		return saveUntitledAs(this.ied, this.path, write).then((moved) => {
+			if (moved) this.untitled = false;
+		});
 	}
 
 	problem(message) {

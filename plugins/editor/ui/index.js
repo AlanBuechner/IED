@@ -7,6 +7,7 @@ import { Explorer } from "./explorer.js";
 import { Output as OutputView, remember as rememberOutputSource } from "./output.js";
 import { DocumentView } from "./document.js";
 import { CodeEditor, editorEnvironment } from "./editorview.js";
+import { isUntitled, newUntitled, untitledClosed } from "./untitled.js";
 import { Editors } from "./editors.js";
 import { loadMonaco, languagesChanged } from "./monaco.js";
 import { colorize, languageOf } from "./colorize.js";
@@ -91,6 +92,8 @@ export function activate(ied) {
 		return editor ? editor.save() : undefined;
 	});
 	ied.commands.handle("ied.editor.saveAll", () => Promise.all(editors.all().filter((e) => e.sync.dirty).map((e) => e.save())));
+	ied.commands.handle("ied.editor.newFile", () => newUntitled(ied));
+	ied.tabs.onClose("doc", (ref) => isUntitled(ref.slice("doc:".length)) && untitledClosed(ied, ref));
 	ied.commands.handle("ied.editor.goTo", (args) => goTo(ied, args));
 	ied.commands.handle("ied.editor.open", (args) => openFromOutside(ied, args));
 	ied.commands.handle("ied.task.build", () => tasks.run({ slot: "build" }));

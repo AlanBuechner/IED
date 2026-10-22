@@ -1,11 +1,14 @@
 // dock.js - a dock host's layout tree on screen (F-SHL-10, F-SHL-11, F-SHL-12, docs/15 "Docking"): splits with
 // splitters, document groups with their tab strip on top, tool-window groups with a title and their tabs below (VS);
-// dragging a tab onto a group (center joins it, edges split it) or an activity edge, with a preview of where it lands.
+// a tab dragged along its strip slides into a new place (tabslide.js), as in a web browser; dragged off it, onto a group
+// (center joins it, edges split it), another strip or an activity edge, with a preview of where it lands. A document
+// strip ends in "+", which opens a new tab of its activity (its `newTab` command), as does a double click on its free end.
 // Auto-hidden tool windows are tabs on strips along the edges; a click slides one out over the documents until the focus
 // or a click goes elsewhere, or Escape.
 
 import { h, icon, iconFrom, replace, append } from "/ui-kit/dom.js";
 import { autoHiddenOf, hiddenIn, isGroup, isSplit, nodeAt, pathOf } from "./layouttree.js";
+import { TabSlide } from "./tabslide.js";
 
 const MIN_PANE_PX = 80;
 const DRAG_START_PX = 5;
@@ -17,7 +20,8 @@ const NOT_AWAY = ".ah-tab, .popup, .dock-ghost, .shadow-root-host";
 
 export class DockView {
 	// `host`: {views, menus, emptyWell(), activate(ref), close(ref), pin(ref), move(ref, path, zone, index),
-	// resize(path, sizes), autoHide(ref, hidden), resizeAutoHidden(ref, share), hold(on), focused(ref, path, well)}
+	// resize(path, sizes), autoHide(ref, hidden), resizeAutoHidden(ref, share), hold(on), focused(ref, path, well),
+	// newTab(path, active) and newTabTitle when the activity opens new tabs (null: no "+")}
 	constructor(host, container) {
 		this.host = host;
 		this.container = container;
@@ -113,12 +117,15 @@ export class DockView {
 	}
 
 	emptyWellGroup() {
-		return h("div.dock-group.well", { dataset: { path: "" } }, h("div.tabs"), h("div.dock-body", null, this.host.emptyWell()));
+		const plus = this.host.newTab ? h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on: { click: () => this.host.newTab([], null) } }, icon("add")) : null;
+		return h("div.dock-group.well", { dataset: { path: "" } }, h("div.tabs", null, plus), h("div.dock-body", null, this.host.emptyWell()));
 	}
 
 	documentTabs(group, visible, active, path) {
-		const strip = h("div.tabs", { role: "tablist" });
+		const newTab = this.host.newTab ? () => this.host.newTab(path, active) : null;
+		const strip = h("div.tabs", { role: "tablist", on: { dblclick: (event) => newTab && (event.target === strip || event.target.matches(".tabs-tail")) && newTab() } });
 		for (const ref of visible) strip.append(this.tab(ref, ref === active, group.preview === ref, path, "tab"));
+		if (newTab) strip.append(h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on: { click: newTab } }, icon("add")));
 		strip.append(h("div.tabs-tail", null, visible.length ? h("button.ib.tabs-menu", { title: "Open documents", "aria-label": "Open documents", on: { click: (event) => this.listTabs(event, visible) } }, icon("chevron-down")) : null));
 		return strip;
 	}
@@ -160,7 +167,7 @@ export class DockView {
 		const el = h("div." + cls + (on ? ".on" : "") + (preview ? ".preview" : ""), {
 			role: "tab", tabindex: on ? "0" : "-1", "aria-selected": on ? "true" : "false", title: ref, dataset: { ref, icon: JSON.stringify(entry.icon) },
 			on: {
-				pointerdown: (event) => this.press(event, ref),
+				pointerdown: (event) => this.press(event, ref, path),
 				click: () => this.host.activate(ref),
 				dblclick: () => this.host.pin(ref),
 				auxclick: (event) => {
@@ -210,12 +217,30 @@ export class DockView {
 	// ---------------------------------------------------------------------------------------------------------------
 	// Dragging a tab
 
-	press(event, ref) {
+	// A tab pressed: dragged along its strip it slides into a new place (a browser's tabs); dragged off the strip it is
+	// docked where it is dropped. `path`: its group's, for a tab of a strip (an auto-hidden one has none).
+	press(event, ref, path) {
 		if (event.button !== 0 || event.target.closest("button")) return;
 		const start = { x: event.clientX, y: event.clientY };
+		const tabEl = event.currentTarget;
+		const strip = path && tabEl.parentElement.matches(".tabs, .tw-tabs") ? tabEl.parentElement : null;
+		let slide = null;
 		let drag = null;
 		const move = (e) => {
-			if (!drag && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_START_PX) return;
+			if (!drag && !slide && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_START_PX) return;
+			if (!drag && !slide && strip) {
+				this.host.hold(true);
+				slide = new TabSlide(strip, tabEl, start.x);
+			}
+			if (slide && slide.holds(e.clientX, e.clientY)) {
+				slide.move(e.clientX);
+				return;
+			}
+			if (slide) {
+				slide.end();
+				slide = null;
+				this.host.hold(false);
+			}
 			if (!drag) drag = this.beginDrag(ref);
 			this.dragOver(drag, e.clientX, e.clientY);
 		};
@@ -223,6 +248,7 @@ export class DockView {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
 			window.removeEventListener("keydown", key, true);
+			if (slide) this.endSlide(slide, ref, path, dropIt);
 			if (drag) this.endDrag(drag, dropIt);
 		};
 		const up = () => finish(true);
@@ -235,6 +261,13 @@ export class DockView {
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
 		window.addEventListener("keydown", key, true);
+	}
+
+	endSlide(slide, ref, path, dropIt) {
+		const before = slide.before();
+		slide.end();
+		this.host.hold(false);
+		if (dropIt && before !== undefined) this.host.move(ref, path, "center", this.treeIndex(path, before));
 	}
 
 	beginDrag(ref) {
@@ -264,7 +297,7 @@ export class DockView {
 		drag.ghost.remove();
 		this.root.classList.remove("dragging");
 		this.host.hold(false);
-		if (dropIt && drag.target) this.host.move(drag.ref, drag.target.path, drag.target.zone, drag.target.index);
+		if (dropIt && drag.target) this.host.move(drag.ref, drag.target.path, drag.target.zone === "insert" ? "center" : drag.target.zone, drag.target.index);
 	}
 
 	// Where a tab dropped at (x, y) goes: {path, zone, index, rect}, or null outside this dock.
@@ -279,7 +312,10 @@ export class DockView {
 		const path = parsePath(groupEl.dataset.path);
 		const strip = hit.closest(".tabs, .tw-tabs");
 		const groupRect = groupEl.getBoundingClientRect();
-		if (strip) return { path, zone: "center", index: this.treeIndex(path, insertionBefore(strip, x)), rect: groupRect };
+		if (strip) {
+			const before = insertionBefore(strip, x);
+			return { path, zone: "insert", index: this.treeIndex(path, before), rect: insertionMark(strip, before) };
+		}
 		const zone = zoneIn(groupRect, x, y);
 		return { path, zone, index: null, rect: zone === "center" ? groupRect : edgeRect(groupRect, zone, 0.5) };
 	}
@@ -531,6 +567,15 @@ function edgeRect(rect, zone, share) {
 	if (zone === "right") return { left: rect.right - w, top: rect.top, width: w, height: rect.height };
 	if (zone === "top") return { left: rect.left, top: rect.top, width: rect.width, height: hgt };
 	return { left: rect.left, top: rect.bottom - hgt, width: rect.width, height: hgt };
+}
+
+// Where a tab dropped on `strip` before `before` (null: at the end) lands: a thin mark between the tabs.
+function insertionMark(strip, before) {
+	const tabs = [...strip.querySelectorAll(".tab, .tw-tab")];
+	const box = strip.getBoundingClientRect();
+	const at = before ? tabs.find((el) => el.dataset.ref === before) : tabs[tabs.length - 1];
+	const x = at ? (before ? at.getBoundingClientRect().left : at.getBoundingClientRect().right) : box.left;
+	return { left: x - 1, top: box.top, width: 3, height: box.height };
 }
 
 // The ref of the tab a tab dropped at x goes before, or null for the end of the strip.

@@ -130,6 +130,49 @@ def docking_persists(run):
 	run.shot("reloaded")
 
 
+def read_file(run, path):
+	return run.page.evaluate("(p) => ied_shell.client.request('fs.read', { wsId: ied_shell.wsId, path: p }).then(r => r.text, () => null)", path)
+
+
+@scenario(viewports=("desktop",))
+def tabs_like_a_browser(run):
+	"""Tabs as in a web browser (docs/15 "Docking"): a tab dragged along its strip slides into a new place, kept by the
+	server; "+" opens Untitled-1.txt, kept as it is typed (.ied/local/untitled/) and saved into the workspace with Ctrl+S;
+	in the Chat activity "+" opens a new chat."""
+	page = run.open()
+	for path in ("README.md", "src/main.c"):
+		page.evaluate("(p) => ied_shell.commands.run('ied.editor.goTo', { path: p })", path)
+		page.wait_for_selector(".dock-host:not([hidden]) .tab:has-text('%s')" % path.split("/")[-1])
+	check(tab_names(run) == ["README.md", "main.c"], "opened in order: %s" % tab_names(run))
+	tabs = ".dock-host:not([hidden]) .dock-group.well .tabs .tab"
+	first = page.locator(tabs).first.bounding_box()
+	last = page.locator(tabs).last.bounding_box()
+	drag(page, (first["x"] + 20, first["y"] + 8), (last["x"] + last["width"] - 4, first["y"] + 8))
+	check(tab_names(run) == ["main.c", "README.md"], "dragged past main.c: %s" % tab_names(run))
+	time.sleep(0.8)
+	run.reload()
+	check(tab_names(run) == ["main.c", "README.md"], "the order is kept by the server: %s" % tab_names(run))
+	page.click(".dock-host:not([hidden]) .tabs-new")
+	page.wait_for_selector(".tab.on:has-text('Untitled-1.txt')")
+	view = ".view[data-ref='doc:.ied/local/untitled/Untitled-1.txt']"
+	page.wait_for_selector(view + " .monaco-editor .view-lines", timeout=30000)
+	page.click(view + " .monaco-editor .view-lines")
+	page.keyboard.type("remember the milk")
+	page.wait_for_function("() => ied_shell.client.request('fs.read', { wsId: ied_shell.wsId, path: '.ied/local/untitled/Untitled-1.txt' }).then(r => r.text === 'remember the milk', () => false)", polling=300, timeout=10000)
+	run.shot("untitled")
+	page.keyboard.press("Control+s")
+	page.wait_for_selector(".dialog input")
+	page.fill(".dialog input", "notes/todo.txt")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tab.on:has-text('todo.txt')", timeout=10000)
+	page.wait_for_function("() => ied_shell.client.request('fs.read', { wsId: ied_shell.wsId, path: 'notes/todo.txt' }).then(r => r.text === 'remember the milk', () => false)", polling=300, timeout=10000)
+	check(read_file(run, ".ied/local/untitled/Untitled-1.txt") is None, "the untitled file moved into the workspace")
+	run.show_activity("ied.chat")
+	page.click(".dock-host:not([hidden]) .tabs-new")
+	page.wait_for_selector(".tab.on[data-ref='chat:new']")
+	run.shot("new-chat")
+
+
 @scenario()
 def tab_context_menu(run):
 	page = run.open()
