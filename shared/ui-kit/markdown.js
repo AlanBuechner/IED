@@ -212,8 +212,10 @@ const INLINE = [
 	{ re: /^\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))*)>?(?:\s+"([^"]*)")?\s*\)/, make: (m) => [h("a", { href: safeUrl(m[2]), title: m[3] || null }, ...inline(m[1])), m[0].length] },
 	{ re: /^<((?:https?|mailto):[^\s>]+)>/, make: (m) => [h("a", { href: m[1] }, m[1]), m[0].length] },
 	{ re: /^https?:\/\/[^\s<]*[^\s<.,;:!?)\]'"]/, make: (m) => [h("a", { href: m[0] }, m[0]), m[0].length] },
-	{ re: /^(\*\*|__)(?=\S)([\s\S]*?\S)\1/, make: (m) => [h("strong", null, ...inline(m[2])), m[0].length] },
-	{ re: /^(\*|_)(?=\S)([\s\S]*?\S)\1(?!\1)/, make: (m) => [h("em", null, ...inline(m[2])), m[0].length] },
+	{ re: /^\*\*(?=\S)([\s\S]*?\S)\*\*/, make: (m) => [h("strong", null, ...inline(m[1])), m[0].length] },
+	{ re: /^__(?=\S)([\s\S]*?\S)__(?![A-Za-z0-9])/, make: (m) => [h("strong", null, ...inline(m[1])), m[0].length] },
+	{ re: /^\*(?=\S)([\s\S]*?\S)\*(?!\*)/, make: (m) => [h("em", null, ...inline(m[1])), m[0].length] },
+	{ re: /^_(?=\S)([\s\S]*?\S)_(?!_)(?![A-Za-z0-9])/, make: (m) => [h("em", null, ...inline(m[1])), m[0].length] },
 	{ re: /^~~(?=\S)([\s\S]*?\S)~~/, make: (m) => [h("del", null, ...inline(m[1])), m[0].length] },
 	{ re: /^(?: {2,}|\\)\n/, make: (m) => [h("br"), m[0].length] },
 	{ re: /^\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/, make: (m) => [document.createTextNode(m[1]), m[0].length] },
@@ -241,7 +243,7 @@ export function inline(text) {
 	while (at < text.length) {
 		const rest = text.slice(at);
 		let made = null;
-		if ("`![<h*_~ \\".includes(rest[0])) {
+		if ("`![<h*_~ \\".includes(rest[0]) && !(rest[0] === "_" && /[A-Za-z0-9]/.test(text[at - 1] || ""))) {
 			for (const rule of INLINE) {
 				const m = rule.re.exec(rest);
 				if (m) {

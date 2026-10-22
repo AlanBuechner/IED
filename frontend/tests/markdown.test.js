@@ -19,6 +19,9 @@ test("markdown: headings, paragraphs and inlines", () => {
 		'<p data-line="0">A <a href="docs/a.md" title="tip">link</a> and <a href="https://example.com/x">https://example.com/x</a>.</p>');
 	assertEqual(html("one  \ntwo\\\nthree"), '<p data-line="0">one<br>two<br>three</p>', "hard breaks");
 	assertEqual(html("---\n> quoted\n> more"), '<hr data-line="0"><blockquote data-line="1"><p data-line="0">quoted\nmore</p></blockquote>');
+	assertEqual(html("stream_level runs and profile_hitches says so; _snake_case_ and __bold__."),
+		'<p data-line="0">stream_level runs and profile_hitches says so; <em>snake_case</em> and <strong>bold</strong>.</p>', "an underscore inside a word is a letter");
+	assertEqual(html("**foo**bar and *a*b"), '<p data-line="0"><strong>foo</strong>bar and <em>a</em>b</p>', "asterisks may close inside a word");
 });
 
 test("markdown: lists with task items keep their source lines", () => {
