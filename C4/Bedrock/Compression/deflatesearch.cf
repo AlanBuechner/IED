@@ -1,0 +1,76 @@
+include "deflatesearch.ch"
+
+namespace Compression
+{
+	LevelSearch SearchFor(int32 level) {
+		const int32[10] good = { 0, 4, 4, 4, 4, 8, 8, 8, 32, 32 };
+		const int32[10] lazy = { 0, 4, 5, 6, 4, 16, 16, 32, 128, 258 };
+		const int32[10] nice = { 0, 8, 16, 32, 16, 32, 128, 128, 258, 258 };
+		const int32[10] chain = { 0, 4, 8, 32, 16, 32, 128, 256, 1024, 4096 };
+		LevelSearch search;
+		search.good = good[level];
+		search.lazy = lazy[level];
+		search.nice = nice[level];
+		search.chain = chain[level];
+		search.lazyMatching = level >= 4;
+		return search;
+	}
+
+	void SlideEntries(uint32* entries, int64 count, uint32 shift) {
+		for (int64 i = 0; i < count; i++) entries[i] = entries[i] > shift ? entries[i] - shift : 0u;
+	}
+
+	int32 CommonLength(const uint8* a, const uint8* b, int32 limit) {
+		int32 length = 0;
+		while (length + 8 <= limit) {
+			uint64 x = 0u;
+			uint64 y = 0u;
+			memcpy((void*)&x, (void*)(a + length), 8u);
+			memcpy((void*)&y, (void*)(b + length), 8u);
+			const uint64 differ = x ^ y;
+			if (differ != 0u) return length + (int32)(bit_trailing_zeros(differ) >> 3);
+			length += 8;
+		}
+		while (length < limit && a[length] == b[length]) length++;
+		return length;
+	}
+
+	uint32 Load32(const uint8* at) {
+		uint32 value = 0u;
+		memcpy((void*)&value, (void*)at, 4u);
+		return value;
+	}
+
+	Match LongestMatch(const MatchFinder& finder, int64 position, int32 shorter, const LevelSearch& search) {
+		Match best;
+		best.length = shorter;
+		const int64 left = finder.size - position;
+		const int32 limit = left < (int64)kMaxMatch ? (int32)left : kMaxMatch;
+		if (limit < (int32)kHashBytes || shorter >= limit) return best;
+		int32 chain = shorter >= search.good ? search.chain >> 2 : search.chain;
+		const uint8* here = finder.data + position;
+		const uint32 start = Load32(here);
+		int32 endAt = shorter >= 3 ? shorter - 3 : 0;
+		uint32 end = Load32(here + endAt);
+		const uint32* prev = finder.prev.Data();
+		int64 candidate = finder.Position(prev[position & (kWindowSize - 1)]);
+		while (candidate >= 0 && position - candidate <= kWindowSize && chain > 0) {
+			chain--;
+			const uint8* there = finder.data + candidate;
+			if (Load32(there + endAt) == end && Load32(there) == start) {
+				const int32 length = CommonLength(there, here, limit);
+				if (length > best.length) {
+					best.length = length;
+					best.distance = (int32)(position - candidate);
+					if (length >= search.nice || length >= limit) break;
+					endAt = length - 3;
+					end = Load32(here + endAt);
+				}
+			}
+			const int64 next = finder.Position(prev[candidate & (kWindowSize - 1)]);
+			if (next >= candidate) break; // a link the window overwrote
+			candidate = next;
+		}
+		return best;
+	}
+}

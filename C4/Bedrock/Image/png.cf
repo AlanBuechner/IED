@@ -1,0 +1,459 @@
+include "png.ch"
+
+namespace Image
+{
+	const uint8[8] kPngSignature = { 137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u };
+	const int32 kChunkOverhead = 12;   // length, type and CRC
+	const int32 kHeaderBytes = 13;
+
+	const uint8 kGray = 0u;
+	const uint8 kTruecolor = 2u;
+	const uint8 kIndexed = 3u;
+	const uint8 kGrayAlpha = 4u;
+	const uint8 kTruecolorAlpha = 6u;
+
+	const uint8 kFilterNone = 0u;
+	const uint8 kFilterSub = 1u;
+	const uint8 kFilterUp = 2u;
+	const uint8 kFilterAverage = 3u;
+	const uint8 kFilterPaeth = 4u;
+	const int32 kFilters = 5;
+
+	// Adam7: each pass's first column and row, and its steps.
+	const int32[7] kPassX = { 0, 4, 0, 2, 0, 1, 0 };
+	const int32[7] kPassY = { 0, 0, 4, 0, 2, 0, 1 };
+	const int32[7] kPassDx = { 8, 8, 4, 4, 2, 2, 1 };
+	const int32[7] kPassDy = { 8, 8, 8, 4, 4, 2, 2 };
+
+	uint32 ReadBigEndian32(const uint8* at) { return ((uint32)at[0] << 24) | ((uint32)at[1] << 16) | ((uint32)at[2] << 8) | (uint32)at[3]; }
+
+	ReadResult Failed(const char* why) {
+		ReadResult result;
+		result.error = why;
+		return result;
+	}
+
+	// --- the header and the chunks ------------------------------------------------------------------------------------
+
+	// IHDR's fields, and the palette and transparency the chunks after it give.
+	struct Header
+	{
+		public int32 width;
+		public int32 height;
+		public uint8 depth;
+		public uint8 color;
+		public bool interlaced;
+		public uint8[1024] palette;   // RGBA, four bytes an entry
+		public int32 paletteCount;
+		public bool keyed;            // tRNS names a gray or RGB value that is transparent
+		public uint16[3] key;         // that value: gray, or red, green and blue
+	}
+
+	int32 Channels(uint8 color) {
+		if (color == kTruecolor) return 3;
+		if (color == kGrayAlpha) return 2;
+		if (color == kTruecolorAlpha) return 4;
+		return 1;
+	}
+
+	bool ValidDepth(uint8 color, uint8 depth) {
+		if (color == kGray) return depth == 1u || depth == 2u || depth == 4u || depth == 8u || depth == 16u;
+		if (color == kIndexed) return depth == 1u || depth == 2u || depth == 4u || depth == 8u;
+		if (color == kTruecolor || color == kGrayAlpha || color == kTruecolorAlpha) return depth == 8u || depth == 16u;
+		return false;
+	}
+
+	const char* ReadHeader(const uint8* data, Header& header) {
+		header.width = (int32)ReadBigEndian32(data);
+		header.height = (int32)ReadBigEndian32(data + 4);
+		header.depth = data[8];
+		header.color = data[9];
+		header.interlaced = data[12] == 1u;
+		if (header.width <= 0 || header.height <= 0) return "an image with no pixels, or more than 2^31 a side";
+		if ((int64)header.width * (int64)header.height > kMostPixels) return "an image of more pixels than Image::kMostPixels";
+		if (!ValidDepth(header.color, header.depth)) return "a color type and bit depth PNG does not have";
+		if (data[10] != 0u || data[11] != 0u || data[12] > 1u) return "an unknown compression, filter or interlace method";
+		for (int32 i = 0; i < 256; ++i) header.palette[i * 4 + 3] = 255u;
+		return nullptr;
+	}
+
+	const char* ReadPalette(const uint8* data, int64 length, Header& header) {
+		if (length % 3 != 0 || length / 3 > 256 || length == 0) return "a palette of a length that is not 1 to 256 colors";
+		header.paletteCount = (int32)(length / 3);
+		for (int32 i = 0; i < header.paletteCount; ++i)
+			for (int32 c = 0; c < 3; ++c) header.palette[i * 4 + c] = data[i * 3 + c];
+		return nullptr;
+	}
+
+	const char* ReadTransparency(const uint8* data, int64 length, Header& header) {
+		if (header.color == kIndexed) {
+			if (length > (int64)header.paletteCount) return "more transparent entries than palette colors";
+			for (int64 i = 0; i < length; ++i) header.palette[i * 4 + 3] = data[i];
+			return nullptr;
+		}
+		const int32 samples = header.color == kGray ? 1 : header.color == kTruecolor ? 3 : 0;
+		if (samples == 0) return "transparency in an image that has alpha";
+		if (length != (int64)(samples * 2)) return "a transparent color of the wrong length";
+		header.keyed = true;
+		for (int32 s = 0; s < samples; ++s) header.key[s] = (uint16)(((uint32)data[s * 2] << 8) | (uint32)data[s * 2 + 1]);
+		return nullptr;
+	}
+
+	// The chunks: the header first, the palette and transparency it needs, the image data gathered, the end. Ancillary
+	// chunks are skipped; an unknown critical one fails.
+	const char* ReadChunks(const uint8* data, int64 size, Header& header, Core::Array<uint8>& compressed) {
+		int64 at = 8;
+		bool seenHeader = false;
+		while (true) {
+			if (at + kChunkOverhead > size) return "the file ends before its IEND chunk";
+			const int64 length = (int64)ReadBigEndian32(data + at);
+			if (length > size - at - kChunkOverhead) return "a chunk longer than the file";
+			const uint8* type = data + at + 4;
+			const uint8* body = type + 4;
+			if (Core::Crc32((const void*)type, length + 4) != ReadBigEndian32(body + length)) return "a chunk whose CRC does not match";
+			const bool isHeader = memcmp((void*)type, (void*)"IHDR", 4u) == 0;
+			if (seenHeader == isHeader) return isHeader ? "a second IHDR chunk" : "a chunk before IHDR";
+			const char* problem = nullptr;
+			if (isHeader) {
+				if (length != (int64)kHeaderBytes) return "an IHDR chunk of the wrong length";
+				problem = ReadHeader(body, header);
+				seenHeader = true;
+			}
+			else if (memcmp((void*)type, (void*)"PLTE", 4u) == 0) problem = ReadPalette(body, length, header);
+			else if (memcmp((void*)type, (void*)"tRNS", 4u) == 0) problem = ReadTransparency(body, length, header);
+			else if (memcmp((void*)type, (void*)"IDAT", 4u) == 0) compressed.Append(body, length);
+			else if (memcmp((void*)type, (void*)"IEND", 4u) == 0) return header.color == kIndexed && header.paletteCount == 0 ? "an indexed image with no palette" : nullptr;
+			else if ((type[0] & 32u) == 0u) return "a critical chunk this reader does not know";
+			if (problem != nullptr) return problem;
+			at += length + kChunkOverhead;
+		}
+	}
+
+	// --- filters --------------------------------------------------------------------------------------------------------
+
+	// The neighbour closest to left + above - upperLeft (ties to left, then above): its distances are |above - upperLeft|,
+	// |left - upperLeft| and |left + above - 2 upperLeft|.
+	uint8 Paeth(uint8 left, uint8 above, uint8 upperLeft) {
+		const int32 a = (int32)left;
+		const int32 b = (int32)above;
+		const int32 c = (int32)upperLeft;
+		const int32 toLeft = b > c ? b - c : c - b;
+		const int32 toAbove = a > c ? a - c : c - a;
+		const int32 toUpperLeft = a + b - 2 * c >= 0 ? a + b - 2 * c : 2 * c - a - b;
+		if (toLeft <= toAbove && toLeft <= toUpperLeft) return left;
+		return toAbove <= toUpperLeft ? above : upperLeft;
+	}
+
+	alias Pixel = packed int16[4];
+
+	Pixel LoadPixel(const uint8* at) { return (Pixel)simd_load(at, 4); }
+	void StorePixel(uint8* at, Pixel value) { simd_store(at, (packed uint8[4])value); }
+
+	// Paeth's choice for each channel at once.
+	Pixel PaethPixel(Pixel left, Pixel above, Pixel upperLeft) {
+		const Pixel toLeft = simd_abs(above - upperLeft);
+		const Pixel toAbove = simd_abs(left - upperLeft);
+		const Pixel toUpperLeft = simd_abs(left + above - upperLeft - upperLeft);
+		return simd_select(toLeft <= toAbove, simd_select(toLeft <= toUpperLeft, left, upperLeft), simd_select(toAbove <= toUpperLeft, above, upperLeft));
+	}
+
+	// A row of four-byte pixels (8-bit RGBA, or gray with alpha at 16 bits) unfiltered a pixel at a time, its four
+	// channels in lanes: a pixel still waits for the one to its left, but four bytes go at once. The first pixel is done.
+	bool UnfilterPixels(uint8 filter, uint8* row, const uint8* previous, int64 bytes) {
+		Pixel left = LoadPixel(row);
+		for (int64 i = 4; i + 4 <= bytes; i += 4) {
+			const Pixel above = LoadPixel(previous + i);
+			Pixel predicted = left;
+			if (filter == kFilterAverage) predicted = (left + above) >> 1;
+			else if (filter == kFilterPaeth) predicted = PaethPixel(left, above, LoadPixel(previous + i - 4));
+			left = (LoadPixel(row + i) + predicted) & 255;
+			StorePixel(row + i, left);
+		}
+		return true;
+	}
+
+	// One row's bytes restored in place from their filter, `previous` being the row above (zeros for the first). The
+	// first pixel has no left neighbour, so it goes first and the loops after it test nothing but their bound.
+	bool Unfilter(uint8 filter, uint8* row, const uint8* previous, int64 bytes, int32 step) {
+		const int64 first = (int64)step < bytes ? (int64)step : bytes;
+		if (step == 4 && (filter == kFilterSub || filter == kFilterAverage || filter == kFilterPaeth)) {
+			for (int64 i = 0; i < first; ++i) row[i] += filter == kFilterSub ? 0u : filter == kFilterAverage ? (uint8)(previous[i] >> 1u) : previous[i];
+			return UnfilterPixels(filter, row, previous, bytes);
+		}
+		if (filter == kFilterNone) return true;
+		if (filter == kFilterSub) {
+			for (int64 i = first; i < bytes; ++i) row[i] += row[i - step];
+			return true;
+		}
+		if (filter == kFilterUp) {
+			for (int64 i = 0; i < bytes; ++i) row[i] += previous[i];
+			return true;
+		}
+		if (filter == kFilterAverage) {
+			for (int64 i = 0; i < first; ++i) row[i] += (uint8)(previous[i] >> 1u);
+			for (int64 i = first; i < bytes; ++i) row[i] += (uint8)(((int32)row[i - step] + (int32)previous[i]) >> 1);
+			return true;
+		}
+		if (filter == kFilterPaeth) {
+			for (int64 i = 0; i < first; ++i) row[i] += previous[i];
+			for (int64 i = first; i < bytes; ++i) row[i] += Paeth(row[i - step], previous[i], previous[i - step]);
+			return true;
+		}
+		return false;
+	}
+
+	// --- samples to RGBA ------------------------------------------------------------------------------------------------
+
+	// Sample `index` of a row of `depth`-bit samples, as written (not yet scaled).
+	uint32 Sample(const uint8* row, int64 index, uint8 depth) {
+		if (depth == 8u) return (uint32)row[index];
+		if (depth == 16u) return ((uint32)row[index * 2] << 8) | (uint32)row[index * 2 + 1];
+		const int64 bit = index * (int64)depth;
+		return ((uint32)row[bit >> 3] >> (uint32)(8 - (int32)depth - (int32)(bit & 7))) & ((1u << (uint32)depth) - 1u);
+	}
+
+	// A sample scaled to 8 bits: low depths stretched to the full range, 16 bits cut to their high byte.
+	uint8 Scaled(uint32 sample, uint8 depth) {
+		if (depth == 16u) return (uint8)(sample >> 8);
+		if (depth == 8u) return (uint8)sample;
+		return (uint8)(sample * 255u / ((1u << (uint32)depth) - 1u));
+	}
+
+	// The pixel at column `x` of an unfiltered row, as RGBA at `to`; false for a palette index past the palette.
+	bool ExpandPixel(const Header& header, const uint8* row, int64 x, uint8* to) {
+		const int32 channels = Channels(header.color);
+		if (header.color == kIndexed) {
+			const uint32 index = Sample(row, x, header.depth);
+			if ((int32)index >= header.paletteCount) return false;
+			memcpy((void*)to, (void*)&header.palette[(int32)index * 4], 4u);
+			return true;
+		}
+		uint32[4] samples;
+		for (int32 c = 0; c < channels; ++c) samples[c] = Sample(row, x * (int64)channels + (int64)c, header.depth);
+		const bool gray = header.color == kGray || header.color == kGrayAlpha;
+		for (int32 c = 0; c < 3; ++c) to[c] = Scaled(samples[gray ? 0 : c], header.depth);
+		if (header.color == kGrayAlpha || header.color == kTruecolorAlpha) to[3] = Scaled(samples[channels - 1], header.depth);
+		else {
+			const bool transparent = header.keyed && samples[0] == (uint32)header.key[0] &&
+				(gray || (samples[1] == (uint32)header.key[1] && samples[2] == (uint32)header.key[2]));
+			to[3] = transparent ? 0u : 255u;
+		}
+		return true;
+	}
+
+	// A row's `columns` pixels as RGBA from `to` on, `stride` bytes apart: 8-bit RGBA, RGB and gray directly, the rest a
+	// pixel at a time. False for a palette index past the palette.
+	bool ExpandRow(const Header& header, const uint8* row, int64 columns, uint8* to, int64 stride) {
+		if (header.depth != 8u || header.keyed || (header.color != kTruecolorAlpha && header.color != kTruecolor && header.color != kGray)) {
+			for (int64 x = 0; x < columns; ++x)
+				if (!ExpandPixel(header, row, x, to + x * stride)) return false;
+			return true;
+		}
+		if (header.color == kTruecolorAlpha && stride == 4) {
+			memcpy((void*)to, (void*)row, (uint64)(columns * 4));
+			return true;
+		}
+		const int32 channels = Channels(header.color);
+		for (int64 x = 0; x < columns; ++x) {
+			const uint8* from = row + x * (int64)channels;
+			uint8* pixel = to + x * stride;
+			pixel[0] = from[0];
+			pixel[1] = from[channels == 1 ? 0 : 1];
+			pixel[2] = from[channels == 1 ? 0 : 2];
+			pixel[3] = channels == 4 ? from[3] : 255u;
+		}
+		return true;
+	}
+
+	// --- passes ---------------------------------------------------------------------------------------------------------
+
+	int32 BitsPerPixel(const Header& header) { return Channels(header.color) * (int32)header.depth; }
+	int64 RowBytes(const Header& header, int64 width) { return (width * (int64)BitsPerPixel(header) + 7) / 8; }
+
+	// One pass of `columns` by `rows` pixels (the whole image when not interlaced), from `raw` at `at`, placed from
+	// (x0, y0) every (dx, dy) pixels. Where the next pass starts, or -1 with `problem`.
+	struct Pass
+	{
+		public int32 x0;
+		public int32 y0;
+		public int32 dx;
+		public int32 dy;
+		public int64 columns;
+		public int64 rows;
+	}
+
+	int64 ReadPass(const Header& header, const Pass& pass, Core::Array<uint8>& raw, int64 at, Rgba& image, const char*& problem) {
+		if (pass.columns == 0 || pass.rows == 0) return at;
+		const int64 bytes = RowBytes(header, pass.columns);
+		const int32 step = BitsPerPixel(header) >= 8 ? BitsPerPixel(header) / 8 : 1;
+		if (at + pass.rows * (bytes + 1) > raw.Count()) {
+			problem = "less image data than the image needs";
+			return -1;
+		}
+		Core::Array<uint8> zeros;
+		zeros.Resize(bytes);
+		uint8* pixels = image.pixels.Data();
+		const uint8* previous = zeros.Data();
+		for (int64 y = 0; y < pass.rows; ++y) {
+			uint8* row = raw.Data() + at + 1;
+			if (!Unfilter(raw[at], row, previous, bytes, step)) {
+				problem = "a row with an unknown filter";
+				return -1;
+			}
+			const int64 outY = (int64)pass.y0 + y * (int64)pass.dy;
+			uint8* to = pixels + (outY * (int64)image.width + (int64)pass.x0) * 4;
+			if (!ExpandRow(header, row, pass.columns, to, (int64)pass.dx * 4)) {
+				problem = "a palette index past the palette";
+				return -1;
+			}
+			previous = row;
+			at += bytes + 1;
+		}
+		return at;
+	}
+
+	Pass WholeImage(const Header& header) {
+		Pass pass;
+		pass.dx = 1;
+		pass.dy = 1;
+		pass.columns = (int64)header.width;
+		pass.rows = (int64)header.height;
+		return pass;
+	}
+
+	Pass Adam7Pass(const Header& header, int32 index) {
+		Pass pass;
+		pass.x0 = kPassX[index];
+		pass.y0 = kPassY[index];
+		pass.dx = kPassDx[index];
+		pass.dy = kPassDy[index];
+		pass.columns = ((int64)header.width - (int64)pass.x0 + (int64)pass.dx - 1) / (int64)pass.dx;
+		pass.rows = ((int64)header.height - (int64)pass.y0 + (int64)pass.dy - 1) / (int64)pass.dy;
+		if (pass.columns < 0) pass.columns = 0;
+		if (pass.rows < 0) pass.rows = 0;
+		return pass;
+	}
+
+	const char* ReadPixels(const Header& header, Core::Array<uint8>& raw, Rgba& image) {
+		const char* problem = nullptr;
+		int64 at = 0;
+		const int32 passes = header.interlaced ? 7 : 1;
+		for (int32 p = 0; p < passes && at >= 0; ++p) at = ReadPass(header, header.interlaced ? Adam7Pass(header, p) : WholeImage(header), raw, at, image, problem);
+		return problem;
+	}
+
+	ReadResult DecodePng(const uint8* data, int64 size, Rgba& image) {
+		if (size < 8 || memcmp((void*)data, (void*)&kPngSignature[0], 8u) != 0) return Failed("not a PNG file");
+		Header header;
+		Core::Array<uint8> compressed;
+		const char* problem = ReadChunks(data, size, header, compressed);
+		if (problem != nullptr) return Failed(problem);
+		Core::Array<uint8> raw;
+		Compression::InflateResult inflated = Compression::ZlibDecompress(compressed.Data(), compressed.Count(), raw);
+		if (!inflated.ok) return Failed(inflated.error);
+		image.width = header.width;
+		image.height = header.height;
+		image.pixels.Clear();
+		image.pixels.Resize((int64)header.width * (int64)header.height * 4);
+		problem = ReadPixels(header, raw, image);
+		if (problem != nullptr) return Failed(problem);
+		ReadResult result;
+		result.ok = true;
+		return result;
+	}
+
+	// --- writing ---------------------------------------------------------------------------------------------------------
+
+	bool Opaque(const Rgba& image) {
+		const uint8* pixels = image.pixels.Data();
+		const int64 count = (int64)image.width * (int64)image.height;
+		for (int64 i = 0; i < count; ++i)
+			if (pixels[i * 4 + 3] != 255u) return false;
+		return true;
+	}
+
+	// The image's rows as RGB or RGBA bytes, each after its filter type.
+	void FilterRows(const Rgba& image, int32 channels, Core::Array<uint8>& out) {
+		const int64 bytes = (int64)image.width * (int64)channels;
+		Core::Array<uint8> current;
+		Core::Array<uint8> previous;
+		Core::Array<uint8> candidate;
+		Core::Array<uint8> best;
+		current.Resize(bytes);
+		previous.Resize(bytes);
+		candidate.Resize(bytes);
+		best.Resize(bytes);
+		for (int64 y = 0; y < (int64)image.height; ++y) {
+			const uint8* source = image.pixels.Data() + y * (int64)image.width * 4;
+			for (int64 x = 0; x < (int64)image.width; ++x)
+				for (int32 c = 0; c < channels; ++c) current[x * (int64)channels + (int64)c] = source[x * 4 + (int64)c];
+			const uint8 filter = BestFilter(current.Data(), previous.Data(), bytes, channels, candidate.Data(), best.Data());
+			out.Push(filter);
+			out.Append(best.Data(), bytes);
+			current.Swap(previous);
+		}
+	}
+
+	// The filter whose bytes, read as signed, sum to the least (libpng's heuristic), its bytes in `best`.
+	uint8 BestFilter(const uint8* row, const uint8* previous, int64 bytes, int32 step, uint8* candidate, uint8* best) {
+		uint64 bestSum = 0u;
+		uint8 bestFilter = kFilterNone;
+		for (int32 f = 0; f < kFilters; ++f) {
+			const uint8 filter = (uint8)f;
+			uint64 sum = 0u;
+			for (int64 i = 0; i < bytes; ++i) {
+				const uint8 left = i >= step ? row[i - step] : 0u;
+				const uint8 upperLeft = i >= step ? previous[i - step] : 0u;
+				uint8 predicted = 0u;
+				if (filter == kFilterSub) predicted = left;
+				else if (filter == kFilterUp) predicted = previous[i];
+				else if (filter == kFilterAverage) predicted = (uint8)(((int32)left + (int32)previous[i]) >> 1);
+				else if (filter == kFilterPaeth) predicted = Paeth(left, previous[i], upperLeft);
+				const uint8 value = (uint8)(row[i] - predicted);
+				candidate[i] = value;
+				sum += (uint64)(value < 128u ? value : 256u - (uint32)value);
+			}
+			if (f == 0 || sum < bestSum) {
+				bestSum = sum;
+				bestFilter = filter;
+				memcpy((void*)best, (void*)candidate, (uint64)bytes);
+			}
+		}
+		return bestFilter;
+	}
+
+	void PutBigEndian32(Core::Array<uint8>& out, uint32 value) {
+		for (int32 shift = 24; shift >= 0; shift -= 8) out.Push((uint8)((value >> (uint32)shift) & 0xffu));
+	}
+
+	void PutChunk(Core::Array<uint8>& out, const char* type, const uint8* body, int64 length) {
+		PutBigEndian32(out, (uint32)length);
+		const int64 typeAt = out.Count();
+		out.Append((const uint8*)type, 4);
+		out.Append(body, length);
+		PutBigEndian32(out, Core::Crc32((const void*)(out.Data() + typeAt), length + 4));
+	}
+
+	void EncodePng(const Rgba& image, int32 level, Core::Array<uint8>& out) {
+		const bool opaque = Opaque(image);
+		const int32 channels = opaque ? 3 : 4;
+		uint8[13] header;
+		for (int32 shift = 0; shift < 4; ++shift) {
+			header[shift] = (uint8)(((uint32)image.width >> (uint32)(24 - shift * 8)) & 0xffu);
+			header[4 + shift] = (uint8)(((uint32)image.height >> (uint32)(24 - shift * 8)) & 0xffu);
+		}
+		header[8] = 8u;
+		header[9] = opaque ? kTruecolor : kTruecolorAlpha;
+		header[10] = 0u;
+		header[11] = 0u;
+		header[12] = 0u;
+		Core::Array<uint8> rows;
+		FilterRows(image, channels, rows);
+		Core::Array<uint8> compressed;
+		Compression::ZlibCompress(rows.Data(), rows.Count(), level, compressed);
+		out.Append(&kPngSignature[0], 8);
+		PutChunk(out, "IHDR", &header[0], (int64)kHeaderBytes);
+		PutChunk(out, "IDAT", compressed.Data(), compressed.Count());
+		PutChunk(out, "IEND", nullptr, 0);
+	}
+}

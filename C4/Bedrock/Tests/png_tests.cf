@@ -1,0 +1,392 @@
+// Image: PNG read for every color type and bit depth, interlaced or not, with palettes and tRNS (files written by
+// hand with each combination), written and read back at every level, RGB for opaque images, and damaged files refused.
+
+include "bedrock.ch"
+
+// gray, 1 bit, a transparent key: 5x3.
+
+const uint8[143] kGray1Png = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	1u, 0u, 0u, 0u, 0u, 115u, 77u, 248u, 85u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 2u, 116u, 82u, 78u, 83u, 0u, 0u, 118u, 147u, 205u, 56u, 0u, 0u, 0u,
+	7u, 73u, 68u, 65u, 84u, 120u, 218u, 99u, 100u, 96u, 104u, 96u, 231u, 227u, 92u, 63u, 0u, 0u, 0u, 7u, 73u, 68u, 65u, 84u,
+	120u, 0u, 0u, 2u, 108u, 1u, 98u, 199u, 178u, 142u, 146u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[60] kGray1Rgba = {
+	0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 255u, 255u, 255u, 255u,
+	0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 255u, 255u, 255u, 255u, 255u, 255u, 255u, 255u,
+	255u, 255u, 255u, 255u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u
+};
+
+// gray, 16 bits, interlaced, a transparent key: 5x3.
+
+const uint8[175] kGray16InterlacedPng = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	16u, 0u, 0u, 0u, 1u, 89u, 202u, 118u, 241u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 2u, 116u, 82u, 78u, 83u, 240u, 72u, 26u, 40u, 229u, 39u, 0u, 0u, 0u,
+	23u, 73u, 68u, 65u, 84u, 120u, 218u, 99u, 250u, 224u, 193u, 114u, 236u, 9u, 211u, 231u, 110u, 198u, 27u, 61u, 142u, 211u, 68u, 126u,
+	49u, 124u, 8u, 81u, 192u, 181u, 138u, 35u, 0u, 0u, 0u, 23u, 73u, 68u, 65u, 84u, 82u, 96u, 48u, 223u, 246u, 244u, 63u, 139u,
+	97u, 149u, 149u, 141u, 137u, 255u, 107u, 143u, 162u, 64u, 0u, 52u, 122u, 15u, 168u, 249u, 110u, 249u, 253u, 0u, 0u, 0u, 0u, 73u,
+	69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[60] kGray16InterlacedRgba = {
+	240u, 240u, 240u, 0u, 240u, 240u, 240u, 255u, 243u, 243u, 243u, 255u, 34u, 34u, 34u, 255u, 198u, 198u, 198u, 255u, 49u, 49u, 49u, 255u,
+	107u, 107u, 107u, 255u, 159u, 159u, 159u, 255u, 138u, 138u, 138u, 255u, 252u, 252u, 252u, 255u, 216u, 216u, 216u, 255u, 55u, 55u, 55u, 255u,
+	25u, 25u, 25u, 255u, 229u, 229u, 229u, 255u, 45u, 45u, 45u, 255u
+};
+
+// RGB, 8 bits, a transparent key: 5x3.
+
+const uint8[192] kRgb8Png = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	8u, 2u, 0u, 0u, 0u, 212u, 84u, 82u, 175u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 6u, 116u, 82u, 78u, 83u, 0u, 196u, 0u, 231u, 0u, 212u, 95u, 32u, 153u,
+	98u, 0u, 0u, 0u, 29u, 73u, 68u, 65u, 84u, 120u, 218u, 1u, 48u, 0u, 207u, 255u, 3u, 196u, 231u, 212u, 160u, 239u, 45u, 149u,
+	103u, 112u, 10u, 206u, 212u, 161u, 209u, 253u, 2u, 206u, 120u, 239u, 190u, 143u, 113u, 216u, 83u, 151u, 0u, 0u, 0u, 30u, 73u, 68u,
+	65u, 84u, 121u, 151u, 234u, 44u, 59u, 174u, 230u, 37u, 9u, 0u, 2u, 137u, 196u, 233u, 195u, 0u, 61u, 124u, 165u, 105u, 91u, 11u,
+	232u, 233u, 157u, 219u, 140u, 86u, 25u, 222u, 236u, 187u, 50u, 8u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[60] kRgb8Rgba = {
+	196u, 231u, 212u, 0u, 2u, 98u, 151u, 255u, 150u, 152u, 187u, 255u, 85u, 26u, 49u, 255u, 203u, 222u, 21u, 255u, 146u, 95u, 195u, 255u,
+	192u, 241u, 16u, 255u, 45u, 130u, 231u, 255u, 144u, 200u, 23u, 255u, 240u, 231u, 21u, 255u, 27u, 35u, 172u, 255u, 131u, 241u, 77u, 255u,
+	169u, 39u, 80u, 255u, 235u, 211u, 255u, 255u, 217u, 132u, 240u, 255u
+};
+
+// RGB, 16 bits, interlaced, a transparent key: 5x3.
+
+const uint8[241] kRgb16InterlacedPng = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	16u, 2u, 0u, 0u, 1u, 243u, 195u, 190u, 122u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 6u, 116u, 82u, 78u, 83u, 148u, 201u, 192u, 32u, 99u, 62u, 205u, 229u, 84u,
+	71u, 0u, 0u, 0u, 54u, 73u, 68u, 65u, 84u, 120u, 218u, 1u, 97u, 0u, 158u, 255u, 3u, 148u, 201u, 192u, 32u, 99u, 62u, 4u,
+	11u, 145u, 107u, 133u, 142u, 89u, 0u, 42u, 14u, 12u, 140u, 63u, 190u, 1u, 23u, 184u, 139u, 225u, 249u, 52u, 247u, 24u, 245u, 161u,
+	138u, 148u, 212u, 9u, 157u, 208u, 42u, 43u, 3u, 24u, 82u, 130u, 84u, 168u, 124u, 125u, 242u, 41u, 232u, 0u, 0u, 0u, 54u, 73u,
+	68u, 65u, 84u, 80u, 29u, 162u, 119u, 47u, 5u, 2u, 89u, 30u, 47u, 229u, 78u, 30u, 185u, 68u, 60u, 85u, 2u, 209u, 4u, 160u,
+	133u, 192u, 58u, 0u, 73u, 213u, 49u, 35u, 19u, 91u, 74u, 156u, 153u, 105u, 106u, 39u, 128u, 197u, 54u, 18u, 118u, 37u, 63u, 93u,
+	202u, 6u, 107u, 245u, 39u, 43u, 193u, 37u, 3u, 19u, 148u, 23u, 75u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u,
+	130u
+};
+
+const uint8[60] kRgb16InterlacedRgba = {
+	148u, 192u, 99u, 0u, 24u, 130u, 168u, 255u, 42u, 12u, 63u, 255u, 92u, 227u, 131u, 255u, 11u, 107u, 142u, 255u, 160u, 192u, 0u, 255u,
+	117u, 227u, 91u, 255u, 17u, 76u, 130u, 255u, 214u, 94u, 167u, 255u, 51u, 100u, 156u, 255u, 23u, 139u, 249u, 255u, 113u, 177u, 246u, 255u,
+	14u, 128u, 131u, 255u, 21u, 31u, 133u, 255u, 226u, 29u, 173u, 255u
+};
+
+// a palette, 2 bits, partly transparent: 5x3.
+
+const uint8[170] kPalette2Png = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	2u, 3u, 0u, 0u, 0u, 38u, 88u, 45u, 107u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 12u, 80u, 76u, 84u, 69u, 189u, 124u, 92u, 34u, 111u, 52u, 195u, 181u, 246u,
+	134u, 51u, 83u, 126u, 191u, 240u, 84u, 0u, 0u, 0u, 2u, 116u, 82u, 78u, 83u, 156u, 75u, 74u, 105u, 144u, 54u, 0u, 0u, 0u,
+	8u, 73u, 68u, 65u, 84u, 120u, 218u, 99u, 92u, 34u, 195u, 224u, 232u, 132u, 176u, 2u, 157u, 0u, 0u, 0u, 9u, 73u, 68u, 65u,
+	84u, 192u, 148u, 122u, 0u, 0u, 9u, 203u, 2u, 106u, 133u, 134u, 91u, 154u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u,
+	96u, 130u
+};
+
+const uint8[60] kPalette2Rgba = {
+	195u, 181u, 246u, 255u, 195u, 181u, 246u, 255u, 34u, 111u, 52u, 75u, 189u, 124u, 92u, 156u, 134u, 51u, 83u, 255u, 34u, 111u, 52u, 75u,
+	189u, 124u, 92u, 156u, 189u, 124u, 92u, 156u, 34u, 111u, 52u, 75u, 34u, 111u, 52u, 75u, 195u, 181u, 246u, 255u, 195u, 181u, 246u, 255u,
+	34u, 111u, 52u, 75u, 195u, 181u, 246u, 255u, 189u, 124u, 92u, 156u
+};
+
+// a palette, 8 bits, interlaced, partly transparent: 17x9.
+
+const uint8[1022] kPalette8InterlacedPng = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 17u, 0u, 0u, 0u, 9u,
+	8u, 3u, 0u, 0u, 1u, 148u, 49u, 7u, 168u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 2u, 88u, 80u, 76u, 84u, 69u, 144u, 89u, 47u, 20u, 13u, 139u, 59u, 210u, 41u,
+	124u, 218u, 27u, 109u, 40u, 166u, 162u, 129u, 3u, 115u, 39u, 159u, 56u, 66u, 61u, 95u, 52u, 64u, 153u, 99u, 117u, 200u, 82u, 25u,
+	75u, 61u, 121u, 8u, 158u, 231u, 2u, 162u, 146u, 249u, 67u, 66u, 227u, 7u, 164u, 31u, 42u, 250u, 13u, 89u, 5u, 72u, 202u, 109u,
+	250u, 163u, 112u, 235u, 148u, 218u, 125u, 18u, 38u, 165u, 197u, 15u, 56u, 177u, 152u, 235u, 196u, 47u, 185u, 182u, 172u, 44u, 64u, 111u,
+	58u, 153u, 111u, 162u, 114u, 93u, 52u, 155u, 55u, 27u, 245u, 75u, 108u, 150u, 162u, 108u, 98u, 106u, 214u, 141u, 27u, 141u, 153u, 18u,
+	139u, 2u, 233u, 11u, 97u, 139u, 77u, 188u, 136u, 133u, 128u, 102u, 192u, 47u, 204u, 223u, 253u, 214u, 48u, 201u, 243u, 220u, 87u, 45u,
+	220u, 51u, 67u, 22u, 188u, 86u, 253u, 222u, 116u, 22u, 32u, 122u, 93u, 173u, 152u, 80u, 248u, 7u, 63u, 1u, 76u, 31u, 129u, 148u,
+	204u, 77u, 93u, 188u, 182u, 238u, 249u, 74u, 254u, 117u, 243u, 4u, 135u, 99u, 60u, 169u, 115u, 67u, 55u, 143u, 109u, 140u, 101u, 39u,
+	82u, 221u, 3u, 19u, 160u, 19u, 219u, 233u, 157u, 165u, 78u, 229u, 75u, 238u, 17u, 221u, 100u, 112u, 228u, 69u, 24u, 136u, 46u, 99u,
+	4u, 49u, 90u, 25u, 153u, 160u, 152u, 203u, 38u, 39u, 71u, 241u, 73u, 64u, 230u, 49u, 95u, 185u, 91u, 155u, 10u, 85u, 198u, 102u,
+	22u, 7u, 73u, 79u, 177u, 249u, 196u, 2u, 231u, 102u, 58u, 62u, 235u, 134u, 134u, 80u, 118u, 132u, 45u, 138u, 168u, 189u, 35u, 230u,
+	164u, 233u, 73u, 127u, 13u, 29u, 9u, 247u, 209u, 251u, 60u, 234u, 211u, 118u, 210u, 200u, 55u, 91u, 84u, 159u, 172u, 96u, 222u, 68u,
+	121u, 216u, 138u, 48u, 244u, 80u, 147u, 88u, 183u, 116u, 12u, 201u, 200u, 244u, 253u, 4u, 126u, 229u, 204u, 223u, 233u, 213u, 49u, 225u,
+	189u, 188u, 80u, 156u, 100u, 120u, 237u, 100u, 137u, 170u, 27u, 72u, 107u, 133u, 187u, 30u, 219u, 227u, 134u, 26u, 223u, 81u, 71u, 122u,
+	85u, 56u, 132u, 134u, 244u, 50u, 197u, 39u, 135u, 78u, 107u, 228u, 165u, 68u, 192u, 252u, 76u, 214u, 176u, 53u, 91u, 45u, 7u, 230u,
+	146u, 4u, 81u, 41u, 80u, 7u, 142u, 77u, 131u, 212u, 74u, 26u, 232u, 22u, 37u, 67u, 150u, 76u, 199u, 133u, 207u, 34u, 251u, 60u,
+	1u, 165u, 76u, 41u, 103u, 220u, 244u, 108u, 36u, 208u, 209u, 201u, 200u, 69u, 122u, 190u, 129u, 241u, 5u, 235u, 71u, 74u, 88u, 138u,
+	203u, 238u, 233u, 222u, 125u, 30u, 245u, 83u, 85u, 35u, 30u, 139u, 189u, 53u, 151u, 156u, 166u, 189u, 162u, 42u, 199u, 69u, 123u, 7u,
+	181u, 161u, 29u, 227u, 124u, 227u, 123u, 23u, 220u, 145u, 253u, 238u, 113u, 100u, 192u, 27u, 63u, 25u, 81u, 173u, 233u, 105u, 126u, 253u,
+	185u, 100u, 221u, 14u, 165u, 220u, 203u, 242u, 221u, 37u, 187u, 5u, 178u, 165u, 122u, 243u, 40u, 32u, 67u, 35u, 99u, 111u, 216u, 196u,
+	27u, 66u, 254u, 255u, 97u, 43u, 133u, 207u, 122u, 34u, 30u, 222u, 223u, 65u, 15u, 68u, 94u, 17u, 202u, 44u, 137u, 85u, 149u, 99u,
+	0u, 182u, 88u, 36u, 111u, 157u, 92u, 25u, 211u, 186u, 149u, 68u, 15u, 58u, 139u, 161u, 83u, 135u, 241u, 133u, 118u, 127u, 231u, 99u,
+	234u, 202u, 134u, 152u, 147u, 232u, 62u, 235u, 74u, 235u, 245u, 192u, 151u, 192u, 91u, 186u, 74u, 236u, 76u, 221u, 80u, 7u, 198u, 100u,
+	145u, 210u, 243u, 35u, 143u, 101u, 164u, 243u, 232u, 13u, 116u, 159u, 77u, 249u, 11u, 166u, 227u, 98u, 27u, 48u, 209u, 1u, 107u, 249u,
+	4u, 247u, 218u, 67u, 192u, 103u, 57u, 210u, 84u, 52u, 130u, 9u, 29u, 7u, 17u, 233u, 184u, 50u, 230u, 54u, 44u, 92u, 204u, 128u,
+	81u, 112u, 155u, 84u, 2u, 46u, 232u, 32u, 169u, 35u, 15u, 88u, 1u, 116u, 177u, 55u, 33u, 190u, 233u, 0u, 0u, 0u, 100u, 116u,
+	82u, 78u, 83u, 70u, 225u, 118u, 4u, 18u, 81u, 178u, 112u, 20u, 214u, 110u, 209u, 25u, 68u, 177u, 237u, 87u, 101u, 246u, 147u, 51u,
+	48u, 185u, 252u, 16u, 203u, 53u, 75u, 179u, 212u, 121u, 87u, 222u, 120u, 241u, 251u, 176u, 174u, 232u, 49u, 123u, 102u, 143u, 144u, 103u,
+	165u, 226u, 254u, 80u, 199u, 245u, 160u, 38u, 172u, 21u, 115u, 43u, 250u, 92u, 202u, 92u, 39u, 165u, 225u, 227u, 15u, 26u, 31u, 16u,
+	137u, 175u, 23u, 243u, 198u, 150u, 206u, 212u, 167u, 235u, 129u, 159u, 181u, 18u, 120u, 111u, 12u, 131u, 103u, 252u, 160u, 75u, 201u, 167u,
+	153u, 232u, 33u, 13u, 230u, 170u, 100u, 59u, 227u, 215u, 246u, 0u, 0u, 0u, 91u, 73u, 68u, 65u, 84u, 120u, 218u, 1u, 172u, 0u,
+	83u, 255u, 1u, 98u, 205u, 213u, 1u, 53u, 122u, 197u, 0u, 104u, 104u, 1u, 139u, 50u, 3u, 168u, 67u, 23u, 142u, 100u, 3u, 176u,
+	74u, 26u, 30u, 0u, 15u, 153u, 56u, 184u, 2u, 137u, 44u, 92u, 239u, 2u, 30u, 127u, 101u, 12u, 108u, 54u, 85u, 187u, 38u, 2u,
+	72u, 253u, 189u, 115u, 151u, 3u, 254u, 218u, 148u, 0u, 156u, 19u, 83u, 104u, 120u, 75u, 15u, 90u, 2u, 32u, 239u, 198u, 225u, 1u,
+	244u, 248u, 231u, 1u, 33u, 166u, 109u, 76u, 21u, 248u, 4u, 199u, 2u, 238u, 185u, 101u, 254u, 178u, 0u, 0u, 0u, 92u, 73u, 68u,
+	65u, 84u, 105u, 231u, 166u, 190u, 50u, 49u, 190u, 0u, 183u, 199u, 49u, 11u, 136u, 166u, 5u, 69u, 0u, 144u, 10u, 4u, 56u, 40u,
+	141u, 66u, 86u, 19u, 55u, 8u, 60u, 9u, 94u, 50u, 71u, 150u, 3u, 77u, 5u, 23u, 231u, 0u, 92u, 232u, 204u, 117u, 65u, 226u,
+	71u, 53u, 84u, 247u, 24u, 198u, 1u, 64u, 48u, 228u, 188u, 169u, 5u, 235u, 246u, 167u, 3u, 81u, 112u, 114u, 249u, 246u, 85u, 74u,
+	4u, 222u, 3u, 61u, 217u, 143u, 215u, 149u, 155u, 190u, 168u, 240u, 88u, 227u, 199u, 252u, 214u, 140u, 20u, 13u, 71u, 191u, 110u, 199u,
+	63u, 229u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[612] kPalette8InterlacedRgba = {
+	213u, 49u, 225u, 170u, 255u, 97u, 43u, 255u, 186u, 74u, 236u, 255u, 250u, 163u, 112u, 147u, 30u, 219u, 227u, 255u, 164u, 233u, 73u, 120u,
+	85u, 149u, 99u, 255u, 30u, 219u, 227u, 255u, 93u, 173u, 152u, 254u, 67u, 150u, 76u, 255u, 85u, 56u, 132u, 255u, 22u, 7u, 73u, 206u,
+	30u, 219u, 227u, 255u, 227u, 7u, 164u, 237u, 164u, 233u, 73u, 120u, 96u, 222u, 68u, 75u, 109u, 40u, 166u, 18u, 27u, 63u, 25u, 255u,
+	200u, 82u, 25u, 110u, 109u, 40u, 166u, 18u, 169u, 115u, 67u, 43u, 223u, 253u, 214u, 123u, 123u, 23u, 220u, 255u, 136u, 46u, 99u, 26u,
+	251u, 60u, 234u, 131u, 250u, 163u, 112u, 147u, 135u, 99u, 60u, 115u, 95u, 52u, 64u, 20u, 19u, 160u, 19u, 92u, 153u, 99u, 117u, 214u,
+	116u, 12u, 201u, 232u, 31u, 129u, 148u, 245u, 73u, 64u, 230u, 23u, 37u, 187u, 5u, 255u, 27u, 245u, 75u, 121u, 67u, 192u, 103u, 255u,
+	200u, 69u, 122u, 255u, 59u, 210u, 41u, 118u, 237u, 100u, 137u, 255u, 185u, 182u, 172u, 203u, 8u, 158u, 231u, 25u, 91u, 155u, 10u, 198u,
+	134u, 244u, 50u, 255u, 199u, 133u, 207u, 255u, 117u, 243u, 4u, 21u, 75u, 238u, 17u, 225u, 9u, 247u, 209u, 12u, 56u, 66u, 61u, 112u,
+	4u, 247u, 218u, 255u, 228u, 69u, 24u, 15u, 133u, 128u, 102u, 232u, 203u, 242u, 221u, 255u, 127u, 13u, 29u, 111u, 4u, 49u, 90u, 31u,
+	11u, 97u, 139u, 176u, 133u, 128u, 102u, 232u, 164u, 243u, 232u, 255u, 189u, 188u, 80u, 100u, 223u, 253u, 214u, 123u, 105u, 126u, 253u, 255u,
+	92u, 25u, 211u, 255u, 169u, 115u, 67u, 43u, 5u, 235u, 71u, 255u, 34u, 251u, 60u, 255u, 233u, 184u, 50u, 255u, 252u, 76u, 214u, 255u,
+	146u, 4u, 81u, 255u, 85u, 198u, 102u, 150u, 161u, 83u, 135u, 255u, 214u, 141u, 27u, 120u, 227u, 7u, 164u, 237u, 1u, 116u, 177u, 255u,
+	178u, 165u, 122u, 255u, 188u, 182u, 238u, 38u, 67u, 35u, 99u, 255u, 190u, 129u, 241u, 255u, 213u, 49u, 225u, 170u, 203u, 242u, 221u, 255u,
+	169u, 115u, 67u, 43u, 123u, 23u, 220u, 255u, 29u, 7u, 17u, 255u, 81u, 173u, 233u, 255u, 166u, 227u, 98u, 255u, 200u, 55u, 91u, 252u,
+	81u, 112u, 155u, 255u, 221u, 100u, 112u, 227u, 252u, 76u, 214u, 255u, 127u, 13u, 29u, 111u, 31u, 42u, 250u, 87u, 27u, 48u, 209u, 255u,
+	52u, 130u, 9u, 255u, 241u, 133u, 118u, 255u, 223u, 65u, 15u, 255u, 39u, 71u, 241u, 175u, 91u, 155u, 10u, 198u, 111u, 216u, 196u, 255u,
+	200u, 82u, 25u, 110u, 41u, 103u, 220u, 255u, 142u, 77u, 131u, 255u, 85u, 56u, 132u, 255u, 233u, 184u, 50u, 255u, 200u, 82u, 25u, 110u,
+	170u, 27u, 72u, 255u, 227u, 7u, 164u, 237u, 41u, 103u, 220u, 255u, 80u, 248u, 7u, 80u, 141u, 153u, 18u, 241u, 58u, 153u, 111u, 75u,
+	200u, 69u, 122u, 255u, 133u, 128u, 102u, 232u, 124u, 218u, 27u, 4u, 164u, 233u, 73u, 120u, 55u, 143u, 109u, 250u, 29u, 7u, 17u, 255u,
+	164u, 233u, 73u, 120u, 92u, 204u, 128u, 255u, 203u, 242u, 221u, 255u, 165u, 197u, 15u, 185u, 1u, 107u, 249u, 255u, 27u, 245u, 75u, 121u,
+	4u, 49u, 90u, 31u, 190u, 129u, 241u, 255u, 253u, 222u, 116u, 165u, 49u, 95u, 185u, 243u, 108u, 150u, 162u, 87u, 35u, 143u, 101u, 255u,
+	25u, 153u, 160u, 16u, 59u, 210u, 41u, 118u, 127u, 231u, 99u, 255u, 111u, 216u, 196u, 255u, 213u, 49u, 225u, 170u, 200u, 244u, 253u, 33u,
+	133u, 128u, 102u, 232u, 141u, 153u, 18u, 241u, 228u, 69u, 24u, 15u, 37u, 187u, 5u, 255u, 249u, 74u, 254u, 172u, 77u, 249u, 11u, 255u,
+	243u, 40u, 32u, 255u, 1u, 116u, 177u, 255u, 181u, 161u, 29u, 255u, 63u, 1u, 76u, 199u, 232u, 32u, 169u, 255u, 75u, 61u, 121u, 209u,
+	151u, 192u, 91u, 255u, 156u, 166u, 189u, 255u, 14u, 165u, 220u, 255u, 186u, 149u, 68u, 255u, 57u, 210u, 84u, 255u, 162u, 129u, 3u, 81u,
+	15u, 58u, 139u, 255u, 152u, 203u, 38u, 137u, 41u, 80u, 7u, 255u
+};
+
+// gray with alpha, 8 bits: 5x3.
+
+const uint8[157] kGrayAlpha8Png = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	8u, 4u, 0u, 0u, 0u, 241u, 63u, 13u, 115u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 21u, 73u, 68u, 65u, 84u, 120u, 218u, 99u, 124u, 252u, 58u, 160u, 125u, 245u,
+	26u, 205u, 7u, 62u, 129u, 76u, 143u, 222u, 77u, 41u, 15u, 125u, 164u, 176u, 146u, 210u, 0u, 0u, 0u, 21u, 73u, 68u, 65u, 84u,
+	239u, 48u, 135u, 91u, 134u, 169u, 247u, 212u, 122u, 249u, 73u, 54u, 249u, 76u, 93u, 162u, 0u, 21u, 4u, 14u, 205u, 86u, 59u, 1u,
+	47u, 0u, 0u, 0u, 0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[60] kGrayAlpha8Rgba = {
+	227u, 227u, 227u, 235u, 51u, 51u, 51u, 114u, 222u, 222u, 222u, 30u, 7u, 7u, 7u, 254u, 83u, 83u, 83u, 79u, 197u, 197u, 197u, 217u,
+	199u, 199u, 199u, 233u, 51u, 51u, 51u, 13u, 71u, 71u, 71u, 154u, 94u, 94u, 94u, 107u, 82u, 82u, 82u, 163u, 118u, 118u, 118u, 8u,
+	197u, 197u, 197u, 73u, 182u, 182u, 182u, 156u, 232u, 232u, 232u, 128u
+};
+
+// RGBA, 16 bits: 5x3.
+
+const uint8[249] kRgba16Png = {
+	137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u, 0u, 0u, 0u, 13u, 73u, 72u, 68u, 82u, 0u, 0u, 0u, 5u, 0u, 0u, 0u, 3u,
+	16u, 6u, 0u, 0u, 0u, 11u, 166u, 25u, 187u, 0u, 0u, 0u, 34u, 116u, 69u, 88u, 116u, 67u, 111u, 109u, 109u, 101u, 110u, 116u,
+	0u, 97u, 110u, 32u, 97u, 110u, 99u, 105u, 108u, 108u, 97u, 114u, 121u, 32u, 99u, 104u, 117u, 110u, 107u, 32u, 116u, 111u, 32u, 115u,
+	107u, 105u, 112u, 93u, 218u, 220u, 137u, 0u, 0u, 0u, 67u, 73u, 68u, 65u, 84u, 120u, 218u, 1u, 123u, 0u, 132u, 255u, 1u, 19u,
+	91u, 224u, 100u, 4u, 193u, 152u, 210u, 109u, 231u, 14u, 53u, 5u, 241u, 91u, 29u, 68u, 171u, 90u, 13u, 36u, 244u, 247u, 23u, 194u,
+	32u, 152u, 249u, 219u, 201u, 219u, 136u, 171u, 139u, 255u, 98u, 34u, 55u, 104u, 71u, 3u, 211u, 186u, 226u, 210u, 73u, 61u, 35u, 184u,
+	245u, 52u, 106u, 64u, 5u, 88u, 69u, 63u, 10u, 193u, 30u, 151u, 77u, 196u, 0u, 0u, 0u, 67u, 73u, 68u, 65u, 84u, 70u, 126u,
+	241u, 168u, 32u, 106u, 247u, 231u, 164u, 44u, 118u, 113u, 222u, 202u, 229u, 180u, 71u, 102u, 58u, 3u, 165u, 65u, 1u, 230u, 24u, 162u,
+	63u, 152u, 172u, 67u, 19u, 29u, 246u, 135u, 99u, 220u, 127u, 122u, 114u, 200u, 237u, 3u, 207u, 61u, 72u, 122u, 98u, 20u, 188u, 189u,
+	20u, 159u, 59u, 49u, 68u, 44u, 220u, 89u, 46u, 149u, 175u, 2u, 59u, 3u, 95u, 56u, 212u, 87u, 18u, 2u, 104u, 0u, 0u, 0u,
+	0u, 73u, 69u, 78u, 68u, 174u, 66u, 96u, 130u
+};
+
+const uint8[60] kRgba16Rgba = {
+	19u, 224u, 4u, 152u, 128u, 238u, 9u, 243u, 196u, 72u, 45u, 234u, 134u, 224u, 8u, 197u, 49u, 223u, 42u, 45u, 220u, 82u, 75u, 111u,
+	163u, 10u, 47u, 246u, 189u, 111u, 31u, 16u, 152u, 75u, 137u, 72u, 73u, 220u, 147u, 223u, 230u, 162u, 152u, 67u, 3u, 41u, 116u, 189u,
+	203u, 44u, 177u, 55u, 223u, 233u, 80u, 104u, 11u, 66u, 229u, 106u
+};
+
+struct PngVector
+{
+	public const uint8* png;
+	public int64 pngBytes;
+	public const uint8* rgba;
+	public int32 width;
+	public int32 height;
+}
+
+PngVector Vector(const uint8* png, int64 pngBytes, const uint8* rgba, int32 width, int32 height) {
+	PngVector vector;
+	vector.png = png;
+	vector.pngBytes = pngBytes;
+	vector.rgba = rgba;
+	vector.width = width;
+	vector.height = height;
+	return vector;
+}
+
+Core::Array<PngVector> Vectors() {
+	Core::Array<PngVector> vectors;
+	vectors.Push(Vector(&kGray1Png[0], (int64)sizeof(kGray1Png), &kGray1Rgba[0], 5, 3));
+	vectors.Push(Vector(&kGray16InterlacedPng[0], (int64)sizeof(kGray16InterlacedPng), &kGray16InterlacedRgba[0], 5, 3));
+	vectors.Push(Vector(&kRgb8Png[0], (int64)sizeof(kRgb8Png), &kRgb8Rgba[0], 5, 3));
+	vectors.Push(Vector(&kRgb16InterlacedPng[0], (int64)sizeof(kRgb16InterlacedPng), &kRgb16InterlacedRgba[0], 5, 3));
+	vectors.Push(Vector(&kPalette2Png[0], (int64)sizeof(kPalette2Png), &kPalette2Rgba[0], 5, 3));
+	vectors.Push(Vector(&kPalette8InterlacedPng[0], (int64)sizeof(kPalette8InterlacedPng), &kPalette8InterlacedRgba[0], 17, 9));
+	vectors.Push(Vector(&kGrayAlpha8Png[0], (int64)sizeof(kGrayAlpha8Png), &kGrayAlpha8Rgba[0], 5, 3));
+	vectors.Push(Vector(&kRgba16Png[0], (int64)sizeof(kRgba16Png), &kRgba16Rgba[0], 5, 3));
+	return vectors;
+}
+
+bool Holds(const Image::Rgba& image, const PngVector& vector) {
+	return image.width == vector.width && image.height == vector.height &&
+		image.pixels.Count() == (int64)(vector.width * vector.height * 4) &&
+		memcmp((void*)image.pixels.Data(), (void*)vector.rgba, (uint64)image.pixels.Count()) == 0;
+}
+
+bool Fails(const uint8* data, int64 size, const char* why) {
+	Image::Rgba image;
+	Image::ReadResult read = Image::DecodePng(data, size, image);
+	return !read.ok && read.error != nullptr && Core::StringView(read.error) == Core::StringView(why);
+}
+
+void PutBigEndian(Core::Array<uint8>& out, uint32 value) {
+	for (int32 shift = 24; shift >= 0; shift -= 8) out.Push((uint8)((value >> (uint32)shift) & 0xffu));
+}
+
+void PutChunk(Core::Array<uint8>& out, const char* type, const Core::Array<uint8>& body) {
+	PutBigEndian(out, (uint32)body.Count());
+	const int64 typeAt = out.Count();
+	out.Append((const uint8*)type, 4);
+	out.Append(body.Data(), body.Count());
+	PutBigEndian(out, Core::Crc32((const void*)(out.Data() + typeAt), body.Count() + 4));
+}
+
+// A PNG of one row of `width` pixels: the header's fields, its chunks after IHDR given by the caller.
+Core::Array<uint8> Header(uint32 width, uint32 height, uint8 depth, uint8 color) {
+	Core::Array<uint8> png;
+	const uint8[8] signature = { 137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u };
+	png.Append(&signature[0], 8);
+	Core::Array<uint8> ihdr;
+	PutBigEndian(ihdr, width);
+	PutBigEndian(ihdr, height);
+	ihdr.Push(depth);
+	ihdr.Push(color);
+	ihdr.Push(0u);
+	ihdr.Push(0u);
+	ihdr.Push(0u);
+	PutChunk(png, "IHDR", ihdr);
+	return png;
+}
+
+[test("image.png")]
+class PngTests {
+	[test("every_kind_reads")]
+	public static void TestEveryKindReads() {
+		Core::Array<PngVector> vectors = Vectors();
+		int32 wrong = 0;
+		for (int64 i = 0; i < vectors.Count(); ++i) {
+			Image::Rgba image;
+			Image::ReadResult read = Image::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
+			if (!read.ok || !Holds(image, vectors[i])) wrong++;
+		}
+		assert_eq(0, wrong, "gray 1 and 16 bits, RGB 8 and 16, palettes of 2 and 8 bits, gray with alpha, RGBA 16, interlaced or not, with tRNS");
+	}
+
+	[test("written_reads_back")]
+	public static void TestWrittenReadsBack() {
+		Core::Array<PngVector> vectors = Vectors();
+		int32 wrong = 0;
+		for (int64 i = 0; i < vectors.Count(); ++i) {
+			Image::Rgba image;
+			Image::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
+			for (int32 level = Compression::kStoreLevel; level <= Compression::kBestLevel; level += 3) {
+				Core::Array<uint8> png;
+				Image::EncodePng(image, level, png);
+				Image::Rgba back;
+				if (!Image::DecodePng(png.Data(), png.Count(), back).ok || !Holds(back, vectors[i])) wrong++;
+			}
+		}
+		assert_eq(0, wrong, "each image written at four levels reads back the same");
+	}
+
+	[test("opaque_writes_rgb")]
+	public static void TestOpaqueWritesRgb() {
+		Image::Rgba image;
+		image.width = 3;
+		image.height = 2;
+		for (int32 i = 0; i < 6; ++i) {
+			image.pixels.Push((uint8)(i * 40));
+			image.pixels.Push(7u);
+			image.pixels.Push(9u);
+			image.pixels.Push(255u);
+		}
+		Core::Array<uint8> opaque;
+		Image::EncodePng(image, 6, opaque);
+		assert_true(opaque[25] == 2u, "every pixel opaque: RGB");
+		image.pixels[3] = 128u;
+		Core::Array<uint8> translucent;
+		Image::EncodePng(image, 6, translucent);
+		assert_true(translucent[25] == 6u, "one translucent pixel: RGBA");
+		Image::Rgba back;
+		assert_true(Image::DecodePng(translucent.Data(), translucent.Count(), back).ok && back.pixels[3] == 128u, "the alpha kept");
+	}
+
+	[test("damaged")]
+	public static void TestDamaged() {
+		Core::Array<uint8> png;
+		png.Append(&kRgb8Png[0], (int64)sizeof(kRgb8Png));
+		assert_true(Fails(png.Data(), 7, "not a PNG file"), "too short for the signature");
+		png[0] = 0u;
+		assert_true(Fails(png.Data(), png.Count(), "not a PNG file"), "another signature");
+		png[0] = 137u;
+		png[20] ^= 1u;
+		assert_true(Fails(png.Data(), png.Count(), "a chunk whose CRC does not match"), "a changed header byte");
+		png[20] ^= 1u;
+		int32 cutsRead = 0;
+		for (int64 cut = 0; cut < png.Count(); ++cut) {
+			Image::Rgba image;
+			if (Image::DecodePng(png.Data(), cut, image).ok) cutsRead++;
+		}
+		assert_eq(0, cutsRead, "a file cut anywhere fails");
+		Core::Array<uint8> late;
+		const uint8[8] signature = { 137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u };
+		late.Append(&signature[0], 8);
+		Core::Array<uint8> nothing;
+		PutChunk(late, "IEND", nothing);
+		assert_true(Fails(late.Data(), late.Count(), "a chunk before IHDR"), "no IHDR first");
+		Core::Array<uint8> huge = Header(70000u, 70000u, 8u, 6u);
+		PutChunk(huge, "IEND", nothing);
+		assert_true(Fails(huge.Data(), huge.Count(), "an image of more pixels than Image::kMostPixels"), "too many pixels");
+		Core::Array<uint8> badDepth = Header(1u, 1u, 3u, 2u);
+		PutChunk(badDepth, "IEND", nothing);
+		assert_true(Fails(badDepth.Data(), badDepth.Count(), "a color type and bit depth PNG does not have"), "a depth PNG lacks");
+	}
+
+	[test("palette_index_past_palette")]
+	public static void TestPaletteIndexPastPalette() {
+		Core::Array<uint8> png = Header(2u, 1u, 8u, 3u);
+		Core::Array<uint8> palette;
+		palette.Push(1u);
+		palette.Push(2u);
+		palette.Push(3u);
+		PutChunk(png, "PLTE", palette);
+		const uint8[3] row = { 0u, 0u, 1u };   // filter none, index 0, then index 1 of a one-color palette
+		Core::Array<uint8> compressed;
+		Compression::ZlibCompress(&row[0], 3, 6, compressed);
+		PutChunk(png, "IDAT", compressed);
+		Core::Array<uint8> nothing;
+		PutChunk(png, "IEND", nothing);
+		assert_true(Fails(png.Data(), png.Count(), "a palette index past the palette"), "index 1 of one color");
+	}
+}

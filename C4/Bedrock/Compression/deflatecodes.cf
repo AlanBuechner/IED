@@ -1,0 +1,172 @@
+include "deflatecodes.ch"
+
+namespace Compression
+{
+	int32 LengthIndex(int32 length) { return (int32)kLengthIndex[length - kMinMatch]; }
+
+	int32 DistanceSymbol(int32 distance) {
+		const int32 at = distance - 1;
+		return (int32)(at < 256 ? kDistanceSymbol[at] : kDistanceSymbol[256 + (at >> 7)]);
+	}
+
+	void BuildLengths(const uint32* frequencies, int32 count, int32 limit, uint8* lengths) {
+		Core::Array<uint32> weights;
+		weights.Resize((int64)count);
+		for (int32 i = 0; i < count; i++) weights[i] = frequencies[i];
+		while (true) {
+			int32 longest = OptimalLengths(&weights[0], count, lengths);
+			if (longest <= limit) return;
+			for (int32 i = 0; i < count; i++) if (weights[i] != 0u) weights[i] = (weights[i] + 1u) / 2u;
+		}
+	}
+
+	int32 OptimalLengths(const uint32* weights, int32 count, uint8* lengths) {
+		Core::Array<int32> order;
+		for (int32 i = 0; i < count; i++) {
+			lengths[i] = 0u;
+			if (weights[i] != 0u) order.Push(i);
+		}
+		const int32 used = (int32)order.Count();
+		if (used == 0) return 0;
+		if (used == 1) { lengths[order[0]] = 1u; return 1; }
+		order.SortBy([weights](int32 a, int32 b) -> bool { return weights[a] < weights[b] || (weights[a] == weights[b] && a < b); });
+		// Nodes 0..used-1 are the leaves in weight order, then the merged nodes in the order they are made.
+		Core::Array<uint64> weight;
+		Core::Array<int32> parent;
+		weight.Resize((int64)(2 * used));
+		parent.Resize((int64)(2 * used));
+		for (int32 i = 0; i < used; i++) weight[i] = (uint64)weights[order[i]];
+		int32 leaf = 0;
+		int32 merged = used;
+		for (int32 made = used; made < 2 * used - 1; made++) {
+			int32[2] pick;
+			for (int32 k = 0; k < 2; k++) {
+				if (leaf < used && (merged >= made || weight[leaf] <= weight[merged])) { pick[k] = leaf; leaf++; }
+				else { pick[k] = merged; merged++; }
+			}
+			weight[made] = weight[pick[0]] + weight[pick[1]];
+			parent[pick[0]] = made;
+			parent[pick[1]] = made;
+		}
+		const int32 root = 2 * used - 2;
+		Core::Array<int32> depth;
+		depth.Resize((int64)(2 * used));
+		depth[root] = 0;
+		int32 longest = 0;
+		for (int32 node = root - 1; node >= 0; node--) {
+			depth[node] = depth[parent[node]] + 1;
+			if (node < used) {
+				lengths[order[node]] = (uint8)depth[node];
+				if (depth[node] > longest) longest = depth[node];
+			}
+		}
+		return longest;
+	}
+
+	void BuildCodes(const uint8* lengths, int32 count, uint16* codes) {
+		int32[16] sizes;
+		for (int32 i = 0; i < 16; i++) sizes[i] = 0;
+		for (int32 i = 0; i < count; i++) sizes[lengths[i]] += 1;
+		sizes[0] = 0;
+		int32[16] next;
+		int32 code = 0;
+		for (int32 bits = 1; bits < 16; bits++) {
+			code = (code + sizes[bits - 1]) << 1;
+			next[bits] = code;
+		}
+		for (int32 i = 0; i < count; i++) {
+			const int32 len = (int32)lengths[i];
+			if (len == 0) continue;
+			int32 value = next[len];
+			next[len] += 1;
+			int32 reversed = 0;
+			for (int32 b = 0; b < len; b++) { reversed = (reversed << 1) | (value & 1); value >>= 1; }
+			codes[i] = (uint16)reversed;
+		}
+	}
+
+	CodeSet FixedCodes() {
+		CodeSet codes;
+		codes.literalLengths = &kFixedLiteralLengths[0];
+		codes.literalCodes = &kFixedLiteralCodes[0];
+		codes.distanceLengths = &kFixedDistanceLengths[0];
+		codes.distanceCodes = &kFixedDistanceCodes[0];
+		return codes;
+	}
+
+	CodeSet CodesOf(const BlockCodes& block) {
+		CodeSet codes;
+		codes.literalLengths = &block.literalLengths[0];
+		codes.literalCodes = &block.literalCodes[0];
+		codes.distanceLengths = &block.distanceLengths[0];
+		codes.distanceCodes = &block.distanceCodes[0];
+		return codes;
+	}
+
+	Frequencies BlockFrequencies(const Symbols& symbols) {
+		Frequencies counts = symbols.counts;
+		counts.literals[kEndOfBlockSymbol] += 1u;
+		return counts;
+	}
+
+	int64 DataBits(const Frequencies& counts, const CodeSet& codes) {
+		int64 bits = 0;
+		for (int32 i = 0; i < kLiteralCodes; i++) {
+			bits += (int64)counts.literals[i] * (int64)codes.literalLengths[i];
+			if (i >= 257) bits += (int64)counts.literals[i] * (int64)kMatchLengthExtra[i - 257];
+		}
+		for (int32 i = 0; i < kDistanceCodes; i++) bits += (int64)counts.distances[i] * (int64)(codes.distanceLengths[i] + kMatchDistanceExtra[i]);
+		return bits;
+	}
+
+	LengthRuns RunsOf(const uint8* lengths, int32 count) {
+		LengthRuns runs;
+		int32 i = 0;
+		while (i < count) {
+			const uint8 value = lengths[i];
+			int32 run = 1;
+			while (i + run < count && lengths[i + run] == value) run++;
+			i += run;
+			if (value == 0u) {
+				while (run >= 11) { const int32 take = run < 138 ? run : 138; runs.symbols.Push(18u); runs.extras.Push((uint8)(take - 11)); run -= take; }
+				if (run >= 3) { runs.symbols.Push(17u); runs.extras.Push((uint8)(run - 3)); run = 0; }
+				while (run > 0) { runs.symbols.Push(0u); runs.extras.Push(0u); run--; }
+				continue;
+			}
+			runs.symbols.Push(value);
+			runs.extras.Push(0u);
+			run--;
+			while (run >= 3) { const int32 take = run < 6 ? run : 6; runs.symbols.Push(16u); runs.extras.Push((uint8)(take - 3)); run -= take; }
+			while (run > 0) { runs.symbols.Push(value); runs.extras.Push(0u); run--; }
+		}
+		return runs;
+	}
+
+	DynamicHeader HeaderFor(const BlockCodes& codes) {
+		DynamicHeader header;
+		header.literalCount = kLiteralCodes;
+		while (header.literalCount > 257 && codes.literalLengths[header.literalCount - 1] == 0u) header.literalCount--;
+		header.distanceCount = kDistanceCodes;
+		while (header.distanceCount > 1 && codes.distanceLengths[header.distanceCount - 1] == 0u) header.distanceCount--;
+		for (int32 i = 0; i < header.literalCount; i++) header.lengths[i] = codes.literalLengths[i];
+		for (int32 i = 0; i < header.distanceCount; i++) header.lengths[header.literalCount + i] = codes.distanceLengths[i];
+		header.runs = RunsOf(&header.lengths[0], header.literalCount + header.distanceCount);
+		uint32[19] counts;
+		for (int32 i = 0; i < 19; i++) counts[i] = 0u;
+		for (int64 i = 0; i < header.runs.symbols.Count(); i++) counts[(int32)header.runs.symbols[i]] += 1u;
+		BuildLengths(&counts[0], 19, kMostLengthCodeBits, &header.lengthCodeLengths[0]);
+		BuildCodes(&header.lengthCodeLengths[0], 19, &header.lengthCodeCodes[0]);
+		header.lengthCodeCount = 19;
+		while (header.lengthCodeCount > 4 && header.lengthCodeLengths[(int32)kLengthCodeOrder[header.lengthCodeCount - 1]] == 0u) header.lengthCodeCount--;
+		return header;
+	}
+
+	int64 HeaderBits(const DynamicHeader& header) {
+		int64 bits = 5 + 5 + 4 + 3 * (int64)header.lengthCodeCount;
+		for (int64 i = 0; i < header.runs.symbols.Count(); i++) {
+			const int32 symbol = (int32)header.runs.symbols[i];
+			bits += (int64)header.lengthCodeLengths[symbol] + (symbol == 16 ? 2 : symbol == 17 ? 3 : symbol == 18 ? 7 : 0);
+		}
+		return bits;
+	}
+}

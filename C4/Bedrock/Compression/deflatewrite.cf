@@ -1,0 +1,93 @@
+include "deflatewrite.ch"
+
+namespace Compression
+{
+	void WriteSymbols(BitWriter& into, const Symbols& symbols, const CodeSet& codes) {
+		BitWriter writer = into;
+		const uint32* items = symbols.items.Data();
+		const int64 count = symbols.items.Count();
+		for (int64 i = 0; i < count; i++) {
+			const uint32 item = items[i];
+			if ((item & kMatchFlag) == 0u) {
+				writer.Put((uint32)codes.literalCodes[(int32)item], (int32)codes.literalLengths[(int32)item]);
+				continue;
+			}
+			const int32 length = (int32)((item >> 15) & 511u);
+			const int32 distance = (int32)(item & 32767u) + 1;
+			const int32 lengthIndex = LengthIndex(length);
+			writer.Put((uint32)codes.literalCodes[257 + lengthIndex], (int32)codes.literalLengths[257 + lengthIndex]);
+			writer.Put((uint32)(length - (int32)kMatchLengthBase[lengthIndex]), (int32)kMatchLengthExtra[lengthIndex]);
+			const int32 distanceIndex = DistanceSymbol(distance);
+			writer.Put((uint32)codes.distanceCodes[distanceIndex], (int32)codes.distanceLengths[distanceIndex]);
+			writer.Put((uint32)(distance - (int32)kMatchDistanceBase[distanceIndex]), (int32)kMatchDistanceExtra[distanceIndex]);
+		}
+		writer.Put((uint32)codes.literalCodes[kEndOfBlockSymbol], (int32)codes.literalLengths[kEndOfBlockSymbol]);
+		into = writer;
+	}
+
+	void WriteHeader(BitWriter& writer, const DynamicHeader& header) {
+		writer.Put((uint32)(header.literalCount - 257), 5);
+		writer.Put((uint32)(header.distanceCount - 1), 5);
+		writer.Put((uint32)(header.lengthCodeCount - 4), 4);
+		for (int32 i = 0; i < header.lengthCodeCount; i++) writer.Put((uint32)header.lengthCodeLengths[(int32)kLengthCodeOrder[i]], 3);
+		for (int64 i = 0; i < header.runs.symbols.Count(); i++) {
+			const int32 symbol = (int32)header.runs.symbols[i];
+			writer.Put((uint32)header.lengthCodeCodes[symbol], (int32)header.lengthCodeLengths[symbol]);
+			if (symbol >= 16) writer.Put((uint32)header.runs.extras[i], symbol == 16 ? 2 : symbol == 17 ? 3 : 7);
+		}
+	}
+
+	void WriteStored(BitWriter& writer, const uint8* data, int64 start, int64 end, bool last) {
+		int64 at = start;
+		while (true) {
+			const int64 size = end - at < kMostStoredBytes ? end - at : kMostStoredBytes;
+			const bool final = last && at + size == end;
+			writer.Put(final ? 1u : 0u, 1);
+			writer.Put(0u, 2);
+			writer.Align();
+			writer.Put((uint32)size, 16);
+			writer.Put((uint32)(size ^ 0xffff), 16);
+			writer.PutBytes(data + at, size);
+			at += size;
+			if (at >= end) return;
+		}
+	}
+
+	int64 StoredBits(int64 bytes, int32 pending) {
+		const int64 blocks = bytes == 0 ? 1 : (bytes + kMostStoredBytes - 1) / kMostStoredBytes;
+		return blocks * (3 + 7 + 32) + bytes * 8 + (int64)(8 - pending);
+	}
+
+	void WriteBlock(BitWriter& writer, const uint8* data, const Symbols& symbols, bool last) {
+		writer.Reserve((symbols.end - symbols.start) + 6 * symbols.items.Count() + kBlockRoomSlack);
+		const Frequencies counts = BlockFrequencies(symbols);
+		BlockCodes dynamic;
+		BuildLengths(&counts.literals[0], kLiteralCodes, kMostCodeBits, &dynamic.literalLengths[0]);
+		uint32[30] distances;
+		bool anyDistance = false;
+		for (int32 i = 0; i < kDistanceCodes; i++) { distances[i] = counts.distances[i]; anyDistance = anyDistance || distances[i] != 0u; }
+		if (!anyDistance) distances[0] = 1u; // a block without matches still has a distance code
+		BuildLengths(&distances[0], kDistanceCodes, kMostCodeBits, &dynamic.distanceLengths[0]);
+		BuildCodes(&dynamic.literalLengths[0], kLiteralCodes, &dynamic.literalCodes[0]);
+		BuildCodes(&dynamic.distanceLengths[0], kDistanceCodes, &dynamic.distanceCodes[0]);
+		const DynamicHeader header = HeaderFor(dynamic);
+		const CodeSet fixed = FixedCodes();
+		const CodeSet own = CodesOf(dynamic);
+		const int64 dynamicBits = 3 + HeaderBits(header) + DataBits(counts, own);
+		const int64 fixedBits = 3 + DataBits(counts, fixed);
+		const int64 storedBits = StoredBits(symbols.end - symbols.start, writer.count);
+		if (storedBits <= dynamicBits && storedBits <= fixedBits) {
+			WriteStored(writer, data, symbols.start, symbols.end, last);
+			return;
+		}
+		writer.Put(last ? 1u : 0u, 1);
+		if (fixedBits <= dynamicBits) {
+			writer.Put(1u, 2);
+			WriteSymbols(writer, symbols, fixed);
+			return;
+		}
+		writer.Put(2u, 2);
+		WriteHeader(writer, header);
+		WriteSymbols(writer, symbols, own);
+	}
+}

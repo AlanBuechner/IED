@@ -1299,13 +1299,38 @@ byte, sentences, runs, noise, a mix, matches 32 KiB back) read back raw and wrap
 
 ---
 
-## 20. Tests
+## 20. Images (`Image/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 70 files, 618 tests (array, list, initlist,
+**Status:** **Implemented**. Plain C4 over Compression (section 19), checked against PNG files of every kind and read
+back by PIL.
+
+| Header | Gives |
+|---|---|
+| `png.ch` | `Image::DecodePng(data, size, image)`: a PNG file's image as an `Rgba` (`width`, `height`, `pixels`: four bytes a pixel, rows top to bottom); a `ReadResult` (`ok`, `error`). `Image::EncodePng(image, level, out)`: the image as a PNG file appended to `out`, at a Compression level |
+
+Reading takes every color type (gray, RGB, a palette, gray with alpha, RGBA) at every bit depth PNG has (1, 2, 4,
+8 and 16), a palette's and a gray or RGB image's tRNS transparency, and Adam7 interlacing; low depths stretch to the
+full byte, 16-bit samples keep their high byte. Every chunk's CRC is checked; ancillary chunks are skipped and an
+unknown critical one fails, as do a damaged or cut file, a depth PNG lacks, a palette index past the palette and an
+image of more than `kMostPixels` (2^28). Writing makes RGB when every pixel is opaque and RGBA otherwise, each row with
+the filter whose bytes sum least (libpng's heuristic). Four-byte pixels unfilter a pixel at a time, their channels in
+SIMD lanes. A 1920x1080 RGBA screenshot reads in about 23 ms (PIL: 28) and writes in about 118 ms at level 5, 2%
+smaller than PIL's level 6 (120 ms).
+
+Covered by `Bedrock/Tests/png_tests.cf`: eight files written by hand (gray at 1 and 16 bits, RGB at 8 and 16, palettes
+of 2 and 8 bits, gray with alpha, RGBA at 16 bits, interlaced or not, with tRNS), each written back at four levels,
+RGB chosen for opaque images, and damaged files (signature, CRC, every cut, no IHDR first, too many pixels, a depth
+PNG lacks, a palette index past the palette).
+
+---
+
+## 21. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 71 files, 623 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1318,7 +1343,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 21. Missing versus the plan
+## 22. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 
