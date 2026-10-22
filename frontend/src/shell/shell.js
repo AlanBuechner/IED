@@ -15,7 +15,7 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { treeOf, withTree, withoutTree, withActivity, withPhonePane, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
+import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
@@ -24,6 +24,10 @@ import { DesktopChrome } from "./desktop.js";
 import { PhoneChrome } from "./phone.js";
 
 const AUTH_PROBE_AFTER_MS = 1500;
+// How long after its plugins load a window waits before it switches the layout back to the default mode: their context
+// keys come with their topics' snapshots, so until then "no mode holds" may only mean "not heard yet" (docs/15
+// "Window layouts").
+const MODE_SETTLE_MS = 2000;
 const WORKSPACE_KEY = "ied.wsId";
 
 export class Shell {
@@ -62,6 +66,9 @@ export class Shell {
 		this.workspace = workspaceInfo();
 		this.layout = null;
 		this.doc = emptyDocument();
+		this.wantedMode = DEFAULT_MODE;  // the layout mode the context keys ask for (docs/15 "Window layouts")
+		this.modeTimer = null;
+		this.modeSettled = false;
 		this.deviceClass = deviceClassOf(window.innerWidth);
 		this.chrome = null;
 		this.focus = null;
@@ -70,6 +77,7 @@ export class Shell {
 		this.wsTopic = null;
 		this.serverListeners = new Set();
 		this.views.onChange((entry) => this.chrome && this.chrome.tabChanged(entry));
+		this.context.onChange(() => this.updateMode());
 	}
 
 	async start() {
@@ -83,6 +91,7 @@ export class Shell {
 		window.addEventListener("resize", () => this.resized());
 		window.addEventListener("hashchange", () => location.hash === "#start" && !this.showingStartPage && this.showStartPage());
 		this.context.set("deviceClass", this.deviceClass);
+		this.context.set("layoutMode", DEFAULT_MODE);
 		this.context.set("connected", false);
 		// Inside IED's desktop app (docs/27), which adds window.iedDesktop before the page's scripts.
 		this.context.set("desktopApp", Boolean(window.iedDesktop));
@@ -291,6 +300,13 @@ export class Shell {
 			this.report("The plugins' contributions could not be read: " + e.message, e);
 		}
 		if (this.chrome) this.chrome.contributionsChanged();
+		this.updateMode();
+		clearTimeout(this.modeTimer);
+		this.modeSettled = false;
+		this.modeTimer = setTimeout(() => {
+			this.modeSettled = true;
+			this.reconcileMode();
+		}, MODE_SETTLE_MS);
 		this.render();
 	}
 
@@ -347,6 +363,7 @@ export class Shell {
 	render() {
 		if (!this.chrome || !this.wsId) return;
 		this.context.set("activeActivity", this.currentActivity());
+		this.context.set("layoutMode", this.mode);
 		this.chrome.render();
 	}
 
@@ -373,22 +390,63 @@ export class Shell {
 		return host ? host.id : null;
 	}
 
-	treeOf(activityId) {
-		return this.treeIn(this.doc, activityId);
+	// The layout mode shown: the layout document's, which every window of the device class shows.
+	get mode() {
+		return (this.doc && this.doc.mode) || DEFAULT_MODE;
 	}
 
-	// A tablet starts with its tool windows auto-hidden (docs/15 "Phone layout").
-	treeIn(doc, activityId) {
-		return treeOf(doc, activityId, this.contributions.toolsOf(activityId).map((t) => ({ id: t.id, dock: t.dock })), this.deviceClass === "tablet");
+	treeOf(activityId) {
+		return this.treeIn(this.doc, activityId, this.mode);
+	}
+
+	// The tree of `activityId` in layout mode `mode`, its default placed for that mode; a tablet starts with its tool
+	// windows auto-hidden (docs/15 "Phone layout").
+	treeIn(doc, activityId, mode) {
+		const tools = this.contributions.toolsOf(activityId).map((t) => Object.assign({ id: t.id }, this.contributions.placementOf(t, mode)));
+		return treeOf(doc, activityId, tools, this.deviceClass === "tablet", mode);
 	}
 
 	changeTree(activityId, fn) {
 		if (!this.layout || !activityId) return;
 		this.layout.update((doc) => {
-			const before = this.treeIn(doc, activityId);
+			const mode = doc.mode || DEFAULT_MODE;
+			const before = this.treeIn(doc, activityId, mode);
 			const after = fn(before);
-			return after === before ? doc : withTree(doc, activityId, after);
+			return after === before ? doc : withTree(doc, activityId, after, mode);
 		});
+	}
+
+	// The layout mode the context asks for is the first contributed one whose `when` holds (debugging), else the default;
+	// when it changes, the layout document switches to it, unless another window has already. A window that has just
+	// loaded switches back to the default only once settled.
+	updateMode() {
+		const contributed = this.contributions.layoutModes().find((mode) => this.context.holds(mode.when));
+		const next = contributed ? contributed.id : DEFAULT_MODE;
+		if (next === this.wantedMode) return;
+		this.wantedMode = next;
+		if (this.modeSettled || next !== DEFAULT_MODE) this.reconcileMode();
+	}
+
+	// Switches the layout document to the wanted mode: that mode's trees, with the documents as they were (docs/15
+	// "Window layouts"); nothing when it shows that mode already. A phone's has no trees to switch.
+	reconcileMode() {
+		if (!this.layout || this.deviceClass === "phone") return;
+		const to = this.wantedMode;
+		this.layout.update((doc) => {
+			const from = doc.mode || DEFAULT_MODE;
+			return from === to ? doc : Object.assign(this.withDocumentsCarried(doc, from, to), { mode: to });
+		});
+	}
+
+	withDocumentsCarried(doc, from, to) {
+		const isTool = (ref) => Boolean(this.contributions.toolWindow(ref));
+		let next = doc;
+		for (const activity of this.contributions.activities) {
+			if (activity.view) continue;
+			const carried = T.withDocumentsOf(this.treeIn(doc, activity.id, to), this.treeIn(doc, activity.id, from), isTool);
+			next = withTree(next, activity.id, carried, to);
+		}
+		return next;
 	}
 
 	showActivity(activityId) {
@@ -468,7 +526,12 @@ export class Shell {
 			return;
 		}
 		this.layout.update((doc) => withActivity(doc, tool.activity));
-		this.changeTree(tool.activity, (tree) => T.ensureTool(tree, id, tool.dock, true));
+		// One that is not open goes where the mode's default puts it, auto-hidden when that hides it (and so slides out).
+		const place = this.contributions.placementOf(tool, this.mode);
+		this.changeTree(tool.activity, (tree) => {
+			const shown = T.ensureTool(tree, id, place.dock, true, place.group, place.size);
+			return place.autoHide && !T.refsOf(tree).includes(id) ? T.autoHideTab(shown, id) : shown;
+		});
 		this.slideOut(tool.activity, id);
 		requestAnimationFrame(() => this.views.focus(id));
 	}
@@ -573,7 +636,7 @@ export class Shell {
 	resetLayout() {
 		if (!this.layout) return;
 		const activityId = this.currentActivity();
-		this.layout.update((doc) => (this.deviceClass === "phone" ? Object.assign({}, doc, { phone: { pane: null, back: [] } }) : withoutTethers(withoutTree(doc, activityId), T.refsOf(this.treeOf(activityId)))));
+		this.layout.update((doc) => (this.deviceClass === "phone" ? Object.assign({}, doc, { phone: { pane: null, back: [] } }) : withoutTethers(withoutTree(doc, activityId, this.mode), T.refsOf(this.treeOf(activityId)))));
 	}
 
 	phoneBack() {

@@ -5,6 +5,8 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 
+const USAGE_KEPT = 1200;
+
 // A frame's file as a tab knows it: a workspace path, or a file: URI outside the workspace; null for neither.
 export function framePath(frame) {
 	const source = frame && frame.source;
@@ -37,6 +39,10 @@ export class DebugState {
 		this.followed = null;     // the session id whose topic is followed
 		this.thread = null;       // the thread a click in Threads chose; null: the stopped one
 		this.onStop = null;       // fn(frame) when a stop arrives: the shell shows its place
+		// What the program uses once the adapter names its process (docs/25 "Diagnostic Tools"):
+		// {processId, name, samples: [[t ms, cpu %, privateBytes, workingSetBytes]]}; heard with onUsage.
+		this.usage = null;
+		this.usageListeners = new Set();
 	}
 
 	follow(wsId) {
@@ -68,6 +74,7 @@ export class DebugState {
 		this.frames = [];
 		this.threads = [];
 		this.frame = null;
+		this.usageIs(null);
 		this.followed = session ? session.id : null;
 		if (!session) return;
 		const id = session.id;
@@ -75,6 +82,7 @@ export class DebugState {
 			snap: (data) => {
 				if (this.followed !== id) return;
 				this.session = data.session;
+				this.usageIs(data.usage || null);
 				this.stoppedAt(data.frames || [], data.threads || [], false);
 			},
 			evt: (kind, data) => {
@@ -87,6 +95,10 @@ export class DebugState {
 				else if (kind === "dbg.stopped") {
 					this.session = data.session;
 					this.stoppedAt(data.frames || [], data.threads || [], true);
+				}
+				else if (kind === "dbg.usage") {
+					const samples = this.usage ? this.usage.samples : [];
+					this.usageIs({ processId: data.processId, name: data.name, samples: samples.concat([data.sample]).slice(-USAGE_KEPT) });
 				}
 			},
 		});
@@ -105,6 +117,17 @@ export class DebugState {
 		this.listeners.add(fn);
 		fn(this);
 		return () => this.listeners.delete(fn);
+	}
+
+	usageIs(usage) {
+		this.usage = usage;
+		for (const fn of [...this.usageListeners]) fn(usage);
+	}
+
+	onUsage(fn) {
+		this.usageListeners.add(fn);
+		fn(this.usage);
+		return () => this.usageListeners.delete(fn);
 	}
 
 	changed() {

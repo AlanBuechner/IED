@@ -97,6 +97,7 @@
 			"properties": {
 				"activities": { "type": "array", "items": { "$ref": "#/$defs/activity" } },
 				"toolWindows": { "type": "array", "items": { "$ref": "#/$defs/toolWindow" } },
+				"layoutModes": { "type": "array", "items": { "$ref": "#/$defs/layoutMode" } },
 				"commands": { "type": "array", "items": { "$ref": "#/$defs/command" } },
 				"menus": {
 					"type": "object",
@@ -336,7 +337,38 @@
 				"icon": { "$ref": "#/$defs/icon" },
 				"view": { "type": "string" },
 				"defaultDock": { "enum": ["left", "right", "bottom", "document"] },
+				"dockGroup": { "type": "string", "description": "Tool windows of one dock and group share a tab group; another group of the dock goes beside it." },
+				"defaultSize": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1, "description": "The share of the activity's width (left, right) or height (bottom) a new group for it takes; the dock's usual share when absent." },
+				"autoHide": { "type": "boolean", "description": "It starts auto-hidden (docs/15 'Auto-hide')." },
+				"open": { "type": "boolean", "description": "false: the default layout leaves it out; its menu item opens it." },
+				"modes": {
+					"type": "object",
+					"description": "Its place in a layout mode's default (layoutModes), by mode id; what a mode leaves out comes from the fields above.",
+					"additionalProperties": { "$ref": "#/$defs/toolWindowPlacement" }
+				},
 				"activity": { "type": "string", "description": "Activity it belongs to; default 'ied.editor'." },
+				"when": { "$ref": "#/$defs/when" }
+			}
+		},
+		"toolWindowPlacement": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"dock": { "enum": ["left", "right", "bottom", "document"] },
+				"group": { "type": "string" },
+				"size": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+				"autoHide": { "type": "boolean" },
+				"open": { "type": "boolean" }
+			}
+		},
+		"layoutMode": {
+			"type": "object",
+			"required": ["id", "when"],
+			"additionalProperties": false,
+			"description": "A window layout of its own while `when` holds, as VS's debugging layout (docs/15 'Window layouts').",
+			"properties": {
+				"id": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9.-]*$" },
+				"title": { "type": "string" },
 				"when": { "$ref": "#/$defs/when" }
 			}
 		},

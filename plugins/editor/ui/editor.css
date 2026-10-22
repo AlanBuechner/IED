@@ -153,6 +153,14 @@
 .cs-row .cs-name, .cs-row .cs-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cs-arrow { color: var(--marker-current); font-size: 9px; }
 .el-empty { padding: var(--space-4); font-size: var(--font-size-sm); }
+/* Diagnostic Tools: two graphs of the debugged program, stacked */
+.dt { display: flex; flex-direction: column; overflow: auto; }
+.dt-graphs { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) var(--space-4) var(--space-4); }
+.dt-graphs[hidden] { display: none; }
+.dt-section { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.dt-title { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--text-1); }
+.dt-value { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dt-graph { display: block; width: 100%; height: 96px; border: var(--border-width) solid var(--border-0); }
 .lv-name { flex: 0 0 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-type { flex: 0 0 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

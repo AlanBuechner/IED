@@ -60,7 +60,7 @@
 		},
 		"keybindings": [
 			{ "command": "ied.profiler.profile", "key": "alt+f2" },
-			{ "command": "ied.profiler.show", "key": "ctrl+alt+f2" }
+			{ "command": "ied.profiler.show", "key": "ctrl+alt+f2", "when": "!debugState" }
 		],
 		"systemMessageSections": [
 			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures); the profile_* tools read them. Start with profile_diagnose: it lists the problems that stand out (slow frames, hot zones, work on one thread, lock contention, allocations every frame, memory that keeps growing, collections), each with its evidence and the tool that looks closer. Slow or stuttering: profile_hitches, profile_frame, profile_top_zones, profile_find_zone, profile_flame, profile_threads, profile_locks. Memory: profile_memory (growth, a rising floor, collections), profile_leaks (what is never freed), profile_allocations (who allocates, per frame, churn). Drill down with profile_zone (a [ref] other tools print) and profile_timeline (a window in order); profile_plots reads the program's counters, profile_messages its log; profile_compare checks a fix against the capture before it. profile_capture runs the project's Profile task and records; profile_annotate marks a finding on the capture's timeline. Report numbers with their source lines. Read the profiler skill before instrumenting code." }

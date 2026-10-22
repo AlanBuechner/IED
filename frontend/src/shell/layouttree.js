@@ -2,9 +2,10 @@
 // tree and returns a new, normalized one; the argument is never changed.
 //
 // node: {kind: "split", dir: "row" | "column", sizes, children}
-//     | {kind: "tabs", tabs, active, well?, preview?, dock?, autoHidden?, autoHide?, autoHideSize?}
+//     | {kind: "tabs", tabs, active, well?, preview?, dock?, dockGroup?, autoHidden?, autoHide?, autoHideSize?}
 // `well` marks a document group (tabs on top, documents open into it); `preview` is its VS preview tab; `dock` is the
-// region a tool-window group was made for ("left", "right", "bottom"), so a tool window added later finds it.
+// region a tool-window group was made for ("left", "right", "bottom") and `dockGroup` the name it was made for there, so
+// a tool window added later finds it.
 // `autoHidden` are the group's tabs unpinned to the activity edge `autoHide` (VS auto-hide): each keeps its place in the
 // group, out of the layout, and slides out over the documents `autoHideSize` of the dock host wide (or high). A group
 // whose every tab is hidden takes no room.
@@ -118,6 +119,7 @@ function normalizeNode(node, seen) {
 		if (!node.tabs.includes(node.active)) node.active = node.tabs[0] || null;
 		if (node.preview && !node.tabs.includes(node.preview)) delete node.preview;
 		if (!node.well) delete node.well;
+		if (typeof node.dockGroup !== "string" || !node.dockGroup) delete node.dockGroup;
 		const hidden = Array.isArray(node.autoHidden) ? node.tabs.filter((ref) => node.autoHidden.includes(ref)) : [];
 		if (node.well || !hidden.length || !ZONE_DIR[node.autoHide]) clearAutoHide(node);
 		else Object.assign(node, { autoHidden: hidden, autoHideSize: clampShare(node.autoHideSize) });
@@ -199,7 +201,7 @@ export function openTab(tree, ref, options) {
 		return normalize(next);
 	}
 	const chosen = opts.groupPath ? nodeAt(next, opts.groupPath) : null;
-	const target = isGroup(chosen) ? chosen : wellsOf(next)[0] || groupsOf(next)[0];
+	const target = isGroup(chosen) && chosen.well ? chosen : wellsOf(next)[0] || groupsOf(next)[0];
 	const previewAt = opts.preview && target.preview ? target.tabs.indexOf(target.preview) : -1;
 	if (previewAt >= 0) target.tabs[previewAt] = ref;
 	else target.tabs.splice(target.active ? target.tabs.indexOf(target.active) + 1 : target.tabs.length, 0, ref);
@@ -362,9 +364,11 @@ export function setSizes(tree, splitPath, sizes) {
 // ---------------------------------------------------------------------------------------------------------------
 // Tool windows
 
-// The tree with tool window `id` in it, placed by `dock` ("left", "right", "bottom", "document") when it is missing:
-// in the group made for that dock, else in a new one. `activate` makes it the active tab.
-export function ensureTool(tree, id, dock, activate) {
+// The tree with tool window `id` in it, placed by `dock` ("left", "right", "bottom", "document") and `dockGroup` (a
+// name) when it is missing: in the group made for that dock and name, else in a new one beside the dock's other groups
+// (to the right at the bottom, below on a side), else along the edge taking `share` of it (the dock's usual share by
+// default). `activate` makes it the active tab.
+export function ensureTool(tree, id, dock, activate, dockGroup, share) {
 	if (refsOf(tree).includes(id)) return activate ? activateTab(tree, id) : tree;
 	const next = clone(tree);
 	if (dock === "document" || !EDGE_SIZES[dock]) {
@@ -373,7 +377,9 @@ export function ensureTool(tree, id, dock, activate) {
 		if (activate || !well.active) well.active = id;
 		return normalize(next);
 	}
-	const home = groupsOf(next).find((g) => g.dock === dock);
+	const named = dockGroup || null;
+	const docked = groupsOf(next).filter((g) => g.dock === dock);
+	const home = docked.find((g) => (g.dockGroup || null) === named);
 	if (home) {
 		// A region whose every tab is auto-hidden stays hidden.
 		const hiddenRegion = Boolean(home.autoHidden) && home.autoHidden.length === home.tabs.length;
@@ -382,20 +388,55 @@ export function ensureTool(tree, id, dock, activate) {
 		else if (activate || !home.active) home.active = id;
 		return normalize(next);
 	}
-	const made = group([id], { dock });
+	const made = group([id], named ? { dock, dockGroup: named } : { dock });
+	if (docked.length) return normalize(beside(next, docked[docked.length - 1], made, dock === "bottom" ? "right" : "bottom"));
 	if (dock === "bottom") {
 		const well = wellsOf(next)[0];
-		if (well) return normalize(beside(next, well, made, "bottom", EDGE_SIZES.bottom));
+		if (well) return normalize(beside(next, well, made, "bottom", share || EDGE_SIZES.bottom));
 	}
-	return normalize(withEdge(next, made, dock, EDGE_SIZES[dock]));
+	return normalize(withEdge(next, made, dock, share || EDGE_SIZES[dock]));
 }
 
-// The VS starting point: tool windows by their dock around one document group, the first of each group active; with
+// The VS starting point: tool windows ({id, dock, group, size, autoHide, open}) by their dock and group around one document
+// group, the first of each group active, those that ask auto-hidden and those with `open` false left out; with
 // `autoHide` (a tablet), every tool window auto-hidden.
 export function defaultTree(toolWindows, autoHide) {
 	let tree = group([], { well: true });
-	for (const tool of toolWindows) tree = ensureTool(tree, tool.id, tool.dock, false);
+	const placed = toolWindows.filter((tool) => tool.open !== false);
+	for (const tool of placed) tree = ensureTool(tree, tool.id, tool.dock, false, tool.group, tool.size);
+	for (const tool of placed) if (tool.autoHide) tree = autoHideTab(tree, tool.id);
 	return autoHide ? autoHideAll(tree) : tree;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Layout modes (docs/15 "Window layouts")
+
+// The tree `target` of another layout mode with the documents of `source`: source's document area (the smallest subtree
+// holding every document group, its splits as they were) replaces target's, without the tool windows in it, and
+// documents source had among tool windows join the first document group. Target's tool windows stay where they are.
+export function withDocumentsOf(target, source, isTool) {
+	const next = clone(target);
+	for (const g of groupsOf(next)) g.tabs = g.tabs.filter(isTool);
+	const from = clone(source);
+	const area = nodeAt(from, documentAreaPath(from));
+	const strays = groupsOf(from).filter((g) => pathOf(area, g) === null).flatMap((g) => g.tabs.filter((ref) => !isTool(ref)));
+	for (const g of groupsOf(area)) g.tabs = g.tabs.filter((ref) => !isTool(ref));
+	const well = wellsOf(area)[0];
+	if (well) well.tabs.push(...strays);
+	const at = documentAreaPath(next);
+	if (!at.length) return normalize(area);
+	nodeAt(next, at.slice(0, -1)).children[at[at.length - 1]] = area;
+	return normalize(next);
+}
+
+function documentAreaPath(tree) {
+	const paths = wellsOf(tree).map((well) => pathOf(tree, well));
+	if (!paths.length) return [];
+	return paths.reduce((common, path) => {
+		let k = 0;
+		while (k < common.length && k < path.length && common[k] === path[k]) k++;
+		return common.slice(0, k);
+	});
 }
 
 // ---------------------------------------------------------------------------------------------------------------

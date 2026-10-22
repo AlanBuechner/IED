@@ -2,7 +2,9 @@
 sessions of the demo program (dbg.*, 'dbg:<wsId>' and 'dbg:<wsId>:<sessionId>'). The program is src/main.c: it stops
 at each breakpoint in order (one on a line without code binds to the next line with some, one past the end is not
 verified), steps a line with code at a time, prints "hero spawned" and exits with 0 when it runs off its last breakpoint.
-Controls are revision-checked as on the real server."""
+Controls are revision-checked as on the real server. While it lives it reports what it uses, as the real server samples a
+program's process (docs/25 "Diagnostic Tools"): its processor share busy while it runs and idle while it is stopped,
+its memory growing."""
 
 import asyncio
 
@@ -11,6 +13,10 @@ from rpc import RpcError
 PROGRAM = "src/main.c"
 CODE_LINES = [5, 6, 7, 9, 11, 12]
 STEP_DELAY = 0.15
+USAGE_INTERVAL = 0.5
+USAGE_KEPT = 1200
+PROCESS_ID = 4242
+PROCESS_NAME = "demo.exe"
 VARIABLES = {
 	1000: [{"name": "player", "value": "{name=\"hero\" position={x=0 y=0}}", "type": "Player", "variablesReference": 1001},
 		{"name": "renderer", "value": "0x000001f4a2b0e000", "type": "Renderer*", "variablesReference": 0}],
@@ -36,6 +42,7 @@ class Session:
 		self.reason = ""
 		self.exit_code = None
 		self.output = []
+		self.samples = []
 
 	@property
 	def topic(self):
@@ -48,6 +55,11 @@ class Session:
 		stop = {"threadId": 1, "reason": self.reason, "description": ""} if self.state == "stopped" else None
 		return {"id": self.session_id, "name": self.name, "project": "demo", "type": "mock", "state": self.state, "revision": self.revision,
 			"problem": "", "exitCode": self.exit_code, "stop": stop}
+
+	def usage(self):
+		if not self.samples:
+			return None
+		return {"processId": PROCESS_ID, "name": PROCESS_NAME, "samples": self.samples}
 
 	def frames(self):
 		if self.state != "stopped":
@@ -157,9 +169,25 @@ class Debugger:
 
 	async def launch(self, session):
 		await asyncio.sleep(STEP_DELAY)
+		if not session.live():
+			return   # stopped while it started: an ended session never runs again
 		self.publish_bound(session)
 		self.ran(session)
+		asyncio.ensure_future(self.report_usage(session))
 		await self.run_on(session, -1)
+
+	async def report_usage(self, session):
+		"""A sample every USAGE_INTERVAL while the program lives: [t ms, cpu %, private bytes, working set bytes]."""
+		started = asyncio.get_event_loop().time()
+		mb = 1024 * 1024
+		while session.live():
+			n = len(session.samples)
+			running = session.state == "running"
+			sample = [round((asyncio.get_event_loop().time() - started) * 1000), (18 + 9 * ((n * 7) % 5) / 4) if running else 0.4,
+				min(64 * mb, 38 * mb + n * 300 * 1024), min(70 * mb, 44 * mb + n * 320 * 1024)]
+			session.samples = (session.samples + [sample])[-USAGE_KEPT:]
+			self.server.hub.publish(session.topic, "dbg.usage", {"processId": PROCESS_ID, "name": PROCESS_NAME, "sample": sample})
+			await asyncio.sleep(USAGE_INTERVAL)
 
 	def session(self, p):
 		session = self.sessions.get(p.str("sessionId"))
@@ -176,7 +204,7 @@ class Debugger:
 			raise RpcError("not_found", "no debug configuration %s" % configuration)
 		session = Session("d%d" % (len(self.sessions) + 1), ws.ws_id, configuration)
 		self.sessions[session.session_id] = session
-		self.server.hub.add(session.topic, lambda: {"session": session.summary(), "threads": [{"id": 1, "name": "main"}], "frames": session.frames(), "output": session.output})
+		self.server.hub.add(session.topic, lambda: {"session": session.summary(), "threads": [{"id": 1, "name": "main"}], "frames": session.frames(), "output": session.output, "usage": session.usage()})
 		self.server.outputs.clear(ws.ws_id, "debug")
 		self.changed(session)
 		asyncio.ensure_future(self.launch(session))

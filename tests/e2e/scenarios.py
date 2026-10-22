@@ -22,6 +22,12 @@ def tab_names(run, cls=".tab"):
 	return run.texts(".dock-group.well " + cls + " .name")
 
 
+def show_output(page):
+	"""Shows the Output window: auto-hidden by default, it slides out (docs/15 "Window layouts")."""
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.output' })")
+	page.wait_for_selector("select[aria-label='Show output from']")
+
+
 def drag(page, start, end, steps=12):
 	page.mouse.move(*start)
 	page.mouse.down()
@@ -43,13 +49,13 @@ def shell_chrome(run):
 	check(run.texts(".menubar .mi")[:3] == ["File", "Edit", "View"], "the menu bar in VS order: %s" % run.texts(".menubar .mi"))
 	if run.viewport == "tablet":
 		check(run.texts(".ah-left .ah-tab") == ["Solution Explorer"], "a tablet starts with its tool windows auto-hidden: %s" % run.texts(".ah-left .ah-tab"))
-		check("Output" in run.texts(".ah-bottom .ah-tab"), "Output on the bottom strip: %s" % run.texts(".ah-bottom .ah-tab"))
 		page.click(".ah-left .ah-tab:has-text('Solution Explorer')")
 		page.wait_for_selector(".ah-flyout .tree-row:has-text('README.md')")
 	else:
 		page.wait_for_selector(".tree-row:has-text('README.md')")
-		check("Solution Explorer" in run.texts(".panel-title"), "Solution Explorer docked")
-		check("Output" in run.texts(".panel-title"), "Output docked")
+		check(run.texts(".dock .panel-title") == ["Solution Explorer"], "Solution Explorer docked: %s" % run.texts(".dock .panel-title"))
+	check(run.texts(".ah-right .ah-tab") == ["Output"], "Output auto-hidden on the right: %s" % run.texts(".ah-tab"))
+	check(run.texts(".ah-bottom .ah-tab") == ["Error List", "Find in Files"], "Error List and Find in Files at the bottom: %s" % run.texts(".ah-tab"))
 	check(run.texts(".statusbar .conn-state") == ["Ready"], "the status bar says Ready")
 	check(page.is_visible(".menubar .conn.live"), "the title says live")
 	run.shot("loaded")
@@ -166,71 +172,117 @@ def editor_context_menu(run):
 
 @scenario()
 def tool_windows_close_and_come_back(run):
+	"""A closed tool window comes back where the layout's default puts it: Solution Explorer docked and focused, Output
+	auto-hidden and slid out."""
 	page = run.open()
-	page.click(".dock-group.tool:has(.panel-title:has-text('Output')) .panel-title button[aria-label='Close Output']")
-	page.wait_for_selector(".panel-title:has-text('Output')", state="detached")
+	page.click(".dock-group.tool:has(.panel-title:has-text('Solution Explorer')) .panel-title button[aria-label='Close Solution Explorer']")
+	page.wait_for_selector(".panel-title:has-text('Solution Explorer')", state="detached")
+	page.click(".ah-right .ah-tab:has-text('Output')")
+	page.click(".ah-flyout .panel-title button[aria-label='Close Output']")
+	page.wait_for_selector(".ah-tab:has-text('Output')", state="detached")
 	run.shot("closed")
 	page.click(".dock-group.well")
 	page.keyboard.press("Control+Alt+O")
-	page.wait_for_selector(".panel-title:has-text('Output')")
+	page.wait_for_selector(".ah-flyout .panel-title:has-text('Output')")
+	check(run.texts(".ah-right .ah-tab") == ["Output"], "back on the right edge: %s" % run.texts(".ah-tab"))
 	page.keyboard.press("Control+Alt+L")
+	page.wait_for_selector(".dock .panel-title:has-text('Solution Explorer')")
 	page.wait_for_function("document.activeElement.closest('.view') && document.activeElement.closest('.view').dataset.ref === 'ied.explorer'", timeout=5000)
+	page.wait_for_selector(".ah-flyout", state="detached")
 	run.shot("back")
 
 
 @scenario()
 def tool_windows_auto_hide(run):
-	"""VS auto-hide, one tool window at a time (docs/15 "Auto-hide"): the pin on a tool window's title hides it to a strip
-	on its group's edge while the rest of the group stays docked; a group with nothing left docked gives its room to the
-	documents; a strip tab slides the window out over them until a click elsewhere or Escape; the server keeps it hidden;
-	Dock puts it back into its group."""
+	"""VS auto-hide, one tool window at a time (docs/15 "Auto-hide"): a strip tab slides its window out over the
+	documents until a click elsewhere or Escape; Dock puts it into the layout; the pin on a docked window's title hides
+	that window alone, its group's others staying docked; a group with nothing docked gives its room to the documents;
+	the server keeps it all; Auto Hide All, and Reset Window Layout back to the default."""
 	page = run.open()
 	group = ".dock .dock-group.tool:has(.panel-title:has-text('%s'))"
-	page.wait_for_selector(group % "Output")
-	page.click(group % "Output" + " .panel-title button[aria-label='Auto Hide Output']")
-	page.wait_for_selector(".ah-bottom .ah-tab:has-text('Output')")
-	check(run.texts(".ah-tab") == ["Output"], "only Output is hidden: %s" % run.texts(".ah-tab"))
-	page.wait_for_selector(group % "Error List")
-	check("Output" not in run.texts(".dock .tw-tab"), "nor among its group's tabs: %s" % run.texts(".dock .tw-tab"))
+	page.wait_for_selector(".ah-right .ah-tab:has-text('Output')")
 	well = page.locator(".dock-group.well").first.bounding_box()
-	page.click(group % "Solution Explorer" + " .panel-title button[aria-label='Auto Hide Solution Explorer']")
-	page.wait_for_selector(".ah-left .ah-tab:has-text('Solution Explorer')")
-	grown = page.locator(".dock-group.well").first.bounding_box()
-	check(grown["width"] > well["width"] + 100, "the documents took the emptied group's room: %d -> %d" % (well["width"], grown["width"]))
-	run.shot("hidden")
-	errors = page.locator(group % "Error List").bounding_box()
-	page.click(".ah-bottom .ah-tab:has-text('Output')")
+	page.click(".ah-right .ah-tab:has-text('Output')")
 	page.wait_for_selector(".ah-flyout .panel-title:has-text('Output')")
 	time.sleep(0.3)
 	flyout = page.locator(".ah-flyout").bounding_box()
-	check(abs(page.locator(group % "Error List").bounding_box()["height"] - errors["height"]) < 2, "it slides out over the layout, not into it")
-	check(flyout["y"] < errors["y"] + errors["height"] and flyout["height"] > 100, "over the bottom of the layout: %s" % flyout)
+	check(flyout["x"] > well["x"] + 100 and flyout["x"] + flyout["width"] >= well["x"] + well["width"] - 1, "from the right, over the documents: %s" % flyout)
+	check(abs(page.locator(".dock-group.well").first.bounding_box()["width"] - well["width"]) < 2, "over them, not beside them")
 	run.shot("slid-out")
 	page.click(".dock-group.well .dock-body", position={"x": 40, "y": 40})
 	page.wait_for_selector(".ah-flyout", state="detached")
+	for name in ("Error List", "Find in Files"):
+		page.click(".ah-bottom .ah-tab:has-text('%s')" % name)
+		page.click(".ah-flyout .panel-title button[aria-label='Dock %s']" % name)
+		page.wait_for_selector(".ah-flyout", state="detached")
+	page.wait_for_function("[...document.querySelectorAll('.dock .tw-tab')].map((t) => t.textContent).join() === 'Error List,Find in Files'")
+	check(page.locator(".dock-group.well").first.bounding_box()["height"] < well["height"] - 100, "docked, they take room")
+	page.click(group % "Find in Files" + " .panel-title button[aria-label='Auto Hide Find in Files']")
+	page.wait_for_selector(".ah-bottom .ah-tab:has-text('Find in Files')")
+	page.wait_for_selector(group % "Error List")
+	check(run.texts(".ah-tab") == ["Find in Files", "Output"], "only Find in Files is hidden: %s" % run.texts(".ah-tab"))
+	run.shot("one-hidden")
+	page.click(group % "Solution Explorer" + " .panel-title button[aria-label='Auto Hide Solution Explorer']")
+	page.wait_for_selector(".ah-left .ah-tab:has-text('Solution Explorer')")
+	check(page.locator(".dock-group.well").first.bounding_box()["width"] > well["width"] + 100, "the documents took its room")
 	page.click(".ah-left .ah-tab:has-text('Solution Explorer')")
 	page.wait_for_selector(".ah-flyout .tree-row:has-text('README.md')")
 	page.keyboard.press("Escape")
 	page.wait_for_selector(".ah-flyout", state="detached")
 	time.sleep(0.8)
 	run.reload()
-	page.wait_for_selector(".ah-bottom .ah-tab:has-text('Output')")
-	check(run.texts(".ah-tab") == ["Solution Explorer", "Output"], "still hidden after a reload, the server keeps it: %s" % run.texts(".ah-tab"))
+	page.wait_for_selector(".ah-left .ah-tab:has-text('Solution Explorer')")
+	check(run.texts(".ah-tab") == ["Solution Explorer", "Find in Files", "Output"], "the server kept it: %s" % run.texts(".ah-tab"))
 	page.click(".dock-group.well .dock-body", position={"x": 40, "y": 40})
 	page.keyboard.press("Control+Alt+O")
 	page.wait_for_selector(".ah-flyout .panel-title:has-text('Output')")
 	page.click(".ah-flyout .panel-title button[aria-label='Dock Output']")
 	page.wait_for_selector(group % "Output")
-	check("Output" in run.texts(".dock .tw-tab"), "back among its group's tabs: %s" % run.texts(".dock .tw-tab"))
-	check(run.texts(".ah-tab") == ["Solution Explorer"], "Solution Explorer stays hidden: %s" % run.texts(".ah-tab"))
 	page.click("button.mi:has-text('Window')")
 	page.click(".menu .menu-item:has-text('Auto Hide All')")
-	page.wait_for_selector(".ah-bottom .ah-tab:has-text('Error List')")
-	check("Output" in run.texts(".ah-bottom .ah-tab"), "every tool window: %s" % run.texts(".ah-tab"))
+	page.wait_for_selector(".ah-right .ah-tab:has-text('Output')")
+	check(run.texts(".ah-tab") == ["Solution Explorer", "Error List", "Find in Files", "Output"], "every tool window: %s" % run.texts(".ah-tab"))
 	run.shot("all-hidden")
 	page.click("button.mi:has-text('Window')")
 	page.click(".menu .menu-item:has-text('Reset Window Layout')")
-	page.wait_for_selector(".ah-tab", state="detached")
+	page.wait_for_selector(group % "Solution Explorer")
+	check(run.texts(".ah-tab") == ["Error List", "Find in Files", "Output"], "the default again: %s" % run.texts(".ah-tab"))
+
+
+@scenario(targets=("mock",))
+def window_layouts_for_editing_and_debugging(run):
+	"""VS's editing and debugging layouts (docs/15 "Window layouts"): a debug session shows the debugging layout - Output
+	docked at the bottom beside the variables, Diagnostic Tools on the right - with the documents as they were; a change made while debugging is there
+	at the next session; stopping brings the editing layout back."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": [{"line": 5}]})
+	try:
+		open_main_c(run, page)
+		page.evaluate("ied_shell.commands.run('ied.debug.start')")
+		page.wait_for_selector(".statusbar[data-state='debugging']")
+		page.wait_for_selector(".dock .panel-title:has-text('Locals')")
+		titles = run.texts(".dock .panel-title")
+		check(titles == ["Solution Explorer", "Output", "Locals", "Diagnostic Tools"], "the debugging layout: %s" % titles)
+		check(run.texts(".dock .tw-tab") == ["Output", "Error List", "Call Stack", "Breakpoints", "Locals", "Watch", "Threads"], "its groups: %s" % run.texts(".dock .tw-tab"))
+		check(tab_names(run) == ["main.c"], "the document came along: %s" % tab_names(run))
+		check(run.texts(".ah-tab") == ["Find in Files"], "Find in Files hidden: %s" % run.texts(".ah-tab"))
+		run.shot("debugging")
+		page.click(".dock .dock-group.tool:has(.panel-title:has-text('Locals')) .panel-title button[aria-label='Auto Hide Locals']")
+		page.wait_for_selector(".ah-bottom .ah-tab:has-text('Locals')")
+		page.evaluate("ied_shell.commands.run('ied.debug.stop')")
+		page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
+		page.wait_for_selector(".ah-right .ah-tab:has-text('Output')")
+		check(run.texts(".dock .panel-title") == ["Solution Explorer"], "editing again: %s" % run.texts(".dock .panel-title"))
+		check(tab_names(run) == ["main.c"], "with the document: %s" % tab_names(run))
+		page.evaluate("ied_shell.commands.run('ied.debug.start')")
+		page.wait_for_selector(".statusbar[data-state='debugging']")
+		page.wait_for_selector(".ah-bottom .ah-tab:has-text('Locals')")
+		check(page.query_selector(".dock .panel-title:has-text('Locals')") is None, "the debugging layout kept the change")
+		page.evaluate("ied_shell.commands.run('ied.debug.stop')")
+		page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
+	finally:
+		run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
 
 
 @scenario()
@@ -267,6 +319,7 @@ def notifications(run):
 @scenario()
 def output_streams(run):
 	page = run.open()
+	show_output(page)
 	if run.target.kind == "mock":
 		page.select_option("select[aria-label='Show output from']", "build")
 		run.request("task.run", {"wsId": "w1", "task": "build"})
@@ -299,12 +352,14 @@ def resume_after_server_restart(run):
 @scenario(targets=("mock",))
 def reopen_mid_stream(run):
 	page = run.open()
+	show_output(page)
 	page.select_option("select[aria-label='Show output from']", "build")
 	run.request("task.run", {"wsId": "w1", "task": "flood", "params": {"lines": 3000}})
 	run.wait_text(".output-text .line", "line")
 	page.context.close()
 	time.sleep(1.0)
 	page = run.open(fresh=False)
+	show_output(page)
 	page.select_option("select[aria-label='Show output from']", "build")
 	page.wait_for_function("[...document.querySelectorAll('.output-text .line')].some(l => /3000/.test(l.textContent))", timeout=30000)
 	run.shot("reopened")
@@ -775,6 +830,7 @@ def build_from_the_toolbar(run):
 	page.wait_for_selector(".statusbar[data-state='building']")
 	run.wait_text(".statusbar", "Build demo", timeout=10000)
 	run.wait_text(".output-text .line", "Build demo | Debug | x64", timeout=10000)
+	check(page.is_visible(".ah-flyout .panel-title:has-text('Output')"), "the auto-hidden Output slid out with the build")
 	run.shot("building")
 	page.wait_for_function("document.querySelector(\"select[aria-label='Show output from']\") && document.querySelector(\"select[aria-label='Show output from']\").value === 'build'", timeout=10000)
 	run.wait_text(".statusbar", "Build succeeded", timeout=20000)
@@ -877,6 +933,42 @@ def debug_windows(run):
 	page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
 	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
 	run.request("watch.set", {"wsId": ws, "expressions": []})
+
+
+@scenario(targets=("mock",))
+def diagnostic_tools_while_debugging(run):
+	"""Diagnostic Tools (F-DBG-52, docs/25): the debugging layout shows it on the right; it names the program's process
+	and graphs its memory and CPU as the server samples them, busy while it runs and idle at a breakpoint; the samples
+	stay to look at after the session ends."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": [{"line": 9}]})
+	try:
+		open_main_c(run, page)
+		page.evaluate("ied_shell.commands.run('ied.debug.start')")
+		page.wait_for_selector(".statusbar[data-state='debugging']")
+		page.wait_for_selector(".dock .panel-title:has-text('Diagnostic Tools')")
+		run.wait_text(".dt-head", "demo.exe (4242)", timeout=10000)
+		page.wait_for_function("ied_shell.views.entries.get('ied.diagnosticTools').instance.usage.samples.length >= 4", timeout=10000)
+		check("MB private" in run.texts(".dt-value")[0], "the memory now: %s" % run.texts(".dt-value"))
+		box = page.locator(".dock-group.tool:has(.panel-title:has-text('Diagnostic Tools'))").bounding_box()
+		well = page.locator(".dock-group.well").first.bounding_box()
+		check(box["x"] > well["x"] + well["width"] - 2, "on the right of the documents: %s" % box)
+		drawn = page.evaluate("[...document.querySelectorAll('.dt-graph')].map((c) => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v > 0))")
+		check(drawn == [True, True], "both graphs drawn: %s" % drawn)
+		run.shot("graphs")
+		page.click(".dock-group.well .monaco-editor .view-lines")
+		page.keyboard.press("Control+Alt+F2")
+		page.wait_for_function("document.activeElement.closest('.view') && document.activeElement.closest('.view').dataset.ref === 'ied.diagnosticTools'", timeout=5000)
+		page.evaluate("ied_shell.commands.run('ied.debug.stop')")
+		page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.diagnosticTools' })")
+		page.wait_for_selector(".ah-flyout .dt-graphs:not([hidden])")
+		check(run.texts(".dt-head")[0].startswith("Diagnostics session"), "the ended session's samples are still there")
+		time.sleep(0.3)
+		run.shot("after")
+	finally:
+		run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
 
 
 @scenario(viewports=("phone",), targets=("mock",))

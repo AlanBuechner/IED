@@ -1,31 +1,47 @@
-// layoutdoc.js - the whole layout document (docs/15): which activity shows, each dock host's tree, the phone's pane and
-// back stack. Pure, like layouttree.js.
+// layoutdoc.js - the whole layout document (docs/15): which activity shows, each dock host's tree in each layout mode,
+// the phone's pane and back stack. Pure, like layouttree.js.
 
 import { defaultTree, normalize } from "./layouttree.js";
 
 export const LAYOUT_DOC_VERSION = 1;
+// The layout mode whose trees are the document's `activities`; another's are under `modes.<id>.activities`, and the
+// document's `mode` names the one shown, whose trees hold the documents as they are (docs/15 "Window layouts").
+export const DEFAULT_MODE = "default";
 
 export function emptyDocument() {
 	return { v: LAYOUT_DOC_VERSION, activity: null, activities: {}, phone: { pane: null, back: [] } };
 }
 
-// The tree of a dock host: the stored one, or the default from `tools` ([{id, dock}] of the activity), its tool windows
-// auto-hidden with `autoHide` (a tablet's). A tool window the stored tree lacks (closed, or new) comes back when it is
-// shown (ensureTool).
-export function treeOf(doc, activityId, tools, autoHide) {
-	const stored = doc && doc.activities ? doc.activities[activityId] : null;
+// The tree of a dock host in layout mode `mode`: the stored one, or the default from `tools` ([{id, dock, group,
+// autoHide, open}] of the activity, placed for that mode), its tool windows auto-hidden with `autoHide` (a tablet's). A
+// tool window the stored tree lacks (closed, or new) comes back when it is shown (ensureTool).
+export function treeOf(doc, activityId, tools, autoHide, mode) {
+	const held = treesOf(doc, mode);
+	const stored = held ? held[activityId] : null;
 	return stored ? normalize(stored) : defaultTree(tools, autoHide);
 }
 
-export function withTree(doc, activityId, tree) {
-	const next = Object.assign({}, doc, { activities: Object.assign({}, doc.activities, { [activityId]: tree }) });
-	return next;
+function treesOf(doc, mode) {
+	if (!doc) return null;
+	if (!mode || mode === DEFAULT_MODE) return doc.activities || null;
+	return doc.modes && doc.modes[mode] ? doc.modes[mode].activities || null : null;
 }
 
-export function withoutTree(doc, activityId) {
-	const activities = Object.assign({}, doc.activities);
+function withTrees(doc, mode, activities) {
+	if (!mode || mode === DEFAULT_MODE) return Object.assign({}, doc, { activities });
+	const modes = Object.assign({}, doc.modes);
+	modes[mode] = Object.assign({}, modes[mode], { activities });
+	return Object.assign({}, doc, { modes });
+}
+
+export function withTree(doc, activityId, tree, mode) {
+	return withTrees(doc, mode, Object.assign({}, treesOf(doc, mode), { [activityId]: tree }));
+}
+
+export function withoutTree(doc, activityId, mode) {
+	const activities = Object.assign({}, treesOf(doc, mode));
 	delete activities[activityId];
-	return Object.assign({}, doc, { activities });
+	return withTrees(doc, mode, activities);
 }
 
 export function withActivity(doc, activityId) {

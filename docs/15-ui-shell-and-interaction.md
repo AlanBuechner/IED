@@ -191,6 +191,7 @@ The terminal dock and the chat activity are contributions of the `terminal` and 
 ```jsonc
 { "v": 1, "activity": "ied.editor",
   "activities": { "ied.editor": <node> },
+  "mode": "debug", "modes": { "debug": { "activities": { "ied.editor": <node> } } },
   "phone": { "pane": "<ref>", "back": ["<ref>"] } }
 // node: { "kind": "split", "dir": "row" | "column", "sizes": [0.2, 0.8], "children": [<node>, ...] }
 //     | { "kind": "tabs", "tabs": ["<ref>", ...], "active": "<ref>", "well": true, "preview": "<ref>", "dock": "left",
@@ -205,10 +206,10 @@ tabs that are auto-hidden to the activity's edge `autoHide`, and `autoHideSize` 
 (left, right) or height (top, bottom) they take when they slide out. The operations on a tree are pure functions in
 `frontend/src/shell/layouttree.js`.
 
-- No stored layout (revision 0), or one of another `v`, starts from the default the contributions imply: tool windows placed by `defaultDock` (left, right, bottom; `document` joins the well) around one document well. A tablet's default has every tool window auto-hidden.
+- No stored layout (revision 0), or one of another `v`, starts from the default the contributions imply: tool windows placed by `defaultDock` (left, right, bottom; `document` joins the well), `dockGroup`, `autoHide` and `open` around one document well ("Window layouts" below). A tablet's default has every tool window auto-hidden. `modes` holds the trees of the layout modes other than the default one, and `mode` names the one shown (the default when absent).
 - A tab whose ref nothing resolves (its plugin is disabled) stays in the tree, hidden, and comes back with its plugin. A tool window the tree lacks is added where its `defaultDock` says when it is first shown.
 - A split has at least two children and sizes that sum to 1; a group has one active tab; closing the last tab of a group removes the group, except the well, which stays (empty, as in VS).
-- Changes are written with `layout.set` 400 ms after the last one. A conflict retries on the new revision (last writer wins, `docs/11`); a `layout.changed` from another client of the same device class is applied unless a drag is under way.
+- Changes are written with `layout.set` 400 ms after the last one, and no later than a second after the first one not yet written. A change made before the server's document has arrived waits for it and is made to it. A conflict retries on the new revision (last writer wins, `docs/11`); a `layout.changed` from another client of the same device class is applied unless a drag is under way.
 - Window > Reset Window Layout writes the default.
 
 **Docking.** Dragging a tab shows targets on the hovered group (center joins it, the four edges split it) and on the activity's edges, with a preview overlay. Splitters resize their neighbors (80 px minimum). A tab's context menu: Close, Close All But This, Close All, Move to New Group Right, Move to New Group Below, Tether with the Tab Beside / Untether, Auto Hide / Dock (tool windows), Copy Reference; a tool window's title bar has the same menu. No floating windows.
@@ -221,6 +222,16 @@ tabs that are auto-hidden to the activity's edge `autoHide`, and `autoHideSize` 
 - Asking for a hidden window (View > Output, Ctrl+Alt+O, a build showing its output, Ctrl+Shift+F) slides it out, as VS does.
 - Its slid-out title bar has Dock (the pin turned sideways) and Close. Auto Hide and Dock are also on the tab's context menu and the Window menu, with Window > Auto Hide All for every tool window of the activity; Reset Window Layout docks them all again.
 - Hidden or docked is layout state, so it follows the person to every window of the device class and survives reloads; which window is slid out belongs to the browser window. A tool window added to a group whose every window is hidden is hidden too. Documents never hide. A phone has no edges: its tool windows are panes, whatever the desktop layout says.
+- Asking for a tool window that is not open puts it where the current layout mode's default says: auto-hidden (and slid out) when that default hides it.
+
+**Window layouts** (VS's design and debug layouts). The editor area has a layout for editing and one for debugging; each is the person's to change, and each is remembered as they left it.
+
+- Plugins contribute **layout modes** (`layoutModes: [{id, title, when}]`); the current mode is the first, in load order, whose `when` holds, else the default one. The shell sets the `layoutMode` context key. The editor plugin's `debug` mode holds while `debugState` (a debug session lives).
+- Each mode keeps its own tree per activity: the default mode's in `activities`, another's in `modes.<id>.activities`; a mode without one starts from its default. The layout document's `mode` is the one shown, so every window of the device class shows the same: a window switches the document when the mode it works out changes (another window may have switched it already). Only a switch back to the default waits until 2 s after the window's plugins load, since until their context keys arrive with their topics "no mode holds" may mean "not heard yet"; then the window makes the document agree with it, which also covers a session that ended while no window was open.
+- The documents follow the person across a switch: the new mode's tree gets the old one's document area (the smallest subtree holding every document group, its splits and tabs as they were) in place of its own, and keeps its tool windows where they were in that mode. Documents the old tree had among tool windows go to the first document group.
+- A mode's default comes from each tool window's placement: `defaultDock`, `dockGroup` (tool windows of one dock and group share a tab group; another group of the same dock goes beside it, to the right at the bottom and below on a side), `defaultSize` (the share of the activity's width or height a new group for it takes), `autoHide` and `open` (false: left out, its menu item opens it), each overridable for a mode under `modes.<id>` (`dock`, `group`, `size`, `autoHide`, `open`).
+- As shipped: **editing** has Solution Explorer docked on the left, Output auto-hidden on the right edge (sliding out 40% of the width), Error List and Find in Files auto-hidden at the bottom, and the debugger's windows closed. **Debugging** has Solution Explorer on the left, Output, Error List, Call Stack and Breakpoints docked at the bottom beside Locals, Watch and Threads, Diagnostic Tools on the right (the program's memory and CPU, `docs/25` "Diagnostic Tools"), and Find in Files hidden. Window > Reset Window Layout resets the current mode's.
+- Starting a build shows Output, as VS does: docked, it comes to the front of its group; auto-hidden, it slides out.
 
 **Commands and keys.**
 

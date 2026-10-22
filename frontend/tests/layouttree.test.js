@@ -221,6 +221,67 @@ test("layout: auto-hide all, sizes and the normal form of hidden tabs", () => {
 	assertEqual(odd.children[3].autoHide, undefined);
 });
 
+test("layout: a mode's default places tool windows by dock and group, hides those that ask, leaves out the closed", () => {
+	const editing = [
+		{ id: "explorer", dock: "left" },
+		{ id: "output", dock: "right", autoHide: true, size: 0.4 },
+		{ id: "errors", dock: "bottom", autoHide: true },
+		{ id: "locals", dock: "bottom", open: false },
+	];
+	const tree = L.defaultTree(editing);
+	assertEqual(L.groupOf(tree, "output").autoHideSize, 0.4, "it slides out as large as its default size");
+	assertEqual(shape(tree), "row(G[explorer|explorer] column(W[] G[errors|errors]^bottom(errors)) G[output|output]^right(output))");
+	assertEqual(L.refsOf(tree).includes("locals"), false, "a closed one is left out");
+	const debugging = [
+		{ id: "explorer", dock: "left" },
+		{ id: "output", dock: "bottom", group: "output" },
+		{ id: "errors", dock: "bottom", group: "output" },
+		{ id: "locals", dock: "bottom", group: "variables" },
+		{ id: "watch", dock: "bottom", group: "variables" },
+		{ id: "find", dock: "bottom", autoHide: true },
+	];
+	const debug = L.defaultTree(debugging);
+	assertEqual(shape(debug), "row(G[explorer|explorer] column(W[] row(G[output,errors|output] G[locals,watch|locals] G[find|find]^bottom(find))))", "groups of one dock side by side");
+	assertEqual(L.groupOf(debug, "watch").dockGroup, "variables");
+	const sides = L.ensureTool(L.ensureTool(L.defaultTree([]), "a", "left", false, "one"), "b", "left", false, "two");
+	assertEqual(shape(sides), "row(column(G[a|a] G[b|b]) W[])", "on a side, one below the other");
+	assertEqual(shape(L.ensureTool(sides, "c", "left", false, "two")), "row(column(G[a|a] G[b,c|b]) W[])", "a name finds its group");
+});
+
+test("layout: switching modes carries the documents, and the mode keeps its tool windows", () => {
+	const isTool = (ref) => !ref.includes(":");
+	let editing = L.defaultTree([{ id: "explorer", dock: "left" }, { id: "output", dock: "right", autoHide: true }]);
+	editing = L.openTab(editing, "doc:a");
+	editing = L.openTab(editing, "doc:b");
+	editing = L.moveTab(editing, "doc:b", L.pathOf(editing, L.wellsOf(editing)[0]), "right");
+	editing = L.moveTab(editing, "doc:a", L.pathOf(editing, L.groupOf(editing, "explorer")), "center");
+	editing = L.openTab(editing, "doc:c", { groupPath: L.pathOf(editing, L.groupOf(editing, "doc:b")) });
+	let debug = L.defaultTree([{ id: "explorer", dock: "left" }, { id: "output", dock: "bottom" }]);
+	debug = L.openTab(debug, "doc:stale");
+	const carried = L.withDocumentsOf(debug, editing, isTool);
+	assertEqual(shape(carried), "row(G[explorer|explorer] column(W[doc:b,doc:c,doc:a|doc:c] G[output|output]))", "the documents as they were, a stray one into the documents, none stale");
+	assertTrue(sizesHold(carried));
+	const split = L.moveTab(carried, "doc:c", L.pathOf(carried, L.groupOf(carried, "doc:c")), "right");
+	const back = L.withDocumentsOf(editing, split, isTool);
+	assertEqual(shape(back), "row(G[explorer|explorer] W[doc:b,doc:a|doc:a] W[doc:c|doc:c] G[output|output]^right(output))", "back again: the documents split as they were left, editing's tool windows");
+	assertEqual(L.isAutoHidden(back, "output"), true, "Output still hidden in the editing layout");
+});
+
+test("layout doc: each layout mode keeps its own trees", () => {
+	const tools = [{ id: "explorer", dock: "left" }, { id: "output", dock: "bottom" }];
+	let doc = D.emptyDocument();
+	const debugTree = L.openTab(D.treeOf(doc, "ed", tools, false, "debug"), "doc:a");
+	doc = D.withTree(doc, "ed", debugTree, "debug");
+	assertEqual(D.treeOf(doc, "ed", tools, false, "debug"), debugTree, "stored under modes.debug");
+	assertEqual(doc.activities, {}, "the default mode's untouched");
+	assertEqual(shape(D.treeOf(doc, "ed", tools, false, D.DEFAULT_MODE)), shape(L.defaultTree(tools)), "the default mode starts from its default");
+	doc = D.withTree(doc, "ed", L.defaultTree(tools), D.DEFAULT_MODE);
+	assertTrue(Boolean(doc.activities.ed) && Boolean(doc.modes.debug.activities.ed), "both kept");
+	doc = D.withoutTree(doc, "ed", "debug");
+	assertEqual(doc.modes.debug.activities, {}, "reset one mode");
+	assertTrue(Boolean(doc.activities.ed), "not the other");
+});
+
 test("layout: a tab opens beside another, in a new group when there is no other", () => {
 	let tree = L.normalize(L.group(["doc:a.md", "doc:b"], { well: true, active: "doc:a.md" }));
 	tree = L.openBeside(tree, "doc:a.md", "mdpreview:a.md");

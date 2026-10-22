@@ -22,6 +22,7 @@ import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView
 import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath, hoverExpression } from "./debug.js";
 import { BreakpointMargin } from "./breakpointmargin.js";
 import { CallStack as CallStackView, Locals as LocalsView, Watch as WatchView, Threads as ThreadsView, BreakpointsWindow } from "./debugviews.js";
+import { DiagnosticTools as DiagnosticToolsView } from "./diagtools.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -338,6 +339,10 @@ export function Watch(ctx) {
 
 export function Threads(ctx) {
 	return new ThreadsView(ctx, debug);
+}
+
+export function DiagnosticTools(ctx) {
+	return new DiagnosticToolsView(ctx, debug);
 }
 
 export function Breakpoints(ctx) {

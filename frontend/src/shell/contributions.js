@@ -105,6 +105,25 @@ export class Contributions {
 		return this.toolWindows.filter((t) => t.activity === activityId && this.shell.context.holds(t.when));
 	}
 
+	// Where layout mode `mode`'s default puts tool window `tool` (docs/15 "Window layouts"): {dock, group, size, autoHide,
+	// open}, from its `modes.<mode>` over its own fields.
+	placementOf(tool, mode) {
+		const own = tool.modes && tool.modes[mode] ? tool.modes[mode] : {};
+		const size = own.size !== undefined ? own.size : tool.defaultSize;
+		return {
+			dock: DOCKS.has(own.dock) ? own.dock : tool.dock,
+			group: own.group !== undefined ? own.group : tool.dockGroup || null,
+			size: Number.isFinite(size) && size > 0 && size < 1 ? size : null,
+			autoHide: own.autoHide !== undefined ? own.autoHide === true : tool.autoHide === true,
+			open: own.open !== undefined ? own.open !== false : tool.open !== false,
+		};
+	}
+
+	// The layout modes, in load order: [{id, title, when}].
+	layoutModes() {
+		return this.of("layoutModes").map((entry) => entry.value).filter((mode) => mode && typeof mode.id === "string");
+	}
+
 	plugin(id) {
 		return this.plugins.find((p) => p.id === id) || null;
 	}

@@ -1,10 +1,12 @@
 // debug.test.js - which session the debugger follows, a frame's file and place, and the breakpoint margin's decorations
-// (bound breakpoints on the line the adapter moved them to, unverified and disabled ones, the current statement).
+// (bound breakpoints on the line the adapter moved them to, unverified and disabled ones, the current statement), and the
+// Diagnostic Tools' scales and graphs.
 
 import { test, assertEqual } from "./harness.js";
 import { currentSession, framePath, isLive, hoverExpression } from "/plugins/ied.editor/ui/debug.js";
 import { marginDecorations } from "/plugins/ied.editor/ui/breakpointmargin.js";
 import { frameWhere, breakpointLabel } from "/plugins/ied.editor/ui/debugviews.js";
+import { niceTop, graphPoints, sessionClock } from "/plugins/ied.editor/ui/diagtools.js";
 
 test("debug: the session followed is the newest live one, else the newest", () => {
 	const ended = { id: "d1", state: "ended" };
@@ -47,4 +49,19 @@ test("debug: the expression a hover names", () => {
 test("debug: a breakpoint's label", () => {
 	assertEqual(breakpointLabel("src/game/main.cf", { line: 6 }), "main.cf, line 7");
 	assertEqual(breakpointLabel("main.cf", { line: 0, condition: "i > 3" }), "main.cf, line 1 when i > 3");
+});
+
+test("debug: Diagnostic Tools scales its graphs to round tops and draws the session so far", () => {
+	assertEqual(niceTop(58, 1), 75, "58 MB on a 75 MB scale");
+	assertEqual(niceTop(23, 10), 25);
+	assertEqual(niceTop(3, 10), 10, "never below the least");
+	assertEqual(niceTop(100, 10), 100, "a round value is its own top");
+	assertEqual(niceTop(101, 10), 200);
+	const samples = [[0, 10, 50], [500, 20, 100], [1000, 40, 200]];
+	assertEqual(graphPoints(samples, 1, 40, 100, 50), [[0, 37.5], [50, 25], [100, 0]], "x by time, y by value");
+	assertEqual(graphPoints(samples, 2, 100, 100, 50)[2], [100, 0], "above the top stays on it");
+	assertEqual(graphPoints([], 1, 10, 100, 50), []);
+	assertEqual(sessionClock(65000), "1:05");
+	assertEqual(sessionClock(3723000), "1:02:03");
+	assertEqual(sessionClock(0), "0:00");
 });

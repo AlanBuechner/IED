@@ -39,14 +39,18 @@
 		],
 		"toolWindows": [
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
-			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" },
-			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" },
-			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" },
-			{ "id": "ied.callStack", "title": "Call Stack", "icon": "$(debug-stackframe)", "view": "CallStack", "defaultDock": "bottom" },
-			{ "id": "ied.locals", "title": "Locals", "icon": "$(symbol-variable)", "view": "Locals", "defaultDock": "bottom" },
-			{ "id": "ied.watch", "title": "Watch", "icon": "$(eye)", "view": "Watch", "defaultDock": "bottom" },
-			{ "id": "ied.threads", "title": "Threads", "icon": "$(list-flat)", "view": "Threads", "defaultDock": "bottom" },
-			{ "id": "ied.breakpoints", "title": "Breakpoints", "icon": "$(circle-filled)", "view": "Breakpoints", "defaultDock": "bottom" }
+			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "right", "defaultSize": 0.4, "autoHide": true, "modes": { "debug": { "dock": "bottom", "group": "output", "size": 0.3, "autoHide": false } } },
+			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom", "autoHide": true, "modes": { "debug": { "dock": "bottom", "group": "output", "autoHide": false } } },
+			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom", "autoHide": true },
+			{ "id": "ied.callStack", "title": "Call Stack", "icon": "$(debug-stackframe)", "view": "CallStack", "defaultDock": "bottom", "open": false, "modes": { "debug": { "dock": "bottom", "group": "output", "open": true } } },
+			{ "id": "ied.locals", "title": "Locals", "icon": "$(symbol-variable)", "view": "Locals", "defaultDock": "bottom", "open": false, "modes": { "debug": { "dock": "bottom", "group": "variables", "open": true } } },
+			{ "id": "ied.watch", "title": "Watch", "icon": "$(eye)", "view": "Watch", "defaultDock": "bottom", "open": false, "modes": { "debug": { "dock": "bottom", "group": "variables", "open": true } } },
+			{ "id": "ied.threads", "title": "Threads", "icon": "$(list-flat)", "view": "Threads", "defaultDock": "bottom", "open": false, "modes": { "debug": { "dock": "bottom", "group": "variables", "open": true } } },
+			{ "id": "ied.breakpoints", "title": "Breakpoints", "icon": "$(circle-filled)", "view": "Breakpoints", "defaultDock": "bottom", "open": false, "modes": { "debug": { "dock": "bottom", "group": "output", "open": true } } },
+			{ "id": "ied.diagnosticTools", "title": "Diagnostic Tools", "icon": "$(pulse)", "view": "DiagnosticTools", "defaultDock": "right", "defaultSize": 0.25, "open": false, "modes": { "debug": { "dock": "right", "open": true } } }
+		],
+		"layoutModes": [
+			{ "id": "debug", "title": "Debugging", "when": "debugState" }
 		],
 		"statusBarItems": [
 			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" },
@@ -284,6 +288,7 @@
 			{ "command": "ied.debug.toggleBreakpoint", "key": "f9", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.debug.windows", "key": "ctrl+alt+b" },
 			{ "command": "shell.showView", "key": "ctrl+alt+c", "args": { "id": "ied.callStack" } },
+			{ "command": "shell.showView", "key": "ctrl+alt+f2", "args": { "id": "ied.diagnosticTools" }, "when": "debugState" },
 			{ "command": "shell.showView", "key": "ctrl+alt+v ctrl+l", "args": { "id": "ied.locals" } },
 			{ "command": "shell.showView", "key": "ctrl+alt+w ctrl+1", "args": { "id": "ied.watch" } },
 			{ "command": "shell.showView", "key": "ctrl+alt+h", "args": { "id": "ied.threads" } },
