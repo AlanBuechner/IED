@@ -187,6 +187,10 @@ def job_row(job_dir):
 			row["prefillTokens"] = server["promptRead"]
 			row["tokensOut"] = server["generated"] or row["tokensOut"]
 			row["soloSeconds"] = round(server["promptRead"] / SOLO_PREFILL_RATE + row["tokensOut"] / SOLO_GENERATE_RATE + row["toolSeconds"])
+	if agent.get("budgetSeconds") is not None:
+		# The harness's own count, which stopped the turn: it also prices a request cut before it reported its tokens,
+		# whose time the count above takes for time in tools.
+		row["soloSeconds"] = round(agent["budgetSeconds"])
 	if "error" in grade:
 		row["gradeError"] = grade["error"][-300:]
 		return row
