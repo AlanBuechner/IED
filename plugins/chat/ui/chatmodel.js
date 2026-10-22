@@ -7,12 +7,29 @@
 export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approval: "Needs approval", awaiting_answer: "Needs an answer", paused: "Paused" };
 export const MODES = [["ask", "Ask"], ["plan", "Plan"], ["agent", "Agent"]];
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
+export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"]];
+
+// What the composer's Effort shows: the chat's pick, else its role's (docs/04 "Effort"), else the model's own default;
+// `roleEffort` is null while the chat has no snapshot to say.
+export function effortLabel(effort, roleEffort) {
+	const named = (id) => (EFFORTS.find(([e]) => e === id) || [id, id])[1];
+	if (effort) return named(effort);
+	if (roleEffort === null) return "Group's";
+	return roleEffort ? named(roleEffort) + " (group)" : "Default";
+}
+
+// The Effort menu's rows: the group's first (empty: its role's), then each level; the chat's pick checked.
+export function effortRows(effort, roleEffort) {
+	const group = roleEffort === null ? "As the group says" : "As the group says (" + (roleEffort ? effortLabel(roleEffort, "") : "the model's default") + ")";
+	return [["", group]].concat(EFFORTS).map(([id, label]) => ({ kind: "item", label, value: id, enabled: true, icon: id === (effort || "") ? "$(check)" : null }));
+}
 
 export class ChatModel {
 	constructor() {
 		this.summary = null;
 		this.model = "";
 		this.groupInUse = "";
+		this.roleEffort = null;     // the group's effort for this chat, once a snapshot says
 		this.turns = [];
 		this.hasMore = false;
 		this.approvals = [];
@@ -30,6 +47,7 @@ export class ChatModel {
 		this.summary = summaryOf(data);
 		this.model = data.model || "";
 		this.groupInUse = data.groupInUse || "";
+		this.roleEffort = data.roleEffort || "";
 		this.turns = (data.turns || []).map(normalTurn);
 		this.hasMore = Boolean(data.hasMore);
 		this.approvals = data.pendingApprovals || [];
@@ -180,7 +198,7 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting"];
+	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];
 	return summary;

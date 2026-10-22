@@ -5,7 +5,7 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { MODES, PERMISSIONS, compact, contextBar, duration, tokensPerSecond } from "./chatmodel.js";
+import { MODES, PERMISSIONS, compact, contextBar, duration, effortLabel, effortRows, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
 import { MentionList } from "./mentionlist.js";
 import { AttachBar } from "./attachbar.js";
@@ -149,7 +149,7 @@ export class Composer {
 		this.injectButton.hidden = !this.running;
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.queued.map((text, index) => this.queuedRow(text, index)));
-		this.renderSelectors(summary, model.groupInUse);
+		this.renderSelectors(summary, model.groupInUse, model.roleEffort);
 		this.renderTelemetry(model);
 	}
 
@@ -173,11 +173,12 @@ export class Composer {
 		this.focus();
 	}
 
-	renderSelectors(summary, groupInUse) {
+	renderSelectors(summary, groupInUse, roleEffort) {
 		const mode = MODES.find(([id]) => id === summary.mode) || MODES[2];
 		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS[1];
 		replace(this.selectors,
 			h("span.muted", null, "Group"), this.dropdown(summary.group || groupInUse || "default", "Model group", () => this.groupRows(summary.group || groupInUse), (row) => this.actions.set({ group: row.value })),
+			h("span.muted", null, "Effort"), this.dropdown(effortLabel(summary.effort, roleEffort), "Effort", () => effortRows(summary.effort, roleEffort), (row) => this.actions.set({ effort: row.value })),
 			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODES, summary.mode), (row) => this.actions.set({ mode: row.value })),
 			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
 	}

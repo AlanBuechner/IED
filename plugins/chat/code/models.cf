@@ -20,6 +20,14 @@ namespace Ai
 		return true;
 	}
 
+	// Whether `mapping` is an object of efforts, each an object of request fields.
+	static bool IsEffortMapping(const Serialization::DomNode& mapping) {
+		if (mapping.Kind() != Serialization::DomKind::Object) return false;
+		for (int64 i = 0; i < mapping.Count(); ++i)
+			if (!IsEffort(mapping.KeyAt(i)) || mapping.ValueAt(i).Kind() != Serialization::DomKind::Object) return false;
+		return true;
+	}
+
 	static ModelProfile* ReadModel(Core::StringView name, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
 		ModelProfile* profile = new ModelProfile();
 		profile->name = Core::String(name);
@@ -39,6 +47,15 @@ namespace Ai
 		profile->visionSet = entry.Member("vision").Kind() == Serialization::DomKind::Bool;
 		profile->vision = entry.Member("vision").AsBool();
 		profile->apiKeyEnv = Core::String(entry.Member("apiKey").Member("env").AsView());
+		if (entry.Member("effort").IsValid()) {
+			if (!IsEffortMapping(entry.Member("effort"))) {
+				problems.Push((Core::String("ai.models.") + name) + ": effort must map low, medium or high to the request fields each adds");
+				return nullptr;
+			}
+			Core::StringBuilder effort;
+			Serialization::WriteJson(entry.Member("effort"), &effort, 0);
+			profile->effort = effort.ToString();
+		}
 		Serialization::DomNode watchdog = entry.Member("watchdog");
 		profile->connectMs = SecondsAsMs(watchdog.Member("connectS"), kModelConnectMs);
 		profile->prefillBaseMs = SecondsAsMs(watchdog.Member("prefillBaseS"), kModelPrefillBaseMs);
@@ -106,4 +123,6 @@ namespace Ai
 		if (privacy == Privacy::Lan) return "lan";
 		return privacy == Privacy::Cloud ? "cloud" : "local";
 	}
+
+	bool IsEffort(Core::StringView text) { return text == "low" || text == "medium" || text == "high"; }
 }

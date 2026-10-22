@@ -90,16 +90,26 @@ namespace Ai
 		return names.IsEmpty() ? Core::String() : names[0];
 	}
 
-	Core::String Chats::ModelOf(const Chat* chat) const {
-		IED::Workspace ws = WorkspaceOf(chat);
+	// The models the primary role of the chat's group tries, in order; `role` gets the role.
+	static Core::Array<ModelProfile*> PrimaryOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		return RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), Core::StringView("primary"), role);
+	}
+
+	Core::String Chats::ModelOf(const Chat* chat) const {
 		RoleModel role;
-		Core::Array<ModelProfile*> candidates = RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), Core::StringView("primary"), role);
+		Core::Array<ModelProfile*> candidates = PrimaryOf(context, chat, WorkspaceOf(chat), role);
 		return candidates.IsEmpty() ? Core::String() : candidates[0]->name;
 	}
 
-	Core::String Chats::Snapshot(Chat* chat) { return chat->SnapshotJson(ModelOf(chat).View(), GroupOf(context, chat, WorkspaceOf(chat)).View(), kChatSnapshotTurns); }
+	Core::String Chats::Snapshot(Chat* chat) {
+		IED::Workspace ws = WorkspaceOf(chat);
+		RoleModel role;
+		Core::Array<ModelProfile*> candidates = PrimaryOf(context, chat, ws, role);
+		Core::StringView model = candidates.IsEmpty() ? Core::StringView("") : candidates[0]->name.View();
+		return chat->SnapshotJson(model, GroupOf(context, chat, ws).View(), role.effort.View(), kChatSnapshotTurns);
+	}
 
 	Core::String Chats::ListSnapshot(Core::StringView wsId) {
 		IED::JsonWriter json;
@@ -270,6 +280,11 @@ namespace Ai
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
 		if (params.Has("group")) chat->group = params.Str("group");
+		if (params.Has("effort")) {
+			Core::String effort = params.Str("effort");
+			if (!effort.IsEmpty() && !IsEffort(effort.View())) throw IED::RpcError(IED::ErrorCode::BadRequest, "effort must be low, medium, high or empty (its role's)");
+			chat->effort = effort;
+		}
 	}
 
 	Core::String Chats::CreateMethod(const IED::Request& request) {

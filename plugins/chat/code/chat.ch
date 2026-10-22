@@ -113,6 +113,7 @@ namespace Ai
 		public ChatMode mode;
 		public Core::String model;
 		public Core::String group;
+		public Core::String effort;                   // the last request's (docs/04 "Effort"); empty: none was sent
 		public Core::Array<Segment*> segments;
 		public Core::String stop;                     // empty while it runs
 		public Core::Array<Core::String> recoveries;  // what the harness did, in order ("continued after max_tokens")
@@ -220,6 +221,7 @@ namespace Ai
 		public ChatMode mode;
 		public PermissionMode permission;
 		public Core::String group;
+		public Core::String effort;                   // low, medium or high; empty: its role's
 		public ChatState state;
 		public Core::String stateReason;              // why it paused
 		public int64 createdMs;
@@ -251,9 +253,9 @@ namespace Ai
 		public void WriteResources(IED::JsonWriter& json) const;
 		// The clips as the clients show them: [{name, source, lines, bytes, text}], each text cut to kClipShownBytes.
 		public void WriteClips(IED::JsonWriter& json) const;
-		// The chat:<chatId> snapshot: the summary, the model and group in use, tasks, queued messages, the clips, the last
-		// `recent` turns and what it waits on.
-		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const;
+		// The chat:<chatId> snapshot: the summary, the model and group in use and its role's effort, tasks, queued messages,
+		// the clips, the last `recent` turns and what it waits on.
+		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const;
 	}
 
 	int64 ChatNowMs();

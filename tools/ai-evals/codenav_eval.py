@@ -119,8 +119,8 @@ def quality(turn, facts):
 	return len(facts) - len(missing), missing
 
 
-def summary(report, model, temperature):
-	lines = ["# Code navigation eval", "", "Model `%s` at temperature %s, %s." % (model, temperature, time.strftime("%Y-%m-%d %H:%M")), "",
+def summary(report, model, temperature, effort):
+	lines = ["# Code navigation eval", "", "Model `%s` at temperature %s, effort %s, %s." % (model, temperature, effort or "unset", time.strftime("%Y-%m-%d %H:%M")), "",
 		"Quality: the facts a right answer states, found in the answer. Steps: requests to the model. Prompt: the last request's prompt tokens (the context the turn ended with). Out: completion tokens over the turn, reasoning included.", "",
 		"| Question | Quality | Seconds | Steps | Calls | Prompt | Out | Thinking chars | Answer chars | Expected tool used | Misuses |", "|---|---|---|---|---|---|---|---|---|---|---|"]
 	details = []
@@ -228,7 +228,7 @@ async def run(args, name, profile, out):
 		client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": cookie})
 		await client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		await client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {name: profile}})
-		await client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"eval": {"primary": {"model": name, "temperature": args.temperature}}}})
+		await client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"eval": {"primary": dict({"model": name, "temperature": args.temperature}, **({"effort": args.effort} if args.effort else {}))}}})
 		await client.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": "eval"})
 		client.abort()
 		report = {}
@@ -257,6 +257,7 @@ def main():
 	parser.add_argument("--settings", default=os.path.join(os.environ.get("APPDATA", ""), "IED", "settings.json"), help="the app settings holding ai.models")
 	parser.add_argument("--model", help="the ai.models profile (default: the first)")
 	parser.add_argument("--temperature", type=float, default=0.0, help="0 (the default) for runs that compare")
+	parser.add_argument("--effort", choices=["low", "medium", "high"], help="the role's effort (docs/04 \"Effort\"); unset: the model server's default")
 	parser.add_argument("--parallel", type=int, default=1, help="turns at once; more than 1 makes them share the model server, so times do not compare")
 	parser.add_argument("--only", help="question keys, comma-separated: " + ", ".join(q[0] for q in QUESTIONS))
 	args = parser.parse_args()
@@ -269,7 +270,7 @@ def main():
 	with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as f:
 		json.dump(report, f, indent="\t")
 	with open(os.path.join(out, "summary.md"), "w", encoding="utf-8") as f:
-		f.write(summary(report, name, args.temperature))
+		f.write(summary(report, name, args.temperature, args.effort))
 	print("results in " + out)
 
 

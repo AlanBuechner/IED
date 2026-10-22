@@ -46,6 +46,8 @@ A **model group** assigns, per **role**, a model + temperature + effort + fallba
 
 Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). A role a group leaves unset is **off** and uses the group's `primary` (a group without `primary` uses the first model in `ai.models`); a new group turns on `primary` alone, so the finer roles stay off until the owner gives one its own model. This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
 
+**Effort** is how much a reasoning model thinks before it answers: `low`, `medium` or `high`, or unset for what its server does by default. A turn's effort is its chat's, when the chat picked one (the composer's Effort, `chat.set`), else its role's (`ai.groups`). A model profile says what each effort adds to the chat completion request in its `effort` (`{"low": {<fields>}, "medium": {...}, "high": {...}}`, the fields written into the request; a level it leaves out adds nothing, so `{}` never sends one). Without one, a llama.cpp server is sent `chat_template_kwargs: {"reasoning_effort": <effort>}`, which its chat template reads, and any other server OpenAI's top-level `reasoning_effort`: llama.cpp (b10222) ignores the top-level field, and a template that does not read the variable ignores it too. A template that reads only `enable_thinking` (Qwen3's) takes `"effort": {"low": {"chat_template_kwargs": {"enable_thinking": false}}}`. Qwen3.8's template reads both: unset is its `xhigh`, which `high` also means, and an effort it does not know fails the request (400). A turn records the effort it used. Measured with `tools/ai-evals` on Qwen3.8 27B at temperature 0: its default (xhigh) took 730 s for the eight questions, `medium` 494 s and `low` 458 s, every answer keeping its facts; medium thinks least per step and keeps reading by symbol, low takes fewer steps by reading whole files.
+
 ## Scheduling and routing
 
 1. **Role -> candidate list** (the role's model, then its fallbacks).
@@ -222,8 +224,8 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 | Key | Tiers | Value |
 |---|---|---|
-| `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, vision?, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); `vision` says whether the images tool results show are sent to it (`docs/13` "Images in tool results"; left out, its server says: llama.cpp's `/props` `modalities.vision`); a key is only ever named by its environment variable |
-| `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary` |
+| `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, vision?, effort?: {low?, medium?, high?}, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); `effort` the request fields each effort adds ("Model groups and roles"); `vision` says whether the images tool results show are sent to it (`docs/13` "Images in tool results"; left out, its server says: llama.cpp's `/props` `modalities.vision`); a key is only ever named by its environment variable |
+| `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary`, with the chat's effort when it picked one |
 | `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
 | `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |

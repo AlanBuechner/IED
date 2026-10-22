@@ -28,6 +28,8 @@ vendor\python\python.exe -I tools/ai-evals/codenav_eval.py --server <exe> --mode
   quality holds and time, steps or tokens fall.
 - Use the repository's Python (`vendor\python`): a Microsoft Store Python reads its own private copy of AppData and does
   not see the app settings.
+- `--effort` (`low`, `medium`, `high`) is the eval role's effort (`docs/04` "Model groups and roles"); left out, the
+  model server's default (Qwen3.8's template: its longest, `xhigh`).
 - `--parallel` (default 1) is how many turns run at once. More than one makes them share the model server's GPU: they
   finish sooner together but each takes several times longer, so their times do not compare with a sequential run.
 
@@ -47,3 +49,6 @@ The fact checks catch an answer that misses what matters, not one that is wrong 
 | 2026-10-22 | same | `code_symbols` gives its only match's source when short; its word search keeps the best 25; `code_members` without the owner's qualification; `search_text` grouped by file, long lines cut; unlisted lines only uses as code, a common name's counted; prompt: independent calls together, a plain name read directly, short quotes | 38/38, 769 s (-10%), 65 steps (-16%), 115 calls (-25%), 17.6k out; no symbol was read again after a search gave its source. `trace` spent 9 of 22 steps finding where `LspPool` is made: C4LSP gives neither a constructor's `new T(...)` nor a class's uses in other files (reported) |
 | 2026-10-22 | same | prompt: no closing summary, no side notes | 38/38, 731 s, 59 steps, 117 calls, 16.9k out; answers barely shorter (17.8k chars): the gain is mostly run-to-run change. Half the output is the final reply (its thinking and the answer), half the tool steps (~160 tokens each, mostly thinking); `request` read things the question did not ask about |
 | 2026-10-22 | same | prompt: stop once the question can be answered | 38/38, 730 s, 56 steps, 109 calls; the seven questions besides `trace` 475 -> 444 s. `trace` still spends its steps looking for where `LspPool` is made |
+| 2026-10-22 | same | `--effort low` (IED now sends a role's effort; a llama.cpp server gets the template's `reasoning_effort`) | 38/38, 458 s (-37% from the unset run above), 40 steps, 51 calls, 10.0k out, thinking 11.9k chars (was 27.9k). Fewer steps because it reads whole files more (`trace` read 5; prompts to 30k tokens), which the prompt cache makes cheap here but would not scale to big files |
+| 2026-10-22 | same | `--effort medium` | 38/38, 494 s (-32%), 56 steps, 88 calls, 10.6k out, thinking 9.7k chars: this template gives medium no instruction, low a "keep it brief" one; it kept reading by symbol. Recommended for this model: medium |
+| 2026-10-22 | same | `--effort medium` again, with C4LSP's references fixed (a472b79: constructions, a class's uses in other files) | 38/38, 496 s, 55 steps: the same run but for `trace`, whose `code_references LspPool::Init` now names `new LspPool(self)` and so needs no text search after it |

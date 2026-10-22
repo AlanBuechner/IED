@@ -384,6 +384,59 @@ class ChatTests(ChatCase):
 		self.assertIsNone(progress[-1], "cleared when the reply starts")
 		self.assertNotIn("return_progress", self.model.requests()[-1]["body"], "only llama.cpp is asked for progress")
 
+	async def test_a_turn_sends_its_effort_as_a_llamacpp_template_reads_it(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "fake", "effort": "medium"}}}})
+		chat_id, topic = await self.chat(group="g")
+		self.model.queue(text_step("Thought some."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertEqual({"reasoning_effort": "medium"}, body.get("chat_template_kwargs"), "the role's effort, as the chat template reads it")
+		self.assertNotIn("reasoning_effort", body, "llama.cpp ignores OpenAI's field")
+		self.assertEqual("medium", (await self.last_turn(chat_id)).get("effort"), "the turn says what it used")
+		with self.assertRaises(RpcFailure) as refused:
+			await self.client.request("chat.set", {"chatId": chat_id, "effort": "xhigh"})
+		self.assertEqual("bad_request", refused.exception.code)
+		await self.client.request("chat.set", {"chatId": chat_id, "effort": "low"})
+		self.assertEqual("low", (await self.summary(chat_id))["effort"])
+		self.model.queue(text_step("Thought less."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		self.assertEqual({"reasoning_effort": "low"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "the chat's pick over its role's")
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		self.assertEqual("low", (await self.summary(chat_id))["effort"], "kept across a restart")
+		await self.client.sub([topic])
+		snapshot = (await self.client.next_frame(topic))["data"]
+		self.assertEqual(("low", "medium"), (snapshot["effort"], snapshot["roleEffort"]), "the snapshot has both, for the composer")
+		await self.client.request("chat.set", {"chatId": chat_id, "effort": ""})
+		self.model.queue(text_step("As the role says."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		self.assertEqual({"reasoning_effort": "medium"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "empty is the role's again")
+
+	async def test_a_profile_maps_effort_and_other_servers_get_openais_field(self):
+		self.model.post("/_fake/config", {"props": False})
+		await self.use_model({"effort": {"low": {"chat_template_kwargs": {"enable_thinking": False}}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "fake", "effort": "low"}}}})
+		chat_id, _ = await self.chat(group="g")
+		self.model.queue(text_step("No thinking."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertEqual({"enable_thinking": False}, body.get("chat_template_kwargs"), "the profile's fields for the level")
+		self.assertNotIn("reasoning_effort", body)
+		await self.client.request("chat.set", {"chatId": chat_id, "effort": "high"})
+		self.model.queue(text_step("Mapped to nothing."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertFalse("chat_template_kwargs" in body or "reasoning_effort" in body, "a level the mapping leaves out adds nothing: %s" % sorted(body))
+		await self.use_model({})
+		self.model.queue(text_step("OpenAI's way."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertEqual("high", body.get("reasoning_effort"), "a server that is not llama.cpp, without a mapping")
+		self.assertNotIn("chat_template_kwargs", body)
+
 	async def test_image_info_reads_a_texture_header(self):
 		header = b"DDS " + bytes(8) + (512).to_bytes(4, "little") + (256).to_bytes(4, "little") + bytes(8) + (10).to_bytes(4, "little") + bytes(48)
 		header += (4).to_bytes(4, "little") + b"DXT1" + bytes(40)

@@ -25,6 +25,7 @@ namespace Ai
 		public bool vision;                // it is sent the images tool results show (images.ch), when `visionSet`
 		public bool visionSet;             // the profile says; else its server does (llama.cpp's /props modalities)
 		public Core::String apiKeyEnv;     // the environment variable holding the key (`"apiKey": {"env": ...}`)
+		public Core::String effort;        // the request fields each effort adds (`"effort": {"low": {...}}`), as JSON; empty: by its server
 		public int32 connectMs;
 		public int32 prefillBaseMs;        // the prefill watchdog before the prompt's share (docs/12 "Watchdogs")
 		public double prefillRate;         // prompt tokens per second assumed until one is measured
@@ -54,4 +55,6 @@ namespace Ai
 	// The groups in the ai.groups value, by name.
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson);
 	const char* PrivacyName(Privacy privacy);
+	// Whether `text` is an effort: low, medium or high.
+	bool IsEffort(Core::StringView text);
 }

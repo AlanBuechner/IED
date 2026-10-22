@@ -226,7 +226,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 
 /* ---------- phone ---------- */
 @media (max-width: 719px) {
-	.chat-panel, .chat-selectors, .chat-telemetry, .chat-segmeta, .chat-tool-head .src, .desk { display: none !important; }
+	.chat-panel, .chat-telemetry, .chat-segmeta, .chat-tool-head .src, .desk { display: none !important; }
+	.chat-selectors { overflow-x: auto; scrollbar-width: none; padding-bottom: var(--space-2); }
+	.chat-dd { height: 28px; }
 	.chat-act .chat-phone-only { display: inline-flex; }
 	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
 	.chat-panel-title { display: flex; align-items: center; justify-content: space-between; }

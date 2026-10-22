@@ -16,7 +16,7 @@ import { stored, store } from "./stored.js";
 const NEAR_BOTTOM_PX = 80;
 
 function newDraft() {
-	return { mode: "agent", permission: "ask", group: "" };
+	return { mode: "agent", permission: "ask", group: "", effort: "" };
 }
 
 // What the composer shows of a chat not made yet.

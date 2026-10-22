@@ -1309,6 +1309,38 @@ def chat_clipboard(run):
 	run.shot("clipboard")
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def chat_effort(run):
+	"""A chat's effort from the composer (docs/04 "Effort"): its group's is named until the chat picks one, and the pick
+	goes with the next request (the fake model is a llama.cpp server, so as its chat template reads it). At phone width
+	the selectors scroll beside the box and the menu is a sheet."""
+	page = open_chat(run)
+	chat_id = page.get_attribute(".chat-tab.on", "data-chat")
+	run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"local": {"primary": {"model": "fake", "effort": "medium"}}}})
+	run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": "local"})
+	try:
+		run.reload()
+		run.show_activity("ied.chat")
+		page.click(".chat-tab[data-chat='%s']" % chat_id)
+		page.wait_for_selector(".chat-tab.on[data-chat='%s']" % chat_id)
+		run.wait_text(".chat-selectors", "Medium (group)")
+		page.click(".chat-selectors .chat-dd[title='Effort']")
+		page.wait_for_selector(".popup.menu" + (".sheet" if run.phone else ""))
+		check("As the group says (Medium)" in run.texts(".popup.menu")[0], "the group's row names its effort")
+		run.shot("menu")
+		page.click(".popup.menu .menu-item:has-text('Low')")
+		run.wait_text(".chat-selectors .chat-dd[title='Effort']", "Low")
+		run.target.queue_model(model_script({"text": "Quick.", "chunk": 6}, {"finish": "stop"}))
+		send(page, "hi")
+		page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+		sent = run.target.model_requests()[-1]["body"].get("chat_template_kwargs")
+		check(sent == {"reasoning_effort": "low"}, "the chat's pick was sent: %s" % sent)
+		run.shot("sent")
+	finally:
+		run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {}})
+		run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": ""})
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def chat_shows_the_prompt_read(run):
 	"""While the model's server reads a long prompt the turn shows how far (llama.cpp's progress, turn.progress), and

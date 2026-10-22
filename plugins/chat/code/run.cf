@@ -155,7 +155,7 @@ namespace Ai
 		ModelProbe probe = ProbeModel(*profile, kProbeTimeoutMs);
 		IED::HostLock guard(*context);
 		chats->probed.At(profile->name) = true;
-		chats->progressing.At(profile->name) = probe.server == "llama.cpp";
+		chats->llamaCpp.At(profile->name) = probe.server == "llama.cpp";
 		chats->seesImages.At(profile->name) = probe.vision;
 		if (probe.contextWindow > 0) chats->windows.At(profile->name) = probe.contextWindow;
 	}

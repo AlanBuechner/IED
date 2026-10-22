@@ -1,4 +1,5 @@
 include "chatstore.ch"
+include "models.ch"
 
 namespace Ai
 {
@@ -31,6 +32,7 @@ namespace Ai
 		json.Field("mode", ChatModeName(chat->mode));
 		json.Field("permission", PermissionModeName(chat->permission));
 		json.Field("group", chat->group.View());
+		if (!chat->effort.IsEmpty()) json.Field("effort", chat->effort.View());
 		json.IntField("createdMs", chat->createdMs);
 		json.IntField("updatedMs", chat->updatedMs);
 		json.IntField("counter", chat->counter);
@@ -88,6 +90,7 @@ namespace Ai
 		ReadChatMode(header.Member("mode").AsView(), chat->mode);
 		ReadPermissionMode(header.Member("permission").AsView(), chat->permission);
 		chat->group = Core::String(header.Member("group").AsView());
+		if (IsEffort(header.Member("effort").AsView())) chat->effort = Core::String(header.Member("effort").AsView());
 		chat->createdMs = header.Member("createdMs").AsInt();
 		chat->updatedMs = header.Member("updatedMs").AsInt();
 		chat->counter = header.Member("counter").AsInt();

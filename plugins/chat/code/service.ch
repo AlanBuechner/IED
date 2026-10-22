@@ -50,7 +50,7 @@ namespace Ai
 		public Core::HashMap<Core::String, double> prefillRates;   // model -> prompt tokens per second, measured
 		public Core::HashMap<Core::String, int64> windows;         // model -> context size its server reported or an error named
 		public Core::HashMap<Core::String, bool> probed;           // models whose server was asked (docs/12 discovery)
-		public Core::HashMap<Core::String, bool> progressing;      // models whose server streams prompt progress (llama.cpp)
+		public Core::HashMap<Core::String, bool> llamaCpp;         // models llama.cpp serves: they stream prompt progress and read effort in the template
 		public Core::HashMap<Core::String, bool> seesImages;       // models whose server takes images (llama.cpp's modalities)
 
 	private:

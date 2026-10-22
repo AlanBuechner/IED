@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "run.ch"
 include "images.ch"
 include "superseded.ch"
+include "effort.ch"
 
 namespace Ai
 {
@@ -88,14 +89,16 @@ namespace Ai
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode, chat->loadedTools).View());
 		json.BoolField("stream", true);
-		bool progressing = false;
-		chats->progressing.TryGet(profile->name, progressing);
-		if (progressing) json.BoolField("return_progress", true);
+		bool llamaCpp = false;
+		chats->llamaCpp.TryGet(profile->name, llamaCpp);
+		if (llamaCpp) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
 		json.BeginObject();
 		json.BoolField("include_usage", true);
 		json.EndObject();
 		if (role.hasTemperature) WriteTemperature(json, role.temperature);
+		turn->effort = Core::String(EffortOf(chat->effort.View(), role.effort.View()));
+		WriteEffort(json, *profile, turn->effort.View(), llamaCpp);
 		if (profile->maxOutput > 0) json.IntField("max_tokens", profile->maxOutput);
 		json.EndObject();
 		Core::String body = json.ToString();
@@ -212,9 +215,9 @@ namespace Ai
 	}
 
 	void TurnRun::EstimatePrefill(const StepRequest& request) {
-		bool progressing = false;
-		chats->progressing.TryGet(candidates[candidate]->name, progressing);
-		if (progressing || request.readMs < kRunEstimateShownMs) return;
+		bool llamaCpp = false;
+		chats->llamaCpp.TryGet(candidates[candidate]->name, llamaCpp);
+		if (llamaCpp || request.readMs < kRunEstimateShownMs) return;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.BoolField("estimated", true);

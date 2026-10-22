@@ -264,6 +264,7 @@ namespace Ai
 		json.Field("mode", ChatModeName(mode));
 		json.Field("model", model.View());
 		json.Field("group", group.View());
+		if (!effort.IsEmpty()) json.Field("effort", effort.View());
 		json.Key(Core::StringView("segments"));
 		json.BeginArray();
 		for (Segment* segment : segments) segment->WriteJson(json);
@@ -304,6 +305,7 @@ namespace Ai
 		ReadChatMode(node.Member("mode").AsView(), mode);
 		model = Core::String(node.Member("model").AsView());
 		group = Core::String(node.Member("group").AsView());
+		effort = Core::String(node.Member("effort").AsView());
 		Serialization::DomNode list = node.Member("segments");
 		for (int64 i = 0; i < list.Count(); ++i) {
 			Segment* segment = new Segment();
@@ -381,6 +383,7 @@ namespace Ai
 		json.Field("mode", ChatModeName(mode));
 		json.Field("permission", PermissionModeName(permission));
 		json.Field("group", group.View());
+		json.Field("effort", effort.View());
 		json.Field("state", ChatStateName(state));
 		if (!stateReason.IsEmpty()) json.Field("stateReason", stateReason.View());
 		json.IntField("turnCount", turns.Count());
@@ -469,12 +472,13 @@ namespace Ai
 		json.EndArray();
 	}
 
-	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const {
+	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const {
 		IED::JsonWriter json;
 		json.BeginObject();
 		WriteSummary(json);
 		json.Field("model", model);
 		json.Field("groupInUse", groupInUse);
+		json.Field("roleEffort", roleEffort);
 		json.Key(Core::StringView("tasks"));
 		WriteTasks(json);
 		json.Key(Core::StringView("queued"));
