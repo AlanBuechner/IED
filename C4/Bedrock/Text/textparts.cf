@@ -50,6 +50,35 @@ namespace Core
 	Array<String> Split(const char* separator) extends String { return SplitStrings(SplitParts(this.View(), StringView(separator))); }
 	Array<String> Split(char separator) extends String { return SplitStrings(SplitParts(this.View(), separator)); }
 
+	int64 JoinedLength(int64 parts, int64 partBytes, StringView separator) {
+		return parts > 1 ? partBytes + separator.ByteLength() * (parts - 1) : partBytes;
+	}
+
+	String Join(const Array<StringView>& parts, StringView separator) {
+		int64 bytes = 0;
+		for (int64 i = 0; i < parts.Count(); ++i) bytes += parts[i].ByteLength();
+		String joined = String(JoinedLength(parts.Count(), bytes, separator));
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			if (i > 0) joined.Append(separator);
+			joined.Append(parts[i]);
+		}
+		return joined;
+	}
+
+	String Join(const Array<String>& parts, StringView separator) {
+		int64 bytes = 0;
+		for (int64 i = 0; i < parts.Count(); ++i) bytes += parts[i].ByteLength();
+		String joined = String(JoinedLength(parts.Count(), bytes, separator));
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			if (i > 0) joined.Append(separator);
+			joined.Append(parts[i].View());
+		}
+		return joined;
+	}
+
+	String Join(const Array<StringView>& parts, const char* separator) { return Join(parts, StringView(separator)); }
+	String Join(const Array<String>& parts, const char* separator) { return Join(parts, StringView(separator)); }
+
 	String WithAsciiCase(StringView text, bool upper) {
 		String changed = String(text);
 		char* bytes = (char*)changed.CStr();

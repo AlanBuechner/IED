@@ -33,7 +33,7 @@ namespace Scripting
 		Result ObjectStart(LoweringContext& ctx, const Value& source, const HIRNode* loaded, const Type* value)
 		{
 			const Type* from = TypeHandle::UnwrapToValue(loaded->type);
-			if (Core::String why = ImplicitConversion::ObjectProblem(ctx, from, value); !why.empty())
+			if (Core::String why = ImplicitConversion::ObjectProblem(from, value); !why.empty())
 				return Result::Fail(QueryError::NotAValue, why);
 			if (from != value && from->GetKind() != TypeKind::Object) return Result(loaded); // a swizzle run as its packed vector
 			if (from == value && Lifecycle::IsFresh(loaded)) return Result(loaded); // relocated

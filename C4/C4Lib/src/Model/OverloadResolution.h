@@ -48,12 +48,12 @@ namespace Scripting
 		                                  const Core::Vector<const Type*>& args, const TemplateOrdering& moreSpecialized = {});
 		/// `F takes 2 arguments, not 3` or `argument 1 of F has type 'X' but parameter 'x' expects 'Y'`.
 		static CandidateMismatch Explain(const OverloadCandidate& only, const Core::Vector<const Type*>& args, const Core::String& name);
-
-	private:
-		static int CandidateCost(const OverloadCandidate& c, const Core::Vector<const Type*>& args);
 		/// Conversion cost for one argument against one parameter: 0 exact, 1 implicit numeric /
 		/// enum-underlying, -1 not viable. Aliases unwrap (an alias of int32 matches an int32 arg).
 		static int ParamCost(const Type* param, const Type* arg);
+
+	private:
+		static int CandidateCost(const OverloadCandidate& c, const Core::Vector<const Type*>& args);
 		static int BracedCost(const Type* param, uint32 entries);
 	};
 

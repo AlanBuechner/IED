@@ -1,6 +1,7 @@
 #include "Model/OverloadResolution.h"
 #include <algorithm>
 #include <vector>
+#include "Model/ConversionAdvice.h"
 #include "Model/SymbolTable.h"
 #include "Model/TypeHandle.h" // UnwrapToValue brick (moved off the Type base)
 #include "Model/Types/ObjectType.h"
@@ -316,7 +317,7 @@ namespace Scripting
 			const Core::String paramName = c.record && i < c.record->paramNames.Count() ? c.record->paramNames[i] : param.mName;
 			const Core::String named = paramName.empty() ? "" : "'" + paramName + "' ";
 			return { (int32)i, "argument " + std::to_string(i + 1) + " of " + name + " has type '" + args[i]->GetName() +
-				"' but parameter " + named + "expects '" + param.m_Type->GetName() + "'" };
+				"' but parameter " + named + "expects '" + param.m_Type->GetName() + "'" + ConversionAdvice(args[i], param.m_Type) };
 		}
 		return {};
 	}

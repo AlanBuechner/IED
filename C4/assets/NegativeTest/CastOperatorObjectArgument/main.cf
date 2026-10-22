@@ -1,0 +1,7 @@
+struct Kelvin { public double k; }
+struct Celsius {
+	public double c;
+	[operator("cast")] public Kelvin ToKelvin() const { Kelvin k; k.k = this.c + 273.15; return k; }
+}
+double Read(Kelvin t) { return t.k; }
+int32 main() { Celsius c; c.c = 1.0; return (int32)Read(c); }

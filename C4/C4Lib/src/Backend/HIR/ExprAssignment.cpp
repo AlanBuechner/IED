@@ -228,7 +228,7 @@ namespace Scripting
 	{
 		// The value an object variable takes: the object itself, or the base sub-object of a derived one (slicing).
 		const Type* from = TypeHandle::UnwrapToValue(value.type);
-		if (Core::String why = ImplicitConversion::ObjectProblem(m_Ctx, from, target); !why.empty())
+		if (Core::String why = ImplicitConversion::ObjectProblem(from, target); !why.empty())
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "Cannot assign value of type '" + Core::String(from->GetName()) +
 				"' to '" + target->GetName() + "': " + why));
 		const auto* derived = dynamic_cast<const ObjectType*>(from);

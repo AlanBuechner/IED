@@ -396,13 +396,15 @@ for text that is not padded base64.
 `Core::ParseInt64(text, value)` reads decimal text - an optional `-` and at least one digit, nothing around them - and
 returns false, leaving `value` as it was, for anything else or a number outside `int64`. The JSON readers use it.
 
-### Splitting, case and reals (`textparts.ch`)
+### Splitting, joining, case and reals (`textparts.ch`)
 
 - `text.Split(separator)` on a `StringView` gives the parts between separators as views into the text (no copies); on
   a `String` it gives `String`s of their own. The separator is a `char`, a `StringView` or a `const char*`; n
   separators give n + 1 parts, empty ones included (`"a,,b"` is `a`, ``, `b`; an empty text is one empty part),
   and an empty separator gives the whole text. `Core::SplitParts(text, separator)` walks the same parts one
   `Next(part)` at a time without allocating.
+- `Core::Join(parts, separator)` is Split's inverse: an `Array` of `StringView`s or `String`s in order with the
+  separator (a `StringView` or a `const char*`) between each two, in one allocation; no parts give an empty text.
 - `ToLower()` / `ToUpper()` on a `String` or a `StringView` give a new `String` with the ASCII letters changed; every
   other byte, UTF-8 sequences included, is kept.
 - `Core::ParseDouble(text, value)` reads the whole text as a double in strtod's syntax (digits, a fraction, an

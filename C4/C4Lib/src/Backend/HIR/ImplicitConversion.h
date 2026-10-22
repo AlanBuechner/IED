@@ -15,7 +15,7 @@ namespace Scripting
 
 		/// Why a `from` value cannot become a `to` object or array, with the explicit form to write; empty when
 		/// it can (the same type, or a derived object sliced to its base).
-		Core::String ObjectProblem(LoweringContext& ctx, const Type* from, const Type* to);
+		Core::String ObjectProblem(const Type* from, const Type* to);
 
 		/// A warning when converting `value` (written as `site`) to `target` may change it (D-32, B22): to a narrower
 		/// integer, a floating-point value to an integer, a double to a float. A constant that fits says nothing.

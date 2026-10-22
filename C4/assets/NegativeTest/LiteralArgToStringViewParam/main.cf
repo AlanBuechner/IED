@@ -1,0 +1,3 @@
+include "bedrock.ch"
+int64 Length(Core::StringView text) { return text.ByteLength(); }
+int32 main() { return (int32)Length("abc"); }

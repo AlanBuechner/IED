@@ -1,4 +1,4 @@
-// Text helpers (Text/textparts.ch): Split and SplitParts, ASCII case, ParseDouble.
+// Text helpers (Text/textparts.ch): Split and SplitParts, Join, ASCII case, ParseDouble.
 
 include "bedrock.ch"
 
@@ -36,6 +36,34 @@ class TextSplitTests {
 		assert_eq(3, count, "three parts");
 		assert_se("k|v|w|", seen.CStr(), "in order");
 		assert_true(!parts.Next(part), "and then none");
+	}
+}
+
+[test("text.join")]
+class TextJoinTests {
+	[test("views_and_strings")]
+	public static void TestViewsAndStrings() {
+		Core::String line = Core::String("alpha,,beta,gamma,delta");
+		Core::Array<Core::StringView> parts = line.View().Split(',');
+		Core::String joined = Core::Join(parts, ",");
+		assert_true(joined == line, "Split's inverse, empty parts included");
+		assert_eq(line.ByteLength(), joined.Capacity(), "one allocation of the joined length");
+		assert_eq(line.CharCount(), joined.CharCount(), "and its character count");
+		Core::Array<Core::String> words = Core::String("x y z").Split(' ');
+		assert_se("x::y::z", Core::Join(words, Core::StringView("::")).CStr(), "Strings, a separator of several bytes");
+	}
+
+	[test("few_parts")]
+	public static void TestFewParts() {
+		Core::Array<Core::String> none;
+		assert_true(Core::Join(none, ",").IsEmpty(), "no parts give an empty text");
+		Core::Array<Core::String> one;
+		one.Push(Core::String("solo"));
+		assert_se("solo", Core::Join(one, ", ").CStr(), "one part is itself");
+		Core::Array<Core::StringView> blanks;
+		blanks.Push(Core::StringView(""));
+		blanks.Push(Core::StringView(""));
+		assert_se("-", Core::Join(blanks, "-").CStr(), "two empty parts keep their separator");
 	}
 }
 

@@ -1111,6 +1111,22 @@
         "expect": ["a 'int32' is not a 'Wrap': construct one with Wrap(...)"],
         "reason": "Constructions are explicit (D-32)."
     },
+    "StringArgToStringViewParam": {
+        "expect": ["error: argument 1 of Length has type 'String' but parameter 'text' expects 'StringView': pass x.View()"],
+        "reason": "Nothing converts to a StringView by itself (D-32): the error names the method of String that gives one."
+    },
+    "LiteralArgToStringViewParam": {
+        "expect": ["but parameter 'text' expects 'StringView': construct one with Core::StringView(...)"],
+        "reason": "A C string becomes a StringView only through its create, which the error names with its namespace."
+    },
+    "StringInitializesStringView": {
+        "expect": ["a 'String' is not a 'StringView': pass x.View()"],
+        "reason": "An initialization names the same explicit form as an argument does."
+    },
+    "CastOperatorObjectArgument": {
+        "expect": ["error: argument 1 of Read has type 'Celsius' but parameter 't' expects 'Kelvin': convert it with (Kelvin)x"],
+        "reason": "A cast operator runs only through a cast (D-32): the argument error names it."
+    },
     "ObjectToInt": {
         "expect": ["cannot initialize 'int32' from 'S': a 'S' is not a number"],
         "reason": "BUG-131."

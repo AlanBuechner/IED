@@ -1,0 +1,6 @@
+include "bedrock.ch"
+int32 main() {
+	Core::String s = Core::String("abc");
+	Core::StringView view = s;
+	return (int32)view.ByteLength();
+}

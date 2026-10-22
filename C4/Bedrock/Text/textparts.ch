@@ -1,7 +1,8 @@
-// Text helpers: splitting at a separator, ASCII case and reading a real number.
+// Text helpers: splitting at a separator and joining, ASCII case and reading a real number.
 //
 //     Core::Array<Core::StringView> fields = line.View().Split(',');   // views into line: no copies
 //     Core::Array<Core::String> words = text.Split(" ");               // a String splits into Strings of its own
+//     Core::String csv = Core::Join(fields, ",");                      // and joins back
 //     Core::SplitParts parts = Core::SplitParts(csv, ",");             // walks the parts without allocating
 //     Core::StringView part;
 //     while (parts.Next(part)) ...
@@ -36,6 +37,12 @@ namespace Core
 	Array<String> Split(StringView separator) extends String;
 	Array<String> Split(const char* separator) extends String;
 	Array<String> Split(char separator) extends String;
+
+	// The parts in order with `separator` between each two, Split's inverse: no parts give "", one part itself.
+	String Join(const Array<StringView>& parts, StringView separator);
+	String Join(const Array<StringView>& parts, const char* separator);
+	String Join(const Array<String>& parts, StringView separator);
+	String Join(const Array<String>& parts, const char* separator);
 
 	// ASCII letters changed; every other byte, UTF-8 sequences included, kept.
 	String ToLower() extends StringView;

@@ -134,7 +134,8 @@
 			{"match": "argument \\d+ of (assert_se|printf|strcmp|strlen) has type '(String|StringView)'", "hint": "This takes a C string: pass s.CStr() (a StringView: Core::String(view).CStr()), or compare with assert_true(s == \"text\")."},
 			{"match": "no operator '\\+' takes a '(String|StringView)' on the left and a '(int32|int64|uint64|double|float|bool)'", "hint": "Numbers do not add to strings: build text with Core::StringBuilder (Append, AppendInt, AppendDouble) or Core::Format(&builder, \"{0:D}\", n)."},
 			{"match": "Cannot access private (field|method)", "hint": "Members are private unless marked: write public before each member other code uses."},
-			{"match": "no function named Core::(Split|Join|ToLower|ToUpper|Trim|ParseDouble|ToString|Lowercase)\\b", "hint": "Bedrock has no such helper: write a small one over Core::StringView (IndexOf, Substring, ByteAt, Trimmed) and Core::StringBuilder."},
+			{"match": "no function named Core::(Split|Join|ToLower|ToUpper|Trim|ToString|Lowercase)\\b", "hint": "Split, ToLower and ToUpper are methods of a StringView or String (line.View().Split(','), name.ToLower()); Trim is Trimmed(); Join is Core::Join(parts, \", \"); there is no ToString: build text with Core::StringBuilder or Core::Format."},
+			{"match": "has type '(char8\\*|const char8\\*|String)' but parameter '\\w+' expects 'StringView'", "hint": "Nothing converts to a StringView by itself: pass Core::StringView(\"text\") for a literal, s.View() for a Core::String."},
 			{"match": "cannot initialize '(String|StringView)' from '(int32|int64|double)'", "hint": "Numbers become text through Core::StringBuilder.AppendInt / AppendDouble or Core::Format, not a constructor."}
 		],
 		"aiDocs": [ { "id": "c4", "title": "C4 language, Bedrock library (library/bedrock-api.md: every type's and function's signatures; library/bedrock.md: the guide), runtime and tools reference", "folder": "docs" } ],

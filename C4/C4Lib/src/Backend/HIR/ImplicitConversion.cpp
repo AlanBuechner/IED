@@ -1,5 +1,4 @@
 #include "Backend/HIR/ImplicitConversion.h"
-#include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/Lifecycle.h"
 #include "Model/Types/PointerType.h"
 #include "Model/TypeHandle.h"
@@ -7,6 +6,7 @@
 #include "Model/Types/EnumType.h"
 #include "Model/Types/SwizzleType.h"
 #include "Model/ConstEvaluator.h"
+#include "Model/ConversionAdvice.h"
 #include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
 #include "Parser/Nodes/Expressions/TernaryExpressionNode.h"
 #include <cmath>
@@ -218,7 +218,7 @@ namespace Scripting::ImplicitConversion
 			")x if that is intended");
 	}
 
-	Core::String ObjectProblem(LoweringContext& ctx, const Type* from, const Type* to)
+	Core::String ObjectProblem(const Type* from, const Type* to)
 	{
 		if (from == to) return "";
 		const auto* toObject = dynamic_cast<const ObjectType*>(to);
@@ -233,9 +233,7 @@ namespace Scripting::ImplicitConversion
 			const auto* run = static_cast<const SwizzleType*>(from);
 			if (lanes && lanes->GetLaneCount() == run->GetLaneCount() && lanes->GetElementType() == run->GetElementType()) return "";
 		}
-		Core::String why = "a " + Quoted(from) + " is not a " + Quoted(to);
-		if (toObject && !LifecycleFacts::Own(ctx.queries(), toObject).creates.empty()) why += ": construct one with " + to->GetName() + "(...)";
-		return why;
+		return "a " + Quoted(from) + " is not a " + Quoted(to) + ConversionAdvice(from, to);
 	}
 
 	Core::String ConditionProblem(LoweringContext& ctx, const Type* type)

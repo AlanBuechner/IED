@@ -298,6 +298,11 @@ Every place a value becomes a typed location uses the same rules (D-32): an init
 
 Arithmetic applies the usual C integer promotions and arithmetic conversions. User conversions are explicit
 (D-32): a create runs only when written (`Wrap(5)`, `Wrap w(5)`), and a `cast` operator only through a cast.
+When a value cannot become an object, as an initialization or as an argument (`argument 1 of F has type 'X' but
+parameter 'p' expects 'Y'`), the error ends with the explicit form when the types offer one: `convert it with (Y)x`
+for a `cast` operator of X, `pass x.View()` for a public method of X that takes nothing and returns a Y (a
+`Core::String` passed for a `Core::StringView`), `construct one with Y(...)` for a create of Y that takes an X (a C
+string passed for a `Core::StringView`).
 
 Overload resolution sums the per-argument costs and picks the cheapest viable candidate. Equal best
 costs are an error (`ambiguous call - equally good overloads: A and B`); no viable candidate is `no
