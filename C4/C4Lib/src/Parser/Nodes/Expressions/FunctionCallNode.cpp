@@ -3,14 +3,19 @@
 
 namespace Scripting
 {
-	std::span<const Ref<AstNode>> FunctionCallNode::Children() const
+	void FunctionCallNode::SetCallee(Ref<AstNode> callee)
 	{
-		// Children = callee + arguments (all in one contiguous span)
+		m_Callee = callee;
 		m_Children.Clear();
 		if (m_Callee) m_Children.Push(m_Callee);
-		for (auto& arg : m_Arguments)
-			if (arg) m_Children.Push(arg);
-		return m_Children;
+		for (const Ref<AstNode>& argument : m_Arguments) m_Children.Push(argument);
+	}
+
+	void FunctionCallNode::AddArgument(Ref<AstNode> argument)
+	{
+		if (!argument) return;
+		m_Arguments.Push(argument);
+		m_Children.Push(argument);
 	}
 
 	Core::String FunctionCallNode::ToString() const

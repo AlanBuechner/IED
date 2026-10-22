@@ -58,7 +58,7 @@ namespace Scripting
 			if (type == TokenType::OpenParen)
 			{
 				auto node = CreateRef<FunctionCallNode>();
-				node->m_Callee = base;
+				node->SetCallee(base);
 				node->m_OpenParenToken = next;
 				node->startLocation = base->startLocation;
 				lexer.NextCompoundToken(); // consume (
@@ -78,7 +78,7 @@ namespace Scripting
 								ErrorSeverity::Error);
 							break;
 						}
-						node->m_Arguments.Push(arg);
+						node->AddArgument(arg);
 
 						peek = lexer.PeekCompound();
 						if (peek.GetType() == TokenType::Comma)

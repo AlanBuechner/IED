@@ -22,7 +22,12 @@ namespace Scripting
 		bool HasTemplateArgs() const { return m_TemplateArgs != nullptr; }
 		const Ref<TemplateArgumentListNode>& GetTemplateArgs() const { return m_TemplateArgs; }
 
-		std::span<const Ref<AstNode>> Children() const override;
+		/// The parser fills a call through these, which keep Children (the callee, then the arguments) as they go: every
+		/// walk of every body asks a call for its children.
+		void SetCallee(Ref<AstNode> callee);
+		void AddArgument(Ref<AstNode> argument);
+
+		std::span<const Ref<AstNode>> Children() const override { return m_Children; }
 		Core::String ToString() const override;
 protected:
 		NodeType Type() const override { return NodeType::FunctionCall; }
@@ -35,6 +40,6 @@ protected:
 		Core::Vector<Ref<AstNode>> m_Arguments;
 		Token m_CloseParenToken;
 		Ref<TemplateArgumentListNode> m_TemplateArgs; // nullptr if absent
-		mutable Core::Vector<Ref<AstNode>> m_Children;
+		Core::Vector<Ref<AstNode>> m_Children;
 	};
 }

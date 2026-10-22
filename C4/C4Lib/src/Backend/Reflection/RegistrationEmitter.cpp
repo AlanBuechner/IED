@@ -17,6 +17,7 @@
 #include <llvm/IR/Module.h>
 #include <set>
 #include <tuple>
+#include <string_view>
 #include <unordered_map>
 
 namespace Scripting
@@ -146,7 +147,13 @@ namespace Scripting
 			ImageValue F64(double value) const { return m_Image.Real(value); }
 			ImageValue Null() const { return m_Image.Null(); }
 			ImageValue Text(std::string text) { return m_Image.Text(std::move(text)); }
-			ImageValue TypeText(const Type* type) { return Text(QualifiedName(type)); }
+			// A type's name is one text however many rows name it.
+			ImageValue TypeText(const Type* type)
+			{
+				auto [known, fresh] = m_TypeTexts.try_emplace(type);
+				if (fresh) known->second = Text(QualifiedName(type));
+				return known->second;
+			}
 			ImageValue Symbol(const llvm::GlobalValue* value)
 			{
 				return value ? m_Image.Symbol(value->getName().str(), llvm::isa<llvm::Function>(value), value->hasHiddenVisibility()) : Null();
@@ -332,6 +339,7 @@ namespace Scripting
 			std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // annotation failures already reported, by location
 			std::unordered_map<const FunctionRecord*, Table> m_RecordAnnotations;
 			std::unordered_map<const FunctionRecord*, Table> m_RecordParams;
+			std::unordered_map<const Type*, ImageValue> m_TypeTexts;
 			std::vector<ImageRow> m_Types;
 			std::vector<ImageRow> m_Variables;
 			std::vector<ImageRow> m_Addresses;
@@ -377,14 +385,14 @@ namespace Scripting
 
 		// A thread_local has no one address, so it is not registered. A name can register twice (a declaration
 		// and its definition): the symbol is the identity.
-		std::unordered_set<std::string> variables;
+		std::unordered_set<std::string_view> variables; // the symbols' own names, which the model keeps
 		model.Symbols()->CollectGlobalVariables([&](const SymbolInfo& variable) {
 			if (variable.kind != SymbolKind::Variable || !variable.type || variable.isThreadLocal || variable.mangledName.empty()) return;
 			if (hostSymbol(variable.mangledName) || hostUnit(variable.definingUnit)) return;
 			if (variables.insert(variable.mangledName.c_str()).second) writer.AddVariable(variable);
 		});
 
-		std::unordered_set<std::string> functions;
+		std::unordered_set<std::string_view> functions;
 		Core::Vector<const FunctionRecord*> records;
 		model.AllFunctionRecords(records);
 		for (const FunctionRecord* function : records)

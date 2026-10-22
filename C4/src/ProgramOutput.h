@@ -72,6 +72,8 @@ private:
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
 	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
+	bool CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode, const std::string& base,
+		const Scripting::ObjectSettings& settings);
 	bool FinishInterface(llvm::Module& module);
 	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);

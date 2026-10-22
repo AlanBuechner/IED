@@ -4,7 +4,10 @@
 #include "Compiler/Toolchain.h"
 #include "Script/HostTable.h"
 #include "Script/InlineBodies.h"
+#include "Script/InlineBodyCache.h"
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -268,6 +271,47 @@ namespace Testing
 			}
 			TEST_ASSERT_EQ(defined, 250);
 			TEST_ASSERT_EQ(InlineBodies(*module, HostSymbols(*module, {}), 1).size(), size_t(1));
+		});
+		TEST_PASSED();
+	}
+
+	// A split program's inline bodies are kept by their partition's bitcode and a salt (InlineBodyCache): kept ones are
+	// read back, a damaged file is extracted again, and another salt extracts again and leaves only its own file.
+	void HostTableTest::KeptInlineBodiesAreReadBack()
+	{
+		Lowered(kProgram, [](llvm::Module* module) {
+			TEST_ASSERT(module != nullptr);
+			const std::vector<std::string> symbols = HostSymbols(*module, {});
+			const HostNames names(symbols);
+			const std::vector<std::string> extracted = InlineBodies(*module, names, 1);
+			TEST_ASSERT(!extracted.empty());
+			llvm::Module empty("empty", module->getContext());
+			const std::vector<std::string> bitcode = { "the partition's bitcode" };
+			const std::filesystem::path folder = std::filesystem::temp_directory_path() / "c4-inline-body-cache";
+			std::filesystem::remove_all(folder);
+			std::string error;
+			auto chunksOf = [&](llvm::Module& partition, const char* salt) {
+				return InlineBodyCache(folder, salt).Chunks({ &partition }, bitcode, names, 1, 1, error);
+			};
+			auto kept = [&folder] {
+				std::vector<std::filesystem::path> files;
+				for (const auto& entry : std::filesystem::directory_iterator(folder)) files.push_back(entry.path());
+				return files;
+			};
+			const auto first = chunksOf(*module, "salt");
+			TEST_ASSERT(first && first->size() == 1 && first->front() == extracted);
+			const auto again = chunksOf(empty, "salt"); // the same bitcode: read back, not extracted from the empty module
+			TEST_ASSERT(again && again->front() == extracted);
+			TEST_ASSERT_EQ(kept().size(), size_t(1));
+			std::ofstream(kept().front(), std::ios::binary | std::ios::trunc) << "C4IB" << char(1);
+			const auto damaged = chunksOf(empty, "salt");
+			TEST_ASSERT(damaged && damaged->front().empty());
+			const std::filesystem::path salted = kept().front();
+			const auto other = chunksOf(*module, "another salt");
+			TEST_ASSERT(other && other->front() == extracted);
+			TEST_ASSERT(kept().size() == 1 && kept().front() != salted);
+			TEST_ASSERT(error.empty());
+			std::filesystem::remove_all(folder);
 		});
 		TEST_PASSED();
 	}

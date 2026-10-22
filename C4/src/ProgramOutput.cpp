@@ -13,6 +13,7 @@
 #include "Script/HostInterface.h"
 #include "Script/HostTable.h"
 #include "Script/InlineBodies.h"
+#include "Script/InlineBodyCache.h"
 #include "Script/InterfaceBuilder.h"
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Module.h>
@@ -68,6 +69,7 @@ bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitio
 	Scripting::ParallelFor(partitions.size(), settings.threads,
 		[&](size_t i) { bitcode[i] = Scripting::PartitionBitcode(*partitions[i], optimization); });
 	m_In.compiler.AddPhaseTime("bitcode", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
 	const auto assembly = std::chrono::steady_clock::now();
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
 	const Scripting::ObjectCache cache(base + ".objects", CacheSalt(settings));
@@ -302,9 +304,10 @@ bool ProgramOutput::PlaceDebugInfo(const DebugInfoPaths& paths)
 }
 
 // --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table, and the interface that goes
-// beside the program once it is built. The interface's build id covers the inline bodies: a build that splits its
-// module before optimizing it extracts them on the split's threads (FinishScriptHost), any other here. A program that
-// uses the scripting API without it has no table to link against: an error that says what to do.
+// beside the program once it is built. The interface's build id covers the inline bodies: a program emitted in
+// partitions takes them from the inline body cache with the partitions' bitcode (CollectInlineBodies), a build that
+// splits its module before optimizing it extracts them on the split's threads (FinishScriptHost), any other here. A
+// program that uses the scripting API without it has no table to link against: an error that says what to do.
 bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitions)
 {
 	llvm::Module& module = *partitions.front();
@@ -343,21 +346,35 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 		return false;
 	}
 	const bool whileSplitting = OptimizesPartitions(m_In.options);
-	const Scripting::HostNames hostNames(m_HostBuild->symbols);
-	if (partitions.size() > 1)
+	if (partitions.size() == 1)
 	{
-		std::vector<std::vector<std::string>> chunks(partitions.size());
-		Scripting::ParallelFor(partitions.size(), m_In.options.threads,
-			[&](size_t i) { chunks[i] = Scripting::InlineBodies(*partitions[i], hostNames, kInlineBodyChunksPerPartition); });
-		for (std::vector<std::string>& partition : chunks)
-			m_HostBuild->inlineBodies.insert(m_HostBuild->inlineBodies.end(), partition.begin(), partition.end());
+		const Scripting::HostNames hostNames(m_HostBuild->symbols);
+		if (whileSplitting) m_InlineBodies = { Scripting::InlineBodyGroups(module, hostNames, kInlineBodyChunks), Scripting::InlineBodyBitcode };
+		else m_HostBuild->inlineBodies = Scripting::InlineBodies(module, hostNames);
 	}
-	else if (whileSplitting)
-		m_InlineBodies = { Scripting::InlineBodyGroups(module, hostNames, kInlineBodyChunks), Scripting::InlineBodyBitcode };
-	else
-		m_HostBuild->inlineBodies = Scripting::InlineBodies(module, hostNames);
 	Timed("script host", start);
 	return whileSplitting || FinishInterface(module);
+}
+
+// A script host's inline bodies, each partition's from the inline body cache (D-81): an edit extracts only those of the
+// partitions it changed, or all of them when it changed the host table's names.
+bool ProgramOutput::CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode,
+	const std::string& base, const Scripting::ObjectSettings& settings)
+{
+	const auto start = std::chrono::steady_clock::now();
+	const Scripting::InlineBodyCache cache(base + ".inline", CacheSalt(settings) + " " + Scripting::HostNamesSalt(m_HostBuild->symbols));
+	const Scripting::HostNames names(m_HostBuild->symbols);
+	std::string error;
+	const auto chunks = cache.Chunks(partitions, bitcode, names, kInlineBodyChunksPerPartition, settings.threads, error);
+	if (!chunks)
+	{
+		m_In.result.AddBackendError(Core::String(error.c_str()));
+		return false;
+	}
+	for (const std::vector<std::string>& partition : *chunks)
+		m_HostBuild->inlineBodies.insert(m_HostBuild->inlineBodies.end(), partition.begin(), partition.end());
+	Timed("inline bodies", start);
+	return true;
 }
 
 // The interface, now that the inline bodies are in, and its build id in `module`.

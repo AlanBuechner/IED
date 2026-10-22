@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 7 done).
+  progress (steps 1 to 8 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1656,6 +1656,15 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   | the constant back | 2.69 | 2.54 |
 
   The script host phase fell from 0.26 s to 0.19 s and the bitcode phase from 0.19 s to 0.11 s.
+- **Done notes (step 8):** a script host emitted in partitions keeps each partition's inline bodies between builds
+  (`InlineBodyCache`, `<int>/<name>.inline/`), named by the hash of the partition's bitcode and of the table's names,
+  and takes them with the partitions' bitcode (`-ftime`: `inline bodies`): an edit extracts only its partitions'.
+  The image description makes one text per type name; the interop pre-pass finds each project's folders once; text
+  the macro pass left unchanged keeps its source; a call node keeps its children as it is parsed. IED server: nothing
+  changed 1.67 -> 1.48 s, a statement 1.96 -> 1.94 s, a header constant 2.52 -> 2.51 s (one run each; the script host
+  and inline bodies fell from 0.19 s to about 0.05 s, the rest is noise); a no-op's peak memory 1.97 -> 1.78 GB.
+  Adding a function took 2.97 s: it changed the host table, then in partition 0 (65k instructions, 1.2 s at `-O3`),
+  and every partition's inline-body key.
 - **Next:** HIR lowering (about 0.55 s of an edit, the largest serial part) needs a scope chain per lowering context
   instead of the symbol table's one cursor, a locked type store and instantiation, and errors gathered per function
   to run on several threads. What is left inside it is spread thin: the arenas' blocks (each function's own), vector

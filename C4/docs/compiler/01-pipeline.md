@@ -46,7 +46,8 @@ in `C4Lib`.
 ```
 
 `-ftime` prints the wall-clock time of each phase: preprocess, parse, model, lower, script host (with
-`--script-host`), optimize and codegen (one `optimize+codegen` phase in an incremental build), runtime+link.
+`--script-host`), bitcode and inline bodies (a program emitted in partitions; inline bodies with `--script-host`),
+optimize and codegen (one `optimize+codegen` phase in an incremental build), interface, runtime+link.
 
 ## 1. Source registration
 

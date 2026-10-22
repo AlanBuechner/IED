@@ -32,5 +32,7 @@ namespace Testing
 		void BodiesComeInChunksWithTheirConstants();
 		TEST_FUNC(Script.HostTable)
 		void NoBodiesWithoutSymbols();
+		TEST_FUNC(Script.HostTable)
+		void KeptInlineBodiesAreReadBack();
 	};
 } // namespace Testing

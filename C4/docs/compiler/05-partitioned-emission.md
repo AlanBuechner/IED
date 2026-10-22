@@ -92,7 +92,8 @@ emitted after.
 Thread-local accessors per partition; one symbol list across the partitions, in partition order (`HostSymbols`),
 which partition 0, where the table is, declares, leaving out another partition's own locals (its helpers); inline
 bodies extracted per partition, on its thread, up to four chunks each, against one set of the table's names
-(`HostNames`, made once); the interface and its build id once the
+(`HostNames`, made once), and kept between builds by the hash of the partition's bitcode and of the table's names
+(`InlineBodyCache`, in `<int>/<name>.inline/`), so an edit extracts only its partitions'; the interface and its build id once the
 partitions are assembled, the build id an object of its own (`<int>/<name>.build-id.obj`). A script knows a host's
 local (a static member, a static local) by the name the program gave it, so the interface, the table, the
 thread-local accessors and the inline bodies use that name (`ProgramName`: the `.local` suffix off), and the table

@@ -29,6 +29,8 @@
 #include <sstream>
 #include <filesystem>
 #include <chrono>
+#include <string_view>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -330,11 +332,17 @@ namespace
 				if (sources.HasInfo(id)) projectOf[sources.GetInfo(id).absPath] = sources.GetInfo(id).project;
 			std::vector<Scripting::InteropFileInput> inputs;
 			inputs.reserve(macroResults.size());
+			std::unordered_map<uint32, std::vector<std::string>> reached; // each project's folders, found once
 			for (const auto& mr : macroResults)
 			{
 				auto owner = projectOf.find(mr.absPath);
-				std::vector<std::string> folders = owner != projectOf.end() && !m_Options.projectsFile.empty()
-					? sources.FoldersReachedFrom(owner->second) : std::vector<std::string>();
+				std::vector<std::string> folders;
+				if (owner != projectOf.end() && !m_Options.projectsFile.empty())
+				{
+					auto [known, fresh] = reached.try_emplace(owner->second);
+					if (fresh) known->second = sources.FoldersReachedFrom(owner->second);
+					folders = known->second;
+				}
 				inputs.push_back({ mr.name, mr.absPath, mr.text, std::move(folders) });
 			}
 
@@ -386,7 +394,8 @@ namespace
 			{
 				const auto& info = sm.GetInfo(id);
 				auto it = byAbs.find(Scripting::MacroIdentity(info));
-				if (it != byAbs.end())
+				// Text the passes left as it was keeps its source and line table: no lexer has read one yet.
+				if (it != byAbs.end() && !(info.source && std::string_view(info.source->Data(), info.source->Size()) == *it->second))
 					sm.SetSourceText(id, *it->second);
 			}
 		}

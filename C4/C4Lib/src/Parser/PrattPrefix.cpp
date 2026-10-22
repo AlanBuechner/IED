@@ -66,7 +66,7 @@ namespace Scripting
 	{
 		Lexer& lexer = state.GetLexer();
 		auto call = CreateRef<FunctionCallNode>();
-		call->m_Callee = callee;
+		call->SetCallee(callee);
 		call->m_TemplateArgs = tmplArgs;
 		call->m_OpenParenToken = lexer.PeekCompound();
 		call->startLocation = start;
@@ -75,7 +75,7 @@ namespace Scripting
 		{
 			auto arg = ParseArgument(state);
 			if (!arg) break;
-			call->m_Arguments.Push(arg);
+			call->AddArgument(arg);
 			if (lexer.PeekCompound().GetType() != TokenType::Comma) break;
 			lexer.NextCompoundToken(); // a trailing comma is allowed
 		}
