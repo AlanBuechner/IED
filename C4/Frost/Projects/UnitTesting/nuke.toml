@@ -1,0 +1,9 @@
+# The reflection-driven test and benchmark harness (docs/UnitTesting.md): a test program runs with -filter=GLOB,
+# -benchmark-filter=GLOB, -list-tests, -list-benchmarks.
+[project]
+name = "UnitTesting"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Test and benchmark discovery, running, history and regression checks"
+depends = ["Core", "Reflection", "ObjectDescription"]

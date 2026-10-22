@@ -9,9 +9,10 @@ namespace Scripting::Toolchain
 {
 	namespace
 	{
-		// A development build runs from bin/<config>/<project>/ inside the repository: the repository is a few
-		// folders up. An installed C4 has everything under its home and never reaches this.
+		// A development build runs from build/bin/<config>/<project>/ inside the IED repository, whose C4 tree is C4/:
+		// the repository is a few folders up. An installed C4 has everything under its home and never reaches this.
 		constexpr int kRepositoryDepth = 4;
+		const fs::path kSourceTree = "C4";
 
 		bool IsFile(const fs::path& p) { std::error_code ec; return fs::is_regular_file(p, ec); }
 		bool IsFolder(const fs::path& p) { std::error_code ec; return fs::is_directory(p, ec); }
@@ -22,7 +23,12 @@ namespace Scripting::Toolchain
 			return executable.empty() ? fs::current_path() : executable.parent_path();
 		}
 
-		// `relative` in the nearest folder above the executable that has it, for a development build.
+		// The C4 tree of a repository folder: it holds the compiler's sources and the runtime, which tells it from the
+		// compiler's own bin folder (build/bin/<config>/C4/, with copies of the runtime and Bedrock).
+		bool IsSourceTree(const fs::path& folder) { return IsFolder(folder / "C4Lib") && IsFolder(folder / "C4Runtime"); }
+
+		// `relative` in the nearest folder above the executable that has it, or in that folder's C4 tree, for a
+		// development build.
 		fs::path InRepository(const fs::path& relative)
 		{
 			fs::path folder = ExecutableFolder();
@@ -30,6 +36,7 @@ namespace Scripting::Toolchain
 			{
 				folder = folder.parent_path();
 				if (fs::exists(folder / relative)) return folder / relative;
+				if (IsSourceTree(folder / kSourceTree) && fs::exists(folder / kSourceTree / relative)) return folder / kSourceTree / relative;
 			}
 			return {};
 		}
@@ -55,7 +62,7 @@ namespace Scripting::Toolchain
 	{
 		const fs::path installed = Home() / "toolchain" / "bin" / "clang.exe";
 		if (IsFile(installed)) return installed;
-		return InRepository(fs::path("Frost") / "vendor" / "Compiler" / "bin" / "clang.exe");
+		return InRepository(fs::path("vendor") / "llvm" / "bin" / "clang.exe");
 	}
 
 	fs::path Runtime()

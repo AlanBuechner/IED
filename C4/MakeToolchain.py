@@ -1,6 +1,6 @@
-# Assembles a C4 toolchain - the install Nuke compiles C4 projects with - from a Frost build of this folder:
+# Assembles a C4 toolchain - the install Nuke compiles C4 projects with - from a Nuke build of this folder's projects:
 #
-#   python MakeToolchain.py --out <dir> [--config Development]
+#   python MakeToolchain.py --out <dir> [--config Development] [--bin <the configuration's build/bin folder>]
 #
 #   <dir>/
 #     toolchain.json        name, version (C4.exe --version), git commit, modified flag, build time
@@ -25,6 +25,7 @@ import sys
 sys.dont_write_bytecode = True
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPOSITORY = os.path.dirname(HERE)
 COMPILER_FILES = (".exe", ".dll", ".pdb")
 COMPILER_FOLDERS = ("Bedrock", "C4Runtime", "toolchain")
 TOOLS = {
@@ -156,13 +157,14 @@ def write_metadata(out, fields, changed):
 
 
 def main(argv):
-	parser = argparse.ArgumentParser(description="Assemble a C4 toolchain from a Frost build")
+	parser = argparse.ArgumentParser(description="Assemble a C4 toolchain from a Nuke build of the compiler")
 	parser.add_argument("--out", required=True, help="the toolchain folder to create or refresh")
-	parser.add_argument("--config", default="Development", help="the Frost configuration that was built")
+	parser.add_argument("--config", default="Development", help="the configuration that was built")
+	parser.add_argument("--bin", help="the build's bin folder of that configuration (default: <repository>/build/bin/<config>-windows-x64)")
 	options = parser.parse_args(argv)
-	build = os.path.join(HERE, "bin", f"{options.config}-windows-x64")
+	build = os.path.abspath(options.bin or os.path.join(REPOSITORY, "build", "bin", f"{options.config}-windows-x64"))
 	if not os.path.isfile(os.path.join(build, "C4", "C4.exe")):
-		print(f"MakeToolchain: no compiler build at {build}/C4 (build it first: nuke build -p C4 {options.config})")
+		print(f"MakeToolchain: no compiler build at {build}/C4 (build it first: nuke build C4 {options.config})")
 		return 1
 	out = os.path.abspath(options.out)
 	copied, removed = mirror(plan(build, HERE), out)

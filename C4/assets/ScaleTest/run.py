@@ -16,7 +16,7 @@ import generate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
-COMPILER = os.path.join(REPO, 'bin', 'Development-windows-x64', 'C4', 'C4.exe')
+COMPILER = os.path.join(os.path.dirname(REPO), 'build', 'bin', 'Development-windows-x64', 'C4', 'C4.exe')
 WORK = os.path.join(REPO, 'assets', 'build-output', 'scale')
 
 

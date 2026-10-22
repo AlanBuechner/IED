@@ -16,7 +16,7 @@ $ErrorActionPreference = "Continue"
 
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $root "..\..")).Path
-$compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
+$compiler = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/C4.exe"
 $work     = Join-Path $repoRoot "assets/build-output/negative"
 
 if (-not (Test-Path $compiler)) { Write-Host "COMPILER NOT FOUND: $compiler - build it first." -ForegroundColor Red; exit 1 }

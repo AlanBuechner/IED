@@ -1,0 +1,11 @@
+[project]
+name = "ReflectionTesting"
+kind = "executable"
+language = "cpp"
+group = "C++ Libraries"
+description = "The Reflection, ObjectDescription and ChangeNotification tests"
+depends = ["Core", "UnitTesting", "Reflection", "ObjectDescription", "StaticReflection", "ChangeNotification"]
+tests = true
+
+[project.driver]
+reflection = true

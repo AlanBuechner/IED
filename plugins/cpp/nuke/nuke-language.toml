@@ -1,0 +1,9 @@
+# The C/C++ plugin's Nuke driver (IED docs/26 section 6, Nuke/README.md section 9c): a Nuke project with
+# language = "cpp" compiles with the workspace's LLVM release for the MSVC ABI; its IED task preset is cpp.nuke. The
+# package brings the C++ libraries (Core, Reflection, UnitTesting, ...) a workspace may depend on by name.
+[language]
+id = "cpp"
+module = "driver/__init__.py"
+preset = "cpp.nuke"
+libraries = ["libraries/*"]
+build-before-test = true

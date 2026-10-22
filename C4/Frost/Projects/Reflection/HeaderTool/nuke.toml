@@ -1,0 +1,10 @@
+# Reads a reflecting project's sources with libclang and writes their reflection data (run by the C++ driver per source).
+[project]
+name = "HeaderTool"
+kind = "executable"
+language = "cpp"
+group = "C++ Libraries"
+description = "Reflection header analysis (libclang)"
+depends = ["StaticReflection"]
+includes = ["${cpp.llvm}/include"]
+links = ["ntdll.lib", "version.lib", "${cpp.llvm}/lib/*.lib"]

@@ -1,0 +1,12 @@
+# The compiler as a library: lexer, parser, macros, the program model, HIR, LLVM codegen and interop. It links LLVM
+# statically: LLVM-C.lib is left out, since its C API would bind to LLVM-C.dll's copy of LLVM, whose target registry
+# the statically linked compiler never sees.
+[project]
+name = "C4Lib"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "The C4 compiler as a library: front end, program model, HIR, LLVM codegen, interop"
+depends = ["Core", "Reflection", "ObjectDescription", "Profiling"]
+includes = ["../C4Runtime", "${cpp.llvm}/include"]
+links = ["${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "${cpp.llvm}/lib/LTO.lib", "advapi32.lib", "kernel32.lib", "user32.lib", "gdi32.lib"]

@@ -1,0 +1,7 @@
+[project]
+name = "ChangeNotification"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Change notifications over reflected objects"
+depends = ["Core"]

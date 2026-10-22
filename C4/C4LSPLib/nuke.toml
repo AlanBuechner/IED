@@ -1,0 +1,8 @@
+# The language server (protocol, JSON, session, features) as a library, so C4LSP and C4Testing link the same code.
+[project]
+name = "C4LSPLib"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "The C4 language server as a library"
+depends = ["Core", "C4Lib", "ObjectDescription", "C4Protocol"]

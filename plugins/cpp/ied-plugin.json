@@ -2,9 +2,12 @@
 // grammars name for control flow, Markdown fence names, header/source pairs, icons and the places compilers print (MSVC's
 // "path(line,col)", clang's and gcc's "path:line:col") - and clangd as the language server of C and C++ documents, one
 // per workspace. clangd finds each file's flags in the nearest compile_commands.json (or compile_flags.txt) above it or
-// in a build/ folder beside one, and guesses without one. Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's
-// adapter/codelldb.exe), which connects back to IED's port (transport tcp, docs/25); a launch configuration's type is
-// "lldb", with CodeLLDB's arguments (program, args, cwd, env, stopOnEntry).
+// in a build/ folder beside one (the Nuke driver writes build/compile_commands.json), and guesses without one. Projects
+// with language = "cpp" in a Nuke workspace build through the plugin's Nuke driver (nuke/, Frost before it): its clang
+// prints diagnostics in MSVC's form without a code, "file(line,col): error: ...", which the clang-msvc matcher reads.
+// Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's adapter/codelldb.exe), which connects back to
+// IED's port (transport tcp, docs/25); a launch configuration's type is "lldb", with CodeLLDB's arguments (program,
+// args, cwd, env, stopOnEntry).
 // clangd's semantic tokens map onto the syntax colors Visual Assist style: `auto` (a deduced type) reads as a keyword and
 // code a preprocessor condition leaves out (clangd's `comment`) gray, like the directives.
 {
@@ -132,6 +135,13 @@
 				"severityMap": { "fatal error": "error", "note": "info" }
 			},
 			{
+				"id": "clang-msvc",
+				"source": "clang",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
+				"patterns": [ { "regexp": "^\\s*(.+?)\\((\\d+),(\\d+)\\): (fatal error|error|warning|note): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 } ],
+				"severityMap": { "fatal error": "error", "note": "info" }
+			},
+			{
 				"id": "msvc",
 				"source": "msvc",
 				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
@@ -144,7 +154,7 @@
 				"id": "cpp.nuke",
 				"label": "C/C++ (Nuke)",
 				"extends": "nuke",
-				"problemMatcher": ["clang", "msvc"],
+				"problemMatcher": ["clang", "clang-msvc", "msvc"],
 				"debug": {
 					"default": "Launch",
 					"configurations": {

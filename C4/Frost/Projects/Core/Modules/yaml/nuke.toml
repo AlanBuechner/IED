@@ -1,0 +1,9 @@
+# yaml-cpp (the submodule yaml-cpp/, the owner's fork) compiled as a library of its own
+[project]
+name = "yaml"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "yaml-cpp"
+sources = ["yaml-cpp/src/**/*.cpp"]
+includes = ["yaml-cpp/include"]

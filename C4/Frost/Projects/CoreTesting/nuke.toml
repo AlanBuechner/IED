@@ -1,0 +1,12 @@
+[project]
+name = "CoreTesting"
+kind = "executable"
+language = "cpp"
+group = "C++ Libraries"
+description = "The Core library's tests and benchmarks"
+depends = ["Core", "Threading", "UnitTesting", "ObjectDescription"]
+includes = ["src/glm"]
+tests = true
+
+[project.driver]
+reflection = true

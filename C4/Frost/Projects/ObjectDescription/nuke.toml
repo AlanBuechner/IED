@@ -1,0 +1,7 @@
+[project]
+name = "ObjectDescription"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Object descriptions and their serialization"
+depends = ["Core", "Reflection"]

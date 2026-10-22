@@ -157,7 +157,10 @@ class Session:
 			package = self.workspace.language_packages().get(language)
 			function = getattr(languages.load_driver(package), "variables", None) if package else None
 			context = languages.WorkspaceContext(self.workspace.dir, self.workspace.spec.language_settings.get(language, {}), self.log)
-			self._language_values[language] = function(context) if function else {}
+			try:
+				self._language_values[language] = function(context) if function else {}
+			except ValueError as error:
+				raise NukeError(f"[languages.{language}]: {error}") from None
 		return self._language_values[language][key]
 
 	# --- tracing ---------------------------------------------------------------------------------

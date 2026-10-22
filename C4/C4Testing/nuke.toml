@@ -1,0 +1,17 @@
+# The compiler's unit tests (and the language server's and debug adapter's): nuke test C4Testing --filter "Lexer.*".
+# It depends on C4 so the compiler the debug adapter tests launch is built too. ntdll: LLVMSupport (RtlGetLastNtStatus);
+# dbghelp: the debug adapter; shell32: its command-line test. The codegen tests include the LLVM headers directly.
+[project]
+name = "C4Testing"
+kind = "executable"
+language = "cpp"
+group = "C4"
+description = "The C4 compiler, language server and debug adapter unit tests"
+depends = ["Core", "UnitTesting", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib", "C4DAPLib", "C4"]
+includes = ["${cpp.llvm}/include"]
+defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
+links = ["ntdll.lib", "dbghelp.lib", "shell32.lib"]
+tests = true
+
+[project.driver]
+reflection = true

@@ -6,7 +6,7 @@ $ErrorActionPreference = "Continue"
 
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $root "..\..")).Path
-$compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
+$compiler = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/C4.exe"
 $scratch  = Join-Path $repoRoot "assets/build-output/toolstest"
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -23,7 +23,7 @@ function Get-Tree([string]$dir) {
 
 # The Bedrock copy next to C4.exe is exactly Bedrock/ (no missing, extra or different file; BUG-099).
 function Test-ShippedBedrockMirrorsSource {
-    $shipped = Join-Path $repoRoot "bin/Development-windows-x64/C4/Bedrock"
+    $shipped = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/Bedrock"
     $source  = Join-Path $repoRoot "Bedrock"
     if (-not (Test-Path $shipped)) { return @("no Bedrock next to C4.exe: $shipped (build first)") }
     $failures = @()
@@ -261,7 +261,7 @@ function Test-LinkFlags {
 # A copy of the install outside the repository builds and runs a program, an extern "c" one too, with its own
 # toolchain (D-56, BUG-043, BUG-045).
 function Test-InstallOutsideRepository {
-    $bin = Join-Path $repoRoot "bin/Development-windows-x64"
+    $bin = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64"
     $kit = Join-Path $env:TEMP "c4-toolstest/kit"
     New-Item -ItemType Directory -Force $kit | Out-Null
     foreach ($folder in @("Bedrock", "C4Runtime", "toolchain")) {
@@ -389,7 +389,7 @@ function Test-ProjectDefines {
     $object = Join-Path $dir "int/inlined.exe"
     $optimized = Invoke-Compiler $compiler @("--projects", (Join-Path $dir "int/projects.toml"), "-O2", "-c", "-o", $object)
     if ($optimized.exit -ne 0) { return @("the -O2 object did not build: $($optimized.output)") }
-    $objdump = Join-Path $repoRoot "Frost/vendor/Compiler/bin/llvm-objdump.exe"
+    $objdump = Join-Path (Split-Path -Parent $repoRoot) "vendor/llvm/bin/llvm-objdump.exe"
     $main = (& $objdump -d --no-show-raw-insn (Join-Path $dir "int/inlined.obj") | Out-String) -split "`r?`n`r?`n" | Where-Object { $_ -match "<main>:" }
     if (-not $main -or $main -match "call") { return @("at -O2 the game's main still calls the engine: $main") }
     return @()
@@ -462,7 +462,7 @@ function Test-DebugInfoFlag {
     if ($LASTEXITCODE -ne 0) { return @("the -g program exited $LASTEXITCODE") }
     $pdb = Join-Path $dir "app.pdb"
     if (-not (Test-Path $pdb)) { return @("-g wrote no app.pdb") }
-    $pdbutil = Join-Path $repoRoot "Frost/vendor/Compiler/bin/llvm-pdbutil.exe"
+    $pdbutil = Join-Path (Split-Path -Parent $repoRoot) "vendor/llvm/bin/llvm-pdbutil.exe"
     $symbols = (& $pdbutil dump --symbols $pdb | Out-String)
     $lines = (& $pdbutil dump -l $pdb | Out-String)
     $globals = (& $pdbutil dump --globals $pdb | Out-String)
@@ -487,7 +487,7 @@ function Test-DapAdapter {
     $exe = Join-Path $dir "app.exe"
     $build = Invoke-Compiler $compiler @($dir, "-g", "-o", $exe)
     if ($build.exit -ne 0) { return @("the program did not build: $($build.output)") }
-    $adapter = Join-Path $repoRoot "bin/Development-windows-x64/C4DAP/C4DAP.exe"
+    $adapter = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4DAP/C4DAP.exe"
     $failures = @(python (Join-Path $root "StdioClient.py") dap $adapter $exe (Join-Path $dir "main.cf"))
     if ($LASTEXITCODE -ne 0 -and $failures.Count -eq 0) { $failures += "the client exited $LASTEXITCODE" }
     return $failures
@@ -495,7 +495,7 @@ function Test-DapAdapter {
 
 # The language server over real stdio: initialize, a malformed frame it drops (BUG-202), shutdown and exit 0.
 function Test-LspStdio {
-    $server = Join-Path $repoRoot "bin/Development-windows-x64/C4LSP/C4LSP.exe"
+    $server = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4LSP/C4LSP.exe"
     $failures = @(python (Join-Path $root "StdioClient.py") lsp $server)
     if ($LASTEXITCODE -ne 0 -and $failures.Count -eq 0) { $failures += "the client exited $LASTEXITCODE" }
     return $failures
@@ -737,7 +737,7 @@ int32 main()
     $tiny = New-Sources "partitions-tiny" @{ "main.cf" = $hello }
     $small = Invoke-Compiler $compiler @($tiny, "-o", (Join-Path $tiny "app.exe"), "-O2")
     if ($small.exit -ne 0 -or @(Get-ChildItem (Join-Path $tiny "app.objects") -Filter "*.obj" -ErrorAction SilentlyContinue).Count -ne 1) { $failures += "a one-line program was not assembled as one object by default" }
-    $pdbutil = Join-Path $repoRoot "Frost/vendor/Compiler/bin/llvm-pdbutil.exe"
+    $pdbutil = Join-Path (Split-Path -Parent $repoRoot) "vendor/llvm/bin/llvm-pdbutil.exe"
     $pdb = Join-Path $dir "debug/app.pdb"
     $symbols = if (Test-Path $pdb) { (& $pdbutil dump --symbols $pdb | Out-String) } else { "" }
     if ($symbols -notmatch "``main``" -or $symbols -notmatch "``Raise``") { $failures += "the partitioned -g build's .pdb lacks main or Raise" }

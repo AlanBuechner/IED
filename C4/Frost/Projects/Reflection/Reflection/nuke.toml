@@ -1,0 +1,9 @@
+# The runtime reflection library. A project with [project.driver] reflection = true depends on it, the HeaderTool
+# and CodeGen (docs/ReflectionSystem.md).
+[project]
+name = "Reflection"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Runtime type information and its registration"
+depends = ["Core"]

@@ -145,7 +145,7 @@ A language plugin owns everything about its language. The host and the default f
 
 | Plugin | Languages | Brings now | Brings later |
 |---|---|---|---|
-| `ied.cpp` | C, C++ | clangd, CodeLLDB, icons, matchers; CMake/meson markers | CMake and MSBuild presets, a CMake Nuke driver |
+| `ied.cpp` | C, C++ | clangd, CodeLLDB, icons, matchers; CMake/meson markers; the Nuke driver (Frost's build, merged) and the C++ libraries (Core, Reflection, UnitTesting, ...) | CMake and MSBuild presets, a CMake Nuke driver |
 | `ied.rust` | Rust | rust-analyzer, cargo preset, icons | cargo Nuke driver, `cargo_metadata` tool, the `ied-profiler` crate and a Profile task (`docs/16`) |
 | `ied.go` | Go | icons, markers | gopls, go preset, go Nuke driver, the profiler client module, the Go execution-trace importer (`profilerImporters`) and a Profile task (`docs/16`) |
 | `ied.python` | Python | icons, markers | a language server, venv-aware run/test presets |
@@ -180,7 +180,7 @@ depends = ["Engine"]
 dialogue = "tools/dialogue"  # a folder with nuke/nuke-language.toml
 ```
 
-A driver (`nuke/nuke-language.toml` naming a Python module and the IED preset of its projects) implements `build(ctx)` -> the artifacts Nuke copies to `build/bin/{config}-{system}-{arc}/{project}/`, `program(ctx)` -> the file `nuke run` starts, `test(ctx)` -> an exit code, and optionally `clean(ctx)` and `has_tests(ctx)`; it maps Nuke's configuration onto the native one itself (cargo: no optimization is the dev profile, otherwise `--release`, with debug info through `CARGO_PROFILE_RELEASE_DEBUG`; go: `-gcflags=all=-N -l` and `-ldflags=-s -w`). As built: `Nuke/nuke/languages.py`, `plugins/rust/nuke/cargo.py`, `plugins/go/nuke/gotool.py`, the presets `rust.nuke` and `go.nuke` (and Go's native `go` preset and gopls profile), a two-line `rustc-human` matcher for cargo's own diagnostics, and `${projectOutput}` from the project file's `buildSystem.output`, which `nuke init --ied` writes. A C4 + Rust + Go workspace builds, runs and tests in one `nuke` command (`Nuke/tests/test_languages.py` with the real cargo and go), and in IED a Rust error from the Nuke build lands in the Error List.
+A driver (`nuke/nuke-language.toml` naming a Python module and the IED preset of its projects) implements `build(ctx)` -> the artifacts Nuke copies to `build/bin/{config}-{system}-{arc}/{project}/`, `program(ctx)` -> the file `nuke run` starts, `test(ctx)` -> an exit code, and optionally `clean(ctx)` and `has_tests(ctx)`; it maps Nuke's configuration onto the native one itself (cargo: no optimization is the dev profile, otherwise `--release`, with debug info through `CARGO_PROFILE_RELEASE_DEBUG`; go: `-gcflags=all=-N -l` and `-ldflags=-s -w`). As built: `Nuke/nuke/languages.py`, `plugins/rust/nuke/cargo.py`, `plugins/go/nuke/gotool.py`, `plugins/cpp/nuke/driver/` (C and C++, below), the presets `rust.nuke` and `go.nuke` (and Go's native `go` preset and gopls profile), a two-line `rustc-human` matcher for cargo's own diagnostics, and `${projectOutput}` from the project file's `buildSystem.output`, which `nuke init --ied` writes. A C4 + Rust + Go workspace builds, runs and tests in one `nuke` command (`Nuke/tests/test_languages.py` with the real cargo and go), and in IED a Rust error from the Nuke build lands in the Error List.
 
 Rules that keep the native toolchain intact:
 
@@ -190,6 +190,16 @@ Rules that keep the native toolchain intact:
 4. Nuke owns only what is cross-language: the project graph (`depends` across languages), the configuration names, the staged outputs, and the one command a person or IED runs.
 
 `nuke init --ied` names `<language>.nuke` in each project's file - the preset its language's plugin offers by that convention, extending `nuke` (`c4.nuke`, `cpp.nuke`, later `rust.nuke`) - and `nuke` for a project without a language; it used to give every project `c4.nuke`, which handed the C++ `C4` project a C4 debug launch. Nuke's own preset, the `nuke.command` setting, the `nuke.toml` icon and the Nuke skill are the built-in `ied.nuke` plugin's, since IED invokes Nuke for any language it builds (`AGENTS.md` rule 3). With P2, `nuke init --ied` also pins each language package the workspace's `[languages]` names in the solution's `localPlugins`.
+
+**C and C++** have no native tool to defer to, so `ied.cpp`'s driver is the build itself: the C++ build system the C4
+compiler was built with (Frost), merged into Nuke as a language driver (owner, 2026-10-21; Nuke/README.md section 9c,
+`docs/23` N-17). It compiles with an LLVM release's clang for the MSVC ABI, links executables, static libraries and DLLs,
+runs the Reflection library's code generation and writes `build/compile_commands.json` for clangd; the package's library
+projects (`plugins/cpp/libraries`: Core, Threading, Profiling, the Reflection libraries and tools, ObjectDescription,
+ChangeNotification, UnitTesting and their tests) join a workspace that depends on them. It is also where Nuke learned how
+a package extends it (`docs/23` N-18): workspace settings in `[languages.cpp]` (`llvm`, `system-includes`), library
+projects, `build-before-test`, `implicit_depends`, `${cpp.llvm}`. This repository's C4 compiler and tools are ten such
+projects, grouped as `C4` in the solution (`docs/03`).
 
 Cross-language linking (a C4 game calling a Rust library through a C header) is the drivers' and C4 interop's business, later.
 

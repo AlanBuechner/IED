@@ -20,8 +20,8 @@ sys.path.insert(0, HERE)
 
 from difftest import generate, render, helpers  # noqa: E402
 
-COMPILER = os.path.join(C4_ROOT, 'bin', 'Development-windows-x64', 'C4', 'C4.exe')
-CLANG = os.path.join(C4_ROOT, 'Frost', 'vendor', 'Compiler', 'bin', 'clang.exe')
+COMPILER = os.path.join(os.path.dirname(C4_ROOT), 'build', 'bin', 'Development-windows-x64', 'C4', 'C4.exe')
+CLANG = os.path.join(os.path.dirname(C4_ROOT), 'vendor', 'llvm', 'bin', 'clang.exe')
 OUTPUT = os.path.join(C4_ROOT, 'assets', 'build-output', 'differential')
 RUN_SECONDS = 20
 COMPILE_SECONDS = 300

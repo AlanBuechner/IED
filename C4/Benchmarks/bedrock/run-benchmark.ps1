@@ -7,8 +7,8 @@ param([switch]$Check)
 $ErrorActionPreference = "Continue"
 $dir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo  = (Resolve-Path (Join-Path $dir "../..")).Path
-$c4    = Join-Path $repo "bin/Development-windows-x64/C4/C4.exe"
-$clang = Join-Path $repo "Frost/vendor/Compiler/bin/clang.exe"
+$c4    = Join-Path (Split-Path -Parent $repo) "build/bin/Development-windows-x64/C4/C4.exe"
+$clang = Join-Path (Split-Path -Parent $repo) "vendor/llvm/bin/clang.exe"
 $out   = Join-Path $repo "assets/build-output/benchmarks/bedrock"
 New-Item -ItemType Directory -Force $out | Out-Null
 $c4Exe  = Join-Path $out "bedrock_c4.exe"

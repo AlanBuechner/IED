@@ -17,7 +17,7 @@ $ErrorActionPreference = "Continue"
 
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $root "..\..")).Path
-$compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
+$compiler = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/C4.exe"
 $mode     = if ($O2) { "O2" } else { "O0" }   # what each host compiles its scripts with
 $variant  = $mode + $(if ($DebugScripts) { "-debug" } else { "" })
 $work     = Join-Path $repoRoot "assets/build-output/script/$variant"

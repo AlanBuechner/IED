@@ -1,0 +1,8 @@
+# Gathers what the HeaderTool found in a project into its generated.cpp (run by the C++ driver after the sources compile).
+[project]
+name = "CodeGen"
+kind = "executable"
+language = "cpp"
+group = "C++ Libraries"
+description = "Reflection code generator"
+depends = ["StaticReflection"]

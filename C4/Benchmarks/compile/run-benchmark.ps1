@@ -6,7 +6,7 @@ param([switch]$Check)
 $ErrorActionPreference = "Continue"
 $dir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = (Resolve-Path (Join-Path $dir "../..")).Path
-$c4   = Join-Path $repo "bin/Development-windows-x64/C4/C4.exe"
+$c4   = Join-Path (Split-Path -Parent $repo) "build/bin/Development-windows-x64/C4/C4.exe"
 $out  = Join-Path $repo "assets/build-output/benchmarks/compile"
 New-Item -ItemType Directory -Force $out | Out-Null
 

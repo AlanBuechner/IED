@@ -16,6 +16,9 @@ A driver module (or package: a module named __init__.py loads with its folder as
 	has_tests(ctx) -> bool    optional (default True)
 	implicit_depends(spec)    optional: projects a project needs besides its `depends` (names), added to them
 	variables(ctx) -> dict    optional: values manifests read as ${<language>.<name>} (ctx: a WorkspaceContext)
+
+A driver reports a project it cannot build with ctx.problem(message) (or, without a context, a ValueError), and a
+failed compile with ctx.fail(what, code).
 """
 
 import glob
@@ -192,6 +195,14 @@ class DriverContext:
 	def expand(self, text):
 		"""`text` with the project's ${variables} (the steps' ones, the language packages' included)."""
 		return self.expander(text) if self.expander else text
+
+	def problem(self, message):
+		"""Stops Nuke with `message` as a problem of the workspace or a manifest (exit code 1)."""
+		raise NukeError(message)
+
+	def fail(self, what, code=1):
+		"""Stops Nuke because `what` (a compile, a link) failed, with its exit code."""
+		raise StepFailed(what, code)
 
 	def tool(self, name):
 		"""The command of the language's tool: NUKE_TOOL_<NAME> when set (tests, a tool off PATH), else its name."""

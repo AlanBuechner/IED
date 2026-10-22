@@ -9,7 +9,7 @@ $ErrorActionPreference = "Continue"
 # Paths are relative to this script (never hardcoded) so the suite runs from any checkout location.
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $root "..\..")).Path
-$compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
+$compiler = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/C4.exe"
 $testDir  = $root
 $flags    = @()
 if ($DebugInfo) { $flags += "-g" }

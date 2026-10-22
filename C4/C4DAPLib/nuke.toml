@@ -1,0 +1,11 @@
+# The debug adapter (DAP requests and events, the debugger over the Win32 debug API and DbgHelp) as a library, so C4DAP
+# and C4Testing link the same code.
+[project]
+name = "C4DAPLib"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "The C4 debug adapter as a library"
+depends = ["Core", "ObjectDescription", "C4Protocol"]
+defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
+links = ["dbghelp.lib"]

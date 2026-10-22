@@ -1,0 +1,10 @@
+# The language server executable: a stdio loop over C4LSPLib. ntdll: LLVMSupport (RtlGetLastNtStatus), reached through
+# the target's host detection.
+[project]
+name = "C4LSP"
+kind = "executable"
+language = "cpp"
+group = "C4"
+description = "The C4 language server"
+depends = ["Core", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib"]
+links = ["ntdll.lib"]

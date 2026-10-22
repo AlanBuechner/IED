@@ -1,0 +1,13 @@
+# The C/C++ interop binding generator: parses a foreign header with an in-process ClangTool and writes C4 declarations.
+# It builds at -O0: lld-link fails at -O3 with CodeView on this toolchain with "relocation against symbol in discarded
+# section: protected ... clang::interp::ByteCodeEmitter::emitIncPtr" (lld's garbage collection of protected-symbol
+# COMDATs), and a one-shot generator does not need the speed.
+[project]
+name = "CBind"
+kind = "executable"
+language = "cpp"
+group = "C4"
+description = "The C/C++ interop binding generator"
+includes = ["${cpp.llvm}/include"]
+links = ["ntdll.lib", "version.lib", "advapi32.lib", "kernel32.lib", "user32.lib", "${cpp.llvm}/lib/*.lib"]
+compiler-args = ["-O0"]

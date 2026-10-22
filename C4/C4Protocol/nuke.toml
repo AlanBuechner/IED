@@ -1,0 +1,8 @@
+# JSON values, Content-Length framing and the stdio channel the language server and the debug adapter share.
+[project]
+name = "C4Protocol"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "JSON, Content-Length framing and the stdio channel of C4LSP and C4DAP"
+depends = ["Core", "ObjectDescription"]

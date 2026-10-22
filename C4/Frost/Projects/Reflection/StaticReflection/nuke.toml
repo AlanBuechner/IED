@@ -1,0 +1,7 @@
+[project]
+name = "StaticReflection"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Compile-time reflection the HeaderTool and CodeGen share"
+depends = ["Core", "ObjectDescription"]

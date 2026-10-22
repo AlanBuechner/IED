@@ -1,0 +1,7 @@
+[project]
+name = "Threading"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Threads, jobs and synchronization"
+depends = ["Core"]

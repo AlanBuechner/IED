@@ -32,7 +32,7 @@ $ErrorActionPreference = "Continue"
 
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $root "..\..")).Path
-$compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
+$compiler = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/C4.exe"
 # Scratch build output lives under assets/build-output (never the repo root, never dot-prefixed).
 $work     = Join-Path $repoRoot "assets/build-output/isolated"
 

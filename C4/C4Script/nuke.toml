@@ -1,0 +1,19 @@
+# The script host (docs/runtime/04): the DLL a program built with --script-host loads to compile, link and load C4 scripts
+# while it runs. It carries the compiler and LLVM statically: LLVM-C.lib and LTO.lib import their DLLs, which a program
+# that ships scripting should not need beside it. lld's COFF driver links debug scripts into DLLs in the process and
+# DbgHelp names a fault in one (section 6.4); the vendored lld links it, as every other C4 binary, and writes C4Script.lib.
+[project]
+name = "C4Script"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "The C4 script host DLL"
+depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling"]
+includes = ["${cpp.llvm}/include"]
+defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "", C4SCRIPT_EXPORTS = "" }
+links = ["ntdll.lib", "kernel32.lib", "user32.lib", "advapi32.lib", "shell32.lib", "bcrypt.lib", "ole32.lib", "version.lib",
+	"${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "!LTO.lib", "${cpp.llvm}/lib/lldCOFF.lib", "${cpp.llvm}/lib/lldCommon.lib", "dbghelp.lib"]
+
+[project.driver]
+library = "dynamic"
+linker-args = ["-fuse-ld=lld"]

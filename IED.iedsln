@@ -7,6 +7,41 @@
 			"optional": true
 		}
 	],
+	"groups": [
+		{
+			"name": "C++ Libraries",
+			"projects": [
+				"ChangeNotification",
+				"CodeGen",
+				"Core",
+				"CoreTesting",
+				"HeaderTool",
+				"ObjectDescription",
+				"Profiling",
+				"Reflection",
+				"ReflectionTesting",
+				"StaticReflection",
+				"Threading",
+				"UnitTesting",
+				"yaml"
+			]
+		},
+		{
+			"name": "C4",
+			"projects": [
+				"C4",
+				"C4DAP",
+				"C4DAPLib",
+				"C4Lib",
+				"C4LSP",
+				"C4LSPLib",
+				"C4Protocol",
+				"C4Script",
+				"C4Testing",
+				"CBind"
+			]
+		}
+	],
 	"items": [
 		"README.md",
 		"AGENTS.md",

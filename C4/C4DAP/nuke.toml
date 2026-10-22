@@ -1,0 +1,9 @@
+# The debug adapter executable: a stdio loop over C4DAPLib.
+[project]
+name = "C4DAP"
+kind = "executable"
+language = "cpp"
+group = "C4"
+description = "The C4 debug adapter"
+depends = ["Core", "ObjectDescription", "C4Protocol", "C4DAPLib"]
+links = ["dbghelp.lib"]

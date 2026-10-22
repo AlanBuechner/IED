@@ -15,6 +15,8 @@ Design and decisions: [`../docs/23-nuke-build-system.md`](../docs/23-nuke-build-
 - [7. Variables](#7-variables)
 - [8. Toolchains](#8-toolchains)
 - [9. C4 projects: compiling, tests, the IDE bridge](#9-c4-projects-compiling-tests-the-ide-bridge)
+- [9b. Projects in other languages](#9b-projects-in-other-languages)
+- [9c. C and C++ projects](#9c-c-and-c-projects)
 - [10. This repository as a workspace](#10-this-repository-as-a-workspace)
 - [11. Layout of Nuke itself](#11-layout-of-nuke-itself)
 
@@ -63,6 +65,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `-w, --workspace DIR` | the workspace at DIR instead of searching up from the current folder |
 | `--all` | every project of the workspace |
 | `--filter GLOB` | test cases to run (`*` any run of characters, `?` one) |
+| `-j, --jobs N` | how many compiles a language driver runs at once (C++, section 9c; default `NUKE_JOBS`, else one per processor) |
 | `--json` | machine-readable output for `list` and `info` (messages go to stderr) |
 | `-v, --verbose` | print every command Nuke runs |
 | `--version` | Nuke's version |
@@ -108,7 +111,10 @@ description = "Package a shippable folder"
 requires = ["build"]
 
 [languages]                        # section 9b: where a language's driver comes from (default: the workspace's
-dialogue = "tools/dialogue"        # .ied/plugins/, then IED's own plugins beside Nuke - rust, go)
+dialogue = "tools/dialogue"        # .ied/plugins/, then IED's own plugins beside Nuke - rust, go, cpp)
+
+[languages.cpp]                    # or a table: what the language's driver reads (section 9c), with
+llvm = "vendor/llvm"               # package = "<folder>" when it also pins the package
 ```
 
 Discovery (no `projects` list) walks the workspace and skips `build`, `bin`, `bin-int`, `vendor`,
@@ -121,7 +127,7 @@ workspace of its own.
 name = "Game"                      # default: the folder name
 kind = "executable"                # executable | module | library | custom
 description = "The game"
-group = "Games"                    # display grouping for IDEs
+group = "Games"                    # the folder IED's Solution Explorer shows it in ("Engine/Tools" nests)
 language = "c4"                    # default "c4" for executable and module; another one builds through its driver
                                    # (section 9b); a custom project's is for IDEs only
 depends = ["Engine"]               # build order; C4 programs also compile their modules' sources
@@ -328,7 +334,10 @@ project without a language), and pins the toolchain's IED plugin
 store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
 is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
-names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. It also adds `.ied/local/` to
+names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. The projects' `group`s
+become the solution's `groups`, the Solution Explorer's folders (sorted by name, `"Engine/Tools"` nested); a language
+package's library outside the workspace builds with it but has no project file (the explorer lists only the
+workspace's files). It also adds `.ied/local/` to
 `.gitignore`, as `nuke init` does for a new workspace. The AI skills are not copied into the workspace: C4's come with the
 toolchain's IED plugin, Nuke's with IED's `ied.nuke` plugin (IED docs/26).
 
@@ -345,6 +354,7 @@ languages, and the outputs in one place.
 |---|---|---|---|
 | `rust` | IED's `plugins/rust` | `cargo build --message-format=json-render-diagnostics` (diagnostics to the log, artifacts read from cargo's messages); executables and dynamic/static libraries with their `.pdb` are copied | no optimization: the dev profile; otherwise `--release`, with debug info (`CARGO_PROFILE_RELEASE_DEBUG`) when the configuration keeps it. `[project.driver]`: `package`, `bin` |
 | `go` | IED's `plugins/go` | `go build -o build/bin/.../<Name>.exe <package>` (a library: `go build ./...` to check it); `go test ./...` | no optimization: `-gcflags=all=-N -l`; no debug info: `-ldflags=-s -w`; GOOS/GOARCH from the platform. `[project.driver]`: `package` (default `.`), `name` |
+| `cpp` | IED's `plugins/cpp` | the driver is the build (section 9c): clang `-cc1` per source, lld / llvm-lib / `-shared` link into `build/bin`, the Reflection library's code generation | the configuration's optimization and debug info, its name defined. `[project.driver]`: `library`, `reflection`, `system-includes`, `linker-args` |
 
 A language's package is the one the workspace pins in `[languages]` (a folder, relative to the workspace), else one
 of the workspace's own plugins (`.ied/plugins/<id>/`: a project that invents a language ships its driver with it),
@@ -358,28 +368,114 @@ language = "rust"                  # its Cargo.toml sits beside this file
 depends = ["Engine"]               # built after Engine, whatever its language
 ```
 
-A driver (`nuke/nuke-language.toml` names it and the IED preset of its projects) is a module with
-`build(ctx) -> [artifacts]`, `program(ctx) -> file name or None`, `test(ctx) -> exit code`, and optionally `clean(ctx)`
-and `has_tests(ctx)`; `ctx` (`nuke/languages.py`) carries the project, the configuration, the platform, the bin and
-int folders, the extra arguments and test filter, `options` (`[project.driver]`), `tool(name)`, and `run`/`capture`
-to run the tool with its output in Nuke's log. `nuke init --ied` gives such a project its package's preset
+A driver (`nuke/nuke-language.toml` names it and the IED preset of its projects) is a module - or a Python package,
+when the module named is an `__init__.py` - with `build(ctx) -> [artifacts]`, `program(ctx) -> file name or None`,
+`test(ctx) -> exit code`, and optionally `clean(ctx)`, `has_tests(ctx)`, `implicit_depends(spec) -> [names]` (projects
+a project needs besides its `depends`, added to them: C++ reflection needs the Reflection library and its tools) and
+`variables(ctx) -> {name: value}` (what manifests and steps read as `${<language>.<name>}`: `${cpp.llvm}`); `ctx`
+(`nuke/languages.py`) carries the project, the configuration, the platform, the bin and int folders, the extra
+arguments and test filter, `options` (`[project.driver]`), `settings` (the workspace's `[languages.<id>]` table),
+`depends` (the contexts of the projects in `depends`), `expand(text)` (the project's variables), `jobs` (`-j`),
+`tool(name)`, `run`/`capture` to run the tool with its output in Nuke's log, and `problem(message)` / `fail(what, code)`
+to stop Nuke (a ValueError from `implicit_depends` or `variables` is a problem too). The description may also name
+the package's **library projects** (`libraries = ["libraries/*"]`, folders with a `[project]` nuke.toml): a workspace
+depending on one by name gets it as a project, built into its own `build/`; and ask for `build-before-test = true`
+(`nuke test` builds such a project, with what it depends on, before `test(ctx)`). `nuke init --ied` gives such a project its package's preset
 (`rust.nuke`, `go.nuke`), the program in `buildSystem.output` (IED's `${projectOutput}`), and pins a `[languages]`
 package that is an IED plugin in the solution's `localPlugins`.
 
+## 9c. C and C++ projects
+
+`language = "cpp"` builds with IED's C/C++ plugin (`plugins/cpp/nuke/driver/`), the C++ build system Frost was, as a
+language driver: an LLVM release's clang compiles each source with its `-cc1` frontend for the MSVC ABI (with Visual
+Studio's headers and the Windows SDK's), and the objects link into an executable (lld), a static library (llvm-lib) or
+a DLL (clang `-shared`) in the project's bin folder.
+
+```toml
+# Engine/nuke.toml
+[project]
+kind = "library"                   # a static library (.lib); kind = "executable" for a program
+language = "cpp"
+depends = ["Core"]                 # its include folders and library reach this project and what links it
+sources = ["src", "third_party/lua/*.c"]   # folders (every .c and .cpp below), files or globs; default ["src"]
+includes = ["include"]             # include folders it gives itself and its dependents, after its source folders
+defines = { ENGINE = "", LEVEL = "2" }     # an empty value defines the name alone
+links = ["user32.lib", "${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib"]   # names, paths or globs; "!NAME" leaves a file out
+compiler-args = ["-Wno-unused-variable"]   # clang -cc1 arguments, after the driver's own
+tests = true                       # (an executable) a test program: `nuke test` runs it with -filter=GLOB
+
+[project.driver]
+library = "dynamic"                # a DLL (and its import library) instead of a static library
+reflection = true                  # the Reflection library's HeaderTool and CodeGen run over the sources
+system-includes = ["sdk/include"]  # this project's own system include folders
+linker-args = ["-fuse-ld=lld"]
+```
+
+```toml
+# the workspace's nuke.toml
+[languages.cpp]
+llvm = "vendor/llvm"               # the LLVM release (default: the folder above the clang on PATH)
+system-includes = ["${cpp.llvm}/include"]   # system include folders of every C++ compile
+standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for .c files
+```
+
+- **Includes and links travel through static libraries.** A project compiles with its own include folders and those
+  of every C++ static library it reaches through static libraries; a program or DLL links its objects with those
+  libraries, their `links` and its own (less what its `"!NAME"` entries leave out). A static library holds its own
+  objects only. A program or DLL in `depends` only orders the build: a tool it runs, a program shipped beside it.
+- **Compiles.** A source compiles when it has no object or dependency file yet, its arguments changed, clang is newer,
+  or a file it read changed or went (clang's dependency files). An object is stamped with the time its compile began,
+  so a file edited during the build compiles again the next time. `-j N` (`NUKE_JOBS`) compiles N at once, by default
+  one per processor. A crash of clang or the HeaderTool - they crash now and then under a parallel build on Windows,
+  never on a rerun - is retried twice; an error never is. A failed compile leaves no object or dependency file, and
+  nothing links. The objects of removed sources go; two sources that would share an object (`a/Types.cpp`,
+  `b/Types.cpp`) are an error.
+- **Configurations.** The optimization is the configuration's (Debug `-O0`, Development and Dist `-O3`), with CodeView
+  debug information and a `.pdb` when it keeps debug info. Every compile defines the configuration's name in capitals
+  (`DEVELOPMENT`), `UNICODE`, `_UNICODE`, `_CRT_SECURE_NO_WARNINGS`, `PROJECT_NAME=<name>` and the configuration's
+  `defines`. Diagnostics are in MSVC's form, `file(line,col): error: ...` (the C/C++ plugin's `clang-msvc` matcher), at
+  most 10 errors a file.
+- **Links** run when the output is missing, an object or library is newer, or the arguments changed, through a
+  response file (a deep folder's objects outgrow a command line). A running program or DLL is moved aside first
+  (`<file>.<ms>.old`), as Nuke does for C4 programs.
+- **Copies.** A program or DLL gets its `[[project.copy]]` entries and those of the libraries it links: a file when it
+  changed, a folder mirrored. A program whose project has an `assets/` folder gets `<bin>/assets` linked to it.
+- **Reflection** (`reflection = true`): the project depends on the package's `Reflection`, `HeaderTool` and `CodeGen`
+  (added to its `depends`). Each source goes through the HeaderTool after it compiles; CodeGen gathers what it found
+  into `<int>/generated/generated.cpp`, compiled and linked with the project (`plugins/cpp/docs/ReflectionSystem.md`).
+- **clangd.** Every build merges its sources' compiles, in the clang driver's form, into `build/compile_commands.json`,
+  which IED's clangd finds for every file of the workspace.
+- **Variables.** `${cpp.llvm}` and `${cpp.clang}` name the LLVM release and its `clang.exe`, in manifests and steps.
+- **Libraries** the package brings (`plugins/cpp/libraries/`, documented in `plugins/cpp/docs/`): `Core` (containers,
+  strings, UUID, `Ref<T>`, logging, time, the Math library) with yaml-cpp as `yaml`, `Threading`, `Profiling` (the IED
+  Trace Protocol client), `Reflection`, `StaticReflection`, `HeaderTool`, `CodeGen`, `ObjectDescription`,
+  `ChangeNotification`, `UnitTesting` (the test and benchmark harness: a test program takes `-filter=GLOB`,
+  `-benchmark-filter=GLOB`, `-list-tests`, `-list-benchmarks`) and their tests, `CoreTesting` and `ReflectionTesting`.
+  A workspace depending on one by name gets it; this repository lists them all (`plugins/cpp/libraries/*`).
+
+What Frost did that the driver does not: Visual Studio solution files (IED is the IDE: `nuke init --ied`), its
+AddressSanitizer build (`-asan`), and the per-file compile-time table (`-ci`; `build/int/<cfg>/nuke-trace.json` has
+each project's time).
+
 ## 10. This repository as a workspace
 
-The repository root's `nuke.toml` makes IED itself a workspace. Its project `C4` (`C4/nuke.toml`, kind
-`custom`) builds the compiler with Frost:
+The repository root's `nuke.toml` makes IED itself a workspace. The C4 compiler and its tools are C++ projects in the
+`C4` group, built by the C/C++ plugin's driver (section 9c) with the LLVM release `setup.bat` installs
+(`[languages.cpp] llvm = "vendor/llvm"`): `C4` (`C4/nuke.toml`: C4.exe and the install layout beside it), `C4Lib`,
+`C4Protocol`, `C4LSPLib`, `C4LSP`, `C4DAPLib`, `C4DAP`, `CBind`, `C4Script` (a DLL) and `C4Testing`, each in its own
+folder under `C4/`; the C++ libraries they use are the plugin's (`plugins/cpp/libraries/*`). Outputs are Nuke's:
+`build/bin/<Config>-windows-x64/C4/C4.exe`, `.../C4LSP/C4LSP.exe` and so on.
 
 | Command (from the root) | Does |
 |---|---|
-| `nuke build` / `nuke build debug` | Frost builds C4.exe, C4LSP, C4DAP, CBind, C4Script; a Development build refreshes the `dev` toolchain |
-| `nuke test` | C4Testing (`nuke test C4 -- --filter "Lexer.*"`) |
+| `nuke build` / `nuke build debug` | C4.exe and the tools the toolchain ships (C4LSP, C4DAP, CBind, C4Script); a Development build refreshes the `dev` toolchain (`C4/MakeToolchain.py --bin ${bin.root}`) |
+| `nuke test` | every project's tests: C4Testing, CoreTesting, ReflectionTesting, the server's and the CLI's (`nuke test C4Testing --filter "Lexer.*"`) |
 | `nuke gates` | build, then every C4 suite: unit, e2e, negative and isolated (-O0 and -O2), runtime, script (-O0 and -O2), tools, Bedrock |
 | `nuke install-c4` | build, then install the compiler as a numbered toolchain |
-| `nuke clean` | Frost clean |
+| `nuke clean` | the configuration's outputs |
 
-IED's own C4 server will be an `executable` project of this workspace (built with `toolchain = "dev"`).
+IED's own server (`src/`, `ied-server`), the CLI, the launcher and the desktop app are C4 projects of the same
+workspace, built with `toolchain = "dev"`.
 
 ## 11. Layout of Nuke itself
 

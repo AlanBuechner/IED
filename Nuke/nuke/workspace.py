@@ -160,7 +160,11 @@ def _with_implicit_depends(project, packages):
 	if implicit is None:
 		return project
 	known = {name.lower() for name in project.depends} | {project.name.lower()}
-	extra = tuple(name for name in implicit(project) if name.lower() not in known)
+	try:
+		wanted = implicit(project)
+	except ValueError as error:
+		raise NukeError(f"{project.file}: {error}") from None
+	extra = tuple(name for name in wanted if name.lower() not in known)
 	return replace(project, depends=project.depends + extra) if extra else project
 
 

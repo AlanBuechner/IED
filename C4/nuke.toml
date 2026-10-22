@@ -1,42 +1,69 @@
-# The C4 compiler and its tools (C++), built by Frost (Frost/). A Development build also refreshes the "dev"
-# toolchain in the shared store, so C4 workspaces pinned to toolchain = "dev" use the compiler built here.
+# The C4 compiler (C4.exe), built by the C/C++ plugin's driver (plugins/cpp/nuke) with the LLVM release the workspace
+# names, together with the tools the toolchain ships (C4LSP, C4DAP, CBind, C4Script: the executables and the DLL in
+# `depends` only order the build). It ships the install layout C4.exe finds beside itself (D-56): the Bedrock default
+# library, the runtime's sources, and the clang, lld-link and llvm-rc it compiles and links C4 programs with, with
+# clang's own headers. A Development build also refreshes the "dev" toolchain in the shared store, so C4 workspaces
+# pinned to toolchain = "dev" use the compiler built here.
 [project]
 name = "C4"
-kind = "custom"
+kind = "executable"
 language = "cpp"
-description = "The C4 compiler, language server, debug adapter, CBind and C4Script (C++, built with Frost)"
-output = "bin/${config}-windows-x64/C4/C4.exe"
+group = "C4"
+description = "The C4 compiler"
+depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling", "UnitTesting", "C4LSP", "C4DAP", "CBind", "C4Script"]
+includes = ["${cpp.llvm}/include"]
+defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
+links = ["kernel32.lib", "user32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "ntdll.lib",
+	"${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "${cpp.llvm}/lib/LTO.lib"]
 
-[[project.steps]]
-name = "frost"
-phase = "build"
-description = "Frost: C4.exe, C4LSP, C4DAP, CBind, C4Script"
-run = ["${python}", "Frost/Build.py", "-b", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}"]
+[project.driver]
+reflection = true
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/LLVM-C.dll"
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/libclang.dll"
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/LTO.dll"
+
+[[project.copy]]
+from = "Bedrock"
+
+[[project.copy]]
+from = "C4Runtime"
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/clang.exe"
+to = "toolchain/bin/clang.exe"
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/lld-link.exe"
+to = "toolchain/bin/lld-link.exe"
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/llvm-rc.exe"
+to = "toolchain/bin/llvm-rc.exe"
+
+[[project.copy]]
+from = "${cpp.llvm}/lib/clang"
+to = "toolchain/lib/clang"
 
 [[project.steps]]
 name = "dev-toolchain"
 phase = "post-build"
 configs = ["Development"]
 description = "refresh the dev toolchain"
-run = ["${python}", "MakeToolchain.py", "--config", "${config}", "--out", "${toolchains}/c4/dev"]
-
-[[project.steps]]
-name = "unit-tests"
-phase = "test"
-description = "C4Testing (pass a filter after --: nuke test C4 -- --filter \"Lexer.*\")"
-run = ["${python}", "Frost/Build.py", "-test", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}", "${args}"]
-
-[[project.steps]]
-name = "frost-clean"
-phase = "clean"
-run = ["${python}", "Frost/Build.py", "-clean", "-c", "${config}", "-p", "${project.dir}"]
+run = ["${python}", "MakeToolchain.py", "--config", "${config}", "--bin", "${bin.root}", "--out", "${toolchains}/c4/dev"]
 
 # --- nuke gates: every suite the compiler must pass (docs/tools/05-test-suites.md) ---------------------------
 
 [[project.steps]]
 name = "unit-tests"
 phase = "gates"
-run = ["${python}", "Frost/Build.py", "-test", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}"]
+description = "C4Testing, CoreTesting and ReflectionTesting"
+run = ["${python}", "${nuke}", "test", "C4Testing", "CoreTesting", "ReflectionTesting", "${config}"]
 
 [[project.steps]]
 name = "e2e"
@@ -107,7 +134,7 @@ run = ["${python}", "assets/DifferentialTest/run.py"]
 [[project.steps]]
 name = "bedrock-compile"
 phase = "gates"
-run = ["bin/${config}-windows-x64/C4/C4.exe", "Bedrock/Tests", "-test", "-o", "assets/build-output/bedrock/BedrockTests.exe"]
+run = ["${output}", "Bedrock/Tests", "-test", "-o", "assets/build-output/bedrock/BedrockTests.exe"]
 
 [[project.steps]]
 name = "bedrock"

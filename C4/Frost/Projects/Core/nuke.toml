@@ -1,0 +1,8 @@
+# Core: containers (Vector, Map, String), UUID, Ref<T>, assertions, logging and the Math library (docs/CoreLibrary.md)
+[project]
+name = "Core"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "Containers, strings, UUID, Ref<T>, assertions, logging, time and the Math library"
+depends = ["yaml"]

@@ -1,0 +1,9 @@
+# The IED Trace Protocol client (src/Profiling/Itp.h, Itp.cpp; IED docs/16) and the Performance.h macros over it:
+# programs built with ENABLE_PROFILING stream zones to the IED profiler when run with IED_PROFILER set.
+[project]
+name = "Profiling"
+kind = "library"
+language = "cpp"
+group = "C++ Libraries"
+description = "The IED Trace Protocol client and the profiling macros"
+depends = ["Core"]
