@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 import unittest
 
@@ -18,7 +19,74 @@ from test_chat import REPO, ChatCase, call_step, text_step, write
 
 CLANGD = os.path.join(REPO, "C4", "Frost", "vendor", "Compiler", "bin", "clangd.exe")
 FAKE_LSP = os.path.join(REPO, "tools", "server-checks", "fake_lsp.py")
+C4LSP = os.path.join(REPO, "toolchains", "c4", "dev", "tools", "C4LSP", "C4LSP.exe")
+NUKE = os.path.join(REPO, "nuke.bat")
 TURN_SECONDS = 120
+
+RING_CH = """// A ring of values and what it writes to.
+include "bedrock.ch"
+
+#define RING_CAPACITY 64
+#define TWICE(x) ((x) * 2)
+
+namespace Game
+{
+	// Something values can be written to.
+	interface ISink
+	{
+		// Writes one value.
+		void Write(int32 value);
+	}
+
+	// A ring buffer of values.
+	class Ring : ISink
+	{
+		[operator("create")] public void Init() {}
+		// Pushes one value; drops it when full.
+		public void Push(int32 value);
+		// How many values it holds.
+		public int32 Count() const;
+		public static int32 Capacity() { return RING_CAPACITY; }
+		public bool Empty() const { return count == 0; }
+		public void Write(int32 value);
+
+		private int32 count;
+		public static const int32 kLimit = TWICE(RING_CAPACITY);
+	}
+
+	int32 Fill(Ring& ring);
+}
+"""
+
+RING_CF = """include "ring.ch"
+
+namespace Game
+{
+	// Adds the value at the end.
+	void Ring::Push(int32 value) {
+		if (count < Capacity()) count += 1;
+	}
+
+	int32 Ring::Count() const { return count; }
+
+	void Ring::Write(int32 value) { Push(value); }
+
+	int32 Fill(Ring& ring) {
+		ring.Push(TWICE(3));
+		ring.Write(4);
+		return ring.Count();
+	}
+}
+"""
+
+MAIN_CF = """// Arena - entry point.
+include "ring.ch"
+
+int32 main() {
+	Game::Ring ring;
+	return Game::Fill(ring);
+}
+"""
 
 RING_H = """#pragma once
 #define RING_CAPACITY 64
@@ -185,6 +253,67 @@ class ClangdCodeToolTests(CodeToolCase):
 		self.assertIn("Defined at src/ring.h:3", results["x1"])
 		self.assertIn("no symbol Pop", results["n1"])
 		self.assertIn("names several symbols", results["a1"], "Sink::Write and Ring::Write")
+
+
+@unittest.skipUnless(os.path.exists(C4LSP), "no dev C4 toolchain (nuke build makes it)")
+class C4CodeToolTests(CodeToolCase):
+	"""A C4 project as `nuke init --ied` makes one and `nuke build` describes it to C4LSP, the toolchain's `c4` plugin
+	pinned by the solution. Not checked until C4LSP answers them (reported to the C4 session 2026-10-22): references
+	asked at a declaration, the type definition of a variable, implementations as methods, and macros in
+	workspace/symbol."""
+
+	def prepare(self):
+		def nuke(*words):
+			done = subprocess.run(["cmd", "/c", NUKE] + list(words), cwd=self.repo, capture_output=True, text=True)
+			self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+		nuke("init", "--toolchain", "dev", "--ied")
+		write(os.path.join(self.repo, "src", "ring.ch"), RING_CH)
+		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)
+		write(os.path.join(self.repo, "src", "main.cf"), MAIN_CF)
+		nuke("build")
+
+	async def test_navigating_a_c4_project(self):
+		results = await self.results(
+			("s1", "code_symbols", {"query": "Push"}),
+			("o1", "code_symbols", {"path": "src/ring.ch"}),
+			("r1", "code_read_symbol", {"symbol": "Ring::Push"}),
+			("r2", "code_read_symbol", {"symbol": "Game::Ring::Push", "declaration": True}),
+			("r3", "code_read_symbol", {"path": "src/ring.cf", "line": 7}),
+			("d1", "code_definition", {"path": "src/ring.cf", "line": 15, "symbol": "Push"}),
+			("f1", "code_references", {"path": "src/ring.cf", "line": 15, "symbol": "Push"}),
+			("h1", "code_hover", {"symbol": "Ring::Count"}),
+			("m1", "code_members", {"symbol": "Ring", "inherited": True}),
+			("c1", "code_call_hierarchy", {"symbol": "Ring::Push", "direction": "incoming", "depth": 2}),
+			("c2", "code_call_hierarchy", {"symbol": "Fill", "direction": "outgoing"}),
+			("y1", "code_type_hierarchy", {"symbol": "ISink", "direction": "subtypes"}),
+			("x1", "code_expand_macro", {"path": "src/ring.cf", "line": 15, "symbol": "TWICE"}))
+		self.assertIn("method Game::Ring::Push  src/ring.cf:6\nmethod Game::Ring::Push  src/ring.ch:21\n", results["s1"], "the project's first, Bedrock's after")
+		self.assertIn("function TWICE: macro  [5]", results["o1"], "a macro is a symbol")
+		self.assertIn("  class Ring: class : ISink  [16-30]", results["o1"])
+		self.assertIn("    method Capacity: static int32 ()  [24]", results["o1"], "a member's kind and signature")
+		self.assertIn("    field kLimit: static const int32  [29]", results["o1"])
+		self.assertIn("5\t\t// Adds the value at the end.\n6\t\tvoid Ring::Push(int32 value) {", results["r1"], "the definition with its comment")
+		self.assertIn("Also declared at src/ring.ch:21", results["r1"])
+		self.assertIn("20\t\t\t// Pushes one value; drops it when full.\n21\t\t\tpublic void Push(int32 value);", results["r2"], "the declaration when asked")
+		self.assertNotIn("19\t", results["r2"], "the declaration above it is not an annotation of it")
+		self.assertIn("Defined at src/ring.cf:6", results["r2"])
+		self.assertIn("7\t\t\tif (count < Capacity()) count += 1;", results["r3"], "the function holding the line")
+		self.assertIn("method Game::Ring::Push: void (int32 value) - src/ring.cf lines 5-8", results["d1"])
+		self.assertIn("4 references to src/ring.cf:15 in 2 files", results["f1"])
+		self.assertIn("  12 (in Game::Ring::Write): void Ring::Write(int32 value) { Push(value); }", results["f1"])
+		self.assertIn("  21 (in Game::Ring::Push): public void Push(int32 value);", results["f1"])
+		self.assertIn("public int32 Game::Ring::Count() const", results["h1"])
+		self.assertIn("How many values it holds.", results["h1"])
+		self.assertIn("  L24  method  public static int32 Game::Ring::Capacity()", results["m1"], "static")
+		self.assertIn("  L29  field  public static const int32 Game::Ring::kLimit = ((64) * 2)", results["m1"], "static const with its value")
+		self.assertIn("  L19  constructor  [operator(\"create\")] public void Game::Ring::Init()", results["m1"], "annotations")
+		self.assertIn("  L23  method  public int32 Game::Ring::Count() const  - How many values it holds.", results["m1"], "const and the doc summary")
+		self.assertIn("from ISink (src/ring.ch:10)\n  L13  method  void Game::ISink::Write(int32 value)  - Writes one value.", results["m1"], "inherited")
+		self.assertIn("  method Write (Game::Ring::Write) - src/ring.cf:12 (call at line 12)\n    function Fill (Game::Fill) - src/ring.cf:14 (call at line 16)", results["c1"])
+		self.assertIn("function main - src/main.cf:4 (call at line 6)", results["c1"], "callers two levels up")
+		self.assertIn("  method Count (Game::Ring::Count) - src/ring.cf:10 (call at line 17)", results["c2"])
+		self.assertIn("interface ISink (Game::ISink) - src/ring.ch:10 is derived by:\n  class Ring (Game::Ring) - src/ring.ch:17", results["y1"])
+		self.assertIn("TWICE at src/ring.cf:15 expands to:\n```\n((3) * 2)\n```", results["x1"], "c4/expandMacro")
 
 
 class FakeServerCodeToolTests(CodeToolCase):

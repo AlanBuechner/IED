@@ -32,9 +32,13 @@ namespace Ai
 		return plan;
 	}
 
+	// A comment line, or an annotation alone on its line (`[test("x")]`, `@Override`) - not a declaration that starts with
+	// one (`[operator("create")] public void Init() {}`).
 	static bool IsCommentLine(Core::StringView line) {
 		Core::StringView text = line.Trimmed();
-		return text.StartsWith(Core::StringView("//")) || text.StartsWith(Core::StringView("/*")) || text.StartsWith(Core::StringView("*")) || text.StartsWith(Core::StringView("@")) || text.StartsWith(Core::StringView("["));
+		if (text.StartsWith(Core::StringView("//")) || text.StartsWith(Core::StringView("/*")) || text.StartsWith(Core::StringView("*"))) return true;
+		if (text.StartsWith(Core::StringView("[")) && text.EndsWith(Core::StringView("]"))) return true;
+		return text.StartsWith(Core::StringView("@")) && !text.Contains(Core::StringView(" "));
 	}
 
 	int64 CommentStart(CodeQuery& query, Core::StringView path, int64 line) {
