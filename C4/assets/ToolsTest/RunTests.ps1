@@ -478,6 +478,24 @@ function Test-DebugInfoFlag {
     return $failures
 }
 
+# BUG-356: a program in a folder whose path passes MAX_PATH builds and runs: its sources found, read and compiled.
+function Test-DeepFolder {
+    $base = [System.IO.Path]::GetFullPath((Join-Path $scratch "deep"))
+    $deep = $base + "\" + ("d" * 120) + "\" + ("e" * 120)
+    New-Item -ItemType Directory -Force -Path ("\\?\" + $deep) | Out-Null
+    Set-Content -LiteralPath ("\\?\" + $deep + "\main.cf") -Value "int32 main() { return 7; }" -Encoding ascii
+    $exe = Join-Path $scratch "deep.exe"
+    $build = Invoke-Compiler $compiler @($deep, "-o", $exe)
+    $failures = @()
+    if ($build.exit -ne 0) { $failures += "a folder past MAX_PATH did not build: $($build.output)" }
+    else {
+        & $exe
+        if ($LASTEXITCODE -ne 7) { $failures += "the program from the deep folder exited $LASTEXITCODE" }
+    }
+    Remove-Item -LiteralPath ("\\?\" + $base) -Recurse -Force -ErrorAction SilentlyContinue
+    return $failures
+}
+
 # Platform::SourceLineOf: a program built with -g finds the line its own function starts on in its .pdb; without -g
 # it knows no line.
 function Test-SourceLines {
@@ -776,7 +794,7 @@ int32 main()
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
-    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines",
+    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
     "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0

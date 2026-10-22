@@ -193,13 +193,13 @@ namespace
 			{
 				const fs::path& input = fs::path(m_Options.inputs[i].c_str());
 
-				if (!fs::exists(input))
+				if (!Scripting::FileExists(Scripting::PathText(input)))
 				{
 					std::cerr << "error: Input file/folder not found: " << input << std::endl;
 					return false;
 				}
 
-				if (fs::is_directory(input))
+				if (Scripting::IsFolder(Scripting::PathText(input)))
 				{
 					total += m_Compiler.RegisterFolder(input);
 					CORE_INFO("Registered source file(s) from folder {0}", input.string());
@@ -209,7 +209,7 @@ namespace
 				// A single file is registered together with its folder so that the files it
 				// includes can be resolved.
 				fs::path parentDir = fs::absolute(input).parent_path();
-				if (!parentDir.empty() && fs::is_directory(parentDir))
+				if (!parentDir.empty() && Scripting::IsFolder(Scripting::PathText(parentDir)))
 					total += m_Compiler.RegisterFolder(parentDir);
 				else
 					m_Compiler.RegisterFile(fs::absolute(input));
@@ -234,7 +234,7 @@ namespace
 			// include) are compiled, so a program that includes none of it compiles none of it and may use any of
 			// its names.
 			const fs::path bedrockDir = Scripting::Toolchain::Bedrock();
-			if (!fs::is_directory(bedrockDir))
+			if (!Scripting::IsFolder(Scripting::PathText(bedrockDir)))
 			{
 				std::cerr << "error: the default library was not found at " << bedrockDir.string() << " (set C4_HOME to the "
 					"folder that holds C4.exe, Bedrock/, C4Runtime/ and toolchain/)\n";
@@ -255,7 +255,7 @@ namespace
 			for (uint32 p = 0; p < projects.Count(); ++p)
 				for (const fs::path& source : projects.At(p).sources)
 				{
-					if (fs::is_directory(source)) total += m_Compiler.RegisterFolder(source);
+					if (Scripting::IsFolder(Scripting::PathText(source))) total += m_Compiler.RegisterFolder(source);
 					else if (m_Compiler.RegisterFile(source)) ++total;
 					else std::cerr << "warning: project '" << projects.At(p).name << "' names '" << source.generic_string() << "', which does not exist\n";
 				}
@@ -289,14 +289,14 @@ namespace
 			for (uint32 i = 0; i < m_Options.inputs.Count(); ++i)
 			{
 				const fs::path& input = fs::path(m_Options.inputs[i].c_str());
-				if (fs::is_directory(input))
+				if (Scripting::IsFolder(Scripting::PathText(input)))
 				{
 					roots.push_back(input.string());
 					continue;
 				}
 
 				fs::path parentDir = fs::absolute(input).parent_path();
-				if (!parentDir.empty() && fs::is_directory(parentDir))
+				if (!parentDir.empty() && Scripting::IsFolder(Scripting::PathText(parentDir)))
 					roots.push_back(parentDir.string());
 			}
 
