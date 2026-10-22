@@ -37,6 +37,7 @@ namespace Ai
 
 		// --- run.cf: the loop ---
 		private bool Prepare();
+		private void ResolveMessage();
 		private void Discover();
 		private void Step();
 		private void Handle(StepVerdict verdict, StepResult* result);

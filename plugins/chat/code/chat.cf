@@ -148,6 +148,78 @@ namespace Ai
 		ReadToolImages(node.Member("images"), images);
 	}
 
+	// --- What an owner's message names ------------------------------------------------------------------------------
+
+	void WriteMentions(IED::JsonWriter& json, const Core::Array<Mention>& mentions) {
+		json.BeginArray();
+		for (const Mention& mention : mentions) {
+			json.BeginObject();
+			json.Field("kind", mention.kind.View());
+			json.Field("ref", mention.ref.View());
+			json.Field("label", mention.label.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void WriteAttachments(IED::JsonWriter& json, const Core::Array<Attachment>& attachments) {
+		json.BeginArray();
+		for (const Attachment& attachment : attachments) {
+			json.BeginObject();
+			json.Field("name", attachment.name.View());
+			json.Field("path", attachment.path.View());
+			json.Field("mime", attachment.mime.View());
+			json.IntField("bytes", attachment.bytes);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void ReadMentions(const Serialization::DomNode& list, Core::Array<Mention>& mentions) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Mention mention;
+			mention.kind = Core::String(list.At(i).Member("kind").AsView());
+			mention.ref = Core::String(list.At(i).Member("ref").AsView());
+			mention.label = Core::String(list.At(i).Member("label").AsView());
+			mentions.Push(mention);
+		}
+	}
+
+	void ReadAttachments(const Serialization::DomNode& list, Core::Array<Attachment>& attachments) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Attachment attachment;
+			attachment.name = Core::String(list.At(i).Member("name").AsView());
+			attachment.path = Core::String(list.At(i).Member("path").AsView());
+			attachment.mime = Core::String(list.At(i).Member("mime").AsView());
+			attachment.bytes = list.At(i).Member("bytes").AsInt();
+			attachments.Push(attachment);
+		}
+	}
+
+	void OwnerMessage::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("text", text.View());
+		if (!mentions.IsEmpty()) {
+			json.Key(Core::StringView("mentions"));
+			WriteMentions(json, mentions);
+		}
+		if (!attachments.IsEmpty()) {
+			json.Key(Core::StringView("attachments"));
+			WriteAttachments(json, attachments);
+		}
+		json.EndObject();
+	}
+
+	void OwnerMessage::Read(const Serialization::DomNode& node) {
+		if (node.Kind() == Serialization::DomKind::String) {
+			text = Core::String(node.AsView());
+			return;
+		}
+		text = Core::String(node.Member("text").AsView());
+		ReadMentions(node.Member("mentions"), mentions);
+		ReadAttachments(node.Member("attachments"), attachments);
+	}
+
 	// --- Turns -------------------------------------------------------------------------------------------------------
 
 	Segment* Turn::FindSegment(Core::StringView segId) const {
@@ -162,10 +234,7 @@ namespace Ai
 		return nullptr;
 	}
 
-	void Turn::WriteJson(IED::JsonWriter& json, bool withMessages) const {
-		json.BeginObject();
-		json.Field("turnId", turnId.View());
-		json.Key(Core::StringView("user"));
+	void Turn::WriteUser(IED::JsonWriter& json) const {
 		json.BeginObject();
 		json.Field("text", userText.View());
 		if (!fromChatId.IsEmpty()) {
@@ -175,7 +244,22 @@ namespace Ai
 			json.Field("title", fromTitle.View());
 			json.EndObject();
 		}
+		if (!mentions.IsEmpty()) {
+			json.Key(Core::StringView("mentions"));
+			WriteMentions(json, mentions);
+		}
+		if (!attachments.IsEmpty()) {
+			json.Key(Core::StringView("attachments"));
+			WriteAttachments(json, attachments);
+		}
 		json.EndObject();
+	}
+
+	void Turn::WriteJson(IED::JsonWriter& json, bool withMessages) const {
+		json.BeginObject();
+		json.Field("turnId", turnId.View());
+		json.Key(Core::StringView("user"));
+		WriteUser(json);
 		if (hops > 0) json.IntField("hops", hops);
 		json.Field("mode", ChatModeName(mode));
 		json.Field("model", model.View());
@@ -214,6 +298,8 @@ namespace Ai
 		userText = Core::String(node.Member("user").Member("text").AsView());
 		fromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
 		fromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
+		ReadMentions(node.Member("user").Member("mentions"), mentions);
+		ReadAttachments(node.Member("user").Member("attachments"), attachments);
 		hops = node.Member("hops").AsInt();
 		ReadChatMode(node.Member("mode").AsView(), mode);
 		model = Core::String(node.Member("model").AsView());
@@ -330,7 +416,7 @@ namespace Ai
 
 	void Chat::WriteQueued(IED::JsonWriter& json) const {
 		json.BeginArray();
-		for (const Core::String& text : queued) json.String(text.View());
+		for (OwnerMessage* message : queued) json.String(message->text.View());
 		json.EndArray();
 	}
 

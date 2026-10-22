@@ -30,9 +30,9 @@ namespace Ai
 		public void PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge);
 		// The chat's summary changed: chat.changed on its topic and its workspace's, and its header saved.
 		public void Changed(Chat* chat);
-		// A turn for `text` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner.
-		public void StartTurn(Chat* chat, Core::StringView text);
-		public void StartTurn(Chat* chat, Core::StringView text, const Chat* from, int64 hops);
+		// A turn for `message` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner.
+		public void StartTurn(Chat* chat, const OwnerMessage& message);
+		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops);
 		// The workspace's chats.
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
 		// A new chat in `ws`, published on its chats: topic.
@@ -55,6 +55,7 @@ namespace Ai
 
 	private:
 		private Core::String Snapshot(Chat* chat);
+		private void QueueChanged(Chat* chat);
 		private Core::String ListSnapshot(Core::StringView wsId);
 		private void AddTopic(Chat* chat);
 		private Chat* NewChat(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);

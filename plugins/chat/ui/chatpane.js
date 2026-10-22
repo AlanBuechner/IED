@@ -9,6 +9,8 @@ import { ChatModel } from "./chatmodel.js";
 import { TranscriptView } from "./transcript.js";
 import { Composer } from "./composer.js";
 import { SidePanel } from "./sidepanel.js";
+import { MentionSource } from "./mentions.js";
+import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
 
 const NEAR_BOTTOM_PX = 80;
@@ -62,12 +64,17 @@ export class ChatPane {
 			approve: (approval, decision, message) => this.approve(approval, decision, message),
 			allowAlways: (approval) => this.allowAlways(approval),
 			answer: (question, text) => this.request("chat.answer", { chatId: this.chatId, questionId: question.questionId, answer: text }),
-			send: (text, as) => this.send(text, as),
+			send: (text, as, extras) => this.send(text, as, extras),
+			mentionRows: (query) => this.mentionRows(query),
+			upload: (file) => this.upload(file),
+			toast: (text) => this.ied.toast(text, { level: "warn" }),
 			stop: () => this.stop(),
 			unqueue: (index) => this.request("chat.unqueue", { chatId: this.chatId, index }),
+			sendQueued: (index) => this.request("chat.unqueue", { chatId: this.chatId, index, start: true }),
+			fileUrl: (path) => workspaceFileUrl(this.wsId, path),
 			set: (change) => this.setChat(change),
 			groups: () => this.groups(),
-			openFile: (path) => this.openFile(path),
+			openFile: (path, line) => this.openFile(path, line),
 			openTab: (ref) => this.openTab(ref),
 			closeDetails: () => this.showDetails(false),
 			openChat: (chatId) => this.host.openChat(chatId),
@@ -170,15 +177,40 @@ export class ChatPane {
 		return true;
 	}
 
-	async send(text, as) {
+	// extras: {mentions, attachments}, sent when there are any.
+	async send(text, as, extras) {
 		if (!this.chatId && !(await this.createChat())) return false;
-		const sent = await this.request("chat.send", { chatId: this.chatId, text, as });
+		const params = { chatId: this.chatId, text, as };
+		if (extras && extras.mentions.length) params.mentions = extras.mentions;
+		if (extras && extras.attachments.length) params.attachments = extras.attachments;
+		const sent = await this.request("chat.send", params);
 		if (sent && sent.injected) this.ied.toast("Given to the running turn at its next step.", { level: "info" });
 		return sent !== null;
 	}
 
 	stop() {
 		if (this.chatId) this.request("chat.stop", { chatId: this.chatId });
+	}
+
+	// The @ list's rows: its lists other than files and symbols asked once per "@" (mentions.js).
+	mentionRows(query) {
+		if (!this.mentionSource || this.mentionSource.chatId !== this.chatId) this.mentionSource = new MentionSource((method, params) => this.request(method, params), this.wsId, this.chatId);
+		if (!query) this.mentionSource.reset();
+		return this.mentionSource.rows(query);
+	}
+
+	// A file for the next message, uploaded now (PUT /api/upload, docs/10): its blob id, or null with a toast.
+	async upload(file) {
+		try {
+			const reply = await fetch("/api/upload", { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" }, credentials: "same-origin" });
+			const text = await reply.text();
+			if (reply.ok) return JSON.parse(text);
+			this.ied.toast(file.name + " was not uploaded: " + (text.trim() || reply.status), { level: "error" });
+		}
+		catch (e) {
+			this.ied.toast(file.name + " was not uploaded: " + e.message, { level: "error" });
+		}
+		return null;
 	}
 
 	approve(approval, decision, message) {
@@ -201,9 +233,9 @@ export class ChatPane {
 		return Object.keys(groups);
 	}
 
-	openFile(path) {
+	openFile(path, line) {
 		const opener = this.ied.contributions("fileOpener").pop();
-		if (opener) this.ied.commands.run(opener.value.command, { path, line: 0, col: 0 });
+		if (opener) this.ied.commands.run(opener.value.command, { path, line: line || 0, col: 0 });
 		else this.ied.toast("No plugin opens files, so " + path + " is not shown.", { level: "warn" });
 	}
 

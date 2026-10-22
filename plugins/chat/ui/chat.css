@@ -143,6 +143,34 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-row2 { display: flex; align-items: center; gap: var(--space-2); justify-content: flex-end; }
 .chat-row2 .grow { flex: 1; }
 .chat-row2 [hidden] { display: none; }
+.chat-composer.drop { border-color: var(--accent-info); border-style: dashed; }
+
+/* The composer's @ list and the files a message carries (docs/04 "Attachments and @-mentions") */
+.chat-compose-col { position: relative; }
+.chat-mention-list { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 var(--space-7) var(--space-1); max-height: 264px; overflow-y: auto; background: var(--bg-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-3); box-shadow: var(--shadow-popup); z-index: 5; padding: var(--space-1) 0; }
+.chat-mention-row { display: flex; align-items: center; gap: var(--space-3); height: 22px; padding: 0 var(--space-4); cursor: pointer; font-size: var(--font-size-sm); color: var(--text-0); }
+.chat-mention-row .ci { width: 14px; height: 14px; color: var(--text-1); flex: none; }
+.chat-mention-row .muted { flex: 1; min-width: 0; text-align: right; font-size: var(--font-size-xs); }
+.chat-mention-row:hover { background: var(--veil); }
+.chat-mention-row.on { background: var(--selection); }
+.chat-attached { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0 0 var(--space-2); }
+.chat-attached[hidden] { display: none; }
+.chat-attach { display: inline-flex; align-items: center; gap: var(--space-2); height: 24px; max-width: 260px; padding: 0 var(--space-1) 0 var(--space-2); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); background: var(--bg-3); font-size: var(--font-size-sm); color: var(--text-0); }
+.chat-attach img { width: 18px; height: 18px; object-fit: cover; border-radius: var(--radius-1); flex: none; }
+.chat-attach > .ci { width: 14px; height: 14px; color: var(--text-1); flex: none; }
+.chat-attach .muted { font-size: var(--font-size-xs); flex: none; }
+.chat-attach .ib { width: 18px; height: 18px; }
+.chat-attach .ib .ci { width: 12px; height: 12px; }
+.chat-attach.uploading { color: var(--text-2); border-style: dashed; }
+.chat-attach.failed { border-color: var(--accent-error); color: var(--accent-error); }
+.chat-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); white-space: normal; }
+.chat-chip { display: inline-flex; align-items: center; gap: var(--space-2); height: 22px; max-width: 320px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); background: var(--bg-2); color: var(--text-1); font: inherit; font-size: var(--font-size-sm); text-decoration: none; }
+.chat-chip .ci { width: 14px; height: 14px; flex: none; }
+.chat-chip .muted { font-size: var(--font-size-xs); flex: none; }
+button.chat-chip, a.chat-chip { cursor: pointer; }
+button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: var(--text-2); }
+.chat-chip.image { height: auto; padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); cursor: zoom-in; }
+.chat-chip.image img { display: block; max-width: 96px; max-height: 64px; border-radius: var(--radius-1); background: var(--bg-0); }
 .chat-selectors { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; }
 .chat-dd { display: inline-flex; align-items: center; gap: var(--space-2); height: 20px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); background: var(--bg-3); color: var(--text-0); font: inherit; font-size: var(--font-size-sm); }
 .chat-dd .ci { width: 12px; height: 12px; color: var(--text-2); }
@@ -224,6 +252,10 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 	.chat-input { min-height: 0; padding: var(--space-2) 0; flex: 1; }
 	.chat-composer .btn { height: 36px; }
 	.chat-queued { height: 32px; }
+	.chat-mention-list { margin: 0 var(--space-4) var(--space-1); max-height: 45vh; }
+	.chat-mention-row { height: 36px; font-size: var(--font-size-ui); }
+	.chat-attach { height: 32px; }
+	.chat-attach .ib { width: 28px; height: 28px; }
 }
 
 /* ---------- Settings > AI > Models and Model Groups ---------- */

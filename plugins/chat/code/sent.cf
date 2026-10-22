@@ -1,0 +1,96 @@
+include "sent.ch"
+include "chatstore.ch"
+include "media.ch"
+
+namespace Ai
+{
+	static bool KindNeedsRef(Core::StringView kind) { return kind != "problems" && kind != "diff"; }
+
+	static bool KnownKind(Core::StringView kind) {
+		return kind == "file" || kind == "folder" || kind == "symbol" || kind == "terminal" || kind == "output" || kind == "chat" || !KindNeedsRef(kind);
+	}
+
+	static void MustBeList(const Serialization::DomNode& list, const char* name) {
+		if (list.IsValid() && list.Kind() != Serialization::DomKind::Array) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(name) + " must be an array").View());
+	}
+
+	Core::Array<Mention> SentMentions(const Serialization::DomNode& list) {
+		MustBeList(list, "mentions");
+		Core::Array<Mention> mentions;
+		ReadMentions(list, mentions);
+		for (const Mention& mention : mentions) {
+			if (!KnownKind(mention.kind.View()))
+				throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("a mention's kind must be file, folder, symbol, terminal, output, problems, diff or chat, not ") + mention.kind.View()).View());
+			if (KindNeedsRef(mention.kind.View()) && mention.ref.IsEmpty())
+				throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("the mention @") + mention.label.View() + " has no ref").View());
+		}
+		return mentions;
+	}
+
+	Core::String MediaName(Core::StringView name) {
+		int64 start = name.ByteLength();
+		while (start > 0 && name.ByteAt(start - 1) != '/' && name.ByteAt(start - 1) != '\\') start -= 1;
+		Core::StringBuilder out;
+		for (int64 i = start; i < name.ByteLength(); ++i) {
+			const int32 c = name.ByteAt(i);
+			const bool kept = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+			out.AppendByte(kept ? c : '_');
+		}
+		Core::String made = out.ToString();
+		return made.IsEmpty() || made == "." || made == ".." ? Core::String("file") : made;
+	}
+
+	// The type the upload was sent as, or one its name gives when that says nothing.
+	static Core::String AttachmentMime(Core::StringView contentType, Core::StringView name) {
+		if (!contentType.IsEmpty() && contentType != "application/octet-stream") return Core::String(contentType);
+		Core::String image = ImageMime(name);
+		return image.IsEmpty() ? Core::String("application/octet-stream") : image;
+	}
+
+	static Core::String MediaFolder(const Chat* chat) { return (Core::String(".ied/local/chats/") + chat->chatId.View()) + "/media/"; }
+
+	// An upload, written to the chat's media folder.
+	static Attachment Uploaded(Chat* chat, const IED::Workspace& ws, const Serialization::DomNode& sent) {
+		Core::String contentType;
+		Core::Array<uint8> bytes;
+		Core::String problem;
+		if (!IED::ReadBlob(sent.Member("blobId").AsView(), contentType, bytes, problem)) throw IED::RpcError(IED::ErrorCode::NotFound, problem.View());
+		if (bytes.Count() > kAttachmentMaxBytes) throw IED::RpcError(IED::ErrorCode::BadRequest, "an attachment is at most 20 MiB");
+		Attachment attachment;
+		attachment.name = Core::String(sent.Member("name").AsView());
+		if (attachment.name.IsEmpty()) attachment.name = Core::String("file");
+		attachment.mime = AttachmentMime(contentType.View(), attachment.name.View());
+		attachment.bytes = bytes.Count();
+		Core::String file = (chat->NextId("m") + "-") + MediaName(attachment.name.View()).View();
+		attachment.path = MediaFolder(chat) + file.View();
+		FS::Path written = ChatFolder(FS::Path(ws.root.View()), chat->chatId.View()) / "media" / file.View();
+		FS::MakeDirectories(written.Parent().CStr());
+		if (!FS::WriteFileAtomically(written.CStr(), (const void*)bytes.Data(), bytes.Count()))
+			throw IED::RpcError(IED::ErrorCode::Internal, (Core::String("could not write ") + attachment.path.View()).View());
+		return attachment;
+	}
+
+	// A file the chat's media folder already keeps (a queued message's, sent again): only a name directly in that folder.
+	static Attachment AlreadyKept(Chat* chat, const IED::Workspace& ws, const Serialization::DomNode& sent) {
+		Attachment attachment;
+		attachment.path = Core::String(sent.Member("path").AsView());
+		Core::String folder = MediaFolder(chat);
+		Core::StringView file = attachment.path.View().StartsWith(folder.View()) ? attachment.path.View().Substring(folder.ByteLength(), attachment.path.ByteLength() - folder.ByteLength()) : Core::StringView("");
+		if (file.IsEmpty() || MediaName(file) != file) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("an attachment's path must be a file in ") + folder.View()).View());
+		attachment.bytes = FS::FileSize((ChatFolder(FS::Path(ws.root.View()), chat->chatId.View()) / "media" / file).CStr());
+		if (attachment.bytes < 0) throw IED::RpcError(IED::ErrorCode::NotFound, (attachment.path + " is no longer there").View());
+		attachment.name = Core::String(sent.Member("name").AsView());
+		if (attachment.name.IsEmpty()) attachment.name = Core::String(file);
+		attachment.mime = AttachmentMime(sent.Member("mime").AsView(), file);
+		return attachment;
+	}
+
+	Core::Array<Attachment> KeepAttachments(Chat* chat, const IED::Workspace& ws, const Serialization::DomNode& list) {
+		MustBeList(list, "attachments");
+		if (list.Count() > kMostAttachments) throw IED::RpcError(IED::ErrorCode::BadRequest, "a message takes at most 16 attachments");
+		Core::Array<Attachment> kept;
+		for (int64 i = 0; i < list.Count(); ++i)
+			kept.Push(list.At(i).Member("path").IsValid() ? AlreadyKept(chat, ws, list.At(i)) : Uploaded(chat, ws, list.At(i)));
+		return kept;
+	}
+}

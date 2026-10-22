@@ -2,7 +2,7 @@ include "images.ch"
 
 namespace Ai
 {
-	static bool SupportedImage(Core::StringView mime) {
+	bool SupportedImage(Core::StringView mime) {
 		return mime == "image/png" || mime == "image/jpeg" || mime == "image/webp" || mime == "image/gif";
 	}
 
@@ -112,6 +112,28 @@ namespace Ai
 				ImagePart(json, url.View());
 				encoded += url.ByteLength();
 			}
+		json.EndArray();
+		json.EndObject();
+		return encoded;
+	}
+
+	int64 WriteUserWithImages(IED::JsonWriter& json, Core::StringView root, const ModelMessage* message) {
+		int64 encoded = 0;
+		json.BeginObject();
+		json.Field("role", "user");
+		json.Key(Core::StringView("content"));
+		json.BeginArray();
+		TextPart(json, message->content.View());
+		for (const IED::ToolImage& image : message->images) {
+			Core::String url;
+			if (!DataUrl(root, image, url)) {
+				TextPart(json, ((Core::String("[the attached image ") + image.path.View()) + " is no longer there]").View());
+				continue;
+			}
+			TextPart(json, ((Core::String("The attached image ") + image.path.View()) + ":").View());
+			ImagePart(json, url.View());
+			encoded += url.ByteLength();
+		}
 		json.EndArray();
 		json.EndObject();
 		return encoded;

@@ -1413,6 +1413,50 @@ def chat_stop_and_queue(run):
 	check(not page.is_visible(".chat-queued") and "and then summarize it" in run.texts(".chat-turn:last-child .chat-user"), "the queued message was sent")
 
 
+PIXEL_PNG = bytes.fromhex(
+	"89504e470d0a1a0a0000000d494844520000001000000010080200000090916836000001964944415478da15d151154421084551231881"
+	"084630021188608413c1084620021188400422cc1bbfd9accb758cc11cc8600df640073638030677f0063e88410e6ad083312673229335"
+	"d9139dd8e44c98dcc99bf8242639a949cf0f08531061095b50c18423205ce1092e849042092d1f58cc852cd6622f74618bb36071176fe1"
+	"8b58e4a216bd3eb0991bd9accddee8c63667c3e66edec637b1c94d6d7a7f40998a284bd98a2aa61c05e52a4f712594544a69fd80310d31"
+	"96b10d35cc3806c6359ee146186994d1f681c33cc8611df6410f7638070ef7f00e7e88431eead0e703ff02bf4abe23bfd85f906ff537fc"
+	"7f171e38042414f4f73de3322f7259977dd18b5dcefd8fdfcbbbf8252e79a94bdf0f3ce6431eebb11ffab0c779ffe5f7f11efe88473eea"
+	"d1ef03ce74c459ce76d431e7f83fca759ee34e38e994d3fe81600612ac60071a5870e21ffc062ff020820c2ae8f84032134956b2134d2c"
+	"39f93ff3262ff124924c2ae9fc40310b2956b10b2dac38f52fe516aff0228a2caae8fa40331b6956b31b6dac39fdaff036aff1269a6caa"
+	"e9e607880270100b735fc00000000049454e44ae426082")
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_mentions_and_attachments(run):
+	"""@ in the composer lists the workspace's files and more (docs/04 "Attachments and @-mentions"): Enter writes the
+	mention; a picture attached shows as a chip; the sent message shows both under its text, and the model was given
+	the file's text and the picture."""
+	page = open_chat(run)
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": "I read src/main.c and looked at the picture.", "chunk": 6}, {"finish": "stop"}))
+	page.click(".chat-input")
+	page.keyboard.type("Look at @src/mai")
+	page.wait_for_selector(".chat-mention-list:not([hidden]) .chat-mention-row.on:has-text('@src/main.c')", timeout=10000)
+	run.shot("mention-list")
+	page.keyboard.press("Enter")
+	check(page.input_value(".chat-input") == "Look at @src/main.c ", "the mention is written: %r" % page.input_value(".chat-input"))
+	check(page.is_hidden(".chat-mention-list"), "the list closes")
+	page.set_input_files(".chat-composer input[type=file]", files=[{"name": "shot.png", "mimeType": "image/png", "buffer": PIXEL_PNG}])
+	page.wait_for_selector(".chat-attached .chat-attach:not(.uploading) img", timeout=10000)
+	page.keyboard.type("and this picture")
+	run.shot("composer")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	chips = run.texts(".chat-turn:last-child .chat-chips .chat-chip")
+	check(len(chips) == 2 and "@src/main.c" in chips[0] and "shot.png" in chips[1], "the message shows what it named and carried: %s" % chips)
+	page.wait_for_function("(() => { const i = document.querySelector('.chat-turn:last-child .chat-chip.image img'); return i && i.complete && i.naturalWidth === 16; })()", timeout=10000)
+	check(page.is_hidden(".chat-attached"), "the composer's chips are gone once sent")
+	if run.target.kind == "real":
+		user = [m for m in run.target.model_requests()[-1]["body"]["messages"] if m["role"] == "user"][0]
+		parts = user["content"] if isinstance(user["content"], list) else [{"type": "text", "text": user["content"]}]
+		check('<mention label="@src/main.c" kind="file">' in parts[0]["text"] and "int main" in parts[0]["text"], "the model got the file's text")
+	run.shot("sent")
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Settings (docs/07 "The settings window as built")
 

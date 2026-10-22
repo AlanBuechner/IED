@@ -1,0 +1,34 @@
+// terminal.text: a terminal's scrollback as the plain lines a chat reads.
+
+include "terminaltext.ch"
+
+static Core::StringView TermView(const char* text) { return Core::StringView(text); }
+
+// `text` with '~' standing for ESC and '!' for BEL.
+static Core::String Escaped(const char* text) {
+	Core::StringBuilder out;
+	for (int64 i = 0; text[i] != 0; ++i) {
+		const char c = text[i];
+		if (c == '~') out.AppendByte(27);
+		else if (c == '!') out.AppendByte(7);
+		else out.AppendByte(c);
+	}
+	return out.ToString();
+}
+
+[test("server.terminal.text")]
+class TerminalTextTests {
+	[test("plain_text")]
+	public static void TestPlain() {
+		Core::String colored = Escaped("~[1;31merror~[0m: no~[K\r\n~]0;title!ok ~]8;;http://x~\\link~]8;;~\\ done~(B\n");
+		assert_true(Terminal::PlainText(colored.View()) == "error: no\nok link done\n", "colors, erases, titles, links and charset picks left out, CR dropped");
+		assert_true(Terminal::PlainText(Escaped("cut ~[3").View()) == "cut ", "a sequence cut off at the end");
+	}
+
+	[test("last_lines")]
+	public static void TestLast() {
+		assert_true(Terminal::LastLines(TermView("a\nb\nc\n"), 2) == "b\nc", "the last two, no final empty one");
+		assert_true(Terminal::LastLines(TermView("only"), 200) == "only", "fewer than asked");
+		assert_true(Terminal::LastLines(TermView(""), 5).IsEmpty(), "nothing");
+	}
+}

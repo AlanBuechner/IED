@@ -13,6 +13,8 @@ namespace Ai
 	const char* kImagesNotSent = "this model is not sent images";
 	const char* kImagesEarlier = "an earlier image: a request sends the newest 4";
 
+	// Whether a request can send an image of this type: PNG, JPEG, WebP or GIF.
+	bool SupportedImage(Core::StringView mime);
 	// The images a tool named that a request can send: a type the format takes, a file inside the workspace, at most
 	// kToolImageMaxBytes. Why each other one was left out goes to `notes`.
 	Core::Array<IED::ToolImage> AcceptedImages(const IED::Workspace& ws, const Core::Array<IED::ToolImage>& images, Core::Array<Core::String>& notes);
@@ -21,6 +23,8 @@ namespace Ai
 	// The user message showing the images `results` name, read from the workspace at `root`. The bytes of base64 it
 	// holds, so an estimate can count the images as images rather than as text.
 	int64 WriteImagesMessage(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& results);
+	// The owner's message with the images attached to it, as parts of that message. The bytes of base64 it holds.
+	int64 WriteUserWithImages(IED::JsonWriter& json, Core::StringView root, const ModelMessage* message);
 	// The images the messages name.
 	int64 CountImages(const Core::Array<ModelMessage*>& messages);
 }

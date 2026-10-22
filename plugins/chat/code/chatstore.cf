@@ -35,7 +35,9 @@ namespace Ai
 		json.Key(Core::StringView("tasks"));
 		chat->WriteTasks(json);
 		json.Key(Core::StringView("queued"));
-		chat->WriteQueued(json);
+		json.BeginArray();
+		for (OwnerMessage* message : chat->queued) message->WriteJson(json);
+		json.EndArray();
 		json.Key(Core::StringView("loadedTools"));
 		json.BeginArray();
 		for (const Core::String& name : chat->loadedTools) json.String(name.View());
@@ -97,7 +99,11 @@ namespace Ai
 			chat->tasks.Push(task);
 		}
 		Serialization::DomNode queued = header.Member("queued");
-		for (int64 i = 0; i < queued.Count(); ++i) chat->queued.Push(Core::String(queued.At(i).AsView()));
+		for (int64 i = 0; i < queued.Count(); ++i) {
+			OwnerMessage* message = new OwnerMessage();
+			message->Read(queued.At(i));
+			chat->queued.Push(message);
+		}
 		Serialization::DomNode loaded = header.Member("loadedTools");
 		for (int64 i = 0; i < loaded.Count(); ++i) chat->loadedTools.Push(Core::String(loaded.At(i).AsView()));
 		Serialization::DomNode allowed = header.Member("allowed");

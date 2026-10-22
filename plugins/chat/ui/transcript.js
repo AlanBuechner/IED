@@ -7,6 +7,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
 import { showImage } from "/ui-kit/imageview.js";
 import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
+import { userChips } from "./userchips.js";
 
 const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
 const STOP_LABELS = { finished: "Finished", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model" };
@@ -17,7 +18,8 @@ function clock(ms) {
 	return String(at.getHours()).padStart(2, "0") + ":" + String(at.getMinutes()).padStart(2, "0");
 }
 
-// actions: {approve(approval, decision, message), allowAlways(approval), answer(question, text), openFile(path)}
+// actions: {approve(approval, decision, message), allowAlways(approval), answer(question, text), openFile(path, line?),
+// openChat(chatId)}
 export class TranscriptView {
 	constructor(model, actions) {
 		this.model = model;
@@ -93,7 +95,7 @@ export class TranscriptView {
 	// --- Turns -------------------------------------------------------------------------------------------------------
 
 	turnEl(turn) {
-		const user = h("div.chat-user", null, turn.user ? turn.user.text : "");
+		const user = h("div.chat-user", null, turn.user ? turn.user.text : "", this.model.summary ? userChips(turn.user, this.model.summary.wsId, this.actions) : null);
 		const agentHead = h("div.chat-head.agent");
 		replace(agentHead, ...this.agentHeadParts(turn));
 		const body = h("div.chat-body");

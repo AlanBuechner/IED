@@ -16,6 +16,20 @@ MODEL = "mock-model@local"
 GROUP = "mock-group"
 MODES = ("ask", "plan", "agent")
 PERMISSIONS = ("plan", "ask", "acceptEdits", "auto")
+MENTION_KINDS = ("file", "folder", "symbol", "terminal", "output", "problems", "diff", "chat")
+MOST_ATTACHMENTS = 16
+
+
+def sent_mentions(mentions):
+	"""chat.send's mentions, checked as the server checks them (docs/04 "Attachments and @-mentions")."""
+	kept = []
+	for mention in mentions:
+		if not isinstance(mention, dict) or mention.get("kind") not in MENTION_KINDS:
+			raise RpcError("bad_request", "a mention's kind must be file, folder, symbol, terminal, output, problems, diff or chat")
+		if mention["kind"] not in ("problems", "diff") and not mention.get("ref"):
+			raise RpcError("bad_request", "the mention @%s has no ref" % mention.get("label", ""))
+		kept.append({"kind": mention["kind"], "ref": mention.get("ref", ""), "label": mention.get("label", "")})
+	return kept
 
 
 def now_ms():
@@ -41,9 +55,10 @@ class Segment:
 
 
 class Turn:
-	def __init__(self, turn_id, user_text, mode):
+	def __init__(self, turn_id, user_text, mode, extras=None):
 		self.turn_id = turn_id
 		self.user_text = user_text
+		self.extras = extras or {}   # the message's mentions and attachments (docs/04)
 		self.mode = mode
 		self.segments = []
 		self.stop = None
@@ -56,7 +71,7 @@ class Turn:
 
 	def to_dict(self):
 		out = {
-			"turnId": self.turn_id, "user": {"text": self.user_text}, "mode": self.mode, "model": MODEL, "group": GROUP, "stop": self.stop,
+			"turnId": self.turn_id, "user": self.user(), "mode": self.mode, "model": MODEL, "group": GROUP, "stop": self.stop,
 			"recoveries": list(self.recoveries), "tokensIn": self.tokens_in, "tokensOut": self.tokens_out, "ttftMs": 400, "genMs": 2000,
 			"startedMs": self.started_ms, "segments": [s.to_dict() for s in self.segments],
 		}
@@ -65,6 +80,9 @@ class Turn:
 		if self.prefill:
 			out["prefill"] = dict(self.prefill)
 		return out
+
+	def user(self):
+		return dict({"text": self.user_text}, **self.extras)
 
 	def tool(self, call_id):
 		return next((s for s in self.segments if s.kind == "tool" and s.extra.get("callId") == call_id), None)
@@ -92,7 +110,7 @@ class Chat:
 		self.state_reason = ""
 		self.turns = []
 		self.tasks = []
-		self.queued = []
+		self.queued = []   # (text, extras): the wire shows the texts
 		self.modified = []
 		self.context = None
 		self.approvals = {}
@@ -105,6 +123,9 @@ class Chat:
 	@property
 	def topic(self):
 		return "chat:" + self.chat_id
+
+	def queued_texts(self):
+		return [text for text, _ in self.queued]
 
 	def next_id(self, prefix):
 		self.counter += 1
@@ -155,7 +176,7 @@ class Chats:
 	def snapshot(self, chat):
 		recent = chat.turns[-SNAPSHOT_TURNS:]
 		return dict(
-			chat.summary(), model=MODEL, groupInUse=chat.group or GROUP, tasks=chat.tasks, queued=chat.queued, modified=chat.modified,
+			chat.summary(), model=MODEL, groupInUse=chat.group or GROUP, tasks=chat.tasks, queued=chat.queued_texts(), modified=chat.modified,
 			context=chat.context, hasMore=len(chat.turns) > len(recent), turns=[t.to_dict() for t in recent],
 			pendingApprovals=[a.data for a in chat.approvals.values() if a.decision is None],
 			pendingQuestion=chat.question.data if chat.question and chat.question.decision is None else None,
@@ -243,21 +264,52 @@ class Chats:
 		delivery = p.str("as", "message", required=False)
 		if delivery not in ("message", "queue", "inject"):
 			raise RpcError("bad_request", "as must be message, queue or inject")
+		mentions = sent_mentions(p.list("mentions", [], required=False))
+		files = p.list("attachments", [], required=False)
+		if chat.runner is not None and delivery == "inject" and (mentions or files):
+			raise RpcError("bad_request", "a message with mentions or attachments cannot be injected: queue it")
+		extras = {}
+		if mentions:
+			extras["mentions"] = mentions
+		if files:
+			extras["attachments"] = self._keep_attachments(chat, files)
 		if chat.runner is not None:
 			if delivery == "inject":
 				self._steer(chat, text)
 				return {"injected": True}
-			chat.queued.append(text)
-			self.publish(chat, "queue.changed", {"queued": list(chat.queued)})
+			chat.queued.append((text, extras))
+			self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
 			return {"queued": len(chat.queued)}
 		name = chat_scripts.pick(text, p.str("mockScript", None, required=False))
 		script = chat_scripts.SCRIPTS.get(name)
 		if script is None:
 			raise RpcError("bad_request", "unknown mockScript %r (have: %s)" % (name, ", ".join(chat_scripts.SCRIPTS)))
-		return {"turnId": self._start(chat, text, script), "script": name}
+		return {"turnId": self._start(chat, text, script, extras), "script": name}
 
-	def _start(self, chat, text, script):
-		turn = Turn(chat.next_id("u"), text, chat.mode)
+	# Each upload copied into the chat's media folder, as the server does; an image is then served by the workspace's
+	# files route.
+	def _keep_attachments(self, chat, files):
+		if len(files) > MOST_ATTACHMENTS:
+			raise RpcError("bad_request", "a message takes at most 16 attachments")
+		kept = []
+		for file in files:
+			if "path" in file:
+				if not file["path"].startswith(".ied/local/chats/%s/media/" % chat.chat_id):
+					raise RpcError("bad_request", "an attachment's path must be a file in the chat's media folder")
+				kept.append({"name": file.get("name") or file["path"].rsplit("/", 1)[-1], "path": file["path"], "mime": file.get("mime") or "application/octet-stream", "bytes": len(self.server.workspace.items[chat.ws_id].images.get(file["path"], b""))})
+				continue
+			blob = self.server.blobs.get(file.get("blobId"))
+			if blob is None:
+				raise RpcError("not_found", "the upload is no longer kept: send it again")
+			content_type, data = blob
+			name = file.get("name") or "file"
+			path = ".ied/local/chats/%s/media/%s-%s" % (chat.chat_id, chat.next_id("m"), re.sub(r"[^A-Za-z0-9._-]", "_", re.split(r"[/\\]", name)[-1]) or "file")
+			self.server.workspace.items[chat.ws_id].images[path] = data   # the files route serves the images among them
+			kept.append({"name": name, "path": path, "mime": content_type, "bytes": len(data)})
+		return kept
+
+	def _start(self, chat, text, script, extras=None):
+		turn = Turn(chat.next_id("u"), text, chat.mode, extras)
 		chat.turns.append(turn)
 		if chat.title == "New chat":
 			chat.title = text.strip().split("\n")[0][:48]
@@ -278,9 +330,15 @@ class Chats:
 		index = p.int("index")
 		if index < 0 or index >= len(chat.queued):
 			raise RpcError("not_found", "no queued message at that index")
-		del chat.queued[index]
-		self.publish(chat, "queue.changed", {"queued": list(chat.queued)})
-		return {"queued": list(chat.queued)}
+		start = p.bool("start", False, required=False)
+		if start and chat.runner is not None:
+			raise RpcError("conflict", "a turn is running: the message starts when it ends")
+		text, extras = chat.queued.pop(index)
+		self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
+		answer = {"queued": chat.queued_texts(), "message": dict({"text": text}, **extras)}
+		if start:
+			answer["turnId"] = self._start(chat, text, chat_scripts.SCRIPTS[chat_scripts.pick(text, None)], extras)
+		return answer
 
 	async def m_chat_stop(self, call, p):
 		chat = self.get(p.str("chatId"))
@@ -329,7 +387,7 @@ class Chats:
 
 	async def _play(self, chat, turn, script):
 		turn.tokens_in = 18000 + 40 * len(chat.turns)
-		self.publish(chat, "turn.start", {"turnId": turn.turn_id, "mode": turn.mode, "group": GROUP, "model": MODEL, "user": {"text": turn.user_text}, "startedMs": turn.started_ms})
+		self.publish(chat, "turn.start", {"turnId": turn.turn_id, "mode": turn.mode, "group": GROUP, "model": MODEL, "user": turn.user(), "startedMs": turn.started_ms})
 		self.changed(chat)
 		paused = False
 		try:
@@ -347,9 +405,9 @@ class Chats:
 			chat.state_reason = turn.stop if paused else ""
 			self.changed(chat)
 		if chat.queued and turn.stop == "finished":
-			text = chat.queued.pop(0)
-			self.publish(chat, "queue.changed", {"queued": list(chat.queued)})
-			self._start(chat, text, chat_scripts.SCRIPTS[chat_scripts.pick(text, None)])
+			text, extras = chat.queued.pop(0)
+			self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
+			self._start(chat, text, chat_scripts.SCRIPTS[chat_scripts.pick(text, None)], extras)
 
 	async def _op(self, chat, turn, op):
 		kind = op[0]

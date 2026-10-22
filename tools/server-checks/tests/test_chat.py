@@ -819,7 +819,7 @@ class ChatTests(ChatCase):
 		await self.client.request("chat.stop", {"chatId": chat_id})
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
 		self.assertEqual(1, (await self.summary(chat_id))["turnCount"], "a stopped turn does not start the queue")
-		self.assertEqual({"queued": []}, await self.client.request("chat.unqueue", {"chatId": chat_id, "index": 0}))
+		self.assertEqual({"queued": [], "message": {"text": "second"}}, await self.client.request("chat.unqueue", {"chatId": chat_id, "index": 0}), "the message taken off, whole")
 		with self.assertRaises(RpcFailure) as gone:
 			await self.client.request("chat.unqueue", {"chatId": chat_id, "index": 0})
 		self.assertEqual("not_found", gone.exception.code)

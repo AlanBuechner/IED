@@ -2,6 +2,7 @@
 
 include "parse.ch"
 include "patch.ch"
+include "workingdiff.ch"
 
 static Core::StringView View(const char* text) { return Core::StringView(text); }
 
@@ -119,5 +120,16 @@ class GitPatchTests {
 		context.Push(0);
 		assert_true(Git::HunkPatch(Sample(), 0, context, false).IsEmpty(), "context alone changes nothing");
 		assert_true(Git::HunkPatch(Sample(), 5, Core::Array<int64>(), false).IsEmpty(), "no such hunk");
+	}
+}
+
+[test("server.git.workingdiff")]
+class GitWorkingDiffTests {
+	[test("cut_at_a_line")]
+	public static void TestCut() {
+		bool truncated = true;
+		assert_true(Git::CutAtLine(View("a\nb\n"), 10, truncated) == "a\nb\n" && !truncated, "short enough: all of it");
+		assert_true(Git::CutAtLine(View("one\ntwo\nthree\n"), 9, truncated) == "one\ntwo\n" && truncated, "cut where a line starts");
+		assert_true(Git::CutAtLine(View("a long first line"), 4, truncated).IsEmpty() && truncated, "no whole line fits: nothing");
 	}
 }

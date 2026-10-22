@@ -3,6 +3,7 @@ include "run.ch"
 include "contributed.ch"
 include "chattools.ch"
 include "clipboard.ch"
+include "mentions.ch"
 
 namespace Ai
 {
@@ -20,8 +21,10 @@ namespace Ai
 	}
 
 	void TurnRun::Execute() {
-		if (Prepare())
+		if (Prepare()) {
+			ResolveMessage();
 			while (!ending) Step();
+		}
 		End();
 	}
 
@@ -93,6 +96,47 @@ namespace Ai
 		for (const Core::String& problem : contributed) context->Log(problem.View());
 		system = chats->prompts.System(chat->mode, prompt);
 		return true;
+	}
+
+	// What the owner's message names, read now, and its attachments, into the message the model is sent (mentions.ch):
+	// the turn's stored message, so later steps, a retry and the transcript keep what the model saw.
+	void TurnRun::ResolveMessage() {
+		Core::Array<Mention> mentions;
+		Core::Array<Attachment> attachments;
+		{
+			IED::HostLock guard(*context);
+			mentions = turn->mentions;
+			attachments = turn->attachments;
+		}
+		if (mentions.IsEmpty() && attachments.IsEmpty()) return;
+		ToolInvocation call;
+		call.context = context;
+		call.ws = ws;
+		call.chat = chat;
+		call.callId = Core::String("mention");
+		call.cancelled = &run->cancelled;
+		Core::StringBuilder added;
+		for (const Mention& mention : mentions) {
+			added.Append("\n\n");
+			added.Append(MentionBlock(mention, ReadMention(*tools, call, mention).View()).View());
+		}
+		Core::Array<IED::ToolImage> images;
+		for (const Attachment& attachment : attachments) {
+			if (!AttachedImage(attachment)) {
+				added.Append("\n");
+				added.Append(AttachedNote(attachment).View());
+				continue;
+			}
+			IED::ToolImage image;
+			image.mime = attachment.mime;
+			image.path = attachment.path;
+			images.Push(image);
+		}
+		IED::HostLock guard(*context);
+		ModelMessage* message = turn->messages[0];
+		message->content = message->content + added.View();
+		message->images = images;
+		SaveRunning();
 	}
 
 	// --- A step ------------------------------------------------------------------------------------------------------
@@ -395,7 +439,11 @@ namespace Ai
 		chat->approvals.Clear();
 		chat->question = nullptr;
 		if (!chat->injected.IsEmpty()) {
-			for (const Core::String& steering : chat->injected) chat->queued.Push(steering);
+			for (const Core::String& steering : chat->injected) {
+				OwnerMessage* message = new OwnerMessage();
+				message->text = steering;
+				chat->queued.Push(message);
+			}
 			chat->injected.Clear();
 			IED::JsonWriter queue;
 			queue.BeginObject();

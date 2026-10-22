@@ -17,7 +17,11 @@
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
 		"bindings": {
-			"consumes": [ { "name": "ai.roots", "version": "1.0.0", "optional": true } ],
+			"consumes": [
+				{ "name": "ai.roots", "version": "1.0.0", "optional": true },
+				{ "name": "terminal.text", "version": "1.0.0", "optional": true },
+				{ "name": "git.workingDiff", "version": "1.0.0", "optional": true }
+			],
 			"provides": [
 				{
 					"name": "chat.resource",

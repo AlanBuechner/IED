@@ -140,6 +140,67 @@ A chat copies text it has seen - lines of a file, of an earlier tool result, or 
 
 Drag-drop, paste and picker attachments (images/videos to vision-capable models; others become file references read on demand). `@` opens fuzzy suggestions: files and folders, symbols (`@#Name`), open documents, terminals, output sources, Error List, `@diff`, other chats; mentions become structured references resolved at call time.
 
+**Design (2026-10-22), built.** What the owner puts in a message besides its words, and how the model gets it:
+
+- **Mentions.** Typing `@` at a word's start in the composer (or its `@` button) opens a list above the text box that narrows
+  as more is typed; Up/Down choose, Enter or Tab inserts, Esc closes. The list is the client's, from methods it already has: files
+  (`fs.files`, open documents first) and their folders (`@src/`), symbols for `@#` (`lsp.workspaceSymbols`), terminals
+  (`term.list`), output sources (`out.sources`), the workspace's other chats, and two fixed entries, `@problems` (the
+  Error List) and `@diff` (the working tree's changes). Picking one writes `@<label>` into the text - `@src/ring.cf`,
+  `@#Game::Ring::Push`, `@terminal:Build`, `@output:Git`, `@chat:Fix the build` - and the composer keeps it as a
+  structured reference, `{kind, ref, label}` (`kind` one of `file`, `folder`, `symbol`, `terminal`, `output`,
+  `problems`, `diff`, `chat`; `ref` the path, the symbol's place `path:line` (1-based, its label's name narrowing
+  it; a bare name works too), the terminal or source id, or the chat id). A mention whose `@<label>` is no
+  longer in the text when it is sent is dropped.
+- **Attachments.** The paper clip (a file picker), a paste of files or an image, or files dropped on the composer. Each
+  is uploaded at once (`PUT /api/upload`, `docs/10`) and shows as a chip above the text box - an image's picture, any
+  other file's icon, name and size - with a button that takes it off. A workspace file dragged from the Solution
+  Explorer is a mention of it, not an attachment.
+- **The message** goes as `chat.send {..., mentions: [{kind, ref, label}], attachments: [{blobId, name}]}` (`docs/10`).
+  The server copies each attachment out of its blob into the chat's `media/` folder (`.ied/local/chats/<chatId>/media/
+  m<n>-<name>`, `n` the chat's counter and the name's last part with anything but letters, digits, `.`, `-` and `_`
+  made `_`; at most 16 per message and 20 MiB each; an expired blob is refused with `not_found`), and the
+  turn's user message keeps `attachments: [{name, path, mime, bytes}]` (the path workspace-relative) and `mentions`.
+- **Resolved when the turn starts** - "at call time": the text the model gets for each mention is read when the turn's
+  first request is built, not when it was typed, and appended to the user's message as one block per mention,
+  `<mention label="@src/ring.cf" kind="file">...</mention>`. Most are what the read tool for them answers, so the model
+  sees a mention as it would see that tool's result (`docs/13`):
+  - a file: `fs_read` - the text the document store has (an open document's unsaved edits included), its first 400
+    lines, and how to read on;
+  - a folder: `fs_list`;
+  - a symbol: `code_read_symbol`, its declaration with its doc comment;
+  - `@problems`: `problems_list`, the workspace's Error List;
+  - an output source: its last 200 lines (the new `IED::OutputTail`);
+  - a terminal: its last 200 lines without escape sequences, from the terminal plugin's binding `terminal.text`
+    (plugins compose through bindings, `AGENTS.md` rule 7);
+  - `@diff`: each of the workspace's repositories' `git diff HEAD` and the files it does not track (IED's
+    `.ied/local/` left out), at most 64 KiB, from the git plugin's binding `git.workingDiff`;
+  - a chat: `chat_read` of its last 3 turns.
+  A mention that cannot be read (a file deleted since, a chat gone) is a block that says why. The resolved message is
+  the turn's stored user message, so a retry, a restart and the transcript show what the model saw; later steps of the
+  turn do not read the mentions again.
+- **Attachments in the request:** an image (PNG, JPEG, GIF, WebP, at most 4 MiB) goes to a model that takes images as an
+  image part of the owner's own message (its text first), counted with a tool result's images among the newest 4 a
+  request sends (`docs/13` "Images in tool results"); to a model that
+  does not, and for any other file, the message names it - `attached: .ied/local/chats/<id>/media/2-notes.txt (12 KB,
+  text/plain)` - and the model reads it with `fs_read` when it needs it.
+- **The transcript** shows a user message's mentions and attachments as chips under its text; an image chip shows the
+  picture (the workspace's images route, `docs/10`), a file chip opens the file, a mention chip opens what it names.
+
+New in the plugin API for it (`docs/26`): `IED::ReadBlob(id, contentType, bytes, problem)` (an upload's bytes) and
+`IED::OutputTail(wsId, sourceId, text, problem)` (the text an output source keeps); new bindings: the terminal
+plugin's `terminal.text` and the git plugin's `git.workingDiff`, which the chat's manifest consumes.
+
+**As built.** Server: `plugins/chat/code/sent` (chat.send's mentions checked, attachments copied), `mentions` (each
+mention read at turn start, `TurnRun::ResolveMessage`), `images` (`WriteUserWithImages`); a queued message keeps its
+mentions and attachments in `chat.json`; `plugins/terminal/code/terminaltext`, `plugins/git/code/workingdiff`. Client:
+`plugins/chat/ui/mentions.js` (the rows: `fs.files`, `lsp.workspaceSymbols` after `@#`, `term.list`, `out.sources`,
+`chat.list`), `mentionlist.js` (the list), `attachbar.js` (uploads and their chips), `userchips.js` (the transcript's
+chips). Tests: `server.ai.mentions`, `server.terminal.text`, `server.git.workingdiff`, `tools/server-checks/tests/
+test_chat_mentions.py`, `frontend/tests/chatmentions.test.js`, the e2e scenario `chat_mentions_and_attachments`. A
+queued message keeps what it names and carries through the queue row's Edit (`chat.unqueue` answers it whole; its files
+go again by their media path) and Send it now (`chat.unqueue {start: true}` starts it on the server).
+
 ## As built (M4, first slice, 2026-10-21)
 
 The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compiled into the server and written against `src/api/` like any plugin's, since P4 of `docs/26`; before, `src/ai/`); the plugin's UI module is its UI and its manifest declares its settings and the AI output source:
@@ -171,4 +232,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.
+**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.

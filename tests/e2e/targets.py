@@ -125,6 +125,11 @@ class RealTarget(Target):
 		request = urllib.request.Request(self.model_url + "/_fake/queue", data=json.dumps({"scripts": list(scripts)}).encode(), headers={"Content-Type": "application/json"})
 		urllib.request.urlopen(request, timeout=10).read()
 
+	def model_requests(self):
+		"""What the fake model was sent, oldest first."""
+		with urllib.request.urlopen(self.model_url + "/_fake/requests", timeout=10) as reply:
+			return json.loads(reply.read())
+
 	def stop(self):
 		super().stop()
 		if self.model:

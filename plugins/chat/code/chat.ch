@@ -66,10 +66,47 @@ namespace Ai
 		public void Read(const Serialization::DomNode& node);
 	}
 
+	// What an owner's message names besides its words (docs/04 "Attachments and @-mentions").
+	class Mention
+	{
+		public Core::String kind;    // file, folder, symbol, terminal, output, problems, diff, chat
+		public Core::String ref;     // the path, symbol, terminal or output source id, or chat id; empty for problems, diff
+		public Core::String label;   // as the message writes it, after its @
+	}
+
+	// A file sent with a message, kept in the chat's media folder.
+	class Attachment
+	{
+		public Core::String name;
+		public Core::String path;    // workspace-relative
+		public Core::String mime;
+		public int64 bytes;
+	}
+
+	// An owner's message as it waits in the queue for a turn.
+	class OwnerMessage
+	{
+		public Core::String text;
+		public Core::Array<Mention> mentions;
+		public Core::Array<Attachment> attachments;
+
+		// {text, mentions?, attachments?}, as the chat's header keeps it.
+		public void WriteJson(IED::JsonWriter& json) const;
+		// From that, or from the plain text an older header kept.
+		public void Read(const Serialization::DomNode& node);
+	}
+
+	void WriteMentions(IED::JsonWriter& json, const Core::Array<Mention>& mentions);
+	void WriteAttachments(IED::JsonWriter& json, const Core::Array<Attachment>& attachments);
+	void ReadMentions(const Serialization::DomNode& list, Core::Array<Mention>& mentions);
+	void ReadAttachments(const Serialization::DomNode& list, Core::Array<Attachment>& attachments);
+
 	class Turn
 	{
 		public Core::String turnId;
 		public Core::String userText;
+		public Core::Array<Mention> mentions;         // what the message names, read when the turn starts
+		public Core::Array<Attachment> attachments;   // what was sent with it
 		public Core::String fromChatId;               // another chat sent the message (chattools.ch); empty: the owner
 		public Core::String fromTitle;
 		public int64 hops;                            // chats in a row that messaged each other up to this turn
@@ -91,6 +128,8 @@ namespace Ai
 
 		public Segment* FindSegment(Core::StringView segId) const;
 		public Segment* ToolSegment(Core::StringView callId) const;
+		// The owner's message as the clients get it: {text, from?, mentions?, attachments?}.
+		public void WriteUser(IED::JsonWriter& json) const;
 		// The clients' view; with `messages` the stored form, the model's messages too.
 		public void WriteJson(IED::JsonWriter& json, bool withMessages) const;
 		public void Read(const Serialization::DomNode& node);
@@ -187,7 +226,7 @@ namespace Ai
 		public int64 updatedMs;
 		public Core::Array<Turn*> turns;
 		public Core::Array<ChatTask*> tasks;
-		public Core::Array<Core::String> queued;      // sent while a turn ran, for the next turn
+		public Core::Array<OwnerMessage*> queued;     // sent while a turn ran, for the next turn
 		public Core::Array<Core::String> injected;    // for the running turn's next step
 		public Core::Array<Approval*> approvals;       // waiting for a decision
 		public Question* question;                    // the ask_user question waiting, or null

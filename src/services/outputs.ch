@@ -39,9 +39,10 @@ namespace Ied
 		public void Clear(Workspace* ws, Core::StringView sourceId);
 		// A line of the server log, to every workspace's "ied" source.
 		public void Log(Core::StringView line);
+		// The workspace's source of that id; null when it has none.
+		public OutputSource* Find(Workspace* ws, Core::StringView sourceId) const;
 
 	private:
-		private OutputSource* Find(Workspace* ws, Core::StringView sourceId) const;
 		private OutputSource* Add(WorkspaceOutputs* outputs, Core::StringView id, Core::StringView label);
 		private Core::String Snapshot(const OutputSource* source) const;
 		private Core::String SourcesMethod(Call& call, const Params& params);

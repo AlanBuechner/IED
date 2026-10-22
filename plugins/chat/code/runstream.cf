@@ -42,12 +42,17 @@ namespace Ai
 	}
 
 	// The messages as a request sends them: after a step's results, the images they name in a user message, to a model
-	// that sees images (images.ch).
+	// that sees images (images.ch); the owner's attached images in their message.
 	static void WriteMessages(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& messages, RequestImages& images) {
 		Core::Array<ModelMessage*> shown;
 		for (int64 i = 0; i < messages.Count(); ++i) {
 			ModelMessage* message = messages[i];
 			Core::StringView unsent = Unsent(message, images);
+			if (message->role == "user" && unsent.IsEmpty() && !message->images.IsEmpty()) {
+				images.encoded += WriteUserWithImages(json, root, message);
+				images.sent += message->images.Count();
+				continue;
+			}
 			message->WriteRequest(json, unsent);
 			if (unsent.IsEmpty() && !message->images.IsEmpty()) {
 				shown.Push(message);

@@ -1,6 +1,7 @@
 include "api/plugin.ch"
 include "service.ch"
 include "run.ch"
+include "sent.ch"
 
 namespace Ai
 {
@@ -145,13 +146,16 @@ namespace Ai
 		return out.ToString();
 	}
 
-	void Chats::StartTurn(Chat* chat, Core::StringView text) { StartTurn(chat, text, nullptr, 0); }
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, nullptr, 0); }
 
-	void Chats::StartTurn(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops) {
 		IED::Workspace ws = WorkspaceOf(chat);
+		Core::StringView text = sent.text.View();
 		Turn* turn = new Turn();
 		turn->turnId = chat->NextId("u");
-		turn->userText = Core::String(text);
+		turn->userText = sent.text;
+		turn->mentions = sent.mentions;
+		turn->attachments = sent.attachments;
 		turn->hops = hops;
 		if (from) {
 			turn->fromChatId = from->chatId;
@@ -179,16 +183,7 @@ namespace Ai
 		data.Field("group", turn->group.View());
 		data.Field("model", turn->model.View());
 		data.Key(Core::StringView("user"));
-		data.BeginObject();
-		data.Field("text", text);
-		if (from) {
-			data.Key(Core::StringView("from"));
-			data.BeginObject();
-			data.Field("chatId", from->chatId.View());
-			data.Field("title", from->title.View());
-			data.EndObject();
-		}
-		data.EndObject();
+		turn->WriteUser(data);
 		data.IntField("startedMs", turn->startedMs);
 		data.EndObject();
 		Publish(chat, "turn.start", data.View());
@@ -205,7 +200,9 @@ namespace Ai
 
 	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
 		if (!chat->run) {
-			StartTurn(chat, text, from, hops);
+			OwnerMessage message;
+			message.text = Core::String(text);
+			StartTurn(chat, message, from, hops);
 			return true;
 		}
 		chat->injected.Push(FromText(from, text));
@@ -246,15 +243,19 @@ namespace Ai
 
 	void Chats::TurnEnded(Chat* chat) {
 		if (chat->queued.IsEmpty() || chat->Current()->stop != "finished") return;
-		Core::String next = chat->queued[0];
+		OwnerMessage* next = chat->queued[0];
 		chat->queued.RemoveAt(0);
+		QueueChanged(chat);
+		StartTurn(chat, *next);
+	}
+
+	void Chats::QueueChanged(Chat* chat) {
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Key(Core::StringView("queued"));
 		chat->WriteQueued(data);
 		data.EndObject();
 		Publish(chat, "queue.changed", data.View());
-		StartTurn(chat, next.View());
 	}
 
 	// --- Methods -----------------------------------------------------------------------------------------------------
@@ -293,28 +294,30 @@ namespace Ai
 	Core::String Chats::SendMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
 		Chat* chat = Get(params.Str("chatId").View());
-		Core::String text = params.Str("text");
-		if (text.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "text is empty");
+		OwnerMessage* message = new OwnerMessage();
+		message->text = params.Str("text");
+		if (message->text.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "text is empty");
 		Core::String delivery = params.Str("as", Core::StringView("message"));
 		if (delivery != "message" && delivery != "queue" && delivery != "inject") throw IED::RpcError(IED::ErrorCode::BadRequest, "as must be message, queue or inject");
+		Serialization::DomNode mentions = params.Field("mentions");
+		Serialization::DomNode attachments = params.Field("attachments");
+		const bool extras = mentions.Count() > 0 || attachments.Count() > 0;
+		if (chat->run && delivery == "inject" && extras) throw IED::RpcError(IED::ErrorCode::BadRequest, "a message with mentions or attachments cannot be injected: queue it");
+		message->mentions = SentMentions(mentions);
+		message->attachments = KeepAttachments(chat, WorkspaceOf(chat), attachments);
 		IED::JsonWriter json;
 		json.BeginObject();
 		if (!chat->run) {
-			StartTurn(chat, text.View());
+			StartTurn(chat, *message);
 			json.Field("turnId", chat->Current()->turnId.View());
 		}
 		else if (delivery == "inject") {
-			chat->injected.Push(text);
+			chat->injected.Push(message->text);
 			json.BoolField("injected", true);
 		}
 		else {
-			chat->queued.Push(text);
-			IED::JsonWriter data;
-			data.BeginObject();
-			data.Key(Core::StringView("queued"));
-			chat->WriteQueued(data);
-			data.EndObject();
-			Publish(chat, "queue.changed", data.View());
+			chat->queued.Push(message);
+			QueueChanged(chat);
 			SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
 			json.IntField("queued", chat->queued.Count());
 		}
@@ -327,14 +330,23 @@ namespace Ai
 		Chat* chat = Get(params.Str("chatId").View());
 		const int64 index = params.Int("index");
 		if (index < 0 || index >= chat->queued.Count()) throw IED::RpcError(IED::ErrorCode::NotFound, "no queued message at that index");
+		const bool start = params.Bool("start", false);
+		if (start && chat->run) throw IED::RpcError(IED::ErrorCode::Conflict, "a turn is running: the message starts when it ends");
+		OwnerMessage* message = chat->queued[index];
 		chat->queued.RemoveAt(index);
+		QueueChanged(chat);
+		SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("queued"));
 		chat->WriteQueued(json);
+		json.Key(Core::StringView("message"));
+		message->WriteJson(json);
+		if (start) {
+			StartTurn(chat, *message);
+			json.Field("turnId", chat->Current()->turnId.View());
+		}
 		json.EndObject();
-		Publish(chat, "queue.changed", json.View());
-		SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
 		return json.ToString();
 	}
 

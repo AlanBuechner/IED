@@ -204,6 +204,7 @@ def _codicon_alias(name):
 
 
 def _file(root, rel):
+	root = root.resolve()   # a junction (a worktree's vendor folder) is the root it leads to
 	target = (root / rel.lstrip("/")).resolve()
 	if target != root and root not in target.parents:
 		raise HttpError(403, "path escapes the static root")

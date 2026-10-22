@@ -15,6 +15,16 @@
 	"permissions": ["terminal", "process.spawn"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Terminal" },
+		"bindings": {
+			"provides": [
+				{
+					"name": "terminal.text",
+					"version": "1.0.0",
+					"kind": "function",
+					"description": "A terminal's last lines as plain text, its escape sequences left out: {terminal, lines?} -> {terminal, title, alive, text} (200 lines by default, at most 2000); a chat reads it for an @terminal: mention (docs/04)."
+				}
+			]
+		},
 		"panels": [
 			{ "id": "ied.terminal.panel", "title": "Terminal", "icon": "$(terminal)", "view": "TerminalPanel" }
 		],

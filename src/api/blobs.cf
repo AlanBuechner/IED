@@ -12,4 +12,19 @@ namespace IED
 		}
 		return instance->runtime->server->blobs->Put(contentType, bytes);
 	}
+
+	bool ReadBlob(Core::StringView id, Core::String& contentType, Core::Array<uint8>& bytes, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Blob* blob = server->blobs->Get(id);
+		if (!blob) {
+			problem = Core::String("the upload is no longer kept: send it again");
+			return false;
+		}
+		contentType = blob->contentType;
+		bytes = blob->bytes;
+		return true;
+	}
 }
