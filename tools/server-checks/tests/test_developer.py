@@ -1,6 +1,7 @@
 """Developer mode (docs/28): a server that runs from IED's source checkout gives its chats the source as ied:/ (the
 developer plugin's ai.roots binding, opened as a workspace when first used), a system-message section and
-ied_known_bugs; every write there asks, whatever the chat's permission mode; developer.enabled off, or an untrusted
+ied_known_bugs; every write there asks, whatever the chat's permission mode, until the owner allows it for the chat by a
+rule that names ied:/; developer.enabled off, or an untrusted
 workspace, takes it all away. An installed IED finds its checkout through install.json; one without gives none of it.
 Rebuild and relaunch: ied.developer/rebuild runs `nuke.bat install-ied` in the checkout (a fake one here), its lines and
 its end on the topic ied.developer/state."""
@@ -101,6 +102,24 @@ class DeveloperTests(ChatCase):
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
 		with open(os.path.join(self.home, "notes.txt"), encoding="utf-8") as f:
 			self.assertEqual("fixed\n", f.read())
+
+	async def test_allow_for_this_chat_covers_the_writes_its_rule_names(self):
+		"""The owner's "Allow for this chat" on a write into the source lets the chat's later writes its rule names run
+		without asking; a write the rule does not name still asks, auto mode or not."""
+		chat_id, topic = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("fs_write", {"path": "ied:/notes/one.txt", "content": "one\n"}, "w1"),
+			call_step("fs_write", {"path": "ied:/notes/two.txt", "content": "two\n"}, "w2"),
+			call_step("fs_write", {"path": "ied:/other.txt", "content": "three\n"}, "w3"), text_step("Written."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "write them"})
+		first = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
+		self.assertEqual("fs.write(ied:/notes/**)", first["subject"])
+		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": first["approvalId"], "decision": "chat"})
+		third = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
+		self.assertEqual("fs.write(ied:/**)", third["subject"], "two.txt ran without asking; other.txt is outside the rule")
+		self.assertTrue(os.path.exists(os.path.join(self.home, "notes", "two.txt")))
+		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": third["approvalId"], "decision": "allow"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		self.assertTrue(os.path.exists(os.path.join(self.home, "other.txt")))
 
 	async def test_an_untrusted_workspace_gets_none(self):
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})

@@ -103,7 +103,7 @@ Which folders a client may open is the machine's to say: a new path comes only f
 | `plan` | auto | denied | denied (read-only commands from an allowlist may run) |
 | `ask` (default) | auto | ask | ask |
 | `acceptEdits` | auto | auto (checkpointed) | ask |
-| `auto` | auto | auto | auto within rules; ask for anything matching a `confirm` rule |
+| `auto` | auto | auto | auto within rules; ask for anything matching a `confirm` rule, and for a write or command in a root that asks (`docs/28`, `ied:/`) until a rule naming that root allows it |
 
 **Rules** (app tier and solution tier; solution rules can only *restrict*, never widen beyond app rules unless the workspace is trusted):
 

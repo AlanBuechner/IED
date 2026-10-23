@@ -88,6 +88,25 @@ namespace Ai
 		return Permit::Ask;
 	}
 
+	// The rule names the root: its pattern starts "<alias>:/".
+	static bool NamesRoot(Core::StringView rule, Core::StringView rootAlias) {
+		Core::StringView kind;
+		Core::StringView pattern;
+		if (!SplitSubject(rule, kind, pattern)) return false;
+		Core::String root = Core::String(rootAlias) + ":/";
+		return pattern.StartsWith(root.View());
+	}
+
+	static bool AnyNamesRoot(const Core::Array<Core::String>& rules, Core::StringView subject, Core::StringView rootAlias) {
+		for (const Core::String& rule : rules)
+			if (NamesRoot(rule.View(), rootAlias) && RuleMatches(rule.View(), subject)) return true;
+		return false;
+	}
+
+	bool AllowedInRoot(const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::StringView rootAlias) {
+		return AnyNamesRoot(allowedForChat, subject, rootAlias) || AnyNamesRoot(rules.allow, subject, rootAlias);
+	}
+
 	Core::String ChatAllowRule(Core::StringView subject) {
 		Core::StringView kind;
 		Core::StringView argument;

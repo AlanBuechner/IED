@@ -25,4 +25,8 @@ namespace Ai
 	// The rule "Allow for this chat" adds for `subject`: a write's folder ("fs.write(src/core/**)"), a command's first
 	// word ("shell(nuke *)"), anything else itself.
 	Core::String ChatAllowRule(Core::StringView subject);
+	// Whether the owner allowed `subject`, a write or command in a root whose calls ask (docs/28 "Permissions that
+	// always ask"), by a rule that names the root: one "Allow for this chat" added ("fs.write(ied:/src/**)") or an
+	// ai.permissions allow rule starting "<alias>:/". A permission mode, or a rule for anything, never does.
+	bool AllowedInRoot(const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::StringView rootAlias);
 }

@@ -172,13 +172,15 @@ namespace Ai
 			if (!rootAlias.IsEmpty()) plan.subject = RootSubject(plan.subject.View(), rootAlias.View());
 			Core::String why;
 			Permit permit = Permit::Allow;
+			bool allowedInRoot = false;
 			{
 				IED::HostLock guard(*context);
 				permit = Decide(chat->permission, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
+				if (!rootAlias.IsEmpty()) allowedInRoot = AllowedInRoot(rules, chat->allowed, plan.subject.View(), rootAlias.View());
 			}
-			if (!rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow) {
+			if (!rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow && !allowedInRoot) {
 				permit = Permit::Ask;
-				why = (Core::String("every write and command in ") + rootAlias) + ":/ asks the owner";
+				why = (Core::String("every write and command in ") + rootAlias) + ":/ asks the owner until they allow it for this chat";
 			}
 			if (permit == Permit::Deny) {
 				Core::Array<Core::String> values;

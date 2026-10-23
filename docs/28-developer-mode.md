@@ -36,8 +36,12 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    (a folder workspace, not added to the recent projects) the first time a path names it, so edits go through its
    document store like any other - an open editor of that file shows the change. `shell_run` takes `cwd: "ied:/"`.
 2. **Permissions that always ask.** Writes into the source have the subject `fs.write(ied:/<path>)` and commands run
-   there `shell(ied:/<command>)`; every one asks, whatever the chat's permission mode and its rules (a deny rule still
-   refuses). The IDE's own source is never written silently.
+   there `shell(ied:/<command>)`; every one asks, whatever the chat's permission mode (a deny rule still refuses),
+   until the owner allows it by a rule that names `ied:/`: "Allow for this chat" on its approval card (the file's folder,
+   `fs.write(ied:/src/projects/**)`; a command's first word, `shell(ied:/nuke *)`) or an `ai.permissions` allow rule
+   starting `ied:/`. A rule for anything (`fs.write(**)`) or auto mode never covers it: the IDE's own source is never
+   written without the owner's say. (Owner, 2026-10-23: asked for every edit in auto mode, the "Allow for this chat"
+   button did nothing for these.)
 3. **A system message section** (`docs/14` item 5, "IED itself"): this IED is built from source at `<path>`; when a
    failure is in the compiler, Bedrock, Nuke or IED rather than in the workspace, fix it there - read
    `ied:/AGENTS.md` and `ied:/C4/AGENTS.md` first, record a C4 bug in `ied:/C4/docs/status/known-bugs.md`, add a test
@@ -97,7 +101,8 @@ plugin API like the others, and the chat plugin learns of the source through a b
   store and plugins run. Generic: any plugin with the permission may use it.
 - **`ai.roots`** (a binding the chat plugin consumes, optional; `kind: function`): `{wsId}` -> `{roots: [{alias, wsId,
   title, confirm}]}`, other workspaces a chat of `wsId` may reach. A path `<alias>:/<path>` in a file tool or a
-  `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask (the subjects
+  `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask until a rule naming the
+  root allows it (the subjects
   `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). The developer plugin provides it with one root,
   `{alias: "ied", title: "IED source", confirm: true}`, while developer mode is on; nothing is reachable otherwise.
 - **The system message section and the tools** are entries the plugin's code contributes when it activates

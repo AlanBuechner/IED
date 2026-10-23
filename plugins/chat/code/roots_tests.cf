@@ -1,6 +1,8 @@
-// roots: a tool call's "<alias>:/" paths found, taken off and named in its permission subject (docs/28).
+// roots: a tool call's "<alias>:/" paths found, taken off and named in its permission subject, and allowed only by a
+// rule that names the root (docs/28).
 
 include "roots.ch"
+include "permissions.ch"
 
 static Serialization::DomNode RootArgs(const char* json) {
 	Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -31,5 +33,26 @@ class RootsTests {
 		assert_se("fs.write(ied:/C4/a.cf)", Ai::RootSubject(Core::StringView("fs.write(C4/a.cf)"), Core::StringView("ied")).CStr(), "a write");
 		assert_se("shell(ied:/nuke build)", Ai::RootSubject(Core::StringView("shell(nuke build)"), Core::StringView("ied")).CStr(), "a command");
 		assert_se("plain", Ai::RootSubject(Core::StringView("plain"), Core::StringView("ied")).CStr(), "no argument");
+	}
+
+	[test("allowed_by_name")]
+	public static void TestAllowedByName() {
+		Ai::PermissionRules rules;
+		Core::Array<Core::String> chat;
+		Core::StringView ied = Core::StringView("ied");
+		Core::StringView write = Core::StringView("fs.write(ied:/src/projects/manage.cf)");
+		assert_true(!Ai::AllowedInRoot(rules, chat, write, ied), "nothing allows it at first");
+		chat.Push(Ai::ChatAllowRule(write));
+		assert_se("fs.write(ied:/src/projects/**)", chat[0].CStr(), "Allow for this chat names the file's folder in the root");
+		assert_true(Ai::AllowedInRoot(rules, chat, write, ied), "that rule allows it");
+		assert_true(Ai::AllowedInRoot(rules, chat, Core::StringView("fs.write(ied:/src/projects/manage.ch)"), ied), "and the folder's other files");
+		assert_true(!Ai::AllowedInRoot(rules, chat, Core::StringView("fs.write(ied:/docs/03.md)"), ied), "not another folder");
+		Core::Array<Core::String> none;
+		rules.allow.Push(Core::String("fs.write(**)"));
+		assert_true(!Ai::AllowedInRoot(rules, none, write, ied), "a rule for anything does not name the root");
+		rules.allow.Push(Core::String("fs.write(ied:/**)"));
+		assert_true(Ai::AllowedInRoot(rules, none, write, ied), "an allow rule that names it does");
+		chat.Push(Ai::ChatAllowRule(Core::StringView("shell(ied:/nuke build)")));
+		assert_true(Ai::AllowedInRoot(Ai::PermissionRules(), chat, Core::StringView("shell(ied:/nuke gates)"), ied), "a command's first word");
 	}
 }
