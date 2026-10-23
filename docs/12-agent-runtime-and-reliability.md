@@ -79,6 +79,7 @@ A stop is classified into exactly one **stop reason**, shown in the turn footer 
 | Context | `context_overflow` | provider error mentioning context length, or prompt > discovered `n_ctx` |
 | Agent | `loop_detected`, `no_progress`, `budget` | runtime checks |
 | User | `user_cancelled` | stop button |
+| Harness | `harness_error` | the turn's own code let an exception escape: the turn ends with a note saying so, and the server's log has the message and where it was thrown (`Logs` below) |
 
 ### Recovery policy (defaults; per-model overrides in the model profile)
 
@@ -191,6 +192,40 @@ On server start, runs in `running` or `awaiting_user` are restored:
 
 - `awaiting_user` stays awaiting (approval cards come back).
 - `running` becomes `interrupted`; policy `ai.resumeInterrupted = ask | auto | never` (default `ask`, `auto` for Agent mode). Resume starts a fresh step from the journal (the in-flight model request is lost; its partial text is kept as an assistant message only if it was a complete segment).
+
+## Logs: why the server stopped
+
+The server outlives every window, so when it stops, nobody watched it. Two logs in the machine-local folder
+(`%LOCALAPPDATA%\IED\logs\`, `docs/21`) say what happened, one line each, `<date> <time> [<pid>] <text>`, appended
+and closed at once (the last line before a crash is on disk); a log past 4 MiB moves to `<name>.1.log` when its
+program starts (`launcher/logfile.ch`, which the server and the app share):
+
+- **`server.log`** (in the server's data folder: `--data`'s `logs\` when it is given): each run's start (version,
+  program, data and home folders), the address it listens on, every line of the Output window's Server source (plugins
+  started, workspaces opened, what a plugin says), a start that did not happen and why (`not started: another
+  ied-server runs ...`), `stopped by the control channel` and `exit: the HTTP server stopped`. The server names it its
+  crash log (`Platform::SetCrashLog`, C4's `library/bedrock.md` "Crash reports"), so a fatal error - an exception
+  nothing caught on any thread, the collector's own, a fault nothing handled - ends the run with the report: the
+  message, the thread's id and name, and the stack, named from `ied-server.pdb` (the install keeps it beside the
+  program, `docs/21`).
+- **`desktop.log`**: each start of the app, each server it started (`started ied-server, pid N`), how each ended
+  (`the server (pid N) stopped answering: it exited with code 1; its log says why: ...`, from the exit code of the
+  process it started; a server another program started is only said to be gone), each return (`the server is back`)
+  and a start that failed with its reason; the app's own crash report.
+
+Plugin code does not end the server this way: a thread a plugin starts (`PluginContext::StartThread`) that lets an
+exception escape ends alone, and a chat turn's ends the turn (`harness_error`, with a note in the chat); both log
+`plugin <id>: a thread of its own ended on an exception nothing caught: <message>` (or `chat <id>: turn <id> ended
+...`) with the exception's type and the stack from its `throw` (`Platform::StackText` in the handler).
+
+How a run ended reads off its last lines: `exit: the HTTP server stopped` is a stop someone asked for (`ied stop`, the
+app's relaunch); a `C4: fatal:` report is a crash, with where it happened; nothing after the run's last lines is a
+process another program ended (Task Manager, a script, `TerminateProcess`: the app's line gives its exit code). A
+launcher that starts a server which ends before its control pipe opens says so with its exit code and the log
+(`ied-server ended (code 3) before its control pipe opened; ...\server.log says why`). The checks: `test_control`
+(the log through a run, a refused start, and `testhooks.crash` - an uncaught exception on a thread of its own - leaving
+its report with the thread's name and the line that threw), `test_desktop` (the log of a server killed, then stopped,
+and started again each time), the launcher's `log_lines` and `log_file` tests.
 
 ## Harness test strategy (summary; details in `docs/19`)
 

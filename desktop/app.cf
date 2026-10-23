@@ -135,7 +135,41 @@ namespace Desktop
 
 	Net::LocalStream App::EnsureServer(Core::String& error) {
 		Threading::LockGuard guard(startLock);
-		return Launch::Reach(options.control.View(), error);
+		Process::Child started;
+		Net::LocalStream stream = Launch::Reach(options.control.View(), error, &started);
+		if (started.IsOpen()) {
+			Core::StringBuilder line;
+			line.Append("started ied-server, pid ");
+			line.AppendInt((int64)started.Id());
+			log.Write(line.View());
+			server = take(started);
+		}
+		else if (!stream.IsOpen()) log.Write((Core::String("the server could not be reached: ") + error.View()).View());
+		return stream;
+	}
+
+	void App::ServerGone() {
+		Threading::LockGuard guard(startLock);
+		if (!server.IsOpen()) {
+			log.Write(Core::StringView("the server stopped answering; another program started it, so how it ended is not known here"));
+			return;
+		}
+		Core::StringBuilder line;
+		line.Append("the server (pid ");
+		line.AppendInt((int64)server.Id());
+		line.Append(") stopped answering: ");
+		const int64 code = server.Wait(kServerEndWaitMs);
+		if (code < 0) line.Append("it still runs, but nobody listens on its control pipe");
+		else {
+			line.Append("it exited with ");
+			line.Append(Launch::ExitCodeText(code).View());
+		}
+		if (code > 0) {
+			line.Append("; its log says why: ");
+			line.Append((Launch::LogsFolder() / "server.log").View());
+		}
+		log.Write(line.View());
+		server.Close();
 	}
 
 	void App::Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival) {
@@ -302,6 +336,7 @@ namespace Desktop
 	}
 
 	void App::ServerBack() {
+		log.Write(Core::StringView("the server is back"));
 		if (messages != null) PostMessageW(messages, kServerBackMessage, 0, 0);
 	}
 
@@ -324,6 +359,7 @@ namespace Desktop
 	}
 
 	void App::ServerFailed(Core::StringView why) {
+		log.Write((Core::String("the server could not be started again: ") + why).View());
 		{
 			Threading::LockGuard guard(lock);
 			watchError = Core::String(why);
@@ -359,6 +395,9 @@ namespace Desktop
 	}
 
 	int32 App::Run() {
+		log.Open(LogFilePath(options).View());
+		Platform::SetCrashLog(log.File().View());
+		log.Write((((Core::String("start: ied-desktop ") + kDesktopVersion) + " (") + Platform::ExecutablePath().View() + "), data " + data.View()).View());
 		OleInitialize(null);
 		instance = GetModuleHandleW(null);
 		if (!RegisterClasses()) return 1;
@@ -383,6 +422,7 @@ namespace Desktop
 			DispatchMessageW(&message);
 		}
 		watch.Stop();
+		log.Write(Core::StringView("exit: the last window closed"));
 		return 0;
 	}
 }

@@ -39,6 +39,7 @@ namespace Ied
 		private Core::String External(Call& call, const Params& params);
 		private Core::String Info(Call& call, const Params& params);
 		private Core::String CollectGarbage(Call& call, const Params& params);
+		private Core::String Crash(Call& call, const Params& params);
 		private Core::String MintToken(Call& call, const Params& params);
 		private void RegisterMethods();
 

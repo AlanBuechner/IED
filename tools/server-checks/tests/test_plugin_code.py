@@ -43,6 +43,17 @@ namespace Probe
 		return IED::Answer(Core::StringView("{}"));
 	}
 
+	void Refuse()
+	{
+		throw IED::RpcError(IED::ErrorCode::Conflict, "refused on a thread of its own");
+	}
+
+	IED::Result ThrowOnThread(const Serialization::DomNode& args)
+	{
+		plugin->StartThread([]() { Refuse(); });
+		return IED::Answer(Core::StringView("{}"));
+	}
+
 	void Opened(const IED::Workspace& ws)
 	{
 		Core::StringBuilder entries;
@@ -59,6 +70,7 @@ namespace Probe
 		context.Log(Core::StringView("probe started"));
 		context.Provide(Core::StringView("probe.echo"), Echo);
 		context.Provide(Core::StringView("probe.crash"), Crash);
+		context.Provide(Core::StringView("probe.throwOnThread"), ThrowOnThread);
 		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { heard += 1; });
 		context.OnWorkspace(Opened);
 	}
@@ -138,7 +150,8 @@ def probe_manifest(plugin_id="test.probe", **fields):
 		"runtime": {"kind": "c4", "entry": "Probe::Activate"},
 		"contributes": {"bindings": {"provides": [
 			{"name": "probe.echo", "version": "1.0.0", "kind": "function"},
-			{"name": "probe.crash", "version": "1.0.0", "kind": "function"}]}},
+			{"name": "probe.crash", "version": "1.0.0", "kind": "function"},
+			{"name": "probe.throwOnThread", "version": "1.0.0", "kind": "function"}]}},
 	}
 	body.update(fields)
 	return body
@@ -309,6 +322,26 @@ class PluginCodeTests(ServerTestCase):
 		await self.client.request("plugins.reload")
 		await self.settled("test.probe", after=code)
 		self.assertEqual("after", (await self.echo("after"))["said"], "a reload builds it again")
+
+	async def test_an_exception_on_a_plugin_thread_ends_the_thread_not_the_server(self):
+		"""PluginContext::StartThread: an exception the plugin's thread lets escape is logged, with where it was thrown,
+		and the server and the plugin go on (docs/12 "Logs")."""
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})
+		self.start()
+		await self.connect()
+		await self.settled("test.probe")
+		await self.client.request("plugins.call", {"name": "probe.throwOnThread", "args": {}})
+		log = os.path.join(self.server.data, "logs", "server.log")
+		deadline = time.monotonic() + 30
+		text = ""
+		while time.monotonic() < deadline and "refused on a thread of its own" not in text:
+			await asyncio.sleep(0.25)
+			with open(log, encoding="utf-8") as f:
+				text = f.read()
+		self.assertIn("plugin test.probe: a thread of its own ended on an exception nothing caught: refused on a thread of its own", text)
+		self.assertIn("thrown: class Ied::RpcError", text, "the exception's type")
+		self.assertEqual("after", (await self.echo("after"))["said"], "the plugin still answers")
+		self.assertIsNone(self.server.process.poll(), "the server runs on")
 
 	async def test_diagnostics_the_allow_list_and_a_failed_rebuild(self):
 		folder = self.builtin(probe_manifest(), {"code/probe.cf": "include \"api/plugin.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) { undefined_thing(); } }\n"})

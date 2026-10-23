@@ -28,4 +28,6 @@ namespace Desktop
 	const char* Usage();
 	// Where the app keeps its window placement and WebView2 profile.
 	FS::Path DataFolder(const Options& options);
+	// The app's log: %LOCALAPPDATA%\IED\logs\desktop.log beside the server's, or desktop.log in --data's folder.
+	FS::Path LogFilePath(const Options& options);
 }

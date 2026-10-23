@@ -2,6 +2,7 @@
 // and the services - under one lock. A method runs holding it (web/rpc.ch); a session takes it for each frame.
 
 include "config.ch"
+include "logfile.ch"
 include "web/session.ch"
 include "services/presence.ch"
 include "services/workspaces.ch"
@@ -34,8 +35,8 @@ namespace Ied
 		[operator("create")] public void Init() {}
 		[operator("create")] public void Init(ServerConfig config);
 
-		// A line of the server's log: to standard error (unless --quiet) and to every workspace's "ied" output source.
-		// Safe from any thread, holding the server lock or not.
+		// A line of the server's log: to standard error (unless --quiet), to logs/server.log and to every workspace's
+		// "ied" output source. Safe from any thread, holding the server lock or not.
 		public void Log(Core::StringView line);
 		// The lock is held.
 		public void RemoveSession(Session* session);
@@ -43,6 +44,9 @@ namespace Ied
 		// forgotten, durable state kept, and every session told bye and closed.
 		public void Restart();
 
+		private void LogStart();
+
+		public Launch::LogFile logFile;
 		public LogPump logPump;
 		public Threading::Thread logThread;
 		public Threading::Mutex lock;

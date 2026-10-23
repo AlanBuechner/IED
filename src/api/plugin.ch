@@ -104,7 +104,8 @@ namespace IED
 
 		// Starts `body` on a thread of the plugin's own: the API's free functions (FindWorkspace, ReadFile, RunTask, ...)
 		// know the calling plugin on it, as on the plugin's thread and in its methods. A script stops its threads in
-		// OnDeactivate.
+		// OnDeactivate. An exception `body` lets escape ends this thread, not the server: the log (logs/server.log,
+		// docs/12 "Logs") says so, with where it was thrown.
 		public void StartThread(func<void()> body);
 
 		// The server's record of the plugin, for the API's own classes (HostLock).

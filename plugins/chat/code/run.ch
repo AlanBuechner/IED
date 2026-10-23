@@ -49,6 +49,9 @@ namespace Ai
 		private void Retry(StepVerdict verdict, StepResult* result, int64 bound);
 		private void Pause(Core::StringView reason, Core::StringView why);
 		private void Finish(Core::StringView stop);
+		// The turn's code let an exception escape (`message`: an RpcError's, else empty; `stack`: where it was thrown):
+		// the turn ends with harness_error, saying so, and the server's log has the rest.
+		private void Failed(Core::StringView message, Core::StringView stack);
 		private void End();
 		private bool Sleep(int64 ms);
 

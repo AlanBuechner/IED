@@ -25,6 +25,7 @@ namespace Ied
 		server->rpc.Register("testhooks.external", [self](Call& call, const Params& params) -> Core::String { return self->External(call, params); });
 		server->rpc.Register("testhooks.mintToken", [self](Call& call, const Params& params) -> Core::String { return self->MintToken(call, params); });
 		server->rpc.Register("testhooks.gc", [self](Call& call, const Params& params) -> Core::String { return self->CollectGarbage(call, params); });
+		server->rpc.Register("testhooks.crash", [self](Call& call, const Params& params) -> Core::String { return self->Crash(call, params); });
 	}
 
 	Core::String TestHooks::Info(Call& call, const Params& params) {
@@ -44,6 +45,16 @@ namespace Ied
 	// Two full collections, then the collector's counts: live bytes after them are what a soak judges, since private
 	// memory also holds garbage the proportional trigger has not collected yet. The second frees what waited for its
 	// finalizer, which a collection keeps alive (with all it points to) until the finalizer has run.
+	// What a bug on a background thread does: an exception nothing catches ends the server, with its report in
+	// logs/server.log.
+	Core::String TestHooks::Crash(Call& call, const Params& params) {
+		Threading::Thread::Run([]() {
+			Threading::Thread::SetCurrentName("testhooks.crash");
+			throw RpcError(ErrorCode::Internal, "testhooks.crash");
+		}).Detach();
+		return Core::String("{}");
+	}
+
 	Core::String TestHooks::CollectGarbage(Call& call, const Params& params) {
 		GC::Collect();
 		GC::Collect();

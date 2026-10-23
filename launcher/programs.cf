@@ -60,7 +60,7 @@ namespace Launch
 		return false;
 	}
 
-	Net::LocalStream StartServer(Core::StringView control, Core::String& error) {
+	Net::LocalStream StartServer(Core::StringView control, Core::String& error, Process::Child* started) {
 		FS::Path program = ServerProgram();
 		if (program.IsEmpty()) {
 			error = Core::String("ied-server.exe is not beside ") + Platform::ExecutablePath().FileName();
@@ -75,17 +75,31 @@ namespace Launch
 		Core::String name = ControlName(control);
 		while (clock_now_ns() < deadline) {
 			Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), kConnectMs);
-			if (stream.IsOpen()) return stream;
+			if (stream.IsOpen()) {
+				if (started) *started = take(child);
+				return stream;
+			}
 			if (child.Wait(100) != Process::kTimedOut) break;
 		}
-		error = Core::String("ied-server started but its control pipe never opened");
+		const int64 code = child.Wait(0);
+		if (code < 0) {
+			error = Core::String("ied-server started but its control pipe never opened");
+			return Net::LocalStream();
+		}
+		Core::StringBuilder ended;
+		ended.Append("ied-server ended (");
+		ended.Append(ExitCodeText(code).View());
+		ended.Append(") before its control pipe opened; ");
+		ended.Append((LogsFolder() / "server.log").View());
+		ended.Append(" says why");
+		error = ended.ToString();
 		return Net::LocalStream();
 	}
 
-	Net::LocalStream Reach(Core::StringView control, Core::String& error) {
+	Net::LocalStream Reach(Core::StringView control, Core::String& error, Process::Child* started) {
 		Core::String name = ControlName(control);
 		Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), kConnectMs);
 		if (stream.IsOpen()) return take(stream);
-		return StartServer(control, error);
+		return StartServer(control, error, started);
 	}
 }

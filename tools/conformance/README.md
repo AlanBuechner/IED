@@ -44,6 +44,7 @@ Besides the frames, the suite uses these methods (shapes in `tools/mock-server/R
 | `testhooks.scratch` | `lines?` | creates a fresh text file `"line 0\nline 1\n..."`; returns `{wsId, path, text, revision}` |
 | `testhooks.serverEdit` | `docId, changes, origin?, baseVersion?` | applies an edit as the server (like an AI tool or a reload) |
 | `testhooks.gc` | - | the real server only (not the mock): a full garbage collection, then `{collections, liveBytes, heapBytes}`; the idle soak's leak measure |
+| `testhooks.crash` | - | the real server only: answers `{}`, then a thread of its own (named `testhooks.crash`) throws an exception nothing catches, which ends the server with exit code 1 and its report in `logs/server.log` (`docs/12` "Logs") |
 
 The decisions the suite pins down beyond `docs/10` (sub result shape, replay-vs-budget rule, opId details, UTF-16 columns, ...) are listed in `tools/mock-server/README.md` under "Protocol decisions".
 

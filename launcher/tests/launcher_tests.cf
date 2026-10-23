@@ -1,4 +1,5 @@
-// The launcher: locations with lines and columns, the control channel's lines, and which URLs may leave IED.
+// The launcher: locations with lines and columns, the control channel's lines, which URLs may leave IED, and the
+// log files it and the server keep.
 
 include "launcher.ch"
 
@@ -41,5 +42,41 @@ class LauncherTests {
 		assert_true(!Launch::IsExternalUrl(Core::StringView("file:///C:/Windows/System32/calc.exe")), "a file is no external URL");
 		assert_true(!Launch::IsExternalUrl(Core::StringView("ms-settings:")), "another scheme");
 		assert_true(!Launch::IsExternalUrl(Core::StringView("http://")), "a scheme alone");
+	}
+
+	[test("log_lines")]
+	public static void TestLogLines() {
+		// The stamp's form, "2026-10-22 23:26:02.123 [4242] ", whatever the local time is.
+		Core::String stamp = Launch::LogStamp(Platform::UnixTimeNs(), 4242);
+		assert_true(stamp.ByteLength() == 31 && stamp.View().EndsWith(Core::StringView(" [4242] ")), "date, time to the millisecond, pid");
+		assert_true(stamp.View().ByteAt(4) == '-' && stamp.View().ByteAt(10) == ' ' && stamp.View().ByteAt(19) == '.', "2026-10-22 23:26:02.123");
+		assert_se("C:/logs/desktop.1.log", Launch::RotatedLogFile(Core::StringView("C:/logs/desktop.log")).CStr(), "the rotated name");
+		assert_se("code 0", Launch::ExitCodeText(0).CStr(), "a clean exit");
+		assert_se("code 3", Launch::ExitCodeText(3).CStr(), "a refused start");
+		assert_se("exception 0xc0000005", Launch::ExitCodeText(3221225477).CStr(), "a crash is its exception");
+	}
+
+	[test("log_file")]
+	public static void TestLogFile() {
+		FS::Path folder = FS::TempDirectory() / "ied-launcher-log-test";
+		FS::RemoveAll(folder.CStr());
+		FS::Path file = folder / "logs" / "test.log";
+		Launch::LogFile log;
+		assert_true(log.Open(file.View()), "opens, making its folder");
+		log.Write(Core::StringView("first"));
+		log.Write(Core::StringView("second"));
+		Core::String text = FS::File(file.CStr(), "rb").ReadText();
+		assert_true(text.View().EndsWith(Core::StringView("] second\n")) && text.View().Contains(Core::StringView("] first\n")), "lines appended in order");
+		Core::String big = Core::String(Launch::kLogFileBytes + 1);
+		for (int64 i = 0; i <= Launch::kLogFileBytes; ++i) big.Append(Core::StringView("x"));
+		FS::File grow = FS::File(file.CStr(), "ab");
+		grow.Write((const void*)big.View().Data(), big.View().ByteLength());
+		grow.Close();
+		Launch::LogFile again;
+		assert_true(again.Open(file.View()), "opens a log past its size");
+		again.Write(Core::StringView("fresh"));
+		assert_true(FS::FileSize((folder / "logs" / "test.1.log").CStr()) > Launch::kLogFileBytes, "the old log moved aside");
+		assert_true(FS::FileSize(file.CStr()) < 100, "a new log started");
+		FS::RemoveAll(folder.CStr());
 	}
 }

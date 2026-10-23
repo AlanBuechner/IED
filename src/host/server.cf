@@ -17,6 +17,8 @@ namespace Ied
 		this.config.homeDir = HomeFolder(config);
 		this.config.staticDir = StaticFolder(this.config);
 		this.config.appDataDir = AppDataFolder(this.config);
+		logFile.Open((FS::Path(this.config.dataDir.View()) / "logs" / "server.log").View());
+		LogStart();
 		Core::String trustError;
 		trust.Load((FS::Path(this.config.appDataDir.View()) / "trust.json").View(), trustError);
 		if (!trustError.IsEmpty()) Log(trustError.View());
@@ -70,7 +72,22 @@ namespace Ied
 	void Server::Log(Core::StringView line) {
 		Core::String stamped = LogStamp(Platform::UnixTimeNs()) + line;
 		if (!config.quiet) Platform::WriteError(((Core::String("[ied] ") + stamped.View()) + "\n").View());
+		logFile.Write(line);
 		logPump.Push(stamped.View());
+	}
+
+	// The first line of a run in logs/server.log: which server, and where its state and install are.
+	void Server::LogStart() {
+		Core::StringBuilder line;
+		line.Append("start: ied-server ");
+		line.Append(config.version.View());
+		line.Append(" (");
+		line.Append(Platform::ExecutablePath().View());
+		line.Append("), data ");
+		line.Append(config.dataDir.View());
+		line.Append(", home ");
+		line.Append(config.homeDir.View());
+		logFile.Write(line.View());
 	}
 
 	void LogPump::Push(Core::StringView line) {

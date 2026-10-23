@@ -191,11 +191,34 @@ namespace IED
 		if (instance->runtime->TopicOf(instance, key)) instance->runtime->server->hub.PublishMergeable(key, kind, merge);
 	}
 
+	// The end of a plugin's thread that let an exception escape: its message and where it was thrown, in the log.
+	static void ThreadFailed(Ied::CodeInstance* instance, Core::StringView message, Core::StringView stack) {
+		Core::StringBuilder line;
+		line.Append("plugin ");
+		line.Append(instance->pluginId.View());
+		line.Append(": a thread of its own ended on an exception nothing caught");
+		if (!message.IsEmpty()) {
+			line.Append(": ");
+			line.Append(message);
+		}
+		line.AppendByte('\n');
+		line.Append(stack);
+		instance->runtime->server->Log(line.View());
+	}
+
 	void PluginContext::StartThread(func<void()> body) {
 		Ied::CodeInstance* instance = Of(host);
 		Threading::Thread::Run([instance, body]() {
 			Ied::CodeScope scope(instance);
-			body();
+			try {
+				body();
+			}
+			catch (Ied::RpcError& error) {
+				ThreadFailed(instance, error.message.View(), Platform::StackText().View());
+			}
+			catch (...) {
+				ThreadFailed(instance, Core::StringView(""), Platform::StackText().View());
+			}
 		}).Detach();
 	}
 

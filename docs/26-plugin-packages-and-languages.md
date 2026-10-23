@@ -65,7 +65,7 @@ A plugin that needs a long-running service in another language starts it from it
 
 **Cost.** A compile takes 4-5 s against the server's 6.4 MB interface (several plugins compile at once, each on its own thread); the compiled-script cache and a profile of script compile time are on the C4 session's list (`docs/17`).
 
-**Trust, honestly.** Plugin code runs in the server process, so its permissions are declared, shown before approval and enforced at the API, but they are not a sandbox: a plugin can reach Bedrock directly. The boundary is the trust decision - built-ins ship with IED, an app plugin loads only after the owner approves its content hash (as now), a project plugin only in a trusted workspace (`docs/11`). A plugin that faults is isolated per call; one that hangs keeps its own thread busy and its callers get "no answer within N s", but nothing stops the hung call (no watchdog inside the process).
+**Trust, honestly.** Plugin code runs in the server process, so its permissions are declared, shown before approval and enforced at the API, but they are not a sandbox: a plugin can reach Bedrock directly. The boundary is the trust decision - built-ins ship with IED, an app plugin loads only after the owner approves its content hash (as now), a project plugin only in a trusted workspace (`docs/11`). A plugin that faults is isolated per call, and a thread it starts (`StartThread`) that lets an exception escape ends alone, logged with the plugin's id, the message and where it was thrown (`docs/12` "Logs"); one that hangs keeps its own thread busy and its callers get "no answer within N s", but nothing stops the hung call (no watchdog inside the process).
 
 ### Built-ins on the API (P4)
 

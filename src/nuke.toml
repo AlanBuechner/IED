@@ -3,6 +3,8 @@
 name = "ied-server"
 kind = "executable"
 description = "The IED server: HTTP, the protocol v1 WebSocket hub (docs/10), workspaces and documents"
+# Its log (logs/server.log) is the launcher's LogFile, the one ied-desktop keeps desktop.log with.
+depends = ["launcher"]
 # The built-in plugins' server code is part of the server (docs/26 "Built-ins on the API").
 sources = [".", "../plugins/git/code", "../plugins/terminal/code", "../plugins/chat/code", "../plugins/browser/code", "../plugins/profiler/code", "../plugins/gpu/code", "../plugins/developer/code", "../plugins/tor/code", "../plugins/websearch/code", "../plugins/webfetch/code"]
 links = ["ws2_32"]

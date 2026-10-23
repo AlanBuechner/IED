@@ -40,6 +40,15 @@ PROGRAMS = {
 	"ied-desktop": ("ied-desktop.exe",),
 }
 
+# Each program's debug information, when the build made it (-g): beside the program, a crash report names functions
+# and lines (C4/docs/library/bedrock.md "Crash reports"). One the build no longer has is removed, so a report never
+# reads an older build's.
+SYMBOLS = {
+	"ied-server": "ied-server.pdb",
+	"ied": "ied.pdb",
+	"ied-desktop": "ied-desktop.pdb",
+}
+
 # The server's home (src/host/config: HomeFolder finds shared/host-api/schemas above the program), and what it skips.
 TREES = (
 	("frontend", ("mocks", "tests")),
@@ -121,6 +130,17 @@ def copy_program(source, target, report):
 		replace_file(source, target, report)
 
 
+def install_symbols(bin_root, target, report):
+	"""Each program's PDB beside it when the build has one; one it has not is removed from the install."""
+	for program, name in SYMBOLS.items():
+		source = os.path.join(bin_root, program, name)
+		installed = os.path.join(target, name)
+		if os.path.isfile(source):
+			copy_program(source, installed, report)
+		elif os.path.isfile(installed):
+			discard(installed, report)
+
+
 def remove_old(folder):
 	for name in os.listdir(folder):
 		if name.endswith(".old"):
@@ -191,6 +211,7 @@ def install(bin_root, target):
 			if not os.path.isfile(source):
 				raise SystemExit("install-ied: %s is not built (%s)" % (name, source))
 			copy_program(source, os.path.join(target, name), report)
+	install_symbols(bin_root, target, report)
 	for tree, skip in TREES:
 		source = os.path.join(REPO, tree)
 		if not os.path.isdir(source):

@@ -1,5 +1,6 @@
 """The control channel and the `ied` CLI (docs/10 'Local control channel', F-SRV-2, F-SRV-7): one server per pipe
-name, status / url / open / stop over newline-delimited JSON-RPC 2.0, launch URLs that sign in, the CLI on top."""
+name, status / url / open / stop over newline-delimited JSON-RPC 2.0, launch URLs that sign in, the CLI on top; and
+the server's own log (docs/12 "Logs"), which keeps each run's start, end and fatal error."""
 
 import json
 import os
@@ -10,9 +11,13 @@ import unittest
 
 from frames import FrameChecker
 from iedclient import Client
-from server import CLI_ENV, ControlPipe, IedServer, ServerTestCase
+from server import CLI_ENV, ControlPipe, IedServer, ServerTestCase, read_lines
 
 TREE_SERVER = "server"
+
+
+def server_log(server):
+	return read_lines(os.path.join(server.data, "logs", "server.log"))
 
 
 class ControlTests(ServerTestCase):
@@ -40,6 +45,7 @@ class ControlTests(ServerTestCase):
 			self.assertFalse(second.started)
 			self.assertEqual(3, second.process.returncode)
 			self.assertIn("another ied-server runs", second.error)
+			self.assertIn("not started: another ied-server runs", server_log(second)[-1], "the log says why it did not start")
 		finally:
 			second.stop()
 
@@ -87,6 +93,25 @@ class ControlTests(ServerTestCase):
 		await client.wait_closed(10)
 		self.assertEqual({"t": "bye", "reason": "shutdown"}, client.bye)
 		self.assertEqual(0, self.server.process.wait(15))
+		lines = server_log(self.server)
+		pid = "[%d] " % self.server.process.pid
+		self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[\d+\] start: ied-server ", "each line: date, time, pid")
+		self.assertTrue(all(pid in line for line in lines), lines)
+		self.assertIn("listening: http://127.0.0.1:%d" % self.server.port, "\n".join(lines))
+		self.assertTrue(lines[-2].endswith("stopped by the control channel"), lines)
+		self.assertTrue(lines[-1].endswith("exit: the HTTP server stopped"), lines)
+
+	async def test_a_crash_leaves_its_report_in_the_log(self):
+		"""An exception nothing catches on a thread of the server ends it (C4's fatal error, exit code 1): the report,
+		with the thread and the stack that threw, is in logs/server.log after the run's own lines."""
+		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await client.request("testhooks.crash")
+		self.assertEqual(1, self.server.process.wait(30))
+		client.abort()
+		text = "\n".join(server_log(self.server))
+		self.assertIn("[%d] C4: fatal: an exception was thrown and not caught" % self.server.process.pid, text)
+		self.assertIn('"testhooks.crash"', text, "the thread's name")
+		self.assertRegex(text, r"\(\S*testhooks\.cf:\d+\)", "the line that threw, named from the PDB")
 
 
 @unittest.skipUnless(os.environ.get(CLI_ENV), "needs --cli")

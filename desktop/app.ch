@@ -15,6 +15,7 @@ namespace Desktop
 	const char* kDesktopVersion = "0.1.0";
 	const uint32 kServerBackMessage = 0x8002;     // WM_APP + 2
 	const uint32 kServerFailedMessage = 0x8003;   // WM_APP + 3
+	const int32 kServerEndWaitMs = 3000;          // how long a server that closed its pipe gets to exit, for its code
 
 	class App
 	{
@@ -48,6 +49,8 @@ namespace Desktop
 
 		// From other threads.
 		public Net::LocalStream EnsureServer(Core::String& error);
+		// The watch found nobody on the control pipe: how the server ended goes to the log.
+		public void ServerGone();
 		public void ServerBack();
 		public void ServerFailed(Core::StringView why);
 		// The watch's last `status` reply from the server (the workspaces it has open), kept so that a server started
@@ -56,6 +59,7 @@ namespace Desktop
 
 		public Options options;
 		public FS::Path data;
+		public Launch::LogFile log;   // desktop.log: the app's starts and the server's starts, ends and failures
 
 	private:
 		private bool RegisterClasses();
@@ -82,7 +86,8 @@ namespace Desktop
 		private CallbackSet callbacks;
 		private Watch watch;
 		private Threading::Mutex lock;         // what resolver threads and the watch hand over
-		private Threading::Mutex startLock;    // one server start at a time
+		private Threading::Mutex startLock;    // one server start at a time, and `server`
+		private Process::Child server;         // the server this app started last, for its exit code
 		private Core::String watchError;
 		private Core::String lastStatus;       // the server's last `status` reply, under `lock` (Remember)
 		private bool quitting;

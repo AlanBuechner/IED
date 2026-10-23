@@ -1,6 +1,7 @@
 """The installer (tools/install/install_ied.py): a mirror copies what changed, leaves out what it skips and removes what
-is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; the PATH gains the
-folder once and loses only it; an uninstall removes the folder whole or, while a program in it runs, not at all."""
+is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; a program's PDB
+comes and goes with the build; the PATH gains the folder once and loses only it; an uninstall removes the folder whole
+or, while a program in it runs, not at all."""
 
 import json
 import os
@@ -102,6 +103,29 @@ class PathTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "nt", "Windows: a running program's file")
+class SymbolsTests(unittest.TestCase):
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, self.root, True)
+		self.bin = os.path.join(self.root, "bin")
+		self.target = os.path.join(self.root, "target")
+		os.makedirs(self.target)
+
+	def test_a_program_s_pdb_goes_beside_it_and_leaves_with_it(self):
+		write(os.path.join(self.bin, "ied-server", "ied-server.pdb"), "server symbols")
+		write(os.path.join(self.bin, "ied-desktop", "ied-desktop.pdb"), "desktop symbols")
+		write(os.path.join(self.target, "ied.pdb"), "an older build's")
+		result = report()
+		install_ied.install_symbols(self.bin, self.target, result)
+		self.assertEqual((2, 1), (result["copied"], result["removed"]))
+		with open(os.path.join(self.target, "ied-server.pdb"), encoding="utf-8") as f:
+			self.assertEqual("server symbols", f.read())
+		self.assertFalse(os.path.exists(os.path.join(self.target, "ied.pdb")), "a PDB the build no longer has never names its frames")
+		again = report()
+		install_ied.install_symbols(self.bin, self.target, again)
+		self.assertEqual((0, 0), (again["copied"], again["removed"]), "nothing changed, nothing copied")
+
+
 class ProgramInUseTests(unittest.TestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-install-")

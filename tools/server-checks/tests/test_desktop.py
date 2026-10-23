@@ -17,12 +17,14 @@ import time
 import unittest
 
 import ws
-from server import CLI_ENV, DESKTOP_ENV, ServerTestCase, remove_tree
+from server import CLI_ENV, DESKTOP_ENV, ServerTestCase, read_lines, remove_tree
 
 START_SECONDS = 40
 WATCH_SECONDS = 2.5   # the app's watch looks at its server every 2 s
 WM_SETTEXT, WM_COMMAND, IDOK, IDCANCEL = 0x000C, 0x0111, 1, 2
 FOLDER_BOX, NAME_BOX = 1152, 1148   # the folder picker's "Folder:" edit (edt1); a file dialog's name combo (cmb13)
+# The start page's ways to open a workspace are buttons (New Project... first): Open Folder is found by its label.
+OPEN_FOLDER_BUTTON = "[...document.querySelectorAll('.start-page .sp-start button')].find((b) => b.textContent === 'Open Folder...')"
 
 
 def free_port():
@@ -235,10 +237,12 @@ class DesktopTests(ServerTestCase):
 
 	def test_a_server_that_dies_is_started_again_with_the_windows_workspace(self):
 		"""docs/27 "The server dies while windows are open": the app starts the server again and opens the workspace the
-		window showed on it, and the window shows it again - killed or stopped (`ied stop`) alike."""
+		window showed on it, and the window shows it again - killed or stopped (`ied stop`) alike. Its log
+		(logs/desktop.log) says each server it started, how each ended, and each return."""
 		self.start_app()
 		self.wait(self.signed_in_page, "signed-in window")
 		first = self.wait(lambda: (lambda s: s if s and s["clients"] >= 1 else None)(self.status()), "connected window")
+		killed = first["pid"]
 		for stop in (lambda pid: os.kill(pid, 9), lambda pid: self.ied("stop")):
 			time.sleep(WATCH_SECONDS)
 			stop(first["pid"])
@@ -248,17 +252,23 @@ class DesktopTests(ServerTestCase):
 			origin = again["url"].rstrip("/")
 			self.wait(lambda: [p for p in page_targets(self.port) if p["url"].startswith(origin + "/") and "login" not in p["url"] and p["title"] == "project - IED"], "the window on its folder again", 20)
 			first = again
+		log = read_lines(os.path.join(self.root, "local", "IED", "logs", "desktop.log"))
+		self.assertIn("start: ied-desktop", log[0])
+		self.assertIn("started ied-server, pid %d" % killed, "\n".join(log))
+		self.assertIn("the server (pid %d) stopped answering: it exited with code 9" % killed, "\n".join(log), "a killed server's code")
+		self.assertIn("stopped answering: it exited with code 0", "\n".join(log), "a stopped one's")
+		self.assertEqual(3, sum("started ied-server, pid" in line for line in log), log)
+		self.assertEqual(2, sum(line.endswith("the server is back") for line in log), log)
 
 	def home_page(self):
 		pages = [p for p in page_targets(self.port) if p["url"].startswith("http://127.0.0.1:") and "login" not in p["url"]]
 		if not pages:
 			return None
-		label = evaluate(pages[0], "(document.querySelector('.start-page .sp-start button') || {}).textContent || ''")
-		return pages[0] if label == "Open Folder..." else None
+		return pages[0] if evaluate(pages[0], "!!(" + OPEN_FOLDER_BUTTON + ")") else None
 
 	def open_folder(self, folder):
 		"""Presses the start page's Open Folder button and answers the picker with `folder` (None: cancels it)."""
-		evaluate(self.wait(self.home_page, "start page with Open Folder"), "document.querySelector('.start-page .sp-start button').click()")
+		evaluate(self.wait(self.home_page, "start page with Open Folder"), OPEN_FOLDER_BUTTON + ".click()")
 		dialog = self.wait(lambda: dialog_of(self.app.pid), "folder picker", 15)
 		answer_dialog(dialog, folder)
 		self.wait(lambda: dialog_of(self.app.pid) is None, "picker closed", 15)

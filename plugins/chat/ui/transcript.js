@@ -10,7 +10,7 @@ import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmo
 import { userChips } from "./userchips.js";
 
 const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
-const STOP_LABELS = { finished: "Finished", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model" };
+const STOP_LABELS = { finished: "Finished", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model", harness_error: "Stopped by an error in IED" };
 
 function clock(ms) {
 	if (!ms) return "";
@@ -215,8 +215,9 @@ export class TranscriptView {
 	}
 
 	harnessLine(segment) {
-		const level = segment.kind === "paused" || segment.kind === "no_model" ? ".attn" : "";
-		const glyph = segment.kind === "paused" ? "debug-pause" : segment.kind === "routing" ? "arrow-right" : segment.kind === "no_model" ? "warning" : "sync";
+		const warns = segment.kind === "no_model" || segment.kind === "harness_error";
+		const level = segment.kind === "paused" || warns ? ".attn" : "";
+		const glyph = segment.kind === "paused" ? "debug-pause" : segment.kind === "routing" ? "arrow-right" : warns ? "warning" : "sync";
 		return h("div.chat-harness" + level, { title: "A note from IED's harness" + (segment.kind ? " (" + segment.kind + ")" : "") }, icon(glyph), h("span", null, (level ? "" : "harness: ") + segment.text));
 	}
 

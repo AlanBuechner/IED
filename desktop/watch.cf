@@ -56,6 +56,10 @@ namespace Desktop
 		{
 			Threading::LockGuard guard(mutex);
 			if (exhausted) return;
+		}
+		app->ServerGone();
+		{
+			Threading::LockGuard guard(mutex);
 			if (!budget.Allow(clock_now_ns())) {
 				exhausted = true;
 				app->ServerFailed(Core::StringView("The server stopped three times in a minute, so it is not started again until you retry."));

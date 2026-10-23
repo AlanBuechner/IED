@@ -1,0 +1,63 @@
+include "logfile.ch"
+
+namespace Launch
+{
+	bool LogFile::Open(Core::StringView file) {
+		FS::Path path = FS::Path(file);
+		FS::MakeDirectories(path.Parent().CStr());
+		if (FS::FileSize(path.CStr()) > kLogFileBytes) FS::Rename(path.CStr(), RotatedLogFile(file).CStr());
+		Threading::LockGuard guard(lock);
+		this.file = Core::String(file);
+		return FS::File(this.file.CStr(), "ab").IsOpen();
+	}
+
+	void LogFile::Write(Core::StringView line) {
+		Core::String text = (LogStamp(Platform::UnixTimeNs(), Platform::ProcessId()) + line) + "\n";
+		Threading::LockGuard guard(lock);
+		if (file.IsEmpty()) return;
+		FS::File out = FS::File(file.CStr(), "ab");
+		if (out.IsOpen()) out.Write((const void*)text.View().Data(), text.View().ByteLength());
+	}
+
+	FS::Path LogsFolder() { return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED" / "logs"; }
+
+	Core::String LogStamp(int64 unixNs, uint64 pid) {
+		Platform::CalendarTime at = Platform::LocalCalendar(unixNs);
+		Core::StringBuilder stamp;
+		stamp.AppendIntBase(at.year, 10, 4);
+		stamp.AppendByte('-');
+		stamp.AppendIntBase(at.month, 10, 2);
+		stamp.AppendByte('-');
+		stamp.AppendIntBase(at.day, 10, 2);
+		stamp.AppendByte(' ');
+		stamp.AppendIntBase(at.hour, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(at.minute, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(at.second, 10, 2);
+		stamp.AppendByte('.');
+		stamp.AppendIntBase(at.nanosecond / 1000000, 10, 3);
+		stamp.Append(" [");
+		stamp.AppendInt((int64)pid);
+		stamp.Append("] ");
+		return stamp.ToString();
+	}
+
+	Core::String RotatedLogFile(Core::StringView file) {
+		FS::Path path = FS::Path(file);
+		FS::Path rotated = path.Parent() / ((Core::String(path.Stem()) + ".1") + path.Extension()).View();
+		return Core::String(rotated.View());
+	}
+
+	Core::String ExitCodeText(int64 code) {
+		Core::StringBuilder text;
+		if (code >= 3221225472 && code <= 4294967295) {
+			text.Append("exception 0x");
+			text.AppendUIntBase((uint64)code, 16, 8);
+			return text.ToString();
+		}
+		text.Append("code ");
+		text.AppendInt(code);
+		return text.ToString();
+	}
+}

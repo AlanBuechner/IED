@@ -31,6 +31,12 @@ static void Fail(Core::StringView why) {
 	Platform::WriteError(text.View());
 }
 
+// The same, kept in logs/server.log too: the server exists, so it has a log.
+static void Fail(Ied::Server* server, Core::StringView why) {
+	server->logFile.Write((Core::String("not started: ") + why).View());
+	Fail(why);
+}
+
 static void Announce(const char* what, Core::StringView url) {
 	Core::StringBuilder line;
 	line.Append(what);
@@ -45,11 +51,11 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 	Core::String error;
 	Threading::LockGuard guard(server->lock);
 	if (!server->auth->Load(error)) {
-		Fail(error.View());
+		Fail(server, error.View());
 		return false;
 	}
 	if (!at.IsLoopback() && !server->auth->HasPassword()) {
-		Fail(Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
+		Fail(server, Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
 		return false;
 	}
 	server->plugins->Load();
@@ -82,15 +88,16 @@ int32 main(int32 argc, char8** argv) {
 	}
 	Http::Server* http = new Http::Server();
 	Ied::Server* server = new Ied::Server(config);
+	Platform::SetCrashLog(server->logFile.File().View());
 	Ied::Control* control = new Ied::Control(server, [http]() { http->Stop(); });
 	if (!control->Listen(Ied::ControlName(config).View(), error)) {
-		Fail((Core::String("another ied-server runs for this user (") + error.View() + "); `ied status` tells which").View());
+		Fail(server, (Core::String("another ied-server runs for this user (") + error.View() + "); `ied status` tells which").View());
 		return 3;
 	}
 	if (!Prepare(server, at)) return 2;
 	Ied::Front* front = new Ied::Front(server);
 	if (!http->Listen(at) && (config.portGiven || !http->Listen(at.WithPort(0)))) {
-		Fail(Core::StringView(http->Error()));
+		Fail(server, Core::StringView(http->Error()));
 		return 1;
 	}
 	server->port = http->LocalAddress().port;
@@ -98,6 +105,8 @@ int32 main(int32 argc, char8** argv) {
 	control->Start();
 	Announce("LISTENING", ListeningUrl(config, server->port).View());
 	Announce("OPEN", Ied::LaunchUrl(config, server->port, LaunchToken(server).View(), Core::StringView("")).View());
+	server->logFile.Write((Core::String("listening: ") + ListeningUrl(config, server->port).View()).View());
 	http->Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
+	server->logFile.Write(Core::StringView("exit: the HTTP server stopped"));
 	return 0;
 }

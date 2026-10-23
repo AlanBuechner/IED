@@ -76,4 +76,9 @@ namespace Desktop
 		if (!options.dataDir.IsEmpty()) return FS::Path(FS::AbsolutePath(options.dataDir.CStr()).View());
 		return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED" / "desktop";
 	}
+
+	FS::Path LogFilePath(const Options& options) {
+		if (!options.dataDir.IsEmpty()) return DataFolder(options) / "desktop.log";
+		return Launch::LogsFolder() / "desktop.log";
+	}
 }
