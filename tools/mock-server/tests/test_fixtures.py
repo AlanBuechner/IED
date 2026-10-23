@@ -54,20 +54,20 @@ class ChatTests(MockCase):
 				texts[frame["data"]["segId"]] += frame["data"]["text"]
 		self.assertEqual(40, list(texts.values())[-1].count("The render loop owns the frame"))
 
-	async def test_a_message_sent_while_running_is_queued_and_runs_next(self):
+	async def test_a_message_sent_while_running_joins_the_turn_and_a_queued_one_runs_next(self):
 		client = await self.client()
 		await client.sub(["chat:c2"])
 		await client.request("chat.send", {"chatId": "c2", "text": "x", "mockScript": "long"})
-		queued = await client.request("chat.send", {"chatId": "c2", "text": "how does the player move?"})
+		queued = await client.request("chat.send", {"chatId": "c2", "text": "how does the player move?", "as": "queue"})
 		self.assertEqual({"queued": 1}, queued)
-		injected = await client.request("chat.send", {"chatId": "c2", "text": "use tabs", "as": "inject"})
-		self.assertEqual({"injected": True}, injected)
+		pending = await client.request("chat.send", {"chatId": "c2", "text": "use tabs"})
+		self.assertEqual({"pending": 1}, pending)
 		self.server.clock.scale = 0.0
 		frames = await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end" and f["data"]["turnId"] != "u1" and f["data"]["stop"] == "finished", timeout=20)
 		starts = [f["data"]["user"]["text"] for f in frames if f.get("kind") == "turn.start"]
 		self.assertEqual(["x", "how does the player move?"], starts, "the queued message is the next turn")
-		steering = [f["data"]["text"] for f in frames if f.get("kind") == "segment.start" and f["data"]["type"] == "steering"]
-		self.assertEqual(["use tabs"], steering)
+		joined = [f["data"]["text"] for f in frames if f.get("kind") == "segment.start" and f["data"]["type"] == "message"]
+		self.assertEqual(["use tabs"], joined, "the sent one joined the running turn")
 
 	async def test_stop_cancels_and_a_stopped_turn_leaves_the_queue(self):
 		client = await self.client()

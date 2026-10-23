@@ -57,7 +57,7 @@ namespace Ai
 				Close(segment);
 			}
 		}
-		for (int64 i = 0; i < result->calls.Count() && !ending; ++i) ExecuteCall(result->calls[i], callSegments[i], result->calls[i]->id.View());
+		for (int64 i = 0; i < result->calls.Count() && !ending; ++i) ExecuteCall(result->calls[i], callSegments[i], result->calls[i]->id.View(), i == result->calls.Count() - 1);
 		IED::HostLock guard(*context);
 		CloseOpenCalls(turn, Core::StringView("The call did not run: an earlier call in the same reply ended the turn."));
 		SaveRunning();
@@ -72,7 +72,7 @@ namespace Ai
 		return out.ToString();
 	}
 
-	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId) {
+	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId, bool last) {
 		const int64 started = ToolNowMs();
 		ToolOutcome outcome;
 		ToolSpec* spec = tools->Find(call->name.View());
@@ -124,7 +124,7 @@ namespace Ai
 			if (malformed > kRunMalformedBound) Pause(Core::StringView("malformed_tool_call"), Core::StringView("the model kept sending tool arguments that do not fit the tool's schema"));
 			SaveRunning();
 		}
-		if (claude && candidates[candidate]->IsClaude()) AnswerClaude(modelId, outcome);
+		if (claude && candidates[candidate]->IsClaude()) AnswerClaude(modelId, outcome, last);
 	}
 
 	bool TurnRun::Pasted(Serialization::DomNode& args, Core::String& missing) {

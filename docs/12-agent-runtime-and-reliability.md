@@ -42,7 +42,7 @@ run(turn):
 	ctx = assemble_context(chat)                      # docs/04 system message order, ledger, compression check
 	loop:
 		if budgets_exceeded(): pause("budget"); return
-		deliver_pending_steering(ctx)                 # injected user messages, task edits, scratchpad edits
+		deliver_pending_messages(ctx)                 # messages sent while the turn ran, task edits, scratchpad edits
 		req = build_request(ctx, mode.tools, model_for(role="primary"))
 		resp = stream_with_guards(req)               # watchdogs, dialect parsing, repair  (below)
 		record(resp)
@@ -154,11 +154,11 @@ The predecessor IDE defaulted every model to a 262144-token window. When the rea
 - **Side-effect safety on resume:** each call is journaled `started` before execution and `finished` after. On resume after a crash, a call that is `started` but not `finished` is **not re-executed**; the model receives "this call was interrupted by a server restart; its effect is unknown - verify before retrying."
 - Shell commands run in the chat's AI terminal (F-TRM-23); long-running ones can be backgrounded with a handle.
 
-## Steering, queueing and task edits
+## Messages while a turn runs, queueing and task edits
 
-- **Inject** (F-CHT-26): delivered at the next step boundary (after the current tool batch finishes, or immediately if the model is mid-stream and the owner chose "interrupt") as a user-role note: `[Steering from the user, sent while you were working]: ...`.
-- **Queue:** held until the turn ends, then sent as the next turn.
-- **Task list / scratchpad edits by the owner** are summarized into a steering note ("The user marked task 3 done and added task 'Update docs'").
+- **A message sent while a turn runs** (F-CHT-26; owner, 2026-10-23: "re work the prompt injection into running chats to be just a normal chat message that will get added in-between tool call rounds so that ai can see it as soon as possible") joins that turn. It waits above the composer (the chat's `pending`, `docs/10`) for the turn's next step - after the tool round in progress returns - and then the model gets it as a plain user message: its words, its mentions read then and its files attached, nothing wrapped around it. The transcript shows it there, after that round, as the owner's message (a `message` segment). A turn about to finish with one waiting goes on to answer it; a turn that is stopped or pauses first leaves it queued for the next turn, and a server restart keeps it the same way. On Claude (`docs/04` "The Claude Code provider") the step's last tool result carries it - the soonest Claude reads anything mid-query - as `[Message from the user, sent while you were working]: ...`, so that Claude does not take it for the tool's output; between queries it is a message of its own. Another chat's `chat_send` to a running chat joins it the same way.
+- **Queue** (Ctrl+Enter, or the Queue button while a turn runs): held until the turn ends, then sent as the next turn.
+- **Task list / scratchpad edits by the owner** are summarized into a note ("The user marked task 3 done and added task 'Update docs'").
 
 ## Sub-agents
 
@@ -167,7 +167,7 @@ The predecessor IDE defaulted every model to a 262144-token window. When the rea
 - Tool: `spawn_agents([{ role: research|worker|<custom>, task, tools?, paths?, budget? }], wait: bool)`, plus `agent_send`, `agents_wait`, `agents_cancel`.
 - Each sub-agent: own transcript (stored under the parent chat), model + temperature from its role in the active group, restricted tool set (research = read-only + web; worker = read + write within assigned paths, no git mutations by default), its own budgets, a required `report(summary, artifacts)` at the end.
 - **Concurrency** is bounded by the scheduler (model slots), not by a fixed number; a group whose worker model has 4 llama.cpp slots can run 4 workers in parallel.
-- Parent receives bounded reports (the full sub-transcript stays available via `history_read`). If the parent does not wait, reports arrive as steering notes when ready.
+- Parent receives bounded reports (the full sub-transcript stays available via `history_read`). If the parent does not wait, reports arrive as notes when ready.
 - UI: collapsible nested sections (F-CHT-16), expandable into tabs.
 - **Planner/implementer pattern** (J3): the `planning` role produces `submit_plan` with tasks; Agent mode then dispatches tasks to `implementation`/`worker` roles and verifies with build/test tools on the primary. This is a built-in mode preset ("Plan -> Implement"), not a special code path.
 
@@ -256,4 +256,4 @@ A **fake model server** (OpenAI-compatible, scriptable) is a first-class test fi
 
 `plugins/chat/code/run*.cf` (`docs/04` "As built"). Built: the loop with Ask, Plan and Agent modes (Agent ends with `finish`, open tasks get one nudge); every row of the taxonomy except `budget` by tokens or cost and `context_truncated_by_server`; the recovery policy with these bounds - transport errors retried with backoff (`Retry-After` honored, at most 60 s) and the role's next model after 2 failures, 4 attempts in all; cuts (`disconnected_mid_stream`, `stalled_*`, `step_cap`) continued from the partial text, 2 per step; `max_tokens` 3, a call cut inside its arguments asked for again; `empty`, `reasoning_only`, `announced_no_action`, `unparsed_tool_call` nudged 2 times; `repetition` (a reply ending in one passage repeated, found as it streams) cut, discarded and nudged 2 times; `malformed_tool_call` answered with the schema, paused after 3 in a row; `context_overflow` learns the limit from the error, compresses and retries (a retry when the prompt fits the learned limit and nothing is left to compress), 3 per step; `loop_detected` after the same call failed the same way 3 times; `no_progress` after 3 Agent replies without a call or `finish`; the step budget `ai.maxSteps` (a note at 80%). A reason past its bound pauses the chat with a note saying why; the next message continues. Both watchdogs and the hard cap; the prefill budget uses the rate llama.cpp reports, else one measured from the time to first token, else the profile's `watchdog.prefillRate`. Discovery: each profile's server is asked once per server run - its slot context (llama.cpp `/props`, vLLM `max_model_len`) is the window of a profile that names none (and caps one that names a larger), and a llama.cpp server is asked for prompt progress. Steering (inject) at the next step - steering that arrives during what would be the turn's last answer gets one more step, and steering a stopped turn never took joins the queue; queued messages as the next turn. Restart: a turn in flight ends `interrupted`; its chat goes on by itself when a tool asked for the restart or `ai.resumeInterrupted` allows it ("Restart behavior"), else it waits paused.
 
-Checked by `tools/server-checks/tests/test_chat.py` (24 checks) against `tools/fake-model`: every script of the fake model's library, the dialects, approvals, ask_user, steering, stopping, a fallback model, a server killed mid-turn.
+Checked by `tools/server-checks/tests/test_chat.py` (24 checks) against `tools/fake-model`: every script of the fake model's library, the dialects, approvals, ask_user, messages sent while a turn runs, stopping, a fallback model, a server killed mid-turn.

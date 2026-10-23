@@ -126,7 +126,23 @@ namespace Ai
 
 	// --- The tools ---------------------------------------------------------------------------------------------------
 
-	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return IED::NormalizePath(call.args.Member(name).AsView()); }
+	Core::String ToolPath(Core::StringView path) {
+		Core::StringBuilder kept;
+		int64 at = 0;
+		while (at <= path.ByteLength()) {
+			int64 end = at;
+			while (end < path.ByteLength() && path.ByteAt(end) != '/' && path.ByteAt(end) != '\\') end += 1;
+			Core::StringView part = path.Substring(at, end - at);
+			if (part != ".") {
+				if (kept.ByteLength() > 0) kept.AppendByte('/');
+				kept.Append(part);
+			}
+			at = end + 1;
+		}
+		return IED::NormalizePath(kept.View());
+	}
+
+	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return ToolPath(call.args.Member(name).AsView()); }
 
 	// The file fs_read reads: a workspace path, or - by its absolute path, as the code tools show one - a file outside
 	// the workspace that a language server named (its file: URI).
@@ -290,7 +306,7 @@ namespace Ai
 	}
 
 	static ToolOutcome GlobRun(const ToolInvocation& call) {
-		Core::String root = IED::NormalizePath(call.args.Member("root").AsView());
+		Core::String root = ToolPath(call.args.Member("root").AsView());
 		Core::Array<Core::String> found = IED::ExpandGlob((FS::Path(call.ws.root.View()) / root.View()).View(), call.args.Member("pattern").AsView());
 		Core::StringBuilder out;
 		for (int64 i = 0; i < found.Count() && i < kGlobMostPaths; ++i) {

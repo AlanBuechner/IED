@@ -97,7 +97,7 @@ namespace Ai
 			OwnerMessage message;
 			message.text = ResumeText(reason.View(), chat->resume.View());
 			context->Log((((Core::String("chat ") + chat->chatId.View()) + " goes on after the restart (") + reason.View() + ")").View());
-			StartTurn(chat, message, nullptr, 0, reason.CStr());
+			StartTurn(chat, message, 0, reason.CStr());
 		}
 	}
 
@@ -258,33 +258,32 @@ namespace Ai
 		return Core::String(line.Substring(0, cut)) + "...";
 	}
 
-	// What the model is told of a message another chat sent: a sub-agent's task from the chat that ran it says its answer
-	// goes back by itself.
-	static Core::String FromText(const Chat* to, const Chat* from, Core::StringView text) {
+	Core::String ModelText(const Chat* to, const OwnerMessage& message) {
+		if (message.fromChatId.IsEmpty()) return message.text;
 		Core::StringBuilder out;
-		if (!to->agent.IsEmpty() && to->parentChatId == from->chatId) {
+		if (!to->agent.IsEmpty() && to->parentChatId == message.fromChatId) {
 			out.Append("You are the sub-agent \"");
 			out.Append(to->agent.View());
 			out.Append("\" of chat \"");
-			out.Append(from->title.View());
+			out.Append(message.fromTitle.View());
 			out.Append("\" (");
-			out.Append(from->chatId.View());
+			out.Append(message.fromChatId.View());
 			out.Append("). This is its task for you; you start with none of its conversation. Your final answer goes back to it by itself when your turn ends: make it complete and self-contained - what you did, what you found, what is left.\n\n");
-			out.Append(text);
+			out.Append(message.text.View());
 			return out.ToString();
 		}
 		out.Append("Message from chat \"");
-		out.Append(from->title.View());
+		out.Append(message.fromTitle.View());
 		out.Append("\" (");
-		out.Append(from->chatId.View());
+		out.Append(message.fromChatId.View());
 		out.Append("); answer it with chat_send if it asks for an answer:\n\n");
-		out.Append(text);
+		out.Append(message.text.View());
 		return out.ToString();
 	}
 
-	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, nullptr, 0); }
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, 0); }
 
-	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops, const char* resumed, const char* origin) {
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, int64 hops, const char* resumed, const char* origin) {
 		IED::Workspace ws = WorkspaceOf(chat);
 		Core::StringView text = sent.text.View();
 		Turn* turn = new Turn();
@@ -296,17 +295,15 @@ namespace Ai
 		turn->resumed = Core::String(resumed);
 		turn->origin = Core::String(origin);
 		chat->resume = Core::String();
-		if (from) {
-			turn->fromChatId = from->chatId;
-			turn->fromTitle = from->title;
-		}
+		turn->fromChatId = sent.fromChatId;
+		turn->fromTitle = sent.fromTitle;
 		turn->mode = chat->mode;
 		turn->group = GroupOf(context, chat, ws);
 		turn->model = ModelOf(chat);
 		turn->startedMs = ChatNowMs();
 		ModelMessage* message = new ModelMessage();
 		message->role = Core::String("user");
-		message->content = from ? FromText(chat, from, text) : Core::String(text);
+		message->content = ModelText(chat, sent);
 		turn->messages.Push(message);
 		chat->turns.Push(turn);
 		if (chat->title == kNewChatTitle) chat->title = TitleFrom(text);
@@ -338,15 +335,23 @@ namespace Ai
 	}
 
 	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
+		OwnerMessage* message = new OwnerMessage();
+		message->text = Core::String(text);
+		message->fromChatId = from->chatId;
+		message->fromTitle = from->title;
 		if (!chat->run) {
-			OwnerMessage message;
-			message.text = Core::String(text);
-			StartTurn(chat, message, from, hops);
+			StartTurn(chat, *message, hops);
 			return true;
 		}
-		chat->injected.Push(FromText(chat, from, text));
+		Pend(chat, message);
 		if (hops > chat->run->turn->hops) chat->run->turn->hops = hops;
 		return false;
+	}
+
+	void Chats::Pend(Chat* chat, OwnerMessage* message) {
+		chat->pending.Push(message);
+		QueueChanged(chat);
+		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
 	}
 
 	// A chat not yet announced: kept and given its topic.
@@ -398,6 +403,8 @@ namespace Ai
 		data.BeginObject();
 		data.Key(Core::StringView("queued"));
 		chat->WriteQueued(data);
+		data.Key(Core::StringView("pending"));
+		chat->WritePending(data);
 		data.EndObject();
 		Publish(chat, "queue.changed", data.View());
 	}
@@ -477,22 +484,18 @@ namespace Ai
 		message->text = params.Str("text");
 		if (message->text.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "text is empty");
 		Core::String delivery = params.Str("as", Core::StringView("message"));
-		if (delivery != "message" && delivery != "queue" && delivery != "inject") throw IED::RpcError(IED::ErrorCode::BadRequest, "as must be message, queue or inject");
-		Serialization::DomNode mentions = params.Field("mentions");
-		Serialization::DomNode attachments = params.Field("attachments");
-		const bool extras = mentions.Count() > 0 || attachments.Count() > 0;
-		if (chat->run && delivery == "inject" && extras) throw IED::RpcError(IED::ErrorCode::BadRequest, "a message with mentions or attachments cannot be injected: queue it");
-		message->mentions = SentMentions(mentions);
-		message->attachments = KeepAttachments(chat, WorkspaceOf(chat), attachments);
+		if (delivery != "message" && delivery != "queue") throw IED::RpcError(IED::ErrorCode::BadRequest, "as must be message or queue");
+		message->mentions = SentMentions(params.Field("mentions"));
+		message->attachments = KeepAttachments(chat, WorkspaceOf(chat), params.Field("attachments"));
 		IED::JsonWriter json;
 		json.BeginObject();
 		if (!chat->run) {
 			StartTurn(chat, *message);
 			json.Field("turnId", chat->Current()->turnId.View());
 		}
-		else if (delivery == "inject") {
-			chat->injected.Push(message->text);
-			json.BoolField("injected", true);
+		else if (delivery == "message") {
+			Pend(chat, message);
+			json.IntField("pending", chat->pending.Count());
 		}
 		else {
 			chat->queued.Push(message);

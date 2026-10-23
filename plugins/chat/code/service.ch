@@ -47,11 +47,11 @@ namespace Ai
 		public void PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge);
 		// The chat's summary changed: chat.changed on its topic and its workspace's, and its header saved.
 		public void Changed(Chat* chat);
-		// A turn for `message` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner;
-		// `resumed` why IED starts it itself after a restart (resume.ch), "" for a message.
+		// A turn for `message` starts - the owner's, or another chat's (docs/04 "Chats talk to each other"); `resumed` why IED
+		// starts it itself after a restart (resume.ch), "" for a message.
 		public void StartTurn(Chat* chat, const OwnerMessage& message);
 		// `origin` "background": IED starts it to tell of background tasks that ended.
-		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops, const char* resumed = "", const char* origin = "");
+		public void StartTurn(Chat* chat, const OwnerMessage& message, int64 hops, const char* resumed = "", const char* origin = "");
 		// The workspace's chats.
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
 		// A new chat in `ws`, published on its chats: topic.
@@ -59,6 +59,10 @@ namespace Ai
 		// Another chat's message: true when it started a turn of `chat`, false when its running turn gets it at the next
 		// step. The model is told which chat sent it.
 		public bool Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops);
+		// A message for the running turn's next step (docs/12 "Messages while a turn runs"), told to the clients and kept.
+		public void Pend(Chat* chat, OwnerMessage* message);
+		// queue.changed: the queued and the pending messages.
+		public void QueueChanged(Chat* chat);
 		// A turn ended: the next queued message, if the turn finished, starts the next.
 		public void TurnEnded(Chat* chat);
 		public Core::String ModelOf(const Chat* chat) const;
@@ -114,7 +118,6 @@ namespace Ai
 		private ClaudeSession* ClaudeCountSetup(Chat* chat, const IED::Workspace& ws, ClaudeCountStart& start);
 		// The context meter of an idle chat redrawn for the window of `model`, the one its next turn starts on.
 		private void MeterFor(Chat* chat, const IED::Workspace& ws, Core::StringView model);
-		private void QueueChanged(Chat* chat);
 		private Core::String ListSnapshot(Core::StringView wsId);
 		private void AddTopic(Chat* chat);
 		private Chat* NewChat(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);
@@ -162,6 +165,9 @@ namespace Ai
 	}
 
 	Core::String ChatsTopic(Core::StringView wsId);
+	// What the model is told of `message` sent to `to`: its words; another chat's says which chat sent it, and a sub-agent's
+	// task from the chat that ran it says its answer goes back by itself.
+	Core::String ModelText(const Chat* to, const OwnerMessage& message);
 	// ai.probe of a claude-code profile: the CLI asked now (where it is, its version, whether it is signed in), answered in
 	// a probe's shape.
 	Core::String ProbeClaude(ClaudeAccount* account, IED::PluginContext* context, const ModelProfile& profile);

@@ -200,10 +200,11 @@ system message goes in a file, `.ied/local/chats/<chatId>/claude-system.md` (a W
 **A turn.** IED's loop (`docs/12`) runs unchanged, and a step is one model response:
 
 1. The step sends what the session has not seen of the conversation - the owner's message (its mentions resolved, its images as
-   image blocks), harness notes, steering - as stream-json `user` messages. A session that does not have the chat's earlier turns
+   image blocks), harness notes, messages sent while the turn ran - as stream-json `user` messages. A session that does not have the chat's earlier turns
    (a new one for a chat another model answered so far, or one `--resume` could not find) first gets them written out as text.
    Nothing is sent while a query runs (between a step's tool calls and the next response): the CLI would make it a query of its
-   own after this one. Steering that comes then goes with the next tool result's text, or as a message once the query ends,
+   own after this one. A message that comes then goes with the step's last tool result - its text after the result's, marked as
+   the owner's (`docs/12` "Messages while a turn runs") - or as a message of its own once the query ends,
    and a turn does not finish before Claude has it. A retried step with nothing new (the CLI's query ended with an error, or
    the CLI was restarted) tells Claude to go on.
 2. It reads the CLI's output: `stream_event`s (the Messages API's raw events) stream thinking, text and tool-use input into the
@@ -365,7 +366,7 @@ In the Chats list (`docs/15` "Chat activity") Delete needs no confirmation - the
 A chat can hand work to another chat of its workspace and hear back, the way a lead hands a task to a colleague. The tools are the deferred group `chats` (`docs/13`), loaded with `tool_search` or by calling one:
 
 - `chat_list` names the workspace's chats (id, title, mode, running or idle, the first line of its last answer); `chat_read` shows another chat's last turns (at most 5), messages and answers without the tool calls.
-- `chat_send` sends a chat a message: an idle chat starts a turn with it, a running one gets it at its next step (like a steering message). `chat_create` starts a new chat with a message (a title and mode optional; it uses this chat's model group), to split the work. Both are Exec tools: they ask in Ask mode, and "Allow for this chat" adds `chat.send(<id>)` / `chat.create(*)`.
+- `chat_send` sends a chat a message: an idle chat starts a turn with it, a running one gets it at its next step (as a message the owner sends while it runs). `chat_create` starts a new chat with a message (a title and mode optional; it uses this chat's model group), to split the work. Both are Exec tools: they ask in Ask mode, and "Allow for this chat" adds `chat.send(<id>)` / `chat.create(*)`.
 - `chat_wait` waits for another chat's turn to end and returns its answer (default 120 s, at most 600 s; a stop ends the wait).
 
 The receiving turn says who sent it: its user message carries `from {chatId, title}`, the transcript heads it "From chat <title>" with a link that opens that chat, and the model is told the message came from that chat and that it can answer with `chat_send`. A chain of chats messaging chats is cut at 3 hops (`hops` on the turn), so two chats cannot keep each other running forever.
@@ -376,7 +377,7 @@ Owner, 2026-10-23: "ai background tasks that the ai can be notified of when they
 
 - `shell_run` and `build_run` with `background: true`, and `agent_run`, start a task and answer at once with its id (`bg-<n>`, the chat's counter); the turn goes on. A command's output goes to Output > AI as before.
 - `background_status {id?}` lists the chat's tasks (state, title, time, exit code, the first line of how it ended), or one with its output's end; `background_wait {id?, seconds?}` waits for that task, or any running one, to end (120 s by default, 600 at most; a stop ends the wait); `background_stop {id}` stops one. They are the deferred group `background`.
-- **Told when they end.** A running turn gets each ended task at its next step as a harness note (`background_ended`), not as the owner's steering; a turn that would finish with an ended task not yet told goes on to read it. An idle chat starts a turn by itself whose message names the tasks that ended (the transcript heads it "Background tasks"); a paused or waiting chat hears them with its next turn.
+- **Told when they end.** A running turn gets each ended task at its next step as a harness note (`background_ended`), not as the owner's message; a turn that would finish with an ended task not yet told goes on to read it. An idle chat starts a turn by itself whose message names the tasks that ended (the transcript heads it "Background tasks"); a paused or waiting chat hears them with its next turn.
 - **Lifetime.** A task outlives the turn that started it; Stop on the chat stops its turn, not its tasks. Deleting a chat stops them. `chat.json` keeps the list (id, kind, title, state, times, exit code, summary); a task still running when the server stops is `lost` when it starts again, its process gone with the server.
 - **In the UI.** The side panel's "Background tasks" section lists them - a spinner while running, how each ended, its time - with Stop on a running one and its output's end unfolding under it; the chat topic's `background.changed {tasks}` carries the list (`docs/10`).
 

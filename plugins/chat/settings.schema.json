@@ -173,6 +173,14 @@
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Days a deleted chat is kept, whole and restorable from the Chats list's Deleted section, before it is removed for good (docs/04 Deleting a chat)."
 		},
+		"ai.chats.panelRows": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 200,
+			"default": 5,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Rows a long list of a chat's details panel shows - modified files, tasks, background tasks, the clipboard, what the chat has open - before its Show all (docs/15 Chat)."
+		},
 		"ai.claude.command": {
 			"type": "array",
 			"items": { "type": "string" },

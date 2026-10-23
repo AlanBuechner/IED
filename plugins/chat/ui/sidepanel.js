@@ -3,7 +3,7 @@
 // this chat with their lines added and removed, each opening in the editor; the tabs it uses that plugins reported (the
 // pages it drives), each opening as a tab; its background tasks (docs/04 "Background tasks"), a running one with Stop,
 // each unfolding to its output's end and an agent's opening its chat; the AI's clipboard, each clip unfolding to its
-// text. Sections fold.
+// text. Sections fold, and a long list shows its first rows (ai.chats.panelRows) until Show all.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { compact, contextBar } from "./chatmodel.js";
@@ -13,11 +13,15 @@ const RESOURCE_ICONS = { page: "globe", terminal: "terminal", process: "server-p
 
 const TASK_STATES = { running: ["loading", "spin", "c-info"], done: ["pass", "", "c-saved"], failed: ["error", "", "c-error"], stopped: ["circle-slash", "", "muted"], lost: ["circle-slash", "", "c-warn"] };
 
+export const PREVIEW_ROWS = 5;
+
 // actions: {openFile(path), fileIcon(path), openTab(ref), openChat(chatId), stopTask(taskId), closeDetails()}
 export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
 		this.closed = new Set();
+		this.all = new Set();   // sections showing every row
+		this.previewRows = PREVIEW_ROWS;
 		this.openClips = new Set();
 		this.openTasks = new Set();
 		this.title = h("div.panel-title.chat-panel-title");
@@ -48,6 +52,23 @@ export class SidePanel {
 			closed ? null : rows);
 	}
 
+	// A list's entries (a row, or a row and what it unfolds to), its first previewRows only - from the one before `keep`,
+	// the row the preview keeps in view - with Show all below; every one once that is pressed.
+	limited(id, entries, keep = 0) {
+		if (entries.length <= this.previewRows) return entries.flat();
+		const all = this.all.has(id);
+		const start = all ? 0 : Math.max(0, Math.min(keep - 1, entries.length - this.previewRows));
+		const shown = all ? entries : entries.slice(start, start + this.previewRows);
+		const toggle = () => {
+			if (all) this.all.delete(id);
+			else this.all.add(id);
+			this.toggled();
+		};
+		const more = h("button.chat-sec-more", { "aria-expanded": all ? "true" : "false", title: all ? "Show only " + this.previewRows : (entries.length - this.previewRows) + " more", on: { click: toggle } },
+			icon(all ? "chevron-up" : "chevron-down"), all ? "Show fewer" : "Show all " + entries.length);
+		return [...shown.flat(), more];
+	}
+
 	contextSection(model) {
 		const bar = contextBar(model.context);
 		if (!model.context) return this.section("context", "Context", "", h("div.chat-sec-empty.muted", null, "Shown after the first request."));
@@ -60,11 +81,13 @@ export class SidePanel {
 
 	tasksSection(model) {
 		const done = model.tasks.filter((t) => t.status === "done" || t.status === "skipped").length;
+		const now = model.tasks.findIndex((t) => t.status === "in_progress");
 		const rows = model.tasks.map((task) => h("div.chat-sec-row.task" + (task.status === "in_progress" ? ".now" : ""), { title: task.note || task.title, dataset: { status: task.status } },
 			h("span.chat-check" + (task.status === "done" || task.status === "skipped" ? ".on" : ""), null, TASK_GLYPHS[task.status] ? icon(TASK_GLYPHS[task.status]) : null),
 			h("span.name" + (task.status === "done" || task.status === "skipped" ? ".muted" : ""), null, task.title),
 			task.status === "in_progress" ? h("span.meta", null, "now") : null));
-		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "No tasks yet."));
+		const keep = now >= 0 ? now : Math.max(0, model.tasks.findIndex((t) => t.status === "pending"));
+		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? this.limited("tasks", rows, keep) : h("div.chat-sec-empty.muted", null, "No tasks yet."));
 	}
 
 	// What the chat has open (docs/04 "What a chat has open"): shown only when it has something.
@@ -72,20 +95,20 @@ export class SidePanel {
 		if (!model.resources.length) return null;
 		const rows = model.resources.map((resource) => h("button.chat-sec-row.file", { title: "Open " + (resource.title || resource.ref) + " in a tab", dataset: { ref: resource.ref }, on: { click: () => this.actions.openTab(resource.ref) } },
 			icon(RESOURCE_ICONS[resource.kind] || "link-external"), h("span.name", null, resource.title || resource.ref)));
-		return this.section("open", "Open by this chat", String(model.resources.length), rows);
+		return this.section("open", "Open by this chat", String(model.resources.length), this.limited("open", rows));
 	}
 
 	filesSection(model) {
 		const rows = model.modified.map((file) => h("button.chat-sec-row.file", { title: file.path, on: { click: () => this.actions.openFile(file.path) } },
 			this.actions.fileIcon(file.path), h("span.name", null, file.path.split("/").pop()), h("span.dir.muted", null, file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
 			h("span.meta", null, file.plus ? h("span.plus", null, "+" + file.plus) : null, file.minus ? h("span.minus", null, " -" + file.minus) : null)));
-		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
+		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? this.limited("files", rows) : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
 	}
 
 	// The background tasks the AI started: shown only when it started one; the newest first.
 	backgroundSection(model) {
 		if (!model.background.length) return null;
-		const rows = [];
+		const entries = [];
 		const now = Date.now();
 		for (const task of [...model.background].reverse()) {
 			const open = this.openTasks.has(task.taskId);
@@ -96,21 +119,21 @@ export class SidePanel {
 			};
 			const [glyph, spin, tone] = TASK_STATES[task.state] || TASK_STATES.lost;
 			const took = task.state === "running" ? "since " + clockOf(task.startedMs) : taskTime((task.endedMs || now) - task.startedMs);
-			rows.push(h("div.chat-sec-row.bg-task", { dataset: { task: task.taskId, state: task.state } },
+			const row = h("div.chat-sec-row.bg-task", { dataset: { task: task.taskId, state: task.state } },
 				h("button.chat-bg-open", { title: task.title + (task.summary ? " - " + task.summary : ""), "aria-expanded": open ? "true" : "false", on: { click: toggle } },
 					icon(glyph, [spin, tone].filter(Boolean).join(" ")), h("span.name", null, task.title), h("span.meta", null, task.state === "running" ? took : task.summary || task.state)),
 				task.chatId ? h("button.ib", { title: "Open the agent's chat", "aria-label": "Open the agent's chat", on: { click: () => this.actions.openChat(task.chatId) } }, icon("comment-discussion")) : null,
-				task.state === "running" ? h("button.ib", { title: "Stop " + task.taskId, "aria-label": "Stop " + task.taskId, on: { click: () => this.actions.stopTask(task.taskId) } }, icon("debug-stop")) : null));
-			if (open) rows.push(h("pre.chat-clip", null, (task.taskId + " " + task.state + " - " + took + (task.summary ? " - " + task.summary : "")) + (task.output ? "\n" + task.output : "")));
+				task.state === "running" ? h("button.ib", { title: "Stop " + task.taskId, "aria-label": "Stop " + task.taskId, on: { click: () => this.actions.stopTask(task.taskId) } }, icon("debug-stop")) : null);
+			entries.push(open ? [row, h("pre.chat-clip", null, (task.taskId + " " + task.state + " - " + took + (task.summary ? " - " + task.summary : "")) + (task.output ? "\n" + task.output : ""))] : row);
 		}
 		const running = model.background.filter((t) => t.state === "running").length;
-		return this.section("background", "Background tasks", running ? running + " running" : String(model.background.length), rows);
+		return this.section("background", "Background tasks", running ? running + " running" : String(model.background.length), this.limited("background", entries));
 	}
 
 	// The AI's clipboard (clipboard_copy): shown only when it holds something; a clip unfolds to its text.
 	clipsSection(model) {
 		if (!model.clips.length) return null;
-		const rows = [];
+		const entries = [];
 		for (const clip of model.clips) {
 			const open = this.openClips.has(clip.name);
 			const toggle = () => {
@@ -118,12 +141,12 @@ export class SidePanel {
 				else this.openClips.add(clip.name);
 				this.toggled();
 			};
-			rows.push(h("button.chat-sec-row.clip", { title: "{{clip:" + clip.name + "}} from " + clip.source, "aria-expanded": open ? "true" : "false", dataset: { clip: clip.name }, on: { click: toggle } },
+			const row = h("button.chat-sec-row.clip", { title: "{{clip:" + clip.name + "}} from " + clip.source, "aria-expanded": open ? "true" : "false", dataset: { clip: clip.name }, on: { click: toggle } },
 				icon(open ? "chevron-down" : "chevron-right"), h("span.name", null, clip.name), h("span.dir.muted", null, clip.source),
-				h("span.meta", null, clip.lines + (clip.lines === 1 ? " line" : " lines"))));
-			if (open) rows.push(h("pre.chat-clip", null, clip.text + (new TextEncoder().encode(clip.text).length < clip.bytes ? "\n..." : "")));
+				h("span.meta", null, clip.lines + (clip.lines === 1 ? " line" : " lines")));
+			entries.push(open ? [row, h("pre.chat-clip", null, clip.text + (new TextEncoder().encode(clip.text).length < clip.bytes ? "\n..." : ""))] : row);
 		}
-		return this.section("clips", "Clipboard", String(model.clips.length), rows);
+		return this.section("clips", "Clipboard", String(model.clips.length), this.limited("clips", entries));
 	}
 }
 

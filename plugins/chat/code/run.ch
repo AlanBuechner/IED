@@ -38,6 +38,9 @@ namespace Ai
 		// --- run.cf: the loop ---
 		private bool Prepare();
 		private void ResolveMessage();
+		// What a message's mentions name, read now, and its attachments, as words added to it (mentions.ch); its images in
+		// `images`. The lock is not held.
+		private Core::String MessageExtras(const Core::Array<Mention>& mentions, const Core::Array<Attachment>& attachments, Core::Array<IED::ToolImage>& images);
 		private void Discover();
 		private void Step();
 		private void Handle(StepVerdict verdict, StepResult* result);
@@ -82,13 +85,17 @@ namespace Ai
 		// A note to the model, shown as a grey harness line; UiNote only shows it.
 		private void HarnessNote(Core::StringView kind, Core::StringView text);
 		private void UiNote(Core::StringView kind, Core::StringView text);
-		private void DeliverSteering();
+		// The messages sent while the turn ran, given to the model as plain messages and shown where it got them (docs/12
+		// "Messages while a turn runs"); with `inResult` they go with a tool result (Claude mid-query), each saying it is
+		// the owner's. The lock is not held.
+		private void DeliverMessages(bool inResult);
 		private void SaveRunning();
 
 		// --- runtools.cf: tool calls ---
 		private void RecordAssistant(const StepResult* result, bool withCalls);
 		private void ExecuteCalls(StepResult* result);
-		private void ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId);
+		// `last`: the step's last call, whose result to Claude carries what came for the turn meanwhile.
+		private void ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId, bool last);
 		// The chat's clips pasted into `args` (clipboard.ch); false with `missing` a name it has no clip of.
 		private bool Pasted(Serialization::DomNode& args, Core::String& missing);
 		// What the model is told when a call pastes a clip there is not.
@@ -119,6 +126,9 @@ namespace Ai
 		private StepResult* ClaudeStep(const StepEvents& events);
 		private bool StartClaude(Core::String& problem);
 		private void SendToClaude();
+		// The turn's messages the session has not seen, set aside for the next tool result while a query runs. The lock is
+		// held.
+		private void SetAside();
 		// One of the step's lines; true when the step is over.
 		private bool TakeClaudeLine(ClaudeLine* line, ClaudeResponse* response, StepResult* result, const StepEvents& events, int64 startedMs);
 		// A line beside a step's: a rate limit event, the session's id, a query's result.
@@ -134,13 +144,14 @@ namespace Ai
 		// Claude cannot serve the turn (`claudeBlocked`: a usage limit, no subscription sign-in): the next candidate that is
 		// not Claude, or a pause saying why. The lock is held.
 		private void ClaudeBlocked();
-		// The call's result to the CLI's tools/call for it.
-		private void AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome);
+		// The call's result to the CLI's tools/call for it; the step's `last` call's carries the messages that came meanwhile.
+		private void AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome, bool last);
 		// The turn is over: the query settled, the usage asked, the session kept for the chat's next turn.
 		private void EndClaude();
 		private ClaudeSession* claude;                               // the chat's session once a Claude step used it
 		private int64 claudeSent;                                    // the turn's messages before this the session has
-		private Core::String claudeAside;                            // steering that came mid-query, for the next tool result
+		private Core::String claudeAside;                            // messages that came mid-query, for the next tool result
+		private Core::Array<IED::ToolImage> claudeAsideImages;       // and their images
 		private Core::String claudeBlocked;                          // why Claude cannot serve this turn; empty while it can
 		private Core::String claudeBlockedStop;                      // the stop a pause for it records: usage_limit, not_subscription
 

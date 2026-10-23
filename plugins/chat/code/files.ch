@@ -19,6 +19,9 @@ namespace Ai
 	// The text of a file the model sees: lines numbered from `first` (1-based), at most `most` lines and
 	// kReadMostBytes, with how to read on when it stops early.
 	Core::String NumberedLines(Core::StringView text, int64 first, int64 most);
+	// A path a tool call names, workspace-relative: its "." parts dropped ("." is the root, as models often write it),
+	// then normalized as every workspace path is ("..", a drive letter: bad_request).
+	Core::String ToolPath(Core::StringView path);
 	// `text` with each edit's `old` replaced by its `new`, all or none; false with `error` naming the edit that failed.
 	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error);
 }

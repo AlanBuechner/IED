@@ -18,12 +18,30 @@ namespace Ai
 	// The permission a mode starts with (docs/11): Plan's is plan (read only), the others auto.
 	PermissionMode DefaultPermission(ChatMode mode);
 
-	// One piece of a turn the clients show: "text", "thinking", "tool", "harness" or "steering".
+	// What an owner's message names besides its words (docs/04 "Attachments and @-mentions").
+	class Mention
+	{
+		public Core::String kind;    // file, folder, symbol, terminal, output, problems, diff, chat
+		public Core::String ref;     // the path, symbol, terminal or output source id, or chat id; empty for problems, diff
+		public Core::String label;   // as the message writes it, after its @
+	}
+
+	// A file sent with a message, kept in the chat's media folder.
+	class Attachment
+	{
+		public Core::String name;
+		public Core::String path;    // workspace-relative
+		public Core::String mime;
+		public int64 bytes;
+	}
+
+	// One piece of a turn the clients show: "text", "thinking", "tool", "harness" or "message" (a message sent while the
+	// turn ran, where the model got it; "steering" in chats from before 2026-10-23).
 	class Segment
 	{
 		public Core::String segId;
 		public Core::String type;
-		public Core::String text;          // text, thinking, harness and steering segments
+		public Core::String text;          // text, thinking, harness and message segments
 		public bool done;
 		public Core::String model;
 		public Core::String kind;          // a harness note's kind ("continue_after_max_tokens")
@@ -40,6 +58,12 @@ namespace Ai
 		public Core::String source;        // where the tool ran ("built-in", "Output: AI")
 		public Core::Array<IED::ToolImage> images;   // what the result showed the model, for the card
 		public int64 tokens;
+		// A message segment:
+		public Core::Array<Mention> mentions;
+		public Core::Array<Attachment> attachments;
+		public Core::String fromChatId;    // another chat sent it; empty: the owner
+		public Core::String fromTitle;
+		public int64 atMs;                 // when the model was given it
 
 		public void WriteJson(IED::JsonWriter& json) const;
 		// The members WriteJson writes, without the braces.
@@ -68,31 +92,17 @@ namespace Ai
 		public void Read(const Serialization::DomNode& node);
 	}
 
-	// What an owner's message names besides its words (docs/04 "Attachments and @-mentions").
-	class Mention
-	{
-		public Core::String kind;    // file, folder, symbol, terminal, output, problems, diff, chat
-		public Core::String ref;     // the path, symbol, terminal or output source id, or chat id; empty for problems, diff
-		public Core::String label;   // as the message writes it, after its @
-	}
-
-	// A file sent with a message, kept in the chat's media folder.
-	class Attachment
-	{
-		public Core::String name;
-		public Core::String path;    // workspace-relative
-		public Core::String mime;
-		public int64 bytes;
-	}
-
-	// An owner's message as it waits in the queue for a turn.
+	// A message as it waits for a turn - in the queue, or for the running turn's next step: the owner's, or another
+	// chat's (chattools.ch).
 	class OwnerMessage
 	{
 		public Core::String text;
 		public Core::Array<Mention> mentions;
 		public Core::Array<Attachment> attachments;
+		public Core::String fromChatId;    // the chat that sent it; empty: the owner
+		public Core::String fromTitle;
 
-		// {text, mentions?, attachments?}, as the chat's header keeps it.
+		// {text, from?, mentions?, attachments?}, as the chat's header keeps it.
 		public void WriteJson(IED::JsonWriter& json) const;
 		// From that, or from the plain text an older header kept.
 		public void Read(const Serialization::DomNode& node);
@@ -259,7 +269,7 @@ namespace Ai
 		public Core::Array<Turn*> turns;
 		public Core::Array<ChatTask*> tasks;
 		public Core::Array<OwnerMessage*> queued;     // sent while a turn ran, for the next turn
-		public Core::Array<Core::String> injected;    // for the running turn's next step
+		public Core::Array<OwnerMessage*> pending;    // sent while a turn ran, for its next step
 		public Core::Array<Approval*> approvals;       // waiting for a decision
 		public Question* question;                    // the ask_user question waiting, or null
 		public Core::Array<Core::String> allowed;     // rules the owner allowed for this chat ("Allow for this chat")
@@ -285,7 +295,9 @@ namespace Ai
 		public int64 WaitingApprovals() const;
 		public void WriteSummary(IED::JsonWriter& json) const;
 		public void WriteTasks(IED::JsonWriter& json) const;
+		// The queued and the pending messages as the clients show them: their texts.
 		public void WriteQueued(IED::JsonWriter& json) const;
+		public void WritePending(IED::JsonWriter& json) const;
 		public void WriteModified(IED::JsonWriter& json) const;
 		public void WriteResources(IED::JsonWriter& json) const;
 		// The background tasks as the clients show them: [{taskId, ..., output}].

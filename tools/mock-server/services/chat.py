@@ -120,6 +120,7 @@ class Chat:
 		self.turns = []
 		self.tasks = []
 		self.queued = []   # (text, extras): the wire shows the texts
+		self.pending = []  # (text, extras) sent to the running turn, for its next step
 		self.modified = []
 		self.context = None
 		self.approvals = {}
@@ -135,6 +136,10 @@ class Chat:
 
 	def queued_texts(self):
 		return [text for text, _ in self.queued]
+
+	def lists(self):
+		"""queue.changed's data: the queued and the pending messages' texts."""
+		return {"queued": self.queued_texts(), "pending": [text for text, _ in self.pending]}
 
 	def next_id(self, prefix):
 		self.counter += 1
@@ -209,7 +214,7 @@ class Chats:
 	def snapshot(self, chat):
 		recent = chat.turns[-SNAPSHOT_TURNS:]
 		return dict(
-			chat.summary(), **self.in_use(chat), tasks=chat.tasks, queued=chat.queued_texts(), modified=chat.modified,
+			chat.summary(), **self.in_use(chat), tasks=chat.tasks, **chat.lists(), modified=chat.modified,
 			context=chat.context, hasMore=len(chat.turns) > len(recent), turns=[t.to_dict() for t in recent],
 			pendingApprovals=[a.data for a in chat.approvals.values() if a.decision is None],
 			pendingQuestion=chat.question.data if chat.question and chat.question.decision is None else None,
@@ -319,23 +324,22 @@ class Chats:
 		if not text.strip():
 			raise RpcError("bad_request", "text is empty")
 		delivery = p.str("as", "message", required=False)
-		if delivery not in ("message", "queue", "inject"):
-			raise RpcError("bad_request", "as must be message, queue or inject")
+		if delivery not in ("message", "queue"):
+			raise RpcError("bad_request", "as must be message or queue")
 		mentions = sent_mentions(p.list("mentions", [], required=False))
 		files = p.list("attachments", [], required=False)
-		if chat.runner is not None and delivery == "inject" and (mentions or files):
-			raise RpcError("bad_request", "a message with mentions or attachments cannot be injected: queue it")
 		extras = {}
 		if mentions:
 			extras["mentions"] = mentions
 		if files:
 			extras["attachments"] = self._keep_attachments(chat, files)
 		if chat.runner is not None:
-			if delivery == "inject":
-				self._steer(chat, text)
-				return {"injected": True}
+			if delivery == "message":
+				chat.pending.append((text, extras))
+				self.publish(chat, "queue.changed", chat.lists())
+				return {"pending": len(chat.pending)}
 			chat.queued.append((text, extras))
-			self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
+			self.publish(chat, "queue.changed", chat.lists())
 			return {"queued": len(chat.queued)}
 		name = chat_scripts.pick(text, p.str("mockScript", None, required=False))
 		script = chat_scripts.SCRIPTS.get(name)
@@ -374,13 +378,17 @@ class Chats:
 		chat.runner = asyncio.ensure_future(self._play(chat, turn, script))
 		return turn.turn_id
 
-	def _steer(self, chat, text):
-		turn = chat.turns[-1]
-		segment = Segment(chat.next_id("s"), "steering")
-		segment.text, segment.done = text, True
-		turn.segments.append(segment)
-		self.publish(chat, "segment.start", dict(segment.to_dict(), turnId=turn.turn_id))
-		self.publish(chat, "segment.end", {"segId": segment.seg_id, "tokens": len(text) // 4, "ms": 0})
+	# The messages sent to the running turn, at its next step (after a tool round), as the owner's messages.
+	def _deliver(self, chat, turn):
+		for text, extras in chat.pending:
+			segment = Segment(chat.next_id("s"), "message", atMs=now_ms(), **extras)
+			segment.text, segment.done = text, True
+			turn.segments.append(segment)
+			self.publish(chat, "segment.start", dict(segment.to_dict(), turnId=turn.turn_id))
+			self.publish(chat, "segment.end", {"segId": segment.seg_id, "tokens": len(text) // 4, "ms": 0})
+		if chat.pending:
+			chat.pending = []
+			self.publish(chat, "queue.changed", chat.lists())
 
 	async def m_chat_unqueue(self, call, p):
 		chat = self.get(p.str("chatId"))
@@ -391,7 +399,7 @@ class Chats:
 		if start and chat.runner is not None:
 			raise RpcError("conflict", "a turn is running: the message starts when it ends")
 		text, extras = chat.queued.pop(index)
-		self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
+		self.publish(chat, "queue.changed", chat.lists())
 		answer = {"queued": chat.queued_texts(), "message": dict({"text": text}, **extras)}
 		if start:
 			answer["turnId"] = self._start(chat, text, chat_scripts.SCRIPTS[chat_scripts.pick(text, None)], extras)
@@ -473,13 +481,22 @@ class Chats:
 		paused = False
 		try:
 			for op in script:
+				if op[0] == "end" and op[1] == "finished" and chat.pending:
+					self._deliver(chat, turn)
+					await self._op(chat, turn, ("text", "Noted - I will go on with that."))
 				paused = await self._op(chat, turn, op) or paused
+				if op[0] == "tool":
+					self._deliver(chat, turn)
 		except asyncio.CancelledError:
 			self._close_open_segments(chat, turn)
 			self._withdraw(chat)
 			self._end(chat, turn, chat.stop_reason, {})
 			paused = chat.stop_reason == "interrupted"
 		finally:
+			if chat.pending:
+				chat.queued.extend(chat.pending)
+				chat.pending = []
+				self.publish(chat, "queue.changed", chat.lists())
 			chat.runner = None
 			chat.question = None
 			chat.state = "paused" if paused else "idle"
@@ -487,7 +504,7 @@ class Chats:
 			self.changed(chat)
 		if chat.queued and turn.stop == "finished":
 			text, extras = chat.queued.pop(0)
-			self.publish(chat, "queue.changed", {"queued": chat.queued_texts()})
+			self.publish(chat, "queue.changed", chat.lists())
 			self._start(chat, text, chat_scripts.SCRIPTS[chat_scripts.pick(text, None)], extras)
 
 	async def _op(self, chat, turn, op):

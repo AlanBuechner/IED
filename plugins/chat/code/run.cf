@@ -210,6 +210,16 @@ namespace Ai
 			attachments = turn->attachments;
 		}
 		if (mentions.IsEmpty() && attachments.IsEmpty()) return;
+		Core::Array<IED::ToolImage> images;
+		Core::String added = MessageExtras(mentions, attachments, images);
+		IED::HostLock guard(*context);
+		ModelMessage* message = turn->messages[0];
+		message->content = message->content + added.View();
+		message->images = images;
+		SaveRunning();
+	}
+
+	Core::String TurnRun::MessageExtras(const Core::Array<Mention>& mentions, const Core::Array<Attachment>& attachments, Core::Array<IED::ToolImage>& images) {
 		ToolInvocation call;
 		call.context = context;
 		call.ws = ws;
@@ -221,7 +231,6 @@ namespace Ai
 			added.Append("\n\n");
 			added.Append(MentionBlock(mention, ReadMention(*tools, call, mention).View()).View());
 		}
-		Core::Array<IED::ToolImage> images;
 		for (const Attachment& attachment : attachments) {
 			if (!AttachedImage(attachment)) {
 				added.Append("\n");
@@ -233,11 +242,7 @@ namespace Ai
 			image.path = attachment.path;
 			images.Push(image);
 		}
-		IED::HostLock guard(*context);
-		ModelMessage* message = turn->messages[0];
-		message->content = message->content + added.View();
-		message->images = images;
-		SaveRunning();
+		return added.ToString();
 	}
 
 	// --- A step ------------------------------------------------------------------------------------------------------
@@ -271,9 +276,6 @@ namespace Ai
 	void TurnRun::Step() {
 		Discover();
 		const bool onClaude = candidates[candidate]->IsClaude();
-		StepRequest request;
-		int64 estimate = 0;
-		int64 estimateBefore = 0;
 		{
 			IED::HostLock guard(*context);
 			if (run->cancelled) {
@@ -284,6 +286,13 @@ namespace Ai
 				Pause(Core::StringView("budget"), Core::StringView("the turn used its step budget (ai.maxSteps); send a message to continue"));
 				return;
 			}
+		}
+		DeliverMessages(onClaude && claude && claude->querying);
+		StepRequest request;
+		int64 estimate = 0;
+		int64 estimateBefore = 0;
+		{
+			IED::HostLock guard(*context);
 			if (maxSteps > 0 && steps == maxSteps * 8 / 10 && steps > 0) {
 				Core::Array<Core::String> values;
 				values.Push(Core::String("percent"));
@@ -292,7 +301,8 @@ namespace Ai
 				values.Push(Core::String("steps"));
 				HarnessNote(Core::StringView("budget_warning"), chats->prompts.Note("budget_warning", values).View());
 			}
-			DeliverSteering();
+			Core::String ended = chats->TellEnded(chat);
+			if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
 			if (!onClaude) {
 				if (Window() > 0 && CalibratedTokens() * 100 > Window() * kContextCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
 				request = Request();
@@ -534,9 +544,9 @@ namespace Ai
 		pauseWhy = Core::String(why);
 	}
 
-	// A turn about to finish with steering waiting goes on: the next step gives it to the model. The lock is held.
+	// A turn about to finish with a message waiting goes on: the next step gives it to the model. The lock is held.
 	void TurnRun::Finish(Core::StringView reason) {
-		if (ending || (reason == "finished" && (!chat->injected.IsEmpty() || !claudeAside.IsEmpty() || chats->HasUntold(chat)))) return;
+		if (ending || (reason == "finished" && (!chat->pending.IsEmpty() || !claudeAside.IsEmpty() || chats->HasUntold(chat)))) return;
 		ending = true;
 		stop = Core::String(reason);
 	}
@@ -556,19 +566,10 @@ namespace Ai
 		}
 		chat->approvals.Clear();
 		chat->question = nullptr;
-		if (!chat->injected.IsEmpty()) {
-			for (const Core::String& steering : chat->injected) {
-				OwnerMessage* message = new OwnerMessage();
-				message->text = steering;
-				chat->queued.Push(message);
-			}
-			chat->injected.Clear();
-			IED::JsonWriter queue;
-			queue.BeginObject();
-			queue.Key(Core::StringView("queued"));
-			chat->WriteQueued(queue);
-			queue.EndObject();
-			chats->Publish(chat, "queue.changed", queue.View());
+		if (!chat->pending.IsEmpty()) {
+			for (OwnerMessage* message : chat->pending) chat->queued.Push(message);
+			chat->pending.Clear();
+			chats->QueueChanged(chat);
 		}
 		if (pausing) UiNote(Core::StringView("paused"), ((Core::String("Paused (") + stop.View()) + "): " + pauseWhy.View() + ". Send a message to continue.").View());
 		CloseOpenCalls(turn, Core::StringView("The call did not run: the turn ended first."));

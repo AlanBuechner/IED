@@ -1,7 +1,8 @@
 // transcript.js - a chat's turns as the activity shows them (docs/15 "Chat", mockup 02): the owner's message, then the
 // agent's segments - thinking (collapsed), Markdown text, tool cards (expandable to their result), approval cards with
-// the change's diff, the ask_user question, harness notes as grey lines - and the turn's footer: how it stopped, what
-// the harness recovered, tokens and speed. Segments update in place as their events arrive.
+// the change's diff, the ask_user question, harness notes as grey lines, a message sent while it ran where the model got
+// it - and the turn's footer: how it stopped, what the harness recovered, tokens and speed. Segments update in place as
+// their events arrive.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
@@ -115,19 +116,23 @@ export class TranscriptView {
 		return el;
 	}
 
-	// Who sent the turn's message: the owner, another chat (docs/04 "Chats talk to each other"), which a click opens, or
-	// IED itself, going on after a restart (docs/12 "Restart behavior").
+	// Who sent the turn's message: the owner, another chat, or IED itself, going on after a restart (docs/12 "Restart
+	// behavior").
 	userHead(turn) {
-		const from = turn.user && turn.user.from;
 		const resumed = turn.user && turn.user.resumed;
 		if (turn.user && turn.user.origin === "background") return h("div.chat-head.from", { title: "IED started this turn to tell the AI that background tasks it started have ended" },
 			icon("history"), h("b", null, "Background tasks"), h("span.muted", null, "ended"), h("span.muted", null, clock(turn.startedMs)));
 		if (resumed) return h("div.chat-head.from", { title: resumed === "relaunch" ? "IED relaunched onto a new build and continued this chat" : "IED restarted while this chat ran and continued it" },
 			icon("debug-restart"), h("b", null, "IED"), h("span.muted", null, resumed === "relaunch" ? "after relaunching" : "after a restart"), h("span.muted", null, clock(turn.startedMs)));
-		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs)));
+		return this.senderHead(turn.user && turn.user.from, turn.startedMs);
+	}
+
+	// The owner, or another chat (docs/04 "Chats talk to each other"), which a click opens.
+	senderHead(from, ms) {
+		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(ms)));
 		return h("div.chat-head.from", null, icon("comment-discussion"), h("b", null, "From chat"),
 			h("button.chat-from-link", { title: "Open " + from.title, on: { click: () => this.actions.openChat(from.chatId) } }, from.title || from.chatId),
-			h("span.muted", null, clock(turn.startedMs)));
+			h("span.muted", null, clock(ms)));
 	}
 
 	// While the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many
@@ -192,7 +197,14 @@ export class TranscriptView {
 		else if (segment.type === "thinking") replace(el, ...this.thinkingParts(segment));
 		else if (segment.type === "tool") replace(el, this.toolCard(segment));
 		else if (segment.type === "harness") replace(el, this.harnessLine(segment));
-		else if (segment.type === "steering") replace(el, h("div.chat-user.inject", null, h("span.chat-tag", null, "injected"), segment.text));
+		else if (segment.type === "message" || segment.type === "steering") replace(el, ...this.messageParts(segment));
+	}
+
+	// A message sent while the turn ran, as any message of the owner's, where the model got it ("steering": an older
+	// chat's).
+	messageParts(segment) {
+		const chips = this.model.summary ? userChips(segment, this.model.summary.wsId, this.actions) : null;
+		return [this.senderHead(segment.from, segment.atMs), h("div.chat-user", null, segment.text || "", chips)];
 	}
 
 	textParts(segment) {

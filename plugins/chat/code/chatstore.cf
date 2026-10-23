@@ -63,6 +63,10 @@ namespace Ai
 		json.BeginArray();
 		for (OwnerMessage* message : chat->queued) message->WriteJson(json);
 		json.EndArray();
+		json.Key(Core::StringView("pending"));
+		json.BeginArray();
+		for (OwnerMessage* message : chat->pending) message->WriteJson(json);
+		json.EndArray();
 		json.Key(Core::StringView("loadedTools"));
 		json.BeginArray();
 		for (const Core::String& name : chat->loadedTools) json.String(name.View());
@@ -142,6 +146,13 @@ namespace Ai
 		for (int64 i = 0; i < queued.Count(); ++i) {
 			OwnerMessage* message = new OwnerMessage();
 			message->Read(queued.At(i));
+			chat->queued.Push(message);
+		}
+		// Messages the turn a restart cut off had not taken yet wait for the next turn.
+		Serialization::DomNode pending = header.Member("pending");
+		for (int64 i = 0; i < pending.Count(); ++i) {
+			OwnerMessage* message = new OwnerMessage();
+			message->Read(pending.At(i));
 			chat->queued.Push(message);
 		}
 		Serialization::DomNode loaded = header.Member("loadedTools");

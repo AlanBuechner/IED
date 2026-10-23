@@ -200,7 +200,7 @@ class ClaudeTurnTests(ClaudeCase):
 		with self.assertRaises(Exception):
 			await self.client.request("chat.set", {"chatId": chat_id, "model": "no-such-model"})
 
-	async def test_steering_mid_query_rides_with_the_next_tool_result(self):
+	async def test_a_message_mid_query_rides_with_the_steps_last_tool_result(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "Writing it."}, {"tool": "fs_write", "input": {"path": "notes.txt", "content": "hi\n"}, "id": "toolu_w"}]},
 			{"blocks": [{"tool": "fs_read", "input": {"path": "src/main.c"}, "id": "toolu_r"}]},
@@ -208,27 +208,28 @@ class ClaudeTurnTests(ClaudeCase):
 		chat_id, topic = await self.chat()
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "Write notes"})
 		approval = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=30))[-1]["data"]
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs", "as": "inject"})
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs"})
 		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": approval["approvalId"], "decision": "allow"})
 		end = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=30))[-1]["data"]
 		self.assertEqual("finished", end["stop"], end)
 		self.assertEqual(1, len(self.received("user")), "nothing is sent while a query runs")
 		results = self.tool_results()
-		self.assertNotIn("use tabs", json.dumps(results["toolu_w"]))
-		self.assertIn("use tabs", results["toolu_r"]["result"]["content"][0]["text"], "the steering reached Claude with the next tool result")
+		self.assertIn("[Message from the user, sent while you were working]: use tabs", results["toolu_w"]["result"]["content"][0]["text"],
+			"it reached Claude with the result of the round it came in, saying whose it is")
+		self.assertNotIn("use tabs", json.dumps(results["toolu_r"]))
 
-	async def test_steering_during_the_last_answer_is_sent_before_the_turn_ends(self):
+	async def test_a_message_during_the_last_answer_is_sent_before_the_turn_ends(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": " ".join(["word"] * 200)}], "delayMs": 20}, {"blocks": [{"text": "Using tabs."}]})
 		chat_id, topic = await self.chat()
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "explain"})
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=30)
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs", "as": "inject"})
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs"})
 		end = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=60))[-1]["data"]
 		self.assertEqual("finished", end["stop"], end)
 		queries = [entry["query"][0]["text"] for entry in self.log() if "query" in entry]
 		self.assertEqual(2, len(queries), queries)
-		self.assertIn("use tabs", queries[1], "sent as a message once the first query ended")
+		self.assertEqual("use tabs", queries[1], "sent as a plain message once the first query ended")
 
 	async def test_stop_interrupts_the_cli(self):
 		await self.use_claude()

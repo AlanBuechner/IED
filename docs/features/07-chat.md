@@ -37,7 +37,7 @@ Owner: `plugins/chat` - its UI, its default tool set and the runtime (`code/`, a
 | F-CHT-23 | Model group selector + effort selector + mode selector (Ask / Plan / Agent / custom) + permission mode, all per chat, persisted | P0 | US-CHT-3, US-CHT-13 |
 | F-CHT-24 | Privacy toggle (local-only) with a lock indicator; shows "locked: touched sensitive file X" when tainted | P0 | US-MDL-5 |
 | F-CHT-25 | Slash commands: `/compact`, `/clear`, `/fork`, `/rewind`, `/mode`, `/model`, `/skill <name>`, `/task`, plugin-contributed commands | P1 | - |
-| F-CHT-26 | Send while busy: **Queue** (next turn) or **Inject** (delivered at the next tool boundary as steering) - two buttons; queued items shown above the input and editable/removable | P0 (inject), P1 (queue) | US-CHT-5, US-CHT-15 |
+| F-CHT-26 | Send while busy: **Send** joins the running turn at its next tool boundary as a plain message of the owner's, mentions and files included (`docs/12` "Messages while a turn runs"), or **Queue** (next turn); waiting and queued messages shown above the input, queued ones editable/removable | P0 (inject), P1 (queue) | US-CHT-5, US-CHT-15 |
 | F-CHT-27 | Stop (Esc in the chat): cancels the model stream and running tools (with kill of their process trees) and records what was done | P0 | US-CHT-11 |
 | F-CHT-28 | Voice input relies on the OS keyboard on phones; no custom STT in v1 | P2 | - |
 

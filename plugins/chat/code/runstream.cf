@@ -264,23 +264,48 @@ namespace Ai
 		turn->messages.Push(message);
 	}
 
-	void TurnRun::DeliverSteering() {
-		for (const Core::String& steering : chat->injected) {
-			Segment* segment = NewSegment("steering");
-			segment->text = steering;
-			Close(Begin(segment));
-			Core::Array<Core::String> values;
-			values.Push(Core::String("text"));
-			values.Push(steering);
+	// Taken under the lock, their mentions read without it; a turn stopped meanwhile leaves them for End to queue.
+	void TurnRun::DeliverMessages(bool inResult) {
+		Core::Array<OwnerMessage*> arrived;
+		{
+			IED::HostLock guard(*context);
+			if (run->cancelled || chat->pending.IsEmpty()) return;
+			arrived = chat->pending;
+			chat->pending.Clear();
+		}
+		Core::Array<ModelMessage*> messages;
+		for (OwnerMessage* sent : arrived) {
 			ModelMessage* message = new ModelMessage();
 			message->role = Core::String("user");
-			message->content = chats->prompts.Note("steering", values);
-			turn->messages.Push(message);
-			turn->recoveries.Push(Core::String("delivered a steering message"));
+			message->content = ModelText(chat, *sent) + MessageExtras(sent->mentions, sent->attachments, message->images).View();
+			if (inResult) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("text"));
+				values.Push(message->content);
+				message->content = chats->prompts.Note("steering", values);
+			}
+			messages.Push(message);
 		}
-		chat->injected.Clear();
-		Core::String ended = chats->TellEnded(chat);
-		if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
+		IED::HostLock guard(*context);
+		if (run->cancelled) {
+			for (OwnerMessage* later : chat->pending) arrived.Push(later);
+			chat->pending = arrived;
+			return;
+		}
+		for (int64 i = 0; i < arrived.Count(); ++i) {
+			Segment* segment = NewSegment("message");
+			segment->text = arrived[i]->text;
+			segment->mentions = arrived[i]->mentions;
+			segment->attachments = arrived[i]->attachments;
+			segment->fromChatId = arrived[i]->fromChatId;
+			segment->fromTitle = arrived[i]->fromTitle;
+			segment->atMs = StreamNowMs();
+			Close(Begin(segment));
+			turn->messages.Push(messages[i]);
+		}
+		chats->QueueChanged(chat);
+		SaveChatHeader(LocalStateOf(ws), chat);
+		SaveRunning();
 	}
 
 	// --- Accounting --------------------------------------------------------------------------------------------------

@@ -891,7 +891,7 @@ class ChatTests(ChatCase):
 			await self.client.request("ai.probe", {"wsId": "w1", "model": "nope"})
 		self.assertEqual("bad_request", missing.exception.code)
 
-	# --- Steering and stopping ---------------------------------------------------------------------------------------
+	# --- Messages while a turn runs, and stopping ---------------------------------------------------------------------
 
 	async def test_stop_cancels_the_turn(self):
 		chat_id, topic = await self.chat()
@@ -903,7 +903,7 @@ class ChatTests(ChatCase):
 		self.assertEqual("user_cancelled", end["stop"])
 		self.assertEqual("idle", (await self.summary(chat_id))["state"])
 
-	async def test_queued_messages_run_next_and_injected_ones_steer(self):
+	async def test_queued_messages_run_next_and_sent_ones_join_the_running_turn(self):
 		chat_id, topic = await self.chat()
 		self.model.queue("long-stream", "ok-text")
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "first"})
@@ -917,27 +917,50 @@ class ChatTests(ChatCase):
 		with self.assertRaises(RpcFailure) as gone:
 			await self.client.request("chat.unqueue", {"chatId": chat_id, "index": 0})
 		self.assertEqual("not_found", gone.exception.code)
-		self.model.queue(call_step("fs_list", {"path": "src"}), "ok-text")
+		self.model.post("/_fake/reset", {})
+		self.model.queue(inline({"text": "word " * 200, "chunk": 4, "delayMs": 150}, {"toolCall": {"name": "fs_list", "arguments": {"path": "src"}}}, {"finish": "tool_calls"}), "ok-text")
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "third"})
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs", "as": "inject"})
-		self.model.queue("ok-text")
-		ends = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end" and f["data"]["turnId"] != "u1", timeout=30)
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta" and f["data"].get("text"), timeout=20)
+		self.assertEqual({"pending": 1}, await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs"}), "a message to a running turn waits for its next step")
+		told = (await self.client.wait_for(topic, lambda f: f.get("kind") == "queue.changed" and f["data"]["pending"], timeout=20))[-1]["data"]
+		self.assertEqual({"queued": [], "pending": ["use tabs"]}, told, "every device sees it waiting")
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end" and f["data"]["turnId"] != "u1", timeout=30)
+		self.assertIn({"queued": [], "pending": []}, [f["data"] for f in frames if f.get("kind") == "queue.changed"], "it leaves the list when the turn takes it")
 		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
 		self.assertEqual(["first", "third"], [t["user"]["text"] for t in history[:2]])
-		steering = [s for t in history for s in self.segments(t, "steering")]
-		self.assertEqual(["use tabs"], [s["text"] for s in steering])
+		joined = [s for t in history for s in self.segments(t, "message")]
+		self.assertEqual(["use tabs"], [s["text"] for s in joined])
+		self.assertGreater(joined[0]["atMs"], 0)
+		third = history[1]["segments"]
+		self.assertEqual("tool", third[third.index(joined[0]) - 1]["type"], "shown after the tool round it came in")
+		last = self.model.requests()[-1]["body"]["messages"]
+		self.assertEqual(("tool", "user", "use tabs"), (last[-2]["role"], last[-1]["role"], last[-1]["content"]), "the model gets it as a plain message after the results")
 
-	async def test_steering_during_the_last_answer_still_reaches_the_model(self):
+	async def test_a_message_during_the_last_answer_still_reaches_the_model(self):
 		chat_id, topic = await self.chat()
 		long_answer = inline({"text": "word " * 400, "chunk": 4, "delayMs": 150}, {"finish": "stop"})
 		self.model.queue(long_answer, text_step("Using tabs."))
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "explain"})
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=20)
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs", "as": "inject"})
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "use tabs"})
 		end = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=30))[-1]["data"]
 		self.assertEqual("finished", end["stop"])
 		last = self.model.requests()[-1]["body"]["messages"]
-		self.assertIn("use tabs", last[-1]["content"], "the answer that would have ended the turn is followed by a step with the steering")
+		self.assertEqual("use tabs", last[-1]["content"], "the answer that would have ended the turn is followed by a step with the message")
+
+	async def test_a_message_the_turn_did_not_take_waits_for_the_next(self):
+		chat_id, topic = await self.chat()
+		await self.use_model({}, script="long-stream")
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "talk"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=20)
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "and then this"})
+		await self.client.request("chat.stop", {"chatId": chat_id})
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		told = [f["data"] for f in frames if f.get("kind") == "queue.changed"][-1]
+		self.assertEqual({"queued": ["and then this"], "pending": []}, told, "a stopped turn leaves it queued, not lost")
+		with self.assertRaises(RpcFailure) as wrong:
+			await self.client.request("chat.send", {"chatId": chat_id, "text": "x", "as": "inject"})
+		self.assertEqual("bad_request", wrong.exception.code)
 
 	# --- Persistence -------------------------------------------------------------------------------------------------
 

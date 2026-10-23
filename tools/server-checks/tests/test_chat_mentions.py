@@ -2,7 +2,7 @@
 file, a folder, the Error List, an output source, a terminal (the terminal plugin's terminal.text binding), the working
 tree's diff (the git plugin's git.workingDiff) and another chat - into the user message the model gets; attachments
 copied out of their uploads into the chat's media folder, an image shown to a model that sees images and every other
-file named for fs_read; a queued message keeps them, an injected one cannot have them."""
+file named for fs_read; a queued message keeps them, and so does one sent to a running turn, read when it gets it."""
 
 import base64
 import json
@@ -169,9 +169,6 @@ class MentionTests(ChatCase):
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "write it"})
 		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
 		mention = [{"kind": "file", "ref": "notes.txt", "label": "notes.txt"}]
-		with self.assertRaises(RpcFailure) as injected:
-			await self.client.request("chat.send", {"chatId": chat_id, "text": "and @notes.txt", "as": "inject", "mentions": mention})
-		self.assertEqual("bad_request", injected.exception.code, "steering is words only")
 		queued = await self.client.request("chat.send", {"chatId": chat_id, "text": "then @notes.txt", "as": "queue", "mentions": mention})
 		self.assertEqual(1, queued["queued"])
 		with open(self.state_file(".ied/local/chats/%s/chat.json" % chat_id), encoding="utf-8") as f:
@@ -184,6 +181,25 @@ class MentionTests(ChatCase):
 		last = [m for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "user"][-1]["content"]
 		self.assertIn("remember", self.block(last, "notes.txt"), "read when its turn started")
 
+
+	async def test_a_message_to_the_running_turn_brings_what_it_names(self):
+		chat_id, topic = await self.chat()
+		self.model.queue(call_step("fs_write", {"path": "src/new.c", "content": "int x;\n"}), text_step("Done."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "write it"})
+		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
+		mention = [{"kind": "file", "ref": "notes.txt", "label": "notes.txt"}]
+		blob = self.upload(PNG, "image/png")
+		sent = await self.client.request("chat.send", {"chatId": chat_id, "text": "and @notes.txt", "mentions": mention, "attachments": [{"blobId": blob, "name": "shot.png"}]})
+		self.assertEqual({"pending": 1}, sent)
+		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "allow"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
+		turn = await self.last_turn(chat_id)
+		joined = [s for s in turn["segments"] if s["type"] == "message"]
+		self.assertEqual(1, len(joined))
+		self.assertEqual(("and @notes.txt", mention, "shot.png"), (joined[0]["text"], joined[0]["mentions"], joined[0]["attachments"][0]["name"]), "shown with its chips")
+		last = [m for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "user"][-1]["content"]
+		self.assertTrue(last.startswith("and @notes.txt"), last)
+		self.assertIn("remember", self.block(last, "notes.txt"), "read when the turn got it")
 
 	async def test_a_queued_message_comes_back_whole(self):
 		chat_id, topic = await self.chat()

@@ -113,23 +113,24 @@ namespace Ai
 	}
 
 	// The CLI makes a message sent while a query runs a query of its own after it, so mid-query (after a step's tool calls)
-	// the turn's new messages - steering - wait in claudeAside for the next tool result, or for the query's end.
+	// the turn's new messages - the owner's, harness notes - wait in claudeAside for the next tool result, or for the
+	// query's end.
 	void TurnRun::SendToClaude() {
 		Core::Array<ModelMessage*> pending;
 		Core::String history;
 		{
 			IED::HostLock guard(*context);
 			if (claude->querying) {
-				for (int64 i = claudeSent; i < turn->messages.Count(); ++i)
-					if (turn->messages[i]->role == "user") claudeAside = (claudeAside.IsEmpty() ? Core::String() : claudeAside + "\n\n") + turn->messages[i]->content.View();
-				claudeSent = turn->messages.Count();
+				SetAside();
 				return;
 			}
 			if (!claudeAside.IsEmpty()) {
 				ModelMessage* aside = new ModelMessage();
 				aside->role = Core::String("user");
 				aside->content = claudeAside;
+				aside->images = claudeAsideImages;
 				claudeAside = Core::String();
+				claudeAsideImages.Clear();
 				pending.Push(aside);
 			}
 			if (claudeSent == 0) {
@@ -153,6 +154,16 @@ namespace Ai
 			claude->process->Send(UserMessageLine(text.View(), images).View());
 			claude->querying = true;
 		}
+	}
+
+	void TurnRun::SetAside() {
+		for (int64 i = claudeSent; i < turn->messages.Count(); ++i) {
+			const ModelMessage* message = turn->messages[i];
+			if (message->role != "user") continue;
+			claudeAside = (claudeAside.IsEmpty() ? Core::String() : claudeAside + "\n\n") + message->content.View();
+			for (const IED::ToolImage& image : message->images) claudeAsideImages.Push(image);
+		}
+		claudeSent = turn->messages.Count();
 	}
 
 	// --- A step ----------------------------------------------------------------------------------------------------------
@@ -394,22 +405,29 @@ namespace Ai
 
 	// --- Calls and the end -----------------------------------------------------------------------------------------------
 
-	void TurnRun::AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome) {
+	// Claude reads a step's results together, so the last one takes what came for the turn while the step ran - the
+	// soonest Claude can see it.
+	void TurnRun::AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome, bool last) {
 		ClaudeLine* call = claude->AwaitCall(toolUseId, kClaudeCallWaitMs);
 		if (!call) return;
-		Core::Array<ClaudeImage> images;
-		for (const IED::ToolImage& image : outcome.images) {
-			ClaudeImage block;
-			if (ReadClaudeImage(ws, image, block)) images.Push(block);
-		}
+		if (last && !ending) DeliverMessages(true);
 		Core::StringView content = outcome.content.View();
 		Core::String kept = content.ByteLength() <= kRunKeptToolResultBytes ? outcome.content : Core::String(content.Substring(0, kRunKeptToolResultBytes)) + "\n[result truncated]";
+		Core::Array<IED::ToolImage> shown = outcome.images;
 		{
 			IED::HostLock guard(*context);
+			if (last) SetAside();
 			if (!claudeAside.IsEmpty()) {
 				kept = (kept + "\n\n") + claudeAside.View();
+				for (const IED::ToolImage& image : claudeAsideImages) shown.Push(image);
 				claudeAside = Core::String();
+				claudeAsideImages.Clear();
 			}
+		}
+		Core::Array<ClaudeImage> images;
+		for (const IED::ToolImage& image : shown) {
+			ClaudeImage block;
+			if (ReadClaudeImage(ws, image, block)) images.Push(block);
 		}
 		claude->Answer(call, McpCallResult(kept.View(), images, outcome.isError).View());
 	}

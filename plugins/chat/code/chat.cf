@@ -65,6 +65,26 @@ namespace Ai
 		}
 	}
 
+	// A message's from?, mentions? and attachments?, each only when it has one.
+	static void WriteMessageFields(IED::JsonWriter& json, Core::StringView fromChatId, Core::StringView fromTitle, const Core::Array<Mention>& mentions,
+		const Core::Array<Attachment>& attachments) {
+		if (!fromChatId.IsEmpty()) {
+			json.Key(Core::StringView("from"));
+			json.BeginObject();
+			json.Field("chatId", fromChatId);
+			json.Field("title", fromTitle);
+			json.EndObject();
+		}
+		if (!mentions.IsEmpty()) {
+			json.Key(Core::StringView("mentions"));
+			WriteMentions(json, mentions);
+		}
+		if (!attachments.IsEmpty()) {
+			json.Key(Core::StringView("attachments"));
+			WriteAttachments(json, attachments);
+		}
+	}
+
 	void Segment::WriteJson(IED::JsonWriter& json) const {
 		json.BeginObject();
 		WriteFields(json);
@@ -95,6 +115,8 @@ namespace Ai
 			}
 		}
 		else json.Field("text", text.View());
+		if (type == "message") WriteMessageFields(json, fromChatId.View(), fromTitle.View(), mentions, attachments);
+		if (atMs > 0) json.IntField("atMs", atMs);
 		if (!kind.IsEmpty()) json.Field("kind", kind.View());
 		if (tokens > 0) json.IntField("tokens", tokens);
 	}
@@ -118,6 +140,11 @@ namespace Ai
 		isError = node.Member("result").Member("isError").AsBool();
 		ReadToolImages(node.Member("result").Member("images"), images);
 		tokens = node.Member("tokens").AsInt();
+		ReadMentions(node.Member("mentions"), mentions);
+		ReadAttachments(node.Member("attachments"), attachments);
+		fromChatId = Core::String(node.Member("from").Member("chatId").AsView());
+		fromTitle = Core::String(node.Member("from").Member("title").AsView());
+		atMs = node.Member("atMs").AsInt();
 	}
 
 	void ModelMessage::WriteJson(IED::JsonWriter& json) const {
@@ -202,14 +229,7 @@ namespace Ai
 	void OwnerMessage::WriteJson(IED::JsonWriter& json) const {
 		json.BeginObject();
 		json.Field("text", text.View());
-		if (!mentions.IsEmpty()) {
-			json.Key(Core::StringView("mentions"));
-			WriteMentions(json, mentions);
-		}
-		if (!attachments.IsEmpty()) {
-			json.Key(Core::StringView("attachments"));
-			WriteAttachments(json, attachments);
-		}
+		WriteMessageFields(json, fromChatId.View(), fromTitle.View(), mentions, attachments);
 		json.EndObject();
 	}
 
@@ -219,6 +239,8 @@ namespace Ai
 			return;
 		}
 		text = Core::String(node.Member("text").AsView());
+		fromChatId = Core::String(node.Member("from").Member("chatId").AsView());
+		fromTitle = Core::String(node.Member("from").Member("title").AsView());
 		ReadMentions(node.Member("mentions"), mentions);
 		ReadAttachments(node.Member("attachments"), attachments);
 	}
@@ -437,6 +459,12 @@ namespace Ai
 		json.EndArray();
 	}
 
+	void Chat::WritePending(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (OwnerMessage* message : pending) json.String(message->text.View());
+		json.EndArray();
+	}
+
 	void Chat::WriteModified(IED::JsonWriter& json) const {
 		json.BeginArray();
 		for (ModifiedFile* file : modified) {
@@ -552,6 +580,8 @@ namespace Ai
 		WriteTasks(json);
 		json.Key(Core::StringView("queued"));
 		WriteQueued(json);
+		json.Key(Core::StringView("pending"));
+		WritePending(json);
 		json.Key(Core::StringView("modified"));
 		WriteModified(json);
 		json.Key(Core::StringView("resources"));

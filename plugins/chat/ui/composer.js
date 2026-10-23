@@ -1,7 +1,8 @@
-// composer.js - the chat's input bar (docs/15 "Chat", mockup 02): the messages queued for the next turn, the files the
-// message carries, the text box (Enter sends, Shift+Enter breaks the line, Esc stops a running turn, "@" mentions,
-// docs/04), Attach / Queue / Inject / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its effort,
-// mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
+// composer.js - the chat's input bar (docs/15 "Chat", mockup 02): the messages waiting for the running turn's next step
+// and those queued for the next turn, the files the message carries, the text box (Enter sends - to a running turn, at
+// its next step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@"
+// mentions, docs/04), Attach / Queue / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its
+// effort, mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -25,12 +26,11 @@ export class Composer {
 		this.queuedEl = h("div.chat-queued-list");
 		this.input = h("textarea.chat-input", { rows: 1, "aria-label": "Message", spellcheck: "true" });
 		this.list = new MentionList(this.input, (query) => this.actions.mentionRows(query), (row) => this.mentioned(row));
-		this.attached = new AttachBar((file) => this.actions.upload(file), (path) => this.actions.fileUrl(path), () => this.syncExtras(), (text) => this.actions.toast(text));
+		this.attached = new AttachBar((file) => this.actions.upload(file), (path) => this.actions.fileUrl(path), () => {}, (text) => this.actions.toast(text));
 		this.input.addEventListener("keydown", (event) => this.key(event));
 		this.input.addEventListener("input", () => {
 			this.fit();
 			this.list.follow();
-			if (this.mentions.length) this.syncExtras();
 		});
 		this.input.addEventListener("click", () => this.list.follow());
 		this.input.addEventListener("paste", (event) => this.pasted(event));
@@ -40,12 +40,11 @@ export class Composer {
 		} } });
 		this.attachButton = h("button.ib", { title: "Attach files (or paste or drop them here)", "aria-label": "Attach files", on: { click: () => this.files.click() } }, icon("attach"));
 		this.mentionButton = h("button.ib.desk", { title: "Mention a file, folder, #symbol, terminal, output, chat, problems or diff (@)", "aria-label": "Mention", on: { click: () => this.startMention() } }, icon("mention"));
-		this.queueButton = h("button.btn.desk", { title: "Send after this turn ends", on: { click: () => this.send("queue") } }, "Queue");
-		this.injectButton = h("button.btn", { title: "Give it to the running turn at its next step (Ctrl+Enter)", on: { click: () => this.send("inject") } }, "Inject");
+		this.queueButton = h("button.btn", { title: "Send it as the next turn, once this one ends (Ctrl+Enter)", on: { click: () => this.send("queue") } }, "Queue");
 		this.stopButton = h("button.btn.desk", { title: "Stop the turn (Esc)", on: { click: () => this.actions.stop() } }, icon("debug-stop"), "Stop", h("span.kbd", null, "Esc"));
 		this.sendButton = h("button.btn.primary", { title: "Send (Enter)", "aria-label": "Send", on: { click: () => this.send("message") } }, icon("send"));
 		this.box = h("div.chat-composer", null, this.input,
-			h("div.chat-row2", null, this.attachButton, this.mentionButton, h("span.grow.desk"), this.queueButton, this.injectButton, this.stopButton, this.sendButton), this.files);
+			h("div.chat-row2", null, this.attachButton, this.mentionButton, h("span.grow.desk"), this.queueButton, this.stopButton, this.sendButton), this.files);
 		this.input.addEventListener("focus", () => this.box.classList.add("focus"));
 		this.input.addEventListener("blur", () => {
 			this.box.classList.remove("focus");
@@ -72,7 +71,7 @@ export class Composer {
 		if (this.list.key(event)) return;
 		if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
 			event.preventDefault();
-			this.send(event.ctrlKey && this.running ? "inject" : "message");
+			this.send(event.ctrlKey && this.running ? "queue" : "message");
 		}
 		else if (event.key === "Escape" && this.running) {
 			event.preventDefault();
@@ -86,7 +85,7 @@ export class Composer {
 		this.input.style.overflowY = this.input.scrollHeight > MOST_INPUT_PX ? "auto" : "hidden";
 	}
 
-	// A message with mentions or files is queued rather than injected: steering is words only.
+	// `as` "message" (to a running turn: at its next step) or "queue" (the next turn).
 	async send(as) {
 		const text = this.input.value.trim();
 		if (!text) return;
@@ -95,8 +94,7 @@ export class Composer {
 		this.fit();
 		this.list.close();
 		const attachments = await this.attached.sent();
-		const extras = mentions.length > 0 || attachments.length > 0;
-		if (!(await this.actions.send(text, extras && as === "inject" ? "queue" : as, { mentions, attachments }))) {
+		if (!(await this.actions.send(text, as, { mentions, attachments }))) {
 			this.input.value = text;
 			this.fit();
 			return;
@@ -108,7 +106,6 @@ export class Composer {
 	mentioned(row) {
 		this.mentions.push({ kind: row.kind, ref: row.ref, label: row.label });
 		this.fit();
-		this.syncExtras();
 	}
 
 	// "@" typed at the caret, as if by the key.
@@ -130,13 +127,6 @@ export class Composer {
 		this.attached.add(files);
 	}
 
-	// Inject takes words only: off while the message names or carries something.
-	syncExtras() {
-		const extras = this.attached.count > 0 || keptMentions(this.input.value, this.mentions).length > 0;
-		this.injectButton.disabled = extras;
-		this.injectButton.title = extras ? "A message with mentions or files is queued, not injected" : "Give it to the running turn at its next step (Ctrl+Enter)";
-	}
-
 	focus() {
 		this.input.focus();
 	}
@@ -144,14 +134,19 @@ export class Composer {
 	update(model) {
 		const summary = model.summary || {};
 		this.running = model.running();
-		this.input.placeholder = window.matchMedia(PHONE).matches ? (this.running ? "Message or steer\u2026" : "Message\u2026")
-			: "Message " + (summary.title || "the chat") + (this.running ? " - Enter queues it, Ctrl+Enter steers the running turn" : " - Enter sends, Shift+Enter breaks the line");
+		this.input.placeholder = window.matchMedia(PHONE).matches ? "Message\u2026"
+			: "Message " + (summary.title || "the chat") + (this.running ? " - Enter sends it into the running turn, Ctrl+Enter queues it for after" : " - Enter sends, Shift+Enter breaks the line");
+		this.sendButton.title = this.running ? "Send it into the running turn: the AI gets it after its current step (Enter)" : "Send (Enter)";
 		this.queueButton.hidden = !this.running;
-		this.injectButton.hidden = !this.running;
 		this.stopButton.hidden = !this.running;
-		replace(this.queuedEl, ...model.queued.map((text, index) => this.queuedRow(text, index)));
+		replace(this.queuedEl, ...model.pending.map((text) => this.pendingRow(text)), ...model.queued.map((text, index) => this.queuedRow(text, index)));
 		this.renderSelectors(summary, model.groupInUse, model.roleEffort);
 		this.renderTelemetry(model);
+	}
+
+	// A message sent to the running turn, until the turn takes it at its next step.
+	pendingRow(text) {
+		return h("div.chat-queued.pending", { title: "The AI gets it after its current step: once the tools it runs now return" }, icon("arrow-right"), h("span.muted", null, "At the next step:"), h("span.ellip", null, text));
 	}
 
 	// A queued message: edit it (back into the box with what it names and carries), send it now when no turn runs, or

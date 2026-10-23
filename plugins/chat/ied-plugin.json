@@ -1,7 +1,7 @@
 // The chat activity (docs/04, docs/12, docs/15 "Chat activity"): the server's chats - turns that run on the server
 // whatever the browsers do - as dockable tabs with streaming segments, tool cards, approval cards and harness notes, a
-// composer that sends, queues, injects and stops, and a right panel with the context, the task list and the files the
-// AI changed; the Chats list beside them shows every chat's state and keeps deleted chats restorable. Its server
+// composer that sends (into a running turn too), queues and stops, and a right panel with the context, the task list
+// and the files the AI changed; the Chats list beside them shows every chat's state and keeps deleted chats restorable. Its server
 // code (code/: the turn loop, the model wire, the tools, the chats on disk) is compiled into the server and runs on
 // the plugin API (docs/26 "Built-ins on the API"); its prompts are in prompts/.
 {
@@ -9,7 +9,7 @@
 	"id": "ied.chat",
 	"name": "Chat",
 	"version": "0.1.0",
-	"description": "AI chats: streaming turns, tool and approval cards, steering, tasks and context.",
+	"description": "AI chats: streaming turns, tool and approval cards, messages to running turns, tasks and context.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js" },

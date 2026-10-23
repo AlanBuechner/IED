@@ -38,6 +38,7 @@ export class ChatModel {
 		this.question = null;
 		this.tasks = [];
 		this.queued = [];
+		this.pending = [];   // sent to the running turn, for its next step
 		this.modified = [];
 		this.resources = [];
 		this.clips = [];
@@ -55,6 +56,7 @@ export class ChatModel {
 		this.question = data.pendingQuestion || null;
 		this.tasks = data.tasks || [];
 		this.queued = data.queued || [];
+		this.pending = data.pending || [];
 		this.modified = data.modified || [];
 		this.resources = data.resources || [];
 		this.clips = data.clips || [];
@@ -146,6 +148,7 @@ export class ChatModel {
 				return { tasks: true };
 			case "queue.changed":
 				this.queued = data.queued || [];
+				this.pending = data.pending || [];
 				return { queued: true };
 			case "resources.changed":
 				this.resources = data.resources || [];

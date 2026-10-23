@@ -1,7 +1,7 @@
-// chatpane.js - one chat shown (docs/15 "Chat"): its transcript (chat:<chatId>), composer and details panel, and what
-// the owner does in it - send, stop, approve, answer. The Chat activity shows one at a time under its tabs; a chat opened
-// as a tab of the editor area (chat:<chatId>) is one on its own, and what it opens from its panel opens beside it,
-// tethered (docs/15 "Tethered tabs").
+// chatpane.js - one chat shown (docs/15 "Chat"): its transcript (chat:<chatId>), composer and details panel - as wide
+// as the owner drags it, on this device - and what the owner does in it - send, stop, approve, answer. The Chat
+// activity shows one at a time under its tabs; a chat opened as a tab of the editor area (chat:<chatId>) is one on its
+// own, and what it opens from its panel opens beside it, tethered (docs/15 "Tethered tabs").
 
 import { h, icon } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
@@ -9,13 +9,16 @@ import { ChatModel } from "./chatmodel.js";
 import { TranscriptView } from "./transcript.js";
 import { CodeColors } from "./codecolors.js";
 import { Composer } from "./composer.js";
-import { SidePanel } from "./sidepanel.js";
+import { PREVIEW_ROWS, SidePanel } from "./sidepanel.js";
 import { MentionSource } from "./mentions.js";
 import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
 import { choicesFrom } from "./modelpicker.js";
 
 const NEAR_BOTTOM_PX = 80;
+const PANEL_MIN_PX = 200;
+const TRANSCRIPT_MIN_PX = 360;   // what a wide panel leaves the transcript
+const PANEL_STEP_PX = 16;        // an arrow key on the panel's edge
 
 function newDraft() {
 	return { mode: "agent", permission: "auto", group: "", effort: "" };
@@ -48,13 +51,29 @@ export class ChatPane {
 		this.atEnd = true;   // the transcript shows its end, and keeps it as it grows, until the owner scrolls up
 		this.scroller = h("div.chat-transcript", { on: { scroll: () => (this.atEnd = this.nearBottom()) } }, this.transcript.el);
 		this.main = h("section.chat-main", null, host.header || null, this.scroller, this.composer.el);
-		this.el = h("div.chat-act" + (this.showPanel ? "" : ".no-panel"), null, this.main, this.panel.el);
+		this.sash = h("div.chat-panel-sash", { role: "separator", tabindex: "0", "aria-orientation": "vertical", "aria-label": "Details panel width", title: "Drag to resize; double-click for the default width",
+			on: { pointerdown: (event) => this.dragPanel(event), dblclick: () => this.sizePanel(0), keydown: (event) => this.panelKey(event) } });
+		this.el = h("div.chat-act" + (this.showPanel ? "" : ".no-panel"), null, this.main, this.sash, this.panel.el);
+		this.sizePanel(stored("ied.chat.panelWidth", 0));
 		this.el.addEventListener("keydown", (event) => this.key(event));
 		this.resizer = new ResizeObserver(() => this.atEnd && this.toEnd());
 		this.resizer.observe(this.scroller);
 		this.resizer.observe(this.transcript.el);
 		this.transcript.render();
 		this.composer.update(this.model);
+		this.panel.update(this.model);
+		this.stopSettings = ied.client.subscribe("settings:" + wsId, {
+			snap: (data) => this.settingsChanged(data.values),
+			evt: (kind, data) => kind === "settings.changed" && this.settingsChanged(data.values),
+		});
+	}
+
+	// ai.chats.panelRows: how many rows a long list of the details panel shows until Show all.
+	settingsChanged(values) {
+		const rows = values && values["ai.chats.panelRows"] ? values["ai.chats.panelRows"].value : PREVIEW_ROWS;
+		const count = Number.isInteger(rows) && rows > 0 ? rows : PREVIEW_ROWS;
+		if (count === this.panel.previewRows) return;
+		this.panel.previewRows = count;
 		this.panel.update(this.model);
 	}
 
@@ -212,9 +231,7 @@ export class ChatPane {
 		const params = { chatId: this.chatId, text, as };
 		if (extras && extras.mentions.length) params.mentions = extras.mentions;
 		if (extras && extras.attachments.length) params.attachments = extras.attachments;
-		const sent = await this.request("chat.send", params);
-		if (sent && sent.injected) this.ied.toast("Given to the running turn at its next step.", { level: "info" });
-		return sent !== null;
+		return (await this.request("chat.send", params)) !== null;
 	}
 
 	stop() {
@@ -286,6 +303,47 @@ export class ChatPane {
 		this.el.classList.toggle("no-panel", !this.showPanel);
 	}
 
+	// The details panel `px` wide, kept for this device's chats; 0 is the stylesheet's width.
+	sizePanel(px) {
+		this.panelWidth = px > 0 ? Math.max(PANEL_MIN_PX, Math.round(px)) : 0;
+		if (this.panelWidth) this.el.style.setProperty("--chat-panel-w", this.panelWidth + "px");
+		else this.el.style.removeProperty("--chat-panel-w");
+		this.sash.setAttribute("aria-valuenow", String(Math.round(this.panel.el.offsetWidth || this.panelWidth)));
+	}
+
+	widest() {
+		return Math.max(PANEL_MIN_PX, this.el.clientWidth - TRANSCRIPT_MIN_PX);
+	}
+
+	dragPanel(event) {
+		if (event.button !== 0) return;
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = this.panel.el.offsetWidth;
+		const widest = this.widest();
+		this.sash.setPointerCapture(event.pointerId);
+		this.sash.classList.add("active");
+		const move = (e) => this.sizePanel(Math.min(widest, startWidth + startX - e.clientX));
+		const up = () => {
+			this.sash.removeEventListener("pointermove", move);
+			this.sash.removeEventListener("pointerup", up);
+			this.sash.removeEventListener("pointercancel", up);
+			this.sash.classList.remove("active");
+			store("ied.chat.panelWidth", this.panelWidth);
+		};
+		this.sash.addEventListener("pointermove", move);
+		this.sash.addEventListener("pointerup", up);
+		this.sash.addEventListener("pointercancel", up);
+	}
+
+	panelKey(event) {
+		const step = event.key === "ArrowLeft" ? PANEL_STEP_PX : event.key === "ArrowRight" ? -PANEL_STEP_PX : 0;
+		if (!step) return;
+		event.preventDefault();
+		this.sizePanel(Math.min(this.widest(), this.panel.el.offsetWidth + step));
+		store("ied.chat.panelWidth", this.panelWidth);
+	}
+
 	key(event) {
 		if (!event.altKey || event.ctrlKey || event.metaKey) return;
 		const approval = this.model.approvals[this.model.approvals.length - 1];
@@ -306,6 +364,7 @@ export class ChatPane {
 
 	dispose() {
 		this.resizer.disconnect();
+		this.stopSettings();
 		if (this.stopChat) this.stopChat();
 	}
 }

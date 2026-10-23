@@ -54,16 +54,21 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 |    | v RECENT          9  | [fs_edit Engine/src/Core/Log.cf]  awaiting approval    |   [>] port sink |
 |    |  ( ) General     2h  |  +--------------------------------------------------+  | v Modified (4)  |
 |    |  ( ) Shaders     3d  |  | diff ...                  [Allow] [Always] [Deny]|  |   Log.cf  +120  |
-|    | > DELETED         2  |  +--------------------------------------------------+  |                 |
+|    |                      |  +--------------------------------------------------+  |   ...           |
+|    |                      |                                                        |   v Show all 9  |
+|    | > DELETED         2  |                                                        |                 |
 |    |                      | -- harness: continued after max_tokens (1x) --         |                 |
 |    |                      +--------------------------------------------------------+                 |
-|    |                      | [@ attach] message...                [Queue] [Inject] [>]                 |
+|    |                      | -> At the next step: use the existing Ring type        |                 |
+|    |                      | [@ attach] message...                       [Queue] [>]                   |
 |    |                      | group: plan-claude/impl-local v  effort: high v  mode: Agent v           |
 +----+----------------------+--------------------------------------------------------+-----------------+
 ```
 
 - A chat opens at the end of its transcript whenever it is shown (owner, 2026-10-22: "any time i open a chat window it should automatically take me to the end"): opened from the list, its tab chosen again, its activity returned to, the page reloaded, on a phone as on a desktop. It keeps the end in view as the transcript grows (a reply streaming, an image loading, the composer growing) until the owner scrolls up, and follows again once they scroll back down to it.
 - A chat tab's icon is its state; the Chats list adds the tasks done (`3/7`) and says "Needs approval" / "Needs an answer" / "Paused" in amber.
+- A message sent while a turn runs joins it (`docs/12` "Messages while a turn runs"): it waits above the composer ("At the next step: ...") until the turn's next step takes it, then shows in the transcript as the owner's message after the tool round it came in, and the turn answers it. Queue (Ctrl+Enter) keeps one for the next turn instead.
+- The details panel's long lists (modified files, tasks, background tasks, the clipboard, what the chat has open) show their first `ai.chats.panelRows` rows (5) with "Show all N" below; the task list's preview starts at the task before the one in progress. Its left edge drags its width (arrow keys too; a double-click goes back to the default), kept for the device's chats (owner, 2026-10-23: "things that get to long dont fill up space. also the side bar where all this is should be resizeable").
 - Approval cards and questions are inline and also aggregated in the notification center.
 - Harness notes (nudges, continues, retries, routing) are thin grey rows - always visible, never hidden in a log.
 - A reply reads as prose, colored the way Claude Code colors its output (owner, 2026-10-22: easy on the eyes in a dark room): body text softer than the UI's and set larger and looser (`--prose-*`, `docs/07` "Prose"), headings and list markers warm, inline code lavender on a faint tint, links blue, the agent's name in the AI accent. Fenced code takes the editor's syntax colors through `editor.colorize` (once its closing fence arrives, cached by text so a streaming reply does not flicker), and a change's diff in an approval card or a tool result is colored as its file's language. The prose column is at most 940 px wide; the composer's Send button is a step dimmer than white.
@@ -135,7 +140,7 @@ Default bindings (subset; full table generated from the command registry):
 | Build | Ctrl+Shift+B build; Ctrl+Break cancel; Ctrl+F5 run without debugging |
 | Debug | F5 start/continue; Shift+F5 stop; Ctrl+Shift+F5 restart; F9 breakpoint; Ctrl+F9 enable/disable; F10 step over; F11 step into; Shift+F11 step out; Ctrl+F10 run to cursor; Ctrl+Alt+P attach |
 | Bookmarks | Ctrl+K, Ctrl+K toggle; Ctrl+K, Ctrl+N / Ctrl+K, Ctrl+P next/prev |
-| Chat | Ctrl+Alt+I focus chat; Esc stop run (in chat); Ctrl+Enter send (when Enter = newline); Alt+Enter inject |
+| Chat | Ctrl+Alt+I focus chat; Esc stop run (in chat); Enter sends - into a running turn, at its next step; Ctrl+Enter queues for the next turn while one runs |
 
 ## Context menus (examples of required groups)
 

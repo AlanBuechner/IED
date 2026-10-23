@@ -6,9 +6,9 @@
 .chat-act .chat-panel-title { display: none; }
 /* A chat in a narrow place (a chat tab in a side group): the details panel is a sheet, as on a phone. */
 @container chat (max-width: 640px) {
-	.chat-act .chat-panel, .chat-tabbar .desk { display: none; }
+	.chat-act .chat-panel, .chat-act .chat-panel-sash, .chat-tabbar .desk { display: none; }
 	.chat-tabbar .chat-phone-only { display: inline-flex; }
-	.chat-act.phone-panel .chat-panel { display: flex; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
+	.chat-act.phone-panel .chat-panel { display: flex; position: absolute; inset: 0; width: auto; max-width: none; z-index: 3; border-left: none; }
 	.chat-act .chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-panel-title .chat-phone-only { display: inline-flex; }
 }
@@ -65,8 +65,8 @@
 .chat-live { display: inline-flex; align-items: center; gap: var(--space-2); }
 .chat-live .ci { width: 12px; height: 12px; }
 .chat-user { background: var(--bg-3); border-radius: var(--radius-3); padding: var(--space-4) var(--space-5); margin: var(--space-1) 0 var(--space-5); color: var(--prose-text); font-size: var(--prose-font-size); line-height: var(--prose-line-height); white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-user.inject { background: transparent; border: var(--border-width) dashed var(--border-1); margin: var(--space-3) 0; }
-.chat-tag { display: inline-block; margin-right: var(--space-3); font-size: var(--font-size-xs); color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+/* A message sent while the turn ran, where the model got it: the owner's message as any, among the agent's segments. */
+.chat-seg[data-type="message"], .chat-seg[data-type="steering"] { margin-top: var(--space-5); }
 .chat-segmeta { font-size: var(--font-size-xs); color: var(--text-2); margin: calc(-1 * var(--space-2)) 0 var(--space-4); }
 
 /* A reply's Markdown (docs/07 "Prose"): softer body text, warm structure, cool inline code, code in the editor's colors. */
@@ -172,6 +172,7 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-queued { display: flex; align-items: center; gap: var(--space-3); height: 26px; font-size: var(--font-size-sm); color: var(--text-1); }
 .chat-queued .ci { width: 14px; height: 14px; color: var(--text-2); }
 .chat-queued .ellip { flex: 1; }
+.chat-queued.pending .ci { color: var(--accent-info); }
 .chat-composer { border: var(--border-width) solid var(--border-1); border-radius: var(--radius-3); background: var(--bg-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); }
 .chat-composer.focus { border-color: var(--focus); }
 .chat-input { display: block; width: 100%; min-height: 40px; max-height: 220px; resize: none; overflow-y: hidden; border: 0; outline: 0; background: transparent; color: var(--text-0); font: inherit; padding: var(--space-1) 0 var(--space-3); }
@@ -243,9 +244,13 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-prefill { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; color: var(--text-1); font-size: var(--font-size-sm); padding: var(--space-2) 0; }
 .chat-prefill .meta { color: var(--text-2); }
 
-/* ---------- details panel ---------- */
-.chat-panel { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-0); background: var(--bg-1); }
-.chat-act.no-panel .chat-panel { display: none; }
+/* ---------- details panel: as wide as the owner drags its edge (--chat-panel-w, chatpane.js) ---------- */
+.chat-panel { box-sizing: border-box; width: var(--chat-panel-w, 300px); min-width: 200px; max-width: calc(100% - 360px); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-0); background: var(--bg-1); }
+.chat-act.no-panel .chat-panel, .chat-act.no-panel .chat-panel-sash { display: none; }
+.chat-panel-sash { flex: none; width: 0; position: relative; z-index: 2; touch-action: none; cursor: col-resize; outline: none; }
+.chat-panel-sash::after { content: ""; position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; }
+.chat-panel-sash:hover::after, .chat-panel-sash.active::after, .chat-panel-sash:focus-visible::after { left: -1px; width: 2px; background: var(--border-1); }
+.chat-panel-sash:focus-visible::after { background: var(--focus); }
 .chat-panel-body { flex: 1; overflow: auto; }
 .chat-sec { border-bottom: var(--border-width) solid var(--border-0); padding-bottom: var(--space-3); }
 .chat-sec.closed { padding-bottom: 0; }
@@ -260,6 +265,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .chat-sec-row .ci { width: 14px; height: 14px; flex: none; }
 .chat-sec-row.task.now { background: var(--veil); color: var(--text-0); }
 .chat-sec-empty { padding: var(--space-2) var(--space-4) var(--space-2) 26px; font-size: var(--font-size-sm); }
+.chat-sec-more { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 21px; padding: 0 var(--space-4) 0 26px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--font-size-xs); text-align: left; cursor: pointer; }
+.chat-sec-more:hover { color: var(--text-0); background: var(--veil); }
+.chat-sec-more .ci { width: 12px; height: 12px; }
 .chat-sec-row.clip { padding-left: var(--space-5); }
 .chat-sec-row.clip .dir { flex: 1; }
 .chat-sec-row.bg-task { padding-left: var(--space-5); padding-right: var(--space-2); }
@@ -286,17 +294,18 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .sw.free { background: var(--bg-4); }
 
 @media (max-width: 1500px) {
-	.chat-panel { width: 264px; }
+	.chat-panel { width: var(--chat-panel-w, 264px); }
 	.chat-col { padding: 0 var(--space-6); }
 }
 
 /* ---------- phone ---------- */
 @media (max-width: 719px) {
-	.chat-panel, .chat-telemetry, .chat-segmeta, .chat-tool-head .src, .desk { display: none !important; }
+	.chat-panel, .chat-panel-sash, .chat-telemetry, .chat-segmeta, .chat-tool-head .src, .desk { display: none !important; }
 	.chat-selectors { overflow-x: auto; scrollbar-width: none; padding-bottom: var(--space-2); }
 	.chat-dd { height: 28px; }
 	.chat-act .chat-phone-only { display: inline-flex; }
-	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
+	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; max-width: none; z-index: 3; border-left: none; }
+	.chat-sec-more { min-height: 36px; font-size: var(--font-size-sm); }
 	.chat-act .chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-col { padding: 0 var(--space-4); }
 	.chat-tabbar { height: 40px; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-2); }

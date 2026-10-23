@@ -120,7 +120,7 @@ namespace Ai
 		if (told.IsEmpty()) return;
 		OwnerMessage message;
 		message.text = told;
-		StartTurn(chat, message, nullptr, 0, "", "background");
+		StartTurn(chat, message, 0, "", "background");
 	}
 
 	// --- Running them ------------------------------------------------------------------------------------------------

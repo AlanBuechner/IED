@@ -1641,8 +1641,9 @@ def chat_stop_and_queue(run):
 		run.target.queue_model(model_script({"text": "word " * 2000, "chunk": 5, "delayMs": 20}, {"finish": "stop"}), model_script({"text": "The queued answer.", "chunk": 6}, {"finish": "stop"}))
 	send(page, "write a long essay")
 	streaming(page)
-	send(page, "and then summarize it")
-	page.wait_for_selector(".chat-queued:has-text('and then summarize it')")
+	page.fill(".chat-input", "and then summarize it")
+	page.press(".chat-input", "Control+Enter")
+	page.wait_for_selector(".chat-queued:not(.pending):has-text('and then summarize it')")
 	run.shot("queued")
 	page.click(".chat-row2 .btn:has-text('Stop')")
 	page.wait_for_selector(".chat-foot:has-text('Stopped')", timeout=20000)
@@ -1651,6 +1652,26 @@ def chat_stop_and_queue(run):
 	page.click(".chat-queued button[aria-label='Send the queued message now']")
 	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
 	check(not page.is_visible(".chat-queued") and "and then summarize it" in run.texts(".chat-turn:last-child .chat-user"), "the queued message was sent")
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_message_joins_the_running_turn(run):
+	"""A message sent while a turn runs waits above the composer, then shows as the owner's message where the turn took
+	it - after the tool round it came in - and the same turn answers it (docs/12 "Messages while a turn runs")."""
+	page = open_chat(run)
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": "word " * 600, "chunk": 5, "delayMs": 20}, {"toolCall": {"name": "fs_list", "arguments": {"path": "."}}}, {"finish": "tool_calls"}),
+			model_script({"text": "Using tabs from now on.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "write a long essay")
+	streaming(page)
+	send(page, "use tabs")
+	page.wait_for_selector(".chat-queued.pending:has-text('use tabs')")
+	run.shot("pending")
+	page.wait_for_selector(".chat-turn:last-child .chat-seg[data-type='message'] .chat-user:has-text('use tabs')", timeout=30000)
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=60000)
+	check(len(run.texts(".chat-turn")) == 1, "the running turn took it: no turn of its own")
+	check(not page.is_visible(".chat-queued"), "it left the composer once the turn took it")
+	run.shot("joined")
 
 
 PIXEL_PNG = bytes.fromhex(
