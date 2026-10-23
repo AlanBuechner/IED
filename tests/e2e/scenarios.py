@@ -2136,6 +2136,56 @@ def startup_project_runs(run):
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
+def new_project_from_a_template(run):
+	"""New Project (docs/15 "New Project"): the start page's button shows the language plugins' templates (the C/C++
+	and Go plugins' on the mock; C4's come with its toolchain), a search narrows them, and the chosen one, named, makes a
+	new solution that the window then shows. On a desktop, the new solution's menu in Solution Explorer adds a project to
+	it: it has the nuke.toml the templates add to (the mock's Tools solution stays as other scenarios know it)."""
+	page = run.open()
+	page.evaluate("ied_shell.showStartPage()")
+	page.wait_for_selector(".start-page .sp-start button:has-text('New Project...')")
+	page.click(".start-page .sp-start button:has-text('New Project...')")
+	page.wait_for_selector(".new-project .np-row")
+	titles = run.texts(".new-project .np-row .np-title")
+	check({"Console App", "Static Library"} <= set(titles) and len(titles) >= 4, "the plugins' templates: %r" % titles)
+	check(page.query_selector(".new-project .np-row .np-tile") is not None, "drawn with their language's tile")
+	run.shot("templates")
+	page.fill(".new-project .np-search", "go console")
+	page.wait_for_function("document.querySelectorAll('.new-project .np-row').length === 1")
+	check(page.get_attribute(".new-project .np-row", "data-template") == "ied.go/console", "the search keeps Go's")
+	page.press(".new-project .np-search", "Enter")
+	page.wait_for_selector(".new-project input[aria-label='Project name']")
+	check(page.input_value(".new-project input[aria-label='Project name']") == "ConsoleApp1", "a name to start from")
+	page.fill(".new-project input[aria-label='Project name']", "bad name")
+	check(page.is_disabled(".new-project button:has-text('Create')"), "a bad name cannot be made")
+	name = "Hello" + run.viewport.capitalize()
+	page.fill(".new-project input[aria-label='Project name']", name)
+	check(page.inner_text(".new-project .np-where").endswith("C:/mock/" + name), "where it goes: %s" % page.inner_text(".new-project .np-where"))
+	run.shot("configure")
+	page.click(".new-project button:has-text('Create')")
+	page.wait_for_function("(n) => document.title === n + ' - IED'", arg=name, timeout=10000)
+	check(page.query_selector(".new-project") is None, "the dialog closed")
+	page.wait_for_selector(".toast:has-text('Created %s')" % name)
+	if run.phone:
+		return
+	run.show_activity("ied.editor")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution '%s' (1 project)\")" % name)
+	page.click(".explorer .tree-row:has-text(\"Solution '%s'\")" % name, button="right")
+	page.click(".menu .menu-item:has-text('New Project...')")
+	page.wait_for_selector(".new-project .np-row[data-template='ied.cpp/library']")
+	page.click(".new-project .np-row[data-template='ied.cpp/library']")
+	page.click(".new-project button:has-text('Next')")
+	page.wait_for_selector(".new-project select[aria-label='Solution']")
+	check(page.input_value(".new-project select[aria-label='Solution']") == "add", "added to the solution it was asked from")
+	check(page.is_disabled(".new-project input[aria-label='Location']"), "the solution's folder, not another")
+	page.fill(".new-project input[aria-label='Project name']", "Engine")
+	page.click(".new-project button:has-text('Create')")
+	page.wait_for_selector(".toast:has-text('Added the project Engine')")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution '%s' (2 projects)\")" % name)
+	run.shot("added")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
 def solution_explorer_switches_views(run):
 	"""The Solution Explorer's Switch Views (docs/15): a solution shows its projects and Solution Items, or its folder,
 	and back. The mock's recent solution Tools opens as a solution with three projects."""

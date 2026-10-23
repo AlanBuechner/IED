@@ -1,0 +1,351 @@
+include "templates.ch"
+include "host/server.ch"
+include "tasks/model.ch"
+include "tasks/expand.ch"
+include "tasks/missing.ch"
+include "fs/walk.ch"
+include "web/json.ch"
+
+namespace Ied
+{
+	// A template's step as it runs: its command (argv or a command line), its folder, and the setting naming its program.
+	class TemplateStep
+	{
+		public Core::Array<Core::String> argv;
+		public Core::String shell;
+		public Core::String cwd;
+		public Core::String label;
+		public Core::String setting;
+	}
+
+	void ProjectTemplates::Init(Server* server) {
+		this.server = server;
+		ProjectTemplates* self = this;
+		server->rpc.Register("project.templates", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		server->rpc.Register("project.create", [self](Call& call, const Params& params) -> Core::String { return self->CreateMethod(call, params); });
+	}
+
+	bool IsProjectName(Core::StringView name) {
+		if (name.IsEmpty() || name.ByteLength() > 64) return false;
+		for (int64 i = 0; i < name.ByteLength(); ++i) {
+			const int32 c = name.ByteAt(i);
+			const bool word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+			if (!word && (i == 0 || (c != '.' && c != '-'))) return false;
+		}
+		return true;
+	}
+
+	Core::String WithName(Core::StringView text, Core::StringView name) {
+		Core::StringBuilder out;
+		int64 at = 0;
+		for (int64 found = text.IndexOf(Core::StringView("${name}"), 0); found >= 0; found = text.IndexOf(Core::StringView("${name}"), at)) {
+			out.Append(text.Substring(at, found - at));
+			out.Append(name);
+			at = found + 7;
+		}
+		out.Append(text.Substring(at, text.ByteLength() - at));
+		return out.ToString();
+	}
+
+	static Core::String Slashed(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) out.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return out.ToString();
+	}
+
+	static void Collect(Core::Array<ProjectTemplate*>& into, const Core::Array<Contribution>& entries, Workspace* from) {
+		for (const Contribution& given : entries) {
+			if (from && given.plugin->manifest->source != PluginSource::Project) continue;
+			Core::String key = (given.plugin->manifest->id + "/") + given.entry.Member("id").AsView();
+			bool seen = false;
+			for (ProjectTemplate* known : into) seen = seen || known->key.View() == key.View();
+			if (seen) continue;
+			ProjectTemplate* made = new ProjectTemplate();
+			made->key = key;
+			made->plugin = given.plugin;
+			made->from = from;
+			made->entry = given.entry;
+			into.Push(made);
+		}
+	}
+
+	Core::Array<ProjectTemplate*> ProjectTemplates::All() {
+		Core::Array<ProjectTemplate*> all;
+		Collect(all, server->plugins->Entries(nullptr, Core::StringView("projectTemplates")), nullptr);
+		for (Workspace* ws : server->workspaces->All())
+			if (ws->trusted) Collect(all, server->plugins->Entries(ws, Core::StringView("projectTemplates")), ws);
+		return all;
+	}
+
+	// The name the plugin's `languages` give the template's language ("cpp": "C++"), else the id.
+	static Core::String LanguageName(const Plugin* plugin, Core::StringView language) {
+		Serialization::DomNode languages = plugin->manifest->contributes.Member("languages");
+		for (int64 i = 0; i < languages.Count(); ++i) {
+			Serialization::DomNode entry = languages.At(i);
+			if (entry.Member("id").AsView() != language) continue;
+			Serialization::DomNode aliases = entry.Member("aliases");
+			return aliases.Count() > 0 ? Core::String(aliases.At(0).AsView()) : Core::String(language);
+		}
+		return Core::String(language);
+	}
+
+	// Where the window loads the plugin's files from (an icon's SVG).
+	static Core::String PluginBase(const ProjectTemplate* made) {
+		Core::String plugin = (made->plugin->manifest->id + "/");
+		return made->from ? ((Core::String("/w/") + made->from->wsId.View()) + "/plugins/") + plugin.View() : Core::String("/plugins/") + plugin.View();
+	}
+
+	// Whether `made` can add a project to `ws`: a trusted solution whose folder holds one of the template's `into` files
+	// (nuke.toml: a Nuke workspace, whose `nuke init NAME` adds the project).
+	static bool CanAdd(const ProjectTemplate* made, Workspace* ws) {
+		if (!ws || !ws->trusted || !ws->solution) return false;
+		Serialization::DomNode into = made->entry.Member("into");
+		for (int64 i = 0; i < into.Count(); ++i)
+			if (FS::FileExists((ws->root / into.At(i).AsView()).CStr())) return true;
+		return false;
+	}
+
+	// Where a new project goes unless the person says: beside the project opened last, else in their home folder.
+	static Core::String DefaultLocation(Server* server) {
+		const Core::Array<RecentProject>& recent = server->recent.All();
+		if (!recent.IsEmpty()) {
+			FS::Path last = FS::Path(recent[0].path.View());
+			FS::Path folder = recent[0].kind == "solution" ? last.Parent() : last;
+			if (!folder.Parent().IsEmpty()) return Slashed(folder.Parent().View());
+		}
+		Core::String home;
+		return Platform::TryGetEnvironmentVariable("USERPROFILE", home) ? Slashed(home.View()) : Core::String();
+	}
+
+	static void WriteTemplate(JsonWriter& json, const ProjectTemplate* made, Workspace* ws) {
+		Serialization::DomNode entry = made->entry;
+		json.BeginObject();
+		json.Field("key", made->key.View());
+		json.Field("plugin", made->plugin->manifest->id.View());
+		json.Field("id", entry.Member("id").AsView());
+		json.Field("title", entry.Member("title").AsView());
+		json.Field("description", entry.Member("description").AsView());
+		json.Field("language", entry.Member("language").AsView());
+		json.Field("languageName", LanguageName(made->plugin, entry.Member("language").AsView()).View());
+		json.Key(Core::StringView("tags"));
+		json.BeginArray();
+		Serialization::DomNode tags = entry.Member("tags");
+		for (int64 i = 0; i < tags.Count(); ++i) json.String(tags.At(i).AsView());
+		json.EndArray();
+		json.BoolField("canAdd", CanAdd(made, ws));
+		json.EndObject();
+	}
+
+	// {templates: [{key, plugin, id, title, description, language, languageName, tags, canAdd}], icons: [{plugin: {id,
+	// base}, value}] (the template plugins' projectIcons, as the shell's icons read them), location}
+	Core::String ProjectTemplates::ListMethod(Call& call, const Params& params) {
+		Workspace* ws = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+		Core::Array<ProjectTemplate*> all = All();
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("templates"));
+		json.BeginArray();
+		for (ProjectTemplate* made : all) WriteTemplate(json, made, ws);
+		json.EndArray();
+		json.Key(Core::StringView("icons"));
+		json.BeginArray();
+		Core::Array<Core::String> drawn;
+		for (ProjectTemplate* made : all) {
+			bool seen = false;
+			for (const Core::String& id : drawn) seen = seen || id.View() == made->plugin->manifest->id.View();
+			if (seen) continue;
+			drawn.Push(made->plugin->manifest->id);
+			Serialization::DomNode icons = made->plugin->manifest->contributes.Member("projectIcons");
+			for (int64 i = 0; i < icons.Count(); ++i) {
+				json.BeginObject();
+				json.Key(Core::StringView("plugin"));
+				json.BeginObject();
+				json.Field("id", made->plugin->manifest->id.View());
+				json.Field("base", PluginBase(made).View());
+				json.EndObject();
+				json.RawField("value", NodeJson(icons.At(i)).View());
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		json.Field("location", DefaultLocation(server).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Making a project
+
+	static ProjectTemplate* Named(const Core::Array<ProjectTemplate*>& all, Core::StringView key) {
+		for (ProjectTemplate* made : all)
+			if (made->key.View() == key) return made;
+		throw RpcError(ErrorCode::NotFound, (Core::String("no project template ") + key).View());
+	}
+
+	static Core::String Expanded(Core::StringView text, const TaskLookup& lookup) {
+		Core::String out;
+		Core::String unknown;
+		if (!ExpandTaskText(text, lookup, out, unknown)) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template names ${") + unknown.View()) + "}, which nothing gives").View());
+		return out;
+	}
+
+	// The steps of `made`, their variables filled: the new project's name and folders, ${config:KEY} (the workspace's
+	// settings, or the app's for a new workspace) and ${env:NAME}.
+	static Core::Array<TemplateStep*> PlanSteps(Server* server, const ProjectTemplate* made, Workspace* ws, Core::StringView name, const FS::Path& project, const FS::Path& workspace) {
+		Core::HashMap<Core::String, Core::String>* values = new Core::HashMap<Core::String, Core::String>();
+		values->Insert(Core::String("name"), Core::String(name));
+		values->Insert(Core::String("projectName"), Core::String(name));
+		values->Insert(Core::String("projectDir"), Slashed(project.View()));
+		values->Insert(Core::String("projectRoot"), Slashed(project.View()));
+		values->Insert(Core::String("workspaceDir"), Slashed(workspace.View()));
+		values->Insert(Core::String("solutionDir"), Slashed(workspace.View()));
+		Settings* settings = server->settings;
+		TaskLookup lookup = [values, settings, ws](Core::StringView key, Core::String& value) -> bool {
+			if (values->TryGet(Core::String(key), value)) return true;
+			if (key.StartsWith(Core::StringView("env:"))) {
+				if (!Platform::TryGetEnvironmentVariable(Core::String(key.Substring(4, key.ByteLength() - 4)).CStr(), value)) value = Core::String();
+				return true;
+			}
+			if (!key.StartsWith(Core::StringView("config:"))) return false;
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Core::String json = settings->Effective(ws, Core::StringView(""), key.Substring(7, key.ByteLength() - 7));
+			Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+			value = setting.Kind() == Serialization::DomKind::String ? Core::String(setting.AsView()) : Core::String(json.View().Trimmed());
+			return true;
+		};
+		Core::Array<TemplateStep*> planned;
+		Serialization::DomNode steps = made->entry.Member("steps");
+		for (int64 i = 0; i < steps.Count(); ++i) {
+			TaskStep* step = ReadTaskStep(steps.At(i));
+			if (step->kind != StepKind::Run || (step->argv.IsEmpty() && step->shell.IsEmpty())) throw RpcError(ErrorCode::BadRequest, ((Core::String("a step of the template ") + made->key.View()) + " runs nothing").View());
+			TemplateStep* run = new TemplateStep();
+			for (const Core::String& arg : step->argv) run->argv.Push(Expanded(arg.View(), lookup));
+			if (!step->shell.IsEmpty()) run->shell = Expanded(step->shell.View(), lookup);
+			run->cwd = Expanded(step->cwd.IsEmpty() ? Core::StringView("${workspaceDir}") : step->cwd.View(), lookup);
+			run->label = !step->label.IsEmpty() ? step->label : !run->shell.IsEmpty() ? run->shell : run->argv[0];
+			run->setting = ProgramSetting(!step->shell.IsEmpty() ? step->shell.View() : step->argv.IsEmpty() ? Core::StringView("") : step->argv[0].View());
+			planned.Push(run);
+		}
+		return planned;
+	}
+
+	static Core::String Tail(Core::StringView text) {
+		Core::StringView trimmed = text.Trimmed();
+		return Core::String(trimmed.ByteLength() <= kTemplateLogBytes ? trimmed : trimmed.Substring(trimmed.ByteLength() - kTemplateLogBytes, kTemplateLogBytes));
+	}
+
+	// Runs `step` to its end with its output added to `log`; "" when it succeeded, else why not.
+	static Core::String RunStep(const TemplateStep* step, Core::StringBuilder& log) {
+		Process::StartInfo info;
+		if (!step->shell.IsEmpty()) info.shellCommand = step->shell;
+		else {
+			info.program = step->argv[0];
+			for (int64 i = 1; i < step->argv.Count(); ++i) info.arguments.Push(step->argv[i]);
+		}
+		info.workingDirectory = step->cwd;
+		info.input = Process::Redirect::Null;
+		info.errors = Process::Redirect::ToOutput;
+		Process::Output done = Process::Run(info, (int32)kTemplateStepMs);
+		log.Append(done.output.View());
+		if (done.exitCode == 0) return Core::String();
+		Core::StringBuilder why;
+		why.Append("the template's step ");
+		why.Append(step->label.View());
+		if (done.exitCode == Process::kTimedOut) why.Append(" ran out of time");
+		else if (done.exitCode == Process::kError) {
+			why.Append(" did not start: ");
+			why.Append(done.error.View());
+		}
+		else {
+			why.Append(" failed (exit ");
+			why.AppendInt(done.exitCode);
+			why.Append(")");
+		}
+		Core::String program = !step->shell.IsEmpty() ? ProgramWord(step->shell.View()) : step->argv[0];
+		Core::String path;
+		Core::String extensions;
+		if (!Platform::TryGetEnvironmentVariable("PATH", path)) path = Core::String();
+		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
+		if (!step->setting.IsEmpty() && !FindsProgram(program.View(), step->cwd.View(), path.View(), extensions.View())) {
+			why.Append(". ");
+			why.Append(MissingProgramText(program.View(), step->setting.View()).View());
+		}
+		Core::String tail = Tail(done.output.View());
+		if (!tail.IsEmpty()) {
+			why.Append(":\n");
+			why.Append(tail.View());
+		}
+		return why.ToString();
+	}
+
+	// Copies the template's files into `project`, ${name} filled in their paths and text; a file there stays. "" when
+	// every one was written, else why not.
+	static Core::String CopyFiles(const FS::Path& from, const FS::Path& project, Core::StringView name) {
+		Core::String problem;
+		FileWalk walk;
+		walk.root = from;
+		walk.useIgnoreFiles = false;
+		walk.cancel = nullptr;
+		walk.Run([from, project, name, &problem](Core::StringView path) -> bool {
+			FS::Path target = project / WithName(path, name).View();
+			if (FS::FileExists(target.CStr())) return true;
+			FS::File source = FS::File((from / path).CStr(), "rb");
+			Core::String text = source.ReadText();
+			source.Close();
+			Core::String filled = WithName(text.View(), name);
+			if (FS::MakeDirectories(target.Parent().CStr()) && FS::WriteFileAtomically(target.CStr(), filled.CStr(), filled.View().ByteLength())) return true;
+			problem = Core::String("could not write ") + Slashed(target.View()).View();
+			return false;
+		});
+		return problem;
+	}
+
+	// The template's folder of files in its plugin, or "" for none; a path that leaves the plugin is refused.
+	static FS::Path FilesOf(const ProjectTemplate* made) {
+		Core::StringView files = made->entry.Member("files").AsView();
+		if (files.IsEmpty()) return FS::Path();
+		if (FS::Path(files).IsAbsolute() || files.IndexOf(Core::StringView(".."), 0) >= 0) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template ") + made->key.View()) + "'s files are outside its plugin").View());
+		return made->plugin->manifest->folder / files;
+	}
+
+	// {template, name, location (a new workspace's folder goes in it) | wsId (the project goes into that solution)} ->
+	// {workspace, path, log}: the new workspace opened (trusted: its owner made it), or the solution it went into.
+	Core::String ProjectTemplates::CreateMethod(Call& call, const Params& params) {
+		ProjectTemplate* made = Named(All(), params.Str("template").View());
+		Core::String name = params.Str("name");
+		if (!IsProjectName(name.View())) throw RpcError(ErrorCode::BadRequest, ((Core::String("'") + name.View()) + "' cannot name a project: use letters, digits, '_', '.' and '-'").View());
+		Workspace* into = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+		if (into && !into->trusted) throw RpcError(ErrorCode::Forbidden, "a template runs commands in the workspace: trust it first");
+		if (into && !CanAdd(made, into)) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template ") + made->key.View()) + " cannot add a project to this solution").View());
+		Core::String location = into ? Core::String(into->root.View()) : params.Str("location", Core::StringView(""));
+		if (location.IsEmpty() || !FS::Path(location.View()).IsAbsolute()) throw RpcError(ErrorCode::BadRequest, "a new project needs the folder it goes in, as a full path");
+		FS::Path project = FS::Path(location.View()) / name.View();
+		FS::Path workspace = into ? into->root : project;
+		if (FS::IsDirectory(project.CStr()) || FS::FileExists(project.CStr())) throw RpcError(ErrorCode::Conflict, (Slashed(project.View()) + " is there already: pick another name or folder").View());
+		Core::Array<TemplateStep*> steps = PlanSteps(server, made, into, name.View(), project, workspace);
+		FS::Path files = FilesOf(made);
+		Core::StringBuilder log;
+		Core::String problem;
+		{
+			Threading::UnlockGuard released(server->lock);
+			if (!FS::MakeDirectories(project.CStr())) problem = Core::String("could not make ") + Slashed(project.View()).View();
+			for (int64 i = 0; i < steps.Count() && problem.IsEmpty(); ++i) problem = RunStep(steps[i], log);
+			if (problem.IsEmpty() && !files.IsEmpty()) problem = CopyFiles(files, project, name.View());
+			if (!problem.IsEmpty()) FS::RemoveAll(project.CStr());
+		}
+		if (!problem.IsEmpty()) throw RpcError(ErrorCode::Unavailable, problem.View());
+		Workspace* shown = into;
+		if (!shown) {
+			if (!server->trust.Set(project, true)) server->Log(Core::StringView("the new project could not be trusted"));
+			Core::String relative;
+			shown = server->workspaces->OpenFor(project, relative);
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.RawField("workspace", shown->SummaryJson().View());
+		json.Field("path", Slashed(project.View()).View());
+		json.Field("log", Tail(log.View()).View());
+		json.EndObject();
+		return json.ToString();
+	}
+}

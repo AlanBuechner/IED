@@ -37,6 +37,10 @@ namespace Ied
 		return Concurrency::Queue;
 	}
 
+	TaskStep* ReadTaskStep(const Serialization::DomNode& node) {
+		return ReadStep(node);
+	}
+
 	static TaskStep* ReadStep(const Serialization::DomNode& node) {
 		TaskStep* step = new TaskStep();
 		Serialization::DomNode run = node.Member("run");

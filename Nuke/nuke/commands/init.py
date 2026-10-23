@@ -3,6 +3,7 @@ IED solution and project files (ied_files.py)."""
 
 import argparse
 import os
+import re
 
 from .. import fsutil, ied_files
 from .. import workspace as workspaces
@@ -10,10 +11,13 @@ from ..errors import NukeError
 from ..manifest import KINDS, MANIFEST_NAME, PROJECT_NAME
 from . import base
 
+LANGUAGE = re.compile(r"^[a-z][a-z0-9_+-]*$")
 TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "templates")
-USAGE = """nuke init [NAME] [--kind executable|module|custom] [--toolchain VERSION] [--ied]
+USAGE = """nuke init [NAME] [--kind executable|module|library|custom] [--language ID] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
   inside a workspace:  create the project NAME in ./NAME (or here with --here)
+  --language:          the project's language (default c4); another one builds through its driver (section 9b)
+                       and gets no sources: the template that asked for it brings them
   --ied:               also write (or refresh) the IED solution <Workspace>.iedsln and build/ied/*.iedproj;
                        inside a workspace, `nuke init --ied` alone does only that"""
 
@@ -48,6 +52,7 @@ def _parse(args):
 	parser = argparse.ArgumentParser(prog="nuke init", add_help=False)
 	parser.add_argument("name", nargs="?")
 	parser.add_argument("--kind", default="executable", choices=KINDS)
+	parser.add_argument("--language", default="c4")
 	parser.add_argument("--toolchain")
 	parser.add_argument("--here", action="store_true")
 	parser.add_argument("--ied", action="store_true")
@@ -58,6 +63,10 @@ def _parse(args):
 		raise NukeError(USAGE) from None
 	if options.name and not PROJECT_NAME.match(options.name):
 		raise NukeError(f"'{options.name}' is not a valid project name (letters, digits, '_', '.', '-')")
+	if not LANGUAGE.match(options.language):
+		raise NukeError(f"'{options.language}' is not a language id (lowercase letters, digits, '_', '+', '-')")
+	if options.language != "c4" and options.kind == "module":
+		raise NukeError("a module is C4's; a library in another language is --kind library")
 	return options
 
 
@@ -74,7 +83,13 @@ def _write_new(path, text):
 		f.write(text)
 
 
-def _sources(folder, name, kind):
+def _language_line(options):
+	return "" if options.language == "c4" else f'language = "{options.language}"\n'
+
+
+def _sources(folder, name, kind, language):
+	if language != "c4":
+		return
 	if kind == "executable":
 		_write_new(os.path.join(folder, "src", "main.cf"), _template("main.cf", name=name))
 	elif kind == "module":
@@ -85,11 +100,12 @@ def create_workspace(cli, folder, options):
 	name = options.name or os.path.basename(os.path.abspath(folder))
 	if not PROJECT_NAME.match(name):
 		raise NukeError(f"the folder name '{name}' is not a valid project name; pass one: nuke init NAME")
-	toolchain = options.toolchain or _default_toolchain(cli)
-	_write_new(os.path.join(folder, MANIFEST_NAME), _template("workspace.toml", name=name, kind=options.kind, toolchain=toolchain))
-	_sources(folder, name, options.kind)
+	toolchain = options.toolchain or _default_toolchain(cli, required=options.language == "c4")
+	toolchain_line = f'toolchain = "{toolchain}"\n' if toolchain else ""
+	_write_new(os.path.join(folder, MANIFEST_NAME), _template("workspace.toml", name=name, kind=options.kind, toolchain_line=toolchain_line, language_line=_language_line(options)))
+	_sources(folder, name, options.kind, options.language)
 	_ensure_gitignore(folder)
-	cli.log.note(f"created workspace {name} ({options.kind}, toolchain {toolchain})")
+	cli.log.note(f"created workspace {name} ({options.kind}, {options.language}, toolchain {toolchain or 'none'})")
 	cli.log.note("next: nuke build run")
 	return 0
 
@@ -98,8 +114,8 @@ def create_project(cli, folder, options):
 	name = options.name or os.path.basename(os.path.abspath(folder))
 	if cli.workspace.find_project(name):
 		raise NukeError(f"workspace {cli.workspace.name} already has a project named '{name}'")
-	_write_new(os.path.join(folder, MANIFEST_NAME), _template("project.toml", name=name, kind=options.kind))
-	_sources(folder, name, options.kind)
+	_write_new(os.path.join(folder, MANIFEST_NAME), _template("project.toml", name=name, kind=options.kind, language_line=_language_line(options)))
+	_sources(folder, name, options.kind, options.language)
 	relative = os.path.relpath(folder, cli.workspace.dir).replace("\\", "/")
 	cli.log.note(f"created project {name} in {relative}")
 	if cli.workspace.spec.projects is not None:
@@ -122,12 +138,14 @@ def ied_solution(cli, workspace):
 	return 0
 
 
-def _default_toolchain(cli):
+def _default_toolchain(cli, required=True):
 	latest = cli.store.latest()
 	if latest:
 		return latest.version
 	if cli.store.get("dev"):
 		return "dev"
+	if not required:
+		return None
 	raise NukeError(f"no C4 toolchain is installed in {cli.store.kind_dir()}; pass --toolchain VERSION or install one first")
 
 

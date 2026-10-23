@@ -24,6 +24,14 @@
 		"projectIcons": [
 			{ "languageId": "c4", "label": "C4", "color": "--hue-teal", "presets": ["c4.nuke"] }
 		],
+		"projectTemplates": [
+			{ "id": "console", "title": "Console App", "language": "c4", "tags": ["Console", "Windows"], "into": ["nuke.toml"],
+				"description": "A C4 program (src/main.cf) on the newest installed toolchain, built, tested and debugged through Nuke.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --ied" }] },
+			{ "id": "module", "title": "Module", "language": "c4", "tags": ["Library"], "into": ["nuke.toml"],
+				"description": "C4 code other projects compile in by naming it in their depends (a header in src/), with its own tests.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --kind module --ied" }] }
+		],
 		"outputLinks": [
 			{ "id": "c4", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\"'|*?]+?\\.[A-Za-z0-9_+-]+) \\((\\d+):(\\d+)\\)", "file": 1, "line": 2, "column": 3 },
 			{ "id": "c4-test", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }

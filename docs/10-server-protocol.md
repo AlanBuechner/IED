@@ -129,6 +129,20 @@ A workspace is a folder, a solution (its `.iedsln`'s folder) or the folder of a 
 
 **The recent projects** are the server's: every workspace opened (`ied <path>`, the desktop app's Open Folder, `--workspace`, `ws.openRecent`) goes first in a list kept in the data folder's `recent.json` (machine-local: the paths are this machine's), newest first; past 20, the oldest that are not favorites drop off, and favorites stay. The `server` topic's snapshot carries it as `recent: [{path, name, kind, opened, favorite, exists}]` - `path` is what opens it again (a folder, or a solution's `.iedsln`), `opened` unix ms, `exists` whether the path is still there - and every change publishes the whole list as `recent.changed {recent}`. A client opens again only what is listed: a path the owner never opened on the machine still comes from the machine (`docs/11` "Trust layers").
 
+**Projects** (`docs/03` "New projects"):
+
+| Method | Result |
+|---|---|
+| `project.templates {wsId?}` | `{templates: [{key: "<plugin>/<id>", plugin, id, title, description, language, languageName, tags, canAdd}], icons: [{plugin: {id, base}, value}], location}`: every template the loaded plugins give (the global ones' and each trusted open workspace's own), `canAdd` when `wsId`'s trusted solution folder holds one of the template's `into` files; `icons` are those plugins' `projectIcons`, which the dialog draws tiles from; `location` is where a new project goes unless the person says (beside the project opened last, else their home folder) |
+| `project.create {template, name, location}` or `{template, name, wsId}` | `{workspace: summary, path, log}`: a new workspace at `<location>/<name>`, opened and trusted, or a project added to `wsId`'s solution; `bad_request` for a name that is not letters, digits, `_`, `.` and `-` (64 at most), a location that is not a full path, or a template that cannot add to it; `conflict` when the folder is there; `forbidden` for an untrusted solution; `not_found` for no such template; `unavailable` when a step fails or a file cannot be written (the message says why, with the step's output) |
+
+**Projects** (`docs/03` "New projects"):
+
+| Method | Result |
+|---|---|
+| `project.templates {wsId?}` | `{templates: [{key: "<plugin>/<id>", plugin, id, title, description, language, languageName, tags, canAdd}], icons: [{plugin: {id, base}, value}], location}`: every template the loaded plugins give (the global ones' and each trusted open workspace's own), `canAdd` when `wsId`'s trusted solution folder holds one of the template's `into` files; `icons` are those plugins' `projectIcons`, which the dialog draws tiles from; `location` is where a new project goes unless the person says (beside the project opened last, else their home folder) |
+| `project.create {template, name, location}` or `{template, name, wsId}` | `{workspace: summary, path, log}`: a new workspace at `<location>/<name>`, opened and trusted, or a project added to `wsId`'s solution; `bad_request` for a name that is not letters, digits, `_`, `.` and `-` (64 at most), a location that is not a full path, or a template that cannot add to it; `conflict` when the folder is there; `forbidden` for an untrusted solution; `not_found` for no such template; `unavailable` when a step fails or a file cannot be written (the message says why, with the step's output) |
+
 A launch URL's `#open=<wsId>/<path>[:<line>[:<col>]]` (the control channel's `open`) shows that workspace, and the file when `path` is not empty; the web client's own `#start` shows its start page (`docs/15`).
 
 ## Files

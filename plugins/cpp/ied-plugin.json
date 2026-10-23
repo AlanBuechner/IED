@@ -45,6 +45,17 @@
 			{ "languageId": "cpp", "label": "++", "color": "--hue-violet", "markers": ["CMakeLists.txt", "meson.build", "premake5.lua", "xmake.lua", "*.vcxproj", "compile_commands.json"] },
 			{ "languageId": "c", "label": "C", "color": "--hue-blue" }
 		],
+		"projectTemplates": [
+			{ "id": "console", "title": "Console App", "language": "cpp", "tags": ["Console", "Windows"], "into": ["nuke.toml"], "files": "templates/console-cpp",
+				"description": "A C++ program that prints to the console, built by Nuke with the LLVM release for the MSVC ABI.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --language cpp --ied" }] },
+			{ "id": "console-c", "title": "Console App", "language": "c", "tags": ["Console", "Windows"], "into": ["nuke.toml"], "files": "templates/console-c",
+				"description": "A C program that prints to the console, built by Nuke with the LLVM release for the MSVC ABI.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --language cpp --ied" }] },
+			{ "id": "library", "title": "Static Library", "language": "cpp", "tags": ["Library", "Windows"], "into": ["nuke.toml"], "files": "templates/library-cpp",
+				"description": "A C++ static library (.lib) other projects link by naming it in their depends; its src folder is its include folder.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --language cpp --kind library --ied" }] }
+		],
 		"fileIcons": [
 			{ "languageId": "c", "extensions": [".c"], "label": "C", "color": "--hue-blue" },
 			{ "languageId": "c", "extensions": [".h"], "label": "h", "color": "--hue-violet" },

@@ -9,7 +9,7 @@ WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
 def solution_files(name):
 	"""A recent solution's files when it is opened again: the solution, two programs (src/, viewer/) and a library (core/),
-	their code and README."""
+	their code, README and the nuke.toml that lets a New Project template add a project to it."""
 	return {
 		"README.md": "# %s\n" % name,
 		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }, { "file": "viewer/Viewer.iedproj" }, { "file": "core/Core.iedproj" }], "items": ["README.md"] }\n' % name,
@@ -19,6 +19,7 @@ def solution_files(name):
 		"viewer/viewer.c": "int main(void) { return 0; }\n",
 		"core/Core.iedproj": '{ "version": 1, "name": "Core", "root": ".", "kind": "library" }\n',
 		"core/core.c": "int core(void) { return 1; }\n",
+		"nuke.toml": "[workspace]\nname = \"%s\"\n" % name,
 	}
 
 

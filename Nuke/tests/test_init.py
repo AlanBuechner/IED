@@ -45,6 +45,25 @@ class InitTests(WorkspaceTest):
 		self.assertEqual(self.nuke("init", "--here", cwd=self.path("Other"))[0], 0)
 		self.assertEqual(self.nuke("init", "--here", cwd=self.path("Other"))[0], 1)
 
+	def test_a_workspace_in_another_language_has_no_c4_sources(self):
+		code, out = self.nuke("init", "Tool", "--language", "cpp")
+		self.assertEqual(code, 0, out)
+		parsed = manifest.load(self.path("nuke.toml"))
+		self.assertEqual((parsed.workspace.toolchain, parsed.project.name, parsed.project.kind, parsed.project.language), ("1.0.0", "Tool", "executable", "cpp"))
+		self.assertFalse(os.path.exists(self.path("src")), "the template that asked brings the sources")
+		self.assertIn("cpp", out)
+
+	def test_a_project_in_another_language_inside_a_workspace(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n"})
+		code, out = self.nuke("init", "Viewer", "--language", "go", "--kind", "library")
+		self.assertEqual(code, 0, out)
+		parsed = manifest.load(self.path("Viewer", "nuke.toml"))
+		self.assertEqual((parsed.project.kind, parsed.project.language), ("library", "go"))
+		self.assertFalse(os.path.exists(self.path("Viewer", "src")))
+		self.assertEqual(self.nuke("init", "Lib", "--language", "go", "--kind", "module")[0], 1, "a module is C4's")
+		self.assertEqual(self.nuke("init", "Odd", "--language", "Not A Language")[0], 1)
+		self.assertTrue(os.path.exists(self.path("Viewer", "nuke.toml")) and not os.path.exists(self.path("Odd")) and not os.path.exists(self.path("Lib")))
+
 	def test_bad_name_and_help(self):
 		self.assertEqual(self.nuke("init", "bad name")[0], 1)
 		code, out = self.nuke("init", "--help")
@@ -78,6 +97,12 @@ class IedSolutionTests(WorkspaceTest):
 			"buildSystem": {"id": "nuke", "projectName": "Game", "output": "${workspaceDir}/build/bin/${config}-windows-${arch}/Game/Game.exe"},
 			"presets": ["c4.nuke"], "language": "c4"}, project)
 		self.assertIn("1 project(s)", out)
+
+	def test_a_project_in_another_language_gets_its_preset(self):
+		code, out = self.nuke("init", "Game", "--language", "cpp", "--ied")
+		self.assertEqual(code, 0, out)
+		project = json.loads(read(self.path("build", "ied", "Game.iedproj")))
+		self.assertEqual((["cpp.nuke"], "cpp"), (project["presets"], project["language"]))
 
 	def test_projects_follow_the_workspace_and_hand_edits_are_kept(self):
 		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n", "Engine/nuke.toml": "[project]\nkind = \"module\"\n",

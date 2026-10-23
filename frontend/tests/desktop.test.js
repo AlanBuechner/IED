@@ -35,20 +35,20 @@ test("desktop: Open Folder is there only inside the desktop app", () => {
 	const browser = shellWith(false);
 	assertTrue(!labels(browser.menus.resolve("menubar/file")).includes("Open Folder..."), "not in a browser's File menu");
 	assertTrue(labels(browser.menus.resolve("menubar/file")).includes("Start Page"), "the start page is everywhere");
-	assertEqual(browser.menus.resolve("shell/openWorkspace"), [], "no way to open one from a browser");
+	assertEqual(labels(browser.menus.resolve("shell/openWorkspace")), ["New Project..."], "a browser makes new projects, but opens none");
 	const desktop = shellWith(true);
-	assertEqual(labels(desktop.menus.resolve("menubar/file"))[0], "Open Folder...", "first in File");
-	assertEqual(desktop.menus.resolve("shell/openWorkspace")[0].keys, "Ctrl+Shift+Alt+O");
+	assertEqual(labels(desktop.menus.resolve("menubar/file")).slice(0, 2), ["New Project...", "Open Folder..."], "first in File, after New Project");
+	assertEqual(desktop.menus.resolve("shell/openWorkspace").find((row) => row.command === "shell.openFolder").keys, "Ctrl+Shift+Alt+O");
 });
 
 test("desktop: the start page offers Open Folder, which asks the app", async () => {
 	const plain = startPageView(shellWith(false));
-	assertEqual(plain.querySelectorAll(".sp-start button").length, 0);
-	assertEqual(plain.querySelector(".sp-start p").textContent, "Open a project on the server: ied <folder or .iedsln>");
+	assertEqual([...plain.querySelectorAll(".sp-start button")].map((b) => b.textContent), ["New Project..."], "a browser: New Project only");
+	assertEqual(plain.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .iedsln>");
 	const shell = shellWith(true);
 	const view = startPageView(shell);
-	const button = view.querySelector(".sp-start button");
-	assertEqual(button.textContent, "Open Folder...");
+	assertEqual([...view.querySelectorAll(".sp-start button")].map((b) => b.textContent), ["New Project...", "Open Folder..."]);
+	const button = [...view.querySelectorAll(".sp-start button")].find((b) => b.textContent === "Open Folder...");
 	assertEqual(view.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .iedsln>", "the command line too");
 	let asked = 0;
 	const before = Object.getOwnPropertyDescriptor(window, "iedDesktop");

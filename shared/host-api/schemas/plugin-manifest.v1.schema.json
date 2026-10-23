@@ -692,16 +692,21 @@
 		},
 		"projectTemplate": {
 			"type": "object",
-			"required": ["id", "title", "steps"],
+			"required": ["id", "title"],
 			"additionalProperties": false,
+			"description": "A New Project template (docs/03 'New projects'): its steps run in the new workspace's folder, or in the open solution's to add the project there, then its files are copied into the project's folder.",
 			"properties": {
-				"id": { "type": "string" },
+				"id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
 				"title": { "type": "string" },
 				"description": { "type": "string" },
 				"icon": { "$ref": "#/$defs/icon" },
-				"kind": { "enum": ["project", "solution", "item"] },
-				"parameters": { "type": "object", "description": "JSON Schema rendered as the template's form." },
-				"steps": { "type": "array", "items": { "$ref": "project.v1.schema.json#/$defs/step" } }
+				"language": { "type": "string", "description": "The language id of the project it makes: the New Project dialog's filter and its tile (projectIcons)." },
+				"tags": { "type": "array", "items": { "type": "string" }, "description": "What else the dialog shows and filters by: 'Console', 'Library'." },
+				"kind": { "enum": ["project", "solution", "item"], "default": "project" },
+				"into": { "type": "array", "items": { "type": "string" }, "description": "Files in a solution's folder that let it add the project there (nuke.toml: its steps' `nuke init NAME` adds it); without them it only makes new workspaces." },
+				"files": { "type": "string", "description": "A folder of the plugin copied into the new project's folder after the steps, ${name} filled in paths and text; a file already there stays." },
+				"parameters": { "type": "object", "description": "JSON Schema rendered as the template's form (not read yet)." },
+				"steps": { "type": "array", "items": { "$ref": "project.v1.schema.json#/$defs/step" }, "description": "Run first, each to its end (two minutes at most), with ${name}, ${projectDir}, ${workspaceDir}, ${config:KEY} and ${env:NAME}; the default folder is ${workspaceDir}." }
 			}
 		},
 		"toolCall": {

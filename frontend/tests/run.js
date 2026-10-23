@@ -31,6 +31,7 @@ import "./chatmentions.test.js";
 import "./chatpane.test.js";
 import "./claude.test.js";
 import "./hovercard.test.js";
+import "./newproject.test.js";
 import "./settings.test.js";
 import "./git.test.js";
 import "./semanticcolors.test.js";

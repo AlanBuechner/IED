@@ -2,7 +2,7 @@
 release (vendor/llvm) and this machine's Visual Studio: programs linking static libraries and their links, a DLL,
 compiles only when they have to, a failed compile leaving nothing behind, stale objects removed, object name clashes,
 a link past the Windows command line, the compile database, copies and the assets link, test programs, and the checks
-of the driver's settings. Skipped without the LLVM release or Visual Studio."""
+of the driver's settings, and where the LLVM release comes from. Skipped without the LLVM release or Visual Studio."""
 
 import importlib
 import json
@@ -38,6 +38,36 @@ def has_toolchain():
 	except ValueError:
 		return False
 	return True
+
+
+class LlvmFolderTests(unittest.TestCase):
+	"""Where the LLVM release comes from: the workspace's setting, else clang on PATH, else the checkout's (setup.bat)."""
+
+	def setUp(self):
+		self.toolchain = module("toolchain")
+		self.settings = module("settings")
+		self.root = os.path.join(REPOSITORY, "build", "nuke-tests", "llvm-folder")
+		shutil.rmtree(self.root, ignore_errors=True)
+		os.makedirs(os.path.join(self.root, "llvm", "bin"))
+		open(os.path.join(self.root, "llvm", "bin", "clang.exe"), "w").close()
+		self.path = os.environ.get("PATH", "")
+		os.environ["PATH"] = self.root   # no clang on it
+
+	def tearDown(self):
+		os.environ["PATH"] = self.path
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	def folder(self, table, checkout):
+		return self.toolchain.llvm_folder(self.settings.read_settings(table), self.root, checkout)
+
+	def test_the_workspace_then_the_checkout(self):
+		checkout = os.path.join(self.root, "llvm")
+		self.assertEqual(self.folder({"llvm": "named"}, checkout), os.path.join(self.root, "named").replace("\\", "/"), "the workspace's own")
+		self.assertEqual(self.folder({}, checkout), checkout.replace("\\", "/"), "no setting, no clang on PATH: the checkout's")
+		with self.assertRaises(ValueError) as none:
+			self.folder({}, os.path.join(self.root, "missing"))
+		self.assertIn("setup.bat", str(none.exception))
+		self.assertTrue(self.toolchain.CHECKOUT_LLVM.replace("\\", "/").endswith("/vendor/llvm"), self.toolchain.CHECKOUT_LLVM)
 
 
 @unittest.skipUnless(sys.platform == "win32" and has_toolchain(), "needs vendor/llvm (setup.bat) and Visual Studio's C++ tools")

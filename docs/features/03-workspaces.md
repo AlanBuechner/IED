@@ -80,6 +80,6 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
-| F-WSP-60 | *New Project / New Solution* dialog listing `projectTemplates` contributions (name, description, icon, parameters schema) | P1 | US-WSP-8 | plugins/editor |
-| F-WSP-61 | Template execution = a command list (like toolbar steps), typically calling the build system's init (`nuke init`) and then adding the result to the solution | P1 | US-WSP-8 | plugins/editor |
+| F-WSP-60 | *New Project / New Solution* dialog listing `projectTemplates` contributions (name, description, icon, parameters schema) - **built** (2026-10-22) as the shell's, with search and a language filter; parameters not read yet | P1 | US-WSP-8 | shell (`newproject.js`) |
+| F-WSP-61 | Template execution = a command list (like toolbar steps), typically calling the build system's init (`nuke init`) and then adding the result to the solution - **built**: steps then files, a new workspace or into a Nuke solution (`docs/03` "New projects") | P1 | US-WSP-8 | server (`src/projects`) |
 | F-WSP-62 | *Add New Item* (file templates per language, contributed) | P2 | US-WSP-8 | plugins/editor |

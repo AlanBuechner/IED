@@ -1,9 +1,9 @@
 # Nuke workspace manifest (reference: Nuke/README.md in the IED repository).
 [workspace]
 name = "{name}"
-toolchain = "{toolchain}"
-default-project = "{name}"
+{toolchain_line}default-project = "{name}"
 
 [project]
 name = "{name}"
 kind = "{kind}"
+{language_line}

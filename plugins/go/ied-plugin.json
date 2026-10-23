@@ -28,6 +28,11 @@
 		"projectIcons": [
 			{ "languageId": "go", "label": "GO", "color": "--hue-cyan", "presets": ["go", "go.nuke"], "markers": ["go.mod", "go.work"] }
 		],
+		"projectTemplates": [
+			{ "id": "console", "title": "Console App", "language": "go", "tags": ["Console"], "into": ["nuke.toml"], "files": "templates/console",
+				"description": "A Go command (package main with its go.mod), built and run by Nuke through the go tool.",
+				"steps": [{ "label": "nuke init", "run": "\"${config:nuke.command}\" init ${name} --language go --ied" }] }
+		],
 		"outputLinks": [
 			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
 		],

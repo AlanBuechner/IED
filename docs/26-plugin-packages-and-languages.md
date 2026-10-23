@@ -149,9 +149,9 @@ A language plugin owns everything about its language. The host and the default f
 
 | Plugin | Languages | Brings now | Brings later |
 |---|---|---|---|
-| `ied.cpp` | C, C++ | clangd, CodeLLDB, icons, matchers; CMake/meson markers; the Nuke driver (Frost's build, merged) and the C++ libraries (Core, Reflection, UnitTesting, ...) | CMake and MSBuild presets, a CMake Nuke driver |
+| `ied.cpp` | C, C++ | clangd, CodeLLDB, icons, matchers; CMake/meson markers; the Nuke driver (Frost's build, merged) and the C++ libraries (Core, Reflection, UnitTesting, ...); New Project's C++ Console App, C Console App and Static Library | CMake and MSBuild presets, a CMake Nuke driver |
 | `ied.rust` | Rust | rust-analyzer, cargo preset, icons | cargo Nuke driver, `cargo_metadata` tool, the `ied-profiler` crate and a Profile task (`docs/16`) |
-| `ied.go` | Go | icons, markers | gopls, go preset, go Nuke driver, the profiler client module, the Go execution-trace importer (`profilerImporters`) and a Profile task (`docs/16`) |
+| `ied.go` | Go | icons, markers, New Project's Console App | gopls, go preset, go Nuke driver, the profiler client module, the Go execution-trace importer (`profilerImporters`) and a Profile task (`docs/16`) |
 | `ied.python` | Python | icons, markers | a language server, venv-aware run/test presets |
 | `ied.web` | JavaScript, TypeScript, HTML, CSS, SCSS | icons, markers | a TS server, npm-script presets |
 | `ied.csharp` | C# | icons, markers | `dotnet` presets |
@@ -162,7 +162,7 @@ A language plugin owns everything about its language. The host and the default f
 | `ied.scripts` | Shell, PowerShell, Batch | icons | |
 | `ied.lua`, `ied.sql` | Lua, SQL | icons | |
 | `ied.filetypes` | (no language) | media, archive, binary, license icons; plain text | |
-| `c4` (in every C4 toolchain) | C4 | as now, plus its skills (`C4/IedPlugin/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section and `c4.nuke` extending Nuke's preset | C4 code: `c4_*` AI tools, test provider, project templates |
+| `c4` (in every C4 toolchain) | C4 | as now, plus its skills (`C4/IedPlugin/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section, `c4.nuke` extending Nuke's preset and New Project's Console App and Module | C4 code: `c4_*` AI tools, test provider |
 | `ied.nuke` (built in) | (no language: the build system) | the `nuke` preset, `nuke.command`, the `nuke.toml` icon, the Nuke skill, a section and the `nuke_list` tool | |
 
 The editor keeps no language knowledge: the compiler location shapes, Markdown fence names and Monaco control keywords it held moved into the language plugins (section 3), and its Markdown preview into `ied.markdown`, which colors fenced code through the editor's `editor.colorize` binding (now `{languageId | path, lines}`).

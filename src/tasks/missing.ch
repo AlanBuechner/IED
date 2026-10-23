@@ -15,6 +15,7 @@ namespace Ied
 	// is or with one of `extensions` (PATHEXT).
 	bool FindsProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions);
 
-	// The red line that says `program` was not found and how to give it.
+	// What says `program` was not found and how to give it; the note is that as a red line of a run's output.
+	Core::String MissingProgramText(Core::StringView program, Core::StringView setting);
 	Core::String MissingProgramNote(Core::StringView program, Core::StringView setting);
 }

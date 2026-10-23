@@ -36,6 +36,9 @@ namespace Ied
 		public int64 timeoutSeconds;
 	}
 
+	// A step as a task file or a project template writes it.
+	TaskStep* ReadTaskStep(const Serialization::DomNode& node);
+
 	class TaskDef
 	{
 		public Core::String key;

@@ -38,8 +38,11 @@ namespace Ied
 	}
 
 	Core::String MissingProgramNote(Core::StringView program, Core::StringView setting) {
+		return (Core::String("\x1b[31m") + MissingProgramText(program, setting).View()) + "\x1b[0m\r\n";
+	}
+
+	Core::String MissingProgramText(Core::StringView program, Core::StringView setting) {
 		Core::StringBuilder note;
-		note.Append("\x1b[31m");
 		note.Append(program);
 		note.Append(" was not found: it is not a program in the step's folder or on PATH. ");
 		if (setting.IsEmpty()) note.Append("Give its full path, or put its folder on PATH.");
@@ -48,7 +51,6 @@ namespace Ied
 			note.Append(setting);
 			note.Append(" (Settings) to its full path, or put its folder on PATH and restart IED.");
 		}
-		note.Append("\x1b[0m\r\n");
 		return note.ToString();
 	}
 }

@@ -7,6 +7,7 @@ import * as T from "./layouttree.js";
 import { showPalette } from "./palette.js";
 import { showNotificationCenter } from "./notifications.js";
 import { showWorkspaceSwitcher } from "./workspaces.js";
+import { showNewProject } from "./newproject.js";
 
 function tabOf(shell, args) {
 	return (args && args.ref) || (shell.focus && shell.focus.ref) || null;
@@ -64,6 +65,7 @@ const COMMANDS = [
 	{ id: "shell.togglePanel", title: "Show or Hide the Panel", category: "View", icon: "$(layout-panel)", run: (shell) => shell.chrome && shell.chrome.panel && shell.chrome.panel.mounted && shell.chrome.panel.setOpen(!shell.chrome.panel.isOpen()) },
 	{ id: "shell.showNotifications", title: "Notifications", category: "View", icon: "$(bell)", run: (shell, args) => showNotificationCenter(shell, args && args.at) },
 	{ id: "shell.clearNotifications", title: "Clear All Notifications", category: "View", run: (shell) => Promise.all(shell.server.notifications.map((n) => shell.client.request("server.dismiss", { id: n.id }))) },
+	{ id: "shell.newProject", title: "New Project...", category: "File", icon: "$(new-folder)", run: (shell, args) => showNewProject(shell, { addTo: Boolean(args && (args.addTo || args.kind === "solution")) }) },
 	{ id: "shell.startPage", title: "Start Page", category: "File", icon: "$(home)", run: (shell) => shell.showStartPage() },
 	{ id: "shell.openFolder", title: "Open Folder...", category: "File", icon: "$(folder-opened)", run: () => window.iedDesktop && window.iedDesktop.openFolder() },
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
@@ -76,6 +78,7 @@ const COMMANDS = [
 
 const MENUS = {
 	"menubar/file": [
+		{ command: "shell.newProject", group: "0_new" },
 		{ command: "shell.openFolder", group: "0_open", when: "desktopApp" },
 		{ command: "shell.startPage", group: "0_open", order: 1 },
 		{ command: "shell.switchWorkspace", group: "1_workspace" },
@@ -109,6 +112,7 @@ const MENUS = {
 	],
 	// The ways to open a workspace: buttons where none is open, rows of the workspace switcher.
 	"shell/openWorkspace": [
+		{ command: "shell.newProject", group: "0_new" },
 		{ command: "shell.openFolder", group: "1_open", when: "desktopApp" },
 	],
 	"tab/context": [

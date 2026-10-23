@@ -128,6 +128,23 @@ class Workspaces:
 	def _recent_changed(self):
 		self.server.hub.publish("server", "recent.changed", {"recent": [dict(p) for p in self.recent]})
 
+	def add(self, name, root, files, kind, solution=None):
+		"""A workspace opened after the start, with its topics and every service's state for it."""
+		ws = Workspace("w%d" % (len(self.items) + 1), name, root, files, [], kind=kind)
+		ws.solution = solution
+		self.items[ws.ws_id] = ws
+		self.server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
+		for service in (self.server.layout, self.server.settings, self.server.outputs, self.server.lsp, self.server.tasks, self.server.debug, self.server.terminals):
+			service.opened(ws.ws_id)
+		self.server.hub.publish("server", "workspace.opened", ws.summary())
+		return ws
+
+	def opened(self, ws, path, kind):
+		"""`ws` first in the recent projects, as opening it again puts it."""
+		self.recent = [r for r in self.recent if folded(r["path"]) != folded(path)]
+		self.recent.insert(0, {"path": path, "name": ws.name, "kind": kind, "opened": int(time.time() * 1000), "favorite": False, "exists": True})
+		self._recent_changed()
+
 	async def m_ws_openRecent(self, call, p):
 		project = self._recent(p.str("path"))
 		if not project.get("exists", True):
@@ -137,14 +154,7 @@ class Workspaces:
 		ws = next((w for w in self.items.values() if folded(w.root) == folded(root)), None)
 		if ws is None:
 			files = workspace_files.solution_files(project["name"]) if solution else {"README.md": "# %s\n" % project["name"]}
-			ws = Workspace("w%d" % (len(self.items) + 1), project["name"], root, files, [], kind="solution" if solution else "folder")
-			if solution:
-				ws.solution = workspace_files.solution_model(project["name"], root)
-			self.items[ws.ws_id] = ws
-			self.server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
-			for service in (self.server.layout, self.server.settings, self.server.outputs, self.server.lsp, self.server.tasks, self.server.debug, self.server.terminals):
-				service.opened(ws.ws_id)
-			self.server.hub.publish("server", "workspace.opened", ws.summary())
+			ws = self.add(project["name"], root, files, "solution" if solution else "folder", workspace_files.solution_model(project["name"], root) if solution else None)
 		self.recent.remove(project)
 		self.recent.insert(0, dict(project, opened=int(time.time() * 1000)))
 		self._recent_changed()

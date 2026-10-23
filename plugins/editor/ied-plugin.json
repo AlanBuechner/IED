@@ -202,6 +202,7 @@
 			],
 			"explorer/context": [
 				{ "command": "ied.task.setStartup", "group": "0_startup", "when": "explorerItemKind == 'project' && explorerProjectKind != 'library' && explorerProjectKind != 'plugin'" },
+				{ "command": "shell.newProject", "group": "0_add", "when": "explorerItemKind == 'solution'" },
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.newFile", "group": "2_new", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.newFolder", "group": "2_new", "order": 1, "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },

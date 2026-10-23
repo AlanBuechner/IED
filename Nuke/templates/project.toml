@@ -2,4 +2,4 @@
 [project]
 name = "{name}"
 kind = "{kind}"
-# depends = ["Engine"]
+{language_line}# depends = ["Engine"]

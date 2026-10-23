@@ -51,7 +51,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `rebuild` | `clean`, then `build` |
 | `list` | the workspace's projects (`--json`: name, kind, folder, manifest, depends, tests, default, output) |
 | `info` | workspace, configuration, toolchain, output folders and commands (`--json`) |
-| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`); with `--ied` also the workspace's IED solution (below) |
+| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`); with `--ied` also the workspace's IED solution (below); `--language ID` for a project in another language than C4 (no sources: IED's New Project templates bring them) |
 | `toolchain` | `list`, `which`, `install`, `remove`, `use` (section 8) |
 | `help` | every command, including the workspace's own; `nuke help COMMAND` |
 
@@ -414,7 +414,8 @@ linker-args = ["-fuse-ld=lld"]
 ```toml
 # the workspace's nuke.toml
 [languages.cpp]
-llvm = "vendor/llvm"               # the LLVM release (default: the folder above the clang on PATH)
+llvm = "vendor/llvm"               # the LLVM release (default: the folder above the clang on PATH, else the IED
+                                   # checkout's vendor/llvm, which setup.bat installs)
 system-includes = ["${cpp.llvm}/include"]   # system include folders of every C++ compile
 standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for .c files
 ```

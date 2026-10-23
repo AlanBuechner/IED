@@ -1,5 +1,6 @@
 """The C++ toolchain a workspace builds with: an LLVM release (clang, lld, llvm-lib; [languages.cpp] llvm, else the
-folder above the clang on PATH), clang's own headers, and the Visual Studio and Windows SDK it targets."""
+folder above the clang on PATH, else the one setup.bat installs in the IED checkout this package is part of), clang's
+own headers, and the Visual Studio and Windows SDK it targets."""
 
 import functools
 import os
@@ -10,6 +11,8 @@ from . import msvc
 from .settings import Settings
 
 TARGET = "x86_64-pc-windows-msvc"
+# plugins/cpp/nuke/driver -> the checkout's vendor/llvm (tools/setup/deps.toml)
+CHECKOUT_LLVM = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "vendor", "llvm"))
 
 
 @dataclass(frozen=True)
@@ -26,15 +29,18 @@ class Toolchain:
 		return TARGET
 
 
-def llvm_folder(settings, workspace_dir):
-	"""The LLVM release the workspace names, else the one whose clang is on PATH."""
+def llvm_folder(settings, workspace_dir, checkout_llvm=CHECKOUT_LLVM):
+	"""The LLVM release the workspace names, else the one whose clang is on PATH, else the checkout's (a workspace made
+	outside the IED checkout, from a template, names none)."""
 	if settings.llvm:
 		folder = settings.llvm if os.path.isabs(settings.llvm) else os.path.join(workspace_dir, settings.llvm)
 		return os.path.normpath(folder).replace("\\", "/")
 	clang = shutil.which("clang")
-	if clang is None:
-		raise ValueError("no LLVM for C++: name its folder in the workspace's [languages.cpp] llvm = \"...\" or put clang on PATH")
-	return os.path.dirname(os.path.dirname(os.path.abspath(clang))).replace("\\", "/")
+	if clang is not None:
+		return os.path.dirname(os.path.dirname(os.path.abspath(clang))).replace("\\", "/")
+	if os.path.isfile(os.path.join(checkout_llvm, "bin", "clang.exe")):
+		return checkout_llvm.replace("\\", "/")
+	raise ValueError("no LLVM for C++: name its folder in the workspace's [languages.cpp] llvm = \"...\", put clang on PATH, or run setup.bat in the IED checkout")
 
 
 def clang_resource_includes(llvm):

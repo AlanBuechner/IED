@@ -1,0 +1,26 @@
+// projects: what can name a new project, and ${name} filled in a template's paths and text.
+
+include "projects/templates.ch"
+
+[test("server.projects")]
+class ProjectsTests {
+	[test("names")]
+	public static void TestNames() {
+		assert_true(Ied::IsProjectName(Core::StringView("Game")) && Ied::IsProjectName(Core::StringView("my_game-2.0")) && Ied::IsProjectName(Core::StringView("_tool")), "letters, digits, '_', '.', '-'");
+		assert_true(!Ied::IsProjectName(Core::StringView("")), "none");
+		assert_true(!Ied::IsProjectName(Core::StringView("bad name")), "a space");
+		assert_true(!Ied::IsProjectName(Core::StringView("-dash")) && !Ied::IsProjectName(Core::StringView(".hidden")), "not first");
+		assert_true(!Ied::IsProjectName(Core::StringView("a/b")) && !Ied::IsProjectName(Core::StringView("..")), "no folders");
+		Core::StringBuilder long;
+		for (int64 i = 0; i < 65; ++i) long.Append("a");
+		assert_true(!Ied::IsProjectName(long.View()), "64 at most");
+	}
+
+	[test("with_name")]
+	public static void TestWithName() {
+		assert_se("src/Game.h", Ied::WithName(Core::StringView("src/${name}.h"), Core::StringView("Game")).CStr(), "a path");
+		assert_se("Game says hi to Game", Ied::WithName(Core::StringView("${name} says hi to ${name}"), Core::StringView("Game")).CStr(), "every one");
+		assert_se("${other} stays", Ied::WithName(Core::StringView("${other} stays"), Core::StringView("Game")).CStr(), "only ${name}");
+		assert_se("", Ied::WithName(Core::StringView(""), Core::StringView("Game")).CStr(), "nothing");
+	}
+}
