@@ -1,4 +1,5 @@
-// tasks: what a project offers (presets under its own file, by key), ${name} expansion that refuses unknown names,
+// tasks: what a project offers (presets under its own file, by key; a preset no loaded plugin offers names the plugin
+// that offers it and why it is out), ${name} expansion that refuses unknown names,
 // problem matchers over one line and over several, the toolbar's selections on disk, a run's problems as JSON, and a
 // step's missing program: the setting that names it, whether cmd would find it, what to say.
 
@@ -8,10 +9,26 @@ include "tasks/matcher.ch"
 include "tasks/selections.ch"
 include "tasks/runner.ch"
 include "tasks/missing.ch"
+include "tasks/presets.ch"
 
 static Serialization::DomNode Json(const char* text) {
 	Serialization::DomDoc* doc = new Serialization::DomDoc();
 	return Serialization::ReadJson(Core::StringView(text), *doc).root;
+}
+
+// A plugin as the host keeps it: `contributes` null for a manifest that could not be read.
+static Ied::Plugin* PluginWith(const char* id, Ied::PluginState state, const char* contributes) {
+	Ied::Manifest* manifest = new Ied::Manifest();
+	manifest->id = Core::String(id);
+	manifest->folder = FS::Path("C:/toolchains/c4/dev/ied");
+	if (contributes) {
+		manifest->root = Json(contributes);
+		manifest->contributes = manifest->root.Member("contributes");
+	}
+	Ied::Plugin* plugin = new Ied::Plugin();
+	plugin->manifest = manifest;
+	plugin->state = state;
+	return plugin;
 }
 
 static Ied::ProblemMatcher* Matcher(const char* json) {
@@ -43,6 +60,37 @@ class TasksTests {
 		Core::String note = Ied::MissingProgramNote(Core::StringView("nuke"), Core::StringView("nuke.command"));
 		assert_true(note.View().IndexOf(Core::StringView("nuke was not found"), 0) >= 0 && note.View().IndexOf(Core::StringView("Set nuke.command (Settings)"), 0) >= 0, "names the program and its setting");
 		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("missing_preset")]
+	public static void TestMissingPreset() {
+		const char* offersNuke = "{\"contributes\": {\"taskPresets\": [{\"id\": \"c4.nuke\"}]}}";
+		Core::Array<Ied::Plugin*> plugins;
+		plugins.Push(PluginWith("rust", Ied::PluginState::Loaded, "{\"contributes\": {\"taskPresets\": [{\"id\": \"rust.nuke\"}]}}"));
+		plugins.Push(PluginWith("lint", Ied::PluginState::Failed, "{\"contributes\": {}}"));
+		assert_se("no plugin offers the task preset c4.nuke", Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins).CStr(), "no plugin that is out offers it");
+
+		Ied::Plugin* c4 = PluginWith("c4", Ied::PluginState::Failed, offersNuke);
+		c4->manifest->problems.Push(Core::String("/contributes/systemMessageSections/0/maxTokens: 640 is greater than maximum 600"));
+		plugins.Push(c4);
+		Core::String text = Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins);
+		assert_true(text.View().StartsWith(Core::StringView("no plugin offers the task preset c4.nuke: the plugin c4, which offers it, did not load: /contributes/systemMessageSections/0/maxTokens: 640 is greater than maximum 600, in ")), text.CStr());
+		assert_true(text.View().EndsWith(Core::StringView("ied-plugin.json")), "the manifest to fix");
+		c4->manifest->problems.Push(Core::String("/version: not a version"));
+		assert_true(Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins).View().Contains(Core::StringView("600 (and 1 more), in ")), "the first problem, and how many more");
+
+		c4->state = Ied::PluginState::Untrusted;
+		assert_se("no plugin offers the task preset c4.nuke: the plugin c4, which offers it, is off until this workspace is trusted", Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins).CStr(), "a workspace not trusted");
+		c4->state = Ied::PluginState::Disabled;
+		assert_true(Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins).View().EndsWith(Core::StringView("which offers it, is turned off (Extensions > Manage Plugins)")), "turned off");
+		c4->state = Ied::PluginState::Overridden;
+		assert_se("no plugin offers the task preset c4.nuke", Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins).CStr(), "another of its id stands in");
+
+		Ied::Plugin* unread = PluginWith("broken", Ied::PluginState::Failed, nullptr);
+		unread->manifest->problems.Push(Core::String("ied-plugin.json is not JSON: unexpected end (line 3)"));
+		plugins.Push(unread);
+		text = Ied::MissingPresetText(Core::StringView("c4.nuke"), plugins);
+		assert_true(text.View().StartsWith(Core::StringView("no plugin offers the task preset c4.nuke; the plugin broken did not load: ied-plugin.json is not JSON: unexpected end (line 3), in ")), text.CStr());
 	}
 
 	[test("presets_under_the_project")]

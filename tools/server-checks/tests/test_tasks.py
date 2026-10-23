@@ -3,7 +3,8 @@ selections persist per machine; a run streams its steps' output to run:<runId> a
 lines into diagnostics, follows onlyIf, saves dirty documents first, refuses unknown variables and a second `single`
 run, and cancel kills the step's whole process tree. An untrusted workspace runs nothing; a folder workspace gets the
 presets whose `detect` matches. Only a project that runs can be the startup project (not a library), trusting a workspace
-sends its offer again, and a step whose program a setting names says how to fix it when that program is not there."""
+sends its offer again, a step whose program a setting names says how to fix it when that program is not there, and a
+preset no loaded plugin offers names the workspace's plugin that offers it and why it is out (C4 BUG-385)."""
 
 import asyncio
 import json
@@ -158,6 +159,38 @@ class TaskTests(ServerTestCase):
 		self.assertEqual("build", tasks["build"]["slot"], "the preset's task stays")
 		self.assertEqual(["config", "|", "build"], offer["toolbar"])
 		self.assertEqual([], offer["problems"])
+
+	async def offer_of(self, project):
+		"""task.list for `project` once the solution that names it has been read again."""
+		for _ in range(50):
+			try:
+				return await self.client.request("task.list", {"wsId": "w1", "project": project})
+			except RpcFailure:
+				await asyncio.sleep(0.1)
+		self.fail("no offer for " + project)
+
+	async def test_a_missing_preset_names_the_plugin_that_is_out(self):
+		"""The owner saw only "no plugin offers the task preset c4.nuke" when the c4 plugin's manifest failed its schema
+		(maxTokens 640 over 600, C4 BUG-385): the problem now names the plugin and why it is out - a manifest the schema
+		refuses, with the file to fix, or a workspace not trusted."""
+		broken = dict(FAKE_PLUGIN, id="broken", contributes={"taskPresets": [{"id": "broken.make", "label": "Broken"}],
+			"systemMessageSections": [{"id": "broken", "text": "Hi.", "maxTokens": 640}]})
+		write(os.path.join(self.repo, ".ied", "plugins", "broken", "ied-plugin.json"), broken)
+		local = dict(FAKE_PLUGIN, id="local", contributes={"taskPresets": [{"id": "local.make", "label": "Local",
+			"tasks": {"build": {"slot": "build", "steps": [{"run": python("print('local')")}]}}}]})
+		write(os.path.join(self.repo, ".ied", "plugins", "local", "ied-plugin.json"), local)
+		write(os.path.join(self.repo, "Broken.iedproj"), {"version": 1, "name": "Broken", "root": ".", "kind": "other", "presets": ["broken.make"]})
+		write(os.path.join(self.repo, "Local.iedproj"), {"version": 1, "name": "Local", "root": ".", "kind": "other", "presets": ["local.make"]})
+		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}, {"file": "Broken.iedproj"}, {"file": "Local.iedproj"}]})
+		problems = (await self.offer_of("Broken"))["problems"]
+		self.assertEqual(1, len(problems), problems)
+		self.assertTrue(problems[0].startswith("no plugin offers the task preset broken.make: the plugin broken, which offers it, did not load: "
+			"/contributes/systemMessageSections/0/maxTokens: 640 is greater than maximum 600"), problems[0])
+		self.assertIn(os.path.join(".ied", "plugins", "broken", "ied-plugin.json"), problems[0].replace("/", os.sep), "the manifest to fix")
+		self.assertEqual([], (await self.offer_of("Local"))["problems"], "a plugin that loads offers its preset")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
+		self.assertEqual(["no plugin offers the task preset local.make: the plugin local, which offers it, is off until this workspace is trusted"],
+			(await self.offer_of("Local"))["problems"])
 
 	async def test_a_preset_extends_another(self):
 		"""docs/26: a preset reads its base first and overrides it by key; its problemMatcher reaches every step that names

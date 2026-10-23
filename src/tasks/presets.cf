@@ -1,0 +1,61 @@
+include "presets.ch"
+
+namespace Ied
+{
+	static bool Offers(const Manifest* manifest, Core::StringView id) {
+		Serialization::DomNode presets = manifest->contributes.Member("taskPresets");
+		for (int64 i = 0; i < presets.Count(); ++i)
+			if (presets.At(i).Member("id").AsView() == id) return true;
+		return false;
+	}
+
+	static Core::String FailedText(const Manifest* manifest) {
+		Core::StringBuilder why;
+		why.Append("did not load: ");
+		why.Append(manifest->problems.IsEmpty() ? Core::StringView("its manifest has a problem") : manifest->problems[0].View());
+		if (manifest->problems.Count() > 1) {
+			why.Append(" (and ");
+			why.AppendInt(manifest->problems.Count() - 1);
+			why.Append(" more)");
+		}
+		why.Append(", in ");
+		why.Append((manifest->folder / kManifestFile).Normalized().View());
+		return why.ToString();
+	}
+
+	// Why `plugin` is not loaded, from "the plugin <id> ..."; "" when it is, or another plugin of its id stands in.
+	static Core::String NotLoadedText(const Plugin* plugin) {
+		if (plugin->state == PluginState::Failed) return FailedText(plugin->manifest);
+		if (plugin->state == PluginState::Untrusted) return Core::String("is off until this workspace is trusted");
+		if (plugin->state == PluginState::Disabled) return Core::String("is turned off (Extensions > Manage Plugins)");
+		if (plugin->state == PluginState::NeedsApproval) return Core::String("waits for your approval (Extensions > Manage Plugins)");
+		return Core::String();
+	}
+
+	static void AppendPlugin(Core::StringBuilder& text, const Plugin* plugin, const char* between, Core::StringView why) {
+		text.Append("the plugin ");
+		text.Append(plugin->manifest->id.View());
+		text.Append(between);
+		text.Append(why);
+	}
+
+	Core::String MissingPresetText(Core::StringView id, const Core::Array<Plugin*>& plugins) {
+		Core::StringBuilder text;
+		text.Append("no plugin offers the task preset ");
+		text.Append(id);
+		for (const Plugin* plugin : plugins) {
+			Core::String why = NotLoadedText(plugin);
+			if (why.IsEmpty() || !Offers(plugin->manifest, id)) continue;
+			text.Append(": ");
+			AppendPlugin(text, plugin, ", which offers it, ", why.View());
+			return text.ToString();
+		}
+		for (const Plugin* plugin : plugins) {
+			Core::String why = NotLoadedText(plugin);
+			if (why.IsEmpty() || plugin->manifest->root.IsValid()) continue;
+			text.Append("; ");
+			AppendPlugin(text, plugin, " ", why.View());
+		}
+		return text.ToString();
+	}
+}

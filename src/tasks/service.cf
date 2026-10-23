@@ -1,5 +1,6 @@
 include "service.ch"
 include "missing.ch"
+include "presets.ch"
 include "host/server.ch"
 include "plugins/when.ch"
 include "fs/glob.ch"
@@ -91,20 +92,30 @@ namespace Ied
 		if (ids.IsEmpty())
 			for (const Serialization::DomNode& preset : presets)
 				if (!preset.Member("detect").AsView().IsEmpty() && Detected(project->root, preset.Member("detect").AsView())) ids.Push(Core::String(preset.Member("id").AsView()));
+		Server* host = server;
+		MissingPreset missing = [host, ws](Core::StringView id) -> Core::String { return MissingPresetText(id, PluginsOf(host, ws)); };
 		for (const Core::String& id : ids) {
 			Core::Array<Core::String> chain;
-			ReadPreset(presets, id.View(), chain, into);
+			ReadPreset(presets, id.View(), chain, into, missing);
 		}
 	}
 
+	// The workspace's plugins, its own first, then the app's and the built-in ones: any of them may offer a preset.
+	static Core::Array<Plugin*> PluginsOf(Server* server, Workspace* ws) {
+		Core::Array<Plugin*> plugins = server->plugins->LocalFor(ws);
+		for (Plugin* plugin : server->plugins->All()) plugins.Push(plugin);
+		return plugins;
+	}
+
 	// The preset `id` into `into`, after the preset it extends (and that one's base before it); `chain` holds the ids
-	// being read, so a preset that extends itself is a problem instead of a loop.
-	static void ReadPreset(const Core::Array<Serialization::DomNode>& presets, Core::StringView id, Core::Array<Core::String>& chain, OfferedTasks& into) {
+	// being read, so a preset that extends itself is a problem instead of a loop. A preset no plugin offers is a problem
+	// `missing` words (presets.ch).
+	static void ReadPreset(const Core::Array<Serialization::DomNode>& presets, Core::StringView id, Core::Array<Core::String>& chain, OfferedTasks& into, MissingPreset missing) {
 		int64 found = -1;
 		for (int64 i = 0; i < presets.Count(); ++i)
 			if (presets[i].Member("id").AsView() == id) found = i;
 		if (found < 0) {
-			into.problems.Push((Core::String("no plugin offers the task preset ") + id));
+			into.problems.Push(missing(id));
 			return;
 		}
 		for (const Core::String& reading : chain)
@@ -114,7 +125,7 @@ namespace Ied
 			}
 		chain.Push(Core::String(id));
 		Core::StringView base = presets[found].Member("extends").AsView();
-		if (!base.IsEmpty()) ReadPreset(presets, base, chain, into);
+		if (!base.IsEmpty()) ReadPreset(presets, base, chain, into, missing);
 		ReadTaskEntries(presets[found], (Core::String("the preset ") + id).View(), into);
 	}
 
