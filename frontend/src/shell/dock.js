@@ -9,6 +9,7 @@
 import { h, icon, iconFrom, replace, append } from "/ui-kit/dom.js";
 import { autoHiddenOf, hiddenIn, isGroup, isSplit, nodeAt, pathOf, refsOf } from "./layouttree.js";
 import { TabSlide, alongStrip } from "./tabslide.js";
+import { ScrollPlaces } from "./scrollplaces.js";
 
 const MIN_PANE_PX = 80;
 const DRAG_START_PX = 5;
@@ -29,6 +30,8 @@ export class DockView {
 		this.container = container;
 		this.tree = null;
 		this.flyout = null;   // the slid-out window: {ref, el, returnFocus, stop}
+		this.places = new ScrollPlaces();
+		this.visibility = null;   // while views move: ref -> shown, told once they are placed
 		this.root = h("div.dock");
 		this.strips = Object.fromEntries(EDGES.map((edge) => [edge, h("div.ah-strip.ah-" + edge, { hidden: true, role: "tablist", "aria-label": "Auto-hidden tool windows" })]));
 		this.center = h("div.dock-center", null, this.root);
@@ -41,21 +44,38 @@ export class DockView {
 		if (this.flyout) this.dropFlyout();
 	}
 
-	// Builds the tree again; views keep their elements, the one with the focus keeps it, and what was scrolled keeps
-	// its place (an element moved to a new parent loses it).
+	// Builds the tree again; views keep their elements, the one with the focus keeps it, and each keeps its scroll place.
 	render(tree) {
 		this.tree = tree;
 		const focused = document.activeElement;
-		const scrolled = [...this.frame.querySelectorAll(".dock-body *")].filter((e) => e.scrollTop || e.scrollLeft).map((e) => [e, e.scrollTop, e.scrollLeft]);
-		const el = this.node(tree, []) || this.emptyWellGroup();
-		replace(this.root, el);
-		this.renderAutoHidden();
-		for (const [element, top, left] of scrolled) {
-			if (!element.isConnected) continue;
-			element.scrollTop = top;
-			element.scrollLeft = left;
-		}
+		this.moving(() => {
+			replace(this.root, this.node(tree, []) || this.emptyWellGroup());
+			this.renderAutoHidden();
+		});
 		if (focused && focused !== document.activeElement && this.frame.contains(focused)) focused.focus({ preventScroll: true });
+	}
+
+	// Runs `move`, which moves views' elements to new parents, where they lose their scroll places: the views shown
+	// before have theirs noted, and each view shown after gets its own back - now, or when a tab chosen again shows it.
+	// Views hear whether they are shown after that, on the page with their places back.
+	moving(move) {
+		this.places.note(this.views());
+		this.visibility = new Map();
+		const result = move();
+		this.places.restore(this.views());
+		const visibility = this.visibility;
+		this.visibility = null;
+		for (const [ref, shown] of visibility) this.host.views.setVisible(ref, shown);
+		return result;
+	}
+
+	setVisible(ref, shown) {
+		if (this.visibility) this.visibility.set(ref, shown);
+		else this.host.views.setVisible(ref, shown);
+	}
+
+	views() {
+		return this.frame.querySelectorAll(".dock-body > .view");
 	}
 
 	// Its activity is not shown, so neither is any of its views; the next render shows them again.
@@ -115,7 +135,7 @@ export class DockView {
 			const entry = views.get(ref);
 			entry.el.hidden = ref !== active;
 			body.append(entry.el);
-			views.setVisible(ref, ref === active);
+			this.setVisible(ref, ref === active);
 		}
 		if (visible.length === 0) body.append(this.host.emptyWell());
 		if (group.well) el.append(this.documentTabs(group, visible, active, path), body);
@@ -389,7 +409,7 @@ export class DockView {
 		const entry = this.host.views.get(ref);
 		entry.el.hidden = true;
 		if (entry.el.parentElement !== this.park) this.park.append(entry.el);
-		this.host.views.setVisible(ref, false);
+		this.setVisible(ref, false);
 	}
 
 	// Slides out the auto-hidden window `ref`; the shell asks this for a tab that is activated or shown.
@@ -401,14 +421,17 @@ export class DockView {
 			this.flyout = { ref, el: null, returnFocus: focused && !focused.closest(".ah-tab") ? focused : null, stop: this.watchAway() };
 		}
 		this.flyout.ref = ref;
-		this.renderAutoHidden();
+		this.moving(() => this.renderAutoHidden());
 	}
 
 	// Slides it back; with `restoreFocus`, the focus goes back where it was before (Escape, its strip tab again).
 	hideFlyout(restoreFocus) {
 		if (!this.flyout) return;
-		const flyout = this.dropFlyout();
-		this.renderAutoHidden();
+		const flyout = this.moving(() => {
+			const dropped = this.dropFlyout();
+			this.renderAutoHidden();
+			return dropped;
+		});
 		if (restoreFocus && flyout.returnFocus && flyout.returnFocus.isConnected) flyout.returnFocus.focus({ preventScroll: true });
 	}
 
@@ -443,7 +466,7 @@ export class DockView {
 		const body = el.querySelector(":scope > .dock-body");
 		entry.el.hidden = false;
 		if (entry.el.parentElement !== body) body.replaceChildren(entry.el);
-		this.host.views.setVisible(ref, true);
+		this.setVisible(ref, true);
 	}
 
 	// A click or the focus anywhere else slides the window back (a frame taking the focus only blurs the window), and so

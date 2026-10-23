@@ -9,6 +9,7 @@ import { initials, startPageView } from "./workspaces.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
+import { ScrollPlaces } from "./scrollplaces.js";
 
 const SLOTS = 4;
 
@@ -25,6 +26,7 @@ export class PhoneChrome {
 		this.app = h("div.app.phone", null, this.head, this.banners, this.area, this.strip, this.nav, this.panel.el);
 		this.state = "connecting";
 		this.shown = null;
+		this.places = new ScrollPlaces();
 		replace(root, this.app);
 		this.stopContext = shell.context.onChange(() => this.renderStrip());
 	}
@@ -133,9 +135,11 @@ export class PhoneChrome {
 		return tool || null;
 	}
 
+	// The pane's view takes the area; the one it replaces keeps its scroll places for when it is gone back to.
 	renderPane(pane) {
 		const ref = this.contentRef(pane);
 		const entry = ref ? this.shell.views.get(ref) : null;
+		this.places.note(this.area.querySelectorAll(":scope > .view"));
 		if (this.shown && this.shown !== ref) this.shell.views.setVisible(this.shown, false);
 		this.shown = ref;
 		if (!entry) {
@@ -144,6 +148,7 @@ export class PhoneChrome {
 		}
 		entry.el.hidden = false;
 		if (this.area.firstElementChild !== entry.el || this.area.children.length !== 1) replace(this.area, entry.el);
+		this.places.restore([entry.el]);
 		this.shell.views.setVisible(ref, true);
 		this.shell.focused(this.shell.currentActivity(), ref, null, false);
 	}
