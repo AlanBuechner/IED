@@ -15,6 +15,7 @@
 #include "ReflectABI.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/xxhash.h>
 #include <set>
 #include <tuple>
 #include <string_view>
@@ -30,6 +31,13 @@ namespace Scripting
 			for (const Core::String& part : enclosing) out += std::string(part.c_str()) + "::";
 			return out + name.c_str();
 		}
+
+		// The names of the program's symbols are long: hashed with xxh3 rather than a byte at a time.
+		struct NameHash
+		{
+			size_t operator()(std::string_view name) const { return llvm::xxh3_64bits(llvm::StringRef(name.data(), name.size())); }
+		};
+		using Names = std::unordered_set<std::string_view, NameHash>;
 
 		bool Reflected(const ProgramModel& model, const ObjectType* object)
 		{
@@ -113,10 +121,11 @@ namespace Scripting
 				const Table params = Params(&function, types);
 				const Table groups = Groups(function.groups);
 				const Table annotations = RecordAnnotations(&function);
+				const InvokeEntry* entry = ThunkEntry(&function);
 				m_Functions.push_back({ Text(name), Text(function.mangledName),
 					TypeText(function.type->GetReturnType()), params.count, params.rows, U32(function.isStatic || !owner ? 1 : 0),
-					U32(function.type->IsVariadic() ? 1 : 0), Text(owner ? QualifiedName(owner) : std::string()),
-					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function), Address(&function) });
+					U32(function.type->IsVariadic() ? 1 : 0), owner ? TypeText(owner) : Text(std::string()),
+					groups.count, groups.rows, Invoke(entry), annotations.count, annotations.rows, Code(entry), Address(entry) });
 			}
 
 			ImageDescription Finish()
@@ -154,9 +163,13 @@ namespace Scripting
 				if (fresh) known->second = Text(QualifiedName(type));
 				return known->second;
 			}
+			// A function's or global's name is one symbol however many rows name it (shared thunks, a method's code).
 			ImageValue Symbol(const llvm::GlobalValue* value)
 			{
-				return value ? m_Image.Symbol(value->getName().str(), llvm::isa<llvm::Function>(value), value->hasHiddenVisibility()) : Null();
+				if (!value) return Null();
+				auto [known, fresh] = m_SymbolOf.try_emplace(value);
+				if (fresh) known->second = m_Image.Symbol(value->getName().str(), llvm::isa<llvm::Function>(value), value->hasHiddenVisibility());
+				return known->second;
 			}
 
 			Table Rows(ImageShape shape, std::vector<ImageRow> rows)
@@ -165,20 +178,21 @@ namespace Scripting
 				return { U32(count), m_Image.Table(shape, std::move(rows)) };
 			}
 
-			// The function's invoke thunk, or null when reflection cannot call it.
-			ImageValue Invoke(const FunctionRecord* function) { return Entry(function, &InvokeEntry::thunk); }
-
-			// The code the function's shared thunk calls, or null for a thunk of its own.
-			ImageValue Code(const FunctionRecord* function) { return Entry(function, &InvokeEntry::code); }
-
-			// The function's own code, which FunctionContaining finds a return address in; null when it has no thunk.
-			ImageValue Address(const FunctionRecord* function) { return Entry(function, &InvokeEntry::function); }
-
-			ImageValue Entry(const FunctionRecord* function, llvm::Function* InvokeEntry::*part)
+			// The function's thunk and the code it calls; null when reflection cannot call it.
+			const InvokeEntry* ThunkEntry(const FunctionRecord* function) const
 			{
 				auto found = function ? m_Thunks.find(function) : m_Thunks.end();
-				return Symbol(found == m_Thunks.end() ? nullptr : found->second.*part);
+				return found == m_Thunks.end() ? nullptr : &found->second;
 			}
+
+			// The function's invoke thunk, or null when reflection cannot call it.
+			ImageValue Invoke(const InvokeEntry* entry) { return Symbol(entry ? entry->thunk : nullptr); }
+
+			// The code the function's shared thunk calls, or null for a thunk of its own.
+			ImageValue Code(const InvokeEntry* entry) { return Symbol(entry ? entry->code : nullptr); }
+
+			// The function's own code, which FunctionContaining finds a return address in; null when it has no thunk.
+			ImageValue Address(const InvokeEntry* entry) { return Symbol(entry ? entry->function : nullptr); }
 
 			Table Groups(const Core::Vector<Core::String>& groups)
 			{
@@ -324,9 +338,10 @@ namespace Scripting
 					const FunctionRecord* record = m_Model.RecordForMethod(&object, &method);
 					const Table params = Params(record, method.m_ParameterTypes);
 					const Table annotations = RecordAnnotations(record);
+					const InvokeEntry* entry = ThunkEntry(record);
 					rows.push_back({ Text(method.mName), params.count, params.rows, TypeText(method.m_ReturnType),
 						U32(method.m_IsStatic ? 1 : 0), U32(VirtualTables::IsVirtual(&object, method) ? 1 : 0), U32(method.m_IsConst ? 1 : 0),
-						Invoke(record), annotations.count, annotations.rows, Code(record) });
+						Invoke(entry), annotations.count, annotations.rows, Code(entry) });
 				}
 				return Rows(ImageShape::Method, std::move(rows));
 			}
@@ -340,6 +355,7 @@ namespace Scripting
 			std::unordered_map<const FunctionRecord*, Table> m_RecordAnnotations;
 			std::unordered_map<const FunctionRecord*, Table> m_RecordParams;
 			std::unordered_map<const Type*, ImageValue> m_TypeTexts;
+			std::unordered_map<const llvm::GlobalValue*, ImageValue> m_SymbolOf;
 			std::vector<ImageRow> m_Types;
 			std::vector<ImageRow> m_Variables;
 			std::vector<ImageRow> m_Addresses;
@@ -385,16 +401,17 @@ namespace Scripting
 
 		// A thread_local has no one address, so it is not registered. A name can register twice (a declaration
 		// and its definition): the symbol is the identity.
-		std::unordered_set<std::string_view> variables; // the symbols' own names, which the model keeps
+		Names variables; // the symbols' own names, which the model keeps
 		model.Symbols()->CollectGlobalVariables([&](const SymbolInfo& variable) {
 			if (variable.kind != SymbolKind::Variable || !variable.type || variable.isThreadLocal || variable.mangledName.empty()) return;
 			if (hostSymbol(variable.mangledName) || hostUnit(variable.definingUnit)) return;
 			if (variables.insert(variable.mangledName.c_str()).second) writer.AddVariable(variable);
 		});
 
-		std::unordered_set<std::string_view> functions;
 		Core::Vector<const FunctionRecord*> records;
 		model.AllFunctionRecords(records);
+		Names functions;
+		functions.reserve(records.Count());
 		for (const FunctionRecord* function : records)
 			if (ReflectedFunction(*function) && !hostSymbol(function->mangledName) && !hostUnit(function->declUnit) &&
 				functions.insert(function->mangledName.c_str()).second)

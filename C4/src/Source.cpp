@@ -168,13 +168,13 @@ namespace
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.scriptHost) driver.ShareVtables();
 			if (ProgramOutput::OptimizesPartitions(m_Options)) driver.VerifyLater();
-			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, m_Options.threads, m_Options.optLevel == 0);
+			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, m_Options.optLevel == 0);
 			driver.SetReflectionTag(m_Options.reflectTag);
 			driver.LowerOn(m_Options.threads);
 			auto phaseStart = std::chrono::steady_clock::now();
 			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, m_Options.runTests ? &tests : nullptr);
 			m_Compiler.AddPhaseTime("lower", SecondsSince(phaseStart));
-			if (m_Options.timePhases) ReportLowering(driver.LoweringStatistics());
+			if (m_Options.timePhases) ReportLowering(driver.LoweringStatistics(), driver.StepSeconds());
 			if (!ok)
 			{
 				ReportBackendFailure(driver, backendError);
@@ -193,11 +193,19 @@ namespace
 		}
 
 		// -ftime: how many bodies were lowered at once, and what stopped the others (ParallelLowering).
-		static void ReportLowering(const Scripting::LoweringStats& stats)
+		static void ReportLowering(const Scripting::LoweringStats& stats, const std::vector<std::pair<const char*, double>>& steps)
 		{
+			const char* lead = "lower: ";
+			for (const auto& [step, seconds] : steps)
+			{
+				std::printf("%s%s %.3f s", lead, step, seconds);
+				lead = ", ";
+			}
+			if (!steps.empty()) std::printf("\n");
 			std::printf("lowering: %llu bodies in %llu round(s) (%.3f s), %llu changes made between rounds, %llu lowered alone (%.3f s), "
-				"%llu lowerings in all", (unsigned long long)stats.bodies, (unsigned long long)stats.rounds, stats.atOnceSeconds,
-				(unsigned long long)stats.made, (unsigned long long)stats.alone, stats.aloneSeconds, (unsigned long long)stats.attempts);
+				"%llu lowerings in all, %.3f s preparing", (unsigned long long)stats.bodies, (unsigned long long)stats.rounds, stats.atOnceSeconds,
+				(unsigned long long)stats.made, (unsigned long long)stats.alone, stats.aloneSeconds, (unsigned long long)stats.attempts,
+				stats.prepareSeconds);
 			const char* separator = " (";
 			for (const auto& [what, count] : stats.changes)
 			{

@@ -29,9 +29,10 @@ namespace Scripting
 		/// are skipped: a union holds no lifecycle.
 		void ForEachField(const ObjectType* type, const std::function<void(const ObjectType::FieldInfo&)>& visit);
 
-		/// Makes the compiler-written create, delete and copy of every object type that needs one and declares none
-		/// (what Lifecycle::DefaultCreate, Destroy and Copy would make on first use), in the model's order of types,
-		/// so lowerings on several threads find them made. One that nothing calls is never emitted.
-		void MakeCompilerWritten(ProgramModel& model);
+		/// Makes the compiler-written create, delete and copy of every object type from the model's `from`th on that
+		/// needs one and declares none (what Lifecycle::DefaultCreate, Destroy and Copy would make on first use), in the
+		/// model's order of types, so lowerings on several threads find them made; returns how many types there are.
+		/// One that nothing calls is never emitted, and one a type needs later is made on first use.
+		uint32 MakeCompilerWritten(ProgramModel& model, uint32 from);
 	}
 } // namespace Scripting

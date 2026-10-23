@@ -26,7 +26,7 @@ namespace Scripting
 		};
 		using Plan = std::vector<PlannedCapture>;
 
-		QueryResult<const FunctionType*> Signature(const LambdaNode& lambda, Core::Vector<Core::String>& paramNames, std::vector<bool>& paramIsConst);
+		QueryResult<void> Signature(const LambdaNode& lambda, ClosureSpec& spec);
 		QueryResult<Plan> PlanCaptures(const LambdaNode& lambda);
 		QueryResult<void> PlanListed(const LambdaNode& lambda, Plan& plan);
 		QueryResult<void> PlanDefaults(const LambdaNode& lambda, const OuterUses& uses, Plan& plan);

@@ -288,6 +288,12 @@ namespace Scripting
 		return ClosureTypes::Create(*this, spec);
 	}
 
+	const Closure* ProgramModel::ClosureMadeFor(const Core::String& owner, const AstNode* body) const
+	{
+		const auto made = m_ClosuresMade.find({ owner, body });
+		return made == m_ClosuresMade.end() ? nullptr : made->second;
+	}
+
 	const Closure* ProgramModel::ClosureOf(const Type* t) const
 	{
 		const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(t));

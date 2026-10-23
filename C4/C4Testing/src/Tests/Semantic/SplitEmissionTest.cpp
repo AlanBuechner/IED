@@ -51,7 +51,8 @@ namespace Testing
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
 			CodeGenDriver driver(context);
-			driver.SplitInto(count, 3, false);
+			driver.LowerOn(3);
+			driver.SplitInto(count, false);
 			std::string error;
 			if (!driver.Lower(compiler.GetProgramModelForLowering(), "main", &error))
 			{

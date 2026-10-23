@@ -3,6 +3,7 @@
 #include "Compiler/ErrorTracker.h"
 #include "Compiler/WorkerPool.h"
 #include "Model/ModelWrites.h"
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -21,6 +22,9 @@ namespace Scripting
 		ErrorTracker errors;
 	};
 
+	/// Lowers the ith of a batch, with its diagnostics in the tracker given (LowerFunction for a function's body).
+	using LoweringJob = std::function<HIRFunction(size_t, ErrorTracker&)>;
+
 	/// How lowering on several threads went (-ftime).
 	struct LoweringStats
 	{
@@ -31,6 +35,7 @@ namespace Scripting
 		uint64_t made = 0;      // changes made between rounds
 		double atOnceSeconds = 0; // in rounds of lowering at once
 		double aloneSeconds = 0;  // lowering bodies alone
+		double prepareSeconds = 0; // making what lowering would make on first use, before each round
 		std::map<std::string, uint64_t> changes; // what stopped bodies in a round, by kind
 	};
 
@@ -48,19 +53,25 @@ namespace Scripting
 		explicit ParallelLowering(unsigned threads);
 
 		std::vector<LoweredBody> Lower(ProgramModel& model, const std::vector<const FunctionRecord*>& records);
+		/// The same for lowerings of another kind (an invoke thunk): `lower(i, errors)` lowers the ith of `count`; the
+		/// bodies have no record.
+		std::vector<LoweredBody> LowerEach(ProgramModel& model, size_t count, const LoweringJob& lower);
 		const LoweringStats& Stats() const { return m_Stats; }
+		/// The threads lowering keeps, for the other work of the emit to run on.
+		WorkerPool& Pool() { return *m_Pool; }
 
 	private:
 		void Prepare(ProgramModel& model);
-		void LowerInRounds(ProgramModel& model, const std::vector<const FunctionRecord*>& records, std::vector<LoweredBody>& bodies);
-		/// Lowers the `pending` records at once; a body that would change the model is left without a tree, and what
+		void LowerInRounds(ProgramModel& model, const LoweringJob& lower, std::vector<LoweredBody>& bodies);
+		/// Lowers the `pending` bodies at once; a body that would change the model is left without a tree, and what
 		/// stopped it is at its place in the result.
-		std::vector<ModelFrozen> LowerAtOnce(ProgramModel& model, const std::vector<const FunctionRecord*>& records,
-			const std::vector<size_t>& pending, std::vector<LoweredBody>& bodies);
-		LoweredBody LowerAlone(ProgramModel& model, const FunctionRecord* record);
+		std::vector<ModelFrozen> LowerAtOnce(ProgramModel& model, const LoweringJob& lower, const std::vector<size_t>& pending,
+			std::vector<LoweredBody>& bodies);
+		LoweredBody LowerAlone(const LoweringJob& lower, size_t i);
 
 		unsigned m_Threads;
 		std::unique_ptr<WorkerPool> m_Pool;
+		uint32 m_PreparedTypes = 0; // the model's object types whose compiler-written functions are made
 		LoweringStats m_Stats;
 	};
 } // namespace Scripting

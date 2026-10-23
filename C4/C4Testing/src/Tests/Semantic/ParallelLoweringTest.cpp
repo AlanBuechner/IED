@@ -196,6 +196,19 @@ namespace Testing
 		}
 	}
 
+	void ParallelLoweringTest::ARunInsideARunRunsOnItsThread()
+	{
+		WorkerPool pool(kThreads);
+		std::vector<std::atomic<int>> hits(64 * 32);
+		pool.Run(64, [&](size_t outer) {
+			const std::thread::id runner = std::this_thread::get_id();
+			pool.Run(32, [&](size_t inner) {
+				if (std::this_thread::get_id() == runner) ++hits[outer * 32 + inner];
+			});
+		});
+		for (std::atomic<int>& hit : hits) TEST_ASSERT_EQ(hit.load(), 1);
+	}
+
 	void ParallelLoweringTest::AFrozenModelRefusesEveryChange()
 	{
 		CompilerInstance compiler;
@@ -247,6 +260,46 @@ namespace Testing
 		model.Writes().Freeze(false);
 		TEST_ASSERT(!refused); // the instance was made: the lowering finds it
 		TEST_ASSERT(!errors.HasErrors());
+	}
+
+	void ParallelLoweringTest::ClosuresAreMadeOneARoundInTheirOrder()
+	{
+		CompilerInstance compiler;
+		ProgramModel& model = MakeModel(compiler,
+			"int32 Use(int32 x) {\n"
+			"\tfuncptr<int32(int32)> first = [](int32 v) -> int32 { return v + 1; };\n"
+			"\tfuncptr<int32(int32)> second = [](int32 v) -> int32 { return v * 2; };\n"
+			"\treturn first(second(x));\n"
+			"}\nint32 main() { return Use(3); }\n");
+		const FunctionRecord* use = Named(model, "Use");
+		TEST_ASSERT(use != nullptr);
+		std::vector<std::string> made;
+		for (int round = 0; round < 3; ++round)
+		{
+			ErrorTracker errors;
+			std::function<void()> make;
+			const char* what = nullptr;
+			model.Writes().Freeze(true);
+			try
+			{
+				TEST_ASSERT(LowerFunction(model, errors, use).complete);
+			}
+			catch (const ModelFrozen& frozen)
+			{
+				make = frozen.make;
+				what = frozen.what;
+			}
+			model.Writes().Freeze(false);
+			TEST_ASSERT_EQ(std::string(what ? what : "nothing"), std::string(make ? "a closure" : "nothing"));
+			if (!make) break;
+			const uint32 before = model.ObjectTypes().Count();
+			make();
+			model.Settle(); // as between rounds: the new closure type's lazily kept answers
+			TEST_ASSERT_EQ(model.ObjectTypes().Count(), before + 1);
+			made.push_back(model.ObjectTypes().Back()->GetName().c_str());
+		}
+		TEST_ASSERT_EQ(made.size(), size_t(2)); // one closure a round, then the body lowers
+		TEST_ASSERT(made[0].find("_0") != std::string::npos && made[1].find("_1") != std::string::npos);
 	}
 
 	void ParallelLoweringTest::LoweringOnEightThreadsBuildsTheSameModule()

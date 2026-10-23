@@ -207,8 +207,10 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
 
 ## Lowering on several threads
 
-`ParallelLowering` (`Backend/CodeGen`) lowers each batch of `CodeGenDriver::EmitReachable` on `-j` threads
-(`CodeGenDriver::LowerOn`), and the program is the same whatever the threads: one thread runs the same rounds.
+`ParallelLowering` (`Backend/CodeGen`) lowers each batch of `CodeGenDriver::EmitReachable`, and the invoke thunks
+(`LowerEach`), on `-j` threads (`CodeGenDriver::LowerOn`), and the program is the same whatever the threads: one
+thread runs the same rounds. Its `WorkerPool` keeps the threads, and the emit's other work on threads (each
+partition's emission, imports, thunks, the finish) runs on them too.
 
 - **The frozen model.** Every place that changes what lowering reads asks the model's `ModelWrites` first
   (`Model/ModelWrites.h`): a type the store takes (`TypeStore::Own`), a record (`SymbolTable::AddFunctionRecord`),
@@ -219,22 +221,27 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
 - **What is not a change.** Interning (`T*`, `T&`, `T[N]`, signatures, funcptr and braced-list types) is the
   same whoever interns first and nothing walks the store, so the store's caches are read under a shared lock and
   filled under their own, and lowerings intern at once.
-- **Before a batch.** `Prepare` makes what lowering would make on first use and keeps lazily: every object type's
-  compiler-written create, delete and copy that it needs and declares none of (`LifecycleFacts::MakeCompilerWritten`,
-  in the model's order of types; one nothing calls is never emitted), and `ProgramModel::Settle` (layouts,
-  lifecycle methods, template method owners).
+- **Before a batch.** `Prepare` makes what lowering would make on first use and keeps lazily: the compiler-written
+  create, delete and copy each object type made since the last batch needs and declares none of
+  (`LifecycleFacts::MakeCompilerWritten`, in the model's order of types; one nothing calls is never emitted, and one a
+  type needs later is made on first use), and `ProgramModel::Settle` (layouts, lifecycle methods, template method
+  owners).
 - **Rounds.** A round lowers the pending bodies at once against the frozen model, each with its own diagnostics
   and scope cursor (a `WorkerPool` keeps the threads between rounds). A body that stopped for a change that can be
-  made apart from its lowering - a function or class template instance, made from its template and arguments
-  alone (`ModelFrozen::make`) - has it made after the round, in the batch's order, and goes to the next round,
-  which finds it made. After four rounds, or for a change only its lowering can make (a closure, a local type),
-  the bodies left are lowered alone, in the batch's order, making their changes.
+  made apart from its lowering (`ModelFrozen::make`) - a function or class template instance, made from its
+  template and arguments alone, or a lambda's closure, made from its spec and kept by the code that writes it and
+  the lambda's body (`ProgramModel::ClosureMadeFor`) - has it made after the round, in the batch's order, and goes
+  to the next round, which finds it made (a body with lambdas finds one more a round, so the closures of one piece
+  of code are numbered in its order). After sixteen rounds, or for a change only its lowering can make (a local
+  type or function), the bodies left are lowered alone, in the batch's order, making their changes.
 - **What a body sees.** A body never sees a change another body of its batch made unless it needed that change
   itself (it then stops and finds it next round), and the changes are made in one order, so record order and
   symbol names (`_1` for a second record with a symbol) do not depend on the threads.
-- `-ftime` prints the rounds, the changes made between them, the bodies lowered alone and what stopped bodies,
-  by kind. IED server: 11161 bodies in 31 rounds (0.05 s), 1329 instances made between rounds, 417 lowered alone
-  (0.03 s; most hold a lambda); the `lower` phase 0.51 s / 0.35 s (the rest is emission and reflection).
+- `-ftime` prints the steps of `lower` (bodies, thunks, global starts, reflection, imports, finish), then the
+  rounds, the changes made between them, the bodies lowered alone, what stopped bodies by kind, and the time spent
+  preparing. IED server: 13346 bodies (thunks included) in 92 rounds (0.06 s), 2432 instances and closures made
+  between rounds, 10 lowered alone; the `lower` phase 0.51 s with every body lowered in order, 0.35 s with bodies
+  on threads, 0.33 s with closures and thunks in the rounds and the emit on the kept threads.
 
 ## Diagnostics
 

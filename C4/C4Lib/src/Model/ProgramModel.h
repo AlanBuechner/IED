@@ -256,6 +256,9 @@ namespace Scripting
 
 		/// A lambda's closure type and call method (docs/language/07, D-22), built while its function lowers.
 		const Closure* CreateClosure(const ClosureSpec& spec);
+		/// The closure made for the lambda whose body is `body` in the code `owner` (ClosureSpec), null before: a body
+		/// lowered again finds its lambdas' closures.
+		const Closure* ClosureMadeFor(const Core::String& owner, const AstNode* body) const;
 		/// The closure facts of a lambda's type; null for every other type.
 		const Closure* ClosureOf(const Type* t) const;
 
@@ -446,6 +449,7 @@ namespace Scripting
 		mutable std::deque<std::vector<SymbolInfo>> m_PackStorage; // the elements of every bound pack (stable addresses)
 		std::unordered_map<const ObjectType*, std::unique_ptr<Closure>> m_Closures; // closure type -> its captures and call method
 		std::unordered_map<Core::String, uint32> m_ClosuresByOwner;                 // lambdas made so far in each piece of code
+		std::map<std::pair<Core::String, const AstNode*>, const Closure*> m_ClosuresMade; // ClosureMadeFor's
 		bool m_Valid = false;
 	};
 

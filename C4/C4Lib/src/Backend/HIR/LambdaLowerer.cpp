@@ -78,19 +78,15 @@ namespace Scripting
 	{
 		if (!dynamic_cast<const CodeBlockNode*>(lambda.GetBody().Get()))
 			return m_Ctx.Fail(&lambda, QueryResult<Value>::Fail(QueryError::NotAValue, "lambda has no body"));
+		// A body lowered again (ParallelLowering) finds the closure made for it; its captures' values are planned anew.
+		const Closure* closure = m_Ctx.model().ClosureMadeFor(m_Ctx.CodeSymbol(), lambda.GetBody().Get());
 		ClosureSpec spec;
-		auto signature = Signature(lambda, spec.paramNames, spec.paramIsConst);
-		if (!signature.Ok()) return m_Ctx.Fail(&lambda, QueryResult<Value>::Fail(signature.error, signature.message));
+		if (!closure)
+			if (auto signature = Signature(lambda, spec); !signature.Ok())
+				return m_Ctx.Fail(&lambda, QueryResult<Value>::Fail(signature.error, signature.message));
 		auto plan = PlanCaptures(lambda);
 		if (!plan.Ok()) return m_Ctx.Fail(&lambda, QueryResult<Value>::Fail(plan.error, plan.message));
 
-		spec.signature = signature.value;
-		spec.body = lambda.GetBody().Get();
-		spec.scope = m_Ctx.scope;
-		spec.unitId = m_Ctx.unitId;
-		spec.isMutable = lambda.IsMutable();
-		spec.owner = m_Ctx.CodeSymbol();
-		spec.ownerName = OwnerName();
 		std::vector<ConstructionArgument> fields;
 		for (const PlannedCapture& p : plan.value)
 		{
@@ -99,7 +95,16 @@ namespace Scripting
 			if (p.capture.kind == ClosureCapture::Kind::This || p.capture.kind == ClosureCapture::Kind::ThisCopy)
 				spec.enclosingType = m_Ctx.enclosingType;
 		}
-		const Closure* closure = m_Ctx.model().CreateClosure(spec);
+		if (!closure)
+		{
+			spec.body = lambda.GetBody().Get();
+			spec.scope = m_Ctx.scope;
+			spec.unitId = m_Ctx.unitId;
+			spec.isMutable = lambda.IsMutable();
+			spec.owner = m_Ctx.CodeSymbol();
+			spec.ownerName = OwnerName();
+			closure = m_Ctx.model().CreateClosure(spec);
+		}
 		if (auto body = LowerCallMethod(*closure); !body.Ok()) return QueryResult<Value>::Fail(body.error, body.message);
 		return m_Expr.ResolveConstruct(&lambda, closure->type, fields, true);
 	}
@@ -114,10 +119,10 @@ namespace Scripting
 		return m_Ctx.startedGlobal ? "the start of " + m_Ctx.startedGlobal->plainName : Core::String("the program's start");
 	}
 
-	QueryResult<const FunctionType*> LambdaLowerer::Signature(const LambdaNode& lambda, Core::Vector<Core::String>& paramNames,
-		std::vector<bool>& paramIsConst)
+	// The call method's return and parameter types and names, in `spec`: the closure owns its signature.
+	QueryResult<void> LambdaLowerer::Signature(const LambdaNode& lambda, ClosureSpec& spec)
 	{
-		using Result = QueryResult<const FunctionType*>;
+		using Result = QueryResult<void>;
 		TypeStore* ts = m_Ctx.queries().TypeStore();
 		const Type* ret = ts->Builtin(TypeKind::Void);
 		if (lambda.GetReturnType())
@@ -130,21 +135,21 @@ namespace Scripting
 			return Result::Fail(QueryError::NotAValue, "lambda returns a value but has no explicit return type: add '-> <type>' "
 				"before the body (C4 does not deduce lambda return types)");
 
-		Core::Vector<FunctionType::ParameterInfo> params;
+		spec.returned = ret;
 		for (uint32 i = 0; i < lambda.ParameterCount(); ++i)
 		{
 			const auto& p = lambda.GetParameters()[i];
 			const auto& type = *static_cast<const QualTypeNode*>(p->GetType().Get());
 			auto pt = m_Ctx.queries().ResolveTypeCtx(type, m_Ctx.unitId, m_Ctx.scope);
 			if (!pt.Ok()) return Result::Fail(pt.error, pt.message);
-			paramIsConst.push_back(type.DeclaresConstValue());
+			spec.paramIsConst.push_back(type.DeclaresConstValue());
 			FunctionType::ParameterInfo info;
 			info.mName = p->HasName() ? p->GetNameToken().GetText() : "arg" + std::to_string(i);
 			info.m_Type = pt.value;
-			params.Push(info);
-			paramNames.Push(info.mName);
+			spec.params.Push(info);
+			spec.paramNames.Push(info.mName);
 		}
-		return Result::Success(static_cast<const FunctionType*>(ts->Own(new FunctionType(ret, params))));
+		return Result::Success();
 	}
 
 	// --- captures ------------------------------------------------------------------------------------------

@@ -9,7 +9,6 @@
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Compiler/IrVerification.h"
-#include "Compiler/ParallelFor.h"
 #include "Backend/CodeGen/ImportPlanner.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/CodeGen/UseSites.h"
@@ -125,7 +124,7 @@ namespace Scripting
 		using FirstUse = std::pair<const FunctionRecord*, const HIRFunction*>;
 		std::vector<std::vector<FirstUse>> firstUses(PartitionCount());
 		if (PartitionCount() > 1) SettleLayouts(model);
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t i) {
 			for (const HIRFunction* tree : trees[i])
 			{
 				EmitterOf(static_cast<unsigned>(i)).Emit(*tree);
@@ -302,32 +301,92 @@ namespace Scripting
 		{
 			Core::Vector<const FunctionRecord*> targets = NewInvokeTargets(model);
 			if (targets.Empty()) return true;
+			const std::vector<TargetThunk> wanted = ThunksWanted(model, targets);
+			const std::vector<ThunkJob> jobs = PlanThunks(model, targets, wanted);
+			std::vector<LoweredBody> bodies = m_Lowering.LowerEach(model, jobs.size(), [&](size_t i, ErrorTracker& errors) {
+				return Scripting::LowerInvokeThunk(model, errors, *jobs[i].target, *jobs[i].thunk, jobs[i].shared);
+			});
 			std::vector<Placed> lowered;
+			std::unordered_map<const FunctionRecord*, const FunctionRecord*> own; // a target's own thunk, lowered
+			for (size_t i = 0; i < jobs.size(); ++i)
+			{
+				const bool complete = bodies[i].tree->complete; // else reflection reports the function as not invokable
+				if (jobs[i].shared) m_SharedThunks[jobs[i].thunk->mangledName.c_str()] = complete ? jobs[i].thunk : nullptr;
+				else if (complete) own[jobs[i].target] = jobs[i].thunk;
+				if (!complete) continue;
+				lowered.push_back({ bodies[i].tree.get(), jobs[i].shared ? PartitionOf(*jobs[i].thunk) : PartitionOf(*jobs[i].target) });
+				m_Trees.push_back(std::move(bodies[i].tree));
+			}
 			std::vector<std::pair<const FunctionRecord*, const FunctionRecord*>> thunkOf; // each target and its thunk
-			for (const FunctionRecord* target : targets)
-				if (const FunctionRecord* thunk = ThunkFor(model, *target, lowered)) thunkOf.push_back({ target, thunk });
+			for (uint32 i = 0; i < targets.Count(); ++i)
+			{
+				const auto shared = wanted[i].shared ? m_SharedThunks.find(wanted[i].symbol) : m_SharedThunks.end();
+				const auto mine = own.find(targets[i]);
+				const FunctionRecord* thunk = shared != m_SharedThunks.end() ? shared->second : mine != own.end() ? mine->second : nullptr;
+				if (thunk) thunkOf.push_back({ targets[i], thunk });
+			}
 			Core::Vector<const FunctionRecord*> batch;
 			EmitPlaced(model, lowered, batch);
-			for (const Placed& placed : lowered) FinishThunk(*placed.tree->record, placed.partition);
-			for (const auto& [target, thunk] : thunkOf) RecordThunk(model, *target, *thunk);
+			FinishThunks(lowered);
+			RecordThunks(model, thunkOf);
 			if (!EmitReachable(model, batch, errorMessage)) return false;
 		}
 	}
 
-	// `target`'s thunk: its own, or the one its signature shares, lowered into `lowered` when new. Null when it cannot
-	// be lowered: reflection reports the function as not invokable.
-	const FunctionRecord* CodeGenDriver::ThunkFor(ProgramModel& model, const FunctionRecord& target, std::vector<Placed>& lowered)
+	// Each target's thunk: whether its signature shares one, and its symbol (worked out on the threads: they only read).
+	std::vector<CodeGenDriver::TargetThunk> CodeGenDriver::ThunksWanted(const ProgramModel& model, const Core::Vector<const FunctionRecord*>& targets)
 	{
-		if (!SharesInvokeThunk(model, target)) return LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false, lowered);
-		const std::string symbol = SharedInvokeThunkSymbol(target);
-		auto [entry, fresh] = m_SharedThunks.try_emplace(symbol, nullptr);
-		if (fresh) entry->second = LowerInvokeThunk(model, target, symbol, true, lowered);
-		return entry->second;
+		std::vector<TargetThunk> wanted(targets.Count());
+		m_Lowering.Pool().Run(targets.Count(), [&](size_t i) {
+			wanted[i].shared = SharesInvokeThunk(model, *targets[i]);
+			wanted[i].symbol = wanted[i].shared ? SharedInvokeThunkSymbol(*targets[i]) : InvokeThunkSymbol(*targets[i]);
+		});
+		return wanted;
 	}
+
+	// The thunks `targets` need, in order: each its own, or the one its signature shares, once.
+	std::vector<CodeGenDriver::ThunkJob> CodeGenDriver::PlanThunks(ProgramModel& model, const Core::Vector<const FunctionRecord*>& targets,
+		const std::vector<TargetThunk>& wanted)
+	{
+		std::vector<ThunkJob> jobs;
+		std::unordered_set<std::string> planned;
+		for (uint32 i = 0; i < targets.Count(); ++i)
+		{
+			if (wanted[i].shared && (m_SharedThunks.count(wanted[i].symbol) || !planned.insert(wanted[i].symbol).second)) continue;
+			FunctionRecord& thunk = m_ThunkRecords.emplace_back();
+			thunk.type = InvokeThunkType(model);
+			thunk.mangledName = wanted[i].symbol.c_str();
+			jobs.push_back({ targets[i], &thunk, wanted[i].shared });
+		}
+		return jobs;
+	}
+
+	// Each partition finishes its thunks at once (each has its own module); the functions are kept in the order emitted.
+	void CodeGenDriver::FinishThunks(const std::vector<Placed>& lowered)
+	{
+		std::vector<llvm::Function*> emitted(lowered.size());
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t partition) {
+			for (size_t i = 0; i < lowered.size(); ++i)
+				if (lowered[i].partition == partition) emitted[i] = FinishThunk(*lowered[i].tree->record, lowered[i].partition);
+		});
+		for (size_t i = 0; i < lowered.size(); ++i) m_ThunkFunctions[lowered[i].tree->record] = emitted[i];
+	}
+
+	// Each target's entry is made in its own partition, the partitions at once; the entries are kept in the targets' order.
+	void CodeGenDriver::RecordThunks(const ProgramModel& model, const std::vector<std::pair<const FunctionRecord*, const FunctionRecord*>>& thunkOf)
+	{
+		std::vector<InvokeEntry> entries(thunkOf.size());
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t partition) {
+			for (size_t i = 0; i < thunkOf.size(); ++i)
+				if (PartitionOf(*thunkOf[i].first) == partition) entries[i] = InvokeEntryOf(model, *thunkOf[i].first, *thunkOf[i].second);
+		});
+		for (size_t i = 0; i < thunkOf.size(); ++i) m_Thunks[thunkOf[i].first] = entries[i];
+	}
+
 
 	// Only the reflection image names a thunk: a local of the program, which a split program's image module reaches.
 	// Reflection calls through it seldom: small, with its target called rather than copied into it.
-	void CodeGenDriver::FinishThunk(const FunctionRecord& thunk, unsigned partition)
+	llvm::Function* CodeGenDriver::FinishThunk(const FunctionRecord& thunk, unsigned partition)
 	{
 		ModuleContext& home = Partition(partition);
 		llvm::Function* emitted = home.GetOrCreateFunction(thunk);
@@ -335,15 +394,15 @@ namespace Scripting
 		home.MakeLocal(*emitted);
 		emitted->addFnAttr(llvm::Attribute::MinSize);
 		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
-		m_ThunkFunctions[&thunk] = emitted;
+		return emitted;
 	}
 
 	// The image names a target by its function in the partition that defines it, which declares nothing new there.
-	void CodeGenDriver::RecordThunk(ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk)
+	InvokeEntry CodeGenDriver::InvokeEntryOf(const ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk)
 	{
 		llvm::Function* emitted = m_ThunkFunctions.at(&thunk);
 		ModuleContext& home = Partition(PartitionOf(target));
-		m_Thunks[&target] = SharesInvokeThunk(model, target) ? InvokeEntry{ emitted, home.GetOrCreateFunction(target), CodeOf(target, home) }
+		return SharesInvokeThunk(model, target) ? InvokeEntry{ emitted, home.GetOrCreateFunction(target), CodeOf(target, home) }
 			: InvokeEntry{ emitted, nullptr, CodeOf(target, home) };
 	}
 
@@ -352,28 +411,24 @@ namespace Scripting
 		return HasCode(target) ? home.GetOrCreateFunction(target) : nullptr;
 	}
 
-	const FunctionRecord* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol,
-		bool shared, std::vector<Placed>& lowered)
-	{
-		FunctionRecord& thunk = m_ThunkRecords.emplace_back();
-		thunk.type = InvokeThunkType(model);
-		thunk.mangledName = symbol.c_str();
-		ErrorTracker notCallable; // reflection reports the function as not invokable instead
-		auto tree = std::make_unique<HIRFunction>(Scripting::LowerInvokeThunk(model, notCallable, target, thunk, shared));
-		if (!tree->complete) return nullptr;
-		lowered.push_back({ tree.get(), shared ? PartitionOf(thunk) : PartitionOf(target) });
-		m_Trees.push_back(std::move(tree));
-		return &thunk;
-	}
-
+	// Records are only added, and what makes one reflected and callable never changes: those are kept, in order, until
+	// they have code to call.
 	Core::Vector<const FunctionRecord*> CodeGenDriver::NewInvokeTargets(ProgramModel& model)
 	{
-		Core::Vector<const FunctionRecord*> records, targets;
-		model.AllFunctionRecords(records);
-		for (const FunctionRecord* rec : records)
-			if (ReflectedFunction(*rec) && Invokable(*rec) && !IsHostSymbol(rec->mangledName) && HasCallableCode(model, *rec) &&
-				m_ThunkTargets.insert(rec).second)
-				targets.Push(rec);
+		const Core::Vector<std::unique_ptr<FunctionRecord>>& records = model.Symbols()->Records();
+		for (; m_RecordsScanned < records.Count(); ++m_RecordsScanned)
+		{
+			const FunctionRecord* rec = records[m_RecordsScanned].get();
+			if (ReflectedFunction(*rec) && Invokable(*rec) && !IsHostSymbol(rec->mangledName)) m_InvokeCandidates.push_back(rec);
+		}
+		Core::Vector<const FunctionRecord*> targets;
+		std::vector<const FunctionRecord*> waiting;
+		for (const FunctionRecord* rec : m_InvokeCandidates)
+		{
+			if (!HasCallableCode(model, *rec)) waiting.push_back(rec);
+			else if (m_ThunkTargets.insert(rec).second) targets.Push(rec);
+		}
+		m_InvokeCandidates = std::move(waiting);
 		return targets;
 	}
 
@@ -507,11 +562,10 @@ namespace Scripting
 		UseScriptRuntime(m_MCtx.module());
 	}
 
-	void CodeGenDriver::SplitInto(unsigned count, unsigned threads, bool onlyAlwaysInline)
+	void CodeGenDriver::SplitInto(unsigned count, bool onlyAlwaysInline)
 	{
 		m_Others.clear();
 		for (unsigned i = 1; i < count; ++i) m_Others.push_back(std::make_unique<PartitionEmitter>());
-		m_Threads = std::max(threads, 1u);
 		m_OnlyAlwaysInline = onlyAlwaysInline;
 	}
 
@@ -519,7 +573,7 @@ namespace Scripting
 	std::vector<std::vector<const FunctionRecord*>> CodeGenDriver::PlanImports()
 	{
 		std::vector<FactsByRecord> facts(PartitionCount());
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t i) {
 			ModuleContext& partition = Partition(static_cast<unsigned>(i));
 			facts[i] = FactsOf(partition.module(), partition.RecordsOfFunctions());
 		});
@@ -533,7 +587,7 @@ namespace Scripting
 			}
 		const auto home = [this](const FunctionRecord& rec) { return PartitionOf(rec); };
 		std::vector<std::vector<const FunctionRecord*>> imports(PartitionCount());
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) { // each reads the facts and the placement only
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t i) { // each reads the facts and the placement only
 			imports[i] = ImportsOf(static_cast<unsigned>(i), own[i], all, home, m_OnlyAlwaysInline);
 		});
 		return imports;
@@ -545,7 +599,7 @@ namespace Scripting
 	{
 		const std::vector<std::vector<const FunctionRecord*>> imports = PlanImports();
 		SettleLayouts(model);
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t i) {
 			for (const FunctionRecord* record : imports[i])
 				if (const auto tree = m_TreeOf.find(record); tree != m_TreeOf.end())
 					EmitterOf(static_cast<unsigned>(i)).EmitImport(*tree->second);
@@ -565,15 +619,28 @@ namespace Scripting
 		Core::Vector<const FunctionRecord*> records;
 		model.AllFunctionRecords(records);
 		DeclareWrittenFunctions(records);
+		auto step = std::chrono::steady_clock::now();
 		if (!EmitReachable(model, WrittenBodies(records), errorMessage)) return false;
 		const bool harness = tests && TestHarnessEmitter(m_MCtx, model.Tests(), *tests).Emit();
 		if (!harness && !entryName.empty() && !EmitEntryPoint(records, entryName, errorMessage)) return false;
 		if (!EmitReachable(model, {}, errorMessage)) return false; // what the test harness or the entry wrapper references
+		Timed("bodies", step);
 		if (!EmitStaticState(model, errorMessage)) return false;
+		Timed("static state", step);
 		if (!EmitReflection(model, errorMessage)) return false;
+		Timed("reflection", step);
 		if (m_Placement && !EmitImports(model, errorMessage)) return false;
+		Timed("imports", step);
 		FinishModule(model);
+		Timed("finish", step);
 		return m_VerifyLater || Verify(errorMessage);
+	}
+
+	void CodeGenDriver::Timed(const char* step, std::chrono::steady_clock::time_point& since)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		m_StepSeconds.push_back({ step, std::chrono::duration<double>(now - since).count() });
+		since = now;
 	}
 
 	void CodeGenDriver::EmitFileAssembly(const ProgramModel& model)
@@ -593,7 +660,7 @@ namespace Scripting
 	void CodeGenDriver::LowerTypes(ProgramModel& model)
 	{
 		if (PartitionCount() > 1) SettleLayouts(model);
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t index) {
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t index) {
 			const unsigned i = static_cast<unsigned>(index);
 			ModuleContext& partition = Partition(i);
 			partition.SetModel(&model); // GlobalAddress resolves funcptr initializers (`funcptr<R(a)> g = F;`) against it
@@ -651,11 +718,17 @@ namespace Scripting
 	// make start their static data members too; the functions global initialization reaches get their thunks after it.
 	bool CodeGenDriver::EmitStaticState(ProgramModel& model, std::string* errorMessage)
 	{
+		auto step = std::chrono::steady_clock::now();
 		if (m_ShareVtables && !EmitEveryVtable(model, errorMessage)) return false;
+		Timed("vtables", step);
 		if (!EmitInvokeThunks(model, errorMessage)) return false;
+		Timed("thunks", step);
 		if (!EmitGlobalInit(model, errorMessage)) return false;
+		Timed("global starts", step);
 		if (!EmitInvokeThunks(model, errorMessage)) return false;
+		Timed("thunks", step);
 		MaterializeGlobals(model);
+		Timed("globals", step);
 		return true;
 	}
 
@@ -665,7 +738,7 @@ namespace Scripting
 		DeclareOthersStaticStorage();
 		EmitGcRoots(m_MCtx, model, m_Script ? m_Script->hostSymbols : nullptr);
 		if (m_Script) ApplyScriptLowering(); // after the roots: it removes host thread_locals the module's caches point at
-		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) {
+		m_Lowering.Pool().Run(PartitionCount(), [&](size_t i) {
 			ModuleContext& partition = Partition(static_cast<unsigned>(i));
 			AlignVectorAccesses(partition.module());
 			ApplyTarget(partition.module(), model.Target());

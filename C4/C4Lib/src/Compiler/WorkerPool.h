@@ -12,7 +12,8 @@ namespace Scripting
 {
 	/// Threads kept for many short rounds of parallel work, where ParallelFor would start its own each round: Run calls
 	/// `body(i)` for each i below `count` on the pool's threads and the calling one, each taking the next index as it
-	/// finishes one, and returns when every call has returned. `body` must not throw.
+	/// finishes one, and returns when every call has returned. `body` must not throw. A Run inside a run (a body that
+	/// runs work of its own) calls its bodies in order on its own thread.
 	class WorkerPool
 	{
 	public:
@@ -37,6 +38,11 @@ namespace Scripting
 
 		void Run(size_t count, std::function<void(size_t)> body)
 		{
+			if (m_Running.exchange(true))
+			{
+				for (size_t i = 0; i < count; ++i) body(i);
+				return;
+			}
 			{
 				const std::lock_guard<std::mutex> held(m_Lock);
 				m_Body = std::move(body);
@@ -49,6 +55,7 @@ namespace Scripting
 			Drain();
 			std::unique_lock<std::mutex> held(m_Lock);
 			m_Done.wait(held, [this] { return m_Busy == 0; });
+			m_Running = false;
 		}
 
 	private:
@@ -81,6 +88,7 @@ namespace Scripting
 		std::function<void(size_t)> m_Body;
 		size_t m_Count = 0;
 		std::atomic<size_t> m_Next = 0;
+		std::atomic<bool> m_Running = false; // a round is on
 		uint64_t m_Round = 0;
 		unsigned m_Busy = 0; // workers not done with this round
 		bool m_Stop = false;

@@ -31,10 +31,11 @@ namespace Scripting
 	struct ClosureSpec
 	{
 		Core::Vector<ClosureCapture> captures; // field indices are assigned by CreateClosure
-		const FunctionType* signature = nullptr;
+		const Type* returned = nullptr;                   // the call method's signature: what it returns,
+		Core::Vector<FunctionType::ParameterInfo> params; // and its parameters, named
 		Core::Vector<Core::String> paramNames;
 		std::vector<bool> paramIsConst;
-		const AstNode* body = nullptr;
+		const AstNode* body = nullptr;          // the lambda's body: with `owner`, what its closure is kept by
 		const Scope* scope = nullptr;           // type lookup context of the body
 		uint32 unitId = 0;
 		const ObjectType* enclosingType = nullptr; // the object `this` names in the body (null outside a method)
@@ -70,6 +71,7 @@ namespace Scripting
 
 	private:
 		static ObjectType* NewClosureType(const Core::String& name, Core::Vector<ClosureCapture>& captures, TypeStore& types);
-		static const FunctionRecord* AddCallMethod(ProgramModel& model, ObjectType* type, const ClosureSpec& spec, bool isStatic);
+		static const FunctionRecord* AddCallMethod(ProgramModel& model, ObjectType* type, const ClosureSpec& spec, const FunctionType* signature,
+			bool isStatic);
 	};
 }

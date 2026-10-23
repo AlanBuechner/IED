@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <set>
 #include <deque>
+#include <chrono>
 #include <future>
 #include <mutex>
 
@@ -66,10 +67,13 @@ namespace Scripting
 		/// The located diagnostics of a failed HIR lowering (empty when lowering succeeded).
 		const Core::Vector<CompilationError>& LoweringErrors() const { return m_LoweringErrors.GetErrors(); }
 
-		/// Function bodies are lowered on up to `threads` threads (ParallelLowering), with the result of lowering them
-		/// one after another; one before Lower. How it went, for -ftime.
+		/// Function bodies are lowered, and partitions emitted, on up to `threads` threads (ParallelLowering), with the
+		/// result of doing it on one; one before Lower. How it went, for -ftime.
 		void LowerOn(unsigned threads) { m_Lowering = ParallelLowering(threads); }
 		const LoweringStats& LoweringStatistics() const { return m_Lowering.Stats(); }
+		/// How long each step of Lower took after the types (-ftime): the bodies, the static state, reflection,
+		/// imports, the finish.
+		const std::vector<std::pair<const char*, double>>& StepSeconds() const { return m_StepSeconds; }
 
 		llvm::Module* module() { return &m_MCtx.module(); } // owned by this driver until destruction or TakeModule
 		/// The module Lower built, which the caller then owns (a script compile keeps it past the driver).
@@ -100,10 +104,10 @@ namespace Scripting
 
 		/// The program is emitted into `count` partitions (D-81), each function and global in the one ProgramPlacement
 		/// gives it: partition 0 is module(), with the program's own code and data; every other is a module of its own
-		/// in an LLVM context of its own. The partitions emit at once on up to `threads` threads. Each copies the small
+		/// in an LLVM context of its own. The partitions emit at once on LowerOn's threads. Each copies the small
 		/// functions it calls from the others (ImportPlanner), only `inline` ones with `onlyAlwaysInline` (-O0). Before
 		/// Lower.
-		void SplitInto(unsigned count, unsigned threads, bool onlyAlwaysInline);
+		void SplitInto(unsigned count, bool onlyAlwaysInline);
 		unsigned PartitionCount() const { return 1 + static_cast<unsigned>(m_Others.size()); }
 		/// Partition `i`'s module (0: module()).
 		llvm::Module& PartitionModule(unsigned i) { return Partition(i).module(); }
@@ -176,13 +180,27 @@ namespace Scripting
 		/// An invoke thunk for every function reflection registers and can call that has none yet, then every
 		/// function the thunks reach. A function an argument cannot be passed to gets no thunk.
 		bool EmitInvokeThunks(ProgramModel& model, std::string* errorMessage);
-		const FunctionRecord* ThunkFor(ProgramModel& model, const FunctionRecord& target, std::vector<Placed>& lowered);
-		void FinishThunk(const FunctionRecord& thunk, unsigned partition);
-		void RecordThunk(ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk);
-		/// The thunk named `symbol` for `target` (shared: calling the code it is given), or null when an argument cannot be
-		/// passed.
-		const FunctionRecord* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared,
-			std::vector<Placed>& lowered);
+		/// A thunk to lower: its record, the target it is lowered from, and whether it is its signature's shared one
+		/// (calling the code it is given).
+		struct ThunkJob
+		{
+			const FunctionRecord* target = nullptr;
+			FunctionRecord* thunk = nullptr;
+			bool shared = false;
+		};
+		/// The thunk a target calls through: its signature's shared one or its own, and its symbol.
+		struct TargetThunk
+		{
+			bool shared = false;
+			std::string symbol;
+		};
+		std::vector<TargetThunk> ThunksWanted(const ProgramModel& model, const Core::Vector<const FunctionRecord*>& targets);
+		std::vector<ThunkJob> PlanThunks(ProgramModel& model, const Core::Vector<const FunctionRecord*>& targets,
+			const std::vector<TargetThunk>& wanted);
+		void FinishThunks(const std::vector<Placed>& lowered);
+		llvm::Function* FinishThunk(const FunctionRecord& thunk, unsigned partition);
+		void RecordThunks(const ProgramModel& model, const std::vector<std::pair<const FunctionRecord*, const FunctionRecord*>>& thunkOf);
+		InvokeEntry InvokeEntryOf(const ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk);
 		/// The code reflection records as `target`'s address; none for a function without code (a pure virtual method).
 		llvm::Function* CodeOf(const FunctionRecord& target, ModuleContext& home);
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
@@ -217,6 +235,8 @@ namespace Scripting
 		void EmitPlaced(const ProgramModel& model, const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch);
 		/// The static locals every other partition defines, declared in partition 0 for its GC roots.
 		void DeclareOthersStaticStorage();
+		/// Records `step` as taking from `since` to now, and moves `since` to now.
+		void Timed(const char* step, std::chrono::steady_clock::time_point& since);
 		/// Every object type laid out before partitions read layouts at once (a type laid out on its first query).
 		void SettleLayouts(const ProgramModel& model) const;
 		/// Each partition's copies of the small functions it calls from the others, then what they reach.
@@ -229,12 +249,12 @@ namespace Scripting
 		FunctionEmitter m_Emitter;
 		ErrorTracker m_LoweringErrors;
 		ParallelLowering m_Lowering{ 1 };
+		std::vector<std::pair<const char*, double>> m_StepSeconds;
 		bool m_DebugInfo = false;
 		bool m_ShareVtables = false;
 		bool m_VerifyLater = false;
 		bool m_StrictAliasing = true;
 		std::vector<std::unique_ptr<PartitionEmitter>> m_Others; // partitions 1..n-1 of a split program
-		unsigned m_Threads = 1;                                  // how many partitions emit at once
 		bool m_OnlyAlwaysInline = false;                         // -O0: a partition copies only `inline` functions
 		std::unordered_map<const FunctionRecord*, const HIRFunction*> m_TreeOf; // the lowered body of each record
 		std::mutex m_ModelLock;                                  // what emission asks of the model that can change it
@@ -248,6 +268,8 @@ namespace Scripting
 		std::vector<llvm::Function*> m_FirstUseStarts; // the starts of a script's thread_locals that start on first use
 		std::deque<FunctionRecord> m_ThunkRecords;     // compiler-written: no model record
 		std::set<const FunctionRecord*> m_ThunkTargets; // considered for a thunk (one that failed too: no retry)
+		uint32 m_RecordsScanned = 0;                     // the model's records NewInvokeTargets has looked at
+		std::vector<const FunctionRecord*> m_InvokeCandidates; // reflected and callable, without code to call yet
 		std::unordered_map<std::string, const FunctionRecord*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
 		std::unordered_map<const FunctionRecord*, llvm::Function*> m_ThunkFunctions; // each thunk emitted, in its partition
 		InvokeThunks m_Thunks;

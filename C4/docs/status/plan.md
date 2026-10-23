@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 14 done).
+  progress (steps 1 to 15 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1725,11 +1725,17 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   run; `ParallelLoweringTest` builds a 60-function program's module on one thread and on eight and compares it).
   IED server: 11161 bodies in 31 rounds, 1329 instances made between rounds, 417 lowered alone (most hold a lambda);
   `lower` 0.51 s / 0.35 s (interleaved A/B, median of eight).
-- **Next:** what is left of `lower` is mostly not lowering: emission (by partition, already on threads), the
-  reflection image's description (serial, about 0.08 s), invoke thunks and imports. Bodies with a lambda are lowered
-  alone: a closure keyed by its lambda would let the round make it. Past that, the front end (about 0.3 s for a
-  one-file edit) is the next serial part; a resident compiler keeping unchanged files' trees and model is the way
-  past it.
+- **Done notes (step 15):** a lambda's closure is kept by the code writing it and the lambda's body and made between
+  rounds like an instance (10 bodies of 13346 left to lower alone, from 417); invoke thunks lower through the rounds;
+  the emit's threaded work runs on the rounds' kept `WorkerPool`; the reflection image names each function or global
+  with one symbol (45071 symbols / 13532) and hashes its name sets with xxh3. `-ftime` prints the steps of `lower`.
+  IED server, interleaved A/B: `lower` 0.342 s / 0.289 s; bodies 0.14 / 0.13, thunks 0.034 / 0.024, reflection
+  0.045 / 0.036.
+- **Next:** what is left of `lower` (0.29 s): emitting the bodies by partition (on threads), imports 0.05 s (their
+  planning and copies, on threads), reflection 0.036 s (serial: built chunk by chunk on threads, each chunk's type
+  texts and record tables adopted where the image first uses them, it would be about 0.01 s), thunks 0.024 s, the
+  finish 0.017 s. Past that, the front end (about 0.3 s for a one-file edit) is the next serial part; a resident
+  compiler keeping unchanged files' trees and model is the way past it.
 
 ### Testing framework
 

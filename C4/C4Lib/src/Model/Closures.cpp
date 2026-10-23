@@ -42,7 +42,8 @@ namespace Scripting
 
 	const Closure* ClosureTypes::Create(ProgramModel& model, const ClosureSpec& spec)
 	{
-		model.Writes().Ask("a closure");
+		// Made from the spec alone, so a frozen model has it made between rounds (ParallelLowering).
+		model.Writes().Ask("a closure", [&model, spec] { Create(model, spec); });
 		// Named for the code that writes it and its place there, so every program with that code names it alike.
 		const uint32 index = model.m_ClosuresByOwner[spec.owner]++;
 		const Core::String name = "__c4_closure_" + spec.owner + "_" + std::to_string(index);
@@ -56,11 +57,13 @@ namespace Scripting
 		model.m_Types->Own(type);
 		model.m_ObjectTypes.Push(type);
 		closure->type = type;
-		closure->call = AddCallMethod(model, type, spec, closure->CapturesNothing());
+		const FunctionType* signature = model.m_Types->Own(new FunctionType(spec.returned, spec.params));
+		closure->call = AddCallMethod(model, type, spec, signature, closure->CapturesNothing());
 		type->CalculateLayout();
 
 		const Closure* stored = closure.get();
 		model.m_Closures.emplace(type, std::move(closure));
+		model.m_ClosuresMade.emplace(std::make_pair(spec.owner, spec.body), stored);
 		return stored;
 	}
 
@@ -78,19 +81,20 @@ namespace Scripting
 		return type;
 	}
 
-	const FunctionRecord* ClosureTypes::AddCallMethod(ProgramModel& model, ObjectType* type, const ClosureSpec& spec, bool isStatic)
+	const FunctionRecord* ClosureTypes::AddCallMethod(ProgramModel& model, ObjectType* type, const ClosureSpec& spec, const FunctionType* signature,
+		bool isStatic)
 	{
 		ObjectType::MethodInfo m;
 		m.mName = "Call";
-		m.m_ReturnType = spec.signature->GetReturnType();
-		for (const auto& p : spec.signature->GetParameters()) m.m_ParameterTypes.Push(p.m_Type);
+		m.m_ReturnType = signature->GetReturnType();
+		for (const auto& p : signature->GetParameters()) m.m_ParameterTypes.Push(p.m_Type);
 		m.m_IsStatic = isStatic;
 		m.m_OperatorAnnotations.Push(kCallOperator);
 		m.m_HasBody = true;
 		type->AddMethod(m);
 
 		FunctionRecord rec;
-		rec.type = spec.signature;
+		rec.type = signature;
 		rec.scope = spec.scope;
 		rec.containingType = type;
 		rec.isStatic = isStatic;
@@ -98,8 +102,8 @@ namespace Scripting
 		rec.bodyNode = spec.body;
 		rec.definingUnit = spec.unitId;
 		rec.name = m.mName;
-		rec.mangledName = type->GetName() + "_Call_" + spec.signature->OverloadSuffix();
-		rec.minArity = spec.signature->GetParameterCount();
+		rec.mangledName = type->GetName() + "_Call_" + signature->OverloadSuffix();
+		rec.minArity = signature->GetParameterCount();
 		rec.operatorAnnotations.Push(kCallOperator);
 		for (const Core::String& p : spec.paramNames) rec.paramNames.Push(p);
 		rec.paramIsConst = spec.paramIsConst;

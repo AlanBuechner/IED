@@ -30,10 +30,16 @@ namespace Testing
 		void WorkerPoolRunsEveryIndexOncePerRound();
 
 		TEST_FUNC(Semantic.ParallelLowering)
+		void ARunInsideARunRunsOnItsThread();
+
+		TEST_FUNC(Semantic.ParallelLowering)
 		void AFrozenModelRefusesEveryChange();
 
 		TEST_FUNC(Semantic.ParallelLowering)
 		void AStoppedLoweringNamesAnInstanceToMake();
+
+		TEST_FUNC(Semantic.ParallelLowering)
+		void ClosuresAreMadeOneARoundInTheirOrder();
 
 		TEST_FUNC(Semantic.ParallelLowering)
 		void LoweringOnEightThreadsBuildsTheSameModule();

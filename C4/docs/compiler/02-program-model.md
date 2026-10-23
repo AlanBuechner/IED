@@ -299,7 +299,8 @@ While HIR lowers a body it changes scopes ONLY through the model's RAII API (`Mo
 - `CreateClosure(spec)` / `ClosureOf(type)` (`Model/Closures`): a lambda's closure type - a struct whose
   fields are the captures (`ClosureCapture`: by value, by reference as a pointer, `this` as a pointer,
   `*this` as a copy) with an `[operator("call")]` method record (static when nothing is captured), built
-  while the enclosing function lowers. Closures are not reflected.
+  while the enclosing function lowers. `ClosureMadeFor(owner, body)` finds the closure made for a lambda in a piece
+  of code, so lowering it again (a round of ParallelLowering) uses it. Closures are not reflected.
 
 ## Changes and the frozen model
 

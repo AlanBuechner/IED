@@ -181,6 +181,7 @@ namespace Scripting
 		ctx.out = &fn;
 		ctx.unitId = target.definingUnit;
 		ctx.scope = target.scope;
+		ScopeCursor cursor(*model.Symbols()); // thunks lower on several threads (ParallelLowering)
 		ScopeGuard frame = ctx.queries().PushScope(Scope::Kind::Function, thunk.mangledName);
 		fn.root = fn.NewNode<BlockNode>(nullptr);
 		fn.complete = ThunkBuilder(ctx, target, shared).Build().Ok() && errors.GetErrors().Empty();
