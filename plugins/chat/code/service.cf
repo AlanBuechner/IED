@@ -71,6 +71,32 @@ namespace Ai
 		for (const Core::String& problem : problems) context->Log(problem.View());
 		LoadDeleted(ws);
 		PurgeExpired();
+		ResumeLater(wsId.View());
+	}
+
+	void Chats::ResumeLater(Core::StringView wsId) {
+		Chats* self = this;
+		Core::String id = Core::String(wsId);
+		context->StartThread([self, id]() {
+			Threading::Thread::Sleep(kResumeDelayNs);
+			IED::HostLock guard(*self->context);
+			self->Resume(id.View());
+		});
+	}
+
+	void Chats::Resume(Core::StringView wsId) {
+		IED::Workspace ws;
+		if (stopping || !IED::FindWorkspace(wsId, ws)) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String policy = Core::String(Serialization::ReadJson(context->Setting(Core::StringView("ai.resumeInterrupted"), wsId).View(), *doc).root.AsView());
+		for (Chat* chat : InWorkspace(wsId)) {
+			Core::String reason = ResumeReason(chat, policy.View());
+			if (reason.IsEmpty()) continue;
+			OwnerMessage message;
+			message.text = ResumeText(reason.View(), chat->resume.View());
+			context->Log((((Core::String("chat ") + chat->chatId.View()) + " goes on after the restart (") + reason.View() + ")").View());
+			StartTurn(chat, message, nullptr, 0, reason.CStr());
+		}
 	}
 
 	Chat* Chats::Get(Core::StringView chatId) const {
@@ -186,7 +212,7 @@ namespace Ai
 
 	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, nullptr, 0); }
 
-	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops) {
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops, const char* resumed) {
 		IED::Workspace ws = WorkspaceOf(chat);
 		Core::StringView text = sent.text.View();
 		Turn* turn = new Turn();
@@ -195,6 +221,8 @@ namespace Ai
 		turn->mentions = sent.mentions;
 		turn->attachments = sent.attachments;
 		turn->hops = hops;
+		turn->resumed = Core::String(resumed);
+		chat->resume = Core::String();
 		if (from) {
 			turn->fromChatId = from->chatId;
 			turn->fromTitle = from->title;

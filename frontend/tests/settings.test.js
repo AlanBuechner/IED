@@ -2,7 +2,7 @@
 // draw, titles, controls and search; a refused write's message; and the Models and Model Groups pages' helpers.
 
 import { test, assertEqual, assertThrows } from "./harness.js";
-import { controlKind, findPage, inputText, matches, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
+import { controlKind, findPage, inputText, matches, pageOwning, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
 import { refusal } from "../src/shell/settingsview.js";
 import { probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
 import { freshName, movedEarlier, roleDefault, withRole } from "/plugins/ied.chat/ui/groupsettings.js";
@@ -25,6 +25,8 @@ test("settings: pages, nesting and contributed pages", () => {
 	assertEqual(pages[3].children.map((c) => [c.title, c.keys]), [["C/C++", ["cpp.clangd.path"]]], "the first slash nests");
 	assertEqual(findPage(pages, "custom:models").view, "ModelsSettings");
 	assertEqual(findPage(pages, "nope"), null);
+	assertEqual(pageOwning(pages, "ai.models").id, "custom:models", "search sends a key its plugin's page edits to that page");
+	assertEqual(pageOwning(pages, "ai.maxSteps"), null);
 });
 
 test("settings: titles, controls and values", () => {

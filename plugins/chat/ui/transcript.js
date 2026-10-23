@@ -115,9 +115,13 @@ export class TranscriptView {
 		return el;
 	}
 
-	// Who sent the turn's message: the owner, or another chat (docs/04 "Chats talk to each other"), which a click opens.
+	// Who sent the turn's message: the owner, another chat (docs/04 "Chats talk to each other"), which a click opens, or
+	// IED itself, going on after a restart (docs/12 "Restart behavior").
 	userHead(turn) {
 		const from = turn.user && turn.user.from;
+		const resumed = turn.user && turn.user.resumed;
+		if (resumed) return h("div.chat-head.from", { title: resumed === "relaunch" ? "IED relaunched onto a new build and continued this chat" : "IED restarted while this chat ran and continued it" },
+			icon("debug-restart"), h("b", null, "IED"), h("span.muted", null, resumed === "relaunch" ? "after relaunching" : "after a restart"), h("span.muted", null, clock(turn.startedMs)));
 		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs)));
 		return h("div.chat-head.from", null, icon("comment-discussion"), h("b", null, "From chat"),
 			h("button.chat-from-link", { title: "Open " + from.title, on: { click: () => this.actions.openChat(from.chatId) } }, from.title || from.chatId),

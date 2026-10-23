@@ -82,6 +82,10 @@ namespace Launch
 			if (child.Wait(100) != Process::kTimedOut) break;
 		}
 		const int64 code = child.Wait(0);
+		if (code == kAnotherServerExit) {
+			Net::LocalStream other = Net::LocalStream::Connect(name.CStr(), kConnectMs);
+			if (other.IsOpen()) return other;
+		}
 		if (code < 0) {
 			error = Core::String("ied-server started but its control pipe never opened");
 			return Net::LocalStream();

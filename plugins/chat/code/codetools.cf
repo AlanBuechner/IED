@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "codetools.ch"
 include "images.ch"
 include "linediff.ch"
+include "chatstore.ch"
 
 namespace Ai
 {
@@ -102,9 +103,17 @@ namespace Ai
 		outcome.preview = shown.ToString();
 	}
 
+	// The call restarts the server: the chat goes on by itself once it is back (resume.ch).
+	static void ResumeAfterRestart(const ToolInvocation& call, Core::StringView tool) {
+		IED::HostLock guard(*call.context);
+		call.chat->resume = Core::String(tool);
+		SaveChatHeader(LocalStateOf(call.ws), call.chat);
+	}
+
 	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
 		const int64 started = clock_now_ns();
 		IED::ToolResult result = IED::RunPluginTool(entry->pluginId.View(), entry->entry, CodeToolCall(entry, call), entry->seconds);
+		if (result.restarts && call.chat) ResumeAfterRestart(call, entry->name.View());
 		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
 		outcome.isError = result.isError;
 		AttachImages(outcome, call.ws, result.images);

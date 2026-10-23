@@ -366,6 +366,32 @@ namespace Ied
 		};
 		instance->queue.Push(job);
 		instance->wake.NotifyAll();
+		if (!Await(instance, job, wait, stopped, problem)) return false;
+		if (!refused->IsEmpty()) {
+			problem = (who + ": ") + refused->View();
+			return false;
+		}
+		return true;
+	}
+
+	bool CodeRuntime::RunApart(CodeInstance* instance, func<void(CodeInstance*)> body, int64 ms, func<bool()> stopped, Core::String& problem) {
+		if (instance->state != CodeState::Active && !Run(instance, [](CodeInstance* code) {}, ms, stopped, problem)) return false;
+		CodeJob* job = new CodeJob();
+		Server* host = server;
+		Threading::Thread::Run([host, instance, body, job]() {
+			{
+				CodeScope scope(instance);
+				body(instance);
+			}
+			Threading::LockGuard guard(host->lock);
+			job->done = true;
+			instance->finished.NotifyAll();
+		}).Detach();
+		return Await(instance, job, ms, stopped, problem);
+	}
+
+	bool CodeRuntime::Await(CodeInstance* instance, CodeJob* job, int64 wait, func<bool()> stopped, Core::String& problem) {
+		Core::String who = Core::String("plugin ") + instance->pluginId.View();
 		const int64 deadline = clock_now_ns() + wait * 1000000;
 		while (!job->done) {
 			const int64 left = deadline - clock_now_ns();
@@ -378,10 +404,6 @@ namespace Ied
 				return false;
 			}
 			instance->finished.WaitFor(server->lock, left < 100000000 ? left : 100000000);
-		}
-		if (!refused->IsEmpty()) {
-			problem = (who + ": ") + refused->View();
-			return false;
 		}
 		return true;
 	}

@@ -39,7 +39,10 @@ namespace Ied
 		private Core::String Launch(Core::StringView fragment);
 		private Core::String Status();
 		private Core::String Open(const Serialization::DomNode& params);
-		private void Stop();
+		private Core::String ClaimRelaunch();
+		// A relaunch no desktop app took (relaunch.ch): the server stops, and main starts it again.
+		private bool RelaunchDue();
+		private void Stop(Core::StringView why);
 
 		private Server* server;
 		private StopServer stop;

@@ -247,6 +247,7 @@ namespace Ai
 			json.Field("title", fromTitle.View());
 			json.EndObject();
 		}
+		if (!resumed.IsEmpty()) json.Field("resumed", resumed.View());
 		if (!mentions.IsEmpty()) {
 			json.Key(Core::StringView("mentions"));
 			WriteMentions(json, mentions);
@@ -302,6 +303,7 @@ namespace Ai
 		userText = Core::String(node.Member("user").Member("text").AsView());
 		fromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
 		fromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
+		resumed = Core::String(node.Member("user").Member("resumed").AsView());
 		ReadMentions(node.Member("user").Member("mentions"), mentions);
 		ReadAttachments(node.Member("user").Member("attachments"), attachments);
 		hops = node.Member("hops").AsInt();

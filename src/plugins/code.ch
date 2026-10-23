@@ -154,6 +154,9 @@ namespace Ied
 		// (more while it compiles) with the lock released, or until `stopped()`; false with `problem` when the code cannot
 		// run or did not finish in time. On the instance's own thread `body` runs at once.
 		public bool Run(CodeInstance* instance, func<void(CodeInstance*)> body, int64 ms, func<bool()> stopped, Core::String& problem);
+		// The same on a thread of its own, as the instance's code, so a long call (a build) leaves the instance's thread
+		// to its other calls; the code started first if it has not. The lock is held.
+		public bool RunApart(CodeInstance* instance, func<void(CodeInstance*)> body, int64 ms, func<bool()> stopped, Core::String& problem);
 		// A guarded call faulted: the code fails until it is built again. Takes the lock; FaultedLocked with it held.
 		public void Faulted(CodeInstance* instance, Core::StringView problem);
 		public void FaultedLocked(CodeInstance* instance, Core::StringView problem);
@@ -180,6 +183,8 @@ namespace Ied
 		private void Failed(CodeInstance* instance, Core::StringView problem, Core::StringView digest);
 		private bool Wants(CodeInstance* instance, Workspace* ws) const;
 		private void Loop(CodeInstance* instance);
+		// Waits for `job` with the lock released, at most `wait` ms or until `stopped()`.
+		private bool Await(CodeInstance* instance, CodeJob* job, int64 wait, func<bool()> stopped, Core::String& problem);
 		private Scripting::Host* ScriptHost(Core::String& problem);
 		private void UseScriptCache();
 

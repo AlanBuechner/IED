@@ -26,6 +26,7 @@ namespace Ied
 		server->rpc.Register("testhooks.mintToken", [self](Call& call, const Params& params) -> Core::String { return self->MintToken(call, params); });
 		server->rpc.Register("testhooks.gc", [self](Call& call, const Params& params) -> Core::String { return self->CollectGarbage(call, params); });
 		server->rpc.Register("testhooks.crash", [self](Call& call, const Params& params) -> Core::String { return self->Crash(call, params); });
+		server->rpc.Register("testhooks.relaunch", [self](Call& call, const Params& params) -> Core::String { return self->AskRelaunch(call, params); });
 	}
 
 	Core::String TestHooks::Info(Call& call, const Params& params) {
@@ -42,9 +43,6 @@ namespace Ied
 		return json.ToString();
 	}
 
-	// Two full collections, then the collector's counts: live bytes after them are what a soak judges, since private
-	// memory also holds garbage the proportional trigger has not collected yet. The second frees what waited for its
-	// finalizer, which a collection keeps alive (with all it points to) until the finalizer has run.
 	// What a bug on a background thread does: an exception nothing catches ends the server, with its report in
 	// logs/server.log.
 	Core::String TestHooks::Crash(Call& call, const Params& params) {
@@ -55,6 +53,17 @@ namespace Ied
 		return Core::String("{}");
 	}
 
+	// A relaunch, as a plugin asks for one (IED::RelaunchServer): the control channel and the desktop app take it from
+	// there (host/relaunch.ch).
+	Core::String TestHooks::AskRelaunch(Call& call, const Params& params) {
+		if (!server->relaunch.Ask(Core::StringView("testhooks.relaunch"), clock_now_ns() / 1000000)) throw RpcError(ErrorCode::Conflict, "a relaunch is already under way");
+		server->Log(Core::StringView("relaunch: asked by testhooks.relaunch"));
+		return Core::String("{}");
+	}
+
+	// Two full collections, then the collector's counts: live bytes after them are what a soak judges, since private
+	// memory also holds garbage the proportional trigger has not collected yet. The second frees what waited for its
+	// finalizer, which a collection keeps alive (with all it points to) until the finalizer has run.
 	Core::String TestHooks::CollectGarbage(Call& call, const Params& params) {
 		GC::Collect();
 		GC::Collect();

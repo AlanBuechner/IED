@@ -340,6 +340,11 @@ namespace Desktop
 		if (messages != null) PostMessageW(messages, kServerBackMessage, 0, 0);
 	}
 
+	void App::ServerAsksRelaunch() {
+		log.Write(Core::StringView("the server asked to be relaunched onto the newest install"));
+		if (messages != null) PostMessageW(messages, kServerRelaunchMessage, 0, 0);
+	}
+
 	void App::Remember(Core::StringView status) {
 		Threading::LockGuard guard(lock);
 		lastStatus = Core::String(status);
@@ -370,6 +375,10 @@ namespace Desktop
 	bool App::Handle(uint32 message) {
 		if (message == kServerBackMessage) {
 			for (int64 i = 0; i < windows.Count(); ++i) Reconnect(windows[i], Arrival::ServerBack);
+			return true;
+		}
+		if (message == kServerRelaunchMessage) {
+			Relaunch();
 			return true;
 		}
 		if (message == kServerFailedMessage) {

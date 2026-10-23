@@ -1,20 +1,26 @@
-"""Developer mode (docs/28): a server that runs from IED's source checkout gives its chats the source as ied:/ (the
-developer plugin's ai.roots binding, opened as a workspace when first used), a system-message section and
-ied_known_bugs; every write there asks, whatever the chat's permission mode, until the owner allows it for the chat by a
-rule that names ied:/; developer.enabled off, or an untrusted
-workspace, takes it all away. An installed IED finds its checkout through install.json; one without gives none of it.
-Rebuild and relaunch: ied.developer/rebuild runs `nuke.bat install-ied` in the checkout (a fake one here), its lines and
-its end on the topic ied.developer/state."""
+"""Developer mode (docs/28), off until the owner turns developer.enabled on: a server that runs from IED's source
+checkout then gives its chats the source as ied:/ (the developer plugin's ai.roots binding, opened as a workspace when
+first used), a system-message section and ied_known_bugs; writes there follow the chat's permission mode - auto mode
+runs them without asking, ask mode asks until the owner allows them for the chat. An untrusted workspace gets none of it.
+An installed IED finds its checkout through install.json; one without gives none of it. Rebuild and relaunch:
+ied.developer/rebuild runs `nuke.bat install-ied` in the checkout (a fake one here), its lines and its end on the topic
+ied.developer/state; ied_relaunch runs it too, then the server relaunches itself (no desktop app takes it) and the chat
+goes on by itself on the new server."""
 
+import asyncio
 import json
 import os
 import shutil
 import subprocess
+import time
 
-from iedclient import RpcFailure
+from iedclient import Client, RpcFailure
+from frames import FrameChecker
+from server import ControlPipe
 from test_chat import REPO, ChatCase, call_step, text_step, write
 
 BUILD_SECONDS = 30
+RELAUNCH_SECONDS = 60
 
 KNOWN_BUGS = """# Known bugs
 
@@ -67,15 +73,33 @@ def commit_all(folder, message):
 	return subprocess.run(["git", "-C", folder, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
-class DeveloperTests(ChatCase):
+async def enable(client):
+	await client.request("settings.set", {"tier": "app", "key": "developer.enabled", "value": True})
+
+
+def trust_folder(data, folder):
+	"""The owner trusted `folder` before (the app tier's trust.json, docs/11), as the owner's real checkout is."""
+	write(os.path.join(data, "app", "trust.json"), json.dumps({"version": 1, "trusted": [folder.replace("\\", "/").lower()]}))
+
+
+class SourceCase(ChatCase):
+	"""A server run from a (fake) source checkout the owner trusts, with developer mode turned on."""
+
 	def start_server(self):
 		make_source_home(self.home)
+		trust_folder(self.data, self.home)
 		return super().start_server()
 
-	def tool_results(self):
-		mine = self.model.requests()[-1]["body"]["messages"]
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		await enable(self.client)
+
+	def tool_results(self, request=-1):
+		mine = self.model.requests()[request]["body"]["messages"]
 		return {m["tool_call_id"]: m["content"] for m in mine if m["role"] == "tool"}
 
+
+class DeveloperTests(SourceCase):
 	async def test_the_source_is_reachable(self):
 		chat_id, _ = await self.chat(mode="agent")
 		self.model.queue(call_step("ied_known_bugs", {}, "k1"), call_step("fs_read", {"path": "ied:/AGENTS.md"}, "r1"), text_step("Read."))
@@ -90,23 +114,22 @@ class DeveloperTests(ChatCase):
 		self.assertNotIn("BUG-NNN", results["k1"], "the template is no bug")
 		self.assertIn("Fix bugs at the source.", results["r1"])
 
-	async def test_writes_there_always_ask(self):
+	async def test_auto_mode_writes_there_without_asking(self):
+		"""What developer mode is for (owner, 2026-10-23): an agent fixing IED or the C4 toolchain in auto mode edits and
+		builds without the owner approving each step."""
 		chat_id, topic = await self.chat(mode="agent", permission="auto")
-		self.model.queue(call_step("fs_write", {"path": "ied:/notes.txt", "content": "fixed\n"}, "w1"), text_step("Written."))
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "write it"})
-		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
-		self.assertEqual("fs.write(ied:/**)", request["subject"], "the rule Allow for this chat would add")
-		self.assertIn("ied:/", request["why"])
-		self.assertFalse(os.path.exists(os.path.join(self.home, "notes.txt")), "nothing is written before the decision")
-		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "allow"})
-		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		self.model.queue(call_step("fs_write", {"path": "ied:/notes.txt", "content": "fixed\n"}, "w1"),
+			call_step("shell_run", {"command": "echo built", "cwd": "ied:/"}, "s1"), text_step("Written."))
+		await self.turn(chat_id, "write it")
+		self.assertFalse([f for f in self.frames if f.get("kind") == "approval.request"], "nothing asked")
 		with open(os.path.join(self.home, "notes.txt"), encoding="utf-8") as f:
 			self.assertEqual("fixed\n", f.read())
+		self.assertIn("built", self.tool_results()["s1"])
 
 	async def test_allow_for_this_chat_covers_the_writes_its_rule_names(self):
-		"""The owner's "Allow for this chat" on a write into the source lets the chat's later writes its rule names run
-		without asking; a write the rule does not name still asks, auto mode or not."""
-		chat_id, topic = await self.chat(mode="agent", permission="auto")
+		"""In ask mode a write into the source asks; the owner's "Allow for this chat" lets the chat's later writes its
+		rule names run without asking, and a write the rule does not name still asks."""
+		chat_id, topic = await self.chat(mode="agent", permission="ask")
 		self.model.queue(call_step("fs_write", {"path": "ied:/notes/one.txt", "content": "one\n"}, "w1"),
 			call_step("fs_write", {"path": "ied:/notes/two.txt", "content": "two\n"}, "w2"),
 			call_step("fs_write", {"path": "ied:/other.txt", "content": "three\n"}, "w3"), text_step("Written."))
@@ -139,6 +162,79 @@ class DeveloperTests(ChatCase):
 		system = self.model.requests()[0]["body"]["messages"][0]["content"]
 		self.assertNotIn("This IED is built from its source checkout", system)
 		self.assertIn("nothing is reachable as ied:/", self.tool_results()["r1"])
+
+
+class OffByDefaultTests(ChatCase):
+	"""Developer mode is off until the owner turns it on, even where IED is built from source (owner, 2026-10-23)."""
+
+	def start_server(self):
+		make_source_home(self.home)
+		return super().start_server()
+
+	async def test_off_by_default(self):
+		chat_id, _ = await self.chat(mode="agent")
+		self.model.queue(call_step("fs_read", {"path": "ied:/AGENTS.md"}, "r1"), text_step("No."))
+		await self.turn(chat_id)
+		messages = self.model.requests()[-1]["body"]["messages"]
+		self.assertNotIn("This IED is built from its source checkout", messages[0]["content"])
+		self.assertNotIn("ied_relaunch", messages[0]["content"])
+		self.assertIn("nothing is reachable as ied:/", [m["content"] for m in messages if m["role"] == "tool"][0])
+
+
+class RelaunchTests(SourceCase):
+	"""ied_relaunch: `nuke install-ied` (a fake one), then the server relaunches itself - no desktop app watches, so none
+	claims it - on its port with its workspaces, and the chat goes on by itself there."""
+
+	def start_server(self):
+		server = super().start_server()
+		fake_nuke(self.home, "echo installed\nexit /b 0\n")
+		return server
+
+	def tearDown(self):
+		try:
+			ControlPipe(self.server.control).call("stop")
+		except OSError:
+			pass
+		super().tearDown()
+
+	async def reconnect(self):
+		"""Signs in to the server that took over: a launch URL from its control pipe, once it answers."""
+		deadline = time.time() + RELAUNCH_SECONDS
+		while True:
+			try:
+				reply = ControlPipe(self.server.control).call("url")
+				break
+			except OSError:
+				self.assertLess(time.time(), deadline, "no server came back")
+				await asyncio.sleep(0.25)
+		self.server.launch_url = reply["result"]["url"]
+		self.client.abort()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+
+	async def test_the_chat_goes_on_after_the_relaunch(self):
+		chat_id, topic = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("ied_relaunch", {}, "x1"), call_step("finish", {"summary": "relaunching", "verification": "installed"}, "f1"),
+			call_step("finish", {"summary": "back on the new build", "verification": "checked"}, "f2"))
+		await self.turn(chat_id, "fix it and relaunch")
+		self.assertIn("Installed. IED relaunches", self.tool_results()["x1"])
+		self.server.process.wait(RELAUNCH_SECONDS)
+		self.assertEqual(0, self.server.process.returncode, "the old server stopped on its own")
+		await self.reconnect()
+		status = ControlPipe(self.server.control).call("status")["result"]
+		self.assertNotEqual(self.server.process.pid, status["pid"], "a new server")
+		self.assertEqual(["Game"], [os.path.basename(w["root"].replace("/", os.sep)) for w in status["workspaces"]], "with the owner's workspace")
+		deadline = time.time() + RELAUNCH_SECONDS
+		while True:
+			last = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"][-1]
+			if last["user"].get("resumed") and last.get("stop"):
+				break
+			self.assertLess(time.time(), deadline, "the chat did not go on: %r" % last["user"])
+			await asyncio.sleep(0.5)
+		self.assertEqual("relaunch", last["user"]["resumed"])
+		self.assertIn("as your call to ied_relaunch asked", last["user"]["text"])
+		told = [m["content"] for r in self.model.requests() for m in r["body"]["messages"] if m["role"] == "user"]
+		self.assertTrue(any("as your call to ied_relaunch asked" in text for text in told), "the model is told")
+		self.assertEqual("finished", last["stop"])
 
 
 class RebuildTests(ChatCase):
@@ -225,6 +321,7 @@ class InstalledFromSourceTests(ChatCase):
 		self.assertEqual({"commit": self.installed, "dirty": True, "installedMs": 1792630000123}, state["install"])
 		self.assertEqual(self.head, state["head"])
 		self.assertEqual(2, state["behind"])
+		await enable(self.client)
 		chat_id, _ = await self.chat(mode="agent")
 		self.model.queue(text_step("Hi."))
 		await self.turn(chat_id)

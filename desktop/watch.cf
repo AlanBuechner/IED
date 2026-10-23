@@ -37,7 +37,11 @@ namespace Desktop
 		Net::LocalStream stream = Net::LocalStream::Connect(Launch::ControlName(app->options.control.View()).CStr(), Launch::kConnectMs);
 		if (!stream.IsOpen()) return;
 		Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
-		if (reply.ok) app->Remember(reply.result.View());
+		if (!reply.ok) return;
+		app->Remember(reply.result.View());
+		if (!ReplyFlag(reply.result.View(), "relaunch")) return;
+		Launch::Reply claim = Launch::Ask(stream, Core::StringView("relaunch.claim"), Core::StringView(""));
+		if (claim.ok && ReplyFlag(claim.result.View(), "claimed")) app->ServerAsksRelaunch();
 	}
 
 	void Watch::Loop() {

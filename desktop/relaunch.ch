@@ -23,6 +23,9 @@ namespace Desktop
 	// The root of workspace `wsId` in the control channel's reply to `status` (Launch::Reply's line); "" when it is not
 	// open.
 	Core::String RootOf(Core::StringView statusReply, Core::StringView wsId);
+	// A boolean of a control reply's result (Launch::Reply's line): `status`'s "relaunch" - the server asks the app that
+	// watches it to relaunch (src/host/relaunch.ch) - and `relaunch.claim`'s "claimed".
+	bool ReplyFlag(Core::StringView reply, const char* name);
 	// Waits up to `ms` for process `pid` to end; true once it has (or never ran).
 	bool AwaitExit(int64 pid, int32 ms);
 }

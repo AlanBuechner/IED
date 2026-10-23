@@ -250,7 +250,7 @@ A chat belongs to a workspace and to the server: a turn runs on the server until
 | `chats:<wsId>` | `chat.created`, `chat.changed`, `chat.restored` (a summary), `chat.deleted {chatId, deleted}`, `chat.purged {chatId}` | `{chats: [summary], deleted: [{chatId, wsId, title, updatedMs, deletedMs, purgeMs, turnCount}]}`: the deleted chats the latest first, `purgeMs` when the server removes each for good |
 | `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `resources.changed`, `clips.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, roleEffort, tasks, queued, modified, resources, clips, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now (a pinned model first), `roleEffort` that role's effort |
 
-A turn is `{turnId, user: {text, from?, mentions?, attachments?}, hops?, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `mentions` are `{kind, ref, label}` as sent and `attachments` `{name, path, mime, bytes}` (`path` workspace-relative, in the chat's `media/` folder); `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
+A turn is `{turnId, user: {text, from?, resumed?, mentions?, attachments?}, hops?, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `mentions` are `{kind, ref, label}` as sent and `attachments` `{name, path, mime, bytes}` (`path` workspace-relative, in the chat's `media/` folder); `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
 
 A segment is `{segId, type, done, model?, tokens?}` plus by type:
 
@@ -263,7 +263,7 @@ Events:
 
 | Event | Data |
 |---|---|
-| `turn.start` | `{turnId, mode, group, model, user: {text, from?, mentions?, attachments?}, startedMs}`: `model` the one the turn starts on, a pinned model or the first its chain's pace order keeps (`docs/04` "Pacing") |
+| `turn.start` | `{turnId, mode, group, model, user: {text, from?, resumed?, mentions?, attachments?}, startedMs}` (`resumed`: IED started the turn after a restart, `relaunch` or `interrupted`, `docs/12` "Restart behavior"): `model` the one the turn starts on, a pinned model or the first its chain's pace order keeps (`docs/04` "Pacing") |
 | `segment.start` | `{turnId, ...the segment as it starts}` (a note's text, a tool's name and call) |
 | `segment.delta` | `{segId, text}` or `{segId, argsText}`: text to append |
 | `segment.end` | `{segId, tokens, ms}` |
@@ -351,7 +351,8 @@ The pipe name is the single-instance lock: the server claims it before anything 
 |---|---|
 | `url` | `{url}`: `http://<host>:<port>/?t=<launch token>`, which signs a browser in once (`docs/11`) |
 | `open {path, line?, col?}` | `{wsId, path, url}`. `path` is absolute. A folder becomes a workspace unless one holds it already. A file opens in the workspace that holds it, else its folder becomes one; `path` in the result is workspace-relative, and the server topic gets `workspace.opened`. The URL ends in `#open=<wsId>/<path>[:<line>[:<col>]]`, which the web client reads once it has signed in: it shows that workspace and, once its layout is in place, runs the `fileOpener` command (`docs/02`), the editor's showing the file at the place and a Markdown file's preview beside it. |
-| `status` | `{serverVersion, pid, url (without a token), workspaces, clients}` |
+| `status` | `{serverVersion, pid, url (without a token), workspaces, clients, relaunch}`: `relaunch` true while the server asks the desktop app watching it to relaunch it (`docs/27` "Relaunch") |
+| `relaunch.claim` | `{claimed}`: the desktop app takes the relaunch `status` shows, and the server leaves it to the app; false when none is shown |
 | `stop` | `{}`, then every socket gets `bye {reason: "shutdown"}`, the pipe closes and the process ends |
 | (later) `open {wait: true}` | blocks until the document closes (git's editor) |
 

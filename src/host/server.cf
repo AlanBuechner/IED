@@ -87,6 +87,7 @@ namespace Ied
 		line.Append(config.dataDir.View());
 		line.Append(", home ");
 		line.Append(config.homeDir.View());
+		if (config.relaunched) line.Append(", relaunched");
 		logFile.Write(line.View());
 	}
 

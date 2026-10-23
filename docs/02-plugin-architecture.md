@@ -153,7 +153,7 @@ A binding with `side: "server"` (the default) is answered by the providing plugi
 
 ## Permissions
 
-Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `terminal`, `net.egress`, `net.listen`, `ai.invoke`, `ai.tools`, `ai.context`, `lsp`, `dap`, `git`, `sandbox`, `profiler`, `secrets`, `settings.write`, `workspace.open`, `workspace.projects`, `ui.notifications`, `ui.clipboard`, `ui.externalLinks`), shown before enabling, enforced at the plugin API (`src/api/`) for a plugin's C4 code (`docs/26` section 2: a courtesy, not a sandbox, since the code runs in the server). A permission increase on update requires re-approval. UI modules run with full client privileges, so they are exactly as trusted as their plugin; untrusted third-party UI uses the sandboxed iframe view kind (`docs/11`).
+Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `terminal`, `net.egress`, `net.listen`, `ai.invoke`, `ai.tools`, `ai.context`, `lsp`, `dap`, `git`, `sandbox`, `profiler`, `secrets`, `settings.write`, `workspace.open`, `workspace.projects`, `server.relaunch`, `ui.notifications`, `ui.clipboard`, `ui.externalLinks`), shown before enabling, enforced at the plugin API (`src/api/`) for a plugin's C4 code (`docs/26` section 2: a courtesy, not a sandbox, since the code runs in the server). A permission increase on update requires re-approval. UI modules run with full client privileges, so they are exactly as trusted as their plugin; untrusted third-party UI uses the sandboxed iframe view kind (`docs/11`).
 
 ## Open items
 

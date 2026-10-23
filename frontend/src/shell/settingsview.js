@@ -5,7 +5,7 @@
 // settings.reset (docs/07 "Settings on the wire"); the server checks every value against its schema.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { TIERS, controlKind, findPage, inputText, matches, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
+import { TIERS, controlKind, findPage, inputText, matches, pageOwning, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
 import { KeyboardPage } from "./keyboardpage.js";
 
 export function settingsView(shell, ctx) {
@@ -150,7 +150,10 @@ class SettingsView {
 		const pages = this.pages();
 		if (this.query.trim()) {
 			const found = Object.keys(this.schema).sort().filter((key) => matches(key, this.schema[key], this.query));
-			replace(this.page, h("div.set-crumbs", null, found.length + (found.length === 1 ? " setting matches" : " settings match")), ...found.map((key) => this.row(key)));
+			replace(this.page, h("div.set-crumbs", null, found.length + (found.length === 1 ? " setting matches" : " settings match")), ...found.map((key) => {
+				const owner = pageOwning(pages, key);
+				return owner ? this.pageLink(key, owner) : this.row(key);
+			}));
 			return;
 		}
 		const node = findPage(pages, this.pageId);
@@ -165,6 +168,20 @@ class SettingsView {
 		const parent = pages.find((p) => p.children.includes(node));
 		replace(this.page, h("div.set-crumbs", null, parent ? parent.title + " \u203a " + node.title : node.title), h("h1", null, node.title),
 			...node.keys.map((key) => this.row(key)), node.children.length && !node.keys.length ? h("p.muted", null, "Choose a page under " + node.title + ".") : null);
+	}
+
+	// A setting a plugin's own page edits: found here, set there, where the page decides whether it can be.
+	pageLink(key, node) {
+		const entry = this.schema[key] || { schema: {} };
+		return h("div.set-row", { dataset: { key } },
+			h("div.set-label", null, h("span.set-title", null, settingTitle(key)), h("span.mono.muted", null, key)),
+			entry.schema && entry.schema.description ? h("div.set-desc", null, entry.schema.description) : null,
+			h("div.set-edit", null, h("button.btn", { on: { click: () => {
+				this.pageId = node.id;
+				this.query = "";
+				this.searchField.value = "";
+				this.render();
+			} } }, "Set on the " + node.title + " page")));
 	}
 
 	// A plugin's own page, mounted once and kept while the window lives.

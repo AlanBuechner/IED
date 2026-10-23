@@ -1,0 +1,22 @@
+include "relaunching.ch"
+include "host/server.ch"
+
+namespace IED
+{
+	bool RelaunchServer(Core::StringView reason, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		if (!instance->May(Core::StringView("server.relaunch"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission server.relaunch");
+			return false;
+		}
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		if (!server->relaunch.Ask(reason, clock_now_ns() / 1000000)) {
+			problem = Core::String("a relaunch is already under way");
+			return false;
+		}
+		server->Log((((Core::String("relaunch: asked by plugin ") + instance->pluginId.View()) + ": ") + reason).View());
+		return true;
+	}
+}

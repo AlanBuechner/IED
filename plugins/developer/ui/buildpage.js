@@ -1,4 +1,4 @@
-// buildpage.js - Settings > Environment > Developer (docs/28): developer.enabled, and the desktop build - the checkout
+// buildpage.js - Settings > Environment > Developer (docs/28): developer.enabled (only when IED is built from source), and the desktop build - the checkout
 // it comes from, what the install was made from and how far the checkout has moved on since - with Rebuild and relaunch:
 // `nuke install-ied` on the server (ied.developer/rebuild), its log as it runs, then the desktop app moved onto the new
 // install (window.iedDesktop.relaunch, when the app has it). The server owns the build; this page only shows it.
@@ -110,12 +110,16 @@ export class BuildPage {
 		this.stopState();
 	}
 
+	// The switch only where it can do something: IED built from its source checkout.
 	renderSetting() {
-		replace(this.setting, ...this.settings.keys.map((key) => this.settings.row(key)));
+		if (!this.state) replace(this.setting);
+		else if (!this.state.source) replace(this.setting, h("p.set-desc.dev-off", null, "Developer mode is offered only when IED is built from its source checkout: run it from the checkout, or install it from one with ", h("code", null, "nuke install-ied"), "."));
+		else replace(this.setting, ...this.settings.keys.map((key) => this.settings.row(key)));
 	}
 
 	shown(data) {
 		this.state = data;
+		this.renderSetting();
 		replace(this.rows, ...installRows(data).flatMap(([label, value]) => [h("span.k", null, label), h("span.v", null, value)]));
 		replace(this.log, data.build.lines.join("\n"));
 		this.log.scrollTop = this.log.scrollHeight;

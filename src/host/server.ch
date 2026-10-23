@@ -3,6 +3,7 @@
 
 include "config.ch"
 include "logfile.ch"
+include "relaunch.ch"
 include "web/session.ch"
 include "services/presence.ch"
 include "services/workspaces.ch"
@@ -81,6 +82,7 @@ namespace Ied
 		public HostSchemas schemas;
 		public Settings* settings;
 		public AppDataWatch appWatch;
+		public Relaunch relaunch;
 	}
 
 	// "e-" and 12 random hex digits.

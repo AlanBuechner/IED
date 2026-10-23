@@ -38,6 +38,7 @@ namespace Ied
 		Core::StringView option = arguments[i].View();
 		if (option == "--test-hooks") { config.testHooks = true; return true; }
 		if (option == "--quiet") { config.quiet = true; return true; }
+		if (option == "--relaunched") { config.relaunched = true; return true; }
 		if (i + 1 >= arguments.Count()) return Fail(error, option, "needs a value (or is unknown)");
 		i += 1;
 		Core::StringView value = arguments[i].View();
@@ -68,6 +69,7 @@ namespace Ied
 	}
 
 	bool ParseArguments(const Core::Array<Core::String>& arguments, ServerConfig& config, Core::String& error) {
+		config.arguments = arguments;
 		for (int64 i = 0; i < arguments.Count(); ++i)
 			if (!ParseOption(arguments, i, config, error)) return false;
 		return true;

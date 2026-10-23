@@ -3,7 +3,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { buildLine, canRelaunch, duration, installRows, relaunchWhenBuilt, shortCommit } from "/plugins/ied.developer/ui/buildpage.js";
-import { statusOf } from "/plugins/ied.developer/ui/index.js";
+import { settingOf, statusOf } from "/plugins/ied.developer/ui/index.js";
 
 const HEAD = "0f458b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f70";
 const INSTALLED = "307c681aabbccddeeff00112233445566778899";
@@ -49,6 +49,12 @@ test("developer: without an install the checkout is what runs; without a source 
 	const none = installRows(state({ source: "" }));
 	assertEqual(none.length, 1);
 	assertTrue(none[0][1].startsWith("none: "), none[0][1]);
+});
+
+test("developer: developer mode is off unless the owner turned it on", () => {
+	assertEqual(settingOf({}), false);
+	assertEqual(settingOf({ "developer.enabled": { value: false, source: "default" } }), false);
+	assertEqual(settingOf({ "developer.enabled": { value: true, source: "app" } }), true);
 });
 
 test("developer: only the desktop app with relaunch can relaunch", () => {

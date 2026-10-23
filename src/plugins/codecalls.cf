@@ -86,12 +86,14 @@ namespace Ied
 		IED::ToolResult* result = new IED::ToolResult();
 		Core::String function = Core::String(entry.Member("function").AsView());
 		Core::String problem;
-		server->code->Run(instance, [function, name, request, result](CodeInstance* code) {
+		func<void(CodeInstance*)> body = [function, name, request, result](CodeInstance* code) {
 			Core::String failure;
 			Reflection::Function tool = CodeFunction(code, function.View(), Core::StringView("IED::ToolResult"), Core::StringView("IED::ToolCall&"), failure);
 			if (tool.IsValid()) InvokeCode(code, tool, (void*)result, (void*)&request->call, failure);
 			if (!failure.IsEmpty()) *result = IED::ToolFailure(((name + ": ") + failure.View()).View());
-		}, seconds * 1000, stopped, problem);
+		};
+		if (entry.Member("ownThread").AsBool()) server->code->RunApart(instance, body, seconds * 1000, stopped, problem);
+		else server->code->Run(instance, body, seconds * 1000, stopped, problem);
 		if (!problem.IsEmpty()) return IED::ToolFailure(((name + ": ") + problem.View()).View());
 		return *result;
 	}

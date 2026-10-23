@@ -1,6 +1,7 @@
 // The server watch (docs/27 "Starting the server"): a thread that notices the user's ied-server is gone while windows
 // are open and starts it again, at most kServerRestarts times a minute. While the server answers, it keeps the app told
-// which workspaces it has open, so the windows get theirs back on a server started again.
+// which workspaces it has open, so the windows get theirs back on a server started again; and when the server asks to be
+// relaunched (src/host/relaunch.ch), it claims that and has the app relaunch.
 
 include "launcher.ch"
 

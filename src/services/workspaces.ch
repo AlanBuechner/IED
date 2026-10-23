@@ -21,6 +21,7 @@ namespace Ied
 		public FS::Path localState;        // its per-machine state, what ".ied/local/..." paths name (localstate.ch)
 		public SolutionModel* solution;    // a solution workspace's model; null otherwise
 		public bool trusted;
+		public bool byPlugin;              // opened by a plugin (IED::OpenFolder), not the owner: a relaunch leaves it closed
 		public Core::HashMap<Core::String, int64> revisions;        // relative path -> revision
 		public Core::HashMap<Core::String, Core::String> digests;   // relative path -> SHA-256 of the text the server last wrote or read; "" once it deleted the file
 		public Core::HashMap<Core::String, bool> ownDirectories;    // folders the server made, until the watcher reports them
@@ -43,6 +44,9 @@ namespace Ied
 		// The open workspace rooted at `root`, or null.
 		public Workspace* ForRoot(const FS::Path& root) const;
 		public Workspace* First() const { return items.IsEmpty() ? nullptr : items[0]; }
+		// What opens each workspace the owner opened again - a solution's file, else its folder - in the order they
+		// opened, so they get their ids back.
+		public Core::Array<Core::String> OwnerPaths() const;
 		public const Core::Array<Workspace*>& All() const { return items; }
 		public Core::String SummariesJson() const;
 		// A file's text, the file seen from now on (its revision and digest kept); throws not_found.

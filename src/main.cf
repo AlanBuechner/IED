@@ -4,6 +4,7 @@
 include "host/server.ch"
 include "host/control.ch"
 include "web/front.ch"
+include "programs.ch"
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -63,6 +64,41 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 	return true;
 }
 
+// A relaunched server waits (kRelaunchedWaitMs) for the one before it to let go of the pipe and the port.
+static bool Retrying(const Ied::ServerConfig& config, int64 started) {
+	if (!config.relaunched || clock_now_ns() - started > Ied::kRelaunchedWaitMs * 1000000) return false;
+	Threading::Thread::Sleep(250000000);
+	return true;
+}
+
+static bool ClaimPipe(Ied::Control* control, const Ied::ServerConfig& config, Core::String& error) {
+	const int64 started = clock_now_ns();
+	while (!control->Listen(Ied::ControlName(config).View(), error))
+		if (!Retrying(config, started)) return false;
+	return true;
+}
+
+// The port asked for; else any (a relaunched server's port is its old one, which it may not get back).
+static bool ListenHttp(Http::Server* http, const Net::Address& at, const Ied::ServerConfig& config) {
+	const int64 started = clock_now_ns();
+	while (!http->Listen(at))
+		if (!Retrying(config, started)) return (!config.portGiven || config.relaunched) && http->Listen(at.WithPort(0));
+	return true;
+}
+
+// Once a relaunch no desktop app took has stopped the server (host/relaunch.ch): its program again.
+static void StartRelaunched(Ied::Server* server) {
+	Core::Array<Core::String> arguments;
+	{
+		Threading::LockGuard guard(server->lock);
+		if (!server->relaunch.Starting()) return;
+		arguments = Ied::RelaunchArguments(server->config.arguments, server->port, server->workspaces->OwnerPaths());
+	}
+	Core::String problem;
+	if (Ied::StartAgain(arguments, problem)) server->logFile.Write(Core::StringView("relaunch: started again"));
+	else server->logFile.Write((Core::String("relaunch: could not start again: ") + problem.View()).View());
+}
+
 static Core::String LaunchToken(Ied::Server* server) {
 	Threading::LockGuard guard(server->lock);
 	return server->auth->MintLaunchToken(Ied::kLaunchTokenMs);
@@ -90,13 +126,13 @@ int32 main(int32 argc, char8** argv) {
 	Ied::Server* server = new Ied::Server(config);
 	Platform::SetCrashLog(server->logFile.File().View());
 	Ied::Control* control = new Ied::Control(server, [http]() { http->Stop(); });
-	if (!control->Listen(Ied::ControlName(config).View(), error)) {
+	if (!ClaimPipe(control, config, error)) {
 		Fail(server, (Core::String("another ied-server runs for this user (") + error.View() + "); `ied status` tells which").View());
-		return 3;
+		return Launch::kAnotherServerExit;
 	}
 	if (!Prepare(server, at)) return 2;
 	Ied::Front* front = new Ied::Front(server);
-	if (!http->Listen(at) && (config.portGiven || !http->Listen(at.WithPort(0)))) {
+	if (!ListenHttp(http, at, config)) {
 		Fail(server, Core::StringView(http->Error()));
 		return 1;
 	}
@@ -108,5 +144,6 @@ int32 main(int32 argc, char8** argv) {
 	server->logFile.Write((Core::String("listening: ") + ListeningUrl(config, server->port).View()).View());
 	http->Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
 	server->logFile.Write(Core::StringView("exit: the HTTP server stopped"));
+	StartRelaunched(server);
 	return 0;
 }

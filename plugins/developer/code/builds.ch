@@ -23,6 +23,9 @@ namespace Developer
 		public void Refresh();
 		// Starts `nuke install-ied` in the checkout; false with `problem` while one runs.
 		public bool Start(Core::String& problem);
+		// Waits for the install that runs, starting one when none does, off the lock: how it ended, its exit code and the
+		// last `most` lines of its log.
+		public BuildState AwaitInstall(int64& code, Core::String& tail, int64 most);
 		public void Cancel();
 
 	private:
@@ -46,5 +49,6 @@ namespace Developer
 	}
 
 	const int64 kBuildLogLines = 400;
+	const int64 kInstallPollNs = 500000000;
 	const int64 kBuildMostSeconds = 3600;
 }

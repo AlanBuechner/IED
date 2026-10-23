@@ -15,6 +15,7 @@ namespace Desktop
 	const char* kDesktopVersion = "0.1.0";
 	const uint32 kServerBackMessage = 0x8002;     // WM_APP + 2
 	const uint32 kServerFailedMessage = 0x8003;   // WM_APP + 3
+	const uint32 kServerRelaunchMessage = 0x8006; // WM_APP + 6: the server asked to be relaunched
 	const int32 kServerEndWaitMs = 3000;          // how long a server that closed its pipe gets to exit, for its code
 
 	class App
@@ -53,6 +54,8 @@ namespace Desktop
 		public void ServerGone();
 		public void ServerBack();
 		public void ServerFailed(Core::StringView why);
+		// The server asked to be relaunched and the watch claimed it: Relaunch, on the UI thread.
+		public void ServerAsksRelaunch();
 		// The watch's last `status` reply from the server (the workspaces it has open), kept so that a server started
 		// again opens the windows' workspaces again.
 		public void Remember(Core::StringView status);

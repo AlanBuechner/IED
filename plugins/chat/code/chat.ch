@@ -112,6 +112,7 @@ namespace Ai
 		public Core::String fromChatId;               // another chat sent the message (chattools.ch); empty: the owner
 		public Core::String fromTitle;
 		public int64 hops;                            // chats in a row that messaged each other up to this turn
+		public Core::String resumed;                  // IED started it after a restart (resume.ch): "relaunch" or "interrupted"
 		public ChatMode mode;
 		public Core::String model;
 		public Core::String group;
@@ -131,7 +132,7 @@ namespace Ai
 
 		public Segment* FindSegment(Core::StringView segId) const;
 		public Segment* ToolSegment(Core::StringView callId) const;
-		// The owner's message as the clients get it: {text, from?, mentions?, attachments?}.
+		// The owner's message as the clients get it: {text, from?, resumed?, mentions?, attachments?}.
 		public void WriteUser(IED::JsonWriter& json) const;
 		// The clients' view; with `messages` the stored form, the model's messages too.
 		public void WriteJson(IED::JsonWriter& json, bool withMessages) const;
@@ -243,6 +244,7 @@ namespace Ai
 		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource), this run only
 		public Core::Array<Clip*> clips;              // the AI's clipboard, oldest first (clipboard.ch)
 		public Core::String context;                  // the last context.changed data (JSON); empty before a request
+		public Core::String resume;                   // a call of this tool restarts the server: the chat goes on once it is back (resume.ch)
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
 

@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 from frames import FrameChecker
@@ -112,6 +113,55 @@ class ControlTests(ServerTestCase):
 		self.assertIn("[%d] C4: fatal: an exception was thrown and not caught" % self.server.process.pid, text)
 		self.assertIn('"testhooks.crash"', text, "the thread's name")
 		self.assertRegex(text, r"\(\S*testhooks\.cf:\d+\)", "the line that threw, named from the PDB")
+
+	async def ask_relaunch(self):
+		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await client.request("testhooks.relaunch")
+		client.abort()
+
+	def await_status(self, ready, seconds=15):
+		deadline = time.time() + seconds
+		while True:
+			try:
+				status = ControlPipe(self.server.control).call("status")["result"]
+				if ready(status):
+					return status
+			except OSError:
+				pass
+			self.assertLess(time.time(), deadline, "the status never came")
+			time.sleep(0.25)
+
+	async def test_the_desktop_app_claims_a_relaunch(self):
+		"""A relaunch a plugin asks for (testhooks.relaunch here) shows in the status once the asker's answer is out; the
+		desktop app that watches claims it (relaunch.claim) and stops the server itself, which then starts nothing
+		(host/relaunch.ch)."""
+		await self.ask_relaunch()
+		self.assertFalse(self.result("status")["relaunch"], "not while the asker's answer goes out")
+		self.assertEqual({"claimed": False}, self.result("relaunch.claim"), "nor claimed then")
+		self.await_status(lambda s: s["relaunch"])
+		self.assertEqual({"claimed": True}, self.result("relaunch.claim"))
+		self.assertFalse(self.result("status")["relaunch"], "taken")
+		self.result("stop")
+		self.assertEqual(0, self.server.process.wait(15))
+		time.sleep(2)
+		with self.assertRaises(OSError, msg="the app starts the next server, not this one"):
+			ControlPipe(self.server.control)
+		self.assertIn("relaunch: the desktop app relaunches IED (testhooks.relaunch)", "\n".join(server_log(self.server)))
+
+	async def test_a_relaunch_no_app_claims_starts_the_server_again(self):
+		await self.ask_relaunch()
+		self.assertEqual(0, self.server.process.wait(30), "it stopped itself")
+		try:
+			status = self.await_status(lambda s: s["pid"] != self.server.process.pid, 30)
+			self.assertEqual("http://127.0.0.1:%d/" % self.server.port, status["url"], "on its port")
+			self.assertEqual(1, len(status["workspaces"]), "with its workspace")
+			self.assertFalse(status["relaunch"])
+		finally:
+			ControlPipe(self.server.control).call("stop")
+		text = "\n".join(server_log(self.server))
+		self.assertIn("stopped to relaunch: no desktop app took the relaunch", text)
+		self.assertIn("relaunch: started again", text)
+		self.assertRegex(text, r"\[%d\] start: ied-server .*, relaunched" % status["pid"], "the new server says what it is")
 
 
 @unittest.skipUnless(os.environ.get(CLI_ENV), "needs --cli")

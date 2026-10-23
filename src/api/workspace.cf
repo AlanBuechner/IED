@@ -34,7 +34,10 @@ namespace IED
 		Ied::Server* server = instance->runtime->server;
 		Ied::ApiLock guard(server);
 		Ied::Workspace* found = server->workspaces->ForRoot(canonical);
-		if (!found) found = server->workspaces->Open(canonical, Core::StringView("folder"));
+		if (!found) {
+			found = server->workspaces->Open(canonical, Core::StringView("folder"));
+			found->byPlugin = true;
+		}
 		ws = Ied::PluginWorkspace(server, found);
 		return true;
 	}

@@ -17,7 +17,9 @@ import time
 import unittest
 
 import ws
-from server import CLI_ENV, DESKTOP_ENV, ServerTestCase, read_lines, remove_tree
+from frames import FrameChecker
+from iedclient import Client
+from server import CLI_ENV, DESKTOP_ENV, IedServer, ServerTestCase, read_lines, remove_tree
 
 START_SECONDS = 40
 WATCH_SECONDS = 2.5   # the app's watch looks at its server every 2 s
@@ -317,3 +319,29 @@ class DesktopTests(ServerTestCase):
 		self.assertEqual("project - IED", self.wait(self.signed_in_page, "the window on the folder")["title"])
 		self.assertEqual([where], [rect for _, rect in after.values()], "where it was")
 		self.assertFalse(os.path.exists(os.path.join(self.root, "local", "IED", "desktop", "relaunch.json")), "the relaunch file is taken")
+
+	def test_a_relaunch_the_server_asks_for_moves_the_app_and_its_server(self):
+		"""The server asks to be relaunched (developer mode's ied_relaunch, docs/28; testhooks.relaunch here): the app's
+		watch claims it and relaunches itself and the server as its own Relaunch does, so the server starts nothing of its
+		own (src/host/relaunch.ch). The first server is the check's, with test hooks, on the app's pipe."""
+		server = IedServer(control=self.control)
+		self.addCleanup(server.stop)
+		self.assertTrue(server.started, server.error)
+		self.start_app()
+		self.wait(self.signed_in_page, "signed-in window")
+		before = desktop_windows()
+
+		async def ask():
+			client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": server.sign_in()})
+			await client.request("testhooks.relaunch")
+			client.abort()
+		asyncio.run(ask())
+		self.app.wait(30)
+		after = self.wait(lambda: {h: v for h, v in desktop_windows().items() if h not in before}, "the relaunched window", START_SECONDS)
+		self.relaunched = [pid for pid, _ in after.values()]
+		self.assertEqual(0, server.process.wait(10), "the app stopped the server")
+		again = self.wait(lambda: (lambda s: s if s and s["pid"] != server.process.pid and s["clients"] >= 1 else None)(self.status()), "the app's own server and the window on it")
+		self.assertEqual([os.path.normcase(self.folder)], [os.path.normcase(w["root"]) for w in again["workspaces"]], "the window's folder opened again")
+		self.assertEqual("project - IED", self.wait(self.signed_in_page, "the window on the folder")["title"])
+		self.assertIn("the server asked to be relaunched onto the newest install", "\n".join(read_lines(os.path.join(self.root, "local", "IED", "logs", "desktop.log"))))
+		self.assertNotIn("relaunch: started again", "\n".join(read_lines(os.path.join(server.data, "logs", "server.log"))), "the server left it to the app")

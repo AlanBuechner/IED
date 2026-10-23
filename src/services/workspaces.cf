@@ -130,6 +130,13 @@ namespace Ied
 		return opened;
 	}
 
+	Core::Array<Core::String> Workspaces::OwnerPaths() const {
+		Core::Array<Core::String> paths;
+		for (Workspace* ws : items)
+			if (!ws->byPlugin) paths.Push(Core::String(ws->solution ? ws->solution->file.View() : ws->root.View()));
+		return paths;
+	}
+
 	// A workspace opened (or opened again) goes first in the recent projects: a solution by its file, anything else by
 	// its folder, which is what opens it again.
 	void Workspaces::Remember(Workspace* ws) {

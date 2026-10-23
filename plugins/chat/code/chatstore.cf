@@ -50,6 +50,7 @@ namespace Ai
 		json.IntField("createdMs", chat->createdMs);
 		json.IntField("updatedMs", chat->updatedMs);
 		json.IntField("counter", chat->counter);
+		if (!chat->resume.IsEmpty()) json.Field("resume", chat->resume.View());
 		json.Key(Core::StringView("tasks"));
 		chat->WriteTasks(json);
 		json.Key(Core::StringView("queued"));
@@ -112,6 +113,7 @@ namespace Ai
 		chat->createdMs = header.Member("createdMs").AsInt();
 		chat->updatedMs = header.Member("updatedMs").AsInt();
 		chat->counter = header.Member("counter").AsInt();
+		chat->resume = Core::String(header.Member("resume").AsView());
 		Serialization::DomNode tasks = header.Member("tasks");
 		for (int64 i = 0; i < tasks.Count(); ++i) {
 			ChatTask* task = new ChatTask();

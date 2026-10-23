@@ -48,6 +48,15 @@ export function settingsPages(settings, contributed) {
 	return sorted;
 }
 
+// The plugin's own page that edits `key` (it decides how and whether to show it), or null.
+export function pageOwning(pages, key) {
+	for (const p of pages) {
+		const child = p.children.find((c) => c.view && c.keys.includes(key));
+		if (child) return child;
+	}
+	return null;
+}
+
 // The node with `id` in the tree, or null.
 export function findPage(pages, id) {
 	for (const p of pages) {

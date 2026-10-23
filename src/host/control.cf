@@ -38,11 +38,13 @@ namespace Ied
 		acceptor = Threading::Thread::Run([self]() { self->AcceptLoop(); });
 	}
 
-	// Until the server stops: then the pipe closes, so `ied` sees no server even before the process has ended.
+	// Until the server stops: then the pipe closes, so `ied` sees no server even before the process has ended. A
+	// relaunch that came due stops it here.
 	void Control::AcceptLoop() {
 		while (!stopping.Load()) {
 			Net::LocalStream accepted = listener.Accept(kAcceptSliceMs);
 			if (!accepted.IsOpen() && !listener.TimedOut()) break;
+			if (RelaunchDue()) Stop(Core::StringView("stopped to relaunch: no desktop app took the relaunch"));
 			if (!accepted.IsOpen()) continue;
 			Net::LocalStream* stream = new Net::LocalStream(take(accepted));
 			Control* self = this;
@@ -71,7 +73,7 @@ namespace Ied
 			stream->SendText((answer.line + "\n").View(), 5000);
 			if (answer.stop) {
 				stream->Close();
-				Stop();
+				Stop(Core::StringView("stopped by the control channel"));
 				return;
 			}
 		}
@@ -111,6 +113,7 @@ namespace Ied
 		if (method == "status") return Status();
 		if (method == "open") return Open(params);
 		if (method == "stop") return Core::String("{}");
+		if (method == "relaunch.claim") return ClaimRelaunch();
 		throw RpcError(ErrorCode::NotFound, (Core::String("no method '") + method + "'").View());
 	}
 
@@ -130,8 +133,21 @@ namespace Ied
 		json.Field("url", LaunchUrl(server->config, server->port, Core::StringView(""), Core::StringView("")).View());
 		json.RawField("workspaces", server->workspaces->SummariesJson().View());
 		json.IntField("clients", server->sessions.Count());
+		json.BoolField("relaunch", server->relaunch.Shown(clock_now_ns() / 1000000));
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String Control::ClaimRelaunch() {
+		Threading::LockGuard guard(server->lock);
+		const bool claimed = server->relaunch.Claim(clock_now_ns() / 1000000);
+		if (claimed) server->Log((Core::String("relaunch: the desktop app relaunches IED (") + server->relaunch.reason.View() + ")").View());
+		return Core::String(claimed ? "{\"claimed\":true}" : "{\"claimed\":false}");
+	}
+
+	bool Control::RelaunchDue() {
+		Threading::LockGuard guard(server->lock);
+		return server->relaunch.Due(clock_now_ns() / 1000000);
 	}
 
 	// "open=<wsId>/<path>[:<line>[:<col>]]": what the web client shows once it has signed in (docs/10).
@@ -174,7 +190,7 @@ namespace Ied
 	}
 
 	// Every client is told and closed, then the HTTP server stops, and with it the process.
-	void Control::Stop() {
+	void Control::Stop(Core::StringView why) {
 		stopping.Store(true);
 		Core::Array<Session*> closing;
 		{
@@ -184,7 +200,7 @@ namespace Ied
 			server->lsp->StopAll();
 		}
 		for (Session* session : closing) session->FlushAndClose(1001, "shutdown");
-		server->Log(Core::StringView("stopped by the control channel"));
+		server->Log(why);
 		stop();
 	}
 }

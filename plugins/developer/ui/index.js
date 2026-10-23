@@ -29,11 +29,11 @@ export function statusOf(state) {
 
 export function DeveloperStatus(ctx) {
 	let state = { source: "" };
-	let enabled = true;
+	let enabled = false;
 	const render = () => {
 		const [label, color, line] = statusOf(state);
 		ctx.el.hidden = !state.source || !enabled;
-		ctx.el.title = "Developer mode: chats may fix IED and the C4 toolchain in " + state.source + " (every write and command there asks first)" + (line ? "\n" + line : "");
+		ctx.el.title = "Developer mode: chats may fix IED and the C4 toolchain in " + state.source + " (writes and commands there follow each chat's permission mode)" + (line ? "\n" + line : "");
 		replace(ctx.el, icon(state.build && state.build.state === "running" ? "sync" : "tools"), h("span" + (color ? "." + color : ""), null, label));
 	};
 	const stopState = ctx.ied.client.subscribe("ied.developer/state", {
@@ -64,9 +64,10 @@ export function DeveloperStatus(ctx) {
 	} };
 }
 
-function settingOf(values) {
+// developer.enabled is off unless set: it is offered only where IED is built from source.
+export function settingOf(values) {
 	const setting = values && values["developer.enabled"];
-	return !setting || setting.value !== false;
+	return Boolean(setting && setting.value === true);
 }
 
 function addStylesheet(href) {

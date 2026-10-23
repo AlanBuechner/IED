@@ -22,6 +22,7 @@ include "tasks.ch"
 include "contributions.ch"
 include "outputs.ch"
 include "projects.ch"
+include "relaunching.ch"
 
 namespace IED
 {

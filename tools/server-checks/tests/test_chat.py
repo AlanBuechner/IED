@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 from frames import FrameChecker
@@ -960,6 +961,31 @@ class ChatTests(ChatCase):
 		await self.client.sub([topic])
 		await self.client.next_frame(topic)
 		self.assertEqual("finished", (await self.turn(chat_id, "continue"))["stop"], "a paused chat continues with the next message")
+
+	async def test_an_interrupted_agent_turn_goes_on_by_itself(self):
+		"""ai.resumeInterrupted is "agent" by default: an Agent turn a crash cut off goes on by itself once the server is
+		back, its message IED's (docs/12 "Restart behavior"); an Ask chat waits, as the check above shows."""
+		chat_id, topic = await self.chat(mode="agent")
+		await self.use_model({}, script="long-stream")
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "work"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=20)
+		self.client.abort()
+		self.server.process.kill()
+		self.server.process.wait(10)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		deadline = time.time() + 30
+		while True:
+			history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
+			if len(history) == 2:
+				break
+			self.assertLess(time.time(), deadline, "the cut-off turn did not go on: %r" % [t["stop"] for t in history])
+			await asyncio.sleep(0.25)
+		self.assertEqual("interrupted", history[0]["stop"])
+		self.assertEqual("interrupted", history[1]["user"].get("resumed"), "IED started it, not the owner")
+		self.assertIn("cut it off", history[1]["user"]["text"])
+		await self.client.request("chat.stop", {"chatId": chat_id})
 
 	async def test_a_chat_file_that_is_not_utf8_still_loads(self):
 		"""A running.json written before C4 BUG-384 held a console's code-page bytes as they were, and the JSON reader

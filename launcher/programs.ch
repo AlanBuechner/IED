@@ -6,6 +6,9 @@ include "logfile.ch"
 namespace Launch
 {
 	const int64 kServerStartMs = 15000;
+	// ied-server's exit code when another server holds the control pipe: one started at the same moment (a relaunch,
+	// another launcher) won the race.
+	const int32 kAnotherServerExit = 3;
 
 	// ied-server.exe beside this program or in a sibling folder (the build layout); empty when none is.
 	FS::Path ServerProgram();
@@ -14,7 +17,8 @@ namespace Launch
 	// The web client's folder: the nearest "frontend" above this program that holds login.html; empty when none does.
 	FS::Path WebClientFolder();
 	// Starts the server in the background, then waits for its pipe: a connection, or a closed stream with `error`. The
-	// process goes to `started` when it is given (its exit code tells how it ended).
+	// process goes to `started` when it is given (its exit code tells how it ended). A server that ends because another
+	// claimed the pipe meanwhile gives a connection to that one.
 	Net::LocalStream StartServer(Core::StringView control, Core::String& error, Process::Child* started = nullptr);
 	// A connection to the server on `control` (this user's when empty), starting it when nobody listens (`started`
 	// as StartServer's).

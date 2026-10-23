@@ -32,6 +32,9 @@ namespace IED
 		public Core::String preview;   // what the tool card shows; the content when empty
 		public bool isError;
 		public Core::Array<ToolImage> images;
+		// The server restarts after this call (IED::RelaunchServer): the chat continues by itself once it is back, with a
+		// message saying so (docs/12 "Restart behavior").
+		public bool restarts;
 	}
 
 	// What a call will do, made only by reading: the owner may deny it.

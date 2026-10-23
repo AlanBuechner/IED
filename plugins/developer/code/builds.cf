@@ -112,6 +112,31 @@ namespace Developer
 
 	void Builds::Cancel() { canceled.Store(true); }
 
+	static Core::String LastLines(const Core::Array<Core::String>& lines, int64 most) {
+		Core::StringBuilder tail;
+		for (int64 i = lines.Count() > most ? lines.Count() - most : 0; i < lines.Count(); ++i) {
+			tail.Append(lines[i].View());
+			tail.Append("\n");
+		}
+		return tail.ToString();
+	}
+
+	BuildState Builds::AwaitInstall(int64& code, Core::String& tail, int64 most) {
+		Core::String running;
+		Start(running);
+		for (;;) {
+			{
+				IED::HostLock guard(*context);
+				if (state != BuildState::Running) {
+					code = exitCode;
+					tail = LastLines(lines, most);
+					return state;
+				}
+			}
+			Threading::Thread::Sleep(kInstallPollNs);
+		}
+	}
+
 	// `cmd /c <checkout>\nuke.bat install-ied`, its output published as it comes.
 	void Builds::Run() {
 		Process::StartInfo info;

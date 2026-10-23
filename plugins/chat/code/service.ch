@@ -11,6 +11,7 @@ include "catalog.ch"
 include "probe.ch"
 include "claudeaccount.ch"
 include "claudesession.ch"
+include "resume.ch"
 
 namespace Ai
 {
@@ -34,9 +35,10 @@ namespace Ai
 		public void PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge);
 		// The chat's summary changed: chat.changed on its topic and its workspace's, and its header saved.
 		public void Changed(Chat* chat);
-		// A turn for `message` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner.
+		// A turn for `message` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner;
+		// `resumed` why IED starts it itself after a restart (resume.ch), "" for a message.
 		public void StartTurn(Chat* chat, const OwnerMessage& message);
-		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops);
+		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops, const char* resumed = "");
 		// The workspace's chats.
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
 		// A new chat in `ws`, published on its chats: topic.
@@ -102,6 +104,9 @@ namespace Ai
 		private void ClaudeKeeper();
 		// Stops the Claude sessions no turn used for kClaudeIdleMs; the lock is held.
 		private void StopIdleSessions();
+		// The workspace's chats that go on by themselves after a restart (resume.ch), kResumeDelayNs after it opened.
+		private void ResumeLater(Core::StringView wsId);
+		private void Resume(Core::StringView wsId);
 
 		private Core::Array<Chat*> chats;
 		private Core::Array<DeletedChat*> deleted;

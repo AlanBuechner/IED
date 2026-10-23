@@ -91,6 +91,10 @@ class DesktopTests {
 		Core::StringView status = Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pid\":1,\"workspaces\":[{\"wsId\":\"w1\",\"root\":\"C:\\\\a\"},{\"wsId\":\"w2\",\"root\":\"C:\\\\Game\"}]}}");
 		assert_se("C:\\Game", Desktop::RootOf(status, Core::StringView("w2")).CStr(), "its folder");
 		assert_true(Desktop::RootOf(status, Core::StringView("w9")).IsEmpty(), "a workspace no longer open");
+		assert_true(!Desktop::ReplyFlag(status, "relaunch"), "a server that does not ask to be relaunched");
+		assert_true(Desktop::ReplyFlag(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pid\":1,\"relaunch\":true}}"), "relaunch"), "one that does");
+		assert_true(Desktop::ReplyFlag(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"claimed\":true}}"), "claimed"), "the claim taken");
+		assert_true(!Desktop::ReplyFlag(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32601}}"), "claimed"), "an older server knows no claim");
 		Core::Array<Desktop::RelaunchWindow> windows;
 		Desktop::RelaunchWindow game;
 		game.root = Core::String("C:\\Game");

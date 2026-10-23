@@ -127,6 +127,12 @@
 			},
 			"additionalProperties": false
 		},
+		"ai.resumeInterrupted": {
+			"enum": ["agent", "always", "never"],
+			"default": "agent",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "A turn a server restart cut off: agent - an Agent-mode chat goes on by itself once IED is back (at most 3 restarts in a row; others wait for your next message); always - every chat does; never - every chat waits for you (docs/12 Restart behavior). A chat whose tool restarted IED on purpose (ied_relaunch) always goes on."
+		},
 		"ai.maxSteps": {
 			"type": "integer",
 			"minimum": 0,

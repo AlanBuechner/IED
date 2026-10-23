@@ -64,6 +64,12 @@ namespace Desktop
 		return Core::String();
 	}
 
+	bool ReplyFlag(Core::StringView reply, const char* name) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(reply, *doc);
+		return read.Ok() && read.root.Member("result").Member(name).AsBool();
+	}
+
 	bool AwaitExit(int64 pid, int32 ms) {
 		void* process = OpenProcess(kSynchronize, 0, (uint32)pid);
 		if (process == null) return true;

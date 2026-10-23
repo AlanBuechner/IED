@@ -4,7 +4,13 @@
 AI can fix issues with the C4 compiler or IED itself as it is working on stuff"): `plugins/developer`, the chat's
 `ai.roots` routing (`plugins/chat/code/roots.cf`), `IED::OpenFolder`; server checks `test_developer.py`. Rebuild and
 relaunch built 2026-10-21 (owner's request: "in the settings we should add a re build and relaunch to make this easy for
-me to keep the desktop build up to date"). Not yet: see "Where it is not yet" below.
+me to keep the desktop build up to date"). Autonomy built 2026-10-23 (owner: "the point of the developer mode that IED and
+C4 edits are gated behind is so the AI can fix language bugs and iterate in IED and automatically rebuild and relaunch
+IED and start its self back up to test the changes"; "developer mode should be disabled by default and only available to
+enable if you are building from source"): off by default, writes and commands in `ied:/` follow the chat's permission
+mode, `ied_relaunch`, the host's relaunch (`src/host/relaunch.ch`, `docs/27` "Relaunch") and the chat going on after it
+(`docs/12` "Restart behavior"); server checks `test_developer.py` `RelaunchTests`, `test_control.py`,
+`test_desktop.py`. Not yet: see "Where it is not yet" below.
 
 ## Why
 
@@ -16,12 +22,14 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
 
 ## When it is on
 
-- `developer.enabled` (on by default, any tier) has an effect only when the server is built from a source checkout:
+- `developer.enabled` (off by default, any tier) can be turned on only when the server is built from a source checkout:
   either its home (the folder it found `shared/host-api` in, `IED::HomeFolder`) is one - it holds `.git`,
   `C4/C4Lib/src` and `src/nuke.toml` - or it is an install whose `install.json` names one as its `source` and that
   folder still is one. `nuke install-ied` writes that record (`docs/21` "Install shape"), so the desktop app the owner
-  installed from the checkout gets developer mode too; an install from elsewhere, or with no record, offers nothing
-  whatever the setting says.
+  installed from the checkout can have developer mode too. Settings > Environment > Developer shows the switch only
+  then; elsewhere it says developer mode needs IED built from its source checkout, and the settings search sends the key
+  to that page rather than drawing a switch of its own (`docs/07`). An install from elsewhere, or with no record, offers
+  nothing whatever the setting says.
 - Settings > Environment > Developer holds the setting and the desktop build (below). The status bar shows `DEV` while
   it is on (the source folder in its tooltip; a click opens the page); it reads `DEV: building` while a rebuild runs,
   `DEV: build failed` in red after one fails, and its tooltip says how many commits the checkout is ahead of the
@@ -35,23 +43,35 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    `fs_write`, `image_view` and `image_info` take them. Under the hood the source is opened as a workspace of its own
    (a folder workspace, not added to the recent projects) the first time a path names it, so edits go through its
    document store like any other - an open editor of that file shows the change. `shell_run` takes `cwd: "ied:/"`.
-2. **Permissions that always ask.** Writes into the source have the subject `fs.write(ied:/<path>)` and commands run
-   there `shell(ied:/<command>)`; every one asks, whatever the chat's permission mode (a deny rule still refuses),
-   until the owner allows it by a rule that names `ied:/`: "Allow for this chat" on its approval card (the file's folder,
-   `fs.write(ied:/src/projects/**)`; a command's first word, `shell(ied:/nuke *)`) or an `ai.permissions` allow rule
-   starting `ied:/`. A rule for anything (`fs.write(**)`) or auto mode never covers it: the IDE's own source is never
-   written without the owner's say. (Owner, 2026-10-23: asked for every edit in auto mode, the "Allow for this chat"
-   button did nothing for these.)
+2. **Permissions as the chat's mode says.** Writes into the source have the subject `fs.write(ied:/<path>)` and
+   commands run there `shell(ied:/<command>)`, and they are decided like any other (`docs/11`): auto mode runs them
+   without asking, acceptEdits writes and asks for commands, ask mode asks until the owner allows them - "Allow for this
+   chat" on the card adds a rule naming the root (the file's folder, `fs.write(ied:/src/projects/**)`; a command's first
+   word, `shell(ied:/nuke *)`) - and a deny rule still refuses. Turning developer mode on is the owner's say that a chat
+   may change IED's source (owner, 2026-10-23: the point is that the AI fixes the language and IED and iterates on its
+   own). A command needs the checkout trusted, as any workspace (`docs/11`); the owner's is.
 3. **A system message section** (`docs/14` item 5, "IED itself"): this IED is built from source at `<path>`; when a
    failure is in the compiler, Bedrock, Nuke or IED rather than in the workspace, fix it there - read
    `ied:/AGENTS.md` and `ied:/C4/AGENTS.md` first, record a C4 bug in `ied:/C4/docs/status/known-bugs.md`, add a test
-   that would have caught it, run `nuke build` and `nuke gates` in `ied:/`, and say in the chat what was fixed. About
-   150 tokens; only while developer mode is on.
+   that would have caught it, run `nuke build` and `nuke gates` in `ied:/`, and say in the chat what was fixed; when the
+   running IED needs the fix, `ied_relaunch` installs it and the chat continues on the new build. About 200 tokens; only
+   while developer mode is on.
 4. **Tools** (a deferred group `ied`, loaded with `tool_search`, `docs/13`):
    - `ied_rebuild()`: `nuke build` in the source, the end of its output; a compiler build refreshes the `dev`
      toolchain, so the workspace's next build uses the fix at once when it pins `dev`.
    - `ied_gates()`: `nuke gates`, the C4 test suites, with a summary of what failed.
+   - `ied_relaunch()`: `nuke install-ied` through the settings page's build (one at a time; a build already running is
+     the one it waits for, and the page and the status bar show it), then `IED::RelaunchServer`: the desktop app, or
+     else the server itself, relaunches onto the new install (`docs/27` "Relaunch"). Its result says IED relaunches in a
+     few seconds and ends the turn, and it marks the chat (`IED::ToolResult::restarts`), so once IED is back the chat
+     goes on by itself with IED's message "IED restarted onto its new build, as your call to ied_relaunch asked..."
+     (`docs/12` "Restart behavior"). A build that fails installs nothing, relaunches nothing and gives the end of its
+     log.
    - `ied_known_bugs()`: the open entries of `known-bugs.md`, so a chat checks whether a bug is known before filing it.
+
+   The three long tools run on threads of their own (`ownThread`, `docs/26` section 8): before, a 10-minute
+   `ied_gates` held the plugin's thread, and every `ied:/` path of every chat (the `ai.roots` binding runs there) failed
+   after 30 s.
 
 ## Rebuild and relaunch
 
@@ -79,13 +99,13 @@ The settings page keeps the desktop app current with the checkout without a term
   build: {state, startedMs, endedMs, exitCode, lines}}`, the event `changed` (a new snapshot) and `build.lines`
   (`{lines}`, the lines added). A window closed during a build finds it, its log and its end when it opens again;
   `ied.developer/refresh` reads HEAD and `install.json` again (the page asks when it opens).
-- Relaunching is the owner's click, never automatic from a chat: the chat tool `ied_rebuild` builds (`nuke build`) but
-  installs nothing.
+- A chat relaunches with `ied_relaunch` (above), the same build and the same relaunch; `ied_rebuild` builds
+  (`nuke build`) and installs nothing.
 
 ## What it does not do
 
-- It does not move the running server onto a new build by itself. The owner's Rebuild and relaunch does (above); a
-  chat that fixed IED tells the owner, who rebuilds when it suits them.
+- It does not relaunch on its own: a chat calls `ied_relaunch`, or the owner clicks Rebuild and relaunch. Windows
+  and their workspaces come back; what a window had open beyond its workspace comes back from the server's layouts.
 - It does not commit or push. The owner reviews the change (the chat's Modified files list shows `ied:/` files too) and
   commits it.
 - It never touches another checkout: `ied:/` is the source this server was built from, nothing else.
@@ -102,13 +122,18 @@ plugin API like the others, and the chat plugin learns of the source through a b
 - **`ai.roots`** (a binding the chat plugin consumes, optional; `kind: function`): `{wsId}` -> `{roots: [{alias, wsId,
   title, confirm}]}`, other workspaces a chat of `wsId` may reach. A path `<alias>:/<path>` in a file tool or a
   `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask until a rule naming the
-  root allows it (the subjects
-  `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). The developer plugin provides it with one root,
-  `{alias: "ied", title: "IED source", confirm: true}`, while developer mode is on; nothing is reachable otherwise.
+  root allows it, whatever the mode (the subjects `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). The
+  developer plugin provides it with one root, `{alias: "ied", title: "IED source", confirm: false}`, while developer
+  mode is on; nothing is reachable otherwise.
+- **`ied.developer.install`** (a binding the plugin provides and its own `ied_relaunch` consumes): `{}` ->
+  `{state, exitCode, tail}` once `nuke install-ied` has ended; it waits as long as the build takes, so it is for a tool
+  on a thread of its own.
+- **`IED::RelaunchServer(reason, problem)`** (`src/api/relaunching.ch`, permission `server.relaunch`): the host's
+  relaunch (`docs/27` "Relaunch"); generic, for any plugin that installs IED.
 - **The system message section and the tools** are entries the plugin's code contributes when it activates
   (`PluginContext::Contribute`), only when the server runs from source, each with `when: config.developer.enabled`; the
   tools are deferred (`tool_search` loads them, group `ied.developer`).
-- **The setting** is the plugin's `developer.enabled` (on by default; it has no effect without the source); its
+- **The setting** is the plugin's `developer.enabled` (off by default; it has no effect without the source); its
   status item shows `DEV` while the source is there and the setting holds, from the plugin's topic
   `ied.developer/state` and the workspace's settings.
 - **The settings page** is the plugin's `settingsPages` entry `ied.developer` (Environment > Developer, view
@@ -131,3 +156,5 @@ says so in `known-bugs.md` (its entry names the chat), so the other one waits fo
 3. The system message section.
 4. `ied_rebuild`, `ied_gates`, `ied_known_bugs`.
 5. Rebuild and relaunch in the settings page (with the desktop app's `relaunch`, `docs/27`).
+6. Autonomy: off by default, the chat's mode decides in `ied:/`, `ied_relaunch` with the host's relaunch, and the chat
+   going on after it.
