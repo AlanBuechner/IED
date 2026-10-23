@@ -126,6 +126,8 @@ namespace Ai
 		private void ClaudeErrorOf(ClaudeLine* line, StepResult* result);
 		// The query's result: the context window the CLI reports.
 		private void ClaudeResult(ClaudeLine* line);
+		// The CLI's own count of the session's context (get_context_usage) as the chat's meter, its window learned.
+		private void ClaudeContext(const Serialization::DomNode& usage);
 		// Reads the query to its result.
 		private void DrainClaude();
 		// Claude cannot serve the turn (`claudeBlocked`: a usage limit, no subscription sign-in): the next candidate that is
@@ -186,7 +188,8 @@ namespace Ai
 	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
 	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);
-	// The context meter of a chat with turns but no count yet - one an older server ran, or whose count was lost -
-	// estimated from what its next turn would send, for the model it would start on (`estimated`). Inside the host lock.
-	Core::String EstimatedContext(Chats* chats, Chat* chat, const IED::Workspace& ws);
+	// The context meter of a chat with turns but none kept - an older server ran it, or its count was lost: its last
+	// turn's prompt as its model's server counted it (`tokensIn`), split like what its next turn would send; that send
+	// estimated when no turn kept a count. For the model its next turn starts on. Inside the host lock.
+	Core::String MeterFromTurns(Chats* chats, Chat* chat, const IED::Workspace& ws);
 }

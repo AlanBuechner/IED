@@ -163,7 +163,7 @@ namespace Ai
 		return chats->prompts.System(chat->mode, prompt);
 	}
 
-	Core::String EstimatedContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {
+	Core::String MeterFromTurns(Chats* chats, Chat* chat, const IED::Workspace& ws) {
 		IED::PluginContext* context = chats->context;
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
@@ -177,8 +177,10 @@ namespace Ai
 		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->userText.View() : Core::StringView(""), models, contributed);
 		Core::Array<ContextPart> parts = ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->mode, chat->loadedTools, claude).ByteLength());
 		int64 used = 0;
-		for (const ContextPart& part : parts) used += part.tokens;
-		return ContextJson(profile ? chats->WindowOf(profile) : 0, used, model.View(), claude, parts, true);
+		for (int64 i = chat->turns.Count() - 1; i >= 0 && used == 0; --i) used = chat->turns[i]->tokensIn;
+		if (used == 0)
+			for (const ContextPart& part : parts) used += part.tokens;
+		return ContextJson(profile ? chats->WindowOf(profile) : 0, used, model.View(), claude, ScaledParts(parts, used));
 	}
 
 	// What the owner's message names, read now, and its attachments, into the message the model is sent (mentions.ch):

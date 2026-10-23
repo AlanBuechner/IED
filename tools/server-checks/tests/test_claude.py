@@ -102,6 +102,11 @@ class ClaudeTurnTests(ClaudeCase):
 		self.assertEqual([turn["turnId"]], header["claude"]["turns"])
 		context = [f for f in self.frames if f.get("kind") == "context.changed"][-1]["data"]
 		self.assertEqual(1000000, context["window"], "the window the CLI reports")
+		counted = [f["data"] for f in self.frames if f.get("kind") == "context.changed" and f["data"].get("source") == "claude"]
+		if not counted:
+			counted = [(await self.client.wait_for("chat:" + chat_id, lambda f: f.get("kind") == "context.changed" and f["data"].get("source") == "claude", timeout=20))[-1]["data"]]
+		self.assertEqual((41234, 1000000), (counted[-1]["used"], counted[-1]["window"]), "the turn ends on the CLI's own count (get_context_usage)")
+		self.assertEqual(["System prompt", "MCP tools", "Messages"], [p["name"] for p in counted[-1]["parts"]], "its rows that fill the window")
 
 	def local_state(self):
 		from server import local_state

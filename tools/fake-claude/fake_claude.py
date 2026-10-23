@@ -1,12 +1,12 @@
 """A fake Claude Code CLI for IED's checks (docs/04 "The Claude Code provider"): the parts of Claude Code 2.1.304's
 print mode IED uses - `--version`, `auth status`, and `-p --input-format stream-json --output-format stream-json`
-with control requests both ways (initialize, get_usage, set_model, interrupt; IED's in-process MCP server reached over
+with control requests both ways (initialize, get_usage, get_context_usage, set_model, interrupt; IED's in-process MCP server reached over
 mcp_message: initialize, tools/list, tools/call), stream_event partial messages, rate_limit_events and results.
 
     python fake_claude.py --state <folder> [the CLI's own arguments]
 
 The state folder scripts it and records what it saw (README.md): script.json (the responses, taken in order),
-usage.json (get_usage's answer), auth.json (`auth status`), log.jsonl (what it was started with and every line it
+usage.json (get_usage's answer), context.json (get_context_usage's), auth.json (`auth status`), log.jsonl (what it was started with and every line it
 read), sessions/ (the session ids --resume finds)."""
 
 import json
@@ -18,6 +18,11 @@ import time
 import uuid
 
 VERSION = "2.1.304"
+# get_context_usage's answer unless context.json says another: the rows the CLI's /context shows, each with its kind.
+CONTEXT_USAGE = {"totalTokens": 41234, "maxTokens": 1000000, "rawMaxTokens": 1000000, "percentage": 4, "model": "claude-opus-5-5", "categories": [
+	{"name": "System prompt", "tokens": 6100, "color": "promptBorder", "kind": "used"}, {"name": "MCP tools", "tokens": 17900, "color": "cyan_FOR_SUBAGENTS_ONLY", "kind": "used"},
+	{"name": "Messages", "tokens": 17234, "color": "purple_FOR_SUBAGENTS_ONLY", "kind": "used"}, {"name": "Free space", "tokens": 913766, "color": "promptBorder", "kind": "free"},
+	{"name": "Autocompact buffer", "tokens": 45000, "color": "inactive", "kind": "buffer"}]}
 
 
 class State:
@@ -146,6 +151,8 @@ class Cli:
 			self.answer(message, {"commands": [], "models": [{"value": "opus", "resolvedModel": "claude-opus-5-5"}, {"value": "sonnet", "resolvedModel": "claude-sonnet-5-5"}, {"value": "haiku", "resolvedModel": "claude-haiku-5-5"}]})
 		elif subtype == "get_usage":
 			self.answer(message, self.state.read("usage.json", {"session": {}, "subscription_type": None, "rate_limits_available": False, "rate_limits": None, "behaviors": None}))
+		elif subtype == "get_context_usage":
+			self.answer(message, self.state.read("context.json", CONTEXT_USAGE))
 		elif subtype == "set_model":
 			self.model = request.get("model") or "default"
 			self.answer(message, {})

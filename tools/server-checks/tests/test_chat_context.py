@@ -1,6 +1,6 @@
 """The chat's context meter across a restart (docs/04 "Context management"): the count of the last step comes back with
-the chat, and a chat with turns but no count - one an older server ran - gets an estimate from what its next turn
-would send, never nothing. The turns compression left out are kept in chat.json."""
+the chat, and a chat with turns but no meter kept - one an older server ran - gets one from its last turn's count,
+never nothing. The turns compression left out are kept in chat.json."""
 
 import json
 import os
@@ -36,14 +36,13 @@ class ContextMeterTests(ChatCase):
 		await self.turn(chat_id)
 		counted = [f["data"] for f in self.frames if f.get("kind") == "context.changed"][-1]
 		self.assertGreater(counted["used"], 0)
-		self.assertNotIn("estimated", counted)
 		await self.restart()
 		after = (await self.snapshot(topic))["context"]
 		self.assertEqual((counted["used"], counted["window"], counted["model"]), (after["used"], after["window"], after["model"]), "the count kept in chat.json")
 		with open(self.header(chat_id), encoding="utf-8") as f:
 			self.assertEqual([], json.load(f)["compressedTurns"], "no turn left out yet")
 
-	async def test_a_chat_without_a_count_is_estimated(self):
+	async def test_a_chat_without_a_meter_gets_its_last_turns_count(self):
 		chat_id, topic = await self.chat()
 		self.model.queue(text_step("Counted."))
 		await self.turn(chat_id)
@@ -60,14 +59,15 @@ class ContextMeterTests(ChatCase):
 		await self.connect()
 		meter = (await self.snapshot(topic))["context"]
 		self.assertIsNotNone(meter, "a chat with turns always has a meter")
-		self.assertTrue(meter.get("estimated"), meter)
-		self.assertEqual("fake", meter["model"])
-		self.assertGreater(meter["used"], 1000, "the system message and tools are in it")
+		last = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"][-1]
+		self.assertGreater(last["tokensIn"], 1000)
+		self.assertEqual(last["tokensIn"], meter["used"], "the last request as the model's server counted it")
 		self.assertEqual(meter["used"], sum(p["tokens"] for p in meter["parts"]))
+		self.assertNotIn("estimated", meter)
 		self.assertEqual(32768, meter["window"], "the window the server learned before the restart")
 		self.model.queue(text_step("Counted again."))
 		await self.client.sub([topic])
 		await self.client.next_frame(topic)
 		await self.turn(chat_id)
 		recounted = [f["data"] for f in self.frames if f.get("kind") == "context.changed"][-1]
-		self.assertNotIn("estimated", recounted, "the next reply counts it")
+		self.assertGreater(recounted["used"], meter["used"], "the next reply counts it")

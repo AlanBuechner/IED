@@ -150,12 +150,12 @@ namespace Ai
 		return NextModel(chat, WorkspaceOf(chat), group, roleEffort);
 	}
 
-	// A chat with turns always has a meter: one no model counted yet is estimated (EstimatedContext).
+	// A chat with turns always has a meter: one kept none is made from its turns (MeterFromTurns).
 	Core::String Chats::Snapshot(Chat* chat) {
 		Core::String group;
 		Core::String roleEffort;
 		IED::Workspace ws = WorkspaceOf(chat);
-		if (chat->context.IsEmpty() && !chat->turns.IsEmpty()) chat->context = EstimatedContext(this, chat, ws);
+		if (chat->context.IsEmpty() && !chat->turns.IsEmpty()) chat->context = MeterFromTurns(this, chat, ws);
 		Core::String model = NextModel(chat, ws, group, roleEffort);
 		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), kChatSnapshotTurns);
 	}

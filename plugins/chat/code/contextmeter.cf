@@ -2,7 +2,7 @@ include "contextmeter.ch"
 
 namespace Ai
 {
-	Core::String ContextJson(int64 window, int64 used, Core::StringView model, bool claude, const Core::Array<ContextPart>& parts, bool estimated) {
+	Core::String ContextJson(int64 window, int64 used, Core::StringView model, bool claude, const Core::Array<ContextPart>& parts, Core::StringView source) {
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.IntField("window", window);
@@ -10,7 +10,7 @@ namespace Ai
 		json.Field("model", model);
 		if (claude) json.BoolField("compacts", true);
 		else json.IntField("compressAt", kContextCompressAtPercent);
-		if (estimated) json.BoolField("estimated", true);
+		if (!source.IsEmpty()) json.Field("source", source);
 		json.Key(Core::StringView("parts"));
 		json.BeginArray();
 		for (const ContextPart& part : parts) {
@@ -46,8 +46,7 @@ namespace Ai
 		return parsed.root;
 	}
 
-	Core::String ContextForModel(Core::StringView context, int64 window, Core::StringView model, bool claude) {
-		Serialization::DomNode root = ReadContext(context);
+	static Core::Array<ContextPart> PartsOf(const Serialization::DomNode& root) {
 		Core::Array<ContextPart> parts;
 		Serialization::DomNode list = root.Member("parts");
 		for (int64 i = 0; list.Kind() == Serialization::DomKind::Array && i < list.Count(); ++i) {
@@ -56,7 +55,52 @@ namespace Ai
 			part.tokens = list.At(i).Member("tokens").AsInt();
 			parts.Push(part);
 		}
-		return ContextJson(window, root.Member("used").AsInt(), model, claude, parts, root.Member("estimated").AsBool());
+		return parts;
+	}
+
+	Core::String ContextForModel(Core::StringView context, int64 window, Core::StringView model, bool claude) {
+		Serialization::DomNode root = ReadContext(context);
+		return ContextJson(window, root.Member("used").AsInt(), model, claude, PartsOf(root), claude ? root.Member("source").AsView() : Core::StringView(""));
+	}
+
+	bool ReadClaudeContext(const Serialization::DomNode& usage, int64& used, int64& window, Core::Array<ContextPart>& parts) {
+		used = usage.Member("totalTokens").AsInt();
+		window = usage.Member("maxTokens").AsInt() > 0 ? usage.Member("maxTokens").AsInt() : usage.Member("rawMaxTokens").AsInt();
+		Serialization::DomNode rows = usage.Member("categories");
+		for (int64 i = 0; rows.Kind() == Serialization::DomKind::Array && i < rows.Count(); ++i) {
+			Serialization::DomNode row = rows.At(i);
+			Core::StringView kind = row.Member("kind").AsView();
+			Core::StringView name = row.Member("name").AsView();
+			const bool fills = kind.IsEmpty() ? name != "Free space" && name != "Autocompact buffer" : kind == "used";
+			if (!fills || row.Member("tokens").AsInt() <= 0) continue;
+			ContextPart part;
+			part.name = Core::String(name);
+			part.tokens = row.Member("tokens").AsInt();
+			parts.Push(part);
+		}
+		return used > 0;
+	}
+
+	Core::Array<ContextPart> GrownClaudeParts(Core::StringView context, int64 used) {
+		if (context.IsEmpty()) return Core::Array<ContextPart>();
+		Serialization::DomNode root = ReadContext(context);
+		if (root.Member("source").AsView() != "claude") return Core::Array<ContextPart>();
+		Core::Array<ContextPart> parts = PartsOf(root);
+		int64 total = 0;
+		int64 messages = -1;
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			total += parts[i].tokens;
+			if (parts[i].name == "Messages") messages = i;
+		}
+		if (messages < 0) {
+			ContextPart part;
+			part.name = Core::String("Messages");
+			parts.Push(part);
+			messages = parts.Count() - 1;
+		}
+		const int64 grown = parts[messages].tokens + used - total;
+		parts[messages].tokens = grown > 0 ? grown : 0;
+		return parts;
 	}
 
 	Core::String ContextModel(Core::StringView context) {

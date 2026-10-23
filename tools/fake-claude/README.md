@@ -16,7 +16,8 @@ leading arguments the setting names come before IED's own.
 ## What it speaks
 
 - **Control requests from IED:** `initialize` (with `sdkMcpServers: ["ied"]` it connects to IED's in-process MCP server
-  first: `initialize`, `notifications/initialized`, `tools/list`), `get_usage` (answers `usage.json`), `set_model`,
+  first: `initialize`, `notifications/initialized`, `tools/list`), `get_usage` (answers `usage.json`), `get_context_usage` (answers `context.json`, else a 1,000,000 window with 41,234
+  tokens in three `used` rows and the `free` and `buffer` rows), `set_model`,
   `interrupt`, `mcp_message` (a `notifications/tools/list_changed` makes it list the tools again); anything else is an
   error answer, as the real CLI's.
 - **A user message** starts a query: `system/init` first (the session id, the tools as `mcp__ied__<name>`, `apiKeySource`),
@@ -36,6 +37,7 @@ leading arguments the setting names come before IED's own.
 |---|---|---|
 | `script.json` | the test | `{"responses": [...]}`, taken in order across queries; none left: "(the fake has no response queued)" |
 | `usage.json` | the test | `get_usage`'s answer (default: not signed in to a plan) |
+| `context.json` | the test | `get_context_usage`'s answer (default: `CONTEXT_USAGE` in `fake_claude.py`) |
 | `auth.json` | the test | `auth status`'s answer (default: signed in with `claude.ai`), plus `apiKeySource` for `system/init` |
 | `log.jsonl` | the fake | each start (`argv`, `cwd`, the `CLAUDE_CODE_DISABLE_*` it got, `billed`: the names of billing variables it saw), every line it read (`in`), each tool list (`tools`), each query's content (`query`) and tool result (`toolResult`) |
 | `sessions/` | the fake | one file per session id it made, for `--resume` |

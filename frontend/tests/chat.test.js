@@ -67,9 +67,8 @@ test("chat: tasks, queue, files and context", () => {
 	assertEqual([bar.percent, bar.parts[0].share, bar.free], [50, 0.125, "Free"]);
 	assertEqual(contextBar(null).parts, []);
 	assertEqual(contextBar({ window: 100, used: 10, model: "qwen", compressAt: 85, parts: [] }).free, "Free (compressed at 85%)", "IED compresses a local model");
-	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", compacts: true, parts: [] }).free, "Free (the model compacts its own)", "Claude compacts its own");
-	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", parts: [] }).model, "claude-opus");
-	assertEqual([contextBar({ window: 100, used: 10, parts: [] }).estimated, contextBar({ window: 100, used: 10, estimated: true, parts: [] }).estimated], [false, true], "an estimate says so");
+	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", compacts: true, parts: [] }).free, "Free", "Claude compacts its own");
+	assertEqual(contextBar({ window: 0, used: 10, parts: [{ name: "Messages", tokens: 10 }] }).parts[0].share, 0, "no window, no full bar");
 	model.event("chat.changed", { chatId: "c1", title: "Renamed", state: "running" });
 	assertEqual([model.summary.title, model.running()], ["Renamed", true]);
 });
@@ -133,7 +132,7 @@ test("chat: a call's arguments on one line", () => {
 });
 
 test("chat: numbers as the views show them", () => {
-	assertEqual([compact(980), compact(41300), compact(128000), compact(undefined)], ["980", "41.3k", "128k", "-"]);
+	assertEqual([compact(980), compact(41300), compact(128000), compact(1000000), compact(1250000), compact(undefined)], ["980", "41.3k", "128k", "1M", "1.3M", "-"]);
 	assertEqual([duration(38), duration(6100), duration(151000)], ["38 ms", "6.1 s", "2m 31s"]);
 	assertEqual([tokensPerSecond({ tokensOut: 412, genMs: 10000 }), tokensPerSecond({ tokensOut: 0 })], ["41.2", ""]);
 });

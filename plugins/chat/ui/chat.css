@@ -3,12 +3,13 @@
 
 .chat-act { display: flex; height: 100%; min-height: 0; background: var(--bg-2); position: relative; container: chat / inline-size; }
 .chat-act .chat-phone-only { display: none; }
+.chat-act .chat-panel-title { display: none; }
 /* A chat in a narrow place (a chat tab in a side group): the details panel is a sheet, as on a phone. */
 @container chat (max-width: 640px) {
 	.chat-act .chat-panel, .chat-tabbar .desk { display: none; }
 	.chat-tabbar .chat-phone-only { display: inline-flex; }
 	.chat-act.phone-panel .chat-panel { display: flex; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
-	.chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
+	.chat-act .chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-panel-title .chat-phone-only { display: inline-flex; }
 }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -296,7 +297,7 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 	.chat-dd { height: 28px; }
 	.chat-act .chat-phone-only { display: inline-flex; }
 	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
-	.chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
+	.chat-act .chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-col { padding: 0 var(--space-4); }
 	.chat-tabbar { height: 40px; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-2); }
 	.chat-tabbar > .ib { width: 40px; height: 40px; }

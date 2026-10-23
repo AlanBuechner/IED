@@ -26,7 +26,7 @@ export class SidePanel {
 	}
 
 	update(model) {
-		replace(this.title, h("span.ellip", null, (model.summary && model.summary.title) || "Chat"),
+		replace(this.title, h("span.ellip", null, "Details"),
 			h("button.ib.chat-phone-only", { title: "Close details", "aria-label": "Close details", on: { click: () => this.actions.closeDetails() } }, icon("close")));
 		replace(this.body, this.contextSection(model), this.tasksSection(model), this.backgroundSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
 	}
@@ -51,7 +51,7 @@ export class SidePanel {
 	contextSection(model) {
 		const bar = contextBar(model.context);
 		if (!model.context) return this.section("context", "Context", "", h("div.chat-sec-empty.muted", null, "Shown after the first request."));
-		const meta = (bar.estimated ? "~" : "") + (bar.window ? bar.percent + "% of " + compact(bar.window) : compact(bar.used) + " tokens") + (bar.model ? " - " + bar.model : "") + (bar.estimated ? " (estimated)" : "");
+		const meta = bar.window ? bar.percent + "% of " + compact(bar.window) : compact(bar.used) + " tokens";
 		const rows = bar.parts.map((part, i) => h("div.chat-sec-row", null, h("span.sw.s" + (i + 1)), h("span.name", null, part.name), h("span.meta", null, compact(part.tokens))));
 		if (bar.window) rows.push(h("div.chat-sec-row", null, h("span.sw.free"), h("span.name.muted", null, bar.free), h("span.meta", null, compact(Math.max(bar.window - bar.used, 0)))));
 		const stack = h("div.chat-stack", null, ...bar.parts.map((part, i) => h("i.s" + (i + 1), { style: { width: (part.share * 100).toFixed(2) + "%" } })));

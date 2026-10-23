@@ -359,6 +359,18 @@ namespace Ai
 		SaveChatHeader(LocalStateOf(ws), chat);
 	}
 
+	void TurnRun::ClaudeContext(const Serialization::DomNode& usage) {
+		int64 used = 0;
+		int64 window = 0;
+		Core::Array<ContextPart> parts;
+		if (!ReadClaudeContext(usage, used, window, parts)) return;
+		ModelProfile* profile = candidates[candidate];
+		chats->LearnWindow(profile->name.View(), window);
+		chat->context = ContextJson(Window(), used, profile->name.View(), true, parts, Core::StringView("claude"));
+		chats->Publish(chat, "context.changed", chat->context.View());
+		SaveChatHeader(LocalStateOf(ws), chat);
+	}
+
 	void TurnRun::DrainClaude() {
 		TurnRun* self = this;
 		claude->Settle(Core::StringView(kClaudeTurnOverNote), false, kClaudeDrainMs, [self](ClaudeLine* line) { self->ClaudeAside(line); });
@@ -426,6 +438,12 @@ namespace Ai
 			if (usage.IsValid()) {
 				IED::HostLock guard(*context);
 				chats->claude->TookUsage(usage);
+			}
+			Serialization::DomNode contextUsage = claude->process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), kClaudeUsageAskMs, error,
+				[session](ClaudeLine* line) { session->Serve(line); });
+			if (contextUsage.IsValid()) {
+				IED::HostLock guard(*context);
+				ClaudeContext(contextUsage);
 			}
 		}
 		IED::HostLock guard(*context);
