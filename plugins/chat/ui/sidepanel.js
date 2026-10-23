@@ -3,7 +3,8 @@
 // this chat with their lines added and removed, each opening in the editor; the tabs it uses that plugins reported (the
 // pages it drives), each opening as a tab; its background tasks (docs/04 "Background tasks"), a running one with Stop,
 // each unfolding to its output's end and an agent's opening its chat; the AI's clipboard, each clip unfolding to its
-// text. Sections fold, and a long list shows its first rows (ai.chats.panelRows) until Show all.
+// text. Sections fold, and a long list shows ai.chats.panelRows rows until Show all: its first, or for the task list
+// the ones around what the AI does now, under a row that counts those above.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { compact, contextBar } from "./chatmodel.js";
@@ -52,21 +53,24 @@ export class SidePanel {
 			closed ? null : rows);
 	}
 
-	// A list's entries (a row, or a row and what it unfolds to), its first previewRows only - from the one before `keep`,
-	// the row the preview keeps in view - with Show all below; every one once that is pressed.
-	limited(id, entries, keep = 0) {
+	// A list's entries (a row, or a row and what it unfolds to), previewRows of them only - from the one before `keep`,
+	// the row the preview keeps in view, with a row above saying what it leaves out there (`above(count)`) - and Show
+	// all below; every one once that is pressed.
+	limited(id, entries, keep = 0, above = (count) => count + " above") {
 		if (entries.length <= this.previewRows) return entries.flat();
 		const all = this.all.has(id);
-		const start = all ? 0 : Math.max(0, Math.min(keep - 1, entries.length - this.previewRows));
-		const shown = all ? entries : entries.slice(start, start + this.previewRows);
 		const toggle = () => {
 			if (all) this.all.delete(id);
 			else this.all.add(id);
 			this.toggled();
 		};
-		const more = h("button.chat-sec-more", { "aria-expanded": all ? "true" : "false", title: all ? "Show only " + this.previewRows : (entries.length - this.previewRows) + " more", on: { click: toggle } },
+		const before = this.previewRows > 1 ? 1 : 0;
+		const start = all ? 0 : Math.max(0, Math.min(keep - before, entries.length - this.previewRows));
+		const shown = all ? entries : entries.slice(start, start + this.previewRows);
+		const earlier = start > 0 ? h("button.chat-sec-more.above", { title: "Show all " + entries.length, on: { click: toggle } }, icon("chevron-up"), above(start)) : null;
+		const more = h("button.chat-sec-more", { "aria-expanded": all ? "true" : "false", title: all ? "Show only " + this.previewRows : (entries.length - shown.length) + " more", on: { click: toggle } },
 			icon(all ? "chevron-up" : "chevron-down"), all ? "Show fewer" : "Show all " + entries.length);
-		return [...shown.flat(), more];
+		return [earlier, ...shown.flat(), more];
 	}
 
 	contextSection(model) {
@@ -86,8 +90,9 @@ export class SidePanel {
 			h("span.chat-check" + (task.status === "done" || task.status === "skipped" ? ".on" : ""), null, TASK_GLYPHS[task.status] ? icon(TASK_GLYPHS[task.status]) : null),
 			h("span.name" + (task.status === "done" || task.status === "skipped" ? ".muted" : ""), null, task.title),
 			task.status === "in_progress" ? h("span.meta", null, "now") : null));
-		const keep = now >= 0 ? now : Math.max(0, model.tasks.findIndex((t) => t.status === "pending"));
-		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? this.limited("tasks", rows, keep) : h("div.chat-sec-empty.muted", null, "No tasks yet."));
+		const next = model.tasks.findIndex((t) => t.status === "pending");
+		const keep = now >= 0 ? now : next >= 0 ? next : model.tasks.length - 1;
+		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? this.limited("tasks", rows, keep, (count) => doneAbove(model.tasks, count)) : h("div.chat-sec-empty.muted", null, "No tasks yet."));
 	}
 
 	// What the chat has open (docs/04 "What a chat has open"): shown only when it has something.
@@ -148,6 +153,11 @@ export class SidePanel {
 		}
 		return this.section("clips", "Clipboard", String(model.clips.length), this.limited("clips", entries));
 	}
+}
+
+// What the task preview leaves out above it: "4 done above" when they are all done or skipped.
+function doneAbove(tasks, count) {
+	return count + (tasks.slice(0, count).every((t) => t.status === "done" || t.status === "skipped") ? " done above" : " above");
 }
 
 // "42 s", "3 min": how long a task ran.

@@ -138,8 +138,9 @@ test("chat pane: the Model menu shows what the chat runs on, and the next turn's
 // The details panel's section `id`: the names of its rows and its Show all button's text.
 function panelList(pane, id) {
 	const section = pane.panel.el.querySelector(".chat-sec[data-section='" + id + "']");
-	const more = section.querySelector(".chat-sec-more");
-	return { names: [...section.querySelectorAll(".chat-sec-row .name")].map((n) => n.textContent), more: more ? more.textContent : null, button: more };
+	const more = section.querySelector(".chat-sec-more:not(.above)");
+	const above = section.querySelector(".chat-sec-more.above");
+	return { names: [...section.querySelectorAll(".chat-sec-row .name")].map((n) => n.textContent), more: more ? more.textContent : null, button: more, above: above ? above.textContent : null, aboveButton: above };
 }
 
 test("chat pane: a long list of the details panel shows its first rows until Show all, as many as ai.chats.panelRows", async () => {
@@ -166,14 +167,30 @@ test("chat pane: a long list of the details panel shows its first rows until Sho
 	}
 });
 
-test("chat pane: the task list's preview keeps the task in progress in view", async () => {
+test("chat pane: the task list's preview follows what the AI does, under a row that counts the tasks above", async () => {
 	const ied = fakeIed();
 	const pane = await openPane(ied, 1);
 	try {
-		const tasks = [];
-		for (let i = 1; i <= 10; i++) tasks.push({ id: "t" + i, title: "Task " + i, status: i < 8 ? "done" : i === 8 ? "in_progress" : "pending" });
-		ied.topics.get("chat:c1").snap(Object.assign(snapshotOf(1), { tasks }));
-		assertEqual(panelList(pane, "tasks").names, ["Task 6", "Task 7", "Task 8", "Task 9", "Task 10"], "from the one done before it");
+		const topic = ied.topics.get("chat:c1");
+		const tasks = (...statuses) => statuses.map((status, i) => ({ id: "t" + (i + 1), title: "Task " + (i + 1), status }));
+		const named = (...numbers) => numbers.map((n) => "Task " + n);
+		const [D, S, N, P] = ["done", "skipped", "in_progress", "pending"];
+		topic.snap(Object.assign(snapshotOf(1), { tasks: tasks(P, P, P, P, P, P, P, P, P, P) }));
+		let list = panelList(pane, "tasks");
+		assertEqual([list.names, list.above, list.more], [named(1, 2, 3, 4, 5), null, "Show all 10"], "none started: the first");
+		topic.evt("tasks.changed", { items: tasks(D, D, D, D, D, D, D, N, P, P) });
+		list = panelList(pane, "tasks");
+		assertEqual([list.names, list.above], [named(6, 7, 8, 9, 10), "5 done above"], "the one in progress, after the one done before it");
+		topic.evt("tasks.changed", { items: tasks(D, D, D, S, D, P, P, P, P, P) });
+		assertEqual([panelList(pane, "tasks").names, panelList(pane, "tasks").above], [named(5, 6, 7, 8, 9), "4 done above"], "between two: the next one up");
+		topic.evt("tasks.changed", { items: tasks(D, P, D, D, D, D, N, P, P, P) });
+		assertEqual(panelList(pane, "tasks").above, "5 above", "one above is not done");
+		topic.evt("tasks.changed", { items: tasks(D, D, D, D, D, D, D, D, D, D) });
+		list = panelList(pane, "tasks");
+		assertEqual([list.names, list.above], [named(6, 7, 8, 9, 10), "5 done above"], "all done: the last");
+		list.aboveButton.click();
+		list = panelList(pane, "tasks");
+		assertEqual([list.names.length, list.above, list.more], [10, null, "Show fewer"], "the row above shows them all");
 	}
 	finally {
 		closePane(pane);
