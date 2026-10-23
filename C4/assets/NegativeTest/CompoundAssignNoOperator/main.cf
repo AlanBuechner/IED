@@ -1,0 +1,7 @@
+include "bedrock.ch"
+
+int32 main() {
+	Core::String s = Core::String("ab");
+	s += 'c';
+	return 0;
+}

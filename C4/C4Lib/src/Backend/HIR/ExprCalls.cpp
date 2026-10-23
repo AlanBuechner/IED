@@ -156,7 +156,7 @@ namespace Scripting
 		for (const auto& p : sig.GetParameters()) params.Push(p.m_Type);
 		if (auto built = MaterializeBracedArguments(args.braced, params, args.nodes); !built.Ok()) return QueryResult<Value>::Fail(built.error, built.message);
 		if (auto named = BindTemplateNames(callee, args, params); !named.Ok()) return QueryResult<Value>::Fail(named.error, named.message);
-		if (auto bound = BindCallArguments(n, args, sig); !bound.Ok()) return QueryResult<Value>::Fail(bound.error, bound.message);
+		if (auto bound = BindCallArguments(n, args, sig, rec.isLinked); !bound.Ok()) return QueryResult<Value>::Fail(bound.error, bound.message);
 		if (auto filled = AppendDefaultArguments(callee, target.name, args.nodes, rec, sig); !filled.Ok())
 			return QueryResult<Value>::Fail(filled.error, filled.message);
 		auto receiver = CallReceiver(n, target, rec);
@@ -174,7 +174,7 @@ namespace Scripting
 
 	// Each argument binds to its parameter (CallArguments): references take the address, by-value objects a copy of an
 	// lvalue (a fresh object relocates), scalars convert to the parameter type.
-	QueryResult<void> ExprLowerer::BindCallArguments(const FunctionCallNode* n, CallArgumentList& args, const FunctionType& sig)
+	QueryResult<void> ExprLowerer::BindCallArguments(const FunctionCallNode* n, CallArgumentList& args, const FunctionType& sig, bool foreign)
 	{
 		const bool written = args.nodes.size() == n->GetArguments().Count(); // no pack expanded into several
 		for (size_t i = 0; i < args.nodes.size() && i < sig.GetParameterCount(); ++i)
@@ -190,7 +190,7 @@ namespace Scripting
 			args.nodes[i] = bound.value;
 		}
 		for (size_t i = sig.GetParameterCount(); i < args.nodes.size(); ++i)
-			if (auto passed = VarArgs::CheckPassed(m_Ctx, args.nodes[i] ? args.nodes[i]->type : nullptr, i); !passed.Ok())
+			if (auto passed = VarArgs::CheckPassed(m_Ctx, args.nodes[i] ? args.nodes[i]->type : nullptr, i, foreign); !passed.Ok())
 				return m_Ctx.Fail(n->GetCallee().Get(), passed);
 		return QueryResult<void>::Success();
 	}

@@ -102,9 +102,11 @@ namespace Scripting
 			for (LoweredBody& body : m_Lowering.Lower(model, bodies)) Keep(model, std::move(body), lowered);
 			LowerCensusFunctions(model, lowered);
 			batch.Clear();
-			if (LoweringFailed(errorMessage)) return false;
-			if (lowered.empty()) return true;
+			// A body that failed is not emitted, but the complete ones go on: the template instances they use are only
+			// found by emitting them, and their errors are reported with the rest.
+			if (lowered.empty()) return !LoweringFailed(errorMessage);
 			EmitPlaced(model, lowered, batch);
+			CallsOfFailed(lowered, batch);
 		}
 	}
 
@@ -142,6 +144,19 @@ namespace Scripting
 				batch.Push(rec);
 			}
 		}
+	}
+
+	void CodeGenDriver::CallsOfFailed(const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch)
+	{
+		for (const Placed& placed : lowered)
+			if (!placed.tree->complete)
+				for (const HIRNode* node : placed.tree->m_Nodes)
+					if (node->kind == HIRNode::Kind::Call)
+						if (const FunctionRecord* callee = static_cast<const CallNode*>(node)->callee)
+						{
+							m_FirstUsers.emplace(callee, placed.tree);
+							batch.Push(callee);
+						}
 	}
 
 	void CodeGenDriver::SettleLayouts(const ProgramModel& model) const

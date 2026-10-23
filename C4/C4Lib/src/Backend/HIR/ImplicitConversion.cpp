@@ -196,6 +196,28 @@ namespace Scripting::ImplicitConversion
 				ArmFits(ctx, choice.elseExpr, written ? written->GetElseBranch().Get() : nullptr, to);
 		}
 
+		// An integer constant of `from` kept as its value in `to`, exactly: a uint64 at or past 2^63 is stored negative.
+		bool IntegerConstantFits(const ConstantValue& value, const Type* from, const Type* to)
+		{
+			const bool past63 = from->IsUnsignedInteger() && value.intValue < 0;
+			const uint32 bits = (uint32)to->GetSize() * 8;
+			if (to->IsUnsignedInteger())
+				return past63 ? bits == 64 : value.intValue >= 0 && (bits == 64 || (uint64)value.intValue < ((uint64)1 << bits));
+			if (past63) return false;
+			const int64 limit = bits == 64 ? 0 : (int64)1 << (bits - 1);
+			return bits == 64 || (value.intValue >= -limit && value.intValue < limit);
+		}
+
+		// A conversion between integers of one size or to a wider one changes no value, but a constant can still leave
+		// the target's range: `uint64 u = -1;`, `int64 n = 0xFFFFFFFFFFFFFFFF;`.
+		bool ConstantLeavesRange(LoweringContext& ctx, const AstNode* site, const Value& value, const Type* from, const Type* to)
+		{
+			if (!from->IsIntegral() || !to->IsIntegral() || from->IsUnsignedInteger() == to->IsUnsignedInteger()) return false;
+			ConstantValue constant;
+			return ConstantOf(ctx, site, value, constant) && constant.kind == ConstantValue::Kind::Int64 &&
+				!IntegerConstantFits(constant, from, to);
+		}
+
 		bool ValueFits(LoweringContext& ctx, const AstNode* site, const Value& value, const Type* to)
 		{
 			ConstantValue constant;
@@ -212,8 +234,8 @@ namespace Scripting::ImplicitConversion
 		const Type* from = TypeHandle::UnwrapToValue(value.type);
 		const Type* to = TypeHandle::UnwrapToValue(target);
 		if (to && IsPackedVector(to)) to = static_cast<const SwizzleType*>(to)->GetElementType(); // a broadcast converts to the lanes
-		if (!from || !to || from == to || !PlainNumber(from) || !PlainNumber(to) || !Narrows(from, to)) return;
-		if (ValueFits(ctx, site, value, to)) return;
+		if (!from || !to || from == to || !PlainNumber(from) || !PlainNumber(to)) return;
+		if (Narrows(from, to) ? ValueFits(ctx, site, value, to) : !ConstantLeavesRange(ctx, site, value, from, to)) return;
 		ctx.Warn(site, "the conversion from " + Quoted(from) + " to " + Quoted(to) + " may change the value: write (" + to->GetName() +
 			")x if that is intended");
 	}

@@ -132,6 +132,7 @@ namespace Scripting
 		if (body && rec.bodyNode && rec.bodyNode != body)
 			m_Builder.ErrorAt(m_Ctx, &fn, DuplicateDefinitionMessage(shownName, *rec.type, *rec.bodyNode, fn));
 		rec.declarations.Push(&fn);
+		MergeDefaults(rec, fn, shownName);
 		if (!body) return;
 		rec.bodyNode = body;
 		rec.definingUnit = unitId; // lowered with the definition file's include closure
@@ -139,6 +140,25 @@ namespace Scripting
 		for (uint32 i = 0; i < fn.GetParameters().Count(); ++i)
 			if (fn.GetParameters()[i]->HasName()) rec.paramNames[i] = fn.GetParameters()[i]->GetNameToken().GetText();
 		rec.paramIsConst = fn.ParameterConstness();
+	}
+
+	void FreeFunctionResolver::MergeDefaults(const FunctionRecord& rec, const FunctionDefinitionNode& fn, const Core::String& shownName) const
+	{
+		const auto& params = fn.GetParameters();
+		if (params.Count() != rec.paramDefaults.Count()) return;
+		for (uint32 i = 0; i < params.Count(); ++i)
+		{
+			const AstNode* written = params[i]->GetDefaultValue().Get();
+			const AstNode* known = rec.paramDefaults[i];
+			if (!written || written == known) continue;
+			if (!known) rec.paramDefaults[i] = written;
+			else if (known->ToString() != written->ToString())
+				m_Builder.ErrorAt(m_Ctx, written, "'" + rec.paramNames[i] + "' of '" + shownName + "' has two defaults, " + written->ToString() +
+					" here and " + known->ToString() + " where it is declared again: write it once, on the declaration or the definition");
+		}
+		uint32 trailing = 0;
+		for (uint32 i = params.Count(); i-- > 0 && rec.paramDefaults[i];) ++trailing;
+		rec.minArity = params.Count() - trailing;
 	}
 
 	bool FreeFunctionResolver::ResolveFree(const ModelBuilder::PendingFunc& f)

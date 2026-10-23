@@ -319,8 +319,68 @@
         "expect": ["'new (storage) T' needs a pointer to the storage"],
         "reason": "Placement new builds the object at an address."
     },
+    "DefaultArgumentGivenTwice": {
+        "expect": [
+            "'factor' of 'Scale' has two defaults"
+        ],
+        "reason": "A default written on both the declaration and the definition must be the same (BUG-369)."
+    },
+    "PrintfStringView": {
+        "expect": [
+            "a 'Core::StringView' is a pointer and a length, not a C string: print it with %.*s, passing (int32)v.ByteLength(), v.Data()"
+        ],
+        "reason": "printf's %s reads a C string; a StringView passed through '...' to a C function is its bytes (BUG-371)."
+    },
+    "IndexKeyType": {
+        "expect": [
+            "no [operator(\"index\")] of 'HashMap' takes a 'char8*': its reader takes a 'const Core::String&'"
+        ],
+        "reason": "A map indexed with the wrong key type names the key type its reader takes, not 'no reader' (BUG-373)."
+    },
+    "StaticMethodWithDot": {
+        "expect": [
+            "'Shape' is a type, not an object: call its static method as Shape::Twice(...)"
+        ],
+        "reason": "A static method is called as Type::Method (05 5.4), and the message says so (BUG-374)."
+    },
+    "CompoundAssignNoOperator": {
+        "expect": [
+            "no operator '+=' takes a 'String' on the left and a 'char8' on the right"
+        ],
+        "reason": "A compound assignment with no operator names the operator written (BUG-375)."
+    },
+    "BraceDeclarator": {
+        "expect": [
+            "a declaration is initialized with '=' in C4: write 'Point p = { ... };', not 'Point p{ ... }'"
+        ],
+        "reason": "C++'s brace initialization gets the C4 spelling, not just an unexpected token (BUG-376)."
+    },
+    "FormatUnwritableArgument": {
+        "expect": [
+            "no function named NoSuchFunction",
+            "no variable named NoSuchName",
+            "no create of 'Core::FormatArgument' takes (Pt)",
+            "(in 'Format', used at main.cf (11:2))"
+        ],
+        "reason": "An argument Format cannot write names its type, and is reported beside the file's other errors, also those of its own function (BUG-377)."
+    },
+    "PrivateMemberNotSuggested": {
+        "expect": [
+            "no member 'Length' in 'Core::String'"
+        ],
+        "reason": "A suggestion names only what the caller can use, never a private field (BUG-378).",
+        "reject": [
+            "did you mean 'length'"
+        ]
+    },
+    "VariableFromFileNotIncluded": {
+        "expect": [
+            "no variable named kLimit is visible here: it is declared in limits.ch, which this file does not include"
+        ],
+        "reason": "A const from a file this one does not include says so, as a function does (BUG-379)."
+    },
     "NoMatchingCreate": {
-        "expect": ["no matching constructor of 'Range' with 3 argument(s)"],
+        "expect": ["no create of 'Range' takes (int32, int32, int32): its creates take (int32, int32)"],
         "reason": "Construction runs one of the type's own creates; no create takes three arguments."
     },
     "AggregateTooManyInitializers": {
@@ -2277,7 +2337,7 @@
         "reason": "Revived from IsoNegativeTest::TestDuplicateGlobalDefinitionIsError: the namespaced form of the same hazard."
     },
     "TypeFromFileNotIncluded": {
-        "expect": ["main.cf (2:2) error: type not found: Widget"],
+        "expect": ["main.cf (2:2) error: no type named Widget is visible here: it is declared in widgets.ch, which this file does not include"],
         "reason": "Revived from IsoNegativeTest::TestSymbolsFromNonIncludedFileAreNotVisible: a body sees only what its file includes (01)."
     },
     "FunctionFromFileNotIncluded": {

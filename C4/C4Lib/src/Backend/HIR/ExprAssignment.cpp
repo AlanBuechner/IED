@@ -8,6 +8,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Backend/HIR/Lifecycle.h"
 #include "Backend/HIR/PointerConversion.h"
+#include "Backend/HIR/BuiltinOperators.h"
 #include "Parser/Nodes/Expressions/AssignmentExpressionNode.h"
 #include "Parser/Nodes/Expressions/BracedInitializerNode.h"
 #include "Model/Types.h"
@@ -269,6 +270,9 @@ namespace Scripting
 			seq->steps.push_back(m_Ctx.LoadIfNeeded(target));
 			return Value::R(seq, target.type);
 		}
+		// An object's `+=` is its own method or its `+`'s, and the query found neither: name the operator written.
+		if (const auto* object = dynamic_cast<const ObjectType*>(tt); object && !object->IsPurePackedVector())
+			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotFound, BuiltinOperators::MissingOperator(tok, tt, rt)));
 		// The built-in operator: exactly `target = target OP value` (pointer offsets, conversions and operand
 		// rules included), converted back to the target's type.
 		auto combined = ApplyBinary(n, tok.substr(0, tok.size() - 1), target, value); // "a += b" -> "+"

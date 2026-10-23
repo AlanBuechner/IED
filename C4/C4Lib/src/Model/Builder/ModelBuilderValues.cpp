@@ -32,8 +32,9 @@ namespace Scripting
 			info.declNode = &var;
 			info.initializer = d.m_Initializer ? d.m_Initializer.Get() : nullptr;
 			info.mangledName = CanonicalSymbolName(ctx.scope, name);
-			// Same-named file-scope statics in different files must not share one symbol (as functions).
-			if (info.isStatic && ctx.scope->GetKind() == Scope::Kind::File) info.mangledName += "_u" + std::to_string(ctx.unitId);
+			// Same-named file-scope statics in different files, at file scope or in a namespace, must not share one symbol
+			// (as functions): a split program's partitions name each other's by it.
+			if (info.isStatic && ctx.scope->HoldsFileStatics()) info.mangledName += "_u" + std::to_string(ctx.unitId);
 			info.plainName = name; // plain C4 name for reflection (plan 14)
 			for (const auto& ga : var.GetAnnotations()) CollectGroupAnnotations(ga.Get(), info.groups);
 			// [link("sym")] on a variable aliases the named foreign symbol (doc 04 interop): codegen emits an

@@ -38,6 +38,9 @@ namespace Scripting
 		Receiver ReceiverOf(const ModelBuilder::PendingFunc& f) const;
 		const FunctionRecord* DeclaredMethod(const ObjectType& owner, const Core::String& name, const FunctionType* signature, bool isConst) const;
 		void AttachDefinition(const FunctionRecord& rec, const FunctionDefinitionNode& fn, uint32 unitId, const Core::String& shownName) const;
+		/// A parameter's default may be written on the declaration or the definition, and applies to every call (7.4);
+		/// written on both, it must be the same expression.
+		void MergeDefaults(const FunctionRecord& rec, const FunctionDefinitionNode& fn, const Core::String& shownName) const;
 
 		bool ResolveFree(const ModelBuilder::PendingFunc& f);
 		const FunctionRecord* MergeWithDeclaration(const ModelBuilder::PendingFunc& f, const Signature& sig, const Receiver& receiver) const;

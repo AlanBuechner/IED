@@ -122,8 +122,19 @@ namespace Scripting
 		return target;
 	}
 
+	QueryResult<void> ExprLowerer::CheckTypeReceiver(const MemberAccessNode* ma)
+	{
+		const auto* id = dynamic_cast<const IdentifierExpressionNode*>(ma->GetBaseObject().Get());
+		if (!id || NamesVariable(id->GetName())) return QueryResult<void>::Success();
+		auto type = m_Ctx.queries().QueryType(id->GetName(), m_Ctx.unitId, m_Ctx.scope);
+		if (!type.Ok() || !dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(type.value))) return QueryResult<void>::Success();
+		const Core::String call = id->GetName() + "::" + ma->GetMemberNameToken().GetText();
+		return QueryResult<void>::Fail(QueryError::NotCallable, "'" + id->GetName() + "' is a type, not an object: call its static method as " + call + "(...)");
+	}
+
 	QueryResult<ExprLowerer::CallTarget> ExprLowerer::MemberCallTarget(const MemberAccessNode* ma)
 	{
+		if (auto onType = CheckTypeReceiver(ma); !onType.Ok()) return m_Ctx.Fail(ma, QueryResult<CallTarget>::Fail(onType.error, onType.message));
 		auto base = ResolveExpr(ma->GetBaseObject().Get());
 		if (!base.Ok()) return QueryResult<CallTarget>::Fail(base.error, base.message);
 		if (auto spelled = CheckAccessOperator(ma, base.value); !spelled.Ok())

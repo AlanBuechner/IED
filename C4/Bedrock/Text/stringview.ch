@@ -26,6 +26,7 @@ namespace Core
 
 		// Byte index of the first `c` or `part` at or after `start` (0 when not given); -1 when absent.
 		public int64 IndexOf(char c, int64 start) const;
+		public int64 IndexOf(char c) const { return IndexOf(c, 0); }
 		public int64 IndexOf(StringView part, int64 start) const;
 		public int64 IndexOf(StringView part) const { return IndexOf(part, 0); }
 		public bool Contains(StringView part) const { return IndexOf(part) >= 0; }

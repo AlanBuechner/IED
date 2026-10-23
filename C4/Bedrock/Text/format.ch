@@ -6,9 +6,11 @@
 //   argument                                     {n}                       kind               .N
 //   an integer (int8 to int64, uint8 to uint64)  decimal                   d D u decimal,     zero-pad to N digits
 //                                                                          x hexadecimal,
+//                                                                          X with A to F,
 //                                                                          b binary, o octal
 //   float, double                                the shortest text that    f F fixed point    N fraction digits
-//                                                reads back as the value                      (default 0)
+//                                                reads back as the value                      (6 when not given,
+//                                                                                             as C's %f)
 //   const char*, Core::String, Core::StringView  the text                  s
 //   bool                                         true or false
 //   char                                         the character

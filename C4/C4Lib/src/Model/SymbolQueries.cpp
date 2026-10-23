@@ -1,4 +1,5 @@
 #include "Model/SymbolQueries.h"
+#include "Model/NotIncluded.h"
 #include "Model/OverloadResolution.h"
 #include "Model/ConstEvaluator.h"
 #include "Model/OperatorTable.h"
@@ -479,7 +480,11 @@ namespace Scripting
 		// A frame variable is reachable only through FindLocal: found here, it belongs to an enclosing function
 		// whose layers a nested body's scope chain passes through (a lambda reaches it only by capture).
 		const SymbolInfo* info = model.FindVisibleQualified(name, ctx.unitId, ctx.scope);
-		if (!info || info->IsFrameVariable()) return QueryResult<VariableInfo>::Fail(QueryError::NotFound, "no variable named " + name);
+		if (!info || info->IsFrameVariable())
+		{
+			const Core::String elsewhere = info ? Core::String() : NotIncluded(model, name, SymbolKind::Variable, "variable");
+			return QueryResult<VariableInfo>::Fail(QueryError::NotFound, elsewhere.empty() ? "no variable named " + name : elsewhere);
+		}
 		if (info->kind != SymbolKind::Variable)
 			return QueryResult<VariableInfo>::Fail(QueryError::NotCallable, "name is not a variable: " + name);
 		VariableInfo v;
@@ -543,10 +548,13 @@ namespace Scripting
 
 	Core::String SymbolQueries::NoMember(const ProgramModel& model, const ObjectType* type, const Core::String& name)
 	{
+		// Only what any caller can use is suggested: `s.Length()` is not pointed at a private `length`.
 		std::vector<Core::String> members;
 		ClassHierarchy::ForEachSubobject(type, [&](const ObjectType* part, int64) {
-			for (const auto& field : part->GetFields()) members.push_back(field.mName);
-			for (const auto& method : part->GetMethods()) members.push_back(method.mName);
+			for (const auto& field : part->GetFields())
+				if (field.m_Access == AccessModifier::Public) members.push_back(field.mName);
+			for (const auto& method : part->GetMethods())
+				if (method.m_Access == AccessModifier::Public) members.push_back(method.mName);
 		});
 		if (auto extensions = model.m_ExtensionMethods.find(type); extensions != model.m_ExtensionMethods.end())
 			for (const FunctionRecord* extension : extensions->second) members.push_back(extension->name);

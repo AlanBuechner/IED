@@ -1,0 +1,7 @@
+include "bedrock.ch"
+
+int32 main() {
+	Core::HashMap<Core::String, int64> m;
+	m["k"] = 1;
+	return 0;
+}

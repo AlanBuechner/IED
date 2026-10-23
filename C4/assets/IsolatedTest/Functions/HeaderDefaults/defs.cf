@@ -1,0 +1,8 @@
+include "defs.ch"
+
+int64 OnDeclaration(int64 v, int64 factor) { return v * factor; }
+int64 OnDefinition(int64 v, int64 factor = 3) { return v * factor; }
+int64 OnBoth(int64 v, int64 factor = 4) { return v * factor; }
+int64 Widget::Size(int64 extra = 1) const { return base + extra; }
+
+int64 InsideDefiningFile() { return OnDeclaration(1); }

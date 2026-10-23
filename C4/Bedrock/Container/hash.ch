@@ -85,6 +85,13 @@ namespace Core
 		public static bool Equal(T* a, T* b) { return a == b; }
 	}
 
+	// How a lookup by a key of another type Q (HashMap::FindAs, HashSet::ContainsAs) hashes it for a table of K keys:
+	// as Q's KeyTraits do, which must agree with K's (a StringView for String keys). A C string looking up String keys
+	// hashes its text (Text/string.ch), not its address.
+	template<K, Q> struct LookupTraits {
+		public static uint64 Hash(const Q& key) { return KeyTraits<Q>::Hash(key); }
+	}
+
 	// Hashes and compares a key's bytes: for plain data whose every byte is part of its value.
 	template<K> struct ByteKeyTraits {
 		public static uint64 Hash(const K& key) { return HashBytes((const char*)&key, (int64)sizeof(K)); }

@@ -1,0 +1,13 @@
+// A constant that leaves an integer's range across signedness warns as a narrowing one does (BUG-372); one that fits
+// does not.
+int32 main() {
+	int64 n = 0xFFFFFFFFFFFFFFFF;
+	uint64 u = -1;
+	uint32 w = -1;
+	uint64 big = 0xFFFFFFFFFFFFFFFF;
+	int64 most = 9223372036854775807;
+	uint64 small = 5;
+	int64 least = -9223372036854775807;
+	if (n == -1 && u != 0u && w != 0u && big != 0u && most > 0 && small == 5u && least < 0) return 0;
+	return 1;
+}

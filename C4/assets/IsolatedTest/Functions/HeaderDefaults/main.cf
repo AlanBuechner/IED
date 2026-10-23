@@ -1,0 +1,12 @@
+include "defs.ch"
+
+int32 main() {
+	if (OnDeclaration(5) != 10) return 1;
+	if (OnDefinition(5) != 15) return 2;
+	if (OnBoth(5) != 20) return 3;
+	if (InsideDefiningFile() != 2) return 4;
+	Widget w;
+	w.base = 10;
+	if (w.Size() != 11) return 5;
+	return 0;
+}

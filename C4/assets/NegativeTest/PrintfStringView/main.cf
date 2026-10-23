@@ -1,0 +1,7 @@
+include "bedrock.ch"
+
+int32 main() {
+	Core::StringView view = Core::StringView("hello");
+	printf("[%s]\n", view);
+	return 0;
+}

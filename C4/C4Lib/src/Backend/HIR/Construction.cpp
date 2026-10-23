@@ -11,6 +11,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/InitListType.h"
 #include "Model/Types/SwizzleType.h"
+#include "Model/Types/QualifiedName.h"
 
 namespace Scripting
 {
@@ -216,6 +217,34 @@ namespace Scripting
 		}
 	}
 
+	static Core::String TypeList(const Core::Vector<const Type*>& types)
+	{
+		Core::String list = "(";
+		for (uint32 i = 0; i < types.Count(); ++i) list += (i ? ", " : "") + QualifiedName(types[i]);
+		return list + ")";
+	}
+
+	// What the arguments are and what the creates take: `no create of 'FormatArgument' takes (Pt): its creates take
+	// (bool), (int64), ...`.
+	static Core::String NoCreateMessage(const ObjectType* type, const Core::Vector<const Type*>& argTypes,
+		const std::vector<const FunctionRecord*>& creates, bool ambiguous)
+	{
+		const Core::String name = QualifiedName(type);
+		if (ambiguous) return "the arguments " + TypeList(argTypes) + " match more than one create of '" + name + "' equally well";
+		constexpr size_t kListed = 8;
+		Core::String taken;
+		size_t listed = 0;
+		for (const FunctionRecord* rec : creates)
+		{
+			if (!rec->type || listed++ == kListed) continue;
+			Core::Vector<const Type*> params;
+			for (uint32 i = 0; i < rec->type->GetParameterCount(); ++i) params.Push(rec->type->GetParameters()[i].m_Type);
+			taken += (taken.empty() ? "" : ", ") + TypeList(params);
+		}
+		if (listed > kListed) taken += ", and " + std::to_string(listed - kListed) + " more";
+		return "no create of '" + name + "' takes " + TypeList(argTypes) + ": its creates take " + taken;
+	}
+
 	static QueryResult<ConstructionPlan> ChooseConstruction(LoweringContext& ctx, ExprLowerer& expr, const ObjectType* type,
 		const std::vector<ConstructionArgument>& args, bool braced, const AstNode* site)
 	{
@@ -243,8 +272,8 @@ namespace Scripting
 			argTypes.Push(a.brace ? ctx.queries().TypeStore()->BracedList(a.brace->EntryCount()) : TypeHandle::UnwrapToValue(a.value.type));
 		OverloadResolution resolved = OverloadResolver::Resolve(candidates, argTypes);
 		if (resolved.status != OverloadResolution::Status::Resolved || !resolved.chosenRecord)
-			return ctx.Fail(site, Plan::Fail(QueryError::NotFound, "no matching constructor of '" + type->GetName() + "' with " +
-				std::to_string(args.size()) + " argument(s)"));
+			return ctx.Fail(site, Plan::Fail(QueryError::NotFound,
+				NoCreateMessage(type, argTypes, own.creates, resolved.status == OverloadResolution::Status::Ambiguous)));
 		return ctx.Fail(site, CallPlan(ctx, expr, resolved.chosenRecord, args));
 	}
 

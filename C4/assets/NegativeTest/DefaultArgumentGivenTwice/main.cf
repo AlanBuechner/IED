@@ -1,0 +1,5 @@
+include "defs.ch"
+
+int64 Scale(int64 v, int64 factor = 3) { return v * factor; }
+
+int32 main() { return (int32)Scale(1); }

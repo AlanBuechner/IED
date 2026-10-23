@@ -1,0 +1,13 @@
+include "bedrock.ch"
+
+struct Pt { public int32 x; }
+
+int32 Broken() { return NoSuchFunction(); }
+
+int32 main() {
+	Core::StringBuilder b;
+	Pt pt;
+	Core::Format(&b, "{0}", 1, NoSuchName);
+	Core::Format(&b, "{0}", pt);
+	return 0;
+}

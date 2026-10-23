@@ -1,0 +1,9 @@
+include "statics.ch"
+
+namespace Shop
+{
+	static const int64 kShared = 20;
+	static int64 gCount = 20;
+	static int64 Helper() { return 2; }
+	int64 FromB() { gCount += 1; return Helper() * 1000 + kShared + gCount; }
+}

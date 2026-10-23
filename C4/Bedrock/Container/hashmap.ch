@@ -73,8 +73,8 @@ namespace Core
 		// Room for `entries` entries without growing again.
 		public void Reserve(int64 entries);
 
-		// Lookups by a key of another type Q that hashes as K does (KeyTraits<Q>) and compares with == to a K: a
-		// Core::StringView for Core::String keys, so no String is made to look one up.
+		// Lookups by a key of another type Q that hashes as K does (LookupTraits<K, Q>) and compares with == to a K: a
+		// Core::StringView or a C string for Core::String keys, so no String is made to look one up.
 		template<Q> public V* FindAs(const Q& key) { int64 slot = SlotAs(key); return slot >= 0 ? &entries[slot].value : nullptr; }
 		template<Q> public const V* FindAs(const Q& key) const { int64 slot = SlotAs(key); return slot >= 0 ? &entries[slot].value : nullptr; }
 		template<Q> public bool ContainsAs(const Q& key) const { return SlotAs(key) >= 0; }
@@ -93,7 +93,7 @@ namespace Core
 		}
 		template<Q> private int64 SlotAs(const Q& key) const {
 			const KeyValue<K, V>* stored = entries;
-			return FindSlot(table, KeyTraits<Q>::Hash(key), [stored, &key](int64 slot) -> bool { return stored[slot].key == key; });
+			return FindSlot(table, LookupTraits<K, Q>::Hash(key), [stored, &key](int64 slot) -> bool { return stored[slot].key == key; });
 		}
 		// Where a new key of `hash` goes, the table first grown when it is full.
 		private int64 SlotForNew(uint64 hash);

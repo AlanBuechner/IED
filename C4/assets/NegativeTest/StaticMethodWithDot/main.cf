@@ -1,0 +1,6 @@
+class Shape
+{
+	public static int64 Twice(int64 x) { return x * 2; }
+}
+
+int32 main() { return (int32)Shape.Twice(7); }

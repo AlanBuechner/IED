@@ -8,8 +8,11 @@ namespace Core
 		public int64 index;
 		public int32 kind;
 		public int32 width;
+		public bool widthWritten; // `.N` was given (`.0` included)
 		public int64 length;
 	}
+
+	const int32 kFixedDigitsByDefault = 6;
 
 	int32 FormatDigit(int32 c) { return c >= '0' && c <= '9' ? c - '0' : -1; }
 
@@ -23,6 +26,7 @@ namespace Core
 			p += 2;
 			if (text[p] == '.') {
 				p += 1;
+				field.widthWritten = true;
 				while (FormatDigit(text[p]) >= 0) { field.width = field.width * 10 + FormatDigit(text[p]); p += 1; }
 			}
 		}
@@ -33,8 +37,23 @@ namespace Core
 
 	int32 FormatBase(int32 kind) { return kind == 'x' ? 16 : kind == 'b' ? 2 : kind == 'o' ? 8 : 10; }
 
+	// Hexadecimal with A to F ({n:X}), zero-padded to `width` digits.
+	void AppendUpperHex(StringBuilder* out, uint64 value, int32 width) {
+		char[16] digits;
+		int32 count = 0;
+		do {
+			const int32 digit = (int32)(value % 16u);
+			digits[count] = (char)(digit < 10 ? '0' + digit : 'A' + digit - 10);
+			count += 1;
+			value = value / 16u;
+		} while (value > 0u);
+		for (int32 i = count; i < width; ++i) out->AppendByte('0');
+		while (count > 0) { count -= 1; out->AppendByte(digits[count]); }
+	}
+
 	// A signed integer in another base is its two's complement bits.
 	void AppendFormatInteger(StringBuilder* out, const FormatField& field, const FormatArgument& argument) {
+		if (field.kind == 'X') { AppendUpperHex(out, (uint64)argument.integer, field.width); return; }
 		const int32 base = FormatBase(field.kind);
 		if (argument.kind == FormatValue::Signed && base == 10) out->AppendIntBase(argument.integer, 10, field.width);
 		else out->AppendUIntBase((uint64)argument.integer, base, field.width);
@@ -42,8 +61,9 @@ namespace Core
 
 	void AppendFormatReal(StringBuilder* out, const FormatField& field, const FormatArgument& argument) {
 		const bool fixed = field.kind == 'f' || field.kind == 'F';
-		if (argument.kind == FormatValue::Float) out->AppendFloat((float)argument.real, fixed ? field.width : -1);
-		else out->AppendDouble(argument.real, fixed ? field.width : -1);
+		const int32 digits = !fixed ? -1 : field.widthWritten ? field.width : kFixedDigitsByDefault;
+		if (argument.kind == FormatValue::Float) out->AppendFloat((float)argument.real, digits);
+		else out->AppendDouble(argument.real, digits);
 	}
 
 	void AppendFormatArgument(StringBuilder* out, const FormatField& field, const FormatArgument& argument) {

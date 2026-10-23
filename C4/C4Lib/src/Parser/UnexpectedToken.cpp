@@ -25,6 +25,18 @@ namespace Scripting
 			return Core::StringFormat::Format("an array's extent belongs to its type in C4: write '{0}[{1}] {2}', not '{0} {2}[{1}]'",
 				type.GetText(), extent, name.GetText());
 		}
+
+		// C++'s brace initialization `Point p{ 1, 2 }`: in C4 a declaration is initialized with '='.
+		Core::String BraceDeclaratorMessage(const Lexer& lexer)
+		{
+			const Token& type = lexer.PeekCompound();
+			const Token& name = lexer.PeekCompound(1);
+			if (type.GetType() != TokenType::Identifier || name.GetType() != TokenType::Identifier ||
+				lexer.PeekCompound(2).GetType() != TokenType::OpenCurl)
+				return "";
+			return "a declaration is initialized with '=' in C4: write '" + Core::String(type.GetText()) + " " + Core::String(name.GetText()) +
+				" = { ... };', not '" + Core::String(type.GetText()) + " " + Core::String(name.GetText()) + "{ ... }'";
+		}
 	}
 
 	Core::String UnexpectedTokenMessage(const Lexer& lexer)
@@ -34,6 +46,7 @@ namespace Scripting
 		if (token.GetType() == TokenType::Identifier && Token::IsKeyword(name.GetType()) && EndsAName(lexer.PeekCompound(2).GetType()))
 			return KeywordNameMessage(name);
 		if (Core::String array = CArrayDeclaratorMessage(lexer); !array.empty()) return array;
+		if (Core::String braces = BraceDeclaratorMessage(lexer); !braces.empty()) return braces;
 		return Core::StringFormat::Format("Unexpected token '{0}'", token.GetText());
 	}
 

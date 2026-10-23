@@ -1,0 +1,7 @@
+include "statics.ch"
+
+int32 main() {
+	if (Shop::FromA() != 1021) return 1;
+	if (Shop::FromB() != 2041) return 2;
+	return 0;
+}

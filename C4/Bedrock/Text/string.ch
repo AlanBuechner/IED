@@ -56,4 +56,12 @@ namespace Core
 		private int64 capacity; // bytes the buffer holds, the terminator excluded
 		private int64 chars;    // decoded characters
 	}
+
+	// A C string looks up String keys by its text, hashed as String::Hash hashes it.
+	template<> struct LookupTraits<String, const char*> {
+		public static uint64 Hash(const char* key) { return StringView(key).Hash(); }
+	}
+	template<> struct LookupTraits<String, char*> {
+		public static uint64 Hash(char* key) { return StringView((const char*)key).Hash(); }
+	}
 }

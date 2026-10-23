@@ -47,8 +47,8 @@ namespace Core
 		// Room for `values` values without growing again.
 		public void Reserve(int64 values);
 
-		// Lookups by a value of another type Q that hashes as T does (KeyTraits<Q>) and compares with == to a T: a
-		// Core::StringView for a set of Core::String, so no String is made to look one up.
+		// Lookups by a value of another type Q that hashes as T does (LookupTraits<T, Q>) and compares with == to a T: a
+		// Core::StringView or a C string for a set of Core::String, so no String is made to look one up.
 		template<Q> public bool ContainsAs(const Q& value) const { return SlotAs(value) >= 0; }
 		template<Q> public bool RemoveAs(const Q& value) { return RemoveSlot(SlotAs(value)); }
 
@@ -70,7 +70,7 @@ namespace Core
 		}
 		template<Q> private int64 SlotAs(const Q& value) const {
 			const T* stored = values;
-			return FindSlot(table, KeyTraits<Q>::Hash(value), [stored, &value](int64 slot) -> bool { return stored[slot] == value; });
+			return FindSlot(table, LookupTraits<T, Q>::Hash(value), [stored, &value](int64 slot) -> bool { return stored[slot] == value; });
 		}
 		private bool RemoveSlot(int64 slot);
 		private void Rehash(int64 capacity);

@@ -1,0 +1,10 @@
+include "statics.ch"
+
+// The same names as b.cf's, file-private to each (BUG-382): a split program's partitions keep them apart.
+namespace Shop
+{
+	static const int64 kShared = 10;
+	static int64 gCount = 10;
+	static int64 Helper() { return 1; }
+	int64 FromA() { gCount += 1; return Helper() * 1000 + kShared + gCount; }
+}

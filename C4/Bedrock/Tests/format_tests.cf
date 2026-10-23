@@ -59,8 +59,27 @@ public static void TestFormatFloatDouble() {
 	Core::Format(b, "{0:F.3}", 2.25);         // double, 3 fraction digits
 	assert_se("2.250", b->CStr(), "double F.3");
 	b->Clear();
-	Core::Format(b, "{0:f}", 3.0f);           // no width -> 0 fraction digits
-	assert_se("3", b->CStr(), "float f (no decimals)");
+	Core::Format(b, "{0:f}", 3.25f);          // no width -> 6 fraction digits, as C's %f (BUG-380)
+	assert_se("3.250000", b->CStr(), "float f (6 decimals)");
+	b->Clear();
+	Core::Format(b, "{0:F}", 3.25);
+	assert_se("3.250000", b->CStr(), "double F (6 decimals)");
+	b->Clear();
+	Core::Format(b, "{0:f.0}", 3.25);         // .0 written: none
+	assert_se("3", b->CStr(), "f.0 (no decimals)");
+}
+
+[test("format.upper_hex")]
+public static void TestFormatUpperHex() {
+	Core::StringBuilder* b = new Core::StringBuilder(32);
+	Core::Format(b, "{0:X}", 255u);           // A to F (BUG-380)
+	assert_se("FF", b->CStr(), "upper hex");
+	b->Clear();
+	Core::Format(b, "{0:X.6}", 48879);
+	assert_se("00BEEF", b->CStr(), "upper hex zero-padded");
+	b->Clear();
+	Core::Format(b, "{0:X}", -1);             // two's complement bits, as x
+	assert_se("FFFFFFFFFFFFFFFF", b->CStr(), "upper hex of a negative");
 }
 
 [test("format.multiple")]

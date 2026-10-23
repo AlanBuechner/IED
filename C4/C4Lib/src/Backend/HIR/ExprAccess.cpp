@@ -196,6 +196,16 @@ namespace Scripting
 		return (sym && sym->kind == SymbolKind::Variable) ? sym : nullptr;
 	}
 
+	// `m[k]` on an object no [operator("index")] of which takes k: the key type its reader takes, or that it has none.
+	static Core::String NoReaderMessage(const ModelQueries& queries, const ObjectType& type, const Type* key)
+	{
+		const FunctionRecord* reader = queries.FindOperatorMethod(&type, "index", 1);
+		if (!reader || !reader->type || reader->type->GetParameterCount() != 1 || !key)
+			return "Cannot index into '" + type.GetName() + "': it has no [operator(\"index\")] reader - the current value cannot be read";
+		return "no [operator(\"index\")] of '" + type.GetName() + "' takes a '" + QualifiedName(TypeHandle::UnwrapToValue(key)) + "': its reader takes a '" +
+			QualifiedName(reader->type->GetParameters()[0].m_Type) + "'";
+	}
+
 	// `a[i]` (05): an operator-overloaded `[]` wins (QO("[]")); otherwise built-in index math. The
 	// result is an LVALUE (element slot/field) - `a[i] = v` stores through it with no special path.
 	QueryResult<Value> ExprLowerer::ResolveArrayIndex(const ArrayIndexNode* n)
@@ -273,7 +283,8 @@ namespace Scripting
 			baseAddr = m_Ctx.out->NewNode<LoadNode>(ptrToElem, m_Ctx.NewLValue(dataLv));
 		}
 		else if (baseType->GetKind() == TypeKind::Object)
-			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "Cannot index into '" + baseType->GetName() + "': it has no [operator(\"index\")] reader - the current value cannot be read"));
+			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue,
+				NoReaderMessage(m_Ctx.queries(), *static_cast<const ObjectType*>(baseType), idx.value.type)));
 		else return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "cannot index a non-array/pointer: '" + Core::String(baseType->GetName()) + "'"));
 
 		const Type* intT = m_Ctx.queries().TypeStore()->Builtin(TypeKind::Int64);

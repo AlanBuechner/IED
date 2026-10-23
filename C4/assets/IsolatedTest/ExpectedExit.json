@@ -71,6 +71,18 @@
     "mustNotContain": ["SHOULD NOT REACH HERE"],
     "reason": "An exception escaping a root enumerator stops the program (BUG-367): root enumerators run while the collection marks, and it never unwinds through the collector into the caller of the collection."
   },
+  "Diagnostics/Bug372ConstantSignChange": {
+    "exit": 0,
+    "compileMustContain": ["main.cf (4:12) warning: the conversion from 'uint64' to 'int64' may change the value",
+      "main.cf (5:13) warning: the conversion from 'int32' to 'uint64' may change the value",
+      "main.cf (6:13) warning: the conversion from 'int32' to 'uint32' may change the value", "Warnings:            3"],
+    "reason": "BUG-372: a constant that leaves an integer's range across signedness warns; constants that fit do not."
+  },
+  "Namespaces/FileStaticsInANamespace": {
+    "exit": 0,
+    "compileFlags": ["--incremental", "--partitions", "4"],
+    "reason": "BUG-382: same-named file-scope statics inside a namespace in two files are each file's own, also when the program is split into partitions."
+  },
   "Lifecycle/NoexceptTerminates": {
     "exit": 1,
     "mustContain": ["an exception left a noexcept function"],

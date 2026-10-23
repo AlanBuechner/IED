@@ -56,7 +56,7 @@ namespace Scripting
 		Core::String mangledName;                   // unique emitted symbol for this signature
 		Core::String name;                          // plain C4-side name (not mangled) - reflection display + group queries
 		Core::Vector<Core::String> groups;          // [group("name")] annotations on the declaration (reflection, plan 14)
-		uint32 minArity = 0;                        // params minus trailing defaults (doc 08 step 1)
+		mutable uint32 minArity = 0;                // params minus trailing defaults (doc 08 step 1)
 		// Parameter NAMES, in source order. The interned FunctionType drops them (names are not type
 		// identity), but the lowerer needs them to bind each param slot as a local - so they live on
 		// the record, which is per-declaration. Parallel to `type->GetParameters()`. Mutable: when an
@@ -68,7 +68,7 @@ namespace Scripting
 		// trailing arguments the caller omitted (`F(1)` for `F(int32 a, int32 b = 5)` lowers the `5` here).
 		// Stored as raw AST pointers (the parse tree outlives the record) and re-lowered in the CALLER's
 		// context at each call site - C++ evaluates defaults per call.
-		Core::Vector<const AstNode*> paramDefaults;
+		mutable Core::Vector<const AstNode*> paramDefaults;
 		// Parameters declared const (`const int32 x`, D-30), parallel to paramNames: read-only in the body. Taken
 		// from the definition, like the names.
 		mutable std::vector<bool> paramIsConst;

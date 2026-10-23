@@ -117,6 +117,9 @@ DpThree(4);    // 9
   (`int32 F(int32 a, int32 b = a)` is the error `no variable named a`) or `this`.
 - Methods and creates may have defaults too. A create whose every parameter has a default is the type's
   default create ([06](06-lifecycle-and-operators.md#62-construction-create)).
+- A default may be written on a function's declaration (a header) or on its definition: a function is one
+  entity in the program, so either applies to every call, from any file. Written on both, it must be the same
+  expression (`'factor' of 'Scale' has two defaults, 3 here and 2 where it is declared again`).
 
 ## 7.5 Function pointers
 

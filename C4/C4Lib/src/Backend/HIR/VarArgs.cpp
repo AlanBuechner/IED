@@ -84,6 +84,14 @@ namespace Scripting::VarArgs
 			return "a '" + QualifiedName(t) + "' copies or destroys itself, and '...' passes only bytes" +
 				(text ? Core::String(" (pass its text as .CStr())") : Core::String());
 		}
+
+		// A C function (printf's %s) reads a C string where a text view passes its bytes: a pointer and a length.
+		Core::String TextViewProblem(const Type* t)
+		{
+			const ObjectType* object = dynamic_cast<const ObjectType*>(t);
+			if (!object || !object->FindMethodByName("Data") || !object->FindMethodByName("ByteLength")) return "";
+			return "a '" + QualifiedName(t) + "' is a pointer and a length, not a C string: print it with %.*s, passing (int32)v.ByteLength(), v.Data()";
+		}
 	}
 
 	bool IsIntrinsic(const Core::String& name)
@@ -113,10 +121,11 @@ namespace Scripting::VarArgs
 		return Value::R(ctx.out->NewNode<VaNode>(read, VaNode::Op::Arg, address.value), read);
 	}
 
-	QueryResult<void> CheckPassed(LoweringContext& ctx, const Type* type, size_t position)
+	QueryResult<void> CheckPassed(LoweringContext& ctx, const Type* type, size_t position, bool toForeign)
 	{
 		const Type* passed = type ? TypeHandle::UnwrapToValue(type) : nullptr;
 		Core::String why = passed ? LifecycleProblem(ctx, passed) : Core::String();
+		if (why.empty() && passed && toForeign) why = TextViewProblem(passed);
 		if (why.empty()) return QueryResult<void>::Success();
 		return QueryResult<void>::Fail(QueryError::NotAValue, "argument " + std::to_string(position + 1) + " cannot pass through '...': " + why);
 	}

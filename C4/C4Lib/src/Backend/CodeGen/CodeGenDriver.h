@@ -145,7 +145,7 @@ namespace Scripting
 
 		/// Lowers and emits `batch`, then every template-made or compiler-written function the emitted code
 		/// references for the first time, until none is left (D-16). False, with the diagnostics, when a body
-		/// fails to lower.
+		/// fails to lower; the bodies the complete ones reach are still lowered, so every error is reported at once.
 		bool EmitReachable(ProgramModel& model, Core::Vector<const FunctionRecord*> batch, std::string* errorMessage);
 		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, ErrorTracker& errors);
 		/// A lowered body joins the program: its diagnostics after the ones before it, its tree in `lowered`.
@@ -234,6 +234,9 @@ namespace Scripting
 		unsigned PartitionOf(const SymbolInfo& global) const { return m_Placement ? m_Placement->Of(global) : 0; }
 		void TakeNewFunctions(Core::Vector<const FunctionRecord*>& batch);
 		void EmitPlaced(const ProgramModel& model, const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch);
+		/// A body that failed is not emitted, so what it calls is not found by emitting it: the calls it did lower name
+		/// the functions lowered next, so their errors are reported with its own.
+		void CallsOfFailed(const std::vector<Placed>& lowered, Core::Vector<const FunctionRecord*>& batch);
 		/// The static locals every other partition defines, declared in partition 0 for its GC roots.
 		void DeclareOthersStaticStorage();
 		/// Records `step` as taking from `since` to now, and moves `since` to now.

@@ -137,6 +137,8 @@ namespace Scripting
 		QueryResult<CallTarget> ResolveCallTarget(const AstNode* callee);
 		QueryResult<CallTarget> NamedCallTarget(const IdentifierExpressionNode* id);
 		QueryResult<CallTarget> MemberCallTarget(const MemberAccessNode* ma);
+		/// `Shape.Twice(7)`: a method of a type is called as `Shape::Twice(7)` (a static field takes either spelling).
+		QueryResult<void> CheckTypeReceiver(const MemberAccessNode* ma);
 		QueryResult<CallTarget> StaticCallTarget(const StaticAccessNode* sa);
 		QueryResult<CallTarget> ValueCallTarget(const AstNode* callee);
 		/// Whether `name` (plain or qualified) names a variable here: a call of it calls the variable's value.
@@ -180,7 +182,7 @@ namespace Scripting
 		QueryResult<Value> ConstructorCall(const AstNode* callee, const ObjectType* type, const CallArgumentList& args);
 		QueryResult<Value> CallFunction(const FunctionCallNode* n, const CallTarget& target, CallArgumentList& args, const FunctionRecord& rec,
 			const FunctionType& sig);
-		QueryResult<void> BindCallArguments(const FunctionCallNode* n, CallArgumentList& args, const FunctionType& sig);
+		QueryResult<void> BindCallArguments(const FunctionCallNode* n, CallArgumentList& args, const FunctionType& sig, bool foreign);
 		QueryResult<void> AppendDefaultArguments(const AstNode* callee, const Core::String& name, std::vector<const HIRNode*>& nodes,
 			const FunctionRecord& rec, const FunctionType& sig);
 		QueryResult<const LValue*> CallReceiver(const FunctionCallNode* n, const CallTarget& target, const FunctionRecord& rec);

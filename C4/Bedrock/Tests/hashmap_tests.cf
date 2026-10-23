@@ -221,6 +221,10 @@ class HashMapTests {
 		assert_true(ages.ContainsAs(Core::StringView("alan")), "contains by a view");
 		assert_true(!ages.ContainsAs(Core::StringView("grace")), "absent by a view");
 		assert_true(ages.FindAs(Core::StringView("ad")) == nullptr, "a prefix is another key");
+		// A C string looks a String key up by its text, not its address (BUG-370).
+		int32* byText = ages.FindAs("ada");
+		assert_true(byText != nullptr && *byText == 36, "found by a C string");
+		assert_true(ages.ContainsAs("alan") && !ages.ContainsAs("grace"), "contains by a C string");
 		assert_true(ages.RemoveAs(Core::StringView("alan")) && ages.Count() == 1, "removed by a view");
 		assert_true(!ages.RemoveAs(Core::StringView("alan")), "removed once");
 	}
