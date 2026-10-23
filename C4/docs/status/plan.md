@@ -1757,6 +1757,189 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   finish 0.017 s. Past that, the front end (about 0.3 s for a one-file edit) is the next serial part; a resident
   compiler keeping unchanged files' trees and model is the way past it.
 
+### What Claymore's ECS and renderer need
+
+Found while designing the Claymore engine (`C:\GameDev\Claymore`: `docs/engine/ecs.md` section 16,
+`docs/engine/rhi.md`, `docs/engine/render-core.md` section 7) and checked with probes against the dev toolchain on
+2026-10-23. Checked and working, so no WP: annotation arguments of enum type (folded to their `Int`); typed pools in
+generic code (`new (p) T()`, `destroy`, `relocate`); a type's explicit `create` and `delete` called through
+`reflect_method_invoke` (they run the field initializers and the members' creates and deletes); keep-all `GC::Pool`s
+for native memory that holds pointers (256 MiB in 16 KiB slots: the longest stop of a concurrent cycle 1.4-1.6 ms); COM
+methods that return structs by value (B74 adds the test); data exported from the executable by a foreign C source
+(B74 adds the test and the docs).
+
+#### B70 - Pointer-free buffers are not scanned (BUG-386)
+- **Closes:** BUG-386. **Design:** [memory and GC](../runtime/01-memory-and-gc.md#engine-hooks),
+  [builtins 1](../language/14-builtins.md#1-compiler-intrinsics). **Depends on:** none. **Status:** Ready.
+- **Why:** an engine keeps hundreds of MiB of floats, indices and vertices in Bedrock containers. Each buffer is a
+  scan region today, scanned at every collection and copied whole at every stop of a concurrent cycle: 30-36 ms stops
+  for 256 MiB where D-79 gives about 1 ms.
+- **Steps:**
+  1. `holds_pointers(T)`: a `bool` constant, true when a value of `T` may hold a managed pointer. It is
+     `TypeHandle::MayHoldPointers`, the query that already picks `c4_alloc_typed_noscan` and the roots. Parse it beside
+     `holds_native_bytes` (`Parser/Nodes/Expressions/TypeOfExpressionNode.cpp`) and fold it in
+     `Backend/HIR/ExprQueries.cpp`. A program function of the same name wins, as for the other intrinsics.
+  2. Bedrock: `Core::Array` (`ResizeScannedElements`), `HashMap`, `List`, `Queue` and `Threading::JobQueue`'s cells take
+     the scanned forms only when `holds_pointers` of the element is true. Otherwise they use `buffer_resize` /
+     `buffer_free` or plain `raw_alloc`, never registered. Both forms keep growing in place past 1 MiB.
+  3. Docs:
+     - builtins 1: the row.
+     - bedrock.md "Containers allocate element storage": only element types that may hold pointers.
+     - runtime/01 engine hooks: a scan region is not write-watched, so a concurrent cycle copies it whole at every
+       stop and the final stop scans it whole. Native memory that holds pointers and is large belongs in a keep-all
+       `GC::Pool`, whose slots are heap pages, so only the pages written during the cycle are rescanned.
+     - tools/05 section 8: the measurements.
+- **Tests:**
+  - TestCode `holds_pointers`: values for `int32`, `float*`, a struct of floats, a struct holding a `T*`, a
+    `packed float[8]`, an enum, a template argument, `Core::Array<float>`.
+  - IsolatedTest `MemoryGC/Bug386PointerFreeBuffersUnscanned`, at `-O0` and `-O2`:
+    - `c4_gc_region_count()` does not grow for `Core::Array<float>`, `Core::Array<Math::Vec3>`,
+      `Core::HashMap<int64, float>` or `Core::Queue<int32>`, and does grow for `Core::Array<Node*>`.
+    - An object whose address is kept only in a `Core::Array<int64>` is collected (its finalizer runs).
+  - `Benchmarks/gc`: a large-array world beside the entities, with its stops recorded, not asserted.
+
+#### B71 - Reflected construction, destruction and copy for every object type
+- **Design:** [reflection](../runtime/02-reflection.md),
+  [lifecycle 6.4](../language/06-lifecycle-and-operators.md#64-copy-move-and-assignment). **Depends on:** B70 step 1
+  (the same pointer query). **Status:** Blocked (B70).
+- **Why:** Claymore's ECS keeps components in chunked pools, and knows some component types only through reflection:
+  types a script declares, a component the editor adds by name, a scene read from disk. A pool must construct,
+  destroy and copy those in place, and must know whether their chunks need scanning. Today (probe, 2026-10-23):
+  - A type without an explicit `create` or `delete` has no reflected methods. Reflection cannot construct a type
+    whose only start is field initializers. It cannot destroy a type that has no `delete` of its own but whose
+    members have one.
+  - Nothing can be copied: the compiler-written `__c4_copy_T_<n>` is not reflected.
+  - A method does not say which operator it is: `Init` is only a name, and overloads share it.
+  - Nothing says whether a type may hold managed pointers.
+  - B56's reflection reader starts the elements it adds at zero, so field defaults are lost on a load.
+- **Steps:**
+  1. `c4_type_info` (`C4Runtime/ReflectABI.h`; `Backend/Reflection/ReflectionTables.cpp`, `RegistrationEmitter.cpp`)
+     gains three thunks and a flags word:
+     - `construct` (`void(void* object)`, the object zero): what `new (p) T()` runs. NULL when zero is the whole
+       start (no initializer or create anywhere in the type), or when `T` has only creates with arguments.
+     - `destroy` (`void(void* object)`): what `destroy(p)` runs. NULL when there is nothing to destroy.
+     - `copy` (`void(void* to, const void* from)`, `to` zero): what `new (to) T(*from)` runs. NULL when a byte copy
+       is the copy.
+     - `flags`:
+       - `reflect_TYPE_HOLDS_POINTERS`: B70's query.
+       - `reflect_TYPE_DEFAULT_CONSTRUCTIBLE`.
+       - `reflect_TYPE_COPYABLE`: false for a type with a `delete` and no copy operator (section 6.4).
+       - `reflect_TYPE_ABSTRACT`.
+
+     The thunks are the code the compiler already writes for those operations, emitted with the method thunks
+     (`Backend/HIR/InvokeThunk`). A template instance gets its own, as it gets its own record. The NULLs keep the image
+     small: a type with nothing to run gets no thunk.
+  2. `c4_method_info` gains `operatorRole`: `"create"`, `"delete"`, `"copy"`, ... or `""`. A host can then tell the
+     creates from other methods of the same name.
+  3. The records change layout. A script compiles against its host's interface, and the compiled-script cache keys on
+     the compiler's build, so no old image is reused. Check this with the stacked-registration test.
+  4. Bedrock:
+     - `Reflection::Type` gains `Construct(void*) -> bool` (false when not default constructible; zero-fills, then
+       runs the thunk), `Destroy(void*)` and `CopyTo(void* to, const void* from) -> bool`.
+     - It also gains `HoldsPointers()`, `IsDefaultConstructible()`, `IsCopyable()`, `IsTriviallyDestructible()` and
+       `IsTriviallyCopyable()`.
+     - `Reflection::Method::OperatorRole()`.
+     - B56's reader constructs the elements it adds, so the defaults of fields a document leaves out survive.
+  5. Docs: runtime/02 sections 2 to 4, bedrock.md 8, [implementation-status.md](implementation-status.md).
+- **Tests:**
+  - IsolatedTest `Reflection/TypeOperations`, at `-O0` and `-O2`. Each case is constructed in a zeroed buffer, copied
+    and destroyed, with counters showing every create and delete ran once:
+    - a type with only field initializers;
+    - a type whose member has a create and a delete and which has neither;
+    - a type with a copy operator;
+    - a type with a delete and no copy (not copyable);
+    - a type with only creates that take arguments;
+    - a template instance;
+    - a derived type whose base has a delete;
+    - an enum (no thunks);
+    - the pointer flag of a pointer-free and of a pointer-holding type.
+  - ScriptTest `TypeOperations`: the same for types a script declares and the host finds by name; after the unload
+    they are gone.
+  - Bedrock `reflection.type.construct`, `reflection.type.copy`, `reflection.type.destroy` and
+    `serialization.reflect.defaults`.
+
+#### B72 - GPU zones from Bedrock's profiling client (`Profile::Gpu`)
+- **Design:** the IED tree's `docs/16-profiler-and-trace-format.md` (messages 0x90-0x94, "GPU timing").
+  **Depends on:** none. **Status:** Ready.
+- **Why:** Claymore's RenderCore times every frame-graph pass on the GPU, and wants those times beside the CPU zones in
+  IED's profiler. The server, the capture and the timeline already take GPU contexts and zones. No C4 client sends
+  them (docs/16 "Not built yet").
+- **Steps:**
+  1. `Profile/gpu.ch`, API-neutral: Bedrock records no GPU commands. The caller owns the query heap, writes the
+     timestamps and reads them back.
+     - `Profile::GpuContext(GpuApi api, Core::StringView queue, uint64 periodPicoseconds, uint32 queryCount)` sends
+       `GpuContextDef`.
+     - `Calibrate(cpuTicks, gpuTicks)` sends `GpuCalibration`. The caller passes D3D12's `GetClockCalibration`,
+       periodically.
+     - `uint32 BeginZone(Site& site)` sends `GpuZoneBegin` at the CPU time of recording. It returns the query to write
+       the start timestamp into; ids go round a ring of `queryCount`, so they are the caller's query-heap slots.
+     - `EndZone(uint32 query)`.
+     - `Time(uint32 query, uint64 gpuTicks)` sends `GpuTime` after the readback.
+     - A `Profile::GpuZone` scope pairs `BeginZone` and `EndZone` for recording code.
+     - With no session connected it costs what `Profile::Zone` costs.
+  2. Encoder (`encode.cf`) and session (`session.cf`): the five messages and each context's state. Several threads
+     record into one context at once (parallel command recording), so ids come from a per-context atomic counter, and
+     each message goes out in its recording thread's chunk.
+  3. Docs:
+     - bedrock.md 17.
+     - IED tree docs/16 "As built".
+     - IED tree docs/22, which says `Profile::Gpu::Zone` "emits the native markers". Bedrock stays API-neutral, so the
+       renderer emits the markers, with the zone's site name.
+- **Tests:**
+  - Bedrock `profile.gpu.*`:
+    - the messages as docs/16 lays them out;
+    - ids wrap in the ring;
+    - nothing is sent without a session;
+    - zones from four threads on one context.
+  - The IED tree's `tools/server-checks`: a client sends a context, a calibration, nested zones and their times, and
+    the capture's GPU lane holds them at the calibrated CPU times.
+  - The C4 GPU sample (`plugins/gpu/samples/c4`) times its frame with timestamp queries.
+
+#### B73 - Guarded script calls on job workers
+- **Design:** [scripting 7](../runtime/04-scripting.md#7-crash-isolation). **Depends on:** none. **Status:** Ready.
+- **Why:** Claymore runs the jobs of script systems on its frame workers, each call through `Script::Call`. A fault
+  must suspend that script, not end the engine. Section 7 says a guarded call stops at a fault, but no test makes a
+  guarded call off the main thread, and nothing says what a stopped call leaves behind.
+- **Steps** (each a test first; a failure is a BUG):
+  1. Faults on several workers at once, in one script and in two. Each call returns false, the faulting script is
+     marked once, and the other calls finish.
+  2. A stack overflow in a guarded call on a worker, then another on the same thread. The second is caught too: the
+     guard page is restored (`_resetstkoflw`).
+  3. A fault while another thread collects. The stop must still find the faulting thread stoppable and scannable, with
+     no stale stack bounds or native-code state left by the guard's unwind.
+  4. Say what a fault leaves: which cleanups between the guard and the fault run (`delete`s of the script's locals, a
+     `Threading::MutexGuard` the script holds). A host must then treat whatever did not run as poisoned (a lock the
+     script took, a command stream it was writing). If a mutex stays locked, document it, and decide whether the guard
+     should run those frames' cleanups.
+  5. Docs: section 7 (threads, what a fault leaves), and bedrock.md 10 (a job's exception rule beside a guarded call).
+- **Tests:** ScriptTest `CrashIsolationThreads` (steps 1 to 4), at `-O0`, `-O2`, `-DebugScripts` and `-Incremental`.
+
+#### B74 - Interop for a D3D12 renderer: exported data and COM struct returns
+- **Design:** [interop](../language/13-interop.md). **Depends on:** none. **Status:** Ready.
+- **Why:**
+  - **Agility SDK.** Claymore's D3D12 backend needs it for enhanced barriers and Shader Model 6.6: the probe's
+    Windows 10 machine reports SM 6.5 and no enhanced barriers from the OS runtime. The D3D12 loader finds the SDK
+    through two data symbols the executable exports, `D3D12SDKVersion` and `D3D12SDKPath`. C4 cannot export data
+    itself (section 6), but a foreign C source can, and the export survives C4's link (probe, 2026-10-23).
+  - **COM struct returns.** Every D3D12 renderer calls COM methods that return structs by value through MSVC's
+    member-function ABI, with a hidden result pointer even for 8 bytes: `GetCPUDescriptorHandleForHeapStart`,
+    `GetGPUDescriptorHandleForHeapStart`, `GetDesc`, `GetResourceAllocationInfo`. On a real device they return the
+    right values today (probe). No test runs them: StressTest's Dx12Game only compiles.
+- **Steps:**
+  1. Interop: a section "Exporting data from the executable".
+     - The pattern: a C file with `__declspec(dllexport) const unsigned int D3D12SDKVersion = 614;` and
+       `__declspec(dllexport) const char* D3D12SDKPath = ".\\D3D12\\";` (C gives a file-scope `const` external
+       linkage; `extern` with an initializer only warns), plus `extern "c" source "agility.c"`.
+     - The SDK's `D3D12Core.dll` goes beside the executable in that folder (a build step's copy).
+  2. IsolatedTest `Interop/ExportedData`: a C source exports an `int` and a string. The program finds both with
+     `GetProcAddress(GetModuleHandleA(NULL), ...)` and reads them, at `-O0` and `-O2` and under `--incremental` (the
+     partitioned link and the object cache keep the export).
+  3. IsolatedTest `Interop/ComStructReturns`: an `extern "c++" source` class whose virtual methods return 8-, 16- and
+     24-byte structs, one with arguments after the hidden pointer. They are called through an object the C++ side
+     made, and the values are checked.
+  4. Whether C4 should export data itself (`[export("D3D12SDKVersion")]` on a constant) is a roadmap item, not this WP.
+- **Tests:** steps 2 and 3.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -2275,7 +2458,8 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
 Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66 B67 B68
-Ready now:            B31
+Ready now:            B31 B70 B72 B73 B74
+After B70:            B71
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)
 After A3 + A6:        B8

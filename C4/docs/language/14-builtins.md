@@ -111,7 +111,7 @@ keeps the sign of its first argument.
 
 The rest of the collector API - pacing, disable / enable, pins, root enumerators, collection callbacks and
 the full statistics - is the Bedrock `GC` namespace (`include "Memory/gc.ch"`,
-[Bedrock](../library/bedrock.md#7-memory-memorygcch)).
+[Bedrock](../library/bedrock.md#7-memory-memorygcch-memorypoolch)).
 
 ## 5. Bytes and number text
 
