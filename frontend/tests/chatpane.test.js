@@ -216,7 +216,7 @@ test("chat pane: the details panel's edge sizes it, and the width is kept for th
 		assertEqual(next.el.style.getPropertyValue("--chat-panel-w"), (before + 16) + "px", "a new pane opens as wide");
 		next.dispose();
 		pane.sash.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-		assertEqual(pane.panel.el.offsetWidth, before, "a double-click: the default width");
+		assertEqual([pane.panel.el.offsetWidth, Number(localStorage.getItem("ied.chat.panelWidth"))], [before, 0], "a double-click: the default width, kept");
 	}
 	finally {
 		closePane(pane);

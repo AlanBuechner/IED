@@ -52,7 +52,7 @@ export class ChatPane {
 		this.scroller = h("div.chat-transcript", { on: { scroll: () => (this.atEnd = this.nearBottom()) } }, this.transcript.el);
 		this.main = h("section.chat-main", null, host.header || null, this.scroller, this.composer.el);
 		this.sash = h("div.chat-panel-sash", { role: "separator", tabindex: "0", "aria-orientation": "vertical", "aria-label": "Details panel width", title: "Drag to resize; double-click for the default width",
-			on: { pointerdown: (event) => this.dragPanel(event), dblclick: () => this.sizePanel(0), keydown: (event) => this.panelKey(event) } });
+			on: { pointerdown: (event) => this.dragPanel(event), dblclick: () => this.keepPanel(0), keydown: (event) => this.panelKey(event) } });
 		this.el = h("div.chat-act" + (this.showPanel ? "" : ".no-panel"), null, this.main, this.sash, this.panel.el);
 		this.sizePanel(stored("ied.chat.panelWidth", 0));
 		this.el.addEventListener("keydown", (event) => this.key(event));
@@ -329,7 +329,7 @@ export class ChatPane {
 			this.sash.removeEventListener("pointerup", up);
 			this.sash.removeEventListener("pointercancel", up);
 			this.sash.classList.remove("active");
-			store("ied.chat.panelWidth", this.panelWidth);
+			this.keepPanel(this.panelWidth);
 		};
 		this.sash.addEventListener("pointermove", move);
 		this.sash.addEventListener("pointerup", up);
@@ -340,7 +340,12 @@ export class ChatPane {
 		const step = event.key === "ArrowLeft" ? PANEL_STEP_PX : event.key === "ArrowRight" ? -PANEL_STEP_PX : 0;
 		if (!step) return;
 		event.preventDefault();
-		this.sizePanel(Math.min(this.widest(), this.panel.el.offsetWidth + step));
+		this.keepPanel(Math.min(this.widest(), this.panel.el.offsetWidth + step));
+	}
+
+	// The panel `px` wide (0: the default) for this device's chats from now on.
+	keepPanel(px) {
+		this.sizePanel(px);
 		store("ied.chat.panelWidth", this.panelWidth);
 	}
 
