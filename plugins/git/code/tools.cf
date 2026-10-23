@@ -9,7 +9,8 @@ namespace Git
 		if (found->error == "untrusted") throw IED::RpcError(IED::ErrorCode::Untrusted, "git does not run in an untrusted workspace; ask the owner to trust it");
 		if (!found->error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, found->error.View());
 		if (found->repos.IsEmpty() && found->discover) throw IED::RpcError(IED::ErrorCode::Busy, "the workspace's repositories are still being found; try again in a moment");
-		if (found->repos.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace's folder is in no git repository");
+		if (found->repos.IsEmpty())
+			throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace's folder is in no git repository, and the git tools see only the workspace's repositories; for a repository elsewhere run git with shell_run in its folder");
 	}
 
 	GitPlace PlaceOf(const GitRepo* repo) {
