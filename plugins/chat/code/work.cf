@@ -8,6 +8,8 @@ namespace Ai
 {
 	const int32 kShellPollMs = 250;
 	const int64 kShellDrainMs = 1000;
+	const int64 kBuildPollNs = 100000000;
+	const int64 kBuildCancelWaitMs = 15000;
 
 	static int64 WorkNowMs() { return clock_now_ns() / 1000000; }
 
@@ -451,17 +453,43 @@ namespace Ai
 		return plan;
 	}
 
+	// Runs the call's task to its end; the run being stopped, or `seconds` passing (0: no limit), cancels it, and
+	// `stopped` says which.
+	static IED::TaskOutcome AwaitTask(const ToolInvocation& call, Core::StringView task, int64 seconds, Core::String& stopped) {
+		IED::TaskOutcome outcome;
+		Core::String runId = IED::StartTask(call.ws, call.args.Member("project").AsView(), task, task.IsEmpty() ? Core::StringView("build") : Core::StringView(""), outcome.problem);
+		if (runId.IsEmpty()) return outcome;
+		const int64 deadline = seconds > 0 ? WorkNowMs() + seconds * 1000 : -1;
+		int64 cancelledAt = -1;
+		while (!IED::TaskEnded(runId.View(), outcome) && outcome.problem.IsEmpty()) {
+			if (cancelledAt < 0 && (*call.cancelled || (deadline >= 0 && WorkNowMs() > deadline))) {
+				stopped = Core::String(*call.cancelled ? "stopped with the run" : "ran out of time and was stopped");
+				IED::CancelTask(runId.View());
+				cancelledAt = WorkNowMs();
+			}
+			if (cancelledAt >= 0 && WorkNowMs() - cancelledAt > kBuildCancelWaitMs) {
+				outcome.problem = Core::String("the task did not end when it was cancelled");
+				break;
+			}
+			Threading::Thread::Sleep(kBuildPollNs);
+		}
+		return outcome;
+	}
+
 	static ToolOutcome BuildRun(const ToolInvocation& call) {
 		Core::String task = call.args.Member("task").IsValid() ? Core::String(call.args.Member("task").AsView()) : Core::String("");
-		IED::TaskOutcome run = IED::RunTask(call.ws, call.args.Member("project").AsView(), task.View(), task.IsEmpty() ? Core::StringView("build") : Core::StringView(""));
+		const int64 seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : 0;
+		Core::String stopped;
+		IED::TaskOutcome run = AwaitTask(call, task.View(), seconds, stopped);
 		if (!run.problem.IsEmpty()) return ToolError((Core::String("build_run: ") + run.problem.View()).View());
-		const bool succeeded = run.succeeded;
+		const bool succeeded = run.succeeded && stopped.IsEmpty();
 		int64 errors = 0;
 		int64 warnings = 0;
 		Core::String problems = WithWorkspaceLines(call, WithHints(ProblemLines(ParsedObject(run.problems.View()), Core::StringView(""), false, kProblemsMost, errors, warnings).View(), CallHints(call)).View());
 		Core::StringBuilder said;
 		said.Append(run.label.View());
-		said.Append(succeeded ? " succeeded" : run.cancelled ? " was cancelled" : " failed");
+		if (!stopped.IsEmpty()) said.Append((Core::String(" ") + stopped.View()).View());
+		else said.Append(succeeded ? " succeeded" : run.cancelled ? " was cancelled" : " failed");
 		said.Append(" in ");
 		said.AppendInt(run.ms / 1000);
 		said.Append(" s (");
@@ -508,8 +536,8 @@ namespace Ai
 		program->plan = ProgramPlan;
 		program->run = ProgramRun;
 		registry.Add(program);
-		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\"})",
-			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}}, \"additionalProperties\": false}",
+		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). A test or program that might not end: give timeout_s. Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\", \"timeout_s\": 300})",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		build->plan = BuildPlan;
 		build->run = BuildRun;

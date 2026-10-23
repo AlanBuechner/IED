@@ -42,6 +42,7 @@ AUTO_ANSWER = "I am not available to answer. Make the reasonable choice yourself
 HOME_PARTS = ("plugins", "frontend", "shared")
 GIT_IDENTITY = ["-c", "user.name=eval", "-c", "user.email=eval@localhost", "-c", "commit.gpgsign=false"]
 EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300, "stepCapS": 3600}
+STOP_WAIT_S = 120   # how long a stopped turn may take to end before the job is graded as it stands
 MINIMAL_STARTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "starters", "minimal")
 # A task's timeout_minutes as budget seconds: the share of it a job got alone-on-the-server when four jobs shared the
 # server (0.40 to 0.49 measured, 2026-10-22), so budgeted runs compare with the wall-clock runs before them.
@@ -216,7 +217,10 @@ async def agent_turn(server, cookie, task, prompt, job_dir, roots, spent):
 			if remaining <= 0:
 				timed_out = True
 				await client.request("chat.stop", {"chatId": chat_id}, timeout=30)
-				end = (await client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=120))[-1]["data"]
+				try:
+					end = (await client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=STOP_WAIT_S))[-1]["data"]
+				except asyncio.TimeoutError:
+					end = {"stop": "stop_unanswered"}   # a tool the stop did not reach: the job is graded as it stands
 				break
 			try:
 				frame = await client.next_frame(topic, timeout=min(max(remaining, 1), 30))

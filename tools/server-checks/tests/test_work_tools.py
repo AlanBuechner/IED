@@ -1,16 +1,18 @@
 """The tools a model builds, runs and looks things up with, on a C4 project (docs/13 "As built"): docs_search and
-docs_read over a plugin's aiDocs, a plugin's aiHints and the source line under each build error, program_run, and
-fs_edit saying where a missed old text differs from the file."""
+docs_read over a plugin's aiDocs, a plugin's aiHints and the source line under each build error, program_run,
+build_run stopped by its timeout or with its run, and fs_edit saying where a missed old text differs from the file."""
 
+import asyncio
 import glob
 import json
 import os
 import shutil
 import subprocess
+import time
 import unittest
 
-from test_chat import REPO, write
-from test_code_tools import CodeToolCase, NUKE, PRINTING_MAIN_CF, RING_CF, RING_CH
+from test_chat import REPO, call_step, text_step, write
+from test_code_tools import TURN_SECONDS, CodeToolCase, NUKE, PRINTING_MAIN_CF, RING_CF, RING_CH
 
 GUIDE_MD = """# Demo library
 
@@ -32,6 +34,15 @@ BROKEN_MAIN_CF = """include "ring.ch"
 int32 main() {
 	auto filled = 3;
 	return filled;
+}
+"""
+
+SLOW_TESTS_CF = """include "bedrock.ch"
+
+[test("slow.waits")]
+static void Waits() {
+	Threading::Thread::Sleep((int64)600 * 1000000000);
+	assert_true(1, "never reached");
 }
 """
 
@@ -92,6 +103,24 @@ class WorkToolTests(CodeToolCase):
 		results = await self.results(("u1", "task_update", {"id": "t1", "status": "in_progress"}))
 		self.assertIn("the chat has no tasks yet", results["u1"], results["u1"])
 		self.assertIn("tasks_set(", results["u1"], "the call to make instead (a model asked five times with the old empty list)")
+
+	async def test_a_task_that_does_not_end_is_stopped(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "nuke.command", "value": os.path.join(REPO, "bin", "nuke.cmd")})
+		write(os.path.join(self.repo, "src", "tests", "slow_tests.cf"), SLOW_TESTS_CF)
+		started = time.time()
+		results = await self.results(("t1", "build_run", {"task": "test", "timeout_s": 15}), permission="auto")
+		self.assertIn("ran out of time and was stopped", results["t1"], results["t1"])
+		self.assertLess(time.time() - started, 90, "not the test's ten minutes")
+		chat_id, topic = await self.chat(permission="auto")
+		self.model.queue(call_step("build_run", {"task": "test"}, "t2"), text_step("Done."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "test it"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "tool.state" and (f.get("data") or {}).get("state") == "running", timeout=TURN_SECONDS)
+		await asyncio.sleep(5)
+		stopped = time.time()
+		await self.client.request("chat.stop", {"chatId": chat_id})
+		end = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=60))[-1]["data"]
+		self.assertEqual("user_cancelled", end["stop"])
+		self.assertLess(time.time() - stopped, 20, "a stop reaches a running task (it waited for the task's end before)")
 
 	async def test_errors_with_their_source_lines_and_hints(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "nuke.command", "value": os.path.join(REPO, "bin", "nuke.cmd")})
