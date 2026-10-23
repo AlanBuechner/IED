@@ -157,30 +157,34 @@ namespace Ied
 		return NewProjectFileText(name, root, kind.View(), language.View(), facts.presets);
 	}
 
-	ProjectChange* ProjectManager::Import(const FS::Path& given, const ProjectOptions& options) {
-		FS::Path folder = FolderAt(given);
-		Workspace* ws = server->workspaces->ForRoot(folder);
-		FS::Path existing = SolutionIn(folder);
-		if (!existing.IsEmpty() || (ws && ws->solution)) throw RpcError(ErrorCode::Conflict, (ForwardSlashes(folder.View()) + " is an IED solution already: open it").View());
-		ProjectChange* change = new ProjectChange();
+	FS::Path ProjectManager::MakeSolution(Workspace* ws, const FS::Path& folder, const ProjectOptions& options, ProjectChange* change, Core::StringBuilder& log) {
 		Serialization::DomNode system = SystemFor(server, ws, folder);
-		Core::StringBuilder log;
-		FS::Path file;
 		if (system.IsValid()) {
 			RequireTrust(ws ? ws->trusted : server->trust.IsTrusted(folder), system);
 			Run(Plan(ws, folder, system, "generate", EmptyValues()), log);
-			file = SolutionIn(folder);
+			FS::Path file = SolutionIn(folder);
 			if (file.IsEmpty()) throw RpcError(ErrorCode::Unavailable, ((Core::String("the ") + SystemLabel(system).View()) + " project system wrote no solution file in the folder: " + StepLogTail(log.View()).View()).View());
+			return file;
 		}
-		else {
-			Core::String name = NameFor(options, folder);
-			Core::Array<Core::String> projects;
-			projects.Push(name + ".iedproj");
-			Core::String project = ProjectFileFor(server, ws, folder, name.View(), Core::StringView("."), options, change);
-			WriteNew(ws, folder, (name + ".iedproj").View(), project.View());
-			WriteNew(ws, folder, (name + ".iedsln").View(), NewSolutionFileText(name.View(), projects).View());
-			file = folder / (name + ".iedsln").View();
-		}
+		Core::String name = NameFor(options, folder);
+		Core::Array<Core::String> projects;
+		projects.Push(name + ".iedproj");
+		Core::String project = ProjectFileFor(server, ws, folder, name.View(), Core::StringView("."), options, change);
+		WriteNew(ws, folder, (name + ".iedproj").View(), project.View());
+		WriteNew(ws, folder, (name + ".iedsln").View(), NewSolutionFileText(name.View(), projects).View());
+		return folder / (name + ".iedsln").View();
+	}
+
+	ProjectChange* ProjectManager::Import(const FS::Path& given, const ProjectOptions& options) {
+		FS::Path folder = FolderAt(given);
+		Workspace* ws = server->workspaces->ForRoot(folder);
+		if (ws && ws->solution) throw RpcError(ErrorCode::Conflict, (ForwardSlashes(folder.View()) + " is an IED solution already").View());
+		ProjectChange* change = new ProjectChange();
+		Core::StringBuilder log;
+		FS::Path file = SolutionIn(folder);
+		// A solution a generator wrote (`nuke init --ied`) while the folder was open as a folder is taken as it is.
+		if (!file.IsEmpty()) change->notes.Push((Core::String("the folder's solution ") + file.FileName()) + " was there already: opened as it is");
+		else file = MakeSolution(ws, folder, options, change, log);
 		if (ws) server->workspaces->BecomeSolution(ws, file);
 		else {
 			Core::String relative;

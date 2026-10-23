@@ -26,8 +26,9 @@ namespace Ied
 		[operator("create")] public void Init(Server* server);
 
 		// Each throws as its method answers.
-		// The folder at the full path `folder` made an IED solution: its project system's generate, else a solution and
-		// a project of the folder that IED writes. An open folder workspace there becomes the solution; else it opens.
+		// The folder at the full path `folder` made an IED solution: the solution file already in it (a generator such as
+		// `nuke init --ied` wrote it), else its project system's generate, else a solution and a project of the folder
+		// that IED writes. An open folder workspace there becomes the solution; else it opens.
 		public ProjectChange* Import(const FS::Path& folder, const ProjectOptions& options);
 		// The folder `folder` of `ws` (workspace-relative, not its root) made a project of its solution; a folder
 		// workspace becomes a solution first.
@@ -45,6 +46,8 @@ namespace Ied
 		// Writes a file that must not be there yet: through `ws` when it is open (so its watcher knows the write), else
 		// straight to disk; `relative` to `folder`.
 		private void WriteNew(Workspace* ws, const FS::Path& folder, Core::StringView relative, Core::StringView text);
+		// The solution file Import makes for `folder`, which has none: by its project system, else written by IED.
+		private FS::Path MakeSolution(Workspace* ws, const FS::Path& folder, const ProjectOptions& options, ProjectChange* change, Core::StringBuilder& log);
 		// The project's solution file changed by `edit` and written through `ws`.
 		private void EditSolution(Workspace* ws, func<bool(Core::StringView, Core::String&, Core::String&)> edit);
 		private Core::String ImportMethod(Call& call, const Params& params);

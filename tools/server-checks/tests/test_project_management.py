@@ -161,6 +161,20 @@ class HandWrittenSolutionTests(ProjectManagementCase):
 		self.assertEqual(["solution"], [w["kind"] for w in listed if w["wsId"] == "w1"])
 		await self.refused("conflict", "is an IED solution already", "project.import", {"path": self.folder})
 
+	async def test_a_solution_a_generator_wrote_into_the_open_folder_is_opened_as_it_is(self):
+		write(self.path("build", "ied", "Gen.iedproj"), {"version": 1, "name": "Gen", "root": "../..", "kind": "executable"})
+		solution = {"version": 1, "name": "Generated", "projects": [{"file": "build/ied/*.iedproj", "optional": True}]}
+		write(self.path("Generated.iedsln"), solution)
+		made = await self.client.request("project.import", {"path": self.folder})
+		self.assertEqual(("w1", "solution", "Generated"), (made["workspace"]["wsId"], made["workspace"]["kind"], made["workspace"]["name"]), "the same workspace, now the generated solution")
+		self.assertTrue(made["path"].endswith("/Generated.iedsln"), made)
+		self.assertTrue(any("was there already" in note for note in made["notes"]), made["notes"])
+		changed = await self.solution_changed()
+		self.assertEqual(["Gen"], [p["name"] for p in changed["solution"]["projects"]], "the generated project files, as written")
+		self.assertEqual(solution, json.loads(read(self.path("Generated.iedsln"))), "the solution file is left as it was")
+		self.assertFalse(os.path.exists(self.path("Game.iedsln")), "no second solution is written")
+		await self.refused("conflict", "is an IED solution already", "project.import", {"path": self.folder})
+
 	async def test_a_folder_joins_the_solution_and_the_comments_stay(self):
 		await self.client.request("project.import", {"path": self.folder})
 		await self.solution_changed()
