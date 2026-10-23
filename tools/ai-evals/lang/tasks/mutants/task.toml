@@ -1,6 +1,6 @@
 title = "Write thorough unit tests for a working semantic-versioning library, graded by mutation testing"
 category = "tests"
-set = "holdout"
+set = ["holdout", "holdout2"]
 timeout_minutes = 45
 
 [c4]

@@ -1,0 +1,5 @@
+5 eve 10.88
+6 fay 10.34
+9 ian 10.85
+orders 3 total 32.07
+average 10.69

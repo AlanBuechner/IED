@@ -1,6 +1,6 @@
 title = "A dense matrix library with a given interface and operators, from an empty project"
 category = "scratch-library"
-set = "tune"
+set = ["tune", "tune2"]
 timeout_minutes = 45
 
 [c4]

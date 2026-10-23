@@ -1,0 +1,4 @@
+order,customer,tier,sku,quantity,unit_price
+5,eve,standard,thing,1,10.07
+6,fay,gold,thing,1,10.07
+9,ian,standard,thing,3,3.35

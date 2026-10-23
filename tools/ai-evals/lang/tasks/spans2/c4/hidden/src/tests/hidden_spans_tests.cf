@@ -1,0 +1,83 @@
+include "spans.ch"
+
+static Spans::SpanSet Of(const Core::Array<int64>& bounds) {
+	Spans::SpanSet set;
+	for (int64 i = 0; i + 1 < bounds.Count(); i += 2) set.Add(bounds[i], bounds[i + 1]);
+	return set;
+}
+
+static bool Is(const Spans::SpanSet& set, const Core::Array<int64>& bounds) {
+	Core::Array<Spans::Span> all = set.All();
+	if (all.Count() * 2 != bounds.Count()) return false;
+	for (int64 i = 0; i < all.Count(); ++i)
+		if (all[i].start != bounds[i * 2] || all[i].end != bounds[i * 2 + 1]) return false;
+	return true;
+}
+
+[test("hidden.spans.empty")]
+static void HiddenEmpty() {
+	Spans::SpanSet set;
+	assert_eq((int64)0, set.Count(), "count");
+	assert_eq((int64)0, set.Covered(), "covered");
+	assert_true(!set.Contains(0), "contains");
+	assert_eq((int64)0, set.All().Count(), "all");
+}
+
+[test("hidden.spans.add_ignores_empty_and_reversed")]
+static void HiddenAddIgnoresEmpty() {
+	Spans::SpanSet set;
+	set.Add(5, 5);
+	set.Add(9, 3);
+	assert_eq((int64)0, set.Count(), "nothing added");
+}
+
+[test("hidden.spans.add_merges_overlapping_and_touching")]
+static void HiddenAddMerges() {
+	Spans::SpanSet set = Of({ 10, 20, 30, 40, 50, 60 });
+	assert_true(Is(set, { 10, 20, 30, 40, 50, 60 }), "three apart");
+	set.Add(20, 30);
+	assert_true(Is(set, { 10, 40, 50, 60 }), "touching both sides");
+	set.Add(5, 55);
+	assert_true(Is(set, { 5, 60 }), "covering");
+	assert_eq((int64)55, set.Covered(), "covered");
+}
+
+[test("hidden.spans.add_inside_changes_nothing")]
+static void HiddenAddInside() {
+	Spans::SpanSet set = Of({ 0, 100 });
+	set.Add(10, 20);
+	assert_true(Is(set, { 0, 100 }), "unchanged");
+}
+
+[test("hidden.spans.remove_edges")]
+static void HiddenRemoveEdges() {
+	Spans::SpanSet set = Of({ 0, 10, 20, 30 });
+	set.Remove(5, 25);
+	assert_true(Is(set, { 0, 5, 25, 30 }), "trimmed both");
+	set.Remove(0, 5);
+	assert_true(Is(set, { 25, 30 }), "whole span");
+	set.Remove(30, 40);
+	assert_true(Is(set, { 25, 30 }), "touching, nothing removed");
+	set.Remove(26, 27);
+	assert_true(Is(set, { 25, 26, 27, 30 }), "a hole");
+	set.Remove(10, 9);
+	assert_eq((int64)4, set.Covered(), "reversed range ignored");
+}
+
+[test("hidden.spans.contains_bounds")]
+static void HiddenContainsBounds() {
+	Spans::SpanSet set = Of({ -5, 0, 7, 8 });
+	assert_true(set.Contains(-5) && set.Contains(-1) && !set.Contains(0), "first span");
+	assert_true(set.Contains(7) && !set.Contains(8) && !set.Contains(6), "one integer span");
+}
+
+[test("hidden.spans.many")]
+static void HiddenMany() {
+	Spans::SpanSet set;
+	for (int64 i = 0; i < 2000; ++i) set.Add(i * 10, i * 10 + 5);
+	assert_eq((int64)2000, set.Count(), "count");
+	assert_eq((int64)10000, set.Covered(), "covered");
+	for (int64 i = 0; i < 2000; i += 2) set.Remove(i * 10 + 2, i * 10 + 3);
+	assert_eq((int64)3000, set.Count(), "split every other");
+	assert_true(set.Contains(19993) && !set.Contains(19995), "far end");
+}

@@ -1,6 +1,6 @@
 title = "JSON order report command-line tool, from an empty project"
 category = "stdlib"
-set = "holdout"
+set = ["holdout", "holdout2"]
 timeout_minutes = 45
 
 [c4]

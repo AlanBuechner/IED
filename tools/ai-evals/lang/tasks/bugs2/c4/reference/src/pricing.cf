@@ -1,0 +1,23 @@
+include "pricing.ch"
+
+namespace Invoice
+{
+	const int64 kPercent = 100;
+
+	int64 PercentOf(int64 cents, int64 percent) { return (cents * percent + kPercent / 2) / kPercent; }
+
+	int64 LineCents(int64 quantity, int64 unitCents) {
+		const int64 amount = quantity * unitCents;
+		if (quantity >= kBulkQuantity) return amount - PercentOf(amount, kBulkPercentOff);
+		return amount;
+	}
+
+	Totals PriceOrder(const Core::Array<OrderLine>& lines) {
+		Totals totals;
+		for (const OrderLine& line : lines) totals.subtotal += LineCents(line.quantity, line.unitCents);
+		if (lines[0].tier == Tier::Gold) totals.goldDiscount = PercentOf(totals.subtotal, kGoldPercentOff);
+		totals.tax = PercentOf(totals.subtotal - totals.goldDiscount, kTaxPercent);
+		totals.total = totals.subtotal - totals.goldDiscount + totals.tax;
+		return totals;
+	}
+}

@@ -1,0 +1,8 @@
+[workspace]
+name = "gradebook"
+toolchain = "dev"
+default-project = "gradebook"
+
+[project]
+name = "gradebook"
+kind = "executable"

@@ -55,7 +55,8 @@ def load_task(task_id):
 
 
 def load_tasks(selection=None, task_set=None):
-	"""The tasks named (comma-separated ids), else every task of `task_set` (tune, holdout), else all."""
+	"""The tasks named (comma-separated ids), else every task of `task_set` (tune, holdout; tune2, holdout2 the second
+	round's, with its recalibrated tasks), else all."""
 	ids = sorted(name for name in os.listdir(TASKS) if os.path.exists(os.path.join(TASKS, name, "task.toml")))
 	if selection:
 		wanted = selection.split(",")
@@ -64,7 +65,13 @@ def load_tasks(selection=None, task_set=None):
 			raise SystemExit("no task %s (there are %s)" % (", ".join(unknown), ", ".join(ids)))
 		ids = wanted
 	tasks = [load_task(name) for name in ids]
-	return [t for t in tasks if not task_set or t.get("set") == task_set]
+	return [t for t in tasks if not task_set or task_set in sets_of(t)]
+
+
+def sets_of(task):
+	"""The sets a task is in: one (`set = "tune"`) or several, a task unchanged from one round to the next being in both."""
+	given = task.get("set")
+	return given if isinstance(given, list) else [given] if given else []
 
 
 def languages_of(task, wanted):

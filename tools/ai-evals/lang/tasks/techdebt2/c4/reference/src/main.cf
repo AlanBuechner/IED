@@ -1,0 +1,53 @@
+include "bedrock.ch"
+include "records.ch"
+include "report.ch"
+
+const int32 kExitError = 1;
+const int32 kExitUsage = 2;
+
+static bool ReadFile(const char* path, Core::String& text) {
+	FS::File file = FS::File(path, "rb");
+	if (!file.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + path + "\n").View());
+		return false;
+	}
+	text = file.ReadText();
+	return true;
+}
+
+static int32 BadLine(const char* path, int64 line) {
+	Core::StringBuilder message;
+	Core::Format(&message, "error: {0:s} line {1:D}\n", path, line);
+	Platform::WriteError(message.View());
+	return kExitError;
+}
+
+static void WarnUnknown(const Core::Array<Core::String>& ids) {
+	for (const Core::String& id : ids) Platform::WriteError((Core::String("warning: unknown student ") + id.View() + "\n").View());
+}
+
+static void WarnCount(int64 count) {
+	if (count == 0) return;
+	Core::StringBuilder message;
+	Core::Format(&message, "{0:D} warning(s)\n", count);
+	Platform::WriteError(message.View());
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 3) {
+		Platform::WriteError(Core::StringView("usage: gradebook <students.csv> <scores.csv>\n"));
+		return kExitUsage;
+	}
+	Core::String studentsText;
+	if (!ReadFile(argv[1], studentsText)) return kExitError;
+	Gradebook::Roster roster = Gradebook::ParseStudents(studentsText.View());
+	if (roster.badLine) return BadLine(argv[1], roster.badLine);
+	Core::String scoresText;
+	if (!ReadFile(argv[2], scoresText)) return kExitError;
+	Gradebook::ScoreResult scores = Gradebook::ApplyScores(scoresText.View(), roster.students);
+	WarnUnknown(scores.unknownIds);
+	if (scores.badLine) return BadLine(argv[2], scores.badLine);
+	Platform::WriteOutput(Gradebook::Report(roster.students).View());
+	WarnCount(scores.unknownIds.Count());
+	return 0;
+}

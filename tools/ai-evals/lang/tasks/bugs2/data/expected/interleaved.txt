@@ -1,0 +1,5 @@
+2001 erin 20.79
+2002 finn 48.21
+2003 gail 3.40
+orders 3 total 72.40
+average 24.13

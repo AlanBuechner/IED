@@ -1,0 +1,25 @@
+include "orderline.ch"
+
+[test("invoice.parse.line")]
+static void ParsesALine() {
+	Invoice::OrderLine line;
+	Core::String why;
+	assert_true(Invoice::ParseLine(Core::StringView("1001,alice,gold,widget,3,2.50"), line, why), "parses");
+	assert_true(line.order == "1001" && line.customer == "alice" && line.tier == Invoice::Tier::Gold, "order fields");
+	assert_true(line.sku == "widget" && line.quantity == 3 && line.unitCents == 250, "line fields");
+}
+
+[test("invoice.parse.errors")]
+static void RejectsBadLines() {
+	Invoice::OrderLine line;
+	Core::String why;
+	assert_true(!Invoice::ParseLine(Core::StringView("1001,alice,platinum,widget,3,2.50"), line, why) && why == "bad tier", "tier");
+	assert_true(!Invoice::ParseLine(Core::StringView("1001,alice,gold,widget,0,2.50"), line, why) && why == "bad quantity", "quantity");
+	assert_true(!Invoice::ParseLine(Core::StringView("1001,alice,gold,widget,3,2.5"), line, why) && why == "bad price", "price");
+}
+
+[test("invoice.parse.line_numbers")]
+static void NamesTheBadLine() {
+	Invoice::ParseResult result = Invoice::ParseOrders(Core::StringView("order,customer,tier,sku,quantity,unit_price\n1,a,gold,x,1,1.00\n2,b,gold\n"));
+	assert_true(result.error == "line 3: expected 6 fields", "line 3");
+}

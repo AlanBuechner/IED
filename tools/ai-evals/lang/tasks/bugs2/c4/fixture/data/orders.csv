@@ -1,0 +1,8 @@
+order,customer,tier,sku,quantity,unit_price
+1001,alice,gold,widget,12,2.50
+1001,alice,gold,gadget,1,19.99
+1002,bob,standard,widget,10,2.50
+1002,bob,standard,cable,2,4.75
+1003,carol,standard,gadget,3,19.99
+1004,dave,gold,bolt,40,0.35
+1004,dave,gold,widget,2,2.50

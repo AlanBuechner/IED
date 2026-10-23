@@ -1,0 +1,19 @@
+add 5 5
+add 9 3
+remove 2 2
+list
+count
+covered
+add -10 -5
+add -5 0
+list
+add 100 200
+add 120 130
+list
+remove 150 160
+list
+remove -100 -7
+list
+contains -7
+contains -8
+covered

@@ -1,6 +1,6 @@
 title = "Make a slow log analyzer at least 10x faster without changing its output"
 category = "optimize"
-set = "tune"
+set = ["tune", "tune2"]
 timeout_minutes = 50
 fixture_files = [["data/sample.log", "data/sample.log"]]
 

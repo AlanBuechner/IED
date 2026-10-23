@@ -1,0 +1,4 @@
+7 gus 22.90
+8 hal 1.23
+orders 2 total 24.13
+average 12.07

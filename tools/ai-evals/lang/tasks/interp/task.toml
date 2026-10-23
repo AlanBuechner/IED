@@ -1,6 +1,6 @@
 title = "Add while loops and arrays to an interpreter"
 category = "large"
-set = "holdout"
+set = ["holdout", "holdout2"]
 timeout_minutes = 60
 
 [c4]

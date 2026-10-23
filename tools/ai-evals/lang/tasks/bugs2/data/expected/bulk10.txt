@@ -1,0 +1,5 @@
+1 ann 24.30
+2 ben 24.30
+3 cat 26.73
+orders 3 total 75.33
+average 25.11

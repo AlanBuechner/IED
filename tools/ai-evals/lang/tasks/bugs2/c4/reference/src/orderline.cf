@@ -1,0 +1,84 @@
+include "orderline.ch"
+
+namespace Invoice
+{
+	const int64 kFields = 6;
+
+	static int64 SplitFields(Core::StringView text, Core::StringView* fields) {
+		int64 count = 0;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && text.ByteAt(i) != ',') continue;
+			if (count == kFields) return kFields + 1;
+			fields[count++] = text.Substring(start, i - start);
+			start = i + 1;
+		}
+		return count;
+	}
+
+	static bool ParsePrice(Core::StringView text, int64& cents) {
+		const int64 dot = text.IndexOf('.', 0);
+		int64 units = 0;
+		int64 fraction = 0;
+		if (dot < 0 || text.ByteLength() - dot != 3) return false;
+		if (!Core::ParseInt64(text.Substring(0, dot), units) || !Core::ParseInt64(text.Substring(dot + 1, 2), fraction)) return false;
+		if (units < 0 || fraction < 0) return false;
+		cents = units * kCentsPerUnit + fraction;
+		return true;
+	}
+
+	static bool ParseTier(Core::StringView text, Tier& tier) {
+		if (text == "standard") tier = Tier::Standard;
+		else if (text == "gold") tier = Tier::Gold;
+		else return false;
+		return true;
+	}
+
+	bool ParseLine(Core::StringView text, OrderLine& line, Core::String& why) {
+		Core::StringView[kFields] fields;
+		if (SplitFields(text, &fields[0]) != kFields) {
+			why = Core::String("expected 6 fields");
+			return false;
+		}
+		if (!ParseTier(fields[2], line.tier)) {
+			why = Core::String("bad tier");
+			return false;
+		}
+		if (!Core::ParseInt64(fields[4], line.quantity) || line.quantity <= 0) {
+			why = Core::String("bad quantity");
+			return false;
+		}
+		if (!ParsePrice(fields[5], line.unitCents)) {
+			why = Core::String("bad price");
+			return false;
+		}
+		line.order = Core::String(fields[0]);
+		line.customer = Core::String(fields[1]);
+		line.sku = Core::String(fields[3]);
+		return true;
+	}
+
+	ParseResult ParseOrders(Core::StringView text) {
+		ParseResult result;
+		Core::StringView rest = text;
+		int64 number = 0;
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView row = rest.Substring(0, end > 0 && rest.ByteAt(end - 1) == '\r' ? end - 1 : end);
+			rest = rest.Substring(end + 1, rest.ByteLength());
+			++number;
+			if (number == 1 || row.IsEmpty()) continue;
+			OrderLine line;
+			Core::String why;
+			if (!ParseLine(row, line, why)) {
+				Core::StringBuilder error;
+				Core::Format(&error, "line {0:D}: {1:s}", number, why.CStr());
+				result.error = error.ToString();
+				return result;
+			}
+			result.lines.Push(take(line));
+		}
+		return result;
+	}
+}

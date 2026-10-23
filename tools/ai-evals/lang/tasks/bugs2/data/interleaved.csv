@@ -1,0 +1,6 @@
+order,customer,tier,sku,quantity,unit_price
+2001,erin,standard,widget,2,2.50
+2002,finn,gold,gadget,1,19.99
+2001,erin,standard,cable,3,4.75
+2003,gail,standard,bolt,10,0.35
+2002,finn,gold,widget,12,2.50

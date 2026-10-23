@@ -1,0 +1,25 @@
+section blue
+  Ada 0.0 F
+  Dev 0.0 F
+  Gus 0.0 F
+  Jun 0.0 F
+  Mo 0.0 F
+  Pia 0.0 F
+  mean 0.0
+section green
+  Cleo 0.0 F
+  Fay 0.0 F
+  Ivo 0.0 F
+  Lea 0.0 F
+  Oz 0.0 F
+  Rae 0.0 F
+  mean 0.0
+section red
+  Ben 0.0 F
+  Eli 0.0 F
+  Hana 0.0 F
+  Kai 0.0 F
+  Nia 0.0 F
+  Quin 0.0 F
+  mean 0.0
+overall mean 0.0

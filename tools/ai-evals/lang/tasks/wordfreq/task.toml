@@ -1,6 +1,6 @@
 title = "Word frequency command-line tool, from an empty project"
 category = "scratch"
-set = "tune"
+set = ["tune", "tune2"]
 timeout_minutes = 45
 
 [c4]

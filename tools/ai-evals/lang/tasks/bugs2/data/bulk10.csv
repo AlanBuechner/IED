@@ -1,0 +1,4 @@
+order,customer,tier,sku,quantity,unit_price
+1,ann,standard,widget,10,2.50
+2,ben,standard,widget,9,2.50
+3,cat,standard,widget,11,2.50

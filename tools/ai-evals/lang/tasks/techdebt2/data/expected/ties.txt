@@ -1,0 +1,9 @@
+section a
+  Amy 90.0 A
+  Zed 90.0 A
+  mean 90.0
+section b
+  Bob 35.5 F
+  Cat 19.4 F
+  mean 27.4
+overall mean 58.7

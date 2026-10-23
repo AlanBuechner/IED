@@ -9,6 +9,9 @@
 bin/nuke text eol=lf
 # The e2e fixture's files are compared byte for byte after edits: LF in every checkout.
 tests/e2e/fixture/** text eol=lf
+# The language eval's task data is what the programs read, byte for byte in every checkout (bugs/data/excel.csv
+# keeps its CRLF on purpose).
+tools/ai-evals/lang/tasks/*/data/** -text
 
 *.png binary
 *.jpg binary

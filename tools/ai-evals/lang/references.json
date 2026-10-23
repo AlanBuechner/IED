@@ -42,5 +42,16 @@
 			"benchSeconds": 0.617,
 			"benchMB": 169.8
 		}
+	},
+	"spans2": {
+		"c4": {
+			"benchSeconds": 0.008,
+			"benchMB": 4.4,
+			"startSeconds": 0.008
+		},
+		"go": {
+			"benchSeconds": 0.007,
+			"benchMB": 14.2
+		}
 	}
 }

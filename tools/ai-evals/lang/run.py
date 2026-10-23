@@ -255,7 +255,7 @@ async def run_job(job, settings, config):
 	"""One task in one language: workspace, server, turn, grade."""
 	task, lang, job_dir, ws = job["task"], job["lang"], job["dir"], job["ws"]
 	os.makedirs(job_dir, exist_ok=True)
-	record = {"task": task["id"], "lang": lang, "repeat": job["repeat"], "workspace": ws, "category": task.get("category"), "set": task.get("set")}
+	record = {"task": task["id"], "taskVersion": task.get("version", 1), "lang": lang, "repeat": job["repeat"], "workspace": ws, "category": task.get("category"), "set": config.get("set") or common.sets_of(task)[0]}
 	try:
 		opened = prepare_workspace(task, lang, ws, config["toolchain"], config.get("starter"))
 		async with slots.Slot(config["slots"], os.path.basename(job_dir)):
@@ -322,7 +322,7 @@ def main():
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--server", required=True, help="the ied-server executable")
 	parser.add_argument("--tasks", help="task ids, comma-separated (default: all, or --set)")
-	parser.add_argument("--set", dest="task_set", choices=["tune", "holdout"], help="only the tasks of this set")
+	parser.add_argument("--set", dest="task_set", choices=["tune", "holdout", "tune2", "holdout2"], help="only the tasks of this set (tune2, holdout2: the second round, with its recalibrated tasks)")
 	parser.add_argument("--langs", default="c4", help="languages, comma-separated: c4, go")
 	parser.add_argument("--variant", default="baseline", help="variants/<name> (or a folder): files over IED's home and the toolchain")
 	parser.add_argument("--label", default="", help="a note for the run's record")
@@ -347,7 +347,7 @@ def main():
 	print("preparing the %s toolchain and home" % os.path.basename(variant), flush=True)
 	starter = os.path.join(variant, "starter")
 	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain, run_id), "home": prepare_home(variant, run_id, args.home_base), "slots": args.slots,
-		"starter": starter if os.path.isdir(starter) else None}
+		"starter": starter if os.path.isdir(starter) else None, "set": args.task_set}
 	jobs = []
 	for repeat in range(1, args.repeat + 1):
 		for task in tasks:

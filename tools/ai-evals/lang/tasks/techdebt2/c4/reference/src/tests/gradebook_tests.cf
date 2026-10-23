@@ -1,0 +1,40 @@
+include "records.ch"
+include "report.ch"
+
+[test("gradebook.grades.weighted")]
+static void WeightsTheKinds() {
+	Gradebook::Student student;
+	student.tallies[0] = Gradebook::Tally{ 180, 2 };
+	student.tallies[1] = Gradebook::Tally{ 80, 1 };
+	student.tallies[2] = Gradebook::Tally{ 70, 1 };
+	assert_eq((int64)7800, Gradebook::WeightedAverage(student), "30% of 90, 20% of 80, 50% of 70");
+}
+
+[test("gradebook.grades.letters")]
+static void LettersAtTheBounds() {
+	assert_true(Gradebook::Letter(9000)[0] == 'A' && Gradebook::Letter(8999)[0] == 'B' && Gradebook::Letter(5999)[0] == 'F', "bounds");
+}
+
+[test("gradebook.records.bad_lines")]
+static void FindsBadLines() {
+	assert_eq((int64)3, Gradebook::ParseStudents(Core::StringView("id,name,section\n1,a,x\n2,,x\n")).badLine, "empty name");
+	Core::Array<Gradebook::Student> students = Gradebook::ParseStudents(Core::StringView("h\n1,a,x\n")).students;
+	assert_eq((int64)2, Gradebook::ApplyScores(Core::StringView("h\n1,lab,50\n"), students).badLine, "unknown kind");
+	assert_eq((int64)2, Gradebook::ApplyScores(Core::StringView("h\n1,exam,101\n"), students).badLine, "score above 100");
+}
+
+[test("gradebook.records.unknown_students")]
+static void SkipsUnknownStudents() {
+	Core::Array<Gradebook::Student> students = Gradebook::ParseStudents(Core::StringView("h\n1,a,x\n")).students;
+	Gradebook::ScoreResult result = Gradebook::ApplyScores(Core::StringView("h\n9,exam,50\n1,exam,70\n"), students);
+	assert_eq((int64)1, result.unknownIds.Count(), "one unknown");
+	assert_eq((int64)70, students[0].tallies[2].sum, "the known score counted");
+}
+
+[test("gradebook.report.sections")]
+static void ReportsSectionsInOrder() {
+	Core::Array<Gradebook::Student> students = Gradebook::ParseStudents(Core::StringView("h\n1,Zed,b\n2,Amy,a\n3,Bob,a\n")).students;
+	Gradebook::ApplyScores(Core::StringView("h\n1,exam,100\n1,quiz,100\n1,homework,100\n2,exam,50\n3,exam,70\n"), students);
+	assert_se("section a\n  Bob 35.0 F\n  Amy 25.0 F\n  mean 30.0\nsection b\n  Zed 100.0 A\n  mean 100.0\noverall mean 53.3\n",
+		Gradebook::Report(students).CStr(), "sections by name, best first, each with its mean");
+}

@@ -1,0 +1,80 @@
+title = "Refactor a working but messy program to the project's standards without changing its behavior"
+category = "refactor"
+set = "tune2"
+# 2: no median or honor roll, ten more minutes - no setup of either language got through version 1's refactor.
+version = 2
+timeout_minutes = 60
+
+[c4]
+project = "gradebook"
+prompt = """
+`gradebook` is a C4 program (a Nuke workspace) that turns a class's students and scores into a report: `gradebook <students.csv> <scores.csv>` (examples in `data/`). It works, but all of it is one long `main` in `src/main.cf` with global state, copy-pasted parsing, magic numbers and hand-written sorting, and it has no tests.
+
+Refactor it to follow the standards in AGENTS.md. Its behavior must not change at all: the same standard output, standard error and exit code for every input, errors and warnings included. Add unit tests for the core logic, and build and test before you finish.
+"""
+
+[go]
+project = "gradebook"
+prompt = """
+`gradebook` is a Go program (package main in this module) that turns a class's students and scores into a report: `gradebook <students.csv> <scores.csv>` (examples in `data/`). It works, but all of it is one long `main` in `main.go` with global state, copy-pasted parsing, magic numbers and hand-written sorting, and it has no tests.
+
+Refactor it to follow the standards in AGENTS.md. Its behavior must not change at all: the same standard output, standard error and exit code for every input, errors and warnings included. Add unit tests for the core logic, and build and test before you finish.
+"""
+
+[[checks]]
+name = "sample"
+args = ["{data}/students.csv", "{data}/scores.csv"]
+stdout_file = "data/expected/sample.txt"
+stderr_contains = "warning: unknown student s99"
+
+[[checks]]
+name = "warning-count"
+args = ["{data}/students.csv", "{data}/scores.csv"]
+stderr_contains = "2 warning(s)"
+
+[[checks]]
+name = "ties"
+args = ["{data}/ties-students.csv", "{data}/ties-scores.csv"]
+stdout_file = "data/expected/ties.txt"
+
+[[checks]]
+name = "no-scores"
+args = ["{data}/students.csv", "{data}/header-only.csv"]
+stdout_file = "data/expected/noscores.txt"
+
+[[checks]]
+name = "no-students"
+args = ["{data}/header-only.csv", "{data}/header-only.csv"]
+stdout_file = "data/expected/nostudents.txt"
+
+[[checks]]
+name = "bad-student-line"
+args = ["{data}/bad-students.csv", "{data}/ties-scores.csv"]
+exit = 1
+stderr_contains = "bad-students.csv line 3"
+
+[[checks]]
+name = "bad-score-line"
+args = ["{data}/ties-students.csv", "{data}/bad-scores.csv"]
+exit = 1
+stderr_contains = "bad-scores.csv line 3"
+
+[[checks]]
+name = "missing-file"
+args = ["{data}/ties-students.csv", "{data}/no-such.csv"]
+exit = 1
+stderr_contains = "error: cannot read"
+
+[[checks]]
+name = "usage"
+args = ["{data}/ties-students.csv"]
+exit = 2
+stderr_contains = "usage: gradebook <students.csv> <scores.csv>"
+
+[requirements]
+globals_max = 0
+function_lines_max = 40
+own_tests_min = 4
+weight = 0.4
+# Behavior and build count as far as the refactor went: the untouched program passes every check and earns nothing.
+gate = true

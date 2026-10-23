@@ -1,6 +1,6 @@
 title = "Add options and a report command to an existing multi-file program"
 category = "feature"
-set = "tune"
+set = ["tune", "tune2"]
 timeout_minutes = 45
 
 [c4]

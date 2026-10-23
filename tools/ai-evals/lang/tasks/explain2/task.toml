@@ -1,0 +1,50 @@
+title = "Explain how an interpreter parses operators and calls functions"
+category = "explain"
+set = "holdout2"
+timeout_minutes = 20
+mode = "ask"
+# 2: a third question, on how a return leaves a function - every setup of either language stated all of version 1's facts.
+version = 2
+
+# What a right answer names, as the code writes it (the same names in both languages): precedence climbing in
+# Parser.ParseBinary with the table in Precedence (expressions.go / expressions.cf); CallFunction makes a new
+# Environment whose parent is the function's closure (FunctionValue's Closure / closure) and Defines the parameters
+# in it, bound to the arguments; a return makes a Flow whose returned flag ExecuteBlock checks after each statement
+# (ExecuteReturn / executeReturn), so the rest of the block and the function are skipped.
+answer_facts = [
+	"ParseBinary",
+	"Precedence",
+	"CallFunction",
+	"Environment",
+	"Define",
+	"(?i)closure",
+	"(?i)parent",
+	"Flow",
+	"(?i)\\breturned\\b",
+	"ExecuteBlock",
+	"(?i)executeReturn",
+]
+
+[c4]
+project = "calc"
+prompt = """
+I'm new to this code base: `calc` is an interpreter for a small scripting language, written in C4 (a Nuke workspace), and README.md describes the language. Three questions, so I can find my way around:
+
+1. How does a binary expression like `1 + 2 * 3` get parsed so that `*` binds tighter than `+` and `10 - 4 - 3` groups to the left? Which functions take part, and where is the precedence of each operator defined?
+2. What happens when a script calls a function it defined: where are the arguments bound to the parameters, and how does the function's body see the variables of the scope where the function was defined, even after that scope has ended?
+3. When a `return` runs inside an `if` inside a function, how does the function end right there, without running the statements after the `if`? What carries the returned value back to the call, and where is that checked?
+
+Name the functions and types involved and the files they are in. Please don't change any code.
+"""
+
+[go]
+project = "calc"
+prompt = """
+I'm new to this code base: `calc` is an interpreter for a small scripting language, written in Go (package main in this module), and README.md describes the language. Three questions, so I can find my way around:
+
+1. How does a binary expression like `1 + 2 * 3` get parsed so that `*` binds tighter than `+` and `10 - 4 - 3` groups to the left? Which functions take part, and where is the precedence of each operator defined?
+2. What happens when a script calls a function it defined: where are the arguments bound to the parameters, and how does the function's body see the variables of the scope where the function was defined, even after that scope has ended?
+3. When a `return` runs inside an `if` inside a function, how does the function end right there, without running the statements after the `if`? What carries the returned value back to the call, and where is that checked?
+
+Name the functions and types involved and the files they are in. Please don't change any code.
+"""

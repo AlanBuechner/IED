@@ -63,7 +63,19 @@ into that home (a schema the variant adds to) rather than copied over it.
 ## Tasks (`tasks/<id>/task.toml`)
 
 Each task has a C4 and a Go version that behave identically, a `set` (`tune`: iterated on; `holdout`: run only to
-check that a change generalizes), and a prompt written as a user would. What is graded:
+check that a change generalizes), and a prompt written as a user would.
+
+A task has to sit in the sweet spot of what it tests: hard enough that setups differ, doable enough that a good one
+succeeds. After each round, look at every task's spread across setups and languages (scores, finished jobs, the
+review's correctness); a task every setup aces or every setup fails tells nothing and is recalibrated as a new task
+(`<id>2`, `version = 2` saying what changed and why) in the next round's sets, so a round's runs always compare on the
+same tasks. Round 2 (`tune2`, `holdout2`; unchanged tasks are in both rounds, `set = ["tune", "tune2"]`):
+`bugs2` has six bugs, two in parsing and grouping (every setup fixed round 1's four); `techdebt2` has no median or
+honor roll and ten more minutes (no setup got through round 1's refactor); `spans2` drops the O(log n) demand (every
+implementation broke in the splicing it needs; `optimize` measures speed work); `explain2` asks a third question
+(every setup stated round 1's facts). Requirements score their progress from the starting project, and a refactor's
+or a speedup's checks count only as far as it went (`requirements.gate`), so an untouched program scores about 0.
+What is graded:
 
 | | |
 |---|---|

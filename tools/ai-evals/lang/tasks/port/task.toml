@@ -1,6 +1,6 @@
 title = "Port a C++ Markdown-to-HTML converter, with a small context window"
 category = "longrun"
-set = "holdout"
+set = ["holdout", "holdout2"]
 timeout_minutes = 75
 max_steps = 250
 context_window = 32768

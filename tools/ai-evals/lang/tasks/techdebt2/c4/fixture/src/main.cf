@@ -1,0 +1,163 @@
+include "bedrock.ch"
+
+struct Student
+{
+	public Core::String id;
+	public Core::String name;
+	public Core::String section;
+	public int64 hwSum;
+	public int64 hwCount;
+	public int64 quizSum;
+	public int64 quizCount;
+	public int64 examSum;
+	public int64 examCount;
+	public int64 avg;
+}
+
+Core::Array<Student> g_students;
+int64 g_warnings = 0;
+Core::String g_error;
+
+int64 kindAvg(int64 sum, int64 count) {
+	if (count == 0) return 0;
+	return (sum * 100 * 2 + count) / (2 * count);
+}
+
+void printTenths(Core::StringBuilder& out, int64 hundredths) {
+	int64 t = (hundredths + 5) / 10;
+	out.AppendInt(t / 10);
+	out.Append(".");
+	out.AppendInt(t % 10);
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 3) {
+		Platform::WriteError(Core::StringView("usage: gradebook <students.csv> <scores.csv>\n"));
+		return 2;
+	}
+	// read students
+	FS::File f1 = FS::File(argv[1], "rb");
+	if (!f1.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + argv[1] + "\n").View());
+		return 1;
+	}
+	Core::String text1 = f1.ReadText();
+	Core::StringView rest = text1.View();
+	int64 lineNo = 0;
+	while (!rest.IsEmpty()) {
+		int64 e = rest.IndexOf('\n', 0);
+		if (e < 0) e = rest.ByteLength();
+		Core::StringView line = rest.Substring(0, e > 0 && rest.ByteAt(e - 1) == '\r' ? e - 1 : e);
+		rest = rest.Substring(e + 1, rest.ByteLength());
+		lineNo++;
+		if (lineNo == 1 || line.IsEmpty()) continue;
+		int64 c1 = line.IndexOf(',', 0);
+		int64 c2 = c1 < 0 ? -1 : line.IndexOf(',', c1 + 1);
+		if (c1 <= 0 || c2 < 0 || line.IndexOf(',', c2 + 1) >= 0 || c2 == c1 + 1 || c2 == line.ByteLength() - 1) {
+			Core::StringBuilder m;
+			Core::Format(&m, "error: {0:s} line {1:D}\n", argv[1], lineNo);
+			Platform::WriteError(m.View());
+			return 1;
+		}
+		Student s;
+		s.id = Core::String(line.Substring(0, c1));
+		s.name = Core::String(line.Substring(c1 + 1, c2 - c1 - 1));
+		s.section = Core::String(line.Substring(c2 + 1, line.ByteLength() - c2 - 1));
+		g_students.Push(s);
+	}
+	// read scores
+	FS::File f2 = FS::File(argv[2], "rb");
+	if (!f2.IsOpen()) {
+		Platform::WriteError((Core::String("error: cannot read ") + argv[2] + "\n").View());
+		return 1;
+	}
+	Core::String text2 = f2.ReadText();
+	rest = text2.View();
+	lineNo = 0;
+	while (!rest.IsEmpty()) {
+		int64 e = rest.IndexOf('\n', 0);
+		if (e < 0) e = rest.ByteLength();
+		Core::StringView line = rest.Substring(0, e > 0 && rest.ByteAt(e - 1) == '\r' ? e - 1 : e);
+		rest = rest.Substring(e + 1, rest.ByteLength());
+		lineNo++;
+		if (lineNo == 1 || line.IsEmpty()) continue;
+		int64 c1 = line.IndexOf(',', 0);
+		int64 c2 = c1 < 0 ? -1 : line.IndexOf(',', c1 + 1);
+		int64 score = 0;
+		bool ok = c1 > 0 && c2 > c1 + 1 && line.IndexOf(',', c2 + 1) < 0 && Core::ParseInt64(line.Substring(c2 + 1, line.ByteLength() - c2 - 1), score) && score >= 0 && score <= 100;
+		Core::StringView kind = ok ? line.Substring(c1 + 1, c2 - c1 - 1) : Core::StringView("");
+		if (!ok || (kind != "homework" && kind != "quiz" && kind != "exam")) {
+			Core::StringBuilder m;
+			Core::Format(&m, "error: {0:s} line {1:D}\n", argv[2], lineNo);
+			Platform::WriteError(m.View());
+			return 1;
+		}
+		Core::StringView id = line.Substring(0, c1);
+		int64 found = -1;
+		for (int64 i = 0; i < g_students.Count(); i++) {
+			if (g_students[i].id == id) found = i;
+		}
+		if (found < 0) {
+			Platform::WriteError((Core::String("warning: unknown student ") + id + "\n").View());
+			g_warnings++;
+			continue;
+		}
+		if (kind == "homework") { g_students[found].hwSum += score; g_students[found].hwCount++; }
+		if (kind == "quiz") { g_students[found].quizSum += score; g_students[found].quizCount++; }
+		if (kind == "exam") { g_students[found].examSum += score; g_students[found].examCount++; }
+	}
+	// compute
+	for (int64 i = 0; i < g_students.Count(); i++) {
+		Student& s = g_students[i];
+		s.avg = (kindAvg(s.hwSum, s.hwCount) * 30 + kindAvg(s.quizSum, s.quizCount) * 20 + kindAvg(s.examSum, s.examCount) * 50 + 50) / 100;
+	}
+	// sections
+	Core::Array<Core::String> sections;
+	for (int64 i = 0; i < g_students.Count(); i++) {
+		bool have = false;
+		for (int64 j = 0; j < sections.Count(); j++) if (sections[j] == g_students[i].section) have = true;
+		if (!have) sections.Push(g_students[i].section);
+	}
+	for (int64 i = 0; i < sections.Count(); i++)
+		for (int64 j = 0; j + 1 < sections.Count() - i; j++)
+			if (sections[j + 1] < sections[j]) { Core::String t = sections[j]; sections[j] = sections[j + 1]; sections[j + 1] = t; }
+	Core::StringBuilder out;
+	int64 total = 0;
+	for (int64 k = 0; k < sections.Count(); k++) {
+		Core::Array<Student> list;
+		for (int64 i = 0; i < g_students.Count(); i++) if (g_students[i].section == sections[k]) list.Push(g_students[i]);
+		for (int64 i = 0; i < list.Count(); i++)
+			for (int64 j = 0; j + 1 < list.Count() - i; j++)
+				if (list[j + 1].avg > list[j].avg || (list[j + 1].avg == list[j].avg && list[j + 1].name < list[j].name)) { Student t = list[j]; list[j] = list[j + 1]; list[j + 1] = t; }
+		out.Append("section ");
+		out.Append(sections[k].View());
+		out.Append("\n");
+		int64 sum = 0;
+		for (int64 i = 0; i < list.Count(); i++) {
+			out.Append("  ");
+			out.Append(list[i].name.View());
+			out.Append(" ");
+			printTenths(out, list[i].avg);
+			if (list[i].avg >= 9000) out.Append(" A\n");
+			else if (list[i].avg >= 8000) out.Append(" B\n");
+			else if (list[i].avg >= 7000) out.Append(" C\n");
+			else if (list[i].avg >= 6000) out.Append(" D\n");
+			else out.Append(" F\n");
+			sum += list[i].avg;
+		}
+		total += sum;
+		out.Append("  mean ");
+		printTenths(out, (sum * 2 + list.Count()) / (2 * list.Count()));
+		out.Append("\n");
+	}
+	out.Append("overall mean ");
+	printTenths(out, g_students.Count() == 0 ? 0 : (total * 2 + g_students.Count()) / (2 * g_students.Count()));
+	out.Append("\n");
+	Platform::WriteOutput(out.View());
+	if (g_warnings > 0) {
+		Core::StringBuilder w;
+		Core::Format(&w, "{0:D} warning(s)\n", g_warnings);
+		Platform::WriteError(w.View());
+	}
+	return 0;
+}
