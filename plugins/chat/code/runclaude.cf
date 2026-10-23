@@ -362,10 +362,10 @@ namespace Ai
 	void TurnRun::ClaudeContext(const Serialization::DomNode& usage) {
 		int64 used = 0;
 		int64 window = 0;
-		Core::Array<ContextPart> parts;
-		if (!ReadClaudeContext(usage, used, window, parts)) return;
+		if (!ReadClaudeContext(usage, used, window)) return;
 		ModelProfile* profile = candidates[candidate];
 		chats->LearnWindow(profile->name.View(), window);
+		Core::Array<ContextPart> parts = ScaledParts(ContextParts(chat, system.ByteLength(), SentTools().ByteLength()), used);
 		chat->context = ContextJson(Window(), used, profile->name.View(), true, parts, Core::StringView("claude"));
 		chats->Publish(chat, "context.changed", chat->context.View());
 		SaveChatHeader(LocalStateOf(ws), chat);

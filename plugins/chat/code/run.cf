@@ -163,6 +163,25 @@ namespace Ai
 		return chats->prompts.System(chat->mode, prompt);
 	}
 
+	// IED's parts of what the chat's next turn would send, estimated.
+	static Core::Array<ContextPart> NextTurnParts(Chats* chats, Chat* chat, const IED::Workspace& ws, const Core::Array<ModelProfile*>& models, bool claude) {
+		Core::Array<Core::String> contributed;
+		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
+		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->userText.View() : Core::StringView(""), models, contributed);
+		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->mode, chat->loadedTools, claude).ByteLength());
+	}
+
+	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(chats->context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode meter = Serialization::ReadJson(chat->context.View(), *doc).root;
+		const int64 used = meter.Member("used").AsInt();
+		const bool claude = meter.Member("compacts").AsBool();
+		Core::Array<ContextPart> parts = ScaledParts(NextTurnParts(chats, chat, ws, models, claude), used);
+		return ContextJson(meter.Member("window").AsInt(), used, meter.Member("model").AsView(), claude, parts, meter.Member("source").AsView());
+	}
+
 	Core::String MeterFromTurns(Chats* chats, Chat* chat, const IED::Workspace& ws) {
 		IED::PluginContext* context = chats->context;
 		Core::Array<Core::String> problems;
@@ -172,10 +191,7 @@ namespace Ai
 		Core::String model = chats->NextModel(chat, ws, group, roleEffort);
 		ModelProfile* profile = FindModel(models, model.View());
 		const bool claude = profile && profile->IsClaude();
-		Core::Array<Core::String> contributed;
-		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
-		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->userText.View() : Core::StringView(""), models, contributed);
-		Core::Array<ContextPart> parts = ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->mode, chat->loadedTools, claude).ByteLength());
+		Core::Array<ContextPart> parts = NextTurnParts(chats, chat, ws, models, claude);
 		int64 used = 0;
 		for (int64 i = chat->turns.Count() - 1; i >= 0 && used == 0; --i) used = chat->turns[i]->tokensIn;
 		if (used == 0)

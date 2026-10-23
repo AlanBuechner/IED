@@ -106,7 +106,8 @@ class ClaudeTurnTests(ClaudeCase):
 		if not counted:
 			counted = [(await self.client.wait_for("chat:" + chat_id, lambda f: f.get("kind") == "context.changed" and f["data"].get("source") == "claude", timeout=20))[-1]["data"]]
 		self.assertEqual((41234, 1000000), (counted[-1]["used"], counted[-1]["window"]), "the turn ends on the CLI's own count (get_context_usage)")
-		self.assertEqual(["System prompt", "MCP tools", "Messages"], [p["name"] for p in counted[-1]["parts"]], "its rows that fill the window")
+		self.assertEqual(["System prompt", "Tool definitions", "Messages", "Tool results"], [p["name"] for p in counted[-1]["parts"]], "IED's parts")
+		self.assertEqual(41234, sum(p["tokens"] for p in counted[-1]["parts"]), "split across the CLI's count")
 
 	def local_state(self):
 		from server import local_state
@@ -126,6 +127,33 @@ class ClaudeTurnTests(ClaudeCase):
 		self.assertEqual("max", argv[argv.index("--effort") + 1], "the chat's pick")
 		self.assertIn("--resume", argv, "the same conversation")
 		self.assertEqual("max", (await self.last_turn(chat_id)).get("effort"))
+
+	async def test_a_shown_chat_without_claudes_count_asks_its_resumed_session(self):
+		"""docs/04 "Context management": a Claude chat whose meter is not the CLI's own (its last turn ran on an older
+		server) has its session resumed when it is shown, and the meter becomes the CLI's get_context_usage - no query."""
+		await self.use_claude()
+		self.script({"blocks": [{"text": "One."}]})
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id, "first"))["stop"])
+		header_path = os.path.join(self.local_state(), "chats", chat_id, "chat.json")
+		self.server.stop(remove_data=False)
+		self.client.abort()
+		with open(header_path, encoding="utf-8") as f:
+			header = json.load(f)
+		del header["context"]
+		with open(header_path, "w", encoding="utf-8") as f:
+			json.dump(header, f)
+		queries = len([entry for entry in self.log() if "query" in entry])
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub(["chat:" + chat_id])
+		first = (await self.client.next_frame("chat:" + chat_id))["data"]["context"]
+		self.assertNotEqual("claude", first.get("source"), "the last turn's count until Claude answers")
+		counted = (await self.client.wait_for("chat:" + chat_id, lambda f: f.get("kind") == "context.changed", timeout=30))[-1]["data"]
+		self.assertEqual(("claude", 41234, 1000000), (counted.get("source"), counted["used"], counted["window"]), "Claude's own count")
+		self.assertIn("--resume", self.sessions_started()[-1], "the chat's own session")
+		self.assertEqual(queries, len([entry for entry in self.log() if "query" in entry]), "no query was made")
 
 	async def test_the_session_is_kept_between_turns_and_resumed_after_a_restart(self):
 		await self.use_claude()

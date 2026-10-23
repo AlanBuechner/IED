@@ -156,6 +156,8 @@ namespace Ai
 		Core::String roleEffort;
 		IED::Workspace ws = WorkspaceOf(chat);
 		if (chat->context.IsEmpty() && !chat->turns.IsEmpty()) chat->context = MeterFromTurns(this, chat, ws);
+		else if (!chat->context.IsEmpty() && !HasIedParts(chat->context.View())) chat->context = ResplitContext(this, chat, ws);
+		if (!chat->run && !chat->claudeAsked && !chat->claudeSession.IsEmpty() && ContextSource(chat->context.View()) != "claude") CountClaude(chat, ws);
 		Core::String model = NextModel(chat, ws, group, roleEffort);
 		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), kChatSnapshotTurns);
 	}

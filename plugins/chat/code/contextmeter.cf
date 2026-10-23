@@ -63,48 +63,28 @@ namespace Ai
 		return ContextJson(window, root.Member("used").AsInt(), model, claude, PartsOf(root), claude ? root.Member("source").AsView() : Core::StringView(""));
 	}
 
-	bool ReadClaudeContext(const Serialization::DomNode& usage, int64& used, int64& window, Core::Array<ContextPart>& parts) {
+	bool ReadClaudeContext(const Serialization::DomNode& usage, int64& used, int64& window) {
 		used = usage.Member("totalTokens").AsInt();
 		window = usage.Member("maxTokens").AsInt() > 0 ? usage.Member("maxTokens").AsInt() : usage.Member("rawMaxTokens").AsInt();
-		Serialization::DomNode rows = usage.Member("categories");
-		for (int64 i = 0; rows.Kind() == Serialization::DomKind::Array && i < rows.Count(); ++i) {
-			Serialization::DomNode row = rows.At(i);
-			Core::StringView kind = row.Member("kind").AsView();
-			Core::StringView name = row.Member("name").AsView();
-			const bool fills = kind.IsEmpty() ? name != "Free space" && name != "Autocompact buffer" : kind == "used";
-			if (!fills || row.Member("tokens").AsInt() <= 0) continue;
-			ContextPart part;
-			part.name = Core::String(name);
-			part.tokens = row.Member("tokens").AsInt();
-			parts.Push(part);
-		}
 		return used > 0;
-	}
-
-	Core::Array<ContextPart> GrownClaudeParts(Core::StringView context, int64 used) {
-		if (context.IsEmpty()) return Core::Array<ContextPart>();
-		Serialization::DomNode root = ReadContext(context);
-		if (root.Member("source").AsView() != "claude") return Core::Array<ContextPart>();
-		Core::Array<ContextPart> parts = PartsOf(root);
-		int64 total = 0;
-		int64 messages = -1;
-		for (int64 i = 0; i < parts.Count(); ++i) {
-			total += parts[i].tokens;
-			if (parts[i].name == "Messages") messages = i;
-		}
-		if (messages < 0) {
-			ContextPart part;
-			part.name = Core::String("Messages");
-			parts.Push(part);
-			messages = parts.Count() - 1;
-		}
-		const int64 grown = parts[messages].tokens + used - total;
-		parts[messages].tokens = grown > 0 ? grown : 0;
-		return parts;
 	}
 
 	Core::String ContextModel(Core::StringView context) {
 		if (context.IsEmpty()) return Core::String();
 		return Core::String(ReadContext(context).Member("model").AsView());
+	}
+
+	Core::String ContextSource(Core::StringView context) {
+		if (context.IsEmpty()) return Core::String();
+		return Core::String(ReadContext(context).Member("source").AsView());
+	}
+
+	bool HasIedParts(Core::StringView context) {
+		Core::Array<ContextPart> parts = PartsOf(ReadContext(context));
+		const char*[4] names = { "System prompt", "Tool definitions", "Messages", "Tool results" };
+		if (parts.Count() != 4) return false;
+		for (int64 i = 0; i < 4; ++i)
+			if (parts[i].name.View() != Core::StringView(names[i])) return false;
+		return true;
 	}
 }

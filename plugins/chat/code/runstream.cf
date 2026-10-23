@@ -342,9 +342,7 @@ namespace Ai
 
 	void TurnRun::PublishContext(int64 used) {
 		ModelProfile* profile = candidates[candidate];
-		Core::Array<ContextPart> cli = profile->IsClaude() ? GrownClaudeParts(chat->context.View(), used) : Core::Array<ContextPart>();
-		if (!cli.IsEmpty()) chat->context = ContextJson(Window(), used, profile->name.View(), true, cli, Core::StringView("claude"));
-		else chat->context = ContextJson(Window(), used, profile->name.View(), profile->IsClaude(), ScaledParts(ContextParts(chat, system.ByteLength(), SentTools().ByteLength()), used));
+		chat->context = ContextJson(Window(), used, profile->name.View(), profile->IsClaude(), ScaledParts(ContextParts(chat, system.ByteLength(), SentTools().ByteLength()), used));
 		chats->Publish(chat, "context.changed", chat->context.View());
 		SaveChatHeader(LocalStateOf(ws), chat);
 	}

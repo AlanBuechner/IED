@@ -21,6 +21,17 @@ namespace Ai
 	// What a call a restart interrupted gets as its result (chatstore.ch LoadChats).
 	const char* kInterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
 
+	// What resuming a chat's Claude session to count its context needs (claudecount.cf).
+	class ClaudeCountStart
+	{
+		public ModelProfile* profile;
+		public Core::String system;
+		public Core::String tools;
+		public int64 toolsBytes;   // of the tool definitions as a request lists them
+		public Core::String effort;
+		public Core::Array<Core::String> command;
+	}
+
 	class Chats
 	{
 		[operator("create")] public void Init() {}
@@ -67,6 +78,9 @@ namespace Ai
 		// A window a server, the CLI or an error reported for `model`, kept in the plugin's state folder so the next
 		// server run knows it before asking; whether it changed.
 		public bool LearnWindow(Core::StringView model, int64 window);
+		// Claude's own count of an idle Claude chat's context asked of its resumed session, on a thread of its own; once
+		// per server run (claudecount.cf). Inside the host lock.
+		public void CountClaude(Chat* chat, const IED::Workspace& ws);
 
 		// Background tasks (background.cf, docs/04 "Background tasks"); inside the host lock. A new running task of
 		// `chat`, published.
@@ -96,6 +110,8 @@ namespace Ai
 		private Core::String Snapshot(Chat* chat);
 		private void LoadWindows();
 		private void WakeForBackground(Chat* chat);
+		private void AskClaudeCount(Chat* chat, IED::Workspace ws);
+		private ClaudeSession* ClaudeCountSetup(Chat* chat, const IED::Workspace& ws, ClaudeCountStart& start);
 		// The context meter of an idle chat redrawn for the window of `model`, the one its next turn starts on.
 		private void MeterFor(Chat* chat, const IED::Workspace& ws, Core::StringView model);
 		private void QueueChanged(Chat* chat);

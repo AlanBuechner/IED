@@ -46,29 +46,24 @@ class ContextMeterTests {
 		assert_true(!local.View().Contains(Core::StringView("estimated")) && !local.View().Contains(Core::StringView("source")), "a plain count");
 	}
 
-	[test("claudes_own_rows")]
-	public static void TestClaudeRows() {
+	[test("claudes_count")]
+	public static void TestClaudeCount() {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		Serialization::DomNode usage = Serialization::ReadJson(Core::StringView("{\"totalTokens\": 52000, \"maxTokens\": 1000000, \"rawMaxTokens\": 1000000, \"categories\": ["
-			"{\"name\": \"System prompt\", \"tokens\": 4000, \"kind\": \"used\"}, {\"name\": \"MCP tools\", \"tokens\": 18000, \"kind\": \"used\"},"
-			"{\"name\": \"Messages\", \"tokens\": 30000, \"kind\": \"used\"}, {\"name\": \"Deferred\", \"tokens\": 9000, \"kind\": \"deferred\"},"
-			"{\"name\": \"Free space\", \"tokens\": 903000, \"kind\": \"free\"}, {\"name\": \"Autocompact buffer\", \"tokens\": 45000, \"kind\": \"buffer\"}]}"), *doc).root;
+		Serialization::DomNode usage = Serialization::ReadJson(Core::StringView("{\"totalTokens\": 479667, \"maxTokens\": 1000000, \"rawMaxTokens\": 1000000, \"categories\": ["
+			"{\"name\": \"System prompt\", \"tokens\": 10347, \"kind\": \"used\"}, {\"name\": \"Messages\", \"tokens\": 469320, \"kind\": \"used\"},"
+			"{\"name\": \"Free space\", \"tokens\": 475333, \"kind\": \"free\"}, {\"name\": \"Autocompact buffer\", \"tokens\": 45000, \"kind\": \"buffer\"}]}"), *doc).root;
 		int64 used = 0;
 		int64 window = 0;
-		Core::Array<Ai::ContextPart> parts;
-		assert_true(Ai::ReadClaudeContext(usage, used, window, parts), "a count");
-		assert_eq((int64)52000, used, "the CLI's total");
+		assert_true(Ai::ReadClaudeContext(usage, used, window), "a count");
+		assert_eq((int64)479667, used, "the CLI's total");
 		assert_eq((int64)1000000, window, "its window");
-		assert_eq((int64)3, parts.Count(), "only the rows that fill the window");
-		assert_se("MCP tools", parts[1].name.CStr(), "by the CLI's names");
+		Core::Array<Ai::ContextPart> parts = Ai::ScaledParts(FourParts(), used);
 		Core::String meter = Ai::ContextJson(window, used, Core::StringView("claude-opus"), true, parts, Core::StringView("claude"));
-		Core::Array<Ai::ContextPart> grown = Ai::GrownClaudeParts(meter.View(), 60000);
-		assert_eq((int64)3, grown.Count(), "the same rows a step later");
-		assert_eq((int64)38000, grown[2].tokens, "the step's growth on Messages");
-		assert_eq((int64)18000, grown[1].tokens, "the tools as the CLI counted them");
-		assert_eq((int64)0, Ai::GrownClaudeParts(Core::StringView("{\"used\": 5, \"parts\": []}"), 9).Count(), "IED's own parts are not the CLI's");
-		Serialization::DomNode old = Serialization::ReadJson(Core::StringView("{\"totalTokens\": 10, \"maxTokens\": 200000, \"categories\": [{\"name\": \"Messages\", \"tokens\": 10}, {\"name\": \"Free space\", \"tokens\": 199990}]}"), *doc).root;
-		Core::Array<Ai::ContextPart> before;
-		assert_true(Ai::ReadClaudeContext(old, used, window, before) && before.Count() == 1, "a CLI before kinds: the free row left out by name");
+		assert_se("claude", Ai::ContextSource(meter.View()).CStr(), "the count is Claude's");
+		assert_true(Ai::HasIedParts(meter.View()), "IED's four parts");
+		assert_true(!Ai::HasIedParts(Core::StringView("{\"parts\": [{\"name\": \"System prompt\", \"tokens\": 1}, {\"name\": \"Messages\", \"tokens\": 2}]}")), "the CLI's rows are not");
+		assert_true(meter.View().Contains(Core::StringView("\"name\":\"Tool definitions\"")) && meter.View().Contains(Core::StringView("\"name\":\"Tool results\"")), "IED's four parts");
+		Serialization::DomNode none = Serialization::ReadJson(Core::StringView("{\"categories\": []}"), *doc).root;
+		assert_true(!Ai::ReadClaudeContext(none, used, window), "no count, nothing");
 	}
 }

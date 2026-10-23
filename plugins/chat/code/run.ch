@@ -126,7 +126,8 @@ namespace Ai
 		private void ClaudeErrorOf(ClaudeLine* line, StepResult* result);
 		// The query's result: the context window the CLI reports.
 		private void ClaudeResult(ClaudeLine* line);
-		// The CLI's own count of the session's context (get_context_usage) as the chat's meter, its window learned.
+		// The CLI's own count of the session's context and its window (get_context_usage) as the chat's meter, split into
+		// IED's parts; the window learned.
 		private void ClaudeContext(const Serialization::DomNode& usage);
 		// Reads the query to its result.
 		private void DrainClaude();
@@ -192,4 +193,7 @@ namespace Ai
 	// turn's prompt as its model's server counted it (`tokensIn`), split like what its next turn would send; that send
 	// estimated when no turn kept a count. For the model its next turn starts on. Inside the host lock.
 	Core::String MeterFromTurns(Chats* chats, Chat* chat, const IED::Workspace& ws);
+	// The chat's meter with its count, window and model kept and its parts made IED's four again, split across the
+	// count (a meter a build kept with the Claude CLI's own rows). Inside the host lock.
+	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws);
 }

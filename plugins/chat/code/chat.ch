@@ -273,6 +273,7 @@ namespace Ai
 		public Core::String context;                  // the context meter (contextmeter.ch); empty before a request
 		public int64 estimateOffset;                  // the last count a model's server gave less IED's estimate of that request
 		public Core::String estimateModel;            // the model that count came from; "" before one this server run
+		public bool claudeAsked;                      // Claude was asked to count its context this server run (claudecount.cf)
 		public Core::String resume;                   // a call of this tool restarts the server: the chat goes on once it is back (resume.ch)
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
