@@ -1,0 +1,16 @@
+{
+	"description": "v13 with the C4 facts corrected and a checked FAQ: the c4-language skill's section 2b answers the language questions models asked themselves in their thinking (about 20 a task, four times Go's rate), each answer verified by compiling a probe; the skill, section and redefinition hint no longer say static helpers collide across files",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

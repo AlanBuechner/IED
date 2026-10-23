@@ -1,0 +1,12 @@
+{
+	"$defs": {
+		"model": {
+			"properties": {
+				"keepThinking": {
+					"type": "boolean",
+					"description": "A llama.cpp server is sent the turn's earlier thinking (default true)."
+				}
+			}
+		}
+	}
+}
