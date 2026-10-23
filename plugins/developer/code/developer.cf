@@ -28,13 +28,15 @@ namespace Developer
 		text.Append(source);
 		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); writes and commands there follow this chat's permission mode. ");
 		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed. ");
-		text.Append("When the running IED needs the fix (its server, a plugin, the web client), ied_relaunch installs it and relaunches IED; this chat then continues on the new build.");
+		text.Append("When the running IED needs the fix (its server, a plugin, the web client), ied_relaunch installs it and relaunches IED; this chat then continues on the new build.\n\n");
+		text.Append("Every failing tool call is a chance to fix IED's tools: find out why it failed before you move on. If the tool did something wrong (a bug, a case it should handle), fix the tool in ied:/. If your call was wrong because the tool's description or the system prompt misled you (a name, an argument, what it returns), correct that text in ied:/ so the next call is not misled the same way. ");
+		text.Append("The core tools' descriptions are in ied:/plugins/chat/code (each tool's Spec), the system prompt in ied:/plugins/chat/prompts, a plugin's tools in its ied-plugin.json or its code. A failure the tool reported correctly (a file that is not there) needs neither. Then make the call again.");
 		IED::JsonWriter json;
 		json.BeginArray();
 		json.BeginObject();
 		json.Field("id", "source");
 		json.Field("text", text.View());
-		json.IntField("maxTokens", 300);
+		json.IntField("maxTokens", kSectionTokens);
 		json.Field("when", kWhen);
 		json.EndObject();
 		json.EndArray();

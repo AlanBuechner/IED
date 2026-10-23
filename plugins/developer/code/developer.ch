@@ -24,5 +24,6 @@ namespace Developer
 	const int64 kTailBytes = 6000;
 	const int64 kBuildSeconds = 1800;
 	const int64 kQuickSeconds = 30;
+	const int64 kSectionTokens = 450;   // the system message section, its source path included
 	const int64 kTailLines = 60;   // of a failed install's log, for ied_relaunch
 }

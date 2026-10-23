@@ -54,8 +54,14 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    failure is in the compiler, Bedrock, Nuke or IED rather than in the workspace, fix it there - read
    `ied:/AGENTS.md` and `ied:/C4/AGENTS.md` first, record a C4 bug in `ied:/C4/docs/status/known-bugs.md`, add a test
    that would have caught it, run `nuke build` and `nuke gates` in `ied:/`, and say in the chat what was fixed; when the
-   running IED needs the fix, `ied_relaunch` installs it and the chat continues on the new build. About 200 tokens; only
-   while developer mode is on.
+   running IED needs the fix, `ied_relaunch` installs it and the chat continues on the new build. And every failing
+   tool call is a chance to fix IED's tools (owner, 2026-10-23: "any time it has a failing tool call it should either
+   fix the tool call or update the system prompt for that tool to correct the confusion"): the chat finds out why the
+   call failed; a tool that did something wrong is fixed in `ied:/`, and a call that was wrong because the tool's
+   description or the system prompt misled it gets that text corrected in `ied:/` - the core tools' descriptions in
+   `plugins/chat/code` (each tool's `Spec`), the system prompt in `plugins/chat/prompts`, a plugin's tools in its
+   manifest or code - then the call is made again; a failure the tool reported correctly (a file that is not there)
+   needs neither. About 400 tokens (`maxTokens` 450); only while developer mode is on.
 4. **Tools** (a deferred group `ied`, loaded with `tool_search`, `docs/13`):
    - `ied_rebuild()`: `nuke build` in the source, the end of its output; a compiler build refreshes the `dev`
      toolchain, so the workspace's next build uses the fix at once when it pins `dev`.
