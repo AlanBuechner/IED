@@ -1,7 +1,7 @@
 """Validates IED files against the shared/host-api schemas.
 
 Usage:
-	python -I tools/schema-check/schema_check.py                 # schemas + shared/host-api examples + fixtures
+	python -I tools/schema-check/schema_check.py                 # schemas + shared/host-api examples + fixtures + the shipped plugins
 	python -I tools/schema-check/schema_check.py <path>...       # files or folders (scanned recursively)
 	python -I tools/schema-check/schema_check.py --schema S F... # force schema S for files F
 
@@ -42,7 +42,9 @@ RULES = [
 	("*.frames.jsonl", "frames"),
 ]
 SKIP_DIRS = {".git", "build", "bin-int", "third_party", "node_modules", "__pycache__", "local"}
-DEFAULT_TARGETS = [HOST_API / "examples", TOOLS / "schema-check" / "fixtures"]
+# The plugins IED and the C4 toolchain ship: a manifest the schema refuses fails to load in every workspace (BUG-385:
+# the C4 plugin's section maxTokens over the schema's 600 left every C4 workspace without its language server).
+DEFAULT_TARGETS = [HOST_API / "examples", TOOLS / "schema-check" / "fixtures", REPO / "plugins", REPO / "C4" / "IedPlugin"]
 
 
 def schema_for(path):
