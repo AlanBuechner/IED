@@ -297,11 +297,13 @@ namespace Browser
 		Call(page, Core::StringView("Emulation.setDeviceMetricsOverride"), params.View());
 	}
 
-	void Browsers::Navigate(Page* page, Core::StringView url) {
+	bool Browsers::Navigate(Page* page, Core::StringView url) {
 		Core::String target = Allowed(page->wsId.View(), url);
 		Load(page);
 		CdpReply reply = Call(page, Core::StringView("Page.navigate"), (Core::String("{\"url\":") + JsonText(target.View()).View() + "}").View());
 		Core::StringView failed = reply.result.Member("errorText").AsView();
+		// A navigation within the document (only the #fragment differs) has no loader: no load event will come.
+		const bool newDocument = failed.IsEmpty() && !reply.result.Member("loaderId").AsView().IsEmpty();
 		if (!failed.IsEmpty()) {
 			ConsoleEntry entry;
 			entry.level = Core::String("error");
@@ -313,6 +315,7 @@ namespace Browser
 				events.Publish(page->Topic().View(), "console", (Core::String("{\"entries\":[") + ConsoleJson(added).View() + "]}").View());
 			});
 		}
+		return newDocument;
 	}
 
 	void Browsers::Back(Page* page, int32 step) {

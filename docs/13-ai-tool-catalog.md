@@ -150,7 +150,7 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-BRW-5 | `browser_console(page, since?)` / `browser_network(page, filter?)` | read | Console messages and failed requests. |
 | T-BRW-6 | `browser_eval(page, js)` | exec | Gated (`ask` in default mode). |
 | T-BRW-7 | `browser_close(page)` | meta | |
-| T-BRW-8 | `browser_navigate(page, url)` | net | Another URL in an open page; waits for its load. |
+| T-BRW-8 | `browser_navigate(page, url)` | net | Another URL in an open page; waits for its load (not for a `#fragment` change, which loads nothing). |
 
 ### `media`
 

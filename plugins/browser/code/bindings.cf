@@ -77,8 +77,8 @@ namespace Browser
 		Page* page = PageOf(browsers, args, ws);
 		const int64 loads = browsers->Loads(page);
 		const int64 mark = ConsoleMark(browsers, page);
-		browsers->Navigate(page, args.Member("url").AsView());
-		const bool loaded = browsers->AwaitLoad(page, loads, kLoadWaitNs);
+		const bool newDocument = browsers->Navigate(page, args.Member("url").AsView());
+		const bool loaded = !newDocument || browsers->AwaitLoad(page, loads, kLoadWaitNs);
 		Settle(browsers, page);
 		Core::String text = Core::String("Now at ") + Described(browsers, page).View() + (loaded ? "" : " - it had not finished loading after 30 s") +
 			NewErrors(browsers, page, mark).View();

@@ -191,6 +191,18 @@ class BrowserTests(ServerTestCase):
 			await self.call("browser.act", page=page, action="click", ref="e999")
 		self.assertIn("take a new one", stale.exception.message)
 
+	async def test_navigating_within_the_page_does_not_wait_for_a_load(self):
+		opened = await self.call("browser.openPage", url=self.url)
+		page = re.search(r"(pg-[0-9a-f]+)", opened["text"]).group(1)
+		started = time.monotonic()
+		moved = (await self.call("browser.navigatePage", page=page, url=self.url + "#part"))["text"]
+		self.assertLess(time.monotonic() - started, 10, "a same-document navigation fires no load event to wait for")
+		self.assertNotIn("had not finished loading", moved)
+		self.assertEqual({"text": 'Value: "#part"', "isError": False}, await self.call("browser.eval", page=page, js="location.hash"))
+		reloaded = (await self.call("browser.navigatePage", page=page, url=self.url + "?again=1"))["text"]
+		self.assertNotIn("had not finished loading", reloaded)
+		self.assertEqual({"text": 'Value: "?again=1"', "isError": False}, await self.call("browser.eval", page=page, js="location.search"))
+
 	async def test_only_the_web_and_the_workspace_open(self):
 		for url, code in (("javascript:alert(1)", "bad_request"), ("file:///C:/Windows/win.ini", "forbidden"), ("chrome://settings", "bad_request")):
 			with self.subTest(url=url), self.assertRaises(RpcFailure) as refused:

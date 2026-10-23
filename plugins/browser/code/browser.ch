@@ -48,7 +48,8 @@ namespace Browser
 		public Page* Find(Core::StringView pageId);
 		// Loads the page into the browser when it is not; throws RpcError unavailable when the browser cannot run.
 		public void Load(Page* page);
-		public void Navigate(Page* page, Core::StringView url);
+		// Whether a new document is loading (false for a navigation within the document, which fires no load event).
+		public bool Navigate(Page* page, Core::StringView url);
 		public void Back(Page* page, int32 step);
 		public void Reload(Page* page);
 		public void StopLoading(Page* page);
