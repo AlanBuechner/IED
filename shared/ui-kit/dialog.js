@@ -38,6 +38,41 @@ export function confirmDialog({ title, message, confirm = "OK", cancel = "Cancel
 	});
 }
 
+// A question with several answers (VS's Remove / Delete / Cancel): resolves the chosen one's `value`, or null when
+// cancelled. `choices` are {label, value, primary?, danger?}; Enter takes the focused button (the first to begin with),
+// Tab and the arrows move between them, Escape or a click outside cancels.
+export function choiceDialog({ title, message, choices, cancel = "Cancel" }) {
+	return new Promise((resolve) => {
+		const previous = document.activeElement;
+		const phone = window.matchMedia("(max-width: 719px)").matches;
+		const finish = (answer) => {
+			veil.remove();
+			if (previous && previous.isConnected) previous.focus({ preventScroll: true });
+			resolve(answer);
+		};
+		const buttons = choices.map((choice) => h("button.btn" + (choice.danger ? ".danger" : choice.primary ? ".primary" : ""), { on: { click: () => finish(choice.value) } }, choice.label));
+		buttons.push(h("button.btn", { on: { click: () => finish(null) } }, cancel));
+		const move = (step) => buttons[(buttons.indexOf(document.activeElement) + step + buttons.length) % buttons.length].focus();
+		const box = h("div.popup.dialog" + (phone ? ".sheet" : ""), {
+			role: "alertdialog", "aria-modal": "true", "aria-label": title, tabindex: "-1",
+			on: {
+				keydown: (event) => {
+					event.stopPropagation();
+					if (event.key === "Escape") finish(null);
+					else if (event.key === "Enter" && buttons.includes(document.activeElement)) document.activeElement.click();
+					else if (event.key === "Tab") move(event.shiftKey ? -1 : 1);
+					else if (event.key === "ArrowRight" || event.key === "ArrowLeft") move(event.key === "ArrowRight" ? 1 : -1);
+					else return;
+					event.preventDefault();
+				},
+			},
+		}, h("div.dialog-title", null, title), h("div.dialog-message", null, message), h("div.dialog-buttons", null, ...buttons));
+		const veil = h("div.dialog-veil", { on: { mousedown: (event) => event.target === veil && finish(null) } }, box);
+		document.body.append(veil);
+		buttons[0].focus();
+	});
+}
+
 // A question with a text answer (a branch name, a stash message): resolves the text, trimmed, or null when cancelled.
 // Enter answers; Escape or a click outside cancels. `check` returns why a text cannot be the answer, or "".
 export function promptDialog({ title, message, value = "", placeholder = "", confirm = "OK", cancel = "Cancel", check = () => "" }) {

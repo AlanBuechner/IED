@@ -2,11 +2,12 @@
 // Solution Items, or its folder (Switch Views, remembered per workspace on this device); a folder or file workspace
 // shows its folder. Folders load when opened; tree.changed keeps them
 // current. A click opens a file in a preview tab, a double click or Enter keeps it open (VS). New files and folders
-// and renames are named in place; a delete asks first.
+// and renames are named in place; a delete asks first. A folder can be added as a project, and a project moved or
+// removed (its files kept, or its folder deleted), through the server's project.* methods.
 
 import { h, icon } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
-import { confirmDialog } from "/ui-kit/dialog.js";
+import { choiceDialog, confirmDialog, promptDialog } from "/ui-kit/dialog.js";
 
 function parentOf(path) {
 	const slash = path.lastIndexOf("/");
@@ -329,6 +330,54 @@ export class Explorer {
 		catch (e) {
 			this.ied.report(e.code === "conflict" ? "'" + path + "' was not restored: something is there now." : "Could not restore '" + path + "': " + e.message, e);
 		}
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Projects (docs/03 "Managing projects"): the server changes the solution (through its build system when one owns
+	// it), and every Solution Explorer shows it from solution.changed.
+
+	async project(method, params, done) {
+		try {
+			const result = await this.ied.client.request(method, Object.assign({ wsId: this.ctx.wsId }, params));
+			this.ied.toast(done(result));
+			return result;
+		}
+		catch (e) {
+			this.ied.report(e.message, e);
+			return null;
+		}
+	}
+
+	addFolderAsProject(node) {
+		if (!node || node.kind !== "folder") return undefined;
+		return this.project("project.add", { folder: node.path }, (made) => "Added the project " + made.project + ".");
+	}
+
+	async addExistingFolder() {
+		const folder = await promptDialog({ title: "Add Existing Folder as Project", message: "The folder, relative to the solution's folder.", placeholder: "tools/packer", confirm: "Add" });
+		if (folder) await this.project("project.add", { folder }, (made) => "Added the project " + made.project + ".");
+	}
+
+	async moveProject(node) {
+		if (!node || node.kind !== "project") return;
+		if (!node.path) {
+			this.ied.report("'" + node.name + "' " + (node.path === null ? "lies outside the solution's folder" : "is the solution's own folder") + ": it cannot move.");
+			return;
+		}
+		const to = await promptDialog({ title: "Move Project", message: "Move '" + node.name + "' to the folder (relative to the solution's folder):", value: node.path, confirm: "Move",
+			check: (text) => (text.replace(/\\/g, "/").replace(/\/+$/, "") === node.path ? "Give another folder" : "") });
+		if (to) await this.project("project.move", { project: node.name, to }, () => "Moved " + node.name + " to " + to + ".");
+	}
+
+	async removeProject(node) {
+		if (!node || node.kind !== "project") return;
+		const choices = [{ label: "Remove", value: "remove", primary: true }];
+		if (node.path) choices.push({ label: "Delete", value: "delete", danger: true });
+		const message = "'" + node.name + "' will be removed from the solution." + (node.path ? " Remove keeps its files; Delete moves its folder to the trash." : "");
+		const choice = await choiceDialog({ title: "Remove Project", message, choices });
+		if (!choice) return;
+		await this.project("project.remove", { project: node.name, deleteFiles: choice === "delete" },
+			() => (choice === "delete" ? "Deleted " + node.name + "; its folder is in the trash." : "Removed " + node.name + " from the solution; its files are kept."));
 	}
 
 	workspaceEvent(kind, data) {

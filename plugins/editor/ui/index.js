@@ -88,6 +88,10 @@ export function activate(ied) {
 	ied.commands.handle("ied.explorer.newFolder", () => explorer() && explorer().create("folder"));
 	ied.commands.handle("ied.explorer.rename", () => explorer() && explorer().rename(explorer().selected()));
 	ied.commands.handle("ied.explorer.delete", () => explorer() && explorer().remove(explorer().selected()));
+	ied.commands.handle("ied.explorer.addFolderAsProject", () => explorer() && explorer().addFolderAsProject(explorer().selected()));
+	ied.commands.handle("ied.explorer.addExistingFolder", () => explorer() && explorer().addExistingFolder());
+	ied.commands.handle("ied.explorer.moveProject", () => explorer() && explorer().moveProject(explorer().selected()));
+	ied.commands.handle("ied.explorer.removeProject", () => explorer() && explorer().removeProject(explorer().selected()));
 	ied.commands.handle("ied.output.clear", () => last(outputs) && last(outputs).clear());
 	ied.commands.handle("ied.output.toggleWrap", () => last(outputs) && last(outputs).toggleWrap());
 	ied.commands.handle("ied.editor.save", () => {
