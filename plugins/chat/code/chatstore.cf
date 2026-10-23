@@ -12,10 +12,13 @@ namespace Ai
 		FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
 	}
 
+	// A chat's file as UTF-8: one written before the JSON writer kept to UTF-8 (C4 BUG-384) can hold a console's
+	// bytes, which read as U+FFFD rather than lose the whole file to the JSON reader.
 	static Core::String ReadWhole(const FS::Path& file) {
 		if (!FS::FileExists(file.CStr())) return Core::String();
 		FS::File opened = FS::File(file.CStr(), "rb");
-		return opened.ReadText();
+		Core::String text = opened.ReadText();
+		return text.View().IsValidUtf8() ? text : Core::ValidUtf8(text.View());
 	}
 
 	static Serialization::DomNode ParseJson(Core::StringView text) {

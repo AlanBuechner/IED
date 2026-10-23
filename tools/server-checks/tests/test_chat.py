@@ -961,6 +961,30 @@ class ChatTests(ChatCase):
 		await self.client.next_frame(topic)
 		self.assertEqual("finished", (await self.turn(chat_id, "continue"))["stop"], "a paused chat continues with the next message")
 
+	async def test_a_chat_file_that_is_not_utf8_still_loads(self):
+		"""A running.json written before C4 BUG-384 held a console's code-page bytes as they were, and the JSON reader
+		refused it: the chat came back without its turn. Its stray bytes now read as U+FFFD."""
+		chat_id, topic = await self.chat()
+		await self.use_model({}, script="long-stream")
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "talk"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=20)
+		self.client.abort()
+		self.server.process.kill()
+		self.server.process.wait(10)
+		running = os.path.join(local_state(self.data, self.repo), "chats", chat_id, "running.json")
+		with open(running, "rb") as f:
+			data = f.read()
+		self.assertIn(b'"talk"', data)
+		with open(running, "wb") as f:
+			f.write(data.replace(b'"talk"', b'"talk \x83 roadmap"', 1))
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
+		self.assertEqual(["interrupted"], [t["stop"] for t in history], "the turn the restart interrupted is there")
+		self.assertIn("talk " + chr(0xFFFD) + " roadmap", json.dumps(history, ensure_ascii=False))
+		self.assertFalse(os.path.exists(running), "and taken in, as any interrupted turn")
+
 	async def test_delete_keeps_the_chat_restorable_until_it_is_purged(self):
 		chat_id, topic = await self.chat()
 		self.model.queue("ok-text")

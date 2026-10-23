@@ -191,6 +191,9 @@ Steps are not capped unless the owner asks: `ai.maxSteps` is 0 (no limit) by def
 On server start, runs in `running` or `awaiting_user` are restored:
 
 - `awaiting_user` stays awaiting (approval cards come back).
+- A chat's files are read as UTF-8 whatever they hold: one written before C4 BUG-384 kept a console's code-page bytes
+  (a tool's output) as they were, and the JSON reader refused it whole, so a restarted chat came back without the
+  turn it was running; such bytes now read as U+FFFD.
 - `running` becomes `interrupted`; policy `ai.resumeInterrupted = ask | auto | never` (default `ask`, `auto` for Agent mode). Resume starts a fresh step from the journal (the in-flight model request is lost; its partial text is kept as an assistant message only if it was a complete segment).
 
 ## Logs: why the server stopped
