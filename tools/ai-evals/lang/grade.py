@@ -7,12 +7,19 @@ lengths, globals, the language's idioms). Works on a copy, so it can be run agai
 
 import glob
 import hashlib
+import io
 import json
+import math
 import os
 import re
 import shutil
+import stat
 import statistics
+import subprocess
 import sys
+import tarfile
+import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
@@ -67,8 +74,20 @@ def expand(word, task, scratch):
 	return word.replace("{data}", task_data(task)).replace("{tmp}", scratch)
 
 
+def remove_tree(folder):
+	"""`folder` and everything in it, read-only files too (git's objects), once Windows has let go of it."""
+	def writable(func, path, _):
+		os.chmod(path, stat.S_IWRITE)
+		func(path)
+	for _ in range(50):   # a deleted folder lingers until nothing holds it: rmtree can return before it is gone
+		if not os.path.exists(folder):
+			return
+		shutil.rmtree(folder, onexc=writable)
+		time.sleep(0.1)
+
+
 def copy_workspace(ws, out):
-	shutil.rmtree(out, ignore_errors=True)
+	remove_tree(out)
 	shutil.copytree(ws, out, ignore=shutil.ignore_patterns("build", "bin", ".ied", ".git"))
 
 
@@ -349,23 +368,47 @@ def run_mutants(task, lang, out, spec):
 	return results
 
 
-def requirements(task, result):
-	"""The task's own demands on the code (a refactor's): [(name, met)]."""
+def start_code(ws, lang, task):
+	"""The code metrics of the starting project (the fixture commit), which a refactor's progress is measured from."""
+	archive = subprocess.run(["git", "archive", "HEAD"], cwd=ws, capture_output=True)
+	with tempfile.TemporaryDirectory() as start:
+		with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+			tar.extractall(start, filter="data")
+		return code_metrics(start, lang, task)
+
+
+def covered(start, now, target):
+	"""How much of the way from `start` down to `target` `now` has gone, in [0, 1]."""
+	if now <= target:
+		return 1.0
+	return max(0.0, min(1.0, (start - now) / (start - target))) if start > target else 0.0
+
+
+def requirements(task, result, start):
+	"""The task's own demands on the code (a refactor's, an optimization's): each met or not, and its progress in
+	[0, 1] - how far from the starting project (`start`, its code metrics) toward the demand the change went, so a
+	refactor half done scores half."""
 	wanted = task.get("requirements", {})
 	code, own = result["code"], result.get("ownTests", {})
-	met = []
+	found = []
 	if "globals_max" in wanted:
-		met.append(("at most %d globals" % wanted["globals_max"], code["globals"] <= wanted["globals_max"]))
+		progress = covered(start["globals"], code["globals"], wanted["globals_max"])
+		found.append(("at most %d globals" % wanted["globals_max"], code["globals"] <= wanted["globals_max"], progress))
 	if "function_lines_max" in wanted:
 		longest = code["longestFunction"][1] if code["longestFunction"] else 0
-		met.append(("functions of at most %d lines" % wanted["function_lines_max"], longest <= wanted["function_lines_max"]))
+		was = start["longestFunction"][1] if start["longestFunction"] else 0
+		found.append(("functions of at most %d lines" % wanted["function_lines_max"], longest <= wanted["function_lines_max"], covered(was, longest, wanted["function_lines_max"])))
 	if "own_tests_min" in wanted:
-		met.append(("at least %d passing tests of its own" % wanted["own_tests_min"], own.get("passed", 0) >= wanted["own_tests_min"] and own.get("passed") == own.get("total")))
+		passed, total = own.get("passed", 0), own.get("total", 0)
+		share = min(1.0, passed / wanted["own_tests_min"]) * (1.0 if passed == total else 0.5)
+		found.append(("at least %d passing tests of its own" % wanted["own_tests_min"], passed >= wanted["own_tests_min"] and passed == total, share))
 	if "speedup_min" in wanted:
 		bench = result.get("bench") or {}
 		speedup = bench.get("speedup")
-		met.append(("%gx faster than the start" % wanted["speedup_min"], bool(speedup) and bench.get("correct") is not False and speedup >= wanted["speedup_min"]))
-	return [{"name": name, "met": ok} for name, ok in met]
+		correct = bool(speedup) and bench.get("correct") is not False
+		progress = max(0.0, min(1.0, math.log(speedup) / math.log(wanted["speedup_min"]))) if correct and speedup > 1 else 0.0
+		found.append(("%gx faster than the start" % wanted["speedup_min"], correct and speedup >= wanted["speedup_min"], progress))
+	return [{"name": name, "met": ok, "progress": round(progress, 3)} for name, ok, progress in found]
 
 
 def compare_bench(task, lang, bench):
@@ -513,8 +556,9 @@ def is_test_file(path, lang):
 
 def score(result, task):
 	"""Quality in [0, 1]: hidden tests 0.45, program checks 0.35, a clean build 0.1, own passing tests 0.1, and where
-	the task has them its mutants killed 0.45 and its requirements met 0.25 (weights are normalized). A question's is
-	the share of its facts the answer states."""
+	the task has them its mutants killed 0.45 and its requirements' progress 0.25 (weights are normalized; a task with
+	`requirements.gate` counts its checks and build only as far as its requirements went). A question's is the share
+	of its facts the answer states."""
 	if task.get("answer_facts"):
 		facts = result["answer"]
 		return round(facts["found"] / max(facts["total"], 1), 3)
@@ -525,18 +569,21 @@ def score(result, task):
 		valid = own.get("total") and own["passed"] == own["total"]
 		parts.append((0.45, sum(1 for m in mutants if m["killed"]) / len(mutants) if valid else 0.0))
 	reqs = result.get("requirements") or []
+	progress = sum(r.get("progress", 1.0 if r["met"] else 0.0) for r in reqs) / len(reqs) if reqs else 1.0
 	if reqs:
-		parts.append((task.get("requirements", {}).get("weight", 0.25), sum(1 for r in reqs if r["met"]) / len(reqs)))
+		parts.append((task.get("requirements", {}).get("weight", 0.25), progress))
+	# A refactor's behavior and build count as far as the refactor went: an untouched program keeps both and earns nothing.
+	gate = progress if task.get("requirements", {}).get("gate") else 1.0
 	hidden = result.get("hiddenTests")
 	if hidden is not None:
 		parts.append((0.45, hidden["passed"] / hidden["total"] if hidden.get("total") else 0.0))
 	checks = result.get("checks") or []
 	if checks:
-		parts.append((0.35, sum(1 for c in checks if c["ok"]) / len(checks)))
+		parts.append((0.35, gate * sum(1 for c in checks if c["ok"]) / len(checks)))
 	if result.get("bench") is not None and task.get("bench", {}).get("must_be_correct", True) and result["bench"].get("correct") is False:
 		parts.append((0.1, 0.0))
 	build = result["build"]
-	parts.append((0.1, 1.0 if build["ok"] and not build.get("warnings") else 0.5 if build["ok"] else 0.0))
+	parts.append((0.1, gate * (1.0 if build["ok"] and not build.get("warnings") else 0.5 if build["ok"] else 0.0)))
 	own = result.get("ownTests", {})
 	parts.append((0.1, 1.0 if own.get("total") and own["passed"] == own["total"] else 0.5 if own.get("total") else 0.0))
 	weight = sum(w for w, _ in parts)
@@ -558,7 +605,7 @@ def grade(task, lang, ws, out, toolchain=None, answer=""):
 		copy_workspace(ws, out)
 		result["mutants"] = run_mutants(task, lang, out, spec)
 	if task.get("requirements"):
-		result["requirements"] = requirements(task, result)
+		result["requirements"] = requirements(task, result, start_code(ws, lang, task))
 	if task.get("answer_facts"):
 		result["answer"] = answer_facts(task, answer)
 	result["score"] = score(result, task)

@@ -55,3 +55,5 @@ timeout = 600
 [requirements]
 speedup_min = 10.0
 weight = 0.6
+# Output and build count as far as the speedup went (log scale to the 10x): the untouched program keeps its output and earns nothing.
+gate = true

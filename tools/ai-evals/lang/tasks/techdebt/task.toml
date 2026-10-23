@@ -74,3 +74,5 @@ globals_max = 0
 function_lines_max = 40
 own_tests_min = 4
 weight = 0.4
+# Behavior and build count as far as the refactor went: the untouched program passes every check and earns nothing.
+gate = true
