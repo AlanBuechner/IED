@@ -13,7 +13,7 @@
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js" },
-	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp"],
+	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp", "workspace.projects"],
 	"contributes": {
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
 		"skills": ["skills"],

@@ -34,6 +34,18 @@
 		"fileIcons": [
 			{ "fileNames": ["nuke.toml"], "label": "NK", "color": "--hue-red" }
 		],
+		"projectSystems": [
+			{
+				"id": "nuke",
+				"label": "Nuke",
+				"detect": "nuke.toml",
+				"generate": [{ "label": "nuke init --ied", "run": "\"${config:nuke.command}\" init --ied" }],
+				"add": [{ "label": "nuke project add", "run": "\"${config:nuke.command}\" project add \"${folder}\" --name \"${name}\" --language \"${language}\" --kind \"${kind}\"" }],
+				"remove": [{ "label": "nuke project remove", "run": "\"${config:nuke.command}\" project remove ${projectName}" }],
+				"delete": [{ "label": "nuke project remove", "run": "\"${config:nuke.command}\" project remove ${projectName} --deleting" }],
+				"move": [{ "label": "nuke project move", "run": "\"${config:nuke.command}\" project move \"${from}\" \"${to}\"" }]
+			}
+		],
 		"taskPresets": [
 			{
 				"id": "nuke",

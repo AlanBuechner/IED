@@ -159,6 +159,7 @@ export class Shell {
 		}
 		else if (kind === "notification.dismissed") s.notifications = s.notifications.filter((n) => n.id !== data.id);
 		else if (kind === "workspace.opened") s.workspaces = [...s.workspaces.filter((w) => w.wsId !== data.wsId), data];
+		else if (kind === "workspace.changed") s.workspaces = s.workspaces.map((w) => (w.wsId === data.wsId ? data : w));
 		else if (kind === "recent.changed") s.recent = data.recent || [];
 		this.serverChanged();
 		if (kind === "workspace.opened" && !this.wsId && !this.startPageAsked) this.showWorkspace(data.wsId);
@@ -280,7 +281,7 @@ export class Shell {
 			return;
 		}
 		if (kind === "trust.changed") this.workspace.trusted = data.trusted !== false;
-		else if (kind === "solution.changed") this.workspace.solution = data.solution || null;
+		else if (kind === "solution.changed") Object.assign(this.workspace, { solution: data.solution || null, kind: data.kind || this.workspace.kind, name: data.name || this.workspace.name });
 		else return;
 		this.workspaceChanged();
 		this.reloadContributions();

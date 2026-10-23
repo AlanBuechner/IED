@@ -163,17 +163,34 @@ namespace Ied
 	}
 
 	// A solution file or a project file changed, appeared or went: the model is read again and told.
-	void Workspaces::ReadSolutionAgain(Workspace* ws) {
+	void Workspaces::SolutionChanged(Workspace* ws) {
 		ws->solution = ReadSolution(ws->solution->file, server->schemas);
+		PublishSolution(ws);
+	}
+
+	void Workspaces::BecomeSolution(Workspace* ws, const FS::Path& file) {
+		ws->kind = Core::String("solution");
+		ws->solution = ReadSolution(file, server->schemas);
+		PublishSolution(ws);
+		server->hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
+		if (server->recent.Contains(ws->root.View())) server->recent.Forget(ws->root.View());
+		Remember(ws);
+	}
+
+	// The model read last told: solution.changed {solution, kind, name} on ws:<wsId>, and everything that reads it.
+	void Workspaces::PublishSolution(Workspace* ws) {
 		ws->name = ws->solution->name;
 		LogProblems(server, ws->solution);
 		server->settings->SolutionChanged(ws);
 		JsonWriter data;
 		data.BeginObject();
 		data.RawField("solution", ws->solution->ToJson().View());
+		data.Field("kind", ws->kind.View());
+		data.Field("name", ws->name.View());
 		data.EndObject();
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "solution.changed", data.View());
 		server->tasks->ProjectsChanged(ws);
+		server->lsp->ProjectsChanged(ws);
 	}
 
 	static bool TouchesSolution(const Workspace* ws, const ChangeBatch& batch) {
@@ -222,6 +239,8 @@ namespace Ied
 		ws->localState = LocalStateFolder(ws->root, kind, server->config.appDataDir.View());
 		if (kind != "solution")
 			for (const Core::String& moved : MoveFolderState(ws->root, ws->localState)) server->Log(moved.View());
+		else
+			for (const Core::String& moved : AdoptFolderState(ws->root, ws->localState, server->config.appDataDir.View())) server->Log(moved.View());
 		ws->trusted = server->trust.IsTrusted(ws->root);
 		items.Push(ws);
 		Workspaces* self = this;
@@ -387,7 +406,7 @@ namespace Ied
 		if (batch.Overflowed())
 			for (const Core::String& path : server->documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
-		if (TouchesSolution(ws, batch)) ReadSolutionAgain(ws);
+		if (TouchesSolution(ws, batch)) SolutionChanged(ws);
 		if (TouchesWorkspacePlugins(batch)) PluginsChanged(ws);
 		server->code->FilesChanged(ws, batch);
 	}
@@ -541,12 +560,7 @@ namespace Ied
 		if (!current) throw Missing("file", path.View());
 		const int64 expected = params.Int("expectedRevision", -1);
 		if (expected >= 0 && expected != current) throw Changed(current);
-		Core::String trashId = server->trash->MoveIn(ws, path.View(), false);
-		ws->revisions.Remove(path);
-		ws->digests.At(path) = Core::String();
-		server->documents->OnDiskDeleted(ws, path.View());
-		TreeChanged(ws, path.View(), "deleted");
-		return TrashResult(trashId.View());
+		return TrashResult(TrashFile(ws, path.View()).View());
 	}
 
 	static Core::String TrashResult(Core::StringView trashId) {
@@ -557,10 +571,14 @@ namespace Ied
 		return json.ToString();
 	}
 
-	// A folder with everything in it, when `recursive` says so, to the trash: the files known under it are forgotten
-	// and the documents open on them told.
+	// A folder with everything in it, when `recursive` says so, to the trash.
 	Core::String Workspaces::DeleteFolder(Workspace* ws, Core::StringView path, bool recursive) {
 		if (!recursive) throw RpcError(ErrorCode::BadRequest, "the path is a folder: pass recursive to delete it with everything in it");
+		return TrashResult(TrashFolder(ws, path).View());
+	}
+
+	// The files known under the folder are forgotten and the documents open on them told.
+	Core::String Workspaces::TrashFolder(Workspace* ws, Core::StringView path) {
 		Core::String trashId = server->trash->MoveIn(ws, path, true);
 		for (const Core::String& known : Under(KnownPaths(ws), path)) {
 			if (FS::FileExists(ws->At(known.View()).CStr())) continue;
@@ -570,8 +588,19 @@ namespace Ied
 		for (const Core::String& open : Under(server->documents->OpenPaths(ws), path))
 			if (!FS::FileExists(ws->At(open.View()).CStr())) server->documents->OnDiskDeleted(ws, open.View());
 		TreeChanged(ws, path, "deleted");
-		return TrashResult(trashId.View());
+		return trashId;
 	}
+
+	Core::String Workspaces::TrashFile(Workspace* ws, Core::StringView path) {
+		Core::String trashId = server->trash->MoveIn(ws, path, false);
+		ws->revisions.Remove(Core::String(path));
+		ws->digests.At(Core::String(path)) = Core::String();
+		server->documents->OnDiskDeleted(ws, path);
+		TreeChanged(ws, path, "deleted");
+		return trashId;
+	}
+
+	void Workspaces::MoveFolder(Workspace* ws, Core::StringView from, Core::StringView to) { RenameFolder(ws, from, to); }
 
 	// A folder moved with what is in it: revisions and digests follow, and so do the documents open under it.
 	Core::String Workspaces::RenameFolder(Workspace* ws, Core::StringView source, Core::StringView target) {
@@ -579,7 +608,7 @@ namespace Ied
 		FS::Path to = ws->At(target);
 		if (FS::FileExists(to.CStr()) || FS::IsDirectory(to.CStr())) throw RpcError(ErrorCode::Conflict, "the target already exists");
 		FS::MakeDirectories(to.Parent().CStr());
-		if (!FS::Rename(ws->At(source).CStr(), to.CStr())) throw RpcError(ErrorCode::Unavailable, "the folder could not be renamed");
+		if (!FS::Rename(ws->At(source).CStr(), to.CStr())) throw RpcError(ErrorCode::Unavailable, "the folder could not be moved: something has a file in it open (a terminal, a running program, another app)");
 		const int64 cut = source.ByteLength();
 		for (const Core::String& known : Under(KnownPaths(ws), source)) {
 			Core::String moved = Core::String(target) + known.View().Substring(cut, known.ByteLength() - cut);

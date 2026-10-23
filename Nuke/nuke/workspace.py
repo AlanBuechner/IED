@@ -188,6 +188,8 @@ def _project_folders(spec):
 		matches = _match_entry(spec.dir, entry)
 		if not matches:
 			raise NukeError(f"{spec.file}: workspace.projects entry '{entry}' matches no folder with a {MANIFEST_NAME}")
+		if glob.has_magic(entry):
+			matches = [m for m in matches if not fsutil.matches_any(os.path.relpath(m, spec.dir), spec.exclude)]
 		folders.extend(m for m in matches if not any(fsutil.same_path(m, f) for f in folders))
 	return folders
 
@@ -196,6 +198,11 @@ def _match_entry(root, entry):
 	pattern = os.path.join(root, entry)
 	candidates = glob.glob(pattern) if glob.has_magic(entry) else [pattern]
 	return sorted(fsutil.norm(c) for c in candidates if os.path.isfile(os.path.join(c, MANIFEST_NAME)))
+
+
+def entry_finds(root, entry, folder):
+	"""Whether the projects entry `entry` (a folder or a glob) finds the project folder `folder`."""
+	return any(fsutil.same_path(match, folder) for match in _match_entry(root, entry))
 
 
 def discover(root, exclude=()):

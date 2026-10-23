@@ -5,14 +5,12 @@
 // replacing a file that is there. The project.templates and project.create methods; members run with the server lock
 // held, which a create releases while its steps run.
 
+include "steps.ch"
 include "plugins/host.ch"
 include "web/rpc.ch"
 
 namespace Ied
 {
-	const int64 kTemplateStepMs = 120000;
-	const int64 kTemplateLogBytes = 4000;
-
 	// A template as a plugin contributes it.
 	class ProjectTemplate
 	{
@@ -29,6 +27,9 @@ namespace Ied
 
 		// The templates IED knows now, each once: the global plugins' first, then each trusted open workspace's own.
 		public Core::Array<ProjectTemplate*> All();
+		// A project from the template `key` named `name`: a new workspace in the folder `location` (a full path), opened
+		// and trusted, or a project added to `into`'s solution. Throws as project.create answers.
+		public ProjectChange* Create(Core::StringView key, Core::StringView name, Core::StringView location, Workspace* into);
 
 	private:
 		private Core::String ListMethod(Call& call, const Params& params);
@@ -37,6 +38,11 @@ namespace Ied
 		private Server* server;
 	}
 
+	// Whether `made` can add a project to `ws`: a trusted solution whose folder holds one of the template's `into` files
+	// (nuke.toml: a Nuke workspace, whose `nuke init NAME` adds the project).
+	bool TemplateCanAdd(const ProjectTemplate* made, Workspace* ws);
+	// Where a new project goes unless the person says: beside the project opened last, else in their home folder.
+	Core::String DefaultProjectLocation(Server* server);
 	// Whether `name` can name a new project: letters, digits, '_', '.' and '-', starting with a letter, a digit or '_'.
 	bool IsProjectName(Core::StringView name);
 	// `text` with every ${name} replaced by `name`.

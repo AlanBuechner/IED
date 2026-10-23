@@ -66,6 +66,20 @@ namespace Ied
 		// What its plugins contribute changed: its settings catalog and task offers are made again and its clients read
 		// the contributions again (plugins.changed on ws:<wsId>).
 		public void ContributionsChanged(Workspace* ws);
+		// Its solution file or a project file changed: the model is read again now and solution.changed published, so every
+		// client's Solution Explorer shows it without waiting for the watcher.
+		public void SolutionChanged(Workspace* ws);
+		// An open folder workspace whose root now holds the solution `file` becomes that solution in place (docs/03
+		// "Managing projects"): same wsId, chats, terminals and local state for this run; solution.changed carries its
+		// new kind and name, and workspace.changed on the server topic its summary.
+		public void BecomeSolution(Workspace* ws, const FS::Path& file);
+		// A folder of `ws` moved with what is in it: revisions and digests follow, and so do the documents open under
+		// it; throws conflict when `to` is there, unavailable when something holds a file in it open.
+		public void MoveFolder(Workspace* ws, Core::StringView from, Core::StringView to);
+		// A folder of `ws` with everything in it to the trash; its trash entry's id.
+		public Core::String TrashFolder(Workspace* ws, Core::StringView path);
+		// A file of `ws` to the trash; its trash entry's id.
+		public Core::String TrashFile(Workspace* ws, Core::StringView path);
 
 	private:
 		private Workspace* OpenOrFind(const FS::Path& target, Core::String& relative);
@@ -78,8 +92,8 @@ namespace Ied
 		private void Moved(Workspace* ws, Core::StringView from, Core::StringView to);
 		private Core::String DeleteFolder(Workspace* ws, Core::StringView path, bool recursive);
 		private Core::String RenameFolder(Workspace* ws, Core::StringView from, Core::StringView to);
+		private void PublishSolution(Workspace* ws);
 		private void PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow);
-		private void ReadSolutionAgain(Workspace* ws);
 		private bool External(Workspace* ws, const TreeChange& change);
 		private bool ExternalWrite(Workspace* ws, Core::StringView path);
 		private bool ExternalDelete(Workspace* ws, Core::StringView path);

@@ -93,4 +93,23 @@ class LocalStateTests {
 		FS::RemoveAll(root.CStr());
 		FS::RemoveAll(state.CStr());
 	}
+
+	[test("a_folder_made_a_solution")]
+	public static void TestAdopted() {
+		FS::Path root = LocalScratch("ied-localstate-adopt-");
+		FS::Path appData = LocalScratch("ied-localstate-adopt-app-");
+		FS::Path folderState = Ied::LocalStateFolder(root, LocalView("folder"), appData.View());
+		FS::Path solutionState = Ied::LocalStateFolder(root, LocalView("solution"), appData.View());
+		LocalWrite(folderState / "chats/c1/chat.json", "{}");
+		LocalWrite(folderState / "layout/desktop.json", "{}");
+		LocalWrite(folderState / "breakpoints.json", "[\"folder\"]");
+		LocalWrite(solutionState / "breakpoints.json", "[\"solution\"]");
+		Core::Array<Core::String> said = Ied::AdoptFolderState(root, solutionState, appData.View());
+		assert_true(FS::FileExists((solutionState / "chats/c1/chat.json").CStr()) && FS::FileExists((solutionState / "layout/desktop.json").CStr()), "its chats and layouts follow it into the solution");
+		assert_true(FS::FileExists((folderState / "breakpoints.json").CStr()), "what the solution has already stays where it was");
+		assert_eq((int64)3, said.Count(), "two moved, one kept");
+		assert_true(Ied::AdoptFolderState(root, solutionState, appData.View()).Count() == 1, "a second time only the kept one is left to say");
+		FS::RemoveAll(root.CStr());
+		FS::RemoveAll(appData.CStr());
+	}
 }

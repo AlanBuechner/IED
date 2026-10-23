@@ -1,23 +1,10 @@
 include "templates.ch"
 include "host/server.ch"
-include "tasks/model.ch"
-include "tasks/expand.ch"
-include "tasks/missing.ch"
 include "fs/walk.ch"
 include "web/json.ch"
 
 namespace Ied
 {
-	// A template's step as it runs: its command (argv or a command line), its folder, and the setting naming its program.
-	class TemplateStep
-	{
-		public Core::Array<Core::String> argv;
-		public Core::String shell;
-		public Core::String cwd;
-		public Core::String label;
-		public Core::String setting;
-	}
-
 	void ProjectTemplates::Init(Server* server) {
 		this.server = server;
 		ProjectTemplates* self = this;
@@ -44,12 +31,6 @@ namespace Ied
 			at = found + 7;
 		}
 		out.Append(text.Substring(at, text.ByteLength() - at));
-		return out.ToString();
-	}
-
-	static Core::String Slashed(Core::StringView path) {
-		Core::StringBuilder out;
-		for (int64 i = 0; i < path.ByteLength(); ++i) out.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
 		return out.ToString();
 	}
 
@@ -95,9 +76,7 @@ namespace Ied
 		return made->from ? ((Core::String("/w/") + made->from->wsId.View()) + "/plugins/") + plugin.View() : Core::String("/plugins/") + plugin.View();
 	}
 
-	// Whether `made` can add a project to `ws`: a trusted solution whose folder holds one of the template's `into` files
-	// (nuke.toml: a Nuke workspace, whose `nuke init NAME` adds the project).
-	static bool CanAdd(const ProjectTemplate* made, Workspace* ws) {
+	bool TemplateCanAdd(const ProjectTemplate* made, Workspace* ws) {
 		if (!ws || !ws->trusted || !ws->solution) return false;
 		Serialization::DomNode into = made->entry.Member("into");
 		for (int64 i = 0; i < into.Count(); ++i)
@@ -111,10 +90,10 @@ namespace Ied
 		if (!recent.IsEmpty()) {
 			FS::Path last = FS::Path(recent[0].path.View());
 			FS::Path folder = recent[0].kind == "solution" ? last.Parent() : last;
-			if (!folder.Parent().IsEmpty()) return Slashed(folder.Parent().View());
+			if (!folder.Parent().IsEmpty()) return ForwardSlashes(folder.Parent().View());
 		}
 		Core::String home;
-		return Platform::TryGetEnvironmentVariable("USERPROFILE", home) ? Slashed(home.View()) : Core::String();
+		return Platform::TryGetEnvironmentVariable("USERPROFILE", home) ? ForwardSlashes(home.View()) : Core::String();
 	}
 
 	static void WriteTemplate(JsonWriter& json, const ProjectTemplate* made, Workspace* ws) {
@@ -132,7 +111,7 @@ namespace Ied
 		Serialization::DomNode tags = entry.Member("tags");
 		for (int64 i = 0; i < tags.Count(); ++i) json.String(tags.At(i).AsView());
 		json.EndArray();
-		json.BoolField("canAdd", CanAdd(made, ws));
+		json.BoolField("canAdd", TemplateCanAdd(made, ws));
 		json.EndObject();
 	}
 
@@ -182,102 +161,6 @@ namespace Ied
 		throw RpcError(ErrorCode::NotFound, (Core::String("no project template ") + key).View());
 	}
 
-	static Core::String Expanded(Core::StringView text, const TaskLookup& lookup) {
-		Core::String out;
-		Core::String unknown;
-		if (!ExpandTaskText(text, lookup, out, unknown)) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template names ${") + unknown.View()) + "}, which nothing gives").View());
-		return out;
-	}
-
-	// The steps of `made`, their variables filled: the new project's name and folders, ${config:KEY} (the workspace's
-	// settings, or the app's for a new workspace) and ${env:NAME}.
-	static Core::Array<TemplateStep*> PlanSteps(Server* server, const ProjectTemplate* made, Workspace* ws, Core::StringView name, const FS::Path& project, const FS::Path& workspace) {
-		Core::HashMap<Core::String, Core::String>* values = new Core::HashMap<Core::String, Core::String>();
-		values->Insert(Core::String("name"), Core::String(name));
-		values->Insert(Core::String("projectName"), Core::String(name));
-		values->Insert(Core::String("projectDir"), Slashed(project.View()));
-		values->Insert(Core::String("projectRoot"), Slashed(project.View()));
-		values->Insert(Core::String("workspaceDir"), Slashed(workspace.View()));
-		values->Insert(Core::String("solutionDir"), Slashed(workspace.View()));
-		Settings* settings = server->settings;
-		TaskLookup lookup = [values, settings, ws](Core::StringView key, Core::String& value) -> bool {
-			if (values->TryGet(Core::String(key), value)) return true;
-			if (key.StartsWith(Core::StringView("env:"))) {
-				if (!Platform::TryGetEnvironmentVariable(Core::String(key.Substring(4, key.ByteLength() - 4)).CStr(), value)) value = Core::String();
-				return true;
-			}
-			if (!key.StartsWith(Core::StringView("config:"))) return false;
-			Serialization::DomDoc* doc = new Serialization::DomDoc();
-			Core::String json = settings->Effective(ws, Core::StringView(""), key.Substring(7, key.ByteLength() - 7));
-			Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
-			value = setting.Kind() == Serialization::DomKind::String ? Core::String(setting.AsView()) : Core::String(json.View().Trimmed());
-			return true;
-		};
-		Core::Array<TemplateStep*> planned;
-		Serialization::DomNode steps = made->entry.Member("steps");
-		for (int64 i = 0; i < steps.Count(); ++i) {
-			TaskStep* step = ReadTaskStep(steps.At(i));
-			if (step->kind != StepKind::Run || (step->argv.IsEmpty() && step->shell.IsEmpty())) throw RpcError(ErrorCode::BadRequest, ((Core::String("a step of the template ") + made->key.View()) + " runs nothing").View());
-			TemplateStep* run = new TemplateStep();
-			for (const Core::String& arg : step->argv) run->argv.Push(Expanded(arg.View(), lookup));
-			if (!step->shell.IsEmpty()) run->shell = Expanded(step->shell.View(), lookup);
-			run->cwd = Expanded(step->cwd.IsEmpty() ? Core::StringView("${workspaceDir}") : step->cwd.View(), lookup);
-			run->label = !step->label.IsEmpty() ? step->label : !run->shell.IsEmpty() ? run->shell : run->argv[0];
-			run->setting = ProgramSetting(!step->shell.IsEmpty() ? step->shell.View() : step->argv.IsEmpty() ? Core::StringView("") : step->argv[0].View());
-			planned.Push(run);
-		}
-		return planned;
-	}
-
-	static Core::String Tail(Core::StringView text) {
-		Core::StringView trimmed = text.Trimmed();
-		return Core::String(trimmed.ByteLength() <= kTemplateLogBytes ? trimmed : trimmed.Substring(trimmed.ByteLength() - kTemplateLogBytes, kTemplateLogBytes));
-	}
-
-	// Runs `step` to its end with its output added to `log`; "" when it succeeded, else why not.
-	static Core::String RunStep(const TemplateStep* step, Core::StringBuilder& log) {
-		Process::StartInfo info;
-		if (!step->shell.IsEmpty()) info.shellCommand = step->shell;
-		else {
-			info.program = step->argv[0];
-			for (int64 i = 1; i < step->argv.Count(); ++i) info.arguments.Push(step->argv[i]);
-		}
-		info.workingDirectory = step->cwd;
-		info.input = Process::Redirect::Null;
-		info.errors = Process::Redirect::ToOutput;
-		Process::Output done = Process::Run(info, (int32)kTemplateStepMs);
-		log.Append(done.output.View());
-		if (done.exitCode == 0) return Core::String();
-		Core::StringBuilder why;
-		why.Append("the template's step ");
-		why.Append(step->label.View());
-		if (done.exitCode == Process::kTimedOut) why.Append(" ran out of time");
-		else if (done.exitCode == Process::kError) {
-			why.Append(" did not start: ");
-			why.Append(done.error.View());
-		}
-		else {
-			why.Append(" failed (exit ");
-			why.AppendInt(done.exitCode);
-			why.Append(")");
-		}
-		Core::String program = !step->shell.IsEmpty() ? ProgramWord(step->shell.View()) : step->argv[0];
-		Core::String path;
-		Core::String extensions;
-		if (!Platform::TryGetEnvironmentVariable("PATH", path)) path = Core::String();
-		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
-		if (!step->setting.IsEmpty() && !FindsProgram(program.View(), step->cwd.View(), path.View(), extensions.View())) {
-			why.Append(". ");
-			why.Append(MissingProgramText(program.View(), step->setting.View()).View());
-		}
-		Core::String tail = Tail(done.output.View());
-		if (!tail.IsEmpty()) {
-			why.Append(":\n");
-			why.Append(tail.View());
-		}
-		return why.ToString();
-	}
-
 	// Copies the template's files into `project`, ${name} filled in their paths and text; a file there stays. "" when
 	// every one was written, else why not.
 	static Core::String CopyFiles(const FS::Path& from, const FS::Path& project, Core::StringView name) {
@@ -294,7 +177,7 @@ namespace Ied
 			source.Close();
 			Core::String filled = WithName(text.View(), name);
 			if (FS::MakeDirectories(target.Parent().CStr()) && FS::WriteFileAtomically(target.CStr(), filled.CStr(), filled.View().ByteLength())) return true;
-			problem = Core::String("could not write ") + Slashed(target.View()).View();
+			problem = Core::String("could not write ") + ForwardSlashes(target.View()).View();
 			return false;
 		});
 		return problem;
@@ -308,44 +191,68 @@ namespace Ied
 		return made->plugin->manifest->folder / files;
 	}
 
-	// {template, name, location (a new workspace's folder goes in it) | wsId (the project goes into that solution)} ->
-	// {workspace, path, log}: the new workspace opened (trusted: its owner made it), or the solution it went into.
-	Core::String ProjectTemplates::CreateMethod(Call& call, const Params& params) {
-		ProjectTemplate* made = Named(All(), params.Str("template").View());
-		Core::String name = params.Str("name");
-		if (!IsProjectName(name.View())) throw RpcError(ErrorCode::BadRequest, ((Core::String("'") + name.View()) + "' cannot name a project: use letters, digits, '_', '.' and '-'").View());
-		Workspace* into = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+	// The variables a template's steps see: the new project's name and folders.
+	static Core::HashMap<Core::String, Core::String>* TemplateValues(Core::StringView name, const FS::Path& project, const FS::Path& workspace) {
+		Core::HashMap<Core::String, Core::String>* values = new Core::HashMap<Core::String, Core::String>();
+		values->Insert(Core::String("name"), Core::String(name));
+		values->Insert(Core::String("projectName"), Core::String(name));
+		values->Insert(Core::String("projectDir"), ForwardSlashes(project.View()));
+		values->Insert(Core::String("projectRoot"), ForwardSlashes(project.View()));
+		values->Insert(Core::String("workspaceDir"), ForwardSlashes(workspace.View()));
+		values->Insert(Core::String("solutionDir"), ForwardSlashes(workspace.View()));
+		return values;
+	}
+
+	ProjectChange* ProjectTemplates::Create(Core::StringView key, Core::StringView name, Core::StringView location, Workspace* into) {
+		ProjectTemplate* made = Named(All(), key);
+		if (!IsProjectName(name)) throw RpcError(ErrorCode::BadRequest, ((Core::String("'") + name) + "' cannot name a project: use letters, digits, '_', '.' and '-'").View());
 		if (into && !into->trusted) throw RpcError(ErrorCode::Forbidden, "a template runs commands in the workspace: trust it first");
-		if (into && !CanAdd(made, into)) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template ") + made->key.View()) + " cannot add a project to this solution").View());
-		Core::String location = into ? Core::String(into->root.View()) : params.Str("location", Core::StringView(""));
-		if (location.IsEmpty() || !FS::Path(location.View()).IsAbsolute()) throw RpcError(ErrorCode::BadRequest, "a new project needs the folder it goes in, as a full path");
-		FS::Path project = FS::Path(location.View()) / name.View();
+		if (into && !TemplateCanAdd(made, into)) throw RpcError(ErrorCode::BadRequest, ((Core::String("the template ") + made->key.View()) + " cannot add a project to this solution").View());
+		Core::String folder = into ? Core::String(into->root.View()) : Core::String(location);
+		if (folder.IsEmpty() || !FS::Path(folder.View()).IsAbsolute()) throw RpcError(ErrorCode::BadRequest, "a new project needs the folder it goes in, as a full path");
+		FS::Path project = FS::Path(folder.View()) / name;
 		FS::Path workspace = into ? into->root : project;
-		if (FS::IsDirectory(project.CStr()) || FS::FileExists(project.CStr())) throw RpcError(ErrorCode::Conflict, (Slashed(project.View()) + " is there already: pick another name or folder").View());
-		Core::Array<TemplateStep*> steps = PlanSteps(server, made, into, name.View(), project, workspace);
+		if (FS::IsDirectory(project.CStr()) || FS::FileExists(project.CStr())) throw RpcError(ErrorCode::Conflict, (ForwardSlashes(project.View()) + " is there already: pick another name or folder").View());
+		Core::Array<ProjectStep*> steps = PlanProjectSteps(server, made->entry.Member("steps"), into, TemplateValues(name, project, workspace), (Core::String("the template ") + made->key.View()).View());
 		FS::Path files = FilesOf(made);
 		Core::StringBuilder log;
 		Core::String problem;
 		{
 			Threading::UnlockGuard released(server->lock);
-			if (!FS::MakeDirectories(project.CStr())) problem = Core::String("could not make ") + Slashed(project.View()).View();
-			for (int64 i = 0; i < steps.Count() && problem.IsEmpty(); ++i) problem = RunStep(steps[i], log);
-			if (problem.IsEmpty() && !files.IsEmpty()) problem = CopyFiles(files, project, name.View());
+			if (!FS::MakeDirectories(project.CStr())) problem = Core::String("could not make ") + ForwardSlashes(project.View()).View();
+			if (problem.IsEmpty()) problem = RunProjectSteps(steps, log);
+			if (problem.IsEmpty() && !files.IsEmpty()) problem = CopyFiles(files, project, name);
 			if (!problem.IsEmpty()) FS::RemoveAll(project.CStr());
 		}
 		if (!problem.IsEmpty()) throw RpcError(ErrorCode::Unavailable, problem.View());
-		Workspace* shown = into;
-		if (!shown) {
+		ProjectChange* change = new ProjectChange();
+		change->ws = into;
+		if (into && into->solution) server->workspaces->SolutionChanged(into);
+		if (!into) {
 			if (!server->trust.Set(project, true)) server->Log(Core::StringView("the new project could not be trusted"));
 			Core::String relative;
-			shown = server->workspaces->OpenFor(project, relative);
+			change->ws = server->workspaces->OpenFor(project, relative);
 		}
+		change->path = ForwardSlashes(project.View());
+		change->project = Core::String(name);
+		change->log = StepLogTail(log.View());
+		return change;
+	}
+
+	// {template, name, location (a new workspace's folder goes in it) | wsId (the project goes into that solution)} ->
+	// {workspace, path, log}: the new workspace opened (trusted: its owner made it), or the solution it went into.
+	Core::String ProjectTemplates::CreateMethod(Call& call, const Params& params) {
+		Workspace* into = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+		Core::String location = into ? Core::String() : params.Str("location", Core::StringView(""));
+		ProjectChange* change = Create(params.Str("template").View(), params.Str("name").View(), location.View(), into);
 		JsonWriter json;
 		json.BeginObject();
-		json.RawField("workspace", shown->SummaryJson().View());
-		json.Field("path", Slashed(project.View()).View());
-		json.Field("log", Tail(log.View()).View());
+		json.RawField("workspace", change->ws->SummaryJson().View());
+		json.Field("path", change->path.View());
+		json.Field("log", change->log.View());
 		json.EndObject();
 		return json.ToString();
 	}
+
+	Core::String DefaultProjectLocation(Server* server) { return DefaultLocation(server); }
 }

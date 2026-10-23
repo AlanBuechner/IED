@@ -52,10 +52,11 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `list` | the workspace's projects (`--json`: name, kind, folder, manifest, depends, tests, default, output) |
 | `info` | workspace, configuration, toolchain, output folders and commands (`--json`) |
 | `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`; a C4 executable gets `src/main.cf` and an example test, `src/tests/main_tests.cf`); with `--ied` also the workspace's IED solution (below); `--language ID` for a project in another language than C4 (no sources: IED's New Project templates bring them) |
+| `project` | `add FOLDER` (an existing folder made a project: its `[project]` written when it has none, the workspace listing it), `remove NAME` (out of the workspace, its folder kept: its `projects` entry goes or `exclude` takes it; refused while another project depends on it; `--deleting` when the caller deletes the folder next), `move PROJECT TO` (the folder moved and the workspace's entries fixed, or only the entries when it was moved already); manifests are edited in place, their comments kept; `--ied` writes the IED solution again (`nuke project --help`) |
 | `toolchain` | `list`, `which`, `install`, `remove`, `use` (section 8) |
 | `help` | every command, including the workspace's own; `nuke help COMMAND` |
 
-`init`, `toolchain` and `help` take the rest of the line as their own arguments.
+`init`, `project`, `toolchain` and `help` take the rest of the line as their own arguments.
 
 | Option | Meaning |
 |---|---|
@@ -94,7 +95,7 @@ name = "MyGame"                    # default: the folder name
 toolchain = "0.1.0"                # section 8; "latest" or unset = the newest installed (with a warning)
 default-project = "Game"           # what build/run/test use when no project is named
 projects = ["Game", "Engine", "tools/*"]   # folders or globs; leave out to find every project below
-exclude = ["samples/**"]           # with discovery: folders to skip
+exclude = ["samples/**"]           # folders to skip: in discovery, and among what a projects glob finds
 default-configuration = "Development"
 scripts = ["build/nuke_ext.py"]    # Python extensions (section 6)
 ide = true                         # write the IDE bridge files (section 9)

@@ -292,6 +292,33 @@ namespace Ied
 		for (const Core::String& path : server->documents->OpenPaths(ws)) DocumentOpened(server->documents->Find(ws, path.View()));
 	}
 
+	// Whether `language` still serves what it did: its project, where it was; or, serving no project, only files that
+	// no project holds.
+	static bool StillServes(const LanguageServer* language) {
+		const Workspace* ws = language->ws;
+		if (!language->profile->perProject || !ws->solution) return true;
+		if (language->project.IsEmpty()) {
+			for (const Core::KeyValue<Core::String, bool>& open : language->documents)
+				if (ws->solution->Owning(ws->At(open.key.View()))) return false;
+			return true;
+		}
+		ProjectModel* project = ws->solution->Project(language->project.View());
+		return project && project->root == language->projectDir;
+	}
+
+	void LspPool::ProjectsChanged(Workspace* ws) {
+		bool stopped = false;
+		for (int64 i = languages.Count() - 1; i >= 0; --i) {
+			LanguageServer* language = languages[i];
+			if (language->ws != ws || StillServes(language)) continue;
+			language->Stop();
+			languages.RemoveAt(i);
+			stopped = true;
+		}
+		if (!stopped) return;
+		for (const Core::String& path : server->documents->OpenPaths(ws)) DocumentOpened(server->documents->Find(ws, path.View()));
+	}
+
 	// --- What a LanguageServer hands over -----------------------------------------------------------------------------
 
 	void LspPool::Running(LanguageServer* language) {

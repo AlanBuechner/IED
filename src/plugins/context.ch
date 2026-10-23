@@ -8,6 +8,10 @@ include "when.ch"
 
 namespace Ied
 {
+	// Whether `marker` names one of `names`: a whole name, or "*.ext" any name with that ending (ASCII case folded).
+	bool MarkerNamed(const Core::Array<Core::String>& names, Core::StringView marker);
+	// The names of what lies directly in `folder`; none when it is no folder.
+	Core::Array<Core::String> FolderNames(const FS::Path& folder);
 	// The languages `ws` uses, each once (see above); read now, with the server lock held.
 	Core::Array<Core::String> WorkspaceLanguages(Server* server, Workspace* ws);
 	// The lookup of `ws`'s context; workspaceLanguage.<id> reads the languages on its first use. With the lock held.

@@ -13,6 +13,8 @@ namespace IED
 		public Core::String folder;      // its code root, relative to the workspace's root ("" for the root itself)
 		public Core::String kind;        // "executable", "library", ...
 		public Core::String language;    // its project file's `language`; empty when it names none
+		public Core::String file;        // its project file, relative to the workspace's root when inside it
+		public Core::Array<Core::String> references;   // the projects it depends on, by name
 	}
 
 	class Workspace

@@ -20,4 +20,8 @@ namespace Ied
 	// build's lsp-options among it, and so does all of it in a folder holding a solution file (the solution's own
 	// state). What it moved or left, one line each.
 	Core::Array<Core::String> MoveFolderState(const FS::Path& root, const FS::Path& localState);
+	// Moves what the folder at `root` kept while it was a plain folder workspace (its state in `appData`: chats,
+	// layouts, breakpoints, ...) into a solution's `localState` (docs/03 "Managing projects"), once: an entry the
+	// solution has already stays. What it moved or left, one line each.
+	Core::Array<Core::String> AdoptFolderState(const FS::Path& root, const FS::Path& localState, Core::StringView appData);
 }

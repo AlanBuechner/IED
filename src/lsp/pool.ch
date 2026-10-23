@@ -29,6 +29,9 @@ namespace Ied
 		// The services' events.
 		public void WorkspaceOpened(Workspace* ws);
 		public void TrustChanged(Workspace* ws);
+		// Its solution was read again: a project-scoped server whose project went, or moved to another folder, stops (and
+		// one started before the workspace had projects); the open documents go to the servers that serve them now.
+		public void ProjectsChanged(Workspace* ws);
 		public void DocumentOpened(Document* doc);
 		public void DocumentChanged(Document* doc);
 		public void DocumentSaved(Document* doc);

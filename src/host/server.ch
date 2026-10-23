@@ -25,6 +25,7 @@ include "lsp/pool.ch"
 include "tasks/service.ch"
 include "dap/service.ch"
 include "projects/templates.ch"
+include "projects/manage.ch"
 
 namespace Ied
 {
@@ -67,6 +68,7 @@ namespace Ied
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
 		public ProjectTemplates* projects;
+		public ProjectManager* projectManager;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public CodeRuntime* code;

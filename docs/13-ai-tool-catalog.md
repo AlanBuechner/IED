@@ -224,6 +224,21 @@ A chat's own clipboard, so the model moves, repeats or matches text it has seen 
 
 **Pasting.** `{{clip:<name>}}` in any string of any later call's arguments - any tool, a plugin's too, at any depth (`edits[].old`) - is replaced by the clip before the arguments are checked against the tool's schema, so the permission check, the approval card's diff and the tool see the pasted text, while the model's own call, which later requests send, keeps the token (no context spent twice). `{{!clip:<name>}}` writes `{{clip:<name>}}` itself; text that is not a well-formed token (`{{clip:<name>}}` as written here, angle brackets and all) stays as it is, and pasted text is not pasted into again. A token naming a clip the chat does not have fails the call without running it (harness note `unknown_clip`, naming the clips there are). Clips are names of letters, digits, `_`, `.` and `-`, at most 40. They are kept in `chat.json` (a restart keeps them), are the chat's own (another chat starts empty), and show in the details panel's "Clipboard" section (`clips.changed`, `docs/10`), each unfolding to its first 2 KB. `fs_edit`'s description points at the clipboard for long blocks.
 
+### `projects` (built, 2026-10-22; deferred)
+
+Project management for the AI (owner, 2026-10-22: making, moving and removing projects and making an existing folder an IED project, each change showing in the running Solution Explorer without a reload). Every tool runs the server's `project.*` operation (`docs/03` "Managing projects", `docs/10` "Projects") through `api/projects.ch`, so a change reaches every window at once - a folder workspace made a solution becomes one in place - and answers with what it did, IED's notes (the language and build preset it found, a file to check), the workspace's projects as they are now and the end of the build system's output. As built: `plugins/chat/code/projecttools.cf`.
+
+| Tool | Class | Notes |
+|---|---|---|
+| `project_list()` | read | The workspace (kind, folder, trust) and its projects: kind, language, folder, project file, the projects each depends on; the other open workspaces. A folder workspace is told how to become a solution. |
+| `project_templates()` | read | New Project's templates by key (`ied.cpp/console`), with their language and description, which can be added to this solution, and where a new workspace goes. |
+| `project_create(template, name, location?)` | exec | Without `location`, a project added to this solution (the template must be able to add to it: its error says to give a location instead); with one, a new workspace `<location>/<name>`, opened and trusted beside this chat's (the result says the chat stays in its own). Subject `project.create(<name>)`; adding to an untrusted solution fails at the plan. |
+| `project_import(folder, name?, kind?, language?)` | exec | `.` makes this workspace a solution in place; a folder of the workspace joins its solution as a project; a full path elsewhere becomes a solution of its own and opens. The build system's own project files when a project system owns the folder (`nuke init --ied`, `nuke project add`), else IED's `.iedsln` and `.iedproj`. Subject `project.import(<folder>)`. |
+| `project_move(project, to)` | exec | The project's folder to another folder of the workspace; documents open in it follow, the build system's manifests and the solution too. Subject `project.move(<project> -> <to>)`. |
+| `project_remove(project, delete_files?)` | exec | Out of the solution and its build, its files kept; `delete_files` moves its folder to IED's trash. Refused while another project depends on it (naming them); an unknown name lists the projects. Subject `project.remove(<project>)`. |
+
+The four that change projects are `exec`: a solution a build system owns changes by running it, which may run the workspace's scripts. Checked: `tools/server-checks/tests/test_project_management.py` (`ProjectToolTests`: a fake model lists, imports this folder and a folder of it, moves, lists templates and removes, the client seeing `solution.changed` with the new kind).
+
 ### `ide` (drive the UI for the human)
 
 | ID | Tool | Class | Notes |

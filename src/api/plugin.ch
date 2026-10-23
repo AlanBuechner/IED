@@ -21,6 +21,7 @@ include "lsp.ch"
 include "tasks.ch"
 include "contributions.ch"
 include "outputs.ch"
+include "projects.ch"
 
 namespace IED
 {

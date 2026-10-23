@@ -1,0 +1,112 @@
+include "steps.ch"
+include "host/server.ch"
+include "tasks/model.ch"
+include "tasks/expand.ch"
+include "tasks/missing.ch"
+
+namespace Ied
+{
+	Core::String ForwardSlashes(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) out.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return out.ToString();
+	}
+
+	Core::String StepLogTail(Core::StringView text) {
+		Core::StringView trimmed = text.Trimmed();
+		return Core::String(trimmed.ByteLength() <= kProjectLogBytes ? trimmed : trimmed.Substring(trimmed.ByteLength() - kProjectLogBytes, kProjectLogBytes));
+	}
+
+	static Core::String Expanded(Core::StringView text, const TaskLookup& lookup, Core::StringView owner) {
+		Core::String out;
+		Core::String unknown;
+		if (!ExpandTaskText(text, lookup, out, unknown)) throw RpcError(ErrorCode::BadRequest, ((((Core::String("") + owner) + " names ${") + unknown.View()) + "}, which nothing gives").View());
+		return out;
+	}
+
+	// ${KEY} from `values`, ${env:NAME} (empty when unset) and ${config:KEY} (a string setting's text, else its JSON).
+	static TaskLookup StepLookup(Server* server, Workspace* ws, const Core::HashMap<Core::String, Core::String>* values) {
+		Settings* settings = server->settings;
+		return [values, settings, ws](Core::StringView key, Core::String& value) -> bool {
+			if (values->TryGet(Core::String(key), value)) return true;
+			if (key.StartsWith(Core::StringView("env:"))) {
+				if (!Platform::TryGetEnvironmentVariable(Core::String(key.Substring(4, key.ByteLength() - 4)).CStr(), value)) value = Core::String();
+				return true;
+			}
+			if (!key.StartsWith(Core::StringView("config:"))) return false;
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Core::String json = settings->Effective(ws, Core::StringView(""), key.Substring(7, key.ByteLength() - 7));
+			Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+			value = setting.Kind() == Serialization::DomKind::String ? Core::String(setting.AsView()) : Core::String(json.View().Trimmed());
+			return true;
+		};
+	}
+
+	Core::Array<ProjectStep*> PlanProjectSteps(Server* server, const Serialization::DomNode& steps, Workspace* ws, const Core::HashMap<Core::String, Core::String>* values, Core::StringView owner) {
+		TaskLookup lookup = StepLookup(server, ws, values);
+		Core::Array<ProjectStep*> planned;
+		for (int64 i = 0; i < steps.Count(); ++i) {
+			TaskStep* step = ReadTaskStep(steps.At(i));
+			if (step->kind != StepKind::Run || (step->argv.IsEmpty() && step->shell.IsEmpty())) throw RpcError(ErrorCode::BadRequest, ((Core::String("a step of ") + owner) + " runs nothing").View());
+			ProjectStep* run = new ProjectStep();
+			for (const Core::String& arg : step->argv) run->argv.Push(Expanded(arg.View(), lookup, owner));
+			if (!step->shell.IsEmpty()) run->shell = Expanded(step->shell.View(), lookup, owner);
+			run->cwd = Expanded(step->cwd.IsEmpty() ? Core::StringView("${workspaceDir}") : step->cwd.View(), lookup, owner);
+			run->label = !step->label.IsEmpty() ? step->label : !run->shell.IsEmpty() ? run->shell : run->argv[0];
+			run->setting = ProgramSetting(!step->shell.IsEmpty() ? step->shell.View() : step->argv.IsEmpty() ? Core::StringView("") : step->argv[0].View());
+			planned.Push(run);
+		}
+		return planned;
+	}
+
+	Core::String RunProjectStep(const ProjectStep* step, Core::StringBuilder& log) {
+		Process::StartInfo info;
+		if (!step->shell.IsEmpty()) info.shellCommand = step->shell;
+		else {
+			info.program = step->argv[0];
+			for (int64 i = 1; i < step->argv.Count(); ++i) info.arguments.Push(step->argv[i]);
+		}
+		info.workingDirectory = step->cwd;
+		info.input = Process::Redirect::Null;
+		info.errors = Process::Redirect::ToOutput;
+		Process::Output done = Process::Run(info, (int32)kProjectStepMs);
+		log.Append(done.output.View());
+		if (done.exitCode == 0) return Core::String();
+		Core::StringBuilder why;
+		why.Append("the step ");
+		why.Append(step->label.View());
+		if (done.exitCode == Process::kTimedOut) why.Append(" ran out of time");
+		else if (done.exitCode == Process::kError) {
+			why.Append(" did not start: ");
+			why.Append(done.error.View());
+		}
+		else {
+			why.Append(" failed (exit ");
+			why.AppendInt(done.exitCode);
+			why.Append(")");
+		}
+		Core::String program = !step->shell.IsEmpty() ? ProgramWord(step->shell.View()) : step->argv[0];
+		Core::String path;
+		Core::String extensions;
+		if (!Platform::TryGetEnvironmentVariable("PATH", path)) path = Core::String();
+		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
+		if (!step->setting.IsEmpty() && !FindsProgram(program.View(), step->cwd.View(), path.View(), extensions.View())) {
+			why.Append(". ");
+			why.Append(MissingProgramText(program.View(), step->setting.View()).View());
+		}
+		Core::String tail = StepLogTail(done.output.View());
+		if (!tail.IsEmpty()) {
+			why.Append(":\n");
+			why.Append(tail.View());
+		}
+		return why.ToString();
+	}
+
+	Core::String RunProjectSteps(const Core::Array<ProjectStep*>& steps, Core::StringBuilder& log) {
+		for (const ProjectStep* step : steps) {
+			Core::String problem = RunProjectStep(step, log);
+			if (!problem.IsEmpty()) return problem;
+		}
+		return Core::String();
+	}
+}

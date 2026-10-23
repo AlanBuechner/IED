@@ -7,6 +7,7 @@ include "codeinfo.ch"
 include "work.ch"
 include "skilltools.ch"
 include "media.ch"
+include "projecttools.ch"
 
 namespace Ai
 {

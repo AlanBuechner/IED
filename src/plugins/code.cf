@@ -702,6 +702,9 @@ namespace Ied
 			if (RelativeTo(ws->root.View(), model->root.View(), folder)) project.folder = folder;
 			project.kind = model->kind;
 			project.language = Core::String(model->data.Member("language").AsView());
+			if (!RelativeTo(ws->root.View(), model->file.View(), project.file)) project.file = Core::String(model->file.View());
+			Serialization::DomNode references = model->data.Member("references");
+			for (int64 i = 0; i < references.Count(); ++i) project.references.Push(Core::String(references.At(i).AsView()));
 			shown.projects.Push(project);
 		}
 		return shown;

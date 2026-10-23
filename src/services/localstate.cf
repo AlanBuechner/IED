@@ -59,18 +59,39 @@ namespace Ied
 		return false;
 	}
 
+	// Moves `name` from `from` into `to` unless `to` has it: what happened, or "" when `from` had nothing of the name.
+	static Core::String MoveNamed(const FS::Path& from, const FS::Path& to, const char* name) {
+		FS::Path source = from / name;
+		FS::Path target = to / name;
+		if (!FS::FileExists(source.CStr()) && !FS::IsDirectory(source.CStr())) return Core::String();
+		if (FS::FileExists(target.CStr()) || FS::IsDirectory(target.CStr())) return (((Core::String("kept ") + source.View()) + ": ") + target.View()) + " exists";
+		if (MoveEntry(source, target)) return ((Core::String("moved ") + source.View()) + " to ") + target.View();
+		return ((Core::String("could not move ") + source.View()) + " to ") + target.View();
+	}
+
+	Core::Array<Core::String> AdoptFolderState(const FS::Path& root, const FS::Path& localState, Core::StringView appData) {
+		Core::Array<Core::String> said;
+		FS::Path folderState = LocalStateFolder(root, Core::StringView("folder"), appData);
+		if (!FS::IsDirectory(folderState.CStr())) return said;
+		FS::MakeDirectories(localState.CStr());
+		for (const char* name : kIedLocalEntries) {
+			Core::String line = MoveNamed(folderState, localState, name);
+			if (!line.IsEmpty()) said.Push(line);
+		}
+		Core::String layout = MoveNamed(folderState, localState, "layout");
+		if (!layout.IsEmpty()) said.Push(layout);
+		FS::RemoveEmptyDirectory(folderState.CStr());
+		return said;
+	}
+
 	Core::Array<Core::String> MoveFolderState(const FS::Path& root, const FS::Path& localState) {
 		Core::Array<Core::String> said;
 		FS::Path legacy = root / ".ied" / "local";
 		if (!FS::IsDirectory(legacy.CStr()) || FS::IsLink(legacy.CStr()) || HoldsSolution(root)) return said;
 		FS::MakeDirectories(localState.CStr());
 		for (const char* name : kIedLocalEntries) {
-			FS::Path from = legacy / name;
-			FS::Path to = localState / name;
-			if (!FS::FileExists(from.CStr()) && !FS::IsDirectory(from.CStr())) continue;
-			if (FS::FileExists(to.CStr()) || FS::IsDirectory(to.CStr())) said.Push((((Core::String("kept ") + from.View()) + ": ") + to.View()) + " exists");
-			else if (MoveEntry(from, to)) said.Push(((Core::String("moved ") + from.View()) + " to ") + to.View());
-			else said.Push(((Core::String("could not move ") + from.View()) + " to ") + to.View());
+			Core::String line = MoveNamed(legacy, localState, name);
+			if (!line.IsEmpty()) said.Push(line);
 		}
 		FS::RemoveEmptyDirectory(legacy.CStr());
 		FS::RemoveEmptyDirectory((root / ".ied").CStr());

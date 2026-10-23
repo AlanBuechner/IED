@@ -79,7 +79,7 @@
 				"net.egress", "net.listen",
 				"ai.invoke", "ai.tools", "ai.context",
 				"lsp", "dap", "git", "sandbox", "profiler",
-				"secrets", "settings.write", "workspace.open",
+				"secrets", "settings.write", "workspace.open", "workspace.projects",
 				"ui.notifications", "ui.clipboard", "ui.externalLinks"
 			]
 		},
@@ -233,6 +233,7 @@
 				"testProviders": { "type": "array", "items": { "$ref": "#/$defs/testProvider" } },
 				"taskPresets": { "type": "array", "items": { "$ref": "#/$defs/taskPreset" } },
 				"projectTemplates": { "type": "array", "items": { "$ref": "#/$defs/projectTemplate" } },
+				"projectSystems": { "type": "array", "items": { "$ref": "#/$defs/projectSystem" } },
 				"toolCalls": { "type": "array", "items": { "$ref": "#/$defs/toolCall" } },
 				"toolGroups": {
 					"type": "array",
@@ -708,6 +709,27 @@
 				"parameters": { "type": "object", "description": "JSON Schema rendered as the template's form (not read yet)." },
 				"steps": { "type": "array", "items": { "$ref": "project.v1.schema.json#/$defs/step" }, "description": "Run first, each to its end (two minutes at most), with ${name}, ${projectDir}, ${workspaceDir}, ${config:KEY} and ${env:NAME}; the default folder is ${workspaceDir}." }
 			}
+		},
+		"projectSystem": {
+			"type": "object",
+			"required": ["id", "detect", "generate"],
+			"additionalProperties": false,
+			"description": "A build system that owns a solution's projects (docs/03 'Managing projects'): a solution whose folder holds `detect` is its. An operation's steps change the build system's manifests in the solution's folder, then `generate` writes the IED solution and project files again; an operation it does not give is refused.",
+			"properties": {
+				"id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+				"label": { "type": "string" },
+				"detect": { "type": "string", "description": "A file in the solution's folder (nuke.toml)." },
+				"generate": { "$ref": "#/$defs/projectSystemSteps", "description": "Writes the IED solution and project files from the build system's manifests: what makes a folder holding `detect` an IED solution, and what runs after every other operation." },
+				"add": { "$ref": "#/$defs/projectSystemSteps", "description": "An existing folder (${folder}) made a project, named ${name}, in ${language}, of ${kind}; an empty value leaves the choice to the build system." },
+				"remove": { "$ref": "#/$defs/projectSystemSteps", "description": "${projectName} (in ${folder}) taken out of the build, its folder kept." },
+				"delete": { "$ref": "#/$defs/projectSystemSteps", "description": "${projectName} taken out of the build before IED moves its folder to the trash." },
+				"move": { "$ref": "#/$defs/projectSystemSteps", "description": "After IED moved ${projectName}'s folder from ${from} to ${to} (open documents follow it): the build system's entries for it fixed." }
+			}
+		},
+		"projectSystemSteps": {
+			"type": "array",
+			"items": { "$ref": "project.v1.schema.json#/$defs/step" },
+			"description": "Run in the solution's folder, each to its end (two minutes at most), with ${workspaceDir}, ${projectName}, ${folder}, ${from}, ${to}, ${name}, ${language}, ${kind} (paths relative to the solution's folder, '/'), ${config:KEY} and ${env:NAME}."
 		},
 		"toolCall": {
 			"type": "object",
