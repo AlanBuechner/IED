@@ -19,6 +19,9 @@ from server import REPO, IedServer, ServerTestCase, local_state
 FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 MAIN = "int main(void)\n{\n\treturn 0;\n}\n"
 TURN_SECONDS = 60
+# A Claude CLI that is never signed in: a check's server never finds the owner's own and sets Claude up behind it
+# (docs/04 "Setting it up"), which would send a chat of the group it adds to their subscription.
+SIGNED_OUT_CLAUDE = [sys.executable, "-I", "-c", "raise SystemExit(1)"]
 DAY_MS = 24 * 60 * 60 * 1000
 
 
@@ -208,6 +211,7 @@ class ChatCase(ServerTestCase):
 		await super().asyncSetUp()
 		await self.connect()
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.claude.command", "value": SIGNED_OUT_CLAUDE})
 		await self.use_model({})
 
 	async def connect(self):

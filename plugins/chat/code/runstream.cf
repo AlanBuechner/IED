@@ -345,6 +345,7 @@ namespace Ai
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("turnId", turn->turnId.View());
+		data.Field("model", turn->model.View());
 		data.IntField("tokensIn", turn->tokensIn);
 		data.IntField("tokensOut", turn->tokensOut);
 		data.IntField("ttftMs", turn->ttftMs);

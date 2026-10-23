@@ -261,6 +261,8 @@ namespace Ai
 		// The chat:<chatId> snapshot: the summary, the model and group in use and its role's effort, tasks, queued messages,
 		// the clips, the last `recent` turns and what it waits on.
 		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const;
+		// The chat topic's chat.changed: the summary, the model and group in use and its role's effort.
+		public Core::String ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const;
 	}
 
 	int64 ChatNowMs();

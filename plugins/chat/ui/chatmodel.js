@@ -8,6 +8,8 @@ export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approva
 export const MODES = [["ask", "Ask"], ["plan", "Plan"], ["agent", "Agent"]];
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
 export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
+// The summary's fields that change which model a chat's next turn starts on.
+const CHOICE_KEYS = ["pinnedModel", "group", "mode"];
 
 // What the composer's Effort shows: the chat's pick, else its role's (docs/04 "Effort"), else the model's own default;
 // `roleEffort` is null while the chat has no snapshot to say.
@@ -45,9 +47,7 @@ export class ChatModel {
 	// The snapshot replaces everything.
 	snapshot(data) {
 		this.summary = summaryOf(data);
-		this.model = data.model || "";
-		this.groupInUse = data.groupInUse || "";
-		this.roleEffort = data.roleEffort || "";
+		this.choose(data);
 		this.turns = (data.turns || []).map(normalTurn);
 		this.hasMore = Boolean(data.hasMore);
 		this.approvals = data.pendingApprovals || [];
@@ -61,6 +61,14 @@ export class ChatModel {
 		return { all: true };
 	}
 
+	// What the chat's next turn starts on (the snapshot's, or a chat.changed's after the pin, group or mode changed): its
+	// model, its group and that group's effort for its mode.
+	choose(data) {
+		this.model = data.model || "";
+		this.groupInUse = data.groupInUse || "";
+		this.roleEffort = data.roleEffort || "";
+	}
+
 	// Older turns from chat.history go first.
 	prepend(turns, hasMore) {
 		this.turns = turns.map(normalTurn).concat(this.turns);
@@ -72,9 +80,12 @@ export class ChatModel {
 	// {context}, {approvals}, {question}.
 	event(kind, data) {
 		switch (kind) {
-			case "chat.changed":
+			case "chat.changed": {
+				const before = this.summary || {};
 				this.summary = summaryOf(data);
+				if (data.model !== undefined && CHOICE_KEYS.some((key) => before[key] !== this.summary[key])) this.choose(data);
 				return { summary: true };
+			}
 			case "turn.start": {
 				const turn = normalTurn({ turnId: data.turnId, user: data.user, mode: data.mode, model: data.model, group: data.group, startedMs: data.startedMs, segments: [], stop: null, recoveries: [] });
 				this.turns.push(turn);
@@ -201,7 +212,7 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting"];
+	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];
 	return summary;

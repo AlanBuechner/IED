@@ -476,13 +476,26 @@ namespace Ai
 		json.EndArray();
 	}
 
+	static void WriteInUse(IED::JsonWriter& json, Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) {
+		json.Field("model", model);
+		json.Field("groupInUse", groupInUse);
+		json.Field("roleEffort", roleEffort);
+	}
+
+	Core::String Chat::ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		WriteInUse(json, model, groupInUse, roleEffort);
+		json.EndObject();
+		return json.ToString();
+	}
+
 	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const {
 		IED::JsonWriter json;
 		json.BeginObject();
 		WriteSummary(json);
-		json.Field("model", model);
-		json.Field("groupInUse", groupInUse);
-		json.Field("roleEffort", roleEffort);
+		WriteInUse(json, model, groupInUse, roleEffort);
 		json.Key(Core::StringView("tasks"));
 		WriteTasks(json);
 		json.Key(Core::StringView("queued"));

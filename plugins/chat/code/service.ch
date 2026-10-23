@@ -47,6 +47,9 @@ namespace Ai
 		// A turn ended: the next queued message, if the turn finished, starts the next.
 		public void TurnEnded(Chat* chat);
 		public Core::String ModelOf(const Chat* chat) const;
+		// What the chat's next turn starts on: the model its chain's pace order puts first (its first model when Claude is
+		// used up, "" for none), with its group and that role's effort. Inside the host lock.
+		public Core::String NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const;
 		// The chat's Claude session (docs/04 "A chat's session"), made from what its header kept the first time this
 		// server run asks.
 		public ClaudeSession* SessionOf(Chat* chat);

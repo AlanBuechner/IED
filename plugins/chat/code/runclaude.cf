@@ -19,21 +19,15 @@ namespace Ai
 	// --- Which Claude ----------------------------------------------------------------------------------------------------
 
 	Core::String TurnRun::ChooseClaude() {
-		const int64 now = ClaudeNowMs();
-		Core::Array<ChainPlace*> places;
-		for (int64 i = 0; i < candidates.Count(); ++i) {
-			ModelProfile* profile = candidates[i];
-			const bool pinned = i == 0 && profile->name == chat->pinnedModel;
-			places.Push(PlaceNow(*profile, role.PaceOf(profile->name.View()), pinned, *chats->claude, now));
-		}
+		Core::Array<ChainPlace*> places = PlacesOf(candidates, role, chat->pinnedModel.View(), *chats->claude, ClaudeNowMs());
+		Core::Array<ChainPlace*> order = TurnOrder(places);
 		Core::String out;
-		for (const ChainPlace* place : places) {
-			if (place->state == PlaceState::Use) continue;
+		for (const ChainPlace* place : PassedOver(places, order)) {
 			out = place->why;
 			UiNote(Core::StringView("routing"), ((place->model + (place->state == PlaceState::Over ? " skipped for pace: " : " left out: ")) + place->why.View()).View());
 		}
 		Core::Array<ModelProfile*> kept;
-		for (const ChainPlace* place : TurnOrder(places)) kept.Push(FindModel(candidates, place->model.View()));
+		for (const ChainPlace* place : order) kept.Push(FindModel(candidates, place->model.View()));
 		candidates = kept;
 		return candidates.IsEmpty() ? out : Core::String();
 	}

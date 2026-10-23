@@ -209,11 +209,15 @@ class Chats:
 	def snapshot(self, chat):
 		recent = chat.turns[-SNAPSHOT_TURNS:]
 		return dict(
-			chat.summary(), model=MODEL, groupInUse=chat.group or GROUP, tasks=chat.tasks, queued=chat.queued_texts(), modified=chat.modified,
+			chat.summary(), **self.in_use(chat), tasks=chat.tasks, queued=chat.queued_texts(), modified=chat.modified,
 			context=chat.context, hasMore=len(chat.turns) > len(recent), turns=[t.to_dict() for t in recent],
 			pendingApprovals=[a.data for a in chat.approvals.values() if a.decision is None],
 			pendingQuestion=chat.question.data if chat.question and chat.question.decision is None else None,
 		)
+
+	def in_use(self, chat):
+		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed."""
+		return {"model": chat.pinned_model or MODEL, "groupInUse": chat.group or GROUP, "roleEffort": ""}
 
 	def get(self, chat_id):
 		chat = self.items.get(chat_id)
@@ -227,7 +231,7 @@ class Chats:
 	def changed(self, chat):
 		chat.updated_ms = now_ms()
 		summary = chat.summary()
-		self.publish(chat, "chat.changed", summary)
+		self.publish(chat, "chat.changed", dict(summary, **self.in_use(chat)))
 		self.server.hub.publish("chats:" + chat.ws_id, "chat.changed", summary)
 
 	def on_restart(self):
@@ -618,7 +622,7 @@ class Chats:
 		turn.stop = stop
 		turn.recoveries = list(extra.get("recoveries", []))
 		turn.ended_ms = now_ms()
-		self.publish(chat, "turn.stats", {"turnId": turn.turn_id, "tokensIn": turn.tokens_in, "tokensOut": turn.tokens_out, "ttftMs": 400, "genMs": 2000})
+		self.publish(chat, "turn.stats", {"turnId": turn.turn_id, "model": MODEL, "tokensIn": turn.tokens_in, "tokensOut": turn.tokens_out, "ttftMs": 400, "genMs": 2000})
 		self.publish(chat, "turn.end", {"turnId": turn.turn_id, "stop": stop, "recoveries": turn.recoveries, "tokensIn": turn.tokens_in,
 			"tokensOut": turn.tokens_out, "ttftMs": 400, "genMs": 2000, "endedMs": turn.ended_ms})
 

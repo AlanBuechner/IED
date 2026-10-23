@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "service.ch"
+include "pacing.ch"
 include "run.ch"
 include "sent.ch"
 
@@ -84,13 +85,6 @@ namespace Ai
 
 	void Chats::PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge) { context->PublishMergeable(chat->Topic().View(), kind, merge); }
 
-	void Chats::Changed(Chat* chat) {
-		Core::String summary = chat->SummaryJson();
-		Publish(chat, "chat.changed", summary.View());
-		context->Publish(ChatsTopic(chat->wsId.View()).View(), "chat.changed", summary.View());
-		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
-	}
-
 	// The chat's group: its own, else ai.defaultGroup, else the first group.
 	static Core::String GroupOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws) {
 		if (!chat->group.IsEmpty()) return chat->group;
@@ -110,18 +104,37 @@ namespace Ai
 		return PinnedFirst(models, candidates, chat->pinnedModel.View());
 	}
 
-	Core::String Chats::ModelOf(const Chat* chat) const {
+	Core::String Chats::NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const {
 		RoleModel role;
-		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, WorkspaceOf(chat), role);
-		return candidates.IsEmpty() ? Core::String() : candidates[0]->name;
+		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, ws, role);
+		group = GroupOf(context, chat, ws);
+		roleEffort = role.effort;
+		if (candidates.IsEmpty()) return Core::String();
+		Core::Array<ChainPlace*> order = TurnOrder(PlacesOf(candidates, role, chat->pinnedModel.View(), *claude, ChatNowMs()));
+		return order.IsEmpty() ? candidates[0]->name : order[0]->model;
+	}
+
+	Core::String Chats::ModelOf(const Chat* chat) const {
+		Core::String group;
+		Core::String roleEffort;
+		return NextModel(chat, WorkspaceOf(chat), group, roleEffort);
 	}
 
 	Core::String Chats::Snapshot(Chat* chat) {
+		Core::String group;
+		Core::String roleEffort;
+		Core::String model = NextModel(chat, WorkspaceOf(chat), group, roleEffort);
+		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), kChatSnapshotTurns);
+	}
+
+	void Chats::Changed(Chat* chat) {
 		IED::Workspace ws = WorkspaceOf(chat);
-		RoleModel role;
-		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, ws, role);
-		Core::StringView model = candidates.IsEmpty() ? Core::StringView("") : candidates[0]->name.View();
-		return chat->SnapshotJson(model, GroupOf(context, chat, ws).View(), role.effort.View(), kChatSnapshotTurns);
+		Core::String group;
+		Core::String roleEffort;
+		Core::String model = NextModel(chat, ws, group, roleEffort);
+		Publish(chat, "chat.changed", chat->ChangedJson(model.View(), group.View(), roleEffort.View()).View());
+		context->Publish(ChatsTopic(chat->wsId.View()).View(), "chat.changed", chat->SummaryJson().View());
+		SaveChatHeader(LocalStateOf(ws), chat);
 	}
 
 	Core::String Chats::ListSnapshot(Core::StringView wsId) {

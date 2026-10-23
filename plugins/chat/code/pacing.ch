@@ -28,9 +28,15 @@ namespace Ai
 
 	// How `profile`'s place, paced by `pace`, stands now; a `pinned` model is never over its pace. Inside the host lock.
 	ChainPlace* PlaceNow(const ModelProfile& profile, const PaceLimit& pace, bool pinned, const ClaudeAccount& account, int64 nowMs);
+	// The places of a turn's `candidates` now, each paced as `role` says; the first is never over its pace when it is the
+	// chat's `pinned` model. Inside the host lock.
+	Core::Array<ChainPlace*> PlacesOf(const Core::Array<ModelProfile*>& candidates, const RoleModel& role, Core::StringView pinned, const ClaudeAccount& account, int64 nowMs);
 	// The places in the order a turn tries them: those it may use, in order, then those over their pace, the least over first
 	// (the cheaper model, in a chain that steps down); used up left out.
 	Core::Array<ChainPlace*> TurnOrder(const Core::Array<ChainPlace*>& places);
+	// The places a turn passes over to reach the first of `order` (TurnOrder's): those ahead of it in the chain that are over
+	// their pace or used up; every one not in use when `order` is empty. A routing note each; those behind it are not skipped.
+	Core::Array<ChainPlace*> PassedOver(const Core::Array<ChainPlace*>& places, const Core::Array<ChainPlace*>& order);
 	// Each role of each group of the ai.groups value whose chain has a Claude model, with its places now. Inside the host lock.
 	Core::Array<RoleChain*> ClaudeChains(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, const ClaudeAccount& account, int64 nowMs);
 	// [{group, role, now, places: [{model, claude, pace?: {max, target}, state: use | over | used_up, why?}]}]

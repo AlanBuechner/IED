@@ -219,7 +219,9 @@ in a role's chain - its model or a fallback - may have a pace:
     }
 
 A turn skips a paced Claude model while its pace against `target` is over `max`, and goes on down the chain - to a cheaper
-Claude model or a local one - with a routing note ("claude-opus left out: the week is at 1.85x pace, over its 1.00x"). `target`
+Claude model or a local one - with a routing note ("claude-opus skipped for pace: the week is at 1.85x pace, over its 1.00x";
+"left out" for one used up). Only the places ahead of the model the turn runs on get a note: those behind it were never
+reached. The turn's header names that model from its start (`turn.start`), and the next one's after a failover (`turn.stats`). `target`
 is `session` (spend each 5-hour window fully: `five_hour`), `week` (stretch the week: `seven_day` and the model's own weekly
 window) or `both` (the default: the higher). A Claude model without a pace is used whatever the pace - "Opus for planning,
 always" - and only a used-up window leaves it out (100%, or a `rejected` rate-limit status; a model's own weekly window for that
@@ -235,7 +237,10 @@ the profile goes, each role that named it gets its ladder as paced places (1.0, 
 and a `claude-<model>` profile is added for a rung that had none.
 
 **Switching models.** A chat may pin a model of `ai.models` over its group's primary (`chat.set {model}`, the composer's Model
-menu, `""` back to the group's): the group's fallbacks stay behind it. The AI has two tools (group `models`, `docs/13`):
+menu, `""` back to the group's): the group's fallbacks stay behind it, so a turn on the pin notes none of them, and one tries
+them only when the pin fails. The Model menu's label is the pin ("Group's" without one), and the model chip under the composer
+the model the next turn starts on: both follow `chat.changed`, which carries that model on the chat's topic (`docs/10`
+"Chats"), whoever pinned it - the owner here or on another device, or the AI's `chat_set_model`. The AI has two tools (group `models`, `docs/13`):
 `ai_usage` (the plan's windows with their pace and resets, and for each paced chain which model a turn uses now and why) and
 `chat_set_model` (pin a model for this chat's next turns or another chat's, an Exec call: in Ask mode the owner approves it).
 

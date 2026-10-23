@@ -257,6 +257,9 @@ class ClaudeUsageTests(ClaudeCase):
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		turn = await self.last_turn(chat_id)
 		self.assertIn("claude-opus skipped for pace: the week is at 1.20x pace, over its 1.00x", self.notes(turn))
+		started = [f for f in self.frames if f.get("kind") == "turn.start"][0]["data"]
+		self.assertEqual("claude-sonnet", started["model"], "turn.start names the model the pace order picked, not the chain's first")
+		self.assertEqual({"claude-sonnet"}, {f["data"]["model"] for f in self.frames if f.get("kind") == "turn.stats"}, "each request's stats name the model")
 		argv = self.sessions_started()[-1]
 		self.assertEqual("sonnet", argv[argv.index("--model") + 1])
 		self.assertEqual("claude-sonnet", turn["model"])
@@ -279,9 +282,31 @@ class ClaudeUsageTests(ClaudeCase):
 			"fallback": [{"model": "claude-sonnet", "pace": {"max": 1.25}}, {"model": "claude-haiku", "pace": {"max": 1.5}}]}}}})
 		self.script({"blocks": [{"text": "Still Claude: nothing else to try."}]})
 		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"])
-		self.assertEqual("claude-haiku", (await self.last_turn(chat_id))["model"], "every place over its pace: the least over (haiku 1.2x past its 1.5x), not opus")
+		last = await self.last_turn(chat_id)
+		self.assertEqual("claude-haiku", last["model"], "every place over its pace: the least over (haiku 1.2x past its 1.5x), not opus")
+		self.assertEqual(["claude-opus", "claude-sonnet"], [n.split(" ")[0] for n in self.notes(last)], "the places passed over, not the one the turn runs on")
 		argv = self.sessions_started()[-1]
 		self.assertEqual("haiku", argv[argv.index("--model") + 1])
+
+	async def test_a_pinned_model_is_used_first_and_the_chain_behind_it_is_not_skipped(self):
+		await self.use_claude(models=self.SONNET, groups=self.LADDER)
+		self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=(90, int(3.5 * 24 * HOUR))))
+		await self.client.request("ai.usage", {"refresh": True})
+		chat_id, topic = await self.chat()
+		await self.client.request("chat.set", {"chatId": chat_id, "model": "fake"})
+		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed" and f["data"]["pinnedModel"] == "fake"))[-1]["data"]
+		self.assertEqual(("fake", "claude"), (changed["model"], changed["groupInUse"]), "the chat topic says what the next turn starts on")
+		self.model.queue(text_step("Pinned locally."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		turn = await self.last_turn(chat_id)
+		self.assertEqual(("fake", "claude"), (turn["model"], turn["group"]))
+		self.assertEqual([], self.notes(turn), "the group's Claude models behind the pin were never reached: none is skipped for pace")
+		self.assertEqual([], self.sessions_started(), "no Claude session for a turn on the pinned local model")
+		await self.client.request("chat.set", {"chatId": chat_id, "model": ""})
+		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed" and f["data"]["pinnedModel"] == ""))[-1]["data"]
+		self.assertEqual("fake", changed["model"], "unpinned: the group's chain again, as its pace order has it (opus and sonnet over their pace)")
+		listed = (await self.client.request("chat.list", {"wsId": "w1"}))["chats"][0]
+		self.assertNotIn("model", listed, "the chats topic keeps the summary")
 
 	async def test_a_chats_mode_picks_its_role(self):
 		await self.use_claude(groups={"local, claude plans": {"primary": {"model": "fake"}, "planning": {"model": "claude-opus"}}}, default_group="local, claude plans")

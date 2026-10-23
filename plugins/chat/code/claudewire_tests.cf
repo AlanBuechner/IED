@@ -141,6 +141,29 @@ class ClaudeWireTests {
 		Core::Array<Ai::ChainPlace*> order = Ai::TurnOrder(places);
 		assert_true(order.Count() == 3 && order[0]->model == "qwen" && order[1]->model == "claude-haiku" && order[2]->model == "claude-opus",
 			"in use first, then over their pace, the least over first (haiku 1.23x past its 1.5x before opus 1.85x past its 1.0x); used up left out");
+		Core::Array<Ai::ChainPlace*> passed = Ai::PassedOver(places, order);
+		assert_true(passed.Count() == 3 && passed[0]->model == "claude-opus" && passed[2]->model == "claude-haiku", "every place ahead of qwen that is not in use is passed over");
+	}
+
+	[test("only_the_places_ahead_of_the_turns_model_are_passed_over")]
+	public static void TestPassedOver() {
+		Core::Array<Ai::ChainPlace*> pinned;
+		pinned.Push(Place("fake", Ai::PlaceState::Use, 0));
+		pinned.Push(Place("claude-opus", Ai::PlaceState::Over, 1.85));
+		pinned.Push(Place("claude-sonnet", Ai::PlaceState::UsedUp, 0));
+		assert_true(Ai::PassedOver(pinned, Ai::TurnOrder(pinned)).IsEmpty(), "a pinned model in use: the group's fallbacks behind it are not skipped");
+		Core::Array<Ai::ChainPlace*> over;
+		over.Push(Place("claude-opus", Ai::PlaceState::Over, 1.85));
+		over.Push(Place("claude-sonnet", Ai::PlaceState::Over, 1.48));
+		over.Push(Place("claude-haiku", Ai::PlaceState::Over, 1.23));
+		Core::Array<Ai::ChainPlace*> passed = Ai::PassedOver(over, Ai::TurnOrder(over));
+		assert_true(passed.Count() == 2 && passed[0]->model == "claude-opus" && passed[1]->model == "claude-sonnet", "every place over its pace: the least over is used, not skipped");
+		Core::Array<Ai::ChainPlace*> none;
+		none.Push(Place("claude-opus", Ai::PlaceState::UsedUp, 0));
+		none.Push(Place("qwen", Ai::PlaceState::Use, 0));
+		none.Push(Place("claude-haiku", Ai::PlaceState::UsedUp, 0));
+		passed = Ai::PassedOver(none, Core::Array<Ai::ChainPlace*>());
+		assert_true(passed.Count() == 2 && passed[1]->model == "claude-haiku", "no order: every place not in use");
 	}
 
 	[test("when_a_window_frees")]

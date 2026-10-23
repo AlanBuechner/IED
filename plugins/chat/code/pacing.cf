@@ -40,6 +40,15 @@ namespace Ai
 		return place;
 	}
 
+	Core::Array<ChainPlace*> PlacesOf(const Core::Array<ModelProfile*>& candidates, const RoleModel& role, Core::StringView pinned, const ClaudeAccount& account, int64 nowMs) {
+		Core::Array<ChainPlace*> places;
+		for (int64 i = 0; i < candidates.Count(); ++i) {
+			ModelProfile* profile = candidates[i];
+			places.Push(PlaceNow(*profile, role.PaceOf(profile->name.View()), i == 0 && profile->name.View() == pinned, account, nowMs));
+		}
+		return places;
+	}
+
 	Core::Array<ChainPlace*> TurnOrder(const Core::Array<ChainPlace*>& places) {
 		Core::Array<ChainPlace*> ordered;
 		for (ChainPlace* place : places)
@@ -52,6 +61,15 @@ namespace Ai
 			ordered.Insert(at, place);
 		}
 		return ordered;
+	}
+
+	Core::Array<ChainPlace*> PassedOver(const Core::Array<ChainPlace*>& places, const Core::Array<ChainPlace*>& order) {
+		Core::Array<ChainPlace*> passed;
+		for (ChainPlace* place : places) {
+			if (!order.IsEmpty() && place == order[0]) break;
+			if (place->state != PlaceState::Use) passed.Push(place);
+		}
+		return passed;
 	}
 
 	static RoleChain* ChainOf(const Core::Array<ModelProfile*>& models, const RoleModel& role, const ClaudeAccount& account, int64 nowMs) {
