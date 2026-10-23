@@ -43,5 +43,9 @@ class ContextMeterTests {
 		assert_true(claude.View().Contains(Core::StringView("\"compacts\":true")) && !claude.View().Contains(Core::StringView("compressAt")), "Claude compacts its own");
 		assert_se("claude-opus", Ai::ContextModel(claude.View()).CStr(), "the model it is drawn for");
 		assert_se("", Ai::ContextModel(Core::StringView("")).CStr(), "no meter, no model");
+		Core::String estimate = Ai::ContextJson(32768, 9000, Core::StringView("qwen"), false, FourParts(), true);
+		assert_true(estimate.View().Contains(Core::StringView("\"estimated\":true")), "an estimate says so");
+		assert_true(Ai::ContextForModel(estimate.View(), 200000, Core::StringView("claude-opus"), true).View().Contains(Core::StringView("\"estimated\":true")), "and still does for another model");
+		assert_true(!local.View().Contains(Core::StringView("estimated")), "a count is not an estimate");
 	}
 }

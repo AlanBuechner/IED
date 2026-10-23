@@ -209,8 +209,8 @@ export class Composer {
 			turn ? h("span", null, h("b", null, compact(turn.tokensIn)), " in / ", h("b", null, compact(turn.tokensOut)), " out") : null,
 			speed ? h("span", null, h("b", null, speed), " tok/s") : null,
 			turn && turn.ttftMs ? h("span", null, "TTFT ", h("b", null, duration(turn.ttftMs))) : null,
-			bar.window ? h("span.chat-mchip", { title: "Context used of " + (bar.model || "the model") + "'s window" }, "ctx ", h("span.chat-bar", null, h("i", { style: { width: Math.min(bar.percent, 100) + "%" } })), h("b", null, bar.percent + "%"), " of " + compact(bar.window))
-				: bar.used ? h("span.chat-mchip", { title: "Context used; the model's window is not known yet" }, "ctx ", h("b", null, compact(bar.used))) : null,
+			bar.window ? h("span.chat-mchip", { title: (bar.estimated ? "Estimated from the chat; the next reply counts it. " : "") + "Context used of " + (bar.model || "the model") + "'s window" }, "ctx ", h("span.chat-bar", null, h("i", { style: { width: Math.min(bar.percent, 100) + "%" } })), h("b", null, (bar.estimated ? "~" : "") + bar.percent + "%"), " of " + compact(bar.window))
+				: bar.used ? h("span.chat-mchip", { title: (bar.estimated ? "Estimated from the chat; " : "Context used; ") + "the model's window is not known yet" }, "ctx ", h("b", null, (bar.estimated ? "~" : "") + compact(bar.used))) : null,
 			model.model ? h("span.chat-mchip", null, h("span.dot.info"), model.model) : model.summary && model.summary.chatId ? h("span.chat-mchip.c-warn", null, "no model set up (ai.models)") : null);
 	}
 }

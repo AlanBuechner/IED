@@ -17,9 +17,9 @@ namespace Ai
 		public int64 tokens;
 	}
 
-	// {window, used, model, compressAt?, compacts?, parts: [{name, tokens}]}: IED compresses a local model's context at
-	// `compressAt` percent; Claude compacts its own (`compacts`).
-	Core::String ContextJson(int64 window, int64 used, Core::StringView model, bool claude, const Core::Array<ContextPart>& parts);
+	// {window, used, model, compressAt?, compacts?, estimated?, parts: [{name, tokens}]}: IED compresses a local model's
+	// context at `compressAt` percent; Claude compacts its own (`compacts`); `estimated` when no model counted it.
+	Core::String ContextJson(int64 window, int64 used, Core::StringView model, bool claude, const Core::Array<ContextPart>& parts, bool estimated = false);
 	// `parts` scaled to add up to `used`, the last taking what rounding leaves; as they are when either is 0.
 	Core::Array<ContextPart> ScaledParts(const Core::Array<ContextPart>& parts, int64 used);
 	// The meter `context` again for another model: its window and model replaced, its count and parts kept.

@@ -444,15 +444,16 @@ export function diffRows(unified) {
 }
 
 // The context's parts as fractions of the window, for the stacked bar; the window is the used total when unknown. `free`
-// names the room left: where IED compresses (`compressAt` percent), or that the model compacts its own (Claude).
+// names the room left: where IED compresses (`compressAt` percent), or that the model compacts its own (Claude);
+// `estimated` when no model counted it yet (the server estimated it from the chat after a restart).
 export function contextBar(context) {
-	if (!context) return { window: 0, used: 0, percent: 0, parts: [], free: "" };
+	if (!context) return { window: 0, used: 0, percent: 0, parts: [], free: "", estimated: false };
 	const window = context.window || 0;
 	const used = context.used || 0;
 	const whole = window || Math.max(used, 1);
 	const free = context.compacts ? "Free (the model compacts its own)" : context.compressAt ? "Free (compressed at " + context.compressAt + "%)" : "Free";
 	return {
-		window, used, percent: window ? Math.round(used * 100 / window) : 0, model: context.model || "", free,
+		window, used, percent: window ? Math.round(used * 100 / window) : 0, model: context.model || "", free, estimated: Boolean(context.estimated),
 		parts: (context.parts || []).map((p) => ({ name: p.name, tokens: p.tokens, share: p.tokens / whole })),
 	};
 }

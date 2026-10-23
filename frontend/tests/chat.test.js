@@ -69,6 +69,7 @@ test("chat: tasks, queue, files and context", () => {
 	assertEqual(contextBar({ window: 100, used: 10, model: "qwen", compressAt: 85, parts: [] }).free, "Free (compressed at 85%)", "IED compresses a local model");
 	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", compacts: true, parts: [] }).free, "Free (the model compacts its own)", "Claude compacts its own");
 	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", parts: [] }).model, "claude-opus");
+	assertEqual([contextBar({ window: 100, used: 10, parts: [] }).estimated, contextBar({ window: 100, used: 10, estimated: true, parts: [] }).estimated], [false, true], "an estimate says so");
 	model.event("chat.changed", { chatId: "c1", title: "Renamed", state: "running" });
 	assertEqual([model.summary.title, model.running()], ["Renamed", true]);
 });

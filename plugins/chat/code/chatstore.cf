@@ -48,6 +48,11 @@ namespace Ai
 			json.EndObject();
 		}
 		if (!chat->context.IsEmpty()) json.RawField("context", chat->context.View());
+		json.Key(Core::StringView("compressedTurns"));
+		json.BeginArray();
+		for (const Turn* turn : chat->turns)
+			if (turn->compressed) json.String(turn->turnId.View());
+		json.EndArray();
 		json.IntField("createdMs", chat->createdMs);
 		json.IntField("updatedMs", chat->updatedMs);
 		json.IntField("counter", chat->counter);
@@ -242,6 +247,10 @@ namespace Ai
 		chat->wsId = Core::String(wsId);
 		ReadHeader(chat, header);
 		ReadTurns(chat, ReadWhole(folder / "turns.jsonl").View());
+		Serialization::DomNode compressed = header.Member("compressedTurns");
+		for (int64 i = 0; i < compressed.Count(); ++i)
+			for (Turn* turn : chat->turns)
+				if (turn->turnId.View() == compressed.At(i).AsView()) turn->compressed = true;
 		Serialization::DomNode running = ParseJson(ReadWhole(folder / "running.json").View());
 		if (running.Kind() == Serialization::DomKind::Object) {
 			Turn* turn = new Turn();

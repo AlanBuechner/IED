@@ -314,15 +314,16 @@ namespace Ai
 		return part;
 	}
 
-	// The tool definitions the model is sent: Claude's session lists every tool, a local model the request's.
-	Core::String TurnRun::SentTools() const {
-		if (!candidates[candidate]->IsClaude()) return tools->RequestTools(chat->mode, chat->loadedTools);
+	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, const Core::Array<Core::String>& loaded, bool claude) {
+		if (!claude) return tools->RequestTools(mode, loaded);
 		Core::Array<Core::String> every;
 		for (ToolSpec* spec : tools->tools) every.Push(spec->name);
-		return tools->RequestTools(chat->mode, every);
+		return tools->RequestTools(mode, every);
 	}
 
-	void TurnRun::PublishContext(int64 used) {
+	Core::String TurnRun::SentTools() const { return ToolsSent(tools, chat->mode, chat->loadedTools, candidates[candidate]->IsClaude()); }
+
+	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
 		int64 messages = 0;
 		int64 results = 0;
 		for (Turn* each : chat->turns)
@@ -332,13 +333,19 @@ namespace Ai
 					else messages += MessageBytes(message);
 				}
 		Core::Array<ContextPart> parts;
-		parts.Push(Part("System prompt", system.ByteLength() / 4));
-		parts.Push(Part("Tool definitions", SentTools().ByteLength() / 4));
+		parts.Push(Part("System prompt", systemBytes / 4));
+		parts.Push(Part("Tool definitions", toolsBytes / 4));
 		parts.Push(Part("Messages", messages / 4));
 		parts.Push(Part("Tool results", results / 4));
+		return parts;
+	}
+
+	void TurnRun::PublishContext(int64 used) {
+		Core::Array<ContextPart> parts = ContextParts(chat, system.ByteLength(), SentTools().ByteLength());
 		ModelProfile* profile = candidates[candidate];
 		chat->context = ContextJson(Window(), used, profile->name.View(), profile->IsClaude(), ScaledParts(parts, used));
 		chats->Publish(chat, "context.changed", chat->context.View());
+		SaveChatHeader(LocalStateOf(ws), chat);
 	}
 
 	void TurnRun::Account(const StepResult* result, int64 promptEstimate, int64 estimateBefore) {

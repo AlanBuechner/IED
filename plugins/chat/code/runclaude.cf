@@ -356,6 +356,7 @@ namespace Ai
 		if (!chats->LearnWindow(profile->name.View(), window) || chat->context.IsEmpty()) return;
 		chat->context = ContextForModel(chat->context.View(), Window(), profile->name.View(), true);
 		chats->Publish(chat, "context.changed", chat->context.View());
+		SaveChatHeader(LocalStateOf(ws), chat);
 	}
 
 	void TurnRun::DrainClaude() {

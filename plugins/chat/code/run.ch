@@ -175,4 +175,18 @@ namespace Ai
 
 	// Starts `chat`'s current turn on a thread of its own; inside the host lock.
 	void StartRun(Chats* chats, Chat* chat, const IED::Workspace& ws);
+	// The tools a turn of `chat` gets: the core set, the workspace's plugins' (their problems in `contributed`) and the
+	// chat's own - chats, clipboard, models, background tasks, agents. Inside the host lock.
+	ToolRegistry* TurnTools(Chats* chats, Chat* chat, const IED::Workspace& ws, Core::Array<Core::String>& contributed);
+	// The system message a turn of `chat` whose message is `userText` is sent (docs/14). Inside the host lock.
+	Core::String TurnSystem(Chats* chats, Chat* chat, const IED::Workspace& ws, ToolRegistry* tools, Core::StringView userText, const Core::Array<ModelProfile*>& models,
+		Core::Array<Core::String>& contributed);
+	// The tool definitions a request sends: a local model the chat's loaded ones, Claude's session every tool.
+	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, const Core::Array<Core::String>& loaded, bool claude);
+	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
+	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
+	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);
+	// The context meter of a chat with turns but no count yet - one an older server ran, or whose count was lost -
+	// estimated from what its next turn would send, for the model it would start on (`estimated`). Inside the host lock.
+	Core::String EstimatedContext(Chats* chats, Chat* chat, const IED::Workspace& ws);
 }

@@ -9,6 +9,7 @@ import functools
 import http.server
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import time
@@ -35,13 +36,32 @@ PAGE = """<!doctype html>
 LOAD_SECONDS = 30
 
 
-def browser_installed():
+def installed_browser():
 	for variable, rest in (("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"), ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
 		("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"), ("ProgramFiles", "Google/Chrome/Application/chrome.exe")):
 		root = os.environ.get(variable)
 		if root and os.path.isfile(os.path.join(root, rest)):
-			return True
-	return False
+			return os.path.join(root, rest)
+	return None
+
+
+def browser_installed():
+	return installed_browser() is not None
+
+
+def leave_browser_on(profile):
+	"""A headless browser on `profile` that no server started, as one an earlier server left behind: once it wrote its
+	DevToolsActivePort."""
+	os.makedirs(profile, exist_ok=True)
+	process = subprocess.Popen([installed_browser(), "--headless=new", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
+		"--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	deadline = time.monotonic() + LOAD_SECONDS
+	while not os.path.exists(os.path.join(profile, "DevToolsActivePort")):
+		if time.monotonic() > deadline:
+			process.kill()
+			raise AssertionError("the browser left on the profile did not start")
+		time.sleep(0.2)
+	return process
 
 
 def remove_when_released(path):
@@ -264,6 +284,30 @@ class BrowserTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as gone:
 			await self.client.request("browser.frame", {"pageId": page, "after": 0})
 		self.assertEqual("not_found", gone.exception.code)
+
+	def profile(self):
+		return os.path.join(self.data, "plugins", "ied.browser", "profile")
+
+	async def test_a_browser_left_on_the_profile_is_closed_first(self):
+		"""docs/27 "Engine": a browser an earlier server left on IED's profile held it, so every start handed it its
+		arguments and exited ("another program may hold its profile"); it is asked to close through its DevTools port."""
+		left = leave_browser_on(self.profile())
+		self.addCleanup(lambda: left.poll() is None and left.kill())
+		page = await self.open()
+		await self.titled(page, "Fixture")
+		left.wait(10)
+		self.assertIsNotNone(left.returncode, "the browser left behind was closed")
+
+	async def test_a_browser_left_without_its_port_file_is_ended(self):
+		"""The same browser with its DevToolsActivePort gone (an older server deleted it on a failed start): the start
+		that hands off and exits ends whatever holds the profile, and starts again."""
+		left = leave_browser_on(self.profile())
+		self.addCleanup(lambda: left.poll() is None and left.kill())
+		os.remove(os.path.join(self.profile(), "DevToolsActivePort"))
+		page = await self.open()
+		await self.titled(page, "Fixture")
+		left.wait(10)
+		self.assertIsNotNone(left.returncode, "the browser left behind was ended")
 
 
 @unittest.skipUnless(browser_installed(), "needs Microsoft Edge or Google Chrome")
