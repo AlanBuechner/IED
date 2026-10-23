@@ -290,7 +290,9 @@ null-terminated buffer and keeps its character count current; a zero `String` is
 `CharCount`, `Capacity`, `IsEmpty`, `CStr()`, `View()`, `CodePointAt`, `==`, `!=`, `<`, `>`, `<=`, `>=` (`==` and `!=`
 also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+` with a `String`, a `StringView` or a
 `const char*` (a new `String`), `Append` (`+=`) of a `String`, a `StringView` or a `const char*` (safe with itself
-or a view of itself), `Clear`, `Reserve`.
+or a view of itself), `Clear`, `Reserve`. `Core::ValidUtf8(view)` is the text with each byte that belongs to no
+well-formed UTF-8 sequence replaced by U+FFFD, byte by byte as `DecodeUtf8` reads them: text from outside (a
+console's code page, a file in another encoding) made fit for what takes UTF-8 only.
 
 ### `Core::StringBuilder` (`stringbuilder.ch`)
 
@@ -578,7 +580,9 @@ if (!Serialization::FromJson(json.View(), loaded)) printf("not settings\n");
 ```
 - **JSON** (`json.ch`): `Serialization::WriteJson(node, out, indent)` (0 = compact). Floats are written
   in the shortest form that reads back as the same double, always with a fraction or exponent (`1.0`);
-  NaN and the infinities, which JSON cannot express, are `null`. Control characters are `\uXXXX`.
+  NaN and the infinities, which JSON cannot express, are `null`. Control characters are `\uXXXX`, and a
+  string that is not UTF-8 is written with U+FFFD for each stray byte (`Core::ValidUtf8`), so the writer's
+  output always reads back: it used to copy the bytes, and `ReadJson` then refused the whole document (BUG-384).
   `WriteJsonString(text, out)` and `WriteFloatText(value, out)` are the pieces.
 - **YAML** (`yaml.ch`): `Serialization::WriteYaml(node, out, indent)` writes block style with at least 2
   spaces per level; strings and keys are double-quoted, empty containers are `{}` / `[]`, and NaN and the

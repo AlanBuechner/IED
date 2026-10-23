@@ -2,6 +2,20 @@ include "string.ch"
 
 namespace Core
 {
+	String ValidUtf8(StringView text) {
+		String valid;
+		int64 at = 0;
+		for (;;) {
+			const int64 bad = InvalidUtf8Offset(text.Data() + at, text.ByteLength() - at);
+			if (bad < 0) break;
+			valid.Append(text.Substring(at, bad));
+			valid.Append("\xef\xbf\xbd");
+			at += bad + 1;
+		}
+		valid.Append(text.Substring(at, text.ByteLength() - at));
+		return valid;
+	}
+
 	[operator("create")] void String::Init(const char* text) { Append(StringView(text)); }
 
 	[operator("create")] void String::Init(StringView text) { Append(text); }

@@ -175,4 +175,16 @@ class JsonReaderTests {
 		assert_true(read.root.Member("text").AsView() == Core::StringView("line\nbreak \xe2\x82\xac"), "strings survive");
 		assert_true(read.root.Member("value").AsFloat() == 1.0 / 3.0, "doubles survive exactly");
 	}
+
+	// BUG-384: text a console wrote in its code page went into JSON as it was, which the reader then refused.
+	[test("text_that_is_not_utf8")]
+	public static void TestTextThatIsNotUtf8() {
+		Core::StringBuilder out;
+		Serialization::WriteJsonString(Core::StringView("roadmap \x83?\" notes"), &out);
+		assert_se("\"roadmap \xef\xbf\xbd?\\\" notes\"", out.ToString().CStr(), "each stray byte is written as U+FFFD");
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(out.View(), doc);
+		assert_true(read.Ok(), "what it writes reads back");
+		assert_se("roadmap \xef\xbf\xbd?\" notes", read.root.AsString(), "the text, repaired");
+	}
 }

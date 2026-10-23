@@ -57,6 +57,11 @@ namespace Core
 		private int64 chars;    // decoded characters
 	}
 
+	// `text` with each byte that does not belong to a well-formed UTF-8 sequence replaced by U+FFFD, byte by byte as
+	// DecodeUtf8 reads them: text from outside (a console's code page, a file in another encoding) made fit for what
+	// takes UTF-8 only, such as JSON.
+	String ValidUtf8(StringView text);
+
 	// A C string looks up String keys by its text, hashed as String::Hash hashes it.
 	template<> struct LookupTraits<String, const char*> {
 		public static uint64 Hash(const char* key) { return StringView(key).Hash(); }

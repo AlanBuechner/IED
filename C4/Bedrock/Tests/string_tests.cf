@@ -146,3 +146,12 @@ public static void TestStringOperators() {
 	grown += grown;
 	assert_se("xabc-yzxabc-yz", grown.CStr(), "+= appends itself");
 }
+
+[test("string.valid_utf8")]
+public static void TestValidUtf8() {
+	assert_se("caf\xc3\xa9", Core::ValidUtf8(Core::StringView("caf\xc3\xa9")).CStr(), "well-formed text is kept");
+	assert_se("a\xef\xbf\xbd+b", Core::ValidUtf8(Core::StringView("a\x83+b")).CStr(), "a stray byte is U+FFFD");
+	assert_se("x\xef\xbf\xbd\xef\xbf\xbd", Core::ValidUtf8(Core::StringView("x\xe2\x82")).CStr(), "a cut sequence at the end, byte by byte as DecodeUtf8 reads it");
+	assert_se("\xef\xbf\xbd\xef\xbf\xbd", Core::ValidUtf8(Core::StringView("\xc0\xaf")).CStr(), "an overlong form, byte by byte");
+	assert_true(Core::ValidUtf8(Core::StringView("\x83\xe2\x80\x94\xff")).View().IsValidUtf8(), "always well-formed");
+}

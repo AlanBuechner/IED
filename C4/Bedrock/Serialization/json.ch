@@ -9,7 +9,8 @@ namespace Serialization
 	// the infinities, which JSON cannot express, are written as null.
 	void WriteJson(const DomNode& node, Core::StringBuilder* out, int32 indent);
 
-	// A JSON string literal of `text`: quotes, backslashes and control characters escaped.
+	// A JSON string literal of `text`: quotes, backslashes and control characters escaped, and each byte that is not
+	// part of a UTF-8 character written as U+FFFD (Core::ValidUtf8), so what it writes always reads back (BUG-384).
 	void WriteJsonString(Core::StringView text, Core::StringBuilder* out);
 
 	// The shortest text that reads back as `value`, with a fraction or exponent so it reads back as a float.

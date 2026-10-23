@@ -35,6 +35,11 @@ namespace Serialization
 
 	// The runs of bytes that need no escape are found sixteen at a time and appended whole.
 	void WriteJsonString(Core::StringView text, Core::StringBuilder* out) {
+		if (!text.IsValidUtf8()) {
+			Core::String valid = Core::ValidUtf8(text);
+			WriteJsonString(valid.View(), out);
+			return;
+		}
 		out->AppendByte('"');
 		const char* bytes = text.Data();
 		const int64 end = text.ByteLength();
