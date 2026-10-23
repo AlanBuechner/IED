@@ -210,7 +210,7 @@ static void Buckets() {
 | `bool operator==(const P& o) const` | `[operator("==")] public bool Equals(const P& o) const` (also `"<"`, `"+"`, `"[]"` is `"index"`, `"hash"`) |
 | `class C { int x; public: int y; };` | `class C { private int32 x; public int32 y; }` - every member says its own visibility; a `public:` label only requires it |
 | `std::string s = "hi";` | `Core::String s = Core::String("hi");` (comparing works directly: `s == "hi"`) |
-| `printf("%s", s)` with a String | printf is C's: pass `s.CStr()` (a String through printf's `...` does not compile); `Core::Format(&b, "{0}", s)` takes the String itself |
+| `printf("%s", s)` with a String | printf is C's: pass `s.CStr()` (a String through printf's `...` does not compile; a view: `printf("%.*s", (int32)v.ByteLength(), v.Data())`); `Core::Format(&b, "{0}", s)` takes the String itself |
 | `v.push_back(x)`, `v.size()`, `v.empty()`, `v.back()` | `v.Push(x)`, `v.Count()`, `v.IsEmpty()`, `v.Back()` |
 | `m.find(k) != m.end()`, `m.count(k)`, `m.insert({k, v})` | `m.Find(k)` (a `V*`, null when absent), `m.Contains(k)`, `m.Insert(k, v)`; `m[k]` creates a zero value |
 | `std::sort(v.begin(), v.end(), cmp)` | `v.Sort()` (by `<`) or `v.SortBy([](const T& a, const T& b) -> bool { return ...; })` |
@@ -219,7 +219,7 @@ static void Buckets() {
 | `std::cin`, `getline` | `Platform::InputLines lines; Core::String line; while (lines.Next(line)) { ... }` (no line break in `line`), or `Platform::ReadAllInput(builder)` |
 | `T& r = c ? a : b;` to pick one of two objects | `?:` on objects makes a copy: pick through pointers, `T* r = c ? &a : &b;` |
 | `p->x` on an object, `o.x` through a pointer | `.` on objects and references, `->` through pointers only |
-| a `const` or file-scope variable with the same name in two `.cf` files | one program: a plain `const` in two files is a redefinition, and in a namespace even `static` data collides (a link error, "duplicate symbol"); give each name one home (a header) or distinct names. `static` helper functions are private to their file |
+| a helper, `const` or variable with the same name in two `.cf` files | one program: the second is a redefinition unless both are `static` (private to their file); give a shared name one home (a header) |
 
 ## 3. Bedrock every day
 
@@ -229,12 +229,12 @@ access is unchecked; a zero value of any container or string is empty. Full refe
 
 | Type | Everyday members |
 |---|---|
-| `Core::StringView` (a view; pass by value) | `StringView("lit")`, `Data()`, `ByteLength()`, `IsEmpty()`, `ByteAt(i)`, `Substring(start, length)` (clamped, no copy), `IndexOf(char, from)`, `IndexOf(view, from)`, `Contains`, `StartsWith`, `EndsWith`, `Trimmed()`, `Split(',')` (an Array of views into it), `ToLower()`, `==`, `<` |
+| `Core::StringView` (a view; pass by value) | `StringView("lit")`, `Data()`, `ByteLength()`, `IsEmpty()`, `ByteAt(i)`, `Substring(start, length)` (clamped, no copy), `IndexOf(char)` / `IndexOf(char, from)` (-1 when absent), `IndexOf(view, from)`, `Contains`, `StartsWith`, `EndsWith`, `Trimmed()`, `Split(',')` (an Array of views into it), `ToLower()`, `==`, `<` |
 | `Core::String` (owns UTF-8) | `String("lit")`, `String(view)`, `View()`, `CStr()`, `ByteLength()`, `IsEmpty()`, `Split`, `ToLower()`, `+` (String on the left; with String, view or literal: a new String), `+=`, `Clear()`, `==` / `!=` with a String, view or literal on the right (a view on the left: `view == s.View()`), `<` with another String, `hash` (a HashMap key). Substring, Trimmed, IndexOf, StartsWith, Contains: through `s.View()` |
 | `Core::StringBuilder` | `Append(view or literal)` (a String: `Append(s.View())`), `AppendByte(c)`, `AppendInt(int64)`, `AppendDouble(d, decimals)`, `AppendIntBase(n, base, minDigits)`, `View()`, `CStr()`, `ToString()`, `Clear()`, `ByteLength()` |
-| `Core::Format(&builder, "{0} {1} {2:F.2} {3:x}", count, name, ratio, mask)` | appends; `{n}` writes any integer, float or double (its shortest text), String, StringView, const char*, bool or char as it is; `{n:F.d}` / `{n:f.d}` d fraction digits (`{n:F}` alone: none), `{n:x}` hex (`X` is not hex), `{n:d.N}` pads an integer to N digits, `{{` a brace. Only into a builder: `&builder`, never a String. A type Format cannot write is a compile error |
+| `Core::Format(&builder, "{0} {1} {2:F.2} {3:x}", count, name, ratio, mask)` | appends; `{n}` writes any integer, float or double (its shortest text), String, StringView, const char*, bool or char as it is; `{n:F.d}` / `{n:f.d}` d fraction digits (`{n:F}` alone: 6, as `%f`), `{n:x}` / `{n:X}` hex, `{n:d.N}` pads an integer to N digits, `{{` a brace. Only into a builder: `&builder`, never a String. A type Format cannot write is a compile error |
 | `Core::Array<T>` | `= { 1, 2 }`, `Array<T>(capacity)`, `Push(v)`, `Pop()`, `Count()`, `IsEmpty()`, `[i]`, `Front()`, `Back()`, `Insert(i, v)`, `RemoveAt(i)`, `RemoveRange(first, end)`, `Clear()`, `Resize(n)`, `Reserve(n)`, `Sort()`, `SortBy(before)`, `IndexOf(v)`, `Contains(v)`, `LowerBound(v)`, `LowerBoundBy(v, before)`; range-for |
-| `Core::HashMap<K, V>` | `Insert(k, v)` (true when added), `m[k]` (`V&`, created when absent), `Find(k)` (`V*` or nullptr), `FindAs(view)` for String keys (a `Core::StringView`, never a bare literal: `FindAs("k")` never finds), `Get(k)` (a copy, zero when absent), `TryGet(k, out)`, `Contains(k)`, `Remove(k)`, `Count()`; range-for gives `Core::KeyValue<K, V>&` (`.key`, `.value`) in no particular order |
+| `Core::HashMap<K, V>` | `Insert(k, v)` (true when added), `m[k]` (`V&`, created when absent), `Find(k)` (`V*` or nullptr), `FindAs(view)` or `FindAs("lit")` for String keys, `Get(k)` (a copy, zero when absent), `TryGet(k, out)`, `Contains(k)`, `Remove(k)`, `Count()`; range-for gives `Core::KeyValue<K, V>&` (`.key`, `.value`) in no particular order |
 | `Core::HashSet<T>` | `Add(v)` (true when new), `Contains(v)`, `ContainsAs(view)`, `Remove(v)`, `Count()`; range-for |
 | `Core::Queue<T>`, `Core::Stack<T>`, `Core::PriorityQueue<T>`, `Core::List<T>`, `Core::LruCache<K, V>` | `Push`, `Pop`, `Front` / `Top`, `Count`, `IsEmpty` |
 | `Core::ParseInt64(view, value)` | decimal text, optional `-`, nothing around it; false (value unchanged) otherwise |
@@ -252,8 +252,8 @@ All files of a project compile together as one program (no per-file object and l
 - Outside function bodies, order does not matter: no forward declarations of types are needed. Functions defined in
   a `.cf` are declared in the `.ch` others include.
 - A file sees another file's functions, types and constants only through a `.ch` it includes. The names still share
-  the program: two files may not define the same function, type or `const`, and in a namespace even `static` variables
-  and constants collide (a link error); a `static` function is private to its file.
+  the program: two files may not define the same function, type or `const` unless both are `static` (private to their
+  file).
 - A `static` variable in a `.ch` is defined there (the header is a source file); templates and their methods may be
   defined in a `.cf`.
 
@@ -322,8 +322,8 @@ template<F> void Each(const Core::Array<int32>& items, F f) { for (int32 v : ite
 ```
 
 Captures as C++: `[x]`, `[&x]`, `[=]`, `[&]`, `[n = expr]`, `[this]`. Templates take types (`template<T>`), values,
-packs (`template<...Ts>`); a member of a template instance compiles only when used. Default arguments work; a free
-function's default goes on its `.cf` definition as well as its `.ch` declaration (one only in the header is lost).
+packs (`template<...Ts>`); a member of a template instance compiles only when used. Default arguments work: a function's
+default may be on its `.ch` declaration or its `.cf` definition (both: the same expression) and applies to every call.
 
 ## 8. Statements
 
