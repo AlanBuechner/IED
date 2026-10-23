@@ -229,8 +229,10 @@ class ChatCase(ServerTestCase):
 			model["model"] = "script:" + script
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {script or "fake": model}})
 
-	async def chat(self, mode="ask", **extra):
-		created = await self.client.request("chat.create", dict({"wsId": "w1", "mode": mode}, **extra))
+	# Permission "ask" (Plan mode's "plan"), so the cases see approval cards; a new chat's default is "auto".
+	async def chat(self, mode="ask", permission=None, **extra):
+		permission = permission or ("plan" if mode == "plan" else "ask")
+		created = await self.client.request("chat.create", dict({"wsId": "w1", "mode": mode, "permission": permission}, **extra))
 		topic = "chat:" + created["chatId"]
 		await self.client.sub([topic])
 		await self.client.next_frame(topic)

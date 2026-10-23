@@ -156,8 +156,7 @@ namespace Ai
 		return line.ToString();
 	}
 
-	ToolOutcome RunToolCommand(const ToolInvocation& call, const ToolCommand& command, bool whole) {
-		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
+	static Process::StartInfo StartInfoOf(const ToolInvocation& call, const ToolCommand& command) {
 		Process::StartInfo info;
 		if (!command.shell.IsEmpty()) info.shellCommand = command.shell;
 		else {
@@ -168,7 +167,22 @@ namespace Ai
 		info.input = Process::Redirect::Null;
 		info.output = Process::Redirect::Pipe;
 		info.errors = Process::Redirect::Pipe;
-		Process::Child child = Process::Child::Start(info);
+		return info;
+	}
+
+	Process::Child* StartToolCommand(const ToolInvocation& call, const ToolCommand& command, Core::String& problem) {
+		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
+		Process::Child started = Process::Child::Start(StartInfoOf(call, command));
+		if (!started.IsOpen()) {
+			problem = (command.tool + ": the command did not start: ") + started.Error();
+			return nullptr;
+		}
+		return new Process::Child(take(started));
+	}
+
+	ToolOutcome RunToolCommand(const ToolInvocation& call, const ToolCommand& command, bool whole) {
+		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
+		Process::Child child = Process::Child::Start(StartInfoOf(call, command));
 		if (!child.IsOpen()) return ToolError((((command.tool + ": the command did not start: ") + child.Error()).View()));
 		Core::String kept;
 		Core::String stopped;
@@ -186,14 +200,18 @@ namespace Ai
 		return outcome;
 	}
 
-	static ToolOutcome ShellRun(const ToolInvocation& call) {
+	ToolCommand ShellCommandOf(const ToolInvocation& call, int64 defaultSeconds, int64 mostSeconds) {
 		ToolCommand command;
 		command.shell = Core::String(call.args.Member("command").AsView());
 		command.cwd = IED::NormalizePath(call.args.Member("cwd").AsView());
-		command.seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
-		if (command.seconds < 1 || command.seconds > kShellMostSeconds) command.seconds = kShellMostSeconds;
+		command.seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : defaultSeconds;
+		if (command.seconds < 1 || command.seconds > mostSeconds) command.seconds = mostSeconds;
 		command.tool = Core::String("shell_run");
-		ToolOutcome outcome = RunToolCommand(call, command, false);
+		return command;
+	}
+
+	static ToolOutcome ShellRun(const ToolInvocation& call) {
+		ToolOutcome outcome = RunToolCommand(call, ShellCommandOf(call, kShellDefaultSeconds, kShellMostSeconds), false);
 		outcome.content = WithHints(outcome.content.View(), CallHints(call));
 		return outcome;
 	}
@@ -476,7 +494,7 @@ namespace Ai
 		return outcome;
 	}
 
-	static ToolOutcome BuildRun(const ToolInvocation& call) {
+	ToolOutcome BuildRun(const ToolInvocation& call) {
 		Core::String task = call.args.Member("task").IsValid() ? Core::String(call.args.Member("task").AsView()) : Core::String("");
 		const int64 seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : 0;
 		Core::String stopped;
@@ -525,7 +543,7 @@ namespace Ai
 		search->run = SearchRun;
 		registry.Add(search);
 		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
-			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}}, \"required\": [\"command\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		shell->plan = ShellPlan;
 		shell->run = ShellRun;
@@ -537,7 +555,7 @@ namespace Ai
 		program->run = ProgramRun;
 		registry.Add(program);
 		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). A test or program that might not end: give timeout_s. Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\", \"timeout_s\": 300})",
-			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"description\": \"a project of the solution; the startup project when left out (one without tests fails test: name the project that has them)\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}}, \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"description\": \"a project of the solution; the startup project when left out (one without tests fails test: name the project that has them)\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once: you are told when it ends\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		build->plan = BuildPlan;
 		build->run = BuildRun;

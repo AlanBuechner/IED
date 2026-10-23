@@ -1,0 +1,423 @@
+include "agents.ch"
+
+namespace Ai
+{
+	static Serialization::DomNode ParseGroups(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	Core::Array<AgentSpec*> GroupAgents(Core::StringView groupsJson, Core::StringView group) {
+		Core::Array<AgentSpec*> agents;
+		Core::String groupName = Core::String(group);
+		Serialization::DomNode list = ParseGroups(groupsJson).Member(groupName.CStr()).Member("agents");
+		for (int64 i = 0; list.Kind() == Serialization::DomKind::Object && i < list.Count(); ++i) {
+			Serialization::DomNode entry = list.ValueAt(i);
+			AgentSpec* agent = new AgentSpec();
+			if (!ReadRoleEntry(entry, agent->role)) continue;
+			agent->name = Core::String(list.KeyAt(i));
+			agent->description = Core::String(entry.Member("description").AsView());
+			agent->mode = ChatMode::Agent;
+			ReadChatMode(entry.Member("mode").AsView(), agent->mode);
+			Serialization::DomNode calls = entry.Member("calls");
+			for (int64 j = 0; calls.Kind() == Serialization::DomKind::Array && j < calls.Count(); ++j) agent->calls.Push(Core::String(calls.At(j).AsView()));
+			agents.Push(agent);
+		}
+		return agents;
+	}
+
+	Core::Array<AgentSpec*> CallableAgents(const Core::Array<AgentSpec*>& agents, Core::StringView self) {
+		if (self.IsEmpty()) return agents;
+		Core::Array<AgentSpec*> callable;
+		AgentSpec* me = nullptr;
+		for (AgentSpec* agent : agents)
+			if (agent->name.View() == self) me = agent;
+		if (!me) return callable;
+		bool every = false;
+		for (const Core::String& name : me->calls) every = every || name == "*";
+		for (AgentSpec* agent : agents) {
+			if (agent == me) continue;
+			bool named = every;
+			for (const Core::String& name : me->calls) named = named || name == agent->name;
+			if (named) callable.Push(agent);
+		}
+		return callable;
+	}
+
+	Core::Array<AgentSpec*> AgentsOf(Chats* chats, const Chat* chat, const IED::Workspace& ws) {
+		if (chat->group.IsEmpty() && !chat->pinnedModel.IsEmpty()) return Core::Array<AgentSpec*>();
+		Core::String groups = chats->context->Setting(Core::StringView("ai.groups"), WsId(ws));
+		return CallableAgents(GroupAgents(groups.View(), chats->GroupOfChat(chat, ws).View()), chat->agent.View());
+	}
+
+	static void AgentLine(Core::StringBuilder& out, const AgentSpec* agent, const Core::Array<ModelProfile*>& models) {
+		out.Append("- ");
+		out.Append(agent->name.View());
+		out.Append(" (");
+		out.Append(agent->role.model.View());
+		ModelProfile* profile = FindModel(models, agent->role.model.View());
+		if (profile) {
+			out.Append(", ");
+			out.Append(PrivacyName(profile->privacy));
+		}
+		out.Append(", ");
+		out.Append(ChatModeName(agent->mode));
+		out.Append(" mode)");
+		if (!agent->description.IsEmpty()) {
+			out.Append(": ");
+			out.Append(agent->description.View());
+		}
+		out.Append("\n");
+	}
+
+	const char* kDelegationAdvice = "Delegate when it pays: a self-contained, well-specified task that runs while you do something else, or that needs "
+		"another model's strength (a cheap, fast model for bulk edits; a strong one for a review). Do it yourself when it takes a few tool calls "
+		"(a brief costs more), needs this conversation's context, or is the very next step of your own work (you would only wait for it). A brief "
+		"says the goal, the files, the constraints, what done looks like and what to return. Check an agent's answer before you rely on it; prefer "
+		"one agent to several, and never give two the same work.";
+
+	Core::String AgentsSection(const Core::Array<AgentSpec*>& agents, const Core::Array<ModelProfile*>& models) {
+		if (agents.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("You can run these agents of your model group with agent_run. Each runs as a chat of its own, in the background, and its answer comes back to you when it ends:\n\n");
+		for (const AgentSpec* agent : agents) AgentLine(out, agent, models);
+		out.Append("\n");
+		out.Append(kDelegationAdvice);
+		out.Append(" agent_list shows how each has done in this workspace.");
+		return out.ToString();
+	}
+
+	// --- Each agent's record (.ied/local/agents.json) ------------------------------------------------------------------
+
+	static FS::Path RecordsFile(const IED::Workspace& ws) { return LocalStateOf(ws) / "agents.json"; }
+
+	static Serialization::DomNode ReadRecords(const IED::Workspace& ws) {
+		FS::Path file = RecordsFile(ws);
+		if (!FS::FileExists(file.CStr())) return ParseGroups(Core::StringView("{}"));
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return ParseGroups(opened.IsOpen() ? opened.ReadText().View() : Core::StringView("{}"));
+	}
+
+	static Core::Array<int64> Numbers(const Serialization::DomNode& list) {
+		Core::Array<int64> numbers;
+		for (int64 i = 0; list.Kind() == Serialization::DomKind::Array && i < list.Count(); ++i) numbers.Push(list.At(i).AsInt());
+		return numbers;
+	}
+
+	static void WriteNumbers(IED::JsonWriter& json, const char* key, const Core::Array<int64>& numbers) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		const int64 first = numbers.Count() > kAgentRecordKept ? numbers.Count() - kAgentRecordKept : 0;
+		for (int64 i = first; i < numbers.Count(); ++i) json.Int(numbers[i]);
+		json.EndArray();
+	}
+
+	// A record with one more run when `state` is not empty: its counts, and its times and tokens with `ms` and `tokens`.
+	static void WriteRecord(IED::JsonWriter& json, const Serialization::DomNode& record, Core::StringView state, int64 ms, int64 tokens) {
+		const bool more = !state.IsEmpty();
+		json.BeginObject();
+		json.IntField("runs", record.Member("runs").AsInt() + (more ? 1 : 0));
+		json.IntField("done", record.Member("done").AsInt() + (state == "done" ? 1 : 0));
+		json.IntField("failed", record.Member("failed").AsInt() + (state == "failed" ? 1 : 0));
+		json.IntField("stopped", record.Member("stopped").AsInt() + (state == "stopped" ? 1 : 0));
+		Core::Array<int64> times = Numbers(record.Member("ms"));
+		Core::Array<int64> spent = Numbers(record.Member("tokens"));
+		if (more) {
+			times.Push(ms);
+			spent.Push(tokens);
+		}
+		WriteNumbers(json, "ms", times);
+		WriteNumbers(json, "tokens", spent);
+		json.EndObject();
+	}
+
+	// One more run of agent `key` ("<group>/<agent>") that ended `state` after `ms`, `tokens` read and written.
+	static void RecordRun(const IED::Workspace& ws, Core::StringView key, Core::StringView state, int64 ms, int64 tokens) {
+		Serialization::DomNode records = ReadRecords(ws);
+		IED::JsonWriter json;
+		json.BeginObject();
+		bool found = false;
+		for (int64 i = 0; records.Kind() == Serialization::DomKind::Object && i < records.Count(); ++i) {
+			const bool mine = records.KeyAt(i) == key;
+			found = found || mine;
+			json.Key(records.KeyAt(i));
+			WriteRecord(json, records.ValueAt(i), mine ? state : Core::StringView(""), ms, tokens);
+		}
+		if (!found) {
+			json.Key(key);
+			WriteRecord(json, ParseGroups(Core::StringView("{}")), state, ms, tokens);
+		}
+		json.EndObject();
+		FS::Path file = RecordsFile(ws);
+		FS::MakeDirectories(file.Parent().CStr());
+		FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+
+	static int64 Median(Core::Array<int64> numbers) {
+		if (numbers.IsEmpty()) return 0;
+		for (int64 i = 1; i < numbers.Count(); ++i)
+			for (int64 j = i; j > 0 && numbers[j - 1] > numbers[j]; --j) {
+				const int64 swap = numbers[j];
+				numbers[j] = numbers[j - 1];
+				numbers[j - 1] = swap;
+			}
+		return numbers[numbers.Count() / 2];
+	}
+
+	static Core::String Tokens(int64 tokens) {
+		Core::StringBuilder out;
+		if (tokens < 1000) out.AppendInt(tokens);
+		else {
+			out.AppendInt(tokens / 1000);
+			out.Append(".");
+			out.AppendInt((tokens % 1000) / 100);
+			out.Append("k");
+		}
+		return out.ToString();
+	}
+
+	static void RecordText(Core::StringBuilder& out, const Serialization::DomNode& record) {
+		const int64 runs = record.Member("runs").AsInt();
+		if (runs == 0) {
+			out.Append("  No runs in this workspace yet.\n");
+			return;
+		}
+		out.Append("  In this workspace: ");
+		out.AppendInt(runs);
+		out.Append(runs == 1 ? " run - " : " runs - ");
+		out.AppendInt(record.Member("done").AsInt());
+		out.Append(" finished, ");
+		out.AppendInt(record.Member("failed").AsInt());
+		out.Append(" failed, ");
+		out.AppendInt(record.Member("stopped").AsInt());
+		out.Append(" stopped; median ");
+		out.Append(TaskDuration(Median(Numbers(record.Member("ms")))).View());
+		out.Append(" and ");
+		out.Append(Tokens(Median(Numbers(record.Member("tokens")))).View());
+		out.Append(" tokens a run.\n");
+	}
+
+	// --- A sub-agent's turn ended --------------------------------------------------------------------------------------
+
+	void Chats::AgentTurnEnded(Chat* chat) {
+		if (chat->parentChatId.IsEmpty() || !chat->Current()) return;
+		Chat* parent = nullptr;
+		for (Chat* each : chats)
+			if (each->chatId == chat->parentChatId) parent = each;
+		if (!parent) return;
+		const Turn* turn = chat->Current();
+		for (BackgroundTask* task : parent->background) {
+			if (!task->Running() || task->agentChatId != chat->chatId) continue;
+			task->endedMs = ChatNowMs();
+			task->state = Core::String(turn->stop == "finished" ? "done" : turn->stop == "user_cancelled" ? "stopped" : "failed");
+			Core::StringBuilder summary;
+			summary.Append(turn->stop == "finished" ? "finished" : turn->stop == "user_cancelled" ? "stopped" : "ended");
+			if (turn->stop != "finished" && turn->stop != "user_cancelled") {
+				summary.Append(" (");
+				summary.Append(turn->stop.View());
+				summary.Append(")");
+			}
+			summary.Append(" on ");
+			summary.Append(turn->model.View());
+			summary.Append(", ");
+			summary.Append(Tokens(turn->tokensIn).View());
+			summary.Append(" tokens of context, ");
+			summary.Append(Tokens(turn->tokensOut).View());
+			summary.Append(" written");
+			task->summary = summary.ToString();
+			Core::String answer = AnswerOf(turn);
+			task->output = answer.IsEmpty() ? Core::String("(it gave no answer; chat_read it, or chat_send it a question)") : IED::BoundedText(Core::StringView(""), answer.View(), kBackgroundKeptBytes);
+			RecordRun(WorkspaceOf(chat), (chat->group + "/" + chat->agent.View()).View(), task->state.View(), task->endedMs - task->startedMs, turn->tokensIn + turn->tokensOut);
+			BackgroundEnded(parent, task);
+		}
+	}
+
+	// --- The tools -----------------------------------------------------------------------------------------------------
+
+	static ToolOutcome ListRun(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		Core::Array<AgentSpec*> agents = AgentsOf(chats, chat, call.ws);
+		if (agents.IsEmpty()) return ToolResult(Core::StringView("This chat runs no agents: its model group has none it may run, or it runs on a single model."), Core::StringView("none"));
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(call.context->Setting(Core::StringView("ai.models"), WsId(call.ws)).View(), problems);
+		Serialization::DomNode records = ReadRecords(call.ws);
+		Core::String group = chats->GroupOfChat(chat, call.ws);
+		Core::StringBuilder out;
+		out.Append("Agents this chat may run (group \"");
+		out.Append(group.View());
+		out.Append("\"):\n");
+		for (const AgentSpec* agent : agents) {
+			AgentLine(out, agent, models);
+			Core::String key = (group + "/") + agent->name.View();
+			RecordText(out, records.Member(key.CStr()));
+			for (BackgroundTask* task : chat->background) {
+				if (!task->Running() || task->kind != "agent" || !task->title.View().StartsWith((agent->name + ":").View())) continue;
+				out.Append("  Running now: ");
+				out.Append(task->taskId.View());
+				out.Append(" (chat ");
+				out.Append(task->agentChatId.View());
+				out.Append(").\n");
+			}
+		}
+		out.Append("\n");
+		out.Append(kDelegationAdvice);
+		Core::StringBuilder preview;
+		preview.AppendInt(agents.Count());
+		preview.Append(agents.Count() == 1 ? " agent" : " agents");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	static AgentSpec* AgentNamed(const Core::Array<AgentSpec*>& agents, Core::StringView name) {
+		for (AgentSpec* agent : agents)
+			if (agent->name.View() == name) return agent;
+		return nullptr;
+	}
+
+	static Core::String Names(const Core::Array<AgentSpec*>& agents) {
+		Core::StringBuilder out;
+		for (const AgentSpec* agent : agents) {
+			if (out.ByteLength() > 0) out.Append(", ");
+			out.Append(agent->name.View());
+		}
+		return out.ToString();
+	}
+
+	// The sub-agent chat `id` this chat ran as `agent`, or null with why.
+	static Chat* EarlierRun(Chats* chats, const Chat* chat, Core::StringView id, Core::StringView agent, Core::String& problem) {
+		for (Chat* each : chats->InWorkspace(chat->wsId.View()))
+			if (each->chatId.View() == id && each->parentChatId == chat->chatId && each->agent.View() == agent) return each;
+		problem = ((Core::String("agent_run: ") + id) + " is not a chat this chat ran as ") + agent;
+		return nullptr;
+	}
+
+	static Core::String AgentTitle(Core::StringView agent, Core::StringView task) {
+		Core::StringView line = task.Trimmed();
+		const int64 end = line.IndexOf('\n', 0);
+		if (end >= 0) line = line.Substring(0, end);
+		if (line.ByteLength() > 60) {
+			int64 cut = 60;
+			while (cut > 0 && ((uint8)line.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+			line = line.Substring(0, cut);
+		}
+		return (Core::String(agent) + ": ") + line;
+	}
+
+	static ToolOutcome RunAgent(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		Core::StringView name = call.args.Member("agent").AsView();
+		Core::StringView brief = call.args.Member("task").AsView();
+		Core::Array<AgentSpec*> agents = AgentsOf(chats, chat, call.ws);
+		AgentSpec* agent = AgentNamed(agents, name);
+		if (!agent) return ToolError((((Core::String("agent_run: there is no agent ") + name) + " this chat may run; it may run: ") + (agents.IsEmpty() ? Core::String("none") : Names(agents)).View()).View());
+		int64 running = 0;
+		for (BackgroundTask* task : chat->background)
+			if (task->Running() && task->kind == "agent") running += 1;
+		if (running >= kAgentsRunningMost) return ToolError(Core::StringView("agent_run: 4 agents of this chat are running; wait for one to end (background_wait) before you start another"));
+		const int64 hops = chat->Current() ? chat->Current()->hops + 1 : 1;
+		if (hops > kChatHopsMost) return ToolError(Core::StringView("agent_run: chats have run each other 3 times in a row; do this yourself"));
+		Chat* target = nullptr;
+		Core::StringView earlier = call.args.Member("chat").AsView();
+		if (!earlier.IsEmpty()) {
+			Core::String problem;
+			target = EarlierRun(chats, chat, earlier, name, problem);
+			if (!target) return ToolError(problem.View());
+		}
+		else {
+			target = chats->Create(call.ws, AgentTitle(name, brief).View(), agent->mode, chats->GroupOfChat(chat, call.ws).View());
+			target->agent = Core::String(name);
+			target->parentChatId = chat->chatId;
+			target->permission = chat->permission;
+			chats->Changed(target);
+		}
+		BackgroundTask* task = chats->StartBackground(chat, Core::StringView("agent"), AgentTitle(name, brief).View());
+		task->agentChatId = target->chatId;
+		chats->BackgroundChanged(chat);
+		chats->Deliver(target, brief, chat, hops);
+		Core::StringBuilder out;
+		out.Append("Started agent ");
+		out.Append(name);
+		out.Append(" (");
+		out.Append(agent->role.model.View());
+		out.Append(") in chat ");
+		out.Append(target->chatId.View());
+		out.Append(" as background task ");
+		out.Append(task->taskId.View());
+		out.Append(". Go on with other work: its answer comes to you when it ends (background_wait ");
+		out.Append(task->taskId.View());
+		out.Append(" if you cannot go on without it).");
+		if (brief.Trimmed().ByteLength() < kAgentBriefShortBytes)
+			out.Append(" The brief is short: the agent starts with none of this conversation. If it lacks the goal, the files, what done looks like or what to return, background_stop it and run it again with those.");
+		return ToolResult(out.View(), (task->taskId + " " + name).View());
+	}
+
+	static ToolPlan AgentPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = (Core::String("agent.run(") + call.args.Member("agent").AsView()) + ")";
+		plan.summary = (Core::String("Run agent ") + call.args.Member("agent").AsView()) + " on a task";
+		return plan;
+	}
+
+	static ToolPlan ListPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = Core::String("agent.list(*)");
+		plan.summary = Core::String("List the agents");
+		return plan;
+	}
+
+	static Core::String RunParameters(const Core::Array<AgentSpec*>& agents) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("type", "object");
+		json.Key(Core::StringView("properties"));
+		json.BeginObject();
+		json.Key(Core::StringView("agent"));
+		json.BeginObject();
+		json.Key(Core::StringView("enum"));
+		json.BeginArray();
+		for (const AgentSpec* agent : agents) json.String(agent->name.View());
+		json.EndArray();
+		json.EndObject();
+		json.Key(Core::StringView("task"));
+		json.BeginObject();
+		json.Field("type", "string");
+		json.Field("description", "the brief: the goal, the files, the constraints, what done looks like and what to return");
+		json.EndObject();
+		json.Key(Core::StringView("chat"));
+		json.BeginObject();
+		json.Field("type", "string");
+		json.Field("description", "a sub-agent chat of this agent that ran before (its id): it keeps what it learned");
+		json.EndObject();
+		json.EndObject();
+		json.Key(Core::StringView("required"));
+		json.BeginArray();
+		json.String(Core::StringView("agent"));
+		json.String(Core::StringView("task"));
+		json.EndArray();
+		json.BoolField("additionalProperties", false);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void AddAgentTools(ToolRegistry& registry, Chats* chats, Chat* chat, const IED::Workspace& ws) {
+		Core::Array<AgentSpec*> agents = AgentsOf(chats, chat, ws);
+		if (agents.IsEmpty()) return;
+		ToolSpec* list = new ToolSpec();
+		list->name = Core::String("agent_list");
+		list->description = Core::String("The agents of your model group you may run: each one's model, mode and what it is for, how its runs in this workspace ended (finished, failed, stopped), its median time and tokens, and which run now.");
+		list->parameters = Core::String("{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}");
+		list->toolClass = ToolClass::Read;
+		list->parallelSafe = true;
+		list->inPlan = true;
+		list->plan = ListPlan;
+		list->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return ListRun(chats, chat, call); };
+		registry.Add(list);
+		ToolSpec* run = new ToolSpec();
+		run->name = Core::String("agent_run");
+		run->description = Core::String("Run an agent of your model group on a task, in the background, as a chat of its own; its answer comes back to you when it ends. Give it a complete brief: it starts with none of this conversation. chat: continue a sub-agent chat that ran before. Example: agent_run({\"agent\": \"reviewer\", \"task\": \"Review the diff of src/net/ring.cf for off-by-one errors and races; answer with each problem as path:line and why.\"})");
+		run->parameters = RunParameters(agents);
+		run->toolClass = ToolClass::Exec;
+		run->plan = AgentPlan;
+		run->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return RunAgent(chats, chat, call); };
+		registry.Add(run);
+	}
+}

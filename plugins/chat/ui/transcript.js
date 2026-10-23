@@ -120,6 +120,8 @@ export class TranscriptView {
 	userHead(turn) {
 		const from = turn.user && turn.user.from;
 		const resumed = turn.user && turn.user.resumed;
+		if (turn.user && turn.user.origin === "background") return h("div.chat-head.from", { title: "IED started this turn to tell the AI that background tasks it started have ended" },
+			icon("history"), h("b", null, "Background tasks"), h("span.muted", null, "ended"), h("span.muted", null, clock(turn.startedMs)));
 		if (resumed) return h("div.chat-head.from", { title: resumed === "relaunch" ? "IED relaunched onto a new build and continued this chat" : "IED restarted while this chat ran and continued it" },
 			icon("debug-restart"), h("b", null, "IED"), h("span.muted", null, resumed === "relaunch" ? "after relaunching" : "after a restart"), h("span.muted", null, clock(turn.startedMs)));
 		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs)));

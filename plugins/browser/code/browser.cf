@@ -407,6 +407,48 @@ namespace Browser
 		Persist(page->wsId.View());
 	}
 
+	bool Browsers::CloseByPerson(Page* page) {
+		Core::String chatId;
+		{
+			IED::HostLock lock(*context);
+			chatId = page->chatId;
+		}
+		if (chatId.IsEmpty() || !ChatRunning(chatId.View())) {
+			Close(page);
+			return true;
+		}
+		{
+			IED::HostLock lock(*context);
+			page->released = true;
+			page->releasedNs = clock_now_ns();
+		}
+		Persist(page->wsId.View());
+		return false;
+	}
+
+	bool Browsers::ChatRunning(Core::StringView chatId) {
+		IED::Result state = IED::CallBinding(Core::StringView("chat.state"), (Core::String("{\"chatId\":") + JsonText(chatId).View() + "}").View());
+		if (!state.Ok()) return false;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(state.json.View(), *doc);
+		return parsed.Ok() && parsed.root.Member("running").IsValid() && parsed.root.Member("running").AsBool();
+	}
+
+	void Browsers::CloseReleasedPages() {
+		Core::Array<Page*> released;
+		Core::Array<Core::String> chats;
+		{
+			IED::HostLock lock(*context);
+			for (Page* page : pages) {
+				if (!page->released) continue;
+				released.Push(page);
+				chats.Push(page->chatId);
+			}
+		}
+		for (int64 i = 0; i < released.Count(); ++i)
+			if (!ChatRunning(chats[i].View())) Close(released[i]);
+	}
+
 	void Browsers::Unloaded(Page* page) {
 		{
 			Threading::LockGuard routes(frames);
@@ -472,6 +514,13 @@ namespace Browser
 	}
 
 	Core::String Browsers::Frame(Page* page, int64 after) {
+		{
+			IED::HostLock lock(*context);
+			if (page->released && clock_now_ns() - page->releasedNs > kReleaseGraceNs) {
+				page->released = false;
+				Persist(page->wsId.View());
+			}
+		}
 		Load(page);
 		const int64 deadline = clock_now_ns() + kFrameWaitNs;
 		for (;;) {
@@ -540,6 +589,7 @@ namespace Browser
 				}
 			}
 			StopIdleScreencasts();
+			CloseReleasedPages();
 			UnloadIdlePages();
 		}
 	}

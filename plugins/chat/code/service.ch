@@ -12,6 +12,7 @@ include "probe.ch"
 include "claudeaccount.ch"
 include "claudesession.ch"
 include "resume.ch"
+include "contextmeter.ch"
 
 namespace Ai
 {
@@ -38,7 +39,8 @@ namespace Ai
 		// A turn for `message` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner;
 		// `resumed` why IED starts it itself after a restart (resume.ch), "" for a message.
 		public void StartTurn(Chat* chat, const OwnerMessage& message);
-		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops, const char* resumed = "");
+		// `origin` "background": IED starts it to tell of background tasks that ended.
+		public void StartTurn(Chat* chat, const OwnerMessage& message, const Chat* from, int64 hops, const char* resumed = "", const char* origin = "");
 		// The workspace's chats.
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
 		// A new chat in `ws`, published on its chats: topic.
@@ -49,12 +51,35 @@ namespace Ai
 		// A turn ended: the next queued message, if the turn finished, starts the next.
 		public void TurnEnded(Chat* chat);
 		public Core::String ModelOf(const Chat* chat) const;
+		// The group the chat runs in: its own, else ai.defaultGroup, else the first group.
+		public Core::String GroupOfChat(const Chat* chat, const IED::Workspace& ws) const;
+		// A sub-agent chat's turn ended: its parent's task for it ends with its answer (agents.cf).
+		public void AgentTurnEnded(Chat* chat);
 		// What the chat's next turn starts on: the model its chain's pace order puts first (its first model when Claude is
 		// used up, "" for none), with its group and that role's effort. Inside the host lock.
 		public Core::String NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const;
 		// The chat's Claude session (docs/04 "A chat's session"), made from what its header kept the first time this
 		// server run asks.
 		public ClaudeSession* SessionOf(Chat* chat);
+		// The context window of `profile`: its own contextWindow, or what its server or the CLI reported when that is
+		// smaller or the profile names none; 0 when nothing said.
+		public int64 WindowOf(const ModelProfile* profile) const;
+		// A window a server, the CLI or an error reported for `model`, kept in the plugin's state folder so the next
+		// server run knows it before asking; whether it changed.
+		public bool LearnWindow(Core::StringView model, int64 window);
+
+		// Background tasks (background.cf, docs/04 "Background tasks"); inside the host lock. A new running task of
+		// `chat`, published.
+		public BackgroundTask* StartBackground(Chat* chat, Core::StringView kind, Core::StringView title);
+		// `task` ended, its fields set: its chat is told - a running turn at its next step, an idle chat by a turn of its own.
+		public void BackgroundEnded(Chat* chat, BackgroundTask* task);
+		// The tasks that ended and were not told, now told: the note that tells the model; "" for none.
+		public Core::String TellEnded(Chat* chat);
+		public bool HasUntold(const Chat* chat) const;
+		// background.changed with the chat's tasks, and chat.changed (its summary counts the running ones).
+		public void BackgroundChanged(Chat* chat);
+		// Asks a running task to stop: a command is killed, a project's task cancelled, an agent's turn stopped.
+		public void StopBackground(BackgroundTask* task);
 
 		public IED::PluginContext* context;
 		public ClaudeAccount* claude;                              // the plan's usage (docs/04 "Usage")
@@ -62,12 +87,17 @@ namespace Ai
 		public ToolRegistry* tools;
 		public Core::HashMap<Core::String, double> prefillRates;   // model -> prompt tokens per second, measured
 		public Core::HashMap<Core::String, int64> windows;         // model -> context size its server reported or an error named
-		public Core::HashMap<Core::String, bool> probed;           // models whose server was asked (docs/12 discovery)
+		public Core::HashMap<Core::String, bool> probed;           // models whose server answered the ask (docs/12 discovery)
+		public Core::HashMap<Core::String, int64> probeFailedMs;   // models whose server did not, and when
 		public Core::HashMap<Core::String, bool> llamaCpp;         // models llama.cpp serves: they stream prompt progress and read effort in the template
 		public Core::HashMap<Core::String, bool> seesImages;       // models whose server takes images (llama.cpp's modalities)
 
 	private:
 		private Core::String Snapshot(Chat* chat);
+		private void LoadWindows();
+		private void WakeForBackground(Chat* chat);
+		// The context meter of an idle chat redrawn for the window of `model`, the one its next turn starts on.
+		private void MeterFor(Chat* chat, const IED::Workspace& ws, Core::StringView model);
 		private void QueueChanged(Chat* chat);
 		private Core::String ListSnapshot(Core::StringView wsId);
 		private void AddTopic(Chat* chat);
@@ -82,6 +112,7 @@ namespace Ai
 		private Core::String SendMethod(const IED::Request& request);
 		private Core::String UnqueueMethod(const IED::Request& request);
 		private Core::String StopMethod(const IED::Request& request);
+		private Core::String StopTaskMethod(const IED::Request& request);
 		private Core::String ApproveMethod(const IED::Request& request);
 		private Core::String AnswerMethod(const IED::Request& request);
 		private Core::String HistoryMethod(const IED::Request& request);

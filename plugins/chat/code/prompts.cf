@@ -59,6 +59,10 @@ namespace Ai
 			out.Append("\n\n# From the workspace's plugins\n\n");
 			out.Append(context.sections.View());
 		}
+		if (!context.agents.IsEmpty()) {
+			out.Append("\n\n# Sub-agents\n\n");
+			out.Append(context.agents.View());
+		}
 		out.Append("\n\n# Workspace\n\n");
 		out.Append(context.workspace.View());
 		if (!context.deferred.IsEmpty()) {

@@ -340,15 +340,22 @@ namespace Ai
 		result->error = ((Core::String("Claude Code: ") + error) + ": ") + said.View();
 	}
 
+	// modelUsage names each model the query used by its id: the turn's model's entry, else the first with a window.
 	void TurnRun::ClaudeResult(ClaudeLine* line) {
 		Serialization::DomNode usage = line->root.Member("modelUsage");
-		for (int64 i = 0; usage.Kind() == Serialization::DomKind::Object && i < usage.Count(); ++i) {
-			const int64 window = usage.ValueAt(i).Member("contextWindow").AsInt();
-			if (window <= 0) continue;
-			IED::HostLock guard(*context);
-			chats->windows.At(candidates[candidate]->name) = window;
-			return;
+		if (usage.Kind() != Serialization::DomKind::Object) return;
+		const Core::String model = ClaudeModel();
+		int64 window = 0;
+		for (int64 i = 0; i < usage.Count(); ++i) {
+			const int64 each = usage.ValueAt(i).Member("contextWindow").AsInt();
+			if (each <= 0) continue;
+			if (window == 0 || usage.KeyAt(i).Contains(model.View())) window = each;
 		}
+		IED::HostLock guard(*context);
+		ModelProfile* profile = candidates[candidate];
+		if (!chats->LearnWindow(profile->name.View(), window) || chat->context.IsEmpty()) return;
+		chat->context = ContextForModel(chat->context.View(), Window(), profile->name.View(), true);
+		chats->Publish(chat, "context.changed", chat->context.View());
 	}
 
 	void TurnRun::DrainClaude() {
@@ -399,9 +406,15 @@ namespace Ai
 		TurnRun* self = this;
 		if (claude->Running() && claude->querying && stop == "finished" && !run->cancelled) {
 			StepEvents events = [self](StepEventKind kind, Core::StringView delta, int64 call) { self->OnEvent(kind, delta, call); };
-			ClaudeStep(events);
+			int64 estimateBefore = 0;
+			{
+				IED::HostLock guard(*context);
+				estimateBefore = EstimateTokens();
+			}
+			StepResult* last = ClaudeStep(events);
 			IED::HostLock guard(*context);
 			CloseStreaming();
+			Account(last, 0, estimateBefore);
 		}
 		claude->Settle(Core::StringView(kClaudeTurnOverNote), true, kClaudeDrainMs, [self](ClaudeLine* line) { self->ClaudeAside(line); });
 		if (claude->Running()) {

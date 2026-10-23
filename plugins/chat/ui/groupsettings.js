@@ -1,28 +1,24 @@
-// groupsettings.js - Settings > AI > Model Groups (docs/04 "Model groups and roles", mockup 04): the groups of ai.groups
-// as a bar (the default one starred), and the chosen group's roles - a model, a temperature, an effort and fallbacks in
-// order. A new group turns on primary alone; a role with nothing set is off, grayed out, and uses the primary's model.
-// A chat's mode picks the role (Ask primary, Plan planning, Agent implementation); the other roles are kept for the
-// features that will use them. A Claude model in a chain - the role's or a fallback - has a pace (docs/04 "Pacing"):
-// always, or while the plan's pace is at most a limit; fallbacks move earlier and go.
+// groupsettings.js - Settings > AI > Model Groups (docs/04 "A group is a topology", mockup 04): the groups of ai.groups
+// as a bar (the default one starred), and the chosen group's topology. Its orchestrator - the chat's own model - has a
+// role per mode, each a model, a temperature, an effort and fallbacks in order: a new group turns on primary alone; a
+// role with nothing set is off, grayed out, and uses the primary's model (Ask primary, Plan planning, Agent
+// implementation). Its sub-agents each have a name, a role, the mode their chat runs in, what they are for (the
+// orchestrator is told) and the agents they may run themselves. A Claude model in a chain - a role's or an agent's, or a
+// fallback - has a pace (docs/04 "Pacing"): always, or while the plan's pace is at most a limit; fallbacks move earlier
+// and go.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
 import { PACE_LIMITS, PACE_TARGETS, fallbackPlaces, paceFromValue, paceLabel, paceValue, storedFallback } from "./pacing.js";
 
+// The orchestrator's roles: [role, what it is for].
 export const ROLES = [
-	["primary", "Ask mode, and roles left off", true],
-	["planning", "Plan mode", true],
-	["implementation", "Agent mode", true],
-	["worker", "sub-agents", false],
-	["research", "sub-agents", false],
-	["verifier", "independent check", false],
-	["summarizer", "compression", false],
-	["titler", "titles, commit messages", false],
-	["vision", "images, video frames", false],
-	["completion", "ghost text (FIM)", false],
-	["inline", "Ctrl+I edits", false],
+	["primary", "Ask mode, and modes left off"],
+	["planning", "Plan mode"],
+	["implementation", "Agent mode"],
 ];
 const EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
+const AGENT_MODES = ["agent", "ask", "plan"];
 
 // The model a role gets when it is turned on: the group's primary's, else the first one.
 export function roleDefault(group, models) {
@@ -56,6 +52,40 @@ export function withRole(group, role, change) {
 	return next;
 }
 
+// `group` with sub-agent `name` changed by `change` ({model, mode, description, calls, temperature, effort, fallback});
+// empty fields are dropped.
+export function withAgent(group, name, change) {
+	const agents = Object.assign({}, group.agents || {});
+	const entry = Object.assign({}, agents[name] || {}, change);
+	for (const key of Object.keys(entry)) if (entry[key] === undefined || entry[key] === "" || (Array.isArray(entry[key]) && !entry[key].length)) delete entry[key];
+	agents[name] = entry;
+	return Object.assign({}, group, { agents });
+}
+
+// `group` without sub-agent `name`, which no other agent calls any more.
+export function withoutAgent(group, name) {
+	const agents = {};
+	for (const [other, entry] of Object.entries(group.agents || {})) {
+		if (other === name) continue;
+		agents[other] = entry.calls ? Object.assign({}, entry, { calls: entry.calls.filter((c) => c !== name) }) : entry;
+		if (agents[other].calls && !agents[other].calls.length) delete agents[other].calls;
+	}
+	const next = Object.assign({}, group, { agents });
+	if (!Object.keys(agents).length) delete next.agents;
+	return next;
+}
+
+// `group` with sub-agent `from` named `to`, in its place and in the agents that call it; unchanged when `to` is taken.
+export function withAgentRenamed(group, from, to) {
+	if (!to || from === to || (group.agents || {})[to]) return group;
+	const agents = {};
+	for (const [name, entry] of Object.entries(group.agents || {})) {
+		const calls = entry.calls ? entry.calls.map((c) => (c === from ? to : c)) : undefined;
+		agents[name === from ? to : name] = calls ? Object.assign({}, entry, { calls }) : entry;
+	}
+	return Object.assign({}, group, { agents });
+}
+
 export class ModelGroupsPage {
 	constructor(ctx) {
 		this.ctx = ctx;
@@ -67,7 +97,7 @@ export class ModelGroupsPage {
 		replace(ctx.el,
 			h("div.set-crumbs", null, "AI \u203a Model Groups \u00b7 ", h("span.mono", null, "ai.groups")),
 			h("h1", null, "Model Groups"),
-			h("p.set-lead", null, "A group gives every role a model, a temperature, an effort and fallbacks. Chats pick a group, and a chat's mode picks the role: Ask uses primary, Plan planning, Agent implementation. A turn tries its role's model, then the fallbacks in order; a Claude model with a pace is passed over while your plan runs ahead of it, so the week or the 5-hour session lasts (a cheaper model or a local one takes the turn). The starred group is the default (ai.defaultGroup)."),
+			h("p.set-lead", null, "A group is a topology: an orchestrator - the chat's own model - and the sub-agents it runs. A chat runs on a group or on one model (the composer's Model menu). The orchestrator's role follows the chat's mode: Ask uses primary, Plan planning, Agent implementation. A turn tries its role's model, then the fallbacks in order; a Claude model with a pace is passed over while your plan runs ahead of it, so the week or the 5-hour session lasts (a cheaper model or a local one takes the turn). The starred group is the default (ai.defaultGroup)."),
 			this.bar, this.table);
 		this.stop = this.settings.onChange(() => this.render());
 		this.render();
@@ -147,13 +177,23 @@ export class ModelGroupsPage {
 			return;
 		}
 		const models = this.models();
+		const description = h("input.input-field.set-group-about", { "aria-label": "What this group is for", placeholder: "What this group is for (the Model menu shows it)", value: group.description || "", spellcheck: "true" });
+		description.addEventListener("change", () => this.save(Object.assign({}, group, { description: description.value.trim() || undefined })));
+		const agents = Object.entries(group.agents || {});
 		replace(this.table,
+			description,
+			h("h2.set-sub", null, "Orchestrator"),
 			h("div.set-role.head", null, h("span"), h("span", null, "Role"), h("span", null, "Model"), h("span", null, "Pace (Claude)"), h("span", null, "Temp"), h("span", null, "Effort")),
-			...ROLES.map(([role, what, used]) => this.roleRow(group, role, what, used, models)));
+			...ROLES.map(([role, what]) => this.roleRow(group, role, what, models)),
+			h("h2.set-sub", null, "Sub-agents"),
+			h("p.set-lead", null, "The orchestrator runs these with agent_run, each as a chat of its own in the background, and hears its answer when it ends. It is told what each is for, so say it plainly: what it is good at, what it is not. An agent runs the agents its Calls names. A chat on a single model runs none."),
+			agents.length ? h("div.set-role.set-agent.head", null, h("span", null, "Agent"), h("span", null, "Model"), h("span", null, "Pace (Claude)"), h("span", null, "Mode"), h("span", null, "Temp"), h("span", null, "Effort"), h("span")) : null,
+			...agents.map(([name, entry]) => this.agentRow(group, name, entry, models)),
+			h("div.set-bar", null, h("button.btn.set-add-agent", { disabled: !models.length, on: { click: () => this.addAgent(group, models) } }, icon("add"), "Add agent")));
 	}
 
 	// A role is on while it has a model; an off role is grayed out with its controls locked until it is turned on.
-	roleRow(group, role, what, used, models) {
+	roleRow(group, role, what, models) {
 		const entry = group[role] || {};
 		const on = Boolean(entry.model);
 		const locked = on ? {} : { disabled: true };
@@ -184,12 +224,69 @@ export class ModelGroupsPage {
 		const add = h("select.input-field.set-add", { "aria-label": role + " add a fallback", on: { change: (event) => {
 			if (event.target.value) setPlaces(places.concat({ model: event.target.value }));
 		} } }, h("option", { value: "" }, "+"), ...models.filter((m) => m !== entry.model && !places.some((place) => place.model === m)).map((m) => h("option", { value: m }, m)));
-		const state = on ? what + (used ? "" : " (not used yet)") : role === "primary" ? "off: chats use the first model" : "off: uses primary";
+		const state = on ? what : role === "primary" ? "off: chats use the first model" : "off: uses primary";
 		return h("div.set-role" + (on ? "" : ".off"), { dataset: { role, state: on ? "on" : "off" } },
 			toggle,
 			h("span.set-role-name", null, h("b", null, role), h("span.muted", null, state)),
 			model, pace, temperature, effort,
 			h("span.set-chips", null, entry.model ? h("span.set-then", null, places.length ? "then" : "no fallbacks") : null, ...places.map((place, i) => this.placeChip(place, i, places, setPlaces)), entry.model ? add : null));
+	}
+
+	// A sub-agent: its name, model, pace, mode, temperature and effort; what it is for; the agents it calls; its fallbacks.
+	agentRow(group, name, entry, models) {
+		const change = (patch) => this.save(withAgent(group, name, patch));
+		const label = "Agent " + name;
+		const nameField = h("input.input-field.set-agent-name", { "aria-label": label + " name", value: name, spellcheck: "false" });
+		nameField.addEventListener("change", () => {
+			const next = nameField.value.trim();
+			if (next && next !== name && (group.agents || {})[next]) this.ctx.ied.toast("There is an agent " + next + " already.", { level: "warn" });
+			this.save(withAgentRenamed(group, name, next));
+		});
+		const model = h("select.input-field.set-role-model", { "aria-label": label + " model", on: { change: (event) => change({ model: event.target.value, pace: this.isClaude(event.target.value) ? entry.pace : undefined }) } },
+			...models.map((m) => h("option", Object.assign({ value: m }, entry.model === m ? { selected: true } : {}), m)),
+			entry.model && !models.includes(entry.model) ? h("option", { value: entry.model, selected: true }, entry.model + " (not in Models)") : null);
+		const pace = this.isClaude(entry.model) ? this.paceSelect(label + " pace", entry.pace, (next) => change({ pace: next })) : h("span.set-role-pace.muted", null, "-");
+		const mode = h("select.input-field.set-agent-mode", { "aria-label": label + " mode", on: { change: (event) => change({ mode: event.target.value === "agent" ? undefined : event.target.value }) } },
+			...AGENT_MODES.map((m) => h("option", Object.assign({ value: m }, (entry.mode || "agent") === m ? { selected: true } : {}), m)));
+		const temperature = h("input.input-field.set-num", { "aria-label": label + " temperature", inputmode: "decimal", placeholder: "-", value: entry.temperature === undefined ? "" : String(entry.temperature) });
+		temperature.addEventListener("change", () => {
+			const text = temperature.value.trim();
+			const value = Number(text);
+			if (text && (!Number.isFinite(value) || value < 0 || value > 2)) {
+				temperature.value = entry.temperature === undefined ? "" : String(entry.temperature);
+				this.ctx.ied.toast("A temperature is a number from 0 to 2.", { level: "warn" });
+				return;
+			}
+			change({ temperature: text ? value : undefined });
+		});
+		const effort = h("select.input-field.set-role-effort", { "aria-label": label + " effort", on: { change: (event) => change({ effort: event.target.value || undefined }) } },
+			...EFFORTS.map((e) => h("option", Object.assign({ value: e }, (entry.effort || "") === e ? { selected: true } : {}), e || "-")));
+		const about = h("input.input-field.set-agent-about", { "aria-label": label + " is for", placeholder: "What it is for - the orchestrator reads this", value: entry.description || "", spellcheck: "true" });
+		about.addEventListener("change", () => change({ description: about.value.trim() }));
+		const calls = entry.calls || [];
+		const others = calls.includes("*") ? [] : Object.keys(group.agents || {}).filter((other) => other !== name && !calls.includes(other));
+		const addCall = h("select.input-field.set-add", { "aria-label": label + " calls another agent", on: { change: (event) => {
+			if (event.target.value) change({ calls: event.target.value === "*" ? ["*"] : calls.filter((c) => c !== "*").concat(event.target.value) });
+		} } }, h("option", { value: "" }, "+"), calls.includes("*") ? null : h("option", { value: "*" }, "every agent"), ...others.map((o) => h("option", { value: o }, o)));
+		const places = fallbackPlaces(entry);
+		const setPlaces = (next) => change({ fallback: storedFallback(next) });
+		const addPlace = h("select.input-field.set-add", { "aria-label": label + " add a fallback", on: { change: (event) => {
+			if (event.target.value) setPlaces(places.concat({ model: event.target.value }));
+		} } }, h("option", { value: "" }, "+"), ...models.filter((m) => m !== entry.model && !places.some((place) => place.model === m)).map((m) => h("option", { value: m }, m)));
+		return h("div.set-role.set-agent", { dataset: { agent: name } },
+			nameField, model, pace, mode, temperature, effort,
+			h("button.ib", { title: "Remove " + name, "aria-label": "Remove agent " + name, on: { click: () => this.save(withoutAgent(group, name)) } }, icon("trash")),
+			about,
+			h("span.set-chips", null, h("span.set-then", null, calls.length ? "calls" : "calls no agent"),
+				...calls.map((c) => h("span.chip.set-call", { dataset: { call: c } }, c === "*" ? "every agent" : c,
+					h("button.ib", { title: "Stop calling " + c, "aria-label": "Stop " + name + " calling " + c, on: { click: () => change({ calls: calls.filter((other) => other !== c) }) } }, icon("close")))),
+				addCall),
+			h("span.set-chips", null, h("span.set-then", null, places.length ? "then" : "no fallbacks"), ...places.map((place, i) => this.placeChip(place, i, places, setPlaces)), addPlace));
+	}
+
+	async addAgent(group, models) {
+		const name = freshName(group.agents || {}, "agent");
+		await this.save(withAgent(group, name, { model: roleDefault(group, models) }));
 	}
 
 	// A fallback: its place, its pace when it is a Claude model, Try earlier and Remove.

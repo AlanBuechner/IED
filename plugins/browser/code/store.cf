@@ -20,6 +20,7 @@ namespace Browser
 			json.RawField("scale", ScaleText(page->scalePercent).View());
 			json.Field("opener", page->opener.View());
 			if (!page->chatId.IsEmpty()) json.Field("chatId", page->chatId.View());
+			if (page->released) json.BoolField("released", true);
 			json.EndObject();
 		}
 		json.EndArray();
@@ -55,6 +56,7 @@ namespace Browser
 			page->scalePercent = (int32)(item.Member("scale").AsFloat() * 100.0 + 0.5);
 			page->opener = Core::String(item.Member("opener").AsView() == "ai" ? "ai" : "user");
 			page->chatId = Core::String(item.Member("chatId").AsView());
+			page->released = item.Member("released").IsValid() && item.Member("released").AsBool();
 			if (page->width < 200 || page->height < 150) {
 				page->width = kDefaultPageWidth;
 				page->height = kDefaultPageHeight;

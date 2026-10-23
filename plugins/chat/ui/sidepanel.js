@@ -1,7 +1,9 @@
 // sidepanel.js - the chat's right panel (mockup 02 "breakdown panel"): the context the last request used, by part,
 // against the model's window; the task list the agent keeps (tasks_set / task_update); the files the AI changed in
 // this chat with their lines added and removed, each opening in the editor; the tabs it uses that plugins reported (the
-// pages it drives), each opening as a tab; the AI's clipboard, each clip unfolding to its text. Sections fold.
+// pages it drives), each opening as a tab; its background tasks (docs/04 "Background tasks"), a running one with Stop,
+// each unfolding to its output's end and an agent's opening its chat; the AI's clipboard, each clip unfolding to its
+// text. Sections fold.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { compact, contextBar } from "./chatmodel.js";
@@ -9,12 +11,15 @@ import { compact, contextBar } from "./chatmodel.js";
 const TASK_GLYPHS = { done: "check", skipped: "circle-slash", in_progress: "arrow-right", pending: null };
 const RESOURCE_ICONS = { page: "globe", terminal: "terminal", process: "server-process" };
 
-// actions: {openFile(path), fileIcon(path), openTab(ref), closeDetails()}
+const TASK_STATES = { running: ["loading", "spin", "c-info"], done: ["pass", "", "c-saved"], failed: ["error", "", "c-error"], stopped: ["circle-slash", "", "muted"], lost: ["circle-slash", "", "c-warn"] };
+
+// actions: {openFile(path), fileIcon(path), openTab(ref), openChat(chatId), stopTask(taskId), closeDetails()}
 export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
 		this.closed = new Set();
 		this.openClips = new Set();
+		this.openTasks = new Set();
 		this.title = h("div.panel-title.chat-panel-title");
 		this.body = h("div.chat-panel-body");
 		this.el = h("aside.chat-panel", { "aria-label": "Chat details" }, this.title, this.body);
@@ -23,7 +28,7 @@ export class SidePanel {
 	update(model) {
 		replace(this.title, h("span.ellip", null, (model.summary && model.summary.title) || "Chat"),
 			h("button.ib.chat-phone-only", { title: "Close details", "aria-label": "Close details", on: { click: () => this.actions.closeDetails() } }, icon("close")));
-		replace(this.body, this.contextSection(model), this.tasksSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
+		replace(this.body, this.contextSection(model), this.tasksSection(model), this.backgroundSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
 	}
 
 	// The panel drawn again after a fold or unfold.
@@ -46,9 +51,9 @@ export class SidePanel {
 	contextSection(model) {
 		const bar = contextBar(model.context);
 		if (!model.context) return this.section("context", "Context", "", h("div.chat-sec-empty.muted", null, "Shown after the first request."));
-		const meta = bar.window ? bar.percent + "% of " + compact(bar.window) : compact(bar.used) + " tokens";
+		const meta = (bar.window ? bar.percent + "% of " + compact(bar.window) : compact(bar.used) + " tokens") + (bar.model ? " - " + bar.model : "");
 		const rows = bar.parts.map((part, i) => h("div.chat-sec-row", null, h("span.sw.s" + (i + 1)), h("span.name", null, part.name), h("span.meta", null, compact(part.tokens))));
-		if (bar.window) rows.push(h("div.chat-sec-row", null, h("span.sw.free"), h("span.name.muted", null, "Free (compress at 85%)"), h("span.meta", null, compact(Math.max(bar.window - bar.used, 0)))));
+		if (bar.window) rows.push(h("div.chat-sec-row", null, h("span.sw.free"), h("span.name.muted", null, bar.free), h("span.meta", null, compact(Math.max(bar.window - bar.used, 0)))));
 		const stack = h("div.chat-stack", null, ...bar.parts.map((part, i) => h("i.s" + (i + 1), { style: { width: (part.share * 100).toFixed(2) + "%" } })));
 		return this.section("context", "Context", meta, [stack, ...rows]);
 	}
@@ -77,6 +82,31 @@ export class SidePanel {
 		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
 	}
 
+	// The background tasks the AI started: shown only when it started one; the newest first.
+	backgroundSection(model) {
+		if (!model.background.length) return null;
+		const rows = [];
+		const now = Date.now();
+		for (const task of [...model.background].reverse()) {
+			const open = this.openTasks.has(task.taskId);
+			const toggle = () => {
+				if (open) this.openTasks.delete(task.taskId);
+				else this.openTasks.add(task.taskId);
+				this.toggled();
+			};
+			const [glyph, spin, tone] = TASK_STATES[task.state] || TASK_STATES.lost;
+			const took = task.state === "running" ? "since " + clockOf(task.startedMs) : taskTime((task.endedMs || now) - task.startedMs);
+			rows.push(h("div.chat-sec-row.bg-task", { dataset: { task: task.taskId, state: task.state } },
+				h("button.chat-bg-open", { title: task.title + (task.summary ? " - " + task.summary : ""), "aria-expanded": open ? "true" : "false", on: { click: toggle } },
+					icon(glyph, [spin, tone].filter(Boolean).join(" ")), h("span.name", null, task.title), h("span.meta", null, task.state === "running" ? took : task.summary || task.state)),
+				task.chatId ? h("button.ib", { title: "Open the agent's chat", "aria-label": "Open the agent's chat", on: { click: () => this.actions.openChat(task.chatId) } }, icon("comment-discussion")) : null,
+				task.state === "running" ? h("button.ib", { title: "Stop " + task.taskId, "aria-label": "Stop " + task.taskId, on: { click: () => this.actions.stopTask(task.taskId) } }, icon("debug-stop")) : null));
+			if (open) rows.push(h("pre.chat-clip", null, (task.taskId + " " + task.state + " - " + took + (task.summary ? " - " + task.summary : "")) + (task.output ? "\n" + task.output : "")));
+		}
+		const running = model.background.filter((t) => t.state === "running").length;
+		return this.section("background", "Background tasks", running ? running + " running" : String(model.background.length), rows);
+	}
+
 	// The AI's clipboard (clipboard_copy): shown only when it holds something; a clip unfolds to its text.
 	clipsSection(model) {
 		if (!model.clips.length) return null;
@@ -95,4 +125,17 @@ export class SidePanel {
 		}
 		return this.section("clips", "Clipboard", String(model.clips.length), rows);
 	}
+}
+
+// "42 s", "3 min": how long a task ran.
+export function taskTime(ms) {
+	const seconds = Math.max(0, Math.round(ms / 1000));
+	if (seconds < 120) return seconds + " s";
+	if (seconds < 7200) return Math.round(seconds / 60) + " min";
+	return Math.round(seconds / 3600) + " h";
+}
+
+function clockOf(ms) {
+	const at = new Date(ms);
+	return String(at.getHours()).padStart(2, "0") + ":" + String(at.getMinutes()).padStart(2, "0");
 }

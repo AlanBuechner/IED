@@ -241,6 +241,16 @@ class ProbeTests {
 		assert_eq((int64)32768, probe.contextWindow, "props without a slot context change nothing");
 	}
 
+	[test("the_profiles_model_wins")]
+	public static void TestWantedModel() {
+		Ai::ModelProbe probe;
+		Ai::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\", \"max_model_len\": 131072}]}"), probe, View("b"));
+		assert_eq((int64)131072, probe.contextWindow, "the window of the model the profile names");
+		Ai::ModelProbe other;
+		Ai::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\"}]}"), other, View("b"));
+		assert_eq((int64)32768, other.contextWindow, "the first model's when the profile's says none");
+	}
+
 	[test("server_root")]
 	public static void TestServerRoot() {
 		assert_true(Ai::ServerRoot(View("http://h:8080/v1")).View() == "http://h:8080", "/v1 off");

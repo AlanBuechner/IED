@@ -181,7 +181,7 @@ Each gets a static HTML mock against `theme.css` (no server needed) and screensh
 
 **Composition.** The shell owns chrome, layout, commands, keybindings, menus and focus; every view in it comes from a plugin's UI module (`docs/02`). For the shown workspace it reads `plugins.contributions {wsId}`, imports each loaded plugin's `ui` module, and builds:
 
-- the sidebar from `activities` by `order`: the workspace switcher on top, the notifications bell and the settings gear at the bottom;
+- the sidebar from `activities` by `order`: the workspace switcher on top, the notifications bell and the settings gear at the bottom; a plugin may badge its activity's button (`ied.activities.badge`, `docs/02`): the Chat activity shows how many of the workspace's chats are in a turn (info blue) or, when any waits on its owner, how many (warn), also on a phone's bottom nav (owner, 2026-10-23: "the chat icon on the side bar should show if there is an actively running chat");
 - the menu bar from `menus["menubar/<name>"]` in VS order (File, Edit, View, Git, Project, Build, Debug, Test, Analyze, Tools, Extensions, Window, Help); a menu shows only when something is in it, and menus that do not fit go into a trailing `...` menu. View lists every tool window;
 - the command registry from `commands`, keybindings from `keybindings`, status items from `statusBarItems`, toolbar views from `toolbarItems` (after the toolbar's commands, highest priority first; on a phone they sit in a strip above the bottom nav).
 

@@ -30,6 +30,7 @@
 .chats-sec-head .meta { margin-left: auto; font-weight: var(--font-weight-normal); font-variant-numeric: tabular-nums; }
 .chats-row { position: relative; display: flex; align-items: center; gap: var(--space-3); height: var(--row-h); padding: 0 var(--space-4) 0 var(--space-6); color: var(--text-1); font-size: var(--font-size-ui); white-space: nowrap; cursor: pointer; user-select: none; outline: none; }
 .chats-row:hover { background: var(--veil); color: var(--text-0); }
+.chats-row.sub { padding-left: calc(var(--space-6) + var(--depth) * 14px); }
 .chats-row:focus-visible { box-shadow: inset 0 0 0 1px var(--focus); }
 .chats-row.shown { background: var(--selection); color: var(--text-0); }
 .chats-row.shown::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent-ai); }
@@ -212,6 +213,26 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-dd { display: inline-flex; align-items: center; gap: var(--space-2); height: 20px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); background: var(--bg-3); color: var(--text-0); font: inherit; font-size: var(--font-size-sm); }
 .chat-dd .ci { width: 12px; height: 12px; color: var(--text-2); }
 .chat-dd:hover { background: var(--bg-4); }
+.chat-model-dd span { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+/* the Model menu (modelpicker.js): groups left, models right by family */
+.chat-picker { display: flex; align-items: stretch; max-height: min(420px, calc(100vh - 8px)); font-size: var(--font-size-sm); outline: none; }
+.chat-picker-col { display: flex; flex-direction: column; width: 260px; min-width: 0; overflow-y: auto; padding: var(--space-2) 0; }
+.chat-picker-col + .chat-picker-col { border-left: var(--border-width) solid var(--border-0); }
+.chat-picker-head { padding: var(--space-2) var(--space-4); color: var(--text-2); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; }
+.chat-picker-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: var(--row-h); padding: 0 var(--space-4); border: 0; background: none; color: var(--text-0); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.chat-picker-row:hover, .chat-picker-row:focus { background: var(--bg-4); outline: none; }
+.chat-picker-row .ci { width: 14px; height: 14px; flex: none; color: var(--text-2); }
+.chat-picker-row.on .ci { color: var(--text-0); }
+.chat-picker-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chat-picker-row .meta { color: var(--text-2); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.chat-picker-row.fam .name { color: var(--text-1); font-weight: var(--font-weight-semibold); }
+.chat-picker-family .chat-picker-row { padding-left: calc(var(--space-4) + 14px + var(--space-3)); }
+.chat-picker-empty { padding: var(--space-2) var(--space-4); }
+.chat-picker.sheet { flex-direction: column; max-height: 70vh; overflow-y: auto; }
+.chat-picker.sheet .chat-picker-col { width: auto; overflow: visible; }
+.chat-picker.sheet .chat-picker-col + .chat-picker-col { border-left: 0; border-top: var(--border-width) solid var(--border-0); }
+.chat-picker.sheet .chat-picker-row { height: var(--row-h-touch); font-size: var(--font-size-lg); }
 .chat-telemetry { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .chat-telemetry b { color: var(--text-1); font-weight: var(--font-weight-normal); }
 .chat-mchip { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -240,6 +261,13 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .chat-sec-empty { padding: var(--space-2) var(--space-4) var(--space-2) 26px; font-size: var(--font-size-sm); }
 .chat-sec-row.clip { padding-left: var(--space-5); }
 .chat-sec-row.clip .dir { flex: 1; }
+.chat-sec-row.bg-task { padding-left: var(--space-5); padding-right: var(--space-2); }
+.chat-sec-row.bg-task:hover { background: var(--veil); }
+.chat-bg-open { display: flex; align-items: center; gap: var(--space-3); flex: 1; min-width: 0; min-height: 21px; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; text-align: left; cursor: pointer; }
+.chat-bg-open:hover { color: var(--text-0); }
+.chat-bg-open .name { flex: 1; min-width: 0; }
+.chat-bg-open .meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.chat-sec-row.bg-task .ib { width: 20px; height: 20px; flex: none; }
 .chat-clip { margin: var(--space-1) var(--space-4) var(--space-2) 26px; padding: var(--space-2) var(--space-3); max-height: 200px; overflow: auto; font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); line-height: 17px; color: var(--text-1); background: var(--bg-0); border: var(--border-width) solid var(--border-0); white-space: pre; tab-size: 4; }
 .chat-check { display: inline-grid; place-items: center; width: 13px; height: 13px; border: var(--border-width) solid var(--border-1); border-radius: 2px; flex: none; }
 .chat-check .ci { width: 11px; height: 11px; }
@@ -343,6 +371,12 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .set-chips .chip .ib .ci { width: 11px; height: 11px; }
 .set-add { width: auto !important; min-width: 44px !important; }
 .set-place .set-role-pace { width: auto; max-width: 170px; height: 20px; padding: 0 var(--space-1); font-size: var(--font-size-xs); }
+.set-sub { margin: var(--space-6) 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--text-0); }
+.set-group-about { max-width: 1100px; margin-top: var(--space-4); }
+.set-agent { grid-template-columns: 170px minmax(160px, 1fr) 180px 80px 72px 100px 24px; }
+.set-agent > .set-agent-about { grid-column: 1 / -1; }
+.set-agent > .set-chips { grid-column: 1 / -1; }
+.set-call { margin-left: 0; }
 
 /* ---------- Settings > AI > Claude ---------- */
 .claude-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); max-width: 980px; }

@@ -36,6 +36,13 @@ namespace Ai
 	// Runs `command` in the workspace with its output in the AI output source: "exit <code>" and the output's tail, or
 	// for a tool whose output is data (`whole`) all of its stdout, at most kShellKeptBytes.
 	ToolOutcome RunToolCommand(const ToolInvocation& call, const ToolCommand& command, bool whole);
+	// Starts `command` as RunToolCommand does without waiting for it (a background task reads it): the child, or null
+	// with `problem`.
+	Process::Child* StartToolCommand(const ToolInvocation& call, const ToolCommand& command, Core::String& problem);
+	// shell_run's command from its arguments: timeout_s, else `defaultSeconds`, at most `mostSeconds`.
+	ToolCommand ShellCommandOf(const ToolInvocation& call, int64 defaultSeconds, int64 mostSeconds);
+	// build_run: the task to its end, its errors and warnings as path:line; *call.cancelled stops it.
+	ToolOutcome BuildRun(const ToolInvocation& call);
 	// "path:line:col: severity: message" for each error and warning in a diag snapshot's files (docs/10), the paths
 	// starting with `under` (empty: all), at most `most`; `errors` and `warnings` count them all.
 	Core::String ProblemLines(const Serialization::DomNode& files, Core::StringView under, bool errorsOnly, int64 most, int64& errors, int64& warnings);

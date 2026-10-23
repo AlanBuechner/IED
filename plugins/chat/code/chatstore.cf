@@ -47,6 +47,7 @@ namespace Ai
 			json.EndArray();
 			json.EndObject();
 		}
+		if (!chat->context.IsEmpty()) json.RawField("context", chat->context.View());
 		json.IntField("createdMs", chat->createdMs);
 		json.IntField("updatedMs", chat->updatedMs);
 		json.IntField("counter", chat->counter);
@@ -77,6 +78,10 @@ namespace Ai
 			json.EndObject();
 		}
 		json.EndArray();
+		json.Key(Core::StringView("background"));
+		chat->WriteBackground(json);
+		if (!chat->agent.IsEmpty()) json.Field("agent", chat->agent.View());
+		if (!chat->parentChatId.IsEmpty()) json.Field("parentChatId", chat->parentChatId.View());
 		json.EndObject();
 		WriteWhole(ChatFolder(state, chat->chatId.View()) / "chat.json", json.View());
 	}
@@ -110,6 +115,11 @@ namespace Ai
 		chat->claudeSession = Core::String(header.Member("claude").Member("session").AsView());
 		Serialization::DomNode claudeTurns = header.Member("claude").Member("turns");
 		for (int64 i = 0; i < claudeTurns.Count(); ++i) chat->claudeTurns.Push(Core::String(claudeTurns.At(i).AsView()));
+		if (header.Member("context").Kind() == Serialization::DomKind::Object) {
+			Core::StringBuilder context;
+			Serialization::WriteJson(header.Member("context"), &context, 0);
+			chat->context = context.ToString();
+		}
 		chat->createdMs = header.Member("createdMs").AsInt();
 		chat->updatedMs = header.Member("updatedMs").AsInt();
 		chat->counter = header.Member("counter").AsInt();
@@ -149,6 +159,20 @@ namespace Ai
 			clip->text = Core::String(clips.At(i).Member("text").AsView());
 			chat->clips.Push(clip);
 		}
+		// A task the server's stop ended with its process: lost, and told with the chat's next turn.
+		Serialization::DomNode background = header.Member("background");
+		for (int64 i = 0; i < background.Count(); ++i) {
+			BackgroundTask* task = new BackgroundTask();
+			task->Read(background.At(i));
+			if (task->Running()) {
+				task->state = Core::String("lost");
+				task->summary = Core::String("lost: the server stopped while it ran");
+				task->endedMs = chat->updatedMs;
+			}
+			chat->background.Push(task);
+		}
+		chat->agent = Core::String(header.Member("agent").AsView());
+		chat->parentChatId = Core::String(header.Member("parentChatId").AsView());
 	}
 
 	static void ReadTurns(Chat* chat, Core::StringView text) {

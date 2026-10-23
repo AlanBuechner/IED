@@ -1,0 +1,65 @@
+include "contextmeter.ch"
+
+namespace Ai
+{
+	Core::String ContextJson(int64 window, int64 used, Core::StringView model, bool claude, const Core::Array<ContextPart>& parts) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("window", window);
+		json.IntField("used", used);
+		json.Field("model", model);
+		if (claude) json.BoolField("compacts", true);
+		else json.IntField("compressAt", kContextCompressAtPercent);
+		json.Key(Core::StringView("parts"));
+		json.BeginArray();
+		for (const ContextPart& part : parts) {
+			json.BeginObject();
+			json.Field("name", part.name.View());
+			json.IntField("tokens", part.tokens);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::Array<ContextPart> ScaledParts(const Core::Array<ContextPart>& parts, int64 used) {
+		int64 total = 0;
+		for (const ContextPart& part : parts) total += part.tokens;
+		if (used <= 0 || total <= 0) return parts;
+		Core::Array<ContextPart> scaled;
+		int64 given = 0;
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			ContextPart part;
+			part.name = parts[i].name;
+			part.tokens = i + 1 == parts.Count() ? used - given : (int64)((double)parts[i].tokens * (double)used / (double)total + 0.5);
+			given += part.tokens;
+			scaled.Push(part);
+		}
+		return scaled;
+	}
+
+	static Serialization::DomNode ReadContext(Core::StringView context) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(context, *doc);
+		return parsed.root;
+	}
+
+	Core::String ContextForModel(Core::StringView context, int64 window, Core::StringView model, bool claude) {
+		Serialization::DomNode root = ReadContext(context);
+		Core::Array<ContextPart> parts;
+		Serialization::DomNode list = root.Member("parts");
+		for (int64 i = 0; list.Kind() == Serialization::DomKind::Array && i < list.Count(); ++i) {
+			ContextPart part;
+			part.name = Core::String(list.At(i).Member("name").AsView());
+			part.tokens = list.At(i).Member("tokens").AsInt();
+			parts.Push(part);
+		}
+		return ContextJson(window, root.Member("used").AsInt(), model, claude, parts);
+	}
+
+	Core::String ContextModel(Core::StringView context) {
+		if (context.IsEmpty()) return Core::String();
+		return Core::String(ReadContext(context).Member("model").AsView());
+	}
+}

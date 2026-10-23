@@ -1,8 +1,8 @@
 // index.js - the chat plugin's UI module (docs/04, docs/15 "Chat activity"): chats as tabs ("chat:<chatId>"; "chat:new"
 // a draft) in the Chat activity's document well, the Chats tool window (every chat and its state, the deleted ones),
-// the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>) and Claude's plan usage (from aiusage), Settings >
-// AI > Models, Model Groups and Claude, and the commands that open the activity, start, stop, rename and delete chats and
-// show Claude's usage.
+// the status bar's "AI: 1 running, 1 needs you" and the Chat activity's badge (from chats:<wsId>), Claude's plan usage
+// (from aiusage), Settings > AI > Models, Model Groups and Claude, and the commands that open the activity, start, stop,
+// rename and delete chats and show Claude's usage.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { ChatTabView, DRAFT } from "./chattab.js";
@@ -39,6 +39,42 @@ export function activate(ied) {
 	});
 	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
 	ied.tabs.kind("chat", { view: "ChatTab", title: (arg) => (arg === DRAFT ? "New chat" : "Chat"), icon: (arg) => (arg === DRAFT ? "$(add)" : "$(comment-discussion)") });
+	badgeActiveChats(ied);
+}
+
+// The Chat activity's button shows the workspace's chats in a turn: how many need the owner (warn), else how many run.
+function badgeActiveChats(ied) {
+	let stop = null;
+	const follow = () => {
+		if (stop) stop();
+		stop = null;
+		ied.activities.badge("ied.chat", null);
+		const wsId = ied.workspace.wsId;
+		if (!wsId) return;
+		const list = new ChatList();
+		const render = () => ied.activities.badge("ied.chat", chatBadge(list.chats));
+		stop = ied.client.subscribe("chats:" + wsId, {
+			snap: (data) => {
+				list.snapshot(data);
+				render();
+			},
+			evt: (kind, data) => {
+				list.event(kind, data);
+				render();
+			},
+		});
+	};
+	if (ied.workspace.on) ied.workspace.on(follow);
+	follow();
+}
+
+// The badge for the workspace's chats: null while none is in a turn.
+export function chatBadge(chats) {
+	const status = chatStatusText(chats);
+	if (!status) return null;
+	const waiting = chats.filter((c) => c.state === "awaiting_approval" || c.state === "awaiting_answer").length;
+	const running = chats.filter((c) => c.state === "running").length;
+	return { count: waiting || running, tone: waiting ? "warn" : "info", title: status.text.slice("AI: ".length) };
 }
 
 export function ChatTab(ctx) {

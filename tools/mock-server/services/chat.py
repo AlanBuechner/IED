@@ -112,7 +112,7 @@ class Chat:
 		self.ws_id = ws_id
 		self.title = title
 		self.mode = mode
-		self.permission = "plan" if mode == "plan" else "ask"
+		self.permission = "plan" if mode == "plan" else "auto"
 		self.group = ""
 		self.pinned_model = ""
 		self.state = "idle"
@@ -296,6 +296,11 @@ class Chats:
 	async def m_chat_set(self, call, p):
 		chat = self.get(p.str("chatId"))
 		self._settings(chat, p)
+		# A chat runs on a group or on one model (docs/04 "One choice per chat"): each alone clears the other.
+		if "group" in p.raw and "model" not in p.raw:
+			chat.pinned_model = ""
+		if "model" in p.raw and p.str("model") and "group" not in p.raw:
+			chat.group = ""
 		self.changed(chat)
 		return chat.summary()
 

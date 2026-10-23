@@ -38,7 +38,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | O1 | **"Federated projects"** - is it a set of solutions/repos opened together as one workspace (e.g. this repo with IED + C4, plus a game project), as designed in `docs/03`? Or something else (e.g. a remote project on another machine)? | As designed |
 | O3 | **OS primitives for the server**: build them as Bedrock modules (`Net::`, `Process::`, `FS::Watch`, `Time::`) in the C4 tree (`C4/Bedrock/`), or wrap libuv behind a C shim first? | Bedrock modules (game engines need them too), libuv acceptable as their implementation |
 | O5 | **Loopback token friction.** Even on localhost, IED requires the one-time token / cookie (blocks malicious web pages from driving the server). Acceptable? (The CLI and tray open URLs with the token, so normal use is seamless.) | Yes |
-| O6 | **Default autonomy.** New chats default to `ask` permission mode and interrupted Agent runs auto-resume after a server restart. OK? | Yes |
+| O6 | **Default autonomy.** New chats default to `ask` permission mode and interrupted Agent runs auto-resume after a server restart. OK? | Yes; changed 2026-10-23: new chats default to `auto` (Plan mode keeps `plan`), `docs/11` |
 | O7 | **Server platform scope.** v1 server is Windows x64 only (C4 is Windows-only today); a Linux server comes after C4's Linux target. Clients are any browser. OK? | Yes |
 | O8 | **Not core**: ComfyUI generation, Perforce/Fossil, GitHub PR integration as optional plugins rather than built-ins. OK? | Yes |
 | O9 | **"Explosion theming"**: purely functional grayscale, or a signature accent moment (logo, title treatment, splash)? | Functional; identity in iconography only |

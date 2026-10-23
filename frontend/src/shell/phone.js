@@ -6,6 +6,7 @@
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
 import { initials, startPageView } from "./workspaces.js";
+import { badgeElement } from "./badges.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -84,6 +85,10 @@ export class PhoneChrome {
 
 	chord() {}
 
+	badgesChanged() {
+		this.renderNav(this.paneRef());
+	}
+
 	tabChanged(entry) {
 		if (entry.ref === this.shown) this.renderHead(this.paneRef());
 	}
@@ -104,7 +109,7 @@ export class PhoneChrome {
 	slots() {
 		const shell = this.shell;
 		const activities = [...shell.contributions.activities].sort((a, b) => a.order - b.order);
-		const activity = (a) => ({ pane: "activity:" + a.id, title: a.title, icon: a.icon, base: a.plugin.base, run: () => shell.showActivity(a.id) });
+		const activity = (a) => ({ pane: "activity:" + a.id, title: a.title, icon: a.icon, base: a.plugin.base, badge: shell.activityBadge(a.id), run: () => shell.showActivity(a.id) });
 		const all = [
 			...activities.filter((a) => a.phoneSlot).map(activity),
 			...shell.contributions.toolWindows.filter((t) => t.phoneNav !== false && shell.context.holds(t.when)).map((t) => ({ pane: t.id, title: t.title, icon: t.icon, base: t.plugin.base, run: () => shell.showView(t.id) })),
@@ -170,8 +175,8 @@ export class PhoneChrome {
 		const shell = this.shell;
 		const { shown, more } = this.slots();
 		const activityPane = pane && !pane.startsWith("activity:") && !shell.contributions.toolWindow(pane) ? "activity:" + shell.currentActivity() : pane;
-		const buttons = shown.map((slot) => h("button.pn" + (slot.pane === activityPane ? ".on" : ""), { "aria-label": slot.title, dataset: { pane: slot.pane }, on: { click: () => slot.run() } },
-			iconFrom(slot.icon, slot.base) || icon("window"), h("span", null, slot.title)));
+		const buttons = shown.map((slot) => h("button.pn" + (slot.pane === activityPane ? ".on" : ""), { "aria-label": slot.badge && slot.badge.title ? slot.title + " - " + slot.badge.title : slot.title, dataset: { pane: slot.pane }, on: { click: () => slot.run() } },
+			iconFrom(slot.icon, slot.base) || icon("window"), h("span", null, slot.title), badgeElement(slot.badge)));
 		while (buttons.length < SLOTS) buttons.push(h("span.pn.empty"));
 		buttons.push(h("button.pn", { "aria-label": "More", on: { click: (event) => this.showMore(event.currentTarget, more) } }, icon("menu"), h("span", null, "More")));
 		replace(this.nav, ...buttons);

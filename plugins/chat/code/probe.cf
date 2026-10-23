@@ -30,16 +30,26 @@ namespace Ai
 		return value;
 	}
 
-	void ReadModelList(Core::StringView json, ModelProbe& probe) {
+	static int64 ListedWindow(const Serialization::DomNode& model) {
+		if (model.Member("max_model_len").IsValid()) return Count(model.Member("max_model_len"));
+		return model.Member("meta").Member("n_ctx").IsValid() ? Count(model.Member("meta").Member("n_ctx")) : 0;
+	}
+
+	void ReadModelList(Core::StringView json, ModelProbe& probe, Core::StringView wanted) {
 		Serialization::DomNode data = ParseProbeJson(json).Member("data");
+		bool found = false;
 		for (int64 i = 0; data.Kind() == Serialization::DomKind::Array && i < data.Count(); ++i) {
 			Serialization::DomNode model = data.At(i);
 			probe.models.Push(Core::String(model.Member("id").AsView()));
-			if (probe.contextWindow == 0 && model.Member("max_model_len").IsValid()) probe.contextWindow = Count(model.Member("max_model_len"));
-			if (probe.contextWindow == 0 && model.Member("meta").Member("n_ctx").IsValid()) probe.contextWindow = Count(model.Member("meta").Member("n_ctx"));
-			if (probe.trainContext == 0) probe.trainContext = Count(model.Member("meta").Member("n_ctx_train"));
+			const int64 window = ListedWindow(model);
+			const bool isWanted = !wanted.IsEmpty() && model.Member("id").AsView() == wanted;
+			if (window > 0 && (isWanted || (!found && probe.contextWindow == 0))) probe.contextWindow = window;
+			found = found || (isWanted && window > 0);
+			if (probe.trainContext == 0 || isWanted) probe.trainContext = Count(model.Member("meta").Member("n_ctx_train"));
 		}
 	}
+
+	void ReadModelList(Core::StringView json, ModelProbe& probe) { ReadModelList(json, probe, Core::StringView("")); }
 
 	void ReadProps(Core::StringView json, ModelProbe& probe) {
 		Serialization::DomNode props = ParseProbeJson(json);
@@ -95,7 +105,7 @@ namespace Ai
 			probe.error = said.ToString();
 			return probe;
 		}
-		ReadModelList(body.View(), probe);
+		ReadModelList(body.View(), probe, profile.model.View());
 		for (const Core::String& id : probe.models) probe.modelServed = probe.modelServed || id == profile.model;
 		Core::String props;
 		Core::String ignored;

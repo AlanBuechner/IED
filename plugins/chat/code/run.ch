@@ -18,9 +18,9 @@ namespace Ai
 	const int64 kRunSameErrorBound = 3;
 	const int64 kRunMalformedBound = 3;
 	const int64 kRunKeptToolResultBytes = 16 * 1024;
-	const int64 kRunCompressAtPercent = 85;
 	const int64 kRunProgressEveryMs = 250;   // turn.progress at most this often
 	const int64 kRunEstimateShownMs = 3000;  // a prompt estimated to take this long to read shows the estimate
+	const int64 kRunProbeRetryMs = 60000;    // a model's server that did not answer discovery is asked again after this
 
 	class TurnRun
 	{
@@ -68,10 +68,16 @@ namespace Ai
 		private Segment* Begin(Segment* segment);
 		private void Close(Segment* segment);
 		private void CloseStreaming();
-		private void Account(const StepResult* result, int64 promptEstimate);
+		// The step's counts: its prompt's tokens (the server's, else `promptEstimate`, else the calibrated estimate) and its
+		// output on turn.stats and the context meter; `estimateBefore` is EstimateTokens() when its request was made.
+		private void Account(const StepResult* result, int64 promptEstimate, int64 estimateBefore);
 		private void PublishContext(int64 used);
 		private int64 Window() const;
+		// IED's estimate of the context (bytes / 4), and that estimate corrected by how far it was from the last count the
+		// model's server gave.
 		private int64 EstimateTokens() const;
+		private int64 CalibratedTokens() const;
+		private Core::String SentTools() const;
 		private bool Compress();
 		// A note to the model, shown as a grey harness line; UiNote only shows it.
 		private void HarnessNote(Core::StringView kind, Core::StringView text);

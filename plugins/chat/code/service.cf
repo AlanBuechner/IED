@@ -31,6 +31,7 @@ namespace Ai
 		Register("chat.send", [self](const IED::Request& request) -> Core::String { return self->SendMethod(request); });
 		Register("chat.unqueue", [self](const IED::Request& request) -> Core::String { return self->UnqueueMethod(request); });
 		Register("chat.stop", [self](const IED::Request& request) -> Core::String { return self->StopMethod(request); });
+		Register("chat.stopTask", [self](const IED::Request& request) -> Core::String { return self->StopTaskMethod(request); });
 		Register("chat.approve", [self](const IED::Request& request) -> Core::String { return self->ApproveMethod(request); });
 		Register("chat.answer", [self](const IED::Request& request) -> Core::String { return self->AnswerMethod(request); });
 		Register("chat.history", [self](const IED::Request& request) -> Core::String { return self->HistoryMethod(request); });
@@ -39,6 +40,7 @@ namespace Ai
 		Register("chat.restore", [self](const IED::Request& request) -> Core::String { return self->RestoreMethod(request); });
 		Register("chat.purge", [self](const IED::Request& request) -> Core::String { return self->PurgeMethod(request); });
 		claude = new ClaudeAccount(context);
+		LoadWindows();
 		context->StartThread([self]() { self->ClaudeKeeper(); });
 		context->StartThread([self]() { self->DeletedKeeper(); });
 		context->OnDeactivate([self]() {
@@ -121,13 +123,15 @@ namespace Ai
 		return names.IsEmpty() ? Core::String() : names[0];
 	}
 
+	Core::String Chats::GroupOfChat(const Chat* chat, const IED::Workspace& ws) const { return GroupOf(context, chat, ws); }
+
 	// The models the chat's group gives a turn in the chat's mode, in order (docs/04 "Which role a turn uses"); `role` gets the
 	// role.
 	static Core::Array<ModelProfile*> CandidatesOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
-		Core::Array<ModelProfile*> candidates = RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), RoleOfMode(Core::StringView(ChatModeName(chat->mode))), role);
-		return PinnedFirst(models, candidates, chat->pinnedModel.View());
+		return TurnCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->agent.View(),
+			Core::StringView(ChatModeName(chat->mode)), chat->pinnedModel.View(), role);
 	}
 
 	Core::String Chats::NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const {
@@ -158,9 +162,60 @@ namespace Ai
 		Core::String group;
 		Core::String roleEffort;
 		Core::String model = NextModel(chat, ws, group, roleEffort);
+		MeterFor(chat, ws, model.View());
 		Publish(chat, "chat.changed", chat->ChangedJson(model.View(), group.View(), roleEffort.View()).View());
 		context->Publish(ChatsTopic(chat->wsId.View()).View(), "chat.changed", chat->SummaryJson().View());
 		SaveChatHeader(LocalStateOf(ws), chat);
+	}
+
+	void Chats::MeterFor(Chat* chat, const IED::Workspace& ws, Core::StringView model) {
+		if (chat->run || chat->context.IsEmpty() || model.IsEmpty() || ContextModel(chat->context.View()).View() == model) return;
+		Core::Array<Core::String> problems;
+		ModelProfile* profile = FindModel(ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems), model);
+		if (!profile) return;
+		chat->context = ContextForModel(chat->context.View(), WindowOf(profile), model, profile->IsClaude());
+		Publish(chat, "context.changed", chat->context.View());
+	}
+
+	int64 Chats::WindowOf(const ModelProfile* profile) const {
+		int64 found = 0;
+		windows.TryGet(profile->name, found);
+		if (profile->contextWindow > 0 && (found == 0 || profile->contextWindow < found)) return profile->contextWindow;
+		return found;
+	}
+
+	static FS::Path WindowsFile(IED::PluginContext* context) { return FS::Path(context->StateFolder().View()) / "windows.json"; }
+
+	bool Chats::LearnWindow(Core::StringView model, int64 window) {
+		if (window <= 0) return false;
+		int64 known = 0;
+		windows.TryGet(Core::String(model), known);
+		if (known == window) return false;
+		windows.At(Core::String(model)) = window;
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (Core::KeyValue<Core::String, int64>& entry : windows) {
+			json.Key(entry.key.View());
+			json.Int(entry.value);
+		}
+		json.EndObject();
+		FS::Path file = WindowsFile(context);
+		FS::MakeDirectories(file.Parent().CStr());
+		Core::String text = json.ToString();
+		FS::WriteFileAtomically(file.CStr(), (const void*)text.View().Data(), text.ByteLength());
+		return true;
+	}
+
+	void Chats::LoadWindows() {
+		FS::Path file = WindowsFile(context);
+		if (!FS::FileExists(file.CStr())) return;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen()) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(opened.ReadText().View(), *doc);
+		if (!parsed.Ok() || parsed.root.Kind() != Serialization::DomKind::Object) return;
+		for (int64 i = 0; i < parsed.root.Count(); ++i)
+			if (parsed.root.ValueAt(i).AsInt() > 0) windows.At(Core::String(parsed.root.KeyAt(i))) = parsed.root.ValueAt(i).AsInt();
 	}
 
 	Core::String Chats::ListSnapshot(Core::StringView wsId) {
@@ -198,9 +253,21 @@ namespace Ai
 		return Core::String(line.Substring(0, cut)) + "...";
 	}
 
-	// What the model is told of a message another chat sent.
-	static Core::String FromText(const Chat* from, Core::StringView text) {
+	// What the model is told of a message another chat sent: a sub-agent's task from the chat that ran it says its answer
+	// goes back by itself.
+	static Core::String FromText(const Chat* to, const Chat* from, Core::StringView text) {
 		Core::StringBuilder out;
+		if (!to->agent.IsEmpty() && to->parentChatId == from->chatId) {
+			out.Append("You are the sub-agent \"");
+			out.Append(to->agent.View());
+			out.Append("\" of chat \"");
+			out.Append(from->title.View());
+			out.Append("\" (");
+			out.Append(from->chatId.View());
+			out.Append("). This is its task for you; you start with none of its conversation. Your final answer goes back to it by itself when your turn ends: make it complete and self-contained - what you did, what you found, what is left.\n\n");
+			out.Append(text);
+			return out.ToString();
+		}
 		out.Append("Message from chat \"");
 		out.Append(from->title.View());
 		out.Append("\" (");
@@ -212,7 +279,7 @@ namespace Ai
 
 	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, nullptr, 0); }
 
-	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops, const char* resumed) {
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, const Chat* from, int64 hops, const char* resumed, const char* origin) {
 		IED::Workspace ws = WorkspaceOf(chat);
 		Core::StringView text = sent.text.View();
 		Turn* turn = new Turn();
@@ -222,6 +289,7 @@ namespace Ai
 		turn->attachments = sent.attachments;
 		turn->hops = hops;
 		turn->resumed = Core::String(resumed);
+		turn->origin = Core::String(origin);
 		chat->resume = Core::String();
 		if (from) {
 			turn->fromChatId = from->chatId;
@@ -233,7 +301,7 @@ namespace Ai
 		turn->startedMs = ChatNowMs();
 		ModelMessage* message = new ModelMessage();
 		message->role = Core::String("user");
-		message->content = from ? FromText(from, text) : Core::String(text);
+		message->content = from ? FromText(chat, from, text) : Core::String(text);
 		turn->messages.Push(message);
 		chat->turns.Push(turn);
 		if (chat->title == kNewChatTitle) chat->title = TitleFrom(text);
@@ -271,7 +339,7 @@ namespace Ai
 			StartTurn(chat, message, from, hops);
 			return true;
 		}
-		chat->injected.Push(FromText(from, text));
+		chat->injected.Push(FromText(chat, from, text));
 		if (hops > chat->run->turn->hops) chat->run->turn->hops = hops;
 		return false;
 	}
@@ -308,7 +376,12 @@ namespace Ai
 	}
 
 	void Chats::TurnEnded(Chat* chat) {
-		if (chat->queued.IsEmpty() || chat->Current()->stop != "finished") return;
+		AgentTurnEnded(chat);
+		if (chat->Current()->stop != "finished") return;
+		if (chat->queued.IsEmpty()) {
+			WakeForBackground(chat);
+			return;
+		}
 		OwnerMessage* next = chat->queued[0];
 		chat->queued.RemoveAt(0);
 		QueueChanged(chat);
@@ -365,13 +438,31 @@ namespace Ai
 		return chat->SummaryJson();
 	}
 
+	// A chat runs on a group or on one model (docs/04 "One choice per chat"): a group alone clears the model, a model
+	// alone the group.
 	Core::String Chats::SetMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
 		Chat* chat = Get(params.Str("chatId").View());
 		ReadPinnedModel(context, WorkspaceOf(chat), chat, params);
 		ReadSettings(chat, params);
+		if (params.Has("group") && !params.Has("model")) chat->pinnedModel = Core::String();
+		if (params.Has("model") && !params.Str("model").IsEmpty() && !params.Has("group")) chat->group = Core::String();
 		Changed(chat);
 		return chat->SummaryJson();
+	}
+
+	// chat.stopTask {chatId, taskId}: one of the chat's background tasks stopped (docs/04 "Background tasks").
+	Core::String Chats::StopTaskMethod(const IED::Request& request) {
+		const IED::Params& params = request.params;
+		Chat* chat = Get(params.Str("chatId").View());
+		BackgroundTask* task = chat->FindBackground(params.Str("taskId").View());
+		if (!task) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no background task ") + params.Str("taskId").View()).View());
+		if (task->Running()) StopBackground(task);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", task->state.View());
+		json.EndObject();
+		return json.ToString();
 	}
 
 	Core::String Chats::SendMethod(const IED::Request& request) {
@@ -571,7 +662,7 @@ namespace Ai
 		if (!job->done) throw IED::RpcError(IED::ErrorCode::Cancelled, "request cancelled");
 		if (!job->claude.IsEmpty()) return job->claude;
 		if (!params.Has("profile") && job->probe.contextWindow > 0) {
-			windows.At(name) = job->probe.contextWindow;
+			LearnWindow(name.View(), job->probe.contextWindow);
 			probed.At(name) = true;
 		}
 		return job->probe.JsonText();

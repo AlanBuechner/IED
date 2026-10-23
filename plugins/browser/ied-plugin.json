@@ -35,13 +35,15 @@
 				{ "name": "browser.console", "version": "1" },
 				{ "name": "browser.eval", "version": "1" },
 				{ "name": "browser.closePage", "version": "1" },
-				{ "name": "chat.resource", "version": "1.0.0", "optional": true }
+				{ "name": "chat.resource", "version": "1.0.0", "optional": true },
+				{ "name": "chat.state", "version": "1.0.0", "optional": true }
 			]
 		},
 		"commands": [
 			{ "id": "ied.browser.open", "title": "Web Browser", "category": "View", "icon": "$(globe)" },
 			{ "id": "ied.browser.pages", "title": "Browser Pages...", "category": "View", "icon": "$(browser)" },
-			{ "id": "ied.browser.openFile", "title": "View in Browser", "category": "Solution Explorer", "icon": "$(globe)" }
+			{ "id": "ied.browser.openFile", "title": "View in Browser", "category": "Solution Explorer", "icon": "$(globe)" },
+			{ "id": "ied.browser.previewBeside", "title": "Open in Browser to the Side", "category": "Browser", "icon": "$(globe)" }
 		],
 		"menus": {
 			"menubar/view": [
@@ -50,10 +52,14 @@
 			],
 			"explorer/context": [
 				{ "command": "ied.browser.openFile", "group": "1_open", "when": "explorerItemKind == 'file' && (explorerItemExtension == '.html' || explorerItemExtension == '.htm' || explorerItemExtension == '.svg')" }
+			],
+			"tab/title": [
+				{ "command": "ied.browser.previewBeside", "group": "1_preview", "when": "tabKind == 'doc' && (resourceExtname == '.html' || resourceExtname == '.htm')" }
 			]
 		},
 		"keybindings": [
-			{ "command": "ied.browser.open", "key": "ctrl+alt+r" }
+			{ "command": "ied.browser.open", "key": "ctrl+alt+r" },
+			{ "command": "ied.browser.previewBeside", "key": "ctrl+k v", "when": "activeTabKind == 'doc' && editorLanguage == 'html'" }
 		],
 		"systemMessageSections": [
 			{ "id": "browser", "text": "You can render web pages in a headless browser on the server: browser_open a URL (the workspace's dev server on localhost, a file of the workspace, or the web), then browser_snapshot to read it with element refs, browser_act to click and type, browser_screenshot to see it, browser_console for its errors. The user can watch your pages live. Read the browser skill for the workflow." }

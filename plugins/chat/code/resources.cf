@@ -36,8 +36,27 @@ namespace Ai
 		return IED::Answer(Core::StringView("{}"));
 	}
 
+	// {chatId} -> {state, running}: `running` while a turn is in flight, waiting on an approval or answer included.
+	static IED::Result ChatStateCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
+		IED::HostLock guard(*context);
+		Chat* chat = nullptr;
+		try {
+			chat = chats->Get(args.Member("chatId").AsView());
+		}
+		catch (IED::RpcError& error) {
+			return IED::Refusal(error.message.View());
+		}
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("state", ChatStateName(chat->state));
+		data.BoolField("running", chat->run != nullptr);
+		data.EndObject();
+		return IED::Answer(data.View());
+	}
+
 	void ProvideChatResources(IED::PluginContext& context, Chats* chats) {
 		IED::PluginContext* at = &context;
 		context.Provide(Core::StringView("chat.resource"), [at, chats](const Serialization::DomNode& args) -> IED::Result { return ChatResourceCall(at, chats, args); });
+		context.Provide(Core::StringView("chat.state"), [at, chats](const Serialization::DomNode& args) -> IED::Result { return ChatStateCall(at, chats, args); });
 	}
 }

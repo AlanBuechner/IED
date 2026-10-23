@@ -1355,7 +1355,7 @@ def open_chat(run):
 	if run.target.kind == "real":
 		run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
 	ws_id = page.evaluate("ied_shell.wsId")
-	run.chat_id = run.request("chat.create", {"wsId": ws_id, "mode": "ask"})["chatId"]
+	run.chat_id = run.request("chat.create", {"wsId": ws_id, "mode": "ask", "permission": "ask"})["chatId"]
 	show_chat(run)
 	return page
 

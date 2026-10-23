@@ -142,7 +142,16 @@ namespace Ai
 	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into) {
 		Core::String groupName = Core::String(group);
 		Core::String roleName = Core::String(role);
-		Serialization::DomNode entry = ParseValue(groupsJson).Member(groupName.CStr()).Member(roleName.CStr());
+		return ReadRoleEntry(ParseValue(groupsJson).Member(groupName.CStr()).Member(roleName.CStr()), into);
+	}
+
+	bool ReadAgentRole(Core::StringView groupsJson, Core::StringView group, Core::StringView agent, RoleModel& into) {
+		Core::String groupName = Core::String(group);
+		Core::String agentName = Core::String(agent);
+		return ReadRoleEntry(ParseValue(groupsJson).Member(groupName.CStr()).Member("agents").Member(agentName.CStr()), into);
+	}
+
+	bool ReadRoleEntry(const Serialization::DomNode& entry, RoleModel& into) {
 		if (entry.Member("model").Kind() != Serialization::DomKind::String) return false;
 		into.model = Core::String(entry.Member("model").AsView());
 		into.pace = ReadPace(entry.Member("pace"));
@@ -172,6 +181,23 @@ namespace Ai
 			if (fallback) candidates.Push(fallback);
 		}
 		return candidates;
+	}
+
+	static Core::Array<ModelProfile*> ChainOf(const Core::Array<ModelProfile*>& models, const RoleModel& role) {
+		Core::Array<ModelProfile*> candidates;
+		ModelProfile* first = FindModel(models, role.model.View());
+		if (first) candidates.Push(first);
+		for (const Core::String& name : role.fallback) {
+			ModelProfile* fallback = FindModel(models, name.View());
+			if (fallback) candidates.Push(fallback);
+		}
+		return candidates;
+	}
+
+	Core::Array<ModelProfile*> TurnCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView agent,
+		Core::StringView mode, Core::StringView pinned, RoleModel& chosen) {
+		if (!agent.IsEmpty() && ReadAgentRole(groupsJson, group, agent, chosen)) return PinnedFirst(models, ChainOf(models, chosen), pinned);
+		return PinnedFirst(models, RoleCandidates(models, groupsJson, group, RoleOfMode(mode), chosen), pinned);
 	}
 
 	Core::Array<ModelProfile*> PinnedFirst(const Core::Array<ModelProfile*>& models, const Core::Array<ModelProfile*>& candidates, Core::StringView pinned) {

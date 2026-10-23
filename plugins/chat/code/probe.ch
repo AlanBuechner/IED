@@ -29,6 +29,8 @@ namespace Ai
 	ModelProbe ProbeModel(const ModelProfile& profile, int32 timeoutMs);
 	// The parts of a probe each endpoint's answer gives.
 	void ReadModelList(Core::StringView json, ModelProbe& probe);
+	// The window of model `wanted` when the list gives one, else of the first that does.
+	void ReadModelList(Core::StringView json, ModelProbe& probe, Core::StringView wanted);
 	void ReadProps(Core::StringView json, ModelProbe& probe);
 	// The server's root for endpoints beside the OpenAI ones: the endpoint without a trailing /v1.
 	Core::String ServerRoot(Core::StringView endpoint);

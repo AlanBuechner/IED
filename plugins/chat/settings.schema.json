@@ -70,6 +70,16 @@
 			"required": ["max"],
 			"additionalProperties": false
 		},
+		"fallback": {
+			"type": "array",
+			"description": "Tried in order after the role's model: a model's name, or {model, pace} for a Claude model used only while on pace.",
+			"items": {
+				"anyOf": [
+					{ "type": "string", "minLength": 1 },
+					{ "type": "object", "properties": { "model": { "type": "string", "minLength": 1 }, "pace": { "$ref": "#/$defs/pace" } }, "required": ["model"], "additionalProperties": false }
+				]
+			}
+		},
 		"role": {
 			"type": "object",
 			"properties": {
@@ -77,19 +87,35 @@
 				"pace": { "$ref": "#/$defs/pace" },
 				"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
 				"effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
-				"fallback": {
-					"type": "array",
-					"description": "Tried in order after the role's model: a model's name, or {model, pace} for a Claude model used only while on pace.",
-					"items": {
-						"anyOf": [
-							{ "type": "string", "minLength": 1 },
-							{ "type": "object", "properties": { "model": { "type": "string", "minLength": 1 }, "pace": { "$ref": "#/$defs/pace" } }, "required": ["model"], "additionalProperties": false }
-						]
-					}
-				}
+				"fallback": { "$ref": "#/$defs/fallback" }
 			},
 			"required": ["model"],
 			"additionalProperties": false
+		},
+		"agent": {
+			"type": "object",
+			"description": "A sub-agent of the group (docs/04 A group is a topology): a role, what it is for, the mode its chat runs in and the agents it may run itself.",
+			"properties": {
+				"model": { "type": "string", "minLength": 1 },
+				"pace": { "$ref": "#/$defs/pace" },
+				"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+				"effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
+				"fallback": { "$ref": "#/$defs/fallback" },
+				"description": { "type": "string", "description": "What the orchestrator is told it is for." },
+				"mode": { "enum": ["agent", "ask", "plan"], "default": "agent" },
+				"calls": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "The agents it may run itself; [\"*\"] every one; none by default." }
+			},
+			"required": ["model"],
+			"additionalProperties": false
+		},
+		"group": {
+			"type": "object",
+			"description": "An orchestrator - primary, with planning and implementation for Plan and Agent mode - and its sub-agents.",
+			"properties": {
+				"description": { "type": "string" },
+				"agents": { "type": "object", "additionalProperties": { "$ref": "#/$defs/agent" } }
+			},
+			"additionalProperties": { "$ref": "#/$defs/role" }
 		}
 	},
 	"properties": {
@@ -106,8 +132,8 @@
 			"default": {},
 			"x-ied-tiers": ["app"],
 			"x-ied-merge": "merge",
-			"description": "Model groups by name: per role (primary, planning, implementation, worker, summarizer, ...) a model, temperature, effort and fallbacks; a Claude model in a chain may have a pace. A chat's mode picks the role: Ask primary, Plan planning, Agent implementation; a role left off is primary (docs/04 Model groups, Pacing).",
-			"additionalProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/role" } }
+			"description": "Model groups by name, each a topology: an orchestrator - per role (primary, planning, implementation) a model, temperature, effort and fallbacks; a Claude model in a chain may have a pace; a chat's mode picks the role: Ask primary, Plan planning, Agent implementation, a role left off is primary - and its sub-agents, agents, which the orchestrator runs with agent_run (docs/04 Model groups, A group is a topology, Pacing).",
+			"additionalProperties": { "$ref": "#/$defs/group" }
 		},
 		"ai.defaultGroup": {
 			"type": "string",

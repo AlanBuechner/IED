@@ -106,23 +106,23 @@ function chipText(pane) {
 	return chips.length ? chips[chips.length - 1].textContent : "";
 }
 
-test("chat pane: the Model picker shows the chat's pin, and the next turn's model follows a new pin, group or mode", async () => {
+test("chat pane: the Model menu shows what the chat runs on, and the next turn's model follows a new model, group or mode", async () => {
 	const ied = fakeIed();
 	const pane = await openPane(ied, 1);
 	try {
 		const topic = ied.topics.get("chat:c1");
 		const summary = (change) => Object.assign({ chatId: "c1", wsId: "w1", title: "Long chat", mode: "agent", permission: "ask", group: "", effort: "", pinnedModel: "", state: "idle", turnCount: 1 }, change);
-		const MODEL = "Model (pinned over the group's)";
+		const MODEL = "Run this chat on a group or a model";
 		topic.snap(Object.assign(snapshotOf(1), { pinnedModel: "fake", model: "fake", groupInUse: "claude", roleEffort: "" }));
 		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "the snapshot's pin");
 		topic.evt("chat.changed", summary({ pinnedModel: "", model: "claude-opus", groupInUse: "claude", roleEffort: "high" }));
-		assertEqual([picked(pane, MODEL), chipText(pane), picked(pane, "Effort")], ["Group's", "claude-opus", "High (group)"], "unpinned: the group's model and effort");
+		assertEqual([picked(pane, MODEL), chipText(pane), picked(pane, "Effort")], ["claude (default)", "claude-opus", "High (group)"], "no model of its own: the default group's model and effort");
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", model: "fake", groupInUse: "claude", roleEffort: "high" }));
 		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "pinned from the picker or by the AI");
 		topic.evt("turn.start", { turnId: "n1", mode: "agent", model: "fake", group: "claude", user: { text: "Go" } });
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", state: "running", model: "fake", groupInUse: "claude", roleEffort: "high" }));
 		topic.evt("chat.changed", summary({ pinnedModel: "", state: "running", model: "claude-opus", groupInUse: "claude", roleEffort: "high" }));
-		assertEqual([picked(pane, MODEL), chipText(pane)], ["Group's", "claude-opus"], "unpinned mid-turn: the next turn's");
+		assertEqual([picked(pane, MODEL), chipText(pane)], ["claude (default)", "claude-opus"], "unpinned mid-turn: the next turn's");
 		topic.evt("chat.changed", summary({ mode: "plan", state: "idle", model: "claude-sonnet", groupInUse: "claude", roleEffort: "" }));
 		assertEqual([chipText(pane), picked(pane, "Effort")], ["claude-sonnet", "Default"], "a new mode, a new role");
 		topic.evt("turn.start", { turnId: "n2", mode: "plan", model: "claude-haiku", group: "claude", user: { text: "Plan" } });

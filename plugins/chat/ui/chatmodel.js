@@ -41,6 +41,7 @@ export class ChatModel {
 		this.modified = [];
 		this.resources = [];
 		this.clips = [];
+		this.background = [];
 		this.context = null;
 	}
 
@@ -57,6 +58,7 @@ export class ChatModel {
 		this.modified = data.modified || [];
 		this.resources = data.resources || [];
 		this.clips = data.clips || [];
+		this.background = data.background || [];
 		this.context = data.context || null;
 		return { all: true };
 	}
@@ -154,6 +156,9 @@ export class ChatModel {
 			case "clips.changed":
 				this.clips = data.clips || [];
 				return { clips: true };
+			case "background.changed":
+				this.background = data.tasks || [];
+				return { background: true };
 			case "context.changed":
 				this.context = data;
 				return { context: true };
@@ -212,7 +217,8 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting"];
+	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
+		"backgroundRunning", "agent", "parentChatId"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];
 	return summary;
@@ -437,14 +443,16 @@ export function diffRows(unified) {
 	return rows;
 }
 
-// The context's parts as fractions of the window, for the stacked bar; the window is the used total when unknown.
+// The context's parts as fractions of the window, for the stacked bar; the window is the used total when unknown. `free`
+// names the room left: where IED compresses (`compressAt` percent), or that the model compacts its own (Claude).
 export function contextBar(context) {
-	if (!context) return { window: 0, used: 0, percent: 0, parts: [] };
+	if (!context) return { window: 0, used: 0, percent: 0, parts: [], free: "" };
 	const window = context.window || 0;
 	const used = context.used || 0;
 	const whole = window || Math.max(used, 1);
+	const free = context.compacts ? "Free (the model compacts its own)" : context.compressAt ? "Free (compressed at " + context.compressAt + "%)" : "Free";
 	return {
-		window, used, percent: window ? Math.round(used * 100 / window) : 0,
+		window, used, percent: window ? Math.round(used * 100 / window) : 0, model: context.model || "", free,
 		parts: (context.parts || []).map((p) => ({ name: p.name, tokens: p.tokens, share: p.tokens / whole })),
 	};
 }

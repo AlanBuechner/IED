@@ -5,6 +5,7 @@ include "chattools.ch"
 include "clipboard.ch"
 include "modeltools.ch"
 include "mentions.ch"
+include "agents.ch"
 
 namespace Ai
 {
@@ -111,7 +112,7 @@ namespace Ai
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
 		for (const Core::String& problem : problems) context->Log(problem.View());
 		Core::String groups = context->Setting(Core::StringView("ai.groups"), WsId(ws));
-		candidates = PinnedFirst(models, RoleCandidates(models, groups.View(), turn->group.View(), RoleOfMode(Core::StringView(ChatModeName(turn->mode))), role), chat->pinnedModel.View());
+		candidates = TurnCandidates(models, groups.View(), turn->group.View(), chat->agent.View(), Core::StringView(ChatModeName(turn->mode)), chat->pinnedModel.View(), role);
 		rules = ReadPermissionRules(context->Setting(Core::StringView("ai.permissions"), WsId(ws)).View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		maxSteps = Serialization::ReadJson(context->Setting(Core::StringView("ai.maxSteps"), WsId(ws)).View(), *doc).root.AsInt();
@@ -133,6 +134,8 @@ namespace Ai
 		AddChatTools(*tools, chats, chat);
 		AddClipboardTools(*tools, chats, chat);
 		AddModelTools(*tools, chats, chat);
+		AddBackgroundTools(*tools, chats, chat);
+		AddAgentTools(*tools, chats, chat, ws);
 		if (Serialization::ReadJson(context->Setting(Core::StringView("ai.tools.loadAll"), WsId(ws)).View(), *doc).root.AsBool()) tools->LoadAll();
 		SystemContext prompt;
 		prompt.agentsMd = AgentsMd(ws);
@@ -141,6 +144,7 @@ namespace Ai
 		prompt.skills = SkillsIndex(SkillsOf(context, ws, contributed), turn->userText.View(), DefaultSkillsIndexLimits());
 		prompt.docs = DocsIndex(DocsOf(context, ws, contributed));
 		prompt.deferred = tools->DeferredIndex(chat->mode, chat->loadedTools);
+		prompt.agents = AgentsSection(AgentsOf(chats, chat, ws), models);
 		for (const Core::String& problem : contributed) context->Log(problem.View());
 		system = chats->prompts.System(chat->mode, prompt);
 		return true;
@@ -191,22 +195,28 @@ namespace Ai
 
 	// A profile's server is asked once per server run (docs/12 "Truth about the model's context window"): the window it
 	// reports, for a profile that names none, whether it streams prompt progress and whether it takes images, for a
-	// profile that does not say; the lock is not held.
+	// profile that does not say; a server that did not answer is asked again a minute later. The lock is not held.
 	void TurnRun::Discover() {
 		ModelProfile* profile = candidates[candidate];
 		if (profile->IsClaude()) return;
 		bool asked = false;
+		int64 failedMs = 0;
 		{
 			IED::HostLock guard(*context);
 			chats->probed.TryGet(profile->name, asked);
+			chats->probeFailedMs.TryGet(profile->name, failedMs);
 		}
-		if (asked) return;
+		if (asked || (failedMs > 0 && ChatNowMs() - failedMs < kRunProbeRetryMs)) return;
 		ModelProbe probe = ProbeModel(*profile, kProbeTimeoutMs);
 		IED::HostLock guard(*context);
+		if (!probe.ok) {
+			chats->probeFailedMs.At(profile->name) = ChatNowMs();
+			return;
+		}
 		chats->probed.At(profile->name) = true;
 		chats->llamaCpp.At(profile->name) = probe.server == "llama.cpp";
 		chats->seesImages.At(profile->name) = probe.vision;
-		if (probe.contextWindow > 0) chats->windows.At(profile->name) = probe.contextWindow;
+		chats->LearnWindow(profile->name.View(), probe.contextWindow);
 	}
 
 	void TurnRun::Step() {
@@ -214,6 +224,7 @@ namespace Ai
 		const bool onClaude = candidates[candidate]->IsClaude();
 		StepRequest request;
 		int64 estimate = 0;
+		int64 estimateBefore = 0;
 		{
 			IED::HostLock guard(*context);
 			if (run->cancelled) {
@@ -234,11 +245,12 @@ namespace Ai
 			}
 			DeliverSteering();
 			if (!onClaude) {
-				if (Window() > 0 && EstimateTokens() * 100 > Window() * kRunCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
+				if (Window() > 0 && CalibratedTokens() * 100 > Window() * kContextCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
 				request = Request();
 				estimate = request.promptTokens;
 				EstimatePrefill(request);
 			}
+			estimateBefore = EstimateTokens();
 			SaveRunning();
 		}
 		steps += 1;
@@ -249,7 +261,7 @@ namespace Ai
 			IED::HostLock guard(*context);
 			CloseStreaming();
 			Prefill(Core::StringView(""));
-			Account(result, estimate);
+			Account(result, estimate, estimateBefore);
 		}
 		Handle(Classify(*result), result);
 		callSegments.Clear();
@@ -435,7 +447,7 @@ namespace Ai
 	void TurnRun::Overflow(StepResult* result) {
 		Core::String error = result->completion->errored ? result->completion->errorMessage : result->error;
 		const int64 limit = ContextLimitIn(error.View());
-		if (limit > 0) chats->windows.At(candidates[candidate]->name) = limit;
+		if (limit > 0) chats->LearnWindow(candidates[candidate]->name.View(), limit);
 		Core::String key = Core::String("context_overflow");
 		int64 count = 0;
 		counts.TryGet(key, count);
@@ -475,7 +487,7 @@ namespace Ai
 
 	// A turn about to finish with steering waiting goes on: the next step gives it to the model. The lock is held.
 	void TurnRun::Finish(Core::StringView reason) {
-		if (ending || (reason == "finished" && (!chat->injected.IsEmpty() || !claudeAside.IsEmpty()))) return;
+		if (ending || (reason == "finished" && (!chat->injected.IsEmpty() || !claudeAside.IsEmpty() || chats->HasUntold(chat)))) return;
 		ending = true;
 		stop = Core::String(reason);
 	}

@@ -26,7 +26,7 @@ Permission handling per class is defined in `docs/11`.
 | T-FS-4 | `fs_list(path, depth?, glob?)` | read | Directory listing (respects ignore rules). |
 | T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob. |
 | T-SRCH-1 | `search_text(pattern, regex?, glob?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. |
-| T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` returns a handle. |
+| T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` starts it as a background task and answers at once with its id (built 2026-10-23, `background` below). |
 | T-LSP-1 | `code_symbols(path or query, kind?, depth?)` | read | Outline of a file (kinds, signatures, line ranges), or the workspace's symbols named like `query`. **Built**, "Navigating code". |
 | T-LSP-2 | `code_definition(target)` | read | Where it is defined and declared, each with its first lines. **Built**. |
 | T-LSP-3 | `code_references(target, limit?, include_declaration?)` | read | References by file, each line with the function it sits in. **Built**. |
@@ -184,13 +184,25 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API) searched by words - the best Markdown sections with their path, line range and the lines that match. |
 | T-KNW-8 | `docs_read(path, heading? or line?)` | read | **Built**: a section of those docs by its path (`c4/library/bedrock.md`) and heading or line, as `docs_search` names them; a path alone lists the file's headings. |
 
-### `agents`
+### `agents` (built, 2026-10-23; offered while the chat may run agents)
 
-| ID | Tool | Class | Notes |
-|---|---|---|---|
-| T-AGT-1 | `spawn_agents(specs[], wait?)` | meta | Research/worker sub-agents (`docs/12`). |
-| T-AGT-2 | `agent_send(id, message)` / `agents_wait(ids, timeout_s?)` / `agents_cancel(ids)` | meta | |
-| T-AGT-3 | `submit_plan(plan_markdown, tasks)` | meta | Plan mode output. |
+A group's sub-agents (`docs/04` "A group is a topology"); the first design's `spawn_agents`, `agent_send`, `agents_wait` and `agents_cancel` became these with `chat_send` and the `background` tools.
+
+| Tool | Class | Notes |
+|---|---|---|
+| `agent_list()` | read | the agents this chat may run: model, local or cloud, mode, what each is for, each one's record in the workspace (runs; finished, failed, stopped; median time and tokens) and which run now, then when delegating pays |
+| `agent_run(agent, task, chat?)` | exec | starts the agent as a chat of its own on `task`, as a background task of this chat (its id answers); `chat` continues a sub-agent chat that ran before; its answer comes back when its turn ends. A brief under 200 characters gets a reminder; at most 4 running, 3 chats in a row; subject `agent.run(<name>)` |
+| T-AGT-3 `submit_plan(plan_markdown, tasks)` | meta | Plan mode output (not built). |
+
+### `background` (built, 2026-10-23; deferred)
+
+What `shell_run` and `build_run` with `background`, and `agent_run`, started (`docs/04` "Background tasks"). A task's end is told to its chat by itself: a harness note at the running turn's next step, or a turn of its own for an idle chat.
+
+| Tool | Class | Notes |
+|---|---|---|
+| `background_status(id?)` | read | the chat's tasks (state, time, how each ended), or one with the end of its output (an agent's answer) |
+| `background_wait(id?, seconds?)` | read | until that task, or any of the chat's, ends (120 s by default, at most 600); an ended task it shows is told |
+| `background_stop(id)` | meta | a command killed, a project's task cancelled, an agent's turn stopped |
 
 ### `chats` (built, 2026-10-21; deferred)
 
@@ -339,6 +351,6 @@ Budgets scale down automatically for models with small context windows (proporti
 
 ## As built (M4, first slice, 2026-10-21)
 
-The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `program_run`, `tasks_set`, `task_update`, `ask_user`, `finish`, and `docs_search` and `docs_read` when a plugin of the workspace has reference docs. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it, `build_run` and `program_run` need a trusted workspace. Why these tools exist, from the language eval (`tools/ai-evals/lang`, 2026-10-22): a model learning C4 read its library's headers through `shell_run` (15 to 25 calls a task) until it had `docs_search` over the toolchain's docs and API digest; it built ad hoc PowerShell timing scripts until `program_run` measured a program; it re-read files to see the line an error named; and it retried an `fs_edit` with the same wrong text until the miss said where it differed.
+The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `program_run`, `tasks_set`, `task_update`, `ask_user`, `finish`, and `docs_search` and `docs_read` when a plugin of the workspace has reference docs. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it, `build_run` and `program_run` need a trusted workspace. `shell_run` and `build_run` take `background` (2026-10-23, `plugins/chat/code/background.cf`): the task starts and the call answers at once. Why these tools exist, from the language eval (`tools/ai-evals/lang`, 2026-10-22): a model learning C4 read its library's headers through `shell_run` (15 to 25 calls a task) until it had `docs_search` over the toolchain's docs and API digest; it built ad hoc PowerShell timing scripts until `program_run` measured a program; it re-read files to see the line an error named; and it retried an `fs_edit` with the same wrong text until the miss said where it differed.
 
 Not yet: `tools_enable` and most groups (built: `media`, `chats`, `clipboard`, `code`, `git`; "Navigating code").

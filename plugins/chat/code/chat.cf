@@ -40,7 +40,7 @@ namespace Ai
 		return names[(int32)state];
 	}
 
-	PermissionMode DefaultPermission(ChatMode mode) { return mode == ChatMode::Plan ? PermissionMode::Plan : PermissionMode::Ask; }
+	PermissionMode DefaultPermission(ChatMode mode) { return mode == ChatMode::Plan ? PermissionMode::Plan : PermissionMode::Auto; }
 
 	// --- Segments and messages ---------------------------------------------------------------------------------------
 
@@ -248,6 +248,7 @@ namespace Ai
 			json.EndObject();
 		}
 		if (!resumed.IsEmpty()) json.Field("resumed", resumed.View());
+		if (!origin.IsEmpty()) json.Field("origin", origin.View());
 		if (!mentions.IsEmpty()) {
 			json.Key(Core::StringView("mentions"));
 			WriteMentions(json, mentions);
@@ -304,6 +305,7 @@ namespace Ai
 		fromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
 		fromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
 		resumed = Core::String(node.Member("user").Member("resumed").AsView());
+		origin = Core::String(node.Member("user").Member("origin").AsView());
 		ReadMentions(node.Member("user").Member("mentions"), mentions);
 		ReadAttachments(node.Member("user").Member("attachments"), attachments);
 		hops = node.Member("hops").AsInt();
@@ -400,6 +402,12 @@ namespace Ai
 		json.IntField("tasksDone", done);
 		json.IntField("tasksTotal", tasks.Count());
 		json.IntField("approvalsWaiting", WaitingApprovals());
+		int64 running = 0;
+		for (BackgroundTask* task : background)
+			if (task->Running()) running += 1;
+		json.IntField("backgroundRunning", running);
+		if (!agent.IsEmpty()) json.Field("agent", agent.View());
+		if (!parentChatId.IsEmpty()) json.Field("parentChatId", parentChatId.View());
 	}
 
 	Core::String Chat::SummaryJson() const {
@@ -451,6 +459,48 @@ namespace Ai
 			json.EndObject();
 		}
 		json.EndArray();
+	}
+
+	void Chat::WriteBackground(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (BackgroundTask* task : background) task->WriteJson(json, true);
+		json.EndArray();
+	}
+
+	BackgroundTask* Chat::FindBackground(Core::StringView taskId) const {
+		for (BackgroundTask* task : background)
+			if (task->taskId.View() == taskId) return task;
+		return nullptr;
+	}
+
+	void BackgroundTask::WriteJson(IED::JsonWriter& json, bool withOutput) const {
+		json.BeginObject();
+		json.Field("taskId", taskId.View());
+		json.Field("kind", kind.View());
+		json.Field("title", title.View());
+		json.Field("state", state.View());
+		json.IntField("startedMs", startedMs);
+		if (endedMs > 0) json.IntField("endedMs", endedMs);
+		if (!Running() && kind != "agent") json.IntField("exitCode", exitCode);
+		json.Field("summary", summary.View());
+		if (!agentChatId.IsEmpty()) json.Field("chatId", agentChatId.View());
+		if (told) json.BoolField("told", true);
+		if (withOutput) json.Field("output", output.View());
+		json.EndObject();
+	}
+
+	void BackgroundTask::Read(const Serialization::DomNode& node) {
+		taskId = Core::String(node.Member("taskId").AsView());
+		kind = Core::String(node.Member("kind").AsView());
+		title = Core::String(node.Member("title").AsView());
+		state = Core::String(node.Member("state").AsView());
+		startedMs = node.Member("startedMs").AsInt();
+		endedMs = node.Member("endedMs").AsInt();
+		exitCode = node.Member("exitCode").AsInt();
+		summary = Core::String(node.Member("summary").AsView());
+		output = Core::String(node.Member("output").AsView());
+		agentChatId = Core::String(node.Member("chatId").AsView());
+		told = node.Member("told").AsBool();
 	}
 
 	int64 Clip::Lines() const {
@@ -508,6 +558,8 @@ namespace Ai
 		WriteResources(json);
 		json.Key(Core::StringView("clips"));
 		WriteClips(json);
+		json.Key(Core::StringView("background"));
+		WriteBackground(json);
 		json.Key(Core::StringView("context"));
 		if (context.IsEmpty()) json.Null();
 		else json.Raw(context.View());

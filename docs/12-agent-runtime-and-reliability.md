@@ -162,6 +162,8 @@ The predecessor IDE defaulted every model to a 262144-token window. When the rea
 
 ## Sub-agents
 
+**As built (2026-10-23):** a model group is a topology - an orchestrator and its `agents` - and an agent runs as a chat of its own and a background task of the chat that ran it (`agent_run`, `docs/04` "A group is a topology", "Background tasks"; `plugins/chat/code/agents.cf`, `background.cf`). The first design follows; what differs: no `spawn_agents` batch or `report` tool (the agent's last answer is its report), agents are named by the group rather than by role, and concurrency is at most 4 agents per chat.
+
 - Tool: `spawn_agents([{ role: research|worker|<custom>, task, tools?, paths?, budget? }], wait: bool)`, plus `agent_send`, `agents_wait`, `agents_cancel`.
 - Each sub-agent: own transcript (stored under the parent chat), model + temperature from its role in the active group, restricted tool set (research = read-only + web; worker = read + write within assigned paths, no git mutations by default), its own budgets, a required `report(summary, artifacts)` at the end.
 - **Concurrency** is bounded by the scheduler (model slots), not by a fixed number; a group whose worker model has 4 llama.cpp slots can run 4 workers in parallel.

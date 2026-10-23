@@ -6,6 +6,7 @@ import { MENUBAR } from "./menus.js";
 import { DockView } from "./dock.js";
 import * as T from "./layouttree.js";
 import { initials, kindIcon, startPageView } from "./workspaces.js";
+import { badgeElement } from "./badges.js";
 import { StatusBar } from "./statusbar.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -63,6 +64,10 @@ export class DesktopChrome {
 		this.status.render();
 	}
 
+	badgesChanged() {
+		this.renderSidebar();
+	}
+
 	workspaceChanged() {
 		this.renderSidebar();
 		this.renderTitle();
@@ -103,10 +108,14 @@ export class DesktopChrome {
 		const ws = shell.workspace;
 		const unread = shell.server.notifications.length;
 		const wsButton = h("button.sb-ws", { title: ws.name ? ws.name + " (" + (ws.kind || "folder") + ") - switch workspace" : "Workspaces", "aria-label": "Switch workspace", on: { click: (event) => shell.commands.run("shell.switchWorkspace", { at: event.currentTarget }) } }, initials(ws.name));
-		const activities = shell.contributions.activities.map((a) => h("button.sb-act" + (a.id === current ? ".on" : ""), {
-			title: a.title, "aria-label": a.title, "aria-pressed": a.id === current ? "true" : "false", dataset: { activity: a.id },
-			on: { click: () => shell.showActivity(a.id) },
-		}, iconFrom(a.icon, a.plugin.base) || icon("window")));
+		const activities = shell.contributions.activities.map((a) => {
+			const badge = shell.activityBadge(a.id);
+			const title = badge && badge.title ? a.title + " - " + badge.title : a.title;
+			return h("button.sb-act" + (a.id === current ? ".on" : ""), {
+				title, "aria-label": title, "aria-pressed": a.id === current ? "true" : "false", dataset: { activity: a.id },
+				on: { click: () => shell.showActivity(a.id) },
+			}, iconFrom(a.icon, a.plugin.base) || icon("window"), badgeElement(badge));
+		});
 		const bell = h("button.sb-act.sb-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } },
 			icon(unread ? "bell-dot" : "bell"), unread ? h("span.badge.info", null, String(unread)) : null);
 		const gear = h("button.sb-act", { title: "Manage", "aria-label": "Manage", on: { click: (event) => shell.showMenu("shell/manage", event.currentTarget) } }, icon("settings-gear"));

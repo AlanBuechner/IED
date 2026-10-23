@@ -58,6 +58,8 @@ namespace Ai
 	Core::String Chats::DeleteMethod(const IED::Request& request) {
 		Chat* chat = Get(request.params.Str("chatId").View());
 		if (chat->run) throw IED::RpcError(IED::ErrorCode::Conflict, "the chat is running a turn: stop it first");
+		for (BackgroundTask* task : chat->background)
+			if (task->Running()) StopBackground(task);
 		IED::Workspace ws = WorkspaceOf(chat);
 		DeletedChat* gone = new DeletedChat();
 		gone->chatId = chat->chatId;

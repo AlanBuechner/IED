@@ -15,7 +15,7 @@ namespace Ai
 	const char* PermissionModeName(PermissionMode mode);
 	bool ReadPermissionMode(Core::StringView text, PermissionMode& mode);
 	const char* ChatStateName(ChatState state);
-	// The permission a mode starts with (docs/11): Plan's is plan, the others ask.
+	// The permission a mode starts with (docs/11): Plan's is plan (read only), the others auto.
 	PermissionMode DefaultPermission(ChatMode mode);
 
 	// One piece of a turn the clients show: "text", "thinking", "tool", "harness" or "steering".
@@ -113,6 +113,7 @@ namespace Ai
 		public Core::String fromTitle;
 		public int64 hops;                            // chats in a row that messaged each other up to this turn
 		public Core::String resumed;                  // IED started it after a restart (resume.ch): "relaunch" or "interrupted"
+		public Core::String origin;                   // "background": IED started it to tell of background tasks that ended
 		public ChatMode mode;
 		public Core::String model;
 		public Core::String group;
@@ -155,6 +156,29 @@ namespace Ai
 	}
 
 	const int64 kClipShownBytes = 2048;   // of a clip's text, what the clients get
+
+	// A task a chat's AI started in the background (docs/04 "Background tasks"): a command, a project's task, or a
+	// sub-agent's chat. Its fields change under the server lock; its thread is the one that ends it.
+	class BackgroundTask
+	{
+		public Core::String taskId;       // "bg-3"
+		public Core::String kind;         // command, task, agent
+		public Core::String title;        // "npm test", "build of Game", "agent reviewer"
+		public Core::String state;        // running, done, failed, stopped, lost
+		public int64 startedMs;
+		public int64 endedMs;
+		public int64 exitCode;
+		public Core::String summary;      // how it ended, one line ("exit 0", "build succeeded in 40 s (0 errors)")
+		public Core::String output;       // its output's end, or the agent's answer
+		public Core::String agentChatId;  // an agent's chat
+		public bool told;                 // its chat heard it ended
+		public bool stopAsked;
+
+		public bool Running() const { return state == "running"; }
+		// {taskId, kind, title, state, startedMs, endedMs?, exitCode?, summary, chatId?, output?}; the output with `withOutput`.
+		public void WriteJson(IED::JsonWriter& json, bool withOutput) const;
+		public void Read(const Serialization::DomNode& node);
+	}
 
 	// A clip on the AI's clipboard (clipboard.ch): text it copied, pasted into later calls as {{clip:<name>}}.
 	class Clip
@@ -243,7 +267,12 @@ namespace Ai
 		public Core::Array<Core::String> loadedTools; // deferred tools tool_search or a call loaded (docs/13)
 		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource), this run only
 		public Core::Array<Clip*> clips;              // the AI's clipboard, oldest first (clipboard.ch)
-		public Core::String context;                  // the last context.changed data (JSON); empty before a request
+		public Core::Array<BackgroundTask*> background;   // its AI's background tasks, oldest first (background.ch)
+		public Core::String agent;                    // the group's sub-agent this chat runs as; "" for an orchestrator
+		public Core::String parentChatId;             // the chat that ran it as a sub-agent; ""
+		public Core::String context;                  // the context meter (contextmeter.ch); empty before a request
+		public int64 estimateOffset;                  // the last count a model's server gave less IED's estimate of that request
+		public Core::String estimateModel;            // the model that count came from; "" before one this server run
 		public Core::String resume;                   // a call of this tool restarts the server: the chat goes on once it is back (resume.ch)
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
@@ -258,6 +287,9 @@ namespace Ai
 		public void WriteQueued(IED::JsonWriter& json) const;
 		public void WriteModified(IED::JsonWriter& json) const;
 		public void WriteResources(IED::JsonWriter& json) const;
+		// The background tasks as the clients show them: [{taskId, ..., output}].
+		public void WriteBackground(IED::JsonWriter& json) const;
+		public BackgroundTask* FindBackground(Core::StringView taskId) const;
 		// The clips as the clients show them: [{name, source, lines, bytes, text}], each text cut to kClipShownBytes.
 		public void WriteClips(IED::JsonWriter& json) const;
 		// The chat:<chatId> snapshot: the summary, the model and group in use and its role's effort, tasks, queued messages,

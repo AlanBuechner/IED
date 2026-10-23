@@ -1,12 +1,13 @@
 // composer.js - the chat's input bar (docs/15 "Chat", mockup 02): the messages queued for the next turn, the files the
 // message carries, the text box (Enter sends, Shift+Enter breaks the line, Esc stops a running turn, "@" mentions,
-// docs/04), Attach / Queue / Inject / Stop / Send, the chat's group, mode and permission, and the running numbers -
-// tokens in and out, speed, time to first token, context use.
+// docs/04), Attach / Queue / Inject / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its effort,
+// mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { MODES, PERMISSIONS, compact, contextBar, duration, effortLabel, effortRows, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
+import { choiceLabel, showModelPicker } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
 import { AttachBar } from "./attachbar.js";
 
@@ -15,7 +16,7 @@ const MOST_INPUT_PX = 220;
 const PHONE = "(max-width: 719px)";
 
 // actions: {send(text, as, extras), stop(), unqueue(index) -> Promise<{queued, message} | null>, sendQueued(index),
-// set(change), groups() -> Promise<[names]>, mentionRows(query) -> Promise<[row]>, upload(file) -> Promise<{blobId} | null>,
+// set(change), choices() -> Promise<{groups, models}>, mentionRows(query) -> Promise<[row]>, upload(file) -> Promise<{blobId} | null>,
 // fileUrl(path), toast(text)}
 export class Composer {
 	constructor(actions) {
@@ -149,7 +150,7 @@ export class Composer {
 		this.injectButton.hidden = !this.running;
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.queued.map((text, index) => this.queuedRow(text, index)));
-		this.renderSelectors(summary, model.groupInUse, model.roleEffort, model.model);
+		this.renderSelectors(summary, model.groupInUse, model.roleEffort);
 		this.renderTelemetry(model);
 	}
 
@@ -173,12 +174,11 @@ export class Composer {
 		this.focus();
 	}
 
-	renderSelectors(summary, groupInUse, roleEffort, inUse) {
+	renderSelectors(summary, groupInUse, roleEffort) {
 		const mode = MODES.find(([id]) => id === summary.mode) || MODES[2];
-		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS[1];
+		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS.find(([id]) => id === "auto");
 		replace(this.selectors,
-			h("span.muted", null, "Group"), this.dropdown(summary.group || groupInUse || "default", "Model group", () => this.groupRows(summary.group || groupInUse), (row) => this.actions.set({ group: row.value })),
-			h("span.muted", null, "Model"), this.dropdown(summary.pinnedModel || "Group's", "Model (pinned over the group's)", () => this.modelRows(summary.pinnedModel, inUse), (row) => this.actions.set({ model: row.value })),
+			h("span.muted", null, "Model"), this.modelButton(summary, groupInUse),
 			h("span.muted", null, "Effort"), this.dropdown(effortLabel(summary.effort, roleEffort), "Effort", () => effortRows(summary.effort, roleEffort), (row) => this.actions.set({ effort: row.value })),
 			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODES, summary.mode), (row) => this.actions.set({ mode: row.value })),
 			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
@@ -191,18 +191,14 @@ export class Composer {
 		} } }, h("span", null, label), icon("chevron-down"));
 	}
 
-	// The Model menu: the group's model, or a model of ai.models pinned over it for the next turns (docs/04 "Switching models").
-	async modelRows(pinned, inUse) {
-		const models = await this.actions.models();
-		const rows = [{ kind: "item", label: "As the group says" + (!pinned && inUse ? " (" + inUse + ")" : ""), value: "", enabled: true, icon: pinned ? null : "$(check)" }];
-		for (const model of models) rows.push({ kind: "item", label: model.name + (model.claude ? "  (Claude subscription)" : ""), value: model.name, enabled: true, icon: model.name === pinned ? "$(check)" : null });
-		return rows;
-	}
-
-	async groupRows(current) {
-		const names = await this.actions.groups();
-		if (!names.length) return [{ kind: "item", label: "No groups: the first model in ai.models", enabled: false }];
-		return names.map((name) => ({ kind: "item", label: name, value: name, enabled: true, icon: name === current ? "$(check)" : null }));
+	// The Model menu: a group (an orchestrator and its agents) or one model (docs/04 "One choice per chat").
+	modelButton(summary, groupInUse) {
+		const label = choiceLabel(summary, groupInUse);
+		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on a group or a model", "aria-haspopup": "dialog", on: { click: async (event) => {
+			const at = event.currentTarget;
+			const choices = await this.actions.choices();
+			if (choices) showModelPicker(at, choices, { group: summary.group || "", model: summary.pinnedModel || "" }, (change) => this.actions.set(change));
+		} } }, h("span", null, label), icon("chevron-down"));
 	}
 
 	renderTelemetry(model) {
@@ -213,7 +209,8 @@ export class Composer {
 			turn ? h("span", null, h("b", null, compact(turn.tokensIn)), " in / ", h("b", null, compact(turn.tokensOut)), " out") : null,
 			speed ? h("span", null, h("b", null, speed), " tok/s") : null,
 			turn && turn.ttftMs ? h("span", null, "TTFT ", h("b", null, duration(turn.ttftMs))) : null,
-			bar.window ? h("span.chat-mchip", { title: "Context used of the model's window" }, "ctx ", h("span.chat-bar", null, h("i", { style: { width: Math.min(bar.percent, 100) + "%" } })), h("b", null, bar.percent + "%"), " of " + compact(bar.window)) : null,
+			bar.window ? h("span.chat-mchip", { title: "Context used of " + (bar.model || "the model") + "'s window" }, "ctx ", h("span.chat-bar", null, h("i", { style: { width: Math.min(bar.percent, 100) + "%" } })), h("b", null, bar.percent + "%"), " of " + compact(bar.window))
+				: bar.used ? h("span.chat-mchip", { title: "Context used; the model's window is not known yet" }, "ctx ", h("b", null, compact(bar.used))) : null,
 			model.model ? h("span.chat-mchip", null, h("span.dot.info"), model.model) : model.summary && model.summary.chatId ? h("span.chat-mchip.c-warn", null, "no model set up (ai.models)") : null);
 	}
 }

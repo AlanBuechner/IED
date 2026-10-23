@@ -46,6 +46,7 @@ export class Shell {
 		this.tabCloseHandlers = new Map();
 		this.tabListeners = new Set();    // ied.tabs.onChange
 		this.tabsShown = null;            // the tabs state they heard last, as JSON
+		this.activityBadges = new Map();  // activity id -> {count, tone, title} (ied.activities.badge)
 		this.contributions = new Contributions(this);
 		this.contributions.on(() => this.views.mountWaiting());
 		this.modules = new Map();
@@ -403,6 +404,23 @@ export class Shell {
 
 	// ---------------------------------------------------------------------------------------------------------------
 	// Activities, tabs and views (used by the chrome, the commands and the plugins' `ied`)
+
+	// A plugin's badge on one of its activities' buttons (ied.activities.badge): {count?, tone?: "info" | "warn", title?},
+	// or null to take it off; another plugin's activity is left alone.
+	setActivityBadge(pluginId, activityId, badge) {
+		const activity = this.contributions.activity(activityId);
+		if (!activity || activity.plugin.id !== pluginId) return;
+		const next = badge ? { count: Math.max(0, Math.floor(badge.count || 0)), tone: badge.tone === "warn" ? "warn" : "info", title: String(badge.title || "") } : null;
+		if (JSON.stringify(next) === JSON.stringify(this.activityBadges.get(activityId) || null)) return;
+		if (next) this.activityBadges.set(activityId, next);
+		else this.activityBadges.delete(activityId);
+		if (this.chrome) this.chrome.badgesChanged();
+	}
+
+	// The badge on activity `activityId`'s button, or null.
+	activityBadge(activityId) {
+		return this.activityBadges.get(activityId) || null;
+	}
 
 	currentActivity() {
 		const activities = this.contributions.activities;
@@ -840,6 +858,8 @@ export class Shell {
 					return () => shell.tabListeners.delete(fn);
 				},
 			},
+			// A badge on the button of one of this plugin's activities: {count?, tone?: "info" | "warn", title?}, null to clear.
+			activities: { badge: (activityId, badge) => shell.setActivityBadge(plugin.id, activityId, badge) },
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
 			contributions: Object.assign((point) => shell.contributions.of(point), { on: (fn) => shell.contributions.on(fn) }),
 			icons: {

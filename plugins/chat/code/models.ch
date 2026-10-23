@@ -82,12 +82,20 @@ namespace Ai
 	// The role `role` of `group` in the ai.groups value; false when the group has no such role. A fallback is a model's name or
 	// {model, pace}.
 	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into);
+	// Sub-agent `agent` of `group` (its `agents`) as a role; false when the group has no such agent.
+	bool ReadAgentRole(Core::StringView groupsJson, Core::StringView group, Core::StringView agent, RoleModel& into);
+	// A role's JSON: {model, pace?, temperature?, effort?, fallback?}; false without a model.
+	bool ReadRoleEntry(const Serialization::DomNode& entry, RoleModel& into);
 	// The models `role` of `group` tries in order - its model, then its fallbacks - of those `models` has; `chosen` gets
 	// the role. A role the group leaves off is its primary; without a primary either, the first model alone.
 	Core::Array<ModelProfile*> RoleCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& chosen);
 	// `candidates` with the profile `pinned` of `models` first and the rest after it in order; as they are when `pinned` is
 	// empty or names no profile (docs/04 "Switching models").
 	Core::Array<ModelProfile*> PinnedFirst(const Core::Array<ModelProfile*>& models, const Core::Array<ModelProfile*>& candidates, Core::StringView pinned);
+	// The models a turn of a chat tries in order: a sub-agent chat's (`agent`) agent chain, else the role of `mode` in
+	// `group`; `pinned` first either way.
+	Core::Array<ModelProfile*> TurnCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView agent,
+		Core::StringView mode, Core::StringView pinned, RoleModel& chosen);
 	// The groups in the ai.groups value, by name.
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson);
 	const char* PrivacyName(Privacy privacy);

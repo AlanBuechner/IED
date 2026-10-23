@@ -18,6 +18,7 @@ namespace Ai
 		public Core::String skills;      // the list of its skills (item 8)
 		public Core::String docs;        // its plugins' reference docs, one line each
 		public Core::String deferred;    // the tools tool_search loads, one line each (item 7, docs/13)
+		public Core::String agents;      // the sub-agents it may run and when delegating pays (docs/04); "" for none
 	}
 
 	class Prompts

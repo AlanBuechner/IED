@@ -13,11 +13,12 @@ import { SidePanel } from "./sidepanel.js";
 import { MentionSource } from "./mentions.js";
 import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
+import { choicesFrom } from "./modelpicker.js";
 
 const NEAR_BOTTOM_PX = 80;
 
 function newDraft() {
-	return { mode: "agent", permission: "ask", group: "", effort: "" };
+	return { mode: "agent", permission: "auto", group: "", effort: "" };
 }
 
 // What the composer shows of a chat not made yet.
@@ -79,12 +80,12 @@ export class ChatPane {
 			sendQueued: (index) => this.request("chat.unqueue", { chatId: this.chatId, index, start: true }),
 			fileUrl: (path) => workspaceFileUrl(this.wsId, path),
 			set: (change) => this.setChat(change),
-			groups: () => this.groups(),
-			models: () => this.models(),
+			choices: () => this.choices(),
 			openFile: (path, line) => this.openFile(path, line),
 			openTab: (ref) => this.openTab(ref),
 			closeDetails: () => this.showDetails(false),
 			openChat: (chatId) => this.host.openChat(chatId),
+			stopTask: (taskId) => this.request("chat.stopTask", { chatId: this.chatId, taskId }),
 			fileIcon: (path) => this.ied.icons.file(path),
 			loadEarlier: () => this.loadEarlier(),
 			codeBlock: (code, fence, closed) => this.codeColors.element(code, fence, closed),
@@ -130,6 +131,16 @@ export class ChatPane {
 		this.transcript.render();
 		this.composer.update(this.model);
 		this.panel.update(this.model);
+		if (!chatId) this.nameDraftGroup();
+	}
+
+	// A draft's Model menu names the default group a chat made now would run on.
+	async nameDraftGroup() {
+		const choices = await this.choices();
+		const group = choices && choices.groups.find((g) => g.isDefault);
+		if (this.chatId || !group) return;
+		this.model.groupInUse = group.name;
+		this.composer.update(this.model);
 	}
 
 	shown(data) {
@@ -145,7 +156,7 @@ export class ChatPane {
 		const change = this.model.event(kind, data);
 		this.transcript.update(change);
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
-		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips) this.panel.update(this.model);
+		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips || change.background) this.panel.update(this.model);
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
 	}
 
@@ -180,7 +191,7 @@ export class ChatPane {
 	// A draft keeps its group, mode and permission until its first message makes the chat with them.
 	setChat(change) {
 		if (this.chatId) return this.request("chat.set", Object.assign({ chatId: this.chatId }, change));
-		if (change.mode && !change.permission) change.permission = change.mode === "plan" ? "plan" : "ask";
+		if (change.mode && !change.permission) change.permission = change.mode === "plan" ? "plan" : "auto";
 		Object.assign(this.draft, change);
 		this.model.summary = draftSummary(this.draft);
 		this.composer.update(this.model);
@@ -245,17 +256,10 @@ export class ChatPane {
 		if (await this.request("settings.set", { tier: "app", key: "ai.permissions", value: Object.assign({}, current, { allow }) })) await this.approve(approval, "allow");
 	}
 
-	async groups() {
+	// What the Model menu lists: the groups and the models of the settings (modelpicker.js).
+	async choices() {
 		const settings = await this.request("settings.get", { wsId: this.wsId });
-		const groups = settings && settings.values && settings.values["ai.groups"] ? settings.values["ai.groups"].value || {} : {};
-		return Object.keys(groups);
-	}
-
-	// The models of ai.models a chat can be pinned to: [{name, claude}].
-	async models() {
-		const settings = await this.request("settings.get", { wsId: this.wsId });
-		const models = settings && settings.values && settings.values["ai.models"] ? settings.values["ai.models"].value || {} : {};
-		return Object.keys(models).map((name) => ({ name, claude: models[name].provider === "claude-code" }));
+		return settings && settings.values ? choicesFrom(settings.values) : null;
 	}
 
 	openFile(path, line) {

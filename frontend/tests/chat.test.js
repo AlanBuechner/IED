@@ -3,7 +3,7 @@
 
 import { test, assertEqual } from "./harness.js";
 import { ChatList, ChatModel, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortRows, keptFor, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
-import { chatStatusText } from "/plugins/ied.chat/ui/index.js";
+import { chatBadge, chatStatusText } from "/plugins/ied.chat/ui/index.js";
 import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
 function snapshot() {
@@ -64,10 +64,19 @@ test("chat: tasks, queue, files and context", () => {
 	model.event("context.changed", { window: 32768, used: 16384, parts: [{ name: "System prompt", tokens: 4096 }] });
 	assertEqual([model.tasks.length, model.queued, model.modified[0].plus, model.context.used], [1, ["later"], 3, 16384]);
 	const bar = contextBar(model.context);
-	assertEqual([bar.percent, bar.parts[0].share], [50, 0.125]);
+	assertEqual([bar.percent, bar.parts[0].share, bar.free], [50, 0.125, "Free"]);
 	assertEqual(contextBar(null).parts, []);
+	assertEqual(contextBar({ window: 100, used: 10, model: "qwen", compressAt: 85, parts: [] }).free, "Free (compressed at 85%)", "IED compresses a local model");
+	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", compacts: true, parts: [] }).free, "Free (the model compacts its own)", "Claude compacts its own");
+	assertEqual(contextBar({ window: 100, used: 10, model: "claude-opus", parts: [] }).model, "claude-opus");
 	model.event("chat.changed", { chatId: "c1", title: "Renamed", state: "running" });
 	assertEqual([model.summary.title, model.running()], ["Renamed", true]);
+});
+
+test("chat: the Chat activity's badge counts the chats in a turn", () => {
+	assertEqual(chatBadge([{ state: "idle" }, { state: "paused" }]), null, "none in a turn");
+	assertEqual(chatBadge([{ state: "running" }, { state: "running" }, { state: "idle" }]), { count: 2, tone: "info", title: "2 running" });
+	assertEqual(chatBadge([{ state: "running" }, { state: "awaiting_approval" }]), { count: 1, tone: "warn", title: "1 running, 1 needs you" }, "one waiting on the owner wins");
 });
 
 test("chat: the list keeps the latest first", () => {

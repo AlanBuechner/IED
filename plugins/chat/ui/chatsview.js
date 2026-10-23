@@ -1,7 +1,8 @@
 // chatsview.js - the Chats tool window (docs/15 "Chat activity"): every chat of the workspace (chats:<wsId>) with its
 // state, those open as tabs in this window first, then the rest, then the deleted ones, kept for a while and restorable
-// (docs/04 "Deleting a chat"). A click opens a chat as a tab; its menu renames, closes or deletes it. Deleting needs no
-// confirmation: the toast offers Undo and the Deleted section keeps the chat.
+// (docs/04 "Deleting a chat"); a sub-agent's chat sits under the chat that ran it (docs/04 "A group is a topology"). A
+// click opens a chat as a tab; its menu renames, closes or deletes it. Deleting needs no confirmation: the toast offers
+// Undo and the Deleted section keeps the chat.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -70,12 +71,13 @@ export class ChatsView {
 		const focused = document.activeElement && this.body.contains(document.activeElement) ? document.activeElement.dataset.chat : null;
 		const now = Date.now();
 		const chats = this.list.chats.filter((c) => this.matches(c.title));
-		const open = chats.filter((c) => this.isOpen(c.chatId));
-		const rest = chats.filter((c) => !this.isOpen(c.chatId));
+		const root = rootsOf(chats);
+		const open = chats.filter((c) => this.isOpen(root.get(c.chatId)));
+		const rest = chats.filter((c) => !this.isOpen(root.get(c.chatId)));
 		const deleted = this.list.deleted.filter((d) => this.matches(d.title));
 		const sections = [
-			open.length ? this.section("open", "Open", open.map((c) => this.chatRow(c, now))) : null,
-			rest.length ? this.section("recent", open.length ? "Recent" : "Chats", rest.map((c) => this.chatRow(c, now))) : null,
+			open.length ? this.section("open", "Open", nestAgents(open).map(({ chat, depth }) => this.chatRow(chat, now, depth))) : null,
+			rest.length ? this.section("recent", open.length ? "Recent" : "Chats", nestAgents(rest).map(({ chat, depth }) => this.chatRow(chat, now, depth))) : null,
 			deleted.length ? this.section("deleted", "Deleted", deleted.map((d) => this.deletedRow(d, now))) : null,
 		].filter(Boolean);
 		if (!sections.length) sections.push(this.emptyEl());
@@ -103,12 +105,13 @@ export class ChatsView {
 			closed ? null : h("div.chats-rows", { role: "group" }, ...rows));
 	}
 
-	chatRow(summary, now) {
+	chatRow(summary, now, depth) {
 		const look = chatLook(summary);
 		const shown = this.tabs.shown.includes("chat:" + summary.chatId);
 		const state = STATE_LABELS[summary.state] || summary.state;
-		return h("div.chats-row" + (shown ? ".shown" : "") + (look.attention ? ".attn" : ""), {
-			role: "treeitem", tabindex: "-1", title: summary.title + " - " + state, dataset: { chat: summary.chatId, state: summary.state },
+		return h("div.chats-row" + (shown ? ".shown" : "") + (look.attention ? ".attn" : "") + (depth ? ".sub" : ""), {
+			role: "treeitem", tabindex: "-1", title: (summary.agent ? "Agent " + summary.agent + ": " : "") + summary.title + " - " + state,
+			"aria-level": String((depth || 0) + 1), style: { "--depth": String(depth || 0) }, dataset: { chat: summary.chatId, state: summary.state },
 			on: {
 				click: () => this.open(summary.chatId),
 				auxclick: (event) => event.button === 1 && this.isOpen(summary.chatId) && this.ied.tabs.close("chat:" + summary.chatId),
@@ -251,4 +254,45 @@ export class ChatsView {
 		this.stopList();
 		this.stopTabs();
 	}
+}
+
+// Each chat's topmost ancestor in `chats` (itself for a chat no listed chat ran): a sub-agent's chat goes in its
+// orchestrator's section.
+export function rootsOf(chats) {
+	const byId = new Map(chats.map((c) => [c.chatId, c]));
+	const roots = new Map();
+	for (const chat of chats) {
+		let at = chat;
+		const seen = new Set();
+		while (at.parentChatId && byId.has(at.parentChatId) && !seen.has(at.chatId)) {
+			seen.add(at.chatId);
+			at = byId.get(at.parentChatId);
+		}
+		roots.set(chat.chatId, at.chatId);
+	}
+	return roots;
+}
+
+// The chats in order with each sub-agent's chat right under the chat that ran it ([{chat, depth}]); one whose parent is
+// not in the list stays where it is.
+export function nestAgents(chats) {
+	const ids = new Set(chats.map((c) => c.chatId));
+	const children = new Map();
+	for (const chat of chats) {
+		if (!chat.parentChatId || !ids.has(chat.parentChatId)) continue;
+		if (!children.has(chat.parentChatId)) children.set(chat.parentChatId, []);
+		children.get(chat.parentChatId).push(chat);
+	}
+	const out = [];
+	const placed = new Set();
+	const place = (chat, depth) => {
+		if (placed.has(chat.chatId)) return;
+		placed.add(chat.chatId);
+		out.push({ chat, depth });
+		for (const child of children.get(chat.chatId) || []) place(child, depth + 1);
+	};
+	for (const chat of chats)
+		if (!chat.parentChatId || !ids.has(chat.parentChatId)) place(chat, 0);
+	for (const chat of chats) place(chat, 0);
+	return out;
 }

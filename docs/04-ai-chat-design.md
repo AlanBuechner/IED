@@ -58,6 +58,38 @@ before. The other roles (worker, research, summarizer, titler, ...) wait for the
 
 **Effort** is how much a reasoning model thinks before it answers: `low`, `medium`, `high`, `xhigh` or `max` (Claude's five), or unset for what its server does by default. A turn's effort is its chat's, when the chat picked one (the composer's Effort, `chat.set`), else its role's (`ai.groups`). A model profile says what each effort adds to the chat completion request in its `effort` (`{"low": {<fields>}, "medium": {...}, ..., "max": {...}}`, the fields written into the request; a level it leaves out adds nothing, so `{}` never sends one). Without one, a llama.cpp server is sent `chat_template_kwargs: {"reasoning_effort": <effort>}`, which its chat template reads, and any other server OpenAI's top-level `reasoning_effort`: llama.cpp (b10222) ignores the top-level field, and a template that does not read the variable ignores it too. A template that reads only `enable_thinking` (Qwen3's) takes `"effort": {"low": {"chat_template_kwargs": {"enable_thinking": false}}}`. Qwen3.8's template reads both: unset is its `xhigh`, which `high` also means, and an effort it does not know fails the request (400), so a level its server does not take is mapped to one it does (`"max": {"chat_template_kwargs": {"reasoning_effort": "xhigh"}}`). A turn records the effort it used. Measured with `tools/ai-evals` on Qwen3.8 27B at temperature 0: its default (xhigh) took 730 s for the eight questions, `medium` 494 s and `low` 458 s, every answer keeping its facts; medium thinks least per step and keeps reading by symbol, low takes fewer steps by reading whole files.
 
+## A group is a topology: an orchestrator and its sub-agents (2026-10-23)
+
+Owner, 2026-10-23: "model groups are topologys of an orcistrator and sub agents that can call each other. there is no need for a group and model selection they both become one. we should also have the tools and info for the AI to make sure that the sub agents are usfaul and not just makeing things more complex", and "in the chat we should be able to select from eather a grop or an ai directly ... in the menu we should have groups on the left and individual ai's on the right".
+
+**The shape.** A group's `primary` chain is its orchestrator - the chat's own model - with `planning` and `implementation` for Plan and Agent mode as above; `agents` are its sub-agents:
+
+```jsonc
+"ai.groups": {
+	"claude leads, local hands": {
+		"description": "Opus orchestrates; a local coder edits, Sonnet reviews",
+		"primary": { "model": "claude-opus", "fallback": ["qwen3.8-27b@lan"] },
+		"agents": {
+			"coder":    { "model": "qwen-coder@desk", "temperature": 0, "mode": "agent", "calls": ["reviewer"],
+			              "description": "Fast local implementer for well-specified edits in a few files" },
+			"reviewer": { "model": "claude-sonnet", "mode": "ask", "description": "Reviews a diff for bugs and missed cases" }
+		}
+	}
+}
+```
+
+An agent is a role (model, pace, temperature, effort, fallbacks) with `description` (what the orchestrator is told it is for), `mode` (`agent` by default, `ask`, `plan`) and `calls`, the agents it may run itself (none by default; `["*"]` every one). The orchestrator may run every agent of its group. The finer roles of the first design (worker, research, verifier, summarizer, titler, vision, completion, inline) are no longer offered: a group that names them keeps them, unused.
+
+**One choice per chat.** A chat runs on a group or on a single model: `chat.set {group}` clears the chat's model and `{model}` its group (`docs/10`). A single model runs alone, with no sub-agents; when it fails, the default group's chain is tried behind it, as a pinned model's was. The composer's one Model menu shows the groups on the left - each with its orchestrator and its number of agents, the default marked - and the models on the right, by family: Claude's under one heading, each other server's under its host, a family folded unless it holds the chat's choice; a phone shows the two lists one above the other.
+
+**Running a sub-agent.** `agent_run {agent, task, chat?}` starts the agent as a chat of its own - `agent` its name, `parent` the chat that ran it - in the same group, on the agent's chain, in the agent's mode, with its parent's permission; `chat` sends the task to a sub-agent chat that ran before, which keeps what it learned. It is a background task of its parent ("Background tasks" below): the parent goes on, and hears the agent's answer when the agent's turn ends (or waits for it with `background_wait`). A sub-agent runs the agents its `calls` names; chats in a row stop at 3 hops as before, and a chat runs at most 4 agents at once. The Chats list shows a sub-agent's chat under its parent.
+
+**What keeps them useful.**
+
+- A system-message section, for a chat that can run agents: each agent (name, model, local or cloud, what it is for) and when delegating pays - a self-contained, well-specified task that runs while the orchestrator does something else, or that needs another model's strength (cheap and fast for bulk edits, strong for a review) - and when it does not: a task of a few tool calls, one that needs this conversation's context, or the very next step of the orchestrator's own work. A brief says the goal, the files, the constraints, what done looks like and what to return; an answer is checked before it is relied on.
+- `agent_list`: the agents with their record in this workspace - runs, how many finished, failed or were stopped, their median time and tokens (`.ied/local/agents.json`) - so the orchestrator sees which pay off.
+- `agent_run` answers a brief under 200 characters with a reminder that the agent starts with none of the conversation, and every agent's answer arrives with its time and tokens.
+
 ## Scheduling and routing
 
 1. **Role -> candidate list** (the role's model, then its fallbacks).
@@ -284,6 +316,7 @@ the owner signs in (`claude auth login`) for the first real one.
 - **Cache-aware:** the system message and early prefix stay byte-identical; between compressions the context is append-only; compression happens in big steps rarely, so llama.cpp and Anthropic prefix caches stay warm (this is what makes long local chats *fast*, not just possible).
 - **Never lost:** the raw history stays on disk; `history_search` / `history_read` retrieve compressed-away details. Scratchpad and task list are never compressed (they travel as tail notes).
 - **Overflow recovery:** a context-length error updates the model's window from the error text, compresses and retries (`docs/12`).
+- **The meter as built (2026-10-23; owner: "the context display in the chat window is not always acuret").** After each step the chat's `context.changed` (kept in `chat.json`, so a restart shows it) says how full the context is: the tokens the model's server counted for the step's prompt plus the reply it gave, against the window of the model that counted them (`model`). A step that failed before an answer leaves it as it was (it used to drop to 0%). The window is the profile's `contextWindow`, else what the server, the CLI's `modelUsage` (the turn's model's entry) or a context error reported, kept in the chat plugin's `windows.json` so the next server run knows Claude's before its first query ends; a server that did not answer discovery is asked again after a minute, and a server listing several models gives the window of the profile's model. Agent mode's last Claude step after `finish` is counted too. The parts (system prompt, tool definitions - every tool for Claude - messages with their thinking and images, tool results) are IED's estimates scaled to add up to the count; `compressAt` (85) is where IED compresses a local model, which counts from its estimate calibrated by the last real count, so the meter and compression agree; Claude's says it compacts its own (`compacts`). A chat that switches models while idle is redrawn for the new model's window. `plugins/chat/code/contextmeter.cf`, tests `server.ai.contextmeter`, `server.ai.probe`.
 
 ## System message
 
@@ -336,6 +369,16 @@ A chat can hand work to another chat of its workspace and hear back, the way a l
 - `chat_wait` waits for another chat's turn to end and returns its answer (default 120 s, at most 600 s; a stop ends the wait).
 
 The receiving turn says who sent it: its user message carries `from {chatId, title}`, the transcript heads it "From chat <title>" with a link that opens that chat, and the model is told the message came from that chat and that it can answer with `chat_send`. A chain of chats messaging chats is cut at 3 hops (`hops` on the turn), so two chats cannot keep each other running forever.
+
+## Background tasks (2026-10-23)
+
+Owner, 2026-10-23: "ai background tasks that the ai can be notified of when they finish as well as be able to check on there status".
+
+- `shell_run` and `build_run` with `background: true`, and `agent_run`, start a task and answer at once with its id (`bg-<n>`, the chat's counter); the turn goes on. A command's output goes to Output > AI as before.
+- `background_status {id?}` lists the chat's tasks (state, title, time, exit code, the first line of how it ended), or one with its output's end; `background_wait {id?, seconds?}` waits for that task, or any running one, to end (120 s by default, 600 at most; a stop ends the wait); `background_stop {id}` stops one. They are the deferred group `background`.
+- **Told when they end.** A running turn gets each ended task at its next step as a harness note (`background_ended`), not as the owner's steering; a turn that would finish with an ended task not yet told goes on to read it. An idle chat starts a turn by itself whose message names the tasks that ended (the transcript heads it "Background tasks"); a paused or waiting chat hears them with its next turn.
+- **Lifetime.** A task outlives the turn that started it; Stop on the chat stops its turn, not its tasks. Deleting a chat stops them. `chat.json` keeps the list (id, kind, title, state, times, exit code, summary); a task still running when the server stops is `lost` when it starts again, its process gone with the server.
+- **In the UI.** The side panel's "Background tasks" section lists them - a spinner while running, how each ended, its time - with Stop on a running one and its output's end unfolding under it; the chat topic's `background.changed {tasks}` carries the list (`docs/10`).
 
 ## What a chat has open (built, 2026-10-21)
 
@@ -434,7 +477,7 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 | `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, vision?, keepThinking?, effort?: {low?, medium?, high?, xhigh?, max?}, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); `effort` the request fields each effort adds ("Model groups and roles"); `vision` says whether the images tool results show are sent to it (`docs/13` "Images in tool results"; left out, its server says: llama.cpp's `/props` `modalities.vision`); `keepThinking` (default true) sends a llama.cpp server the turn's earlier thinking with each step as `reasoning_content`, as its chat template expects - without it the template shows an empty think block for every earlier step and the model works its plan out again (measured in `tools/ai-evals/lang`, variant v10); a key is only ever named by its environment variable. Or `{provider: "claude-code", model?, pacing?: {ladder, target}, contextWindow?, watchdog?}`: Claude through the owner's Claude Code CLI on their subscription ("The Claude Code provider") |
 | `ai.claude.command` | app | the Claude Code CLI's program and leading arguments; `[]`, the default: found (PATH, the native installer's, the Claude desktop app's) |
 | `ai.claude.usageRefreshMinutes` | app | how often the plan's usage is asked while a `claude-code` profile is set up (10; 0: only when asked and after Claude turns) |
-| `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary`, with the chat's effort when it picked one |
+| `ai.groups` | app | `{<group>: {description?, <role>: {model, temperature?, effort?, fallback?: [names]}, agents?: {<name>: {model, description?, mode?, calls?, temperature?, effort?, fallback?}}}}`; a turn uses its mode's role, with the chat's effort when it picked one; `agents` are the orchestrator's sub-agents ("A group is a topology") |
 | `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
 | `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |
@@ -444,4 +487,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.
+**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, checkpoints and rewind, the trajectory files. Sub-agents and background tasks are built (2026-10-23, above).
