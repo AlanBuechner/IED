@@ -41,7 +41,7 @@ from iedclient import Client  # noqa: E402
 AUTO_ANSWER = "I am not available to answer. Make the reasonable choice yourself, say which you chose, and continue."
 HOME_PARTS = ("plugins", "frontend", "shared")
 GIT_IDENTITY = ["-c", "user.name=eval", "-c", "user.email=eval@localhost", "-c", "commit.gpgsign=false"]
-EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300}
+EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300, "stepCapS": 3600}
 # A task's timeout_minutes as budget seconds: the share of it a job got alone-on-the-server when four jobs shared the
 # server (0.40 to 0.49 measured, 2026-10-22), so budgeted runs compare with the wall-clock runs before them.
 BUDGET_FACTOR = 0.45

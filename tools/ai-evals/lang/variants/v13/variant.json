@@ -1,0 +1,16 @@
+{
+	"description": "v10's server features on build/bin/langeval-cut, where a reply cut while still reasoning (the step cap, a stall) keeps its reasoning and the next step goes on with it; the prompt drops v9's rule against drafting code in thinking",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}
