@@ -63,11 +63,24 @@ function closePane(pane) {
 	pane.el.remove();
 }
 
+// The owner's wheel turned up, and the transcript moved as it does then.
+function ownerScrollsUp(pane, px) {
+	pane.scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -px, bubbles: true }));
+	pane.scroller.scrollTop = Math.max(0, pane.scroller.scrollTop - px);
+}
+
+// The transcript `px` taller, as when an image of a tool's result loads.
+function grow(pane, px) {
+	const block = document.createElement("div");
+	block.style.height = px + "px";
+	pane.transcript.el.append(block);
+}
+
 test("chat pane: a chat opens at its end, and is there again whenever it is shown", async () => {
 	const pane = await openPane(fakeIed(), 30);
 	try {
 		assertTrue(pane.scroller.scrollTop > 0 && gap(pane) <= 1, "opened at its end");
-		pane.scroller.scrollTop = 0;
+		ownerScrollsUp(pane, pane.scroller.scrollTop);
 		await frames(2);
 		pane.visible(false);
 		pane.visible(true);
@@ -86,11 +99,35 @@ test("chat pane: the end stays in view as the chat grows, until the owner scroll
 		ied.topics.get("chat:c1").evt("turn.start", { turnId: "n1", mode: "agent", user: { text: "One more" } });
 		await frames(2);
 		assertTrue(gap(pane) <= 1, "a new turn: still at the end");
-		pane.scroller.scrollTop = 0;
+		ownerScrollsUp(pane, pane.scroller.scrollTop);
 		await frames(2);
 		ied.topics.get("chat:c1").evt("turn.start", { turnId: "n2", mode: "agent", user: { text: "And another" } });
 		await frames(2);
 		assertEqual(pane.scroller.scrollTop, 0, "scrolled up: the transcript stays where the owner put it");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+test("chat pane: only the owner scrolling up stops following the end - never the chat growing between a scroll and its event", async () => {
+	const pane = await openPane(fakeIed(), 30);
+	try {
+		grow(pane, 400);
+		pane.scroller.dispatchEvent(new Event("scroll"));
+		await frames(2);
+		assertTrue(gap(pane) <= 1, "an image loaded before the last scroll's event: still at the end");
+		ownerScrollsUp(pane, 300);
+		await frames(2);
+		const top = pane.scroller.scrollTop;
+		grow(pane, 400);
+		await frames(2);
+		assertEqual(pane.scroller.scrollTop, top, "scrolled up by the owner: the transcript stays where they put it");
+		pane.scroller.scrollTop = pane.scroller.scrollHeight;
+		await frames(2);
+		grow(pane, 400);
+		await frames(2);
+		assertTrue(gap(pane) <= 1, "back at the end: it follows again");
 	}
 	finally {
 		closePane(pane);

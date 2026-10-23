@@ -3,7 +3,9 @@ screenshots the states that matter. Both servers run every scenario unless it na
 
 import json
 import os
+import struct
 import time
+import zlib
 
 from harness import check
 
@@ -1672,6 +1674,64 @@ def chat_message_joins_the_running_turn(run):
 	check(len(run.texts(".chat-turn")) == 1, "the running turn took it: no turn of its own")
 	check(not page.is_visible(".chat-queued"), "it left the composer once the turn took it")
 	run.shot("joined")
+
+
+def noise_png(width, height):
+	"""A gray PNG of random noise: large, and slow to load and decode, as a page's screenshot is."""
+	def chunk(kind, data):
+		return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+	rows = b"".join(b"\x00" + os.urandom(width) for _ in range(height))
+	return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def transcript_gap(page):
+	"""How far the shown chat's transcript is from its end, in pixels."""
+	return page.evaluate("(() => { const s = [...document.querySelectorAll('.chat-transcript')].find((e) => e.offsetParent); return s.scrollHeight - s.scrollTop - s.clientHeight; })()")
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_follows_its_end_past_images(run):
+	"""Tool results that show images, and a reply streaming after them, keep the transcript at its end; only the owner's
+	wheel up stops it following (owner, 2026-10-23: "no tool calls should stop the auto scroll only the user scrolling
+	up can")."""
+	page = open_chat(run)
+	images = 1
+	if run.target.kind == "real":
+		images = 5
+		os.makedirs(os.path.join(run.target.workspace, "shots"), exist_ok=True)
+		views = []
+		for i in range(images):
+			name = "shots/%s-%d.png" % (run.viewport, i)
+			with open(os.path.join(run.target.workspace, name), "wb") as f:
+				f.write(noise_png(600, 900))
+			views.append(model_script({"text": "Looking at the page. " * 20, "chunk": 4, "delayMs": 200}, {"toolCall": {"name": "image_view", "arguments": {"path": name}}}, {"finish": "tool_calls"}))
+		run.target.queue_model(*views, model_script({"text": "word " * 3000, "chunk": 5, "delayMs": 300}, {"finish": "stop"}))
+	send(page, "show me the screen")
+	try:
+		page.wait_for_function("(n) => [...document.querySelectorAll('.chat-turn:last-child .chat-tool-images img')].filter((i) => i.complete && i.naturalHeight > 0).length >= n", arg=images, timeout=30000)
+		if run.target.kind == "real":
+			page.wait_for_function("(document.querySelector('.chat-turn:last-child .chat-seg[data-type=text]:last-child .chat-text') || {textContent: ''}).textContent.length > 600", timeout=30000)
+		else:
+			page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+		time.sleep(0.3)
+		check(transcript_gap(page) <= 2, "at the end past the images: %d px from it" % transcript_gap(page))
+		run.shot("following")
+		if run.target.kind != "real" or run.phone:
+			return
+		box = page.locator(".chat-transcript:visible").bounding_box()
+		page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+		page.mouse.wheel(0, -500)
+		time.sleep(0.5)
+		top = page.evaluate("[...document.querySelectorAll('.chat-transcript')].find((e) => e.offsetParent).scrollTop")
+		time.sleep(1.0)
+		check(not page.is_visible(".chat-turn:last-child .chat-foot:has-text('Finished')"), "the reply still streams")
+		now = page.evaluate("[...document.querySelectorAll('.chat-transcript')].find((e) => e.offsetParent).scrollTop")
+		check(now == top and transcript_gap(page) > 100, "scrolled up by the owner's wheel, it stays there: %d then %d" % (top, now))
+		run.shot("scrolled-up")
+	finally:
+		if run.target.kind == "real":
+			run.request("chat.stop", {"chatId": run.chat_id})
+			page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Stopped'), .chat-turn:last-child .chat-foot:has-text('Finished')", timeout=20000)
 
 
 PIXEL_PNG = bytes.fromhex(

@@ -16,6 +16,8 @@ import { stored, store } from "./stored.js";
 import { choicesFrom } from "./modelpicker.js";
 
 const NEAR_BOTTOM_PX = 80;
+const OWNER_SCROLL_MS = 800;   // a scroll this soon after the owner's wheel, touch or key is theirs
+const CLAMPED_PX = 2;          // a transcript that shrank under its end is scrolled up by the browser, this close to it
 const PANEL_MIN_PX = 200;
 const TRANSCRIPT_MIN_PX = 360;   // what a wide panel leaves the transcript
 const PANEL_STEP_PX = 16;        // an arrow key on the panel's edge
@@ -49,7 +51,11 @@ export class ChatPane {
 		this.panel.el.addEventListener("chat-panel-toggle", () => this.panel.update(this.model));
 		this.showPanel = stored("ied.chat.panel", true);
 		this.atEnd = true;   // the transcript shows its end, and keeps it as it grows, until the owner scrolls up
-		this.scroller = h("div.chat-transcript", { on: { scroll: () => (this.atEnd = this.nearBottom()) } }, this.transcript.el);
+		this.lastTop = 0;
+		this.ownerMs = 0;    // the owner's last wheel, touch or key on the transcript
+		this.held = false;   // the owner holds a pointer down on it (its scrollbar)
+		const touched = (event) => this.touched(event);
+		this.scroller = h("div.chat-transcript", { on: { scroll: () => this.scrolled(), wheel: touched, touchstart: touched, touchmove: touched, keydown: touched, pointerdown: touched } }, this.transcript.el);
 		this.main = h("section.chat-main", null, host.header || null, this.scroller, this.composer.el);
 		this.sash = h("div.chat-panel-sash", { role: "separator", tabindex: "0", "aria-orientation": "vertical", "aria-label": "Details panel width", title: "Drag to resize; double-click for the default width",
 			on: { pointerdown: (event) => this.dragPanel(event), dblclick: () => this.keepPanel(0), keydown: (event) => this.panelKey(event) } });
@@ -179,9 +185,39 @@ export class ChatPane {
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
 	}
 
-	nearBottom() {
+	gap() {
 		const s = this.scroller;
-		return s.scrollHeight - s.scrollTop - s.clientHeight < NEAR_BOTTOM_PX;
+		return s.scrollHeight - s.scrollTop - s.clientHeight;
+	}
+
+	// The transcript scrolled. Only the owner moving it up stops it following its end: a scroll event comes a frame after
+	// its scroll, and what grew meanwhile (an image of a tool's result loading, a reply streaming) leaves the end farther
+	// away than it was, which says nothing of the owner. Back near the end, it follows again.
+	scrolled() {
+		const top = this.scroller.scrollTop;
+		const up = top < this.lastTop;
+		if (up && this.ownerScrolls() && this.gap() > CLAMPED_PX) this.atEnd = false;
+		else if (!up && this.gap() < NEAR_BOTTOM_PX) this.atEnd = true;
+		this.lastTop = top;
+	}
+
+	ownerScrolls() {
+		return this.held || Date.now() - this.ownerMs < OWNER_SCROLL_MS;
+	}
+
+	// The owner's hand on the transcript; a pointer held down (on its scrollbar) counts until it is let go.
+	touched(event) {
+		this.ownerMs = Date.now();
+		if (event.type !== "pointerdown") return;
+		this.held = true;
+		const release = () => {
+			this.held = false;
+			this.ownerMs = Date.now();
+			window.removeEventListener("pointerup", release, true);
+			window.removeEventListener("pointercancel", release, true);
+		};
+		window.addEventListener("pointerup", release, true);
+		window.addEventListener("pointercancel", release, true);
 	}
 
 	// The transcript at its end, kept there as it grows (a reply streaming, an image loading, the composer growing) until
@@ -194,6 +230,7 @@ export class ChatPane {
 
 	toEnd() {
 		this.scroller.scrollTop = this.scroller.scrollHeight;
+		this.lastTop = this.scroller.scrollTop;
 	}
 
 	async loadEarlier() {
