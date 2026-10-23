@@ -22,6 +22,7 @@
 				"maxOutput": { "type": "integer", "minimum": 0, "description": "Tokens a reply may take; 0 leaves it to the server." },
 				"privacy": { "enum": ["local", "lan", "cloud"], "default": "local" },
 				"vision": { "type": "boolean", "description": "Whether the images tool results show are sent to it (a vision model; llama.cpp with its projector). Left out: what its server says (llama.cpp's /props modalities, asked once per server run); Test connection shows it." },
+				"keepThinking": { "type": "boolean", "default": true, "description": "A llama.cpp server is sent the turn's earlier thinking with each step (reasoning_content), as its chat template expects; false sends only the replies." },
 				"effort": {
 					"type": "object",
 					"description": "What each effort adds to a request: the fields written into it, e.g. {\"low\": {\"chat_template_kwargs\": {\"enable_thinking\": false}}}. A level left out adds nothing. Left out: a llama.cpp server is sent chat_template_kwargs.reasoning_effort, any other server reasoning_effort (docs/04 Model groups and roles).",

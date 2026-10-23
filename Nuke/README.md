@@ -51,7 +51,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `rebuild` | `clean`, then `build` |
 | `list` | the workspace's projects (`--json`: name, kind, folder, manifest, depends, tests, default, output) |
 | `info` | workspace, configuration, toolchain, output folders and commands (`--json`) |
-| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`); with `--ied` also the workspace's IED solution (below); `--language ID` for a project in another language than C4 (no sources: IED's New Project templates bring them) |
+| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`; a C4 executable gets `src/main.cf` and an example test, `src/tests/main_tests.cf`); with `--ied` also the workspace's IED solution (below); `--language ID` for a project in another language than C4 (no sources: IED's New Project templates bring them) |
 | `toolchain` | `list`, `which`, `install`, `remove`, `use` (section 8) |
 | `help` | every command, including the workspace's own; `nuke help COMMAND` |
 

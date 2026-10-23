@@ -1,7 +1,12 @@
 // {name} - entry point.
 include "bedrock.ch"
 
-int32 main() {{
-	printf("{name}\n");
+// argv[0] is the program itself; its arguments are argv[1] to argv[argc - 1]. The exit code is main's result.
+int32 main(int32 argc, char** argv) {{
+	Core::StringBuilder out;
+	Core::Format(&out, "{name}: {{0:D}} argument(s)\n", (int64)(argc - 1));
+	for (int32 i = 1; i < argc; i++)
+		Core::Format(&out, "  {{0:s}}\n", argv[i]);
+	printf("%s", out.CStr());
 	return 0;
 }}

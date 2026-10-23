@@ -21,6 +21,7 @@ namespace Ai
 		ModelMessage* message = new ModelMessage();
 		message->role = Core::String("assistant");
 		message->content = result->text;
+		message->reasoning = result->thinking;
 		if (withCalls && !result->calls.IsEmpty()) {
 			IED::JsonWriter calls;
 			calls.BeginArray();

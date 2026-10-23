@@ -292,6 +292,7 @@ class C4CodeToolTests(CodeToolCase):
 			done = subprocess.run(["cmd", "/c", NUKE] + list(words), cwd=self.repo, capture_output=True, text=True)
 			self.assertEqual(0, done.returncode, done.stdout + done.stderr)
 		nuke("init", "--toolchain", "dev", "--ied")
+		shutil.rmtree(os.path.join(self.repo, "src", "tests"), ignore_errors=True)   # the checks' own tests, not the template's example
 		shutil.copytree(os.path.join(REPO, "plugins", "nuke"), os.path.join(self.home, "plugins", "nuke"))
 		write(os.path.join(self.repo, "src", "ring.ch"), RING_CH)
 		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)

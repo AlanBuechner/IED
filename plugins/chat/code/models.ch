@@ -37,6 +37,7 @@ namespace Ai
 		public Privacy privacy;
 		public bool vision;                // it is sent the images tool results show (images.ch), when `visionSet`
 		public bool visionSet;             // the profile says; else its server does (llama.cpp's /props modalities)
+		public bool keepThinking;          // a llama.cpp server is sent the turn's earlier thinking (`keepThinking`, default true)
 		public Core::String apiKeyEnv;     // the environment variable holding the key (`"apiKey": {"env": ...}`)
 		public Core::String effort;        // the request fields each effort adds (`"effort": {"low": {...}}`), as JSON; empty: by its server
 		public int32 connectMs;

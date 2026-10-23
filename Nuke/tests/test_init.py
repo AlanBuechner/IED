@@ -12,7 +12,8 @@ class InitTests(WorkspaceTest):
 		self.assertEqual(code, 0, out)
 		parsed = manifest.load(self.path("nuke.toml"))
 		self.assertEqual((parsed.workspace.toolchain, parsed.project.name, parsed.project.kind), ("1.0.0", "Game", "executable"))
-		self.assertIn("int32 main()", read(self.path("src", "main.cf")))
+		self.assertIn("int32 main(int32 argc, char** argv) {", read(self.path("src", "main.cf")))
+		self.assertIn('[test("Game.example")]', read(self.path("src", "tests", "main_tests.cf")), "an example test to start from")
 		self.assertFalse(os.path.exists(self.path(".ied", "skills")), "the skills come with the IED plugins, not as copies")
 		self.assertEqual(read(self.path(".gitignore")), "build/\n.ied/local/\n")
 

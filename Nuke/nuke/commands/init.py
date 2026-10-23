@@ -92,6 +92,7 @@ def _sources(folder, name, kind, language):
 		return
 	if kind == "executable":
 		_write_new(os.path.join(folder, "src", "main.cf"), _template("main.cf", name=name))
+		_write_new(os.path.join(folder, "src", "tests", "main_tests.cf"), _template("main_tests.cf", name=name))
 	elif kind == "module":
 		_write_new(os.path.join(folder, "src", f"{name}.ch"), _template("module.ch", name=name))
 

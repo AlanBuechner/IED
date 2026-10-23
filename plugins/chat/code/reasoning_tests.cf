@@ -1,0 +1,48 @@
+// reasoning: an assistant message keeps its step's thinking, stores it, and sends it back only when asked.
+
+include "chat.ch"
+
+static Serialization::DomNode ParsedReasoningJson(Core::StringView json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+	return read.Ok() ? read.root : Serialization::DomNode();
+}
+
+static Ai::ModelMessage* ThinkingStep() {
+	Ai::ModelMessage* message = new Ai::ModelMessage();
+	message->role = Core::String("assistant");
+	message->content = Core::String("Reading the file.");
+	message->reasoning = Core::String("The parser is in parse.cf; read it before changing the tests.");
+	return message;
+}
+
+[test("server.ai.reasoning")]
+class ReasoningTests {
+	[test("sent_when_kept")]
+	public static void TestSent() {
+		Ai::ModelMessage* step = ThinkingStep();
+		IED::JsonWriter kept;
+		step->WriteRequest(kept, Core::StringView(""), true);
+		Serialization::DomNode sent = ParsedReasoningJson(kept.View());
+		assert_true(sent.Member("reasoning_content").AsView() == step->reasoning.View(), "a turn's thinking goes back as reasoning_content");
+		assert_true(sent.Member("content").AsView() == "Reading the file.", "beside the reply's text");
+		IED::JsonWriter plain;
+		step->WriteRequest(plain, Core::StringView(""));
+		assert_true(!ParsedReasoningJson(plain.View()).Member("reasoning_content").IsValid(), "other requests carry no thinking");
+	}
+
+	[test("stored_with_the_message")]
+	public static void TestStored() {
+		Ai::ModelMessage* step = ThinkingStep();
+		IED::JsonWriter json;
+		step->WriteJson(json);
+		Ai::ModelMessage* read = new Ai::ModelMessage();
+		read->Read(ParsedReasoningJson(json.View()));
+		assert_true(read->reasoning == step->reasoning, "a reopened chat keeps the step's thinking");
+		Ai::ModelMessage* none = new Ai::ModelMessage();
+		none->role = Core::String("tool");
+		IED::JsonWriter quiet;
+		none->WriteJson(quiet);
+		assert_true(!ParsedReasoningJson(quiet.View()).Member("reasoning_content").IsValid(), "a message without thinking stores none");
+	}
+}

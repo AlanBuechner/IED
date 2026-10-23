@@ -44,7 +44,7 @@ namespace Ai
 
 	// The messages as a request sends them: after a step's results, the images they name in a user message, to a model
 	// that sees images (images.ch); the owner's attached images in their message.
-	static void WriteMessages(IED::JsonWriter& json, const IED::Workspace& ws, const Core::Array<ModelMessage*>& messages, RequestImages& images) {
+	static void WriteMessages(IED::JsonWriter& json, const IED::Workspace& ws, const Core::Array<ModelMessage*>& messages, RequestImages& images, bool withReasoning) {
 		Core::Array<ModelMessage*> shown;
 		for (int64 i = 0; i < messages.Count(); ++i) {
 			ModelMessage* message = messages[i];
@@ -54,7 +54,7 @@ namespace Ai
 				images.sent += message->images.Count();
 				continue;
 			}
-			message->WriteRequest(json, unsent);
+			message->WriteRequest(json, unsent, withReasoning);
 			if (unsent.IsEmpty() && !message->images.IsEmpty()) {
 				shown.Push(message);
 				images.sent += message->images.Count();
@@ -84,13 +84,16 @@ namespace Ai
 		json.Field("role", "system");
 		json.Field("content", system.View());
 		json.EndObject();
+		bool llamaCpp = false;
+		chats->llamaCpp.TryGet(profile->name, llamaCpp);
+		// The turn's earlier thinking goes back to a llama.cpp server: its templates show a step's reasoning with the step,
+		// and without it the model works its plan out again at every step.
+		const bool keepThinking = llamaCpp && profile->keepThinking;
 		for (Turn* each : chat->turns)
-			if (!each->compressed) WriteMessages(json, ws, each->messages, images);
+			if (!each->compressed) WriteMessages(json, ws, each->messages, images, keepThinking && each == turn);
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode, chat->loadedTools).View());
 		json.BoolField("stream", true);
-		bool llamaCpp = false;
-		chats->llamaCpp.TryGet(profile->name, llamaCpp);
 		if (llamaCpp) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
 		json.BeginObject();

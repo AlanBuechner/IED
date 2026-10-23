@@ -42,6 +42,7 @@ AUTO_ANSWER = "I am not available to answer. Make the reasonable choice yourself
 HOME_PARTS = ("plugins", "frontend", "shared")
 GIT_IDENTITY = ["-c", "user.name=eval", "-c", "user.email=eval@localhost", "-c", "commit.gpgsign=false"]
 EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300, "stepCapS": 3600}
+MINIMAL_STARTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "starters", "minimal")
 # A task's timeout_minutes as budget seconds: the share of it a job got alone-on-the-server when four jobs shared the
 # server (0.40 to 0.49 measured, 2026-10-22), so budgeted runs compare with the wall-clock runs before them.
 BUDGET_FACTOR = 0.45
@@ -88,7 +89,10 @@ def toolchain_line(toolchain):
 
 
 def write_starter(starter, ws, project):
-	"""The variant's starter files (its starter/ folder) over what nuke init wrote, {name} the project's name."""
+	"""The variant's starter files (its starter/ folder, else starters/minimal: what nuke init wrote before 2026-10-22)
+	in place of the src/ nuke init writes, {name} the project's name: a variant's workspace does not change with Nuke's
+	templates."""
+	shutil.rmtree(os.path.join(ws, "src"), ignore_errors=True)
 	for folder, _, files in os.walk(starter):
 		for name in files:
 			source = os.path.join(folder, name)
@@ -114,8 +118,7 @@ def prepare_c4(task, spec, ws, toolchain, starter):
 		code, out, err, _ = common.nuke(["init", spec["project"], "--toolchain", toolchain.replace("\\", "/")], ws)
 		if code != 0:
 			raise RuntimeError("nuke init failed: %s%s" % (out, err))
-		if starter:
-			write_starter(starter, ws, spec["project"])
+		write_starter(starter or MINIMAL_STARTER, ws, spec["project"])
 	code, out, err, _ = common.nuke(["init", "--ied"], ws)
 	if code != 0:
 		raise RuntimeError("nuke init --ied failed: %s%s" % (out, err))
@@ -331,7 +334,7 @@ def main():
 	parser.add_argument("--settings", default=os.path.join(os.environ.get("APPDATA", ""), "IED", "settings.json"), help="the app settings holding ai.models")
 	parser.add_argument("--model", help="the ai.models profile (default: the first)")
 	parser.add_argument("--temperature", type=float, default=0.6, help="0.6 (the default) as Qwen3 asks for its thinking mode; greedy decoding (0) falls into endless repetition on long replies")
-	parser.add_argument("--effort", choices=["low", "medium", "high"], default="medium")
+	parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], default="medium")
 	parser.add_argument("--max-steps", type=int, default=150)
 	parser.add_argument("--parallel", type=int, default=1, help="tasks at once (they share the model server)")
 	parser.add_argument("--repeat", type=int, default=1)
@@ -347,7 +350,7 @@ def main():
 	print("preparing the %s toolchain and home" % os.path.basename(variant), flush=True)
 	starter = os.path.join(variant, "starter")
 	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain, run_id), "home": prepare_home(variant, run_id, args.home_base), "slots": args.slots,
-		"starter": starter if os.path.isdir(starter) else None, "set": args.task_set}
+		"starter": starter if os.path.isdir(starter) else MINIMAL_STARTER, "set": args.task_set}
 	jobs = []
 	for repeat in range(1, args.repeat + 1):
 		for task in tasks:

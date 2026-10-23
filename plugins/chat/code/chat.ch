@@ -58,11 +58,13 @@ namespace Ai
 		public Core::String toolCalls;     // an assistant's calls, the JSON array of the request format; empty for none
 		public Core::String toolCallId;    // a tool result's call
 		public Core::Array<IED::ToolImage> images;   // a tool result's images (images.ch)
+		public Core::String reasoning;     // an assistant's thinking in its step: sent back where the server keeps it
 
 		// As the chat keeps it.
 		public void WriteJson(IED::JsonWriter& json) const;
 		// As a request sends it; with `unsent` (why its images are not sent, images.ch), the images named in its text.
-		public void WriteRequest(IED::JsonWriter& json, Core::StringView unsent) const;
+		// With `withReasoning`, its thinking as reasoning_content.
+		public void WriteRequest(IED::JsonWriter& json, Core::StringView unsent, bool withReasoning = false) const;
 		public void Read(const Serialization::DomNode& node);
 	}
 

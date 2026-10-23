@@ -82,6 +82,7 @@ namespace Ai
 		}
 		profile->visionSet = entry.Member("vision").Kind() == Serialization::DomKind::Bool;
 		profile->vision = entry.Member("vision").AsBool();
+		profile->keepThinking = entry.Member("keepThinking").Kind() != Serialization::DomKind::Bool || entry.Member("keepThinking").AsBool();
 		profile->apiKeyEnv = Core::String(entry.Member("apiKey").Member("env").AsView());
 		if (entry.Member("effort").IsValid()) {
 			if (!IsEffortMapping(entry.Member("effort"))) {

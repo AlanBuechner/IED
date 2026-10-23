@@ -1,0 +1,10 @@
+// {name}'s unit tests: `nuke test` builds the project and runs every [test] function in it.
+include "bedrock.ch"
+
+[test("{name}.example")]
+static void TestExample() {{
+	Core::Array<int64> values = {{ 3, 1, 2 }};
+	values.Sort();
+	assert_eq((int64)3, values.Count(), "Sort keeps every value");
+	assert_eq((int64)1, values[0], "Sort puts the smallest first");
+}}

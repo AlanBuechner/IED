@@ -385,6 +385,22 @@ class ChatTests(ChatCase):
 		self.assertIsNone(progress[-1], "cleared when the reply starts")
 		self.assertNotIn("return_progress", self.model.requests()[-1]["body"], "only llama.cpp is asked for progress")
 
+	async def test_a_llamacpp_server_gets_the_turns_earlier_thinking_back(self):
+		chat_id, _ = await self.chat()
+		thought = inline({"reasoning": "Echo it first, then answer."}, {"toolCall": {"id": "c1", "name": "demo_echo", "arguments": {"word": "hi"}}}, {"finish": "tool_calls"})
+		self.model.queue(thought, text_step("Echoed."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		step = [m for m in self.model.requests()[-1]["body"]["messages"] if m.get("tool_calls")][0]
+		self.assertEqual("Echo it first, then answer.", step.get("reasoning_content"), "its template shows a step's reasoning with the step")
+		self.model.queue(text_step("Again."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		self.assertFalse(any("reasoning_content" in m for m in self.model.requests()[-1]["body"]["messages"]), "an earlier turn's thinking stays out")
+		await self.use_model({"keepThinking": False})
+		chat_id, _ = await self.chat()
+		self.model.queue(thought, text_step("Echoed."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		self.assertFalse(any("reasoning_content" in m for m in self.model.requests()[-1]["body"]["messages"]), "the profile turns it off")
+
 	async def test_a_turn_sends_its_effort_as_a_llamacpp_template_reads_it(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "fake", "effort": "medium"}}}})
 		chat_id, topic = await self.chat(group="g")
