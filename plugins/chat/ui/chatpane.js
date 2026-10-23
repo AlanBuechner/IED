@@ -44,10 +44,14 @@ export class ChatPane {
 		this.panel = new SidePanel(actions);
 		this.panel.el.addEventListener("chat-panel-toggle", () => this.panel.update(this.model));
 		this.showPanel = stored("ied.chat.panel", true);
-		this.scroller = h("div.chat-transcript", null, this.transcript.el);
+		this.atEnd = true;   // the transcript shows its end, and keeps it as it grows, until the owner scrolls up
+		this.scroller = h("div.chat-transcript", { on: { scroll: () => (this.atEnd = this.nearBottom()) } }, this.transcript.el);
 		this.main = h("section.chat-main", null, host.header || null, this.scroller, this.composer.el);
 		this.el = h("div.chat-act" + (this.showPanel ? "" : ".no-panel"), null, this.main, this.panel.el);
 		this.el.addEventListener("keydown", (event) => this.key(event));
+		this.resizer = new ResizeObserver(() => this.atEnd && this.toEnd());
+		this.resizer.observe(this.scroller);
+		this.resizer.observe(this.transcript.el);
 		this.transcript.render();
 		this.composer.update(this.model);
 		this.panel.update(this.model);
@@ -102,6 +106,11 @@ export class ChatPane {
 		this.composer.focus();
 	}
 
+	// Whenever the chat is shown (its tab opened or chosen, its activity back), it opens at its end.
+	visible(shown) {
+		if (shown) this.scrollToEnd();
+	}
+
 	// --- The chat shown ----------------------------------------------------------------------------------------------
 
 	// Shows `chatId`, or a draft for null.
@@ -128,18 +137,16 @@ export class ChatPane {
 		this.transcript.render();
 		this.composer.update(this.model);
 		this.panel.update(this.model);
-		this.scrollToEnd(true);
+		this.scrollToEnd();
 		if (this.host.shown) this.host.shown(this.model.summary);
 	}
 
 	changed(kind, data) {
-		const follow = this.nearBottom();
 		const change = this.model.event(kind, data);
 		this.transcript.update(change);
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
 		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips) this.panel.update(this.model);
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
-		if (follow) this.scrollToEnd(false);
 	}
 
 	nearBottom() {
@@ -147,10 +154,16 @@ export class ChatPane {
 		return s.scrollHeight - s.scrollTop - s.clientHeight < NEAR_BOTTOM_PX;
 	}
 
-	scrollToEnd(now) {
-		const go = () => (this.scroller.scrollTop = this.scroller.scrollHeight);
-		if (now) go();
-		requestAnimationFrame(go);
+	// The transcript at its end, kept there as it grows (a reply streaming, an image loading, the composer growing) until
+	// the owner scrolls up; again on the next frame, for a pane being placed on the page now.
+	scrollToEnd() {
+		this.atEnd = true;
+		this.toEnd();
+		requestAnimationFrame(() => this.toEnd());
+	}
+
+	toEnd() {
+		this.scroller.scrollTop = this.scroller.scrollHeight;
 	}
 
 	async loadEarlier() {
@@ -288,6 +301,7 @@ export class ChatPane {
 	}
 
 	dispose() {
+		this.resizer.disconnect();
 		if (this.stopChat) this.stopChat();
 	}
 }

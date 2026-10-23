@@ -50,6 +50,7 @@ export function ChatTab(ctx) {
 	});
 	return {
 		focus: () => view.focus(),
+		visible: (shown) => view.pane.visible(shown),
 		dispose: () => {
 			tabViews.delete(view);
 			view.dispose();

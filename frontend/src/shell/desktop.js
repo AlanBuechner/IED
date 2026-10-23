@@ -218,9 +218,15 @@ export class DesktopChrome {
 				dock.container.remove();
 				this.docks.delete(id);
 			}
-			else dock.container.hidden = id !== activityId;
+			else {
+				dock.container.hidden = id !== activityId;
+				if (dock.container.hidden) dock.hide();
+			}
 		}
-		for (const el of this.area.querySelectorAll(":scope > .view")) el.hidden = el.dataset.ref !== "activity:" + activityId;
+		for (const el of this.area.querySelectorAll(":scope > .view")) {
+			el.hidden = el.dataset.ref !== "activity:" + activityId;
+			shell.views.setVisible(el.dataset.ref, !el.hidden);
+		}
 		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page")) empty.remove();
 		if (!activityId) {
 			this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
@@ -230,7 +236,10 @@ export class DesktopChrome {
 		else {
 			const entry = shell.views.get("activity:" + activityId);
 			if (entry && entry.el.parentElement !== this.area) this.area.append(entry.el);
-			if (entry) entry.el.hidden = false;
+			if (entry) {
+				entry.el.hidden = false;
+				shell.views.setVisible(entry.ref, true);
+			}
 		}
 	}
 

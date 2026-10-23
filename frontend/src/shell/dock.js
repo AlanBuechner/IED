@@ -7,7 +7,7 @@
 // or a click goes elsewhere, or Escape.
 
 import { h, icon, iconFrom, replace, append } from "/ui-kit/dom.js";
-import { autoHiddenOf, hiddenIn, isGroup, isSplit, nodeAt, pathOf } from "./layouttree.js";
+import { autoHiddenOf, hiddenIn, isGroup, isSplit, nodeAt, pathOf, refsOf } from "./layouttree.js";
 import { TabSlide, alongStrip } from "./tabslide.js";
 
 const MIN_PANE_PX = 80;
@@ -56,6 +56,11 @@ export class DockView {
 			element.scrollLeft = left;
 		}
 		if (focused && focused !== document.activeElement && this.frame.contains(focused)) focused.focus({ preventScroll: true });
+	}
+
+	// Its activity is not shown, so neither is any of its views; the next render shows them again.
+	hide() {
+		for (const ref of this.tree ? refsOf(this.tree) : []) this.host.views.setVisible(ref, false);
 	}
 
 	// A tab's title or unsaved state changed: its tabs say so, without building the tree again.

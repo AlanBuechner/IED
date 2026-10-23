@@ -62,6 +62,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 +----+----------------------+--------------------------------------------------------+-----------------+
 ```
 
+- A chat opens at the end of its transcript whenever it is shown (owner, 2026-10-22: "any time i open a chat window it should automatically take me to the end"): opened from the list, its tab chosen again, its activity returned to, the page reloaded, on a phone as on a desktop. It keeps the end in view as the transcript grows (a reply streaming, an image loading, the composer growing) until the owner scrolls up, and follows again once they scroll back down to it.
 - A chat tab's icon is its state; the Chats list adds the tasks done (`3/7`) and says "Needs approval" / "Needs an answer" / "Paused" in amber.
 - Approval cards and questions are inline and also aggregated in the notification center.
 - Harness notes (nudges, continues, retries, routing) are thin grey rows - always visible, never hidden in a log.
