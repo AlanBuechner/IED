@@ -22,6 +22,9 @@ namespace IED
 	// Runs a plugin's tool call that its code implements (`function`) or a binding answers (`binding`), as `entry`
 	// names it, and waits for it (at most `seconds`, or until the call is cancelled).
 	ToolResult RunPluginTool(Core::StringView pluginId, const Serialization::DomNode& entry, const ToolCall& call, int64 seconds);
+	// What a plugin's tool call will do, for its approval card: the function `entry`'s `plan` names, with `call`'s
+	// arguments; waits at most kToolPlanMs or until the call is cancelled. False with `problem` when it could not be had.
+	bool PlanPluginTool(Core::StringView pluginId, const Serialization::DomNode& entry, const ToolCall& call, ToolPlan& plan, Core::String& problem);
 	// Whether a contribution's `when` clause holds in `ws`'s context (docs/26 section 8: workspaceTrusted,
 	// workspaceKind, config.<key>, workspaceContains.<name>, workspaceLanguage.<id>); an empty one does. False with
 	// `error` when it does not parse.
@@ -30,4 +33,6 @@ namespace IED
 	Core::String AppFolder();
 	// The install's folder (the server's home): its plugins/ and shared/.
 	Core::String HomeFolder();
+
+	const int64 kToolPlanMs = 5000;
 }

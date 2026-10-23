@@ -24,6 +24,45 @@ namespace Ai
 		return lines;
 	}
 
+	// "a,b" as its count b; "a" alone counts 1.
+	static int64 RangeCount(Core::StringView range) {
+		const int64 comma = range.IndexOf(',', 0);
+		if (comma < 0) return 1;
+		int64 count = 0;
+		Core::ParseInt64(range.Substring(comma + 1, range.ByteLength() - comma - 1), count);
+		return count;
+	}
+
+	// The old and new line counts a "@@ -a,b +c,d @@" line gives; false when it is not one.
+	static bool HunkCounts(Core::StringView line, int64& oldCount, int64& newCount) {
+		if (!line.StartsWith(Core::StringView("@@ -"))) return false;
+		const int64 plus = line.IndexOf(Core::StringView(" +"));
+		const int64 close = plus < 0 ? -1 : line.IndexOf(Core::StringView(" @@"), plus);
+		if (close < 0) return false;
+		oldCount = RangeCount(line.Substring(4, plus - 4));
+		newCount = RangeCount(line.Substring(plus + 2, close - plus - 2));
+		return true;
+	}
+
+	void CountDiff(Core::StringView unified, int64& plus, int64& minus) {
+		plus = 0;
+		minus = 0;
+		int64 oldLeft = 0;
+		int64 newLeft = 0;
+		for (Core::StringView line : SplitLines(unified)) {
+			if (oldLeft <= 0 && newLeft <= 0) {
+				HunkCounts(line, oldLeft, newLeft);
+				continue;
+			}
+			const int32 kind = line.IsEmpty() ? ' ' : line.ByteAt(0);
+			if (kind == '\\') continue;
+			if (kind != '+') oldLeft -= 1;
+			if (kind != '-') newLeft -= 1;
+			if (kind == '+') plus += 1;
+			if (kind == '-') minus += 1;
+		}
+	}
+
 	static DiffOp Op(char8 kind, int64 oldLine, int64 newLine) {
 		DiffOp op;
 		op.kind = kind;

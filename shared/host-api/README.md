@@ -35,6 +35,10 @@ namespace Markup
 	// toolCalls[].function: IED::ToolResult <Name>(const IED::ToolCall& call)
 	IED::ToolResult Outline(const IED::ToolCall& call) { ... IED::ReadFile(call.workspace, path, text, problem) ... }
 
+	// toolCalls[].plan: IED::ToolPlan <Name>(const IED::ToolCall& call) - what a call asking the owner will do, for its
+	// approval card (summary, unified diff, counts, or an error that fails it); it only reads
+	IED::ToolPlan RenamePlan(const IED::ToolCall& call) { ... }
+
 	// systemMessageSections[].function: Core::String <Name>(const IED::Workspace& ws)
 	Core::String Section(const IED::Workspace& ws) { ... }
 

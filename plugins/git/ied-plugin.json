@@ -119,6 +119,7 @@
 					"hunks": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
 					"repo": { "type": "string" } }, "required": ["paths"], "additionalProperties": false },
 				"function": "Git::StageTool",
+				"plan": "Git::StagePlan",
 				"timeoutSeconds": 150
 			},
 			{
@@ -131,6 +132,7 @@
 					"hunks": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
 					"repo": { "type": "string" } }, "required": ["paths"], "additionalProperties": false },
 				"function": "Git::UnstageTool",
+				"plan": "Git::UnstagePlan",
 				"timeoutSeconds": 150
 			},
 			{
@@ -144,6 +146,7 @@
 					"amend": { "type": "boolean" },
 					"repo": { "type": "string" } }, "required": ["message"], "additionalProperties": false },
 				"function": "Git::CommitTool",
+				"plan": "Git::CommitPlan",
 				"timeoutSeconds": 150
 			},
 			{
@@ -158,6 +161,7 @@
 					"switch": { "type": "boolean" },
 					"repo": { "type": "string" } }, "required": ["action", "name"], "additionalProperties": false },
 				"function": "Git::BranchTool",
+				"plan": "Git::BranchPlan",
 				"timeoutSeconds": 150
 			},
 			{
@@ -172,6 +176,7 @@
 					"index": { "type": "integer", "minimum": 0 },
 					"repo": { "type": "string" } }, "required": ["action"], "additionalProperties": false },
 				"function": "Git::StashTool",
+				"plan": "Git::StashPlan",
 				"timeoutSeconds": 150
 			}
 		],

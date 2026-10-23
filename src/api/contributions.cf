@@ -62,6 +62,22 @@ namespace IED
 		return Ied::InvokePluginTool(server, ws, plugin, entry, call, seconds, [cancelled]() -> bool { return cancelled && *cancelled; });
 	}
 
+	bool PlanPluginTool(Core::StringView pluginId, const Serialization::DomNode& entry, const ToolCall& call, ToolPlan& plan, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, call.workspace.id.View(), "", problem);
+		if (!ws) return false;
+		Ied::Plugin* plugin = LoadedPlugin(server, ws, pluginId);
+		if (!plugin) {
+			problem = (Core::String("the plugin ") + pluginId) + " is not loaded";
+			return false;
+		}
+		const bool* cancelled = call.cancelled;
+		return Ied::InvokePluginPlan(server, ws, plugin, entry, call, [cancelled]() -> bool { return cancelled && *cancelled; }, plan, problem);
+	}
+
 	bool WhenHolds(const Workspace& ws, Core::StringView clause, Core::String& error) {
 		Ied::CodeInstance* instance = Ied::ApiCaller(error);
 		if (!instance) return false;

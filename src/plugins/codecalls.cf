@@ -63,6 +63,14 @@ namespace Ied
 		public Serialization::DomDoc* doc;
 	}
 
+	static PluginToolCall* CopiedCall(const IED::ToolCall& call) {
+		PluginToolCall* request = new PluginToolCall();
+		request->doc = new Serialization::DomDoc();
+		request->call = call;
+		request->call.args = Serialization::ReadJson(NodeJson(call.args).View(), *request->doc).root;
+		return request;
+	}
+
 	IED::ToolResult InvokePluginTool(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, int64 seconds, func<bool()> stopped) {
 		Core::String name = Core::String(entry.Member("name").AsView());
 		Core::String binding = Core::String(entry.Member("binding").AsView());
@@ -74,10 +82,7 @@ namespace Ied
 		}
 		CodeInstance* instance = server->code->For(plugin, ws);
 		if (!instance) return IED::ToolFailure(((name + ": ") + "the plugin has no code (runtime kind c4)").View());
-		PluginToolCall* request = new PluginToolCall();
-		request->doc = new Serialization::DomDoc();
-		request->call = call;
-		request->call.args = Serialization::ReadJson(NodeJson(call.args).View(), *request->doc).root;
+		PluginToolCall* request = CopiedCall(call);
 		IED::ToolResult* result = new IED::ToolResult();
 		Core::String function = Core::String(entry.Member("function").AsView());
 		Core::String problem;
@@ -89,6 +94,26 @@ namespace Ied
 		}, seconds * 1000, stopped, problem);
 		if (!problem.IsEmpty()) return IED::ToolFailure(((name + ": ") + problem.View()).View());
 		return *result;
+	}
+
+	bool InvokePluginPlan(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, func<bool()> stopped, IED::ToolPlan& plan, Core::String& problem) {
+		CodeInstance* instance = server->code->For(plugin, ws);
+		if (!instance) {
+			problem = Core::String("the plugin has no code (runtime kind c4)");
+			return false;
+		}
+		PluginToolCall* request = CopiedCall(call);
+		IED::ToolPlan* result = new IED::ToolPlan();
+		Core::String* failure = new Core::String();
+		Core::String function = Core::String(entry.Member("plan").AsView());
+		const bool ran = server->code->Run(instance, [function, request, result, failure](CodeInstance* code) {
+			Reflection::Function planner = CodeFunction(code, function.View(), Core::StringView("IED::ToolPlan"), Core::StringView("IED::ToolCall&"), *failure);
+			if (planner.IsValid()) InvokeCode(code, planner, (void*)result, (void*)&request->call, *failure);
+		}, IED::kToolPlanMs, stopped, problem);
+		if (ran && !failure->IsEmpty()) problem = *failure;
+		if (!ran || !failure->IsEmpty()) return false;
+		plan = *result;
+		return true;
 	}
 
 	void DeliverEvent(CodeInstance* instance, Core::StringView topic, Core::StringView kind, Core::StringView data) {

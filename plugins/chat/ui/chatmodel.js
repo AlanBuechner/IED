@@ -343,25 +343,96 @@ export function duration(ms) {
 	return minutes + "m " + Math.floor((ms % 60000) / 1000) + "s";
 }
 
+const DIFF_HEADER = /^(diff --git |diff --cc |--- |\+\+\+ |new file mode|deleted file mode|rename from |rename to |Binary files |index |old mode |new mode |similarity index |dissimilarity index |copy from |copy to )/;
+
+// A path of a "---" or "+++" line without its a/ or b/; null for /dev/null.
+function diffSide(text) {
+	let path = text.split("\t")[0];
+	if (path.length > 1 && path.startsWith("\"") && path.endsWith("\"")) path = path.slice(1, -1);
+	if (path === "/dev/null") return null;
+	return /^[ab]\//.test(path) ? path.slice(2) : path;
+}
+
+// A header line of a diff's file (`key` and the `rest` after it) read into its row; a new row when it starts a file.
+function readDiffHeader(key, rest, file, startFile) {
+	if (key === "diff --git " || key === "diff --cc ") {
+		file = startFile();
+		const at = rest.lastIndexOf(" b/");
+		file.path = at < 0 || key === "diff --cc " ? rest : rest.slice(at + 3);
+		return;
+	}
+	if (key === "--- ") {
+		if (!file || file.hunks || file.headed) file = startFile();
+		const path = diffSide(rest);
+		if (path === null) file.status = "new";
+		else file.oldPath = path;
+		if (!file.path && path !== null) file.path = path;
+		return;
+	}
+	if (!file) return;
+	const path = key === "+++ " ? diffSide(rest) : rest;
+	if (key === "+++ ") file.headed = true;
+	if (key === "+++ " && path === null) file.status = "deleted";
+	else if (key === "+++ " || key === "rename to ") file.path = path;
+	if (key === "rename from ") file.oldPath = rest;
+	if (key === "new file mode") file.status = "new";
+	if (key === "deleted file mode") file.status = "deleted";
+	if (key === "Binary files ") file.status = file.status ? file.status + ", binary" : "binary";
+}
+
 // The lines of a unified diff with their old and new line numbers: [{kind: " " | "-" | "+" | "@", text, old, new}].
+// Each file of a diff of several (git's, or "---" and "+++" lines) comes first as its own row: {kind: "f", path,
+// oldPath, status: "" | "new" | "deleted" | "renamed" | "binary" | "new, binary", plus, minus}.
 export function diffRows(unified) {
 	const rows = [];
 	let oldLine = 0;
 	let newLine = 0;
+	let oldLeft = 0; // the lines the hunk still has on each side
+	let newLeft = 0;
+	let file = null;
+	const startFile = () => {
+		file = { kind: "f", path: "", oldPath: "", status: "", plus: 0, minus: 0, hunks: 0, headed: false };
+		rows.push(file);
+		return file;
+	};
 	for (const line of (unified || "").split("\n")) {
 		if (!line) continue;
-		const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+		const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
 		if (hunk) {
 			oldLine = Number(hunk[1]);
-			newLine = Number(hunk[2]);
+			newLine = Number(hunk[3]);
+			oldLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+			newLeft = hunk[4] === undefined ? 1 : Number(hunk[4]);
+			if (file) file.hunks += 1;
 			rows.push({ kind: "@", text: line, old: null, new: null });
+			continue;
+		}
+		const header = oldLeft <= 0 && newLeft <= 0 && DIFF_HEADER.exec(line);
+		if (header) {
+			readDiffHeader(header[1], line.slice(header[1].length), file, startFile);
 			continue;
 		}
 		const kind = line[0];
 		const text = line.slice(1);
-		if (kind === "-") rows.push({ kind, text, old: oldLine++, new: null });
-		else if (kind === "+") rows.push({ kind, text, old: null, new: newLine++ });
-		else rows.push({ kind: " ", text, old: oldLine++, new: newLine++ });
+		if (kind === "\\") continue;
+		if (kind === "-") {
+			rows.push({ kind, text, old: oldLine++, new: null });
+			oldLeft -= 1;
+			if (file) file.minus += 1;
+		}
+		else if (kind === "+") {
+			rows.push({ kind, text, old: null, new: newLine++ });
+			newLeft -= 1;
+			if (file) file.plus += 1;
+		}
+		else {
+			rows.push({ kind: " ", text, old: oldLine++, new: newLine++ });
+			oldLeft -= 1;
+			newLeft -= 1;
+		}
+	}
+	for (const row of rows) {
+		if (row.kind === "f" && !row.status && row.oldPath && row.oldPath !== row.path) row.status = "renamed";
 	}
 	return rows;
 }

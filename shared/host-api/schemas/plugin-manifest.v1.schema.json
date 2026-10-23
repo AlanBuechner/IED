@@ -750,6 +750,7 @@
 				"resultBudgetTokens": { "type": "integer", "minimum": 64 },
 				"binding": { "type": "string", "description": "Provided binding that implements the tool." },
 				"function": { "type": "string", "description": "A function of the plugin's C4 code that implements the tool ('Rust::Tools::Metadata')." },
+				"plan": { "type": "string", "description": "For a `function` or `binding` tool: a function of the plugin's C4 code, `IED::ToolPlan <Name>(const IED::ToolCall&)`, that says what a call will do for its approval card - a summary and the change as a unified diff - or why it cannot work. Called only for a call that asks the owner, at most 5 seconds; it only reads. When it fails the card shows the call as it is (docs/26 section 8)." },
 				"run": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The command: argv, with ${args.<name>} the call's arguments (a list argument as a whole word is a word per item)." },
 				"cwd": { "type": "string", "description": "The folder it runs in, relative to the workspace's root." },
 				"output": { "enum": ["text", "json"], "default": "text", "description": "text: the exit code and the output's tail; json: the whole output, for a tool whose output is data." },

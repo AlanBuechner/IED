@@ -191,6 +191,8 @@ namespace Ai
 				return refused;
 			}
 			if (permit == Permit::Ask) {
+				if (spec->detail) spec->detail(invocation, plan);
+				if (!plan.error.IsEmpty()) return ToolError(plan.error.View());
 				ToolOutcome refused;
 				if (!AwaitApproval(spec, segment, plan, why.View(), args, refused)) return refused;
 			}

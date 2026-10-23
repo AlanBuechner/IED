@@ -146,33 +146,57 @@ namespace Git
 		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no git tool ") + tool).View());
 	}
 
+	static GitToolPlan PlanTool(GitPlugin* git, GitWorkspace* found, Core::StringView tool, const Serialization::DomNode& args) {
+		if (tool == "stage") return PlanStage(git, found, args, true);
+		if (tool == "unstage") return PlanStage(git, found, args, false);
+		if (tool == "commit") return PlanCommit(git, found, args);
+		if (tool == "branch") return PlanBranch(git, found, args);
+		if (tool == "stash") return PlanStash(git, found, args);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no plan for the git tool ") + tool).View());
+	}
+
+	static void WritePlan(IED::JsonWriter& json, const GitToolPlan& plan) {
+		json.Field("summary", plan.summary.View());
+		json.Field("diff", plan.diff.View());
+		json.IntField("plus", plan.plus);
+		json.IntField("minus", plan.minus);
+	}
+
 	void ProvideQuery(GitPlugin* git) {
 		git->context->Provide(Core::StringView(kQueryBinding), [git](const Serialization::DomNode& call) -> IED::Result {
 			Threading::LockGuard guard(git->lock);
+			const bool plan = call.Member("plan").AsBool();
+			IED::JsonWriter json;
+			json.BeginObject();
 			try {
-				Core::String text = AnswerTool(git, git->Find(call.Member("wsId").AsView()), call.Member("tool").AsView(), call.Member("args"));
-				IED::JsonWriter json;
-				json.BeginObject();
-				json.Field("text", text.View());
-				json.EndObject();
-				return IED::Answer(json.View());
+				GitWorkspace* found = git->Find(call.Member("wsId").AsView());
+				if (plan) WritePlan(json, PlanTool(git, found, call.Member("tool").AsView(), call.Member("args")));
+				else json.Field("text", AnswerTool(git, found, call.Member("tool").AsView(), call.Member("args")).View());
 			}
 			catch (IED::RpcError& failed) {
-				return IED::Refusal(failed.message.View());
+				if (!plan) return IED::Refusal(failed.message.View());
+				json.Field("error", failed.message.View());
 			}
+			json.EndObject();
+			return IED::Answer(json.View());
 		});
 	}
 
 	// --- The tool functions (the manifest's toolCalls) --------------------------------------------------------------
 
-	static Core::String Ask(const char* tool, Core::StringView wsId, Core::StringView args, Core::String& problem) {
+	static IED::Result Query(const char* tool, Core::StringView wsId, Core::StringView args, bool plan) {
 		IED::JsonWriter call;
 		call.BeginObject();
 		call.Field("wsId", wsId);
 		call.Field("tool", tool);
 		call.RawField("args", args);
+		if (plan) call.BoolField("plan", true);
 		call.EndObject();
-		IED::Result answer = IED::CallBinding(Core::StringView(kQueryBinding), call.View());
+		return IED::CallBinding(Core::StringView(kQueryBinding), call.View());
+	}
+
+	static Core::String Ask(const char* tool, Core::StringView wsId, Core::StringView args, Core::String& problem) {
+		IED::Result answer = Query(tool, wsId, args, false);
 		if (!answer.Ok()) {
 			problem = answer.error;
 			return Core::String("");
@@ -198,6 +222,30 @@ namespace Git
 	IED::ToolResult CommitTool(const IED::ToolCall& call) { return Through("commit", call); }
 	IED::ToolResult BranchTool(const IED::ToolCall& call) { return Through("branch", call); }
 	IED::ToolResult StashTool(const IED::ToolCall& call) { return Through("stash", call); }
+
+	// A plan the binding could not give says so on the card, which otherwise shows the call as it is.
+	static IED::ToolPlan PlanThrough(const char* tool, const IED::ToolCall& call) {
+		IED::ToolPlan plan;
+		IED::Result answer = Query(tool, call.workspace.id.View(), IED::NodeJson(call.args).View(), true);
+		if (!answer.Ok()) {
+			plan.summary = (((Core::String("git could not tell what ") + call.name.View()) + " will do: ") + answer.error.View());
+			return plan;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode said = Serialization::ReadJson(answer.json.View(), *doc).root;
+		plan.summary = Core::String(said.Member("summary").AsView());
+		plan.diff = Core::String(said.Member("diff").AsView());
+		plan.plus = said.Member("plus").AsInt();
+		plan.minus = said.Member("minus").AsInt();
+		plan.error = Core::String(said.Member("error").AsView());
+		return plan;
+	}
+
+	IED::ToolPlan StagePlan(const IED::ToolCall& call) { return PlanThrough("stage", call); }
+	IED::ToolPlan UnstagePlan(const IED::ToolCall& call) { return PlanThrough("unstage", call); }
+	IED::ToolPlan CommitPlan(const IED::ToolCall& call) { return PlanThrough("commit", call); }
+	IED::ToolPlan BranchPlan(const IED::ToolCall& call) { return PlanThrough("branch", call); }
+	IED::ToolPlan StashPlan(const IED::ToolCall& call) { return PlanThrough("stash", call); }
 
 	Core::String Section(const IED::Workspace& ws) {
 		Core::String problem;

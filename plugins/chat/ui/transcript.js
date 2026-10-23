@@ -268,14 +268,29 @@ export class TranscriptView {
 			preview ? h("div" + (result.isError ? ".c-error" : ""), null, preview) : h("div.muted", null, segment.state === "running" ? "Running\u2026" : "No result yet."));
 	}
 
-	// A change's diff, its code in the colors of `path`'s language.
+	// A change's diff, its code in the colors of its file's language: `path`'s, or each file's of a diff of several.
 	diffBlock(unified, path) {
-		const block = h("div.chat-diff", null, ...diffRows(unified).map((row) => row.kind === "@"
-			? h("div.dl.hunk", null, h("span.no"), h("span.no"), h("span.code", null, row.text))
-			: h("div.dl" + (row.kind === "+" ? ".add" : row.kind === "-" ? ".del" : ""), null,
-				h("span.no", null, row.old === null ? "" : String(row.old)), h("span.no", null, row.new === null ? "" : String(row.new)),
-				h("span.sign", null, row.kind === " " ? "" : row.kind), h("span.code", null, row.text))));
-		this.actions.colorDiff(path, [...block.querySelectorAll(".dl:not(.hunk) .code")]);
+		const block = h("div.chat-diff");
+		let file = path;
+		let spans = [];
+		const color = () => spans.length && this.actions.colorDiff(file, spans);
+		for (const row of diffRows(unified)) {
+			if (row.kind === "f") {
+				color();
+				file = row.path || path;
+				spans = [];
+				block.append(diffFileRow(row));
+				continue;
+			}
+			const line = row.kind === "@"
+				? h("div.dl.hunk", null, h("span.no"), h("span.no"), h("span.code", null, row.text))
+				: h("div.dl" + (row.kind === "+" ? ".add" : row.kind === "-" ? ".del" : ""), null,
+					h("span.no", null, row.old === null ? "" : String(row.old)), h("span.no", null, row.new === null ? "" : String(row.new)),
+					h("span.sign", null, row.kind === " " ? "" : row.kind), h("span.code", null, row.text));
+			if (row.kind !== "@") spans.push(line.lastChild);
+			block.append(line);
+		}
+		color();
 		return block;
 	}
 
@@ -333,6 +348,13 @@ export class TranscriptView {
 			h("div.chat-finish-body.chat-text", null, ...this.markdown(args.summary || ""),
 				args.verification ? h("div.chat-finish-verify", null, h("b", null, "Verified: "), args.verification) : null));
 	}
+}
+
+// A file of a diff of several: its path, what became of it, its counts.
+function diffFileRow(row) {
+	const state = row.status === "renamed" ? "renamed from " + row.oldPath : row.status;
+	return h("div.dl.file", { title: row.path }, h("span.fpath", null, row.path), state ? h("span.fstate", null, state) : null,
+		h("span.fcount", null, row.plus ? h("span.plus", null, "+" + row.plus) : null, row.minus ? h("span.minus", null, "-" + row.minus) : null));
 }
 
 // The file a call's arguments name ("" when none does).

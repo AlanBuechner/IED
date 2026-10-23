@@ -22,10 +22,13 @@ def git_manifest():
 		return json.loads("".join(line for line in f if not line.lstrip().startswith("//")))
 
 
-def add_git(home):
+def add_git(home, plans=None):
 	"""The git plugin's server side in `home`: its entry, permissions, settings, output source, bindings, tools and
-	system-message section, without its UI."""
+	system-message section, without its UI; `plans` replaces tools' plan functions by name."""
 	manifest = git_manifest()
+	for tool in manifest["contributes"]["toolCalls"]:
+		if tool["name"] in (plans or {}):
+			tool["plan"] = plans[tool["name"]]
 	plugin = os.path.join(home, "plugins", "git")
 	os.makedirs(plugin, exist_ok=True)
 	shutil.copy(os.path.join(REPO, "plugins", "git", "settings.schema.json"), plugin)
@@ -81,6 +84,11 @@ class GitToolCase(ServerTestCase):
 		with self.assertRaises(RpcFailure) as failed:
 			await self.ask(tool, **args)
 		return str(failed.exception)
+
+	async def plan(self, tool, **args):
+		"""What a write tool's call would do, as its approval card shows it: {summary, diff, plus, minus} or {error}."""
+		reply = await self.client.request("plugins.call", {"name": "git.query", "wsId": "w1", "args": {"wsId": "w1", "tool": tool, "args": args, "plan": True}})
+		return reply["result"]
 
 
 class GitToolTests(GitToolCase):
@@ -201,6 +209,97 @@ class GitToolTests(GitToolCase):
 		self.assertEqual("", await self.ask("section"), "no repositories, no section")
 
 
+class GitToolPlanTests(GitToolCase):
+	"""What each write tool's approval card shows (docs/13 "What the approval card shows"), read from what the call will
+	act on, changing nothing."""
+
+	def change_two_places(self):
+		write(os.path.join(self.repo, "a.txt"), LINES.replace("line 2\n", "line two\n").replace("line 5\n", "line five\n").replace("line 25\n", "line twenty-five\n"))
+
+	async def test_hunks_staged_and_unstaged_show_those_hunks(self):
+		self.change_two_places()
+		plan = await self.plan("stage", paths=["a.txt"], hunks=[2])
+		self.assertEqual("Stage hunk 2 of a.txt", plan["summary"])
+		self.assertTrue(plan["diff"].startswith("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -22,7 +22,7 @@"), plan["diff"])
+		self.assertIn("(hunk 2)\n", plan["diff"])
+		self.assertIn("-line 25\n+line twenty-five\n", plan["diff"])
+		self.assertNotIn("line five", plan["diff"], "only the hunk asked for")
+		self.assertEqual((1, 1), (plan["plus"], plan["minus"]))
+		self.assertEqual("", git(self.repo, "diff", "--cached"), "a plan changes nothing")
+		self.assertIn("a.txt has 2 hunks in git_diff; there is no hunk 3", (await self.plan("stage", paths=["a.txt"], hunks=[3]))["error"])
+		self.assertIn("hunks are of one file", (await self.plan("stage", paths=["a.txt", "src/main.c"], hunks=[1]))["error"])
+		await self.ask("stage", paths=["a.txt"], hunks=[2, 1])
+		unstage = await self.plan("unstage", paths=["a.txt"], hunks=[1])
+		self.assertEqual("Unstage hunk 1 of a.txt", unstage["summary"])
+		self.assertIn("-line 5\n+line five\n", unstage["diff"])
+		self.assertNotIn("twenty-five", unstage["diff"])
+		self.assertIn("src/main.c has nothing staged", (await self.plan("unstage", paths=["src/main.c"], hunks=[1]))["error"])
+
+	async def test_whole_paths_show_their_diff_and_new_files(self):
+		self.change_two_places()
+		write(os.path.join(self.repo, "notes.txt"), "remember\n")
+		plan = await self.plan("stage", paths=["."])
+		self.assertEqual("Stage .: 2 files, +3 -2", plan["summary"])
+		self.assertIn("diff --git a/a.txt b/a.txt\n", plan["diff"])
+		self.assertIn("diff --git a/notes.txt b/notes.txt\nnew file mode 100644\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+remember\n", plan["diff"])
+		self.assertIn("?? notes.txt", git(self.repo, "status", "--porcelain"), "still untracked")
+		self.assertEqual("Unstage a.txt: nothing staged", (await self.plan("unstage", paths=["a.txt"]))["summary"])
+		git(self.repo, "add", "a.txt")
+		unstage = await self.plan("unstage", paths=["a.txt"])
+		self.assertEqual(("Unstage a.txt: 1 file, +2 -2", 2, 2), (unstage["summary"], unstage["plus"], unstage["minus"]))
+
+	async def test_a_commit_shows_its_files_and_counts(self):
+		self.assertIn("nothing is staged", (await self.plan("commit", message="Nothing"))["error"])
+		self.assertIn("a commit needs a message", (await self.plan("commit", message=" "))["error"])
+		self.change_two_places()
+		write(os.path.join(self.repo, "notes.txt"), "remember\n")
+		git(self.repo, "add", "a.txt")
+		staged = await self.plan("commit", message="Five and twenty-five\n\nThe body.")
+		self.assertEqual("Commit to main: Five and twenty-five (1 file, +2 -2)", staged["summary"])
+		self.assertIn("diff --git a/a.txt b/a.txt\n", staged["diff"])
+		self.assertNotIn("notes.txt", staged["diff"], "what is staged, nothing else")
+		named = await self.plan("commit", message="Notes", paths=["notes.txt", "src"])
+		self.assertEqual("Commit to main: Notes (1 file, +1 -0)", named["summary"])
+		self.assertIn("+++ b/notes.txt\n@@ -0,0 +1 @@\n+remember\n", named["diff"])
+		self.assertNotIn("a.txt", named["diff"], "exactly its paths")
+		git(self.repo, "reset", "-q")
+		write(os.path.join(self.repo, "src", "main.c"), "int main(void) { return 2; }\n")
+		git(self.repo, "add", "src/main.c")
+		write(os.path.join(self.repo, "src", "main.c"), "int main(void) { return 3; }\n")
+		worktree = await self.plan("commit", message="Three", paths=["src/main.c"])
+		self.assertIn("-int main(void) { return 0; }\n+int main(void) { return 3; }\n", worktree["diff"], "the work tree against HEAD, staged or not")
+		self.assertIn("return 2", git(self.repo, "diff", "--cached"), "the index as it was")
+		head = git_out(self.repo, "rev-parse", "--short=7", "HEAD")
+		self.assertEqual("Amend %s on main: Second again (1 file, +1 -1)" % head, (await self.plan("commit", message="Second again", amend=True))["summary"])
+		remote = os.path.join(self.root, "remote.git")
+		git(self.root, "init", "-q", "--bare", "-b", "main", remote)
+		git(self.repo, "remote", "add", "origin", remote)
+		git(self.repo, "push", "-q", "-u", "origin", "main")
+		self.assertIn("amending it would rewrite pushed history", (await self.plan("commit", message="Fix", amend=True))["error"])
+
+	async def test_branches_and_stashes_say_what_they_do(self):
+		commit = git_out(self.repo, "log", "-1", "--format=%h %s")
+		created = await self.plan("branch", action="create", name="feat", switch=True)
+		self.assertEqual(("Create branch feat at HEAD (%s) and switch to it" % commit, "", 0, 0), (created["summary"], created["diff"], created["plus"], created["minus"]))
+		self.assertIn("there is no commit nope", (await self.plan("branch", action="create", name="feat", **{"from": "nope"}))["error"])
+		self.assertIn("there is no branch feat", (await self.plan("branch", action="switch", name="feat"))["error"])
+		self.assertIn("is not a name git takes", (await self.plan("branch", action="create", name="--force"))["error"])
+		git(self.repo, "branch", "feat")
+		self.assertIn("a branch feat already exists", (await self.plan("branch", action="create", name="feat"))["error"])
+		self.assertEqual("Switch from main to feat (%s)" % commit, (await self.plan("branch", action="switch", name="feat"))["summary"])
+		self.assertEqual("Delete branch feat (%s); git keeps it unless it is merged" % commit, (await self.plan("branch", action="delete", name="feat"))["summary"])
+		self.assertIn("there are no local changes to stash", (await self.plan("stash", action="push"))["error"])
+		self.assertIn("there is no stash@{0}", (await self.plan("stash", action="pop"))["error"])
+		write(os.path.join(self.repo, "a.txt"), "wip\n")
+		write(os.path.join(self.repo, "notes.txt"), "remember\n")
+		stash = await self.plan("stash", action="push", message="wip on a", untracked=True)
+		self.assertEqual(("Stash the local changes: 1 file, +1 -30, 1 untracked file, as \"wip on a\"", 1, 30), (stash["summary"], stash["plus"], stash["minus"]))
+		git(self.repo, "stash", "push", "-q", "-m", "wip on a")
+		self.assertEqual("Pop stash@{0} (On main: wip on a): 1 file, +1 -30, taken off the list", (await self.plan("stash", action="pop"))["summary"])
+		self.assertEqual("Apply stash@{0} (On main: wip on a): 1 file, +1 -30, kept on the list", (await self.plan("stash", action="apply", index=0))["summary"])
+		self.assertEqual(1, len(git(self.repo, "stash", "list").splitlines()), "a plan changes nothing")
+
+
 class NestedRepositoryToolTests(GitToolCase):
 	def prepare(self):
 		self.lib = os.path.join(self.repo, "lib")
@@ -228,6 +327,13 @@ class NestedRepositoryToolTests(GitToolCase):
 		self.assertIn("diff --git a/lib/x.c b/lib/x.c\n", diff)
 		self.assertIn("+++ b/lib/x.c\n", diff)
 		self.assertIn("different repositories", await self.refused("stage", paths=["lib/x.c", "a.txt"]))
+		write(os.path.join(self.lib, "y.c"), "int y;\n")
+		plan = await self.plan("stage", paths=["lib"])
+		self.assertEqual("Stage lib: 2 files, +2 -1", plan["summary"])
+		self.assertIn("diff --git a/lib/x.c b/lib/x.c\n", plan["diff"])
+		self.assertIn("+++ b/lib/y.c\n@@ -0,0 +1 @@\n+int y;\n", plan["diff"], "a new file under its workspace path")
+		hunk = await self.plan("stage", paths=["lib/x.c"], hunks=[1])
+		self.assertTrue(hunk["diff"].startswith("diff --git a/lib/x.c b/lib/x.c\n--- a/lib/x.c\n+++ b/lib/x.c\n@@ -1 +1 @@ (hunk 1)\n-int x;\n+int x = 1;\n"), hunk["diff"])
 		await self.ask("stage", paths=["lib/x.c"])
 		self.assertIn("x.c", git(self.lib, "diff", "--cached", "--name-only"))
 		self.assertIn("no repository at 'nope'; the workspace's are: ., lib", await self.refused("branches", repo="nope"))
@@ -248,6 +354,12 @@ class FolderInARepositoryToolTests(GitToolCase):
 		diff = await self.ask("diff")
 		self.assertIn("diff --git a/main.c b/main.c\n", diff)
 		self.assertNotIn("a.txt", diff)
+		git(self.repo, "add", "a.txt", "src/main.c")
+		plan = await self.plan("commit", message="Both")
+		self.assertEqual("Commit to main: Both (2 files, +1 -1, 1 outside the workspace's folder)", plan["summary"])
+		self.assertTrue(plan["diff"].startswith("diff --git a/main.c b/main.c\n"), plan["diff"])
+		self.assertNotIn("a.txt", plan["diff"])
+		git(self.repo, "reset", "-q")
 		await self.ask("commit", message="Return 1", paths=["main.c"])
 		self.assertEqual(["src/main.c"], git_out(self.repo, "show", "--name-only", "--format=", "HEAD").split())
 		self.assertIn("main.c", await self.ask("show"))
@@ -275,6 +387,9 @@ class GitToolChatTests(ChatCase):
 		await self.client.request("chat.send", {"chatId": chat_id, "text": "commit it"})
 		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=TURN_SECONDS))[-1]["data"]
 		self.assertEqual(("git_commit", "plugin(ied.git/git_commit)"), (request["tool"], request["subject"]))
+		self.assertEqual(("Commit to main: Return 1 (1 file, +1 -1)", 1, 1), (request["summary"], request["plus"], request["minus"]), "the card says what goes in")
+		self.assertTrue(request["diff"].startswith("diff --git a/src/main.c b/src/main.c\n"), request["diff"])
+		self.assertIn("-\treturn 0;\n+\treturn 1;\n", request["diff"])
 		self.assertEqual("First", subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.repo, capture_output=True, text=True).stdout.strip(), "nothing committed before the decision")
 		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "allow"})
 		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
@@ -288,6 +403,16 @@ class GitToolChatTests(ChatCase):
 		self.assertIn("committed ", results["c2"])
 		tools = self.segments(await self.last_turn(chat_id), "tool")
 		self.assertEqual([("git_status", "ok", "plugin ied.git"), ("git_commit", "ok", "plugin ied.git")], [(t["tool"], t["state"], t.get("source")) for t in tools])
+	async def test_a_call_its_plan_says_cannot_work_fails_without_asking(self):
+		await self.repos_found()
+		chat_id, topic = await self.chat()
+		self.model.queue(call_step("git_stage", {"paths": ["src/main.c"], "hunks": [9]}, "c1"), text_step("No such hunk."))
+		await self.turn(chat_id, "stage hunk 9")
+		self.assertEqual([], [f for f in self.frames if f.get("kind") == "approval.request"], "nothing to approve")
+		results = {m["tool_call_id"]: m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"}
+		self.assertIn("git_stage: src/main.c has 1 hunk in git_diff; there is no hunk 9", results["c1"])
+		self.assertEqual("", subprocess.run(["git", "diff", "--cached"], cwd=self.repo, capture_output=True, text=True).stdout)
+
 	async def test_plan_mode_offers_only_the_reading_tools(self):
 		await self.repos_found()
 		chat_id, _ = await self.chat(mode="plan")
@@ -298,3 +423,29 @@ class GitToolChatTests(ChatCase):
 			self.assertIn("- %s: " % name, system)
 		for name in ("git_stage", "git_unstage", "git_commit", "git_branch", "git_stash"):
 			self.assertNotIn("- %s: " % name, system)
+
+
+class GitToolPlanFailureChatTests(ChatCase):
+	"""A plan that cannot be had leaves the approval card as it was, saying why."""
+
+	def start_server(self):
+		add_git(self.home, plans={"git_branch": "Git::NoSuchPlan"})
+		subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, check=True)
+		for args in (["config", "user.name", "Owner"], ["config", "user.email", "owner@example.com"], ["add", "."], ["commit", "-q", "-m", "First"]):
+			subprocess.run(["git", *args], cwd=self.repo, check=True, capture_output=True)
+		return super().start_server()
+
+	async def test_the_plain_card_says_why(self):
+		for _ in range(100):
+			if (await self.client.request("git.repos", {"wsId": "w1"}))["repos"]:
+				break
+			await asyncio.sleep(0.05)
+		chat_id, topic = await self.chat()
+		self.model.queue(call_step("git_branch", {"action": "create", "name": "feat"}, "c1"), text_step("Made."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "make a branch"})
+		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=TURN_SECONDS))[-1]["data"]
+		self.assertTrue(request["summary"].startswith("Run git_branch (plugin ied.git); no plan: its code has no function 'Git::NoSuchPlan'"), request["summary"])
+		self.assertFalse(request.get("diff"))
+		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "allow"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
+		self.assertIn("feat", subprocess.run(["git", "branch", "--list", "feat"], cwd=self.repo, capture_output=True, text=True).stdout, "the call runs as before")

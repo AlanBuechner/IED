@@ -1,0 +1,59 @@
+// The plans plugin tools give their approval cards (docs/26 section 8): a plugin's plan put on the card's, and the
+// lines a unified diff adds and removes.
+
+include "codetools.ch"
+include "linediff.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.plans")]
+class PlanTests {
+	[test("diff_counts")]
+	public static void TestCounts() {
+		int64 plus = 0;
+		int64 minus = 0;
+		Ai::CountDiff(Text("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,3 +1,3 @@\n a\n--- a removed line\n+++ an added one\n b\n@@ -9 +9,2 @@\n-x\n+y\n+z\n\\ No newline at end of file\n"), plus, minus);
+		assert_true(plus == 3 && minus == 2, "the hunks' lines, never the file's --- and +++ lines");
+		Ai::CountDiff(Text("@@ -1 +1 @@\r\n-a\r\n+b\r\n"), plus, minus);
+		assert_true(plus == 1 && minus == 1, "counts left out are 1; CRLF lines");
+		Ai::CountDiff(Text(""), plus, minus);
+		assert_true(plus == 0 && minus == 0, "no diff");
+	}
+
+	[test("merged_into_the_card")]
+	public static void TestMerge() {
+		Ai::ToolPlan plan;
+		plan.subject = Core::String("plugin(ied.git/git_stage)");
+		plan.summary = Core::String("Run git_stage (plugin ied.git)");
+		IED::ToolPlan given;
+		given.summary = Core::String("Stage hunk 2 of a.c\nand more said");
+		given.diff = Core::String("@@ -1 +1 @@\n-a\n+b\n");
+		Ai::MergePlan(plan, given, Text("git_stage"));
+		assert_true(plan.summary == "Stage hunk 2 of a.c" && plan.diff == given.diff && plan.plus == 1 && plan.minus == 1, plan.summary.CStr());
+		assert_true(plan.subject == "plugin(ied.git/git_stage)" && plan.error.IsEmpty(), "the subject is the chat's");
+		given.plus = 10;
+		Ai::MergePlan(plan, given, Text("git_stage"));
+		assert_true(plan.plus == 10 && plan.minus == 0, "the counts the plugin gave");
+		Ai::ToolPlan kept;
+		kept.summary = Core::String("Run git_branch (plugin ied.git)");
+		Ai::MergePlan(kept, IED::ToolPlan(), Text("git_branch"));
+		assert_true(kept.summary == "Run git_branch (plugin ied.git)" && kept.diff.IsEmpty() && kept.error.IsEmpty(), "an empty plan adds nothing");
+		IED::ToolPlan refused;
+		refused.error = Core::String("src/a.c has 1 hunk in git_diff; there is no hunk 5");
+		Ai::MergePlan(kept, refused, Text("git_stage"));
+		assert_true(kept.error == "git_stage: src/a.c has 1 hunk in git_diff; there is no hunk 5", kept.error.CStr());
+	}
+
+	[test("long_diff_cut_at_a_line")]
+	public static void TestCut() {
+		Core::StringBuilder lines;
+		lines.Append("@@ -0,0 +1,8000 @@\n");
+		for (int64 i = 0; i < 8000; ++i) lines.Append("+abcdefgh\n");
+		IED::ToolPlan given;
+		given.diff = lines.ToString();
+		Ai::ToolPlan plan;
+		Ai::MergePlan(plan, given, Text("tool"));
+		assert_true(plan.diff.ByteLength() <= Ai::kPlanDiffMostBytes && plan.diff.View().EndsWith(Text("+abcdefgh\n")), "cut at a line within the bound");
+		assert_true(plan.plus == 8000, "counted over the whole diff");
+	}
+}

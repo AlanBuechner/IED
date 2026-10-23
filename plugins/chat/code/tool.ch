@@ -50,6 +50,9 @@ namespace Ai
 	}
 
 	alias ToolPlanner = func<ToolPlan(const ToolInvocation& call)>;
+	// What a call that asks the owner adds to its plan for the card: a summary and diff in place of the plan's, or why
+	// the call cannot work.
+	alias ToolDetailer = func<void(const ToolInvocation& call, ToolPlan& plan)>;
 	alias ToolRunner = func<ToolOutcome(const ToolInvocation& call)>;
 
 	class ToolSpec
@@ -64,6 +67,7 @@ namespace Ai
 		public bool deferred;             // listed by name until loaded for the chat
 		public Core::String group;        // "media", or a plugin tool's plugin id
 		public ToolPlanner plan;
+		public ToolDetailer detail;       // null: the card shows the plan as it is
 		public ToolRunner run;            // null: the run handles the call itself
 	}
 

@@ -10,8 +10,7 @@ namespace Git
 		return ((Core::String(what) + "\n") + RepoStatus(git, repo).View());
 	}
 
-	// The hunks asked for, 1-based as git_diff numbers them, checked against `count` and sorted last first.
-	static Core::Array<int64> HunksArg(const Serialization::DomNode& args, int64 count, Core::StringView path) {
+	Core::Array<int64> HunksArg(const Serialization::DomNode& args, int64 count, Core::StringView path) {
 		Core::Array<int64> hunks;
 		Serialization::DomNode given = args.Member("hunks");
 		for (int64 i = 0; i < given.Count(); ++i) {
@@ -41,8 +40,7 @@ namespace Git
 	static void ApplyHunks(GitPlugin* git, const ToolRepo& target, Core::StringView path, Core::StringView repoPath, const Serialization::DomNode& args, bool staged) {
 		GitRun read = git->RunOrThrow(target.repo, GitDiffArgs(repoPath, Core::StringView(""), Core::StringView(""), false, staged, 3), kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
 		GitDiff diff = ParseDiff(read.output.View());
-		if (diff.hunks.IsEmpty() && staged) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(path) + " has nothing staged").View());
-		if (diff.hunks.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(path) + " has no unstaged changes to tracked lines; an untracked file is staged whole, without hunks").View());
+		RequireHunks(diff, path, staged);
 		for (int64 hunk : HunksArg(args, diff.hunks.Count(), path)) {
 			FS::Path file = GitTempFile((Core::String("ied-") + target.repo->repoId.View() + "-tool-hunk.patch").View(), HunkPatch(diff, hunk - 1, Core::Array<int64>(), staged).View());
 			Core::Array<Core::String> arguments = GitArgs("apply", "--cached", "--recount");
@@ -57,6 +55,11 @@ namespace Git
 			}
 			FS::RemoveFile(file.CStr());
 		}
+	}
+
+	void RequireHunks(const GitDiff& diff, Core::StringView path, bool staged) {
+		if (diff.hunks.IsEmpty() && staged) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(path) + " has nothing staged").View());
+		if (diff.hunks.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(path) + " has no unstaged changes to tracked lines; an untracked file is staged whole, without hunks").View());
 	}
 
 	static Core::Array<Core::String> WithPaths(Core::Array<Core::String> arguments, const Core::Array<Core::String>& paths) {
@@ -80,8 +83,7 @@ namespace Git
 		return Done(git, target.repo, WhatStaged(stage, paths, args.Member("hunks")).View());
 	}
 
-	// Amending HEAD once it is on its upstream would rewrite history others may have.
-	static void RequireUnpushed(GitPlugin* git, GitRepo* repo) {
+	void RequireUnpushed(GitPlugin* git, GitRepo* repo) {
 		if (IsUnborn(git, repo)) throw IED::RpcError(IED::ErrorCode::BadRequest, "there is no commit to amend yet");
 		if (!TryRun(git, repo, GitArgs("merge-base", "--is-ancestor", "HEAD", "@{upstream}")).Ok()) return;
 		throw IED::RpcError(IED::ErrorCode::Conflict, "HEAD is already on its upstream (pushed); amending it would rewrite pushed history, so make a new commit instead");
@@ -159,7 +161,7 @@ namespace Git
 		return error;
 	}
 
-	static bool HasRef(GitPlugin* git, GitRepo* repo, Core::StringView ref) {
+	bool HasRef(GitPlugin* git, GitRepo* repo, Core::StringView ref) {
 		return TryRun(git, repo, GitArgs("rev-parse", "--verify", "--quiet", (Core::String(ref) + "^{commit}").CStr())).Ok();
 	}
 
@@ -193,7 +195,7 @@ namespace Git
 		return Done(git, target.repo, (Core::String("created branch ") + name.View()).View());
 	}
 
-	static Core::String StashName(int64 index) {
+	Core::String StashName(int64 index) {
 		Core::StringBuilder name;
 		name.Append("stash@{");
 		name.AppendInt(index);

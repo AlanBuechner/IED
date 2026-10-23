@@ -17,4 +17,6 @@ namespace Ai
 	LineDiff DiffLines(Core::StringView before, Core::StringView after, int64 context);
 	// The lines of `text`, without their line breaks ("\r\n" or "\n"); a final break starts no line.
 	Core::Array<Core::StringView> SplitLines(Core::StringView text);
+	// The lines a unified diff adds and removes: its hunks' '+' and '-' lines, never a file's "---" and "+++" lines.
+	void CountDiff(Core::StringView unified, int64& plus, int64& minus);
 }

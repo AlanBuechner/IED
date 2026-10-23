@@ -11,6 +11,7 @@ namespace Git
 	const char* kQueryBinding = "git.query";
 	const int64 kToolLogDefault = 30;
 	const int64 kToolUntrackedMost = 50;
+	const int64 kPlanPathsNamed = 3;   // the paths a card's summary names
 
 	// The repository a call works in and where it sits in the workspace.
 	struct ToolRepo
@@ -19,8 +20,45 @@ namespace Git
 		public GitPlace place;
 	}
 
-	// git.query: {wsId, tool, args} -> {text}; a refusal says why the tool cannot answer.
+	// git.query: {wsId, tool, args} -> {text}; a refusal says why the tool cannot answer. With plan: true, what a write
+	// tool's call will do, for its approval card: {summary, diff, plus, minus}, or {error} when the call cannot work.
 	void ProvideQuery(GitPlugin* git);
+
+	// What a write tool's call will do (toolplan.cf, docs/13 "What the approval card shows").
+	class GitToolPlan
+	{
+		public Core::String summary;
+		public Core::String diff;
+		public int64 plus;
+		public int64 minus;
+	}
+
+	// A card's diff, a file at a time: each file whole while the diff stays within `most`, then named with no lines.
+	// The counts are every file's.
+	class PlanDiff
+	{
+		// git diff's output: each of its files.
+		public void AddDiff(Core::StringView diff);
+		// One file's section: its header lines, then its hunks (or "Binary files ... differ").
+		public void AddFile(Core::StringView section);
+		// An untracked file as a new one, its lines from `git diff --no-index /dev/null <it>`; "" names it with none.
+		public void AddNewFile(Core::StringView path, Core::StringView noIndex);
+
+		public Core::StringBuilder text;
+		public int64 most = kToolTextMostBytes;
+		public int64 files;
+		public int64 plus;
+		public int64 minus;
+		public int64 named;      // files past `most`, named with no lines
+		public int64 unlisted;   // untracked files past kToolListMost, not named at all
+	}
+
+	// The `hunks` (1-based, in order) of one file's diff under its workspace path, each header ending "(hunk N)".
+	Core::String HunksDiff(const GitDiff& diff, Core::StringView path, const Core::Array<int64>& hunks);
+	// "3 files, +12 -4".
+	Core::String CountWords(int64 files, int64 plus, int64 minus);
+	// "a.c, b.c, c.c and 2 more".
+	Core::String PathWords(const Core::Array<Core::String>& paths);
 
 	// --- What the answers share (tools.cf); the lock is held ---
 
@@ -56,6 +94,23 @@ namespace Git
 	Core::String CommitAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
 	Core::String BranchAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
 	Core::String StashAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
+	// Their plans; each throws, as the tool would, the reason the call cannot work.
+	GitToolPlan PlanStage(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args, bool stage);
+	GitToolPlan PlanCommit(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
+	GitToolPlan PlanBranch(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
+	GitToolPlan PlanStash(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args);
+
+	// --- What the changing tools and their plans share (toolchange.cf) ---
+
+	// The hunks asked for, 1-based as git_diff numbers them, checked against `count` and sorted last first.
+	Core::Array<int64> HunksArg(const Serialization::DomNode& args, int64 count, Core::StringView path);
+	// Throws when a file's diff has no hunks to stage (or with `staged`, to unstage).
+	void RequireHunks(const GitDiff& diff, Core::StringView path, bool staged);
+	// Throws when HEAD is on its upstream: amending it would rewrite history others may have.
+	void RequireUnpushed(GitPlugin* git, GitRepo* repo);
+	bool HasRef(GitPlugin* git, GitRepo* repo, Core::StringView ref);
+	// "stash@{2}".
+	Core::String StashName(int64 index);
 	// The system message's git section: which repositories the workspace has and how to work in them ("" for none).
 	Core::String SectionText(const GitWorkspace* found);
 }

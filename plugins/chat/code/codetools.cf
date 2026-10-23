@@ -1,6 +1,7 @@
 include "api/plugin.ch"
 include "codetools.ch"
 include "images.ch"
+include "linediff.ch"
 
 namespace Ai
 {
@@ -30,6 +31,57 @@ namespace Ai
 		return plan;
 	}
 
+	static IED::ToolCall CodeToolCall(const CodeToolEntry* entry, const ToolInvocation& call) {
+		IED::ToolCall request;
+		request.name = entry->name;
+		request.args = call.args;
+		request.workspace = call.ws;
+		request.chatId = call.chat ? call.chat->chatId : Core::String("");
+		request.cancelled = call.cancelled;
+		return request;
+	}
+
+	// The first line of `text`.
+	static Core::StringView FirstLine(Core::StringView text) {
+		const int64 end = text.IndexOf('\n', 0);
+		return (end < 0 ? text : text.Substring(0, end)).Trimmed();
+	}
+
+	// `text` cut at the last line start at or before `most` bytes.
+	static Core::StringView CutAtLine(Core::StringView text, int64 most) {
+		if (text.ByteLength() <= most) return text;
+		int64 end = most;
+		while (end > 0 && text.ByteAt(end - 1) != '\n') end -= 1;
+		return text.Substring(0, end);
+	}
+
+	void MergePlan(ToolPlan& plan, const IED::ToolPlan& planned, Core::StringView tool) {
+		if (!planned.error.IsEmpty()) {
+			plan.error = (Core::String(tool) + ": ") + planned.error.View();
+			return;
+		}
+		Core::StringView summary = FirstLine(planned.summary.View());
+		if (!summary.IsEmpty()) plan.summary = Core::String(summary);
+		plan.diff = Core::String(CutAtLine(planned.diff.View(), kPlanDiffMostBytes));
+		plan.plus = planned.plus;
+		plan.minus = planned.minus;
+		if (plan.plus == 0 && plan.minus == 0) CountDiff(planned.diff.View(), plan.plus, plan.minus);
+	}
+
+	// A call that asks the owner: the plugin's `plan` of it on the card. A plan that cannot be had leaves the card as it
+	// is, saying why.
+	static void CodeToolDetail(const CodeToolEntry* entry, const ToolInvocation& call, ToolPlan& plan) {
+		IED::ToolPlan planned;
+		Core::String problem;
+		if (IED::PlanPluginTool(entry->pluginId.View(), entry->entry, CodeToolCall(entry, call), planned, problem)) {
+			MergePlan(plan, planned, entry->name.View());
+			return;
+		}
+		plan.summary = (plan.summary + "; no plan: ") + problem.View();
+		Core::String said = ((((Core::String("plugin ") + entry->pluginId.View()) + ": the plan of ") + entry->name.View()) + " failed: ") + problem.View();
+		call.context->Log(said.View());
+	}
+
 	// The result's images a request can send; the others named in its text, with why. The card names them all.
 	static void AttachImages(ToolOutcome& outcome, const IED::Workspace& ws, const Core::Array<IED::ToolImage>& images) {
 		if (images.IsEmpty()) return;
@@ -52,13 +104,7 @@ namespace Ai
 
 	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
 		const int64 started = clock_now_ns();
-		IED::ToolCall request;
-		request.name = entry->name;
-		request.args = call.args;
-		request.workspace = call.ws;
-		request.chatId = call.chat ? call.chat->chatId : Core::String("");
-		request.cancelled = call.cancelled;
-		IED::ToolResult result = IED::RunPluginTool(entry->pluginId.View(), entry->entry, request, entry->seconds);
+		IED::ToolResult result = IED::RunPluginTool(entry->pluginId.View(), entry->entry, CodeToolCall(entry, call), entry->seconds);
 		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
 		outcome.isError = result.isError;
 		AttachImages(outcome, call.ws, result.images);
@@ -89,6 +135,7 @@ namespace Ai
 		spec->deferred = !node.Member("preload").AsBool();
 		spec->group = Core::String(pluginId);
 		spec->plan = [entry](const ToolInvocation& call) -> ToolPlan { return CodeToolPlan(entry, call); };
+		if (!node.Member("plan").AsView().IsEmpty()) spec->detail = [entry](const ToolInvocation& call, ToolPlan& plan) { CodeToolDetail(entry, call, plan); };
 		spec->run = [entry](const ToolInvocation& call) -> ToolOutcome { return CodeToolRun(entry, call); };
 		return spec;
 	}

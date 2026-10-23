@@ -268,7 +268,7 @@ Events:
 | `segment.delta` | `{segId, text}` or `{segId, argsText}`: text to append |
 | `segment.end` | `{segId, tokens, ms}` |
 | `tool.state` | `{callId, state, ms?, plus?, minus?, source?, result?}` |
-| `approval.request` | `{approvalId, callId, tool, args, summary, why, subject, diff?, plus?, minus?}`: `why` names the mode and rule that asked; `subject` is the rule "Allow for this chat" would add (`fs.write(src/core/**)`, `shell(nuke *)`) |
+| `approval.request` | `{approvalId, callId, tool, args, summary, why, subject, diff?, plus?, minus?}`: `why` names the mode and rule that asked; `subject` is the rule "Allow for this chat" would add (`fs.write(src/core/**)`, `shell(nuke *)`); `diff` is a unified diff, one file's hunks or several files under `---`/`+++` lines (a plugin tool's plan, `docs/26` section 8) |
 | `approval.resolved` | `{approvalId, decision, by?}`; `withdrawn` when the turn ended first |
 | `question.request` / `question.resolved` | `{questionId, callId, question, options, allowText}` / `{questionId, answer, by}` |
 | `tasks.changed` | `{items: [{id, title, status, note?}]}`; `status` is `pending`, `in_progress`, `done`, `skipped` |

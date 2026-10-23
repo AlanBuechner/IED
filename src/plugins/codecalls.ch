@@ -18,6 +18,9 @@ namespace Ied
 	// `entry` names, with `call`'s arguments; waits at most `seconds` or until `stopped()`. With the lock held (released
 	// while it waits).
 	IED::ToolResult InvokePluginTool(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, int64 seconds, func<bool()> stopped);
+	// The plan of that call for its approval card: the function `entry`'s `plan` names; waits at most IED::kToolPlanMs or
+	// until `stopped()`. False with `problem` when it could not be had.
+	bool InvokePluginPlan(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, func<bool()> stopped, IED::ToolPlan& plan, Core::String& problem);
 	// On the instance's thread: its handlers of an event's kind, each guarded.
 	void DeliverEvent(CodeInstance* instance, Core::StringView topic, Core::StringView kind, Core::StringView data);
 	// plugins.call {wsId?, name, args?} -> {result}: a UI module's call of a server binding (docs/10).

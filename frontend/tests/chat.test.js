@@ -145,6 +145,23 @@ test("chat: a unified diff's rows carry both line numbers", () => {
 	assertEqual(rows.map((r) => [r.kind, r.old, r.new]), [["@", null, null], [" ", 21, 21], ["-", 22, null], ["-", 23, null], ["+", null, 22]]);
 });
 
+test("chat: a diff of several files has a row for each, with what became of it and its counts", () => {
+	const git = [
+		"diff --git a/src/ring.c b/src/ring.c", "index 1a2b..3c4d 100644", "--- a/src/ring.c", "+++ b/src/ring.c",
+		"@@ -2,3 +2,3 @@ int f() (hunk 2)", " a", "--- not a header: a removed line", "+++ nor this one", " b",
+		"diff --git a/new.txt b/new.txt", "new file mode 100644", "--- /dev/null", "+++ b/new.txt", "@@ -0,0 +1 @@", "+hi", "\\ No newline at end of file",
+		"diff --git a/old.c b/old.c", "deleted file mode 100644", "--- a/old.c", "+++ /dev/null",
+		"diff --git a/a b.c b/c d.c", "similarity index 90%", "rename from a b.c", "rename to c d.c",
+		"diff --git a/logo.png b/logo.png", "Binary files a/logo.png and b/logo.png differ",
+	].join("\n");
+	const files = diffRows(git).filter((r) => r.kind === "f").map((r) => [r.path, r.oldPath, r.status, r.plus, r.minus]);
+	assertEqual(files, [["src/ring.c", "src/ring.c", "", 1, 1], ["new.txt", "", "new", 1, 0], ["old.c", "old.c", "deleted", 0, 0], ["c d.c", "a b.c", "renamed", 0, 0], ["logo.png", "", "binary", 0, 0]]);
+	assertEqual(diffRows(git).slice(1, 6).map((r) => [r.kind, r.old, r.new]), [["@", null, null], [" ", 2, 2], ["-", 3, null], ["+", null, 3], [" ", 4, 4]]);
+	const plain = diffRows("--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-a\n+b\n--- a/y.c\n+++ b/y.c\n@@ -1 +1,2 @@\n a\n+c\n");
+	assertEqual(plain.filter((r) => r.kind === "f").map((r) => [r.path, r.plus, r.minus]), [["x.c", 1, 1], ["y.c", 1, 0]]);
+	assertEqual(diffRows("@@ -1 +1 @@\n-a\n+b\n").some((r) => r.kind === "f"), false, "one file's hunks have no file row");
+});
+
 // An editor's `editor.colorize`: each line as <i>line</i>, and the calls it was asked.
 function colorizingIed() {
 	const asked = [];
