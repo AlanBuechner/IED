@@ -14,7 +14,7 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 | F-AIR-6 | Claude Code bridge provider: drives the user's own installed `claude` CLI in stream-json mode with IED's tools exposed via MCP; reports `rate_limit_event` usage (see `docs/04`, policy constraints) | P1 | US-CLD-1, US-CLD-2 |
 | F-AIR-7 | Embeddings provider (OpenAI-compatible `/v1/embeddings`, llama.cpp) for skill/history search | P2 | US-CTX-4 |
 | F-AIR-8 | Plugin-contributed providers (gen) - a plugin can add a provider type | P2 | US-PLG-5 |
-| F-AIR-9 | Model profile fields: endpoint, model id, display name, context window, max output, supports tools/vision/thinking/FIM, effort mapping (how "low/med/high" maps to this model: `reasoning_effort`, thinking budget, or a system hint), default sampling (temperature, top_p, top_k, min_p, repeat penalty), parallel slots, privacy class (`local` / `lan` / `cloud`), cost per token, stall policy overrides | P0 | US-MDL-1 |
+| F-AIR-9 | Model profile fields: endpoint, model id, display name, context window, max output, supports tools/vision/thinking/FIM, effort mapping (how each effort, low to max, maps to this model: `reasoning_effort`, thinking budget, or a system hint), default sampling (temperature, top_p, top_k, min_p, repeat penalty), parallel slots, privacy class (`local` / `lan` / `cloud`), cost per token, stall policy overrides | P0 | US-MDL-1 |
 
 ## Model groups and routing
 

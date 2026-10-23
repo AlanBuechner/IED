@@ -257,7 +257,7 @@ def main():
 	parser.add_argument("--settings", default=os.path.join(os.environ.get("APPDATA", ""), "IED", "settings.json"), help="the app settings holding ai.models")
 	parser.add_argument("--model", help="the ai.models profile (default: the first)")
 	parser.add_argument("--temperature", type=float, default=0.0, help="0 (the default) for runs that compare")
-	parser.add_argument("--effort", choices=["low", "medium", "high"], help="the role's effort (docs/04 \"Effort\"); unset: the model server's default")
+	parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="the role's effort (docs/04 \"Effort\"); unset: the model server's default")
 	parser.add_argument("--parallel", type=int, default=1, help="turns at once; more than 1 makes them share the model server, so times do not compare")
 	parser.add_argument("--only", help="question keys, comma-separated: " + ", ".join(q[0] for q in QUESTIONS))
 	args = parser.parse_args()

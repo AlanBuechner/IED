@@ -29,7 +29,9 @@
 					"properties": {
 						"low": { "type": "object" },
 						"medium": { "type": "object" },
-						"high": { "type": "object" }
+						"high": { "type": "object" },
+						"xhigh": { "type": "object" },
+						"max": { "type": "object" }
 					},
 					"additionalProperties": false
 				},
@@ -74,7 +76,7 @@
 				"model": { "type": "string", "minLength": 1 },
 				"pace": { "$ref": "#/$defs/pace" },
 				"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
-				"effort": { "enum": ["low", "medium", "high"] },
+				"effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
 				"fallback": {
 					"type": "array",
 					"description": "Tried in order after the role's model: a model's name, or {model, pace} for a Claude model used only while on pace.",

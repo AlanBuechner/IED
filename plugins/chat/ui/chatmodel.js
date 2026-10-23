@@ -7,7 +7,7 @@
 export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approval: "Needs approval", awaiting_answer: "Needs an answer", paused: "Paused" };
 export const MODES = [["ask", "Ask"], ["plan", "Plan"], ["agent", "Agent"]];
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
-export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"]];
+export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
 
 // What the composer's Effort shows: the chat's pick, else its role's (docs/04 "Effort"), else the model's own default;
 // `roleEffort` is null while the chat has no snapshot to say.

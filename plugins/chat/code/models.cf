@@ -86,7 +86,7 @@ namespace Ai
 		profile->apiKeyEnv = Core::String(entry.Member("apiKey").Member("env").AsView());
 		if (entry.Member("effort").IsValid()) {
 			if (!IsEffortMapping(entry.Member("effort"))) {
-				problems.Push((Core::String("ai.models.") + name) + ": effort must map low, medium or high to the request fields each adds");
+				problems.Push((Core::String("ai.models.") + name) + ": effort must map low, medium, high, xhigh or max to the request fields each adds");
 				return nullptr;
 			}
 			Core::StringBuilder effort;
@@ -198,5 +198,5 @@ namespace Ai
 		return privacy == Privacy::Cloud ? "cloud" : "local";
 	}
 
-	bool IsEffort(Core::StringView text) { return text == "low" || text == "medium" || text == "high"; }
+	bool IsEffort(Core::StringView text) { return text == "low" || text == "medium" || text == "high" || text == "xhigh" || text == "max"; }
 }

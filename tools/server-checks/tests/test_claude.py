@@ -107,6 +107,21 @@ class ClaudeTurnTests(ClaudeCase):
 		from server import local_state
 		return local_state(self.data, self.repo)
 
+	async def test_effort_goes_to_the_cli_and_a_new_one_restarts_the_session(self):
+		await self.use_claude(groups={"claude": {"primary": {"model": "claude-opus", "effort": "xhigh"}}})
+		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]})
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id, "first"))["stop"])
+		argv = self.sessions_started()[-1]
+		self.assertEqual("xhigh", argv[argv.index("--effort") + 1], "the role's effort")
+		await self.client.request("chat.set", {"chatId": chat_id, "effort": "max"})
+		self.assertEqual("finished", (await self.turn(chat_id, "second"))["stop"])
+		self.assertEqual(2, len(self.sessions_started()), "a new effort, a new process")
+		argv = self.sessions_started()[-1]
+		self.assertEqual("max", argv[argv.index("--effort") + 1], "the chat's pick")
+		self.assertIn("--resume", argv, "the same conversation")
+		self.assertEqual("max", (await self.last_turn(chat_id)).get("effort"))
+
 	async def test_the_session_is_kept_between_turns_and_resumed_after_a_restart(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]}, {"blocks": [{"text": "Three."}]})

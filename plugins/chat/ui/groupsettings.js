@@ -22,7 +22,7 @@ export const ROLES = [
 	["completion", "ghost text (FIM)", false],
 	["inline", "Ctrl+I edits", false],
 ];
-const EFFORTS = ["", "low", "medium", "high"];
+const EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
 
 // The model a role gets when it is turned on: the group's primary's, else the first one.
 export function roleDefault(group, models) {
@@ -74,7 +74,7 @@ export class ModelGroupsPage {
 	}
 
 	groups() {
-		return Object.assign({}, this.settings.value("ai.groups").value || {});
+		return Object.assign({}, this.written || this.settings.value("ai.groups").value || {});
 	}
 
 	models() {
@@ -219,8 +219,19 @@ export class ModelGroupsPage {
 	async save(group) {
 		const groups = this.groups();
 		groups[this.selected] = group;
+		await this.writeGroups(groups);
+	}
+
+	// Writes ai.groups and draws it at once. Until the server answers, the page reads what it wrote, so a change made
+	// before then builds on this one instead of undoing it; the answer comes after settings.changed has the new value.
+	async writeGroups(groups) {
+		this.written = groups;
+		this.render();
 		const error = await this.settings.set("ai.groups", groups, "app");
 		if (error) this.ctx.ied.toast(error, { level: "error" });
+		if (this.written !== groups) return;
+		this.written = null;
+		this.render();
 	}
 
 	async create() {
@@ -229,7 +240,7 @@ export class ModelGroupsPage {
 		const first = this.models()[0];
 		groups[name] = first ? { primary: { model: first } } : {};
 		this.selected = name;
-		await this.settings.set("ai.groups", groups, "app");
+		await this.writeGroups(groups);
 	}
 
 	async duplicate() {
@@ -237,7 +248,7 @@ export class ModelGroupsPage {
 		const name = freshName(groups, this.selected + " copy");
 		groups[name] = JSON.parse(JSON.stringify(groups[this.selected]));
 		this.selected = name;
-		await this.settings.set("ai.groups", groups, "app");
+		await this.writeGroups(groups);
 	}
 
 	async rename(from, to) {
@@ -249,7 +260,7 @@ export class ModelGroupsPage {
 		const renamed = {};
 		for (const [name, group] of Object.entries(groups)) renamed[name === from ? to : name] = group;
 		this.selected = to;
-		await this.settings.set("ai.groups", renamed, "app");
+		await this.writeGroups(renamed);
 		if (this.defaultGroup() === from) await this.settings.set("ai.defaultGroup", to, "app");
 	}
 
@@ -259,7 +270,7 @@ export class ModelGroupsPage {
 		const groups = this.groups();
 		delete groups[name];
 		this.selected = null;
-		await this.settings.set("ai.groups", groups, "app");
+		await this.writeGroups(groups);
 		if (this.defaultGroup() === name) await this.settings.reset("ai.defaultGroup", "app");
 	}
 

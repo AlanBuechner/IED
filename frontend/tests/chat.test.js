@@ -131,8 +131,9 @@ test("chat: numbers as the views show them", () => {
 test("chat: the composer's effort - the chat's pick, else its group's, else the model's default", () => {
 	assertEqual([effortLabel("low", "high"), effortLabel("", "high"), effortLabel("", ""), effortLabel("", null)], ["Low", "High (group)", "Default", "Group's"]);
 	const rows = effortRows("", "medium");
-	assertEqual(rows.map((r) => [r.value, r.label, Boolean(r.icon)]), [["", "As the group says (Medium)", true], ["low", "Low", false], ["medium", "Medium", false], ["high", "High", false]]);
-	assertEqual(effortRows("high", "").map((r) => Boolean(r.icon)), [false, false, false, true]);
+	assertEqual(rows.map((r) => [r.value, r.label, Boolean(r.icon)]), [["", "As the group says (Medium)", true], ["low", "Low", false], ["medium", "Medium", false], ["high", "High", false], ["xhigh", "Extra high", false], ["max", "Max", false]]);
+	assertEqual(effortRows("high", "").map((r) => Boolean(r.icon)), [false, false, false, true, false, false]);
+	assertEqual([effortLabel("xhigh", ""), effortLabel("", "max")], ["Extra high", "Max (group)"]);
 	assertEqual([effortRows("", "")[0].label, effortRows("", null)[0].label], ["As the group says (the model's default)", "As the group says"], "a group that sets none; a chat not made yet");
 	const model = new ChatModel();
 	model.snapshot(Object.assign(snapshot(), { effort: "low", roleEffort: "medium" }));

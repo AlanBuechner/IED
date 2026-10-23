@@ -1447,15 +1447,17 @@ def chat_effort(run):
 		run.wait_text(".chat-selectors", "Medium (group)")
 		page.click(".chat-selectors .chat-dd[title='Effort']")
 		page.wait_for_selector(".popup.menu" + (".sheet" if run.phone else ""))
-		check("As the group says (Medium)" in run.texts(".popup.menu")[0], "the group's row names its effort")
+		menu = run.texts(".popup.menu")[0]
+		check("As the group says (Medium)" in menu, "the group's row names its effort")
+		check("Extra high" in menu and "Max" in menu, "Claude's five levels: %s" % menu)
 		run.shot("menu")
-		page.click(".popup.menu .menu-item:has-text('Low')")
-		run.wait_text(".chat-selectors .chat-dd[title='Effort']", "Low")
+		page.click(".popup.menu .menu-item:has-text('Max')")
+		run.wait_text(".chat-selectors .chat-dd[title='Effort']", "Max")
 		run.target.queue_model(model_script({"text": "Quick.", "chunk": 6}, {"finish": "stop"}))
 		send(page, "hi")
 		page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
 		sent = run.target.model_requests()[-1]["body"].get("chat_template_kwargs")
-		check(sent == {"reasoning_effort": "low"}, "the chat's pick was sent: %s" % sent)
+		check(sent == {"reasoning_effort": "max"}, "the chat's pick was sent: %s" % sent)
 		run.shot("sent")
 	finally:
 		run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {}})
@@ -1788,11 +1790,20 @@ def model_settings(run):
 	page.wait_for_selector(".set-role[data-role='planning'][data-state='on']")
 	primary = page.eval_on_selector(".set-role[data-role='primary'] .set-role-model", "e => e.value")
 	check(primary and page.eval_on_selector(".set-role[data-role='planning'] .set-role-model", "e => e.value") == primary, "a role turned on gets the primary's model")
+	page.select_option(".set-role[data-role='primary'] .set-role-effort", "xhigh")
+	page.select_option(".set-role[data-role='planning'] .set-role-effort", "max")
 	page.click(".set-bar button:has-text('Make default')")
 	page.wait_for_selector(".set-group.on .ci")
 	run.shot("groups")
-	groups = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
-	check(groups["ai.defaultGroup"]["value"] == "group" and groups["ai.groups"]["value"]["group"]["planning"]["model"] == primary, "written to the User tier: %s" % groups["ai.groups"])
+	deadline = time.time() + 10
+	while True:
+		groups = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
+		roles = groups["ai.groups"]["value"]["group"]
+		if roles["planning"].get("effort") == "max" or time.time() > deadline:
+			break
+		time.sleep(0.1)
+	check(groups["ai.defaultGroup"]["value"] == "group" and roles["planning"]["model"] == primary, "written to the User tier: %s" % groups["ai.groups"])
+	check((roles["primary"].get("effort"), roles["planning"].get("effort")) == ("xhigh", "max"), "Claude's levels: %s" % roles)
 
 
 # ---------------------------------------------------------------------------------------------------------------

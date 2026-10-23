@@ -91,6 +91,6 @@ namespace Ai
 	// The groups in the ai.groups value, by name.
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson);
 	const char* PrivacyName(Privacy privacy);
-	// Whether `text` is an effort: low, medium or high.
+	// Whether `text` is an effort: low, medium, high, xhigh or max.
 	bool IsEffort(Core::StringView text);
 }

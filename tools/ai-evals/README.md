@@ -34,7 +34,7 @@ vendor\python\python.exe -I tools/ai-evals/codenav_eval.py --server <exe> --mode
   quality holds and time, steps or tokens fall.
 - Use the repository's Python (`vendor\python`): a Microsoft Store Python reads its own private copy of AppData and does
   not see the app settings.
-- `--effort` (`low`, `medium`, `high`) is the eval role's effort (`docs/04` "Model groups and roles"); left out, the
+- `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) is the eval role's effort (`docs/04` "Model groups and roles"); left out, the
   model server's default (Qwen3.8's template: its longest, `xhigh`).
 - `--parallel` (default 1) is how many turns run at once. More than one makes them share the model server's GPU: they
   finish sooner together but each takes several times longer, so their times do not compare with a sequential run.

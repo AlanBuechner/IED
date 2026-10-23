@@ -223,7 +223,7 @@ namespace Ai
 		public ChatMode mode;
 		public PermissionMode permission;
 		public Core::String group;
-		public Core::String effort;                   // low, medium or high; empty: its role's
+		public Core::String effort;                   // low, medium, high, xhigh or max; empty: its role's
 		public Core::String pinnedModel;              // a model of ai.models over its group's primary; empty: the group's
 		public Core::String claudeSession;            // the Claude Code session holding its conversation (docs/04)
 		public Core::Array<Core::String> claudeTurns; // the turns that session has

@@ -411,8 +411,12 @@ class ChatTests(ChatCase):
 		self.assertNotIn("reasoning_effort", body, "llama.cpp ignores OpenAI's field")
 		self.assertEqual("medium", (await self.last_turn(chat_id)).get("effort"), "the turn says what it used")
 		with self.assertRaises(RpcFailure) as refused:
-			await self.client.request("chat.set", {"chatId": chat_id, "effort": "xhigh"})
+			await self.client.request("chat.set", {"chatId": chat_id, "effort": "extreme"})
 		self.assertEqual("bad_request", refused.exception.code)
+		await self.client.request("chat.set", {"chatId": chat_id, "effort": "xhigh"})
+		self.model.queue(text_step("Thought hard."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		self.assertEqual({"reasoning_effort": "xhigh"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "xhigh, as it is")
 		await self.client.request("chat.set", {"chatId": chat_id, "effort": "low"})
 		self.assertEqual("low", (await self.summary(chat_id))["effort"])
 		self.model.queue(text_step("Thought less."))

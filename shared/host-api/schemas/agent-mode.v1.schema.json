@@ -22,7 +22,7 @@
 				"properties": {
 					"model": { "type": "string" },
 					"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
-					"effort": { "enum": ["off", "low", "medium", "high", "max"] }
+					"effort": { "enum": ["off", "low", "medium", "high", "xhigh", "max"] }
 				}
 			}
 		},
