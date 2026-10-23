@@ -90,6 +90,8 @@ namespace Git
 
 	// The diff a repository answers with for `path` (docs/10 git.diff's arguments as given).
 	Core::Array<Core::String> GitDiffArgs(Core::StringView path, Core::StringView oldPath, Core::StringView oid, bool hasParent, bool staged, int64 context);
+	// A file in the system's temp folder holding `text`, for git to read (-F, apply); throws unavailable.
+	FS::Path GitTempFile(Core::StringView name, Core::StringView text);
 	// The state a repository is in from what its git dir holds: "", merging, rebasing, cherryPicking, reverting, bisecting.
 	Core::String GitRepoState(const FS::Path& gitDir);
 	// The git.* methods on the plugin's context: those that read (methods.cf), change (changes.cf) and run an operation

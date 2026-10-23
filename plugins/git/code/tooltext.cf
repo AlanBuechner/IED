@@ -1,0 +1,264 @@
+include "tooltext.ch"
+
+namespace Git
+{
+	Core::StringView ChangeWord(Core::StringView status) {
+		if (status == "A") return Core::StringView("added");
+		if (status == "M") return Core::StringView("modified");
+		if (status == "D") return Core::StringView("deleted");
+		if (status == "R") return Core::StringView("renamed");
+		if (status == "C") return Core::StringView("copied");
+		if (status == "T") return Core::StringView("type changed");
+		if (status == "UU") return Core::StringView("both modified");
+		if (status == "AA") return Core::StringView("both added");
+		if (status == "DD") return Core::StringView("both deleted");
+		if (status == "AU") return Core::StringView("added by us");
+		if (status == "UA") return Core::StringView("added by them");
+		if (status == "DU") return Core::StringView("deleted by us");
+		if (status == "UD") return Core::StringView("deleted by them");
+		return status;
+	}
+
+	static Core::StringView Short(Core::StringView oid) {
+		return oid.ByteLength() > 7 ? oid.Substring(0, 7) : oid;
+	}
+
+	static void AppendTrack(Core::StringBuilder& out, Core::StringView upstream, int64 ahead, int64 behind, bool gone) {
+		if (upstream.IsEmpty()) {
+			out.Append(", no upstream");
+			return;
+		}
+		out.Append(", tracking ");
+		out.Append(upstream);
+		if (gone) out.Append(" (gone)");
+		else if (ahead == 0 && behind == 0) out.Append(" (up to date)");
+		else {
+			out.Append(" (");
+			if (ahead > 0) {
+				out.AppendInt(ahead);
+				out.Append(" ahead");
+			}
+			if (ahead > 0 && behind > 0) out.Append(", ");
+			if (behind > 0) {
+				out.AppendInt(behind);
+				out.Append(" behind");
+			}
+			out.Append(")");
+		}
+	}
+
+	static void AppendHead(Core::StringBuilder& out, const GitHead& head) {
+		if (head.detached) {
+			out.Append("HEAD detached at ");
+			out.Append(Short(head.oid.View()));
+			return;
+		}
+		out.Append("on branch ");
+		out.Append(head.branch.View());
+		if (head.oid.IsEmpty()) out.Append(", no commits yet");
+		else AppendTrack(out, head.upstream.View(), head.ahead, head.behind, head.gone);
+	}
+
+	static Core::StringView StateWords(Core::StringView state) {
+		if (state == "merging") return Core::StringView("a merge is in progress: resolve the conflicts, stage them, then git_commit");
+		if (state == "rebasing") return Core::StringView("a rebase is in progress");
+		if (state == "cherryPicking") return Core::StringView("a cherry-pick is in progress");
+		if (state == "reverting") return Core::StringView("a revert is in progress");
+		if (state == "bisecting") return Core::StringView("a bisect is in progress");
+		return state;
+	}
+
+	// One list of changes under its title, the paths outside the workspace counted in `outside`.
+	static void AppendChanges(Core::StringBuilder& out, const char* title, const Core::Array<GitChange>& changes, const GitPlace& place, int64& outside) {
+		Core::StringBuilder lines;
+		int64 shown = 0;
+		int64 count = 0;
+		for (const GitChange& change : changes) {
+			Core::String path;
+			if (!place.FromRepo(change.path.View(), path)) {
+				outside += 1;
+				continue;
+			}
+			count += 1;
+			if (shown >= kToolListMost) continue;
+			shown += 1;
+			lines.Append("  ");
+			if (change.status != "?") {
+				lines.Append(ChangeWord(change.status.View()));
+				lines.Append(": ");
+			}
+			lines.Append(path.View());
+			Core::String from;
+			if (!change.oldPath.IsEmpty() && place.FromRepo(change.oldPath.View(), from)) {
+				lines.Append(" (from ");
+				lines.Append(from.View());
+				lines.Append(")");
+			}
+			lines.Append("\n");
+		}
+		if (count == 0) return;
+		out.Append(title);
+		out.Append(" (");
+		out.AppendInt(count);
+		out.Append("):\n");
+		out.Append(lines.View());
+		if (count > shown) {
+			out.Append("  ... and ");
+			out.AppendInt(count - shown);
+			out.Append(" more\n");
+		}
+	}
+
+	Core::String StatusText(const GitStatus& status, Core::StringView state, const GitPlace& place, Core::StringView name) {
+		Core::StringBuilder out;
+		out.Append("repository ");
+		out.Append(place.Name());
+		if (!name.IsEmpty()) {
+			out.Append(" (");
+			out.Append(name);
+			out.Append(")");
+		}
+		out.Append(": ");
+		AppendHead(out, status.head);
+		out.Append("\n");
+		if (!state.IsEmpty()) {
+			out.Append(StateWords(state));
+			out.Append("\n");
+		}
+		int64 outside = 0;
+		AppendChanges(out, "conflicted", status.conflicted, place, outside);
+		AppendChanges(out, "staged", status.staged, place, outside);
+		AppendChanges(out, "not staged", status.unstaged, place, outside);
+		AppendChanges(out, "untracked", status.untracked, place, outside);
+		const int64 changes = status.conflicted.Count() + status.staged.Count() + status.unstaged.Count() + status.untracked.Count();
+		if (changes == 0) out.Append("nothing to commit, the work tree is clean\n");
+		else if (outside == changes) out.Append("no changes in the workspace's folder\n");
+		if (outside > 0) {
+			out.AppendInt(outside);
+			out.Append(" changes outside the workspace's folder are not shown\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String LogText(Core::StringView records, int64 most, int64 skip) {
+		Core::StringBuilder out;
+		int64 count = 0;
+		bool more = false;
+		for (Core::StringView record : SplitOn(records, (char)0)) {
+			Core::Array<Core::StringView> fields = SplitOn(record.Trimmed(), (char)31);
+			if (fields.Count() < 3) continue;
+			if (count == most) {
+				more = true;
+				break;
+			}
+			count += 1;
+			out.Append(fields[0]);
+			out.Append(" ");
+			out.Append(fields[1]);
+			out.Append(" ");
+			out.Append(fields[2]);
+			out.Append(": ");
+			if (fields.Count() > 4) out.Append(fields[4]);
+			if (fields.Count() > 3 && !fields[3].Trimmed().IsEmpty()) {
+				out.Append("  (");
+				out.Append(fields[3].Trimmed());
+				out.Append(")");
+			}
+			out.Append("\n");
+		}
+		if (count == 0) return Core::String("no commits\n");
+		if (more) {
+			out.Append("[more: skip ");
+			out.AppendInt(skip + most);
+			out.Append(" for the next ones]\n");
+		}
+		return out.ToString();
+	}
+
+	static void AppendBranch(Core::StringBuilder& out, const GitRef& branch, Core::StringView subject) {
+		out.Append(branch.current ? "* " : "  ");
+		out.Append(branch.name.View());
+		AppendTrack(out, branch.upstream.View(), branch.ahead, branch.behind, branch.gone);
+		out.Append(": ");
+		out.Append(Short(branch.oid.View()));
+		out.Append(" ");
+		out.Append(subject);
+		out.Append("\n");
+	}
+
+	// The names of `refs`, at most kToolListMost, after a title with their count.
+	static void AppendNames(Core::StringBuilder& out, const char* title, const Core::Array<GitRef>& refs) {
+		if (refs.IsEmpty()) return;
+		out.Append(title);
+		out.Append(" (");
+		out.AppendInt(refs.Count());
+		out.Append("): ");
+		for (int64 i = 0; i < refs.Count() && i < kToolListMost; ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(refs[i].name.View());
+		}
+		if (refs.Count() > kToolListMost) out.Append(", ...");
+		out.Append("\n");
+	}
+
+	// The subject for-each-ref printed after the branch `name`'s fields.
+	static Core::StringView BranchSubject(Core::StringView refs, Core::StringView name) {
+		for (Core::StringView line : SplitOn(refs, '\n')) {
+			Core::Array<Core::StringView> fields = SplitOn(line, (char)31);
+			if (fields.Count() > 6 && fields[0].StartsWith(Core::StringView("refs/heads/")) && fields[0].Substring(11, fields[0].ByteLength() - 11) == name) return fields[6];
+		}
+		return Core::StringView("");
+	}
+
+	Core::String BranchesText(Core::StringView refs, const Core::Array<GitStash>& stashes) {
+		GitRefs parsed = ParseRefs(refs);
+		Core::StringBuilder out;
+		if (parsed.branches.IsEmpty()) out.Append("no branches yet (no commits)\n");
+		else out.Append("branches (* the current one):\n");
+		for (const GitRef& branch : parsed.branches) AppendBranch(out, branch, BranchSubject(refs, branch.name.View()));
+		AppendNames(out, "remote branches", parsed.remoteBranches);
+		AppendNames(out, "tags", parsed.tags);
+		if (!stashes.IsEmpty()) {
+			out.Append("stashes (");
+			out.AppendInt(stashes.Count());
+			out.Append("):\n");
+		}
+		for (const GitStash& stash : stashes) {
+			out.Append("  ");
+			out.AppendInt(stash.index);
+			out.Append(": ");
+			out.Append(stash.message.View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String FileText(Core::StringView text, int64 first, int64 most) {
+		Core::Array<Core::StringView> lines = SplitOn(text, '\n');
+		Core::StringBuilder out;
+		const int64 start = first < 1 ? 1 : first;
+		int64 line = start;
+		while (line <= lines.Count() && line - start < most && out.ByteLength() < kToolTextMostBytes) {
+			Core::StringView content = lines[line - 1];
+			if (content.EndsWith(Core::StringView("\r"))) content = content.Substring(0, content.ByteLength() - 1);
+			out.AppendInt(line);
+			out.Append("\t");
+			out.Append(content);
+			out.Append("\n");
+			line += 1;
+		}
+		if (lines.IsEmpty()) out.Append("[the file is empty]\n");
+		else if (line <= lines.Count()) {
+			out.Append("[lines ");
+			out.AppendInt(start);
+			out.Append("-");
+			out.AppendInt(line - 1);
+			out.Append(" of ");
+			out.AppendInt(lines.Count());
+			out.Append("; git_show with offset ");
+			out.AppendInt(line);
+			out.Append(" reads on]\n");
+		}
+		return out.ToString();
+	}
+}

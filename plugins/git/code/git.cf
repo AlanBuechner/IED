@@ -1,6 +1,7 @@
-// The ied.git plugin's entry (docs/26 section 2b): the git side of every workspace it is loaded for, its methods, and
-// the workspace events it follows.
+// The ied.git plugin's entry (docs/26 section 2b): the git side of every workspace it is loaded for, its methods, the
+// bindings the chat and the AI's git tools call, and the workspace events it follows.
 include "workingdiff.ch"
+include "tools.ch"
 
 namespace Git
 {
@@ -8,6 +9,7 @@ namespace Git
 	{
 		GitPlugin* git = new GitPlugin(&context);
 		RegisterMethods(git);
+		ProvideQuery(git);
 		context.Provide(Core::StringView("git.workingDiff"), [git](const Serialization::DomNode& args) -> IED::Result { return WorkingDiff(git, args); });
 		context.OnWorkspace([git](const IED::Workspace& ws) { git->Opened(ws); });
 		context.OnTrustChanged([git](const IED::Workspace& ws) { git->TrustChanged(ws); });

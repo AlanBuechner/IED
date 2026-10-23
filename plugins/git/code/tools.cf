@@ -1,0 +1,206 @@
+include "tools.ch"
+include "api/bindings.ch"
+include "api/tools.ch"
+
+namespace Git
+{
+	void RequireRepos(const GitWorkspace* found) {
+		if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace has no git side");
+		if (found->error == "untrusted") throw IED::RpcError(IED::ErrorCode::Untrusted, "git does not run in an untrusted workspace; ask the owner to trust it");
+		if (!found->error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, found->error.View());
+		if (found->repos.IsEmpty() && found->discover) throw IED::RpcError(IED::ErrorCode::Busy, "the workspace's repositories are still being found; try again in a moment");
+		if (found->repos.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace's folder is in no git repository");
+	}
+
+	GitPlace PlaceOf(const GitRepo* repo) {
+		Core::String within;
+		if (repo->relative == "..") IED::RelativeTo(repo->root.View(), repo->wsRoot.View(), within);
+		return PlaceFrom(repo->relative.View(), within.View());
+	}
+
+	static ToolRepo Target(GitRepo* repo) {
+		ToolRepo target;
+		target.repo = repo;
+		target.place = PlaceOf(repo);
+		return target;
+	}
+
+	static Core::String RepoNames(const GitWorkspace* found) {
+		Core::StringBuilder names;
+		for (GitRepo* repo : found->repos) {
+			if (!names.IsEmpty()) names.Append(", ");
+			names.Append(PlaceOf(repo).Name());
+		}
+		return names.ToString();
+	}
+
+	// The repository whose folder holds `path` most closely; null when none does.
+	static GitRepo* Holder(const GitWorkspace* found, Core::StringView path) {
+		GitRepo* best = nullptr;
+		int64 bestLength = -1;
+		for (GitRepo* repo : found->repos) {
+			GitPlace place = PlaceOf(repo);
+			Core::String inside;
+			if (!place.ToRepo(path, inside) || place.folder.View().ByteLength() <= bestLength) continue;
+			best = repo;
+			bestLength = place.folder.View().ByteLength();
+		}
+		return best;
+	}
+
+	static GitRepo* Named(const GitWorkspace* found, Core::StringView asked) {
+		Core::String folder = ToolPath(asked);
+		for (GitRepo* repo : found->repos)
+			if (PlaceOf(repo).folder == folder) return repo;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (((Core::String("no repository at '") + asked) + "'; the workspace's are: ") + RepoNames(found).View()).View());
+	}
+
+	static GitRepo* ByPaths(const GitWorkspace* found, const Core::Array<Core::String>& paths) {
+		GitRepo* repo = Holder(found, paths[0].View());
+		if (!repo) throw IED::RpcError(IED::ErrorCode::NotFound, ((Core::String(paths[0]) + " is in no repository of the workspace; its repositories are: ") + RepoNames(found).View()).View());
+		for (const Core::String& path : paths)
+			if (Holder(found, path.View()) != repo) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String(paths[0]) + " and ") + path.View()) + " are in different repositories; ask for one repository at a time").View());
+		return repo;
+	}
+
+	ToolRepo ToolRepoFor(GitWorkspace* found, const Serialization::DomNode& args, const Core::Array<Core::String>& paths) {
+		RequireRepos(found);
+		if (args.Member("repo").IsValid()) return Target(Named(found, args.Member("repo").AsView()));
+		if (!paths.IsEmpty()) return Target(ByPaths(found, paths));
+		for (GitRepo* repo : found->repos)
+			if (repo->relative.IsEmpty() || repo->relative == "..") return Target(repo);
+		if (found->repos.Count() == 1) return Target(found->repos[0]);
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("the workspace's folder is in no repository of its own; name one with repo: ") + RepoNames(found).View()).View());
+	}
+
+	Core::Array<Core::String> ListArg(const Serialization::DomNode& args, const char* key) {
+		Core::Array<Core::String> items;
+		Serialization::DomNode list = args.Member(key);
+		for (int64 i = 0; i < list.Count(); ++i) items.Push(Core::String(list.At(i).AsView()));
+		return items;
+	}
+
+	Core::Array<Core::String> RepoPaths(const ToolRepo& target, const Core::Array<Core::String>& paths) {
+		Core::Array<Core::String> inside;
+		for (const Core::String& path : paths) {
+			Core::String repoPath;
+			if (!target.place.ToRepo(path.View(), repoPath)) throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String(path) + " is not in the repository ") + target.place.Name()).View());
+			inside.Push(repoPath);
+		}
+		return inside;
+	}
+
+	Core::String NameArg(const Serialization::DomNode& args, const char* key) {
+		Core::StringView name = args.Member(key).AsView().Trimmed();
+		if (name.StartsWith(Core::StringView("-"))) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(key) + " is not a name git takes: it starts with '-'").View());
+		return Core::String(name);
+	}
+
+	GitRun TryRun(GitPlugin* git, GitRepo* repo, const Core::Array<Core::String>& arguments) {
+		GitCli cli = git->CliFor(repo->wsId.View());
+		FS::Path root = repo->root;
+		Threading::UnlockGuard released(git->lock);
+		return cli.Run(root, arguments, kGitReadTimeoutMs);
+	}
+
+	bool IsUnborn(GitPlugin* git, GitRepo* repo) {
+		return !TryRun(git, repo, GitArgs("rev-parse", "--verify", "--quiet", "HEAD")).Ok();
+	}
+
+	void AddArgs(Core::Array<Core::String>& arguments, const Core::Array<Core::String>& more) {
+		for (const Core::String& each : more) arguments.Push(each);
+	}
+
+	Core::String RepoStatus(GitPlugin* git, GitRepo* repo) {
+		GitRun run = git->RunOrThrow(repo, GitArgs("status", "--porcelain=v2", "-z", "--branch"), kGitReadTimeoutMs, IED::ErrorCode::Unavailable);
+		return StatusText(ParseStatus(run.output.View()), GitRepoState(repo->gitDir).View(), PlaceOf(repo), repo->name.View());
+	}
+
+	Core::String SectionText(const GitWorkspace* found) {
+		if (!found || found->repos.IsEmpty()) return Core::String("");
+		Core::StringBuilder out;
+		if (found->repos.Count() == 1) out.Append("The workspace is in a git repository. ");
+		else {
+			out.Append("The workspace has git repositories at ");
+			out.Append(RepoNames(found).View());
+			out.Append(" (the git_* tools take `repo` for one; a path names its own). ");
+		}
+		out.Append("Read it with git_status, git_diff, git_log, git_show, git_blame and git_branches rather than git in a shell. ");
+		out.Append("Stage, commit, branch or stash (git_stage, git_commit, git_branch, git_stash) only when the owner asks; nothing here pushes.");
+		return out.ToString();
+	}
+
+	static Core::String AnswerTool(GitPlugin* git, GitWorkspace* found, Core::StringView tool, const Serialization::DomNode& args) {
+		if (tool == "section") return SectionText(found);
+		if (tool == "status") return StatusAnswer(git, found, args);
+		if (tool == "diff") return DiffAnswer(git, found, args);
+		if (tool == "log") return LogAnswer(git, found, args);
+		if (tool == "show") return ShowAnswer(git, found, args);
+		if (tool == "blame") return BlameAnswer(git, found, args);
+		if (tool == "branches") return BranchesAnswer(git, found, args);
+		if (tool == "stage") return StageAnswer(git, found, args, true);
+		if (tool == "unstage") return StageAnswer(git, found, args, false);
+		if (tool == "commit") return CommitAnswer(git, found, args);
+		if (tool == "branch") return BranchAnswer(git, found, args);
+		if (tool == "stash") return StashAnswer(git, found, args);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no git tool ") + tool).View());
+	}
+
+	void ProvideQuery(GitPlugin* git) {
+		git->context->Provide(Core::StringView(kQueryBinding), [git](const Serialization::DomNode& call) -> IED::Result {
+			Threading::LockGuard guard(git->lock);
+			try {
+				Core::String text = AnswerTool(git, git->Find(call.Member("wsId").AsView()), call.Member("tool").AsView(), call.Member("args"));
+				IED::JsonWriter json;
+				json.BeginObject();
+				json.Field("text", text.View());
+				json.EndObject();
+				return IED::Answer(json.View());
+			}
+			catch (IED::RpcError& failed) {
+				return IED::Refusal(failed.message.View());
+			}
+		});
+	}
+
+	// --- The tool functions (the manifest's toolCalls) --------------------------------------------------------------
+
+	static Core::String Ask(const char* tool, Core::StringView wsId, Core::StringView args, Core::String& problem) {
+		IED::JsonWriter call;
+		call.BeginObject();
+		call.Field("wsId", wsId);
+		call.Field("tool", tool);
+		call.RawField("args", args);
+		call.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView(kQueryBinding), call.View());
+		if (!answer.Ok()) {
+			problem = answer.error;
+			return Core::String("");
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Core::String(Serialization::ReadJson(answer.json.View(), *doc).root.Member("text").AsView());
+	}
+
+	static IED::ToolResult Through(const char* tool, const IED::ToolCall& call) {
+		Core::String problem;
+		Core::String text = Ask(tool, call.workspace.id.View(), IED::NodeJson(call.args).View(), problem);
+		return problem.IsEmpty() ? IED::ToolText(text.View()) : IED::ToolFailure(problem.View());
+	}
+
+	IED::ToolResult StatusTool(const IED::ToolCall& call) { return Through("status", call); }
+	IED::ToolResult DiffTool(const IED::ToolCall& call) { return Through("diff", call); }
+	IED::ToolResult LogTool(const IED::ToolCall& call) { return Through("log", call); }
+	IED::ToolResult ShowTool(const IED::ToolCall& call) { return Through("show", call); }
+	IED::ToolResult BlameTool(const IED::ToolCall& call) { return Through("blame", call); }
+	IED::ToolResult BranchesTool(const IED::ToolCall& call) { return Through("branches", call); }
+	IED::ToolResult StageTool(const IED::ToolCall& call) { return Through("stage", call); }
+	IED::ToolResult UnstageTool(const IED::ToolCall& call) { return Through("unstage", call); }
+	IED::ToolResult CommitTool(const IED::ToolCall& call) { return Through("commit", call); }
+	IED::ToolResult BranchTool(const IED::ToolCall& call) { return Through("branch", call); }
+	IED::ToolResult StashTool(const IED::ToolCall& call) { return Through("stash", call); }
+
+	Core::String Section(const IED::Workspace& ws) {
+		Core::String problem;
+		return Ask("section", ws.id.View(), Core::StringView("{}"), problem);
+	}
+}

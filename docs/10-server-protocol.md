@@ -315,6 +315,8 @@ The `ied.git` plugin's server code (`plugins/git/code/`, a built-in on the plugi
 
 Fetch, pull and push are **operations**: one at a time per repository (`busy` otherwise), run with `--progress`, their lines streamed as `op.progress` and their end as `op.end`. They never ask for credentials on a terminal; Git Credential Manager may show its own window on the server's desktop (F-GIT-25 puts its prompts in the UI later).
 
+The AI's git tools (`docs/13` "git") are the plugin's too: its `git.query` server binding (`{wsId, tool, args} -> {text}`, `plugins.call`) answers each from these repositories as text, and the tools that change one run as these methods do - logged to the Git output, the repository read again before they answer.
+
 | Topic | Events | Snapshot |
 |---|---|---|
 | `gitrepos:<wsId>` | `repos.changed` (the snapshot again) | `{repos, error, discovering}` (`git.repos`) |

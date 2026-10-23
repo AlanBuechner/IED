@@ -76,8 +76,7 @@ namespace Git
 		return Empty();
 	}
 
-	// A file in the system's temp folder holding `text`, for git to read (-F, apply).
-	static FS::Path TempFile(Core::StringView name, Core::StringView text) {
+	FS::Path GitTempFile(Core::StringView name, Core::StringView text) {
 		FS::Path file = FS::TempDirectory() / name;
 		if (!FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength())) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("cannot write ") + file.View()).View());
 		return file;
@@ -101,7 +100,7 @@ namespace Git
 			throw IED::RpcError(IED::ErrorCode::Conflict, "the file changed since its diff was read; look again");
 		Core::String patch = HunkPatch(diff, hunk, chosen, staged || discard);
 		if (patch.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "the chosen lines change nothing");
-		FS::Path file = TempFile((Core::String("ied-") + repo->repoId.View() + "-hunk.patch").View(), patch.View());
+		FS::Path file = GitTempFile((Core::String("ied-") + repo->repoId.View() + "-hunk.patch").View(), patch.View());
 		Core::Array<Core::String> arguments = GitArgs("apply", "--recount");
 		if (!discard) arguments.Push(Core::String("--cached"));
 		if (staged || discard) arguments.Push(Core::String("-R"));
@@ -162,7 +161,7 @@ namespace Git
 		const bool amend = params.Bool("amend", false);
 		if (message.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "a commit needs a message");
 		if (!amend && repo->changesJson.View().Contains(Core::StringView("\"staged\":[]"))) throw IED::RpcError(IED::ErrorCode::BadRequest, "nothing is staged");
-		FS::Path file = TempFile((Core::String("ied-") + repo->repoId.View() + "-message.txt").View(), (message + "\n").View());
+		FS::Path file = GitTempFile((Core::String("ied-") + repo->repoId.View() + "-message.txt").View(), (message + "\n").View());
 		Core::Array<Core::String> arguments = GitArgs("commit", "-F", file.CStr());
 		if (amend) arguments.Push(Core::String("--amend"));
 		if (params.Bool("signoff", false)) arguments.Push(Core::String("--signoff"));

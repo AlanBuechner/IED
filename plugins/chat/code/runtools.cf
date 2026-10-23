@@ -201,7 +201,7 @@ namespace Ai
 			ToolOutcome outcome = spec->run(invocation);
 			outcome.ms = ToolNowMs() - ran;
 			outcome.timed = true;
-			if (spec->toolClass == ToolClass::Write && !outcome.isError && rootAlias.IsEmpty()) {
+			if (spec->toolClass == ToolClass::Write && !outcome.isError && rootAlias.IsEmpty() && !args.Member("path").AsView().IsEmpty()) {
 				IED::HostLock guard(*context);
 				TrackModified(IED::NormalizePath(args.Member("path").AsView()).View(), outcome.plus, outcome.minus);
 			}

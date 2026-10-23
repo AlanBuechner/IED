@@ -1,0 +1,206 @@
+// The git tools that read (docs/13 T-GIT-1..3): git_status, git_diff, git_log, git_show, git_blame, git_branches.
+
+include "tools.ch"
+include "workingdiff.ch"
+
+namespace Git
+{
+	Core::String StatusAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		if (args.Member("repo").IsValid()) return RepoStatus(git, ToolRepoFor(found, args, Core::Array<Core::String>()).repo);
+		RequireRepos(found);
+		Core::Array<GitRepo*> repos = found->repos;
+		Core::StringBuilder out;
+		for (GitRepo* repo : repos) {
+			if (!out.IsEmpty()) out.Append("\n");
+			out.Append(RepoStatus(git, repo).View());
+		}
+		return out.ToString();
+	}
+
+	static int64 IntArg(const Serialization::DomNode& args, const char* key, int64 fallback) {
+		return args.Member(key).IsValid() ? args.Member(key).AsInt() : fallback;
+	}
+
+	// What the work tree holds that git does not track, under the paths: a line for git_diff's answer.
+	static Core::String UntrackedNote(GitPlugin* git, const ToolRepo& target, const Core::Array<Core::String>& paths) {
+		Core::Array<Core::String> arguments = GitArgs("ls-files", "-z", "--others", "--exclude-standard");
+		arguments.Push(Core::String("--"));
+		AddArgs(arguments, paths.IsEmpty() ? RepoPaths(target, GitArgs(".")) : RepoPaths(target, paths));
+		arguments.Push(Core::String(kNotWorkingFiles));
+		GitRun run = git->RunOrThrow(target.repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
+		Core::StringBuilder out;
+		int64 count = 0;
+		for (Core::StringView path : SplitOn(run.output.View(), (char)0)) {
+			Core::String shown;
+			if (!target.place.FromRepo(path, shown)) continue;
+			count += 1;
+			if (count > kToolUntrackedMost) continue;
+			out.Append(count == 1 ? "untracked, not in the diff (git_stage adds them, fs_read reads them): " : ", ");
+			out.Append(shown.View());
+		}
+		if (count > kToolUntrackedMost) {
+			out.Append(" and ");
+			out.AppendInt(count - kToolUntrackedMost);
+			out.Append(" more");
+		}
+		if (count > 0) out.Append("\n");
+		return out.ToString();
+	}
+
+	static bool AnythingStaged(GitPlugin* git, GitRepo* repo) {
+		return TryRun(git, repo, GitArgs("diff", "--cached", "--quiet")).exitCode == 1;
+	}
+
+	static Core::String NoDiff(GitPlugin* git, GitRepo* repo, bool staged, Core::StringView range) {
+		if (!range.IsEmpty()) return (Core::String("no differences for ") + range) + "\n";
+		if (staged) return Core::String("nothing is staged\n");
+		if (AnythingStaged(git, repo)) return Core::String("no unstaged changes to tracked files (staged: true shows what is staged)\n");
+		return Core::String("no unstaged changes to tracked files\n");
+	}
+
+	Core::String DiffAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		Core::Array<Core::String> paths = ListArg(args, "paths");
+		ToolRepo target = ToolRepoFor(found, args, paths);
+		const bool staged = args.Member("staged").AsBool();
+		Core::String range = NameArg(args, "rev_range");
+		const int64 context = IntArg(args, "context", 3);
+		Core::Array<Core::String> arguments = GitArgs("diff", "--no-ext-diff", "-M");
+		Core::StringBuilder unified;
+		unified.Append("-U");
+		unified.AppendInt(context);
+		arguments.Push(unified.ToString());
+		if (staged) arguments.Push(Core::String("--cached"));
+		AddArgs(arguments, target.place.DiffOptions());
+		if (!range.IsEmpty()) arguments.Push(range);
+		arguments.Push(Core::String("--"));
+		AddArgs(arguments, RepoPaths(target, paths));
+		GitRun run = git->RunOrThrow(target.repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
+		Core::String text = DiffText(run.output.View(), range.IsEmpty() && context == 3, kToolTextMostBytes);
+		if (text.IsEmpty()) text = NoDiff(git, target.repo, staged, range.View());
+		if (staged || !range.IsEmpty()) return text;
+		return text + UntrackedNote(git, target, paths).View();
+	}
+
+	Core::String LogAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		Core::Array<Core::String> paths = ListArg(args, "paths");
+		ToolRepo target = ToolRepoFor(found, args, paths);
+		const int64 most = IntArg(args, "n", kToolLogDefault);
+		const int64 skip = IntArg(args, "skip", 0);
+		Core::String rev = NameArg(args, "rev");
+		if (rev.IsEmpty() && !args.Member("all").AsBool() && IsUnborn(git, target.repo)) return Core::String("no commits yet\n");
+		Core::Array<Core::String> arguments = GitArgs("log", "-z", "--date=format:%Y-%m-%d %H:%M", (Core::String("--format=") + kToolLogFormat).CStr());
+		Core::StringBuilder count;
+		count.Append("--max-count=");
+		count.AppendInt(most + 1);
+		arguments.Push(count.ToString());
+		Core::StringBuilder skipped;
+		skipped.Append("--skip=");
+		skipped.AppendInt(skip);
+		arguments.Push(skipped.ToString());
+		Core::String query = Core::String(args.Member("query").AsView().Trimmed());
+		Core::String author = Core::String(args.Member("author").AsView().Trimmed());
+		if (!query.IsEmpty() || !author.IsEmpty()) arguments.Push(Core::String("--regexp-ignore-case"));
+		if (!query.IsEmpty()) arguments.Push(Core::String("--fixed-strings"));
+		if (!query.IsEmpty()) arguments.Push(Core::String("--grep=") + query.View());
+		if (!author.IsEmpty()) arguments.Push(Core::String("--author=") + author.View());
+		if (args.Member("all").AsBool()) {
+			arguments.Push(Core::String("--exclude=refs/stash"));
+			arguments.Push(Core::String("--all"));
+		}
+		if (!rev.IsEmpty()) arguments.Push(rev);
+		arguments.Push(Core::String("--"));
+		AddArgs(arguments, RepoPaths(target, paths));
+		GitRun run = git->RunOrThrow(target.repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
+		return LogText(run.output.View(), most, skip);
+	}
+
+	static Core::String CommitHeader(GitPlugin* git, GitRepo* repo, Core::StringView rev) {
+		Core::Array<Core::String> arguments = GitArgs("show", "-s", "--date=format:%Y-%m-%d %H:%M");
+		arguments.Push(Core::String("--format=commit %H%nparents %p%nauthor %an <%ae> %ad%ncommitter %cn <%ce> %cd%n%n%B"));
+		arguments.Push(Core::String(rev));
+		arguments.Push(Core::String("--"));
+		return Core::String(git->RunOrThrow(repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::NotFound).output.View().Trimmed());
+	}
+
+	static Core::String FileAtAnswer(GitPlugin* git, const ToolRepo& target, Core::StringView rev, const Serialization::DomNode& args) {
+		Core::Array<Core::String> asked;
+		asked.Push(Core::String(args.Member("file").AsView()));
+		Core::String repoPath = RepoPaths(target, asked)[0];
+		GitRun run = git->RunOrThrow(target.repo, GitArgs("show", ((Core::String(rev) + ":") + repoPath.View()).CStr()), kGitReadTimeoutMs, IED::ErrorCode::NotFound);
+		if (run.output.View().IndexOf((char)0, 0) >= 0) return (Core::String(asked[0]) + " is a binary file at ") + rev;
+		return FileText(run.output.View(), IntArg(args, "offset", 1), kToolFileMostLines);
+	}
+
+	Core::String ShowAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		Core::Array<Core::String> paths = ListArg(args, "paths");
+		if (args.Member("file").IsValid()) paths.Push(Core::String(args.Member("file").AsView()));
+		ToolRepo target = ToolRepoFor(found, args, paths);
+		Core::String rev = NameArg(args, "rev");
+		if (rev.IsEmpty()) rev = Core::String("HEAD");
+		if (args.Member("file").IsValid()) return FileAtAnswer(git, target, rev.View(), args);
+		Core::String header = CommitHeader(git, target.repo, rev.View());
+		Core::Array<Core::String> arguments = GitArgs("show", "--format=", "--no-ext-diff", "-M");
+		arguments.Push(Core::String("--diff-merges=first-parent"));
+		AddArgs(arguments, target.place.DiffOptions());
+		arguments.Push(rev);
+		arguments.Push(Core::String("--"));
+		AddArgs(arguments, RepoPaths(target, paths));
+		GitRun run = git->RunOrThrow(target.repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::NotFound);
+		Core::String diff = DiffText(run.output.View(), false, kToolTextMostBytes);
+		if (diff.IsEmpty()) diff = Core::String(paths.IsEmpty() ? "(it changes no files)\n" : "(it changes none of the paths)\n");
+		return (header + "\n\n") + diff.View();
+	}
+
+	static int64 LineCount(Core::StringView text) {
+		int64 lines = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.ByteAt(i) == '\n') lines += 1;
+		if (!text.IsEmpty() && text.ByteAt(text.ByteLength() - 1) != '\n') lines += 1;
+		return lines;
+	}
+
+	Core::String BlameAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		Core::Array<Core::String> paths;
+		paths.Push(Core::String(args.Member("path").AsView()));
+		ToolRepo target = ToolRepoFor(found, args, paths);
+		Core::String repoPath = RepoPaths(target, paths)[0];
+		FS::Path file = target.repo->root / repoPath.View();
+		if (!FS::FileExists(file.CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no file ") + paths[0].View() + " in the work tree").View());
+		const int64 total = LineCount(FS::File(file.CStr(), "rb").ReadText().View());
+		const int64 first = IntArg(args, "start_line", 1) < 1 ? 1 : IntArg(args, "start_line", 1);
+		int64 last = IntArg(args, "end_line", first + kToolFileMostLines - 1);
+		if (last > total) last = total;
+		if (last - first >= kToolFileMostLines) last = first + kToolFileMostLines - 1;
+		if (first > total) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(paths[0]) + " has fewer lines than start_line").View());
+		Core::StringBuilder range;
+		range.Append("-L");
+		range.AppendInt(first);
+		range.Append(",");
+		range.AppendInt(last);
+		Core::Array<Core::String> arguments = GitArgs("blame", "--porcelain", range.ToString().CStr(), "--");
+		arguments.Push(repoPath);
+		GitRun run = git->RunOrThrow(target.repo, arguments, kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
+		Core::String text = BlameText(run.output.View(), paths[0].View());
+		if (last >= total) return text;
+		Core::StringBuilder more;
+		more.Append("[lines ");
+		more.AppendInt(first);
+		more.Append("-");
+		more.AppendInt(last);
+		more.Append(" of ");
+		more.AppendInt(total);
+		more.Append("; git_blame with start_line ");
+		more.AppendInt(last + 1);
+		more.Append(" reads on]\n");
+		return text + more.View();
+	}
+
+	Core::String BranchesAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {
+		ToolRepo target = ToolRepoFor(found, args, Core::Array<Core::String>());
+		Core::Array<Core::String> refs = GitArgs("for-each-ref", (Core::String("--format=") + kToolRefFormat).CStr(), "refs/heads", "refs/remotes");
+		refs.Push(Core::String("refs/tags"));
+		GitRun listed = git->RunOrThrow(target.repo, refs, kGitReadTimeoutMs, IED::ErrorCode::Unavailable);
+		GitRun stashes = git->RunOrThrow(target.repo, GitArgs("stash", "list", "-z", (Core::String("--format=") + kGitStashFormat).CStr()), kGitReadTimeoutMs, IED::ErrorCode::Unavailable);
+		return BranchesText(listed.output.View(), ParseStashes(stashes.output.View()));
+	}
+}

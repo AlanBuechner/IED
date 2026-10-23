@@ -23,6 +23,7 @@ namespace Git
 		public Core::String upstream;
 		public int64 ahead;
 		public int64 behind;
+		public bool gone;           // the upstream is named but no longer exists
 	}
 
 	struct GitStatus

@@ -79,12 +79,16 @@ namespace Git
 
 	GitStatus ParseStatus(Core::StringView porcelain) {
 		GitStatus status;
+		bool compared = false;
 		Core::Array<Core::StringView> entries = SplitOn(porcelain, (char)0);
 		for (int64 i = 0; i < entries.Count(); ++i) {
 			Core::StringView entry = entries[i];
 			if (entry.IsEmpty()) continue;
 			const int32 kind = entry.ByteAt(0);
-			if (kind == '#') ReadBranchLine(entry, status.head);
+			if (kind == '#') {
+				ReadBranchLine(entry, status.head);
+				compared = compared || entry.StartsWith(Core::StringView("# branch.ab "));
+			}
 			else if (kind == '1') ReadTracked(entry, Core::StringView(""), status);
 			else if (kind == '2' && i + 1 < entries.Count()) {
 				ReadTracked(entry, entries[i + 1], status);
@@ -93,6 +97,7 @@ namespace Git
 			else if (kind == 'u') status.conflicted.Push(MakeChange(AfterSpaces(entry, 10), Core::StringView(""), entry.Substring(2, 2)));
 			else if (kind == '?') status.untracked.Push(MakeChange(entry.Substring(2, entry.ByteLength() - 2), Core::StringView(""), Core::StringView("?")));
 		}
+		status.head.gone = !status.head.upstream.IsEmpty() && !compared;
 		return status;
 	}
 

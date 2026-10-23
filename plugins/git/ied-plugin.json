@@ -2,7 +2,7 @@
 // the commit graph, a commit's details and diffs, local changes staged by file, hunk or line, the commit composer,
 // branches, stashes, fetch, pull and push. Its server code (code/, docs/10 "Git") is compiled into the server and runs
 // on the plugin API like any plugin's (docs/26 "Built-ins on the API"): the git.* methods, the git: and gitrepos:
-// topics, the Git output source.
+// topics, the Git output source, and the AI's git_* tools (docs/13 "git") answered through its git.query binding.
 {
 	"manifestVersion": 1,
 	"id": "ied.git",
@@ -19,16 +19,162 @@
 			{ "fileNames": [".gitignore", ".gitattributes", ".gitmodules", ".gitkeep"], "label": "GIT", "color": "--hue-red" }
 		],
 		"bindings": {
-			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true } ],
+			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true }, { "name": "git.query", "version": "1" } ],
 			"provides": [
 				{
 					"name": "git.workingDiff",
 					"version": "1.0.0",
 					"kind": "function",
 					"description": "What the workspace's working trees change against HEAD as one text: {wsId, maxBytes?} -> {text, truncated, repos} (each repository's git diff HEAD and untracked files, 64 KiB by default); a chat reads it for an @diff mention (docs/04)."
-				}
+				},
+				{ "name": "git.query", "version": "1", "kind": "function", "description": "A git_* tool's answer as text: {wsId, tool: status|diff|log|show|blame|branches|stage|unstage|commit|branch|stash|section, args} -> {text}." }
 			]
 		},
+		"systemMessageSections": [
+			{ "id": "git", "function": "Git::Section", "when": "workspaceTrusted", "maxTokens": 120 }
+		],
+		"toolCalls": [
+			{
+				"name": "git_status",
+				"description": "Each repository's branch and how it stands against its upstream (ahead, behind), a merge or rebase in progress, and its changes: staged, not staged, untracked and conflicted files. Every repository of the workspace unless `repo` names one (\".\" the workspace's own); paths are the workspace's, as fs_read takes them.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "repo": { "type": "string", "description": "A repository's folder in the workspace, \".\" for the workspace's own." } }, "additionalProperties": false },
+				"function": "Git::StatusTool"
+			},
+			{
+				"name": "git_diff",
+				"description": "A diff of what changed: by default what is not staged yet, with `staged: true` what is staged (what git_commit takes), with `rev_range` against or between revisions (\"HEAD\" everything not committed, \"main..feature\", \"HEAD~3\"). It starts with each file's +/- counts and names the untracked files after it. With the default context each hunk header ends with its number, \"(hunk 2)\", which git_stage and git_unstage take. A diff past 24 KB is cut: ask for fewer paths.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {
+					"paths": { "type": "array", "items": { "type": "string" }, "description": "Files or folders; the whole repository when left out." },
+					"staged": { "type": "boolean" },
+					"rev_range": { "type": "string" },
+					"context": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Lines around each change (3)." },
+					"repo": { "type": "string" } }, "additionalProperties": false },
+				"function": "Git::DiffTool"
+			},
+			{
+				"name": "git_log",
+				"description": "Commits, newest first, a line each: short hash, date, author, subject, and the branches and tags on it. HEAD's history unless `rev` names another (a branch, a tag, \"main..feature\") or `all` takes every branch; `paths` keeps the commits that changed them, `query` those whose message has the text, `author` those by a name or email; `n` (30, at most 200) and `skip` page.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {
+					"n": { "type": "integer", "minimum": 1, "maximum": 200 },
+					"skip": { "type": "integer", "minimum": 0 },
+					"rev": { "type": "string" },
+					"all": { "type": "boolean" },
+					"paths": { "type": "array", "items": { "type": "string" } },
+					"query": { "type": "string" },
+					"author": { "type": "string" },
+					"repo": { "type": "string" } }, "additionalProperties": false },
+				"function": "Git::LogTool"
+			},
+			{
+				"name": "git_show",
+				"description": "One commit: its hash, parents, author, committer, whole message, and its change against its first parent as a diff (only the `paths` given, if any). With `file`, that file's text as it was at the revision instead, lines numbered (`offset` reads on). `rev` is a hash, a branch, a tag or \"HEAD~2\"; HEAD when left out.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {
+					"rev": { "type": "string" },
+					"paths": { "type": "array", "items": { "type": "string" } },
+					"file": { "type": "string" },
+					"offset": { "type": "integer", "minimum": 1 },
+					"repo": { "type": "string" } }, "additionalProperties": false },
+				"function": "Git::ShowTool"
+			},
+			{
+				"name": "git_blame",
+				"description": "Who last changed each line of a file in the work tree, and in which commit: the commits (hash, date, author, subject), then each line with its number and commit; lines not committed yet are marked. 400 lines at a time from `start_line` (1), to `end_line` when given.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {
+					"path": { "type": "string" },
+					"start_line": { "type": "integer", "minimum": 1 },
+					"end_line": { "type": "integer", "minimum": 1 } }, "required": ["path"], "additionalProperties": false },
+				"function": "Git::BlameTool"
+			},
+			{
+				"name": "git_branches",
+				"description": "The local branches - the current one marked * - each with its upstream, how far ahead or behind it is and its last commit; then the remote branches, the tags and the stashes.",
+				"class": "read",
+				"group": "git",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "repo": { "type": "string" } }, "additionalProperties": false },
+				"function": "Git::BranchesTool"
+			},
+			{
+				"name": "git_stage",
+				"description": "Stages changes for the next commit: whole files or folders (`paths`, \".\" for everything; new and deleted files too), or with `hunks` only those hunks of one file, numbered as git_diff shows them. Answers with the status after it.",
+				"class": "write",
+				"group": "git",
+				"inputSchema": { "type": "object", "properties": {
+					"paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+					"hunks": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
+					"repo": { "type": "string" } }, "required": ["paths"], "additionalProperties": false },
+				"function": "Git::StageTool",
+				"timeoutSeconds": 150
+			},
+			{
+				"name": "git_unstage",
+				"description": "Takes changes out of what is staged and leaves the work tree as it is: whole files or folders (`paths`), or with `hunks` those hunks of one file, numbered as git_diff with staged: true shows them. Answers with the status after it.",
+				"class": "write",
+				"group": "git",
+				"inputSchema": { "type": "object", "properties": {
+					"paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+					"hunks": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
+					"repo": { "type": "string" } }, "required": ["paths"], "additionalProperties": false },
+				"function": "Git::UnstageTool",
+				"timeoutSeconds": 150
+			},
+			{
+				"name": "git_commit",
+				"description": "Commits what is staged with `message` (a subject line; a blank line and a body when it needs one). With `paths`, commits exactly those files as the work tree has them - new ones too - and leaves everything else staged or not as it was. `amend` replaces the last commit, refused once it is pushed. Never pushes.",
+				"class": "write",
+				"group": "git",
+				"inputSchema": { "type": "object", "properties": {
+					"message": { "type": "string", "minLength": 1 },
+					"paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+					"amend": { "type": "boolean" },
+					"repo": { "type": "string" } }, "required": ["message"], "additionalProperties": false },
+				"function": "Git::CommitTool",
+				"timeoutSeconds": 150
+			},
+			{
+				"name": "git_branch",
+				"description": "Creates a branch (`create`, at `from` or HEAD; `switch: true` also switches to it), switches to one (`switch`; a remote branch such as \"origin/feature\" gets a local branch tracking it), or deletes a merged one (`delete`). Local changes go along when they can; a switch that would overwrite them fails and says so.",
+				"class": "write",
+				"group": "git",
+				"inputSchema": { "type": "object", "properties": {
+					"action": { "enum": ["create", "switch", "delete"] },
+					"name": { "type": "string", "minLength": 1 },
+					"from": { "type": "string" },
+					"switch": { "type": "boolean" },
+					"repo": { "type": "string" } }, "required": ["action", "name"], "additionalProperties": false },
+				"function": "Git::BranchTool",
+				"timeoutSeconds": 150
+			},
+			{
+				"name": "git_stash",
+				"description": "Puts the local changes aside (`push`, with a `message`; `untracked: true` takes new files too) or brings a stash back (`pop` takes it off the list, `apply` keeps it there; `index` as git_branches lists them, 0 the newest).",
+				"class": "write",
+				"group": "git",
+				"inputSchema": { "type": "object", "properties": {
+					"action": { "enum": ["push", "pop", "apply"] },
+					"message": { "type": "string" },
+					"untracked": { "type": "boolean" },
+					"index": { "type": "integer", "minimum": 0 },
+					"repo": { "type": "string" } }, "required": ["action"], "additionalProperties": false },
+				"function": "Git::StashTool",
+				"timeoutSeconds": 150
+			}
+		],
 		"settings": { "schema": "settings.schema.json", "page": "Source Control" },
 		"activities": [
 			{ "id": "ied.git", "title": "Git", "icon": "$(source-control)", "order": 20, "phoneSlot": true, "view": "GitActivity" }
