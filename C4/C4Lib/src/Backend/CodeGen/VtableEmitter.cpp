@@ -126,7 +126,6 @@ namespace Scripting
 		std::string name = "c4.thunk." + callee->getName().str() + "." + (delta < 0 ? "m" + std::to_string(-delta) : std::to_string(delta));
 		llvm::Function* thunk = llvm::Function::Create(callee->getFunctionType(), llvm::Function::InternalLinkage, name, m_MCtx.module());
 		thunk->setAttributes(callee->getAttributes());
-		thunk->addFnAttr(llvm::Attribute::UWTable);
 		m_Thunks[key] = thunk;
 
 		llvm::IRBuilder<> B(llvm::BasicBlock::Create(m_MCtx.context(), "entry", thunk));

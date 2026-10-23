@@ -22,9 +22,9 @@ namespace Platform
 		public Protection protection;   // None unless committed; copy-on-write pages read as writable
 	}
 
-	[link("c4_vm_page_size")] int64 PageSize();
+	[link("c4_vm_page_size")] int64 PageSize() noexcept;
 	// Reservations start at a multiple of this (64 KiB on Windows).
-	[link("c4_vm_allocation_granularity")] int64 AllocationGranularity();
+	[link("c4_vm_allocation_granularity")] int64 AllocationGranularity() noexcept;
 
 	// `size` bytes of addresses and no memory; null when size <= 0 or there is no room.
 	void* Reserve(int64 size);
@@ -43,5 +43,5 @@ namespace Platform
 	// The run of pages holding `address`; false when the address is outside the process's space.
 	bool Query(const void* address, MemoryRegion& region);
 	// Makes code written to memory visible to the processor's instruction fetch: call it before running the code.
-	[link("c4_vm_flush_instruction_cache")] void FlushInstructionCache(const void* address, int64 size);
+	[link("c4_vm_flush_instruction_cache")] void FlushInstructionCache(const void* address, int64 size) noexcept;
 }

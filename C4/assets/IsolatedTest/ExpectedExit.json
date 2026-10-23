@@ -47,6 +47,30 @@
     "mustNotContain": ["SHOULD NOT REACH HERE"],
     "reason": "An exception escaping a finalizer stops the program; it never unwinds through the collector into the caller of the collection."
   },
+  "MemoryGC/PoolKeepException": {
+    "exit": 1,
+    "mustContain": ["an exception escaped a pool's keep callback"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a pool's keep callback stops the program (BUG-367): keep runs while the collection marks, and it never unwinds through the collector into the caller of the collection."
+  },
+  "MemoryGC/PoolReleaseException": {
+    "exit": 1,
+    "mustContain": ["an exception escaped a pool's released callback"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a pool's released callback stops the program (BUG-367): released runs after the collection, and it never unwinds through the collector into the caller of the collection."
+  },
+  "MemoryGC/CollectionResultException": {
+    "exit": 1,
+    "mustContain": ["an exception escaped a collection-result callback"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a collection-result callback stops the program (BUG-367): collection-result callbacks run after the collection, and it never unwinds through the collector into the caller of the collection."
+  },
+  "MemoryGC/RootEnumeratorException": {
+    "exit": 1,
+    "mustContain": ["an exception escaped a root enumerator"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a root enumerator stops the program (BUG-367): root enumerators run while the collection marks, and it never unwinds through the collector into the caller of the collection."
+  },
   "Lifecycle/NoexceptTerminates": {
     "exit": 1,
     "mustContain": ["an exception left a noexcept function"],

@@ -8,12 +8,12 @@ namespace Platform
 	const int64 kNanosecondsPerSecond = 1000000000;
 
 	// The processor's high-resolution counter: monotonic, TickFrequency() ticks per second. The cheapest timestamp.
-	[link("c4_time_ticks")] int64 Ticks();
-	[link("c4_time_tick_frequency")] int64 TickFrequency();
+	[link("c4_time_ticks")] int64 Ticks() noexcept;
+	[link("c4_time_tick_frequency")] int64 TickFrequency() noexcept;
 	// The wall clock: nanoseconds since 1970-01-01 00:00:00 UTC without leap seconds; an int64 spans 1677 to 2262.
-	[link("c4_time_unix_ns")] int64 UnixTimeNs();
+	[link("c4_time_unix_ns")] int64 UnixTimeNs() noexcept;
 	// Seconds to add to UTC for the local time at the instant `unixNs`, daylight saving time as it was then.
-	[link("c4_time_local_offset_seconds")] int32 LocalOffsetSeconds(int64 unixNs);
+	[link("c4_time_local_offset_seconds")] int32 LocalOffsetSeconds(int64 unixNs) noexcept;
 
 	enum class Weekday { Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday }
 

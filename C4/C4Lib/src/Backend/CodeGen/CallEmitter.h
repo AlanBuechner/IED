@@ -46,6 +46,9 @@ namespace Scripting
 		std::vector<const Type*> ParameterTypes(const CallSite& site) const;
 		void AppendArguments(const CallSite& site, std::vector<llvm::Value*>& args);
 		llvm::Value* EmitArgument(const CallSite& site, uint32_t i, const Type* paramType, bool variadicExtra);
+		/// The temporary passed for an argument held in memory - by hidden pointer, or an rvalue for a reference - when
+		/// the argument is built in it (ExprEmitter::BuildsInPlace); null otherwise.
+		llvm::Value* BuiltInPlace(const HIRNode* arg, const Type* paramType);
 		/// A C4 `__init_list<T>` (a value or a pointer to one) as the MSVC std::initializer_list a linked C++ callee
 		/// takes; null when `paramType` is not an init list.
 		llvm::Value* LinkedInitializerList(llvm::Value* list, const Type* paramType);

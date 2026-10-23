@@ -18,12 +18,12 @@ namespace FS
 	const int64 kMaxPathBytes = 98304;
 }
 
-[link("c4_fs_info")] int32 c4_fs_info(const char* path, int32 followLinks, FS::InfoRecord* out);
-[link("c4_fs_set_modified")] int32 c4_fs_set_modified(const char* path, int64 unixNs);
-[link("c4_fs_set_read_only")] int32 c4_fs_set_read_only(const char* path, int32 readOnly);
-[link("c4_fs_copy_file")] int32 c4_fs_copy_file(const char* from, const char* to, int32 replace, char* error, int64 errorCapacity);
-[link("c4_fs_absolute")] int64 c4_fs_absolute(const char* path, char* out, int64 capacity);
-[link("c4_fs_canonical")] int64 c4_fs_canonical(const char* path, char* out, int64 capacity);
+[link("c4_fs_info")] int32 c4_fs_info(const char* path, int32 followLinks, FS::InfoRecord* out) noexcept;
+[link("c4_fs_set_modified")] int32 c4_fs_set_modified(const char* path, int64 unixNs) noexcept;
+[link("c4_fs_set_read_only")] int32 c4_fs_set_read_only(const char* path, int32 readOnly) noexcept;
+[link("c4_fs_copy_file")] int32 c4_fs_copy_file(const char* from, const char* to, int32 replace, char* error, int64 errorCapacity) noexcept;
+[link("c4_fs_absolute")] int64 c4_fs_absolute(const char* path, char* out, int64 capacity) noexcept;
+[link("c4_fs_canonical")] int64 c4_fs_canonical(const char* path, char* out, int64 capacity) noexcept;
 
 namespace FS
 {

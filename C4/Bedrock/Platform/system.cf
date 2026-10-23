@@ -1,11 +1,11 @@
 include "system.ch"
 
-[link("c4_system_processor_info")] void c4_system_processor_info(Platform::ProcessorInfo* info);
-[link("c4_system_memory_status")] void c4_system_memory_status(Platform::MemoryStatus* status);
-[link("c4_system_process_memory")] void c4_system_process_memory(Platform::ProcessMemory* memory);
-[link("c4_system_executable_path")] int64 c4_system_executable_path(void* out, int64 capacity);
-[link("c4_system_get_environment")] int64 c4_system_get_environment(const char* name, void* out, int64 capacity);
-[link("c4_system_set_environment")] int32 c4_system_set_environment(const char* name, const char* value);
+[link("c4_system_processor_info")] void c4_system_processor_info(Platform::ProcessorInfo* info) noexcept;
+[link("c4_system_memory_status")] void c4_system_memory_status(Platform::MemoryStatus* status) noexcept;
+[link("c4_system_process_memory")] void c4_system_process_memory(Platform::ProcessMemory* memory) noexcept;
+[link("c4_system_executable_path")] int64 c4_system_executable_path(void* out, int64 capacity) noexcept;
+[link("c4_system_get_environment")] int64 c4_system_get_environment(const char* name, void* out, int64 capacity) noexcept;
+[link("c4_system_set_environment")] int32 c4_system_set_environment(const char* name, const char* value) noexcept;
 
 namespace Platform
 {

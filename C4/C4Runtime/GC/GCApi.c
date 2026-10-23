@@ -117,7 +117,7 @@ static void notify_results(GCState* gc)
 		const GCEntry* current = gc_map_find(&gc->results, callbacks[i].key);
 		const GCEntry entry = current ? *current : callbacks[i];
 		gc_os_unlock();
-		if (current) ((c4_gc_on_collection_fn)entry.a)(entry.b);
+		if (current) c4_gc_run_collection_result((c4_gc_on_collection_fn)entry.a, entry.b);
 	}
 	gc_mem_free(callbacks);
 }
@@ -160,7 +160,7 @@ static void run_releases(GCState* gc)
 		if (!ready) gc->runningReleases = 0;
 		gc_os_unlock();
 		if (!ready) return;
-		desc.release(desc.user_data, release.object);
+		c4_gc_run_pool_release(desc.release, desc.user_data, release.object);
 	}
 }
 

@@ -1,0 +1,19 @@
+// An exception escaping a collection-result callback stops the program; it never unwinds through the collector into
+// the caller of the collection.
+include "Memory/gc.ch"
+
+int32 g_key = 0;
+
+void Throw(void* userData) { throw 7; }
+
+int32 main() {
+	GC::RegisterCollectionResult((void*)&g_key, Throw, nullptr);
+	try {
+		GC::Collect();
+	} catch (...) {
+		printf("SHOULD NOT REACH HERE: the exception reached the caller of the collection\n");
+		return 2;
+	}
+	printf("SHOULD NOT REACH HERE: the callback did not run\n");
+	return 3;
+}

@@ -14,13 +14,13 @@ namespace GC
 		public void* userData;
 	}
 
-	[link("c4_gc_pool_create")] void* PoolCreate(const PoolDesc* desc);
-	[link("c4_gc_pool_destroy")] void PoolDestroy(void* pool);
-	[link("c4_gc_pool_base")] uint8* PoolBase(void* pool);
-	[link("c4_gc_pool_slot_size")] uint64 PoolSlotSize(void* pool);
-	[link("c4_gc_pool_occupy")] bool PoolOccupy(void* pool, void* object);
-	[link("c4_gc_pool_vacate")] bool PoolVacate(void* pool, void* object);
-	[link("c4_gc_pool_occupied")] bool PoolOccupied(void* pool, const void* object);
+	[link("c4_gc_pool_create")] void* PoolCreate(const PoolDesc* desc) noexcept;
+	[link("c4_gc_pool_destroy")] void PoolDestroy(void* pool) noexcept;
+	[link("c4_gc_pool_base")] uint8* PoolBase(void* pool) noexcept;
+	[link("c4_gc_pool_slot_size")] uint64 PoolSlotSize(void* pool) noexcept;
+	[link("c4_gc_pool_occupy")] bool PoolOccupy(void* pool, void* object) noexcept;
+	[link("c4_gc_pool_vacate")] bool PoolVacate(void* pool, void* object) noexcept;
+	[link("c4_gc_pool_occupied")] bool PoolOccupied(void* pool, const void* object) noexcept;
 
 	static bool KeepThroughOptions(void* user, void* object) { return ((PoolState*)user)->options.keep(object); }
 

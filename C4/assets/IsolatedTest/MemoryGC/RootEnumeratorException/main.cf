@@ -1,0 +1,19 @@
+// An exception escaping a root enumerator stops the program: enumerators run while the collection marks, with every
+// other thread stopped, and must not unwind through the collector into the caller of the collection.
+include "Memory/gc.ch"
+
+int32 g_key = 0;
+
+void Enumerate(void* userData, GC::VisitRoot visit, void* visitContext) { throw 7; }
+
+int32 main() {
+	GC::RegisterRootEnumerator((void*)&g_key, Enumerate, nullptr);
+	try {
+		GC::Collect();
+	} catch (...) {
+		printf("SHOULD NOT REACH HERE: the exception reached the caller of the collection\n");
+		return 2;
+	}
+	printf("SHOULD NOT REACH HERE: the enumerator did not run\n");
+	return 3;
+}

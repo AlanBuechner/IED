@@ -1,6 +1,6 @@
 include "sourceline.ch"
 
-[link("c4_source_line_of")] int32 c4_source_line_of(const void* code, void* file, int32 capacity, int32* line);
+[link("c4_source_line_of")] int32 c4_source_line_of(const void* code, void* file, int32 capacity, int32* line) noexcept;
 
 namespace Platform
 {

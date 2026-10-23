@@ -69,10 +69,12 @@ namespace Scripting
 		/// (a receiver, a member access, a `const T&` argument). It is destroyed when its statement ends.
 		const LValue* Temporary(const HIRNode* fresh);
 
-		/// `value`, then the temporaries created since `mark` destroyed and zeroed: the end of a full
-		/// expression inside a statement (a condition, a loop step). They stay with their statement, so an
-		/// exception later in it finds them zero.
+		/// `value` in a block that owns the temporaries created since `mark`: the end of a full expression inside a
+		/// statement (a condition, a loop step, a field's initializer), which destroys them on every path.
 		const HIRNode* EndFullExpression(const HIRNode* value, size_t mark);
+		/// The temporaries created since `mark` become `block`'s: zeroed as it starts, destroyed as it ends on every
+		/// path; nothing else holds them.
+		void OwnTemporaries(BlockNode* block, size_t mark);
 		/// The same for a declaration that is not a statement of its own (a for-loop init): the statements
 		/// destroying and zeroing those temporaries, appended to `region`.
 		void EndTemporaries(BlockNode* region, size_t mark);

@@ -390,7 +390,7 @@ What changed, for the WPs that build on it:
   [runtime/01](../runtime/01-memory-and-gc.md#2-the-collector)): 64 MiB arenas with a two-level page map
   (O(1) lookup of any pointer, interior ones included), headerless objects in 72 size classes plus large
   objects, an explicit mark stack, ordered finalizers that run after the collection through
-  `GC/GCFinalizerShim.cpp` (an escaping exception is fatal), counted pins that are roots, hash-map hook
+  `GC/GCCallbacks.cpp` (an exception escaping one, or a GC callback, is fatal), counted pins that are roots, hash-map hook
   tables with no limit, pacing by live bytes (`c4_gc_set_percent`, 4 MiB minimum), returning idle pages to
   the OS, fatal out-of-memory. `GCPlatformWin32.c` is the only platform file (B31 adds a POSIX one; B29 added
   thread registration and per-thread caches, `GCThreads`). Raw memory and byte helpers moved to
@@ -1731,6 +1731,26 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   with one symbol (45071 symbols / 13532) and hashes its name sets with xxh3. `-ftime` prints the steps of `lower`.
   IED server, interleaved A/B: `lower` 0.342 s / 0.289 s; bodies 0.14 / 0.13, thunks 0.034 / 0.024, reflection
   0.045 / 0.036.
+- **Done notes (step 16):** leaner IR from the emitter ([compiler/04](../compiler/04-codegen-and-abi.md)), and the
+  runtime's sources compiled on every processor. A slot is zeroed where its declaration runs, not also at entry;
+  blocks after a `return` or `throw` that no label reaches are deleted; every return shares one chain of cleanup
+  exits; whole-program nounwind inference (`UnwindInference`) turns invokes of callees that cannot unwind into calls
+  and drops the pads only they reached, resting on Bedrock's `[link]` runtime declarations now marked `noexcept`
+  (all but the ones that run C4 code: reflection's invoke, unloading a reflection source, the script host) and on the collector's callbacks running behind catch-alls (BUG-367, found
+  on the way: an exception escaping a pool's `keep` or `released`, a root enumerator or a collection-result callback
+  unwound through the collector and left it half done) and on every definition having an unwind table (BUG-368:
+  `addFnAttr(UWTable)` made none, so a frame that cannot throw and has no personality broke a fault's unwind to a
+  debug script host's `__try`); a call result or a construction is built where it goes (a
+  declaration's slot, a hidden-pointer argument, a reference argument's temporary); a full expression's temporaries
+  belong to it alone, not also to its statement; a hidden-pointer parameter's slot is the caller's temporary
+  (`noalias`, `dead_on_return`). IED server, its whole program's IR before optimization: 813,028 instructions /
+  606,983 (invokes 50,289 / 2,275, cleanup pads 9,923 / 2,851, `llvm.lifetime` pairs 16,960 / 6,273, allocas 99,062
+  / 82,981); its machine code 6.46 MB / 5.43 MB. Cold -O3 build (interleaved, three runs each): CPU 96.4 s / 93.8 s,
+  wall 8.6 s / 8.5 s (within the noise of a busy machine); cold -O0 (two each): CPU 15.0 s / 13.4 s, the partitions'
+  assembly 11.6 s / 9.1 s, wall 2.13 s / 1.97 s. The runtime on an empty cache: 17.75 s / 9.77 s. The Bedrock benchmark
+  at -O3: 251.0 ms / 247.2 ms. What is left of the -O3 CPU is LLVM optimizing and compiling what inlining made,
+  doubled by the partitions' imports (with none: 41 CPU-s, but the benchmark split into partitions runs 582 ms
+  where 100-instruction imports run 328 ms and the whole program 254 ms).
 - **Next:** what is left of `lower` (0.29 s): emitting the bodies by partition (on threads), imports 0.05 s (their
   planning and copies, on threads), reflection 0.036 s (serial: built chunk by chunk on threads, each chunk's type
   texts and record tables adopted where the image first uses them, it would be about 0.01 s), thunks 0.024 s, the

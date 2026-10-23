@@ -240,33 +240,44 @@ namespace Scripting
 	const HIRNode* Lifecycle::EndFullExpression(const HIRNode* value, size_t mark)
 	{
 		if (m_Ctx.pendingTemporaries.size() <= mark) return value;
+		// The full expression is a block of its own that owns the temporaries it made: they are destroyed as it ends,
+		// on every path, and its statement no longer holds them.
+		BlockNode* full = m_Ctx.out->NewNode<BlockNode>(nullptr);
+		OwnTemporaries(full, mark);
 		const Type* t = value->type;
-		const bool hasValue = t && t->GetKind() != TypeKind::Void;
 		auto* seq = m_Ctx.out->NewNode<SequenceNode>(t);
-		LValue resultLv;
-		if (hasValue)
+		seq->steps.push_back(full);
+		if (!t || t->GetKind() == TypeKind::Void)
 		{
-			resultLv.kind = LValue::Kind::Slot; resultLv.type = t; resultLv.slot = m_Ctx.AllocSlot(t, "__full", SlotClass::Temp);
-			seq->steps.push_back(m_Ctx.out->NewNode<StoreNode>(m_Ctx.NewLValue(resultLv), value));
+			full->stmts.push_back(m_Ctx.out->NewNode<ExprStmtNode>(value));
+			return seq;
 		}
-		else seq->steps.push_back(value);
-		DestroyTemporaries(seq->steps, mark);
-		if (hasValue) seq->steps.push_back(m_Ctx.out->NewNode<LoadNode>(t, m_Ctx.NewLValue(resultLv)));
+		LValue resultLv; resultLv.kind = LValue::Kind::Slot; resultLv.type = t; resultLv.slot = m_Ctx.AllocSlot(t, "__full", SlotClass::Temp);
+		const LValue* result = m_Ctx.NewLValue(resultLv);
+		full->stmts.push_back(m_Ctx.out->NewNode<StoreNode>(result, value));
+		seq->steps.push_back(m_Ctx.out->NewNode<LoadNode>(t, result));
 		return seq;
+	}
+
+	void Lifecycle::OwnTemporaries(BlockNode* block, size_t mark)
+	{
+		for (size_t i = mark; i < m_Ctx.pendingTemporaries.size(); ++i)
+		{
+			const auto& temp = m_Ctx.pendingTemporaries[i];
+			block->stmts.push_back(m_Ctx.out->NewNode<LocalDeclNode>(temp.slot, temp.type, nullptr));
+			LValue lv; lv.kind = LValue::Kind::Slot; lv.type = temp.type; lv.slot = temp.slot;
+			ScheduleDestroy(block, m_Ctx.NewLValue(lv));
+		}
+		m_Ctx.pendingTemporaries.erase(m_Ctx.pendingTemporaries.begin() + mark, m_Ctx.pendingTemporaries.end());
 	}
 
 	void Lifecycle::PlaceTemporaries(BlockNode* block, size_t mark)
 	{
-		// The statement's nodes move into a block of their own that starts by zeroing each temporary and
-		// destroys them when the statement ends, on every path. Cleanups the statement registers for the
-		// enclosing scope (a declared variable's destruction, a `defer`) stay in the enclosing block, after it.
+		// The statement's nodes move into a block of their own that owns its temporaries. Cleanups the statement
+		// registers for the enclosing scope (a declared variable's destruction, a `defer`) stay in the enclosing
+		// block, after it.
 		BlockNode* statement = m_Ctx.out->NewNode<BlockNode>(nullptr);
-		for (const auto& temp : m_Ctx.pendingTemporaries)
-		{
-			statement->stmts.push_back(m_Ctx.out->NewNode<LocalDeclNode>(temp.slot, temp.type, nullptr));
-			LValue lv; lv.kind = LValue::Kind::Slot; lv.type = temp.type; lv.slot = temp.slot;
-			ScheduleDestroy(statement, m_Ctx.NewLValue(lv));
-		}
+		OwnTemporaries(statement, 0);
 		std::vector<HIRNode*> enclosingCleanups;
 		for (size_t i = mark; i < block->stmts.size(); ++i)
 		{

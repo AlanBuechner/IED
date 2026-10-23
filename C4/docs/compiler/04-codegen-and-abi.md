@@ -35,8 +35,8 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 
 `Lower` is one call per step: `LowerTypes` (1), `DeclareWrittenFunctions` (2), `EmitReachable` (4), the
 `TestHarnessEmitter` (6) or `EmitEntryPoint` (7), `EmitReachable` again for what those reference,
-`EmitStaticState` (invoke thunks, 5 and 3), `EmitReflection` (the reflection image), `FinishModule` (8, 9) and
-`Verify` (10).
+`EmitStaticState` (invoke thunks, 5 and 3), `EmitReflection` (the reflection image), the imports of a split
+program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModule` (8, 9) and `Verify` (10).
 
 1. **Types.** Lower every object/union to a named struct, created opaque (so recursive and incomplete types
    are legal) and filled from the model's field offsets.
@@ -137,12 +137,18 @@ link with clang-compiled C/C++ in both directions. All of it lives in `Abi`:
     `[sret?] [this] [params...]` with the free-function return rules - the receiver is an ordinary
     leading argument of a C function.
   - **Free / static function, funcptr call:** `[sret?] [params...]`.
-- `FunctionEmitter` reinterprets register-passed aggregates back into the object slot and loads
-  hidden-pointer aggregates through the pointer; the sret pointer is `IRContext::Sret()`.
-- A call's sret result is built where it goes: `return f(...)` passes the function's own `Sret()` (copy elision,
-  `RegionEmitter::ResultCall`), and any other call gets a temporary whose `llvm.lifetime` spans the call and the
-  read of the result, so calls that never run together share one stack slot (BUG-363). A result read through its
-  address later (`materialize`) keeps a temporary of its own for the whole function.
+- `FunctionEmitter` reinterprets register-passed aggregates back into the object slot. A hidden-pointer
+  parameter's slot IS the caller's temporary (`FunctionEmitter::HeldParameters`), marked `noalias` and
+  `dead_on_return`: as in MSVC the callee owns that memory and destroys the object, and every caller passes
+  a temporary of its own for the call (a materialized copy, or the value built in it), never storage it reads
+  again. A `volatile` parameter is still copied into a slot of its own. The sret pointer is `IRContext::Sret()`.
+- An aggregate rvalue that is a call returning in memory or a `T(...)` construction is built where it goes
+  (copy elision, `ExprEmitter::BuildsInPlace` / `EmitInPlace`): `return` builds it at the function's own
+  `Sret()`, a declaration `T v = ...` in `v`'s slot (unless `v` is `volatile`), a hidden-pointer argument or an
+  rvalue bound to a reference parameter in the temporary passed (`CallEmitter::BuiltInPlace`; not for a linked
+  C++ callee, whose initializer lists are rebuilt). Any other call gets a temporary whose `llvm.lifetime` spans
+  the call and the read of the result, so calls that never run together share one stack slot (BUG-363). A
+  result read through its address later (`materialize`) keeps a temporary of its own for the whole function.
 - `-mstackrealign` is always passed to clang.
 
 The model is the size authority (`Type::GetSize`); `Abi` only classifies. Interop tests under
@@ -199,8 +205,8 @@ Emission:
 | `Ternary`, `&&`, `||` | three blocks + PHI, insert point left at the join |
 | `New` | `c4_alloc_typed(size, align, type)` (zeroed; `type` the type's census record, `CensusTypes`) or, for placement, the given storage zeroed with a store; every vptr; constructor (through `CallEmitter`) with `this` = the new pointer or positional field fill; `c4_gc_register_finalizer` with the type's full destruction when it has one (never for placement) |
 | `Relocate` | `memmove` of the object's bytes, then the source zeroed with its own vptrs |
-| `Delete` | `c4_free(p)` - the runtime runs the registered finalizer once, then frees |
-| `Construct` | entry-block temporary, zero-init at the use site, every vptr, constructor or field fill, yields the value |
+| `Delete` | `c4_free(p)` - the runtime runs the registered finalizer once, then frees; a plain call (an exception escaping a finalizer is fatal) |
+| `Construct` | zero-init, every vptr, constructor or field fill (`ObjectEmitter::ConstructAt`): where the value goes when it is built in place, else in an entry-block temporary whose value it yields |
 | `InitList` | entry-block element array + `{ptr, size}` aggregate |
 | `For`/`While`/`If`/`Switch` | structural blocks pre-created before the body; every break/continue/fallthrough target is defined with the cleanup depth of its statement; a `for` init block is a frame around the whole loop |
 | `Goto` / `Label` | the labels of a block are created when the block starts; a backward goto exits to the depth recorded at the label, a forward goto to the depth of the statement that contains it in the label's block; falling through into a label branches to it |
@@ -224,7 +230,10 @@ insert point.
   the funclet before running outer cleanups). The entries are popped while their exit is emitted, so the
   code of a cleanup sees exactly the scopes outside it, then restored for the code after the jump.
 - **Return.** The value is computed first, staged in an entry-block slot (or the sret pointer) because SSA
-  values do not survive a `catchret`, then every cleanup up to the function scope runs, then `ret`.
+  values do not survive a `catchret`, then the return branches to the function's one way out
+  (`RegionEmitter::ReturnPathFrom`): a chain of `return.cleanup` blocks, one per cleanup or handler entry,
+  each emitted once with only the scopes outside it visible, ending in the one block that loads the staged
+  value and returns. Every return inside an entry shares that entry's exit instead of a copy of its own.
 - **Exceptional exits.** `IRContext::UnwindTarget` walks the stack downwards: the innermost try gives its
   catchswitch, the innermost cleanup gives its `cleanuppad`, created the first time an exception edge
   needs it (`RegionEmitter::CleanupPadFor`). The pad runs a second copy of the cleanup body with only the
@@ -234,7 +243,13 @@ insert point.
 - **Calls.** `IRContext::Call` is the only place a call instruction is created. It adds the `funclet`
   bundle when the insert point is inside a catchpad or a cleanup pad, and emits an `invoke` whenever the
   callee may throw and an unwind target exists. Runtime calls that cannot reach user code (`c4_alloc`,
-  finalizer registration, the `va_*` intrinsics) are plain calls.
+  finalizer registration, `c4_free`, the `va_*` intrinsics) are plain calls; every runtime function the
+  compiler declares is `nounwind`. After the whole program is emitted, `InferNoUnwind` turns the invokes of
+  callees that cannot unwind into calls (see [Exceptions](#exceptions)).
+- **Slots.** A slot is zeroed (with its vptrs) where its declaration runs, or initialized there; a slot no
+  declaration starts (a temporary the lifecycle reads, a drop flag) is zeroed once in the entry block
+  (`IRContext::ZeroUndeclaredSlots`), so no local ever holds stack garbage and none is zeroed twice. Blocks
+  that no label made live after a `return` or `throw` are deleted with the body.
 - **Temporaries.** Every alloca - slots, sret buffers, materialized arguments, construct temporaries,
   init-list arrays, the return slot, throw buffers - is created at the top of the entry block. An alloca
   anywhere else is a dynamic stack allocation that grows on each loop iteration and breaks clang's frame
@@ -246,8 +261,11 @@ C4 exceptions use the same native Windows EH that clang emits for C++ on MSVC:
 
 - `throw v` stores the value in an entry-block buffer and calls `_CxxThrowException(&v, ThrowInfo)`
   through the call brick (an invoke inside any cleanup or try).
-- Every definition gets personality `__CxxFrameHandler3` and `uwtable` up front (an exception-free
-  function ignores them).
+- Every definition gets personality `__CxxFrameHandler3` up front (an exception-free function ignores it), and
+  `ApplyTarget` gives every definition an unwind table (`setUWTableKind(Default)`; `addFnAttr(UWTable)` makes the
+  attribute with kind None, no table), as clang does on Windows x64: a fault caught by a `__try` (a script host's
+  guarded call), a C++ exception, a debugger or a profiler unwinds through frames that cannot throw themselves,
+  and a frame without one breaks the walk (BUG-368).
 - A try is a `catchswitch` whose unwind destination is whatever the try itself would unwind to; each clause
   is a `catchpad` `[TypeDescriptor, adjectives, slot]`: adjectives `8` for a reference clause, `1` for a
   const referent or pointee, and `catch (...)` is `[null, 64, null]`. The frame handler copies the value
@@ -261,8 +279,21 @@ C4 exceptions use the same native Windows EH that clang emits for C++ on MSVC:
   each CatchableType's copy function is the copy of that type or base (member convention: `this`, source),
   0 where the bytes suffice, and the ThrowInfo destructor is the type's full destruction.
 - A `noexcept` function's body is emitted inside a catch-all funclet (`RegionEmitter::EmitNoexceptBody`)
-  whose handler calls `c4_noexcept_violation` (fatal message, exit 1). A call to a `noexcept` callee is a
-  plain `call`, never an `invoke`.
+  whose handler calls `c4_noexcept_violation` (fatal message, exit 1). Its function is `nounwind`, and a call
+  to it is a plain `call`, never an `invoke`.
+- **Nounwind inference** (`UnwindInference.cpp`), over every partition once the program is emitted: a
+  function can unwind when it calls through a pointer, calls a declaration no partition defines that is not
+  `nounwind`, or calls a function of the program that can unwind (a fixed point over the call graph; a
+  partition's local functions are its own). The rest are marked `nounwind` wherever they are defined or
+  declared, each invoke of one becomes a call that continues in its own block, and the cleanup pads only
+  those invokes reached are deleted. LLVM's function-attrs infers the same inside one module once it
+  optimizes; this sees the whole of a split program and runs at `-O0` too. It rests on the runtime's
+  declarations saying what they do: the prelude and Bedrock mark every `[link]` runtime function `noexcept`
+  except the ones that run C4 code in the caller's thread (`reflect_function_invoke`,
+  `reflect_method_invoke`, `c4_reflect_unload_source`, the `c4s_*` script host); finalizers, exit
+  destructors and the collector's callbacks run behind catch-alls that make an escaping exception fatal
+  ([runtime/01](../runtime/01-memory-and-gc.md)). In the IED server it turns 48,000 of 50,300 invokes into
+  calls.
 - `EHRuntime.cpp` installs a terminate handler: an uncaught exception prints a fatal message and exits 1. Both
   fatal paths report through `c4_report_uncaught_exception`, a function of its own a debugger can stop on.
 

@@ -256,30 +256,37 @@ namespace Testing
 		for (const auto& node : fn.m_Nodes)
 			if (node->kind == HIRNode::Kind::If) branch = static_cast<const IfNode*>(node);
 		TEST_ASSERT(branch != nullptr && branch->cond && branch->cond->kind == HIRNode::Kind::Sequence);
+		// The condition is a block of its own that destroys the temporary as it ends, on every path; nothing else does.
 		const auto* seq = static_cast<const SequenceNode*>(branch->cond);
+		TEST_ASSERT(!seq->steps.empty() && seq->steps.front()->kind == HIRNode::Kind::Block);
 		bool destroyedInCondition = false;
-		for (const HIRNode* step : seq->steps)
-			if (step->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(step)->callee == Record(model, "Res_Delete"))
-				destroyedInCondition = true;
+		for (const HIRNode* s : static_cast<const BlockNode*>(seq->steps.front())->stmts)
+			destroyedInCondition = destroyedInCondition || s->kind == HIRNode::Kind::Defer;
 		TEST_ASSERT(destroyedInCondition);
+		size_t destroys = 0;
+		for (const auto& node : fn.m_Nodes)
+			if (node->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(node)->callee == Record(model, "Res_Delete")) ++destroys;
+		TEST_ASSERT_EQ(destroys, size_t(1));
 	}
 
 	void LifecycleTest::NoexceptCalleesAreNotInvoked()
 	{
-		// A noexcept callee never unwinds into its caller: the caller calls it without an unwind edge.
+		// A noexcept callee never unwinds into its caller, nor does one that cannot (UnwindInference): the caller calls
+		// them without an unwind edge.
 		CompilerInstance compiler;
 		auto& model = MakeModel(compiler,
 			"class Res { public int32 id; [operator(\"delete\")] public void Delete() { id = 0; } }\n"
 			"int32 Quiet() noexcept { return 1; }\n"
-			"int32 Loud() { return 2; }\n"
-			"int32 main() { Res r; return Quiet() + Loud(); }\n");
+			"int32 Plain() { return 3; }\n"
+			"int32 Loud(int32 v) { if (v > 1) throw v; return v; }\n"
+			"int32 main() { Res r; return Quiet() + Plain() + Loud(2); }\n");
 		TEST_ASSERT(Record(model, "Quiet")->isNoexcept);
 		TEST_ASSERT(!Record(model, "Loud")->isNoexcept);
 		llvm::LLVMContext ctx;
 		CodeGenDriver driver(ctx);
 		std::string error;
 		TEST_ASSERT(driver.Lower(model, "main", &error));
-		bool quietInvoked = false, loudInvoked = false;
+		bool quietInvoked = false, plainInvoked = false, loudInvoked = false;
 		for (llvm::Function& f : *driver.module())
 			for (llvm::BasicBlock& bb : f)
 				for (llvm::Instruction& inst : bb)
@@ -288,9 +295,10 @@ namespace Testing
 						if (!invoke->getCalledFunction()) continue;
 						llvm::StringRef callee = invoke->getCalledFunction()->getName();
 						quietInvoked = quietInvoked || callee.starts_with("Quiet");
+						plainInvoked = plainInvoked || callee.starts_with("Plain");
 						loudInvoked = loudInvoked || callee.starts_with("Loud");
 					}
-		TEST_ASSERT(!quietInvoked);
+		TEST_ASSERT(!quietInvoked && !plainInvoked);
 		TEST_ASSERT(loudInvoked); // r's destructor must run if Loud throws
 	}
 } // namespace Testing

@@ -300,6 +300,19 @@ namespace Scripting
 		return value;
 	}
 
+	bool ExprEmitter::BuildsInPlace(const HIRNode* value, const Type* type)
+	{
+		if (!value || !type || TypeHandle::UnwrapToValue(value->type) != TypeHandle::UnwrapToValue(type)) return false;
+		if (value->kind == HIRNode::Kind::Construct) return true;
+		return value->kind == HIRNode::Kind::Call && CallEmitter(m_Ctx, *this).ReturnsInMemory(static_cast<const CallNode*>(value));
+	}
+
+	void ExprEmitter::EmitInPlace(const HIRNode* value, llvm::Value* storage)
+	{
+		if (value->kind == HIRNode::Kind::Construct) ObjectEmitter(m_Ctx, *this).ConstructAt(static_cast<const ConstructNode*>(value), storage);
+		else CallEmitter(m_Ctx, *this).EmitInto(static_cast<const CallNode*>(value), storage);
+	}
+
 	llvm::Value* ExprEmitter::Load(llvm::Type* type, llvm::Value* addr, MemoryAccess access)
 	{
 		return Attach(m_Ctx.builder().CreateLoad(type, addr, access.isVolatile), access.aliasTag);

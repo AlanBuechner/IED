@@ -51,10 +51,17 @@ namespace Scripting
 		// --- slots -----------------------------------------------------------------------------------
 		// The builder, writing at the end of the function's entry block.
 		void StartAt(llvm::BasicBlock& entry);
-		// One alloca per slot in the entry block, zero-initialized (static locals are module globals).
-		void CreateSlotAllocas();
+		// One alloca per slot in the entry block (static locals are module globals); ZeroUndeclaredSlots zeroes them.
+		// A slot `held` names (by slot) is that memory instead: a by-value parameter the caller handed over.
+		void CreateSlotAllocas(const std::vector<llvm::Value*>& held);
 		// Zero a local slot again (with its vptrs): a declaration without an initializer, on every pass.
 		void ResetSlot(uint32 slot);
+		// The slot's declaration is emitted (RegionEmitter::EmitLocalDecl): it starts zeroed or initialized there, and
+		// no use comes before it (a goto may not cross a declaration, a case is a block of its own).
+		void NoteDeclared(uint32 slot) { m_Declared[slot] = true; }
+		// After the body: zeroes, with its vptrs, at entry, every local slot no declaration starts (a temporary the
+		// lifecycle reads, a drop flag): no local ever holds stack garbage. A parameter is stored at entry.
+		void ZeroUndeclaredSlots();
 		llvm::Value* SlotAlloca(uint32 slot) const { return m_SlotAllocas[slot]; }
 		bool SlotIsStatic(uint32 i) const { return m_Hir.GetSlot(i).cls == SlotClass::Static; }
 
@@ -114,6 +121,9 @@ namespace Scripting
 		const HIRFunction& m_Hir;
 		std::unique_ptr<llvm::IRBuilder<>> m_B; // created in StartAt (needs the entry block first)
 		std::vector<llvm::Value*> m_SlotAllocas;
+		std::vector<bool> m_Declared;                 // NoteDeclared's, by slot
+		llvm::Instruction* m_LastSlotAlloca = nullptr; // where entry zeroing goes: after the slots, before the parameters' stores
+		llvm::DebugLoc m_PrologueLocation;
 		llvm::Value* m_This = nullptr;
 		llvm::DISubprogram* m_DebugScope = nullptr;
 		llvm::Value* m_Sret = nullptr;

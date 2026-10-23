@@ -1,13 +1,13 @@
 include "local.ch"
 include "Text/stringbuilder.ch"
 
-[link("c4_local_listen")] void* c4_local_listen(const char* name, char* error, int64 errorCapacity);
-[link("c4_local_accept")] void* c4_local_accept(void* listener, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity);
-[link("c4_local_connect")] void* c4_local_connect(const char* name, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity);
-[link("c4_local_send")] int64 c4_local_send(void* pipe, const void* data, int64 size, int32 timeoutMs);
-[link("c4_local_receive")] int64 c4_local_receive(void* pipe, void* buffer, int64 capacity, int32 timeoutMs);
-[link("c4_local_close")] void c4_local_close(void* pipe);
-[link("c4_local_user_id")] int64 c4_local_user_id(char* out, int64 capacity);
+[link("c4_local_listen")] void* c4_local_listen(const char* name, char* error, int64 errorCapacity) noexcept;
+[link("c4_local_accept")] void* c4_local_accept(void* listener, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity) noexcept;
+[link("c4_local_connect")] void* c4_local_connect(const char* name, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity) noexcept;
+[link("c4_local_send")] int64 c4_local_send(void* pipe, const void* data, int64 size, int32 timeoutMs) noexcept;
+[link("c4_local_receive")] int64 c4_local_receive(void* pipe, void* buffer, int64 capacity, int32 timeoutMs) noexcept;
+[link("c4_local_close")] void c4_local_close(void* pipe) noexcept;
+[link("c4_local_user_id")] int64 c4_local_user_id(char* out, int64 capacity) noexcept;
 
 namespace Net
 {

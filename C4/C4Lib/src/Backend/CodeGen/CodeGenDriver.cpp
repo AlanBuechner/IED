@@ -12,6 +12,7 @@
 #include "Backend/CodeGen/ImportPlanner.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/CodeGen/UseSites.h"
+#include "Backend/CodeGen/UnwindInference.h"
 #include "Backend/Reflection/ReflectionTables.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Script/ScriptModulePasses.h"
@@ -631,9 +632,18 @@ namespace Scripting
 		Timed("reflection", step);
 		if (m_Placement && !EmitImports(model, errorMessage)) return false;
 		Timed("imports", step);
+		InferNoUnwind(Modules(), m_Lowering.Pool());
+		Timed("nounwind", step);
 		FinishModule(model);
 		Timed("finish", step);
 		return m_VerifyLater || Verify(errorMessage);
+	}
+
+	std::vector<llvm::Module*> CodeGenDriver::Modules()
+	{
+		std::vector<llvm::Module*> modules;
+		for (unsigned i = 0; i < PartitionCount(); ++i) modules.push_back(&PartitionModule(i));
+		return modules;
 	}
 
 	void CodeGenDriver::Timed(const char* step, std::chrono::steady_clock::time_point& since)

@@ -130,6 +130,8 @@ namespace Scripting
 		ModuleContext& mc = m_Ctx.mctx();
 		Abi& abi = mc.abi();
 		const HIRNode* arg = site.args[i];
+		const bool linked = site.callee && site.callee->isLinked; // a C++ callee's initializer lists are rebuilt below
+		if (llvm::Value* built = linked ? nullptr : BuiltInPlace(arg, paramType)) return built;
 		llvm::Value* v = m_Expr.Emit(arg);
 		if (paramType && paramType->GetKind() == TypeKind::Reference)
 		{
@@ -149,6 +151,18 @@ namespace Scripting
 			return m_Ctx.builder().CreateLoad(llvm::IntegerType::get(mc.context(), intSize * 8), m_Ctx.Materialize(v, mc.Lower(paramType)));
 		if (abi.PassesByHiddenPtr(paramType)) return m_Ctx.Materialize(v, mc.Lower(paramType));
 		return v;
+	}
+
+	llvm::Value* CallEmitter::BuiltInPlace(const HIRNode* arg, const Type* paramType)
+	{
+		if (!paramType || dynamic_cast<const AddressOfNode*>(arg)) return nullptr;
+		const bool reference = paramType->GetKind() == TypeKind::Reference;
+		const Type* held = reference ? TypeHandle::UnwrapToValue(static_cast<const ReferenceType*>(paramType)->GetReferentType()) : paramType;
+		if (!reference && !m_Ctx.mctx().abi().PassesByHiddenPtr(held)) return nullptr;
+		if (!m_Expr.BuildsInPlace(arg, held)) return nullptr;
+		llvm::Value* temporary = m_Ctx.EntryAlloca(m_Ctx.mctx().Lower(held));
+		m_Expr.EmitInPlace(arg, temporary);
+		return temporary;
 	}
 
 	llvm::Value* CallEmitter::LinkedInitializerList(llvm::Value* list, const Type* paramType)

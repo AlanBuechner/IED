@@ -46,13 +46,13 @@ namespace Platform
 		Avx512Bw, Avx512Vl, Vpclmulqdq
 	}
 
-	[link("c4_system_processor_features")] uint64 c4_system_processor_features();
+	[link("c4_system_processor_features")] uint64 c4_system_processor_features() noexcept;
 	bool HasProcessorFeature(ProcessorFeature feature) { return ((c4_system_processor_features() >> (uint64)(int32)feature) & 1u) != 0u; }
 
 	ProcessorInfo GetProcessorInfo();
 	MemoryStatus GetMemoryStatus();
 	ProcessMemory GetProcessMemory();
-	[link("c4_system_process_id")] uint64 ProcessId();
+	[link("c4_system_process_id")] uint64 ProcessId() noexcept;
 	// The running program's file; empty when the system cannot say.
 	FS::Path ExecutablePath();
 
@@ -67,6 +67,6 @@ namespace Platform
 	bool RemoveEnvironmentVariable(const char* name);
 
 	// `count` bytes from the system's cryptographically secure generator (keys, nonces, masks); false when it fails.
-	[link("c4_system_random_bytes")] int32 c4_system_random_bytes(void* out, int64 count);
+	[link("c4_system_random_bytes")] int32 c4_system_random_bytes(void* out, int64 count) noexcept;
 	bool RandomBytes(void* out, int64 count) { return c4_system_random_bytes(out, count) == 0; }
 }

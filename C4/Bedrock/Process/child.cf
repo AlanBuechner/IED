@@ -25,15 +25,15 @@ namespace Process
 	}
 }
 
-[link("c4_process_start")] int32 c4_process_start(const Process::StartRecord* start, Process::Handles* out, char* error, int64 errorCapacity);
-[link("c4_process_write")] int64 c4_process_write(Process::Handles* process, const void* data, int64 size, int32 timeoutMs);
-[link("c4_process_read")] int64 c4_process_read(Process::Handles* process, int32 stream, void* buffer, int64 capacity, int32 timeoutMs);
-[link("c4_process_read_any")] int64 c4_process_read_any(Process::Handles* process, void* buffer, int64 capacity, int32 timeoutMs, int32* stream);
-[link("c4_process_close_pipe")] void c4_process_close_pipe(Process::Handles* process, int32 stream);
-[link("c4_process_wait")] int64 c4_process_wait(Process::Handles* process, int32 timeoutMs);
-[link("c4_process_kill")] int32 c4_process_kill(Process::Handles* process);
-[link("c4_process_resize")] int32 c4_process_resize(Process::Handles* process, int32 columns, int32 rows);
-[link("c4_process_close")] void c4_process_close(Process::Handles* process);
+[link("c4_process_start")] int32 c4_process_start(const Process::StartRecord* start, Process::Handles* out, char* error, int64 errorCapacity) noexcept;
+[link("c4_process_write")] int64 c4_process_write(Process::Handles* process, const void* data, int64 size, int32 timeoutMs) noexcept;
+[link("c4_process_read")] int64 c4_process_read(Process::Handles* process, int32 stream, void* buffer, int64 capacity, int32 timeoutMs) noexcept;
+[link("c4_process_read_any")] int64 c4_process_read_any(Process::Handles* process, void* buffer, int64 capacity, int32 timeoutMs, int32* stream) noexcept;
+[link("c4_process_close_pipe")] void c4_process_close_pipe(Process::Handles* process, int32 stream) noexcept;
+[link("c4_process_wait")] int64 c4_process_wait(Process::Handles* process, int32 timeoutMs) noexcept;
+[link("c4_process_kill")] int32 c4_process_kill(Process::Handles* process) noexcept;
+[link("c4_process_resize")] int32 c4_process_resize(Process::Handles* process, int32 columns, int32 rows) noexcept;
+[link("c4_process_close")] void c4_process_close(Process::Handles* process) noexcept;
 
 namespace Process
 {

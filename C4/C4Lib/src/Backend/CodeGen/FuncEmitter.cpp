@@ -63,7 +63,6 @@ namespace Scripting
 		const std::string name = std::string(call.mangledName.c_str()) + "_onepointer";
 		if (llvm::Function* existing = mc.module().getFunction(name)) return existing;
 		llvm::Function* adapter = llvm::Function::Create(method->getFunctionType(), llvm::Function::InternalLinkage, name, &mc.module());
-		adapter->addFnAttr(llvm::Attribute::UWTable);
 		llvm::IRBuilder<> B(llvm::BasicBlock::Create(mc.context(), "entry", adapter));
 		llvm::Value* object = B.CreateAlloca(mc.Lower(closure), nullptr, "closure");
 		B.CreateStore(adapter->getArg(0), object); // the closure's one field, at offset 0
@@ -85,7 +84,6 @@ namespace Scripting
 		const std::string name = ThunkName(signature);
 		if (llvm::Function* existing = mc.module().getFunction(name)) return existing;
 		llvm::Function* thunk = llvm::Function::Create(FuncEmitter::CodeType(mc, signature), llvm::Function::InternalLinkage, name, &mc.module());
-		thunk->addFnAttr(llvm::Attribute::UWTable); // a throw from the funcptr unwinds through it
 		BuildThunkBody(mc, signature, thunk);
 		return thunk;
 	}

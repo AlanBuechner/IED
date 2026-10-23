@@ -10,13 +10,13 @@ struct __C4MemoryRegion
 	public int32 protection;
 }
 
-[link("c4_vm_reserve")] void* c4_vm_reserve(int64 size, int64 alignment);
-[link("c4_vm_allocate")] void* c4_vm_allocate(int64 size, int32 protection);
-[link("c4_vm_commit")] int32 c4_vm_commit(void* address, int64 size, int32 protection);
-[link("c4_vm_decommit")] int32 c4_vm_decommit(void* address, int64 size);
-[link("c4_vm_release")] int32 c4_vm_release(void* base);
-[link("c4_vm_protect")] int32 c4_vm_protect(void* address, int64 size, int32 protection);
-[link("c4_vm_query")] int32 c4_vm_query(const void* address, __C4MemoryRegion* region);
+[link("c4_vm_reserve")] void* c4_vm_reserve(int64 size, int64 alignment) noexcept;
+[link("c4_vm_allocate")] void* c4_vm_allocate(int64 size, int32 protection) noexcept;
+[link("c4_vm_commit")] int32 c4_vm_commit(void* address, int64 size, int32 protection) noexcept;
+[link("c4_vm_decommit")] int32 c4_vm_decommit(void* address, int64 size) noexcept;
+[link("c4_vm_release")] int32 c4_vm_release(void* base) noexcept;
+[link("c4_vm_protect")] int32 c4_vm_protect(void* address, int64 size, int32 protection) noexcept;
+[link("c4_vm_query")] int32 c4_vm_query(const void* address, __C4MemoryRegion* region) noexcept;
 
 namespace Platform
 {

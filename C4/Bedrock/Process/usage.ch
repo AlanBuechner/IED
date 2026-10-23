@@ -15,8 +15,8 @@ namespace Process
 		public int64 peakWorkingSetBytes;   // the most of its memory in RAM at once
 	}
 
-	[link("c4_process_usage")] int32 c4_process_usage(uint32 id, Usage* usage);
-	[link("c4_process_handle_usage")] int32 c4_process_handle_usage(void* process, Usage* usage);
+	[link("c4_process_usage")] int32 c4_process_usage(uint32 id, Usage* usage) noexcept;
+	[link("c4_process_handle_usage")] int32 c4_process_handle_usage(void* process, Usage* usage) noexcept;
 
 	// What process `id` uses; false, with `usage` zeroed, when there is no such process or the system will not say.
 	bool GetUsage(uint32 id, Usage& usage) { return c4_process_usage(id, &usage) == 0; }

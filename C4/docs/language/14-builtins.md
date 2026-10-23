@@ -11,6 +11,10 @@ Rules:
 
 - The prelude declares each function with `[link("symbol")]`: C runtime functions keep their names, C4 runtime
   ones are prefixed `c4_` (`raw_alloc` calls `c4_raw_alloc`).
+- A prelude or Bedrock runtime function that runs no C4 code in its caller's thread is declared `noexcept`, so a
+  call to it needs no unwind path; the ones that do (`reflect_function_invoke`, `reflect_method_invoke`,
+  `c4_reflect_unload_source`, the `c4s_*` script host) are not. Finalizers, exit destructors and the collector's
+  callbacks run behind the runtime's catch-alls: an exception escaping one is fatal.
 - A program declaration of the same file-scope name, a function or a type, hides the prelude's: the prelude is a
   fallback, never an override. A name inside a namespace hides nothing. A hidden function stays the one a file
   calls where the program's declaration is not visible: Bedrock keeps the prelude's `memmove` beside a bound C

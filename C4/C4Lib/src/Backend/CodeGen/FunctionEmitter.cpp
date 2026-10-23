@@ -1,14 +1,13 @@
 #include "Backend/CodeGen/FunctionEmitter.h"
 #include "Backend/CodeGen/DebugInfo.h"
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
 namespace Scripting
 {
-	// A definition gets an unwind table: a throw is an SEH raise that unwinds frame by frame to its catchswitch,
-	// and every frame on the way needs one. The MSVC frame handler is its personality before any EH pad exists
-	// (LLVM requires that order); a function without exceptions ignores it. A declaration must have neither.
+	// The MSVC frame handler is a definition's personality before any EH pad exists (LLVM requires that order); a
+	// function without exceptions ignores it. A declaration has none. Every definition's unwind table is ApplyTarget's.
 	void FunctionEmitter::PrepareDefinition(llvm::Function& fn)
 	{
-		fn.addFnAttr(llvm::Attribute::UWTable);
 		if (!fn.hasPersonalityFn()) fn.setPersonalityFn(m_MCtx.GetFrameHandler3());
 	}
 
@@ -32,6 +31,25 @@ namespace Scripting
 		fn->setDLLStorageClass(llvm::GlobalValue::DefaultStorageClass);
 	}
 
+	// MSVC x64 passes a by-value aggregate wider than a register as a pointer to the caller's own temporary, which the
+	// callee owns (it destroys the object; the caller never reads it again): the parameter's slot is that memory, with
+	// no copy. A volatile parameter keeps a copy of its own.
+	std::vector<llvm::Value*> FunctionEmitter::HeldParameters(llvm::Function& fn, const HIRFunction& hir, unsigned firstParam)
+	{
+		std::vector<llvm::Value*> held;
+		const FunctionType* ft = hir.record->type;
+		for (uint32 i = 0; ft && i < ft->GetParameterCount() && firstParam + i < fn.arg_size(); ++i)
+		{
+			held.push_back(nullptr);
+			if (!m_MCtx.abi().PassesByHiddenPtr(ft->GetParameters()[i].m_Type) || hir.GetSlot(i).isVolatile) continue;
+			llvm::Argument* argument = fn.getArg(firstParam + i);
+			argument->addAttr(llvm::Attribute::NoAlias);
+			argument->addAttr(llvm::Attribute::DeadOnReturn);
+			held.back() = argument;
+		}
+		return held;
+	}
+
 	void FunctionEmitter::EmitBody(const HIRFunction& hir)
 	{
 		llvm::Function* fn = m_MCtx.GetOrCreateFunction(*hir.record);
@@ -49,7 +67,7 @@ namespace Scripting
 		llvm::DISubprogram* described = debug ? debug->Describe(*fn, *hir.record) : nullptr;
 		ctx.SetDebugScope(described);
 		ctx.At(hir.root->origin); // the prologue is the opening brace
-		ctx.CreateSlotAllocas();
+		ctx.CreateSlotAllocas(HeldParameters(*fn, hir, sig.firstParam));
 
 		// The hidden parameters (this, the sret pointer) have no HIR slot; the declared parameters follow them.
 		if (sig.thisIndex >= 0) ctx.SetThis(fn->getArg(sig.thisIndex));
@@ -73,11 +91,11 @@ namespace Scripting
 				llvm::Value* obj = B.CreateLoad(m_MCtx.Lower(ptype), asObjPtr);
 				B.CreateStore(obj, ctx.SlotAlloca(i));
 			}
+			else if (ctx.SlotAlloca(i) == p)
+				continue; // held in the caller's temporary (HeldParameters)
 			else if (abi.PassesByHiddenPtr(ptype))
 			{
-				// A by-value aggregate that does NOT fit one register passes as a HIDDEN POINTER: the caller
-				// hands over the address of its temporary, so p is &temp - LOAD the object through it. Storing
-				// the pointer itself into the object-typed slot would leave garbage (invalid IR).
+				// A volatile one: p is &temp - LOAD the object through it into its own slot.
 				auto& B = ctx.builder();
 				llvm::Value* obj = B.CreateLoad(m_MCtx.Lower(ptype), p);
 				B.CreateStore(obj, ctx.SlotAlloca(i));
@@ -108,5 +126,8 @@ namespace Scripting
 				else if (returnsZero) ctx.builder().CreateRet(llvm::Constant::getNullValue(fn->getReturnType()));
 				else ctx.builder().CreateUnreachable();
 			}
+		ctx.ZeroUndeclaredSlots();
+		// The code after a return or a throw that no label made live (RegionEmitter::ContinueAfterTerminator).
+		llvm::EliminateUnreachableBlocks(*fn);
 	}
 } // namespace Scripting

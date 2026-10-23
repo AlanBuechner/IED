@@ -47,7 +47,7 @@ static void mark_enumerated(GCMarker* marker, const GCPtrMap* enumerators)
 	for (size_t i = 0; i < count; ++i)
 	{
 		const GCEntry* current = gc_map_find(enumerators, list[i].key);
-		if (current) ((c4_gc_enum_roots_fn)current->a)(current->b, visit_root, marker);
+		if (current) c4_gc_run_root_enumerator((c4_gc_enum_roots_fn)current->a, current->b, visit_root, marker);
 	}
 	gc_mem_free(list);
 }

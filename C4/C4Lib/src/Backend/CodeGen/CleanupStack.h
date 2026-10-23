@@ -24,6 +24,7 @@ namespace Scripting
 		llvm::Value* parentPad = nullptr;         // the funclet this entry was pushed in (null = none)
 		size_t floor = 0;                         // the unwind floor in effect when it was pushed
 		llvm::BasicBlock* ehPad = nullptr;        // Cleanup, Abandon: its cleanuppad block, created on first need
+		llvm::BasicBlock* returnPath = nullptr;   // Cleanup, Handler: its exit on every return's way out, made on first need
 
 		bool HasPad() const { return kind == Kind::Cleanup || kind == Kind::Abandon; }
 	};

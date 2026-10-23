@@ -12,22 +12,37 @@ namespace Scripting
 		m_B->SetInsertPoint(&entry);
 	}
 
-	void IRContext::CreateSlotAllocas()
+	void IRContext::CreateSlotAllocas(const std::vector<llvm::Value*>& held)
 	{
 		uint32 count = m_Hir.SlotCount();
 		m_SlotAllocas.resize(count, nullptr);
+		m_Declared.assign(count, false);
+		m_PrologueLocation = m_B->getCurrentDebugLocation();
 		for (uint32 i = 0; i < count; ++i)
-			m_SlotAllocas[i] = m_Hir.GetSlot(i).cls == SlotClass::Static ? CreateStaticSlot(m_Hir.GetSlot(i)) : CreateLocalSlot(m_Hir.GetSlot(i));
+			if (i < held.size() && held[i]) m_SlotAllocas[i] = held[i];
+			else if (m_Hir.GetSlot(i).cls == SlotClass::Static) m_SlotAllocas[i] = CreateStaticSlot(m_Hir.GetSlot(i));
+			else m_SlotAllocas[i] = CreateLocalSlot(m_Hir.GetSlot(i));
 	}
 
 	llvm::Value* IRContext::CreateLocalSlot(const HIRFunction::Slot& slot)
 	{
-		// Declarations are zero-initialized (no local ever holds stack garbage) and every vptr of a polymorphic
-		// object points at its type's vtables.
 		llvm::AllocaInst* storage = m_B->CreateAlloca(m_MCtx.Lower(slot.type), nullptr, "slot");
-		m_MCtx.StoreZero(*m_B, slot.type, storage);
-		m_MCtx.vtables().StoreVptrs(*m_B, slot.type, storage);
+		m_LastSlotAlloca = storage;
 		return storage;
+	}
+
+	void IRContext::ZeroUndeclaredSlots()
+	{
+		if (!m_LastSlotAlloca) return;
+		llvm::IRBuilder<> atEntry(m_LastSlotAlloca->getNextNode());
+		atEntry.SetCurrentDebugLocation(m_PrologueLocation);
+		for (uint32 i = 0; i < m_Hir.SlotCount(); ++i)
+		{
+			const HIRFunction::Slot& slot = m_Hir.GetSlot(i);
+			if (slot.cls == SlotClass::Static || slot.cls == SlotClass::Param || m_Declared[i]) continue;
+			m_MCtx.StoreZero(atEntry, slot.type, m_SlotAllocas[i]);
+			m_MCtx.vtables().StoreVptrs(atEntry, slot.type, m_SlotAllocas[i]);
+		}
 	}
 
 	void IRContext::ResetSlot(uint32 slot)

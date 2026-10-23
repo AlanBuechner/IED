@@ -23,8 +23,8 @@ namespace FS
 
 	bool File::Flush() { return handle && file_flush(handle) == 0; }
 
-	[link("c4_file_sync")] int32 c4_file_sync(void* file);
-	[link("c4_fs_replace")] int32 c4_fs_replace(const char* from, const char* to);
+	[link("c4_file_sync")] int32 c4_file_sync(void* file) noexcept;
+	[link("c4_fs_replace")] int32 c4_fs_replace(const char* from, const char* to) noexcept;
 
 	bool File::Sync() { return handle && c4_file_sync(handle) == 0; }
 

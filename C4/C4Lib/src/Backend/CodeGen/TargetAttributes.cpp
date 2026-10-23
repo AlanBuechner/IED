@@ -12,6 +12,7 @@ namespace Scripting
 		for (llvm::Function& function : module)
 		{
 			if (function.isDeclaration()) continue;
+			function.setUWTableKind(llvm::UWTableKind::Default);
 			function.addFnAttr("target-cpu", target.Cpu());
 			if (!features.empty()) function.addFnAttr("target-features", features);
 		}

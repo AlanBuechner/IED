@@ -228,6 +228,7 @@ namespace Scripting
 
 	private:
 		ModuleContext& Partition(unsigned i) { return i == 0 ? m_MCtx : m_Others[i - 1]->mctx(); }
+		std::vector<llvm::Module*> Modules();
 		FunctionEmitter& EmitterOf(unsigned i) { return i == 0 ? m_Emitter : m_Others[i - 1]->emitter(); }
 		unsigned PartitionOf(const FunctionRecord& rec) const { return m_Placement ? m_Placement->Of(rec) : 0; }
 		unsigned PartitionOf(const SymbolInfo& global) const { return m_Placement ? m_Placement->Of(global) : 0; }

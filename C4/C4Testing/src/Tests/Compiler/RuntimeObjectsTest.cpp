@@ -24,7 +24,7 @@ namespace Testing
 
 	void RuntimeObjectsTest::CppSourcesCompileAsCpp20()
 	{
-		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCFinalizerShim.cpp", "C:/obj/x.obj");
+		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCCallbacks.cpp", "C:/obj/x.obj");
 		TEST_ASSERT(Has(args, "-std=c++20") && Has(args, "-O2"));
 	}
 

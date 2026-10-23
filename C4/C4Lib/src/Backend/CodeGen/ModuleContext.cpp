@@ -238,6 +238,7 @@ namespace Scripting
 			fileStatic ? LocalName(rec.mangledName.c_str()) : std::string(rec.mangledName.c_str()), m_Module);
 		if (fileStatic) MakeLocal(*fn);
 		if (DeclaredInline(rec)) fn->addFnAttr(llvm::Attribute::AlwaysInline);
+		if (rec.isNoexcept) fn->setDoesNotThrow();
 		m_FuncCache[&rec] = fn;
 		m_NewFunctions.push_back(&rec);
 		return fn;
@@ -553,6 +554,7 @@ namespace Scripting
 		if (fn) return fn;
 		auto* fty = llvm::FunctionType::get(ret, params, false);
 		fn = llvm::Function::Create(fty, llvm::Function::ExternalLinkage, name, m_Module);
+		fn->setDoesNotThrow(); // what the compiler calls in the runtime never unwinds: C4 code it runs goes through a catch-all
 		return fn;
 	}
 

@@ -8,9 +8,10 @@ namespace Scripting
 {
 	/// The block-owning walker (doc 03): emits statements, creates the control-flow blocks, and owns scope
 	/// exit. Every BlockNode is a frame; every `DeferNode` pushes a cleanup on the IRContext's CleanupStack.
-	/// Every exit edge - fall-through, break, continue, fallthrough, goto, return - runs the cleanups it
-	/// crosses inline (leaving crossed catch handlers with catchret), and the first exception edge that needs
-	/// a cleanup creates its cleanuppad (CleanupPadFor), which runs the same body and unwinds outward.
+	/// Every exit edge - fall-through, break, continue, fallthrough, goto - runs the cleanups it crosses inline
+	/// (leaving crossed catch handlers with catchret); every return branches to the shared way out, where each
+	/// entry's exit is emitted once (ReturnPathFrom); and the first exception edge that needs a cleanup creates
+	/// its cleanuppad (CleanupPadFor), which runs the same body and unwinds outward.
 	class RegionEmitter : public RegionServices
 	{
 	public:
@@ -35,7 +36,6 @@ namespace Scripting
 		void EmitReturn(const ReturnNode* r);
 		void EmitReturnValue(llvm::Value* v, const Type* ret);
 		/// The call `return f(...)` returns when it can build its result in this function's own result pointer.
-		const CallNode* ResultCall(const ReturnNode* r);
 		void EmitGoto(const GotoNode* g);
 		void EmitLabel(const LabelNode* l);
 		void EmitIf(const IfNode* n);
@@ -57,6 +57,15 @@ namespace Scripting
 		void PushAbandon(llvm::Function* abandon, llvm::Value* argument);
 		void EmitCleanupBody(const CleanupEntry& e);
 		size_t ForwardJumpDepth(const BlockNode* owner) const;
+		/// Where a return at cleanup depth `depth` goes: the exit of the first entry below `depth` that does something
+		/// on the way out (ReturnPathOf), else the return itself (FinalReturn).
+		llvm::BasicBlock* ReturnPathFrom(size_t depth);
+		/// Entry `index`'s exit, with only the scopes outside it visible, then on to ReturnPathFrom(index): emitted once
+		/// for every return that crosses it.
+		llvm::BasicBlock* ReturnPathOf(size_t index);
+		/// The function's return of what the returns staged.
+		llvm::BasicBlock* FinalReturn();
+		static bool RunsOnReturn(const CleanupEntry& e);
 
 		void DeclareLabels(const BlockNode* block);
 		void DefineLabel(uint32 id, llvm::BasicBlock* block);
@@ -68,5 +77,7 @@ namespace Scripting
 		ExprEmitter m_Expr;
 		std::vector<Frame> m_Frames;
 		std::unordered_map<uint32, Label> m_Labels;
+		llvm::BasicBlock* m_FinalReturn = nullptr;
+		llvm::Type* m_StagedType = nullptr; // what the returns stage in the return slot; null when nothing is
 	};
 } // namespace Scripting

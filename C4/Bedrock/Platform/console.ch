@@ -12,8 +12,8 @@ include "Text/stringview.ch"
 
 namespace Platform
 {
-	[link("c4_console_write")] int64 c4_console_write(int32 stream, const void* bytes, int64 count);
-	[link("c4_console_read")] int64 c4_console_read(void* bytes, int64 capacity);
+	[link("c4_console_write")] int64 c4_console_write(int32 stream, const void* bytes, int64 count) noexcept;
+	[link("c4_console_read")] int64 c4_console_read(void* bytes, int64 capacity) noexcept;
 
 	// False when the stream is closed or the write failed.
 	bool WriteOutput(Core::StringView text) { return c4_console_write(1, (const void*)text.Data(), text.ByteLength()) == text.ByteLength(); }

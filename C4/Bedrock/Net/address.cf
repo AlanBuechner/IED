@@ -1,9 +1,9 @@
 include "address.ch"
 include "Container/hash.ch"
 
-[link("c4_net_resolve")] int32 c4_net_resolve(const char* host, int32 port, Net::Address* out, int32 capacity, char* error, int64 errorCapacity);
-[link("c4_net_address_text")] int64 c4_net_address_text(const Net::Address* address, char* out, int64 capacity);
-[link("c4_net_parse_address")] int32 c4_net_parse_address(const char* text, Net::Address* out);
+[link("c4_net_resolve")] int32 c4_net_resolve(const char* host, int32 port, Net::Address* out, int32 capacity, char* error, int64 errorCapacity) noexcept;
+[link("c4_net_address_text")] int64 c4_net_address_text(const Net::Address* address, char* out, int64 capacity) noexcept;
+[link("c4_net_parse_address")] int32 c4_net_parse_address(const char* text, Net::Address* out) noexcept;
 
 namespace Net
 {

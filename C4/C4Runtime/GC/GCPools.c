@@ -1,4 +1,5 @@
 #include "GC/GCPools.h"
+#include "GC/GCFinalize.h"
 #include "GC/GCPlatform.h"
 #include <string.h>
 
@@ -131,7 +132,7 @@ static void offer_unreached(GCMarker* marker, const GCPool* pool, GCSpan* chunk)
 		for (uint64_t bits = chunk->allocBits[w] & ~chunk->markBits[w]; bits; bits &= bits - 1)
 		{
 			const GCObject object = { chunk, w * 64u + (uint32_t)__builtin_ctzll(bits) };
-			if (gc_object_marked(object) || !pool->desc.keep(pool->desc.user_data, gc_object_base(object))) continue;
+			if (gc_object_marked(object) || !c4_gc_run_pool_keep(pool->desc.keep, pool->desc.user_data, gc_object_base(object))) continue;
 			gc_mark_object(marker, object);
 			gc_mark_drain(marker);
 		}

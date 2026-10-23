@@ -24,6 +24,8 @@ namespace Scripting
 	private:
 		void EmitBody(const HIRFunction& hir);
 		void PrepareDefinition(llvm::Function& fn);
+		/// The by-value parameters the caller hands over in memory of their own, by slot (null for the others).
+		std::vector<llvm::Value*> HeldParameters(llvm::Function& fn, const HIRFunction& hir, unsigned firstParam);
 
 		ModuleContext& m_MCtx;
 	};

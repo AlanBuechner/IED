@@ -28,6 +28,12 @@ namespace Scripting
 		// generational or concurrent collector ever does, it is added here and every store gets it.
 		llvm::Value* GcStore(llvm::Value* addr, llvm::Value* value, const Type* elemType, MemoryAccess access = {});
 
+		/// Whether `value`, an rvalue of `type`, can be built where it is to be stored, with no temporary of its own: a
+		/// call that returns it in memory, or a construction.
+		bool BuildsInPlace(const HIRNode* value, const Type* type);
+		/// Builds such a `value` at `storage` (copy elision).
+		void EmitInPlace(const HIRNode* value, llvm::Value* storage);
+
 		/// An access of `accessed` at `loc`: volatile for a volatile variable or field, or any part of one, and tagged
 		/// with the class of memory it touches.
 		MemoryAccess AccessOf(const LValue* loc, const Type* accessed) const;

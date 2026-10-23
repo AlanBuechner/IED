@@ -1,8 +1,8 @@
 include "library.ch"
 
-[link("c4_library_open")] void* c4_library_open(const char* path, void* error, int64 errorCapacity);
-[link("c4_library_find")] void* c4_library_find(void* library, const char* symbol);
-[link("c4_library_close")] void c4_library_close(void* library);
+[link("c4_library_open")] void* c4_library_open(const char* path, void* error, int64 errorCapacity) noexcept;
+[link("c4_library_find")] void* c4_library_find(void* library, const char* symbol) noexcept;
+[link("c4_library_close")] void c4_library_close(void* library) noexcept;
 
 namespace Platform
 {

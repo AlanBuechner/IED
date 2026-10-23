@@ -14,9 +14,9 @@ namespace FS
 	const int32 kWatchTimedOut = -2;
 }
 
-[link("c4_fs_watch_open")] void* c4_fs_watch_open(const char* path, int32 recursive, char* error, int64 errorCapacity);
-[link("c4_fs_watch_next")] int32 c4_fs_watch_next(void* watch, int32 timeoutMs, FS::ChangeRecord* out, char* error, int64 errorCapacity);
-[link("c4_fs_watch_close")] void c4_fs_watch_close(void* watch);
+[link("c4_fs_watch_open")] void* c4_fs_watch_open(const char* path, int32 recursive, char* error, int64 errorCapacity) noexcept;
+[link("c4_fs_watch_next")] int32 c4_fs_watch_next(void* watch, int32 timeoutMs, FS::ChangeRecord* out, char* error, int64 errorCapacity) noexcept;
+[link("c4_fs_watch_close")] void c4_fs_watch_close(void* watch) noexcept;
 
 namespace FS
 {

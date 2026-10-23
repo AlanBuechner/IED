@@ -157,12 +157,17 @@ namespace Scripting
 
 	llvm::Value* ObjectEmitter::EmitConstruct(const ConstructNode* n)
 	{
-		// The object lives in a zeroed stack temporary and is yielded by value.
+		// The object lives in a stack temporary and is yielded by value.
 		llvm::Type* objTy = m_Ctx.mctx().Lower(n->objectType);
 		llvm::Value* temp = m_Ctx.EntryAlloca(objTy, "construct");
-		m_Ctx.mctx().StoreZero(m_Ctx.builder(), n->objectType, temp);
-		Initialize(n->objectType, temp, n->ctor, n->aggregateInit, n->args);
+		ConstructAt(n, temp);
 		return m_Ctx.builder().CreateLoad(objTy, temp);
+	}
+
+	void ObjectEmitter::ConstructAt(const ConstructNode* n, llvm::Value* storage)
+	{
+		m_Ctx.mctx().StoreZero(m_Ctx.builder(), n->objectType, storage);
+		Initialize(n->objectType, storage, n->ctor, n->aggregateInit, n->args);
 	}
 
 	void ObjectEmitter::Initialize(const Type* objectType, llvm::Value* storage, const FunctionRecord* ctor, bool aggregateInit,
@@ -226,11 +231,12 @@ namespace Scripting
 
 	llvm::Value* ObjectEmitter::EmitDelete(const DeleteNode* n)
 	{
-		// c4_free runs the [operator("delete")] finalizer registered at allocation, then frees; null is a no-op.
+		// c4_free runs the [operator("delete")] finalizer registered at allocation, then frees; null is a no-op. An
+		// exception escaping the finalizer is fatal (runtime/01), so the call never unwinds.
 		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
 		llvm::Value* object = m_Expr.Emit(n->operand);
 		auto* freeFn = m_Ctx.mctx().RuntimeFunction("c4_free", llvm::Type::getVoidTy(ctx), { llvm::PointerType::get(ctx, 0) });
-		m_Ctx.Call(freeFn, { object }, true);
+		m_Ctx.Call(freeFn, { object }, false);
 		return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 0);
 	}
 } // namespace Scripting

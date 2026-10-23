@@ -1,12 +1,14 @@
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/BuildUtils.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/ParallelFor.h"
 #include "Compiler/Toolchain.h"
 #include <cstdio>
 #include <functional>
 #include <algorithm>
 #include <iostream>
 #include <system_error>
+#include <thread>
 #include <process.h>
 
 namespace Scripting
@@ -90,9 +92,9 @@ namespace Scripting
 			const std::vector<std::string> args = RuntimeCompileCommand(clang, root.string(), source.string(), partial.string());
 			if (verbose)
 			{
-				std::cout << "Compiling C4 runtime:";
-				for (const std::string& a : args) std::cout << " " << a;
-				std::cout << std::endl;
+				std::string line = "Compiling C4 runtime:";
+				for (const std::string& a : args) line += " " + a;
+				std::fputs((line + "\n").c_str(), stdout); // one write: sources compile at once
 			}
 			if (!RunTool(args))
 			{
@@ -134,21 +136,32 @@ namespace Scripting
 		const fs::path objectDir = ObjectFolder(root);
 		CreateFolders(PathText(objectDir));
 		const uint64_t headersKey = HeadersKey(root);
+		struct Missing
+		{
+			fs::path source;
+			fs::path object;
+			std::string stem;
+		};
+		std::vector<Missing> missing;
 		for (const fs::path& source : FilesUnder(root, { ".c", ".cpp" }))
 		{
 			const std::string relative = RelativeName(source, root);
 			const fs::path object = objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey));
-			if (!FileExists(PathText(object)))
-			{
-				if (!Compile(root, source, object, verbose))
-				{
-					std::cerr << "error: failed to compile the C4 runtime source " << source.string() << std::endl;
-					return false;
-				}
-				RemoveOtherVersions(objectDir, ObjectStem(relative), object);
-			}
+			if (!FileExists(PathText(object))) missing.push_back({ source, object, ObjectStem(relative) });
 			objects.Push(Core::String(object.string().c_str()));
 		}
+		// A toolchain's first build compiles every source: one clang each, at once.
+		std::vector<char> failed(missing.size(), 0);
+		ParallelFor(missing.size(), std::max(1u, std::thread::hardware_concurrency()), [&](size_t i) {
+			if (!Compile(root, missing[i].source, missing[i].object, verbose)) failed[i] = 1;
+			else RemoveOtherVersions(objectDir, missing[i].stem, missing[i].object);
+		});
+		for (size_t i = 0; i < missing.size(); ++i)
+			if (failed[i])
+			{
+				std::cerr << "error: failed to compile the C4 runtime source " << missing[i].source.string() << std::endl;
+				return false;
+			}
 		return true;
 	}
 

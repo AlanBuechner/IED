@@ -15,6 +15,8 @@ namespace Scripting
 
 		llvm::Value* EmitNew(const NewNode* n);
 		llvm::Value* EmitConstruct(const ConstructNode* n);
+		/// `n`'s object built at `storage`: zeroed, its vptrs set, then initialized.
+		void ConstructAt(const ConstructNode* n, llvm::Value* storage);
 		llvm::Value* EmitInitList(const InitListNode* n);
 		llvm::Value* EmitDelete(const DeleteNode* n);
 		llvm::Value* EmitRelocate(const RelocateNode* n);

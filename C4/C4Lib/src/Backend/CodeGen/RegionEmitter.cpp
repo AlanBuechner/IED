@@ -229,9 +229,11 @@ namespace Scripting
 		// A declaration without an initializer starts zeroed (with its vptrs) every time it runs, not only
 		// on the first pass through a loop. A static local is program storage: a Once region starts it.
 		if (m_Ctx.SlotIsStatic(d->slot)) return;
+		m_Ctx.NoteDeclared(d->slot);
+		const bool isVolatile = m_Ctx.hir().GetSlot(d->slot).isVolatile;
 		if (!d->init) m_Ctx.ResetSlot(d->slot);
-		else m_Expr.GcStore(m_Ctx.SlotAlloca(d->slot), m_Expr.Emit(d->init), d->type,
-			MemoryAccess{ m_Ctx.hir().GetSlot(d->slot).isVolatile });
+		else if (!isVolatile && m_Expr.BuildsInPlace(d->init, d->type)) m_Expr.EmitInPlace(d->init, m_Ctx.SlotAlloca(d->slot)); // copy elision
+		else m_Expr.GcStore(m_Ctx.SlotAlloca(d->slot), m_Expr.Emit(d->init), d->type, MemoryAccess{ isVolatile });
 		// A local that a later move may take has a drop flag: it owns its object from here (LastUseMoves).
 		if (d->liveFlag != kNoDropFlag)
 			m_Ctx.builder().CreateStore(llvm::ConstantInt::getTrue(m_Ctx.mctx().context()), m_Ctx.SlotAlloca(d->liveFlag));
@@ -311,7 +313,7 @@ namespace Scripting
 		const FunctionRecord* rec = m_Ctx.hir().record;
 		const Type* ret = rec && rec->type ? rec->type->GetReturnType() : nullptr;
 		llvm::Value* v = nullptr;
-		if (const CallNode* call = ResultCall(r)) CallEmitter(m_Ctx, m_Expr).EmitInto(call, m_Ctx.Sret()); // copy elision
+		if (m_Ctx.Sret() && m_Expr.BuildsInPlace(r->value, ret)) m_Expr.EmitInPlace(r->value, m_Ctx.Sret()); // copy elision
 		else if (r->value) v = m_Expr.Emit(r->value);
 		if (m_Ctx.Cleanups().Depth() == 0)
 		{
@@ -321,28 +323,53 @@ namespace Scripting
 		}
 		// The value is computed before the scope's cleanups run (C++ order) and staged in memory: SSA values
 		// do not survive a catchret out of a funclet, and an sret result goes straight to its out-pointer.
-		llvm::Value* staged = nullptr;
 		if (v && m_Ctx.Sret())
 			B.CreateStore(v, m_Ctx.Sret());
 		else if (v)
 		{
-			staged = m_Ctx.ReturnSlot(v->getType());
-			B.CreateStore(v, staged);
+			m_StagedType = v->getType();
+			B.CreateStore(v, m_Ctx.ReturnSlot(m_StagedType));
 		}
-		ExitCleanups(0);
-		if (IsOpen())
-			EmitReturnValue(staged ? B.CreateLoad(v->getType(), staged) : nullptr, ret);
+		B.CreateBr(ReturnPathFrom(m_Ctx.Cleanups().Depth()));
 		ContinueAfterTerminator();
 	}
 
-	const CallNode* RegionEmitter::ResultCall(const ReturnNode* r)
+	bool RegionEmitter::RunsOnReturn(const CleanupEntry& e)
 	{
-		if (!m_Ctx.Sret() || !r->value || r->value->kind != HIRNode::Kind::Call) return nullptr;
-		const auto* call = static_cast<const CallNode*>(r->value);
+		return (e.kind == CleanupEntry::Kind::Cleanup && !e.exceptionalOnly) || e.kind == CleanupEntry::Kind::Handler;
+	}
+
+	llvm::BasicBlock* RegionEmitter::ReturnPathFrom(size_t depth)
+	{
+		for (size_t i = depth; i-- > 0; )
+			if (RunsOnReturn(m_Ctx.Cleanups().At(i))) return ReturnPathOf(i);
+		return FinalReturn();
+	}
+
+	llvm::BasicBlock* RegionEmitter::ReturnPathOf(size_t index)
+	{
+		CleanupStack& cs = m_Ctx.Cleanups();
+		if (cs.At(index).returnPath) return cs.At(index).returnPath;
+		llvm::BasicBlock* block = NewBlock("return.cleanup");
+		cs.At(index).returnPath = block;
+		InsertGuard guard(m_Ctx.builder(), block);
+		std::vector<CleanupEntry> above = cs.DetachFrom(index);
+		ExitEntry(above.front());
+		if (IsOpen()) m_Ctx.builder().CreateBr(ReturnPathFrom(index));
+		cs.Restore(std::move(above));
+		return block;
+	}
+
+	llvm::BasicBlock* RegionEmitter::FinalReturn()
+	{
+		if (m_FinalReturn) return m_FinalReturn;
+		m_FinalReturn = NewBlock("return");
+		auto& B = m_Ctx.builder();
+		InsertGuard guard(B, m_FinalReturn);
 		const FunctionRecord* rec = m_Ctx.hir().record;
 		const Type* ret = rec && rec->type ? rec->type->GetReturnType() : nullptr;
-		if (!ret || TypeHandle::UnwrapToValue(call->type) != TypeHandle::UnwrapToValue(ret)) return nullptr;
-		return CallEmitter(m_Ctx, m_Expr).ReturnsInMemory(call) ? call : nullptr;
+		EmitReturnValue(m_StagedType ? B.CreateLoad(m_StagedType, m_Ctx.ReturnSlot(m_StagedType)) : nullptr, ret);
+		return m_FinalReturn;
 	}
 
 	void RegionEmitter::EmitReturnValue(llvm::Value* v, const Type* ret)
