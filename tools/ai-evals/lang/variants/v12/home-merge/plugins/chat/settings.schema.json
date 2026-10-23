@@ -1,0 +1,17 @@
+{
+	"$defs": {
+		"model": {
+			"properties": {
+				"keepThinking": {
+					"type": "boolean",
+					"description": "A llama.cpp server is sent the turn's earlier thinking (default true)."
+				},
+				"thinkingCap": {
+					"type": "integer",
+					"minimum": 0,
+					"description": "Tokens of reasoning a reply may take before it acts; 0: no cap."
+				}
+			}
+		}
+	}
+}

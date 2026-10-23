@@ -1,0 +1,19 @@
+{
+	"description": "v11 on build/bin/langeval-guard: a reply whose reasoning passes 6000 tokens before any text or call is stopped, its code blocks kept as clips and its reasoning with the turn, and a harness note says to write the drafted file now",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	],
+	"model": {
+		"thinkingCap": 6000
+	}
+}

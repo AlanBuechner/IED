@@ -358,6 +358,8 @@ def main():
 		"effort": args.effort, "parallel": args.parallel, "server": config["server"], "baseToolchain": args.base_toolchain,
 		"toolchainBuilt": common.read_json(os.path.join(args.base_toolchain, "toolchain.json"), {}).get("built"), "started": time.strftime("%Y-%m-%d %H:%M:%S"),
 		"jobs": [os.path.basename(j["dir"]) for j in jobs], "commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=common.REPO, capture_output=True, text=True).stdout.strip()})
+	# A variant's model fields (variant.json "model": {"thinkingCap": 6000}) go over the profile's.
+	profile = dict(profile, **common.read_json(os.path.join(variant, "variant.json"), {}).get("model", {}))
 	proxy = ModelProxy(profile["endpoint"])
 	config["spent"] = proxy.spent
 	try:
