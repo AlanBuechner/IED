@@ -50,7 +50,7 @@ int32 main() {
 - **One-level namespaces** (D-58): `Core` (containers, text, hashing, sorting), `FS` (files),
   `Serialization` (DOM, JSON, YAML, binary), `Reflection` (the runtime registry), `GC` (the collector),
   `Threading` (threads, atomics, locks, futures, jobs), `Platform` (virtual memory, the machine and the process,
-  libraries, wall-clock time) and `Math` (vectors, matrices, quaternions, transforms).
+  crash reports, libraries, wall-clock time) and `Math` (vectors, matrices, quaternions, transforms).
   Anything that is not part of a larger system goes in `Core`. Namespaces are open, so user code may add
   to any of them as long as member names do not collide.
 - Constructors are `[operator("create")]` methods (overloads chosen by argument count and type), the
@@ -977,6 +977,29 @@ return address. It reads the debug information of the module the address is in, 
 debug script's DLL (C4Runtime's `c4_source_line_of`, over the system's DbgHelp, loaded the first time it is asked
 and asked one call at a time); a program without it, code a script compiled in memory, and data know no line.
 `Reflection::FunctionContaining` names the function.
+
+### Crash reports (`crashlog.ch`)
+
+A fatal error - an exception nothing caught or one that left a `noexcept` function, the collector's, an abstract
+method called - ends the program with a report on standard error: `C4: fatal: <what>`, the thread (its id and
+name) and the stack that reached the error, a frame a line, `at Ns::Function+0x4d (C:/src/file.cf:42)` from the PDB
+of a `-g` build or `at program.exe+0x1a2b` without one (C4Runtime's `c4_fatal`, `Platform/CrashReportWin32.c`).
+The names are found by a thread of the report's own, which the failing one waits for: when DbgHelp cannot finish
+(a thread the collector stopped holds a lock it needs), the report goes out with the addresses alone.
+
+A program nobody watches the console of (a server, a windowed app) names a crash log with
+`Platform::SetCrashLog(path)`: each report is also appended there, after `<date> <time> [<pid>] `, so a log
+the program writes in that form reads on into its report. With a log named, a fault nothing handles (an access
+violation, a stack overflow, a division by zero) is reported there too, from its faulting instruction, before the
+system ends the program with the fault's code (Windows Error Reporting still sees it), and a C runtime function
+given an invalid argument is a fatal error instead of a fail-fast. `assets/RuntimeTest/CrashLog` runs a child
+that fails each way and reads its stderr and log.
+
+`Platform::StackText()` is the same stack for a report of the program's own (`c4_stack_text`). In a catch handler it
+is the stack of the throw being handled - `thrown: class Ns::Error` and the frames from the `throw` outward, read from
+the state the C++ runtime keeps for the handler, since a walk from the handler itself goes back to the function that
+catches - so code that keeps a thread alive past an exception can still say where it came from. It reads the PDBs the
+first time: for reports, not a hot path.
 
 ### Time (`time.ch`)
 

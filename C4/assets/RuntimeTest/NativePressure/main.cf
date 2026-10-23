@@ -1,0 +1,35 @@
+// BUG-383: garbage that is small in the heap but holds big native buffers (here 64 KiB strings) starts collections
+// too, so the native memory in use stays bounded instead of growing with everything the program ever dropped. Exit 0
+// when it stayed below kBoundBytes while 1.25 GiB of such garbage was made.
+
+include "bedrock.ch"
+
+const int32 kObjects = 20000;
+const int64 kTextBytes = 65536;
+const int64 kBoundBytes = 268435456;
+
+class Holder
+{
+	public Core::String text;
+}
+
+int32 main() {
+	Core::String chunk = Core::String(kTextBytes);
+	for (int64 i = 0; i < kTextBytes; ++i) chunk.Append(Core::StringView("x"));
+	Holder* last = nullptr;
+	int64 peak = 0;
+	for (int32 i = 0; i < kObjects; ++i) {
+		Holder* holder = new Holder();
+		holder->text = chunk;
+		last = holder;
+		const int64 inUse = (int64)GC::GetStats().nativeBytes;
+		if (inUse > peak) peak = inUse;
+	}
+	GC::Stats stats = GC::GetStats();
+	printf("native peak %lld MiB over %lld collections\n", peak / 1048576, (int64)stats.collections);
+	if (last == nullptr || peak >= kBoundBytes) {
+		printf("FAIL: native memory held by garbage grew to %lld MiB (bound %lld MiB)\n", peak / 1048576, kBoundBytes / 1048576);
+		return 1;
+	}
+	return 0;
+}

@@ -129,6 +129,23 @@ void c4_library_close(void* library);
 // the module has none (a program built without -g, a script compiled in memory) or `file` is too small.
 int32_t c4_source_line_of(const void* code, char* file, int32_t capacity, int32_t* line);
 
+// --- crash reports (Platform/CrashReportWin32.c) ----------------------------------------------------------
+// Every fatal error of the runtime ends here: an exception nothing caught or one that left a noexcept function, the
+// collector's, an abstract method called. The report is "C4: fatal: <what>", the thread, and its stack a frame a line,
+// named from the modules' PDBs: on standard error, and appended to the crash log after the time and the process id.
+// c4_fatal then exits with 1; c4_fatal_report leaves the ending to its caller. A second fatal error on the reporting
+// thread (from code exit runs) ends the process at once.
+__attribute__((noreturn)) void c4_fatal(const char* what);
+void c4_fatal_report(const char* what);
+// Where reports are also appended (UTF-8; NULL or "" for standard error only). Once a log is named, a fault nothing
+// handles (an access violation, a stack overflow) is reported before the system ends the process with its code, and a
+// C runtime function given an invalid argument is a fatal error.
+void c4_crash_log(const char* path);
+// The calling thread's stack as a report writes it, a frame a line, the `skip` frames above the caller left out, into
+// `out` (terminated; what fits): its length. In a catch handler it runs on the stack of the throw, so the frames go on
+// from where the exception was thrown. It reads the PDBs the first time: for reports, not a hot path.
+int64_t c4_stack_text(char* out, int64_t capacity, int32_t skip);
+
 // --- time (Platform/TimeWin32.c) ----------------------------------------------------------------------
 // The high-resolution counter (QueryPerformanceCounter): monotonic, `c4_time_tick_frequency` ticks per second.
 int64_t c4_time_ticks(void);

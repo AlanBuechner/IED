@@ -10,6 +10,7 @@ void gc_state_init(GCState* gc, const c4_gc_root_range* globals)
 	gc->percent = GC_DEFAULT_PERCENT;
 	gc->minTrigger = GC_MIN_TRIGGER_BYTES;
 	gc->nextCollection = GC_MIN_TRIGGER_BYTES;
+	gc->nextNative = GC_MIN_NATIVE_GROWTH;
 	gc->marker.heap = &gc->heap;
 	gc->markThreads = -1;
 	gc->concurrent.threshold = GC_DEFAULT_CONCURRENT_BYTES;
@@ -19,6 +20,15 @@ static size_t next_collection(size_t liveBytes, int32_t percent, size_t minimum)
 {
 	const size_t grown = liveBytes + liveBytes / 100 * (size_t)percent;
 	return grown > minimum ? grown : minimum;
+}
+
+// Native memory paces collections as the heap does: what is in use once the last collection's finalizers have run
+// (what garbage held is freed by then) may grow by `percent`, and by GC_MIN_NATIVE_GROWTH at least. Without it a
+// heap of small objects that hold big buffers grows without a collection (BUG-383).
+static int64_t next_native(int64_t inUse, int32_t percent)
+{
+	const int64_t grown = inUse / 100 * (int64_t)percent;
+	return inUse + (grown > GC_MIN_NATIVE_GROWTH ? grown : GC_MIN_NATIVE_GROWTH);
 }
 
 c4_gc_stats gc_stats(const GCState* gc)
@@ -68,6 +78,8 @@ void gc_reclaim(GCState* gc)
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
 	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent, gc->minTrigger);
+	gc->nextNative = INT64_MAX;
+	gc->nativePending = 1;
 }
 
 void gc_stops_record(GCStops* stops, uint64_t startNs, uint64_t endNs)
@@ -164,7 +176,7 @@ static void start_collection(GCState* gc, GCThread* self)
 	else gc_collect(gc, self);
 }
 
-void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request)
+void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request, int64_t nativeInUse)
 {
 	check_request(request);
 	// The heap hears of this thread's allocations now; others' come at their own refills.
@@ -172,7 +184,13 @@ void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request)
 	gc->allocs += self->cache.allocs;
 	self->cache.allocatedBytes = 0;
 	self->cache.allocs = 0;
-	if (!gc->disabled && !gc->collecting && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection) start_collection(gc, self);
+	if (gc->nativePending && !gc->collected && !gc->runningFinalizers && gc->ready.count == 0)
+	{
+		gc->nextNative = next_native(nativeInUse, gc->percent);
+		gc->nativePending = 0;
+	}
+	const int due = gc_heap_live_bytes(&gc->heap) >= gc->nextCollection || nativeInUse >= gc->nextNative;
+	if (!gc->disabled && !gc->collecting && due) start_collection(gc, self);
 	void* p = allocate_once(gc, self, request);
 	if (!p && gc_concurrent_busy(gc)) return NULL;
 	if (!p)

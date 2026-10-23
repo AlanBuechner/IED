@@ -294,7 +294,8 @@ C4 exceptions use the same native Windows EH that clang emits for C++ on MSVC:
   destructors and the collector's callbacks run behind catch-alls that make an escaping exception fatal
   ([runtime/01](../runtime/01-memory-and-gc.md)). In the IED server it turns 48,000 of 50,300 invokes into
   calls.
-- `EHRuntime.cpp` installs a terminate handler: an uncaught exception prints a fatal message and exits 1. Both
+- `EHRuntime.cpp` installs a terminate handler: an uncaught exception is reported (`c4_fatal_report`: the
+  message, the thread and the throw's stack, which the handler runs on before it unwinds) and exits 1. Both
   fatal paths report through `c4_report_uncaught_exception`, a function of its own a debugger can stop on.
 
 TypeDescriptor names reproduce MSVC's name back-references (`MsvcNames`): a repeated identifier is its

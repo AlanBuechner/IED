@@ -1,0 +1,109 @@
+// Crash reports (Platform::SetCrashLog, C4Runtime/Platform/CrashReportWin32.c): the program runs itself as a child
+// that fails - an exception nothing catches, an access violation - and reads what the child left on standard error
+// and in its crash log, and what Platform::StackText says in a catch handler. Exit 0 when each report is there, whole,
+// with its stack.
+
+include "bedrock.ch"
+
+const int64 kAccessViolation = 3221225477;   // 0xC0000005, the exit code of a process a fault ended
+
+struct Boom
+{
+	public int32 code;
+}
+
+static void Throw(int32 depth) {
+	if (depth == 0) throw Boom{ depth };
+	Throw(depth - 1);
+}
+
+static int32* Nowhere(int64 n) { return n > 1000 ? new int32 : nullptr; }
+
+// The child: fails as `how` says, with `log` its crash log unless `how` is "unlogged"; "caught" prints what StackText
+// says in a handler and exits 0.
+static int32 Fail(Core::StringView how, Core::StringView log) {
+	if (how == "caught") {
+		try {
+			Throw(2);
+		}
+		catch (...) {
+			printf("%s", Platform::StackText().CStr());
+		}
+		return 0;
+	}
+	if (how != "unlogged") Platform::SetCrashLog(log);
+	if (how == "fault") *Nowhere(how.ByteLength()) = 1;
+	Threading::Thread worker = Threading::Thread::Run([]() {
+		Threading::Thread::SetCurrentName("thrower");
+		Throw(3);
+	});
+	worker.Join();
+	return 0;
+}
+
+static bool Holds(Core::StringView text, Core::StringView part, const char* how, const char* where) {
+	if (text.Contains(part)) return true;
+	printf("FAIL %s: %s lacks \"%s\":\n%s\n", how, where, Core::String(part).CStr(), Core::String(text).CStr());
+	return false;
+}
+
+static Core::String ReadLog(const FS::Path& log) {
+	FS::File file = FS::File(log.CStr(), "rb");
+	return file.IsOpen() ? file.ReadText() : Core::String();
+}
+
+// Runs the child failing as `how`; true when it ended with `exitCode` and reported `what` on stderr and, with a log,
+// in it: after the time and its process id, then its thread and stack.
+static bool Reported(const char* how, int64 exitCode, const char* what, bool logged) {
+	FS::Path log = Platform::ExecutablePath().Parent() / (Core::String(how) + ".log").View();
+	FS::RemoveFile(log.CStr());
+	Process::StartInfo info;
+	info.program = Core::String(Platform::ExecutablePath().View());
+	info.arguments.Push(Core::String(how));
+	info.arguments.Push(Core::String(log.View()));
+	Process::Output child = Process::Run(info, 60000);
+	bool ok = true;
+	if (child.exitCode != exitCode) {
+		printf("FAIL %s: exit %lld, not %lld\n", how, child.exitCode, exitCode);
+		ok = false;
+	}
+	Core::String report = Core::String("C4: fatal: ") + what;
+	ok = Holds(child.errors.View(), report.View(), how, "stderr") && ok;
+	ok = Holds(child.errors.View(), Core::StringView("\n    at "), how, "stderr") && ok;
+	Core::String written = ReadLog(log);
+	if (!logged) {
+		if (written.IsEmpty()) return ok;
+		printf("FAIL %s: a log was written without SetCrashLog\n", how);
+		return false;
+	}
+	ok = Holds(written.View(), (Core::String("] ") + report.View()).View(), how, "the crash log") && ok;
+	ok = Holds(written.View(), Core::StringView("\n    thread "), how, "the crash log") && ok;
+	ok = Holds(written.View(), Core::StringView("\n    at "), how, "the crash log") && ok;
+	return ok;
+}
+
+// StackText in a catch handler: the exception's type and the stack from its throw, the throwing frames included.
+static bool Caught() {
+	Process::StartInfo info;
+	info.program = Core::String(Platform::ExecutablePath().View());
+	info.arguments.Push(Core::String("caught"));
+	info.arguments.Push(Core::String("-"));
+	Process::Output child = Process::Run(info, 60000);
+	bool ok = Holds(child.output.View(), Core::StringView("    thrown: struct Boom\n"), "caught", "StackText");
+	ok = Holds(child.output.View(), Core::StringView("\n    at "), "caught", "StackText") && ok;
+	if (child.exitCode == 0) return ok;
+	printf("FAIL caught: exit %lld\n", child.exitCode);
+	return false;
+}
+
+int32 main(int32 argc, char8** argv) {
+	if (argc == 3) return Fail(Core::StringView((const char*)argv[1]), Core::StringView((const char*)argv[2]));
+	bool ok = Reported("throw", 1, "an exception was thrown and not caught", true);
+	Core::String thrown = ReadLog(Platform::ExecutablePath().Parent() / "throw.log");
+	ok = Holds(thrown.View(), Core::StringView("\"thrower\""), "throw", "the crash log") && ok;
+	ok = Reported("fault", kAccessViolation, "an access violation (0xC0000005) writing address 0x0", true) && ok;
+	ok = Reported("unlogged", 1, "an exception was thrown and not caught", false) && ok;
+	ok = Caught() && ok;
+	if (ok) printf("crash reports: ok\n");
+	return ok ? 0 : 1;
+}

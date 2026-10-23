@@ -348,7 +348,7 @@ function Test-NukeToolchainProject {
         if ($init.exit -ne 0) { return @("nuke init failed: $($init.output)") }
         $failures = @()
         $run = Invoke-Nuke $root """$nuke"" run"
-        if ($run.exit -ne 0 -or $run.output -notmatch "(?m)^Game\s*$") { return @("the nuke init project did not build and run: " + ($run.output -split "`n" | Select-Object -Last 6) -join " | ") }
+        if ($run.exit -ne 0 -or $run.output -notmatch "(?m)^Game: 0 argument\(s\)\s*$") { return @("the nuke init project did not build and run: " + ($run.output -split "`n" | Select-Object -Last 6) -join " | ") }
         $built = "build/{0}/Development-windows-x64/Game/Game.objects"
         if (-not (Test-Path (Join-Path $root ($built -f "int"))) -or (Test-Path (Join-Path $root ($built -f "bin")))) { $failures += "Nuke did not put the intermediates in build/int" }
 

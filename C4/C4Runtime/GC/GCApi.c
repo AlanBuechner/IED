@@ -183,6 +183,15 @@ static void after_collection(void)
 // ------------------------------------------------------------------------------------------------
 // Objects
 
+// Every thread's native bytes in use, the ended ones' and the unregistered ones' (under the lock; a thread's own count
+// may lag the read by its last allocation).
+static int64_t native_in_use(const GCState* gc)
+{
+	int64_t total = __atomic_load_n(&g_nativeInUse, __ATOMIC_RELAXED) + gc->endedNativeInUse;
+	for (const GCThread* thread = gc->threads.all; thread; thread = thread->next) total += thread->nativeInUse;
+	return total;
+}
+
 // A concurrent cycle that the program's allocation outruns is finished at once, so the heap stays within twice the
 // size that started it.
 static int cycle_outrun(const GCState* gc)
@@ -226,7 +235,7 @@ __attribute__((noinline)) static void* allocate_slow(GCThread* self, GCAllocRequ
 	{
 		gc_os_lock();
 		GCState* gc = collector();
-		void* p = gc_allocate(gc, self, request);
+		void* p = gc_allocate(gc, self, request, native_in_use(gc));
 		const int outrun = cycle_outrun(gc);
 		gc_os_unlock();
 		if (p && !outrun)
@@ -564,15 +573,6 @@ static c4_gc_stats locked_stats(void)
 	const c4_gc_stats s = gc_stats(gc);
 	gc_os_unlock();
 	return s;
-}
-
-// Every thread's native bytes in use, the ended ones' and the unregistered ones' (under the lock; a thread's own count
-// may lag the read by its last allocation).
-static int64_t native_in_use(const GCState* gc)
-{
-	int64_t total = __atomic_load_n(&g_nativeInUse, __ATOMIC_RELAXED) + gc->endedNativeInUse;
-	for (const GCThread* thread = gc->threads.all; thread; thread = thread->next) total += thread->nativeInUse;
-	return total;
 }
 
 c4_gc_stats c4_gc_get_stats(void)

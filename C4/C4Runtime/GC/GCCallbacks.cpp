@@ -2,15 +2,14 @@
 // an exception must not unwind through the collector's C frames (a collection would stay half done), so one escaping
 // stops the program.
 
-#include <cstdio>
-#include <cstdlib>
+#include "PlatformRuntimeC.h"
+#include <string>
 
 namespace
 {
 	[[noreturn]] void Escaped(const char* what)
 	{
-		std::fprintf(stderr, "C4: fatal: an exception escaped %s\n", what);
-		std::exit(1);
+		c4_fatal((std::string("an exception escaped ") + what).c_str());
 	}
 }
 

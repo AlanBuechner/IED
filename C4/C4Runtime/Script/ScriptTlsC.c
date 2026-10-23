@@ -2,6 +2,7 @@
 // on its first use; each thread keeps an array of its objects by slot, made on that thread's first use of the
 // variable. The slow path, the threads' list and releasing take one lock; reading an existing object takes none.
 
+#include "PlatformRuntimeC.h"
 #include "ScriptRuntimeC.h"
 #include "GCRuntimeC.h"
 #include "ThreadRuntimeC.h"
@@ -28,8 +29,7 @@ static _Thread_local ThreadSlots* t_slots;
 
 static void fatal(const char* message)
 {
-	fputs(message, stderr);
-	exit(1);
+	c4_fatal(message);
 }
 
 static void free_object(void* object)
@@ -77,7 +77,7 @@ static ThreadSlots* this_thread_slots(void)
 {
 	if (t_slots) return t_slots;
 	ThreadSlots* slots = (ThreadSlots*)calloc(1, sizeof(ThreadSlots));
-	if (!slots) fatal("C4: fatal: out of memory for a script thread_local\n");
+	if (!slots) fatal("out of memory for a script thread_local");
 	AcquireSRWLockExclusive(&g_lock);
 	slots->next = g_threads;
 	g_threads = slots;
@@ -107,7 +107,7 @@ static void* new_object(const __emutls_control* control)
 	const size_t align = control->align > sizeof(void*) ? control->align : sizeof(void*);
 	const size_t size = control->size ? control->size : 1;
 	void* object = _aligned_malloc(size, align);
-	if (!object) fatal("C4: fatal: out of memory for a script thread_local\n");
+	if (!object) fatal("out of memory for a script thread_local");
 	if (control->value) memcpy(object, control->value, control->size);
 	else memset(object, 0, size);
 	c4_gc_register_region(object, size); // it may hold managed pointers
@@ -124,7 +124,7 @@ static void* make_object(__emutls_control* control, uintptr_t index)
 		size_t capacity = slots->capacity ? slots->capacity : 8;
 		while (capacity < index) capacity *= 2;
 		void** grown = (void**)realloc(slots->objects, capacity * sizeof(void*));
-		if (!grown) fatal("C4: fatal: out of memory for a script thread_local\n");
+		if (!grown) fatal("out of memory for a script thread_local");
 		memset(grown + slots->capacity, 0, (capacity - slots->capacity) * sizeof(void*));
 		slots->objects = grown;
 		slots->capacity = capacity;

@@ -7,6 +7,7 @@
 // Type identity is the TypeDescriptor's address or, across modules, its decorated name - the rule the
 // MSVC frame handler uses, so C++ types match too. C4 has no virtual bases (PMD.pdisp is always -1).
 
+#include "PlatformRuntimeC.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,6 +65,5 @@ int32_t c4_instance_of(void* obj, const void* target)
 // A vtable entry with no implementation (an abstract method reached on a constructed object).
 void c4_purecall(void)
 {
-	fputs("C4: fatal: pure virtual method called\n", stderr);
-	exit(1);
+	c4_fatal("pure virtual method called");
 }

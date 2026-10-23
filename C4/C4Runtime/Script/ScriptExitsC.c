@@ -2,6 +2,7 @@
 // its thread_locals' on each thread when that thread ends or the script unloads, whichever comes first. One lock
 // guards every script's lists: they change only as objects start, threads end and scripts unload.
 
+#include "PlatformRuntimeC.h"
 #include "ScriptRuntimeC.h"
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
@@ -47,8 +48,7 @@ static SRWLOCK g_lock = SRWLOCK_INIT;
 
 static void fatal(const char* message)
 {
-	fputs(message, stderr);
-	exit(1);
+	c4_fatal(message);
 }
 
 static void push_exit(ScriptExits* exits, void (*destroy)(void*), void* object)
@@ -57,7 +57,7 @@ static void push_exit(ScriptExits* exits, void (*destroy)(void*), void* object)
 	{
 		const size_t capacity = exits->capacity ? exits->capacity * 2 : kFirstExitCapacity;
 		ScriptExit* grown = (ScriptExit*)realloc(exits->entries, capacity * sizeof(ScriptExit));
-		if (!grown) fatal("C4: fatal: out of memory registering a script object to destroy\n");
+		if (!grown) fatal("out of memory registering a script object to destroy");
 		exits->entries = grown;
 		exits->capacity = capacity;
 	}
@@ -138,7 +138,7 @@ void c4_script_thread_at_exit(c4_script_module* module, void (*destroy)(void*), 
 		if (!block)
 		{
 			block = (ScriptThreadExits*)calloc(1, sizeof(ScriptThreadExits));
-			if (!block) fatal("C4: fatal: out of memory registering a script thread_local\n");
+			if (!block) fatal("out of memory registering a script thread_local");
 			block->thread = thread;
 			block->references = 2;
 			block->next = module->threads;

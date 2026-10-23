@@ -2,6 +2,7 @@
 // control reaches it, and every global, static member and static local that needs destruction is registered
 // when its start completes. They are destroyed at exit in the reverse order, as in C++.
 
+#include "PlatformRuntimeC.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,8 +40,7 @@ void c4_run_exit_destroy(void (*destroy)(void*), void* object); // StaticStorage
 
 static void fatal(const char* message)
 {
-	fputs(message, stderr);
-	exit(1);
+	c4_fatal(message);
 }
 
 // --- once guards ---------------------------------------------------------------------------------------
@@ -69,7 +69,7 @@ int c4_once_begin(c4_once_guard* guard)
 		SleepConditionVariableSRW(&g_storage.onceEnded, &g_storage.lock, INFINITE, 0);
 	}
 	ReleaseSRWLockExclusive(&g_storage.lock);
-	if (reentered) fatal("C4: fatal: a static local's initialization reached its own declaration again\n");
+	if (reentered) fatal("a static local's initialization reached its own declaration again");
 	return run;
 }
 
@@ -139,5 +139,5 @@ void c4_at_exit(void (*destroy)(void*), void* object)
 		g_storage.exitCount++;
 	}
 	ReleaseSRWLockExclusive(&g_storage.lock);
-	if (!room) fatal("C4: fatal: out of memory registering an object to destroy at exit\n");
+	if (!room) fatal("out of memory registering an object to destroy at exit");
 }

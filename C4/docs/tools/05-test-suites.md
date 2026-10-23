@@ -154,7 +154,8 @@ assets\build-output\iso\SwizzleLanguage.exe
 
 ## 6. RuntimeTest, ScriptTest, StressTest and ToolsTest
 
-- `RuntimeTest/`: `PrintfTest`, `StructReturn`. Compile and run; exit 0 required.
+- `RuntimeTest/`: `PrintfTest`, `StructReturn`, `CrashLog` (a child that fails reports on stderr and in its crash
+  log), `NativePressure` (garbage holding native buffers is collected, BUG-383). Compile and run; exit 0 required.
 - `ScriptTest/` ([runtime/04-scripting.md](../runtime/04-scripting.md)): one folder per case, `host/` (the program,
   built with `--script-host` together with `Common/scripttest.ch`, its checks and script loading) and `scripts/`
   (copied beside the built program). The host exits 0 when every check held; with `-O2` the host and its scripts

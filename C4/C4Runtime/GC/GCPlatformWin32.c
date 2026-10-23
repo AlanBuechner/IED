@@ -1,4 +1,5 @@
 #include "GC/GCPlatform.h"
+#include "PlatformRuntimeC.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -379,7 +380,5 @@ void gc_os_on_thread_exit(void (*on_exit)(void*), void* data)
 
 void gc_os_fatal(const char* message)
 {
-	fprintf(stderr, "C4: fatal: %s\n", message);
-	fflush(stderr);
-	exit(1);
+	c4_fatal(message);
 }

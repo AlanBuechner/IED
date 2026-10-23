@@ -311,9 +311,10 @@ Behavior:
 - `finally` is exactly a `defer` that covers the try statement and its handlers:
   `try { A } catch (E e) { B } finally { F }` behaves as `{ defer { F } try { A } catch (E e) { B } }`.
   The defer-body rules apply to `F` (no `return`, no jumps out of it).
-- **Uncaught exceptions** terminate the process: the runtime prints
-  `C4: fatal: an exception was thrown and not caught` and exits with code 1. No code after the
-  throw runs. Under a debugger, Windows hands the exception to the debugger instead (it stops there,
+- **Uncaught exceptions** terminate the process: the runtime reports
+  `C4: fatal: an exception was thrown and not caught`, the thread and the stack that threw (functions
+  and lines from the PDB of a `-g` build) on standard error, and in the program's crash log when it
+  named one (`Platform::SetCrashLog`), and exits with code 1. No code after the throw runs. Under a debugger, Windows hands the exception to the debugger instead (it stops there,
   with the throw's stack), and the program then ends with the exception's code.
 - The exception object is destroyed (its `delete`) once the last handler is done with it, also when
   the handler leaves by `return`, `break` or another throw.

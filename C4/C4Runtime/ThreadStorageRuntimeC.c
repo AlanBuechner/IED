@@ -2,6 +2,7 @@
 // start and destroyed when the thread ends, the last started first. The main thread's join the process's exit list
 // instead (StaticStorageRuntimeC.c), so they end in the reverse order of every start, among the globals'.
 
+#include "PlatformRuntimeC.h"
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,8 +32,7 @@ void c4_gc_register_thread(void);
 
 static void fatal(const char* message)
 {
-	fputs(message, stderr);
-	exit(1);
+	c4_fatal(message);
 }
 
 // The thread that runs the C runtime's initializers is the main thread.
@@ -64,7 +64,7 @@ void c4_thread_at_exit(void (*destroy)(void*), void* object)
 	}
 	c4_gc_register_thread(); // the collector ends the thread's C4 life, these destructions first
 	ThreadExits* exits = &t_exits;
-	if (exits->count == exits->capacity && !grow(exits)) fatal("C4: fatal: out of memory registering an object to destroy at thread end\n");
+	if (exits->count == exits->capacity && !grow(exits)) fatal("out of memory registering an object to destroy at thread end");
 	exits->entries[exits->count].destroy = destroy;
 	exits->entries[exits->count].object = object;
 	exits->count++;
@@ -88,5 +88,5 @@ void c4_thread_once_abandon(int32_t* guard) { *guard = 0; }
 
 void c4_thread_once_reentered(void)
 {
-	fatal("C4: fatal: a static local's initialization reached its own declaration again\n");
+	fatal("a static local's initialization reached its own declaration again");
 }
