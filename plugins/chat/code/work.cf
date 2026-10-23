@@ -537,7 +537,7 @@ namespace Ai
 		program->run = ProgramRun;
 		registry.Add(program);
 		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). A test or program that might not end: give timeout_s. Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\", \"timeout_s\": 300})",
-			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}}, \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"description\": \"a project of the solution; the startup project when left out (one without tests fails test: name the project that has them)\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		build->plan = BuildPlan;
 		build->run = BuildRun;
