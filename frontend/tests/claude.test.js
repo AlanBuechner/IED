@@ -40,6 +40,9 @@ test("claude: the status bar says the session and the week", () => {
 	const spent = usageStatus(claude([window("five_hour", "Session (5 h)", 100, 2, { usedUp: true })], { blockedUntilMs: NOW + HOUR }));
 	assertEqual(spent.level, "error");
 	assertEqual(spent.tooltip.includes("Used up; Claude frees in 1 h 0 min"), true);
+	const apart = usageStatus(claude([window("seven_day", "Week", 100, 2, { usedUp: true }), window("model:fable", "Fable week", 20, 0.4, { separate: true })], { blockedUntilMs: NOW + 48 * HOUR }));
+	assertEqual(apart.level, "error", "the shared week used up");
+	assertEqual(apart.tooltip.includes("Shared limits used up; they free in 2 d 0 h. Fable week still has room: its model runs"), true, "Fable is metered apart: it still runs");
 	const chain = { group: "claude", role: "primary", now: "claude-sonnet", places: [
 		{ model: "claude-opus", claude: true, pace: { max: 1, target: "both" }, state: "over", why: "the week is at 1.20x pace, over its 1.00x" },
 		{ model: "claude-sonnet", claude: true, pace: { max: 1.25, target: "both" }, state: "use" },
@@ -66,7 +69,9 @@ test("claude: the status item's hover card draws each window's bar, its pace and
 	assertEqual(card.querySelector(".claude-hover-why").textContent, "claude-opus: the session is at 1.60x pace, over its 1.00x");
 	const spent = usageHoverCard(claude([window("five_hour", "Session (5 h)", 100, 2, { usedUp: true })], { blockedUntilMs: NOW + HOUR }));
 	assertEqual([spent.querySelector(".claude-pace").textContent, spent.querySelector(".claude-bar").className], ["used up", "claude-bar err"]);
-	assertEqual(spent.querySelector(".set-probe.bad").textContent.includes("frees in 1 h 0 min"), true);
+	assertEqual(spent.querySelector(".set-probe.bad").textContent.includes("frees in 1 h 0 min. Turns go to their group's fallback"), true);
+	const apart = usageHoverCard(claude([window("seven_day", "Week", 100, 2, { usedUp: true }), window("model:fable", "Fable week", 20, 0.4, { separate: true })], { blockedUntilMs: NOW + 48 * HOUR }));
+	assertEqual(apart.querySelector(".set-probe.bad").textContent, "Shared limits used up; they free in 2 d 0 h. Fable week still has room: its model runs. Other turns go to their group's fallback meanwhile.");
 	const keyed = usageHoverCard(claude([], { cli: { path: "C:/claude.exe", signIn: "signed_in", authMethod: "api_key", subscription: false } }));
 	assertEqual([keyed.querySelector(".claude-hover-note").className, keyed.querySelector(".claude-hover-note").textContent.startsWith("Claude Code signs in with api_key."), keyed.querySelector(".claude-hover-window")],
 		["claude-hover-note c-error", true, null], "no windows: why");

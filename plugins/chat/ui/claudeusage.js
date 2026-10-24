@@ -44,6 +44,21 @@ export function windowLine(window, now) {
 	return line;
 }
 
+// The shared pool used up (the snapshot's blockedUntilMs), as the tooltip says it: "Used up; Claude frees in 1 h 0 min", or
+// with a model metered on a week of its own that has room, "Shared limits used up; they free in 2 d 0 h. Fable week still
+// has room: its model runs".
+export function blockedLine(claude, now) {
+	const frees = resetText(claude.blockedUntilMs, now);
+	const apart = apartWithRoom(claude).map((w) => w.label);
+	if (!apart.length) return "Used up; Claude frees " + frees;
+	return "Shared limits used up; they free " + frees + ". " + apart.join(", ") + " still has room: its model runs";
+}
+
+// The windows a model is metered on apart from the shared pool (Fable's week) that are not used up.
+function apartWithRoom(claude) {
+	return ((claude.usage || {}).windows || []).filter((w) => w.separate && !w.usedUp);
+}
+
 // A chain as the tooltip says it: "claude / primary: claude-sonnet now (claude-opus over its pace)".
 export function chainLine(chain) {
 	const passed = (chain.places || []).filter((place) => place.state !== "use");
@@ -69,7 +84,7 @@ export function usageStatus(claude) {
 	if (claude.blockedUntilMs > now || windows.some((w) => w.usedUp)) level = "error";
 	else if (usage.status === "allowed_warning" || windows.some((w) => w.pace > WARN_PACE)) level = "warn";
 	const lines = windows.map((w) => windowLine(w, now));
-	if (claude.blockedUntilMs > now) lines.push("Used up; Claude frees " + resetText(claude.blockedUntilMs, now));
+	if (claude.blockedUntilMs > now) lines.push(blockedLine(claude, now));
 	for (const chain of claude.chains || []) lines.push(chainLine(chain));
 	return { text: "Claude " + shown.map((w) => SHORT[w.id] + " " + percent(w.utilization)).join(" "), level, tooltip: lines.join("\n") };
 }
@@ -150,7 +165,7 @@ function hoverWindow(window, now) {
 // What holds Claude back now, or warns of it: used up, the CLI's warning, an ask that failed.
 function usageNotes(claude, usage, now) {
 	const notes = [];
-	if (claude.blockedUntilMs > now) notes.push(h("div.set-probe.bad", null, icon("error"), "Claude is used up; it frees " + resetText(claude.blockedUntilMs, now) + ". Turns go to their group's fallback meanwhile."));
+	if (claude.blockedUntilMs > now) notes.push(h("div.set-probe.bad", null, icon("error"), blockedLine(claude, now) + (apartWithRoom(claude).length ? ". Other turns" : ". Turns") + " go to their group's fallback meanwhile."));
 	else if (usage.status === "allowed_warning") notes.push(h("div.set-probe.warn", null, icon("warning"), "Claude Code warns that " + (usage.limitedBy || "a window") + " is near its limit."));
 	if (usage.error) notes.push(h("div.set-probe.warn", null, icon("warning"), "The last ask failed: " + usage.error));
 	return notes;

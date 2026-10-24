@@ -68,11 +68,23 @@ namespace Ai
 		window->resetsAtMs = IsoToMs(node.Member("resets_at").AsView());
 	}
 
+	// The model_scoped window of the model the server calls `name` ("Fable"), metered apart from the shared week.
+	static UsageWindow* ScopedWindow(ClaudeUsage& usage, Core::StringView name) {
+		UsageWindow* window = usage.Window((Core::String("model:") + Lower(name).View()).View());
+		window->label = Core::String(name) + " week";
+		window->model = Lower(name);
+		window->separate = true;
+		return window;
+	}
+
 	bool ReadUsage(const Serialization::DomNode& response, ClaudeUsage& usage, int64 nowMs) {
 		if (response.Kind() != Serialization::DomKind::Object || !response.Member("rate_limits_available").IsValid()) return false;
 		usage.known = true;
 		usage.available = response.Member("rate_limits_available").AsBool();
 		usage.plan = Core::String(response.Member("subscription_type").AsView());
+		Core::Array<UsageWindow*> scopedBefore;
+		for (UsageWindow* window : usage.windows)
+			if (window->separate) scopedBefore.Push(window);
 		usage.windows.Clear();
 		usage.extraEnabled = false;
 		usage.extraUtilization = -1;
@@ -84,13 +96,13 @@ namespace Ai
 		TakeWindow(usage, "seven_day_opus", limits.Member("seven_day_opus"));
 		TakeWindow(usage, "seven_day_sonnet", limits.Member("seven_day_sonnet"));
 		Serialization::DomNode scoped = limits.Member("model_scoped");
+		if (usage.available && limits.Kind() == Serialization::DomKind::Object && scoped.Kind() != Serialization::DomKind::Array)
+			for (UsageWindow* window : scopedBefore) usage.windows.Push(window);
 		for (int64 i = 0; scoped.Kind() == Serialization::DomKind::Array && i < scoped.Count(); ++i) {
 			Serialization::DomNode each = scoped.At(i);
 			Core::StringView name = each.Member("display_name").AsView();
 			if (name.IsEmpty() || each.Member("utilization").IsNull() || !each.Member("utilization").IsValid()) continue;
-			UsageWindow* window = usage.Window((Core::String("model:") + Lower(name).View()).View());
-			window->label = Core::String(name) + " week";
-			window->model = Lower(name);
+			UsageWindow* window = ScopedWindow(usage, name);
 			window->utilization = each.Member("utilization").AsFloat();
 			window->resetsAtMs = IsoToMs(each.Member("resets_at").AsView());
 		}
@@ -105,14 +117,30 @@ namespace Ai
 		return true;
 	}
 
+	// The window a rate_limit_event's type names, null when it is not there: seven_day_overage_included, the CLI's "Fable
+	// limit", is the model_scoped one.
+	static UsageWindow* NamedWindow(const ClaudeUsage& usage, Core::StringView type) {
+		if (type != "seven_day_overage_included") return usage.Find(type);
+		for (UsageWindow* window : usage.windows)
+			if (window->separate) return window;
+		return nullptr;
+	}
+
+	// NamedWindow's, added when it is not there yet (the overage-included one as the CLI names it when it knows no other).
+	static UsageWindow* EventWindow(ClaudeUsage& usage, Core::StringView type) {
+		UsageWindow* named = NamedWindow(usage, type);
+		if (named) return named;
+		return type == "seven_day_overage_included" ? ScopedWindow(usage, Core::StringView("Fable")) : usage.Window(type);
+	}
+
 	static void TakeUnified(ClaudeUsage& usage, const char* id, const Serialization::DomNode& node) {
 		if (node.Kind() != Serialization::DomKind::Object || !node.Member("utilization").IsValid()) return;
-		UsageWindow* window = usage.Window(Core::StringView(id));
+		UsageWindow* window = EventWindow(usage, Core::StringView(id));
 		window->utilization = node.Member("utilization").AsFloat() * 100.0;
 		if (node.Member("resetsAt").AsInt() > 0) window->resetsAtMs = node.Member("resetsAt").AsInt() * 1000;
 	}
 
-	static bool IsPlanWindow(Core::StringView id) { return id == "five_hour" || id == "seven_day" || id == "seven_day_opus" || id == "seven_day_sonnet"; }
+	static bool IsPlanWindow(Core::StringView id) { return id == "five_hour" || id == "seven_day" || id == "seven_day_opus" || id == "seven_day_sonnet" || id == "seven_day_overage_included"; }
 
 	void TakeRateLimit(const Serialization::DomNode& info, ClaudeUsage& usage, int64 nowMs) {
 		if (info.Kind() != Serialization::DomKind::Object) return;
@@ -127,16 +155,23 @@ namespace Ai
 		usage.limitResetsAtMs = info.Member("resetsAt").AsInt() > 0 ? info.Member("resetsAt").AsInt() * 1000 : 0;
 		TakeUnified(usage, "five_hour", unified.Member("five_hour"));
 		TakeUnified(usage, "seven_day", unified.Member("seven_day"));
+		TakeUnified(usage, "seven_day_overage_included", unified.Member("seven_day_overage_included"));
 		if (IsPlanWindow(type) && info.Member("utilization").IsValid()) {
-			UsageWindow* window = usage.Window(type);
+			UsageWindow* window = EventWindow(usage, type);
 			window->utilization = info.Member("utilization").AsFloat() * 100.0;
 			if (usage.limitResetsAtMs > 0) window->resetsAtMs = usage.limitResetsAtMs;
 		}
 		if (usage.status == "rejected" && IsPlanWindow(type)) {
-			UsageWindow* window = usage.Window(type);
+			UsageWindow* window = EventWindow(usage, type);
 			if (window->utilization < 100.0) window->utilization = 100.0;
 			if (usage.limitResetsAtMs > 0) window->resetsAtMs = usage.limitResetsAtMs;
 		}
+	}
+
+	UsageWindow* RejectedWindow(const ClaudeUsage& usage, int64 nowMs) {
+		if (usage.status != "rejected") return nullptr;
+		UsageWindow* window = NamedWindow(usage, usage.limitedBy.View());
+		return window && UsedUp(*window, nowMs) ? window : nullptr;
 	}
 
 	static int64 Digits(Core::StringView text, int64 at, int64 count, bool& ok) {
@@ -217,6 +252,18 @@ namespace Ai
 		return nullptr;
 	}
 
+	Core::String ApartModel(const ClaudeUsage& usage, Core::StringView model) {
+		UsageWindow* own = ModelWindow(usage, model);
+		if (own) return own->separate ? own->model : Core::String();
+		return Lower(model).View().Contains(Core::StringView(kApartModel)) ? Core::String(kApartModel) : Core::String();
+	}
+
+	bool Limits(const ClaudeUsage& usage, const UsageWindow& window, Core::StringView model) {
+		if (window.model.IsEmpty()) return window.id == "five_hour" || ApartModel(usage, model).IsEmpty();
+		UsageWindow* own = ModelWindow(usage, model);
+		return own && own->id.View() == window.id.View();
+	}
+
 	static void WriteNumber(IED::JsonWriter& json, const char* key, double value) {
 		Core::StringBuilder text;
 		text.AppendDouble(value, 3);
@@ -242,6 +289,7 @@ namespace Ai
 			json.Field("id", window->id.View());
 			json.Field("label", window->label.View());
 			if (!window->model.IsEmpty()) json.Field("model", window->model.View());
+			if (window->separate) json.BoolField("separate", true);
 			WriteNumber(json, "utilization", window->utilization);
 			json.IntField("resetsAtMs", window->resetsAtMs);
 			json.IntField("lengthMs", window->lengthMs);
@@ -282,15 +330,14 @@ namespace Ai
 		return out.ToString();
 	}
 
-	// The windows that pace `model` under `target`.
+	// The windows that pace `model` under `target`: those that limit it, the 5-hour session unless `week`, the weekly ones
+	// unless `session`.
 	static Core::Array<UsageWindow*> PacedWindows(const ClaudeUsage& usage, Core::StringView model, Core::StringView target) {
 		Core::Array<UsageWindow*> windows;
-		UsageWindow* session = usage.Find(Core::StringView("five_hour"));
-		UsageWindow* week = usage.Find(Core::StringView("seven_day"));
-		UsageWindow* own = ModelWindow(usage, model);
-		if (target != "week" && session) windows.Push(session);
-		if (target != "session" && week) windows.Push(week);
-		if (target != "session" && own) windows.Push(own);
+		for (UsageWindow* window : usage.windows) {
+			const bool session = window->id == "five_hour";
+			if (Limits(usage, *window, model) && (session ? target != "week" : target != "session")) windows.Push(window);
+		}
 		return windows;
 	}
 

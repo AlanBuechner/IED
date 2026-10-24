@@ -142,7 +142,8 @@ namespace Ai
 		// Reads the query to its result.
 		private void DrainClaude();
 		// Claude cannot serve the turn (`claudeBlocked`: a usage limit, no subscription sign-in): the next candidate that is
-		// not Claude, or a pause saying why. The lock is held.
+		// not Claude - or after a usage limit a Claude one with room left (Fable, metered apart) - or a pause saying why. The
+		// lock is held.
 		private void ClaudeBlocked();
 		// The call's result to the CLI's tools/call for it; the step's `last` call's carries the messages that came meanwhile.
 		private void AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome, bool last);

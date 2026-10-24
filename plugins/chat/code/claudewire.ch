@@ -13,6 +13,7 @@ namespace Ai
 	const char* kClaudeToolPrefix = "mcp__ied__";
 	const char* kClaudeServerName = "ied";
 	const int64 kHistoryTextBytes = 48 * 1024;   // of the earlier turns a new session is told
+	const char* kApartModel = "fable";           // the CLI's overage-included model, metered on a weekly "Fable limit" of its own
 
 	// One window of the plan's limits.
 	class UsageWindow
@@ -20,6 +21,7 @@ namespace Ai
 		public Core::String id;          // five_hour, seven_day, seven_day_opus, seven_day_sonnet, model:<name>
 		public Core::String label;       // "Session (5 h)", "Week", "Opus week"
 		public Core::String model;       // a per-model window's model in lower case ("opus", "fable"); empty for the shared ones
+		public bool separate;            // its model is metered here instead of in the shared week (model_scoped: Fable's)
 		public double utilization;       // percent used, 0-100 (past 100 when usage ran over)
 		public int64 resetsAtMs;         // 0 when unknown
 		public int64 lengthMs;
@@ -46,10 +48,14 @@ namespace Ai
 		public void Forget();
 	}
 
-	// get_usage's answer into `usage`, its windows replacing those before; false when it is not one.
+	// get_usage's answer into `usage`, its windows replacing those before - the model_scoped ones kept when it names none
+	// (the CLI leaves them out when it knows nothing of them); false when it is not one.
 	bool ReadUsage(const Serialization::DomNode& response, ClaudeUsage& usage, int64 nowMs);
-	// A rate_limit_event's rate_limit_info into `usage`: the windows it names (0-1 there) and its status.
+	// A rate_limit_event's rate_limit_info into `usage`: the windows it names (0-1 there) and its status;
+	// seven_day_overage_included (the CLI's "Fable limit") is the model_scoped window's.
 	void TakeRateLimit(const Serialization::DomNode& info, ClaudeUsage& usage, int64 nowMs);
+	// The window the last rate_limit_event refused a request for, while it is used up; null when there is none.
+	UsageWindow* RejectedWindow(const ClaudeUsage& usage, int64 nowMs);
 	// An ISO 8601 time ("2026-10-22T19:00:00.5+00:00", "...Z") as Unix milliseconds; 0 when it is not one.
 	int64 IsoToMs(Core::StringView text);
 	// How far through `window` is at `nowMs`, 0 to 1 (1 when its reset is unknown, 0 once it has reset).
@@ -61,12 +67,18 @@ namespace Ai
 	bool UsedUp(const UsageWindow& window, int64 nowMs);
 	// The weekly window of `model` alone: opus and sonnet their own, another a model_scoped one its name contains.
 	UsageWindow* ModelWindow(const ClaudeUsage& usage, Core::StringView model);
+	// The model a window of its own meters Claude `model` as ("fable"): its model_scoped window's, or before one is known
+	// kApartModel's, as the CLI has it; empty for a model of the shared pool.
+	Core::String ApartModel(const ClaudeUsage& usage, Core::StringView model);
+	// Whether `window` limits Claude `model`: its own window does and another model's does not; the 5-hour session limits
+	// every model, the shared week every one not metered apart (ApartModel).
+	bool Limits(const ClaudeUsage& usage, const UsageWindow& window, Core::StringView model);
 	// {known, available, plan, status, limitedBy, limitResetsAtMs, extra?, updatedMs, error?, windows: [{id, label, model?,
-	// utilization, resetsAtMs, lengthMs, through, pace}]} - the clients' and the AI's view.
+	// separate?, utilization, resetsAtMs, lengthMs, through, pace}]} - the clients' and the AI's view.
 	void WriteUsage(IED::JsonWriter& json, const ClaudeUsage& usage, int64 nowMs);
 
-	// The pace of `model` against `target` (session, week, both) now: the worst of the windows that pace it, `why` which
-	// ("the week is at 1.85x pace"; docs/04 "Pacing"); 0 and empty when the usage is unknown or no window paces it.
+	// The pace of `model` against `target` (session, week, both) now: the worst of the windows that limit and pace it, `why`
+	// which ("the week is at 1.85x pace"; docs/04 "Pacing"); 0 and empty when the usage is unknown or no window paces it.
 	double PaceAgainst(const ClaudeUsage& usage, Core::StringView model, Core::StringView target, int64 nowMs, Core::String& why);
 	// Whether `target` is one pacing knows.
 	bool IsPacingTarget(Core::StringView target);

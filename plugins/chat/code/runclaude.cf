@@ -333,9 +333,10 @@ namespace Ai
 			result->httpStatus = 429;
 			result->error = (Core::String("Claude's usage limit: ") + said.View());
 			IED::HostLock guard(*context);
-			chats->claude->MetLimit(LimitResetIn(said.View()));
+			const Core::String model = ClaudeModel();
+			chats->claude->MetLimit(model.View(), LimitResetIn(said.View()));
 			const int64 now = ClaudeNowMs();
-			claudeBlocked = ((Core::String("Claude's usage limit is reached (") + said.View()) + "); it frees ") + ResetText(chats->claude->BlockedUntil(now), now).View();
+			claudeBlocked = ((Core::String("Claude's usage limit is reached (") + said.View()) + "); it frees ") + ResetText(chats->claude->BlockedUntil(model.View(), now), now).View();
 			claudeBlockedStop = Core::String("usage_limit");
 			return;
 		}
@@ -387,11 +388,20 @@ namespace Ai
 		claude->Settle(Core::StringView(kClaudeTurnOverNote), false, kClaudeDrainMs, [self](ClaudeLine* line) { self->ClaudeAside(line); });
 	}
 
+	// Whether `profile` can take a turn Claude refused: a model that is not Claude, or after a usage limit a Claude one with
+	// room left (one metered apart from the pool that ran out: Fable).
+	static bool TakesOver(const ModelProfile& profile, bool usageLimit, const ClaudeAccount& account, int64 nowMs) {
+		if (!profile.IsClaude()) return true;
+		return usageLimit && PlaceNow(profile, PaceLimit(), true, account, nowMs)->state != PlaceState::UsedUp;
+	}
+
 	void TurnRun::ClaudeBlocked() {
 		const Core::String why = claudeBlocked;
 		claudeBlocked = Core::String();
+		const bool usageLimit = claudeBlockedStop == "usage_limit";
+		const int64 now = ClaudeNowMs();
 		int64 next = candidate + 1;
-		while (next < candidates.Count() && candidates[next]->IsClaude()) next += 1;
+		while (next < candidates.Count() && !TakesOver(*candidates[next], usageLimit, *chats->claude, now)) next += 1;
 		if (next >= candidates.Count()) {
 			Pause(claudeBlockedStop.View(), why.View());
 			return;

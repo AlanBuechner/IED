@@ -225,18 +225,25 @@ namespace Ai
 		Changed();
 	}
 
-	void ClaudeAccount::MetLimit(int64 untilMs) {
+	void ClaudeAccount::MetLimit(Core::StringView model, int64 untilMs) {
 		const int64 now = AccountNowMs();
+		UsageWindow* rejected = RejectedWindow(usage, now);
+		if (rejected && Limits(usage, *rejected, model)) return;
 		int64 until = untilMs;
 		if (until <= now) until = usage.limitResetsAtMs > now ? usage.limitResetsAtMs : now + kUsageUnknownBlockMs;
-		blockedUntilMs = until;
+		Core::String apart = ApartModel(usage, model);
+		if (!apart.IsEmpty()) apartBlockedUntilMs.At(apart) = until;
+		else blockedUntilMs = until;
 		Changed();
 	}
 
-	int64 ClaudeAccount::BlockedUntil(int64 nowMs) const {
-		int64 until = blockedUntilMs > nowMs ? blockedUntilMs : 0;
+	int64 ClaudeAccount::BlockedUntil(Core::StringView model, int64 nowMs) const {
+		Core::String apart = ApartModel(usage, model);
+		int64 until = blockedUntilMs;
+		if (!apart.IsEmpty() && !apartBlockedUntilMs.TryGet(apart, until)) until = 0;
+		if (until <= nowMs) until = 0;
 		for (UsageWindow* window : usage.windows)
-			if (window->model.IsEmpty() && UsedUp(*window, nowMs) && window->resetsAtMs > until) until = window->resetsAtMs;
+			if (Limits(usage, *window, model) && UsedUp(*window, nowMs) && window->resetsAtMs > until) until = window->resetsAtMs;
 		return until;
 	}
 
@@ -268,7 +275,7 @@ namespace Ai
 		json.BoolField("installing", installing);
 		json.EndObject();
 		json.BoolField("refreshing", refreshing);
-		json.IntField("blockedUntilMs", BlockedUntil(now));
+		json.IntField("blockedUntilMs", BlockedUntil(Core::StringView(""), now));
 		json.IntField("nowMs", now);
 		json.Key(Core::StringView("chains"));
 		Core::Array<Core::String> problems;

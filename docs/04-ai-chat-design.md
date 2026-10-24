@@ -216,8 +216,10 @@ system message goes in a file, `.ied/local/chats/<chatId>/claude-system.md` (a W
 4. A turn that ends (an answer in Ask or Plan mode, `finish` in Agent mode, a pause) reads on to the CLI's `result`; Stop sends
    `interrupt`. The turn's messages are kept in IED's own format too, so the chat can move to a local model and back.
 5. The CLI's own errors map onto the stop taxonomy (`docs/12`): an assistant message with `error` `rate_limit` or
-   `billing_error` is a usage limit - the model is marked exhausted until the reset its window names and the turn moves to the
-   role's next candidate (a fallback; a local model), or pauses saying when Claude resets; `authentication_failed` pauses with how
+   `billing_error` is a usage limit - the window the CLI's `rate_limit_event` said refused it is used up until its reset (when
+   no event said, the model's pool is: the shared one, or a model's own when it is metered apart - Fable) and the turn moves to
+   the role's next candidate that still has room (a Claude model metered apart; a fallback; a local model), or pauses saying
+   when Claude resets; `authentication_failed` pauses with how
    to sign in; `overloaded` and `server_error` are transport errors, retried and then sent to the fallback; `system/api_retry`
    shows as a routing note. The CLI compacts its own context, so IED's compression does not run on a Claude step; the window is
    the one the CLI reports (`modelUsage.<model>.contextWindow`).
@@ -228,6 +230,14 @@ extra usage - from the CLI's `get_usage {skip_behaviors: true}` control request,
 CLI process of its own (no model request, no usage spent): when a client asks (`ai.usage {refresh: true}`), after each Claude
 turn, and every `ai.claude.usageRefreshMinutes` (default 10; 0 never) while a `claude-code` profile is set up. Between, each
 `rate_limit_event` a session streams updates the windows it names. It is on the app-wide topic `aiusage` (`docs/10`).
+
+Which windows limit a model: the 5-hour session limits every model; `seven_day_opus` and `seven_day_sonnet` are parts of the
+week, so Opus and Sonnet are limited by their own week and the shared one. A `model_scoped` window is the week of a model
+*metered apart* - Fable, which the CLI bills on a weekly "Fable limit" of its own (`seven_day_overage_included` in its
+`rate_limit_event`s) - and the shared week does not limit that model (owner, 2026-10-23: "the claude support wont use the
+fable model if the weekly usage is maxed out despite fable having its own limits"). As in the CLI, Fable counts as metered apart
+before its window is known; an answer that names no `model_scoped` windows (the CLI leaves them out when it knows nothing of
+them) keeps the ones known. A turn that met a usage limit holds back only the pool it came from.
 
 **Pacing.** A window of length L (5 h, 7 d) at utilization u resetting at R is `e = 1 - (R - now) / L` through, and its pace is
 `p = u / (100 e)`: 1.0 is the even line that runs out exactly at the reset, 2.0 is spending twice as fast. Early in a window
@@ -256,7 +266,7 @@ Claude model or a local one - with a routing note ("claude-opus skipped for pace
 "left out" for one used up). Only the places ahead of the model the turn runs on get a note: those behind it were never
 reached. The turn's header names that model from its start (`turn.start`), and the next one's after a failover (`turn.stats`). `target`
 is `session` (spend each 5-hour window fully: `five_hour`), `week` (stretch the week: `seven_day` and the model's own weekly
-window) or `both` (the default: the higher). A Claude model without a pace is used whatever the pace - "Opus for planning,
+window; a model metered apart only its own) or `both` (the default: the higher). A Claude model without a pace is used whatever the pace - "Opus for planning,
 always" - and only a used-up window leaves it out (100%, or a `rejected` rate-limit status; a model's own weekly window for that
 model). Models skipped for pace stay at the end of the chain as a last resort, the least over its pace first (pace over
 `max`: with the week at 1.85x, Haiku at 1.5 comes before Sonnet at 1.25 and Opus at 1.0): a turn whose every other candidate

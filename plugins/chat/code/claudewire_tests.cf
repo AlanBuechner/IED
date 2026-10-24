@@ -38,6 +38,14 @@ static Ai::ChainPlace* Place(const char* model, Ai::PlaceState state, double ove
 	return place;
 }
 
+static Ai::ModelProfile* Claude(const char* name, const char* model) {
+	Ai::ModelProfile* profile = new Ai::ModelProfile();
+	profile->name = Core::String(name);
+	profile->model = Core::String(model);
+	profile->provider = Ai::Provider::ClaudeCode;
+	return profile;
+}
+
 static void Touch(const FS::Path& file) {
 	FS::MakeDirectories(file.Parent().CStr());
 	FS::WriteFileAtomically(file.CStr(), (const void*)"", 0);
@@ -129,6 +137,45 @@ class ClaudeWireTests {
 		Ai::ClaudeUsage unknown;
 		assert_true(Ai::PaceAgainst(unknown, Text("opus"), Text("both"), kNow, why) == 0.0 && why.IsEmpty(), "usage unknown: no pace");
 		assert_true(Ai::IsPacingTarget(Text("week")) && !Ai::IsPacingTarget(Text("month")), "targets");
+	}
+
+	[test("a_model_metered_apart_runs_while_the_week_is_used_up")]
+	public static void TestMeteredApart() {
+		Ai::ClaudeAccount* account = new Ai::ClaudeAccount();
+		Ai::ClaudeUsage& usage = account->usage;
+		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"five_hour\": {\"utilization\": 30, \"resets_at\": \"2025-10-22T18:20:00Z\"}, \"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}, \"model_scoped\": [{\"display_name\": \"Fable\", \"utilization\": 20, \"resets_at\": \"2025-10-25T16:20:00Z\"}]}}"), usage, kNow);
+		Ai::UsageWindow* session = usage.Find(Text("five_hour"));
+		Ai::UsageWindow* week = usage.Find(Text("seven_day"));
+		Ai::UsageWindow* fable = usage.Find(Text("model:fable"));
+		assert_true(fable && fable->separate && !week->separate, "a model_scoped window is metered apart");
+		assert_true(Ai::Limits(usage, *week, Text("opus")) && !Ai::Limits(usage, *week, Text("claude-fable-5-1")), "the shared week limits opus, not fable");
+		assert_true(Ai::Limits(usage, *session, Text("fable")) && Ai::Limits(usage, *fable, Text("fable")) && !Ai::Limits(usage, *fable, Text("opus")), "the session limits every model, fable's week fable alone");
+		Core::String why;
+		assert_true(Ai::PaceAgainst(usage, Text("fable"), Text("week"), kNow, why) < 0.5 && why.View().Contains(Text("Fable week")), "fable is paced by its own week");
+		assert_true(account->BlockedUntil(Text("opus"), kNow) == week->resetsAtMs && account->BlockedUntil(Text("fable"), kNow) == 0, "the used-up week holds opus back until it resets, not fable");
+		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->state == Ai::PlaceState::Use, "fable's place is in use");
+		Ai::ChainPlace* opus = Ai::PlaceNow(*Claude("claude-opus", "opus"), Ai::PaceLimit(), false, *account, kNow);
+		assert_true(opus->state == Ai::PlaceState::UsedUp && opus->why.View().Contains(Text("frees in 3 d")), "opus's is used up");
+		account->apartBlockedUntilMs.At(Core::String("fable")) = kNow + 3600 * 1000;
+		assert_true(account->BlockedUntil(Text("fable"), kNow) == kNow + 3600 * 1000 && account->BlockedUntil(Text(""), kNow) == week->resetsAtMs, "a usage limit a fable turn met holds back fable alone");
+		account->apartBlockedUntilMs.Remove(Core::String("fable"));
+		account->blockedUntilMs = kNow + (int64)5 * 24 * 3600 * 1000;
+		assert_true(account->BlockedUntil(Text("sonnet"), kNow) == account->blockedUntilMs && account->BlockedUntil(Text("fable"), kNow) == 0, "one a turn of the shared pool met, that pool");
+
+		Ai::TakeRateLimit(Parse("{\"status\": \"rejected\", \"rateLimitType\": \"seven_day_overage_included\", \"resetsAt\": 1761400000, \"unifiedWindows\": {\"seven_day_overage_included\": {\"utilization\": 1.0, \"resetsAt\": 1761400000}}}"), usage, kNow);
+		assert_true(usage.windows.Count() == 3 && Ai::UsedUp(*fable, kNow) && Ai::RejectedWindow(usage, kNow) == fable, "the CLI's Fable limit is fable's model_scoped window");
+		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->why.View().StartsWith(Text("Fable week is used up")), "its own week used up says so");
+		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"five_hour\": {\"utilization\": 31, \"resets_at\": \"2025-10-22T18:20:00Z\"}, \"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}}}"), usage, kNow);
+		assert_true(usage.Find(Text("model:fable")) == fable && fable->separate, "an answer that names no model_scoped windows keeps those known");
+		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}, \"model_scoped\": []}}"), usage, kNow);
+		assert_true(!usage.Find(Text("model:fable")) && account->BlockedUntil(Text("claude-fable-5-1"), kNow) == 0 && account->BlockedUntil(Text("sonnet"), kNow) > 0, "an empty list: none, and fable is metered apart all the same, as the CLI has it");
+		assert_se("fable", Ai::ApartModel(usage, Text("claude-fable-5-1")).CStr(), "fable's pool");
+		assert_true(Ai::ApartModel(usage, Text("opus")).IsEmpty(), "opus is of the shared pool");
+
+		Ai::ClaudeUsage eventOnly;
+		Ai::TakeRateLimit(Parse("{\"status\": \"allowed_warning\", \"rateLimitType\": \"seven_day_overage_included\", \"utilization\": 0.9, \"resetsAt\": 1761400000}"), eventOnly, kNow);
+		Ai::UsageWindow* named = eventOnly.Find(Text("model:fable"));
+		assert_true(named && named->separate && named->label == "Fable week" && named->utilization > 89.9, "an event before any get_usage answer names Fable's window as the CLI does");
 	}
 
 	[test("a_turn_tries_the_chain_in_pacing_order")]

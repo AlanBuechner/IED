@@ -18,15 +18,15 @@ namespace Ai
 		place->pace = pace;
 		place->state = PlaceState::Use;
 		if (!profile.IsClaude()) return place;
-		const int64 blocked = account.BlockedUntil(nowMs);
+		const int64 blocked = account.BlockedUntil(profile.model.View(), nowMs);
 		UsageWindow* own = ModelWindow(account.usage, profile.model.View());
-		if (blocked > 0) {
+		if (own && UsedUp(*own, nowMs)) {
+			place->state = PlaceState::UsedUp;
+			place->why = (own->label + " is used up; it frees ") + ResetText(blocked, nowMs).View();
+		}
+		else if (blocked > 0) {
 			place->state = PlaceState::UsedUp;
 			place->why = Core::String("the plan's usage is used up; it frees ") + ResetText(blocked, nowMs).View();
-		}
-		else if (own && UsedUp(*own, nowMs)) {
-			place->state = PlaceState::UsedUp;
-			place->why = (own->label + " is used up; it frees ") + ResetText(own->resetsAtMs, nowMs).View();
 		}
 		else if (!pinned && pace.max > 0) {
 			Core::String why;

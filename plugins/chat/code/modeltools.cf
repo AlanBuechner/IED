@@ -26,7 +26,28 @@ namespace Ai
 			out.AppendDouble(Pace(*window, now), 2);
 			out.Append("x");
 		}
+		if (window->separate) {
+			out.Append(" (");
+			out.Append(window->model.View());
+			out.Append(" is metered here, apart from the shared week)");
+		}
 		if (UsedUp(*window, now)) out.Append(" - USED UP");
+		out.Append("\n");
+	}
+
+	// The shared pool used up: when it frees, and the models metered apart that still run.
+	static void BlockedLine(Core::StringBuilder& out, const ClaudeAccount& account, int64 now) {
+		const int64 blocked = account.BlockedUntil(Core::StringView(""), now);
+		if (blocked <= 0) return;
+		out.Append("Claude's shared limits are used up; they free ");
+		out.Append(ResetText(blocked, now).View());
+		for (const UsageWindow* window : account.usage.windows) {
+			if (!window->separate || account.BlockedUntil(window->model.View(), now) > 0) continue;
+			out.Append("; ");
+			out.Append(window->model.View());
+			out.Append(" still runs on ");
+			out.Append(window->label.View());
+		}
 		out.Append("\n");
 	}
 
@@ -71,12 +92,7 @@ namespace Ai
 			out.Append(")");
 		}
 		if (!usage.known || !usage.available) out.Append("\n");
-		const int64 blocked = account.BlockedUntil(now);
-		if (blocked > 0) {
-			out.Append("Claude is used up; it frees ");
-			out.Append(ResetText(blocked, now).View());
-			out.Append("\n");
-		}
+		BlockedLine(out, account, now);
 		out.Append("Models (ai.models):\n");
 		for (const ModelProfile* profile : models) ProfileLine(out, profile);
 		Core::Array<RoleChain*> chains = ClaudeChains(models, groupsJson, account, now);

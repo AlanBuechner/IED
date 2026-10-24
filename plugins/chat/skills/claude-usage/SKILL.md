@@ -19,8 +19,13 @@ and a week, and some models have a weekly window of their own. Each has a utiliz
 **pace**: its use against the even line that runs out exactly at the reset. 1.00x lasts to the reset; 1.50x runs out with
 a third of the window left; 0.50x leaves half of it unused.
 
-`ai_usage` shows every window with its pace and reset, the models of `ai.models`, and what a paced (`model: "auto"`) profile
-picks now. Read it before handing out work, and again in a long run.
+The Opus and Sonnet weeks are parts of the shared week. Fable is **metered apart**: it has a week of its own ("Fable
+week", marked "apart from the shared week" in `ai_usage`), and the shared week used up does not stop it - only the 5-hour
+session and its own week do.
+
+`ai_usage` shows every window with its pace and reset, the models of `ai.models`, and for each group chain with a Claude
+model which model a turn uses now and why the ones before it are passed over. Read it before handing out work, and again
+in a long run.
 
 ## Choosing models
 
@@ -29,12 +34,15 @@ picks now. Read it before handing out work, and again in a long run.
 - **Ahead of pace:** keep the strongest model for the decisions and give routine work - renames, mechanical edits,
   searching, writing tests that follow a pattern - to a helper chat on a cheaper model:
   `chat_create({"title": "Rename the fields", "text": "...", "model": "claude-sonnet"})` or `claude-haiku` for the simplest.
-- **A window used up:** Claude turns go to the group's fallback (a local model) until it frees; say so to the owner and
-  give the work a local model can do to a chat pinned to it.
+- **The shared week used up:** Opus, Sonnet and Haiku turns go down their chain until it frees; Fable still runs while its
+  own week has room, so give the work that needs Claude to a chat on `claude-fable`, the rest to a local model, and say so
+  to the owner.
+- **A window used up that stops every Claude model** (the 5-hour session): Claude turns go to the group's fallback (a local
+  model) until it frees; say so to the owner and give the work a local model can do to a chat pinned to it.
 - `chat_set_model({"model": "claude-sonnet", "chat": "<id>"})` moves a chat's next turns; `""` gives it back its group's
   model. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
-- A profile with `model: "auto"` already steps down the ladder (opus, sonnet, haiku) as the windows run ahead of pace;
-  pinning is for when you know the work better than the pace does.
+- A group's chain with paces (the `claude` group's: opus, sonnet, haiku) already steps down as the windows run ahead of
+  pace; pinning is for when you know the work better than the pace does.
 
 ## Not to do
 
