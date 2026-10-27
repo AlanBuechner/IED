@@ -86,6 +86,8 @@ export class Shell {
 		this.authProbe = null;
 		this.shellApi = this.makeApi({ id: "shell", base: "/" });
 		this.wsTopic = null;
+		this.toolsTopic = null;
+		this.tools = null;                // {wsId, snapshot}: the shown workspace's language tools
 		this.serverListeners = new Set();
 		this.views.onChange((entry) => this.chrome && this.chrome.tabChanged(entry));
 		this.context.onChange(() => this.updateMode());
@@ -275,6 +277,10 @@ export class Shell {
 			evt: (kind, data) => this.workspaceEvent(kind, data),
 			gone: () => this.showWorkspace(this.preferredWorkspace()),
 		});
+		this.toolsTopic = this.client.subscribe("tools:" + wsId, {
+			snap: (data) => this.toolsChanged(wsId, data),
+			evt: (kind, data) => kind === "tools.changed" && this.toolsChanged(wsId, data),
+		});
 		await this.reloadContributions();
 		this.openLayout();
 	}
@@ -308,10 +314,19 @@ export class Shell {
 	leaveWorkspace() {
 		if (this.wsTopic) this.wsTopic();
 		this.wsTopic = null;
+		if (this.toolsTopic) this.toolsTopic();
+		this.toolsTopic = null;
+		this.tools = null;
 		if (this.layout) this.layout.dispose();
 		this.layout = null;
 		this.views.releaseAll();
 		this.doc = emptyDocument();
+	}
+
+	// The workspace's language tools (tools:<wsId>, docs/26 "Language tools"): the banner of what it lacks.
+	toolsChanged(wsId, snapshot) {
+		this.tools = { wsId, snapshot };
+		if (this.chrome && this.chrome.renderBanners) this.chrome.renderBanners();
 	}
 
 	workspaceSnapshot(data) {
@@ -898,7 +913,13 @@ export class Shell {
 					return shell.client.clientId;
 				},
 			},
-			commands: { handle: (id, fn) => shell.commands.handle(id, fn), run: (id, args) => shell.commands.run(id, args) },
+			commands: {
+				handle: (id, fn) => shell.commands.handle(id, fn),
+				run: (id, args) => shell.commands.run(id, args),
+				// A command the module makes from what it reads ({id, title, category, icon}), as a manifest's would be: it
+				// is gone when the contributions are read again, so a module defines its own in contributions.on.
+				define: (spec) => shell.commands.define(spec, plugin.id, plugin.base),
+			},
 			bindings: {
 				provide: (name, fn) => shell.bindings.provide(plugin.id, name, fn),
 				call: (name, args) => shell.bindings.call(plugin.id, name, args),

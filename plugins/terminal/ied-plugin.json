@@ -2,7 +2,9 @@
 // console that outlive every browser - as tabs in the panel under every activity (a slide-up drawer on a phone, with a
 // row of the keys a phone keyboard lacks). One window types at a time; the others watch and can take over. Its server
 // code (code/) is compiled into the server and runs on the plugin API (docs/26 "Built-ins on the API"): the term.*
-// methods and the term: and terms: topics.
+// methods and the term: and terms: topics. Terminal profiles (docs/05 "Terminal profiles"): the kinds of terminal New
+// Terminal's menu offers - its own PowerShell 7, Windows PowerShell, Command Prompt and Git Bash, and what other plugins
+// contribute (the Python plugin's Python) - with terminal.defaultProfile choosing what New Terminal runs.
 {
 	"manifestVersion": 1,
 	"id": "ied.terminal",
@@ -25,11 +27,19 @@
 				}
 			]
 		},
+		"terminalProfiles": [
+			{ "id": "pwsh", "title": "PowerShell", "icon": "$(terminal-powershell)", "argv": ["pwsh", "-NoLogo"] },
+			{ "id": "powershell", "title": "Windows PowerShell", "icon": "$(terminal-powershell)", "argv": ["powershell", "-NoLogo"] },
+			{ "id": "cmd", "title": "Command Prompt", "icon": "$(terminal-cmd)", "argv": ["${env:ComSpec}"] },
+			{ "id": "gitbash", "title": "Git Bash", "icon": "$(terminal-git-bash)", "argv": ["${env:ProgramFiles}/Git/bin/bash.exe", "--login", "-i"] }
+		],
 		"panels": [
 			{ "id": "ied.terminal.panel", "title": "Terminal", "icon": "$(terminal)", "view": "TerminalPanel" }
 		],
 		"commands": [
 			{ "id": "ied.terminal.new", "title": "New Terminal", "category": "Terminal", "icon": "$(add)" },
+			{ "id": "ied.terminal.newWithProfile", "title": "New Terminal with Profile...", "category": "Terminal", "icon": "$(chevron-down)" },
+			{ "id": "ied.terminal.selectDefaultProfile", "title": "Select Default Profile...", "category": "Terminal", "icon": "$(settings-gear)" },
 			{ "id": "ied.terminal.kill", "title": "Kill Terminal", "category": "Terminal", "icon": "$(trash)" },
 			{ "id": "ied.terminal.rename", "title": "Rename Terminal...", "category": "Terminal", "icon": "$(edit)" },
 			{ "id": "ied.terminal.show", "title": "Terminal", "category": "View", "icon": "$(terminal)" },

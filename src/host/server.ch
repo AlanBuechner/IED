@@ -29,6 +29,7 @@ include "settings/service.ch"
 include "lsp/pool.ch"
 include "tasks/service.ch"
 include "dap/service.ch"
+include "tools/service.ch"
 include "projects/templates.ch"
 include "projects/manage.ch"
 
@@ -80,6 +81,7 @@ namespace Ied
 		public Tasks* tasks;
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
+		public Tools* tools;
 		public ProjectTemplates* projects;
 		public ProjectManager* projectManager;
 		public Auth* auth;

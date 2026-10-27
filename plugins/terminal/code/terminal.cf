@@ -16,6 +16,7 @@ namespace Terminal
 		json.Field("wsId", wsId.View());
 		json.Field("title", title.View());
 		json.Field("kind", kind.View());
+		json.Field("profile", profile.View());
 		json.BoolField("alive", alive);
 		json.Key(Core::StringView("exitCode"));
 		if (alive) json.Null();
@@ -73,16 +74,11 @@ namespace Terminal
 	// PowerShell and the system's cmd.
 	Core::Array<Core::Array<Core::String>> Terminals::ShellsFor(Core::StringView wsId) {
 		Core::Array<Core::Array<Core::String>> shells;
-		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		Core::String json = context->Setting(Core::StringView("terminal.shell"), wsId);
-		Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
-		if (setting.Kind() == Serialization::DomKind::String && !setting.AsView().IsEmpty()) shells.Push(Argv(setting.AsString(), nullptr));
-		else if (setting.Kind() == Serialization::DomKind::Array && setting.Count() > 0) {
-			Core::Array<Core::String> argv;
-			for (int64 i = 0; i < setting.Count(); ++i) argv.Push(Core::String(setting.At(i).AsView()));
-			shells.Push(argv);
+		Core::Array<Core::String> setting = ShellSetting(context, wsId);
+		if (!setting.IsEmpty()) {
+			shells.Push(setting);
+			return shells;
 		}
-		if (!shells.IsEmpty()) return shells;
 		shells.Push(Argv("pwsh", "-NoLogo"));
 		shells.Push(Argv("powershell", "-NoLogo"));
 		Core::String comspec;
@@ -90,11 +86,12 @@ namespace Terminal
 		return shells;
 	}
 
-	static Process::Child* StartIn(const Core::Array<Core::String>& argv, Core::StringView cwd, int32 cols, int32 rows, Core::String& error) {
+	static Process::Child* StartIn(const Core::Array<Core::String>& argv, const Core::Array<Core::String>& environment, Core::StringView cwd, int32 cols, int32 rows, Core::String& error) {
 		Process::StartInfo info;
 		info.program = argv[0];
 		for (int64 i = 1; i < argv.Count(); ++i) info.arguments.Push(argv[i]);
 		info.workingDirectory = Core::String(cwd);
+		info.environment = environment;
 		info.environment.Push(Core::String("TERM_PROGRAM=IED"));
 		info.terminal = true;
 		info.columns = cols;
@@ -117,7 +114,7 @@ namespace Terminal
 		}
 	}
 
-	Term* Terminals::Create(Core::StringView wsId, const Core::Array<Core::String>& argv, Core::StringView cwd, Core::StringView title, Core::StringView kind, Core::StringView holder, int32 cols, int32 rows) {
+	Term* Terminals::Create(Core::StringView wsId, const Core::Array<Core::String>& argv, const Core::Array<Core::String>& environment, Core::StringView cwd, Core::StringView title, Core::StringView profile, Core::StringView kind, Core::StringView holder, int32 cols, int32 rows) {
 		Core::Array<Core::Array<Core::String>> tries;
 		if (argv.IsEmpty()) tries = ShellsFor(wsId);
 		else tries.Push(argv);
@@ -125,7 +122,7 @@ namespace Terminal
 		Core::String error;
 		Core::String program;
 		for (const Core::Array<Core::String>& each : tries) {
-			child = StartIn(each, cwd, cols, rows, error);
+			child = StartIn(each, environment, cwd, cols, rows, error);
 			program = each[0];
 			if (child) break;
 		}
@@ -134,6 +131,7 @@ namespace Terminal
 		terminal->wsId = Core::String(wsId);
 		terminal->title = title.IsEmpty() ? Core::String(FS::Path(program.View()).Stem()) : Core::String(title);
 		terminal->kind = Core::String(kind);
+		terminal->profile = Core::String(profile);
 		terminal->holder = Core::String(holder);
 		terminal->alive = true;
 		terminal->cols = cols;

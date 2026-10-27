@@ -1268,6 +1268,55 @@ def terminal_on_a_phone(run):
 	page.wait_for_selector(".panel-dock.drawer.shown", state="detached")
 
 
+def open_terminal_dock(run, page):
+	"""The terminal dock open: on a phone the drawer from More, on a desktop its header (collapsed at first)."""
+	if run.phone:
+		page.tap(".phone-nav button[aria-label='More']")
+		page.tap(".menu [role='menuitem']:has-text('Terminal')")
+		page.wait_for_selector(".panel-dock.drawer.shown")
+	else:
+		page.wait_for_selector(".panel-dock .term-head")
+
+
+@scenario(viewports=("desktop", "phone"))
+def terminal_profiles(run):
+	"""New Terminal's menu (docs/05 "Terminal profiles"): the shells and the Python plugin's Python, one that cannot start
+	greyed out (the mock's Git Bash), the default marked; Python opens a Python terminal - on the real server IED's own
+	Python, which answers 6*7 - and its tab shows its icon; the Default Profile submenu sets what New Terminal runs."""
+	page = run.open()
+	open_terminal_dock(run, page)
+	page.click(".term-head button[aria-label='New Terminal with Profile']")
+	page.wait_for_selector(".menu [role='menuitem']:has-text('Python')")
+	check(page.is_visible(".menu [role='menuitem']:has-text('Command Prompt')"), "the terminal's own shells are offered")
+	check("Default" in page.inner_text(".menu"), "the default is marked")
+	if run.target.kind == "mock":
+		check(page.query_selector(".menu .menu-item.dis:has-text('Git Bash (not found)')") is not None, "one that cannot start is greyed out")
+	run.shot("menu")
+	page.click(".menu [role='menuitem']:has-text('Python')")
+	page.wait_for_selector(".term-tab.on:has-text('Python')", timeout=20000)
+	page.wait_for_selector(".term-view:not([hidden]) .xterm-screen")
+	if run.target.kind == "real":
+		page.wait_for_function("[...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].some((r) => r.textContent.includes(\"IED's own Python\"))", timeout=30000)
+		type_in_terminal(page, "6*7")
+		page.wait_for_function("[...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].some((r) => r.textContent.trim() === '42')", timeout=20000)
+	run.shot("python")
+	if not run.phone:
+		page.click(".term-head button[aria-label='New Terminal with Profile']")
+		page.hover(".menu [role='menuitem']:has-text('Default Profile')")
+		page.click(".menu [role='menuitem']:has-text('Default Profile')")
+		page.wait_for_selector(".menu >> nth=1")
+		run.shot("default-submenu")
+		page.locator(".menu").nth(1).locator("[role='menuitem']:has-text('Python')").click()
+		page.wait_for_function("() => document.querySelectorAll('.menu').length === 0")
+		page.click(".term-head button[aria-label='New Terminal']")
+		page.wait_for_function("[...document.querySelectorAll('.term-tab')].filter((t) => t.textContent.includes('Python')).length === 2", timeout=20000)
+		run.request("settings.set", {"tier": "app", "key": "terminal.defaultProfile", "value": ""})
+	while page.query_selector(".term-tab"):
+		count = len(page.query_selector_all(".term-tab"))
+		page.click(".term-head button[aria-label='Kill Terminal']")
+		page.wait_for_function("(n) => document.querySelectorAll('.term-tab').length < n", arg=count, timeout=10000)
+
+
 @scenario(viewports=("desktop",), targets=("mock",))
 def output_links_open_places(run):
 	"""A place an Output line names is underlined and a click opens it (VS): a compiler's error opens its file at the line."""

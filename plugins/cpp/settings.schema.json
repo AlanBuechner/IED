@@ -10,13 +10,13 @@
 		},
 		"cpp.clangd.path": {
 			"type": "string",
-			"default": "clangd",
-			"description": "The clangd to run: a name looked up on PATH, or a path."
+			"default": "",
+			"description": "The clangd to run: a name looked up on PATH, or a path. Empty: the clangd that comes with IED (Settings > Languages shows which runs)."
 		},
 		"cpp.lldb.path": {
 			"type": "string",
-			"default": "codelldb",
-			"description": "CodeLLDB's debug adapter: a name looked up on PATH, or the path of codelldb.exe (in the vscode-lldb extension's adapter folder)."
+			"default": "",
+			"description": "CodeLLDB's debug adapter: a name looked up on PATH, or the path of a codelldb.exe (the vscode-lldb extension's adapter folder has one). Empty: the CodeLLDB that comes with IED, else one IED installed, else codelldb on PATH."
 		},
 		"cpp.clangd.arguments": {
 			"type": "array",

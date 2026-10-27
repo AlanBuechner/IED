@@ -1,11 +1,14 @@
-// Python (docs/26 "Language plugins"): the language, its icons, Python projects by their packaging files, and the places
-// Python prints - a traceback's 'File "path", line N' and the tools' "path:line:col".
+// Python (docs/26 "Language plugins"): the language, its icons, Python projects by their packaging files, the places
+// Python prints - a traceback's 'File "path", line N' and the tools' "path:line:col" - and the Python terminal profile
+// (docs/05 "Terminal profiles"): IED's own Python (vendor/python, the embeddable CPython IED runs its services with)
+// interactively in the workspace's folder, through shell/startup.py, which gives it a packages folder of its own and a
+// pip() that installs there (pip("install requests")).
 {
 	"manifestVersion": 1,
 	"id": "ied.python",
 	"name": "Python",
 	"version": "0.1.0",
-	"description": "The Python language: recognition, icons and traceback links.",
+	"description": "The Python language: recognition, icons, traceback links and a Python terminal on IED's own Python.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
@@ -18,6 +21,9 @@
 		],
 		"projectIcons": [
 			{ "languageId": "python", "label": "PY", "color": "--hue-cyan", "markers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] }
+		],
+		"terminalProfiles": [
+			{ "id": "python", "title": "Python", "icon": "$(python)", "argv": ["${iedHome}/vendor/python/python.exe", "-i", "${pluginDir}/shell/startup.py", "${pluginState}/packages"], "env": { "PYTHONIOENCODING": "utf-8" } }
 		],
 		"outputLinks": [
 			{ "id": "traceback", "regexp": "File \\\"([^\\\"]+)\\\", line (\\d+)", "file": 1, "line": 2 },

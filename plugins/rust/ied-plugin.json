@@ -6,6 +6,13 @@
 // project with language = "rust" builds through the cargo driver in nuke/ (docs/26 section 6) and the rust.nuke preset,
 // which matches cargo's own diagnostics (`rustc-human`: "error[E0308]: ..." then " --> path:line:col"). For the
 // profiler (docs/16): the ied-profiler crate in profiler/ and the cargo preset's Profile task.
+// Its tools (docs/26 "Language tools"): rustup, cargo (the toolchain) and rust-analyzer, found on PATH or in
+// %USERPROFILE%\.cargo\bin and asked their versions in the workspace's folder, so rustup's proxies answer for the
+// toolchain the workspace pins (rust-toolchain.toml's channel, or rust-toolchain); nothing is downloaded while they are
+// asked (RUSTUP_AUTO_INSTALL=0). Installed with one click, for the user, the way the Rust project installs them (asked
+// first: they write outside IED's tools folder): rustup-init (its SHA-256 pinned) without changing PATH, the pinned
+// toolchain by `rustup toolchain install`, rust-analyzer by `rustup component add`. Debugging is the ied.cpp plugin's
+// CodeLLDB (adapter type lldb, its codelldb tool), an optional dependency.
 {
 	"manifestVersion": 1,
 	"id": "ied.rust",
@@ -16,7 +23,7 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
 	"permissions": ["process.spawn", "lsp", "fs.read"],
-	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true }, { "id": "ied.cpp", "version": "^0.1", "optional": true } ],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
 		"systemMessageSections": [
@@ -28,7 +35,7 @@
 				"description": "The Cargo workspace: its crates (packages), their targets and dependencies, as JSON (cargo metadata --no-deps).",
 				"class": "read",
 				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-				"run": ["${config:rust.cargo.path}", "metadata", "--format-version", "1", "--no-deps"],
+				"run": ["${tool:cargo}", "metadata", "--format-version", "1", "--no-deps"],
 				"output": "json",
 				"when": "workspaceContains.Cargo.toml"
 			}
@@ -74,9 +81,70 @@
 			{
 				"id": "rust-analyzer",
 				"label": "rust-analyzer",
-				"command": "${config:rust.analyzer.path}",
+				"command": "${tool:rust-analyzer}",
 				"selector": { "languages": ["rust"] },
 				"when": "config.rust.languageServer && workspaceTrusted"
+			}
+		],
+		"tools": [
+			{
+				"id": "rustup",
+				"title": "rustup",
+				"kind": "buildTool",
+				"when": "workspaceLanguage.rust",
+				"program": "rustup",
+				"onPath": true,
+				"searchPaths": ["${env:USERPROFILE}/.cargo/bin"],
+				"detect": { "args": ["--version"], "pattern": "rustup (\\d+\\.\\d+\\.\\d+)", "env": { "RUSTUP_AUTO_INSTALL": "0" } },
+				"install": {
+					"version": "1.29.2",
+					"windows": [
+						{ "label": "rustup-init from static.rust-lang.org", "download": "https://static.rust-lang.org/rustup/archive/${version}/x86_64-pc-windows-msvc/rustup-init.exe", "sha256": "00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd", "sha256Url": "https://static.rust-lang.org/rustup/archive/${version}/x86_64-pc-windows-msvc/rustup-init.exe.sha256", "extract": "none" },
+						{ "label": "rustup-init: rustup and the stable toolchain for your user, in %USERPROFILE%\\.cargo and .rustup (PATH unchanged)", "run": ["${installDir}/rustup-init.exe", "-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "stable"], "scope": "user" }
+					]
+				},
+				"homepage": "https://rustup.rs"
+			},
+			{
+				"id": "cargo",
+				"title": "Rust toolchain (cargo)",
+				"kind": "compiler",
+				"when": "workspaceLanguage.rust",
+				"program": "cargo",
+				"setting": "rust.cargo.path",
+				"onPath": true,
+				"searchPaths": ["${env:USERPROFILE}/.cargo/bin"],
+				"detect": { "args": ["--version"], "pattern": "cargo (\\d+\\.\\d+\\.\\d+\\S*)", "env": { "RUSTUP_AUTO_INSTALL": "0" } },
+				"versionFrom": [
+					{ "file": "rust-toolchain.toml", "regexp": "^\\s*channel\\s*=\\s*\"([^\"]+)\"", "match": "exact" },
+					{ "file": "rust-toolchain", "regexp": "^\\s*channel\\s*=\\s*\"([^\"]+)\"", "match": "exact" },
+					{ "file": "rust-toolchain", "regexp": "^\\s*([^\\s#\\[=]+)\\s*$", "match": "exact" }
+				],
+				"requires": ["rustup"],
+				"install": {
+					"version": "stable",
+					"windows": [
+						{ "label": "rustup toolchain install", "run": ["${tool:rustup}", "toolchain", "install", "${version}", "--profile", "minimal"], "scope": "user" }
+					]
+				},
+				"homepage": "https://www.rust-lang.org/tools/install"
+			},
+			{
+				"id": "rust-analyzer",
+				"title": "rust-analyzer",
+				"kind": "languageServer",
+				"when": "workspaceLanguage.rust && config.rust.languageServer",
+				"program": "rust-analyzer",
+				"setting": "rust.analyzer.path",
+				"searchPaths": ["${env:USERPROFILE}/.cargo/bin"],
+				"detect": { "args": ["--version"], "pattern": "rust-analyzer (\\S+)", "env": { "RUSTUP_AUTO_INSTALL": "0" } },
+				"requires": ["cargo"],
+				"install": {
+					"windows": [
+						{ "label": "rustup component add rust-analyzer", "run": ["${tool:rustup}", "component", "add", "rust-analyzer"], "scope": "user" }
+					]
+				},
+				"homepage": "https://rust-analyzer.github.io/book/rust_analyzer_binary.html"
 			}
 		],
 		"problemMatchers": [
@@ -118,21 +186,21 @@
 				},
 				"tasks": {
 					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [
-						{ "run": ["${config:rust.cargo.path}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
-						{ "run": ["${config:rust.cargo.path}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
+						{ "run": ["${tool:cargo}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
+						{ "run": ["${tool:cargo}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
 					] },
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [
-						{ "run": ["${config:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run" },
-						{ "run": ["${config:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run" }
+						{ "run": ["${tool:cargo}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run" },
+						{ "run": ["${tool:cargo}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run" }
 					] },
 					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [
-						{ "run": ["${config:rust.cargo.path}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
+						{ "run": ["${tool:cargo}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
 					] },
 					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Run with the profiler connected (IED_PROFILER); the program records through the ied-profiler crate", "steps": [
-						{ "run": ["${config:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } },
-						{ "run": ["${config:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } }
+						{ "run": ["${tool:cargo}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } },
+						{ "run": ["${tool:cargo}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } }
 					] },
-					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${config:rust.cargo.path}", "clean"] } ] }
+					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${tool:cargo}", "clean"] } ] }
 				},
 				"toolbar": ["profile", "|", "run", "build", "test"],
 				"debug": {

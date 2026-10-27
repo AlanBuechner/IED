@@ -3,8 +3,10 @@ JSON-lines file named by its first argument. Its "program" is the launch's `prog
 at each breakpoint's line in order (a line past the file's end is not verified; an empty line binds to the next one),
 steps by a line, prints "hello from <program>" when it runs off its last breakpoint and exits with the launch's
 `exitCode`. Its stack has the stopped line's frame and one in `outside`, a file the launch names outside the workspace.
-A launch with "refuse" set fails; a "fake/crash" request ends the adapter at once. With "--connect PORT" it speaks over
-a socket it opens to 127.0.0.1:PORT, as an adapter of transport tcp does (docs/25), and prints to its stdout instead."""
+A launch with "refuse" set fails; a "fake/crash" request ends the adapter at once. With "--connect PORT" (or Delve's
+"--client-addr=HOST:PORT") it speaks over a socket it opens to 127.0.0.1:PORT, as an adapter of transport tcp does
+(docs/25), and prints to its stdout instead. A program that is a folder (a Go package, as Delve's launch names it) is
+its main.go."""
 
 import json
 import os
@@ -12,8 +14,10 @@ import socket
 import sys
 
 LOG = open(sys.argv[1], "a", encoding="utf-8")
-if "--connect" in sys.argv:
-	CONNECTION = socket.create_connection(("127.0.0.1", int(sys.argv[sys.argv.index("--connect") + 1])))
+CLIENT_ADDR = [a.split(":")[-1] for a in sys.argv if a.startswith("--client-addr=")]
+if "--connect" in sys.argv or CLIENT_ADDR:
+	PORT = int(CLIENT_ADDR[0]) if CLIENT_ADDR else int(sys.argv[sys.argv.index("--connect") + 1])
+	CONNECTION = socket.create_connection(("127.0.0.1", PORT))
 	STDIN = CONNECTION.makefile("rb")
 	STDOUT = CONNECTION.makefile("wb")
 	print("fake adapter connected", flush=True)
@@ -110,11 +114,13 @@ def handle(request):
 			respond(request, error="the program would not start")
 			return
 		launch = arguments
-		with open(arguments["program"], encoding="utf-8") as f:
+		if os.path.isdir(launch["program"]):
+			launch = dict(arguments, program=os.path.join(arguments["program"], "main.go"))
+		with open(launch["program"], encoding="utf-8") as f:
 			lines = f.read().split("\n")
 		respond(request)
 		# The adapter's own process stands for the program's (Diagnostic Tools samples it).
-		event("process", {"name": os.path.basename(arguments["program"]), "systemProcessId": os.getpid(), "isLocalProcess": True, "startMethod": "launch"})
+		event("process", {"name": os.path.basename(launch["program"]), "systemProcessId": os.getpid(), "isLocalProcess": True, "startMethod": "launch"})
 	elif command == "setBreakpoints":
 		path = arguments["source"]["path"]
 		breakpoints[path] = [b["line"] for b in arguments.get("breakpoints", [])]

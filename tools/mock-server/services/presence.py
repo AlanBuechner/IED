@@ -44,15 +44,19 @@ class Presence:
 			"testHooks": True,
 		}
 
+	def post(self, level, text):
+		"""A notification for every device (server.notify's, and the services' own): its id."""
+		note = {"id": "n%d" % self.next_note, "level": level, "text": text, "ts": int(time.time() * 1000)}
+		self.next_note += 1
+		self.notifications.append(note)
+		self.server.hub.publish("server", "notification", note)
+		return note["id"]
+
 	async def notify(self, call, p):
 		level = p.str("level", "info", required=False)
 		if level not in LEVELS:
 			raise RpcError("bad_request", "level must be one of %s" % ", ".join(LEVELS))
-		note = {"id": "n%d" % self.next_note, "level": level, "text": p.str("text"), "ts": int(time.time() * 1000)}
-		self.next_note += 1
-		self.notifications.append(note)
-		self.server.hub.publish("server", "notification", note)
-		return {"id": note["id"]}
+		return {"id": self.post(level, p.str("text"))}
 
 	async def dismiss(self, call, p):
 		note_id = p.str("id")

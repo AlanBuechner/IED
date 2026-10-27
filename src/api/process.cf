@@ -1,5 +1,6 @@
 include "process.ch"
 include "host/server.ch"
+include "tasks/missing.ch"
 
 namespace IED
 {
@@ -22,6 +23,28 @@ namespace IED
 		}
 		const int64 code = child.Wait(5000);
 		return result.problem.IsEmpty() ? code : -1;
+	}
+
+	Core::String FindProgram(Core::StringView program) { return Ied::FindProgramFile(program); }
+
+	Core::String ToolProgram(const Workspace& ws, Core::StringView id) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String();
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
+		return found ? server->tools->ProgramFor(found, id) : Core::String();
+	}
+
+	Core::Array<Core::String> ToolEnvironment(const Workspace& ws, const Core::Array<Core::String>& environment) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return environment;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
+		return found ? server->tools->EnvironmentFor(found, environment) : environment;
 	}
 
 	CommandResult RunCommand(const Workspace& ws, const Core::Array<Core::String>& argv, Core::StringView cwd, int64 seconds) {

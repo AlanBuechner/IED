@@ -170,6 +170,7 @@ namespace Ied
 			server->code->Reconcile(ws);
 			server->outputs->PluginsChanged(ws);
 			server->documents->LanguagesChanged(ws);
+			if (server->tools) server->tools->PluginsChanged(ws);
 		}
 	}
 

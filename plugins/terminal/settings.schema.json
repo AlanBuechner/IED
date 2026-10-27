@@ -7,7 +7,12 @@
 			"type": ["string", "array"],
 			"items": { "type": "string" },
 			"default": "",
-			"description": "The program a new terminal runs: a name or path, or an argv. Empty: PowerShell 7, else Windows PowerShell, else cmd."
+			"description": "The program a new terminal runs when terminal.defaultProfile names no profile: a name or path, or an argv. Empty: PowerShell 7, else Windows PowerShell, else cmd."
+		},
+		"terminal.defaultProfile": {
+			"type": "string",
+			"default": "",
+			"description": "The terminal profile New Terminal runs, by its id (pwsh, powershell, cmd, gitbash, python, ...; New Terminal's menu lists them and sets this). Empty: terminal.shell's program when it is set, else PowerShell 7, Windows PowerShell or the Command Prompt, the first there is."
 		}
 	}
 }

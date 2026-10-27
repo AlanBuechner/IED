@@ -1,0 +1,116 @@
+include "profiles.ch"
+
+namespace Terminal
+{
+	Core::String Profile::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("id", id.View());
+		json.Field("title", title.View());
+		json.Field("icon", icon.View());
+		json.Field("plugin", plugin.View());
+		json.BoolField("available", available);
+		json.Field("problem", problem.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Profile* Read(const IED::Contribution& contribution, const IED::Workspace& ws) {
+		const Serialization::DomNode& entry = contribution.entry;
+		Profile* profile = new Profile();
+		profile->id = Core::String(entry.Member("id").AsView());
+		profile->title = entry.Member("title").AsView().IsEmpty() ? profile->id : Core::String(entry.Member("title").AsView());
+		profile->icon = Core::String(entry.Member("icon").AsView());
+		profile->plugin = contribution.pluginId;
+		Serialization::DomNode argv = entry.Member("argv");
+		for (int64 i = 0; argv.Kind() == Serialization::DomKind::Array && i < argv.Count(); ++i) profile->argv.Push(IED::ExpandContribution(contribution, ws, argv.At(i).AsView()));
+		Serialization::DomNode env = entry.Member("env");
+		for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i)
+			profile->environment.Push((Core::String(env.KeyAt(i)) + "=") + IED::ExpandContribution(contribution, ws, env.ValueAt(i).AsView()).View());
+		profile->cwd = IED::ExpandContribution(contribution, ws, entry.Member("cwd").AsView());
+		Core::String program = profile->argv.IsEmpty() ? Core::String() : IED::FindProgram(profile->argv[0].View());
+		profile->available = !program.IsEmpty();
+		if (profile->available) profile->argv[0] = program;
+		else profile->problem = profile->argv.IsEmpty() || profile->argv[0].IsEmpty() ? Core::String("it names no program") : profile->argv[0] + " was not found";
+		if (profile->available && !profile->cwd.IsEmpty() && !FS::IsDirectory(profile->cwd.CStr())) {
+			profile->available = false;
+			profile->problem = Core::String("its folder ") + profile->cwd.View() + " is not there";
+		}
+		return profile;
+	}
+
+	Profile* ProfileNamed(const Core::Array<Profile*>& profiles, Core::StringView id) {
+		for (Profile* profile : profiles)
+			if (profile->id.View() == id) return profile;
+		return nullptr;
+	}
+
+	Core::Array<Profile*> ProfilesOf(IED::PluginContext* context, const IED::Workspace& ws) {
+		Core::Array<Profile*> profiles;
+		for (const IED::Contribution& contribution : IED::Contributions(ws.id.View(), Core::StringView("terminalProfiles"))) {
+			Core::String error;
+			if (!IED::WhenHolds(ws, contribution.entry.Member("when").AsView(), error)) {
+				if (!error.IsEmpty()) context->Log(((Core::String("the when of terminal profile ") + contribution.entry.Member("id").AsView()) + " does not parse: " + error.View()).View());
+				continue;
+			}
+			Profile* profile = Read(contribution, ws);
+			for (int64 i = 0; i < profiles.Count(); ++i)
+				if (profiles[i]->id == profile->id) {
+					profiles.RemoveAt(i);
+					break;
+				}
+			profiles.Push(profile);
+		}
+		Core::Array<Profile*> ordered;
+		for (Profile* profile : profiles)
+			if (profile->plugin == context->Id()) ordered.Push(profile);
+		for (Profile* profile : profiles)
+			if (profile->plugin != context->Id()) ordered.Push(profile);
+		return ordered;
+	}
+
+	static Core::String SettingText(IED::PluginContext* context, const char* key, Core::StringView wsId) {
+		Core::String json = context->Setting(Core::StringView(key), wsId);
+		if (json.IsEmpty()) return Core::String();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView().Trimmed()) : Core::String();
+	}
+
+	Core::Array<Core::String> ShellSetting(IED::PluginContext* context, Core::StringView wsId) {
+		Core::Array<Core::String> argv;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String json = context->Setting(Core::StringView("terminal.shell"), wsId);
+		Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+		if (setting.Kind() == Serialization::DomKind::String && !setting.AsView().Trimmed().IsEmpty()) argv.Push(Core::String(setting.AsView().Trimmed()));
+		else if (setting.Kind() == Serialization::DomKind::Array)
+			for (int64 i = 0; i < setting.Count(); ++i) argv.Push(Core::String(setting.At(i).AsView()));
+		return argv;
+	}
+
+	Core::String DefaultSetting(IED::PluginContext* context, Core::StringView wsId) { return SettingText(context, "terminal.defaultProfile", wsId); }
+
+	Core::String DefaultProfile(IED::PluginContext* context, const IED::Workspace& ws, const Core::Array<Profile*>& profiles, const Core::Array<Core::String>& fallbacks) {
+		Profile* chosen = ProfileNamed(profiles, DefaultSetting(context, ws.id.View()).View());
+		if (chosen && chosen->available) return chosen->id;
+		if (!ShellSetting(context, ws.id.View()).IsEmpty()) return Core::String();
+		for (const Core::String& id : fallbacks) {
+			Profile* fallback = ProfileNamed(profiles, id.View());
+			if (fallback && fallback->available) return fallback->id;
+		}
+		return Core::String();
+	}
+
+	Core::String ProfilesJson(const Core::Array<Profile*>& profiles, Core::StringView defaultId, Core::StringView setting) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("profiles"));
+		json.BeginArray();
+		for (const Profile* profile : profiles) json.Raw(profile->SummaryJson().View());
+		json.EndArray();
+		json.Field("default", defaultId);
+		json.Field("setting", setting);
+		json.EndObject();
+		return json.ToString();
+	}
+}

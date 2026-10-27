@@ -41,6 +41,11 @@ namespace IED
 	// workspaceKind, config.<key>, workspaceContains.<name>, workspaceLanguage.<id>); an empty one does. False with
 	// `error` when it does not parse.
 	bool WhenHolds(const Workspace& ws, Core::StringView clause, Core::String& error);
+	// A string of `contribution` with the variables of docs/24 "Profiles and selection" expanded for `ws`: ${pluginDir}
+	// (the contributing plugin's folder), ${pluginState} (that plugin's state folder), ${iedHome}, ${workspaceDir},
+	// ${solutionDir}, ${env:<NAME>}, ${config:<key>} and ${tool:<id>} (docs/26 "Language tools"); any other ${...} stays
+	// as written.
+	Core::String ExpandContribution(const Contribution& contribution, const Workspace& ws, Core::StringView text);
 	// The app tier's folder (%APPDATA%\IED): its skills/, prompts/ and plugins/.
 	Core::String AppFolder();
 	// The install's folder (the server's home): its plugins/ and shared/.

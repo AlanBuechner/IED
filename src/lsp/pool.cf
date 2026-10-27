@@ -315,6 +315,11 @@ namespace Ied
 		for (const Core::String& path : server->documents->OpenPaths(ws)) DocumentOpened(server->documents->Find(ws, path.View()));
 	}
 
+	void LspPool::ToolsChanged(Workspace* ws) {
+		for (LanguageServer* language : languages)
+			if (language->ws == ws && language->state == LspState::Failed) language->Relaunch();
+	}
+
 	// Whether `language` still serves what it did: its project, where it was; or, serving no project, only files that
 	// no project holds.
 	static bool StillServes(const LanguageServer* language) {

@@ -69,6 +69,10 @@ namespace Ied
 		Settings* settings = server->settings;
 		Workspace* workspace = ws;
 		variables.config = [settings, workspace](Core::StringView key) -> Core::String { return settings->Effective(workspace, Core::StringView(""), key); };
+		variables.iedHome = server->config.homeDir;
+		variables.pluginState = Core::String((FS::Path(server->config.dataDir.View()) / "plugins" / profile->pluginId.View()).View());
+		Tools* tools = server->tools;
+		variables.tool = [tools, workspace](Core::StringView id) -> Core::String { return tools->ProgramFor(workspace, id); };
 		return variables;
 	}
 
@@ -104,6 +108,7 @@ namespace Ied
 		ProfileVariables variables = Variables();
 		for (const Core::String& arg : profile->args) ExpandProfileArgument(arg.View(), variables, info.arguments);
 		for (const Core::String& entry : profile->environment) info.environment.Push(ExpandProfileVariables(entry.View(), variables));
+		info.environment = server->tools->EnvironmentFor(ws, info.environment);
 		info.workingDirectory = profile->cwd.IsEmpty() ? Core::String(ws->root.View()) : ExpandProfileVariables(profile->cwd.View(), variables);
 		info.input = Process::Redirect::Pipe;
 		info.output = Process::Redirect::Pipe;

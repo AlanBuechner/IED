@@ -95,6 +95,12 @@ namespace Ied
 		else if (value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float || value.Kind() == Serialization::DomKind::Bool) out.Append(json.View().Trimmed());
 	}
 
+	// A variable of the server's environment; nothing when it is not set.
+	static void AppendEnvironment(Core::StringView name, Core::StringBuilder& out) {
+		Core::String value;
+		if (Platform::TryGetEnvironmentVariable(Core::String(name).CStr(), value)) out.Append(value.View());
+	}
+
 	static bool ExpandOne(Core::StringView name, const ProfileVariables& variables, Core::StringBuilder& out) {
 		if (name.StartsWith(Core::StringView("config:"))) AppendConfig(name.Substring(7, name.ByteLength() - 7), variables, out);
 		else if (name == "pluginDir") out.Append(variables.pluginDir.View());
@@ -102,6 +108,12 @@ namespace Ied
 		else if (name == "solutionDir") out.Append(variables.solutionDir.View());
 		else if (name == "projectName") out.Append(variables.projectName.View());
 		else if (name == "projectDir") out.Append(variables.projectDir.View());
+		else if (name == "iedHome") out.Append(variables.iedHome.View());
+		else if (name == "pluginState") out.Append(variables.pluginState.View());
+		else if (name.StartsWith(Core::StringView("env:"))) AppendEnvironment(name.Substring(4, name.ByteLength() - 4), out);
+		else if (name.StartsWith(Core::StringView("tool:"))) {
+			if (variables.tool) out.Append(variables.tool(name.Substring(5, name.ByteLength() - 5)).View());
+		}
 		else return false;
 		return true;
 	}

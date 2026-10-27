@@ -32,6 +32,8 @@ namespace Ied
 		// The services' events.
 		public void WorkspaceOpened(Workspace* ws);
 		public void TrustChanged(Workspace* ws);
+		// Language tools were installed for `ws` (docs/26 "Language tools"): its servers that failed start again.
+		public void ToolsChanged(Workspace* ws);
 		// Its solution was read again: a project-scoped server whose project went, or moved to another folder, stops (and
 		// one started before the workspace had projects); the open documents go to the servers that serve them now.
 		public void ProjectsChanged(Workspace* ws);

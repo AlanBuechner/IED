@@ -57,6 +57,7 @@ namespace Profiler
 		else if (name == "output") value = run.output;
 		else if (name == "pluginFolder") value = importer.folder;
 		else if (name.StartsWith(Core::StringView("config:"))) value = SettingWord(run, name.Substring(7, name.ByteLength() - 7));
+		else if (name.StartsWith(Core::StringView("tool:"))) value = IED::ToolProgram(run.ws, name.Substring(5, name.ByteLength() - 5));
 		else return false;
 		return true;
 	}

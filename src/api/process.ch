@@ -16,5 +16,15 @@ namespace IED
 	// Runs `argv` in `cwd` (relative to the workspace's root), at most `seconds`.
 	CommandResult RunCommand(const Workspace& ws, const Core::Array<Core::String>& argv, Core::StringView cwd, int64 seconds);
 
+	// The program file `program` names: itself when it is a path to a file (".exe" and PATHEXT's endings tried when it
+	// has none), else the first one of that name in a folder of PATH; empty when there is none.
+	Core::String FindProgram(Core::StringView program);
+	// The program found for the language tool `id` in `ws` (docs/26 "Language tools", ${tool:<id>}); empty when no plugin
+	// loaded there names such a tool.
+	Core::String ToolProgram(const Workspace& ws, Core::StringView id);
+	// `environment` ("NAME=value") with what a process started for `ws` needs to find the language tools IED found or
+	// installed outside PATH (docs/26 "Language tools"): their folders first on PATH.
+	Core::Array<Core::String> ToolEnvironment(const Workspace& ws, const Core::Array<Core::String>& environment);
+
 	const int64 kCommandKeptBytes = 1024 * 1024;
 }

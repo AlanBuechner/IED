@@ -10,13 +10,13 @@
 		},
 		"rust.analyzer.path": {
 			"type": "string",
-			"default": "rust-analyzer",
-			"description": "The rust-analyzer to run: a name looked up on PATH (rustup's, once its rust-analyzer component is installed), or a path."
+			"default": "",
+			"description": "The rust-analyzer to run: a name looked up on PATH, or a path. Empty: rustup's in %USERPROFILE%\\.cargo\\bin or on PATH, for the workspace's toolchain (Settings > Languages adds its component)."
 		},
 		"rust.cargo.path": {
 			"type": "string",
-			"default": "cargo",
-			"description": "The cargo the Cargo tasks run: a name looked up on PATH, or a path."
+			"default": "",
+			"description": "The cargo the Cargo tasks run: a name looked up on PATH, or a path. Empty: rustup's in %USERPROFILE%\\.cargo\\bin or on PATH, for the toolchain the workspace pins."
 		}
 	}
 }

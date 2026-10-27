@@ -9,7 +9,7 @@ import sys
 from frames import FrameChecker
 from hub import Hub
 from rpc import Rpc
-from services import chat, debug, docs, git, layout, lsp, outputs, plugins, presence, projects, settings, tasks, terminals, testhooks, workspace
+from services import chat, debug, docs, git, layout, lsp, outputs, plugins, presence, projects, settings, tasks, terminals, testhooks, tools, workspace
 
 MB = 1024 * 1024
 
@@ -86,6 +86,7 @@ class Server:
 		self.tasks = tasks.Tasks(self)
 		self.debug = debug.Debugger(self)
 		self.terminals = terminals.Terminals(self)
+		self.tools = tools.Tools(self)
 		self.chat = chat.Chats(self)
 		self.git = git.Git(self)
 		self.projects = projects.Projects(self)

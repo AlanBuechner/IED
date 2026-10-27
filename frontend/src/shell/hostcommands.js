@@ -3,6 +3,7 @@
 // (`desktopApp`, docs/27), which shows the system's folder picker and opens the folder on the server; a browser has no
 // way to pick a folder of the server's.
 
+import { installTools } from "./languagetools.js";
 import * as T from "./layouttree.js";
 import { showPalette } from "./palette.js";
 import { showNotificationCenter } from "./notifications.js";
@@ -77,6 +78,8 @@ const COMMANDS = [
 	{ id: "shell.keyboardShortcuts", title: "Keyboard Shortcuts", category: "Help", icon: "$(record-keys)", run: (shell) => shell.openSettings("custom:shell.keyboard") },
 	{ id: "shell.settings", title: "Settings", category: "Tools", icon: "$(settings-gear)", run: (shell, args) => shell.openSettings(args && args.page, args && args.tier, args && args.project) },
 	{ id: "shell.plugins", title: "Manage Plugins", category: "Extensions", icon: "$(extensions)", run: (shell) => shell.openTab("shell:plugins") },
+	{ id: "shell.languageTools", title: "Language Tools", category: "Tools", icon: "$(tools)", run: (shell) => shell.openSettings("custom:shell.languages") },
+	{ id: "shell.installLanguageTools", title: "Install Missing Language Tools", category: "Tools", icon: "$(cloud-download)", enablement: "workspaceTrusted", run: (shell) => installTools(shell, shell.wsId, shell.tools && shell.tools.snapshot, []) },
 	{ id: "shell.about", title: "About IED", category: "Help", run: (shell) => shell.openTab("shell:about") },
 ];
 

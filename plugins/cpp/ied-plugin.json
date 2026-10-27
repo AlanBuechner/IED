@@ -8,6 +8,11 @@
 // Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's adapter/codelldb.exe), which connects back to
 // IED's port (transport tcp, docs/25); a launch configuration's type is "lldb", with CodeLLDB's arguments (program,
 // args, cwd, env, stopOnEntry).
+// Its tools (docs/26 "Language tools"): clangd and CodeLLDB ship with IED inside this plugin's install folder
+// (tools/install copies the vendored LLVM's clangd.exe with clang's builtin headers into clangd/, and CodeLLDB's adapter
+// and LLDB into codelldb/, docs/21), so C and C++ work with nothing else installed; run from IED's source they are
+// vendor/llvm's and vendor/codelldb's. cpp.clangd.path and cpp.lldb.path still name others. A source checkout without
+// vendor/codelldb (setup.bat fetches it) installs CodeLLDB into IED's tools folder with one click (its SHA-256 pinned).
 // clangd's semantic tokens map onto the syntax colors Visual Assist style: `auto` (a deduced type) reads as a keyword and
 // code a preprocessor condition leaves out (clangd's `comment`) gray, like the directives.
 {
@@ -15,7 +20,7 @@
 	"id": "ied.cpp",
 	"name": "C/C++",
 	"version": "0.1.0",
-	"description": "C and C++ through clangd: diagnostics, completion, navigation, formatting and refactoring; debugging through LLDB (CodeLLDB).",
+	"description": "C and C++ through clangd: diagnostics, completion, navigation, formatting and refactoring; debugging through LLDB (CodeLLDB). Both ship with IED.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
@@ -125,7 +130,7 @@
 			{
 				"id": "clangd",
 				"label": "clangd",
-				"command": "${config:cpp.clangd.path}",
+				"command": "${tool:clangd}",
 				"args": ["${config:cpp.clangd.arguments}"],
 				"selector": { "languages": ["c", "cpp"] },
 				"formatOnAiWrite": "workspaceContains..clang-format || workspaceContains._clang-format",
@@ -137,11 +142,41 @@
 			{
 				"type": "lldb",
 				"label": "LLDB (CodeLLDB)",
-				"command": "${config:cpp.lldb.path}",
+				"command": "${tool:codelldb}",
 				"args": ["--connect", "${port}"],
 				"transport": "tcp",
 				"languages": ["c", "cpp", "rust"],
 				"when": "workspaceTrusted"
+			}
+		],
+		"tools": [
+			{
+				"id": "clangd",
+				"title": "clangd",
+				"kind": "languageServer",
+				"when": "(workspaceLanguage.c || workspaceLanguage.cpp) && config.cpp.languageServer",
+				"program": "clangd",
+				"setting": "cpp.clangd.path",
+				"bundled": ["${pluginDir}/clangd/bin/clangd.exe", "${iedHome}/vendor/llvm/bin/clangd.exe"],
+				"detect": { "args": ["--version"], "pattern": "clangd version (\\d+\\.\\d+\\.\\d+)" },
+				"homepage": "https://clangd.llvm.org/installation"
+			},
+			{
+				"id": "codelldb",
+				"title": "CodeLLDB",
+				"kind": "debugAdapter",
+				"when": "workspaceLanguage.c || workspaceLanguage.cpp || workspaceLanguage.rust",
+				"program": "codelldb",
+				"setting": "cpp.lldb.path",
+				"bundled": ["${pluginDir}/codelldb/adapter/codelldb.exe", "${iedHome}/vendor/codelldb/extension/adapter/codelldb.exe"],
+				"install": {
+					"version": "1.12.3",
+					"bin": "extension/adapter",
+					"windows": [
+						{ "label": "CodeLLDB from GitHub", "download": "https://github.com/vadimcn/codelldb/releases/download/v${version}/codelldb-win32-x64.vsix", "sha256": "a916e509308dac817732f63ca604a8b93ed29cd16f38a2fa9f0b64ed58e8f51a", "extract": "zip" }
+					]
+				},
+				"homepage": "https://github.com/vadimcn/codelldb"
 			}
 		],
 		"problemMatchers": [

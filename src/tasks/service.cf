@@ -342,6 +342,7 @@ namespace Ied
 			FS::Path cwd = FS::Path(Expanded(step->cwd.IsEmpty() ? Core::StringView("${projectRoot}") : step->cwd.View(), lookup, task->key.View()).View());
 			planned->cwd = Core::String((cwd.IsAbsolute() ? cwd : FS::Path(run->searchRoots[0].View()) / cwd.View()).Normalized().View());
 			for (const Core::String& entry : step->env) planned->env.Push(Expanded(entry.View(), lookup, task->key.View()));
+			planned->env = server->tools->EnvironmentFor(run->ws, planned->env);
 			planned->output = step->output.IsEmpty() ? Core::String(OutputFor(task)) : step->output;
 			for (const Core::String& id : step->matchers) planned->matchers.Push(MatcherNamed(run->ws, id.View()));
 			PlanMatchRoots(planned, lookup, task->key.View());
@@ -394,8 +395,13 @@ namespace Ied
 		Settings* settings = server->settings;
 		Core::HashMap<Core::String, Core::String>* offered = nullptr;
 		offeredVariables.TryGet(ws->wsId, offered);
-		TaskLookup lookup = [values, offered, settings, ws](Core::StringView name, Core::String& value) -> bool {
+		Tools* tools = server->tools;
+		TaskLookup lookup = [values, offered, settings, tools, ws](Core::StringView name, Core::String& value) -> bool {
 			if (values->TryGet(Core::String(name), value)) return true;
+			if (name.StartsWith(Core::StringView("tool:"))) {
+				value = tools->ProgramFor(ws, name.Substring(5, name.ByteLength() - 5));
+				return true;
+			}
 			if (offered && offered->TryGet(Core::String(name), value)) return true;
 			if (name.StartsWith(Core::StringView("env:"))) {
 				Core::String variable = Core::String(name.Substring(4, name.ByteLength() - 4));

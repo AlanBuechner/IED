@@ -40,12 +40,39 @@ namespace Terminal
 
 	static Core::String Empty() { return Core::String("{}"); }
 
-	static Core::String CreateMethod(Terminals* terms, const IED::Request& request) {
-		const IED::Params& params = request.params;
+	static IED::Workspace WorkspaceParam(const IED::Params& params) {
 		Core::String wsId = params.Str("wsId");
 		IED::Workspace ws;
 		if (!IED::FindWorkspace(wsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId.View()).View());
-		Core::String cwd = ws.root;
+		return ws;
+	}
+
+	// The profiles New Terminal falls back on, in order, when no default is set (the terminal plugin's own).
+	static Core::Array<Core::String> Fallbacks() {
+		Core::Array<Core::String> ids;
+		ids.Push(Core::String("pwsh"));
+		ids.Push(Core::String("powershell"));
+		ids.Push(Core::String("cmd"));
+		return ids;
+	}
+
+	// The profile a new terminal runs: the one `params` names, else the default (null when the terminal.shell setting
+	// or the fallback shells decide). Throws not_found for an unknown one and unavailable for one that cannot start.
+	static Profile* ChosenProfile(Terminals* terms, const IED::Workspace& ws, const IED::Params& params) {
+		Core::Array<Profile*> profiles = ProfilesOf(terms->context, ws);
+		Core::String named = params.Str("profile", Core::StringView(""));
+		if (named.IsEmpty()) named = DefaultProfile(terms->context, ws, profiles, Fallbacks());
+		if (named.IsEmpty()) return nullptr;
+		Profile* profile = ProfileNamed(profiles, named.View());
+		if (!profile) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no terminal profile ") + named.View()).View());
+		if (!profile->available) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("the ") + profile->title.View()) + " terminal cannot start: ") + profile->problem.View()).View());
+		return profile;
+	}
+
+	static Core::String CreateMethod(Terminals* terms, const IED::Request& request) {
+		const IED::Params& params = request.params;
+		IED::Workspace ws = WorkspaceParam(params);
+		Core::String cwd;
 		Core::String within = params.Str("cwd", Core::StringView(""));
 		if (!within.IsEmpty()) {
 			FS::Path folder = FS::Path(ws.root.View()) / IED::NormalizePath(within.View()).View();
@@ -55,12 +82,29 @@ namespace Terminal
 		Core::Array<Core::String> argv;
 		Serialization::DomNode given = params.Field("argv");
 		for (int64 i = 0; given.Kind() == Serialization::DomKind::Array && i < given.Count(); ++i) argv.Push(Core::String(given.At(i).AsView()));
+		Core::Array<Core::String> environment;
+		Core::String title = params.Str("title", Core::StringView(""));
+		Profile* profile = argv.IsEmpty() ? ChosenProfile(terms, ws, params) : nullptr;
+		if (profile) {
+			argv = profile->argv;
+			environment = profile->environment;
+			if (cwd.IsEmpty()) cwd = profile->cwd;
+			if (title.IsEmpty()) title = profile->title;
+		}
+		if (cwd.IsEmpty()) cwd = ws.root;
+		environment = IED::ToolEnvironment(ws, environment);
 		const int32 cols = Clamped(params.Int("cols", 0), kTerminalDefaultColumns, kTerminalMostColumns);
 		const int32 rows = Clamped(params.Int("rows", 0), kTerminalDefaultRows, kTerminalMostRows);
-		Term* terminal = terms->Create(wsId.View(), argv, cwd.View(), params.Str("title", Core::StringView("")).View(), Core::StringView("shell"), request.clientId.View(), cols, rows);
+		Term* terminal = terms->Create(ws.id.View(), argv, environment, cwd.View(), title.View(), profile ? profile->id.View() : Core::StringView(""), Core::StringView("shell"), request.clientId.View(), cols, rows);
 		Core::String* summary = new Core::String();
 		terms->context->Atomically([terminal, summary](IED::Events& events) { *summary = terminal->SummaryJson(); });
 		return *summary;
+	}
+
+	static Core::String ProfilesMethod(Terminals* terms, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceParam(request.params);
+		Core::Array<Profile*> profiles = ProfilesOf(terms->context, ws);
+		return ProfilesJson(profiles, DefaultProfile(terms->context, ws, profiles, Fallbacks()).View(), DefaultSetting(terms->context, ws.id.View()).View());
 	}
 
 	static Core::String ListMethod(Terminals* terms, const IED::Request& request) {
@@ -196,6 +240,7 @@ namespace Terminal
 	void RegisterMethods(Terminals* terms) {
 		Register(terms, "term.create", CreateMethod);
 		Register(terms, "term.list", ListMethod);
+		Register(terms, "term.profiles", ProfilesMethod);
 		Register(terms, "term.input", InputMethod);
 		Register(terms, "term.takeLease", TakeLeaseMethod);
 		Register(terms, "term.resize", ResizeMethod);

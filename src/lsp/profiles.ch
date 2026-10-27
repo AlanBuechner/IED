@@ -41,6 +41,8 @@ namespace Ied
 	// The variables a profile's command, arguments and folders may use.
 	// A setting's effective value for the workspace as JSON text; empty when it has none.
 	alias ConfigLookup = func<Core::String(Core::StringView key)>;
+	// The program a plugin's tool is for the workspace (docs/26 "Language tools"); empty when none is found.
+	alias ToolLookup = func<Core::String(Core::StringView id)>;
 
 	struct ProfileVariables
 	{
@@ -49,7 +51,10 @@ namespace Ied
 		public Core::String solutionDir;   // the workspace folder when it is no solution
 		public Core::String projectName;   // empty for a workspace-wide server
 		public Core::String projectDir;
+		public Core::String iedHome;       // the install, or the source a server runs from
+		public Core::String pluginState;   // the plugin's machine-local state folder (<data>/plugins/<id>)
 		public ConfigLookup config;        // ${config:<setting>}; without one they expand to nothing
+		public ToolLookup tool;            // ${tool:<id>}; without one they expand to nothing
 	}
 
 	// The profiles of one plugin's `contributes`, in order.
@@ -60,8 +65,8 @@ namespace Ied
 	bool ProfileSelects(const LspProfile* profile, Core::StringView languageId, Core::StringView path);
 	// The last of `profiles` whose selector names the document, or null.
 	LspProfile* ProfileServing(const Core::Array<LspProfile*>& profiles, Core::StringView languageId, Core::StringView path);
-	// `text` with ${pluginDir}, ${workspaceDir}, ${solutionDir}, ${projectName} and ${projectDir} expanded; any other
-	// ${...} is left as it is.
+	// `text` with ${pluginDir}, ${workspaceDir}, ${solutionDir}, ${projectName}, ${projectDir}, ${iedHome},
+	// ${pluginState}, ${env:<NAME>}, ${config:<setting>} and ${tool:<id>} expanded; any other ${...} is left as it is.
 	Core::String ExpandProfileVariables(Core::StringView text, const ProfileVariables& variables);
 	// One of a profile's `args`, expanded: one argument, or one per element when it is exactly one ${config:...} of a
 	// list setting (docs/24).

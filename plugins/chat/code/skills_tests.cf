@@ -104,9 +104,12 @@ class SkillsTests {
 		words.Push(Core::String("${args.missing}"));
 		words.Push(Core::String("--path=${config:tool.path}"));
 		words.Push(Core::String("${other}"));
+		words.Push(Core::String("${tool:cargo}"));
 		Ai::ToolSetting setting = [](Core::StringView key) -> Core::String { return key == "tool.path" ? Core::String("C:/bin") : Core::String(); };
-		Core::Array<Core::String> argv = Ai::ExpandToolArgv(words, SkillJson("{\"package\": \"game\", \"features\": [\"a\", \"b\"]}"), setting);
-		assert_eq((int64)7, argv.Count(), "a list argument as a whole word is a word per item");
+		Ai::ToolSetting tool = [](Core::StringView id) -> Core::String { return id == "cargo" ? Core::String("C:/rust/cargo.exe") : Core::String(); };
+		Core::Array<Core::String> argv = Ai::ExpandToolArgv(words, SkillJson("{\"package\": \"game\", \"features\": [\"a\", \"b\"]}"), setting, tool);
+		assert_eq((int64)8, argv.Count(), "a list argument as a whole word is a word per item");
+		assert_se("C:/rust/cargo.exe", argv[7].CStr(), "a language tool's program");
 		assert_se("--path=C:/bin", argv[5].CStr(), "a setting");
 		assert_se("${other}", argv[6].CStr(), "anything else as written");
 		assert_se("--package=game", argv[1].CStr(), "an argument inside a word");

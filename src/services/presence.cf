@@ -108,11 +108,10 @@ namespace Ied
 		return json.ToString();
 	}
 
-	Core::String Presence::Notify(Call& call, const Params& params) {
+	Core::String Presence::Add(Core::StringView level, Core::StringView text) {
 		Notification note;
-		note.level = params.Str("level", Core::StringView("info"));
-		if (!IsLevel(note.level.View())) throw RpcError(ErrorCode::BadRequest, "level must be one of info, warning, error, attention");
-		note.text = params.Str("text");
+		note.level = Core::String(level);
+		note.text = Core::String(text);
 		Core::StringBuilder id;
 		id.Append("n");
 		id.AppendInt(nextNote);
@@ -122,9 +121,16 @@ namespace Ied
 		Core::String data = NotificationJson(note);
 		notifications.Push(note);
 		server->hub.Publish(Core::StringView("server"), "notification", data.View());
+		return note.id;
+	}
+
+	Core::String Presence::Notify(Call& call, const Params& params) {
+		Core::String level = params.Str("level", Core::StringView("info"));
+		if (!IsLevel(level.View())) throw RpcError(ErrorCode::BadRequest, "level must be one of info, warning, error, attention");
+		Core::String id = Add(level.View(), params.Str("text").View());
 		JsonWriter json;
 		json.BeginObject();
-		json.Field("id", note.id.View());
+		json.Field("id", id.View());
 		json.EndObject();
 		return json.ToString();
 	}

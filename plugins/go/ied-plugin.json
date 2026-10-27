@@ -1,20 +1,25 @@
 // Go (docs/26 "Language plugins"): the language, its icons, Go projects by go.mod / go.work, the places the go tool
-// prints ("path:line:col"), gopls as the language server when it is installed (go install golang.org/x/tools/gopls),
-// the go preset for a folder with a go.mod - Build, Run and Test through the go tool with the `go` matcher - in a Nuke
-// workspace the go driver in nuke/ with the go.nuke preset (docs/26 section 6), and C4 code (code/go.cf) whose
-// system-message section names the workspace's Go modules. For the profiler (docs/16): the Go client module in
-// profiler/, the go preset's Profile task, and the importer of Go execution traces in importer/ (profilerImporters).
+// prints ("path:line:col"), gopls as the language server, Delve as the debugger (its DAP mode: `dlv dap` dialing IED's
+// port, adapter type "go", docs/25), the go preset for a folder with a go.mod - Build, Run and Test through the go tool
+// with the `go` matcher, Launch and Test configurations - in a Nuke workspace the go driver in nuke/ with the go.nuke
+// preset (docs/26 section 6), and C4 code (code/go.cf) whose system-message section names the workspace's Go modules.
+// Its tools (docs/26 "Language tools"): Go itself, gopls and Delve, found on PATH, where go install puts them or in
+// IED's tools folder, checked against the go version go.mod asks for (its toolchain line, else its go line, as a
+// minimum), and installed with one click: Go from go.dev's archive (its SHA-256 pinned for the plugin's version, else
+// go.dev's own checksum file), gopls and Delve by `go install` of a pinned version into IED's tools folder (the Go
+// checksum database checks them). For the profiler (docs/16): the Go client module in profiler/, the go preset's
+// Profile task, and the importer of Go execution traces in importer/ (profilerImporters).
 {
 	"manifestVersion": 1,
 	"id": "ied.go",
 	"name": "Go",
 	"version": "0.1.0",
-	"description": "The Go language: recognition, icons, gopls, builds through the go tool or Nuke, and build output links.",
+	"description": "The Go language: recognition, icons, gopls, Delve, builds through the go tool or Nuke, build output links, and one-click installs of Go and its tools.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "c4", "entry": "Go::Activate" },
 	"activation": ["onLanguage:go"],
-	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Go" },
@@ -40,7 +45,7 @@
 			{ "id": "modules", "function": "Go::Section", "when": "workspaceLanguage.go", "maxTokens": 200 }
 		],
 		"profilerImporters": [
-			{ "id": "go.trace", "label": "Go execution trace", "extensions": [".out", ".trace"], "magic": "go 1.", "run": ["${config:go.path}", "-C", "${pluginFolder}/importer", "run", ".", "-go", "${config:go.path}", "${input}", "${output}"] }
+			{ "id": "go.trace", "label": "Go execution trace", "extensions": [".out", ".trace"], "magic": "go 1.", "run": ["${tool:go}", "-C", "${pluginFolder}/importer", "run", ".", "-go", "${tool:go}", "${input}", "${output}"] }
 		],
 		"menus": {
 			"explorer/context": [
@@ -48,7 +53,81 @@
 			]
 		},
 		"lspProfiles": [
-			{ "id": "gopls", "label": "gopls", "command": "${config:go.gopls.path}", "selector": { "languages": ["go"] }, "formatOnAiWrite": true, "diagnosticsOnAiWrite": true, "when": "config.go.languageServer && workspaceTrusted" }
+			{ "id": "gopls", "label": "gopls", "command": "${tool:gopls}", "selector": { "languages": ["go"] }, "formatOnAiWrite": true, "diagnosticsOnAiWrite": true, "when": "config.go.languageServer && workspaceTrusted" }
+		],
+		"dapProviders": [
+			{
+				"type": "go",
+				"label": "Go (Delve)",
+				"command": "${tool:dlv}",
+				"args": ["dap", "--client-addr=127.0.0.1:${port}"],
+				"transport": "tcp",
+				"languages": ["go"],
+				"when": "workspaceTrusted",
+				"configurationTemplates": [ { "name": "Launch", "request": "launch", "mode": "debug", "program": "${projectRoot}", "cwd": "${projectRoot}" } ]
+			}
+		],
+		"tools": [
+			{
+				"id": "go",
+				"title": "Go",
+				"kind": "compiler",
+				"when": "workspaceLanguage.go",
+				"program": "go",
+				"setting": "go.path",
+				"onPath": true,
+				"searchPaths": ["${env:ProgramFiles}/Go/bin"],
+				"detect": { "args": ["version"], "pattern": "go(\\d+\\.\\d+(?:\\.\\d+)?)", "env": { "GOTOOLCHAIN": "local" } },
+				"versionFrom": [
+					{ "file": "go.mod", "regexp": "^toolchain\\s+go(\\d[^\\s]*)", "match": "minimum" },
+					{ "file": "go.mod", "regexp": "^go\\s+(\\d[^\\s]*)", "match": "minimum" },
+					{ "file": "go.work", "regexp": "^go\\s+(\\d[^\\s]*)", "match": "minimum" }
+				],
+				"install": {
+					"version": "1.27.3",
+					"bin": "bin",
+					"windows": [
+						{ "label": "Go from go.dev", "download": "https://go.dev/dl/go${version}.windows-amd64.zip", "sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff", "sha256Url": "https://dl.google.com/go/go${version}.windows-amd64.zip.sha256", "extract": "zip", "strip": 1 }
+					]
+				},
+				"homepage": "https://go.dev/doc/install"
+			},
+			{
+				"id": "gopls",
+				"title": "gopls",
+				"kind": "languageServer",
+				"when": "workspaceLanguage.go && config.go.languageServer",
+				"program": "gopls",
+				"setting": "go.gopls.path",
+				"searchPaths": ["${env:USERPROFILE}/go/bin"],
+				"detect": { "args": ["version"], "pattern": "gopls v?(\\d+\\.\\d+\\.\\d+)" },
+				"requires": ["go"],
+				"install": {
+					"version": "0.24.0",
+					"windows": [
+						{ "label": "go install gopls", "run": ["${tool:go}", "install", "golang.org/x/tools/gopls@v${version}"], "env": { "GOBIN": "${installDir}" } }
+					]
+				},
+				"homepage": "https://go.dev/gopls"
+			},
+			{
+				"id": "dlv",
+				"title": "Delve",
+				"kind": "debugAdapter",
+				"when": "workspaceLanguage.go",
+				"program": "dlv",
+				"setting": "go.delve.path",
+				"searchPaths": ["${env:USERPROFILE}/go/bin"],
+				"detect": { "args": ["version"], "pattern": "Version: (\\d+\\.\\d+\\.\\d+)" },
+				"requires": ["go"],
+				"install": {
+					"version": "1.27.2",
+					"windows": [
+						{ "label": "go install dlv", "run": ["${tool:go}", "install", "github.com/go-delve/delve/cmd/dlv@v${version}"], "env": { "GOBIN": "${installDir}" } }
+					]
+				},
+				"homepage": "https://github.com/go-delve/delve"
+			}
 		],
 		"problemMatchers": [
 			{
@@ -65,14 +144,32 @@
 				"label": "Go",
 				"detect": "go.mod",
 				"tasks": {
-					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [ { "run": ["${config:go.path}", "build", "./..."], "problemMatcher": "go" } ] },
-					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [ { "run": ["${config:go.path}", "run", "."], "problemMatcher": "go", "output": "run" } ] },
-					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [ { "run": ["${config:go.path}", "test", "./..."], "problemMatcher": "go", "output": "test" } ] },
-					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Run with the profiler connected (IED_PROFILER); the program records through github.com/AlanBuechner/IED/plugins/go/profiler", "steps": [ { "run": ["${config:go.path}", "run", "."], "problemMatcher": "go", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } } ] }
+					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [ { "run": ["${tool:go}", "build", "./..."], "problemMatcher": "go" } ] },
+					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [ { "run": ["${tool:go}", "run", "."], "problemMatcher": "go", "output": "run" } ] },
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [ { "run": ["${tool:go}", "test", "./..."], "problemMatcher": "go", "output": "test" } ] },
+					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Run with the profiler connected (IED_PROFILER); the program records through github.com/AlanBuechner/IED/plugins/go/profiler", "steps": [ { "run": ["${tool:go}", "run", "."], "problemMatcher": "go", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } } ] }
 				},
-				"toolbar": ["run", "build", "test"]
+				"toolbar": ["run", "build", "test"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "go", "request": "launch", "mode": "debug", "program": "${projectRoot}", "cwd": "${projectRoot}" },
+						"Test": { "type": "go", "request": "launch", "mode": "test", "program": "${projectRoot}", "cwd": "${projectRoot}" }
+					}
+				}
 			},
-			{ "id": "go.nuke", "label": "Go (Nuke)", "extends": "nuke", "problemMatcher": "go" }
+			{
+				"id": "go.nuke",
+				"label": "Go (Nuke)",
+				"extends": "nuke",
+				"problemMatcher": "go",
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "go", "request": "launch", "mode": "exec", "program": "${projectOutput}", "cwd": "${projectRoot}", "preLaunchTask": "build" }
+					}
+				}
+			}
 		]
 	}
 }

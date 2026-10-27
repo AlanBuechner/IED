@@ -1,0 +1,232 @@
+include "detect.ch"
+include "commands.ch"
+include "tasks/missing.ch"
+include "web/json.ch"
+
+namespace Ied
+{
+	Core::String ToolStatus::Json() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", spec->id.View());
+		json.Field("title", spec->title.View());
+		json.Field("kind", spec->kind.View());
+		json.Field("plugin", spec->pluginId.View());
+		json.Field("pluginName", spec->pluginName.View());
+		json.Field("state", state.View());
+		json.Field("path", path.View());
+		json.Field("version", version.View());
+		json.Field("source", source.View());
+		json.Key(Core::StringView("pin"));
+		if (pin.version.IsEmpty()) json.Null();
+		else {
+			json.BeginObject();
+			json.Field("version", pin.version.View());
+			json.Field("match", pin.minimum ? "minimum" : "exact");
+			json.Field("file", pin.file.View());
+			json.EndObject();
+		}
+		json.Field("problem", problem.View());
+		json.BoolField("canInstall", spec->CanInstall());
+		json.Field("installs", spec->CanInstall() ? ToolInstallVersion(spec, pin).View() : Core::StringView(""));
+		json.BoolField("installsForUser", spec->InstallsForUser());
+		json.Key(Core::StringView("requires"));
+		json.BeginArray();
+		for (const Core::String& required : spec->requires) json.String(required.View());
+		json.EndArray();
+		json.Field("homepage", spec->homepage.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	ToolStatus* ToolStatus::Copy() const {
+		ToolStatus* copy = new ToolStatus();
+		copy->spec = spec;
+		copy->state = state;
+		copy->path = path;
+		copy->version = version;
+		copy->source = source;
+		copy->pin = pin;
+		copy->problem = problem;
+		return copy;
+	}
+
+	static Core::String Extensions() {
+		Core::String extensions;
+		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
+		return extensions;
+	}
+
+	// The program file at `file` (".exe" and the other PATHEXT endings tried when it has none); empty when none is.
+	static Core::String ProgramAt(const FS::Path& file) { return FoundProgram(file.View(), Core::StringView(""), Core::StringView(""), Extensions().View()); }
+
+	// The same file on Windows: ASCII case and separator kind do not matter.
+	static bool SamePath(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i) {
+			int32 x = a.ByteAt(i);
+			int32 y = b.ByteAt(i);
+			if (x == '\\') x = '/';
+			if (y == '\\') y = '/';
+			if (x >= 'A' && x <= 'Z') x += 32;
+			if (y >= 'A' && y <= 'Z') y += 32;
+			if (x != y) return false;
+		}
+		return true;
+	}
+
+	// `path` with the system's separators ('\' on Windows), as the owner reads paths there.
+	static Core::String NativePath(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) out.AppendByte(path.ByteAt(i) == '/' ? '\\' : path.ByteAt(i));
+		return out.ToString();
+	}
+
+	static void Add(Core::Array<ToolCandidate>& candidates, Core::StringView path, const char* source, Core::StringView version) {
+		if (path.IsEmpty()) return;
+		for (const ToolCandidate& known : candidates)
+			if (SamePath(known.path.View(), path)) return;
+		ToolCandidate candidate;
+		candidate.path = NativePath(path);
+		candidate.source = Core::String(source);
+		candidate.version = Core::String(version);
+		candidates.Push(candidate);
+	}
+
+	Core::Array<Core::String> InstalledVersions(const FS::Path& toolsRoot, Core::StringView id) {
+		Core::Array<Core::String> versions;
+		FS::Path folder = toolsRoot / id;
+		if (!FS::IsDirectory(folder.CStr())) return versions;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr()))
+			if (entry.kind == FS::EntryKind::Directory && IsFolderSafeVersion(entry.name.View())) versions.Push(entry.name);
+		for (int64 i = 1; i < versions.Count(); ++i)
+			for (int64 j = i; j > 0 && CompareVersions(versions[j - 1].View(), versions[j].View()) < 0; --j) {
+				Core::String swap = versions[j - 1];
+				versions[j - 1] = versions[j];
+				versions[j] = swap;
+			}
+		return versions;
+	}
+
+	Core::Array<ToolCandidate> ToolCandidates(const ToolSpec* spec, Core::StringView setting, const ProfileVariables& variables, const FS::Path& toolsRoot, Core::String& looked) {
+		Core::Array<ToolCandidate> candidates;
+		if (!setting.Trimmed().IsEmpty()) {
+			Core::StringView named = setting.Trimmed();
+			const bool isPath = FS::Path(named).IsAbsolute() || named.IndexOf('/', 0) >= 0 || named.IndexOf('\\', 0) >= 0;
+			Add(candidates, (isPath ? ProgramAt(FS::Path(named)) : FindProgramFile(named)).View(), "setting", Core::StringView(""));
+			looked = ((Core::String("the setting ") + spec->setting.View()) + " names ") + named;
+			return candidates;
+		}
+		Core::StringBuilder where;
+		for (const Core::String& file : spec->bundled) {
+			Core::String expanded = ExpandProfileVariables(file.View(), variables);
+			Add(candidates, ProgramAt(FS::Path(expanded.View())).View(), "bundled", Core::StringView(""));
+			where.Append(expanded.View());
+			where.Append(", ");
+		}
+		for (const Core::String& version : InstalledVersions(toolsRoot, spec->id.View())) {
+			FS::Path folder = spec->installBin.IsEmpty() ? toolsRoot / spec->id.View() / version.View() : toolsRoot / spec->id.View() / version.View() / spec->installBin.View();
+			Add(candidates, ProgramAt(folder / spec->program.View()).View(), "installed", version.View());
+		}
+		where.Append((toolsRoot / spec->id.View()).View());
+		for (const Core::String& folder : spec->searchPaths) {
+			Core::String expanded = ExpandProfileVariables(folder.View(), variables);
+			if (expanded.IsEmpty()) continue;
+			Add(candidates, ProgramAt(FS::Path(expanded.View()) / spec->program.View()).View(), "searchPath", Core::StringView(""));
+			where.Append(", ");
+			where.Append(expanded.View());
+		}
+		Add(candidates, FindProgramFile(spec->program.View()).View(), "path", Core::StringView(""));
+		where.Append(" and PATH");
+		looked = NativePath(((spec->program + " was not found in ") + where.View()).View());
+		return candidates;
+	}
+
+	Core::String VersionIn(Core::StringView output, Core::StringView pattern) {
+		if (pattern.IsEmpty()) return Core::String();
+		Core::Regex regex = Core::Regex((Core::String("(?m)") + pattern).View());
+		Core::RegexMatch found;
+		if (!regex.IsValid() || regex.GroupCount() < 1 || !regex.Search(output, found)) return Core::String();
+		return Core::String(found.Group(1).Trimmed());
+	}
+
+	// Runs the program with the tool's version arguments: its version (empty when its output names none); false with
+	// `problem` when it does not start, run out of time or succeed.
+	static bool AskVersion(const DetectJob& job, Core::StringView program, Core::String& version, Core::String& problem) {
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String(program));
+		for (const Core::String& arg : job.spec->versionArgs) argv.Push(arg);
+		Core::Array<Core::String> environment = job.environment;
+		for (const Core::String& entry : job.spec->versionEnvironment) environment.Push(entry);
+		Process::StartInfo info;
+		if (!CommandStartInfo(argv, job.cwd.View(), environment, info, problem)) return false;
+		info.errors = Process::Redirect::ToOutput;
+		Process::Output ran = Process::Run(info, kToolVersionMs);
+		if (ran.exitCode == Process::kError) {
+			problem = Core::String("it did not start: ") + ran.error.View();
+			return false;
+		}
+		if (ran.exitCode == Process::kTimedOut) {
+			problem = Core::String("it did not answer within 15 s");
+			return false;
+		}
+		if (ran.exitCode != 0) {
+			Core::StringBuilder why;
+			why.Append("it exited with code ");
+			why.AppendInt(ran.exitCode);
+			Core::String line = FirstLine(ran.output.View());
+			if (!line.IsEmpty()) {
+				why.Append(": ");
+				why.Append(line.View());
+			}
+			problem = why.ToString();
+			return false;
+		}
+		version = VersionIn(ran.output.View(), job.spec->versionPattern.View());
+		return true;
+	}
+
+	ToolStatus* DetectTool(const DetectJob& job) {
+		ToolStatus* status = new ToolStatus();
+		status->spec = job.spec;
+		status->pin = job.pin;
+		Core::String broken;
+		bool wrong = false;
+		for (const ToolCandidate& candidate : job.candidates) {
+			Core::String version = candidate.version;
+			Core::String problem;
+			if (!job.spec->versionArgs.IsEmpty() && !AskVersion(job, candidate.path.View(), version, problem)) {
+				if (broken.IsEmpty()) broken = (candidate.path + ": ") + problem.View();
+				continue;
+			}
+			const bool gives = job.pin.version.IsEmpty() || version.IsEmpty() || VersionSatisfies(version.View(), job.pin.version.View(), job.pin.minimum);
+			if (gives || !wrong) {
+				status->path = candidate.path;
+				status->version = version;
+				status->source = candidate.source;
+			}
+			if (gives) {
+				status->state = Core::String("found");
+				return status;
+			}
+			wrong = true;
+		}
+		if (wrong) {
+			status->state = Core::String("wrongVersion");
+			Core::StringBuilder why;
+			why.Append(job.pin.file.View());
+			why.Append(job.pin.minimum ? " asks for " : " pins ");
+			why.Append(job.pin.version.View());
+			if (job.pin.minimum) why.Append(" or newer");
+			why.Append("; ");
+			why.Append(status->path.View());
+			why.Append(" is ");
+			why.Append(status->version.View());
+			status->problem = why.ToString();
+			return status;
+		}
+		status->state = Core::String("missing");
+		status->problem = broken.IsEmpty() ? job.looked : broken;
+		return status;
+	}
+}

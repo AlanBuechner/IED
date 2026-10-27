@@ -49,6 +49,7 @@ namespace Ied
 		tasks = new Tasks(self);
 		breakpoints = new Breakpoints(self);
 		debugger = new Debugger(self);
+		tools = new Tools(self);
 		projects = new ProjectTemplates(self);
 		projectManager = new ProjectManager(self);
 		if (IsMaster()) {

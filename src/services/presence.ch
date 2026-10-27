@@ -25,6 +25,8 @@ namespace Ied
 		public void RoutesChanged();
 		// {methods, topics}: what a client sends the master (docs/10 "Routing").
 		public Core::String RoutesJson() const;
+		// A notification for every device (server.notify's): its id.
+		public Core::String Add(Core::StringView level, Core::StringView text);
 
 	private:
 		private Core::String Snapshot() const;

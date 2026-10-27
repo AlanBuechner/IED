@@ -17,18 +17,19 @@ namespace Ai
 		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : IED::NodeJson(value);
 	}
 
-	// The value of one ${...}: an argument of the call or a setting; anything else is left as written.
-	static Core::String Variable(Core::StringView name, const Serialization::DomNode& args, const ToolSetting& setting) {
+	// The value of one ${...}: an argument of the call, a setting or a language tool; anything else is left as written.
+	static Core::String Variable(Core::StringView name, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
 		if (name.StartsWith(Core::StringView("args."))) {
 			Core::String key = Core::String(name.Substring(5, name.ByteLength() - 5));
 			return ArgumentText(args.Member(key.CStr()));
 		}
 		if (name.StartsWith(Core::StringView("config:"))) return setting(name.Substring(7, name.ByteLength() - 7));
+		if (name.StartsWith(Core::StringView("tool:"))) return tool(name.Substring(5, name.ByteLength() - 5));
 		return (Core::String("${") + name) + "}";
 	}
 
 	// `word` with each ${...} replaced.
-	static Core::String ExpandWord(Core::StringView word, const Serialization::DomNode& args, const ToolSetting& setting) {
+	static Core::String ExpandWord(Core::StringView word, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
 		Core::StringBuilder out;
 		Core::StringView rest = word;
 		for (;;) {
@@ -36,14 +37,14 @@ namespace Ai
 			const int64 close = open < 0 ? -1 : rest.IndexOf('}', open);
 			if (close < 0) break;
 			out.Append(rest.Substring(0, open));
-			out.Append(Variable(rest.Substring(open + 2, close - open - 2), args, setting).View());
+			out.Append(Variable(rest.Substring(open + 2, close - open - 2), args, setting, tool).View());
 			rest = rest.Substring(close + 1, rest.ByteLength() - close - 1);
 		}
 		out.Append(rest);
 		return out.ToString();
 	}
 
-	Core::Array<Core::String> ExpandToolArgv(const Core::Array<Core::String>& words, const Serialization::DomNode& args, const ToolSetting& setting) {
+	Core::Array<Core::String> ExpandToolArgv(const Core::Array<Core::String>& words, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
 		Core::Array<Core::String> argv;
 		for (const Core::String& word : words) {
 			Core::StringView view = word.View();
@@ -52,7 +53,7 @@ namespace Ai
 			Serialization::DomNode value = whole ? args.Member(name.CStr()) : Serialization::DomNode();
 			if (whole && value.Kind() == Serialization::DomKind::Array)
 				for (int64 i = 0; i < value.Count(); ++i) argv.Push(ArgumentText(value.At(i)));
-			else argv.Push(ExpandWord(view, args, setting));
+			else argv.Push(ExpandWord(view, args, setting, tool));
 		}
 		return argv;
 	}
@@ -88,9 +89,15 @@ namespace Ai
 		};
 	}
 
+	// A language tool's program in the call's workspace (docs/26 "Language tools").
+	static ToolSetting ToolOf(const ToolInvocation& call) {
+		IED::Workspace ws = call.ws;
+		return [ws](Core::StringView id) -> Core::String { return IED::ToolProgram(ws, id); };
+	}
+
 	static ToolPlan CommandPlan(const CommandToolEntry* entry, const ToolInvocation& call) {
 		ToolPlan plan;
-		Core::String line = Joined(ExpandToolArgv(entry->run, call.args, SettingOf(call)));
+		Core::String line = Joined(ExpandToolArgv(entry->run, call.args, SettingOf(call), ToolOf(call)));
 		plan.subject = (Core::String("shell(") + line.View()) + ")";
 		plan.summary = (Core::String("Run `") + line.View()) + "`";
 		if (!call.ws.trusted) plan.error = entry->name + ": the workspace is not trusted, so nothing may run in it; ask the owner to trust it";
@@ -121,7 +128,7 @@ namespace Ai
 
 	static ToolOutcome CommandRun(const CommandToolEntry* entry, const ToolInvocation& call) {
 		ToolCommand command;
-		Core::Array<Core::String> argv = ExpandToolArgv(entry->run, call.args, SettingOf(call));
+		Core::Array<Core::String> argv = ExpandToolArgv(entry->run, call.args, SettingOf(call), ToolOf(call));
 		Core::String problem;
 		if (!IsBatchFile(argv[0].View())) command.argv = argv;
 		else if (!BatchLine(argv, command.shell, problem)) return ToolError(((entry->name + ": ") + problem.View()).View());

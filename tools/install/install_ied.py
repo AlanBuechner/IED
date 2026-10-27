@@ -64,11 +64,12 @@ TREES = (
 BUILT_IN_PLACE = {"build", "target", "__pycache__"}
 
 # The services the web plugins run (docs/29): the private Python, SearXNG's own package (its searx/ folder) and Python
-# packages, and the Tor Expert Bundle. Each install first has setup install them into the checkout's vendor/ (only what
-# is missing or out of date), then copies them; without them web search says what is missing, and web fetch uses
-# Windows' curl.
+# packages, and the Tor Expert Bundle; and pip, which the Python terminal's pip() runs (docs/05 "Terminal profiles").
+# Each install first has setup install them into the checkout's vendor/ (only what is missing or out of date), then
+# copies them; without them web search says what is missing, and web fetch uses Windows' curl.
 SERVICES = (
 	("vendor/python", ("__pycache__",)),
+	("vendor/pip", ("__pycache__",)),
 	("vendor/searxng/searx", ("__pycache__",)),
 	("vendor/searxng-packages", ("__pycache__", "bin")),
 	("vendor/tor", ("docs",)),

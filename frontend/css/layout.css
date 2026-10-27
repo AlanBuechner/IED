@@ -611,6 +611,34 @@ dl.facts dd { margin: 0; }
 	.kb-tools { flex-wrap: wrap; }
 }
 
+/* ---------- Settings > Languages > Tools (languagetools.js, docs/26 "Language tools") ---------- */
+.lt-page .set-desc { max-width: 760px; }
+.lt-tools { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-5) 0 var(--space-3); }
+.lt-tools .btn .ci { margin-right: var(--space-2); }
+.lt-status { font-size: var(--font-size-sm); }
+.lt-group h2 { margin: var(--space-5) 0 var(--space-2); font-size: var(--font-size-ui); font-weight: 600; color: var(--text-0); }
+.lt-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr) auto; align-items: start; gap: var(--space-4); padding: var(--space-3) var(--space-2); border-bottom: var(--border-width) solid var(--border-0); }
+.lt-group .lt-row:first-of-type { border-top: var(--border-width) solid var(--border-0); }
+.lt-row:hover { background: var(--veil); }
+.lt-name, .lt-state { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--font-size-sm); }
+.lt-title { color: var(--text-0); font-size: var(--font-size-ui); }
+.lt-tone { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-0); }
+.lt-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.lt-row.ok .lt-dot { background: var(--accent-saved); }
+.lt-row.warn .lt-dot { background: var(--accent-warn); }
+.lt-row.error .lt-dot { background: var(--accent-error); }
+.lt-row.busy .lt-tone .ci { color: var(--accent-info); }
+.lt-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-xs); }
+.lt-problem { color: var(--text-1); overflow-wrap: anywhere; }
+.lt-action .btn .ci { margin-right: var(--space-2); }
+.lt-untrusted { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) 0; color: var(--text-1); }
+
+@media (max-width: 719px) {
+	.lt-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2) var(--space-3); }
+	.lt-state { grid-column: 1 / -1; grid-row: 2; }
+	.lt-untrusted { flex-wrap: wrap; }
+}
+
 @media (max-width: 719px) {
 	.set-top { padding: var(--space-3) var(--space-4); }
 	.set-body { flex-direction: column; }

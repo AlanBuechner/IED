@@ -347,6 +347,7 @@ namespace Ied
 		server->outputs->PluginsChanged(ws);
 		server->settings->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);
+		server->tools->PluginsChanged(ws);
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
 	}
 
@@ -411,6 +412,7 @@ namespace Ied
 		server->breakpoints->WorkspaceOpened(ws);
 		server->debugger->WorkspaceOpened(ws);
 		server->code->WorkspaceOpened(ws);
+		server->tools->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
@@ -578,6 +580,7 @@ namespace Ied
 		if (TouchesWorkspacePlugins(batch)) PluginsChanged(ws);
 		server->code->FilesChanged(ws, batch);
 		server->lsp->FilesChanged(ws, batch);
+		server->tools->FilesChanged(ws, batch);
 	}
 
 	// Whether a change is someone else's; it updates what the server knows of the path either way.
@@ -859,6 +862,7 @@ namespace Ied
 		server->lsp->TrustChanged(ws);
 		server->code->Reconcile(ws);
 		server->code->TrustChanged(ws);
+		server->tools->TrustChanged(ws);
 		server->documents->LanguagesChanged(ws);
 		server->outputs->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);

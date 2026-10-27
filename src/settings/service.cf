@@ -180,7 +180,10 @@ namespace Ied
 		return json.ToString();
 	}
 
-	void Settings::Publish(Workspace* ws) { server->hub.Publish(TopicOf(ws).View(), "settings.changed", Snapshot(ws, Core::StringView("")).View()); }
+	void Settings::Publish(Workspace* ws) {
+		server->hub.Publish(TopicOf(ws).View(), "settings.changed", Snapshot(ws, Core::StringView("")).View());
+		if (ws && server->tools) server->tools->SettingsChanged(ws);
+	}
 
 	void Settings::PublishAll() {
 		Publish(nullptr);

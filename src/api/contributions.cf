@@ -108,6 +108,27 @@ namespace IED
 		return found && Ied::WhenHolds(clause, Ied::WorkspaceWhen(server, found), error);
 	}
 
+	Core::String ExpandContribution(const Contribution& contribution, const Workspace& ws, Core::StringView text) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String(text);
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
+		if (!found) return Core::String(text);
+		Ied::ProfileVariables variables;
+		variables.pluginDir = contribution.folder;
+		variables.workspaceDir = Core::String(found->root.View());
+		variables.solutionDir = Core::String(found->root.View());
+		variables.iedHome = server->config.homeDir;
+		variables.pluginState = Core::String((FS::Path(server->config.dataDir.View()) / "plugins" / contribution.pluginId.View()).View());
+		Ied::Settings* settings = server->settings;
+		variables.config = [settings, found](Core::StringView key) -> Core::String { return settings->Effective(found, Core::StringView(""), key); };
+		Ied::Tools* tools = server->tools;
+		variables.tool = [tools, found](Core::StringView id) -> Core::String { return tools->ProgramFor(found, id); };
+		return Ied::ExpandProfileVariables(text, variables);
+	}
+
 	Core::String AppFolder() {
 		Core::String problem;
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);

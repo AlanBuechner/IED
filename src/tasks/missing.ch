@@ -14,6 +14,11 @@ namespace Ied
 	// Whether cmd would find `program`: a file as given, or a name in `cwd` or a folder of `path` (`;`-separated), as it
 	// is or with one of `extensions` (PATHEXT).
 	bool FindsProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions);
+	// The file cmd would run for `program`, found as FindsProgram finds it; empty when there is none.
+	Core::String FoundProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions);
+	// FoundProgram with this process's PATH and PATHEXT, not looking in a current folder: the program a name or a path
+	// names; empty when there is none.
+	Core::String FindProgramFile(Core::StringView program);
 
 	// What says `program` was not found and how to give it; the note is that as a red line of a run's output.
 	Core::String MissingProgramText(Core::StringView program, Core::StringView setting);

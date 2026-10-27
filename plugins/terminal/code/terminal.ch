@@ -7,6 +7,7 @@
 // topics' pulled snapshots read it whole; the methods read it there too.
 
 include "queue.ch"
+include "profiles.ch"
 include "api/plugin.ch"
 include "api/text.ch"
 
@@ -22,6 +23,7 @@ namespace Terminal
 		public Core::String wsId;
 		public Core::String title;
 		public Core::String kind;        // shell, or what made it (an agent, a task)
+		public Core::String profile;     // the terminal profile it runs; empty for a program given as it is
 		public Core::String holder;      // the client that types
 		public bool alive;
 		public int64 exitCode;
@@ -32,7 +34,7 @@ namespace Terminal
 		public MessageQueue* input;      // keystrokes, in order, for the writer thread
 
 		public Core::String Topic() const { return Core::String("term:") + termId.View(); }
-		// {termId, wsId, title, kind, alive, exitCode, holder}
+		// {termId, wsId, title, kind, profile, alive, exitCode, holder}
 		public Core::String SummaryJson() const;
 		// {terminal, cols, rows, scrollback}
 		public Core::String SnapshotJson() const;
@@ -44,9 +46,10 @@ namespace Terminal
 		[operator("create")] public void Init(IED::PluginContext* context);
 
 		public void Opened(const IED::Workspace& ws);
-		// A terminal running `argv` (empty: the workspace's shell) in `cwd`; the caller (`holder`) types. Throws
-		// unavailable when nothing could be started.
-		public Term* Create(Core::StringView wsId, const Core::Array<Core::String>& argv, Core::StringView cwd, Core::StringView title, Core::StringView kind, Core::StringView holder, int32 cols, int32 rows);
+		// A terminal running `argv` (empty: the terminal.shell setting's program, else the first of PowerShell 7, Windows
+		// PowerShell and cmd that starts) in `cwd` with `environment` ("NAME=value" over the server's); the caller
+		// (`holder`) types. Throws unavailable when nothing could be started.
+		public Term* Create(Core::StringView wsId, const Core::Array<Core::String>& argv, const Core::Array<Core::String>& environment, Core::StringView cwd, Core::StringView title, Core::StringView profile, Core::StringView kind, Core::StringView holder, int32 cols, int32 rows);
 		public Core::String ListJson(Core::StringView wsId) const;
 		// The terms:<wsId> event `kind` for `terminal`. Inside a change.
 		public void Changed(IED::Events& events, Term* terminal, const char* kind);

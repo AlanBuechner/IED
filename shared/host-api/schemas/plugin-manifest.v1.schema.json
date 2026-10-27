@@ -115,6 +115,7 @@
 				"statusBarItems": { "type": "array", "items": { "$ref": "#/$defs/statusBarItem" } },
 				"toolbarItems": { "type": "array", "items": { "$ref": "#/$defs/toolbarItem" } },
 				"panels": { "type": "array", "items": { "$ref": "#/$defs/panel" } },
+				"terminalProfiles": { "type": "array", "items": { "$ref": "#/$defs/terminalProfile" } },
 				"settingsPages": { "type": "array", "items": { "$ref": "#/$defs/settingsPage" } },
 				"outputSources": {
 					"type": "array",
@@ -236,6 +237,7 @@
 				},
 				"lspProfiles": { "type": "array", "items": { "$ref": "#/$defs/lspProfile" } },
 				"dapProviders": { "type": "array", "items": { "$ref": "#/$defs/dapProvider" } },
+				"tools": { "type": "array", "items": { "$ref": "#/$defs/tool" } },
 				"problemMatchers": { "type": "array", "items": { "$ref": "#/$defs/problemMatcher" } },
 				"testProviders": { "type": "array", "items": { "$ref": "#/$defs/testProvider" } },
 				"taskPresets": { "type": "array", "items": { "$ref": "#/$defs/taskPreset" } },
@@ -486,6 +488,91 @@
 				"title": { "type": "string" },
 				"icon": { "type": "string" },
 				"view": { "type": "string" }
+			}
+		},
+		"terminalProfile": {
+			"type": "object",
+			"required": ["id", "title", "argv"],
+			"additionalProperties": false,
+			"description": "A kind of terminal the terminal dock's New Terminal menu offers (docs/05 \"Terminal profiles\"): a program and its arguments under a pseudo console. Strings take ${pluginDir}, ${pluginState}, ${iedHome}, ${workspaceDir}, ${env:NAME}, ${config:key} and ${tool:id}. Of two with one id the last loaded plugin's.",
+			"properties": {
+				"id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+				"title": { "type": "string" },
+				"icon": { "$ref": "#/$defs/icon" },
+				"argv": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The program (a path, or a name looked for on PATH) and its arguments." },
+				"env": { "type": "object", "additionalProperties": { "type": "string" } },
+				"cwd": { "type": "string", "description": "Its folder; without one the workspace's (or the folder New Terminal was asked for)." },
+				"when": { "$ref": "#/$defs/when" }
+			}
+		},
+		"tool": {
+			"type": "object",
+			"required": ["id", "title", "program"],
+			"additionalProperties": false,
+			"description": "A program a language needs (docs/26 \"Language tools\"): how IED finds it, reads its version, sees the version a workspace pins and installs it into its tools folder. ${tool:<id>} in language server profiles, debug adapters, task steps and terminal profiles is the program found. Of two with one id the last loaded plugin's.",
+			"properties": {
+				"id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+				"title": { "type": "string" },
+				"kind": { "enum": ["compiler", "languageServer", "debugAdapter", "buildTool", "other"], "default": "other" },
+				"when": { "$ref": "#/$defs/when", "description": "The workspaces that need it (workspaceLanguage.go); only a trusted workspace's tools are looked for." },
+				"program": { "type": "string", "description": "The file looked for: a name, an extension of PATHEXT added when it has none." },
+				"setting": { "type": "string", "description": "A setting naming the program (a name looked up on PATH, or a path); set, nothing else is tried." },
+				"bundled": { "type": "array", "items": { "type": "string" }, "description": "Files tried first: what the plugin ships (${pluginDir}, ${iedHome})." },
+				"searchPaths": { "type": "array", "items": { "type": "string" }, "description": "Folders tried after IED's installs of it and before PATH (${env:USERPROFILE}/go/bin)." },
+				"onPath": { "type": "boolean", "default": false, "description": "Found outside PATH, its folder goes first on the PATH of the processes IED starts for the workspace." },
+				"detect": {
+					"type": "object",
+					"additionalProperties": false,
+					"description": "How its version is read; without it being there is enough.",
+					"properties": {
+						"args": { "type": "array", "items": { "type": "string" } },
+						"pattern": { "type": "string", "description": "A regular expression whose group 1, in the program's output, is its version." },
+						"env": { "type": "object", "additionalProperties": { "type": "string" } }
+					}
+				},
+				"versionFrom": {
+					"type": "array",
+					"description": "Where a workspace pins the version it wants, in order: the first file (in its root, then each project's folder) with a line the regexp matches.",
+					"items": {
+						"type": "object",
+						"required": ["file", "regexp"],
+						"additionalProperties": false,
+						"properties": {
+							"file": { "type": "string" },
+							"regexp": { "type": "string", "description": "Group 1 is the version; ^ and $ match at each line." },
+							"match": { "enum": ["minimum", "exact"], "default": "exact" }
+						}
+					}
+				},
+				"requires": { "type": "array", "items": { "type": "string" }, "description": "Tools an install of this one needs first (gopls needs go)." },
+				"install": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"version": { "type": "string", "description": "What an install gives when the workspace pins no version (or pins an older minimum)." },
+						"bin": { "type": "string", "description": "The program's folder inside the install folder (<data>/tools/<id>/<version>)." },
+						"windows": { "type": "array", "items": { "$ref": "#/$defs/toolInstallStep" } }
+					}
+				},
+				"homepage": { "type": "string", "description": "Where to read how to install it by hand." }
+			}
+		},
+		"toolInstallStep": {
+			"type": "object",
+			"additionalProperties": false,
+			"description": "A download (checked against its SHA-256, then unpacked into the install folder) or a command. Strings take ${version}, ${installDir}, ${tool:id} and the profile variables.",
+			"properties": {
+				"label": { "type": "string" },
+				"download": { "type": "string", "description": "A URL." },
+				"sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "The download's SHA-256 for the tool's install version." },
+				"sha256Url": { "type": "string", "description": "A file holding the download's SHA-256, for another version (a pinned one)." },
+				"extract": { "enum": ["zip", "tar", "none"], "default": "zip" },
+				"strip": { "type": "integer", "minimum": 0 },
+				"fileName": { "type": "string", "description": "With extract none: the file's name in the install folder." },
+				"run": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+				"env": { "type": "object", "additionalProperties": { "type": "string" } },
+				"cwd": { "type": "string", "description": "A command's folder; without one the workspace's." },
+				"scope": { "enum": ["ied", "user"], "default": "ied", "description": "user: the step writes outside IED's tools folder, for the user (rustup's own folders); the owner is asked before it runs." }
 			}
 		},
 		"settingsPage": {

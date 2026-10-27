@@ -1,9 +1,12 @@
 // banners.js - the non-blocking bars under the toolbar: the connection to the master while it is not live (F-SHL-34; the
-// views stay readable and input waits), the shown workspace's server while it is not there (servers.js), and the trust
-// of an untrusted workspace (F-SHL-33).
+// views stay readable and input waits), the shown workspace's server while it is not there (servers.js), the trust
+// of an untrusted workspace (F-SHL-33), and the language tools the workspace lacks (docs/26 "Language tools": Install,
+// Details - Settings > Languages - and Dismiss; an install's progress).
 
 import { h, icon } from "/ui-kit/dom.js";
+import { installTools } from "./languagetools.js";
 import { serverBanner } from "./servers.js";
+import { toolsBanner } from "./toolsmodel.js";
 
 const CONNECTION = {
 	connecting: ["info", "sync", "Connecting to the server..."],
@@ -32,6 +35,14 @@ export function banners(shell, state) {
 		out.push(h("div.banner.warn", { role: "status", dataset: { banner: "trust" } }, icon("shield"),
 			h("span", null, "This workspace is not trusted: its project-local plugins and anything that runs its code stay off."),
 			h("button.btn", { on: { click: () => shell.commands.run("shell.trustWorkspace") } }, "Trust Workspace")));
+	}
+	const tools = shell.wsId && shell.tools && shell.tools.wsId === shell.wsId ? toolsBanner(shell.tools.snapshot) : null;
+	if (tools) {
+		out.push(h("div.banner." + tools.tone, { role: "status", dataset: { banner: "tools" } }, icon(tools.busy ? "sync" : "tools", tools.busy ? "spin" : ""), h("span", null, tools.text),
+			tools.install.length ? h("button.btn", { on: { click: () => installTools(shell, shell.wsId, shell.tools.snapshot, tools.install) } }, "Install") : null,
+			tools.busy ? h("button.btn", { on: { click: () => shell.commands.run("ied.output.show", { sourceId: "tools" }) } }, "Show Output") : null,
+			h("button.btn", { on: { click: () => shell.commands.run("shell.languageTools") } }, "Details"),
+			tools.busy ? null : h("button.ib", { title: "Dismiss", "aria-label": "Dismiss", on: { click: () => shell.client.request("tools.dismiss", { wsId: shell.wsId }).catch((e) => shell.report(e.message, e)) } }, icon("close"))));
 	}
 	return out;
 }

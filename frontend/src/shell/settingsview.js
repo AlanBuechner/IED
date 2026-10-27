@@ -7,15 +7,23 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { TIERS, controlKind, findPage, inputText, matches, pageOwning, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
 import { KeyboardPage } from "./keyboardpage.js";
+import { LanguageToolsPage } from "./languagetools.js";
 
 export function settingsView(shell, ctx) {
 	return new SettingsView(shell, ctx);
 }
 
-// The shell's own pages, drawn as a plugin's settingsPages are: Environment > Keyboard edits keyboard.bindings.
+// The shell's own pages, drawn as a plugin's settingsPages are: Environment > Keyboard edits keyboard.bindings;
+// Languages > Tools shows the workspace's language tools and installs them (docs/26 "Language tools").
 function shellPages(shell) {
-	const plugin = { id: "shell", base: "/", module: { KeyboardSettings: (ctx) => new KeyboardPage(shell, ctx) } };
-	return [{ plugin, value: { id: "shell.keyboard", page: "Environment", title: "Keyboard", view: "KeyboardSettings", keys: ["keyboard.bindings"] } }];
+	const plugin = { id: "shell", base: "/", module: {
+		KeyboardSettings: (ctx) => new KeyboardPage(shell, ctx),
+		LanguageTools: (ctx) => (ctx.wsId ? new LanguageToolsPage(shell, ctx) : ctx.el.append(h("p.muted", null, "Open a workspace to see its language tools."))),
+	} };
+	return [
+		{ plugin, value: { id: "shell.keyboard", page: "Environment", title: "Keyboard", view: "KeyboardSettings", keys: ["keyboard.bindings"] } },
+		{ plugin, value: { id: "shell.languages", page: "Languages", title: "Tools", view: "LanguageTools", keys: [] } },
+	];
 }
 
 class SettingsView {

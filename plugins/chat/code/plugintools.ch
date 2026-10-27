@@ -10,10 +10,11 @@ namespace Ai
 {
 	// The tool `entry` (a `toolCalls` item) describes; null with `problem` when it runs no command.
 	ToolSpec* CommandTool(const Serialization::DomNode& entry, Core::StringView pluginId, Core::String& problem);
-	// A setting's effective value as text, for ${config:<key>}.
+	// A setting's effective value as text, for ${config:<key>}; a language tool's program, for ${tool:<id>}.
 	alias ToolSetting = func<Core::String(Core::StringView)>;
-	// `words` with ${args.<name>} replaced from `args` and ${config:<key>} from `setting` (what is missing is empty).
-	Core::Array<Core::String> ExpandToolArgv(const Core::Array<Core::String>& words, const Serialization::DomNode& args, const ToolSetting& setting);
+	// `words` with ${args.<name>} replaced from `args`, ${config:<key>} from `setting` and ${tool:<id>} from `tool` (what is
+	// missing is empty).
+	Core::Array<Core::String> ExpandToolArgv(const Core::Array<Core::String>& words, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool);
 	// Whether `program` is a batch file (.cmd, .bat): it runs only through cmd.exe (a setting naming nuke.cmd).
 	bool IsBatchFile(Core::StringView program);
 	// `argv` as the line cmd.exe runs, each word quoted; false with `problem` when a word holds what cmd.exe reads even

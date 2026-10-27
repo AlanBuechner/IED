@@ -134,7 +134,7 @@ class Workspaces:
 		ws.solution = solution
 		self.items[ws.ws_id] = ws
 		self.server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
-		for service in (self.server.layout, self.server.settings, self.server.outputs, self.server.lsp, self.server.tasks, self.server.debug, self.server.terminals):
+		for service in (self.server.layout, self.server.settings, self.server.outputs, self.server.lsp, self.server.tasks, self.server.debug, self.server.terminals, self.server.tools):
 			service.opened(ws.ws_id)
 		self.server.hub.publish("server", "workspace.opened", ws.summary())
 		return ws
@@ -174,6 +174,7 @@ class Workspaces:
 		ws = self.get(p.str("wsId"))
 		ws.trusted = p.bool("trusted")
 		self.server.hub.publish("ws:" + ws.ws_id, "trust.changed", {"trusted": ws.trusted})
+		self.server.tools.publish(ws.ws_id)
 		return {"trusted": ws.trusted}
 
 	async def m_fs_list(self, call, p):
