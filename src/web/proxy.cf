@@ -123,12 +123,13 @@ namespace Ied
 		tunnel->deviceId = device->id;
 		tunnel->upstream = upstream;
 		Proxy* self = this;
-		Http::AcceptWebSocket(request, response, [self, tunnel](Http::WebSocket& socket) {
+		const bool accepted = Http::AcceptWebSocket(request, response, [self, tunnel](Http::WebSocket& socket) {
 			tunnel->client = &socket;
 			self->Add(tunnel);
 			self->Pump(tunnel);
 			self->Remove(tunnel);
 		});
+		if (!accepted) upstream->socket.Close(1001, Core::StringView("the browser's upgrade was refused"));
 	}
 
 	// On the browser's connection thread: its messages to the workspace server, while a thread of its own sends the

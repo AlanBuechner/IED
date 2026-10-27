@@ -213,6 +213,8 @@ namespace Ied
 				Threading::LockGuard guard(server->lock);
 				if (record->closing || record->shutdown) break;
 				launched = StartProcess(record, problem);
+				// A restart asked for from here on is this run's.
+				record->restartAsked = false;
 				Core::StringBuilder line;
 				line.Append("workspace server ");
 				line.Append(record->wsId.View());
@@ -230,10 +232,14 @@ namespace Ied
 			}
 			if (launched && AwaitStarted(record, problem)) {
 				Threading::LockGuard guard(server->lock);
-				record->state = ServerState::Ready;
-				record->restartAsked = false;
-				Changed(record);
+				// Unless a restart or a close was asked while it started: its stop is on the way.
+				if (!record->restartAsked && !record->closing && !record->shutdown) {
+					record->state = ServerState::Ready;
+					Changed(record);
+				}
 			}
+			// One that never became ready (it hangs in its start) is ended, and counts as an exit.
+			else if (launched && record->child->Wait(0) == Process::kTimedOut) record->child->Kill();
 			const int64 code = launched ? record->child->Wait(Process::kWaitForever) : -1;
 			Threading::LockGuard guard(server->lock);
 			Exited(record, code, problem.View());

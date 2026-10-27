@@ -359,8 +359,10 @@ namespace Ied
 		if (params.Bool("enabled", true)) disabled.Remove(id);
 		else disabled.At(id) = true;
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
-		Load();
+		// The workspace servers read the choices first: a client hears plugins.changed from the master and asks its workspace
+		// server for the contributions, which must be the new ones by then.
 		if (server->servers) server->servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
+		Load();
 		return Summary(Get(id.View()), nullptr);
 	}
 
@@ -373,8 +375,8 @@ namespace Ied
 		approved.At(id) = FolderDigest(plugin->manifest->folder);
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
 		server->auth->Record("plugin-approved", (Core::String("\"plugin\":") + JsonString(id.View()).View()).View());
-		Load();
 		if (server->servers) server->servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
+		Load();
 		return Summary(Get(id.View()), nullptr);
 	}
 
