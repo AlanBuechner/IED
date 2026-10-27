@@ -127,9 +127,14 @@ modules side by side, build, run, debug, commit each repository when it works. T
   of the game therefore pins exactly the package code it was built with, released or not; another machine builds the
   same commit once it is pushed (Nuke says so when it is not).
 - **Releasing is optional and one command.** `nuke package release Windowing --minor` (in the clone or in the
-  repository's own checkout) tags `Windowing/v0.3.0` at HEAD and pushes the tag; it refuses while the checkout has
-  uncommitted changes or is behind its remote, and when a package of the same repository that Windowing uses has
-  unreleased changes (it names them: `release Rhi too`). Other games move to the new version with `nuke package update`.
+  repository's own checkout) tags `Windowing/v0.3.0` at HEAD and pushes the branch and the tag; it refuses while the
+  checkout has uncommitted changes or is behind its remote, and when a package of the same repository that Windowing
+  uses has unreleased changes (it names them: `release Rhi too`). A package of the repository whose newest release would
+  not accept the new version (Input 0.1.0 needs Windowing ^0.1.0, and 0.2.0 is outside it) is released again at the same
+  commit (Input 0.1.1), so a release of it accepts the new one; the workspace's own requirement moves when the new
+  version is outside it. Other games move to the new version with `nuke package update`.
+- **The lock moves only for what changed.** While a source is developed, a versioned package whose folder is the same at
+  HEAD as at its last release stays locked at that release; a commit that changes Windowing moves only Windowing's entry.
 - **Back to locked.** `nuke package lock claymore` exports the lock's commits and removes the clone - only when every
   change in it is committed and pushed (it names what is not).
 - **A checkout elsewhere.** `nuke package develop claymore --at C:/GameDev/Claymore` builds from an existing clone
