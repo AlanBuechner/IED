@@ -415,35 +415,66 @@ class BrowserToolTests(ServerTestCase):
 	async def pages(self):
 		return [p["pageId"] for p in (await self.client.request("browser.pages", {"wsId": "w1"}))["pages"]]
 
-	async def test_a_person_closing_the_ais_page_leaves_it_to_the_ai(self):
-		"""docs/27 "The Browser tab": a person closing the tab of a page the AI opened while its turn runs only closes the
-		tab; the page closes when the turn ends. Once the chat is idle, closing it closes it."""
-		created = await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "permission": "ask"})
+	async def ai_page(self):
+		"""A chat whose AI opened a page: (chatId, pageId)."""
+		created = await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "permission": "auto"})
 		chat_id = created["chatId"]
-		topic = "chat:" + chat_id
-		await self.client.sub([topic])
-		await self.client.next_frame(topic)
-		self.model.queue(chat_checks.call_step("browser_open", {"url": self.url}, "c1"), chat_checks.call_step("shell_run", {"command": "echo hi"}, "c2"),
-			chat_checks.text_step("Done."))
-		await self.client.request("chat.send", {"chatId": chat_id, "text": "Open the page, then run a command"})
-		opening = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=LOAD_SECONDS))[-1]["data"]
-		self.assertEqual("browser_open", opening["tool"], opening)
-		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": opening["approvalId"], "decision": "allow"})
-		request = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=LOAD_SECONDS * 2))[-1]["data"]
-		self.assertEqual("shell_run", request["tool"], request)
-		page = (await self.pages())[0]
-		self.assertEqual({"closed": False}, await self.client.request("browser.close", {"pageId": page}), "the AI's turn still runs")
+		await self.client.sub(["chat:" + chat_id])
+		await self.client.next_frame("chat:" + chat_id)
+		self.model.queue(chat_checks.call_step("browser_open", {"url": self.url}, "c1"), chat_checks.text_step("Opened."))
+		opened = (await self.turn(chat_id))[0]
+		return chat_id, re.search(r"(pg-[0-9a-f]+)", opened["result"]["preview"]).group(1)
+
+	async def test_a_person_closing_the_ais_page_leaves_it_to_the_ai(self):
+		"""docs/27 "The Browser tab" (owner, 2026-10-26: "the tabs is just a view into what the ai is doing"): a person
+		closing the tab of a page the AI opened closes only the tab - the page goes on for the AI, listed in its chat with
+		the command that force-closes it, after the turn ended too, and the AI still uses it; a person's own page closes."""
+		chat_id, page = await self.ai_page()
+		self.assertEqual({"closed": False}, await self.client.request("browser.close", {"pageId": page}), "only the tab closed")
 		await asyncio.sleep(2)
-		self.assertEqual([page], await self.pages(), "the page stays while the turn runs")
-		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "deny"})
-		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=LOAD_SECONDS)
+		self.assertEqual([page], await self.pages(), "the page stays with the chat idle")
+		listed = await self.listed(chat_id, lambda r: [x["ref"] for x in r] == ["browser:" + page], "the page")
+		self.assertEqual("ied.browser.forceClose", listed[0].get("close"), "with the command that closes it for good")
+		self.model.queue(chat_checks.call_step("browser_snapshot", {"page": page, "mode": "text"}, "c2"), chat_checks.text_step("Read."))
+		read = (await self.turn(chat_id))[0]
+		self.assertEqual("ok", read["state"], read)
+		self.assertIn("Fixture", read["result"]["preview"], "the AI goes on reading it")
+		mine = await self.client.request("browser.open", {"wsId": "w1", "url": self.url}, timeout=LOAD_SECONDS)
+		self.assertEqual({"closed": True}, await self.client.request("browser.close", {"pageId": mine["pageId"]}), "a person's own page closes with its tab")
+		self.assertEqual([page], await self.pages())
+
+	async def test_force_close_closes_the_ais_page_for_good(self):
+		"""The chat's "Open by this chat" Force close (browser.close {force}): the page closes for good and leaves the
+		chat's list; the AI's next use of it is told it is gone."""
+		chat_id, page = await self.ai_page()
+		await self.listed(chat_id, lambda r: len(r) == 1, "the page")
+		self.assertEqual({"closed": True}, await self.client.request("browser.close", {"pageId": page, "force": True}))
+		self.assertEqual([], await self.pages())
+		await self.listed(chat_id, lambda r: r == [], "empty once it was force-closed")
+		self.model.queue(chat_checks.call_step("browser_snapshot", {"page": page}, "c2"), chat_checks.text_step("Gone."))
+		gone = (await self.turn(chat_id))[0]
+		self.assertEqual("error", gone["state"], gone)
+		self.assertIn("no page", gone["result"]["preview"])
+
+	async def test_a_restart_lists_the_ais_page_in_its_chat_again(self):
+		"""The chat's list is kept for a server run only: after a restart the browser tells the chat its page again, loaded
+		or not, so it can be opened or force-closed from there."""
+		chat_id, page = await self.ai_page()
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = IedServer(data=os.path.join(self.root, "data"), extra=("--workspace", self.site))
+		self.addCleanup(self.server.stop)
+		self.assertTrue(self.server.started, self.server.error)
+		self.cookie = self.server.sign_in()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		listed = await self.listed(chat_id, lambda r: [x["ref"] for x in r] == ["browser:" + page], "the page, told again")
+		self.assertEqual("ied.browser.forceClose", listed[0].get("close"))
+
+	async def test_the_ais_pages_close_when_its_chat_is_deleted(self):
+		chat_id, page = await self.ai_page()
+		self.assertEqual({"closed": False}, await self.client.request("browser.close", {"pageId": page}))
+		await self.client.request("chat.delete", {"chatId": chat_id})
 		deadline = time.monotonic() + 10
 		while await self.pages():
-			self.assertLess(time.monotonic(), deadline, "the page closes once the turn ended")
+			self.assertLess(time.monotonic(), deadline, "the page closes with its chat")
 			await asyncio.sleep(0.25)
-		await self.client.request("chat.set", {"chatId": chat_id, "permission": "auto"})
-		self.model.queue(chat_checks.call_step("browser_open", {"url": self.url}, "c3"), chat_checks.text_step("Opened."))
-		await self.turn(chat_id)
-		again = (await self.pages())[0]
-		self.assertEqual({"closed": True}, await self.client.request("browser.close", {"pageId": again}), "an idle chat's page closes at once")
-		self.assertEqual([], await self.pages())

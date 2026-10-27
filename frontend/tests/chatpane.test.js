@@ -360,6 +360,36 @@ test("chat pane: a chat reverted on any device is drawn as the server has it now
 	}
 });
 
+test("chat pane: what the chat has open has Open and Force close, from a right click or a finger held on it", async () => {
+	const ied = fakeIed();
+	const ran = [];
+	ied.commands = { run: async (id, args) => ran.push([id, args]) };
+	const pane = await openPane(ied, 1);
+	try {
+		pane.openTab = (ref) => ran.push(["open", ref]);
+		ied.topics.get("chat:c1").evt("resources.changed", { resources: [{ ref: "browser:pg-1", title: "App", kind: "page", close: "ied.browser.forceClose" }, { ref: "x:1", title: "Other", kind: "process" }] });
+		const row = (ref) => pane.panel.el.querySelector(".chat-sec[data-section='open'] .chat-sec-row[data-ref='" + ref + "']");
+		row("browser:pg-1").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+		const items = () => [...document.querySelectorAll(".popup.menu .menu-item")].map((i) => [i.textContent, i.classList.contains("dis")]);
+		assertEqual(items(), [["Open", false], ["Force close", false]], "its menu");
+		[...document.querySelectorAll(".popup.menu .menu-item")][1].click();
+		assertEqual(ran, [["ied.browser.forceClose", { ref: "browser:pg-1" }]], "Force close runs the command its plugin named");
+		const other = row("x:1");
+		other.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", clientX: 5, clientY: 5, bubbles: true }));
+		await new Promise((resolve) => setTimeout(resolve, 650));
+		assertEqual(items(), [["Open", false], ["Force close", true]], "a finger held opens it; nothing to force-close without a command");
+		other.dispatchEvent(new PointerEvent("pointerup", { pointerType: "touch", bubbles: true }));
+		other.click();
+		assertEqual(ran.length, 1, "the click that ends the hold opens nothing");
+		document.querySelector(".popup.menu .menu-item").click();
+		assertEqual(ran[1], ["open", "x:1"], "Open opens its tab");
+	}
+	finally {
+		document.querySelectorAll(".popup.menu").forEach((menu) => menu.remove());
+		closePane(pane);
+	}
+});
+
 test("chat: a link in a reply opens the file it names, an address in its own window", () => {
 	const opened = [];
 	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0 }, { openFile: (path, line) => opened.push([path, line]), loadEarlier: () => {}, codeBlock: () => null });

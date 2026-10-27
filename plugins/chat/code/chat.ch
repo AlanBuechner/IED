@@ -171,6 +171,7 @@ namespace Ai
 		public Core::String ref;      // the tab ("browser:pg-3")
 		public Core::String title;
 		public Core::String kind;     // "page", ...: the side panel's icon
+		public Core::String close;    // the UI command that closes it for good (the side panel's Force close); "" for none
 	}
 
 	const int64 kClipShownBytes = 2048;   // of a clip's text, what the clients get

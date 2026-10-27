@@ -65,9 +65,13 @@ namespace Browser
 		return browsers->Frame(browsers->Find(params.Str("pageId").View()), params.Int("after", 0));
 	}
 
-	// {closed}: false for a page an AI's running turn keeps open (Browsers::CloseByPerson).
+	// {closed}: false for a page an AI's chat opened, which only its tab left (Browsers::CloseByPerson); `force` closes
+	// any page for good.
 	static Core::String CloseMethod(Browsers* browsers, const IED::Params& params) {
-		const bool closed = browsers->CloseByPerson(browsers->Find(params.Str("pageId").View()));
+		Page* page = browsers->Find(params.Str("pageId").View());
+		bool closed = true;
+		if (params.Bool("force", false)) browsers->Close(page);
+		else closed = browsers->CloseByPerson(page);
 		return Core::String(closed ? "{\"closed\":true}" : "{\"closed\":false}");
 	}
 

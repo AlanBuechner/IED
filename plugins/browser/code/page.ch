@@ -51,8 +51,6 @@ namespace Browser
 		public Core::String parent;   // the page that opened it (window.open, target="_blank"); "" for none
 		public Core::String chatId;   // the chat whose AI opened it; "" for a person's page
 		public Core::String toldChat; // the title that chat last heard it listed under; "" while it is not listed
-		public bool released;         // a person closed it while its chat's turn ran: it closes when the turn ends
-		public int64 releasedNs;
 		public bool loading;
 		public bool canGoBack;
 		public bool canGoForward;

@@ -7,7 +7,13 @@
 // the ones around what the AI does now, under a row that counts those above.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
+import { MenuHost } from "/ui-kit/menu.js";
 import { compact, contextBar } from "./chatmodel.js";
+
+const menus = new MenuHost();
+const HOLD_MS = 500;         // a finger held this long on a row opens its menu
+const HOLD_SLOP_PX = 10;
+const HELD_MENU_MS = 800;    // the browser's own contextmenu after a hold is the same menu
 
 const TASK_GLYPHS = { done: "check", skipped: "circle-slash", in_progress: "arrow-right", pending: null };
 const RESOURCE_ICONS = { page: "globe", terminal: "terminal", process: "server-process" };
@@ -16,10 +22,12 @@ const TASK_STATES = { running: ["loading", "spin", "c-info"], done: ["pass", "",
 
 export const PREVIEW_ROWS = 5;
 
-// actions: {openFile(path), fileIcon(path), openTab(ref), openChat(chatId), stopTask(taskId), closeDetails()}
+// actions: {openFile(path), fileIcon(path), openTab(ref), openChat(chatId), stopTask(taskId), closeDetails(),
+// runCommand(id, args)}
 export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
+		this.heldMs = 0;   // when a held finger last opened a row's menu
 		this.closed = new Set();
 		this.all = new Set();   // sections showing every row
 		this.previewRows = PREVIEW_ROWS;
@@ -95,12 +103,39 @@ export class SidePanel {
 		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? this.limited("tasks", rows, keep, (count) => doneAbove(model.tasks, count)) : h("div.chat-sec-empty.muted", null, "No tasks yet."));
 	}
 
-	// What the chat has open (docs/04 "What a chat has open"): shown only when it has something.
+	// What the chat has open (docs/04 "What a chat has open"): shown only when it has something. A click opens a row's tab
+	// - a view of it; closing that tab leaves it to the AI - and its menu (right click, or press and hold on a phone) has
+	// Open and Force close, which closes it for good through the command its plugin named.
 	openSection(model) {
 		if (!model.resources.length) return null;
-		const rows = model.resources.map((resource) => h("button.chat-sec-row.file", { title: "Open " + (resource.title || resource.ref) + " in a tab", dataset: { ref: resource.ref }, on: { click: () => this.actions.openTab(resource.ref) } },
-			icon(RESOURCE_ICONS[resource.kind] || "link-external"), h("span.name", null, resource.title || resource.ref)));
+		const rows = model.resources.map((resource) => {
+			const name = resource.title || resource.ref;
+			const menu = (at) => this.resourceMenu(at, resource);
+			const row = h("button.chat-sec-row.file", {
+				title: "Open " + name + " in a tab" + (resource.close ? " (right-click to force close it)" : ""), dataset: { ref: resource.ref },
+				on: { click: () => this.actions.openTab(resource.ref), contextmenu: (event) => {
+					event.preventDefault();
+					if (Date.now() - this.heldMs > HELD_MENU_MS) menu(event);
+				} },
+			}, icon(RESOURCE_ICONS[resource.kind] || "link-external"), h("span.name", null, name));
+			holdForMenu(row, (at) => {
+				this.heldMs = Date.now();
+				menu(at);
+			});
+			return row;
+		});
 		return this.section("open", "Open by this chat", String(model.resources.length), this.limited("open", rows));
+	}
+
+	resourceMenu(at, resource) {
+		menus.show({ at, label: resource.title || resource.ref, rows: [
+			{ kind: "item", label: "Open", id: "open", enabled: true },
+			{ kind: "separator" },
+			{ kind: "item", label: "Force close", id: "close", enabled: Boolean(resource.close) },
+		], pick: (row) => {
+			if (row.id === "open") this.actions.openTab(resource.ref);
+			else if (row.id === "close") this.actions.runCommand(resource.close, { ref: resource.ref });
+		} });
 	}
 
 	filesSection(model) {
@@ -153,6 +188,39 @@ export class SidePanel {
 		}
 		return this.section("clips", "Clipboard", String(model.clips.length), this.limited("clips", entries));
 	}
+}
+
+// `open({x, y})` when a finger (or pen) is held on `el` without moving: a phone's right click. The click that ends the
+// hold is swallowed.
+function holdForMenu(el, open) {
+	let timer = 0;
+	let start = null;
+	let swallow = false;
+	const cancel = () => {
+		clearTimeout(timer);
+		timer = 0;
+	};
+	el.addEventListener("pointerdown", (event) => {
+		if (event.pointerType === "mouse") return;
+		start = { x: event.clientX, y: event.clientY };
+		cancel();
+		timer = setTimeout(() => {
+			timer = 0;
+			swallow = true;
+			open(start);
+		}, HOLD_MS);
+	});
+	el.addEventListener("pointermove", (event) => {
+		if (timer && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > HOLD_SLOP_PX) cancel();
+	});
+	el.addEventListener("pointerup", cancel);
+	el.addEventListener("pointercancel", cancel);
+	el.addEventListener("click", (event) => {
+		if (!swallow) return;
+		swallow = false;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+	}, true);
 }
 
 // What the task preview leaves out above it: "4 done above" when they are all done or skipped.

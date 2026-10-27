@@ -49,6 +49,12 @@ namespace Ai
 		json.EndArray();
 	}
 
+	bool Chats::IsDeleted(Core::StringView chatId) const {
+		for (DeletedChat* chat : deleted)
+			if (chat->chatId.View() == chatId) return true;
+		return false;
+	}
+
 	DeletedChat* Chats::DeletedOf(Core::StringView chatId) const {
 		for (DeletedChat* chat : deleted)
 			if (chat->chatId.View() == chatId) return chat;

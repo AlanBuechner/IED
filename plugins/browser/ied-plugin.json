@@ -43,7 +43,10 @@
 			{ "id": "ied.browser.open", "title": "Web Browser", "category": "View", "icon": "$(globe)" },
 			{ "id": "ied.browser.pages", "title": "Browser Pages...", "category": "View", "icon": "$(browser)" },
 			{ "id": "ied.browser.openFile", "title": "View in Browser", "category": "Solution Explorer", "icon": "$(globe)" },
-			{ "id": "ied.browser.previewBeside", "title": "Open in Browser to the Side", "category": "Browser", "icon": "$(globe)" }
+			{ "id": "ied.browser.previewBeside", "title": "Open in Browser to the Side", "category": "Browser", "icon": "$(globe)" },
+			// Closes a page for good, the AI's too ({ref: "browser:<pageId>"}): a chat's "Open by this chat" runs it from a
+			// page's Force close (docs/27 "The Browser tab").
+			{ "id": "ied.browser.forceClose", "title": "Force Close Page", "category": "Browser", "icon": "$(close-all)" }
 		],
 		"menus": {
 			"menubar/view": [

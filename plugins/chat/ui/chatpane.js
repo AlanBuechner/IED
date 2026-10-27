@@ -148,6 +148,7 @@ export class ChatPane {
 			loadEarlier: () => this.loadEarlier(),
 			codeBlock: (code, fence, closed) => this.codeColors.element(code, fence, closed),
 			colorDiff: (path, spans) => this.codeColors.diff(path, spans),
+			runCommand: (id, args) => this.ied.commands.run(id, args),
 			copy: (text, what) => this.copy(text, what),
 			editMessage: (turn) => this.editMessage(turn),
 			resend: (turn) => this.resend(turn),

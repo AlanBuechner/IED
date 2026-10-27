@@ -19,7 +19,9 @@ namespace Browser
 	const int64 kLoadWaitNs = 30000000000;
 	const int64 kScreencastRetryNs = 250000000;
 	const int64 kDefaultUnloadSeconds = 600;
-	const int64 kReleaseGraceNs = 2000000000;   // a frame pull this long after a person's close is a viewer back
+	// The UI command that closes a page for good (the browser UI module's), told with an AI's page to its chat: the
+	// chat's side panel runs it from the page's Force close (docs/04 "What a chat has open").
+	const char* kForceCloseCommand = "ied.browser.forceClose";
 
 	// Added to every document of a page: tells the server the top document's title as it changes (headless browsers
 	// do not report a script's document.title), through the page's __iedPageTitle binding.
@@ -32,6 +34,10 @@ namespace Browser
 		"\tconst watch = () => { if (document.head) new MutationObserver(report).observe(document.head, { subtree: true, childList: true, characterData: true }); report(); };\n"
 		"\tif (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();\n"
 		"})();\n";
+
+	// A chat as the chat plugin's chat.state tells it: there, deleted, or unknown (no chat plugin, or a chat it has not
+	// loaded yet).
+	enum class ChatSeen { Unknown, There, Deleted }
 
 	class Browsers
 	{
@@ -55,9 +61,11 @@ namespace Browser
 		public void Reload(Page* page);
 		public void StopLoading(Page* page);
 		public void Resize(Page* page, int32 width, int32 height, int32 scalePercent);
+		// The page closed for good: the AI's browser_close, a force close (browser.close {force}), its chat deleted.
 		public void Close(Page* page);
-		// A person closes the page (its tab): one an AI's chat opened stays open while that chat's turn runs, since the
-		// AI still works in it, and closes when the AI closes it or the turn ends; any other closes now. Whether it closed.
+		// A person closes the page's tab: a tab is only a view of the page, so a page an AI's chat opened goes on for the AI
+		// - listed in the chat's "Open by this chat" until the AI closes it, the owner force-closes it or the chat is
+		// deleted (owner, 2026-10-26); any other page closes now. Whether it closed.
 		public bool CloseByPerson(Page* page);
 		// Waits (at most `ns`) for a load event after `loadsBefore`; false when none came.
 		public bool AwaitLoad(Page* page, int64 loadsBefore, int64 ns);
@@ -92,8 +100,9 @@ namespace Browser
 		private void Adopt(Page* parent, Core::StringView targetId, Core::StringView url);
 		private bool StartScreencast(Page* page);
 		private void Changed(IED::Events& events, Page* page);
-		// The chat whose AI opened `page` lists it while it is loaded, under its title (chat.resource, docs/04 "What a
-		// chat has open"); told on the worker, in order, only when that changes. In a change (the server's lock held).
+		// The chat whose AI opened `page` lists it while it is open, loaded or not, under its title and with the command
+		// that force-closes it (chat.resource, docs/04 "What a chat has open"); told on the worker, in order, only when
+		// that changes. In a change (the server's lock held).
 		private void TellChat(Page* page, bool open);
 		private void Persist(Core::StringView wsId);
 		private void Later(func<void()> job);
@@ -103,10 +112,11 @@ namespace Browser
 		// when next looked at or used); the browser stops once no page was loaded for that long.
 		private void UnloadIdlePages();
 		private int64 UnloadAfterNs();
-		// Whether chat `chatId` is in a turn (the chat plugin's chat.state); false without the chat plugin.
-		private bool ChatRunning(Core::StringView chatId);
-		// Pages a person closed while their chat's turn ran close once it has ended.
-		private void CloseReleasedPages();
+		// What the chat plugin's chat.state says of chat `chatId`.
+		private ChatSeen SeeChat(Core::StringView chatId);
+		// The worker's: each page an AI's chat opened is told to that chat until the chat lists it (after a restart it
+		// lists none), and closes with its chat when that is deleted.
+		private void FollowChats();
 		// The page's title (headless browsers do not always tell when it changes) and history flags, asked of the page.
 		private void RefreshState(Page* page);
 		private void PageEvent(Page* page, const CdpEvent& event);

@@ -2328,6 +2328,75 @@ def browser_tab(run):
 	run.wait_text(titles, "Went hello", timeout=20000)
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def chat_ai_page_kept_and_force_closed(run):
+	"""A Browser tab is a view of a page (owner, 2026-10-26: "the tabs is just a view into what the ai is doing"): closing
+	the tab of a page the AI opened leaves the page to the AI - a toast says so and how to close it - and the chat's
+	"Open by this chat" row's menu (right click; press and hold on a phone) has Force close, which closes it for good."""
+	site = os.path.join(run.target.workspace, "site")
+	os.makedirs(site, exist_ok=True)
+	with open(os.path.join(site, "demo.html"), "w", encoding="utf-8") as f:
+		f.write(BROWSER_DEMO)
+	page = open_chat(run)
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("ws.setTrust", {"wsId": ws, "trusted": True})   # the AI's plugin tools run in a trusted workspace only
+	try:
+		ai_page_kept_and_force_closed(run, page, ws, site)
+	finally:
+		run.request("ws.setTrust", {"wsId": ws, "trusted": False})
+
+
+def ai_page_kept_and_force_closed(run, page, ws, site):
+	run.request("chat.set", {"chatId": run.chat_id, "permission": "auto"})
+	url = "file:///" + os.path.join(site, "demo.html").replace("\\", "/")
+	run.target.queue_model(model_script({"toolCall": {"name": "browser_open", "arguments": {"url": url}}}, {"finish": "tool_calls"}),
+		model_script({"text": "The demo page is open.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "open the demo page")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=60000)
+	pages = lambda: [p["pageId"] for p in run.request("browser.pages", {"wsId": ws})["pages"]]
+	opened = pages()
+	if len(opened) != 1:
+		tools = [s for s in run.request("chat.history", {"chatId": run.chat_id})["turns"][-1]["segments"] if s["type"] == "tool"]
+		check(False, "the AI's page: %s; its call: %s" % (opened, [t.get("result") for t in tools]))
+	ref = "browser:" + opened[0]
+	row = ".chat-panel .chat-sec[data-section='open'] .chat-sec-row[data-ref='%s']" % ref
+	if run.phone:
+		page.click("button[aria-label='Chat details']")
+	page.wait_for_selector(row, timeout=20000)
+	page.click(row)
+	page.wait_for_selector(".view[data-ref='%s'] .browser-frame:not([hidden])" % ref, timeout=30000)
+	run.shot("page")
+	if run.phone:
+		# a phone's pane goes back, the page kept in its stack: nothing is closed
+		page.evaluate("(ref) => ied_shell.commands.run('shell.closeTab', { ref })", ref)
+	else:
+		page.click(".tab[data-ref='%s'] .x" % ref)
+		page.wait_for_selector(".toast:has-text('keeps this page open')", timeout=10000)
+		check("Force close" in run.texts(".toast:has-text('keeps this page open')")[0], "the toast says how to close it for good")
+		run.shot("kept")
+	time.sleep(1.5)
+	check(pages() == opened, "the page goes on for the AI: %s" % pages())
+	if run.phone:
+		show_chat(run)
+		page.click("button[aria-label='Chat details']")
+		page.wait_for_selector(row, timeout=10000)
+		page.evaluate("""(sel) => {
+			const el = document.querySelector(sel);
+			const box = el.getBoundingClientRect();
+			el.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', clientX: box.x + 20, clientY: box.y + 10, bubbles: true }));
+		}""", row)
+		page.wait_for_selector(".popup.menu.sheet", timeout=5000)
+	else:
+		page.click(row, button="right")
+		page.wait_for_selector(".popup.menu", timeout=5000)
+	check(run.texts(".popup.menu .menu-item") == ["Open", "Force close"], "Open and Force close: %s" % run.texts(".popup.menu .menu-item"))
+	run.shot("menu")
+	page.click(".popup.menu .menu-item:has-text('Force close')")
+	page.wait_for_selector(row, state="detached", timeout=20000)
+	check(pages() == [], "closed for good: %s" % pages())
+	run.shot("closed")
+
+
 @scenario(viewports=("desktop",), targets=("real",))
 def browser_tab_opens_where_the_person_is(run):
 	"""A page opens in the activity you are in (docs/15 "Docking", docs/27 "The Browser tab"; the owner, 2026-10-26:

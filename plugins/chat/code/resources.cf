@@ -3,7 +3,8 @@ include "resources.ch"
 
 namespace Ai
 {
-	// {chatId, ref, title?, kind?, open?}: `open` false takes the tab off the chat's list.
+	// {chatId, ref, title?, kind?, close?, open?}: `open` false takes the tab off the chat's list; `close` the UI command
+	// that closes the thing for good, which the side panel's Force close runs with {ref}.
 	static IED::Result ChatResourceCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
 		IED::HostLock guard(*context);
 		Core::StringView ref = args.Member("ref").AsView();
@@ -25,6 +26,7 @@ namespace Ai
 			resource->ref = Core::String(ref);
 			if (args.Member("title").IsValid()) resource->title = Core::String(args.Member("title").AsView());
 			if (args.Member("kind").IsValid()) resource->kind = Core::String(args.Member("kind").AsView());
+			if (args.Member("close").IsValid()) resource->close = Core::String(args.Member("close").AsView());
 			if (at < 0) chat->resources.Push(resource);
 		}
 		IED::JsonWriter data;
@@ -36,7 +38,9 @@ namespace Ai
 		return IED::Answer(Core::StringView("{}"));
 	}
 
-	// {chatId} -> {state, running}: `running` while a turn is in flight, waiting on an approval or answer included.
+	// {chatId} -> {state, running}: `running` while a turn is in flight, waiting on an approval or answer included; a
+	// deleted chat (kept among the deleted until purged) is {state: "deleted", running: false, deleted: true}, so what a
+	// plugin kept open for it can close (docs/27).
 	static IED::Result ChatStateCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
 		IED::HostLock guard(*context);
 		Chat* chat = nullptr;
@@ -44,6 +48,7 @@ namespace Ai
 			chat = chats->Get(args.Member("chatId").AsView());
 		}
 		catch (IED::RpcError& error) {
+			if (chats->IsDeleted(args.Member("chatId").AsView())) return IED::Answer(Core::StringView("{\"state\":\"deleted\",\"running\":false,\"deleted\":true}"));
 			return IED::Refusal(error.message.View());
 		}
 		IED::JsonWriter data;

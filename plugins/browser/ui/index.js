@@ -1,20 +1,25 @@
 // index.js - the browser plugin's UI module (docs/27 "The Browser tab"): the "browser:<pageId>" tab kind showing a page
 // that lives on the server, View > Web Browser, Browser Pages... (every page of the workspace, the AI's too), View in
 // Browser for a workspace file, an HTML file's page beside its editor (reloaded when the file is saved), a toast when
-// the AI opens a page, and closing a page with its tab (one the AI still works in closes when it is done).
+// the AI opens a page, and closing a page with its tab - a tab is only a view of the page, so a page an AI's chat opened
+// goes on for the AI until it closes it or the owner force-closes it (Force Close Page, which the chat's "Open by this
+// chat" runs from the page's row).
 
 import { icon } from "/ui-kit/dom.js";
 import { showPicker } from "/ui-kit/picker.js";
 import { BrowserView } from "./browserview.js";
+
+export const KEPT_FOR_THE_AI = "The AI keeps this page open: closing the tab closed only your view of it. To close the page for good, right-click it under \"Open by this chat\" in the chat's details and choose Force close.";
 
 export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/browser.css");
 	ied.tabs.kind("browser", { view: "BrowserTab", title: () => "Browser", icon: () => "$(globe)" });
 	ied.tabs.onClose("browser", (ref) => {
 		ied.client.request("browser.close", { pageId: ref.slice("browser:".length) })
-			.then((answer) => answer && answer.closed === false && ied.toast("The AI is still using this page: it closes when the AI is done with it."))
+			.then((answer) => answer && answer.closed === false && ied.toast(KEPT_FOR_THE_AI))
 			.catch(() => {});
 	});
+	ied.commands.handle("ied.browser.forceClose", (args) => forceClose(ied, (args && args.ref) || ied.context.get("activeTab")));
 	ied.commands.handle("ied.browser.open", (args) => openPage(ied, args && args.url));
 	ied.commands.handle("ied.browser.openFile", (args) => {
 		const root = ied.workspace.root;
@@ -27,6 +32,21 @@ export function activate(ied) {
 		followPreviews();
 	});
 	watchNewPages(ied);
+}
+
+// The page of `ref` ("browser:<pageId>") closed for good, the AI's too, and its tab here with it.
+async function forceClose(ied, ref) {
+	if (!ref || !ref.startsWith("browser:")) {
+		ied.toast("Force Close Page closes a page: run it on a Browser tab, or from a page under \"Open by this chat\" in a chat's details.", { level: "info" });
+		return;
+	}
+	try {
+		await ied.client.request("browser.close", { pageId: ref.slice("browser:".length), force: true });
+	}
+	catch (e) {
+		if (e.code !== "not_found") throw e;
+	}
+	if (ied.tabs.state().open.includes(ref)) ied.tabs.close(ref);
 }
 
 // An HTML file's page beside its editor, tethered to it as a Markdown preview is: shown with the file, closed with it.

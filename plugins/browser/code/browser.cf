@@ -39,10 +39,11 @@ namespace Browser
 		Core::String summary = page->SummaryJson();
 		events.Publish(BrowserTopic(page->wsId.View()).View(), "page.changed", summary.View());
 		events.Publish(page->Topic().View(), "changed", summary.View());
-		TellChat(page, page->live);
+		TellChat(page, true);
 	}
 
-	// A server without the chat plugin refuses the call, which changes nothing.
+	// A server without the chat plugin refuses the call, which changes nothing; a chat not loaded yet refuses it too, and
+	// the worker tells it again (FollowChats).
 	void Browsers::TellChat(Page* page, bool open) {
 		if (page->chatId.IsEmpty()) return;
 		Core::String title = open ? (page->title.IsEmpty() ? page->url : page->title) : Core::String();
@@ -54,10 +55,16 @@ namespace Browser
 		args.Field("ref", (Core::String("browser:") + page->pageId.View()).View());
 		if (open) args.Field("title", title.View());
 		args.Field("kind", Core::StringView("page"));
+		if (open) args.Field("close", Core::StringView(kForceCloseCommand));
 		args.BoolField("open", open);
 		args.EndObject();
 		Core::String text = args.ToString();
-		Later([text]() { IED::CallBinding(Core::StringView("chat.resource"), text.View()); });
+		Browsers* self = this;
+		Later([self, page, text, title]() {
+			if (IED::CallBinding(Core::StringView("chat.resource"), text.View()).Ok()) return;
+			IED::HostLock lock(*self->context);
+			if (page->toldChat.View() == title.View()) page->toldChat = Core::String();
+		});
 	}
 
 	Page* Browsers::Find(Core::StringView pageId) {
@@ -413,40 +420,42 @@ namespace Browser
 			IED::HostLock lock(*context);
 			chatId = page->chatId;
 		}
-		if (chatId.IsEmpty() || !ChatRunning(chatId.View())) {
-			Close(page);
-			return true;
-		}
-		{
-			IED::HostLock lock(*context);
-			page->released = true;
-			page->releasedNs = clock_now_ns();
-		}
-		Persist(page->wsId.View());
-		return false;
+		if (!chatId.IsEmpty()) return false;
+		Close(page);
+		return true;
 	}
 
-	bool Browsers::ChatRunning(Core::StringView chatId) {
+	ChatSeen Browsers::SeeChat(Core::StringView chatId) {
 		IED::Result state = IED::CallBinding(Core::StringView("chat.state"), (Core::String("{\"chatId\":") + JsonText(chatId).View() + "}").View());
-		if (!state.Ok()) return false;
+		if (!state.Ok()) return ChatSeen::Unknown;
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Serialization::ReadResult parsed = Serialization::ReadJson(state.json.View(), *doc);
-		return parsed.Ok() && parsed.root.Member("running").IsValid() && parsed.root.Member("running").AsBool();
+		if (!parsed.Ok()) return ChatSeen::Unknown;
+		return parsed.root.Member("deleted").AsBool() ? ChatSeen::Deleted : ChatSeen::There;
 	}
 
-	void Browsers::CloseReleasedPages() {
-		Core::Array<Page*> released;
+	void Browsers::FollowChats() {
+		Core::Array<Page*> owned;
 		Core::Array<Core::String> chats;
 		{
 			IED::HostLock lock(*context);
 			for (Page* page : pages) {
-				if (!page->released) continue;
-				released.Push(page);
+				if (page->chatId.IsEmpty()) continue;
+				owned.Push(page);
 				chats.Push(page->chatId);
 			}
 		}
-		for (int64 i = 0; i < released.Count(); ++i)
-			if (!ChatRunning(chats[i].View())) Close(released[i]);
+		for (int64 i = 0; i < owned.Count(); ++i) {
+			const ChatSeen seen = SeeChat(chats[i].View());
+			if (seen == ChatSeen::Deleted) {
+				context->Log(((Core::String("page ") + owned[i]->pageId.View()) + " closed: chat " + chats[i].View() + " was deleted").View());
+				Close(owned[i]);
+				continue;
+			}
+			if (seen != ChatSeen::There) continue;
+			IED::HostLock lock(*context);
+			if (owned[i]->toldChat.IsEmpty()) TellChat(owned[i], true);
+		}
 	}
 
 	void Browsers::Unloaded(Page* page) {
@@ -514,13 +523,6 @@ namespace Browser
 	}
 
 	Core::String Browsers::Frame(Page* page, int64 after) {
-		{
-			IED::HostLock lock(*context);
-			if (page->released && clock_now_ns() - page->releasedNs > kReleaseGraceNs) {
-				page->released = false;
-				Persist(page->wsId.View());
-			}
-		}
 		Load(page);
 		const int64 deadline = clock_now_ns() + kFrameWaitNs;
 		for (;;) {
@@ -589,7 +591,7 @@ namespace Browser
 				}
 			}
 			StopIdleScreencasts();
-			CloseReleasedPages();
+			FollowChats();
 			UnloadIdlePages();
 		}
 	}

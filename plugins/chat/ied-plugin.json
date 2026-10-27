@@ -30,13 +30,13 @@
 					"name": "chat.resource",
 					"version": "1.0.0",
 					"kind": "function",
-					"description": "A plugin says a chat uses one of its tabs (a page the AI drives), or no longer does: {chatId, ref, title?, kind?, open?} -> {}; the chat's side panel lists them (docs/04 \"What a chat has open\")."
+					"description": "A plugin says a chat uses one of its tabs (a page the AI drives), or no longer does: {chatId, ref, title?, kind?, close?, open?} -> {}; the chat's side panel lists them, and its Force close runs the UI command `close` names with {ref} (docs/04 \"What a chat has open\")."
 				},
 				{
 					"name": "chat.state",
 					"version": "1.0.0",
 					"kind": "function",
-					"description": "Whether a chat is in a turn: {chatId} -> {state, running}; a page the AI drives stays open while its turn runs (docs/27)."
+					"description": "Whether a chat is in a turn: {chatId} -> {state, running}; a deleted chat answers {state: \"deleted\", running: false, deleted: true}, and a page its AI opened closes (docs/27)."
 				}
 			]
 		},

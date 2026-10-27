@@ -39,6 +39,8 @@ namespace Ai
 
 		public void WorkspaceOpened(const IED::Workspace& ws);
 		public Chat* Get(Core::StringView chatId) const;
+		// Whether `chatId` is a deleted chat, kept until it is purged (deletedchats.cf).
+		public bool IsDeleted(Core::StringView chatId) const;
 		// The workspace `chat` belongs to; throws not_found when it is not open.
 		public IED::Workspace WorkspaceOf(const Chat* chat) const;
 

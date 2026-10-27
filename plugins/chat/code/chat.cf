@@ -489,6 +489,7 @@ namespace Ai
 			json.Field("ref", resource->ref.View());
 			json.Field("title", resource->title.View());
 			json.Field("kind", resource->kind.View());
+			if (!resource->close.IsEmpty()) json.Field("close", resource->close.View());
 			json.EndObject();
 		}
 		json.EndArray();
