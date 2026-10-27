@@ -1,5 +1,5 @@
 # The C4 compiler (C4.exe), built by the C/C++ plugin's driver (plugins/cpp/nuke) with the LLVM release the workspace
-# names, together with the tools the toolchain ships (C4LSP, C4DAP, CBind, C4Script: the executables and the DLL in
+# names, together with the tools the toolchain ships (C4LSP, C4DAP, CBind, C4Script, C4Api: the executables and DLLs in
 # `depends` only order the build). It ships the install layout C4.exe finds beside itself (D-56): the Bedrock default
 # library, the runtime's sources, and the clang, lld-link and llvm-rc it compiles and links C4 programs with, with
 # clang's own headers. A Development build also refreshes the "dev" toolchain in the shared store, so C4 workspaces
@@ -10,7 +10,7 @@ kind = "executable"
 language = "cpp"
 group = "C4"
 description = "The C4 compiler"
-depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling", "UnitTesting", "C4LSP", "C4DAP", "CBind", "C4Script"]
+depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling", "UnitTesting", "C4LSP", "C4DAP", "CBind", "C4Script", "C4Api"]
 includes = ["${cpp.llvm}/include"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
 links = ["kernel32.lib", "user32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "ntdll.lib",

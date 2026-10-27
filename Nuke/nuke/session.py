@@ -155,7 +155,7 @@ class Session:
 			raise KeyError(name)
 		if language not in self._language_values:
 			package = self.workspace.language_packages().get(language)
-			function = getattr(languages.load_driver(package), "variables", None) if package else None
+			function = getattr(languages.load_driver(package), "variables", None) if package and package.module else None
 			context = languages.WorkspaceContext(self.workspace.dir, self.workspace.spec.language_settings.get(language, {}), self.log)
 			try:
 				self._language_values[language] = function(context) if function else {}

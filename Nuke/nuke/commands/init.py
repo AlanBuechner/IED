@@ -135,7 +135,9 @@ def ied_solution(cli, workspace):
 	changed = ied_files.generate(workspace, toolchain, cli.log)
 	_ensure_gitignore(workspace.dir)
 	path = os.path.relpath(ied_files.solution_path(workspace), cli.cwd).replace("\\", "/")
-	cli.log.note(f"IED solution {path}: {len(workspace.projects)} project(s), {changed} file(s) written or removed")
+	plugins = len(ied_files.plugin_projects(workspace))
+	listed = f"{len(workspace.projects)} project(s)" + (f" and {plugins} IED plugin(s)" if plugins else "")
+	cli.log.note(f"IED solution {path}: {listed}, {changed} file(s) written or removed")
 	return 0
 
 

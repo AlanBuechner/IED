@@ -13,6 +13,9 @@ from support import read, write_files
 import io
 
 STORE = toolchains.ToolchainStore(toolchains.default_store_root())
+REPOSITORY = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SAMPLE = os.path.join(REPOSITORY, "plugins", "c4", "samples", "c4-outline")
+CLANG = os.path.join(REPOSITORY, "vendor", "llvm", "bin", "clang.exe")
 
 
 def available_toolchain():
@@ -83,6 +86,20 @@ class RealToolchainTests(unittest.TestCase):
 		code, out = self.nuke("test", "--filter", "math.add")
 		self.assertEqual(code, 0, out)
 		self.assertIn("1 of 1 test project(s) passed", out)
+
+	@unittest.skipUnless(TOOLCHAIN and os.path.isfile(os.path.join(TOOLCHAIN.dir, "C4Api", "C4Api.dll")) and os.path.isfile(CLANG),
+		"needs a toolchain that ships C4Api and the checkout's LLVM release")
+	def test_a_tool_links_the_toolchains_c4_api(self):
+		"""The c4 plugin's sample (plugins/c4/samples/c4-outline), a workspace of its own as a third party's tool is: a C++
+		program that depends on C4Api gets the toolchain's header, import library and DLL, and outlines C4 sources."""
+		folder = os.path.join(self.root, "c4-outline")
+		shutil.copytree(SAMPLE, folder, ignore=shutil.ignore_patterns("build"))
+		manifest = os.path.join(folder, "nuke.toml")
+		write_files(folder, {"nuke.toml": read(manifest).replace('toolchain = "dev"', f'toolchain = "{TOOLCHAIN.version}"')})
+		code, out = self.nuke("test", cwd=folder)
+		self.assertEqual(code, 0, out)
+		self.assertIn("c4-outline: 3 fixture(s), 0 problem(s)", out)
+		self.assertTrue(os.path.isfile(os.path.join(folder, "build", "bin", "Development-windows-x64", "c4-outline", "C4Api.dll")), "the DLL beside the tool")
 
 
 if __name__ == "__main__":

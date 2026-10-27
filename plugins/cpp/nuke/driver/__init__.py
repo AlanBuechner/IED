@@ -7,7 +7,8 @@ folder, with the copies that belong beside a program. It writes build/compile_co
 [project] keys it reads: kind ("executable" or "library"), sources (folders, files or globs; default src), includes,
 defines, links (names, paths or globs; "!NAME" leaves a file out), compiler-args (clang -cc1 arguments),
 [[project.copy]], [project.config.<Name>], tests = true (a test program run by `nuke test`), depends.
-[project.driver]: library = "static" | "dynamic", reflection, system-includes, linker-args (settings.py).
+[project.driver]: library = "static" | "dynamic" | "prebuilt" (an SDK's files, nothing built), reflection,
+system-includes, linker-args (settings.py).
 [languages.cpp]: llvm, system-includes, standard, c-standard. ${cpp.llvm} and ${cpp.clang} name the LLVM release."""
 
 import os
@@ -47,8 +48,11 @@ def build(ctx):
 
 
 def _build(ctx):
-	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand)
 	target = model.target(ctx)
+	if target.kind == "prebuilt":
+		_check_prebuilt(target)
+		return []
+	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand)
 	libraries = [model.target(dependency) for dependency in model.libraries(ctx)]
 	_check_object_names(ctx, target)
 	_prepare_folders(target, ctx.log)
@@ -56,6 +60,17 @@ def _build(ctx):
 	_link(ctx, toolchain, target, objects_linked, libraries)
 	_place_beside(ctx, target, libraries)
 	return []
+
+
+def _check_prebuilt(target):
+	"""A prebuilt library compiles nothing; its files must be there for what links it."""
+	if target.sources:
+		raise ValueError(f"a prebuilt library compiles nothing: give it sources = [] (it lists {len(target.sources)} source(s))")
+	files = [model.absolute(link, target.dir) for link in target.links if not link.startswith("!") and ("/" in link or "\\" in link)]
+	given = list(target.includes) + files + [source for source, _ in target.copies]
+	missing = [path for path in given if not os.path.exists(path)]
+	if missing:
+		raise ValueError(f"its prebuilt files are not there: {', '.join(missing)}")
 
 
 def _check_object_names(ctx, target):
@@ -144,7 +159,7 @@ def _link(ctx, toolchain, target, objects_linked, libraries):
 	and every link of theirs and its own, less the files its own "!NAME" links leave out."""
 	inputs = []
 	if target.kind != "static":
-		inputs += [library.output for library in libraries]
+		inputs += [library.output for library in libraries if library.output]
 		for owner in [target] + libraries:
 			inputs += model.resolve_links(owner.links, owner.dir, toolchain.library_dirs)
 	left_out = model.excluded_links(target.links)

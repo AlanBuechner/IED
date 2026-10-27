@@ -2747,8 +2747,9 @@ def start_page_and_recent_projects(run):
 def startup_project_runs(run):
 	"""Pick the startup project and Run builds and runs it (docs/06 "Protocol and state"): Solution Explorer draws it in
 	bold, as VS does; the toolbar's Startup project list and Set as Startup Project (the project's menu, or the palette,
-	which asks which) offer only the projects that run - not the Core library, which the server refuses too - and Run
-	runs the one picked. The mock's recent solution Tools has the programs Tool and Viewer and the library Core."""
+	which asks which) offer only the projects that run - not the Core library, which the server refuses too, nor the Lang
+	plugin, which has no Build either - and Run runs the one picked. The mock's recent solution Tools has the programs
+	Tool and Viewer, the library Core and the IED plugin Lang."""
 	page = run.open()
 	ws = run.request("ws.openRecent", {"path": "C:/mock/Tools/Tools.iedsln"})["workspace"]["wsId"]
 	page.evaluate("(id) => ied_shell.showWorkspace(id)", ws)
@@ -2764,6 +2765,13 @@ def startup_project_runs(run):
 	page.click(".explorer .tree-row:has-text('Core')", button="right")
 	page.wait_for_selector(".menu")
 	check(not page.is_visible(".menu .menu-item:has-text('Set as Startup Project')"), "a library has no Set as Startup Project")
+	check(page.is_visible(".menu .menu-item:has-text('Build Project')"), "but it builds")
+	page.keyboard.press("Escape")
+	page.click(".explorer .tree-row:has-text('Lang')", button="right")
+	page.wait_for_selector(".menu .menu-item:has-text('New File...')")
+	labels = run.texts(".menu .menu-item .label")
+	check(not any(word in label for label in labels for word in ("Startup", "Build", "Rebuild", "Clean", "Tests")), "an IED plugin neither starts nor builds: %r" % labels)
+	run.shot("plugin")
 	page.keyboard.press("Escape")
 	refused = None
 	try:
@@ -2843,7 +2851,7 @@ def new_project_from_a_template(run):
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def solution_explorer_switches_views(run):
 	"""The Solution Explorer's Switch Views (docs/15): a solution shows its projects and Solution Items, or its folder,
-	and back. The mock's recent solution Tools opens as a solution with three projects."""
+	and back. The mock's recent solution Tools opens as a solution with four projects."""
 	page = run.open()
 	ws = run.request("ws.openRecent", {"path": "C:/mock/Tools/Tools.iedsln"})["workspace"]["wsId"]
 	page.evaluate("(id) => ied_shell.showWorkspace(id)", ws)
@@ -2851,7 +2859,7 @@ def solution_explorer_switches_views(run):
 	run.show_activity("ied.editor")
 	if run.phone:
 		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.explorer' })")
-	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (3 projects)\")")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (4 projects)\")")
 	page.click(".explorer .tree-row:has-text(\"Solution 'Tools'\")")
 	page.keyboard.press("ArrowRight")
 	page.wait_for_selector(".explorer .tree-row:has-text('Solution Items')")
@@ -2863,7 +2871,7 @@ def solution_explorer_switches_views(run):
 	check(all(any(name in row for row in rows) for name in ("src", "README.md", "Tools.iedsln")), "the folder's entries: %r" % rows)
 	run.shot("folder")
 	page.click("button[aria-label='Switch to Solution View']")
-	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (3 projects)\")")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (4 projects)\")")
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))

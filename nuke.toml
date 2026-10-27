@@ -12,6 +12,9 @@ name = "IED"
 toolchain = "dev"
 default-project = "C4"
 projects = ["C4", "C4/*", "plugins/cpp/libraries/*", "src", "cli", "launcher", "desktop", "tools/schema-check/c4", "plugins/gpu"]
+# The default plugins (plugins/<id>: their manifests, code, UI and Nuke packages) are projects of IED's solution too, in
+# its "IED Plugins" folder (`nuke init --ied`): ied-server compiles the built-ins' code (src/nuke.toml), IED loads them.
+ied-plugins = ["plugins/*"]
 
 # The LLVM release C++ compiles with (clang, lld, llvm-lib; setup.bat installs it). Its headers are system headers of
 # every C++ compile, as the C4 compiler's sources and tools include them.

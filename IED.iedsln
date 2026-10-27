@@ -30,6 +30,7 @@
 			"name": "C4",
 			"projects": [
 				"C4",
+				"C4Api",
 				"C4DAP",
 				"C4DAPLib",
 				"C4Lib",
@@ -39,6 +40,39 @@
 				"C4Script",
 				"C4Testing",
 				"CBind"
+			]
+		},
+		{
+			"name": "IED Plugins",
+			"projects": [
+				"c4 plugin",
+				"ied.browser",
+				"ied.chat",
+				"ied.cpp",
+				"ied.csharp",
+				"ied.data",
+				"ied.desktop",
+				"ied.developer",
+				"ied.editor",
+				"ied.filetypes",
+				"ied.git",
+				"ied.go",
+				"ied.gpu",
+				"ied.java",
+				"ied.lua",
+				"ied.markdown",
+				"ied.nuke",
+				"ied.profiler",
+				"ied.python",
+				"ied.rust",
+				"ied.scripts",
+				"ied.shaders",
+				"ied.sql",
+				"ied.terminal",
+				"ied.tor",
+				"ied.web",
+				"ied.webfetch",
+				"ied.websearch"
 			]
 		}
 	],

@@ -13,6 +13,8 @@ from support import WorkspaceTest, read
 from nuke import cli, ied_files, languages, manifest, workspace as workspaces
 from nuke.errors import NukeError
 
+REPOSITORY = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 DESCRIPTION = """[language]
 id = "toy"
 module = "driver/__init__.py"
@@ -165,6 +167,44 @@ class VariableTests(PackageExtensionTest):
 		self.assertIn("unknown variable ${toy.nothing}", out)
 
 
+class DriverlessPackageTests(PackageExtensionTest):
+	"""A package with no driver names its preset and brings libraries: C4's, since Nuke compiles C4 itself (docs/23 N-23)."""
+
+	def sdk_workspace(self, game):
+		self.toy_package()
+		self.files({"../sdk/nuke/nuke-language.toml": "[language]\nid = \"sdk\"\nlibraries = [\"libraries/*\"]\n",
+			"../sdk/libraries/Api/nuke.toml": "[project]\nname = \"Api\"\nkind = \"library\"\nlanguage = \"toy\"\n",
+			"nuke.toml": "[workspace]\nname = \"W\"\n[languages]\ntoy = \"../pkg\"\nsdk = \"../sdk\"\n",
+			"Game/nuke.toml": "[project]\nname = \"Game\"\n" + game})
+
+	def test_its_libraries_join_a_workspace_that_depends_on_them(self):
+		self.sdk_workspace("language = \"toy\"\ndepends = [\"Api\"]\n")
+		package = languages.read_package(self.path("..", "sdk"))
+		self.assertEqual((None, "sdk.nuke"), (package.module, package.preset))
+		code, out = self.nuke("build", "Game")
+		self.assertEqual(0, code, out)
+		self.assertEqual(["Api", "Game"], [c["project"] for c in self.calls() if c["call"] == "build"])
+
+	def test_a_project_in_its_language_says_there_is_no_driver(self):
+		self.sdk_workspace("language = \"sdk\"\n")
+		code, out = self.nuke("build", "Game")
+		self.assertEqual(1, code, out)
+		self.assertIn("the sdk package", out)
+		self.assertIn("has no Nuke driver", out)
+
+	def test_the_c4_package(self):
+		package = languages.read_package(os.path.join(REPOSITORY, "plugins", "c4"))
+		self.assertEqual(("c4", None, "c4.nuke"), (package.language, package.module, package.preset))
+		self.assertEqual(["C4Api"], [os.path.basename(folder) for folder in package.library_folders()], "the C API of the toolchain")
+
+	def test_a_c4_variable_nobody_gives_is_unknown(self):
+		self.files({"nuke.toml": "[workspace]\nname = \"W\"\n[[workspace.steps]]\nphase = \"post-build\"\nrun = [\"echo\", \"${c4.nothing}\"]\n",
+			"Lib/nuke.toml": "[project]\nkind = \"custom\"\n"})
+		code, out = self.nuke("build", "--all")
+		self.assertEqual(1, code)
+		self.assertIn("unknown variable ${c4.nothing}", out, "the c4 package gives no variables, and has no driver to ask")
+
+
 class JobsTests(unittest.TestCase):
 	def test_jobs(self):
 		os.environ.pop(cli.JOBS_ENV, None)
@@ -210,6 +250,30 @@ class SolutionGroupTests(PackageExtensionTest):
 		self.assertEqual([{"name": "Games", "projects": ["Game"]}], solution["groups"], "Meta is not in the solution")
 		self.assertFalse(os.path.exists(self.path("build", "ied", "Meta.iedproj")))
 		self.assertTrue(os.path.exists(self.path("build", "ied", "Game.iedproj")))
+
+	def test_the_ied_plugins_it_develops_are_projects_in_their_folder(self):
+		self.files({"nuke.toml": "[workspace]\nname = \"W\"\nied-plugins = [\"plugins/*\", \"extra/one\", \"missing/*\"]\n",
+			"C4/nuke.toml": "[project]\nname = \"C4\"\nkind = \"custom\"\ngroup = \"C4\"\n",
+			"plugins/c4/ied-plugin.json": "// the language's plugin\n{\"id\": \"c4\", \"name\": \"C4\"}\n",
+			"plugins/chat/ied-plugin.json": "{\"id\": \"ied.chat\"}\n",
+			"plugins/broken/ied-plugin.json": "{\"name\": \"no id\"}\n",
+			"plugins/empty/readme.md": "no manifest here",
+			"extra/one/ied-plugin.json": "{\"id\": \"one\"}\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(0, code, out)
+		self.assertIn("1 project(s) and 3 IED plugin(s)", out)
+		solution = json.loads(read(self.path("W.iedsln")))
+		self.assertEqual([{"name": "C4", "projects": ["C4"]}, {"name": "IED Plugins", "projects": ["c4 plugin", "ied.chat", "one"]}], solution["groups"],
+			"each plugin by its id, the one whose id a project has named apart")
+		c4 = json.loads(read(self.path("build", "ied", "c4 plugin.iedproj")))
+		self.assertEqual({"version": 1, "name": "c4 plugin", "root": "../../plugins/c4", "kind": "plugin"}, c4, "no build system: IED loads it")
+		self.assertIn("plugins/broken/ied-plugin.json names no plugin id", out)
+		self.assertIn("ied-plugins entry 'missing/*' finds no folder", out)
+		code, out = self.nuke("init", "--ied")
+		self.assertIn(", 0 file(s) written or removed", out, "again: nothing changes")
+		os.remove(self.path("plugins", "chat", "ied-plugin.json"))
+		self.nuke("init", "--ied")
+		self.assertFalse(os.path.exists(self.path("build", "ied", "ied.chat.iedproj")), "a plugin gone, its project file goes")
 
 
 if __name__ == "__main__":

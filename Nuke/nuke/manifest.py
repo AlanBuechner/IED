@@ -112,6 +112,7 @@ class WorkspaceSpec:
 	ide: bool = True
 	languages: dict = field(default_factory=dict)   # [languages]: language -> its package's folder (languages.py)
 	language_settings: dict = field(default_factory=dict)   # [languages.<id>] tables: language -> what its driver reads
+	ied_plugins: tuple = ()         # folders or globs of the IED plugins it develops: projects of IED's solution (ied_files.py)
 
 
 @dataclass(frozen=True)
@@ -258,6 +259,7 @@ def _workspace(t, configurations, commands, languages, folder, path):
 		ide=t.boolean("ide", True),
 		languages=languages[0],
 		language_settings=languages[1],
+		ied_plugins=t.strings("ied-plugins"),
 	)
 	t.done()
 	return spec

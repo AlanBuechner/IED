@@ -8,17 +8,20 @@ WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
 
 def solution_files(name):
-	"""A recent solution's files when it is opened again: the solution, two programs (src/, viewer/) and a library (core/),
-	their code, README and the nuke.toml that lets a New Project template add a project to it."""
+	"""A recent solution's files when it is opened again: the solution, two programs (src/, viewer/), a library (core/) and
+	an IED plugin it develops (lang/), their code, README and the nuke.toml that lets a New Project template add a project
+	to it."""
 	return {
 		"README.md": "# %s\n" % name,
-		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }, { "file": "viewer/Viewer.iedproj" }, { "file": "core/Core.iedproj" }], "items": ["README.md"] }\n' % name,
+		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }, { "file": "viewer/Viewer.iedproj" }, { "file": "core/Core.iedproj" }, { "file": "lang/Lang.iedproj" }], "items": ["README.md"] }\n' % name,
 		"src/Tool.iedproj": '{ "version": 1, "name": "Tool", "root": ".", "kind": "executable" }\n',
 		"src/tool.c": "int main(void) { return 0; }\n",
 		"viewer/Viewer.iedproj": '{ "version": 1, "name": "Viewer", "root": ".", "kind": "executable" }\n',
 		"viewer/viewer.c": "int main(void) { return 0; }\n",
 		"core/Core.iedproj": '{ "version": 1, "name": "Core", "root": ".", "kind": "library" }\n',
 		"core/core.c": "int core(void) { return 1; }\n",
+		"lang/Lang.iedproj": '{ "version": 1, "name": "Lang", "root": ".", "kind": "plugin" }\n',
+		"lang/ied-plugin.json": '{ "manifestVersion": 1, "id": "tools.lang", "name": "Lang", "version": "0.1.0" }\n',
 		"nuke.toml": "[workspace]\nname = \"%s\"\n" % name,
 	}
 
@@ -31,7 +34,7 @@ def solution_model(name, root):
 	"""What the server's ws:<wsId> snapshot carries as `solution` for solution_files (docs/03 "The server as built")."""
 	return {
 		"name": name, "file": root + "/" + name + ".iedsln", "problems": [], "groups": [], "items": ["README.md"], "generator": None, "localPlugins": [],
-		"projects": [project(root, "src", "Tool", "executable"), project(root, "viewer", "Viewer", "executable"), project(root, "core", "Core", "library")],
+		"projects": [project(root, "src", "Tool", "executable"), project(root, "viewer", "Viewer", "executable"), project(root, "core", "Core", "library"), project(root, "lang", "Lang", "plugin")],
 	}
 
 

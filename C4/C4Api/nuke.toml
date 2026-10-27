@@ -1,0 +1,19 @@
+# The C4 compiler's C API (docs/tools/04-c4-api.md): C4Api.dll, a C interface over C4Lib for tools around C4 in any
+# language - a C4 source's declarations and syntax diagnostics today. It carries the compiler statically, as C4Script
+# does, so a tool needs only the DLL beside it; every toolchain ships it in C4Api/ with its header and import library
+# (MakeToolchain.py), and a Nuke project anywhere depends on it by name (the c4 package's C4Api library,
+# plugins/c4/libraries/C4Api).
+[project]
+name = "C4Api"
+kind = "library"
+language = "cpp"
+group = "C4"
+description = "The C4 compiler's C API: C4Api.dll over C4Lib"
+depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling"]
+defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "", C4API_EXPORTS = "" }
+# C4Lib's links come with it; LTO.lib would import LTO.dll, which a tool should not need beside it. ntdll: LLVMSupport.
+links = ["ntdll.lib", "!LTO.lib"]
+
+[project.driver]
+library = "dynamic"
+linker-args = ["-fuse-ld=lld"]

@@ -1,14 +1,17 @@
 """IED's files for a workspace (`nuke init --ied`; IED docs/03): <Name>.iedsln at the root, a project file per project
-under build/ied/ and, in the solution's localPlugins, the IED plugin of the workspace's toolchain (<toolchain>/ied) and
-of each language package the workspace pins in [languages] (IED docs/26 section 6). The generator rewrites what it
-wrote when the workspace changes, but never a file edited by hand since, nor one it did not write:
+under build/ied/ - and one of kind "plugin" for each IED plugin the workspace develops ([workspace] ied-plugins), in the
+"IED Plugins" folder - and, in the solution's localPlugins, the IED plugin of the workspace's toolchain
+(<toolchain>/ied) and of each language package the workspace pins in [languages] (IED docs/26 section 6). The generator
+rewrites what it wrote when the workspace changes, but never a file edited by hand since, nor one it did not write:
 .ied/local/generated.json keeps the digest of each file it wrote. The files it wrote under the names before
 (<Name>.ied.sln, *.ied.proj) go once the new ones are written."""
 
+import glob
 import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 
 from . import fsutil, languages
 from .errors import NukeError
@@ -20,6 +23,16 @@ PLUGIN_ID = "c4"
 BASE_PRESET = "nuke"  # IED's own Nuke preset (its ied.nuke plugin): Build, Run, Test and the toolbar run Nuke
 KINDS = {"executable": "executable", "module": "library", "library": "library", "custom": "other"}
 ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
+PLUGIN_GROUP = "IED Plugins"
+PLUGIN_MANIFEST = "ied-plugin.json"
+
+
+@dataclass(frozen=True)
+class PluginProject:
+	"""An IED plugin the workspace develops, as a project of its solution: its files, no build (IED builds and loads it)."""
+	name: str
+	dir: str
+	group: str = PLUGIN_GROUP
 
 
 def solution_path(workspace):
@@ -82,6 +95,37 @@ def listed_projects(workspace):
 	return [spec for spec in workspace.projects.values() if _inside(spec.dir, workspace.dir)]
 
 
+def _entry_plugin_folders(workspace, entry):
+	"""The folders an ied-plugins entry (a folder or a glob, relative to the workspace) finds that hold an IED plugin."""
+	pattern = os.path.join(workspace.dir, entry)
+	candidates = sorted(glob.glob(pattern)) if glob.has_magic(entry) else [pattern]
+	return [fsutil.norm(folder) for folder in candidates if os.path.isfile(os.path.join(folder, PLUGIN_MANIFEST))]
+
+
+def plugin_folders(workspace):
+	"""The folders of the IED plugins [workspace] ied-plugins names, each once."""
+	found = []
+	for entry in workspace.spec.ied_plugins:
+		found += [folder for folder in _entry_plugin_folders(workspace, entry) if not any(fsutil.same_path(folder, f) for f in found)]
+	return found
+
+
+def plugin_projects(workspace):
+	"""The IED plugins the workspace develops as projects of its solution, named by their ids - "<id> plugin" where a
+	project has that name already, as project files and IED's project settings are files named after a project and
+	Windows folds case (the c4 plugin beside the C4 compiler). A plugin whose manifest names no id is left out."""
+	taken = {spec.name.lower() for spec in listed_projects(workspace)}
+	projects = []
+	for folder in plugin_folders(workspace):
+		identifier = plugin_id(folder)
+		if not identifier:
+			continue
+		name = identifier if identifier.lower() not in taken else f"{identifier} plugin"
+		taken.add(name.lower())
+		projects.append(PluginProject(name, folder))
+	return projects
+
+
 def groups(projects):
 	"""The solution's display folders from the projects' `group` ("C4", "Engine/Tools" nests): sorted by name, each with
 	its projects by name and the folders inside it; [] when no project names one."""
@@ -108,9 +152,11 @@ def groups(projects):
 	return written(root)
 
 
-def solution(workspace, plugin):
+def solution(workspace, plugin, plugins=()):
+	"""The solution: its projects' files, folders (the projects' groups, the plugins' "IED Plugins"), items, local
+	plugins and how it is made again."""
 	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.iedproj", "optional": True}]}
-	folders = groups(listed_projects(workspace))
+	folders = groups(listed_projects(workspace) + list(plugins))
 	if folders:
 		body["groups"] = folders
 	items = [item for item in ITEMS if os.path.isfile(fsutil.join(workspace.dir, item))]
@@ -150,6 +196,12 @@ def output(workspace, spec):
 		path = spec.output if os.path.isabs(spec.output) else os.path.join(spec.dir, spec.output)
 		return "${workspaceDir}/" + _relative(path, workspace.dir) if _inside(path, workspace.dir) else path.replace("\\", "/")
 	return None
+
+
+def plugin_project(workspace, plugin):
+	"""The project file of an IED plugin the workspace develops: its folder, kind plugin (never the startup project)."""
+	folder = fsutil.join(workspace.dir, PROJECTS_DIR)
+	return {"version": 1, "name": plugin.name, "root": _relative(plugin.dir, folder), "kind": "plugin"}
 
 
 def project(workspace, spec):
@@ -211,12 +263,17 @@ def generate(workspace, toolchain, log):
 	"""Writes the solution and project files; returns the number of files written or removed."""
 	generated = Generated(workspace)
 	plugin = plugin_dir(toolchain) if toolchain else None
-	changed = int(generated.write(solution_path(workspace), _text(solution(workspace, plugin))))
+	plugins = plugin_projects(workspace)
+	changed = int(generated.write(solution_path(workspace), _text(solution(workspace, plugin, plugins))))
 	wanted = set()
 	for spec in listed_projects(workspace):
 		path = project_path(workspace, spec)
 		wanted.add(os.path.normcase(path))
 		changed += int(generated.write(path, _text(project(workspace, spec))))
+	for developed in plugins:
+		path = project_path(workspace, developed)
+		wanted.add(os.path.normcase(path))
+		changed += int(generated.write(path, _text(plugin_project(workspace, developed))))
 	for path in fsutil.files_under(fsutil.join(workspace.dir, PROJECTS_DIR), [".proj", ".iedproj"]):
 		if (path.endswith(".ied.proj") or path.endswith(".iedproj")) and os.path.normcase(path) not in wanted:
 			changed += int(generated.remove(path))
@@ -225,6 +282,12 @@ def generate(workspace, toolchain, log):
 	generated.save()
 	for key in generated.kept:
 		log.warn(f"{key} was not written by `nuke init --ied` or was edited since; left as it is (delete it to regenerate)")
+	for entry in workspace.spec.ied_plugins:
+		if not _entry_plugin_folders(workspace, entry):
+			log.warn(f"{workspace.spec.file}: ied-plugins entry '{entry}' finds no folder with an {PLUGIN_MANIFEST}")
+	for folder in plugin_folders(workspace):
+		if not plugin_id(folder):
+			log.warn(f"{_where(folder, workspace)}/{PLUGIN_MANIFEST} names no plugin id; the solution leaves that plugin out")
 	if toolchain and not plugin:
 		log.warn(f"toolchain {toolchain.version} ships no IED plugin; the solution has no C4 language support (use a newer toolchain)")
 	elif plugin and not _inside(plugin, workspace.dir):

@@ -3,7 +3,7 @@ workspace's [languages.cpp] table and a project's [project.driver] table."""
 
 from dataclasses import dataclass
 
-LIBRARY_TYPES = ("static", "dynamic")
+LIBRARY_TYPES = ("static", "dynamic", "prebuilt")
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,8 @@ class Settings:
 @dataclass(frozen=True)
 class Options:
 	"""[project.driver]"""
-	library: str = "static"          # a kind = "library" project: a static library (.lib) or a DLL
+	library: str = "static"          # a kind = "library" project: a static library (.lib), a DLL, or "prebuilt": files
+	                                 # it is given (its links, includes and copies), nothing built
 	reflection: bool = False         # run the Reflection library's HeaderTool and CodeGen over the sources
 	system_includes: tuple = ()      # this project's own system include folders (-internal-isystem)
 	linker_args: tuple = ()          # extra arguments of the link

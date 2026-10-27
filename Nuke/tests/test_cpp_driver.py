@@ -243,6 +243,53 @@ class LibraryTests(CppTest):
 		self.assertNotIn(self.path("Mid", "src").replace("\\", "/"), read(self.int("App", "Main.args")))
 
 
+class PrebuiltTests(CppTest):
+	"""A prebuilt library (an SDK's, as the C4 toolchain's C4Api): nothing built, its include folders, files and copies
+	reaching what depends on it."""
+
+	def sdk(self):
+		"""An SDK made of a static library's build: sdk/include/Lib/Lib.h, sdk/lib/Lib.lib and a file to ship."""
+		self.workspace({"Lib": ("kind = \"library\"\n", {"src/Lib/Lib.h": "#pragma once\nint Answer();\n",
+			"src/Lib/Lib.cpp": "#include \"Lib/Lib.h\"\n#include <windows.h>\n#include <shlwapi.h>\n"
+				"int Answer() { return PathIsRelativeA(\"a\\\\b\") ? 42 : 0; }\n"})})
+		self.build("Lib")
+		os.makedirs(self.path("sdk", "include", "Lib"))
+		os.makedirs(self.path("sdk", "lib"))
+		shutil.copy2(self.path("Lib", "src", "Lib", "Lib.h"), self.path("sdk", "include", "Lib", "Lib.h"))
+		shutil.copy2(self.bin("Lib", "Lib.lib"), self.path("sdk", "lib", "Lib.lib"))
+		self.files({"sdk/shipped.txt": "beside the program"})
+
+	def prebuilt(self, manifest):
+		self.workspace({
+			"Sdk": ("kind = \"library\"\n" + manifest + "[project.driver]\nlibrary = \"prebuilt\"\n", {}),
+			"App": ("depends = [\"Sdk\"]\n", {"src/Main.cpp": "#include \"Lib/Lib.h\"\nint main() { return Answer(); }\n"}),
+		})
+
+	def test_a_program_gets_its_includes_files_and_copies(self):
+		self.sdk()
+		self.prebuilt("sources = []\nincludes = [\"../sdk/include\"]\nlinks = [\"../sdk/lib/Lib.lib\", \"shlwapi.lib\"]\n"
+			"[[project.copy]]\nfrom = \"../sdk/shipped.txt\"\n")
+		out = self.build("App")
+		self.assertIn("App: copied 1 file(s) beside it", out)
+		self.assertEqual(42, subprocess.run([self.bin("App", "App.exe")]).returncode, "the SDK's library linked, with its own links")
+		self.assertEqual("beside the program", read(self.bin("App", "shipped.txt")))
+		self.assertFalse(os.path.exists(self.bin("Sdk")), "nothing of its own is built")
+		self.assertIn(self.path("sdk", "lib", "Lib.lib").replace("\\", "/"), read(self.int("App", "linker.args")).replace("\\", "/"))
+
+	def test_missing_files_and_sources_are_named(self):
+		self.sdk()
+		self.prebuilt("sources = []\nincludes = [\"../sdk/include\"]\nlinks = [\"../sdk/lib/Gone.lib\"]\n")
+		code, out = self.nuke("build", "App")
+		self.assertEqual(1, code, out)
+		self.assertIn("its prebuilt files are not there", out)
+		self.assertIn("Gone.lib", out)
+		self.prebuilt("includes = [\"../sdk/include\"]\n")
+		self.files({"Sdk/src/x.cpp": "int x() { return 0; }\n"})
+		code, out = self.nuke("build", "App")
+		self.assertEqual(1, code, out)
+		self.assertIn("a prebuilt library compiles nothing", out)
+
+
 class LinkTests(CppTest):
 	def test_a_link_past_the_command_line_limit(self):
 		folder = self.path("a_folder_whose_name_is_long_enough_to_matter", "and_another_one_below_it", "and_a_third_one_too")

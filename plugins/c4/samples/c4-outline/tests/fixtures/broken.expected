@@ -1,0 +1,5 @@
+broken.cf
+  function First (1:7)
+  function Broken (2:7)
+  function Last (3:7)
+broken.cf(2,27): error: Expected ';' after return, got '}'

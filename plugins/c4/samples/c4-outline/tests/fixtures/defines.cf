@@ -1,0 +1,9 @@
+// c4-outline: -D FAST -DLEVEL=2
+#ifdef FAST
+int32 Fast();
+#else
+int32 Slow();
+#endif
+#if LEVEL == 2
+int32 LevelTwo();
+#endif

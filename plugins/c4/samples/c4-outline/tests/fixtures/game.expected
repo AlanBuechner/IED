@@ -1,0 +1,12 @@
+game.cf
+  namespace Game (3:11)
+    enum Team (5:7)
+      enum value Red (5:14)
+      enum value Blue (5:19)
+    class Player (7:8)
+      variable health (9:16)
+      variable team (10:15)
+      function Hit (11:15)
+    alias Score (14:8)
+  function Game::Player::Hit (17:6)
+  function main (19:7)

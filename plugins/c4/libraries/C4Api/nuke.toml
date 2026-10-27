@@ -1,0 +1,19 @@
+# The C4 compiler's C API from the workspace's toolchain (C4/docs/tools/04-c4-api.md): a C or C++ project anywhere that
+# says depends = ["C4Api"] compiles with its header (#include "C4Api.h") and links its import library, and a program
+# gets C4Api.dll beside it - all of the toolchain the workspace pins, so a tool and the compiler it reads C4 with are
+# one version. Nothing is built: the toolchain ships the files (C4/MakeToolchain.py). In the IED repository itself the
+# C4Api project of C4/ is the one built from source.
+[project]
+name = "C4Api"
+kind = "library"
+language = "cpp"
+description = "The C4 compiler's C API (C4Api.dll) of the workspace's toolchain"
+sources = []
+includes = ["${toolchain.dir}/C4Api"]
+links = ["${toolchain.dir}/C4Api/C4Api.lib"]
+
+[[project.copy]]
+from = "${toolchain.dir}/C4Api/C4Api.dll"
+
+[project.driver]
+library = "prebuilt"

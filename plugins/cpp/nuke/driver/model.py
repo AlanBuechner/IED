@@ -3,7 +3,9 @@
 Include folders and links travel through static libraries: a project compiles with its own include folders (its source
 folders and `includes`) and those of every C++ static library it reaches through static libraries, and an executable or
 DLL links its objects with those libraries and their `links`. An executable or a DLL in `depends` only orders the build
-(a tool it runs, a program it ships beside it). A static library holds its own objects only."""
+(a tool it runs, a program it ships beside it). A static library holds its own objects only. A prebuilt library (an
+SDK's: the C4 toolchain's C4Api) is built by nobody: it is its include folders, its library files (`links`) and its
+copies, which reach what it reaches as a static library's do."""
 
 import glob
 import os
@@ -15,13 +17,14 @@ LANGUAGE = "cpp"
 SOURCE_EXTENSIONS = (".c", ".cpp")
 SKIPPED_FOLDERS = {"bin", "bin-int", "__pycache__"}
 OUTPUT_EXTENSIONS = {"executable": ".exe", "static": ".lib", "dynamic": ".dll"}
+TRAVELLING = ("static", "prebuilt")   # the libraries whose include folders and links reach what depends on them
 
 
 @dataclass(frozen=True)
 class Target:
 	name: str
 	dir: str
-	kind: str              # "executable", "static" (a .lib) or "dynamic" (a DLL)
+	kind: str              # "executable", "static" (a .lib), "dynamic" (a DLL) or "prebuilt" (given, not built)
 	bin_dir: str
 	int_dir: str
 	sources: tuple         # the .c and .cpp files it compiles
@@ -37,11 +40,12 @@ class Target:
 
 	@property
 	def output(self):
-		return f"{self.bin_dir}/{self.name}{OUTPUT_EXTENSIONS[self.kind]}"
+		"""The file the link makes; None for a prebuilt library."""
+		return f"{self.bin_dir}/{self.name}{OUTPUT_EXTENSIONS[self.kind]}" if self.kind in OUTPUT_EXTENSIONS else None
 
 	@property
 	def is_library(self):
-		return self.kind in ("static", "dynamic")
+		return self.kind in ("static", "dynamic", "prebuilt")
 
 
 def norm(path):
@@ -53,8 +57,8 @@ def absolute(path, base):
 
 
 def is_static_library(ctx):
-	"""A C++ static library: what includes and links travel through."""
-	return ctx.project.language == LANGUAGE and ctx.project.kind == "library" and read_options(ctx.project).library == "static"
+	"""A C++ static or prebuilt library: what includes and links travel through."""
+	return ctx.project.language == LANGUAGE and ctx.project.kind == "library" and read_options(ctx.project).library in TRAVELLING
 
 
 def source_files(entries, folder):
@@ -136,7 +140,7 @@ def _override(spec, config_name):
 
 
 def libraries(ctx):
-	"""The DriverContexts of the C++ static libraries `ctx` reaches through static libraries, depth first, each once."""
+	"""The DriverContexts of the C++ static and prebuilt libraries `ctx` reaches through them, depth first, each once."""
 	found, seen = [], set()
 
 	def visit(context):

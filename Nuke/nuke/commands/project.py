@@ -157,7 +157,8 @@ def _kind_of(workspace, folder, language):
 			if "main.cf" in files:
 				return "executable"
 		return "module"
-	return "executable" if language in languages.find_packages(workspace.dir, workspace.spec.languages) else "custom"
+	package = languages.find_packages(workspace.dir, workspace.spec.languages).get(language)
+	return "executable" if package and package.module else "custom"
 
 
 def _list(workspace, relative):

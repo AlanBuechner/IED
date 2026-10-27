@@ -7,6 +7,7 @@
 #     C4.exe, *.dll, *.pdb  the compiler; it finds everything below relative to itself (docs/status/plan.md D-56)
 #     Bedrock/  C4Runtime/  toolchain/{bin,lib}   default library, runtime sources, clang + lld-link + llvm-rc
 #     CBind/    C4Script/                         binding generator, script host
+#     C4Api/                C4Api.dll, its import library and C4Api.h: the compiler's C API for tools (docs/tools/04)
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs, and library/bedrock-api.md: the
 #                           Bedrock API digest, made from the headers the toolchain ships (ApiDigest.py)
@@ -45,12 +46,14 @@ COMPILER_FOLDERS = ("Bedrock", "C4Runtime", "toolchain")
 TOOLS = {
 	"CBind": ("CBind", ["CBind.exe", "CBind.pdb"]),
 	"C4Script": ("C4Script", ["C4Script.dll", "C4Script.lib"]),
+	"C4Api": ("C4Api", ["C4Api.dll", "C4Api.lib", "C4Api.pdb"]),
 	"tools/C4LSP": ("C4LSP", ["C4LSP.exe", "C4LSP.pdb"]),
 	"tools/C4DAP": ("C4DAP", ["C4DAP.exe", "C4DAP.pdb"]),
 }
 LSP_DLLS = ("libclang.dll", "LLVM-C.dll", "LTO.dll")
+HEADERS = {"C4Api/C4Api.h": "C4Api/src/C4Api.h"}   # destination -> source, relative to this folder
 REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe", "toolchain/bin/llvm-rc.exe",
-	"CBind/CBind.exe", "C4Script/C4Script.dll", "ied/ied-plugin.json", "docs/library/bedrock-api.md", "ied/docs/library/bedrock-api.md"]
+	"CBind/CBind.exe", "C4Script/C4Script.dll", "C4Api/C4Api.dll", "C4Api/C4Api.lib", "C4Api/C4Api.h", "ied/ied-plugin.json", "docs/library/bedrock-api.md", "ied/docs/library/bedrock-api.md"]
 DIGEST = "library/bedrock-api.md"  # under docs/, made by MakeToolchain from the shipped Bedrock
 DOCS = [
 	"01-what-is-c4.md",
@@ -154,6 +157,8 @@ def plan(build, repo, digest):
 			source = os.path.join(build, project, name)
 			if os.path.isfile(source):
 				files[os.path.join(dest, name)] = source
+	for dest, source in HEADERS.items():
+		files[dest] = os.path.join(repo, *source.split("/"))
 	if os.path.isfile(os.path.join(build, "C4LSP", "C4LSP.exe")):
 		for dll in LSP_DLLS:
 			if os.path.isfile(os.path.join(compiler, dll)):

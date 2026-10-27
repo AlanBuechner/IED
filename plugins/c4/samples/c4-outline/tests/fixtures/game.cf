@@ -1,0 +1,23 @@
+include "bedrock.ch"
+
+namespace Game
+{
+	enum Team { Red, Blue }
+
+	class Player
+	{
+		public int32 health;
+		public Team team;
+		public void Hit(int32 damage);
+	}
+
+	alias Score = int64;
+}
+
+void Game::Player::Hit(int32 damage) { health = health - damage; }
+
+int32 main()
+{
+	Game::Player player;
+	return 0;
+}

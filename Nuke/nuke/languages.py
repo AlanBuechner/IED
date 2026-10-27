@@ -6,7 +6,9 @@ language's package is the one the workspace pins in [languages], else one of the
 (.ied/plugins/<id>/), else one of IED's (plugins/ beside Nuke, or the folders NUKE_LANGUAGE_PACKAGES names).
 
 A package may also bring library projects (`libraries` in its description: folders with a nuke.toml [project]); a
-workspace that depends on one by name gets it as one of its projects, built into the workspace's own build/ folder.
+workspace that depends on one by name gets it as one of its projects, built into the workspace's own build/ folder. A
+package may have no driver (no `module`): it then names its projects' preset and brings libraries only - C4's
+(plugins/c4/nuke), since Nuke compiles C4 itself (IED docs/23 N-23).
 
 A driver module (or package: a module named __init__.py loads with its folder as a Python package) defines:
 	build(ctx) -> [paths]     build the project; the artifacts to copy into its bin folder
@@ -43,7 +45,7 @@ DESCRIPTION_KEYS = {"id", "module", "preset", "libraries", "build-before-test"}
 class LanguagePackage:
 	language: str
 	folder: str            # the package: an IED plugin folder
-	module: str            # the driver's Python file
+	module: str            # the driver's Python file; None for a package without one
 	preset: str            # the IED task preset of the language's Nuke projects (`<language>.nuke`)
 	pinned: bool = False   # named by the workspace's [languages]
 	libraries: tuple = ()  # globs, relative to the package, of the library projects it brings
@@ -70,10 +72,10 @@ def read_package(folder, pinned=False):
 	except (OSError, tomllib.TOMLDecodeError) as error:
 		raise NukeError(f"{description}: {error}") from None
 	table = data.get("language")
-	if not isinstance(table, dict) or not isinstance(table.get("id"), str) or not isinstance(table.get("module"), str):
-		raise NukeError(f"{description}: needs [language] with an id and the driver's module")
-	module = os.path.join(folder, "nuke", table["module"])
-	if not os.path.isfile(module):
+	if not isinstance(table, dict) or not isinstance(table.get("id"), str) or not isinstance(table.get("module", ""), str):
+		raise NukeError(f"{description}: needs [language] with an id (and the driver's module, when it has one)")
+	module = os.path.join(folder, "nuke", table["module"]) if "module" in table else None
+	if module and not os.path.isfile(module):
 		raise NukeError(f"{description}: its driver {table['module']} is not there")
 	unknown = sorted(set(table) - DESCRIPTION_KEYS)
 	if unknown:
@@ -84,8 +86,8 @@ def read_package(folder, pinned=False):
 	before_test = table.get("build-before-test", False)
 	if not isinstance(before_test, bool):
 		raise NukeError(f"{description}: [language].build-before-test must be true or false")
-	return LanguagePackage(table["id"], fsutil.norm(folder), fsutil.norm(module), table.get("preset", f"{table['id']}.nuke"), pinned,
-		tuple(libraries), before_test)
+	return LanguagePackage(table["id"], fsutil.norm(folder), fsutil.norm(module) if module else None, table.get("preset", f"{table['id']}.nuke"),
+		pinned, tuple(libraries), before_test)
 
 
 def packages_in(parent):
@@ -130,6 +132,8 @@ _drivers = {}
 def load_driver(package):
 	"""The driver module of `package`, imported once; a module named __init__.py is imported as a package, so the
 	driver can be split into modules of its own."""
+	if package.module is None:
+		raise NukeError(f"the {package.language} package ({package.folder}) has no Nuke driver: its nuke/{DESCRIPTION} names no module")
 	if package.module not in _drivers:
 		name = f"nuke_language_{package.language.replace('-', '_')}"
 		folders = [os.path.dirname(package.module)] if os.path.basename(package.module) == "__init__.py" else None
