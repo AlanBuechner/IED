@@ -181,14 +181,15 @@ def remove_old(folder):
 def mirror(source, target, skip, report, anywhere=(), keep=()):
 	"""`target` made like `source` (folders in `skip` left out at its top, those in `anywhere` at any depth): changed
 	files copied, files gone from it removed - but those under `keep` (target-relative folders, '/'-separated), which
-	something else puts there."""
-	wanted = set()
+	something else puts there. Names compare as the file system does (on Windows, whatever their case), and a file
+	the source spells in another case takes the source's spelling."""
+	wanted = {}
 	for folder, dirs, files in os.walk(source):
 		relative = os.path.relpath(folder, source)
 		dirs[:] = [d for d in dirs if d not in anywhere and not (relative == "." and d in skip)]
 		for name in files:
 			path = os.path.normpath(os.path.join(relative, name))
-			wanted.add(path)
+			wanted[os.path.normcase(path)] = path
 			destination = os.path.join(target, path)
 			if not same(os.path.join(folder, name), destination):
 				os.makedirs(os.path.dirname(destination), exist_ok=True)
@@ -199,10 +200,21 @@ def mirror(source, target, skip, report, anywhere=(), keep=()):
 	for folder, _, files in os.walk(target, topdown=False):
 		for name in files:
 			path = os.path.normpath(os.path.relpath(os.path.join(folder, name), target))
-			if path not in wanted and not path.startswith(kept):
+			spelled = wanted.get(os.path.normcase(path))
+			if spelled is None and not path.startswith(kept):
 				discard(os.path.join(folder, name), report)
+			elif spelled is not None and spelled != path:
+				respell(os.path.join(target, path), os.path.join(target, spelled))
 		if folder != target and not os.listdir(folder):
 			os.rmdir(folder)
+
+
+def respell(path, spelled):
+	"""Renames `path` to `spelled`, the same name in another case (through a name of its own: Windows keeps the old
+	spelling when a rename changes only the case)."""
+	passing = path + ".respelling"
+	os.replace(path, passing)
+	os.replace(passing, spelled)
 
 
 def install_cpp_tools(repo, target, report):

@@ -56,6 +56,24 @@ class MirrorTests(unittest.TestCase):
 		self.assertFalse(os.path.exists(os.path.join(self.target, "index.html")))
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
 
+	def test_a_file_renamed_in_case_or_moved_keeps_its_content(self):
+		write(os.path.join(self.target, "code", "activate.cf"), "same")
+		write(os.path.join(self.target, "code", "run.cf"), "old")
+		write(os.path.join(self.target, "code", "moved.cf"), "moved")
+		for name in ("run.cf", "moved.cf"):
+			os.utime(os.path.join(self.target, "code", name), (1000000000, 1000000000))   # installed long before the change
+		write(os.path.join(self.source, "code", "Activate.cf"), "same")
+		write(os.path.join(self.source, "code", "Run.cf"), "new")
+		write(os.path.join(self.source, "code", "run", "Moved.cf"), "moved")
+		result = report()
+		install_ied.mirror(self.source, self.target, set(), result)
+		self.assertEqual(["Activate.cf", "Run.cf", "run"], sorted(os.listdir(os.path.join(self.target, "code"))), "the source's spelling, nothing lost")
+		with open(os.path.join(self.target, "code", "Activate.cf"), encoding="utf-8") as f:
+			self.assertEqual("same", f.read(), "an unchanged file renamed only in case is kept, not removed")
+		with open(os.path.join(self.target, "code", "Run.cf"), encoding="utf-8") as f:
+			self.assertEqual("new", f.read())
+		self.assertEqual(["Moved.cf"], os.listdir(os.path.join(self.target, "code", "run")))
+
 
 	def test_what_a_checkout_built_in_place_stays_out_at_any_depth(self):
 		write(os.path.join(self.source, "c4", "ied-plugin.json"), "{}")
