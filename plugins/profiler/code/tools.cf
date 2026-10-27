@@ -46,6 +46,14 @@ namespace Profiler
 		return text.ToString();
 	}
 
+	// The program stopped before the answer says it is: its run ends once its process has (at most kCaptureEndWaitNs).
+	static void StopRun(Core::StringView runId) {
+		IED::CancelTask(runId);
+		const int64 endBy = clock_now_ns() + kCaptureEndWaitNs;
+		IED::TaskOutcome outcome;
+		while (!IED::TaskEnded(runId, outcome) && outcome.problem.IsEmpty() && clock_now_ns() < endBy) Threading::Thread::Sleep(kPollNs);
+	}
+
 	static Core::String Record(ProfilerPlugin* profiler, Core::StringView wsId, const Serialization::DomNode& args) {
 		IED::Workspace ws;
 		if (!IED::FindWorkspace(wsId, ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
@@ -71,7 +79,7 @@ namespace Profiler
 		StopLive(profiler, id.View());
 		const int64 endBy = clock_now_ns() + kCaptureEndWaitNs;
 		while (StillLive(profiler, id.View()) && clock_now_ns() < endBy) Threading::Thread::Sleep(kPollNs);
-		IED::CancelTask(runId.View());
+		StopRun(runId.View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Core::String asked = Core::String("{\"capture\":\"") + id.View() + "\"}";
 		return ToolAnswer(profiler, wsId, Core::StringView("summary"), Serialization::ReadJson(asked.View(), *doc).root);

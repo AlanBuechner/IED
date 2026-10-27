@@ -2536,9 +2536,12 @@ def ai_page_kept_and_force_closed(run, page, ws, site):
 	url = "file:///" + os.path.join(site, "demo.html").replace("\\", "/")
 	run.target.queue_model(model_script({"toolCall": {"name": "browser_open", "arguments": {"url": url}}}, {"finish": "tool_calls"}),
 		model_script({"text": "The demo page is open.", "chunk": 6}, {"finish": "stop"}))
+	every = lambda: [p["pageId"] for p in run.request("browser.pages", {"wsId": ws})["pages"]]
+	# the workspace keeps the pages of earlier scenarios (browser_tab's): this one looks at the pages it opens
+	before = set(every())
+	pages = lambda: [p for p in every() if p not in before]
 	send(page, "open the demo page")
 	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=60000)
-	pages = lambda: [p["pageId"] for p in run.request("browser.pages", {"wsId": ws})["pages"]]
 	opened = pages()
 	if len(opened) != 1:
 		tools = [s for s in run.request("chat.history", {"chatId": run.chat_id})["turns"][-1]["segments"] if s["type"] == "tool"]
