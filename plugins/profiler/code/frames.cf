@@ -126,11 +126,9 @@ namespace Profiler
 		json.BeginArray();
 		for (const GpuContext* gpu : capture.gpus) {
 			for (const GpuZone& zone : gpu->zones) {
-				const int64* begin = gpu->times.Find(zone.beginQuery);
-				const int64* end = gpu->times.Find(zone.endQuery);
 				int64 cpuBegin;
 				int64 cpuEnd;
-				if (!begin || !end || zone.depth != 0 || !gpu->ToCpu(*begin, capture.clock, capture.clockFreqHz, cpuBegin) || !gpu->ToCpu(*end, capture.clock, capture.clockFreqHz, cpuEnd)) continue;
+				if (zone.depth != 0 || !gpu->Span(zone, capture.clock, capture.clockFreqHz, cpuBegin, cpuEnd)) continue;
 				if (!frame.Holds(zone.cpuBegin)) continue;
 				json.BeginObject();
 				json.Field("queue", capture.Text(gpu->nameStr));

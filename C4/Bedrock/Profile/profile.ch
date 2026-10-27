@@ -30,6 +30,9 @@ namespace Profile
 		public int64 session;
 	}
 
+	// The site's id in `session`, its SrcLocDef queued the first time.
+	uint64 SiteId(Session* session, Site& site);
+
 	// A zone: from its creation to the end of its scope, on the calling thread, with what the thread allocated in it
 	// (the collector's own count, its nested zones' included) and the native memory it took and gave back (containers'
 	// buffers).

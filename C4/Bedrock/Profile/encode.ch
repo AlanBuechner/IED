@@ -17,7 +17,8 @@ namespace Profile
 		PoolDef = 0x60, Alloc = 0x61, Free = 0x62, PoolReset = 0x63, GcBegin = 0x68, GcEnd = 0x69, AllocCount = 0x6A,
 		HeapCensus = 0x6B, HeapCensusType = 0x6C, HeapCensusTypeNative = 0x6D,
 		LockDef = 0x70, LockWait = 0x71, LockObtain = 0x72, LockRelease = 0x73,
-		CallstackDef = 0x81, Sample = 0x82, SymbolDef = 0x83
+		CallstackDef = 0x81, Sample = 0x82, SymbolDef = 0x83,
+		GpuContextDef = 0x90, GpuCalibration = 0x91, GpuZoneBegin = 0x92, GpuZoneEnd = 0x93, GpuTime = 0x94
 	}
 
 	const uint8 kThreadChunk = 0;

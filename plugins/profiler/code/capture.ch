@@ -219,17 +219,25 @@ namespace Profiler
 		public int64 acquisitions;
 	}
 
+	const int64 kNoGpuTime = -1;
+
+	// A zone on a GPU queue: when its thread recorded it (CPU ticks) and, once read back, its timestamps (GPU ticks).
 	struct GpuZone
 	{
 		public int64 cpuBegin;
 		public int64 cpuEnd = kOpen;
 		public uint64 beginQuery;
 		public uint64 endQuery;
+		public int64 gpuBegin = kNoGpuTime;
+		public int64 gpuEnd = kNoGpuTime;
 		public uint32 site;
-		public int32 depth;
+		public int32 depth;              // among its thread's open zones on the context
 		public int32 track;
 	}
 
+	// A GPU queue. Query ids are a client's query-heap slots, reused round a ring, so a time belongs to the zone waiting
+	// for its slot when it arrives - or, sent before that zone (another thread's chunk of the same flush), to the next
+	// zone that takes the slot. Threads recording into it at once nest their zones apart.
 	class GpuContext
 	{
 		public uint64 id;
@@ -238,12 +246,15 @@ namespace Profiler
 		public double periodPs = 1.0;
 		public Core::Array<int64> calibrationCpu;
 		public Core::Array<int64> calibrationGpu;
-		public Core::HashMap<uint64, int64> times;   // query id -> GPU ticks
 		public Core::Array<GpuZone> zones;
-		public Core::Array<int64> open;               // indices of zones whose end has not been recorded
+		public Core::HashMap<int32, Core::Array<int64>> open;   // per track: the zones begun there and not ended
+		public Core::HashMap<uint64, int64> waiting;            // a slot -> the zone whose time it will hold
+		public Core::HashMap<uint64, int64> early;              // a slot -> a time no zone waited for yet
 
 		// A GPU timestamp on the CPU's timeline (ticks since the capture started); false without a calibration.
 		public bool ToCpu(int64 gpuTicks, const Clock& clock, int64 cpuFreqHz, int64& out) const;
+		// Where a zone ran on the CPU's timeline; false until both its times are back and the context is calibrated.
+		public bool Span(const GpuZone& zone, const Clock& clock, int64 cpuFreqHz, int64& begin, int64& end) const;
 	}
 
 	struct ModuleRecord

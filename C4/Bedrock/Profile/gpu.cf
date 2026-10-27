@@ -1,0 +1,107 @@
+include "gpu.ch"
+
+// Each message goes out in the chunk of the thread that sends it: the zones' begins and ends where they are recorded,
+// so they nest per thread, the times and calibrations where they are read back. Only the context's definition is
+// global, queued before the first event that names it.
+
+namespace Profile
+{
+	const uint32 kQueriesAZone = 2;
+
+	// The context's id in `session`, its GpuContextDef queued the first time.
+	static uint64 ContextId(Session* session, GpuContext* context) {
+		if (atomic_load(&context->session, MemoryOrder::Acquire) == session->number) return context->id;
+		ProfilerWork work;
+		Threading::LockGuard held(session->lock);
+		if (context->session == session->number) return context->id;
+		const uint64 queue = session->Intern(context->queue.View());
+		session->nextGpuContext += 1;
+		const uint64 id = session->nextGpuContext;
+		{
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::GpuContextDef);
+			PutVarint(session->global.bytes, id);
+			PutVarint(session->global.bytes, (uint64)context->api);
+			PutVarint(session->global.bytes, queue);
+			PutVarint(session->global.bytes, context->periodPicoseconds);
+		}
+		context->id = id;
+		atomic_store(&context->session, session->number, MemoryOrder::Release);
+		return id;
+	}
+
+	void GpuContext::Init(GpuApi api, Core::StringView queue, uint64 periodPicoseconds, uint32 queryCount) {
+		this.api = api;
+		this.queue = Core::String(queue);
+		this.periodPicoseconds = periodPicoseconds;
+		this.queryCount = queryCount < kQueriesAZone ? kQueriesAZone : queryCount - queryCount % kQueriesAZone;
+		Session* running = Running();
+		if (running) ContextId(running, this);
+	}
+
+	// An untimed event of the calling thread: the context and two fields.
+	static void GpuDetail(Session* session, Event type, uint64 context, uint64 first, uint64 second) {
+		ProfilerWork work;
+		EventBuffer* buffer = ThreadBuffer(session);
+		Threading::LockGuard held(buffer->lock);
+		PutEvent(buffer->bytes, type);
+		PutVarint(buffer->bytes, context);
+		PutVarint(buffer->bytes, first);
+		PutVarint(buffer->bytes, second);
+	}
+
+	void GpuContext::Calibrate(int64 cpuTicks, uint64 gpuTicks) {
+		Session* running = Running();
+		if (!running) return;
+		const int64 sessionTicks = ClockPair::Read().TicksAt((uint64)SystemNs(cpuTicks), running->frequency);
+		GpuDetail(running, Event::GpuCalibration, ContextId(running, this), (uint64)sessionTicks, gpuTicks);
+	}
+
+	uint32 GpuContext::BeginZone(Site& site) {
+		const int64 zone = atomic_fetch_add(&zones, 1, MemoryOrder::Relaxed);
+		const uint32 query = (uint32)((uint64)zone % (uint64)(queryCount / kQueriesAZone)) * kQueriesAZone;
+		Session* running = Running();
+		if (!running) return query;
+		const uint64 context = ContextId(running, this);
+		const uint64 where = SiteId(running, site);
+		ProfilerWork work;
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::GpuZoneBegin, now);
+		PutVarint(buffer->bytes, context);
+		PutVarint(buffer->bytes, (uint64)query);
+		PutVarint(buffer->bytes, where);
+		return query;
+	}
+
+	void GpuContext::EndZone(uint32 query) {
+		Session* running = Running();
+		if (!running) return;
+		const uint64 context = ContextId(running, this);
+		ProfilerWork work;
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::GpuZoneEnd, now);
+		PutVarint(buffer->bytes, context);
+		PutVarint(buffer->bytes, (uint64)(query + 1));
+	}
+
+	void GpuContext::Time(uint32 query, uint64 gpuTicks) {
+		Session* running = Running();
+		if (running) GpuDetail(running, Event::GpuTime, ContextId(running, this), (uint64)query, gpuTicks);
+	}
+
+	void GpuZone::Init(GpuContext& context, Site& site) {
+		Session* running = Running();
+		this.context = &context;
+		session = running ? running->number : 0;
+		begin = context.BeginZone(site);
+	}
+
+	void GpuZone::Delete() {
+		Session* running = Running();
+		if (session != 0 && running && running->number == session) context->EndZone(begin);
+	}
+}

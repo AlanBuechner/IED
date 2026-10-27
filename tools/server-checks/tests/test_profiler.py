@@ -194,6 +194,39 @@ def lock_stream(token):
 	return w.bytes()
 
 
+def gpu_stream(token):
+	"""A renderer's GPU zones (1 ns ticks, a 1 GHz GPU clock): one frame of 16 ms; the Direct queue calibrated at
+	CPU 5 ms = GPU tick 1,000,000; Main records Shadow pass (slots 0, 1) with Cascade nested in it (2, 3) and a worker
+	records Lighting (4, 5) meanwhile, each sending its zones in its own chunk; the readback thread's times for
+	Lighting come before the worker's chunk."""
+	w = itp.Writer().hello(app="Renderer", freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	shadow = w.srcloc("Shadow pass", defs, file="src/render.cf", line=40)
+	cascade = w.srcloc("Cascade", defs, file="src/render.cf", line=44)
+	lighting = w.srcloc("Lighting", defs, file="src/render.cf", line=60)
+	defs.event("GpuContextDef", ctxId=1, api=1, queueNameStr=w.string("Direct queue", defs), periodPicoseconds=1000)
+	w.add(defs)
+	main = w.chunk(itp.THREAD_CHUNK, 1, 0).event("FrameMark", 0, frameSetStr=0)
+	main.event("GpuCalibration", ctxId=1, cpuTicks=5 * MS, gpuTicks=1_000_000)
+	main.event("GpuZoneBegin", 1 * MS, ctxId=1, queryId=0, srcLocId=shadow)
+	main.event("GpuZoneBegin", 2 * MS, ctxId=1, queryId=2, srcLocId=cascade)
+	readback = w.chunk(itp.THREAD_CHUNK, 3, 0)
+	readback.event("GpuTime", ctxId=1, queryId=4, gpuTicks=3_000_000).event("GpuTime", ctxId=1, queryId=5, gpuTicks=3_250_000)
+	w.add(readback)
+	worker = w.chunk(itp.THREAD_CHUNK, 2, 0)
+	worker.event("GpuZoneBegin", 2 * MS + 500_000, ctxId=1, queryId=4, srcLocId=lighting).event("GpuZoneEnd", 3 * MS, ctxId=1, queryId=5)
+	w.add(worker)
+	main.event("GpuZoneEnd", 3 * MS + 200_000, ctxId=1, queryId=3).event("GpuZoneEnd", 4 * MS, ctxId=1, queryId=1)
+	main.event("FrameMark", 16 * MS, frameSetStr=0)
+	w.add(main)
+	times = w.chunk(itp.THREAD_CHUNK, 3, 0)
+	for query, ticks in ((0, 2_000_000), (2, 2_100_000), (3, 2_300_000), (1, 2_500_000)):
+		times.event("GpuTime", ctxId=1, queryId=query, gpuTicks=ticks)
+	w.add(times)
+	w.add(w.chunk(itp.GLOBAL_CHUNK, 0, 0).event("Bye", reason=0))
+	return w.bytes()
+
+
 def pprof_profile():
 	"""A pprof CPU profile, gzip-compressed: main -> work (3 samples) and main -> idle (1 sample)."""
 	def varint(value):
@@ -424,6 +457,26 @@ class ProfilerTests(ProfilerServer):
 		with self.assertRaises(RpcFailure) as bad:
 			await self.query("prof.zone", captureId=capture, ref="nonsense")
 		self.assertEqual("bad_request", bad.exception.code)
+
+	async def test_gpu_zones_land_at_their_calibrated_cpu_times(self):
+		capture = await self.capture_that_ends(gpu_stream(self.token()))
+		timeline = await self.query("prof.timeline", captureId=capture, width=1000)
+		self.assertEqual(1, len(timeline["gpu"]), timeline["gpu"])
+		lane = timeline["gpu"][0]
+		self.assertEqual(("Direct queue", 2), (lane["label"], lane["depth"]))
+		names = timeline["names"]
+		zones = sorted((names[z[3]], z[0], z[1], z[2], z[4]) for z in lane["zones"])
+		self.assertEqual([
+			("Cascade", 1, 6_100_000, 6_300_000, 2 * MS),
+			("Lighting", 0, 7 * MS, 7_250_000, 2 * MS + 500_000),
+			("Shadow pass", 0, 6 * MS, 6_500_000, 1 * MS),
+		], zones, "each zone at its GPU times on the CPU's clock, nested on the thread that recorded it")
+		frame = await self.query("prof.frame", captureId=capture, index=0)
+		self.assertEqual([("Direct queue", "Lighting", 250_000), ("Direct queue", "Shadow pass", 500_000)],
+			sorted((g["queue"], g["name"], g["durationNs"]) for g in frame["gpu"]), "the frame's GPU work, its outer zones")
+		summary = await self.query("prof.summary", captureId=capture)
+		self.assertEqual([{"queue": "Direct queue", "zones": 3, "calibrated": True}], summary["gpu"])
+		self.assertEqual(0, summary["warningCount"], summary["warnings"])
 
 	async def test_captures_survive_a_restart(self):
 		capture = await self.capture_that_ends(game_stream(self.token()))

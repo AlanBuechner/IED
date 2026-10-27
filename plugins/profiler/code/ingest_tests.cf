@@ -56,6 +56,22 @@ static void End(Profiler::WireWriter& w, int64 at) {
 	w.Time(at);
 }
 
+// A GpuZoneBegin (with its site) or GpuZoneEnd on context 1.
+static void GpuZone(Profiler::WireWriter& w, Profiler::EventType type, int64 at, uint64 query, uint64 site) {
+	w.Type(type);
+	w.Time(at);
+	w.Varint(1);
+	w.Varint(query);
+	if (type == Profiler::EventType::GpuZoneBegin) w.Varint(site);
+}
+
+static void GpuTime(Profiler::WireWriter& w, uint64 query, uint64 ticks) {
+	w.Type(Profiler::EventType::GpuTime);
+	w.Varint(1);
+	w.Varint(query);
+	w.Varint(ticks);
+}
+
 [test("server.profiler.wire")]
 class ProfilerWireTests {
 	[test("varints")]
@@ -383,5 +399,68 @@ class ProfilerIngestTests {
 		w.EndChunk();
 		Profiler::Capture* capture = Read(w);
 		assert_true(capture->warningCount == 1 && capture->tracks[0]->levels[0]->ends[0] == 3, "the rest of the chunk is skipped; the next chunk is read");
+	}
+
+	[test("gpu_zones_nest_per_thread_and_take_their_times")]
+	public static void TestGpuZones() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		Define(w, 1, "Direct queue");
+		w.Type(Profiler::EventType::GpuContextDef);
+		w.Varint(1);
+		w.Varint(1);
+		w.Varint(1);
+		w.Varint(1000);
+		w.EndChunk();
+		// Two threads record into the queue at once, their zones interleaved in time; the times of thread 2's zone
+		// arrive before it (another thread's chunk first), then a later zone takes slots 0 and 1 again.
+		w.BeginChunk(Profiler::kThreadChunk, 3, 0);
+		GpuTime(w, 4, 700);
+		GpuTime(w, 5, 800);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		GpuZone(w, Profiler::EventType::GpuZoneBegin, 10, 0, 1);
+		GpuZone(w, Profiler::EventType::GpuZoneBegin, 11, 2, 1);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 2, 0);
+		GpuZone(w, Profiler::EventType::GpuZoneBegin, 12, 4, 1);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 11);
+		GpuZone(w, Profiler::EventType::GpuZoneEnd, 13, 3, 0);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 2, 12);
+		GpuZone(w, Profiler::EventType::GpuZoneEnd, 14, 5, 0);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 13);
+		GpuZone(w, Profiler::EventType::GpuZoneEnd, 15, 1, 0);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 3, 0);
+		GpuTime(w, 0, 100);
+		GpuTime(w, 2, 200);
+		GpuTime(w, 3, 300);
+		GpuTime(w, 1, 400);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 15);
+		GpuZone(w, Profiler::EventType::GpuZoneBegin, 20, 0, 1);
+		GpuZone(w, Profiler::EventType::GpuZoneEnd, 21, 1, 0);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 3, 0);
+		GpuTime(w, 0, 900);
+		GpuTime(w, 1, 950);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->gpus.Count() == 1 && capture->warningCount == 0, "one context; nothing ended that did not begin");
+		const Profiler::GpuContext* gpu = capture->gpus[0];
+		assert_eq(4, gpu->zones.Count(), "every zone");
+		const Profiler::GpuZone& outer = gpu->zones[0];
+		const Profiler::GpuZone& inner = gpu->zones[1];
+		const Profiler::GpuZone& other = gpu->zones[2];
+		const Profiler::GpuZone& again = gpu->zones[3];
+		assert_true(outer.depth == 0 && inner.depth == 1 && other.depth == 0, "each thread's zones nest on their own");
+		assert_true(inner.endQuery == 3 && outer.endQuery == 1 && other.endQuery == 5, "an end closes its own thread's innermost zone");
+		assert_true(outer.gpuBegin == 100 && outer.gpuEnd == 400 && inner.gpuBegin == 200 && inner.gpuEnd == 300, "the times their slots read back");
+		assert_true(other.gpuBegin == 700 && other.gpuEnd == 800, "times that arrived before their zone");
+		assert_true(again.gpuBegin == 900 && again.gpuEnd == 950, "and a slot used again takes its new time, not the old one");
 	}
 }

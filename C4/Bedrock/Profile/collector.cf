@@ -15,27 +15,6 @@ namespace Profile
 
 	int32 g_collectorKey = 0;
 
-	// The session's clock and the system's counter (in nanoseconds) read together, to put a time on the counter on the
-	// session's clock.
-	class ClockPair
-	{
-		public int64 ticks;
-		public int64 systemNs;
-
-		public static ClockPair Read() {
-			ClockPair pair;
-			pair.ticks = Now();
-			const int64 counter = Platform::Ticks();
-			const int64 frequency = Platform::TickFrequency();
-			pair.systemNs = (counter / frequency) * kNsPerSecond + (counter % frequency) * kNsPerSecond / frequency;
-			return pair;
-		}
-
-		public int64 TicksAt(uint64 ns, int64 frequency) const {
-			return ticks - (int64)((double)(systemNs - (int64)ns) * (double)frequency / (double)kNsPerSecond);
-		}
-	}
-
 	// --- Collections ----------------------------------------------------------------------------------------------
 
 	// Each stop as a GcBegin and GcEnd, the last with the live bytes the collection left.

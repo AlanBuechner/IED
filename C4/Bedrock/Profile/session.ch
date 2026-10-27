@@ -83,6 +83,7 @@ namespace Profile
 		public uint64 nextThread;
 		public uint64 nextTask;
 		public uint64 nextLock;
+		public uint64 nextGpuContext;
 		public Core::Array<EventBuffer*> threads;
 		public EventBuffer global;
 		public int32 stopping;           // atomic
@@ -105,6 +106,21 @@ namespace Profile
 		// Writes the bytes to the trace's sink; false when it failed (the session then ends).
 		public bool Send(const Core::Array<uint8>& bytes);
 	}
+
+	// The session's clock and the system's counter (in nanoseconds) read together, to put a time on the counter on the
+	// session's clock.
+	class ClockPair
+	{
+		public int64 ticks;
+		public int64 systemNs;
+
+		public static ClockPair Read();
+		// The session's ticks (`frequency` a second) at `ns` on the system's counter.
+		public int64 TicksAt(uint64 ns, int64 frequency) const;
+	}
+
+	// A reading of the system's counter (Platform::Ticks) in nanoseconds.
+	int64 SystemNs(int64 counter);
 
 	// The running session, or null; turns profiling on from IED_PROFILER the first time it is asked.
 	Session* Running();

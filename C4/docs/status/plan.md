@@ -1912,7 +1912,27 @@ methods that return structs by value (B74 adds the test); data exported from the
 
 #### B72 - GPU zones from Bedrock's profiling client (`Profile::Gpu`)
 - **Design:** the IED tree's `docs/16-profiler-and-trace-format.md` (messages 0x90-0x94, "GPU timing").
-  **Depends on:** none. **Status:** Ready.
+  **Depends on:** none. **Status:** Done.
+- **Done notes:** `Profile/gpu.ch`, `gpu.cf`: `Profile::GpuApi`, `GpuContext(api, queue, periodPicoseconds,
+  queryCount)` (defined once per session, like a `Site`; `queryCount` made even, at least 2), `Calibrate(cpuTicks,
+  gpuTicks)` (the system counter's reading put on the session's clock: `ClockPair`, moved from `collector.cf` to
+  `session`), `BeginZone(site)` (two slots round the ring from an atomic counter: begin `q`, end `q + 1`), `EndZone(q)`,
+  `Time(slot, ticks)`, `GpuZone` (a scope that ends only in the session it began in); the begins and ends go in the
+  recording thread's chunk, calibrations and times in the reading thread's, the definition in the global one. Without
+  a session a zone costs the ring's atomic add (the slots must still be handed out). The IED server's ingestion had
+  two bugs for a renderer that records in parallel and reuses slots: a context nested every thread's zones on one stack
+  (an end closed another thread's zone) and kept one time per slot (a slot used again overwrote the earlier zone's);
+  `GpuContext` now keeps an open stack per track, gives each zone its own `gpuBegin` / `gpuEnd`, and a time that comes
+  before its zone (another thread's chunk of the same flush) waits for it (`ingest.cf`; `GpuContext::Span` reads them
+  for the timeline, a frame and the summary). The C4 GPU sample (`plugins/gpu/samples/c4`) times its clear with two
+  timestamp queries (a query heap, a readback buffer, `GetTimestampFrequency`, `GetClockCalibration`), and its capture
+  test still passes; recorded to a file it shows the clear at 1.4-3.5 us on the GPU, about 0.5 ms after it was
+  recorded. Tests: Bedrock `profile.gpu.messages_as_docs_16_lays_them_out`, `ids_wrap_in_the_ring`,
+  `nothing_is_sent_without_a_session`, `zones_from_four_threads_on_one_context`; server unit test
+  `server.profiler.ingest.gpu_zones_nest_per_thread_and_take_their_times`; server check
+  `test_gpu_zones_land_at_their_calibrated_cpu_times` (a context, a calibration, nested zones on one thread and one on
+  another, times before and after their zones: the GPU lane at the calibrated CPU times, the frame's GPU work, the
+  summary).
 - **Why:** Claymore's RenderCore times every frame-graph pass on the GPU, and wants those times beside the CPU zones in
   IED's profiler. The server, the capture and the timeline already take GPU contexts and zones. No C4 client sends
   them (docs/16 "Not built yet").

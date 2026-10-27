@@ -405,11 +405,9 @@ namespace Profiler
 			json.Key(Core::StringView("zones"));
 			json.BeginArray();
 			for (const GpuZone& zone : gpu->zones) {
-				const int64* begin = gpu->times.Find(zone.beginQuery);
-				const int64* end = gpu->times.Find(zone.endQuery);
 				int64 cpuBegin;
 				int64 cpuEnd;
-				if (!begin || !end || !gpu->ToCpu(*begin, w.capture->clock, w.capture->clockFreqHz, cpuBegin) || !gpu->ToCpu(*end, w.capture->clock, w.capture->clockFreqHz, cpuEnd)) continue;
+				if (!gpu->Span(zone, w.capture->clock, w.capture->clockFreqHz, cpuBegin, cpuEnd)) continue;
 				if (!w.range.Overlaps(cpuBegin, cpuEnd)) continue;
 				if ((int64)zone.depth + 1 > depth) depth = (int64)zone.depth + 1;
 				json.BeginArray();

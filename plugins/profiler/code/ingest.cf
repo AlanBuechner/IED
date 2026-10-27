@@ -430,6 +430,64 @@ namespace Profiler
 
 	// --- GPU ----------------------------------------------------------------------------------------------------------
 
+	// A slot's time into the zone waiting for it (its begin or its end), else kept for the next zone that takes the slot.
+	static void GpuTime(GpuContext* gpu, uint64 query, int64 ticks) {
+		int64 waiting;
+		if (!gpu->waiting.TryGet(query, waiting)) {
+			gpu->early.Remove(query);
+			gpu->early.Insert(query, ticks);
+			return;
+		}
+		gpu->waiting.Remove(query);
+		GpuZone& zone = gpu->zones[waiting];
+		if (zone.beginQuery == query && zone.gpuBegin == kNoGpuTime) zone.gpuBegin = ticks;
+		else zone.gpuEnd = ticks;
+	}
+
+	// The zone `index` now waits for the time of `query`: at once when it came first.
+	static int64 AwaitGpuTime(GpuContext* gpu, uint64 query, int64 index) {
+		int64 early;
+		if (gpu->early.TryGet(query, early)) {
+			gpu->early.Remove(query);
+			return early;
+		}
+		gpu->waiting.Remove(query);
+		gpu->waiting.Insert(query, index);
+		return kNoGpuTime;
+	}
+
+	static Core::Array<int64>* OpenGpuZones(GpuContext* gpu, int32 track) {
+		if (!gpu->open.Find(track)) gpu->open.Insert(track, Core::Array<int64>());
+		return gpu->open.Find(track);
+	}
+
+	static void BeginGpuZone(GpuContext* gpu, int32 track, const Event& event, int64 t) {
+		Core::Array<int64>* open = OpenGpuZones(gpu, track);
+		GpuZone zone;
+		zone.cpuBegin = t;
+		zone.beginQuery = event.fields[1];
+		zone.site = (uint32)event.fields[2];
+		zone.depth = (int32)open->Count();
+		zone.track = track;
+		const int64 index = gpu->zones.Count();
+		zone.gpuBegin = AwaitGpuTime(gpu, zone.beginQuery, index);
+		gpu->zones.Push(zone);
+		open->Push(index);
+	}
+
+	static void EndGpuZone(Capture& capture, GpuContext* gpu, int32 track, const Event& event, int64 t) {
+		Core::Array<int64>* open = OpenGpuZones(gpu, track);
+		if (open->IsEmpty()) {
+			capture.Warn(t, Core::StringView("a GPU zone ended that never began"));
+			return;
+		}
+		const int64 index = open->Pop();
+		GpuZone& zone = gpu->zones[index];
+		zone.cpuEnd = t;
+		zone.endQuery = event.fields[1];
+		zone.gpuEnd = AwaitGpuTime(gpu, zone.endQuery, index);
+	}
+
 	static void GpuEvent(Capture& capture, int32 track, const Event& event, int64 t) {
 		GpuContext* gpu = GpuFor(capture, event.fields[0]);
 		if (event.type == EventType::GpuContextDef) {
@@ -441,27 +499,9 @@ namespace Profiler
 			gpu->calibrationCpu.Push((int64)event.fields[1]);
 			gpu->calibrationGpu.Push((int64)event.fields[2]);
 		}
-		else if (event.type == EventType::GpuTime) {
-			int64* known = gpu->times.Find(event.fields[1]);
-			if (known) *known = (int64)event.fields[2];
-			else gpu->times.Insert(event.fields[1], (int64)event.fields[2]);
-		}
-		else if (event.type == EventType::GpuZoneBegin) {
-			GpuZone zone;
-			zone.cpuBegin = t;
-			zone.beginQuery = event.fields[1];
-			zone.site = (uint32)event.fields[2];
-			zone.depth = (int32)gpu->open.Count();
-			zone.track = track;
-			gpu->zones.Push(zone);
-			gpu->open.Push(gpu->zones.Count() - 1);
-		}
-		else if (gpu->open.IsEmpty()) capture.Warn(t, Core::StringView("a GPU zone ended that never began"));
-		else {
-			GpuZone& zone = gpu->zones[gpu->open.Pop()];
-			zone.cpuEnd = t;
-			zone.endQuery = event.fields[1];
-		}
+		else if (event.type == EventType::GpuTime) GpuTime(gpu, event.fields[1], (int64)event.fields[2]);
+		else if (event.type == EventType::GpuZoneBegin) BeginGpuZone(gpu, track, event, t);
+		else EndGpuZone(capture, gpu, track, event, t);
 	}
 
 	// --- Definitions --------------------------------------------------------------------------------------------------

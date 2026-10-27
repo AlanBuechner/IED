@@ -1,7 +1,7 @@
 // Profile: a session recorded to a trace file (IED_PROFILER=file:...) and read back event by event - the preamble and
 // Hello, definitions before their first use, zones on two threads with times that only grow, frames, plots, messages,
 // thread renames and the names the system knows, tasks, memory, each stop of a collection, censuses and sampled
-// allocations, and Bye; nothing recorded outside a session.
+// allocations, GPU contexts, calibrations, zones and their times, and Bye; nothing recorded outside a session.
 
 include "bedrock.ch"
 include "profile.ch"
@@ -76,6 +76,10 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x69) return "tvvvvv";
 	if (type == 0x70) return "vvv";
 	if (type == 0x71 || type == 0x72 || type == 0x73) return "tv";
+	if (type == 0x90) return "vvvv";
+	if (type == 0x91 || type == 0x94) return "vvv";
+	if (type == 0x92) return "tvvv";
+	if (type == 0x93) return "tvv";
 	return null;
 }
 
@@ -640,5 +644,199 @@ class ProfileTests {
 		Core::String problem;
 		assert_true(!Profile::Start(Core::StringView("127.0.0.1:1;token=x"), problem) && !problem.IsEmpty(), "an unreachable profiler is said so");
 		assert_true(!Profile::Start(Core::StringView("nonsense"), problem), "and an address that is none");
+	}
+}
+
+// --- GPU zones ------------------------------------------------------------------------------------------------------
+
+static Profile::Site s_shadowPass = Profile::Site("Shadow pass", "render.cf", 40);
+static Profile::Site s_shadowCascade = Profile::Site("Cascade", "render.cf", 44);
+static Profile::GpuContext* s_sharedQueue = null;
+
+static int64 IndexOf(const Core::Array<TracedEvent>& events, int32 type) {
+	for (int64 i = 0; i < events.Count(); ++i)
+		if (events[i].type == type) return i;
+	return -1;
+}
+
+static Core::Array<TracedEvent> OfType(const Core::Array<TracedEvent>& events, int32 type) {
+	Core::Array<TracedEvent> found;
+	for (const TracedEvent& e : events)
+		if (e.type == type) found.Push(e);
+	return found;
+}
+
+// 25 zones, each with one nested in it, recorded on the calling thread into the shared context.
+static void RecordPasses() {
+	for (int32 i = 0; i < 25; ++i) {
+		Profile::GpuZone pass(*s_sharedQueue, s_shadowPass);
+		Profile::GpuZone cascade(*s_sharedQueue, s_shadowCascade);
+	}
+}
+
+// Whether each thread's GPU zones begin and end in its own chunks and nest there: an end names the end slot of the
+// innermost zone its thread began.
+static bool NestedPerThread(const Core::Array<TracedEvent>& events) {
+	Core::HashMap<uint64, Core::Array<uint64>> open;
+	for (const TracedEvent& e : events) {
+		if (e.type != 0x92 && e.type != 0x93) continue;
+		if (e.chunk != 0) return false;
+		if (!open.Find(e.thread)) open.Insert(e.thread, Core::Array<uint64>());
+		Core::Array<uint64>* stack = open.Find(e.thread);
+		if (e.type == 0x92) stack->Push(e.fields[1]);
+		else if (stack->IsEmpty() || stack->Pop() + 1 != e.fields[1]) return false;
+	}
+	for (const Core::KeyValue<uint64, Core::Array<uint64>>& entry : open)
+		if (!entry.value.IsEmpty()) return false;
+	return true;
+}
+
+[test("profile.gpu")]
+class ProfileGpuTests {
+	[test("messages_as_docs_16_lays_them_out")]
+	public static void TestMessages() {
+		Core::String path = TracePath("bedrock-profile-gpu.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		Profile::GpuContext gpu(Profile::GpuApi::D3D12, Core::StringView("Direct queue"), 100000, 8);
+		const int64 before = Profile::Now();
+		gpu.Calibrate(Platform::Ticks(), 5000);
+		const int64 after = Profile::Now();
+		uint32 outerQuery;
+		uint32 innerQuery;
+		{
+			Profile::GpuZone outer(gpu, s_shadowPass);
+			outerQuery = outer.BeginQuery();
+			{
+				Profile::GpuZone inner(gpu, s_shadowCascade);
+				innerQuery = inner.BeginQuery();
+				assert_eq((int64)innerQuery + 1, (int64)inner.EndQuery(), "a zone's end slot follows its begin slot");
+			}
+		}
+		gpu.Time(0, 6000);
+		gpu.Time(1, 9000);
+		gpu.Time(2, 7000);
+		gpu.Time(3, 8000);
+		Profile::Stop();
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "every chunk reads whole");
+		const TracedEvent* def = First(events, 0x90);
+		assert_true(def && def->chunk == 1 && def->fields[1] == 1 && *strings.Find(def->fields[2]) == "Direct queue" && def->fields[3] == 100000,
+			"GpuContextDef: the context, its API, queue name and tick period, in the global chunk");
+		assert_true(IndexOf(events, 0x90) < IndexOf(events, 0x91) && IndexOf(events, 0x90) < IndexOf(events, 0x92), "defined before its first use");
+		const uint64 context = def->fields[0];
+		const TracedEvent* calibration = First(events, 0x91);
+		const int64 slack = (int64)events[0].fields[2] / 1000;
+		assert_true(calibration && calibration->fields[0] == context && calibration->fields[2] == 5000, "GpuCalibration: the context and the GPU's ticks");
+		assert_true((int64)calibration->fields[1] >= before - slack && (int64)calibration->fields[1] <= after + slack, "and the CPU's, on the session's clock");
+		assert_eq(0, (int64)outerQuery, "the first zone takes slots 0 and 1");
+		assert_eq(2, (int64)innerQuery, "the next 2 and 3");
+		Core::Array<TracedEvent> begins = OfType(events, 0x92);
+		Core::Array<TracedEvent> ends = OfType(events, 0x93);
+		assert_eq(2, begins.Count(), "GpuZoneBegin for each zone");
+		assert_eq(2, ends.Count(), "and GpuZoneEnd");
+		Core::HashMap<uint64, bool> defined;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x11) defined.Insert(e.fields[0], true);
+		assert_true(begins[0].fields[0] == context && begins[0].fields[1] == 0 && defined.Find(begins[0].fields[2]) != null,
+			"the begin names the context, its slot and its site");
+		assert_true(begins[1].fields[1] == 2 && begins[1].ticks >= begins[0].ticks, "the nested zone begins later");
+		assert_true(ends[0].fields[0] == context && ends[0].fields[1] == 3 && ends[1].fields[1] == 1, "the ends name the end slots, innermost first");
+		assert_true(ends[0].ticks >= begins[1].ticks && ends[1].ticks >= ends[0].ticks, "at times that only grow");
+		assert_true(begins[0].chunk == 0 && ends[0].chunk == 0 && begins[0].thread == ends[1].thread, "in the recording thread's chunks");
+		Core::Array<TracedEvent> times = OfType(events, 0x94);
+		assert_eq(4, times.Count(), "GpuTime for each slot read back");
+		assert_true(times[0].fields[0] == context && times[0].fields[1] == 0 && times[0].fields[2] == 6000 && times[3].fields[1] == 3 && times[3].fields[2] == 8000,
+			"each with the context, its slot and the GPU's ticks");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("ids_wrap_in_the_ring")]
+	public static void TestRing() {
+		Profile::GpuContext ring(Profile::GpuApi::Vulkan, Core::StringView("Compute"), 1000, 6);
+		assert_eq(6, (int64)ring.QueryCount(), "six slots: three zones");
+		int64[7] slots;
+		for (int32 i = 0; i < 7; ++i) slots[i] = (int64)ring.BeginZone(s_shadowPass);
+		assert_true(slots[0] == 0 && slots[1] == 2 && slots[2] == 4, "each zone takes the next two slots");
+		assert_true(slots[3] == 0 && slots[4] == 2 && slots[5] == 4 && slots[6] == 0, "and the ring starts over");
+		Profile::GpuContext odd(Profile::GpuApi::Other, Core::StringView("Copy"), 1000, 7);
+		assert_eq(6, (int64)odd.QueryCount(), "an odd count loses its last slot");
+		Profile::GpuContext tiny(Profile::GpuApi::Other, Core::StringView("Tiny"), 1000, 0);
+		assert_eq(2, (int64)tiny.QueryCount(), "and a ring holds one zone at least");
+		assert_true(tiny.BeginZone(s_shadowPass) == 0 && tiny.BeginZone(s_shadowPass) == 0, "which every zone then shares");
+	}
+
+	[test("nothing_is_sent_without_a_session")]
+	public static void TestOff() {
+		assert_true(!Profile::IsActive(), "no session");
+		Profile::GpuContext gpu(Profile::GpuApi::D3D12, Core::StringView("Direct queue"), 100000, 64);
+		gpu.Calibrate(Platform::Ticks(), 10);
+		{
+			Profile::GpuZone zone(gpu, s_shadowPass);
+			assert_eq(0, (int64)zone.BeginQuery(), "a zone still gets its slots");
+		}
+		gpu.Time(0, 20);
+		Core::String path = TracePath("bedrock-profile-gpu-off.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "a session starts afterwards");
+		Profile::Stop();
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		int64 gpuEvents = 0;
+		for (const TracedEvent& e : events)
+			if (e.type >= 0x90 && e.type <= 0x94) gpuEvents += 1;
+		assert_eq(0, gpuEvents, "nothing of the context was sent, before or in a session that did not use it");
+
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "another session");
+		{
+			Profile::GpuZone zone(gpu, s_shadowPass);
+		}
+		Profile::Stop();
+		events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(IndexOf(events, 0x90) >= 0 && IndexOf(events, 0x90) < IndexOf(events, 0x92), "a context made before the session is defined at its first use in it");
+		assert_eq(2, (int64)First(events, 0x92)->fields[1], "and its ring went on meanwhile");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("zones_from_four_threads_on_one_context")]
+	public static void TestThreads() {
+		Core::String path = TracePath("bedrock-profile-gpu-threads.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		Profile::GpuContext gpu(Profile::GpuApi::D3D12, Core::StringView("Direct queue"), 100000, 512);
+		s_sharedQueue = &gpu;
+		Threading::Thread first = Threading::Thread::Run([]() { RecordPasses(); });
+		Threading::Thread second = Threading::Thread::Run([]() { RecordPasses(); });
+		Threading::Thread third = Threading::Thread::Run([]() { RecordPasses(); });
+		Threading::Thread fourth = Threading::Thread::Run([]() { RecordPasses(); });
+		first.Join();
+		second.Join();
+		third.Join();
+		fourth.Join();
+		s_sharedQueue = null;
+		Profile::Stop();
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		assert_eq(1, CountOf(events, 0x90), "one context, defined once");
+		Core::Array<TracedEvent> begins = OfType(events, 0x92);
+		assert_eq(200, begins.Count(), "every zone of the four threads began");
+		assert_eq(200, CountOf(events, 0x93), "and ended");
+		Core::HashMap<uint64, bool> slots;
+		Core::HashMap<uint64, bool> threads;
+		for (const TracedEvent& e : begins) {
+			slots.Insert(e.fields[1], true);
+			threads.Insert(e.thread, true);
+		}
+		assert_eq(200, slots.Count(), "each in slots of its own");
+		assert_eq(4, threads.Count(), "on four threads");
+		assert_true(NestedPerThread(events), "each thread's zones nest in its own chunks");
+		FS::RemoveFile(path.CStr());
 	}
 }

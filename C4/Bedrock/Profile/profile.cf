@@ -4,8 +4,7 @@ include "Threading/jobs.ch"
 
 namespace Profile
 {
-	// The site's id in `session`, its definitions queued the first time.
-	static uint64 SiteId(Session* session, Site& site) {
+	uint64 SiteId(Session* session, Site& site) {
 		if (atomic_load(&site.session, MemoryOrder::Acquire) == session->number) return site.id;
 		ProfilerWork work;
 		Threading::LockGuard held(session->lock);

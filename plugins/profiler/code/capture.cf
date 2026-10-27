@@ -35,6 +35,11 @@ namespace Profiler
 		return true;
 	}
 
+	bool GpuContext::Span(const GpuZone& zone, const Clock& clock, int64 cpuFreqHz, int64& begin, int64& end) const {
+		if (zone.gpuBegin == kNoGpuTime || zone.gpuEnd == kNoGpuTime) return false;
+		return ToCpu(zone.gpuBegin, clock, cpuFreqHz, begin) && ToCpu(zone.gpuEnd, clock, cpuFreqHz, end);
+	}
+
 	Core::StringView Capture::Text(uint64 id) const {
 		if (id == 0) return Core::StringView("");
 		const Core::String* text = strings.Find(id);

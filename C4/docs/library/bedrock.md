@@ -1310,6 +1310,7 @@ Profile::Frame();
 | `Mutex`, `MutexGuard`, `PROFILE_MUTEX(variable, name)` | a `Threading::Mutex` whose waits and holds the profiler shows (`Lock`, `TryLock`, `Unlock`; a free mutex is taken without recording a wait); the macro gives it this file and line |
 | `LockSite`, `LockWait(site, shared)`, `LockObtained`, `LockReleased` | a lock of the program's own: its name and place, registered once per session, and the calling thread's wait, hold and release (`shared` for a reader of a reader-writer lock) |
 | `Alloc(ptr, size, pool)`, `Free(ptr, pool)`, `PoolName`, `PoolReset` | a pool of the program's own (sent in one global order, so an address reused by another thread is never confused) |
+| `GpuContext(api, queue, periodPicoseconds, queryCount)`, `Calibrate(cpuTicks, gpuTicks)`, `BeginZone(site) -> query`, `EndZone(query)`, `Time(query, gpuTicks)`, `GpuZone(context, site)` (`Profile/gpu.ch`) | GPU zones (IED docs/16 "GPU timing", messages 0x90-0x94): a queue of the program's renderer, defined once per session; a pair of readings of the system's counter and the GPU's clock (D3D12 `GetClockCalibration`); a zone of the calling thread at the CPU time it is recorded, which takes two query slots round a ring of `queryCount` (begin `query`, end `query + 1`), so threads recording into one context at once (parallel command lists) get slots of their own and nest their zones apart; the GPU's timestamp of a slot once it is read back. Bedrock records no GPU commands and stays API-neutral: the program owns the query heap, writes the timestamps into the slots and reads them back, and its renderer emits the API's own markers named after the zone's site. Without a session nothing is sent; a zone costs the ring's atomic add |
 | `IsActive()`, `Start(target, problem)`, `Stop()` | for tools and tests; a program run by IED starts from its environment on its first call |
 
 While a session runs, every `JobSystem` job is a task by itself, named as it was submitted ("Job" without a name), on
@@ -1336,7 +1337,14 @@ each thread's events taken first, then the global buffer's, sent first, so a def
 failed send ends the session. One session runs per process, kept in globals (the module's documented exception to the
 no-globals convention). `-D PROFILE=0` compiles the `PROFILE_*` macros to nothing; direct calls stay and cost one load.
 
-Covered by `Bedrock/Tests/profile_tests.cf` (9 tests): a session to a file read back event by event - the preamble and
+A GPU zone's begin and end go out in the chunk of the thread that records them and a calibration or a time in the
+chunk of the thread that reads it back; only the context's definition is global, queued before the first event that
+names it. A calibration's CPU reading is on the system's counter (QueryPerformanceCounter, as D3D12 gives it) and is
+put on the session's clock as the collector's pauses are (`ClockPair`).
+
+Covered by `Bedrock/Tests/profile_tests.cf` (13 tests; `profile.gpu.*`: the five GPU messages as docs/16 lays them
+out, slots that wrap in the ring, nothing sent without a session and a context defined at its first use in a later
+one, and 200 zones from four threads on one context, each in slots of its own and nested in its thread's chunks): a session to a file read back event by event - the preamble and
 `Hello`, definitions before their use, zones on two threads with times that only grow across chunks, frames, plots,
 messages, renames, tasks, a pool, a collection and `Bye`; a thread named by the system starting with that name, a
 `GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; a `Profile::Mutex` one thread waits for while

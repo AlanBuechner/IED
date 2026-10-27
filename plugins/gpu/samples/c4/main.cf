@@ -1,7 +1,9 @@
 // fb-sample-c4 - a D3D12 program in C4 for the GPU debugger (IED docs/22 "Capture"): it loads IED's capture library
 // through Bedrock's Gpu::Capture, hands it its device, and each frame clears a render target inside a marker between
 // StartFrame and EndFrame - the frame bounds of a program with no swap chain. It opens no window. Started by Launch
-// for Capture it runs until stopped; with FLASHBANG_DLL set by hand and --capture-frame it captures itself.
+// for Capture it runs until stopped; with FLASHBANG_DLL set by hand and --capture-frame it captures itself. It times
+// the clear on the GPU with two timestamp queries, a zone of IED's profiler (Profile::GpuContext, docs/16): run with
+// IED_PROFILER set, the profiler's GPU lane shows it under the frame.
 //   fb-sample-c4 [--frames N] [--capture-frame K]      N = 0 (the default): until stopped
 
 extern "c++" include "d3d12.hpp" {
@@ -13,9 +15,15 @@ extern "c++" include "d3d12.hpp" {
 
 include "bedrock.ch"
 include "gpu.ch"
+include "profile.ch"
 
 const int32 kTargetSize = 256;
 const int64 kFrameNs = 16000000;
+const uint32 kQueries = 64;                 // the profiler's ring of timestamp slots: 32 zones
+const int64 kCalibrateEveryFrames = 60;
+const uint64 kPicosecondsASecond = 1000000000000;
+
+static Profile::Site s_clearSite = Profile::Site("Clear", __FILE__, __LINE__);
 
 class Options
 {
@@ -34,6 +42,9 @@ class Renderer
 	public ID3D12Fence* fence;
 	public void* idle;         // the event the fence sets when the GPU is done
 	public uint64 submitted;   // the fence value of the last frame
+	public ID3D12QueryHeap* timestamps;
+	public ID3D12Resource* readback;    // where the frame's timestamps are resolved to, two for each slot pair
+	public Profile::GpuContext* gpu;
 	public Core::String problem;
 }
 
@@ -116,27 +127,93 @@ bool CreateTarget(Renderer& r) {
 	return true;
 }
 
-// The device (wrapped for capture when the library is loaded), its queue and the render target.
+// The queue's timestamp queries and the buffer they are read back from, and the profiler's context for the queue.
+bool CreateTimer(Renderer& r) {
+	D3D12_QUERY_HEAP_DESC queries;
+	memset(&queries, 0, sizeof(D3D12_QUERY_HEAP_DESC));
+	queries.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+	queries.Count = kQueries;
+	void* heap = nullptr;
+	if (Failed(r, "CreateQueryHeap", r.device->CreateQueryHeap(&queries, __uuidof(ID3D12QueryHeap), &heap))) return false;
+	r.timestamps = (ID3D12QueryHeap*)heap;
+	D3D12_HEAP_PROPERTIES readable;
+	memset(&readable, 0, sizeof(D3D12_HEAP_PROPERTIES));
+	readable.Type = D3D12_HEAP_TYPE_READBACK;
+	D3D12_RESOURCE_DESC desc;
+	memset(&desc, 0, sizeof(D3D12_RESOURCE_DESC));
+	desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	desc.Width = (uint64)kQueries * 8;
+	desc.Height = 1;
+	desc.DepthOrArraySize = 1;
+	desc.MipLevels = 1;
+	desc.SampleDesc.Count = 1;
+	desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	void* buffer = nullptr;
+	if (Failed(r, "CreateCommittedResource", r.device->CreateCommittedResource(&readable, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, __uuidof(ID3D12Resource), &buffer))) return false;
+	r.readback = (ID3D12Resource*)buffer;
+	r.readback->SetName(u"Timestamps");
+	uint64 frequency = 0;
+	if (Failed(r, "GetTimestampFrequency", r.queue->GetTimestampFrequency(&frequency)) || frequency == 0) return false;
+	r.gpu = new Profile::GpuContext(Profile::GpuApi::D3D12, Core::StringView("Direct queue"), kPicosecondsASecond / frequency, kQueries);
+	return true;
+}
+
+// The device (wrapped for capture when the library is loaded), its queue, the render target and the timer.
 bool Create(Renderer& r, Gpu::Capture& capture) {
 	void* device = nullptr;
 	if (Failed(r, "D3D12CreateDevice", D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &device))) return false;
 	r.device = (ID3D12Device*)capture.WrapD3D12Device(device);
-	return CreateQueue(r) && CreateTarget(r);
+	return CreateQueue(r) && CreateTarget(r) && CreateTimer(r);
 }
 
-// One frame: the target cleared to a color that moves with `frame`, inside a "Clear" marker; waits for the GPU.
-void Render(Renderer& r, int64 frame) {
-	r.allocator->Reset();
-	r.list->Reset(r.allocator, nullptr);
+// The CPU's and the GPU's clocks read together, so the profiler puts the GPU's times on the CPU's timeline.
+void Calibrate(Renderer& r) {
+	uint64 gpuTicks = 0;
+	uint64 cpuTicks = 0;
+	if (r.queue->GetClockCalibration(&gpuTicks, &cpuTicks) == 0) r.gpu->Calibrate((int64)cpuTicks, gpuTicks);
+}
+
+// The two timestamps of the zone that took `query`, once the frame's fence passed.
+void ReadTimes(Renderer& r, uint32 query) {
+	void* mapped = nullptr;
+	D3D12_RANGE range;
+	range.Begin = (uint64)query * 8;
+	range.End = range.Begin + 16;
+	if (r.readback->Map(0, &range, &mapped) != 0) return;
+	const uint64* ticks = (const uint64*)((uint8*)mapped + range.Begin);
+	r.gpu->Time(query, ticks[0]);
+	r.gpu->Time(query + 1, ticks[1]);
+	D3D12_RANGE nothing;
+	nothing.Begin = 0;
+	nothing.End = 0;
+	r.readback->Unmap(0, &nothing);
+}
+
+// The target cleared to a color that moves with `frame`, inside a "Clear" marker and a GPU zone of the same name: the
+// slot pair it took.
+uint32 RecordClear(Renderer& r, int64 frame) {
+	Profile::GpuZone zone(*r.gpu, s_clearSite);
 	const char16* marker = u"Clear";
 	r.list->BeginEvent(0, (const void*)marker, 12);
+	r.list->EndQuery(r.timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.BeginQuery());
 	float[4] color;
 	color[0] = 0.25f;
 	color[1] = 0.5f;
 	color[2] = (float)(frame % 4) * 0.25f;
 	color[3] = 1.0f;
 	r.list->ClearRenderTargetView(r.heap->GetCPUDescriptorHandleForHeapStart(), &color[0], 0, nullptr);
+	r.list->EndQuery(r.timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.EndQuery());
 	r.list->EndEvent();
+	r.list->ResolveQueryData(r.timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.BeginQuery(), 2, r.readback, (uint64)zone.BeginQuery() * 8);
+	return zone.BeginQuery();
+}
+
+// One frame: the clear, timed; waits for the GPU, then hands the profiler the clear's timestamps.
+void Render(Renderer& r, int64 frame) {
+	if (frame % kCalibrateEveryFrames == 0) Calibrate(r);
+	r.allocator->Reset();
+	r.list->Reset(r.allocator, nullptr);
+	const uint32 query = RecordClear(r, frame);
 	r.list->Close();
 	r.queue->ExecuteCommandLists(1, &r.list);
 	r.submitted += 1;
@@ -145,6 +222,7 @@ void Render(Renderer& r, int64 frame) {
 		r.fence->SetEventOnCompletion(r.submitted, r.idle);
 		WaitForSingleObject(r.idle, INFINITE);
 	}
+	ReadTimes(r, query);
 }
 
 void Destroy(Renderer& r) {
@@ -153,6 +231,8 @@ void Destroy(Renderer& r) {
 	if (r.heap) r.heap->Release();
 	if (r.target) r.target->Release();
 	if (r.fence) r.fence->Release();
+	if (r.readback) r.readback->Release();
+	if (r.timestamps) r.timestamps->Release();
 	if (r.queue) r.queue->Release();
 	if (r.device) r.device->Release();
 	if (r.idle) CloseHandle(r.idle);
@@ -175,6 +255,7 @@ int32 main(int32 argc, char** argv) {
 		capture.Annotate(Core::StringView("frame"), Core::StringView(frame % 2 == 0 ? "even" : "odd"));
 		Render(r, frame);
 		capture.EndFrame();
+		Profile::Frame();
 		Threading::Thread::Sleep(kFrameNs);
 	}
 	for (int32 i = 0; i < capture.CaptureCount(); ++i) printf("captured %s\n", capture.CapturePath(i).CStr());

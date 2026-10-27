@@ -52,6 +52,22 @@ namespace Profile
 		t_profilerTook.nativeFreed += took.nativeFreed;
 	}
 
+	int64 SystemNs(int64 counter) {
+		const int64 frequency = Platform::TickFrequency();
+		return (counter / frequency) * kNsPerSecond + (counter % frequency) * kNsPerSecond / frequency;
+	}
+
+	ClockPair ClockPair::Read() {
+		ClockPair pair;
+		pair.ticks = Now();
+		pair.systemNs = SystemNs(Platform::Ticks());
+		return pair;
+	}
+
+	int64 ClockPair::TicksAt(uint64 ns, int64 frequency) const {
+		return ticks - (int64)((double)(systemNs - (int64)ns) * (double)frequency / (double)kNsPerSecond);
+	}
+
 	void EventBuffer::Timed(Event type, int64 ticks) {
 		PutEvent(bytes, type);
 		PutZigzag(bytes, ticks - last);
