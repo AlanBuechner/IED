@@ -51,6 +51,12 @@ export function refsOf(tree) {
 	return groupsOf(tree).flatMap((g) => g.tabs);
 }
 
+// The tabs of `before` that `after` no longer has: closed, or a preview tab another replaced.
+export function closedBy(before, after) {
+	const kept = new Set(refsOf(after));
+	return refsOf(before).filter((ref) => !kept.has(ref));
+}
+
 export function groupOf(tree, ref) {
 	return groupsOf(tree).find((g) => g.tabs.includes(ref)) || null;
 }

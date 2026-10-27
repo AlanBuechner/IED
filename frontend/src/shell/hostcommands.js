@@ -71,7 +71,7 @@ const COMMANDS = [
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
 	{ id: "shell.trustWorkspace", title: "Trust Workspace", category: "File", enablement: "!workspaceTrusted", run: (shell) => shell.client.request("ws.setTrust", { wsId: shell.wsId, trusted: true }) },
 	{ id: "shell.keyboardShortcuts", title: "Keyboard Shortcuts", category: "Help", icon: "$(record-keys)", run: (shell) => shell.openSettings("custom:shell.keyboard") },
-	{ id: "shell.settings", title: "Settings", category: "Tools", icon: "$(settings-gear)", run: (shell, args) => shell.openSettings(args && args.page) },
+	{ id: "shell.settings", title: "Settings", category: "Tools", icon: "$(settings-gear)", run: (shell, args) => shell.openSettings(args && args.page, args && args.tier, args && args.project) },
 	{ id: "shell.plugins", title: "Manage Plugins", category: "Extensions", icon: "$(extensions)", run: (shell) => shell.openTab("shell:plugins") },
 	{ id: "shell.about", title: "About IED", category: "Help", run: (shell) => shell.openTab("shell:about") },
 ];
@@ -148,6 +148,16 @@ export function registerShellCommands(shell) {
 	for (const binding of KEYS) shell.keybindings.define(binding, "shell");
 	shell.menus.provide("menubar/view", () => toolWindowItems(shell));
 	shell.menus.provide("tab/context", () => moveToActivityItems(shell));
+	shell.menus.provide("tabs/new", () => newTabHereItems(shell));
+}
+
+// The first row of a "+" menu (the menu `tabs/new`, docs/15 "Docking"): the activity's own way to open a tab, the one a
+// click on the "+" runs; the plugins add the other ways to that menu - a web view, a file's preview, Go To All. The group
+// whose "+" was pressed is the focused one by the time the menu resolves (shell.js `showNewTabMenu`).
+function newTabHereItems(shell) {
+	const where = shell.focus && shell.focus.well ? shell.focus.activity : null;
+	const activity = where ? shell.contributions.activities.find((a) => a.id === where) : null;
+	return activity && activity.newTab ? [{ command: activity.newTab, group: "0_new" }] : [];
 }
 
 // A document tab moves to another dock host (F-SHL-14: a chat into the Editor's well, a file into the Chat's).

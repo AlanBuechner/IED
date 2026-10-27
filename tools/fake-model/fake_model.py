@@ -27,7 +27,7 @@ LOG_LIMIT = 500
 
 
 class Config:
-	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text", vision=False, props=True):
+	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text", vision=False, props=True, metrics="off"):
 		self.n_ctx = n_ctx
 		self.n_ctx_train = n_ctx_train
 		self.slots = slots
@@ -38,6 +38,11 @@ class Config:
 		self.default_script = default_script
 		self.vision = vision
 		self.props = props
+		# What /metrics says: "off" answers nothing, "busy" gives a vLLM's gauges with the completions streaming now
+		# counted in num_requests_running (what a healthy long prefill looks like to IED's watchdog), "idle" gives the
+		# same gauges at 0 (a server that is alive but has lost the request), and "slow" answers them after the watchdog's
+		# own ask would have given up - a status page that takes seconds while the engine reads.
+		self.metrics = metrics
 
 	@property
 	def slot_ctx(self):
@@ -47,13 +52,17 @@ class Config:
 		return {
 			"nCtx": self.n_ctx, "nCtxTrain": self.n_ctx_train, "slots": self.slots, "slotCtx": self.slot_ctx, "model": self.model,
 			"timeScale": self.time_scale, "enforceCtx": self.enforce_ctx, "ctxErrorStyle": self.ctx_error_style, "defaultScript": self.default_script,
-			"vision": self.vision, "props": self.props,
+			"vision": self.vision, "props": self.props, "metrics": self.metrics,
 		}
 
 
 CONFIG_FIELDS = {"nCtx": ("n_ctx", int), "nCtxTrain": ("n_ctx_train", int), "slots": ("slots", int), "model": ("model", str),
 	"timeScale": ("time_scale", (int, float)), "enforceCtx": ("enforce_ctx", bool), "ctxErrorStyle": ("ctx_error_style", str), "defaultScript": ("default_script", str),
-	"vision": ("vision", bool), "props": ("props", bool)}
+	"vision": ("vision", bool), "props": ("props", bool), "metrics": ("metrics", str)}
+
+
+METRICS_MODES = ("off", "busy", "idle", "slow")
+METRICS_SLOW_S = 3.0   # how long a "slow" status page takes to answer, past IED's 2 s ask
 
 
 class State:
@@ -95,6 +104,8 @@ class State:
 			for key, value in changes.items():
 				if key not in CONFIG_FIELDS or not isinstance(value, CONFIG_FIELDS[key][1]) or isinstance(value, bool) != (CONFIG_FIELDS[key][1] is bool):
 					raise ValueError("bad config field %r" % key)
+				if key == "metrics" and value not in METRICS_MODES:
+					raise ValueError("metrics must be one of %s" % ", ".join(METRICS_MODES))
 				setattr(self.config, CONFIG_FIELDS[key][0], value)
 			if "slots" in changes:
 				self.slot_gate = threading.Semaphore(self.config.slots)
@@ -154,12 +165,15 @@ class Handler(BaseHTTPRequestHandler):
 			"/props": self._props,
 			"/slots": lambda: [{"id": i, "n_ctx": config.slot_ctx, "is_processing": i < self.state.busy} for i in range(config.slots)],
 			"/v1/models": self._models,
+			"/metrics": self._metrics,
 			"/_fake/scripts": lambda: {n: {"stopClass": s["stopClass"], "description": s["description"]} for n, s in sorted(self.state.library.scripts.items())},
 			"/_fake/requests": lambda: list(self.state.log),
 			"/_fake/config": config.to_dict,
 		}
-		if path not in routes or (path == "/props" and not config.props):
+		if path not in routes or (path == "/props" and not config.props) or (path == "/metrics" and config.metrics == "off"):
 			return self._json(404, {"error": {"message": "no route %s" % path}})
+		if path == "/metrics":
+			return self._text(200, routes[path]())
 		return self._json(200, routes[path]())
 
 	def do_POST(self):
@@ -183,6 +197,19 @@ class Handler(BaseHTTPRequestHandler):
 			except ValueError as e:
 				return self._json(400, {"error": {"message": str(e)}})
 		return self._json(404, {"error": {"message": "no route %s" % path}})
+
+	def _metrics(self):
+		"""A vLLM's Prometheus answer: the gauges IED's prefill watchdog asks when a stream says nothing but the server
+		may still be reading (docs/12 "Watchdogs"). `busy` counts the completions streaming now, so "busy" says 1 during
+		a scripted stall - what a healthy long prefill looks like - and "idle" says 0 - what a lost request looks like.
+		`slow` says 1 after waiting past the watchdog's own ask, which times out on it."""
+		if self.state.config.metrics == "slow":
+			time.sleep(METRICS_SLOW_S)
+		with self.state.lock:
+			running = self.state.busy if self.state.config.metrics in ("busy", "slow") else 0
+		return ("# HELP vllm:num_requests_running Number of requests in model execution batches.\n"
+			"# TYPE vllm:num_requests_running gauge\n"
+			'vllm:num_requests_running{engine="0",model_name="%s"} %d.0\n' % (self.state.config.model, running))
 
 	def _props(self):
 		config = self.state.config
@@ -261,6 +288,14 @@ class Handler(BaseHTTPRequestHandler):
 
 	def _json(self, status, obj):
 		streaming.send_json(self, status, obj, {})
+
+	def _text(self, status, text):
+		body = text.encode()
+		self.send_response(status)
+		self.send_header("Content-Type", "text/plain; version=0.0.4")
+		self.send_header("Content-Length", str(len(body)))
+		self.end_headers()
+		self.wfile.write(body)
 
 
 class FakeModelServer(ThreadingHTTPServer):

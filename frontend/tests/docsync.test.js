@@ -380,6 +380,38 @@ test("docsync: save waits for pending edits", async () => {
 	assertTrue(saved && !sync.dirty, "then saved");
 });
 
+test("docsync: a sync disposed while its document opens never follows it", async () => {
+	const client = new ModelClient(new ModelServer("text"));
+	const target = new TextTarget();
+	const sync = new DocumentSync(client, target, {});
+	let opened = "still opening";
+	sync.open("w1", "a.txt").then((value) => (opened = value));
+	await Promise.resolve();
+	sync.dispose();
+	client.requests.shift().resolve({ docId: "d1", version: 1, holder: "me" });
+	await settle();
+	assertEqual(opened, null, "resolves with nothing");
+	assertEqual([client.handler, target.text], [null, ""], "no subscription was made, so no text reaches the closed view");
+});
+
+test("docsync: events that come before the first snapshot are passed over", async () => {
+	const client = new ModelClient(new ModelServer(""));
+	const target = new TextTarget();
+	const sync = new DocumentSync(client, target, {});
+	const opening = sync.open("w1", "a.txt");
+	await Promise.resolve();
+	client.requests.shift().resolve({ docId: "d1", version: 1, holder: "me" });
+	await settle();
+	let applied = 0;
+	target.applyRemote = () => (applied += 1);
+	client.handler.evt("doc.edit", { version: 5, changes: [change(0, 0, 0, 0, "x")], origin: "user:other" }, 5);
+	assertEqual([applied, target.text], [0, ""], "the topic's events on the way when this view joined it: the snapshot holds them");
+	client.handler.snap({ text: "abc", version: 5, lease: { holder: "other" }, dirty: true }, 5);
+	await opening;
+	client.handler.evt("doc.edit", { version: 6, changes: [change(0, 3, 0, 3, "!")], origin: "user:other" }, 6);
+	assertEqual([target.text, applied], ["abc", 1], "after it, events apply");
+});
+
 test("docsync: an overlapping remote edit starts over from a snapshot", async () => {
 	const { server, client, target, sync, states } = await opened("abcdef");
 	target.type(sync, [change(0, 1, 0, 4, "X")]);

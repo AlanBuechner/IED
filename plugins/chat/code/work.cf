@@ -537,7 +537,7 @@ namespace Ai
 
 	void AddWorkTools(ToolRegistry& registry) {
 		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"src/**\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob: '*' within a folder, '**' across folders, {a,b} either\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->plan = SearchPlan;
 		search->run = SearchRun;

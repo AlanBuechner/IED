@@ -194,6 +194,7 @@ a { color: var(--link); text-decoration: none; }
 	position: relative;
 	touch-action: none;
 	user-select: none;
+	cursor: pointer;
 }
 .tab:hover { color: var(--text-1); }
 /* "+" after the last tab, as in a browser (an activity's newTab) */
@@ -230,7 +231,7 @@ a { color: var(--link); text-decoration: none; }
 }
 .dock-group.focused .panel-title { color: var(--text-0); }
 .tw-tabs { display: flex; height: 24px; flex: none; border-top: var(--border-width) solid var(--border-0); background: var(--bg-0); overflow: hidden; }
-.tw-tab { display: flex; align-items: center; padding: 0 var(--space-4); color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; position: relative; touch-action: none; user-select: none; }
+.tw-tab { display: flex; align-items: center; padding: 0 var(--space-4); color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; position: relative; touch-action: none; user-select: none; cursor: pointer; }
 .tw-tab:hover { color: var(--text-1); }
 .tw-tab.on { color: var(--text-0); background: var(--bg-1); }
 .tw-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--text-1); }
@@ -256,7 +257,7 @@ a { color: var(--link); text-decoration: none; }
 .ah-bottom { grid-area: bottom; border-top: var(--border-width) solid var(--border-0); }
 .ah-group { display: flex; gap: var(--space-2); flex: none; }
 .ah-left .ah-group, .ah-right .ah-group { flex-direction: column; }
-.ah-tab { display: flex; align-items: center; justify-content: center; position: relative; color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; user-select: none; touch-action: none; outline: none; }
+.ah-tab { display: flex; align-items: center; justify-content: center; position: relative; color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; user-select: none; touch-action: none; outline: none; cursor: pointer; }
 .ah-left .ah-tab, .ah-right .ah-tab { writing-mode: vertical-rl; padding: var(--space-4) 0; }
 .ah-top .ah-tab, .ah-bottom .ah-tab { padding: 0 var(--space-4); }
 .ah-tab::after { content: ""; position: absolute; background: var(--border-1); }
@@ -324,7 +325,7 @@ a { color: var(--link); text-decoration: none; }
 .np-search { flex: 1; min-width: 0; }
 .np-language { flex: none; width: 160px; }
 .np-list { flex: 1 1 auto; min-height: 120px; max-height: 52vh; overflow-y: auto; border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); }
-.np-row { display: flex; align-items: flex-start; gap: var(--space-4); padding: var(--space-4) var(--space-5); cursor: default; border-bottom: var(--border-width) solid var(--border-0); }
+.np-row { display: flex; align-items: flex-start; gap: var(--space-4); padding: var(--space-4) var(--space-5); cursor: pointer; user-select: none; border-bottom: var(--border-width) solid var(--border-0); }
 .np-row:last-child { border-bottom: 0; }
 .np-row:hover { background: var(--bg-3); }
 .np-row.sel { background: var(--selection-active); }
@@ -369,7 +370,7 @@ a { color: var(--link); text-decoration: none; }
 .sp-slot { flex: none; width: 24px; }
 .app.phone .sp-slot { width: 40px; }
 .sp-row:hover .ib, .sp-row:focus-within .ib, .sp-row .ib.on { visibility: visible; }
-.sp-row.gone { cursor: default; }
+.sp-row.gone { cursor: not-allowed; }
 .sp-row.gone .sp-name, .sp-row.gone .sp-when { color: var(--text-2); }
 .app.phone .start-page { padding: var(--space-5) var(--space-4); gap: var(--space-5); justify-content: flex-start; }
 .app.phone .sp-projects, .app.phone .sp-start { flex: 1 1 100%; }

@@ -10,6 +10,21 @@ import { showImage } from "/ui-kit/imageview.js";
 import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
 import { userChips } from "./userchips.js";
 
+// The streaming thinking's preview: the last few lines, cut at a line start - so it opens on a whole line and moves
+// only when a line completes, and the line being written shows in full.
+const THINK_TAIL_LINES = 3;
+const THINK_TAIL_CHARS = 320;
+export function thinkingTail(text) {
+	const lines = String(text || "").split("\n");
+	let tail = lines.slice(-THINK_TAIL_LINES).join("\n");
+	if (tail.length > THINK_TAIL_CHARS) {
+		tail = tail.slice(-THINK_TAIL_CHARS);
+		const at = tail.indexOf("\n");
+		if (at >= 0) tail = tail.slice(at + 1);
+	}
+	return tail;
+}
+
 const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
 const STOP_LABELS = { finished: "Finished", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model", harness_error: "Stopped by an error in IED" };
 
@@ -32,6 +47,20 @@ export class TranscriptView {
 		this.expanded = new Set();
 		this.frame = 0;
 		this.prefillTimer = 0;
+		this.el.addEventListener("click", (event) => this.linkClicked(event));
+	}
+
+	// A link in a reply. A web address opens in its own window (markdown.js marks it so); a path of this workspace names a
+	// place in IED, and the page following it itself would leave the IDE. A mail address is for the system's own program,
+	// and "#section" is a place in the page (docs/15 "Links").
+	linkClicked(event) {
+		const link = event.target.closest && event.target.closest("a[href]");
+		if (!link || link.hasAttribute("target")) return null;
+		const href = link.getAttribute("href");
+		if (href.startsWith("#") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(href)) return null;
+		event.preventDefault();
+		this.actions.openFile(decodeURIComponent(href.split("#")[0]));
+		return null;
 	}
 
 	render() {
@@ -135,13 +164,19 @@ export class TranscriptView {
 			h("span.muted", null, clock(ms)));
 	}
 
-	// While the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many
+	// Whether the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many
 	// tokens (the cached ones were not read again), and for how long; from another server only the estimate, its bar
-	// moving with the clock.
+	// moving with the clock; and when that estimate is out and the server says the work is still in its engine, that and
+	// how long it has taken so far - the answer to "is it stuck or thinking?", told afresh every time IED asks.
 	showPrefill(el, turn) {
 		const progress = !turn.stop && turn.prefill;
 		el.hidden = !progress;
 		if (!progress) return;
+		if (progress.working) {
+			replace(el, icon("loading", "spin"), h("span", null, "Still reading the prompt"),
+				h("span.meta", null, compact(progress.total) + " tokens \u00b7 " + duration(progress.waitedMs) + " so far: the server says it is still working"));
+			return;
+		}
 		if (progress.estimated) {
 			this.tickPrefill();
 			const elapsed = Math.max(0, Date.now() - progress.startedMs);
@@ -228,7 +263,7 @@ export class TranscriptView {
 		};
 		const facts = segment.done ? [segment.ms ? duration(segment.ms) : "", segment.tokens ? compact(segment.tokens) + " tok" : ""].filter(Boolean).join(" \u00b7 ") : "thinking\u2026";
 		const head = h("button.chat-think", { "aria-expanded": open ? "true" : "false", on: { click: toggle } }, icon(open ? "chevron-down" : "chevron-right"), h("span.lbl", null, "Thinking"), h("span", null, facts));
-		const tail = !segment.done && !open ? h("div.chat-think-tail", null, (segment.text || "").slice(-160)) : null;
+		const tail = !segment.done && !open ? h("div.chat-think-tail", null, thinkingTail(segment.text)) : null;
 		return [head, open ? h("div.chat-think-body", null, segment.text || "") : tail];
 	}
 

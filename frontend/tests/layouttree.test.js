@@ -343,6 +343,14 @@ test("layout doc: tethers pair tabs, and a follower closes with its lead", () =>
 	assertEqual(D.partnersOf(D.emptyDocument(), "doc:a"), []);
 });
 
+test("layout tree: the tabs a change closes are those it took out, a preview tab replaced among them", () => {
+	const tree = L.normalize({ kind: "split", dir: "row", sizes: [0.5, 0.5], children: [L.group(["doc:a.md", "doc:b.md"], { well: true, preview: "doc:b.md" }), L.group(["mdpreview:b.md"], { well: true })] });
+	assertEqual(L.closedBy(tree, L.openTab(tree, "doc:c.md", { preview: true })), ["doc:b.md"], "the preview tab another took the place of");
+	assertEqual(L.closedBy(tree, L.openTab(tree, "doc:c.md", {})), [], "a tab opened beside the others closes none");
+	assertEqual(L.closedBy(tree, L.closeTab(tree, "doc:a.md")), ["doc:a.md"]);
+	assertEqual(L.closedBy(tree, L.moveTab(tree, "mdpreview:b.md", [0], "center")), [], "a tab moved stays open");
+});
+
 test("layout doc: a phone's tab closed while another shows leaves its back stack", () => {
 	let doc = D.withPhonePane(D.emptyDocument(), "chat:new");
 	doc = D.withPhonePane(doc, "chat:c4");

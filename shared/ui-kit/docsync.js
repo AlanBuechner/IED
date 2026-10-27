@@ -27,7 +27,7 @@ export class DocumentSync {
 		this.unsubscribe = null;
 		this.disposed = false;
 		this.waiters = [];
-		this.resyncing = false;
+		this.awaitingSnapshot = false;
 	}
 
 	get holdsLease() {
@@ -38,11 +38,14 @@ export class DocumentSync {
 		return (this.inflight ? 1 : 0) + this.queue.length;
 	}
 
-	// Opens the document and follows it; resolves with the first snapshot applied. A `file:` URI is a file outside the
-	// workspace a language server named: shown read-only (docs/10).
+	// Opens the document and follows it; resolves with the first snapshot applied, or null when disposed before the
+	// document opened (its view closed: nothing follows it then). A `file:` URI is a file outside the workspace a language
+	// server named: shown read-only (docs/10).
 	async open(wsId, path) {
 		const opened = await this.client.request("doc.open", /^file:\/\//i.test(path) ? { wsId, uri: path } : { wsId, path });
+		if (this.disposed) return null;
 		this.docId = opened.docId;
+		this.awaitingSnapshot = true;
 		return new Promise((resolve, reject) => {
 			this.unsubscribe = this.client.subscribe("doc:" + this.docId, {
 				snap: (data) => {
@@ -67,7 +70,7 @@ export class DocumentSync {
 	// From the server
 
 	snapshot(data) {
-		this.resyncing = false;
+		this.awaitingSnapshot = false;
 		this.version = data.version;
 		this.holder = data.lease ? data.lease.holder : null;
 		this.dirty = data.dirty;
@@ -81,10 +84,11 @@ export class DocumentSync {
 		this.state({ baselineMoved: true });
 	}
 
-	// Events before the snapshot a resync waits for describe the text it is about to replace: they are passed over.
-	// `baselineMoved` in the state says the file's text moved (a save, a reload from disk): the server's baselines did.
+	// Events before the snapshot an open or a resync waits for describe the text it is about to replace: they are passed
+	// over (a topic another view follows already has events on the way when this one joins it). `baselineMoved` in the
+	// state says the file's text moved (a save, a reload from disk): the server's baselines did.
 	event(kind, data) {
-		if (this.resyncing) return;
+		if (this.awaitingSnapshot) return;
 		const baselineMoved = kind === "doc.saved" || (kind === "doc.edit" && data.origin === "disk");
 		if (kind === "doc.edit") this.edited(data);
 		else if (kind === "doc.lease") {
@@ -165,7 +169,7 @@ export class DocumentSync {
 	// Starts over from the server's text: what was not yet applied there is dropped, and the person is told.
 	resync() {
 		if (this.unsubscribe) this.unsubscribe();
-		this.resyncing = true;
+		this.awaitingSnapshot = true;
 		this.inflight = null;
 		this.queue = [];
 		this.wakeWaiters();

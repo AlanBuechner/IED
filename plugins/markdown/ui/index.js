@@ -20,6 +20,10 @@ export function activate(ied) {
 		const path = args && args.path ? args.path : ied.context.get("resourcePath");
 		if (path) ied.tabs.openBeside("doc:" + path, "mdpreview:" + path, { tether: true, closes: true });
 	});
+	// The preview's Go to Source: the file at the block under the pointer (a 0-based line, as the editor's goTo takes it).
+	ied.commands.handle("ied.markdown.goToSource", (args) => {
+		if (args && args.path) ied.commands.run("ied.editor.goTo", { path: args.path, line: args.line });
+	});
 }
 
 export function MarkdownPreview(ctx) {

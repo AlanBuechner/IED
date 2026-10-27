@@ -33,6 +33,7 @@ A script has one or more `responses`. Each request to a script uses the next res
 | `--time-scale` | 1.0 | multiplies every stall and chunk delay; per request: header `X-Fake-Time-Scale` |
 | `--enforce-ctx` | off | reject prompts larger than the slot context (estimate: chars / 4) with a context error |
 | `--ctx-error-style` | llamacpp | `llamacpp` (`exceed_context_size_error` with `n_ctx`) or `openai` (`context_length_exceeded`, limit in the message) |
+| `metrics` (config, `off`) | off | `off`: `/metrics` answers 404, as a server that says nothing of itself. `busy`: a vLLM's `vllm:num_requests_running`, 1 while a completion is streaming - what a healthy long prefill looks like to the prefill watchdog. `idle`: the same gauges at 0 - a server alive but holding no such work. `slow`: the gauges at 1 after 3 s, past the 2 s the watchdog's own ask allows - a status page that times the ask out. See `stalled_prefill` below. |
 
 | Endpoint | Returns |
 |---|---|
@@ -102,6 +103,8 @@ An `error` or `cut` as the very first step happens before any header. When the s
 | `disconnected_mid_stream` | `eof-without-done` | 2 | partial text, clean end of body, no finish_reason, no `[DONE]` |
 | `stalled_prefill` | `stall-prefill` | 2 | no bytes at all (not even headers) for 120 s |
 | `stalled_prefill` | `stall-prefill-after-headers` | 2 | headers at once, then 120 s without a chunk |
+| `stalled_prefill` | `stall-prefill-twice` | 2 | 150 s of silence, cancelled; then 140 s, which the retry's longer deadline outlasts |
+| none | `stall-prefill-after-headers` + `metrics: "busy"` | - | the same silence, and the watchdog's question answered: the request is left to finish, nothing is retried (docs/12 "Watchdogs") |
 | `stalled_stream` | `stall-mid-stream` | 2 | ~200 tokens, 120 s of silence, then the rest |
 | `max_tokens` | `max-tokens` | 2 | text cut by `finish_reason=length`; the 2nd request finishes |
 | `max_tokens` | `max-tokens-mid-tool-args` | 2 | tool-call arguments cut by `length` (invalid JSON); the 2nd request sends the full call |

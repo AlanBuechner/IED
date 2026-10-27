@@ -1,23 +1,27 @@
 // The desktop app's commands (docs/27 "The page and its keys"): inside ied-desktop, whose window.iedDesktop the shell
-// finds, the `desktopApp` context key is set and Window > New Window and Help > Developer Tools appear; in a browser they
-// stay hidden. File > Open Folder is the shell's: it is needed where no workspace (and so no plugin) is loaded.
+// finds, the `desktopApp` context key is set and Window > New Window, Window > Open in Web and Help > Developer Tools
+// appear; in a browser they stay hidden. Open in Web opens the shown workspace in the system's default browser (the
+// app asks the server for a fresh one-time sign-in URL). File > Open Folder is the shell's: it is needed where no
+// workspace (and so no plugin) is loaded.
 {
 	"manifestVersion": 1,
 	"id": "ied.desktop",
 	"name": "Desktop App",
 	"version": "0.1.0",
-	"description": "New windows and developer tools in IED's desktop app.",
+	"description": "New windows, a web browser and developer tools in IED's desktop app.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative", "ui": "ui/index.js" },
 	"contributes": {
 		"commands": [
 			{ "id": "ied.desktop.newWindow", "title": "New Window", "category": "Window", "icon": "$(empty-window)" },
+			{ "id": "ied.desktop.openInWeb", "title": "Open in Web", "category": "Window", "icon": "$(globe)" },
 			{ "id": "ied.desktop.devTools", "title": "Developer Tools", "category": "Help", "icon": "$(tools)" }
 		],
 		"menus": {
 			"menubar/window": [
-				{ "command": "ied.desktop.newWindow", "group": "0_window", "when": "desktopApp" }
+				{ "command": "ied.desktop.newWindow", "group": "0_window", "when": "desktopApp" },
+				{ "command": "ied.desktop.openInWeb", "group": "0_window", "order": 1, "when": "desktopApp" }
 			],
 			"menubar/help": [
 				{ "command": "ied.desktop.devTools", "group": "8_tools", "when": "desktopApp" }

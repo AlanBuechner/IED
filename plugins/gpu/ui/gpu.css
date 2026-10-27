@@ -11,7 +11,7 @@
 .gpu-target .name { color: var(--text-0); }
 .gpu-target .meta, .gpu-capture .meta { color: var(--text-2); font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gpu-captures { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4); padding: var(--space-3) var(--space-4) var(--space-6); }
-.gpu-capture { display: flex; flex-direction: column; border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); background: var(--bg-2); cursor: default; overflow: hidden; min-width: 0; }
+.gpu-capture { display: flex; flex-direction: column; border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); background: var(--bg-2); cursor: pointer; user-select: none; overflow: hidden; min-width: 0; }
 .gpu-capture:hover { border-color: var(--border-1); }
 .gpu-capture:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .gpu-capture .thumb { aspect-ratio: 16 / 9; background: var(--bg-0); display: grid; place-items: center; color: var(--text-3); overflow: hidden; }
@@ -45,7 +45,7 @@
 
 /* View tabs (PIX: Overview / Pipeline / Performance) */
 .gpu-vtabs { display: flex; align-items: stretch; height: 30px; padding: 0 var(--space-3); background: var(--bg-1); border-bottom: var(--border-width) solid var(--border-0); flex: none; white-space: nowrap; overflow: hidden; }
-.gpu-vtab { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-5); color: var(--text-2); position: relative; cursor: default; background: none; border: none; font: inherit; }
+.gpu-vtab { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-5); color: var(--text-2); position: relative; cursor: pointer; background: none; border: none; font: inherit; }
 .gpu-vtab.on { color: var(--text-0); }
 .gpu-vtab.on::after { content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: 0; height: 2px; background: var(--text-0); }
 .gpu-vtabs .tail { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); color: var(--text-2); font-size: var(--font-size-xs); }
@@ -62,7 +62,8 @@
 .gpu-head { height: 22px; font-size: var(--font-size-xs); color: var(--text-2); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); flex: none; }
 .gpu-head > span, .gpu-r > span { padding: 0 var(--space-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .gpu-head > span + span { border-left: var(--border-width) solid var(--border-0); }
-.gpu-r { height: 21px; font-size: var(--font-size-sm); cursor: default; }
+.gpu-r { height: 21px; font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
+.gpu-r.info { cursor: default; }
 .gpu-r:hover { background: var(--bg-3); }
 .gpu-r .n, .gpu-head .n { text-align: right; font-variant-numeric: tabular-nums; }
 .gpu-r .m { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-1); }
@@ -91,7 +92,8 @@
 /* Pipeline view: state tree + resource viewer */
 .gpu-stree { width: 360px; flex: none; background: var(--bg-1); }
 .gpu-stree .viewport { flex: 1; overflow: auto; min-height: 0; }
-.gpu-srow { display: flex; align-items: center; gap: var(--space-2); height: 21px; padding-left: calc(4px + var(--d, 0) * 14px); padding-right: var(--space-3); font-size: var(--font-size-sm); white-space: nowrap; cursor: default; }
+.gpu-srow { display: flex; align-items: center; gap: var(--space-2); height: 21px; padding-left: calc(4px + var(--d, 0) * 14px); padding-right: var(--space-3); font-size: var(--font-size-sm); white-space: nowrap; cursor: default; user-select: none; }
+.gpu-stree .gpu-srow, .gpu-srow.link { cursor: pointer; }
 .gpu-srow:hover { background: var(--bg-3); }
 .gpu-srow.sel { background: var(--selection-active); }
 .gpu-srow .ci { width: 14px; height: 14px; color: var(--text-2); flex: none; }
@@ -160,7 +162,8 @@
 .gpu-buf-nav { display: flex; align-items: center; gap: var(--space-2); }
 .gpu-hist-summary { flex: none; padding: var(--space-3) var(--space-4); background: var(--bg-1); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); color: var(--text-0); }
 .gpu-hist { flex: 1; overflow: auto; min-height: 0; }
-.gpu-hist-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 2px var(--space-3); padding: 4px var(--space-3); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); cursor: default; }
+.gpu-hist-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 2px var(--space-3); padding: 4px var(--space-3); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
+.gpu-hist-row.edge { cursor: default; }
 .gpu-hist-row:hover { background: var(--bg-3); }
 .gpu-hist-row.sel { background: var(--selection-active); }
 .gpu-hist-row .eid { color: var(--text-2); text-align: right; font-variant-numeric: tabular-nums; }

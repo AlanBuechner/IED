@@ -641,6 +641,8 @@ namespace Ai
 		"{\"provider\":\"claude-code\",\"model\":\"fable\"}" };
 	// The pace each place of a ladder (the setup's chain, an old `auto` profile's) is used to, strongest first.
 	static double RungLimit(int64 rung) { return rung == 0 ? 1.0 : rung == 1 ? 1.25 : 1.5; }
+	// The setup's chain after the shared pool's ladder: Fable, its own week (ApartModel) spent evenly.
+	const double kApartPace = 1.0;
 
 	static Serialization::DomNode ParsedValue(Core::StringView json) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -748,6 +750,7 @@ namespace Ai
 		if (!oldGroups.Member("claude").IsValid()) {
 			RoleModel primary;
 			for (int64 rung = 0; rung < 3; ++rung) Place(primary, Core::StringView(kClaudeProfileNames[rung]), Limit(RungLimit(rung), Core::StringView("both")));
+			Place(primary, Core::StringView(kClaudeProfileNames[3]), Limit(kApartPace, Core::StringView("both")));
 			Core::String fallback = ClaudeFallback(oldModels, oldGroups, defaultGroup);
 			if (!fallback.IsEmpty()) Place(primary, fallback.View(), PaceLimit());
 			out.Key(Core::StringView("claude"));

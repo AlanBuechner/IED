@@ -221,9 +221,9 @@ function table(lines, at, to, out) {
 const INLINE = [
 	{ re: /^`+/, make: codeSpan },
 	{ re: /^!\[([^\]]*)\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))*)>?(?:\s+"([^"]*)")?\s*\)/, make: (m) => [h("img", { src: safeUrl(m[2]), alt: m[1], title: m[3] || null }), m[0].length] },
-	{ re: /^\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))*)>?(?:\s+"([^"]*)")?\s*\)/, make: (m) => [h("a", { href: safeUrl(m[2]), title: m[3] || null }, ...inline(m[1])), m[0].length] },
-	{ re: /^<((?:https?|mailto):[^\s>]+)>/, make: (m) => [h("a", { href: m[1] }, m[1]), m[0].length] },
-	{ re: /^https?:\/\/[^\s<]*[^\s<.,;:!?)\]'"]/, make: (m) => [h("a", { href: m[0] }, m[0]), m[0].length] },
+	{ re: /^\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))*)>?(?:\s+"([^"]*)")?\s*\)/, make: (m) => [h("a", Object.assign({ href: safeUrl(m[2]), title: m[3] || null }, webLink(m[2])), ...inline(m[1])), m[0].length] },
+	{ re: /^<((?:https?|mailto):[^\s>]+)>/, make: (m) => [h("a", Object.assign({ href: m[1] }, webLink(m[1])), m[1]), m[0].length] },
+	{ re: /^https?:\/\/[^\s<]*[^\s<.,;:!?)\]'"]/, make: (m) => [h("a", { href: m[0], target: "_blank", rel: "noopener noreferrer" }, m[0]), m[0].length] },
 	{ re: /^\*\*(?=\S)([\s\S]*?\S)\*\*/, make: (m) => [h("strong", null, ...inline(m[1])), m[0].length] },
 	{ re: /^__(?=\S)([\s\S]*?\S)__(?![A-Za-z0-9])/, make: (m) => [h("strong", null, ...inline(m[1])), m[0].length] },
 	{ re: /^\*(?=\S)([\s\S]*?\S)\*(?!\*)/, make: (m) => [h("em", null, ...inline(m[1])), m[0].length] },
@@ -232,6 +232,13 @@ const INLINE = [
 	{ re: /^(?: {2,}|\\)\n/, make: (m) => [h("br"), m[0].length] },
 	{ re: /^\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/, make: (m) => [document.createTextNode(m[1]), m[0].length] },
 ];
+
+// A web address is marked to open in its own window: followed by the page itself, it would leave IED's own page - a
+// reply's link is not a place in it. A mail address opens its program and a path of the workspace is answered by the
+// view (docs/15 "Links").
+function webLink(url) {
+	return /^https?:\/\//i.test(url) ? { target: "_blank", rel: "noopener noreferrer" } : null;
+}
 
 // A link's or an image's address when it is web, mail or relative; null for any other scheme (javascript:, data:...).
 export function safeUrl(url) {

@@ -150,8 +150,9 @@ namespace Ai
 	// ai.models and ai.groups (their JSON) with Claude set up (docs/04 "Setting it up"): the Claude profiles added - claude-opus,
 	// claude-sonnet, claude-haiku, claude-fable; one already there of a name kept as it is - and a `claude` group unless one is
 	// there, its primary chain stepping down as the plan runs ahead of pace: claude-opus (1.0), claude-sonnet (1.25),
-	// claude-haiku (1.5), then the default group's primary when that is not Claude (else the first model that is not);
-	// `defaultGroup` the ai.defaultGroup value (empty: the first group).
+	// claude-haiku (1.5), claude-fable (1.0: metered apart, so against its own week and the session), then the default
+	// group's primary when that is not Claude (else the first model that is not); `defaultGroup` the ai.defaultGroup value
+	// (empty: the first group).
 	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut);
 	// Whether the ai.models value (JSON) names a claude-code profile.
 	bool HasClaudeModel(Core::StringView models);

@@ -260,6 +260,9 @@ namespace Browser
 		if (selector.IsEmpty()) return 0;
 		CdpReply found = browsers->Call(page, Core::StringView("Runtime.evaluate"), (Core::String("{\"expression\":") +
 			JsonText((Core::String("document.querySelector(") + JsonText(selector).View() + ")").View()).View() + "}").View());
+		// A selector the page cannot read throws: its result is the exception, not an element.
+		if (found.result.Member("exceptionDetails").IsValid())
+			throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("'") + selector + "' is not a CSS selector (Playwright's text= and :has-text() are not CSS): name the element by a ref from browser_snapshot, or a CSS selector").View());
 		Core::StringView objectId = found.result.Member("result").Member("objectId").AsView();
 		if (objectId.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("nothing matches ") + selector).View());
 		CdpReply described = browsers->Call(page, Core::StringView("DOM.describeNode"), (Core::String("{\"objectId\":") + JsonText(objectId).View() + "}").View());

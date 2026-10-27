@@ -91,8 +91,22 @@ namespace Ai
 		if (usage.Kind() == Serialization::DomKind::Object) {
 			if (usage.Member("prompt_tokens").IsValid()) promptTokens = usage.Member("prompt_tokens").AsInt();
 			if (usage.Member("completion_tokens").IsValid()) completionTokens = usage.Member("completion_tokens").AsInt();
+			const Serialization::DomNode cached = usage.Member("prompt_tokens_details").Member("cached_tokens");
+			if (cached.IsValid()) cachedTokens = cached.AsInt();   // vLLM's count of the prefix it did not have to read
 		}
 		Serialization::DomNode timings = root.Member("timings");
 		if (timings.Member("prompt_per_second").IsValid()) promptPerSecond = timings.Member("prompt_per_second").AsFloat();
+		if (timings.Member("cache_n").IsValid()) cachedTokens = timings.Member("cache_n").AsInt();   // llama.cpp's own count
+	}
+
+	double Completion::MeasuredPrefillRate(int64 ttftMs) const {
+		if (promptPerSecond > 0) return promptPerSecond;   // llama.cpp measured its own read: it says nothing of a cache wait
+		const int64 read = ReadTokens();
+		if (read < kCompletionReadTeachingTokens || ttftMs <= 0) return 0.0;   // little read: the wait was queueing, not reading
+		return (double)read * 1000.0 / (double)ttftMs;
+	}
+
+	int64 Completion::ReadTokens() const {
+		return cachedTokens < 0 || cachedTokens > promptTokens ? promptTokens : promptTokens - cachedTokens;
 	}
 }

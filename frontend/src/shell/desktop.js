@@ -301,6 +301,9 @@ export class DesktopChrome {
 				const command = activity && activity.newTab ? shell.commands.get(activity.newTab) : null;
 				return command ? command.title : "New Tab";
 			},
+			// The "+"'s right button: the other ways to open a tab in this group (`tabs/new`, docs/15 "Docking"), the menu
+			// hung under `at`.
+			newTabMenu: (path, active, at) => shell.showNewTabMenu(activityId, path, active, at),
 		}, container);
 		dock.container = container;
 		this.docks.set(activityId, dock);

@@ -1,8 +1,8 @@
 // composer.js - the chat's input bar (docs/15 "Chat", mockup 02): the messages waiting for the running turn's next step
 // and those queued for the next turn, the files the message carries, the text box (Enter sends - to a running turn, at
 // its next step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@"
-// mentions, docs/04), Attach / Queue / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its
-// effort, mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
+// mentions, docs/04), Attach / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its effort,
+// mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -40,11 +40,10 @@ export class Composer {
 		} } });
 		this.attachButton = h("button.ib", { title: "Attach files (or paste or drop them here)", "aria-label": "Attach files", on: { click: () => this.files.click() } }, icon("attach"));
 		this.mentionButton = h("button.ib.desk", { title: "Mention a file, folder, #symbol, terminal, output, chat, problems or diff (@)", "aria-label": "Mention", on: { click: () => this.startMention() } }, icon("mention"));
-		this.queueButton = h("button.btn", { title: "Send it as the next turn, once this one ends (Ctrl+Enter)", on: { click: () => this.send("queue") } }, "Queue");
 		this.stopButton = h("button.btn.desk", { title: "Stop the turn (Esc)", on: { click: () => this.actions.stop() } }, icon("debug-stop"), "Stop", h("span.kbd", null, "Esc"));
 		this.sendButton = h("button.btn.primary", { title: "Send (Enter)", "aria-label": "Send", on: { click: () => this.send("message") } }, icon("send"));
 		this.box = h("div.chat-composer", null, this.input,
-			h("div.chat-row2", null, this.attachButton, this.mentionButton, h("span.grow.desk"), this.queueButton, this.stopButton, this.sendButton), this.files);
+			h("div.chat-row2", null, this.attachButton, this.mentionButton, h("span.grow.desk"), this.stopButton, this.sendButton), this.files);
 		this.input.addEventListener("focus", () => this.box.classList.add("focus"));
 		this.input.addEventListener("blur", () => {
 			this.box.classList.remove("focus");
@@ -137,7 +136,6 @@ export class Composer {
 		this.input.placeholder = window.matchMedia(PHONE).matches ? "Message\u2026"
 			: "Message " + (summary.title || "the chat") + (this.running ? " - Enter sends it into the running turn, Ctrl+Enter queues it for after" : " - Enter sends, Shift+Enter breaks the line");
 		this.sendButton.title = this.running ? "Send it into the running turn: the AI gets it after its current step (Enter)" : "Send (Enter)";
-		this.queueButton.hidden = !this.running;
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.pending.map((text) => this.pendingRow(text)), ...model.queued.map((text, index) => this.queuedRow(text, index)));
 		this.renderSelectors(summary, model.groupInUse, model.roleEffort);

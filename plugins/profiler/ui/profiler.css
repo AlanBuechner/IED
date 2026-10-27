@@ -5,7 +5,7 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-doc .panel-tools, .prof-library .panel-tools { display: flex; align-items: center; gap: var(--space-3); height: 28px; padding: 0 var(--space-3) 0 var(--space-4); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); flex: none; white-space: nowrap; overflow: hidden; background: var(--bg-1); }
 .prof-doc .grow, .prof-library .grow { flex: 1; min-width: 0; }
 .prof-doc .seg { display: inline-flex; border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); overflow: hidden; flex: none; }
-.prof-doc .seg > span { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); height: 22px; color: var(--text-1); cursor: default; user-select: none; }
+.prof-doc .seg > span { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); height: 22px; color: var(--text-1); cursor: pointer; user-select: none; }
 .prof-doc .seg > span:hover { background: var(--bg-3); }
 .prof-doc .seg > span.on { background: var(--bg-4); color: var(--text-0); }
 .prof-doc .tb-sep { width: var(--border-width); height: 16px; background: var(--border-1); margin: 0 var(--space-2); flex: none; }
@@ -133,7 +133,7 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-connect { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); font-size: var(--font-size-xs); border-bottom: var(--border-width) solid var(--border-0); min-width: 0; }
 .prof-connect .muted { color: var(--text-2); flex: none; }
 .prof-env { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
-.prof-library .row { display: flex; align-items: center; gap: var(--space-3); height: 26px; padding: 0 var(--space-4); font-size: var(--font-size-sm); cursor: default; }
+.prof-library .row { display: flex; align-items: center; gap: var(--space-3); height: 26px; padding: 0 var(--space-4); font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
 .prof-library .row:hover, .prof-library .row:focus { background: var(--bg-3); outline: none; }
 .prof-library .row .meta { color: var(--text-2); white-space: nowrap; font-size: var(--font-size-xs); }
 .prof-library .row.live { color: var(--text-0); }

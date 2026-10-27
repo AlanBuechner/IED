@@ -208,7 +208,7 @@ export class CompareView {
 		try {
 			const { result } = await this.session.call("compareState", this.pair);
 			if (this.sel !== row) return;
-			const rows = result.differences.map(([path, a, b]) => h("div.gpu-r", { title: path + "\n" + a + "\n" + b }, h("span", null, path), h("span.m", null, a || "(none)"), h("span.m", null, b || "(none)")));
+			const rows = result.differences.map(([path, a, b]) => h("div.gpu-r.info", { title: path + "\n" + a + "\n" + b }, h("span", null, path), h("span.m", null, a || "(none)"), h("span.m", null, b || "(none)")));
 			replace(this.stateList, rows.length ? rows : h("div.gpu-state-msg", null, "The state is the same: " + count(result.compared) + " items compared."));
 		}
 		catch (e) {

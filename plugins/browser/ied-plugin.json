@@ -55,6 +55,14 @@
 			],
 			"tab/title": [
 				{ "command": "ied.browser.previewBeside", "group": "1_preview", "when": "tabKind == 'doc' && (resourceExtname == '.html' || resourceExtname == '.htm')" }
+			],
+			// A tab strip's "+" right button (docs/15 "Docking"): a page of its own, the pages open already, and the file
+			// the group shows as a page. A row's when-clause is read of that group's active tab, so `tabKind` and the
+			// resource keys name the file a page would show.
+			"tabs/new": [
+				{ "command": "ied.browser.open", "group": "1_page", "order": 1 },
+				{ "command": "ied.browser.pages", "group": "1_page", "order": 2 },
+				{ "command": "ied.browser.openFile", "group": "2_view", "when": "tabKind == 'doc' && (resourceExtname == '.html' || resourceExtname == '.htm' || resourceExtname == '.svg')" }
 			]
 		},
 		"keybindings": [

@@ -91,7 +91,7 @@
 }
 .el-head { height: 24px; color: var(--text-2); border-bottom: var(--border-width) solid var(--border-0); flex: none; }
 .el-rows { position: absolute; inset: 0; overflow: auto; outline: none; }
-.el-row { height: var(--row-h); color: var(--text-0); cursor: default; }
+.el-row { height: var(--row-h); color: var(--text-0); cursor: pointer; user-select: none; }
 .el-row:hover { background: var(--veil); }
 .el-row.sel { background: var(--bg-4); }
 .el-rows:focus .el-row.sel { outline: var(--border-width) solid var(--focus); outline-offset: -1px; }
@@ -148,7 +148,7 @@
 .dbg-head { display: flex; align-items: center; gap: var(--space-3); height: 24px; padding: 0 var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-bottom: var(--border-width) solid var(--border-0); flex: none; }
 .cs-grid { display: grid; grid-template-columns: 14px minmax(120px, 1fr) minmax(120px, 1fr); gap: var(--space-3); align-items: center; }
 .cs-rows { position: absolute; inset: 0; overflow: auto; outline: none; }
-.cs-row { height: var(--row-h); padding: 0 var(--space-3); font-size: var(--font-size-sm); cursor: default; }
+.cs-row { height: var(--row-h); padding: 0 var(--space-3); font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
 .cs-row:hover { background: var(--veil); }
 .cs-row.sel { background: var(--bg-4); }
 .cs-row .cs-name, .cs-row .cs-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

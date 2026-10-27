@@ -2,7 +2,7 @@
 // chosen in a group and as the whole dock when its activity goes away and comes back; and each view keeps its scroll
 // places while its element is moved or hidden (scrollplaces.js), one at its end staying at its end.
 
-import { test, assertEqual } from "./harness.js";
+import { test, assertEqual, assertTrue } from "./harness.js";
 import { DockView } from "../src/shell/dock.js";
 import { ScrollPlaces } from "../src/shell/scrollplaces.js";
 import { group } from "../src/shell/layouttree.js";
@@ -20,16 +20,23 @@ function scrollingView() {
 	return view;
 }
 
-// The views of `refs`; `shown` holds what each was last told, `placeWhenShown` where its scroller was when told.
+// The views of `refs`; `shown` holds what each was last told, `placeWhenShown` where its scroller was when told,
+// `mounted` the refs whose views were asked for (get mounts a view that is not yet).
 function viewsOf(refs) {
 	const entries = new Map(refs.map((ref) => [ref, { ref, el: scrollingView(), title: ref, icon: "$(file)", base: null, dirty: false }]));
 	const shown = {};
 	const placeWhenShown = {};
+	const mounted = new Set();
 	return {
 		shown,
 		placeWhenShown,
+		mounted,
 		has: (ref) => entries.has(ref),
-		get: (ref) => entries.get(ref),
+		get: (ref) => {
+			mounted.add(ref);
+			return entries.get(ref);
+		},
+		titleOf: (ref) => "Title of " + ref,
 		setVisible: (ref, visible) => {
 			shown[ref] = visible;
 			if (visible) placeWhenShown[ref] = entries.get(ref).el.firstElementChild.scrollTop;
@@ -37,13 +44,33 @@ function viewsOf(refs) {
 	};
 }
 
-function hostWith(views) {
+function hostWith(views, tethers) {
 	const none = () => {};
 	return {
-		views, menus: { show: none, host: null }, emptyWell: () => document.createElement("div"), activate: none, tetheredWith: () => [], close: none,
+		views, menus: { show: none, host: null }, emptyWell: () => document.createElement("div"), activate: none, tetheredWith: (ref) => (tethers && tethers[ref]) || [], close: none,
 		pin: none, move: none, resize: none, autoHide: none, resizeAutoHidden: none, hold: none, focused: none, newTab: null, newTabTitle: "New Tab",
 		titleActions: () => [],
 	};
+}
+
+// A host whose activity opens new tabs: `menus` collects what the "+" right button asks for, `opened` the new tabs.
+function hostWithNewTab(views) {
+	const menus = [];
+	const opened = [];
+	return {
+		host: Object.assign(hostWith(views), {
+			newTab: (path, active) => opened.push({ path, active }),
+			newTabTitle: "New File",
+			newTabMenu: (path, active, at) => menus.push({ path, active, at }),
+		}),
+		menus,
+		opened,
+	};
+}
+
+// A right button press on an element, as the browser would send one.
+function rightClick(el) {
+	el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
 }
 
 test("dock: a hidden activity's views hear they are hidden, and the active one is shown when it is back", () => {
@@ -78,6 +105,62 @@ test("dock: a tab chosen again in its group is where it was scrolled", () => {
 	finally {
 		dock.dispose();
 		container.remove();
+	}
+});
+
+test("dock: the strip's + opens a new tab of its group with a click, its right button the menu of other ways", () => {
+	const views = viewsOf(["a", "b"]);
+	const { host, menus, opened } = hostWithNewTab(views);
+	const container = document.createElement("div");
+	const dock = new DockView(host, container);
+	try {
+		dock.render(group(["a", "b"], { active: "b", well: true }));
+		const plus = container.querySelector(".tabs .tabs-new");
+		assertEqual(plus.title, "New File", "the button says what a click does");
+		plus.click();
+		assertEqual(opened, [{ path: [], active: "b" }], "a click opens the group's new tab");
+		rightClick(plus);
+		assertEqual(opened.length, 1, "and the right button opens none");
+		assertEqual(menus.length, 1, "the right button asks for the menu");
+		assertEqual([menus[0].path, menus[0].active], [[], "b"], "for this group");
+		assertTrue(menus[0].at === plus, "hung under the button");
+	}
+	finally {
+		dock.dispose();
+	}
+});
+
+test("dock: an empty well's + has the same menu", () => {
+	const views = viewsOf([]);
+	const { host, menus, opened } = hostWithNewTab(views);
+	const container = document.createElement("div");
+	const dock = new DockView(host, container);
+	try {
+		dock.render(group([], {}));   // nothing of the activity shown: the empty well's own strip
+		const plus = container.querySelector(".tabs .tabs-new");
+		rightClick(plus);
+		assertEqual(menus.length, 1, "right button: the menu");
+		assertEqual(menus[0].path, [], "for the well's own group");
+		plus.click();
+		assertEqual(opened, [{ path: [], active: null }], "a click still opens one");
+	}
+	finally {
+		dock.dispose();
+	}
+});
+
+test("dock: a tab's tether names its partner without mounting the partner's view", () => {
+	const views = viewsOf(["a"]);
+	const container = document.createElement("div");
+	const dock = new DockView(hostWith(views, { a: ["gone"] }), container);
+	try {
+		dock.render(group(["a"], { active: "a", well: true }));
+		const glyph = container.querySelector(".tether");
+		assertEqual(glyph && glyph.title, "Tethered with Title of gone", "the partner named by its title");
+		assertEqual([...views.mounted], ["a"], "only the open tab's view: a partner no longer open is not made again");
+	}
+	finally {
+		dock.dispose();
 	}
 });
 

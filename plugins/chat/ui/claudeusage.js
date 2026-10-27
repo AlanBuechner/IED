@@ -308,7 +308,7 @@ export class ClaudePage {
 		const missing = CLAUDE_PROFILE_NAMES.filter((name) => !models[name]);
 		return h("div.set-bar", null,
 			missing.length ? h("button.btn" + (claude.configured ? "" : ".primary"), { on: { click: () => this.addModels() } }, icon("add"), claude.configured ? "Add the other Claude models" : "Add Claude models") : null,
-			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; their chains and paces in Model Groups." : "Adds claude-opus, claude-sonnet, claude-haiku and claude-fable to ai.models and a claude group whose chain steps down from Opus as your plan runs ahead of pace."));
+			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; their chains and paces in Model Groups." : "Adds claude-opus, claude-sonnet, claude-haiku and claude-fable to ai.models and a claude group whose chain steps down from Opus as your plan runs ahead of pace, then to Fable on its own week."));
 	}
 
 	async refresh() {

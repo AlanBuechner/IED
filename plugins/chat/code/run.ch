@@ -45,11 +45,17 @@ namespace Ai
 		private void Step();
 		private void Handle(StepVerdict verdict, StepResult* result);
 		private void Progress();
+		// A prefill that ran out its watchdog: its wait, doubled, is the floor under the retries' deadline for the rest of
+		// the turn, so a retry is never given the deadline that just failed (docs/12 "Watchdogs").
+		private void PrefillRanShort(const StepResult* result);
 		private bool Nudge(const char* reason, int64 bound, Core::StringView note);
 		private void NoProgress();
 		private void Transport(StepVerdict verdict, StepResult* result);
 		private void Overflow(StepResult* result);
 		private void Retry(StepVerdict verdict, StepResult* result, int64 bound);
+		// Why a step cut with nothing to continue from pauses: a stalled prefill names the watchdog's own numbers (docs/12
+		// "Watchdogs"), the usual cause being a server that reads the prompt slower than the rate measured on earlier steps.
+		private Core::String StallWhy(Core::StringView reason, const StepResult* result);
 		private void Pause(Core::StringView reason, Core::StringView why);
 		private void Finish(Core::StringView stop);
 		// The turn's code let an exception escape (`message`: an RpcError's, else empty; `stack`: where it was thrown):
@@ -76,8 +82,8 @@ namespace Ai
 		private void Account(const StepResult* result, int64 promptEstimate, int64 estimateBefore);
 		private void PublishContext(int64 used);
 		private int64 Window() const;
-		// IED's estimate of the context (bytes / 4), and that estimate corrected by how far it was from the last count the
-		// model's server gave.
+		// IED's estimate of the context (its bytes at kContextBytesPerToken), and that estimate corrected by how far it was
+		// from the last count the model's server gave.
 		private int64 EstimateTokens() const;
 		private int64 CalibratedTokens() const;
 		private Core::String SentTools() const;
@@ -174,6 +180,7 @@ namespace Ai
 		private Core::String lastCallKey;
 		private int64 sameErrors;
 		private int64 malformed;
+		private int64 prefillFloorMs;   // the least a prefill watchdog allows this turn, after one ran short
 		private bool finishNudged;
 		// How the turn ends: set once, then the loop stops.
 		private bool ending;

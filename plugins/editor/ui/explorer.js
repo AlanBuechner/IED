@@ -246,7 +246,7 @@ export class Explorer {
 
 	menu(node, at) {
 		this.selectedNode(node);
-		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind, name: node.name });
+		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind, name: node.name, project: node.kind === "project" ? node.project.name : undefined });
 	}
 
 	// The context keys of the selected item: its kind, a project's kind (a library cannot be the startup project), and a

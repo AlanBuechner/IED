@@ -45,6 +45,15 @@ export class ViewHost {
 		return this.resolve(ref) !== null;
 	}
 
+	// The title of `ref`'s tab without mounting its view (a tab that is not open, a tethered partner): the mounted view's
+	// own, else its kind's, else the ref.
+	titleOf(ref) {
+		const entry = this.entries.get(ref);
+		if (entry) return entry.title;
+		const resolved = this.resolve(ref);
+		return resolved ? resolved.title : ref;
+	}
+
 	// The workspace-relative file a tab shows, when its kind says (spec.resource(arg)); else null.
 	resourceOf(ref) {
 		const colon = ref.indexOf(":");
@@ -78,12 +87,18 @@ export class ViewHost {
 		const ctx = this.contextFor(entry, resolved);
 		try {
 			const made = factory(ctx);
-			if (made && typeof made.then === "function") made.then((instance) => (entry.instance = instance), (e) => this.failed(entry, "This view failed: " + e.message, e));
+			if (made && typeof made.then === "function") made.then((instance) => this.arrived(entry, instance), (e) => this.failed(entry, "This view failed: " + e.message, e));
 			else entry.instance = made || null;
 		}
 		catch (e) {
 			this.failed(entry, "This view failed: " + e.message, e);
 		}
+	}
+
+	// A view its factory made asynchronously: one whose tab was released meanwhile has nobody left to dispose it.
+	arrived(entry, instance) {
+		if (this.entries.get(entry.ref) === entry) entry.instance = instance || null;
+		else this.disposeInstance(instance);
 	}
 
 	contextFor(entry, resolved) {
@@ -150,13 +165,17 @@ export class ViewHost {
 		const entry = this.entries.get(ref);
 		if (!entry) return;
 		this.entries.delete(ref);
+		this.disposeInstance(entry.instance);
+		entry.el.remove();
+	}
+
+	disposeInstance(instance) {
 		try {
-			if (entry.instance && typeof entry.instance.dispose === "function") entry.instance.dispose();
+			if (instance && typeof instance.dispose === "function") instance.dispose();
 		}
 		catch (e) {
 			this.shell.report("A view failed to close: " + e.message, e);
 		}
-		entry.el.remove();
 	}
 
 	// Disposes every view whose ref is not in `keep`.

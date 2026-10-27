@@ -17,6 +17,12 @@ Files and structure
 - No dead code, no unused parameters or flags, no speculative abstractions (two real uses before a pattern earns an interface).
 - Name things for what they mean in this codebase. No magic numbers or strings: use named constants or enums.
 
+Naming (what this family's code already does)
+- Types, enums, functions and methods: `PascalCase` (`TypeRegistry`, `ResolveOrder`) everywhere.
+- C4 (`.cf`/`.ch` - the server, the plugins' code, Bedrock): fields, locals and parameters are plain `camelCase`, no prefixes (`startupProject`, `keepFrom`); constants are `k` + `PascalCase` (`kMaxViews`). `C4/docs/language/03-lexical-structure.md` says the same.
+- C++ (`C4/C4Lib`, the C++ libraries): fields are `m_PascalCase`, as the engine's C++ does.
+- A project's own rules win where they are more specific, and other languages keep their own idiom (Go's exported names, Rust's `snake_case`); read the code beside you before you name.
+
 Comments
 - Minimal. Code explains itself through names and structure. A comment says *why*, in one short line, only when the code cannot.
 - No doc-comment blocks on every function. Section dividers are fine for grouping at file level.

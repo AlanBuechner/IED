@@ -15,6 +15,9 @@ namespace Launch
 		info.program = Core::String("rundll32");
 		info.arguments.Push(Core::String("url.dll,FileProtocolHandler"));
 		info.arguments.Push(Core::String(url));
+		// The browser the handler starts is its child, and a child is born in the launcher's job: with the job killed on
+		// close (the default) the window it just opened goes with it once this call ends.
+		info.killOnClose = false;
 		Process::Child child = Process::Child::Start(info);
 		return child.IsOpen();
 	}

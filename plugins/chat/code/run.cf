@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "run.ch"
 include "contributed.ch"
 include "chattools.ch"
+include "history.ch"
 include "clipboard.ch"
 include "modeltools.ch"
 include "mentions.ch"
@@ -99,6 +100,12 @@ namespace Ai
 				out.Append(project.name.View());
 				out.Append(" (");
 				out.Append(project.kind.View());
+				// Where its code is: a project's files are not always under a src folder, and docs/14 "Assembly order"
+				// promises each one's root.
+				if (!project.folder.IsEmpty()) {
+					out.Append(Core::StringView(", code in "));
+					out.Append(project.folder.View());
+				}
 				out.Append(")");
 			}
 		}
@@ -140,6 +147,7 @@ namespace Ai
 		IED::PluginContext* context = chats->context;
 		ToolRegistry* tools = ToolsFor(context, ws, contributed);
 		AddChatTools(*tools, chats, chat);
+		AddHistoryTools(*tools, chat);
 		AddClipboardTools(*tools, chats, chat);
 		AddModelTools(*tools, chats, chat);
 		AddBackgroundTools(*tools, chats, chat);
@@ -304,7 +312,7 @@ namespace Ai
 			Core::String ended = chats->TellEnded(chat);
 			if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
 			if (!onClaude) {
-				if (Window() > 0 && CalibratedTokens() * 100 > Window() * kContextCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
+				if (Window() > 0 && CalibratedTokens() * 100 > Window() * kContextCompressAtPercent && Compress()) turn->recoveries.Push(CompressedAt());
 				request = Request();
 				estimate = request.promptTokens;
 				EstimatePrefill(request);
@@ -393,7 +401,10 @@ namespace Ai
 			RecordAssistant(result, false);
 			Nudge("unparsed_tool_call", 2, chats->prompts.Note("unparsed_tool_call").View());
 		}
-		else if (IsCut(verdict)) Retry(verdict, result, 2);
+		else if (IsCut(verdict)) {
+			if (verdict == StepVerdict::StalledPrefill) PrefillRanShort(result);
+			Retry(verdict, result, 2);
+		}
 		else Overflow(result);
 	}
 
@@ -402,6 +413,27 @@ namespace Ai
 	void TurnRun::Progress() {
 		counts.Clear();
 		attempts = 0;
+		prefillFloorMs = 0;
+	}
+
+	// A prefill that ran out its watchdog: the server was still reading, so nothing may be given the deadline that just
+	// failed. Its floor for the rest of the turn is twice what this step waited - the doubling the watchdog's rule already
+	// applies to an estimate (docs/12 "Watchdogs") - and a step that makes progress clears it.
+	//
+	// When the server was asked in the meantime and said it had the work, the model learns too that its prompt is read at
+	// no better than tokens/waited: the engine had the request and then did not, so the wait was real and the next step -
+	// or the next turn - is sized by it rather than by a rate that has not seen a read this slow. A server that never
+	// confirmed is left alone: for it the deadline is the only clock there is, and a rate learned from one slow step would
+	// fire that clock early.
+	void TurnRun::PrefillRanShort(const StepResult* result) {
+		const int64 needed = 2 * result->prefillWaitMs;
+		if (needed > prefillFloorMs) prefillFloorMs = needed;
+		if (result->prefillConfirms <= 0 || result->prefillWaitMs <= 0 || result->promptTokens <= 0) return;
+		const double waited = (double)result->promptTokens * 1000.0 / (double)result->prefillWaitMs;
+		double known = 0;
+		const Core::String name = candidates[candidate]->name;
+		chats->prefillRates.TryGet(name, known);
+		if (known <= 0 || waited < known) chats->prefillRates.At(name) = waited;
 	}
 
 	static Core::String Counted(Core::StringView what, int64 count) {
@@ -410,6 +442,15 @@ namespace Ai
 		text.Append(" (");
 		text.AppendInt(count);
 		text.Append("x)");
+		return text.ToString();
+	}
+
+	// How a compression of the context is named in the turn's recoveries, at the percent the setting uses.
+	static Core::String CompressedAt() {
+		Core::StringBuilder text;
+		text.Append("compressed the context at ");
+		text.AppendInt(kContextCompressAtPercent);
+		text.Append("%");
 		return text.ToString();
 	}
 
@@ -451,8 +492,33 @@ namespace Ai
 		int64 count = 0;
 		counts.TryGet(key, count);
 		counts.At(key) = count + 1;
-		if (count + 1 > bound) Pause(Core::StringView(reason), Core::StringView("the model server stopped answering"));
+		if (count + 1 > bound) Pause(Core::StringView(reason), StallWhy(Core::StringView(reason), result).View());
 		else turn->recoveries.Push(Counted((Core::String("retried after ") + reason).View(), count + 1));
+	}
+
+	// Why a step that was cut with nothing to continue from paused: a stalled prefill names the watchdog's own numbers, since
+	// the usual cause is a server that reads the prompt slower than the rate measured on earlier steps (docs/12 "Watchdogs")
+	// rather than a server that died. When the server was asked while it read, how it answered is part of the numbers.
+	Core::String TurnRun::StallWhy(Core::StringView reason, const StepResult* result) {
+		if (reason != "stalled_prefill" || result->prefillBudgetMs <= 0) return Core::String("the model server stopped answering");
+		Core::StringBuilder why;
+		why.Append("it waited ");
+		why.AppendInt(result->prefillWaitMs / 1000);
+		why.Append(" s for the first token, past the ");
+		why.AppendInt(result->prefillBudgetMs / 1000);
+		why.Append(" s the prefill watchdog allows (its base, plus twice the estimated read of ");
+		why.AppendInt(result->promptTokens);
+		why.Append(" prompt tokens at ");
+		why.AppendInt((int64)(result->prefillRate + 0.5));
+		why.Append(" tok/s, a rate measured on earlier steps).");
+		if (result->prefillConfirms > 0) {
+			why.Append(" It was asked ");
+			why.AppendInt(result->prefillConfirms);
+			why.Append(" times while it waited and each time said the work was still in its engine, so the request was never cancelled and the wait grew to what the server itself reports reading at; at the last ask it no longer had it. A prompt the engine let go of is not one a retry finds again at the same deadline: what helps is a smaller prompt (a new chat, or letting the context compress further). The slower rate this wait teaches the model is kept, so its next turn is sized by it (Settings > AI > Models, watchdog.prefillRate, sets the rate assumed before one is measured).");
+			return why.ToString();
+		}
+		why.Append(" The server says nothing of itself, so the watchdog could only guess from the silence: another chat may be using the server, or its prefix cache went cold (a tool set loaded mid-turn, thinking sent back, a server restart). Send a message to retry, or set a slower watchdog.prefillRate for the model in Settings > AI > Models.");
+		return why.ToString();
 	}
 
 	static int64 Backoff(int64 attempt, int64 retryAfterMs) {

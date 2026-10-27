@@ -25,10 +25,12 @@ class SettingsView {
 		this.schema = {};
 		this.state = { tiers: {}, projects: {}, values: {} };
 		this.projectValues = null;
-		this.tier = "app";
-		this.project = null;
 		this.pageId = shell.nextSettingsPage || null;
+		this.tier = shell.nextSettingsTier || "app";
+		this.project = shell.nextSettingsProject || null;
 		shell.nextSettingsPage = null;
+		shell.nextSettingsTier = null;
+		shell.nextSettingsProject = null;
 		shell.settingsViews.add(this);
 		this.query = "";
 		this.loaded = false;
@@ -92,10 +94,14 @@ class SettingsView {
 		return settingsPages(this.schema, shellPages(this.shell).concat(contributed));
 	}
 
-	// Shows the page `id` ("custom:shell.keyboard", "page:AI").
-	showPage(id) {
-		this.pageId = id;
-		this.render();
+	// Shows the page `page` ("custom:shell.keyboard", "page:AI"); `tier` says which tier to edit and, for a project's
+	// tier, which project (Settings... on a project in Solution Explorer, docs/07). With neither, just the page.
+	show(page, tier, project) {
+		if (tier) this.tier = tier;
+		if (project) this.project = project;
+		if (page) this.pageId = page;
+		if (this.tier === "project" && this.shell.wsId) this.loadProject();
+		else this.render();
 	}
 
 	render() {

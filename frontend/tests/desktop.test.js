@@ -1,9 +1,9 @@
-// desktop.test.js - the desktop app in the web client (docs/27): a new window's URL (plugins/desktop), and the shell's
-// File > Open Folder, there only inside the desktop app, in the File menu, the workspace switcher's ways and as the
-// start page's button.
+// desktop.test.js - the desktop app in the web client (docs/27): a new window's URL and Open in Web's root
+// (plugins/desktop), and the shell's File > Open Folder, there only inside the desktop app, in the File menu, the
+// workspace switcher's ways and as the start page's button.
 
 import { test, assertEqual, assertTrue } from "./harness.js";
-import { workspaceUrl } from "/plugins/ied.desktop/ui/index.js";
+import { workspaceUrl, openInWeb } from "/plugins/ied.desktop/ui/index.js";
 import { Commands } from "../src/shell/commands.js";
 import { ContextKeys } from "../src/shell/context.js";
 import { Keybindings } from "../src/shell/keybindings.js";
@@ -29,6 +29,16 @@ function labels(rows) {
 test("desktop: a new window opens on this window's workspace", () => {
 	assertEqual(workspaceUrl("http://127.0.0.1:8765", "w2"), "http://127.0.0.1:8765/#open=w2/");
 	assertEqual(workspaceUrl("http://127.0.0.1:8765", null), "http://127.0.0.1:8765/", "IED's home without one");
+});
+
+test("desktop: Open in Web hands the workspace's root to the app", () => {
+	let asked = null;
+	const desktop = { openInWeb: (root) => { asked = root; } };
+	openInWeb({ workspace: { root: "C:\\GameDev\\IED" } }, desktop);
+	assertEqual(asked, "C:\\GameDev\\IED", "the root the app opens");
+	asked = "sentinel";
+	openInWeb({ workspace: { root: "" } }, desktop);
+	assertEqual(asked, "sentinel", "no workspace: nothing is asked");
 });
 
 test("desktop: Open Folder is there only inside the desktop app", () => {

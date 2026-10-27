@@ -97,9 +97,34 @@ namespace Ai
 		return plan;
 	}
 
+	bool IsBatchFile(Core::StringView program) {
+		Core::String lower = program.ToLower();
+		return lower.View().EndsWith(Core::StringView(".cmd")) || lower.View().EndsWith(Core::StringView(".bat"));
+	}
+
+	bool BatchLine(const Core::Array<Core::String>& argv, Core::String& line, Core::String& problem) {
+		Core::StringBuilder out;
+		for (const Core::String& word : argv) {
+			Core::StringView text = word.View();
+			if (text.IndexOf('"', 0) >= 0 || text.IndexOf('%', 0) >= 0 || text.IndexOf('\n', 0) >= 0 || text.IndexOf('\r', 0) >= 0) {
+				problem = (Core::String("the command runs a batch file through cmd.exe, which would read the quote, '%' or line break in ") + text) + "; leave them out";
+				return false;
+			}
+			if (out.ByteLength() > 0) out.Append(" ");
+			out.AppendByte('"');
+			out.Append(text);
+			out.AppendByte('"');
+		}
+		line = out.ToString();
+		return true;
+	}
+
 	static ToolOutcome CommandRun(const CommandToolEntry* entry, const ToolInvocation& call) {
 		ToolCommand command;
-		command.argv = ExpandToolArgv(entry->run, call.args, SettingOf(call));
+		Core::Array<Core::String> argv = ExpandToolArgv(entry->run, call.args, SettingOf(call));
+		Core::String problem;
+		if (!IsBatchFile(argv[0].View())) command.argv = argv;
+		else if (!BatchLine(argv, command.shell, problem)) return ToolError(((entry->name + ": ") + problem.View()).View());
 		command.cwd = entry->cwd;
 		command.seconds = entry->seconds;
 		command.tool = entry->name;

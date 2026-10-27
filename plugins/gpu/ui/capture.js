@@ -566,7 +566,7 @@ export class CaptureView {
 		const list = this.warnings();
 		replace(this.bottomBody, h("div.gpu-grid.gpu-wgrid", null,
 			h("div.gpu-head", null, h("span"), h("span.n", null, "EID"), h("span", null, "Warning"), h("span", null, "Source")),
-			h("div.viewport", null, list.length ? list.map((w) => h("div.gpu-r", null, h("span", null, icon("warning", "c-warn")), h("span"), h("span", { title: w }, w), h("span.d", null, "capture"))) : h("div.gpu-state-msg", null, "No warnings: everything the frame did was captured."))));
+			h("div.viewport", null, list.length ? list.map((w) => h("div.gpu-r.info", null, h("span", null, icon("warning", "c-warn")), h("span"), h("span", { title: w }, w), h("span.d", null, "capture"))) : h("div.gpu-state-msg", null, "No warnings: everything the frame did was captured."))));
 	}
 
 	// --- Overview ----------------------------------------------------------------------------------------------------

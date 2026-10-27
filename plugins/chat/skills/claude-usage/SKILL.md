@@ -41,8 +41,8 @@ in a long run.
   model) until it frees; say so to the owner and give the work a local model can do to a chat pinned to it.
 - `chat_set_model({"model": "claude-sonnet", "chat": "<id>"})` moves a chat's next turns; `""` gives it back its group's
   model. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
-- A group's chain with paces (the `claude` group's: opus, sonnet, haiku) already steps down as the windows run ahead of
-  pace; pinning is for when you know the work better than the pace does.
+- A group's chain with paces (the `claude` group's: opus, sonnet, haiku, then fable on its own week) already steps down as
+  the windows run ahead of pace; pinning is for when you know the work better than the pace does.
 
 ## Not to do
 

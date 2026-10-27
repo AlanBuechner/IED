@@ -4,7 +4,7 @@
 
 import { test, assertEqual } from "./harness.js";
 import { fenceLanguages, renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
-import { resolveRelative } from "/plugins/ied.markdown/ui/preview.js";
+import { resolveRelative } from "/ui-kit/paths.js";
 import { moves } from "/plugins/ied.markdown/ui/follow.js";
 
 function html(text, options) {
@@ -17,7 +17,7 @@ test("markdown: headings, paragraphs and inlines", () => {
 	assertEqual(html("# Title\n\nSome *em* and **strong** with `code` and ~~gone~~."),
 		'<h1 data-line="0">Title</h1><p data-line="2">Some <em>em</em> and <strong>strong</strong> with <code>code</code> and <del>gone</del>.</p>');
 	assertEqual(html("A [link](docs/a.md \"tip\") and https://example.com/x."),
-		'<p data-line="0">A <a href="docs/a.md" title="tip">link</a> and <a href="https://example.com/x">https://example.com/x</a>.</p>');
+		'<p data-line="0">A <a href="docs/a.md" title="tip">link</a> and <a href="https://example.com/x" target="_blank" rel="noopener noreferrer">https://example.com/x</a>.</p>');
 	assertEqual(html("one  \ntwo\\\nthree"), '<p data-line="0">one<br>two<br>three</p>', "hard breaks");
 	assertEqual(html("---\n> quoted\n> more"), '<hr data-line="0"><blockquote data-line="1"><p data-line="0">quoted\nmore</p></blockquote>');
 	assertEqual(html("stream_level runs and profile_hitches says so; _snake_case_ and __bold__."),
@@ -55,6 +55,11 @@ test("markdown: text stays text, addresses cannot run script", () => {
 	assertEqual([safeUrl("https://a"), safeUrl("mailto:a@b"), safeUrl("../a.md"), safeUrl("#top"), safeUrl("data:text/html,x"), safeUrl("JavaScript:x")],
 		["https://a", "mailto:a@b", "../a.md", "#top", null, null]);
 	assertEqual(html("\\*not em\\*"), '<p data-line="0">*not em*</p>');
+});
+
+test("markdown: an address is marked to open beside the page, a path of the workspace is not", () => {
+	assertEqual(html("<https://example.com/a> and <mailto:a@b>"),
+		'<p data-line="0"><a href="https://example.com/a" target="_blank" rel="noopener noreferrer">https://example.com/a</a> and <a href="mailto:a@b">mailto:a@b</a></p>');
 });
 
 test("markdown: ticking a box edits its line", () => {

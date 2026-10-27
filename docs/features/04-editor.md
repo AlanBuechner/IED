@@ -72,6 +72,7 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | F-EDT-52 | Bookmarks (Ctrl+K, Ctrl+K toggle; Ctrl+K, Ctrl+N/P), Bookmarks tool window, persisted per workspace | P1 | US-EDT-13 |
 | F-EDT-53 | Task List tool window: TODO/HACK/FIXME comment tokens (configurable), from a background scan + LSP | P1 | US-EDT-13 |
 | F-EDT-54 | Switch header/source (Ctrl+K, Ctrl+O) using the language plugin's pair rules (gen) | P0 | US-EDT-6 |
+| F-EDT-55 | Links in a document's text - paths of the workspace and web addresses - underlined and opened in a tab of their own by a middle click or Ctrl+Click (`editorlinks.js`; `docs/15` "Links") - built 2026-11-08 | P1 | US-EDT-13 |
 
 ## Find and replace
 

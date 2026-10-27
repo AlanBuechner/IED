@@ -83,6 +83,10 @@ export function activate(ied) {
 	ied.commands.handle("ied.explorer.collapseAll", () => explorers.forEach((e) => e.tree.collapseAll()));
 	ied.commands.handle("ied.explorer.copyPath", (args) => copy(fullPath(ied, pathOf(args))));
 	ied.commands.handle("ied.explorer.copyRelativePath", (args) => copy(pathOf(args) || ""));
+	ied.commands.handle("ied.explorer.projectSettings", (args) => openProjectSettings(ied, args));
+	for (const [command, slot] of [["ied.explorer.buildProject", "build"], ["ied.explorer.rebuildProject", "rebuild"], ["ied.explorer.cleanProject", "clean"], ["ied.explorer.testProject", "test"]]) {
+		ied.commands.handle(command, (args) => runProjectTask(ied, tasks, slot, args));
+	}
 	const explorer = () => last(explorers);
 	ied.commands.handle("ied.explorer.newFile", () => explorer() && explorer().create("file"));
 	ied.commands.handle("ied.explorer.newFolder", () => explorer() && explorer().create("folder"));
@@ -434,6 +438,40 @@ function fullPath(ied, path) {
 	const root = ied.workspace.root.replace(/[\\/]+$/, "");
 	const separator = root.includes("\\") ? "\\" : "/";
 	return path ? root + separator + path.split("/").join(separator) : root;
+}
+
+// The project a command was asked for: a menu on a project's row names it (`explorer.js`), the palette and a menu used
+// on anything else mean the row selected here, and a folder's path names its project when the solution has one.
+function projectName(ied, args) {
+	if (args && args.project) return args.project;
+	const node = last(explorers) && last(explorers).selected();
+	if (node && node.kind === "project") return node.project.name;
+	const path = args && args.path !== undefined ? args.path : node && node.path;
+	const solution = ied.workspace.solution;
+	if (!solution || !path) return null;
+	const root = folder(path);
+	const project = solution.projects.find((p) => folder(p.root || "") === root);
+	return project ? project.name : null;
+}
+
+// A folder path as the one that names a project's root is compared: '/' separators, no trailing one, any case.
+function folder(path) {
+	return path.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+}
+
+// A task of the project the menu was used on (`project` empty: the startup project), run for that one project alone.
+async function runProjectTask(ied, tasks, slot, args) {
+	const project = projectName(ied, args);
+	if (!project) {
+		ied.toast("Choose a project to run its " + slot + " task.", { level: "info" });
+		return null;
+	}
+	return tasks.run({ slot, project });
+}
+
+// Settings > Project tier, with this project picked (docs/07 "The settings window").
+function openProjectSettings(ied, args) {
+	ied.commands.run("shell.settings", { tier: "project", project: projectName(ied, args) || undefined });
 }
 
 async function copy(text) {

@@ -30,6 +30,8 @@ const AUTH_PROBE_AFTER_MS = 1500;
 const MODE_SETTLE_MS = 2000;
 const WORKSPACE_KEY = "ied.wsId";
 
+const SETTINGS_TAB = "shell:settings";   // the one settings window a page can have open (hostviews.js)
+
 export class Shell {
 	constructor(root) {
 		this.root = root;
@@ -51,8 +53,12 @@ export class Shell {
 		this.contributions.on(() => this.views.mountWaiting());
 		this.modules = new Map();
 		this.apis = new Map();
-		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
 		this.nextSettingsPage = null;     // the page the next settings window opens on
+		this.nextSettingsPage = null;     // the page the next settings window opens on, its tier and project
+		this.nextSettingsTier = null;
+		this.nextSettingsProject = null;
+		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
+		this.nextSettingsTier = null;     // and the tier it edits, with the project whose tier that is
 		this.bindings = new Bindings((id) => {
 			const plugin = this.contributions.plugins.find((p) => p.id === id);
 			return plugin ? plugin.contributes.bindings || {} : null;
@@ -470,14 +476,29 @@ export class Shell {
 		return treeOf(doc, activityId, tools, this.deviceClass === "tablet", mode);
 	}
 
+	// A tab this change takes out of the tree keeps its tethers: it may be moving to another activity.
 	changeTree(activityId, fn) {
 		if (!this.layout || !activityId) return;
+		this.layout.update((doc) => this.treeChanged(doc, activityId, fn).doc);
+	}
+
+	// A change that closes tabs - closing them, or opening one in a preview tab's place: they lose their tethers (docs/15
+	// "Tethered tabs"), which would otherwise name a tab no longer open.
+	closeInTree(activityId, fn) {
+		if (!this.layout || !activityId) return;
 		this.layout.update((doc) => {
-			const mode = doc.mode || DEFAULT_MODE;
-			const before = this.treeIn(doc, activityId, mode);
-			const after = fn(before);
-			return after === before ? doc : withTree(doc, activityId, after, mode);
+			const changed = this.treeChanged(doc, activityId, fn);
+			return withoutTethers(changed.doc, changed.closed);
 		});
+	}
+
+	// `doc` with the tree of `activityId` changed by `fn`, and the tabs the change took out of it.
+	treeChanged(doc, activityId, fn) {
+		const mode = doc.mode || DEFAULT_MODE;
+		const before = this.treeIn(doc, activityId, mode);
+		const after = fn(before);
+		if (after === before) return { doc, closed: [] };
+		return { doc: withTree(doc, activityId, after, mode), closed: T.closedBy(before, after) };
 	}
 
 	// The layout mode the context asks for is the first contributed one whose `when` holds (debugging), else the default;
@@ -519,12 +540,25 @@ export class Shell {
 		else this.layout.update((doc) => withActivity(doc, activityId));
 	}
 
-	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given.
-	openSettings(page) {
+	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given, with the tier it
+	// edits (`tier`: "app", "solution", "project") and, for a project's, which project (`project`). One open already is
+	// shown and moved to that page; a window with no workspace (the start page) has no layout to open a tab in, so it
+	// says so rather than failing - user settings without a project open is not built yet.
+	openSettings(page, tier, project) {
 		const open = [...this.settingsViews].pop();
-		if (page && open) open.showPage(page);
-		else if (page) this.nextSettingsPage = page;
-		this.openTab("shell:settings");
+		if (open) {
+			if (page || tier || project) open.show(page, tier, project);
+			if (this.layout) this.openTab(SETTINGS_TAB);
+			return;
+		}
+		this.nextSettingsPage = page || null;
+		this.nextSettingsTier = tier || null;
+		this.nextSettingsProject = project || null;
+		if (!this.layout) {
+			this.toasts.show("Settings needs a workspace window: open a project first.", "info");
+			return;
+		}
+		this.openTab(SETTINGS_TAB);
 	}
 
 	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone. A tab open
@@ -545,7 +579,7 @@ export class Shell {
 		const activityId = asked || where || this.dockActivity(ref);
 		const groupPath = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
 		this.layout.update((doc) => withActivity(doc, activityId));
-		this.changeTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
+		this.closeInTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
 		this.slideOut(activityId, ref);
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
 	}
@@ -660,21 +694,22 @@ export class Shell {
 	// A change that closes tabs, then the plugins' onClose handlers for each tab closed here (by this window's person;
 	// another window's views just go when its layout loses the tab).
 	closeTabsBy(activityId, fn) {
-		const before = T.refsOf(this.treeOf(activityId));
-		const after = new Set(T.refsOf(fn(this.treeOf(activityId))));
-		const closed = before.filter((ref) => !after.has(ref));
-		const followers = closed.flatMap((ref) => followersOf(this.doc, ref)).filter((ref) => after.has(ref));
-		this.changeTree(activityId, (tree) => followers.reduce((t, ref) => T.closeTab(t, ref), fn(tree)));
-		if (this.layout && closed.length) this.layout.update((doc) => withoutTethers(doc, closed.concat(followers)));
-		for (const ref of before) {
-			if (after.has(ref) && !followers.includes(ref)) continue;
-			for (const handler of this.tabCloseHandlers.get(ref.split(":")[0]) || []) {
-				try {
-					handler(ref);
-				}
-				catch (e) {
-					this.report("A tab's close handler failed: " + e.message, e);
-				}
+		const before = this.treeOf(activityId);
+		const after = fn(before);
+		const closed = T.closedBy(before, after);
+		const kept = new Set(T.refsOf(after));
+		const followers = closed.flatMap((ref) => followersOf(this.doc, ref)).filter((ref) => kept.has(ref));
+		this.closeInTree(activityId, (tree) => followers.reduce((t, ref) => T.closeTab(t, ref), fn(tree)));
+		for (const ref of closed.concat(followers)) this.tabClosed(ref);
+	}
+
+	tabClosed(ref) {
+		for (const handler of this.tabCloseHandlers.get(ref.split(":")[0]) || []) {
+			try {
+				handler(ref);
+			}
+			catch (e) {
+				this.report("A tab's close handler failed: " + e.message, e);
 			}
 		}
 	}
@@ -789,9 +824,20 @@ export class Shell {
 		this.context.set("tabAutoHidden", (owner && T.hiddenIn(owner, ref)) || undefined);
 	}
 
-	showMenu(menuId, at, args) {
+	// The menu of a document strip's "+" right button: the ways to open a tab in that group (docs/15 "Docking"). The group
+	// is focused first, as a click on the "+" does, so what a row opens goes into it - one of a kind the group cannot
+	// take goes where it can, as any tab opened from elsewhere does. Its items' when-clauses are read of that group's
+	// active tab (`tabKind`, `tabRef`, `resourcePath`, `resourceExtname`) rather than of the tab with the focus, so a
+	// file's preview is offered for the file this group shows.
+	showNewTabMenu(activityId, path, active, at) {
+		this.focused(activityId, active, path, true);
+		const keys = this.keysOf(active);
+		this.showMenu("tabs/new", at, { ref: active || undefined, path: keys.resourcePath }, keys);
+	}
+
+	showMenu(menuId, at, args, keys) {
 		if (args && args.ref) this.tabKeys(args.ref);
-		const rows = this.menus.resolve(menuId);
+		const rows = this.menus.resolve(menuId, keys);
 		return this.menuHost.show({
 			rows, at, label: menuId,
 			pick: (row) => this.commands.run(row.command, row.args !== undefined ? row.args : args),

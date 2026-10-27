@@ -5,6 +5,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { ChatPane } from "/plugins/ied.chat/ui/chatpane.js";
+import { TranscriptView, thinkingTail } from "/plugins/ied.chat/ui/transcript.js";
 
 // What a chat pane asks of the plugin API; `topics` holds the handlers of what it subscribed to.
 function fakeIed() {
@@ -277,4 +278,57 @@ test("chat pane: the details panel's edge sizes it, and the width is kept for th
 		if (kept === null) localStorage.removeItem("ied.chat.panelWidth");
 		else localStorage.setItem("ied.chat.panelWidth", kept);
 	}
+});
+
+test("chat: a link in a reply opens the file it names, an address in its own window", () => {
+	const opened = [];
+	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0 }, { openFile: (path, line) => opened.push([path, line]), loadEarlier: () => {}, codeBlock: () => null });
+	const turn = { turnId: "t1", user: { text: "q" }, segments: [{ segId: "s1", type: "text", done: true, text: "see [the guide](docs/guide.md) and https://example.com/x" }], stop: "finished", recoveries: [] };
+	view.el.append(...[view.turnEl(turn)]);
+	const file = view.el.querySelector('a[href="docs/guide.md"]');
+	const web = view.el.querySelector('a[href="https://example.com/x"]');
+	assertTrue(web.hasAttribute("target") && web.getAttribute("rel") === "noopener noreferrer", "an address is marked to open beside the page");
+	const click = (el) => { const e = new MouseEvent("click", { bubbles: true, cancelable: true, view: window }); el.dispatchEvent(e); return e.defaultPrevented; };
+	assertEqual(click(web), false, "nothing is taken back: the browser opens it in a window");
+	assertEqual(click(file), true, "a file of the workspace opens as a tab, and the page itself is not navigated");
+	assertEqual(opened, [["docs/guide.md", undefined]], "the file the path names");
+});
+
+test("chat: a server that says it is still reading the prompt is believed, not called stalled", () => {
+	const turns = new Map();
+	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0, turn: (id) => turns.get(id) }, { openFile: () => {}, loadEarlier: () => {}, codeBlock: () => null });
+	const reading = (prefill, stop) => {
+		const turn = { turnId: "t" + turns.size, user: { text: "q" }, segments: [], prefill, stop, recoveries: [] };
+		turns.set(turn.turnId, turn);
+		return turn;
+	};
+	const shown = (turn) => {
+		const el = view.turnEl(turn);
+		view.turnEls.set(turn.turnId, { el, prefill: el.querySelector(".chat-prefill") });
+		return el.querySelector(".chat-prefill");
+	};
+	const working = shown(reading({ working: true, total: 245000, waitedMs: 95000 }, null));
+	assertTrue(!working.hidden && working.textContent.includes("Still reading the prompt"), "the line the server's answer earns");
+	assertTrue(working.textContent.includes("the server says it is still working"), "and says where it comes from");
+	assertTrue(working.textContent.includes("1m 35s"), "how long it has waited");
+	const estimated = shown(reading({ estimated: true, total: 12000, estimatedMs: 45000, startedMs: Date.now() - 1000 }, null));
+	assertTrue(estimated.textContent.includes("Reading the prompt") && !estimated.textContent.includes("Still"), "an estimate before the deadline reads as it did");
+	assertTrue(shown(reading({ working: true, total: 1, waitedMs: 1 }, "finished")).hidden, "gone when the turn ends");
+	// The estimate's line starts a timer that redraws it every second; nothing here needs it after the checks.
+	if (view.prefillTimer) clearInterval(view.prefillTimer);
+	view.prefillTimer = 0;
+});
+
+test("chat: the streaming thinking's preview holds the last whole lines, cut at a line start", () => {
+	assertEqual(thinkingTail(""), "", "nothing yet");
+	assertEqual(thinkingTail("one line"), "one line", "a single line: all of it");
+	assertEqual(thinkingTail("a\nb\nc"), "a\nb\nc", "three lines: all of them");
+	assertEqual(thinkingTail("a\nb\nc\nd\ne"), "c\nd\ne", "more: the last three, the line being written last");
+	const long = (c, n) => c.repeat(n);
+	const threeLong = [long("7", 120), long("8", 120), long("9", 120)];
+	assertEqual(thinkingTail(threeLong.join("\n")), threeLong[1] + "\n" + threeLong[2], "long lines: the budget cuts at a line start, the newest in full");
+	const many = Array.from({ length: 10 }, (_, i) => "line " + i + " ".repeat(20)).join("\n");
+	const cut = thinkingTail(many);
+	assertTrue(/^line \d+/.test(cut), "it opens on a whole line");
+	assertEqual(cut.endsWith("line 9".padEnd(26)), true, "it ends on the newest line, in full");
 });

@@ -3,30 +3,18 @@
 // `editor.colorize` binding, when an editor plugin provides it) and the workspace's images (`/w/<wsId>/files/`,
 // docs/10). Ticking a task box edits its line through the document store, taking the lease as typing would; a link to a
 // workspace file opens it in the editor, a web link a new browser window; a workspace image clicked shows at its size.
-// It scrolls with its file's editor (`editor.scrolled`), and a double-click shows that place in the editor.
+// It scrolls with its file's editor (`editor.scrolled`). A double-click does what it does in any prose: selects the
+// text under the pointer. The source of the block clicked is Go to Source on the preview's context menu.
 
 import { h, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { applyChanges } from "/ui-kit/textedits.js";
 import { renderMarkdown, toggleTask } from "/ui-kit/markdown.js";
 import { isFileUri } from "/ui-kit/fileuris.js";
+import { resolveRelative } from "/ui-kit/paths.js";
 import { showImage } from "/ui-kit/imageview.js";
 
 const RENDER_MS = 60;
-
-// The workspace path `href` names, seen from the folder `from`; null when it leaves the workspace.
-export function resolveRelative(from, href) {
-	const parts = from ? from.split("/") : [];
-	for (const part of href.split("/")) {
-		if (part === "" || part === ".") continue;
-		if (part === "..") {
-			if (!parts.length) return null;
-			parts.pop();
-		}
-		else parts.push(part);
-	}
-	return parts.join("/");
-}
 
 export class MarkdownPreview {
 	// `fences`: fenceLanguages() of the loaded languages.
@@ -41,7 +29,7 @@ export class MarkdownPreview {
 		this.body = h("div.md-preview", { tabindex: "0" });
 		ctx.el.append(this.body);
 		this.body.addEventListener("click", (event) => this.clicked(event));
-		this.body.addEventListener("dblclick", (event) => this.showSource(event));
+		this.body.addEventListener("contextmenu", (event) => this.menu(event));
 		this.unfollow = this.ied.bindings.on("editor.scrolled", (data) => {
 			if (data.path === this.path) this.follow(data.line);
 		});
@@ -104,10 +92,14 @@ export class MarkdownPreview {
 		this.body.scrollTop = from + (to - from) * part;
 	}
 
-	// The source of the block double-clicked, in the editor.
-	showSource(event) {
-		const block = event.target.closest("[data-line]");
-		if (block && !isFileUri(this.path)) this.ied.commands.run("ied.editor.goTo", { path: this.path, line: Number(block.dataset.line) });
+	// The preview's context menu (Go to Source for the block under the pointer, as VS Code's preview has it). The context
+	// key says what the pointer was on, as Solution Explorer's do for their kinds; a preview of a file outside the
+	// workspace has no source to go to, so the line is named only for a workspace file.
+	menu(event) {
+		const block = isFileUri(this.path) ? null : event.target.closest("[data-line]");
+		const line = block ? Number(block.dataset.line) : undefined;
+		this.ied.context.set("markdownSourceLine", line === undefined ? undefined : String(line));
+		this.ied.menus.show("mdpreview/context", event, { path: this.path, line });
 	}
 
 	// A fenced block colored as the editor colors its language; plain text until it answers, and without an editor.

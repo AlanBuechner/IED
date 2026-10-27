@@ -106,7 +106,8 @@
 .chat-think .lbl { color: var(--accent-ai); }
 .chat-think .ci { width: 14px; height: 14px; }
 .chat-think-body, .chat-think-tail { margin: 0 0 var(--space-3) 20px; padding-left: var(--space-4); border-left: 2px solid color-mix(in srgb, var(--accent-ai) 35%, transparent); color: var(--text-2); font-size: var(--font-size-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-think-tail { max-height: 3.6em; overflow: hidden; }
+/* The streaming preview: a block of its own height, so nothing already read moves as the thinking grows. */
+.chat-think-tail { height: calc(var(--font-size-sm) * 1.5 * 3); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
 
 /* ---------- tool cards ---------- */
 .chat-tool, .chat-approval, .chat-question, .chat-finish { border: var(--border-width) solid var(--border-0); background: var(--bg-1); border-radius: var(--radius-2); margin: 3px 0; font-size: var(--font-size-sm); overflow: hidden; }

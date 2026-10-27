@@ -1,8 +1,10 @@
+include "api/plugin.ch"
 include "step.ch"
 include "request.ch"
 include "sse.ch"
 include "dialect.ch"
 include "repetition.ch"
+include "probe.ch"
 
 namespace Ai
 {
@@ -10,6 +12,17 @@ namespace Ai
 	const int64 kStepHeldBytes = 48;          // the text tail held back in case it opens a tool call
 	const int64 kStepErrorBodyMs = 5000;
 	const int64 kStepErrorBodyBytes = 16384;
+	const int32 kStepLivenessMs = 2000;       // how long the server gets to say whether it has the work: a healthy vLLM
+												// answers /metrics in milliseconds even while reading a 283k prompt (measured),
+												// and a longer wait would only hold up a Stop
+	const int64 kStepLivenessEveryMs = 1000;  // asked at most this often, however often the deadline is checked
+	const int32 kStepLivenessMost = 10;       // asks that got nothing to read before the watchdog is believed over them:
+													// about twenty seconds of grace for a status page that is slow or busy
+	const int64 kStepMetricsBytes = 1024 * 1024;   // a Prometheus answer read no further than this
+	const char* kVllmRunning = "vllm:num_requests_running";   // what vLLM's gauges say about the engine
+	const char* kVllmWaiting = "vllm:num_requests_waiting";   // its 0.32 split of that count too, below: its lines start
+													// with this name, so GaugeNamed would take them for it
+	const char* kVllmWaitingByReason = "vllm:num_requests_waiting_by_reason";
 
 	static int64 StepNowMs() { return clock_now_ns() / 1000000; }
 
@@ -31,6 +44,13 @@ namespace Ai
 		public int64 argumentsChecked;    // of call `checkedCall`, the one streaming
 		public int64 checkedCall;
 		public bool repeating;            // the reply is caught in a loop: the stream ends
+		public const StepRequest* request;
+		// Whether the server is still asked whether it has the work: cleared when an answer carries no request gauges (or
+		// when there is no root to ask). What the last answer said is kept in `working` and used until the next ask.
+		public bool askable;
+		public int64 livenessAskedMs;
+		public int32 livenessUnknown;   // asks that got nothing to read
+		public bool working;
 	}
 
 	// Never cuts a UTF-8 sequence: the end moves back to the start of the code point it falls in.
@@ -66,10 +86,12 @@ namespace Ai
 	}
 
 	// The server is still at work before the first token: the prefill watchdog waits longer.
-	static void ExtendPrefill(StepStream& stream) {
-		const int64 extended = StepNowMs() + stream.prefillExtendMs;
+	static void ExtendPrefill(StepStream& stream, int64 ms) {
+		const int64 extended = StepNowMs() + ms;
 		if (stream.result->ttftMs < 0 && extended > stream.prefillDeadlineMs) stream.prefillDeadlineMs = extended;
 	}
+
+	static void ExtendPrefill(StepStream& stream) { ExtendPrefill(stream, stream.prefillExtendMs); }
 
 	// Whether `text` grew enough since its last check to be checked again, and now ends in a loop; moves the mark.
 	static bool Loops(Core::StringView text, int64& checked, int64 tailBytes) {
@@ -169,6 +191,145 @@ namespace Ai
 		return body;
 	}
 
+	// The prefill watchdog fired: what it waited and what it allowed, for the pause to say (docs/12 "Watchdogs"). The
+	// budget is the deadline as it stood then, keepalives included, not the one the request started with.
+	static void StalledPrefill(StepStream& stream) {
+		stream.result->end = WireEnd::StalledPrefill;
+		stream.result->prefillWaitMs = StepNowMs() - stream.startMs;
+		stream.result->prefillBudgetMs = stream.prefillDeadlineMs - stream.startMs;
+	}
+
+	// The number after the last space of a Prometheus line (`name{labels} 1.0`); false when there is none.
+	static bool TrailingNumber(Core::StringView line, double& value) {
+		int64 at = line.ByteLength() - 1;
+		while (at > 0 && line.ByteAt(at) != ' ') at -= 1;
+		return at > 0 && Core::ParseDouble(line.Substring(at + 1, line.ByteLength() - at - 1).Trimmed(), value);
+	}
+
+	// Whether `line` is the gauge named `name`: it starts with the name and a `{` of labels or the value's space follows
+	// it - `vllm:num_requests_running_created` is a different metric.
+	static bool GaugeNamed(Core::StringView line, Core::StringView name) {
+		if (!line.StartsWith(name)) return false;
+		if (line.ByteLength() == name.ByteLength()) return true;
+		const int32 after = line.ByteAt(name.ByteLength());
+		return after == '{' || after == ' ';
+	}
+
+	// What one pass over a server's Prometheus answer says of it: whether its vLLM request gauges are there at all
+	// (`found`: what makes a server worth asking) and whether one of them puts work in the engine (`working`: what the
+	// prefill watchdog acts on). The whole answer is read, not a window of it: an engine's lines come after the process's
+	// own in a large one (the owner's vLLM's sit 2 kB into a 71 kB body).
+	struct MetricsLiveness
+	{
+		public bool found;
+		public bool working;
+	}
+
+	MetricsLiveness ReadMetricsLiveness(Core::StringView text) {
+		MetricsLiveness liveness;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int64 end = text.IndexOf('\n', at);
+			const Core::StringView line = text.Substring(at, (end < 0 ? text.ByteLength() : end) - at);
+			at = end < 0 ? text.ByteLength() : end + 1;
+			const bool running = GaugeNamed(line, Core::StringView(kVllmRunning));
+			const bool waiting = GaugeNamed(line, Core::StringView(kVllmWaiting));
+			const bool byReason = line.StartsWith(Core::StringView(kVllmWaitingByReason));   // also starts with kVllmWaiting
+			if (!running && !waiting && !byReason) continue;
+			liveness.found = true;
+			double value = 0;
+			if (TrailingNumber(line, value) && value > 0) liveness.working = true;
+		}
+		return liveness;
+	}
+
+	bool MetricsSayWorking(Core::StringView text) { return ReadMetricsLiveness(text).working; }
+
+	bool MetricsHasRequestGauges(Core::StringView text) { return ReadMetricsLiveness(text).found; }
+
+	// What asking the server came to: its engine has no work (`Idle`), has work in it (`Working`), or the ask found nothing
+	// to read (`Unknown`) - no answer, or an answer that is not a status page. Only `Idle` is a stall.
+	enum class Liveness { Idle, Working, Unknown }
+
+	// Whether the server says it has work in its engine. A vLLM reads a 250k prompt for a minute and a half with nothing
+	// on the wire (no keepalives, no usage before the end), so the prefill watchdog asks rather than guessing from
+	// silence: the gauges saying work is in flight extend the deadline, and a server that answers, is silent on the wire
+	// and idle in its engine really did stop. Asked at most every kStepLivenessEveryMs.
+	//
+	// Only vLLM's gauges are asked. llama.cpp is left to its `prompt_progress` reports, which already extend the
+	// deadline as they arrive (docs/12 "Watchdogs"): its `/slots` `is_processing` says a slot is busy, not that it is
+	// reading this prompt, and a hung server keeps saying busy forever.
+	//
+	// An answer with no request gauges in it - a 404, or a status page that never names them - means this server has
+	// nothing to say and is not asked again, so the clock decides, as it did before the question existed. An ask that got
+	// nothing to read says nothing either way: the deadline moves by the asking alone and it is tried again, until
+	// kStepLivenessMost in a row found nothing - then the server is the dead one it has begun to look like. Giving up on
+	// the first slow reply is how a healthy long prefill was called a stall.
+	static Liveness ServerSaysWorking(StepStream& stream) {
+		const int64 now = StepNowMs();
+		if (!stream.askable) return Liveness::Idle;
+		if (now - stream.livenessAskedMs < kStepLivenessEveryMs) return stream.working ? Liveness::Working : Liveness::Idle;
+		stream.livenessAskedMs = now;
+		if (stream.request->serverRoot.IsEmpty()) {
+			stream.askable = false;
+			stream.working = false;
+			return Liveness::Idle;
+		}
+		Core::String body;
+		Core::String error;
+		int32 status = 0;
+		if (!FetchText((stream.request->serverRoot + "/metrics").View(), stream.request->headers, kStepLivenessMs, status, body, error)) {
+			stream.livenessUnknown += 1;
+			return stream.livenessUnknown >= kStepLivenessMost ? Liveness::Idle : Liveness::Unknown;
+		}
+		if (status == 404) {   // it says there is no /metrics here: nothing is asked again
+			stream.askable = false;
+			stream.working = false;
+			return Liveness::Idle;
+		}
+		if (status != 200) {   // busy or an error page: nothing learned, asked again
+			stream.livenessUnknown += 1;
+			return stream.livenessUnknown >= kStepLivenessMost ? Liveness::Idle : Liveness::Unknown;
+		}
+		const MetricsLiveness liveness = ReadMetricsLiveness(
+			body.View().Substring(0, body.ByteLength() < kStepMetricsBytes ? body.ByteLength() : kStepMetricsBytes));
+		stream.livenessUnknown = 0;   // it answered: what it has said since then is what counts
+		if (!liveness.found) {
+			stream.askable = false;   // no request gauges: nothing is asked again
+			stream.working = false;
+			return Liveness::Idle;
+		}
+		stream.working = liveness.working;
+		return liveness.working ? Liveness::Working : Liveness::Idle;
+	}
+
+	// The prefill deadline passed. A server that says it is still reading does not get its request cancelled - the read
+	// starts over on a retry, so cancelling a healthy long prefill is what turns it into a stall - so the deadline moves
+	// by what a keepalive would and the client is told what the wait is. An ask that got nothing back moves it by the ask
+	// alone and is tried again, so one slow status page never ends a request that is being served.
+	static bool PrefillDeadlinePassed(StepStream& stream) {
+		if (StepNowMs() <= stream.prefillDeadlineMs) return false;
+		const Liveness liveness = ServerSaysWorking(stream);
+		if (liveness == Liveness::Idle) {
+			StalledPrefill(stream);
+			return true;
+		}
+		if (liveness != Liveness::Working) {
+			ExtendPrefill(stream, kStepLivenessMs);   // the ask itself is what this wait cost: it is asked again next second
+			return false;
+		}
+		stream.result->prefillConfirms += 1;
+		ExtendPrefill(stream);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("working", true);
+		json.IntField("total", stream.request->promptTokens);
+		json.IntField("waitedMs", StepNowMs() - stream.startMs);
+		json.EndObject();
+		(*stream.events)(StepEventKind::Working, json.ToString().View(), -1);
+		return false;
+	}
+
 	static bool AwaitHead(StreamingRequest& http, StepStream& stream, const bool* cancelled) {
 		for (;;) {
 			if (*cancelled) {
@@ -182,10 +343,7 @@ namespace Ai
 				stream.result->error = Core::String(http.Error());
 				return false;
 			}
-			if (StepNowMs() > stream.prefillDeadlineMs) {
-				stream.result->end = WireEnd::StalledPrefill;
-				return false;
-			}
+			if (PrefillDeadlinePassed(stream)) return false;
 		}
 	}
 
@@ -193,7 +351,7 @@ namespace Ai
 	static bool Stalled(StepStream& stream, const StepRequest& request) {
 		const int64 now = StepNowMs();
 		if (now - stream.startMs > request.capMs) stream.result->end = WireEnd::StepCap;
-		else if (stream.result->ttftMs < 0 && now > stream.prefillDeadlineMs) stream.result->end = WireEnd::StalledPrefill;
+		else if (stream.result->ttftMs < 0 && PrefillDeadlinePassed(stream)) return true;
 		else if (stream.result->ttftMs >= 0 && now - stream.lastByteMs > request.idleMs) stream.result->end = WireEnd::StalledStream;
 		else return false;
 		return true;
@@ -237,9 +395,16 @@ namespace Ai
 	StepResult* RunStep(const StepRequest& request, const StepEvents& events, const bool* cancelled) {
 		StepStream stream;
 		stream.result = new StepResult();
+		stream.result->promptTokens = request.promptTokens;
+		stream.result->prefillRate = request.readMs > 0 ? (double)request.promptTokens * 1000.0 / (double)request.readMs : 0.0;
 		stream.events = &events;
+		stream.request = &request;
 		stream.startMs = StepNowMs();
 		stream.lastByteMs = stream.startMs;
+		stream.livenessAskedMs = 0;   // never asked
+		stream.askable = true;      // asked until an answer carries no request gauges
+		stream.livenessUnknown = 0;
+		stream.working = false;
 		stream.prefillDeadlineMs = stream.startMs + request.prefillMs;
 		stream.prefillExtendMs = request.prefillExtendMs;
 		StreamingRequest http;

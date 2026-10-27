@@ -58,7 +58,7 @@
 .git-graph-body { position: relative; flex: 1; overflow: auto; min-height: 0; outline: none; }
 .git-graph-spacer { width: 1px; }
 .git-graph-rows { position: absolute; left: 0; right: 0; top: 0; }
-.git-row { height: 24px; font-size: var(--font-size-sm); white-space: nowrap; cursor: default; }
+.git-row { height: 24px; font-size: var(--font-size-sm); white-space: nowrap; cursor: pointer; user-select: none; }
 .git-row:hover { background: var(--veil); }
 .git-row.sel { background: var(--bg-4); }
 .git-graph-body:focus .git-row.sel { background: var(--selection-active); }

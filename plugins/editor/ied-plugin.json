@@ -66,6 +66,11 @@
 			{ "id": "ied.explorer.collapseAll", "title": "Collapse All", "category": "Solution Explorer", "icon": "$(collapse-all)" },
 			{ "id": "ied.explorer.copyPath", "title": "Copy Full Path", "category": "Solution Explorer" },
 			{ "id": "ied.explorer.copyRelativePath", "title": "Copy Relative Path", "category": "Solution Explorer" },
+			{ "id": "ied.explorer.projectSettings", "title": "Settings...", "category": "Solution Explorer", "icon": "$(settings-gear)" },
+			{ "id": "ied.explorer.buildProject", "title": "Build Project", "category": "Solution Explorer", "icon": "$(gear)" },
+			{ "id": "ied.explorer.rebuildProject", "title": "Rebuild Project", "category": "Solution Explorer" },
+			{ "id": "ied.explorer.cleanProject", "title": "Clean Project", "category": "Solution Explorer" },
+			{ "id": "ied.explorer.testProject", "title": "Run Project Tests", "category": "Solution Explorer", "icon": "$(beaker)" },
 			{ "id": "ied.explorer.newFile", "title": "New File...", "category": "Solution Explorer", "icon": "$(new-file)" },
 			{ "id": "ied.explorer.newFolder", "title": "New Folder", "category": "Solution Explorer", "icon": "$(new-folder)" },
 			{ "id": "ied.explorer.rename", "title": "Rename", "category": "Solution Explorer", "icon": "$(edit)" },
@@ -206,6 +211,13 @@
 			],
 			"explorer/context": [
 				{ "command": "ied.task.setStartup", "group": "0_startup", "when": "explorerItemKind == 'project' && explorerProjectKind != 'library' && explorerProjectKind != 'plugin'" },
+				{ "command": "ied.explorer.buildProject", "group": "0_build", "when": "explorerItemKind == 'project'" },
+				{ "command": "ied.explorer.rebuildProject", "group": "0_build", "order": 1, "when": "explorerItemKind == 'project'" },
+				{ "command": "ied.explorer.cleanProject", "group": "0_build", "order": 2, "when": "explorerItemKind == 'project'" },
+				{ "command": "ied.explorer.testProject", "group": "0_build", "order": 3, "when": "explorerItemKind == 'project'" },
+				{ "command": "ied.task.build", "group": "0_build", "when": "explorerItemKind == 'solution'" },
+				{ "command": "ied.task.rebuild", "group": "0_build", "order": 1, "when": "explorerItemKind == 'solution'" },
+				{ "command": "ied.task.clean", "group": "0_build", "order": 2, "when": "explorerItemKind == 'solution'" },
 				{ "command": "shell.newProject", "group": "0_add", "when": "explorerItemKind == 'solution'" },
 				{ "command": "ied.explorer.addExistingFolder", "group": "0_add", "order": 1, "when": "explorerItemKind == 'solution'" },
 				{ "command": "ied.explorer.addFolderAsProject", "group": "0_add", "order": 2, "when": "explorerItemKind == 'folder'" },
@@ -218,7 +230,13 @@
 				{ "command": "ied.explorer.removeProject", "group": "4_edit", "order": 3, "when": "explorerItemKind == 'project'" },
 				{ "command": "ied.explorer.copyPath", "group": "5_copy" },
 				{ "command": "ied.explorer.copyRelativePath", "group": "5_copy", "order": 1 },
+				{ "command": "ied.explorer.projectSettings", "group": "7_settings", "when": "explorerItemKind == 'project' || explorerItemKind == 'solution'" },
 				{ "command": "ied.explorer.refresh", "group": "9_refresh" }
+			],
+			// A tab strip's "+" right button (docs/15 "Docking"): besides the activity's own new tab (a new file, the shell
+			// puts it first) and what the other plugins add there, a file of the group by name.
+			"tabs/new": [
+				{ "command": "ied.editor.goToAll", "group": "3_open" }
 			],
 			"output/context": [
 				{ "command": "ied.output.clear", "group": "1_clear" },

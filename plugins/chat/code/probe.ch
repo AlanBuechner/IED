@@ -25,6 +25,10 @@ namespace Ai
 		public Core::String JsonText() const;
 	}
 
+	// A GET's status and body; false with `error` when nothing usable came back in time. Shared by discovery and the
+	// prefill watchdog's liveness question (`step.ch`), which asks a server whether it is still reading.
+	bool FetchText(Core::StringView url, const Core::Array<Core::String>& headers, int32 timeoutMs, int32& status, Core::String& body, Core::String& error);
+
 	// Asks the profile's server; never longer than about `timeoutMs` per endpoint.
 	ModelProbe ProbeModel(const ModelProfile& profile, int32 timeoutMs);
 	// The parts of a probe each endpoint's answer gives.

@@ -1,7 +1,8 @@
 // editorview.js - a server document in Monaco ("doc:<path>" tabs; F-EDT-1, docs/10): DocumentSync keeps the text with
 // the server, the lease decides who types (a bar offers "Edit Here" to the others), typing pins a preview tab, the tab
 // shows unsaved changes, and Ctrl+S saves (an untitled file asks where to, untitled.js; until then it is saved where it
-// is as it is typed). Language features come from the language servers (language.js). A file
+// is as it is typed). Language features come from the language servers (language.js), and the links written in the text
+// open on a middle click or a Ctrl+click (editorlinks.js). A file
 // mixing line endings opens read-only: Monaco would make them one kind and the positions it reports would no longer be
 // the server's.
 
@@ -98,12 +99,14 @@ export class CodeEditor {
 		};
 	}
 
+	// A snapshot of the text this editor shows already (another view of the document subscribed, and the server sent the
+	// topic's snapshot again) leaves the model as it is: setting it would lose the cursor and the undo history.
 	setText(text) {
 		this.mixedEndings = /\r\n/.test(text) && /(^|[^\r])\n/.test(text);
 		this.applying = true;
 		const first = !this.model;
 		if (first) this.model = this.takeModel(text);
-		else this.model.setValue(text);
+		else if (this.model.getValue() !== text) this.model.setValue(text);
 		this.applying = false;
 		this.setReadOnly(!this.sync.holdsLease);
 		if (!first) return;
@@ -329,5 +332,6 @@ function editorOptions(monaco) {
 		smoothScrolling: false,
 		readOnly: true,
 		"semanticHighlighting.enabled": true,
+		mouseMiddleClickAction: "openLink",
 	}, optionsOf(null, editorEnvironment()));
 }

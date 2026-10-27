@@ -11,6 +11,11 @@ namespace Ai
 	const int64 kTrimmedKeepBytes = 300;
 	const int64 kTrimBelowBytes = 600;
 	const int64 kRecentMessagesKept = 4;
+	// What a chat's bytes are worth in tokens, for the prompt size an estimate is made of - what the prefill watchdog's
+	// budget is built from. Measured with the serving model's tokenizer on this repo's transcripts (31 windows, 2.8 MB:
+	// 3.15 bytes per token; a request's JSON of code, paths and escapes 3.0-3.4, prose 4.4), where bytes/4 read a quarter
+	// low on the same bytes (docs/12 "Truth about the model's context window").
+	const double kContextBytesPerToken = 3.15;
 
 	static int64 StreamNowMs() { return Platform::UnixTimeNs() / 1000000; }
 
@@ -105,7 +110,7 @@ namespace Ai
 		if (profile->maxOutput > 0) json.IntField("max_tokens", profile->maxOutput);
 		json.EndObject();
 		Core::String body = json.ToString();
-		promptTokens = (body.ByteLength() - images.encoded) / 4 + images.sent * kToolImageTokens;
+		promptTokens = RequestTokens((int64)body.ByteLength(), images.encoded, images.sent);
 		return body;
 	}
 
@@ -120,10 +125,12 @@ namespace Ai
 		chats->prefillRates.TryGet(profile->name, rate);
 		request.connectMs = profile->connectMs;
 		request.readMs = (int64)((double)request.promptTokens * 1000.0 / rate);
-		request.prefillMs = profile->prefillBaseMs + 2 * request.readMs;
+		const int64 budget = profile->prefillBaseMs + 2 * request.readMs;   // base + twice the estimated read (docs/12)
+		request.prefillMs = budget > prefillFloorMs ? budget : prefillFloorMs;   // never the deadline that just failed
 		request.prefillExtendMs = profile->prefillBaseMs;
 		request.idleMs = profile->idleMs;
 		request.capMs = profile->stepCapMs;
+		request.serverRoot = ServerRoot(profile->endpoint.View());
 		return request;
 	}
 
@@ -211,6 +218,7 @@ namespace Ai
 			callSegments.Push(Begin(segment));
 		}
 		else if (kind == StepEventKind::Progress) Prefill(delta);
+		else if (kind == StepEventKind::Working) Prefill(delta);
 		else if (call >= 0 && call < callSegments.Count()) {
 			callSegments[call]->argsText.Append(delta);
 			PublishDelta(chats, chat, callSegments[call], "argsText", delta);
@@ -312,18 +320,27 @@ namespace Ai
 
 	int64 TurnRun::Window() const { return chats->WindowOf(candidates[candidate]); }
 
-	// A message's bytes as a request carries them: its text, calls and thinking (sent back where the server keeps it),
-	// an image as kToolImageTokens.
-	static int64 MessageBytes(const ModelMessage* message) {
-		return message->content.ByteLength() + message->toolCalls.ByteLength() + message->reasoning.ByteLength() + message->images.Count() * kToolImageTokens * 4;
+	// What a chat's text counts as, and what a message counts as: its text, calls and thinking (sent back where the server
+	// keeps it) at that rate, an image as an image.
+	static int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / kContextBytesPerToken); }
+
+	static int64 MessageTokens(const ModelMessage* message) {
+		return BytesToTokens(message->content.ByteLength() + message->toolCalls.ByteLength() + message->reasoning.ByteLength())
+			+ message->images.Count() * kToolImageTokens;
 	}
 
 	int64 TurnRun::EstimateTokens() const {
-		int64 bytes = system.ByteLength();
+		int64 tokens = BytesToTokens(system.ByteLength());
 		for (Turn* each : chat->turns)
 			if (!each->compressed)
-				for (ModelMessage* message : each->messages) bytes += MessageBytes(message);
-		return bytes / 4;
+				for (ModelMessage* message : each->messages) tokens += MessageTokens(message);
+		return tokens;
+	}
+
+	// What a request costs with no server count of its own: its text, and the images it sends as images. `bodyBytes` all
+	// the JSON holds, `imageBytes` the part of it the encoded images carry.
+	static int64 RequestTokens(int64 bodyBytes, int64 imageBytes, int64 sentImages) {
+		return BytesToTokens(bodyBytes - imageBytes) + sentImages * kToolImageTokens;
 	}
 
 	int64 TurnRun::CalibratedTokens() const {
@@ -354,14 +371,14 @@ namespace Ai
 		for (Turn* each : chat->turns)
 			if (!each->compressed)
 				for (ModelMessage* message : each->messages) {
-					if (message->role == "tool") results += MessageBytes(message);
-					else messages += MessageBytes(message);
+					if (message->role == "tool") results += MessageTokens(message);
+					else messages += MessageTokens(message);
 				}
 		Core::Array<ContextPart> parts;
-		parts.Push(Part("System prompt", systemBytes / 4));
-		parts.Push(Part("Tool definitions", toolsBytes / 4));
-		parts.Push(Part("Messages", messages / 4));
-		parts.Push(Part("Tool results", results / 4));
+		parts.Push(Part("System prompt", BytesToTokens(systemBytes)));
+		parts.Push(Part("Tool definitions", BytesToTokens(toolsBytes)));
+		parts.Push(Part("Messages", messages));
+		parts.Push(Part("Tool results", results));
 		return parts;
 	}
 
@@ -378,7 +395,8 @@ namespace Ai
 		// A step that failed before an answer (no connection, an error status, a stall, Claude's error line) counted
 		// nothing: the meter keeps the last step's count.
 		if (completion->promptTokens <= 0 && result->text.IsEmpty() && result->thinking.IsEmpty() && result->calls.IsEmpty()) return;
-		const int64 output = completion->completionTokens > 0 ? completion->completionTokens : (result->text.ByteLength() + result->thinking.ByteLength()) / 4;
+		const int64 output = completion->completionTokens > 0 ? completion->completionTokens
+			: BytesToTokens(result->text.ByteLength() + result->thinking.ByteLength());
 		if (completion->promptTokens > 0) {
 			turn->tokensIn = completion->promptTokens;
 			chat->estimateOffset = completion->promptTokens - estimateBefore;
@@ -390,8 +408,8 @@ namespace Ai
 			turn->ttftMs = result->ttftMs;
 			turn->genMs += result->ms - result->ttftMs;
 		}
-		if (completion->promptPerSecond > 0) chats->prefillRates.At(profile->name) = completion->promptPerSecond;
-		else if (result->ttftMs > 200 && turn->tokensIn > 0) chats->prefillRates.At(profile->name) = (double)turn->tokensIn * 1000.0 / (double)result->ttftMs;
+		const double rate = completion->MeasuredPrefillRate(result->ttftMs);
+		if (rate > 0) chats->prefillRates.At(profile->name) = rate;
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("turnId", turn->turnId.View());
@@ -434,13 +452,18 @@ namespace Ai
 				changed = true;
 			}
 		const int64 target = Window() / 2;
+		int64 leftOut = 0;
 		for (Turn* each : chat->turns) {
 			if (target <= 0 || EstimateTokens() <= target || each == turn) break;
 			if (each->compressed) continue;
 			each->compressed = true;
 			changed = true;
+			leftOut += 1;
 		}
-		if (changed) HarnessNote(Core::StringView("context_compressed"), chats->prompts.Note("context_compressed").View());
+		// The note only for what it says: whole turns gone from the requests. Trimming a stale read or a long tool result
+		// keeps the conversation in order, so it leaves no note (the owner, on a note that appeared after a restart with
+		// nothing left out: it read as if the history had been cleared).
+		if (leftOut > 0) HarnessNote(Core::StringView("context_compressed"), chats->prompts.Note("context_compressed").View());
 		return changed;
 	}
 

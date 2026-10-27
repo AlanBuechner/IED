@@ -24,7 +24,7 @@ Permission handling per class is defined in `docs/11`.
 | T-FS-2 | `fs_write(path, content)` | write | Create or overwrite a file (through the document store; checkpointed). |
 | T-FS-3 | `fs_edit(path, edits: [{old, new, replace_all?}])` | write | Exact-match replacements, all-or-nothing; an `old` not in the file is answered with where it differs (**built**: the line where the file agrees longest with the start or the end of `old`, and what the file has there against what `old` has, line breaks and tabs shown as escapes). |
 | T-FS-4 | `fs_list(path, depth?, glob?)` | read | Directory listing (respects ignore rules). |
-| T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob. |
+| T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob (`*`, `?`, `**`, `{a,b}`; `src/fs/glob`). |
 | T-SRCH-1 | `search_text(pattern, regex?, glob?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. |
 | T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` starts it as a background task and answers at once with its id (built 2026-10-23, `background` below). |
 | T-LSP-1 | `code_symbols(path or query, kind?, depth?)` | read | Outline of a file (kinds, signatures, line ranges), or the workspace's symbols named like `query`. **Built**, "Navigating code". |
@@ -178,7 +178,7 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-KNW-1 | `skill_search(query)` | read | **Built**: the workspace's skills (`.ied/skills/`, plugins' `skills`, the app's; `docs/26` section 8) whose name, description or keywords hold the query's words, a word in the name counting most; up to 10 as `name (source): description`. BM25 and embeddings later. |
 | T-KNW-2 | `skill_read(name, file?)` | read | **Built**: a skill's SKILL.md without its frontmatter, or another file of its folder (`file`, relative to it); an unknown name lists the skills. Enabling the tool groups a skill declares comes with tool groups. |
 | T-KNW-3 | `skill_write(name, description, keywords, body)` | write | Approval-gated; writes to `.ied/skills/` or app tier. |
-| T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | Retrieve compressed-away chat history. |
+| T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | **Built** (2026-10-25, `plugins/chat/code/history.cf`, deferred tools of group `chats`): what this chat said in the turns compression left out of its requests. The tool the "earlier parts were left out" note points at - without it those turns are out of reach (F-AIR-54). Search gives the newest place each word was said, read gives a turn's messages as the model was sent them (at most 4 at a time). |
 | T-KNW-5 | `scratchpad(action: read|write|append|replace_section, section?, text?)` | meta | Chat scratchpad (F-CHT-71). |
 | T-KNW-6 | `memory_read()` / `memory_add(fact)` | meta | Project memory (P2, F-AIR-66). |
 | T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API) searched by words - the best Markdown sections with their path, line range and the lines that match. |

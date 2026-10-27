@@ -1,11 +1,12 @@
 // ai: server-sent events, one completion put together from its chunks, the dialects local models write, and what a
-// model server says of itself.
+// model server says of itself - its window, and the gauges that say whether it has work in flight.
 
 include "sse.ch"
 include "completion.ch"
 include "dialect.ch"
 include "probe.ch"
 include "models.ch"
+include "step.ch"
 
 static Core::StringView View(const char* text) { return Core::StringView(text); }
 
@@ -88,6 +89,30 @@ class CompletionTests {
 		assert_true(completion.content.IsEmpty(), "nothing said yet");
 	}
 
+	[test("the_prefill_rate_a_step_teaches")]
+	public static void TestMeasuredPrefillRate() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":149000}}}"), deltas);
+		assert_eq((int64)1000, completion.ReadTokens(), "what the server had to read, not the whole prompt");
+		assert_true(completion.MeasuredPrefillRate(1300) <= 0.0, "a cached answer in a second teaches nothing: its rate would starve the next cold read");
+
+		Ai::Completion cold;
+		cold.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":1000}}}"), deltas);
+		assert_eq((int64)149000, cold.ReadTokens(), "the rest of the prompt was read");
+		assert_true(cold.MeasuredPrefillRate(40000) > 3600.0 && cold.MeasuredPrefillRate(40000) < 3900.0, "read tokens over the wait");
+
+		Ai::Completion quiet;
+		quiet.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1}}"), deltas);
+		assert_eq((int64)150000, quiet.ReadTokens(), "a server that says nothing of its cache: all of it was read");
+		assert_true(quiet.MeasuredPrefillRate(2000) > 74000.0, "its wait for the first token was the read");
+
+		Ai::Completion llama;
+		llama.Take(View("{\"usage\":{\"prompt_tokens\":9000},\"timings\":{\"prompt_n\":9000,\"cache_n\":8000,\"prompt_per_second\":1200.5}}"), deltas);
+		assert_eq((int64)1000, llama.ReadTokens(), "llama.cpp counts the cached prefix in timings");
+		assert_true(llama.MeasuredPrefillRate(100000) > 1200.0 && llama.MeasuredPrefillRate(100000) < 1201.0, "what the server measured reading");
+	}
+
 	[test("malformed_chunk_is_skipped")]
 	public static void TestMalformed() {
 		Ai::Completion completion;
@@ -98,7 +123,6 @@ class CompletionTests {
 		assert_eq((int64)1, completion.malformedChunks, "counted");
 		assert_true(completion.content.View() == "ab", "and skipped");
 	}
-
 	[test("error_in_the_stream")]
 	public static void TestError() {
 		Ai::Completion completion;
@@ -256,6 +280,29 @@ class ProbeTests {
 		assert_true(Ai::ServerRoot(View("http://h:8080/v1")).View() == "http://h:8080", "/v1 off");
 		assert_true(Ai::ServerRoot(View("http://h:8080/v1/")).View() == "http://h:8080", "a trailing slash too");
 		assert_true(Ai::ServerRoot(View("http://h:11434")).View() == "http://h:11434", "no /v1 stays");
+	}
+
+	// A vLLM's real answer, cut to the lines that matter (the owner's server, 2026-10-25: the gauges 6 kB into a 71 kB body).
+	[test("what_a_servers_gauges_say_of_its_work")]
+	public static void TestMetricsLiveness() {
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 1.0\n")), "a vLLM, working");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 1.0\n")), "the gauge above 0");
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running{engine=\"0\"} 0.0\n")), "a vLLM, idle");
+		assert_true(!Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting{engine=\"0\"} 0.0\n")), "both gauges 0: nothing in its engine");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting{engine=\"0\",reason=\"capacity\"} 1.0\n")), "queued work counts as work");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting_by_reason{engine=\"0\",reason=\"capacity\"} 1.0\n")), "and so does vLLM 0.32's split of it by reason");
+		assert_true(!Ai::MetricsHasRequestGauges(View("process_cpu_seconds_total 1245.88\nvllm:prefix_cache_hits_total 1.0e+08\n")), "no request gauges: nothing to ask it with");
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running 1.0\n")), "a gauge with no labels");
+		assert_true(!Ai::MetricsSayWorking(View("vllm:num_requests_running_created 1.792e+09\n")), "the _created series is a different metric, not the gauge");
+		assert_true(!Ai::MetricsHasRequestGauges(View("vllm:num_requests_running_created 1.792e+09\n")), "and says nothing of the server either");
+		assert_true(!Ai::MetricsSayWorking(View("")), "an empty answer");
+		// An engine's lines come after the process's own, far into a large answer: reading only the head of it used to
+		// decide a healthy vLLM says nothing of itself (the owner's server, 2026-10-25: the gauges 2 kB into 71 kB).
+		assert_true(Ai::MetricsHasRequestGauges(View("# HELP python_gc_objects_collected_total Objects collected during gc\n"
+													  "python_gc_objects_collected_total{generation=\"2\"} 42897.0\n"
+													  "# TYPE vllm:num_requests_running gauge\n"
+													  "vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 0.0\n")),
+													  "the gauges past the head of a big answer, and a # TYPE line is no gauge");
 	}
 }
 

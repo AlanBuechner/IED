@@ -27,11 +27,19 @@
 		],
 		"commands": [
 			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" },
-			{ "id": "ied.markdown.previewBeside", "title": "Open Preview to the Side", "category": "Markdown", "icon": "$(open-preview)" }
+			{ "id": "ied.markdown.previewBeside", "title": "Open Preview to the Side", "category": "Markdown", "icon": "$(open-preview)" },
+			{ "id": "ied.markdown.goToSource", "title": "Go to Source", "category": "Markdown", "icon": "$(go-to-file)" }
 		],
 		"menus": {
+			"mdpreview/context": [
+				{ "command": "ied.markdown.goToSource", "group": "1_source", "when": "markdownSourceLine" }
+			],
 			"tab/title": [
 				{ "command": "ied.markdown.previewBeside", "group": "1_preview", "when": "tabKind == 'doc' && (resourceExtname == '.md' || resourceExtname == '.markdown')" }
+			],
+			// A tab strip's "+" right button (docs/15 "Docking"): the preview of the Markdown file that group shows.
+			"tabs/new": [
+				{ "command": "ied.markdown.preview", "group": "2_view", "when": "tabKind == 'doc' && (resourceExtname == '.md' || resourceExtname == '.markdown')" }
 			],
 			"explorer/context": [
 				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" },

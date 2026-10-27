@@ -1,0 +1,32 @@
+// plugintools: a plugin's command tool whose program is a batch file (nuke_list with nuke.command naming nuke.cmd) runs
+// through cmd.exe with every word quoted, and refuses a word cmd.exe would read even inside quotes.
+
+include "plugintools.ch"
+
+static Core::Array<Core::String> Words(const char* a, const char* b, const char* c) {
+	Core::Array<Core::String> words;
+	words.Push(Core::String(a));
+	words.Push(Core::String(b));
+	words.Push(Core::String(c));
+	return words;
+}
+
+[test("server.ai.plugintools")]
+class PluginToolTests {
+	[test("batch_files")]
+	public static void TestBatchFiles() {
+		assert_true(Ai::IsBatchFile(Core::StringView("C:\\GameDev\\IED\\bin\\nuke.cmd")) && Ai::IsBatchFile(Core::StringView("tools/Setup.BAT")), "by extension, any case");
+		assert_true(!Ai::IsBatchFile(Core::StringView("nuke")) && !Ai::IsBatchFile(Core::StringView("git.exe")), "a program");
+	}
+
+	[test("batch_line")]
+	public static void TestBatchLine() {
+		Core::String line;
+		Core::String problem;
+		assert_true(Ai::BatchLine(Words("C:\\IED\\bin\\nuke.cmd", "list", "a b&c|d"), line, problem), "plain words");
+		assert_se("\"C:\\IED\\bin\\nuke.cmd\" \"list\" \"a b&c|d\"", line.CStr(), "each word quoted: & and | inside quotes are text to cmd.exe");
+		assert_true(!Ai::BatchLine(Words("nuke.cmd", "list", "x\" & del y"), line, problem) && !problem.IsEmpty(), "a quote would end the quoting");
+		assert_true(!Ai::BatchLine(Words("nuke.cmd", "list", "%PATH%"), line, problem), "cmd.exe expands % inside quotes");
+		assert_true(!Ai::BatchLine(Words("nuke.cmd", "list", "a\nb"), line, problem), "a line break ends the command");
+	}
+}

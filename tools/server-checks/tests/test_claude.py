@@ -407,6 +407,32 @@ class ClaudeUsageTests(ClaudeCase):
 		self.assertEqual("finished", (await self.turn(pinned))["stop"])
 		self.assertEqual("claude-fable", (await self.last_turn(pinned))["model"], "a chat pinned to Fable runs on it")
 
+	async def test_the_setups_chain_goes_to_fable_before_the_local_model(self):
+		"""The setup's chain (opus 1.0, sonnet 1.25, haiku 1.5, fable 1.0, local): Fable takes the turns the shared week is used
+		up or too far ahead of pace for, while its own week is on pace; past that, the local model."""
+		await self.use_claude(models=dict(self.FABLE, **self.SONNET, **{"claude-haiku": {"provider": "claude-code", "model": "haiku"}}), groups={"claude": {"primary": {
+			"model": "claude-opus", "pace": {"max": 1.0}, "fallback": [{"model": "claude-sonnet", "pace": {"max": 1.25}}, {"model": "claude-haiku", "pace": {"max": 1.5}},
+			{"model": "claude-fable", "pace": {"max": 1.0}}, "fake"]}}})
+
+		async def now(week, fable):
+			self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=week, fable=fable))
+			usage = await self.client.request("ai.usage", {"refresh": True})
+			return [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == ("claude", "primary")][0]
+
+		half = int(3.5 * 24 * HOUR)
+		chain = await now(week=(100, half), fable=(10, half))
+		self.assertEqual(("claude-fable", "used_up"), (chain["now"], chain["places"][0]["state"]), chain)
+		self.script({"blocks": [{"text": "Fable, the week being used up."}]})
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		self.assertEqual("claude-fable", (await self.last_turn(chat_id))["model"])
+		chain = await now(week=(90, half), fable=(10, half))
+		self.assertEqual("claude-fable", chain["now"], "the week at 1.80x: opus, sonnet and haiku over their pace, Fable on its own at 0.20x")
+		self.assertEqual(["over", "over", "over", "use", "use"], [p["state"] for p in chain["places"]])
+		chain = await now(week=(90, half), fable=(90, half))
+		self.assertEqual(("fake", "over"), (chain["now"], chain["places"][3]["state"]), "Fable's own week at 1.80x too: the local model")
+		self.assertIn("Fable week is at 1.80x pace", chain["places"][3]["why"])
+
 	async def test_a_weekly_limit_met_on_opus_moves_the_turn_to_fable(self):
 		"""A turn the shared week refuses goes on down the chain to a Claude model metered apart, Fable, before a local one;
 		the next turn starts on Fable."""
@@ -461,8 +487,9 @@ class ClaudeSetupTests(ClaudeCase):
 		self.assertEqual("opus", models["claude-opus"]["model"])
 		groups = await self.setting("ai.groups")
 		self.assertEqual({"primary": {"model": "claude-opus", "pace": {"max": 1.0, "target": "both"}, "fallback": [
-			{"model": "claude-sonnet", "pace": {"max": 1.25, "target": "both"}}, {"model": "claude-haiku", "pace": {"max": 1.5, "target": "both"}}, "fake"]}},
-			groups["claude"], "a chain stepping down as the plan runs ahead of pace, then the local model")
+			{"model": "claude-sonnet", "pace": {"max": 1.25, "target": "both"}}, {"model": "claude-haiku", "pace": {"max": 1.5, "target": "both"}},
+			{"model": "claude-fable", "pace": {"max": 1.0, "target": "both"}}, "fake"]}},
+			groups["claude"], "a chain stepping down as the plan runs ahead of pace, then Fable on its own week, then the local model")
 		self.assertEqual("local", await self.setting("ai.defaultGroup"), "the owner's default group is left as it is")
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": self.model.url + "/v1"}}})
 		self.assertFalse((await self.client.request("ai.usage", {"refresh": True}))["claude"]["configured"], "removed Claude models stay removed")

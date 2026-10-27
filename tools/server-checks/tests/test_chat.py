@@ -842,7 +842,62 @@ class ChatTests(ChatCase):
 		turn = await self.last_turn(chat_id)
 		self.assertEqual(["empty", "empty", "paused"], [s["kind"] for s in self.segments(turn, "harness")])
 
+	async def test_a_retry_after_a_stalled_prefill_waits_longer(self):
+		# The owner's report: a server still reading a cold prompt when the watchdog fires. The retry must not be handed
+		# the deadline that just failed, or the turn pauses after two tries while the server was never broken.
+		chat_id, _ = await self.chat()
+		await self.use_model({}, script="stall-prefill-twice")
+		self.model.post("/_fake/reset", {})
+		end = await self.turn(chat_id, timeout=TURN_SECONDS * 3)
+		self.assertEqual("finished", end["stop"], (end, "the second prefill finished inside the longer deadline"))
+		self.assertEqual(2, len(self.model.requests()), "one stall, one retry")
+		self.assertTrue(any(r.startswith("retried after stalled_prefill") for r in end["recoveries"]), end["recoveries"])
+
+	async def test_a_server_still_reading_its_prompt_is_not_called_stalled(self):
+		# The same silence, on a server whose gauges say the work is still in its engine (the owner's vLLM: a 250k prompt
+		# read for 87 s with nothing on the wire). The watchdog asks, is told it is working, and waits - so the request is
+		# never cancelled and the answer lands in one go. Cancelling is what turned a healthy long prefill into a stall:
+		# the retry starts the read over and runs into the same short deadline twice, then pauses.
+		chat_id, _ = await self.chat()
+		self.model.post("/_fake/config", {"metrics": "busy"})
+		await self.use_model({"watchdog": {"prefillBaseS": 1, "idleS": 1, "prefillRate": 1000000}}, script="stall-prefill-after-headers")
+		self.model.post("/_fake/reset", {})
+		end = await self.turn(chat_id, timeout=TURN_SECONDS * 2)
+		frames = self.frames
+		self.model.post("/_fake/config", {"metrics": "off"})
+		self.assertEqual("finished", end["stop"], end)
+		self.assertEqual([], end["recoveries"], "nothing was retried: the wait was never called a stall")
+		self.assertEqual(1, len(self.model.requests()), "the one request was left alone until it answered")
+		progress = [f["data"]["prefill"] for f in frames if f.get("kind") == "turn.progress" and f["data"]["prefill"]]
+		self.assertTrue(any(p.get("working") for p in progress), "the client was told the server is still working")
+
+	async def test_a_server_whose_engine_is_idle_still_counts_as_stalled(self):
+		# The check must not hide a real stall: a server that answers /metrics with nothing in flight is a server that
+		# lost the request, and that is still retried like one.
+		chat_id, _ = await self.chat()
+		self.model.post("/_fake/config", {"metrics": "idle"})
+		await self.use_model({"watchdog": {"prefillBaseS": 1, "idleS": 1, "prefillRate": 1000000}}, script="stall-prefill-after-headers")
+		self.model.post("/_fake/reset", {})
+		end = await self.turn(chat_id, timeout=TURN_SECONDS * 2)
+		self.model.post("/_fake/config", {"metrics": "off"})
+		self.assertEqual("finished", end["stop"], end)
+		self.assertTrue(any(r.startswith("retried after stalled_prefill") for r in end["recoveries"]), end["recoveries"])
+
+	async def test_a_status_page_that_times_the_ask_out_is_not_a_stall(self):
+		# The ask itself can be what fails: a vLLM under load answers /metrics in milliseconds, but a status page that
+		# takes seconds times IED's 2 s ask out. That must not be read as "the server says it has nothing" - one timed-out
+		# ask used to end a healthy prefill. The deadline moves by the asking and the request is left alone until it answers.
+		chat_id, _ = await self.chat()
+		self.model.post("/_fake/config", {"metrics": "slow"})
+		await self.use_model({"watchdog": {"prefillBaseS": 1, "idleS": 1, "prefillRate": 1000000}}, script="stall-prefill-after-headers")
+		self.model.post("/_fake/reset", {})
+		end = await self.turn(chat_id, timeout=TURN_SECONDS * 2)
+		self.model.post("/_fake/config", {"metrics": "off"})
+		self.assertEqual("finished", end["stop"], end)
+		self.assertEqual(1, len(self.model.requests()), "waited through the timed-out ask instead of retrying")
+
 	async def test_a_looping_reply_is_cut_and_dropped(self):
+
 		chat_id, _ = await self.chat()
 		await self.use_model({}, script="repetition-loop")
 		self.model.post("/_fake/reset", {})

@@ -140,7 +140,7 @@ def read_file(run, path):
 def tabs_like_a_browser(run):
 	"""Tabs as in a web browser (docs/15 "Docking"): a tab dragged along its strip slides into a new place, kept by the
 	server; "+" opens Untitled-1.txt, kept as it is typed (.ied/local/untitled/) and saved into the workspace with Ctrl+S;
-	in the Chat activity "+" opens a new chat."""
+	in the Chat activity "+" opens a new chat; the right button of "+" is the menu of other ways to open a tab there."""
 	page = run.open()
 	for path in ("README.md", "src/main.c"):
 		page.evaluate("(p) => ied_shell.commands.run('ied.editor.goTo', { path: p })", path)
@@ -181,6 +181,26 @@ def tabs_like_a_browser(run):
 	page.click(".dock-host:not([hidden]) .tabs-new")
 	page.wait_for_selector(".tab.on[data-ref='chat:new']")
 	run.shot("new-chat")
+	run.show_activity("ied.editor")
+	before = tab_names(run)
+	page.click(".dock-host:not([hidden]) .tabs-new", button="right")
+	page.wait_for_selector(".menu")
+	plus = page.locator(".dock-host:not([hidden]) .tabs-new").bounding_box()
+	menu = page.locator(".menu").bounding_box()
+	check(menu["x"] >= plus["x"] - 4 and menu["y"] >= plus["y"] + plus["height"] - 2, "the menu hangs under the +: %s over %s" % (menu, plus))
+	labels = run.texts(".menu .menu-item .label")
+	for wanted in ("New File", "Web Browser", "Go To All"):
+		check(wanted in labels, "the + menu has %s: %s" % (wanted, labels))
+	run.shot("plus-menu")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".menu", state="detached")
+	check(tab_names(run) == before, "its menu opened nothing: %s" % tab_names(run))
+	page.click(".dock-host:not([hidden]) .tabs-new", button="right")
+	page.click(".menu .menu-item:has-text('New File')")
+	page.wait_for_selector(".tab.on:has-text('Untitled-')")
+	check(len(tab_names(run)) == len(before) + 1, "a picked row opens its tab in this group: %s" % tab_names(run))
+	page.click(".tab.on:has-text('Untitled-') .x")
+	page.wait_for_selector(".tab.on:has-text('Untitled-')", state="detached")
 
 
 @scenario()
@@ -841,7 +861,8 @@ def markdown_preview_ticks_a_task(run):
 @scenario()
 def markdown_preview_beside_is_tethered(run):
 	"""Open Preview to the Side opens the preview in a group beside its file, tethered (docs/15 "Tethered tabs"): it
-	scrolls with the editor, both tabs carry the link, and closing the file closes the preview."""
+	scrolls with the editor, both tabs carry the link, and closing the file closes the preview. The editor keeps its
+	cursor: the preview's subscription brings the document's snapshot again, and the same text leaves the model alone."""
 	page = run.open()
 	ws = page.evaluate("ied_shell.wsId")
 	path = "docs/tether-%s.md" % run.viewport
@@ -849,8 +870,10 @@ def markdown_preview_beside_is_tethered(run):
 	page.evaluate("(path) => ied_shell.commands.run('ied.editor.goTo', { path })", path)
 	editor = "ied_shell.views.entries.get('doc:' + path).instance"
 	page.wait_for_function("(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }", arg=path, timeout=20000)
+	page.evaluate("(path) => " + editor + ".editor.setPosition({ lineNumber: 30, column: 3 })", path)
 	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.previewBeside', { path })", path)
 	page.wait_for_selector(".md-preview h2")
+	check(page.evaluate("(path) => " + editor + ".editor.getPosition().lineNumber", path) == 30, "the editor's cursor stays where it was")
 	check(len(page.query_selector_all(".dock-host:not([hidden]) .dock-group.well")) == 2, "the preview is in a group of its own")
 	check(len(page.query_selector_all(".dock-host:not([hidden]) .dock-group.well .tab .tether")) == 2, "both tabs show the tether")
 	page.evaluate("(path) => " + editor + ".editor.setScrollTop(600)", path)
@@ -888,6 +911,34 @@ def markdown_preview_follows_its_group(run):
 	check(page.is_visible(".dock-host:not([hidden]) .tab:has-text('Preview %s')" % other.split("/")[-1]), "a C file leaves it on the last Markdown file")
 	check(not page.is_visible(button), "no preview button for a C file")
 	run.request("fs.delete", {"wsId": ws, "path": other})
+
+
+@scenario(viewports=("desktop",))
+def browsing_markdown_leaves_no_editor_behind(run):
+	"""Markdown files browsed one after another in the preview tab, a preview beside the first (owner, 2026-10-23: the
+	app's memory kept rising while browsing .md files): the file the preview tab no longer shows loses its tether, and
+	no editor outlives its tab - the tether's tooltip made the gone file's editor again on every render, and a view that
+	arrived after its tab was released was never disposed."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	paths = ["docs/browse-%d-%s.md" % (i, run.viewport) for i in range(6)]
+	for i, path in enumerate(paths):
+		run.request("fs.write", {"wsId": ws, "path": path, "text": "# Page %d\n" % i})
+	ready = "(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }"
+	page.evaluate("(path) => ied_shell.openTab('doc:' + path, { preview: true })", paths[0])
+	page.wait_for_function(ready, arg=paths[0], timeout=20000)
+	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.previewBeside', { path })", paths[0])
+	page.wait_for_selector(".md-preview h1")
+	for path in paths[1:]:
+		page.evaluate("(path) => ied_shell.openTab('doc:' + path, { preview: true })", path)
+		page.wait_for_function(ready, arg=path, timeout=10000)
+	time.sleep(0.5)
+	check(page.evaluate("ied_shell.doc.tethers || []") == [], "the replaced file's tether went with it")
+	check(page.evaluate("monaco.editor.getEditors().length") == 1, "one editor, the open tab's: %s" % page.evaluate("monaco.editor.getEditors().map((e) => e.getModel() && e.getModel().uri.path)"))
+	page.evaluate("(path) => ied_shell.closeTab('mdpreview:' + path)", paths[0])
+	page.evaluate("(path) => ied_shell.closeTab('doc:' + path)", paths[-1])
+	for path in paths:
+		run.request("fs.delete", {"wsId": ws, "path": path})
 
 
 @scenario(viewports=("desktop",))
@@ -2137,6 +2188,87 @@ def browser_tab(run):
 	run.wait_text(".browser-caption", 'AI: click button "Go"')
 	run.shot("ai-action")
 	run.wait_text(titles, "Went hello", timeout=20000)
+
+
+# The place of a character of a document's editor, in page coordinates, or why the editor is not to be clicked in.
+EDITOR_POINT = """([path, line, column]) => {
+	const view = ied_shell.views.entries.get('doc:' + path);
+	const ed = view && view.instance && view.instance.editor;
+	if (!ed) return { why: 'no editor for ' + path };
+	ed.layout();
+	const host = ed.getContainerDomNode();
+	const box = host.getBoundingClientRect();
+	const at = ed.getScrolledVisiblePosition({ lineNumber: line, column });
+	if (!box.width || !at) return { why: 'not shown: ' + JSON.stringify({ box: box.width, shown: ied_shell.tabsState().shown }) };
+	const x = box.left + at.left + 2, y = box.top + at.top + 2;
+	const under = document.elementFromPoint(x, y);
+	return under && host.contains(under) ? { x, y } : { why: (under ? String(under.className || under.tagName) : 'nothing') + ' over the editor at ' + Math.round(x) + ',' + Math.round(y) };
+}"""
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def document_links_open_on_middle_click(run):
+	"""The links written in a document's text (F-EDT-92, docs/15 "Links", owner 2026-11-08): Monaco underlines a web
+	address and a path that names a file of the workspace, and leaves a member access, a version and a folder plain. A
+	middle click opens the address in a Browser tab and the file in a document tab of its own - the two ways the owner
+	asked for (a page or a file opened in another tab by the middle button, as in a web browser). A link of an answer
+	opens its file too, without the IDE's own page going anywhere."""
+	url = run.target.url + "/login.html"        # the server's own sign-in page: a web address, and it answers unauthenticated
+	path = "docs/links-%s.md" % run.viewport
+	TEXT = "# Links\n\nSee ../README.md and %s here.\n\nx.y and 1.5 and docs/ are plain.\n"
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("fs.write", {"wsId": ws, "path": path, "text": TEXT % url})
+	page.evaluate("(path) => ied_shell.commands.run('ied.editor.goTo', { path })", path)
+	page.wait_for_function("(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }", arg=path, timeout=20000)
+	page.wait_for_selector(".view-lines .detected-link", timeout=20000)
+	found = page.eval_on_selector_all(".view-lines .detected-link", "els => els.map(e => e.textContent)")
+	check("../README.md" in found, "a path that names a file of the workspace is a link: %s" % found)
+	check(any(t.startswith("http") for t in found), "a web address is a link: %s" % found)
+	check(not any(t in ("x.y", "1.5", "docs/") for t in found), "a member, a version and a folder stay plain: %s" % found)
+	run.shot("underlined")
+
+	def middle_click(line, column):
+		"""The middle button on the character at a place, as a mouse gives it, and the tabs after (docs/15). The editor is
+		shown first, and its place taken only when the editor is what stands under it: a view that was hidden keeps its last
+		layout until it is measured again, and on a phone the tab shows as the pane."""
+		page.evaluate("(ref) => ied_shell.openTab(ref)", "doc:" + path)
+		point = {}
+		for _ in range(20):
+			point = page.evaluate(EDITOR_POINT, [path, line, column])
+			if "x" in point:
+				break
+			page.wait_for_timeout(250)
+		check("x" in point, "the editor was not shown to click in: %s" % point.get("why"))
+		page.mouse.move(point["x"], point["y"])
+		page.wait_for_timeout(700)
+		page.mouse.click(point["x"], point["y"], button="middle")
+		page.wait_for_timeout(800)
+		return page.evaluate("() => ied_shell.tabsState().open")
+
+	titles = ".phone-head" if run.phone else ".tab .name"
+	tabs = middle_click(3, 28)                 # "See ../README.md and " is 23 characters: the address begins at 24
+	check(any(t.startswith("browser:") for t in tabs), "the middle click on the address opened a Browser tab: %s" % tabs)
+	run.wait_text(titles, "IED - sign in", timeout=30000)
+	run.shot("web-page")
+
+	tabs = middle_click(3, 7)
+	check("doc:README.md" in tabs, "the middle click on the path opened that file's tab: %s" % tabs)
+	run.wait_text(titles, "README.md", timeout=20000)
+	run.shot("file-tab")
+
+	# A link in a reply opens its file, and the page itself does not go anywhere.
+	chat = open_chat(run)
+	run.target.queue_model(model_script({"text": "Read [the notes](docs/notes.md) now.", "chunk": 12}, {"finish": "stop"}))
+	send(chat, "where are the notes?")
+	chat.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	before = chat.evaluate("() => location.href")
+	chat.click(".chat-turn:last-child .chat-text a[href='docs/notes.md']")
+	chat.wait_for_function("(ref) => ied_shell.tabsState().open.includes(ref)", arg="doc:docs/notes.md", timeout=20000)
+	check(chat.evaluate("() => location.href") == before, "the page did not follow the link itself")
+	run.shot("answer-link")
+	run.request("fs.delete", {"wsId": ws, "path": path})
+	chat.close()
 
 
 import profiler_scenarios  # noqa: E402,F401  (the profiler's scenarios register themselves)

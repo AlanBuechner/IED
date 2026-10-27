@@ -61,8 +61,7 @@ namespace Ai
 		probe.vision = props.Member("modalities").Member("vision").AsBool();
 	}
 
-	// A GET's status and body; false with `error` when nothing usable came back in time.
-	static bool Fetch(Core::StringView url, const Core::Array<Core::String>& headers, int32 timeoutMs, int32& status, Core::String& body, Core::String& error) {
+	bool FetchText(Core::StringView url, const Core::Array<Core::String>& headers, int32 timeoutMs, int32& status, Core::String& body, Core::String& error) {
 		StreamingRequest http;
 		if (!http.Get(url, headers, timeoutMs, error)) return false;
 		const int64 until = ProbeNowMs() + timeoutMs;
@@ -94,7 +93,7 @@ namespace Ai
 		const int64 started = ProbeNowMs();
 		int32 status = 0;
 		Core::String body;
-		if (!Fetch((profile.endpoint + "/models").View(), headers, timeoutMs, status, body, probe.error)) return probe;
+		if (!FetchText((profile.endpoint + "/models").View(), headers, timeoutMs, status, body, probe.error)) return probe;
 		probe.ms = ProbeNowMs() - started;
 		if (status != 200) {
 			Core::StringBuilder said;
@@ -109,7 +108,7 @@ namespace Ai
 		for (const Core::String& id : probe.models) probe.modelServed = probe.modelServed || id == profile.model;
 		Core::String props;
 		Core::String ignored;
-		if (Fetch((ServerRoot(profile.endpoint.View()) + "/props").View(), headers, timeoutMs, status, props, ignored) && status == 200) ReadProps(props.View(), probe);
+		if (FetchText((ServerRoot(profile.endpoint.View()) + "/props").View(), headers, timeoutMs, status, props, ignored) && status == 200) ReadProps(props.View(), probe);
 		probe.ok = true;
 		return probe;
 	}

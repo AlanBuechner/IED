@@ -295,13 +295,13 @@ class ClaudeWireTests {
 		assert_true(Ai::HasClaudeModel(models.View()) && !Ai::HasClaudeModel(Text("{\"q\": {\"endpoint\": \"http://q/v1\"}}")), "the Claude profiles added");
 		Serialization::DomNode added = Parse(models.CStr());
 		assert_true(added.Count() == 4 && added.Member("claude-opus").Member("model").AsView() == "opus" && !added.Member("claude-auto").IsValid(), "four profiles, no auto");
-		assert_se("{\"claude\":{\"primary\":{\"model\":\"claude-opus\",\"pace\":{\"max\": 1.00, \"target\": \"both\"},\"fallback\":[{\"model\":\"claude-sonnet\",\"pace\":{\"max\": 1.25, \"target\": \"both\"}},{\"model\":\"claude-haiku\",\"pace\":{\"max\": 1.50, \"target\": \"both\"}}]}}}", groups.CStr(), "a chain stepping down as the plan runs ahead of pace");
+		assert_se("{\"claude\":{\"primary\":{\"model\":\"claude-opus\",\"pace\":{\"max\": 1.00, \"target\": \"both\"},\"fallback\":[{\"model\":\"claude-sonnet\",\"pace\":{\"max\": 1.25, \"target\": \"both\"}},{\"model\":\"claude-haiku\",\"pace\":{\"max\": 1.50, \"target\": \"both\"}},{\"model\":\"claude-fable\",\"pace\":{\"max\": 1.00, \"target\": \"both\"}}]}}}", groups.CStr(), "a chain stepping down as the plan runs ahead of pace, then Fable on its own week");
 		Ai::WithClaudeModels(Text("{\"qwen\": {\"endpoint\": \"http://q/v1\"}, \"claude-opus\": {\"provider\": \"claude-code\", \"model\": \"opus\", \"contextWindow\": 5}}"),
 			Text("{\"local\": {\"primary\": {\"model\": \"qwen\"}}}"), Text("local"), models, groups);
 		Serialization::DomNode kept = Parse(models.CStr());
 		assert_true(kept.Count() == 5 && kept.Member("claude-opus").Member("contextWindow").AsInt() == 5 && kept.Member("qwen").Member("endpoint").AsView() == "http://q/v1", "what was there kept as it was");
 		Serialization::DomNode chain = Parse(groups.CStr()).Member("claude").Member("primary").Member("fallback");
-		assert_true(chain.Count() == 3 && chain.At(2).AsView() == "qwen", "then the default group's local primary, always");
+		assert_true(chain.Count() == 4 && chain.At(2).Member("model").AsView() == "claude-fable" && chain.At(3).AsView() == "qwen", "then the default group's local primary, always");
 		assert_true(Parse(groups.CStr()).Member("local").Member("primary").Member("model").AsView() == "qwen", "the other groups kept");
 		Ai::WithClaudeModels(Text("{\"qwen\": {\"endpoint\": \"http://q/v1\"}}"), Text("{\"claude\": {\"primary\": {\"model\": \"claude-opus\"}}}"), Text("claude"), models, groups);
 		assert_se("{\"claude\":{\"primary\":{\"model\":\"claude-opus\"}}}", groups.CStr(), "a claude group already there is kept");

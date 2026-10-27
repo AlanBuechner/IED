@@ -48,7 +48,7 @@ The call {tool} ({call_id}) was interrupted by a restart; its effect is unknown.
 You have used {percent}% of this run's {budget} budget. Wrap up: finish the current task, verify, and report.
 
 ## context_compressed
-Earlier parts of this conversation were summarized to save space. Read the files or symbols again if you need their exact contents.
+Earlier parts of this conversation were left out of your requests to save space - not summarized and not lost: they are still in this chat, whole, and a restart does not empty it. `history_search` finds where anything was said and `history_read` gives a turn back; read the files or symbols again if you need their exact contents.
 
 ## unparsed_tool_call
 Your reply wrote a tool call as text that could not be read. Call the tool again in the tool-calling format, with complete JSON arguments.

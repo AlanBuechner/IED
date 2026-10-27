@@ -2,7 +2,8 @@
 // splitters, document groups with their tab strip on top, tool-window groups with a title and their tabs below (VS);
 // a tab dragged along its strip slides into a new place (tabslide.js), as in a web browser; dragged off it, onto a group
 // (center joins it, edges split it), another strip or an activity edge, with a preview of where it lands. A document
-// strip ends in "+", which opens a new tab of its activity (its `newTab` command), as does a double click on its free end.
+// strip ends in "+", which opens a new tab of its activity (its `newTab` command), as does a double click on its free end;
+// its right button opens the `tabs/new` menu, the other ways to open a tab there (a web view, a file's preview, ...).
 // Auto-hidden tool windows are tabs on strips along the edges; a click slides one out over the documents until the focus
 // or a click goes elsewhere, or Escape.
 
@@ -23,8 +24,9 @@ const NOT_AWAY = ".ah-tab, .popup, .dock-ghost, .shadow-root-host";
 export class DockView {
 	// `host`: {views, menus, emptyWell(), activate(ref), close(ref), pin(ref), move(ref, path, zone, index),
 	// resize(path, sizes), autoHide(ref, hidden), resizeAutoHidden(ref, share), hold(on), focused(ref, path, well),
-	// newTab(path, active) and newTabTitle when the activity opens new tabs (null: no "+"), titleActions(path, active):
-	// the strip's buttons for its group's active tab, [{title, icon, base, command, run}]}
+	// newTab(path, active) and newTabTitle when the activity opens new tabs (null: no "+"), newTabMenu(path, active, event)
+	// for its right button, titleActions(path, active): the strip's buttons for its group's active tab,
+	// [{title, icon, base, command, run}]}
 	constructor(host, container) {
 		this.host = host;
 		this.container = container;
@@ -144,7 +146,7 @@ export class DockView {
 	}
 
 	emptyWellGroup() {
-		const plus = this.host.newTab ? h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on: { click: () => this.host.newTab([], null) } }, icon("add")) : null;
+		const plus = this.newTabButton([], null);
 		return h("div.dock-group.well", { dataset: { path: "" } }, h("div.tabs", null, plus), h("div.dock-body", null, this.host.emptyWell()));
 	}
 
@@ -152,7 +154,8 @@ export class DockView {
 		const newTab = this.host.newTab ? () => this.host.newTab(path, active) : null;
 		const strip = h("div.tabs", { role: "tablist", on: { dblclick: (event) => newTab && (event.target === strip || event.target.matches(".tabs-tail")) && newTab() } });
 		for (const ref of visible) strip.append(this.tab(ref, ref === active, group.preview === ref, path, "tab"));
-		if (newTab) strip.append(h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on: { click: newTab } }, icon("add")));
+		const plus = this.newTabButton(path, active);
+		if (plus) strip.append(plus);
 		const actions = active && this.host.titleActions ? this.host.titleActions(path, active) : [];
 		strip.append(h("div.tabs-tail", null,
 			...actions.map((action) => h("button.ib.tabs-action", { title: action.title, "aria-label": action.title, dataset: { command: action.command }, on: { click: action.run } }, iconFrom(action.icon, action.base) || h("span", null, action.title))),
@@ -177,6 +180,22 @@ export class DockView {
 		this.host.menus.show("tab/context", event, { ref });
 	}
 
+	// The strip's "+": a click opens a new tab of its activity (its `newTab` command), its right button the menu of the
+	// other ways to open one (`tabs/new`, docs/15 "Docking"). `path` and `active` say which group, so what is chosen goes
+	// into it.
+	newTabButton(path, active) {
+		if (!this.host.newTab) return null;
+		const on = { click: () => this.host.newTab(path, active) };
+		if (this.host.newTabMenu) on.contextmenu = (event) => this.openNewTabMenu(event, path, active);
+		return h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on }, icon("add"));
+	}
+
+	// The menu hangs under the button: the keyboard's menu key reaches it as the mouse does.
+	openNewTabMenu(event, path, active) {
+		event.preventDefault();
+		this.host.newTabMenu(path, active, event.currentTarget);
+	}
+
 	toolTabs(visible, active, path) {
 		const strip = h("div.tw-tabs", { role: "tablist" });
 		for (const ref of visible) strip.append(this.tab(ref, ref === active, false, path, "tw-tab"));
@@ -187,7 +206,7 @@ export class DockView {
 	tetherGlyph(ref) {
 		const partners = this.host.tetheredWith ? this.host.tetheredWith(ref) : [];
 		if (!partners.length) return null;
-		const names = partners.map((p) => (this.host.views.get(p) || { title: p }).title).join(", ");
+		const names = partners.map((p) => this.host.views.titleOf(p)).join(", ");
 		return h("span.tether", { title: "Tethered with " + names, "aria-label": "Tethered with " + names }, icon("link"));
 	}
 

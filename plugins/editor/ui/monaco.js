@@ -3,6 +3,7 @@
 // comment tokens, brackets, Monarch grammars and the keywords their grammars name for control flow.
 
 import { SYNTAX_KINDS } from "./semanticcolors.js";
+import { registerLinks } from "./editorlinks.js";
 
 const BASE = "/vendor/monaco-editor/min/vs";
 const THEME = "ied-dark";
@@ -31,6 +32,7 @@ function boot(ied) {
 				const monaco = window.monaco;
 				defineTheme(monaco, controlKeywords(ied.contributions("languages")));
 				monaco.editor.setTheme(THEME);
+				registerLinks(monaco, ied);
 				shareThemeWithShadowRoots();
 				registerLanguages(monaco, ied).then(() => resolve(monaco), reject);
 			}, reject);

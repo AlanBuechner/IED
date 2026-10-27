@@ -1,0 +1,31 @@
+{
+	"description": "Prefill that outlasts the watchdog twice: 150 s and then 140 s of silence, the second one answered.",
+	"stopClass": "stalled_prefill",
+	"harness": "The retry after a stalled prefill is never given the deadline that just failed: the wait becomes the floor under the next one (twice it), so the second 140 s read finishes inside it. docs/12 \"Watchdogs\".",
+	"responses": [
+		{
+			"headers": "lazy",
+			"steps": [
+				{ "stall": 150 },
+				{ "role": "assistant" },
+				{ "text": "Slow." },
+				{ "finish": "stop" },
+				{ "usage": true },
+				{ "done": true }
+			],
+			"wire": { "transport": "done", "minSilence": 150 }
+		},
+		{
+			"headers": "lazy",
+			"steps": [
+				{ "stall": 140 },
+				{ "role": "assistant" },
+				{ "text": "Answered inside the longer deadline." },
+				{ "finish": "stop" },
+				{ "usage": true },
+				{ "done": true }
+			],
+			"wire": { "transport": "done", "minSilence": 140, "finishReason": "stop", "text": "Answered inside the longer deadline." }
+		}
+	]
+}
