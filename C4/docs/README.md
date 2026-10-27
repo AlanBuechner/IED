@@ -82,6 +82,7 @@ been checked against the compiler.
 | [03-editor-lsp-dap.md](tools/03-editor-lsp-dap.md) | Editor integration (IED), C4LSP, C4DAP |
 | [04-building-the-compiler.md](tools/04-building-the-compiler.md) | Building C4 itself: `setup.bat`, `nuke build` (the C/C++ plugin's driver), toolchains from the build, build traps |
 | [05-test-suites.md](tools/05-test-suites.md) | Every test suite, how to run it (`nuke gates` runs them all), how to add tests |
+| [06-c4-api.md](tools/06-c4-api.md) | The compiler's C API (`C4Api.dll`) for tools around C4, and linking it from any project |
 
 ### Compiler internals - `compiler/`
 | Page | Contents |
@@ -137,5 +138,5 @@ been checked against the compiler.
 | `AGENTS.md` | Standards for anyone (human or AI) changing the code: stability mandate, code cleanliness, comments |
 | `WORK.md` | Tracker for active work |
 | `LongTermPlan.txt` | The original long-term plan; its items are tracked in [status/roadmap.md](status/roadmap.md) |
-| `skills/*/SKILL.md` | Short agent-facing summaries of the language, shipped in every toolchain; these docs are the full reference |
+| `../plugins/c4/skills/*/SKILL.md` | Short agent-facing summaries of the language (the c4 IED plugin's), shipped in every toolchain; these docs are the full reference |
 | `../plugins/cpp/docs/` | The C++ libraries the compiler links (Core, Math, Reflection, UnitTesting); their build is `../Nuke/README.md` section 9c |

@@ -7,7 +7,7 @@
 #     C4.exe, *.dll, *.pdb  the compiler; it finds everything below relative to itself (docs/status/plan.md D-56)
 #     Bedrock/  C4Runtime/  toolchain/{bin,lib}   default library, runtime sources, clang + lld-link + llvm-rc
 #     CBind/    C4Script/                         binding generator, script host
-#     C4Api/                C4Api.dll, its import library and C4Api.h: the compiler's C API for tools (docs/tools/04)
+#     C4Api/                C4Api.dll, its import library and C4Api.h: the compiler's C API for tools (docs/tools/06)
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs, and library/bedrock-api.md: the
 #                           Bedrock API digest, made from the headers the toolchain ships (ApiDigest.py)
@@ -64,7 +64,7 @@ DOCS = [
 	"language/13-interop.md", "language/14-builtins.md", "language/15-projects.md",
 	"library/bedrock.md",
 	"runtime/01-memory-and-gc.md", "runtime/02-reflection.md", "runtime/03-testing.md", "runtime/04-scripting.md",
-	"tools/01-compiler-cli.md", "tools/02-nuke.md", "tools/03-editor-lsp-dap.md",
+	"tools/01-compiler-cli.md", "tools/02-nuke.md", "tools/03-editor-lsp-dap.md", "tools/06-c4-api.md",
 ]
 
 

@@ -172,7 +172,7 @@ Two palettes ship:
 
 - **Grayscale** - luminance, weight and italics only; a per-user choice (`data-syntax="grayscale"` on the root or on any subtree).
 
-Language plugins map their server's semantic token legend onto these names with `semanticTokenColors` (`docs/02`; the C4 plugin's in `C4/IedPlugin/ied-plugin.json`, clangd's in `plugins/cpp`, rust-analyzer's in `plugins/rust`). Grammar (Monarch) tokens map by name: `keyword.directive` is the preprocessor gray, an `#include`'s path a string, a grammar's per-keyword control-flow names (`keyword.return`) the control color. Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
+Language plugins map their server's semantic token legend onto these names with `semanticTokenColors` (`docs/02`; the C4 plugin's in `plugins/c4/ied-plugin.json`, clangd's in `plugins/cpp`, rust-analyzer's in `plugins/rust`). Grammar (Monarch) tokens map by name: `keyword.directive` is the preprocessor gray, an `#include`'s path a string, a grammar's per-keyword control-flow names (`keyword.return`) the control color. Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
 
 ### Prose
 

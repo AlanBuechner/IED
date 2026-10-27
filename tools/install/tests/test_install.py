@@ -57,6 +57,21 @@ class MirrorTests(unittest.TestCase):
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
 
 
+	def test_what_a_checkout_built_in_place_stays_out_at_any_depth(self):
+		write(os.path.join(self.source, "c4", "ied-plugin.json"), "{}")
+		write(os.path.join(self.source, "c4", "samples", "tool", "build", "bin", "tool.exe"), "built")
+		write(os.path.join(self.source, "c4", "samples", "tool", "src", "main.cpp"), "int main() {}")
+		write(os.path.join(self.source, "rust", "profiler", "target", "debug", "x.rlib"), "cargo")
+		write(os.path.join(self.source, "cpp", "nuke", "driver", "__pycache__", "model.pyc"), "bytecode")
+		write(os.path.join(self.target, "rust", "profiler", "target", "old.rlib"), "installed before")
+		result = report()
+		install_ied.mirror(self.source, self.target, set(), result, install_ied.BUILT_IN_PLACE)
+		self.assertEqual(2, result["copied"], "the manifest and the sample's source")
+		self.assertTrue(os.path.isfile(os.path.join(self.target, "c4", "samples", "tool", "src", "main.cpp")))
+		for gone in (("c4", "samples", "tool", "build"), ("rust", "profiler", "target"), ("cpp", "nuke", "driver", "__pycache__")):
+			self.assertFalse(os.path.exists(os.path.join(self.target, *gone)), "/".join(gone))
+
+
 class ServicesTests(unittest.TestCase):
 	def test_setup_installs_the_services_through_the_private_python(self):
 		repo = tempfile.mkdtemp(prefix="ied-install-")

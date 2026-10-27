@@ -1,4 +1,4 @@
-# The C4 compiler's C API (docs/tools/04-c4-api.md): C4Api.dll, a C interface over C4Lib for tools around C4 in any
+# The C4 compiler's C API (docs/tools/06-c4-api.md): C4Api.dll, a C interface over C4Lib for tools around C4 in any
 # language - a C4 source's declarations and syntax diagnostics today. It carries the compiler statically, as C4Script
 # does, so a tool needs only the DLL beside it; every toolchain ships it in C4Api/ with its header and import library
 # (MakeToolchain.py), and a Nuke project anywhere depends on it by name (the c4 package's C4Api library,

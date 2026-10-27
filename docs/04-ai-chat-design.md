@@ -373,7 +373,7 @@ Assembled in a fixed order - base prompt, style rules, mode instructions, soluti
 
 ## Skills
 
-- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the C4 skills the toolchain's plugin ships, `C4/IedPlugin/skills/`, which use `triggers`). A plugin's skills stay in its folder, which the file tools read as `plugins:/<plugin id>/` and nobody but developer mode writes (owner, 2026-10-26; `docs/13` "Plugin folders"); `skill_read` says where a skill lives and what lies beside it.
+- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the C4 skills of the `c4` plugin, `plugins/c4/skills/` (each toolchain ships its version's), which use `triggers`). A plugin's skills stay in its folder, which the file tools read as `plugins:/<plugin id>/` and nobody but developer mode writes (owner, 2026-10-26; `docs/13` "Plugin folders"); `skill_read` says where a skill lives and what lies beside it.
 - Index: BM25 over name, description, keywords, triggers and headings; optional embedding rerank (P2).
 - In the prompt: the whole index when small (<= 40), otherwise the top 15 for the task + `skill_search`. Bodies load only via `skill_read`; a skill can declare tool groups to enable.
 - Authoring: `skill_write` (approval-gated) and "synthesize skill from this chat"; the orchestration learning loop proposes skill updates after successful goals.

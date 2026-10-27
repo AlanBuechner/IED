@@ -1,5 +1,5 @@
 #pragma once
-// The C4 compiler's C API (docs/tools/04-c4-api.md): C4Api.dll gives tools around C4 - written in C, C++, C4 through
+// The C4 compiler's C API (docs/tools/06-c4-api.md): C4Api.dll gives tools around C4 - written in C, C++, C4 through
 // interop, or any language that calls C - what the compiler knows about a source, behind a C interface that keeps its
 // shape across compiler versions. Every toolchain ships it in C4Api/ (this header, C4Api.dll, its import library
 // C4Api.lib); a Nuke project depends on it by name (depends = ["C4Api"]). Strings are UTF-8 and owned by the DLL: one

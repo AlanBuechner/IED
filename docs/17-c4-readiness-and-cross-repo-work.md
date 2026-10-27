@@ -87,7 +87,7 @@ Until then, the **frontend (`frontend/`, `shared/ui-kit`) and the contract (`sha
 
 ### C4LSP (`C4/C4LSP/`)
 
-Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Legacy quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, `C4/IedPlugin/ied-plugin.json`) and the C4 team should fix:
+Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Legacy quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, `plugins/c4/toolchain-contributions.json`) and the C4 team should fix:
 
 | # | Item | Why |
 |---|---|---|
@@ -134,7 +134,7 @@ Today: launch, line breakpoints, thrown/uncaught exception filters, continue/ste
 
 C4Assist (the C4 plugin for the predecessor IDE, Go + TypeScript) was not carried into this repository when C4 moved in (2026-10-20); this section is the record of what it did and what the rewrite needs. Its theme values live on in `frontend/css/theme.css`.
 
-C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (built: `C4/IedPlugin/ied-plugin.json`, shipped in every toolchain as `ied/`):
+C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (built: `plugins/c4/ied-plugin.json` - in `C4/IedPlugin` until 2026-10-26 -, shipped in every toolchain as `ied/`; IED's built-in copy has a little code that finds the toolchain whose language server and debug adapter it starts, `docs/26` "The c4 plugin and its toolchains"):
 
 - Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (IED's default palette is the Visual Assist X one C4Assist ships, `docs/07`).
 - LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.
@@ -143,6 +143,10 @@ C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes,
 - Skills: the C4 skills move to the plugin's `skills/` and the Nuke skill to the built-in `ied.nuke` plugin; `nuke init` stops copying them into `.ied/skills/` (`docs/26` section 8).
 - `kitStatus` becomes a status bar item fed by a binding the host already has (file exists + LSP state); `formatDocument` is the LSP's formatting (no separate tool).
 - Port C4Assist's 17 Playwright e2e specs to IED's frontend e2e harness (`docs/19`).
+
+### Tools around C4: the C API
+
+Owner (list item 26, 2026-10-26): "tooling to allow for other projects not just the c4 plugin to link to the c4lib ... for third parties to build their own tooling around c4". Built: `C4Api.dll` (`C4/C4Api`), a stable C API over C4Lib - API version 1 parses a source into its declarations and syntax diagnostics - shipped in every toolchain's `C4Api/` with `C4Api.h` and its import library; a Nuke project of any workspace says `depends = ["C4Api"]` (the c4 package's prebuilt library, `docs/23` N-24); the sample `plugins/c4/samples/c4-outline` is tested by Nuke's integration tests. Why a DLL with a C interface and not C4Lib's static library: `C4/docs/tools/06-c4-api.md`. Next: name resolution and the program model of a project (API version 2), as tools ask for them.
 
 ### The script host for IED plugins (`docs/26`)
 

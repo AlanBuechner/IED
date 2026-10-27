@@ -15,6 +15,7 @@ This doc is the design; it supersedes the four-runtime model of `docs/02` (whose
     plugin.cf                  a class implementing IED::Plugin (section 2)
   ui/                        ES modules run in the browser: views, client bindings
   nuke/                      the plugin's Nuke language driver: nuke-language.toml + Python (section 6)
+  libraries/                 library projects its Nuke package brings (C++'s Core, C4's C4Api)
   skills/<name>/SKILL.md     AI skills
   prompts/<section>.md       system-message sections
   grammars/ icons/ schemas/  data the contributions name
@@ -172,8 +173,25 @@ A language plugin owns everything about its language. The host and the default f
 | `ied.scripts` | Shell, PowerShell, Batch | icons | |
 | `ied.lua`, `ied.sql` | Lua, SQL | icons | |
 | `ied.filetypes` | (no language) | media, archive, binary, license icons; plain text | |
-| `c4` (in every C4 toolchain) | C4 | as now, plus its skills (`C4/IedPlugin/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section, `c4.nuke` extending Nuke's preset and New Project's Console App and Module | C4 code: `c4_*` AI tools, test provider |
+| `c4` (built in, and in every C4 toolchain) | C4 | `plugins/c4`: its skills (`plugins/c4/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section, `c4.nuke` extending Nuke's preset, New Project's Console App and Module, C4LSP and C4DAP of the workspace's toolchain ("The c4 plugin and its toolchains" below), and a Nuke package that brings C4Api, the compiler's C API for tools (section 6) | C4 code: `c4_*` AI tools, test provider |
 | `ied.nuke` (built in) | (no language: the build system) | the `nuke` preset, `nuke.command`, the `nuke.toml` icon, the Nuke skill, a section and the `nuke_list` tool | |
+
+### The c4 plugin and its toolchains
+
+Owner (list item 26, 2026-10-26): "the plugin for c4 support in ied and nuke should be in the plugins folder next to all the other default plugins rather then in the c4 project folder". It is `plugins/c4` (it was `C4/IedPlugin`), and it exists in two copies of one source:
+
+- **IED's built-in** (`<IED>/plugins/c4`, loaded everywhere): a C4 folder opened without a Nuke solution gets the language, its grammar, icons, matchers, presets, templates and skills - and the language server and debug adapter of an installed toolchain, which its code finds (below).
+- **Each toolchain's own** (`<toolchain>/ied/`): `C4/MakeToolchain.py` copies the plugin's grammar, settings and skills, and writes the copy a **declarative** manifest - `runtime.kind` `declarative`, and the entries of `plugins/c4/toolchain-contributions.json` (the language server, the debug adapter, the reference docs) with `${pluginDir}/..` for the toolchain - plus `docs/`, that version's reference docs. `nuke init --ied` pins it in the solution's `localPlugins`, so in a trusted workspace it overrides the built-in there (a project plugin wins over a built-in, section 7): a Nuke workspace gets the plugin of the C4 it builds with. Declarative because a toolchain outlives IED versions: its copy has no code compiled against an API it predates (and a `builtin` runtime is refused outside IED's own folder).
+
+**How the built-in finds a toolchain.** Its code (`plugins/c4/code/`, compiled into the server, `runtime.kind` `builtin`) gives each workspace the plugin is loaded for the language server and debug adapter of `toolchain-contributions.json` with `${c4.toolchain}` filled in, as computed contributions (section 3), and again when the workspace's `nuke.toml` or a setting changes. The toolchain, in order:
+
+1. the app's `c4.toolchain` setting (app tier only, so a repository cannot point IED at a program of its own): a toolchain folder, or a version installed in the store;
+2. the workspace's `nuke.toml` `[workspace] toolchain` (its root's): a version, `latest`, `dev`, or a folder relative to the workspace - as Nuke reads them (`Nuke/nuke/toolchains.py`);
+3. none: the newest numbered version installed, else `dev`.
+
+The store is Nuke's: `NUKE_TOOLCHAINS`, else the `toolchains/` folder of the Nuke checkout IED runs - the one the `nuke.command` setting names when it is a path (`<checkout>/bin/nuke.cmd`), else the first `nuke.cmd` on PATH (`setup.bat --add-to-path`) - with `c4/<version>` below it. A version is installed when its folder holds `C4.exe`. The server log says which toolchain a workspace got and from where, or, in a workspace that uses C4, why it got none; with none the workspace has no C4LSP or C4DAP (the language itself stays). C4LSP and C4DAP run only in a trusted workspace, as they did when only a toolchain's copy brought them. The C4 knowledge is the plugin's: the host gives it `Contribute`, `Setting` and `ReadFile` (AGENTS.md rule 1). Tests: the unit cases `server.c4plugin.toolchain`, the server checks `test_c4_plugin.py` (a pinned version, a pin edited to `latest`, the setting, an empty store, a toolchain's copy overriding the built-in) and `tools/schema-check` (the toolchain copy's manifest, as MakeToolchain writes it).
+
+Limits: the built-in has no reference docs of its own (`aiDocs` must lie inside the plugin; a toolchain's copy has its version's), so the AI's `docs_search` over C4 needs a Nuke solution that pins a toolchain. A toolchain store found only through `nuke.command` or PATH: a machine whose `nuke` is neither names it with `c4.toolchain` or `NUKE_TOOLCHAINS`.
 
 The editor keeps no language knowledge: the compiler location shapes, Markdown fence names and Monaco control keywords it held moved into the language plugins (section 3), and its Markdown preview into `ied.markdown`, which colors fenced code through the editor's `editor.colorize` binding (now `{languageId | path, lines}`).
 
@@ -181,7 +199,7 @@ The editor keeps no language knowledge: the compiler location shapes, Markdown f
 
 **Without a `nuke.toml`** a project builds with its language's own tool, exactly as its developers build it outside IED: the language plugin's task preset runs `cargo`, `go`, `cmake`, `dotnet` or `npm` (detected by `Cargo.toml`, `go.mod`, `CMakeLists.txt`, ...), with the plugin's problem matchers and launch configurations. Nuke is not involved. This is how `ied.rust`'s `rust.cargo` preset works today.
 
-**With a `nuke.toml`** Nuke orchestrates the workspace - C4 projects natively, others through **language drivers** shipped in the language plugin's `nuke/` folder **(owner)**. A non-C4 project names its language:
+**With a `nuke.toml`** Nuke orchestrates the workspace - C4 projects natively, others through **language drivers** shipped in the language plugin's `nuke/` folder **(owner)**. C4's package (`plugins/c4/nuke`) has no driver - Nuke compiles C4 itself, its toolchains and modules being Nuke's own model (`docs/23` N-23) - and brings the library tools around C4 link: `C4Api`, the compiler's C API from the workspace's toolchain, a prebuilt C/C++ library (`docs/23` N-24, `C4/docs/tools/06-c4-api.md`, the sample `plugins/c4/samples/c4-outline`). A non-C4 project names its language:
 
 ```toml
 [project]
@@ -212,7 +230,7 @@ runs the Reflection library's code generation and writes `build/compile_commands
 projects (`plugins/cpp/libraries`: Core, Threading, Profiling, the Reflection libraries and tools, ObjectDescription,
 ChangeNotification, UnitTesting and their tests) join a workspace that depends on them. It is also where Nuke learned how
 a package extends it (`docs/23` N-18): workspace settings in `[languages.cpp]` (`llvm`, `system-includes`), library
-projects, `build-before-test`, `implicit_depends`, `${cpp.llvm}`. This repository's C4 compiler and tools are ten such
+projects, `build-before-test`, `implicit_depends`, `${cpp.llvm}`. This repository's C4 compiler and tools are eleven such
 projects, grouped as `C4` in the solution (`docs/03`).
 
 Cross-language linking (a C4 game calling a Rust library through a C header) is the drivers' and C4 interop's business, later.

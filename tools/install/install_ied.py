@@ -59,6 +59,9 @@ TREES = (
 	("third_party/codicons/src/icons", ()),
 	("third_party/codicons/src/template", ()),
 )
+# What a checkout's own work leaves inside those trees, at any depth, and an install leaves out: a plugin's sample built
+# in place (plugins/c4/samples/*/build), a crate's cargo output (target), the bytecode of a Nuke driver Python ran.
+BUILT_IN_PLACE = {"build", "target", "__pycache__"}
 
 # The services the web plugins run (docs/29): the private Python, SearXNG's own package (its searx/ folder) and Python
 # packages, and the Tor Expert Bundle. Each install first has setup install them into the checkout's vendor/ (only what
@@ -150,13 +153,13 @@ def remove_old(folder):
 				pass
 
 
-def mirror(source, target, skip, report):
-	"""`target` made like `source` (folders in `skip` left out): changed files copied, files gone from it removed."""
+def mirror(source, target, skip, report, anywhere=()):
+	"""`target` made like `source` (folders in `skip` left out at its top, those in `anywhere` at any depth): changed
+	files copied, files gone from it removed."""
 	wanted = set()
 	for folder, dirs, files in os.walk(source):
 		relative = os.path.relpath(folder, source)
-		if relative == ".":
-			dirs[:] = [d for d in dirs if d not in skip]
+		dirs[:] = [d for d in dirs if d not in anywhere and not (relative == "." and d in skip)]
 		for name in files:
 			path = os.path.normpath(os.path.join(relative, name))
 			wanted.add(path)
@@ -216,7 +219,7 @@ def install(bin_root, target):
 		source = os.path.join(REPO, tree)
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
-		mirror(source, os.path.join(target, tree), set(skip), report)
+		mirror(source, os.path.join(target, tree), set(skip), report, BUILT_IN_PLACE)
 	if not ensure_services(REPO):
 		print("install-ied: setup could not install the web search services (see above); installing without what is missing")
 	for tree, skip in SERVICES:

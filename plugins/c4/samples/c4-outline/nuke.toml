@@ -1,4 +1,4 @@
-# A tool around C4 built on the compiler's C API (C4/docs/tools/04-c4-api.md): c4-outline prints the declarations and
+# A tool around C4 built on the compiler's C API (C4/docs/tools/06-c4-api.md): c4-outline prints the declarations and
 # the syntax errors of C4 sources. It is a workspace of its own, as a third party's tool is: it pins a toolchain, and
 # depends = ["C4Api"] gives it that toolchain's C API - C4Api.h, C4Api.lib, C4Api.dll beside the program - through the
 # c4 package's library (plugins/c4/libraries/C4Api). From this folder:

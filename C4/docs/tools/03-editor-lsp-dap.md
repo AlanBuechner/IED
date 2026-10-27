@@ -2,13 +2,14 @@
 
 C4's editor integration targets **IED**, the project's own IDE. IED has no built-in C4 knowledge: all
 coloring, navigation and diagnostics come from the C4 language server, and debugging from the C4 debug
-adapter, through the C4 plugin for IED (`IedPlugin/`; it replaces the plugin written for the previous editor,
-which was retired). The server and the adapter speak plain LSP and DAP, so any client can use them.
+adapter, through the C4 plugin for IED (`plugins/c4/` of the IED repository, beside IED's other default plugins; it
+replaces the plugin written for the previous editor, which was retired). The server and the adapter speak plain LSP
+and DAP, so any client can use them.
 
 | Piece | Location | Status |
 |---|---|---|
 | C4LSP - language server | `C4LSPLib/` (the server), `C4LSP/` (the executable) | **Implemented** (rebuilt after the ProgramModel rework, validated in the previous editor, unit tested in C4Testing) |
-| C4 plugin for IED | `IedPlugin/`, shipped in every toolchain as `ied/` | **Implemented** for the language and C4LSP; the C4DAP part waits for IED's debugger |
+| C4 plugin for IED | `plugins/c4/` (IED's built-in), shipped in every toolchain as `ied/` | **Implemented** for the language, C4LSP and C4DAP |
 | C4DAP - debug adapter | `C4DAPLib/` (the adapter), `C4DAP/` (the executable) | **Implemented** (unit tested in C4Testing and over stdio in ToolsTest) |
 
 ---
@@ -153,9 +154,22 @@ and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 G
 
 ## 2. The C4 plugin for IED
 
-`IedPlugin/` is a declarative IED plugin (no code: a manifest, a grammar and a settings schema). `MakeToolchain.py`
-copies it into every toolchain as `<toolchain>/ied/`, so a workspace gets the plugin of the C4 it builds with: the
-solution `nuke init --ied` writes names it in its `localPlugins` (IED loads local plugins in trusted workspaces).
+The plugin lives in the IED repository as `plugins/c4/` (IED docs/26 "The c4 plugin and its toolchains"), in two
+copies:
+
+- **IED's built-in** (`<IED>/plugins/c4`): loaded everywhere, so a C4 folder opened without a Nuke solution has C4
+  support. Its code (`plugins/c4/code`, compiled into IED's server) gives each workspace the language server and the
+  debug adapter of the toolchain it uses: the app's `c4.toolchain` setting (a toolchain folder or an installed
+  version), else the toolchain the workspace's `nuke.toml` pins, else the newest one installed - in the store of the
+  Nuke IED runs (`NUKE_TOOLCHAINS`, else the `toolchains/` folder of the checkout the `nuke.command` setting or PATH
+  names), as Nuke reads those names ([02-nuke.md](02-nuke.md)). The server log says which toolchain a workspace got,
+  or why none.
+- **Each toolchain's own** (`<toolchain>/ied/`): `MakeToolchain.py` copies the plugin's grammar, settings and skills
+  and writes it a declarative manifest naming that toolchain's own tools and docs (`${pluginDir}/..`). The solution
+  `nuke init --ied` writes names it in its `localPlugins`; IED loads it in a trusted workspace, where it overrides
+  the built-in, so a workspace gets the plugin of the C4 it builds with.
+
+Both contribute:
 
 - **The language** `c4` for `.cf` and `.ch`: comments, brackets, closing pairs, indentation, task comments, and a
   Monarch grammar (`grammars/c4.monarch.json`) that colors a file until C4LSP's semantic tokens arrive. Its files and
@@ -179,7 +193,11 @@ solution `nuke init --ied` writes names it in its `localPlugins` (IED loads loca
   matchers and a `Launch` debug configuration (C4DAP on the project's output, built first).
 - **AI**: the skills of this version of the language (`skills/`, read before writing C4 or its tests) and a system
   message section for workspaces that hold C4.
-- **Settings**: `c4.languageServer` (on) turns C4LSP off for a workspace.
+- **Settings**: `c4.languageServer` (on) turns C4LSP off for a workspace; `c4.toolchain` (app tier only: a
+  repository cannot point IED at a program of its own) names the built-in's toolchain.
+
+C4LSP and C4DAP run only in a trusted workspace. The reference docs (`ied/docs`, the AI's `docs_search` and
+`docs_read`) come with a toolchain's copy.
 
 The server and the adapter are tested here without an editor (C4Testing `Lsp.*` and `Dap.*`, ToolsTest); IED's
 server checks drive its language server pool with a fake server.

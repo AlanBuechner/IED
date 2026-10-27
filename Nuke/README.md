@@ -99,6 +99,7 @@ exclude = ["samples/**"]           # folders to skip: in discovery, and among wh
 default-configuration = "Development"
 scripts = ["build/nuke_ext.py"]    # Python extensions (section 6)
 ide = true                         # write the IDE bridge files (section 9)
+ied-plugins = ["plugins/*"]        # IED plugins it develops: projects of its IED solution (section 9)
 
 [configurations.Profile]           # add a configuration, or change a built-in one
 optimize = 2                       # 0..3
@@ -266,8 +267,9 @@ Manifest strings expand `${name}`; an unknown name is an error. `$${` is a liter
 ## 8. Toolchains
 
 A **toolchain** is a complete C4 install - the compiler, its default library and runtime, clang and lld-link,
-CBind, C4Script, the language server and debug adapter, the user docs and the IED plugin of that language
-version (with its AI skills) - with a `toolchain.json` (version, git commit, whether the tree was modified, build time). They live
+CBind, C4Script, C4Api (the compiler's C API for tools, section 9c), the language server and debug adapter, the user docs
+and the IED plugin of that language version (IED's `plugins/c4`, with its AI skills and a manifest naming that
+toolchain's tools) - with a `toolchain.json` (version, git commit, whether the tree was modified, build time). They live
 in one store per machine, `<this repository>/toolchains/c4/<version>/` (`NUKE_TOOLCHAINS` overrides the
 location), and every workspace shares them:
 
@@ -333,7 +335,10 @@ other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `l
 configuration, extended by the language's plugin with its problem matchers and launch configuration; `["nuke"]` for a
 project without a language), and pins the toolchain's IED plugin
 (`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
-store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
+store is inside the workspace, as it is by default. The IED plugins the workspace develops (`ied-plugins`: folders or
+globs of folders with an `ied-plugin.json`) get project files of kind `plugin` - no build system: IED loads them - named
+by their ids (`<id> plugin` where a project has that name) in the solution's "IED Plugins" folder; this repository
+lists `plugins/*`. Run it again after adding or removing projects: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
 is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
 names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. The projects' `group`s
@@ -360,7 +365,10 @@ languages, and the outputs in one place.
 
 A language's package is the one the workspace pins in `[languages]` (a folder, relative to the workspace), else one
 of the workspace's own plugins (`.ied/plugins/<id>/`: a project that invents a language ships its driver with it),
-else one of IED's plugins beside Nuke (`NUKE_LANGUAGE_PACKAGES` adds folders to look in). `NUKE_TOOL_<NAME>`
+else one of IED's plugins beside Nuke (`NUKE_LANGUAGE_PACKAGES` adds folders to look in). A package may have no
+driver (no `module` in its description): it names its projects' preset and brings library projects, and a project in
+its language is refused. C4's is one (`plugins/c4/nuke`): Nuke compiles C4 itself (IED docs/23 N-23), and the package
+brings `C4Api`, the compiler's C API from the workspace's toolchain (section 9c). `NUKE_TOOL_<NAME>`
 (`NUKE_TOOL_CARGO`) names the tool when it is not on `PATH`.
 
 ```toml
@@ -407,7 +415,7 @@ compiler-args = ["-Wno-unused-variable"]   # clang -cc1 arguments, after the dri
 tests = true                       # (an executable) a test program: `nuke test` runs it with -filter=GLOB
 
 [project.driver]
-library = "dynamic"                # a DLL (and its import library) instead of a static library
+library = "dynamic"                # a DLL (and its import library) instead of a static library; "prebuilt": below
 reflection = true                  # the Reflection library's HeaderTool and CodeGen run over the sources
 system-includes = ["sdk/include"]  # this project's own system include folders
 linker-args = ["-fuse-ld=lld"]
@@ -448,6 +456,12 @@ standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for
   into `<int>/generated/generated.cpp`, compiled and linked with the project (`plugins/cpp/docs/ReflectionSystem.md`).
 - **clangd.** Every build merges its sources' compiles, in the clang driver's form, into `build/compile_commands.json`,
   which IED's clangd finds for every file of the workspace.
+- **Prebuilt libraries** (`library = "prebuilt"`, `sources = []`): an SDK's files, nothing built. Its `includes`,
+  its `links` (library files) and its `[[project.copy]]` reach what depends on it as a static library's do, and each
+  must be there (the build stops naming the ones that are not). The c4 package's `C4Api` is one:
+  `includes = ["${toolchain.dir}/C4Api"]`, `links = ["${toolchain.dir}/C4Api/C4Api.lib"]` and `C4Api.dll` copied beside
+  the program, so `depends = ["C4Api"]` links a tool with the compiler's C API of the workspace's toolchain (C4
+  `docs/tools/06-c4-api.md`; the sample `plugins/c4/samples/c4-outline`).
 - **Variables.** `${cpp.llvm}` and `${cpp.clang}` name the LLVM release and its `clang.exe`, in manifests and steps.
 - **Libraries** the package brings (`plugins/cpp/libraries/`, documented in `plugins/cpp/docs/`): `Core` (containers,
   strings, UUID, `Ref<T>`, logging, time, the Math library) with yaml-cpp as `yaml`, `Threading`, `Profiling` (the IED
@@ -465,7 +479,7 @@ each project's time).
 The repository root's `nuke.toml` makes IED itself a workspace. The C4 compiler and its tools are C++ projects in the
 `C4` group, built by the C/C++ plugin's driver (section 9c) with the LLVM release `setup.bat` installs
 (`[languages.cpp] llvm = "vendor/llvm"`): `C4` (`C4/nuke.toml`: C4.exe and the install layout beside it), `C4Lib`,
-`C4Protocol`, `C4LSPLib`, `C4LSP`, `C4DAPLib`, `C4DAP`, `CBind`, `C4Script` (a DLL) and `C4Testing`, each in its own
+`C4Protocol`, `C4LSPLib`, `C4LSP`, `C4DAPLib`, `C4DAP`, `CBind`, `C4Script` and `C4Api` (DLLs) and `C4Testing`, each in its own
 folder under `C4/`; the C++ libraries they use are the plugin's (`plugins/cpp/libraries/*`). Outputs are Nuke's:
 `build/bin/<Config>-windows-x64/C4/C4.exe`, `.../C4LSP/C4LSP.exe` and so on.
 

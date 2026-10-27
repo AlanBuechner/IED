@@ -1,4 +1,4 @@
-// The C4 compiler's C API over C4Lib (docs/tools/04-c4-api.md).
+// The C4 compiler's C API over C4Lib (docs/tools/06-c4-api.md).
 
 #define IMPLEMENT_LOGGER // the DLL's own copy of Core's loggers, which C4Lib logs through
 #include "Core/Logging/Log.h"

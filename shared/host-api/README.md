@@ -79,7 +79,7 @@ Skills are folders `<name>/SKILL.md` (plus optional resources next to it), found
 name: c4-testing                      # unique per source; collisions: project > plugin > app (shown in Settings > Skills)
 description: How to write and run [test] functions in C4 with the -test harness.
 keywords: [test, assert, fixture, nuke test]        # IED keyword field
-triggers: ["write a test", "test is failing"]       # accepted for compatibility with C4's skills (C4/IedPlugin/skills/); indexed like keywords
+triggers: ["write a test", "test is failing"]       # accepted for compatibility with C4's skills (plugins/c4/skills/); indexed like keywords
 tools: [build, debug]                 # optional: tool groups enabled when this skill is read
 ---
 

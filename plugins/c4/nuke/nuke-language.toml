@@ -1,7 +1,7 @@
 # The c4 plugin's Nuke package (IED docs/26 section 6, Nuke/README.md section 9b): C4 projects are Nuke's own - it
 # compiles them with the workspace's toolchain itself (Nuke/nuke/c4, IED docs/23 N-23) - so the package has no driver.
 # It names their IED task preset, c4.nuke, and brings the library a project depends on to build tooling around C4:
-# C4Api, the compiler's C API from the workspace's toolchain (libraries/C4Api, C4/docs/tools/04-c4-api.md).
+# C4Api, the compiler's C API from the workspace's toolchain (libraries/C4Api, C4/docs/tools/06-c4-api.md).
 [language]
 id = "c4"
 preset = "c4.nuke"

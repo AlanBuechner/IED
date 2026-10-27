@@ -171,12 +171,14 @@ compiler (`build/bin/<Config>-windows-x64/` of the IED repository):
   toolchain/bin, lib/   clang, lld-link, llvm-rc, clang's headers
   CBind/                the binding generator
   C4Script/             the script host library (runtime/04-scripting.md)
+  C4Api/                the compiler's C API for tools around C4: C4Api.dll, C4Api.lib, C4Api.h (06-c4-api.md)
   tools/C4LSP/          the language server (+ the LLVM dlls it loads)
   tools/C4DAP/          the debug adapter
   docs/                 the user-facing language, library, runtime and tools docs (this page among them), and
                         library/bedrock-api.md, the Bedrock API digest: every public type and function of the shipped
                         headers with its signature and doc comment's first sentence (C4/ApiDigest.py)
-  ied/                  the IED plugin for this version of the language, with its AI skills (from C4/IedPlugin/)
+  ied/                  the IED plugin for this version of the language, with its AI skills (from the IED repository's
+                        plugins/c4/), its manifest naming this toolchain's language server, debug adapter and docs
   ied/docs/             docs/ again, inside the plugin: its aiDocs contribution, which the AI searches and reads
 ```
 
@@ -193,7 +195,7 @@ From the IED repository root, a workspace whose project `C4` (`C4/nuke.toml`) bu
   `C4/C4Lib/src/Compiler/Version.h`. Installed versions never change: bump the version first. A workspace then
   pins it with `nuke toolchain use <version>`.
 
-Note: `C4/IedPlugin/skills/*/SKILL.md` are short agent-facing summaries kept in sync with these docs (they are the
+Note: `plugins/c4/skills/*/SKILL.md` (in the IED repository) are short agent-facing summaries kept in sync with these docs (they are the
 compressed view; when the two disagree, these pages win). Every toolchain ships them in its IED plugin, `ied/skills/`.
 
 Gaps:

@@ -81,7 +81,7 @@ IED/
 |  +- ui-kit/            shared web components (tree, tabs, ANSI console, menus, dropdowns, icons)
 +- src/                  IED server (C4): the host's concepts (workspaces, documents, tasks, language servers, ...) and the plugin API (src/api/, docs/26)
 +- frontend/             web client (html/css/js): theme tokens, static mocks, shell, docking, WS client
-+- plugins/              built-in plugins: one per language (cpp - with Nuke's C/C++ driver and the C++ libraries -, rust, go, python, web, ...) and the features (chat, editor, git, terminal, browser, markdown, nuke, profiler, gpu, sandbox)
++- plugins/              built-in plugins: one per language (c4 - with its Nuke package and the C4Api library for tools -, cpp - with Nuke's C/C++ driver and the C++ libraries -, rust, go, python, web, ...) and the features (chat, editor, git, terminal, browser, markdown, nuke, profiler, gpu, sandbox)
 +- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs)
 +- Nuke/                 the build system (Python, stdlib only) + its tests
 +- tests/                e2e: the web client in Playwright against the mock and the real server, desktop and phone

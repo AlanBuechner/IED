@@ -18,7 +18,7 @@ Plugin *logic* always runs server-side (work continues with no browser open); UI
 | App (global) | `%APPDATA%/IED/plugins/<id>/` | owner approved the plugin's content hash and permissions |
 | Project-local | `.ied/plugins/<id>/` in the workspace (planned, `docs/26`), and paths the solution's `localPlugins` name | the workspace is **trusted** (`docs/11`) |
 
-If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (a C4 workspace pins its toolchain's plugin, `toolchains/c4/<version>/ied`; a game engine can ship a shader-language or GPU-debugger plugin).
+If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (a C4 workspace pins its toolchain's plugin, `toolchains/c4/<version>/ied`, over IED's built-in `c4`; a game engine can ship a shader-language or GPU-debugger plugin).
 
 ## Lifecycle
 
