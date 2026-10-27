@@ -22,6 +22,10 @@ namespace IED
 	// The program found for the language tool `id` in `ws` (docs/26 "Language tools", ${tool:<id>}); empty when no plugin
 	// loaded there names such a tool.
 	Core::String ToolProgram(const Workspace& ws, Core::StringView id);
+	// The language tools of `ws` as the host sees them (docs/26 "Language tools"): the tools:<wsId> snapshot, {trusted,
+	// detected, detecting, install, busy, dismissed, tools: [{id, title, kind, plugin, state, path, version, source, pin,
+	// problem, canInstall, installs, ...}]}; "" when the workspace is not open.
+	Core::String LanguageToolsJson(const Workspace& ws);
 	// `environment` ("NAME=value") with what a process started for `ws` needs to find the language tools IED found or
 	// installed outside PATH (docs/26 "Language tools"): their folders first on PATH.
 	Core::Array<Core::String> ToolEnvironment(const Workspace& ws, const Core::Array<Core::String>& environment);

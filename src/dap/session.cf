@@ -76,6 +76,7 @@ namespace Ied
 	// As a language server's (docs/24): with launchMode staged, a copy of the adapter's folder keyed by the program's
 	// size and time, so the adapter can be rebuilt while a session runs.
 	Core::String DebugSession::ProgramToRun(Core::String& error) const {
+		if (server->tools->LacksProgram(ws, provider->command.View(), error)) return Core::String();
 		Core::String command = ExpandProfileVariables(provider->command.View(), VariablesOf(server, ws, provider, launch.project.View()));
 		FS::Path program = FS::AbsolutePath(command.CStr());
 		if (!provider->staged) return command;

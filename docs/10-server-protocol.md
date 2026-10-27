@@ -89,8 +89,9 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |
 | `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
-| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`), the `ai` source (the AI's `shell_run` commands and their output, `docs/13`), the `git` source (the git commands that change something, with what git said, "Git" below) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
-| `terms:<wsId>` | `term.added`, `term.changed`, `term.removed` (a terminal's summary) | `{terminals: [summary]}`: the workspace's terminals, in the order they were made; a summary is `{termId, wsId, title, kind, alive, exitCode, holder}` |
+| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`), the `tools` source (Language Tools: what an install of language tools did, `docs/26`), the `ai` source (the AI's `shell_run` commands and their output, `docs/13`), the `git` source (the git commands that change something, with what git said, "Git" below) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
+| `terms:<wsId>` | `term.added`, `term.changed`, `term.removed` (a terminal's summary) | `{terminals: [summary]}`: the workspace's terminals, in the order they were made; a summary is `{termId, wsId, title, kind, profile, alive, exitCode, holder}` |
+| `tools:<wsId>` | `tools.changed` (the whole snapshot) | the workspace's language tools: `{trusted, detected, detecting, install, busy, dismissed, tools: [status]}`; `tools.status`, `tools.detect`, `tools.install {wsId, tools?, allowUserScope?}`, `tools.cancel`, `tools.dismiss` (`docs/26` "Language tools") |
 | `term:<termId>` | `data {data}` (coalescible), `resize {cols, rows}`, `exit {code}`, `lease {holder}` | `{terminal: summary, cols, rows, scrollback}`: `scrollback` is the last 256 KB of output, replayed by a client to rebuild the screen |
 | `dbg:<wsId>`, `dbg:<wsId>:<sessionId>`, `bp:<wsId>` | the debugger's (`docs/25` "The server as built") | the workspace's debug sessions, one session's stop, the breakpoints |
 | `prof:<captureId>` | `stats`, `progress` | capture summary (timeline data is fetched via requests/blobs) |
@@ -188,7 +189,8 @@ A terminal is a shell (or any program) under a pseudo console on the server (Con
 
 | Method | Params | Answer |
 |---|---|---|
-| `term.create` | `wsId, cols?, rows?, title?, cwd?` (a workspace path), `argv?` (default: the `terminal.shell` setting, else PowerShell 7, Windows PowerShell or `cmd`) | the summary; the caller holds the lease |
+| `term.create` | `wsId, cols?, rows?, title?, cwd?` (a workspace path), `argv?` or `profile?` (a terminal profile's id, `docs/05` "Terminal profiles"; with neither, the default profile - `terminal.defaultProfile`, else the `terminal.shell` setting's program, else PowerShell 7, Windows PowerShell or `cmd`) | the summary; the caller holds the lease. `not_found` for an unknown profile, `unavailable` for one that cannot start |
+| `term.profiles` | `wsId` | `{profiles: [{id, title, icon, plugin, available, problem}], default, setting}`: the workspace's terminal profiles (the terminal plugin's first), the one New Terminal runs, and the `terminal.defaultProfile` setting |
 | `term.list` | `wsId` | `{terminals: [summary]}` |
 | `term.input` | `termId, data` | `{}`; only the lease holder types (`forbidden` with reason `lease` and the holder otherwise) |
 | `term.takeLease` | `termId` | `{holder}`: this client types from now on (the others see the `lease` event) |
@@ -196,7 +198,7 @@ A terminal is a shell (or any program) under a pseudo console on the server (Con
 | `term.rename` | `termId, title` | the summary |
 | `term.close` | `termId` | `{}`: the program's tree is ended; the terminal leaves the list |
 
-A terminal's program runs in the workspace folder (or `cwd`) with the server's environment and `TERM_PROGRAM=IED`. When it exits the terminal stays in the list, `alive: false` with its `exitCode`, until closed. An untrusted workspace still gets terminals: the person typing is the one deciding what runs (`docs/11`).
+A terminal's program runs in the workspace folder (or `cwd`, or its profile's folder) with the server's environment, its profile's `env`, the tools PATH (`docs/26` "Language tools") and `TERM_PROGRAM=IED`. When it exits the terminal stays in the list, `alive: false` with its `exitCode`, until closed. An untrusted workspace still gets terminals: the person typing is the one deciding what runs (`docs/11`).
 
 ## Document editing protocol
 

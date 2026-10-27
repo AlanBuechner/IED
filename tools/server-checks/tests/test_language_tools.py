@@ -4,7 +4,8 @@ workspace pins; an untrusted workspace runs nothing; one Install downloads (chec
 or the version's checksum file), unpacks and runs commands into IED's tools folder, what a tool requires first; refusals
 (a checksum that does not match, an install for the user not allowed, a tool IED cannot install). The tools are fake
 batch files served from a loopback HTTP server (fake_tools.py): nothing is downloaded from anywhere. The real Go, Rust and
-C/C++ plugins' tools are listed; Go debugs through Delve's DAP mode (here the fake adapter dialing IED's port)."""
+C/C++ plugins' tools are listed; Go debugs through Delve's DAP mode (here the fake adapter dialing IED's port); a
+language server whose tool is missing fails at once, saying so; the AI reads the tools with language_tools."""
 
 import asyncio
 import json
@@ -18,6 +19,7 @@ from fake_tools import FileServer, broken_script, tool_zip, version_script, writ
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
 from server import IedServer, ServerTestCase
+from test_chat import TURN_SECONDS, ChatCase, call_step, text_step
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE_DAP = os.path.join(HERE, "fake_dap.py")
@@ -46,7 +48,8 @@ def fake_plugin(url, sha140):
 		{"id": "elsewhere", "title": "Not here", "program": "x", "when": "workspaceContains.nothing-here"},
 	]
 	return {"manifestVersion": 1, "id": "test.tools", "name": "Fake language", "version": "1.0.0", "publisher": "checks", "ied": {"api": "^1"},
-		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "Text Editor/Fake"}, "tools": tools}}
+		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "Text Editor/Fake"}, "tools": tools,
+			"lspProfiles": [{"id": "fake-ls", "label": "Fake LS", "command": "${tool:fakels}", "selector": {"extensions": [".fake"]}}]}}
 
 
 SETTINGS = {"type": "object", "properties": {"fake.c.path": {"type": "string", "default": "", "description": "Fake C."}}}
@@ -137,6 +140,17 @@ class LanguageToolTests(ServerTestCase):
 		self.assertEqual(("missing", False, "https://example.invalid/manual"), (manual["state"], manual["canInstall"], manual["homepage"]))
 		self.assertIn("nothing-like-this was not found in", manual["problem"])
 		self.assertIsNone(self.tool(snapshot, "elsewhere"), "a tool whose when does not hold")
+		write(os.path.join(self.folder, "a.fake"), "x\n")
+		await self.client.request("doc.open", {"wsId": self.ws, "path": "a.fake"})
+		deadline = time.monotonic() + 20
+		server = None
+		while time.monotonic() < deadline and not (server and server["state"] == "failed"):
+			servers = (await self.client.request("lsp.status", {"wsId": self.ws}))["servers"]
+			server = next((s for s in servers if s["profile"] == "fake-ls"), None)
+			await asyncio.sleep(0.2)
+		self.assertEqual(("failed", 0), (server["state"], server["restarts"]), "a language server whose tool is missing is not started")
+		self.assertTrue(server["problem"].startswith("Fake LS is not installed: fakels was not found in"), server["problem"])
+		self.assertTrue(server["problem"].endswith(". Settings > Languages installs it."), server["problem"])
 		self.assertEqual("compiler", self.tool(snapshot, "go")["kind"])
 		await self.client.request("settings.set", {"tier": "solution", "wsId": self.ws, "key": "fake.c.path", "value": os.path.join(self.folder, "sdk2", "fakec.cmd")})
 		snapshot = await self.settled(lambda s: self.tool(s, "fakec")["source"] == "setting")
@@ -279,3 +293,40 @@ class LanguagePluginToolTests(ServerTestCase):
 		launch = [m for m in logged if m.get("command") == "launch"][0]["arguments"]
 		self.assertEqual(("launch", "debug"), (launch["request"], launch["mode"]))
 		self.assertEqual(os.path.realpath(self.folder).lower(), os.path.realpath(launch["program"]).lower(), "the package: the project's folder")
+
+
+class LanguageToolsChatTests(ChatCase):
+	"""The AI asks what the workspace's languages need (language_tools, docs/13): each tool found or missing, why, its pin
+	and what IED would install."""
+
+	def setUp(self):
+		super().setUp()
+		self.server.stop(remove_data=False)
+		plugin = os.path.join(self.repo, ".ied", "plugins", "test.tools")
+		write(os.path.join(plugin, "ied-plugin.json"), {"manifestVersion": 1, "id": "test.tools", "name": "Fake language", "version": "1.0.0", "publisher": "checks",
+			"ied": {"api": "^1"}, "runtime": {"kind": "declarative"}, "contributes": {"tools": [
+				{"id": "fakec", "title": "Fake C", "kind": "compiler", "program": "fakec", "searchPaths": ["${workspaceDir}/sdk"],
+					"detect": {"args": ["--version"], "pattern": "fakec version (\\S+)"}, "versionFrom": [{"file": "fake.toml", "regexp": "^c\\s*=\\s*\"([^\"]+)\"", "match": "minimum"}]},
+				{"id": "fakels", "title": "Fake LS", "kind": "languageServer", "program": "fakels",
+					"install": {"version": "2.0.1", "windows": [{"run": ["cmd", "/d", "/c", "echo"]}]}}]}})
+		write_program(os.path.join(self.repo, "sdk"), "fakec", version_script("fakec", "1.2.0"))
+		write(os.path.join(self.repo, "fake.toml"), 'c = "1.1"\n')
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+
+	async def test_the_ai_reads_the_language_tools(self):
+		deadline = time.monotonic() + 60
+		while time.monotonic() < deadline:
+			snapshot = await self.client.request("tools.status", {"wsId": "w1"})
+			if snapshot["detected"] and not snapshot["detecting"] and any(t["id"] == "fakec" for t in snapshot["tools"]):
+				break
+			await asyncio.sleep(0.2)
+		chat_id, _ = await self.chat(permission="auto")
+		self.model.queue(call_step("language_tools", {}, "t1"), text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		result = [m["content"] for m in sent if m["role"] == "tool"][0]
+		self.assertIn("- Fake C (compiler, Fake language): found 1.2.0 at ", result)
+		self.assertIn("; the workspace pins 1.1 or newer (fake.toml)", result)
+		self.assertIn("- Fake LS (languageServer, Fake language): missing - fakels was not found in", result)
+		self.assertIn("; IED installs 2.0.1", result)

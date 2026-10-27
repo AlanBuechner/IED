@@ -284,6 +284,77 @@ namespace Ai
 		return spec;
 	}
 
+	static ToolPlan LanguageToolsPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = Core::String("tools.status()");
+		plan.summary = Core::String("List the language tools");
+		return plan;
+	}
+
+	// One tool as a line: "- Go (compiler, Go): found 1.26.6 at C:\...\go.exe; the workspace pins 1.22 or newer (go.mod)".
+	static void DescribeTool(Core::StringBuilder& out, const Serialization::DomNode& tool) {
+		Core::StringView state = tool.Member("state").AsView();
+		out.Append("- ");
+		out.Append(tool.Member("title").AsView());
+		out.Append(" (");
+		out.Append(tool.Member("kind").AsView());
+		out.Append(", ");
+		out.Append(tool.Member("pluginName").AsView());
+		out.Append("): ");
+		out.Append(state == "wrongVersion" ? Core::StringView("wrong version") : state);
+		if (!tool.Member("version").AsView().IsEmpty()) {
+			out.Append(" ");
+			out.Append(tool.Member("version").AsView());
+		}
+		if (!tool.Member("path").AsView().IsEmpty()) {
+			out.Append(" at ");
+			out.Append(tool.Member("path").AsView());
+		}
+		Serialization::DomNode pin = tool.Member("pin");
+		if (pin.Kind() == Serialization::DomKind::Object) {
+			out.Append("; the workspace pins ");
+			out.Append(pin.Member("version").AsView());
+			if (pin.Member("match").AsView() == "minimum") out.Append(" or newer");
+			out.Append(" (");
+			out.Append(pin.Member("file").AsView());
+			out.Append(")");
+		}
+		if (state != "found" && !tool.Member("problem").AsView().IsEmpty()) {
+			out.Append(" - ");
+			out.Append(tool.Member("problem").AsView());
+		}
+		if (state != "found" && tool.Member("canInstall").AsBool()) {
+			out.Append("; IED installs ");
+			out.Append(tool.Member("installs").AsView());
+			if (tool.Member("installsForUser").AsBool()) out.Append(" for the user (asked first)");
+		}
+		out.Append("\n");
+	}
+
+	static ToolOutcome LanguageToolsRun(const ToolInvocation& call) {
+		Core::String json = IED::LanguageToolsJson(call.ws);
+		if (json.IsEmpty()) return ToolError(Core::StringView("language_tools: the workspace is not open any more"));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode snapshot = Serialization::ReadJson(json.View(), *doc).root;
+		if (!snapshot.Member("trusted").AsBool()) return ToolResult(Core::StringView("The workspace is not trusted, so IED looks for none of its tools (finding them runs programs); the owner trusts it from the banner."), Core::StringView("untrusted"));
+		if (!snapshot.Member("detected").AsBool()) return ToolResult(Core::StringView("IED is still looking for the workspace's tools; ask again in a moment."), Core::StringView("looking"));
+		Serialization::DomNode tools = snapshot.Member("tools");
+		Core::StringBuilder out;
+		out.Append("The compilers, language servers and debuggers the workspace's languages need. The owner installs a missing one with one click (the banner, or Settings > Languages > Tools); a setting naming a program wins.\n");
+		int64 lacking = 0;
+		for (int64 i = 0; tools.Kind() == Serialization::DomKind::Array && i < tools.Count(); ++i) {
+			DescribeTool(out, tools.At(i));
+			if (tools.At(i).Member("state").AsView() != "found") lacking += 1;
+		}
+		if (tools.Count() == 0) out.Append("None of the workspace's languages names a tool.\n");
+		Core::StringBuilder preview;
+		preview.AppendInt(tools.Count());
+		preview.Append(tools.Count() == 1 ? " tool, " : " tools, ");
+		preview.AppendInt(lacking);
+		preview.Append(" missing");
+		return ToolResult(out.View(), preview.View());
+	}
+
 	void AddProjectTools(ToolRegistry& registry) {
 		registry.Add(ProjectSpec("project_list", "The workspace's solution and its projects (kind, language, folder, project file, dependencies) and the other open workspaces. Example: project_list({})",
 			"{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}", ToolClass::Read, ListPlan, ListRun));
@@ -301,5 +372,7 @@ namespace Ai
 		registry.Add(ProjectSpec("project_remove", "Take a project out of the solution (and its build): its files stay unless delete_files, which moves its folder to IED's trash (recoverable). Refused while another project depends on it. Example: project_remove({\"project\": \"OldTool\"})",
 			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"minLength\": 1}, \"delete_files\": {\"type\": \"boolean\"}}, \"required\": [\"project\"], \"additionalProperties\": false}",
 			ToolClass::Exec, RemovePlan, RemoveRun));
+		registry.Add(ProjectSpec("language_tools", "The compilers, language servers and debuggers the workspace's languages need (go, gopls, Delve, cargo, rust-analyzer, clangd, CodeLLDB...): each found (its version and where) or missing (why), and the version the workspace pins (go.mod, rust-toolchain.toml). For a build, a language server or a debugger that fails because its program is missing or the wrong version. Example: language_tools({})",
+			"{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}", ToolClass::Read, LanguageToolsPlan, LanguageToolsRun));
 	}
 }

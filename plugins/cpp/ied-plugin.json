@@ -168,7 +168,7 @@
 				"when": "workspaceLanguage.c || workspaceLanguage.cpp || workspaceLanguage.rust",
 				"program": "codelldb",
 				"setting": "cpp.lldb.path",
-				"bundled": ["${pluginDir}/codelldb/adapter/codelldb.exe", "${iedHome}/vendor/codelldb/extension/adapter/codelldb.exe"],
+				"bundled": ["${pluginDir}/codelldb/adapter/codelldb.exe", "${iedHome}/vendor/codelldb/adapter/codelldb.exe"],
 				"install": {
 					"version": "1.12.3",
 					"bin": "extension/adapter",

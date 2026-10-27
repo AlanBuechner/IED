@@ -1,7 +1,8 @@
 """Installs IED from this checkout's build (docs/21 "Install shape"): the programs and what the server serves and loads
 - the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries, and the
 services web search runs (the private Python, SearXNG with its packages and Tor, which setup installs into the checkout
-first when they are missing, docs/29) - copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
+first when they are missing, docs/29), pip for the Python terminal, and the C/C++ plugin's clangd and CodeLLDB (docs/21)
+- copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
 `ied-desktop --register` puts IED in the Start menu and
 makes IED's solution files (.iedsln, .iedfed) open in it, and the folder goes on the user's PATH, so `ied <folder>`
 works in a terminal opened afterwards.
@@ -74,7 +75,30 @@ SERVICES = (
 	("vendor/searxng-packages", ("__pycache__", "bin")),
 	("vendor/tor", ("docs",)),
 )
-SERVICE_PACKAGES = ("searxng", "pip", "searxng-packages", "tor")
+SERVICE_PACKAGES = ("searxng", "pip", "searxng-packages", "tor", "codelldb")
+
+# The C/C++ plugin's own tools (docs/21 "Bundled vs detected", docs/26 "Language tools"), copied into its folder in the
+# install, where its manifest looks first: clangd from the vendored LLVM with clang's builtin headers, which it finds
+# beside itself (../lib/clang/<version>/include), and CodeLLDB's adapter with its LLDB. The mirror of plugins/ keeps them.
+CPP_TOOLS_FOLDERS = ("cpp/clangd", "cpp/codelldb")
+
+
+def cpp_tools(repo):
+	"""(source, target, is_tree) of the C/C++ plugin's tools that the checkout has, relative to it and to the install."""
+	found = []
+	clangd = os.path.join(repo, "vendor", "llvm", "bin", "clangd.exe")
+	if os.path.isfile(clangd):
+		found.append((clangd, os.path.join("plugins", "cpp", "clangd", "bin", "clangd.exe"), False))
+		resources = os.path.join(repo, "vendor", "llvm", "lib", "clang")
+		for version in sorted(os.listdir(resources)) if os.path.isdir(resources) else []:
+			include = os.path.join(resources, version, "include")
+			if os.path.isdir(include):
+				found.append((include, os.path.join("plugins", "cpp", "clangd", "lib", "clang", version, "include"), True))
+	codelldb = os.path.join(repo, "vendor", "codelldb")
+	for part in ("adapter", "lldb"):
+		if os.path.isdir(os.path.join(codelldb, part)):
+			found.append((os.path.join(codelldb, part), os.path.join("plugins", "cpp", "codelldb", part), True))
+	return found
 
 
 def services_command(repo):
@@ -154,9 +178,10 @@ def remove_old(folder):
 				pass
 
 
-def mirror(source, target, skip, report, anywhere=()):
+def mirror(source, target, skip, report, anywhere=(), keep=()):
 	"""`target` made like `source` (folders in `skip` left out at its top, those in `anywhere` at any depth): changed
-	files copied, files gone from it removed."""
+	files copied, files gone from it removed - but those under `keep` (target-relative folders, '/'-separated), which
+	something else puts there."""
 	wanted = set()
 	for folder, dirs, files in os.walk(source):
 		relative = os.path.relpath(folder, source)
@@ -170,13 +195,30 @@ def mirror(source, target, skip, report, anywhere=()):
 				replace_file(os.path.join(folder, name), destination, report)
 	if not os.path.isdir(target):
 		return
+	kept = tuple(os.path.normpath(k) + os.sep for k in keep)
 	for folder, _, files in os.walk(target, topdown=False):
 		for name in files:
 			path = os.path.normpath(os.path.relpath(os.path.join(folder, name), target))
-			if path not in wanted:
+			if path not in wanted and not path.startswith(kept):
 				discard(os.path.join(folder, name), report)
 		if folder != target and not os.listdir(folder):
 			os.rmdir(folder)
+
+
+def install_cpp_tools(repo, target, report):
+	"""The C/C++ plugin's tools into its folder of the install; what the checkout lacks is reported (clangd always comes
+	with the LLVM setup installs; CodeLLDB is setup's codelldb package, else the plugin offers its one-click install)."""
+	tools = cpp_tools(repo)
+	for source, relative, is_tree in tools:
+		destination = os.path.join(target, relative)
+		if is_tree:
+			mirror(source, destination, set(), report)
+		elif not same(source, destination):
+			os.makedirs(os.path.dirname(destination), exist_ok=True)
+			replace_file(source, destination, report)
+	for name, folder in (("clangd", "plugins/cpp/clangd"), ("CodeLLDB", "plugins/cpp/codelldb")):
+		if not any(relative.replace(os.sep, "/").startswith(folder) for _, relative, _ in tools):
+			report["missing"].append(name + " (vendor/llvm, vendor/codelldb)")
 
 
 def checkout_state(repo):
@@ -220,7 +262,7 @@ def install(bin_root, target):
 		source = os.path.join(REPO, tree)
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
-		mirror(source, os.path.join(target, tree), set(skip), report, BUILT_IN_PLACE)
+		mirror(source, os.path.join(target, tree), set(skip), report, BUILT_IN_PLACE, CPP_TOOLS_FOLDERS if tree == "plugins" else ())
 	if not ensure_services(REPO):
 		print("install-ied: setup could not install the web search services (see above); installing without what is missing")
 	for tree, skip in SERVICES:
@@ -229,6 +271,7 @@ def install(bin_root, target):
 			mirror(source, os.path.join(target, tree), set(skip), report)
 		else:
 			report["missing"].append(tree)
+	install_cpp_tools(REPO, target, report)
 	head, dirty = checkout_state(REPO)
 	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000)))
 	return report
@@ -360,7 +403,7 @@ def main(argv):
 	report = install(args.bin, target)
 	print("install-ied: %s - %d files copied, %d removed" % (target, report["copied"], report["removed"]))
 	if report["missing"]:
-		print("install-ied: without %s: web search will say what is missing (run setup.bat, then install again)" % ", ".join(report["missing"]))
+		print("install-ied: without %s: web search and Settings > Languages say what is missing (run setup.bat, then install again)" % ", ".join(report["missing"]))
 	note = restart_note(report, running_from(target) if os.name == "nt" else [])
 	if note:
 		print(note)

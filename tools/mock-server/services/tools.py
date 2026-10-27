@@ -87,9 +87,13 @@ class Tools:
 		return self.snapshot(self.server.workspace.get(p.str("wsId")).ws_id)
 
 	async def m_tools_detect(self, call, p):
+		"""The mock's detection is its script again: what an install left found is missing once more."""
 		ws = self.server.workspace.get(p.str("wsId"))
 		if not ws.trusted:
 			raise RpcError("forbidden", "the workspace is not trusted: no program is run to find its tools")
+		if ws.ws_id not in self.install:
+			self.states[ws.ws_id] = {tool["id"]: dict(SCRIPT.get(tool["id"], {"state": "missing"})) for _, tool in self.specs()}
+			self.dismissed.pop(ws.ws_id, None)
 		self.publish(ws.ws_id)
 		return {}
 

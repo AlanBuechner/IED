@@ -1,0 +1,13 @@
+Third-party programs an install of IED puts in this plugin's folder (docs/21 "Bundled vs detected"):
+
+clangd/    clangd and clang's builtin headers, from the LLVM release IED's setup installs (vendor/llvm, LLVM 22.1.0).
+           LLVM Project: Apache License 2.0 with LLVM Exceptions - https://llvm.org/LICENSE.txt
+           Source: https://github.com/llvm/llvm-project
+
+codelldb/  CodeLLDB's debug adapter and the LLDB it carries, from the CodeLLDB release IED's setup installs
+           (vendor/codelldb, CodeLLDB 1.12.3).
+           CodeLLDB: MIT License - https://github.com/vadimcn/codelldb/blob/master/LICENSE
+           LLDB: Apache License 2.0 with LLVM Exceptions - https://llvm.org/LICENSE.txt
+           Python (in LLDB's folder): Python Software Foundation License - https://docs.python.org/3/license.html
+
+The full license texts go in the install's licenses\ folder before any public release (docs/21 "Licenses").

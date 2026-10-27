@@ -172,8 +172,14 @@ namespace Ied
 			Core::Array<ToolStatus*> found;
 			for (DetectJob* job : jobs) found.Push(DetectTool(*job));
 			Threading::LockGuard guard(server->lock);
+			bool arrived = false;
+			for (const ToolStatus* status : found) {
+				ToolStatus* before = StatusOf(entry, status->spec->id.View());
+				arrived = arrived || (before && before->Lacking() && !status->Lacking());
+			}
 			entry->statuses = found;
 			entry->detected = true;
+			if (arrived) server->lsp->ToolsChanged(entry->ws);
 			for (const ToolStatus* status : found)
 				if (!status->Lacking()) entry->failures.Remove(status->spec->id);
 			if (entry->dirty) continue;
@@ -211,6 +217,20 @@ namespace Ied
 			return setting.View().Trimmed().IsEmpty() ? spec->program : Core::String(setting.View().Trimmed());
 		}
 		return Core::String();
+	}
+
+	bool Tools::LacksProgram(Workspace* ws, Core::StringView command, Core::String& problem) {
+		Core::StringView text = command.Trimmed();
+		if (!text.StartsWith(Core::StringView("${tool:")) || !text.EndsWith(Core::StringView("}")) || text.IndexOf('}', 0) != text.ByteLength() - 1) return false;
+		WorkspaceTools* entry = EntryOf(ws);
+		ToolStatus* status = entry ? StatusOf(entry, text.Substring(7, text.ByteLength() - 8)) : nullptr;
+		if (!status || (status->state != "missing" && status->state != "failed")) return false;
+		Core::String failure;
+		const bool failed = entry->failures.TryGet(status->spec->id, failure);
+		Core::StringView why = failed ? failure.View() : status->problem.View();
+		while (why.EndsWith(Core::StringView("."))) why = why.Substring(0, why.ByteLength() - 1);
+		problem = (((status->spec->title + " is not installed: ") + why) + ". ") + (status->spec->CanInstall() ? "Settings > Languages installs it." : "Settings > Languages says how to get it.");
+		return true;
 	}
 
 	Core::Array<Core::String> Tools::EnvironmentFor(Workspace* ws, const Core::Array<Core::String>& environment) {
@@ -299,6 +319,11 @@ namespace Ied
 		json.EndArray();
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String Tools::SnapshotJson(Workspace* ws) {
+		WorkspaceTools* entry = EntryOf(ws);
+		return entry ? Snapshot(entry) : Core::String();
 	}
 
 	void Tools::Publish(WorkspaceTools* entry) { server->hub.Publish(ToolsTopic(entry->ws).View(), "tools.changed", Snapshot(entry).View()); }

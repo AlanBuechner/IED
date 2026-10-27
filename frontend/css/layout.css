@@ -617,7 +617,7 @@ dl.facts dd { margin: 0; }
 .lt-tools .btn .ci { margin-right: var(--space-2); }
 .lt-status { font-size: var(--font-size-sm); }
 .lt-group h2 { margin: var(--space-5) 0 var(--space-2); font-size: var(--font-size-ui); font-weight: 600; color: var(--text-0); }
-.lt-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr) auto; align-items: start; gap: var(--space-4); padding: var(--space-3) var(--space-2); border-bottom: var(--border-width) solid var(--border-0); }
+.lt-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr) 140px; align-items: start; gap: var(--space-4); padding: var(--space-3) var(--space-2); border-bottom: var(--border-width) solid var(--border-0); }
 .lt-group .lt-row:first-of-type { border-top: var(--border-width) solid var(--border-0); }
 .lt-row:hover { background: var(--veil); }
 .lt-name, .lt-state { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--font-size-sm); }
@@ -630,6 +630,7 @@ dl.facts dd { margin: 0; }
 .lt-row.busy .lt-tone .ci { color: var(--accent-info); }
 .lt-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-xs); }
 .lt-problem { color: var(--text-1); overflow-wrap: anywhere; }
+.lt-action { justify-self: end; }
 .lt-action .btn .ci { margin-right: var(--space-2); }
 .lt-untrusted { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) 0; color: var(--text-1); }
 

@@ -43,11 +43,16 @@ namespace Ied
 		// ${tool:<id>}: the program found for tool `id` in `ws` (a wrong version's too); before a detection, the first
 		// place it may be, else what its setting names, else its program's name; empty for a tool no plugin names.
 		public Core::String ProgramFor(Workspace* ws, Core::StringView id);
+		// Whether `command` is exactly ${tool:<id>} of a tool `ws` lacks - detected missing, or its install failed - with
+		// what to say instead of starting it ("rust-analyzer is not installed: ...; Settings > Languages installs it").
+		public bool LacksProgram(Workspace* ws, Core::StringView command, Core::String& problem);
 		// `environment` with the folders of `ws`'s tools that are found outside PATH and ask for it (onPath) first on
 		// PATH.
 		public Core::Array<Core::String> EnvironmentFor(Workspace* ws, const Core::Array<Core::String>& environment);
 		// The tools of the plugins loaded for `ws` whose `when` holds there; of one id, the last loaded plugin's.
 		public Core::Array<ToolSpec*> ToolsOf(Workspace* ws);
+		// tools:<wsId>'s snapshot; "" for a workspace that is not open.
+		public Core::String SnapshotJson(Workspace* ws);
 
 	private:
 		private WorkspaceTools* EntryOf(Workspace* ws);

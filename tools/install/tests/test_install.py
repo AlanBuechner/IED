@@ -81,7 +81,39 @@ class ServicesTests(unittest.TestCase):
 		write(os.path.join(repo, "vendor", "python", "python.exe"), "")
 		command = install_ied.services_command(repo)
 		self.assertEqual([os.path.join(repo, "vendor", "python", "python.exe"), "-I", os.path.join(repo, "tools", "setup", "setup.py")], command[:3])
-		self.assertEqual(["--only", "searxng,pip,searxng-packages,tor", "--no-path"], command[3:], "only the services, never PATH")
+		self.assertEqual(["--only", "searxng,pip,searxng-packages,tor,codelldb", "--no-path"], command[3:], "only the services, never PATH")
+
+
+class CppToolsTests(unittest.TestCase):
+	"""The C/C++ plugin's clangd (with clang's builtin headers) and CodeLLDB go into its folder of the install, and the
+	mirror of plugins/ leaves them there."""
+
+	def test_the_cpp_plugin_gets_its_tools_and_keeps_them(self):
+		root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, root, True)
+		repo, target = os.path.join(root, "repo"), os.path.join(root, "IED")
+		write(os.path.join(repo, "vendor", "llvm", "bin", "clangd.exe"), "clangd")
+		write(os.path.join(repo, "vendor", "llvm", "lib", "clang", "22", "include", "stddef.h"), "stddef")
+		write(os.path.join(repo, "vendor", "llvm", "lib", "clang", "22", "lib", "windows", "asan.lib"), "not needed")
+		write(os.path.join(repo, "vendor", "codelldb", "adapter", "codelldb.exe"), "codelldb")
+		write(os.path.join(repo, "vendor", "codelldb", "lldb", "bin", "liblldb.dll"), "lldb")
+		write(os.path.join(repo, "plugins", "cpp", "ied-plugin.json"), "{}")
+		done = dict(report(), missing=[])
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), done, install_ied.CPP_TOOLS_FOLDERS)
+		install_ied.install_cpp_tools(repo, target, done)
+		cpp = os.path.join(target, "plugins", "cpp")
+		for path in (("clangd", "bin", "clangd.exe"), ("clangd", "lib", "clang", "22", "include", "stddef.h"), ("codelldb", "adapter", "codelldb.exe"), ("codelldb", "lldb", "bin", "liblldb.dll")):
+			self.assertTrue(os.path.isfile(os.path.join(cpp, *path)), path)
+		self.assertFalse(os.path.exists(os.path.join(cpp, "clangd", "lib", "clang", "22", "lib")), "only the headers clangd reads")
+		self.assertEqual([], done["missing"])
+		again = dict(report(), missing=[])
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), again, install_ied.CPP_TOOLS_FOLDERS)
+		install_ied.install_cpp_tools(repo, target, again)
+		self.assertEqual((0, 0), (again["copied"], again["removed"]), "the next install leaves them as they are")
+		shutil.rmtree(os.path.join(repo, "vendor", "codelldb"))
+		without = dict(report(), missing=[])
+		install_ied.install_cpp_tools(repo, target, without)
+		self.assertEqual(["CodeLLDB (vendor/llvm, vendor/codelldb)"], without["missing"], "what the checkout lacks is said")
 
 
 class RecordTests(unittest.TestCase):

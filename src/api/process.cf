@@ -37,6 +37,16 @@ namespace IED
 		return found ? server->tools->ProgramFor(found, id) : Core::String();
 	}
 
+	Core::String LanguageToolsJson(const Workspace& ws) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String();
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
+		return found ? server->tools->SnapshotJson(found) : Core::String();
+	}
+
 	Core::Array<Core::String> ToolEnvironment(const Workspace& ws, const Core::Array<Core::String>& environment) {
 		Core::String problem;
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);

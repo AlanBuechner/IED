@@ -4,11 +4,16 @@ screenshots the states that matter. Both servers run every scenario unless it na
 import json
 import os
 import signal
+import shutil
 import struct
+import sys
 import time
 import zlib
 
 from harness import check
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "server-checks"))
+from fake_tools import FileServer, tool_zip, version_script  # noqa: E402
 
 SCENARIOS = []
 DESKTOPS = ("desktop", "laptop")
@@ -487,6 +492,61 @@ def a_language_trust_brings_reaches_open_tabs(run):
 		run.request("ws.setTrust", {"wsId": ws, "trusted": trusted})
 		run.request("fs.delete", {"wsId": ws, "path": ".ied/plugins/fancy", "recursive": True})
 		run.request("fs.delete", {"wsId": ws, "path": path})
+
+
+def fake_tools_plugin(files):
+	"""A project plugin naming fake language tools (docs/26 "Language tools"): Fake Format found in the workspace's sdk/,
+	Fake C downloaded from `files` (a loopback server) and Fake LS installed by Fake C, as `go install` installs gopls."""
+	data, digest = tool_zip("fakec", "1.4.0")
+	files.files["/fakec-1.4.0.zip"] = data
+	return {
+		"manifestVersion": 1, "id": "e2e.tools", "name": "Fake language", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+		"contributes": {"tools": [
+			{"id": "fakefmt", "title": "Fake Format", "kind": "other", "program": "fakefmt", "searchPaths": ["${workspaceDir}/sdk"], "detect": {"args": ["--version"], "pattern": "version (\\S+)"}},
+			{"id": "fakec", "title": "Fake C", "kind": "compiler", "program": "fakec", "onPath": True, "detect": {"args": ["--version"], "pattern": "version (\\S+)"},
+				"install": {"version": "1.4.0", "bin": "bin", "windows": [{"label": "Fake C archive", "download": files.url("/fakec-${version}.zip"), "sha256": digest, "extract": "zip", "strip": 1}]}},
+			{"id": "fakels", "title": "Fake LS", "kind": "languageServer", "program": "fakels", "requires": ["fakec"], "detect": {"args": ["--version"], "pattern": "version (\\S+)"},
+				"install": {"version": "2.0.1", "windows": [{"label": "fakec install", "run": ["${tool:fakec}", "install", "fakels@v${version}"], "env": {"GOBIN": "${installDir}"}}]}},
+		]},
+	}
+
+
+@scenario(viewports=("desktop", "phone"))
+def language_tools(run):
+	"""The tools a workspace's languages need (docs/26 "Language tools"): a banner names what is missing, Details opens
+	Settings > Languages > Tools with each tool's state, version and where it was found, and Install Missing installs
+	them - on the real server a project plugin's fake tools, downloaded from a loopback server, checked, unpacked and run
+	into IED's tools folder; on the mock its scripted CodeLLDB and Delve. The banner goes once nothing is missing."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	trusted = page.evaluate("ied_shell.workspace.trusted")
+	files = FileServer({}) if run.target.kind == "real" else None
+	try:
+		if files:
+			shutil.rmtree(os.path.join(run.target.root, "data", "tools"), ignore_errors=True)
+			run.request("fs.write", {"wsId": ws, "path": ".ied/plugins/e2e.tools/ied-plugin.json", "text": json.dumps(fake_tools_plugin(files))})
+			run.request("fs.write", {"wsId": ws, "path": "sdk/fakefmt.cmd", "text": version_script("fakefmt", "3.1.0")})
+			run.request("ws.setTrust", {"wsId": ws, "trusted": True})
+		else:
+			run.request("tools.detect", {"wsId": ws})
+		page.wait_for_selector(".banner[data-banner='tools']", timeout=30000)
+		check("not installed" in page.inner_text(".banner[data-banner='tools']"), "the banner says what is missing")
+		run.shot("banner")
+		page.click(".banner[data-banner='tools'] button:has-text('Details')")
+		page.wait_for_selector(".lt-page .lt-row[data-state='missing']")
+		check(page.query_selector(".lt-row[data-state='found']") is not None, "a tool that is there shows as found")
+		run.shot("page")
+		page.click(".lt-tools button:has-text('Install Missing')")
+		page.wait_for_function("() => document.querySelectorAll('.lt-row[data-state=\"missing\"], .lt-row[data-state=\"installing\"], .lt-row[data-state=\"queued\"]').length === 0", timeout=60000)
+		check(page.query_selector(".lt-row[data-state='failed']") is None, "every install worked")
+		page.wait_for_selector(".banner[data-banner='tools']", state="detached", timeout=10000)
+		run.shot("installed")
+	finally:
+		if files:
+			run.request("ws.setTrust", {"wsId": ws, "trusted": trusted})
+			run.request("fs.delete", {"wsId": ws, "path": ".ied/plugins/e2e.tools", "recursive": True})
+			run.request("fs.delete", {"wsId": ws, "path": "sdk", "recursive": True})
+			files.stop()
 
 
 @scenario()

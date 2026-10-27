@@ -52,6 +52,7 @@ server.
 | `lsp/` | `client`, `framing`, `pool`, `positions`, `profiles`, `queue`, `rewrite`, `uris` | `docs/24`: language servers from plugins' profiles, one per workspace and profile, requests passed through |
 | `tasks/` | `model`, `service`, `runner`, `expand`, `selections`, `matcher` | `docs/06`: what projects offer to run, the toolbar's selections, runs with their steps, problem matchers |
 | `dap/` | `providers`, `session`, `breakpoints`, `service` | `docs/25`: debug adapters from plugins (stdio or TCP), sessions, the workspace's breakpoints and watches |
+| `tools/` | `spec`, `versions`, `detect`, `install`, `commands`, `service` | `docs/26` "Language tools": the programs plugins' `tools` name, found and version-checked per workspace against its pins, installed into `<data>/tools`; `${tool:<id>}`, the tools PATH, `tools.*` and `tools:<wsId>` |
 | `tests/` | `*_tests.cf` | unit tests of the honest parts (`nuke test ied-server`) |
 
 Methods run holding the server lock, as the mock's single thread does, and release it only to wait (`Call::Sleep`); each

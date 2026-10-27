@@ -79,6 +79,17 @@ format = "tgz"
 strip = 1
 probe = "include/vulkan/vulkan_core.h"
 
+[packages.codelldb]
+group = "ied"
+version = "1.12.3"
+description = "CodeLLDB: the debug adapter for C, C++ and Rust (its adapter and LLDB, with LLDB's Python) that the ied.cpp plugin ships (docs/21, docs/26 \"Language tools\")"
+url = "https://github.com/vadimcn/codelldb/releases/download/v1.12.3/codelldb-win32-x64.vsix"
+sha256 = "a916e509308dac817732f63ca604a8b93ed29cd16f38a2fa9f0b64ed58e8f51a"
+dest = "vendor/codelldb"
+format = "zip"
+strip = 1                            # the .vsix's extension/ folder: adapter/, lldb/, ...
+probe = "adapter/codelldb.exe"
+
 [packages.searxng]
 group = "ied"
 version = "d47cb96bfb79240d487bdb2336886d0dc59f2f30"

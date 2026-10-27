@@ -81,6 +81,7 @@ namespace Ied
 	// The program to start: the profile's command, or with launchMode staged a copy of its folder (keyed by the
 	// program's size and time, so a rebuilt server gets a new copy and the original stays free to rebuild).
 	Core::String LanguageServer::ProgramToRun(Core::String& error) const {
+		if (server->tools->LacksProgram(ws, profile->command.View(), error)) return Core::String();
 		Core::String command = ExpandProfileVariables(profile->command.View(), Variables());
 		FS::Path program = FS::AbsolutePath(command.CStr());
 		if (!profile->staged) return command;
