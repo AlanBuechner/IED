@@ -54,15 +54,16 @@ namespace Scripting
 		Script& operator=(const Script&) = delete;
 
 		/// It compiled, linked and started, and no guarded call into it faulted.
-		bool Ok() const { return m_Linked && !m_Faulted; }
-		bool Faulted() const { return m_Faulted; }
+		bool Ok() const { return m_Linked && !Faulted(); }
+		bool Faulted() const { return m_Faulted.load(std::memory_order_acquire); }
 		const std::string& Diagnostics() const { return m_Diagnostics; }
 		/// It was linked from the host's script cache (section 4.6), not compiled.
 		bool Cached() const { return m_Cached; }
 		const std::string& Tag() const { return m_Tag; }
-		/// What stopped the call that faulted: the code, the instruction (as an offset into the script when it is
-		/// one of its) and what it touched.
-		std::string FaultText() const;
+		/// What stopped the call that faulted first: the code, the instruction (as an offset into the script when it
+		/// is one of its) and what it touched; "" while none did. Written once, so any thread may read it while calls
+		/// on other threads fault (BUG-396).
+		const std::string& FaultText() const;
 
 		/// The address of the script's symbol `name`; null when it has none or is not loaded.
 		void* Find(const std::string& name) const;
@@ -78,7 +79,11 @@ namespace Scripting
 			: m_Runtime(runtime), m_Guard(guard), m_Loading(std::move(loading)), m_Tag(std::move(tag)) {}
 		bool Load(std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 		bool CallStart(void (*start)());
+		/// The script faulted: the first fault, of the calls that fault on several threads at once, is the one kept.
 		void RecordFault(const ScriptFault& fault);
+		/// The script stops for a reason that is no hardware fault (an exception escaped its start or its exits).
+		void MarkFaulted(const char* why);
+		std::string DescribeFault() const;
 
 		HostRuntime m_Runtime;              // a copy: a script may outlive its host object
 		GuardedCall m_Guard;
@@ -90,10 +95,12 @@ namespace Scripting
 		void* m_Record = nullptr;          // the script's c4_script_module
 		const void* m_Roots = nullptr;     // its __c4_gc_roots
 		std::vector<void*> m_TlsControls;  // its thread_locals' __emutls_v controls
-		bool m_Faulted = false;
+		std::atomic<bool> m_Faulted{ false };
 		bool m_Cached = false;
+		std::mutex m_FaultLock;            // the first fault's record, written once under it
 		ScriptFault m_Fault;
 		std::string m_FaultPlace;          // the fault's module and function, when the script's code has symbols
+		std::string m_FaultText;
 	};
 
 	/// A program's side of scripting: its interface and table, from which it compiles and loads scripts.

@@ -402,6 +402,26 @@ What the guard cannot cover: a script's code called by host code that is not gua
 script object from the engine's own loop). The host wraps such calls in `Scripting::Guard` where a script may run.
 There are no memory quotas.
 
+**On several threads.** A guarded call is the calling thread's own, so an engine calls scripts from its job workers as
+from its main thread (B73, ScriptTest `CrashIsolationThreads`, at `-O0`, `-O2`, as debug scripts and in partitions):
+
+- Calls that fault on several workers at once each return false. Their script is faulted once, with the first fault's
+  text, which any thread may read while the others are still faulting; calls into other scripts on other workers
+  finish.
+- A stack overflow is caught on a worker as on the main thread, and so is the next one on the same thread: the guard
+  puts the thread's guard page back.
+- A fault does not hold up a collection on another thread: the faulted thread is stopped and scanned like any, and
+  allocates afterwards; collections verified against a fresh mark (`GC::SetVerify`) find nothing missed.
+
+**What a fault leaves (D-83).** The guard unwinds from the fault to itself without running any cleanup of the
+script's frames: neither the faulting frame's `delete`s nor those of the frames below it whose calls were under way (C4
+code handles C4 and C++ exceptions, not hardware faults, as MSVC's `/EHs` does). A lock the script took stays held (a
+`Threading::LockGuard` in the script is not released), an object it was building stays half built, a command stream it
+was writing stays half written. The host treats what the script touched as poisoned: it does not take a lock the
+script could hold again without knowing who holds it, and drops what the script was writing. The guard does not run
+those cleanups on purpose: they would run on whatever state the fault left (a half-written object, a corrupt heap), and
+a faulted script is not trusted to run again.
+
 ---
 
 ## 8. Status

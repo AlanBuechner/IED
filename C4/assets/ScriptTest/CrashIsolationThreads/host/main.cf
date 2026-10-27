@@ -1,0 +1,205 @@
+// B73: guarded script calls on job workers (docs/runtime/04 section 7). Calls that fault on several workers at once,
+// into one script and into two, each return false and mark their script faulted once with a fault that reads whole,
+// while calls into another script finish; a stack overflow on a worker, then another on the same thread, are both
+// caught; faults while another thread collects leave every thread stoppable and scannable; and what a fault leaves
+// behind is pinned down: no cleanup of the script's frames runs, and a lock it held stays held (D-83).
+include "scripttest.ch"
+include "faults.ch"
+
+const int32 kWorkers = 6;         // every call of a step meets at its barrier, each on a thread of its own
+const uint32 kAccessViolation = 3221225477;   // 0xC0000005
+const uint32 kStackOverflow = 3221225725;     // 0xC00000FD
+
+funcptr<void(void*)> FunctionOf(Scripting::Script* script, const char* name)
+{
+	return (funcptr<void(void*)>)script->Address(name);
+}
+
+void ExpectAtBarrier(int32 calls)
+{
+	atomic_store(&Faults::g_arrived, 0, MemoryOrder::Release);
+	atomic_store(&Faults::g_expected, calls, MemoryOrder::Release);
+}
+
+// Each call into `script` on its own worker, all at once: whether it returned (true) or faulted.
+class CallResults
+{
+	public bool[8] returned;
+	public int64[8] values;
+}
+
+void CallOnWorkers(Threading::JobSystem& jobs, Scripting::Script* script, funcptr<void(void*)> fn, CallResults* results, int32 first, int32 count,
+	Threading::WaitGroup& group)
+{
+	for (int32 i = first; i < first + count; ++i)
+	{
+		const int32 slot = i;
+		jobs.Submit([script, fn, results, slot]() { results->returned[slot] = script->Call(fn, (void*)&results->values[slot]); },
+			Threading::JobPriority::High, &group);
+	}
+}
+
+void CheckFaultedOnce(ScriptTest::Checks& checks, Scripting::Script* script, const char* code, const char* what)
+{
+	checks.That(script->Faulted() && !script->Ok(), what);
+	checks.Contains(script->FaultText(), code, "its fault reads whole");
+	int32 fine = 0;
+	checks.That(!script->Call(FunctionOf(script, "Fine"), (void*)&fine) && fine == 0, "and it refuses further calls");
+}
+
+// Four calls fault at once into one script while two calls into another work, all on workers.
+void CheckFaultsTogether(Scripting::Host* host, Threading::JobSystem& jobs, ScriptTest::Checks& checks)
+{
+	Scripting::Script* faulting = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "together", "faults.cf"));
+	Scripting::Script* working = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "working", "faults.cf"));
+	if (!faulting->Ok() || !working->Ok()) return;
+	CallResults* results = new CallResults();
+	Threading::WaitGroup group;
+	ExpectAtBarrier(6);
+	CallOnWorkers(jobs, faulting, FunctionOf(faulting, "WritesNullTogether"), results, 0, 4, group);
+	CallOnWorkers(jobs, working, FunctionOf(working, "WorksTogether"), results, 4, 2, group);
+	jobs.Wait(group);
+	int32 faulted = 0;
+	for (int32 i = 0; i < 4; ++i)
+		if (!results->returned[i]) faulted += 1;
+	checks.Equal(4, faulted, "each faulting call returns false");
+	checks.That(results->returned[4] && results->returned[5] && results->values[4] > 0 && results->values[4] == results->values[5], "the other script's calls finish");
+	CheckFaultedOnce(checks, faulting, "0xc0000005", "the faulting script is faulted");
+	checks.Contains(faulting->FaultText(), "writing 0x0", "with what it wrote");
+	checks.That(working->Ok(), "the other is not");
+	faulting->Unload();
+	working->Unload();
+}
+
+// Two scripts fault at once on four workers, two calls each, with different faults.
+void CheckTwoScriptsFault(Scripting::Host* host, Threading::JobSystem& jobs, ScriptTest::Checks& checks)
+{
+	Scripting::Script* first = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "first", "faults.cf"));
+	Scripting::Script* second = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "second", "faults.cf"));
+	if (!first->Ok() || !second->Ok()) return;
+	CallResults* results = new CallResults();
+	Threading::WaitGroup group;
+	ExpectAtBarrier(4);
+	CallOnWorkers(jobs, first, FunctionOf(first, "WritesNullTogether"), results, 0, 2, group);
+	CallOnWorkers(jobs, second, FunctionOf(second, "DividesTogether"), results, 2, 2, group);
+	jobs.Wait(group);
+	checks.That(!results->returned[0] && !results->returned[1] && !results->returned[2] && !results->returned[3], "every call faulted");
+	CheckFaultedOnce(checks, first, "0xc0000005", "the first script is faulted");
+	CheckFaultedOnce(checks, second, "0xc0000094", "and the second, by its own fault");
+	first->Unload();
+	second->Unload();
+}
+
+// A stack overflow on a worker, then another on the same thread: its guard page came back.
+void CheckOverflowsOnOneWorker(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Threading::JobSystemDesc desc;
+	desc.frameWorkers = 1;
+	desc.backgroundWorkers = 0;
+	Threading::JobSystem single(desc);
+	Scripting::Script* first = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "overflow-a", "faults.cf"));
+	Scripting::Script* second = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "overflow-b", "faults.cf"));
+	if (!first->Ok() || !second->Ok()) return;
+	uint64[2] threads;
+	bool[2] returned;
+	int64[2] limits;
+	limits[0] = 1000000000;
+	limits[1] = 1000000000;
+	for (int32 i = 0; i < 2; ++i)
+	{
+		Scripting::Script* script = i == 0 ? first : second;
+		funcptr<void(void*)> overflows = FunctionOf(script, "Overflows");
+		int64* limit = &limits[i];
+		uint64* thread = &threads[i];
+		bool* result = &returned[i];
+		Threading::WaitGroup group;
+		single.Submit([script, overflows, limit, thread, result]() {
+			*thread = Threading::Thread::CurrentId();
+			*result = script->Call(overflows, (void*)limit);
+		}, Threading::JobPriority::High, &group);
+		single.Wait(group);
+	}
+	checks.That(!returned[0] && !returned[1], "both overflows are caught");
+	checks.That(threads[0] == threads[1], "on the same thread");
+	checks.Contains(first->FaultText(), "0xc00000fd", "a stack overflow");
+	checks.Contains(second->FaultText(), "0xc00000fd", "and the second too");
+	first->Unload();
+	second->Unload();
+}
+
+void CollectRepeatedly(int32 rounds)
+{
+	for (int32 i = 0; i < rounds; ++i)
+	{
+		GC::Collect();
+		atomic_fetch_add(&Faults::g_collections, 1, MemoryOrder::AcqRel);
+	}
+}
+
+// Faults on workers while another thread collects, again and again: every collection stops and scans the faulted
+// threads, and they allocate afterwards.
+void CheckFaultsWhileCollecting(Scripting::Host* host, Threading::JobSystem& jobs, ScriptTest::Checks& checks)
+{
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "collecting", "faults.cf"));
+	if (!script->Ok()) return;
+	funcptr<void(void*)> faults = FunctionOf(script, "AllocatesThenFaults");
+	GC::SetVerify(true);
+	atomic_store(&Faults::g_collections, 0, MemoryOrder::Release);
+	Threading::Thread collector = Threading::Thread::Run([]() { CollectRepeatedly(60); });
+	Threading::Atomic<int32>* caught = new Threading::Atomic<int32>();
+	Threading::Atomic<int32>* allocatedAfter = new Threading::Atomic<int32>();
+	Threading::WaitGroup group;
+	for (int32 i = 0; i < 40; ++i)
+		jobs.Submit([faults, caught, allocatedAfter]() {
+			Scripting::Fault fault;
+			if (!Scripting::Guard(faults, nullptr, &fault) && fault.code == kAccessViolation) caught->FetchAdd(1, MemoryOrder::Relaxed);
+			int64* after = new int64[8];
+			after[7] = 7;
+			if (after[7] == 7) allocatedAfter->FetchAdd(1, MemoryOrder::Relaxed);
+		}, Threading::JobPriority::High, &group);
+	jobs.Wait(group);
+	collector.Join();
+	GC::SetVerify(false);
+	checks.Equal(40, caught->Load(), "every fault while another thread collects is caught");
+	checks.Equal(40, allocatedAfter->Load(), "and its thread allocates afterwards");
+	checks.Equal(60, atomic_load(&Faults::g_collections, MemoryOrder::Acquire), "every collection finished, each verified against a fresh mark");
+	GC::Collect();
+	checks.That(script->Ok(), "Guard marks no script");
+	script->Unload();
+}
+
+// What a fault leaves (D-83): no cleanup of the script's frames runs - neither the faulting frame's nor those of the
+// frames below it whose calls were under way - and a lock the script held stays held.
+void CheckWhatAFaultLeaves(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "leaves", "faults.cf"));
+	if (!script->Ok()) return;
+	Scripting::Fault fault;
+	atomic_store(&Faults::g_cleanups, 0, MemoryOrder::Release);
+	checks.That(!Scripting::Guard(FunctionOf(script, "FaultsWithLocal"), nullptr, &fault), "a fault with a local in its frame");
+	checks.Equal(0, atomic_load(&Faults::g_cleanups, MemoryOrder::Acquire), "leaves the faulting frame's local undestroyed");
+	checks.That(!Scripting::Guard(FunctionOf(script, "FaultsBelowLocal"), nullptr, &fault), "a fault in a call");
+	checks.Equal(0, atomic_load(&Faults::g_cleanups, MemoryOrder::Acquire), "and the local of the frame that made the call");
+	checks.That(!Scripting::Guard(FunctionOf(script, "FaultsHoldingLock"), nullptr, &fault), "a fault holding a lock");
+	const bool free = Faults::g_lock.TryLock();
+	checks.That(!free, "leaves the lock held: a host treats what the script held as poisoned");
+	if (free) Faults::g_lock.Unlock();
+	script->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("CrashIsolationThreads");
+	Threading::JobSystemDesc desc;
+	desc.frameWorkers = kWorkers;
+	desc.backgroundWorkers = 0;
+	Threading::JobSystem jobs(desc);
+	CheckFaultsTogether(host, jobs, checks);
+	CheckTwoScriptsFault(host, jobs, checks);
+	CheckOverflowsOnOneWorker(host, checks);
+	CheckFaultsWhileCollecting(host, jobs, checks);
+	CheckWhatAFaultLeaves(host, checks);
+	return checks.End("CrashIsolationThreads");
+}

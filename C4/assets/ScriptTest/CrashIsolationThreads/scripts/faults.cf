@@ -1,0 +1,90 @@
+include "faults.ch"
+
+// Waits until every expected call has arrived, so the calls fault at once on their threads.
+void Arrive()
+{
+	atomic_fetch_add(&Faults::g_arrived, 1, MemoryOrder::AcqRel);
+	while (atomic_load(&Faults::g_arrived, MemoryOrder::Acquire) < atomic_load(&Faults::g_expected, MemoryOrder::Acquire)) thread_yield();
+}
+
+void WritesNullTogether(void* unused)
+{
+	Arrive();
+	*(int32*)Faults::g_null = 1;
+}
+
+void DividesTogether(void* out)
+{
+	Arrive();
+	*(int32*)out = 10 / Faults::g_zero;
+}
+
+// Works for a while (until every expected call arrived, then some more), and finishes.
+void WorksTogether(void* out)
+{
+	Arrive();
+	int64 sum = 0;
+	for (int64 i = 0; i < 100000; ++i) sum += i % 7;
+	*(int64*)out = sum;
+}
+
+int64 Deep(int64 depth, int64 limit)
+{
+	int64[128] frame;
+	for (int32 i = 0; i < 128; i++) frame[i] = depth + i;
+	Faults::g_frame = (int64)&frame[0];
+	if (depth >= limit) return frame[3];
+	return Deep(depth + 1, limit) + frame[5];
+}
+
+void Overflows(void* out) { *(int64*)out = Deep(0, *(int64*)out); }
+
+// Garbage made while another thread collects, then a fault with it still in the frame.
+void AllocatesThenFaults(void* unused)
+{
+	int64* last = null;
+	for (int32 i = 0; i < 2000; ++i)
+	{
+		int64* block = new int64[16];
+		block[0] = (int64)last;
+		last = (i % 50 == 49) ? null : block;
+	}
+	Faults::g_frame = (int64)last;
+	*(int32*)Faults::g_null = 1;
+}
+
+struct Counted
+{
+	[operator("delete")] public void Delete() { atomic_fetch_add(&Faults::g_cleanups, 1, MemoryOrder::AcqRel); }
+	public int32 value;
+}
+
+// A frame that faults with a local to destroy.
+void FaultsWithLocal(void* unused)
+{
+	Counted local;
+	local.value = 1;
+	*(int32*)Faults::g_null = local.value;
+}
+
+void WriteNull(int32 value) { *(int32*)Faults::g_null = value; }
+
+// A frame whose call faults further in, with a local to destroy. The call goes through an address read back as
+// volatile, so no optimizer folds the callee into this frame.
+void FaultsBelowLocal(void* unused)
+{
+	Counted local;
+	local.value = 2;
+	funcptr<void(int32)> write = WriteNull;
+	Faults::g_frame = (int64)write;
+	((funcptr<void(int32)>)Faults::g_frame)(local.value);
+}
+
+// Faults holding the host's lock.
+void FaultsHoldingLock(void* unused)
+{
+	Threading::LockGuard held(Faults::g_lock);
+	*(int32*)Faults::g_null = 3;
+}
+
+void Fine(void* out) { *(int32*)out = 5; }

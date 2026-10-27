@@ -18,7 +18,6 @@ struct c4s_script
 {
 	std::unique_ptr<Scripting::Script> script;
 	std::string tag;
-	std::string fault; // FaultText, kept for the pointer handed out
 };
 
 namespace
@@ -132,11 +131,11 @@ extern "C"
 
 	int32_t c4s_script_faulted(const c4s_script* script) { return script && script->script && script->script->Faulted() ? 1 : 0; }
 
+	// The script keeps its fault's text once it is written, so the pointer stays valid with the script.
 	const char* c4s_script_fault(c4s_script* script)
 	{
 		if (!script || !script->script) return "";
-		script->fault = script->script->FaultText();
-		return script->fault.c_str();
+		return script->script->FaultText().c_str();
 	}
 
 	void* c4s_script_find(const c4s_script* script, const char* symbol)

@@ -64,9 +64,14 @@ namespace Scripting
 
 	Script::~Script() { Unload(); }
 
-	std::string Script::FaultText() const
+	const std::string& Script::FaultText() const
 	{
-		if (!m_Faulted) return "";
+		static const std::string kNone;
+		return Faulted() ? m_FaultText : kNone;
+	}
+
+	std::string Script::DescribeFault() const
+	{
 		std::string text = "exception " + Hex(m_Fault.code);
 		if (!m_FaultPlace.empty()) text += " at " + m_FaultPlace;
 		else if (m_Fault.address >= m_Image.low && m_Fault.address < m_Image.high) text += " at script+" + Hex(m_Fault.address - m_Image.low);
@@ -80,7 +85,7 @@ namespace Scripting
 
 	bool Script::Call(void (*fn)(void*), void* context)
 	{
-		if (!m_Linked || m_Faulted) return false;
+		if (!m_Linked || Faulted()) return false;
 		ScriptFault fault;
 		if (m_Guard(fn, context, &fault)) return true;
 		RecordFault(fault);
@@ -89,9 +94,20 @@ namespace Scripting
 
 	void Script::RecordFault(const ScriptFault& fault)
 	{
-		m_Faulted = true;
+		std::lock_guard<std::mutex> held(m_FaultLock);
+		if (Faulted()) return;
 		m_Fault = fault;
 		m_FaultPlace = m_Linked ? m_Linked->Describe(fault.address) : "";
+		m_FaultText = DescribeFault();
+		m_Faulted.store(true, std::memory_order_release);
+	}
+
+	void Script::MarkFaulted(const char* why)
+	{
+		std::lock_guard<std::mutex> held(m_FaultLock);
+		if (Faulted()) return;
+		m_FaultText = why;
+		m_Faulted.store(true, std::memory_order_release);
 	}
 
 	bool Script::CallStart(void (*start)())
@@ -103,7 +119,7 @@ namespace Scripting
 		}
 		catch (...)
 		{
-			m_Faulted = true;
+			MarkFaulted("an exception escaped the start of the script's globals");
 			m_Diagnostics += "error: an exception escaped the start of the script's globals\n";
 		}
 		return false;
@@ -138,7 +154,7 @@ namespace Scripting
 		}
 		catch (...)
 		{
-			m_Faulted = true; // a destructor threw; the rest still goes
+			MarkFaulted("an exception escaped an exit of the script's globals"); // the rest still goes
 		}
 		if (!m_TlsControls.empty()) m_Runtime.tlsRelease(m_TlsControls.data(), static_cast<uint32>(m_TlsControls.size()));
 		if (m_Roots) m_Runtime.removeRootTable(m_Roots);

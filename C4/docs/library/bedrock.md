@@ -860,7 +860,11 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
   job runs, `end(token)` with what `begin` returned once it has; a null function is not called, and an empty observer
   stops it. `Submit(job, priority, group, name)` gives the job the name the observer sees (a literal, or text that
   outlives the job). A profiler installs one as it starts, so each job is a task in its timeline.
-- An exception that escapes a job ends the process, as one escaping a thread's entry does.
+- An exception that escapes a job ends the process, as one escaping a thread's entry does. A job that calls a
+  script runs the call guarded (`Script::Call`, `Scripting::Guard`): a hardware fault in the script ends that call,
+  which returns false, and the job and its worker go on; a C4 exception from the script is no fault and passes through
+  to the job like any (catch it there, or it ends the process). Calls on several workers fault and are caught at once,
+  and what a faulted call leaves is the host's to recover ([scripting 7](../runtime/04-scripting.md#7-crash-isolation)).
 
 **Threads and exceptions; threads C4 did not start.** An exception that leaves a `Thread::Run` body, a job or an
 event loop's `Run` called on its own thread ends the process (`C4: fatal: an exception was thrown and not caught`),
