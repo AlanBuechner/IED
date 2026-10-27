@@ -37,8 +37,10 @@ namespace Ai
 
 	static Core::String Who(const IED::Contribution& given) { return Core::String("plugin ") + given.pluginId.View(); }
 
-	// A folder of a plugin as the file tools name it: plugins:/<id>/<relative>.
+	// A folder of a plugin as the file tools name it: plugins:/<id>/<relative>; "" for one outside the plugin (a
+	// computed entry's: the c4 plugin's docs of its toolchain), which plugins:/ does not reach.
 	static Core::String PluginShown(const IED::Contribution& given, Core::StringView relative) {
+		if (given.computed && FS::Path(relative.Trimmed()).IsAbsolute()) return Core::String("");
 		return JoinPath(((Core::String(kPluginsAlias) + ":/") + given.pluginId.View()).View(), relative.Trimmed());
 	}
 

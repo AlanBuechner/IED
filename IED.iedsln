@@ -61,6 +61,7 @@
 				"ied.java",
 				"ied.lua",
 				"ied.markdown",
+				"ied.mcp",
 				"ied.nuke",
 				"ied.profiler",
 				"ied.python",

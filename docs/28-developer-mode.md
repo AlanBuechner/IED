@@ -52,7 +52,7 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    plugin's folder in `ied:/`: a server run from the checkout loads its built-in plugins from it, and an installed one's
    come from it (the root's `home: true`: `<home>/plugins/chat` is `ied:/plugins/chat`, so the change lands in the
    source, not in the install a reinstall replaces). The c4 plugin is the toolchain's copy `nuke build` makes from
-   `ied:/C4/IedPlugin/` and `ied:/C4/docs/`; the section says to change those and rebuild.
+   `ied:/plugins/c4/` (the built-in, and the source of each toolchain's copy) and `ied:/C4/docs/`; the section says to change those and rebuild.
 2. **Permissions as the chat's mode says.** Writes into the source have the subject `fs.write(ied:/<path>)` and
    commands run there `shell(ied:/<command>)`, and they are decided like any other (`docs/11`): auto mode runs them
    without asking, acceptEdits writes and asks for commands, ask mode asks until the owner allows them - "Allow for this

@@ -442,8 +442,9 @@ class FakeServerCodeToolTests(CodeToolCase):
 
 @unittest.skipUnless(os.path.exists(C4LSP), "no dev toolchain with C4LSP (nuke build makes it)")
 class C4AfterAiWriteTests(CodeToolCase):
-	"""docs/24 "After an AI edit" with the real C4LSP and this checkout's c4 manifest (C4/IedPlugin, which asks for
-	both): a C4 file the AI writes comes back formatted, and an error in it is in the result."""
+	"""docs/24 "After an AI edit" with the real C4LSP and this checkout's c4 plugin (plugins/c4, the built-in, which
+	asks for both and finds the dev toolchain in the store as it does on a machine): a C4 file the AI writes comes back
+	formatted, and an error in it is in the result."""
 
 	def prepare(self):
 		def nuke(*words):
@@ -456,18 +457,25 @@ class C4AfterAiWriteTests(CodeToolCase):
 		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)
 		write(os.path.join(self.repo, "src", "main.cf"), MAIN_CF)
 		nuke("build")
-		# This checkout's manifest in place of the toolchain's (which may be older), its tools still the toolchain's.
+		# This checkout's built-in c4 plugin in place of the toolchain's copy (which may be older), finding the dev
+		# toolchain - its tools - through NUKE_TOOLCHAINS, as the workspace's nuke.toml pins it.
 		solution = [os.path.join(self.repo, name) for name in os.listdir(self.repo) if name.endswith(".iedsln")][0]
 		with open(solution, encoding="utf-8") as f:
 			pinned = json.load(f)
 		pinned.pop("localPlugins", None)
 		write(solution, json.dumps(pinned))
 		plugin = os.path.join(self.home, "plugins", "c4")
-		shutil.copytree(os.path.join(REPO, "C4", "IedPlugin"), plugin)
-		with open(os.path.join(plugin, "ied-plugin.json"), encoding="utf-8") as f:
-			manifest = "".join(line for line in f if not line.lstrip().startswith("//"))
-		toolchain = os.path.dirname(os.path.dirname(os.path.dirname(C4LSP))).replace("\\", "/")
-		write(os.path.join(plugin, "ied-plugin.json"), manifest.replace("${pluginDir}/..", toolchain))
+		for name in ("ied-plugin.json", "settings.schema.json", "toolchain-contributions.json", "grammars", "skills"):
+			source = os.path.join(REPO, "plugins", "c4", name)
+			if os.path.isdir(source):
+				shutil.copytree(source, os.path.join(plugin, name))
+			else:
+				os.makedirs(plugin, exist_ok=True)
+				shutil.copy2(source, plugin)
+		store = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(C4LSP)))))
+		saved = os.environ.get("NUKE_TOOLCHAINS")
+		os.environ["NUKE_TOOLCHAINS"] = store
+		self.addCleanup(lambda: os.environ.pop("NUKE_TOOLCHAINS", None) if saved is None else os.environ.__setitem__("NUKE_TOOLCHAINS", saved))
 
 	async def test_a_c4_write_is_formatted_and_checked(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.edits.diagnosticsWaitMs", "value": 10000})

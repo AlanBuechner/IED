@@ -66,7 +66,7 @@ multiple files." As built (`plugins/chat/code/afterwrite.cf`, `files.cf` `Writte
 - **The language plugin decides.** Two options of an `lspProfiles` entry, each `true` or a when clause that must hold in
   the workspace (`docs/26` section 8): `formatOnAiWrite` - a file the AI writes (`fs_write`, `fs_edit`) is formatted
   with `textDocument/formatting` before the call returns - and `diagnosticsOnAiWrite` - the call's result carries what
-  the server then says of the file. Shipped: C4LSP (`C4/IedPlugin`) and gopls (`ied.go`) both; clangd (`ied.cpp`)
+  the server then says of the file. Shipped: C4LSP (`plugins/c4`) and gopls (`ied.go`) both; clangd (`ied.cpp`)
   diagnostics, and formatting only where the workspace's root has a `.clang-format` (`workspaceContains..clang-format`;
   without one clangd would reformat to LLVM style). A language whose profile names neither is untouched.
 - **The owner turns them off:** `ai.edits.formatOnWrite`, `ai.edits.diagnosticsOnWrite` (app, solution; on), and
