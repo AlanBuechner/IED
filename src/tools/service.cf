@@ -50,15 +50,22 @@ namespace Ied
 
 	void Tools::PluginsChanged(Workspace* ws) { TrustChanged(ws); }
 
-	// A setting may name a tool's program: its tools are found again (asking a version is cheap).
+	// A setting may name a tool's program: when one of the tools' settings changed, they are found again.
 	void Tools::SettingsChanged(Workspace* ws) {
 		WorkspaceTools* entry = EntryOf(ws);
-		if (!entry || !entry->detected) return;
+		if (entry && entry->detected && ToolSettings(ws) != entry->settings) Detect(entry);
+	}
+
+	Core::String Tools::ToolSettings(Workspace* ws) {
+		Core::StringBuilder values;
 		for (const ToolSpec* spec : ToolsOf(ws))
 			if (!spec->setting.IsEmpty()) {
-				Detect(entry);
-				return;
+				values.Append(spec->setting.View());
+				values.Append("=");
+				values.Append(SettingText(ws, spec->setting.View()).View());
+				values.Append("\n");
 			}
+		return values.ToString();
 	}
 
 	// A pin file (go.mod, rust-toolchain.toml) that changed: its tools are found again.
@@ -69,15 +76,13 @@ namespace Ied
 			Detect(entry);
 			return;
 		}
-		Core::Array<ToolSpec*> specs = ToolsOf(ws);
 		for (const TreeChange& change : batch.Changes()) {
 			Core::StringView name = FS::Path(change.path.View()).FileName();
-			for (const ToolSpec* spec : specs)
-				for (const VersionSource* source : spec->versionFrom)
-					if (FS::Path(source->file.View()).FileName() == name) {
-						Detect(entry);
-						return;
-					}
+			for (const Core::String& pinned : entry->pinFiles)
+				if (pinned.View() == name) {
+					Detect(entry);
+					return;
+				}
 		}
 	}
 
@@ -166,8 +171,13 @@ namespace Ied
 			{
 				Threading::LockGuard guard(server->lock);
 				entry->dirty = false;
+				entry->settings = ToolSettings(entry->ws);
+				entry->pinFiles.Clear();
 				if (entry->ws->trusted)
-					for (ToolSpec* spec : ToolsOf(entry->ws)) jobs.Push(JobFor(entry->ws, spec));
+					for (ToolSpec* spec : ToolsOf(entry->ws)) {
+						jobs.Push(JobFor(entry->ws, spec));
+						for (const VersionSource* source : spec->versionFrom) entry->pinFiles.Push(Core::String(FS::Path(source->file.View()).FileName()));
+					}
 			}
 			Core::Array<ToolStatus*> found;
 			for (DetectJob* job : jobs) found.Push(DetectTool(*job));

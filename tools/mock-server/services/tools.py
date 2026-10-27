@@ -1,8 +1,9 @@
-"""Language tools (docs/26 "Language tools"): 'tools:<wsId>' with the tools the loaded C/C++ and Go plugins name, each in a
-scripted state - clangd found (it comes with IED), CodeLLDB and Delve missing, Go found with go.mod's pin, gopls found -
-and tools.status / tools.detect / tools.install / tools.cancel / tools.dismiss. An install runs its tools one by one on
-the mock's clock, writing to the workspace's 'tools' output source, and leaves each found in IED's tools folder. Nothing
-is run or downloaded."""
+"""Language tools (docs/26 "Language tools"): 'tools:<wsId>' with the tools the loaded C/C++ and Go plugins name, and
+tools.status / tools.detect / tools.install / tools.cancel / tools.dismiss. A workspace starts with every tool found (so
+the other scenarios see no banner); tools.detect - the mock's detection - brings its script: clangd found (it comes with
+IED), CodeLLDB and Delve missing, Go found with go.mod's pin, gopls found. An install runs its tools one by one on the
+mock's clock, writing to the workspace's 'tools' output source, and leaves each found in IED's tools folder. Nothing is
+run or downloaded."""
 
 import asyncio
 
@@ -31,8 +32,16 @@ class Tools:
 			self.opened(ws_id)
 
 	def opened(self, ws_id):
-		self.states[ws_id] = {tool["id"]: dict(SCRIPT.get(tool["id"], {"state": "missing"})) for _, tool in self.specs()}
+		self.states[ws_id] = {tool["id"]: self.found(tool) for _, tool in self.specs()}
 		self.server.hub.add("tools:" + ws_id, lambda: self.snapshot(ws_id))
+
+	@staticmethod
+	def found(tool):
+		scripted = SCRIPT.get(tool["id"], {})
+		if scripted.get("state") == "found":
+			return dict(scripted)
+		version = tool.get("install", {}).get("version", "1.0.0")
+		return {"state": "found", "version": version, "source": "path", "path": "C:\\Tools\\%s.exe" % tool["program"]}
 
 	def specs(self):
 		"""[(plugin, tool entry)] of the loaded plugins the mock scripts."""

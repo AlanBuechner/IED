@@ -25,6 +25,8 @@ namespace Ied
 		public bool dirty;                                         // detect again when the running detection ends
 		public Core::HashMap<Core::String, Core::String> failures; // tool id -> why its install failed, while it lacks
 		public Core::String dismissed;                             // the lacking tools when the banner was dismissed
+		public Core::String settings;                              // the tools' settings as they were last seen
+		public Core::Array<Core::String> pinFiles;                 // the names of the files the tools' pins are read from
 		public Core::Array<Core::String> queued;                   // an install's tools, in order
 		public Core::String current;                               // the one installing now
 	}
@@ -62,6 +64,8 @@ namespace Ied
 		private DetectJob* JobFor(Workspace* ws, ToolSpec* spec);
 		private ProfileVariables VariablesFor(Workspace* ws, const ToolSpec* spec);
 		private Core::String SettingText(Workspace* ws, Core::StringView key);
+		// The tools' settings and their values, one per line: what SettingsChanged compares.
+		private Core::String ToolSettings(Workspace* ws);
 		private Core::Array<Core::String> ProjectFolders(Workspace* ws);
 		private ToolStatus* StatusOf(WorkspaceTools* entry, Core::StringView id);
 		private void Store(WorkspaceTools* entry, ToolStatus* status);
