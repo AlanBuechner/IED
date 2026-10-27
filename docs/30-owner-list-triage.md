@@ -15,7 +15,7 @@ was partial. **left** - with why.
 | 3 | Usage limits must not switch Claude off | **done** | Every turn asks Claude; only the CLI's own usage-limit refusal moves that turn to the chain's next candidate, and the next turn asks again. `BlockedUntil`, `MetLimit`, `PlaceState::UsedUp` are gone; pace-based fallback is unchanged. Fable is limited by the shared week too, its own week an extra limit. `test_claude.py`, unit `server.ai.claude`. |
 | 4 | Thinking preview: fixed size, last lines, wrapped, never sideways | **done** | A four-line box holding the last whole lines, wrapping at its bottom. e2e `chat_thinking_preview`. |
 | 5 | A Python shell on the vendored Python | **done** | Terminal profiles (`terminalProfiles`), the Python plugin's profile runs `vendor/python` with `pip()` into IED's own folder. `test_terminal_profiles.py` (a real Python terminal, a wheel installed and imported). |
-| 6 | Code navigation: symbols that do not go; Ctrl re-pressed | **done** | IED: a word whose definition answer was empty or late is asked again while Ctrl is held (`definitionlinks.js`, unit in a real Monaco). C4LSP: the symbols it answered null for (template instances' methods, lambdas, `Enum::Member`, `Class::Static`, out-of-line definitions) - see `WORK.md` "C4LSP definitions". |
+| 6 | Code navigation: symbols that do not go; Ctrl re-pressed | **done** | IED: a word whose definition answer was empty or late is asked again while Ctrl is held (`definitionlinks.js`, unit in a real Monaco). C4LSP: the symbols it answered null for - template instances' methods, member function templates, everything in a lambda, `Enum::Member`, `Class::Static`, a declaration's own name, range-for variables, a class template's own members - each fixed at its cause (BUG-401..408), so definition, hover, references and rename agree; 15 new C4Testing cases fail on the old code. |
 | 7 | Never clear context after a server reset; save the context to disk | **done** | Reproduced first (`test_chat_prefix.py` against the old build): compression rewrote messages in memory, so a reloaded chat sent other bytes - a cold read, a jump in the count and a second compression. Now compression only changes what requests send (`context.json` in the chat folder keeps that view), every message stays whole on disk, the calibration and the server's last count are in `chat.json`. 7 checks in `test_chat_prefix.py`. |
 | 8 | Week or work-week pace, weekend marker, mid-week rollover | **done** | `ai.claude.paceDays` (week, workweek) and `ai.claude.workDays`; `WorkWeek.cf` paces a weekly window over the work days (mid-week reset, weekends standing still, DST) with a dashed weekend tick. Unit `server.ai.workweek`, e2e `claude_week_paced_over_work_days`. |
 | 9 | Footer usage: hover simple bars, click the card with "Open Claude settings" | **done** | ui-kit `hoverCard` pinned mode; the status bar passes a click to its view. e2e `claude_usage_bars_and_card`. |
@@ -55,3 +55,13 @@ was partial. **left** - with why.
 - 17 (double-click in a Markdown preview selects) and 36 (the Queue button) were done then and stay done.
 - 34 (important side panels cannot be closed): still as it was - the chats list and the profiler's captures panel are
   views inside a tool window. It is not on the new list.
+
+## Checked, on master 55cb7a68
+
+- ied-server unit tests 394/394; server checks 448/448 with `--cli`, on the refreshed dev toolchain and before it.
+- e2e: the in-browser unit tests (350) and every scenario at every viewport, against the mock and the real server: 0
+  failures (the one failure the first run found - a ContentModified answer reported as an error - is fixed above).
+- `nuke gates` for C4: C4Testing 1297, TestCode 1530 x4, Negative 696 x2, Isolated 487 x2, Script 25 x5, Tools 31,
+  Differential 150, Bedrock 715; Nuke's tests 204; lint, the schema check, the C4 GPU sample's capture test.
+- Not yet on the owner's installed IED: it runs from the install, which `nuke install-ied` refreshes, and its C4LSP
+  comes from the dev toolchain, which `nuke build` refreshes (it is at 80a188b5, before BUG-401..409).
