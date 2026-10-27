@@ -2099,6 +2099,53 @@ def model_settings(run):
 	check((roles["primary"].get("effort"), roles["planning"].get("effort")) == ("xhigh", "max"), "Claude's levels: %s" % roles)
 
 
+FAKE_MCP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "fake-mcp", "fake_mcp.py")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def mcp_settings_page(run):
+	"""Settings > AI > MCP Servers (docs/04 "MCP"): Add server with a command, Test before Save, Save to the User tier,
+	then the server's card: Start, its tools, Stop. Against tools/fake-mcp."""
+	import sys
+	page = run.open()
+	run.request("ws.setTrust", {"wsId": page.evaluate("ied_shell.wsId"), "trusted": True})
+	open_settings(run, page)
+	page.click(".set-node[data-page='custom:ied.mcp.servers']")
+	pane = ".set-custom[data-page='custom:ied.mcp.servers']"
+	page.wait_for_selector(pane + " button[data-act='add']")
+	page.click(pane + " button[data-act='add']")
+	form = pane + " .mcp-server.editing"
+	page.fill(form + " input[aria-label='Name']", "fake")
+	page.fill(form + " input[aria-label='Command']", sys.executable)
+	page.fill(form + " input[aria-label='Arguments']", "-I \"%s\"" % FAKE_MCP.replace("\\", "/"))
+	check(not page.is_visible(form + " input[aria-label='URL']"), "a command's fields, not a URL's")
+	page.click(form + " button[data-act='try']")
+	page.wait_for_selector(form + " .mcp-test .mcp-line.mcp-ok", timeout=20000)
+	run.wait_text(form + " .mcp-test", "10 tools")
+	run.shot("tested")
+	page.click(form + " button[data-act='save']")
+	card = pane + " .mcp-server[data-server='fake']:not(.editing)"
+	page.wait_for_selector(card)
+	deadline = time.time() + 10
+	while True:
+		servers = run.request("settings.get", {})["values"]["mcp.servers"]["value"]
+		if "fake" in servers or time.time() > deadline:
+			break
+		time.sleep(0.1)
+	check(servers.get("fake", {}).get("command") == sys.executable and servers["fake"]["args"][-1].endswith("fake_mcp.py"), "written to the User tier: %s" % servers)
+	page.click(card + " button[data-act='start']")
+	page.wait_for_selector(pane + " .mcp-server[data-server='fake'][data-state='running']", timeout=20000)
+	run.wait_text(card + " .mcp-line", "Running: fake-mcp 1.2.3")
+	page.click(card + " .mcp-tools summary")
+	page.wait_for_selector(card + " .mcp-tool[data-tool='echo'] .mcp-tool-name:has-text('mcp_fake_echo')")
+	run.shot("running")
+	page.click(card + " button[data-act='stop']")
+	page.wait_for_selector(pane + " .mcp-server[data-server='fake'][data-state='stopped']", timeout=20000)
+	run.wait_text(card + " .mcp-line", "stay offered")
+	run.shot("stopped")
+	run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {}})
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Git (docs/10 "Git", mockup 05): the mock's canned repository; the real server's is the fixture made a repository
 # (targets.make_repository).

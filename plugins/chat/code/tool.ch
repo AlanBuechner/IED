@@ -69,8 +69,9 @@ namespace Ai
 		public bool inPlan;               // offered in Plan mode (docs/13 "Mode presets")
 		public bool agentOnly;            // offered only in Agent mode (finish)
 		public bool deferred;             // listed by name until loaded for the chat
-		public Core::String group;        // "media", or a plugin tool's plugin id
+		public Core::String group;        // "media", a plugin tool's group or else its plugin id
 		public bool folderRoots;          // works in a plugin's folder (plugins:/), which is no workspace: reads it from the disk
+		public bool asks;                 // every call asks until a rule allows it (a toolCalls entry's approval "ask")
 		public ToolPlanner plan;
 		public ToolDetailer detail;       // null: the card shows the plan as it is
 		public ToolRunner run;            // null: the run handles the call itself

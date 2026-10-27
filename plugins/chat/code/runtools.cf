@@ -194,6 +194,7 @@ namespace Ai
 			{
 				IED::HostLock guard(*context);
 				permit = Decide(chat->permission, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
+				if (spec->asks) permit = AskUntilAllowed(permit, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
 				if (!root.rootAlias.IsEmpty()) allowedInRoot = AllowedInRoot(rules, chat->allowed, plan.subject.View(), root.rootAlias.View());
 			}
 			if (!root.rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow && !allowedInRoot) {

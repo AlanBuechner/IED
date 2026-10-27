@@ -25,6 +25,7 @@ namespace Ai
 
 	void TurnRun::Execute() {
 		try {
+			AwaitToolStarts(ws, &run->cancelled);
 			if (Prepare()) {
 				ResolveMessage();
 				while (!ending) Step();

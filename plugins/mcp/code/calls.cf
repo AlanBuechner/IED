@@ -1,0 +1,280 @@
+// A call of an MCP tool (docs/04 "MCP" A call): mcp.call starts it on a thread of the plugin's own and answers its id at
+// once, mcp.result waits a while for what it came to, mcp.cancel cancels it at the server - so the tool function that
+// polls them sees the chat's Stop between waits. A server that is not running is started first (a failed one is tried
+// once); the answer becomes the tool's result, its images and files written under .ied/local/mcp/media/.
+
+include "servers.ch"
+
+namespace Mcp
+{
+	const char* kMediaFolder = ".ied/local/mcp/media";
+	const int64 kCallsKept = 64;
+
+	static int64 CallsNowMs() { return clock_now_ns() / 1000000; }
+
+	// The server and tool the chat's tool `aiName` is, in `place` (under `lock`).
+	static bool ToolOf(WorkspaceServers* place, Core::StringView aiName, ServerEntry*& entry, McpTool*& tool) {
+		for (ServerEntry* each : place->servers)
+			for (McpTool* known : each->tools)
+				if (known->aiName.View() == aiName) {
+					entry = each;
+					tool = known;
+					return true;
+				}
+		return false;
+	}
+
+	static Core::String NoSuchTool(Core::StringView aiName) {
+		return (Core::String("there is no MCP tool ") + aiName) + " in this workspace now: its server's tools changed or it was taken out of mcp.servers; the next turn has the tools as they are";
+	}
+
+	Core::String McpService::DescribeTool(Core::StringView wsId, Core::StringView aiName, Core::String& error) {
+		Threading::LockGuard guard(lock);
+		WorkspaceServers* place = Find(wsId);
+		ServerEntry* entry = nullptr;
+		McpTool* tool = nullptr;
+		if (!place || !ToolOf(place, aiName, entry, tool)) {
+			error = NoSuchTool(aiName);
+			return Core::String();
+		}
+		if (!place->ws.trusted) {
+			error = Core::String("the workspace is not trusted: MCP servers start only in a trusted workspace");
+			return Core::String();
+		}
+		if (!entry->config->enabled) {
+			error = (Core::String("the MCP server ") + entry->config->name.View()) + " is turned off (mcp.servers." + entry->config->name.View() + ".enabled)";
+			return Core::String();
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("server", entry->config->name.View());
+		json.Field("tool", tool->name.View());
+		json.Field("title", tool->title.View());
+		json.Field("permission", PermissionName(entry->config->permission));
+		json.Field("state", ServerStateName(entry->state));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpService::StartCall(const Serialization::DomNode& args, Core::String& error) {
+		Core::String wsId = Core::String(args.Member("wsId").AsView());
+		Core::String tool = Core::String(args.Member("tool").AsView());
+		Core::String arguments = args.Member("arguments").Kind() == Serialization::DomKind::Object ? IED::NodeJson(args.Member("arguments")) : Core::String("{}");
+		if (DescribeTool(wsId.View(), tool.View(), error).IsEmpty()) return Core::String();
+		RunningCall* call = new RunningCall();
+		{
+			Threading::LockGuard guard(lock);
+			callCount += 1;
+			Core::StringBuilder id;
+			id.Append("mc-");
+			id.AppendInt(callCount);
+			call->callId = id.ToString();
+			running.Push(call);
+			while (running.Count() > kCallsKept && running[0]->done) running.RemoveAt(0);
+		}
+		McpService* self = this;
+		context->StartThread([self, call, wsId, tool, arguments]() { self->RunCall(call, wsId.View(), tool.View(), arguments.View()); });
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("callId", call->callId.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void McpService::RunCall(RunningCall* call, Core::StringView wsId, Core::StringView aiName, Core::StringView arguments) {
+		WorkspaceServers* place = nullptr;
+		ServerEntry* entry = nullptr;
+		McpTool* tool = nullptr;
+		bool found = false;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			found = place && ToolOf(place, aiName, entry, tool);
+		}
+		IED::ToolResult result;
+		Core::String error;
+		if (!found) result = IED::ToolFailure(NoSuchTool(aiName).View());
+		else if (!AwaitRunning(place, entry, &call->cancelled, error)) result = IED::ToolFailure(((Core::String("the MCP server ") + entry->config->name.View()) + " is not running: " + error.View()).View());
+		else {
+			result = Invoke(place, entry, tool, arguments, &call->cancelled);
+			{
+				Threading::LockGuard guard(lock);
+				entry->calls -= 1;
+				entry->lastUsedMs = CallsNowMs();
+			}
+		}
+		if (found) result.source = Core::String("MCP ") + entry->config->name.View();
+		Threading::LockGuard guard(lock);
+		call->result = result;
+		call->done = true;
+		changed.NotifyAll();
+	}
+
+	bool McpService::AwaitRunning(WorkspaceServers* place, ServerEntry* entry, const bool* cancelled, Core::String& error) {
+		for (int32 attempt = 0; attempt < 3; ++attempt) {
+			int64 generation = 0;
+			{
+				Threading::LockGuard guard(lock);
+				for (;;) {
+					if (entry->state == ServerState::Running && entry->client != nullptr && entry->client->Alive()) {
+						entry->calls += 1;
+						entry->lastUsedMs = CallsNowMs();
+						return true;
+					}
+					if (entry->state != ServerState::Starting) break;
+					if (*cancelled) {
+						error = Core::String("stopped while it was starting");
+						return false;
+					}
+					if (CallsNowMs() > entry->startByMs) {
+						error = Core::String("its start took longer than its startSeconds");
+						return false;
+					}
+					changed.WaitFor(lock, 100000000);
+				}
+				if (attempt > 0 && entry->state == ServerState::Failed) {
+					error = entry->error;
+					return false;
+				}
+				if (entry->state == ServerState::Running) {
+					entry->state = ServerState::Stopped;
+					entry->error = Core::String("it had stopped answering");
+				}
+				if (!Begin(place, entry, generation)) {
+					error = entry->error.IsEmpty() ? Core::String("it may not start now") : entry->error;
+					return false;
+				}
+			}
+			Launch(place, entry, generation);
+		}
+		Threading::LockGuard guard(lock);
+		error = entry->error.IsEmpty() ? Core::String("it did not start") : entry->error;
+		return false;
+	}
+
+	// The part's base64 bytes in a new file under the media folder: its workspace path, or empty when it cannot be written.
+	Core::String McpService::SaveMedia(const IED::Workspace& ws, Core::StringView server, const ContentPart* part) {
+		Core::Array<uint8> bytes;
+		if (!Core::Base64Decode(part->data.View(), bytes)) return Core::String();
+		Core::StringBuilder name;
+		{
+			Threading::LockGuard guard(lock);
+			mediaCount += 1;
+			name.Append(kMediaFolder);
+			name.Append("/");
+			name.Append(server);
+			name.Append("-");
+			name.AppendInt(Platform::UnixTimeNs() / 1000000);
+			name.Append("-");
+			name.AppendInt(mediaCount);
+			name.Append(".");
+			name.Append(ExtensionOf(part->mime.View()));
+		}
+		Core::String file = IED::WorkspaceFile(ws, name.View());
+		FS::MakeDirectories(Core::String(FS::Path(file.View()).Parent().View()).CStr());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)bytes.Data(), bytes.Count())) return Core::String();
+		return name.ToString();
+	}
+
+	IED::ToolResult McpService::Invoke(WorkspaceServers* place, ServerEntry* entry, McpTool* tool, Core::StringView arguments, const bool* cancelled) {
+		McpClient* client = nullptr;
+		ServerConfig* config = nullptr;
+		IED::Workspace ws;
+		{
+			Threading::LockGuard guard(lock);
+			client = entry->client;
+			config = entry->config;
+			ws = place->ws;
+		}
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.Field("name", tool->name.View());
+		params.RawField("arguments", arguments);
+		params.EndObject();
+		Core::String error;
+		Serialization::DomNode answer = client ? client->Call(Core::StringView("tools/call"), params.View(), (int32)(config->timeoutSeconds * 1000), cancelled, error) : Serialization::DomNode();
+		if (!client) error = Core::String("it stopped");
+		if (!answer.IsValid()) {
+			Core::StringBuilder said;
+			said.Append(config->name.View());
+			said.Append(": ");
+			said.Append(tool->name.View());
+			said.Append(" failed: ");
+			said.Append(error.View());
+			if (error.View().Contains(Core::StringView("did not answer within"))) {
+				said.Append(" (mcp.servers.");
+				said.Append(config->name.View());
+				said.Append(".timeoutSeconds)");
+			}
+			if (!client || !client->Alive()) said.Append("; IED starts it again by itself");
+			return IED::ToolFailure(said.View());
+		}
+		CallContent content = ReadCallResult(answer);
+		Core::Array<Core::String> paths;
+		IED::ToolResult result;
+		for (ContentPart* part : content.parts) {
+			const bool file = part->kind == PartKind::Image || part->kind == PartKind::File;
+			Core::String path = file ? SaveMedia(ws, config->name.View(), part) : Core::String();
+			paths.Push(path);
+			if (part->kind == PartKind::Image && !path.IsEmpty()) {
+				IED::ToolImage image;
+				image.mime = part->mime;
+				image.path = path;
+				result.images.Push(image);
+			}
+		}
+		result.content = CallText(content, paths);
+		if (result.content.IsEmpty() && result.images.IsEmpty()) result.content = Core::String("(the tool answered with no content)");
+		else if (result.content.IsEmpty()) result.content = Core::String("(an image)");
+		result.isError = content.isError;
+		return result;
+	}
+
+	static void WriteResult(IED::JsonWriter& json, const IED::ToolResult& result) {
+		json.Field("content", result.content.View());
+		json.BoolField("isError", result.isError);
+		json.Field("source", result.source.View());
+		json.Key(Core::StringView("images"));
+		json.BeginArray();
+		for (const IED::ToolImage& image : result.images) {
+			json.BeginObject();
+			json.Field("mime", image.mime.View());
+			json.Field("path", image.path.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String McpService::CallResult(Core::StringView callId, int64 waitMs, Core::String& error) {
+		Threading::LockGuard guard(lock);
+		RunningCall* call = nullptr;
+		for (RunningCall* each : running)
+			if (each->callId.View() == callId) call = each;
+		if (!call) {
+			error = (Core::String("there is no MCP call ") + callId);
+			return Core::String();
+		}
+		const int64 deadline = CallsNowMs() + waitMs;
+		while (!call->done) {
+			const int64 left = deadline - CallsNowMs();
+			if (left <= 0) break;
+			changed.WaitFor(lock, left * 1000000);
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("done", call->done);
+		if (call->done) {
+			WriteResult(json, call->result);
+			running.RemoveAt(running.IndexOf(call));
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void McpService::CancelCall(Core::StringView callId) {
+		Threading::LockGuard guard(lock);
+		for (RunningCall* each : running)
+			if (each->callId.View() == callId) each->cancelled = true;
+		changed.NotifyAll();
+	}
+}

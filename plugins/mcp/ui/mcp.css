@@ -1,0 +1,56 @@
+/* Settings > AI > MCP Servers (docs/04 "MCP"): theme tokens only; color only where it means something. */
+
+.mcp-lead { color: var(--text-1); max-width: 860px; margin: 0 0 var(--space-5); }
+.mcp-head { font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); color: var(--text-0); margin: var(--space-6) 0 var(--space-3); }
+.mcp-bar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-3) 0; }
+.mcp-status { display: grid; gap: var(--space-2); max-width: 980px; }
+.mcp-status:empty { display: none; }
+.mcp-note { display: flex; align-items: flex-start; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--text-1); overflow-wrap: anywhere; }
+.mcp-note .ci { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.mcp-note.mcp-warn { color: var(--accent-warn); }
+.mcp-note.mcp-bad { color: var(--accent-error); }
+
+.mcp-servers { display: grid; gap: var(--space-4); max-width: 980px; }
+.mcp-server { background: var(--bg-1); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-3); padding: var(--space-4) var(--space-5); display: grid; gap: var(--space-3); font-size: var(--font-size-sm); min-width: 0; }
+.mcp-server.editing { border-color: var(--border-1); }
+.mcp-server-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; min-width: 0; }
+.mcp-server-head b { font-size: var(--font-size-ui); color: var(--text-0); }
+.mcp-server-head .chip { margin-left: 0; }
+.mcp-server-head .grow { flex: 1; }
+.mcp-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.mcp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-2); }
+.mcp-dot.mcp-ok { background: var(--accent-saved); }
+.mcp-dot.mcp-busy { background: var(--accent-info); }
+.mcp-dot.mcp-warn { background: var(--accent-warn); }
+.mcp-dot.mcp-bad { background: var(--accent-error); }
+.mcp-target { color: var(--text-1); font-size: calc(var(--font-size-code) - 1px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mcp-line { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text-1); overflow-wrap: anywhere; min-width: 0; }
+.mcp-line .ci { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.mcp-line.mcp-ok { color: var(--text-0); }
+.mcp-line.mcp-ok .ci { color: var(--accent-saved); }
+.mcp-line.mcp-busy { color: var(--accent-info); }
+.mcp-line.mcp-warn { color: var(--accent-warn); }
+.mcp-line.mcp-bad { color: var(--accent-error); }
+.mcp-test { display: grid; gap: var(--space-2); }
+
+.mcp-tools summary, .mcp-log summary { cursor: pointer; color: var(--text-1); user-select: none; }
+.mcp-tool-list { display: grid; margin-top: var(--space-2); border-top: var(--border-width) solid var(--border-0); }
+.mcp-tool { display: grid; grid-template-columns: minmax(160px, 260px) minmax(0, 1fr) auto auto; gap: var(--space-4); align-items: center; min-height: var(--row-h); border-bottom: var(--border-width) solid var(--border-0); padding-left: var(--space-2); }
+.mcp-tool .chip { margin-left: 0; }
+.mcp-tool-name { color: var(--text-0); font-size: calc(var(--font-size-code) - 1px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-tool-about { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-log-text { margin: var(--space-2) 0 0; padding: var(--space-3); max-height: 220px; overflow: auto; background: var(--bg-0); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); color: var(--text-1); font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.mcp-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3) var(--space-5); }
+.mcp-field[hidden] { display: none; }
+.mcp-area { width: 100%; min-height: 52px; resize: vertical; font-family: var(--font-mono); }
+.mcp-check { display: flex; align-items: center; gap: var(--space-2); color: var(--text-1); grid-column: 1 / -1; }
+
+@media (max-width: 700px) {
+	.mcp-server { padding: var(--space-3) var(--space-4); }
+	.mcp-actions { width: 100%; }
+	.mcp-actions .btn { height: 32px; }
+	.mcp-tool { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0; padding: var(--space-2) 0 var(--space-2) var(--space-2); }
+	.mcp-tool-about { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
+	.mcp-form { grid-template-columns: minmax(0, 1fr); }
+}

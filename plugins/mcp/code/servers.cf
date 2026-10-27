@@ -1,0 +1,861 @@
+include "servers.ch"
+
+namespace Mcp
+{
+	static int64 ServiceNowMs() { return clock_now_ns() / 1000000; }
+
+	const char* ServerStateName(ServerState state) {
+		if (state == ServerState::Starting) return "starting";
+		if (state == ServerState::Running) return "running";
+		if (state == ServerState::Failed) return "failed";
+		return "stopped";
+	}
+
+	int64 RestartDelayMs(int64 exits) {
+		int64 delay = 1000;
+		for (int64 i = 1; i < exits && delay < kMostRestartDelayMs; ++i) delay *= 2;
+		return delay < kMostRestartDelayMs ? delay : kMostRestartDelayMs;
+	}
+
+	static bool NameTaken(const Core::Array<McpTool*>& tools, Core::StringView aiName) {
+		for (McpTool* tool : tools)
+			if (tool->aiName.View() == aiName) return true;
+		return false;
+	}
+
+	// `base` made unique among `tools`: "_2", "_3" added, the base cut so the name stays within kToolNameMostBytes.
+	static Core::String UniqueName(const Core::Array<McpTool*>& tools, Core::StringView base) {
+		if (!NameTaken(tools, base)) return Core::String(base);
+		for (int64 n = 2;; ++n) {
+			Core::StringBuilder suffix;
+			suffix.Append("_");
+			suffix.AppendInt(n);
+			Core::StringView kept = base.ByteLength() + suffix.ByteLength() > kToolNameMostBytes ? base.Substring(0, kToolNameMostBytes - suffix.ByteLength()) : base;
+			Core::String name = Core::String(kept) + suffix.View();
+			if (!NameTaken(tools, name.View())) return name;
+		}
+	}
+
+	const char*[36] kSchemaKeywords = { "$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples",
+		"deprecated", "readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions", "type", "enum", "const",
+		"pattern", "minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "required",
+		"properties", "additionalProperties", "items", "minItems", "maxItems", "uniqueItems", "oneOf", "anyOf", "allOf", "not",
+		"$ref" };
+
+	static bool KnownKeyword(Core::StringView key) {
+		if (key.StartsWith(Core::StringView("x-"))) return true;
+		for (int64 i = 0; i < 36; ++i)
+			if (key == kSchemaKeywords[i]) return true;
+		return false;
+	}
+
+	// `schema` as JSON with the keywords Bedrock's validator does not know left out (propertyNames, patternProperties,
+	// multipleOf, if/then/else, a list of items, ...), at every depth; each one left out named in `dropped`.
+	static void WriteLoadable(IED::JsonWriter& json, const Serialization::DomNode& schema, Core::Array<Core::String>& dropped) {
+		if (schema.Kind() != Serialization::DomKind::Object) {
+			json.Raw(IED::NodeJson(schema).View());
+			return;
+		}
+		json.BeginObject();
+		for (int64 i = 0; i < schema.Count(); ++i) {
+			Core::StringView key = schema.KeyAt(i);
+			Serialization::DomNode value = schema.ValueAt(i);
+			const bool named = key == "properties" || key == "$defs";
+			const bool single = key == "items" || key == "additionalProperties" || key == "not";
+			const bool list = key == "oneOf" || key == "anyOf" || key == "allOf";
+			if (!KnownKeyword(key) || (key == "items" && value.Kind() == Serialization::DomKind::Array)) {
+				if (!dropped.Contains(Core::String(key))) dropped.Push(Core::String(key));
+				continue;
+			}
+			json.Key(key);
+			if (named && value.Kind() == Serialization::DomKind::Object) {
+				json.BeginObject();
+				for (int64 j = 0; j < value.Count(); ++j) {
+					json.Key(value.KeyAt(j));
+					WriteLoadable(json, value.ValueAt(j), dropped);
+				}
+				json.EndObject();
+			}
+			else if (single) WriteLoadable(json, value, dropped);
+			else if (list && value.Kind() == Serialization::DomKind::Array) {
+				json.BeginArray();
+				for (int64 j = 0; j < value.Count(); ++j) WriteLoadable(json, value.At(j), dropped);
+				json.EndArray();
+			}
+			else json.Raw(IED::NodeJson(value).View());
+		}
+		json.EndObject();
+	}
+
+	// A schema the chat's validator can load and a model takes for a function's parameters: the server's, less the
+	// keywords the validator does not know (said in `note`); `{"type":"object"}` with `note` when even that does not load.
+	Core::String UsableSchema(const Serialization::DomNode& schema, Core::String& note) {
+		if (schema.Kind() != Serialization::DomKind::Object) {
+			if (schema.IsValid()) note = Core::String("its inputSchema is not an object");
+			return Core::String("{\"type\":\"object\"}");
+		}
+		Core::Array<Core::String> dropped;
+		IED::JsonWriter json;
+		WriteLoadable(json, schema, dropped);
+		Core::String text = json.ToString();
+		Serialization::SchemaRegistry* registry = new Serialization::SchemaRegistry();
+		Core::String error;
+		if (!registry->Add(Core::StringView("tool"), text.View(), error)) {
+			note = Core::String("its inputSchema does not load (") + error.View() + "), so the model is shown no parameters and its arguments are not checked";
+			return Core::String("{\"type\":\"object\"}");
+		}
+		if (!dropped.IsEmpty()) {
+			Core::StringBuilder said;
+			said.Append("its inputSchema's ");
+			for (int64 i = 0; i < dropped.Count(); ++i) {
+				if (i > 0) said.Append(", ");
+				said.Append(dropped[i].View());
+			}
+			said.Append(" are left out: IED's schema validator does not know them");
+			note = said.ToString();
+		}
+		return text;
+	}
+
+	Core::Array<McpTool*> ReadToolsPage(Core::StringView server, const Serialization::DomNode& result, Core::String& cursor) {
+		Core::Array<McpTool*> found;
+		Serialization::DomNode tools = result.Member("tools");
+		for (int64 i = 0; tools.Kind() == Serialization::DomKind::Array && i < tools.Count(); ++i) {
+			Serialization::DomNode given = tools.At(i);
+			Core::StringView name = given.Member("name").AsView();
+			if (name.IsEmpty()) continue;
+			McpTool* tool = new McpTool();
+			tool->name = Core::String(name);
+			tool->aiName = ToolName(server, name);
+			tool->title = Core::String(given.Member("title").AsView().IsEmpty() ? given.Member("annotations").Member("title").AsView() : given.Member("title").AsView());
+			tool->description = Core::String(given.Member("description").AsView().Trimmed());
+			Core::String note;
+			tool->schema = UsableSchema(given.Member("inputSchema"), note);
+			tool->note = note;
+			tool->readOnlyHint = given.Member("annotations").Member("readOnlyHint").AsBool();
+			found.Push(tool);
+		}
+		cursor = Core::String(result.Member("nextCursor").AsView());
+		return found;
+	}
+
+	// --- Workspaces and their configurations -------------------------------------------------------------------------
+
+	WorkspaceServers* McpService::Find(Core::StringView wsId) {
+		for (WorkspaceServers* place : places)
+			if (place->ws.id.View() == wsId) return place;
+		return nullptr;
+	}
+
+	Core::Array<ServerConfig*> McpService::Configs(WorkspaceServers* place, Core::Array<Core::String>& problems) {
+		Core::String wsId = place->ws.id;
+		Core::Array<ServerConfig*> configs = ReadServers(context->Setting(Core::StringView("mcp.servers"), wsId.View()).View(), problems);
+		for (const IED::Contribution& given : IED::Contributions(wsId.View(), Core::StringView("mcpServers"))) {
+			Core::String error;
+			if (!IED::WhenHolds(place->ws, given.entry.Member("when").AsView(), error)) continue;
+			Core::StringView id = given.entry.Member("id").AsView();
+			bool named = false;
+			for (ServerConfig* config : configs) named = named || config->name.View() == id;
+			if (named) continue;
+			Core::String problem;
+			ServerConfig* config = ReadContributedServer(given.entry, given.pluginId.View(), given.folder.View(), problem);
+			if (config) configs.Push(config);
+			else problems.Push(((Core::String("plugin ") + given.pluginId.View() + ": the MCP server ") + id + ": ") + problem.View());
+		}
+		return configs;
+	}
+
+	static int64 IdleMs(IED::PluginContext* context, Core::StringView wsId) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(context->Setting(Core::StringView("mcp.idleMinutes"), wsId).View(), *doc).root;
+		const int64 minutes = value.IsValid() ? value.AsInt() : 10;
+		return minutes > 0 ? minutes * 60000 : 0;
+	}
+
+	void McpService::Reread(WorkspaceServers* place) {
+		Core::Array<Core::String> problems;
+		Core::Array<ServerConfig*> configs = Configs(place, problems);
+		const int64 idle = IdleMs(context, place->ws.id.View());
+		Core::Array<ServerEntry*> halted;
+		{
+			Threading::LockGuard guard(lock);
+			place->problems = problems;
+			place->idleMs = idle;
+			Core::Array<ServerEntry*> next;
+			for (ServerConfig* config : configs) {
+				ServerEntry* entry = nullptr;
+				for (ServerEntry* each : place->servers)
+					if (each->config->name == config->name) entry = each;
+				if (!entry) {
+					entry = new ServerEntry();
+					entry->state = ServerState::Stopped;
+				}
+				else if (entry->config->hash != config->hash || (!config->enabled && entry->state != ServerState::Stopped)) {
+					halted.Push(entry);
+					if (entry->config->hash != config->hash) {
+						entry->tools.Clear();
+						entry->toolsKnown = false;
+					}
+				}
+				entry->config = config;
+				if (!entry->toolsKnown) LoadCached(place, entry);
+				next.Push(entry);
+			}
+			for (ServerEntry* old : place->servers)
+				if (!next.Contains(old)) halted.Push(old);
+			place->servers = next;
+		}
+		for (ServerEntry* entry : halted) Halt(place, entry, Core::StringView("its configuration changed"), false);
+	}
+
+	void McpService::Opened(const IED::Workspace& ws) {
+		WorkspaceServers* place = nullptr;
+		bool first = false;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(ws.id.View());
+			if (!place) {
+				place = new WorkspaceServers();
+				places.Push(place);
+				first = true;
+			}
+			place->ws = ws;
+		}
+		if (first) ReadCacheFile(place);
+		Reread(place);
+		if (!ws.trusted) {
+			Core::Array<ServerEntry*> all;
+			{
+				Threading::LockGuard guard(lock);
+				all = place->servers;
+			}
+			for (ServerEntry* entry : all) Halt(place, entry, Core::StringView("the workspace is not trusted"), true);
+		}
+		Changed(place);
+	}
+
+	void McpService::SettingsChanged(Core::StringView wsId) {
+		Core::Array<WorkspaceServers*> affected;
+		{
+			Threading::LockGuard guard(lock);
+			for (WorkspaceServers* place : places)
+				if (wsId.IsEmpty() || place->ws.id.View() == wsId) affected.Push(place);
+		}
+		for (WorkspaceServers* place : affected) {
+			Reread(place);
+			Changed(place);
+		}
+	}
+
+	// --- Starting and stopping ---------------------------------------------------------------------------------------
+
+	// `entry` marked as starting, with its new generation; false when it is starting or running already, or may not
+	// start. Under `lock`.
+	bool McpService::Begin(WorkspaceServers* place, ServerEntry* entry, int64& generation) {
+		if (stopping || !place->ws.trusted || !entry->config->enabled) return false;
+		if (entry->state == ServerState::Starting || entry->state == ServerState::Running) return false;
+		entry->state = ServerState::Starting;
+		entry->generation += 1;
+		generation = entry->generation;
+		entry->startByMs = ServiceNowMs() + entry->config->startSeconds * 1000 + 2000;
+		entry->restartAtMs = 0;
+		entry->error = Core::String();
+		changed.NotifyAll();
+		return true;
+	}
+
+	// The start of an entry Begin marked: connected and its tools listed, or failed with why.
+	void McpService::Launch(WorkspaceServers* place, ServerEntry* entry, int64 generation) {
+		Changed(place);
+		McpClient* client = nullptr;
+		Core::Array<McpTool*> tools;
+		Core::String error;
+		bool ok = Connect(place, entry->config, generation, client, tools, new StartLog(), error);
+		bool stale = false;
+		Core::String line;
+		{
+			Threading::LockGuard guard(lock);
+			stale = entry->generation != generation;
+			if (!stale && ok && !client->Alive()) {
+				ok = false;
+				error = Core::String("it exited right after it started");
+			}
+			if (!stale && ok) {
+				entry->client = client;
+				entry->state = ServerState::Running;
+				entry->tools = tools;
+				entry->toolsKnown = true;
+				entry->toolsHash = entry->config->hash;
+				entry->serverName = client->serverName;
+				entry->serverVersion = client->serverVersion;
+				entry->protocolVersion = client->protocolVersion;
+				entry->instructions = client->instructions;
+				entry->startedMs = ServiceNowMs();
+				entry->lastUsedMs = entry->startedMs;
+				Core::StringBuilder said;
+				said.Append("running: ");
+				said.Append(client->serverName.IsEmpty() ? Core::StringView("a server") : client->serverName.View());
+				if (!client->serverVersion.IsEmpty()) {
+					said.Append(" ");
+					said.Append(client->serverVersion.View());
+				}
+				said.Append(", MCP ");
+				said.Append(client->protocolVersion.View());
+				said.Append(", ");
+				said.AppendInt(tools.Count());
+				said.Append(tools.Count() == 1 ? " tool" : " tools");
+				if (client->Pid() != 0) {
+					said.Append(", pid ");
+					said.AppendInt(client->Pid());
+				}
+				line = said.ToString();
+			}
+			else if (!stale) {
+				const bool restarting = entry->quickExits > 0;
+				if (restarting) entry->quickExits += 1;
+				entry->error = error;
+				if (restarting && entry->quickExits < kMostQuickExits) {
+					entry->state = ServerState::Stopped;
+					entry->restartAtMs = ServiceNowMs() + RestartDelayMs(entry->quickExits);
+				}
+				else entry->state = ServerState::Failed;
+				line = Core::String("did not start: ") + error.View();
+			}
+			changed.NotifyAll();
+		}
+		if (stale) {
+			if (client) client->Close();
+			return;
+		}
+		Note(place, entry, line.View(), entry->config->name.View());
+		Changed(place);
+	}
+
+	// The values of `env` or `headers`, each read from IED's environment when it says {env}; false with `error` for a
+	// variable IED's environment does not have.
+	static bool Resolved(const Core::Array<ConfigValue>& values, const char* separator, Core::Array<Core::String>& out, Core::String& error) {
+		for (const ConfigValue& value : values) {
+			Core::String text = value.text;
+			if (!value.fromEnv.IsEmpty() && !Platform::TryGetEnvironmentVariable(value.fromEnv.CStr(), text)) {
+				error = ((Core::String(value.name) + " takes %") + value.fromEnv.View() + "%, which IED's environment does not have");
+				return false;
+			}
+			out.Push((value.name + separator) + text.View());
+		}
+		return true;
+	}
+
+	static bool IsAbsolute(Core::StringView path) {
+		return path.StartsWith(Core::StringView("/")) || path.StartsWith(Core::StringView("\\")) || (path.ByteLength() > 1 && path.ByteAt(1) == ':');
+	}
+
+	// What a connection to `config` starts or reaches, in workspace `ws`; false with `error`.
+	static bool LaunchOf(const ServerConfig* config, const IED::Workspace& ws, ServerLaunch& launch, Core::String& error) {
+		if (config->IsHttp()) {
+			launch.url = config->url;
+			return Resolved(config->headers, ": ", launch.headers, error);
+		}
+		launch.cwd = config->cwd.IsEmpty() ? ws.root : IsAbsolute(config->cwd.View()) ? config->cwd : Core::String((FS::Path(ws.root.View()) / config->cwd.View()).View());
+		if (!FS::IsDirectory(launch.cwd.CStr())) {
+			error = Core::String("its folder (cwd) is not there: ") + launch.cwd.View();
+			return false;
+		}
+		if (!Resolved(config->env, "=", launch.environment, error)) return false;
+		Core::StringView command = config->command.View();
+		const bool placed = command.IndexOf('/', 0) >= 0 || command.IndexOf('\\', 0) >= 0;
+		Core::String asked = placed && !IsAbsolute(command) ? Core::String((FS::Path(ws.root.View()) / command).View()) : Core::String(command);
+		Core::String program = FindProgram(asked.View(), Platform::GetEnvironmentVariable("PATH").View());
+		if (program.IsEmpty()) {
+			error = placed ? Core::String("there is no program ") + asked.View() : (Core::String("there is no program ") + command) + " on PATH (nor .exe, .cmd or .bat of it)";
+			return false;
+		}
+		if (!IsBatchFile(program.View())) {
+			launch.program = program;
+			launch.arguments = config->args;
+			return true;
+		}
+		Core::Array<Core::String> argv;
+		argv.Push(program);
+		for (const Core::String& arg : config->args) argv.Push(arg);
+		return BatchLine(argv, launch.shellLine, error);
+	}
+
+	void StartLog::Add(Core::StringView line) {
+		Threading::LockGuard guard(mutex);
+		lines.Push(Core::String(line));
+		if (lines.Count() > kLogLinesKept) lines.RemoveAt(0);
+	}
+
+	Core::String StartLog::Tail(int64 count) {
+		Threading::LockGuard guard(mutex);
+		Core::StringBuilder out;
+		int64 from = lines.Count() - count;
+		for (int64 i = from < 0 ? 0 : from; i < lines.Count(); ++i) {
+			if (out.ByteLength() > 0) out.Append(" | ");
+			out.Append(lines[i].View());
+		}
+		return out.ToString();
+	}
+
+	// Every page of a server's tools/list, the excluded ones left out, each named uniquely; false with `error`.
+	static bool ListTools(McpClient* client, const ServerConfig* config, Core::Array<McpTool*>& tools, Core::String& error) {
+		Core::String cursor;
+		for (int64 page = 0; page < kListPagesMost; ++page) {
+			IED::JsonWriter params;
+			params.BeginObject();
+			if (!cursor.IsEmpty()) params.Field("cursor", cursor.View());
+			params.EndObject();
+			Serialization::DomNode result = client->Call(Core::StringView("tools/list"), params.View(), (int32)(config->startSeconds * 1000), nullptr, error);
+			if (!result.IsValid()) {
+				error = Core::String("tools/list: ") + error.View();
+				return false;
+			}
+			for (McpTool* tool : ReadToolsPage(config->name.View(), result, cursor))
+				if (!config->Excludes(tool->name.View())) {
+					tool->aiName = UniqueName(tools, tool->aiName.View());
+					tools.Push(tool);
+				}
+			if (cursor.IsEmpty()) return true;
+		}
+		return true;
+	}
+
+	bool McpService::Connect(WorkspaceServers* place, ServerConfig* config, int64 generation, McpClient*& client, Core::Array<McpTool*>& tools, StartLog* printed, Core::String& error) {
+		ServerLaunch launch;
+		IED::Workspace ws;
+		{
+			Threading::LockGuard guard(lock);
+			ws = place->ws;
+		}
+		Core::String name = config->name;
+		ServerEntry* entry = generation > 0 ? FindEntry(place, name.View(), generation) : nullptr;
+		Note(place, entry, (Core::String("starting: ") + Display(config).View()).View(), name.View());
+		if (!LaunchOf(config, ws, launch, error)) return false;
+		McpService* self = this;
+		Core::String wsId = ws.id;
+		client = new McpClient();
+		LogHandler logged = [self, wsId, name, generation, printed](Core::StringView line) {
+			printed->Add(line);
+			self->ServerLog(wsId.View(), name.View(), generation, line);
+		};
+		NotifyHandler notified = [self, wsId, name, generation](Message* message) { self->Notified(wsId.View(), name.View(), generation, message); };
+		EndHandler ended = [self, wsId, name, generation](int64 exitCode) { self->Ended(wsId.View(), name.View(), generation, exitCode); };
+		if (!client->Open(launch, logged, notified, ended, error)) return false;
+		if (!client->Initialize((int32)(config->startSeconds * 1000), nullptr, error)) {
+			Threading::Thread::Sleep(100000000);
+			if (client->ExitCode() >= 0) {
+				Core::StringBuilder exited;
+				exited.Append(error.View());
+				exited.Append(" (it exited with code ");
+				exited.AppendInt(client->ExitCode());
+				exited.Append(")");
+				error = exited.ToString();
+			}
+			if (error.View().Contains(Core::StringView("did not answer within"))) error = (error + " (mcp.servers.") + name.View() + ".startSeconds)";
+			Core::String tail = printed->Tail(3);
+			if (!tail.IsEmpty()) error = (error + "; it printed: ") + tail.View();
+			client->Close();
+			return false;
+		}
+		if (!ListTools(client, config, tools, error)) {
+			client->Close();
+			return false;
+		}
+		for (McpTool* tool : tools)
+			if (!tool->note.IsEmpty()) Note(place, entry, ((tool->name + ": ") + tool->note.View()).View(), name.View());
+		return true;
+	}
+
+	void McpService::Halt(WorkspaceServers* place, ServerEntry* entry, Core::StringView why, bool keepFailed) {
+		McpClient* client = nullptr;
+		bool was = false;
+		{
+			Threading::LockGuard guard(lock);
+			was = entry->state == ServerState::Running || entry->state == ServerState::Starting;
+			client = entry->client;
+			entry->client = nullptr;
+			entry->generation += 1;
+			entry->restartAtMs = 0;
+			entry->quickExits = 0;
+			if (entry->state != ServerState::Failed || !keepFailed) entry->state = ServerState::Stopped;
+			changed.NotifyAll();
+		}
+		if (client) client->Close();
+		if (was) Note(place, entry, (Core::String("stopped: ") + why).View(), entry->config->name.View());
+	}
+
+	void McpService::Ended(Core::StringView wsId, Core::StringView name, int64 generation, int64 exitCode) {
+		WorkspaceServers* place = nullptr;
+		ServerEntry* entry = nullptr;
+		Core::String line;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			entry = place ? FindEntryLocked(place, name, generation) : nullptr;
+			if (!entry || entry->state != ServerState::Running) return;
+			const int64 now = ServiceNowMs();
+			entry->quickExits = now - entry->startedMs < kQuickExitMs ? entry->quickExits + 1 : 1;
+			entry->restarts += 1;
+			entry->client = nullptr;
+			entry->generation += 1;
+			Core::StringBuilder said;
+			said.Append("exited with code ");
+			said.AppendInt(exitCode);
+			Core::String tail = TailLocked(entry, 3);
+			if (!tail.IsEmpty()) {
+				said.Append("; it printed: ");
+				said.Append(tail.View());
+			}
+			entry->error = said.ToString();
+			if (entry->quickExits >= kMostQuickExits) {
+				entry->state = ServerState::Failed;
+				entry->error = entry->error + "; it exited 5 times in a row, each within a minute of its start, so it is not started again until you Restart it in Settings > AI > MCP Servers";
+				line = entry->error;
+			}
+			else {
+				entry->state = ServerState::Stopped;
+				entry->restartAtMs = now + RestartDelayMs(entry->quickExits);
+				Core::StringBuilder restart;
+				restart.Append(entry->error.View());
+				restart.Append("; starting it again in ");
+				restart.AppendInt(RestartDelayMs(entry->quickExits) / 1000);
+				restart.Append(" s");
+				line = restart.ToString();
+			}
+			changed.NotifyAll();
+		}
+		Note(place, entry, line.View(), name);
+		Changed(place);
+	}
+
+	void McpService::Notified(Core::StringView wsId, Core::StringView name, int64 generation, Message* message) {
+		if (message->method == "notifications/tools/list_changed") {
+			McpService* self = this;
+			Core::String ws = Core::String(wsId);
+			Core::String server = Core::String(name);
+			context->StartThread([self, ws, server, generation]() { self->Relist(ws.View(), server.View(), generation); });
+			return;
+		}
+		if (message->method == "notifications/message") {
+			Serialization::DomNode data = message->params.Member("data");
+			Core::String text = data.Kind() == Serialization::DomKind::String ? Core::String(data.AsView()) : IED::NodeJson(data);
+			ServerLog(wsId, name, generation, ((Core::String(message->params.Member("level").AsView()) + ": ") + text.View()).View());
+		}
+	}
+
+	void McpService::Relist(Core::StringView wsId, Core::StringView name, int64 generation) {
+		WorkspaceServers* place = nullptr;
+		McpClient* client = nullptr;
+		ServerConfig* config = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			ServerEntry* entry = place ? FindEntryLocked(place, name, generation) : nullptr;
+			if (!entry || entry->state != ServerState::Running) return;
+			client = entry->client;
+			config = entry->config;
+		}
+		Core::Array<McpTool*> tools;
+		Core::String error;
+		if (!ListTools(client, config, tools, error)) {
+			Note(place, nullptr, (Core::String("its tools changed, but ") + error.View()).View(), name);
+			return;
+		}
+		ServerEntry* entry = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			entry = FindEntryLocked(place, name, generation);
+			if (!entry) return;
+			entry->tools = tools;
+		}
+		Core::StringBuilder said;
+		said.Append("its tools changed: ");
+		said.AppendInt(tools.Count());
+		said.Append(tools.Count() == 1 ? " tool; a chat's next turn has them" : " tools; a chat's next turn has them");
+		Note(place, entry, said.View(), name);
+		Changed(place);
+	}
+
+	// --- Lookups (under `lock` where they say) -----------------------------------------------------------------------
+
+	ServerEntry* McpService::FindEntryLocked(WorkspaceServers* place, Core::StringView name, int64 generation) {
+		for (ServerEntry* entry : place->servers)
+			if (entry->config->name.View() == name && (generation == kAnyGeneration || entry->generation == generation)) return entry;
+		return nullptr;
+	}
+
+	ServerEntry* McpService::FindEntry(WorkspaceServers* place, Core::StringView name, int64 generation) {
+		Threading::LockGuard guard(lock);
+		return FindEntryLocked(place, name, generation);
+	}
+
+	Core::String McpService::TailLocked(ServerEntry* entry, int64 lines) {
+		Core::Array<Core::String> kept;
+		for (int64 i = entry->log.Count() - 1; i >= 0 && kept.Count() < lines; --i)
+			if (!entry->log[i].View().StartsWith(Core::StringView("[IED]"))) kept.Insert(0, entry->log[i]);
+		Core::StringBuilder out;
+		for (const Core::String& line : kept) {
+			if (out.ByteLength() > 0) out.Append(" | ");
+			out.Append(line.View());
+		}
+		return out.ToString();
+	}
+
+	// --- The output --------------------------------------------------------------------------------------------------
+
+	static void Keep(ServerEntry* entry, Core::StringView line) {
+		entry->log.Push(Core::String(line));
+		if (entry->log.Count() > kLogLinesKept) entry->log.RemoveAt(0);
+	}
+
+	void McpService::ServerLog(Core::StringView wsId, Core::StringView name, int64 generation, Core::StringView line) {
+		{
+			Threading::LockGuard guard(lock);
+			WorkspaceServers* place = Find(wsId);
+			ServerEntry* entry = place ? FindEntryLocked(place, name, generation) : nullptr;
+			if (entry) Keep(entry, line);
+		}
+		Output(wsId, ((Core::String("[") + name) + "] " + line).View());
+	}
+
+	void McpService::Note(WorkspaceServers* place, ServerEntry* entry, Core::StringView line, Core::StringView name) {
+		Core::String wsId;
+		{
+			Threading::LockGuard guard(lock);
+			wsId = place->ws.id;
+			if (entry) Keep(entry, (Core::String("[IED] ") + line).View());
+		}
+		Output(wsId.View(), ((Core::String("[") + name) + "] " + line).View());
+	}
+
+	void McpService::Output(Core::StringView wsId, Core::StringView line) {
+		Platform::CalendarTime now = Platform::LocalCalendar(Platform::UnixTimeNs());
+		Core::StringBuilder text;
+		text.AppendIntBase(now.hour, 10, 2);
+		text.Append(":");
+		text.AppendIntBase(now.minute, 10, 2);
+		text.Append(":");
+		text.AppendIntBase(now.second, 10, 2);
+		text.Append(" ");
+		text.Append(line);
+		text.Append("\r\n");
+		context->Output(wsId, Core::StringView("mcp"), text.View());
+	}
+
+	// --- The watcher -------------------------------------------------------------------------------------------------
+
+	void McpService::Start() {
+		McpService* self = this;
+		context->StartThread([self]() { self->Watch(); });
+	}
+
+	void McpService::Watch() {
+		for (;;) {
+			Core::Array<WorkspaceServers*> idlePlaces;
+			Core::Array<ServerEntry*> idle;
+			Core::Array<WorkspaceServers*> duePlaces;
+			Core::Array<ServerEntry*> due;
+			Core::Array<int64> generations;
+			{
+				Threading::LockGuard guard(lock);
+				if (stopping) return;
+				changed.WaitFor(lock, kWatchTickMs * 1000000);
+				if (stopping) return;
+				const int64 now = ServiceNowMs();
+				for (WorkspaceServers* place : places)
+					for (ServerEntry* entry : place->servers) {
+						if (entry->state == ServerState::Running && entry->calls == 0 && place->idleMs > 0 && now - entry->lastUsedMs > place->idleMs) {
+							idlePlaces.Push(place);
+							idle.Push(entry);
+						}
+						int64 generation = 0;
+						if (entry->state == ServerState::Stopped && entry->restartAtMs > 0 && now >= entry->restartAtMs) {
+							if (Begin(place, entry, generation)) {
+								duePlaces.Push(place);
+								due.Push(entry);
+								generations.Push(generation);
+							}
+							else entry->restartAtMs = 0;
+						}
+					}
+			}
+			for (int64 i = 0; i < idle.Count(); ++i) {
+				Halt(idlePlaces[i], idle[i], Core::StringView("no call used it for mcp.idleMinutes; its tools stay offered and the next call starts it"), true);
+				Changed(idlePlaces[i]);
+			}
+			for (int64 i = 0; i < due.Count(); ++i) {
+				McpService* self = this;
+				WorkspaceServers* place = duePlaces[i];
+				ServerEntry* entry = due[i];
+				const int64 generation = generations[i];
+				context->StartThread([self, place, entry, generation]() { self->Launch(place, entry, generation); });
+			}
+		}
+	}
+
+	void McpService::Shutdown() {
+		Core::Array<WorkspaceServers*> owners;
+		Core::Array<ServerEntry*> all;
+		{
+			Threading::LockGuard guard(lock);
+			stopping = true;
+			changed.NotifyAll();
+			for (WorkspaceServers* place : places)
+				for (ServerEntry* entry : place->servers) {
+					owners.Push(place);
+					all.Push(entry);
+				}
+		}
+		for (int64 i = 0; i < all.Count(); ++i) Halt(owners[i], all[i], Core::StringView("IED stops"), true);
+	}
+
+	// --- What a turn and Settings ask --------------------------------------------------------------------------------
+
+	Core::String McpService::Ensure(Core::StringView wsId) {
+		Core::Array<ServerEntry*> starting;
+		Core::Array<int64> generations;
+		WorkspaceServers* place = nullptr;
+		int64 waitMs = 0;
+		IED::JsonWriter json;
+		json.BeginObject();
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			const int64 now = ServiceNowMs();
+			json.Key(Core::StringView("servers"));
+			json.BeginArray();
+			for (int64 i = 0; place && place->ws.trusted && i < place->servers.Count(); ++i) {
+				ServerEntry* entry = place->servers[i];
+				if (!entry->config->enabled || entry->toolsKnown) continue;
+				int64 generation = 0;
+				if (entry->state == ServerState::Stopped && Begin(place, entry, generation)) {
+					starting.Push(entry);
+					generations.Push(generation);
+				}
+				if (entry->state == ServerState::Starting) {
+					const int64 left = entry->startByMs - now;
+					if (left > waitMs) waitMs = left;
+				}
+				json.BeginObject();
+				json.Field("name", entry->config->name.View());
+				json.Field("state", ServerStateName(entry->state));
+				json.EndObject();
+			}
+			json.EndArray();
+		}
+		json.IntField("waitMs", waitMs < kEnsureMostWaitMs ? waitMs : kEnsureMostWaitMs);
+		json.EndObject();
+		for (int64 i = 0; i < starting.Count(); ++i) {
+			McpService* self = this;
+			ServerEntry* entry = starting[i];
+			const int64 generation = generations[i];
+			context->StartThread([self, place, entry, generation]() { self->Launch(place, entry, generation); });
+		}
+		return json.ToString();
+	}
+
+	static Core::String Refused(Core::StringView why) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", false);
+		json.Field("error", why);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// What a test came to, from a connection that started (or `error`).
+	static Core::String TestJson(bool ok, int64 ms, McpClient* client, const Core::Array<McpTool*>& tools, Core::StringView error, Core::StringView log) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", ok);
+		json.IntField("ms", ms);
+		if (ok && client) {
+			json.Field("serverName", client->serverName.View());
+			json.Field("serverVersion", client->serverVersion.View());
+			json.Field("protocolVersion", client->protocolVersion.View());
+			json.Field("instructions", client->instructions.View());
+		}
+		json.Key(Core::StringView("tools"));
+		json.BeginArray();
+		for (McpTool* tool : tools) {
+			json.BeginObject();
+			json.Field("name", tool->name.View());
+			json.Field("aiName", tool->aiName.View());
+			json.Field("description", tool->description.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		if (!error.IsEmpty()) json.Field("error", error);
+		json.Field("log", log);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpService::Test(Core::StringView wsId, Core::StringView name, Core::StringView entryJson) {
+		WorkspaceServers* place = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+		}
+		if (!place) return Refused(Core::StringView("no such workspace"));
+		if (!place->ws.trusted) return Refused(Core::StringView("the workspace is not trusted: MCP servers start only in a trusted workspace (trust it first)"));
+		const int64 started = ServiceNowMs();
+		if (!entryJson.IsEmpty()) {
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Core::String problem;
+			ServerConfig* config = ReadServer(name.IsEmpty() ? Core::StringView("test") : name, Serialization::ReadJson(entryJson, *doc).root, problem);
+			if (!config) return Refused(problem.View());
+			McpClient* client = nullptr;
+			Core::Array<McpTool*> tools;
+			Core::String error;
+			StartLog* printed = new StartLog();
+			const bool ok = Connect(place, config, kTestGeneration, client, tools, printed, error);
+			Core::String json = TestJson(ok, ServiceNowMs() - started, client, tools, error.View(), printed->Tail(8).View());
+			if (ok) client->Close();
+			return json;
+		}
+		Restart(wsId, name);
+		Threading::LockGuard guard(lock);
+		ServerEntry* entry = FindEntryLocked(place, name, kAnyGeneration);
+		if (!entry) return Refused((Core::String("there is no MCP server ") + name + " in this workspace").View());
+		return TestJson(entry->state == ServerState::Running, ServiceNowMs() - started, entry->client, entry->tools, entry->error.View(), TailLocked(entry, 8).View());
+	}
+
+	Core::String McpService::Restart(Core::StringView wsId, Core::StringView name) {
+		WorkspaceServers* place = nullptr;
+		ServerEntry* entry = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			entry = place ? FindEntryLocked(place, name, kAnyGeneration) : nullptr;
+		}
+		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("there is no MCP server ") + name + " in this workspace").View());
+		Halt(place, entry, Core::StringView("restarted from Settings"), false);
+		int64 generation = 0;
+		bool begun = false;
+		{
+			Threading::LockGuard guard(lock);
+			entry->quickExits = 0;
+			begun = Begin(place, entry, generation);
+			if (!begun && !place->ws.trusted) entry->error = Core::String("the workspace is not trusted");
+			else if (!begun && !entry->config->enabled) entry->error = Core::String("it is turned off (enabled: false)");
+		}
+		if (begun) Launch(place, entry, generation);
+		else Changed(place);
+		return StatusJson(wsId);
+	}
+
+	Core::String McpService::StopServer(Core::StringView wsId, Core::StringView name) {
+		WorkspaceServers* place = nullptr;
+		ServerEntry* entry = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			entry = place ? FindEntryLocked(place, name, kAnyGeneration) : nullptr;
+		}
+		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("there is no MCP server ") + name + " in this workspace").View());
+		Halt(place, entry, Core::StringView("stopped from Settings"), false);
+		Changed(place);
+		return StatusJson(wsId);
+	}
+}

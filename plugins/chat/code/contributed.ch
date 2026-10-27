@@ -27,6 +27,13 @@ namespace Ai
 	// The core tools, docs_search and docs_read when the plugins have reference docs, and the plugins' tool calls that run
 	// a command and whose `when` holds; a tool whose name is taken, or that is implemented some other way, is a problem.
 	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
+	// Before a turn builds its tools, without the server lock: the MCP plugin's binding mcp.ensure starts the servers
+	// whose tools are not known yet, and is asked again every kToolStartPollMs while it says to wait (docs/04 "MCP"
+	// Lifetime), until `cancelled`. Nothing when no plugin provides it.
+	void AwaitToolStarts(const IED::Workspace& ws, const bool* cancelled);
+
+	const int64 kToolStartPollMs = 250;
+	const int64 kToolStartMostMs = 30000;
 
 	const int64 kSectionDefaultTokens = 200;
 	const int64 kSectionsMostTokens = 1500;

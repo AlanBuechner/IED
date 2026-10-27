@@ -23,7 +23,8 @@
 				{ "name": "ai.roots", "version": "1.0.0", "optional": true },
 				{ "name": "terminal.text", "version": "1.0.0", "optional": true },
 				{ "name": "git.workingDiff", "version": "1.0.0", "optional": true },
-				{ "name": "editor.colorize", "version": "1", "optional": true }
+				{ "name": "editor.colorize", "version": "1", "optional": true },
+				{ "name": "mcp.ensure", "version": "1", "optional": true }
 			],
 			"provides": [
 				{

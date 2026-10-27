@@ -152,7 +152,8 @@ namespace Ai
 		spec->parallelSafe = spec->toolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
 		spec->inPlan = spec->toolClass == ToolClass::Read;
 		spec->deferred = !node.Member("preload").AsBool();
-		spec->group = Core::String(pluginId);
+		spec->group = node.Member("group").AsView().IsEmpty() ? Core::String(pluginId) : Core::String(node.Member("group").AsView());
+		spec->asks = node.Member("approval").AsView() == "ask";
 		spec->plan = [entry](const ToolInvocation& call) -> ToolPlan { return CommandPlan(entry, call); };
 		spec->run = [entry](const ToolInvocation& call) -> ToolOutcome { return CommandRun(entry, call); };
 		return spec;

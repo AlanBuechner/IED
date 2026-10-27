@@ -1,0 +1,454 @@
+include "client.ch"
+
+namespace Mcp
+{
+	const int64 kReadBytes = 65536;
+	const int64 kLogLineBytes = 2000;
+
+	static int64 NowMs() { return clock_now_ns() / 1000000; }
+
+	static bool Stopped(const bool* cancelled) { return cancelled != nullptr && *cancelled; }
+
+	static Core::String Seconds(int64 ms) {
+		Core::StringBuilder out;
+		out.AppendInt((ms + 999) / 1000);
+		out.Append(" s");
+		return out.ToString();
+	}
+
+	static Core::StringView Capped(Core::StringView text, int64 most) { return text.ByteLength() <= most ? text : text.Substring(0, most); }
+
+	bool IsBatchFile(Core::StringView program) {
+		Core::StringBuilder lower;
+		for (int64 i = 0; i < program.ByteLength(); ++i) {
+			const int32 c = program.ByteAt(i);
+			lower.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return lower.View().EndsWith(Core::StringView(".cmd")) || lower.View().EndsWith(Core::StringView(".bat"));
+	}
+
+	static void DropPending(Core::Array<PendingCall*>& pending, PendingCall* call) {
+		const int64 at = pending.IndexOf(call);
+		if (at >= 0) pending.RemoveAt(at);
+	}
+
+	bool BatchLine(const Core::Array<Core::String>& argv, Core::String& line, Core::String& problem) {
+		Core::StringBuilder out;
+		for (const Core::String& word : argv) {
+			Core::StringView text = word.View();
+			if (text.IndexOf('"', 0) >= 0 || text.IndexOf('%', 0) >= 0 || text.IndexOf('\n', 0) >= 0 || text.IndexOf('\r', 0) >= 0) {
+				problem = (Core::String("the server runs through cmd.exe (a batch file), which would read the quote, '%' or line break in ") + text) + "; leave them out";
+				return false;
+			}
+			if (out.ByteLength() > 0) out.Append(" ");
+			out.AppendByte('"');
+			out.Append(text);
+			out.AppendByte('"');
+		}
+		line = out.ToString();
+		return true;
+	}
+
+	static bool HasExtension(Core::StringView command) {
+		int64 at = command.ByteLength() - 1;
+		while (at >= 0 && command.ByteAt(at) != '.' && command.ByteAt(at) != '/' && command.ByteAt(at) != '\\') at -= 1;
+		return at >= 0 && command.ByteAt(at) == '.';
+	}
+
+	Core::String FindProgram(Core::StringView command, Core::StringView path) {
+		const bool placed = command.IndexOf('/', 0) >= 0 || command.IndexOf('\\', 0) >= 0;
+		if (placed) return FS::FileExists(Core::String(command).CStr()) ? Core::String(command) : Core::String();
+		const char*[4] extensions = { ".exe", ".cmd", ".bat", ".com" };
+		int64 start = 0;
+		while (start <= path.ByteLength()) {
+			int64 end = path.IndexOf(';', start);
+			if (end < 0) end = path.ByteLength();
+			Core::StringView folder = path.Substring(start, end - start).Trimmed();
+			start = end + 1;
+			if (folder.IsEmpty()) continue;
+			FS::Path base = FS::Path(folder) / command;
+			if (HasExtension(command) && FS::FileExists(base.CStr())) return Core::String(base.View());
+			for (int64 i = 0; i < 4; ++i) {
+				Core::String candidate = Core::String(base.View()) + extensions[i];
+				if (FS::FileExists(candidate.CStr())) return candidate;
+			}
+		}
+		return Core::String();
+	}
+
+	int64 McpClient::NextId() {
+		Threading::LockGuard guard(mutex);
+		ids += 1;
+		return ids;
+	}
+
+	bool McpClient::Open(const ServerLaunch& given, LogHandler logs, NotifyHandler notifications, EndHandler ends, Core::String& error) {
+		launch = given;
+		logged = logs;
+		notified = notifications;
+		onEnd = ends;
+		exitCode = -1;
+		http = !given.url.IsEmpty();
+		if (http) {
+			const Http::Url parsed = Http::ParseUrl(given.url.View());
+			if (given.url.View().StartsWith(Core::StringView("https://"))) {
+				error = Core::String("https is not supported: IED's HTTP client speaks plain http (a server on this machine or the LAN); put an http:// URL");
+				return false;
+			}
+			if (!parsed.valid || parsed.webSocket) {
+				error = Core::String("not an http://host[:port]/path URL: ") + given.url.View();
+				return false;
+			}
+			return true;
+		}
+		Process::StartInfo info;
+		if (!given.shellLine.IsEmpty()) info.shellCommand = given.shellLine;
+		else {
+			info.program = given.program;
+			info.arguments = given.arguments;
+		}
+		info.workingDirectory = given.cwd;
+		info.environment = given.environment;
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			error = (Core::String("cannot start ") + (given.shellLine.IsEmpty() ? given.program.View() : given.shellLine.View()) + ": ") + started.Error();
+			return false;
+		}
+		child = new Process::Child(take(started));
+		McpClient* self = this;
+		Process::Child* process = child;
+		Threading::Thread::Run([self, process]() { self->ReadLoop(process); }).Detach();
+		return true;
+	}
+
+	void McpClient::ReadLoop(Process::Child* process) {
+		char[kReadBytes] buffer;
+		LineSplitter out;
+		LineSplitter errors;
+		Message* none = nullptr;
+		for (;;) {
+			Process::Stream from = Process::Stream::Output;
+			const int64 got = process->ReadAny((void*)&buffer[0], kReadBytes, from);
+			if (got > 0) {
+				Core::StringView bytes = Core::StringView(&buffer[0], got);
+				Core::String line;
+				if (from == Process::Stream::Output) {
+					out.Feed(bytes);
+					while (out.Next(line)) Dispatch(line.View(), -1, none);
+				}
+				else {
+					errors.Feed(bytes);
+					while (errors.Next(line)) logged(Capped(line.View(), kLogLineBytes));
+				}
+				continue;
+			}
+			if (got == 0 && process->HasOutput()) continue;
+			break;
+		}
+		Core::String rest = out.Rest();
+		if (!rest.IsEmpty()) Dispatch(rest.View(), -1, none);
+		rest = errors.Rest();
+		if (!rest.IsEmpty()) logged(Capped(rest.View(), kLogLineBytes));
+		const int64 code = process->Wait(5000);
+		{
+			Threading::LockGuard guard(mutex);
+			ended = true;
+			exitCode = code;
+			arrived.NotifyAll();
+		}
+		onEnd(code);
+	}
+
+	void McpClient::Dispatch(Core::StringView text, int64 waiting, Message*& answer) {
+		for (Message* message : ReadMessages(text)) {
+			if (message->kind == MessageKind::Response) {
+				if (waiting >= 0 && message->number == waiting) {
+					answer = message;
+					continue;
+				}
+				Threading::LockGuard guard(mutex);
+				for (PendingCall* call : pending)
+					if (call->id == message->number && !call->done) {
+						call->answer = message;
+						call->done = true;
+					}
+				arrived.NotifyAll();
+			}
+			else if (message->kind == MessageKind::Request) Answer(message);
+			else if (message->kind == MessageKind::Notification) notified(message);
+			else logged((Core::String("[not JSON-RPC] ") + Capped(message->text.View(), 300)).View());
+		}
+	}
+
+	void McpClient::Answer(Message* request) {
+		Core::String text = request->method == "ping" ? ResultText(request->id.View(), Core::StringView("{}"))
+			: ErrorText(request->id.View(), kMethodNotFound, ((Core::String("IED does not offer ") + request->method.View()) + " to MCP servers").View());
+		if (!http) {
+			WriteLine(text.View());
+			return;
+		}
+		Core::String error;
+		if (!Post(text.View(), error)) logged((Core::String("[IED] the answer to the server's ") + request->method.View() + " was not taken: " + error.View()).View());
+	}
+
+	bool McpClient::WriteLine(Core::StringView text) {
+		Threading::LockGuard guard(writing);
+		if (!child || closed) return false;
+		{
+			Threading::LockGuard state(mutex);
+			if (ended) return false;
+		}
+		Core::StringBuilder line;
+		line.Append(text);
+		line.AppendByte('\n');
+		return child->WriteText(line.View(), kWriteMs);
+	}
+
+	Core::Array<Core::String> McpClient::HttpHeaders() {
+		Core::Array<Core::String> headers = launch.headers;
+		if (!protocolVersion.IsEmpty()) headers.Push(Core::String("MCP-Protocol-Version: ") + protocolVersion.View());
+		if (!session.IsEmpty()) headers.Push(Core::String("Mcp-Session-Id: ") + session.View());
+		return headers;
+	}
+
+	// A message that needs no answer: a notification, or IED's answer to a server's request.
+	bool McpClient::Post(Core::StringView text, Core::String& error) {
+		HttpExchange exchange;
+		if (!exchange.Send(Core::StringView("POST"), launch.url.View(), HttpHeaders(), text, kConnectMs, error)) return false;
+		const BodyRead head = exchange.ReadHead(kWriteMs);
+		if (head != BodyRead::Bytes) {
+			error = head == BodyRead::Waiting ? Core::String("no answer") : Core::String(exchange.Error());
+			return false;
+		}
+		if (exchange.Status() >= 200 && exchange.Status() < 300) return true;
+		Core::StringBuilder said;
+		said.Append("HTTP ");
+		said.AppendInt(exchange.Status());
+		error = said.ToString();
+		return false;
+	}
+
+	bool McpClient::Notify(Core::StringView method, Core::StringView paramsJson) {
+		Core::String text = NotificationText(method, paramsJson);
+		if (!http) return WriteLine(text.View());
+		Core::String error;
+		return Post(text.View(), error);
+	}
+
+	void McpClient::GiveUp(int64 id, Core::StringView why) {
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.IntField("requestId", id);
+		params.Field("reason", why);
+		params.EndObject();
+		Notify(Core::StringView("notifications/cancelled"), params.View());
+	}
+
+	Serialization::DomNode McpClient::Settled(PendingCall* call, Core::String& error) {
+		Message* answer = call->answer;
+		if (answer->error.IsValid() && answer->error.Kind() == Serialization::DomKind::Object) {
+			error = Describe(answer->error);
+			return Serialization::DomNode();
+		}
+		if (answer->result.IsValid()) return answer->result;
+		return answer->doc->NewObject();
+	}
+
+	Serialization::DomNode McpClient::Call(Core::StringView method, Core::StringView paramsJson, int32 waitMs, const bool* cancelled, Core::String& error) {
+		const int64 id = NextId();
+		Core::String text = RequestText(id, method, paramsJson);
+		return http ? CallHttp(id, text.View(), waitMs, cancelled, method == "initialize", error) : CallStdio(id, text.View(), waitMs, cancelled, error);
+	}
+
+	Serialization::DomNode McpClient::CallStdio(int64 id, Core::StringView text, int32 waitMs, const bool* cancelled, Core::String& error) {
+		PendingCall* call = new PendingCall();
+		call->id = id;
+		{
+			Threading::LockGuard guard(mutex);
+			pending.Push(call);
+		}
+		if (!WriteLine(text)) {
+			Threading::LockGuard guard(mutex);
+			DropPending(pending, call);
+			error = ended ? Core::String("the server has exited") : Core::String("the server does not take its input");
+			return Serialization::DomNode();
+		}
+		const int64 deadline = NowMs() + waitMs;
+		bool gone = false;
+		bool stopped = false;
+		{
+			Threading::LockGuard guard(mutex);
+			while (!call->done && !ended) {
+				if (Stopped(cancelled)) {
+					stopped = true;
+					break;
+				}
+				const int64 left = deadline - NowMs();
+				if (left <= 0) break;
+				arrived.WaitFor(mutex, (left < kSliceMs ? left : kSliceMs) * 1000000);
+			}
+			DropPending(pending, call);
+			gone = !call->done && ended;
+		}
+		if (call->done) return Settled(call, error);
+		if (gone) {
+			error = Core::String("the server exited before it answered");
+			return Serialization::DomNode();
+		}
+		if (stopped) {
+			GiveUp(id, Core::StringView("stopped by the owner"));
+			error = Core::String("stopped before the server answered; the request was cancelled");
+			return Serialization::DomNode();
+		}
+		GiveUp(id, Core::StringView("no answer in time"));
+		error = (Core::String("the server did not answer within ") + Seconds(waitMs).View()) + "; the request was cancelled";
+		return Serialization::DomNode();
+	}
+
+	Serialization::DomNode McpClient::CallHttp(int64 id, Core::StringView text, int32 waitMs, const bool* cancelled, bool initializing, Core::String& error) {
+		const int64 deadline = NowMs() + waitMs;
+		for (int32 attempt = 0; attempt < 2; ++attempt) {
+			HttpExchange exchange;
+			if (!exchange.Send(Core::StringView("POST"), launch.url.View(), HttpHeaders(), text, kConnectMs, error)) return Serialization::DomNode();
+			for (;;) {
+				const BodyRead head = exchange.ReadHead(kSliceMs);
+				if (head == BodyRead::Bytes) break;
+				if (head == BodyRead::Failed) {
+					error = Core::String(exchange.Error());
+					return Serialization::DomNode();
+				}
+				if (Stopped(cancelled) || NowMs() >= deadline) {
+					exchange.Close();
+					GiveUp(id, Core::StringView(Stopped(cancelled) ? "stopped by the owner" : "no answer in time"));
+					error = Stopped(cancelled) ? Core::String("stopped before the server answered; the request was cancelled") : (Core::String("the server did not answer within ") + Seconds(waitMs).View()) + "; the request was cancelled";
+					return Serialization::DomNode();
+				}
+			}
+			const int32 status = exchange.Status();
+			if (status == 404 && !session.IsEmpty() && !initializing && attempt == 0) {
+				session = Core::String();
+				logged(Core::StringView("[IED] the server ended the session: starting a new one"));
+				exchange.Close();
+				const int64 left = deadline - NowMs();
+				if (left <= 0 || !Initialize((int32)left, cancelled, error)) return Serialization::DomNode();
+				continue;
+			}
+			if (initializing && !exchange.Header(Core::StringView("Mcp-Session-Id")).IsEmpty()) session = exchange.Header(Core::StringView("Mcp-Session-Id"));
+			const bool events = exchange.Header(Core::StringView("Content-Type")).View().StartsWith(Core::StringView("text/event-stream"));
+			EventReader reader;
+			Core::String body;
+			Message* answer = nullptr;
+			for (;;) {
+				Core::String chunk;
+				const BodyRead got = exchange.Read(chunk, kSliceMs);
+				if (got == BodyRead::Failed) {
+					error = Core::String(exchange.Error());
+					return Serialization::DomNode();
+				}
+				if (events) {
+					reader.Feed(chunk.View());
+					Core::String data;
+					while (answer == nullptr && reader.Next(data)) Dispatch(data.View(), id, answer);
+					if (got == BodyRead::Ended && answer == nullptr && reader.Flush(data)) Dispatch(data.View(), id, answer);
+				}
+				else {
+					body.Append(chunk.View());
+					if (body.ByteLength() > 64 * 1024 * 1024) {
+						error = Core::String("the server's answer is larger than 64 MB");
+						return Serialization::DomNode();
+					}
+					if (got == BodyRead::Ended && status >= 200 && status < 300 && !body.View().Trimmed().IsEmpty()) Dispatch(body.View(), id, answer);
+				}
+				if (answer != nullptr || got == BodyRead::Ended) break;
+				if (Stopped(cancelled) || NowMs() >= deadline) {
+					exchange.Close();
+					GiveUp(id, Core::StringView(Stopped(cancelled) ? "stopped by the owner" : "no answer in time"));
+					error = Stopped(cancelled) ? Core::String("stopped before the server answered; the request was cancelled") : (Core::String("the server did not answer within ") + Seconds(waitMs).View()) + "; the request was cancelled";
+					return Serialization::DomNode();
+				}
+			}
+			if (status < 200 || status >= 300) {
+				Core::StringBuilder said;
+				said.Append("HTTP ");
+				said.AppendInt(status);
+				Core::StringView shown = Capped(body.View().Trimmed(), kErrorBodyBytes);
+				if (!shown.IsEmpty()) {
+					said.Append(": ");
+					said.Append(shown);
+				}
+				error = said.ToString();
+				return Serialization::DomNode();
+			}
+			if (answer == nullptr) {
+				error = events ? Core::String("the server's event stream ended without the answer")
+					: (Core::String("the server's answer is not the JSON-RPC answer to the request: ") + Capped(body.View().Trimmed(), 200));
+				return Serialization::DomNode();
+			}
+			PendingCall settled;
+			settled.answer = answer;
+			settled.done = true;
+			return Settled(&settled, error);
+		}
+		error = Core::String("the server ended the session twice");
+		return Serialization::DomNode();
+	}
+
+	bool McpClient::Initialize(int32 waitMs, const bool* cancelled, Core::String& error) {
+		protocolVersion = Core::String();
+		Serialization::DomNode result = Call(Core::StringView("initialize"), InitializeParams(Core::StringView(kClientVersion)).View(), waitMs, cancelled, error);
+		if (!result.IsValid()) {
+			error = Core::String("initialize: ") + error.View();
+			return false;
+		}
+		Core::StringView version = result.Member("protocolVersion").AsView();
+		if (!KnownVersion(version)) {
+			error = (Core::String("the server speaks MCP ") + (version.IsEmpty() ? Core::StringView("of no version") : version)) + ", which IED does not (it speaks 2025-06-18, 2025-03-26 and 2024-11-05)";
+			return false;
+		}
+		protocolVersion = Core::String(version);
+		serverName = Core::String(result.Member("serverInfo").Member("name").AsView());
+		serverVersion = Core::String(result.Member("serverInfo").Member("version").AsView());
+		instructions = Core::String(result.Member("instructions").AsView());
+		toolsChange = result.Member("capabilities").Member("tools").Member("listChanged").AsBool();
+		if (!Notify(Core::StringView("notifications/initialized"), Core::StringView(""))) {
+			error = Core::String("the server did not take notifications/initialized");
+			return false;
+		}
+		return true;
+	}
+
+	bool McpClient::Alive() {
+		if (http) return !closed;
+		Threading::LockGuard guard(mutex);
+		return child != nullptr && !ended && !closed;
+	}
+
+	int64 McpClient::ExitCode() {
+		Threading::LockGuard guard(mutex);
+		return ended ? exitCode : -1;
+	}
+
+	uint32 McpClient::Pid() const { return child != nullptr ? child->Id() : (uint32)0; }
+
+	void McpClient::Close() {
+		if (http) {
+			if (closed) return;
+			closed = true;
+			if (session.IsEmpty()) return;
+			HttpExchange exchange;
+			Core::String error;
+			if (exchange.Send(Core::StringView("DELETE"), launch.url.View(), HttpHeaders(), Core::StringView(""), kConnectMs, error)) exchange.ReadHead(2000);
+			return;
+		}
+		{
+			Threading::LockGuard guard(writing);
+			if (closed || !child) return;
+			closed = true;
+			child->CloseInput();
+		}
+		if (child->Wait(1000) == Process::kTimedOut) child->Kill();
+	}
+}

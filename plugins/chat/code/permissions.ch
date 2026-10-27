@@ -29,4 +29,8 @@ namespace Ai
 	// always ask"), by a rule that names the root: one "Allow for this chat" added ("fs.write(ied:/src/**)") or an
 	// ai.permissions allow rule starting "<alias>:/". A permission mode, or a rule for anything, never does.
 	bool AllowedInRoot(const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::StringView rootAlias);
+	// What a call of a tool whose every call asks (a toolCalls entry's approval "ask", docs/11) may do, once Decide
+	// allowed it: still allowed when an ai.permissions allow rule or one the owner allowed for the chat matches
+	// `subject`, else asked with `why`. Read calls are not held back.
+	Permit AskUntilAllowed(Permit decided, ToolClass toolClass, const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::String& why);
 }

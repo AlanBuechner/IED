@@ -181,6 +181,25 @@ namespace Ai
 
 	// --- Tool calls --------------------------------------------------------------------------------------------------
 
+	void AwaitToolStarts(const IED::Workspace& ws, const bool* cancelled) {
+		if (!ws.trusted) return;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", ws.id.View());
+		json.EndObject();
+		Core::String args = json.ToString();
+		const int64 started = clock_now_ns() / 1000000;
+		for (;;) {
+			IED::Result answer = IED::CallBinding(Core::StringView("mcp.ensure"), args.View());
+			if (!answer.Ok()) return;
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			const int64 waitMs = Serialization::ReadJson(answer.json.View(), *doc).root.Member("waitMs").AsInt();
+			const int64 waited = clock_now_ns() / 1000000 - started;
+			if (waitMs <= 0 || waited >= kToolStartMostMs || (cancelled && *cancelled)) return;
+			Threading::Thread::Sleep(kToolStartPollMs * 1000000);
+		}
+	}
+
 	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
 		ToolRegistry* registry = CoreTools();
 		if (!DocsOf(context, ws, problems).IsEmpty()) AddDocsTools(*registry, CallDocs);

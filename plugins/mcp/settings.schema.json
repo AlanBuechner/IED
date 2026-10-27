@@ -1,0 +1,50 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "MCP settings",
+	"type": "object",
+	"$defs": {
+		"value": {
+			"description": "Text, or {\"env\": \"NAME\"}: read from IED's environment when the server starts, so no secret is written in a settings file.",
+			"oneOf": [
+				{ "type": "string" },
+				{ "type": "object", "properties": { "env": { "type": "string", "minLength": 1 } }, "required": ["env"], "additionalProperties": false }
+			]
+		},
+		"server": {
+			"type": "object",
+			"properties": {
+				"command": { "type": "string", "minLength": 1, "description": "A program on PATH or a path, started in the workspace and spoken to on its standard input and output (stdio). A .cmd or .bat (npx) runs through cmd.exe." },
+				"args": { "type": "array", "items": { "type": "string" }, "description": "Its arguments, each as written." },
+				"env": { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" }, "description": "Variables added to its environment." },
+				"cwd": { "type": "string", "description": "The folder it runs in, relative to the workspace root (the default)." },
+				"url": { "type": "string", "pattern": "^https?://", "description": "A running server's streamable-HTTP endpoint (http://127.0.0.1:8000/mcp). Plain http only: IED's HTTP client has no TLS." },
+				"headers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" }, "description": "Headers each HTTP request carries (Authorization)." },
+				"enabled": { "type": "boolean", "default": true },
+				"permission": { "enum": ["ask", "auto", "read"], "default": "ask", "description": "ask: every call of its tools asks you, in any permission mode, until you allow it for the chat (or an ai.permissions allow rule does); auto: its tools are commands that follow the chat's permission mode; read: you say it only reads - its tools run without asking and are offered in Plan mode." },
+				"preload": { "description": "true, or names of its tools: send them whole with every request. Otherwise they are deferred (shown whole by tool_search).", "oneOf": [ { "type": "boolean" }, { "type": "array", "items": { "type": "string" } } ] },
+				"privacy": { "enum": ["local", "lan", "cloud"], "description": "Where what its tools are sent goes: local for a command or a loopback URL, cloud for any other URL unless said." },
+				"timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 1800, "default": 120, "description": "How long a call may take before it is cancelled." },
+				"startSeconds": { "type": "integer", "minimum": 1, "maximum": 300, "default": 30, "description": "How long a start may take to answer initialize (uvx and npx may download the server on its first run)." },
+				"exclude": { "type": "array", "items": { "type": "string" }, "description": "Its tools left out, by the server's names." }
+			},
+			"additionalProperties": false
+		}
+	},
+	"properties": {
+		"mcp.servers": {
+			"type": "object",
+			"additionalProperties": { "$ref": "#/$defs/server" },
+			"default": {},
+			"x-ied-tiers": ["app", "solution", "project"],
+			"x-ied-merge": "merge",
+			"description": "MCP servers whose tools the AI gets in a trusted workspace, by name: {command, args?, env?, cwd?} or {url, headers?}, with enabled, permission, preload, privacy, timeoutSeconds, startSeconds and exclude (docs/04 MCP). A deeper tier's entry of a name replaces the one above it."
+		},
+		"mcp.idleMinutes": {
+			"type": "integer",
+			"minimum": 0,
+			"default": 10,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "A server no call used for this long is stopped; its tools stay offered and the next call starts it again. 0: it runs until IED stops."
+		}
+	}
+}

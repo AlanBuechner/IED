@@ -35,6 +35,8 @@ namespace IED
 		// chat adds no failure notes to it (docs/12 "Tools execution").
 		public bool reportsFailure;
 		public Core::Array<ToolImage> images;
+		// Where it ran, for the tool card ("MCP blender"); empty: the plugin.
+		public Core::String source;
 		// The server restarts after this call (IED::RelaunchServer): the chat continues by itself once it is back, with a
 		// message saying so (docs/12 "Restart behavior").
 		public bool restarts;

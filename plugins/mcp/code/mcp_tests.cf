@@ -1,0 +1,199 @@
+// mcp: JSON-RPC framing as MCP speaks it, server configurations and the AI's tool names, a tools/list page, a tools/call
+// answer as the model reads it, event streams, schemas the validator can load and the restart delays.
+
+include "servers.ch"
+
+static Serialization::DomNode Json(const char* text, Serialization::DomDoc& doc) { return Serialization::ReadJson(Core::StringView(text), doc).root; }
+
+[test("server.mcp.protocol")]
+class McpProtocolTests {
+	[test("messages read by kind, ids kept as JSON")]
+	public static void TestRead() {
+		Core::Array<Mcp::Message*> read = Mcp::ReadMessages(Core::StringView("{\"jsonrpc\": \"2.0\", \"id\": 7, \"result\": {\"tools\": []}}"));
+		assert_eq((int64)1, read.Count(), "one");
+		assert_true(read[0]->kind == Mcp::MessageKind::Response, "a response");
+		assert_eq((int64)7, read[0]->number, "its number");
+		assert_true(read[0]->result.Member("tools").IsValid(), "its result");
+		read = Mcp::ReadMessages(Core::StringView("{\"jsonrpc\": \"2.0\", \"id\": \"s1\", \"method\": \"ping\"}"));
+		assert_true(read[0]->kind == Mcp::MessageKind::Request && read[0]->id.View() == "\"s1\"", read[0]->id.CStr());
+		assert_eq((int64)-1, read[0]->number, "a text id has no number");
+		read = Mcp::ReadMessages(Core::StringView("{\"jsonrpc\": \"2.0\", \"method\": \"notifications/tools/list_changed\"}"));
+		assert_true(read[0]->kind == Mcp::MessageKind::Notification, "a notification");
+		read = Mcp::ReadMessages(Core::StringView("{\"jsonrpc\": \"2.0\", \"id\": 3, \"error\": {\"code\": -32602, \"message\": \"bad\"}}"));
+		assert_true(read[0]->kind == Mcp::MessageKind::Response && Mcp::Describe(read[0]->error).View() == "bad (code -32602)", Mcp::Describe(read[0]->error).CStr());
+		read = Mcp::ReadMessages(Core::StringView("[{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {}}, {\"jsonrpc\": \"2.0\", \"method\": \"x\"}]"));
+		assert_eq((int64)2, read.Count(), "a batch is its messages");
+		read = Mcp::ReadMessages(Core::StringView("Starting server..."));
+		assert_true(read[0]->kind == Mcp::MessageKind::Invalid && read[0]->text.View() == "Starting server...", "a line that is not JSON");
+		read = Mcp::ReadMessages(Core::StringView("{\"id\": 1, \"result\": {}}"));
+		assert_true(read[0]->kind == Mcp::MessageKind::Invalid, "no jsonrpc 2.0");
+	}
+
+	[test("what IED writes")]
+	public static void TestWrite() {
+		assert_true(Mcp::RequestText(4, Core::StringView("tools/list"), Core::StringView("{}")).View() == "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{}}", "a request");
+		assert_true(Mcp::NotificationText(Core::StringView("notifications/initialized"), Core::StringView("")).View() == "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", "a notification without params");
+		assert_true(Mcp::ResultText(Core::StringView("\"s1\""), Core::StringView("{}")).View() == "{\"jsonrpc\":\"2.0\",\"id\":\"s1\",\"result\":{}}", "an answer keeps the server's id");
+		Core::String refused = Mcp::ErrorText(Core::StringView("9"), Mcp::kMethodNotFound, Core::StringView("no"));
+		assert_true(refused.View() == "{\"jsonrpc\":\"2.0\",\"id\":9,\"error\":{\"code\":-32601,\"message\":\"no\"}}", refused.CStr());
+		Serialization::DomDoc doc;
+		Serialization::DomNode params = Serialization::ReadJson(Mcp::InitializeParams(Core::StringView("0.1.0")).View(), doc).root;
+		assert_true(params.Member("protocolVersion").AsView() == "2025-06-18", "this protocol");
+		assert_eq((int64)0, params.Member("capabilities").Count(), "no client capabilities");
+		assert_true(params.Member("clientInfo").Member("name").AsView() == "IED", "IED");
+		assert_true(Mcp::KnownVersion(Core::StringView("2025-03-26")) && !Mcp::KnownVersion(Core::StringView("2026-01-01")), "versions");
+	}
+
+	[test("lines out of pieces")]
+	public static void TestLines() {
+		Mcp::LineSplitter lines;
+		lines.Feed(Core::StringView("{\"a\":"));
+		Core::String line;
+		assert_true(!lines.Next(line), "not a whole line yet");
+		lines.Feed(Core::StringView("1}\r\n\n{\"b\":2}\n{\"c\""));
+		assert_true(lines.Next(line) && line.View() == "{\"a\":1}", line.CStr());
+		assert_true(lines.Next(line) && line.View() == "{\"b\":2}", "the blank line is skipped");
+		assert_true(!lines.Next(line), "the rest waits");
+		assert_true(lines.Rest().View() == "{\"c\"", "what an ended stream left");
+	}
+
+	[test("event streams")]
+	public static void TestEvents() {
+		Mcp::EventReader events;
+		events.Feed(Core::StringView("event: message\ndata: {\"a\":\ndata: 1}\n\n: keepalive\n\ndata: {\"b\":2}"));
+		Core::String data;
+		assert_true(events.Next(data) && data.View() == "{\"a\":\n1}", data.CStr());
+		assert_true(!events.Next(data), "a comment is not an event; the last one has not ended");
+		assert_true(events.Flush(data) && data.View() == "{\"b\":2}", "a stream that ended mid-event");
+	}
+}
+
+[test("server.mcp.config")]
+class McpConfigTests {
+	[test("servers read from mcp.servers")]
+	public static void TestServers() {
+		Core::Array<Core::String> problems;
+		Core::Array<Mcp::ServerConfig*> servers = Mcp::ReadServers(Core::StringView(
+			"{\"blender\": {\"command\": \"uvx\", \"args\": [\"blender-mcp\"], \"env\": {\"PORT\": \"9876\", \"TOKEN\": {\"env\": \"BLENDER_TOKEN\"}}},"
+			" \"web\": {\"url\": \"http://127.0.0.1:8000/mcp\", \"permission\": \"read\", \"preload\": [\"look\"]},"
+			" \"far\": {\"url\": \"http://example.com/mcp\"},"
+			" \"both\": {\"command\": \"a\", \"url\": \"http://b\"}, \"bad name!\": {\"command\": \"a\"}, \"odd\": {\"command\": \"a\", \"permission\": \"never\"}}"), problems);
+		assert_eq((int64)3, servers.Count(), "three can be used");
+		assert_eq((int64)3, problems.Count(), "three say why not");
+		assert_true(problems[0].View().StartsWith(Core::StringView("mcp.servers.both: give a command")), problems[0].CStr());
+		Mcp::ServerConfig* blender = servers[0];
+		assert_true(blender->enabled && blender->permission == Mcp::Permission::Ask && !blender->IsHttp(), "defaults: enabled, ask, stdio");
+		assert_true(blender->env[1].fromEnv.View() == "BLENDER_TOKEN", "a value from IED's environment");
+		assert_true(blender->privacy.View() == "local" && servers[1]->privacy.View() == "local" && servers[2]->privacy.View() == "cloud", "privacy by where it is");
+		assert_true(servers[1]->Preloads(Core::StringView("look")) && !servers[1]->Preloads(Core::StringView("other")), "preload by name");
+		assert_eq((int64)120, blender->timeoutSeconds, "a call's default time");
+		assert_true(Mcp::Display(blender).View() == "uvx blender-mcp", Mcp::Display(blender).CStr());
+	}
+
+	[test("what changes the hash")]
+	public static void TestHash() {
+		Serialization::DomDoc doc;
+		Core::String problem;
+		Mcp::ServerConfig* a = Mcp::ReadServer(Core::StringView("s"), Json("{\"command\": \"x\", \"args\": [\"1\"]}", doc), problem);
+		Mcp::ServerConfig* b = Mcp::ReadServer(Core::StringView("s"), Json("{\"command\": \"x\", \"args\": [\"1\"], \"permission\": \"auto\", \"preload\": true}", doc), problem);
+		Mcp::ServerConfig* c = Mcp::ReadServer(Core::StringView("s"), Json("{\"command\": \"x\", \"args\": [\"2\"]}", doc), problem);
+		assert_true(a->hash == b->hash, "permission and preload keep the server running");
+		assert_true(a->hash != c->hash, "its arguments start another");
+	}
+
+	[test("the AI's tool names")]
+	public static void TestNames() {
+		assert_true(Mcp::ToolName(Core::StringView("blender"), Core::StringView("get_scene_info")).View() == "mcp_blender_get_scene_info", "as it is");
+		assert_true(Mcp::ToolName(Core::StringView("My-Engine"), Core::StringView("Scene.Inspect")).View() == "mcp_my_engine_scene_inspect", "lowercase, '_' for the rest");
+		assert_true(Mcp::ToolName(Core::StringView("a"), Core::StringView("x--y__")).View() == "mcp_a_x_y", "runs of '_' as one, none at the end");
+		Core::String longName = Mcp::ToolName(Core::StringView("server"), Core::StringView("a_very_long_tool_name_that_goes_on_and_on_past_what_a_model_takes"));
+		assert_eq((int64)64, longName.ByteLength(), "at most 64");
+		assert_true(Mcp::ToolGroup(Core::StringView("Blender")).View() == "mcp_blender", "the group");
+		assert_true(Mcp::ValidServerName(Core::StringView("blender-5_2")) && !Mcp::ValidServerName(Core::StringView("a b")) && !Mcp::ValidServerName(Core::StringView("")), "server names");
+	}
+
+	[test("batch files go through cmd.exe, quoted")]
+	public static void TestBatch() {
+		assert_true(Mcp::IsBatchFile(Core::StringView("C:/node/NPX.CMD")) && !Mcp::IsBatchFile(Core::StringView("uvx.exe")), "by extension");
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String("C:/Program Files/nodejs/npx.cmd"));
+		argv.Push(Core::String("-y"));
+		Core::String line;
+		Core::String problem;
+		assert_true(Mcp::BatchLine(argv, line, problem) && line.View() == "\"C:/Program Files/nodejs/npx.cmd\" \"-y\"", line.CStr());
+		argv.Push(Core::String("%PATH%"));
+		assert_true(!Mcp::BatchLine(argv, line, problem), "cmd.exe would expand it");
+	}
+}
+
+[test("server.mcp.tools")]
+class McpToolTests {
+	[test("a tools/list page")]
+	public static void TestPage() {
+		Serialization::DomDoc doc;
+		Core::String cursor;
+		Core::Array<Mcp::McpTool*> tools = Mcp::ReadToolsPage(Core::StringView("fake"), Json(
+			"{\"tools\": [{\"name\": \"echo\", \"title\": \"Echo\", \"description\": \"Say it.\", \"inputSchema\": {\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\"}}}, \"annotations\": {\"readOnlyHint\": true}},"
+			" {\"name\": \"\"}, {\"name\": \"bare\"}], \"nextCursor\": \"2\"}", doc), cursor);
+		assert_eq((int64)2, tools.Count(), "a tool without a name is left out");
+		assert_true(cursor.View() == "2", "the next page");
+		assert_true(tools[0]->aiName.View() == "mcp_fake_echo" && tools[0]->title.View() == "Echo" && tools[0]->readOnlyHint, "named, titled, its hint kept");
+		assert_true(tools[1]->schema.View() == "{\"type\":\"object\"}", "no schema: any object");
+	}
+
+	[test("schemas the validator can load")]
+	public static void TestSchemas() {
+		Serialization::DomDoc doc;
+		Core::String note;
+		Core::String kept = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"integer\", \"title\": \"A\"}}, \"required\": [\"a\"]}", doc), note);
+		assert_true(note.IsEmpty() && kept.View().Contains(Core::StringView("\"required\":[\"a\"]")), kept.CStr());
+		Core::String stripped = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"tags\": {\"type\": \"object\", \"propertyNames\": {\"pattern\": \"^x\"}, \"additionalProperties\": {\"type\": \"string\", \"multipleOf\": 2}}}}", doc), note);
+		assert_true(!stripped.View().Contains(Core::StringView("propertyNames")) && !stripped.View().Contains(Core::StringView("multipleOf")), stripped.CStr());
+		assert_true(stripped.View().Contains(Core::StringView("\"additionalProperties\":{\"type\":\"string\"}")), "the rest kept, at every depth");
+		assert_true(note.View().Contains(Core::StringView("propertyNames, multipleOf")), note.CStr());
+		note = Core::String();
+		assert_true(Mcp::UsableSchema(Json("[1]", doc), note).View() == "{\"type\":\"object\"}" && !note.IsEmpty(), "not an object");
+	}
+
+	[test("a tools/call answer as the model reads it")]
+	public static void TestContent() {
+		Serialization::DomDoc doc;
+		Mcp::CallContent content = Mcp::ReadCallResult(Json(
+			"{\"content\": [{\"type\": \"text\", \"text\": \"one\"}, {\"type\": \"image\", \"mimeType\": \"image/png\", \"data\": \"AAAA\"},"
+			" {\"type\": \"audio\", \"mimeType\": \"audio/wav\", \"data\": \"AAAA\"}, {\"type\": \"resource\", \"resource\": {\"uri\": \"x://a\", \"text\": \"inside\"}},"
+			" {\"type\": \"resource_link\", \"uri\": \"x://b\", \"name\": \"b\"}], \"isError\": true}", doc));
+		assert_eq((int64)5, content.parts.Count(), "every block");
+		assert_true(content.isError, "isError");
+		assert_true(content.parts[1]->kind == Mcp::PartKind::Image && content.parts[2]->kind == Mcp::PartKind::File, "an image to show, audio to save");
+		Core::Array<Core::String> paths;
+		for (int64 i = 0; i < 5; ++i) paths.Push(Core::String(i == 2 ? ".ied/local/mcp/media/a.wav" : ""));
+		Core::String text = Mcp::CallText(content, paths);
+		assert_true(text.View() == "one\n[audio saved as .ied/local/mcp/media/a.wav (audio/wav)]\n[resource x://a]\ninside\n[resource link x://b - b]", text.CStr());
+		Mcp::CallContent structured = Mcp::ReadCallResult(Json("{\"content\": [], \"structuredContent\": {\"sum\": 5}}", doc));
+		Core::Array<Core::String> none;
+		assert_true(Mcp::CallText(structured, none).View() == "{\"sum\":5}", "structuredContent when there is no content");
+		assert_true(Core::StringView(Mcp::ExtensionOf(Core::StringView("image/jpeg"))) == "jpg" && Core::StringView(Mcp::ExtensionOf(Core::StringView("x/y"))) == "bin", "extensions");
+	}
+
+	[test("a long answer is cut with a note")]
+	public static void TestCut() {
+		Mcp::CallContent content;
+		Mcp::ContentPart* part = new Mcp::ContentPart();
+		part->kind = Mcp::PartKind::Text;
+		Core::StringBuilder text;
+		for (int64 i = 0; i < Mcp::kResultMostBytes + 100; ++i) text.AppendByte('x');
+		part->text = text.ToString();
+		content.parts.Push(part);
+		Core::Array<Core::String> none;
+		Core::String cut = Mcp::CallText(content, none);
+		assert_true(cut.ByteLength() < Mcp::kResultMostBytes + 200 && cut.View().EndsWith(Core::StringView("bytes; the rest is left out]")), "cut");
+	}
+
+	[test("restarts back off")]
+	public static void TestBackoff() {
+		assert_eq((int64)1000, Mcp::RestartDelayMs(1), "1 s");
+		assert_eq((int64)2000, Mcp::RestartDelayMs(2), "2 s");
+		assert_eq((int64)16000, Mcp::RestartDelayMs(5), "16 s");
+		assert_eq((int64)30000, Mcp::RestartDelayMs(9), "then 30 s");
+	}
+}

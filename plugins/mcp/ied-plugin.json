@@ -1,0 +1,38 @@
+// MCP (docs/04 "MCP"): the client of Model Context Protocol servers - programs IED starts and speaks to on stdio, or
+// servers it reaches with streamable HTTP - whose tools become the AI's tools in a workspace (computed toolCalls, so the
+// chat offers them with every plugin's tools, its permission checks and approval cards). Its server code (code/) is
+// compiled into the server; its UI module draws Settings > AI > MCP Servers.
+{
+	"manifestVersion": 1,
+	"id": "ied.mcp",
+	"name": "MCP",
+	"version": "0.1.0",
+	"description": "MCP servers (Blender, a game engine, anything) as the AI's tools: started on first use, restarted when they exit, listed in Settings.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Mcp::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "net.egress", "ai.tools", "fs.write"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "AI/MCP Servers" },
+		"outputSources": [ { "id": "mcp", "title": "MCP" } ],
+		"settingsPages": [
+			{ "id": "ied.mcp.servers", "page": "AI", "title": "MCP Servers", "view": "McpSettings", "keys": ["mcp.servers", "mcp.idleMinutes"] }
+		],
+		"bindings": {
+			"provides": [
+				{ "name": "mcp.ensure", "version": "1", "kind": "function", "description": "Starts each enabled server of a trusted workspace whose tools are not known yet and answers at once: {wsId} -> {waitMs, servers: [{name, state}]}; waitMs is how long the caller may wait for those starts (at most 30000) - call again until it is 0. The chat calls it before a turn builds its tools." },
+				{ "name": "mcp.status", "version": "1", "kind": "function", "description": "A workspace's servers as the topic mcp:<wsId> shows them: {wsId} -> {trusted, servers: [...]}" },
+				{ "name": "mcp.tool", "version": "1", "kind": "function", "description": "What a chat tool of an MCP server is: {wsId, tool} -> {server, tool, title, permission, state}; refused when it cannot be called now (gone, turned off, the workspace untrusted)." },
+				{ "name": "mcp.call", "version": "1", "kind": "function", "description": "Starts a call of a chat tool of an MCP server and answers at once: {wsId, tool, arguments, chatId?} -> {callId}. The server is started first when it is not running." },
+				{ "name": "mcp.result", "version": "1", "kind": "function", "description": "What a call came to, waiting at most waitMs (250; at most 5000): {callId, waitMs?} -> {done, content?, isError?, source?, images?: [{mime, path}]}; once done, the call is forgotten." },
+				{ "name": "mcp.cancel", "version": "1", "kind": "function", "description": "Cancels a call at its server (notifications/cancelled): {callId} -> {}" }
+			],
+			"consumes": [
+				{ "name": "mcp.tool", "version": "1" },
+				{ "name": "mcp.call", "version": "1" },
+				{ "name": "mcp.result", "version": "1" },
+				{ "name": "mcp.cancel", "version": "1" }
+			]
+		}
+	}
+}

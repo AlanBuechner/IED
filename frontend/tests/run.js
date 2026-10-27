@@ -54,5 +54,6 @@ import "./profiler.test.js";
 import "./gpu.test.js";
 import "./developer.test.js";
 import "./websearch.test.js";
+import "./mcp.test.js";
 
 run(document.getElementById("results"));

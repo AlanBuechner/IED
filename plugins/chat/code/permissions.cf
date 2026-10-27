@@ -107,6 +107,14 @@ namespace Ai
 		return AnyNamesRoot(allowedForChat, subject, rootAlias) || AnyNamesRoot(rules.allow, subject, rootAlias);
 	}
 
+	Permit AskUntilAllowed(Permit decided, ToolClass toolClass, const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::String& why) {
+		if (decided != Permit::Allow || toolClass == ToolClass::Read || toolClass == ToolClass::Meta) return decided;
+		Core::String rule;
+		if (AnyMatches(rules.allow, subject, rule) || AnyMatches(allowedForChat, subject, rule)) return Permit::Allow;
+		why = Core::String("every call of this tool asks until you allow it for the chat or an ai.permissions allow rule does");
+		return Permit::Ask;
+	}
+
 	Core::String ChatAllowRule(Core::StringView subject) {
 		Core::StringView kind;
 		Core::StringView argument;
