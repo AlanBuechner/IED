@@ -13,6 +13,8 @@ namespace Scripting
 	public:
 		/// The next token, default-made, at the end.
 		Token* Alloc();
+		/// Every token, gone: the memory goes back once the parse that read them is over.
+		void Clear();
 
 		Token& At(uint32 index) const { return m_Chunks[index / kChunkTokens][index % kChunkTokens]; }
 		uint32 Count() const { return m_Count; }

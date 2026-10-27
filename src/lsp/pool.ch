@@ -6,6 +6,7 @@
 include "client.ch"
 include "rewrite.ch"
 include "services/documents.ch"
+include "fs/changes.ch"
 
 namespace Ied
 {
@@ -13,6 +14,8 @@ namespace Ied
 	const int64 kLspIndexWaitMs = 30000;     // how long workspace symbols wait for the servers' indexes
 	const int64 kLspIndexGraceMs = 2000;     // a server this new is given this long to begin indexing
 	const int64 kLspIndexSliceNs = 50000000;
+	const int64 kLspSweepNs = 1000000000;    // how often idle servers are looked for (lsp.idleStopMinutes)
+	const char* kLspIdleSetting = "lsp.idleStopMinutes";
 
 	// The server that named a file outside its workspace in a result passed to a client.
 	class NamedFile
@@ -37,6 +40,9 @@ namespace Ied
 		public void DocumentSaved(Document* doc);
 		// `doc` was at `oldPath`: closed there on the servers that had it, opened where it is now.
 		public void DocumentRenamed(Document* doc, Core::StringView oldPath);
+		// Files of the workspace changed on disk (the watcher's batch): a running server whose initializationOptionsFiles
+		// name one of them gets those files again (workspace/didChangeConfiguration).
+		public void FilesChanged(Workspace* ws, const ChangeBatch& batch);
 		// IED stops: shutdown and exit to every server.
 		public void StopAll();
 
@@ -48,8 +54,9 @@ namespace Ied
 		// The result's JSON for a request the server made.
 		public Core::String ServerRequest(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
 		// Its profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win), and
-		// with a pluginCodeOption the workspace's plugin code scopes under that key (docs/26 "Editing plugin code").
-		public Core::String InitializationOptions(const LanguageServer* language);
+		// with a pluginCodeOption the workspace's plugin code scopes under that key (docs/26 "Editing plugin code"), and with
+		// initializationOptionsFiles those files under its key (kept as sent, for FilesChanged).
+		public Core::String InitializationOptions(LanguageServer* language);
 		// Whether one of the workspace's servers named the file outside it (`uri` as CanonicalFileUri gives it) in a
 		// result passed to a client: only such a file opens as a document (docs/10 "Files outside the workspace").
 		public bool WasNamed(Workspace* ws, Core::StringView uri) const;
@@ -90,6 +97,17 @@ namespace Ied
 	private:
 		// Its profile's initializationOptions with its initializationOptionsFile merged over them.
 		private Core::String ProfileOptions(const LanguageServer* language);
+		// Its profile's initializationOptionsFiles: {<file name without its extension>: <the file's object>}, in name order;
+		// "{}" when none is there (a file that is not a JSON object is left out, and said so in the output).
+		private Core::String OptionsFilesJson(LanguageServer* language);
+		// Every second, on a thread of its own: a server none of whose documents a window shows, and that nothing asked or
+		// told anything for lsp.idleStopMinutes, stops and leaves the pool; it starts again when it is needed.
+		private void SweepLoop();
+		private void StopIdle(int64 nowNs);
+		// Whether a window shows one of the documents `language` has open (a client follows its doc: topic).
+		private bool Shown(const LanguageServer* language) const;
+		// lsp.idleStopMinutes for `ws`, in ns; 0: never.
+		private int64 IdleLimitNs(Workspace* ws);
 		// The profiles of the plugins loaded for `ws` whose `when` holds, in load order.
 		private Core::Array<LspProfile*> ProfilesFor(Workspace* ws);
 		private bool Allowed(Workspace* ws, const LspProfile* profile);
@@ -143,6 +161,7 @@ namespace Ied
 		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>"
 		private Core::HashMap<Core::String, bool> scanned;                   // wsIds StartFor has walked
 		private Core::HashMap<Core::String, int64> publishes;                // "<wsId>|<path>": its diagnostics published so often
+		private bool sweeping;                                               // the SweepLoop thread runs
 	}
 
 	// A params object's JSON with "textDocument": {"uri": `uri`} in place of any it had.

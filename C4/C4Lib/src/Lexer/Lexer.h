@@ -35,6 +35,10 @@ namespace Scripting
 		/// Source ID this lexer is tokenising.
 		uint32 GetSourceId() const { return m_SourceId; }
 
+		/// The tokens read, given back once the file's parse is over (AST nodes keep copies of theirs): a program's
+		/// tokens are as big as its AST, and nothing reads them after the parse. The lexer reads nothing more.
+		void ReleaseTokens();
+
 		// -----------------------------------------------------------------------
 		/// @name Token Access
 		/// @{

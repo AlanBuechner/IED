@@ -114,8 +114,9 @@ See [runtime/03-testing.md](../runtime/03-testing.md).
 
 ## 4. The editor bridge
 
-After every successful build of an executable (and every test build of a module) Nuke writes
-`<workspace>/.ied/local/lsp-options/<Project>.json`, the options IED passes to the C4 language server:
+After every build of an executable (and every test build of a module), also one whose compile fails, Nuke writes
+`<workspace>/.ied/local/lsp-options/<Project>.json`, one program's options; IED passes all of them to one C4 language
+server for the workspace ([03-editor-lsp-dap.md](03-editor-lsp-dap.md#one-server-for-every-program)):
 
 | Key | Value |
 |---|---|

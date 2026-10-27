@@ -25,10 +25,13 @@ class Build(base.Command):
 		if project.kind != "executable":
 			return
 		job = c4compile.plan(session, project)
-		c4compile.compile_program(session, job)
+		try:
+			c4compile.compile_program(session, job)
+		finally:
+			# A compile that fails still tells the editor what it compiles: its errors are what the editor should show.
+			if session.workspace.spec.ide:
+				ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
 		copy_files(session, project)
-		if session.workspace.spec.ide:
-			ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
 
 
 def copy_files(session, project):

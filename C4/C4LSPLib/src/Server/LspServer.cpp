@@ -1,31 +1,49 @@
 #include "Server/LspServer.h"
+#include "Server/ProgramPlan.h"
 #include "Protocol/LspJson.h"
 #include "Json/JsonWriter.h"
+#include <algorithm>
 #include <chrono>
+#include <set>
 #include "Features/Diagnostics.h"
-#include "Features/Hover.h"
-#include "Features/Definition.h"
-#include "Features/References.h"
-#include "Features/DocumentHighlight.h"
-#include "Features/Completion.h"
-#include "Features/DocumentSymbols.h"
-#include "Features/SemanticTokens.h"
-#include "Features/SignatureHelp.h"
-#include "Features/TypeDefinition.h"
-#include "Features/Implementation.h"
-#include "Features/Rename.h"
-#include "Features/CodeActions.h"
-#include "Features/FoldingRanges.h"
 #include "Features/Tidy.h"
 
 namespace C4LSP::Server
 {
-	LspServer::LspServer(OutputSink send) : m_Send(std::move(send)), m_Session(std::make_unique<CompilationSession>()) {}
-
-	std::shared_ptr<CompilationSession> LspServer::GetSnapshot() const
+	namespace
 	{
-		std::lock_guard<std::mutex> lock(m_SessionMutex);
-		return m_Session;
+		// How long a query across programs keeps the analyses it asked for, and how long it waits for them.
+		constexpr auto kConsultedKept = std::chrono::minutes(3);
+		constexpr auto kConsultWait = std::chrono::seconds(25);
+		// How often the worker looks for analyses it may let go while nothing changes.
+		constexpr auto kReleaseEvery = std::chrono::seconds(30);
+
+		std::string PathOfUri(const std::string& uri) { return Protocol::DocumentUri::FromUri(uri); }
+
+		// uri -> hash of its text: what an analysis took from the editor.
+		std::map<std::string, size_t> InputsOf(const EditorDocuments& docs)
+		{
+			std::map<std::string, size_t> inputs;
+			for (const auto& [uri, text] : docs) inputs[uri] = std::hash<std::string>{}(text);
+			return inputs;
+		}
+	}
+
+	LspServer::LspServer(OutputSink send) : m_Send(std::move(send)), m_Unanalyzed(std::make_shared<CompilationSession>())
+	{
+		m_Programs.push_back(std::make_shared<Program>(ProgramOptions{}));
+	}
+
+	std::shared_ptr<Program> LspServer::ProgramOfLocked(const std::string& uri) const
+	{
+		auto analyzing = m_Analyzing.find(uri);
+		if (analyzing != m_Analyzing.end() && analyzing->second->session) return analyzing->second;
+		const std::string path = PathOfUri(uri);
+		for (const auto& program : m_Programs)
+			if (program->session && program->Owns(path)) return program;
+		for (const auto& program : m_Programs)
+			if (program->session && program->session->FindSourceIdByUri(uri) != 0) return program;
+		return m_Programs.front();
 	}
 
 	std::shared_ptr<CompilationSession> LspServer::GetSnapshot(const std::string& uri) const
@@ -33,47 +51,47 @@ namespace C4LSP::Server
 		const int32 scope = ScopeOfUri(uri);
 		std::lock_guard<std::mutex> lock(m_SessionMutex);
 		if (scope >= 0 && static_cast<size_t>(scope) < m_ScriptSessions.size() && m_ScriptSessions[scope]) return m_ScriptSessions[scope];
-		return m_Session;
+		std::shared_ptr<Program> program = ProgramOfLocked(uri);
+		return program->session ? program->session : m_Unanalyzed;
 	}
 
 	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest(const std::string& uri)
 	{
-		WaitForPendingWork(std::chrono::milliseconds(10'000)); // as SnapshotForRequest()
+		// Wait for pending work (bounded), then snapshot: didChange is applied to m_Documents and analyzed on the worker,
+		// so answering before that swap-in would answer for stale text (completion after typing "x." would offer globals
+		// instead of x's members). On a very large program one analysis can outlive any client's request timeout, so past
+		// the deadline the current snapshot answers. The editor's LSP request timeout is 15s; 10s stays below it.
+		WaitForPendingWork(std::chrono::milliseconds(10'000));
 		return GetSnapshot(uri);
 	}
 
 	int32 LspServer::ScopeOfUri(const std::string& uri) const
 	{
-		return m_Scripts.empty() ? -1 : ScopeOf(m_Scripts, Protocol::DocumentUri::FromUri(uri));
+		return m_Scripts.empty() ? -1 : ScopeOf(m_Scripts, PathOfUri(uri));
 	}
 
-	std::shared_ptr<CompilationSession> LspServer::BuildScriptSession(size_t scope, const std::vector<std::pair<std::string, std::string>>& docs)
+	size_t LspServer::AnalyzedProgramCount() const
+	{
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		size_t count = 0;
+		for (const auto& program : m_Programs)
+			if (program->session) ++count;
+		return count;
+	}
+
+	std::shared_ptr<CompilationSession> LspServer::BuildScriptSession(size_t scope, const EditorDocuments& docs)
 	{
 		auto session = std::make_shared<CompilationSession>();
-		if (!m_RootUri.empty()) session->SetRootFolder(Protocol::DocumentUri::FromUri(m_RootUri));
+		if (!m_RootUri.empty()) session->SetRootFolder(PathOfUri(m_RootUri));
 		session->SetScript(m_Scripts[scope], m_Interfaces.Get(m_Scripts[scope].interfacePath));
 		for (const auto& [uri, text] : docs) session->SetOpenDocument(uri, text);
 		session->Recompile();
 		return session;
 	}
 
-	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest()
-	{
-		// Wait for pending work (bounded), then snapshot. Every read-only feature answers from this:
-		// didChange is applied to m_Documents and recompiled on the worker thread, so answering from
-		// GetSnapshot() before that swap-in would make the feature operate on stale text (e.g. completion
-		// after typing "x." returns globals instead of x's members). The wait stays bounded because on a
-		// very large root one recompile can outlive any sane client request timeout; past the deadline we
-		// still answer from whatever snapshot exists. The editor's LSP request timeout is 15s, so 10s stays safely
-		// below it. Semantic tokens deliberately do NOT use this (they have a refresh channel: the client
-		// refetches on every publishDiagnostics), see HandleSemanticTokens.
-		WaitForPendingWork(std::chrono::milliseconds(10'000)); // best-effort; false just means "answer now"
-		return GetSnapshot();
-	}
-
 	LspServer::~LspServer()
 	{
-		// Stop the worker before members it references (m_Session, m_Documents) are destroyed.
+		// Stop the worker before members it references (the programs, m_Documents) are destroyed.
 		{
 			std::lock_guard<std::mutex> lock(m_WorkMutex);
 			m_WorkShutdown = true;
@@ -83,6 +101,202 @@ namespace C4LSP::Server
 		if (m_Worker.joinable())
 			m_Worker.join();
 	}
+
+	// --- Programs ------------------------------------------------------------------------------------------------------
+
+	void LspServer::SetPrograms(ProgramOptions own, const Json::Value& programs)
+	{
+		std::vector<ProgramOptions> wanted;
+		wanted.push_back(std::move(own));
+		for (ProgramOptions& program : ReadPrograms(programs)) wanted.push_back(std::move(program));
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		std::vector<std::shared_ptr<Program>> made;
+		for (ProgramOptions& program : wanted)
+		{
+			std::shared_ptr<Program> kept;
+			for (const auto& known : m_Programs)
+				if (known->Options() == program) kept = known;
+			made.push_back(kept ? kept : std::make_shared<Program>(std::move(program)));
+		}
+		m_Programs = std::move(made);
+		for (auto it = m_Analyzing.begin(); it != m_Analyzing.end();)
+			it = std::find(m_Programs.begin(), m_Programs.end(), it->second) == m_Programs.end() ? m_Analyzing.erase(it) : std::next(it);
+	}
+
+	std::vector<std::string> LspServer::AnalyzeScripts(const EditorDocuments& docs)
+	{
+		std::vector<EditorDocuments> scopeDocs(m_Scripts.size());
+		for (const auto& doc : docs)
+		{
+			const int32 scope = ScopeOfUri(doc.first);
+			if (scope >= 0) scopeDocs[scope].push_back(doc);
+		}
+		m_ScriptInputs.resize(m_Scripts.size());
+		std::vector<std::string> analyzed;
+		for (size_t scope = 0; scope < m_Scripts.size(); ++scope)
+		{
+			const auto inputs = InputsOf(scopeDocs[scope]);
+			if (inputs == m_ScriptInputs[scope] && (inputs.empty() || m_ScriptSessions[scope])) continue;
+			std::shared_ptr<CompilationSession> session = scopeDocs[scope].empty() ? nullptr : BuildScriptSession(scope, scopeDocs[scope]);
+			{
+				std::lock_guard<std::mutex> lock(m_SessionMutex);
+				m_ScriptSessions.resize(m_Scripts.size());
+				m_ScriptSessions[scope] = session;
+			}
+			m_ScriptInputs[scope] = inputs;
+			for (const auto& [uri, text] : scopeDocs[scope]) analyzed.push_back(uri);
+		}
+		return analyzed;
+	}
+
+	std::vector<std::string> LspServer::AnalyzePrograms(const EditorDocuments& docs)
+	{
+		std::vector<std::shared_ptr<Program>> programs;
+		std::vector<ProgramFacts> facts;
+		std::map<std::string, std::shared_ptr<Program>> before;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			programs = m_Programs;
+			before = m_Analyzing;
+			for (const auto& program : programs)
+			{
+				if (program->Refresh()) program->stale = true;
+				ProgramFacts known;
+				for (const auto& doc : docs) known.owns.push_back(program->Owns(PathOfUri(doc.first)));
+				known.analyzed = program->session != nullptr;
+				known.projects = program->ProjectNames().size();
+				facts.push_back(std::move(known));
+			}
+		}
+		const std::vector<int32> assigned = AssignDocuments(facts, docs.size());
+
+		// Each program analyzes every open document it holds; the options' own also takes those no program holds.
+		std::vector<EditorDocuments> taken(programs.size());
+		std::map<std::string, std::shared_ptr<Program>> analyzing;
+		std::set<size_t> needed;
+		for (size_t d = 0; d < docs.size(); ++d)
+		{
+			for (size_t p = 0; p < programs.size(); ++p)
+				if (facts[p].owns[d]) taken[p].push_back(docs[d]);
+			const size_t placed = assigned[d] >= 0 ? static_cast<size_t>(assigned[d]) : 0;
+			if (assigned[d] < 0) taken[0].push_back(docs[d]);
+			analyzing[docs[d].first] = programs[placed];
+			needed.insert(placed);
+		}
+		const auto now = std::chrono::steady_clock::now();
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			for (size_t p = 0; p < programs.size(); ++p)
+				if (programs[p]->wantedUntil > now) needed.insert(p);
+		}
+
+		std::vector<std::string> analyzed;
+		for (size_t p : needed)
+		{
+			const auto inputs = InputsOf(taken[p]);
+			{
+				std::lock_guard<std::mutex> lock(m_SessionMutex);
+				if (programs[p]->session && !programs[p]->stale && programs[p]->analyzedWith == inputs) continue;
+			}
+			std::shared_ptr<CompilationSession> fresh = programs[p]->Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken[p]);
+			{
+				std::lock_guard<std::mutex> lock(m_SessionMutex);
+				programs[p]->session = fresh;
+				programs[p]->analyzedWith = inputs;
+				programs[p]->stale = false;
+			}
+			for (const auto& [uri, program] : analyzing)
+				if (program == programs[p]) analyzed.push_back(uri);
+		}
+		for (const auto& [uri, program] : analyzing)
+		{
+			auto was = before.find(uri);
+			if (was == before.end() || was->second != program) analyzed.push_back(uri);
+		}
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			m_Analyzing = std::move(analyzing);
+		}
+		ReleaseUnneeded();
+		return analyzed;
+	}
+
+	void LspServer::ReleaseUnneeded()
+	{
+		const auto now = std::chrono::steady_clock::now();
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		std::set<Program*> analyzing;
+		for (const auto& [uri, program] : m_Analyzing) analyzing.insert(program.get());
+		for (const auto& program : m_Programs)
+			if (program->session && !analyzing.count(program.get()) && program->wantedUntil <= now)
+			{
+				program->session.reset();
+				program->analyzedWith.clear();
+			}
+	}
+
+	// --- Across programs -----------------------------------------------------------------------------------------------
+
+	std::vector<std::shared_ptr<CompilationSession>> LspServer::OtherAnalyses(const std::string& uri, const std::string& declarationUri)
+	{
+		if (ScopeOfUri(uri) >= 0) return {}; // a script is no program's
+		const std::string path = PathOfUri(declarationUri);
+		std::vector<std::shared_ptr<Program>> consulted;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			const std::shared_ptr<Program> asked = ProgramOfLocked(uri);
+			std::vector<ReachFacts> facts;
+			int32 askedIndex = -1;
+			for (size_t p = 0; p < m_Programs.size(); ++p)
+			{
+				facts.push_back({ m_Programs[p]->ProjectsReaching(path), m_Programs[p]->ProjectNames(), m_Programs[p]->session != nullptr });
+				if (m_Programs[p] == asked) askedIndex = static_cast<int32>(p);
+			}
+			for (size_t p : ProgramsToConsult(facts, askedIndex)) consulted.push_back(m_Programs[p]);
+		}
+		return Consult(consulted);
+	}
+
+	std::vector<std::shared_ptr<CompilationSession>> LspServer::AllAnalyses()
+	{
+		std::vector<std::shared_ptr<Program>> consulted;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			std::vector<ReachFacts> facts;
+			for (const auto& program : m_Programs)
+				facts.push_back({ program->ProjectNames(), program->ProjectNames(), program->session != nullptr });
+			for (size_t p : ProgramsToConsult(facts, -1)) consulted.push_back(m_Programs[p]);
+			for (const auto& program : m_Programs)
+				if (program->session && std::find(consulted.begin(), consulted.end(), program) == consulted.end()) consulted.push_back(program);
+		}
+		return Consult(consulted);
+	}
+
+	std::vector<std::shared_ptr<CompilationSession>> LspServer::Consult(const std::vector<std::shared_ptr<Program>>& programs)
+	{
+		bool missing = false;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			const auto until = std::chrono::steady_clock::now() + kConsultedKept;
+			for (const auto& program : programs)
+			{
+				program->wantedUntil = std::max(program->wantedUntil, until);
+				missing = missing || !program->session || program->stale;
+			}
+		}
+		if (missing)
+		{
+			PostRecompile();
+			WaitForPendingWork(std::chrono::duration_cast<std::chrono::milliseconds>(kConsultWait));
+		}
+		std::vector<std::shared_ptr<CompilationSession>> sessions;
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		for (const auto& program : programs)
+			if (program->session) sessions.push_back(program->session);
+		return sessions;
+	}
+
+	// --- The worker ----------------------------------------------------------------------------------------------------
 
 	void LspServer::PostRecompile()
 	{
@@ -100,13 +314,17 @@ namespace C4LSP::Server
 	{
 		while (true)
 		{
-			bool dirty;
 			{
 				std::unique_lock<std::mutex> lock(m_WorkMutex);
-				m_WorkCv.wait(lock, [this] { return m_Dirty || m_WorkShutdown; });
-				dirty = m_Dirty;
-				if (m_WorkShutdown && !dirty)
+				const bool woken = m_WorkCv.wait_for(lock, kReleaseEvery, [this] { return m_Dirty || m_WorkShutdown; });
+				if (m_WorkShutdown && !m_Dirty)
 					return;
+				if (!woken)
+				{
+					lock.unlock();
+					ReleaseUnneeded(); // a query's analyses outlive it a while, then go
+					continue;
+				}
 				m_Dirty = false;
 				m_Working = true;
 			}
@@ -126,8 +344,8 @@ namespace C4LSP::Server
 	void LspServer::WaitForCurrentWork()
 	{
 		std::unique_lock<std::mutex> lock(m_WorkMutex);
-		// Wait until there is neither an in-flight recompile nor one queued. Checking only !m_Working
-		// would let a request slip through the gap between two cycles and read a stale AST.
+		// Wait until there is neither an in-flight pass nor one queued. Checking only !m_Working would let a request slip
+		// through the gap between two passes and read a stale AST.
 		m_WorkCv.wait(lock, [this] { return !m_Working && !m_Dirty; });
 	}
 
@@ -139,56 +357,35 @@ namespace C4LSP::Server
 
 	void LspServer::RunRecompileAndPublish()
 	{
-		std::vector<std::pair<std::string, std::string>> docs;
+		EditorDocuments docs;
 		{
 			std::lock_guard<std::mutex> lock(m_DocMutex);
-			m_Documents.ForEachDocument([&](const std::string& uri, const std::string& text) {
-				docs.emplace_back(uri, text);
-			});
+			m_Documents.ForEachDocument([&](const std::string& uri, const std::string& text) { docs.emplace_back(uri, text); });
 		}
-		// A script scope's documents compile as its scripts, apart from the program (initializationOptions.scripts).
-		std::vector<std::vector<std::pair<std::string, std::string>>> scriptDocs(m_Scripts.size());
-		std::vector<std::pair<std::string, std::string>> programDocs;
+		// A script scope's documents compile as its scripts, apart from every program (initializationOptions.scripts).
+		EditorDocuments programDocs;
 		for (const auto& doc : docs)
-		{
-			const int32 scope = ScopeOfUri(doc.first);
-			(scope < 0 ? programDocs : scriptDocs[scope]).push_back(doc);
-		}
-		std::vector<std::shared_ptr<CompilationSession>> scripts(m_Scripts.size());
-		for (size_t scope = 0; scope < m_Scripts.size(); ++scope)
-			if (!scriptDocs[scope].empty()) scripts[scope] = BuildScriptSession(scope, scriptDocs[scope]);
+			if (ScopeOfUri(doc.first) < 0) programDocs.push_back(doc);
+		std::vector<std::string> analyzed = AnalyzeScripts(docs);
+		for (std::string& uri : AnalyzePrograms(programDocs)) analyzed.push_back(std::move(uri));
+		Publish(analyzed);
+	}
 
-		// Build into a FRESH session so feature requests keep answering against the previous,
-		// still-valid snapshot while this (potentially long) recompile runs. Swap it in only when done.
-		auto fresh = std::make_unique<CompilationSession>();
-		if (!m_RootUri.empty())
-			fresh->SetRootFolder(Protocol::DocumentUri::FromUri(m_RootUri));
-		fresh->SetIncludePaths(m_IncludePaths); // client build config (initialize) survives every recompile
-		fresh->SetDefines(m_Defines);
-		fresh->SetTarget(m_Target);
-		if (!m_LibraryFolder.empty())
-			fresh->SetLibraryFolder(m_LibraryFolder);
-		fresh->SetProjectsFile(m_ProjectsFile);
-		for (const auto& [uri, text] : programDocs)
-			fresh->SetOpenDocument(uri, text);
-		fresh->Recompile();
-
-		std::shared_ptr<CompilationSession> published = std::move(fresh);
+	void LspServer::Publish(const std::vector<std::string>& uris)
+	{
+		std::set<std::string> published;
+		for (const std::string& uri : uris)
 		{
-			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			m_Session = published; // atomically swap the snapshots in
-			m_ScriptSessions = scripts;
-		}
-
-		for (const auto& [uri, text] : docs)
-		{
-			const int32 scope = ScopeOfUri(uri);
-			CompilationSession& analyzed = scope < 0 ? *published : *scripts[scope];
-			auto diagnostics = Features::Diagnostics::ForDocument(analyzed, uri);
-			// C4 Tidy appends its non-error code-quality findings to the same publish so the editor's
-			// squiggle list shows compiler errors and tidy warnings together (VS2022-style). With the
-			// feature disabled this returns empty and nothing changes.
-			for (const auto& tidyDiag : Features::Tidy::ForDocument(analyzed, uri))
+			if (!published.insert(uri).second) continue;
+			{
+				std::lock_guard<std::mutex> lock(m_DocMutex);
+				if (!m_Documents.IsOpen(uri)) continue;
+			}
+			auto analyzed = GetSnapshot(uri);
+			auto diagnostics = Features::Diagnostics::ForDocument(*analyzed, uri);
+			// C4 Tidy appends its non-error code-quality findings to the same publish so the editor's squiggle list shows
+			// compiler errors and tidy warnings together (VS2022-style). With the feature disabled this returns empty.
+			for (const auto& tidyDiag : Features::Tidy::ForDocument(*analyzed, uri))
 				diagnostics.Push(tidyDiag);
 			Json::Value params = Json::Value::MakeObject();
 			params.SetMember("uri", Json::Value::String(Core::String(uri)));
@@ -196,6 +393,8 @@ namespace C4LSP::Server
 			SendNotification("textDocument/publishDiagnostics", params);
 		}
 	}
+
+	// --- Messages ------------------------------------------------------------------------------------------------------
 
 	void LspServer::HandleMessage(const Json::Value& message)
 	{
@@ -225,58 +424,52 @@ namespace C4LSP::Server
 			HandleShutdown(id);
 		else if (!m_Initialized)
 			UnknownMethod(id, method);
-		else
-		{
-			// Feature requests answer from the last-completed snapshot WITHOUT waiting for an
-			// in-flight recompile. A recompile can outlive a client's request timeout (CBind interop),
-			// so blocking here would make every F12/hover time out as "no implementation found".
-			if (method == "textDocument/hover")
-				HandleHover(id, params);
-			else if (method == "textDocument/definition")
-				HandleDefinition(id, params);
-			else if (method == "textDocument/references")
-				HandleReferences(id, params);
-			else if (method == "textDocument/documentHighlight")
-				HandleDocumentHighlight(id, params);
-			else if (method == "textDocument/completion")
-				HandleCompletion(id, params);
+		else if (method == "textDocument/hover")
+			HandleHover(id, params);
+		else if (method == "textDocument/definition")
+			HandleDefinition(id, params);
+		else if (method == "textDocument/references")
+			HandleReferences(id, params);
+		else if (method == "textDocument/documentHighlight")
+			HandleDocumentHighlight(id, params);
+		else if (method == "textDocument/completion")
+			HandleCompletion(id, params);
 		else if (method == "textDocument/documentSymbol")
 			HandleDocumentSymbol(id, params);
 		else if (method == "workspace/symbol")
 			HandleWorkspaceSymbols(id, params);
-			else if (method == "textDocument/semanticTokens/full")
-				HandleSemanticTokens(id, params);
-			else if (method == "textDocument/signatureHelp")
-				HandleSignatureHelp(id, params);
-			else if (method == "textDocument/typeDefinition")
-				HandleTypeDefinition(id, params);
-			else if (method == "textDocument/declaration")
-				HandleDeclaration(id, params);
-			else if (method == "textDocument/implementation")
-				HandleImplementation(id, params);
-			else if (method == "textDocument/rename")
-				HandleRename(id, params);
-			else if (method == "textDocument/prepareRename")
-				HandlePrepareRename(id, params);
-			else if (method == "textDocument/formatting" || method == "textDocument/rangeFormatting")
-				HandleFormatting(id, params);
-			else if (method == "textDocument/codeAction")
-				HandleCodeAction(id, params);
-			else if (method == "textDocument/foldingRange")
-				HandleFoldingRanges(id, params);
-			else if (method == "textDocument/prepareCallHierarchy")
-				HandlePrepareCallHierarchy(id, params);
-			else if (method == "callHierarchy/incomingCalls" || method == "callHierarchy/outgoingCalls")
-				HandleCalls(id, params, method == "callHierarchy/incomingCalls");
-			else if (method == "textDocument/prepareTypeHierarchy")
-				HandlePrepareTypeHierarchy(id, params);
-			else if (method == "typeHierarchy/supertypes" || method == "typeHierarchy/subtypes")
-				HandleRelatedTypes(id, params, method == "typeHierarchy/supertypes");
-			else if (method == "c4/expandMacro")
-				HandleExpandMacro(id, params);
-			else
-				UnknownMethod(id, method);
-		}
+		else if (method == "textDocument/semanticTokens/full")
+			HandleSemanticTokens(id, params);
+		else if (method == "textDocument/signatureHelp")
+			HandleSignatureHelp(id, params);
+		else if (method == "textDocument/typeDefinition")
+			HandleTypeDefinition(id, params);
+		else if (method == "textDocument/declaration")
+			HandleDeclaration(id, params);
+		else if (method == "textDocument/implementation")
+			HandleImplementation(id, params);
+		else if (method == "textDocument/rename")
+			HandleRename(id, params);
+		else if (method == "textDocument/prepareRename")
+			HandlePrepareRename(id, params);
+		else if (method == "textDocument/formatting" || method == "textDocument/rangeFormatting")
+			HandleFormatting(id, params);
+		else if (method == "textDocument/codeAction")
+			HandleCodeAction(id, params);
+		else if (method == "textDocument/foldingRange")
+			HandleFoldingRanges(id, params);
+		else if (method == "textDocument/prepareCallHierarchy")
+			HandlePrepareCallHierarchy(id, params);
+		else if (method == "callHierarchy/incomingCalls" || method == "callHierarchy/outgoingCalls")
+			HandleCalls(id, params, method == "callHierarchy/incomingCalls");
+		else if (method == "textDocument/prepareTypeHierarchy")
+			HandlePrepareTypeHierarchy(id, params);
+		else if (method == "typeHierarchy/supertypes" || method == "typeHierarchy/subtypes")
+			HandleRelatedTypes(id, params, method == "typeHierarchy/supertypes");
+		else if (method == "c4/expandMacro")
+			HandleExpandMacro(id, params);
+		else
+			UnknownMethod(id, method);
 	}
 
 	void LspServer::HandleNotification(const Json::Value& message)

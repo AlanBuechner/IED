@@ -9,6 +9,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
+#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Features/TypeText.h"
 #include <algorithm>
 
@@ -161,6 +162,13 @@ namespace C4LSP::Features
 		}
 	}
 
+	// A base list (`class Square : IShape`) writes its types too, though they are not the type's children (BUG-390).
+	void ReferenceScanner::VisitBases(const Search& search, const Scripting::ObjectDefinitionNode& object, const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		for (const Scripting::BaseClassEntry& base : object.GetBaseClasses())
+			if (base.m_Type) Visit(search, *base.m_Type, path);
+	}
+
 	void ReferenceScanner::Walk(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& pathIn)
 	{
 		const bool isRoot = node.Type() == Scripting::NodeType::Namespace && static_cast<const Scripting::NamespaceNode&>(node).IsRoot();
@@ -196,6 +204,8 @@ namespace C4LSP::Features
 		}
 		if (node.Type() == Scripting::NodeType::FunctionDefinition && AnyTypeTarget(search.targets))
 			VisitQualifiers(search, static_cast<const Scripting::FunctionDefinitionNode&>(node), path);
+		if (node.Type() == Scripting::NodeType::ObjectDefinition && AnyTypeTarget(search.targets))
+			VisitBases(search, static_cast<const Scripting::ObjectDefinitionNode&>(node), path);
 		if (!AnyFunctionTarget(search.targets))
 			return;
 		for (const Constructions::Construction& construction : Constructions::Of(node, path, search.resolver))

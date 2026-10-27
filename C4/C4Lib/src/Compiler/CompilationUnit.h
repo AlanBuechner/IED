@@ -24,9 +24,6 @@ namespace Scripting
 		void Join() { m_ProcessingThread.join(); }
 		bool IsWorking() { return m_ProcessingThread.joinable(); }
 
-		Lexer& GetLexer() { return m_Lexer; }
-		const Lexer& GetLexer() const { return m_Lexer; }
-
 		ErrorTracker& GetErrorTracker() { return m_ErrorTracker; }
 		const ErrorTracker& GetErrorTracker() const { return m_ErrorTracker; }
 

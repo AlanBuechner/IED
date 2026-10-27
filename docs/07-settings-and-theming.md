@@ -97,8 +97,9 @@ entry of its name.
 
 ### Host settings
 
-The host declares a few settings of its own next to the plugins': `shared/host-api/schemas/host-settings.v1.schema.json`, owner `ied`, page Environment, read from the install (`--home`) and listed first in `settings.schema`. Today one:
+The host declares a few settings of its own next to the plugins': `shared/host-api/schemas/host-settings.v1.schema.json`, owner `ied`, page Environment, read from the install (`--home`) and listed first in `settings.schema`:
 
+- `lsp.idleStopMinutes` (app and solution tiers, 10): a language server none of whose documents a window shows for this many minutes stops and gives its memory back; it starts again when one is shown or asked about; 0 keeps servers running (`docs/24` "Lifecycle").
 - `keyboard.bindings` (app tier): the owner's keyboard shortcuts, `[{command, key?, when?, args?, remove?}]`. An entry with a `key` adds that key (or chord) to the command; one with `remove: true` takes the command's default `key` away, or every default key when it names none. The owner's bindings come after the shell's and the plugins' and so win; the shell applies them as the app tier changes (`settings:app`), in every window. Settings > Environment > **Keyboard** edits them (Help > Keyboard Shortcuts opens it): every command with its keys, searchable, "Only what I changed"; Add records a key or a two-key chord (Enter adds, Escape cancels; the commands that already have it are named) with a when-clause defaulting to the command's first default's; a key's x takes it off (a default shows struck through until its command is reset); Reset drops everything the owner said about the command.
 
 ### The editor's settings

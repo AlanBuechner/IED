@@ -5,7 +5,7 @@
 #include <functional>
 #include <set>
 
-namespace Scripting { class AstNode; struct FunctionDefinitionNode; }
+namespace Scripting { class AstNode; struct FunctionDefinitionNode; struct ObjectDefinitionNode; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
 namespace C4LSP::Features
@@ -54,5 +54,6 @@ namespace C4LSP::Features
 		static void Walk(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);
 		static void Visit(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);
 		static void VisitQualifiers(const Search& search, const Scripting::FunctionDefinitionNode& function, const Core::Vector<const Scripting::AstNode*>& path);
+		static void VisitBases(const Search& search, const Scripting::ObjectDefinitionNode& object, const Core::Vector<const Scripting::AstNode*>& path);
 	};
 } // namespace C4LSP::Features

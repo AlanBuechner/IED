@@ -20,9 +20,64 @@
 #include "Features/CallHierarchy.h"
 #include "Features/TypeHierarchy.h"
 #include "Features/MacroUses.h"
+#include "Features/WorkspaceSymbols.h"
+#include <optional>
+#include <set>
 
 namespace C4LSP::Server
 {
+	namespace
+	{
+		std::string RangeKey(const Protocol::Range& range)
+		{
+			return std::to_string(range.start.line) + ":" + std::to_string(range.start.character) + "-" + std::to_string(range.end.line) + ":" + std::to_string(range.end.character);
+		}
+
+		std::string PlaceKey(const std::string& uri, const Protocol::Range& range)
+		{
+			return ComparablePath(Protocol::DocumentUri::FromUri(uri)) + "#" + RangeKey(range);
+		}
+
+		// `more` after `into`, without what `into` has already (`key` says when two are the same).
+		template <typename T, typename Key>
+		void AppendNew(Core::Vector<T>& into, const Core::Vector<T>& more, Key key)
+		{
+			std::set<std::string> seen;
+			for (const T& known : into) seen.insert(key(known));
+			for (const T& candidate : more)
+				if (seen.insert(key(candidate)).second) into.Push(candidate);
+		}
+
+		std::string LocationKey(const Protocol::Location& location) { return PlaceKey(location.uri, location.range); }
+		std::string OccurrenceKey(const Features::RenameOccurrence& occurrence) { return PlaceKey(occurrence.uri, occurrence.range); }
+		std::string ItemKey(const Features::HierarchyItem& item) { return PlaceKey(item.uri, item.selectionRange); }
+		std::string CallKey(const Features::HierarchyCall& call) { return ItemKey(call.item); }
+		std::string SymbolKey(const Features::WorkspaceSymbol& symbol) { return symbol.name + "@" + LocationKey(symbol.location); }
+
+		// What a query at a place asks the other programs about: the place itself in an analysis that compiles its
+		// document, else where its target is declared (a use in a file of a project only one program holds).
+		struct Anchor
+		{
+			std::string uri;
+			Protocol::Position position;
+			std::optional<Protocol::Location> declaration; // none when the place is a declaration's own name
+
+			std::string DeclarationUri() const { return declaration ? declaration->uri : uri; }
+
+			std::pair<std::string, Protocol::Position> In(const CompilationSession& other) const
+			{
+				if (other.FindSourceIdByUri(uri) != 0 || !declaration) return { uri, position };
+				return { declaration->uri, declaration->range.start };
+			}
+		};
+
+		Anchor AnchorAt(CompilationSession& session, const std::string& uri, const Protocol::Position& position)
+		{
+			const Core::Vector<Protocol::Location> found = Features::Definition::At(session, uri, position);
+			return { uri, position, found.Empty() ? std::nullopt : std::optional<Protocol::Location>(found[0]) };
+		}
+	}
+
 	void LspServer::HandleHover(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
@@ -39,12 +94,23 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
+	// A declaration's references in every program that reaches it (docs/tools/03 "One server for every program").
 	void LspServer::HandleReferences(const Json::Value& id, const Json::Value& params)
 	{
+		const std::string uri = ExtractUri(params);
 		auto position = ExtractPosition(params);
-		auto session = SnapshotForRequest(ExtractUri(params));
+		auto session = SnapshotForRequest(uri);
 		const bool includeDeclaration = params.Member("context").Member("includeDeclaration").GetBool(false);
-		auto locations = Features::References::At(*session, ExtractUri(params), position, includeDeclaration);
+		auto locations = Features::References::At(*session, uri, position, includeDeclaration);
+		if (!locations.Empty())
+		{
+			const Anchor anchor = AnchorAt(*session, uri, position);
+			for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
+			{
+				const auto [at, place] = anchor.In(*other);
+				AppendNew(locations, Features::References::At(*other, at, place, includeDeclaration), LocationKey);
+			}
+		}
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
@@ -71,11 +137,14 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::DocumentSymbols(symbols));
 	}
 
+	// Every program's symbols (scripts are not in workspace symbols).
 	void LspServer::HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params)
 	{
 		const std::string query = params.Member("query").GetString(""); // {query: "..."} per the LSP spec
-		auto session = SnapshotForRequest(); // the program's: scripts are not in its workspace symbols
-		auto symbols = Features::WorkspaceSymbols::ForQuery(*session, query);
+		WaitForPendingWork(std::chrono::milliseconds(10'000));
+		Core::Vector<Features::WorkspaceSymbol> symbols;
+		for (const auto& session : AllAnalyses())
+			AppendNew(symbols, Features::WorkspaceSymbols::ForQuery(*session, query), SymbolKey);
 		SendResponse(id, Protocol::LspJson::WorkspaceSymbols(symbols));
 	}
 
@@ -130,20 +199,41 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
+	// The types deriving from a type, or the methods overriding one, in every program that reaches it.
 	void LspServer::HandleImplementation(const Json::Value& id, const Json::Value& params)
 	{
-		auto session = SnapshotForRequest(ExtractUri(params));
-		auto locations = Features::Implementation::At(*session, ExtractUri(params), ExtractPosition(params));
+		const std::string uri = ExtractUri(params);
+		const Protocol::Position position = ExtractPosition(params);
+		auto session = SnapshotForRequest(uri);
+		auto locations = Features::Implementation::At(*session, uri, position);
+		const Anchor anchor = AnchorAt(*session, uri, position);
+		for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
+		{
+			const auto [at, place] = anchor.In(*other);
+			AppendNew(locations, Features::Implementation::At(*other, at, place), LocationKey);
+		}
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-		void LspServer::HandleRename(const Json::Value& id, const Json::Value& params)
+	// Every program's occurrences: a rename leaves no use behind in a project that includes the declaring one.
+	void LspServer::HandleRename(const Json::Value& id, const Json::Value& params)
+	{
+		std::string newName = params.Member("newName").GetString();
+		const std::string uri = ExtractUri(params);
+		const Protocol::Position position = ExtractPosition(params);
+		auto session = SnapshotForRequest(uri);
+		auto result = Features::Rename::At(*session, uri, position);
+		if (result.found)
 		{
-			std::string newName = params.Member("newName").GetString();
-			auto session = SnapshotForRequest(ExtractUri(params));
-			auto result = Features::Rename::At(*session, ExtractUri(params), ExtractPosition(params));
-			SendResponse(id, Protocol::LspJson::Rename(result, newName));
+			const Anchor anchor = AnchorAt(*session, uri, position);
+			for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
+			{
+				const auto [at, place] = anchor.In(*other);
+				AppendNew(result.occurrences, Features::Rename::At(*other, at, place).occurrences, OccurrenceKey);
+			}
 		}
+		SendResponse(id, Protocol::LspJson::Rename(result, newName));
+	}
 
 		void LspServer::HandlePrepareRename(const Json::Value& id, const Json::Value& params)
 		{
@@ -218,7 +308,10 @@ namespace C4LSP::Server
 	{
 		const Features::HierarchyItem item = Protocol::LspJson::HierarchyItemFrom(params.Member("item"));
 		auto session = SnapshotForRequest(item.uri);
-		const auto calls = incoming ? Features::CallHierarchy::Incoming(*session, item) : Features::CallHierarchy::Outgoing(*session, item);
+		auto calls = incoming ? Features::CallHierarchy::Incoming(*session, item) : Features::CallHierarchy::Outgoing(*session, item);
+		if (incoming) // its callers in every program that reaches it
+			for (const auto& other : OtherAnalyses(item.uri, item.uri))
+				AppendNew(calls, Features::CallHierarchy::Incoming(*other, item), CallKey);
 		SendResponse(id, Protocol::LspJson::HierarchyCalls(calls, incoming ? "from" : "to"));
 	}
 
@@ -232,7 +325,10 @@ namespace C4LSP::Server
 	{
 		const Features::HierarchyItem item = Protocol::LspJson::HierarchyItemFrom(params.Member("item"));
 		auto session = SnapshotForRequest(item.uri);
-		const auto items = supertypes ? Features::TypeHierarchy::Supertypes(*session, item) : Features::TypeHierarchy::Subtypes(*session, item);
+		auto items = supertypes ? Features::TypeHierarchy::Supertypes(*session, item) : Features::TypeHierarchy::Subtypes(*session, item);
+		if (!supertypes) // the types deriving from it in every program that reaches it
+			for (const auto& other : OtherAnalyses(item.uri, item.uri))
+				AppendNew(items, Features::TypeHierarchy::Subtypes(*other, item), ItemKey);
 		SendResponse(id, Protocol::LspJson::HierarchyItems(items));
 	}
 

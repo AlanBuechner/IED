@@ -21,6 +21,8 @@ namespace Ied
 		public Core::Array<Core::String> globs;
 		public Core::String initializationOptions;      // JSON text, "{}" without any
 		public Core::String initializationOptionsFile;
+		public Core::String optionsFiles;               // initializationOptionsFiles.files: a path whose file name may hold * and ?
+		public Core::String optionsFilesKey;            // initializationOptionsFiles.key: the initializationOptions key they go under
 		public Core::String pluginCodeOption;           // the initializationOptions key that gets the plugin code scopes
 		public bool staged;
 		public bool perProject;                         // scope "project": one server per project of a solution

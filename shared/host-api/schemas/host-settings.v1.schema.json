@@ -5,6 +5,13 @@
 	"description": "The settings the host itself declares (docs/07 \"Host settings\"), next to the plugins'. Owner 'ied'.",
 	"type": "object",
 	"properties": {
+		"lsp.idleStopMinutes": {
+			"type": "number",
+			"default": 10,
+			"minimum": 0,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "A language server none of whose documents a window shows for this many minutes stops, giving back its memory; it starts again when one of its documents is shown or asked about (docs/24). 0 keeps servers running."
+		},
 		"keyboard.bindings": {
 			"type": "array",
 			"default": [],

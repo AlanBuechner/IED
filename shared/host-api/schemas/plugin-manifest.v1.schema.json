@@ -582,6 +582,16 @@
 				},
 				"initializationOptions": { "type": "object" },
 				"initializationOptionsFile": { "type": "string", "description": "JSON file merged over initializationOptions (file keys win); watched; change -> didChangeConfiguration or restart." },
+				"initializationOptionsFiles": {
+					"type": "object",
+					"required": ["files", "key"],
+					"additionalProperties": false,
+					"description": "Several JSON files handed to one server, under one initializationOptions key: {<key>: {<file name without .json>: <the file's object>}} - a workspace-wide server that serves many projects gets each project's options (docs/24). When a matching file of the workspace appears, changes or goes, a running server gets workspace/didChangeConfiguration {settings: {<key>: {...}}}.",
+					"properties": {
+						"files": { "type": "string", "minLength": 1, "description": "The files: a path with ${...} variables whose file name may hold * and ? ('${workspaceDir}/.ied/local/lsp-options/*.json')." },
+						"key": { "type": "string", "minLength": 1, "description": "The initializationOptions key they go under." }
+					}
+				},
 				"pluginCodeOption": { "type": "string", "minLength": 1, "description": "An initializationOptions key that gets the workspace's plugin code scopes: [{folders, interface, allow}] - one per c4 plugin loaded for it, as the server compiles its code (docs/26 \"Editing plugin code\")." },
 				"settingsBindings": {
 					"type": "object",

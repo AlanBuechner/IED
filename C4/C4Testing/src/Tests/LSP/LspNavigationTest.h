@@ -13,6 +13,8 @@
 #include "Features/DocumentHighlight.h"
 #include "Features/TypeDefinition.h"
 #include "Features/Implementation.h"
+#include "Features/Rename.h"
+#include "Features/Definition.h"
 #include "LspTestSupport.h"
 
 namespace Testing
@@ -76,6 +78,10 @@ namespace Testing
 		// A type's uses where it is written as a type (a parameter's, a local's) are its references.
 		TEST_FUNC(Lsp.Navigation.References)
 		void TestReferencesOfATypeIncludeWhereItIsWritten();
+
+		// BUG-390: a base list (`class Square : IShape`) names its types too: references and rename found none of them.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestReferencesOfATypeIncludeTheBaseListsNamingIt();
 
 		// BUG-350: the type definition of an object-typed variable, at its declaration and at a use (it never answered).
 		TEST_FUNC(Lsp.Navigation.TypeDefinition)

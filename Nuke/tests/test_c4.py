@@ -117,6 +117,17 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(options["target"], ["-march=x86-64-v3"])
 		self.assertIn(self.path("Engine", "third").replace("\\", "/"), options["includePaths"])
 
+	def test_a_compile_that_fails_still_writes_the_ide_options(self):
+		os.environ["FAKE_C4_FAIL"] = "1"
+		try:
+			code, out = self.nuke("build")
+		finally:
+			del os.environ["FAKE_C4_FAIL"]
+		self.assertNotEqual(code, 0, out)
+		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Game.json")))
+		self.assertEqual(self.int("Game", "projects.toml").replace("\\", "/"), options["projects"].replace("\\", "/"))
+		self.assertTrue(os.path.isfile(self.int("Game", "projects.toml")), "the description the options name is there")
+
 	def test_up_to_date_until_something_changes(self):
 		self.nuke("build")
 		code, out = self.nuke("build")

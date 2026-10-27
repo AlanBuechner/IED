@@ -1,6 +1,8 @@
 #include "Server/NodeLocator.h"
 #include "SourceManager/Source.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
+#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 
 namespace C4LSP::Server
 {
@@ -66,6 +68,11 @@ namespace C4LSP::Server
 				continue;
 			Find(*child.Get(), sourceId, byteOffset, currentPath, result);
 		}
+		// A base list's types are no children of the type, but a position can be on one (BUG-390).
+		if (node.Type() == Scripting::NodeType::ObjectDefinition)
+			for (const Scripting::BaseClassEntry& base : static_cast<const Scripting::ObjectDefinitionNode&>(node).GetBaseClasses())
+				if (base.m_Type)
+					Find(*base.m_Type, sourceId, byteOffset, currentPath, result);
 
 		currentPath.Pop();
 	}

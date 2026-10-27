@@ -136,6 +136,7 @@ namespace Ied
 		progress.Clear();
 		progressed = false;
 		startedNs = clock_now_ns();
+		usedNs = startedNs;
 		LanguageServer* self = this;
 		Process::Child* process = child;
 		MessageQueue* queue = outgoing;
@@ -146,7 +147,7 @@ namespace Ied
 		server->lsp->StateChanged(this);
 	}
 
-	Core::String LanguageServer::InitializeParams() const {
+	Core::String LanguageServer::InitializeParams() {
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("processId", (int64)Platform::ProcessId());
@@ -185,6 +186,7 @@ namespace Ied
 	}
 
 	int64 LanguageServer::Ask(Core::StringView method, Core::StringView params, CancelToken* wake) {
+		usedNs = clock_now_ns();
 		const int64 id = nextId;
 		nextId += 1;
 		LspAnswer* answer = new LspAnswer();
@@ -220,6 +222,7 @@ namespace Ied
 	}
 
 	void LanguageServer::Notify(Core::StringView method, Core::StringView params) {
+		usedNs = clock_now_ns();
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("jsonrpc", "2.0");

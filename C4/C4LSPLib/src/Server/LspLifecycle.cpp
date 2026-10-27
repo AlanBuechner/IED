@@ -24,6 +24,17 @@ namespace C4LSP::Server
 	{
 		bool tidyChanged = false;
 		const Json::Value settings = params.Member("settings"); // {settings:{...}} per the client's updateSettings
+		if (settings.IsObject() && settings.HasMember("programs"))
+		{
+			// The programs' options files changed (IED's initializationOptionsFiles): the programs again, then a pass.
+			ProgramOptions own;
+			{
+				std::lock_guard<std::mutex> lock(m_SessionMutex);
+				own = m_Programs.front()->Options();
+			}
+			SetPrograms(std::move(own), settings.Member("programs"));
+			PostRecompile();
+		}
 		if (settings.IsObject())
 		{
 			const Json::Value tidy = settings.Member("tidy");
@@ -58,22 +69,11 @@ namespace C4LSP::Server
 		if (docs.empty())
 			return;
 
-		// Republish from the CURRENT snapshot without a full recompile: RunRecompileAndPublish would
-		// rebuild every source just to flip one flag. Rebuild each open document's diagnostics with
-		// the new tidy state and send them, exactly like the publish loop does after a real build.
-		for (const auto& [uri, text] : docs)
-		{
-			auto session = GetSnapshot(uri); // a script scope's, or the program's
-			if (!session)
-				continue;
-			auto diagnostics = Features::Diagnostics::ForDocument(*session, uri);
-			for (const auto& tidyDiag : Features::Tidy::ForDocument(*session, uri))
-				diagnostics.Push(tidyDiag);
-			Json::Value params2 = Json::Value::MakeObject();
-			params2.SetMember("uri", Json::Value::String(Core::String(uri)));
-			params2.SetMember("diagnostics", Protocol::LspJson::DiagnosticsArray(diagnostics));
-			SendNotification("textDocument/publishDiagnostics", params2);
-		}
+		// Republish from the CURRENT snapshots without analyzing again: a pass would rebuild every program just to flip
+		// one flag. Each open document's diagnostics, with the new tidy state, as a pass publishes them.
+		std::vector<std::string> uris;
+		for (const auto& [uri, text] : docs) uris.push_back(uri);
+		Publish(uris);
 	}
 
 	void LspServer::HandleInitialize(const Json::Value& id, const Json::Value& params)
@@ -84,42 +84,14 @@ namespace C4LSP::Server
 		// The project generator passes the compiler's include dirs (-I) and defines through
 		// initializationOptions so LSP diagnostics match a real build. Malformed entries are ignored:
 		// a bad client option must never break the server.
-		m_IncludePaths.clear();
-		m_Defines.clear();
-		m_Target = Scripting::CpuTarget();
-		m_LibraryFolder.clear();
-		m_ProjectsFile.clear();
 		m_Scripts.clear();
 		const Json::Value options = params.Member("initializationOptions");
+		// The programs: the options' own (includePaths, defines, c4Home, projects - the build description Nuke writes,
+		// docs/language/15-projects.md - and target), then each of `programs` (docs/tools/03 "One server for every program").
+		SetPrograms(ReadProgramOptions("", options), options.Member("programs"));
 		if (options.IsObject()) {
 			// Folders of scripts and the host interface each compiles against (docs/tools/03 section 1).
 			m_Scripts = ReadScriptScopes(options.Member("scripts"));
-			// The build description Nuke writes (docs/language/15-projects.md): the same projects the compiler gets.
-			const Json::Value projects = options.Member("projects");
-			if (projects.IsString())
-				m_ProjectsFile = projects.GetString();
-			// The C4 install the project builds with (Nuke writes its path): its Bedrock is the default library.
-			const Json::Value home = options.Member("c4Home");
-			if (home.IsString() && !home.GetString().empty())
-				m_LibraryFolder = home.GetString() + "/Bedrock";
-			const Json::Value includePaths = options.Member("includePaths");
-			for (uint32 i = 0; i < includePaths.Size(); ++i)
-				if (includePaths.At(i).IsString() && !includePaths.At(i).GetString().empty())
-					m_IncludePaths.push_back(includePaths.At(i).GetString());
-			const Json::Value defines = options.Member("defines");
-			if (defines.IsObject()) {
-				for (const auto& [name, value] : defines.Raw().GetAsDescriptionMap())
-					if (value.IsString())
-						m_Defines[std::string(name)] = std::string(Json::Value(value).GetString());
-			}
-			// The processor the build compiles for, as the compiler's -march / -m flags; flags that select none are ignored.
-			const Json::Value target = options.Member("target");
-			std::vector<std::string> targetFlags;
-			for (uint32 i = 0; i < target.Size(); ++i)
-				if (target.At(i).IsString()) targetFlags.push_back(target.At(i).GetString());
-			std::string targetError;
-			if (std::optional<Scripting::CpuTarget> selected = Scripting::CpuTarget::FromFlags(targetFlags, targetError))
-				m_Target = *selected;
 			// C4 Tidy on/off: the plugin's "feature-tidy" setting is forwarded here by the client at startup.
 			// A missing key keeps the server-side default (off); a non-bool value is ignored so a bad
 			// client option never breaks initialization.

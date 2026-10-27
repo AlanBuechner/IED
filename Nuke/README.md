@@ -319,10 +319,11 @@ program keeps running; a later build removes the `.old` copies nothing runs any 
 the project folder (with `--filter`), runs every harness even when one fails, prints a summary and exits 1
 if any failed. Custom projects test with `phase = "test"` steps.
 
-**IDE bridge.** After each successful compile Nuke writes `<workspace>/.ied/local/lsp-options/<P>.json`:
-`includePaths`, `defines`, `c4Home` (the toolchain), `toolchain`, `projects` (the description) and `target`
-(the `-m...` compiler arguments) - the exact input the compiler saw, so the language server in IED agrees with
-the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
+**IDE bridge.** After each compile of a program (an executable's build, a module's test build), also one that
+fails, Nuke writes `<workspace>/.ied/local/lsp-options/<P>.json`: `includePaths`, `defines`, `c4Home` (the
+toolchain), `toolchain`, `projects` (the description) and `target` (the `-m...` compiler arguments) - the exact
+input the compiler saw, so the language server in IED agrees with the build. IED hands every one of them to one
+C4LSP for the workspace, which analyzes a module's files in a program that compiles them. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
 `.gitignore`.
 
 **IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.iedsln` at the root

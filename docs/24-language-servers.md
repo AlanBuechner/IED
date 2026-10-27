@@ -8,14 +8,17 @@ How IED runs language servers (F-EDT-10..24, `docs/05` `src/lsp`): the server is
 
 A profile names its server (`command`, `args`, `env`, `cwd`; `${pluginDir}`, `${solutionDir}`, `${workspaceDir}`, `${projectName}`, `${projectDir}` expand, and `${config:<setting>}` to the setting's effective value for the workspace - a string as it is, a number or a boolean as written, anything else or an unset setting as nothing; an argument that is exactly one `${config:...}` of a list setting becomes one argument per element), which documents it serves (`selector`: language ids, extensions, globs), how many servers it runs (`scope`), how it starts (`launchMode`), and its quirks (`positionEncoding`, `requestIds`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`). A document is served by the last loaded plugin's profile whose selector matches it (language id from `docs/10`, else extension, else glob) and whose `when` holds for the workspace (`workspaceTrusted`, `workspaceKind`, `config.<setting>`, `workspaceContains.<name>`, `workspaceLanguage.<id>`; `src/plugins/context.cf`, `docs/26`).
 
-**Scope.** `workspace` (the default) runs one server per workspace and profile. `project` runs one per project of a solution workspace (`docs/03`): a document goes to the server of the project whose code root holds it (the deepest), and `${projectName}` / `${projectDir}` name that project in `command`, `args`, `env`, `cwd` and `initializationOptionsFile`. Documents in no project - every document of a folder workspace - share one workspace-wide server with those variables empty. A compiler that analyzes one program per process (C4LSP: its options name one program's build description) needs `project`.
+**Scope.** `workspace` (the default) runs one server per workspace and profile. `project` runs one per project of a solution workspace (`docs/03`): a document goes to the server of the project whose code root holds it (the deepest), and `${projectName}` / `${projectDir}` name that project in `command`, `args`, `env`, `cwd` and `initializationOptionsFile`. Documents in no project - every document of a folder workspace - share one workspace-wide server with those variables empty.
+
+**Options files.** `initializationOptionsFiles: {files, key}` hands one server several JSON files: `files` is a path with `${...}` variables whose file name may hold `*` and `?`, and the server's `initializationOptions` get `{<key>: {<file name without .json>: <the file's object>}}` (a file that is not a JSON object is left out and said so in the IED output; files in folders below are not named). When the workspace watcher sees one of them appear, change or go, a running server gets `workspace/didChangeConfiguration {settings: {<key>: {...}}}` with them all (nothing when they read the same as last sent). This is how one server serves every project of a workspace: C4LSP is `scope: workspace` with `{files: "${workspaceDir}/.ied/local/lsp-options/*.json", key: "programs"}`, every program's options file Nuke writes (C4 `docs/tools/03` "One server for every program"). It was one server per project until 2026-10-27 (owner's list 27/28): eight C4LSP processes of 700 MB to 1 GB each for one IED, and a module project - built only inside the programs that depend on it, so it has no options file of its own - analyzed alone, its includes unresolved.
 
 ## Lifecycle
 
 - **Lazy.** A server starts when the first document it serves opens in the workspace (`doc.open`), and serves every document of the workspace it matches after that. One process per workspace and profile.
-- **Initialize.** `rootUri` and one `workspaceFolders` entry are the workspace folder; `initializationOptions` are the profile's, with the JSON of `initializationOptionsFile` merged over them (its keys win), and with `pluginCodeOption` the workspace's plugin code scopes under that key (`docs/26` "Editing plugin code"); `capabilities` say what the host and the web client use, with `general.positionEncodings` offering `utf-16` and `utf-8` unless the profile fixes an encoding. The server's capabilities are kept and given to clients.
+- **Initialize.** `rootUri` and one `workspaceFolders` entry are the workspace folder; `initializationOptions` are the profile's, with the JSON of `initializationOptionsFile` merged over them (its keys win), with `initializationOptionsFiles` under their key ("Options files" above), and with `pluginCodeOption` the workspace's plugin code scopes under that key (`docs/26` "Editing plugin code"); `capabilities` say what the host and the web client use, with `general.positionEncodings` offering `utf-16` and `utf-8` unless the profile fixes an encoding. The server's capabilities are kept and given to clients.
 - **Staged launch** (`launchMode: staged`): the executable's folder is copied to `<data>/lsp-stage/<profile>/<digest>/` and the copy runs, so the original can be rebuilt; when the original changes, the server is restarted from a new copy.
 - **Exit.** A server that exits is restarted with a backoff (1 s, 2 s, 4 s); after three exits in five minutes it stays down as `failed`, with the reason in the workspace's IED output and on the `lsp:<wsId>` topic, until `lsp.restart`. Requests waiting on it fail with `plugin_error` ("the language server exited"); the restarted server gets every open document it serves again. Stopping IED (or `lsp.restart`) sends `shutdown` then `exit` and kills a server still running 2 s later; the server processes live in IED's job, so they end with it whatever happens. A server that failed or stopped takes its diagnostics with it.
+- **Idle.** A server none of whose documents a window shows (no client follows the document's `doc:` topic), and that nothing asked or told anything, for `lsp.idleStopMinutes` (host setting, app or solution tier, 10 by default, fractions allowed, 0 keeps servers running) stops and leaves the pool, with a line in the IED output; looked for every second. The document store keeps its documents (they never close), so this is what gives back a server's memory once its files are out of sight: the next `lsp.capabilities` or `lsp.request` about one of its documents - an editor showing it again, plugin code asking - starts it again, and it gets the store's documents as a restarted server does. Its diagnostics go while it is stopped.
 - **Errors** of a server (its stderr, malformed messages) go to the workspace's IED output source, prefixed with the profile.
 
 ## Documents
@@ -39,7 +42,7 @@ Positions are found wherever LSP puts them: any object with numeric `line` and `
 | `lsp.request {docId, method, params}` | sends a request about a document to its server: `params` without `textDocument` (the host adds it), positions UTF-16; the result comes back with positions UTF-16 and workspace URIs as `ied://`. `not_found` when no server serves the document, `unavailable` while it starts or after it failed, the server's own error as `plugin_error {code, message}`. A `cancel` frame sends `$/cancelRequest`. With `codeActionsNeedClientFilter`, the code actions of `textDocument/codeAction` are cut to those whose diagnostics meet the requested range. |
 | `lsp.capabilities {docId}` | `{profile, state, capabilities}`: the serving profile and the server's capabilities, waiting for the server to start (20 s at most); `{profile: null}` when no server serves the document |
 | `lsp.workspaceSymbols {wsId, query}` | `{symbols: [...]}`: `workspace/symbol` asked of every running server of the workspace that offers it, each symbol with its `source` (as diagnostics name it), positions in UTF-16 and workspace URIs as `ied://`; a server that fails or times out is left out |
-| `lsp.status {wsId}`, `lsp.restart {wsId, profile, project?}` | `{servers: [{profile, label, plugin, project, state: starting\|running\|failed\|stopped, pid, restarts, problem}]}` (`project` empty for a workspace-wide server); a restart starts it again |
+| `lsp.status {wsId}`, `lsp.restart {wsId, profile, project?}` | `{servers: [{profile, label, plugin, project, state: starting\|running\|failed\|stopped, pid, restarts, problem, memory}]}` (`project` empty for a workspace-wide server; `memory` `{privateBytes, workingSetBytes}` of a starting or running server's process as the status is read, else null - the topic's events do not carry it); a restart starts it again |
 | topic `lsp:<wsId>` | snapshot `{servers}`; events `lsp.state {profile, project, state, problem}`, `lsp.refresh {path, kinds}` (`path` null: every document, after a server's `workspace/<kind>/refresh`) |
 | topic `diag:<wsId>` | as above |
 
@@ -87,11 +90,40 @@ multiple files." As built (`plugins/chat/code/afterwrite.cf`, `files.cf` `Writte
 - **Never a failure.** The call's result is not an error whatever the server says (the card stays green); the
   developer-mode failure note (`docs/28`) is not added to it.
 
+## C4LSP memory, measured (2026-10-27, owner's list 28)
+
+C4LSP's private bytes and working set, after the documents named opened (diagnostics published) and after five edits of
+the first one, the old way (one server per project, each with its project's options file or none) and the new (one
+server, every program's options). Scratch copies; `lspdrive.py`-style client over stdio; this machine (16 threads).
+
+| Workspace, documents | Before | After |
+|---|---|---|
+| Claymore: a file each of Sandbox, SandboxScripts, SandboxEditor, SandboxClient, Runtime, Base, Scene, SceneEditor | 8 processes: 1601 MB private / 723 MB in RAM opened, 2396 / 1437 MB after the edits (SandboxEditor alone 336 -> 562 MB) | 1 process: 261 / 238 MB, then 277 / 254 MB (two programs analyzed: SandboxEditor's holds six of the files) |
+| IED: `src/lsp/pool.cf`, `plugins/git/code/discover.cf`, `plugins/go/code/go.cf` (a script), `cli/main.cf`, `launcher/control.cf`, `desktop/app.cf` | 5 processes: 4886 / 2670 MB, then 6234 / 4229 MB (ied-server's 1761 -> 2184 MB) | 1 process: 1071 / 1014 MB, then 1162 / 1114 MB |
+| one program including `bedrock.ch` | 360-400 MB, growing about 20 MB an edit (711 MB after 15) | 84 MB, 136 MB steady |
+| the go plugin's code as a script against `ied-server.c4i` | 1193 MB, 1459 after three edits | 188 MB, 284 steady |
+
+What dominated, and what changed (C4 `docs/tools/03` "Memory"):
+
+- **The heap, not the program.** A program's live objects were a fraction of the process: 85 MB of C++ objects for the
+  Bedrock program in a 400 MB process. Parsing files on every processor at once left the Windows heap holding several
+  times what the program needs, and more after each compile (the "pile up": every keystroke compiles again). C4LSP now
+  parses one file at a time: the IED server's program takes 0.6 GB where it took 2.0 GB growing past 2.4 GB in eight
+  edits; its first analysis 3.3 s instead of 2.0 s, an edit 1.5 s instead of 1.1 s.
+- **Tokens.** Each file kept the tokens it was parsed from (about 40 % of the live objects) though nothing reads them
+  after the parse; the compiler now lets them go when a file's parse ends (C4.exe too).
+- **One process, few analyses.** Every server parsed its own Bedrock and its own copy of every shared module: Base,
+  Runtime and the engine in each of Claymore's eight. One server analyzes as few programs as hold the open documents
+  (a module's files in a program that depends on it), keeps another program's analysis only for a query that needed
+  it (three minutes), and a server none of whose documents is shown stops (`lsp.idleStopMinutes`).
+- Still per program: each analysis is double-buffered while it is redone (twice its size at the peak of an edit), and
+  two programs that share modules each parse them (sharing a parsed module across programs is C4 roadmap work).
+
 ## Open items
 
 - Incremental `didChange` for servers that ask for it (C4LSP takes full text).
 - `workspace/applyEdit` through the document store as the server's own edit (`origin: lsp`).
 - Profiles whose `when` names `config.*` are chosen again when settings change (today: when a document opens and when trust changes).
 - A project's server is not stopped when its project leaves the solution; it serves on until IED restarts or `lsp.restart`.
-- `settingsBindings` pushed with `didChangeConfiguration`; the `initializationOptionsFile` watched (restart on change).
+- `settingsBindings` pushed with `didChangeConfiguration`; the single `initializationOptionsFile` watched as `initializationOptionsFiles` are; options files outside the workspace folder are read at start only (the watcher sees the workspace).
 - `tcp` transport.

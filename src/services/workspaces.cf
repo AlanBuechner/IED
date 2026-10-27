@@ -416,6 +416,7 @@ namespace Ied
 		if (TouchesSolution(ws, batch)) SolutionChanged(ws);
 		if (TouchesWorkspacePlugins(batch)) PluginsChanged(ws);
 		server->code->FilesChanged(ws, batch);
+		server->lsp->FilesChanged(ws, batch);
 	}
 
 	// Whether a change is someone else's; it updates what the server knows of the path either way.

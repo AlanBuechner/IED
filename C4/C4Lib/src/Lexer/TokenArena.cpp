@@ -9,4 +9,11 @@ namespace Scripting
 		++m_Count;
 		return token;
 	}
+
+	void TokenArena::Clear()
+	{
+		m_Chunks.clear();
+		m_Chunks.shrink_to_fit();
+		m_Count = 0;
+	}
 } // namespace Scripting

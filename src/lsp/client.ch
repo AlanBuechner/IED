@@ -58,6 +58,8 @@ namespace Ied
 		public Core::HashMap<Core::String, bool> progress;    // $/progress tokens begun and not ended: work it does (indexing)
 		public bool progressed;                               // it began some since it last started
 		public int64 startedNs;                               // when it last started
+		public int64 usedNs;                                  // when it was last asked or told something, or a window last showed one of its documents
+		public Core::String optionsFilesSent;                 // its initializationOptionsFiles as it last got them (JSON)
 
 		// Starts the process (again) and sends initialize; Failed with `problem` when it cannot start.
 		public void Start();
@@ -79,7 +81,7 @@ namespace Ied
 	private:
 		private Core::String ProgramToRun(Core::String& error) const;
 		private Process::StartInfo StartInfoFor(Core::StringView program) const;
-		private Core::String InitializeParams() const;
+		private Core::String InitializeParams();
 		private int64 Ask(Core::StringView method, Core::StringView params, CancelToken* wake);
 		private void Send(Core::StringView json);
 		private void Dispatch(Core::StringView body);

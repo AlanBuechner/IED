@@ -1,5 +1,6 @@
 #pragma once
 #include "Server/CompilationSession.h"
+#include "Server/Program.h"
 #include "Protocol/TextDocumentStore.h"
 #include "Protocol/PositionCodec.h"
 #include "Json/JsonValue.h"
@@ -9,25 +10,26 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace C4LSP::Server
 {
-	// Owns the compilation session and open documents, dispatches incoming JSON-RPC to the
-	// features, and emits responses/notifications via a caller-supplied sink (tests capture it).
+	// Owns the open documents and the analyses of the workspace's programs, dispatches incoming JSON-RPC to the features,
+	// and emits responses/notifications via a caller-supplied sink (tests capture it).
 	//
-	// Recompiles run on a dedicated worker thread and build into a SEPARATE CompilationSession that
-	// is swapped in atomically when done (double-buffered). Feature requests read the last-completed
-	// snapshot: most wait for pending work with a bounded timeout (SnapshotForRequest) because they have
-	// no refresh channel - a stale answer would be wrong for the text on screen. The one exception is
-	// semantic tokens, which DO have a refresh channel in the editor's client: its provider wires Monaco's
-	// onDidChange to textDocument/publishDiagnostics, so it refetches every time this server publishes
-	// (i.e. after each recompile). HandleSemanticTokens therefore answers immediately from the current
-	// snapshot; a pre-compile empty answer is corrected by the next publish-triggered fetch within one
-	// debounce window, and answering without waiting keeps first paint instant on roots whose initial
-	// compile takes minutes (C-bind interop headers).
+	// One server serves every program of a workspace (docs/tools/03 "One server for every program"): the options name the
+	// programs (initializationOptions.programs, one per options file Nuke writes; the options' own fields are one more,
+	// which also takes every document no other program compiles). Each open document is analyzed in one program that
+	// compiles it - as few programs as hold them all are analyzed - and a query about a declaration (references,
+	// implementations, rename, incoming calls, subtypes, workspace symbols) asks every other program that reaches it too.
+	//
+	// Analyses run on a dedicated worker thread and build into SEPARATE CompilationSessions that are swapped in when done
+	// (double-buffered). Feature requests read the last-completed snapshot: most wait for pending work with a bounded
+	// timeout (SnapshotForRequest) because they have no refresh channel - a stale answer would be wrong for the text on
+	// screen. Semantic tokens and folding answer at once: the client fetches them again after each publish.
 	class LspServer
 	{
 	public:
@@ -42,33 +44,56 @@ namespace C4LSP::Server
 		bool ShouldExit() const { return m_ShouldExit; }
 		int ExitCode() const { return m_ShutdownRequested ? 0 : 1; }
 
-		// Block until no recompile is running or queued. Tests use this to make post-didOpen
-		// assertions deterministic; feature handlers instead wait via SnapshotForRequest (bounded).
+		// Block until no analysis is running or queued. Tests use this to make post-didOpen assertions deterministic;
+		// feature handlers instead wait via SnapshotForRequest (bounded).
 		void WaitForCurrentWork();
 
-	// Same as above but bounded: returns false when the deadline passes with work still pending.
-	bool WaitForPendingWork(std::chrono::milliseconds timeout);
+		// Same as above but bounded: returns false when the deadline passes with work still pending.
+		bool WaitForPendingWork(std::chrono::milliseconds timeout);
+
+		// How many programs hold an analysis now (tests: only what the open documents and recent queries need).
+		size_t AnalyzedProgramCount() const;
 
 	private:
-		std::shared_ptr<CompilationSession> GetSnapshot() const; // the program's current built session, atomically
-		std::shared_ptr<CompilationSession> SnapshotForRequest(); // waits (bounded) for a fresh build, then snapshots
-		// The session that analyzes `uri`: its script scope's (initializationOptions.scripts), else the program's.
+		// The analysis that answers about `uri`: its script scope's (initializationOptions.scripts), else its program's.
 		std::shared_ptr<CompilationSession> GetSnapshot(const std::string& uri) const;
 		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri);
+		// The program answering about `uri` (the session lock held): the one its document is analyzed in, else one whose
+		// analysis compiled the file, else the options' own.
+		std::shared_ptr<Program> ProgramOfLocked(const std::string& uri) const;
 		int32 ScopeOfUri(const std::string& uri) const;
 		// A scope's open documents compiled as its scripts.
-		std::shared_ptr<CompilationSession> BuildScriptSession(size_t scope, const std::vector<std::pair<std::string, std::string>>& docs);
+		std::shared_ptr<CompilationSession> BuildScriptSession(size_t scope, const EditorDocuments& docs);
+
+		// --- Across programs ---------------------------------------------------------------------------------------------
+		// The analyses of the other programs a query at `uri` asks about the declaration in `declarationUri` too: as few
+		// as reach every project it reaches that the program of `uri` lacks; analyzed for it when they were not (waited
+		// for, a bounded time).
+		std::vector<std::shared_ptr<CompilationSession>> OtherAnalyses(const std::string& uri, const std::string& declarationUri);
+		// Every program's analysis, made for the query when missing (workspace symbols).
+		std::vector<std::shared_ptr<CompilationSession>> AllAnalyses();
+		std::vector<std::shared_ptr<CompilationSession>> Consult(const std::vector<std::shared_ptr<Program>>& programs);
+
+		// --- Programs ----------------------------------------------------------------------------------------------------
+		// The programs: `own` (the options' own fields) first, then those `programs` names (initializationOptions.programs);
+		// a program whose options did not change keeps its analysis.
+		void SetPrograms(ProgramOptions own, const Json::Value& programs);
+		// The worker's pass over the programs: which program analyzes each document, analyses made again where their
+		// documents changed, those no longer needed let go. Returns the documents whose analysis is new.
+		std::vector<std::string> AnalyzePrograms(const EditorDocuments& docs);
+		// The script scopes' analyses made again where their documents changed; returns those documents.
+		std::vector<std::string> AnalyzeScripts(const EditorDocuments& docs);
+		// Analyses neither the open documents nor a recent query need, let go.
+		void ReleaseUnneeded();
 
 		void HandleRequest(const Json::Value& message);
 		void HandleNotification(const Json::Value& message);
 		void UnknownMethod(const Json::Value& id, const std::string& method);
 
-		// The client pushes the effective LSP profile settings here whenever they change (plugin setting
-		// toggles included). Only known keys act; unknown ones are ignored so a future client option
-		// never breaks the server. A changed tidy flag re-runs the publish pipeline on the existing
-		// snapshot without recompiling from scratch: diagnostics for every open document are rebuilt
-		// with (or without) the tidy findings and republished, which is what makes the settings-menu
-		// toggle take effect live instead of at next launch.
+		// The client pushes the effective LSP profile settings here whenever they change (plugin setting toggles
+		// included), and the programs when their options files change. Only known keys act; unknown ones are ignored so a
+		// future client option never breaks the server. A changed tidy flag re-runs the publish pipeline on the existing
+		// snapshots without analyzing again.
 		void HandleDidChangeConfiguration(const Json::Value& params);
 
 		void HandleInitialize(const Json::Value& id, const Json::Value& params);
@@ -78,9 +103,10 @@ namespace C4LSP::Server
 		void HandleDidOpen(const Json::Value& params);
 		void HandleDidChange(const Json::Value& params);
 		void HandleDidClose(const Json::Value& params);
-		void PostRecompile();       // enqueue a recompile on the worker (non-blocking)
+		void PostRecompile();       // enqueue a pass on the worker (non-blocking)
 		void WorkerLoop();          // runs on the worker thread
 		void RunRecompileAndPublish();
+		void Publish(const std::vector<std::string>& uris);
 
 		void HandleHover(const Json::Value& id, const Json::Value& params);
 		void HandleDefinition(const Json::Value& id, const Json::Value& params);
@@ -88,14 +114,14 @@ namespace C4LSP::Server
 		void HandleDocumentHighlight(const Json::Value& id, const Json::Value& params);
 		void HandleCompletion(const Json::Value& id, const Json::Value& params);
 		void HandleDocumentSymbol(const Json::Value& id, const Json::Value& params);
-	void HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params);
+		void HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params);
 		void HandleSemanticTokens(const Json::Value& id, const Json::Value& params);
 		void HandleSignatureHelp(const Json::Value& id, const Json::Value& params);
 		void HandleTypeDefinition(const Json::Value& id, const Json::Value& params);
 		void HandleDeclaration(const Json::Value& id, const Json::Value& params);
 		void HandleImplementation(const Json::Value& id, const Json::Value& params);
 		void HandleRename(const Json::Value& id, const Json::Value& params);
-	void HandlePrepareRename(const Json::Value& id, const Json::Value& params);
+		void HandlePrepareRename(const Json::Value& id, const Json::Value& params);
 		void HandleFormatting(const Json::Value& id, const Json::Value& params); // textDocument/formatting + rangeFormatting
 		void HandleCodeAction(const Json::Value& id, const Json::Value& params);  // textDocument/codeAction (lightbulb)
 		void HandleFoldingRanges(const Json::Value& id, const Json::Value& params); // textDocument/foldingRange (gutter triangles)
@@ -120,24 +146,22 @@ namespace C4LSP::Server
 		Protocol::Position ExtractPosition(const Json::Value& params) const;
 
 		OutputSink m_Send;
-		std::shared_ptr<CompilationSession> m_Session; // last-completed snapshot (double-buffered)
 		Protocol::TextDocumentStore m_Documents;
 		std::string m_RootUri;
-		std::vector<std::string> m_IncludePaths;  // from initializationOptions.includePaths (-I dirs)
-		std::map<std::string, std::string> m_Defines; // from initializationOptions.defines (predefined macros)
-		Scripting::CpuTarget m_Target;                 // from initializationOptions.target (the -march / -m flags, D-62)
-		std::string m_LibraryFolder;                   // <initializationOptions.c4Home>/Bedrock; empty: the session's default
-		std::string m_ProjectsFile;                    // initializationOptions.projects: the build description
+		std::vector<std::shared_ptr<Program>> m_Programs;   // [0]: the options' own; then initializationOptions.programs
+		std::map<std::string, std::shared_ptr<Program>> m_Analyzing; // uri -> the program its document is analyzed in
+		std::shared_ptr<CompilationSession> m_Unanalyzed;   // what answers before any analysis: an empty session
 		std::vector<ScriptScope> m_Scripts;            // initializationOptions.scripts: folders of scripts and their hosts
 		InterfaceCache m_Interfaces;                   // the scopes' host interfaces (the worker's)
 		std::vector<std::shared_ptr<CompilationSession>> m_ScriptSessions; // per scope, null while none of its documents is open
+		std::vector<std::map<std::string, size_t>> m_ScriptInputs;         // per scope, the documents its session took (the worker's)
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
 		std::string m_RequestUri;                      // the document of the request being answered
 		bool m_Initialized = false;
 		bool m_ShutdownRequested = false;
 		bool m_ShouldExit = false;
 
-		mutable std::mutex m_SessionMutex; // guards the m_Session snapshot pointer (swap vs. read)
+		mutable std::mutex m_SessionMutex; // guards m_Programs, the programs' analyses, m_Analyzing and m_ScriptSessions
 		std::mutex m_DocMutex;     // guards m_Documents (read thread mutates, worker reads)
 		std::mutex m_SendMutex;    // serializes output frames so two threads never interleave a message
 
@@ -145,8 +169,8 @@ namespace C4LSP::Server
 		std::condition_variable m_WorkCv;
 		std::thread m_Worker;
 		bool m_WorkerStarted = false;
-		bool m_Working = false;  // a recompile is currently running on the worker
-		bool m_Dirty = false;    // a recompile is queued
+		bool m_Working = false;  // a pass is currently running on the worker
+		bool m_Dirty = false;    // a pass is queued
 		bool m_WorkShutdown = false;
 	};
 } // namespace C4LSP::Server

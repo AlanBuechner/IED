@@ -29,6 +29,7 @@ namespace Scripting
 			m_RootASTNode->SetIsRoot(true);
 			m_RootASTNode->ParseBody(parserState);
 			ReportLexicalErrors();
+			m_Lexer.ReleaseTokens();
 
 			// Save original children before any merge happens
 			const auto& parsedChildren = m_RootASTNode->GetMutableChildren();

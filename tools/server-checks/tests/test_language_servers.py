@@ -3,6 +3,7 @@ from the store; diagnostics land on diag:<wsId> in UTF-16; lsp.request adds the 
 and maps URIs; a server that exits is started again; lsp.status, lsp.capabilities and lsp.restart; a profile's
 pluginCodeOption gets the plugin code scopes: those loaded for the workspace and those it holds (docs/26)."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -110,8 +111,31 @@ class LanguageServerTests(ServerTestCase):
 		self.assertTrue(opened["uri"].startswith("file:///") and opened["uri"].endswith("/a.fk"), opened["uri"])
 		snapshot = await self.client.request("lsp.status", {"wsId": "w1"})
 		self.assertEqual(("fake-lsp", "running", 0), tuple(snapshot["servers"][0][k] for k in ("profile", "state", "restarts")))
+		memory = snapshot["servers"][0]["memory"]
+		self.assertTrue(memory["privateBytes"] > 0 and memory["workingSetBytes"] > 0, memory)
 		output = await self.client.wait_for("out:w1:ied", lambda f: "[fake-lsp] fake-lsp started" in json.dumps(f), timeout=20)
 		self.assertTrue(output)
+
+	async def test_an_idle_server_stops_and_starts_again_when_asked(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "lsp.idleStopMinutes", "value": 0.05})
+		doc = await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		await self.client.wait_for("lsp:w1", lambda f: f["t"] == "evt" and f["data"]["state"] == "stopped", timeout=15)
+		self.assertEqual({"servers": []}, await self.client.request("lsp.status", {"wsId": "w1"}), "it left the pool")
+		await self.client.wait_for("out:w1:ied", lambda f: "no window showed one of its documents for 3 seconds" in json.dumps(f), timeout=10)
+		hover = await self.client.request("lsp.request", {"docId": doc, "method": "textDocument/hover", "params": {"position": {"line": 0, "character": 2}}})
+		self.assertEqual("at 0:3", hover["contents"], "asked about a document, it started again")
+		self.assertEqual("running", (await self.client.request("lsp.status", {"wsId": "w1"}))["servers"][0]["state"])
+
+	async def test_a_server_whose_document_a_window_shows_keeps_running(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "lsp.idleStopMinutes", "value": 0.05})
+		doc = await self.open("a.fk")
+		await self.client.sub(["doc:" + doc])
+		await self.diagnostics("a.fk")
+		pid = (await self.client.request("lsp.status", {"wsId": "w1"}))["servers"][0]["pid"]
+		await asyncio.sleep(6)
+		status = await self.client.request("lsp.status", {"wsId": "w1"})
+		self.assertEqual([("running", pid)], [(s["state"], s["pid"]) for s in status["servers"]])
 
 	async def test_edits_and_saves_reach_the_server(self):
 		doc = await self.open("a.fk")
@@ -334,3 +358,80 @@ class ProjectScopeTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as refused:
 			await self.client.request("lsp.restart", {"wsId": "w1", "profile": "fake-lsp", "project": "Nope"})
 		self.assertEqual("not_found", refused.exception.code)
+
+
+class OptionsFilesTests(ServerTestCase):
+	"""initializationOptionsFiles: one workspace-wide server gets several JSON files under one key, by file name, and gets
+	them again (workspace/didChangeConfiguration) when one of them appears, changes or goes - as C4LSP gets every program's
+	options file Nuke writes."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-lsp-files-")
+		self.home = os.path.join(self.root, "home")
+		self.workspace = os.path.join(self.root, "work")
+		self.log = os.path.join(self.root, "fake-lsp.jsonl")
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		shutil.copy(os.path.join(HERE, "fake_lsp.py"), plugin)
+		write(os.path.join(plugin, "ied-plugin.json"), {
+			"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {
+				"languages": [{"id": "fake", "extensions": [".fk"]}],
+				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]},
+					"initializationOptions": {"mine": 1},
+					"initializationOptionsFiles": {"files": "${workspaceDir}/.ied/local/opts/*.json", "key": "programs"}}]}})
+		self.opts = os.path.join(self.workspace, ".ied", "local", "opts")
+		write(os.path.join(self.opts, "Game.json"), {"projects": "game.toml"})
+		write(os.path.join(self.opts, "Tool.json"), {"projects": "tool.toml"})
+		write(os.path.join(self.opts, "Broken.json"), "not json")
+		write(os.path.join(self.opts, "below", "Deep.json"), {"projects": "deep.toml"})
+		write(os.path.join(self.opts, "notes.txt"), "not an options file")
+		write(os.path.join(self.workspace, "a.fk"), "ok\n")
+		self.server = IedServer(extra=("--home", self.home, "--workspace", self.workspace))
+		self.assertTrue(self.server.started, self.server.error)
+
+	def tearDown(self):
+		self.server.stop()
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await self.client.sub(["diag:w1", "out:w1:ied"])
+		await self.client.next_frame("diag:w1")
+
+	async def asyncTearDown(self):
+		self.assertEqual([], self.client.violations)
+		self.client.abort()
+
+	async def changes(self, count):
+		"""The first `count` workspace/didChangeConfiguration the server got, waited for (10 s at most)."""
+		for _ in range(100):
+			got = received(self.log, "workspace/didChangeConfiguration")
+			if len(got) >= count:
+				return got
+			await asyncio.sleep(0.1)
+		self.fail("the server got %d configuration changes, not %d" % (len(received(self.log, "workspace/didChangeConfiguration")), count))
+
+	async def test_every_file_under_the_key_and_again_when_one_changes(self):
+		await self.client.request("doc.open", {"wsId": "w1", "path": "a.fk"})
+		await self.client.wait_for("diag:w1", lambda f: f["t"] == "evt" and f["data"]["path"] == "a.fk", timeout=20)
+		options = received(self.log, "initialize")[0]["params"]["initializationOptions"]
+		self.assertEqual(1, options["mine"], "the profile's own options stay")
+		self.assertEqual({"Game": {"projects": "game.toml"}, "Tool": {"projects": "tool.toml"}}, options["programs"],
+			"by file name; a file that is not a JSON object, one in a folder below and one the pattern does not name are left out")
+		await self.client.wait_for("out:w1:ied", lambda f: "Broken.json" in json.dumps(f), timeout=10)
+		write(os.path.join(self.opts, "Editor.json"), {"projects": "editor.toml"})
+		first = (await self.changes(1))[0]["params"]["settings"]["programs"]
+		self.assertEqual(["Editor", "Game", "Tool"], sorted(first))
+		write(os.path.join(self.opts, "Game.json"), {"projects": "game2.toml"})
+		second = (await self.changes(2))[1]["params"]["settings"]["programs"]
+		self.assertEqual("game2.toml", second["Game"]["projects"])
+		os.remove(os.path.join(self.opts, "Tool.json"))
+		third = (await self.changes(3))[2]["params"]["settings"]["programs"]
+		self.assertEqual(["Editor", "Game"], sorted(third), "a file that went is gone")
+		write(os.path.join(self.opts, "notes.txt"), "changed, but no options file")
+		write(os.path.join(self.opts, "Game.json"), {"projects": "game2.toml"})
+		await asyncio.sleep(1.5)
+		self.assertEqual(3, len(received(self.log, "workspace/didChangeConfiguration")), "nothing the pattern names changed")

@@ -429,6 +429,27 @@ int32 main() { return 0; }
 		TEST_PASSED();
 	}
 
+	void LspNavigationTest::TestReferencesOfATypeIncludeTheBaseListsNamingIt()
+	{
+		auto session = Testing::Lsp::MakeSession("Shapes.cf", kShapes);
+		const std::string uri = Testing::Lsp::UriFor("Shapes.cf");
+		const auto inBases = Testing::Lsp::PositionOf(kShapes, "IShape", 2); // `class Square : IShape`
+		auto shape = References::At(session, uri, Testing::Lsp::PositionOf(kShapes, "IShape"));
+		TEST_ASSERT_EQ(shape.Count(), 1u);
+		TEST_ASSERT_EQ(shape[0].range.start.line, inBases.line);
+		TEST_ASSERT_EQ(shape[0].range.start.character, inBases.character);
+		TEST_ASSERT_EQ(References::At(session, uri, inBases).Count(), 1u); // asked at the base list itself
+		auto declared = Definition::At(session, uri, inBases);
+		TEST_ASSERT_EQ(declared.Count(), 1u);
+		TEST_ASSERT_EQ(declared[0].range.start.line, Testing::Lsp::PositionOf(kShapes, "interface IShape").line);
+		auto square = References::At(session, uri, Testing::Lsp::PositionOf(kShapes, "Square"), true);
+		TEST_ASSERT_EQ(square.Count(), 2u); // its declaration and `class Tile : Square`
+		auto renamed = Rename::At(session, uri, Testing::Lsp::PositionOf(kShapes, "IShape"));
+		TEST_ASSERT(renamed.found);
+		TEST_ASSERT_EQ(renamed.occurrences.Count(), 2u); // the interface's name and the base list
+		TEST_PASSED();
+	}
+
 	void LspNavigationTest::TestTypeDefinitionOfAVariable()
 	{
 		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);

@@ -52,6 +52,10 @@ namespace Scripting
 		uint32 SourceCount() const { return m_SourceManager.Count(); }
 		uint32 UnitCount() const { return static_cast<uint32>(m_CompilationUnits.size()); }
 		uint32 GetMaxThreads() const { return m_MaxThreads; }
+		/// How many files parse at once (at least one); every processor by default. A process that compiles again and
+		/// again (the language server) keeps its memory with one: parses on many threads at once leave the heap holding
+		/// several times what the program needs, more after each compile (docs/tools/03 "Memory").
+		void SetMaxThreads(uint32 threads) { m_MaxThreads = threads > 0 ? threads : 1; }
 		Core::Vector<CompilationError> GetAllErrors() const;
 		Core::Vector<CompilationError> GetAllDiagnostics() const; // includes warnings
 		/// The macro pass's errors and warnings, placed at their files' sources; GetAllDiagnostics lists them first.

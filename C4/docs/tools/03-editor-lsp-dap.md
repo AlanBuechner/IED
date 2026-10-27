@@ -51,7 +51,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 |---|---|
 | Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
 | Sync | `didOpen`, `didChange`, `didClose`, `publishDiagnostics` |
-| Navigation | `definition` (a function's body: its out-of-line definition when it has one), `declaration`, `typeDefinition` (the named type of a value: a variable's or a parameter's at its declaration or a use, through references, pointers and aliases), `implementation` (from a type, the types deriving from it; from a method, the methods of derived types that override it), `references` and `documentHighlight` (asked at a use, at a declaration's own name or at a type written in a declaration - `Push` of `void Ring::Push()` is the method, its `Ring` the type, `Ring` of `Ring* ring` the type; every file, the declarations first with `context.includeDeclaration`; a type's references include where it is written as a type, `Ring&` of a parameter, a field's type in another header, `new Ring(...)`, and the `Ring::` of each out-of-line definition; a create operator's references are the constructions that call it, `new Ring(args)`, `Ring r(args)`, `Ring r;` and `Ring(args)`, by its count of arguments; a member reached with `->` through a pointer resolves like one reached with `.`; a name outside any function, a field's type in `namespace N { class C { ... } }`, resolves from its type's and namespace's scope); `rename` renames a type's qualifiers too but leaves a constructor's constructions, which spell the type's name; `prepareCallHierarchy`, `callHierarchy/incomingCalls` and `outgoingCalls` (the function named or called at a position; its callers, each with its calls; the functions its body calls; a function's declaration in its type and its out-of-line definition are one function; a construction is a call of the create operator it fits); `prepareTypeHierarchy`, `typeHierarchy/supertypes` and `subtypes` (direct bases and direct derived types) |
+| Navigation | `definition` (a function's body: its out-of-line definition when it has one), `declaration`, `typeDefinition` (the named type of a value: a variable's or a parameter's at its declaration or a use, through references, pointers and aliases), `implementation` (from a type, the types deriving from it; from a method, the methods of derived types that override it), `references` and `documentHighlight` (asked at a use, at a declaration's own name or at a type written in a declaration - `Push` of `void Ring::Push()` is the method, its `Ring` the type, `Ring` of `Ring* ring` the type; every file, the declarations first with `context.includeDeclaration`; a type's references include where it is written as a type, `Ring&` of a parameter, a field's type in another header, `new Ring(...)`, the `Ring::` of each out-of-line definition, and each base list naming it, `class Square : IShape`; a create operator's references are the constructions that call it, `new Ring(args)`, `Ring r(args)`, `Ring r;` and `Ring(args)`, by its count of arguments; a member reached with `->` through a pointer resolves like one reached with `.`; a name outside any function, a field's type in `namespace N { class C { ... } }`, resolves from its type's and namespace's scope); `rename` renames a type's qualifiers too but leaves a constructor's constructions, which spell the type's name; `prepareCallHierarchy`, `callHierarchy/incomingCalls` and `outgoingCalls` (the function named or called at a position; its callers, each with its calls; the functions its body calls; a function's declaration in its type and its out-of-line definition are one function; a construction is a call of the create operator it fits); `prepareTypeHierarchy`, `typeHierarchy/supertypes` and `subtypes` (direct bases and direct derived types) |
 | Information | `hover` (markdown `MarkupContent`: a `c4` block with the declaration as written - annotations, access, modifiers, return type, parameters with their defaults, trailing qualifiers - its name qualified with its owner, `public int64 Ai::ToolRegistry::Find(const Span& text, int64 start = 0) const`, then the comment above it, or after it on a field's line; a method's out-of-line definition hovers as its declaration in the type; a parameter or a local is labeled as one; a type written in a declaration shows that type; on a macro use, the `#define` and what the use expands to), `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members), `c4/expandMacro` (`TextDocumentPositionParams` -> `{name, expansion}`, null off a macro use; `experimental.expandMacro` in the capabilities, as rust-analyzer's `rust-analyzer/expandMacro`) |
 | Symbols | `documentSymbol` (kinds Namespace, Class, Struct, Interface, Enum, EnumMember, Method, Constructor - an `[operator("create")]` method - Field, Function, Variable, Constant - a `const` global; `detail` is the declaration without its annotations, access and name, `static int64 (const Span& text) const`; an out-of-line definition is named with its owner, `ToolRegistry::Add`, as clangd names one; a range covers the doc comment above and the annotations; each `#define` is a symbol of kind Function with detail `macro`), `workspace/symbol` (names containing the query, any case, inside namespaces and types too; `containerName` is the `::`-joined owner, `Ai::ToolRegistry`, and an out-of-line method's is its type; every `#define`, kind Function, where it is defined) |
 | Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives, also behind a pointer or an array (`char` of `const char*`); a type named in an expression (a constructor call) keeps its own kind, and a method called through an implicit `this` is a `method`; a token never crosses a line - a block comment is one token per line), `foldingRange` |
@@ -60,15 +60,19 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 
 ### Configuration and deployment
 
-- The server takes no command-line arguments. It reads `rootUri` and `initializationOptions`; the client
-  passes the contents of the build-derived LSP options file (`includePaths`, `defines`, `c4Home`: the C4
-  install the project builds with, `projects`: the build description C4.exe gets, and `target`: the project's
-  `-march` / `-m` compiler arguments, so the editor sees the build's `SIMD_*` macros and the intrinsics its
-  processor allows, D-62; flags that select no target are ignored), which Nuke writes on every build
-  (`.ied/local/lsp-options/<project>.json`). With a usable description
-  the server compiles its projects, each with its own defines and boundary
-  ([../language/15-projects.md](../language/15-projects.md)); otherwise the files beside each open document (not the
-  folders under them: a workspace folder can hold many programs) and everything under `includePaths`.
+- The server takes no command-line arguments. It reads `rootUri` and `initializationOptions`. A program's options
+  are what the build-derived LSP options file holds (`includePaths`, `defines`, `c4Home`: the C4 install the project
+  builds with, `projects`: the build description C4.exe gets, and `target`: the project's `-march` / `-m` compiler
+  arguments, so the editor sees the build's `SIMD_*` macros and the intrinsics its processor allows, D-62; flags that
+  select no target are ignored), which Nuke writes for every program it compiles, also when the compile fails
+  (`.ied/local/lsp-options/<program>.json`; a module's tests are a program). `programs` (`{<name>: <options>}`) names
+  every program of the workspace, and the options' own fields are one more program (one server for one program, as
+  before). With a usable description a program compiles its projects, each with its own defines and boundary
+  ([../language/15-projects.md](../language/15-projects.md)); without one, the files beside each open document it
+  takes (not the folders under them: a workspace folder can hold many programs) and everything under `includePaths`.
+  `workspace/didChangeConfiguration` with `{settings: {programs}}` replaces the programs (an options file changed); a
+  program whose options are the same keeps its analysis, and one whose build description file changed is analyzed
+  again.
 - `scripts` (`[{folders: [...], interface: "<host>.c4i", allow: [...], defines: ["NAME=VALUE"]}]`) names folders of
   scripts: a document under one of them is analyzed as C4Script compiles it ([../runtime/04-scripting.md](../runtime/04-scripting.md)),
   against that host's interface (read once, again when the file changes), with every `.cf` and `.ch` under the
@@ -90,13 +94,54 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 - Tests: `C4Testing/src/Tests/Protocol/` (JSON values and the framing: partial frames, several frames in one
   chunk, a frame with no usable length or a body that is not JSON is dropped and reading goes on) and
   `C4Testing/src/Tests/LSP/` (protocol types, document sync, the session and the default library, every feature,
-  and the server end to end over its message API).
+  and the server end to end over its message API; `Lsp.Programs`: one server for an engine, a game module on it, a
+  client and a tool - a module analyzed in a program that compiles it, the analyses the open documents need, queries
+  across programs, programs arriving with a configuration change, and the planner).
+
+### One server for every program
+
+A workspace holds many programs - Claymore's editor, client, server and tools, each with the modules it depends on - and
+a module's files are compiled only inside the programs that use it. One server serves them all (`Server/Program`,
+`ProgramPlan`, `LspServer`):
+
+- **Each open document is analyzed in one program that compiles it** - a described project's sources hold it. As few
+  programs as hold all the open documents are analyzed, chosen one at a time: the one holding the most documents left,
+  one already analyzed before one that is not, then the one with fewer projects. Boundaries make a project mean the
+  same in every program that holds it, so a module's file reads the same in any of them (and gets what a build of that
+  program prints). A document no program holds goes to the options' own program (the loose files beside it). Script
+  documents are their scope's, as before.
+- **An analysis is redone when what it took changed**: the open documents it holds (their text), its build
+  description file, its options. An edit redoes the programs holding the edited document; the others keep theirs. A
+  program no open document needs any more lets its analysis go.
+- **A query about a declaration asks every program that reaches it**: `references`, `implementation` (every override
+  of a virtual method, in every project that includes the declaring one), `rename`, `callHierarchy/incomingCalls`,
+  `typeHierarchy/subtypes` and `workspace/symbol`. Besides the document's own program, as few programs as hold every
+  project that uses the declaring one (every project, for a file of the default library) are asked - at the same place
+  when they compile the document, else at the declaration - analyzed for the query when they were not (waited for 25 s
+  at most), and kept three minutes after; answers are merged, each place once. `workspace/symbol` asks programs that
+  hold every project.
+
+### Memory
+
+Measured on Claymore and IED's own workspace (IED `docs/24` "C4LSP memory, measured"): one server per project took 1.6
+and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 GB, steady.
+
+- **One parse at a time.** Parsing a program's files on every processor at once left the heap holding several times
+  what the program needs, and more after every compile: a program including `bedrock.ch` was 85 MB of objects in a
+  400 MB process growing 20 MB an edit. The server's compiler parses one file at a time
+  (`CompilerInstance::SetMaxThreads`): that program now takes 136 MB steady, IED's server program 0.6 GB (first
+  analysis 3.3 s instead of 2.0 s, an edit 1.5 s instead of 1.1 s). C4.exe still parses on every processor: it compiles
+  once and exits.
+- **Tokens go after the parse.** A file's tokens (as many bytes as its AST: the AST keeps copies of the ones it needs)
+  are released when its parse ends (`Lexer::ReleaseTokens`), in C4.exe too.
+- An analysis is double-buffered while it is redone: requests answer from the last one meanwhile.
 
 ### Open items
 
 | Item | Status |
 |---|---|
 | Incremental re-analysis (today each change recompiles the program). | **Planned** |
+| One parse of a module several analyzed programs share (each program parses Bedrock and its modules today). | **Planned** |
 
 ---
 
@@ -111,9 +156,10 @@ solution `nuke init --ied` writes names it in its `localPlugins` (IED loads loca
   projects show a teal "C4" (a header an "h"), and `.ch` / `.cf` pair as header and source.
 - **Semantic token colors** (`semanticTokenColors`): C4LSP's token types mapped onto IED's syntax theme tokens in the
   Visual Assist style (`controlFlow` pink, `preprocessor` gray), never raw colors.
-- **C4LSP** (`lspProfiles`, IED `docs/24`): one server per project of the solution (`scope: project`), each with
-  the options Nuke writes for that project (`.ied/local/lsp-options/<project>.json`) as its initialization options,
-  so it compiles what the build compiles. It runs from a staged copy of `tools/C4LSP/` (rebuilding the toolchain
+- **C4LSP** (`lspProfiles`, IED `docs/24`): one server for the workspace (`scope: workspace`), given every
+  program's options Nuke writes (`initializationOptionsFiles` `.ied/local/lsp-options/*.json` under `programs`, sent
+  again when one changes), so each document is analyzed as the build compiles it (section 1 "One server for every
+  program"). It runs from a staged copy of `tools/C4LSP/` (rebuilding the toolchain
   never fights a running server), with `C4_HOME` naming the toolchain so the copy still finds Bedrock. It agrees
   the position encoding with the client (`utf-8` when offered, else `utf-16`) and answers string or number request
   ids as sent. Two quirks are declared rather than worked around in IED: semantic tokens and folding are fetched

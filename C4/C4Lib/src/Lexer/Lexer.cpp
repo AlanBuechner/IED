@@ -266,6 +266,13 @@ namespace Scripting
 			m_TemplateDepth--;
 	}
 
+	void Lexer::ReleaseTokens()
+	{
+		m_Arena.Clear();
+		m_UndoStack.Clear();
+		m_Offset = 0;
+	}
+
 	// -----------------------------------------------------------------------
 	// Undo / Speculative Parse
 	// -----------------------------------------------------------------------

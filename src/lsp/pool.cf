@@ -4,6 +4,7 @@ include "host/server.ch"
 include "plugins/context.ch"
 include "settings/merge.ch"
 include "plugins/code.ch"
+include "fs/glob.ch"
 
 namespace Ied
 {
@@ -27,6 +28,7 @@ namespace Ied
 
 	void LspPool::Init(Server* server) {
 		this.server = server;
+		this.sweeping = false;
 		LspPool* self = this;
 		server->rpc.Register("lsp.request", [self](Call& call, const Params& params) -> Core::String { return self->RequestMethod(call, params); });
 		server->rpc.Register("lsp.capabilities", [self](Call& call, const Params& params) -> Core::String { return self->CapabilitiesMethod(call, params); });
@@ -73,6 +75,11 @@ namespace Ied
 	LanguageServer* LspPool::Create(Workspace* ws, LspProfile* profile, const ProjectModel* project) {
 		LanguageServer* language = new LanguageServer(server, ws, profile, NameOf(project).View(), project ? project->root : FS::Path());
 		languages.Push(language);
+		if (!sweeping) {
+			sweeping = true;
+			LspPool* self = this;
+			Threading::Thread::Run([self]() { self->SweepLoop(); }).Detach();
+		}
 		return language;
 	}
 
@@ -422,9 +429,17 @@ namespace Ied
 		return Core::String("null");
 	}
 
-	Core::String LspPool::InitializationOptions(const LanguageServer* language) {
+	Core::String LspPool::InitializationOptions(LanguageServer* language) {
 		Core::String options = ProfileOptions(language);
 		const LspProfile* profile = language->profile;
+		if (!profile->optionsFilesKey.IsEmpty()) {
+			language->optionsFilesSent = OptionsFilesJson(language);
+			JsonWriter files;
+			files.BeginObject();
+			files.RawField(profile->optionsFilesKey.CStr(), language->optionsFilesSent.View());
+			files.EndObject();
+			options = MergeJson(options.View(), files.View(), MergeKind::Merge);
+		}
 		if (profile->pluginCodeOption.IsEmpty()) return options;
 		JsonWriter scopes;
 		scopes.BeginObject();
@@ -449,6 +464,136 @@ namespace Ied
 			return profile->initializationOptions;
 		}
 		return MergeJson(profile->initializationOptions.View(), text.View(), MergeKind::Merge);
+	}
+
+	// --- Options files -----------------------------------------------------------------------------------------------
+
+	// The folder and the file name pattern a profile's initializationOptionsFiles names, its variables expanded.
+	static FS::Path OptionsFilesFolder(const LanguageServer* language, Core::String& pattern) {
+		FS::Path files = FS::Path(ExpandProfileVariables(language->profile->optionsFiles.View(), language->Variables()).View());
+		if (!files.IsAbsolute()) files = language->ws->root / files.View();
+		pattern = Core::String(files.FileName());
+		return files.Parent();
+	}
+
+	// A file name without its last extension: "Game.json" is "Game".
+	static Core::String Stem(Core::StringView name) {
+		int64 dot = -1;
+		for (int64 i = 0; i < name.ByteLength(); ++i)
+			if (name.ByteAt(i) == '.') dot = i;
+		return Core::String(dot > 0 ? name.Substring(0, dot) : name);
+	}
+
+	Core::String LspPool::OptionsFilesJson(LanguageServer* language) {
+		Core::String pattern;
+		FS::Path folder = OptionsFilesFolder(language, pattern);
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& name : ExpandGlob(folder, pattern.View())) {
+			if (name.View().IndexOf('/', 0) >= 0) continue;   // a file of a folder below
+			FS::Path file = folder / name.View();
+			FS::File opened = FS::File(file.CStr(), "rb");
+			Core::String text = opened.IsOpen() ? opened.ReadText() : Core::String();
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+			if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+				Log(language, (Core::String("left out of its initializationOptionsFiles, not a JSON object: ") + file.View()).View());
+				continue;
+			}
+			json.RawField(Stem(name.View()).CStr(), NodeJson(read.root).View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Whether the file the watcher saw change at `path` (relative to the workspace folder, where a build writes it - not
+	// Workspace::At, which takes .ied/local to a folder workspace's state elsewhere) is one `language`'s
+	// initializationOptionsFiles names.
+	static bool NamesOptionsFile(const LanguageServer* language, Core::StringView path) {
+		Core::String pattern;
+		FS::Path folder = OptionsFilesFolder(language, pattern);
+		Core::String relative;
+		if (!RelativeTo(folder.View(), (language->ws->root / path).View(), relative) || relative.View().IndexOf('/', 0) >= 0) return false;
+		return GlobMatch(pattern.View(), relative.View());
+	}
+
+	void LspPool::FilesChanged(Workspace* ws, const ChangeBatch& batch) {
+		for (LanguageServer* language : languages) {
+			if (language->ws != ws || language->state != LspState::Running || language->profile->optionsFilesKey.IsEmpty()) continue;
+			bool named = batch.Overflowed();
+			for (const TreeChange& change : batch.Changes()) named = named || NamesOptionsFile(language, change.path.View());
+			if (!named) continue;
+			Core::String files = OptionsFilesJson(language);
+			if (files.View() == language->optionsFilesSent.View()) continue;
+			language->optionsFilesSent = files;
+			JsonWriter json;
+			json.BeginObject();
+			json.Key(Core::StringView("settings"));
+			json.BeginObject();
+			json.RawField(language->profile->optionsFilesKey.CStr(), files.View());
+			json.EndObject();
+			json.EndObject();
+			language->Notify(Core::StringView("workspace/didChangeConfiguration"), json.View());
+		}
+	}
+
+	// --- Idle servers ------------------------------------------------------------------------------------------------
+
+	void LspPool::SweepLoop() {
+		for (;;) {
+			Threading::Thread::Sleep(kLspSweepNs);
+			Threading::LockGuard guard(server->lock);
+			StopIdle(clock_now_ns());
+		}
+	}
+
+	int64 LspPool::IdleLimitNs(Workspace* ws) {
+		Core::String json = server->settings->Effective(ws, Core::StringView(""), Core::StringView(kLspIdleSetting));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		const bool number = value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float;
+		const double minutes = number ? value.AsFloat() : 0.0;
+		return minutes > 0.0 ? (int64)(minutes * 60000000000.0) : 0;
+	}
+
+	bool LspPool::Shown(const LanguageServer* language) const {
+		for (const Core::KeyValue<Core::String, bool>& open : language->documents) {
+			Document* doc = server->documents->Find(language->ws, open.key.View());
+			Topic* topic = doc ? server->hub.Find(doc->Topic().View()) : nullptr;
+			if (topic && topic->subscribers.Count() > 0) return true;
+		}
+		return false;
+	}
+
+	// "10 minutes", "1 minute", "3 seconds".
+	static Core::String DurationText(int64 ns) {
+		Core::StringBuilder text;
+		const int64 seconds = ns / 1000000000;
+		if (seconds >= 60 && seconds % 60 == 0) {
+			text.AppendInt(seconds / 60);
+			text.Append(seconds == 60 ? " minute" : " minutes");
+		}
+		else {
+			text.AppendInt(seconds);
+			text.Append(seconds == 1 ? " second" : " seconds");
+		}
+		return text.ToString();
+	}
+
+	void LspPool::StopIdle(int64 nowNs) {
+		for (int64 i = languages.Count() - 1; i >= 0; --i) {
+			LanguageServer* language = languages[i];
+			if (language->state != LspState::Running && language->state != LspState::Starting) continue;
+			if (Shown(language)) {
+				language->usedNs = nowNs;
+				continue;
+			}
+			const int64 limitNs = IdleLimitNs(language->ws);
+			if (limitNs <= 0 || nowNs - language->usedNs < limitNs) continue;
+			Log(language, (Core::String("stopped: no window showed one of its documents for ") + DurationText(limitNs).View() + " (" + kLspIdleSetting + "); it starts again when one is shown").View());
+			language->Stop();
+			languages.RemoveAt(i);
+		}
 	}
 
 	// --- Diagnostics -------------------------------------------------------------------------------------------------
@@ -527,6 +672,16 @@ namespace Ied
 			json.IntField("pid", (int64)language->pid);
 			json.IntField("restarts", (int64)language->restarts);
 			json.Field("problem", language->problem.View());
+			json.Key(Core::StringView("memory"));
+			Process::Usage usage;
+			const bool live = language->state == LspState::Running || language->state == LspState::Starting;
+			if (live && language->pid != 0 && Process::GetUsage(language->pid, usage)) {
+				json.BeginObject();
+				json.IntField("privateBytes", usage.privateBytes);
+				json.IntField("workingSetBytes", usage.workingSetBytes);
+				json.EndObject();
+			}
+			else json.Null();
 			json.EndObject();
 		}
 		json.EndArray();

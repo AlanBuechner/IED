@@ -1,6 +1,6 @@
 // The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar and how C4LSP's semantic
 // tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink, `preprocessor` gray), C4LSP - one server per
-// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - C4DAP,
+// workspace, given every program's options Nuke writes (it analyzes each document in a program that compiles it) - C4DAP,
 // the c4 and c4-test problem matchers and output links, the c4.nuke task preset (IED's `nuke` preset with C4's matchers
 // and Launch configuration, IED docs/06, docs/25, docs/26), and how C4 files and projects look (teal "C4", a header
 // "h"), and the AI skills of this version of the language (skills/). Ships in every toolchain as <toolchain>/ied/
@@ -157,8 +157,8 @@
 				"command": "${pluginDir}/../tools/C4LSP/C4LSP.exe",
 				"env": { "C4_HOME": "${pluginDir}/.." },
 				"selector": { "languages": ["c4"] },
-				"scope": "project",
-				"initializationOptionsFile": "${workspaceDir}/.ied/local/lsp-options/${projectName}.json",
+				"scope": "workspace",
+				"initializationOptionsFiles": { "files": "${workspaceDir}/.ied/local/lsp-options/*.json", "key": "programs" },
 				"pluginCodeOption": "scripts",
 				"launchMode": "staged",
 				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],

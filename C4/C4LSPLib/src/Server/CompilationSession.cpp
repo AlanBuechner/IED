@@ -23,8 +23,24 @@ namespace fs = std::filesystem;
 
 namespace C4LSP::Server
 {
+	namespace
+	{
+		// One file parses at a time: the server compiles again on every edit, and parses on every processor at once left
+		// the heap holding several times what a program needs, more after each compile (docs/tools/03 "Memory": the IED
+		// server's program, 2.0 GB growing past 2.4 GB in eight edits on 16 threads, 0.6 GB steady on one; a first compile
+		// takes 3.3 s instead of 2.0 s, an edit 1.5 s instead of 1.1 s).
+		constexpr uint32 kParseThreads = 1;
+
+		std::unique_ptr<Scripting::CompilerInstance> NewCompiler()
+		{
+			auto compiler = std::make_unique<Scripting::CompilerInstance>();
+			compiler->SetMaxThreads(kParseThreads);
+			return compiler;
+		}
+	}
+
 	CompilationSession::CompilationSession()
-		: m_Compiler(std::make_unique<Scripting::CompilerInstance>()), m_LibraryFolder(Scripting::Toolchain::Bedrock().string()) {}
+		: m_Compiler(NewCompiler()), m_LibraryFolder(Scripting::Toolchain::Bedrock().string()) {}
 
 	SemanticResolver& CompilationSession::GetResolver()
 	{
@@ -62,10 +78,9 @@ namespace C4LSP::Server
 	bool CompilationSession::Recompile()
 	{
 		if (m_ScriptHost) return RecompileScript();
-		// A fresh instance per compile: the previous ASTs/symbol tables are discarded together,
-		// so no feature can observe a stale tree after an edit. (Types are process-lifetime by
-		// design, matching the compiler's own memory model.)
-		m_Compiler = std::make_unique<Scripting::CompilerInstance>();
+		// A fresh instance per compile: the previous ASTs, model and types are discarded together, so no feature can
+		// observe a stale tree after an edit.
+		m_Compiler = NewCompiler();
 		m_Compiler->SetTarget(m_Target);
 
 		if (!RegisterProjects())
@@ -103,7 +118,7 @@ namespace C4LSP::Server
 
 	bool CompilationSession::RecompileScript()
 	{
-		m_Compiler = std::make_unique<Scripting::CompilerInstance>();
+		m_Compiler = NewCompiler();
 		m_LoweringErrors.Clear();
 		m_SetupProblem.clear();
 		if (!m_ScriptHost->error.empty())
