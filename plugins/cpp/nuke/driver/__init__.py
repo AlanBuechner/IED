@@ -67,7 +67,7 @@ def _check_prebuilt(target):
 	if target.sources:
 		raise ValueError(f"a prebuilt library compiles nothing: give it sources = [] (it lists {len(target.sources)} source(s))")
 	files = [model.absolute(link, target.dir) for link in target.links if not link.startswith("!") and ("/" in link or "\\" in link)]
-	given = list(target.includes) + files + [source for source, _ in target.copies]
+	given = list(target.includes) + files + [copy[0] for copy in target.copies]
 	missing = [path for path in given if not os.path.exists(path)]
 	if missing:
 		raise ValueError(f"its prebuilt files are not there: {', '.join(missing)}")

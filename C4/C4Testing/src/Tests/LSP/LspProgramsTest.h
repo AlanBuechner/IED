@@ -46,6 +46,14 @@ namespace Testing
 		TEST_FUNC(Lsp.Programs)
 		void TestMalformedProgramsAreLeftOut();
 
+		// The default library is a program of its own: its files are analyzed as its tests compile them, and the library's
+		// own sources (a checkout of C4) are found by its markers.
+		TEST_FUNC(Lsp.Programs)
+		void TestTheLibrarysFilesAreAnalyzedInItsOwnProgram();
+
+		TEST_FUNC(Lsp.Programs)
+		void TestALibrarysOwnSourcesAreItsProgram();
+
 		// The planner, honest: as few programs as hold the documents.
 		TEST_FUNC(Lsp.Programs.Plan)
 		void TestAssignDocumentsCoversWithFewPrograms();

@@ -1,0 +1,31 @@
+# Bedrock, C4's default library (docs/library/bedrock.md), as a project of this workspace: its files under C4 in IED's
+# Solution Explorer, and its build and tests - the Bedrock gate's - by the compiler this checkout builds, whose install
+# carries this folder (C4/nuke.toml copies it, this file left out). Programs never build through this project: they take
+# the library from their toolchain. C4LSP analyzes these files as the library's own program (docs/tools/03 "The default
+# library's own program").
+[project]
+name = "Bedrock"
+kind = "custom"
+language = "c4"
+group = "C4"
+description = "C4's default library: Tests/ compiled and run by this checkout's compiler"
+depends = ["C4"]
+output = "${bin}/BedrockTests.exe"
+
+[[project.steps]]
+name = "tests"
+phase = "build"
+description = "Tests/ with the [test] harness, by this checkout's C4.exe (its install holds this folder's files)"
+run = ["${bin.root}/C4/C4.exe", "Tests", "-test", "-o", "${bin}/BedrockTests.exe"]
+
+[[project.steps]]
+name = "build-first"
+phase = "pre-test"
+description = "the compiler and the tests first: nuke test builds no custom project's dependencies"
+run = ["${python}", "${nuke}", "build", "Bedrock", "${config}"]
+
+[[project.steps]]
+name = "run"
+phase = "test"
+description = "every Bedrock test"
+run = ["${bin}/BedrockTests.exe"]

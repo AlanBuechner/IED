@@ -14,6 +14,10 @@ namespace C4LSP::Server
 {
 	class CompilationSession;
 
+	// The project a library program's files are, among the projects queries across programs compare (a name no Nuke
+	// project can take).
+	inline constexpr const char* kLibraryProject = "(the default library)";
+
 	// The editor's open documents a build takes over the files on disk: (uri, text).
 	using EditorDocuments = std::vector<std::pair<std::string, std::string>>;
 
@@ -31,7 +35,8 @@ namespace C4LSP::Server
 		// program must be analyzed again.
 		bool Refresh();
 
-		// Whether a described project's sources hold the file at `path`.
+		// Whether a described project's sources hold the file at `path`; for the default library's own program, whether the
+		// library holds it.
 		bool Owns(const std::string& path) const;
 		// The described projects' names.
 		std::set<std::string> ProjectNames() const;

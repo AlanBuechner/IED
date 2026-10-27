@@ -142,6 +142,30 @@ a module's files are compiled only inside the programs that use it. One server s
   hold every project, so a search of the workspace's symbols costs every program's analysis for those three
   minutes.
 
+### The default library's own program
+
+Bedrock is analyzed as a program of its own, never inside another program's analysis (the owner: "treat bedrock as
+just another project in the background"; a file of C4/Bedrock opened in IED's workspace showed `include not found:
+'capture.ch'` and a cascade, compiled from memory by a program that did not hold it):
+
+- **One program per library.** Besides the programs the options describe, the server has the default library's own
+  program for each library they build with (their `c4Home`'s, else its own install's), and for each folder above an
+  open document no program holds that has the library's markers (`Prelude/prelude.ch` and `bedrock.ch`: the
+  library's own sources in a checkout of C4) - `LibraryProgramOptions`, `LibraryFolderAbove`.
+- **It compiles as the library is tested**: its `Tests/` folder against that folder as the default library, as
+  `C4.exe Bedrock/Tests -test` does in the Bedrock gate, so each library file reads as it builds there - a file of
+  its own sources finds the header beside it, and a definition's name goes to its declaration.
+- **It holds every file of its folder**: a library document is analyzed there, and nowhere else. A query about a
+  library declaration asks it only when it is analyzed already or asked itself (a question about `Core::String` from a
+  program does not analyze the whole library); `workspace/symbol` never analyzes it for the search.
+- In IED's own workspace the library's sources are also a project, `C4/Bedrock/nuke.toml` (custom: its Build compiles
+  `Tests/` with the checkout's compiler, its Test runs them), listed under C4 in the solution; the C4 project's copy of
+  the folder leaves that file out (`[[project.copy]] exclude`).
+
+Checks: `Lsp.Programs` `TestTheLibrarysFilesAreAnalyzedInItsOwnProgram` (references from `string.ch` reach
+`Tests/string_tests.cf`), `TestALibrarysOwnSourcesAreItsProgram` (a library folder found by its markers: no `include
+not found`, the definition's name goes to its declaration) - both fail without it.
+
 ### Memory
 
 Measured on Claymore and IED's own workspace (IED `docs/24` "C4LSP memory, measured"): one server per project took 1.6

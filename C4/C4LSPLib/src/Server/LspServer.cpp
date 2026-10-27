@@ -1,5 +1,7 @@
 #include "Server/LspServer.h"
 #include "Server/ProgramPlan.h"
+#include "Server/ScriptScopes.h"
+#include "Compiler/Toolchain.h"
 #include "Protocol/LspJson.h"
 #include "Json/JsonWriter.h"
 #include <algorithm>
@@ -20,6 +22,41 @@ namespace C4LSP::Server
 		constexpr auto kFreshWait = std::chrono::seconds(10);
 		// How often the worker looks for analyses it may let go while nothing changes.
 		constexpr auto kReleaseEvery = std::chrono::seconds(30);
+
+		// The library a program builds with: its options', else the server's own.
+		std::string LibraryOf(const ProgramOptions& options)
+		{
+			return options.libraryFolder.empty() ? Scripting::Toolchain::Bedrock().generic_string() : options.libraryFolder;
+		}
+
+		// Whether `programs` has the default library at `folder`'s own program.
+		bool HasLibraryProgram(const std::vector<std::shared_ptr<Program>>& programs, const std::string& folder)
+		{
+			for (const auto& program : programs)
+				if (program->Options().library && ComparablePath(program->Options().libraryFolder) == ComparablePath(folder)) return true;
+			return false;
+		}
+
+		// The program of `options`: the one of `known` with those options, else a new one.
+		std::shared_ptr<Program> Reused(const std::vector<std::shared_ptr<Program>>& known, ProgramOptions options)
+		{
+			for (const auto& program : known)
+				if (program->Options() == options) return program;
+			return std::make_shared<Program>(std::move(options));
+		}
+
+		// The default library's own program for each library `programs` build with, and for each one `before` had (a
+		// library found above an open document stays), reused from `before` (docs/tools/03 "The default library's own
+		// program").
+		void AddLibraryPrograms(std::vector<std::shared_ptr<Program>>& programs, const std::vector<std::shared_ptr<Program>>& before)
+		{
+			std::vector<std::string> folders;
+			for (const auto& program : programs) folders.push_back(LibraryOf(program->Options()));
+			for (const auto& program : before)
+				if (program->Options().library) folders.push_back(program->Options().libraryFolder);
+			for (const std::string& folder : folders)
+				if (!HasLibraryProgram(programs, folder)) programs.push_back(Reused(before, LibraryProgramOptions(folder)));
+		}
 
 		// The read thread holds the query lock while it answers a request; it gives it up while it waits for the
 		// worker, which publishes from the same analyses meanwhile.
@@ -44,6 +81,7 @@ namespace C4LSP::Server
 	LspServer::LspServer(OutputSink send) : m_Send(std::move(send)), m_Unanalyzed(std::make_shared<CompilationSession>())
 	{
 		m_Programs.push_back(std::make_shared<Program>(ProgramOptions{}));
+		AddLibraryPrograms(m_Programs, {});
 	}
 
 	std::shared_ptr<Program> LspServer::ProgramOfLocked(const std::string& uri) const
@@ -130,13 +168,8 @@ namespace C4LSP::Server
 		for (ProgramOptions& program : ReadPrograms(programs)) wanted.push_back(std::move(program));
 		std::lock_guard<std::mutex> lock(m_SessionMutex);
 		std::vector<std::shared_ptr<Program>> made;
-		for (ProgramOptions& program : wanted)
-		{
-			std::shared_ptr<Program> kept;
-			for (const auto& known : m_Programs)
-				if (known->Options() == program) kept = known;
-			made.push_back(kept ? kept : std::make_shared<Program>(std::move(program)));
-		}
+		for (ProgramOptions& program : wanted) made.push_back(Reused(m_Programs, std::move(program)));
+		AddLibraryPrograms(made, m_Programs);
 		m_Programs = std::move(made);
 		for (auto it = m_Analyzing.begin(); it != m_Analyzing.end();)
 			it = std::find(m_Programs.begin(), m_Programs.end(), it->second) == m_Programs.end() ? m_Analyzing.erase(it) : std::next(it);
@@ -228,6 +261,17 @@ namespace C4LSP::Server
 		}
 	}
 
+	void LspServer::AddLibrariesAboveLocked(const EditorDocuments& docs)
+	{
+		for (const auto& doc : docs)
+		{
+			const std::string path = PathOfUri(doc.first);
+			if (std::any_of(m_Programs.begin(), m_Programs.end(), [&path](const std::shared_ptr<Program>& program) { return program->Owns(path); })) continue;
+			const std::string folder = LibraryFolderAbove(path);
+			if (!folder.empty() && !HasLibraryProgram(m_Programs, folder)) m_Programs.push_back(std::make_shared<Program>(LibraryProgramOptions(folder)));
+		}
+	}
+
 	std::vector<std::string> LspServer::AnalyzePrograms(const EditorDocuments& docs)
 	{
 		std::vector<std::shared_ptr<Program>> programs;
@@ -235,6 +279,7 @@ namespace C4LSP::Server
 		std::map<std::string, std::shared_ptr<Program>> before;
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			AddLibrariesAboveLocked(docs);
 			programs = m_Programs;
 			before = m_Analyzing;
 			for (const auto& program : programs) facts.push_back(FactsOf(*program, docs));
@@ -313,7 +358,11 @@ namespace C4LSP::Server
 			int32 askedIndex = -1;
 			for (size_t p = 0; p < m_Programs.size(); ++p)
 			{
-				facts.push_back({ m_Programs[p]->ProjectsReaching(path), m_Programs[p]->ProjectNames(), m_Programs[p]->session != nullptr });
+				// A library's program is asked when it is analyzed already, or asked itself: a question about Core::String
+				// from a program's code does not analyze the whole library for its own uses.
+				const Program& program = *m_Programs[p];
+				const bool reachable = !program.Options().library || program.session != nullptr || m_Programs[p] == asked;
+				facts.push_back({ reachable ? program.ProjectsReaching(path) : std::set<std::string>(), program.ProjectNames(), program.session != nullptr });
 				if (m_Programs[p] == asked) askedIndex = static_cast<int32>(p);
 			}
 			for (size_t p : ProgramsToConsult(facts, askedIndex)) consulted.push_back(m_Programs[p]);
@@ -326,10 +375,17 @@ namespace C4LSP::Server
 		std::vector<std::shared_ptr<Program>> consulted;
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			// The workspace's own programs: a library's program is not analyzed for this (the toolchain's library would flood
+			// every search), though one analyzed already is read.
+			std::vector<std::shared_ptr<Program>> own;
 			std::vector<ReachFacts> facts;
 			for (const auto& program : m_Programs)
-				facts.push_back({ program->ProjectNames(), program->ProjectNames(), program->session != nullptr });
-			for (size_t p : ProgramsToConsult(facts, -1)) consulted.push_back(m_Programs[p]);
+				if (!program->Options().library)
+				{
+					own.push_back(program);
+					facts.push_back({ program->ProjectNames(), program->ProjectNames(), program->session != nullptr });
+				}
+			for (size_t p : ProgramsToConsult(facts, -1)) consulted.push_back(own[p]);
 			for (const auto& program : m_Programs)
 				if (program->session && std::find(consulted.begin(), consulted.end(), program) == consulted.end()) consulted.push_back(program);
 		}

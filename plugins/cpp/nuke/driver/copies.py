@@ -1,6 +1,7 @@
 """What lands beside a program besides itself: the [[project.copy]] entries of the program and of the libraries it
 reaches (a file is copied when it changed, a folder mirrored), and an `assets` link to the project's assets folder."""
 
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -36,13 +37,23 @@ def copy_file(source, dest, log):
 	return True
 
 
-def mirror_folder(source, dest, log):
-	"""Makes `dest` a copy of `source`: changed files copied, files `source` no longer has removed. The number copied."""
+def excluded(relative, patterns):
+	"""Whether a file at `relative` in a copied folder is one `patterns` leave out: a pattern matches the path ('/'-separated)
+	or the file's name, with fnmatch's globs (as Nuke's fsutil.excluded)."""
+	relative = relative.replace("\\", "/")
+	return any(fnmatch.fnmatch(relative, p) or fnmatch.fnmatch(relative.rsplit("/", 1)[-1], p) for p in patterns)
+
+
+def mirror_folder(source, dest, log, exclude=()):
+	"""Makes `dest` a copy of `source`: changed files copied, files `source` no longer has - and those `exclude` leaves
+	out - removed. The number copied."""
 	copied, wanted = 0, set()
 	for base, dirs, files in os.walk(source):
 		for name in files:
 			path = os.path.join(base, name)
 			relative = os.path.relpath(path, source)
+			if excluded(relative, exclude):
+				continue
 			wanted.add(os.path.normcase(relative))
 			copied += copy_file(path, os.path.join(dest, relative), log)
 	for base, dirs, files in os.walk(dest, topdown=False):
@@ -59,12 +70,12 @@ def mirror_folder(source, dest, log):
 
 
 def copy_all(copies, bin_dir, log):
-	"""Every (source, destination) of `copies` into `bin_dir`; the number of files copied."""
+	"""Every (source, destination, exclude) of `copies` into `bin_dir`; the number of files copied."""
 	copied = 0
-	for source, dest in copies:
+	for source, dest, exclude in copies:
 		target = os.path.join(bin_dir, dest)
 		if os.path.isdir(source):
-			copied += mirror_folder(source, target, log)
+			copied += mirror_folder(source, target, log, exclude)
 		elif os.path.isfile(source):
 			copied += copy_file(source, target, log)
 		else:

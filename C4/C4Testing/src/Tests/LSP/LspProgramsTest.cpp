@@ -2,7 +2,10 @@
 #include "LspServerHarness.h"
 #include "LspTestSupport.h"
 #include "Server/ProgramPlan.h"
+#include "Compiler/Toolchain.h"
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -94,6 +97,29 @@ namespace Testing
 		{
 			auto lower = [](std::string text) { for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return text; };
 			return Contains(lower(uris), lower(uri));
+		}
+
+		std::string ReadText(const fs::path& path)
+		{
+			std::ifstream in(path, std::ios::binary);
+			return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		}
+
+		// `params` (ServerHarness::At) `columns` further along its line.
+		Value Further(Value params, int32 columns)
+		{
+			const Value at = params.Member("position");
+			Value moved = Value::MakeObject();
+			moved.SetMember("line", Value::Int(at.Member("line").GetInt()));
+			moved.SetMember("character", Value::Int(at.Member("character").GetInt() + columns));
+			params.SetMember("position", moved);
+			return params;
+		}
+
+		// The URIs a definition answer names: a location, or a list of them.
+		std::string DefinitionUris(const Value& answer)
+		{
+			return answer.IsObject() ? std::string(answer.Member("uri").GetString()) : UrisOf(answer);
 		}
 	}
 
@@ -292,6 +318,51 @@ namespace Testing
 		server.Initialize(options);
 		server.Open(ws.gameModule, kGameModule);
 		TEST_ASSERT_EQ(server.MessagesFor(ws.gameModule), std::string()); // the good programs still serve
+		fs::remove_all(ws.root);
+		TEST_PASSED();
+	}
+
+	void LspProgramsTest::TestTheLibrarysFilesAreAnalyzedInItsOwnProgram()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_programs_library");
+		ServerHarness server(FileUri(ws.root));
+		server.Initialize(ws.WithPrograms());
+		const fs::path header = fs::absolute(Scripting::Toolchain::Bedrock() / "Text" / "string.ch").lexically_normal();
+		const std::string text = ReadText(header);
+		const std::string uri = FileUri(header);
+		server.Open(uri, text);
+		TEST_ASSERT_EQ(server.MessagesFor(uri), std::string());
+		Value params = Further(ServerHarness::At(uri, text, "class String"), 6);
+		Value context = Value::MakeObject();
+		context.SetMember("includeDeclaration", Value::Bool(true));
+		params.SetMember("context", context);
+		const std::string uris = UrisOf(server.Request("textDocument/references", params));
+		// The library's tests are its own program's sources: no client or tool compiles them.
+		TEST_ASSERT(Names(uris, FileUri(fs::absolute(Scripting::Toolchain::Bedrock() / "Tests" / "string_tests.cf").lexically_normal())));
+		fs::remove_all(ws.root);
+		TEST_PASSED();
+	}
+
+	void LspProgramsTest::TestALibrarysOwnSourcesAreItsProgram()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_programs_library_sources");
+		const fs::path library = ws.root / "Lang" / "Library"; // the library's sources in a checkout, beside the programs
+		fs::create_directories(library / "Prelude");
+		fs::copy_file(Scripting::Toolchain::Bedrock() / "Prelude" / "prelude.ch", library / "Prelude" / "prelude.ch");
+		WriteFile(library / "bedrock.ch", "include \"Widgets/widget.ch\"\n");
+		WriteFile(library / "Widgets/widget.ch", "namespace Widgets\n{\n\tint32 Size();\n}\n");
+		const std::string source = "include \"widget.ch\"\n\nnamespace Widgets\n{\n\tint32 Size() { return 4; }\n}\n";
+		WriteFile(library / "Widgets/widget.cf", source);
+		WriteFile(library / "Tests/widget_tests.cf", "include \"bedrock.ch\"\n\n[test(\"widgets.size\")]\nstatic void TestSize() { int32 size = Widgets::Size(); }\n");
+		ServerHarness server(FileUri(ws.root));
+		Value options = ws.WithPrograms(); // the options' own program described too, as IED's are: no loose files beside a document
+		options.SetMember("projects", Value::String(Core::String((ws.root / "build" / "Client" / "projects.toml").generic_string())));
+		server.Initialize(options);
+		const std::string uri = FileUri(library / "Widgets/widget.cf");
+		server.Open(uri, source);
+		TEST_ASSERT_EQ(server.MessagesFor(uri), std::string()); // not "include not found: 'widget.ch'"
+		const Value definition = server.Request("textDocument/definition", ServerHarness::At(uri, source, "Size() {"));
+		TEST_ASSERT(Names(DefinitionUris(definition), FileUri(library / "Widgets/widget.ch"))); // the definition's name: its declaration
 		fs::remove_all(ws.root);
 		TEST_PASSED();
 	}

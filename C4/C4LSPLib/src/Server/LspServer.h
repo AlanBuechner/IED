@@ -78,9 +78,13 @@ namespace C4LSP::Server
 		std::vector<std::shared_ptr<CompilationSession>> Consult(const std::vector<std::shared_ptr<Program>>& programs);
 
 		// --- Programs ----------------------------------------------------------------------------------------------------
-		// The programs: `own` (the options' own fields) first, then those `programs` names (initializationOptions.programs);
-		// a program whose options did not change keeps its analysis.
+		// The programs: `own` (the options' own fields) first, then those `programs` names (initializationOptions.programs),
+		// then the default library's own program for each library they build with; a program whose options did not change
+		// keeps its analysis.
 		void SetPrograms(ProgramOptions own, const Json::Value& programs);
+		// For each of `docs` no program holds that lies in a default library's own sources (LibraryFolderAbove), that
+		// library's own program (the session lock held).
+		void AddLibrariesAboveLocked(const EditorDocuments& docs);
 		// The worker's pass over the programs: which program analyzes each document, analyses made again where their
 		// documents changed, those no longer needed let go. Returns the documents whose analysis is new.
 		std::vector<std::string> AnalyzePrograms(const EditorDocuments& docs);

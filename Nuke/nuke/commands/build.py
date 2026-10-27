@@ -45,7 +45,7 @@ def copy_files(session, project):
 			source = fsutil.join(module.dir, expand(copy.source, values))
 			dest = fsutil.join(destination_root, expand(copy.dest, values))
 			if os.path.isdir(source):
-				copied += fsutil.copy_tree_if_newer(source, dest)
+				copied += fsutil.copy_tree_if_newer(source, dest, copy.exclude)
 			elif os.path.isfile(source):
 				copied += fsutil.copy_if_newer(source, dest)
 			else:

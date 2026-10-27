@@ -147,6 +147,7 @@ scripts = ["nuke_ext.py"]          # extensions whose steps default to this proj
 [[project.copy]]                   # copied into the program's bin folder after each build (when newer)
 from = "assets"                    # file or folder, relative to the project
 to = "assets"                      # relative to the bin folder (default: the source's name)
+exclude = ["nuke.toml"]            # of a folder: paths in it or names (globs) left out - and removed from a mirror
 
 [project.config.Dist]              # per-configuration additions
 defines = { SHIP = "1" }
@@ -452,7 +453,8 @@ standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for
   response file (a deep folder's objects outgrow a command line). A running program or DLL is moved aside first
   (`<file>.<ms>.old`), as Nuke does for C4 programs.
 - **Copies.** A program or DLL gets its `[[project.copy]]` entries and those of the libraries it links: a file when it
-  changed, a folder mirrored. A program whose project has an `assets/` folder gets `<bin>/assets` linked to it.
+  changed, a folder mirrored (but what its `exclude` leaves out, which the mirror removes). A program whose project has
+  an `assets/` folder gets `<bin>/assets` linked to it.
 - **Reflection** (`reflection = true`): the project depends on the package's `Reflection`, `HeaderTool` and `CodeGen`
   (added to its `depends`). Each source goes through the HeaderTool after it compiles; CodeGen gathers what it found
   into `<int>/generated/generated.cpp`, compiled and linked with the project (`plugins/cpp/docs/ReflectionSystem.md`).

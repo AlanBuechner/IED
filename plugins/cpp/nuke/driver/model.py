@@ -35,7 +35,7 @@ class Target:
 	links: tuple           # library files: by path, globbed, or found by name
 	linker_args: tuple
 	reflection: bool
-	copies: tuple          # (file or folder, where in the bin folder)
+	copies: tuple          # (file or folder, where in the bin folder, what of a folder is left out)
 	tests: bool
 
 	@property
@@ -126,7 +126,7 @@ def target(ctx):
 		links=tuple(expand(link) for link in spec.links + tuple(override.get("links", ()))),
 		linker_args=tuple(expand(a) for a in options.linker_args),
 		reflection=options.reflection,
-		copies=tuple((absolute(expand(copy.source), spec.dir), copy.dest) for copy in spec.copies),
+		copies=tuple((absolute(expand(copy.source), spec.dir), copy.dest, tuple(getattr(copy, "exclude", ()))) for copy in spec.copies),
 		tests=spec.tests is True,
 	)
 

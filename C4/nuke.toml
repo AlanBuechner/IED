@@ -30,6 +30,7 @@ from = "${cpp.llvm}/bin/LTO.dll"
 
 [[project.copy]]
 from = "Bedrock"
+exclude = ["nuke.toml"]   # Bedrock is a project of this workspace too (Bedrock/nuke.toml): never shipped
 
 [[project.copy]]
 from = "C4Runtime"

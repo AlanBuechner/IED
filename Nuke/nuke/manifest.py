@@ -39,6 +39,7 @@ class StepSpec:
 class CopySpec:
 	source: str
 	dest: str
+	exclude: tuple = ()             # of a folder: paths in it or names, globs allowed, left out (fsutil.excluded)
 
 
 @dataclass(frozen=True)
@@ -384,10 +385,11 @@ def _project(t, folder, path):
 def _copy(t):
 	source = t.string("from")
 	dest = t.string("to")
+	exclude = t.strings("exclude")
 	t.done()
 	if not source:
 		raise NukeError(f"{t.file}: {t.where} needs 'from' (a file or folder, relative to the project)")
-	return CopySpec(source, dest if dest is not None else os.path.basename(source.rstrip("/\\")))
+	return CopySpec(source, dest if dest is not None else os.path.basename(source.rstrip("/\\")), tuple(exclude))
 
 
 def _override(name, t):

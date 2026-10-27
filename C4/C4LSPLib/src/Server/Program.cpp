@@ -46,6 +46,7 @@ namespace C4LSP::Server
 
 	bool Program::Owns(const std::string& path) const
 	{
+		if (m_Options.library) return InLibrary(path);
 		if (!m_Projects) return false;
 		auto known = m_Owned.find(path);
 		if (known != m_Owned.end()) return known->second;
@@ -56,6 +57,7 @@ namespace C4LSP::Server
 
 	std::set<std::string> Program::ProjectNames() const
 	{
+		if (m_Options.library) return { kLibraryProject };
 		std::set<std::string> names;
 		if (m_Projects)
 			for (uint32 p = 0; p < m_Projects->Count(); ++p) names.insert(m_Projects->At(p).name);
@@ -71,6 +73,7 @@ namespace C4LSP::Server
 
 	std::set<std::string> Program::ProjectsReaching(const std::string& path) const
 	{
+		if (m_Options.library) return InLibrary(path) ? std::set<std::string>{ kLibraryProject } : std::set<std::string>();
 		if (!m_Projects) return {};
 		const std::optional<uint32_t> owner = m_Projects->OwnerOf(PathOf(path));
 		if (!owner) return InLibrary(path) ? ProjectNames() : std::set<std::string>();

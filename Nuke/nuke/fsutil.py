@@ -145,11 +145,21 @@ def _copy_of(source, dest):
 	return abs(mtime(dest) - (mtime(source) - COPY_MTIME_NUDGE_SECONDS)) < 0.01 and os.path.getsize(dest) == os.path.getsize(source)
 
 
-def copy_tree_if_newer(source, dest):
-	"""Copy every file of `source` into `dest` when newer. Returns the number of files copied."""
+def excluded(relative, patterns):
+	"""Whether a file at `relative` (its path in a copied folder) is one `patterns` leave out: a pattern matches the path
+	('/'-separated) or the file's name, with fnmatch's globs."""
+	relative = relative.replace("\\", "/")
+	return any(fnmatch.fnmatch(relative, p) or fnmatch.fnmatch(relative.rsplit("/", 1)[-1], p) for p in patterns)
+
+
+def copy_tree_if_newer(source, dest, exclude=()):
+	"""Copy every file of `source` into `dest` when newer, but those `exclude` leaves out. Returns the number of files
+	copied."""
 	copied = 0
 	for path in files_under(source):
-		copied += copy_if_newer(path, join(dest, os.path.relpath(path, source)))
+		relative = os.path.relpath(path, source)
+		if not excluded(relative, exclude):
+			copied += copy_if_newer(path, join(dest, relative))
 	return copied
 
 

@@ -352,8 +352,8 @@ class DatabaseTests(CppTest):
 class CopyTests(CppTest):
 	def test_copies_and_the_assets_link(self):
 		self.workspace({
-			"Data": ("kind = \"library\"\n[[project.copy]]\nfrom = \"shipped\"\n", {"src/Data.cpp": "int Data() { return 0; }\n",
-				"shipped/a.txt": "a", "shipped/deep/b.txt": "b"}),
+			"Data": ("kind = \"library\"\n[[project.copy]]\nfrom = \"shipped\"\nexclude = [\"nuke.toml\"]\n", {"src/Data.cpp": "int Data() { return 0; }\n",
+				"shipped/a.txt": "a", "shipped/deep/b.txt": "b", "shipped/deep/nuke.toml": "[project]\n"}),
 			"App": ("depends = [\"Data\"]\n[[project.copy]]\nfrom = \"${cpp.llvm}/bin/clang.exe\"\nto = \"toolchain/bin/clang.exe\"\n",
 				{"src/Main.cpp": "int main() { return 0; }\n", "assets/x.txt": "x"}),
 		})
@@ -362,6 +362,7 @@ class CopyTests(CppTest):
 		self.assertEqual("b", read(self.bin("App", "shipped/deep/b.txt")), "a library's copies land beside the program")
 		self.assertTrue(os.path.isfile(self.bin("App", "toolchain/bin/clang.exe")))
 		self.assertEqual("x", read(self.bin("App", "assets/x.txt")), "assets/ is linked")
+		self.assertFalse(os.path.exists(self.bin("App", "shipped/deep/nuke.toml")), "what a copy excludes stays behind, at any depth")
 		os.remove(self.path("Data", "shipped", "a.txt"))
 		self.build("App")
 		self.assertFalse(os.path.exists(self.bin("App", "shipped/a.txt")), "a folder is mirrored")

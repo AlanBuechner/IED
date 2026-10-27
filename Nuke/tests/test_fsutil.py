@@ -40,6 +40,16 @@ class CopyIfNewerTests(unittest.TestCase):
 		with open(self.dest) as f:
 			self.assertEqual("two, longer", f.read())
 
+	def test_a_folder_copy_leaves_out_what_it_excludes(self):
+		folder = os.path.join(self.root, "lib")
+		for relative in ("nuke.toml", "Text/a.ch", "Text/nuke.toml", "Text/b.tmp"):
+			os.makedirs(os.path.dirname(os.path.join(folder, relative)), exist_ok=True)
+			with open(os.path.join(folder, relative), "w") as f:
+				f.write(relative)
+		out = os.path.join(self.root, "copied")
+		self.assertEqual(1, fsutil.copy_tree_if_newer(folder, out, ("nuke.toml", "Text/*.tmp")))
+		self.assertEqual(["a.ch"], os.listdir(os.path.join(out, "Text")), "a name matches at any depth, a path from the folder")
+
 	def test_a_copy_someone_changed_is_replaced(self):
 		fsutil.copy_if_newer(self.source, self.dest)
 		with open(self.dest, "w") as f:

@@ -18,6 +18,7 @@ namespace C4LSP::Server
 		std::vector<std::string> targetFlags;       // the build's -march / -m flags (D-62)
 		std::string libraryFolder;                  // <c4Home>/Bedrock; empty: the server's own
 		std::string projectsFile;                   // the build description (docs/language/15-projects.md)
+		bool library = false;                       // the default library's own program (docs/tools/03 "The default library's own program")
 
 		// The processor the flags select; the default target when they select none.
 		Scripting::CpuTarget Target() const;
@@ -32,4 +33,14 @@ namespace C4LSP::Server
 	// initializationOptions.programs: an object of options by program name, in name order, or an array of them (named by
 	// their index). Anything else is no program.
 	std::vector<ProgramOptions> ReadPrograms(const Json::Value& programs);
+
+	// The default library at `folder`'s own program: the library compiled as its tests compile it - `<folder>/Tests`
+	// against `folder` as the library - so each of its files is analyzed where it is built and tested, never pasted into
+	// another program.
+	ProgramOptions LibraryProgramOptions(const std::string& folder);
+
+	// The default library a file lies in, when it is not the toolchain's: the nearest folder above it holding the
+	// library's markers (`Prelude/prelude.ch` and `bedrock.ch`) - the library's own sources, as a checkout of C4 has
+	// them. Empty for none.
+	std::string LibraryFolderAbove(const std::string& path);
 } // namespace C4LSP::Server

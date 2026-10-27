@@ -22,13 +22,13 @@ class ProjectManifestTests(unittest.TestCase):
 		project = parse({"project": {
 			"name": "Game", "kind": "module", "depends": ["Engine"], "sources": ["src", "gen"], "includes": ["third"],
 			"defines": {"A": "1", "B": 2, "C": True}, "links": ["user32"], "compiler-args": ["-march=x86-64-v3"],
-			"tests": False, "working-dir": "assets", "copy": [{"from": "data", "to": "data2"}, {"from": "a/b"}],
+			"tests": False, "working-dir": "assets", "copy": [{"from": "data", "to": "data2"}, {"from": "a/b", "exclude": ["nuke.toml", "*.tmp"]}],
 			"config": {"Dist": {"defines": {"SHIP": "1"}, "links": ["x"], "compiler-args": ["-q"]}},
 			"steps": [{"phase": "pre-build", "run": ["cook"], "inputs": ["a/**"], "outputs": ["b"], "configs": ["Dist"]}],
 		}}).project
 		self.assertEqual(project.defines, {"A": "1", "B": "2", "C": "1"})
 		self.assertEqual(project.copies[0], manifest.CopySpec("data", "data2"))
-		self.assertEqual(project.copies[1], manifest.CopySpec("a/b", "b"))
+		self.assertEqual(project.copies[1], manifest.CopySpec("a/b", "b", ("nuke.toml", "*.tmp")))
 		self.assertEqual(project.config_overrides["Dist"].defines, {"SHIP": "1"})
 		self.assertEqual(project.steps[0].run, ("cook",))
 		self.assertEqual(project.steps[0].name, "cook")
