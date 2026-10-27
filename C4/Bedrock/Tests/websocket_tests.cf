@@ -2,7 +2,7 @@
 // frame can break; close payloads; the handshake (RFC 6455's own key and answer, requests that are not one); and a
 // server and client on loopback - echo of text and binary, fragments with a ping between them, the close codes a
 // server answers bad frames with, a close from either side, the server stopping, pushes from several threads,
-// timeouts, and connections that fail.
+// timeouts, a peer that never reads, and connections that fail.
 
 include "bedrock.ch"
 
@@ -23,6 +23,28 @@ struct WsSeen {
 	public Threading::Atomic<int32> closeCode;
 	public Core::String closeReason;
 	public Threading::Atomic<bool> ended;
+}
+
+// What a session sending to a peer that never reads saw.
+struct WsStall {
+	public Threading::Atomic<int32> sent;          // whole messages the peer's buffers took
+	public Threading::Atomic<int64> stalledMs;     // how long the send that did not go waited
+	public Threading::Atomic<int64> closeMs;
+	public Threading::Atomic<int64> pusherMs;      // from the Close to the pushing thread's send ending
+	public Threading::Atomic<int64> finishedNs;
+	public Threading::Atomic<bool> failsAtOnce;
+	public Threading::Atomic<bool> receiveEnds;
+	public Threading::Atomic<bool> ended;
+}
+
+const int64 kWsStallChunkBytes = 1024 * 1024;
+const int32 kWsStallMostChunks = 512;
+
+// Whether `flag` is set within `ms`.
+static bool WsWaitFor(const Threading::Atomic<bool>& flag, int64 ms) {
+	const int64 deadline = clock_now_ns() + ms * 1000000;
+	while (!flag.Load() && clock_now_ns() < deadline) Threading::Thread::Sleep(10000000);
+	return flag.Load();
 }
 
 // A server on loopback whose /ws accepts WebSockets into `session`, and anything else gets 404.
@@ -401,6 +423,82 @@ class WsConnectionTests {
 		assert_true(!socket.Receive(message, 30) && socket.TimedOut() && socket.IsOpen(), "no message within the timeout: still open");
 		assert_true(socket.SendText(WsText("later")) && socket.Receive(message, kWsWaitMs) && message.Text() == "later", "and still works");
 		socket.Close(1000, WsText(""));
+		rig.Finish();
+	}
+
+	// BUG-399: a peer that stops reading (a phone asleep) holds a send for the send wait at most; the connection is then
+	// cut off, so the next send fails at once and so does the session's receive.
+	[test("send_to_a_peer_that_never_reads")]
+	public static void TestPeerNeverReads() {
+		WsRig rig;
+		WsStall stall;
+		WsStall* seen = &stall;
+		rig.Start([seen](Http::WebSocket& socket) {
+			socket.SetSendWaitMs(300);
+			Core::Array<uint8> chunk;
+			chunk.Resize(kWsStallChunkBytes);
+			int32 sent = 0;
+			int64 began = clock_now_ns();
+			while (sent < kWsStallMostChunks && socket.SendBinary((const void*)chunk.Data(), chunk.Count())) {
+				sent += 1;
+				began = clock_now_ns();
+			}
+			seen->stalledMs.Store((clock_now_ns() - began) / 1000000);
+			seen->sent.Store(sent);
+			const int64 again = clock_now_ns();
+			seen->failsAtOnce.Store(!socket.IsOpen() && !socket.SendText(WsText("more")) && clock_now_ns() - again < 100000000);
+			Http::WebSocketMessage message;
+			seen->receiveEnds.Store(!socket.Receive(message, 5000) && clock_now_ns() - again < 1000000000);
+			seen->ended.Store(true);
+		});
+		WsRaw raw;
+		assert_true(raw.Open(rig.server.LocalAddress(), "13"), "connected, and never reads");
+		const bool ended = WsWaitFor(stall.ended, 30000);
+		assert_true(ended, "the session's sends stop");
+		assert_true(stall.sent.Load() < kWsStallMostChunks && stall.stalledMs.Load() < 3000, "the send the peer did not take gave up after the send wait");
+		assert_true(stall.failsAtOnce.Load(), "the connection is cut off: the next send fails at once");
+		assert_true(stall.receiveEnds.Load(), "and so does a receive");
+		raw.stream.Close();
+		rig.Finish();
+	}
+
+	// BUG-399: Close does not wait behind another thread's send that a peer which stopped reading holds; it cuts the
+	// connection off, which ends that send too.
+	[test("close_does_not_wait_behind_a_send")]
+	public static void TestCloseWhileSendHeld() {
+		WsRig rig;
+		WsStall stall;
+		WsStall* seen = &stall;
+		rig.Start([seen](Http::WebSocket& socket) {
+			socket.SetSendWaitMs(60000);
+			Http::WebSocket* shared = &socket;
+			Threading::Atomic<int32>* sent = &seen->sent;
+			Threading::Atomic<int64>* finished = &seen->finishedNs;
+			Threading::Thread pusher = Threading::Thread::Run([shared, sent, finished]() {
+				Core::Array<uint8> chunk;
+				chunk.Resize(kWsStallChunkBytes);
+				while (sent->Load() < kWsStallMostChunks && shared->SendBinary((const void*)chunk.Data(), chunk.Count())) sent->Store(sent->Load() + 1);
+				finished->Store(clock_now_ns());
+			});
+			int32 last = -1;
+			while (sent->Load() != last && sent->Load() < kWsStallMostChunks) {
+				last = sent->Load();
+				Threading::Thread::Sleep(500000000);
+			}
+			const int64 start = clock_now_ns();
+			socket.Close(1000, WsText(""));
+			seen->closeMs.Store((clock_now_ns() - start) / 1000000);
+			pusher.Join();
+			seen->pusherMs.Store((finished->Load() - start) / 1000000);
+			seen->ended.Store(true);
+		});
+		WsRaw raw;
+		assert_true(raw.Open(rig.server.LocalAddress(), "13"), "connected, and never reads");
+		const bool ended = WsWaitFor(stall.ended, 30000);
+		assert_true(ended && stall.sent.Load() < kWsStallMostChunks, "the pushing thread's send is held");
+		assert_true(stall.closeMs.Load() < 1500, "Close returns without waiting behind it");
+		assert_true(stall.pusherMs.Load() < 3000, "and the held send ends, long before its send wait");
+		raw.stream.Close();
 		rig.Finish();
 	}
 

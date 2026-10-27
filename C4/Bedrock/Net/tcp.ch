@@ -33,7 +33,8 @@ namespace Net
 		public bool IsOpen() const { return slot != 0; }
 		// Bytes sent (TCP may take fewer than `count`), kTimedOut, or kError.
 		public int64 Send(const void* bytes, int64 count, int32 timeoutMs = kWaitForever);
-		// Every byte, or false (Error(), TimedOut()) when the connection fails or a send waits past `timeoutMs`.
+		// Every byte, or false (Error(), TimedOut()) when the connection fails or a send waits past `timeoutMs`: with a
+		// timeout the bytes go in pieces of 64 KiB, and each must go within it.
 		public bool SendAll(const void* bytes, int64 count, int32 timeoutMs = kWaitForever);
 		public bool SendText(Core::StringView text, int32 timeoutMs = kWaitForever) { return SendAll((const void*)text.Data(), text.ByteLength(), timeoutMs); }
 		// Bytes received, 0 once the peer has closed its side, kTimedOut, or kError.
@@ -44,6 +45,7 @@ namespace Net
 		// Small writes go out at once instead of waiting to be combined (TCP_NODELAY).
 		public bool SetNoDelay(bool on);
 		// Ends one direction: after Shutdown::Send the peer's Receive returns 0, and this side can still receive.
+		// Shutdown::Both also ends a send or receive another thread is waiting in on this stream.
 		public void Shutdown(Net::Shutdown side);
 		public Address LocalAddress() const;
 		public Address PeerAddress() const;

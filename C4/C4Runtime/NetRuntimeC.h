@@ -63,7 +63,8 @@ int32_t c4_net_set_no_delay(int64_t socket, int32_t on);
 int64_t c4_net_udp_open(const c4_net_address* address, char* error, int64_t errorCapacity);
 
 // Bytes sent (at least one when size > 0; TCP may take fewer than `size`), kNetTimedOut, or -1. `to` is the
-// destination of a UDP datagram, null for TCP.
+// destination of a UDP datagram, null for TCP. With a timeout a TCP send takes at most 64 KiB and gives up when they
+// have not gone by then (kNetTimedOut; part of them may have).
 int64_t c4_net_send(int64_t socket, const void* data, int64_t size, const c4_net_address* to, int32_t timeoutMs,
 	char* error, int64_t errorCapacity);
 // Bytes received, 0 when a TCP peer has closed its side, kNetTimedOut, or -1. `from` gets a UDP datagram's sender
@@ -75,6 +76,7 @@ int64_t c4_net_receive(int64_t socket, void* buffer, int64_t capacity, c4_net_ad
 int32_t c4_net_local_address(int64_t socket, c4_net_address* out);
 int32_t c4_net_peer_address(int64_t socket, c4_net_address* out);
 
+// Ends one direction or both; both also ends a send or receive another thread is waiting in.
 void c4_net_shutdown(int64_t socket, int32_t how);
 void c4_net_close(int64_t socket);
 

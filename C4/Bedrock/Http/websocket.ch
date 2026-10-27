@@ -3,7 +3,10 @@
 // connection's WebSocket on the connection's thread, and the connection closes when it returns (or the server stops).
 // A client connects with WebSocket::Connect("ws://host:port/path", timeoutMs). Receive waits for a whole message -
 // fragments joined, pings answered, the peer's close answered - and is for one thread at a time; the sends and Close
-// are safe from any thread, so other threads can push while the session receives.
+// are safe from any thread, so other threads can push while the session receives. A send waits for the peer at most
+// the send wait (a peer that stopped reading, as a phone asleep does); past it, the connection is cut off - shut down
+// both ways, so the receiving thread ends too. Close never waits behind another thread's send: when one holds the
+// connection, Close cuts it off instead of sending its close frame.
 //     Http::AcceptWebSocket(request, response, [](Http::WebSocket& socket) {
 //         Http::WebSocketMessage message;
 //         while (socket.Receive(message, Net::kWaitForever)) socket.SendText(message.Text());
@@ -33,6 +36,8 @@ namespace Http
 	const int64 kDefaultMaxMessageBytes = 16 * 1024 * 1024;
 	// How long Close waits for the peer to answer its close frame.
 	const int32 kCloseWaitMs = 1000;
+	// How long a send waits for the peer to take a piece of it (TcpStream::SendAll) unless SetSendWaitMs says.
+	const int32 kSendWaitMs = 10000;
 
 	class WebSocket
 	{
@@ -46,7 +51,8 @@ namespace Http
 		// after the request. `stopping`, when not null, ends Receive once it is set (the server stopping).
 		public static WebSocket Adopt(Net::TcpStream& stream, Core::Array<uint8>& received, const Threading::Atomic<bool>* stopping);
 
-		public bool IsOpen() const { return stream.IsOpen(); }
+		// Open, and not cut off.
+		public bool IsOpen() const { return stream.IsOpen() && !cutOff.Load(); }
 		// The next whole message. False when the connection has closed (CloseCode() says how), failed (Error()), or no
 		// message came within `timeoutMs` (TimedOut(); the socket stays open).
 		public bool Receive(WebSocketMessage& message, int32 timeoutMs);
@@ -68,9 +74,14 @@ namespace Http
 		// tell a quiet client from a gone one. 0 before the first.
 		public int64 LastReceivedNs() const { return lastReceivedNs; }
 		public void SetMaxMessageBytes(int64 bytes) { maxMessageBytes = bytes; }
+		public void SetSendWaitMs(int32 ms) { sendWaitMs = ms; }
 
 		private bool Send(Opcode opcode, const void* bytes, int64 count);
+		private bool SendHeld(Opcode opcode, const void* bytes, int64 count);
 		private bool SendClose(int32 code, Core::StringView reason);
+		private bool LockSending();
+		private void CutOff();
+		private void EndStream();
 		private void CloseStream();
 		private bool ReceiveMore(int64 deadlineNs);
 		private Receipt Take(Frame& frame, WebSocketMessage& message, bool& assembling);
@@ -84,6 +95,9 @@ namespace Http
 		private const Threading::Atomic<bool>* stopping;
 		private bool client;
 		private bool closeSent;               // guarded by `sending`
+		private Threading::Atomic<bool> cutOff;   // shut down both ways: a send failed or waited too long, or Close
+		                                          // would have waited behind one
+		private int32 sendWaitMs;             // 0: kSendWaitMs
 		private int32 closeCode;
 		private Core::String closeReason;
 		private Core::String error;

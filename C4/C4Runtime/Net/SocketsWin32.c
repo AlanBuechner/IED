@@ -256,6 +256,9 @@ static int WaitFor(SOCKET socket, short events, int32_t timeoutMs)
 
 static int Chunk(int64_t size) { return size > INT_MAX ? INT_MAX : (int)size; }
 
+// The most a TCP send with a timeout hands the system at once, so its wait bounds how long the peer may take nothing.
+enum { kTimedSendBytes = 64 * 1024 };
+
 int64_t c4_net_tcp_listen(const c4_net_address* address, int32_t backlog, char* error, int64_t errorCapacity)
 {
 	if (!Started(error, errorCapacity)) return kNetError;
@@ -372,9 +375,14 @@ int64_t c4_net_send(int64_t socket, const void* data, int64_t size, const c4_net
 	const int ready = WaitFor((SOCKET)socket, POLLWRNORM, timeoutMs);
 	if (ready == SOCKET_ERROR) return Failed(error, errorCapacity);
 	if (ready == 0) return TimedOut(error, errorCapacity);
-	const int sent = to ? sendto((SOCKET)socket, (const char*)data, Chunk(size), 0, (const struct sockaddr*)&destination, destinationLength)
-		: send((SOCKET)socket, (const char*)data, Chunk(size), 0);
-	if (sent == SOCKET_ERROR) return Failed(error, errorCapacity);
+	// Writable means some room, not room for all of it: a blocking send of more than the room waits for the peer, so
+	// with a timeout it waits at most that long for a piece of kTimedSendBytes (BUG-399).
+	const DWORD sendWait = timeoutMs == kNetWaitForever ? 0 : (DWORD)(timeoutMs > 0 ? timeoutMs : 1);
+	setsockopt((SOCKET)socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&sendWait, sizeof(sendWait));
+	const int piece = !to && timeoutMs != kNetWaitForever && size > kTimedSendBytes ? kTimedSendBytes : Chunk(size);
+	const int sent = to ? sendto((SOCKET)socket, (const char*)data, piece, 0, (const struct sockaddr*)&destination, destinationLength)
+		: send((SOCKET)socket, (const char*)data, piece, 0);
+	if (sent == SOCKET_ERROR) return WSAGetLastError() == WSAETIMEDOUT ? TimedOut(error, errorCapacity) : Failed(error, errorCapacity);
 	return Done(sent, error, errorCapacity);
 }
 
@@ -415,6 +423,8 @@ int32_t c4_net_peer_address(int64_t socket, c4_net_address* out)
 void c4_net_shutdown(int64_t socket, int32_t how)
 {
 	shutdown((SOCKET)socket, how == kNetShutdownReceive ? SD_RECEIVE : how == kNetShutdownSend ? SD_SEND : SD_BOTH);
+	// Both ways: a send or receive another thread is blocked in returns now (shutdown alone leaves it waiting).
+	if (how == kNetShutdownBoth) CancelIoEx((HANDLE)(uintptr_t)socket, NULL);
 }
 
 void c4_net_close(int64_t socket)
