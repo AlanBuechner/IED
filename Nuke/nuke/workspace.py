@@ -12,6 +12,7 @@ from .errors import NukeError
 from .log import Log
 from .manifest import MANIFEST_NAME, load
 from .packages import checkouts as develop_checkouts
+from .packages import install as package_installs
 
 # Never searched for projects: build output, vendored or third-party code, and hidden folders.
 DISCOVERY_SKIP = {"build", "bin", "bin-int", "vendor", "third_party", "toolchains", "node_modules", "__pycache__"}
@@ -216,6 +217,7 @@ def _package_libraries(packages):
 
 def _project_folders(spec):
 	"""The workspace's own project folders: never anything in its packages folder, whose projects come with packages."""
+	package_installs.check_folder(spec)
 	installed = os.path.join(spec.dir, spec.packages_dir)
 	if spec.projects is None:
 		return discover(spec.dir, tuple(spec.exclude) + (spec.packages_dir.strip("/\\").replace("\\", "/"),))

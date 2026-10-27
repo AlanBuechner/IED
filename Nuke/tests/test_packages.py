@@ -213,6 +213,44 @@ class ManifestTests(PackageTest):
 		self.assertEqual(split("../Game"), (None, "../Game"), "a local folder")
 
 
+class PackagesFolderTests(PackageTest):
+	"""The packages folder is Nuke's alone: a folder of the workspace's own in it is refused, never skipped unseen."""
+
+	def own_projects_in(self, folder):
+		self.files({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\ntoolchain = \"1.0.0\"\n",
+			f"{folder}/ECS/nuke.toml": module("ECS"),
+			f"{folder}/ECS/src/ECS/ecs.ch": "",
+		})
+		git("init", "--quiet", "-b", "main", cwd=self.root)
+		exclude = os.path.join(self.root, ".git", "info", "exclude")
+		write_files(self.root, {".git/info/exclude": "# Nuke's packages folder: installed packages and nuke.lock, all generated\n/packages/\n"})
+		return exclude
+
+	def test_a_project_in_a_folder_named_like_it_is_refused_where_case_does_not_count(self):
+		exclude = self.own_projects_in("Packages")
+		code, out = self.nuke("list", "--json")
+		if os.path.normcase("Packages") != os.path.normcase("packages"):
+			self.assertEqual(code, 0, out)
+			self.assertIn("ECS", [p["name"] for p in json.loads(out)["projects"]])
+			return
+		self.assertNotEqual(code, 0, out)
+		self.assertIn("Packages/ECS/nuke.toml is the workspace's own", out)
+		self.assertIn("does not tell from Packages/", out)
+		self.assertIn("packages-dir = \"deps\"", out)
+		self.assertNotIn("/packages/", read(exclude), "git sees the folder again")
+		self.files({"nuke.toml": "[workspace]\nname = \"Engine\"\ntoolchain = \"1.0.0\"\npackages-dir = \"deps\"\n"})
+		code, out = self.nuke("list", "--json")
+		self.assertEqual(code, 0, out)
+		self.assertIn("ECS", [p["name"] for p in json.loads(out)["projects"]], "with another packages folder it is a project")
+
+	def test_a_project_in_the_packages_folder_is_refused(self):
+		self.own_projects_in("packages")
+		code, out = self.nuke("list", "--json")
+		self.assertNotEqual(code, 0, out)
+		self.assertIn("packages/ECS/nuke.toml is the workspace's own", out)
+
+
 class LocalDependencyTests(PackageTest):
 	"""A local dependency is a folder of the same package: it links that project, and never reaches outside the package."""
 
@@ -289,6 +327,55 @@ class ProjectDependencyTests(PackageTest):
 		self.assertEqual(projects["Win32"]["dir"].replace("\\", "/"), self.engine.work.replace("\\", "/") + "/Windowing/Win32")
 		self.assertIn("Windowing", projects["Win32"]["depends"])
 		self.assertFalse(os.path.exists(self.path("packages")), "nothing fetched: the dependency is this repository's")
+
+	def sample(self):
+		"""A sample game inside the repository's checkout, a workspace of its own, whose project names the repository's
+		Win32 package by its URL."""
+		self.engine_with_dependencies()
+		self.root = os.path.join(self.engine.work, "Sample")
+		self.files({
+			"nuke.toml": "[workspace]\nname = \"Sample\"\ntoolchain = \"1.0.0\"\n",
+			"Game/nuke.toml": f"[project]\nname = \"Game\"\nkind = \"executable\"\n[dependencies]\nWin32 = {needs(self.engine.url, 'Windowing/Win32', '^0.2')}\n",
+			"Game/src/main.cf": "int32 main() { return 0; }\n",
+		})
+
+	def test_a_workspace_inside_the_repository_builds_its_packages_from_the_checkout(self):
+		self.sample()
+		projects = self.projects()
+		work = self.engine.work.replace("\\", "/")
+		self.assertEqual(projects["Win32"]["dir"].replace("\\", "/"), work + "/Windowing/Win32", "the checkout's folder, not a copy")
+		self.assertEqual(projects["Windowing"]["dir"].replace("\\", "/"), work + "/Windowing")
+		self.assertEqual([], [n for n in os.listdir(self.path("packages")) if os.path.isdir(self.path("packages", n))], "nothing installed")
+		self.assertEqual([], [n for n in os.listdir(self.cache) if n != "checkouts.json"] if os.path.isdir(self.cache) else [], "nothing fetched")
+		code, out = self.nuke("package", "status")
+		self.assertEqual(code, 0, out)
+		self.assertIn("engine: builds from this checkout", out)
+		code, out = self.nuke("package", "lock", "engine")
+		self.assertNotEqual(code, 0)
+		self.assertIn("is the repository this workspace is in", out)
+
+	def test_a_change_in_the_checkout_is_built_without_a_commit(self):
+		self.sample()
+		self.projects()
+		win32 = os.path.join(self.engine.work, "Windowing", "Win32", "nuke.toml")
+		write_files(self.engine.work, {
+			"Input/nuke.toml": "[package]\nversion = \"0.1.0\"\n[project]\nname = \"Input\"\nkind = \"module\"\n",
+			"Input/src/Input/input.ch": "",
+			"Windowing/Win32/nuke.toml": read(win32) + f"Input = {needs(self.engine.url, 'Input', '^0.1')}\n",
+		})
+		projects = self.projects()
+		self.assertIn("Input", projects["Win32"]["depends"], "a dependency added in the checkout, neither committed nor released")
+		self.assertEqual(projects["Input"]["dir"].replace("\\", "/"), self.engine.work.replace("\\", "/") + "/Input")
+		self.assertTrue(self.lock()[("engine", "Input")]["version"].startswith("0.1.0+"), "the version its nuke.toml states")
+
+	def test_the_checkout_is_let_go_once_nothing_names_it(self):
+		self.sample()
+		self.projects()
+		self.files({"Game/nuke.toml": "[project]\nname = \"Game\"\nkind = \"executable\"\n"})
+		self.assertNotIn("Win32", self.projects())
+		with open(self.path("packages", "nuke-packages.json"), encoding="utf-8") as f:
+			self.assertEqual({}, json.load(f)["develop"])
+		self.assertTrue(os.path.isfile(os.path.join(self.engine.work, "Windowing", "Win32", "nuke.toml")), "the checkout is untouched")
 
 	def test_a_version_written_by_hand_is_released_as_it_is(self):
 		self.engine_with_dependencies()

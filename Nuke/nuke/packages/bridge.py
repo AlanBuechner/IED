@@ -91,6 +91,7 @@ def _dependencies(entry, state, lock):
 def describe(spec, roots, state, lock, checkouts, joined):
 	"""(packages.json's body, the read-only folders); `roots` are the workspace's own dependencies (resolve.Root)."""
 	developed = {url_key(url): folder for url, folder in checkouts.items()}
+	own = {key for key, entry in state.develop.items() if entry.get("own")}
 	packages, readonly, described = [], [], {}
 	for entry in lock.packages:
 		checkout = developed.get(url_key(entry.url))
@@ -98,12 +99,13 @@ def describe(spec, roots, state, lock, checkouts, joined):
 		projects = sorted(p.name for p in joined if p.package and url_key(p.package.url) == url_key(entry.url) and p.package.line == entry.line)
 		item = {"source": entry.source, "url": entry.url, "path": entry.line, "version": entry.version, "commit": entry.commit,
 			"uses": list(entry.uses), "projects": projects, "folder": _relative(folder, spec.dir),
-			"mode": "develop" if checkout else "locked", "links": web_links(entry.url, _ref(entry), entry.line),
+			"mode": "develop" if checkout else "locked", "own": url_key(entry.url) in own,
+			"links": web_links(entry.url, _ref(entry), entry.line),
 			"requiredBy": state.needs.get(edge_key(entry.url, entry.line), []), "dependsOn": _dependencies(entry, state, lock)}
 		if checkout:
 			if checkout not in described:
 				described[checkout] = checkout_status(checkout)
-			item["writable"] = described[checkout]["behind"] == 0
+			item["writable"] = item["own"] or described[checkout]["behind"] == 0
 		else:
 			item["writable"] = False
 			readonly.append({"path": item["folder"], "reason": locked_reason(entry.source, entry.line, entry.version, entry.commit)})
@@ -112,8 +114,9 @@ def describe(spec, roots, state, lock, checkouts, joined):
 	for url, folder in sorted(checkouts.items()):
 		status = described.get(folder) or checkout_status(folder)
 		source = next((e["source"] for e in state.develop.values() if url_key(e["url"]) == url_key(url)), os.path.basename(folder))
-		writable = status["behind"] == 0
-		checkout_items.append(dict(status, source=source, url=url, folder=_relative(folder, spec.dir), writable=writable))
+		mine = url_key(url) in own        # the checkout the workspace is in: the person's own, whatever its remote has
+		writable = mine or status["behind"] == 0
+		checkout_items.append(dict(status, source=source, url=url, folder=_relative(folder, spec.dir), writable=writable, own=mine))
 		if not writable and fsutil.is_within(folder, spec.dir):
 			readonly.append({"path": _relative(folder, spec.dir), "reason": behind_reason(source, status)})
 	sources = []

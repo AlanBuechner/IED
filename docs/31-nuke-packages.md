@@ -67,9 +67,11 @@ Agility = { source = "https://github.com/me/D3D12Agility.git/SDK", version = "^1
 ```
 
 A local dependency that leaves its package is refused: whoever uses a package must get everything it uses, so a package
-reaches another package only by its URL. The repository's own workspace takes the packages its dependencies name on
-its own repository (one of the checkout's remotes) from its folders, so it builds and tests all of its packages together
-before it releases them.
+reaches another package only by its URL. A dependency on the repository the workspace is in (one of the checkout's
+remotes) is never fetched: the repository's own workspace takes those packages from its folders, so it builds and tests
+all of its packages together before it releases them; and a workspace inside the repository (Claymore's TestEngine)
+builds them from the checkout - the repository is developed at the checkout's top folder for as long as a dependency
+names it (P-12). A change to a package is built by the sample at once: no commit, no push, no pull.
 
 ## 2. Resolution
 
@@ -141,7 +143,12 @@ modules side by side, build, run, debug, commit each repository when it works. T
 - **Back to locked.** `nuke package lock claymore` exports the lock's commits and removes the clone - only when every
   change in it is committed and pushed (it names what is not).
 - **A checkout elsewhere.** `nuke package develop claymore --at C:/GameDev/Claymore` builds from an existing clone
-  outside the workspace instead (for Nuke alone; IED opens files outside a workspace read-only).
+  outside the workspace instead (for Nuke alone; IED opens files outside a workspace read-only). A workspace inside
+  the repository needs neither: it builds from the checkout it is in (section 1, P-12), and `develop` and `lock` refuse
+  that repository.
+- **A version before its release.** In a checkout, a package changed since its last release - or never released - is
+  the version its `nuke.toml` states when that is newer (`0.3.0+2.1a2b3c4d`), as Cargo takes a path dependency's
+  version from its manifest; so a requirement on the version about to be released is met while it is being written.
 
 ## 6. One writable copy: no conflicting changes
 
@@ -270,3 +277,4 @@ the timed fetch) in a workspace whose window was opened.
 | P-9 | Nuke resolves only Nuke packages; language package managers keep their own dependencies | Native first (N-15); Nuke adds the cross-language graph, not a second resolver for crates and modules |
 | P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles; IED's gopls and rust-analyzer get workspace-wide ones through their profiles' `initializationOptionsFile` | Developing a package must not change what the program commits, and one codebase must hold for every language and in the editor: the tools build the clone the way their own users would, one language server serves the workspace as before, and removing one folder brings back the releases |
 | P-11 | The manifests alone say what a workspace uses - each project's `[dependencies]` names a source (`"<repository URL>/<folder>"`) and whether it is `writable` - and any Nuke command, a build first of all, pulls and clones to match; the `nuke package` commands are conveniences over the same files | The owner: "give it a package at a git url and list a version, then when I build it pulls that package down, write-locked or writable if it says so" - Cargo's model. What a checkout of the workspace builds is what its committed manifest says, on every machine |
+| P-12 | A dependency on the repository the workspace is in builds from the checkout, wherever the workspace sits in it: a package in the workspace's folders is its project, any other is developed at the checkout's top folder while a dependency names it; manifest edits there, uncommitted, take effect on the next command (the lock's fast path compares the checkout's manifests too) (owner, 2026-10-27: "any change to the packages will need to be pushed to git then pulled back down to the test engine which is exactly what im trying to avoid") | A repository can hold an engine's packages and the samples that use them exactly as another program would - by URL and version - and still be changed in one place; the same `nuke.toml` fetches the releases in any other checkout |

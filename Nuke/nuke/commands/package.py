@@ -178,8 +178,9 @@ def _fetch_checkouts(context):
 	"""Fetch every develop checkout, one that cannot be fetched not keeping the others' state from being written (IED's
 	nuke plugin runs `status --fetch` on a timer, IED docs/31 section 6); what could not be fetched, and why."""
 	unfetched = []
+	own = {fsutil.norm(context.state.checkout_dir(e)) for e in context.state.develop.values() if e.get("own")}
 	for url, folder in context.state.checkouts().items():
-		if os.path.isdir(folder):
+		if os.path.isdir(folder) and fsutil.norm(folder) not in own:     # the checkout the workspace is in is the person's
 			try:
 				git.run(["fetch", "--quiet", "--prune"], cwd=folder, what=f"git fetch in {folder}")
 			except git.GitError as error:
@@ -258,7 +259,8 @@ def _print_status(context, body):
 		return
 	for checkout in body["checkouts"]:
 		state = "may be edited" if checkout["writable"] else "read-only until pulled"
-		log.line(f"{checkout['source']}: developing in {checkout['folder']} (branch {checkout['branch'] or 'detached'}, "
+		where = "builds from this checkout," if checkout.get("own") else "developing in"
+		log.line(f"{checkout['source']}: {where} {checkout['folder']} (branch {checkout['branch'] or 'detached'}, "
 			f"{checkout['ahead']} ahead, {checkout['behind']} behind {checkout['upstream'] or 'no upstream'}; {state})")
 		changed = git.changes(os.path.join(context.root, checkout["folder"]) if not os.path.isabs(checkout["folder"]) else checkout["folder"])
 		if changed:
@@ -373,6 +375,8 @@ def _develop(cli, args):
 	context = _Context(cli)
 	url, name = context.source(options.source)
 	key = url_key(url)
+	if context.state.develop.get(key, {}).get("own"):
+		raise NukeError(f"{name} is the repository this workspace is in: its packages build from this checkout already")
 	if options.at:
 		folder = fsutil.norm(os.path.abspath(os.path.join(cli.cwd, options.at)))
 		install.check_checkout(folder, url)
@@ -397,6 +401,9 @@ def _lock(cli, args):
 	url, name = context.source(options.source)
 	if context.checkout(url) is None:
 		raise NukeError(f"{name} is not being developed in this workspace")
+	if context.state.develop.get(url_key(url), {}).get("own"):
+		raise NukeError(f"{name} is the repository this workspace is in: its packages build from this checkout as long as a "
+			f"dependency names it")
 	marked = [r.name for r, _ in context.requirements() if r.writable and url_key(r.url) == url_key(url)]
 	if marked:
 		raise NukeError(f"nuke.toml marks {', '.join(marked)} writable: take `writable = true` away there, and the next build "

@@ -12,7 +12,7 @@ import time
 from .. import fsutil
 from ..errors import NukeError
 from . import git, install
-from .store import repository_name, url_key
+from .store import repository_name, same_repository, url_key
 
 HELD_WAIT_SECONDS = 20   # how long a clone may be held before it can step aside (IED restarts a language server in a few)
 
@@ -136,12 +136,36 @@ def _move_aside(folder, aside, name):
 			time.sleep(0.25)
 
 
+def follow_checkout(spec, roots, state, cache, log):
+	"""A dependency on the repository the workspace is in builds from this checkout: the repository is developed from
+	the checkout's top folder (its packages inside the workspace's own folders are its projects already, so they make no
+	root) for as long as a dependency names it. Nothing is cloned, moved or checked: it is the checkout being worked in."""
+	top, remotes = git.checkout_remotes(spec.dir)
+	wanted = {url_key(root.url): root.url for root in roots if top and any(same_repository(root.url, remote) for remote in remotes)}
+	for key, url in wanted.items():
+		entry = state.develop.get(key)
+		if entry is not None and entry.get("own") and fsutil.same_path(state.checkout_dir(entry), top):
+			continue
+		if entry is not None and not fsutil.same_path(state.checkout_dir(entry), top):
+			log.note(f"{entry.get('source')} builds from this checkout ({fsutil.norm(top)}), the repository the workspace is in; "
+				f"{state.checkout_dir(entry)} is no longer used (delete it once its work is pushed)")
+		state.develop[key] = {"url": url, "source": entry.get("source") if entry else repository_name(url),
+			"folder": fsutil.norm(top), "own": True}
+		state.save()
+		cache.record_checkout(url, top)
+	for key in [k for k, entry in state.develop.items() if entry.get("own") and k not in wanted]:
+		del state.develop[key]
+		state.save()
+
+
 def follow_manifest(spec, roots, state, cache, log):
 	"""Makes the develop clones match the manifests' `writable` dependencies: a clone for each source newly marked, and
 	the Stoppings of those no longer marked (sources developed by `nuke package develop` stay)."""
 	wanted = declared(spec, roots)
 	for key, (url, name, branch) in wanted.items():
 		entry = state.develop.get(key)
+		if entry is not None and entry.get("own"):
+			continue        # writable already: the checkout the workspace is in
 		if entry is None or not os.path.isdir(state.checkout_dir(entry)):
 			folder = clone(state, cache, log, url, name, branch)
 			start(state, cache, url, name, folder, by_manifest=True)

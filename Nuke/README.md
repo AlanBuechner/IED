@@ -567,8 +567,12 @@ by themselves (no `depends` entry); the entry's name is yours (messages and `nuk
 - **A local dependency stays in its package.** A package's project may name only projects of the same package by
   folder - Nuke refuses one that reaches outside it - so whoever uses a package gets everything it uses. Another
   package, of this repository or another, is a source with its URL and a version.
-- **A repository builds its own packages from its folders**: a dependency whose URL is one of the checkout's remotes
-  and whose folder is a package of the workspace is not fetched (Claymore's own workspace builds every package together).
+- **A repository builds its own packages from its checkout**: a dependency whose URL is one of the checkout's remotes
+  is never fetched. A package in the workspace's folders is one of its projects (Claymore's own workspace builds every
+  package together); a workspace inside the repository - a sample game, a test engine - builds the packages it names
+  from the checkout's folders, uncommitted changes and all, as if the repository were developed at the checkout
+  (`nuke package status` says "builds from this checkout"). Change a package, build the sample: nothing is committed,
+  pushed or pulled. A package that states a version in its `nuke.toml` is that version there, released or not.
 
 **Locked or writable.** A package is installed **locked** - read-only on disk, at the lock's commit - unless its
 dependency says `writable = true`: then the build clones its repository into `packages/<repository>/` (where the clone

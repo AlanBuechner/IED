@@ -296,7 +296,8 @@ class Resolver:
 
 	def _develop_choice(self, repo, line, needs):
 		"""A source being developed: its HEAD - or, for a versioned package whose folder is the same at HEAD as at its
-		last release, that release, so the lock moves only for the packages a commit changed."""
+		last release, that release, so the lock moves only for the packages a commit changed. A package changed since its
+		release, or never released, is the version its nuke.toml states when that is newer (Cargo's path dependencies)."""
 		commit = repo.head()
 		version = repo.version_of(line, commit)
 		if version.build:
@@ -304,6 +305,10 @@ class Resolver:
 			tagged = repo.release_commit(line, release) if release else None
 			if tagged and repo.unchanged(line, tagged, commit):
 				commit, version = tagged, release
+		info = repo.index(commit).packages.get(line)
+		stated = semver.parse_version(info.version) if version.build and info is not None and info.version else None
+		if stated is not None and stated.release.key() > version.release.key():
+			version = semver.Version(stated.major, stated.minor, stated.patch, stated.pre, version.build)  # what it will be released as
 		for n in needs:
 			if n.kind == "version" and not n.value.matches(version):
 				self.warnings.append(f"{repo.name}:{line or '(repository)'} is {version} in its checkout, but {n.by} wants {n.value}")

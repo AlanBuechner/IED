@@ -187,7 +187,8 @@ export class PackagesView {
 			return [item.locked ? h("span.chip.ok", { title: "The workspace has " + item.locked }, item.locked) : null, h("span.pm-version", null, newest || "unreleased")];
 		}
 		const update = updateOf(item);
-		const mode = item.mode === "develop" ? h("span.chip.info", { title: "Built from the develop clone " + item.folder }, "develop") : h("span.pm-lock", { title: "Locked: read-only" }, icon("lock"));
+		const mode = item.own ? h("span.chip.info", { title: "Built from this checkout, " + item.folder + ": the repository the workspace is in" }, "checkout")
+			: item.mode === "develop" ? h("span.chip.info", { title: "Built from the develop clone " + item.folder }, "develop") : h("span.pm-lock", { title: "Locked: read-only" }, icon("lock"));
 		return [mode, h("span.pm-version", null, item.version), update ? h("span.chip" + (update.breaking ? ".warn" : ".info"), { title: update.breaking ? "A newer major release: change the requirement to take it" : "An update within the requirement" }, (update.breaking ? "major " : "") + update.version) : null];
 	}
 
@@ -273,7 +274,8 @@ export class PackagesView {
 		const links = item.links || {};
 		return [
 			h("div.pm-title", null, icon("package"), h("span.pm-name", null, row.key), h("span.pm-version", null, item.version),
-				item.mode === "develop" ? h("span.chip.info", null, "develop") : h("span.chip", { title: "An installed version is never edited: develop the source to change it" }, "locked")),
+				item.own ? h("span.chip.info", { title: "The repository the workspace is in: built from this checkout" }, "checkout")
+					: item.mode === "develop" ? h("span.chip.info", null, "develop") : h("span.chip", { title: "An installed version is never edited: develop the source to change it" }, "locked")),
 			h("div.pm-desc", null, descriptionOf(item)),
 			this.facts([
 				["Source", this.link(item.source + " (" + item.url + ")", links.repository)],
@@ -282,7 +284,7 @@ export class PackagesView {
 				["Folder", item.folder + (item.writable ? "" : " (read-only)")],
 				["Packages", (item.uses || []).join(", ")],
 				["Projects", (item.projects || []).join(", ") || "none"],
-				checkout ? ["Clone", (checkout.branch || "detached") + ", " + checkout.ahead + " ahead, " + checkout.behind + " behind " + (checkout.upstream || "no upstream")] : null,
+				checkout ? [item.own ? "Checkout" : "Clone", (checkout.branch || "detached") + ", " + checkout.ahead + " ahead, " + checkout.behind + " behind " + (checkout.upstream || "no upstream")] : null,
 			]),
 			this.versionPicker(body, row, requirement),
 			this.actions(body, item, requirement, checkout),
@@ -322,7 +324,7 @@ export class PackagesView {
 		if (item.mode === "develop") {
 			if (checkout && checkout.behind) buttons.push(this.button("Pull", ["pull", source], true));
 			buttons.push(h("button.btn", { on: { click: () => this.release(item, source) } }, "Release..."));
-			buttons.push(this.button("Lock", ["lock", source], false, { title: "Back to locked installs", message: "The workspace goes back to read-only installs of " + item.source + ". The clone's commits must be pushed first; it stays on disk.", confirm: "Lock" }));
+			if (!item.own) buttons.push(this.button("Lock", ["lock", source], false, { title: "Back to locked installs", message: "The workspace goes back to read-only installs of " + item.source + ". The clone's commits must be pushed first; it stays on disk.", confirm: "Lock" }));
 		}
 		else {
 			buttons.push(this.button("Develop", ["develop", source], false, null, "Clone " + item.source + " into the packages folder and build from it, to change it with the program"));

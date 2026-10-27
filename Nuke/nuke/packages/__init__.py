@@ -57,6 +57,7 @@ def sync(spec, projects, options):
 	lock = lockfile.read(spec)
 	if not roots and lock is None:
 		return []
+	writable.follow_checkout(spec, roots, state, cache, options.log)
 	stopping = writable.follow_manifest(spec, roots, state, cache, options.log)
 	checkouts = {url: folder for url, folder in state.checkouts().items()}
 	digest = _digest(roots, checkouts)
@@ -244,10 +245,12 @@ def _from_lock(state, lock, checkouts, local, wanted):
 	for entry in lock.packages:
 		checkout = developed.get(url_key(entry.url))
 		if checkout is not None:
-			resolved_at = state.develop.get(url_key(entry.url), {}).get("head")
-			if not os.path.isdir(checkout) or git.head(checkout) != resolved_at:
+			developed_at = state.develop.get(url_key(entry.url), {})
+			if not os.path.isdir(checkout) or git.head(checkout) != developed_at.get("head"):
 				return None
 			base, found = checkout, index.in_folder(checkout, entry.source)
+			if found.digest != developed_at.get("manifests"):
+				return None         # a manifest of the checkout changed, committed or not: what its packages need may have
 		else:
 			relative = install.export_name(entry.source, entry.line, entry.version)
 			base = fsutil.join(state.root, install.content_name(entry.source, entry.line, entry.version, entry.url))
@@ -305,6 +308,7 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 	for repo in repositories.all():
 		if repo.develop and url_key(repo.url) in state.develop:
 			state.develop[url_key(repo.url)]["head"] = repo.head()    # the lock is current while HEAD stays here
+			state.develop[url_key(repo.url)]["manifests"] = repo.index(None).digest   # and while its manifests do
 	state.save()
 	install.ensure_ignored(spec.dir, spec.packages_dir)
 	previous = lockfile.read(spec)

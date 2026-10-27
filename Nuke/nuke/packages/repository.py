@@ -54,7 +54,8 @@ class Repository:
 		return True
 
 	def lines(self):
-		"""{versioned package path: [(Version, commit)] newest first}, from the tags."""
+		"""{versioned package path: [(Version, commit)] newest first}, from the tags - and in a checkout, every package
+		whose nuke.toml states a version, released or not yet."""
 		if self._lines is None:
 			lines = {}
 			for ref, commit in self.refs().items():
@@ -62,6 +63,10 @@ class Repository:
 				version = semver.parse_version(match.group(2)) if match else None
 				if version is not None:
 					lines.setdefault(match.group(1) or "", []).append((version, commit))
+			if self.checkout:
+				for path, info in self.index(None).packages.items():
+					if info.version:
+						lines.setdefault(path, [])
 			self._lines = {line: sorted(found, key=lambda v: v[0].key(), reverse=True) for line, found in lines.items()}
 		return self._lines
 

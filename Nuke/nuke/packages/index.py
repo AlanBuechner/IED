@@ -3,6 +3,7 @@
 inside another package). Read without checking anything out: one `git ls-tree`
 and one `git cat-file --batch` per commit."""
 
+import hashlib
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ class PackageInfo:
 class RepoIndex:
 	packages: dict = field(default_factory=dict)   # path -> PackageInfo
 	packages_dir: str = "packages"
+	digest: str = ""     # of the manifests its packages were read from: what they hold and need changes only with it
 
 	def owner(self, project_name):
 		"""The package path owning the project named `project_name` (any case), or None."""
@@ -83,6 +85,7 @@ def build(manifest_texts, label):
 		folder = _parent(path) if path != MANIFEST_NAME else ""
 		if not _skipped(folder, packages_dir) and not any(folder == n or folder.startswith(n + "/") for n in nested):
 			folders[folder] = (path, data)
+	index.digest = _digest({path: manifest_texts[path] for path, _ in folders.values()})
 	parsed = {}
 	for folder, (path, data) in folders.items():
 		if "package" in data or "project" in data or folder == "":
@@ -101,6 +104,13 @@ def build(manifest_texts, label):
 		package = index.packages[path]
 		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects), package.version)
 	return index
+
+
+def _digest(texts):
+	hasher = hashlib.sha256()
+	for path in sorted(texts):
+		hasher.update(path.encode("utf-8") + b"\0" + texts[path] + b"\0")
+	return hasher.hexdigest()[:32]
 
 
 def _parse(data, folder, path, label):

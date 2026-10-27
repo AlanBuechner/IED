@@ -88,7 +88,9 @@ then the build clones the repository into `packages/<repository>/` to edit.
   follows the clone's commits, so no release is needed to keep working.
 - A package is a folder with `[package]` (its `version`) in its `nuke.toml`; its versions are also tags
   `<folder>/v<semver>`. A package lists every package it uses in `[dependencies]` by URL, its own repository's too;
-  only a project of the same package is a local folder - Nuke refuses one outside the package.
+  only a project of the same package is a local folder - Nuke refuses one outside the package. A workspace inside a
+  package repository (a sample, a test engine) builds that repository's packages from the checkout, uncommitted edits
+  included: change the package, build the sample, no push or pull.
 - A conflict error names every requirement and who made it: change the project's requirement, or update or release
   the package that made the other one.
 
