@@ -1130,6 +1130,65 @@ class ChatTests(ChatCase):
 			await self.client.request("chat.restore", {"chatId": chat_id})
 		self.assertEqual("not_found", gone.exception.code)
 
+	# --- Reverting (docs/04 "Reverting a chat") ---------------------------------------------------------------------
+
+	def turn_lines(self, chat_id, name="turns.jsonl"):
+		path = os.path.join(local_state(self.data, self.repo), "chats", chat_id, name)
+		with open(path, encoding="utf-8") as f:
+			return [json.loads(line) for line in f if line.strip()]
+
+	async def test_a_revert_drops_the_turn_and_those_after_it_and_keeps_them(self):
+		chat_id, topic = await self.chat()
+		for word in ("one", "two", "three"):
+			self.model.queue(text_step("Answer " + word + "."))
+			self.assertEqual("finished", (await self.turn(chat_id, word))["stop"])
+		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
+		reply = await self.client.request("chat.revert", {"chatId": chat_id, "turnId": history[1]["turnId"]})
+		self.assertEqual((history[1]["turnId"], 2), (reply["turnId"], reply["dropped"]))
+		self.assertTrue(reply["file"].startswith("reverted/") and reply["file"].endswith("-" + history[1]["turnId"] + ".jsonl"), reply)
+		self.assertEqual([history[0]["turnId"]], [t["turnId"] for t in (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]])
+		self.assertEqual([history[0]["turnId"]], [t["turnId"] for t in self.turn_lines(chat_id)], "turns.jsonl keeps the turns before")
+		moved = self.turn_lines(chat_id, reply["file"])
+		self.assertEqual([history[1]["turnId"], history[2]["turnId"]], [t["turnId"] for t in moved], "the dropped turns are kept whole, never deleted")
+		self.assertTrue(moved[0]["messages"], "with what the model was sent")
+		told = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.reverted"))[-1]["data"]
+		self.assertEqual((history[1]["turnId"], 2), (told["turnId"], told["dropped"]))
+		self.assertEqual([history[0]["turnId"]], [t["turnId"] for t in told["snapshot"]["turns"]], "every client's transcript gets the chat as it is now")
+		self.assertEqual((1, "idle"), (told["snapshot"]["turnCount"], told["snapshot"]["state"]))
+		self.assertTrue(told["snapshot"]["context"], "the meter is made again from the turns kept")
+		self.assertEqual(1, (await self.summary(chat_id))["turnCount"])
+		self.model.queue(text_step("Answer two again."))
+		self.assertEqual("finished", (await self.turn(chat_id, "two again"))["stop"])
+		said = [m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] in ("user", "assistant")]
+		self.assertEqual(["one", "Answer one.", "two again"], [s.strip() for s in said], "the model is sent only what the chat kept")
+		turn_ids = [t["turnId"] for t in (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]]
+		self.assertNotIn(turn_ids[1], [t["turnId"] for t in moved], "a new turn never takes a dropped turn's id")
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		self.assertEqual(turn_ids, [t["turnId"] for t in (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]], "a restart reads the chat as reverted")
+		self.assertEqual(2, len(self.turn_lines(chat_id, reply["file"])), "and the dropped turns are still kept")
+
+	async def test_a_revert_stops_a_running_turn_first(self):
+		chat_id, topic = await self.chat()
+		self.model.queue(text_step("First."))
+		await self.turn(chat_id, "first")
+		await self.use_model({}, script="long-stream")
+		started = await self.client.request("chat.send", {"chatId": chat_id, "text": "talk"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "segment.delta", timeout=20)
+		reply = await self.client.request("chat.revert", {"chatId": chat_id, "turnId": started["turnId"]})
+		self.assertEqual(1, reply["dropped"])
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.reverted")
+		self.assertEqual(["user_cancelled"], [f["data"]["stop"] for f in frames if f.get("kind") == "turn.end" and f["data"]["turnId"] == started["turnId"]], "stopped as chat.stop stops it")
+		summary = await self.summary(chat_id)
+		self.assertEqual((1, "idle"), (summary["turnCount"], summary["state"]))
+		self.assertFalse(os.path.exists(os.path.join(local_state(self.data, self.repo), "chats", chat_id, "running.json")))
+		with self.assertRaises(RpcFailure) as gone:
+			await self.client.request("chat.revert", {"chatId": chat_id, "turnId": started["turnId"]})
+		self.assertEqual("not_found", gone.exception.code, "a turn reverted already")
+
 	async def test_a_deleted_chat_is_purged_once_kept_its_days(self):
 		old_id, _ = await self.chat()
 		new_id, _ = await self.chat()

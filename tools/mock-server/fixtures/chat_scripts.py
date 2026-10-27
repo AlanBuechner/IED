@@ -1,6 +1,6 @@
 """Scripted assistant turns for the mock chat (docs/10 "Chats").
 
-Ops: ("thinking", text) | ("text", text) | ("tool", spec) | ("ask", question) | ("tasks", items) | ("harness", kind, text)
+Ops: ("thinking", text[, seconds a delta]) | ("text", text[, seconds a delta]) | ("tool", spec) | ("ask", question) | ("tasks", items) | ("harness", kind, text)
 | ("context", data) | ("pause", seconds) | ("progress", total, steps, seconds) (the prompt read: turn.progress)
 | ("estimate", total, seconds) (a server that does not report it: the estimate) | ("end", stop, extra).
 A tool spec has name, args, result {preview, isError?}, ms, and optionally approval {summary, why, subject, diff} (waits for
@@ -136,8 +136,26 @@ ESTIMATE = [
 	("end", "finished", {}),
 ]
 
-SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE, "rich": RICH}
-KEYWORDS = [("overview", "rich"), ("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
+THOUGHT = "\n".join([
+	"The loop reads input, steps the simulation and renders; the question is where the fixed step comes from.",
+	"main sets dt to 1/60 and never changes it, so every frame advances the player by the same amount, whatever the frame actually took - "
+	"which is fine for a demo but means a slow frame slows the game down instead of skipping ahead, and a fast machine runs no faster.",
+	"Check render_frame next.",
+	"It counts frames and returns 0 after 600 of them.",
+	"So the demo is ten seconds long only at 60 fps; on a machine that cannot keep up it is longer, because nothing measures wall time anywhere in the loop, "
+	"and the player's position after the demo is the same on every machine, which is what the replay tests rely on.",
+	"Then the answer: explain the fixed step, why it keeps replays deterministic, and what an accumulator would add.",
+])
+
+# The thinking streams slowly ("thinking", text, seconds a delta) so a person can open it while it does.
+THINK = [
+	("thinking", THOUGHT, 0.5),
+	("text", "The step is fixed at 1/60 s: `main` passes the same `dt` every frame, so replays are deterministic.\n"),
+	("end", "finished", {}),
+]
+
+SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE, "rich": RICH, "think": THINK}
+KEYWORDS = [("think hard", "think"), ("overview", "rich"), ("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
 	("long", "long"), ("essay", "long"), ("error", "error"), ("fail", "error")]
 
 SEED_TURNS = [

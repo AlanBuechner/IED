@@ -62,6 +62,15 @@
 .chat-head .meta { margin-left: auto; color: var(--text-2); }
 .chat-head .ci { width: 15px; height: 15px; }
 .chat-head.agent b { color: var(--accent-ai); }
+/* A message's buttons (transcript.js messageTools): Copy, and on the owner's Edit and Resend; shown while the pointer is
+	on the message or a button has the focus, always where nothing hovers. */
+.chat-msg-tools { display: inline-flex; align-items: center; gap: 1px; margin-left: auto; visibility: hidden; }
+.chat-msg-tools .ib { width: 22px; height: 22px; color: var(--text-2); }
+.chat-msg-tools .ib:hover { color: var(--text-0); }
+.chat-msg-tools .ib .ci { width: 14px; height: 14px; }
+.chat-head:hover .chat-msg-tools, .chat-head:has(+ .chat-user:hover) .chat-msg-tools, .chat-turn:hover > .chat-foot .chat-msg-tools, .chat-msg-tools:focus-within { visibility: visible; }
+.chat-foot .chat-msg-tools { margin-left: 0; }
+@media (hover: none) { .chat-msg-tools { visibility: visible; } }
 .chat-live { display: inline-flex; align-items: center; gap: var(--space-2); }
 .chat-live .ci { width: 12px; height: 12px; }
 .chat-user { background: var(--bg-3); border-radius: var(--radius-3); padding: var(--space-4) var(--space-5); margin: var(--space-1) 0 var(--space-5); color: var(--prose-text); font-size: var(--prose-font-size); line-height: var(--prose-line-height); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -102,12 +111,18 @@
 .chat-text th { background: var(--bg-1); color: var(--prose-strong); font-weight: var(--font-weight-semibold); }
 .chat-text img { max-width: 100%; }
 
-.chat-think { display: flex; align-items: center; gap: var(--space-2); height: 22px; font-size: var(--font-size-sm); color: var(--text-2); margin: var(--space-2) 0; padding: 0; background: none; border: 0; cursor: pointer; }
+.chat-think { display: flex; align-items: center; gap: var(--space-2); height: 22px; font: inherit; font-size: var(--font-size-sm); color: var(--text-2); margin: var(--space-2) 0; padding: 0 var(--space-2) 0 0; background: none; border: 0; border-radius: var(--radius-2); cursor: pointer; }
+.chat-think:hover { color: var(--text-1); }
+.chat-think:focus-visible { outline: 1px solid var(--focus); }
 .chat-think .lbl { color: var(--accent-ai); }
+.chat-think .chev { display: inline-flex; }
 .chat-think .ci { width: 14px; height: 14px; }
 .chat-think-body, .chat-think-tail { margin: 0 0 var(--space-3) 20px; padding-left: var(--space-4); border-left: 2px solid color-mix(in srgb, var(--accent-ai) 35%, transparent); color: var(--text-2); font-size: var(--font-size-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* The streaming preview: a block of its own height, so nothing already read moves as the thinking grows. */
-.chat-think-tail { height: calc(var(--font-size-sm) * 1.5 * 3); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.chat-think-body[hidden], .chat-think-tail[hidden] { display: none; }
+/* The streaming preview (transcript.js thinkingTail): four lines tall whatever it holds, its whole last lines wrapping as
+	any text does and sitting at its bottom - what is shown moves only up, as lines are added, never sideways. */
+.chat-think-tail { box-sizing: content-box; height: calc(var(--font-size-sm) * 1.5 * 4); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.chat-think-lines { flex: none; min-width: 0; }
 
 /* ---------- tool cards ---------- */
 .chat-tool, .chat-approval, .chat-question, .chat-finish { border: var(--border-width) solid var(--border-0); background: var(--bg-1); border-radius: var(--radius-2); margin: 3px 0; font-size: var(--font-size-sm); overflow: hidden; }
@@ -176,8 +191,18 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-queued.pending .ci { color: var(--accent-info); }
 .chat-composer { border: var(--border-width) solid var(--border-1); border-radius: var(--radius-3); background: var(--bg-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); }
 .chat-composer.focus { border-color: var(--focus); }
-.chat-input { display: block; width: 100%; min-height: 40px; max-height: 220px; resize: none; overflow-y: hidden; border: 0; outline: 0; background: transparent; color: var(--text-0); font: inherit; padding: var(--space-1) 0 var(--space-3); }
+.chat-input { position: relative; display: block; width: 100%; min-height: 40px; max-height: 220px; resize: none; overflow-y: hidden; border: 0; outline: 0; background: transparent; color: var(--text-0); font: inherit; padding: var(--space-1) 0 var(--space-3); }
 .chat-input::placeholder { color: var(--text-2); }
+/* The text box over the layer that draws its mentions as chips (composertext.js): the layer has the box's font,
+	padding and wrapping and clear text, so each chip sits under its words; nothing it draws takes room. */
+.chat-input-box { position: relative; min-width: 0; }
+.chat-input-marks { position: absolute; left: 0; top: 0; overflow: hidden; pointer-events: none; box-sizing: border-box; color: transparent; font: inherit; padding: var(--space-1) 0 var(--space-3); white-space: pre-wrap; overflow-wrap: break-word; }
+.chat-mark { border-radius: var(--radius-2); background: var(--tint-info); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-info) 45%, transparent); }
+.chat-mark[data-kind="folder"] { background: var(--veil); box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--accent-info) 60%, transparent); outline-offset: 0; }
+.chat-editing { display: flex; align-items: center; gap: var(--space-3); min-height: 26px; font-size: var(--font-size-sm); color: var(--text-1); }
+.chat-editing[hidden] { display: none; }
+.chat-editing .ci { width: 14px; height: 14px; color: var(--accent-info); flex: none; }
+.chat-editing .ellip { flex: 1; min-width: 0; }
 .chat-row2 { display: flex; align-items: center; gap: var(--space-2); justify-content: flex-end; }
 .chat-row2 .grow { flex: 1; }
 .chat-row2 [hidden] { display: none; }
@@ -320,6 +345,8 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 	.chat-tool-head { height: 36px; }
 	.chat-tool-head .tname, .chat-tool-head .targs { font-size: var(--font-size-sm); }
 	.chat-head { height: 30px; }
+	.chat-msg-tools { visibility: visible; }
+	.chat-msg-tools .ib { width: 32px; height: 30px; }
 	.chat-approval > .chat-tool-head { height: auto; flex-wrap: wrap; row-gap: 0; padding: var(--space-3) var(--space-4); }
 	.chat-approval > .chat-tool-head .tstat { margin-left: 0; width: 100%; padding-left: 0; }
 	.chat-diff .no:first-child { display: none; }
@@ -329,7 +356,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 	.chat-approval .actions .kbd { display: none; }
 	.chat-composer-wrap { padding: var(--space-3) var(--space-4); }
 	.chat-composer { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); }
-	.chat-input { min-height: 0; padding: var(--space-2) 0; flex: 1; }
+	.chat-input-box { flex: 1; }
+	.chat-input, .chat-input-marks { min-height: 0; padding: var(--space-2) 0; }
+	.chat-editing { min-height: 32px; }
 	.chat-composer .btn { height: 36px; }
 	.chat-queued { height: 32px; }
 	.chat-mention-list { margin: 0 var(--space-4) var(--space-1); max-height: 45vh; }

@@ -1727,6 +1727,120 @@ def chat_message_joins_the_running_turn(run):
 	run.shot("joined")
 
 
+THOUGHT_LINES = [
+	"The loop reads input, steps the simulation and renders; the question is where the fixed step comes from.",
+	"main sets dt to 1/60 and never changes it, so every frame advances the player by the same amount, whatever the frame actually took - "
+	"which is fine for a demo but means a slow frame slows the game down instead of skipping ahead, and a fast machine runs no faster.",
+	"Check render_frame next.",
+	"It counts frames and returns 0 after 600 of them.",
+	"So the demo is ten seconds long only at 60 fps; on a machine that cannot keep up it is longer, because nothing measures wall time anywhere in the loop, "
+	"and the player's position after the demo is the same on every machine, which is what the replay tests rely on.",
+	"Then the answer: explain the fixed step, why it keeps replays deterministic, and what an accumulator would add.",
+]
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_thinking_preview(run):
+	"""The streaming thinking's preview is a box four lines tall whatever it holds, its whole last lines wrapping and
+	sitting at its bottom (owner, 2026-10-26: text "should NEVER change its position horizontoly"), and its header opens
+	it while it streams (owner: "i am un able to upen the thinking message while it is still straminging")."""
+	page = open_chat(run)
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"reasoning": "\n".join(THOUGHT_LINES), "chunk": 10, "delayMs": 500}, {"text": "The step is fixed at 1/60 s.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "think hard about the loop")
+	tail = ".chat-turn:last-child .chat-think-tail:not([hidden])"
+	page.wait_for_selector(tail, timeout=20000)
+	sizes = set()
+	for i in range(12):
+		box = page.locator(tail).bounding_box()
+		sizes.add((round(box["width"]), round(box["height"])))
+		if i == 6:
+			run.shot("preview")
+		time.sleep(0.15)
+	check(len(sizes) == 1, "the preview keeps one size as it streams: %s" % sizes)
+	check(page.eval_on_selector(tail + " .chat-think-lines", "el => el.scrollWidth <= el.parentElement.clientWidth + 1"), "long lines wrap inside it")
+	page.click(".chat-turn:last-child button.chat-think")
+	page.wait_for_selector(".chat-turn:last-child .chat-think-body:not([hidden])", timeout=5000)
+	check(page.get_attribute(".chat-turn:last-child button.chat-think", "aria-expanded") == "true", "opened by a click mid-stream")
+	check(not page.is_visible(".chat-turn:last-child .chat-foot:has-text('Finished')"), "while it still streams")
+	before = len(run.texts(".chat-turn:last-child .chat-think-body")[0])
+	page.wait_for_function("(n) => document.querySelector('.chat-turn:last-child .chat-think-body').textContent.length > n", arg=before, timeout=10000)
+	run.shot("opened")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=60000)
+	check(THOUGHT_LINES[-1] in run.texts(".chat-turn:last-child .chat-think-body")[0], "the open body streamed to its end")
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_edit_and_resend(run):
+	"""The owner's messages have Copy, Edit and Resend, a reply Copy (owner, 2026-10-26: "edit/re send a message that will
+	revert the chat to that point"): Edit puts the message in the composer, and sending it asks, reverts the chat to before
+	it and sends it as a new turn; Resend does the same with the message as it was."""
+	page = open_chat(run)
+	if run.target.kind == "real":
+		run.target.queue_model(*[model_script({"text": "Answer %d." % i, "chunk": 6}, {"finish": "stop"}) for i in range(1, 5)])
+	for question in ("Where is the entry point?", "How many frames does it run?"):
+		send(page, question)
+		page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	first = ".chat-turn:first-child"
+	page.hover(first + " .chat-user")
+	check(page.is_visible(first + " .chat-head button[aria-label='Edit']"), "the message's buttons show on it")
+	run.shot("buttons")
+	page.click(first + " .chat-head button[aria-label='Copy the message']")
+	page.wait_for_selector(".toast:has-text('Copied the message'), .toast:has-text('clipboard')", timeout=5000)
+	page.click(first + " .chat-head button[aria-label='Edit']")
+	page.wait_for_selector(".chat-editing:not([hidden])")
+	check(page.input_value(".chat-input") == "Where is the entry point?", "the message is in the box: %r" % page.input_value(".chat-input"))
+	page.fill(".chat-input", "Where does the program start?")
+	run.shot("editing")
+	page.press(".chat-input", "Enter")
+	page.wait_for_selector(".popup.dialog")
+	check("not changed back" in run.texts(".popup.dialog")[0], "the confirmation says files stay as they are")
+	run.shot("confirm")
+	page.click(".popup.dialog .btn.primary")
+	page.wait_for_function("document.querySelectorAll('.chat-turn').length === 1 && document.querySelector('.chat-turn .chat-user').textContent.startsWith('Where does the program start?')", timeout=20000)
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	check(page.is_hidden(".chat-editing"), "no longer editing")
+	run.shot("edited")
+	old = page.get_attribute(".chat-turn", "data-turn")
+	page.hover(".chat-turn:last-child .chat-user")
+	page.click(".chat-turn:last-child .chat-head button[aria-label='Resend']")
+	page.click(".popup.dialog .btn.primary")
+	page.wait_for_function("(old) => { const turns = document.querySelectorAll('.chat-turn'); return turns.length === 1 && turns[0].dataset.turn !== old && !turns[0].querySelector('.chat-foot').hidden; }", arg=old, timeout=30000)
+	check(run.texts(".chat-turn .chat-user")[0].startswith("Where does the program start?"), "the same message, sent again")
+	run.shot("resent")
+	if run.target.kind == "real":
+		sent = [m["content"] for m in run.target.model_requests()[-1]["body"]["messages"] if m["role"] == "user"]
+		check(sent == ["Where does the program start?"], "the model got only the message sent again: %s" % sent)
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_composer_chips_and_plain_paste(run):
+	"""@-mentions in the composer show as chips, a folder's apart from a file's (owner: "better styling for files using
+	@some/path/file.txt or @some/folder"), and text pasted from a formatted page goes in plain (owner: "if i copy and past
+	formated text into the chat box it should remove the formating")."""
+	page = open_chat(run)
+	page.click(".chat-input")
+	page.keyboard.type("Look at @src/mai")
+	page.wait_for_selector(".chat-mention-list:not([hidden]) .chat-mention-row.on:has-text('@src/main.c')", timeout=10000)
+	page.keyboard.press("Enter")
+	page.keyboard.type("and @sr")
+	folder = "[...document.querySelectorAll('.chat-mention-row')].find((row) => row.offsetParent && row.textContent.trim() === '@src/')"
+	page.wait_for_function("() => !!" + folder, timeout=10000)
+	page.evaluate("() => " + folder + ".click()")
+	marks = page.eval_on_selector_all(".chat-input-marks .chat-mark", "els => els.filter(e => e.offsetParent).map(e => [e.dataset.kind, e.textContent])")
+	check(marks == [["file", "@src/main.c"], ["folder", "@src/"]], "a chip for each, a folder's apart: %s" % marks)
+	page.evaluate("""() => {
+		const input = document.querySelector('.chat-input');
+		const data = new DataTransfer();
+		data.setData('text/html', '<p style="color:red"><b>Bold</b>&nbsp;and <i>italic</i></p>');
+		data.setData('text/plain', 'Bold\\u00a0and italic\\r\\n\\tindented\\u200b');
+		input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+	}""")
+	value = page.input_value(".chat-input")
+	check(value.endswith("Bold and italic\n\tindented"), "pasted as plain text: %r" % value)
+	run.shot("chips")
+
+
 def noise_png(width, height):
 	"""A gray PNG of random noise: large, and slow to load and decode, as a page's screenshot is."""
 	def chunk(kind, data):

@@ -137,6 +137,13 @@ namespace Ai
 		private Core::String HistoryMethod(const IED::Request& request);
 		private Core::String ProbeMethod(const IED::Request& request);
 
+		// Reverting a chat to before one of its turns (revert.cf, docs/04 "Reverting a chat").
+		private Core::String RevertMethod(const IED::Request& request);
+		// The chat's running turn stopped and waited for; throws conflict when it does not end in time.
+		private void StopForRevert(Chat* chat, const IED::Request& request);
+		// A Claude Code session that holds one of the `dropped` turns is stopped and forgotten: the next turn starts a new one.
+		private void LeaveDroppedClaude(Chat* chat, const Core::Array<Core::String>& dropped);
+
 		// Deleted chats (docs/04 "Deleting a chat", deletedchats.cf): chat.delete moves a chat among them, chat.restore
 		// brings it back, chat.purge removes it for good, and so does the keeper ai.chats.keepDeletedDays after.
 		private Core::String DeleteMethod(const IED::Request& request);

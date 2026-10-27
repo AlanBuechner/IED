@@ -1,8 +1,10 @@
 // composer.js - the chat's input bar (docs/15 "Chat", mockup 02): the messages waiting for the running turn's next step
-// and those queued for the next turn, the files the message carries, the text box (Enter sends - to a running turn, at
-// its next step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@"
-// mentions, docs/04), Attach / Stop / Send, what the chat runs on (a group or a model, modelpicker.js), its effort,
-// mode and permission, and the running numbers - tokens in and out, speed, time to first token, context use.
+// and those queued for the next turn, the message being edited (Edit on one of the owner's messages: sending it reverts
+// the chat to before it), the files the message carries, the text box (Enter sends - to a running turn, at its next
+// step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@" mentions drawn
+// as chips, docs/04; pasted text goes in plain), Attach / Stop / Send, what the chat runs on (a group or a model,
+// modelpicker.js), its effort, mode and permission, and the running numbers - tokens in and out, speed, time to first
+// token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -11,25 +13,29 @@ import { keptMentions } from "./mentions.js";
 import { choiceLabel, showModelPicker } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
 import { AttachBar } from "./attachbar.js";
+import { InputMarks, insertText, plainText } from "./composertext.js";
 
 const menus = new MenuHost();
 const MOST_INPUT_PX = 220;
 const PHONE = "(max-width: 719px)";
 
-// actions: {send(text, as, extras), stop(), unqueue(index) -> Promise<{queued, message} | null>, sendQueued(index),
-// set(change), choices() -> Promise<{groups, models}>, mentionRows(query) -> Promise<[row]>, upload(file) -> Promise<{blobId} | null>,
-// fileUrl(path), toast(text)}
+// actions: {send(text, as, extras) (extras: {mentions, attachments, revertTo?: the turn an edited message replaces}),
+// stop(), unqueue(index) -> Promise<{queued, message} | null>, sendQueued(index), set(change), choices() -> Promise<{groups, models}>,
+// mentionRows(query) -> Promise<[row]>, upload(file) -> Promise<{blobId} | null>, fileUrl(path), toast(text)}
 export class Composer {
 	constructor(actions) {
 		this.actions = actions;
 		this.mentions = [];
+		this.editing = null;   // the owner's message being edited: {turnId, atMs}
 		this.queuedEl = h("div.chat-queued-list");
+		this.editingEl = h("div.chat-editing", { hidden: true });
 		this.input = h("textarea.chat-input", { rows: 1, "aria-label": "Message", spellcheck: "true" });
+		this.marks = new InputMarks(this.input);
 		this.list = new MentionList(this.input, (query) => this.actions.mentionRows(query), (row) => this.mentioned(row));
 		this.attached = new AttachBar((file) => this.actions.upload(file), (path) => this.actions.fileUrl(path), () => {}, (text) => this.actions.toast(text));
 		this.input.addEventListener("keydown", (event) => this.key(event));
 		this.input.addEventListener("input", () => {
-			this.fit();
+			this.textChanged();
 			this.list.follow();
 		});
 		this.input.addEventListener("click", () => this.list.follow());
@@ -42,7 +48,7 @@ export class Composer {
 		this.mentionButton = h("button.ib.desk", { title: "Mention a file, folder, #symbol, terminal, output, chat, problems or diff (@)", "aria-label": "Mention", on: { click: () => this.startMention() } }, icon("mention"));
 		this.stopButton = h("button.btn.desk", { title: "Stop the turn (Esc)", on: { click: () => this.actions.stop() } }, icon("debug-stop"), "Stop", h("span.kbd", null, "Esc"));
 		this.sendButton = h("button.btn.primary", { title: "Send (Enter)", "aria-label": "Send", on: { click: () => this.send("message") } }, icon("send"));
-		this.box = h("div.chat-composer", null, this.input,
+		this.box = h("div.chat-composer", null, h("div.chat-input-box", null, this.marks.el, this.input),
 			h("div.chat-row2", null, this.attachButton, this.mentionButton, h("span.grow.desk"), this.stopButton, this.sendButton), this.files);
 		this.input.addEventListener("focus", () => this.box.classList.add("focus"));
 		this.input.addEventListener("blur", () => {
@@ -57,13 +63,30 @@ export class Composer {
 		this.box.addEventListener("dragleave", () => this.box.classList.remove("drop"));
 		this.box.addEventListener("drop", (event) => {
 			this.box.classList.remove("drop");
-			if (!event.dataTransfer.files.length) return;
+			if (event.dataTransfer.files.length) {
+				event.preventDefault();
+				this.attached.add([...event.dataTransfer.files]);
+				return;
+			}
+			const text = event.dataTransfer.getData("text/plain");
+			if (!text) return;
 			event.preventDefault();
-			this.attached.add([...event.dataTransfer.files]);
+			insertText(this.input, plainText(text));
 		});
 		this.selectors = h("div.chat-selectors");
 		this.telemetry = h("div.chat-telemetry");
-		this.el = h("div.chat-composer-wrap", null, h("div.chat-col.chat-compose-col", null, this.queuedEl, this.attached.el, this.list.el, this.box, this.selectors, this.telemetry));
+		this.el = h("div.chat-composer-wrap", null, h("div.chat-col.chat-compose-col", null, this.queuedEl, this.editingEl, this.attached.el, this.list.el, this.box, this.selectors, this.telemetry));
+	}
+
+	// The box's text, mentions and the chips drawn for them, after the text changed: typed, pasted, set.
+	textChanged() {
+		this.fit();
+		this.marks.update(this.mentions);
+	}
+
+	setText(text) {
+		this.input.value = text;
+		this.textChanged();
 	}
 
 	key(event) {
@@ -76,35 +99,43 @@ export class Composer {
 			event.preventDefault();
 			this.actions.stop();
 		}
+		else if (event.key === "Escape" && this.editing) {
+			event.preventDefault();
+			this.stopEditing(true);
+		}
 	}
 
 	fit() {
 		this.input.style.height = "auto";
 		this.input.style.height = Math.min(this.input.scrollHeight, MOST_INPUT_PX) + "px";
 		this.input.style.overflowY = this.input.scrollHeight > MOST_INPUT_PX ? "auto" : "hidden";
+		this.marks.sync();
 	}
 
-	// `as` "message" (to a running turn: at its next step) or "queue" (the next turn).
+	// `as` "message" (to a running turn: at its next step) or "queue" (the next turn). An edited message reverts the chat
+	// to before the one it replaces, then goes as a new turn.
 	async send(as) {
 		const text = this.input.value.trim();
 		if (!text) return;
 		const mentions = keptMentions(text, this.mentions);
-		this.input.value = "";
-		this.fit();
+		const editing = this.editing;
+		this.setText("");
 		this.list.close();
 		const attachments = await this.attached.sent();
-		if (!(await this.actions.send(text, as, { mentions, attachments }))) {
-			this.input.value = text;
-			this.fit();
+		const extras = editing ? { mentions, attachments, revertTo: editing.turnId } : { mentions, attachments };
+		if (!(await this.actions.send(text, as, extras))) {
+			this.setText(text);
 			return;
 		}
 		this.mentions = [];
+		this.marks.update(this.mentions);
 		this.attached.clear();
+		if (editing === this.editing) this.stopEditing(false);
 	}
 
 	mentioned(row) {
 		this.mentions.push({ kind: row.kind, ref: row.ref, label: row.label });
-		this.fit();
+		this.textChanged();
 	}
 
 	// "@" typed at the caret, as if by the key.
@@ -112,18 +143,59 @@ export class Composer {
 		const caret = this.input.selectionStart;
 		const text = this.input.value;
 		const gap = caret > 0 && !/\s/.test(text[caret - 1]) ? " " : "";
-		this.input.value = text.slice(0, caret) + gap + "@" + text.slice(caret);
+		this.setText(text.slice(0, caret) + gap + "@" + text.slice(caret));
 		const after = caret + gap.length + 1;
 		this.input.focus();
 		this.input.setSelectionRange(after, after);
 		this.list.follow();
 	}
 
+	// Files pasted are attached; text goes in plain (plainText), never as the page it came from had it.
 	pasted(event) {
-		const files = event.clipboardData ? [...event.clipboardData.files] : [];
-		if (!files.length) return;
+		const data = event.clipboardData;
+		const files = data ? [...data.files] : [];
+		if (files.length) {
+			event.preventDefault();
+			this.attached.add(files);
+			return;
+		}
+		if (!data) return;
 		event.preventDefault();
-		this.attached.add(files);
+		const text = plainText(data.getData("text/plain"));
+		if (text) insertText(this.input, text);
+	}
+
+	// One of the owner's messages back in the box to edit (`message`: {text, mentions, attachments}): sending it reverts the
+	// chat to before its turn and sends it as a new one. What the box held is replaced.
+	edit(turnId, atMs, message) {
+		this.editing = { turnId, atMs };
+		this.mentions = (message.mentions || []).slice();
+		this.attached.clear();
+		this.attached.keep(message.attachments || []);
+		this.setText(message.text || "");
+		this.renderEditing();
+		this.focus();
+		this.input.setSelectionRange(this.input.value.length, this.input.value.length);
+	}
+
+	// `clear`: the box emptied too (Cancel); after a send it is empty already.
+	stopEditing(clear) {
+		this.editing = null;
+		this.renderEditing();
+		if (!clear) return;
+		this.mentions = [];
+		this.attached.clear();
+		this.setText("");
+	}
+
+	renderEditing() {
+		this.editingEl.hidden = !this.editing;
+		if (!this.editing) return replace(this.editingEl);
+		const at = this.editing.atMs ? new Date(this.editing.atMs) : null;
+		const when = at ? " from " + String(at.getHours()).padStart(2, "0") + ":" + String(at.getMinutes()).padStart(2, "0") : "";
+		return replace(this.editingEl, icon("edit"), h("span.ellip", { title: "Sending it reverts the chat to before that message: it and every turn after it leave the chat (kept in its folder). Files they changed stay as they are." },
+			"Editing your message" + when + ": sending it reverts the chat to before it"),
+		h("button.btn.flat", { title: "Stop editing and empty the box", on: { click: () => this.stopEditing(true) } }, "Cancel"));
 	}
 
 	focus() {
@@ -160,10 +232,9 @@ export class Composer {
 		const taken = await this.actions.unqueue(index);
 		if (!taken) return;
 		const message = taken.message || { text: "" };
-		this.input.value = message.text;
 		this.mentions = (message.mentions || []).slice();
 		this.attached.keep(message.attachments || []);
-		this.fit();
+		this.setText(message.text);
 		this.focus();
 	}
 

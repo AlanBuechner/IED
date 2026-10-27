@@ -179,6 +179,29 @@ class ClaudeTurnTests(ClaudeCase):
 		argv = self.sessions_started()[-1]
 		self.assertEqual(session, argv[argv.index("--resume") + 1], "the new server resumes the chat's session")
 
+	async def test_a_revert_leaves_the_session_and_a_new_one_is_told_what_the_chat_kept(self):
+		"""docs/04 "Reverting a chat": the CLI's session holds the dropped turns, so it is not resumed; the next turn starts a
+		new session, told the turns kept and none of the dropped."""
+		await self.use_claude()
+		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]}, {"blocks": [{"text": "Two again."}]})
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id, "first"))["stop"])
+		self.assertEqual("finished", (await self.turn(chat_id, "second"))["stop"])
+		second = await self.last_turn(chat_id)
+		await self.client.request("chat.revert", {"chatId": chat_id, "turnId": second["turnId"]})
+		header = json.load(open(os.path.join(self.local_state(), "chats", chat_id, "chat.json"), encoding="utf-8"))
+		self.assertNotIn("claude", header, "the chat no longer names the session")
+		self.assertEqual("finished", (await self.turn(chat_id, "second, said again"))["stop"])
+		argv = self.sessions_started()
+		self.assertEqual(2, len(argv), "a new process for a new session")
+		self.assertNotIn("--resume", argv[-1], "the session that holds the dropped turn is not resumed")
+		first = [entry["query"] for entry in self.log() if "query" in entry][-1][0]["text"]
+		self.assertIn("Earlier in this chat", first)
+		self.assertIn("first", first)
+		self.assertIn("One.", first)
+		self.assertNotIn("Two.", first, "the dropped turn is not told")
+		self.assertTrue(first.rstrip().endswith("second, said again"), first)
+
 	async def test_a_chat_that_started_on_another_model_tells_claude_what_happened(self):
 		await self.use_claude(groups={"local": {"primary": {"model": "fake"}}, "claude": {"primary": {"model": "claude-opus"}}}, default_group="local")
 		chat_id, _ = await self.chat()

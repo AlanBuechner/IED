@@ -81,9 +81,11 @@ export class ChatModel {
 	}
 
 	// Folds one event in; what changed: {turn}, {segment, turn}, {summary}, {tasks}, {queued}, {modified}, {clips},
-	// {context}, {approvals}, {question}.
+	// {context}, {approvals}, {question}; {all, reverted} for a chat reverted to before a turn (its snapshot as it is now).
 	event(kind, data) {
 		switch (kind) {
+			case "chat.reverted":
+				return Object.assign(this.snapshot(data.snapshot || {}), { reverted: data });
 			case "chat.changed": {
 				const before = this.summary || {};
 				this.summary = summaryOf(data);

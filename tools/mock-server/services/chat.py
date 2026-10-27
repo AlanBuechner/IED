@@ -188,7 +188,7 @@ class Chats:
 		server.rpc.register("ai.probe", self.m_ai_probe)
 		server.hub.add("aiusage", self.usage_snapshot)
 		server.rpc.register("ai.usage", self.m_ai_usage)
-		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete", "chat.restore", "chat.purge"):
+		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete", "chat.restore", "chat.purge", "chat.revert"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def _create(self, ws_id, title, mode):
@@ -439,6 +439,30 @@ class Chats:
 		self.publish(chat, "question.resolved", {"questionId": question.data["questionId"], "answer": question.decision, "by": call.client_id})
 		return {}
 
+	async def m_chat_revert(self, call, p):
+		"""docs/04 "Reverting a chat": a running turn stopped first, then the turn and those after it dropped (the server
+		keeps them in the chat's reverted/ folder; the mock keeps them in memory) and every client told."""
+		chat = self.get(p.str("chatId"))
+		turn_id = p.str("turnId")
+		if chat.runner is not None:
+			chat.stop_reason = "user_cancelled"
+			chat.runner.cancel()
+			for _ in range(200):
+				if chat.runner is None:
+					break
+				await asyncio.sleep(0.01)
+		ids = [t.turn_id for t in chat.turns]
+		if turn_id not in ids:
+			raise RpcError("not_found", "chat %s has no turn %s" % (chat.chat_id, turn_id))
+		at = ids.index(turn_id)
+		dropped, chat.turns = chat.turns[at:], chat.turns[:at]
+		chat.reverted = getattr(chat, "reverted", []) + dropped
+		chat.state, chat.state_reason = "idle", ""
+		answer = {"turnId": turn_id, "dropped": len(dropped), "file": "reverted/%d-%s.jsonl" % (now_ms(), turn_id)}
+		self.publish(chat, "chat.reverted", dict(answer, snapshot=self.snapshot(chat)))
+		self.changed(chat)
+		return answer
+
 	# --- deleted chats (docs/04 "Deleting a chat"): kept KEEP_DELETED_DAYS, restorable until purged -------------------
 
 	def _delete(self, chat, deleted_ms):
@@ -510,7 +534,7 @@ class Chats:
 	async def _op(self, chat, turn, op):
 		kind = op[0]
 		if kind in ("thinking", "text"):
-			await self._stream_segment(chat, turn, Segment(chat.next_id("s"), kind, model=MODEL), op[1], "text")
+			await self._stream_segment(chat, turn, Segment(chat.next_id("s"), kind, model=MODEL), op[1], "text", op[2] if len(op) > 2 else DELTA_SECONDS)
 		elif kind == "tool":
 			await self._tool(chat, turn, op[1])
 		elif kind == "ask":
@@ -558,11 +582,11 @@ class Chats:
 		turn.prefill = None
 		self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": None})
 
-	async def _stream_segment(self, chat, turn, segment, text, field):
+	async def _stream_segment(self, chat, turn, segment, text, field, seconds=DELTA_SECONDS):
 		turn.segments.append(segment)
 		self.publish(chat, "segment.start", dict(segment.to_dict(), turnId=turn.turn_id))
 		for chunk in _chunks(text):
-			await self.server.clock.sleep(DELTA_SECONDS)
+			await self.server.clock.sleep(seconds)
 			if field == "text":
 				segment.text += chunk
 			else:

@@ -34,6 +34,7 @@ import "./editorlinks.test.js";
 import "./chat.test.js";
 import "./chatmentions.test.js";
 import "./chatpane.test.js";
+import "./chatcomposer.test.js";
 import "./agents.test.js";
 import "./claude.test.js";
 import "./hovercard.test.js";

@@ -26,6 +26,37 @@ function newDraft() {
 	return { mode: "agent", permission: "auto", group: "", effort: "" };
 }
 
+// `text` on the system clipboard: the Clipboard API where the page may use it, else the copy command over a text area
+// of its own (a page on the network's address, as a phone has it, gets no Clipboard API). Whether it was copied.
+export async function copyText(text) {
+	if (navigator.clipboard && window.isSecureContext) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		}
+		catch {
+			// refused (the page has no focus): the copy command below
+		}
+	}
+	const area = h("textarea", { readonly: true, "aria-hidden": "true", style: { position: "fixed", left: "-10000px", top: "0" } });
+	area.value = text;
+	document.body.append(area);
+	area.select();
+	let copied = false;
+	try {
+		copied = document.execCommand("copy");
+	}
+	finally {
+		area.remove();
+	}
+	return copied;
+}
+
+// A turn's attachments as chat.send takes them again: files the chat's media folder keeps, by their path.
+function keptAttachments(attachments) {
+	return (attachments || []).map((attachment) => ({ path: attachment.path, name: attachment.name, mime: attachment.mime }));
+}
+
 // What the composer shows of a chat not made yet.
 function draftSummary(draft) {
 	return Object.assign({ title: "New chat", state: "idle", pinnedModel: draft.model || "" }, draft);
@@ -115,6 +146,9 @@ export class ChatPane {
 			loadEarlier: () => this.loadEarlier(),
 			codeBlock: (code, fence, closed) => this.codeColors.element(code, fence, closed),
 			colorDiff: (path, spans) => this.codeColors.diff(path, spans),
+			copy: (text, what) => this.copy(text, what),
+			editMessage: (turn) => this.editMessage(turn),
+			resend: (turn) => this.resend(turn),
 		};
 	}
 
@@ -143,6 +177,7 @@ export class ChatPane {
 	show(chatId) {
 		if (this.stopChat) this.stopChat();
 		this.stopChat = null;
+		if (this.composer.editing && chatId !== this.chatId) this.composer.stopEditing(true);
 		this.chatId = chatId;
 		this.model = new ChatModel();
 		this.transcript.model = this.model;
@@ -179,10 +214,23 @@ export class ChatPane {
 
 	changed(kind, data) {
 		const change = this.model.event(kind, data);
+		if (change.all) return this.reverted();
 		this.transcript.update(change);
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
 		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips || change.background) this.panel.update(this.model);
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
+	}
+
+	// The chat was reverted to before a turn (here or on another device): it is drawn again as it is now, and a message
+	// being edited whose turn is gone is no longer one to replace (its text stays in the box).
+	reverted() {
+		this.transcript.render();
+		const editing = this.composer.editing;
+		if (editing && !this.model.turn(editing.turnId)) this.composer.stopEditing(false);
+		this.composer.update(this.model);
+		this.panel.update(this.model);
+		this.scrollToEnd();
+		if (this.host.shown) this.host.shown(this.model.summary);
 	}
 
 	gap() {
@@ -262,8 +310,10 @@ export class ChatPane {
 		return true;
 	}
 
-	// extras: {mentions, attachments}, sent when there are any.
+	// extras: {mentions, attachments}, sent when there are any; `revertTo` (an edited message): the chat is reverted to
+	// before that turn first, once the owner says so.
 	async send(text, as, extras) {
+		if (extras && extras.revertTo && !(await this.revertTo(extras.revertTo))) return false;
 		if (!this.chatId && !(await this.createChat())) return false;
 		const params = { chatId: this.chatId, text, as };
 		if (extras && extras.mentions.length) params.mentions = extras.mentions;
@@ -273,6 +323,38 @@ export class ChatPane {
 
 	stop() {
 		if (this.chatId) this.request("chat.stop", { chatId: this.chatId });
+	}
+
+	// --- A message's buttons (docs/15 "Message buttons") -------------------------------------------------------------
+
+	async copy(text, what) {
+		if (await copyText(text)) this.ied.toast(what === "reply" ? "Copied the reply." : "Copied the message.", { level: "info" });
+		else this.ied.toast("The clipboard is not available here.", { level: "warn" });
+	}
+
+	// The owner's message back in the composer, with what it named and carried; sending it reverts the chat to before it.
+	editMessage(turn) {
+		const user = turn.user || {};
+		this.composer.edit(turn.turnId, turn.startedMs, { text: user.text || "", mentions: user.mentions || [], attachments: user.attachments || [] });
+	}
+
+	// The chat reverted to before the owner's message, which is sent again as it was.
+	async resend(turn) {
+		const user = turn.user || {};
+		if (!(await this.revertTo(turn.turnId, "Resend"))) return;
+		await this.send(user.text || "", "message", { mentions: user.mentions || [], attachments: keptAttachments(user.attachments) });
+	}
+
+	// chat.revert to before `turnId`, once the owner confirms: what goes, that it is kept, that files stay as they are, and
+	// that a running turn stops first. Whether it was reverted.
+	async revertTo(turnId, title = "Edit and send") {
+		const at = this.model.turns.findIndex((turn) => turn.turnId === turnId);
+		const after = at < 0 ? 0 : this.model.turns.length - at - 1;
+		const going = after ? "This message, its reply and the " + (after === 1 ? "turn" : after + " turns") + " after it leave the chat" : "This message and its reply leave the chat";
+		const message = going + "; they are kept in the chat's folder (reverted/). Files they changed are not changed back."
+			+ (this.model.running() ? " The turn running now stops first." : "");
+		if (!(await confirmDialog({ title: title + ": revert the chat to before this message?", message, confirm: title === "Resend" ? "Revert and resend" : "Revert and send" }))) return false;
+		return (await this.request("chat.revert", { chatId: this.chatId, turnId })) !== null;
 	}
 
 	// The @ list's rows: its lists other than files and symbols asked once per "@" (mentions.js).

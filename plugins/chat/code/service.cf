@@ -35,6 +35,7 @@ namespace Ai
 		Register("chat.approve", [self](const IED::Request& request) -> Core::String { return self->ApproveMethod(request); });
 		Register("chat.answer", [self](const IED::Request& request) -> Core::String { return self->AnswerMethod(request); });
 		Register("chat.history", [self](const IED::Request& request) -> Core::String { return self->HistoryMethod(request); });
+		Register("chat.revert", [self](const IED::Request& request) -> Core::String { return self->RevertMethod(request); });
 		Register("ai.probe", [self](const IED::Request& request) -> Core::String { return self->ProbeMethod(request); });
 		Register("chat.delete", [self](const IED::Request& request) -> Core::String { return self->DeleteMethod(request); });
 		Register("chat.restore", [self](const IED::Request& request) -> Core::String { return self->RestoreMethod(request); });

@@ -45,14 +45,17 @@ export function foldersOf(paths) {
 	return [...folders];
 }
 
-// The rows for `query`, best first: candidates ranked by their label, ties in the order given.
+// The rows for `query`, best first: candidates ranked by their label, ties the shorter label first - a folder before
+// the files in it, which would otherwise fill the list ("@sr" showed twelve files of src/ and never src/ itself) - then
+// in the order given. With no query yet, the order given.
 export function rankRows(query, candidates) {
 	const ranked = [];
 	candidates.forEach((candidate, order) => {
 		const rank = matchRank(query, candidate.label);
 		if (rank !== null) ranked.push({ candidate, rank, order });
 	});
-	return ranked.sort((a, b) => a.rank - b.rank || a.order - b.order).slice(0, MOST_ROWS).map((entry) => entry.candidate);
+	const shorter = (a, b) => (query ? a.candidate.label.length - b.candidate.label.length : 0);
+	return ranked.sort((a, b) => a.rank - b.rank || shorter(a, b) || a.order - b.order).slice(0, MOST_ROWS).map((entry) => entry.candidate);
 }
 
 // A workspace symbol as a mention: by the place of its name, "path:line" (1-based), which the server reads it at.
@@ -66,15 +69,39 @@ export function symbolMention(symbol, wsId) {
 	return { kind: "symbol", ref: path + ":" + line, label: "#" + name, detail: path };
 }
 
-// The mentions whose "@label" the text still holds, each once.
-export function keptMentions(text, mentions) {
+// A character a label goes on with: a mention written into a longer word or path ("@src/main.c" typed on to
+// "@src/main.cf", a folder's "@src/" to "@src/game") names something else.
+const LABEL_GOES_ON = /[\p{L}\p{N}_\/-]/u;
+
+// Where the text names the mentions: [{start, end, mention}] in order, each "@label" where a mention may start
+// (mentionAt's rule) and not running on into a longer word; where two would overlap, the longer label. Each mention
+// once, by its kind and ref.
+export function mentionRanges(text, mentions) {
 	const seen = new Set();
-	return mentions.filter((mention) => {
+	const unique = mentions.filter((mention) => {
 		const key = mention.kind + "\n" + mention.ref;
-		if (seen.has(key) || !text.includes("@" + mention.label)) return false;
+		if (seen.has(key)) return false;
 		seen.add(key);
 		return true;
 	});
+	const ranges = [];
+	for (const mention of unique.slice().sort((a, b) => b.label.length - a.label.length)) {
+		const written = "@" + mention.label;
+		for (let at = text.indexOf(written); at >= 0; at = text.indexOf(written, at + 1)) {
+			const end = at + written.length;
+			if (at > 0 && !/[\s([{]/.test(text[at - 1])) continue;
+			if (end < text.length && LABEL_GOES_ON.test(text[end])) continue;
+			if (ranges.some((range) => at < range.end && end > range.start)) continue;
+			ranges.push({ start: at, end, mention });
+		}
+	}
+	return ranges.sort((a, b) => a.start - b.start);
+}
+
+// The mentions whose "@label" the text still holds (mentionRanges), each once, in the order they were made.
+export function keptMentions(text, mentions) {
+	const named = new Set(mentionRanges(text, mentions).map((range) => range.mention));
+	return mentions.filter((mention) => named.delete(mention));
 }
 
 // request(method, params) -> Promise<result | null>, as the chat pane's. The lists other than files and symbols are

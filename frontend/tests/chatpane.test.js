@@ -280,6 +280,86 @@ test("chat pane: the details panel's edge sizes it, and the width is kept for th
 	}
 });
 
+// The pane's requests, answered by `answers[method]` (a value or a function of the params); every call kept in `calls`.
+function answering(ied, answers) {
+	ied.calls = [];
+	ied.client.request = async (method, params) => {
+		ied.calls.push([method, params]);
+		const answer = answers[method];
+		return typeof answer === "function" ? answer(params) : answer === undefined ? null : answer;
+	};
+	return ied;
+}
+
+async function confirmShown(press) {
+	await frames(1);
+	const button = document.querySelector(".popup.dialog .btn" + (press ? ".primary" : ":not(.primary)"));
+	assertTrue(button, "the dialog asks first");
+	const said = document.querySelector(".popup.dialog").textContent;
+	button.click();
+	return said;
+}
+
+test("chat pane: the owner's message has Copy, Edit and Resend, the reply Copy; Resend reverts to before it and sends it again", async () => {
+	const ied = answering(fakeIed(), { "chat.revert": { dropped: 1 }, "chat.send": { turnId: "u9" } });
+	const pane = await openPane(ied, 2);
+	try {
+		const copied = [];
+		pane.copy = async (text, what) => copied.push([what, text]);
+		const turn = pane.transcript.el.querySelector(".chat-turn[data-turn='u1']");
+		const buttons = [...turn.querySelectorAll(".chat-head .chat-msg-tools button")].map((b) => b.getAttribute("aria-label"));
+		assertEqual(buttons, ["Copy the message", "Edit", "Resend"], "the owner's message");
+		turn.querySelector(".chat-head .chat-msg-tools button").click();
+		turn.querySelector(".chat-foot .chat-msg-tools button").click();
+		assertEqual(copied, [["message", "Question 1"], ["reply", "Answer 1"]], "Copy gives the message as written and the reply's Markdown");
+		turn.querySelector(".chat-head .chat-msg-tools button[aria-label='Resend']").click();
+		const said = await confirmShown(true);
+		assertTrue(said.includes("leave the chat") && said.includes("kept") && said.includes("not changed back"), "it says what goes, that it is kept, and that files stay: " + said);
+		await frames(2);
+		assertEqual(ied.calls.filter(([m]) => m.startsWith("chat.")).map(([m, p]) => [m, p.turnId || p.text]), [["chat.revert", "u1"], ["chat.send", "Question 1"]], "reverted to before it, then sent again");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+test("chat pane: Edit puts the message in the composer; sending it asks, reverts, then sends; cancelled, nothing changes", async () => {
+	const ied = answering(fakeIed(), { "chat.revert": { dropped: 2 }, "chat.send": { turnId: "u9" } });
+	const pane = await openPane(ied, 3);
+	try {
+		const head = pane.transcript.el.querySelector(".chat-turn[data-turn='u1'] .chat-head");
+		head.querySelector("button[aria-label='Edit']").click();
+		assertEqual([pane.composer.input.value, pane.composer.editingEl.hidden], ["Question 1", false], "in the box, as an edit");
+		pane.composer.setText("Question 1, better");
+		pane.composer.send("message");
+		const said = await confirmShown(false);
+		assertTrue(said.includes("the turn after it"), "one turn after it goes too: " + said);
+		await frames(2);
+		assertEqual([ied.calls.filter(([m]) => m.startsWith("chat.")).length, pane.composer.input.value], [0, "Question 1, better"], "cancelled: no request, the text back in the box");
+		pane.composer.send("message");
+		await confirmShown(true);
+		await frames(2);
+		assertEqual(ied.calls.filter(([m]) => m.startsWith("chat.")).map(([m, p]) => [m, p.turnId || p.text]), [["chat.revert", "u1"], ["chat.send", "Question 1, better"]], "reverted, then the edited text sent");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+test("chat pane: a chat reverted on any device is drawn as the server has it now", async () => {
+	const ied = fakeIed();
+	const pane = await openPane(ied, 3);
+	try {
+		pane.composer.edit("u2", 0, { text: "Question 2", mentions: [], attachments: [] });
+		ied.topics.get("chat:c1").evt("chat.reverted", { turnId: "u1", dropped: 2, file: "reverted/1-u1.jsonl", snapshot: snapshotOf(1) });
+		assertEqual([...pane.transcript.el.querySelectorAll(".chat-turn")].map((t) => t.dataset.turn), ["u0"], "the turns kept");
+		assertEqual([pane.composer.editing, pane.composer.input.value], [null, "Question 2"], "the message being edited is gone: no longer an edit, its text kept");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
 test("chat: a link in a reply opens the file it names, an address in its own window", () => {
 	const opened = [];
 	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0 }, { openFile: (path, line) => opened.push([path, line]), loadEarlier: () => {}, codeBlock: () => null });
@@ -319,16 +399,98 @@ test("chat: a server that says it is still reading the prompt is believed, not c
 	view.prefillTimer = 0;
 });
 
-test("chat: the streaming thinking's preview holds the last whole lines, cut at a line start", () => {
+test("chat: the streaming thinking's preview holds the last whole lines, never cut inside one", () => {
 	assertEqual(thinkingTail(""), "", "nothing yet");
 	assertEqual(thinkingTail("one line"), "one line", "a single line: all of it");
-	assertEqual(thinkingTail("a\nb\nc"), "a\nb\nc", "three lines: all of them");
-	assertEqual(thinkingTail("a\nb\nc\nd\ne"), "c\nd\ne", "more: the last three, the line being written last");
-	const long = (c, n) => c.repeat(n);
-	const threeLong = [long("7", 120), long("8", 120), long("9", 120)];
-	assertEqual(thinkingTail(threeLong.join("\n")), threeLong[1] + "\n" + threeLong[2], "long lines: the budget cuts at a line start, the newest in full");
-	const many = Array.from({ length: 10 }, (_, i) => "line " + i + " ".repeat(20)).join("\n");
-	const cut = thinkingTail(many);
-	assertTrue(/^line \d+/.test(cut), "it opens on a whole line");
-	assertEqual(cut.endsWith("line 9".padEnd(26)), true, "it ends on the newest line, in full");
+	assertEqual(thinkingTail("a\nb\nc\nd"), "a\nb\nc\nd", "four lines: all of them");
+	assertEqual(thinkingTail("a\nb\nc\nd\ne\nf"), "c\nd\ne\nf", "more: the last four, the line being written last");
+	const long = "word ".repeat(400);
+	assertEqual(thinkingTail("first\n" + long), "first\n" + long, "a long line is whole: its start never slides away as it grows");
+	const lines = Array.from({ length: 10 }, (_, i) => "line " + i + " " + "x".repeat(i * 30));
+	assertEqual(thinkingTail(lines.join("\n")).split("\n"), lines.slice(-4), "every line kept is whole");
+});
+
+// A chat pane on the page (with chat.css) whose turn is thinking: [pane, topic, the thinking segment's element].
+async function thinkingPane() {
+	const link = document.querySelector("link[data-test='chat-css']") || document.head.appendChild(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/plugins/ied.chat/ui/chat.css" }));
+	link.dataset.test = "chat-css";
+	if (!link.sheet) await new Promise((resolve) => link.addEventListener("load", resolve, { once: true }));
+	const ied = fakeIed();
+	const pane = await openPane(ied, 1);
+	pane.el.style.cssText = "width: 900px; height: 600px;";
+	const topic = ied.topics.get("chat:c1");
+	topic.evt("turn.start", { turnId: "n1", mode: "agent", user: { text: "Think" } });
+	topic.evt("segment.start", { turnId: "n1", segId: "k1", type: "thinking", done: false, text: "" });
+	await frames(1);
+	return [pane, topic, pane.transcript.el.querySelector(".chat-seg[data-seg='k1']")];
+}
+
+test("chat: a thinking block opens from its header while it streams, and goes on streaming open", async () => {
+	const [pane, topic, seg] = await thinkingPane();
+	try {
+		const head = seg.querySelector("button.chat-think");
+		for (let i = 0; i < 5; i++) {
+			topic.evt("segment.delta", { segId: "k1", text: "step " + i + "\n" });
+			await frames(2);
+		}
+		assertTrue(head.isConnected && seg.querySelector("button.chat-think") === head, "the header is the same element through the deltas: a press on it is not lost");
+		assertEqual(head.getAttribute("aria-expanded"), "false", "closed while streaming");
+		head.click();
+		const body = seg.querySelector(".chat-think-body");
+		assertEqual([head.getAttribute("aria-expanded"), body.hidden, seg.querySelector(".chat-think-tail").hidden], ["true", false, true], "open mid-stream: the whole text, no preview");
+		assertTrue(body.textContent.startsWith("step 0\n") && body.textContent.includes("step 4"), "the whole text so far");
+		topic.evt("segment.delta", { segId: "k1", text: "step 5" });
+		await frames(2);
+		assertTrue(body.isConnected && body.textContent.endsWith("step 5"), "it goes on streaming into the open body");
+		head.click();
+		assertEqual([body.hidden, seg.querySelector(".chat-think-tail").hidden], [true, false], "closed again: the preview");
+		topic.evt("segment.end", { segId: "k1", tokens: 40, ms: 1200 });
+		await frames(2);
+		assertTrue(seg.querySelector(".chat-think-tail").hidden && head.textContent.includes("1.2 s"), "done: the header says how long it took");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+test("chat: the thinking preview keeps its size, and its text only moves up - never sideways", async () => {
+	const [pane, topic, seg] = await thinkingPane();
+	try {
+		const tail = seg.querySelector(".chat-think-tail");
+		const lines = seg.querySelector(".chat-think-lines");
+		const sizes = new Set();
+		const lefts = new Set();
+		// The left edge of the n-th word of the text shown, as drawn.
+		const wordLeft = (n) => {
+			const node = lines.firstChild;
+			const at = node.textContent.indexOf("w" + n + " ");
+			const range = document.createRange();
+			range.setStart(node, at);
+			range.setEnd(node, at + 1);
+			return Math.round(range.getBoundingClientRect().left);
+		};
+		for (let i = 0; i < 120; i++) {
+			topic.evt("segment.delta", { segId: "k1", text: "w" + i + " " });
+			await frames(1);
+			const box = tail.getBoundingClientRect();
+			sizes.add(Math.round(box.width) + "x" + Math.round(box.height));
+			if (i >= 70) lefts.add(wordLeft(70));
+		}
+		assertEqual(lefts.size, 1, "a word of a long line stays where it was drawn as the line grows: " + [...lefts].join(", "));
+		const before = wordLeft(110);
+		for (let i = 0; i < 6; i++) {
+			topic.evt("segment.delta", { segId: "k1", text: "\nshort line " + i });
+			await frames(1);
+			const box = tail.getBoundingClientRect();
+			sizes.add(Math.round(box.width) + "x" + Math.round(box.height));
+		}
+		assertEqual(sizes.size, 1, "one size from a single long line to many short ones: " + [...sizes].join(", "));
+		const height = parseFloat(getComputedStyle(tail).fontSize) * 1.5 * 4;
+		assertTrue(Math.abs(tail.getBoundingClientRect().height - height) < 1, "four lines tall");
+		assertTrue(lines.scrollWidth <= tail.clientWidth + 1, "long lines wrap: nothing reaches past the box's right edge");
+		assertTrue(!lines.textContent.includes("w110 ") || wordLeft(110) === before, "a line kept stays where it was");
+	}
+	finally {
+		closePane(pane);
+	}
 });

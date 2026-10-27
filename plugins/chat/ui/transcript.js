@@ -10,19 +10,13 @@ import { showImage } from "/ui-kit/imageview.js";
 import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
 import { userChips } from "./userchips.js";
 
-// The streaming thinking's preview: the last few lines, cut at a line start - so it opens on a whole line and moves
-// only when a line completes, and the line being written shows in full.
-const THINK_TAIL_LINES = 3;
-const THINK_TAIL_CHARS = 320;
+// The streaming thinking's preview (owner, 2026-10-26: "just show the last few lines with a fixed size block"): the last
+// whole lines as written, never cut inside one, in a box as tall as THINK_TAIL_LINES lines whose text wraps and sits at
+// its bottom (chat.css). Text already shown never moves sideways; it only moves up as lines are added. Each line takes
+// one row of the box at least, so these lines always fill it.
+export const THINK_TAIL_LINES = 4;
 export function thinkingTail(text) {
-	const lines = String(text || "").split("\n");
-	let tail = lines.slice(-THINK_TAIL_LINES).join("\n");
-	if (tail.length > THINK_TAIL_CHARS) {
-		tail = tail.slice(-THINK_TAIL_CHARS);
-		const at = tail.indexOf("\n");
-		if (at >= 0) tail = tail.slice(at + 1);
-	}
-	return tail;
+	return String(text || "").split("\n").slice(-THINK_TAIL_LINES).join("\n");
 }
 
 const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
@@ -45,6 +39,7 @@ export class TranscriptView {
 		this.segmentEls = new Map();
 		this.dirty = new Set();
 		this.expanded = new Set();
+		this.thinkParts = new WeakMap();   // a thinking segment's element -> its parts (fillThinking)
 		this.frame = 0;
 		this.prefillTimer = 0;
 		this.el.addEventListener("click", (event) => this.linkClicked(event));
@@ -146,22 +141,28 @@ export class TranscriptView {
 	}
 
 	// Who sent the turn's message: the owner, another chat, or IED itself, going on after a restart (docs/12 "Restart
-	// behavior").
+	// behavior"). The owner's message has Copy, Edit and Resend (docs/15 "Message buttons").
 	userHead(turn) {
 		const resumed = turn.user && turn.user.resumed;
 		if (turn.user && turn.user.origin === "background") return h("div.chat-head.from", { title: "IED started this turn to tell the AI that background tasks it started have ended" },
 			icon("history"), h("b", null, "Background tasks"), h("span.muted", null, "ended"), h("span.muted", null, clock(turn.startedMs)));
 		if (resumed) return h("div.chat-head.from", { title: resumed === "relaunch" ? "IED relaunched onto a new build and continued this chat" : "IED restarted while this chat ran and continued it" },
 			icon("debug-restart"), h("b", null, "IED"), h("span.muted", null, resumed === "relaunch" ? "after relaunching" : "after a restart"), h("span.muted", null, clock(turn.startedMs)));
-		return this.senderHead(turn.user && turn.user.from, turn.startedMs);
+		const from = turn.user && turn.user.from;
+		const text = turn.user ? turn.user.text : "";
+		const tools = from ? null : messageTools(
+			toolButton("copy", "Copy the message", () => this.actions.copy(text, "message")),
+			toolButton("edit", "Edit: the message back in the box; sending it reverts the chat to before it", () => this.actions.editMessage(turn)),
+			toolButton("debug-restart", "Resend: revert the chat to before this message and send it again", () => this.actions.resend(turn)));
+		return this.senderHead(from, turn.startedMs, tools);
 	}
 
-	// The owner, or another chat (docs/04 "Chats talk to each other"), which a click opens.
-	senderHead(from, ms) {
-		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(ms)));
+	// The owner, or another chat (docs/04 "Chats talk to each other"), which a click opens; `tools` the message's buttons.
+	senderHead(from, ms, tools) {
+		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(ms)), tools || null);
 		return h("div.chat-head.from", null, icon("comment-discussion"), h("b", null, "From chat"),
 			h("button.chat-from-link", { title: "Open " + from.title, on: { click: () => this.actions.openChat(from.chatId) } }, from.title || from.chatId),
-			h("span.muted", null, clock(ms)));
+			h("span.muted", null, clock(ms)), tools || null);
 	}
 
 	// Whether the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many
@@ -225,6 +226,8 @@ export class TranscriptView {
 		if (turn.recoveries && turn.recoveries.length) parts.push(h("span.chat-recoveries", { title: "What the harness did to keep the run going" }, "harness: " + turn.recoveries.join("; ")));
 		const speed = tokensPerSecond(turn);
 		parts.push(h("span.meta", null, compact(turn.tokensIn) + " in / " + compact(turn.tokensOut) + " out" + (turn.ttftMs ? " \u00b7 TTFT " + duration(turn.ttftMs) : "") + (speed ? " \u00b7 " + speed + " tok/s" : "")));
+		const reply = replyText(turn);
+		if (reply) parts.push(messageTools(toolButton("copy", "Copy the reply (Markdown)", () => this.actions.copy(reply, "reply"))));
 		return parts;
 	}
 
@@ -232,7 +235,7 @@ export class TranscriptView {
 
 	fill(el, segment) {
 		if (segment.type === "text") replace(el, ...this.textParts(segment));
-		else if (segment.type === "thinking") replace(el, ...this.thinkingParts(segment));
+		else if (segment.type === "thinking") this.fillThinking(el, segment);
 		else if (segment.type === "tool") replace(el, this.toolCard(segment));
 		else if (segment.type === "harness") replace(el, this.harnessLine(segment));
 		else if (segment.type === "message" || segment.type === "steering") replace(el, ...this.messageParts(segment));
@@ -242,7 +245,8 @@ export class TranscriptView {
 	// chat's).
 	messageParts(segment) {
 		const chips = this.model.summary ? userChips(segment, this.model.summary.wsId, this.actions) : null;
-		return [this.senderHead(segment.from, segment.atMs), h("div.chat-user", null, segment.text || "", chips)];
+		const tools = segment.from ? null : messageTools(toolButton("copy", "Copy the message", () => this.actions.copy(segment.text || "", "message")));
+		return [this.senderHead(segment.from, segment.atMs, tools), h("div.chat-user", null, segment.text || "", chips)];
 	}
 
 	textParts(segment) {
@@ -257,17 +261,45 @@ export class TranscriptView {
 		return renderMarkdown(text, { code: (code, fence, closed) => this.actions.codeBlock(code, fence, closed) });
 	}
 
-	thinkingParts(segment) {
+	// A thinking segment changes in place: its header stays the same element as the text streams, so a click or a key on
+	// it opens it mid-stream (a header drawn anew each frame lost the click between its mousedown and mouseup), and the
+	// open body goes on streaming.
+	fillThinking(el, segment) {
+		let parts = this.thinkParts.get(el);
+		if (!parts) {
+			parts = this.thinkingParts(segment);
+			this.thinkParts.set(el, parts);
+			replace(el, parts.head, parts.tail, parts.body);
+		}
 		const open = this.expanded.has(segment.segId);
-		const toggle = () => {
-			if (open) this.expanded.delete(segment.segId);
-			else this.expanded.add(segment.segId);
-			this.fill(this.segmentEls.get(segment.segId), segment);
-		};
+		if (parts.open !== open) {
+			parts.open = open;
+			parts.head.setAttribute("aria-expanded", open ? "true" : "false");
+			replace(parts.chevron, icon(open ? "chevron-down" : "chevron-right"));
+		}
 		const facts = segment.done ? [segment.ms ? duration(segment.ms) : "", segment.tokens ? compact(segment.tokens) + " tok" : ""].filter(Boolean).join(" \u00b7 ") : "thinking\u2026";
-		const head = h("button.chat-think", { "aria-expanded": open ? "true" : "false", on: { click: toggle } }, icon(open ? "chevron-down" : "chevron-right"), h("span.lbl", null, "Thinking"), h("span", null, facts));
-		const tail = !segment.done && !open ? h("div.chat-think-tail", null, thinkingTail(segment.text)) : null;
-		return [head, open ? h("div.chat-think-body", null, segment.text || "") : tail];
+		if (parts.facts.textContent !== facts) parts.facts.textContent = facts;
+		const tailShown = !segment.done && !open;
+		parts.tail.hidden = !tailShown;
+		if (tailShown) setText(parts.tailText, thinkingTail(segment.text));
+		parts.body.hidden = !open;
+		if (open) setText(parts.body, segment.text || "");
+	}
+
+	thinkingParts(segment) {
+		const segId = segment.segId;
+		const toggle = () => {
+			if (this.expanded.has(segId)) this.expanded.delete(segId);
+			else this.expanded.add(segId);
+			const found = this.model.segment(segId);
+			const el = this.segmentEls.get(segId);
+			if (el) this.fillThinking(el, found ? found.segment : segment);
+		};
+		const chevron = h("span.chev");
+		const facts = h("span.facts");
+		const head = h("button.chat-think", { on: { click: toggle } }, chevron, h("span.lbl", null, "Thinking"), facts);
+		const tailText = h("div.chat-think-lines");
+		return { head, chevron, facts, tail: h("div.chat-think-tail", { hidden: true }, tailText), tailText, body: h("div.chat-think-body", { hidden: true }), open: null };
 	}
 
 	harnessLine(segment) {
@@ -405,6 +437,38 @@ export class TranscriptView {
 			h("div.chat-finish-body.chat-text", null, ...this.markdown(args.summary || ""),
 				args.verification ? h("div.chat-finish-verify", null, h("b", null, "Verified: "), args.verification) : null));
 	}
+}
+
+// A message's buttons at the end of its row: shown while the pointer is on the message (always on a phone).
+function messageTools(...buttons) {
+	return h("span.chat-msg-tools", null, ...buttons);
+}
+
+function toolButton(glyph, title, run) {
+	return h("button.ib", { title, "aria-label": title.split(":")[0], on: { click: run } }, icon(glyph));
+}
+
+// What a turn's reply says, as written (Markdown): its text segments, and the summary its finish gave.
+export function replyText(turn) {
+	const parts = [];
+	for (const segment of turn.segments || []) {
+		if (segment.type === "text" && segment.text && segment.text.trim()) parts.push(segment.text.trim());
+		if (segment.type === "tool" && segment.tool === "finish" && segment.state === "ok") {
+			try {
+				const args = JSON.parse(segment.argsText || "{}");
+				if (args.summary) parts.push(String(args.summary).trim());
+			}
+			catch {
+				// a finish whose arguments did not parse says nothing to copy
+			}
+		}
+	}
+	return parts.join("\n\n");
+}
+
+// `el`'s text, written only when it changed: the node stays, and so do a selection and a scroll in it.
+function setText(el, text) {
+	if (el.textContent !== text) el.textContent = text;
 }
 
 // A file of a diff of several: its path, what became of it, its counts.

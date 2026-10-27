@@ -18,6 +18,9 @@ test("chat mentions: rows rank by their label", () => {
 	assertEqual(matchRank("", "anything"), 0);
 	const rows = rankRows("ri", [{ label: "src/main.cf" }, { label: "terminal:Build" }, { label: "src/ring.cf" }, { label: "diff" }]);
 	assertEqual(rows.map((row) => row.label), ["src/ring.cf", "src/main.cf", "terminal:Build"]);
+	const files = Array.from({ length: 14 }, (_, i) => ({ label: "src/file" + i + ".c" }));
+	assertEqual(rankRows("sr", files.concat({ label: "src/" }, { label: "src/game/" }))[0].label, "src/", "a folder is not crowded out by its files");
+	assertEqual(rankRows("", [{ label: "src/a.c" }, { label: "diff" }]).map((row) => row.label), ["src/a.c", "diff"], "with nothing typed, the order given");
 });
 
 test("chat mentions: the folders of files", () => {
