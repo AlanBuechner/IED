@@ -30,6 +30,8 @@
 .explorer .tree-row .meta { font-size: var(--font-size-xs); }
 .explorer .tree-row.problem .name { color: var(--accent-error); }
 .explorer .tree-row.startup .name { font-weight: 600; color: var(--text-0); }
+.explorer .tree-row.readonly .name { color: var(--text-1); }
+.explorer .tree-row .ex-lock { flex: none; margin-left: var(--space-2); color: var(--text-2); font-size: var(--font-size-xs); }
 .ex-search { padding: var(--space-2) var(--space-3); }
 .ex-search-field { flex: 1; min-width: 0; height: var(--row-h); padding: 0 var(--space-3); }
 .ex-search-note { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; font-size: var(--font-size-xs); }

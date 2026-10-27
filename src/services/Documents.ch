@@ -29,10 +29,12 @@ namespace Ied
 		public Core::String m_Saved;    // the file's text as last read, saved or seen changed on disk
 		public Core::String m_Opened;   // the text when the server opened it: the track-changes margin's baseline
 		public bool m_External;         // a file outside the workspace, read-only; `path` is its file: URI (docs/10)
+		public Core::String m_ReadOnlyReason;   // why a file of a read-only folder is read-only (ReadOnly.ch); empty for none
 		public Core::String m_LanguageId;   // the language its clients were last told
 		public Core::Queue<VersionChanges*> m_History;
 
 		public Core::String Topic() const { return Core::String("doc:") + m_DocId.View(); }
+		public bool IsReadOnly() const { return m_External || !m_ReadOnlyReason.IsEmpty(); }
 	}
 
 	class Documents
@@ -59,6 +61,11 @@ namespace Ied
 		public int64 Save(Document* doc);
 		// Saves every dirty document of `ws` (a task's saveBefore, docs/06); how many.
 		public int64 SaveAll(Workspace* ws);
+		// The read-only folders of `ws` changed: each open document whose state changed is told (doc.readOnly {docId,
+		// readOnly, reason}), and one that became read-only loses its lease.
+		public void ReadOnlyChanged(Workspace* ws);
+		// Throws forbidden (reason read_only) for a document that is read-only.
+		public void RefuseReadOnly(const Document* doc) const;
 		public Core::Array<Core::String> OpenPaths(Workspace* ws) const;
 
 	private:

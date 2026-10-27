@@ -235,11 +235,24 @@ export class Explorer {
 	renderRow(node, row) {
 		row.append(this.iconOf(node), h("span.name", null, ...this.nameParts(node)));
 		if (node.kind === "project" && node.name === this.startup) row.classList.add("startup");
+		const readOnly = this.readOnlyReason(node.path);
+		if (readOnly) {
+			row.classList.add("readonly");
+			row.append(icon("lock", "ex-lock"));
+		}
 		if (node.problem) {
 			row.classList.add("problem");
 			row.title = node.problem;
 		}
+		else if (readOnly) row.title = (node.path || "/") + "\nRead-only: " + readOnly;
 		else if (node.path !== undefined && node.path !== null) row.title = node.path || "/";
+	}
+
+	// Why the files of `path` are read-only, from the folders tools named read-only (docs/10 "Read-only folders"), or "".
+	readOnlyReason(path) {
+		if (path === undefined || path === null || path === "") return "";
+		const rule = (this.ied.workspace.readOnly || []).find((r) => path === r.path || path.startsWith(r.path + "/"));
+		return rule ? rule.reason : "";
 	}
 
 	// A node's icon (docs/15 "Icons"): the solution; folders, a solution's groups and its Solution Items as folders; a
@@ -538,6 +551,10 @@ export class Explorer {
 
 	workspaceEvent(kind, data) {
 		if (kind === "solution.changed") return this.reload();
+		if (kind === "readonly.changed") {
+			this.ied.workspace.readOnly = data.readOnly || [];
+			return this.refresh();
+		}
 		if (kind !== "tree.changed") return undefined;
 		if (this.search) return this.searchSoon();
 		if (data.overflow) return this.refresh();

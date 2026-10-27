@@ -9,6 +9,7 @@ include "web/Rpc.ch"
 include "fs/Watching.ch"
 include "solutions/Model.ch"
 include "LocalState.ch"
+include "ReadOnly.ch"
 
 namespace Ied
 {
@@ -29,6 +30,7 @@ namespace Ied
 		public Core::HashMap<Core::String, int64> m_Revisions;        // relative path -> revision
 		public Core::HashMap<Core::String, Core::String> m_Digests;   // relative path -> SHA-256 of the text the server last wrote or read; "" once it deleted the file
 		public Core::HashMap<Core::String, bool> m_OwnDirectories;    // folders the server made, until the watcher reports them
+		public ReadOnlyRules m_ReadOnly;     // the folders tools named read-only (ReadOnly.ch)
 		public FolderWatch m_Watch;
 
 		// The file at a workspace-relative path; under .ied/local, in its local state.
@@ -60,8 +62,13 @@ namespace Ied
 		public Core::String Read(Workspace* ws, Core::StringView path);
 		// The file's revision now (0 when it does not exist).
 		public int64 Revision(Workspace* ws, Core::StringView path);
-		// Writes a file (its folders made), checking `expectedRevision` unless it is -1; the new revision.
+		// Writes a file (its folders made), checking `expectedRevision` unless it is -1; the new revision. Throws
+		// forbidden (reason read_only) for a file of a read-only folder.
 		public int64 Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision);
+		// Why `path` may not be written (a read-only folder's reason), or empty (ReadOnly.ch).
+		public Core::String ReadOnlyReason(Workspace* ws, Core::StringView path) const;
+		// Throws forbidden (reason read_only) when `path` - or, with `within`, anything under it - is read-only.
+		public void RefuseReadOnly(Workspace* ws, Core::StringView path, bool within) const;
 		// A folder as a workspace of `kind` ("folder", "file" or "solution"), told to every service.
 		public Workspace* Open(const FS::Path& folder, Core::StringView kind);
 		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .iedsln as a solution, a
@@ -117,6 +124,8 @@ namespace Ied
 		private bool External(Workspace* ws, const TreeChange& change);
 		private bool ExternalWrite(Workspace* ws, Core::StringView path);
 		private bool ExternalDelete(Workspace* ws, Core::StringView path);
+		// The read-only folders read again; when they changed and `tell`, readonly.changed and the open documents told.
+		private void LoadReadOnly(Workspace* ws, bool tell);
 		private void Watch(Workspace* ws);
 		private Core::String ListMethod(Call& call, const Params& params);
 		private Core::String ReadMethod(Call& call, const Params& params);

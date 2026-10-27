@@ -416,6 +416,7 @@ namespace Ied
 		m_Server->m_Debugger->WorkspaceOpened(ws);
 		m_Server->m_Code->WorkspaceOpened(ws);
 		m_Server->m_Tools->WorkspaceOpened(ws);
+		LoadReadOnly(ws, false);
 		Watch(ws);
 		m_Server->Log((((Core::String("opened ") + ws->m_WsId.View()) + ": ") + ws->m_Root.View()).View());
 		return ws;
@@ -472,6 +473,7 @@ namespace Ied
 		json.Field("kind", ws->m_Kind.View());
 		json.RawField("solution", ws->m_Solution ? ws->m_Solution->ToJson().View() : Core::StringView("null"));
 		json.RawField("roots", Core::StringView("[\".\"]"));
+		json.RawField("readOnly", ws->m_ReadOnly.ToJson().View());
 		json.RawField("plugins", Core::StringView("[]"));
 		json.RawField("chats", Core::StringView("[]"));
 		json.EndObject();
@@ -552,7 +554,35 @@ namespace Ied
 		return 1;
 	}
 
+	Core::String Workspaces::ReadOnlyReason(Workspace* ws, Core::StringView path) const { return ws->m_ReadOnly.ReasonFor(path); }
+
+	void Workspaces::RefuseReadOnly(Workspace* ws, Core::StringView path, bool within) const {
+		Core::String reason = within ? ws->m_ReadOnly.ReasonWithin(path) : ws->m_ReadOnly.ReasonFor(path);
+		if (reason.IsEmpty()) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("reason", "read_only");
+		data.Field("path", path);
+		data.EndObject();
+		throw RpcError(ErrorCode::Forbidden, (Core::String("read-only: ") + reason.View()).View(), data.View());
+	}
+
+	void Workspaces::LoadReadOnly(Workspace* ws, bool tell) {
+		Core::Array<FS::Path> folders;
+		folders.Push(ws->m_Root / c_ReadOnlyFolder);    // where tools write it, whatever the workspace's kind
+		FS::Path local = ws->At(Core::StringView(c_ReadOnlyFolder));
+		if (local.View() != folders[0].View()) folders.Push(local);
+		if (!ws->m_ReadOnly.Load(folders) || !tell) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.RawField("readOnly", ws->m_ReadOnly.ToJson().View());
+		data.EndObject();
+		m_Server->m_Hub.Publish((Core::String("ws:") + ws->m_WsId.View()).View(), "readonly.changed", data.View());
+		m_Server->m_Documents->ReadOnlyChanged(ws);
+	}
+
 	int64 Workspaces::Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision) {
+		RefuseReadOnly(ws, path, false);
 		const int64 current = Revision(ws, path);
 		if (expectedRevision >= 0 && expectedRevision != current) throw Changed(current);
 		FS::Path file = ws->At(path);
@@ -572,10 +602,13 @@ namespace Ied
 
 	void Workspaces::ApplyExternal(Workspace* ws, const ChangeBatch& batch) {
 		Core::Array<TreeChange> published;
+		bool readOnly = batch.Overflowed();
 		for (const TreeChange& change : batch.Changes()) {
 			if (!IsHiddenPath(change.m_Path.View()) && External(ws, change)) published.Push(change);
 			m_Server->m_Settings->WorkspaceFileChanged(ws, change.m_Path.View());
+			readOnly = readOnly || IsReadOnlyFile(change.m_Path.View());
 		}
+		if (readOnly) LoadReadOnly(ws, true);
 		if (batch.Overflowed())
 			for (const Core::String& path : m_Server->m_Documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
@@ -730,6 +763,7 @@ namespace Ied
 	Core::String Workspaces::DeleteMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
 		Core::String path = NormalizePath(params.Str("path").View());
+		RefuseReadOnly(ws, path.View(), true);
 		if (!path.IsEmpty() && FS::IsDirectory(ws->At(path.View()).CStr())) return DeleteFolder(ws, path.View(), params.Bool("recursive", false));
 		const int64 current = Revision(ws, path.View());
 		if (!current) throw Missing("file", path.View());
@@ -754,6 +788,7 @@ namespace Ied
 
 	// The files known under the folder are forgotten and the documents open on them told.
 	Core::String Workspaces::TrashFolder(Workspace* ws, Core::StringView path) {
+		RefuseReadOnly(ws, path, true);
 		Core::String trashId = m_Server->m_Trash->MoveIn(ws, path, true);
 		for (const Core::String& known : Under(KnownPaths(ws), path)) {
 			if (FS::FileExists(ws->At(known.View()).CStr())) continue;
@@ -767,6 +802,7 @@ namespace Ied
 	}
 
 	Core::String Workspaces::TrashFile(Workspace* ws, Core::StringView path) {
+		RefuseReadOnly(ws, path, false);
 		Core::String trashId = m_Server->m_Trash->MoveIn(ws, path, false);
 		ws->m_Revisions.Remove(Core::String(path));
 		ws->m_Digests.At(Core::String(path)) = Core::String();
@@ -780,6 +816,8 @@ namespace Ied
 	// A folder moved with what is in it: revisions and digests follow, and so do the documents open under it.
 	Core::String Workspaces::RenameFolder(Workspace* ws, Core::StringView source, Core::StringView target) {
 		if (target.StartsWith((Core::String(source) + "/").View())) throw RpcError(ErrorCode::BadRequest, "a folder cannot move into itself");
+		RefuseReadOnly(ws, source, true);
+		RefuseReadOnly(ws, target, true);
 		FS::Path to = ws->At(target);
 		if (FS::FileExists(to.CStr()) || FS::IsDirectory(to.CStr())) throw RpcError(ErrorCode::Conflict, "the target already exists");
 		FS::MakeDirectories(to.Parent().CStr());
@@ -806,6 +844,7 @@ namespace Ied
 	Core::String Workspaces::MakeDirectoryMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
 		Core::String path = NormalizePath(params.Str("path").View());
+		RefuseReadOnly(ws, path.View(), false);
 		FS::Path folder = ws->At(path.View());
 		if (FS::FileExists(folder.CStr())) throw RpcError(ErrorCode::Conflict, "that path is a file");
 		if (!FS::IsDirectory(folder.CStr())) {
@@ -826,6 +865,8 @@ namespace Ied
 		Core::String target = NormalizePath(params.Str("to").View());
 		if (source.IsEmpty() || target.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "the workspace's own folder cannot be renamed");
 		if (FS::IsDirectory(ws->At(source.View()).CStr())) return RenameFolder(ws, source.View(), target.View());
+		RefuseReadOnly(ws, source.View(), false);
+		RefuseReadOnly(ws, target.View(), false);
 		const int64 revision = Revision(ws, source.View());
 		if (!revision) throw Missing("file", source.View());
 		FS::Path to = ws->At(target.View());

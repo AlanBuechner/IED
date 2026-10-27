@@ -62,6 +62,7 @@ namespace IED
 		Ied::Workspace* found = Reached(instance, ws, path, "fs.write", relative, problem);
 		if (!found) return false;
 		try {
+			server->m_Workspaces->RefuseReadOnly(found, relative.View(), false);
 			Ied::Document* doc = server->m_Documents->Find(found, relative.View());
 			if (!doc) {
 				const int64 revision = server->m_Workspaces->Write(found, relative.View(), text, -1);

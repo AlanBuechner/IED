@@ -1,0 +1,95 @@
+include "ReadOnly.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	static int32 FoldAscii(int32 c) { return c == '\\' ? '/' : c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	// Whether `path` is `folder` or under it, as Windows compares names (ASCII case folded, either separator).
+	static bool Covers(Core::StringView folder, Core::StringView path) {
+		if (path.ByteLength() < folder.ByteLength()) return false;
+		for (int64 i = 0; i < folder.ByteLength(); ++i)
+			if (FoldAscii(folder.ByteAt(i)) != FoldAscii(path.ByteAt(i))) return false;
+		return path.ByteLength() == folder.ByteLength() || folder.IsEmpty() || FoldAscii(path.ByteAt(folder.ByteLength())) == '/';
+	}
+
+	static Core::String CleanPath(Core::StringView path) {
+		Core::StringBuilder clean;
+		for (int64 i = 0; i < path.ByteLength(); ++i) clean.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		Core::StringView text = clean.View();
+		int64 start = 0;
+		int64 end = text.ByteLength();
+		while (start < end && text.ByteAt(start) == '/') start += 1;
+		while (end > start && text.ByteAt(end - 1) == '/') end -= 1;
+		return Core::String(text.Substring(start, end - start));
+	}
+
+	static void ReadRules(const FS::Path& file, Core::Array<ReadOnlyRule>& rules) {
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen()) return;
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		Serialization::DomNode paths = read.Ok() ? read.root.Member("paths") : Serialization::DomNode();
+		if (paths.Kind() != Serialization::DomKind::Array) return;
+		for (int64 i = 0; i < paths.Count(); ++i) {
+			Serialization::DomNode entry = paths.At(i);
+			Serialization::DomNode path = entry.Member("path");
+			if (path.Kind() != Serialization::DomKind::String) continue;
+			ReadOnlyRule rule;
+			rule.m_Path = CleanPath(path.AsView());
+			Serialization::DomNode reason = entry.Member("reason");
+			rule.m_Reason = reason.Kind() == Serialization::DomKind::String ? Core::String(reason.AsView()) : Core::String("a tool marked it read-only");
+			if (!rule.m_Path.IsEmpty() && !rule.m_Path.View().Contains(Core::StringView(".."))) rules.Push(rule);
+		}
+	}
+
+	static bool SameRules(const Core::Array<ReadOnlyRule>& a, const Core::Array<ReadOnlyRule>& b) {
+		if (a.Count() != b.Count()) return false;
+		for (int64 i = 0; i < a.Count(); ++i)
+			if (a[i].m_Path.View() != b[i].m_Path.View() || a[i].m_Reason.View() != b[i].m_Reason.View()) return false;
+		return true;
+	}
+
+	bool ReadOnlyRules::Load(const Core::Array<FS::Path>& folders) {
+		Core::Array<ReadOnlyRule> rules;
+		for (const FS::Path& folder : folders) {
+			if (!FS::IsDirectory(folder.CStr())) continue;
+			Core::Array<Core::String> names;
+			for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr()))
+				if (entry.kind == FS::EntryKind::File && entry.name.View().EndsWith(Core::StringView(".json"))) names.Push(entry.name);
+			names.Sort();
+			for (const Core::String& name : names) ReadRules(folder / name.View(), rules);
+		}
+		if (SameRules(rules, m_Rules)) return false;
+		m_Rules = take(rules);
+		return true;
+	}
+
+	Core::String ReadOnlyRules::ReasonFor(Core::StringView path) const {
+		for (const ReadOnlyRule& rule : m_Rules)
+			if (Covers(rule.m_Path.View(), path)) return rule.m_Reason;
+		return Core::String();
+	}
+
+	Core::String ReadOnlyRules::ReasonWithin(Core::StringView path) const {
+		for (const ReadOnlyRule& rule : m_Rules)
+			if (Covers(rule.m_Path.View(), path) || Covers(path, rule.m_Path.View())) return rule.m_Reason;
+		return Core::String();
+	}
+
+	Core::String ReadOnlyRules::ToJson() const {
+		JsonWriter json;
+		json.BeginArray();
+		for (const ReadOnlyRule& rule : m_Rules) {
+			json.BeginObject();
+			json.Field("path", rule.m_Path.View());
+			json.Field("reason", rule.m_Reason.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	bool IsReadOnlyFile(Core::StringView path) { return Covers(Core::StringView(c_ReadOnlyFolder), path) && path.EndsWith(Core::StringView(".json")); }
+}

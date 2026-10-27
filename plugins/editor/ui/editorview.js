@@ -199,7 +199,7 @@ export class CodeEditor {
 	}
 
 	readOnlyReason() {
-		if (this.sync.readOnly) return "This file is outside the workspace; IED shows it read-only.";
+		if (this.sync.readOnly) return this.sync.readOnlyReason || "This file is outside the workspace; IED shows it read-only.";
 		if (this.mixedEndings) return "This file mixes line endings (CRLF and LF); it opens read-only until they are one kind.";
 		return "Another window is editing this document. Use Edit Here to take over.";
 	}
@@ -229,7 +229,7 @@ export class CodeEditor {
 	showBar() {
 		if (this.noticeText) return;
 		const sync = this.sync;
-		if (sync.readOnly) this.setBar("lock", "Read-only: " + displayPath(this.path) + " is outside the workspace.", null);
+		if (sync.readOnly) this.setBar("lock", sync.readOnlyReason ? "Read-only: " + sync.readOnlyReason : "Read-only: " + displayPath(this.path) + " is outside the workspace.", null);
 		else if (this.mixedEndings) this.setBar("warning", "This file mixes line endings (CRLF and LF), so it is read-only here.", null);
 		else if (sync.docId && sync.holder && !sync.holdsLease) this.setBar("lock", "Read-only: another window is editing this document.", h("button.btn", { on: { click: () => this.takeOver() } }, "Edit Here"));
 		else if (sync.diskChanged) this.setBar("warning", sync.diskChanged === "deleted" ? "The file was deleted on disk; saving writes it again." : "The file changed on disk while you edit it here; saving replaces it.", null);

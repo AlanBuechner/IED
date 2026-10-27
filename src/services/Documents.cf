@@ -57,7 +57,8 @@ namespace Ied
 		else json.String(doc->m_Holder.View());
 		json.EndObject();
 		json.BoolField("dirty", doc->m_Dirty);
-		json.BoolField("readOnly", doc->m_External);
+		json.BoolField("readOnly", doc->IsReadOnly());
+		if (!doc->m_ReadOnlyReason.IsEmpty()) json.Field("readOnlyReason", doc->m_ReadOnlyReason.View());
 		json.Field("languageId", m_Server->m_Plugins->LanguageOf(doc->m_Ws, doc->m_Path.View()).View());
 		json.EndObject();
 		return json.ToString();
@@ -94,6 +95,7 @@ namespace Ied
 		doc->m_Ws = ws;
 		doc->m_Path = Core::String(path);
 		doc->m_External = external;
+		if (!external) doc->m_ReadOnlyReason = m_Server->m_Workspaces->ReadOnlyReason(ws, path);
 		doc->m_Text = take(text);
 		doc->m_Saved = doc->m_Text;
 		doc->m_Opened = doc->m_Text;
@@ -244,7 +246,7 @@ namespace Ied
 	Core::String Documents::OpenMethod(Call& call, const Params& params) {
 		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
 		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, NormalizePath(params.Str("path").View()).View());
-		if (doc->m_Holder.IsEmpty() && !doc->m_External) Grant(doc, call.ClientId());
+		if (doc->m_Holder.IsEmpty() && !doc->IsReadOnly()) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("docId", doc->m_DocId.View());
@@ -253,24 +255,53 @@ namespace Ied
 		json.Key(Core::StringView("holder"));
 		if (doc->m_Holder.IsEmpty()) json.Null();
 		else json.String(doc->m_Holder.View());
-		json.BoolField("readOnly", doc->m_External);
+		json.BoolField("readOnly", doc->IsReadOnly());
+		if (!doc->m_ReadOnlyReason.IsEmpty()) json.Field("readOnlyReason", doc->m_ReadOnlyReason.View());
 		json.EndObject();
 		return json.ToString();
 	}
 
-	// A file outside the workspace is only shown (docs/10): no lease, no edit, no save.
-	static void RefuseExternal(const Document* doc) {
-		if (!doc->m_External) return;
+	// A file outside the workspace, or in a read-only folder, is only shown (docs/10): no lease, no edit, no save.
+	void Documents::RefuseReadOnly(const Document* doc) const {
+		if (!doc->IsReadOnly()) return;
 		JsonWriter data;
 		data.BeginObject();
 		data.Field("reason", "read_only");
 		data.EndObject();
-		throw RpcError(ErrorCode::Forbidden, "the file is outside the workspace and read-only", data.View());
+		Core::String message = doc->m_External ? Core::String("the file is outside the workspace and read-only") : Core::String("read-only: ") + doc->m_ReadOnlyReason.View();
+		throw RpcError(ErrorCode::Forbidden, message.View(), data.View());
+	}
+
+	void Documents::ReadOnlyChanged(Workspace* ws) {
+		for (const Core::KeyValue<Core::String, Document*>& entry : m_ById) {
+			Document* doc = entry.value;
+			if (doc->m_Ws != ws || doc->m_External) continue;
+			Core::String reason = m_Server->m_Workspaces->ReadOnlyReason(ws, doc->m_Path.View());
+			if (reason.View() == doc->m_ReadOnlyReason.View()) continue;
+			doc->m_ReadOnlyReason = reason;
+			if (doc->IsReadOnly() && !doc->m_Holder.IsEmpty()) {
+				doc->m_Holder = Core::String();
+				JsonWriter lease;
+				lease.BeginObject();
+				lease.Field("docId", doc->m_DocId.View());
+				lease.Key(Core::StringView("holder"));
+				lease.Null();
+				lease.EndObject();
+				m_Server->m_Hub.Publish(doc->Topic().View(), "doc.lease", lease.View());
+			}
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("docId", doc->m_DocId.View());
+			data.BoolField("readOnly", doc->IsReadOnly());
+			data.Field("reason", reason.View());
+			data.EndObject();
+			m_Server->m_Hub.Publish(doc->Topic().View(), "doc.readOnly", data.View());
+		}
 	}
 
 	Core::String Documents::EditMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
-		RefuseExternal(doc);
+		RefuseReadOnly(doc);
 		if (doc->m_Holder.View() != call.ClientId()) {
 			JsonWriter data;
 			data.BeginObject();
@@ -288,7 +319,7 @@ namespace Ied
 
 	Core::String Documents::TakeLeaseMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
-		RefuseExternal(doc);
+		RefuseReadOnly(doc);
 		if (doc->m_Holder.View() != call.ClientId()) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
@@ -316,14 +347,14 @@ namespace Ied
 	int64 Documents::SaveAll(Workspace* ws) {
 		Core::Array<Document*> dirty;
 		for (const Core::KeyValue<Core::String, Document*>& entry : m_ByPath)
-			if (entry.value->m_Ws == ws && entry.value->m_Dirty && !entry.value->m_External) dirty.Push(entry.value);
+			if (entry.value->m_Ws == ws && entry.value->m_Dirty && !entry.value->IsReadOnly()) dirty.Push(entry.value);
 		for (Document* doc : dirty) Save(doc);
 		return dirty.Count();
 	}
 
 	Core::String Documents::SaveMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
-		RefuseExternal(doc);
+		RefuseReadOnly(doc);
 		const int64 revision = Save(doc);
 		JsonWriter json;
 		json.BeginObject();

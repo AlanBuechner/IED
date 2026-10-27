@@ -343,15 +343,19 @@ export class Shell {
 	}
 
 	workspaceSnapshot(data) {
-		Object.assign(this.workspace, { wsId: data.wsId, name: data.name, kind: data.kind, root: data.root, trusted: data.trusted !== false, solution: data.solution || null });
+		Object.assign(this.workspace, { wsId: data.wsId, name: data.name, kind: data.kind, root: data.root, trusted: data.trusted !== false, solution: data.solution || null, readOnly: data.readOnly || [] });
 		this.workspaceChanged();
 	}
 
 	// Only what changes the workspace's description or its plugins (its .ied/plugins/ edited): a tree.changed is for the
-	// views that show files.
+	// views that show files. The read-only folders (docs/10) are kept for the views that mark them.
 	workspaceEvent(kind, data) {
 		if (kind === "plugins.changed") {
 			this.reloadContributions();
+			return;
+		}
+		if (kind === "readonly.changed") {
+			this.workspace.readOnly = data.readOnly || [];
 			return;
 		}
 		if (kind === "trust.changed") this.workspace.trusted = data.trusted !== false;

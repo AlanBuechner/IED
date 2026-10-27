@@ -20,6 +20,7 @@ export class DocumentSync {
 		this.holder = null;
 		this.dirty = false;
 		this.readOnly = false;
+		this.readOnlyReason = "";       // why a file of a read-only folder is read-only (docs/10 "Read-only folders")
 		this.diskChanged = null;
 		this.languageId = "plaintext";
 		this.inflight = null;
@@ -75,6 +76,7 @@ export class DocumentSync {
 		this.holder = data.lease ? data.lease.holder : null;
 		this.dirty = data.dirty;
 		this.readOnly = data.readOnly === true;
+		this.readOnlyReason = data.readOnlyReason || "";
 		this.languageId = data.languageId || "plaintext";
 		this.inflight = null;
 		this.queue = [];
@@ -108,6 +110,11 @@ export class DocumentSync {
 			this.languageId = data.languageId || "plaintext";
 			this.state({ language: this.languageId });
 			return;
+		}
+		else if (kind === "doc.readOnly") {
+			this.readOnly = data.readOnly === true;
+			this.readOnlyReason = data.reason || "";
+			this.leaseChanged();
 		}
 		this.state(baselineMoved ? { baselineMoved } : {});
 	}
