@@ -25,4 +25,21 @@ namespace IED
 	bool LocalPathOf(Core::StringView uri, Core::String& path);
 	// The canonical file: URI of an absolute path, as servers' answers name a file outside the workspace.
 	Core::String FileUriOfPath(Core::StringView path);
+
+	// After an AI write of a file (docs/24 "After an AI edit"), as its language's plugin asks.
+	// What the profile serving `path` asks for, whether or not its server runs: {profile, label, format, diagnostics}
+	// (its formatOnAiWrite and diagnosticsOnAiWrite); {profile: null} when none serves it.
+	bool LspAiWrite(const Workspace& ws, Core::StringView path, Core::String& result, Core::String& problem);
+	// How many times the workspace's servers have published `path`'s diagnostics: the mark LspDiagnosticsAfter waits
+	// past, taken before the write.
+	int64 LspPublishMark(const Workspace& ws, Core::StringView path);
+	// What the server serving `path` says of it once it has the file as it is now (started, the file opened on it when no
+	// document holds it), waiting at most `ms` for a publication after `mark`: {profile, label, state: fresh | stale |
+	// starting | down, items: [diagnostic, UTF-16 positions], elsewhere: [{path, errors, warnings}], elsewhereFiles};
+	// {profile: null} when none serves it. Without the lock: it waits.
+	bool LspDiagnosticsAfter(const Workspace& ws, Core::StringView path, int64 mark, int64 ms, Core::String& result, Core::String& problem);
+	// `path`'s text as edited, formatted by the server serving it (textDocument/formatting with `tabSize` and
+	// `insertSpaces`), not written; false with `problem` when no server serves it, it does not run within `ms`, does not
+	// format or failed. Without the lock.
+	bool LspFormatted(const Workspace& ws, Core::StringView path, int64 tabSize, bool insertSpaces, int64 ms, Core::String& formatted, Core::String& problem);
 }

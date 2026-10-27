@@ -114,6 +114,75 @@ namespace IED
 
 	Core::String FileUriOfPath(Core::StringView path) { return Ied::CanonicalFileUri(Ied::FileUriOf(path).View()); }
 
+	bool LspAiWrite(const Workspace& ws, Core::StringView path, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			result = server->lsp->AiWriteFor(found, Ied::NormalizePath(path).View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	int64 LspPublishMark(const Workspace& ws, Core::StringView path) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return 0;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "lsp", problem);
+		if (!found) return 0;
+		try {
+			return server->lsp->PublishMark(found, Ied::NormalizePath(path).View());
+		}
+		catch (Ied::RpcError& error) {
+			return 0;
+		}
+	}
+
+	bool LspDiagnosticsAfter(const Workspace& ws, Core::StringView path, int64 mark, int64 ms, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			result = server->lsp->DiagnosticsAfter(call, found, Ied::NormalizePath(path).View(), mark, ms);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	bool LspFormatted(const Workspace& ws, Core::StringView path, int64 tabSize, bool insertSpaces, int64 ms, Core::String& formatted, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			formatted = server->lsp->FormattedFor(call, found, Ied::NormalizePath(path).View(), tabSize, insertSpaces, ms);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
 	bool LspFileText(const Workspace& ws, Core::StringView uri, Core::String& text, Core::String& problem) {
 		Core::String path;
 		if (WorkspacePathOf(ws, uri, path)) return TextAsEdited(ws, path.View(), text, problem);

@@ -47,10 +47,45 @@ Server-initiated requests are answered by the host: `workspace/configuration` wi
 
 ## Plugin code asks language servers (2026-10-21)
 
-The AI's code tools (`docs/13` `code_*`) ask the same servers a person's editor does, through `src/api/lsp.ch` (permission `lsp`): a request about a file, a request without a document (a call or type hierarchy item carries its own URI), the workspace's symbols, and the text of a file a server named. Results come as clients get them: positions in UTF-16, workspace files as `ied://` URIs, others as `file:` URIs recorded as named.
+The AI's code tools (`docs/13` `code_*`) ask the same servers a person's editor does, through `src/api/lsp.ch` (permission `lsp`): a request about a file, a request without a document (a call or type hierarchy item carries its own URI), the workspace's symbols, the text of a file a server named, and what follows an AI write ("After an AI edit" below: `LspAiWrite`, `LspPublishMark`, `LspDiagnosticsAfter`, `LspFormatted`). Results come as clients get them: positions in UTF-16, workspace files as `ied://` URIs, others as `file:` URIs recorded as named.
 
 - **A file nobody has open.** A request about a file that is not an open document still needs it open on its server, but the document store is not burdened with it (a store document never closes) and a server like clangd keeps an AST per open file. So the pool opens it on the server alone - a *transient* open, `didOpen` with the text on disk - and keeps the last 16 per server, closing the oldest with `didClose`. Before each use it compares the file's revision on disk with the one it sent and sends the new text (`didChange`) when it moved; when the store opens the file later, the store's document takes the server's copy over (a full-text `didChange`, then it is the store's). A file outside the workspace is asked of the server that named it, opened the same way under its `file:` URI.
 - **Servers nobody started.** `workspace/symbol` reaches only running servers, and a person may not have opened a file of every language yet. For plugin code the pool first starts the servers the workspace's files call for: one walk of the workspace (build output, `.git` and the default excludes skipped; at most 20 000 files, once per workspace and server run) maps each file to its profile and, for a project-scoped profile in a solution, its owning project (files outside every project start none); each server that is missing starts, and the request waits up to 20 s in all for them to run.
+
+## After an AI edit (2026-10-26)
+
+Owner (item 32 of `docs/30`): "auto format and return LSP errors on file edit. this is something that c4 and go should
+support but other languages might not have the full tooling for this so it is up to the language plugins to configure.
+LSP failure is not a tool call failure. it is to be expected that things will brake mid edit when the edits spand
+multiple files." As built (`plugins/chat/code/afterwrite.cf`, `files.cf` `Written`; the pool's side in
+`src/lsp/aiwrite.cf`):
+
+- **The language plugin decides.** Two options of an `lspProfiles` entry, each `true` or a when clause that must hold in
+  the workspace (`docs/26` section 8): `formatOnAiWrite` - a file the AI writes (`fs_write`, `fs_edit`) is formatted
+  with `textDocument/formatting` before the call returns - and `diagnosticsOnAiWrite` - the call's result carries what
+  the server then says of the file. Shipped: C4LSP (`C4/IedPlugin`) and gopls (`ied.go`) both; clangd (`ied.cpp`)
+  diagnostics, and formatting only where the workspace's root has a `.clang-format` (`workspaceContains..clang-format`;
+  without one clangd would reformat to LLVM style). A language whose profile names neither is untouched.
+- **The owner turns them off:** `ai.edits.formatOnWrite`, `ai.edits.diagnosticsOnWrite` (app, solution; on), and
+  `ai.edits.diagnosticsWaitMs` (default 1500, at most 10000): how long a write waits for the diagnostics, and for a
+  server that is still starting.
+- **Formatting.** The AI's text is written (through the document store, as every AI write), the server formats the file
+  as edited (`IED::LspFormatted`: the indentation the text itself uses - tabs, or spaces and their width - as
+  `tabSize`/`insertSpaces`; its TextEdits applied in UTF-16 after the usual conversion from the server's encoding) and
+  the formatted text is written over it when it differs. The result says "Formatted by C4LSP: it changed N of the lines
+  you wrote, so read them again before an fs_edit near them", and the card's diff is the whole change. A server that is
+  not running within the wait, does not format, or fails leaves the file as written and the result says why ("Not
+  formatted: ..."); that is no failure either.
+- **Diagnostics.** A mark of the file's publications (`IED::LspPublishMark`) is taken before the write (and again before
+  the formatted text is written), then `IED::LspDiagnosticsAfter` makes sure the server has the file as it is now (the
+  document's, or a transient open) and waits for a publication past the mark - one for an older version than the server
+  was sent (`publishDiagnostics.version`) does not count. The result gets "Language server (C4LSP): 2 errors, 1 warning
+  in this file - what the code says now, not a failure of this call: while an edit spans several files, errors from the
+  files not yet changed are expected." with up to 8 `line L:C: severity: message` lines, then "Other files it finds
+  problems in: src/b.cf (2 errors), ..." (the five with the most errors, and how many more). A server that says
+  nothing in time, is starting or is down is said so, with `problems_list` to look later.
+- **Never a failure.** The call's result is not an error whatever the server says (the card stays green); the
+  developer-mode failure note (`docs/28`) is not added to it.
 
 ## Open items
 

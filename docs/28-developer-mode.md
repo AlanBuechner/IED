@@ -10,7 +10,9 @@ IED and start its self back up to test the changes"; "developer mode should be d
 enable if you are building from source"): off by default, writes and commands in `ied:/` follow the chat's permission
 mode, `ied_relaunch`, the host's relaunch (`src/host/relaunch.ch`, `docs/27` "Relaunch") and the chat going on after it
 (`docs/12` "Restart behavior"); server checks `test_developer.py` `RelaunchTests`, `test_control.py`,
-`test_desktop.py`. Not yet: see "Where it is not yet" below.
+`test_desktop.py`. Plugin folders writable and the note on every failing call built 2026-10-26 (owner's items 23 and
+33, `docs/30`): items 1 and 5 below; server checks `test_developer.py`, `test_plugin_folders.py`. Not yet: see "Where
+it is not yet" below.
 
 ## Why
 
@@ -43,6 +45,14 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    `fs_write`, `image_view` and `image_info` take them. Under the hood the source is opened as a workspace of its own
    (a folder workspace, not added to the recent projects) the first time a path names it, so edits go through its
    document store like any other - an open editor of that file shows the change. `shell_run` takes `cwd: "ied:/"`.
+   The tools' results name such paths with `ied:/` again (`fs_list`, `fs_glob`, `search_text`, a write's "saved"
+   line), so they can be passed back as they are (2026-10-26).
+   **The plugins' folders become writable** (2026-10-26, `docs/13` "Plugin folders"): without developer mode
+   `plugins:/<plugin id>/` - a plugin's skills, docs and manifest - is read-only; with it a write there goes to the
+   plugin's folder in `ied:/`: a server run from the checkout loads its built-in plugins from it, and an installed one's
+   come from it (the root's `home: true`: `<home>/plugins/chat` is `ied:/plugins/chat`, so the change lands in the
+   source, not in the install a reinstall replaces). The c4 plugin is the toolchain's copy `nuke build` makes from
+   `ied:/C4/IedPlugin/` and `ied:/C4/docs/`; the section says to change those and rebuild.
 2. **Permissions as the chat's mode says.** Writes into the source have the subject `fs.write(ied:/<path>)` and
    commands run there `shell(ied:/<command>)`, and they are decided like any other (`docs/11`): auto mode runs them
    without asking, acceptEdits writes and asks for commands, ask mode asks until the owner allows them - "Allow for this
@@ -60,8 +70,11 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    call failed; a tool that did something wrong is fixed in `ied:/`, and a call that was wrong because the tool's
    description or the system prompt misled it gets that text corrected in `ied:/` - the core tools' descriptions in
    `plugins/chat/code` (each tool's `Spec`), the system prompt in `plugins/chat/prompts`, a plugin's tools in its
-   manifest or code - then the call is made again; a failure the tool reported correctly (a file that is not there)
-   needs neither. About 400 tokens (`maxTokens` 450); only while developer mode is on.
+   manifest or code, a plugin's skills in its `skills/` - then the call is made again. Since 2026-10-26 (owner: "when
+   developer mode is enabled if the AI has a failing tool call then we should ALWAYS update the tool description system
+   prompt skills or fix the tool so that this issues is never hit again") there is no exception for a failure the tool
+   reported correctly, and the section says where the plugins' folders are written (item 1). About 500 tokens
+   (`maxTokens` 600); only while developer mode is on.
 4. **Tools** (a deferred group `ied`, loaded with `tool_search`, `docs/13`):
    - `ied_rebuild()`: `nuke build` in the source, the end of its output; a compiler build refreshes the `dev`
      toolchain, so the workspace's next build uses the fix at once when it pins `dev`.
@@ -78,6 +91,19 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
    The three long tools run on threads of their own (`ownThread`, `docs/26` section 8): before, a 10-minute
    `ied_gates` held the plugin's thread, and every `ied:/` path of every chat (the `ai.roots` binding runs there) failed
    after 30 s.
+
+5. **A note on every failing call** (2026-10-26): the plugin contributes an `aiToolFailureNotes` entry (`docs/26`
+   section 8; `when` as the section's), and the chat puts it after the result of each call that fails - an error of the
+   call itself, arguments its schema refuses, a tool that does not exist - for the model only (the card shows the
+   error alone): "[Developer mode] fs_read failed. Before you go on, change IED so that this cannot happen again, and say
+   in the chat what you changed: fix the tool's code in ied:/ if it did something wrong; otherwise correct what misled
+   your call - the tool's description or schema (a core tool's Spec in ied:/plugins/chat/code, a plugin's tool in its
+   ied-plugin.json or its code), the system prompt (ied:/plugins/chat/prompts) or the skill you followed
+   (plugins:/<plugin id>/skills/, which writes to its source in ied:/). Then make the call again." Not after a call the
+   owner denied or a rule refused, one cut off by a stopped run, a command or build that ran and failed (its exit code is
+   the result: `ToolOutcome::reportsFailure`, `IED::ToolResult::reportsFailure` for a plugin's tool such as
+   `ied_gates`), or a write whose language server reports errors (`docs/24` "After an AI edit"). Server check
+   `test_developer.py` checks the paths it names exist in the checkout.
 
 ## Rebuild and relaunch
 
@@ -126,11 +152,16 @@ plugin API like the others, and the chat plugin learns of the source through a b
   folder as a workspace, or finds the open one rooted there - the same as the owner opening it, so its watcher, document
   store and plugins run. Generic: any plugin with the permission may use it.
 - **`ai.roots`** (a binding the chat plugin consumes, optional; `kind: function`): `{wsId}` -> `{roots: [{alias, wsId,
-  title, confirm}]}`, other workspaces a chat of `wsId` may reach. A path `<alias>:/<path>` in a file tool or a
-  `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask until a rule naming the
-  root allows it, whatever the mode (the subjects `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). The
-  developer plugin provides it with one root, `{alias: "ied", title: "IED source", confirm: false}`, while developer
-  mode is on; nothing is reachable otherwise.
+  title, folder, confirm, home}]}`, other workspaces a chat of `wsId` may reach. A path `<alias>:/<path>` in a file tool
+  or a `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask until a rule naming the
+  root allows it, whatever the mode (the subjects `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). A root
+  whose `folder` holds a plugin's folder takes the writes `plugins:/` refuses otherwise; `home` says the root is the
+  source the server's home was built or installed from, so it holds the home's plugins at the same place (`docs/13`
+  "Plugin folders"). The developer plugin provides it with one root, `{alias: "ied", title: "IED source", confirm:
+  false, home: true}`, while developer mode is on; nothing is reachable otherwise. `plugins` is the chat's own alias,
+  never a root's.
+- **`aiToolFailureNotes`** (a contribution point, `docs/26` section 8): the plugin's code contributes item 5's note with
+  the section's `when`.
 - **`ied.developer.install`** (a binding the plugin provides and its own `ied_relaunch` consumes): `{}` ->
   `{state, exitCode, tail}` once `nuke install-ied` has ended; it waits as long as the build takes, so it is for a tool
   on a thread of its own.

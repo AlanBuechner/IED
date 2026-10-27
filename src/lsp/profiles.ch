@@ -30,6 +30,9 @@ namespace Ied
 		public Core::Array<Core::String> refetch;       // refetchOnDiagnostics
 		public bool filterCodeActions;
 		public Core::String aiRequests;                 // aiExposedRequests as JSON text, "[]" without any
+		// What an AI write of a file it serves gets (docs/24 "After an AI edit"): "" no, "true" yes, else a when clause.
+		public Core::String formatOnAiWrite;
+		public Core::String diagnosticsOnAiWrite;
 		public Core::String when;
 	}
 

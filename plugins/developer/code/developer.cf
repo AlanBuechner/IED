@@ -27,16 +27,31 @@ namespace Developer
 		text.Append("# IED itself (developer mode)\n\nThis IED is built from its source checkout at ");
 		text.Append(source);
 		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); writes and commands there follow this chat's permission mode. ");
+		text.Append("The plugins' folders (plugins:/<plugin id>/: their skills, docs and manifests) are writable too: a write there goes to the plugin's folder in ied:/ (a built-in plugin's ied:/plugins/<name>/). The c4 plugin is the toolchain's copy that nuke build makes from ied:/C4/IedPlugin/ and ied:/C4/docs/: change those, then ied_rebuild. ");
 		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed. ");
 		text.Append("When the running IED needs the fix (its server, a plugin, the web client), ied_relaunch installs it and relaunches IED; this chat then continues on the new build.\n\n");
-		text.Append("Every failing tool call is a chance to fix IED's tools: find out why it failed before you move on. If the tool did something wrong (a bug, a case it should handle), fix the tool in ied:/. If your call was wrong because the tool's description or the system prompt misled you (a name, an argument, what it returns), correct that text in ied:/ so the next call is not misled the same way. ");
-		text.Append("The core tools' descriptions are in ied:/plugins/chat/code (each tool's Spec), the system prompt in ied:/plugins/chat/prompts, a plugin's tools in its ied-plugin.json or its code. A failure the tool reported correctly (a file that is not there) needs neither. Then make the call again.");
+		text.Append("Every failing tool call is a chance to fix IED's tools, and its result says so: before you move on, change IED so that it cannot fail this way again. If the tool did something wrong (a bug, a case it should handle), fix the tool in ied:/. If your call was wrong because the tool's description, the system prompt or a skill misled you (a name, an argument, what it returns), correct that text so the next call is not misled the same way. ");
+		text.Append("The core tools' descriptions are in ied:/plugins/chat/code (each tool's Spec), the system prompt in ied:/plugins/chat/prompts, a plugin's tools in its ied-plugin.json or its code, its skills in its skills/ folder. Say in the chat what you changed. Then make the call again.");
 		IED::JsonWriter json;
 		json.BeginArray();
 		json.BeginObject();
 		json.Field("id", "source");
 		json.Field("text", text.View());
 		json.IntField("maxTokens", kSectionTokens);
+		json.Field("when", kWhen);
+		json.EndObject();
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// The note every failing call's result carries while developer mode is on (aiToolFailureNotes, docs/28): the owner
+	// wants each one to end in a change to IED that keeps it from happening again.
+	static Core::String FailureNoteEntries() {
+		IED::JsonWriter json;
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("id", "fix-the-cause");
+		json.Field("text", "[Developer mode] {tool} failed. Before you go on, change IED so that this cannot happen again, and say in the chat what you changed: fix the tool's code in ied:/ if it did something wrong; otherwise correct what misled your call - the tool's description or schema (a core tool's Spec in ied:/plugins/chat/code, a plugin's tool in its ied-plugin.json or its code), the system prompt (ied:/plugins/chat/prompts) or the skill you followed (plugins:/<plugin id>/skills/, which writes to its source in ied:/). Then make the call again.");
 		json.Field("when", kWhen);
 		json.EndObject();
 		json.EndArray();
@@ -68,8 +83,9 @@ namespace Developer
 		return json.ToString();
 	}
 
-	// ai.roots: {wsId, open?} -> {roots: [{alias, title, folder, confirm, wsId?}]}; empty while developer.enabled is off
-	// in `wsId`, or `wsId` is not trusted.
+	// ai.roots: {wsId, open?} -> {roots: [{alias, title, folder, confirm, home, wsId?}]}; empty while developer.enabled is
+	// off in `wsId`, or `wsId` is not trusted. `home`: the source is what the server's home was built or installed from,
+	// so a plugin of the home is written in the source (plugins:/, docs/13 "Plugin folders").
 	static IED::Result Roots(IED::PluginContext* context, Core::StringView source, const Serialization::DomNode& args) {
 		IED::Workspace asking;
 		const bool trusted = IED::FindWorkspace(args.Member("wsId").AsView(), asking) && asking.trusted;
@@ -88,6 +104,7 @@ namespace Developer
 			json.Field("title", "IED source");
 			json.Field("folder", source);
 			json.BoolField("confirm", false);
+			json.BoolField("home", true);
 			if (opening) json.Field("wsId", ws.id.View());
 			json.EndObject();
 		}
@@ -141,6 +158,7 @@ namespace Developer
 		Core::String problem;
 		if (!context.Contribute(Core::StringView("systemMessageSections"), Core::StringView(""), SectionEntries(source.View()).View(), problem)) context.Log(problem.View());
 		if (!context.Contribute(Core::StringView("toolCalls"), Core::StringView(""), ToolEntries().View(), problem)) context.Log(problem.View());
+		if (!context.Contribute(Core::StringView("aiToolFailureNotes"), Core::StringView(""), FailureNoteEntries().View(), problem)) context.Log(problem.View());
 		IED::PluginContext* at = &context;
 		context.Provide(Core::StringView("ai.roots"), [at, source](const Serialization::DomNode& args) -> IED::Result { return Roots(at, source.View(), args); });
 		context.Provide(Core::StringView("ied.developer.install"), [builds](const Serialization::DomNode& args) -> IED::Result { return Install(builds); });
@@ -180,6 +198,7 @@ namespace Developer
 		out.Append(OutputTail(ran.output.View(), kTailBytes).View());
 		IED::ToolResult result = IED::ToolText(out.View());
 		result.isError = ran.exitCode != 0;
+		result.reportsFailure = result.isError;
 		return result;
 	}
 

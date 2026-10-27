@@ -278,6 +278,20 @@
 						"additionalProperties": false
 					}
 				},
+				"aiToolFailureNotes": {
+					"type": "array",
+					"description": "Text the AI is given after the result of a tool call that failed (an error of the call itself, a schema refusal, an unknown tool; not a denial, a stopped run or a command that ran and failed): developer mode's 'fix the cause in IED'.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": { "type": "string", "minLength": 1 },
+							"text": { "type": "string", "minLength": 1, "description": "{tool} is the failed call's tool." },
+							"when": { "$ref": "#/$defs/when" }
+						},
+						"required": ["id", "text"],
+						"additionalProperties": false
+					}
+				},
 				"agentModes": { "type": "array", "items": { "type": "string", "description": "Path to an agent-mode.v1 JSON file." } },
 				"mcpServers": { "type": "array", "items": { "$ref": "#/$defs/mcpServer" } },
 				"modelProviders": {
@@ -584,6 +598,16 @@
 					"description": "For servers without */refresh requests."
 				},
 				"codeActionsNeedClientFilter": { "type": "boolean", "default": false },
+				"formatOnAiWrite": {
+					"oneOf": [ { "type": "boolean" }, { "$ref": "#/$defs/when" } ],
+					"default": false,
+					"description": "A file the AI writes (fs_write, fs_edit) is formatted with the server's textDocument/formatting before its result: true, or a when clause that must hold (workspaceContains..clang-format). The owner turns it off with ai.edits.formatOnWrite (docs/24 \"After an AI edit\")."
+				},
+				"diagnosticsOnAiWrite": {
+					"oneOf": [ { "type": "boolean" }, { "$ref": "#/$defs/when" } ],
+					"default": false,
+					"description": "The result of an AI write of a file this server serves carries the diagnostics it publishes for the file, waited for briefly (ai.edits.diagnosticsWaitMs); never a failure of the call (docs/24 \"After an AI edit\")."
+				},
 				"aiExposedRequests": {
 					"type": "array",
 					"items": {

@@ -18,6 +18,8 @@ namespace Ai
 		public Core::String id;
 		public Core::String title;
 		public FS::Path folder;
+		public Core::String shown;     // the folder as the file tools name it: "plugins:/c4/docs"
+		public bool readOnly;          // a plugin's that is not the workspace's own (docs/13 "Plugin folders")
 	}
 
 	// A part of a Markdown file under one heading, up to the next heading of any level.

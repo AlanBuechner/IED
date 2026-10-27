@@ -438,3 +438,111 @@ class FakeServerCodeToolTests(CodeToolCase):
 			await asyncio.sleep(0.1)
 		self.assertEqual(["f0.fk", "f15.fk"], self.uris("textDocument/didClose"), "a document that opens takes the file over")
 		self.assertEqual(2, self.uris("textDocument/didOpen").count("f15.fk"))
+
+
+@unittest.skipUnless(os.path.exists(C4LSP), "no dev toolchain with C4LSP (nuke build makes it)")
+class C4AfterAiWriteTests(CodeToolCase):
+	"""docs/24 "After an AI edit" with the real C4LSP and this checkout's c4 manifest (C4/IedPlugin, which asks for
+	both): a C4 file the AI writes comes back formatted, and an error in it is in the result."""
+
+	def prepare(self):
+		def nuke(*words):
+			done = subprocess.run(["cmd", "/c", NUKE] + list(words), cwd=self.repo, capture_output=True, text=True)
+			self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+		nuke("init", "--toolchain", "dev", "--ied")
+		shutil.rmtree(os.path.join(self.repo, "src", "tests"), ignore_errors=True)
+		shutil.copytree(os.path.join(REPO, "plugins", "nuke"), os.path.join(self.home, "plugins", "nuke"))
+		write(os.path.join(self.repo, "src", "ring.ch"), RING_CH)
+		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)
+		write(os.path.join(self.repo, "src", "main.cf"), MAIN_CF)
+		nuke("build")
+		# This checkout's manifest in place of the toolchain's (which may be older), its tools still the toolchain's.
+		solution = [os.path.join(self.repo, name) for name in os.listdir(self.repo) if name.endswith(".iedsln")][0]
+		with open(solution, encoding="utf-8") as f:
+			pinned = json.load(f)
+		pinned.pop("localPlugins", None)
+		write(solution, json.dumps(pinned))
+		plugin = os.path.join(self.home, "plugins", "c4")
+		shutil.copytree(os.path.join(REPO, "C4", "IedPlugin"), plugin)
+		with open(os.path.join(plugin, "ied-plugin.json"), encoding="utf-8") as f:
+			manifest = "".join(line for line in f if not line.lstrip().startswith("//"))
+		toolchain = os.path.dirname(os.path.dirname(os.path.dirname(C4LSP))).replace("\\", "/")
+		write(os.path.join(plugin, "ied-plugin.json"), manifest.replace("${pluginDir}/..", toolchain))
+
+	async def test_a_c4_write_is_formatted_and_checked(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.edits.diagnosticsWaitMs", "value": 10000})
+		results = await self.results(
+			("s1", "code_symbols", {"query": "Push"}),
+			("w1", "fs_write", {"path": "src/twice.cf", "content": "namespace Game\n{\nint32   Twice(int32 x)   {return x*2;}\n}\n"}),
+			("w2", "fs_write", {"path": "src/broken.cf", "content": "namespace Game\n{\n\tint32 Broken() { return missingName; }\n}\n"}),
+			permission="auto")
+		with open(os.path.join(self.repo, "src", "twice.cf"), encoding="utf-8") as f:
+			formatted = f.read()
+		self.assertIn("Formatted by C4LSP", results["w1"], results["w1"])
+		self.assertNotEqual("namespace Game\n{\nint32   Twice(int32 x)   {return x*2;}\n}\n", formatted, "C4LSP formatted it")
+		self.assertIn("Twice", formatted, "and kept the code")
+		self.assertIn("Language server (C4LSP):", results["w1"], results["w1"])
+		self.assertIn("missingName", results["w2"], results["w2"])
+		self.assertIn("error", results["w2"])
+
+
+class AfterAiWriteTests(CodeToolCase):
+	"""docs/24 "After an AI edit": a write of a file whose language plugin asks for it (formatOnAiWrite,
+	diagnosticsOnAiWrite) is formatted by its server - positions converted from the server's UTF-8 - and its result
+	carries what the server then says of the file and of the others; information, never a failure of the call. A
+	language whose plugin asks for neither gets neither, and the owner turns both off (ai.edits.*)."""
+
+	def prepare(self):
+		self.log = os.path.join(self.root, "fake-lsp.jsonl")
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		shutil.copy(FAKE_LSP, plugin)
+		command = {"command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log]}
+		write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}, {"id": "quiet", "extensions": [".qt"]}],
+				"lspProfiles": [dict(command, id="fake-lsp", label="Fake", selector={"languages": ["fake"]}, formatOnAiWrite=True, diagnosticsOnAiWrite=True),
+					dict(command, id="quiet-lsp", label="Quiet", selector={"languages": ["quiet"]})]}}))
+
+	def received(self, method):
+		"""What the server got of `method`; nothing when it never started."""
+		if not os.path.exists(self.log):
+			return []
+		with open(self.log, encoding="utf-8") as f:
+			return [m for m in map(json.loads, f) if m.get("method") == method]
+
+	async def test_a_write_is_formatted_and_told_what_its_server_says(self):
+		accent = chr(0xE9)   # two bytes in UTF-8, one UTF-16 unit: the server's columns differ from the file's
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.edits.diagnosticsWaitMs", "value": 600})
+		results = await self.results(
+			("w0", "fs_write", {"path": "b.fk", "content": "bad one\n"}),
+			("w1", "fs_write", {"path": "a.fk", "content": accent + " messy bad\n\tmeh\nfine\n"}),
+			("e1", "fs_edit", {"path": "a.fk", "edits": [{"old": "bad", "new": "good"}]}),
+			("w2", "fs_write", {"path": "q.qt", "content": "messy bad\n"}),
+			("w3", "fs_write", {"path": "s.fk", "content": "silent bad\n"}),
+			permission="auto")
+		self.assertIn("a.fk: +3 -0 lines, saved\nFormatted by Fake: it changed 1 of the lines you wrote", results["w1"])
+		self.assertIn("Language server (Fake): 1 error, 1 warning in this file - what the code says now, not a failure of this call", results["w1"])
+		self.assertIn("  line 1:8: error: bad word\n  line 2:2: warning: dull word", results["w1"], "after formatting, in the file's own columns")
+		self.assertIn("Other files it finds problems in: b.fk (1 error).", results["w1"], "a multi-file edit's other files")
+		with open(os.path.join(self.repo, "a.fk"), encoding="utf-8") as f:
+			self.assertEqual(accent + " tidy good\n\tmeh\nfine\n", f.read(), "formatted, the UTF-8 edit put at its UTF-16 place, then edited")
+		self.assertEqual({"tabSize": 4, "insertSpaces": False}, self.received("textDocument/formatting")[0]["params"]["options"], "the file's own indentation: tabs")
+		self.assertIn("Language server (Fake): 0 errors, 1 warning in this file", results["e1"])
+		self.assertNotIn("Formatted", results["e1"], "nothing left to format")
+		self.assertNotIn("Language server", results["w2"], "its plugin asks for neither")
+		self.assertNotIn("Formatted", results["w2"])
+		with open(os.path.join(self.repo, "q.qt"), encoding="utf-8") as f:
+			self.assertEqual("messy bad\n", f.read())
+		self.assertIn("Language server (Fake): nothing new about this file within 600 ms", results["w3"], "a server that says nothing in time")
+		chat_id = (await self.client.request("chat.list", {"wsId": "w1"}))["chats"][0]["chatId"]
+		turn = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"][-1]
+		self.assertEqual(["ok"] * 5, [s["state"] for s in turn["segments"] if s["type"] == "tool"], "errors in the code are no failed call")
+
+	async def test_the_owner_turns_them_off(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.edits.formatOnWrite", "value": False})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.edits.diagnosticsOnWrite", "value": False})
+		results = await self.results(("w1", "fs_write", {"path": "a.fk", "content": "messy bad\n"}), permission="auto")
+		self.assertEqual("a.fk: +1 -0 lines, saved", results["w1"])
+		with open(os.path.join(self.repo, "a.fk"), encoding="utf-8") as f:
+			self.assertEqual("messy bad\n", f.read())
+		self.assertEqual([], self.received("textDocument/formatting"))

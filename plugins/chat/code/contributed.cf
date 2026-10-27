@@ -3,6 +3,7 @@ include "contributed.ch"
 include "catalog.ch"
 include "plugintools.ch"
 include "codetools.ch"
+include "roots.ch"
 
 namespace Ai
 {
@@ -25,24 +26,37 @@ namespace Ai
 		return FS::Path(given.folder.View()) / relative;
 	}
 
-	static SkillFolder* Folder(const FS::Path& folder, Core::StringView source) {
+	static SkillFolder* Folder(const FS::Path& folder, Core::StringView source, Core::StringView shown, bool readOnly) {
 		SkillFolder* entry = new SkillFolder();
 		entry->folder = folder;
 		entry->source = Core::String(source);
+		entry->shown = Core::String(shown);
+		entry->readOnly = readOnly;
 		return entry;
 	}
 
 	static Core::String Who(const IED::Contribution& given) { return Core::String("plugin ") + given.pluginId.View(); }
 
+	// A folder of a plugin as the file tools name it: plugins:/<id>/<relative>.
+	static Core::String PluginShown(const IED::Contribution& given, Core::StringView relative) {
+		return JoinPath(((Core::String(kPluginsAlias) + ":/") + given.pluginId.View()).View(), relative.Trimmed());
+	}
+
+	// Whether a plugin is the workspace's own (.ied/plugins/), whose files its chats change like the rest of it.
+	static bool WorkspaceOwns(const IED::Workspace& ws, const IED::Contribution& given) {
+		Core::String relative;
+		return IED::RelativeTo(ws.root.View(), given.folder.View(), relative) && relative.View().StartsWith(Core::StringView(".ied/plugins/"));
+	}
+
 	Core::Array<Skill*> SkillsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
 		Core::Array<SkillFolder*> folders;
-		folders.Push(Folder(FS::Path(ws.root.View()) / ".ied" / "skills", Core::StringView("project")));
+		folders.Push(Folder(FS::Path(ws.root.View()) / ".ied" / "skills", Core::StringView("project"), Core::StringView(".ied/skills"), false));
 		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("skills"))) {
 			FS::Path folder = InsidePlugin(given, given.entry.AsView());
 			if (folder.IsEmpty()) problems.Push((Who(given) + ": a skills folder must be inside the plugin: ") + given.entry.AsView());
-			else folders.Push(Folder(folder, Who(given).View()));
+			else folders.Push(Folder(folder, Who(given).View(), PluginShown(given, given.entry.AsView()).View(), !WorkspaceOwns(ws, given)));
 		}
-		folders.Push(Folder(FS::Path(IED::AppFolder().View()) / "skills", Core::StringView("app")));
+		folders.Push(Folder(FS::Path(IED::AppFolder().View()) / "skills", Core::StringView("app"), Core::StringView(""), false));
 		return ReadSkills(folders, problems);
 	}
 
@@ -58,6 +72,8 @@ namespace Ai
 			docs->id = Core::String(given.entry.Member("id").AsView());
 			docs->title = Core::String(given.entry.Member("title").AsView());
 			docs->folder = folder;
+			docs->shown = PluginShown(given, given.entry.Member("folder").AsView());
+			docs->readOnly = !WorkspaceOwns(ws, given);
 			folders.Push(docs);
 		}
 		return folders;
@@ -83,6 +99,27 @@ namespace Ai
 	Core::Array<ErrorHint*> CallHints(const ToolInvocation& call) {
 		Core::Array<Core::String> problems;
 		return HintsOf(call.context, call.ws, problems);
+	}
+
+	Core::String FailureNotes(const IED::Workspace& ws, Core::StringView tool) {
+		Core::StringBuilder out;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiToolFailureNotes"))) {
+			Core::String error;
+			if (!IED::WhenHolds(ws, given.entry.Member("when").AsView(), error)) continue;
+			Core::StringView text = given.entry.Member("text").AsView().Trimmed();
+			if (text.IsEmpty()) continue;
+			if (out.ByteLength() > 0) out.Append("\n\n");
+			Core::StringView rest = text;
+			for (;;) {
+				const int64 at = rest.IndexOf(Core::StringView("{tool}"));
+				if (at < 0) break;
+				out.Append(rest.Substring(0, at));
+				out.Append(tool);
+				rest = rest.Substring(at + 6, rest.ByteLength() - at - 6);
+			}
+			out.Append(rest);
+		}
+		return out.ToString();
 	}
 
 	static Core::Array<DocsFolder*> CallDocs(const ToolInvocation& call) {

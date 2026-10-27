@@ -21,11 +21,11 @@ Permission handling per class is defined in `docs/11`.
 | ID | Tool | Class | Purpose |
 |---|---|---|---|
 | T-FS-1 | `fs_read(path, offset?, limit?, around_line?)` | read | Read a text file (line-numbered). Large files return the first window + outline. |
-| T-FS-2 | `fs_write(path, content)` | write | Create or overwrite a file (through the document store; checkpointed). |
+| T-FS-2 | `fs_write(path, content)` | write | Create or overwrite a file (through the document store; checkpointed). **Built** with `fs_edit`: where the file's language plugin asks for it, the file is formatted by its language server and the result carries the server's diagnostics of it and the other files it finds problems in - never a failure of the call (`docs/24` "After an AI edit"). A plugin's folder (`plugins:/`, "Plugin folders" above) refuses both. |
 | T-FS-3 | `fs_edit(path, edits: [{old, new, replace_all?}])` | write | Exact-match replacements, all-or-nothing; an `old` not in the file is answered with where it differs (**built**: the line where the file agrees longest with the start or the end of `old`, and what the file has there against what `old` has, line breaks and tabs shown as escapes). |
 | T-FS-4 | `fs_list(path, depth?, glob?)` | read | Directory listing (respects ignore rules). |
 | T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob (`*`, `?`, `**`, `{a,b}`; `src/fs/glob`). |
-| T-SRCH-1 | `search_text(pattern, regex?, glob?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. |
+| T-SRCH-1 | `search_text(pattern, regex?, glob?, path?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. **Built**: `path` a folder to search under (`glob` then relative to it), `ied:/...` or `plugins:/<id>/...` for those roots. |
 | T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` starts it as a background task and answers at once with its id (built 2026-10-23, `background` below). |
 | T-LSP-1 | `code_symbols(path or query, kind?, depth?)` | read | Outline of a file (kinds, signatures, line ranges), or the workspace's symbols named like `query`. **Built**, "Navigating code". |
 | T-LSP-2 | `code_definition(target)` | read | Where it is defined and declared, each with its first lines. **Built**. |
@@ -42,6 +42,40 @@ Permission handling per class is defined in `docs/11`.
 ## Loading tools on demand (built, 2026-10-21)
 
 Every tool definition sent costs context at every step, and the list grows with each plugin (the browser's and the profiler's tools alone are about 2,500 tokens). So the core set is always sent, and the rest is *deferred*: a plugin's tool calls (unless the entry says `"preload": true`) and the groups below (as built: `media`). A deferred tool is in every request's `tools` from the chat's first step as a *stub*: its name, its description's first sentence ending in `[deferred]`, and parameters `{"type": "object"}`; the system message says once what the mark means ("Deferred tools", `docs/14` item 7). `tool_search(query)` - words for what the model needs, or `select:name,name` - answers with up to 5 of them whole, description and schema, at the end of the conversation; a deferred tool can also be called straight away, its arguments checked against its real schema, which a mistake gets back in the error. **Loading changes nothing at the front of the prompt** (2026-10-26, owner: "loading a tool call loads it in the system message causeing the full context to get re-processed. it would be better to just append it to the end"): until then a loaded tool joined the request's `tools` and left the system message's list, both of which a model server's chat template puts before the conversation, so the next step's prefix differed from the cached one at its first bytes and the server read the whole chat again - minutes on a long local chat, and the cold read the prefill watchdog then mistook for a stall (`docs/12` "What makes a server read the whole prompt again"). A Claude chat gets every schema whole (the CLI's own tool list), and `ai.tools.loadAll` (app, solution; off) sends every definition whole, for a model that does better without the extra step. What a chat looked up stays recorded (`chat.json` `loadedTools`). As built: `plugins/chat/code/tool.cf` (`RequestTools`, `SearchDeferred`), `runtools.cf` (`tool_search`); server checks `test_chat_prefix.py`.
+
+## Plugin folders (built, 2026-10-26)
+
+Owner (item 23 of `docs/30`): plugins "can have there own skills that are avaliable to the model in the chat but are
+not in the skills folder for that project but rather they are in the plugins folders. they are write locked unless
+developer mode is enabled", and the same for the other docs a plugin carries (the c4 language docs). As built
+(`plugins/chat/code/roots.cf`, the API's `IED::LoadedPlugins` and `IED::SearchFolder`):
+
+- **`plugins:/<plugin id>/<path>`** names `<path>` in the folder of a plugin loaded for the chat's workspace - a root
+  alias like developer mode's `ied:/` (`docs/28`), one alias for every plugin, the plugin's id its first part
+  (`plugins:/c4/docs/library/bedrock-api.md`, `plugins:/ied.nuke/skills/nuke/SKILL.md`). `fs_read`, `fs_list`,
+  `fs_glob`, `search_text` (its new `path`: the folder it searches under) and `image_info` read there, from the disk
+  (a plugin's folder is no workspace: the tools that need one, `code_*` and the others, say they do not work there);
+  `fs_list({"path": "plugins:/"})` lists the plugins (`plugins:/<id>/  <name> (builtin|app|project)`). Paths in their
+  results carry the alias, so the model passes them back as they are; the same now holds in `ied:/`. The permission
+  subject names the plugin: `fs.read(plugins:/c4/docs/...)`.
+- **Read-only.** A write, an edit or a command there (`fs_write`, `fs_edit`, `shell_run` with `cwd: "plugins:/..."`,
+  any tool not of class read) is refused - "plugins:/c4/ is read-only: a plugin's files (its skills, docs and manifest)
+  change only through a root that holds its folder (...), which developer mode gives when IED runs from its source" - and
+  so is a write that reaches a loaded plugin's folder by its workspace path (a toolchain's plugin the solution pins in
+  `localPlugins`, the c4 plugin at `toolchains/c4/dev/ied`). Except: a root holds the folder, and then the write goes
+  there - developer mode's `ied:/` holds the built-in plugins of a server run from its source, and of one installed
+  from it (`ai.roots` gives `home: true`: `<home>/plugins/chat` is `ied:/plugins/chat`); the result says where it went
+  ("[plugins:/ied.chat/ is ied:/plugins/chat/: the change was made there]") and the write follows the developer-mode
+  rules (`docs/28`). A plugin the workspace holds in `.ied/plugins/` is the workspace's own: writes to it go through
+  (by `plugins:/` too, into `.ied/plugins/<name>/`). A workspace that is itself a plugin's folder (the owner working on
+  an app plugin) is its own too.
+- **Where a skill or a doc lives.** `skill_read` ends with "[This skill is plugins:/c4/skills/c4-language/SKILL.md,
+  read-only: a plugin's file. Beside it in plugins:/c4/skills/c4-language/: 01-what-is-c4.md, language/, ... - read
+  them with skill_read and file, or fs_read and fs_list there]" (a project skill names `.ied/skills/...`; the app's
+  skills folder is out of the file tools' reach and names none); `docs_read` names the file after its path
+  ("c4/library/bedrock.md (plugins:/c4/docs/library/bedrock.md, read-only)"). The system message's "Skills" and
+  "Reference docs" sections say a plugin's skills and docs are in its folder, `plugins:/<plugin id>/`, read-only
+  (`docs/14`).
 
 ## Groups (enabled on demand)
 
@@ -176,13 +210,13 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | ID | Tool | Class | Notes |
 |---|---|---|---|
 | T-KNW-1 | `skill_search(query)` | read | **Built**: the workspace's skills (`.ied/skills/`, plugins' `skills`, the app's; `docs/26` section 8) whose name, description or keywords hold the query's words, a word in the name counting most; up to 10 as `name (source): description`. BM25 and embeddings later. |
-| T-KNW-2 | `skill_read(name, file?)` | read | **Built**: a skill's SKILL.md without its frontmatter, or another file of its folder (`file`, relative to it); an unknown name lists the skills. Enabling the tool groups a skill declares comes with tool groups. |
+| T-KNW-2 | `skill_read(name, file?)` | read | **Built**: a skill's SKILL.md without its frontmatter, or another file of its folder (`file`, relative to it); an unknown name lists the skills; it says where the skill lives and what lies beside it ("Plugin folders" above). Enabling the tool groups a skill declares comes with tool groups. |
 | T-KNW-3 | `skill_write(name, description, keywords, body)` | write | Approval-gated; writes to `.ied/skills/` or app tier. |
 | T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | **Built** (2026-10-25, `plugins/chat/code/history.cf`, deferred tools of group `chats`): what this chat said in the turns compression left out of its requests. The tool the "earlier parts were left out" note points at - without it those turns are out of reach (F-AIR-54). Search gives the newest place each word was said, read gives a turn's messages as the model was sent them (at most 4 at a time). |
 | T-KNW-5 | `scratchpad(action: read|write|append|replace_section, section?, text?)` | meta | Chat scratchpad (F-CHT-71). |
 | T-KNW-6 | `memory_read()` / `memory_add(fact)` | meta | Project memory (P2, F-AIR-66). |
 | T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API) searched by words - the best Markdown sections with their path, line range and the lines that match. |
-| T-KNW-8 | `docs_read(path, heading? or line?)` | read | **Built**: a section of those docs by its path (`c4/library/bedrock.md`) and heading or line, as `docs_search` names them; a path alone lists the file's headings. |
+| T-KNW-8 | `docs_read(path, heading? or line?)` | read | **Built**: a section of those docs by its path (`c4/library/bedrock.md`) and heading or line, as `docs_search` names them; a path alone lists the file's headings; it names the file in its plugin's folder (`plugins:/<id>/...`, read-only). |
 
 ### `agents` (built, 2026-10-23; offered while the chat may run agents)
 

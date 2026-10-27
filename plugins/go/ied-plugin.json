@@ -48,7 +48,7 @@
 			]
 		},
 		"lspProfiles": [
-			{ "id": "gopls", "label": "gopls", "command": "${config:go.gopls.path}", "selector": { "languages": ["go"] }, "when": "config.go.languageServer && workspaceTrusted" }
+			{ "id": "gopls", "label": "gopls", "command": "${config:go.gopls.path}", "selector": { "languages": ["go"] }, "formatOnAiWrite": true, "diagnosticsOnAiWrite": true, "when": "config.go.languageServer && workspaceTrusted" }
 		],
 		"problemMatchers": [
 			{

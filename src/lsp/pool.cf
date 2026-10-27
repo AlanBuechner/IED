@@ -453,6 +453,15 @@ namespace Ied
 
 	// --- Diagnostics -------------------------------------------------------------------------------------------------
 
+	// The version of `path` last sent to `language`; -1 when it has the file open in no way IED knows. A publication of
+	// an older one is not what an AI write waits for (PublishMark).
+	static int64 SentVersion(Server* server, LanguageServer* language, Core::StringView path) {
+		Document* doc = server->documents->Find(language->ws, path);
+		if (doc && language->documents.Contains(Core::String(path))) return doc->version;
+		const int64 at = TransientIndex(language, path);
+		return at >= 0 ? language->transient[at]->version : -1;
+	}
+
 	void LspPool::Diagnostics(LanguageServer* language, const Serialization::DomNode& params) {
 		Workspace* ws = language->ws;
 		Core::String absolute;
@@ -462,6 +471,13 @@ namespace Ied
 		lineCache.Clear();
 		Core::String items = list.Kind() == Serialization::DomKind::Array ? RewriteJson(list, RewriteFor(language, params.Member("uri").AsView(), false)) : Core::String("[]");
 		server->diagnostics->Set(ws, path.View(), language->Source().View(), items.View());
+		Serialization::DomNode version = params.Member("version");
+		if (version.Kind() != Serialization::DomKind::Int || version.AsInt() >= SentVersion(server, language, path.View())) {
+			Core::String key = NamedKey(ws, path.View());
+			int64 seen = 0;
+			publishes.TryGet(key, seen);
+			publishes.Insert(key, seen + 1);
+		}
 		if (items.View() == "[]") language->published.Remove(path);
 		else language->published.Insert(path, true);
 		if (!language->profile->refetch.IsEmpty()) Refresh(ws, path.View(), language->profile->refetch);

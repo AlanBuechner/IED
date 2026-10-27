@@ -24,6 +24,7 @@ namespace Ai
 		public Core::String callId;
 		public Serialization::DomNode args;
 		public const bool* cancelled;
+		public Core::String shown;      // what the tool shows workspace paths under, so they can be passed back: "ied:/"
 	}
 
 	class ToolOutcome
@@ -32,6 +33,7 @@ namespace Ai
 		public Core::String preview;    // what the card shows; the content when empty
 		public bool isError;
 		public bool denied;             // refused by a rule or by the owner: it did not run
+		public bool reportsFailure;     // an error because what it ran failed (an exit code, a failed build), not the call
 		public int64 plus;              // lines a write added and removed
 		public int64 minus;
 		public Core::String source;     // where it ran, for the card ("built-in", "Output: AI")
@@ -68,6 +70,7 @@ namespace Ai
 		public bool agentOnly;            // offered only in Agent mode (finish)
 		public bool deferred;             // listed by name until loaded for the chat
 		public Core::String group;        // "media", or a plugin tool's plugin id
+		public bool folderRoots;          // works in a plugin's folder (plugins:/), which is no workspace: reads it from the disk
 		public ToolPlanner plan;
 		public ToolDetailer detail;       // null: the card shows the plan as it is
 		public ToolRunner run;            // null: the run handles the call itself

@@ -2001,6 +2001,29 @@ def settings_window(run):
 
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))
+def ai_edit_settings(run):
+	"""AI > the three ai.edits.* rows (docs/24 "After an AI edit"): formatting and diagnostics after an AI write, each on
+	by default and turned off at the user tier, and the wait refused past its maximum. Reset then works at once: the
+	refused value's field no longer sends it again when it loses focus, which redrew the rows under the click."""
+	page = run.open()
+	open_settings(run, page)
+	page.fill(".set-search", "ai.edits")
+	for key in ("ai.edits.formatOnWrite", "ai.edits.diagnosticsOnWrite", "ai.edits.diagnosticsWaitMs"):
+		page.wait_for_selector(".set-row[data-key='%s']" % key)
+	check(page.is_checked(".set-row[data-key='ai.edits.formatOnWrite'] input[type='checkbox']"), "formatting is on by default")
+	run.shot("rows")
+	page.click(".set-row[data-key='ai.edits.formatOnWrite'] input[type='checkbox']")
+	page.wait_for_selector(".set-row[data-key='ai.edits.formatOnWrite'] .set-source.set:has-text('User')")
+	field = ".set-row[data-key='ai.edits.diagnosticsWaitMs'] input"
+	page.fill(field, "20000")
+	page.press(field, "Enter")
+	run.wait_text(".set-row[data-key='ai.edits.diagnosticsWaitMs'] .set-message", "greater than maximum")
+	run.shot("changed")
+	page.click(".set-row[data-key='ai.edits.formatOnWrite'] button:has-text('Reset')")
+	page.wait_for_selector(".set-row[data-key='ai.edits.formatOnWrite'] .set-source:not(.set):has-text('Default')")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
 def developer_settings_page(run):
 	"""Environment > Developer (docs/28): the setting drawn as every row, the checkout the server is built from, and
 	Rebuild; a browser is offered no relaunch. Nothing is built: Rebuild would install this checkout."""

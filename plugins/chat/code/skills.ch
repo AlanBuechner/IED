@@ -14,6 +14,8 @@ namespace Ai
 		public Core::Array<Core::String> keywords;   // `keywords` and `triggers`
 		public FS::Path file;                        // its SKILL.md
 		public Core::String source;                  // "project", "plugin ied.nuke", "app"
+		public Core::String shown;                   // its SKILL.md as the file tools name it ("plugins:/ied.nuke/skills/nuke/SKILL.md"); "" for none
+		public bool readOnly;                        // a plugin's: its files change only in developer mode (docs/13 "Plugin folders")
 	}
 
 	// A folder of skill folders and whose they are.
@@ -21,6 +23,8 @@ namespace Ai
 	{
 		public FS::Path folder;
 		public Core::String source;
+		public Core::String shown;     // the folder as the file tools name it (".ied/skills", "plugins:/c4/skills"); "" for none
+		public bool readOnly;
 	}
 
 	// One SKILL.md; null with `problem` when its frontmatter does not read or lacks a name or a description.

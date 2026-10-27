@@ -72,6 +72,20 @@ namespace Ied
 		public Core::String SymbolsFor(Call& call, Workspace* ws, Core::StringView query);
 		// The text of a file outside `ws` one of its servers named; false for another.
 		public bool NamedText(Workspace* ws, Core::StringView uri, Core::String& text);
+		// After an AI write (docs/24 "After an AI edit"). What the profile serving `path` asks for, whether or not its
+		// server runs: {profile, label, format, diagnostics} (its formatOnAiWrite and diagnosticsOnAiWrite, their when
+		// clauses read in `ws`); {profile: null} when none serves it.
+		public Core::String AiWriteFor(Workspace* ws, Core::StringView path);
+		// How many times the servers of `ws` published `path`'s diagnostics: a mark DiagnosticsAfter waits past.
+		public int64 PublishMark(Workspace* ws, Core::StringView path) const;
+		// The diagnostics of `path` from the server serving it - started, and the file brought up to date on it - once it
+		// publishes them after `mark`, waiting at most `ms`: {profile, label, state: fresh | stale (none came in time) |
+		// starting | down, items, elsewhere: [{path, errors, warnings}] (the other files it finds problems in)};
+		// {profile: null} when none serves it.
+		public Core::String DiagnosticsAfter(Call& call, Workspace* ws, Core::StringView path, int64 mark, int64 ms);
+		// `path`'s text as edited, formatted by the server serving it (textDocument/formatting), not written. Throws
+		// not_found (no server serves it) or unavailable: it is not running within `ms`, does not format, or failed.
+		public Core::String FormattedFor(Call& call, Workspace* ws, Core::StringView path, int64 tabSize, bool insertSpaces, int64 ms);
 
 	private:
 		// Its profile's initializationOptions with its initializationOptionsFile merged over them.
@@ -128,6 +142,7 @@ namespace Ied
 		private Core::HashMap<Core::String, LineIndex*> lineCache;           // by URI, for one message
 		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>"
 		private Core::HashMap<Core::String, bool> scanned;                   // wsIds StartFor has walked
+		private Core::HashMap<Core::String, int64> publishes;                // "<wsId>|<path>": its diagnostics published so often
 	}
 
 	// A params object's JSON with "textDocument": {"uri": `uri`} in place of any it had.

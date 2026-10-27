@@ -91,6 +91,7 @@ namespace Ai
 		info->inPlan = true;
 		info->deferred = true;
 		info->group = Core::String("media");
+		info->folderRoots = true;
 		info->plan = InfoPlan;
 		info->run = InfoRun;
 		registry.Add(info);

@@ -116,6 +116,7 @@ namespace Ai
 		if (result.restarts && call.chat) ResumeAfterRestart(call, entry->name.View());
 		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
 		outcome.isError = result.isError;
+		outcome.reportsFailure = result.reportsFailure;
 		AttachImages(outcome, call.ws, result.images);
 		outcome.source = (Core::String("plugin ") + entry->pluginId.View());
 		outcome.ms = (clock_now_ns() - started) / 1000000;

@@ -22,4 +22,8 @@ namespace IED
 	// with `problem` when the plugin may not read the workspace or the pattern is not a valid regex. Without the lock:
 	// the search runs on the caller's thread.
 	bool Search(const Workspace& ws, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem);
+	// Searches the files under `folder` (an absolute path that is no workspace's: a plugin's folder) as Search does a
+	// workspace's; false with `problem` when the plugin may not read (fs.read), it is no folder or the pattern is not a
+	// valid regex. Without the lock.
+	bool SearchFolder(Core::StringView folder, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem);
 }

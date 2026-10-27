@@ -170,6 +170,8 @@
 						"description": "The C4 macro used at a position and what that use expands to: {textDocument, position} -> {name, expansion}, or null where no macro is used."
 					}
 				],
+				"formatOnAiWrite": true,
+				"diagnosticsOnAiWrite": true,
 				"when": "config.c4.languageServer"
 			}
 		]

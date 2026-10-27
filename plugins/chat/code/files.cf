@@ -3,12 +3,23 @@ include "files.ch"
 include "editmiss.ch"
 include "linediff.ch"
 include "lspquery.ch"
+include "roots.ch"
+include "afterwrite.ch"
 
 namespace Ai
 {
 	const int64 kDiffContext = 2;
 
+	// A file of a plugin's folder (plugins:/), which is no workspace: read from the disk.
+	static Core::String FolderFileText(const IED::Workspace& ws, Core::StringView path) {
+		FS::Path file = FS::Path(ws.root.View()) / IED::NormalizePath(path).View();
+		if (!FS::FileExists(file.CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, ((Core::String("no file ") + path) + " in the plugin's folder; fs_list or fs_glob there finds its files").View());
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
 	Core::String TextAsEdited(const IED::Workspace& ws, Core::StringView path) {
+		if (IsFolderRoot(ws)) return FolderFileText(ws, path);
 		Core::String text;
 		Core::String problem;
 		if (!IED::TextAsEdited(ws, path, text, problem)) throw IED::RpcError(IED::ErrorCode::NotFound, problem.View());
@@ -170,6 +181,7 @@ namespace Ai
 		const int64 limit = call.args.Member("limit").IsValid() ? call.args.Member("limit").AsInt() : kReadMostLines;
 		Core::String numbered = NumberedLines(text.View(), offset, limit < kReadMostLines ? limit : kReadMostLines);
 		Core::StringBuilder preview;
+		preview.Append(call.shown.View());
 		preview.Append(path.View());
 		preview.Append(" (");
 		preview.AppendInt(SplitLines(text.View()).Count());
@@ -204,27 +216,82 @@ namespace Ai
 		return WritePlanFor(call, Core::StringView("Overwrite"), call.args.Member("content").AsView(), before.View(), existed);
 	}
 
-	static ToolOutcome Written(const ToolInvocation& call, Core::StringView path, Core::StringView text, const ToolPlan& plan) {
+	// The file as its language server formats it, written over `text` (afterwrite.ch); `text` when it is not formatted,
+	// with why in `note`, and `note` saying how much formatting changed. The diagnostics wanted are then the formatted
+	// text's: `after.mark` moves past those of `text`.
+	static Core::String FormattedWrite(const ToolInvocation& call, Core::StringView path, Core::StringView text, AfterWrite& after, Core::String& note) {
+		int64 tabSize = 4;
+		bool insertSpaces = false;
+		IndentationOf(text, tabSize, insertSpaces);
+		Core::String formatted;
+		Core::String problem;
+		if (!IED::LspFormatted(call.ws, path, tabSize, insertSpaces, after.waitMs, formatted, problem)) {
+			note = (Core::String("Not formatted: ") + problem.View()) + "; the file is saved as you wrote it.";
+			return Core::String(text);
+		}
+		if (formatted.View() == text) return formatted;
+		if (after.diagnostics) after.mark = IED::LspPublishMark(call.ws, path);
+		{
+			IED::HostLock guard(*call.context);
+			WriteThrough(call.ws, path, formatted.View());
+		}
+		LineDiff change = DiffLines(text, formatted.View(), 0);
+		Core::StringBuilder said;
+		said.Append("Formatted by ");
+		said.Append(after.label.View());
+		said.Append(": it changed ");
+		said.AppendInt(change.plus > change.minus ? change.plus : change.minus);
+		said.Append(" of the lines you wrote, so read them again before an fs_edit near them.");
+		note = said.ToString();
+		return formatted;
+	}
+
+	// Writes `text` over `before` and says so, with what follows a write (afterwrite.ch): the file formatted when its
+	// language asks for it, and what its language server then says of it - information, never a failure.
+	static ToolOutcome Written(const ToolInvocation& call, Core::StringView path, Core::StringView before, Core::StringView text, const ToolPlan& plan) {
+		AfterWrite after = AfterWriteOf(call, path);
 		{
 			IED::HostLock guard(*call.context);
 			WriteThrough(call.ws, path, text);
 		}
+		Core::String formatNote;
+		Core::String saved = after.format ? FormattedWrite(call, path, text, after, formatNote) : Core::String(text);
+		LineDiff diff;
+		diff.unified = plan.diff;
+		diff.plus = plan.plus;
+		diff.minus = plan.minus;
+		if (saved.View() != text) diff = DiffLines(before, saved.View(), kDiffContext);
 		Core::StringBuilder said;
+		said.Append(call.shown.View());
 		said.Append(path);
 		said.Append(": +");
-		said.AppendInt(plan.plus);
+		said.AppendInt(diff.plus);
 		said.Append(" -");
-		said.AppendInt(plan.minus);
+		said.AppendInt(diff.minus);
 		said.Append(" lines, saved");
-		ToolOutcome outcome = ToolResult(said.View(), plan.diff.View());
-		outcome.plus = plan.plus;
-		outcome.minus = plan.minus;
+		if (!formatNote.IsEmpty()) {
+			said.Append("\n");
+			said.Append(formatNote.View());
+		}
+		Core::String answer;
+		Core::String problem;
+		if (after.diagnostics && IED::LspDiagnosticsAfter(call.ws, path, after.mark, after.waitMs, answer, problem)) answer = DiagnosticsSaid(answer.View(), after.waitMs);
+		else if (after.diagnostics) answer = (Core::String("Language server: no diagnostics (") + problem.View()) + ")";
+		if (!answer.IsEmpty()) {
+			said.Append("\n");
+			said.Append(answer.View());
+		}
+		ToolOutcome outcome = ToolResult(said.View(), diff.unified.View());
+		outcome.plus = diff.plus;
+		outcome.minus = diff.minus;
 		return outcome;
 	}
 
 	static ToolOutcome WriteRun(const ToolInvocation& call) {
 		Core::String path = PathArgument(call, "path");
-		return Written(call, path.View(), call.args.Member("content").AsView(), WritePlan(call));
+		Core::String before;
+		CurrentText(call, path.View(), before);
+		return Written(call, path.View(), before.View(), call.args.Member("content").AsView(), WritePlan(call));
 	}
 
 	static ToolPlan EditPlan(const ToolInvocation& call) {
@@ -254,7 +321,7 @@ namespace Ai
 		Core::String after;
 		Core::String error;
 		ApplyTextEdits(before.View(), call.args.Member("edits"), after, error);
-		return Written(call, path.View(), after.View(), plan);
+		return Written(call, path.View(), before.View(), after.View(), plan);
 	}
 
 	static bool Excluded(Core::StringView path) {
@@ -263,17 +330,19 @@ namespace Ai
 		return false;
 	}
 
-	static void ListFolder(const FS::Path& root, Core::StringView folder, int64 depth, int64 most, Core::StringBuilder& out, int64& count) {
+	// `shown` goes before each path: the root's alias, so the paths can be passed back ("ied:/").
+	static void ListFolder(const FS::Path& root, Core::StringView folder, Core::StringView shown, int64 depth, int64 most, Core::StringBuilder& out, int64& count) {
 		FS::Directory listing = FS::Directory((folder.IsEmpty() ? root : root / folder).CStr());
 		for (FS::DirectoryEntry& entry : listing) {
 			if (count >= most) return;
 			Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
 			if (Excluded(path.View())) continue;
 			const bool directory = entry.kind == FS::EntryKind::Directory;
+			out.Append(shown);
 			out.Append(path.View());
 			out.Append(directory ? "/\n" : "\n");
 			count += 1;
-			if (directory && depth > 1) ListFolder(root, path.View(), depth - 1, most, out, count);
+			if (directory && depth > 1) ListFolder(root, path.View(), shown, depth - 1, most, out, count);
 		}
 	}
 
@@ -290,7 +359,7 @@ namespace Ai
 		if (!FS::IsDirectory((FS::Path(call.ws.root.View()) / path.View()).CStr())) return ToolError((Core::String("fs_list: no folder ") + path.View() + "; use fs_glob to find files by name").View());
 		Core::StringBuilder out;
 		int64 count = 0;
-		ListFolder(FS::Path(call.ws.root.View()), path.View(), depth < 1 ? 1 : depth > 6 ? 6 : depth, kListMostEntries, out, count);
+		ListFolder(FS::Path(call.ws.root.View()), path.View(), call.shown.View(), depth < 1 ? 1 : depth > 6 ? 6 : depth, kListMostEntries, out, count);
 		if (count >= kListMostEntries) out.Append("[stopped at 400 entries; list a subfolder or use fs_glob]\n");
 		Core::StringBuilder preview;
 		preview.AppendInt(count);
@@ -310,6 +379,7 @@ namespace Ai
 		Core::Array<Core::String> found = IED::ExpandGlob((FS::Path(call.ws.root.View()) / root.View()).View(), call.args.Member("pattern").AsView());
 		Core::StringBuilder out;
 		for (int64 i = 0; i < found.Count() && i < kGlobMostPaths; ++i) {
+			out.Append(call.shown.View());
 			if (!root.IsEmpty()) {
 				out.Append(root.View());
 				out.Append("/");
@@ -338,10 +408,11 @@ namespace Ai
 
 	void AddFileTools(ToolRegistry& registry) {
 		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers - a workspace file, or by its absolute path a file outside it that the code tools named. Up to 400 lines per call; use offset to read on. For one function or type, code_read_symbol reads just it. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path; plugins:/<plugin id>/<path> for a plugin's files (read-only)\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		read->plan = ReadPlan;
 		read->run = ReadRun;
+		read->folderRoots = true;
 		registry.Add(read);
 		ToolSpec* write = Spec("fs_write", "Create a file, or replace a whole file's content. For a change to part of a file use fs_edit. Example: fs_write({\"path\": \"docs/notes.md\", \"content\": \"...\"})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"content\": {\"type\": \"string\"}}, \"required\": [\"path\", \"content\"], \"additionalProperties\": false}",
@@ -356,16 +427,18 @@ namespace Ai
 		edit->run = EditRun;
 		registry.Add(edit);
 		ToolSpec* list = Spec("fs_list", "List a folder's files and folders (folders end in /), skipping build output and .git. Example: fs_list({\"path\": \"src\", \"depth\": 2})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder; empty for the root\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder; empty for the root; plugins:/ for the plugins' folders\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		list->plan = ListPlan;
 		list->run = ListRun;
+		list->folderRoots = true;
 		registry.Add(list);
 		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either). Example: fs_glob({\"pattern\": \"**/*Log*\"})",
 			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		glob->plan = GlobPlan;
 		glob->run = GlobRun;
+		glob->folderRoots = true;
 		registry.Add(glob);
 	}
 }

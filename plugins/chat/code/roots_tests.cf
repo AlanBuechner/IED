@@ -33,6 +33,26 @@ class RootsTests {
 		assert_se("fs.write(ied:/C4/a.cf)", Ai::RootSubject(Core::StringView("fs.write(C4/a.cf)"), Core::StringView("ied")).CStr(), "a write");
 		assert_se("shell(ied:/nuke build)", Ai::RootSubject(Core::StringView("shell(nuke build)"), Core::StringView("ied")).CStr(), "a command");
 		assert_se("plain", Ai::RootSubject(Core::StringView("plain"), Core::StringView("ied")).CStr(), "no argument");
+		assert_se("fs.read(plugins:/c4/docs/a.md)", Ai::PrefixedSubject(Core::StringView("fs.read(docs/a.md)"), Core::StringView("plugins:/c4/")).CStr(), "a plugin's folder");
+	}
+
+	[test("plugin_paths")]
+	public static void TestPluginPaths() {
+		Core::String first;
+		Core::String rest;
+		Ai::SplitFirst(Core::StringView("ied.chat/skills/a/SKILL.md"), first, rest);
+		assert_se("ied.chat", first.CStr(), "the plugin's id, dots and all");
+		assert_se("skills/a/SKILL.md", rest.CStr(), "the path in its folder");
+		Ai::SplitFirst(Core::StringView("/c4"), first, rest);
+		assert_se("c4", first.CStr(), "a leading slash, as plugins://c4 would give");
+		assert_se("", rest.CStr(), "the folder itself");
+		Ai::SplitFirst(Core::StringView(""), first, rest);
+		assert_se("", first.CStr(), "plugins:/ itself");
+		assert_se("plugins/chat/skills", Ai::JoinPath(Core::StringView("plugins/chat"), Core::StringView("skills")).CStr(), "joined");
+		assert_se("skills", Ai::JoinPath(Core::StringView(""), Core::StringView("skills")).CStr(), "under the root");
+		assert_se("plugins/chat", Ai::JoinPath(Core::StringView("plugins/chat"), Core::StringView("")).CStr(), "the folder");
+		assert_se("plugins", Ai::RootAlias(RootArgs("{\"path\": \"plugins:/c4/docs/a.md\"}")).CStr(), "plugins:/ is an alias");
+		assert_true(!Ai::IsFolderRoot(IED::Workspace()), "a workspace is no plugin folder");
 	}
 
 	[test("allowed_by_name")]

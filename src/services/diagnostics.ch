@@ -25,6 +25,8 @@ namespace Ied
 		public void ClearSource(Workspace* ws, Core::StringView source);
 		// The diag:<wsId> snapshot: {files: {<path>: {<source>: [items]}}}.
 		public Core::String Snapshot(Workspace* ws) const;
+		// What `source` says of `path` now: a JSON array, "[]" for nothing.
+		public Core::String Of(Workspace* ws, Core::StringView path, Core::StringView source) const;
 
 	private:
 

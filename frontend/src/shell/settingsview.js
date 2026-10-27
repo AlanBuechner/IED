@@ -274,8 +274,10 @@ class SettingsView {
 			? h("textarea.input-field.set-json", Object.assign({ "aria-label": key, spellcheck: "false", rows: String(Math.min(12, inputText(kind, value).split("\n").length + 1)) }, disabled))
 			: h("input.input-field", Object.assign({ "aria-label": key, type: kind === "string" ? "text" : "number", spellcheck: "false" }, disabled));
 		field.value = inputText(kind, value);
+		let sent = null;   // the text last sent: the blur after an Enter does not send a refused value again
 		const apply = () => {
-			if (field.value === inputText(kind, value)) return;
+			if (field.value === inputText(kind, value) || field.value === sent) return;
+			sent = field.value;
 			try {
 				commit(parseInput(kind, field.value));
 			}

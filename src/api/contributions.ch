@@ -15,8 +15,19 @@ namespace IED
 		public Serialization::DomNode entry;   // as the manifest (or the code) gives it
 	}
 
+	// A plugin loaded for a workspace, and where its files are.
+	class PluginInfo
+	{
+		public Core::String id;
+		public Core::String name;
+		public Core::String folder;     // the plugin's folder
+		public Core::String source;     // "builtin", "app" or "project"
+	}
+
 	// The entries of `point` in workspace `wsId`, in the plugins' load order.
 	Core::Array<Contribution> Contributions(Core::StringView wsId, Core::StringView point);
+	// The plugins loaded for workspace `wsId`, in load order.
+	Core::Array<PluginInfo> LoadedPlugins(Core::StringView wsId);
 	// The text a plugin's `function` section computes for `ws` ("" for none); false with `problem` when it failed.
 	bool PluginSection(const Workspace& ws, Core::StringView pluginId, Core::StringView function, Core::String& text, Core::String& problem);
 	// Runs a plugin's tool call that its code implements (`function`) or a binding answers (`binding`), as `entry`

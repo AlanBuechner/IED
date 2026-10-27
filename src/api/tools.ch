@@ -31,6 +31,9 @@ namespace IED
 		public Core::String content;   // what the model is told
 		public Core::String preview;   // what the tool card shows; the content when empty
 		public bool isError;
+		// An error because what the tool ran failed (a command's exit code, failing tests), not the call itself: the
+		// chat adds no failure notes to it (docs/12 "Tools execution").
+		public bool reportsFailure;
 		public Core::Array<ToolImage> images;
 		// The server restarts after this call (IED::RelaunchServer): the chat continues by itself once it is back, with a
 		// message saying so (docs/12 "Restart behavior").

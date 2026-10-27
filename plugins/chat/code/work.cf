@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "work.ch"
 include "contributed.ch"
 include "files.ch"
+include "roots.ch"
 include "sourcelines.ch"
 
 namespace Ai
@@ -29,9 +30,18 @@ namespace Ai
 
 	// --- search_text -------------------------------------------------------------------------------------------------
 
+	// The glob a search keeps to: its glob under its folder (`path`), or the folder's files.
+	static Core::String SearchGlob(const ToolInvocation& call) {
+		Core::String folder = ToolPath(call.args.Member("path").AsView());
+		Core::StringView glob = call.args.Member("glob").AsView();
+		if (folder.IsEmpty()) return Core::String(glob);
+		return JoinPath(folder.View(), glob.IsEmpty() ? Core::StringView("**") : glob);
+	}
+
 	static ToolPlan SearchPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.subject = (Core::String("fs.read(") + (call.args.Member("glob").IsValid() ? call.args.Member("glob").AsView() : Core::StringView("**"))) + ")";
+		Core::String glob = SearchGlob(call);
+		plan.subject = (Core::String("fs.read(") + (glob.IsEmpty() ? Core::StringView("**") : glob.View())) + ")";
 		plan.summary = Core::String("Search for ") + call.args.Member("pattern").AsView();
 		return plan;
 	}
@@ -72,29 +82,37 @@ namespace Ai
 		return Core::String(out.View());
 	}
 
+	// A plugin's folder (plugins:/) is searched on the disk; a workspace with its open documents as edited.
+	static bool SearchIn(const IED::Workspace& ws, const IED::SearchQuery& query, const Threading::Atomic<bool>* cancel, IED::SearchResult& result, Core::String& problem) {
+		if (IsFolderRoot(ws)) return IED::SearchFolder(ws.root.View(), query, cancel, result, problem);
+		return IED::Search(ws, query, cancel, result, problem);
+	}
+
 	static ToolOutcome SearchRun(const ToolInvocation& call) {
 		IED::SearchQuery query;
 		query.text = Core::String(call.args.Member("pattern").AsView());
 		query.regex = call.args.Member("regex").AsBool();
 		query.caseSensitive = call.args.Member("case_sensitive").AsBool();
-		if (call.args.Member("glob").IsValid()) query.include.Push(Core::String(call.args.Member("glob").AsView()));
+		Core::String glob = SearchGlob(call);
+		if (!glob.IsEmpty()) query.include.Push(glob);
 		query.exclude = IED::DefaultExcludes();
 		query.useIgnoreFiles = true;
 		query.maxResults = kSearchToolMatches;
 		Threading::Atomic<bool> never;
 		IED::SearchResult result;
 		Core::String problem;
-		if (!IED::Search(call.ws, query, &never, result, problem)) return ToolError((Core::String("search_text: ") + problem.View()).View());
+		if (!SearchIn(call.ws, query, &never, result, problem)) return ToolError((Core::String("search_text: ") + problem.View()).View());
 		bool asRegex = false;
 		if (result.matches.IsEmpty() && !query.regex && LooksLikeRegex(query.text.View())) {
 			query.regex = true;
 			IED::SearchResult again;
 			Core::String ignored;
-			if (IED::Search(call.ws, query, &never, again, ignored) && !again.matches.IsEmpty()) {
+			if (SearchIn(call.ws, query, &never, again, ignored) && !again.matches.IsEmpty()) {
 				result = again;
 				asRegex = true;
 			}
 		}
+		for (int64 i = 0; i < result.matches.Count(); ++i) result.matches[i].path = call.shown + result.matches[i].path.View();
 		Core::StringBuilder out;
 		if (asRegex) out.Append("[nothing matched the pattern as text, so it was read as a regex; set regex true for one]\n");
 		out.Append(SearchListing(result).View());
@@ -196,6 +214,7 @@ namespace Ai
 		ShellOutput(call, ((Core::String("[") + said.View().Substring(0, said.View().IndexOf('\n', 0))) + "]\n").View());
 		ToolOutcome outcome = ToolResult(said.View(), TailOf(kept.View(), 12, 2048).View());
 		outcome.isError = code != 0;
+		outcome.reportsFailure = outcome.isError;
 		outcome.source = Core::String("Output: AI");
 		return outcome;
 	}
@@ -343,6 +362,7 @@ namespace Ai
 		ShellOutput(call, ((Core::String("[") + said.View().Substring(0, said.View().IndexOf('\n', 0))) + "]\n").View());
 		ToolOutcome outcome = ToolResult(WithHints(said.View(), CallHints(call)).View(), said.View().Substring(0, said.View().IndexOf('\n', 0)));
 		outcome.isError = last.code != 0;
+		outcome.reportsFailure = outcome.isError;
 		outcome.source = Core::String("Output: AI");
 		return outcome;
 	}
@@ -520,6 +540,7 @@ namespace Ai
 		if ((!succeeded && errors == 0) || !builds) said.Append(TailOf(run.tail.View(), 40, 4096).View());
 		ToolOutcome outcome = ToolResult(said.View(), said.View().Substring(0, said.View().IndexOf('\n', 0)));
 		outcome.isError = !succeeded;
+		outcome.reportsFailure = outcome.isError;
 		outcome.source = Core::String("Output: Build");
 		return outcome;
 	}
@@ -536,11 +557,12 @@ namespace Ai
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob: '*' within a folder, '**' across folders, {a,b} either\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under; plugins:/<plugin id>/ for a plugin's files\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->plan = SearchPlan;
 		search->run = SearchRun;
+		search->folderRoots = true;
 		registry.Add(search);
 		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
 			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",

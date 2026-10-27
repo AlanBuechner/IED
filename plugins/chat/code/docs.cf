@@ -117,6 +117,8 @@ namespace Ai
 	class DocFile
 	{
 		public Core::String path;
+		public Core::String shown;     // as the file tools name it ("plugins:/c4/docs/library/bedrock.md"); "" when unknown
+		public bool readOnly;
 		public Core::String text;
 		public Core::String lowered;
 		public Core::Array<int64> lineStarts;   // the byte where each line starts, then the text's length
@@ -261,12 +263,24 @@ namespace Ai
 		}
 		DocFile* doc = ReadDocFile(docs->folder / inside, path);
 		if (!doc) problem = Core::String("docs_read: there is no file ") + path + "; docs_search finds the sections";
+		else if (!docs->shown.IsEmpty()) {
+			doc->shown = (docs->shown + "/") + inside;
+			doc->readOnly = docs->readOnly;
+		}
 		return doc;
+	}
+
+	// " (plugins:/c4/docs/a.md, read-only)": where the file lives, so the files beside it can be opened.
+	static Core::String DocPlace(const DocFile* doc) {
+		if (doc->shown.IsEmpty()) return Core::String();
+		return ((Core::String(" (") + doc->shown.View()) + (doc->readOnly ? ", read-only" : "")) + ")";
 	}
 
 	static Core::String HeadingList(const DocFile* doc) {
 		Core::StringBuilder out;
-		Core::Format(&out, "{0:s}: {1:D} lines. Its headings:\n", doc->path.CStr(), doc->lineStarts.Count() - 2);
+		out.Append(doc->path.View());
+		out.Append(DocPlace(doc).View());
+		Core::Format(&out, ": {0:D} lines. Its headings:\n", doc->lineStarts.Count() - 2);
 		for (const DocSection& section : SplitSections(doc->text.View(), doc->path.View())) {
 			Core::Format(&out, "  {0:D} ", section.first);
 			out.Append(section.heading.View());
@@ -295,6 +309,7 @@ namespace Ai
 		Core::StringBuilder out;
 		Core::Format(&out, "{0:s}:{1:D}-{2:D} ", doc->path.CStr(), section.first, section.last);
 		out.Append(section.heading.View());
+		out.Append(DocPlace(doc).View());
 		out.Append("\n");
 		for (int64 line = from; line <= last; ++line) {
 			out.AppendInt(line);

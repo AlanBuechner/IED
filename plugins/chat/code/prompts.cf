@@ -69,11 +69,11 @@ namespace Ai
 			out.Append("\n\n# Deferred tools\n\nTools whose description ends in [deferred] are listed with their first sentence only, to keep the context small. tool_search gives a deferred tool's whole description and parameters (words for what you need, or select: and their names). You may also call one directly: if its arguments are wrong, the error shows its parameters.");
 		}
 		if (!context.docs.IsEmpty()) {
-			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language.\n\n");
+			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language. The files are in their plugins' folders, which docs_read names (plugins:/<plugin id>/..., read-only).\n\n");
 			out.Append(context.docs.View());
 		}
 		if (!context.skills.IsEmpty()) {
-			out.Append("\n\n# Skills\n\nGuides for this workspace's languages, tools and conventions. Read the one that fits the task with skill_read before you start it; skill_search finds skills by words.\n\n");
+			out.Append("\n\n# Skills\n\nGuides for this workspace's languages, tools and conventions. Read the one that fits the task with skill_read before you start it; skill_search finds skills by words. The workspace's own skills are in .ied/skills/; a plugin's are in its folder, plugins:/<plugin id>/ (fs_read, fs_list, fs_glob and search_text take such paths), and are read-only.\n\n");
 			out.Append(context.skills.View());
 		}
 		return out.ToString();

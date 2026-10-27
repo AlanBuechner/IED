@@ -69,6 +69,8 @@ namespace Ai
 				if (entry.kind != FS::EntryKind::Directory || !FS::FileExists(file.CStr())) continue;
 				Core::String problem;
 				Skill* skill = ReadSkill(file, folder->source.View(), problem);
+				if (skill && !folder->shown.IsEmpty()) skill->shown = ((folder->shown + "/") + entry.name.View()) + "/SKILL.md";
+				if (skill) skill->readOnly = folder->readOnly;
 				if (!skill) problems.Push(problem);
 				else if (!SkillNamed(skills, skill->name.View())) skills.Push(skill);
 			}

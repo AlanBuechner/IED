@@ -202,6 +202,26 @@
 			"x-ied-tiers": ["app"],
 			"description": "How often the plan's usage (the 5-hour session and the week) is asked of the CLI while a claude-code model is set up; 0: only when asked and after Claude turns. Asking spends no usage."
 		},
+		"ai.edits.formatOnWrite": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Format a file the AI writes (fs_write, fs_edit) with its language server before the call returns, where the language's plugin asks for it (its language server profile's formatOnAiWrite). The result says what formatting changed (docs/24 After an AI edit)."
+		},
+		"ai.edits.diagnosticsOnWrite": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Give the AI what the language server says of a file it just wrote - its errors and warnings, and the other files it finds problems in - where the language's plugin asks for it (diagnosticsOnAiWrite). Information only: a write with errors still succeeds, since files mid-way through an edit of several are expected to break (docs/24 After an AI edit)."
+		},
+		"ai.edits.diagnosticsWaitMs": {
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 10000,
+			"default": 1500,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "How long an AI write waits for the language server's diagnostics of the file (and for a starting server) before it returns without them; problems_list has them later."
+		},
 		"ai.tools.loadAll": {
 			"type": "boolean",
 			"default": false,

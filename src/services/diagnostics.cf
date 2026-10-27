@@ -51,6 +51,13 @@ namespace Ied
 		for (const Core::String& path : paths) Set(ws, path.View(), source, Core::StringView("[]"));
 	}
 
+	Core::String Diagnostics::Of(Workspace* ws, Core::StringView path, Core::StringView source) const {
+		FileDiagnostics* file = nullptr;
+		Core::String items;
+		if (!files.TryGet(FileKey(ws, path), file) || !file->bySource.TryGet(Core::String(source), items)) return Core::String("[]");
+		return items;
+	}
+
 	Core::String Diagnostics::Snapshot(Workspace* ws) const {
 		Core::String prefix = ws->wsId + "/";
 		JsonWriter json;

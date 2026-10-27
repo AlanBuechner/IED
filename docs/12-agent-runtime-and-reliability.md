@@ -173,6 +173,14 @@ The predecessor IDE defaulted every model to a 262144-token window. When the rea
 
 - Tool calls in one step execute **in parallel** when every call in the batch is declared `parallelSafe` (reads, searches, LSP queries); otherwise sequentially in the order given.
 - Each call: permission check (`docs/11`) -> approval wait if needed -> execute with timeout -> result (truncated to the tool's result budget, with a "result truncated; use <x> to read more" note) -> journal.
+- **Failure notes** (built 2026-10-26): a call that fails - its tool's error, arguments its schema refuses, an unknown
+  tool, a clip that is not there - gets, after its result and for the model only, the notes the workspace's plugins
+  contribute for it (`aiToolFailureNotes`, `docs/26` section 8, each with its `when`; `{tool}` is the tool). Developer
+  mode's is the one shipped: fix the cause in IED so the call cannot fail this way again (`docs/28` item 5). No note
+  goes after a denial (the owner's or a rule's), a call a stopped run cut off, or a result that is an error only because
+  what the tool ran failed - a command's exit code, a failed build or test (`ToolOutcome::reportsFailure`; a plugin
+  tool's `IED::ToolResult::reportsFailure`) - and a write is never an error for what its language server says of the
+  file (`docs/24` "After an AI edit").
 - **Side-effect safety on resume:** each call is journaled `started` before execution and `finished` after. On resume after a crash, a call that is `started` but not `finished` is **not re-executed**; the model receives "this call was interrupted by a server restart; its effect is unknown - verify before retrying."
 - Shell commands run in the chat's AI terminal (F-TRM-23); long-running ones can be backgrounded with a handle.
 

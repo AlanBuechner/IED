@@ -10,6 +10,12 @@ namespace Ied
 		return strings;
 	}
 
+	// A boolean-or-when option: "true", "" for false or none, the clause itself.
+	static Core::String Condition(const Serialization::DomNode& value) {
+		if (value.Kind() == Serialization::DomKind::Bool) return value.AsBool() ? Core::String("true") : Core::String();
+		return Core::String(value.AsView().Trimmed());
+	}
+
 	LspProfile* ReadLspProfile(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
 		LspProfile* profile = new LspProfile();
 		profile->id = Core::String(node.Member("id").AsView());
@@ -39,6 +45,8 @@ namespace Ied
 		profile->refetch = StringsOf(node.Member("refetchOnDiagnostics"));
 		profile->filterCodeActions = node.Member("codeActionsNeedClientFilter").AsBool();
 		profile->aiRequests = node.Member("aiExposedRequests").IsValid() ? NodeJson(node.Member("aiExposedRequests")) : Core::String("[]");
+		profile->formatOnAiWrite = Condition(node.Member("formatOnAiWrite"));
+		profile->diagnosticsOnAiWrite = Condition(node.Member("diagnosticsOnAiWrite"));
 		profile->when = Core::String(node.Member("when").AsView());
 		return profile;
 	}

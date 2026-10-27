@@ -10,6 +10,7 @@ goes on by itself on the new server."""
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -147,6 +148,49 @@ class DeveloperTests(SourceCase):
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
 		self.assertTrue(os.path.exists(os.path.join(self.home, "other.txt")))
 
+	async def test_plugin_folders_are_written_in_the_source(self):
+		"""docs/13 "Plugin folders": read-only without developer mode (test_plugin_folders.py), a plugin's folder takes
+		writes with it on - they go to the plugin's folder in ied:/, under the chat's permission mode like any there."""
+		chat_id, _ = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("fs_write", {"path": "plugins:/demo.lang/skills/new/SKILL.md", "content": "new\n"}, "w1"), text_step("Written."))
+		await self.turn(chat_id)
+		result = self.tool_results()["w1"]
+		self.assertIn("[plugins:/demo.lang/ is ied:/plugins/demo/: the change was made there]", result)
+		self.assertIn("ied:/plugins/demo/skills/new/SKILL.md: +1 -0 lines, saved", result, "the result names it in ied:/")
+		with open(os.path.join(self.home, "plugins", "demo", "skills", "new", "SKILL.md"), encoding="utf-8") as f:
+			self.assertEqual("new\n", f.read())
+		system = self.model.requests()[0]["body"]["messages"][0]["content"]
+		self.assertIn("The plugins' folders (plugins:/<plugin id>/: their skills, docs and manifests) are writable too", system)
+
+	async def test_a_failing_call_is_told_to_fix_its_cause(self):
+		"""Owner, 2026-10-26: with developer mode on, every failing call ends in a change to IED that keeps it from
+		failing again - the result says so. A command that ran and failed, a denial and a stopped run are no such call."""
+		chat_id, _ = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("fs_read", {"path": "missing.txt"}, "r1"), call_step("fs_read", {"nope": 1}, "r2"),
+			call_step("no_such_tool", {}, "u1"), call_step("shell_run", {"command": "exit 3"}, "s1"),
+			call_step("fs_read", {"path": "src/main.c"}, "ok"), text_step("Done."))
+		await self.turn(chat_id)
+		results = self.tool_results()
+		for call, tool in (("r1", "fs_read"), ("r2", "fs_read"), ("u1", "no_such_tool")):
+			self.assertIn("[Developer mode] %s failed. Before you go on, change IED so that this cannot happen again" % tool, results[call], call)
+		self.assertNotIn("[Developer mode]", results["s1"], "the command ran: what it ran failed")
+		self.assertNotIn("[Developer mode]", results["ok"])
+		for path in re.findall(r"ied:/([A-Za-z0-9_./-]+)", results["r1"]):
+			self.assertTrue(os.path.exists(os.path.join(REPO, *path.strip("./").split("/"))), "the note points at IED's real source: " + path)
+		card = [s for s in (await self.last_turn(chat_id))["segments"] if s.get("callId") and s.get("tool") == "fs_read"][0]
+		self.assertNotIn("[Developer mode]", json.dumps(card), "the card shows the error alone")
+
+	async def test_a_denied_call_is_not_told_to_fix_anything(self):
+		chat_id, topic = await self.chat(mode="agent", permission="ask")
+		self.model.queue(call_step("fs_write", {"path": "notes.txt", "content": "no\n"}, "w1"), text_step("Denied."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "write it"})
+		asked = (await self.client.wait_for(topic, lambda f: f.get("kind") == "approval.request", timeout=20))[-1]["data"]
+		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": asked["approvalId"], "decision": "deny"})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		result = self.tool_results()["w1"]
+		self.assertIn("The user denied fs_write", result)
+		self.assertNotIn("[Developer mode]", result)
+
 	async def test_an_untrusted_workspace_gets_none(self):
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
 		chat_id, _ = await self.chat(mode="agent")
@@ -182,6 +226,7 @@ class OffByDefaultTests(ChatCase):
 		self.assertNotIn("This IED is built from its source checkout", messages[0]["content"])
 		self.assertNotIn("ied_relaunch", messages[0]["content"])
 		self.assertIn("nothing is reachable as ied:/", [m["content"] for m in messages if m["role"] == "tool"][0])
+		self.assertNotIn("[Developer mode]", [m["content"] for m in messages if m["role"] == "tool"][0], "no note without it")
 
 
 class RelaunchTests(SourceCase):
@@ -313,7 +358,20 @@ class InstalledFromSourceTests(ChatCase):
 		self.head = commit_all(self.source, "two")
 		record = {"source": self.source.replace("\\", "/"), "commit": self.installed, "dirty": True, "installedMs": 1792630000123, "bin": "x"}
 		write(os.path.join(self.home, "install.json"), json.dumps(record))
+		write(os.path.join(self.source, "plugins", "demo", "ied-plugin.json"), "{}")
 		return super().start_server()
+
+	async def test_a_plugin_of_the_install_is_written_in_its_source(self):
+		"""The install's demo plugin (<home>/plugins/demo) came from the checkout's plugins/demo: a plugins:/ write goes
+		there, not into the install a reinstall would replace."""
+		await enable(self.client)
+		chat_id, _ = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("fs_write", {"path": "plugins:/demo.lang/skills/new/SKILL.md", "content": "new\n"}, "w1"), text_step("Written."))
+		await self.turn(chat_id)
+		result = {m["tool_call_id"]: m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"}["w1"]
+		self.assertIn("[plugins:/demo.lang/ is ied:/plugins/demo/: the change was made there]", result)
+		self.assertTrue(os.path.exists(os.path.join(self.source, "plugins", "demo", "skills", "new", "SKILL.md")))
+		self.assertFalse(os.path.exists(os.path.join(self.home, "plugins", "demo", "skills", "new")), "the install is left as it is")
 
 	async def test_it_finds_its_checkout_and_how_far_it_has_moved_on(self):
 		await self.client.sub(["ied.developer/state"])

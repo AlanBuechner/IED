@@ -3,6 +3,7 @@ include "roots.ch"
 namespace Ai
 {
 	static const char*[3] kRootKeys = { "path", "root", "cwd" };
+	static const char* kFolderRootKind = "plugin";
 
 	static bool IsRootKey(Core::StringView key) { return key == kRootKeys[0] || key == kRootKeys[1] || key == kRootKeys[2]; }
 
@@ -22,48 +23,249 @@ namespace Ai
 		return Core::String();
 	}
 
-	Core::String WithoutAlias(const Serialization::DomNode& args, Core::StringView rootAlias) {
-		Core::String prefix = Core::String(rootAlias) + ":/";
+	alias RootValueChange = func<Core::String(Core::StringView)>;
+
+	// The arguments (JSON) with each path, root and cwd that is a string passed through `change`.
+	static Core::String WithRootValues(const Serialization::DomNode& args, RootValueChange change) {
 		IED::JsonWriter json;
 		json.BeginObject();
 		for (int64 i = 0; i < args.Count(); ++i) {
-			Core::StringView value = args.ValueAt(i).AsView();
 			json.Key(args.KeyAt(i));
-			if (IsRootKey(args.KeyAt(i)) && value.StartsWith(prefix.View())) json.String(value.Substring(prefix.ByteLength(), value.ByteLength() - prefix.ByteLength()));
+			if (IsRootKey(args.KeyAt(i)) && args.ValueAt(i).Kind() == Serialization::DomKind::String) json.String(change(args.ValueAt(i).AsView()).View());
 			else json.Raw(IED::NodeJson(args.ValueAt(i)).View());
 		}
 		json.EndObject();
 		return json.ToString();
 	}
 
-	Core::String RootSubject(Core::StringView subject, Core::StringView rootAlias) {
-		const int64 open = subject.IndexOf('(', 0);
-		if (open < 0) return Core::String(subject);
-		return ((Core::String(subject.Substring(0, open + 1)) + rootAlias) + ":/") + subject.Substring(open + 1, subject.ByteLength() - open - 1);
+	Core::String WithoutAlias(const Serialization::DomNode& args, Core::StringView rootAlias) {
+		Core::String prefix = Core::String(rootAlias) + ":/";
+		return WithRootValues(args, [prefix](Core::StringView value) -> Core::String {
+			return value.StartsWith(prefix.View()) ? Core::String(value.Substring(prefix.ByteLength(), value.ByteLength() - prefix.ByteLength())) : Core::String(value);
+		});
 	}
 
-	bool OpenRoot(Core::StringView wsId, Core::StringView rootAlias, RootTarget& target, Core::String& problem) {
+	Core::String PrefixedSubject(Core::StringView subject, Core::StringView prefix) {
+		const int64 open = subject.IndexOf('(', 0);
+		if (open < 0) return Core::String(subject);
+		return (Core::String(subject.Substring(0, open + 1)) + prefix) + subject.Substring(open + 1, subject.ByteLength() - open - 1);
+	}
+
+	Core::String RootSubject(Core::StringView subject, Core::StringView rootAlias) { return PrefixedSubject(subject, (Core::String(rootAlias) + ":/").View()); }
+
+	void SplitFirst(Core::StringView path, Core::String& first, Core::String& rest) {
+		Core::StringView trimmed = path;
+		while (trimmed.StartsWith(Core::StringView("/"))) trimmed = trimmed.Substring(1, trimmed.ByteLength() - 1);
+		const int64 slash = trimmed.IndexOf('/', 0);
+		first = Core::String(slash < 0 ? trimmed : trimmed.Substring(0, slash));
+		rest = slash < 0 ? Core::String() : Core::String(trimmed.Substring(slash + 1, trimmed.ByteLength() - slash - 1));
+	}
+
+	Core::String JoinPath(Core::StringView folder, Core::StringView path) {
+		if (folder.IsEmpty()) return Core::String(path);
+		if (path.IsEmpty()) return Core::String(folder);
+		return (Core::String(folder) + "/") + path;
+	}
+
+	bool IsFolderRoot(const IED::Workspace& ws) { return ws.id.IsEmpty() && ws.kind == kFolderRootKind; }
+
+	static Serialization::DomNode ReadArgs(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	// --- ai.roots ----------------------------------------------------------------------------------------------------
+
+	static Serialization::DomNode AskRoots(Core::StringView wsId, Core::StringView open, Core::String& problem) {
 		IED::JsonWriter args;
 		args.BeginObject();
 		args.Field("wsId", wsId);
-		args.Field("open", rootAlias);
+		if (!open.IsEmpty()) args.Field("open", open);
 		args.EndObject();
 		IED::Result answer = IED::CallBinding(Core::StringView("ai.roots"), args.View());
-		Core::String nothing = (Core::String("nothing is reachable as ") + rootAlias) + ":/";
 		if (!answer.Ok()) {
-			problem = (nothing + " (") + answer.error.View() + ")";
+			problem = answer.error;
+			return Serialization::DomNode();
+		}
+		return ReadArgs(answer.json.View()).Member("roots");
+	}
+
+	bool OpenRoot(Core::StringView wsId, Core::StringView rootAlias, RootTarget& target, Core::String& problem) {
+		Core::String nothing = (Core::String("nothing is reachable as ") + rootAlias) + ":/";
+		Core::String failed;
+		Serialization::DomNode roots = AskRoots(wsId, rootAlias, failed);
+		if (!failed.IsEmpty()) {
+			problem = (nothing + " (") + failed.View() + ")";
 			return false;
 		}
-		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		Serialization::DomNode roots = Serialization::ReadJson(answer.json.View(), *doc).root.Member("roots");
 		for (int64 i = 0; i < roots.Count(); ++i) {
 			Serialization::DomNode root = roots.At(i);
 			if (root.Member("alias").AsView() != rootAlias || root.Member("wsId").AsView().IsEmpty()) continue;
 			if (!IED::FindWorkspace(root.Member("wsId").AsView(), target.ws)) break;
 			target.confirm = root.Member("confirm").AsBool();
+			target.rootAlias = Core::String(rootAlias);
+			target.shown = Core::String(rootAlias) + ":/";
 			return true;
 		}
 		problem = nothing;
 		return false;
+	}
+
+	// --- Plugin folders ----------------------------------------------------------------------------------------------
+
+	static Core::String PluginNames(const Core::Array<IED::PluginInfo>& plugins) {
+		Core::StringBuilder out;
+		for (const IED::PluginInfo& plugin : plugins) {
+			if (out.ByteLength() > 0) out.Append(", ");
+			out.Append(plugin.id.View());
+		}
+		return out.ToString();
+	}
+
+	// plugins:/ itself: each plugin's folder as fs_list shows a folder.
+	static Core::String PluginListing(const Core::Array<IED::PluginInfo>& plugins) {
+		Core::StringBuilder out;
+		for (const IED::PluginInfo& plugin : plugins) {
+			out.Append(kPluginsAlias);
+			out.Append(":/");
+			out.Append(plugin.id.View());
+			out.Append("/  ");
+			out.Append(plugin.name.View());
+			out.Append(" (");
+			out.Append(plugin.source.View());
+			out.Append(")\n");
+		}
+		out.Append("[each is a plugin's folder, read-only: fs_list, fs_read, fs_glob and search_text take plugins:/<id>/<path>]\n");
+		return out.ToString();
+	}
+
+	static int64 PluginIndex(const Core::Array<IED::PluginInfo>& plugins, Core::StringView id) {
+		for (int64 i = 0; i < plugins.Count(); ++i)
+			if (plugins[i].id.View() == id) return i;
+		return -1;
+	}
+
+	// A plugin's folder as a tool's workspace: none of the server's, its root the folder.
+	static IED::Workspace FolderRoot(const IED::PluginInfo& plugin) {
+		IED::Workspace ws;
+		ws.name = plugin.id;
+		ws.root = plugin.folder;
+		ws.kind = Core::String(kFolderRootKind);
+		ws.localState = Core::String((FS::Path(plugin.folder.View()) / ".ied" / "local").View());
+		return ws;
+	}
+
+	// The plugin id the call's first path names; "" for plugins:/ itself.
+	static Core::String NamedPlugin(const Serialization::DomNode& args) {
+		for (int64 i = 0; i < 3; ++i) {
+			Serialization::DomNode value = args.Member(kRootKeys[i]);
+			if (value.Kind() != Serialization::DomKind::String) continue;
+			Core::String first;
+			Core::String rest;
+			SplitFirst(value.AsView(), first, rest);
+			return first;
+		}
+		return Core::String();
+	}
+
+	// Where a root (alias "" for the chat's own workspace) holds the plugin's folder: its path there; false when no
+	// root does. A root that is the source the server's home was installed from (`home`) holds the home's plugins at
+	// the same place; the workspace holds its own plugins (.ied/plugins/).
+	static bool HoldingRoot(const IED::Workspace& ws, Core::StringView folder, Core::String& rootAlias, Core::String& relative) {
+		Core::String own;
+		if (IED::RelativeTo(ws.root.View(), folder, own) && (own.View() == ".ied/plugins" || own.View().StartsWith(Core::StringView(".ied/plugins/")))) {
+			rootAlias = Core::String();
+			relative = own;
+			return true;
+		}
+		Core::String ignored;
+		Serialization::DomNode roots = AskRoots(ws.id.View(), Core::StringView(""), ignored);
+		for (int64 i = 0; i < roots.Count(); ++i) {
+			Serialization::DomNode root = roots.At(i);
+			Core::StringView rootFolder = root.Member("folder").AsView();
+			if (rootFolder.IsEmpty()) continue;
+			rootAlias = Core::String(root.Member("alias").AsView());
+			if (IED::RelativeTo(rootFolder, folder, relative)) return true;
+			Core::String fromHome;
+			if (root.Member("home").AsBool() && IED::RelativeTo(IED::HomeFolder().View(), folder, fromHome) && !fromHome.IsEmpty() && FS::IsDirectory((FS::Path(rootFolder) / fromHome.View()).CStr())) {
+				relative = fromHome;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static Core::String ReadOnly(const IED::PluginInfo& plugin) {
+		return (((Core::String("plugins:/") + plugin.id.View()) + "/ is read-only: a plugin's files (its skills, docs and manifest) change only through a root that holds its folder (") + plugin.folder.View()) + "), which developer mode gives when IED runs from its source. Read them as they are; to keep a skill of your own, write it in the workspace's .ied/skills/<name>/SKILL.md";
+	}
+
+	static bool ResolvePluginRoot(const IED::Workspace& ws, const Serialization::DomNode& args, bool writes, RootTarget& target, Core::String& problem) {
+		Core::Array<IED::PluginInfo> plugins = IED::LoadedPlugins(ws.id.View());
+		Core::String pluginId = NamedPlugin(args);
+		if (pluginId.IsEmpty()) {
+			if (writes) {
+				problem = Core::String("plugins:/ names the folder of a plugin as plugins:/<plugin id>/<path>; the plugins are ") + PluginNames(plugins).View();
+				return false;
+			}
+			target.answer = PluginListing(plugins);
+			return true;
+		}
+		const int64 index = PluginIndex(plugins, pluginId.View());
+		if (index < 0) {
+			problem = ((Core::String("no plugin ") + pluginId.View()) + " is loaded for this workspace; plugins:/<plugin id>/ names one of ") + PluginNames(plugins).View();
+			return false;
+		}
+		Core::String inside = WithRootValues(args, [](Core::StringView value) -> Core::String {
+			Core::String first;
+			Core::String rest;
+			SplitFirst(value, first, rest);
+			return rest;
+		});
+		const IED::PluginInfo& plugin = plugins[index];
+		if (!writes) {
+			target.ws = FolderRoot(plugin);
+			target.rootAlias = Core::String(kPluginsAlias);
+			target.args = inside;
+			target.shown = ((Core::String(kPluginsAlias) + ":/") + plugin.id.View()) + "/";
+			return true;
+		}
+		Core::String rootAlias;
+		Core::String relative;
+		if (!HoldingRoot(ws, plugin.folder.View(), rootAlias, relative)) {
+			problem = ReadOnly(plugin);
+			return false;
+		}
+		if (rootAlias.IsEmpty()) target.ws = ws;
+		else if (!OpenRoot(ws.id.View(), rootAlias.View(), target, problem)) return false;
+		target.args = WithRootValues(ReadArgs(inside.View()), [relative](Core::StringView value) -> Core::String { return JoinPath(relative.View(), value); });
+		Core::String there = rootAlias.IsEmpty() ? relative : JoinPath((rootAlias + ":").View(), relative.View());
+		target.note = ((((Core::String("[plugins:/") + plugin.id.View()) + "/ is ") + there.View()) + "/: the change was made there]");
+		return true;
+	}
+
+	bool ResolveRoot(const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView rootAlias, bool writes, RootTarget& target, Core::String& problem) {
+		Serialization::DomNode stripped = ReadArgs(WithoutAlias(args, rootAlias).View());
+		if (rootAlias == kPluginsAlias) return ResolvePluginRoot(ws, stripped, writes, target, problem);
+		if (!OpenRoot(ws.id.View(), rootAlias, target, problem)) return false;
+		target.args = IED::NodeJson(stripped);
+		return true;
+	}
+
+	bool MayWriteThere(const IED::Workspace& ws, const Serialization::DomNode& args, Core::String& problem) {
+		Core::StringView path = args.Member("path").AsView();
+		if (path.IsEmpty()) return true;
+		Core::String file = Core::String((FS::Path(ws.root.View()) / path).View());
+		for (const IED::PluginInfo& plugin : IED::LoadedPlugins(ws.id.View())) {
+			Core::String inside;
+			Core::String workspaceIn;
+			if (IED::RelativeTo(plugin.folder.View(), ws.root.View(), workspaceIn)) continue;   // the workspace is the plugin: the owner works on it
+			if (!IED::RelativeTo(plugin.folder.View(), file.View(), inside) || inside.IsEmpty()) continue;
+			Core::String ignore;
+			Core::String relative;
+			if (HoldingRoot(ws, plugin.folder.View(), ignore, relative)) return true;
+			problem = ((Core::String(path) + " is in the folder of the plugin ") + plugin.id.View()) + ". " + ReadOnly(plugin).View();
+			return false;
+		}
+		return true;
 	}
 }

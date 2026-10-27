@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "run.ch"
 include "roots.ch"
 include "clipboard.ch"
+include "contributed.ch"
 
 namespace Ai
 {
@@ -72,6 +73,15 @@ namespace Ai
 		return out.ToString();
 	}
 
+	// The plugins' notes for a call that failed (aiToolFailureNotes: developer mode's "fix the cause in IED") after its
+	// result for the model; the card keeps the error alone.
+	static void AddFailureNotes(const IED::Workspace& ws, Core::StringView tool, ToolOutcome& outcome) {
+		Core::String notes = FailureNotes(ws, tool);
+		if (notes.IsEmpty()) return;
+		if (outcome.preview.IsEmpty()) outcome.preview = outcome.content;
+		outcome.content = (outcome.content + "\n\n") + notes.View();
+	}
+
 	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId, bool last) {
 		const int64 started = ToolNowMs();
 		ToolOutcome outcome;
@@ -111,6 +121,7 @@ namespace Ai
 				outcome = ToolError(chats->prompts.Note("invalid_tool_args", values).View());
 			}
 		}
+		if (outcome.isError && !outcome.denied && !outcome.reportsFailure && !run->cancelled) AddFailureNotes(ws, call->name.View(), outcome);
 		{
 			IED::HostLock guard(*context);
 			Resolve(segment, outcome, outcome.timed ? outcome.ms : ToolNowMs() - started);
@@ -161,26 +172,33 @@ namespace Ai
 		RootTarget root;
 		if (!rootAlias.IsEmpty()) {
 			Core::String problem;
-			if (!OpenRoot(WsId(ws), rootAlias.View(), root, problem)) return ToolError(((spec->name + ": ") + problem.View()).View());
+			if (!ResolveRoot(ws, args, rootAlias.View(), spec->toolClass != ToolClass::Read, root, problem)) return ToolError(((spec->name + ": ") + problem.View()).View());
+			if (!root.answer.IsEmpty()) return ToolResult(root.answer.View(), Core::StringView("the plugins' folders"));
+			if (IsFolderRoot(root.ws) && !spec->folderRoots) return ToolError(((spec->name + ": a plugin's folder (plugins:/) is no workspace, so ") + spec->name.View() + " does not work there; fs_read, fs_list, fs_glob, search_text and image_info read it").View());
 			Serialization::DomDoc* doc = new Serialization::DomDoc();
 			invocation.ws = root.ws;
-			invocation.args = Serialization::ReadJson(WithoutAlias(args, rootAlias.View()).View(), *doc).root;
+			invocation.args = Serialization::ReadJson(root.args.View(), *doc).root;
+			invocation.shown = root.shown;
+		}
+		else if (spec->toolClass == ToolClass::Write && spec->group.IsEmpty()) {
+			Core::String problem;
+			if (!MayWriteThere(ws, args, problem)) return ToolError(((spec->name + ": ") + problem.View()).View());
 		}
 		try {
 			ToolPlan plan = spec->plan(invocation);
 			if (!plan.error.IsEmpty()) return ToolError(plan.error.View());
-			if (!rootAlias.IsEmpty()) plan.subject = RootSubject(plan.subject.View(), rootAlias.View());
+			if (!root.rootAlias.IsEmpty()) plan.subject = PrefixedSubject(plan.subject.View(), root.shown.View());
 			Core::String why;
 			Permit permit = Permit::Allow;
 			bool allowedInRoot = false;
 			{
 				IED::HostLock guard(*context);
 				permit = Decide(chat->permission, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
-				if (!rootAlias.IsEmpty()) allowedInRoot = AllowedInRoot(rules, chat->allowed, plan.subject.View(), rootAlias.View());
+				if (!root.rootAlias.IsEmpty()) allowedInRoot = AllowedInRoot(rules, chat->allowed, plan.subject.View(), root.rootAlias.View());
 			}
-			if (!rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow && !allowedInRoot) {
+			if (!root.rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow && !allowedInRoot) {
 				permit = Permit::Ask;
-				why = (Core::String("every write and command in ") + rootAlias) + ":/ asks the owner until they allow it for this chat";
+				why = (Core::String("every write and command in ") + root.rootAlias.View()) + ":/ asks the owner until they allow it for this chat";
 			}
 			if (permit == Permit::Deny) {
 				Core::Array<Core::String> values;
@@ -206,9 +224,10 @@ namespace Ai
 			ToolOutcome outcome = spec->run(invocation);
 			outcome.ms = ToolNowMs() - ran;
 			outcome.timed = true;
-			if (spec->toolClass == ToolClass::Write && !outcome.isError && rootAlias.IsEmpty() && !args.Member("path").AsView().IsEmpty()) {
+			if (!root.note.IsEmpty() && !outcome.isError) outcome.content = (root.note + "\n") + outcome.content.View();
+			if (spec->toolClass == ToolClass::Write && !outcome.isError && root.rootAlias.IsEmpty() && !invocation.args.Member("path").AsView().IsEmpty()) {
 				IED::HostLock guard(*context);
-				TrackModified(IED::NormalizePath(args.Member("path").AsView()).View(), outcome.plus, outcome.minus);
+				TrackModified(IED::NormalizePath(invocation.args.Member("path").AsView()).View(), outcome.plus, outcome.minus);
 			}
 			return outcome;
 		}

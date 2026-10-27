@@ -24,6 +24,26 @@ namespace IED
 		return found;
 	}
 
+	Core::Array<PluginInfo> LoadedPlugins(Core::StringView wsId) {
+		Core::Array<PluginInfo> found;
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return found;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, wsId, "", problem);
+		if (!ws) return found;
+		for (Ied::Plugin* plugin : server->plugins->LoadedFor(ws)) {
+			PluginInfo each;
+			each.id = plugin->manifest->id;
+			each.name = plugin->manifest->name;
+			each.folder = Core::String(plugin->manifest->folder.View());
+			each.source = Core::String(Ied::PluginSourceName(plugin->manifest->source));
+			found.Push(each);
+		}
+		return found;
+	}
+
 	// The plugin `pluginId` loaded for `ws`, or null.
 	static Ied::Plugin* LoadedPlugin(Ied::Server* server, Ied::Workspace* ws, Core::StringView pluginId) {
 		for (Ied::Plugin* plugin : server->plugins->LoadedFor(ws))

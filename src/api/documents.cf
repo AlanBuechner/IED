@@ -104,4 +104,25 @@ namespace IED
 		result = Ied::SearchFolder(root, query, open, cancel);
 		return true;
 	}
+
+	bool SearchFolder(Core::StringView folder, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		if (!instance->May(Core::StringView("fs.read"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission fs.read");
+			return false;
+		}
+		if (!FS::IsDirectory(Core::String(folder).CStr())) {
+			problem = Core::String("no folder ") + folder;
+			return false;
+		}
+		Ied::LineMatcher matcher = Ied::LineMatcher(query);
+		if (!matcher.IsValid()) {
+			problem = Core::String("the pattern is not a valid regex: ") + matcher.Error();
+			return false;
+		}
+		Core::HashMap<Core::String, Core::String> none;
+		result = Ied::SearchFolder(FS::Path(folder), query, none, cancel);
+		return true;
+	}
 }

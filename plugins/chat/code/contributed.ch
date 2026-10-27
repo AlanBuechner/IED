@@ -18,6 +18,9 @@ namespace Ai
 	Core::Array<ErrorHint*> HintsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
 	// The same, for a tool call: what it shows the model gets them.
 	Core::Array<ErrorHint*> CallHints(const ToolInvocation& call);
+	// What the plugins add to the result of a call of `tool` that failed (`aiToolFailureNotes`: a `text` in which
+	// {tool} is the tool's name, an optional `when`), in load order, a blank line apart; "" when none holds.
+	Core::String FailureNotes(const IED::Workspace& ws, Core::StringView tool);
 	// The plugins' sections for the system message (docs/14 item 5): in load order, each within its maxTokens and all
 	// within kSectionsMostTokens; empty when none holds.
 	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
