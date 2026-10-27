@@ -154,6 +154,8 @@ class Chat:
 		}
 		if self.state_reason:
 			out["stateReason"] = self.state_reason
+		if self.turns and self.turns[-1].stop:
+			out["lastStop"] = self.turns[-1].stop
 		return out
 
 
