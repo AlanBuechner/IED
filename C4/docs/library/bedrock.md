@@ -1059,9 +1059,11 @@ Covered by `Bedrock/Tests/platform_*_tests.cf` and, for faults on protected page
 
 ## 13. Networking (`Net/`)
 
-**Status:** **Implemented** (B49, D-65): TCP and UDP over IPv4 and IPv6, name resolution and waiting on many sockets,
-through a small C API in the runtime (`C4Runtime/NetRuntimeC.h`, `C4Runtime/Net/SocketsWin32.c` over Winsock 2).
-HTTP is built on it (section 14).
+**Status:** **Implemented** (B49, D-65; TLS B77, D-84): TCP and UDP over IPv4 and IPv6, name resolution, waiting on
+many sockets, and TLS on TCP streams, through small C APIs in the runtime (`C4Runtime/NetRuntimeC.h`,
+`C4Runtime/Net/SocketsWin32.c` over Winsock 2; `C4Runtime/TlsRuntimeC.h`, `C4Runtime/Net/Tls*Win32.c` over SChannel).
+Windows only today: the runtime's files for another system come with the Linux port (B31). HTTP is built on it
+(section 14).
 
 ```c4
 Net::TcpListener server;
@@ -1084,6 +1086,29 @@ if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Err
   closed its side), `ReceiveAll` (exactly a count), `SetNoDelay`, `Shutdown(Shutdown::Send / Receive / Both)`,
   `LocalAddress`, `PeerAddress`, `Close`. Each owns its socket and closes it on delete; neither can be copied (move
   one with `take()`), and a zero one is closed.
+- **TLS** (`tls.ch`, B77, D-84): `stream.StartTls(TlsClientOptions { hostName, extraRoots }, timeoutMs)` secures a
+  connected stream as the client, `stream.AcceptTls(identity, timeoutMs)` an accepted one as the server with a
+  `TlsIdentity::FromPkcs12(bytes, count, password)` (a certificate and its private key from a .pfx file; `IsLoaded`,
+  `Error`, `Release`; it must outlive the streams it accepted). From then on `Send`, `Receive` and the rest carry TLS
+  records (`IsSecure()`, `SecureVersion()`: `TlsVersion::Tls12`, or `Tls13` where the system offers it - Windows 11;
+  Windows 10 speaks 1.2). The host name is sent as SNI. The server's certificate is always checked; nothing turns the
+  check off: its chain must reach a root Windows trusts or, only when that fails for want of a trusted root, one of
+  `extraRoots` (CA certificates as PEM blocks or one DER certificate - a local or corporate authority - trusted through
+  a chain engine whose exclusive roots they are, so the system's own trust is never widened); it must name `hostName`
+  (a DNS name, or an IP address in its subject alternative names), be within its validity, be for server
+  authentication and not be revoked (checked below the root; a status that cannot be learned - no CRL, offline - does
+  not refuse, a revoked certificate does). A refusal says why - "the certificate of example.com is refused: it is not
+  issued by an authority this machine trusts (an unknown or self-signed root)", "...: it was issued for other names",
+  "...: it has expired, or is not valid yet" - as does a failed handshake ("the TLS handshake with example.com failed:
+  the peer sent something that is not TLS, ..."; "example.com closed the connection during the TLS handshake (is it
+  serving TLS on this port?)"); a failed `StartTls` or `AcceptTls` closes the stream. `Shutdown(Shutdown::Send)` sends
+  close_notify first, and `Close` does when the socket takes it at once; `Receive` returns 0 at the peer's close_notify
+  or at the connection's end between records, and fails at one cut inside a record. One send and one receive may run
+  at once. A handshake message after the handshake (TLS 1.3's tickets and key updates, a TLS 1.2 renegotiation) is
+  answered on the receiving thread, sends waiting until its answer is out. `Poll` sees the socket, not bytes TLS has
+  decrypted already: receive with a timeout of 0 until it times out. A loaded `TlsIdentity`'s key sits in the user's
+  key store under a name of its own (SChannel runs in LSASS, which cannot use a key only this process holds) and is
+  deleted there on release; a process that crashes with one loaded leaves it behind.
 - **Local connections** (`local.ch`, B67): `LocalListener::Listen(name)`, `Accept(timeoutMs)` and
   `LocalStream::Connect(name, timeoutMs)`, `Send` / `SendAll` / `SendText`, `Receive`, `Close` - a channel between
   this user's processes on this machine, found by a name (a named pipe on Windows, over the runtime's
@@ -1122,7 +1147,13 @@ Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form
 addresses are loopback,
 resolution (also of a name that does not exist), a TCP round trip over IPv4 and IPv6, timeouts on accept, receive and
 `ReceiveAll`, a refused connection, shutdown, a 4 MiB transfer from another thread, a port in use, closed and moved
-streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `local_tests.cf` (8) covers
+streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `tls_tests.cf` (14) runs TLS against servers it starts on loopback, with a test PKI
+kept in `tls_fixtures.ch` and trusted through `extraRoots` (no file and no network): a secured stream both ways with
+close_notify, an IP address the certificate names, the refusals (no extra root, another authority as the extra root,
+a host name and an IP address it does not name, an expired certificate), roots as DER, several PEM blocks and junk,
+identities that do not load, a server that is not TLS, one that closes during the handshake and one that never
+answers, misuse; then https through `Http::Server::UseTls` and `FetchUrl` (a request, 4 MiB down and 1 MiB up across
+many records, the system's roots alone refusing it, plain http to it) and wss. `local_tests.cf` (8) covers
 local connections: both directions, a name as a single-instance lock, no listener (refused at once), timeouts, 40 KB
 sent before a close arriving whole, four clients connecting before any is accepted, a client that leaves before it is
 accepted, the name freed on close, refused names and the user's own name. `loop_tests.cf` covers the
@@ -1134,9 +1165,9 @@ connections at once on one loop thread while a timer keeps running.
 
 ## 14. HTTP (`Http/`)
 
-**Status:** **Implemented** (B50, D-66; WebSockets B51, D-67): HTTP/1.1 messages, a server that answers each
-connection on a thread of its own, a client for one request at a time, and WebSockets both ways, all plain C4 over
-`Net::`. Plain http and ws only: no TLS.
+**Status:** **Implemented** (B50, D-66; WebSockets B51, D-67; https and wss B77, D-84): HTTP/1.1 messages, a server
+that answers each connection on a thread of its own, a client for one request at a time, and WebSockets both ways, all
+plain C4 over `Net::` - http and ws, or https and wss over its TLS (section 13).
 
 ```c4
 Http::Server server;
@@ -1170,11 +1201,21 @@ if (got.ok) printf("%d\n", got.response.status);
   writes the framing - `Content-Length`, `Connection: close` when it closes after a response - and answers
   `Expect: 100-continue` before reading the body; HEAD gets the head only. It refuses with 400 (malformed), 408 (too
   slow), 413 (body over the limit), 431 (head over the limit), 501 (another transfer coding) and 505 (another
-  version); a handler that throws answers 500.
-- **Client** (`client.ch`): `Fetch(address, request, timeoutMs)` sends one request on a connection of its own and
-  reads the response (interim 1xx ones skipped; a `Content-Length`, chunked or until-close body); `Get(url,
-  timeoutMs)` and `Post(url, contentType, body, timeoutMs)` take an `http://host[:port]/path?query` URL
-  (`ParseUrl`; an IPv6 host in brackets). A `FetchResult` is `ok` with the `response`, or not, with `error`.
+  version); a handler that throws answers 500. `UseTls(identity)` (before `Serve`) makes it an https and wss server:
+  each connection starts with a TLS handshake proving it with the `Net::TlsIdentity` it keeps, and one whose
+  handshake fails or outlasts the request timeout is closed (`Stop` waits for a handshake underway as it waits for a
+  request underway).
+- **URLs** (`url.ch`): `ParseUrl` reads `http://`, `https://`, `ws://` and `wss://host[:port]/path?query` (an IPv6
+  host in brackets, the scheme in any case) into a `Url` (`valid`, `webSocket`, `secure`, `host`, `port` - 80, or 443
+  when secure, when it names none - and `target`); `HostHeader(url)` leaves out the scheme's own port.
+- **Client** (`client.ch`): `ConnectTo(url, tls, timeoutMs, why)` is the connection to a URL's server: its host
+  resolved, the first of its addresses that answers, and for https and wss secured with `StartTls`, the certificate
+  checked against `tls` (whose `hostName`, when empty, is the URL's). `FetchUrl(url, request, tls, timeoutMs)` sends one
+  request over it and reads the response (interim 1xx ones skipped; a `Content-Length`, chunked or until-close body);
+  `Get(url, timeoutMs)` and `Post(url, contentType, body, timeoutMs)` do with the system's roots alone, and
+  `Fetch(address, request, timeoutMs)` over plain TCP to an address. A `FetchResult` is `ok` with the `response`, or
+  not, with `error` (a refused certificate's reason among them). A body until the close fails when the connection
+  fails rather than ends.
 
 - **Content codings** (`coding.ch`; RFC 9110 section 8.4): `CompressResponse(request, response, level)` gzips the
   body (Compression section 19) when the request's Accept-Encoding takes gzip (`AcceptsCoding`: listed, or `*`, without
@@ -1188,7 +1229,8 @@ if (got.ok) printf("%d\n", got.response.status);
   session)` answers the handshake (101; 400 for a request that is not one, 426 for another version) and the session
   runs with the connection's `WebSocket` on the connection's thread once the 101 is out; the connection closes when
   the session returns, and a server that stops closes its sessions with 1001. A client connects with
-  `WebSocket::Connect("ws://host:port/path", timeoutMs)`. `Receive(message, timeoutMs)` waits for a whole message
+  `WebSocket::Connect("ws://host:port/path", timeoutMs)`, or `wss://` over TLS (`Connect(url, tls, timeoutMs)` with
+  extra roots); a server that `UseTls` serves wss. `Receive(message, timeoutMs)` waits for a whole message
   (`kind` Text or Binary, `data`, `Text()`): fragments are joined, pings answered, the peer's close answered, and it
   is false when the connection closed (`CloseCode()`, `CloseReason()`), failed (`Error()`) or the wait timed out
   (`TimedOut()`; still open). `LastReceivedNs()` is when bytes last came from the peer, a pong included, so a server
@@ -1205,7 +1247,7 @@ if (got.ok) printf("%d\n", got.response.status);
   after a 101 the server hands it the connection.
 
 Covered by `Bedrock/Tests/http_tests.cf` (27 tests): heads (every malformed form, the limits, CRLF or LF, absolute
-targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers; the server's GET and POST, the
+targets), framing, chunked bodies fed whole and a byte at a time, URLs (https and wss too), headers; the server's GET and POST, the
 client's address a handler sees, three
 pipelined requests on one connection, a chunked request, HEAD, Expect: 100-continue, HTTP/1.0, the refusals, a
 handler that throws, 8 concurrent clients and Stop from a handler; the client's chunked, until-close and interim
@@ -1283,7 +1325,8 @@ growing while it works, a child read by its id, and an ended one gone.
 
 ## 16. Cryptography (`Crypto/`)
 
-**Status:** **Implemented** (B66). Plain C4, checked against the standards' own test vectors. No ciphers and no TLS.
+**Status:** **Implemented** (B66). Plain C4, checked against the standards' own test vectors. No ciphers: TLS is the
+system's, through `Net::` (section 13).
 
 | Header | Gives |
 |---|---|
@@ -1528,8 +1571,8 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | File information and times, copies of files and trees, absolute and canonical paths, watching a directory | **Implemented** (section 5, B53) |
 | `Core::InitList<T>` | **Implemented** |
-| Sockets / networking | **Implemented** (section 13, B49), with an event loop and timers (B54) |
-| HTTP server | **Implemented** (section 14, B50), with WebSockets (B51) |
+| Sockets / networking | **Implemented** (section 13, B49), with an event loop and timers (B54) and TLS (B77) |
+| HTTP server | **Implemented** (section 14, B50), with WebSockets (B51), https and wss (B77) |
 | Child processes: pipes, exit codes, environment, killing a tree, terminals | **Implemented** (section 15, B52) |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |
 | `Platform::`: virtual memory, system and process information, environment variables, libraries, wall-clock time | **Implemented** (section 12, B40) |

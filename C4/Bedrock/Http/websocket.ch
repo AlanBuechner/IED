@@ -1,7 +1,8 @@
 // WebSocket: messages both ways over one connection (D-67, RFC 6455). A server's handler accepts an upgrade with
 // Http::AcceptWebSocket(request, response, session): once the 101 response is out, the session runs with the
 // connection's WebSocket on the connection's thread, and the connection closes when it returns (or the server stops).
-// A client connects with WebSocket::Connect("ws://host:port/path", timeoutMs). Receive waits for a whole message -
+// A client connects with WebSocket::Connect("ws://host:port/path", timeoutMs), or wss:// over TLS (D-84); a server
+// over TLS is an Http::Server that serves TLS. Receive waits for a whole message -
 // fragments joined, pings answered, the peer's close answered - and is for one thread at a time; the sends and Close
 // are safe from any thread, so other threads can push while the session receives. A send waits for the peer at most
 // the send wait (a peer that stopped reading, as a phone asleep does); past it, the connection is cut off - shut down
@@ -44,9 +45,11 @@ namespace Http
 		[operator("create")] public void Init() {}
 		[operator("delete")] public void Delete() { CloseStream(); }
 
-		// A client's connection to "ws://host[:port]/path"; a closed socket with Error() when the connection or the
-		// handshake fails.
+		// A client's connection to "ws://host[:port]/path", or "wss://..." over TLS (the server's certificate checked
+		// against the system's roots, or `tls`: Http::ConnectTo); a closed socket with Error() when the connection, TLS or
+		// the handshake fails.
 		public static WebSocket Connect(Core::StringView url, int32 timeoutMs);
+		public static WebSocket Connect(Core::StringView url, const Net::TlsClientOptions& tls, int32 timeoutMs);
 		// A server's WebSocket over a connection whose handshake was answered: it takes the stream and the bytes received
 		// after the request. `stopping`, when not null, ends Receive once it is set (the server stopping).
 		public static WebSocket Adopt(Net::TcpStream& stream, Core::Array<uint8>& received, const Threading::Atomic<bool>* stopping);

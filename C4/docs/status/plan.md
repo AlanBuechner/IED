@@ -160,6 +160,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-81 | Partitioned emission | An incremental build's edit loop is serial work around a little code generation: the split writes the whole module as bitcode on one thread and every thread reads a copy of it, and IR emission runs on one thread. The program is emitted into its partitions directly, each into a module context of its own on its own thread, so emission, bitcode, hashing and verification use every core and no whole-module copy exists; HIR lowering stays on one thread (it changes the model), and the coordinator decides placement and the order of everything, so the output does not depend on the thread count. A record's partition is decided from its source file before its code exists; partition 0 holds the program's own code and data. Every cross-partition rule (static storage as hidden globals, one vtable per program, globals defined in their file's partition) holds with one partition too, so whole-program builds and scripts take the same path with one partition. | [compiler 05](../compiler/05-partitioned-emission.md) |
 | D-82 | The reflection image is built beside the build | The image is the program's largest piece of data and was built on the coordinator after the fixed point, in partition 0. Its content depends on lowering (the function template instances bodies make, which functions an invoke thunk can call), so it cannot start before lowering ends, and folding an annotation argument can resolve types and make template instances, so reading the model stays on the coordinator. The image is described there, as plain values (`ImageDescription`). A split program keeps the description and its key (a hash of every value and the target), and the object cache keeps the image's object by that key: the LLVM constants are built, in a module and LLVM context of their own on an assembly thread, which reads no model, only when no object of the key is kept, and are assembled from memory, with no bitcode. The module declares what the image points at by name (invoke thunks are hidden `.local` globals, each in its target's partition), so the partitions' code does not change with it, and an edit that changes no reflected declaration builds no image. | [compiler 05](../compiler/05-partitioned-emission.md#the-reflection-image-d-82) |
 | D-83 | A guarded call runs no cleanup of the script's frames on a fault | A hardware fault in a guarded script call (docs/runtime/04 section 7) unwinds to the guard without running the `delete`s of the frames between: C4 code is built for synchronous exceptions (MSVC's `/EHs`), so its frame handler unwinds for C4 and C++ exceptions only. That is kept on purpose rather than made asynchronous (`/EHa`, LLVM's `-fasync-exceptions`): the cleanups would run on whatever state the fault left, and a faulted script is not run again. A lock the script held stays held and what it was writing stays half written; the host treats what the script touched as poisoned. | [scripting 7](../runtime/04-scripting.md#7-crash-isolation) |
+| D-84 | TLS (roadmap 7) | The system's TLS, not one written in C4: SChannel through a runtime C API (`TlsRuntimeC.h`, `Net/Tls*Win32.c`), a session an int64 handle over a connected socket, as `NetRuntimeC.h`'s are. It lives in `Net::TcpStream` (`StartTls` as the client, `AcceptTls` with a `TlsIdentity` as the server), not in a stream type of its own, so `Http`'s client, server and WebSockets - which hold a `TcpStream` - take https and wss with no second code path, and `Response::takeover` hands a secured stream on unchanged. The client checks the server's certificate itself (`SCH_CRED_MANUAL_CRED_VALIDATION`) the way SChannel's own check does, never skipped: `CertGetCertificateChain` to the system's roots, and only when that fails for want of a trusted root a second chain through an engine whose exclusive roots are the caller's extra roots (so they never widen the system's trust), then `CertVerifyCertificateChainPolicy` with the SSL policy and the host name; revocation below the root, an unknown status tolerated, a revoked certificate refused. TLS 1.2 and 1.3 through `SCH_CREDENTIALS` (TLS 1.2 by `SCHANNEL_CRED` on an older system). A server identity's key is imported into the user's key store under a name of its own and deleted on release, because SChannel runs in LSASS and cannot use a key that lives only in the process (`PKCS12_NO_PERSIST_KEY` fails with `SEC_E_NO_CREDENTIALS`). Sends and receives each serialize; a post-handshake message (TLS 1.3 tickets and key updates, a TLS 1.2 renegotiation) is answered on the receiving thread with sends held back. | [Bedrock 13](../library/bedrock.md#13-networking-net) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework; whether C4 exports
@@ -2031,6 +2032,26 @@ methods that return structs by value (B74 adds the test); data exported from the
   4. Whether C4 should export data itself (`[export("D3D12SDKVersion")]` on a constant) is a roadmap item, not this WP.
 - **Tests:** steps 2 and 3.
 
+#### B77 - TLS: https and wss (IED's MCP client, docs/04 "MCP" in the IED tree)
+- **Design:** D-84, [Bedrock 13](../library/bedrock.md#13-networking-net), [14](../library/bedrock.md#14-http-http).
+  **Depends on:** B49, B50, B51. **Status:** Done.
+- **Done notes:** the runtime's `TlsRuntimeC.h` over SChannel in `Net/TlsWin32.c` (sessions: the
+  `InitializeSecurityContextW` / `AcceptSecurityContextW` loop, records, close_notify, post-handshake messages),
+  `Net/TlsTrustWin32.c` (the certificate check, extra roots from PEM or DER into a memory store) and
+  `Net/TlsIdentityWin32.c` (credentials, identities from PKCS #12). Bedrock: `Net::TlsClientOptions`,
+  `Net::TlsIdentity`, `Net::TlsVersion` (`Net/tls.ch`), `TcpStream::StartTls` / `AcceptTls` / `IsSecure` /
+  `SecureVersion`; `Http/url.ch` (URL parsing moved out of the client: https and wss, `Url::secure`, port 443),
+  `Http::ConnectTo` (every resolved address in turn, then TLS for a secure URL), `Http::FetchUrl` with TLS options,
+  `Http::Server::UseTls`, `WebSocket::Connect(url, tls, timeoutMs)`. A body until the close now fails when the
+  connection fails instead of ending. A TLS 1.2 renegotiation a server asks for (HelloRequest) was checked by hand
+  against Node's TLS server (OpenSSL): the new hello made from no input, the handshake to its end, the certificate
+  checked again, and data both ways after it; a TLS 1.3-only server is refused saying the two sides share no version.
+  Windows 10 negotiates TLS 1.2 (its SChannel offers 1.3 only from Windows 11 / Server 2022), so the TLS 1.3 path -
+  tickets and key updates after the handshake - is untested on this machine.
+- **Tests:** Bedrock `net.tls.*` (11) and `http.tls.*` (3) against servers on loopback with the test PKI of
+  `Tests/tls_fixtures.ch`, `http.parse.urls_secure`; `http.client.failures` no longer reaches the internet. In the
+  IED tree, the MCP server checks over https against `tools/fake-mcp` served with Python's `ssl` (OpenSSL).
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -2574,7 +2595,7 @@ methods that return structs by value (B74 adds the test); data exported from the
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66 B67 B68 B70 B71 B72 B73 B74
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66 B67 B68 B70 B71 B72 B73 B74 B77
 In progress:          B69
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)

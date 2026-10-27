@@ -1,0 +1,97 @@
+include "url.ch"
+include "message.ch"
+include "Net/address.ch"
+include "Text/stringbuilder.ch"
+
+namespace Http
+{
+	// A scheme a URL may start with, and what it means.
+	struct Scheme
+	{
+		public const char* prefix;
+		public bool webSocket;
+		public bool secure;
+	}
+
+	const int64 kSchemeCount = 4;
+	const Scheme[4] kSchemes = { { "http://", false, false }, { "https://", false, true }, { "ws://", true, false }, { "wss://", true, true } };
+
+	// The scheme `text` starts with (case does not matter), or none (a null prefix).
+	Scheme SchemeOf(Core::StringView text) {
+		for (int64 i = 0; i < kSchemeCount; ++i) {
+			const Core::StringView prefix = Core::StringView(kSchemes[i].prefix);
+			if (text.ByteLength() > prefix.ByteLength() && EqualsIgnoringCase(text.Substring(0, prefix.ByteLength()), prefix)) return kSchemes[i];
+		}
+		return Scheme();
+	}
+
+	// The port text after a ':' (digits, 1 to 65535), or -1.
+	int32 PortNumber(Core::StringView text) {
+		if (text.IsEmpty() || text.ByteLength() > 5) return -1;
+		int32 port = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const char c = text.Data()[i];
+			if (c < '0' || c > '9') return -1;
+			port = port * 10 + (int32)(c - '0');
+		}
+		return port >= 1 && port <= Net::kMaxPort ? port : -1;
+	}
+
+	// "host", "host:port", "[v6]" or "[v6]:port" into `url`, `defaultPort` when it names none; false when it is none of
+	// those.
+	bool ParseAuthority(Core::StringView authority, int32 defaultPort, Url& url) {
+		Core::StringView host = authority;
+		Core::StringView port;
+		if (authority.StartsWith(Core::StringView("["))) {
+			const int64 close = authority.IndexOf(']', 0);
+			if (close < 0) return false;
+			host = authority.Substring(1, close - 1);
+			const Core::StringView rest = authority.Substring(close + 1, authority.ByteLength() - close - 1);
+			if (!rest.IsEmpty() && !rest.StartsWith(Core::StringView(":"))) return false;
+			port = rest.IsEmpty() ? rest : rest.Substring(1, rest.ByteLength() - 1);
+		}
+		else {
+			const int64 colon = authority.IndexOf(':', 0);
+			if (colon >= 0) {
+				host = authority.Substring(0, colon);
+				port = authority.Substring(colon + 1, authority.ByteLength() - colon - 1);
+			}
+		}
+		url.port = port.IsEmpty() && authority.IndexOf(':', 0) < 0 ? defaultPort : PortNumber(port);
+		url.host = Core::String(host);
+		return !host.IsEmpty() && url.port > 0;
+	}
+
+	Url ParseUrl(Core::StringView text) {
+		const Scheme scheme = SchemeOf(text);
+		if (scheme.prefix == nullptr) return Url();
+		const int64 schemeLength = Core::StringView(scheme.prefix).ByteLength();
+		const Core::StringView rest = text.Substring(schemeLength, text.ByteLength() - schemeLength);
+		int64 end = rest.ByteLength();
+		const int64 slash = rest.IndexOf('/', 0);
+		const int64 mark = rest.IndexOf('?', 0);
+		if (slash >= 0 && slash < end) end = slash;
+		if (mark >= 0 && mark < end) end = mark;
+		Url url;
+		if (!ParseAuthority(rest.Substring(0, end), scheme.secure ? kDefaultHttpsPort : kDefaultHttpPort, url)) return Url();
+		url.webSocket = scheme.webSocket;
+		url.secure = scheme.secure;
+		const Core::StringView target = rest.Substring(end, rest.ByteLength() - end);
+		url.target = target.IsEmpty() ? Core::String("/") : target.StartsWith(Core::StringView("?")) ? Core::String("/") + target : Core::String(target);
+		url.valid = true;
+		return url;
+	}
+
+	Core::String HostHeader(const Url& url) {
+		Core::StringBuilder host;
+		const bool bracketed = url.host.View().IndexOf(':', 0) >= 0;   // an IPv6 address
+		if (bracketed) host.Append("[");
+		host.Append(url.host.View());
+		if (bracketed) host.Append("]");
+		if (url.port != (url.secure ? kDefaultHttpsPort : kDefaultHttpPort)) {
+			host.Append(":");
+			host.AppendInt(url.port);
+		}
+		return host.ToString();
+	}
+}

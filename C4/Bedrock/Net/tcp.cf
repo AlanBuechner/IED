@@ -1,5 +1,6 @@
 include "tcp.ch"
 include "sockets.ch"
+include "tlsruntime.ch"
 
 namespace Net
 {
@@ -19,9 +20,49 @@ namespace Net
 		return stream;
 	}
 
+	// --- TLS --------------------------------------------------------------------------------------------------------------
+
+	// Open and not secured yet; else false, with why.
+	bool TcpStream::CanSecure() {
+		if (!IsOpen()) last.Fail("the stream is closed");
+		else if (IsSecure()) last.Fail("the stream is already secured");
+		return IsOpen() && !IsSecure();
+	}
+
+	// A handshake's session taken on; the stream closed when there is none.
+	bool TcpStream::Secured(int64 session) {
+		if (session < 0) {
+			Close();
+			return false;
+		}
+		tls = session + 1;
+		return true;
+	}
+
+	bool TcpStream::StartTls(const TlsClientOptions& options, int32 timeoutMs) {
+		if (!CanSecure()) return false;
+		TlsClientRecord record;
+		record.hostName = options.hostName.CStr();
+		record.extraRoots = (const void*)options.extraRoots.Data();
+		record.extraRootsSize = options.extraRoots.Count();
+		char[kErrorBytes] why;
+		return Secured(last.Record(c4_tls_connect(Socket(), &record, timeoutMs, &why[0], kErrorBytes), &why[0]));
+	}
+
+	bool TcpStream::AcceptTls(const TlsIdentity& identity, int32 timeoutMs) {
+		if (!CanSecure()) return false;
+		char[kErrorBytes] why;
+		return Secured(last.Record(c4_tls_accept(Socket(), identity.Handle(), timeoutMs, &why[0], kErrorBytes), &why[0]));
+	}
+
+	TlsVersion TcpStream::SecureVersion() const { return IsSecure() ? (TlsVersion)c4_tls_version(Session()) : TlsVersion::None; }
+
+	// --- sending and receiving ----------------------------------------------------------------------------------------------
+
 	int64 TcpStream::Send(const void* bytes, int64 count, int32 timeoutMs) {
 		if (!IsOpen()) return last.Fail("the stream is closed");
 		char[kErrorBytes] why;
+		if (IsSecure()) return last.Record(c4_tls_send(Session(), bytes, count, timeoutMs, &why[0], kErrorBytes), &why[0]);
 		return last.Record(c4_net_send(Socket(), bytes, count, nullptr, timeoutMs, &why[0], kErrorBytes), &why[0]);
 	}
 
@@ -44,6 +85,7 @@ namespace Net
 	int64 TcpStream::Receive(void* buffer, int64 capacity, int32 timeoutMs) {
 		if (!IsOpen()) return last.Fail("the stream is closed");
 		char[kErrorBytes] why;
+		if (IsSecure()) return last.Record(c4_tls_receive(Session(), buffer, capacity, timeoutMs, &why[0], kErrorBytes), &why[0]);
 		return last.Record(c4_net_receive(Socket(), buffer, capacity, nullptr, timeoutMs, &why[0], kErrorBytes), &why[0]);
 	}
 
@@ -67,14 +109,21 @@ namespace Net
 	bool TcpStream::SetNoDelay(bool on) { return IsOpen() && c4_net_set_no_delay(Socket(), on ? 1 : 0) == 0; }
 
 	void TcpStream::Shutdown(Net::Shutdown side) {
-		if (IsOpen()) c4_net_shutdown(Socket(), (int32)side);
+		if (!IsOpen()) return;
+		if (IsSecure() && side == Net::Shutdown::Send) c4_tls_close_notify(Session());
+		c4_net_shutdown(Socket(), (int32)side);
 	}
 
 	Address TcpStream::LocalAddress() const { return LocalAddressOf(Socket()); }
 	Address TcpStream::PeerAddress() const { return PeerAddressOf(Socket()); }
 
 	void TcpStream::Close() {
+		if (tls != 0) {
+			c4_tls_close_notify(Session());
+			c4_tls_free(Session());
+		}
 		if (slot != 0) c4_net_close(Socket());
+		tls = 0;
 		slot = 0;
 	}
 

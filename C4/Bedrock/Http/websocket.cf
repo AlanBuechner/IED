@@ -95,18 +95,21 @@ namespace Http
 		return Core::String();
 	}
 
-	WebSocket WebSocket::Connect(Core::StringView text, int32 timeoutMs) {
+	WebSocket WebSocket::Connect(Core::StringView url, int32 timeoutMs) { return Connect(url, Net::TlsClientOptions(), timeoutMs); }
+
+	WebSocket WebSocket::Connect(Core::StringView text, const Net::TlsClientOptions& tls, int32 timeoutMs) {
 		WebSocket socket;
 		socket.client = true;
 		const Url url = ParseUrl(text);
-		const Net::Resolution found = url.valid && url.webSocket ? Net::Resolve(url.host.CStr(), url.port) : Net::Resolution();
-		if (!url.valid || !url.webSocket) socket.error = Core::String("not a ws://host[:port]/path URL");
-		else if (!found.Found()) socket.error = found.error;
-		if (!socket.error.IsEmpty()) return socket;
-		socket.stream = Net::TcpStream::Connect(found.addresses[0], timeoutMs);
+		if (!url.valid || !url.webSocket) {
+			socket.error = Core::String("not a ws:// or wss://host[:port]/path URL");
+			return socket;
+		}
+		socket.stream = ConnectTo(url, tls, timeoutMs, socket.error);
+		if (!socket.stream.IsOpen()) return socket;
 		Core::StringBuilder head;
 		const Core::String key = WriteHandshake(url, head);
-		if (!socket.stream.IsOpen() || !socket.stream.SendText(head.View(), timeoutMs)) {
+		if (!socket.stream.SendText(head.View(), timeoutMs)) {
 			socket.error = Core::String(socket.stream.Error());
 			socket.stream.Close();
 			return socket;

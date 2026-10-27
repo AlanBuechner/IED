@@ -220,6 +220,11 @@ namespace Http
 		c.stream.Close();
 	}
 
+	// A connection's TLS handshake, when the server uses TLS (`identity` not null); false when it failed (and closed).
+	bool Secure(Connection& c, const Net::TlsIdentity* identity, const ServerLimits& limits) {
+		return identity == nullptr || c.stream.AcceptTls(*identity, limits.requestTimeoutMs);
+	}
+
 	void ReapFinished(Core::Array<Connection*>& live) {
 		for (int64 i = live.Count() - 1; i >= 0; --i) {
 			if (!live[i]->finished.Load()) continue;
@@ -236,6 +241,7 @@ namespace Http
 		if (!listener.IsOpen()) return;
 		const ServerLimits effective = Effective(limits);
 		Threading::Atomic<bool>* stop = &stopping;
+		const Net::TlsIdentity* tls = identity.IsLoaded() ? &identity : nullptr;
 		Core::Array<Connection*> live;
 		while (!stopping.Load()) {
 			Net::TcpStream accepted = listener.Accept(kSliceMs);
@@ -246,8 +252,8 @@ namespace Http
 			}
 			Connection* connection = new Connection();
 			connection->stream = take(accepted);
-			connection->worker = Threading::Thread::Run([connection, handler, effective, stop]() {
-				Converse(*connection, handler, effective, *stop);
+			connection->worker = Threading::Thread::Run([connection, handler, effective, stop, tls]() {
+				if (Secure(*connection, tls, effective)) Converse(*connection, handler, effective, *stop);
 				connection->finished.Store(true);
 			});
 			live.Push(connection);

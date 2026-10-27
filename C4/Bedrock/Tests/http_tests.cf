@@ -219,8 +219,22 @@ class HttpParseTests {
 		Http::Url v6 = Http::ParseUrl(HttpText("http://[::1]:9/a"));
 		assert_true(v6.valid && v6.host == "::1" && v6.port == 9, "an IPv6 host in brackets");
 		assert_true(Http::ParseUrl(HttpText("http://h?q")).target == "/?q", "a query with no path");
-		const char*[7] bad = { "https://x", "http://", "http://:80/", "http://h:0/", "http://h:99999", "http://h:/", "ftp://h" };
+		const char*[7] bad = { "ftp://x", "http://", "http://:80/", "http://h:0/", "http://h:99999", "http://h:/", "https://" };
 		for (int32 i = 0; i < 7; ++i) assert_true(!Http::ParseUrl(HttpText(bad[i])).valid, bad[i]);
+	}
+
+	[test("urls_secure")]
+	public static void TestSecureUrls() {
+		Http::Url https = Http::ParseUrl(HttpText("HTTPS://example.com/mcp"));
+		assert_true(https.valid && https.secure && !https.webSocket && https.port == 443 && https.target == "/mcp", "https: TLS, port 443");
+		assert_true(Http::HostHeader(https) == "example.com", "443 is https's own port, left out of Host");
+		Http::Url wss = Http::ParseUrl(HttpText("wss://[::1]:8443/ws"));
+		assert_true(wss.valid && wss.secure && wss.webSocket && wss.host == "::1" && wss.port == 8443, "wss: TLS and WebSocket");
+		assert_true(Http::HostHeader(wss) == "[::1]:8443", "another port is kept");
+		Http::Url ws = Http::ParseUrl(HttpText("ws://h"));
+		assert_true(ws.valid && !ws.secure && ws.webSocket && ws.port == 80, "ws: plain, port 80");
+		assert_true(Http::HostHeader(Http::ParseUrl(HttpText("http://h:443/"))) == "h:443", "443 is not http's own port");
+		assert_true(Http::HostHeader(Http::ParseUrl(HttpText("https://h:80/"))) == "h:80", "nor 80 https's");
 	}
 
 	[test("headers")]
@@ -443,7 +457,7 @@ class HttpClientTests {
 		assert_true(!cut.ok && HttpContains(cut.error.View(), "whole body"), "a body cut short");
 		Http::FetchResult junk = FetchFrom("SPDY nonsense\r\n\r\n");
 		assert_true(!junk.ok && !junk.error.IsEmpty(), "not HTTP");
-		assert_true(!Http::Get(HttpText("https://example.com/"), kHttpWaitMs).ok, "https is not spoken");
+		assert_true(!Http::Get(HttpText("ws://127.0.0.1:1/"), kHttpWaitMs).ok, "a ws:// URL is not fetched");
 		Net::TcpListener closed;
 		closed.Listen(Net::Address::Loopback(0));
 		Core::String gone = Core::String("http://") + closed.LocalAddress().ToString().View() + Core::StringView("/");

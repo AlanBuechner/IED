@@ -41,6 +41,10 @@ namespace Http
 		public Net::Address LocalAddress() const { return listener.LocalAddress(); }
 		public const char* Error() const { return listener.Error(); }
 		public void SetLimits(const ServerLimits& wanted) { limits = wanted; }
+		// Serves https and wss: each connection starts with a TLS handshake (D-84) proving the server with `tls`, which
+		// the server keeps; one whose handshake fails or takes longer than the request timeout is closed. Before Serve.
+		public void UseTls(Net::TlsIdentity tls) { identity = take(tls); }
+		public bool UsesTls() const { return identity.IsLoaded(); }
 
 		// Accepts and answers until Stop(), then waits for every connection to end and returns. Does nothing unless
 		// listening.
@@ -53,5 +57,6 @@ namespace Http
 		private Net::TcpListener listener;
 		private Threading::Atomic<bool> stopping;
 		private ServerLimits limits;
+		private Net::TlsIdentity identity;
 	}
 }

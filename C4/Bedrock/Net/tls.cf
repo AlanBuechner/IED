@@ -1,0 +1,22 @@
+include "tls.ch"
+include "tlsruntime.ch"
+include "address.ch"
+include "outcome.ch"
+
+namespace Net
+{
+	TlsIdentity TlsIdentity::FromPkcs12(const void* bytes, int64 count, Core::StringView password) {
+		TlsIdentity identity;
+		const Core::String text = Core::String(password);
+		char[kErrorBytes] why;
+		const int64 loaded = c4_tls_identity_load(bytes, count, text.CStr(), &why[0], kErrorBytes);
+		if (loaded == kError) identity.error = Core::String(&why[0]);
+		else identity.slot = loaded + 1;
+		return identity;
+	}
+
+	void TlsIdentity::Release() {
+		if (slot != 0) c4_tls_identity_free(Handle());
+		slot = 0;
+	}
+}

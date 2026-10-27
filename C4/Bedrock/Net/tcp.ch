@@ -1,6 +1,7 @@
 // TcpStream and TcpListener: TCP connections (D-65). Each owns its socket and closes it on delete, so a value local is
 // RAII; neither can be copied (move one with take()). A zero one is closed. A call that waits takes a timeout in
-// milliseconds (kWaitForever, or 0 to only check); a call that fails keeps why in Error().
+// milliseconds (kWaitForever, or 0 to only check); a call that fails keeps why in Error(). A stream secured with TLS
+// (StartTls as a client, AcceptTls as a server: tls.ch, D-84) sends and receives through it.
 //     Net::TcpListener server;
 //     server.Listen(Net::Address::Loopback(0));                          // port 0: any free port
 //     Net::TcpStream client = Net::TcpStream::Connect(server.LocalAddress(), 2000);
@@ -11,6 +12,7 @@
 
 include "address.ch"
 include "outcome.ch"
+include "tls.ch"
 include "Text/stringview.ch"
 
 namespace Net
@@ -31,7 +33,16 @@ namespace Net
 		public static TcpStream FromSocket(int64 socket);
 
 		public bool IsOpen() const { return slot != 0; }
-		// Bytes sent (TCP may take fewer than `count`), kTimedOut, or kError.
+		// Secures the stream as TLS's client: the handshake within `timeoutMs`, and the server's certificate checked
+		// against `options` (TlsClientOptions). False when the handshake fails or the certificate is refused, with the
+		// stream closed and Error() saying why, or TimedOut().
+		public bool StartTls(const TlsClientOptions& options, int32 timeoutMs = kWaitForever);
+		// Secures an accepted stream as TLS's server, proving itself with `identity`; false as StartTls is.
+		public bool AcceptTls(const TlsIdentity& identity, int32 timeoutMs = kWaitForever);
+		public bool IsSecure() const { return tls != 0; }
+		public TlsVersion SecureVersion() const;
+
+		// Bytes sent (TCP may take fewer than `count`; TLS at most a record), kTimedOut, or kError.
 		public int64 Send(const void* bytes, int64 count, int32 timeoutMs = kWaitForever);
 		// Every byte, or false (Error(), TimedOut()) when the connection fails or a send waits past `timeoutMs`: with a
 		// timeout the bytes go in pieces of 64 KiB, and each must go within it.
@@ -44,21 +55,30 @@ namespace Net
 
 		// Small writes go out at once instead of waiting to be combined (TCP_NODELAY).
 		public bool SetNoDelay(bool on);
-		// Ends one direction: after Shutdown::Send the peer's Receive returns 0, and this side can still receive.
-		// Shutdown::Both also ends a send or receive another thread is waiting in on this stream.
+		// Ends one direction: after Shutdown::Send the peer's Receive returns 0 (a secured stream sends TLS's
+		// close_notify first), and this side can still receive. Shutdown::Both also ends a send or receive another thread
+		// is waiting in on this stream.
 		public void Shutdown(Net::Shutdown side);
 		public Address LocalAddress() const;
 		public Address PeerAddress() const;
-		public void Close();   // idempotent
+		// Idempotent; a secured stream sends close_notify first when the socket takes it at once. No other thread may be
+		// in a call on the stream, unless a Shutdown::Both ended it.
+		public void Close();
 
 		// Why the last call failed; empty when it succeeded.
 		public const char* Error() const { return last.error.CStr(); }
 		// Whether the last call gave up waiting.
 		public bool TimedOut() const { return last.timedOut; }
-		// The runtime's socket (Net::Poll), -1 when closed.
+		// The runtime's socket (Net::Poll), -1 when closed. A secured stream may hold received bytes Poll cannot see:
+		// Receive with a timeout of 0 until it times out.
 		public int64 Socket() const { return slot - 1; }
 
+		private bool CanSecure();
+		private bool Secured(int64 session);
+		private int64 Session() const { return tls - 1; }
+
 		private int64 slot;   // the runtime's socket plus one: a zero stream has none
+		private int64 tls;    // the runtime's TLS session plus one, when secured
 		private Outcome last;
 	}
 

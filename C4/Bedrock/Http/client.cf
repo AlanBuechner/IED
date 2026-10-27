@@ -4,7 +4,6 @@ include "Text/stringbuilder.ch"
 namespace Http
 {
 	const int64 kFetchReceiveBytes = 16 * 1024;
-	const int32 kDefaultHttpPort = 80;
 
 	FetchResult Failed(const char* why) {
 		FetchResult result;
@@ -12,82 +11,42 @@ namespace Http
 		return result;
 	}
 
-	// --- URLs -----------------------------------------------------------------------------------------------------------
+	// --- connecting -----------------------------------------------------------------------------------------------------
 
-	// The port text after a ':' (digits, 1 to 65535), or -1.
-	int32 PortNumber(Core::StringView text) {
-		if (text.IsEmpty() || text.ByteLength() > 5) return -1;
-		int32 port = 0;
-		for (int64 i = 0; i < text.ByteLength(); ++i) {
-			const char c = text.Data()[i];
-			if (c < '0' || c > '9') return -1;
-			port = port * 10 + (int32)(c - '0');
+	// The first of `addresses` that takes a connection within `timeoutMs` each; a closed stream with the last one's why.
+	Net::TcpStream ConnectFirst(const Core::Array<Net::Address>& addresses, int32 timeoutMs, Core::String& why) {
+		for (int64 i = 0; i < addresses.Count(); ++i) {
+			Net::TcpStream stream = Net::TcpStream::Connect(addresses[i], timeoutMs);
+			if (stream.IsOpen()) return stream;
+			why = (Core::String("cannot connect to ") + addresses[i].ToString().View() + ": ") + stream.Error();
 		}
-		return port >= 1 && port <= Net::kMaxPort ? port : -1;
+		return Net::TcpStream();
 	}
 
-	// "host", "host:port", "[v6]" or "[v6]:port" into `url`; false when it is none of those.
-	bool ParseAuthority(Core::StringView authority, Url& url) {
-		Core::StringView host = authority;
-		Core::StringView port;
-		if (authority.StartsWith(Core::StringView("["))) {
-			const int64 close = authority.IndexOf(']', 0);
-			if (close < 0) return false;
-			host = authority.Substring(1, close - 1);
-			const Core::StringView rest = authority.Substring(close + 1, authority.ByteLength() - close - 1);
-			if (!rest.IsEmpty() && !rest.StartsWith(Core::StringView(":"))) return false;
-			port = rest.IsEmpty() ? rest : rest.Substring(1, rest.ByteLength() - 1);
+	Net::TcpStream ConnectTo(const Url& url, const Net::TlsClientOptions& tls, int32 timeoutMs, Core::String& why) {
+		const Net::Resolution found = Net::Resolve(url.host.CStr(), url.port);
+		if (!found.Found()) {
+			why = (Core::String("cannot find ") + url.host.View() + ": ") + found.error.View();
+			return Net::TcpStream();
 		}
-		else {
-			const int64 colon = authority.IndexOf(':', 0);
-			if (colon >= 0) {
-				host = authority.Substring(0, colon);
-				port = authority.Substring(colon + 1, authority.ByteLength() - colon - 1);
-			}
-		}
-		url.port = port.IsEmpty() && authority.IndexOf(':', 0) < 0 ? kDefaultHttpPort : PortNumber(port);
-		url.host = Core::String(host);
-		return !host.IsEmpty() && url.port > 0;
-	}
-
-	// How long the scheme ("http://", "ws://") at the start of `text` is, or 0.
-	int64 SchemeLength(Core::StringView text, bool& webSocket) {
-		const Core::StringView http = Core::StringView("http://");
-		const Core::StringView ws = Core::StringView("ws://");
-		webSocket = text.ByteLength() > ws.ByteLength() && EqualsIgnoringCase(text.Substring(0, ws.ByteLength()), ws);
-		if (webSocket) return ws.ByteLength();
-		return text.ByteLength() > http.ByteLength() && EqualsIgnoringCase(text.Substring(0, http.ByteLength()), http) ? http.ByteLength() : 0;
-	}
-
-	Url ParseUrl(Core::StringView text) {
-		Url url;
-		const int64 schemeLength = SchemeLength(text, url.webSocket);
-		if (schemeLength == 0) return Url();
-		const Core::StringView rest = text.Substring(schemeLength, text.ByteLength() - schemeLength);
-		int64 end = rest.ByteLength();
-		const int64 slash = rest.IndexOf('/', 0);
-		const int64 mark = rest.IndexOf('?', 0);
-		if (slash >= 0 && slash < end) end = slash;
-		if (mark >= 0 && mark < end) end = mark;
-		const bool webSocket = url.webSocket;
-		if (!ParseAuthority(rest.Substring(0, end), url)) return Url();
-		url.webSocket = webSocket;
-		const Core::StringView target = rest.Substring(end, rest.ByteLength() - end);
-		url.target = target.IsEmpty() ? Core::String("/") : target.StartsWith(Core::StringView("?")) ? Core::String("/") + target : Core::String(target);
-		url.valid = true;
-		return url;
+		Net::TcpStream stream = ConnectFirst(found.addresses, timeoutMs, why);
+		if (!stream.IsOpen() || !url.secure) return stream;
+		Net::TlsClientOptions checked = tls;
+		if (checked.hostName.IsEmpty()) checked.hostName = url.host;
+		if (!stream.StartTls(checked, timeoutMs)) why = Core::String(stream.Error());
+		return stream;
 	}
 
 	// --- one exchange ---------------------------------------------------------------------------------------------------
 
-	void WriteRequest(Core::StringBuilder& head, const Request& request, const Net::Address& at) {
+	void WriteRequest(Core::StringBuilder& head, const Request& request, Core::StringView defaultHost) {
 		head.Append(request.method.View());
 		head.Append(" ");
 		head.Append(request.target.IsEmpty() ? Core::StringView("/") : request.target.View());
 		head.Append(" HTTP/1.1\r\n");
 		if (!request.headers.Has(Core::StringView("Host"))) {
 			head.Append("Host: ");
-			head.Append(at.ToString().View());
+			head.Append(defaultHost);
 			head.Append("\r\n");
 		}
 		for (int64 i = 0; i < request.headers.Count(); ++i) {
@@ -169,8 +128,8 @@ namespace Http
 				return false;
 			}
 			if (!ReceiveInto(stream, received, timeoutMs)) {
-				if (framing.kind == BodyKind::UntilClose && !stream.TimedOut()) break;
-				why = Core::String("the connection ended before the whole body");
+				if (framing.kind == BodyKind::UntilClose && !stream.TimedOut() && stream.Error()[0] == 0) break;
+				why = stream.Error()[0] != 0 ? Core::String(stream.Error()) : Core::String("the connection ended before the whole body");
 				return false;
 			}
 		}
@@ -179,11 +138,10 @@ namespace Http
 		return true;
 	}
 
-	FetchResult Fetch(const Net::Address& at, const Request& request, int32 timeoutMs) {
-		Net::TcpStream stream = Net::TcpStream::Connect(at, timeoutMs);
-		if (!stream.IsOpen()) return Failed(stream.Error());
+	// `request` sent on `stream` (with `defaultHost` as its Host unless it has one) and the response read.
+	FetchResult Exchange(Net::TcpStream& stream, const Request& request, Core::StringView defaultHost, int32 timeoutMs) {
 		Core::StringBuilder head;
-		WriteRequest(head, request, at);
+		WriteRequest(head, request, defaultHost);
 		if (!stream.SendText(head.View(), timeoutMs) || !stream.SendAll((const void*)request.body.Data(), request.body.Count(), timeoutMs))
 			return Failed(stream.Error());
 		FetchResult result;
@@ -195,38 +153,32 @@ namespace Http
 		return result;
 	}
 
+	FetchResult Fetch(const Net::Address& at, const Request& request, int32 timeoutMs) {
+		Net::TcpStream stream = Net::TcpStream::Connect(at, timeoutMs);
+		if (!stream.IsOpen()) return Failed(stream.Error());
+		return Exchange(stream, request, at.ToString().View(), timeoutMs);
+	}
+
 	int64 ReadSwitchHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, Response& response, Core::String& why) {
 		return ReadFinalHead(stream, received, timeoutMs, true, response, why);
 	}
 
-	Core::String HostHeader(const Url& url) {
-		Core::StringBuilder host;
-		const bool bracketed = url.host.View().IndexOf(':', 0) >= 0;   // an IPv6 address
-		if (bracketed) host.Append("[");
-		host.Append(url.host.View());
-		if (bracketed) host.Append("]");
-		if (url.port != kDefaultHttpPort) {
-			host.Append(":");
-			host.AppendInt(url.port);
-		}
-		return host.ToString();
-	}
-
-	// The request for `url` with `method` and `body`, sent to the first address its host resolves to.
-	FetchResult FetchUrl(Core::StringView url, Request& request, int32 timeoutMs) {
+	FetchResult FetchUrl(Core::StringView url, Request request, const Net::TlsClientOptions& tls, int32 timeoutMs) {
 		const Url parsed = ParseUrl(url);
-		if (!parsed.valid || parsed.webSocket) return Failed("not an http://host[:port]/path URL");
-		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
-		if (!found.Found()) return Failed(found.error.CStr());
+		if (!parsed.valid || parsed.webSocket) return Failed("not an http:// or https://host[:port]/path URL");
+		Core::String why;
+		Net::TcpStream stream = ConnectTo(parsed, tls, timeoutMs, why);
+		if (!stream.IsOpen()) return Failed(why.CStr());
 		request.target = parsed.target;
-		request.headers.Set(Core::StringView("Host"), HostHeader(parsed).View());
-		return Fetch(found.addresses[0], request, timeoutMs);
+		const Core::String host = HostHeader(parsed);
+		request.headers.Set(Core::StringView("Host"), host.View());
+		return Exchange(stream, request, host.View(), timeoutMs);
 	}
 
 	FetchResult Get(Core::StringView url, int32 timeoutMs) {
 		Request request;
 		request.method = Core::String("GET");
-		return FetchUrl(url, request, timeoutMs);
+		return FetchUrl(url, request, Net::TlsClientOptions(), timeoutMs);
 	}
 
 	FetchResult Post(Core::StringView url, Core::StringView contentType, Core::StringView body, int32 timeoutMs) {
@@ -234,6 +186,6 @@ namespace Http
 		request.method = Core::String("POST");
 		request.headers.Set(Core::StringView("Content-Type"), contentType);
 		request.SetBody(body);
-		return FetchUrl(url, request, timeoutMs);
+		return FetchUrl(url, request, Net::TlsClientOptions(), timeoutMs);
 	}
 }

@@ -1,0 +1,377 @@
+// TLS (D-84) on loopback against servers the tests start, with the test PKI of tls_fixtures.ch trusted through
+// TlsClientOptions::extraRoots: a stream secured both ways (the version, both directions, close_notify), the refusals
+// - an untrusted root (none given, or another authority), a host-name mismatch, an expired certificate - with why,
+// extra roots as PEM or DER and malformed ones, identities that cannot load, handshakes with a server that is not
+// TLS, that closes or that never answers, misuse; then https through Http::Server and the client (a request, a body
+// of many records each way) and wss through WebSocket.
+
+include "bedrock.ch"
+include "tls_fixtures.ch"
+
+const int32 kTlsWaitMs = 5000;
+
+static Core::StringView TlsText(const char* text) { return Core::StringView(text); }
+
+static bool TlsContains(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
+
+static Core::Array<uint8> TlsBytes(const char* text) {
+	Core::Array<uint8> bytes;
+	const Core::StringView view = Core::StringView(text);
+	bytes.Append((const uint8*)view.Data(), view.ByteLength());
+	return bytes;
+}
+
+static Core::Array<uint8> TlsDecoded(const char* base64) {
+	Core::Array<uint8> bytes;
+	Core::Base64Decode(Core::StringView(base64), bytes);
+	return bytes;
+}
+
+// The test CA as DER: its PEM block's base64 decoded.
+static Core::Array<uint8> TlsCaDer() {
+	const Core::StringView pem = Core::StringView(kTlsTestCaPem);
+	const int64 start = pem.IndexOf('\n', 0) + 1;
+	const int64 end = pem.IndexOf(Core::StringView("-----END"));
+	Core::StringBuilder base64;
+	for (int64 i = start; i < end; ++i)
+		if (pem.Data()[i] != '\n') base64.AppendByte(pem.Data()[i]);
+	Core::Array<uint8> der;
+	Core::Base64Decode(base64.View(), der);
+	return der;
+}
+
+static Net::TlsIdentity TlsIdentityOf(const char* pfxBase64) {
+	const Core::Array<uint8> pfx = TlsDecoded(pfxBase64);
+	return Net::TlsIdentity::FromPkcs12((const void*)pfx.Data(), pfx.Count(), TlsText(kTlsTestPassword));
+}
+
+static Net::TlsClientOptions TlsTrusting(const char* host, const char* rootsPem) {
+	Net::TlsClientOptions options;
+	options.hostName = Core::String(host);
+	if (rootsPem != nullptr) options.extraRoots = TlsBytes(rootsPem);
+	return options;
+}
+
+// One connection's server: accepts, secures it with `identity` and runs `session` on it, on a thread of its own.
+struct TlsPeer {
+	public Net::TcpListener listener;
+	public Net::TlsIdentity identity;
+	public Threading::Thread serving;
+	public Core::String error;          // why AcceptTls failed, when it did
+	public Threading::Atomic<bool> secured;
+
+	public void Start(const char* pfxBase64, func<void(Net::TcpStream&)> session) {
+		identity = TlsIdentityOf(pfxBase64);
+		listener.Listen(Net::Address::Loopback(0));
+		TlsPeer* peer = this;
+		serving = Threading::Thread::Run([peer, session]() {
+			Net::TcpStream stream = peer->listener.Accept(kTlsWaitMs);
+			if (!stream.AcceptTls(peer->identity, kTlsWaitMs)) {
+				peer->error = Core::String(stream.Error());
+				return;
+			}
+			peer->secured.Store(true);
+			session(stream);
+		});
+	}
+
+	public Net::TcpStream Connect() { return Net::TcpStream::Connect(listener.LocalAddress(), kTlsWaitMs); }
+
+	public void Finish() { serving.Join(); }
+}
+
+// A server's session: what it receives comes back until the client ends its side.
+static void TlsEcho(Net::TcpStream& stream) {
+	char[4096] buffer;
+	while (true) {
+		const int64 got = stream.Receive((void*)&buffer[0], 4096, kTlsWaitMs);
+		if (got <= 0) break;
+		stream.SendAll((const void*)&buffer[0], got, kTlsWaitMs);
+	}
+}
+
+// A server's session that only waits for the client to give up.
+static void TlsIdle(Net::TcpStream& stream) {
+	char[16] buffer;
+	stream.Receive((void*)&buffer[0], 16, kTlsWaitMs);
+}
+
+// A client's StartTls with `options` against a server with `pfx`: Error() when refused, else empty.
+static Core::String TlsRefusal(const char* pfx, const Net::TlsClientOptions& options) {
+	TlsPeer peer;
+	peer.Start(pfx, TlsIdle);
+	Net::TcpStream client = peer.Connect();
+	const bool secured = client.StartTls(options, kTlsWaitMs);
+	const Core::String why = secured ? Core::String() : Core::String(client.Error());
+	client.Close();
+	peer.Finish();
+	return why;
+}
+
+[test("net.tls")]
+class NetTlsTests {
+	[test("stream")]
+	public static void TestStream() {
+		TlsPeer peer;
+		peer.Start(kTlsServerPfxBase64, TlsEcho);
+		Net::TcpStream client = peer.Connect();
+		assert_true(!client.IsSecure() && client.SecureVersion() == Net::TlsVersion::None, "plain until secured");
+		assert_true(client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs), client.Error());
+		assert_true(client.IsSecure() && peer.secured.Load(), "secured on both sides");
+		const Net::TlsVersion version = client.SecureVersion();
+		assert_true(version == Net::TlsVersion::Tls12 || version == Net::TlsVersion::Tls13, "TLS 1.2 or 1.3");
+		char[5] reply;
+		assert_true(client.SendText(TlsText("hello"), kTlsWaitMs) && client.ReceiveAll((void*)&reply[0], 5, kTlsWaitMs), "a round trip");
+		assert_true(Core::StringView(&reply[0], 5) == "hello", "the bytes come back as sent");
+		client.Shutdown(Net::Shutdown::Send);
+		char[4] rest;
+		assert_eq((int64)0, client.Receive((void*)&rest[0], 4, kTlsWaitMs), "close_notify ends the server's side, which ends ours");
+		peer.Finish();
+	}
+
+	[test("ip_address")]
+	public static void TestIpAddress() {
+		assert_se("", TlsRefusal(kTlsServerPfxBase64, TlsTrusting("127.0.0.1", kTlsTestCaPem)).CStr(), "an IP address the certificate names");
+	}
+
+	[test("untrusted")]
+	public static void TestUntrusted() {
+		const Core::String alone = TlsRefusal(kTlsServerPfxBase64, TlsTrusting("localhost", nullptr));
+		assert_true(TlsContains(alone.CStr(), "the certificate of localhost is refused: it is not issued by an authority this machine trusts"), alone.CStr());
+		const Core::String other = TlsRefusal(kTlsServerPfxBase64, TlsTrusting("localhost", kTlsOtherCaPem));
+		assert_true(TlsContains(other.CStr(), "not issued by an authority this machine trusts"), "an extra root that did not issue it trusts nothing");
+	}
+
+	[test("name_mismatch")]
+	public static void TestNameMismatch() {
+		const Core::String why = TlsRefusal(kTlsServerPfxBase64, TlsTrusting("wrong.example", kTlsTestCaPem));
+		assert_true(TlsContains(why.CStr(), "the certificate of wrong.example is refused: it was issued for other names"), why.CStr());
+		const Core::String address = TlsRefusal(kTlsServerPfxBase64, TlsTrusting("127.0.0.2", kTlsTestCaPem));
+		assert_true(TlsContains(address.CStr(), "issued for other names"), "an IP address it does not name");
+	}
+
+	[test("expired")]
+	public static void TestExpired() {
+		const Core::String why = TlsRefusal(kTlsExpiredPfxBase64, TlsTrusting("localhost", kTlsTestCaPem));
+		assert_true(TlsContains(why.CStr(), "the certificate of localhost is refused: it has expired"), why.CStr());
+	}
+
+	[test("roots")]
+	public static void TestRoots() {
+		Net::TlsClientOptions der = TlsTrusting("localhost", nullptr);
+		der.extraRoots = TlsCaDer();
+		assert_se("", TlsRefusal(kTlsServerPfxBase64, der).CStr(), "a DER root");
+		Core::String both = Core::String(kTlsOtherCaPem) + kTlsTestCaPem;
+		assert_se("", TlsRefusal(kTlsServerPfxBase64, TlsTrusting("localhost", both.CStr())).CStr(), "the issuer among several PEM roots");
+		const Core::String junk = TlsRefusal(kTlsServerPfxBase64, TlsTrusting("localhost", "not a certificate"));
+		assert_true(TlsContains(junk.CStr(), "the extra roots hold no certificate"), junk.CStr());
+	}
+
+	[test("identities")]
+	public static void TestIdentities() {
+		const Core::Array<uint8> pfx = TlsDecoded(kTlsServerPfxBase64);
+		Net::TlsIdentity wrong = Net::TlsIdentity::FromPkcs12((const void*)pfx.Data(), pfx.Count(), TlsText("not it"));
+		assert_true(!wrong.IsLoaded() && TlsContains(wrong.Error(), "the password does not open the PKCS #12 file"), wrong.Error());
+		Net::TlsIdentity junk = Net::TlsIdentity::FromPkcs12((const void*)"junk", 4, TlsText(""));
+		assert_true(!junk.IsLoaded() && TlsContains(junk.Error(), "not a PKCS #12"), junk.Error());
+		Net::TlsIdentity none = Net::TlsIdentity::FromPkcs12(nullptr, 0, TlsText(""));
+		assert_true(!none.IsLoaded() && none.Handle() == -1, "no bytes");
+		Net::TlsIdentity loaded = Net::TlsIdentity::FromPkcs12((const void*)pfx.Data(), pfx.Count(), TlsText(kTlsTestPassword));
+		assert_true(loaded.IsLoaded() && loaded.Handle() != -1, loaded.Error());
+		Net::TlsIdentity moved = take(loaded);
+		assert_true(moved.IsLoaded() && !loaded.IsLoaded(), "moved with take()");
+		moved.Release();
+		moved.Release();
+		assert_true(!moved.IsLoaded(), "released, twice");
+	}
+
+	[test("not_tls")]
+	public static void TestNotTls() {
+		Net::TcpListener plain;
+		plain.Listen(Net::Address::Loopback(0));
+		Net::TcpListener* listening = &plain;
+		Threading::Thread answering = Threading::Thread::Run([listening]() {
+			Net::TcpStream stream = listening->Accept(kTlsWaitMs);
+			char[512] hello;
+			stream.Receive((void*)&hello[0], 512, kTlsWaitMs);
+			stream.SendText(TlsText("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"), kTlsWaitMs);
+			stream.Shutdown(Net::Shutdown::Send);
+			stream.Receive((void*)&hello[0], 512, kTlsWaitMs);
+		});
+		Net::TcpStream client = Net::TcpStream::Connect(plain.LocalAddress(), kTlsWaitMs);
+		assert_true(!client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs), "an http server is no TLS server");
+		assert_true(TlsContains(client.Error(), "the TLS handshake with localhost failed"), client.Error());
+		assert_true(!client.IsOpen(), "the stream is closed");
+		answering.Join();
+	}
+
+	[test("closed_during_handshake")]
+	public static void TestClosedDuringHandshake() {
+		Net::TcpListener closing;
+		closing.Listen(Net::Address::Loopback(0));
+		Net::TcpListener* listening = &closing;
+		Threading::Thread answering = Threading::Thread::Run([listening]() {
+			Net::TcpStream stream = listening->Accept(kTlsWaitMs);
+			char[512] hello;
+			stream.Receive((void*)&hello[0], 512, kTlsWaitMs);
+		});
+		Net::TcpStream client = Net::TcpStream::Connect(closing.LocalAddress(), kTlsWaitMs);
+		assert_true(!client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs), "refused");
+		assert_true(TlsContains(client.Error(), "closed the connection during the TLS handshake"), client.Error());
+		answering.Join();
+	}
+
+	[test("handshake_timeout")]
+	public static void TestHandshakeTimeout() {
+		Net::TcpListener silent;
+		silent.Listen(Net::Address::Loopback(0));
+		Net::TcpStream client = Net::TcpStream::Connect(silent.LocalAddress(), kTlsWaitMs);
+		Net::TcpStream accepted = silent.Accept(kTlsWaitMs);
+		const int64 started = clock_now_ns();
+		assert_true(!client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), 300), "a server that never answers");
+		const int64 waitedMs = (clock_now_ns() - started) / 1000000;
+		assert_true(client.TimedOut() && TlsContains(client.Error(), "timed out"), client.Error());
+		assert_true(waitedMs >= 250 && waitedMs < 3000, "after about the timeout");
+	}
+
+	[test("misuse")]
+	public static void TestMisuse() {
+		Net::TcpStream closed;
+		assert_true(!closed.StartTls(TlsTrusting("localhost", nullptr), kTlsWaitMs) && TlsContains(closed.Error(), "closed"), "a closed stream");
+		Net::TlsIdentity none;
+		assert_true(!closed.AcceptTls(none, kTlsWaitMs), "a closed stream, as a server");
+		TlsPeer peer;
+		peer.Start(kTlsServerPfxBase64, TlsEcho);
+		Net::TcpStream client = peer.Connect();
+		assert_true(client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs), client.Error());
+		assert_true(!client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs) && TlsContains(client.Error(), "already secured"), "twice");
+		assert_true(client.IsOpen(), "and stays open");
+		client.Close();
+		peer.Finish();
+		Net::TcpListener listener;
+		listener.Listen(Net::Address::Loopback(0));
+		Net::TcpStream connecting = Net::TcpStream::Connect(listener.LocalAddress(), kTlsWaitMs);
+		Net::TcpStream accepted = listener.Accept(kTlsWaitMs);
+		assert_true(!accepted.AcceptTls(none, kTlsWaitMs) && TlsContains(accepted.Error(), "an identity are needed"), accepted.Error());
+		assert_true(!connecting.StartTls(TlsTrusting("", nullptr), kTlsWaitMs) && TlsContains(connecting.Error(), "a host name"), connecting.Error());
+	}
+}
+
+// --- https and wss --------------------------------------------------------------------------------------------------
+
+// An https server on loopback, answering with `handler` on a thread of its own until Finish.
+struct HttpsRig {
+	public Http::Server server;
+	public Threading::Thread serving;
+
+	public void Start(Http::Handler handler) {
+		server.Listen(Net::Address::Loopback(0));
+		server.UseTls(TlsIdentityOf(kTlsServerPfxBase64));
+		Http::Server* running = &server;
+		serving = Threading::Thread::Run([running, handler]() { running->Serve(handler); });
+	}
+
+	public Core::String Url(const char* scheme, const char* path) const {
+		return Core::String(scheme) + server.LocalAddress().ToString().View() + Core::StringView(path);
+	}
+
+	public void Finish() {
+		server.Stop();
+		serving.Join();
+	}
+}
+
+const int64 kTlsLargeBytes = 4 * 1024 * 1024;
+
+static uint8 TlsPattern(int64 i) { return (uint8)((i * 131 + i / 977) & 0xff); }
+
+static void TlsAnswer(const Http::Request& request, Http::Response& response) {
+	if (request.path == "/large") {
+		for (int64 i = 0; i < kTlsLargeBytes; ++i) response.body.Push(TlsPattern(i));
+		return;
+	}
+	if (request.path == "/count") {
+		Core::StringBuilder text;
+		text.AppendInt(request.body.Count());
+		bool same = true;
+		for (int64 i = 0; same && i < request.body.Count(); ++i) same = request.body[i] == TlsPattern(i);
+		text.Append(same ? " same" : " different");
+		response.SetText(TlsText("text/plain"), text.View());
+		return;
+	}
+	if (request.path == "/ws") {
+		Http::AcceptWebSocket(request, response, [](Http::WebSocket& socket) {
+			Http::WebSocketMessage message;
+			while (socket.Receive(message, Net::kWaitForever)) {
+				if (message.kind == Http::MessageKind::Text) socket.SendText(message.Text());
+				else socket.SendBinary((const void*)message.data.Data(), message.data.Count());
+			}
+		});
+		return;
+	}
+	response.SetText(TlsText("text/plain"), (Core::String("secure ") + request.path.View()).View());
+}
+
+static Http::FetchResult HttpsGet(const Core::String& url, const Net::TlsClientOptions& tls) {
+	Http::Request request;
+	request.method = Core::String("GET");
+	return Http::FetchUrl(url.View(), request, tls, kTlsWaitMs);
+}
+
+[test("http.tls")]
+class HttpTlsTests {
+	[test("request")]
+	public static void TestRequest() {
+		HttpsRig rig;
+		rig.Start(TlsAnswer);
+		assert_true(rig.server.UsesTls(), "the server serves TLS");
+		Http::FetchResult got = HttpsGet(rig.Url("https://", "/hello"), TlsTrusting("", kTlsTestCaPem));
+		assert_true(got.ok && got.response.status == 200, got.error.CStr());
+		assert_true(got.response.BodyText() == "secure /hello", "the body");
+		Http::FetchResult named = HttpsGet(rig.Url("https://", "/again"), TlsTrusting("localhost", kTlsTestCaPem));
+		assert_true(named.ok && named.response.BodyText() == "secure /again", "a host name other than the URL's");
+		Http::FetchResult refused = Http::Get(rig.Url("https://", "/hello").View(), kTlsWaitMs);
+		assert_true(!refused.ok && TlsContains(refused.error.CStr(), "not issued by an authority this machine trusts"), "the system's roots alone refuse it");
+		Http::FetchResult plain = Http::Get(rig.Url("http://", "/hello").View(), kTlsWaitMs);
+		assert_true(!plain.ok, "plain http to a TLS server gets no answer");
+		rig.Finish();
+	}
+
+	[test("large_bodies")]
+	public static void TestLargeBodies() {
+		HttpsRig rig;
+		rig.Start(TlsAnswer);
+		Http::FetchResult got = HttpsGet(rig.Url("https://", "/large"), TlsTrusting("", kTlsTestCaPem));
+		assert_true(got.ok && got.response.body.Count() == kTlsLargeBytes, got.error.CStr());
+		bool same = true;
+		for (int64 i = 0; same && i < kTlsLargeBytes; ++i) same = got.response.body[i] == TlsPattern(i);
+		assert_true(same, "4 MiB across many records, byte for byte");
+		Http::Request upload;
+		upload.method = Core::String("POST");
+		for (int64 i = 0; i < 1024 * 1024; ++i) upload.body.Push(TlsPattern(i));
+		Http::FetchResult counted = Http::FetchUrl(rig.Url("https://", "/count").View(), upload, TlsTrusting("", kTlsTestCaPem), kTlsWaitMs);
+		assert_true(counted.ok && counted.response.BodyText() == "1048576 same", "1 MiB up, byte for byte");
+		rig.Finish();
+	}
+
+	[test("websocket")]
+	public static void TestWebSocket() {
+		HttpsRig rig;
+		rig.Start(TlsAnswer);
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("wss://", "/ws").View(), TlsTrusting("", kTlsTestCaPem), kTlsWaitMs);
+		assert_true(socket.IsOpen(), socket.Error());
+		Http::WebSocketMessage message;
+		assert_true(socket.SendText(TlsText("over tls")) && socket.Receive(message, kTlsWaitMs) && message.Text() == "over tls", "a text message both ways");
+		Core::Array<uint8> big;
+		for (int64 i = 0; i < 100000; ++i) big.Push(TlsPattern(i));
+		assert_true(socket.SendBinary((const void*)big.Data(), big.Count()) && socket.Receive(message, kTlsWaitMs), "100 KB of binary");
+		bool same = message.data.Count() == big.Count();
+		for (int64 i = 0; same && i < big.Count(); ++i) same = message.data[i] == big[i];
+		assert_true(same, "come back byte for byte");
+		socket.Close(1000, TlsText("bye"));
+		assert_true(socket.CloseCode() == 1000, "closed normally");
+		Http::WebSocket refused = Http::WebSocket::Connect(rig.Url("wss://", "/ws").View(), kTlsWaitMs);
+		assert_true(!refused.IsOpen() && TlsContains(refused.Error(), "not issued by an authority"), refused.Error());
+		rig.Finish();
+	}
+}
