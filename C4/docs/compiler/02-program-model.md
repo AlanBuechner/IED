@@ -124,6 +124,7 @@ symbol table.
 | `QueryOperator(token, lhs, rhs, ctx)` | `a + b`: token or canonical name, null `rhs` = unary. Looks for a method on `lhs` first, then `rhs`; for compound assignment prefers `<op>_assign`, falls back to the plain operator. Returns `OperatorBinding` (method, `rightIsReceiver`, `isAssignForm`). |
 | `QueryVariable(name, receiver, ctx)` | ONE verb for local / member / global / static. Unqualified inside a method: member of the enclosing type, then statics of enclosing types, then globals. Constants come back with their folded value. |
 | `QueryMember(type, name)` | Field or method by name, most-derived first (own, bases, extension methods). |
+| `QueryMemberTemplates(type, name)` | The member function templates of that name the type and its bases declare, most-derived first: what `x.F(...)` names before a call instantiates one (the LSP). |
 | `QuerySymbol`, `QueryConstant` | Raw symbol lookup; folded constant by qualified name (`Color::Green`). Cycles report `CyclicDependency`. |
 | `SizeOf`, `AlignOf`, `ElementOf` | Layout facts. A forward-declared (incomplete) type is `Ok` with size 0. |
 | `QueryInstantiation(node)` | For callers holding a specialization node directly (tests, LSP). |

@@ -1,4 +1,5 @@
 #include "Features/Tidy.h"
+#include "Server/WrittenChildren.h"
 #include "Server/CompilationSession.h"
 #include "Server/SemanticResolver.h"
 #include "Parser/AstNode.h"
@@ -118,9 +119,7 @@ namespace C4LSP::Features
 			}
 
 			const bool childInFunction = inFunction || selfIsFunction; // children of a function are local to it
-			for (const auto& child : nodePtr->Children())
-				if (child)
-					stack.push_back({child.Get(), childInFunction, path}); // Ref::Get is the stable AST-pool pointer
+			Server::ForEachWrittenChild(*nodePtr, [&](const Scripting::AstNode& child) { stack.push_back({ &child, childInFunction, path }); });
 		}
 
 		// Phase 2: report every local whose (definition node, name) pair no reference resolved to. A
@@ -161,9 +160,7 @@ namespace C4LSP::Features
 			Core::Vector<const Scripting::AstNode*> path = parentPath;
 			path.Push(node);
 			CheckExpressionTautologies(session, targetId, path, *node, result);
-			for (const auto& child : node->Children())
-				if (child)
-					stack.push_back({child.Get(), path});
+			Server::ForEachWrittenChild(*node, [&](const Scripting::AstNode& child) { stack.push_back({ &child, path }); });
 		}
 
 		CheckUnusedLocals(session, targetId, unit->GetRootAST(), result);

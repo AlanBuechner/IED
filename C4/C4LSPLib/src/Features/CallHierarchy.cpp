@@ -1,4 +1,5 @@
 #include "Features/CallHierarchy.h"
+#include "Server/WrittenChildren.h"
 #include "Features/Constructions.h"
 #include "Features/DeclarationText.h"
 #include "Features/Definition.h"
@@ -112,8 +113,6 @@ namespace C4LSP::Features
 				if (created->Type() == NodeType::FunctionDefinition && creates.insert(Definition::WithBody(session, created)).second)
 					AddCall(session, *Definition::WithBody(session, created), construction.name, grouped, out);
 		}
-		for (const auto& child : node.Children())
-			if (child)
-				CollectCalls(session, *child.Get(), path, grouped, out);
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { CollectCalls(session, child, path, grouped, out); });
 	}
 } // namespace C4LSP::Features

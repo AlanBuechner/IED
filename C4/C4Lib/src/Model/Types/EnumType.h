@@ -14,6 +14,7 @@ namespace Scripting
 		{
 			Core::String mName;
 			int64 m_Value = 0;
+			const AstNode* m_DeclaringNode = nullptr; // the EnumMemberNode (for LSP/DAP)
 		};
 
 		EnumType(const Core::String& name, const Type* underlyingType);

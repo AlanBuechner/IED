@@ -72,7 +72,7 @@ namespace C4LSP::Features
 		const Scripting::AstNode* typeDecl = DeclarationOfNamedType(type);
 		if (!typeDecl)
 			return {};
-		return { session.ToEditorLocation(typeDecl->startLocation, typeDecl->endLocation) };
+		return { Definition::LocationForDeclaration(session, *typeDecl) };
 	}
 
 	Core::Vector<Protocol::Location> TypeDefinition::DeclaredType(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
@@ -109,7 +109,7 @@ namespace C4LSP::Features
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		if (const Scripting::SymbolInfo* info = resolver.Lookup(full, 0))
 			if (info->kind == Scripting::SymbolKind::Type && info->declNode)
-				return { session.ToEditorLocation(info->declNode->startLocation, info->declNode->endLocation) };
+				return { Definition::LocationForDeclaration(session, *info->declNode) };
 
 		std::vector<const Scripting::AstNode*> decls;
 		resolver.CollectDeclarationsByName(simple, decls);
@@ -121,7 +121,7 @@ namespace C4LSP::Features
 				decl->Type() != Scripting::NodeType::UnionDefinition &&
 				decl->Type() != Scripting::NodeType::AliasDefinition)
 				continue; // a type reference wants a type definition, not a same-named function/variable
-			result.Push(session.ToEditorLocation(decl->startLocation, decl->endLocation));
+			result.Push(Definition::LocationForDeclaration(session, *decl));
 		}
 		return result;
 	}

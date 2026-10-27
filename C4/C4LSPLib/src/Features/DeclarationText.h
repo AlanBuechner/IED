@@ -69,6 +69,8 @@ namespace C4LSP::Features
 		static size_t HeaderEnd(std::string_view text, const Scripting::AstNode& decl);
 		/// The written name's bytes.
 		static Span NameSpan(const Scripting::AstNode& decl);
+		/// Where the declaration as written begins.
+		static size_t StartOf(const Scripting::AstNode& decl);
 		/// Where the part after the annotations and the access modifier begins.
 		static size_t AfterAccess(std::string_view text, const Scripting::AstNode& decl);
 		/// The header from the declaration's start to HeaderEnd, its name written as `name`, dedented.

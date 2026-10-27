@@ -66,6 +66,9 @@ namespace Scripting
 		std::span<const Ref<AstNode>> Children() const override;
 		Core::String ToString() const override;
 static Ref<VariableDefinitionNode> TryParse(ParserState& state, bool consumeSemicolon = true);
+		/// The variable a lambda's init capture declares (`n` of `[n = base + 1]`, D-22): its name and initializer, no
+		/// written type. Tools read it; the compiler lowers the capture itself.
+		static Ref<VariableDefinitionNode> ForInitCapture(const Token& name, const Token& assignment, const Ref<AstNode>& initializer);
 		void ParseBody(ParserState& state, bool consumeSemicolon = true);
 
 	protected:

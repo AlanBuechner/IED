@@ -23,6 +23,8 @@
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
+#include "Parser/Nodes/Expressions/LambdaNode.h"
+#include "Server/WrittenChildren.h"
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -333,6 +335,13 @@ namespace C4LSP::Features::TokenWalk
 				WalkTemplateArgument(*call.GetTemplateArgs(), ctx, path); // callee + args still recurse below
 			break;
 		}
+		case Scripting::NodeType::LambdaExpression: {
+			// A capture names a variable (`[&counter]`); an init capture's variable is walked as its declaration.
+			for (const Scripting::LambdaCapture& capture : static_cast<const Scripting::LambdaNode&>(node).GetCaptures())
+				if (capture.kind == Scripting::LambdaCapture::Kind::Variable)
+					RecordOffset(ctx, capture.name.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Variable), None });
+			break;
+		}
 
 		default:
 			break;
@@ -340,7 +349,6 @@ namespace C4LSP::Features::TokenWalk
 
 		// Recurse into children. Body members of an object are direct members (fields / methods);
 		// everything nested inside a function body resets to non-member so locals stay `variable`.
-		auto children = node.Children();
 		bool childDirectMember = directMember;
 		if (node.Type() == Scripting::NodeType::ObjectDefinition)
 			childDirectMember = true;
@@ -352,11 +360,6 @@ namespace C4LSP::Features::TokenWalk
 		if (node.Type() == Scripting::NodeType::ObjectDefinition)
 			childDepth = objectDepth + 1;
 
-		for (const auto& child : children)
-		{
-			if (!child)
-				continue;
-			Walk(*child.Get(), ctx, path, childDepth, childDirectMember);
-		}
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { Walk(child, ctx, path, childDepth, childDirectMember); });
 	}
 } // namespace C4LSP::Features::TokenWalk

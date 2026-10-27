@@ -14,6 +14,8 @@
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
+#include "Parser/Nodes/Statements/ForLoopNode.h"
+#include "Server/WrittenChildren.h"
 #include <algorithm>
 #include <unordered_set>
 
@@ -102,6 +104,7 @@ namespace C4LSP::Features
 		case NodeType::UnionDefinition: return static_cast<const Scripting::UnionDefinitionNode&>(decl).GetNameToken().GetText();
 		case NodeType::AliasDefinition: return static_cast<const Scripting::AliasDefinitionNode&>(decl).GetNameToken().GetText();
 		case NodeType::Parameter: return static_cast<const Scripting::ParameterNode&>(decl).GetNameToken().GetText();
+		case NodeType::ForLoop: return static_cast<const Scripting::ForLoopNode&>(decl).GetRangeVarNameToken().GetText();
 		case NodeType::FunctionDefinition: {
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(decl);
 			return func.GetName() ? func.GetName()->GetLastIdentifierToken().GetText() : std::string();
@@ -137,6 +140,10 @@ namespace C4LSP::Features
 		case NodeType::UnionDefinition: return of(static_cast<const Scripting::UnionDefinitionNode&>(decl).GetNameToken());
 		case NodeType::AliasDefinition: return of(static_cast<const Scripting::AliasDefinitionNode&>(decl).GetNameToken());
 		case NodeType::Parameter: return of(static_cast<const Scripting::ParameterNode&>(decl).GetNameToken());
+		case NodeType::ForLoop: {
+			const auto& loop = static_cast<const Scripting::ForLoopNode&>(decl);
+			return loop.IsRangeBased() ? of(loop.GetRangeVarNameToken()) : NameLocation{}; // BUG-407: its variable, not the statement
+		}
 		case NodeType::FunctionDefinition: {
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(decl);
 			if (!func.GetName())
@@ -157,9 +164,18 @@ namespace C4LSP::Features
 		return name.found ? Span{ name.start.byteOffset, name.end.byteOffset } : Span{};
 	}
 
+	// A range-for variable is declared by its loop's first clause, `const Entry& entry` of `for (const Entry& entry : all)`.
+	size_t DeclarationText::StartOf(const Scripting::AstNode& decl)
+	{
+		if (decl.Type() == NodeType::ForLoop)
+			if (const auto& clause = static_cast<const Scripting::ForLoopNode&>(decl).GetInitClause())
+				return clause->startLocation.byteOffset;
+		return decl.startLocation.byteOffset;
+	}
+
 	size_t DeclarationText::AfterAccess(std::string_view text, const Scripting::AstNode& decl)
 	{
-		size_t at = decl.startLocation.byteOffset;
+		size_t at = StartOf(decl);
 		switch (decl.Type())
 		{
 		case NodeType::FunctionDefinition: {
@@ -222,6 +238,8 @@ namespace C4LSP::Features
 			const bool fits = initializer.size() <= kMostInitializerBytes && initializer.find('\n') == std::string_view::npos;
 			return fits ? stop : assignment;
 		}
+		case NodeType::ForLoop:
+			return NameSpan(decl).end;
 		case NodeType::Namespace:
 		case NodeType::ObjectDefinition:
 		case NodeType::EnumDefinition:
@@ -291,7 +309,7 @@ namespace C4LSP::Features
 
 	std::string DeclarationText::Header(std::string_view text, const Scripting::AstNode& decl, const std::string& name)
 	{
-		const size_t start = decl.startLocation.byteOffset;
+		const size_t start = StartOf(decl);
 		const size_t end = std::min(HeaderEnd(text, decl), text.size());
 		const Span span = NameSpan(decl);
 		if (span.end == 0 || span.start < start || span.end > end)
@@ -327,7 +345,7 @@ namespace C4LSP::Features
 		if (text.empty() || name.end == 0 || name.end > text.size())
 			return "";
 		const size_t start = std::min(AfterAccess(text, decl), name.start);
-		const bool typeOnly = decl.Type() == NodeType::VariableDefinition || decl.Type() == NodeType::Parameter;
+		const bool typeOnly = decl.Type() == NodeType::VariableDefinition || decl.Type() == NodeType::Parameter || decl.Type() == NodeType::ForLoop;
 		const size_t end = typeOnly ? name.end : std::min(HeaderEnd(text, decl), text.size());
 		std::string kept(text.substr(start, name.start - start));
 		if (end > name.end)
@@ -449,10 +467,10 @@ namespace C4LSP::Features
 		path.Push(&node);
 		if (&node == &target)
 			return true;
-		for (const auto& child : node.Children())
-			if (child && FindPath(*child.Get(), target, path))
-				return true;
-		path.Pop();
-		return false;
+		bool found = false;
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { found = found || FindPath(child, target, path); });
+		if (!found)
+			path.Pop();
+		return found;
 	}
 } // namespace C4LSP::Features

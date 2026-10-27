@@ -3,13 +3,8 @@
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
 #include "Model/ProgramModel.h" // the model is the only thing phases query (doc 03)
-#include "Parser/Nodes/Declarations/NamespaceNode.h"
-#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
-#include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
-#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
-#include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Features/Definition.h"
+#include "Features/DeclarationText.h"
 #include "Features/ReferenceScanner.h"
 #include <algorithm>
 
@@ -100,6 +95,12 @@ namespace C4LSP::Features
 			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
 			span = { true, name.start, name.end };
 		}
+		else if (const Scripting::Token* capture = Definition::CaptureNameAt(located, position))
+		{
+			// A lambda's capture spells the variable it captures: its name here, when it names one.
+			if (Definition::CapturedAt(session, located, position))
+				span = { true, capture->GetStartLocation(), capture->GetEndLocation() };
+		}
 		else if (const Scripting::AstNode* written = WrittenType(located))
 		{
 			// A type written here (`LspPool` of `LspPool* lsp`): its name here, when it names a declared type.
@@ -130,39 +131,10 @@ namespace C4LSP::Features
 
 	Rename::NameSpan Rename::DeclarationNameSpan(const Scripting::AstNode& decl)
 	{
-		switch (decl.Type())
-		{
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(decl);
-			if (fn.GetName())
-			{
-				const auto& tok = fn.GetName()->GetLastIdentifierToken();
-				return { true, tok.GetStartLocation(), tok.GetEndLocation() };
-			}
-			break;
-		}
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& v = static_cast<const Scripting::VariableDefinitionNode&>(decl);
-			return { true, v.GetNameToken().GetStartLocation(), v.GetNameToken().GetEndLocation() };
-		}
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& o = static_cast<const Scripting::ObjectDefinitionNode&>(decl);
-			return { true, o.GetNameToken().GetStartLocation(), o.GetNameToken().GetEndLocation() };
-		}
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& e = static_cast<const Scripting::EnumDefinitionNode&>(decl);
-			return { true, e.GetNameToken().GetStartLocation(), e.GetNameToken().GetEndLocation() };
-		}
-		case Scripting::NodeType::Parameter: {
-			const auto& p = static_cast<const Scripting::ParameterNode&>(decl);
-			if (p.HasName())
-				return { true, p.GetNameToken().GetStartLocation(), p.GetNameToken().GetEndLocation() };
-			break;
-		}
-		default:
-			break;
-		}
-		return {};
+		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(decl);
+		if (!name.found)
+			return {};
+		return { true, name.simpleStart, name.end };
 	}
 
 	RenameOccurrence Rename::MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)

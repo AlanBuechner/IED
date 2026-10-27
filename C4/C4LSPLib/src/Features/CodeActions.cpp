@@ -1,4 +1,5 @@
 #include "Features/CodeActions.h"
+#include "Server/WrittenChildren.h"
 #include "Server/CompilationSession.h"
 #include "Server/NodeLocator.h" // LocatedNode.path = root->node ancestor chain (innermost last)
 #include "Features/Diagnostics.h" // public ForDocument: this file's LSP diagnostics, widened + deduped
@@ -99,8 +100,7 @@ namespace C4LSP::Features
 				out.Push(ma);
 		}
 
-		for (const auto& child : node.Children())
-			if (child) CollectDotMemberAccesses(*child.Get(), sourceId, member, out);
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { CollectDotMemberAccesses(child, sourceId, member, out); });
 	}
 
 	// ------------------------------------------------------------- quickfix --

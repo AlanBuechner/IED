@@ -1,6 +1,7 @@
 #include "Features/Hover.h"
 #include "Features/DeclarationText.h"
 #include "Features/DocComment.h"
+#include "Features/Definition.h"
 #include "Features/MacroUses.h"
 #include "Server/CompilationSession.h"
 #include "Server/SemanticResolver.h"
@@ -45,6 +46,8 @@ namespace C4LSP::Features
 	{
 		if (decl.Type() == NodeType::Parameter)
 			return "parameter `" + DeclarationText::NameOf(decl) + "`\n\n";
+		if (decl.Type() == NodeType::ForLoop)
+			return "local `" + DeclarationText::NameOf(decl) + "`\n\n";
 		if (decl.Type() != NodeType::VariableDefinition)
 			return "";
 		const Core::Vector<const Scripting::AstNode*> path = DeclarationText::PathTo(session, decl);
@@ -78,7 +81,7 @@ namespace C4LSP::Features
 		if (!located.Found())
 			return result;
 
-		std::string text = BuildHoverText(session, located);
+		std::string text = BuildHoverText(session, sourceId, located, position);
 		if (text.empty())
 			return result;
 
@@ -94,13 +97,22 @@ namespace C4LSP::Features
 		return doc.empty() ? text : text + "\n\n" + doc;
 	}
 
-	std::string Hover::BuildHoverText(Server::CompilationSession& session, const Server::LocatedNode& located)
+	std::string Hover::BuildHoverText(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
+		// What go-to-definition finds without a reference: a variable a lambda captures, a declaration's own name (a range-
+		// for variable's, the type `Ring` of `Ring::Push`).
+		if (const Scripting::AstNode* captured = Definition::CapturedAt(session, located, position))
+			return DeclarationMarkdown(session, *captured);
+		if (const Scripting::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))
+			return DeclarationMarkdown(session, *named);
+
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		// Prefer a reference node (identifier / member access / call callee) with a resolved type.
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
 			const Scripting::AstNode* node = located.path[i];
+			if (node->Type() == NodeType::LambdaExpression)
+				break; // a lambda is a function of its own: the declaration around it is not what its code names
 
 			if (node->Type() == NodeType::IdentifierExpression || node->Type() == NodeType::MemberAccess || node->Type() == NodeType::StaticAccess)
 			{

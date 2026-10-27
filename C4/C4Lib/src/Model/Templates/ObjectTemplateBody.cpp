@@ -254,6 +254,8 @@ namespace Scripting
 		m.m_IsOverride = fn.IsOverride();
 		m.m_IsFinal = fn.IsFinal();
 		m.m_Access = rec.access;
+		m.m_DeclaringNode = &fn;
+		m.m_HasBody = body != nullptr;
 		m.m_OperatorAnnotations = rec.operatorAnnotations;
 		m_Instance.AddMethod(m);
 		return Result::Success();

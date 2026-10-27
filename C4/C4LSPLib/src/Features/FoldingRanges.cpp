@@ -1,4 +1,5 @@
 #include "Features/FoldingRanges.h"
+#include "Server/WrittenChildren.h"
 #include "Server/CompilationSession.h"
 #include "Parser/AstNode.h"
 #include "Lexer/Lexer.h"
@@ -102,12 +103,10 @@ namespace C4LSP::Features
 			break;
 		}
 
-		for (const auto& child : node.Children())
-		{
-			if (!child || child->startLocation.sourceId != sourceId)
-				continue; // skip inlined include trees and foreign nodes
-			CollectNode(*child.Get(), sourceId, out);
-		}
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) {
+			if (child.startLocation.sourceId == sourceId) // skip inlined include trees and foreign nodes
+				CollectNode(child, sourceId, out);
+		});
 	}
 
 	void FoldingRanges::AddCommentFolds(Server::CompilationSession& session, const std::string& uri, Core::Vector<FoldingRange>& out)

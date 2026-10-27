@@ -178,6 +178,7 @@ namespace Scripting
 			{
 				EnumType::MemberInfo mi;
 				mi.mName = m->GetNameToken().GetText();
+				mi.m_DeclaringNode = m.Get();
 				if (m->HasInitializer() && m->GetInitializer())
 				{
 					ConstEvaluator eval(model, layer);
@@ -197,7 +198,7 @@ namespace Scripting
 			// Unscoped enums inject their members as constants into the current layer (doc 09).
 			if (!en->IsScoped())
 				for (const auto& m : t->GetMembers())
-					layer->Register(m.mName, SymbolInfo{ SymbolKind::Variable, owned, nullptr, {}, true, false, 0, &decl });
+					layer->Register(m.mName, SymbolInfo{ SymbolKind::Variable, owned, nullptr, {}, true, false, 0, m.m_DeclaringNode });
 			return QueryResult<const Type*>::Success(owned);
 		}
 

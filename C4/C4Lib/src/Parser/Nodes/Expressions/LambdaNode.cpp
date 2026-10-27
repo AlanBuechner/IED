@@ -143,11 +143,13 @@ namespace Scripting
 		capture.byReference = Accept(lexer, TokenType::Ampersand);
 		capture.name = lexer.PeekCompound();
 		if (!Expect(state, TokenType::Identifier, "a capture")) return false;
+		const Token assignment = lexer.PeekCompound();
 		if (Accept(lexer, TokenType::Equal))
 		{
 			capture.kind = LambdaCapture::Kind::Init;
 			capture.init = PrattParser::ParseExpression(state);
 			if (!capture.init) return false;
+			capture.declaration = VariableDefinitionNode::ForInitCapture(capture.name, assignment, capture.init);
 			m_Children.Push(capture.init);
 		}
 		m_Captures.Push(capture);

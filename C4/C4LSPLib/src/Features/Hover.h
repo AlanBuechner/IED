@@ -27,7 +27,7 @@ namespace C4LSP::Features
 		static std::string DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration);
 
 	private:
-		static std::string BuildHoverText(Server::CompilationSession& session, const Server::LocatedNode& located);
+		static std::string BuildHoverText(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
 		static std::string BuildReferenceHover(Server::CompilationSession& session, const Scripting::Type* type, const Scripting::AstNode* declaration);
 		static std::string BuildTypeHover(Server::CompilationSession& session, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path);
 		static std::string MacroHover(const std::string& definition, const std::string& expansion, const std::string& doc);

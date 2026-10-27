@@ -9,7 +9,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
-#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
+#include "Server/WrittenChildren.h"
 #include "Features/TypeText.h"
 #include <algorithm>
 
@@ -162,11 +162,15 @@ namespace C4LSP::Features
 		}
 	}
 
-	// A base list (`class Square : IShape`) writes its types too, though they are not the type's children (BUG-390).
-	void ReferenceScanner::VisitBases(const Search& search, const Scripting::ObjectDefinitionNode& object, const Core::Vector<const Scripting::AstNode*>& path)
+	// The variables a lambda's capture list names (`counter` of `[&counter]`), resolved where the lambda is written (BUG-403).
+	void ReferenceScanner::VisitCaptures(const Search& search, const Scripting::LambdaNode& lambda, const Core::Vector<const Scripting::AstNode*>& path)
 	{
-		for (const Scripting::BaseClassEntry& base : object.GetBaseClasses())
-			if (base.m_Type) Visit(search, *base.m_Type, path);
+		Core::Vector<const Scripting::AstNode*> outside = path;
+		outside.Pop();
+		for (const Scripting::LambdaCapture& capture : lambda.GetCaptures())
+			if (capture.kind == Scripting::LambdaCapture::Kind::Variable &&
+				search.targets.count(search.resolver.ResolveIdentifier(capture.name.GetText(), outside).declaration) > 0)
+				search.sink(Occurrence{ &lambda, { capture.name.GetStartLocation(), capture.name.GetEndLocation() }, true }, path);
 	}
 
 	void ReferenceScanner::Walk(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& pathIn)
@@ -180,13 +184,11 @@ namespace C4LSP::Features
 		Core::Vector<const Scripting::AstNode*> path = pathIn;
 		path.Push(&node);
 		Visit(search, node, path);
-		for (const auto& child : node.Children())
-			if (child)
-				Walk(search, *child.Get(), path);
+		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { Walk(search, child, path); });
 	}
 
 	// The occurrences `node` itself is: a name resolving to a target, a type written in code that names one, the
-	// qualifiers of an out-of-line definition, and constructions calling a target create operator.
+	// qualifiers of an out-of-line definition, a lambda's captures, and constructions calling a target create operator.
 	void ReferenceScanner::Visit(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
 	{
 		if (IsReferenceNode(node))
@@ -204,8 +206,8 @@ namespace C4LSP::Features
 		}
 		if (node.Type() == Scripting::NodeType::FunctionDefinition && AnyTypeTarget(search.targets))
 			VisitQualifiers(search, static_cast<const Scripting::FunctionDefinitionNode&>(node), path);
-		if (node.Type() == Scripting::NodeType::ObjectDefinition && AnyTypeTarget(search.targets))
-			VisitBases(search, static_cast<const Scripting::ObjectDefinitionNode&>(node), path);
+		if (node.Type() == Scripting::NodeType::LambdaExpression)
+			VisitCaptures(search, static_cast<const Scripting::LambdaNode&>(node), path);
 		if (!AnyFunctionTarget(search.targets))
 			return;
 		for (const Constructions::Construction& construction : Constructions::Of(node, path, search.resolver))

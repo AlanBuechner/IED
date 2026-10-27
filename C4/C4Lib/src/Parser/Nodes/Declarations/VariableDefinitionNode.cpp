@@ -23,6 +23,20 @@ namespace Scripting
 		return type == TokenType::Public || type == TokenType::Private || type == TokenType::Protected;
 	}
 
+	Ref<VariableDefinitionNode> VariableDefinitionNode::ForInitCapture(const Token& name, const Token& assignment, const Ref<AstNode>& initializer)
+	{
+		Ref<VariableDefinitionNode> node = CreateRef<VariableDefinitionNode>();
+		node->m_NameToken = name;
+		node->m_AssignmentToken = assignment;
+		node->m_Initializer = initializer;
+		node->m_Declarators.Push(Declarator{ name, initializer, {} });
+		node->startLocation = name.GetStartLocation();
+		node->endLocation = initializer ? initializer->endLocation : name.GetEndLocation();
+		if (initializer)
+			node->m_Children.Push(initializer);
+		return node;
+	}
+
 	std::span<const Ref<AstNode>> VariableDefinitionNode::Children() const
 	{
 		return m_Children;

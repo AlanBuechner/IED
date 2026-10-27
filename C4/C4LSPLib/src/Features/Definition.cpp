@@ -12,6 +12,7 @@
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
+#include "Parser/Nodes/Expressions/LambdaNode.h"
 #include "Features/TypeDefinition.h"
 #include "Features/TypeText.h"
 #include "Features/DeclarationText.h"
@@ -21,10 +22,11 @@
 
 namespace C4LSP::Features
 {
-	// A parameter, or a variable declared inside a function: nothing outside that function names it.
+	// A parameter, a for statement's variable, or a variable declared inside a function: nothing outside that function
+	// names it.
 	static bool IsFunctionLocal(Server::CompilationSession& session, const Scripting::AstNode& declaration)
 	{
-		if (declaration.Type() == Scripting::NodeType::Parameter)
+		if (declaration.Type() == Scripting::NodeType::Parameter || declaration.Type() == Scripting::NodeType::ForLoop)
 			return true;
 		if (declaration.Type() != Scripting::NodeType::VariableDefinition)
 			return false;
@@ -34,6 +36,8 @@ namespace C4LSP::Features
 				return true;
 		return false;
 	}
+
+	static const Scripting::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located);
 
 	std::optional<Protocol::Location> Definition::SharedDeclarationAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
@@ -75,6 +79,12 @@ namespace C4LSP::Features
 		auto locations = ResolveReference(session, sourceId, located);
 		if (locations.Count() > 0)
 			return locations;
+		if (const Scripting::AstNode* captured = CapturedAt(session, located, position))
+			return { LocationForDeclaration(session, *captured) };
+		if (const Scripting::AstNode* declared = DeclarationNamedAt(session, sourceId, located, position))
+			return Counterparts(session, *declared);
+		if (const Scripting::AstNode* type = TypeWrittenAt(session, located))
+			return { LocationForDeclaration(session, *type) };
 
 		// Fallback: the caret is on a type name in a declaration (e.g. `ID3D12Device* g_dev`), not a
 		// value reference. VS's F12 jumps to the type definition, so do the same here. This also
@@ -252,15 +262,57 @@ namespace C4LSP::Features
 		return nullptr;
 	}
 
-	// A reference, else a declaration's own name, else a type written there: what references, highlight and rename
-	// are about.
+	// A reference, else a variable a lambda captures, else a declaration's own name, else a type written there: what
+	// references, highlight and rename are about.
 	const Scripting::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
 		if (const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located))
 			return target;
+		if (const Scripting::AstNode* target = CapturedAt(session, located, position))
+			return target;
 		if (const Scripting::AstNode* target = DeclarationNamedAt(session, sourceId, located, position))
 			return target;
 		return TypeWrittenAt(session, located);
+	}
+
+	const Scripting::Token* Definition::CaptureNameAt(const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		if (!located.Found() || located.node->Type() != Scripting::NodeType::LambdaExpression)
+			return nullptr;
+		for (const Scripting::LambdaCapture& capture : static_cast<const Scripting::LambdaNode&>(*located.node).GetCaptures())
+			if (capture.kind == Scripting::LambdaCapture::Kind::Variable && Within(position, capture.name.GetStartLocation(), capture.name.GetEndLocation()))
+				return &capture.name;
+		return nullptr;
+	}
+
+	const Scripting::AstNode* Definition::CapturedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		const Scripting::Token* name = CaptureNameAt(located, position);
+		if (!name)
+			return nullptr;
+		Core::Vector<const Scripting::AstNode*> outside = located.path;
+		outside.Pop();
+		return session.GetResolver().ResolveIdentifier(name->GetText(), outside).declaration;
+	}
+
+	// Where going to the definition of a declaration's own name leads (BUG-406): a function's other declarations - its
+	// declaration in its type or header from its definition, its definition from a declaration - else the declaration
+	// itself, which an editor answers with its references.
+	Core::Vector<Protocol::Location> Definition::Counterparts(Server::CompilationSession& session, const Scripting::AstNode& declared)
+	{
+		std::vector<const Scripting::AstNode*> declarations;
+		session.GetResolver().CollectFunctionDeclarations(&declared, declarations);
+		const bool hasBody = declared.Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(declared).IsDefinition();
+		Core::Vector<Protocol::Location> result;
+		for (const Scripting::AstNode* node : declarations)
+		{
+			const bool nodeHasBody = node->Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(*node).IsDefinition();
+			if (node != &declared && nodeHasBody != hasBody)
+				result.Push(LocationForDeclaration(session, *node));
+		}
+		if (result.Count() == 0)
+			result.Push(LocationForDeclaration(session, declared));
+		return result;
 	}
 
 	const Scripting::AstNode* Definition::FindTargetDeclaration(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)
@@ -270,6 +322,8 @@ namespace C4LSP::Features
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
 			const Scripting::AstNode* node = located.path[i];
+			if (node->Type() == Scripting::NodeType::LambdaExpression)
+				break; // a lambda is a function of its own: the call it is an argument of is not what its code names
 
 			if (node->Type() == Scripting::NodeType::IdentifierExpression ||
 				node->Type() == Scripting::NodeType::MemberAccess ||
@@ -311,44 +365,9 @@ namespace C4LSP::Features
 
 	Protocol::Location Definition::LocationForDeclaration(Server::CompilationSession& session, const Scripting::AstNode& declaration)
 	{
-		const Scripting::SourceLocation* start = &declaration.startLocation;
-		const Scripting::SourceLocation* end = &declaration.endLocation;
-
-		switch (declaration.Type())
-		{
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(declaration);
-			if (func.GetName())
-			{
-				const auto& nameToken = func.GetName()->GetLastIdentifierToken();
-				start = &nameToken.GetStartLocation();
-				end = &nameToken.GetEndLocation();
-			}
-			break;
-		}
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(declaration);
-			start = &var.GetNameToken().GetStartLocation();
-			end = &var.GetNameToken().GetEndLocation();
-			break;
-		}
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(declaration);
-			start = &obj.GetNameToken().GetStartLocation();
-			end = &obj.GetNameToken().GetEndLocation();
-			break;
-		}
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(declaration);
-			start = &en.GetNameToken().GetStartLocation();
-			end = &en.GetNameToken().GetEndLocation();
-			break;
-		}
-		default:
-			break;
-		}
-
-		uint32 declSourceId = start->sourceId;
-		return session.ToEditorLocation(*start, *end);
+		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(declaration);
+		if (name.found)
+			return session.ToEditorLocation(name.simpleStart, name.end);
+		return session.ToEditorLocation(declaration.startLocation, declaration.endLocation);
 	}
 } // namespace C4LSP::Features

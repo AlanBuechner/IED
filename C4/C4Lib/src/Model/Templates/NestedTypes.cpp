@@ -53,7 +53,7 @@ namespace Scripting
 				if (!folded.Ok()) return QueryResult<void>::Fail(folded.error, "the value of '" + name + "::" + member->GetNameToken().GetText() + "': " + folded.message);
 				value = folded.value.AsInt();
 			}
-			en->AddMember({ member->GetNameToken().GetText(), value });
+			en->AddMember({ member->GetNameToken().GetText(), value, member.Get() });
 			next = value + 1;
 		}
 		model.Writes().Ask("a nested enum");
@@ -68,7 +68,7 @@ namespace Scripting
 			constant.isConst = true;
 			constant.constValue = ConstantValue::Int(member.m_Value);
 			constant.definingUnit = 0;
-			constant.declNode = &nested;
+			constant.declNode = member.m_DeclaringNode;
 			Register(owner, member.mName, constant);
 		}
 		return QueryResult<void>::Success();

@@ -4,7 +4,7 @@
 #include "Server/NodeLocator.h"
 #include <optional>
 
-namespace Scripting { class AstNode; class ProgramModel; }
+namespace Scripting { class AstNode; class ProgramModel; class Token; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -40,6 +40,10 @@ namespace C4LSP::Features
 		/// The declaration whose own name is at `position` - `Push` of `void Ring::Push()` is the function, its `Ring`
 		/// the type - not its type, parameters or body (BUG-349). Null elsewhere.
 		static const Scripting::AstNode* DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
+		/// The name of the lambda capture at `position` (`counter` of `[&counter]`); null off a capture.
+		static const Scripting::Token* CaptureNameAt(const Server::LocatedNode& located, const Protocol::Position& position);
+		/// The variable that capture names, resolved where the lambda is written (BUG-403); null off a capture.
+		static const Scripting::AstNode* CapturedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position);
 
 		/// Where the declaration TargetAt finds at a position is, for asking another analysis about it (a query across
 		/// programs); none off a declaration, and none for a parameter or a function's local, which no other program sees.
@@ -49,6 +53,8 @@ namespace C4LSP::Features
 
 		/// Walk the located path (deepest first) for a reference node with a recorded declaration.
 		static Core::Vector<Protocol::Location> ResolveReference(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located);
+		/// Where going to the definition of `declared`'s own name leads (see the .cpp).
+		static Core::Vector<Protocol::Location> Counterparts(Server::CompilationSession& session, const Scripting::AstNode& declared);
 
 		/// Project-wide last resort: find declarations named like the identifier under the caret by
 		/// scanning every unit's symbol table (for symbols defined in files this one does not include).

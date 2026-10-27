@@ -35,7 +35,7 @@ namespace C4LSP::Server
 		explicit SemanticResolver(const Scripting::ProgramModel& model) : m_Model(model) {}
 
 		/// Clear resolution caches. Called after every Recompile() so stale node facts are dropped.
-		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); }
+		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; }
 
 		/// Resolve a reference node to its type + declaring declaration, given the enclosing AST path
 		/// (outermost first, innermost last) that contains it. The path supplies the function-local
@@ -79,11 +79,17 @@ namespace C4LSP::Server
 		const Scripting::Scope* DeclarationScope(const Core::Vector<const Scripting::AstNode*>& path) const;
 		/// The record of the function `path[fi]` declares or defines (see the .cpp); null when the model has none.
 		const Scripting::FunctionRecord* RecordOf(const Core::Vector<const Scripting::AstNode*>& path, int fi, uint32 unitId) const;
+		/// The first record whose declarations hold the function node `fn`; null when none does.
+		const Scripting::FunctionRecord* RecordDeclaring(const Scripting::AstNode& fn) const;
 		bool ResolveLocal(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path,
 			const Scripting::AstNode*& declOut, const Scripting::Type*& typeOut) const;
+		const Scripting::Type* DeclaredType(const Scripting::AstNode& declaration, const Core::Vector<const Scripting::AstNode*>& path) const;
+		const Scripting::SymbolInfo* TypeNamedBy(const Scripting::AstNode& base, const Core::Vector<const Scripting::AstNode*>& path) const;
 
 		const Scripting::ProgramModel& m_Model;
 		mutable std::unordered_map<const Scripting::AstNode*, NodeResolution> m_RefCache;
 		mutable std::unordered_map<const Scripting::QualTypeNode*, const Scripting::Type*> m_TypeCache;
+		mutable std::unordered_map<const Scripting::AstNode*, const Scripting::FunctionRecord*> m_RecordByDeclaration;
+		mutable bool m_RecordsIndexed = false;
 	};
 } // namespace C4LSP::Server

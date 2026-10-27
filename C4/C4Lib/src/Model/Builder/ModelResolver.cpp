@@ -143,6 +143,7 @@ namespace Scripting
 				EnumType::MemberInfo mi;
 				mi.mName = en.GetMembers()[m]->GetNameToken().GetText();
 				mi.m_Value = values[m];
+				mi.m_DeclaringNode = en.GetMembers()[m].Get();
 				e.raw->AddMember(mi);
 			}
 			builder.m_PendingEnums.Remove(i);

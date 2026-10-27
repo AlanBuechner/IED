@@ -45,6 +45,14 @@ namespace Scripting
 			return text;
 		}
 
+		// The template's bare name inside its body: the instance, declared where the template is (BUG-408).
+		SymbolInfo InjectedName(const Type* instance, const ObjectDefinitionNode& templateBody)
+		{
+			SymbolInfo injected{ SymbolKind::Type, instance };
+			injected.declNode = &templateBody;
+			return injected;
+		}
+
 		Core::Vector<ObjectType::TemplateArgument> ObjectArguments(const TemplateArgs& args)
 		{
 			Core::Vector<ObjectType::TemplateArgument> out;
@@ -165,7 +173,7 @@ namespace Scripting
 		model.m_ObjectTypes.Push(static_cast<const ObjectType*>(obj));
 		model.m_TypeInstantiations.emplace(key, self);
 		// Inside its body the template's bare name is this instance (C++'s injected class name).
-		binding->Register(name, SymbolInfo{ SymbolKind::Type, self });
+		binding->Register(name, InjectedName(self, *def.objectBody));
 
 		ObjectTemplateBody body(model, *obj, def, name, args, { binding, InstanceScope(model, *obj, def, name), unitId });
 		if (auto built = body.Build(); !built.Ok())
@@ -197,7 +205,7 @@ namespace Scripting
 		const Type* self = model.m_Types->Own(obj);
 		model.m_ObjectTypes.Push(static_cast<const ObjectType*>(obj));
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "member", BodyParent(model, def));
-		binding->Register(name, SymbolInfo{ SymbolKind::Type, self });
+		binding->Register(name, InjectedName(self, *def.objectBody));
 
 		const TemplateArgs none;
 		ObjectTemplateBody body(model, *obj, def, name, none, { binding, InstanceScope(model, *obj, def, name), site.unitId, &site.ownerBindings });

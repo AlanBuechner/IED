@@ -11,6 +11,7 @@
 #include "Model/SymbolQueries.h"       // name queries: the query verbs delegate to it
 #include "Model/Types/QualifiedName.h"
 #include "Model/Templates/TemplateMethodDefinitions.h"
+#include "Model/Templates/MemberTemplates.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
@@ -347,6 +348,17 @@ namespace Scripting
 	QueryResult<MemberBinding> ProgramModel::QueryMember(const Type* base, const Core::String& name) const
 	{
 		return SymbolQueries().QueryMember(*this, base, name);
+	}
+
+	Core::Vector<const FunctionDefinitionNode*> ProgramModel::QueryMemberTemplates(const Type* base, const Core::String& name) const
+	{
+		Core::Vector<const FunctionDefinitionNode*> declarations;
+		const auto* object = base ? TypeAs<ObjectType>(TypeHandle::UnwrapToValue(base)) : nullptr;
+		if (!object)
+			return declarations;
+		for (const TemplateDef* def : MemberTemplates::Named(*this, object, name))
+			declarations.Push(def->functionBody);
+		return declarations;
 	}
 
 	QueryResult<const SymbolInfo*> ProgramModel::QuerySymbol(const Core::String& name, uint32 unitId, const Scope* context) const

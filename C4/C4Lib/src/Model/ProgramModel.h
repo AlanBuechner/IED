@@ -202,6 +202,9 @@ namespace Scripting
 
 		/// A member by name on a type (fields and methods together), most-derived first.
 		QueryResult<MemberBinding> QueryMember(const Type* base, const Core::String& name) const;
+		/// The member function templates named `name` that `base` and its bases declare, most-derived first: what
+		/// `x.F(...)` names before a call's arguments pick an instance (BUG-402). Empty for any other type.
+		Core::Vector<const FunctionDefinitionNode*> QueryMemberTemplates(const Type* base, const Core::String& name) const;
 
 		// ===========================================================================
 		// SYMBOL / CONSTANT / LAYOUT QUERIES

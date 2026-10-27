@@ -4,6 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 #include "../Declarations/ParameterNode.h"
+#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 
 namespace Scripting
 {
@@ -29,6 +30,7 @@ namespace Scripting
 		Token name;               // Variable and Init
 		bool byReference = false;
 		Ref<AstNode> init;        // Init
+		Ref<VariableDefinitionNode> declaration; // Init: the variable it declares, for tools (BUG-403)
 	};
 
 	/// A lambda expression: `[captures](params) mutable -> Ret { body }`. Its value is a closure object

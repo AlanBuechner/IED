@@ -272,7 +272,7 @@ namespace Scripting
 		if (!en.IsScoped())
 			for (const auto& m : en.GetMembers())
 				ctx.scope->Register(m->GetNameToken().GetText(),
-					SymbolInfo{ SymbolKind::Variable, raw, nullptr, {}, true, false, ctx.unitId, &en });
+					SymbolInfo{ SymbolKind::Variable, raw, nullptr, {}, true, false, ctx.unitId, m.Get() });
 	}
 
 	void ModelBuilder::RegisterAlias(Context& ctx, const AliasDefinitionNode& alias)
