@@ -3,10 +3,13 @@
 import difflib
 import glob
 import os
+import sys
 from dataclasses import replace
 
 from . import configs, extensions, fsutil, languages
+from . import packages as packages_module
 from .errors import NukeError
+from .log import Log
 from .manifest import MANIFEST_NAME, load
 
 # Never searched for projects: build output, vendored or third-party code, and hidden folders.
@@ -85,7 +88,9 @@ def find_root(start):
 		folder = parent
 
 
-def load_workspace(root):
+def load_workspace(root, package_options=None):
+	"""The workspace at `root`, with the projects of the packages it uses (installed and locked first: packages/__init__.py;
+	`package_options` carries the log and what to update)."""
 	root_manifest = load(os.path.join(root, MANIFEST_NAME))
 	spec = root_manifest.workspace or _implicit_workspace(root_manifest)
 	manifests = [root_manifest] if root_manifest.project else []
@@ -99,6 +104,10 @@ def load_workspace(root):
 			raise NukeError(f"{manifest.path}: listed as a project of {spec.name} but has no [project] table")
 		manifests.append(manifest)
 	projects = _index_projects([m.project for m in manifests])
+	if packages_module.active(spec):
+		options = package_options or packages_module.Options(Log(messages=sys.stderr))
+		for project in packages_module.sync(spec, projects, options):
+			projects[project.name] = project
 	packages = _complete_projects(spec, projects)
 	commands = {c.name: c for c in spec.commands}
 	steps = list(spec.steps) + [s for c in spec.commands for s in c.steps]
@@ -181,15 +190,18 @@ def _package_libraries(packages):
 
 
 def _project_folders(spec):
+	"""The workspace's own project folders: never anything in its packages folder, whose projects come with packages."""
+	installed = os.path.join(spec.dir, spec.packages_dir)
 	if spec.projects is None:
-		return discover(spec.dir, spec.exclude)
+		return discover(spec.dir, tuple(spec.exclude) + (spec.packages_dir.strip("/\\").replace("\\", "/"),))
 	folders = []
 	for entry in spec.projects:
 		matches = _match_entry(spec.dir, entry)
 		if not matches:
 			raise NukeError(f"{spec.file}: workspace.projects entry '{entry}' matches no folder with a {MANIFEST_NAME}")
 		if glob.has_magic(entry):
-			matches = [m for m in matches if not fsutil.matches_any(os.path.relpath(m, spec.dir), spec.exclude)]
+			matches = [m for m in matches if not fsutil.matches_any(os.path.relpath(m, spec.dir), spec.exclude)
+				and not fsutil.is_within(m, installed)]
 		folders.extend(m for m in matches if not any(fsutil.same_path(m, f) for f in folders))
 	return folders
 

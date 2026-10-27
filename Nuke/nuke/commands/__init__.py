@@ -6,6 +6,7 @@ from .custom import CustomCommand
 from .help import Help
 from .init import Init
 from .inspect import Info, List
+from .package import Package
 from .project import Project
 from .run import Run
 from .test import Test
@@ -14,7 +15,7 @@ from .toolchain import Toolchain
 
 def command_table(workspace=None):
 	table = {}
-	for command in (Build(), Run(), Clean(), Rebuild(), List(), Init(), Project(), Toolchain()):
+	for command in (Build(), Run(), Clean(), Rebuild(), List(), Init(), Project(), Package(), Toolchain()):
 		table[command.name] = command
 	table["test"] = Test(table)
 	table["info"] = Info(table)

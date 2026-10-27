@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from . import NUKE_VERSION, configs, fsutil, graph, ied_files, toolchains, workspace as workspaces
+from . import NUKE_VERSION, configs, fsutil, graph, ied_files, packages, toolchains, workspace as workspaces
 from .commands import command_table
 from .engine import execute, validate_phases
 from .errors import NukeError, StepFailed
@@ -151,7 +151,7 @@ def load_workspace_for(start, log, tolerate):
 	if root is None:
 		return None
 	try:
-		return workspaces.load_workspace(root)
+		return workspaces.load_workspace(root, packages.Options(log))
 	except NukeError as error:
 		if not tolerate:
 			raise
@@ -190,6 +190,8 @@ def _main(argv, log, store, cwd):
 	start = os.path.abspath(os.path.join(cwd, workspace_dir)) if workspace_dir else cwd
 	if workspace_dir and not os.path.isfile(os.path.join(start, "nuke.toml")):
 		raise NukeError(f"no nuke.toml in {start}")
+	if "--json" in split_program_args(argv)[0]:
+		log.json_mode()           # what loading the workspace says (installing packages) stays out of the JSON
 	workspace = load_workspace_for(start, log, tolerate)
 	table = command_table(workspace)
 	inv = parse(argv, make_classifier(table, workspace), lambda word: table[word].takes_args)

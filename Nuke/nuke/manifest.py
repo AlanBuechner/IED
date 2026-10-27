@@ -14,6 +14,7 @@ KINDS = ("executable", "module", "library", "custom")   # library: a non-C4 lang
 SUBSYSTEMS = ("console", "windows")                     # a C4 executable's (C4.exe --subsystem)
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+PACKAGE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$")
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class ProjectSpec:
 	language: str = ""              # the project's language: "c4" by default for executable and module; another one
 	                                # builds through its driver (languages.py), a custom project's is for IDEs only
 	driver_options: dict = field(default_factory=dict)   # [project.driver]: what the language's driver reads
+	package: object = None          # packages.Origin of a project a package brings (None: the workspace's own)
 
 	@property
 	def is_c4(self):
@@ -114,6 +116,37 @@ class WorkspaceSpec:
 	languages: dict = field(default_factory=dict)   # [languages]: language -> its package's folder (languages.py)
 	language_settings: dict = field(default_factory=dict)   # [languages.<id>] tables: language -> what its driver reads
 	ied_plugins: tuple = ()         # folders or globs of the IED plugins it develops: projects of IED's solution (ied_files.py)
+	sources: dict = field(default_factory=dict)     # [sources]: name -> git URL of a repository of packages
+	packages: tuple = ()            # [packages]: PackageRequirements of what it uses
+	packages_dir: str = "packages"  # where Nuke installs packages, relative to the workspace
+
+
+@dataclass(frozen=True)
+class PackageRequirement:
+	"""A package a workspace or a package needs: its path in its source's repository, the source (a [sources] name or a
+	URL; None for the same repository), and a version requirement, a branch or a commit (none of them: any version)."""
+	path: str
+	origin: str                     # the manifest that asks for it
+	source: str = None
+	version: str = None
+	branch: str = None
+	rev: str = None
+
+	def describe(self):
+		if self.branch:
+			return f"branch {self.branch}"
+		if self.rev:
+			return f"commit {self.rev[:12]}"
+		return self.version or "*"
+
+
+@dataclass(frozen=True)
+class PackageSpec:
+	"""A [package] table: the folder is a package of its repository (Nuke/README.md section 12)."""
+	dir: str
+	file: str
+	description: str = ""
+	dependencies: tuple = ()        # PackageRequirements on other sources (and pinned ones of its own repository)
 
 
 @dataclass(frozen=True)
@@ -121,6 +154,7 @@ class ManifestFile:
 	path: str
 	workspace: WorkspaceSpec = None
 	project: ProjectSpec = None
+	package: PackageSpec = None
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -232,17 +266,86 @@ def parse(data, path):
 	configurations = root.subtables("configurations")
 	commands = root.subtables("commands")
 	languages = _languages(root.table("languages"))
+	package_table = root.table("package")
+	sources = _sources(root.table("sources"))
+	packages = root.table("packages")
 	root.done()
-	if workspace_table is None and project_table is None:
-		raise NukeError(f"{path}: needs a [workspace] or a [project] table")
-	if workspace_table is None and (configurations or commands or any(languages)):
-		raise NukeError(f"{path}: [configurations], [commands] and [languages] belong to the workspace file")
-	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path) if workspace_table else None
+	if workspace_table is None and project_table is None and package_table is None:
+		raise NukeError(f"{path}: needs a [workspace], [project] or [package] table")
+	if workspace_table is None and (configurations or commands or any(languages) or sources or packages is not None):
+		raise NukeError(f"{path}: [configurations], [commands], [languages], [sources] and [packages] belong to the workspace file")
+	requirements = _requirements(packages, path, needs_source=True) if packages is not None else ()
+	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path, sources, requirements) if workspace_table else None
 	project = _project(project_table, folder, path) if project_table else None
-	return ManifestFile(path, workspace, project)
+	package = _package(package_table, folder, path) if package_table else None
+	return ManifestFile(path, workspace, project, package)
 
 
-def _workspace(t, configurations, commands, languages, folder, path):
+def _sources(t):
+	"""[sources]: name -> the git URL of a repository of packages (`claymore = "https://..."`, or `{ git = "..." }`)."""
+	sources = {}
+	if t is None:
+		return sources
+	for name, value in t.data.items():
+		t.read.add(name)
+		if isinstance(value, dict) and set(value) == {"git"}:
+			value = value["git"]
+		if not isinstance(value, str) or not value:
+			raise NukeError(f"{t.file}: sources.{name} must be a git URL (or a table with git = the URL)")
+		if not PROJECT_NAME.match(name):
+			raise NukeError(f"{t.file}: '{name}' is not a valid source name (letters, digits, '_', '.', '-')")
+		sources[name] = value
+	return sources
+
+
+def _requirements(t, path, needs_source):
+	"""[packages] or [package.dependencies]: package path -> "<source>@<requirement>" (or, in a package, just the
+	requirement: its own repository), or a table of source, version, branch, rev and path."""
+	found = []
+	for key, value in t.data.items():
+		t.read.add(key)
+		where = f"{t.where}.{key}"
+		if isinstance(value, str):
+			source, at, version = value.rpartition("@")
+			if not at and needs_source:
+				raise NukeError(f"{path}: {where} must name its source, as \"<source>@{value or '*'}\" or a table with source and version")
+			requirement = PackageRequirement(key, path, source=source or None, version=version or "*")
+		elif isinstance(value, dict):
+			table = Table(value, where, path)
+			requirement = PackageRequirement(table.string("path") or key, path, source=table.string("source"),
+				version=table.string("version"), branch=table.string("branch"), rev=table.string("rev"))
+			table.done()
+			if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
+				raise NukeError(f"{path}: {where} takes one of version, branch and rev")
+			if needs_source and not requirement.source:
+				raise NukeError(f"{path}: {where} needs a source (a name from [sources], or a git URL)")
+		else:
+			raise NukeError(f"{path}: {where} must be \"<source>@<version>\" or a table (source, version, branch, rev)")
+		if not PACKAGE_PATH.match(requirement.path):
+			raise NukeError(f"{path}: {where}: '{requirement.path}' is not a package path (folders of its repository, like Renderer/RHI)")
+		found.append(requirement)
+	return tuple(found)
+
+
+def _package(t, folder, path):
+	t.where = "package"
+	dependencies = t.table("dependencies")
+	spec = PackageSpec(
+		dir=folder,
+		file=path,
+		description=t.string("description", ""),
+		dependencies=_requirements(dependencies, path, needs_source=False) if dependencies is not None else (),
+	)
+	t.done()
+	return spec
+
+
+def is_url(text):
+	"""Whether a package's source is a URL or a path (rather than a name from [sources])."""
+	return bool(text) and any(c in text for c in "/:\\")
+
+
+def _workspace(t, configurations, commands, languages, folder, path, sources=None, requirements=()):
 	t.where = "workspace"
 	spec = WorkspaceSpec(
 		name=t.string("name") or os.path.basename(folder),
@@ -261,8 +364,19 @@ def _workspace(t, configurations, commands, languages, folder, path):
 		languages=languages[0],
 		language_settings=languages[1],
 		ied_plugins=t.strings("ied-plugins"),
+		sources=sources or {},
+		packages=requirements,
+		packages_dir=t.string("packages-dir", "packages"),
 	)
 	t.done()
+	for requirement in spec.packages:
+		if not is_url(requirement.source) and requirement.source not in spec.sources:
+			hint = difflib.get_close_matches(requirement.source, list(spec.sources), n=1)
+			suggestion = f" (did you mean '{hint[0]}'?)" if hint else " (add it to [sources])"
+			raise NukeError(f"{path}: packages.{requirement.path} names source '{requirement.source}', which [sources] does not have{suggestion}")
+	parts = spec.packages_dir.replace("\\", "/").split("/")
+	if os.path.isabs(spec.packages_dir) or ".." in parts or not spec.packages_dir.strip():
+		raise NukeError(f"{path}: workspace.packages-dir must be a folder inside the workspace")
 	return spec
 
 

@@ -5,11 +5,14 @@ import re
 
 KEY_LINE = re.compile(r'^[ \t]*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=')
 TABLE_LINE = re.compile(r"^[ \t]*\[")
+BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def render(value):
 	if isinstance(value, str):
 		return _string(value)
+	if isinstance(value, dict):
+		return "{ " + ", ".join(f"{k} = {render(v)}" for k, v in value.items()) + " }"
 	return "[" + ", ".join(_string(item) for item in value) + "]"
 
 
@@ -130,7 +133,7 @@ def set_key(text, table, key, value):
 		_, start, end = found
 		return text[:start] + rendered + text[end:]
 	indexes, spans = _table_lines(text, table)
-	line = f"{key} = {rendered}\n"
+	line = f"{key if BARE_KEY.match(key) else _string(key)} = {rendered}\n"
 	if indexes is None:
 		gap = "" if not text or text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
 		return f"{text}{gap}[{table}]\n{line}"

@@ -69,7 +69,7 @@ class ProjectManifestTests(unittest.TestCase):
 			parse({"project": {"kind": "custom", "subsystem": "windows"}})
 
 	def test_needs_a_table(self):
-		with self.assertRaisesRegex(NukeError, r"needs a \[workspace\] or a \[project\]"):
+		with self.assertRaisesRegex(NukeError, r"needs a \[workspace\], \[project\] or \[package\]"):
 			parse({})
 
 

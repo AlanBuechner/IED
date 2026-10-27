@@ -28,6 +28,15 @@ class List(base.Command):
 
 
 def project_summary(session, project, default):
+	summary = _summary(session, project, default)
+	if project.package is not None:
+		origin = project.package
+		summary["package"] = {"source": origin.source, "url": origin.url, "path": origin.package, "versioned": origin.line,
+			"version": origin.version, "commit": origin.commit, "develop": origin.develop}
+	return summary
+
+
+def _summary(session, project, default):
 	return {
 		"name": project.name,
 		"kind": project.kind,
