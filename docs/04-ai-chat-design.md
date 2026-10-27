@@ -435,7 +435,8 @@ takes their tools away; a project plugin's `mcpServers` come with the plugin, wh
 **Its tools.** Each tool of a server is a tool of the chat named `mcp_<server>_<tool>` (lowercase, anything but letters,
 digits and `_` made `_`, runs of `_` as one, at most 64 characters; a clash gets `_2`), in group `mcp_<server>`, with the
 server's own description (a deferred stub shows its first sentence, and the name already says the server) and its
-`inputSchema` less the keywords Bedrock's validator does not know (`propertyNames`, `patternProperties`, `multipleOf`, ...;
+`inputSchema` less the keywords Bedrock's validator does not know (`unevaluatedProperties`, `$dynamicRef`, the `content*` ones,
+draft 7's list of `items`, ...; it knows every other 2020-12 assertion, `propertyNames`, `patternProperties` and `multipleOf` among them;
 one that still does not load becomes `{"type": "object"}`; both said in the MCP output). They are deferred unless `preload` says so: in every request's tool list from
 a chat's first step as stubs, shown whole by `tool_search` - so a server with 40 tools costs a local model 40 short lines,
 not 40 schemas. A tool's class is `exec` (`permission` `ask` or `auto`) or `read` (`read`); its subject for the permission
