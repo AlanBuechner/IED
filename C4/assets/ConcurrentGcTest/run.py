@@ -25,7 +25,11 @@ def run(name, command):
     status = 'PASS' if result.returncode == 0 else f'FAIL (exit {result.returncode})'
     print(f'  {status}  {name}')
     if result.returncode != 0:
-        print((result.stdout + result.stderr)[-4000:])
+        output = result.stdout + result.stderr
+        failures = [line for line in output.splitlines() if 'FAIL' in line]
+        if failures:  # a long run's failing case is far above its tail
+            print('\n'.join(failures[:40]))
+        print(output[-4000:])
     return result.returncode == 0
 
 
