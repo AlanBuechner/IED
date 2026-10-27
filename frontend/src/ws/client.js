@@ -207,6 +207,15 @@ export class ProtocolClient {
 		this.retryTimer = this.timers.setTimeout(() => this.connect(), delay);
 	}
 
+	// Connects at once when it waits to reconnect - its server is known to be back (a workspace server the master says is
+	// ready, docs/10 "Routing") - instead of after the rest of its backoff.
+	reconnectNow() {
+		if (this.stopped || this.socket || !this.retryTimer) return;
+		this.timers.clearTimeout(this.retryTimer);
+		this.retryTimer = null;
+		this.connect();
+	}
+
 	closeSocket() {
 		const socket = this.socket;
 		this.socket = null;

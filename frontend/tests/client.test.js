@@ -124,6 +124,16 @@ async function settle() {
 	await Promise.resolve();
 }
 
+test("client: reconnectNow skips the rest of the backoff, and does nothing while connected", () => {
+	const env = live();
+	env.socket().drop();
+	assertEqual(env.sockets.length, 1, "waiting out the backoff");
+	env.client.reconnectNow();
+	assertEqual(env.sockets.length, 2, "a new socket at once");
+	env.client.reconnectNow();
+	assertEqual(env.sockets.length, 2, "not while one is connecting");
+});
+
 test("client: hello first, then live", () => {
 	const env = setup();
 	const states = [];

@@ -157,6 +157,8 @@ export class Shell {
 		if (this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
 		if (!this.wsId || !this.server.workspaces.some((w) => w.wsId === this.wsId)) this.showWorkspace(this.preferredWorkspace());
+		// A master that came back lists the shown workspace again: its server's socket opens again (docs/12).
+		else if (this.client.show) this.client.show(this.wsId);
 	}
 
 	serverEvent(kind, data) {
@@ -175,6 +177,14 @@ export class Shell {
 		else if (kind === "routes.changed" && this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
 		if (kind === "workspace.opened" && !this.wsId && !this.startPageAsked) this.showWorkspace(data.wsId);
+		// A workspace server that stops for good (its workspace closes, or the master stops) loses its socket first, so the
+		// tab does not keep knocking at a server that is going away.
+		if (kind === "workspace.changed" && data.server && data.server.state === "stopping" && this.client.forget) this.client.forget(data.wsId);
+		// One that is back after a restart: its socket reconnects now, not at the end of its backoff.
+		if (kind === "workspace.changed" && data.server && data.server.state === "ready" && this.client.workspaceClient) {
+			const socket = this.client.workspaceClient(data.wsId);
+			if (socket) socket.reconnectNow();
+		}
 		if (kind === "workspace.closed") {
 			if (this.client.forget) this.client.forget(data.wsId);
 			if (data.wsId === this.wsId) this.showWorkspace(this.preferredWorkspace());

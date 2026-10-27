@@ -133,6 +133,11 @@ test("router: a closed workspace's socket goes; a bye auth-revoked on any socket
 	env.live(w1);
 	env.r.forget("w1");
 	assertTrue(!env.r.workspaceClient("w1"), "forgotten");
+	const opened = env.sockets.length;
+	env.r.request("fs.list", { wsId: "w1", path: "" });
+	assertEqual(env.sockets.length, opened, "a closed workspace's server is not knocked at again");
+	env.r.show("w1");
+	assertEqual(env.at("/w/w1/ws").length, 2, "shown again (a master that came back lists it): a new socket");
 	env.r.show("w3");
 	const [w3] = env.at("/w/w3/ws");
 	env.live(w3);

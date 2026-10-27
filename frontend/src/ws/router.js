@@ -46,6 +46,7 @@ export class Router {
 		this.routes = { methods: new Set(), topics: new Set() };
 		this.shown = null;
 		this.workspaces = new Map();   // serving wsId -> ProtocolClient
+		this.gone = new Set();         // workspaces closed: no socket is opened to them
 		this.listeners = new Set();
 		this.lastState = null;
 		this.master = this.makeClient(this.base + "/ws");
@@ -88,13 +89,20 @@ export class Router {
 	// The workspace this tab shows: what a request naming none goes to.
 	show(wsId) {
 		this.shown = wsId || null;
-		if (this.shown) this.clientOf(servingWorkspace(this.shown));
+		if (this.shown) {
+			const key = servingWorkspace(this.shown);
+			const old = this.workspaces.get(key);
+			if (this.gone.delete(key) && old) this.workspaces.delete(key);
+			this.clientOf(key);
+		}
 		this.stateChanged();
 	}
 
-	// A workspace that closed: its socket goes.
+	// A workspace whose server stops for good (it closes): its socket goes, and what is still asked of it waits instead
+	// of knocking at a server that is going away, until it is shown again.
 	forget(wsId) {
 		const key = servingWorkspace(wsId);
+		this.gone.add(key);
 		const client = this.workspaces.get(key);
 		if (!client) return;
 		this.workspaces.delete(key);
@@ -108,7 +116,8 @@ export class Router {
 		if (!client) {
 			client = this.makeClient(this.base + "/w/" + encodeURIComponent(target) + "/ws");
 			this.workspaces.set(target, client);
-			client.start();
+			if (this.gone.has(target)) client.stop();
+			else client.start();
 		}
 		return client;
 	}
