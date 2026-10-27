@@ -1486,33 +1486,58 @@ def chat_clipboard(run):
 	run.shot("clipboard")
 
 
-@scenario(viewports=("desktop", "phone"), targets=("real",))
+@scenario(viewports=("desktop", "phone"))
 def chat_effort(run):
-	"""A chat's effort from the composer (docs/04 "Effort"): its group's is named until the chat picks one, and the pick
-	goes with the next request (the fake model is a llama.cpp server, so as its chat template reads it). At phone width
-	the selectors scroll beside the box and the menu is a sheet."""
+	"""A chat's effort in the Model menu (owner, 2026-10-26: "move the effort from the dropdown and put it into the model
+	selection with a slider at the bottom"): each group says the model a turn uses now and its default effort; the slider
+	starts on the group's default and its pick goes with the next request (the fake model is a llama.cpp server, so as its
+	chat template reads it); a single model has no group default. At phone width the menu is a bottom sheet."""
 	page = open_chat(run)
-	run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"local": {"primary": {"model": "fake", "effort": "medium"}}}})
+	model = "fake" if run.target.kind == "real" else "mock-model@local"
+	models = {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}} if run.target.kind == "real" else {model: {"endpoint": "http://127.0.0.1:8080/v1"}}
+	models["small"] = {"endpoint": "http://127.0.0.1:9/v1", "effort": {"low": {"chat_template_kwargs": {"enable_thinking": False}}, "high": {}}}
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": models})
+	run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"local": {"primary": {"model": model, "effort": "medium"}}}})
 	run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": "local"})
 	try:
 		run.reload()
 		show_chat(run)
-		run.wait_text(".chat-selectors", "Medium (group)")
-		page.click(".chat-selectors .chat-dd[title='Effort']")
-		page.wait_for_selector(".popup.menu" + (".sheet" if run.phone else ""))
-		menu = run.texts(".popup.menu")[0]
-		check("As the group says (Medium)" in menu, "the group's row names its effort")
-		check("Extra high" in menu and "Max" in menu, "Claude's five levels: %s" % menu)
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Medium (group)")
+		check(page.query_selector(".chat-selectors .chat-dd[title='Effort']") is None, "no Effort dropdown beside the Model menu")
+		page.click(".chat-selectors .chat-model-dd")
+		page.wait_for_selector(".chat-picker" + (".sheet" if run.phone else "") + " .chat-picker-effort .chat-effort-slider")
+		check(run.texts(".chat-picker .chat-picker-row.grp .sub") == ["now %s - effort Medium - no agents" % model], "the group: the model a turn uses now and its default effort")
+		check(run.texts(".chat-picker .chat-effort-tick") == ["Group", "Low", "Med", "High", "XHigh", "Max"], "the group's default, then the levels")
+		check(run.texts(".chat-picker .chat-effort-value") == ["Group default (Medium)"], "the slider starts on the group's default")
 		run.shot("menu")
-		page.click(".popup.menu .menu-item:has-text('Max')")
-		run.wait_text(".chat-selectors .chat-dd[title='Effort']", "Max")
-		run.target.queue_model(model_script({"text": "Quick.", "chunk": 6}, {"finish": "stop"}))
-		send(page, "hi")
-		page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
-		sent = run.target.model_requests()[-1]["body"].get("chat_template_kwargs")
-		check(sent == {"reasoning_effort": "max"}, "the chat's pick was sent: %s" % sent)
-		run.shot("sent")
+		page.click(".chat-picker .chat-effort-tick[data-effort='max']")
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Max")
+		check(page.query_selector(".chat-picker") is not None, "the menu stays open for a model to pick")
+		page.focus(".chat-picker .chat-effort-slider")
+		page.keyboard.press("ArrowLeft")
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Extra high")
+		page.keyboard.press("ArrowRight")
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Max")
+		run.shot("max")
+		page.keyboard.press("Escape")
+		page.wait_for_selector(".chat-picker", state="detached")
+		if run.target.kind == "real":
+			run.target.queue_model(model_script({"text": "Quick.", "chunk": 6}, {"finish": "stop"}))
+			send(page, "hi")
+			page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+			sent = run.target.model_requests()[-1]["body"].get("chat_template_kwargs")
+			check(sent == {"reasoning_effort": "max"}, "the chat's pick was sent: %s" % sent)
+			run.shot("sent")
+		page.click(".chat-selectors .chat-model-dd")
+		page.click(".chat-picker .chat-picker-row:has-text('small')")
+		run.wait_text(".chat-selectors .chat-model-dd", "small")
+		page.click(".chat-selectors .chat-model-dd")
+		page.wait_for_selector(".chat-picker .chat-effort-tick")
+		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "High", "Max"], "a single model: no group default, its own levels, the chat's pick kept: %s" % run.texts(".chat-picker .chat-effort-tick"))
+		run.shot("single")
+		page.keyboard.press("Escape")
 	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
 		run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {}})
 		run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": ""})
 
@@ -1641,11 +1666,12 @@ def chat_delete_and_restore(run):
 
 
 @scenario(viewports=("desktop",), targets=("mock",))
-def claude_usage_hover_card(run):
-	"""The status bar's Claude usage draws itself on hover as Settings > AI > Claude does (docs/04 "The Claude Code
-	provider"): each window's bar with the even line, its pace (yellow ahead of it) and reset, and the chain with the
-	model a turn uses now and why Opus is passed over; a click opens the settings page and the card goes. The mock sets
-	Claude up when ai.models names a claude-code model (a phone has no status bar)."""
+def claude_usage_bars_and_card(run):
+	"""The status bar's Claude usage (owner, 2026-10-26): resting the pointer on it shows a simple bar per window; a click
+	opens the card Settings > AI > Claude draws - each window's bar with the even line, its pace (yellow ahead of it) and
+	reset, the chain with the model a turn uses now and why Opus is passed over - which Escape closes, and whose Open Claude
+	settings opens the page. The mock sets Claude up when ai.models names a claude-code model (a phone has no status bar:
+	claude_week_paced_over_work_days opens the page from the palette there)."""
 	page = run.open()
 	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"claude-sonnet": {"provider": "claude-code", "model": "sonnet"}}})
 	try:
@@ -1654,17 +1680,72 @@ def claude_usage_hover_card(run):
 		page.wait_for_selector(item + ":not([hidden])")
 		check(page.get_attribute(item, "title") is None, "no plain tooltip beside the card")
 		page.hover(item)
-		page.wait_for_selector(".hover-card .claude-hover")
-		check(run.texts(".hover-card .claude-hover-window .claude-label") == ["Session (5 h)", "Week", "Opus week"], "a row per window")
-		check(run.texts(".hover-card .claude-pace.c-warn") == ["pace 1.36x"], "the session runs ahead of pace")
-		check(len(page.query_selector_all(".hover-card .claude-bar .even")) == 3, "each bar marks the even pace")
-		check(run.texts(".hover-card .claude-place.warn") == ["claude-opus"] and run.texts(".hover-card .claude-place.info") == ["> claude-sonnet"], "the chain as pacing has it")
-		run.shot("card")
+		page.wait_for_selector(".hover-card .claude-bars")
+		check(run.texts(".hover-card .claude-bars-row .claude-label") == ["Session (5 h)", "Week", "Opus week"], "a bar per window")
+		check(run.texts(".hover-card .claude-bars-row .claude-num") == ["68%", "41%", "12%"], "how much of each is used")
+		check(len(page.query_selector_all(".hover-card .claude-bar .even")) == 3 and page.query_selector(".hover-card .claude-place") is None, "each bar marks the even pace; the chains are the click's")
+		run.shot("bars")
 		page.click(item)
+		page.wait_for_selector(".hover-card.pinned .claude-hover-window")
+		check(len(page.query_selector_all(".hover-card")) == 1, "the bars went for the card")
+		check(run.texts(".hover-card.pinned .claude-pace.c-warn") == ["pace 1.36x"], "the session runs ahead of pace")
+		check(run.texts(".hover-card.pinned .claude-place.warn") == ["claude-opus"] and run.texts(".hover-card.pinned .claude-place.info") == ["> claude-sonnet"], "the chain as pacing has it")
+		check(page.evaluate("document.activeElement.textContent") == "Open Claude settings", "focus in the card, on its way to the settings")
+		run.shot("card")
+		page.keyboard.press("Escape")
+		page.wait_for_selector(".hover-card.pinned", state="detached")
+		check(page.evaluate("document.activeElement.dataset.item") == "ied.chat.claude", "Escape gives the focus back to the item")
+		page.click(item)
+		page.wait_for_selector(".hover-card.pinned")
+		page.mouse.click(600, 300)
+		page.wait_for_selector(".hover-card.pinned", state="detached")
+		page.click(item)
+		page.click(".hover-card.pinned .claude-open-settings")
 		page.wait_for_selector(".claude-page .claude-windows")
 		time.sleep(0.6)
-		check(page.query_selector(".hover-card") is None, "the click took the card away")
+		check(page.query_selector(".hover-card") is None, "the card went with the click")
+		run.shot("settings")
 	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def claude_week_paced_over_work_days(run):
+	"""Settings > AI > Claude's Weekly pace (owner, 2026-10-26: "switch between a week pace and a work week pace"): Work
+	days only shows the days; the bars still show the whole week, now with a dashed mark where the even line stands through
+	the weekend, on the page and in the status item's bars and card. The server's math is a unit test (server.ai.workweek)
+	and a server check (test_claude test_a_weeks_pace_over_the_work_week)."""
+	page = run.open()
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"claude-sonnet": {"provider": "claude-code", "model": "sonnet"}}})
+	try:
+		run.reload()
+		page.evaluate("ied_shell.commands.run('ied.chat.claudeUsage')")
+		page.wait_for_selector(".claude-page .claude-pace-days .claude-segs")
+		check(run.texts(".claude-segs button.on") == ["Every day"] and page.query_selector(".claude-page .claude-bar .off") is None, "every day by default: no marks")
+		page.click(".claude-segs button[data-days='workweek']")
+		page.wait_for_selector(".claude-page .claude-bar .off")
+		check(run.texts(".claude-segs button.on") == ["Work days only"], "the choice shows")
+		check(run.texts(".claude-days .claude-day.on") == ["Mon", "Tue", "Wed", "Thu", "Fri"], "Monday to Friday by default")
+		check(len(page.query_selector_all(".claude-page .claude-window .claude-bar .off")) == 2, "the weekly windows mark their weekend, the session does not")
+		page.click(".claude-days .claude-day[data-day='sat']")
+		page.wait_for_selector(".claude-days .claude-day.on[data-day='sat']")
+		page.click(".claude-days .claude-day[data-day='sat']")
+		page.wait_for_selector(".claude-days .claude-day[data-day='sat']:not(.on)")
+		page.locator(".claude-pace-days").scroll_into_view_if_needed()
+		run.shot("page")
+		if not run.phone:
+			item = ".statusbar [data-item='ied.chat.claude']"
+			page.hover(item)
+			page.wait_for_selector(".hover-card .claude-bars .claude-bar .off")
+			run.shot("bars")
+			page.click(item)
+			page.wait_for_selector(".hover-card.pinned .claude-bar .off")
+			check("dashed one is where it stands through a weekend" in run.texts(".hover-card.pinned .claude-hover-foot")[0], "the card says what the dashed mark is")
+			run.shot("card")
+			page.keyboard.press("Escape")
+	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.claude.workDays"})
+		run.request("settings.reset", {"tier": "app", "key": "ai.claude.paceDays"})
 		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
 
 

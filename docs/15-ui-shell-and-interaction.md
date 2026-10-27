@@ -61,11 +61,30 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 |    |                      +--------------------------------------------------------+                 |
 |    |                      | -> At the next step: use the existing Ring type        |                 |
 |    |                      | [@ attach] message...                               [>]                   |
-|    |                      | group: plan-claude/impl-local v  effort: high v  mode: Agent v           |
+|    |                      | Model: plan-claude/impl-local | High (group) v  Mode: Agent v          |
 +----+----------------------+--------------------------------------------------------+-----------------+
 ```
 
 - A chat opens at the end of its transcript whenever it is shown (owner, 2026-10-22: "any time i open a chat window it should automatically take me to the end"): opened from the list, its tab chosen again, its activity returned to, the page reloaded, on a phone as on a desktop. It keeps the end in view as the transcript grows (a reply streaming, an image loading, the composer growing) until the owner scrolls up, and follows again once they scroll back down to it. Only the owner moving it up - the wheel, a touch, a key, the scrollbar - stops it following (owner, 2026-10-23: "no tool calls should stop the auto scroll only the user scrolling up can"): a scroll event comes a frame after its scroll, so an image of a tool's result that loaded in between (a browser screenshot, a new file each time) left the end farther than the old rule's 80 px and stopped it (e2e `chat_follows_its_end_past_images`).
+- The composer's Model menu (owner, 2026-10-26: effort "into the model selection with a slider at the bottom") - groups on the left, each saying the model a turn of the chat's mode uses now and its default effort, models on the right, the effort slider under both (`docs/04` "One choice per chat"); on a phone a bottom sheet with the lists one above the other and the slider at the thumb:
+
+```
++--------------------------------------+-------------------------------+
+| GROUPS                               | MODELS                        |
+| [v] claude (default)                 |  v Claude                 4   |
+|     now claude-sonnet - effort High  |    * claude-opus              |
+|     - no agents                      |    * claude-sonnet            |
+|  >  local                            |  v spark                      |
+|     now qwen - effort the model's    |    [] qwen3.8-27b             |
+|     own - 2 agents                   |                               |
++--------------------------------------+-------------------------------+
+| EFFORT  Group default (High)                          claude-sonnet  |
+| o-------|-------|-------|-------|-------|                            |
+| Group   Low     Med     High    XHigh   Max                          |
++----------------------------------------------------------------------+
+```
+
+  A single model has no "Group" stop: its first is its own default. Up/Down move in a column and Down past its last row reaches the slider; Left/Right move the slider; a stop's label is a button (a tap on a phone); picking a group or a model closes the menu, the effort leaves it open.
 - A chat tab's icon is its state; the Chats list adds the tasks done (`3/7`) and says "Needs approval" / "Needs an answer" / "Paused" in amber.
 - A message sent while a turn runs joins it (`docs/12` "Messages while a turn runs"): it waits above the composer ("At the next step: ...") until the turn's next step takes it, then shows in the transcript as the owner's message after the tool round it came in, and the turn answers it. Ctrl+Enter keeps one for the next turn instead - there is no Queue button (owner, 2026-10-26), since sending it like normal already queues what a running turn cannot take yet.
 - The details panel's long lists (modified files, tasks, background tasks, the clipboard, what the chat has open) show their first `ai.chats.panelRows` rows (5) with "Show all N" below; the task list's preview follows what the AI does (owner, 2026-10-23: "it would be best if it showed the most recent/active tasks"): the task in progress - else the next one up, else the last ones - after the one before it, under a row that counts the tasks above ("5 done above", a click shows them all). Its left edge drags its width (arrow keys too; a double-click goes back to the default), kept for the device's chats (owner, 2026-10-23: "things that get to long dont fill up space. also the side bar where all this is should be resizeable").

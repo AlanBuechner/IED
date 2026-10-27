@@ -2,13 +2,13 @@
 // and those queued for the next turn, the message being edited (Edit on one of the owner's messages: sending it reverts
 // the chat to before it), the files the message carries, the text box (Enter sends - to a running turn, at its next
 // step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@" mentions drawn
-// as chips, docs/04; pasted text goes in plain), Attach / Stop / Send, what the chat runs on (a group or a model,
-// modelpicker.js), its effort, mode and permission, and the running numbers - tokens in and out, speed, time to first
-// token, context use.
+// as chips, docs/04; pasted text goes in plain), Attach / Stop / Send, what the chat runs on and how hard it thinks (a
+// group or a model and the effort slider, modelpicker.js), its mode and permission, and the running numbers - tokens in
+// and out, speed, time to first token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { MODES, PERMISSIONS, compact, contextBar, duration, effortLabel, effortRows, tokensPerSecond } from "./chatmodel.js";
+import { MODES, PERMISSIONS, compact, contextBar, duration, effortLabel, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
 import { choiceLabel, showModelPicker } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
@@ -210,7 +210,7 @@ export class Composer {
 		this.sendButton.title = this.running ? "Send it into the running turn: the AI gets it after its current step (Enter)" : "Send (Enter)";
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.pending.map((text) => this.pendingRow(text)), ...model.queued.map((text, index) => this.queuedRow(text, index)));
-		this.renderSelectors(summary, model.groupInUse, model.roleEffort);
+		this.renderSelectors(summary, model);
 		this.renderTelemetry(model);
 	}
 
@@ -238,12 +238,11 @@ export class Composer {
 		this.focus();
 	}
 
-	renderSelectors(summary, groupInUse, roleEffort) {
+	renderSelectors(summary, model) {
 		const mode = MODES.find(([id]) => id === summary.mode) || MODES[2];
 		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS.find(([id]) => id === "auto");
 		replace(this.selectors,
-			h("span.muted", null, "Model"), this.modelButton(summary, groupInUse),
-			h("span.muted", null, "Effort"), this.dropdown(effortLabel(summary.effort, roleEffort), "Effort", () => effortRows(summary.effort, roleEffort), (row) => this.actions.set({ effort: row.value })),
+			h("span.muted", null, "Model"), this.modelButton(summary, model),
 			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODES, summary.mode), (row) => this.actions.set({ mode: row.value })),
 			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
 	}
@@ -255,14 +254,18 @@ export class Composer {
 		} } }, h("span", null, label), icon("chevron-down"));
 	}
 
-	// The Model menu: a group (an orchestrator and its agents) or one model (docs/04 "One choice per chat").
-	modelButton(summary, groupInUse) {
-		const label = choiceLabel(summary, groupInUse);
-		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on a group or a model", "aria-haspopup": "dialog", on: { click: async (event) => {
+	// The Model menu: a group (an orchestrator and its agents) or one model (docs/04 "One choice per chat"), and the effort
+	// slider at its bottom; the button says the choice and its effort.
+	modelButton(summary, model) {
+		const label = choiceLabel(summary, model.groupInUse);
+		const alone = !!summary.pinnedModel && !summary.group;
+		const effort = effortLabel(summary.effort, alone ? "" : model.roleEffort);
+		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on a group or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
 			const at = event.currentTarget;
 			const choices = await this.actions.choices();
-			if (choices) showModelPicker(at, choices, { group: summary.group || "", model: summary.pinnedModel || "" }, (change) => this.actions.set(change));
-		} } }, h("span", null, label), icon("chevron-down"));
+			const current = { group: summary.group || "", model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", roleEffort: model.roleEffort };
+			if (choices) showModelPicker(at, choices, current, (change) => this.actions.set(change), (value) => this.actions.set({ effort: value }));
+		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" }, effort), icon("chevron-down"));
 	}
 
 	renderTelemetry(model) {

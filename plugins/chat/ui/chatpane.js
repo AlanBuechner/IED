@@ -396,10 +396,12 @@ export class ChatPane {
 		if (await this.request("settings.set", { tier: "app", key: "ai.permissions", value: Object.assign({}, current, { allow }) })) await this.approve(approval, "allow");
 	}
 
-	// What the Model menu lists: the groups and the models of the settings (modelpicker.js).
+	// What the Model menu lists: the groups and the models of the settings, and the chains pacing has now - the model a turn
+	// of each group's Claude chain uses (aiusage; none when the server cannot say) (modelpicker.js).
 	async choices() {
-		const settings = await this.request("settings.get", { wsId: this.wsId });
-		return settings && settings.values ? choicesFrom(settings.values) : null;
+		const [settings, usage] = await Promise.all([this.request("settings.get", { wsId: this.wsId }), this.ied.client.request("ai.usage", {}).catch(() => null)]);
+		const chains = usage && usage.claude && usage.claude.chains ? usage.claude.chains : [];
+		return settings && settings.values ? choicesFrom(settings.values, chains) : null;
 	}
 
 	openFile(path, line) {

@@ -65,7 +65,8 @@ export class StatusBar {
 			h("button.st.st-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } }, icon(unread ? "bell-dot" : "bell"), unread ? String(unread) : ""));
 	}
 
-	// A plugin's status item: its view export renders it (once); a command makes it clickable.
+	// A plugin's status item: its view export renders it (once); a command makes it clickable, and a view whose instance has
+	// click(event) takes the clicks itself (a popup of its own), leaving the command to the palette.
 	pluginItems(alignment) {
 		const shell = this.shell;
 		return shell.contributions.statusItems
@@ -77,7 +78,11 @@ export class StatusBar {
 	itemElement(item) {
 		let mounted = this.items.get(item.id);
 		if (!mounted) {
-			const el = h(item.command ? "button.st" : "span.st", { dataset: { item: item.id }, on: item.command ? { click: () => this.shell.commands.run(item.command) } : {} });
+			const clicked = (event) => {
+				if (mounted.instance && typeof mounted.instance.click === "function") mounted.instance.click(event);
+				else this.shell.commands.run(item.command);
+			};
+			const el = h(item.command ? "button.st" : "span.st", { dataset: { item: item.id }, on: item.command ? { click: clicked } : {} });
 			mounted = { el, instance: null };
 			this.items.set(item.id, mounted);
 			const view = item.view && item.plugin.module ? item.plugin.module[item.view] : null;

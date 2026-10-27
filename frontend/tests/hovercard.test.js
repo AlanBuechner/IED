@@ -39,6 +39,43 @@ test("hovercard: shows after a rest, follows its content, hides on leaving", asy
 	}
 });
 
+test("hovercard: toggle() pins the click's card - a dialog no hover card shows over - until Escape, a click outside or toggle()", async () => {
+	const anchor = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "item" }));
+	let detail = "details";
+	const card = hoverCard(anchor, () => Object.assign(document.createElement("span"), { textContent: "brief" }), {
+		pinned: () => (detail ? Object.assign(document.createElement("button"), { textContent: detail }) : null), label: "Usage" });
+	const pinned = () => document.querySelector(".hover-card.pinned");
+	try {
+		assertEqual(anchor.getAttribute("aria-expanded"), "false");
+		card.toggle();
+		assertEqual([pinned() && pinned().textContent, pinned().getAttribute("role"), pinned().getAttribute("aria-label"), anchor.getAttribute("aria-expanded"), card.pinned, document.activeElement.textContent],
+			["details", "dialog", "Usage", "true", true, "details"], "shown at once, focus inside");
+		pointer(anchor, "pointerenter");
+		await wait(450);
+		assertEqual(document.querySelectorAll(".hover-card").length, 1, "no hover card while it is pinned");
+		detail = "more";
+		card.refresh();
+		assertEqual(pinned().textContent, "more", "drawn again");
+		pinned().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		assertEqual([pinned(), document.activeElement, anchor.getAttribute("aria-expanded")], [null, anchor, "false"], "Escape, focus back");
+		card.toggle();
+		document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+		assertEqual(pinned(), null, "a click outside");
+		card.toggle();
+		anchor.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+		assertEqual(pinned() !== null, true, "a press on the anchor itself leaves it to the click");
+		card.toggle();
+		assertEqual(pinned(), null, "toggle() again");
+		detail = "";
+		card.toggle();
+		assertEqual([pinned(), card.pinned], [null, false], "nothing to show: no card");
+	}
+	finally {
+		card.dispose();
+		anchor.remove();
+	}
+});
+
 test("hovercard: a click hides it until the pointer leaves; a touch shows nothing", async () => {
 	const anchor = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "item" }));
 	const card = hoverCard(anchor, () => Object.assign(document.createElement("span"), { textContent: "usage" }));

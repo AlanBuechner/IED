@@ -115,6 +115,7 @@ class Chat:
 		self.permission = "plan" if mode == "plan" else "auto"
 		self.group = ""
 		self.pinned_model = ""
+		self.effort = ""
 		self.state = "idle"
 		self.state_reason = ""
 		self.turns = []
@@ -152,6 +153,8 @@ class Chat:
 			"pinnedModel": self.pinned_model, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
 			"approvalsWaiting": sum(1 for a in self.approvals.values() if a.decision is None),
 		}
+		if self.effort:
+			out["effort"] = self.effort
 		if self.state_reason:
 			out["stateReason"] = self.state_reason
 		if self.turns and self.turns[-1].stop:
@@ -159,21 +162,29 @@ class Chat:
 		return out
 
 
-def usage_window(id, label, utilization, through, length_ms, now):
-	return {"id": id, "label": label, "utilization": utilization, "resetsAtMs": now + int((1 - through) * length_ms), "lengthMs": length_ms,
+def usage_window(id, label, utilization, through, length_ms, now, work_week=False):
+	"""A window as WriteUsage writes it; `work_week` its pace over its work days, with one weekend inside it (its counted
+	time 0.55 through at that weekend, which runs from 3.5 to 5.5 days into the window)."""
+	window = {"id": id, "label": label, "utilization": utilization, "resetsAtMs": now + int((1 - through) * length_ms), "lengthMs": length_ms,
 		"through": through, "pace": round(utilization / 100 / through, 3), "usedUp": utilization >= 100}
+	if work_week:
+		start = window["resetsAtMs"] - length_ms
+		window.update(workWeek=True, daysOff=[{"startMs": start + int(3.5 * DAY_MS), "endMs": start + int(5.5 * DAY_MS), "at": 0.55}])
+	return window
 
 
-def claude_usage(now):
-	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claudewire.cf)."""
-	windows = [usage_window("five_hour", "Session (5 h)", 68, 0.5, 5 * 3600000, now), usage_window("seven_day", "Week", 41, 0.45, 7 * DAY_MS, now),
-		usage_window("seven_day_opus", "Opus week", 12, 0.45, 7 * DAY_MS, now)]
+def claude_usage(now, pace_days="week"):
+	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claudewire.cf); `pace_days`
+	ai.claude.paceDays."""
+	work = pace_days == "workweek"
+	windows = [usage_window("five_hour", "Session (5 h)", 68, 0.5, 5 * 3600000, now), usage_window("seven_day", "Week", 41, 0.45, 7 * DAY_MS, now, work),
+		usage_window("seven_day_opus", "Opus week", 12, 0.45, 7 * DAY_MS, now, work)]
 	places = [{"model": "claude-opus", "claude": True, "pace": {"max": 1, "target": "both"}, "state": "over", "why": "the session is at 1.36x pace, over its 1.00x"},
 		{"model": "claude-sonnet", "claude": True, "pace": {"max": 1.5, "target": "both"}, "state": "use", "why": ""},
 		{"model": "claude-haiku", "claude": True, "state": "use", "why": ""}]
 	return {"claude": {"offered": True, "configured": True, "cli": {"asked": True, "path": "C:/Users/me/.local/bin/claude.exe", "version": "2.1.304", "signIn": "signed_in", "authMethod": "claude.ai", "subscription": True, "signingIn": False, "installing": False},
-		"refreshing": False, "blockedUntilMs": 0, "nowMs": now, "chains": [{"group": "claude", "role": "primary", "now": "claude-sonnet", "places": places}],
-		"usage": {"known": True, "available": True, "plan": "max", "status": "allowed", "limitedBy": "", "limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": now - 90000, "windows": windows}}}
+		"refreshing": False, "nowMs": now, "chains": [{"group": "claude", "role": "primary", "now": "claude-sonnet", "places": places}],
+		"usage": {"known": True, "available": True, "plan": "max", "status": "allowed", "limitedBy": "", "limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": now - 90000, "paceDays": pace_days, "windows": windows}}}
 
 
 class Chats:
@@ -223,8 +234,18 @@ class Chats:
 		)
 
 	def in_use(self, chat):
-		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed."""
-		return {"model": chat.pinned_model or MODEL, "groupInUse": chat.group or GROUP, "roleEffort": ""}
+		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed - its model,
+		its group and that group's effort for its mode's role (none for a chat on a single model)."""
+		values = self.server.settings.values(None)
+		groups = values.get("ai.groups", {}).get("value") or {}
+		named = values.get("ai.defaultGroup", {}).get("value") or ""
+		group_in_use = chat.group or (named if named in groups else next(iter(groups), GROUP))
+		roles = groups.get(group_in_use) or {}
+		role = {"plan": "planning", "agent": "implementation"}.get(chat.mode, "primary")
+		entry = roles.get(role) if isinstance(roles.get(role), dict) else roles.get("primary") or {}
+		alone = bool(chat.pinned_model) and not chat.group
+		model = chat.pinned_model or (entry.get("model") if isinstance(entry, dict) and entry.get("model") else MODEL)
+		return {"model": model, "groupInUse": group_in_use, "roleEffort": "" if alone or not isinstance(entry, dict) else entry.get("effort", "")}
 
 	def get(self, chat_id):
 		chat = self.items.get(chat_id)
@@ -250,11 +271,12 @@ class Chats:
 	def usage_snapshot(self):
 		"""aiusage (docs/10): Claude's usage stays hidden until ai.models names a claude-code model; then a Max plan signed in,
 		its session ahead of pace, its week behind, and a claude group whose chain passes Opus over."""
-		models = self.server.settings.values(None).get("ai.models", {}).get("value") or {}
+		values = self.server.settings.values(None)
+		models = values.get("ai.models", {}).get("value") or {}
 		if any(isinstance(m, dict) and m.get("provider") == "claude-code" for m in models.values()):
-			return claude_usage(now_ms())
+			return claude_usage(now_ms(), values.get("ai.claude.paceDays", {}).get("value") or "week")
 		return {"claude": {"offered": True, "configured": False, "cli": {"asked": True, "path": "", "version": "", "signIn": "", "authMethod": "", "subscription": False, "signingIn": False, "installing": False}, "refreshing": False,
-			"blockedUntilMs": 0, "nowMs": now_ms(), "chains": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
+			"nowMs": now_ms(), "chains": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
 				"limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": 0, "windows": []}}}
 
 	# --- methods -----------------------------------------------------------------------------------------------------
@@ -289,6 +311,10 @@ class Chats:
 			chat.group = p.str("group")
 		if "model" in p.raw:
 			chat.pinned_model = p.str("model")
+		if "effort" in p.raw:
+			if p.str("effort") not in ("", "low", "medium", "high", "xhigh", "max"):
+				raise RpcError("bad_request", "effort must be low, medium, high, xhigh, max or empty")
+			chat.effort = p.str("effort")
 
 	async def m_chat_create(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id

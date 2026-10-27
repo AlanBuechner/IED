@@ -3,6 +3,10 @@
 // kept inside the window; the pointer can move into the card. Escape, a click or leaving hides it. A touch has no hover,
 // so nothing shows for one.
 //     const card = hoverCard(el, () => contentOrNull);   card.refresh() after the content changed;   card.dispose()
+// With `pinned`, toggle() - the anchor's click, a tap on a phone - shows a second card that stays: a dialog anchored the
+// same way, which Escape, a click outside it or toggle() again closes; focus goes into it and back to the anchor. No hover
+// card shows while it is open.
+//     const card = hoverCard(el, () => brief, { pinned: () => detailed, label: "Claude usage" });   card.toggle()
 
 import { h } from "./dom.js";
 
@@ -12,11 +16,13 @@ const GAP = 6;
 const MARGIN = 4;
 let cards = 0;
 
-export function hoverCard(anchor, build) {
+export function hoverCard(anchor, build, options = {}) {
 	const id = "hover-card-" + ++cards;
 	let el = null;
+	let pinnedEl = null;
 	let showTimer = 0;
 	let hideTimer = 0;
+	let quietFocus = false;   // the anchor focused again as the pinned card closed: no hover card for it
 	const clear = () => {
 		clearTimeout(showTimer);
 		clearTimeout(hideTimer);
@@ -31,7 +37,7 @@ export function hoverCard(anchor, build) {
 	};
 	const show = () => {
 		clear();
-		const content = build();
+		const content = pinnedEl ? null : build();
 		if (!content) {
 			hide();
 			return;
@@ -52,12 +58,52 @@ export function hoverCard(anchor, build) {
 	const onKey = (event) => {
 		if (event.key === "Escape") hide();
 	};
+	const drawPinned = () => {
+		const content = options.pinned ? options.pinned() : null;
+		if (!content) {
+			unpin(false);
+			return false;
+		}
+		pinnedEl.replaceChildren(content);
+		place(pinnedEl, anchor);
+		return true;
+	};
+	const onOutside = (event) => {
+		if (pinnedEl && !pinnedEl.contains(event.target) && !anchor.contains(event.target)) unpin(false);
+	};
+	const onPinnedKey = (event) => {
+		if (event.key !== "Escape") return;
+		event.preventDefault();
+		event.stopPropagation();
+		unpin(true);
+	};
+	const pin = () => {
+		hide();
+		pinnedEl = h("div.popup.hover-card.pinned", { id: id + "-pinned", role: "dialog", tabindex: "-1", "aria-label": options.label || null, on: { keydown: onPinnedKey } });
+		document.body.append(pinnedEl);
+		if (!drawPinned()) return;
+		document.addEventListener("pointerdown", onOutside, true);
+		anchor.setAttribute("aria-expanded", "true");
+		const first = pinnedEl.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])");
+		(first || pinnedEl).focus({ preventScroll: true });
+	};
+	const unpin = (refocus) => {
+		if (!pinnedEl) return;
+		pinnedEl.remove();
+		pinnedEl = null;
+		document.removeEventListener("pointerdown", onOutside, true);
+		anchor.setAttribute("aria-expanded", "false");
+		if (!refocus || !anchor.isConnected) return;
+		quietFocus = true;
+		anchor.focus({ preventScroll: true });
+		quietFocus = false;
+	};
 	// after a click, until the pointer leaves: what the click opened is shown, and an anchor drawn again under the pointer
 	// is entered again without the pointer moving
 	let pressed = false;
 	const listeners = {
 		pointerenter: (event) => {
-			if (event.pointerType === "touch" || pressed) return;
+			if (event.pointerType === "touch" || pressed || pinnedEl) return;
 			clearTimeout(hideTimer);
 			if (!el) showTimer = setTimeout(show, SHOW_MS);
 		},
@@ -70,17 +116,30 @@ export function hoverCard(anchor, build) {
 			pressed = true;
 			hide();
 		},
-		focusin: () => !pressed && anchor.matches(":focus-visible") && show(),
+		focusin: () => !pressed && !quietFocus && !pinnedEl && anchor.matches(":focus-visible") && show(),
 		focusout: hide,
 	};
 	for (const [name, fn] of Object.entries(listeners)) anchor.addEventListener(name, fn);
+	if (options.pinned) anchor.setAttribute("aria-expanded", "false");
 	return {
-		refresh: () => el && show(),
+		refresh: () => {
+			if (el) show();
+			if (pinnedEl) drawPinned();
+		},
+		toggle: () => {
+			if (pinnedEl) unpin(true);
+			else if (options.pinned) pin();
+		},
+		close: () => unpin(false),
 		get open() {
 			return el !== null;
 		},
+		get pinned() {
+			return pinnedEl !== null;
+		},
 		dispose: () => {
 			hide();
+			unpin(false);
 			for (const [name, fn] of Object.entries(listeners)) anchor.removeEventListener(name, fn);
 		},
 	};

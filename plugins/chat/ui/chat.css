@@ -242,10 +242,12 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-dd .ci { width: 12px; height: 12px; color: var(--text-2); }
 .chat-dd:hover { background: var(--bg-4); }
 .chat-model-dd span { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.chat-model-dd .chat-dd-effort { color: var(--text-2); padding-left: var(--space-2); border-left: var(--border-width) solid var(--border-1); }
 
-/* the Model menu (modelpicker.js): groups left, models right by family */
-.chat-picker { display: flex; align-items: stretch; max-height: min(420px, calc(100vh - 8px)); font-size: var(--font-size-sm); outline: none; }
-.chat-picker-col { display: flex; flex-direction: column; width: 260px; min-width: 0; overflow-y: auto; padding: var(--space-2) 0; }
+/* the Model menu (modelpicker.js): groups left, models right by family, the effort slider under both */
+.chat-picker { display: flex; flex-direction: column; max-height: min(480px, calc(100vh - 8px)); font-size: var(--font-size-sm); outline: none; }
+.chat-picker-cols { display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+.chat-picker-col { display: flex; flex-direction: column; width: 300px; min-width: 0; overflow-y: auto; padding: var(--space-2) 0; }
 .chat-picker-col + .chat-picker-col { border-left: var(--border-width) solid var(--border-0); }
 .chat-picker-head { padding: var(--space-2) var(--space-4); color: var(--text-2); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; }
 .chat-picker-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: var(--row-h); padding: 0 var(--space-4); border: 0; background: none; color: var(--text-0); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
@@ -254,13 +256,33 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-picker-row.on .ci { color: var(--text-0); }
 .chat-picker-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-picker-row .meta { color: var(--text-2); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.chat-picker-row.grp { height: auto; min-height: var(--row-h); padding-top: var(--space-2); padding-bottom: var(--space-2); }
+.chat-picker-row .grp-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.chat-picker-row .grp-text .sub { color: var(--text-2); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; }
 .chat-picker-row.fam .name { color: var(--text-1); font-weight: var(--font-weight-semibold); }
 .chat-picker-family .chat-picker-row { padding-left: calc(var(--space-4) + 14px + var(--space-3)); }
 .chat-picker-empty { padding: var(--space-2) var(--space-4); }
-.chat-picker.sheet { flex-direction: column; max-height: 70vh; overflow-y: auto; }
+.chat-picker-effort { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4); border-top: var(--border-width) solid var(--border-0); }
+.chat-picker-effort-head { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.chat-picker-effort-head .chat-picker-head { padding: 0; }
+.chat-picker-effort-head .meta { color: var(--text-2); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chat-effort-value { color: var(--text-0); white-space: nowrap; }
+.chat-effort-slider { width: 100%; margin: 0; accent-color: var(--text-1); cursor: pointer; }
+.chat-effort-slider:focus-visible { outline: var(--border-width) solid var(--focus); outline-offset: 2px; }
+.chat-effort-ticks { position: relative; height: calc(var(--font-size-xs) * 1.5 + 2 * var(--space-1)); margin: 0 6px; }
+.chat-effort-tick { position: absolute; top: 0; transform: translateX(-50%); padding: var(--space-1) var(--space-1); border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--font-size-xs); cursor: pointer; white-space: nowrap; }
+.chat-effort-tick:first-child { transform: translateX(-6px); }
+.chat-effort-tick:last-child { transform: translateX(calc(-100% + 6px)); }
+.chat-effort-tick:hover, .chat-effort-tick.on { color: var(--text-0); }
+.chat-picker.sheet { max-height: 80vh; overflow-y: auto; }
+.chat-picker.sheet .chat-picker-cols { flex-direction: column; flex: none; }
 .chat-picker.sheet .chat-picker-col { width: auto; overflow: visible; }
 .chat-picker.sheet .chat-picker-col + .chat-picker-col { border-left: 0; border-top: var(--border-width) solid var(--border-0); }
 .chat-picker.sheet .chat-picker-row { height: var(--row-h-touch); font-size: var(--font-size-lg); }
+.chat-picker.sheet .chat-picker-row.grp { height: auto; min-height: var(--row-h-touch); }
+.chat-picker.sheet .chat-effort-slider { height: 28px; }
+.chat-picker.sheet .chat-effort-ticks { height: calc(var(--font-size-sm) * 1.5 + 2 * var(--space-3)); }
+.chat-picker.sheet .chat-effort-tick { padding: var(--space-3) var(--space-2); font-size: var(--font-size-sm); }
 .chat-telemetry { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .chat-telemetry b { color: var(--text-1); font-weight: var(--font-weight-normal); }
 .chat-mchip { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -433,6 +455,15 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .claude-bar.warn .fill { background: var(--accent-warn); }
 .claude-bar.err .fill { background: var(--accent-error); }
 .claude-bar .even { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--text-0); }
+/* where the even line stands through a weekend: the work week's end, when the week's pace counts the work days */
+.claude-bar .off { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: repeating-linear-gradient(to bottom, var(--text-1) 0 2px, transparent 2px 4px); }
+.claude-pace-days { gap: var(--space-4); }
+.claude-segs { justify-self: start; }
+.claude-days { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.claude-day { margin-left: 0; cursor: pointer; color: var(--text-2); background: none; font: inherit; font-size: var(--font-size-xs); }
+.claude-day.on { color: var(--text-0); background: var(--bg-4); border-color: var(--border-1); }
+.claude-day:focus-visible { outline: var(--border-width) solid var(--focus); }
+.claude-settings { display: grid; gap: var(--space-2); }
 .claude-step { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; color: var(--text-1); }
 .claude-step > span { min-width: 0; overflow-wrap: anywhere; flex: 1 1 260px; }
 .claude-step .ci { width: 14px; height: 14px; flex: none; }
@@ -442,8 +473,11 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .claude-place { margin-left: 0; }
 .claude-chain-now { white-space: nowrap; }
 
-/* the status item's hover card */
+/* the status item's bars while the pointer rests on it, and the card its click opens */
 .claude-hover { display: grid; gap: var(--space-4); width: 320px; max-width: 100%; }
+.claude-bars { width: 260px; gap: var(--space-3); }
+.claude-bars-row { display: grid; grid-template-columns: minmax(70px, auto) minmax(90px, 1fr) 36px; gap: var(--space-3); align-items: center; }
+.claude-open-settings { justify-self: start; }
 .claude-hover-head { display: flex; align-items: center; gap: var(--space-3); color: var(--text-0); }
 .claude-hover-head .ci { width: 14px; height: 14px; }
 .claude-hover-head .chip { margin-left: 0; }

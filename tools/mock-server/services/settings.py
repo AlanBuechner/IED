@@ -102,6 +102,10 @@ class Settings:
 		self.server.hub.publish("settings:app", "settings.changed", self.snapshot(None))
 		for ws_id in self.solutions:
 			self.server.hub.publish("settings:" + ws_id, "settings.changed", self.snapshot(ws_id))
+		# as the server's chat plugin does: aiusage's chains and paces follow ai.models, ai.groups and ai.claude.paceDays
+		chats = getattr(self.server, "chat", None)
+		if chats is not None:
+			self.server.hub.publish("aiusage", "usage.changed", chats.usage_snapshot())
 
 	def tier_of(self, p):
 		tier = p.str("tier")

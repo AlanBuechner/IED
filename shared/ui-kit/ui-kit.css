@@ -155,6 +155,7 @@ select.input-field { padding-right: var(--space-2); cursor: pointer; }
 	z-index: 40;
 }
 .hover-card { padding: var(--space-4) var(--space-5); width: max-content; max-width: min(380px, calc(100vw - 8px)); color: var(--text-1); font-size: var(--font-size-sm); }
+.hover-card.pinned { outline: none; overflow-y: auto; max-height: calc(100vh - 8px); }
 .menu { padding: var(--space-2) 0; min-width: 180px; max-height: calc(100vh - 8px); overflow-y: auto; outline: none; }
 .menu-item { display: flex; align-items: center; gap: var(--space-4); height: var(--row-h); padding: 0 var(--space-5) 0 var(--space-4); white-space: nowrap; color: var(--text-0); cursor: pointer; user-select: none; }
 .menu-item.sel { background: var(--bg-4); }

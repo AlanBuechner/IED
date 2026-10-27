@@ -145,17 +145,27 @@ function chipText(pane) {
 	return chips.length ? chips[chips.length - 1].textContent : "";
 }
 
+// The effort the Model button names (the Effort dropdown went into the Model menu, owner 2026-10-26).
+function effortShown(pane) {
+	return pane.composer.selectors.querySelector(".chat-model-dd .chat-dd-effort").textContent;
+}
+
+async function until(found) {
+	for (let i = 0; i < 60 && !found(); i++) await frames(1);
+	return found();
+}
+
 test("chat pane: the Model menu shows what the chat runs on, and the next turn's model follows a new model, group or mode", async () => {
 	const ied = fakeIed();
 	const pane = await openPane(ied, 1);
 	try {
 		const topic = ied.topics.get("chat:c1");
 		const summary = (change) => Object.assign({ chatId: "c1", wsId: "w1", title: "Long chat", mode: "agent", permission: "ask", group: "", effort: "", pinnedModel: "", state: "idle", turnCount: 1 }, change);
-		const MODEL = "Run this chat on a group or a model";
+		const MODEL = "Run this chat on a group or a model, and set its effort";
 		topic.snap(Object.assign(snapshotOf(1), { pinnedModel: "fake", model: "fake", groupInUse: "claude", roleEffort: "" }));
 		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "the snapshot's pin");
 		topic.evt("chat.changed", summary({ pinnedModel: "", model: "claude-opus", groupInUse: "claude", roleEffort: "high" }));
-		assertEqual([picked(pane, MODEL), chipText(pane), picked(pane, "Effort")], ["claude (default)", "claude-opus", "High (group)"], "no model of its own: the default group's model and effort");
+		assertEqual([picked(pane, MODEL), chipText(pane), effortShown(pane)], ["claude (default)", "claude-opus", "High (group)"], "no model of its own: the default group's model and effort");
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", model: "fake", groupInUse: "claude", roleEffort: "high" }));
 		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "pinned from the picker or by the AI");
 		topic.evt("turn.start", { turnId: "n1", mode: "agent", model: "fake", group: "claude", user: { text: "Go" } });
@@ -163,12 +173,66 @@ test("chat pane: the Model menu shows what the chat runs on, and the next turn's
 		topic.evt("chat.changed", summary({ pinnedModel: "", state: "running", model: "claude-opus", groupInUse: "claude", roleEffort: "high" }));
 		assertEqual([picked(pane, MODEL), chipText(pane)], ["claude (default)", "claude-opus"], "unpinned mid-turn: the next turn's");
 		topic.evt("chat.changed", summary({ mode: "plan", state: "idle", model: "claude-sonnet", groupInUse: "claude", roleEffort: "" }));
-		assertEqual([chipText(pane), picked(pane, "Effort")], ["claude-sonnet", "Default"], "a new mode, a new role");
+		assertEqual([chipText(pane), effortShown(pane)], ["claude-sonnet", "Default"], "a new mode, a new role");
 		topic.evt("turn.start", { turnId: "n2", mode: "plan", model: "claude-haiku", group: "claude", user: { text: "Plan" } });
 		topic.evt("chat.changed", summary({ mode: "plan", state: "idle", turnCount: 3, model: "claude-sonnet", groupInUse: "claude", roleEffort: "" }));
 		assertEqual(chipText(pane), "claude-haiku", "a turn's end keeps the model the turn ran on (its chain's pace may have passed over the first)");
 	}
 	finally {
+		closePane(pane);
+	}
+});
+
+test("chat pane: the Model menu says what each group runs on now and its effort, and its slider sets the chat's effort", async () => {
+	const ied = fakeIed();
+	const asked = [];
+	ied.client.request = async (method, params) => {
+		asked.push([method, params]);
+		if (method === "settings.get") return { values: {
+			"ai.models": { value: { "claude-opus": { provider: "claude-code", model: "opus" }, "claude-sonnet": { provider: "claude-code", model: "sonnet" }, qwen: { endpoint: "http://spark:8080/v1", effort: { low: {}, high: {} } } } },
+			"ai.groups": { value: { claude: { primary: { model: "claude-opus", effort: "high", fallback: ["claude-sonnet", "qwen"] } }, local: { primary: { model: "qwen" }, implementation: { model: "qwen", effort: "low" } } } },
+			"ai.defaultGroup": { value: "claude" } } };
+		if (method === "ai.usage") return { claude: { chains: [{ group: "claude", role: "primary", now: "claude-sonnet", places: [] }] } };
+		return null;
+	};
+	const pane = await openPane(ied, 1);
+	const picker = () => document.querySelector(".chat-picker");
+	const open = async () => {
+		pane.composer.selectors.querySelector(".chat-model-dd").click();
+		return until(picker);
+	};
+	try {
+		const topic = ied.topics.get("chat:c1");
+		topic.snap(Object.assign(snapshotOf(1), { mode: "ask", effort: "", model: "claude-sonnet", groupInUse: "claude", roleEffort: "high" }));
+		assertEqual(effortShown(pane), "High (group)");
+		const menu = await open();
+		assertTrue(!!menu, "the Model menu opened");
+		assertEqual([...menu.querySelectorAll(".chat-picker-row.grp")].map((row) => [row.dataset.group, row.dataset.now, row.querySelector(".sub").textContent]),
+			[["claude", "claude-sonnet", "now claude-sonnet - effort High - no agents"], ["local", "qwen", "now qwen - effort the model's own - no agents"]],
+			"each group: the model a turn of the chat's mode uses now (pacing's chain, or its first model) and its default effort");
+		assertEqual([...menu.querySelectorAll(".chat-effort-tick")].map((tick) => tick.textContent), ["Group", "Low", "Med", "High", "XHigh", "Max"], "the group's default, then Sonnet's levels");
+		const slider = menu.querySelector(".chat-effort-slider");
+		assertEqual([slider.value, menu.querySelector(".chat-effort-value").textContent, menu.querySelector(".chat-picker-effort").dataset.model], ["0", "Group default (High)", "claude-sonnet"]);
+		menu.querySelector(".chat-effort-tick[data-effort='max']").click();
+		assertEqual(asked.filter(([method]) => method === "chat.set").map(([, params]) => params), [{ chatId: "c1", effort: "max" }], "the chat's effort");
+		assertEqual([!!picker(), slider.value, menu.querySelector(".chat-effort-value").textContent], [true, "5", "Max"], "the menu stays open");
+		slider.value = "2";
+		slider.dispatchEvent(new Event("change"));
+		assertEqual(asked.filter(([method]) => method === "chat.set").pop()[1], { chatId: "c1", effort: "medium" }, "dragged or moved with the keys");
+		const rows = [...menu.querySelectorAll(".chat-picker-col")[1].querySelectorAll(".chat-picker-row")].filter((row) => !row.closest("[hidden]"));
+		rows[rows.length - 1].focus();
+		rows[rows.length - 1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+		assertEqual(document.activeElement, slider, "Down past a column's last row reaches the slider");
+		menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		assertEqual(picker(), null, "Escape closes it");
+		topic.evt("chat.changed", { chatId: "c1", wsId: "w1", title: "Long chat", mode: "ask", permission: "ask", group: "", effort: "", pinnedModel: "qwen", state: "idle", turnCount: 1, model: "qwen", groupInUse: "claude", roleEffort: "" });
+		assertEqual(effortShown(pane), "Default", "a single model: its own default");
+		const alone = await open();
+		assertEqual([...alone.querySelectorAll(".chat-effort-tick")].map((tick) => tick.textContent), ["Default", "Low", "High"], "a single model has no group default, and its profile's levels");
+		alone.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+	}
+	finally {
+		if (picker()) picker().remove();
 		closePane(pane);
 	}
 });

@@ -2,7 +2,7 @@
 // segments, tool states and what the chat waits on; the list of chats; and the small facts the views show.
 
 import { test, assertEqual } from "./harness.js";
-import { ChatList, ChatModel, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortRows, keptFor, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
+import { ChatList, ChatModel, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortStops, effortsOf, keptFor, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
 import { chatBadge, chatStatusText } from "/plugins/ied.chat/ui/index.js";
 import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
@@ -139,11 +139,15 @@ test("chat: numbers as the views show them", () => {
 
 test("chat: the composer's effort - the chat's pick, else its group's, else the model's default", () => {
 	assertEqual([effortLabel("low", "high"), effortLabel("", "high"), effortLabel("", ""), effortLabel("", null)], ["Low", "High (group)", "Default", "Group's"]);
-	const rows = effortRows("", "medium");
-	assertEqual(rows.map((r) => [r.value, r.label, Boolean(r.icon)]), [["", "As the group says (Medium)", true], ["low", "Low", false], ["medium", "Medium", false], ["high", "High", false], ["xhigh", "Extra high", false], ["max", "Max", false]]);
-	assertEqual(effortRows("high", "").map((r) => Boolean(r.icon)), [false, false, false, true, false, false]);
 	assertEqual([effortLabel("xhigh", ""), effortLabel("", "max")], ["Extra high", "Max (group)"]);
-	assertEqual([effortRows("", "")[0].label, effortRows("", null)[0].label], ["As the group says (the model's default)", "As the group says"], "a group that sets none; a chat not made yet");
+	const all = ["low", "medium", "high", "xhigh", "max"];
+	const group = effortStops("", "medium", false, all);
+	assertEqual(group.map((s) => [s.value, s.label, s.detail]), [["", "Group default", "Medium"], ["low", "Low", ""], ["medium", "Medium", ""], ["high", "High", ""], ["xhigh", "Extra high", ""], ["max", "Max", ""]], "a group: its default first");
+	assertEqual(effortStops("", "", false, all)[0].detail, "the model's own", "a group that sets none");
+	assertEqual(effortStops("", "medium", true, all)[0].label, "Default", "a single model has no group default (owner, 2026-10-26), only its own");
+	assertEqual(effortStops("", "", true, ["low", "high"]).map((s) => s.value), ["", "low", "high"], "the levels its model takes");
+	assertEqual(effortStops("max", "", true, ["low", "high"]).map((s) => [s.value, s.detail]), [["", "the model's own"], ["low", ""], ["high", ""], ["max", "this model does not take it"]], "the chat's pick kept, said to be one it does not take");
+	assertEqual([effortsOf({ provider: "claude-code" }), effortsOf({ endpoint: "http://q/v1", effort: { low: {}, max: { a: 1 } } }), effortsOf({ endpoint: "http://q/v1", effort: {} })], [all, ["low", "max"], []], "a profile's mapping names what it takes");
 	const model = new ChatModel();
 	model.snapshot(Object.assign(snapshot(), { effort: "low", roleEffort: "medium" }));
 	assertEqual([model.summary.effort, model.roleEffort], ["low", "medium"]);

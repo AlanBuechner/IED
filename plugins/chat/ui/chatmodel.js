@@ -11,19 +11,35 @@ export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], 
 // The summary's fields that change which model a chat's next turn starts on.
 const CHOICE_KEYS = ["pinnedModel", "group", "mode"];
 
-// What the composer's Effort shows: the chat's pick, else its role's (docs/04 "Effort"), else the model's own default;
-// `roleEffort` is null while the chat has no snapshot to say.
-export function effortLabel(effort, roleEffort) {
-	const named = (id) => (EFFORTS.find(([e]) => e === id) || [id, id])[1];
-	if (effort) return named(effort);
-	if (roleEffort === null) return "Group's";
-	return roleEffort ? named(roleEffort) + " (group)" : "Default";
+function effortName(id) {
+	return (EFFORTS.find(([e]) => e === id) || [id, id])[1];
 }
 
-// The Effort menu's rows: the group's first (empty: its role's), then each level; the chat's pick checked.
-export function effortRows(effort, roleEffort) {
-	const group = roleEffort === null ? "As the group says" : "As the group says (" + (roleEffort ? effortLabel(roleEffort, "") : "the model's default") + ")";
-	return [["", group]].concat(EFFORTS).map(([id, label]) => ({ kind: "item", label, value: id, enabled: true, icon: id === (effort || "") ? "$(check)" : null }));
+// What the Model button says of the effort: the chat's pick, else its role's (docs/04 "Effort"), else the model's own
+// default; `roleEffort` is null while the chat has no snapshot to say.
+export function effortLabel(effort, roleEffort) {
+	if (effort) return effortName(effort);
+	if (roleEffort === null) return "Group's";
+	return roleEffort ? effortName(roleEffort) + " (group)" : "Default";
+}
+
+// The efforts a model profile (ai.models' entry) takes: those its `effort` mapping names - a level it leaves out sends
+// nothing - else all five (a Claude model, a server told reasoning_effort).
+export function effortsOf(profile) {
+	const mapping = profile && profile.effort;
+	if (!mapping || typeof mapping !== "object") return EFFORTS.map(([id]) => id);
+	return EFFORTS.map(([id]) => id).filter((id) => mapping[id]);
+}
+
+// The Model menu's effort slider's stops, left to right (owner, 2026-10-26: "the group default only applys to groups not
+// single models"): a chat on a group starts with its group's default (`roleEffort`, its role's effort; "" the model's own),
+// one on a single model (`alone`) with that model's own default; then the levels the model a turn uses takes (`supported`),
+// the chat's own pick kept when that model does not take it. [{value, label, detail}], value "" the default.
+export function effortStops(effort, roleEffort, alone, supported) {
+	const first = alone ? { value: "", label: "Default", detail: "the model's own" }
+		: { value: "", label: "Group default", detail: roleEffort ? effortName(roleEffort) : "the model's own" };
+	const levels = EFFORTS.filter(([id]) => supported.includes(id) || id === effort).map(([id, label]) => ({ value: id, label, detail: supported.includes(id) ? "" : "this model does not take it" }));
+	return [first].concat(levels);
 }
 
 export class ChatModel {
