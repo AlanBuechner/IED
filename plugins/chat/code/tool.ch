@@ -2,16 +2,18 @@
 // whether it may run beside others, and has a planner - what a call would do, before the permission check: its
 // subject, the card's summary and a write's diff - and a runner. Tools run on the chat's run thread without the
 // server lock and take it for what they touch of the server's state. A tool with no runner (tasks_set, task_update,
-// ask_user, finish) is the run's own (docs/12). A deferred tool (docs/13 "Loading tools on demand") is listed by name in
-// the system message and sent with its schema only once tool_search, or a call to it, loads it for the chat.
+// ask_user, finish) is the run's own (docs/12). A deferred tool (docs/13 "Loading tools on demand") is in every request's
+// list from a chat's first turn as a stub - its first sentence, any arguments - and tool_search answers with its whole
+// description and schema at the end of the conversation, so loading one never rewrites the front of the prompt a model
+// server holds cached (docs/12 "Watchdogs").
 
 include "chat.ch"
 include "permissions.ch"
 
 namespace Ai
 {
-	const int64 kToolIndexLineBytes = 120;   // a deferred tool's line in the system message
-	const int64 kToolSearchMost = 5;         // the tools one tool_search loads
+	const int64 kToolIndexLineBytes = 120;   // a deferred tool's stub description
+	const int64 kToolSearchMost = 5;         // the tools one tool_search shows
 
 	// A call as a tool gets it.
 	class ToolInvocation
@@ -78,10 +80,11 @@ namespace Ai
 		public void Add(ToolSpec* spec);
 		public ToolSpec* Find(Core::StringView name) const;
 		public bool Offered(const ToolSpec* spec, ChatMode mode) const;
-		// The request's "tools" array for a chat in `mode`: those not deferred, and of the deferred those `loaded` names.
-		public Core::String RequestTools(ChatMode mode, const Core::Array<Core::String>& loaded) const;
-		// The deferred tools offered in `mode` not in `loaded`, one line each: "- name: what it does (group)".
-		public Core::String DeferredIndex(ChatMode mode, const Core::Array<Core::String>& loaded) const;
+		// The request's "tools" array for a chat in `mode`: every tool offered, a deferred one as its stub unless `whole`
+		// (Claude takes every schema; the setting ai.tools.loadAll makes none deferred).
+		public Core::String RequestTools(ChatMode mode, bool whole) const;
+		// Whether a tool offered in `mode` is deferred.
+		public bool HasDeferred(ChatMode mode) const;
 		// The deferred tools that best match `query` - words, or "select:a,b" naming them - at most `most`.
 		public Core::Array<ToolSpec*> SearchDeferred(Core::StringView query, ChatMode mode, int64 most) const;
 		// Every deferred tool loaded: the setting ai.tools.loadAll.

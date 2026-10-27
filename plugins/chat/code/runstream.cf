@@ -40,7 +40,7 @@ namespace Ai
 
 	// Why the message's images are not sent; empty when they are.
 	static Core::StringView Unsent(const ModelMessage* message, RequestImages& images) {
-		if (message->images.IsEmpty()) return Core::StringView("");
+		if (!message->SendsImages()) return Core::StringView("");
 		if (!images.vision) return Core::StringView(kImagesNotSent);
 		if (images.older <= 0) return Core::StringView("");
 		images.older -= message->images.Count();
@@ -54,13 +54,13 @@ namespace Ai
 		for (int64 i = 0; i < messages.Count(); ++i) {
 			ModelMessage* message = messages[i];
 			Core::StringView unsent = Unsent(message, images);
-			if (message->role == "user" && unsent.IsEmpty() && !message->images.IsEmpty()) {
+			if (message->role == "user" && unsent.IsEmpty() && message->SendsImages()) {
 				images.encoded += WriteUserWithImages(json, ws, message);
 				images.sent += message->images.Count();
 				continue;
 			}
 			message->WriteRequest(json, unsent, withReasoning);
-			if (unsent.IsEmpty() && !message->images.IsEmpty()) {
+			if (unsent.IsEmpty() && message->SendsImages()) {
 				shown.Push(message);
 				images.sent += message->images.Count();
 			}
@@ -97,7 +97,7 @@ namespace Ai
 		for (Turn* each : chat->turns)
 			if (!each->compressed) WriteMessages(json, ws, each->messages, images, keepThinking && each == turn);
 		json.EndArray();
-		json.RawField("tools", tools->RequestTools(chat->mode, chat->loadedTools).View());
+		json.RawField("tools", tools->RequestTools(chat->mode, false).View());
 		json.BoolField("stream", true);
 		if (llamaCpp) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
@@ -121,6 +121,9 @@ namespace Ai
 		Core::String key;
 		if (!profile->apiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->apiKeyEnv.CStr(), key)) request.headers.Push(Core::String("Authorization: Bearer ") + key.View());
 		request.body = RequestBody(request.promptTokens);
+		requestHead = (int64)(system.View().Hash() ^ tools->RequestTools(chat->mode, false).View().Hash());
+		request.readTokens = ExpectedRead(request.promptTokens, requestHead);
+		requestRead = request.readTokens;
 		double rate = profile->prefillRate;
 		chats->prefillRates.TryGet(profile->name, rate);
 		request.connectMs = profile->connectMs;
@@ -132,6 +135,15 @@ namespace Ai
 		request.capMs = profile->stepCapMs;
 		request.serverRoot = ServerRoot(profile->endpoint.View());
 		return request;
+	}
+
+	int64 TurnRun::ExpectedRead(int64 promptTokens, int64 head) const {
+		const bool sameFront = !chat->promptRewritten && chat->promptHead == head && chat->lastPromptTokens > 0
+			&& chat->estimateModel.View() == candidates[candidate]->name.View();
+		if (!sameFront) return promptTokens;
+		const int64 added = CalibratedTokens() - chat->lastPromptTokens;
+		if (added < 0) return 0;
+		return added < promptTokens ? added : promptTokens;
 	}
 
 	// --- Segments as the reply streams -------------------------------------------------------------------------------
@@ -225,15 +237,19 @@ namespace Ai
 		}
 	}
 
+	// A server that reports no progress (vLLM) gets the read estimated from what it measured: the part of the prompt past
+	// what its cache holds (ExpectedRead, from the last request's own count) at the rate it read earlier steps' new tokens.
 	void TurnRun::EstimatePrefill(const StepRequest& request) {
 		bool llamaCpp = false;
 		chats->llamaCpp.TryGet(candidates[candidate]->name, llamaCpp);
-		if (llamaCpp || request.readMs < kRunEstimateShownMs) return;
+		const int64 readMs = request.promptTokens > 0 ? request.readMs * request.readTokens / request.promptTokens : 0;
+		if (llamaCpp || readMs < kRunEstimateShownMs) return;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.BoolField("estimated", true);
 		json.IntField("total", request.promptTokens);
-		json.IntField("estimatedMs", request.readMs);
+		json.IntField("read", request.readTokens);
+		json.IntField("estimatedMs", readMs);
 		json.IntField("startedMs", StreamNowMs());
 		json.EndObject();
 		Prefill(json.View());
@@ -325,8 +341,8 @@ namespace Ai
 	static int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / kContextBytesPerToken); }
 
 	static int64 MessageTokens(const ModelMessage* message) {
-		return BytesToTokens(message->content.ByteLength() + message->toolCalls.ByteLength() + message->reasoning.ByteLength())
-			+ message->images.Count() * kToolImageTokens;
+		return BytesToTokens(message->SentText().ByteLength() + message->toolCalls.ByteLength() + message->reasoning.ByteLength())
+			+ (message->SendsImages() ? message->images.Count() * kToolImageTokens : 0);
 	}
 
 	int64 TurnRun::EstimateTokens() const {
@@ -356,14 +372,9 @@ namespace Ai
 		return part;
 	}
 
-	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, const Core::Array<Core::String>& loaded, bool claude) {
-		if (!claude) return tools->RequestTools(mode, loaded);
-		Core::Array<Core::String> every;
-		for (ToolSpec* spec : tools->tools) every.Push(spec->name);
-		return tools->RequestTools(mode, every);
-	}
+	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, bool claude) { return tools->RequestTools(mode, claude); }
 
-	Core::String TurnRun::SentTools() const { return ToolsSent(tools, chat->mode, chat->loadedTools, candidates[candidate]->IsClaude()); }
+	Core::String TurnRun::SentTools() const { return ToolsSent(tools, chat->mode, candidates[candidate]->IsClaude()); }
 
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
 		int64 messages = 0;
@@ -401,6 +412,9 @@ namespace Ai
 			turn->tokensIn = completion->promptTokens;
 			chat->estimateOffset = completion->promptTokens - estimateBefore;
 			chat->estimateModel = profile->name;
+			chat->lastPromptTokens = completion->promptTokens;
+			chat->promptHead = requestHead;
+			chat->promptRewritten = false;
 		}
 		else turn->tokensIn = promptEstimate > 0 ? promptEstimate : CalibratedTokens();
 		turn->tokensOut += output;
@@ -408,7 +422,7 @@ namespace Ai
 			turn->ttftMs = result->ttftMs;
 			turn->genMs += result->ms - result->ttftMs;
 		}
-		const double rate = completion->MeasuredPrefillRate(result->ttftMs);
+		const double rate = completion->MeasuredPrefillRate(result->ttftMs, requestRead);
 		if (rate > 0) chats->prefillRates.At(profile->name) = rate;
 		IED::JsonWriter data;
 		data.BeginObject();
@@ -424,8 +438,9 @@ namespace Ai
 	}
 
 	// Mechanical compression (docs/04 "Context management"): file reads a later call made stale noted as such, tool
-	// results older than the last few messages trimmed; when that is not enough, whole earlier turns left out (they stay
-	// on disk). Whether anything changed.
+	// results older than the last few messages trimmed; when that is not enough, whole earlier turns left out. Only what
+	// the requests send changes - each message's `shown`, kept in context.json so a restart sends the same - while the
+	// chat keeps every message whole. Whether anything changed.
 	bool TurnRun::Compress() {
 		Core::Array<ModelMessage*> sent;
 		int64 keepFrom = -1;
@@ -442,13 +457,13 @@ namespace Ai
 				ModelMessage* message = each->messages[i];
 				if (each == turn && i >= each->messages.Count() - kRecentMessagesKept) continue;
 				if (message->role != "tool") continue;
-				if (!message->images.IsEmpty()) {
-					message->images.Clear();
-					message->content = message->content + kImagesTrimmedNote;
+				if (message->SendsImages()) {
+					message->imagesOut = true;
+					message->shown = Core::String(message->SentText()) + kImagesTrimmedNote;
 					changed = true;
 				}
-				if (message->content.ByteLength() < kTrimBelowBytes) continue;
-				message->content = Core::String(message->content.View().Substring(0, kTrimmedKeepBytes)) + kTrimmedNote;
+				if (message->SentText().ByteLength() < kTrimBelowBytes) continue;
+				message->shown = Core::String(message->SentText().Substring(0, kTrimmedKeepBytes)) + kTrimmedNote;
 				changed = true;
 			}
 		const int64 target = Window() / 2;
@@ -464,6 +479,11 @@ namespace Ai
 		// keeps the conversation in order, so it leaves no note (the owner, on a note that appeared after a restart with
 		// nothing left out: it read as if the history had been cleared).
 		if (leftOut > 0) HarnessNote(Core::StringView("context_compressed"), chats->prompts.Note("context_compressed").View());
+		if (changed) {
+			chat->promptRewritten = true;
+			SaveContextView(LocalStateOf(ws), chat);
+			SaveChatHeader(LocalStateOf(ws), chat);
+		}
 		return changed;
 	}
 

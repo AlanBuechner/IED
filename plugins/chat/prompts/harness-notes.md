@@ -33,7 +33,7 @@ Tasks {tasks} are still open. Complete them, or mark them skipped with a reason,
 The arguments for {tool} were invalid: {error}. Expected schema: {schema_excerpt}. Call it again with corrected arguments.
 
 ## unknown_tool
-There is no tool named {name}. Did you mean {suggestions}? Tools listed under "Tools you can load" are loaded with tool_search.
+There is no tool named {name}. Did you mean {suggestions}? tool_search finds the deferred tools (marked [deferred]) by what they do.
 
 ## unknown_clip
 {tool} did not run: its arguments paste {{clip:{name}}}, and there is no clip {name} ({clips}). Copy it with clipboard_copy first. To write {{clip:{name}}} as text, write {{!clip:{name}}}.

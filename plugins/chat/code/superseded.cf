@@ -65,9 +65,9 @@ namespace Ai
 			FileCall* call = CallOf(calls, message->toolCallId.View());
 			if (!call || call->tool != "fs_read") continue;
 			Core::String because = StaleBecause(calls, call);
-			if (because.IsEmpty() || message->content == because) continue;
-			message->content = because;
-			message->images.Clear();
+			if (because.IsEmpty() || message->shown == because) continue;
+			message->shown = because;
+			message->imagesOut = !message->images.IsEmpty();
 			dropped += 1;
 		}
 		return dropped;

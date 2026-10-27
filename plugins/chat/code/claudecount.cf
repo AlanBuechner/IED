@@ -36,7 +36,7 @@ namespace Ai
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(this, chat, ws, contributed);
 		start.system = TurnSystem(this, chat, ws, tools, chat->Current() ? chat->Current()->userText.View() : Core::StringView(""), models, contributed);
-		Core::String sent = ToolsSent(tools, chat->mode, chat->loadedTools, true);
+		Core::String sent = ToolsSent(tools, chat->mode, true);
 		start.tools = McpToolsResult(sent.View());
 		start.toolsBytes = sent.ByteLength();
 		start.effort = Core::String(EffortOf(chat->effort.View(), roleEffort.View()));

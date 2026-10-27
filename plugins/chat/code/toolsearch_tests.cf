@@ -1,4 +1,5 @@
-// tool search: deferred tools listed by name, found by words or select:, and sent only once loaded (docs/13).
+// tool search: deferred tools sent as stubs from the first request on, found by words or select:, the list the same
+// whatever was loaded (docs/13), so the front of the prompt a model server caches never changes.
 
 include "catalog.ch"
 
@@ -24,20 +25,16 @@ static Ai::ToolRegistry* SearchRegistry() {
 
 [test("server.ai.toolsearch")]
 class ToolSearchTests {
-	[test("listed_by_name_not_sent")]
-	public static void TestIndex() {
+	[test("sent_as_stubs")]
+	public static void TestStubs() {
 		Ai::ToolRegistry* registry = SearchRegistry();
-		Core::Array<Core::String> none;
-		Core::String index = registry->DeferredIndex(Ai::ChatMode::Ask, none);
-		assert_true(index.View().Contains(Core::StringView("- browser_open: Open a web page in the server's browser. (ied.browser)\n")), index.CStr());
-		assert_true(index.View().Contains(Core::StringView("- image_view: ")), "the media group is deferred too");
-		Core::String request = registry->RequestTools(Ai::ChatMode::Ask, none);
+		assert_true(registry->HasDeferred(Ai::ChatMode::Ask), "some tools are deferred");
+		Core::String request = registry->RequestTools(Ai::ChatMode::Ask, false);
 		assert_true(request.View().Contains(Core::StringView("\"fs_read\"")) && request.View().Contains(Core::StringView("\"tool_search\"")), "the core tools are sent");
-		assert_true(!request.View().Contains(Core::StringView("\"name\":\"browser_open\"")), "a deferred tool is not");
-		Core::Array<Core::String> loaded;
-		loaded.Push(Core::String("browser_open"));
-		assert_true(registry->RequestTools(Ai::ChatMode::Ask, loaded).View().Contains(Core::StringView("\"name\":\"browser_open\"")), "until it is loaded");
-		assert_true(!registry->DeferredIndex(Ai::ChatMode::Ask, loaded).View().Contains(Core::StringView("browser_open")), "and then no longer listed");
+		assert_true(request.View().Contains(Core::StringView("{\"name\":\"browser_open\",\"description\":\"Open a web page in the server's browser. [deferred]\",\"parameters\":{\"type\":\"object\"}}")), request.CStr());
+		assert_true(request.View().Contains(Core::StringView("\"name\":\"image_view\"")), "the media group is deferred too");
+		Core::String whole = registry->RequestTools(Ai::ChatMode::Ask, true);
+		assert_true(whole.View().Contains(Core::StringView("Waits for its load.")) && !whole.View().Contains(Core::StringView("browser. [deferred]")), "whole for Claude");
 	}
 
 	[test("found_by_words_or_names")]
@@ -55,8 +52,8 @@ class ToolSearchTests {
 	public static void TestLoadAll() {
 		Ai::ToolRegistry* registry = SearchRegistry();
 		registry->LoadAll();
-		Core::Array<Core::String> none;
-		assert_true(registry->DeferredIndex(Ai::ChatMode::Ask, none).IsEmpty(), "nothing left to load");
-		assert_true(registry->RequestTools(Ai::ChatMode::Ask, none).View().Contains(Core::StringView("profile_list")), "every tool sent");
+		assert_true(!registry->HasDeferred(Ai::ChatMode::Ask), "nothing left to load");
+		Core::String request = registry->RequestTools(Ai::ChatMode::Ask, false);
+		assert_true(request.View().Contains(Core::StringView("Waits for its load.")) && !request.View().Contains(Core::StringView("browser. [deferred]")), "every tool sent whole");
 	}
 }

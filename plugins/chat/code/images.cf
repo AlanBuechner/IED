@@ -125,7 +125,7 @@ namespace Ai
 		json.Field("role", "user");
 		json.Key(Core::StringView("content"));
 		json.BeginArray();
-		TextPart(json, message->content.View());
+		TextPart(json, message->SentText());
 		for (const IED::ToolImage& image : message->images) {
 			Core::String url;
 			if (!DataUrl(ws, image, url)) {
@@ -143,7 +143,8 @@ namespace Ai
 
 	int64 CountImages(const Core::Array<ModelMessage*>& messages) {
 		int64 count = 0;
-		for (ModelMessage* message : messages) count += message->images.Count();
+		for (ModelMessage* message : messages)
+			if (message->SendsImages()) count += message->images.Count();
 		return count;
 	}
 }

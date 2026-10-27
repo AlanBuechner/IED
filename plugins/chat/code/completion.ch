@@ -62,8 +62,9 @@ namespace Ai
 		// rate feeds the prefill watchdog (docs/12 "Watchdogs"), which predicts the wait for the first token, so it counts
 		// the tokens read over that wait - never the whole prompt over the same wait: a step served from the server's prefix
 		// cache answers in a second whatever its prompt's size, and teaching that as a rate would leave the next step's
-		// watchdog firing while a cold prompt is still being read.
-		public double MeasuredPrefillRate(int64 ttftMs) const;
+		// watchdog firing while a cold prompt is still being read. A server that does not say what its cache held is taken
+		// to have read `expectedRead` (what the request added past the last one's prefix, TurnRun::ExpectedRead; -1: all).
+		public double MeasuredPrefillRate(int64 ttftMs, int64 expectedRead = -1) const;
 
 		private void TakeChoice(const Serialization::DomNode& choice, Core::Array<CompletionDelta>& deltas);
 		private void TakeToolCall(const Serialization::DomNode& delta, Core::Array<CompletionDelta>& deltas);

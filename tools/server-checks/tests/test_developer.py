@@ -108,7 +108,8 @@ class DeveloperTests(SourceCase):
 		self.assertIn("This IED is built from its source checkout at", system)
 		self.assertIn("Every failing tool call is a chance to fix IED's tools", system, "a failing call: fix the tool or the text that misled")
 		self.assertIn("Then make the call again.", system, "the section reaches the model whole")
-		self.assertIn("- ied_known_bugs: ", system, "its tools are listed to load")
+		tools = {t["function"]["name"]: t["function"] for t in self.model.requests()[0]["body"]["tools"]}
+		self.assertTrue(tools["ied_known_bugs"]["description"].endswith("[deferred]"), "its tools are offered, deferred")
 		results = self.tool_results()
 		self.assertIn("BUG-007 A demo miscompile", results["k1"])
 		self.assertIn("**Severity:** High", results["k1"])

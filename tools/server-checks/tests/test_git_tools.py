@@ -418,11 +418,11 @@ class GitToolChatTests(ChatCase):
 		chat_id, _ = await self.chat(mode="plan")
 		self.model.queue(text_step("A plan."))
 		await self.turn(chat_id)
-		system = self.model.requests()[-1]["body"]["messages"][0]["content"]
+		offered = [t["function"]["name"] for t in self.model.requests()[-1]["body"]["tools"]]
 		for name in ("git_status", "git_diff", "git_log", "git_show", "git_blame", "git_branches"):
-			self.assertIn("- %s: " % name, system)
+			self.assertIn(name, offered)
 		for name in ("git_stage", "git_unstage", "git_commit", "git_branch", "git_stash"):
-			self.assertNotIn("- %s: " % name, system)
+			self.assertNotIn(name, offered)
 
 
 class GitToolPlanFailureChatTests(ChatCase):

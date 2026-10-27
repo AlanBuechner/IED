@@ -17,7 +17,7 @@ namespace Ai
 		public Core::String workspace;   // the summary (item 6)
 		public Core::String skills;      // the list of its skills (item 8)
 		public Core::String docs;        // its plugins' reference docs, one line each
-		public Core::String deferred;    // the tools tool_search loads, one line each (item 7, docs/13)
+		public bool deferred;            // some tools are sent as stubs tool_search shows whole (item 7, docs/13)
 		public Core::String agents;      // the sub-agents it may run and when delegating pays (docs/04); "" for none
 	}
 

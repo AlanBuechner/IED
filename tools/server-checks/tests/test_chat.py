@@ -571,26 +571,25 @@ class ChatTests(ChatCase):
 		self.assertEqual([], (await self.client.next_frame(topic))["data"]["resources"], "after a restart nothing is open until a plugin says so again")
 
 	async def test_plugin_tools_load_on_demand(self):
-		names = lambda body: [t["function"]["name"] for t in body["tools"]]
+		"""A plugin tool is a stub in the list from the first step - its first sentence, any arguments - and tool_search
+		answers with its definition at the end; the list itself never changes (docs/13 "Loading tools on demand")."""
+		tool = lambda body, name: [t["function"] for t in body["tools"] if t["function"]["name"] == name][0]
 		chat_id, _ = await self.chat()
 		self.model.queue(call_step("tool_search", {"query": "shout"}, "s1"), text_step("Loaded."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		first, last = self.model.requests()[-2]["body"], self.model.requests()[-1]["body"]
-		self.assertNotIn("demo_shout", names(first), "a plugin tool is not sent at first")
-		self.assertIn("- demo_shout: Shout a file's first line. (demo.code)", first["messages"][0]["content"], "it is listed by name")
-		self.assertIn("demo_shout", names(last), "tool_search loaded it")
+		self.assertEqual({"name": "demo_shout", "description": "Shout a file's first line. [deferred]", "parameters": {"type": "object"}}, tool(first, "demo_shout"), "a stub at first")
+		self.assertIn("# Deferred tools", first["messages"][0]["content"], "the system message says what [deferred] means")
+		self.assertEqual(first["tools"], last["tools"], "looking it up leaves the list as it was")
+		self.assertEqual(first["messages"][0], last["messages"][0], "and the system message")
 		self.assertIn("## demo_shout", [m for m in last["messages"] if m["role"] == "tool"][0]["content"], "its definition told the model")
-		chat_id, _ = await self.chat()
-		self.model.queue(text_step("Hi."))
-		await self.turn(chat_id)
-		self.assertNotIn("demo_shout", names(self.model.requests()[-1]["body"]), "loaded per chat")
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.tools.loadAll", "value": True})
 		chat_id, _ = await self.chat()
 		self.model.queue(text_step("Hi."))
 		await self.turn(chat_id)
 		sent = self.model.requests()[-1]["body"]
-		self.assertIn("demo_shout", names(sent), "ai.tools.loadAll sends them all")
-		self.assertNotIn("# Tools you can load", sent["messages"][0]["content"])
+		self.assertEqual("Shout a file's first line.", tool(sent, "demo_shout")["description"], "ai.tools.loadAll sends them whole")
+		self.assertNotIn("# Deferred tools", sent["messages"][0]["content"])
 
 	# --- Tools -------------------------------------------------------------------------------------------------------
 

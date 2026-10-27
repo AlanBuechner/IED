@@ -99,9 +99,11 @@ namespace Ai
 		if (timings.Member("cache_n").IsValid()) cachedTokens = timings.Member("cache_n").AsInt();   // llama.cpp's own count
 	}
 
-	double Completion::MeasuredPrefillRate(int64 ttftMs) const {
+	double Completion::MeasuredPrefillRate(int64 ttftMs, int64 expectedRead) const {
 		if (promptPerSecond > 0) return promptPerSecond;   // llama.cpp measured its own read: it says nothing of a cache wait
-		const int64 read = ReadTokens();
+		// A server that does not say what its cache held: the read IED expected of it, rather than the whole prompt a
+		// cached step answers in a second.
+		const int64 read = cachedTokens < 0 && expectedRead >= 0 && expectedRead < promptTokens ? expectedRead : ReadTokens();
 		if (read < kCompletionReadTeachingTokens || ttftMs <= 0) return 0.0;   // little read: the wait was queueing, not reading
 		return (double)read * 1000.0 / (double)ttftMs;
 	}

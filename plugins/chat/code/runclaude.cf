@@ -46,9 +46,7 @@ namespace Ai
 				claude = chats->SessionOf(chat);
 				claude->inUse = true;
 			}
-			Core::Array<Core::String> every;
-			for (ToolSpec* spec : tools->tools) every.Push(spec->name);
-			toolList = McpToolsResult(tools->RequestTools(chat->mode, every).View());
+			toolList = McpToolsResult(tools->RequestTools(chat->mode, true).View());
 			effort = Core::String(EffortOf(chat->effort.View(), role.effort.View()));
 			turn->effort = effort;
 		}
@@ -142,7 +140,10 @@ namespace Ai
 			for (int64 i = claudeSent; i < turn->messages.Count(); ++i)
 				if (turn->messages[i]->role == "user") pending.Push(turn->messages[i]);
 			claudeSent = turn->messages.Count();
-			if (!claude->turns.Contains(turn->turnId)) claude->turns.Push(turn->turnId);
+			if (!claude->turns.Contains(turn->turnId)) {
+				claude->turns.Push(turn->turnId);
+				chat->claudeTurns = claude->turns;
+			}
 		}
 		for (int64 i = 0; i < pending.Count(); ++i) {
 			Core::Array<ClaudeImage> images;
@@ -297,8 +298,12 @@ namespace Ai
 		Core::StringView subtype = line->root.Member("subtype").AsView();
 		IED::HostLock guard(*context);
 		if (subtype == "init" && !line->root.Member("session_id").AsView().IsEmpty()) {
+			const bool changed = claude->sessionId.View() != line->root.Member("session_id").AsView();
 			claude->sessionId = Core::String(line->root.Member("session_id").AsView());
 			chat->claudeSession = claude->sessionId;
+			// Kept at once: a server stopped before the step's end would otherwise start the next turn on a new session,
+			// told the chat only as text (docs/04 "What a restart keeps").
+			if (changed) SaveChatHeader(LocalStateOf(ws), chat);
 		}
 		else if (subtype == "api_retry") {
 			Core::StringBuilder note;

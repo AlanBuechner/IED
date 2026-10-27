@@ -181,8 +181,11 @@ export class TranscriptView {
 			this.tickPrefill();
 			const elapsed = Math.max(0, Date.now() - progress.startedMs);
 			const share = progress.estimatedMs > 0 ? Math.min(99, Math.floor(elapsed * 100 / progress.estimatedMs)) : 0;
+			const read = progress.read >= 0 && progress.read < progress.total
+				? compact(progress.read) + " new tokens of " + compact(progress.total) + ", the rest cached"
+				: compact(progress.total) + " tokens";
 			replace(el, icon("loading", "spin"), h("span", null, "Reading the prompt"), h("span.chat-bar", null, h("i", { style: { width: share + "%" } })),
-				h("span.meta", null, "about " + duration(progress.estimatedMs) + " for " + compact(progress.total) + " tokens (estimated) \u00b7 " + duration(elapsed)));
+				h("span.meta", null, "about " + duration(progress.estimatedMs) + " for " + read + " (estimated) \u00b7 " + duration(elapsed)));
 			return;
 		}
 		const percent = progress.total > 0 ? Math.min(100, Math.floor(progress.processed * 100 / progress.total)) : 0;

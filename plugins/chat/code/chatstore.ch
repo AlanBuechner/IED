@@ -3,6 +3,8 @@
 // one per line, with the messages the model was sent, and running.json the turn in flight, written at every step and
 // tool boundary. A running.json found at load is a turn a restart interrupted (docs/12 "Restart behavior"): it ends
 // "interrupted", a call that was running gets a result saying its effect is unknown, and the chat waits paused.
+// context.json is what compression shows of the messages in place of their content (docs/04 "Context management"), so a
+// chat loaded again sends exactly what it sent before; the turns' files always keep the messages whole.
 
 include "chat.ch"
 
@@ -16,6 +18,8 @@ namespace Ai
 	void AppendTurn(const FS::Path& state, const Chat* chat, const Turn* turn);
 	void SaveRunningTurn(const FS::Path& state, const Chat* chat, const Turn* turn);
 	void ForgetRunningTurn(const FS::Path& state, const Chat* chat);
+	// context.json: {messages: [{turn, at, shown?, imagesOut?}]}, every message compression changed what requests send of.
+	void SaveContextView(const FS::Path& state, const Chat* chat);
 	// The chats saved for a workspace; `interruptedNote` is what an interrupted call's result tells the model.
 	Core::Array<Chat*> LoadChats(const FS::Path& state, Core::StringView wsId, Core::StringView interruptedNote, Core::Array<Core::String>& problems);
 	// One saved chat, or null with a problem.

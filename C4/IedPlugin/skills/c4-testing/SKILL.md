@@ -1,6 +1,6 @@
 ---
 name: c4-testing
-description: C4 built-in unit testing - [test("group")] annotations on static functions, global and per-class [test_setup]/[test_teardown] fixtures, the assert_true/assert_eq/assert_feq/assert_se builtins (linked into every build), how nuke test detects src/tests/ folders and builds a separate -test harness that runs every test, ordering rules, exit codes, and known limits.
+description: C4 built-in unit testing - [test("group")] annotations on static functions, global and per-class [test_setup]/[test_teardown] fixtures, the assert_true/assert_eq/assert_feq/assert_se builtins (linked into every build), how nuke test detects the tests/ folders of a project's sources and builds a separate -test harness that runs every test, ordering rules, exit codes, and known limits.
 triggers:
   - "C4 unit tests"
   - "[test] annotation group path"
@@ -36,7 +36,7 @@ Builtins (C4Runtime/TestRuntimeC.c). The test runtime is linked into **every** e
 Each returns an int32 status you normally ignore; the harness counts failures itself. String messages are literals that bind to the universal pointer parameter.
 
 ## How Nuke runs them
-Tests live in an **in-source** `src/tests/` folder of a project (no separate test projects). A project with at least one `.cf`/`.ch` under `src/tests/` is "test-bearing":
+Tests live in an **in-source** `tests/` folder inside one of a project's source folders (`src/tests/` with the default `sources = ["src"]`; no separate test projects). A project with at least one `.cf`/`.ch` under such a `tests/` folder is "test-bearing":
 - `nuke build` / `nuke run` (never `-test`), or a compile without `-test`: the `[test]` functions are inert code; the project builds as usual.
 - `nuke test [config] [--filter "math.*"]`: Nuke compiles each test-bearing project separately with `-test -test-json` into `build/bin/<Config>-windows-x64/<Project>/<Project>-tests.exe`, runs every harness (even after one fails) and exits 1 if any failed.
 
@@ -45,5 +45,5 @@ Under `-test`, a generated harness replaces the entry point: it calls global set
 ## Notes and limits
 - Test annotations are read on function declarations (and, for group prefixing, on the owning class). Test methods and fixtures must be `static`, take no parameters and return `void` (each is a clear error otherwise); a program (and each class) has one setup and one teardown.
 - Output: `[TEST] name`, then `ok name (0.012 ms)` / `FAILED name`; a failed assertion prints `FAIL: file.cf:12: message`. `-test-json <path>` (compiler) writes a JSON summary; `tests.exe --filter "math.*"` runs only matching cases.
-- Keep test files ordinary `.cf`/`.ch`; there is no special file naming requirement beyond living under `src/tests/`.
+- Keep test files ordinary `.cf`/`.ch`; there is no special file naming requirement beyond living under a source folder's `tests/`.
 - For manual runs: compile with `C4.exe -o out.exe -test <sources...>` and run the exe; exit code 0 means green.

@@ -28,7 +28,7 @@ namespace Ai
 		AddMediaTools(*registry);
 		AddProjectTools(*registry);
 		AddWorkTools(*registry);
-		AddRunTool(*registry, "tool_search", "Load tools listed under Tools you can load in the system message, so you can call them: words that describe what you need, or select: and their names. Example: tool_search({\"query\": \"look at an image\"}) or tool_search({\"query\": \"select:image_view,image_info\"})",
+		AddRunTool(*registry, "tool_search", "Show the whole description and parameters of deferred tools (those whose description ends in [deferred]): words that describe what you need, or select: and their names. Example: tool_search({\"query\": \"look at an image\"}) or tool_search({\"query\": \"select:image_view,image_info\"})",
 			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}",
 			true, false);
 		AddSkillTools(*registry);

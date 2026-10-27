@@ -68,6 +68,9 @@ namespace Ai
 		// The request's JSON; `promptTokens` its estimate, images counted as images.
 		private Core::String RequestBody(int64& promptTokens);
 		private StepRequest Request();
+		// Of a request of `promptTokens` whose system message and tools hash to `head`, what its server reads: what the chat
+		// added since the last request when nothing in front of it changed, else all of it.
+		private int64 ExpectedRead(int64 promptTokens, int64 head) const;
 		private void OnEvent(StepEventKind kind, Core::StringView text, int64 call);
 		// The prompt read so far (`progress` llama.cpp's object; empty: reading ended), for the clients.
 		private void Prefill(Core::StringView progress);
@@ -181,6 +184,8 @@ namespace Ai
 		private int64 sameErrors;
 		private int64 malformed;
 		private int64 prefillFloorMs;   // the least a prefill watchdog allows this turn, after one ran short
+		private int64 requestHead;      // the step's request's system message and tools, hashed (ExpectedRead)
+		private int64 requestRead;      // what its server was expected to read of it
 		private bool finishNudged;
 		// How the turn ends: set once, then the loop stops.
 		private bool ending;
@@ -204,7 +209,7 @@ namespace Ai
 	Core::String TurnSystem(Chats* chats, Chat* chat, const IED::Workspace& ws, ToolRegistry* tools, Core::StringView userText, const Core::Array<ModelProfile*>& models,
 		Core::Array<Core::String>& contributed);
 	// The tool definitions a request sends: a local model the chat's loaded ones, Claude's session every tool.
-	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, const Core::Array<Core::String>& loaded, bool claude);
+	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, bool claude);
 	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
 	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);

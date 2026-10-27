@@ -83,8 +83,16 @@ namespace Ai
 		public Core::String toolCallId;    // a tool result's call
 		public Core::Array<IED::ToolImage> images;   // a tool result's images (images.ch)
 		public Core::String reasoning;     // an assistant's thinking in its step: sent back where the server keeps it
+		// What compression sends in its place (docs/04 "Context management"), kept apart in the chat's context.json:
+		// the content itself never changes. Empty: the content is sent.
+		public Core::String shown;
+		public bool imagesOut;             // compression left its images out of requests; the chat keeps them
 
-		// As the chat keeps it.
+		// The text a request sends: what compression shows, else the content.
+		public Core::StringView SentText() const;
+		// Whether a request sends its images.
+		public bool SendsImages() const;
+		// As the chat keeps it: the content whole, whatever compression shows of it.
 		public void WriteJson(IED::JsonWriter& json) const;
 		// As a request sends it; with `unsent` (why its images are not sent, images.ch), the images named in its text.
 		// With `withReasoning`, its thinking as reasoning_content.
@@ -282,7 +290,14 @@ namespace Ai
 		public Core::String parentChatId;             // the chat that ran it as a sub-agent; ""
 		public Core::String context;                  // the context meter (contextmeter.ch); empty before a request
 		public int64 estimateOffset;                  // the last count a model's server gave less IED's estimate of that request
-		public Core::String estimateModel;            // the model that count came from; "" before one this server run
+		public Core::String estimateModel;            // the model that count came from; "" before any (kept in chat.json)
+		// What a model server's prefix cache holds of this chat (docs/12 "What makes a server read the whole prompt
+		// again"), so a step's read is estimated as what was added rather than the whole prompt: the last request's count
+		// (model `estimateModel`), its system message and tools as a hash, and whether a compression changed what
+		// requests send since. Kept in chat.json.
+		public int64 lastPromptTokens;
+		public int64 promptHead;
+		public bool promptRewritten;
 		public bool claudeAsked;                      // Claude was asked to count its context this server run (claudecount.cf)
 		public Core::String resume;                   // a call of this tool restarts the server: the chat goes on once it is back (resume.ch)
 		public ChatRun* run;                          // the running turn, or null

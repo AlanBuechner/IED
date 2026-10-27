@@ -20,18 +20,27 @@ namespace Ai
 		return mode != ChatMode::Plan || spec->inPlan;
 	}
 
-	Core::String ToolRegistry::RequestTools(ChatMode mode, const Core::Array<Core::String>& loaded) const {
+	// A description's first sentence, for a stub.
+	static Core::StringView FirstSentence(Core::StringView text) {
+		const int64 stop = text.IndexOf(Core::StringView(". "));
+		const int64 end = stop >= 0 ? stop + 1 : text.ByteLength();
+		return text.Substring(0, end < kToolIndexLineBytes ? end : kToolIndexLineBytes);
+	}
+
+	Core::String ToolRegistry::RequestTools(ChatMode mode, bool whole) const {
 		IED::JsonWriter json;
 		json.BeginArray();
 		for (ToolSpec* spec : tools) {
-			if (!Offered(spec, mode) || (spec->deferred && !loaded.Contains(spec->name))) continue;
+			if (!Offered(spec, mode)) continue;
+			const bool stub = spec->deferred && !whole;
 			json.BeginObject();
 			json.Field("type", "function");
 			json.Key(Core::StringView("function"));
 			json.BeginObject();
 			json.Field("name", spec->name.View());
-			json.Field("description", spec->description.View());
-			json.RawField("parameters", spec->parameters.View());
+			if (stub) json.Field("description", (Core::String(FirstSentence(spec->description.View())) + " [deferred]").View());
+			else json.Field("description", spec->description.View());
+			json.RawField("parameters", stub ? Core::StringView("{\"type\":\"object\"}") : spec->parameters.View());
 			json.EndObject();
 			json.EndObject();
 		}
@@ -39,29 +48,10 @@ namespace Ai
 		return json.ToString();
 	}
 
-	// A description's first sentence, for a one-line listing.
-	static Core::StringView FirstSentence(Core::StringView text) {
-		const int64 stop = text.IndexOf(Core::StringView(". "));
-		const int64 end = stop >= 0 ? stop + 1 : text.ByteLength();
-		return text.Substring(0, end < kToolIndexLineBytes ? end : kToolIndexLineBytes);
-	}
-
-	Core::String ToolRegistry::DeferredIndex(ChatMode mode, const Core::Array<Core::String>& loaded) const {
-		Core::StringBuilder out;
-		for (ToolSpec* spec : tools) {
-			if (!spec->deferred || !Offered(spec, mode) || loaded.Contains(spec->name)) continue;
-			out.Append("- ");
-			out.Append(spec->name.View());
-			out.Append(": ");
-			out.Append(FirstSentence(spec->description.View()));
-			if (!spec->group.IsEmpty()) {
-				out.Append(" (");
-				out.Append(spec->group.View());
-				out.Append(")");
-			}
-			out.Append("\n");
-		}
-		return out.ToString();
+	bool ToolRegistry::HasDeferred(ChatMode mode) const {
+		for (ToolSpec* spec : tools)
+			if (spec->deferred && Offered(spec, mode)) return true;
+		return false;
 	}
 
 	// How well `query`'s words match the tool: each word found in its name counts 3, in its group 2, in its description 1.

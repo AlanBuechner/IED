@@ -106,6 +106,8 @@ class CompletionTests {
 		quiet.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1}}"), deltas);
 		assert_eq((int64)150000, quiet.ReadTokens(), "a server that says nothing of its cache: all of it was read");
 		assert_true(quiet.MeasuredPrefillRate(2000) > 74000.0, "its wait for the first token was the read");
+		assert_true(quiet.MeasuredPrefillRate(2000, 4000) > 1999.0 && quiet.MeasuredPrefillRate(2000, 4000) < 2001.0, "unless the request only added to a prefix it held: the added tokens were the read");
+		assert_true(quiet.MeasuredPrefillRate(2000, 500) <= 0.0, "and too few of those teach nothing");
 
 		Ai::Completion llama;
 		llama.Take(View("{\"usage\":{\"prompt_tokens\":9000},\"timings\":{\"prompt_n\":9000,\"cache_n\":8000,\"prompt_per_second\":1200.5}}"), deltas);

@@ -48,6 +48,14 @@ namespace Ai
 			json.EndObject();
 		}
 		if (!chat->context.IsEmpty()) json.RawField("context", chat->context.View());
+		// The calibration of IED's estimate, so a restart neither compresses early nor late (docs/04 "Context management").
+		if (!chat->estimateModel.IsEmpty()) {
+			json.Field("estimateModel", chat->estimateModel.View());
+			json.IntField("estimateOffset", chat->estimateOffset);
+			json.IntField("lastPromptTokens", chat->lastPromptTokens);
+			json.IntField("promptHead", chat->promptHead);
+			if (chat->promptRewritten) json.BoolField("promptRewritten", true);
+		}
 		json.Key(Core::StringView("compressedTurns"));
 		json.BeginArray();
 		for (const Turn* turn : chat->turns)
@@ -114,6 +122,47 @@ namespace Ai
 
 	void ForgetRunningTurn(const FS::Path& state, const Chat* chat) { FS::RemoveFile((ChatFolder(state, chat->chatId.View()) / "running.json").CStr()); }
 
+	void SaveContextView(const FS::Path& state, const Chat* chat) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		for (const Turn* turn : chat->turns)
+			for (int64 i = 0; i < turn->messages.Count(); ++i) {
+				const ModelMessage* message = turn->messages[i];
+				if (message->shown.IsEmpty() && !message->imagesOut) continue;
+				json.BeginObject();
+				json.Field("turn", turn->turnId.View());
+				json.IntField("at", i);
+				if (!message->shown.IsEmpty()) json.Field("shown", message->shown.View());
+				if (message->imagesOut) json.BoolField("imagesOut", true);
+				json.EndObject();
+			}
+		json.EndArray();
+		json.EndObject();
+		WriteWhole(ChatFolder(state, chat->chatId.View()) / "context.json", json.View());
+	}
+
+	static Turn* TurnNamed(const Chat* chat, Core::StringView turnId) {
+		for (Turn* turn : chat->turns)
+			if (turn->turnId.View() == turnId) return turn;
+		return nullptr;
+	}
+
+	// What compression showed of the messages, as context.json kept it; a message it names that is not there is passed
+	// over (the view is of what requests send, never the chat's record).
+	static void ReadContextView(Chat* chat, const Serialization::DomNode& view) {
+		Serialization::DomNode messages = view.Member("messages");
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			Serialization::DomNode entry = messages.At(i);
+			Turn* turn = TurnNamed(chat, entry.Member("turn").AsView());
+			const int64 at = entry.Member("at").AsInt();
+			if (!turn || at < 0 || at >= turn->messages.Count()) continue;
+			turn->messages[at]->shown = Core::String(entry.Member("shown").AsView());
+			turn->messages[at]->imagesOut = entry.Member("imagesOut").AsBool();
+		}
+	}
+
 	static void ReadHeader(Chat* chat, const Serialization::DomNode& header) {
 		chat->title = Core::String(header.Member("title").AsView());
 		ReadChatMode(header.Member("mode").AsView(), chat->mode);
@@ -129,6 +178,11 @@ namespace Ai
 			Serialization::WriteJson(header.Member("context"), &context, 0);
 			chat->context = context.ToString();
 		}
+		chat->estimateModel = Core::String(header.Member("estimateModel").AsView());
+		chat->estimateOffset = header.Member("estimateOffset").AsInt();
+		chat->lastPromptTokens = header.Member("lastPromptTokens").AsInt();
+		chat->promptHead = header.Member("promptHead").AsInt();
+		chat->promptRewritten = header.Member("promptRewritten").AsBool();
 		chat->createdMs = header.Member("createdMs").AsInt();
 		chat->updatedMs = header.Member("updatedMs").AsInt();
 		chat->counter = header.Member("counter").AsInt();
@@ -268,6 +322,7 @@ namespace Ai
 			turn->Read(running);
 			Interrupted(chat, state, turn, note);
 		}
+		ReadContextView(chat, ParseJson(ReadWhole(folder / "context.json").View()));
 		return chat;
 	}
 

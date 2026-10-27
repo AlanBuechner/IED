@@ -536,7 +536,7 @@ namespace Ai
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"src/**\"})",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"})",
 			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob: '*' within a folder, '**' across folders, {a,b} either\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->plan = SearchPlan;
@@ -560,7 +560,7 @@ namespace Ai
 		build->plan = BuildPlan;
 		build->run = BuildRun;
 		registry.Add(build);
-		ToolSpec* problems = WorkSpec("problems_list", "The Error List: errors and warnings from builds and language servers, as path:line:col: severity: message. Example: problems_list({\"severity\": \"error\", \"path\": \"src/\"})",
+		ToolSpec* problems = WorkSpec("problems_list", "The Error List: errors and warnings from builds and language servers, as path:line:col: severity: message. Example: problems_list({\"severity\": \"error\", \"path\": \"engine/\"})",
 			"{\"type\": \"object\", \"properties\": {\"severity\": {\"enum\": [\"error\", \"warning\"]}, \"path\": {\"type\": \"string\", \"description\": \"only files under this path\"}}, \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		problems->plan = ProblemsPlan;

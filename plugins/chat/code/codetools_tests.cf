@@ -96,12 +96,12 @@ class CodeToolsTests {
 	public static void TestTools() {
 		Ai::ToolRegistry* registry = Ai::CoreTools();
 		assert_eq((int64)0, registry->problems.Count(), registry->problems.IsEmpty() ? "" : registry->problems[0].CStr());
-		Core::Array<Core::String> none;
-		Core::String request = registry->RequestTools(Ai::ChatMode::Plan, none);
+		Core::String request = registry->RequestTools(Ai::ChatMode::Plan, false);
 		assert_true(request.View().Contains(Text("\"name\":\"code_read_symbol\"")) && request.View().Contains(Text("\"name\":\"code_references\"")), "the core code tools, in Plan mode too");
 		assert_true(request.View().Contains(Text("\"name\":\"code_members\"")) && request.View().Contains(Text("\"name\":\"code_call_hierarchy\"")), "with members and the call hierarchy, which a model never loads itself");
-		Core::String index = registry->DeferredIndex(Ai::ChatMode::Ask, none);
-		assert_true(index.View().Contains(Text("- code_hover: ")) && index.View().Contains(Text("(code)\n")), "the rest of the code group is deferred");
+		Core::String asked = registry->RequestTools(Ai::ChatMode::Ask, false);
+		const int64 hover = asked.View().IndexOf(Text("\"name\":\"code_hover\""));
+		assert_true(hover >= 0 && asked.View().Substring(hover, asked.ByteLength() - hover).IndexOf(Text("[deferred]")) < 200, "the rest of the code group is deferred");
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		assert_eq((int64)0, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"outgoing\", \"depth\": 2}"), *doc).root).Count(), "a good call");
 		assert_eq((int64)1, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"up\"}"), *doc).root).Count(), "a direction it does not take");

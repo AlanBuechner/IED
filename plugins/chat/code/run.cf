@@ -164,9 +164,12 @@ namespace Ai
 		prompt.agentsMd = AgentsMd(ws);
 		prompt.sections = PluginSections(context, ws, contributed);
 		prompt.workspace = WorkspaceSummary(ws);
-		prompt.skills = SkillsIndex(SkillsOf(context, ws, contributed), userText, DefaultSkillsIndexLimits());
+		// The skills a long list names are the ones the chat's first message asks about, for the whole chat: a system
+		// message that changed with each turn's words would make the model's server read the conversation again.
+		Core::StringView hint = chat->turns.IsEmpty() ? userText : chat->turns[0]->userText.View();
+		prompt.skills = SkillsIndex(SkillsOf(context, ws, contributed), hint, DefaultSkillsIndexLimits());
 		prompt.docs = DocsIndex(DocsOf(context, ws, contributed));
-		prompt.deferred = tools->DeferredIndex(chat->mode, chat->loadedTools);
+		prompt.deferred = tools->HasDeferred(chat->mode);
 		prompt.agents = AgentsSection(AgentsOf(chats, chat, ws), models);
 		return chats->prompts.System(chat->mode, prompt);
 	}
@@ -176,7 +179,7 @@ namespace Ai
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
 		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->userText.View() : Core::StringView(""), models, contributed);
-		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->mode, chat->loadedTools, claude).ByteLength());
+		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->mode, claude).ByteLength());
 	}
 
 	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {

@@ -22,7 +22,7 @@ signatures, `docs_search({"query": "ParseInt64"})` finds a function.
 
 ## 1. A program to start from
 
-A Nuke workspace: `nuke.toml`, sources in `src/` (`.cf` definitions, `.ch` declarations), tests in `src/tests/`.
+A Nuke workspace: `nuke.toml`, sources in the folders a project's `sources` names - `src/` when it names none (`.cf` definitions, `.ch` declarations) - and tests in a `tests/` folder inside one of them. A project's code is not always in `src/`: read its `nuke.toml` (or `project_list`, which gives each project's folder) before assuming where it is. The examples below use the default layout.
 `nuke build`, `nuke test`, `nuke run -- <args>` (or build_run with task build, test, run).
 
 ```c4

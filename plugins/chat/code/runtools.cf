@@ -224,10 +224,10 @@ namespace Ai
 	ToolOutcome TurnRun::SearchTools(const Serialization::DomNode& args) {
 		Core::StringView query = args.Member("query").AsView();
 		Core::Array<ToolSpec*> found = tools->SearchDeferred(query, chat->mode, kToolSearchMost);
-		if (found.IsEmpty()) return ToolError(((Core::String("tool_search: no tool you can load matches '") + query) + "'; they are listed under Tools you can load in the system message").View());
+		if (found.IsEmpty()) return ToolError(((Core::String("tool_search: no deferred tool matches '") + query) + "'; they are the tools whose description ends in [deferred]").View());
 		Core::StringBuilder said;
 		Core::StringBuilder names;
-		said.Append("Loaded; call them from now on:\n");
+		said.Append("Call them by name:\n");
 		for (ToolSpec* spec : found) {
 			LoadTool(spec);
 			said.Append("\n## ");

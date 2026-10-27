@@ -65,9 +65,8 @@ namespace Ai
 		}
 		out.Append("\n\n# Workspace\n\n");
 		out.Append(context.workspace.View());
-		if (!context.deferred.IsEmpty()) {
-			out.Append("\n\n# Tools you can load\n\nThese tools are not loaded, to keep the context small. tool_search loads them (words for what you need, or select: and their names); calling one by its name loads it too.\n\n");
-			out.Append(context.deferred.View());
+		if (context.deferred) {
+			out.Append("\n\n# Deferred tools\n\nTools whose description ends in [deferred] are listed with their first sentence only, to keep the context small. tool_search gives a deferred tool's whole description and parameters (words for what you need, or select: and their names). You may also call one directly: if its arguments are wrong, the error shows its parameters.");
 		}
 		if (!context.docs.IsEmpty()) {
 			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language.\n\n");

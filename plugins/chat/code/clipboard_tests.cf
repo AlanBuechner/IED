@@ -112,10 +112,9 @@ class ClipboardTests {
 		Ai::ToolRegistry* registry = new Ai::ToolRegistry();
 		Ai::AddClipboardTools(*registry, nullptr, new Ai::Chat());
 		assert_eq((int64)0, registry->problems.Count(), registry->problems.IsEmpty() ? "" : registry->problems[0].CStr());
-		Core::Array<Core::String> none;
-		Core::String index = registry->DeferredIndex(Ai::ChatMode::Plan, none);
-		assert_true(index.View().Contains(Text("- clipboard_copy: Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. (clipboard)\n")), index.CStr());
-		assert_true(index.View().Contains(Text("- clipboard_list: ")), "both, in Plan mode too");
+		Core::String request = registry->RequestTools(Ai::ChatMode::Plan, false);
+		assert_true(request.View().Contains(Text("\"name\":\"clipboard_copy\",\"description\":\"Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. [deferred]\"")), request.CStr());
+		assert_true(request.View().Contains(Text("\"name\":\"clipboard_list\"")), "both, in Plan mode too");
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Ai::ToolSpec* copy = registry->Find(Text("clipboard_copy"));
 		assert_eq((int64)0, registry->Check(copy, Serialization::ReadJson(Text("{\"name\": \"a.b-c_1\", \"path\": \"src/a.cf\", \"start_line\": 3}"), *doc).root).Count(), "a good call");

@@ -361,7 +361,7 @@ namespace Ai
 		list->plan = ListPlan;
 		list->run = ListRun;
 		registry.Add(list);
-		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either). Example: fs_glob({\"pattern\": \"src/**/*Log*\"})",
+		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either). Example: fs_glob({\"pattern\": \"**/*Log*\"})",
 			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		glob->plan = GlobPlan;
