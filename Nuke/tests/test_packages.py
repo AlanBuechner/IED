@@ -181,7 +181,9 @@ class ManifestTests(PackageTest):
 			("Windowing = { version = \"^1.0\" }", "needs its source"),
 			("Windowing = { source = \"https://x/o/e.git/Windowing\", version = \"^1\", rev = \"1a2b\" }", "one of version, branch and rev"),
 			("Windowing = { source = \"https://x/o/e.git/Windowing\", rev = \"1a2b\", writable = true }", "not rev"),
-			("Windowing = { source = \"../Windowing\", version = \"^1.0\" }", "a local folder"),
+			("Windowing = { source = \"Windowing\", version = \"^1.0\" }", "a local folder"),
+			("Windowing = { source = \"../Windowing\" }", "no ../"),
+			("Windowing = { source = \"C:/Code/Windowing\" }", "no ../ and no absolute path"),
 		]
 		for entry, message in cases:
 			self.files({"nuke.toml": f"[project]\nname = \"Game\"\n[dependencies]\n{entry}\n"})
@@ -218,20 +220,32 @@ class LocalDependencyTests(PackageTest):
 		self.files({
 			"nuke.toml": "[workspace]\nname = \"Lib\"\n",
 			"Lib/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Lib\"\nkind = \"module\"\n[dependencies]\n"
-				"Core = { source = \"Core\" }\n",
+				"Core = { source = \"Lib/Core\" }\n",
 			"Lib/Core/nuke.toml": "[project]\nname = \"LibCore\"\nkind = \"module\"\n",
-			"Game/nuke.toml": "[project]\nname = \"Game\"\n[dependencies]\nLib = { source = \"../Lib\" }\n",
+			"Game/nuke.toml": "[project]\nname = \"Game\"\n[dependencies]\nLib = { source = \"Lib\" }\n",
 		})
 		projects = self.projects()
-		self.assertIn("LibCore", projects["Lib"]["depends"], "relative to the project")
+		self.assertIn("LibCore", projects["Lib"]["depends"], "a folder from the workspace's root")
 		self.assertIn("Lib", projects["Game"]["depends"], "a project in no package uses the workspace's")
+
+	def test_a_fetched_package_links_its_own_projects(self):
+		self.engine.commit({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Kit/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Kit\"\nkind = \"module\"\n[dependencies]\n"
+				"KitCore = { source = \"Kit/Core\" }\n",
+			"Kit/Core/nuke.toml": "[project]\nname = \"KitCore\"\nkind = \"module\"\n",
+		}, tags=["Kit/v1.0.0"])
+		self.workspace({"Kit": "\"engine@^1.0\""}, depends=())
+		projects = self.projects()
+		self.assertIn("KitCore", projects["Kit"]["depends"], "from its repository's root, wherever it is installed")
+		self.assertIn("Kit@1.0.0", projects["KitCore"]["dir"].replace("\\", "/"))
 
 	def test_a_local_dependency_stays_inside_its_package(self):
 		self.files({
 			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
 			"Windowing/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Windowing\"\nkind = \"module\"\n",
 			"Input/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Input\"\nkind = \"module\"\n[dependencies]\n"
-				"Windowing = { source = \"../Windowing\" }\n",
+				"Windowing = { source = \"Windowing\" }\n",
 		})
 		code, out = self.nuke("list")
 		self.assertEqual(code, 1)
@@ -631,9 +645,9 @@ class CommandTests(PackageTest):
 	def test_add_a_local_project(self):
 		self.workspace({}, depends=())
 		self.files({"Lib/nuke.toml": "[project]\nname = \"Lib\"\nkind = \"module\"\n"})
-		code, out = self.nuke("package", "add", "../Lib", "--project", "Game")
+		code, out = self.nuke("package", "add", "Lib", "--project", "Game")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Lib = { source = "../Lib" }', read(self.path("Game", "nuke.toml")))
+		self.assertIn('Lib = { source = "Lib" }', read(self.path("Game", "nuke.toml")))
 		self.assertIn("Lib", self.projects()["Game"]["depends"])
 
 	def test_status_json_has_the_dependency_graph_and_the_versions(self):

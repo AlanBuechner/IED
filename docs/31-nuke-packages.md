@@ -19,7 +19,7 @@ The user reference is [`Nuke/README.md`](../Nuke/README.md) section 12; this doc
 |---|---|
 | **repository** | a git repository of packages. Any URL git can fetch: https, ssh, a local path |
 | **package** | a folder of a repository whose `nuke.toml` has a `[package]` table with its `version`; named by its folder in the repository (`Windowing`, `Renderer/RHI/DX12`). Its projects are its own folder's `[project]` and every project folder below it that is not inside another package |
-| **source** | what a dependency names: a package - the repository's URL followed by the package's folder (`https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12`) - or a local folder (a project of the same package) |
+| **source** | what a dependency names: a package - the repository's URL followed by the package's folder (`https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12`) - or a local folder written from the workspace's root (a project of the same package; never `../`) |
 | **version** | a package's `[package] version`, and the git tag `<package folder>/v<semver>` (`Windowing/v1.2.0`), or `v<semver>` for the repository as a whole - Go's convention for modules in subfolders, so a Go module in a package folder has the same versions for `go get` |
 | **versioned package** | a package that has tags of its own, or the repository root: the unit a version is chosen for. A package inside it without tags of its own is released with it, from the same commit |
 | **lock** | `packages/nuke.lock`: the exact commit of every versioned package the workspace uses. Generated from the manifests, ignored with the packages folder |
@@ -35,7 +35,7 @@ RhiD3D12  = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RH
 Windowing = { source = "https://github.com/AlanBuechner/Claymore.git/Windowing", version = "^0.2", writable = true }
 Utils     = { source = "git@github.com:me/utils.git/Utils", branch = "main" }      # no release yet: a branch's tip
 Strings   = { source = "git@github.com:me/utils.git/Strings", rev = "1a2b3c4d" }   # or one commit
-Core      = { source = "../Core" }                                                # a project of the same package
+Core      = { source = "Engine/Core" }                                            # a project of the same package, from the workspace's root
 ```
 
 The name is the entry's own (messages and `nuke package remove` use it). A dependency's projects are linked to the

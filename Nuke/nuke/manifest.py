@@ -297,14 +297,14 @@ def parse(data, path):
 
 def _dependencies(t, path):
 	"""[dependencies]: name -> { source = "<repository URL>/<package folder>", version | branch | rev, writable } for a
-	package from git, or { source = "<folder>" } for a project of the same package."""
+	package from git, or { source = "<folder from the workspace's root>" } for a project of the same package."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
 		where = f"dependencies.{key}"
 		if not isinstance(value, dict):
 			raise NukeError(f"{path}: {where} must be a table: {{ source = \"https://host/owner/repo.git/Folder\", version = \"^1.0\" }}, "
-				f"or {{ source = \"../Folder\" }} for a project of the same package")
+				f"or {{ source = \"Folder\" }} (from the workspace's root) for a project of the same package")
 		table = Table(value, where, path)
 		source = table.string("source")
 		if not source:
@@ -314,6 +314,11 @@ def _dependencies(t, path):
 		table.done()
 		url, folder = split_source(source)
 		if url is None:
+			folder = folder.strip("/").removeprefix("./")
+			parts = folder.split("/")
+			if not folder or ".." in parts or re.match(r"^[A-Za-z]:", folder) or source.startswith("/"):
+				raise NukeError(f"{path}: {where}: '{source}' - a local dependency is a folder of the workspace written from its "
+					f"root, as {{ source = \"Game\" }} or {{ source = \"Engine/Core\" }}: no ../ and no absolute path")
 			if version or branch or rev or writable:
 				raise NukeError(f"{path}: {where}: '{source}' is a local folder - a project of the same package, built with "
 					f"it - so it takes no version, branch, rev or writable")

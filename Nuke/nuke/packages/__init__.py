@@ -124,10 +124,10 @@ def check_local(spec, projects):
 		for requirement in project.dependencies:
 			if requirement.local is None:
 				continue
-			target = local_target(projects, project, requirement)
+			target = local_target(spec, projects, project, requirement)
 			if target is None:
 				raise NukeError(f"{project.file}: dependencies.{requirement.name}: no project in '{requirement.local}' (a folder "
-					f"of the project or of its package)")
+					f"from the workspace's root)")
 			mine, theirs = local.package_holding(spec, project.dir), local.package_holding(spec, target.dir)
 			if mine is not None and mine != theirs:     # a project in no package is no one's dependency: any of the workspace's
 				raise NukeError(f"{project.file}: dependencies.{requirement.name}: {target.name} ('{requirement.local}') is not in "
@@ -135,19 +135,20 @@ def check_local(spec, projects):
 					f"repository: {{ source = \"<repository URL>/{theirs or '<its folder>'}\", version = \"...\" }}")
 
 
-def local_target(projects, project, requirement):
-	"""The project a local dependency names: the folder relative to the project's, else to one of the folders above it
-	(its package's or workspace's root)."""
-	by_dir = {os.path.normcase(os.path.normpath(p.dir)): p for p in projects.values()}
-	base = os.path.normpath(project.dir)
-	while True:
-		found = by_dir.get(os.path.normcase(os.path.normpath(os.path.join(base, requirement.local))))
-		if found is not None:
-			return found
-		parent = os.path.dirname(base)
-		if parent == base:
-			return None
-		base = parent
+def local_target(spec, projects, project, requirement):
+	"""The project a local dependency names: its folder from the workspace's root - for a package's project, from its
+	repository's root, wherever the package is installed (None when that is not part of the installed package)."""
+	origin = project.package
+	if origin is None or origin.develop:
+		folder = os.path.join(spec.dir if origin is None else origin.folder, requirement.local)
+	elif not origin.line:
+		folder = os.path.join(origin.folder, requirement.local)
+	elif requirement.local == origin.line or requirement.local.startswith(origin.line + "/"):
+		folder = os.path.join(origin.folder, requirement.local[len(origin.line):].lstrip("/"))
+	else:
+		return None
+	wanted = os.path.normcase(os.path.normpath(folder))
+	return next((p for p in projects.values() if os.path.normcase(os.path.normpath(p.dir)) == wanted), None)
 
 
 class LocalPackages:
@@ -211,7 +212,7 @@ def link(spec, projects):
 		names = []
 		for requirement in project.dependencies:
 			if requirement.local is not None:
-				target = local_target(projects, project, requirement)
+				target = local_target(spec, projects, project, requirement)
 				names += [target.name] if target is not None else []
 			else:
 				names += _provided(spec, local, provided, project, requirement)

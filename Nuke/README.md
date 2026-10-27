@@ -549,8 +549,9 @@ RhiD3D12  = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RH
 Windowing = { source = "https://github.com/AlanBuechner/Claymore.git/Windowing", version = "~0.2.1", writable = true }
 Utils     = { source = "git@github.com:me/utils.git/Utils", branch = "main" }    # a branch (the lock pins its commit)
 Strings   = { source = "git@github.com:me/utils.git/Strings", rev = "1a2b3c4d" } # one commit
-# a local folder: another project of the same package (or, for a project in no package, of the workspace)
-Core      = { source = "../Core" }
+# a local folder, written from the workspace's root: another project of the same package (or, for a project in no
+# package, of the workspace)
+Core      = { source = "Engine/Core" }
 ```
 
 `nuke.toml` is the only file you write. Any Nuke command (`nuke build`, `nuke init --ied`, ...) fetches what is missing,
@@ -561,7 +562,8 @@ by themselves (no `depends` entry); the entry's name is yours (messages and `nuk
 - **A source** is the repository's URL with the package's folder after it: after `.git/` when the URL has it
   (`https://host/o/r.git/A/B`, `git@host:o/r.git/A`, a local repository `C:/repos/r.git/A`), else after a host's
   owner and repository (`https://github.com/o/r/A/B`); the repository itself for a package at its root. Anything else
-  is a local folder: relative to the project, else to a folder above it (its package's or the workspace's root).
+  is a local folder, written from the workspace's root (`Engine/Core`; for a package's project, from its repository's
+  root - its workspace's - wherever it is installed). `../` and absolute paths are refused.
 - **A local dependency stays in its package.** A package's project may name only projects of the same package by
   folder - Nuke refuses one that reaches outside it - so whoever uses a package gets everything it uses. Another
   package, of this repository or another, is a source with its URL and a version.

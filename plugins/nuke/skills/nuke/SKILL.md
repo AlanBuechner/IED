@@ -66,7 +66,8 @@ ${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words 
 Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). A project's `nuke.toml` lists what it uses
 in `[dependencies]`, one form for everything, as Cargo's dependencies:
 `RhiD3D12 = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12", version = "^0.2.1" }` (the
-repository's URL, then the package's folder there) or `Core = { source = "../Core" }` (a project of the same package).
+repository's URL, then the package's folder there) or `Core = { source = "Engine/Core" }` (a project of the same
+package, its folder from the workspace's root - never `../`).
 Any Nuke command, a build first of all, pulls them and what they need; nothing but `nuke.toml` files are edited by
 hand, and a dependency's projects are linked without `depends`. `packages/nuke.lock` (generated, not committed) pins
 each package's commit; installs live in `packages/` and are read-only, unless the dependency says `writable = true`:
