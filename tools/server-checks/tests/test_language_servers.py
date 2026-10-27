@@ -418,7 +418,7 @@ class OptionsFilesTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.sub(["diag:w1", "out:w1:ied"])
 		await self.client.next_frame("diag:w1")
 

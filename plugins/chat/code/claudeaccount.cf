@@ -260,7 +260,7 @@ namespace Ai
 		json.BoolField("signingIn", signingIn);
 		json.BoolField("installing", installing);
 		json.Key(Core::StringView("usage"));
-		WriteUsage(json, usage, AccountNowMs());
+		WriteUsage(json, usage, Days(), AccountNowMs());
 		json.EndObject();
 		return json.ToString();
 	}
