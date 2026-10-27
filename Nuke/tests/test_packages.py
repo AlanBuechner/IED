@@ -51,15 +51,22 @@ class Remote:
 
 
 def module(name, depends=(), package=None, dependencies=None):
+	"""A module's nuke.toml: a package when `package` (its description) is given; `depends` its own package's projects;
+	`dependencies` {name: inline table} the packages it needs."""
 	text = ""
 	if package is not None:
 		text += f"[package]\ndescription = \"{package}\"\n"
-		if dependencies:
-			text += "[package.dependencies]\n" + "".join(f"{k} = {v}\n" for k, v in dependencies.items())
 	text += f"[project]\nname = \"{name}\"\nkind = \"module\"\n"
 	if depends:
 		text += "depends = [" + ", ".join(f'"{d}"' for d in depends) + "]\n"
+	if dependencies:
+		text += "[dependencies]\n" + "".join(f"{k} = {v}\n" for k, v in dependencies.items())
 	return text
+
+
+def needs(url, path, version):
+	"""A [dependencies] entry: the package at `path` of the repository at `url`."""
+	return f"{{ git = \"{url}\", path = \"{path}\", version = \"{version}\" }}"
 
 
 class PackageTest(WorkspaceTest):
@@ -108,7 +115,7 @@ class PackageTest(WorkspaceTest):
 		}, tags=["Windowing/v0.1.0"])
 		self.engine.commit({"Windowing/src/Windowing/window.ch": "// 0.2\n"}, tags=["Windowing/v0.2.0"])
 		return self.engine.commit({
-			"Renderer/nuke.toml": module("Renderer", ["Windowing"], package="the renderer"),
+			"Renderer/nuke.toml": module("Renderer", package="the renderer", dependencies={"Windowing": needs(self.engine.url, "Windowing", "^0.2")}),
 			"Renderer/src/Renderer/renderer.ch": "",
 		}, tags=["Renderer/v1.0.0"])
 
@@ -183,10 +190,77 @@ class ManifestTests(PackageTest):
 			self.assertEqual(code, 1, entry)
 			self.assertIn(message, out, entry)
 		self.files({"nuke.toml": "[workspace]\n", "Lib/nuke.toml": "[package]\n[package.dependencies]\n"
-			"X = { git = \"https://x/e.git\", version = \"^1\", writable = true }\n[project]\nname = \"Lib\"\n"})
+			"X = { git = \"https://x/e.git\", version = \"^1\" }\n[project]\nname = \"Lib\"\n"})
 		code, out = self.nuke("list")
 		self.assertEqual(code, 1)
-		self.assertIn("writable", out, "a package cannot make its dependencies writable for its users")
+		self.assertIn("is now [dependencies]", out)
+		self.files({"Lib/nuke.toml": "[package]\n[project]\nname = \"Lib\"\n[dependencies]\nX = { path = \"X\", version = \"^1\" }\n"})
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1)
+		self.assertIn("needs its repository", out, "a package names the repository of what it needs, its own too")
+
+
+class ProjectDependencyTests(PackageTest):
+	"""Packages a project names in its own nuke.toml's [dependencies] - with each package's own [dependencies] followed
+	from its manifest - pulled by any command and linked to the project with no `depends` written."""
+
+	def engine_with_dependencies(self):
+		"""Windowing 0.2.0 and its Win32 backend, which names Windowing in its [dependencies] by the repository's URL."""
+		win32 = (f"[package]\nversion = \"0.2.0\"\ndescription = \"the Win32 backend\"\n[project]\nname = \"Win32\"\nkind = \"module\"\n"
+			f"[dependencies]\nWindowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2\" }}\n")
+		self.engine.commit({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Windowing/nuke.toml": "[package]\nversion = \"0.2.0\"\n[project]\nname = \"Windowing\"\nkind = \"module\"\n",
+			"Windowing/src/Windowing/window.ch": "",
+			"Windowing/Win32/nuke.toml": win32,
+			"Windowing/Win32/src/Win32/win32.ch": "",
+		}, tags=["Windowing/v0.2.0", "Windowing/Win32/v0.2.0"])
+
+	def test_a_lone_project_s_dependencies_are_pulled_and_linked(self):
+		self.engine_with_dependencies()
+		self.files({
+			"nuke.toml": f"[project]\nname = \"Game\"\nkind = \"executable\"\n[dependencies]\n"
+				f"Win32 = {{ git = \"{self.engine.url}\", path = \"Windowing/Win32\", version = \"^0.2\" }}\n",
+			"src/main.cf": "int32 main() { return 0; }\n",
+		})
+		projects = self.projects()
+		self.assertIn("Win32", projects["Game"]["depends"], "a dependency links its package's project")
+		self.assertIn("Windowing", projects["Win32"]["depends"], "and the package's own [dependencies] are followed")
+		self.assertEqual(self.lock()[("engine", "Windowing/Win32")]["version"], "0.2.0")
+		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.2.0")
+		self.assertTrue(os.path.isfile(self.path("packages", "nuke.lock")))
+
+	def test_a_repository_builds_its_own_packages_from_its_folders(self):
+		self.engine_with_dependencies()
+		self.root = self.engine.work                  # the repository's own checkout: its origin is the dependency's URL
+		projects = self.projects()
+		self.assertEqual(projects["Win32"]["dir"].replace("\\", "/"), self.engine.work.replace("\\", "/") + "/Windowing/Win32")
+		self.assertIn("Windowing", projects["Win32"]["depends"])
+		self.assertFalse(os.path.exists(self.path("packages")), "nothing fetched: the dependency is this repository's")
+
+	def test_a_version_written_by_hand_is_released_as_it_is(self):
+		self.engine_with_dependencies()
+		self.root = self.engine.work
+		win32 = os.path.join(self.engine.work, "Windowing", "Win32", "nuke.toml")
+		write_files(self.engine.work, {"Windowing/Win32/nuke.toml": read(win32).replace('version = "0.2.0"', 'version = "0.2.5"')})
+		git("commit", "--quiet", "-am", "Win32 0.2.5", cwd=self.engine.work)
+		head = git("rev-parse", "HEAD", cwd=self.engine.work)
+		code, out = self.nuke("package", "release", "Windowing/Win32")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(head, git("rev-list", "-n", "1", "Windowing/Win32/v0.2.5", cwd=self.engine.work), "tagged where it said so: no commit")
+		write_files(self.engine.work, {"Windowing/nuke.toml": "[package]\nversion = \"0.3.0\"\n[project]\nname = \"Windowing\"\nkind = \"module\"\n"})
+		git("commit", "--quiet", "-am", "Windowing 0.3.0", cwd=self.engine.work)
+		code, out = self.nuke("package", "release", "Windowing")
+		self.assertEqual(code, 0, out)
+		self.assertIn("also releasing Windowing/Win32 0.2.6", out, "Win32 wanted ^0.2")
+		self.assertEqual("Release Windowing 0.3.0, Windowing/Win32 0.2.6", git("log", "-1", "--format=%s", "Windowing/v0.3.0", cwd=self.engine.work))
+		self.assertIn('path = "Windowing", version = "^0.3.0"', read(win32))
+
+	def test_a_project_must_name_its_dependency_s_repository(self):
+		self.files({"nuke.toml": "[project]\nname = \"Game\"\n[dependencies]\nWin32 = { path = \"Windowing/Win32\", version = \"^0.2\" }\n"})
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1)
+		self.assertIn("needs its repository", out)
 
 
 class CargoStyleTests(PackageTest):
@@ -254,10 +328,10 @@ class CargoStyleTests(PackageTest):
 		self.manifest("")
 		code, out = self.nuke("package", "add", self.engine.url, "Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2.0\" }}", read(self.path("nuke.toml")))
+		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2.0\" }}", read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0", "--writable")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", path = \"Renderer\", version = \"^1.0\", writable = true }}", read(self.path("nuke.toml")))
+		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", path = \"Renderer\", version = \"^1.0\", writable = true }}", read(self.path("Game", "nuke.toml")))
 		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")), "writable: the source is a clone")
 
 
@@ -275,18 +349,16 @@ class ResolveTests(PackageTest):
 		self.assertEqual(read(installed), "// 0.1\n")
 		self.assertFalse(os.access(installed, os.W_OK), "a locked package's files are read-only")
 
-	def test_a_project_that_became_a_sub_package_still_comes(self):
+	def test_a_package_names_the_packages_it_needs(self):
 		self.engine.commit({
 			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
-			"Core/nuke.toml": "[package]\ndescription = \"core\"\n",
-			"Core/History/nuke.toml": module("History"),
+			"Core/nuke.toml": module("History", package="core"),
 			"Runtime/nuke.toml": module("Runtime", ["History"], package="runtime"),
 		}, tags=["Core/v0.1.0", "Runtime/v0.1.0"])
-		self.engine.commit({"Core/History/nuke.toml": module("History", package="history, a package of its own")}, tags=["Core/v0.1.1"])
-		self.workspace({"Runtime": "\"engine@^0.1\"", "Core": "\"engine@^0.1.1\""}, depends=("Runtime",))
-		projects = self.projects()
-		self.assertIn("History", projects, "Runtime 0.1.0 needs History, which Core 0.1.1 has in its sub-package Core/History")
-		self.assertEqual(self.lock()[("engine", "Core")]["uses"], ["Core", "Core/History"])
+		self.workspace({"Runtime": "\"engine@^0.1\""}, depends=("Runtime",))
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1, "a package's projects depend only on its own; another package is a [dependencies] entry")
+		self.assertIn("depends on History, which is the package Core - another package: name it in Runtime/nuke.toml [dependencies]", out)
 
 	def test_git_ignores_the_packages_but_search_does_not(self):
 		self.windowing()
@@ -359,7 +431,7 @@ class ResolveTests(PackageTest):
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.2.1")
 		self.assertFalse(os.path.isdir(self.path("packages", "engine", "Windowing@0.2.0")), "the old install goes")
 
-	def test_same_repository_dependencies_are_inferred_from_tags(self):
+	def test_a_package_s_dependency_meets_the_workspace_s_requirement(self):
 		self.windowing()
 		self.workspace({"Renderer": "\"engine@^1.0\"", "Windowing": "\"engine@^0.1\""}, depends=("Renderer",))
 		code, out = self.nuke("list")
@@ -373,7 +445,7 @@ class ResolveTests(PackageTest):
 		self.engine.commit({"Renderer/src/Renderer/renderer.ch": "// 1.1\n"}, tags=["Renderer/v1.1.0"])
 		# An older Renderer, made on a branch from Windowing 0.1.0: the only one that works with Windowing ^0.1.
 		git("checkout", "--quiet", "-b", "old", "Windowing/v0.1.0", cwd=self.engine.work)
-		self.engine.commit({"Renderer/nuke.toml": module("Renderer", ["Windowing"], package="old renderer"),
+		self.engine.commit({"Renderer/nuke.toml": module("Renderer", package="old renderer", dependencies={"Windowing": needs(self.engine.url, "Windowing", "^0.1")}),
 			"Renderer/src/Renderer/renderer.ch": "// 0.9\n"}, tags=["Renderer/v0.9.0"])
 		git("push", "--quiet", "origin", "old", cwd=self.engine.work)
 		self.workspace({"Renderer": "\"engine@>=0.9\"", "Windowing": "\"engine@^0.1\""}, depends=("Renderer",))
@@ -389,8 +461,7 @@ class ResolveTests(PackageTest):
 			"Strings/src/Strings/s.ch": ""}, tags=["Strings/v1.0.0", "Strings/v1.1.0"])
 		self.engine.commit({
 			"nuke.toml": f"[workspace]\n[sources]\nstrings = \"{strings.url}\"\n",
-			"Console/nuke.toml": module("Console", ["Strings"], package="console",
-				dependencies={"Strings": "{ source = \"strings\", version = \"^1.1\" }"}),
+			"Console/nuke.toml": module("Console", package="console", dependencies={"Strings": needs(strings.url, "Strings", "^1.1")}),
 			"Console/src/Console/c.ch": "",
 		}, tags=["Console/v0.1.0"])
 		self.workspace({"Console": "\"engine@^0.1\""}, depends=("Console",))
@@ -503,26 +574,26 @@ class CommandTests(PackageTest):
 		self.workspace({}, depends=())
 		code, out = self.nuke("package", "add", "engine", "Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.2.0" }', read(self.path("nuke.toml")))
+		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.2.0" }', read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Renderer = { source = "engine", path = "Renderer", version = "^1.0" }', read(self.path("nuke.toml")))
+		self.assertIn('Renderer = { source = "engine", path = "Renderer", version = "^1.0" }', read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "remove", "Renderer")
 		self.assertEqual(code, 0, out)
-		self.assertNotIn("Renderer", read(self.path("nuke.toml")))
+		self.assertNotIn("Renderer", read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--name", "Backend")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Backend = { source = "engine", path = "Windowing/Win32", version = "^0.2.0" }', read(self.path("nuke.toml")))
+		self.assertIn('Backend = { source = "engine", path = "Windowing/Win32", version = "^0.2.0" }', read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "remove", "Windowing/Win32")
 		self.assertEqual(code, 0, out)
-		self.assertNotIn("Backend", read(self.path("nuke.toml")), "an entry is removed by its name or its path")
+		self.assertNotIn("Backend", read(self.path("Game", "nuke.toml")), "an entry is removed by its name or its path")
 
 	def test_add_a_branch_and_a_nested_package(self):
 		self.windowing()
 		self.workspace({}, depends=())
 		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--branch", "main")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Win32 = { source = "engine", path = "Windowing/Win32", branch = "main" }', read(self.path("nuke.toml")))
+		self.assertIn('Win32 = { source = "engine", path = "Windowing/Win32", branch = "main" }', read(self.path("Game", "nuke.toml")))
 		entry = self.lock()[("engine", "Windowing")]
 		self.assertEqual(entry["commit"], git("rev-parse", "main", cwd=self.engine.work), "the branch's tip, locked")
 		self.assertEqual(entry["uses"], ["Windowing", "Windowing/Win32"])
@@ -534,14 +605,16 @@ class CommandTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		body = json.loads(out[out.index("{"):])
 		self.assertEqual(body["sources"], [{"name": "engine", "url": self.engine.url, "web": None}])
-		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0", "kind": "version"}])
+		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0",
+			"kind": "version", "by": "the workspace", "file": "nuke.toml"}])
 		packages = {p["path"]: p for p in body["packages"]}
 		renderer, windowing = packages["Renderer"], packages["Windowing"]
-		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2.0")])
-		self.assertEqual([(r["requirement"], r["from"] != "") for r in windowing["requiredBy"]], [("^0.2.0", True)], "Renderer needs it")
+		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2")])
+		self.assertEqual([(r["requirement"], r["from"] != "") for r in windowing["requiredBy"]], [("^0.2", True)], "Renderer needs it")
 		self.assertEqual(renderer["requiredBy"][0]["by"], "the workspace")
 		self.assertEqual(windowing["versions"], ["0.2.0", "0.1.0"])
-		self.assertEqual(renderer["packages"], [{"path": "Renderer", "description": "the renderer", "projects": ["Renderer"], "dependencies": []}])
+		self.assertEqual(renderer["packages"], [{"path": "Renderer", "description": "the renderer", "projects": ["Renderer"],
+			"dependencies": [{"path": "Windowing", "source": self.engine.url, "requirement": "^0.2"}]}])
 		state_file = self.path("packages", "nuke-packages.json")
 		state = json.loads(read(state_file))
 		del state["needs"]
@@ -629,7 +702,10 @@ class DevelopTests(PackageTest):
 		code, out = self.nuke("package", "release", "Windowing", "--minor")
 		self.assertEqual(code, 0, out)
 		self.assertIn("Windowing/v0.3.0", git("ls-remote", "--tags", self.engine.url))
-		self.assertIn('Windowing = "engine@^0.3.0"', read(self.path("nuke.toml")))
+		self.assertIn('version = "0.3.0"', read(os.path.join(checkout, "Windowing", "nuke.toml")), "the version is in the manifest")
+		self.assertEqual("Release Windowing 0.3.0, Renderer 1.0.1", git("log", "-1", "--format=%s", "Windowing/v0.3.0", cwd=checkout),
+			"Renderer wanted Windowing ^0.2: it takes ^0.3.0 and is released again with it")
+		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.3.0" }', read(self.path("nuke.toml")))
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.3.0")
 
 		write_files(self.root, {"build/develop/Server/go.work": "go 1.21\n"})
@@ -684,7 +760,8 @@ class DevelopTests(PackageTest):
 	def test_a_breaking_release_releases_its_dependents_again(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n",
 			"Windowing/nuke.toml": module("Windowing", package="windows"), "Windowing/src/Windowing/w.ch": "",
-			"Input/nuke.toml": module("Input", ["Windowing"], package="input"), "Input/src/Input/i.ch": ""},
+			"Input/nuke.toml": module("Input", package="input", dependencies={"Windowing": needs(self.engine.url, "Windowing", "^0.1")}),
+			"Input/src/Input/i.ch": ""},
 			tags=["Windowing/v0.1.0", "Input/v0.1.0"])
 		self.workspace({"Windowing": "\"engine@^0.1\"", "Input": "\"engine@^0.1\""}, depends=("Input",))
 		code, out = self.nuke("package", "develop", "engine")
@@ -696,6 +773,9 @@ class DevelopTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		self.assertIn("also releasing Input 0.1.1", out)
 		self.assertIn("Input/v0.1.1", git("ls-remote", "--tags", self.engine.url))
+		input_manifest = read(os.path.join(checkout, "Input", "nuke.toml"))
+		self.assertIn('version = "0.1.1"', input_manifest)
+		self.assertIn(f'Windowing = {needs(self.engine.url, "Windowing", "^0.2.0")}', input_manifest, "its requirement moved")
 		code, out = self.nuke("package", "lock", "engine")
 		self.assertEqual(code, 0, out)
 		lock = self.lock()

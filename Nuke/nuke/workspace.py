@@ -106,9 +106,8 @@ def find_root(start):
 		folder = parent
 
 
-def load_workspace(root, package_options=None):
-	"""The workspace at `root`, with the projects of the packages it uses (installed and locked first: packages/__init__.py;
-	`package_options` carries the log and what to update)."""
+def read_projects(root):
+	"""(the workspace's spec, its own projects by name) as the manifests at `root` say: no package is read."""
 	root_manifest = load(os.path.join(root, MANIFEST_NAME))
 	spec = root_manifest.workspace or _implicit_workspace(root_manifest)
 	manifests = [root_manifest] if root_manifest.project else []
@@ -121,11 +120,18 @@ def load_workspace(root, package_options=None):
 		if manifest.project is None:
 			raise NukeError(f"{manifest.path}: listed as a project of {spec.name} but has no [project] table")
 		manifests.append(manifest)
-	projects = _index_projects([m.project for m in manifests])
-	if packages_module.active(spec):
+	return spec, _index_projects([m.project for m in manifests])
+
+
+def load_workspace(root, package_options=None):
+	"""The workspace at `root`, with the projects of the packages it uses (installed and locked first: packages/__init__.py;
+	`package_options` carries the log and what to update)."""
+	spec, projects = read_projects(root)
+	if packages_module.active(spec, projects):
 		options = package_options or packages_module.Options(Log(messages=sys.stderr))
 		for project in packages_module.sync(spec, projects, options):
 			projects[project.name] = project
+		projects = packages_module.link(spec, projects)
 	packages = _complete_projects(spec, projects)
 	commands = {c.name: c for c in spec.commands}
 	steps = list(spec.steps) + [s for c in spec.commands for s in c.steps]

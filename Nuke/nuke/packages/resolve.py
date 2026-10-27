@@ -56,10 +56,12 @@ class Selected:
 
 @dataclass
 class Root:
-	"""A need of the workspace itself: a [packages] entry, or a dependency of one of its own packages."""
+	"""A need of the workspace itself: a project's [dependencies] entry, a [packages] entry, or a dependency of one of
+	its own packages."""
 	url: str
 	requirement: object     # manifest.PackageRequirement
 	by: str
+	file: str = None        # the manifest that declares it
 
 
 @dataclass
@@ -210,25 +212,14 @@ class Resolver:
 				if owner is None:
 					elsewhere.add((name, label))
 					continue
-				owner_key = (repo.key, repo.line_of(owner))
-				if owner_key != key:
-					need(owner_key, self._inferred(repo, owner_key[1], choice, f"{label} (its project {project.name} uses {name})", key))
-				use(owner_key, self._owner_at(repo, current[owner_key], owner_key[1], name) or owner)
+				if repo.line_of(owner) != key[1]:
+					if not any(d.path == owner for d in info.dependencies):
+						raise NukeError(f"{label}: its project {project.name} depends on {name}, which is the package {owner} - "
+							f"another package: name it in {path or '.'}/nuke.toml [dependencies] with its repository's URL "
+							f"({name} = {{ git = \"{repo.url}\", path = \"{owner}\", version = \"...\" }})")
+					continue
+				use(key, owner)
 		return elsewhere
-
-	def _owner_at(self, repo, choice, line, name):
-		"""The package of `line` that has project `name` at the version chosen for it - which may not be the package that
-		had it when the dependent was released: a project can become a sub-package of its own (Core's History, later
-		Core/History) - or None when it is not in `line` there."""
-		owner = repo.index(choice.commit).owner(name)
-		return owner if owner is not None and repo.line_of(owner) == line else None
-
-	def _inferred(self, repo, line, choice, by, key):
-		"""A package of the same repository released on its own: at least the release it had at the dependent's commit."""
-		if repo.develop:
-			return Need("version", ANY, by, key, choice.commit)
-		release = repo.release_before(line, choice.commit)
-		return Need("version", semver.compatible(release) if release else ANY, by, key, choice.commit)
 
 	def _dependency_url(self, repo, found, dependency, label):
 		if dependency.source is None:

@@ -169,4 +169,9 @@ class Repository:
 
 	def unchanged(self, line, older, newer):
 		"""Whether the versioned package's folder is the same at both commits."""
-		return git.run(["diff", "--quiet", older, newer, "--", line or "."], cwd=self.repo_dir(), check=False) is not None
+		return git.run(["diff", "--quiet", older, newer, "--"] + self.pathspec(line), cwd=self.repo_dir(), check=False) is not None
+
+	def pathspec(self, line):
+		"""The versioned package's files for git: its folder without the packages inside it versioned on their own."""
+		inside = [other for other in self.lines() if other != line and (not line or other.startswith(line + "/"))]
+		return [line or "."] + [f":(exclude){other}" for other in inside]

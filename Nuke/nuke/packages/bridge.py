@@ -46,10 +46,21 @@ def _relative(path, workspace_dir):
 	return os.path.relpath(path, workspace_dir).replace("\\", "/") if fsutil.is_within(path, workspace_dir) else fsutil.norm(path)
 
 
-def write(spec, state, lock, checkouts, joined):
-	body, readonly = describe(spec, state, lock, checkouts, joined)
+def write(spec, roots, state, lock, checkouts, joined):
+	body, readonly = describe(spec, roots, state, lock, checkouts, joined)
 	fsutil.write_if_changed(fsutil.join(spec.dir, PACKAGES), json.dumps(body, indent=2) + "\n")
 	fsutil.write_if_changed(fsutil.join(spec.dir, READONLY), json.dumps({"version": 1, "writer": "nuke", "paths": readonly}, indent=2) + "\n")
+
+
+def _requirement(spec, root):
+	r = root.requirement
+	item = {"name": r.name or r.path, "path": r.path, "source": r.source, "url": root.url, "requirement": r.describe(),
+		"kind": "branch" if r.branch else "rev" if r.rev else "version", "by": root.by}
+	if root.file:
+		item["file"] = _relative(root.file, spec.dir)
+	if r.writable:
+		item["writable"] = True
+	return item
 
 
 def _ref(entry):
@@ -75,8 +86,8 @@ def _dependencies(entry, state, lock):
 	return found
 
 
-def describe(spec, state, lock, checkouts, joined):
-	"""(packages.json's body, the read-only folders)."""
+def describe(spec, roots, state, lock, checkouts, joined):
+	"""(packages.json's body, the read-only folders); `roots` are the workspace's own dependencies (resolve.Root)."""
 	developed = {url_key(url): folder for url, folder in checkouts.items()}
 	packages, readonly, described = [], [], {}
 	for entry in lock.packages:
@@ -105,15 +116,13 @@ def describe(spec, state, lock, checkouts, joined):
 			readonly.append({"path": _relative(folder, spec.dir), "reason": behind_reason(source, status)})
 	sources = [{"name": name, "url": url, "web": web_url(url)} for name, url in spec.sources.items()]
 	named = {url_key(e.url): e.source for e in lock.packages}
-	for requirement in spec.packages:
-		url = spec.sources.get(requirement.source) or requirement.source
-		if all(url_key(s["url"]) != url_key(url) for s in sources):
-			sources.append({"name": named.get(url_key(url)) or repository_name(url), "url": url, "web": web_url(url), "git": True})
+	for root in roots:
+		if all(url_key(s["url"]) != url_key(root.url) for s in sources):
+			sources.append({"name": named.get(url_key(root.url)) or repository_name(root.url), "url": root.url, "web": web_url(root.url), "git": True})
 	for entry in lock.packages:
 		if all(url_key(s["url"]) != url_key(entry.url) for s in sources):
 			sources.append({"name": entry.source, "url": entry.url, "web": web_url(entry.url), "transitive": True})
-	requirements = [{"name": r.name or r.path, "path": r.path, "source": r.source, "url": spec.sources.get(r.source) or r.source, "requirement": r.describe(),
-		"kind": "branch" if r.branch else "rev" if r.rev else "version"} for r in spec.packages]
+	requirements = [_requirement(spec, root) for root in roots]
 	body = {"version": 1, "packagesFolder": spec.packages_dir.replace("\\", "/"), "sources": sources, "requirements": requirements,
 		"packages": packages, "checkouts": checkout_items}
 	return body, readonly

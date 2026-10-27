@@ -29,6 +29,7 @@ class PackageInfo:
 	description: str
 	dependencies: tuple  # manifest.PackageRequirement
 	projects: tuple      # ProjectInfo
+	version: str = None  # what its [package] says
 
 
 @dataclass
@@ -89,7 +90,7 @@ def build(manifest_texts, label):
 			parsed[folder] = _parse(data, folder, path, label)
 	for folder, spec in parsed.items():
 		if spec.package is not None:
-			index.packages[folder] = PackageInfo(folder, spec.package.description, spec.package.dependencies, ())
+			index.packages[folder] = PackageInfo(folder, spec.package.description, spec.package.dependencies, (), spec.package.version)
 	if "" in parsed and parsed[""].workspace is not None:
 		index.sources = dict(parsed[""].workspace.sources)
 	owned = {path: [] for path in index.packages}
@@ -101,7 +102,7 @@ def build(manifest_texts, label):
 			owned[owner].append(ProjectInfo(spec.project.name, folder, spec.project.depends))
 	for path, projects in owned.items():
 		package = index.packages[path]
-		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects))
+		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects), package.version)
 	return index
 
 

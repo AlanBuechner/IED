@@ -6,9 +6,11 @@ files. Otherwise it resolves (resolve.py: one `git ls-remote` per source at most
 mirrors), installs what changed (install.py) and writes the lock. A source being developed (`nuke package develop`)
 builds from its checkout, and the lock follows the checkout's HEAD."""
 
+import functools
 import hashlib
 import json
 import os
+from collections import defaultdict
 from dataclasses import dataclass, replace
 
 from .. import fsutil
@@ -16,7 +18,7 @@ from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, is_url, load
 from . import bridge, git, index, install, lockfile, writable
 from .resolve import Repositories, Resolver, Root
-from .store import Cache, url_key
+from .store import Cache, same_repository, url_key
 
 
 @dataclass
@@ -40,9 +42,9 @@ class Origin:
 	folder: str                 # the versioned package's folder (a develop checkout's root)
 
 
-def active(spec):
+def active(spec, projects=None):
 	"""Whether the workspace uses packages at all: anything else costs no file access."""
-	return bool(spec.sources or spec.packages) or lockfile.exists(spec)
+	return bool(spec.sources or spec.packages) or any(p.dependencies for p in (projects or {}).values()) or lockfile.exists(spec)
 
 
 def sync(spec, projects, options):
@@ -50,12 +52,12 @@ def sync(spec, projects, options):
 	cache = options.cache or Cache()
 	state = install.State(install.folder(spec.dir, spec.packages_dir))
 	local = {p.name.lower() for p in projects.values()}
-	roots = workspace_roots(spec)
+	roots = workspace_roots(spec, projects)
 	wanted = sorted({name for p in projects.values() for name in p.depends if name.lower() not in local})
 	lock = lockfile.read(spec)
 	if not roots and lock is None:
 		return []
-	stopping = writable.follow_manifest(spec, state, cache, options.log)
+	stopping = writable.follow_manifest(spec, roots, state, cache, options.log)
 	checkouts = {url: folder for url, folder in state.checkouts().items()}
 	digest = _digest(roots, checkouts)
 	try:
@@ -68,7 +70,7 @@ def sync(spec, projects, options):
 		stop.finish(cache)
 	_check_names(joined, projects)
 	if spec.ide:
-		bridge.write(spec, state, lock, checkouts, joined)
+		bridge.write(spec, roots, state, lock, checkouts, joined)
 	return joined
 
 
@@ -93,27 +95,107 @@ def _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, ca
 		return joined, lock
 
 
-def workspace_roots(spec):
-	"""The workspace's own needs: its [packages], and the dependencies its own packages declare on other sources."""
-	roots = [Root(spec.sources.get(r.source) or r.source, r, "the workspace") for r in spec.packages]
-	for folder, package in _local_packages(spec):
-		for dependency in package.dependencies:
-			if dependency.source is None:
-				continue
-			url = dependency.source if is_url(dependency.source) else spec.sources.get(dependency.source)
-			if url is None:
-				raise NukeError(f"{package.file}: package.dependencies.{dependency.path} names source '{dependency.source}', "
-					f"which the workspace's [sources] does not have")
-			roots.append(Root(url, dependency, f"the workspace's package {folder or '(root)'}"))
+def workspace_roots(spec, projects=None):
+	"""The workspace's own needs: each of its projects' [dependencies], its [packages], and what its own packages need
+	- less the packages its own folders hold, which a dependency on its own repository takes from here."""
+	local = local_packages(spec)
+	roots = [Root(spec.sources.get(r.source) or r.source, r, "the workspace", spec.file) for r in spec.packages
+		if local.path_of(spec.sources.get(r.source) or r.source, r.path) is None]
+	declared = set()
+	for project in sorted((p for p in (projects or {}).values() if p.package is None), key=lambda p: p.name.lower()):
+		declared.add(os.path.relpath(project.dir, spec.dir).replace("\\", "/"))
+		for requirement in project.dependencies:
+			url = source_url(spec, requirement, project.file)
+			if local.path_of(url, requirement.path) is None:
+				roots.append(Root(url, requirement, f"project {project.name}", project.file))
+	for folder, package in sorted(local.by_path.items()):
+		if (folder or ".") in declared:
+			continue
+		for requirement in package.dependencies:
+			url = source_url(spec, requirement, f"{folder or '.'}/nuke.toml")
+			if local.path_of(url, requirement.path) is None:
+				roots.append(Root(url, requirement, f"the workspace's package {folder or '(root)'}"))
 	return roots
 
 
-def _local_packages(spec):
-	"""(folder relative to the workspace, PackageSpec) of the workspace's own [package] tables: a repository of packages
-	builds them together, with what they need from elsewhere."""
-	found = index.in_folder(spec.dir, spec.name, skip=(spec.packages_dir,))
-	for path, info in found.packages.items():
-		yield path, info
+def source_url(spec, requirement, file):
+	"""The repository a dependency names: its URL, a [sources] name's, or None for its own repository."""
+	if requirement.source is None or is_url(requirement.source):
+		return requirement.source
+	url = spec.sources.get(requirement.source)
+	if url is None:
+		raise NukeError(f"{file}: {requirement.name or requirement.path} names source '{requirement.source}', which the "
+			f"workspace's [sources] does not have (or give its git URL: git = \"<url>\")")
+	return url
+
+
+class LocalPackages:
+	"""The packages in the workspace's own folders, as a dependency names them: by one of the checkout's remotes (or by
+	no repository, from a package of this one) and the package's path from the repository's top."""
+
+	def __init__(self, spec):
+		self.by_path = index.in_folder(spec.dir, spec.name, skip=(spec.packages_dir,)).packages   # workspace-relative
+		top, self.remotes = git.checkout_remotes(spec.dir)
+		prefix = os.path.relpath(spec.dir, top).replace("\\", "/") if top else "."
+		self.prefix = "" if prefix == "." else prefix
+
+	def path_of(self, url, path):
+		"""The workspace-relative path of the package of this workspace that a dependency on `path` of `url` names, or
+		None when it comes from elsewhere."""
+		if url is not None and not any(same_repository(url, remote) for remote in self.remotes):
+			return None
+		if self.prefix:
+			if not path.startswith(self.prefix + "/"):
+				return None
+			path = path[len(self.prefix) + 1:]
+		return path if path in self.by_path else None
+
+
+@functools.lru_cache(maxsize=8)
+def _local_packages(folder, name, packages_dir):
+	from ..manifest import WorkspaceSpec
+	return LocalPackages(WorkspaceSpec(name=name, dir=folder, file=os.path.join(folder, "nuke.toml"), packages_dir=packages_dir))
+
+
+def local_packages(spec):
+	"""The workspace's LocalPackages, read once per command."""
+	return _local_packages(spec.dir, spec.name, spec.packages_dir)
+
+
+def link(spec, projects):
+	"""Each project - the workspace's and the packages' - depends also on the projects of the packages its
+	[dependencies] name, so `depends` lists only what is not a package."""
+	if not any(p.dependencies for p in projects.values()):
+		return projects
+	local = local_packages(spec)
+	provided = defaultdict(list)        # (url key, package path) or ("", workspace-relative path) -> project names
+	for project in projects.values():
+		if project.package is not None:
+			provided[(url_key(project.package.url), project.package.package)].append(project.name)
+	for path, info in local.by_path.items():
+		provided[("", path)] += [p.name for p in info.projects if p.name in projects]
+	linked = {}
+	for name, project in projects.items():
+		names = []
+		for requirement in project.dependencies:
+			names += _provided(spec, local, provided, project, requirement)
+		known = {d.lower() for d in project.depends} | {project.name.lower()}
+		extra = [n for n in dict.fromkeys(names) if n.lower() not in known]
+		linked[name] = replace(project, depends=tuple(project.depends) + tuple(extra)) if extra else project
+	return linked
+
+
+def _provided(spec, local, provided, project, requirement):
+	origin = project.package
+	if origin is None:
+		url = source_url(spec, requirement, project.file)
+		path = local.path_of(url, requirement.path)
+		return provided.get(("", path), []) if path is not None else provided.get((url_key(url), requirement.path), [])
+	if requirement.source is None:
+		return provided.get((url_key(origin.url), requirement.path), [])
+	if is_url(requirement.source):
+		return provided.get((url_key(requirement.source), requirement.path), [])
+	return next((names for (key, path), names in provided.items() if key and path == requirement.path), [])
 
 
 def _digest(roots, checkouts):

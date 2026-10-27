@@ -255,3 +255,46 @@ def unpushed(repo):
 	"""Commits of HEAD that no remote branch has."""
 	text = run(["rev-list", "HEAD", "--not", "--remotes"], cwd=repo, check=False) or ""
 	return [line for line in text.splitlines() if line.strip()]
+
+
+def checkout_remotes(folder):
+	"""(the top folder of the git checkout holding `folder`, its remotes' URLs), read from its files - no git process,
+	so every command can ask; (None, []) outside a checkout."""
+	current = os.path.abspath(folder)
+	while not os.path.exists(os.path.join(current, ".git")):
+		parent = os.path.dirname(current)
+		if parent == current:
+			return None, []
+		current = parent
+	config = _config_of(os.path.join(current, ".git"))
+	try:
+		with open(config, encoding="utf-8", errors="replace") as f:
+			text = f.read()
+	except OSError:
+		return current, []
+	urls, in_remote = [], False
+	for line in text.splitlines():
+		stripped = line.strip()
+		if stripped.startswith("["):
+			in_remote = stripped.startswith("[remote ")
+		elif in_remote and stripped.startswith("url") and "=" in stripped:
+			urls.append(stripped.split("=", 1)[1].strip())
+	return current, urls
+
+
+def _config_of(dot_git):
+	"""The config file of a checkout's .git: the folder's own, or for a worktree (.git a file naming its gitdir) the main
+	repository's."""
+	if os.path.isdir(dot_git):
+		return os.path.join(dot_git, "config")
+	try:
+		with open(dot_git, encoding="utf-8") as f:
+			gitdir = f.read().strip().removeprefix("gitdir:").strip()
+	except OSError:
+		return os.path.join(dot_git, "config")
+	gitdir = os.path.normpath(os.path.join(os.path.dirname(dot_git), gitdir))
+	common = os.path.join(gitdir, "commondir")
+	if os.path.isfile(common):
+		with open(common, encoding="utf-8") as f:
+			gitdir = os.path.normpath(os.path.join(gitdir, f.read().strip()))
+	return os.path.join(gitdir, "config")

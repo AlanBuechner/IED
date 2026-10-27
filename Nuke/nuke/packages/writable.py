@@ -22,13 +22,12 @@ def source_name(spec, url):
 	return next((name for name, u in spec.sources.items() if url_key(u) == url_key(url)), None) or repository_name(url)
 
 
-def declared(spec):
-	"""{url key: (url, name, branch)} of the sources the workspace's [packages] marks writable."""
+def declared(spec, roots):
+	"""{url key: (url, name, branch)} of the sources a dependency of the workspace (a root) marks writable."""
 	found = {}
-	for requirement in spec.packages:
-		if requirement.writable:
-			url = spec.sources.get(requirement.source) or requirement.source
-			found.setdefault(url_key(url), (url, source_name(spec, url), requirement.branch))
+	for root in roots:
+		if root.requirement.writable:
+			found.setdefault(url_key(root.url), (root.url, source_name(spec, root.url), root.requirement.branch))
 	return found
 
 
@@ -137,10 +136,10 @@ def _move_aside(folder, aside, name):
 			time.sleep(0.25)
 
 
-def follow_manifest(spec, state, cache, log):
-	"""Makes the develop clones match the manifest's `writable` entries: a clone for each source newly marked, and the
-	Stoppings of those no longer marked (sources developed by `nuke package develop` stay)."""
-	wanted = declared(spec)
+def follow_manifest(spec, roots, state, cache, log):
+	"""Makes the develop clones match the manifests' `writable` dependencies: a clone for each source newly marked, and
+	the Stoppings of those no longer marked (sources developed by `nuke package develop` stay)."""
+	wanted = declared(spec, roots)
 	for key, (url, name, branch) in wanted.items():
 		entry = state.develop.get(key)
 		if entry is None or not os.path.isdir(state.checkout_dir(entry)):

@@ -14,6 +14,7 @@ KINDS = ("executable", "module", "library", "custom")   # library: a non-C4 lang
 SUBSYSTEMS = ("console", "windows")                     # a C4 executable's (C4.exe --subsystem)
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+VERSION = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
 PACKAGE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$")
 
 
@@ -76,6 +77,8 @@ class ProjectSpec:
 	                                # builds through its driver (languages.py), a custom project's is for IDEs only
 	driver_options: dict = field(default_factory=dict)   # [project.driver]: what the language's driver reads
 	package: object = None          # packages.Origin of a project a package brings (None: the workspace's own)
+	dependencies: tuple = ()        # [dependencies]: the packages it uses (PackageRequirements); their projects join
+	                                # its depends
 
 	@property
 	def is_c4(self):
@@ -148,7 +151,8 @@ class PackageSpec:
 	dir: str
 	file: str
 	description: str = ""
-	dependencies: tuple = ()        # PackageRequirements on other sources (and pinned ones of its own repository)
+	dependencies: tuple = ()        # [dependencies] (and [package.dependencies]): the packages it uses
+	version: str = None             # its version, which `nuke package release` writes and tags
 
 
 @dataclass(frozen=True)
@@ -271,15 +275,20 @@ def parse(data, path):
 	package_table = root.table("package")
 	sources = _sources(root.table("sources"))
 	packages = root.table("packages")
+	dependencies_table = root.table("dependencies")
 	root.done()
 	if workspace_table is None and project_table is None and package_table is None:
 		raise NukeError(f"{path}: needs a [workspace], [project] or [package] table")
 	if workspace_table is None and (configurations or commands or any(languages) or sources or packages is not None):
 		raise NukeError(f"{path}: [configurations], [commands], [languages], [sources] and [packages] belong to the workspace file")
+	if dependencies_table is not None and project_table is None and package_table is None:
+		raise NukeError(f"{path}: [dependencies] belong to a project or a package (a [project] or [package] table)")
 	requirements = _requirements(packages, path, needs_source=True) if packages is not None else ()
+	# Every dependency names its repository, its own included: a package can live in any repository.
+	dependencies = _requirements(dependencies_table, path, needs_source=True, writable=True) if dependencies_table is not None else ()
 	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path, sources, requirements) if workspace_table else None
-	project = _project(project_table, folder, path) if project_table else None
-	package = _package(package_table, folder, path) if package_table else None
+	project = _project(project_table, folder, path, dependencies) if project_table else None
+	package = _package(package_table, folder, path, dependencies) if package_table else None
 	return ManifestFile(path, workspace, project, package)
 
 
@@ -300,11 +309,10 @@ def _sources(t):
 	return sources
 
 
-def _requirements(t, path, needs_source):
-	"""[packages] or [package.dependencies]: name -> a table of git (a URL) or source (a [sources] name), path (the
-	package's folder in the repository; the name when it has none), version, branch or rev - and, in a workspace's
-	[packages], writable; or "<source>@<requirement>" for the package at the name's path (in a package, just the
-	requirement: its own repository)."""
+def _requirements(t, path, needs_source, writable=None):
+	"""[dependencies] (or a workspace's [packages]): name -> a table of git (the repository's URL) or source (a
+	[sources] name), path (the package's folder in the repository; the name when it has none), version, branch or rev,
+	and writable; or "<source>@<requirement>" for the package at the name's path."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
@@ -316,7 +324,7 @@ def _requirements(t, path, needs_source):
 					f"{{ git = \"<url>\", version = \"{value or '*'}\" }}")
 			requirement = PackageRequirement(key, path, source=source or None, version=version or "*", name=key)
 		elif isinstance(value, dict):
-			requirement = _requirement_table(Table(value, where, path), key, path, needs_source)
+			requirement = _requirement_table(Table(value, where, path), key, path, needs_source, needs_source if writable is None else writable)
 		else:
 			raise NukeError(f"{path}: {where} must be \"<source>@<version>\" or a table (git or source, version, branch, rev)")
 		if not PACKAGE_PATH.match(requirement.path):
@@ -325,7 +333,7 @@ def _requirements(t, path, needs_source):
 	return tuple(found)
 
 
-def _requirement_table(table, key, path, in_workspace):
+def _requirement_table(table, key, path, needs_source, may_be_writable):
 	where = table.where
 	git = table.string("git")
 	source = table.string("source")
@@ -333,27 +341,33 @@ def _requirement_table(table, key, path, in_workspace):
 		raise NukeError(f"{path}: {where} takes git or source, not both")
 	if git is not None and not is_url(git):
 		raise NukeError(f"{path}: {where}.git must be a git URL (https://..., git@host:owner/repo.git or a path), not '{git}'")
-	writable = table.boolean("writable", False) if in_workspace else False
+	writable = table.boolean("writable", False) if may_be_writable else False
 	requirement = PackageRequirement(table.string("path") or key, path, source=git or source, version=table.string("version"),
 		branch=table.string("branch"), rev=table.string("rev"), writable=writable, name=key)
 	table.done()
 	if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
 		raise NukeError(f"{path}: {where} takes one of version, branch and rev")
-	if in_workspace and not requirement.source:
+	if needs_source and not requirement.source:
 		raise NukeError(f"{path}: {where} needs its repository: git = \"<url>\" (or source, a name from [sources])")
 	if writable and requirement.rev:
 		raise NukeError(f"{path}: {where}: a writable package is a clone on a branch, so it takes version or branch, not rev")
 	return requirement
 
 
-def _package(t, folder, path):
+def _package(t, folder, path, dependencies=()):
 	t.where = "package"
-	dependencies = t.table("dependencies")
+	if t.table("dependencies") is not None:
+		raise NukeError(f"{path}: [package.dependencies] is now [dependencies], each entry with its repository's URL: "
+			f"Name = {{ git = \"<url>\", path = \"<its folder there>\", version = \"^1.0\" }}")
+	version = t.string("version")
+	if version is not None and not VERSION.match(version):
+		raise NukeError(f"{path}: package.version must be a version like 0.2.0 (got '{version}')")
 	spec = PackageSpec(
 		dir=folder,
 		file=path,
 		description=t.string("description", ""),
-		dependencies=_requirements(dependencies, path, needs_source=False) if dependencies is not None else (),
+		dependencies=tuple(dependencies),
+		version=version,
 	)
 	t.done()
 	return spec
@@ -463,7 +477,7 @@ def _command(name, t, path):
 	return spec
 
 
-def _project(t, folder, path):
+def _project(t, folder, path, dependencies=()):
 	t.where = "project"
 	name = t.string("name") or os.path.basename(folder)
 	if not PROJECT_NAME.match(name):
@@ -500,6 +514,7 @@ def _project(t, folder, path):
 		config_overrides=dict(_override(name, o) for name, o in t.subtables("config")),
 		scripts=t.strings("scripts"),
 		driver_options=driver,
+		dependencies=tuple(dependencies),
 	)
 	t.done()
 	if kind != "custom" and spec.output:
