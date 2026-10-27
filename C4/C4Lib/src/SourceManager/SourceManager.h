@@ -66,8 +66,10 @@ namespace Scripting
 		/// The default library at `root` (Bedrock) is opt-in by include: the library files the registered
 		/// program sources include are registered the same way as an umbrella entry. A program that
 		/// includes none of it compiles none of it, and the program's own file wins a name both have.
-		/// Its prelude (Prelude/prelude.ch) is registered always: every unit includes it (D-43).
-		uint32 RegisterIncludedLibraryFiles(const fs::path& root);
+		/// Its prelude (Prelude/prelude.ch) is registered always: every unit includes it (D-43). `opened` are library
+		/// files an editor has open: the library's own, registered with it whether or not the program reaches them, so
+		/// such a file is never a second unit beside the library's (BUG-410).
+		uint32 RegisterIncludedLibraryFiles(const fs::path& root, const std::vector<fs::path>& opened = {});
 
 		/// The prelude's source id; 0 when no default library with a prelude was registered.
 		uint32 PreludeId() const { return m_PreludeId; }

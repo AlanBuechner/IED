@@ -31,7 +31,10 @@ pipeline as C4.exe, and answers every request from the compiler's own data:
 - **Interop** blocks are processed declarations-only.
 - **The default library** is registered like C4.exe does it: the Bedrock files the program includes (and their
   implementations), from the install the client names in `c4Home`, else `Toolchain::Bedrock()` (the install the
-  server runs from, or the repository's `Bedrock/` in a development build).
+  server runs from, or the repository's `Bedrock/` in a development build). A library file open in the editor (Ctrl+click into `Core::String`) is the
+  library's own unit, registered with the library whether or not the program reaches it and given the editor's text -
+  never a second unit beside it, which reported "redefinition of type 'String': it is already a type (string.ch:12)"
+  on the file itself (BUG-410).
 
 If a feature needs a fact the model does not expose, the fix is a new model query, not logic in the LSP.
 

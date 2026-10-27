@@ -201,11 +201,13 @@ namespace Scripting
 		}
 	}
 
-	uint32 SourceManager::RegisterIncludedLibraryFiles(const fs::path& rootPath)
+	uint32 SourceManager::RegisterIncludedLibraryFiles(const fs::path& rootPath, const std::vector<fs::path>& opened)
 	{
 		if (!IsFolder(Utf8(rootPath))) return 0;
 		std::string root = NormalizePath(Utf8(fs::absolute(rootPath).lexically_normal()));
 		std::vector<fs::path> entries;
+		for (const fs::path& file : opened)
+			if (IsFile(Utf8(file))) entries.push_back(file);
 		std::map<std::string, bool> exists; // the file system asked once per path: most files include the same headers
 		for (const auto& [id, info] : m_Sources)
 			for (const std::string& inc : ExtractIncludes(info.source->Data()))

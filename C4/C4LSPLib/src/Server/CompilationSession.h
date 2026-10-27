@@ -101,7 +101,13 @@ namespace C4LSP::Server
 	private:
 		// Display name a document URI maps to (root-relative, or just the file name).
 		std::string DisplayNameForUri(const std::string& uri) const;
+		// Each open document's text over its unit's; one no unit has yet is compiled from memory, unless it is a file of
+		// the default library, which the library registers with its own (BUG-410).
 		void ApplyOpenDocumentOverrides();
+		// Whether the document `uri` is a file of the default library folder.
+		bool IsLibraryDocument(const std::string& uri) const;
+		// The library's files the editor has open, as absolute paths.
+		std::vector<std::string> OpenLibraryDocuments() const;
 		// The described projects' sources; false when there is no usable description.
 		bool RegisterProjects();
 		void RegisterLooseSources();

@@ -19,5 +19,11 @@ namespace Testing
 
 		TEST_FUNC(Lsp.Session)
 		void TestLibraryFolderWithoutBedrockLeavesTheIncludeUnresolved();
+
+		TEST_FUNC(Lsp.Session)
+		void TestAnOpenLibraryFileIsTheLibrarysOwn();
+
+		TEST_FUNC(Lsp.Session)
+		void TestAnOpenLibraryFileTheProgramDoesNotReachIsTheLibrarys();
 	};
 } // namespace Testing

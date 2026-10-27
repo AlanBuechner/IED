@@ -90,7 +90,10 @@ namespace C4LSP::Server
 			m_Compiler->RegisterInMemory(name, text);
 
 		ApplyOpenDocumentOverrides();
-		m_Compiler->RegisterIncludedLibraryFiles(fs::path(m_LibraryFolder)); // as C4.exe does: after the program's own sources
+		std::vector<fs::path> openLibraryFiles;
+		for (const std::string& path : OpenLibraryDocuments()) openLibraryFiles.push_back(fs::path(path));
+		m_Compiler->RegisterIncludedLibraryFiles(fs::path(m_LibraryFolder), openLibraryFiles); // as C4.exe does: after the program's own sources
+		ApplyOpenDocumentOverrides(); // the library's files open in the editor have units now
 		RunPreprocessPhase();
 
 		m_Compiler->CompileAll();
@@ -177,6 +180,7 @@ namespace C4LSP::Server
 	{
 		for (const auto& [uri, text] : m_OpenDocuments)
 		{
+			if (IsLibraryDocument(uri)) continue; // the library's folder is not the program's (BUG-410)
 			const std::string path = Protocol::DocumentUri::FromUri(uri);
 			const fs::path folder = fs::path(std::u8string(path.begin(), path.end())).parent_path();
 			if (!folder.empty() && fs::is_directory(folder))
@@ -258,7 +262,7 @@ namespace C4LSP::Server
 			{
 				m_Compiler->GetSourceManager().SetSourceText(id, text);
 			}
-			else
+			else if (!IsLibraryDocument(uri))
 			{
 				// A new unsaved file that is not part of the scanned folder: compile it from memory.
 				m_Compiler->GetSourceManager().RegisterInMemory(DisplayNameForUri(uri), text);
@@ -512,6 +516,25 @@ void CompilationSession::RunPreprocessPhase()
 
 		size_t lastSlash = path.find_last_of('/');
 		return lastSlash == std::string::npos ? path : path.substr(lastSlash + 1);
+	}
+
+	bool CompilationSession::IsLibraryDocument(const std::string& uri) const
+	{
+		if (m_LibraryFolder.empty()) return false;
+		std::string path = Protocol::DocumentUri::FromUri(uri);
+		std::replace(path.begin(), path.end(), '\\', '/');
+		std::string folder = fs::absolute(fs::path(m_LibraryFolder)).lexically_normal().generic_string();
+		if (folder.empty() || folder.back() != '/') folder += '/';
+		std::string relative;
+		return HasPrefixInsensitive(path, folder, relative);
+	}
+
+	std::vector<std::string> CompilationSession::OpenLibraryDocuments() const
+	{
+		std::vector<std::string> paths;
+		for (const auto& [uri, text] : m_OpenDocuments)
+			if (IsLibraryDocument(uri)) paths.push_back(Protocol::DocumentUri::FromUri(uri));
+		return paths;
 	}
 
 	std::vector<std::string> CompilationSession::BuildPreprocessRoots() const
