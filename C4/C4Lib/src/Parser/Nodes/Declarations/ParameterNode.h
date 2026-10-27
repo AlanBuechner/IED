@@ -32,6 +32,8 @@ namespace Scripting
 		std::span<const Ref<AstNode>> Children() const override; // annotations + type + default value
 		Core::String ToString() const override;
 static Ref<ParameterNode> TryParse(ParserState& state);
+		/// C's `(void)` after the open paren: no parameters, as in C++ (BUG-391). Consumes the `void` and says so.
+		static bool SkipVoidList(Lexer& lexer);
 		void ParseBody(ParserState& state);
 
 	protected:

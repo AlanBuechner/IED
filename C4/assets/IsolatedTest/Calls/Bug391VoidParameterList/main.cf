@@ -1,0 +1,27 @@
+// BUG-391: C's `(void)` is an empty parameter list, as in C++ - a function's, a method's, a funcptr type's and a
+// lambda's - where it crashed the compiler. main returns the failures.
+int32 Answer(void) { return 42; }
+int32 Forward(void);
+
+class Counter
+{
+	public int32 count;
+	public int32 Next(void) { count = count + 1; return count; }
+}
+
+int32 main(void)
+{
+	int32 failures = 0;
+	failures += Answer() == 42 ? 0 : 1;
+	failures += Forward() == 7 ? 0 : 1;
+	Counter counter;
+	counter.Next();
+	failures += counter.Next() == 2 ? 0 : 1;
+	funcptr<int32(void)> pointer = Answer;
+	failures += pointer() == 42 ? 0 : 1;
+	func<int32(void)> lambda = [](void) -> int32 { return 5; };
+	failures += lambda() == 5 ? 0 : 1;
+	return failures;
+}
+
+int32 Forward(void) { return 7; }

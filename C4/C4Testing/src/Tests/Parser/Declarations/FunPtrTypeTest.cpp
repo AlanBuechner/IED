@@ -19,6 +19,21 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// BUG-391: funcptr<int32(void)> takes nothing, as C's int32 (*)(void) does.
+	void FunPtrTypeTest::TestVoidParameterList()
+	{
+		auto stream = Scripting::Source::FromMemory("funcptr<int32(void)>");
+		Scripting::Lexer lexer(*stream, 0);
+		Scripting::ErrorTracker errorTracker;
+		Scripting::ParserState state(lexer, errorTracker);
+
+		auto node = Scripting::FunPtrTypeNode::TryParse(state);
+		TEST_ASSERT(node != nullptr);
+		TEST_ASSERT(node->ParameterCount() == 0);
+		TEST_ASSERT(errorTracker.GetErrors().Empty());
+		TEST_PASSED();
+	}
+
 	void FunPtrTypeTest::TestNestedFunPtrType()
 	{
 		auto stream = Scripting::Source::FromMemory("funcptr<float(float a, float b)>");

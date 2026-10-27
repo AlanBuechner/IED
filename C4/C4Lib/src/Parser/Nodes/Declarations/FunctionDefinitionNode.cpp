@@ -354,6 +354,7 @@ namespace Scripting
 		{
 			m_OpenParenToken = openParen;
 			lexer.NextCompoundToken();
+			ParameterNode::SkipVoidList(lexer);
 
 			while (true)
 			{

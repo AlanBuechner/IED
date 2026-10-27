@@ -73,6 +73,27 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// BUG-392: `extern "c" include "x.h"` names a C header for the interop pass; the library's files are only what the
+	// program's C4 includes name. A header found under the library root (an absolute path always is) was parsed as C4.
+	void SourceFolderTest::AForeignIncludeIsNoLibraryFile()
+	{
+		Folder program("foreign_program");
+		Folder library("foreign_library");
+		library.Write("native.h", "int answer(void);\n");
+		library.Write("other.h", "int other(void);\n");
+		library.Write("lib.ch", "int32 lib = 1;\n");
+		program.Write("main.cf", "extern \"c\" include \"" + library.Utf8("native.h") + "\"\n"
+			"extern \"c++\"\tinclude \"other.h\" { define(\"X\"); }\n"
+			"include \"lib.ch\"\nint32 main() { return lib; }\n");
+		SourceManager sources;
+		TEST_ASSERT_EQ(sources.RegisterFolder(program.root), 1u);
+		TEST_ASSERT_EQ(sources.RegisterIncludedLibraryFiles(library.root), 1u);
+		TEST_ASSERT(sources.FindByAbsPath(library.Utf8("lib.ch")) != 0);
+		TEST_ASSERT(sources.FindByAbsPath(library.Utf8("native.h")) == 0);
+		TEST_ASSERT(sources.FindByAbsPath(library.Utf8("other.h")) == 0);
+		TEST_PASSED();
+	}
+
 	void SourceFolderTest::ADeepFolderRegistersAndReads()
 	{
 		Folder folder("deep");

@@ -30,6 +30,9 @@ qualifiers (`const`, `override`, `final`, `noexcept`), `= 0`, `extends T`, then 
   a recursive or virtual call stays a call.
 - The return type comes first, as in C++. There is no trailing-return form for named functions.
 - Parameter names may be omitted in a declaration: `void F(int32);`.
+- C's `(void)` is an empty parameter list, as in C++: `int32 Next(void)` is `int32 Next()`, and so are
+  `funcptr<int32(void)>` and a lambda's `(void)`. Anywhere else `void` is no parameter's type: `parameter 'h' of
+  'Measure' has type void`.
 - `return;` without a value in a non-`void` function is an error (`missing return value for non-void
   function`), and so is control that can reach the end of one (D-55): `control reaches the end of non-void
   function 'Sign': return a 'int32' on every path`, at its closing brace. A body ends on every path when each

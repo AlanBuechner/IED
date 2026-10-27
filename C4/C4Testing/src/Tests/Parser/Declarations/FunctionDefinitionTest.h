@@ -70,5 +70,8 @@ namespace Testing
 
 		TEST_FUNC(Parser.FunctionDefinition)
 		void TestOwnerTemplateHeader();
+
+		TEST_FUNC(Parser.FunctionDefinition)
+		void TestVoidParameterListIsEmpty();
 	};
 }

@@ -1,0 +1,2 @@
+int32 Measure(int32 width, void height) { return width; }
+int32 main() { return 0; }

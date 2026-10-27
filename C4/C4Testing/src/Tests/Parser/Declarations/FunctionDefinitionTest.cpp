@@ -70,6 +70,24 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// BUG-391: C's `(void)` alone is an empty parameter list; a void among parameters stays a parameter (the model
+	// refuses it).
+	void FunctionDefinitionTest::TestVoidParameterListIsEmpty()
+	{
+		ParsedFunction empty = ParseFunction("int32 Answer(void) { return 42; }");
+		TEST_ASSERT(empty.node != nullptr);
+		TEST_ASSERT_EQ(empty.node->GetParameters().Count(), 0u);
+		TEST_ASSERT(empty.errors == 0);
+		ParsedFunction declared = ParseFunction("int32 Answer( void );");
+		TEST_ASSERT(declared.node != nullptr && declared.node->GetParameters().Count() == 0 && declared.node->IsDeclaration());
+		ParsedFunction named = ParseFunction("int32 Measure(int32 width, void height);");
+		TEST_ASSERT(named.node != nullptr);
+		TEST_ASSERT_EQ(named.node->GetParameters().Count(), 2u);
+		ParsedFunction pointer = ParseFunction("int32 Read(void* data) { return 0; }");
+		TEST_ASSERT(pointer.node != nullptr && pointer.node->GetParameters().Count() == 1);
+		TEST_PASSED();
+	}
+
 	void FunctionDefinitionTest::TestRejectedModifiers()
 	{
 		const char* sources[] = { "abstract float Area() { return 1.0f; }", "static abstract float Area();", "concurrent void Work() { }" };

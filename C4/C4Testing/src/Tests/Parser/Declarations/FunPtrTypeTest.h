@@ -55,5 +55,8 @@ namespace Testing
 
 		TEST_FUNC(Parser.FunPtrType)
 		void TestAliasFunPtrType();
+
+		TEST_FUNC(Parser.FunPtrType)
+		void TestVoidParameterList();
 	};
 }

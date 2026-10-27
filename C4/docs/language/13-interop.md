@@ -43,7 +43,8 @@ Rules:
 
 - `extern` declarations appear only at file scope (like `include`), and the trailing `;` is
   optional.
-- Paths are relative to the declaring file.
+- Paths are relative to the declaring file, or absolute. A foreign header is only ever bound, never read as C4,
+  wherever it lies (an absolute path into a toolchain's `C4Api/` included).
 - A foreign source also sees the runtime's C headers, so native code can register with it: `#include
   "ReflectABI.h"` gives the reflection registry (`c4_reflect_register_type`, ..., see
   [runtime/02-reflection.md](../runtime/02-reflection.md)).
@@ -75,6 +76,7 @@ CBind maps foreign declarations to C4 declarations:
 | bitfields | the integers that store them, named after the run: `uint32 __bits_a_b_c` (C4 has no bitfields: read with shifts and masks) |
 | a member C4 cannot spell (`__int128`) or place (a member of a `#pragma pack` record that is not aligned) | its bytes, under its name: `uint8[16] big` |
 | flexible array member | left out (it has no size); the record keeps C's size |
+| a struct only declared, never defined (an opaque handle: `typedef struct c4a_parse c4a_parse;`) | `void*` wherever a pointer to it appears; the name itself is not bound |
 | C++ namespace | flattened: `mathlib::Dot` is called as `Dot` |
 | constructor | `[operator("create")]` extension method, so `new Counter(40)` works |
 | instance method | extension method on the type: `c->Add(5)` |

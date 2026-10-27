@@ -17,5 +17,7 @@ namespace Testing
 		void OnlyC4SourcesAreRegistered();
 		TEST_FUNC(SourceManager.Folders)
 		void ADeepFolderRegistersAndReads();
+		TEST_FUNC(SourceManager.Folders)
+		void AForeignIncludeIsNoLibraryFile();
 	};
 } // namespace Testing

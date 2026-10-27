@@ -2795,5 +2795,9 @@
     "NativeBytesOfValue": {
         "expect": ["native_bytes_of(x) counts x where it is: a variable, field, element or *p"],
         "reason": "native_bytes_of reads the value in place; a temporary has no place to read."
+    },
+    "VoidParameter": {
+        "expect": ["main.cf (1:1) error: parameter 'height' of 'Measure' has type void"],
+        "reason": "BUG-391: a parameter holds a value; only C's `(void)` alone, an empty list, may name void. It crashed the compiler."
     }
 }

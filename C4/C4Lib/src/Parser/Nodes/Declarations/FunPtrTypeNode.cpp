@@ -116,6 +116,7 @@ namespace Scripting
 		}
 		m_OpenParenToken = openParen;
 		lexer.NextCompoundToken();
+		ParameterNode::SkipVoidList(lexer);
 
 		// 5. Parse parameters
 		while (true)

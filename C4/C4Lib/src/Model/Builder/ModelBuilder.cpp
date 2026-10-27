@@ -1,6 +1,7 @@
 #include "Model/Builder/ModelBuilder.h"
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Model/Templates/MemberTemplates.h"
+#include "Model/Types/AliasType.h"
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/ValueContainment.h"
 #include "Model/Types/VirtualTables.h"
@@ -137,6 +138,28 @@ namespace Scripting
 			return QueryResult<void>::Success();
 		}
 
+		bool IsVoid(const Type* t)
+		{
+			while (t && t->GetKind() == TypeKind::Alias) t = static_cast<const AliasType*>(t)->GetAliasedType();
+			return t && t->GetKind() == TypeKind::Void;
+		}
+
+		// A parameter holds a value, so `void` is no parameter's type; C's `(void)` alone is an empty list (BUG-391).
+		QueryResult<void> CheckParameterTypes(const FunctionRecord& rec)
+		{
+			if (!rec.type) return QueryResult<void>::Success();
+			const auto& params = rec.type->GetParameters();
+			for (uint32 i = 0; i < params.Count(); ++i)
+				if (IsVoid(params[i].m_Type))
+				{
+					const Core::String name = i < rec.paramNames.Count() && !rec.paramNames[i].empty() ? "'" + rec.paramNames[i] + "'" : "#" + std::to_string(i + 1);
+					return QueryResult<void>::Fail(QueryError::NotAValue, "parameter " + name + " of '" + rec.name + "' has type void: a parameter "
+						"holds a value (a function without parameters is written " + rec.name + "() or " + rec.name + "(void))",
+						rec.declarations.Empty() ? SourceLocation() : rec.declarations[0]->startLocation);
+				}
+			return QueryResult<void>::Success();
+		}
+
 		void Report(ErrorTracker* errors, const ObjectType* obj, const QueryResult<void>& rule)
 		{
 			if (!rule.Ok() && errors) errors->AddError(rule.loc.line ? rule.loc : obj->GetDeclLocation(), rule.message, ErrorSeverity::Error);
@@ -169,8 +192,12 @@ namespace Scripting
 		Core::Vector<const FunctionRecord*> records;
 		model.AllFunctionRecords(records);
 		for (const FunctionRecord* rec : records)
+		{
 			if (auto names = CheckLifecycleOperators(*rec); !names.Ok() && ctx.errors)
 				ctx.errors->AddError(rec->bodyNode ? rec->bodyNode->startLocation : SourceLocation(), names.message, ErrorSeverity::Error);
+			if (auto params = CheckParameterTypes(*rec); !params.Ok() && ctx.errors)
+				ctx.errors->AddError(params.loc, params.message, ErrorSeverity::Error);
+		}
 		CheckTargets(ctx, model, records);
 	}
 

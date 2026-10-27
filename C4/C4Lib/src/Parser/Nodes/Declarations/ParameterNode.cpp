@@ -45,6 +45,15 @@ namespace Scripting
 		return node;
 	}
 
+	bool ParameterNode::SkipVoidList(Lexer& lexer)
+	{
+		const Token first = lexer.PeekCompound();
+		if (first.GetType() != TokenType::Identifier || first.GetText() != "void" || lexer.PeekCompound(1).GetType() != TokenType::CloseParen)
+			return false;
+		lexer.NextCompoundToken();
+		return true;
+	}
+
 	void ParameterNode::ParseBody(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();

@@ -153,7 +153,28 @@ namespace Scripting
 
 	namespace
 	{
-		// The `include "..."` targets written in a source text (commented-out lines skipped).
+		size_t SkipSpaceBack(const std::string& text, size_t end)
+		{
+			while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+			return end;
+		}
+
+		// Whether the `include` at `at` is a foreign one, `extern "c" include "x.h"`: a C or C++ header for the interop
+		// pass to bind, never a C4 file of the program or the library (BUG-392).
+		bool IsForeignInclude(const std::string& text, size_t at)
+		{
+			size_t end = SkipSpaceBack(text, at);
+			if (end < 2 || text[end - 1] != '"') return false;
+			const size_t open = text.rfind('"', end - 2);
+			if (open == std::string::npos) return false;
+			end = SkipSpaceBack(text, open);
+			const std::string keyword = "extern";
+			if (end < keyword.size() || text.compare(end - keyword.size(), keyword.size(), keyword) != 0) return false;
+			const size_t start = end - keyword.size();
+			return start == 0 || (!std::isalnum(static_cast<unsigned char>(text[start - 1])) && text[start - 1] != '_');
+		}
+
+		// The `include "..."` targets written in a source text (commented-out lines and foreign includes skipped).
 		std::vector<std::string> ExtractIncludes(const std::string& text)
 		{
 			std::vector<std::string> out;
@@ -167,7 +188,7 @@ namespace Scripting
 					if (text[b - 1] == '\n') break;
 					if (text[b - 1] == '/' && b >= 2 && text[b - 2] == '/') { commentedOut = true; break; }
 				}
-				if (!wordStart || commentedOut) { pos = i + 1; continue; }
+				if (!wordStart || commentedOut || IsForeignInclude(text, i)) { pos = i + 1; continue; }
 				size_t j = i + 7;
 				while (j < text.size() && std::isspace(static_cast<unsigned char>(text[j]))) ++j;
 				if (j >= text.size() || text[j] != '"') { pos = i + 1; continue; }

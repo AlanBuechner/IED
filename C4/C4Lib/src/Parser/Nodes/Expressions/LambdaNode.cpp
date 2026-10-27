@@ -158,6 +158,7 @@ namespace Scripting
 	{
 		Lexer& lexer = state.GetLexer();
 		if (!Expect(state, TokenType::OpenParen, "'(' after the capture list")) return false;
+		ParameterNode::SkipVoidList(lexer);
 		while (lexer.PeekCompound().GetType() != TokenType::CloseParen)
 		{
 			const Token t = lexer.PeekCompound();
