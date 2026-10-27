@@ -29,10 +29,11 @@ nuke package remove PACKAGE
   stop using it
 nuke package develop SOURCE [--at FOLDER]
   build the source's packages from a git checkout: packages/<source>/, a clone at the tip of its default branch (or an
-  existing clone, --at); nuke.lock follows the checkout's commits
+  existing clone, --at); nuke.lock follows the checkout's commits, and the workspace's Go and Rust projects build the
+  clone's modules and crates they require (a go.work, Cargo's [patch], under build/develop/)
 nuke package lock SOURCE [--keep]
-  stop developing: the lock's commits are installed read-only again and the clone goes (refused while it has changes
-  that are not committed and pushed; --keep moves the clone to packages/<source>.kept instead)
+  stop developing: the lock's commits are installed read-only again, Go and Rust go back to their releases and the clone
+  goes (refused while it has changes that are not committed and pushed; --keep moves the clone to packages/<source>.kept)
 nuke package pull SOURCE
   bring a develop checkout up to date with its remote (git pull --rebase)
 nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
@@ -343,7 +344,7 @@ def _lock(cli, args):
 		install.remove(aside)
 		os.replace(folder, aside)
 	try:
-		context.load(resolve=True)
+		workspace = context.load(resolve=True)
 	except (NukeError, OSError):
 		if aside:
 			install.remove(folder)
@@ -352,6 +353,8 @@ def _lock(cli, args):
 		context.state.develop[url_key(url)] = entry
 		context.state.save()
 		raise
+	# Go and Rust projects go back to the releases; their next build points them again at what is still developed.
+	install.remove(workspace.develop_root())
 	context.cache.record_checkout(url, folder, present=False)
 	if aside and not options.keep:
 		install.remove(aside)

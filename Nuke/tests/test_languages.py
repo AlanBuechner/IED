@@ -11,13 +11,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
+import types
 import unittest
 
 from support import WorkspaceTest, read, write_files
 from nuke import cli, languages, manifest, toolchains
 from nuke.errors import NukeError
 from nuke.log import Log
+from nuke.packages import checkouts
 
 FAKE_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_tool.py")
 CARGO_TOML = "[package]\nname = \"game\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
@@ -186,6 +189,98 @@ class GoTests(LanguageTest):
 
 def real(tool):
 	return shutil.which(tool) is not None
+
+
+class DevelopCheckoutTests(LanguageTest):
+	"""What the go and cargo drivers write while the workspace develops a package source (IED docs/31 section 7): the
+	clone's modules and crates the project gets, followed through one another, and nothing for a project that gets none.
+	The real tools build against them in test_packages.NativeToolTests."""
+
+	def setUp(self):
+		super().setUp()
+		self.gowork = os.environ.pop("GOWORK", None)
+		self.clone = self.path("packages", "engine")
+
+	def tearDown(self):
+		if self.gowork is not None:
+			os.environ["GOWORK"] = self.gowork
+		super().tearDown()
+
+	def context(self, name, url="https://github.com/Alan/Engine.git"):
+		os.makedirs(self.clone, exist_ok=True)
+		subprocess.run(["git", "init", "--quiet", self.clone], check=True)
+		project = types.SimpleNamespace(name=name, dir=self.path(name), kind="executable", driver_options={})
+		return languages.DriverContext(project, None, "x64", "windows", "", "", Log(io.StringIO()),
+			checkouts=(checkouts.Checkout("engine", url, self.clone),), develop_dir=self.path("build", "develop", name))
+
+	def driver(self, language):
+		return languages.load_driver(languages.find_packages(self.root, {})[language])
+
+	def test_go_uses_the_clone_modules_the_project_requires(self):
+		self.files({
+			"Server/go.mod": "module example.com/server\n\ngo 1.21\n\nrequire (\n\texample.com/engine/net v0.1.0 // indirect\n"
+				"\tgolang.org/x/text v0.3.0\n)\n",
+			"packages/engine/net/go.mod": "module example.com/engine/net\n\ngo 1.22.1\n\nrequire example.com/engine/wire v0.1.0\n",
+			"packages/engine/wire/go.mod": "module \"example.com/engine/wire\" // quoted\ngo 1.20rc1\n",
+			"packages/engine/tools/go.mod": "module example.com/engine/tools\n\ngo 1.25\n",
+		})
+		work = read(self.driver("go").develop_env(self.context("Server"))["GOWORK"])
+		self.assertIn("\ngo 1.22.1\n", work, "the newest go directive of the modules it uses")
+		uses = [json.loads(line.strip()) for line in work.splitlines() if line.startswith("\t")]
+		self.assertEqual([os.path.normpath(self.path(*p.split("/"))) for p in ("Server", "packages/engine/net", "packages/engine/wire")], uses,
+			"the project, what it requires of the clone and what that requires; not the rest of the clone")
+
+	def test_go_without_a_clone_module_gets_no_go_work(self):
+		self.files({"Server/go.mod": "module example.com/server\n\ngo 1.21\n\nrequire example.com/elsewhere v1.0.0\n",
+			"packages/engine/net/go.mod": "module example.com/engine/net\n", "build/develop/Server/go.work": "go 1.21\n"})
+		self.assertEqual({}, self.driver("go").develop_env(self.context("Server")))
+		self.assertFalse(os.path.exists(self.path("build", "develop", "Server", "go.work")), "a stale one goes")
+
+	@unittest.skipUnless(real("go"), "needs go")
+	def test_go_keeps_what_the_projects_own_go_work_has(self):
+		self.files({"go.work": "go 1.23\n\nuse (\n\t./Server\n\t./Shared\n)\n\nreplace example.com/old v1.0.0 => ./Fork\n",
+			"Server/go.mod": "module example.com/server\n\ngo 1.21\n\nrequire example.com/engine/net v0.1.0\n",
+			"Shared/go.mod": "module example.com/shared\n\ngo 1.21\n",
+			"packages/engine/net/go.mod": "module example.com/engine/net\n\ngo 1.21\n"})
+		os.environ.pop("NUKE_TOOL_GO")
+		work = read(self.driver("go").develop_env(self.context("Server"))["GOWORK"])
+		self.assertIn("\ngo 1.23\n", work)
+		self.assertIn(json.dumps(os.path.normpath(self.path("Shared"))), work)
+		self.assertIn(f"replace example.com/old v1.0.0 => {json.dumps(os.path.normpath(self.path('Fork')))}", work)
+
+	def test_cargo_patches_the_crates_it_gets_from_the_developed_repository(self):
+		self.files({
+			"packages/engine/Cargo.toml": "[workspace]\nmembers = [\"mathx\", \"geom\", \"unused\"]\n",
+			"packages/engine/mathx/Cargo.toml": "[package]\nname = \"mathx\"\nversion = \"0.1.0\"\n",
+			"packages/engine/geom/Cargo.toml": "[package]\nname = \"geom\"\nversion = \"0.1.0\"\n",
+			"packages/engine/unused/Cargo.toml": "[package]\nname = \"unused\"\nversion = \"0.1.0\"\n",
+			"Game/Cargo.lock": "version = 4\n\n[[package]]\nname = \"geom\"\nversion = \"0.1.0\"\n"
+				"source = \"git+https://github.com/Alan/Engine.git?tag=geom%2Fv0.1.0#0123abcd\"\n\n"
+				"[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+		})
+		ctx = self.context("Game", url="git@github.com:Alan/Engine.git")
+		cargo = self.driver("rust")
+		metadata = {"workspace_root": self.path("Game"), "packages": [{"dependencies": [
+			{"name": "mathx", "source": "git+https://github.com/Alan/Engine?tag=mathx/v0.1.0"},
+			{"name": "other", "source": "git+https://github.com/someone/else"},
+			{"name": "serde", "source": "registry+https://github.com/rust-lang/crates.io-index"}]}]}
+		own_lock = self.path("Game", "Cargo.lock")
+		crates = cargo.git_crates(metadata, own_lock)
+		self.assertEqual([("https://github.com/alan/engine", "geom"), ("https://github.com/alan/engine", "mathx"),
+			("https://github.com/someone/else", "other")], crates, "its manifests' git dependencies and its Cargo.lock's")
+		tables = cargo.patch_tables(ctx.checkouts, crates)
+		self.assertEqual({"https://github.com/alan/engine": {name: os.path.normpath(os.path.join(self.clone, name)) for name in ("geom", "mathx")}},
+			tables, "the source spelled another way is the same repository; crates of other repositories stay theirs")
+		config = tomllib.loads(cargo.render_config(tables, cargo.develop_lock(ctx, own_lock)))
+		self.assertEqual(os.path.normpath(os.path.join(self.clone, "mathx")), config["patch"]["https://github.com/alan/engine"]["mathx"]["path"])
+		lock = config["resolver"]["lockfile-path"]
+		self.assertEqual(read(own_lock), read(lock), "builds start from the project's own lock")
+		write_files(os.path.dirname(lock), {"Cargo.lock": "# cargo's resolution with the patch\n"})
+		cargo.develop_lock(ctx, own_lock)
+		self.assertEqual("# cargo's resolution with the patch\n", read(lock))
+		os.utime(own_lock, (time.time() + 10, time.time() + 10))
+		cargo.develop_lock(ctx, own_lock)
+		self.assertEqual(read(own_lock), read(lock), "a newer lock of the project's (cargo update) is taken again")
 
 
 class RealToolTests(unittest.TestCase):

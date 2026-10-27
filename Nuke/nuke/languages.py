@@ -181,6 +181,8 @@ class DriverContext:
 	jobs: int = None                               # `nuke -j N`: how many tool processes may run at once (None: the driver's choice)
 	dependencies: object = None                    # () -> [DriverContext] of the projects in `depends`
 	expander: object = None                        # (text) -> text with the project's ${variables}
+	checkouts: tuple = ()                          # packages.checkouts.Checkout of each source the workspace develops
+	develop_dir: str = ""                          # build/develop/<project>: where develop_file() keeps its files
 
 	@property
 	def root(self):
@@ -199,6 +201,17 @@ class DriverContext:
 	def expand(self, text):
 		"""`text` with the project's ${variables} (the steps' ones, the language packages' included)."""
 		return self.expander(text) if self.expander else text
+
+	def develop_file(self, name, text):
+		"""Keeps `text` as the file `name` in the project's develop folder, for what points the language's tool at the
+		develop checkouts (written only when it changed), and returns its path; None removes the file and returns None."""
+		path = os.path.normpath(os.path.join(self.develop_dir, name))
+		if text is None:
+			if os.path.isfile(path):
+				os.remove(path)
+			return None
+		fsutil.write_if_changed(path, text)
+		return path
 
 	def problem(self, message):
 		"""Stops Nuke with `message` as a problem of the workspace or a manifest (exit code 1)."""

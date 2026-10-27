@@ -390,6 +390,8 @@ a project needs besides its `depends`, added to them: C++ reflection needs the R
 (`nuke/languages.py`) carries the project, the configuration, the platform, the bin and int folders, the extra
 arguments and test filter, `options` (`[project.driver]`), `settings` (the workspace's `[languages.<id>]` table),
 `depends` (the contexts of the projects in `depends`), `expand(text)` (the project's variables), `jobs` (`-j`),
+`checkouts` (the package sources the workspace develops: `source`, `url`, `folder`, `serves(url)`, `files(name)`) and
+`develop_file(name, text)` (a file in `build/develop/<project>/` that points the tool at their clones, section 12),
 `tool(name)`, `run`/`capture` to run the tool with its output in Nuke's log, and `problem(message)` / `fail(what, code)`
 to stop Nuke (a ValueError from `implicit_depends` or `variables` is a problem too). The description may also name
 the package's **library projects** (`libraries = ["libraries/*"]`, folders with a `[project]` nuke.toml): a workspace
@@ -619,6 +621,20 @@ its folder, version, mode and projects; every clone with its branch and how far 
 packages' projects in the solution's `Packages/<source>/<package>` folders, their project files naming the package's
 version and mode (`buildSystem.package`).
 
-**Other package managers.** A Rust or Go project inside a package keeps its own manifest, lockfile and cache; Nuke
-never resolves crates or modules. The tags are Go's, so a Go module in a package folder has the same versions for
-`go get`, and Cargo's git dependencies take the same tag.
+**Other package managers.** A Rust or Go project keeps its own manifest, lockfile and cache; Nuke never resolves
+crates or modules and never writes `go.mod`, `go.sum`, `Cargo.toml` or `Cargo.lock`. The tags are Go's, so a Go module
+in a package folder has the same versions for `go get`, and Cargo's git dependencies take the same tag
+(`tag = "Mathx/v0.2.0"`). While a source is developed, the workspace's Go and Rust projects build its clone too, through
+their own tools, so an edit there reaches the Go and Rust programs without a release:
+
+- **Go**: a project whose `go.mod` requires a module of the clone (matched by the module paths of the clone's `go.mod`
+  files, and followed through what those require) builds with `GOWORK` naming `build/develop/<project>/go.work`, which
+  uses the project, those module folders and whatever the project's own `go.work` uses.
+- **Rust**: a project that gets crates from the source's repository (a git dependency of its manifests or a git package
+  of its `Cargo.lock`, the URL in any spelling of the repository) builds with `cargo --config
+  build/develop/<project>/cargo.toml`: `[patch."<url>"]` points those crates at their folders in the clone, and
+  `resolver.lockfile-path` keeps the resolution in a `Cargo.lock` beside it, copied from the project's (cargo 1.98 has
+  that setting; an older cargo leaves the patched resolution in the project's `Cargo.lock` while developing).
+
+`nuke package lock` removes `build/develop/`, and the tools go back to the releases. The files are what Nuke hands the
+tools: `go` or `cargo` run by hand, gopls and rust-analyzer still see the releases.

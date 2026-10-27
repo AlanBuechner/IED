@@ -11,6 +11,7 @@ from . import packages as packages_module
 from .errors import NukeError
 from .log import Log
 from .manifest import MANIFEST_NAME, load
+from .packages import checkouts as develop_checkouts
 
 # Never searched for projects: build output, vendored or third-party code, and hidden folders.
 DISCOVERY_SKIP = {"build", "bin", "bin-int", "vendor", "third_party", "toolchains", "node_modules", "__pycache__"}
@@ -28,6 +29,7 @@ class Workspace:
 		default = spec.default_configuration or configs.DEFAULT_CONFIGURATION
 		self.default_configuration = configs.require(default, self.configurations)
 		self._packages = packages         # language -> LanguagePackage, found on first use
+		self._checkouts = None            # the sources it develops, read on first use
 
 	def project(self, name):
 		for project in self.projects.values():
@@ -52,6 +54,17 @@ class Workspace:
 
 	def output_root(self):
 		return fsutil.join(self.dir, "build")
+
+	def develop_root(self):
+		"""build/develop/: a folder per project for what its driver writes to point the language's tool at the develop
+		checkouts (a go.work, Cargo's [patch]); `nuke package lock` removes it, the next build writes what is still needed."""
+		return fsutil.join(self.output_root(), "develop")
+
+	def checkouts(self):
+		"""The sources the workspace develops (packages/checkouts.py)."""
+		if self._checkouts is None:
+			self._checkouts = develop_checkouts.of_workspace(self.spec)
+		return self._checkouts
 
 	def language_packages(self):
 		"""language -> the package its projects build with (languages.py)."""

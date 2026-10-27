@@ -173,10 +173,32 @@ on the terminal and not in the credential manager's window (`GCM_INTERACTIVE=nev
 
 ## 7. Other package managers
 
-Native first (`docs/23` N-15): a Rust or Go project inside a package keeps its `Cargo.toml` / `go.mod`, lockfile and
-cache, and fetches its crates and modules itself; Nuke never resolves them. Nuke's tags are Go's module tags, so a Go
-module in a package folder is the same version to `go get` and to Nuke, and Cargo's git dependencies take the same tag
-(`tag = "Windowing/v0.2.0"`).
+Native first (`docs/23` N-15): a Rust or Go project keeps its `Cargo.toml` / `go.mod`, lockfile and cache, and
+fetches its crates and modules itself; Nuke never resolves them and never writes those files. Nuke's tags are Go's
+module tags, so a Go module in a package folder is the same version to `go get` and to Nuke, and Cargo's git
+dependencies take the same tag (`tag = "Windowing/v0.2.0"`).
+
+Developing a source reaches those tools too, through their own ways of building local code in place of a release,
+never through their manifests (P-10). The language's driver does it at each build or test, from the workspace's develop
+checkouts (`ctx.checkouts`), in a folder of the project's under `build/develop/`:
+
+- **Go.** A project whose `go.mod` requires a module that lives in the clone (the module paths of the clone's `go.mod`
+  files; a required clone module's own requirements are followed) builds with `GOWORK` naming
+  `build/develop/<project>/go.work`: `use` lines for the project, those module folders, and whatever the project's own
+  `go.work` uses (its `replace` lines too), with absolute paths. Workspace mode builds the clone's folders in place of
+  the required versions; `go.mod` and `go.sum` stay as they are. A project that requires none gets no `go.work`.
+- **Rust.** A project that gets crates from the source's repository - a git dependency in its manifests
+  (`cargo metadata --no-deps`) or a git package in its own `Cargo.lock`, the URL in any spelling of the repository
+  (`https://`, `ssh://`, `git@host:`, a path or `file://`) - builds with `cargo --config build/develop/<project>/cargo.toml`:
+  `[patch."<url>"]` points each of those crates at its folder in the clone, and `resolver.lockfile-path` keeps the
+  patched resolution in a `Cargo.lock` beside it, copied from the project's whenever the project's is newer. The
+  project's `Cargo.lock` stays as it is (a cargo without that setting writes the patched resolution into it while the
+  source is developed; cargo 1.98 has it).
+- **Back to locked.** `nuke package lock` removes `build/develop/`; the next build points the tools again at whatever
+  is still developed.
+
+The files are what Nuke hands the tools, so `go` or `cargo` run by hand, gopls and rust-analyzer still see the
+releases; IED's Go and Rust plugins giving their language servers the same files is a follow-up (`docs/23`).
 
 ## 8. Decisions
 
@@ -191,3 +213,4 @@ module in a package folder is the same version to `go get` and to Nuke, and Carg
 | P-7 | Develop is per source and per workspace: the whole repository becomes a clone in the workspace | A repository's packages are developed and tested together (its own workspace builds them all); one checkout per source keeps them on one commit |
 | P-8 | Files of a package are writable only in a develop checkout that is not behind its remote | The owner's lock-out, sharpened: there is exactly one writable copy of a package line, and it is the newest |
 | P-9 | Nuke resolves only Nuke packages; language package managers keep their own dependencies | Native first (N-15); Nuke adds the cross-language graph, not a second resolver for crates and modules |
+| P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles | Developing a package must not change what the program commits, and one codebase must hold for every language: the tools build the clone the way their own users would, and removing one folder brings back the releases |

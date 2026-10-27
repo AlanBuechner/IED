@@ -69,7 +69,8 @@ class Session:
 			self.log, list(self.args), self.test_filter, settings=self.workspace.spec.language_settings.get(project.language, {}),
 			workspace_dir=self.workspace.dir, jobs=self.jobs,
 			dependencies=lambda: [self.driver_context(self.workspace.find_project(name)) for name in project.depends],
-			expander=lambda text: expand(text, self.variables(project)))
+			expander=lambda text: expand(text, self.variables(project)),
+			checkouts=self.workspace.checkouts(), develop_dir=fsutil.join(self.workspace.develop_root(), project.name))
 
 	def builds_before_test(self, project):
 		"""A project whose language's package asks for it is built, with what it depends on, before its tests run."""

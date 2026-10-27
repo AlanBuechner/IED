@@ -4,14 +4,17 @@ releasing, and what IED is told."""
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import unittest
+import zipfile
 
 from support import read, write_files, WorkspaceTest
 
+from nuke import manifest
 from nuke.errors import NukeError
-from nuke.packages import semver
+from nuke.packages import checkouts, semver, store
 
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Test",
 	"GIT_COMMITTER_EMAIL": "test@example.com"}
@@ -430,10 +433,12 @@ class DevelopTests(PackageTest):
 		self.assertIn('Windowing = "engine@^0.3.0"', read(self.path("nuke.toml")))
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.3.0")
 
+		write_files(self.root, {"build/develop/Server/go.work": "go 1.21\n"})
 		code, out = self.nuke("package", "lock", "engine")
 		self.assertEqual(code, 0, out)
 		self.assertFalse(os.path.isdir(os.path.join(checkout, ".git")))
 		self.assertEqual(read(self.path("packages", "engine", "Windowing@0.3.0", "Windowing", "src", "Windowing", "window.ch")), "// edited in the game\n")
+		self.assertFalse(os.path.exists(self.path("build", "develop")), "what pointed Go and Rust at the clone goes with it")
 
 	def test_a_checkout_behind_its_remote_is_read_only(self):
 		self.windowing()
@@ -497,6 +502,20 @@ class DevelopTests(PackageTest):
 		lock = self.lock()
 		self.assertEqual((lock[("engine", "Windowing")]["version"], lock[("engine", "Input")]["version"]), ("0.2.0", "0.1.1"))
 
+	def test_drivers_see_the_develop_checkouts(self):
+		self.windowing()
+		self.workspace({"Windowing": "\"engine@^0.2\""})
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		checkout = self.path("packages", "engine")
+		write_files(checkout, {"go.mod": "module example.com/engine\n", "Tools/go.mod": "module example.com/engine/tools\n",
+			".gitignore": "target/\n", "target/go.mod": "module ignored\n"})
+		found = checkouts.of_workspace(manifest.load(self.path("nuke.toml")).workspace)
+		self.assertEqual([("engine", self.engine.url)], [(c.source, c.url) for c in found])
+		self.assertEqual(["Tools/go.mod", "go.mod"], [os.path.relpath(p, checkout).replace("\\", "/") for p in found[0].files("go.mod")],
+			"committed or new, never ignored")
+		self.assertTrue(found[0].serves("file:///" + self.engine.url[:-len(".git")]), "Cargo's spelling of the source")
+
 	def test_release_refuses_a_dependency_with_unreleased_changes(self):
 		self.windowing()
 		self.workspace({"Renderer": "\"engine@^1.0\""}, depends=("Renderer",))
@@ -514,6 +533,122 @@ class DevelopTests(PackageTest):
 		tags = git("ls-remote", "--tags", self.engine.url)
 		self.assertIn("Renderer/v1.0.1", tags)
 		self.assertIn("Windowing/v0.2.1", tags)
+
+
+class RepositorySpellingTests(unittest.TestCase):
+	def test_one_repository_spelled_by_other_tools(self):
+		for a, b in (("https://github.com/Alan/Claymore.git", "git@github.com:alan/claymore"),
+				("ssh://git@host.org:2222/team/engine.git", "https://host.org/team/engine/"),
+				("C:/repos/engine.git", "file:///C:/repos/engine"), ("C:/My Repos/engine.git", "file:///C:/My%20Repos/engine.git")):
+			self.assertTrue(store.same_repository(a, b), (a, b))
+		for a, b in (("https://github.com/a/b", "https://github.com/a/c"), ("https://gitlab.com/a/b", "https://github.com/a/b"),
+				("C:/repos/engine", "C:/repos/engine2"), ("https://host.org/Team/x", "https://host.org/team/x")):
+			self.assertFalse(store.same_repository(a, b), (a, b))
+
+
+def real(tool):
+	return shutil.which(tool) is not None
+
+
+def go_version(version):
+	return f"package netcode\n\nfunc Version() string {{ return \"{version}\" }}\n"
+
+
+def rust_version(version):
+	return f"pub fn version() -> &'static str {{ \"{version}\" }}\n"
+
+
+@unittest.skipUnless(real("go") and real("cargo"), "needs go and cargo")
+class NativeToolTests(PackageTest):
+	"""A Go and a Rust project of the workspace get a module and a crate of a package repository through their own tools -
+	a Go module proxy standing for the hosted one, a Cargo git dependency at the package's tag; developing the source
+	builds them from the clone without a release, and locking it again goes back to the releases (IED docs/31 section 7).
+	The tools' caches are the test's own."""
+
+	TOOL_ENV = ("GOPROXY", "GOSUMDB", "GOMODCACHE", "GOFLAGS", "GOWORK", "CARGO_HOME")
+
+	def setUp(self):
+		super().setUp()
+		self.saved = {name: os.environ.get(name) for name in self.TOOL_ENV}
+		self.proxy = os.path.join(self.tmp, "goproxy")
+		os.environ.update({"GOPROXY": "file:///" + self.proxy.replace("\\", "/"), "GOSUMDB": "off", "GOFLAGS": "-modcacherw",
+			"GOMODCACHE": os.path.join(self.tmp, "gomodcache"), "CARGO_HOME": os.path.join(self.tmp, "cargo-home")})
+		os.environ.pop("GOWORK", None)
+
+	def tearDown(self):
+		for name, value in self.saved.items():
+			if value is None:
+				os.environ.pop(name, None)
+			else:
+				os.environ[name] = value
+		super().tearDown()
+
+	def publish_module(self, module, version, files):
+		"""The module version in the file proxy, as a hosted proxy serves it."""
+		folder = os.path.join(self.proxy, *module.split("/"), "@v")
+		write_files(folder, {"list": f"{version}\n", f"{version}.info": json.dumps({"Version": version, "Time": "2026-10-27T00:00:00Z"}),
+			f"{version}.mod": files["go.mod"]})
+		with zipfile.ZipFile(os.path.join(folder, f"{version}.zip"), "w") as archive:
+			for name, text in files.items():
+				archive.writestr(f"{module}@{version}/{name}", text)
+
+	def engine_with_a_module_and_a_crate(self):
+		netcode = {"go.mod": "module example.com/engine/netcode\n\ngo 1.21\n", "netcode.go": go_version("0.1.0")}
+		self.engine.commit({"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Netcode/nuke.toml": "[package]\ndescription = \"networking, a Go module\"\n",
+			"Mathx/nuke.toml": "[package]\ndescription = \"maths, a Rust crate\"\n",
+			"Mathx/Cargo.toml": "[package]\nname = \"mathx\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+			"Mathx/src/lib.rs": rust_version("0.1.0"),
+			**{f"Netcode/{name}": text for name, text in netcode.items()}}, tags=["Netcode/v0.1.0", "Mathx/v0.1.0"])
+		self.publish_module("example.com/engine/netcode", "v0.1.0", netcode)
+
+	def game_with_go_and_rust(self):
+		self.files({
+			"nuke.toml": f"[workspace]\nname = \"Game\"\n[sources]\nengine = \"{self.engine.url}\"\n"
+				"[packages]\nNetcode = \"engine@^0.1\"\nMathx = \"engine@^0.1\"\n",
+			"Server/nuke.toml": "[project]\nlanguage = \"go\"\n",
+			"Server/go.mod": "module example.com/game/server\n\ngo 1.21\n\nrequire example.com/engine/netcode v0.1.0\n",
+			"Server/main.go": "package main\n\nimport (\n\t\"fmt\"\n\n\t\"example.com/engine/netcode\"\n)\n\n"
+				"func main() { fmt.Println(\"netcode \" + netcode.Version()) }\n",
+			"Game/nuke.toml": "[project]\nlanguage = \"rust\"\n",
+			"Game/Cargo.toml": "[package]\nname = \"game\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+				f"mathx = {{ git = \"file:///{self.engine.url}\", tag = \"Mathx/v0.1.0\" }}\n",
+			"Game/src/main.rs": "fn main() { println!(\"mathx {}\", mathx::version()); }\n",
+		})
+		subprocess.run(["go", "mod", "tidy"], cwd=self.path("Server"), check=True, capture_output=True)   # go.sum, as its author has it
+
+	def built(self):
+		"""What the Go and the Rust program print after `nuke build`."""
+		code, out = self.nuke("build", "--all")
+		self.assertEqual(code, 0, out)
+		folder = self.path("build", "bin", "Development-windows-x64")
+		return tuple(subprocess.run([os.path.join(folder, *program)], capture_output=True, text=True).stdout.strip()
+			for program in (("Server", "Server.exe"), ("Game", "game.exe")))
+
+	def own_files(self):
+		return {name: read(self.path(*name.split("/"))) for name in ("Server/go.mod", "Server/go.sum", "Game/Cargo.toml", "Game/Cargo.lock")}
+
+	def test_an_edit_in_the_clone_builds_without_a_release_until_locked(self):
+		self.engine_with_a_module_and_a_crate()
+		self.game_with_go_and_rust()
+		self.assertEqual(("netcode 0.1.0", "mathx 0.1.0"), self.built())
+		before = self.own_files()
+
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		checkout = self.path("packages", "engine")
+		write_files(checkout, {"Netcode/netcode.go": go_version("edited"), "Mathx/src/lib.rs": rust_version("edited")})
+		self.assertEqual(("netcode edited", "mathx edited"), self.built())
+		self.assertEqual(before, self.own_files(), "go.mod, go.sum, Cargo.toml and Cargo.lock stay as they are")
+		self.assertIn(json.dumps(os.path.normpath(os.path.join(checkout, "Netcode"))), read(self.path("build", "develop", "Server", "go.work")))
+		self.assertIn("[patch.", read(self.path("build", "develop", "Game", "cargo.toml")))
+
+		git("checkout", "--quiet", "--", ".", cwd=checkout)
+		code, out = self.nuke("package", "lock", "engine")
+		self.assertEqual(code, 0, out)
+		self.assertFalse(os.path.exists(self.path("build", "develop")))
+		self.assertEqual(("netcode 0.1.0", "mathx 0.1.0"), self.built())
+		self.assertEqual(before, self.own_files())
 
 
 if __name__ == "__main__":

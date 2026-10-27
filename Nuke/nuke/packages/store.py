@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.parse
 
 from .. import fsutil, toolchains
 from . import git
@@ -28,6 +29,25 @@ def url_key(url):
 	if text.startswith("file://"):
 		return "file://" + os.path.normcase(text[7:]).replace("\\", "/")
 	return text.lower() if "github.com" in text.lower() else text
+
+
+def same_repository(a, b):
+	"""Whether two spellings name one repository, as another tool may spell a source (Cargo's git URLs): a local path and
+	its file:// URL are one, and so are https://host/a/b, ssh://git@host/a/b.git and git@host:a/b."""
+	return _identity(a) == _identity(b)
+
+
+def _identity(url):
+	text = url.strip()
+	if text.lower().startswith("file://"):
+		text = urllib.parse.unquote(text[7:])
+		text = text[1:] if re.match(r"^/[A-Za-z]:", text) else text
+	if os.path.isabs(text) or re.match(r"^[A-Za-z]:[\\/]", text):
+		return url_key(text)
+	remote = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:]+)(?::\d+)?/(.*)$", text) or re.match(r"^(?:[^@/]*@)?([^/:]+):(.*)$", text)
+	if remote is None:
+		return url_key(text)
+	return url_key(f"{remote.group(1).lower()}/{remote.group(2).strip('/')}")
 
 
 def repository_name(url):
