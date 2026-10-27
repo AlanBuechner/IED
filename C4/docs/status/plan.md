@@ -2051,8 +2051,9 @@ methods that return structs by value (B74 adds the test); data exported from the
   Windows 10 negotiates TLS 1.2 (its SChannel offers 1.3 only from Windows 11 / Server 2022), so the TLS 1.3 path -
   tickets and key updates after the handshake - is untested on this machine.
 - **Tests:** Bedrock `net.tls.*` (11) and `http.tls.*` (3) against servers on loopback with the test PKI of
-  `Tests/tls_fixtures.ch`, `http.parse.urls_secure`; `http.client.failures` no longer reaches the internet. In the
-  IED tree, the MCP server checks over https against `tools/fake-mcp` served with Python's `ssl` (OpenSSL).
+  `Tests/tls_fixtures.ch`, `http.parse.urls_secure`; `http.client.failures` no longer reaches the internet. Bedrock
+  passes 730 tests. In the IED tree, the MCP server checks over https against `tools/fake-mcp` served with Python's
+  `ssl` (OpenSSL).
 
 ### Testing framework
 
