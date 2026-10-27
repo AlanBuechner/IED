@@ -1,6 +1,6 @@
 """The packages folder of a workspace (`packages/`, [workspace] packages-dir): each locked versioned package exported from
 its mirror into `<source>/<path>@<version>/` with every file read-only, each source being developed as a git clone in
-`<source>/`, and nuke-packages.json saying which is which. Nothing in it is committed; Nuke adds it to .gitignore."""
+`<source>/`, and nuke-packages.json saying which is which. Nothing in it is committed (ensure_ignored)."""
 
 import json
 import os
@@ -112,16 +112,22 @@ def prune(state, wanted, log):
 
 
 def ensure_ignored(workspace_dir, packages_dir):
-	"""The packages folder in the workspace's .gitignore (when the workspace is a git checkout)."""
-	if not os.path.exists(os.path.join(workspace_dir, ".git")):
+	"""The packages folder kept out of git by the checkout's own exclude file (.git/info/exclude), not by .gitignore: git
+	ignores it all the same, while search in IED and the AI's tools, which skip what .gitignore files ignore, still find
+	the packages' code - one codebase with the program's (docs/31 section 4)."""
+	top = git.run(["rev-parse", "--show-toplevel"], cwd=workspace_dir, check=False)
+	exclude = git.run(["rev-parse", "--git-path", "info/exclude"], cwd=workspace_dir, check=False)
+	if not top or not exclude:
 		return
-	path = os.path.join(workspace_dir, ".gitignore")
-	text = fsutil.read_text(path) or ""
-	entry = packages_dir.strip("/").replace("\\", "/") + "/"
-	if any(line.strip() in (entry, "/" + entry, entry.rstrip("/")) for line in text.splitlines()):
+	exclude = os.path.join(workspace_dir, exclude.strip())
+	folder = os.path.relpath(os.path.join(workspace_dir, packages_dir), top.strip()).replace("\\", "/")
+	entry = f"/{folder}/"
+	text = fsutil.read_text(exclude) or ""
+	if entry in (line.strip() for line in text.splitlines()):
 		return
+	os.makedirs(os.path.dirname(exclude), exist_ok=True)
 	addition = ("" if not text or text.endswith("\n") else "\n") + f"# Nuke's installed packages (nuke.lock says which)\n{entry}\n"
-	with open(path, "a", encoding="utf-8", newline="\n") as f:
+	with open(exclude, "a", encoding="utf-8", newline="\n") as f:
 		f.write(addition)
 
 

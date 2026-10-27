@@ -179,7 +179,19 @@ class ResolveTests(PackageTest):
 		installed = self.path("packages", "engine", "Windowing@0.1.0", "Windowing", "src", "Windowing", "window.ch")
 		self.assertEqual(read(installed), "// 0.1\n")
 		self.assertFalse(os.access(installed, os.W_OK), "a locked package's files are read-only")
-		self.assertIn("packages/", read(self.path(".gitignore")) if os.path.isfile(self.path(".gitignore")) else "packages/")
+
+	def test_git_ignores_the_packages_but_search_does_not(self):
+		self.windowing()
+		git("init", "--quiet", "-b", "main", self.tmp + "/game")
+		self.root = os.path.join(self.tmp, "game", "MyGame")       # a workspace in a folder of its repository
+		os.makedirs(self.root)
+		self.workspace({"Windowing": "\"engine@^0.1\""})
+		self.projects()
+		self.assertFalse(os.path.isfile(self.path(".gitignore")), "no .gitignore line: IED's search reads those")
+		self.assertIn("/MyGame/packages/", read(os.path.join(self.tmp, "game", ".git", "info", "exclude")))
+		self.assertEqual("", git("status", "--porcelain", "--untracked-files=all", "--", "MyGame/packages", cwd=self.tmp + "/game"))
+		self.projects()
+		self.assertEqual(1, read(os.path.join(self.tmp, "game", ".git", "info", "exclude")).count("/MyGame/packages/"), "once")
 
 	def test_a_project_named_by_its_folder_keeps_its_name(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n", "Assets/nuke.toml": "[package]\n[project]\nkind = \"module\"\n",

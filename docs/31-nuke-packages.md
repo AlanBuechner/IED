@@ -102,9 +102,9 @@ together before it releases them.
 MyGame/
   nuke.toml            [workspace], [sources], [packages]
   nuke.lock            committed
-  packages/            Nuke's (gitignored; [workspace] packages-dir changes the name)
+  packages/            Nuke's (in .git/info/exclude; [workspace] packages-dir changes the name)
     claymore/
-      Windowing@0.2.0/ a locked package: its folder at its commit, files read-only
+      Windowing@0.2.0/ a locked package: its folder (Windowing/) at its commit, files read-only
       Renderer@0.3.1/
     utils/             a source being developed: a git clone of the whole repository
     nuke-packages.json what is installed and what is developed (machine-local)
@@ -112,7 +112,9 @@ MyGame/
 
 Packages are inside the workspace because IED edits only files of the workspace (files outside it open read-only,
 `docs/10`), and so they show in the Solution Explorer, the file tree, search and the language server like the
-workspace's own projects. The cache shares the git objects among every workspace of the machine.
+workspace's own projects. The folder is kept out of git by the checkout's own `.git/info/exclude` rather than
+`.gitignore`, because search in IED and the AI's tools skip what `.gitignore` files ignore. The cache shares the git
+objects among every workspace of the machine.
 
 ## 5. Developing a package with the program
 

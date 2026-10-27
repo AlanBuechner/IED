@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 
-from .. import fsutil, tomledit
+from .. import fsutil, ied_files, tomledit
 from .. import packages
 from .. import workspace as workspaces
 from ..errors import NukeError
@@ -88,9 +88,11 @@ class _Context:
 		self.state = install.State(install.folder(root, self.spec.packages_dir))
 
 	def load(self, **options):
+		"""The workspace with its packages synced, and the IED solution kept in step with where they are now (N-26)."""
 		workspace = workspaces.load_workspace(self.root, packages.Options(self.log, self.cache, **options))
 		self.spec = workspace.spec
 		self.state = install.State(install.folder(self.root, self.spec.packages_dir))
+		ied_files.refresh(workspace, self.cli.store, self.log)
 		return workspace
 
 	def lock(self):

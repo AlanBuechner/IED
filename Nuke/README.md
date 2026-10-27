@@ -575,9 +575,11 @@ depends = ["Windowing", "Agility"]
   stops with every requirement and who made it.
 - **`nuke.lock`** (commit it) holds the commit of each versioned package and the packages of it used. While it matches
   the manifests and everything is installed, Nuke reads only files: no git process, no network.
-- **Installs** go into the workspace's `packages/` folder (`[workspace] packages-dir`; Nuke adds it to `.gitignore`): a
-  locked package is `packages/<source>/<path>@<version>/` with every file read-only. Each repository is mirrored once per
-  machine in `<nuke home>/.cache/packages/git/` (`NUKE_PACKAGE_CACHE`).
+- **Installs** go into the workspace's `packages/` folder (`[workspace] packages-dir`): a locked package is
+  `packages/<source>/<path>@<version>/<folder>/` with every file read-only. Nuke keeps the folder out of git through the
+  checkout's `.git/info/exclude`, not `.gitignore`, so search in IED and the AI's tools - which skip what `.gitignore`
+  ignores - find the packages' code. Each repository is mirrored once per machine in `<nuke home>/.cache/packages/git/`
+  (`NUKE_PACKAGE_CACHE`).
 - **Private repositories** need nothing of Nuke: git's credential manager or SSH key does it. Git never prompts on the
   terminal under Nuke; a missing sign-in is an error saying to run `git ls-remote <url>` once.
 - **A repository of packages is a workspace** too: its root `nuke.toml` has `[workspace]`, it builds and tests every
