@@ -393,7 +393,7 @@ The pipe is the master's. Its workspace servers use it too, with methods only th
 | `master.binding {name, args}` | `{result}`: a server binding the master's plugins answer (`docs/26` "Servers") |
 | `master.relaunch {reason}` | `IED::RelaunchServer` from a workspace server's plugin: the master's relaunch (`docs/27`) |
 
-Each workspace server has a pipe of its own, `<master's pipe>-<wsId>`, which the master's supervisor alone uses: `status` (`{wsId, pid, port, sessionEpoch, workspaces, clients}`; the server is ready once it answers with its own pid), `stop` (as the master's, for its workspace), and `settings.changed` / `choices.changed`: the master wrote `settings.json` / `plugins.json`, and each workspace server reads it again before the master answers whoever asked for the write (a client that asks its workspace server next sees the change; their file watchers would take a moment).
+Each workspace server has a pipe of its own, `<master's pipe>-<wsId>`, which the master's supervisor alone uses: `status` (`{wsId, pid, port, sessionEpoch, workspaces, clients}`; the server is ready once it answers with its own pid and a port, which it opens once its plugins' code has started - at most 10 s), `stop` (as the master's, for its workspace), and `settings.changed` / `choices.changed`: the master wrote `settings.json` / `plugins.json`, and each workspace server reads it again before the master answers whoever asked for the write (a client that asks its workspace server next sees the change; their file watchers would take a moment).
 
 Errors are JSON-RPC 2.0's: -32700 not JSON, -32600 not a request, -32601 no such method, -32602 bad params, and -32000 for anything a method refuses (a path that does not exist).
 

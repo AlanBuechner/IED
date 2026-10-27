@@ -467,7 +467,7 @@ class BrowserToolTests(ServerTestCase):
 		self.addCleanup(self.server.stop)
 		self.assertTrue(self.server.started, self.server.error)
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		listed = await self.listed(chat_id, lambda r: [x["ref"] for x in r] == ["browser:" + page], "the page, told again")
 		self.assertEqual("ied.browser.forceClose", listed[0].get("close"))
 

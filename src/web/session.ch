@@ -36,7 +36,8 @@ namespace Ied
 		// The client's identity as the server topic shows it.
 		public Core::String ClientJson() const;
 
-		// Without the lock: waits (at most 2 s) for what is queued to go out, then closes the socket.
+		// Without the lock, from any thread: waits (at most 2 s) for what is queued to go out, then closes the socket; once
+		// the connection's thread has ended (its socket gone with it), nothing.
 		public void FlushAndClose(int32 code, const char* reason);
 
 		public Server* server;
@@ -76,6 +77,10 @@ namespace Ied
 		private Threading::Thread writer;
 		private int64 startedNs;
 		private int32 closeCode;          // a frame asked to close the socket (a second hello)
+		// Held while a thread other than the connection's uses the socket: the socket lives on the connection thread's
+		// stack, and that thread takes this before it returns.
+		private Threading::Mutex socketUse;
+		private bool socketGone;
 	}
 
 	// A frame's cursor for `key`, or -1 when it gives none.

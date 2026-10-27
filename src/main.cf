@@ -141,10 +141,10 @@ static void WatchMaster(Ied::Server* server, Ied::Control* control) {
 	}).Detach();
 }
 
-// The master's plugin code registers the methods and topics of its routes (docs/10 "Routing") as it starts: it opens
-// its port once that is done (at most kRoutesSettleMs), so its first client's routes are whole.
+// Plugin code registers its methods and topics as it starts: a server opens its port once that is done (at most
+// kRoutesSettleMs) - the master so its first client's routes are whole (docs/10 "Routing"), a workspace server so the
+// master calls it ready (its pipe's status gives a port) only once its plugins answer.
 static void AwaitRoutes(Ied::Server* server) {
-	if (!server->IsMaster()) return;
 	const int64 deadline = clock_now_ns() + Ied::kRoutesSettleMs * 1000000;
 	for (;;) {
 		{

@@ -37,6 +37,8 @@ namespace Ied
 		if (socket->IsOpen()) Close(closeCode ? closeCode : 1001, closeCode ? "invalid frame" : "session ended");
 		outbox.Close();
 		writer.Join();
+		Threading::LockGuard gone(socketUse);
+		socketGone = true;
 	}
 
 	void Session::Close(int32 code, const char* reason) {
@@ -327,6 +329,8 @@ namespace Ied
 	}
 
 	void Session::FlushAndClose(int32 code, const char* reason) {
+		Threading::LockGuard guard(socketUse);
+		if (socketGone) return;
 		const int64 deadline = clock_now_ns() + kFlushWaitNs;
 		while (!outbox.IsEmpty() && socket->IsOpen() && clock_now_ns() < deadline) Threading::Thread::Sleep(10000000);
 		Close(code, reason);

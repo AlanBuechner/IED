@@ -7,6 +7,7 @@ namespace Ied
 {
 	const int64 kServerPollNs = 100000000;
 	const int64 kExitWindowMs = 60000;
+	const int64 kKeeperEndMs = 2000;
 
 	static int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
 
@@ -57,6 +58,7 @@ namespace Ied
 		records.Push(record);
 		if (!running) return;
 		WorkspaceServers* self = this;
+		record->keeping = true;
 		Threading::Thread::Run([self, record]() { self->Keep(record); }).Detach();
 	}
 
@@ -64,7 +66,10 @@ namespace Ied
 		if (running) return;
 		running = true;
 		WorkspaceServers* self = this;
-		for (WorkspaceServer* record : records) Threading::Thread::Run([self, record]() { self->Keep(record); }).Detach();
+		for (WorkspaceServer* record : records) {
+			record->keeping = true;
+			Threading::Thread::Run([self, record]() { self->Keep(record); }).Detach();
+		}
 	}
 
 	void WorkspaceServers::Retarget(Core::StringView wsId, Core::StringView target) {
@@ -248,6 +253,7 @@ namespace Ied
 			if (record->closing || record->shutdown) break;
 		}
 		Threading::LockGuard guard(server->lock);
+		record->keeping = false;
 		record->changed.NotifyAll();
 		if (!record->closing) return;
 		for (int64 i = 0; i < records.Count(); ++i)
@@ -374,6 +380,16 @@ namespace Ied
 			const int64 left = (deadline - clock_now_ns()) / 1000000;
 			if (child->Wait(left > 0 ? (int32)left : 0) == Process::kTimedOut) child->Kill();
 		}
+		AwaitKeepers();
+	}
+
+	// The keepers have logged how their servers ended and published it before the master goes on to end its process.
+	void WorkspaceServers::AwaitKeepers() {
+		Threading::LockGuard guard(server->lock);
+		Core::Array<WorkspaceServer*> kept = records;
+		const int64 deadline = clock_now_ns() + kKeeperEndMs * 1000000;
+		for (WorkspaceServer* record : kept)
+			while (record->keeping && clock_now_ns() < deadline) record->changed.WaitFor(server->lock, deadline - clock_now_ns());
 	}
 
 	void WorkspaceServers::TellAll(Core::StringView method, Core::StringView paramsJson) {

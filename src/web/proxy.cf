@@ -128,6 +128,8 @@ namespace Ied
 			self->Add(tunnel);
 			self->Pump(tunnel);
 			self->Remove(tunnel);
+			Threading::LockGuard gone(tunnel->use);
+			tunnel->gone = true;
 		});
 		if (!accepted) upstream->socket.Close(1001, Core::StringView("the browser's upgrade was refused"));
 	}
@@ -196,6 +198,8 @@ namespace Ied
 				if (tunnel->deviceId.View() == deviceId) closing.Push(tunnel);
 		}
 		for (Tunnel* tunnel : closing) {
+			Threading::LockGuard held(tunnel->use);
+			if (tunnel->gone) continue;
 			tunnel->client->SendText(ByeFrame("auth-revoked").View());
 			tunnel->client->Close(1008, Core::StringView("auth-revoked"));
 			tunnel->upstream->socket.Close(1001, Core::StringView("auth-revoked"));

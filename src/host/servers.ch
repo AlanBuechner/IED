@@ -40,6 +40,7 @@ namespace Ied
 		public bool restartAsked;
 		public bool closing;
 		public bool shutdown;
+		public bool keeping;                // its keeper thread runs
 		public Process::Child* child;
 		public Threading::ConditionVariable changed;   // its state changed (under the server lock)
 	}
@@ -76,6 +77,7 @@ namespace Ied
 
 	private:
 		private void Keep(WorkspaceServer* record);
+		private void AwaitKeepers();
 		private bool StartProcess(WorkspaceServer* record, Core::String& problem);
 		private bool AwaitStarted(WorkspaceServer* record, Core::String& problem);
 		private void Exited(WorkspaceServer* record, int64 code, Core::StringView how);

@@ -2,6 +2,7 @@
 name, status / url / open / stop over newline-delimited JSON-RPC 2.0, launch URLs that sign in, the CLI on top; and
 the server's own log (docs/12 "Logs"), which keeps each run's start, end and fatal error."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -102,6 +103,29 @@ class ControlTests(ServerTestCase):
 		self.assertIn("listening: http://127.0.0.1:%d" % self.server.port, "\n".join(lines))
 		self.assertTrue(lines[-2].endswith("stopped by the control channel"), lines)
 		self.assertTrue(lines[-1].endswith("exit: the HTTP server stopped"), lines)
+
+	async def test_a_client_that_leaves_while_the_server_stops_is_passed_by(self):
+		"""The stop closes its clients one after another, each given up to 2 s for what is queued to go out: one that
+		leaves meanwhile took its socket with it (the socket is its connection thread's), so the stop passes it by. Here
+		the first client reads nothing until the stop has waited for it, and the second leaves at the bye."""
+		cookie = self.server.sign_in()
+		slow = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		topic = (await slow.request("testhooks.topic", {}))["topic"]
+		await slow.sub([topic])
+		await slow.next_frame(topic)
+		slow.pause_reading()
+		leaving = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		await leaving.request("testhooks.emit", {"topic": topic, "count": 160, "size": 65536}, timeout=60)
+		self.assertEqual({}, await asyncio.to_thread(self.result, "stop"))
+		deadline = time.monotonic() + 15
+		while leaving.bye is None and time.monotonic() < deadline:
+			await asyncio.sleep(0.01)
+		self.assertEqual({"t": "bye", "reason": "shutdown"}, leaving.bye)
+		leaving.abort()
+		await asyncio.sleep(3)
+		slow.resume_reading()
+		self.assertEqual(0, await asyncio.to_thread(self.server.process.wait, 30), "the server ended as asked, not with a crash")
+		slow.abort()
 
 	async def test_a_crash_leaves_its_report_in_the_log(self):
 		"""An exception nothing catches on a thread of the server ends it (C4's fatal error, exit code 1): the report,

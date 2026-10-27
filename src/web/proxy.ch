@@ -22,6 +22,10 @@ namespace Ied
 		public Core::String deviceId;
 		public Http::WebSocket* client;
 		public Upstream* upstream;
+		// Held while another thread uses `client`, which lives on the browser connection's thread: that thread takes it
+		// before it returns.
+		public Threading::Mutex use;
+		public bool gone;
 	}
 
 	class Proxy
