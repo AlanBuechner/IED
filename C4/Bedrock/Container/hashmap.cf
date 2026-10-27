@@ -34,7 +34,10 @@ namespace Core
 
 	template<K, V, Traits>
 	public void HashMap::Clear() {
-		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) destroy(&entries[i]);
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) {
+			destroy(&entries[i]);
+			ClearVacated(entries, i, i + 1);
+		}
 		EmptyTable(table);
 	}
 
@@ -122,6 +125,7 @@ namespace Core
 	private bool HashMap::RemoveSlot(int64 slot) {
 		if (slot < 0) return false;
 		destroy(&entries[slot]);
+		ClearVacated(entries, slot, slot + 1);
 		Vacate(table, slot);
 		return true;
 	}

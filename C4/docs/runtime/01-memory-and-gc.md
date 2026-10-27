@@ -48,7 +48,10 @@ void Example() {
 ```
 
 Containers that keep `T*` inside raw memory must tell the collector about that memory, and only then (a buffer of
-numbers is better left unscanned, `holds_pointers`). Bedrock's containers do this:
+numbers is better left unscanned, `holds_pointers`). The collector scans a region conservatively, all of it: memory in it
+that holds no element yet must be zero, or what the memory held before keeps objects alive (BUG-409: a freed buffer's
+addresses, kept as numbers, kept 56 objects alive from an `Array<Node>`'s unused capacity). `buffer_resize_scanned`
+clears it, and Bedrock's containers zero their buffers and the slots elements leave. Bedrock's containers do this:
 
 ```c4
 data = (T*)raw_alloc((uint64)(capacity * (int64)sizeof(T)));
@@ -117,7 +120,7 @@ declarations.
 |---|---|---|
 | Managed alloc / free | `c4_alloc(size, align)`, `c4_alloc_noscan(size, align)`, `c4_free(p)`; `c4_alloc_typed(size, align, type)` and `c4_alloc_typed_noscan` also give the object's `c4_gc_type` record for a census | `new` (typed) / `delete` |
 | Raw memory | `c4_raw_alloc`, `c4_raw_free`, `c4_raw_free_sized`, `c4_raw_alloc_aligned`, `c4_raw_free_aligned` | `raw_alloc(uint64)`, `raw_free(void*)`, `raw_free_sized(void*, uint64)`, `raw_alloc_aligned`, `raw_free_aligned` |
-| Buffers that grow in place past 1 MiB (`C4Runtime/BufferRuntimeC.c`) | `c4_buffer_resize(buffer, oldBytes, keepBytes, newBytes)`, `c4_buffer_free(buffer, bytes)`, and `_scanned` forms that keep a scan region over the buffer | `buffer_resize`, `buffer_free`, `buffer_resize_scanned`, `buffer_free_scanned` ([builtins 4](../language/14-builtins.md#4-memory-and-gc)) |
+| Buffers that grow in place past 1 MiB (`C4Runtime/BufferRuntimeC.c`) | `c4_buffer_resize(buffer, oldBytes, keepBytes, newBytes)`, `c4_buffer_free(buffer, bytes)`, and `_scanned` forms that keep a scan region over the buffer, zero past its kept bytes | `buffer_resize`, `buffer_free`, `buffer_resize_scanned`, `buffer_free_scanned` ([builtins 4](../language/14-builtins.md#4-memory-and-gc)) |
 | Collect | `c4_gc_collect` | `gc_collect()`, `GC::Collect()` |
 | Pacing | `c4_gc_set_percent(percent)` | `GC::SetPercent` |
 | Marking threads | `c4_gc_set_mark_threads(threads)` | `GC::SetMarkThreads` |

@@ -54,6 +54,7 @@ namespace Core
 	template<T>
 	public void Array::Clear() {
 		DestroyElements(data, 0, count);
+		ClearVacated(data, 0, count);
 		count = 0;
 	}
 
@@ -109,6 +110,7 @@ namespace Core
 		destroy(&data[index]);
 		memmove((void*)&data[index], (void*)&data[index + 1], (uint64)((count - index - 1) * (int64)sizeof(T)));
 		count -= 1;
+		ClearVacated(data, count, count + 1);
 	}
 
 	template<T>
@@ -118,6 +120,7 @@ namespace Core
 		if (first >= end) return;
 		DestroyElements(data, first, end);
 		memmove((void*)&data[first], (void*)&data[end], (uint64)((count - end) * (int64)sizeof(T)));
+		ClearVacated(data, count - (end - first), count);
 		count -= end - first;
 	}
 
@@ -127,6 +130,7 @@ namespace Core
 		destroy(&data[index]);
 		count -= 1;
 		if (index != count) relocate(&data[index], &data[count]);
+		ClearVacated(data, count, count + 1);
 	}
 
 	// Growing default-creates each new element (zero for plain data); shrinking destroys the tail.
@@ -136,6 +140,7 @@ namespace Core
 		Reserve(newCount);
 		CreateElements(data, count, newCount);
 		DestroyElements(data, newCount, count);
+		ClearVacated(data, newCount, count);
 		count = newCount;
 	}
 
@@ -144,6 +149,7 @@ namespace Core
 		if (newCount < 0) newCount = 0;
 		Reserve(newCount);
 		DestroyElements(data, newCount, count);
+		ClearVacated(data, newCount, count);
 		count = newCount;
 	}
 

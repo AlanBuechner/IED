@@ -1,7 +1,9 @@
 // Buffers that grow (GCRuntimeC.h, c4_buffer_resize): heap memory while small, reserved address space once large, so a
 // large buffer grows by committing the pages after it instead of copying itself into a bigger block. A scanned buffer
 // is a collector scan region: the collector may stop the program between any two instructions, so the region never
-// covers memory that is given back, and the elements stay in a registered region while they move.
+// covers memory that is given back, the elements stay in a registered region while they move, and the bytes past the
+// kept ones are zero - a block's earlier contents (another buffer's addresses, kept as numbers) would keep what they
+// point at alive (BUG-409).
 
 #include "GCRuntimeC.h"
 #include "PlatformRuntimeC.h"
@@ -63,9 +65,15 @@ static void Register(bool scanned, void* buffer, size_t bytes)
 	if (scanned) c4_gc_register_region(buffer, bytes);
 }
 
+// A scanned buffer's bytes from `from` to `to` that hold nothing yet: zero, whatever the memory held before.
+static void ClearUnkept(bool scanned, void* buffer, size_t from, size_t to)
+{
+	if (scanned && to > from) memset((char*)buffer + from, 0, to - from);
+}
+
 // A large buffer resized in place: the pages after it committed, or its tail given back. False when its reservation
-// has no room for the growth.
-static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t newBytes, bool scanned)
+// has no room for the growth. Newly committed pages are zero already.
+static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
 {
 	const size_t committed = ToPages(oldBytes);
 	const size_t needed = ToPages(newBytes);
@@ -74,19 +82,21 @@ static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t newBytes, bool s
 		if (needed - committed > ReservedAfter(buffer, committed)) return false;
 		if (c4_vm_commit((char*)buffer + committed, (int64_t)(needed - committed), kProtectReadWrite) != 0) return false;
 	}
+	ClearUnkept(scanned, buffer, keepBytes, newBytes < committed ? newBytes : committed);
 	Register(scanned, buffer, newBytes);
 	if (needed < committed) c4_vm_decommit((char*)buffer + needed, (int64_t)(committed - needed));
 	return true;
 }
 
-// The kept bytes copied into a new block, which is registered before they arrive and the old one unregistered before
-// it goes.
+// The kept bytes copied into a new block, the rest of it cleared, before it is registered; the old block, registered
+// while they move, is unregistered before it goes.
 static void* Move(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
 {
 	void* moved = Allocate(newBytes);
 	if (!moved) return NULL;
-	Register(scanned, moved, newBytes);
 	if (keepBytes) memcpy(moved, buffer, keepBytes);
+	ClearUnkept(scanned, moved, keepBytes, newBytes);
+	Register(scanned, moved, newBytes);
 	if (scanned && buffer) c4_gc_unregister_region(buffer);
 	Release(buffer, oldBytes);
 	return moved;
@@ -108,7 +118,7 @@ static void* Resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newB
 		Free(buffer, oldBytes, scanned);
 		return NULL;
 	}
-	if (IsLarge(oldBytes) && IsLarge(newBytes) && ResizeInPlace(buffer, oldBytes, newBytes, scanned)) return buffer;
+	if (IsLarge(oldBytes) && IsLarge(newBytes) && ResizeInPlace(buffer, oldBytes, keepBytes, newBytes, scanned)) return buffer;
 	return Move(buffer, oldBytes, keepBytes, newBytes, scanned);
 }
 

@@ -124,7 +124,9 @@ Adding a test:
   pointers come from volatile variables, so the optimizer has only the access types to go by: a wrong tag gives a
   stale value at `-O2`. `ExpectedIR.json` checks the tags.
 - Each folder is compiled and run on its own. `main` returns the failed-assert count; exit 0 is required
-  unless a manifest says otherwise. A program still running after 60 seconds is killed and fails its case.
+  unless a manifest says otherwise. A run that fails shows what it printed about the failure (its `FAIL` lines, else
+  its last lines), so a failure seen once says which check failed. A program still running after 60 seconds is killed
+  and fails its case.
 - `-DebugInfo` builds every folder with `-g`, so the debug information is checked against the whole corpus
   (it must verify, link and change nothing the program does).
 - `-Partitions <n>` (TestCode too) assembles every program into `<n>` objects (`--partitions`), so the parallel

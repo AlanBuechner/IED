@@ -6,6 +6,7 @@
 // (Serialization's reflection codec) works on the same parts through these functions.
 
 include "hash.ch"
+include "storage.ch"
 
 namespace Core
 {

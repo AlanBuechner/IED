@@ -29,7 +29,11 @@ namespace Core
 
 	template<T>
 	public void Queue::Clear() {
-		for (int64 k = 0; k < count; ++k) destroy(&data[(head + k) & (capacity - 1)]);
+		for (int64 k = 0; k < count; ++k) {
+			const int64 at = (head + k) & (capacity - 1);
+			destroy(&data[at]);
+			ClearVacated(data, at, at + 1);
+		}
 		count = 0;
 		head = 0;
 	}

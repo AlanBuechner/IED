@@ -70,7 +70,8 @@
 // A buffer that grows in place once past 1 MiB; the owner passes back the size it asked for last (GCRuntimeC.h).
 [link("c4_buffer_resize")] void* buffer_resize(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes) noexcept;
 [link("c4_buffer_free")] void buffer_free(void* buffer, uint64 bytes) noexcept;
-// The same for a buffer the collector scans for pointers, registered as a scan region at its whole size.
+// The same for a buffer the collector scans for pointers, registered as a scan region at its whole size, zero past the
+// bytes it keeps.
 [link("c4_buffer_resize_scanned")] void* buffer_resize_scanned(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes) noexcept;
 [link("c4_buffer_free_scanned")] void buffer_free_scanned(void* buffer, uint64 bytes) noexcept;
 [link("c4_gc_collect")] void gc_collect() noexcept;

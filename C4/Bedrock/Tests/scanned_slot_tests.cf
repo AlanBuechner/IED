@@ -1,0 +1,106 @@
+// BUG-409: a container buffer the collector scans keeps nothing alive once an element leaves it - the slot is zero - and
+// the capacity it grows by is zero, never what its memory held before. Run with:  C4.exe c4/Bedrock/Tests -test
+
+include "bedrock.ch"
+
+const int32 kLetGo = 100;
+
+int32 g_heldFinalized = 0;
+
+class Held {
+	public int32 id;
+	[operator("delete")] public void Finalize() { g_heldFinalized += 1; }
+}
+
+// Overwrites the stack below the caller, where copies of the pointers the fill functions handled are left.
+int64 ScrubStack(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return ScrubStack(depth - 1) + junk[2];
+}
+
+// How many objects collections finalize from here; the conservative stack may still hold a few.
+int32 FinalizedByCollecting(int32 before) {
+	ScrubStack(8);
+	GC::Collect();
+	GC::Collect();
+	return g_heldFinalized - before;
+}
+
+void FillArray(Core::Array<Held*>& held) { for (int32 i = 0; i < kLetGo; ++i) held.Push(new Held()); }
+void FillQueue(Core::Queue<Held*>& held) { for (int32 i = 0; i < kLetGo; ++i) held.Push(new Held()); }
+void FillMap(Core::HashMap<int32, Held*>& held) { for (int32 i = 0; i < kLetGo; ++i) held.Insert(i, new Held()); }
+void FillSet(Core::HashSet<Held*>& held) { for (int32 i = 0; i < kLetGo; ++i) held.Add(new Held()); }
+
+bool NullFrom(Held** slots, int64 from, int64 to) {
+	for (int64 i = from; i < to; ++i)
+		if (slots[i] != null) return false;
+	return true;
+}
+
+[test("container.scanned_slots")]
+class ScannedSlotTests {
+	[test("array_slots_clear_as_elements_leave")]
+	public static void TestArraySlotsClearAsElementsLeave() {
+		Core::Array<Held*> held;
+		for (int32 i = 0; i < 8; ++i) held.Push(new Held());
+		held.Pop();
+		assert_true(NullFrom(held.Data(), 7, 8), "Pop clears the slot it empties");
+		held.RemoveAt(0);
+		assert_true(NullFrom(held.Data(), 6, 7), "RemoveAt clears the slot its shift leaves");
+		held.RemoveSwap(0);
+		assert_true(NullFrom(held.Data(), 5, 6), "RemoveSwap clears the last slot");
+		held.RemoveRange(0, 2);
+		assert_true(NullFrom(held.Data(), 3, 5), "RemoveRange clears the slots its shift leaves");
+		held.Resize(1);
+		assert_true(NullFrom(held.Data(), 1, 3), "a shrinking Resize clears the tail");
+		held.Clear();
+		assert_true(NullFrom(held.Data(), 0, held.Capacity()), "Clear clears every slot");
+	}
+
+	[test("array_growth_is_zero")]
+	public static void TestArrayGrowthIsZero() {
+		Core::Array<Held*> held;
+		held.Push(new Held());
+		held.Reserve(1000);
+		assert_true(NullFrom(held.Data(), 1, held.Capacity()), "the capacity a buffer grows by is zero");
+	}
+
+	[test("popped_from_an_array_are_collected")]
+	public static void TestPoppedFromAnArrayAreCollected() {
+		const int32 before = g_heldFinalized;
+		Core::Array<Held*> held;
+		FillArray(held);
+		while (held.Count() > 0) held.Pop();
+		assert_true(FinalizedByCollecting(before) >= kLetGo - 5, "objects popped from an array are collected");
+	}
+
+	[test("popped_from_a_queue_are_collected")]
+	public static void TestPoppedFromAQueueAreCollected() {
+		const int32 before = g_heldFinalized;
+		Core::Queue<Held*> held;
+		FillQueue(held);
+		while (held.Count() > 0) held.Pop();
+		assert_true(FinalizedByCollecting(before) >= kLetGo - 5, "objects popped from a queue are collected");
+	}
+
+	[test("removed_from_a_map_are_collected")]
+	public static void TestRemovedFromAMapAreCollected() {
+		const int32 before = g_heldFinalized;
+		Core::HashMap<int32, Held*> held;
+		FillMap(held);
+		for (int32 i = 0; i < kLetGo; ++i) held.Remove(i);
+		assert_true(FinalizedByCollecting(before) >= kLetGo - 5, "values removed from a map are collected");
+	}
+
+	[test("cleared_from_a_set_are_collected")]
+	public static void TestClearedFromASetAreCollected() {
+		const int32 before = g_heldFinalized;
+		Core::HashSet<Held*> held;
+		FillSet(held);
+		held.Clear();
+		assert_true(FinalizedByCollecting(before) >= kLetGo - 5, "values cleared from a set are collected");
+	}
+}

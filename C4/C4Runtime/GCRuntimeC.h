@@ -239,7 +239,8 @@ void c4_raw_free_aligned(void* ptr);
 void* c4_buffer_resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes);
 void c4_buffer_free(void* buffer, size_t bytes);
 // The same for a buffer the collector scans for pointers (an Array's elements): a scan region of its whole size,
-// never left registered over memory it gives back, and the elements always in a registered region as they move.
+// never left registered over memory it gives back, the elements always in a registered region as they move, and zero
+// past the kept bytes (BUG-409: the memory's earlier contents would keep objects alive).
 void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes);
 void c4_buffer_free_scanned(void* buffer, size_t bytes);
 

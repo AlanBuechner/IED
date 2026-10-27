@@ -65,6 +65,10 @@ int32 main() {
   `HashSet` (`EntryStorage`), `List` (each node), `Queue` and `Threading::JobQueue`. A buffer keeps the form it was
   made with: code that knows the element type only at run time says the same through `Core::ElementStorage` and
   `Core::EntryStorage` (Serialization's reflection reader takes it from `Reflection::Type::HoldsPointers`).
+  A scanned buffer holds nothing stale (BUG-409): the capacity it grows by is zero, never what the memory held before
+  (a freed block's addresses kept as numbers), and a slot an element leaves is zero, so what it held is collected:
+  `Pop` takes the element (`take` leaves it zero), `RemoveAt`, `RemoveSwap`, `RemoveRange`, a shrinking `Resize`,
+  `Clear`, a queue's `Clear` and a map's or a set's `Remove` and `Clear` clear it (`Core::ClearVacated`).
   `GC::RegionCount()` says how many regions are registered. `Array` and `StringBuilder` keep their buffers in `buffer_resize`
   memory ([builtins 4](../language/14-builtins.md#4-memory-and-gc)): past 1 MiB a buffer grows in place, its pages
   committed after it instead of the whole buffer copied, so pushing to a large array or appending to a large text

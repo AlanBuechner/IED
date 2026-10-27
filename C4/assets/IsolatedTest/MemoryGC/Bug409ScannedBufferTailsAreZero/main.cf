@@ -1,0 +1,71 @@
+// BUG-409: a buffer the collector scans is zero past the bytes it keeps, never what its memory held before - a freed
+// block's addresses kept as numbers (Bug386's Array<int64>) kept the objects they point at alive from an Array<Node>'s
+// unused capacity. Checked where a buffer moves into a new block and where a large one is resized in place.
+include "bedrock.ch"
+
+const uint64 kMiB = 1048576;
+const int32 kStale = 171; // 0xAB in every byte
+
+int32 g_failures = 0;
+
+void Check(bool holds, const char* what)
+{
+	if (holds) return;
+	printf("FAIL: %s\n", what);
+	g_failures += 1;
+}
+
+bool ZeroFrom(const uint8* bytes, uint64 from, uint64 to)
+{
+	for (uint64 i = from; i < to; ++i)
+		if (bytes[i] != 0u) return false;
+	return true;
+}
+
+// A block freed full of a pattern, then a scanned buffer of its size: the heap hands the same block back.
+void CheckReusedBlocks()
+{
+	bool zero = true;
+	for (int32 round = 0; round < 64; ++round)
+	{
+		void* stale = raw_alloc(256u);
+		memset(stale, kStale, 256u);
+		raw_free(stale);
+		uint8* scanned = (uint8*)buffer_resize_scanned(null, 0u, 0u, 256u);
+		zero = zero && ZeroFrom(scanned, 0u, 256u);
+		buffer_free_scanned((void*)scanned, 256u);
+	}
+	Check(zero, "a new scanned buffer is zero");
+}
+
+void CheckMoves()
+{
+	uint8* small = (uint8*)buffer_resize_scanned(null, 0u, 0u, 64u);
+	memset((void*)small, kStale, 64u);
+	uint8* moved = (uint8*)buffer_resize_scanned((void*)small, 64u, 48u, 4096u);
+	Check(moved[47] == 171u, "a buffer that moves keeps its kept bytes");
+	Check(ZeroFrom(moved, 48u, 4096u), "and the rest of its new block is zero");
+	buffer_free_scanned((void*)moved, 4096u);
+}
+
+void CheckInPlace()
+{
+	uint8* large = (uint8*)buffer_resize_scanned(null, 0u, 0u, 2u * kMiB);
+	memset((void*)large, kStale, 2u * kMiB);
+	uint8* shrunk = (uint8*)buffer_resize_scanned((void*)large, 2u * kMiB, kMiB + 100u, 2u * kMiB - 10u);
+	Check(shrunk == large, "a large buffer shrinks in place");
+	Check(shrunk[kMiB + 99u] == 171u, "keeping its kept bytes");
+	Check(ZeroFrom(shrunk, kMiB + 100u, 2u * kMiB - 10u), "and clearing what it does not keep");
+	uint8* grown = (uint8*)buffer_resize_scanned((void*)shrunk, 2u * kMiB - 10u, 2u * kMiB - 10u, 3u * kMiB);
+	Check(grown == large, "and grows in place");
+	Check(ZeroFrom(grown, 2u * kMiB - 10u, 3u * kMiB), "the bytes it grows by zero");
+	buffer_free_scanned((void*)grown, 3u * kMiB);
+}
+
+int32 main()
+{
+	CheckReusedBlocks();
+	CheckMoves();
+	CheckInPlace();
+	return g_failures;
+}

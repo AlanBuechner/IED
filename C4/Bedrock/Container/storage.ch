@@ -20,14 +20,18 @@ namespace Core
 
 	// A buffer of `newBytes` in place of `elements` (`oldBytes`, null for none), its first `keepBytes` kept. The collector
 	// scans it only when `scanned`: when its elements may hold managed pointers (holds_pointers), so a buffer of numbers
-	// costs a collection nothing. Past 1 MiB it grows in place (buffer_resize); over-aligned elements move into a block of
-	// their own, registered before they arrive. A buffer keeps the form it was made with.
+	// costs a collection nothing; a scanned one is zero past the kept bytes (BUG-409). Past 1 MiB it grows in place
+	// (buffer_resize); over-aligned elements move into a block of their own, registered once they are in it, while the old
+	// one still is. A buffer keeps the form it was made with.
 	void* ResizeElementBytes(void* elements, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, uint64 align, bool scanned) {
 		if (align <= kRawAllocAlignment)
 			return scanned ? buffer_resize_scanned(elements, oldBytes, keepBytes, newBytes) : buffer_resize(elements, oldBytes, keepBytes, newBytes);
 		void* moved = newBytes > 0u ? raw_alloc_aligned(newBytes, align) : nullptr;
-		if (moved && scanned) gc_register_region(moved, newBytes);
 		if (keepBytes > 0u) memcpy(moved, elements, keepBytes);
+		if (moved && scanned) {
+			memset((void*)((uint8*)moved + keepBytes), 0, newBytes - keepBytes);
+			gc_register_region(moved, newBytes);
+		}
 		if (elements) {
 			if (scanned) gc_unregister_region(elements);
 			raw_free_aligned(elements);
@@ -35,11 +39,15 @@ namespace Core
 		return moved;
 	}
 
-	// AllocateElements' storage, registered with the collector when its elements may hold pointers; FreeScannable
+	// AllocateElements' storage, registered with the collector, zero, when its elements may hold pointers; FreeScannable
 	// releases it.
 	template<T> T* AllocateScannable(int64 count) {
 		T* elements = AllocateElements<T>(count);
-		if (elements && holds_pointers(T)) gc_register_region((void*)elements, (uint64)(count * (int64)sizeof(T)));
+		if (elements && holds_pointers(T)) {
+			const uint64 bytes = (uint64)(count * (int64)sizeof(T));
+			memset((void*)elements, 0, bytes);
+			gc_register_region((void*)elements, bytes);
+		}
 		return elements;
 	}
 
@@ -62,6 +70,12 @@ namespace Core
 
 	template<T> void DestroyElements(T* items, int64 first, int64 end) {
 		for (int64 k = first; k < end; ++k) destroy(&items[k]);
+	}
+
+	// Slots whose elements were destroyed or moved out: zero when the collector scans them, so what they held is not
+	// kept alive (BUG-409).
+	template<T> void ClearVacated(T* items, int64 first, int64 end) {
+		if (holds_pointers(T) && end > first) memset((void*)&items[first], 0, (uint64)((end - first) * (int64)sizeof(T)));
 	}
 
 	template<T> T* ResizeElements(T* elements, int64 oldCount, int64 keepCount, int64 newCount) {

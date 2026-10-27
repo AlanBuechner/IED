@@ -119,6 +119,16 @@ function Invoke-TestProgram([string]$exe, [string[]]$runArgs = @()) {
     return @{ timedOut = $false; exit = $proc.ExitCode; output = $stdout.Result + $stderr.Result }
 }
 
+# What a failing program printed about its failure - its FAIL lines, else its last lines - so a run that fails once says
+# which check failed.
+function Failure-Lines([string]$output) {
+    $lines = @($output -split "`r?`n" | Where-Object { $_.Trim() -ne "" })
+    $fails = @($lines | Where-Object { $_ -match "FAIL" } | Select-Object -First 3)
+    $shown = if ($fails.Count -gt 0) { $fails } else { @($lines | Select-Object -Last 2) }
+    if ($shown.Count -eq 0) { return "" }
+    return ": " + ($shown -join " | ")
+}
+
 function Timeout-Result([string]$rel) {
     return [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "run timed out after $runTimeoutSeconds s" }
 }
@@ -216,7 +226,7 @@ foreach ($f in $folders) {
             else { try { Get-Content $jsonPath -Raw | ConvertFrom-Json | Out-Null } catch { $jsonProblem = "$($spec.jsonFile) is not valid JSON: $_" } }
         }
         if ($run.exit -ne $spec.exit) {
-            $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "expected exit $($spec.exit), got $($run.exit)" }
+            $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "expected exit $($spec.exit), got $($run.exit)" + (Failure-Lines $run.output) }
         } elseif ($bad) {
             $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "output must not contain '$bad'" }
         } elseif ($missing) {
@@ -236,7 +246,7 @@ foreach ($f in $folders) {
     $run = Invoke-TestProgram $exe
     if ($run.timedOut) { $results += Timeout-Result $rel }
     elseif ($run.exit -eq 0) { $results += [pscustomobject]@{ Name = $rel; Status = "PASS"; Detail = "" } }
-    else { $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "run exit $($run.exit)" } }
+    else { $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "run exit $($run.exit)" + (Failure-Lines $run.output) } }
 }
 
 Write-Host ""

@@ -32,7 +32,10 @@ namespace Core
 
 	template<T, Traits>
 	public void HashSet::Clear() {
-		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) destroy(&values[i]);
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) {
+			destroy(&values[i]);
+			ClearVacated(values, i, i + 1);
+		}
 		EmptyTable(table);
 	}
 
@@ -78,6 +81,7 @@ namespace Core
 	private bool HashSet::RemoveSlot(int64 slot) {
 		if (slot < 0) return false;
 		destroy(&values[slot]);
+		ClearVacated(values, slot, slot + 1);
 		Vacate(table, slot);
 		return true;
 	}
