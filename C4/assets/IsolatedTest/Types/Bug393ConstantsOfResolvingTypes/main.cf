@@ -1,0 +1,33 @@
+// BUG-393: a file-scope extent or constant that measures a type folds once the type's fields, bases and unions are
+// all resolved, never against the empty shell the resolver starts from: comparisons of sizeof and holds_pointers come
+// out as they do at run time, whichever is declared first.
+int32[sizeof(Later) == 16 ? 2 : 1] g_bySize;
+int32[holds_pointers(Later) ? 3 : 1] g_byPointers;
+const bool kLaterIsSixteen = sizeof(Later) == 16;
+int32[kLaterIsSixteen ? 4 : 1] g_byConstant;
+int32[sizeof(Outer) > sizeof(Later) ? 5 : 1] g_byNested;
+int32[holds_pointers(Derived) && !holds_pointers(Numbers) ? 6 : 1] g_byBase;
+int32[sizeof(Word) == 8 && holds_pointers(Pun) ? 7 : 1] g_byUnion;
+int32[offsetof(Outer, after) == 16 ? 8 : 1] g_byOffset;
+
+struct Later { public int32* p; public int64 n; }
+struct Outer { public Later inner; public int32 after; }
+struct Base { public Later* link; }
+struct Derived : Base { public float scale; }
+struct Numbers { public float[4] values; }
+union Word { public int64 bits; public double real; }
+union Pun { public int64 bits; public Later* later; }
+
+int32 main() {
+	int32 failed = 0;
+	if (sizeof(g_bySize) != 8) failed += 1;
+	if (sizeof(g_byPointers) != 12) failed += 1;
+	if (sizeof(g_byConstant) != 16) failed += 1;
+	if (sizeof(g_byNested) != 20) failed += 1;
+	if (sizeof(g_byBase) != 24) failed += 1;
+	if (sizeof(g_byUnion) != 28) failed += 1;
+	if (sizeof(g_byOffset) != 32) failed += 1;
+	int32[sizeof(Later) == 16 ? 2 : 1] local;
+	if (sizeof(local) != 8) failed += 1;
+	return failed;
+}

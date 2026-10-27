@@ -11,15 +11,16 @@
 
 namespace Scripting
 {
-	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), holds_native_bytes (a
-	// bool), __uuidof (the address of a COM GUID), nameof (a type's qualified name) and sizeof...(pack). Nothing runs: an expression operand
-	// is typed, not evaluated.
+	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), holds_native_bytes and
+	// holds_pointers (bools; a program function of the name wins), __uuidof (the address of a COM GUID), nameof (a type's
+	// qualified name) and sizeof...(pack). Nothing runs: an expression operand is typed, not evaluated.
 
 	QueryResult<Value> ExprLowerer::ResolveTypeOf(const TypeOfExpressionNode* n)
 	{
 		if (n->GetKind() == TypeOfExpressionNode::Kind::SizeOfPack) return ResolveSizeOfPack(n);
 		if (n->GetKind() == TypeOfExpressionNode::Kind::UuidOf) return ResolveUuidOf(n);
 		if (n->GetKind() == TypeOfExpressionNode::Kind::NameOf) return ResolveNameOf(n);
+		if (CallsProgramFunction(m_Ctx.model(), *n, m_Ctx.unitId, m_Ctx.scope)) return ResolveExpr(n->GetCall().Get());
 		auto operand = QueryOperandType(n);
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, operand.message));
 		auto value = CompileTimeQueryValue(*n, operand.value);

@@ -122,6 +122,8 @@ private:
 		// An anonymous union (swizzle) inside an object body is flattened into m_PendingFields as
 		// region-marked parent fields so `v.x` / `v.r` resolve and the layout shares one byte range.
 		void FlattenSwizzle(Context& ctx, const ObjectType* obj, const UnionDefinitionNode& un, int regionId);
+		// A field queued for pass 2: its object waits for one more part until the field is attached.
+		void QueueField(const PendingField& field);
 		void FlattenSwizzleView(Context& ctx, const ObjectType* obj, const ObjectDefinitionNode& view, int regionId, int viewId);
 
 		// --- Pass 2 lives in the ModelResolver subsystem (Model/ModelResolver.{h,cpp}) --------

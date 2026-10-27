@@ -104,6 +104,7 @@ through a const access chain.
 | `alignof(T)`, `alignof(expr)` | the alignment, an `int64` constant |
 | `offsetof(T, field)`, `offsetof(T, a.b)` | the byte offset of a (nested) field, an `int64` constant |
 | `holds_native_bytes(T)` | whether a value of `T` can hold native memory, a `bool` constant ([14](14-builtins.md#1-compiler-intrinsics)) |
+| `holds_pointers(T)` | whether a value of `T` may hold a managed pointer, a `bool` constant ([14](14-builtins.md#1-compiler-intrinsics)) |
 | `__uuidof(T)` | pointer to the `_GUID` from `[uuid("...")]` ([13](13-interop.md)); error if `T` has none |
 | `nameof(T)`, `nameof(expr)` | the qualified name of a type, or of an expression's type, as reflection registers it (`Core::Array<Geo::Point>`, D-72): a string constant; in a template, of the argument |
 | `new T`, `new T(args)`, `new T{args}` | heap allocation (GC managed), see section 9 |
@@ -146,8 +147,10 @@ int64 d = offsetof(Outer, inner.value);
 - A reference measures what it refers to. `sizeof(void)` and an incomplete type are errors.
 - `offsetof` names a non-static field, through nested fields with `.`: an unknown or static field is an
   error.
-- `holds_native_bytes(T)` takes a type only, and is a `bool` constant
-  ([14](14-builtins.md#1-compiler-intrinsics)).
+- `holds_native_bytes(T)` and `holds_pointers(T)` take a type only, and are `bool` constants
+  ([14](14-builtins.md#1-compiler-intrinsics)); a program function of either name wins where it is visible.
+- A query that measures a type in a constant waits until the type's fields, bases and unions are all resolved, so
+  `int32[sizeof(T) == 16 ? 2 : 1] g;` at file scope folds against `T` as it is, whichever is declared first (BUG-393).
 - In a constant (an array extent, a `const` initializer) an expression operand is a variable, an element
   (`a[0]`), a field (`s.x`, `p->x`), a dereference, a literal or a cast; inside a function body it may be any
   expression.
@@ -189,7 +192,8 @@ int64 d = offsetof(Outer, inner.value);
 arithmetic result of two numbers (an enum counts as its underlying integer), or the type one branch converts to
 implicitly (a derived object or pointer to its base, `null` to the other branch's pointer or funcptr). An object
 result is a new object, copied from a branch that names one. Anything else is an error (`the branches of '?:'
-have no common type: 'int32*' and 'float*'`).
+have no common type: 'int32*' and 'float*'`). A function returning a reference returns the location a conditional
+of locations chooses, not a copy ([04 4.4](04-types.md#44-references)).
 
 ## 7. Type tests: `is` and `as`
 

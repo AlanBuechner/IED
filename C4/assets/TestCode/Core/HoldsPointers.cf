@@ -1,0 +1,50 @@
+// Core - holds_pointers(T) (docs/language/14 section 1, B70): whether a value of T may hold a managed pointer, the
+// compiler's own noscan decision, as a bool constant.
+include "Framework/Assert.ch"
+include "Core/HoldsPointers.ch"
+include "Container/array.ch"
+include "Text/string.ch"
+
+struct HpFloats { public float x; public float y; public float[4] more; }
+struct HpNode { public int32 value; public HpNode* next; }
+struct HpHolder { public HpFloats plain; public HpNode node; }
+struct HpBase { public HpNode* first; }
+struct HpDerived : HpBase { public float scale; }
+union HpWord { public int64 bits; public double real; }
+union HpPun { public int64 bits; public HpNode* node; }
+enum class HpColor { Red, Green }
+struct HpCallbacks { public funcptr<int32(int32)> callback; public int64 handle; }
+
+template<T> bool HpHolds() { return holds_pointers(T); }
+
+template<T> class HpBox
+{
+	public T value;
+	public bool ScansValue() const { return holds_pointers(T); }
+}
+
+const bool kHpNodeHolds = holds_pointers(HpNode);
+const bool kHpFloatsHold = holds_pointers(HpFloats);
+int32[holds_pointers(HpNode) ? 2 : 1] g_HpSized;
+
+void TestHoldsPointers() {
+	Assert(!holds_pointers(int32), "an int32 holds none");
+	Assert(holds_pointers(float*), "a pointer does");
+	Assert(!holds_pointers(HpFloats), "a struct of floats holds none");
+	Assert(holds_pointers(HpNode), "a struct with a pointer field does");
+	Assert(holds_pointers(HpHolder), "and so does a struct with such a field");
+	Assert(holds_pointers(HpDerived), "or with such a base");
+	Assert(!holds_pointers(packed float[8]), "a packed vector holds none");
+	Assert(!holds_pointers(HpColor), "an enum holds none");
+	Assert(!holds_pointers(HpWord) && holds_pointers(HpPun), "a union holds one when a member may");
+	Assert(!holds_pointers(int64[16]) && holds_pointers(HpNode*[2]), "an array holds what its elements hold");
+	Assert(!holds_pointers(HpCallbacks), "a function pointer points at code, never into the heap");
+	Assert(!HpHolds<float>() && HpHolds<HpNode*>() && HpHolds<HpNode>(), "a template argument");
+	HpBox<int32> numbers;
+	HpBox<Core::String> texts;
+	Assert(!numbers.ScansValue() && texts.ScansValue(), "a class template's argument");
+	Assert(holds_pointers(Core::Array<float>), "an array object holds its buffer's address");
+	Assert(holds_pointers(Core::String), "and so does a string");
+	Assert(kHpNodeHolds && !kHpFloatsHold, "a constant folds it");
+	AssertIntEquals(8, (int32)sizeof(g_HpSized), "and so does an array extent");
+}

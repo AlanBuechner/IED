@@ -1,0 +1,7 @@
+include "query.ch"
+
+struct QueryNode { public QueryNode* next; }
+struct QueryFloats { public float x; public float y; }
+
+bool QueryNodeHolds() { return holds_pointers(QueryNode); }
+bool QueryFloatsHold() { return holds_pointers(QueryFloats); }

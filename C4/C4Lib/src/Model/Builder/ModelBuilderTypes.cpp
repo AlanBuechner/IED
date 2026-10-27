@@ -206,7 +206,7 @@ namespace Scripting
 			switch (child->Type())
 			{
 			case NodeType::VariableDefinition:
-				m_PendingFields.Push({ raw, static_cast<const VariableDefinitionNode*>(child), ctx.unitId });
+				QueueField({ raw, static_cast<const VariableDefinitionNode*>(child), ctx.unitId });
 				break;
 			case NodeType::FunctionDefinition:
 			{
@@ -233,7 +233,16 @@ namespace Scripting
 			}
 		}
 		for (const auto& b : obj.GetBaseClasses())
+		{
+			raw->AwaitPart();
 			m_PendingBases.Push({ raw, b.m_Type.Get(), ctx.scope, ctx.unitId }); // declScope: a base may name a sibling in the same namespace
+		}
+	}
+
+	void ModelBuilder::QueueField(const PendingField& field)
+	{
+		const_cast<ObjectType*>(field.obj)->AwaitPart();
+		m_PendingFields.Push(field);
 	}
 
 	void ModelBuilder::RegisterEnum(Context& ctx, const EnumDefinitionNode& en)

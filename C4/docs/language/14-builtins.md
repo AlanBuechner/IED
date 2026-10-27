@@ -46,12 +46,14 @@ Rules:
 | `relocate(dst, src)` | moves the `T` at `src` into the raw storage at `dst` (both `T*`, neither pointing to const) by copying its bytes, and leaves `*src` zero. Nothing is constructed or destroyed |
 | `native_bytes_of(x)` / `native_bytes_of(p, count)` | the native memory (outside the GC heap) the variable, field, element or `*p` `x` holds, or the `count` elements a `T*` `p` points to hold: an `int64`. A type's `[operator("native_bytes")] int64 NativeBytes() const` answers for its whole object; a type without one adds up its bases, its fields (not static, not in an anonymous union) and its fixed arrays' elements; pointers, references and unions hold none, since what a pointer points at is counted on its own. A type that can hold none gives 0. The operands are evaluated once either way. Bedrock's containers count their buffers by capacity plus what their elements hold. The GC census sums it per type ([runtime/01](../runtime/01-memory-and-gc.md)) |
 | `holds_native_bytes(T)` | whether a value of `T` can hold native memory (`native_bytes_of` is not always 0 for it): a `bool` constant, as `sizeof` is an `int64` one. A container skips walking elements that hold none: `if (holds_native_bytes(E)) ...` |
+| `holds_pointers(T)` | whether a value of `T` may hold a managed pointer: a `bool` constant, the compiler's own answer (`TypeHandle::MayHoldPointers`) to whether `new T` is scanned and whether a global of `T` is a root. True for pointers, references, `func`, and objects, unions and arrays with a part that is one; false for numbers, enums, function pointers and packed vectors. A container registers its buffer as a scan region only when its elements may hold pointers: `if (holds_pointers(E)) gc_register_region(...)` (Bedrock's do, BUG-386) |
 
 The last three are how a container manages objects in a raw buffer (Bedrock's `Array`, `Queue`, `Stack`
 and `HashMap` do): construct into a free slot, destroy a removed element, relocate elements when the
 buffer moves. Copying the bytes of a whole range of live objects is also a valid relocation, because
-objects are trivially relocatable. A program function named `take`, `destroy`, `relocate` or `native_bytes_of` wins
-over the intrinsic.
+objects are trivially relocatable. A program function named `take`, `destroy`, `relocate`, `native_bytes_of`,
+`holds_native_bytes` or `holds_pointers` wins over the intrinsic where it is visible (`holds_pointers(5)` with none is an
+error that says the query takes a type).
 
 The census calls a type's `native_bytes` operator while every other thread is stopped wherever it was, so the
 operator only reads: no allocation, no locks, nothing it would not do in the middle of another thread's change to the

@@ -26,6 +26,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
+#include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/BracedInitializerNode.h" // init-list call arguments
@@ -114,6 +115,8 @@ namespace Scripting
 		if (notFound && BitIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, BitIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && HintIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, HintIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && NativeBytes::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, NativeBytes::LowerIntrinsic(m_Ctx, args.values));
+		if (notFound && TypeOfExpressionNode::IsKeyword(target.name)) // `holds_pointers(5)`: arguments that are no type
+			return m_Ctx.Fail(callee, QueryResult<Value>::Fail(QueryError::NotAValue, "'" + target.name + "' takes a type: " + target.name + "(T)"));
 		// Ambiguous and inaccessible calls are errors in their own right, never masked by a type of the same name.
 		if (unmatched.error == QueryError::NotFound || unmatched.error == QueryError::NotCallable)
 			if (const ObjectType* type = ConstructedType(n, target.name)) return ConstructorCall(callee, type, args);

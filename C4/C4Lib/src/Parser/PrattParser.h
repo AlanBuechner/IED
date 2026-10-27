@@ -44,6 +44,8 @@ namespace Scripting
 		static Ref<AstNode> ParseArgument(ParserState& state);
 		/// `parsed...` when a `...` follows it, else `parsed` (template arguments, D-19).
 		static Ref<AstNode> ExpandIfPack(ParserState& state, const Ref<AstNode>& parsed);
+		/// `callee(args)` from the '(' on.
+		static Ref<AstNode> ParseCall(ParserState& state, Ref<AstNode> callee);
 
 	private:
 		/// Parse a prefix (primary) expression: literals, identifiers, unary operators, parenthesized expressions, casts.

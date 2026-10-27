@@ -22,6 +22,8 @@ namespace Scripting
 	{
 		if (query.GetKind() == TypeOfExpressionNode::Kind::SizeOfPack)
 			return PackLength(query.GetPackName().GetText(), bindingScope);
+		if (CallsProgramFunction(m_Model, query, unitId, bindingScope))
+			return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + query.ToString() + "' calls the program's function, which is not a constant");
 		auto operand = QueryOperandType(query, unitId, bindingScope);
 		if (!operand.Ok()) return QueryResult<ConstantValue>::Fail(operand.error, operand.message);
 		return CompileTimeQueryValue(query, operand.value);

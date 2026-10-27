@@ -33,6 +33,7 @@ namespace Scripting
 		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &un, Redefinition(ctx, "union", name));
 
 		ReportUnionMembersItCannotHold(ctx, un);
+		raw->SetPendingFields(true);
 		m_PendingUnions.Push({ raw, &un, ctx.unitId, ctx.scope });
 	}
 
@@ -97,11 +98,14 @@ namespace Scripting
 			const auto* child = member.Get();
 			if (!child) continue;
 			if (const auto* vd = dynamic_cast<const VariableDefinitionNode*>(child))
-				m_PendingFields.Push({ obj, vd, ctx.unitId, regionId, -1 });       // plain lane: aliases offset 0
+				QueueField({ obj, vd, ctx.unitId, regionId, -1 });                 // plain lane: aliases offset 0
 			else if (const auto* od = dynamic_cast<const ObjectDefinitionNode*>(child))
 				FlattenSwizzleView(ctx, obj, *od, regionId, nextViewId++);          // struct view: sequential lanes
 			else if (const auto* sv = dynamic_cast<const SwizzleViewNode*>(child))
+			{
+				const_cast<ObjectType*>(obj)->AwaitPart();
 				m_PendingSwizzles.Push({ obj, sv, ctx.unitId });                    // packed/unpacked lane view -> SIMD region
+			}
 		}
 	}
 
@@ -112,7 +116,7 @@ namespace Scripting
 			const auto* child = member.Get();
 			if (!child) continue;
 			if (const auto* vd = dynamic_cast<const VariableDefinitionNode*>(child))
-				m_PendingFields.Push({ obj, vd, ctx.unitId, regionId, viewId });    // a lane within this view
+				QueueField({ obj, vd, ctx.unitId, regionId, viewId });              // a lane within this view
 		}
 	}
 

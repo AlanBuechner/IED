@@ -207,6 +207,7 @@ namespace Scripting
 			if (!allOk) { ++i; continue; }
 			for (const auto& f : fields) u.raw->AddField(f);
 			u.raw->CalculateLayout(); // named unions need a concrete size for sizeof / slot allocas
+			u.raw->SetPendingFields(false);
 			builder.m_PendingUnions.Remove(i);
 			changed = true;
 		}
@@ -278,6 +279,7 @@ namespace Scripting
 			}
 			}
 
+			const_cast<ObjectType*>(f.obj)->AttachPendingPart();
 			builder.m_PendingFields.Remove(i);
 			changed = true;
 		}
@@ -349,7 +351,11 @@ namespace Scripting
 				}
 				const_cast<ObjectType*>(sw.obj)->CalculateLayout();
 			}
-			for (uint32 k = i; k <= j; ++k) builder.m_PendingSwizzles.Remove(i); // drop the whole run
+			for (uint32 k = i; k <= j; ++k)
+			{
+				const_cast<ObjectType*>(builder.m_PendingSwizzles[i].obj)->AttachPendingPart();
+				builder.m_PendingSwizzles.Remove(i); // drop the whole run
+			}
 			changed = true;
 		}
 
@@ -363,6 +369,7 @@ namespace Scripting
 			if (!bt.Ok()) { ++i; continue; }
 			if (auto attached = AttachBase(*b.obj, TypeHandle::UnwrapToValue(bt.value)); !attached.Ok())
 				builder.ErrorAt(ctx, b.type, attached.message);
+			const_cast<ObjectType*>(b.obj)->AttachPendingPart();
 			builder.m_PendingBases.Remove(i);
 			changed = true;
 		}

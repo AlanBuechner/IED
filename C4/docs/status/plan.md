@@ -1771,6 +1771,19 @@ methods that return structs by value (B74 adds the test); data exported from the
 #### B70 - Pointer-free buffers are not scanned (BUG-386)
 - **Closes:** BUG-386. **Design:** [memory and GC](../runtime/01-memory-and-gc.md#engine-hooks),
   [builtins 1](../language/14-builtins.md#1-compiler-intrinsics). **Depends on:** none. **Status:** Ready.
+- **Done notes (step 1):** `holds_pointers(T)` is `TypeOfExpressionNode::Kind::HoldsPointers`, folded by
+  `CompileTimeQueryValue` to `TypeHandle::MayHoldPointers` of the type as written (references hold an address). The
+  parser keeps the same text as a call too (`SpeculativeCall`, also for `holds_native_bytes`), and `CallsProgramFunction`
+  lowers that call when a program function of the name is visible (HIR and the constant evaluator); arguments that
+  are no type parse as an ordinary call, which without such a function is the error `'holds_pointers' takes a type`.
+  Found and fixed on the way: BUG-393 (a constant measured a type whose fields were still resolving as if it had none,
+  so `int32[sizeof(T) == 16 ? 2 : 1]` at file scope had one element): an object counts its queued fields, bases and
+  packed regions (`ObjectType::AwaitPart` / `AttachPendingPart`, a union its pending fields), and `sizeof`, `alignof`,
+  `offsetof` and the `holds_*` queries wait (`Settled`, `CompileTimeQueries.cpp`) until every by-value part is attached.
+  Tests: TestCode `Core/HoldsPointers` (17 cases: numbers, pointers, objects,
+  bases, unions, arrays, function pointers, packed vectors, template arguments, `Core::Array<float>`, `Core::String`,
+  in constants and extents), IsolatedTest `Types/HoldsPointersProgramFunction`, `Types/Bug393ConstantsOfResolvingTypes`,
+  NegativeTest `HoldsPointersOfValue`.
 - **Why:** an engine keeps hundreds of MiB of floats, indices and vertices in Bedrock containers. Each buffer is a
   scan region today, scanned at every collection and copied whole at every stop of a concurrent cycle: 30-36 ms stops
   for 256 MiB where D-79 gives about 1 ms.

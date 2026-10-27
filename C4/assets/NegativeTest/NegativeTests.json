@@ -2799,5 +2799,17 @@
     "VoidParameter": {
         "expect": ["main.cf (1:1) error: parameter 'height' of 'Measure' has type void"],
         "reason": "BUG-391: a parameter holds a value; only C's `(void)` alone, an empty list, may name void. It crashed the compiler."
+    },
+    "HoldsPointersOfValue": {
+        "expect": ["'holds_pointers' takes a type: holds_pointers(T)"],
+        "reason": "holds_pointers asks about a type; arguments that name none read as a call, and with no program function of that name the message says what the query takes (B70)."
+    },
+    "ReferenceReturnOfTemporary": {
+        "expect": ["cannot return a reference to a temporary from 'Returned'"],
+        "reason": "BUG-398: a function returning a reference returns a location; a by-value call's result is a temporary that ends with the statement (it used to be returned as if it were an address, which failed IR verification)."
+    },
+    "ReferenceReturnOfChosenLocal": {
+        "expect": ["cannot return a reference to the local 'local'"],
+        "reason": "BUG-398: each branch of a conditional a reference return gives is checked as a returned location is."
     }
 }

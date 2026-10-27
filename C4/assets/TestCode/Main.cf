@@ -14,6 +14,7 @@ include "Core/LiteralTyping.ch"
 include "Core/MacroConditions.ch"
 include "Core/DefaultArgumentExpressions.ch"
 include "Core/SizeofForms.ch"
+include "Core/HoldsPointers.ch"
 include "Core/BooleanLiterals.ch"
 include "Core/FloatLiterals.ch"
 include "Core/CharLiterals.ch"
@@ -206,6 +207,7 @@ TestConstExprArraySizes();
 	TestMacroConditions();
 	TestDefaultArgumentExpressions();
 	TestSizeofForms();
+	TestHoldsPointers();
 	TestVirtualDispatchTemplateInheritance();
 	
 	printf("[DEBUG] Starting Operator Tests...\n");

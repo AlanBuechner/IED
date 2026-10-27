@@ -1,6 +1,7 @@
 #include "TypeOfExpressionNode.h"
 #include "Parser/PrattParser.h"
 #include "Lexer/Lexer.h"
+#include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 
 namespace Scripting
 {
@@ -14,7 +15,27 @@ namespace Scripting
 			if (text == "__uuidof") return Kind::UuidOf;
 			if (text == "nameof") return Kind::NameOf;
 			if (text == "holds_native_bytes") return Kind::HoldsNativeBytes;
+			if (text == "holds_pointers") return Kind::HoldsPointers;
 			return Kind::SizeOf;
+		}
+
+		bool ReadsAsCall(TypeOfExpressionNode::Kind kind)
+		{
+			return kind == TypeOfExpressionNode::Kind::HoldsNativeBytes || kind == TypeOfExpressionNode::Kind::HoldsPointers;
+		}
+
+		// `name(args)` from the keyword on, read ahead and rolled back, as an ordinary call parses it.
+		Ref<AstNode> SpeculativeCall(ParserState& state)
+		{
+			Lexer& lexer = state.GetLexer();
+			auto undo = LexerUndoScope(lexer);
+			state.GetErrorTracker().SuppressErrors();
+			Ref<AstNode> callee = IdentifierExpressionNode::TryParse(state);
+			Ref<AstNode> call = callee && lexer.PeekCompound().GetType() == TokenType::OpenParen ? PrattParser::ParseCall(state, callee) : nullptr;
+			const bool parsed = call && !state.GetErrorTracker().SpeculationFailed();
+			state.GetErrorTracker().DiscardSuppressedErrors();
+			undo.Cancel();
+			return parsed ? call : nullptr;
 		}
 
 		// `(expr)` read ahead and rolled back: the node survives, the lexer does not move.
@@ -35,7 +56,7 @@ namespace Scripting
 	bool TypeOfExpressionNode::IsKeyword(const Core::String& text)
 	{
 		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof" || text == "nameof" ||
-			text == "holds_native_bytes";
+			text == "holds_native_bytes" || text == "holds_pointers";
 	}
 
 	Ref<TypeOfExpressionNode> TypeOfExpressionNode::TryParse(ParserState& state)
@@ -50,17 +71,25 @@ namespace Scripting
 		node->m_Kind = KindOf(keyword.GetText());
 		node->startLocation = keyword.GetStartLocation();
 		node->endLocation = keyword.GetEndLocation();
+		if (ReadsAsCall(node->m_Kind)) node->m_Call = SpeculativeCall(state);
+		auto undo = LexerUndoScope(lexer);
 		lexer.NextCompoundToken();
 
 		if (node->m_Kind == Kind::SizeOf && lexer.PeekCompound().GetType() == TokenType::Ellipsis)
 			node->ParsePack(state);
 		else if (!node->ParseTypeOperand(state) && !node->ParseExpressionOperand(state))
 		{
+			if (node->m_Call)
+			{
+				undo.Cancel(); // `holds_pointers(5)`: no type, so the ordinary call reads it
+				return nullptr;
+			}
 			const Token bad = lexer.PeekCompound();
 			const char* expected = node->m_Kind == Kind::OffsetOf ? "'(Type, field)'" : "'(Type)'";
 			state.GetErrorTracker().AddError(bad.GetStartLocation(),
 				"Expected " + Core::String(expected) + " after '" + keyword.GetText() + "', got '" + bad.GetText() + "'", ErrorSeverity::Error);
 		}
+		undo.Commit();
 		return node;
 	}
 

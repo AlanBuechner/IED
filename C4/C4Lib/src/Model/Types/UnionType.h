@@ -20,6 +20,9 @@ namespace Scripting
 
 		const Core::Vector<ObjectType::FieldInfo>& GetFields() const { return m_Fields; }
 		void AddField(const ObjectType::FieldInfo& field) { m_Fields.Push(field); }
+		// The resolver adds a named union's fields together once every one resolves (BUG-393).
+		bool HasPendingFields() const { return m_PendingFields; }
+		void SetPendingFields(bool pending) { m_PendingFields = pending; }
 		void CalculateLayout();
 
 		int64 GetFieldOffset(const Core::String& name) const;
@@ -39,6 +42,7 @@ namespace Scripting
 	private:
 		Core::String m_FullName;
 		Core::Vector<ObjectType::FieldInfo> m_Fields;
+		bool m_PendingFields = false;
 		const AstNode* m_DeclNode = nullptr;
 		const Scope* m_DeclScope = nullptr;
 		Core::Vector<Core::String> m_EnclosingNames;

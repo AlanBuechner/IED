@@ -61,6 +61,11 @@ namespace Scripting
 		}
 	}
 
+	Ref<AstNode> PrattParser::ParseCall(ParserState& state, Ref<AstNode> callee)
+	{
+		return FinishTemplateCall(state, callee, nullptr, callee->startLocation);
+	}
+
 	Ref<AstNode> PrattParser::FinishTemplateCall(ParserState& state, Ref<AstNode> callee, Ref<TemplateArgumentListNode> tmplArgs,
 		const SourceLocation& start)
 	{
@@ -204,7 +209,7 @@ namespace Scripting
 
 			// --- Compile-time queries: sizeof, alignof, offsetof, __uuidof, sizeof... ---
 			if (TypeOfExpressionNode::IsKeyword(text))
-				return TypeOfExpressionNode::TryParse(state);
+				if (auto query = TypeOfExpressionNode::TryParse(state)) return query;
 			if (VaArgExpressionNode::StartsHere(state))
 				return VaArgExpressionNode::TryParse(state);
 		}

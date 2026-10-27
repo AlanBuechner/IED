@@ -224,6 +224,12 @@ namespace Scripting
 		bool IsDefined() const { return m_IsDefined; }
 		void SetDefined(bool v) { m_IsDefined = v; }
 
+		// Fields, bases and packed regions the resolver has queued and not attached yet: until they are, the type's
+		// size and contents are not known, so a constant that measures it waits (BUG-393).
+		bool HasPendingParts() const { return m_PendingParts != 0; }
+		void AwaitPart() { ++m_PendingParts; }
+		void AttachPendingPart() { --m_PendingParts; }
+
 		// Layout finalization state for the order-independent RESOLVE pass. m_LaidOut means the
 		// size/offsets are computed (memo); m_LayingOut marks a type currently being laid out so a
 		// by-value dependency cycle (infinite size) is detected instead of recursing forever.
@@ -304,6 +310,7 @@ namespace Scripting
 		bool m_IsReturnList = false;
 		bool m_IsComplete = false;
 		bool m_IsDefined = false;
+		uint32 m_PendingParts = 0;
 		// Layout memo + in-progress guard. Mutable because GetSize/GetAlignment are const and lazily
 		// compute the layout on demand (post-order over bases) so sizeof(T) is correct as soon as T's
 		// own fields are resolved - not only after the end-of-pass-2 FinalizeLayouts sweep.

@@ -1,0 +1,14 @@
+// B70: a program function named holds_pointers wins over the query where it is visible, whatever its arguments
+// (a value, or a variable whose name could be a type's); a file that cannot see it gets the query.
+include "query.ch"
+
+bool holds_pointers(int32 value) { return value > 3; }
+
+int32 main() {
+	int32 failed = 0;
+	if (!holds_pointers(5) || holds_pointers(2)) failed += 1;
+	int32 limit = 7;
+	if (!holds_pointers(limit)) failed += 1;
+	if (!QueryNodeHolds() || QueryFloatsHold()) failed += 1;
+	return failed;
+}

@@ -1,0 +1,1 @@
+int32 main() { return holds_pointers(5) ? 1 : 0; }
