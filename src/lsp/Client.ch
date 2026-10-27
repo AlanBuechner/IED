@@ -13,6 +13,14 @@ namespace Ied
 
 	const char* LspStateName(LspState state);
 
+	// The LSP's own error codes for an answer that is no answer: the request was cancelled, or the document changed
+	// under it (the client asks again for the new text).
+	const int64 c_LspRequestCancelled = -32800;
+	const int64 c_LspContentModified = -32801;
+
+	// A server's error object as the protocol's error: `cancelled` for the two above, else plugin_error {code, message}.
+	RpcError LspServerError(Core::StringView json);
+
 	const int64 c_LspStartTimeoutMs = 20000;
 	const int64 c_LspRequestTimeoutMs = 30000;
 	const int64 c_LspRestartWindowNs = 300000000000;   // three exits in five minutes and it stays down

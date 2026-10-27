@@ -36,12 +36,13 @@ namespace Ied
 		return json.ToString();
 	}
 
-	// A server's error object as plugin_error {code, message}.
-	static RpcError ServerError(Core::StringView json) {
+	RpcError LspServerError(Core::StringView json) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Serialization::DomNode error = Serialization::ReadJson(json, *doc).root;
 		Core::StringView message = error.Member("message").AsView();
-		return RpcError(ErrorCode::PluginError, message.IsEmpty() ? Core::StringView("the language server failed") : message, json);
+		const int64 code = error.Member("code").AsInt();
+		const bool noAnswer = code == c_LspRequestCancelled || code == c_LspContentModified;
+		return RpcError(noAnswer ? ErrorCode::Cancelled : ErrorCode::PluginError, message.IsEmpty() ? Core::StringView("the language server failed") : message, json);
 	}
 
 	void LanguageServer::Init(Server* server, Workspace* ws, LspProfile* profile, Core::StringView project, const FS::Path& projectDir) {
@@ -218,7 +219,7 @@ namespace Ied
 		while (!answer->m_Done && !call.m_Cancel->IsCancelled() && clock_now_ns() < deadline) call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_LspWaitSliceNs);
 		m_Answers.Remove(id);
 		if (answer->m_Done && answer->m_Ok) return answer->m_Json;
-		if (answer->m_Done) throw ServerError(answer->m_Json.View());
+		if (answer->m_Done) throw LspServerError(answer->m_Json.View());
 		JsonWriter cancel;
 		cancel.BeginObject();
 		cancel.IntField("id", id);

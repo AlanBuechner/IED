@@ -225,4 +225,15 @@ class LspTests {
 		Serialization::DomNode none = Serialization::ReadJson(Core::StringView("null"), *doc).root;
 		assert_se("null", Ied::FilterCodeActions(none, cursor).CStr(), "no actions");
 	}
+
+	[test("server_errors")]
+	public static void TestServerErrors() {
+		Ied::RpcError modified = Ied::LspServerError(Core::StringView("{\"code\":-32801,\"message\":\"Request cancelled because the document was modified\"}"));
+		assert_true(modified.m_Code == Ied::ErrorCode::Cancelled, "the document changed under the request: no answer, not a failure");
+		assert_se("Request cancelled because the document was modified", modified.m_Message.CStr(), "the server's words kept");
+		assert_true(Ied::LspServerError(Core::StringView("{\"code\":-32800,\"message\":\"cancelled\"}")).m_Code == Ied::ErrorCode::Cancelled, "a request the server cancelled");
+		Ied::RpcError failed = Ied::LspServerError(Core::StringView("{\"code\":-32603,\"message\":\"boom\"}"));
+		assert_true(failed.m_Code == Ied::ErrorCode::PluginError && failed.m_Data.View().Contains(Core::StringView("-32603")), "any other error is the server's failure, its object kept");
+		assert_se("the language server failed", Ied::LspServerError(Core::StringView("{\"code\":-32603}")).m_Message.CStr(), "one without a message");
+	}
 }
