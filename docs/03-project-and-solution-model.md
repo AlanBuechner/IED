@@ -17,7 +17,7 @@ Define IED's workspace formats: Visual Studio-style solutions and projects, with
 
 ## Solution file (`solution.v1.schema.json`)
 
-Fields: `version`, `name`, `projects[]` (paths or globs to `.iedproj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
+Fields: `version`, `name`, `projects[]` (`{file, optional?}` objects: `file` a path or glob to `.iedproj` files, `optional` for generated files not yet generated; a bare string is refused), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
 
 ## Project file (`project.v1.schema.json`)
 
