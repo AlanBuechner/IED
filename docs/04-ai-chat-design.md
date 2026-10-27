@@ -347,6 +347,115 @@ Assembled in a fixed order - base prompt, style rules, mode instructions, soluti
 
 MCP client for stdio and streamable-HTTP servers (Blender, a game engine, anything), configured at app/solution/project tier (project-defined servers need trust). Tools surface as group `mcp_<server>` in the same registry; resources become @-mentionable context; prompts become slash commands. Each server has a privacy class and inherits the workspace egress policy. IED is also an MCP *server* (P1) so external agents can use its LSP/build/editor tools.
 
+### Design (2026-10-26)
+
+Owner, 2026-10-26: "MCP support. i have blender installed with MCP so you can use that to test it".
+
+**Where it lives.** The client is the built-in plugin `ied.mcp` (`plugins/mcp/`): its server code (`plugins/mcp/code/`,
+compiled into the server like the other built-ins, `docs/26` "Built-ins on the API") runs the servers and speaks MCP to them;
+its UI module draws Settings > AI > MCP Servers. The chat has no MCP code (`AGENTS.md` rule 7): the plugin gives each MCP tool
+to the workspace as one of its own computed `toolCalls` (`PluginContext::Contribute`, `docs/26` section 3) - a `function` tool
+of its code with `ownThread`, so calls of several servers run at once - and the chat offers them with every plugin's tools
+(`docs/13` "Plugin and MCP tools"), through the same permission checks, approval cards and tool cards. The one thing the chat
+asks of it is the optional binding `mcp.ensure`, before a turn builds its tools, so a server whose tools are not known yet
+starts first. A Claude chat gets them the same way: they are in the chat's tool list, which reaches the Claude Code CLI through
+IED's in-process MCP server `ied` ("The Claude Code provider"), so IED's permission checks hold for them too; the CLI is never
+given an MCP configuration of its own.
+
+**A server** is an entry of `mcp.servers` (app, solution and project tiers, merged member by member, a deeper tier's entry of a
+name replacing the shallower one's; `docs/07`), or of a plugin's `contributes.mcpServers` (named by its `id`; an
+`mcp.servers` entry of that name replaces it):
+
+```jsonc
+"mcp.servers": {
+	"blender": { "command": "python", "args": ["C:/tools/blender_mcp.py"], "env": { "BLENDER_PORT": "9876" } },
+	"engine":  { "url": "http://127.0.0.1:7801/mcp", "headers": { "Authorization": { "env": "ENGINE_TOKEN" } },
+	             "permission": "read", "preload": true, "privacy": "local" }
+}
+```
+
+- `command` (a program on PATH or a path; a `.cmd` or `.bat` - `npx` - runs through cmd.exe, each word quoted), `args`,
+  `env` (added to the server's environment) and `cwd` (relative to the workspace root, which is the default): a server IED
+  starts and speaks to on its standard input and output. Or `url` (`http://`; Bedrock's HTTP client has no TLS, so `https`
+  is refused with that reason) and `headers`: a server already running, spoken to with streamable HTTP. A value in `env` or
+  `headers` is text or `{"env": "NAME"}`, read from IED's environment when the server starts, so no secret is written in a
+  settings file (`docs/11` "Secrets").
+- `enabled` (default true); `exclude`, tool names left out.
+- `permission`: `ask` (the default) - every call of its tools asks the owner, in any permission mode, until they allow it;
+  `auto` - its tools are commands (`exec`) that follow the chat's permission mode as every command does; `read` - the owner
+  says the server only reads: its tools run without asking and are offered in Plan mode. A server's own `readOnlyHint` is
+  shown, never trusted.
+- `preload`: `true`, or the names of its tools to send whole with every request; otherwise they are deferred
+  (`docs/13` "Loading tools on demand").
+- `privacy`: `local`, `lan` or `cloud` (default `local` for a command or a loopback URL, `cloud` for any other URL): the class
+  a private chat's routing reads ("Privacy" above; a private chat leaves `cloud` servers out once private chats are built).
+- `timeoutSeconds`: how long a call may take (120; at most 1800); `startSeconds`: how long a start may take to answer
+  `initialize` (30; at most 300 - `uvx` or `npx` may download the server on its first run).
+- `mcp.idleMinutes` (app, solution; 10, 0 never): a server no call used for this long is stopped.
+
+**Trust.** A workspace's MCP servers start only while it is trusted, app-tier ones included: their tools run code, and an
+untrusted workspace has no tools that run code at all (`docs/11` "Invariants"). Untrusting a workspace stops its servers and
+takes their tools away; a project plugin's `mcpServers` come with the plugin, which loads only once the workspace is trusted.
+
+**Its tools.** Each tool of a server is a tool of the chat named `mcp_<server>_<tool>` (lowercase, anything but letters,
+digits and `_` made `_`, at most 64 characters; a clash gets `_2`), in group `mcp_<server>`, described as
+`<server> (MCP): <the server's description>`, with the server's `inputSchema` (one Bedrock's validator cannot load becomes
+`{"type": "object"}`, said in the MCP output). They are deferred unless `preload` says so: in every request's tool list from
+a chat's first step as stubs, shown whole by `tool_search` - so a server with 40 tools costs a local model 40 short lines,
+not 40 schemas. A tool's class is `exec` (`permission` `ask` or `auto`) or `read` (`read`); its subject for the permission
+rules is `plugin(ied.mcp/<name>)` like any plugin tool's (`docs/11`), so `"allow": ["plugin(ied.mcp/mcp_blender_*)"]` allows
+all of one server's tools and "Allow for this chat" on the card allows that one tool for the chat. `ask` is the plugin
+manifest's new `toolCalls` field `approval: "ask"`, open to any plugin: such a call asks the owner even in `auto` and
+`acceptEdits` until an allow rule or the chat's allowed rules match it; a `confirm` rule still asks every time and a deny
+rule refuses, and Plan mode refuses it as any non-read call.
+
+**A call** goes to the server as `tools/call {name, arguments}` and its result becomes the tool's: `text` content as text,
+`image` content written to `.ied/local/mcp/media/` and shown to a model that takes images like any tool's images (`docs/13`
+"Images in tool results"), `audio` and `resource` blobs written there and named, an embedded text resource as its text, a
+`resource_link` named with its URI, `structuredContent` as JSON when there is no content; `isError` makes it an error result.
+Text past 256 KB is cut with a note. The card's source is `MCP <server>`. A server that does not answer within
+`timeoutSeconds` is sent `notifications/cancelled` and the call fails saying so (and naming the setting); Stop on the chat
+cancels the call the same way.
+
+**Lifetime.** A server starts on its first use in a workspace: a turn's `mcp.ensure` when its tools are not known yet, a call
+of one of its tools, or Test or Restart in Settings. Its tools are kept per workspace in `.ied/local/mcp/tools.json` with a
+hash of its configuration, so after a restart of IED (or an idle stop) the turns still offer them - the request's tool list
+byte for byte the same - without starting the server, and the next call starts it. It stops after `mcp.idleMinutes` without a
+call, when its configuration changes (its tools are listed again at its next start), when the workspace is untrusted, and with
+the server. A server that exits while up is started again after 1, 2, 4, 8, 16, then every 30 s; one that exited 5 times in a
+row, each within a minute of its start, is `failed` until Restart or a changed configuration (a call to it tries one start
+and fails with its last error). `notifications/tools/list_changed` lists its tools again, and the chat's next turn has the
+new list. `mcp.ensure` answers at once and says how long the caller may wait (`waitMs`, at most 30 s); the chat asks again
+every 250 ms until the starts it is waiting for are done, so a turn's first request has their tools, and a server that takes
+longer joins at the next turn.
+
+**Protocol** (MCP 2025-06-18): `initialize` (IED offers no client capabilities - no roots, sampling or elicitation - and takes
+a server's answer of 2025-06-18, 2025-03-26 or 2024-11-05), `notifications/initialized`, `tools/list` page by page
+(`nextCursor`), `tools/call`, `notifications/tools/list_changed`, `ping` answered, `notifications/cancelled`,
+`notifications/message` written to the output; any other request of the server's is answered `-32601`. On stdio a message is
+one line of JSON; the server's standard error goes to the output. Streamable HTTP POSTs each message with `Accept:
+application/json, text/event-stream`, `MCP-Protocol-Version` and the `Mcp-Session-Id` the server gave at `initialize`, and
+reads a JSON answer or an event stream (with the server's requests and notifications in it) up to the answer; a 404 for a
+session starts a new one once; stopping sends `DELETE`. The client opens no standing GET stream, so a server tells it of a
+changed list only in an answer.
+
+**Failures show** in the workspace's Output source **MCP** (each start with its command or URL, the server's name and
+version and its tools, its standard error, exits with their code, restarts, timeouts, protocol errors), on the server's row
+in Settings > AI > MCP Servers (its state and last error with the end of its standard error), and in the failing call's
+result, which says what to do.
+
+**In the UI** (Settings > AI > MCP Servers, `plugins/mcp/ui/`): the workspace's servers from the topic `mcp:<wsId>` - name,
+command line or URL, state (stopped, starting, running, failed, disabled; untrusted for the whole workspace), permission,
+privacy, its tools (count, then each with its first line; preloaded ones marked), the last error - with Test (start it, or
+again, and list its tools), Restart, Stop, Edit, Remove and on/off; Add server takes a name, a command (with arguments and
+environment) or a URL (with headers), the permission, preload, privacy and timeout, and Test tries it before Save. The page
+edits the User (app) tier; servers a solution or project file sets are listed with where they come from and edited in that
+file.
+
+**Resources and prompts** (designed, not built): a server's `resources/list` as `@` mentions (`@mcp:<server>/<uri>`, read with
+`resources/read` when the turn starts, as other mentions are, `docs/04` "Attachments and @-mentions"), and its prompts as
+slash commands.
+
 ## Web egress and secure mode
 
 - **SearXNG bundled** (`docs/21`); `web_search` goes through it. As built (`docs/29`): run by the `ied.websearch` plugin, not the host, its engines asked through Tor (the `ied.tor` plugin) - Tor carries web search only for now (owner, 2026-10-21); `web_fetch` (`ied.webfetch`) goes direct, looking like a browser. The egress proxy below is not built.
