@@ -221,6 +221,13 @@ namespace Ied
 			if (!result.Ok()) throw RpcError(ErrorCode::PluginError, result.error.View());
 			return (Core::String("{\"result\":") + result.json.View()) + "}";
 		}
+		if (method == "master.notify") {
+			Core::String level = Core::String(params.Member("level").AsView());
+			Core::String text = Required(params, "text");
+			Threading::LockGuard guard(server->lock);
+			server->presence->Add(level.IsEmpty() ? Core::StringView("info") : level.View(), text.View());
+			return Core::String("{}");
+		}
 		if (method == "master.relaunch") {
 			Core::String reason = Core::String(params.Member("reason").AsView());
 			Threading::LockGuard guard(server->lock);

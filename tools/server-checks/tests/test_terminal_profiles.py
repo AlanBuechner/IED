@@ -17,7 +17,8 @@ import time
 import zipfile
 
 from frames import FrameChecker
-from iedclient import Client, RpcFailure
+from iedclient import RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 SHELLS = ["pwsh", "powershell", "cmd", "gitbash"]
@@ -73,7 +74,7 @@ class TerminalProfileTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		self.ws = (await self.client.request("ws.list"))["workspaces"][0]["wsId"]
 
 	async def asyncTearDown(self):

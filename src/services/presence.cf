@@ -109,6 +109,18 @@ namespace Ied
 	}
 
 	Core::String Presence::Add(Core::StringView level, Core::StringView text) {
+		if (!server->IsMaster() && server->master) {
+			JsonWriter params;
+			params.BeginObject();
+			params.Field("level", level);
+			params.Field("text", text);
+			params.EndObject();
+			Core::String result;
+			Core::String problem;
+			if (!server->master->Call(&server->lock, Core::StringView("master.notify"), params.View(), result, problem))
+				server->Log((Core::String("a notification did not reach the master: ") + problem.View()).View());
+			return Core::String();
+		}
 		Notification note;
 		note.level = Core::String(level);
 		note.text = Core::String(text);

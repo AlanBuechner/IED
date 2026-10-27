@@ -25,7 +25,8 @@ namespace Ied
 		public void RoutesChanged();
 		// {methods, topics}: what a client sends the master (docs/10 "Routing").
 		public Core::String RoutesJson() const;
-		// A notification for every device (server.notify's): its id.
+		// A notification for every device (server.notify's): its id. A workspace server's goes to the master, whose
+		// `server` topic every tab follows (master.notify; its id is the master's, so "" here). The lock is held.
 		public Core::String Add(Core::StringView level, Core::StringView text);
 
 	private:

@@ -17,7 +17,8 @@ import time
 
 from fake_tools import FileServer, broken_script, tool_zip, version_script, write_program
 from frames import FrameChecker
-from iedclient import Client, RpcFailure
+from iedclient import RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 from test_chat import TURN_SECONDS, ChatCase, call_step, text_step
 
@@ -84,7 +85,7 @@ class LanguageToolTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		self.ws = (await self.client.request("ws.list"))["workspaces"][0]["wsId"]
 
 	async def asyncTearDown(self):
@@ -244,7 +245,7 @@ class LanguagePluginToolTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.request("settings.set", {"tier": "app", "key": "go.delve.path", "value": sys.executable})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 

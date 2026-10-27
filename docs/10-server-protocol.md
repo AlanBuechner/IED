@@ -394,6 +394,7 @@ The pipe is the master's. Its workspace servers use it too, with methods only th
 | `master.open {path}` | `{workspace: summary}`: a folder or solution a workspace server's method made (`project.create`, `project.import`) opened in a server of its own |
 | `master.binding {name, args}` | `{result}`: a server binding the master's plugins answer (`docs/26` "Servers") |
 | `master.relaunch {reason}` | `IED::RelaunchServer` from a workspace server's plugin: the master's relaunch (`docs/27`) |
+| `master.notify {level, text}` | a notification a workspace server's host raises (a language tools install ending, `docs/26` "Language tools"): the master's `server.notify` |
 
 Each workspace server has a pipe of its own, `<master's pipe>-<wsId>`, which the master's supervisor alone uses: `status` (`{wsId, pid, port, sessionEpoch, workspaces, clients}`; the server is ready once it answers with its own pid and a port, which it opens once its plugins' code has started - at most 10 s), `stop` (as the master's, for its workspace), and `settings.changed` / `choices.changed`: the master wrote `settings.json` / `plugins.json`, and each workspace server reads it again before the master answers whoever asked for the write (a client that asks its workspace server next sees the change; their file watchers would take a moment).
 
