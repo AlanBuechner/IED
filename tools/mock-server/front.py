@@ -25,6 +25,7 @@ SERVED_IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
 WILDCARD_BINDS = {"0.0.0.0", "::", ""}
 MAX_UPLOAD = 64 * 1024 * 1024
+KEEP_ALIVE_SECONDS = 20
 CONTENT_TYPES = {
 	".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
 	".css": "text/css; charset=utf-8", ".json": "application/json", ".map": "application/json", ".svg": "image/svg+xml",
@@ -48,12 +49,19 @@ class Response:
 		self.content_type = content_type
 		self.headers = headers or {}
 
-	def encode(self):
+	def encode(self, keep_alive=False):
 		headers = dict({"Cache-Control": "no-store"}, **self.headers)
 		lines = ["HTTP/1.1 %d %s" % (self.status, REASONS.get(self.status, "Status")), "Content-Type: " + self.content_type,
-			"Content-Length: %d" % len(self.body), "Connection: close"]
+			"Content-Length: %d" % len(self.body), "Connection: " + ("keep-alive" if keep_alive else "close")]
 		lines += ["%s: %s" % kv for kv in headers.items()]
 		return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + self.body
+
+
+def keeps(method, version, headers):
+	"""Whether the connection stays open after a request: a body-less HTTP/1.1 one that did not ask to close. A page loads
+	a hundred modules; a connection each, closed at once, leaves each closed one minutes in TIME_WAIT, and a long e2e
+	run then runs the machine out of ports - a request fails to connect, the mock's flaky first loads."""
+	return method in ("GET", "HEAD") and version == "HTTP/1.1" and headers.get("connection", "").lower() != "close" and headers.get("content-length", "0") in ("", "0")
 
 
 def json_response(obj, status=200):
@@ -69,38 +77,46 @@ class Front:
 
 	async def handle(self, reader, writer):
 		peer = "%s:%s" % writer.get_extra_info("peername")[:2]
-		try:
-			head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 30)
-			(method, target, _), headers = ws.parse_head(head.decode("latin-1"))
-		except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError, ConnectionError, ValueError):
-			writer.close()
-			return
-		path = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
-		# The real master passes /w/<wsId>/ws and /w/<wsId>/api/... to the workspace's server (docs/10 "Routing"); the
-		# mock is one process that plays both, so it answers them as its own.
-		served = WORKSPACE_OWN.match(path)
-		if served:
-			path = served.group(1)
-		try:
-			self._check_host(headers)
-			if path == "/ws":
-				await self._websocket(reader, writer, method, headers, peer)
+		answered = 0
+		while True:
+			try:
+				# A kept connection waits for its next request only as long as a browser keeps one idle.
+				head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), KEEP_ALIVE_SECONDS if answered else 30)
+				(method, target, version), headers = ws.parse_head(head.decode("latin-1"))
+			except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError, ConnectionError, ValueError):
+				writer.close()
 				return
-			response = await self._route(method, path, headers, reader)
-		except HttpError as e:
-			response = Response(e.status, e.message + "\n")
-		except ws.HandshakeError as e:
-			response = Response(e.status, str(e) + "\n")
-		await self._send(writer, response)
+			path = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
+			# The real master passes /w/<wsId>/ws and /w/<wsId>/api/... to the workspace's server (docs/10 "Routing"); the
+			# mock is one process that plays both, so it answers them as its own.
+			served = WORKSPACE_OWN.match(path)
+			if served:
+				path = served.group(1)
+			try:
+				self._check_host(headers)
+				if path == "/ws":
+					await self._websocket(reader, writer, method, headers, peer)
+					return
+				response = await self._route(method, path, headers, reader)
+			except HttpError as e:
+				response = Response(e.status, e.message + "\n")
+			except ws.HandshakeError as e:
+				response = Response(e.status, str(e) + "\n")
+			answered += 1
+			if not await self._send(writer, response, keeps(method, version, headers)):
+				return
 
-	async def _send(self, writer, response):
+	async def _send(self, writer, response, keep_alive=False):
+		"""Writes `response`; whether the connection stays open for another request."""
 		try:
-			writer.write(response.encode())
+			writer.write(response.encode(keep_alive))
 			await writer.drain()
 		except (ConnectionError, OSError):
-			pass
-		finally:
 			writer.close()
+			return False
+		if not keep_alive:
+			writer.close()
+		return keep_alive
 
 	def _check_host(self, headers):
 		if self.server.config.host in WILDCARD_BINDS:

@@ -12,6 +12,28 @@ const DOCKS = new Set(["left", "right", "bottom", "document"]);
 const SHELL_PLUGIN = { id: "shell", source: "builtin", contributes: {}, ui: null, base: "/", module: null };
 export const HOME_ACTIVITY = { id: "shell.home", title: "Home", icon: "$(home)", order: 1000, plugin: SHELL_PLUGIN };
 
+const IMPORT_TRIES = 3;
+
+// Whether `error` is a module that could not be fetched (rather than one that ran and threw): the words Chromium, Firefox
+// and WebKit use.
+function fetchFailure(error) {
+	return error instanceof TypeError && /dynamically imported module|Importing a module script failed|error loading/i.test(String(error.message));
+}
+
+// `load(url)`, again when the module could not be fetched: a server busy at a page's start can drop one request, and a
+// failed module stays failed under its URL for the page's life, so a retry asks for it under a URL of its own.
+export async function importRetrying(url, load = (u) => import(u), wait = (ms) => new Promise((done) => setTimeout(done, ms))) {
+	for (let attempt = 0; ; ++attempt) {
+		try {
+			return await load(attempt === 0 ? url : url + (url.includes("?") ? "&" : "?") + "retry=" + attempt);
+		}
+		catch (e) {
+			if (attempt + 1 >= IMPORT_TRIES || !fetchFailure(e)) throw e;
+			await wait(250 * (attempt + 1));
+		}
+	}
+}
+
 export class Contributions {
 	// `shell` gives commands, keybindings, menus, report(), apiFor(plugin) and the page's module cache.
 	constructor(shell) {
@@ -112,7 +134,7 @@ export class Contributions {
 	// Imports a UI module and calls its activate(ied); a failure is reported and kept, so its views say why.
 	async activate(plugin) {
 		try {
-			const module = await import(plugin.ui);
+			const module = await importRetrying(plugin.ui);
 			if (typeof module.activate === "function") await module.activate(this.shell.apiFor(plugin));
 			return { module, error: null };
 		}
