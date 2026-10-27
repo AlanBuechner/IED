@@ -39,6 +39,8 @@ namespace C4Plugin
 
 	// The Nuke checkout a `nuke.command` setting names when it is a path (<checkout>/bin/nuke.cmd); "" for a bare name.
 	Core::String CheckoutOfCommand(Core::StringView command);
+	// The checkout an IED install was made from, as its install.json's text names it (`source`); "" when it names none.
+	Core::String SourceOfInstallRecord(Core::StringView record);
 	// The files a bare command name may be in on `path` (a PATH value): <folder>/<name>.cmd, .bat, then the name itself.
 	Core::Array<Core::String> CommandCandidates(Core::StringView name, Core::StringView path);
 	// `entries` (JSON) with every ${c4.toolchain} replaced by `folder`.

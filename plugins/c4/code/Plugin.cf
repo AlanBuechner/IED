@@ -44,13 +44,22 @@ namespace C4Plugin
 		return Platform::TryGetEnvironmentVariable(name, value) ? value : Core::String("");
 	}
 
-	// The Nuke checkout IED runs Nuke from: the one nuke.command names, or the first on PATH.
+	// The home of the Nuke in `folder` (Nuke/nuke/installed.py): for an IED install's, the checkout it was made from
+	// while that still holds Nuke, else `folder`.
+	static Core::String NukeHome(Core::StringView folder) {
+		Core::String source = SourceOfInstallRecord(TextOf(FS::Path(folder) / "install.json").View());
+		const bool holdsNuke = !source.IsEmpty() && FS::FileExists((FS::Path(source.View()) / "Nuke/nuke/__main__.py").CStr());
+		return holdsNuke ? Core::String(FS::Path(source.View()).Normalized().View()) : Core::String(folder);
+	}
+
+	// The Nuke checkout IED runs Nuke from: the one nuke.command names, or the first on PATH (an IED install's bin/ when
+	// nuke install-ied put it there), as that Nuke's home.
 	static Core::String NukeCheckout(Support* support, Core::StringView wsId) {
 		Core::String command = StringSetting(support, Core::StringView("nuke.command"), wsId);
 		Core::String named = CheckoutOfCommand(command.View());
-		if (!named.IsEmpty()) return named;
+		if (!named.IsEmpty()) return NukeHome(named.View());
 		for (const Core::String& candidate : CommandCandidates(command.IsEmpty() ? Core::StringView("nuke") : command.View(), Environment("PATH").View()))
-			if (FS::FileExists(candidate.CStr())) return Core::String(FS::Path(candidate.View()).Parent().Parent().Normalized().View());
+			if (FS::FileExists(candidate.CStr())) return NukeHome(FS::Path(candidate.View()).Parent().Parent().Normalized().View());
 		return Core::String("");
 	}
 

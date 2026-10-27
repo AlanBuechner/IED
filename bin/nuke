@@ -1,5 +1,6 @@
 #!/bin/sh
-# Nuke launcher for POSIX shells (Git Bash, MSYS). Put this folder on PATH to run `nuke` anywhere.
+# Nuke launcher for POSIX shells (Git Bash, MSYS). Put this folder on PATH (nuke install-ied puts the install's there)
+# to run `nuke` anywhere.
 root="$(cd "$(dirname "$0")/.." && pwd)"
 py="$root/vendor/python/python.exe"
 [ -x "$py" ] || py="$(command -v python3 || command -v python)"

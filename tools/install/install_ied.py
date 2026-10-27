@@ -1,11 +1,11 @@
 """Installs IED from this checkout's build (docs/21 "Install shape"): the programs and what the server serves and loads
 - the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries, and the
 services web search runs (the private Python, SearXNG with its packages and Tor, which setup installs into the checkout
-first when they are missing, docs/29), pip for the Python terminal, and the C/C++ plugin's clangd and CodeLLDB (docs/21)
-- copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
+first when they are missing, docs/29), pip for the Python terminal, the C/C++ plugin's clangd and CodeLLDB, and Nuke
+with its launchers (docs/21) - copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
 `ied-desktop --register` puts IED in the Start menu and
-makes IED's solution files (.iedsln, .iedfed) open in it, and the folder goes on the user's PATH, so `ied <folder>`
-works in a terminal opened afterwards.
+makes IED's solution files (.iedsln, .iedfed) open in it, and the folder and its bin go on the user's PATH, so
+`ied <folder>` and `nuke` work in a terminal opened afterwards.
 
 	python -I tools/install/install_ied.py --bin build/bin/Development-windows-x64 [--to <folder>] [--no-register] [--no-path]
 	python -I tools/install/install_ied.py --uninstall [--to <folder>]
@@ -59,7 +59,13 @@ TREES = (
 	("vendor/web", ()),
 	("third_party/codicons/src/icons", ()),
 	("third_party/codicons/src/template", ()),
+	("Nuke/nuke", ()),
+	("Nuke/templates", ()),
+	("bin", ()),
 )
+# The folders that go on the user's PATH: the programs', and bin, Nuke's launchers (Nuke/nuke/installed.py: the Nuke an
+# install carries keeps the checkout as its home).
+PATH_FOLDERS = (".", "bin")
 # What a checkout's own work leaves inside those trees, at any depth, and an install leaves out: a plugin's sample built
 # in place (plugins/c4/samples/*/build), a crate's cargo output (target), the bytecode of a Nuke driver Python ran.
 BUILT_IN_PLACE = {"build", "target", "__pycache__"}
@@ -320,15 +326,29 @@ def without_folder(path_value, folder):
 	return None if len(kept) == len(entries) else ";".join(kept)
 
 
-def change_user_path(change, folder):
-	"""Applies `change` (with_folder or without_folder) to the user's PATH (HKCU, Environment); true when it changed.
-	Programs started afterwards see it: Explorer is told, as Settings' Environment Variables dialog tells it."""
+def path_folders(target):
+	return [os.path.normpath(os.path.join(target, folder)) for folder in PATH_FOLDERS]
+
+
+def with_folders(path_value, folders, change):
+	"""The PATH value with `change` (with_folder or without_folder) applied for each of `folders`; None when none
+	changed it."""
+	changed = path_value
+	for folder in folders:
+		changed = change(changed, folder) or changed
+	return None if changed == path_value else changed
+
+
+def change_user_path(change, folders):
+	"""Applies `change` (with_folder or without_folder) for each of `folders` to the user's PATH (HKCU, Environment);
+	true when it changed. Programs started afterwards see it: Explorer is told, as Settings' Environment Variables
+	dialog tells it."""
 	with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
 		try:
 			value, kind = winreg.QueryValueEx(key, "Path")
 		except FileNotFoundError:
 			value, kind = "", winreg.REG_EXPAND_SZ
-		changed = change(value, folder)
+		changed = with_folders(value, folders, change)
 		if changed is None:
 			return False
 		winreg.SetValueEx(key, "Path", 0, kind if kind in (winreg.REG_SZ, winreg.REG_EXPAND_SZ) else winreg.REG_EXPAND_SZ, changed)
@@ -380,7 +400,7 @@ def uninstall(target):
 		subprocess.run([desktop, "--unregister"], timeout=60)
 	if os.path.isfile(shortcut_path()):
 		raise SystemExit("install-ied: the Start menu shortcut is still there: %s" % shortcut_path())
-	print("install-ied: out of the PATH" if change_user_path(without_folder, target) else "install-ied: it was not on the PATH")
+	print("install-ied: out of the PATH" if change_user_path(without_folder, path_folders(target)) else "install-ied: it was not on the PATH")
 	if os.path.isdir(target):
 		remove_install(target)
 		print("install-ied: removed %s" % target)
@@ -404,7 +424,7 @@ def main(argv):
 	parser.add_argument("--bin", help="the build's bin folder for one configuration (build/bin/<config>-windows-x64)")
 	parser.add_argument("--to", default=None, help="the install folder (default %%LOCALAPPDATA%%\\Programs\\IED)")
 	parser.add_argument("--no-register", action="store_true", help="do not put IED in the Start menu")
-	parser.add_argument("--no-path", action="store_true", help="do not put the install folder on the user's PATH")
+	parser.add_argument("--no-path", action="store_true", help="do not put the install folder and its bin on the user's PATH")
 	parser.add_argument("--uninstall", action="store_true", help="take IED out of the Start menu, the file types and the PATH, and remove the folder")
 	args = parser.parse_args(argv)
 	target = os.path.abspath(args.to or default_target())
@@ -422,8 +442,8 @@ def main(argv):
 	if not args.no_register:
 		print("install-ied: in the Start menu as IED (%s)" % register(target))
 	if not args.no_path:
-		added = change_user_path(with_folder, target)
-		print("install-ied: on your PATH; terminals opened from now on run `ied`" if added else "install-ied: already on your PATH")
+		added = change_user_path(with_folder, path_folders(target))
+		print("install-ied: on your PATH; terminals opened from now on run `ied` and `nuke`" if added else "install-ied: already on your PATH")
 	return 0
 
 

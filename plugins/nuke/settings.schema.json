@@ -6,7 +6,7 @@
 		"nuke.command": {
 			"type": "string",
 			"default": "nuke",
-			"description": "How the Nuke tasks start Nuke: a name on PATH or the path of nuke.cmd (bin/ in the IED repository)."
+			"description": "How the Nuke tasks start Nuke: a name on PATH (nuke install-ied puts the install's bin/ there) or the path of nuke.cmd (bin/ in the IED install or repository)."
 		},
 		"nuke.packages.fetchMinutes": {
 			"type": "number",

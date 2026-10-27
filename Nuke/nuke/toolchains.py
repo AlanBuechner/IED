@@ -11,7 +11,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 
-from . import fsutil
+from . import fsutil, installed
 from .errors import NukeError
 
 KIND = "c4"
@@ -25,9 +25,15 @@ OPTION = re.compile(r"(?<![\w-])(--?[A-Za-z][\w.=-]*)")
 REQUIRED = ("C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe")
 
 
-def nuke_home():
-	"""The folder that holds Nuke/ (the IED checkout): toolchains/ and vendor/ live beside it."""
+def nuke_folder():
+	"""The folder that holds Nuke/: the IED checkout, or an IED install."""
 	return fsutil.norm(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def nuke_home():
+	"""The folder of toolchains/, .cache/ and vendor/: the IED checkout that holds Nuke/ - for the Nuke an IED install
+	carries, the checkout it was made from (installed.py)."""
+	return installed.home_of(nuke_folder())
 
 
 def default_store_root():

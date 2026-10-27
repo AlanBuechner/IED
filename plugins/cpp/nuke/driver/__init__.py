@@ -22,7 +22,7 @@ def implicit_depends(spec):
 
 
 def variables(ctx):
-	llvm = toolchains.llvm_folder(settings.read_settings(ctx.settings), ctx.workspace_dir)
+	llvm = toolchains.llvm_folder(settings.read_settings(ctx.settings), ctx.workspace_dir, toolchains.checkout_llvm(ctx.nuke_home))
 	return {"llvm": llvm, "clang": f"{llvm}/bin/clang.exe"}
 
 
@@ -52,7 +52,7 @@ def _build(ctx):
 	if target.kind == "prebuilt":
 		_check_prebuilt(target)
 		return []
-	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand)
+	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand, ctx.nuke_home)
 	libraries = [model.target(dependency) for dependency in model.libraries(ctx)]
 	_check_object_names(ctx, target)
 	_prepare_folders(target, ctx.log)

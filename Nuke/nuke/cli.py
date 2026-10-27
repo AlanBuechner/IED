@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from . import NUKE_VERSION, configs, fsutil, graph, ied_files, packages, toolchains, workspace as workspaces
+from . import NUKE_VERSION, configs, fsutil, graph, ied_files, installed, packages, toolchains, workspace as workspaces
 from .commands import command_table
 from .engine import execute, validate_phases
 from .errors import NukeError, StepFailed
@@ -67,6 +67,18 @@ def find_workspace_option(tokens, takes_args_names):
 		if token.startswith("--workspace="):
 			return token.split("=", 1)[1]
 	return None
+
+
+def carried_checkout(argv, cwd, nuke_folder=None):
+	"""For the Nuke an IED install carries: the checkout at or above the command line's folder (-w, else `cwd`) that
+	holds a Nuke of its own, which runs the command line instead (installed.py); None when this Nuke runs it."""
+	own = nuke_folder or toolchains.nuke_folder()
+	if not installed.is_install(own):
+		return None
+	takes_args_names = {name for name, c in command_table().items() if c.takes_args}
+	workspace_dir = find_workspace_option(split_program_args(argv)[0], takes_args_names)
+	checkout = installed.carrying_checkout(os.path.join(cwd, workspace_dir) if workspace_dir else cwd)
+	return checkout if checkout and not fsutil.same_path(checkout, own) else None
 
 
 def parse(argv, classify, takes_args):

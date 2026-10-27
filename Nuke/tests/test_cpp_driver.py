@@ -67,7 +67,7 @@ class LlvmFolderTests(unittest.TestCase):
 		with self.assertRaises(ValueError) as none:
 			self.folder({}, os.path.join(self.root, "missing"))
 		self.assertIn("setup.bat", str(none.exception))
-		self.assertTrue(self.toolchain.CHECKOUT_LLVM.replace("\\", "/").endswith("/vendor/llvm"), self.toolchain.CHECKOUT_LLVM)
+		self.assertEqual(self.toolchain.checkout_llvm("C:/IED").replace("\\", "/"), "C:/IED/vendor/llvm", "Nuke's home's")
 
 
 @unittest.skipUnless(sys.platform == "win32" and has_toolchain(), "needs vendor/llvm (setup.bat) and Visual Studio's C++ tools")

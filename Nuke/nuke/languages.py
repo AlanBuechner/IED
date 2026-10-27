@@ -35,7 +35,7 @@ import threading
 import tomllib
 from dataclasses import dataclass, field
 
-from . import fsutil, process
+from . import fsutil, process, toolchains
 from .errors import NukeError, StepFailed
 
 DESCRIPTION = "nuke-language.toml"
@@ -163,6 +163,7 @@ class WorkspaceContext:
 	workspace_dir: str
 	settings: dict
 	log: object = None
+	nuke_home: str = field(default_factory=toolchains.nuke_home)   # the IED checkout: setup.bat's tools are in vendor/
 
 
 @dataclass
@@ -186,6 +187,7 @@ class DriverContext:
 	expander: object = None                        # (text) -> text with the project's ${variables}
 	checkouts: tuple = ()                          # packages.checkouts.Checkout of each source the workspace develops
 	develop_dir: str = ""                          # build/develop/<project>: where develop_file() keeps its files
+	nuke_home: str = field(default_factory=toolchains.nuke_home)   # the IED checkout: setup.bat's tools are in vendor/
 
 	@property
 	def root(self):

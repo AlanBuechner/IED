@@ -31,6 +31,11 @@ Design and decisions: [`../docs/23-nuke-build-system.md`](../docs/23-nuke-build-
   yes when it asks) puts `bin/` on your user PATH so `nuke` works in any folder, also run by a quoted name as IED's
   tasks run it (`"nuke" build ...`, which gives a batch file's top level the wrong folder for `%~dp0`).
 - `nuke.bat` at the repository root does the same without PATH.
+- `nuke install-ied` installs Nuke with IED (IED docs/21 "As built"): `%LOCALAPPDATA%\Programs\IED\bin` goes on your
+  user PATH beside the install folder, so `nuke` (as installed) works in any folder of a terminal opened afterwards.
+  That Nuke's home - its toolchain store, package cache and the LLVM the C/C++ driver falls back on - is the checkout
+  the install came from (`install.json`), and in a folder at or under a checkout holding its own `Nuke/nuke` it runs
+  that checkout's Nuke instead (`nuke/installed.py`), so a checkout always builds with its own Nuke.
 - A workspace needs no copy of Nuke or of the compiler: it names a toolchain version (section 8).
 
 ## 2. The command line
@@ -272,8 +277,8 @@ A **toolchain** is a complete C4 install - the compiler, its default library and
 CBind, C4Script, C4Api (the compiler's C API for tools, section 9c), the language server and debug adapter, the user docs
 and the IED plugin of that language version (IED's `plugins/c4`, with its AI skills and a manifest naming that
 toolchain's tools) - with a `toolchain.json` (version, git commit, whether the tree was modified, build time). They live
-in one store per machine, `<this repository>/toolchains/c4/<version>/` (`NUKE_TOOLCHAINS` overrides the
-location), and every workspace shares them:
+in one store per machine, `<this repository>/toolchains/c4/<version>/` (the installed Nuke's is its checkout's,
+section 1; `NUKE_TOOLCHAINS` overrides the location), and every workspace shares them:
 
 | `toolchain =` | Means |
 |---|---|
@@ -394,6 +399,7 @@ arguments and test filter, `options` (`[project.driver]`), `settings` (the works
 `depends` (the contexts of the projects in `depends`), `expand(text)` (the project's variables), `jobs` (`-j`),
 `checkouts` (the package sources the workspace develops: `source`, `url`, `folder`, `serves(url)`, `files(name)`) and
 `develop_file(name, text)` (a file in `build/develop/<project>/` that points the tool at their clones, section 12),
+`nuke_home` (the IED checkout, whose `vendor/` holds what setup.bat installs; also on the context `variables` gets),
 `tool(name)`, `run`/`capture` to run the tool with its output in Nuke's log, and `problem(message)` / `fail(what, code)`
 to stop Nuke (a ValueError from `implicit_depends` or `variables` is a problem too). The description may also name
 the package's **library projects** (`libraries = ["libraries/*"]`, folders with a `[project]` nuke.toml): a workspace
@@ -432,8 +438,8 @@ linker-args = ["-fuse-ld=lld"]
 ```toml
 # the workspace's nuke.toml
 [languages.cpp]
-llvm = "vendor/llvm"               # the LLVM release (default: the folder above the clang on PATH, else the IED
-                                   # checkout's vendor/llvm, which setup.bat installs)
+llvm = "vendor/llvm"               # the LLVM release (default: the folder above the clang on PATH, else vendor/llvm
+                                   # of Nuke's home, the IED checkout, which setup.bat installs)
 system-includes = ["${cpp.llvm}/include"]   # system include folders of every C++ compile
 standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for .c files
 ```
@@ -516,6 +522,7 @@ Nuke/
     steps.py          running steps; incremental inputs/outputs; the Python step context
     session.py        one invocation: configuration, layout, variables, the toolchain
     toolchains.py     the store: resolve, install, remove, pin
+    installed.py      the Nuke an IED install carries: its checkout's home, a checkout's own Nuke (section 1)
     variables.py      ${name} expansion
     configs.py        built-in and workspace configurations
     languages.py      language packages and drivers: finding them, loading them, their context (section 9b)

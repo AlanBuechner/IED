@@ -1,7 +1,7 @@
 """The installer (tools/install/install_ied.py): a mirror copies what changed, leaves out what it skips and removes what
 is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; a program's PDB
-comes and goes with the build; the PATH gains the folder once and loses only it; an uninstall removes the folder whole
-or, while a program in it runs, not at all."""
+comes and goes with the build; the PATH gains the folder and its bin once and loses only them; the install carries
+Nuke; an uninstall removes the folder whole or, while a program in it runs, not at all."""
 
 import json
 import os
@@ -165,6 +165,23 @@ class PathTests(unittest.TestCase):
 	def test_only_the_folder_goes(self):
 		self.assertEqual(r"C:\a;%USERPROFILE%\bin", install_ied.without_folder(r"C:\a;" + self.FOLDER + r";%USERPROFILE%\bin", self.FOLDER))
 		self.assertIsNone(install_ied.without_folder(r"C:\a;C:\b", self.FOLDER), "nothing to take out")
+
+	def test_the_install_and_its_bin_go_and_leave_together(self):
+		folders = install_ied.path_folders(self.FOLDER)
+		self.assertEqual([self.FOLDER, self.FOLDER + r"\bin"], folders, "ied's folder and Nuke's launchers")
+		self.assertEqual(r"C:\a;%s;%s\bin" % (self.FOLDER, self.FOLDER), install_ied.with_folders(r"C:\a;" + self.FOLDER, folders, install_ied.with_folder), "an older install's PATH gains bin")
+		self.assertIsNone(install_ied.with_folders(r"%s\bin;%s" % (self.FOLDER, self.FOLDER), folders, install_ied.with_folder), "both there")
+		self.assertEqual(r"C:\a", install_ied.with_folders(r"%s;C:\a;%s\bin" % (self.FOLDER, self.FOLDER), folders, install_ied.without_folder))
+
+
+class NukeTests(unittest.TestCase):
+	def test_the_install_carries_nuke_and_its_launchers(self):
+		trees = [tree for tree, _ in install_ied.TREES]
+		for tree in ("Nuke/nuke", "Nuke/templates", "bin"):
+			self.assertIn(tree, trees)
+			self.assertTrue(os.path.isdir(os.path.join(install_ied.REPO, tree)), tree)
+		self.assertTrue(os.path.isfile(os.path.join(install_ied.REPO, "bin", "nuke.cmd")))
+		self.assertIn("__pycache__", install_ied.BUILT_IN_PLACE, "no bytecode of the checkout's runs")
 
 
 @unittest.skipUnless(os.name == "nt", "Windows: a running program's file")

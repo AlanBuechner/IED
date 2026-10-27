@@ -153,6 +153,14 @@ namespace C4Plugin
 		return Core::String(bin.Parent().Normalized().View());
 	}
 
+	Core::String SourceOfInstallRecord(Core::StringView record) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(record, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) return Core::String("");
+		Serialization::DomNode source = read.root.Member("source");
+		return source.Kind() == Serialization::DomKind::String ? Core::String(source.AsView()) : Core::String("");
+	}
+
 	Core::Array<Core::String> CommandCandidates(Core::StringView name, Core::StringView path) {
 		Core::Array<Core::String> candidates;
 		for (Core::StringView raw : path.Split(';')) {

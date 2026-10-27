@@ -1,5 +1,6 @@
 @echo off
-rem Nuke launcher. Put this folder on PATH (setup.bat offers to) to run `nuke` from any workspace.
+rem Nuke launcher. Put this folder on PATH (setup.bat offers to; nuke install-ied puts the install's there) to run
+rem `nuke` from any workspace.
 rem Its own folder is read in a subroutine: at the top level, a batch file found on PATH under a quoted name ("nuke",
 rem as IED's tasks run it) gets the current folder for %~dp0.
 setlocal

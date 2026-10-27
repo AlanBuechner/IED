@@ -1,5 +1,5 @@
 """The C++ toolchain a workspace builds with: an LLVM release (clang, lld, llvm-lib; [languages.cpp] llvm, else the
-folder above the clang on PATH, else the one setup.bat installs in the IED checkout this package is part of), clang's
+folder above the clang on PATH, else the one setup.bat installs in Nuke's home, the IED checkout), clang's
 own headers, and the Visual Studio and Windows SDK it targets."""
 
 import functools
@@ -11,8 +11,6 @@ from . import msvc
 from .settings import Settings
 
 TARGET = "x86_64-pc-windows-msvc"
-# plugins/cpp/nuke/driver -> the checkout's vendor/llvm (tools/setup/deps.toml)
-CHECKOUT_LLVM = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "vendor", "llvm"))
 
 
 @dataclass(frozen=True)
@@ -29,7 +27,12 @@ class Toolchain:
 		return TARGET
 
 
-def llvm_folder(settings, workspace_dir, checkout_llvm=CHECKOUT_LLVM):
+def checkout_llvm(nuke_home):
+	"""The LLVM release setup.bat installs in Nuke's home (ctx.nuke_home), the IED checkout (tools/setup/deps.toml)."""
+	return os.path.normpath(os.path.join(nuke_home, "vendor", "llvm"))
+
+
+def llvm_folder(settings, workspace_dir, checkout_llvm):
 	"""The LLVM release the workspace names, else the one whose clang is on PATH, else the checkout's (a workspace made
 	outside the IED checkout, from a template, names none)."""
 	if settings.llvm:
@@ -59,9 +62,9 @@ def _resolve(llvm, workspace_system_includes, settings):
 	return Toolchain(llvm, clang, includes, sdk.library_dirs + (f"{llvm}/lib",), sdk.ms_version, settings)
 
 
-def resolve(settings, workspace_dir, expand):
+def resolve(settings, workspace_dir, expand, nuke_home):
 	"""The workspace's toolchain (probed once per LLVM folder: the MSVC version takes a cl.exe run)."""
-	llvm = llvm_folder(settings, workspace_dir)
+	llvm = llvm_folder(settings, workspace_dir, checkout_llvm(nuke_home))
 	system = tuple(_absolute(expand(folder), workspace_dir) for folder in settings.system_includes)
 	return _resolve(llvm, system, settings)
 

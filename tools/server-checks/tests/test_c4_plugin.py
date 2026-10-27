@@ -156,6 +156,27 @@ class C4PluginTests(ServerTestCase):
 		self.assertNotIn("aiDocs", given, "nor its docs")
 		self.assertIn("languages", given, "the language itself is still the plugin's")
 
+	async def test_an_installed_nuke_on_path_stands_for_its_checkout(self):
+		"""nuke install-ied puts the install's bin/ on PATH (docs/21): the store is the toolchains/ of the checkout its
+		install.json names."""
+		checkout = os.path.join(self.root, "checkout")
+		write(os.path.join(checkout, "Nuke", "nuke", "__main__.py"), "")
+		make_toolchain(os.path.join(checkout, "toolchains", "c4", "0.3.0"), "0.3.0")
+		install = os.path.join(self.root, "install")
+		write(os.path.join(install, "bin", "nuke.cmd"), "")
+		write(os.path.join(install, "install.json"), {"source": slashed(checkout)})
+		write(os.path.join(self.game, "nuke.toml"), '[workspace]\nname = "Game"\ntoolchain = "0.3.0"\n')
+		os.environ.pop("NUKE_TOOLCHAINS", None)
+		path = os.environ.get("PATH", "")
+		os.environ["PATH"] = os.path.join(install, "bin") + os.pathsep + path
+		try:
+			self.start(self.game)
+		finally:
+			os.environ["PATH"] = path
+		await self.connect()
+		await self.until("builtin", self.tool_is("lspProfiles", os.path.join(checkout, "toolchains", "c4", "0.3.0", "tools", "C4LSP", "C4LSP.exe")),
+			"the checkout's toolchain, through the install's nuke.cmd")
+
 	async def test_a_toolchain_copy_uses_its_toolchain_and_ships_its_docs(self):
 		toolchain = os.path.join(self.root, "pinned-toolchain")
 		make_toolchain(toolchain, "0.4.0")
