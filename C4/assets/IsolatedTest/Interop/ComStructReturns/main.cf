@@ -1,0 +1,28 @@
+// B74: virtual methods of an object C++ made that return 8-, 16- and 24-byte structs by value, one with arguments after
+// the hidden result pointer, called through the C++ abstract class as a D3D12 renderer calls its COM objects.
+extern "c++" include "heap.h"
+extern "c++" source "heap.cpp"
+
+int32 g_failures = 0;
+
+void Check(bool holds, const char* what) {
+	if (holds) return;
+	printf("FAIL: %s\n", what);
+	g_failures += 1;
+}
+
+int32 main() {
+	IHeap* heap = CreateHeap(4096);
+	Handle8 start = heap->CpuStart();
+	Check(start.ptr == 4096, "an 8-byte struct through the hidden pointer");
+	Range16 range = heap->Range();
+	Check(range.ptr == 4160 && range.count == 32 && range.flags == 3, "a 16-byte struct");
+	Desc24 desc = heap->Desc();
+	Check(desc.width == 640 && desc.height == 480 && desc.bytes == 8192 && desc.scale == 1.5, "a 24-byte struct");
+	Desc24 scaled = heap->Scaled(3, 0.25);
+	Check(scaled.width == 1920 && scaled.height == 1440 && scaled.bytes == 12288 && scaled.scale == 0.5, "with arguments after the result");
+	Check(heap->CpuStart().ptr == 4096 && heap->Scaled(2, 1.0).height == 960, "results used in place");
+	heap->Release();
+	if (g_failures == 0) printf("COM STRUCT RETURNS OK\n");
+	return g_failures;
+}

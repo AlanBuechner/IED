@@ -162,7 +162,8 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-83 | A guarded call runs no cleanup of the script's frames on a fault | A hardware fault in a guarded script call (docs/runtime/04 section 7) unwinds to the guard without running the `delete`s of the frames between: C4 code is built for synchronous exceptions (MSVC's `/EHs`), so its frame handler unwinds for C4 and C++ exceptions only. That is kept on purpose rather than made asynchronous (`/EHa`, LLVM's `-fasync-exceptions`): the cleanups would run on whatever state the fault left, and a faulted script is not run again. A lock the script held stays held and what it was writing stays half written; the host treats what the script touched as poisoned. | [scripting 7](../runtime/04-scripting.md#7-crash-isolation) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
-optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
+optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework; whether C4 exports
+data from the executable itself (`[export("D3D12SDKVersion")]` on a constant, B74; a foreign C source does it today).
 
 ---
 ## 4. Architect pass
@@ -1999,7 +2000,13 @@ methods that return structs by value (B74 adds the test); data exported from the
 - **Tests:** ScriptTest `CrashIsolationThreads` (steps 1 to 4), at `-O0`, `-O2`, `-DebugScripts` and `-Incremental`.
 
 #### B74 - Interop for a D3D12 renderer: exported data and COM struct returns
-- **Design:** [interop](../language/13-interop.md). **Depends on:** none. **Status:** Ready.
+- **Design:** [interop](../language/13-interop.md). **Depends on:** none. **Status:** Done.
+- **Done notes:** both held as the probe said: interop section 5.1 documents exporting data through a foreign C
+  source, and section 4 the COM struct returns. Tests: IsolatedTest `Interop/ExportedData` (`D3D12SDKVersion` and
+  `D3D12SDKPath` found with `GetProcAddress(GetModuleHandleA(NULL), ...)` and read, at `-O0` and `-O2`; by hand also
+  rebuilt from the object cache with every partition reused), `Interop/ExportedDataIncremental` (the same with
+  `--incremental` in 4 partitions), `Interop/ComStructReturns` (virtual methods of a C++ object returning 8-, 16- and
+  24-byte structs, one with arguments after the hidden pointer, and results used in place).
 - **Why:**
   - **Agility SDK.** Claymore's D3D12 backend needs it for enhanced barriers and Shader Model 6.6: the probe's
     Windows 10 machine reports SM 6.5 and no enhanced barriers from the OS runtime. The D3D12 loader finds the SDK

@@ -1,0 +1,19 @@
+// B74: data a foreign C source exports from the executable stays exported through C4's link: the program finds both
+// symbols in its own export table, as the D3D12 loader finds D3D12SDKVersion and D3D12SDKPath, and reads them.
+// This is Interop/ExportedData built with --incremental in 4 partitions (ExpectedExit.json): the partitioned link keeps
+// the export.
+extern "c" source "agility.c"
+
+[link("GetModuleHandleA")] void* GetModuleHandleA(const char* name) noexcept;
+[link("GetProcAddress")] void* GetProcAddress(void* module, const char* name) noexcept;
+
+int32 main() {
+	void* self = GetModuleHandleA(null);
+	const uint32* version = (const uint32*)GetProcAddress(self, "D3D12SDKVersion");
+	const char8** path = (const char8**)GetProcAddress(self, "D3D12SDKPath");
+	if (version == null || path == null) { printf("FAIL: not exported (%p, %p)\n", (void*)version, (void*)path); return 1; }
+	if (*version != 614) { printf("FAIL: version %u\n", *version); return 2; }
+	if (strcmp((void*)*path, (void*)".\\D3D12\\") != 0) { printf("FAIL: path %s\n", *path); return 3; }
+	printf("EXPORTED DATA OK\n");
+	return 0;
+}

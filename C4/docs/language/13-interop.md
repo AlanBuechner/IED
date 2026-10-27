@@ -155,7 +155,11 @@ calls possible:
 - By-value aggregates of 1, 2, 4 or 8 bytes pass and return in one integer register; other sizes
   pass by hidden pointer and return through `sret`.
 - Methods of C4 types use the MSVC member convention (`this`, then the result pointer; every object
-  result goes through it), and C4 objects have MSVC layout, vtables and RTTI. A C4 class that implements
+  result goes through it, even one of 8 bytes), and C4 objects have MSVC layout, vtables and RTTI. Calls of C++
+  methods use it too, so the COM methods every D3D12 renderer calls for a struct by value
+  (`GetCPUDescriptorHandleForHeapStart`, `GetDesc`, `GetResourceAllocationInfo`) return the right values (test
+  `Interop/ComStructReturns`: virtual methods returning 8-, 16- and 24-byte structs, one with arguments after the
+  hidden pointer, on an object C++ made). A C4 class that implements
   an interface can therefore be handed to C++ code that calls it through the matching C++ abstract class
   (test `Interop/CppExceptionsAndInterfaces`).
 - Exceptions cross in both directions: type descriptors carry MSVC decorated names, so a C4
@@ -188,6 +192,31 @@ the vtable trampolines, and `void**` coercion handles out-params. The D3D12 test
 `_GUID` is declared by the prelude ([14](14-builtins.md)); a program or a bound header that declares its own
 hides it. A type without `[uuid]` gets a name-based GUID, so `__uuidof(T)` works for every type.
 
+### 5.1 Exporting data from the executable
+
+**Status:** **Implemented** (through a foreign source)
+
+Some loaders find data in the executable that starts them by its exported name. The D3D12 runtime looks for the
+Agility SDK through two of them, `D3D12SDKVersion` and `D3D12SDKPath`: a program that exports them gets the SDK's
+`D3D12Core.dll` (enhanced barriers, Shader Model 6.6 on a Windows 10 whose own runtime has neither) instead of the
+system's. C4 cannot export data itself, but a foreign C source can, and the export survives C4's link, whole-program
+and in partitions (`--incremental`), including an object the cache reused:
+
+```c
+// agility.c - in C a file-scope const has external linkage (`extern` with an initializer only warns)
+__declspec(dllexport) const unsigned int D3D12SDKVersion = 614;
+__declspec(dllexport) const char* D3D12SDKPath = ".\\D3D12\\";
+```
+
+```c4
+extern "c" source "agility.c"
+```
+
+The SDK's `D3D12Core.dll` goes beside the executable in the folder the path names (`D3D12\`), copied there by a
+build step. Tests: `Interop/ExportedData` (the program finds both with `GetProcAddress(GetModuleHandleA(NULL), ...)`
+and reads them, at `-O0` and `-O2`) and `Interop/ExportedDataIncremental` (the same in 4 partitions with
+`--incremental`). Whether C4 should export a constant itself (`[export("D3D12SDKVersion")]`) is a roadmap item.
+
 ---
 
 ## 6. Limits and planned work
@@ -197,5 +226,6 @@ hides it. A type without `[uuid]` gets a name-based GUID, so `__uuidof(T)` works
 | Windows x64 only (MSVC ABI, Windows SDK lookup) | **Planned**: Linux with the Linux port |
 | No timeout or progress diagnostic when CBind binds a very heavy SDK header | **Planned** |
 | C++ templates, operators and overloaded operators in headers | **Partial** - not covered by tests; assume unsupported |
-| Calling C4 functions from C/C++ (exports with a stable name) | **Partial** - C4 symbols use C4 mangling (`Name_<n>`); callbacks work by passing function pointers (`Win32WindowCallback` test) |
+| Calling C4 functions from C/C++ (exports with a stable name) | **Partial** - C4 symbols use C4 mangling (`Name_<n>`); callbacks work by passing function pointers (`Win32WindowCallback` test); a definition with `[link("sym")]` is emitted under `sym` |
+| Exporting data from the executable | **Implemented** through a foreign C source (section 5.1); C4 itself exports no data (roadmap) |
 | Tests hard-code Windows SDK version `10.0.26100.0` | test hygiene |

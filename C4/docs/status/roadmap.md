@@ -69,8 +69,11 @@ Every question that used to be listed here has been decided. The decisions are i
 | 3.11 Threading and the GC | D-48: suspend-and-scan with per-thread allocation caches, parallel marking (B32); D-79: concurrent marking of heaps past 16 MiB live (B64), with the OS's written-page tracking instead of a write barrier |
 | 3.12 The `loop` keyword | D-04: removed |
 
-Still open, for the project owner: whether the GC becomes optional per program, and whether the test
-framework grows parameterized tests and benchmarks. Neither blocks a work package.
+Still open, for the project owner: whether the GC becomes optional per program, whether the test
+framework grows parameterized tests and benchmarks, and whether C4 exports data from the executable itself
+(`[export("D3D12SDKVersion")]` on a constant; today a foreign C source does it,
+[interop 5.1](../language/13-interop.md#51-exporting-data-from-the-executable), plan B74). None blocks a work
+package.
 
 ---
 

@@ -78,6 +78,11 @@
       "main.cf (6:13) warning: the conversion from 'int32' to 'uint32' may change the value", "Warnings:            3"],
     "reason": "BUG-372: a constant that leaves an integer's range across signedness warns; constants that fit do not."
   },
+  "Interop/ExportedDataIncremental": {
+    "exit": 0,
+    "compileFlags": ["--incremental", "--partitions", "4"],
+    "reason": "B74: data a foreign C source exports (__declspec(dllexport), as the D3D12 Agility SDK's D3D12SDKVersion and D3D12SDKPath) stays in the executable's export table when the program is optimized and linked in partitions."
+  },
   "Namespaces/FileStaticsInANamespace": {
     "exit": 0,
     "compileFlags": ["--incremental", "--partitions", "4"],
