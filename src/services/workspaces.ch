@@ -12,6 +12,8 @@ include "localstate.ch"
 
 namespace Ied
 {
+	class WorkspaceServers;
+
 	class Workspace
 	{
 		public Core::String wsId;
@@ -22,6 +24,8 @@ namespace Ied
 		public SolutionModel* solution;    // a solution workspace's model; null otherwise
 		public bool trusted;
 		public bool byPlugin;              // opened by a plugin (IED::OpenFolder), not the owner: a relaunch leaves it closed
+		public FS::Path target;            // the master's: what its server's --workspace names (a solution file, a folder, a file)
+		public WorkspaceServers* servers;  // the master's: its summary carries its server's state
 		public Core::HashMap<Core::String, int64> revisions;        // relative path -> revision
 		public Core::HashMap<Core::String, Core::String> digests;   // relative path -> SHA-256 of the text the server last wrote or read; "" once it deleted the file
 		public Core::HashMap<Core::String, bool> ownDirectories;    // folders the server made, until the watcher reports them
@@ -43,11 +47,14 @@ namespace Ied
 		public Workspace* Find(Core::StringView wsId) const;
 		// The open workspace rooted at `root`, or null.
 		public Workspace* ForRoot(const FS::Path& root) const;
-		public Workspace* First() const { return items.IsEmpty() ? nullptr : items[0]; }
+		// The services see no workspace in the master: its records are open in their own servers (docs/01 "Processes"), so
+		// Get, Find, ForRoot, First and All answer as if none were open there; Listed finds the master's record.
+		public Workspace* First() const { return items.IsEmpty() || master ? nullptr : items[0]; }
+		public Workspace* Listed(Core::StringView wsId) const;
 		// What opens each workspace the owner opened again - a solution's file, else its folder - in the order they
 		// opened, so they get their ids back.
 		public Core::Array<Core::String> OwnerPaths() const;
-		public const Core::Array<Workspace*>& All() const { return items; }
+		public const Core::Array<Workspace*>& All() const;
 		public Core::String SummariesJson() const;
 		// A file's text, the file seen from now on (its revision and digest kept); throws not_found.
 		public Core::String Read(Workspace* ws, Core::StringView path);
@@ -63,6 +70,15 @@ namespace Ied
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
 		// A .iedsln (a canonical path) as a solution workspace rooted at its folder.
 		public Workspace* OpenSolution(const FS::Path& file);
+		// The master: a workspace's server closed it for good: it leaves the list (workspace.closed).
+		public void Closed(Core::StringView wsId);
+		// The master: what a workspace server says of its workspace now (master.workspace): its name, kind and trust, and
+		// `solutionFile` when it became a solution; workspace.changed.
+		public void ServerSays(Core::StringView wsId, const Serialization::DomNode& summary, Core::StringView solutionFile);
+		// The master: a trust choice its workspace server made (master.trust), for the record of the workspace at `root`.
+		public void TrustSaid(const FS::Path& root, bool trusted);
+		// A workspace server: trust.json changed (read again): each workspace whose trust it changed is told.
+		public void TrustFileChanged();
 		// What the watcher saw, less what the server did itself: published and passed to the open documents.
 		public void ApplyExternal(Workspace* ws, const ChangeBatch& batch);
 		// Its project plugins changed: their code reconciles and then ContributionsChanged.
@@ -114,8 +130,22 @@ namespace Ied
 		private Core::String RecentChangeMethod(Call& call, const Params& params, bool forget);
 		private void RegisterMethods();
 
+		private Workspace* Record(const FS::Path& folder, Core::StringView kind);
+		private bool Holds(const FS::Path& target, Core::String& relative) const;
+		private Workspace* RootedAt(const FS::Path& root) const;
+		private Workspace* OpenElsewhere(const FS::Path& target);
+		// Its trust changed: every service told, trust.changed on ws:<wsId>.
+		private void ApplyTrust(Workspace* ws, bool trusted);
+		private Core::String NextId();
+		private void Serve(Workspace* ws, const FS::Path& target);
+		// A workspace server: what changed of its own workspace goes to the master too.
+		private void TellMaster(Workspace* ws, Core::StringView solutionFile);
+
 		private Server* server;
 		private Core::Array<Workspace*> items;
+		private Core::Array<Workspace*> none;
+		private bool master;    // this is the master's list of records
+		private int64 opened;   // ids handed out
 	}
 
 	// A workspace-relative path with '/' separators and no '.' or '..'; throws bad_request.

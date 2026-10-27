@@ -5,6 +5,7 @@ import os
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase, read_lines
 
 PASSWORD = "correct horse battery"
@@ -20,7 +21,7 @@ class PasswordTests(ServerTestCase):
 		self.server.stop()
 
 	async def client(self, cookie=None):
-		return await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie or self.cookie})
+		return await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie or self.cookie})
 
 	async def set_password(self, password, current=None):
 		client = await self.client()

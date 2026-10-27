@@ -197,5 +197,7 @@ namespace Ied
 		for (Session* session : closing) session->Push(ByeFrame("auth-revoked").View());
 		Threading::UnlockGuard released(server->lock);
 		for (Session* session : closing) session->FlushAndClose(1008, "auth-revoked");
+		// And the device's sockets to workspace servers, which pass through the master (docs/11).
+		if (server->proxy) server->proxy->Revoke(deviceId);
 	}
 }

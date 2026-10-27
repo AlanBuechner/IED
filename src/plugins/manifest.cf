@@ -85,6 +85,11 @@ namespace Ied
 		manifest->entry = Core::String(root.Member("runtime").Member("entry").AsView());
 		manifest->sources = Strings(root.Member("runtime").Member("sources"));
 		if (manifest->sources.IsEmpty()) manifest->sources.Push(Core::String("code"));
+		manifest->servers = Strings(root.Member("runtime").Member("servers"));
+		if (manifest->servers.IsEmpty() || manifest->source == PluginSource::Project) {
+			manifest->servers.Clear();
+			manifest->servers.Push(Core::String("workspace"));
+		}
 		manifest->activation = Strings(root.Member("activation"));
 		manifest->apiRange = Core::String(root.Member("ied").Member("api").AsView());
 		manifest->permissions = Strings(root.Member("permissions"));

@@ -13,6 +13,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 FAKE_DAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fake_dap.py")
@@ -70,7 +71,7 @@ class DebuggerTests(ServerTestCase):
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		await self.client.sub(["dbg:w1", "bp:w1"])
 		await self.client.next_frame("dbg:w1")
@@ -130,7 +131,7 @@ class DebuggerTests(ServerTestCase):
 		self.assertGreater(later["sample"][0], ms, "a reading every half second")
 		await self.client.request("dbg.stop", {"sessionId": session})
 		await self.ended(topic)
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub([topic])
 			usage = (await other.next_frame(topic))["data"]["usage"]
@@ -267,7 +268,7 @@ class DebuggerTests(ServerTestCase):
 		_, topic = await self.start("Entry")
 		await self.stopped(topic)
 		self.client.abort()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.sub([topic])
 		data = (await self.client.next_frame(topic))["data"]
 		self.assertEqual(("stopped", "src/game.txt"), (data["session"]["state"], data["frames"][0]["source"]["path"]))

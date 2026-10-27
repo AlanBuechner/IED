@@ -70,6 +70,10 @@ const COMMANDS = [
 	{ id: "shell.openFolder", title: "Open Folder...", category: "File", icon: "$(folder-opened)", run: () => window.iedDesktop && window.iedDesktop.openFolder() },
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
 	{ id: "shell.trustWorkspace", title: "Trust Workspace", category: "File", enablement: "!workspaceTrusted", run: (shell) => shell.client.request("ws.setTrust", { wsId: shell.wsId, trusted: true }) },
+	// A workspace runs in a server of its own (docs/01 "Processes"): restarted alone, closed with its server.
+	{ id: "shell.restartWorkspaceServer", title: "Restart Workspace Server", category: "File", icon: "$(debug-restart)", run: (shell, args) => shell.restartWorkspaceServer(args && args.wsId) },
+	{ id: "shell.closeWorkspace", title: "Close Workspace", category: "File", run: (shell, args) => shell.closeWorkspace(args && args.wsId) },
+	{ id: "shell.workspaceServers", title: "Workspace Servers", category: "View", icon: "$(server-process)", run: (shell) => shell.openTab("shell:servers") },
 	{ id: "shell.keyboardShortcuts", title: "Keyboard Shortcuts", category: "Help", icon: "$(record-keys)", run: (shell) => shell.openSettings("custom:shell.keyboard") },
 	{ id: "shell.settings", title: "Settings", category: "Tools", icon: "$(settings-gear)", run: (shell, args) => shell.openSettings(args && args.page, args && args.tier, args && args.project) },
 	{ id: "shell.plugins", title: "Manage Plugins", category: "Extensions", icon: "$(extensions)", run: (shell) => shell.openTab("shell:plugins") },
@@ -83,9 +87,12 @@ const MENUS = {
 		{ command: "shell.startPage", group: "0_open", order: 1 },
 		{ command: "shell.switchWorkspace", group: "1_workspace" },
 		{ command: "shell.trustWorkspace", group: "1_workspace", order: 1, when: "!workspaceTrusted" },
+		{ command: "shell.restartWorkspaceServer", group: "1_workspace", order: 2, when: "workspaceKind" },
+		{ command: "shell.closeWorkspace", group: "1_workspace", order: 3, when: "workspaceKind" },
 	],
 	"menubar/view": [
 		{ command: "shell.commandPalette", group: "1_palette" },
+		{ command: "shell.workspaceServers", group: "8_servers" },
 		{ command: "shell.showNotifications", group: "9_notifications" },
 	],
 	"menubar/window": [

@@ -1,6 +1,7 @@
 include "workspaces.ch"
 include "host/server.ch"
 include "host/trust.ch"
+include "host/servers.ch"
 
 namespace Ied
 {
@@ -64,12 +65,14 @@ namespace Ied
 		json.Field("kind", kind.View());
 		json.Field("root", root.View());
 		json.BoolField("trusted", trusted);
+		if (servers) json.RawField("server", servers->StateJson(wsId.View()).View());
 		json.EndObject();
 		return json.ToString();
 	}
 
 	void Workspaces::Init(Server* server) {
 		this.server = server;
+		master = server->IsMaster();
 		RegisterMethods();
 		Core::String relative;
 		for (int64 i = 0; i < server->config.workspaces.Count(); ++i) {
@@ -78,10 +81,10 @@ namespace Ied
 			else OpenFor(given, relative);
 		}
 		// The test suites' server with no workspace gets an empty one inside its data folder, which goes with it.
-		if (items.IsEmpty() && server->config.testHooks) {
+		if (items.IsEmpty() && server->config.testHooks && server->IsMaster()) {
 			FS::Path scratch = FS::Path(server->config.dataDir.View()) / "scratch-workspace";
 			FS::MakeDirectories(scratch.CStr());
-			Open(scratch, Core::StringView("folder"));
+			Serve(Open(scratch, Core::StringView("folder")), scratch);
 		}
 	}
 
@@ -104,8 +107,37 @@ namespace Ied
 	}
 
 	Workspace* Workspaces::OpenFor(const FS::Path& target, Core::String& relative) {
+		if (!server->IsMaster() && !items.IsEmpty() && !Holds(target, relative)) return OpenElsewhere(target);
 		Workspace* ws = OpenOrFind(target, relative);
 		Remember(ws);
+		return ws;
+	}
+
+	// Whether one of this server's workspaces holds `target` (`relative` the path in it).
+	bool Workspaces::Holds(const FS::Path& target, Core::String& relative) const {
+		for (Workspace* ws : items) {
+			if (ws->solution && TrustKey(ws->solution->file.View()).View() == TrustKey(target.View()).View()) return true;
+			if (RelativeTo(ws->root.View(), target.View(), relative)) return true;
+		}
+		return false;
+	}
+
+	// A workspace server's new workspace (a project it created or imported): opened by the master in a server of its
+	// own (master.open); the record that answers is not one of this server's.
+	Workspace* Workspaces::OpenElsewhere(const FS::Path& target) {
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("path", target.View());
+		params.EndObject();
+		Core::String result = server->master->Ask(&server->lock, Core::StringView("master.open"), params.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode summary = Serialization::ReadJson(result.View(), *doc).root.Member("workspace");
+		Workspace* ws = new Workspace();
+		ws->wsId = Core::String(summary.Member("wsId").AsView());
+		ws->name = Core::String(summary.Member("name").AsView());
+		ws->kind = Core::String(summary.Member("kind").AsView());
+		ws->root = FS::Path(summary.Member("root").AsView());
+		ws->trusted = summary.Member("trusted").AsBool();
 		return ws;
 	}
 
@@ -115,6 +147,12 @@ namespace Ied
 			relative = Core::String();
 			for (Workspace* ws : items)
 				if (ws->solution && TrustKey(ws->solution->file.View()).View() == TrustKey(target.View()).View()) return ws;
+			// The master never runs two servers on one folder: an open folder whose solution this is becomes it.
+			Workspace* folder = master ? RootedAt(target.Parent()) : nullptr;
+			if (folder && !folder->solution) {
+				BecomeSolution(folder, target);
+				return folder;
+			}
 			return OpenSolution(target);
 		}
 		for (Workspace* ws : items)
@@ -126,8 +164,16 @@ namespace Ied
 		if (!solution.IsEmpty()) return OpenOrFind(solution, relative);
 		Workspace* opened = Open(folder ? target : target.Parent(), Core::StringView(folder ? "folder" : "file"));
 		relative = folder ? Core::String() : Core::String(target.FileName());
+		Serve(opened, target);
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
 		return opened;
+	}
+
+	// The master: the workspace's server started, its --workspace what the owner opened.
+	void Workspaces::Serve(Workspace* ws, const FS::Path& target) {
+		if (!server->IsMaster()) return;
+		ws->target = target;
+		server->servers->Start(ws);
 	}
 
 	Core::Array<Core::String> Workspaces::OwnerPaths() const {
@@ -140,6 +186,8 @@ namespace Ied
 	// A workspace opened (or opened again) goes first in the recent projects: a solution by its file, anything else by
 	// its folder, which is what opens it again.
 	void Workspaces::Remember(Workspace* ws) {
+		// The recent projects are the master's (docs/01 "Processes").
+		if (!server->IsMaster()) return;
 		const bool solution = ws->solution != null;
 		Core::StringView path = solution ? ws->solution->file.View() : ws->root.View();
 		if (!server->recent.Opened(path, ws->name.View(), Core::StringView(solution ? "solution" : "folder"), Platform::UnixTimeNs() / 1000000))
@@ -163,8 +211,11 @@ namespace Ied
 		Workspace* ws = Open(file.Parent(), Core::StringView("solution"));
 		ws->solution = ReadSolution(file, server->schemas);
 		ws->name = ws->solution->name;
-		LogProblems(server, ws->solution);
-		server->settings->SolutionChanged(ws);
+		if (server->IsMaster()) Serve(ws, file);
+		else {
+			LogProblems(server, ws->solution);
+			server->settings->SolutionChanged(ws);
+		}
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", ws->SummaryJson().View());
 		return ws;
 	}
@@ -178,10 +229,76 @@ namespace Ied
 	void Workspaces::BecomeSolution(Workspace* ws, const FS::Path& file) {
 		ws->kind = Core::String("solution");
 		ws->solution = ReadSolution(file, server->schemas);
-		PublishSolution(ws);
+		if (server->IsMaster()) {
+			// A folder the master made a solution (project.import with no window on it): its server opens it again as the
+			// solution.
+			ws->name = ws->solution->name;
+			ws->target = file;
+			server->servers->Retarget(ws->wsId.View(), file.View());
+			server->servers->Restart(ws->wsId.View());
+		}
+		else {
+			PublishSolution(ws);
+			TellMaster(ws, file.View());
+		}
 		server->hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
 		if (server->recent.Contains(ws->root.View())) server->recent.Forget(ws->root.View());
 		Remember(ws);
+	}
+
+	void Workspaces::TellMaster(Workspace* ws, Core::StringView solutionFile) {
+		if (!server->master || ws->byPlugin) return;
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("wsId", ws->wsId.View());
+		params.RawField("summary", ws->SummaryJson().View());
+		if (!solutionFile.IsEmpty()) params.Field("solutionFile", solutionFile);
+		params.EndObject();
+		Core::String result;
+		Core::String problem;
+		if (!server->master->Call(&server->lock, Core::StringView("master.workspace"), params.View(), result, problem))
+			server->Log((Core::String("the master was not told of the workspace's change: ") + problem.View()).View());
+	}
+
+	void Workspaces::ServerSays(Core::StringView wsId, const Serialization::DomNode& summary, Core::StringView solutionFile) {
+		Workspace* ws = Listed(wsId);
+		if (!ws) return;
+		if (summary.Member("name").Kind() == Serialization::DomKind::String) ws->name = Core::String(summary.Member("name").AsView());
+		if (summary.Member("kind").Kind() == Serialization::DomKind::String) ws->kind = Core::String(summary.Member("kind").AsView());
+		if (summary.Member("trusted").IsValid()) ws->trusted = summary.Member("trusted").AsBool();
+		if (solutionFile.IsEmpty()) {
+			server->hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
+			return;
+		}
+		// As BecomeSolution tells it: the workspace's new summary, then the recent projects naming the solution.
+		FS::Path file = FS::Path(solutionFile);
+		ws->solution = ReadSolution(file, server->schemas);
+		ws->target = file;
+		server->servers->Retarget(ws->wsId.View(), solutionFile);
+		server->hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
+		if (server->recent.Contains(ws->root.View())) server->recent.Forget(ws->root.View());
+		Remember(ws);
+	}
+
+	void Workspaces::TrustSaid(const FS::Path& root, bool trusted) {
+		Workspace* ws = RootedAt(root);
+		if (!ws || ws->trusted == trusted) return;
+		ws->trusted = trusted;
+		server->hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
+	}
+
+	void Workspaces::Closed(Core::StringView wsId) {
+		for (int64 i = 0; i < items.Count(); ++i) {
+			if (items[i]->wsId.View() != wsId) continue;
+			items.RemoveAt(i);
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("wsId", wsId);
+			data.EndObject();
+			server->hub.Publish(Core::StringView("server"), "workspace.closed", data.View());
+			server->Log((Core::String("closed ") + wsId).View());
+			return;
+		}
 	}
 
 	// The model read last told: solution.changed {solution, kind, name} on ws:<wsId>, and everything that reads it.
@@ -233,12 +350,44 @@ namespace Ied
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
 	}
 
-	Workspace* Workspaces::Open(const FS::Path& folder, Core::StringView kind) {
-		Workspace* ws = new Workspace();
+	// The master's ids are w1, w2, ...; a workspace server's own workspace has the id the master gave it, and a folder
+	// its plugins open the id <wsId>.<n> (docs/10 "Routing").
+	Core::String Workspaces::NextId() {
+		opened += 1;
 		Core::StringBuilder id;
-		id.Append("w");
-		id.AppendInt(items.Count() + 1);
-		ws->wsId = id.ToString();
+		if (server->IsMaster()) {
+			id.Append("w");
+			id.AppendInt(opened);
+		}
+		else {
+			id.Append(server->config.wsId.View());
+			if (opened > 1) {
+				id.AppendByte('.');
+				id.AppendInt(opened - 1);
+			}
+		}
+		return id.ToString();
+	}
+
+	// The master's record of a workspace: what it is, not what is open in it (its server has that).
+	Workspace* Workspaces::Record(const FS::Path& folder, Core::StringView kind) {
+		Workspace* ws = new Workspace();
+		ws->wsId = NextId();
+		FS::Path canonical = FS::CanonicalPath(folder.CStr());
+		ws->root = canonical.IsEmpty() ? folder : canonical;
+		ws->name = Core::String(ws->root.FileName());
+		ws->kind = Core::String(kind);
+		ws->trusted = server->trust.IsTrusted(ws->root);
+		ws->servers = server->servers;
+		items.Push(ws);
+		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
+		return ws;
+	}
+
+	Workspace* Workspaces::Open(const FS::Path& folder, Core::StringView kind) {
+		if (server->IsMaster()) return Record(folder, kind);
+		Workspace* ws = new Workspace();
+		ws->wsId = NextId();
 		FS::Path canonical = FS::CanonicalPath(folder.CStr());
 		ws->root = canonical.IsEmpty() ? folder : canonical;
 		ws->name = Core::String(ws->root.FileName());
@@ -278,16 +427,26 @@ namespace Ied
 		if (!watching) server->Log((Core::String("not watching ") + ws->root.View() + ": " + error.View()).View());
 	}
 
-	Workspace* Workspaces::Find(Core::StringView wsId) const {
+	Workspace* Workspaces::Listed(Core::StringView wsId) const {
 		for (int64 i = 0; i < items.Count(); ++i)
 			if (items[i]->wsId.View() == wsId) return items[i];
 		return nullptr;
 	}
 
+	Workspace* Workspaces::Find(Core::StringView wsId) const { return master ? nullptr : Listed(wsId); }
+
+	// (Not `master ? none : items`: C4 lowers a conditional of two members returned by reference as a value, a module
+	// LLVM refuses - reported as a C4 bug.)
+	const Core::Array<Workspace*>& Workspaces::All() const {
+		if (master) return none;
+		return items;
+	}
+
 	Workspace* Workspaces::Get(Core::StringView wsId) const {
 		Workspace* ws = Find(wsId);
-		if (!ws) throw Missing("workspace", wsId);
-		return ws;
+		if (ws) return ws;
+		if (Listed(wsId)) throw RpcError(ErrorCode::NotFound, (Core::String("workspace ") + wsId + " is open in a server of its own: ask it at /w/" + wsId + "/ws (docs/10 \"Routing\")").View());
+		throw Missing("workspace", wsId);
 	}
 
 	Core::String Workspaces::SummariesJson() const {
@@ -328,12 +487,14 @@ namespace Ied
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
 	}
 
-	Workspace* Workspaces::ForRoot(const FS::Path& root) const {
+	Workspace* Workspaces::RootedAt(const FS::Path& root) const {
 		Core::String relative;
 		for (Workspace* ws : items)
 			if (RelativeTo(ws->root.View(), root.View(), relative) && relative.IsEmpty()) return ws;
 		return nullptr;
 	}
+
+	Workspace* Workspaces::ForRoot(const FS::Path& root) const { return master ? nullptr : RootedAt(root); }
 
 	void Workspaces::Moved(Workspace* ws, Core::StringView from, Core::StringView to) {
 		JsonWriter data;
@@ -683,7 +844,16 @@ namespace Ied
 	Core::String Workspaces::SetTrustMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
 		const bool trusted = params.Bool("trusted", ws->trusted);
-		if (!server->trust.Set(ws->root, trusted)) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
+		if (!server->RecordTrust(ws->root, trusted)) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
+		ApplyTrust(ws, trusted);
+		JsonWriter data;
+		data.BeginObject();
+		data.BoolField("trusted", ws->trusted);
+		data.EndObject();
+		return data.ToString();
+	}
+
+	void Workspaces::ApplyTrust(Workspace* ws, bool trusted) {
 		ws->trusted = trusted;
 		server->settings->TrustChanged(ws);
 		server->lsp->TrustChanged(ws);
@@ -692,13 +862,18 @@ namespace Ied
 		server->documents->LanguagesChanged(ws);
 		server->outputs->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);
-		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();
 		data.BoolField("trusted", ws->trusted);
 		data.EndObject();
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "trust.changed", data.View());
-		return data.ToString();
+	}
+
+	void Workspaces::TrustFileChanged() {
+		for (Workspace* ws : items) {
+			const bool trusted = server->trust.IsTrusted(ws->root);
+			if (trusted != ws->trusted) ApplyTrust(ws, trusted);
+		}
 	}
 
 	// A project of the recent list opened again; only those: a path the owner never opened comes from the machine.
@@ -726,7 +901,7 @@ namespace Ied
 		server->rpc.Register("ws.list", [self](Call& call, const Params& params) -> Core::String {
 			return (Core::String("{\"workspaces\":") + self->SummariesJson().View()) + "}";
 		});
-		server->rpc.Register("ws.setTrust", [self](Call& call, const Params& params) -> Core::String { return self->SetTrustMethod(call, params); });
+		if (!server->IsMaster()) server->rpc.Register("ws.setTrust", [self](Call& call, const Params& params) -> Core::String { return self->SetTrustMethod(call, params); });
 		server->rpc.Register("ws.openRecent", [self](Call& call, const Params& params) -> Core::String { return self->OpenRecentMethod(call, params); });
 		server->rpc.Register("ws.setFavorite", [self](Call& call, const Params& params) -> Core::String { return self->RecentChangeMethod(call, params, false); });
 		server->rpc.Register("ws.forgetRecent", [self](Call& call, const Params& params) -> Core::String { return self->RecentChangeMethod(call, params, true); });

@@ -109,6 +109,8 @@ namespace Ied
 	}
 
 	Core::String Control::Call(Core::StringView method, const Serialization::DomNode& params) {
+		if (!server->IsMaster()) return WorkspaceCall(method, params);
+		if (method.StartsWith(Core::StringView("master."))) return MasterCall(method, params);
 		if (method == "url") return (Core::String("{\"url\":") + JsonString(Launch(Core::StringView("")).View()).View()) + "}";
 		if (method == "status") return Status();
 		if (method == "open") return Open(params);
@@ -136,6 +138,97 @@ namespace Ied
 		json.BoolField("relaunch", server->relaunch.Shown(clock_now_ns() / 1000000));
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String Control::WorkspaceCall(Core::StringView method, const Serialization::DomNode& params) {
+		if (method == "status") return WorkspaceStatus();
+		if (method == "stop") return Core::String("{}");
+		// The master wrote plugins.json: read it again now, before the master answers (its watcher would, a moment later).
+		if (method == "choices.changed") {
+			Threading::LockGuard guard(server->lock);
+			server->plugins->Load();
+			return Core::String("{}");
+		}
+		// The master wrote settings.json (the app tier): the same.
+		if (method == "settings.changed") {
+			Threading::LockGuard guard(server->lock);
+			server->settings->AppFileChanged();
+			return Core::String("{}");
+		}
+		throw RpcError(ErrorCode::NotFound, (Core::String("no method '") + method + "' (a workspace server's pipe is its master's)").View());
+	}
+
+	Core::String Control::WorkspaceStatus() {
+		Threading::LockGuard guard(server->lock);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("serverVersion", server->config.version.View());
+		json.Field("wsId", server->config.wsId.View());
+		json.IntField("pid", (int64)Platform::ProcessId());
+		json.IntField("port", server->port);
+		json.Field("sessionEpoch", server->epoch.View());
+		json.RawField("workspaces", server->workspaces->SummariesJson().View());
+		json.IntField("clients", server->sessions.Count());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String Required(const Serialization::DomNode& params, const char* name) {
+		Serialization::DomNode value = params.Member(name);
+		if (value.Kind() != Serialization::DomKind::String || value.AsView().IsEmpty()) throw RpcError(ErrorCode::BadRequest, (Core::String("needs ") + name).View());
+		return Core::String(value.AsView());
+	}
+
+	Core::String Control::MasterCall(Core::StringView method, const Serialization::DomNode& params) {
+		if (method == "master.workspace") {
+			Threading::LockGuard guard(server->lock);
+			server->workspaces->ServerSays(Required(params, "wsId").View(), params.Member("summary"), params.Member("solutionFile").AsView());
+			return Core::String("{}");
+		}
+		if (method == "master.settings") {
+			Core::String key = Required(params, "key");
+			Serialization::DomNode value = params.Member("value");
+			Core::String valueJson = value.IsValid() && value.Kind() != Serialization::DomKind::Null ? NodeJson(value) : Core::String();
+			Threading::LockGuard guard(server->lock);
+			Core::String problem;
+			if (!server->settings->WriteApp(key.View(), valueJson.View(), problem)) throw RpcError(ErrorCode::BadRequest, problem.View());
+			return Core::String("{}");
+		}
+		if (method == "master.trust") {
+			FS::Path root = FS::Path(Required(params, "root").View());
+			Threading::LockGuard guard(server->lock);
+			if (!server->RecordTrust(root, params.Member("trusted").AsBool())) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
+			return Core::String("{}");
+		}
+		if (method == "master.open") {
+			FS::Path target = FS::CanonicalPath(Required(params, "path").CStr());
+			if (target.IsEmpty()) throw RpcError(ErrorCode::NotFound, "no such file or folder");
+			Threading::LockGuard guard(server->lock);
+			Core::String relative;
+			Workspace* ws = server->workspaces->OpenFor(target, relative);
+			return (Core::String("{\"workspace\":") + ws->SummaryJson().View()) + "}";
+		}
+		if (method == "master.binding") {
+			Core::String name = Required(params, "name");
+			Serialization::DomNode args = params.Member("args");
+			Core::String text = args.IsValid() ? NodeJson(args) : Core::String("{}");
+			int64 wait = params.Member("waitMs").AsInt();
+			if (wait <= 0) wait = IED::kBindingWaitMs;
+			Threading::LockGuard guard(server->lock);
+			CodeInstance* provider = server->code->Provider(nullptr, name.View());
+			if (!provider) throw RpcError(ErrorCode::NotFound, ((Core::String("no plugin of the master provides the server binding '") + name.View()) + "'").View());
+			IED::Result result = InvokeBindingWithin(server, provider, name.View(), text.View(), NeverStopped(), wait);
+			if (!result.Ok()) throw RpcError(ErrorCode::PluginError, result.error.View());
+			return (Core::String("{\"result\":") + result.json.View()) + "}";
+		}
+		if (method == "master.relaunch") {
+			Core::String reason = Core::String(params.Member("reason").AsView());
+			Threading::LockGuard guard(server->lock);
+			if (!server->relaunch.Ask(reason.View(), clock_now_ns() / 1000000)) throw RpcError(ErrorCode::Conflict, "a relaunch is already under way");
+			server->Log((Core::String("relaunch: asked by a workspace server: ") + reason.View()).View());
+			return Core::String("{}");
+		}
+		throw RpcError(ErrorCode::NotFound, (Core::String("no method '") + method + "'").View());
 	}
 
 	Core::String Control::ClaimRelaunch() {
@@ -191,7 +284,10 @@ namespace Ied
 
 	// Every client is told and closed, then the HTTP server stops, and with it the process.
 	void Control::Stop(Core::StringView why) {
+		if (stopping.Load()) return;
 		stopping.Store(true);
+		// The master's workspace servers stop first, so their chats and terminals end as at their own stop.
+		if (server->servers) server->servers->StopAll();
 		Core::Array<Session*> closing;
 		{
 			Threading::LockGuard guard(server->lock);

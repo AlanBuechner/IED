@@ -23,6 +23,14 @@ the CLI, plugins, settings, solutions, outputs, layouts and the web client's fil
 no `--port`, a taken 8765 falls back to a free port; `--control <name>` names the control pipe; `--home <dir>` is the install
 (`frontend/`, `plugins/`, `shared/`; found above the program by default) and `--app-data <dir>` the app tier.
 
+**Two roles** (`docs/01` "Processes"): run as above, the program is the **master** - the control pipe, the port, sign-in,
+the open workspaces - and starts one **workspace server** per open workspace: the same program with `--role workspace
+--ws-id <wsId> --workspace <path> --master <pipe> --control <pipe> --data --app-data --home --state <data>/servers/<key>
+--log <data>/logs/workspace-<key>.log [--restarted-after <text>]` and its secret in `IED_SERVER_SECRET`, on loopback and a
+port of its own, answering only what the master proxies to it (`host/servers` the supervisor, `host/masterlink` a
+workspace server's calls to the master, `web/proxy` the master's `/w/<wsId>/...`). Nothing else starts a workspace
+server.
+
 ## What exists (M1, in progress)
 
 | Folder | Files | What |

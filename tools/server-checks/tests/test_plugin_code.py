@@ -13,7 +13,8 @@ import time
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import EXECUTABLE_ENV, REPO, IedServer, ServerTestCase
+from routed import RoutedClient
+from server import EXECUTABLE_ENV, REPO, IedServer, ServerTestCase, server_state, workspace_log
 
 COMPILE_SECONDS = 120
 BROKEN = "\nnamespace Probe { int32 Broken() { return missing_name; } }\n"
@@ -198,7 +199,7 @@ class PluginCodeTests(ServerTestCase):
 			self.client.abort()
 
 	async def connect(self):
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 
 	async def code(self, plugin_id, ws=None):
 		params = {"wsId": ws} if ws else {}
@@ -331,7 +332,7 @@ class PluginCodeTests(ServerTestCase):
 		await self.connect()
 		await self.settled("test.probe")
 		await self.client.request("plugins.call", {"name": "probe.throwOnThread", "args": {}})
-		log = os.path.join(self.server.data, "logs", "server.log")
+		log = workspace_log(self.server.data, self.repo)   # the plugin runs in the workspace's server (docs/01 "Processes")
 		deadline = time.monotonic() + 30
 		text = ""
 		while time.monotonic() < deadline and "refused on a thread of its own" not in text:
@@ -381,7 +382,7 @@ class PluginCodeTests(ServerTestCase):
 		self.assertEqual("active", code["state"], code)
 		self.assertNotIn("cached", code, "the first start compiles")
 		self.assertNotIn("debug", code, "not as a debug script")
-		self.assertTrue(os.listdir(os.path.join(data, "script-cache")), "and keeps the build")
+		self.assertTrue(os.listdir(os.path.join(server_state(data, self.repo), "script-cache")), "and keeps the build, in the workspace server's own folder")
 		self.client.abort()
 		self.server.stop(remove_data=False)
 		self.start(data, options=("--debug-scripts", "off"))

@@ -58,7 +58,8 @@ export class ReplaySession {
 		const reply = await this.ied.client.request("gpu.replay", { sessionId: this.sessionId, method, params: params || {} });
 		let binary = null;
 		if (reply.blob) {
-			const response = await fetch("/api/blob/" + encodeURIComponent(reply.blob), { credentials: "same-origin" });
+			// The blob is the workspace's server's (docs/10 "Transport").
+			const response = await fetch("/w/" + encodeURIComponent(this.wsId) + "/api/blob/" + encodeURIComponent(reply.blob), { credentials: "same-origin" });
 			if (!response.ok) throw new Error("the replay's data could not be fetched (" + response.status + ")");
 			binary = await response.arrayBuffer();
 		}

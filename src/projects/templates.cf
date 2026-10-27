@@ -229,7 +229,7 @@ namespace Ied
 		change->ws = into;
 		if (into && into->solution) server->workspaces->SolutionChanged(into);
 		if (!into) {
-			if (!server->trust.Set(project, true)) server->Log(Core::StringView("the new project could not be trusted"));
+			if (!server->RecordTrust(project, true)) server->Log(Core::StringView("the new project could not be trusted"));
 			Core::String relative;
 			change->ws = server->workspaces->OpenFor(project, relative);
 		}

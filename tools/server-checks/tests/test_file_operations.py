@@ -8,6 +8,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 
@@ -28,7 +29,7 @@ class FileOperationTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)

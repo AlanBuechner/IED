@@ -10,6 +10,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import REPO, ControlPipe, IedServer, ServerTestCase
 
 SETTINGS_SCHEMA = {"properties": {"local.indent": {"type": "integer", "default": 2}}}
@@ -58,7 +59,7 @@ class SolutionTests(ServerTestCase):
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.sub(["ws:w1"])
 		self.snapshot = (await self.client.next_frame("ws:w1"))["data"]
 

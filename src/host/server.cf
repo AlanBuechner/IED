@@ -17,7 +17,10 @@ namespace Ied
 		this.config.homeDir = HomeFolder(config);
 		this.config.staticDir = StaticFolder(this.config);
 		this.config.appDataDir = AppDataFolder(this.config);
-		logFile.Open((FS::Path(this.config.dataDir.View()) / "logs" / "server.log").View());
+		this.config.stateDir = StateFolder(this.config);
+		this.config.logPath = LogPath(this.config);
+		startedMs = Platform::UnixTimeNs() / 1000000;
+		logFile.Open(this.config.logPath.View());
 		LogStart();
 		Core::String trustError;
 		trust.Load((FS::Path(this.config.appDataDir.View()) / "trust.json").View(), trustError);
@@ -48,10 +51,16 @@ namespace Ied
 		debugger = new Debugger(self);
 		projects = new ProjectTemplates(self);
 		projectManager = new ProjectManager(self);
+		if (IsMaster()) {
+			servers = new WorkspaceServers(self);
+			proxy = new Proxy(self);
+		}
+		else master = new MasterLink(this.config.masterControl.View());
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		// From here on the log pump, the git thread and each workspace's watcher once it opens reach the services under the
 		// lock.
 		Threading::LockGuard guard(lock);
+		if (!this.config.restartedAfter.IsEmpty()) Log((Core::String("restarted after: ") + this.config.restartedAfter.View()).View());
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);
 	}
@@ -81,6 +90,12 @@ namespace Ied
 		Core::StringBuilder line;
 		line.Append("start: ied-server ");
 		line.Append(config.version.View());
+		if (!IsMaster()) {
+			line.Append(", workspace server ");
+			line.Append(config.wsId.View());
+			line.Append(" for ");
+			line.Append(config.workspaces[0].View());
+		}
 		line.Append(" (");
 		line.Append(Platform::ExecutablePath().View());
 		line.Append("), data ");
@@ -109,6 +124,28 @@ namespace Ied
 			Threading::LockGuard serverGuard(server->lock);
 			for (const Core::String& line : lines) server->outputs->Log(line.View());
 		}
+	}
+
+	bool Server::RecordTrust(const FS::Path& root, bool trusted) {
+		if (IsMaster()) {
+			if (!trust.Set(root, trusted)) return false;
+			auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(root.View()).View()).View());
+			workspaces->TrustSaid(root, trusted);
+			return true;
+		}
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("root", root.View());
+		params.BoolField("trusted", trusted);
+		params.EndObject();
+		Core::String result;
+		Core::String problem;
+		if (!master->Call(&lock, Core::StringView("master.trust"), params.View(), result, problem)) {
+			Log((Core::String("the trust choice did not reach the master: ") + problem.View()).View());
+			return false;
+		}
+		trust.Remember(root, trusted);
+		return true;
 	}
 
 	void Server::RemoveSession(Session* session) {

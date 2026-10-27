@@ -69,7 +69,14 @@
 				},
 				"entry": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$", "description": "c4: the entry function, `void <Name>(IED::PluginContext& context)` ('Markup::Activate')." },
 				"sources": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "c4: the folders and files of the plugin's code, in its folder (default ['code']); every .cf file under them is compiled." },
-				"ui": { "type": "string", "description": "Path to the browser ES module that registers UI contributions." }
+				"ui": { "type": "string", "description": "Path to the browser ES module that registers UI contributions." },
+				"servers": {
+					"type": "array",
+					"minItems": 1,
+					"uniqueItems": true,
+					"items": { "enum": ["master", "workspace"] },
+					"description": "Which servers run the plugin's code (docs/26 \"Servers\"): the master, each workspace server, or both; default ['workspace']. A project plugin's code always runs in its workspace's server."
+				}
 			}
 		},
 		"permission": {
@@ -841,7 +848,8 @@
 				"params": { "type": "object", "description": "JSON Schema." },
 				"result": { "type": "object", "description": "JSON Schema (functions only)." },
 				"aiExposed": { "type": "boolean", "default": false },
-				"side": { "enum": ["server", "client"], "default": "server" }
+				"side": { "enum": ["server", "client"], "default": "server" },
+				"master": { "type": "boolean", "default": false, "description": "A server binding the plugin's code in the master server answers, wherever it is called from (docs/26 \"Servers\")." }
 			}
 		}
 	}

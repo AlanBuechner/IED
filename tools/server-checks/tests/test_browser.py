@@ -17,7 +17,8 @@ import unittest
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import IedServer, ServerTestCase, remove_tree, workspace_file
+from routed import RoutedClient
+from server import IedServer, ServerTestCase, remove_tree, server_state, workspace_file
 import test_chat as chat_checks
 
 PAGE = """<!doctype html>
@@ -111,7 +112,7 @@ class BrowserTests(ServerTestCase):
 		await self.connect()
 
 	async def connect(self):
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		self.ws = (await self.client.request("ws.list"))["workspaces"][0]["wsId"]
 
 	async def asyncTearDown(self):
@@ -286,7 +287,7 @@ class BrowserTests(ServerTestCase):
 		self.assertEqual("not_found", gone.exception.code)
 
 	def profile(self):
-		return os.path.join(self.data, "plugins", "ied.browser", "profile")
+		return os.path.join(server_state(self.data, self.site), "plugins", "ied.browser", "profile")   # the workspace server's own (docs/27)
 
 	async def test_a_browser_left_on_the_profile_is_closed_first(self):
 		"""docs/27 "Engine": a browser an earlier server left on IED's profile held it, so every start handed it its
@@ -336,7 +337,7 @@ class BrowserToolTests(ServerTestCase):
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		model = {"endpoint": self.model.url + "/v1", "vision": True, "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model}})
@@ -357,7 +358,7 @@ class BrowserToolTests(ServerTestCase):
 		tells the chat from its worker, so the change may come before or after the turn ends."""
 		deadline = time.monotonic() + LOAD_SECONDS
 		while True:
-			probe = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+			probe = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 			await probe.sub(["chat:" + chat_id])
 			resources = (await probe.wait_for("chat:" + chat_id, lambda f: f["t"] == "snap"))[-1]["data"]["resources"]
 			probe.abort()

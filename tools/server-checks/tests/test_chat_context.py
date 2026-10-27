@@ -7,13 +7,14 @@ import os
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import local_state, read_json_file
 from test_chat import ChatCase, call_step, text_step, write
 
 
 class ContextMeterTests(ChatCase):
 	async def snapshot(self, topic):
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub([topic])
 			return (await other.next_frame(topic))["data"]

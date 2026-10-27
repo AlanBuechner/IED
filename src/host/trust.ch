@@ -13,8 +13,13 @@ namespace Ied
 		// The store in `file`; a missing file trusts nothing, an unreadable one too (and says so in `error`).
 		public void Load(Core::StringView file, Core::String& error);
 		public bool IsTrusted(const FS::Path& root) const;
-		// Records the owner's choice and writes the file; false when it could not be written.
+		// Records the owner's choice and writes the file; false when it could not be written. Only the master writes it
+		// (docs/01 "Processes").
 		public bool Set(const FS::Path& root, bool trusted);
+		// The choice kept without writing the file: a workspace server's, the master writing it.
+		public void Remember(const FS::Path& root, bool trusted);
+		// The file read again (another process wrote it).
+		public void Reload(Core::String& error);
 
 		private Core::String file;
 		private Core::HashMap<Core::String, bool> roots;   // folded root -> trusted

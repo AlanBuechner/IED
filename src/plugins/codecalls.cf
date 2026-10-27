@@ -10,7 +10,58 @@ namespace Ied
 		return false;
 	}
 
+	bool ProvidesBinding(Plugin* plugin, Core::StringView name) {
+		Serialization::DomNode provides = plugin->manifest->contributes.Member("bindings").Member("provides");
+		for (int64 i = 0; i < provides.Count(); ++i)
+			if (provides.At(i).Member("name").AsView() == name) return true;
+		return false;
+	}
+
 	IED::Result InvokeBinding(Server* server, CodeInstance* provider, Core::StringView name, Core::StringView args, func<bool()> stopped) {
+		return InvokeBindingWithin(server, provider, name, args, stopped, IED::kBindingWaitMs);
+	}
+
+	IED::Result ForwardBinding(Server* server, Core::StringView name, Core::StringView args, int64 waitMs) {
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("name", name);
+		params.RawField("args", args.IsEmpty() ? Core::StringView("{}") : args);
+		params.IntField("waitMs", waitMs);
+		params.EndObject();
+		Core::String result;
+		Core::String problem;
+		if (!server->master->Call(&server->lock, Core::StringView("master.binding"), params.View(), result, problem, (int32)(waitMs + kForwardSlackMs)))
+			return IED::Refusal(problem.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(result.View(), *doc);
+		if (!read.Ok() || !read.root.Member("result").IsValid()) return IED::Refusal(((Core::String("the master's answer to '") + name) + "' is not one").View());
+		return IED::Answer(NodeJson(read.root.Member("result")).View());
+	}
+
+	bool ProvidedAnywhere(Server* server, Workspace* ws, Core::StringView name) {
+		Core::Array<Plugin*> loaded = ws ? server->plugins->LoadedFor(ws) : Core::Array<Plugin*>();
+		if (!ws)
+			for (Plugin* plugin : server->plugins->All())
+				if (plugin->state == PluginState::Loaded) loaded.Push(plugin);
+		for (Plugin* plugin : loaded) {
+			Serialization::DomNode provides = plugin->manifest->contributes.Member("bindings").Member("provides");
+			for (int64 i = 0; i < provides.Count(); ++i) {
+				Serialization::DomNode binding = provides.At(i);
+				const bool onServer = !binding.Member("side").IsValid() || binding.Member("side").AsView() == "server";
+				if (onServer && binding.Member("name").AsView() == name) return true;
+			}
+		}
+		return false;
+	}
+
+	IED::Result CallAnywhere(Server* server, Workspace* ws, Core::StringView name, Core::StringView args, func<bool()> stopped, int64 waitMs) {
+		CodeInstance* provider = server->code->Provider(ws, name);
+		if (provider) return InvokeBindingWithin(server, provider, name, args, stopped, waitMs);
+		if (server->master && ProvidedAnywhere(server, ws, name)) return ForwardBinding(server, name, args, waitMs);
+		return IED::Refusal(((Core::String("no plugin provides the server binding '") + name) + "'").View());
+	}
+
+	IED::Result InvokeBindingWithin(Server* server, CodeInstance* provider, Core::StringView name, Core::StringView args, func<bool()> stopped, int64 waitMs) {
 		IED::Result* result = new IED::Result();
 		Core::String binding = Core::String(name);
 		Core::String text = args.IsEmpty() ? Core::String("{}") : Core::String(args);
@@ -31,7 +82,7 @@ namespace Ied
 			Serialization::DomNode node = read.root;
 			Core::String failure;
 			if (!GuardedCall(instance, [call, node, result]() { *result = call(node); }, failure)) result->error = failure;
-		}, IED::kBindingWaitMs, stopped, problem);
+		}, waitMs, stopped, problem);
 		if (!ran) result->error = problem;
 		if (result->Ok()) {
 			Serialization::DomDoc check;
@@ -75,9 +126,7 @@ namespace Ied
 		Core::String name = Core::String(entry.Member("name").AsView());
 		Core::String binding = Core::String(entry.Member("binding").AsView());
 		if (!binding.IsEmpty()) {
-			CodeInstance* provider = server->code->Provider(ws, binding.View());
-			if (!provider) return IED::ToolFailure(((((name + ": ") + "no plugin provides the server binding '") + binding.View()) + "'").View());
-			IED::Result answer = InvokeBinding(server, provider, binding.View(), NodeJson(call.args).View(), stopped);
+			IED::Result answer = CallAnywhere(server, ws, binding.View(), NodeJson(call.args).View(), stopped, IED::kBindingWaitMs);
 			return answer.Ok() ? IED::ToolText(answer.json.View()) : IED::ToolFailure(((name + ": ") + answer.error.View()).View());
 		}
 		CodeInstance* instance = server->code->For(plugin, ws);
@@ -147,11 +196,11 @@ namespace Ied
 		Workspace* ws = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
 		Core::String name = params.Str("name");
 		CodeInstance* provider = server->code->Provider(ws, name.View());
-		if (!provider) throw RpcError(ErrorCode::NotFound, ((Core::String("no plugin provides the server binding '") + name.View()) + "'").View());
+		if (!provider && !(server->master && ProvidedAnywhere(server, ws, name.View()))) throw RpcError(ErrorCode::NotFound, ((Core::String("no plugin provides the server binding '") + name.View()) + "'").View());
 		Serialization::DomNode args = params.Field("args");
 		CancelToken* cancel = call.cancel;
 		Core::String text = args.IsValid() ? NodeJson(args) : Core::String("");
-		IED::Result result = InvokeBinding(server, provider, name.View(), text.View(), [cancel]() -> bool { return cancel->IsCancelled(); });
+		IED::Result result = CallAnywhere(server, ws, name.View(), text.View(), [cancel]() -> bool { return cancel->IsCancelled(); }, IED::kBindingWaitMs);
 		if (!result.Ok()) throw RpcError(ErrorCode::PluginError, result.error.View());
 		return (Core::String("{\"result\":") + result.json.View()) + "}";
 	}

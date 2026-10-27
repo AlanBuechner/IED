@@ -12,7 +12,7 @@
 	"description": "When IED is built from its source, chats can fix IED and the C4 toolchain as they work, and Settings rebuilds and relaunches it.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "entry": "Developer::Activate", "ui": "ui/index.js" },
+	"runtime": { "kind": "builtin", "entry": "Developer::Activate", "ui": "ui/index.js", "servers": ["master", "workspace"] },
 	"permissions": ["process.spawn", "fs.read", "workspace.open", "server.relaunch"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Environment/Developer" },
@@ -34,6 +34,7 @@
 					"name": "ied.developer.install",
 					"version": "1.0.0",
 					"kind": "function",
+					"master": true,
 					"description": "nuke install-ied in the source checkout, the build Settings > Developer shows: {} -> {state: succeeded|failed|canceled, exitCode, tail}, once the install that runs, or one started now, has ended. It waits as long as the build takes, so call it from a tool on a thread of its own (ownThread), as ied_relaunch does (docs/28)."
 				}
 			]

@@ -19,6 +19,7 @@ import unittest
 import ws
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import CLI_ENV, DESKTOP_ENV, IedServer, ServerTestCase, read_lines, remove_tree
 
 START_SECONDS = 40
@@ -345,7 +346,7 @@ class DesktopTests(ServerTestCase):
 		before = desktop_windows()
 
 		async def ask():
-			client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": server.sign_in()})
+			client = await RoutedClient.connect(server.ws_url, FrameChecker(), headers={"Cookie": server.sign_in()})
 			await client.request("testhooks.relaunch")
 			client.abort()
 		asyncio.run(ask())

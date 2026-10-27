@@ -3,6 +3,7 @@
 // (building, debugging, failed; idle otherwise), set by the plugins that know.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
+import { serverLook, serverTitle, showServerMenu } from "./servers.js";
 
 const CONNECTION_TEXT = { live: "Ready", connecting: "Connecting...", reconnecting: "Reconnecting...", closed: "Offline" };
 const TRANSIENT_MS = 3000;
@@ -57,12 +58,25 @@ export class StatusBar {
 		this.el.dataset.state = shell.context.get("statusState") || "idle";
 		replace(this.el,
 			h("span.st.conn-state", { title: "Server connection" }, icon(this.state === "live" ? "pass" : this.state === "closed" ? "debug-disconnect" : "sync"), CONNECTION_TEXT[this.state] || this.state),
+			this.serverItem(),
 			this.chordText ? h("span.st.chord", null, this.chordText) : null,
 			...left,
 			h("span.st.grow"),
 			...right,
 			h("span.st", { title: devices + " device(s) connected" }, icon("vm"), devices + (devices === 1 ? " device" : " devices")),
 			h("button.st.st-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } }, icon(unread ? "bell-dot" : "bell"), unread ? String(unread) : ""));
+	}
+
+	// The shown workspace's server (docs/01 "Processes"): its state, the menu that restarts it or lists them all.
+	serverItem() {
+		const shell = this.shell;
+		const server = shell.wsId ? shell.workspaceServer(shell.wsId) : null;
+		if (!server) return null;
+		const look = serverLook(server.state);
+		return h("button.st.st-server", {
+			dataset: { state: server.state }, title: serverTitle(shell.workspace.name, server), "aria-label": "Workspace server: " + server.state,
+			on: { click: (event) => showServerMenu(shell, event.currentTarget) },
+		}, icon(look.icon), look.text);
 	}
 
 	// A plugin's status item: its view export renders it (once); a command makes it clickable, and a view whose instance has

@@ -51,10 +51,14 @@ namespace Ai
 		});
 	}
 
+	// Each method runs inside the host lock, with the copy of the master's Claude account no older than kAccountFreshMs
+	// (docs/01 "Processes"): a turn it starts picks its model from the plan's usage as it is now.
 	void Chats::Register(const char* name, IED::MethodHandler method) {
 		IED::PluginContext* plugin = context;
+		Chats* self = this;
 		Core::String problem;
-		if (!context->Method(Core::StringView(name), [plugin, method](const IED::Request& request) -> Core::String {
+		if (!context->Method(Core::StringView(name), [plugin, self, method](const IED::Request& request) -> Core::String {
+			if (self->claude) self->claude->SyncIfStale();
 			IED::HostLock guard(*plugin);
 			return method(request);
 		}, problem))

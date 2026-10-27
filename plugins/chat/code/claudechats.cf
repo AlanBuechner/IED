@@ -35,24 +35,43 @@ namespace Ai
 		}
 	}
 
+	// A workspace server's chats: idle sessions stopped, and the copy of the master's Claude account brought up to date
+	// each tick (docs/01 "Processes"), so the usage another workspace's turns learned paces this one's within a tick.
 	void Chats::ClaudeKeeper() {
+		for (;;) {
+			Threading::Thread::Sleep(kClaudeKeeperTickNs);
+			{
+				IED::HostLock guard(*context);
+				if (stopping) return;
+				StopIdleSessions();
+			}
+			claude->Sync(false, false);
+		}
+	}
+
+	// How often the master asks the CLI (ms): every ai.claude.usageRefreshMinutes while a claude-code profile is set up,
+	// else every kClaudeDetectEveryMs to find a sign-in (0: never).
+	static int64 UsageEveryMs(IED::PluginContext* context, bool configured) {
+		if (!configured) return kClaudeSubscriptionOffered ? kClaudeDetectEveryMs : 0;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode minutes = Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.usageRefreshMinutes"), Core::StringView("")).View(), *doc).root;
+		return (minutes.Kind() == Serialization::DomKind::Int ? minutes.AsInt() : kClaudeRefreshDefaultMinutes) * 60 * 1000;
+	}
+
+	void KeepAccount(IED::PluginContext* context, ClaudeAccount* account, AccountKeeper* keeper) {
 		int64 askedMs = 0;
 		for (;;) {
 			Threading::Thread::Sleep(kClaudeKeeperTickNs);
 			bool configured = false;
 			{
 				IED::HostLock guard(*context);
-				if (stopping) return;
-				StopIdleSessions();
-				configured = claude->Configured();
+				if (keeper->stopping) return;
+				configured = account->Configured();
 			}
-			Serialization::DomDoc* doc = new Serialization::DomDoc();
-			Serialization::DomNode minutes = Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.usageRefreshMinutes"), Core::StringView("")).View(), *doc).root;
-			int64 every = (minutes.Kind() == Serialization::DomKind::Int ? minutes.AsInt() : kClaudeRefreshDefaultMinutes) * 60 * 1000;
-			if (!configured) every = kClaudeSubscriptionOffered ? kClaudeDetectEveryMs : 0;
+			const int64 every = UsageEveryMs(context, configured);
 			if (every <= 0 || KeeperNowMs() - askedMs < every) continue;
 			askedMs = KeeperNowMs();
-			claude->Refresh(false);
+			account->Refresh(false);
 		}
 	}
 

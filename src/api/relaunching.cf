@@ -12,6 +12,17 @@ namespace IED
 		}
 		Ied::Server* server = instance->runtime->server;
 		Ied::ApiLock guard(server);
+		// The relaunch is the master's: it stops its workspace servers and starts again with them (docs/27).
+		if (server->master) {
+			Ied::JsonWriter params;
+			params.BeginObject();
+			params.Field("reason", (((Core::String("plugin ") + instance->pluginId.View()) + ": ") + reason).View());
+			params.EndObject();
+			Core::String result;
+			if (!server->master->Call(&server->lock, Core::StringView("master.relaunch"), params.View(), result, problem)) return false;
+			server->Log((((Core::String("relaunch: asked of the master by plugin ") + instance->pluginId.View()) + ": ") + reason).View());
+			return true;
+		}
 		if (!server->relaunch.Ask(reason, clock_now_ns() / 1000000)) {
 			problem = Core::String("a relaunch is already under way");
 			return false;

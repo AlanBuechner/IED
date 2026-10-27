@@ -28,6 +28,7 @@ namespace Ied
 		public Core::String entry;              // runtime.entry: a c4 plugin's entry function ("Markup::Activate")
 		public Core::Array<Core::String> sources;      // runtime.sources: its code's folders and files (default "code")
 		public Core::Array<Core::String> activation;   // when its code starts (docs/26 section 2); empty: at load
+		public Core::Array<Core::String> servers;      // runtime.servers: where its code runs, master and/or workspace (docs/26 "Servers")
 		public Core::String apiRange;           // ied.api
 		public Core::Array<Core::String> permissions;
 		public Core::Array<Dependency*> dependencies;

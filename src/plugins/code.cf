@@ -78,8 +78,10 @@ namespace Ied
 		return TextDigest(all.View());
 	}
 
-	static bool IsCode(Plugin* plugin) {
+	// Whether `plugin` has code that runs in this server (docs/26 "Servers").
+	static bool IsCode(Server* server, Plugin* plugin) {
 		if (plugin->state != PluginState::Loaded) return false;
+		if (!plugin->manifest->servers.Contains(Core::String(server->IsMaster() ? "master" : "workspace"))) return false;
 		return plugin->manifest->kind.View() == "c4" || (plugin->manifest->kind.View() == "builtin" && !plugin->manifest->entry.IsEmpty());
 	}
 
@@ -97,12 +99,14 @@ namespace Ied
 		return nullptr;
 	}
 
-	static bool ProvidesServerBinding(Plugin* plugin, Core::StringView name) {
+	// Whether `plugin` provides the server binding `name` here: one marked master only in the master.
+	static bool ProvidesServerBinding(Server* server, Plugin* plugin, Core::StringView name) {
 		Serialization::DomNode provides = plugin->manifest->contributes.Member("bindings").Member("provides");
 		for (int64 i = 0; i < provides.Count(); ++i) {
 			Serialization::DomNode binding = provides.At(i);
 			Core::StringView side = binding.Member("side").IsValid() ? binding.Member("side").AsView() : Core::StringView("server");
-			if (binding.Member("name").AsView() == name && side == "server") return true;
+			if (binding.Member("name").AsView() != name || side != "server") continue;
+			return server->IsMaster() || !binding.Member("master").AsBool();
 		}
 		return false;
 	}
@@ -113,7 +117,7 @@ namespace Ied
 			for (Plugin* plugin : server->plugins->All())
 				if (plugin->state == PluginState::Loaded) loaded.Push(plugin);
 		for (Plugin* plugin : loaded)
-			if (IsCode(plugin) && ProvidesServerBinding(plugin, name)) return For(plugin, ws);
+			if (IsCode(server, plugin) && ProvidesServerBinding(server, plugin, name)) return For(plugin, ws);
 		return nullptr;
 	}
 
@@ -197,11 +201,25 @@ namespace Ied
 		return json.ToString();
 	}
 
+	bool CodeRuntime::Starting() const {
+		for (CodeInstance* instance : instances)
+			if (!instance->stopping && instance->state == CodeState::Compiling) return true;
+		return false;
+	}
+
+	void CodeRuntime::Registered(Core::Array<Core::String>& methods, Core::Array<Core::String>& topics) const {
+		for (CodeInstance* instance : instances) {
+			if (instance->stopping) continue;
+			for (const Core::String& method : instance->methods) methods.Push(method);
+			for (PluginTopic* topic : instance->topics) topics.Push(topic->key);
+		}
+	}
+
 	Plugin* CodeRuntime::PluginOf(CodeInstance* instance) const {
 		Workspace* ws = instance->IsProject() ? server->workspaces->Find(instance->wsId.View()) : nullptr;
 		Core::Array<Plugin*> candidates = ws ? server->plugins->LocalFor(ws) : server->plugins->All();
 		for (Plugin* plugin : candidates)
-			if (IsCode(plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) return plugin;
+			if (IsCode(server, plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) return plugin;
 		return nullptr;
 	}
 
@@ -213,7 +231,7 @@ namespace Ied
 			if (instance->wsId.View() != wsId) continue;
 			Plugin* match = nullptr;
 			for (Plugin* plugin : wanted)
-				if (IsCode(plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) match = plugin;
+				if (IsCode(server, plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) match = plugin;
 			if (!match) {
 				Stop(instance);
 				continue;
@@ -228,7 +246,7 @@ namespace Ied
 			Activate(instance);
 		}
 		for (Plugin* plugin : wanted)
-			if (IsCode(plugin) && !For(plugin, ws)) Start(plugin, ws);
+			if (IsCode(server, plugin) && !For(plugin, ws)) Start(plugin, ws);
 	}
 
 	CodeInstance* CodeRuntime::Start(Plugin* plugin, Workspace* ws) {
@@ -430,7 +448,7 @@ namespace Ied
 	// Compiled scripts are kept in the data folder: a plugin whose code did not change since it last compiled links
 	// what was kept (C4/docs/runtime/04 section 4.6).
 	void CodeRuntime::UseScriptCache() {
-		FS::Path folder = FS::Path(server->config.dataDir.View()) / "script-cache";
+		FS::Path folder = FS::Path(server->config.stateDir.View()) / "script-cache";
 		FS::MakeDirectories(folder.CStr());
 		if (!host->UseCache(folder.CStr())) server->Log(((Core::String("plugin code: the compiled-script cache in ") + folder.View()) + " cannot be used; code compiles on every start").View());
 	}

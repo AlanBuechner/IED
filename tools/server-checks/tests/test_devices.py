@@ -8,6 +8,7 @@ import unittest
 import ws
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 PASSWORD = "correct horse battery"
@@ -28,7 +29,7 @@ class DeviceTests(ServerTestCase):
 		self.server.stop()
 
 	async def client(self, cookie):
-		return await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		return await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
 
 	async def test_revoke_closes_the_devices_sockets_and_kills_its_cookie(self):
 		mine = self.server.sign_in()
@@ -99,7 +100,7 @@ class LanBindTests(ServerTestCase):
 		local = IedServer(data=refused.data)
 		try:
 			self.assertTrue(local.started, local.error)
-			client = await Client.connect(local.ws_url, FrameChecker(), headers={"Cookie": local.sign_in()})
+			client = await RoutedClient.connect(local.ws_url, FrameChecker(), headers={"Cookie": local.sign_in()})
 			await client.request("auth.setPassword", {"password": PASSWORD}, timeout=30)
 			client.abort()
 		finally:

@@ -148,6 +148,11 @@ namespace Ied
 		// loaded for `ws`, then one per script plugin `ws` holds in another folder - its source folders, the server's
 		// interface and the allow-list - as a JSON array.
 		public Core::String ScopesJson(Workspace* ws) const;
+		// The protocol methods and topics the running code registered, added to `methods` and `topics` (the master's
+		// routes, docs/10 "Routing").
+		public void Registered(Core::Array<Core::String>& methods, Core::Array<Core::String>& topics) const;
+		// Whether some code is still starting (compiling, or its entry not yet run).
+		public bool Starting() const;
 		// The plugin `instance` runs the code of, as loaded now; null when it is gone.
 		public Plugin* PluginOf(CodeInstance* instance) const;
 		// Runs `body` on `instance`'s thread, starting its code first when it has not started, and waits at most `ms`

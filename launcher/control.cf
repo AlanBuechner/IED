@@ -39,11 +39,11 @@ namespace Launch
 	}
 
 	// One line from the stream: false when it closed or went quiet first.
-	static bool ReadLine(Net::LocalStream& stream, Core::String& line) {
+	static bool ReadLine(Net::LocalStream& stream, Core::String& line, int32 timeoutMs) {
 		Core::StringBuilder text;
 		char[4096] chunk;
 		for (;;) {
-			const int64 got = stream.Receive((void*)&chunk[0], 4096, kAnswerMs);
+			const int64 got = stream.Receive((void*)&chunk[0], 4096, timeoutMs);
 			if (got <= 0) return false;
 			text.AppendBytes(&chunk[0], got);
 			const int64 end = text.View().IndexOf('\n', 0);
@@ -53,9 +53,11 @@ namespace Launch
 		}
 	}
 
-	Reply Ask(Net::LocalStream& stream, Core::StringView method, Core::StringView paramsJson) {
+	Reply Ask(Net::LocalStream& stream, Core::StringView method, Core::StringView paramsJson) { return AskWithin(stream, method, paramsJson, kAnswerMs); }
+
+	Reply AskWithin(Net::LocalStream& stream, Core::StringView method, Core::StringView paramsJson, int32 timeoutMs) {
 		Core::String line;
-		if (!stream.SendText(RequestLine(method, paramsJson).View(), kAnswerMs) || !ReadLine(stream, line)) {
+		if (!stream.SendText(RequestLine(method, paramsJson).View(), kAnswerMs) || !ReadLine(stream, line, timeoutMs)) {
 			Reply failed;
 			failed.error = Core::String("the server did not answer");
 			return failed;

@@ -12,6 +12,7 @@ import unittest
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import CLI_ENV, ControlPipe, IedServer, ServerTestCase, read_lines
 
 TREE_SERVER = "server"
@@ -65,7 +66,7 @@ class ControlTests(ServerTestCase):
 		self.assertEqual(401, self.server.exchange(token).status)
 
 	async def test_open_a_file_opens_its_folder_once(self):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await client.sub([TREE_SERVER])
 		await client.next_frame(TREE_SERVER)
 		opened = self.result("open", {"path": os.path.join(self.folder, "main.cf"), "line": 1, "col": 5})
@@ -89,7 +90,7 @@ class ControlTests(ServerTestCase):
 		self.assertIn("result", self.pipe.call("status"), "the channel still works after refusals")
 
 	async def test_stop_tells_clients_and_ends_the_server(self):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		self.assertEqual({}, self.result("stop"))
 		await client.wait_closed(10)
 		self.assertEqual({"t": "bye", "reason": "shutdown"}, client.bye)
@@ -105,8 +106,9 @@ class ControlTests(ServerTestCase):
 	async def test_a_crash_leaves_its_report_in_the_log(self):
 		"""An exception nothing catches on a thread of the server ends it (C4's fatal error, exit code 1): the report,
 		with the thread and the stack that threw, is in logs/server.log after the run's own lines."""
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
-		await client.request("testhooks.crash")
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		# The master's own crash: testhooks.crash on its socket (a workspace server's is test_servers').
+		await client.master.request("testhooks.crash")
 		self.assertEqual(1, self.server.process.wait(30))
 		client.abort()
 		text = "\n".join(server_log(self.server))
@@ -115,7 +117,7 @@ class ControlTests(ServerTestCase):
 		self.assertRegex(text, r"\(\S*testhooks\.cf:\d+\)", "the line that threw, named from the PDB")
 
 	async def ask_relaunch(self):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await client.request("testhooks.relaunch")
 		client.abort()
 

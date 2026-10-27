@@ -8,6 +8,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 TREE = "ws:w1"
@@ -32,7 +33,7 @@ class WatchingTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.sub([TREE])
 		await self.client.next_frame(TREE)   # the snapshot
 

@@ -180,6 +180,16 @@ namespace Ai
 	// ai.probe of a claude-code profile: the CLI asked now (where it is, its version, whether it is signed in), answered in
 	// a probe's shape.
 	Core::String ProbeClaude(ClaudeAccount* account, IED::PluginContext* context, const ModelProfile& profile);
+
+	// The master's account keeper's state: stopping once the plugin stops.
+	class AccountKeeper
+	{
+		public bool stopping;
+	}
+
+	// The master's account kept current (docs/04 "Usage"): the CLI asked every ai.claude.usageRefreshMinutes while
+	// Claude is set up, and asked for a sign-in while it is not; on a thread of the plugin's, until `keeper` stops.
+	void KeepAccount(IED::PluginContext* context, ClaudeAccount* account, AccountKeeper* keeper);
 	// The workspace `wsId` the plugin is loaded for; throws not_found.
 	IED::Workspace OpenWorkspace(Core::StringView wsId);
 }

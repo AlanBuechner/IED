@@ -11,8 +11,14 @@ python -I tools/server-checks/run_server_checks.py --server <exe> -k lock -v
 nuke conformance
 ```
 
+Each check starts the master (`docs/01` "Processes"); its workspaces run in workspace servers it starts. `routed.py`'s
+`RoutedClient` keeps a tab's sockets as the web client does - the master's and one per workspace server through
+`/w/<wsId>/ws` - and sends each request and subscription where the master's routes say (`docs/10` "Routing"), so a check
+talks to "the server" as before.
+
 | Module | Checks |
 |---|---|
+| `test_servers.py` | two workspaces in two processes (their pids, epochs, a server answering for its own workspace alone); the master's routes and the router; a workspace server refusing anything without the master's secret (no secret, a guessed one, a cookie, a launch token, the WebSocket upgrade); a killed workspace server started again with its id while the other workspace's socket never drops, its new log saying how the last run ended; three exits within a minute leave it `failed` until `ws.restart`; `ws.restart` and `ws.close`; `stop` ending every workspace server; a chat cut off by the kill going on by itself once its server is back |
 | `test_access.py` | a foreign Host refused on every path; loopback names accepted; `/healthz` open and terse; `/ws` without a session refused before the upgrade (401); `/api/*` 401 JSON; a page gets the login page (401) with the content policy, `nosniff` and `no-referrer`; only the login page's files are public; a foreign Origin refused on `/ws` (even with a session) and on auth POSTs; forged, other-port and empty cookies are no session |
 | `test_tokens.py` | the `OPEN` line's 64-digit token; the exchange's 303 without the token and the cookie's attributes; a token works once; a token dies after its time (`testhooks.mintToken`); malformed tokens; the cookie opens a protocol session (`auth.devices`); `/api/auth/state`; neither `auth/devices.json` nor the log holds the cookie |
 | `test_password.py` | login without a password (409); malformed logins (400); passwords have 12 characters; set then log in, devices listed, a wrong password gets no cookie; changing it needs the current one; five failures lock the address out, even for the right password, with `Retry-After`; the audit log's events in order and without secrets; `owner.json` holds an Argon2id string |

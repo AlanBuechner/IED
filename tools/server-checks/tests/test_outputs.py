@@ -9,6 +9,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import REPO, ControlPipe, IedServer, ServerTestCase
 
 TOPIC = "out:w1:ied"
@@ -58,7 +59,7 @@ class OutputTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)
@@ -74,19 +75,24 @@ class OutputTests(ServerTestCase):
 		self.assertRegex(snapshot["tail"], r"\[\d\d:\d\d:\d\d\] opened w1: ", "what was logged before, with its time")
 
 	async def test_problems_are_logged_as_they_are_found(self):
-		await self.client.sub([TOPIC])
-		await self.client.next_frame(TOPIC)
+		"""A solution opened with problems: its own workspace server logs them, in its IED output (each workspace's output
+		is its server's log, docs/01 "Processes")."""
 		broken = os.path.join(self.root, "Broken.iedsln")
 		with open(broken, "w") as f:
 			json.dump({"version": 1, "name": "Broken", "projects": [{"file": "missing.iedproj"}]}, f)
 		pipe = ControlPipe(self.server.control)
 		try:
-			pipe.call("open", {"path": broken})
+			ws_id = pipe.call("open", {"path": broken})["result"]["wsId"]
 		finally:
 			pipe.close()
-		frames = await self.client.wait_for(TOPIC, lambda f: f["t"] == "evt" and "no project file matches" in f["data"]["text"], 10)
-		self.assertEqual("append", frames[-1]["kind"])
-		self.assertIn("solution Broken: no project file matches missing.iedproj", frames[-1]["data"]["text"])
+		topic = "out:%s:ied" % ws_id
+		await self.client.sub([topic])
+		frames = await self.client.wait_for(topic, lambda f: "no project file matches" in (f["data"].get("tail", "") if f["t"] == "snap" else f["data"].get("text", "")), 30)
+		said = frames[-1]["data"].get("tail") or frames[-1]["data"]["text"]
+		self.assertIn("solution Broken: no project file matches missing.iedproj", said)
+		await self.client.sub([TOPIC])
+		first = (await self.client.next_frame(TOPIC))["data"]["tail"]
+		self.assertNotIn("no project file matches", first, "another workspace's server logs its own")
 
 	async def test_clear(self):
 		await self.client.sub([TOPIC])

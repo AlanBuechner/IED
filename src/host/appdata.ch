@@ -18,4 +18,6 @@ namespace Ied
 	// What a batch of changes in the app data folder asks for.
 	bool TouchesSettings(const ChangeBatch& batch);
 	bool TouchesPlugins(const ChangeBatch& batch);
+	bool TouchesTrust(const ChangeBatch& batch);
+	bool TouchesChoices(const ChangeBatch& batch);
 }

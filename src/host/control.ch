@@ -31,13 +31,20 @@ namespace Ied
 
 		// One request line to its response.
 		public ControlAnswer Answer(Core::StringView line);
+		// The server stops, as `stop` stops it, saying `why` in its log.
+		public void StopFor(Core::StringView why) { Stop(why); }
 
 	private:
 		private void AcceptLoop();
 		private void Serve(Net::LocalStream* stream);
 		private Core::String Call(Core::StringView method, const Serialization::DomNode& params);
+		// A workspace server's pipe: status and stop, for its master's supervisor.
+		private Core::String WorkspaceCall(Core::StringView method, const Serialization::DomNode& params);
+		// The master's methods for its workspace servers (docs/10 "Local control channel").
+		private Core::String MasterCall(Core::StringView method, const Serialization::DomNode& params);
 		private Core::String Launch(Core::StringView fragment);
 		private Core::String Status();
+		private Core::String WorkspaceStatus();
 		private Core::String Open(const Serialization::DomNode& params);
 		private Core::String ClaimRelaunch();
 		// A relaunch no desktop app took (relaunch.ch): the server stops, and main starts it again.

@@ -3,14 +3,28 @@
 //                [--app-data <folder>] [--control <name>] [--workspace <folder>]... [--test-hooks]
 //                [--idle-timeout <s>] [--outbound-budget-mb <n>] [--coalesce-kb <n>] [--allow-origin <o>]...
 //                [--allow-host <h>]... [--quiet] [--debug-scripts on|off] [--relaunched]
+//     ied-server --role workspace --ws-id <wsId> --workspace <path> --master <pipe> --control <pipe> --data <folder>
+//                --app-data <folder> --home <folder> --state <folder> --log <file> [--restarted-after <text>] ...
+// The first is the master (docs/01 "Processes"); the second a workspace server, which only the master starts, with
+// its secret in IED_SERVER_SECRET (docs/11 "Workspace servers").
 
 include "bedrock.ch"
 
 namespace Ied
 {
+	// Which server this process is (docs/01 "Processes").
+	enum class ServerRole { Master, Workspace }
+
 	class ServerConfig
 	{
 		public Core::String version;
+		public ServerRole role;                        // --role: master (the default) or workspace
+		public Core::String wsId;                      // a workspace server's workspace (--ws-id)
+		public Core::String masterControl;             // a workspace server's master's pipe (--master)
+		public Core::String stateDir;                  // the server's own state (--state); empty: the data folder
+		public Core::String logPath;                   // its log (--log); empty: <data>/logs/server.log
+		public Core::String restartedAfter;            // how the run before this one ended, when the master restarted it
+		public Core::String secret;                    // a workspace server's: what every request the master sends carries
 		public Core::String host;
 		public int32 port;
 		public bool portGiven;                         // --port was given: no other port will do
@@ -35,6 +49,11 @@ namespace Ied
 	}
 
 	ServerConfig DefaultConfig();
+	bool IsWorkspaceServer(const ServerConfig& config);
+	// --state, or the data folder.
+	Core::String StateFolder(const ServerConfig& config);
+	// --log, or <data>/logs/server.log.
+	Core::String LogPath(const ServerConfig& config);
 	// --data, or %LOCALAPPDATA%\IED; with --test-hooks a fresh temporary folder.
 	Core::String DataFolder(const ServerConfig& config);
 	// --home, or the nearest folder above this program that holds shared/host-api/schemas; empty when none does.

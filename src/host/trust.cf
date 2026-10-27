@@ -33,9 +33,18 @@ namespace Ied
 
 	bool TrustStore::IsTrusted(const FS::Path& root) const { return roots.Contains(TrustKey(root.View())); }
 
-	bool TrustStore::Set(const FS::Path& root, bool trusted) {
+	void TrustStore::Reload(Core::String& error) {
+		Core::String at = file;
+		Load(at.View(), error);
+	}
+
+	void TrustStore::Remember(const FS::Path& root, bool trusted) {
 		if (trusted) roots.At(TrustKey(root.View())) = true;
 		else roots.Remove(TrustKey(root.View()));
+	}
+
+	bool TrustStore::Set(const FS::Path& root, bool trusted) {
+		Remember(root, trusted);
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("version", 1);

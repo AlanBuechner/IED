@@ -9,6 +9,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import IedServer, ServerTestCase, local_state
 
 DOCUMENT = {"v": 1, "activity": "ied.editor", "activities": {"ied.editor": {"kind": "tabs", "tabs": ["ied.output"], "active": "ied.output", "well": True}}}
@@ -35,7 +36,7 @@ class LayoutFileTests(ServerTestCase):
 		self.assertTrue(self.server.started, self.server.error)
 
 	async def connect(self):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		self.addCleanup(client.abort)
 		return client
 

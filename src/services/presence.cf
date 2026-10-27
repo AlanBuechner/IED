@@ -26,10 +26,57 @@ namespace Ied
 		server->rpc.Register("server.dismiss", [self](Call& call, const Params& params) -> Core::String { return self->Dismiss(call, params); });
 	}
 
+	// The master's own methods and topics a client sends it (docs/10 "Routing"); its plugins' code adds theirs.
+	static Core::Array<Core::String> MasterMethods() {
+		const char*[16] names = {
+			"server.info", "server.notify", "server.dismiss", "ws.list", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent",
+			"ws.close", "ws.restart", "auth.setPassword", "auth.devices", "auth.revoke", "plugins.setEnabled", "plugins.approve",
+			"testhooks.mintToken", "testhooks.relaunch"
+		};
+		Core::Array<Core::String> methods;
+		for (int32 i = 0; i < 16; ++i) methods.Push(Core::String(names[i]));
+		return methods;
+	}
+
+	Core::String Presence::RoutesJson() const {
+		Core::Array<Core::String> methods = MasterMethods();
+		Core::Array<Core::String> topics;
+		topics.Push(Core::String("server"));
+		server->code->Registered(methods, topics);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("methods"));
+		json.BeginArray();
+		for (const Core::String& name : methods) json.String(name.View());
+		json.EndArray();
+		json.Key(Core::StringView("topics"));
+		json.BeginArray();
+		for (const Core::String& key : topics) json.String(key.View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Presence::RoutesChanged() {
+		if (!server->IsMaster()) return;
+		Core::String routes = RoutesJson();
+		if (routes.View() == published.View()) return;
+		published = routes;
+		server->hub.Publish(Core::StringView("server"), "routes.changed", (Core::String("{\"routes\":") + routes.View() + "}").View());
+	}
+
 	Core::String Presence::Snapshot() const {
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("serverVersion", server->config.version.View());
+		if (server->IsMaster()) {
+			json.RawField("routes", RoutesJson().View());
+			json.Key(Core::StringView("master"));
+			json.BeginObject();
+			json.IntField("pid", (int64)Platform::ProcessId());
+			json.IntField("startedMs", server->startedMs);
+			json.EndObject();
+		}
 		Core::String workspaces = server->workspaces->SummariesJson();
 		json.RawField("workspaces", workspaces.View());
 		json.RawField("recent", server->recent.Json().View());

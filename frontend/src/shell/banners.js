@@ -2,6 +2,7 @@
 // readable and input waits), and the trust of an untrusted workspace (F-SHL-33).
 
 import { h, icon } from "/ui-kit/dom.js";
+import { serverBanner } from "./servers.js";
 
 const CONNECTION = {
 	connecting: ["info", "sync", "Connecting to the server..."],
@@ -11,7 +12,12 @@ const CONNECTION = {
 
 export function banners(shell, state) {
 	const out = [];
-	const connection = CONNECTION[state];
+	// While the shown workspace's server restarts the master's socket stays up: its banner says so, not "the connection
+	// was lost" (docs/01 "Processes").
+	const server = serverBanner(shell);
+	const masterLive = !shell.client || !shell.client.master || shell.client.master.state === "live";
+	if (server) out.push(server);
+	const connection = server && masterLive ? null : CONNECTION[state];
 	if (connection) {
 		const [level, glyph, text] = connection;
 		out.push(h("div.banner." + level, { role: "alert", dataset: { banner: "connection" } }, icon(glyph, state === "closed" ? "" : "spin"), h("span", null, text),

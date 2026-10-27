@@ -21,6 +21,10 @@ namespace Ied
 		// The lock is held.
 		public void Connected(Session* session);
 		public void Disconnected(Session* session);
+		// The master: its plugins' code registered a method or a topic; routes.changed when the routes did.
+		public void RoutesChanged();
+		// {methods, topics}: what a client sends the master (docs/10 "Routing").
+		public Core::String RoutesJson() const;
 
 	private:
 		private Core::String Snapshot() const;
@@ -31,6 +35,7 @@ namespace Ied
 		private Server* server;
 		private Core::Array<Notification> notifications;
 		private int64 nextNote;
+		private Core::String published;   // the routes told last
 	}
 
 	Core::String NotificationJson(const Notification& note);

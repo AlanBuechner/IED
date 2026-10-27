@@ -32,8 +32,13 @@ namespace Ied
 		// Sets `key` to `valueJson` in the app tier, as settings.set does (a known app-tier key, a value that fits its
 		// schema); false with `problem`. For a plugin's PluginContext::SetSetting (docs/26).
 		public bool SetApp(Core::StringView key, Core::StringView valueJson, Core::String& problem);
+		// The master: a workspace server's app-tier edit (master.settings) - SetApp, or `key` removed when `valueJson`
+		// is empty.
+		public bool WriteApp(Core::StringView key, Core::StringView valueJson, Core::String& problem);
 
 	private:
+		private bool AppThroughMaster(Core::StringView key, Core::StringView valueJson, Core::String& problem);
+		private void AppWritten();
 		private SettingsCatalog* CatalogFor(Workspace* ws);
 		private void Rebuild(Workspace* ws);
 		private void Recheck(Workspace* ws);

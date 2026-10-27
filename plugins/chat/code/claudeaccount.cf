@@ -8,8 +8,11 @@ namespace Ai
 	void ClaudeAccount::Init(IED::PluginContext* context) {
 		this.context = context;
 		usage.extraUtilization = -1;
+		replica = context->Server() != "master";
+		if (replica) return;
 		ClaudeAccount* self = this;
 		context->TopicFrom(Core::StringView(kUsageTopic), [self]() -> Core::String { return self->SnapshotJson(); });
+		context->Provide(Core::StringView("ai.claude.account"), [self](const Serialization::DomNode& args) -> IED::Result { return self->AccountBinding(args); });
 		Core::String problem;
 		if (!context->Method(Core::StringView("ai.usage"), [self](const IED::Request& request) -> Core::String { return self->UsageMethod(request); }, problem)) context->Log(problem.View());
 		if (!context->Method(Core::StringView("ai.claude.signIn"), [self](const IED::Request& request) -> Core::String { return self->SignInMethod(request); }, problem)) context->Log(problem.View());
@@ -177,6 +180,10 @@ namespace Ai
 	}
 
 	void ClaudeAccount::Refresh(bool force) {
+		if (replica) {
+			Sync(true, force);
+			return;
+		}
 		MigrateAuto();
 		{
 			IED::HostLock guard(*context);
@@ -214,6 +221,7 @@ namespace Ai
 
 	void ClaudeAccount::TookUsage(const Serialization::DomNode& response) {
 		if (!ReadUsage(response, usage, AccountNowMs())) return;
+		if (replica) Learned("usage", (Core::String("{\"response\":") + IED::NodeJson(response).View() + "}").View());
 		Changed();
 	}
 
@@ -221,12 +229,139 @@ namespace Ai
 		if (method.IsEmpty()) return;
 		signIn = Core::String(signedIn ? "signed_in" : "signed_out");
 		authMethod = Core::String(method);
+		if (replica) {
+			IED::JsonWriter fact;
+			fact.BeginObject();
+			fact.BoolField("signedIn", signedIn);
+			fact.Field("method", method);
+			fact.EndObject();
+			Learned("auth", fact.View());
+		}
 		Changed();
 	}
 
 	void ClaudeAccount::TookRateLimit(const Serialization::DomNode& info) {
 		TakeRateLimit(info, usage, AccountNowMs());
+		if (replica) Learned("rateLimit", (Core::String("{\"info\":") + IED::NodeJson(info).View() + "}").View());
 		Changed();
+	}
+
+	// --- The master's account and a workspace server's copy (docs/01 "Processes") -------------------------------------
+
+	Core::String ClaudeAccount::StateJson() {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("cliPath", cliPath.View());
+		json.Field("cliVersion", cliVersion.View());
+		json.Field("signIn", signIn.View());
+		json.Field("authMethod", authMethod.View());
+		json.BoolField("refreshing", refreshing);
+		json.BoolField("asked", asked);
+		json.BoolField("signingIn", signingIn);
+		json.BoolField("installing", installing);
+		json.Key(Core::StringView("usage"));
+		WriteUsage(json, usage, AccountNowMs());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void ClaudeAccount::TakeState(const Serialization::DomNode& state) {
+		if (state.Kind() != Serialization::DomKind::Object) return;
+		cliPath = Core::String(state.Member("cliPath").AsView());
+		cliVersion = Core::String(state.Member("cliVersion").AsView());
+		signIn = Core::String(state.Member("signIn").AsView());
+		authMethod = Core::String(state.Member("authMethod").AsView());
+		refreshing = state.Member("refreshing").AsBool();
+		asked = state.Member("asked").AsBool();
+		signingIn = state.Member("signingIn").AsBool();
+		installing = state.Member("installing").AsBool();
+		Serialization::DomNode taken = state.Member("usage");
+		usage.Forget();
+		usage.known = taken.Member("known").AsBool();
+		usage.available = taken.Member("available").AsBool();
+		usage.plan = Core::String(taken.Member("plan").AsView());
+		usage.status = Core::String(taken.Member("status").AsView());
+		usage.limitedBy = Core::String(taken.Member("limitedBy").AsView());
+		usage.limitResetsAtMs = taken.Member("limitResetsAtMs").AsInt();
+		usage.extraEnabled = taken.Member("extraEnabled").AsBool();
+		usage.extraUtilization = taken.Member("extraUtilization").IsValid() ? taken.Member("extraUtilization").AsFloat() : -1;
+		usage.updatedMs = taken.Member("updatedMs").AsInt();
+		usage.error = Core::String(taken.Member("error").AsView());
+		Serialization::DomNode windows = taken.Member("windows");
+		for (int64 i = 0; i < windows.Count(); ++i) {
+			Serialization::DomNode window = windows.At(i);
+			UsageWindow* kept = usage.Window(window.Member("id").AsView());
+			kept->label = Core::String(window.Member("label").AsView());
+			kept->model = Core::String(window.Member("model").AsView());
+			kept->separate = window.Member("separate").AsBool();
+			kept->utilization = window.Member("utilization").AsFloat();
+			kept->resetsAtMs = window.Member("resetsAtMs").AsInt();
+			kept->lengthMs = window.Member("lengthMs").AsInt();
+		}
+	}
+
+	void ClaudeAccount::Learned(const char* kind, Core::StringView fact) {
+		learned.Push(((Core::String("{\"kind\":\"") + kind) + "\",\"fact\":" + fact) + "}");
+		if (sending) return;
+		sending = true;
+		ClaudeAccount* self = this;
+		context->StartThread([self]() { self->Sync(false, false); });
+	}
+
+	void ClaudeAccount::Sync(bool refresh, bool force) {
+		Core::Array<Core::String> sent;
+		{
+			IED::HostLock guard(*context);
+			sent = learned;
+			learned.Clear();
+			sending = false;
+		}
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Key(Core::StringView("learned"));
+		args.BeginArray();
+		for (const Core::String& fact : sent) args.Raw(fact.View());
+		args.EndArray();
+		args.BoolField("refresh", refresh);
+		args.BoolField("force", force);
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView("ai.claude.account"), args.View());
+		if (!answer.Ok()) {
+			context->Log((Core::String("the master's Claude account did not answer: ") + answer.error.View()).View());
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(answer.json.View(), *doc);
+		IED::HostLock guard(*context);
+		if (!read.Ok()) return;
+		TakeState(read.root);
+		syncedMs = AccountNowMs();
+	}
+
+	void ClaudeAccount::SyncIfStale() {
+		if (!replica) return;
+		{
+			IED::HostLock guard(*context);
+			if (AccountNowMs() - syncedMs < kAccountFreshMs) return;
+		}
+		Sync(false, false);
+	}
+
+	IED::Result ClaudeAccount::AccountBinding(const Serialization::DomNode& args) {
+		Serialization::DomNode facts = args.Member("learned");
+		{
+			IED::HostLock guard(*context);
+			for (int64 i = 0; i < facts.Count(); ++i) {
+				Core::StringView kind = facts.At(i).Member("kind").AsView();
+				Serialization::DomNode fact = facts.At(i).Member("fact");
+				if (kind == "usage") TookUsage(fact.Member("response"));
+				else if (kind == "rateLimit") TookRateLimit(fact.Member("info"));
+				else if (kind == "auth") TookAuth(fact.Member("signedIn").AsBool(), fact.Member("method").AsView());
+			}
+		}
+		if (args.Member("refresh").AsBool()) Refresh(args.Member("force").AsBool());
+		IED::HostLock guard(*context);
+		return IED::Answer(StateJson().View());
 	}
 
 	PaceDays ClaudeAccount::Days() const {

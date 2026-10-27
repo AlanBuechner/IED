@@ -18,9 +18,11 @@ namespace IED
 
 	Core::String PluginContext::WorkspaceId() const { return Of(host)->wsId; }
 
+	Core::String PluginContext::Server() const { return Core::String(Of(host)->runtime->server->IsMaster() ? "master" : "workspace"); }
+
 	Core::String PluginContext::StateFolder() const {
 		Ied::CodeInstance* instance = Of(host);
-		FS::Path folder = FS::Path(instance->runtime->server->config.dataDir.View()) / "plugins" / instance->pluginId.View();
+		FS::Path folder = FS::Path(instance->runtime->server->config.stateDir.View()) / "plugins" / instance->pluginId.View();
 		FS::MakeDirectories(folder.CStr());
 		return Core::String(folder.View());
 	}
@@ -133,6 +135,7 @@ namespace IED
 		server->rpc.Register(key.CStr(), [runtime, instance, handler](Ied::Call& call, const Ied::Params& params) -> Core::String {
 			return runtime->CallMethod(instance, handler, call, params);
 		});
+		server->presence->RoutesChanged();
 		return true;
 	}
 
@@ -148,6 +151,7 @@ namespace IED
 		topic = new Ied::PluginTopic();
 		topic->key = Core::String(key);
 		instance->topics.Push(topic);
+		runtime->server->presence->RoutesChanged();
 		return topic;
 	}
 

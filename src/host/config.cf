@@ -43,7 +43,16 @@ namespace Ied
 		i += 1;
 		Core::StringView value = arguments[i].View();
 		int64 number = 0;
-		if (option == "--host") config.host = Core::String(value);
+		if (option == "--role") {
+			if (value != "master" && value != "workspace") return Fail(error, option, "is master or workspace");
+			config.role = value == "workspace" ? ServerRole::Workspace : ServerRole::Master;
+		}
+		else if (option == "--ws-id") config.wsId = Core::String(value);
+		else if (option == "--master") config.masterControl = Core::String(value);
+		else if (option == "--state") config.stateDir = Core::String(value);
+		else if (option == "--log") config.logPath = Core::String(value);
+		else if (option == "--restarted-after") config.restartedAfter = Core::String(value);
+		else if (option == "--host") config.host = Core::String(value);
 		else if (option == "--static") config.staticDir = Core::String(value);
 		else if (option == "--data") config.dataDir = Core::String(value);
 		else if (option == "--home") config.homeDir = Core::String(value);
@@ -72,7 +81,25 @@ namespace Ied
 		config.arguments = arguments;
 		for (int64 i = 0; i < arguments.Count(); ++i)
 			if (!ParseOption(arguments, i, config, error)) return false;
+		if (!IsWorkspaceServer(config)) return true;
+		if (config.wsId.IsEmpty() || config.masterControl.IsEmpty() || config.workspaces.Count() != 1) {
+			error = Core::String("--role workspace needs --ws-id, --master and one --workspace (only the master starts one)");
+			return false;
+		}
+		// Loopback only, on a port of the system's choosing (docs/11 "Workspace servers").
+		config.host = Core::String("127.0.0.1");
+		config.port = 0;
+		config.portGiven = false;
 		return true;
+	}
+
+	bool IsWorkspaceServer(const ServerConfig& config) { return config.role == ServerRole::Workspace; }
+
+	Core::String StateFolder(const ServerConfig& config) { return config.stateDir.IsEmpty() ? DataFolder(config) : config.stateDir; }
+
+	Core::String LogPath(const ServerConfig& config) {
+		if (!config.logPath.IsEmpty()) return config.logPath;
+		return Core::String((FS::Path(DataFolder(config).View()) / "logs" / "server.log").View());
 	}
 
 	static Core::String RandomHex(int32 bytes) {

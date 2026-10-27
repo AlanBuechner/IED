@@ -305,7 +305,7 @@ namespace Ied
 		if (!ws) throw RpcError(ErrorCode::Unavailable, "no workspace is open");
 		Core::String name = params.Str("name");
 		if (name.IsEmpty() || name.View().IndexOf('/', 0) >= 0 || name.View().IndexOf('\\', 0) >= 0 || name.View().StartsWith(Core::StringView("."))) throw RpcError(ErrorCode::BadRequest, "name is a plain file name");
-		FS::Path folder = FS::Path(server->config.dataDir.View()) / "testhooks-external";
+		FS::Path folder = FS::Path(server->config.stateDir.View()) / "testhooks-external";
 		FS::MakeDirectories(folder.CStr());
 		FS::Path file = folder / name.CStr();
 		Core::String text = params.Str("text", Core::StringView(""));

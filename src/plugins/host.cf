@@ -49,8 +49,11 @@ namespace Ied
 		PluginHost* self = this;
 		server->hub.Add(Core::StringView("plugins"), [self]() -> Core::String { return self->Snapshot(); });
 		server->rpc.Register("plugins.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
-		server->rpc.Register("plugins.setEnabled", [self](Call& call, const Params& params) -> Core::String { return self->SetEnabledMethod(call, params); });
-		server->rpc.Register("plugins.approve", [self](Call& call, const Params& params) -> Core::String { return self->ApproveMethod(call, params); });
+		// The owner's choices are the master's to write (plugins.json, docs/01 "Processes"); its workspace servers read them.
+		if (server->IsMaster()) {
+			server->rpc.Register("plugins.setEnabled", [self](Call& call, const Params& params) -> Core::String { return self->SetEnabledMethod(call, params); });
+			server->rpc.Register("plugins.approve", [self](Call& call, const Params& params) -> Core::String { return self->ApproveMethod(call, params); });
+		}
 		server->rpc.Register("plugins.contributions", [self](Call& call, const Params& params) -> Core::String { return self->ContributionsMethod(call, params); });
 		server->rpc.Register("plugins.reload", [self](Call& call, const Params& params) -> Core::String { return self->ReloadMethod(call, params); });
 	}
@@ -357,6 +360,7 @@ namespace Ied
 		else disabled.At(id) = true;
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
 		Load();
+		if (server->servers) server->servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
 		return Summary(Get(id.View()), nullptr);
 	}
 
@@ -370,6 +374,7 @@ namespace Ied
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
 		server->auth->Record("plugin-approved", (Core::String("\"plugin\":") + JsonString(id.View()).View()).View());
 		Load();
+		if (server->servers) server->servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
 		return Summary(Get(id.View()), nullptr);
 	}
 

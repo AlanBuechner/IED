@@ -212,7 +212,33 @@ namespace Ied
 		return file;
 	}
 
+	// A workspace server's app-tier edit, made by the master - the one writer of the file (docs/01 "Processes") - and
+	// read back at once. `valueJson` empty removes the key.
+	bool Settings::AppThroughMaster(Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("key", key);
+		params.RawField("value", valueJson.IsEmpty() ? Core::StringView("null") : valueJson);
+		params.EndObject();
+		Core::String result;
+		if (!server->master->Call(&server->lock, Core::StringView("master.settings"), params.View(), result, problem)) return false;
+		app->Reload(catalog, false);
+		PublishAll();
+		return true;
+	}
+
+	bool Settings::WriteApp(Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		if (!valueJson.IsEmpty()) return SetApp(key, valueJson, problem);
+		app->Reload(catalog, false);
+		Core::String edited;
+		if (!RemoveMember(app->text.View(), key, edited, problem) || !app->Write(catalog, edited.View(), problem)) return false;
+		PublishAll();
+		AppWritten();
+		return true;
+	}
+
 	bool Settings::SetApp(Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		if (server->master) return AppThroughMaster(key, valueJson, problem);
 		SettingInfo* setting = catalog.Get(key);
 		if (!setting || !catalog.AllowedIn(setting, Core::StringView("app"))) {
 			problem = (Core::String("no setting ") + key) + " in the app tier";
@@ -233,7 +259,14 @@ namespace Ied
 		Core::String edited;
 		if (!SetMember(app->text.View(), key, valueJson, edited, problem) || !app->Write(catalog, edited.View(), problem)) return false;
 		PublishAll();
+		AppWritten();
 		return true;
+	}
+
+	// The master wrote the app tier: its workspace servers read it again before it answers (docs/01 "Processes"), so a
+	// caller that asks a workspace server next sees the change.
+	void Settings::AppWritten() {
+		if (server->servers) server->servers->TellAll(Core::StringView("settings.changed"), Core::StringView(""));
 	}
 
 	static RpcError Refused(Core::StringView message, const Core::Array<Core::String>& problems) {
@@ -262,11 +295,22 @@ namespace Ied
 		}
 		Core::String edited;
 		Core::String error;
+		if (file == app && server->master) {
+			if (!AppThroughMaster(key, valueJson, error)) throw RpcError(ErrorCode::Unavailable, error.View());
+			JsonWriter answer;
+			answer.BeginObject();
+			answer.IntField("revision", file->revision);
+			answer.EndObject();
+			return answer.ToString();
+		}
 		const bool done = valueJson.IsEmpty() ? RemoveMember(file->text.View(), key, edited, error) : SetMember(file->text.View(), key, valueJson, edited, error);
 		if (!done) throw RpcError(ErrorCode::Conflict, (Core::String("the settings file cannot be edited: ") + error.View()).View());
 		if (!file->Write(*known, edited.View(), error)) throw RpcError(ErrorCode::Unavailable, error.View());
 		if (ws) Publish(ws);
-		else PublishAll();
+		else {
+			PublishAll();
+			AppWritten();
+		}
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("revision", file->revision);

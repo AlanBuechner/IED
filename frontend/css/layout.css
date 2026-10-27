@@ -398,6 +398,23 @@ a { color: var(--link); text-decoration: none; }
 button.st:hover { background: var(--veil); color: var(--text-0); }
 .st.grow { flex: 1; }
 .st.chord { color: var(--text-0); }
+/* The shown workspace's server (servers.js): blue while it (re)starts, red when it failed. */
+.st-server[data-state="starting"] .ci, .st-server[data-state="restarting"] .ci { color: var(--accent-info); }
+.st-server[data-state="failed"] { color: var(--accent-error); }
+
+/* ---------- workspace servers (shell:servers) ---------- */
+.servers-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.servers-table th { text-align: left; font-weight: normal; color: var(--text-2); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); }
+.servers-table td { padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); vertical-align: top; }
+.servers-table td.actions { white-space: nowrap; text-align: right; }
+.servers-table td.actions .btn + .btn { margin-left: var(--space-2); }
+@media (max-width: 719px) {
+	.servers-table thead { display: none; }
+	.servers-table tr { display: grid; grid-template-columns: 1fr auto; padding: var(--space-3) 0; border-bottom: var(--border-width) solid var(--border-0); }
+	.servers-table td { border: none; padding: var(--space-1) var(--space-2); }
+	.servers-table td:nth-child(3), .servers-table td:nth-child(4), .servers-table td:nth-child(5) { display: none; }
+	.servers-table td.actions { grid-column: 1 / -1; text-align: left; }
+}
 
 /* ---------- toasts ---------- */
 .toasts { position: fixed; right: var(--space-5); bottom: calc(var(--statusbar-h) + var(--space-5)); z-index: 50; display: flex; flex-direction: column; gap: var(--space-3); max-width: min(440px, calc(100vw - 2 * var(--space-5))); }

@@ -27,4 +27,6 @@ namespace Launch
 
 	// One request on an open connection.
 	Reply Ask(Net::LocalStream& stream, Core::StringView method, Core::StringView paramsJson);
+	// The same, waiting at most `timeoutMs` for the answer.
+	Reply AskWithin(Net::LocalStream& stream, Core::StringView method, Core::StringView paramsJson, int32 timeoutMs);
 }

@@ -12,6 +12,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase, remove_tree
 from test_chat import TURN_SECONDS, ChatCase, call_step, text_step
 from test_git import LINES, git, make_repo, write
@@ -64,7 +65,7 @@ class GitToolCase(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		for _ in range(100):
 			repos = await self.client.request("git.repos", {"wsId": "w1"})

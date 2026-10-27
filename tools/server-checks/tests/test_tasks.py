@@ -17,6 +17,7 @@ import time
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 PY = sys.executable
@@ -106,7 +107,7 @@ class TaskTests(ServerTestCase):
 
 	async def connect(self):
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		await self.client.sub(["tasks:w1", "diag:w1"])
 		await self.client.next_frame("tasks:w1")
@@ -248,7 +249,7 @@ class TaskTests(ServerTestCase):
 	async def test_a_window_that_comes_back_sees_how_the_last_run_ended(self):
 		snapshot = (await self.client.request("task.list", {"wsId": "w1"}))
 		await self.run_task(task="chain")
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub(["tasks:w1"])
 			data = (await other.next_frame("tasks:w1"))["data"]
@@ -389,7 +390,7 @@ class FolderTaskTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)

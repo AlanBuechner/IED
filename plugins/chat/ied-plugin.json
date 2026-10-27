@@ -12,7 +12,7 @@
 	"description": "AI chats: streaming turns, tool and approval cards, messages to running turns, tasks and context.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js" },
+	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js", "servers": ["master", "workspace"] },
 	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp", "workspace.projects"],
 	"contributes": {
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
@@ -25,7 +25,8 @@
 				{ "name": "git.workingDiff", "version": "1.0.0", "optional": true },
 				{ "name": "editor.colorize", "version": "1", "optional": true },
 				{ "name": "mcp.ensure", "version": "1", "optional": true },
-				{ "name": "mcp.readResource", "version": "1", "optional": true }
+				{ "name": "mcp.readResource", "version": "1", "optional": true },
+				{ "name": "ai.claude.account", "version": "1.0.0" }
 			],
 			"provides": [
 				{
@@ -39,6 +40,13 @@
 					"version": "1.0.0",
 					"kind": "function",
 					"description": "Whether a chat is in a turn: {chatId} -> {state, running}; a deleted chat answers {state: \"deleted\", running: false, deleted: true}, and a page its AI opened closes (docs/27)."
+				},
+				{
+					"name": "ai.claude.account",
+					"version": "1.0.0",
+					"kind": "function",
+					"master": true,
+					"description": "The Claude account the master keeps (docs/04 \"Usage\", docs/01 \"Processes\"): {learned?: [{kind: usage|rateLimit|auth, ...}], refresh?, force?} -> the account's state; what a workspace server's sessions learn goes in, and its copy of the account comes back."
 				}
 			]
 		},

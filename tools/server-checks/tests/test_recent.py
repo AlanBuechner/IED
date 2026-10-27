@@ -8,6 +8,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 
@@ -33,7 +34,7 @@ class RecentTests(ServerTestCase):
 			extra += ["--workspace", folder]
 		self.server = IedServer(data=data, extra=tuple(extra))
 		self.assertTrue(self.server.started, self.server.error)
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await client.sub(["server"])
 		return client
 

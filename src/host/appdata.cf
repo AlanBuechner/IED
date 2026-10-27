@@ -15,13 +15,30 @@ namespace Ied
 		return batch.Overflowed();
 	}
 
+	static bool Touches(const ChangeBatch& batch, const char* file) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.path.View() == file) return true;
+		return batch.Overflowed();
+	}
+
+	bool TouchesTrust(const ChangeBatch& batch) { return Touches(batch, "trust.json"); }
+
+	bool TouchesChoices(const ChangeBatch& batch) { return Touches(batch, "plugins.json"); }
+
 	bool AppDataWatch::Start(Server* server, Core::String& error) {
 		FS::Path folder = FS::Path(server->config.appDataDir.View());
 		FS::MakeDirectories(folder.CStr());
 		return watch.Start(folder, [server](const ChangeBatch& batch) {
 			Threading::LockGuard guard(server->lock);
-			if (TouchesPlugins(batch)) server->plugins->Load();
+			// The master writes plugins.json and trust.json; a workspace server reads them again (docs/01 "Processes").
+			if (TouchesPlugins(batch) || (!server->IsMaster() && TouchesChoices(batch))) server->plugins->Load();
 			else if (TouchesSettings(batch)) server->settings->AppFileChanged();
+			if (!server->IsMaster() && TouchesTrust(batch)) {
+				Core::String problem;
+				server->trust.Reload(problem);
+				if (!problem.IsEmpty()) server->Log(problem.View());
+				server->workspaces->TrustFileChanged();
+			}
 		}, error);
 	}
 }

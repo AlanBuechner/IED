@@ -61,6 +61,7 @@ export class DesktopChrome {
 
 	serverChanged() {
 		this.renderSidebar();
+		this.renderBanners();
 		this.status.render();
 	}
 

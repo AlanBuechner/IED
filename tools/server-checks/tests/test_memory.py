@@ -5,6 +5,7 @@ after one the last few thousand requests' garbage still counted as live (500 KB 
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 MB = 1024 * 1024
@@ -20,7 +21,7 @@ class MemoryTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)

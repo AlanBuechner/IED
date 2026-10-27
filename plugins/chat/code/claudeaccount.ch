@@ -17,6 +17,7 @@ namespace Ai
 	const int32 kUsageProcessMs = 45000;
 	const int64 kClaudeWindowWatchMs = 15 * 60 * 1000;   // how long a sign-in or install window is watched
 	const int64 kClaudeWindowPollNs = 2000000000;
+	const int64 kAccountFreshMs = 2000;       // how old a workspace server's copy of the account may be when a turn starts
 
 	class ClaudeAccount
 	{
@@ -47,6 +48,22 @@ namespace Ai
 		public Core::String SnapshotJson();
 		// Whether ai.models names a claude-code profile.
 		public bool Configured() const;
+		// What the ai.claude.account binding answers and a workspace server's copy takes: every field below, the usage
+		// windows whole. Inside the host lock.
+		public Core::String StateJson();
+		// A workspace server's copy: the master's state taken whole. Inside the host lock.
+		public void TakeState(const Serialization::DomNode& state);
+		// A workspace server's copy: the master's account asked for (ai.claude.account), with what this server's sessions
+		// learned since, and the CLI asked first when `refresh` (`force` as Refresh's). Any thread of the plugin's,
+		// without the host lock.
+		public void Sync(bool refresh, bool force);
+		// The same without a refresh, when the copy was last brought up to date more than kAccountFreshMs ago: before a
+		// turn picks its model (chat.send). Nothing for the master's own. Without the host lock.
+		public void SyncIfStale();
+
+		// A workspace server's copy of the master's account (docs/01 "Processes"): it asks no CLI and registers no
+		// method or topic; what it learns goes to the master.
+		public bool replica;
 
 		public ClaudeUsage usage;            // host lock, as the rest
 		public Core::String cliPath;         // the CLI found; empty: none
@@ -59,6 +76,10 @@ namespace Ai
 		public bool installing;              // an install window is open and watched
 
 		private void Changed();
+		// The master's ai.claude.account: the facts a workspace server learned taken in, a refresh when asked, the state.
+		private IED::Result AccountBinding(const Serialization::DomNode& args);
+		// A workspace server's: a fact (`kind`, JSON) for the master, sent from a thread of the plugin's. Inside the host lock.
+		private void Learned(const char* kind, Core::StringView fact);
 		private Core::Array<Core::String> Command() const;
 		private Core::String UsageMethod(const IED::Request& request);
 		// ai.claude.signIn: the CLI's own subscription login (`auth login --claudeai`) in a window of its own, watched until
@@ -76,5 +97,8 @@ namespace Ai
 		private void Release(bool& waiting);
 
 		private IED::PluginContext* context;
+		private Core::Array<Core::String> learned;   // facts for the master not sent yet (a replica's)
+		private bool sending;
+		private int64 syncedMs;                      // when a replica last took the master's state
 	}
 }

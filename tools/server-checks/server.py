@@ -52,6 +52,21 @@ def read_json_file(path, seconds=3.0):
 			time.sleep(0.05)
 
 
+def folder_key(folder):
+	"""The key of a folder's local state and of its workspace server's files (docs/01 "Storage")."""
+	return hashlib.sha256(trust_key(os.path.realpath(folder)).encode("utf-8")).hexdigest()[:16]
+
+
+def server_state(data, folder):
+	"""The workspace server's own folder for the workspace at `folder` (its plugins' state, its script cache)."""
+	return os.path.join(data, "servers", folder_key(folder))
+
+
+def workspace_log(data, folder):
+	"""The workspace server's log for the workspace at `folder` (docs/12 "Logs")."""
+	return os.path.join(data, "logs", "workspace-%s.log" % folder_key(folder))
+
+
 def workspace_file(data, folder, path):
 	"""The file a folder workspace's relative `path` names, as the server's Workspace::At: ".ied/local/..." in its local
 	state, anything else in the folder."""

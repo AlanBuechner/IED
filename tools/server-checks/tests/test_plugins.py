@@ -9,6 +9,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 
@@ -58,7 +59,7 @@ class PluginTests(ServerTestCase):
 		self.cookie = self.server.sign_in()
 
 	async def call(self, method, params=None):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			return await client.request(method, params or {})
 		finally:
@@ -160,7 +161,7 @@ class PluginTests(ServerTestCase):
 		languages = {"languages": [{"id": "fancy", "extensions": [".FY"]}, {"id": "build", "fileNames": ["Buildfile"]}]}
 		self.add("builtin", "langs", manifest("langs", contributes=languages))
 		self.start()
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			seen = {}
 			for path in ("src/a.fy", "Buildfile", "notes.txt"):

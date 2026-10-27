@@ -107,11 +107,19 @@ function projectRow(shell, project, ws, now) {
 	}, icon("close")) : h("span.sp-slot");
 	const name = ws ? ws.name : project.name;
 	const path = ws ? ws.root : project.path;
-	const when = ws ? (ws.wsId === shell.wsId ? "shown" : "open") : gone ? "not found" : whenOpened(project.opened, now || Date.now());
+	const when = ws ? openState(ws, shell.wsId) : gone ? "not found" : whenOpened(project.opened, now || Date.now());
 	return h("div.sp-row" + (gone ? ".gone" : ""), {
 		role: "button", tabindex: gone ? "-1" : "0", title: path, dataset: { path },
 		on: { click: open, keydown: (event) => event.key === "Enter" && open() },
 	}, iconFrom(kindIcon(ws ? ws.kind : project.kind), "/"), h("div.sp-text", null, h("span.sp-name", null, name), h("span.sp-path", null, path)), h("span.sp-when", null, when), star, forget);
+}
+
+// An open workspace's place on the start page: shown or open, and its server's state while it is not ready
+// (docs/01 "Processes").
+export function openState(ws, shownId) {
+	const base = ws.wsId === shownId ? "shown" : "open";
+	const state = ws.server ? ws.server.state : "ready";
+	return state === "ready" ? base : base + ", server " + state;
 }
 
 export function kindIcon(kind) {

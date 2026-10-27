@@ -13,6 +13,7 @@ import unittest
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 NATIVE = os.path.join(REPO, "build", "bin", "Development-windows-x64", "flashbang")
@@ -68,7 +69,7 @@ class GpuTests(ServerTestCase):
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("settings.set", {"tier": "app", "key": "gpu.nativeFolder", "value": NATIVE.replace("\\", "/")})
 		await self.client.sub(["gpu:w1"])
 		self.snapshot = (await self.client.next_frame("gpu:w1"))["data"]
@@ -134,7 +135,7 @@ class GpuTests(ServerTestCase):
 		texture = reply["result"]
 		self.assertEqual(("R16G16B16A16_FLOAT", "rgba32f", 1280, 720), (texture["format"], texture["encoding"], texture["srcWidth"], texture["srcHeight"]))
 		self.assertTrue(reply["blob"])
-		blob = self.server.request("GET", "/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
+		blob = self.server.request("GET", "/w/w1/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
 		self.assertEqual(200, blob.status)
 		self.assertEqual(texture["width"] * texture["height"] * 16, len(blob.body))
 
@@ -168,7 +169,7 @@ class GpuTests(ServerTestCase):
 		resources = {r["name"]: r["id"] for r in (await self.replay(session, "resources"))["result"]["resources"]}
 		reply = await self.replay(session, "texture", {"id": resources["HDR"], "eid": present[0], "maxSize": 320})
 		self.assertEqual(("R16G16B16A16_SFLOAT", 320, 180), (reply["result"]["format"], reply["result"]["width"], reply["result"]["height"]))
-		blob = self.server.request("GET", "/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
+		blob = self.server.request("GET", "/w/w1/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
 		self.assertEqual(320 * 180 * 16, len(blob.body))
 		cube = [e[0] for e in events if e[2] == "draw"][2]   # Floor, Cube A, Cube B
 		stepped = (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "debug",

@@ -4,7 +4,10 @@
 include "config.ch"
 include "logfile.ch"
 include "relaunch.ch"
+include "servers.ch"
+include "masterlink.ch"
 include "web/session.ch"
+include "web/proxy.ch"
 include "services/presence.ch"
 include "services/workspaces.ch"
 include "services/documents.ch"
@@ -44,6 +47,11 @@ namespace Ied
 		// A simulated restart (testhooks.restart), on a thread of its own holding no lock: a new epoch, rings and opIds
 		// forgotten, durable state kept, and every session told bye and closed.
 		public void Restart();
+		// Which server this is (docs/01 "Processes").
+		public bool IsMaster() const { return config.role == ServerRole::Master; }
+		// The lock is held: a trust choice kept - by the master in trust.json and the audit log, by a workspace server in
+		// memory and through the master; false when it could not be saved.
+		public bool RecordTrust(const FS::Path& root, bool trusted);
 
 		private void LogStart();
 
@@ -83,6 +91,10 @@ namespace Ied
 		public Settings* settings;
 		public AppDataWatch appWatch;
 		public Relaunch relaunch;
+		public WorkspaceServers* servers;   // the master's
+		public Proxy* proxy;                // the master's
+		public MasterLink* master;          // a workspace server's; null in the master
+		public int64 startedMs;
 	}
 
 	// "e-" and 12 random hex digits.

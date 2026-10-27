@@ -103,7 +103,8 @@ class RealTarget(Target):
 		os.makedirs(app)
 		with open(os.path.join(app, "settings.json"), "w", encoding="utf-8") as f:
 			json.dump({"ai.claude.command": [os.path.join(self.root, "no-claude", "claude.exe")]}, f)
-		argv = [self.executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", "ied-e2e-" + secrets.token_hex(6),
+		self.control = "ied-e2e-" + secrets.token_hex(6)
+		argv = [self.executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", self.control,
 			"--test-hooks", "--quiet", "--static", FRONTEND, "--workspace", workspace]
 		self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 		listening = self.process.stdout.readline().strip()
@@ -125,6 +126,31 @@ class RealTarget(Target):
 		self.storage = context.storage_state()
 		page.close()
 		return context
+
+	def control_call(self, method, params=None):
+		"""One request on the master's control pipe (docs/10 "Local control channel"): its result."""
+		request = {"jsonrpc": "2.0", "id": 1, "method": method}
+		if params is not None:
+			request["params"] = params
+		with open("\\\\.\\pipe\\" + self.control, "r+b", buffering=0) as pipe:
+			pipe.write((json.dumps(request) + "\n").encode("utf-8"))
+			data = b""
+			while not data.endswith(b"\n"):
+				chunk = pipe.read(65536)
+				if not chunk:
+					break
+				data += chunk
+		return json.loads(data)["result"]
+
+	def open_folder(self, name):
+		"""A second workspace beside the fixture's, opened as `ied <folder>` opens it (its own workspace server)."""
+		folder = os.path.join(self.root, name)
+		os.makedirs(os.path.join(folder, "src"), exist_ok=True)
+		with open(os.path.join(folder, "README.md"), "w", encoding="utf-8", newline="") as f:
+			f.write("# " + name + chr(10) + chr(10) + "A second workspace, in a server of its own." + chr(10))
+		with open(os.path.join(folder, "src", "tool.py"), "w", encoding="utf-8", newline="") as f:
+			f.write("print('tool')" + chr(10))
+		return self.control_call("open", {"path": folder})["wsId"]
 
 	def queue_model(self, *scripts):
 		"""Scripts for the fake model's next requests (tools/fake-model/README.md)."""

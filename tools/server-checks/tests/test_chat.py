@@ -15,6 +15,7 @@ import urllib.request
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase, local_state, read_json_file
 
 FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
@@ -155,7 +156,7 @@ def make_home(home):
 	shutil.copytree(os.path.join(REPO, "plugins", "chat", "prompts"), os.path.join(plugin, "prompts"))
 	shutil.copy(os.path.join(REPO, "plugins", "chat", "settings.schema.json"), os.path.join(plugin, "settings.schema.json"))
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
-		"runtime": {"kind": "builtin", "entry": "Ai::Activate"}, "permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp", "workspace.projects"],
+		"runtime": {"kind": "builtin", "entry": "Ai::Activate", "servers": ["master", "workspace"]}, "permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp", "workspace.projects"],
 		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}], "bindings": chat_bindings()}}))
 	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "ied-plugin.json"), json.dumps(CODE_PLUGIN))
@@ -217,7 +218,7 @@ class ChatCase(ServerTestCase):
 
 	async def connect(self):
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)
@@ -555,7 +556,7 @@ class ChatTests(ChatCase):
 		results = [m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"]
 		self.assertTrue(changed, "resources.changed published: %s" % results)
 		self.assertEqual([{"ref": "demo:page1", "title": "Demo page", "kind": "page"}], changed[-1]["resources"])
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub([topic])
 			snapshot = (await other.next_frame(topic))["data"]

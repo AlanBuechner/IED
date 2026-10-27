@@ -2,7 +2,7 @@
 // keys, commands, keybindings, menus, views), the shown workspace with its plugins' contributions and its layout, and
 // the chrome for the device class (desktop and tablet, or phone). The server owns all state; this is a view of it.
 
-import { ProtocolClient } from "../ws/client.js";
+import { Router } from "../ws/router.js";
 import { parseOpenFragment } from "./launch.js";
 import { resolveIdentity, deviceClassOf } from "../ws/identity.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -95,7 +95,8 @@ export class Shell {
 		registerShellCommands(this);
 		registerShellViews(this);
 		this.identity = await resolveIdentity(window);
-		this.client = new ProtocolClient({ url: socketUrl(), identity: this.identity, onLeave: (reason) => this.leave(reason) });
+		// The master's socket and the shown workspace's server's (docs/10 "Routing").
+		this.client = new Router({ base: socketBase(), identity: this.identity, onLeave: (reason) => this.leave(reason) });
 		this.client.onState((state) => this.connectionChanged(state));
 		// The width again: the window may have been resized while the identity was read, before anything listened.
 		this.deviceClass = deviceClassOf(window.innerWidth);
@@ -152,7 +153,8 @@ export class Shell {
 	// The server topic: workspaces, devices, notifications
 
 	serverSnapshot(data) {
-		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [] };
+		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [], master: data.master || null };
+		if (this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
 		if (!this.wsId || !this.server.workspaces.some((w) => w.wsId === this.wsId)) this.showWorkspace(this.preferredWorkspace());
 	}
@@ -168,9 +170,34 @@ export class Shell {
 		else if (kind === "notification.dismissed") s.notifications = s.notifications.filter((n) => n.id !== data.id);
 		else if (kind === "workspace.opened") s.workspaces = [...s.workspaces.filter((w) => w.wsId !== data.wsId), data];
 		else if (kind === "workspace.changed") s.workspaces = s.workspaces.map((w) => (w.wsId === data.wsId ? data : w));
+		else if (kind === "workspace.closed") s.workspaces = s.workspaces.filter((w) => w.wsId !== data.wsId);
 		else if (kind === "recent.changed") s.recent = data.recent || [];
+		else if (kind === "routes.changed" && this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
 		if (kind === "workspace.opened" && !this.wsId && !this.startPageAsked) this.showWorkspace(data.wsId);
+		if (kind === "workspace.closed") {
+			if (this.client.forget) this.client.forget(data.wsId);
+			if (data.wsId === this.wsId) this.showWorkspace(this.preferredWorkspace());
+		}
+	}
+
+	// The shown workspace's server as the master's server topic has it: {state, pid, startedMs, restarts, exitCode?,
+	// problem?, log}, or null (docs/10 "Workspaces").
+	workspaceServer(wsId) {
+		const ws = this.server.workspaces.find((w) => w.wsId === (wsId || this.wsId));
+		return ws && ws.server ? ws.server : null;
+	}
+
+	restartWorkspaceServer(wsId) {
+		const target = wsId || this.wsId;
+		if (!target) return null;
+		return this.client.request("ws.restart", { wsId: target }).catch((e) => this.report("The workspace server did not restart: " + e.message, e));
+	}
+
+	closeWorkspace(wsId) {
+		const target = wsId || this.wsId;
+		if (!target) return null;
+		return this.client.request("ws.close", { wsId: target }).catch((e) => this.report("The workspace did not close: " + e.message, e));
 	}
 
 	serverChanged() {
@@ -206,6 +233,7 @@ export class Shell {
 		if (wsId === this.wsId && this.layout) return;
 		this.leaveWorkspace();
 		this.wsId = wsId;
+		if (this.client.show) this.client.show(wsId);
 		try {
 			sessionStorage.setItem(WORKSPACE_KEY, wsId || "");
 		}
@@ -923,6 +951,6 @@ function workspaceInfo() {
 	return info;
 }
 
-function socketUrl() {
-	return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+function socketBase() {
+	return (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
 }

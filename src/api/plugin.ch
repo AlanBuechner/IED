@@ -49,6 +49,8 @@ namespace IED
 		public Core::String Folder() const;
 		// The workspace a project plugin was loaded for; "" for a built-in or app plugin.
 		public Core::String WorkspaceId() const;
+		// Which server the code runs in (docs/26 "Servers"): "master", or "workspace" - a workspace server's.
+		public Core::String Server() const;
 		// A folder for the plugin's machine-local state that belongs to no workspace - caches, the profile of a program
 		// it runs: <the server's data folder>/plugins/<id>, made when asked for. Any thread.
 		public Core::String StateFolder() const;

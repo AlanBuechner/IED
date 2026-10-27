@@ -4,6 +4,7 @@
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { formatBinding } from "./keys.js";
 import { settingsView } from "./settingsview.js";
+import { serversView } from "./servers.js";
 
 const VIEWS = {
 	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: (shell, ctx) => {
@@ -13,6 +14,7 @@ const VIEWS = {
 	plugins: { title: "Plugins", icon: "$(extensions)", view: pluginsView },
 	settings: { title: "Settings", icon: "$(settings-gear)", view: (shell, ctx) => settingsView(shell, ctx) },
 	about: { title: "About IED", icon: "$(info)", view: aboutView },
+	servers: { title: "Workspace Servers", icon: "$(server-process)", view: serversView },
 };
 
 export function registerShellViews(shell) {

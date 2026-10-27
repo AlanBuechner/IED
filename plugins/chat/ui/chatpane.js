@@ -368,10 +368,11 @@ export class ChatPane {
 		return this.mentionSource.rows(query);
 	}
 
-	// A file for the next message, uploaded now (PUT /api/upload, docs/10): its blob id, or null with a toast.
+	// A file for the next message, uploaded now to the workspace's server (PUT /w/<wsId>/api/upload, docs/10), which
+	// keeps it for the chat: its blob id, or null with a toast.
 	async upload(file) {
 		try {
-			const reply = await fetch("/api/upload", { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" }, credentials: "same-origin" });
+			const reply = await fetch("/w/" + encodeURIComponent(this.wsId) + "/api/upload", { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" }, credentials: "same-origin" });
 			const text = await reply.text();
 			if (reply.ok) return JSON.parse(text);
 			this.ied.toast(file.name + " was not uploaded: " + (text.trim() || reply.status), { level: "error" });

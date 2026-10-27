@@ -11,6 +11,7 @@ import time
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 FAKE_TOR = r'''include "api/plugin.ch"
@@ -46,7 +47,7 @@ class WebSearchStartTests(ServerTestCase):
 		tor = os.path.join(self.home, "plugins", "faketor")
 		write(os.path.join(tor, "ied-plugin.json"), {
 			"manifestVersion": 1, "id": "test.faketor", "name": "Fake Tor", "version": "1.0.0", "ied": {"api": "^1"},
-			"runtime": {"kind": "c4", "entry": "FakeTor::Activate"},
+			"runtime": {"kind": "c4", "entry": "FakeTor::Activate", "servers": ["master"]},
 			"contributes": {"bindings": {"provides": [{"name": "tor.proxy", "version": "1", "kind": "function"}]}}})
 		write(os.path.join(tor, "code", "faketor.cf"), FAKE_TOR)
 		self.server = IedServer(extra=("--home", self.home))
@@ -58,7 +59,7 @@ class WebSearchStartTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		self.assertEqual([], self.client.violations)

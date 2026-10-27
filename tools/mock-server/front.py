@@ -19,6 +19,7 @@ CODICON_MAPPING = REPO / "third_party" / "codicons" / "src" / "template" / "mapp
 CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
 WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
 WORKSPACE_FILE = re.compile(r"^/w/([^/]+)/files/(.*)$")
+WORKSPACE_OWN = re.compile(r"^/w/[^/]+(/ws|/api/.*)$")
 # The image types a workspace file is served as (src/web/front.cf IsServedImage): none that is markup.
 SERVED_IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".ico": "image/x-icon"}
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
@@ -75,6 +76,11 @@ class Front:
 			writer.close()
 			return
 		path = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
+		# The real master passes /w/<wsId>/ws and /w/<wsId>/api/... to the workspace's server (docs/10 "Routing"); the
+		# mock is one process that plays both, so it answers them as its own.
+		served = WORKSPACE_OWN.match(path)
+		if served:
+			path = served.group(1)
 		try:
 			self._check_host(headers)
 			if path == "/ws":

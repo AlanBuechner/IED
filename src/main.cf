@@ -47,10 +47,14 @@ static void Announce(const char* what, Core::StringView url) {
 	Platform::WriteOutput(line.View());
 }
 
-// Loads the server's state; false, having said why, when it cannot run.
+// Loads the server's state; false, having said why, when it cannot run. Sign-in is the master's alone (docs/11).
 static bool Prepare(Ied::Server* server, const Net::Address& at) {
 	Core::String error;
 	Threading::LockGuard guard(server->lock);
+	if (!server->IsMaster()) {
+		server->plugins->Load();
+		return true;
+	}
 	if (!server->auth->Load(error)) {
 		Fail(server, error.View());
 		return false;
@@ -65,8 +69,10 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 }
 
 // A relaunched server waits (kRelaunchedWaitMs) for the one before it to let go of the pipe and the port.
+// So does a workspace server, whose pipe the server it replaces (a restart, a relaunch) may hold a moment longer.
 static bool Retrying(const Ied::ServerConfig& config, int64 started) {
-	if (!config.relaunched || clock_now_ns() - started > Ied::kRelaunchedWaitMs * 1000000) return false;
+	const bool waits = config.relaunched || Ied::IsWorkspaceServer(config);
+	if (!waits || clock_now_ns() - started > Ied::kRelaunchedWaitMs * 1000000) return false;
 	Threading::Thread::Sleep(250000000);
 	return true;
 }
@@ -110,11 +116,61 @@ static Core::String ListeningUrl(const Ied::ServerConfig& config, int32 port) {
 	return Core::String(url.View().Substring(0, url.View().ByteLength() - 1));
 }
 
+// A workspace server's secret, out of its environment before anything it starts could inherit it (docs/11
+// "Workspace servers").
+static bool TakeSecret(Ied::ServerConfig& config) {
+	if (!Ied::IsWorkspaceServer(config)) return true;
+	config.secret = Platform::GetEnvironmentVariable("IED_SERVER_SECRET");
+	Platform::RemoveEnvironmentVariable("IED_SERVER_SECRET");
+	return config.secret.ByteLength() == 64;
+}
+
+// A workspace server ends when its master is gone: it runs in the master's job, so this is for a master that left
+// without ending it.
+static void WatchMaster(Ied::Server* server, Ied::Control* control) {
+	if (server->IsMaster()) return;
+	Core::String master = server->config.masterControl;
+	Threading::Thread::Run([master, control]() {
+		for (;;) {
+			Threading::Thread::Sleep(2000000000);
+			if (Launch::ServerGone(master.View())) {
+				control->StopFor(Core::StringView("stopped: its master server is gone"));
+				return;
+			}
+		}
+	}).Detach();
+}
+
+// The master's plugin code registers the methods and topics of its routes (docs/10 "Routing") as it starts: it opens
+// its port once that is done (at most kRoutesSettleMs), so its first client's routes are whole.
+static void AwaitRoutes(Ied::Server* server) {
+	if (!server->IsMaster()) return;
+	const int64 deadline = clock_now_ns() + Ied::kRoutesSettleMs * 1000000;
+	for (;;) {
+		{
+			Threading::LockGuard guard(server->lock);
+			if (!server->code->Starting()) return;
+		}
+		if (clock_now_ns() > deadline) return;
+		Threading::Thread::Sleep(20000000);
+	}
+}
+
+static void AnnounceStart(Ied::Server* server) {
+	if (!server->IsMaster()) return;
+	Announce("LISTENING", ListeningUrl(server->config, server->port).View());
+	Announce("OPEN", Ied::LaunchUrl(server->config, server->port, LaunchToken(server).View(), Core::StringView("")).View());
+}
+
 int32 main(int32 argc, char8** argv) {
 	Ied::ServerConfig config = Ied::DefaultConfig();
 	Core::String error;
 	if (!Ied::ParseArguments(Arguments(argc, argv), config, error)) {
 		Fail(error.View());
+		return 2;
+	}
+	if (!TakeSecret(config)) {
+		Fail(Core::StringView("a workspace server is started by its master, which gives it its secret (docs/11)"));
 		return 2;
 	}
 	Net::Address at = BindAddress(config);
@@ -131,6 +187,7 @@ int32 main(int32 argc, char8** argv) {
 		return Launch::kAnotherServerExit;
 	}
 	if (!Prepare(server, at)) return 2;
+	AwaitRoutes(server);
 	Ied::Front* front = new Ied::Front(server);
 	if (!ListenHttp(http, at, config)) {
 		Fail(server, Core::StringView(http->Error()));
@@ -139,11 +196,15 @@ int32 main(int32 argc, char8** argv) {
 	server->port = http->LocalAddress().port;
 	if (!server->appWatch.Start(server, error)) server->Log((Core::String("app data is not watched: ") + error.View()).View());
 	control->Start();
-	Announce("LISTENING", ListeningUrl(config, server->port).View());
-	Announce("OPEN", Ied::LaunchUrl(config, server->port, LaunchToken(server).View(), Core::StringView("")).View());
+	if (server->IsMaster()) {
+		Threading::LockGuard guard(server->lock);
+		server->servers->Begin();
+	}
+	AnnounceStart(server);
 	server->logFile.Write((Core::String("listening: ") + ListeningUrl(config, server->port).View()).View());
+	WatchMaster(server, control);
 	http->Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
 	server->logFile.Write(Core::StringView("exit: the HTTP server stopped"));
-	StartRelaunched(server);
+	if (server->IsMaster()) StartRelaunched(server);
 	return 0;
 }

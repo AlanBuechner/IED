@@ -17,6 +17,7 @@ import time
 
 from iedclient import Client, RpcFailure
 from frames import FrameChecker
+from routed import RoutedClient
 from server import ControlPipe
 from test_chat import REPO, ChatCase, call_step, text_step, write
 
@@ -257,7 +258,7 @@ class RelaunchTests(SourceCase):
 				await asyncio.sleep(0.25)
 		self.server.launch_url = reply["result"]["url"]
 		self.client.abort()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def test_the_chat_goes_on_after_the_relaunch(self):
 		chat_id, topic = await self.chat(mode="agent", permission="auto")

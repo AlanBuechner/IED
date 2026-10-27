@@ -59,13 +59,15 @@ def sign_in(process):
 
 
 def spawn_server(executable, verbose):
+	"""The real server is a master with its test-hooks scratch workspace w1 in a workspace server of its own (docs/01
+	"Processes"): the suite's protocol is that server's, through the master's /w/w1/ws (docs/10 "Routing")."""
 	process, url = spawn([executable, "--port", "0", "--test-hooks"], verbose)
 	try:
 		os.environ[COOKIE_ENV] = sign_in(process)
 	except Exception:
 		process.kill()
 		raise
-	return process, url
+	return process, url[: -len("/ws")] + "/w/w1/ws"
 
 
 def run_suite(url, pattern, verbosity):

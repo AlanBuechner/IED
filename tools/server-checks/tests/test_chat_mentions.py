@@ -31,6 +31,8 @@ def add_builtin(home, name):
 	os.makedirs(plugin, exist_ok=True)
 	shutil.copy(os.path.join(REPO, "plugins", name, "settings.schema.json"), plugin)
 	runtime = {"kind": "builtin", "entry": manifest["runtime"]["entry"]}
+	if "servers" in manifest["runtime"]:
+		runtime["servers"] = manifest["runtime"]["servers"]
 	kept = {key: manifest["contributes"][key] for key in ("settings", "bindings", "outputSources") if key in manifest["contributes"]}
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": manifest["id"], "name": manifest["name"], "version": manifest["version"],
 		"ied": {"api": "^1"}, "runtime": runtime, "permissions": manifest["permissions"], "contributes": kept}))
@@ -52,7 +54,7 @@ class MentionTests(ChatCase):
 		return super().start_server()
 
 	def upload(self, body, content_type):
-		reply = self.server.request("PUT", "/api/upload", body=body, headers={"Cookie": self.cookie, "Content-Type": content_type})
+		reply = self.server.request("PUT", "/w/w1/api/upload", body=body, headers={"Cookie": self.cookie, "Content-Type": content_type})
 		self.assertEqual(201, reply.status, reply.text())
 		return json.loads(reply.body)["blobId"]
 

@@ -1,5 +1,6 @@
-// The ied.chat plugin's entry (docs/26 "Built-ins on the API"): the chats of every workspace it is loaded for, their
-// topics and the chat.* methods.
+// The ied.chat plugin's entry (docs/26 "Built-ins on the API"): in a workspace server the chats of every workspace it
+// is loaded for, their topics and the chat.* methods; in the master the Claude account alone - the aiusage topic,
+// ai.usage, ai.claude.* and the ai.claude.account binding the workspace servers' copies ask (docs/01 "Processes").
 include "service.ch"
 include "resources.ch"
 
@@ -7,6 +8,17 @@ namespace Ai
 {
 	void Activate(IED::PluginContext& context)
 	{
+		if (context.Server() == "master") {
+			ClaudeAccount* account = new ClaudeAccount(&context);
+			AccountKeeper* keeper = new AccountKeeper();
+			IED::PluginContext* plugin = &context;
+			context.StartThread([plugin, account, keeper]() { KeepAccount(plugin, account, keeper); });
+			context.OnDeactivate([plugin, keeper]() {
+				IED::HostLock guard(*plugin);
+				keeper->stopping = true;
+			});
+			return;
+		}
 		Chats* chats = new Chats(&context);
 		ProvideChatResources(context, chats);
 		context.OnWorkspace([chats](const IED::Workspace& ws) { chats->WorkspaceOpened(ws); });

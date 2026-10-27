@@ -110,7 +110,10 @@ namespace WebSearch
 		});
 	}
 
+	// SearXNG is the app's, run by the master (docs/01 "Processes"); a workspace server's copy only runs the web_search
+	// tool, whose websearch.search the master answers.
 	void Activate(IED::PluginContext& context) {
+		if (context.Server() != "master") return;
 		SearxService* searx = new SearxService(&context);
 		searx->Start();
 		RegisterMethods(context, searx);

@@ -112,6 +112,7 @@ namespace Ai
 
 	static ToolOutcome UsageRun(Chats* chats, const ToolInvocation& call) {
 		if (call.args.Member("refresh").AsBool()) chats->claude->Refresh(false);
+		else chats->claude->SyncIfStale();
 		Core::Array<ModelProfile*> models = ModelsOf(call);
 		Core::String groups = call.context->Setting(Core::StringView("ai.groups"), WsId(call.ws));
 		IED::HostLock guard(*call.context);

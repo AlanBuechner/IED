@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 import itp  # noqa: E402
 from frames import FrameChecker  # noqa: E402
 from iedclient import Client, RpcFailure  # noqa: E402
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase, local_state, remove_tree, workspace_file  # noqa: E402
 
 PY = sys.executable
@@ -260,7 +261,7 @@ class ProfilerServer(ServerTestCase):
 		await self.connect()
 
 	async def connect(self):
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await require_profiler(self, self.client)
 		self.library = await self.subscribed("profs:w1")
 
@@ -708,7 +709,7 @@ class GoTraceImportTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await require_profiler(self, self.client)
 
 	async def asyncTearDown(self):
@@ -773,7 +774,7 @@ class ProfileTaskTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await require_profiler(self, self.client)
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 

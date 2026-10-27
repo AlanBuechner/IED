@@ -6,6 +6,7 @@ import sys
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import IedServer, ServerTestCase
 
 PY = sys.executable
@@ -23,7 +24,7 @@ class TerminalTests(ServerTestCase):
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
 		self.cookie = self.server.sign_in()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		self.ws = (await self.client.request("ws.list"))["workspaces"][0]["wsId"]
 		await self.client.sub(["terms:" + self.ws])
 		await self.client.next_frame("terms:" + self.ws)
@@ -57,7 +58,7 @@ class TerminalTests(ServerTestCase):
 
 	async def test_only_the_lease_holder_types(self):
 		term = await self.client.request("term.create", {"wsId": self.ws, "argv": [PY, "-I", "-c", ECHO]})
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			topic = "term:" + term["termId"]
 			await other.sub([topic])
@@ -86,7 +87,7 @@ class TerminalTests(ServerTestCase):
 		await self.output_until(self.client, topic, "ied-marker-%s" % term["termId"], timeout=30)
 		renamed = await self.client.request("term.rename", {"termId": term["termId"], "title": "build shell"})
 		self.assertEqual("build shell", renamed["title"])
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub([topic])
 			snapshot = (await other.next_frame(topic))["data"]

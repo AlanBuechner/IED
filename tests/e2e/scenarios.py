@@ -3,6 +3,7 @@ screenshots the states that matter. Both servers run every scenario unless it na
 
 import json
 import os
+import signal
 import struct
 import time
 import zlib
@@ -410,13 +411,15 @@ def resume_after_server_restart(run):
 	page.click(".tree-row:has-text('README.md')")
 	page.wait_for_selector(".tab:has-text('README.md')")
 	time.sleep(0.6)
-	epoch = run.request("server.info")["sessionEpoch"]
+	# The shown workspace's server restarts (testhooks.restart goes to it, docs/10 "Routing"): its socket's epoch moves.
+	shown_epoch = "ied_shell.client.workspaceClient(ied_shell.wsId).epoch"
+	epoch = page.evaluate(shown_epoch)
 	page.evaluate("ied_shell.client.request('testhooks.restart', {}).catch(() => {})")
 	page.wait_for_function("ied_shell.client.state !== 'live'", timeout=10000)
 	run.shot("reconnecting")
 	page.wait_for_function("ied_shell.client.state === 'live'", timeout=20000)
 	page.wait_for_selector(".banner[data-banner='connection']", state="detached")
-	check(run.request("server.info")["sessionEpoch"] != epoch, "a new epoch")
+	check(page.evaluate(shown_epoch) != epoch, "a new epoch")
 	check(page.is_visible(".tab:has-text('README.md')"), "the tab is still there")
 	run.wait_text(".monaco-editor .view-lines", "workspace" if run.target.kind == "real" else "fixture", timeout=30000)
 	run.shot("resumed")
@@ -2919,3 +2922,47 @@ def solution_explorer_manages_projects(run):
 	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution '%s' (1 project)\")" % name)
 	check(not exists(run, "libs/packer/pack.c"), "Delete trashes the folder")
 	run.shot("deleted")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def two_workspace_servers(run):
+	"""Two workspaces, each in a server of its own (docs/01 "Processes"): the switcher lists both and the status bar names
+	the shown one's server; killing that server shows the restarting banner while the master's socket stays up, and the
+	page comes back by itself on the new server; View > Workspace Servers lists the master and both."""
+	page = run.open()
+	second = run.target.open_folder("tools-" + run.viewport)
+	page.wait_for_function("(id) => ied_shell.server.workspaces.some(w => w.wsId === id && w.server && w.server.state === 'ready')", arg=second, timeout=60000)
+	if not run.phone:
+		check(page.is_visible(".statusbar .st-server[data-state='ready']"), "the status bar names the shown workspace's server")
+		page.click(".sb-ws")
+		page.wait_for_selector(".popup.menu .menu-item:has-text('tools-desktop')")
+		run.shot("switcher")
+		page.keyboard.press("Escape")
+	page.evaluate("(id) => ied_shell.showWorkspace(id)", second)
+	page.wait_for_function("(id) => ied_shell.workspace.wsId === id && ied_shell.layout && ied_shell.client.state === 'live'", arg=second, timeout=30000)
+	run.show_activity("ied.editor")
+	if not run.phone:
+		page.wait_for_selector(".tree-row:has-text('README.md')", timeout=20000)
+	first_pid = page.evaluate("ied_shell.workspaceServer('w1').pid")
+	shown = page.evaluate("ied_shell.workspaceServer()")
+	check(shown["pid"] != first_pid, "the second workspace runs in another process")
+	run.shot("second-workspace")
+	os.kill(shown["pid"], signal.SIGTERM)
+	page.wait_for_selector(".banner[data-banner='server']", timeout=20000)
+	check(page.evaluate("ied_shell.client.master.state") == "live", "the master's socket stays up")
+	check(not page.is_visible(".banner[data-banner='connection']"), "no 'connection lost' banner")
+	run.shot("restarting")
+	page.wait_for_selector(".banner[data-banner='server']", state="detached", timeout=60000)
+	page.wait_for_function("ied_shell.client.state === 'live'", timeout=30000)
+	back = page.evaluate("ied_shell.workspaceServer()")
+	check(back["restarts"] == 1 and back["pid"] != shown["pid"], "started again: %r" % back)
+	check(page.evaluate("ied_shell.workspaceServer('w1').pid") == first_pid, "the first workspace's server never noticed")
+	if not run.phone:
+		page.wait_for_selector(".tree-row:has-text('README.md')", timeout=20000)
+	run.shot("back")
+	page.evaluate("ied_shell.commands.run('shell.workspaceServers')")
+	page.wait_for_selector(".servers-table tr[data-ws='%s']" % second, timeout=20000)
+	check(page.eval_on_selector_all(".servers-table tbody tr", "rows => rows.length") >= 2, "both workspaces' servers are listed")
+	run.shot("servers")
+	run.request("ws.close", {"wsId": second})
+	page.wait_for_function("(id) => !ied_shell.server.workspaces.some(w => w.wsId === id)", arg=second, timeout=30000)

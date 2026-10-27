@@ -25,7 +25,11 @@ namespace IED
 			return Refusal(((Core::String("the plugin's manifest does not consume '") + name) + "' (bindings.consumes)").View());
 		Ied::Workspace* ws = caller->IsProject() ? server->workspaces->Find(caller->wsId.View()) : nullptr;
 		Ied::CodeInstance* provider = server->code->Provider(ws, name);
-		if (!provider) return Refusal(((Core::String("no plugin provides the server binding '") + name) + "'").View());
-		return Ied::InvokeBinding(server, provider, name, args, Ied::NeverStopped());
+		if (provider) return Ied::InvokeBinding(server, provider, name, args, Ied::NeverStopped());
+		if (!server->master || !Ied::ProvidedAnywhere(server, ws, name)) return Refusal(((Core::String("no plugin provides the server binding '") + name) + "'").View());
+		// A binding of the plugin's own, answered by its code in the master (developer mode's install build): as long as
+		// it takes, as a call into its own binding would here.
+		const int64 wait = Ied::ProvidesBinding(plugin, name) ? Ied::kOwnBindingForwardMs : IED::kBindingWaitMs;
+		return Ied::ForwardBinding(server, name, args, wait);
 	}
 }

@@ -123,7 +123,43 @@ namespace Ied
 		Http::CompressResponse(request, response, Compression::kFastestLevel);
 	}
 
+	// A workspace server's: the secret the master gave it (the header, or on a WebSocket upgrade the query) - anything
+	// else is refused before it is read further (docs/11 "Workspace servers").
+	bool Front::FromMaster(const Http::Request& request) const {
+		const Core::String* header = request.headers.Find(Core::StringView("X-IED-Secret"));
+		Core::StringView sent = header ? header->View() : QueryValue(request.query.View(), Core::StringView("secret"));
+		return SameSecret(sent, server->config.secret.View());
+	}
+
+	static Core::String SentDevice(const Http::Request& request) {
+		const Core::String* header = request.headers.Find(Core::StringView("X-IED-Device"));
+		return Core::String(header ? header->View() : QueryValue(request.query.View(), Core::StringView("device")));
+	}
+
+	// A workspace server answers only its master: its sockets, uploads, blobs, its workspaces' files and plugin files.
+	void Front::RespondToMaster(const Http::Request& request, Http::Response& response) {
+		if (!HostAllowed(request) || !FromMaster(request)) {
+			AnswerJson(response, 403, Core::StringView("{\"error\":\"forbidden\",\"message\":\"a workspace server answers only its IED master server (docs/11)\"}"));
+			return;
+		}
+		Core::StringView path = request.path.View();
+		Core::StringView wsId;
+		Core::StringView rest;
+		if (path == "/ws") Attach(request, response, SentDevice(request).View());
+		else if (path == "/healthz") Health(response);
+		else if (path == "/api/upload") Upload(request, response);
+		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
+		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
+		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, rest)) PluginFile(wsId, rest, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, rest)) WorkspaceImage(wsId, rest, response);
+		else Answer(response, 404, Core::StringView("not found"));
+	}
+
 	void Front::Respond(const Http::Request& request, Http::Response& response) {
+		if (!server->IsMaster()) {
+			RespondToMaster(request, response);
+			return;
+		}
 		if (!HostAllowed(request)) {
 			Answer(response, 403, Core::StringView("that Host is not allowed (DNS rebinding protection; see --allow-host)"));
 			return;
@@ -163,7 +199,12 @@ namespace Ied
 	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
 		Core::StringView wsId;
 		Core::StringView pluginPath;
-		if (path == "/ws") WebSocket(request, response, device);
+		if (WorkspaceRoute(path, wsId, pluginPath)) {
+			const bool upgrade = pluginPath == "/ws" || request.method.View() != "GET";
+			if (upgrade && !OriginAllowed(request)) Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			else server->proxy->Forward(request, response, wsId, device);
+		}
+		else if (path == "/ws") WebSocket(request, response, device);
 		else if (path == "/api/upload") Upload(request, response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
@@ -194,8 +235,12 @@ namespace Ied
 			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
 			return;
 		}
+		Attach(request, response, device->id.View());
+	}
+
+	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device) {
 		Server* shared = server;
-		Core::String deviceId = device->id;
+		Core::String deviceId = Core::String(device);
 		Http::AcceptWebSocket(request, response, [shared, deviceId](Http::WebSocket& socket) {
 			Session* session = new Session(shared, &socket, Core::StringView("client"));
 			session->authDevice = deviceId;
@@ -221,7 +266,7 @@ namespace Ied
 			Answer(response, 405, Core::StringView("use PUT"));
 			return;
 		}
-		if (!OriginAllowed(request)) {
+		if (server->IsMaster() && !OriginAllowed(request)) {
 			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
 			return;
 		}

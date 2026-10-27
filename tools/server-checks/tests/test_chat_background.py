@@ -8,6 +8,7 @@ import sys
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from test_chat import TURN_SECONDS, ChatCase, call_step, text_step
 
 SLEEP = sys.executable + ' -c "import time; time.sleep(1.5); print(\'slept well\')"'
@@ -47,7 +48,7 @@ class BackgroundTests(ChatCase):
 
 	async def snapshot(self, topic):
 		"""The chat's snapshot as a client that subscribes now gets it."""
-		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		other = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
 			await other.sub([topic])
 			return (await other.next_frame(topic))["data"]

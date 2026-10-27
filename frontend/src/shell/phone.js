@@ -67,6 +67,7 @@ export class PhoneChrome {
 
 	serverChanged() {
 		this.renderHead(this.paneRef());
+		this.renderBanners();
 	}
 
 	workspaceChanged() {

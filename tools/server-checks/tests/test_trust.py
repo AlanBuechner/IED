@@ -8,6 +8,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import IedServer, ServerTestCase, read_lines
 
 
@@ -26,7 +27,7 @@ class TrustTests(ServerTestCase):
 			self.server.stop(remove_data=False)
 		self.server = IedServer(data=data, extra=("--workspace", self.folder))
 		self.assertTrue(self.server.started, self.server.error)
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		workspaces = (await client.request("ws.list"))["workspaces"]
 		return client, workspaces[0]
 

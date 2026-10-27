@@ -148,20 +148,26 @@ namespace Developer
 		if (!problem.IsEmpty()) context.Log(problem.View());
 	}
 
+	// The install build is the app's, one at a time, in the master; a workspace server's copy gives its chats the source
+	// (ai.roots), the section and the tools, whose ied_relaunch asks the master's build (docs/28 "Which server").
 	void Activate(IED::PluginContext& context) {
 		Core::String source = SourceFolder();
-		Builds* builds = new Builds(&context, source);
-		context.TopicFrom(Core::StringView("ied.developer/state"), [builds]() -> Core::String { return builds->SnapshotJson(); });
-		ProvideBuildMethods(context, builds, source.View());
+		if (context.Server() == "master") {
+			Builds* builds = new Builds(&context, source);
+			context.TopicFrom(Core::StringView("ied.developer/state"), [builds]() -> Core::String { return builds->SnapshotJson(); });
+			ProvideBuildMethods(context, builds, source.View());
+			if (source.IsEmpty()) return;
+			context.StartThread([builds]() { builds->Refresh(); });
+			context.Provide(Core::StringView("ied.developer.install"), [builds](const Serialization::DomNode& args) -> IED::Result { return Install(builds); });
+			return;
+		}
 		if (source.IsEmpty()) return;
-		context.StartThread([builds]() { builds->Refresh(); });
 		Core::String problem;
 		if (!context.Contribute(Core::StringView("systemMessageSections"), Core::StringView(""), SectionEntries(source.View()).View(), problem)) context.Log(problem.View());
 		if (!context.Contribute(Core::StringView("toolCalls"), Core::StringView(""), ToolEntries().View(), problem)) context.Log(problem.View());
 		if (!context.Contribute(Core::StringView("aiToolFailureNotes"), Core::StringView(""), FailureNoteEntries().View(), problem)) context.Log(problem.View());
 		IED::PluginContext* at = &context;
 		context.Provide(Core::StringView("ai.roots"), [at, source](const Serialization::DomNode& args) -> IED::Result { return Roots(at, source.View(), args); });
-		context.Provide(Core::StringView("ied.developer.install"), [builds](const Serialization::DomNode& args) -> IED::Result { return Install(builds); });
 	}
 
 	// --- Tools ----------------------------------------------------------------------------------------------------

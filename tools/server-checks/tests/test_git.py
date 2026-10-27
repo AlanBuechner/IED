@@ -12,6 +12,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase, remove_tree
 
 LINES = "".join("line %d\n" % n for n in range(1, 31))
@@ -67,7 +68,7 @@ class GitTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		self.repo_id = await self.first_repo()
 		self.topic = "git:" + self.repo_id
@@ -345,7 +346,7 @@ class NestedRepoTests(ServerTestCase):
 	async def repos(self, folder):
 		self.server = IedServer(extra=("--home", self.home, "--workspace", folder))
 		self.assertTrue(self.server.started, self.server.error)
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		for _ in range(100):
 			listed = await client.request("git.repos", {"wsId": "w1"})

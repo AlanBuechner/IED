@@ -9,7 +9,7 @@
 	"description": "Runs Tor on demand: a SOCKS proxy for other plugins' traffic (web search), with new circuits when sites block an exit.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "entry": "Tor::Activate" },
+	"runtime": { "kind": "builtin", "entry": "Tor::Activate", "servers": ["master"] },
 	"permissions": ["process.spawn", "net.egress"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Web/Tor" },

@@ -89,7 +89,7 @@ namespace Ied
 		key.AppendInt(info.size);
 		key.Append("-");
 		key.AppendInt(info.modifiedNs);
-		FS::Path stage = FS::Path(server->config.dataDir.View()) / "lsp-stage" / profile->id.View() / key.View();
+		FS::Path stage = FS::Path(server->config.stateDir.View()) / "lsp-stage" / profile->id.View() / key.View();
 		FS::Path staged = stage / program.FileName();
 		if (!FS::FileExists(staged.CStr()) && FS::CopyTree(program.Parent().CStr(), stage.CStr()) < 0) {
 			error = Core::String("cannot stage ") + program.Parent().View() + " in " + stage.View();

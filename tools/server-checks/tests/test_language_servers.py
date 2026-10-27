@@ -12,6 +12,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,7 +82,7 @@ class LanguageServerTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.sub(["diag:w1", "lsp:w1", "out:w1:ied"])
 		self.diag = (await self.client.next_frame("diag:w1"))["data"]
 		self.status = (await self.client.next_frame("lsp:w1"))["data"]
@@ -302,7 +303,7 @@ class HeldPluginCodeTests(ServerTestCase):
 		shutil.rmtree(self.root, ignore_errors=True)
 
 	async def test_a_loaded_plugin_once_and_the_workspace_folder_as_a_plugin(self):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await client.sub(["diag:w1"])
 		await client.next_frame("diag:w1")
 		await client.request("doc.open", {"wsId": "w1", "path": "a.fk"})
@@ -348,7 +349,7 @@ class ProjectScopeTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 		await self.client.sub(["diag:w1"])
 		await self.client.next_frame("diag:w1")
 

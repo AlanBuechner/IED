@@ -7,6 +7,7 @@ import os
 import ws
 from frames import FrameChecker
 from iedclient import Client
+from routed import RoutedClient
 from server import IedServer, ServerTestCase, read_lines
 
 
@@ -19,7 +20,7 @@ class TokenTests(ServerTestCase):
 		self.server.stop()
 
 	async def mint(self, cookie, ttl_ms):
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
 		try:
 			return (await client.request("testhooks.mintToken", {"ttlMs": ttl_ms}))["token"]
 		finally:
@@ -60,7 +61,7 @@ class TokenTests(ServerTestCase):
 
 	async def test_the_cookie_opens_a_protocol_session(self):
 		cookie = self.server.sign_in()
-		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
 		self.assertIsNotNone(client.welcome)
 		devices = (await client.request("auth.devices"))["devices"]
 		self.assertEqual(1, len(devices))
