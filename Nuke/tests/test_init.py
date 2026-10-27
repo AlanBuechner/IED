@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import unittest
 
 from support import StubStore, WorkspaceTest, make_install, read, write_files
@@ -144,6 +145,27 @@ class IedSolutionTests(WorkspaceTest):
 		self.assertNotIn("output", lines["buildSystem"], "a library runs nothing")
 		self.assertEqual([{"id": "c4", "path": "toolchains/c4/1.0.0/ied"}, {"id": "mygame.dialogue", "path": "tools/dialogue"}], self.solution()["localPlugins"],
 			"the pinned package's plugin; IED's own rust plugin needs no pin")
+
+	def test_every_command_keeps_the_files_in_step(self):
+		"""A pull brings a project (or a solution written elsewhere): the next command writes its file, no init needed."""
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n", "Engine/nuke.toml": "[project]\nkind = \"module\"\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		self.files({"Tools/nuke.toml": "[project]\nkind = \"custom\"\n"})
+		shutil.rmtree(self.path(".ied", "local"))   # a fresh clone: no record of what this machine wrote
+		code, out = self.nuke("clean")
+		self.assertEqual(code, 0, out)
+		self.assertTrue(os.path.isfile(self.path("build", "ied", "Tools.iedproj")), out)
+		self.assertIn("IED solution refreshed", out)
+		code, out = self.nuke("clean")
+		self.assertNotIn("IED solution refreshed", out, "nothing changed, nothing said")
+
+	def test_a_command_writes_no_solution_nuke_does_not_make(self):
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.iedsln": "{\"mine\": true}"})
+		code, out = self.nuke("clean")
+		self.assertEqual(code, 0, out)
+		self.assertEqual("{\"mine\": true}", read(self.path("Game.iedsln")))
+		self.assertFalse(os.path.exists(self.path("build", "ied")), "no project files for a solution Nuke does not make")
 
 	def test_a_solution_it_did_not_write_is_left_alone(self):
 		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.iedsln": "{\"mine\": true}"})

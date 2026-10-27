@@ -338,7 +338,9 @@ project without a language), and pins the toolchain's IED plugin
 store is inside the workspace, as it is by default. The IED plugins the workspace develops (`ied-plugins`: folders or
 globs of folders with an `ied-plugin.json`) get project files of kind `plugin` - no build system: IED loads them - named
 by their ids (`<id> plugin` where a project has that name) in the solution's "IED Plugins" folder; this repository
-lists `plugins/*`. Run it again after adding or removing projects: files it wrote
+lists `plugins/*`. Every later Nuke command on the workspace (`nuke build`, `nuke test`, ...) refreshes them when
+the solution's `generator` is `nuke init --ied` and the toolchain resolves - a pull that adds a project needs no
+`nuke init --ied` - and says so only when a file changed: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
 is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
 names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. The projects' `group`s

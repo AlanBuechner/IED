@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from . import NUKE_VERSION, configs, fsutil, graph, toolchains, workspace as workspaces
+from . import NUKE_VERSION, configs, fsutil, graph, ied_files, toolchains, workspace as workspaces
 from .commands import command_table
 from .engine import execute, validate_phases
 from .errors import NukeError, StepFailed
@@ -220,6 +220,7 @@ def run_commands(workspace, table, inv, log, store):
 	selection = [p.name for p in workspace.projects.values()] if inv.all else [workspace.project(n).name for n in inv.projects]
 	commands = inv.commands or ["build"]
 	log.note(f"workspace {workspace.name}, {configuration.name} {session.arch} {session.system}")
+	ied_files.refresh(workspace, store, log)
 	try:
 		for name in commands:
 			code = execute(session, table, name, selection)

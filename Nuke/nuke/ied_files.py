@@ -259,6 +259,50 @@ class Generated:
 		fsutil.write_if_changed(self.path, json.dumps(self.digests, indent=2, sort_keys=True) + "\n")
 
 
+class _Quiet:
+	"""A log whose warnings are details: a refresh repeats on every command, so what `nuke init --ied` warns about
+	once shows only with -v."""
+
+	def __init__(self, log):
+		self.log = log
+
+	def note(self, text):
+		self.log.detail(text)
+
+	def warn(self, text):
+		self.log.detail(f"IED solution: {text}")
+
+	def detail(self, text):
+		self.log.detail(text)
+
+
+def generated_by_nuke(workspace):
+	"""Whether the workspace's IED solution says `nuke init --ied` makes it (its `generator`), wherever it was written."""
+	try:
+		body = json.loads(fsutil.read_text(solution_path(workspace)) or "null")
+	except ValueError:
+		return False
+	return isinstance(body, dict) and (body.get("generator") or {}).get("run") == ["nuke", "init", "--ied"]
+
+
+def refresh(workspace, store, log):
+	"""The IED files made again on every command, as a build system keeps the IDE files it generates in step with its
+	manifests: a pull that adds a project or an IED plugin needs no `nuke init --ied` before IED shows it. Only for a
+	workspace whose solution Nuke makes (and with the bridge on, `ide`), and only with its toolchain found - without it
+	the solution would lose its C4 plugin. Returns the number of files written or removed."""
+	if not workspace.spec.ide or not generated_by_nuke(workspace):
+		return 0
+	try:
+		toolchain = store.resolve(workspace.spec.toolchain, workspace.dir)
+	except NukeError as error:
+		log.detail(f"IED solution not refreshed: {error}")
+		return 0
+	changed = generate(workspace, toolchain, _Quiet(log))
+	if changed:
+		log.note(f"IED solution refreshed: {changed} file(s) written or removed to match the manifests")
+	return changed
+
+
 def generate(workspace, toolchain, log):
 	"""Writes the solution and project files; returns the number of files written or removed."""
 	generated = Generated(workspace)
