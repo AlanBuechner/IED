@@ -419,7 +419,7 @@ namespace Ied
 			if (!instance) continue;
 			Core::Array<Serialization::DomNode> computed;
 			server->code->ComputedFor(instance, ws, point, computed);
-			for (const Serialization::DomNode& entry : computed) entries.Push(Contribution(plugin, entry));
+			for (const Serialization::DomNode& entry : computed) entries.Push(Contribution(plugin, entry, true));
 		}
 		return entries;
 	}

@@ -158,8 +158,8 @@ The plugin lives in the IED repository as `plugins/c4/` (IED docs/26 "The c4 plu
 copies:
 
 - **IED's built-in** (`<IED>/plugins/c4`): loaded everywhere, so a C4 folder opened without a Nuke solution has C4
-  support. Its code (`plugins/c4/code`, compiled into IED's server) gives each workspace the language server and the
-  debug adapter of the toolchain it uses: the app's `c4.toolchain` setting (a toolchain folder or an installed
+  support. Its code (`plugins/c4/code`, compiled into IED's server) gives each workspace the language server, the
+  debug adapter and the reference docs (`ied/docs`) of the toolchain it uses: the app's `c4.toolchain` setting (a toolchain folder or an installed
   version), else the toolchain the workspace's `nuke.toml` pins, else the newest one installed - in the store of the
   Nuke IED runs (`NUKE_TOOLCHAINS`, else the `toolchains/` folder of the checkout the `nuke.command` setting or PATH
   names), as Nuke reads those names ([02-nuke.md](02-nuke.md)). The server log says which toolchain a workspace got,
@@ -196,8 +196,8 @@ Both contribute:
 - **Settings**: `c4.languageServer` (on) turns C4LSP off for a workspace; `c4.toolchain` (app tier only: a
   repository cannot point IED at a program of its own) names the built-in's toolchain.
 
-C4LSP and C4DAP run only in a trusted workspace. The reference docs (`ied/docs`, the AI's `docs_search` and
-`docs_read`) come with a toolchain's copy.
+C4LSP and C4DAP run only in a trusted workspace. Either copy gives the AI the toolchain's reference docs
+(`ied/docs`, its `docs_search` and `docs_read`).
 
 The server and the adapter are tested here without an editor (C4Testing `Lsp.*` and `Dap.*`, ToolsTest); IED's
 server checks drive its language server pool with a fake server.

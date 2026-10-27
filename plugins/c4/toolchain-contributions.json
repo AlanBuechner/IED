@@ -1,8 +1,8 @@
 // What the c4 plugin contributes from a C4 toolchain (docs/26 "The c4 plugin and its toolchains"), in the manifest's
 // shapes, ${c4.toolchain} standing for the toolchain's folder. The built-in copy's code (code/plugin.cf) gives the
-// language server and the debug adapter of the toolchain a workspace uses; C4/MakeToolchain.py writes all three points
-// into a toolchain's own copy of the manifest, with ${pluginDir}/.. for the folder, the reference docs being that
-// copy's ied/docs.
+// language server, the debug adapter and the reference docs of the toolchain a workspace uses (the docs folder: the
+// toolchain's ied/<folder>); C4/MakeToolchain.py writes all three points into a toolchain's own copy of the manifest,
+// with ${pluginDir}/.. for the toolchain, the docs folder being that copy's own.
 {
 	"lspProfiles": [
 		{

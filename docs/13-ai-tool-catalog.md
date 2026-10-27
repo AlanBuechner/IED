@@ -215,7 +215,7 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | **Built** (2026-10-25, `plugins/chat/code/history.cf`, deferred tools of group `chats`): what this chat said in the turns compression left out of its requests. The tool the "earlier parts were left out" note points at - without it those turns are out of reach (F-AIR-54). Search gives the newest place each word was said, read gives a turn's messages as the model was sent them (at most 4 at a time). |
 | T-KNW-5 | `scratchpad(action: read|write|append|replace_section, section?, text?)` | meta | Chat scratchpad (F-CHT-71). |
 | T-KNW-6 | `memory_read()` / `memory_add(fact)` | meta | Project memory (P2, F-AIR-66). |
-| T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API) searched by words - the best Markdown sections with their path, line range and the lines that match. |
+| T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API; C4's are those of the workspace's toolchain) searched by words - the best Markdown sections with their path, line range and the lines that match. |
 | T-KNW-8 | `docs_read(path, heading? or line?)` | read | **Built**: a section of those docs by its path (`c4/library/bedrock.md`) and heading or line, as `docs_search` names them; a path alone lists the file's headings; it names the file in its plugin's folder (`plugins:/<id>/...`, read-only). |
 
 ### `agents` (built, 2026-10-23; offered while the chat may run agents)

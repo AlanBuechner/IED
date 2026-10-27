@@ -1,0 +1,27 @@
+// contributed: where the folders and files the plugins' entries name are.
+
+include "contributed.ch"
+
+static IED::Contribution Entry(bool computed) {
+	IED::Contribution given;
+	given.pluginId = Core::String("demo");
+	given.folder = Core::String("C:/ied/plugins/demo");
+	given.computed = computed;
+	return given;
+}
+
+[test("server.ai.contributed")]
+class ContributedTests {
+	[test("entry_paths")]
+	public static void TestEntryPaths() {
+		IED::Contribution manifest = Entry(false);
+		assert_true(Ai::EntryPath(manifest, Core::StringView("docs")).View() == "C:/ied/plugins/demo/docs", "a manifest's folder is inside its plugin");
+		assert_true(Ai::EntryPath(manifest, Core::StringView("C:/elsewhere/docs")).IsEmpty(), "never an absolute one");
+		assert_true(Ai::EntryPath(manifest, Core::StringView("skills/../../other")).IsEmpty(), "nor one that leaves the plugin");
+		assert_true(Ai::EntryPath(manifest, Core::StringView("")).IsEmpty(), "nor none");
+		IED::Contribution computed = Entry(true);
+		assert_true(Ai::EntryPath(computed, Core::StringView("C:/tc/c4/0.2.0/ied/docs")).View() == "C:/tc/c4/0.2.0/ied/docs", "code names any folder: a toolchain's docs");
+		assert_true(Ai::EntryPath(computed, Core::StringView("docs")).View() == "C:/ied/plugins/demo/docs", "a relative one is still the plugin's");
+		assert_true(Ai::EntryPath(computed, Core::StringView("../other")).IsEmpty(), "and still may not leave it");
+	}
+}

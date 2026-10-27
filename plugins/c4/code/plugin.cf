@@ -1,7 +1,8 @@
 // The built-in c4 plugin's entry (docs/26 "The c4 plugin and its toolchains"): for each workspace it is loaded for, the
-// language server and the debug adapter of the C4 toolchain that workspace uses (toolchain.ch), given as the plugin's
-// computed contributions from toolchain-contributions.json, and given again when the workspace's nuke.toml or a
-// setting changes. A toolchain's own copy of the plugin has no code: C4/MakeToolchain.py writes them into its manifest.
+// language server, the debug adapter and the reference docs of the C4 toolchain that workspace uses (toolchain.ch),
+// given as the plugin's computed contributions from toolchain-contributions.json, and given again when the workspace's
+// nuke.toml or a setting changes. A toolchain's own copy of the plugin has no code: C4/MakeToolchain.py writes them
+// into its manifest.
 include "api/plugin.ch"
 include "toolchain.ch"
 
@@ -9,6 +10,8 @@ namespace C4Plugin
 {
 	const char* kTemplateFile = "toolchain-contributions.json";
 	static const char*[2] kPoints = { "lspProfiles", "dapProviders" };
+	const char* kDocsPoint = "aiDocs";
+	const char* kCopyFolder = "ied";   // a toolchain's own copy of the plugin, whose folders the docs entries name
 
 	class Support
 	{
@@ -86,7 +89,7 @@ namespace C4Plugin
 
 	// --- What it gives -------------------------------------------------------------------------------------------------
 
-	static Core::String TemplateEntries(Support* support, const char* point) {
+	static Serialization::DomNode Template(Support* support, const char* point) {
 		if (!support->contributions) {
 			support->contributions = new Serialization::DomDoc();
 			Core::String text = TextOf(FS::Path(support->context->Folder().View()) / kTemplateFile);
@@ -94,7 +97,11 @@ namespace C4Plugin
 			if (read.Ok()) support->entries = read.root;
 			else support->context->Log((Core::String(kTemplateFile) + " does not read as JSON: the language server and the debugger are not set up").View());
 		}
-		Serialization::DomNode entries = support->entries.Member(point);
+		return support->entries.Member(point);
+	}
+
+	static Core::String TemplateEntries(Support* support, const char* point) {
+		Serialization::DomNode entries = Template(support, point);
 		return entries.IsValid() ? IED::NodeJson(entries) : Core::String("[]");
 	}
 
@@ -102,6 +109,24 @@ namespace C4Plugin
 	static Core::String Entries(Support* support, const char* point, const ToolchainChoice& choice) {
 		if (choice.folder.IsEmpty()) return Core::String("[]");
 		return WithToolchain(TemplateEntries(support, point).View(), choice.folder.View());
+	}
+
+	// The reference docs of the toolchain `choice` names: its own copy's (<toolchain>/ied/docs), where that copy has them.
+	static Core::String DocsEntries(Support* support, const ToolchainChoice& choice) {
+		Serialization::DomNode docs = Template(support, kDocsPoint);
+		IED::JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; !choice.folder.IsEmpty() && i < docs.Count(); ++i) {
+			FS::Path folder = (FS::Path(choice.folder.View()) / kCopyFolder / docs.At(i).Member("folder").AsView()).Normalized();
+			if (!FS::IsDirectory(folder.CStr())) continue;
+			json.BeginObject();
+			json.Field("id", docs.At(i).Member("id").AsView());
+			json.Field("title", docs.At(i).Member("title").AsView());
+			json.Field("folder", folder.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
 	}
 
 	static void Give(Support* support, const IED::Workspace& ws, Core::StringView point, const Core::String& entries) {
@@ -130,6 +155,7 @@ namespace C4Plugin
 		ToolchainChoice choice = ChooseToolchain(Query(support, ws));
 		Tell(support, ws, choice);
 		for (int64 i = 0; i < 2; ++i) Give(support, ws, Core::StringView(kPoints[i]), Entries(support, kPoints[i], choice));
+		Give(support, ws, Core::StringView(kDocsPoint), DocsEntries(support, choice));
 	}
 
 	static void RefreshAll(Support* support) {

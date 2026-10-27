@@ -84,9 +84,15 @@ namespace Ied
 			plugin = from;
 			entry = given;
 		}
+		[operator("create")] public void Init(Plugin* from, Serialization::DomNode given, bool byCode) {
+			plugin = from;
+			entry = given;
+			computed = byCode;
+		}
 
 		public Plugin* plugin;
 		public Serialization::DomNode entry;
+		public bool computed;   // the plugin's code gave it (PluginContext::Contribute), not its manifest
 	}
 
 	const char* PluginStateName(PluginState state);

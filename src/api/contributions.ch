@@ -13,6 +13,7 @@ namespace IED
 		public Core::String pluginName;
 		public Core::String folder;            // the plugin's folder
 		public Serialization::DomNode entry;   // as the manifest (or the code) gives it
+		public bool computed;                  // the plugin's code gave it (PluginContext::Contribute), not its manifest
 	}
 
 	// A plugin loaded for a workspace, and where its files are.

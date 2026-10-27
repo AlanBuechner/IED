@@ -19,6 +19,7 @@ namespace IED
 			each.pluginName = given.plugin->manifest->name;
 			each.folder = Core::String(given.plugin->manifest->folder.View());
 			each.entry = given.entry;
+			each.computed = given.computed;
 			found.Push(each);
 		}
 		return found;

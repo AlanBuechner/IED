@@ -18,8 +18,8 @@ namespace Ai
 		return parts;
 	}
 
-	// A path a manifest names inside its plugin's folder; empty when it is absolute or leaves the folder.
-	static FS::Path InsidePlugin(const IED::Contribution& given, Core::StringView relative) {
+	FS::Path EntryPath(const IED::Contribution& given, Core::StringView relative) {
+		if (given.computed && FS::Path(relative).IsAbsolute()) return FS::Path(relative).Normalized();
 		if (relative.IsEmpty() || relative.StartsWith(Core::StringView("/")) || relative.StartsWith(Core::StringView("\\")) || relative.IndexOf(':', 0) >= 0) return FS::Path();
 		for (Core::StringView part : SplitPath(relative))
 			if (part == "..") return FS::Path();
@@ -52,7 +52,7 @@ namespace Ai
 		Core::Array<SkillFolder*> folders;
 		folders.Push(Folder(FS::Path(ws.root.View()) / ".ied" / "skills", Core::StringView("project"), Core::StringView(".ied/skills"), false));
 		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("skills"))) {
-			FS::Path folder = InsidePlugin(given, given.entry.AsView());
+			FS::Path folder = EntryPath(given, given.entry.AsView());
 			if (folder.IsEmpty()) problems.Push((Who(given) + ": a skills folder must be inside the plugin: ") + given.entry.AsView());
 			else folders.Push(Folder(folder, Who(given).View(), PluginShown(given, given.entry.AsView()).View(), !WorkspaceOwns(ws, given)));
 		}
@@ -63,7 +63,7 @@ namespace Ai
 	Core::Array<DocsFolder*> DocsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
 		Core::Array<DocsFolder*> folders;
 		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiDocs"))) {
-			FS::Path folder = InsidePlugin(given, given.entry.Member("folder").AsView());
+			FS::Path folder = EntryPath(given, given.entry.Member("folder").AsView());
 			if (folder.IsEmpty()) {
 				problems.Push((Who(given) + ": a docs folder must be inside the plugin: ") + given.entry.Member("folder").AsView());
 				continue;
@@ -146,7 +146,7 @@ namespace Ai
 			if (!IED::PluginSection(ws, given.pluginId.View(), section.Member("function").AsView(), text, problem)) problems.Push(problem);
 			return Core::String(text.View().Trimmed());
 		}
-		FS::Path file = InsidePlugin(given, section.Member("file").AsView());
+		FS::Path file = EntryPath(given, section.Member("file").AsView());
 		Core::String text = file.IsEmpty() ? Core::String() : ReadAll(file);
 		if (text.IsEmpty()) problems.Push(((Who(given) + ": the section ") + section.Member("id").AsView()) + " has no text to give");
 		return Core::String(text.View().Trimmed());

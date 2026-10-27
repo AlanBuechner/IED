@@ -1,7 +1,7 @@
 """The c4 plugin and its toolchains (docs/26 "The c4 plugin and its toolchains"): the built-in copy (plugins/c4) gives a
-workspace the language server and debug adapter of the toolchain it uses - the app's c4.toolchain setting, else the
-workspace's nuke.toml pin, else the newest installed one, from the store NUKE_TOOLCHAINS names - and a toolchain's own
-copy (<toolchain>/ied, pinned by a solution's localPlugins) those of its toolchain, with its reference docs."""
+workspace the language server, debug adapter and reference docs of the toolchain it uses - the app's c4.toolchain
+setting, else the workspace's nuke.toml pin, else the newest installed one, from the store NUKE_TOOLCHAINS names - and
+a toolchain's own copy (<toolchain>/ied, pinned by a solution's localPlugins) those of its toolchain."""
 
 import asyncio
 import json
@@ -49,10 +49,12 @@ def copy_toolchain_plugin(to):
 
 
 def make_toolchain(folder, version):
-	"""What the plugin looks for in a toolchain: its C4.exe and toolchain.json, and the tools it starts."""
+	"""What the plugin looks for in a toolchain: its C4.exe and toolchain.json, the tools it starts and the reference docs
+	of its own copy of the plugin."""
 	write(os.path.join(folder, "toolchain.json"), {"name": "c4", "version": version})
 	for path in ("C4.exe", "tools/C4LSP/C4LSP.exe", "tools/C4DAP/C4DAP.exe"):
 		write(os.path.join(folder, *path.split("/")), "")
+	write(os.path.join(folder, "ied", "docs", "01-what-is-c4.md"), "# What is C4 %s\n" % version)
 
 
 def slashed(path):
@@ -125,7 +127,8 @@ class C4PluginTests(ServerTestCase):
 		self.assertEqual(slashed(pinned), given["lspProfiles"][0]["env"]["C4_HOME"])
 		self.assertEqual(slashed(os.path.join(pinned, "tools", "C4DAP", "C4DAP.exe")), self.tool(given, "dapProviders"))
 		self.assertIn("workspaceTrusted", given["lspProfiles"][0]["when"], "C4LSP runs only in a trusted workspace, as when only a toolchain's copy brought it")
-		self.assertNotIn("aiDocs", given, "the built-in holds no reference docs")
+		self.assertEqual([{"id": "c4", "folder": slashed(os.path.join(pinned, "ied", "docs"))}], [{"id": d["id"], "folder": d["folder"]} for d in given["aiDocs"]],
+			"the reference docs of the toolchain it uses, its own copy's")
 		self.assertIn("skills", given, "its own contributions stay")
 		write(os.path.join(self.game, "nuke.toml"), '[workspace]\nname = "Game"\ntoolchain = "latest"\n')
 		newest = os.path.join(self.store, "c4", "0.10.0", "tools", "C4LSP", "C4LSP.exe")
@@ -150,6 +153,7 @@ class C4PluginTests(ServerTestCase):
 		await asyncio.sleep(1)
 		given = await self.c4("builtin")
 		self.assertNotIn("lspProfiles", given, "no toolchain, no language server")
+		self.assertNotIn("aiDocs", given, "nor its docs")
 		self.assertIn("languages", given, "the language itself is still the plugin's")
 
 	async def test_a_toolchain_copy_uses_its_toolchain_and_ships_its_docs(self):

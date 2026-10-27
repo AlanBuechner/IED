@@ -10,9 +10,13 @@ include "hints.ch"
 
 namespace Ai
 {
+	// A path an entry names: inside its plugin's folder for a manifest's (empty when it is absolute or leaves the
+	// folder); anywhere for an entry the plugin's code computed, which reads what it likes anyway (the c4 plugin's
+	// reference docs are the docs of the toolchain it found, docs/26).
+	FS::Path EntryPath(const IED::Contribution& given, Core::StringView path);
 	// .ied/skills/, then each loaded plugin's `skills` folders, then the app's skills/ (a name's first one wins).
 	Core::Array<Skill*> SkillsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
-	// The plugins' reference docs (`aiDocs`: an id, a title and a folder inside the plugin), in load order.
+	// The plugins' reference docs (`aiDocs`: an id, a title and a folder, EntryPath's), in load order.
 	Core::Array<DocsFolder*> DocsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
 	// The plugins' error hints (`aiHints`: a regex `match`, its `hint`, an optional `when`), in load order.
 	Core::Array<ErrorHint*> HintsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
