@@ -1,0 +1,31 @@
+// The gpu_* answers' number and text helpers (ToolText.cf): values as the UI shows them, and the filters' matching.
+
+include "ToolText.ch"
+
+[test("server.gpu.tooltext")]
+class GpuToolTextTests {
+	static Core::String Shown(double value) {
+		Core::StringBuilder text;
+		GpuDebug::AppendValue(text, value);
+		return text.ToString();
+	}
+
+	[test("values_read_as_the_ui_shows_them")]
+	public static void TestValues() {
+		assert_true(Shown(3.0).View() == "3" && Shown(-12.0).View() == "-12", "whole numbers whole");
+		assert_true(Shown(1.26171875).View() == "1.26172", "six significant digits");
+		assert_true(Shown(0.0872558).View() == "0.0872558", "small ones keep their digits");
+		assert_true(Shown(0.5).View() == "0.5", "no trailing zeros");
+		assert_true(Shown(-3.0848e-8).View() == "-3.0848e-8", "tiny ones with an exponent");
+		assert_true(Shown(2.5e20).View() == "2.5e20", "huge ones too");
+		double zero = 0.0;
+		assert_true(Shown(zero / zero).View() == "NaN" && Shown(1.0 / zero).View() == "Inf" && Shown(-1.0 / zero).View() == "-Inf", "NaN and Inf by name");
+	}
+
+	[test("filters_match_either_case")]
+	public static void TestFolded() {
+		assert_true(GpuDebug::HasFolded(Core::StringView("vkCmdDrawIndexed(36, 1)"), Core::StringView("drawindexed")), "either case");
+		assert_true(GpuDebug::HasFolded(Core::StringView("Cube A"), Core::StringView("")), "the empty word matches");
+		assert_true(!GpuDebug::HasFolded(Core::StringView("Floor"), Core::StringView("Floors")), "a longer word does not");
+	}
+}

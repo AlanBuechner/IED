@@ -1,0 +1,50 @@
+// fs/ignore: .gitignore's rules - names at any depth, folders only, anchored patterns, re-includes, nested files.
+
+include "fs/Ignore.ch"
+
+static Core::Array<Ied::IgnoreFile*> Files(const char* folder, const char* rules) {
+	Ied::IgnoreFile* file = new Ied::IgnoreFile();
+	file->m_Folder = Core::String(folder);
+	file->m_Rules = Ied::ParseIgnoreRules(Core::StringView(rules));
+	Core::Array<Ied::IgnoreFile*> files;
+	files.Push(file);
+	return files;
+}
+
+static bool Ignored(const Core::Array<Ied::IgnoreFile*>& files, const char* path, bool directory) { return Ied::IsIgnored(files, Core::StringView(path), directory); }
+
+[test("server.ignore")]
+class IgnoreTests {
+	[test("rules")]
+	public static void TestRules() {
+		Core::Array<Ied::IgnoreRule> rules = Ied::ParseIgnoreRules(Core::StringView("# a comment\n\n*.exe\r\nbuild/\n/out\n!keep.exe\ndocs/*.md\n"));
+		assert_eq(5, rules.Count(), "comments and blank lines skipped");
+		assert_true(rules[1].m_DirectoryOnly && !rules[1].m_Anchored, "a trailing slash: folders, at any depth");
+		assert_true(rules[2].m_Anchored && rules[2].m_Pattern == "out", "a leading slash anchors");
+		assert_true(rules[3].m_Negate && rules[3].m_Pattern == "keep.exe", "a re-include");
+		assert_true(rules[4].m_Anchored, "a slash inside anchors too");
+	}
+
+	[test("matching")]
+	public static void TestMatching() {
+		Core::Array<Ied::IgnoreFile*> files = Files("", "*.exe\nbuild/\n/out\n!keep.exe\ndocs/*.md\n");
+		assert_true(Ignored(files, "a/b/tool.exe", false), "a name at any depth");
+		assert_true(!Ignored(files, "a/keep.exe", false), "re-included by a later rule");
+		assert_true(Ignored(files, "build", true) && Ignored(files, "src/build", true), "a folder anywhere");
+		assert_true(!Ignored(files, "src/build", false), "but not a file of that name");
+		assert_true(Ignored(files, "out", true) && !Ignored(files, "src/out", true), "anchored to the file's folder");
+		assert_true(Ignored(files, "docs/a.md", false) && !Ignored(files, "x/docs/a.md", false), "a path pattern");
+		assert_true(!Ignored(files, "src/main.c", false), "everything else");
+	}
+
+	[test("nested")]
+	public static void TestNested() {
+		Core::Array<Ied::IgnoreFile*> files = Files("", "*.tmp\n");
+		Core::Array<Ied::IgnoreFile*> deeper = Files("sub", "!a.tmp\n/local\n");
+		files.Push(deeper[0]);
+		assert_true(Ignored(files, "b.tmp", false) && Ignored(files, "sub/b.tmp", false), "the outer file reaches down");
+		assert_true(!Ignored(files, "sub/a.tmp", false), "the deeper file wins");
+		assert_true(Ignored(files, "sub/local", true) && !Ignored(files, "local", true), "anchored to its own folder");
+		assert_true(!Ignored(files, "subway/local", true), "a sibling with a longer name is not under it");
+	}
+}

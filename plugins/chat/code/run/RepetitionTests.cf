@@ -1,0 +1,52 @@
+// repetition: a reply whose tail is one passage repeated is a loop; text that only repeats a little, or varies, is not.
+
+include "Repetition.ch"
+
+static Core::String Repeated(const char* passage, int64 times) {
+	Core::StringBuilder out;
+	for (int64 i = 0; i < times; ++i) out.Append(passage);
+	return out.ToString();
+}
+
+[test("server.ai.repetition")]
+class RepetitionTests {
+	[test("a_passage_repeated")]
+	public static void TestLoop() {
+		Core::String looping = Core::String("Let me think about the parser. ") + Repeated("Wait, I should check the header first. Then I will edit it.\n", 120).View();
+		assert_eq((int64)60, Ai::RepeatedTailPeriod(looping.View(), Ai::c_RepetitionTailBytes), "the passage's length");
+	}
+
+	[test("one_character")]
+	public static void TestOneCharacter() {
+		Core::String dashes = Repeated("-", 5000);
+		assert_eq((int64)1, Ai::RepeatedTailPeriod(dashes.View(), Ai::c_RepetitionTailBytes), "a run of one character");
+	}
+
+	[test("too_short")]
+	public static void TestTooShort() {
+		Core::String brief = Repeated("same line\n", 100);
+		assert_eq((int64)0, Ai::RepeatedTailPeriod(brief.View(), Ai::c_RepetitionTailBytes), "1000 bytes of it is not yet a loop");
+	}
+
+	[test("varied_text")]
+	public static void TestVaried() {
+		Core::StringBuilder lines;
+		for (int64 i = 0; i < 400; ++i) Core::Format(&lines, "case {0:D}: return Value({0:D});\n", (int32)i);
+		assert_eq((int64)0, Ai::RepeatedTailPeriod(lines.View(), Ai::c_RepetitionTailBytes), "similar lines that differ");
+	}
+
+	[test("a_loop_that_ended")]
+	public static void TestLoopThenOn() {
+		Core::String recovered = Repeated("again and again\n", 400) + "and now something else entirely, long enough to fill the probe";
+		assert_eq((int64)0, Ai::RepeatedTailPeriod(recovered.View(), Ai::c_RepetitionTailBytes), "the tail no longer repeats");
+	}
+
+	[test("long_passages_are_not_looked_for")]
+	public static void TestLongPassage() {
+		Core::Random random = Core::Random(7);
+		Core::StringBuilder distinct;
+		for (int64 i = 0; i < 2000; ++i) distinct.AppendByte('a' + (int32)random.Range(0, 26));
+		Core::String text = Repeated(distinct.CStr(), 3);
+		assert_eq((int64)0, Ai::RepeatedTailPeriod(text.View(), Ai::c_RepetitionTailBytes), "a 2000-byte passage is past the longest period");
+	}
+}

@@ -63,7 +63,7 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 | F-AIR-51 | Context ledger: every item typed and counted (system parts, messages, tool results, attachments, skills, summaries) - feeds the context panel | P0 | US-CTX-1 |
 | F-AIR-52 | Tiered compression: (1) mechanical - supersede old file reads, trim tool results to conclusions + excerpts, drop stale diagnostics; (2) summarize older segments with the `summarizer` role into a structured summary (goal, constraints, decisions, progress, files, open questions, exact snippets to keep) | P0 | US-CTX-1 |
 | F-AIR-53 | Cache-aware compression: append-only between compressions; compress in large steps at a high-water mark so llama.cpp/Anthropic prefix caches stay valid; keep the system prompt + early stable prefix byte-identical | P1 | US-CTX-7 |
-| F-AIR-54 | Raw history never lost: `history_search` / `history_read` tools let the agent retrieve compressed-away details (built 2026-10-25: `plugins/chat/code/history.cf`, deferred tools of group `chats`) | P0 | US-CTX-1 |
+| F-AIR-54 | Raw history never lost: `history_search` / `history_read` tools let the agent retrieve compressed-away details (built 2026-10-25: `plugins/chat/code/context/History.cf`, deferred tools of group `chats`) | P0 | US-CTX-1 |
 | F-AIR-55 | Overflow recovery: provider context-exceeded error -> parse the real limit, update the model profile, compress, retry (bounded) | P0 | US-CTX-1 |
 | F-AIR-56 | Manual compress now (`/compact` with optional instructions), and "pin" items so they are never compressed | P1 | US-CTX-1 |
 

@@ -1,9 +1,0 @@
-include "text.ch"
-include "services/outputs.ch"
-
-namespace IED
-{
-	Core::String BoundedText(Core::StringView tail, Core::StringView text, int64 limit) { return Ied::Bounded(tail, text, limit); }
-
-	int64 WholeCharacters(Core::StringView bytes) { return Ied::WholeCharacters(bytes); }
-}

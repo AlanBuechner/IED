@@ -1,0 +1,283 @@
+// Statistics per zone (F-PRF-20, F-PRF-24) and find zone (F-PRF-21).
+include "Analysis.ch"
+
+namespace Profiler
+{
+	// The durations and totals of one row: a site, or a site on one thread or in one task.
+	class StatsRow
+	{
+		public uint64 m_Site;
+		public uint64 m_Group;             // track index + 1, or a task name id; 0 when not grouped
+		public int64 m_Count;
+		public int64 m_Total;
+		public int64 m_Self;
+		public int64 m_Least = -1;
+		public int64 m_Most;
+		public Core::Array<int64> m_Durations;
+
+		public void Add(int64 duration, int64 selfTicks) {
+			m_Count += 1;
+			m_Total += duration;
+			m_Self += selfTicks;
+			if (m_Least < 0 || duration < m_Least) m_Least = duration;
+			if (duration > m_Most) m_Most = duration;
+			m_Durations.Push(duration);
+		}
+	}
+
+	bool ContainsNoCase(Core::StringView text, Core::StringView part) {
+		if (part.IsEmpty()) return true;
+		const int64 n = text.ByteLength();
+		const int64 m = part.ByteLength();
+		for (int64 i = 0; i + m <= n; ++i) {
+			int64 j = 0;
+			while (j < m) {
+				char a = text.Data()[i + j];
+				char b = part.Data()[j];
+				if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+				if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+				if (a != b) break;
+				j += 1;
+			}
+			if (j == m) return true;
+		}
+		return false;
+	}
+
+	// Calls `visit(trackIndex, depth, index)` for each zone that starts in `range`.
+	static void EachZoneIn(const Capture& capture, Range range, const func<void(int64, int64, int64)>& visit) {
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.m_Tracks[t];
+			for (int64 depth = 0; depth < track->m_Levels.Count(); ++depth) {
+				const ZoneLevel* level = track->m_Levels[depth];
+				const int64 stop = level->FirstStartingAt(range.m_End);
+				for (int64 i = level->FirstStartingAt(range.m_Begin); i < stop; ++i) visit(t, depth, i);
+			}
+		}
+	}
+
+	static uint64 GroupOf(const Capture& capture, GroupBy groupBy, int64 track, int64 start) {
+		if (groupBy == GroupBy::Thread) return (uint64)track + 1;
+		if (groupBy == GroupBy::Task) return TaskNameAt(capture, (int32)track, start);
+		return 0;
+	}
+
+	static void Gather(const Capture& capture, const StatsAsk& ask, Range range, Core::Array<StatsRow*>& rows) {
+		Core::HashMap<uint64, StatsRow*> rowOf;
+		Core::HashMap<uint64, bool> matches;
+		const int64 now = capture.m_LastTicks;
+		EachZoneIn(capture, range, [&capture, &ask, &rows, &rowOf, &matches, now](int64 t, int64 depth, int64 i) {
+			const ZoneLevel* level = capture.m_Tracks[t]->m_Levels[depth];
+			const uint64 site = (uint64)level->m_Sites[i];
+			bool shown;
+			if (!matches.TryGet(site, shown)) {
+				shown = ContainsNoCase(capture.SiteName(site), ask.m_Filter.View());
+				matches.Insert(site, shown);
+			}
+			if (!shown || level->m_Ends[i] == c_Open) return;
+			const uint64 group = GroupOf(capture, ask.m_GroupBy, t, level->m_Starts[i]);
+			const uint64 key = (site << 24) ^ group;
+			StatsRow* row = nullptr;
+			if (!rowOf.TryGet(key, row)) {
+				row = new StatsRow();
+				row->m_Site = site;
+				row->m_Group = group;
+				rows.Push(row);
+				rowOf.Insert(key, row);
+			}
+			row->Add(level->EndOr(i, now) - level->m_Starts[i], level->m_Selfs[i]);
+		});
+	}
+
+	static int64 Mean(const StatsRow* row) { return row->m_Count == 0 ? 0 : row->m_Total / row->m_Count; }
+
+	static bool Before(const Capture& capture, StatsOrder order, const StatsRow* a, const StatsRow* b) {
+		if (order == StatsOrder::Self) return a->m_Self > b->m_Self;
+		if (order == StatsOrder::Count) return a->m_Count > b->m_Count;
+		if (order == StatsOrder::Mean) return Mean(a) > Mean(b);
+		if (order == StatsOrder::Max) return a->m_Most > b->m_Most;
+		if (order == StatsOrder::Name) return capture.SiteName(a->m_Site) < capture.SiteName(b->m_Site);
+		return a->m_Total > b->m_Total;
+	}
+
+	static void WriteGroup(IED::JsonWriter& json, const Capture& capture, GroupBy groupBy, uint64 group, int64 t) {
+		json.Key(Core::StringView("group"));
+		if (groupBy == GroupBy::Zone) json.Null();
+		else if (groupBy == GroupBy::Thread) json.String(TrackLabel(capture, capture.m_Tracks[(int64)group - 1], t).View());
+		else json.String(group == 0 ? Core::StringView("(no task)") : capture.Text(group));
+	}
+
+	static void WriteSite(IED::JsonWriter& json, const Capture& capture, uint64 site) {
+		json.Field("name", capture.SiteName(site));
+		json.IntField("site", (int64)site);
+		const SrcLoc* loc = capture.m_Srclocs.Find(site);
+		json.Field("function", loc ? capture.Text(loc->m_FunctionStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.SourceText(loc->m_FileStr).View() : Core::StringView(""));
+		json.IntField("line", loc ? (int64)loc->m_Line : 0);
+	}
+
+	static void WriteRow(IED::JsonWriter& json, const Capture& capture, const StatsAsk& ask, StatsRow* row, Range range) {
+		row->m_Durations.Sort();
+		json.BeginObject();
+		WriteSite(json, capture, row->m_Site);
+		WriteGroup(json, capture, ask.m_GroupBy, row->m_Group, range.m_Begin);
+		json.IntField("count", row->m_Count);
+		json.IntField("totalNs", capture.m_Clock.Ns(row->m_Total));
+		json.IntField("selfNs", capture.m_Clock.Ns(row->m_Self));
+		json.IntField("meanNs", capture.m_Clock.Ns(Mean(row)));
+		json.IntField("medianNs", capture.m_Clock.Ns(Quantile(row->m_Durations, 0.5)));
+		json.IntField("p95Ns", capture.m_Clock.Ns(Quantile(row->m_Durations, 0.95)));
+		json.IntField("minNs", capture.m_Clock.Ns(row->m_Least < 0 ? 0 : row->m_Least));
+		json.IntField("maxNs", capture.m_Clock.Ns(row->m_Most));
+		NumberField(json, "share", (double)row->m_Total / (double)range.Length(), 4);
+		json.EndObject();
+	}
+
+	Core::String Stats(const Capture& capture, const StatsAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.m_FromNs, ask.m_ToNs);
+		Core::Array<StatsRow*> rows;
+		Gather(capture, ask, range, rows);
+		const StatsOrder order = ask.m_Order;
+		if (order == StatsOrder::Median || order == StatsOrder::P95) {
+			for (StatsRow* row : rows) row->m_Durations.Sort();
+			const double fraction = order == StatsOrder::Median ? 0.5 : 0.95;
+			rows.SortBy([fraction](StatsRow* a, StatsRow* b) -> bool { return Quantile(a->m_Durations, fraction) > Quantile(b->m_Durations, fraction); });
+		}
+		else {
+			const Capture* source = &capture;
+			rows.SortBy([source, order](StatsRow* a, StatsRow* b) -> bool { return Before(*source, order, a, b); });
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("from", capture.m_Clock.Ns(range.m_Begin));
+		json.IntField("to", capture.m_Clock.Ns(range.m_End));
+		json.IntField("rowCount", rows.Count());
+		json.Key(Core::StringView("rows"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.m_Limit; ++i) WriteRow(json, capture, ask, rows[i], range);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Find zone ----------------------------------------------------------------------------------------------------
+
+	struct Instance
+	{
+		public uint64 m_Ref;
+		public int64 m_Start;
+		public int64 m_Duration;
+	}
+
+	static bool SiteMatches(const Capture& capture, const FindAsk& ask, uint64 site) {
+		if (ask.m_Site != 0) return site == ask.m_Site;
+		return capture.SiteName(site) == ask.m_Name.View();
+	}
+
+	static void Instances(const Capture& capture, const FindAsk& ask, Range range, Core::Array<Instance>& out) {
+		for (const Core::KeyValue<uint64, SiteStats*>& entry : capture.m_Sites) {
+			if (!SiteMatches(capture, ask, entry.key)) continue;
+			for (uint64 bits : entry.value->m_Refs) {
+				ZoneRef ref;
+				ref.m_Bits = bits;
+				const ThreadTrack* track;
+				const ZoneLevel* level;
+				if (!ZoneAt(capture, ref, track, level)) continue;
+				const int64 i = ref.Index();
+				if (level->m_Ends[i] == c_Open || !range.Holds(level->m_Starts[i])) continue;
+				Instance instance;
+				instance.m_Ref = bits;
+				instance.m_Start = level->m_Starts[i];
+				instance.m_Duration = level->m_Ends[i] - level->m_Starts[i];
+				out.Push(instance);
+			}
+		}
+	}
+
+	// Bin edges in ticks: logarithmic when the durations span more than two decades, else even.
+	static int64 BinOf(int64 duration, int64 least, int64 most, int32 bins, bool logarithmic) {
+		if (most <= least) return 0;
+		double at;
+		if (logarithmic) at = (log((double)duration + 1.0) - log((double)least + 1.0)) / (log((double)most + 1.0) - log((double)least + 1.0));
+		else at = (double)(duration - least) / (double)(most - least);
+		int64 bin = (int64)(at * (double)bins);
+		return bin >= (int64)bins ? (int64)bins - 1 : (bin < 0 ? 0 : bin);
+	}
+
+	static double EdgeNs(const Capture& capture, int64 bin, int64 least, int64 most, int32 bins, bool logarithmic) {
+		const double at = (double)bin / (double)bins;
+		if (!logarithmic) return (double)capture.m_Clock.Ns(least) + at * (double)capture.m_Clock.Ns(most - least);
+		const double low = log((double)least + 1.0);
+		const double high = log((double)most + 1.0);
+		return (exp(low + at * (high - low)) - 1.0) * capture.m_Clock.m_NsPerTick;
+	}
+
+	static void WriteHistogram(IED::JsonWriter& json, const Capture& capture, const Core::Array<int64>& sorted, int32 bins) {
+		const int64 least = sorted.IsEmpty() ? 0 : sorted[0];
+		const int64 most = sorted.IsEmpty() ? 0 : sorted.Back();
+		const bool logarithmic = least >= 0 && most > (least + 1) * 100;
+		Core::Array<int64> counts;
+		counts.Resize(bins);
+		for (int64 duration : sorted) counts[BinOf(duration, least, most, bins, logarithmic)] += 1;
+		json.BoolField("logarithmic", logarithmic);
+		json.Key(Core::StringView("bins"));
+		json.BeginArray();
+		for (int64 b = 0; b < (int64)bins; ++b) {
+			json.BeginArray();
+			WriteNumber(json, EdgeNs(capture, b, least, most, bins, logarithmic), 0);
+			WriteNumber(json, EdgeNs(capture, b + 1, least, most, bins, logarithmic), 0);
+			json.Int(counts[b]);
+			json.EndArray();
+		}
+		json.EndArray();
+	}
+
+	static void WriteInstances(IED::JsonWriter& json, const Capture& capture, const FindAsk& ask, Core::Array<Instance>& instances) {
+		instances.SortBy([](const Instance& a, const Instance& b) -> bool { return a.m_Duration > b.m_Duration; });
+		json.Key(Core::StringView("instances"));
+		json.BeginArray();
+		int32 written = 0;
+		for (const Instance& instance : instances) {
+			const int64 ns = capture.m_Clock.Ns(instance.m_Duration);
+			if ((ask.m_LowNs >= 0 && ns < ask.m_LowNs) || (ask.m_HighNs >= 0 && ns > ask.m_HighNs)) continue;
+			if (written >= ask.m_Limit) break;
+			ZoneRef ref;
+			ref.m_Bits = instance.m_Ref;
+			json.BeginObject();
+			json.Field("ref", ref.Text().View());
+			json.IntField("startNs", capture.m_Clock.Ns(instance.m_Start));
+			json.IntField("durationNs", ns);
+			json.Field("thread", TrackLabel(capture, capture.m_Tracks[ref.Track()], instance.m_Start).View());
+			json.EndObject();
+			written += 1;
+		}
+		json.EndArray();
+	}
+
+	Core::String FindZone(const Capture& capture, const FindAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.m_FromNs, ask.m_ToNs);
+		Core::Array<Instance> instances;
+		Instances(capture, ask, range, instances);
+		Core::Array<int64> sorted;
+		int64 total = 0;
+		for (const Instance& instance : instances) {
+			sorted.Push(instance.m_Duration);
+			total += instance.m_Duration;
+		}
+		sorted.Sort();
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("name", ask.m_Site != 0 ? capture.SiteName(ask.m_Site) : ask.m_Name.View());
+		json.IntField("count", sorted.Count());
+		json.IntField("totalNs", capture.m_Clock.Ns(total));
+		json.IntField("meanNs", sorted.IsEmpty() ? 0 : capture.m_Clock.Ns(total / sorted.Count()));
+		json.IntField("medianNs", capture.m_Clock.Ns(Quantile(sorted, 0.5)));
+		json.IntField("p95Ns", capture.m_Clock.Ns(Quantile(sorted, 0.95)));
+		json.IntField("minNs", sorted.IsEmpty() ? 0 : capture.m_Clock.Ns(sorted[0]));
+		json.IntField("maxNs", sorted.IsEmpty() ? 0 : capture.m_Clock.Ns(sorted.Back()));
+		WriteHistogram(json, capture, sorted, ask.m_Bins < 1 ? 1 : ask.m_Bins);
+		WriteInstances(json, capture, ask, instances);
+		json.EndObject();
+		return json.ToString();
+	}
+}

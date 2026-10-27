@@ -1,0 +1,41 @@
+// Reverting a chat on disk (Revert.ch, docs/04 "Reverting a chat"): the lines of turns.jsonl from the turn on move whole
+// to a file of reverted/, the lines before stay byte for byte - a line the reader cannot parse included - and a turn
+// turns.jsonl does not have moves nothing.
+
+include "Revert.ch"
+include "ChatStore.ch"
+
+static void WriteText(const FS::Path& file, Core::StringView text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+}
+
+static Core::String ReadText(const FS::Path& file) {
+	if (!FS::FileExists(file.CStr())) return Core::String();
+	FS::File opened = FS::File(file.CStr(), "rb");
+	return opened.ReadText();
+}
+
+[test("server.ai.revert")]
+class RevertTests {
+	[test("moves_the_lines")]
+	public static void TestMovesTheLines() {
+		FS::Path state = FS::TempDirectory() / "ied-revert-test";
+		FS::RemoveAll(state.CStr());
+		FS::Path folder = Ai::ChatFolder(state, Core::StringView("c1"));
+		Core::String first = Core::String("{\"turnId\":\"u1\",\"user\":{\"text\":\"one\"}}\n");
+		Core::String broken = Core::String("{\"turnId\":\"u1b\", not json\n");
+		Core::String later = Core::String("{\"turnId\":\"u2\",\"user\":{\"text\":\"two\"}}\n{\"turnId\":\"u3\",\"user\":{\"text\":\"three\"}}\n");
+		WriteText(folder / "turns.jsonl", ((first + broken.View()) + later.View()).View());
+		Core::String moved;
+		Core::String problem;
+		assert_true(Ai::MoveRevertedTurns(state, Core::StringView("c1"), Core::StringView("u2"), 1234, moved, problem), problem.CStr());
+		assert_se("reverted/1234-u2.jsonl", moved.CStr(), "the file's name: when, and the turn");
+		assert_se(((first + broken.View())).CStr(), ReadText(folder / "turns.jsonl").CStr(), "the lines before stay as they were, a broken one too");
+		assert_se(later.CStr(), ReadText(folder / moved.View()).CStr(), "the turn and the ones after it, whole");
+		assert_true(!Ai::MoveRevertedTurns(state, Core::StringView("c1"), Core::StringView("u9"), 1235, moved, problem), "a turn it does not have");
+		assert_true(problem.View().Contains(Core::StringView("u9")), "says which");
+		assert_se(((first + broken.View())).CStr(), ReadText(folder / "turns.jsonl").CStr(), "and moves nothing");
+		FS::RemoveAll(state.CStr());
+	}
+}

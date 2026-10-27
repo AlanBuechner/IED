@@ -1,0 +1,192 @@
+include "api/Plugin.ch"
+include "ClaudeSession.ch"
+
+namespace Ai
+{
+	static int64 SessionNowMs() { return clock_now_ns() / 1000000; }
+
+	Core::StringView ToolUseOf(const ClaudeLine* call) {
+		return call->m_Root.Member("request").Member("message").Member("params").Member("_meta").Member("claudecode/toolUseId").AsView();
+	}
+
+	bool ClaudeSession::Start(const Core::Array<Core::String>& command, Core::StringView folder, Core::StringView systemFile, Core::String& error) {
+		Core::Array<Core::String> argv = command;
+		for (const Core::String& argument : ClaudeBaseArguments()) argv.Push(argument);
+		const char*[8] fixed = { "--permission-prompt-tool", "stdio", "--allowedTools", "mcp__ied", "--system-prompt-snapshot", "off", "--system-prompt-file", "--model" };
+		for (int64 i = 0; i < 7; ++i) argv.Push(Core::String(fixed[i]));
+		argv.Push(Core::String(systemFile));
+		argv.Push(Core::String(fixed[7]));
+		argv.Push(m_Model);
+		if (!m_Effort.IsEmpty()) {
+			argv.Push(Core::String("--effort"));
+			argv.Push(m_Effort);
+		}
+		if (!m_SessionId.IsEmpty()) {
+			argv.Push(Core::String("--resume"));
+			argv.Push(m_SessionId);
+		}
+		m_Process = new ClaudeProcess();
+		if (!m_Process->Start(argv, folder, ClaudeEnvironment(), error)) {
+			m_Process = null;
+			return false;
+		}
+		m_Querying = false;
+		ClaudeSession* self = this;
+		Serialization::DomNode answer = m_Process->Request(InitializeRequest().View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
+		if (answer.IsValid()) return true;
+		Core::String notes = m_Process->Notes();
+		if (!notes.IsEmpty()) error = (error + ": ") + notes.View();
+		Stop();
+		return false;
+	}
+
+	static Core::String McpAnswer(Core::StringView reply) { return (Core::String("{\"mcp_response\":") + reply) + "}"; }
+
+	static Core::String Permission(const Serialization::DomNode& request) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		if (request.Member("tool_name").AsView().StartsWith(Core::StringView(c_ClaudeToolPrefix))) {
+			json.Field("behavior", "allow");
+			json.RawField("updatedInput", request.Member("input").IsValid() ? IED::NodeJson(request.Member("input")).View() : Core::StringView("{}"));
+		}
+		else {
+			json.Field("behavior", "deny");
+			json.Field("message", "Only IED's tools run in this session.");
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void ClaudeSession::Serve(ClaudeLine* line) {
+		if (!m_Process) return;
+		Core::StringView requestId = line->m_Root.Member("request_id").AsView();
+		Serialization::DomNode request = line->m_Root.Member("request");
+		Core::StringView subtype = request.Member("subtype").AsView();
+		if (subtype == "can_use_tool") {
+			m_Process->Send(ControlAnswerLine(requestId, Permission(request).View()).View());
+			return;
+		}
+		if (subtype != "mcp_message" || request.Member("server_name").AsView() != c_ClaudeServerName) {
+			m_Process->Send(ControlRefusalLine(requestId, (Core::String("IED does not answer ") + subtype).View()).View());
+			return;
+		}
+		Serialization::DomNode message = request.Member("message");
+		Core::StringView method = message.Member("method").AsView();
+		Serialization::DomNode id = message.Member("id");
+		if (!id.IsValid()) {
+			m_Process->Send(ControlAnswerLine(requestId, McpAnswer(Core::StringView("{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":0}")).View()).View());
+			return;
+		}
+		if (method == "tools/call") {
+			m_Calls.Push(line);
+			return;
+		}
+		Core::String reply;
+		if (method == "initialize") reply = McpReply(id, McpInitializeResult(message.Member("params").Member("protocolVersion").AsView()).View());
+		else if (method == "tools/list") reply = McpReply(id, m_Tools.IsEmpty() ? Core::StringView("{\"tools\":[]}") : m_Tools.View());
+		else if (method == "ping") reply = McpReply(id, Core::StringView("{}"));
+		else reply = McpFailure(id, -32601, (Core::String("IED's server has no method ") + method).View());
+		m_Process->Send(ControlAnswerLine(requestId, McpAnswer(reply.View()).View()).View());
+	}
+
+	// A user message of the CLI's that carries the result of `toolUseId`: it settled the call itself.
+	static bool SettlesCall(const ClaudeLine* line, Core::StringView toolUseId) {
+		if (line->Type() != "user") return false;
+		Serialization::DomNode content = line->m_Root.Member("message").Member("content");
+		for (int64 i = 0; content.Kind() == Serialization::DomKind::Array && i < content.Count(); ++i)
+			if (content.At(i).Member("type").AsView() == "tool_result" && content.At(i).Member("tool_use_id").AsView() == toolUseId) return true;
+		return false;
+	}
+
+	ClaudeLine* ClaudeSession::AwaitCall(Core::StringView toolUseId, int32 waitMs) {
+		for (int64 i = 0; i < m_Calls.Count(); ++i) {
+			if (ToolUseOf(m_Calls[i]) != toolUseId) continue;
+			ClaudeLine* found = m_Calls[i];
+			m_Calls.RemoveAt(i);
+			return found;
+		}
+		if (!m_Process) return null;
+		Core::Array<ClaudeLine*> kept;
+		ClaudeLine* found = null;
+		const int64 deadline = SessionNowMs() + waitMs;
+		for (;;) {
+			const int64 left = deadline - SessionNowMs();
+			ClaudeLine* line = left > 0 ? m_Process->Next((int32)left) : null;
+			if (!line || SettlesCall(line, toolUseId)) break;
+			if (line->Type() != "control_request") {
+				kept.Push(line);
+				continue;
+			}
+			Serve(line);
+			if (m_Calls.IsEmpty() || ToolUseOf(m_Calls.Back()) != toolUseId) continue;
+			found = m_Calls.Pop();
+			break;
+		}
+		m_Process->PutBack(kept);
+		return found;
+	}
+
+	void ClaudeSession::Answer(ClaudeLine* call, Core::StringView result) {
+		if (!m_Process) return;
+		Core::String reply = McpReply(call->m_Root.Member("request").Member("message").Member("id"), result);
+		m_Process->Send(ControlAnswerLine(call->m_Root.Member("request_id").AsView(), McpAnswer(reply.View()).View()).View());
+	}
+
+	bool ClaudeSession::SetModel(Core::StringView id, Core::String& error) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("subtype", "set_model");
+		json.Field("model", id);
+		json.EndObject();
+		ClaudeSession* self = this;
+		if (!m_Process->Request(json.View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); }).IsValid()) return false;
+		m_Model = Core::String(id);
+		return true;
+	}
+
+	void ClaudeSession::SetTools(Core::StringView result) {
+		if (m_Tools.View() == result) return;
+		m_Tools = Core::String(result);
+		if (!Running()) return;
+		Core::String error;
+		ClaudeSession* self = this;
+		m_Process->Request(Core::StringView("{\"subtype\":\"mcp_message\",\"server_name\":\"ied\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}"),
+			c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
+	}
+
+	void ClaudeSession::Settle(Core::StringView note, bool interrupt, int32 waitMs, ClaudeServe other) {
+		if (!Running()) {
+			Stop();
+			return;
+		}
+		Core::Array<ClaudeImage> none;
+		Core::String refused = McpCallResult(note, none, true);
+		ClaudeSession* self = this;
+		if (m_Querying && interrupt) {
+			Core::String error;
+			m_Process->Request(Core::StringView("{\"subtype\":\"interrupt\"}"), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
+		}
+		const int64 deadline = SessionNowMs() + waitMs;
+		for (;;) {
+			for (ClaudeLine* call : m_Calls) Answer(call, refused.View());
+			m_Calls.Clear();
+			if (!m_Querying) return;
+			const int64 left = deadline - SessionNowMs();
+			ClaudeLine* line = left > 0 ? m_Process->Next((int32)left) : null;
+			if (!line) break;
+			if (line->Type() == "control_request") Serve(line);
+			else {
+				if (line->Type() == "result") m_Querying = false;
+				other(line);
+			}
+		}
+		Stop();
+	}
+
+	void ClaudeSession::Stop() {
+		if (m_Process) m_Process->Stop();
+		m_Process = null;
+		m_Querying = false;
+		m_Calls.Clear();
+	}
+}

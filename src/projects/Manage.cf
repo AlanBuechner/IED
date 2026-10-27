@@ -1,0 +1,433 @@
+include "Manage.ch"
+include "Detect.ch"
+include "SolutionFile.ch"
+include "Templates.ch"
+include "host/Server.ch"
+include "settings/JsonEdit.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	alias StepValues = Core::HashMap<Core::String, Core::String>;
+
+	void ProjectManager::Init(Server* server) {
+		this.m_Server = server;
+		ProjectManager* self = this;
+		server->m_Rpc.Register("project.import", [self](Call& call, const Params& params) -> Core::String { return self->ImportMethod(call, params); });
+		server->m_Rpc.Register("project.add", [self](Call& call, const Params& params) -> Core::String { return self->AddMethod(call, params); });
+		server->m_Rpc.Register("project.remove", [self](Call& call, const Params& params) -> Core::String { return self->RemoveMethod(call, params); });
+		server->m_Rpc.Register("project.move", [self](Call& call, const Params& params) -> Core::String { return self->MoveMethod(call, params); });
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Project systems
+
+	// The project system that owns a solution in `folder`: the first loaded for `ws` (null: the global plugins) whose
+	// detect file lies there; invalid for none.
+	static Serialization::DomNode SystemFor(Server* server, Workspace* ws, const FS::Path& folder) {
+		for (const Contribution& given : server->m_Plugins->Entries(ws, Core::StringView("projectSystems"))) {
+			Core::StringView detect = given.m_Entry.Member("detect").AsView();
+			if (!detect.IsEmpty() && FS::FileExists((folder / detect).CStr())) return given.m_Entry;
+		}
+		return Serialization::DomNode();
+	}
+
+	static Core::String SystemLabel(const Serialization::DomNode& system) {
+		Core::StringView label = system.Member("label").AsView();
+		return Core::String(label.IsEmpty() ? system.Member("id").AsView() : label);
+	}
+
+	static void RequireTrust(bool trusted, const Serialization::DomNode& system) {
+		if (trusted) return;
+		throw RpcError(ErrorCode::Forbidden, ((Core::String("the ") + SystemLabel(system).View()) + " project system runs the build system in the folder, which may run its scripts: trust the workspace first").View());
+	}
+
+	// Every variable a project system's steps may name, empty until the operation gives it.
+	static StepValues* EmptyValues() {
+		StepValues* values = new StepValues();
+		const char*[7] keys = { "projectName", "folder", "from", "to", "name", "language", "kind" };
+		for (const char* key : keys) values->Insert(Core::String(key), Core::String());
+		return values;
+	}
+
+	Core::Array<ProjectStep*> ProjectManager::Plan(Workspace* ws, const FS::Path& folder, const Serialization::DomNode& system, const char* operation, StepValues* values) {
+		Serialization::DomNode steps = system.Member(operation);
+		if (!steps.IsValid()) throw RpcError(ErrorCode::BadRequest, ((((Core::String("the ") + SystemLabel(system).View()) + " project system does not ") + operation) + " projects").View());
+		values->At(Core::String("workspaceDir")) = ForwardSlashes(folder.View());
+		values->At(Core::String("solutionDir")) = ForwardSlashes(folder.View());
+		return PlanProjectSteps(m_Server, steps, ws, values, (Core::String("the project system ") + system.Member("id").AsView()).View());
+	}
+
+	void ProjectManager::Run(const Core::Array<ProjectStep*>& steps, Core::StringBuilder& log) {
+		Core::String problem;
+		{
+			Threading::UnlockGuard released(m_Server->m_Lock);
+			problem = RunProjectSteps(steps, log);
+		}
+		if (!problem.IsEmpty()) throw RpcError(ErrorCode::Unavailable, problem.View());
+	}
+
+	// The refusal for a solution whose project files a generator no project system knows makes.
+	static void RefuseGenerated(const SolutionModel* solution) {
+		Serialization::DomNode generator = solution->m_Data.Member("generator");
+		if (!generator.IsValid()) return;
+		Core::StringBuilder command;
+		Serialization::DomNode run = generator.Member("run");
+		for (int64 i = 0; i < run.Count(); ++i) {
+			if (i > 0) command.AppendByte(' ');
+			command.Append(run.At(i).AsView());
+		}
+		throw RpcError(ErrorCode::BadRequest, ((Core::String("this solution's project files are made by `") + command.View()) + "`, which no loaded plugin's project system runs: change the build system's own files and run it again").View());
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Files
+
+	void ProjectManager::WriteNew(Workspace* ws, const FS::Path& folder, Core::StringView relative, Core::StringView text) {
+		FS::Path file = folder / relative;
+		if (FS::FileExists(file.CStr())) throw RpcError(ErrorCode::Conflict, (ForwardSlashes(file.View()) + " is there already").View());
+		Core::String inside;
+		if (ws && RelativeTo(ws->m_Root.View(), file.View(), inside)) {
+			m_Server->m_Workspaces->Write(ws, inside.View(), text, 0);
+			return;
+		}
+		if (!FS::MakeDirectories(file.Parent().CStr()) || !FS::WriteFileAtomically(file.CStr(), Core::String(text).CStr(), text.ByteLength()))
+			throw RpcError(ErrorCode::Unavailable, (Core::String("could not write ") + ForwardSlashes(file.View()).View()).View());
+	}
+
+	static Core::String Inside(const Workspace* ws, const FS::Path& path) {
+		Core::String relative;
+		if (!RelativeTo(ws->m_Root.View(), path.View(), relative)) throw RpcError(ErrorCode::BadRequest, (ForwardSlashes(path.View()) + " is outside the workspace").View());
+		return relative;
+	}
+
+	void ProjectManager::EditSolution(Workspace* ws, func<bool(Core::StringView, Core::String&, Core::String&)> edit) {
+		Core::String file = Inside(ws, ws->m_Solution->m_File);
+		Core::String text = m_Server->m_Workspaces->Read(ws, file.View());
+		Core::String edited;
+		Core::String error;
+		if (!edit(text.View(), edited, error)) throw RpcError(ErrorCode::Unavailable, error.View());
+		m_Server->m_Workspaces->Write(ws, file.View(), edited.View(), -1);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Projects
+
+	static ProjectModel* Named(Workspace* ws, Core::StringView name) {
+		if (!ws->m_Solution) throw RpcError(ErrorCode::BadRequest, "the workspace is a folder, not a solution: it has no projects (import it to make it one)");
+		for (ProjectModel* project : ws->m_Solution->m_Projects)
+			if (project->m_Name.View() == name) return project;
+		Core::StringBuilder known;
+		for (ProjectModel* project : ws->m_Solution->m_Projects) {
+			known.Append(!known.IsEmpty() ? ", " : "");
+			known.Append(project->m_Name.View());
+		}
+		throw RpcError(ErrorCode::NotFound, ((((Core::String("no project ") + name) + " in the solution; its projects: ") + (!known.IsEmpty() ? known.View() : Core::StringView("none"))).View()));
+	}
+
+	// The project of `ws` whose code root is `folder`; null for none.
+	static ProjectModel* RootedAt(Workspace* ws, const FS::Path& folder) {
+		if (!ws->m_Solution) return nullptr;
+		Core::String relative;
+		for (ProjectModel* project : ws->m_Solution->m_Projects)
+			if (RelativeTo(project->m_Root.View(), folder.View(), relative) && relative.IsEmpty()) return project;
+		return nullptr;
+	}
+
+	static FS::Path FolderAt(const FS::Path& path) {
+		FS::Path canonical = FS::CanonicalPath(path.CStr());
+		if (canonical.IsEmpty() || !FS::IsDirectory(canonical.CStr())) throw RpcError(ErrorCode::NotFound, (Core::String("no folder ") + ForwardSlashes(path.View()).View()).View());
+		return canonical;
+	}
+
+	static Core::String NameFor(const ProjectOptions& options, const FS::Path& folder) {
+		Core::String name = options.m_Name.IsEmpty() ? Core::String(folder.FileName()) : options.m_Name;
+		if (!IsProjectName(name.View())) throw RpcError(ErrorCode::BadRequest, ((Core::String("'") + name.View()) + "' cannot name a project: give a name of letters, digits, '_', '.' and '-'").View());
+		return name;
+	}
+
+	// The project file IED writes for `folder`, and what it chose, as notes.
+	static Core::String ProjectFileFor(Server* server, Workspace* ws, const FS::Path& folder, Core::StringView name, Core::StringView root, const ProjectOptions& options, ProjectChange* change) {
+		FolderFacts facts = DetectFolder(server, ws, folder);
+		Core::String language = options.m_Language.IsEmpty() ? facts.m_Language : options.m_Language;
+		Core::String kind = !options.m_Kind.IsEmpty() ? options.m_Kind : facts.m_Presets.IsEmpty() ? Core::String("other") : Core::String("executable");
+		if (options.m_Language.IsEmpty()) change->m_Notes.Push(language.IsEmpty() ? Core::String("no language found in the folder: give one") : (Core::String("language ") + language.View()) + ", from the folder's files");
+		if (facts.m_Presets.IsEmpty()) change->m_Notes.Push((Core::String("no plugin's task preset knows the folder's build, so it has no build or run tasks: add `presets` or `tasks` to ") + name) + ".iedproj");
+		for (const Core::String& preset : facts.m_Presets) change->m_Notes.Push((Core::String("builds with the task preset ") + preset.View()) + ", which the folder's files match");
+		return NewProjectFileText(name, root, kind.View(), language.View(), facts.m_Presets);
+	}
+
+	FS::Path ProjectManager::MakeSolution(Workspace* ws, const FS::Path& folder, const ProjectOptions& options, ProjectChange* change, Core::StringBuilder& log) {
+		Serialization::DomNode system = SystemFor(m_Server, ws, folder);
+		if (system.IsValid()) {
+			RequireTrust(ws ? ws->m_Trusted : m_Server->m_Trust.IsTrusted(folder), system);
+			Run(Plan(ws, folder, system, "generate", EmptyValues()), log);
+			FS::Path file = SolutionIn(folder);
+			if (file.IsEmpty()) throw RpcError(ErrorCode::Unavailable, ((Core::String("the ") + SystemLabel(system).View()) + " project system wrote no solution file in the folder: " + StepLogTail(log.View()).View()).View());
+			return file;
+		}
+		Core::String name = NameFor(options, folder);
+		Core::Array<Core::String> projects;
+		projects.Push(name + ".iedproj");
+		Core::String project = ProjectFileFor(m_Server, ws, folder, name.View(), Core::StringView("."), options, change);
+		WriteNew(ws, folder, (name + ".iedproj").View(), project.View());
+		WriteNew(ws, folder, (name + ".iedsln").View(), NewSolutionFileText(name.View(), projects).View());
+		return folder / (name + ".iedsln").View();
+	}
+
+	ProjectChange* ProjectManager::Import(const FS::Path& given, const ProjectOptions& options) {
+		FS::Path folder = FolderAt(given);
+		Workspace* ws = m_Server->m_Workspaces->ForRoot(folder);
+		if (ws && ws->m_Solution) throw RpcError(ErrorCode::Conflict, (ForwardSlashes(folder.View()) + " is an IED solution already").View());
+		ProjectChange* change = new ProjectChange();
+		Core::StringBuilder log;
+		FS::Path file = SolutionIn(folder);
+		// A solution a generator wrote (`nuke init --ied`) while the folder was open as a folder is taken as it is.
+		if (!file.IsEmpty()) change->m_Notes.Push((Core::String("the folder's solution ") + file.FileName()) + " was there already: opened as it is");
+		else file = MakeSolution(ws, folder, options, change, log);
+		if (ws) m_Server->m_Workspaces->BecomeSolution(ws, file);
+		else {
+			Core::String relative;
+			ws = m_Server->m_Workspaces->OpenFor(file, relative);
+			if (!ws->m_Trusted) change->m_Notes.Push(Core::String("opened untrusted, as the folder was: its owner trusts it before anything builds or runs there"));
+		}
+		change->m_Ws = ws;
+		change->m_Path = ForwardSlashes(file.View());
+		change->m_Project = ws->m_Name;
+		change->m_Log = StepLogTail(log.View());
+		return change;
+	}
+
+	ProjectChange* ProjectManager::Add(Workspace* ws, Core::StringView folder, const ProjectOptions& options) {
+		if (ws->m_Kind == "file") throw RpcError(ErrorCode::BadRequest, "a workspace opened for one file has no projects: open its folder");
+		Core::String relative = NormalizePath(folder);
+		if (relative.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "that is the workspace's own folder: import it (project.import) to make the workspace a solution");
+		FS::Path dir = FolderAt(ws->m_Root / relative.View());
+		ProjectModel* known = RootedAt(ws, dir);
+		if (known) throw RpcError(ErrorCode::Conflict, (((relative + " is project ") + known->m_Name.View()) + " already").View());
+		ProjectChange* change = new ProjectChange();
+		Serialization::DomNode system = SystemFor(m_Server, ws, ws->m_Root);
+		Core::StringBuilder log;
+		if (system.IsValid()) {
+			RequireTrust(ws->m_Trusted, system);
+			StepValues* values = EmptyValues();
+			values->At(Core::String("folder")) = relative;
+			values->At(Core::String("name")) = options.m_Name;
+			values->At(Core::String("language")) = options.m_Language.IsEmpty() ? DetectFolder(m_Server, ws, dir).m_Language : options.m_Language;
+			values->At(Core::String("kind")) = options.m_Kind;
+			Core::Array<ProjectStep*> steps = Plan(ws, ws->m_Root, system, "add", values);
+			for (ProjectStep* step : Plan(ws, ws->m_Root, system, "generate", values)) steps.Push(step);
+			Run(steps, log);
+			FS::Path file = ws->m_Solution ? FS::Path() : SolutionIn(ws->m_Root);
+			if (ws->m_Solution) m_Server->m_Workspaces->SolutionChanged(ws);
+			else if (file.IsEmpty()) throw RpcError(ErrorCode::Unavailable, ((Core::String("the ") + SystemLabel(system).View()) + " project system wrote no solution file: " + StepLogTail(log.View()).View()).View());
+			else m_Server->m_Workspaces->BecomeSolution(ws, file);
+		}
+		else {
+			if (ws->m_Solution) RefuseGenerated(ws->m_Solution);
+			Core::String name = NameFor(options, dir);
+			if (ws->m_Solution && ws->m_Solution->Project(name.View())) throw RpcError(ErrorCode::Conflict, ((Core::String("the solution has a project named ") + name.View()) + " already: give another name").View());
+			Core::String projectFile = (relative + "/") + name.View() + ".iedproj";
+			WriteNew(ws, ws->m_Root, projectFile.View(), ProjectFileFor(m_Server, ws, dir, name.View(), Core::StringView("."), options, change).View());
+			if (ws->m_Solution) {
+				Core::String listed = projectFile;
+				EditSolution(ws, [listed](Core::StringView text, Core::String& edited, Core::String& error) -> bool {
+					if (!ListsProjectFile(text, listed.View())) return ListProjectFile(text, listed.View(), edited, error);
+					edited = Core::String(text);
+					return true;
+				});
+				m_Server->m_Workspaces->SolutionChanged(ws);
+			}
+			else {
+				Core::String solution = IsProjectName(ws->m_Name.View()) ? ws->m_Name : name;
+				Core::Array<Core::String> projects;
+				projects.Push(projectFile);
+				WriteNew(ws, ws->m_Root, (solution + ".iedsln").View(), NewSolutionFileText(solution.View(), projects).View());
+				m_Server->m_Workspaces->BecomeSolution(ws, ws->m_Root / (solution + ".iedsln").View());
+			}
+		}
+		ProjectModel* added = RootedAt(ws, dir);
+		if (!added) change->m_Notes.Push(Core::String("the solution does not list a project in the folder after the change; see the log"));
+		change->m_Ws = ws;
+		change->m_Path = ForwardSlashes(dir.View());
+		change->m_Project = added ? added->m_Name : Core::String();
+		change->m_Log = StepLogTail(log.View());
+		return change;
+	}
+
+	// The projects whose references name `name`, ", " between them.
+	static Core::String Referrers(const SolutionModel* solution, Core::StringView name) {
+		Core::StringBuilder found;
+		for (ProjectModel* project : solution->m_Projects) {
+			Serialization::DomNode references = project->m_Data.Member("references");
+			for (int64 i = 0; i < references.Count(); ++i)
+				if (references.At(i).AsView() == name && project->m_Name.View() != name) {
+					found.Append(!found.IsEmpty() ? ", " : "");
+					found.Append(project->m_Name.View());
+				}
+		}
+		return found.ToString();
+	}
+
+	ProjectChange* ProjectManager::Remove(Workspace* ws, Core::StringView name, bool deleteFiles) {
+		ProjectModel* project = Named(ws, name);
+		Core::String referrers = Referrers(ws->m_Solution, name);
+		if (!referrers.IsEmpty()) throw RpcError(ErrorCode::Conflict, ((((referrers + " depend on ") + name) + " (their references): take it out of their dependencies first, or remove them too").View()));
+		Core::String folder;
+		const bool inside = RelativeTo(ws->m_Root.View(), project->m_Root.View(), folder);
+		if (deleteFiles && (!inside || folder.IsEmpty())) throw RpcError(ErrorCode::BadRequest, ((Core::String(name) + "'s folder is ") + (inside ? "the workspace's own" : "outside the workspace") + ": remove it without deleting its files").View());
+		ProjectChange* change = new ProjectChange();
+		Serialization::DomNode system = SystemFor(m_Server, ws, ws->m_Root);
+		Core::StringBuilder log;
+		if (system.IsValid()) {
+			RequireTrust(ws->m_Trusted, system);
+			StepValues* values = EmptyValues();
+			values->At(Core::String("projectName")) = Core::String(name);
+			values->At(Core::String("folder")) = folder;
+			Core::Array<ProjectStep*> steps = Plan(ws, ws->m_Root, system, deleteFiles ? "delete" : "remove", values);
+			Core::Array<ProjectStep*> generate = Plan(ws, ws->m_Root, system, "generate", values);
+			Run(steps, log);
+			if (deleteFiles) change->m_TrashId = m_Server->m_Workspaces->TrashFolder(ws, folder.View());
+			Run(generate, log);
+		}
+		else {
+			RefuseGenerated(ws->m_Solution);
+			Core::String projectFile = Inside(ws, project->m_File);
+			Core::String gone = Core::String(name);
+			EditSolution(ws, [projectFile, gone](Core::StringView text, Core::String& edited, Core::String& error) -> bool {
+				return UnlistProject(text, projectFile.View(), gone.View(), edited, error);
+			});
+			const bool inFolder = !folder.IsEmpty() && projectFile.View().StartsWith((folder + "/").View());
+			Core::String solutionText = m_Server->m_Workspaces->Read(ws, Inside(ws, ws->m_Solution->m_File).View());
+			if (ListsProjectFile(solutionText.View(), projectFile.View()) && !(deleteFiles && inFolder)) {
+				m_Server->m_Workspaces->TrashFile(ws, projectFile.View());
+				change->m_Notes.Push((Core::String("its project file ") + projectFile.View()) + " went to the trash: a glob of the solution's projects lists it");
+			}
+			else if (deleteFiles && !inFolder) m_Server->m_Workspaces->TrashFile(ws, projectFile.View());
+			if (deleteFiles) change->m_TrashId = m_Server->m_Workspaces->TrashFolder(ws, folder.View());
+		}
+		m_Server->m_Workspaces->SolutionChanged(ws);
+		if (ws->m_Solution->Project(name)) change->m_Notes.Push(Core::String("the solution still lists the project after the change; see the log"));
+		change->m_Ws = ws;
+		change->m_Path = ForwardSlashes(project->m_Root.View());
+		change->m_Project = Core::String(name);
+		change->m_Log = StepLogTail(log.View());
+		return change;
+	}
+
+	ProjectChange* ProjectManager::Move(Workspace* ws, Core::StringView name, Core::StringView to) {
+		ProjectModel* project = Named(ws, name);
+		Core::String from;
+		if (!RelativeTo(ws->m_Root.View(), project->m_Root.View(), from) || from.IsEmpty()) throw RpcError(ErrorCode::BadRequest, ((Core::String(name) + "'s folder is ") + (from.IsEmpty() ? "the workspace's own" : "outside the workspace") + ": it cannot move").View());
+		Core::String target = NormalizePath(to);
+		if (target.IsEmpty() || target.View() == from.View()) throw RpcError(ErrorCode::BadRequest, (Core::String("give the folder to move ") + name + " to, relative to the workspace").View());
+		if (target.View().StartsWith((from + "/").View())) throw RpcError(ErrorCode::BadRequest, "a project cannot move into its own folder");
+		FS::Path destination = ws->m_Root / target.View();
+		if (FS::FileExists(destination.CStr()) || FS::IsDirectory(destination.CStr())) throw RpcError(ErrorCode::Conflict, (target + " is there already").View());
+		ProjectChange* change = new ProjectChange();
+		Serialization::DomNode system = SystemFor(m_Server, ws, ws->m_Root);
+		Core::StringBuilder log;
+		if (system.IsValid()) {
+			RequireTrust(ws->m_Trusted, system);
+			StepValues* values = EmptyValues();
+			values->At(Core::String("projectName")) = Core::String(name);
+			values->At(Core::String("folder")) = from;
+			values->At(Core::String("from")) = from;
+			values->At(Core::String("to")) = target;
+			Core::Array<ProjectStep*> steps = Plan(ws, ws->m_Root, system, "move", values);
+			Core::Array<ProjectStep*> generate = Plan(ws, ws->m_Root, system, "generate", values);
+			m_Server->m_Workspaces->MoveFolder(ws, from.View(), target.View());
+			try {
+				Run(steps, log);
+			}
+			catch (RpcError& error) {
+				m_Server->m_Workspaces->MoveFolder(ws, target.View(), from.View());
+				throw error;
+			}
+			Run(generate, log);
+		}
+		else {
+			RefuseGenerated(ws->m_Solution);
+			Core::String projectFile = Inside(ws, project->m_File);
+			m_Server->m_Workspaces->MoveFolder(ws, from.View(), target.View());
+			if (projectFile.View().StartsWith((from + "/").View())) {
+				Core::String was = projectFile;
+				Core::String now = target + projectFile.View().Substring(from.ByteLength(), projectFile.ByteLength() - from.ByteLength());
+				EditSolution(ws, [was, now](Core::StringView text, Core::String& edited, Core::String& error) -> bool {
+					Core::String relisted;
+					if (!RelistProjectFile(text, was.View(), now.View(), relisted, error)) return false;
+					if (ListsProjectFile(relisted.View(), now.View())) {
+						edited = relisted;
+						return true;
+					}
+					return ListProjectFile(relisted.View(), now.View(), edited, error);
+				});
+			}
+			else {
+				Core::String text = m_Server->m_Workspaces->Read(ws, projectFile.View());
+				Core::String edited;
+				Core::String error;
+				Core::String root = PathBetween(FS::Path(projectFile.View()).Parent().View(), target.View());
+				if (!SetMember(text.View(), Core::StringView("root"), JsonString(root.View()).View(), edited, error)) throw RpcError(ErrorCode::Unavailable, error.View());
+				m_Server->m_Workspaces->Write(ws, projectFile.View(), edited.View(), -1);
+			}
+		}
+		m_Server->m_Workspaces->SolutionChanged(ws);
+		ProjectModel* moved = ws->m_Solution->Project(name);
+		if (!moved || RootedAt(ws, FS::CanonicalPath(destination.CStr())) != moved) change->m_Notes.Push(Core::String("the solution does not show the project in its new folder after the change; see the log"));
+		change->m_Ws = ws;
+		change->m_Path = ForwardSlashes(destination.View());
+		change->m_Project = Core::String(name);
+		change->m_Log = StepLogTail(log.View());
+		return change;
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Methods
+
+	Core::String ProjectChangeJson(const ProjectChange* change) {
+		JsonWriter json;
+		json.BeginObject();
+		json.RawField("workspace", change->m_Ws->SummaryJson().View());
+		json.Field("path", change->m_Path.View());
+		json.Field("project", change->m_Project.View());
+		if (!change->m_TrashId.IsEmpty()) json.Field("trashId", change->m_TrashId.View());
+		json.Key(Core::StringView("notes"));
+		json.BeginArray();
+		for (const Core::String& note : change->m_Notes) json.String(note.View());
+		json.EndArray();
+		json.Field("log", change->m_Log.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static ProjectOptions OptionsFrom(const Params& params) {
+		ProjectOptions options;
+		options.m_Name = params.Str("name", Core::StringView(""));
+		options.m_Kind = params.Str("kind", Core::StringView(""));
+		options.m_Language = params.Str("language", Core::StringView(""));
+		return options;
+	}
+
+	// {path (a full path), name?, kind?, language?}
+	Core::String ProjectManager::ImportMethod(Call& call, const Params& params) {
+		Core::String path = params.Str("path");
+		if (!FS::Path(path.View()).IsAbsolute()) throw RpcError(ErrorCode::BadRequest, "give the folder as a full path");
+		return ProjectChangeJson(Import(FS::Path(path.View()), OptionsFrom(params)));
+	}
+
+	// {wsId, folder, name?, kind?, language?}
+	Core::String ProjectManager::AddMethod(Call& call, const Params& params) {
+		return ProjectChangeJson(Add(m_Server->m_Workspaces->Get(params.Str("wsId").View()), params.Str("folder").View(), OptionsFrom(params)));
+	}
+
+	// {wsId, project, deleteFiles?}
+	Core::String ProjectManager::RemoveMethod(Call& call, const Params& params) {
+		return ProjectChangeJson(Remove(m_Server->m_Workspaces->Get(params.Str("wsId").View()), params.Str("project").View(), params.Bool("deleteFiles", false)));
+	}
+
+	// {wsId, project, to}
+	Core::String ProjectManager::MoveMethod(Call& call, const Params& params) {
+		return ProjectChangeJson(Move(m_Server->m_Workspaces->Get(params.Str("wsId").View()), params.Str("project").View(), params.Str("to").View()));
+	}
+}

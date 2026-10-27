@@ -1,0 +1,318 @@
+include "GitService.ch"
+include "repo/Discover.ch"
+
+namespace Git
+{
+	Core::String GitWorkspace::SnapshotJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("repos"));
+		json.BeginArray();
+		for (GitRepo* repo : m_Repos) json.Raw(repo->SummaryJson().View());
+		json.EndArray();
+		json.Field("error", m_Error.View());
+		json.BoolField("discovering", m_Discover);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void GitPlugin::Init(IED::PluginContext* context) {
+		this.m_Context = context;
+		GitPlugin* self = this;
+		m_Thread = Threading::Thread::Run([self]() { self->RefreshLoop(); });
+	}
+
+	void GitPlugin::Stop() {
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_Stopping = true;
+			m_Wake.NotifyAll();
+		}
+		m_Thread.Join();
+	}
+
+	Core::String GitPlugin::SettingText(Core::StringView key, Core::StringView wsId) const {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Core::String(Serialization::ReadJson(m_Context->Setting(key, wsId).View(), *doc).root.AsView());
+	}
+
+	GitCli GitPlugin::CliFor(Core::StringView wsId) const {
+		GitCli cli;
+		Core::String path = SettingText(Core::StringView("git.path"), wsId);
+		if (!path.View().Trimmed().IsEmpty()) cli.m_Program = Core::String(path.View().Trimmed());
+		return cli;
+	}
+
+	GitWorkspace* GitPlugin::Find(Core::StringView wsId) const {
+		for (GitWorkspace* git : m_Workspaces)
+			if (git->m_WsId.View() == wsId) return git;
+		return nullptr;
+	}
+
+	void GitPlugin::Opened(const IED::Workspace& ws) {
+		Threading::LockGuard guard(m_Lock);
+		if (Find(ws.m_Id.View())) return;
+		GitWorkspace* git = new GitWorkspace();
+		git->m_WsId = ws.m_Id;
+		git->m_Root = FS::Path(ws.m_Root.View());
+		m_Workspaces.Push(git);
+		m_Context->Topic(git->Topic().View(), git->SnapshotJson().View());
+		Trusted(git, ws.m_Trusted);
+	}
+
+	void GitPlugin::TrustChanged(const IED::Workspace& ws) {
+		Threading::LockGuard guard(m_Lock);
+		GitWorkspace* git = Find(ws.m_Id.View());
+		if (git) Trusted(git, ws.m_Trusted);
+	}
+
+	// Untrusted: its repositories go; trusted: they are found again.
+	void GitPlugin::Trusted(GitWorkspace* git, bool trusted) {
+		git->m_Trusted = trusted;
+		if (!trusted) {
+			Forget(git);
+			git->m_Error = Core::String("untrusted");
+		}
+		else if (git->m_Repos.IsEmpty()) {
+			git->m_Error = Core::String("");
+			git->m_Discover = true;
+			m_Wake.NotifyAll();
+		}
+		Listed(git);
+	}
+
+	// The workspace's repositories changed: its topic's snapshot and a repos.changed event.
+	void GitPlugin::Listed(GitWorkspace* git) {
+		Core::String snapshot = git->SnapshotJson();
+		m_Context->Topic(git->Topic().View(), snapshot.View());
+		m_Context->Publish(git->Topic().View(), "repos.changed", snapshot.View());
+	}
+
+	// A forgotten repository's own watcher, if it has one, keeps marking it; nothing reads it again.
+	void GitPlugin::Forget(GitWorkspace* git) {
+		for (GitRepo* repo : git->m_Repos) m_Context->RemoveTopic(repo->Topic().View());
+		git->m_Repos.Clear();
+		git->m_Discover = false;
+	}
+
+	// --- Which repositories a change touches ---------------------------------------------------------------------------
+
+	// A path inside a git dir: whether it changes the status (and the refs). Objects, logs and lock files do not.
+	static bool GitDirMatters(Core::StringView inside) {
+		if (inside.StartsWith(Core::StringView("objects/")) || inside.EndsWith(Core::StringView(".lock"))) return false;
+		if (inside.StartsWith(Core::StringView("logs/"))) return inside == "logs/refs/stash";
+		return true;
+	}
+
+	void GitPlugin::Mark(GitRepo* repo, Core::StringView path, bool inGitDir) {
+		if (inGitDir && !GitDirMatters(path)) return;
+		repo->m_StatusDirty = true;
+		repo->m_RefsDirty = repo->m_RefsDirty || inGitDir;
+		repo->m_ChangedNs = clock_now_ns();
+	}
+
+	void GitPlugin::FilesChanged(const IED::FileChanges& changes) {
+		Threading::LockGuard guard(m_Lock);
+		GitWorkspace* git = Find(changes.m_WsId.View());
+		if (!git || git->m_Repos.IsEmpty()) return;
+		for (GitRepo* repo : git->m_Repos) {
+			Core::String gitDir;
+			const bool gitDirInside = IED::RelativeTo(git->m_Root.View(), repo->m_CommonDir.View(), gitDir);
+			for (const IED::FileChange& change : changes.m_Changes) {
+				Core::String inside;
+				if (gitDirInside && IED::RelativeTo(gitDir.View(), change.m_Path.View(), inside)) Mark(repo, inside.View(), true);
+				else if (repo->m_Relative.IsEmpty() || repo->m_Relative == ".." || IED::RelativeTo(repo->m_Relative.View(), change.m_Path.View(), inside)) Mark(repo, change.m_Path.View(), false);
+			}
+			if (changes.m_Overflowed) {
+				repo->m_StatusDirty = true;
+				repo->m_RefsDirty = true;
+			}
+		}
+		m_Wake.NotifyAll();
+	}
+
+	// A repository whose refs live outside the workspace folder (it is above it, or a worktree's) gets a watcher of
+	// its own on them; it marks the repository from a thread of its own.
+	void GitPlugin::Watch(GitRepo* repo) {
+		Core::String inside;
+		if (IED::RelativeTo(repo->m_WsRoot.View(), repo->m_CommonDir.View(), inside)) return;
+		GitPlugin* self = this;
+		Core::String error;
+		if (!m_Context->WatchFolder(repo->m_CommonDir.View(), [self, repo](const Core::Array<Core::String>& paths) {
+			Threading::LockGuard guard(self->m_Lock);
+			for (const Core::String& path : paths) self->Mark(repo, path.View(), true);
+			self->m_Wake.NotifyAll();
+		}, error))
+			Log(repo, (Core::String("not watching ") + repo->m_CommonDir.View() + ": " + error.View() + "\n").View());
+	}
+
+	// --- The thread ------------------------------------------------------------------------------------------------------
+
+	void GitPlugin::RefreshLoop() {
+		Threading::LockGuard guard(m_Lock);
+		while (!m_Stopping) {
+			if (DiscoverNext()) continue;
+			int64 waitNs = -1;
+			if (RefreshDue(waitNs)) continue;
+			if (waitNs < 0) m_Wake.Wait(m_Lock);
+			else m_Wake.WaitFor(m_Lock, waitNs);
+		}
+	}
+
+	bool GitPlugin::DiscoverNext() {
+		for (GitWorkspace* git : m_Workspaces) {
+			if (!git->m_Discover) continue;
+			git->m_Discover = false;
+			Discover(git);
+			return true;
+		}
+		return false;
+	}
+
+	void GitPlugin::Discover(GitWorkspace* git) {
+		GitCli cli = CliFor(git->m_WsId.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		const int64 depth = Serialization::ReadJson(m_Context->Setting(Core::StringView("git.scanDepth"), git->m_WsId.View()).View(), *doc).root.AsInt();
+		FS::Path folder = FS::IsDirectory(git->m_Root.CStr()) ? git->m_Root : git->m_Root.Parent();
+		Core::Array<GitFound> found;
+		Core::String error;
+		{
+			Threading::UnlockGuard released(m_Lock);
+			FindRepositories(cli, folder, (int32)depth, found, error);
+		}
+		if (!git->m_Trusted) return;
+		Forget(git);
+		git->m_Error = error;
+		for (const GitFound& each : found) {
+			GitRepo* repo = new GitRepo();
+			m_RepoCount += 1;
+			Core::StringBuilder id;
+			id.AppendByte('r');
+			id.AppendInt(m_RepoCount);
+			repo->m_RepoId = id.ToString();
+			repo->m_WsId = git->m_WsId;
+			repo->m_WsRoot = git->m_Root;
+			repo->m_Root = each.m_Root;
+			repo->m_GitDir = each.m_GitDir;
+			repo->m_CommonDir = each.m_CommonDir;
+			repo->m_Kind = Core::String(each.m_Submodule ? "submodule" : "repo");
+			repo->m_Name = Core::String(each.m_Root.FileName());
+			GitRelative(git->m_Root, each.m_Root, repo->m_Relative);
+			repo->m_StatusDirty = true;
+			repo->m_RefsDirty = true;
+			git->m_Repos.Push(repo);
+			Snapshot(repo);
+			Watch(repo);
+		}
+		Listed(git);
+	}
+
+	bool GitPlugin::RefreshDue(int64& waitNs) {
+		const int64 now = clock_now_ns();
+		for (GitWorkspace* git : m_Workspaces) {
+			for (GitRepo* repo : git->m_Repos) {
+				if (!repo->m_StatusDirty && !repo->m_RefsDirty) continue;
+				int64 due = repo->m_ChangedNs + c_GitQuietNs;
+				if (repo->m_ReadNs + c_GitStatusEveryNs > due) due = repo->m_ReadNs + c_GitStatusEveryNs;
+				if (repo->m_HeadJson.IsEmpty() || due <= now) {
+					Refresh(repo, false);
+					return true;
+				}
+				if (waitNs < 0 || due - now < waitNs) waitNs = due - now;
+			}
+		}
+		return false;
+	}
+
+	// The refs as git lists them: branches and tags, the remotes, the stashes, the worktrees, the submodules.
+	static GitRefsRead ReadRefs(const GitCli& cli, const FS::Path& root) {
+		GitRefsRead read;
+		Core::Array<Core::String> refs = GitArgs("for-each-ref", (Core::String("--format=") + c_GitRefFormat).CStr());
+		refs.Push(Core::String("refs/heads"));
+		refs.Push(Core::String("refs/remotes"));
+		refs.Push(Core::String("refs/tags"));
+		read.m_Refs = ParseRefs(cli.Run(root, refs, c_GitReadTimeoutMs).m_Output.View());
+		read.m_Remotes = ParseRemotes(cli.Run(root, GitArgs("config", "--get-regexp", "^remote\\..*\\.url$"), c_GitReadTimeoutMs).m_Output.View());
+		read.m_Stashes = ParseStashes(cli.Run(root, GitArgs("stash", "list", "-z", (Core::String("--format=") + c_GitStashFormat).CStr()), c_GitReadTimeoutMs).m_Output.View());
+		read.m_Worktrees = ParseWorktrees(cli.Run(root, GitArgs("worktree", "list", "--porcelain", "-z"), c_GitReadTimeoutMs).m_Output.View());
+		FS::Path modules = root / ".gitmodules";
+		if (FS::FileExists(modules.CStr())) {
+			Core::Array<Core::String> paths = GitArgs("config", "--file", ".gitmodules");
+			paths.Push(Core::String("--get-regexp"));
+			paths.Push(Core::String("^submodule\\..*\\.path$"));
+			GitRun listed = cli.Run(root, paths, c_GitReadTimeoutMs);
+			for (Core::StringView line : SplitOn(listed.m_Output.View(), '\n')) {
+				const int64 space = line.IndexOf(' ', 0);
+				if (space < 0) continue;
+				GitSubmodule submodule;
+				submodule.m_Path = Core::String(line.Substring(space + 1, line.ByteLength() - space - 1).Trimmed());
+				read.m_Submodules.Push(submodule);
+			}
+		}
+		return read;
+	}
+
+	void GitPlugin::Refresh(GitRepo* repo, bool refs) {
+		const bool readRefs = refs || repo->m_RefsDirty || repo->m_RefsJson.IsEmpty();
+		repo->m_StatusDirty = false;
+		repo->m_RefsDirty = false;
+		repo->m_ReadNs = clock_now_ns();
+		repo->m_ReadGeneration += 1;
+		const int64 generation = repo->m_ReadGeneration;
+		GitCli cli = CliFor(repo->m_WsId.View());
+		FS::Path root = repo->m_Root;
+		FS::Path gitDir = repo->m_GitDir;
+		Core::String head;
+		Core::String changes;
+		Core::String refsJson;
+		Core::String problem;
+		{
+			Threading::UnlockGuard released(m_Lock);
+			Core::Array<Core::String> arguments = GitArgs("status", "--porcelain=v2", "-z");
+			arguments.Push(Core::String("--branch"));
+			arguments.Push(Core::String("--untracked-files=all"));
+			GitRun status = cli.Run(root, arguments, c_GitReadTimeoutMs);
+			if (status.Ok()) {
+				GitStatus parsed = ParseStatus(status.m_Output.View());
+				head = GitHeadJson(parsed.m_Head, GitRepoState(gitDir).View());
+				changes = GitChangesJson(parsed);
+			}
+			else problem = status.Problem();
+			if (readRefs) refsJson = GitRefsJson(ReadRefs(cli, root), root);
+		}
+		if (!problem.IsEmpty()) Log(repo, (Core::String("git status: ") + problem.View() + "\n").View());
+		if (generation < repo->m_StatusGeneration) head = Core::String("");
+		if (generation < repo->m_RefsGeneration) refsJson = Core::String("");
+		if (!head.IsEmpty()) repo->m_StatusGeneration = generation;
+		if (!refsJson.IsEmpty()) repo->m_RefsGeneration = generation;
+		PublishRead(repo, head, changes, refsJson);
+	}
+
+	void GitPlugin::PublishRead(GitRepo* repo, const Core::String& head, const Core::String& changes, const Core::String& refs) {
+		const bool status = !head.IsEmpty() && (head.View() != repo->m_HeadJson.View() || changes.View() != repo->m_ChangesJson.View());
+		const bool refsChanged = !refs.IsEmpty() && refs.View() != repo->m_RefsJson.View();
+		if (status) {
+			repo->m_HeadJson = head;
+			repo->m_ChangesJson = changes;
+		}
+		if (refsChanged) repo->m_RefsJson = refs;
+		if (status || refsChanged) Snapshot(repo);
+		if (status) Publish(repo, "status.changed", ((((Core::String("{\"head\":") + head.View()) + ",\"changes\":") + changes.View()) + "}").View());
+		if (refsChanged) Publish(repo, "refs.changed", ((Core::String("{\"refs\":") + refs.View()) + "}").View());
+	}
+
+	void GitPlugin::Snapshot(GitRepo* repo) { m_Context->Topic(repo->Topic().View(), repo->SnapshotJson().View()); }
+
+	void GitPlugin::Publish(GitRepo* repo, const char* kind, Core::StringView data) { m_Context->Publish(repo->Topic().View(), kind, data); }
+
+	void GitPlugin::Log(GitRepo* repo, Core::StringView text) { m_Context->Output(repo->m_WsId.View(), Core::StringView(c_GitOutput), text); }
+
+	Core::String GitRepoState(const FS::Path& gitDir) {
+		if (FS::FileExists((gitDir / "MERGE_HEAD").CStr())) return Core::String("merging");
+		if (FS::IsDirectory((gitDir / "rebase-merge").CStr()) || FS::IsDirectory((gitDir / "rebase-apply").CStr())) return Core::String("rebasing");
+		if (FS::FileExists((gitDir / "CHERRY_PICK_HEAD").CStr())) return Core::String("cherryPicking");
+		if (FS::FileExists((gitDir / "REVERT_HEAD").CStr())) return Core::String("reverting");
+		if (FS::FileExists((gitDir / "BISECT_LOG").CStr())) return Core::String("bisecting");
+		return Core::String("");
+	}
+}

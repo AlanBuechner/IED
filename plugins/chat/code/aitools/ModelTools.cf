@@ -1,0 +1,198 @@
+include "api/Plugin.ch"
+include "ModelTools.ch"
+include "claude/Pacing.ch"
+
+namespace Ai
+{
+	static int64 ToolsNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	static void Percent(Core::StringBuilder& out, double value) {
+		out.AppendDouble(value, 0);
+		out.Append("%");
+	}
+
+	static void WindowLine(Core::StringBuilder& out, const UsageWindow* window, const PaceDays& days, int64 now) {
+		out.Append("- ");
+		out.Append(window->m_Label.View());
+		out.Append(": ");
+		Percent(out, window->m_Utilization);
+		out.Append(" used");
+		if (window->m_ResetsAtMs > 0) {
+			out.Append(", resets ");
+			out.Append(ResetText(window->m_ResetsAtMs, now).View());
+			out.Append("; ");
+			Percent(out, Through(*window, days, now) * 100.0);
+			out.Append(CountsWorkDays(*window, days) ? Core::StringView(" through its work days; pace ") : Core::StringView(" through; pace "));
+			out.AppendDouble(Pace(*window, days, now), 2);
+			out.Append("x");
+		}
+		if (window->m_Separate) {
+			out.Append(" (");
+			out.Append(window->m_Model.View());
+			out.Append("'s own week, on top of the shared week and the session)");
+		}
+		if (UsedUp(*window, now)) out.Append(" - USED UP");
+		out.Append("\n");
+	}
+
+	// A window used up keeps no turn from asking Claude (docs/04 "Usage"): what happens instead.
+	static void UsedUpLine(Core::StringBuilder& out, const ClaudeUsage& usage, int64 now) {
+		for (const UsageWindow* window : usage.m_Windows) {
+			if (!UsedUp(*window, now)) continue;
+			out.Append("A window used up does not keep Claude out of a turn: each turn asks Claude first (a plan upgraded mid-week works at once), Claude's own refusal moves it to the next model of its chain, and the next turn asks Claude again.\n");
+			return;
+		}
+	}
+
+	static void ProfileLine(Core::StringBuilder& out, const ModelProfile* profile) {
+		out.Append("- ");
+		out.Append(profile->m_Name.View());
+		out.Append(": ");
+		if (!profile->IsClaude()) {
+			out.Append(PrivacyName(profile->m_Privacy));
+			out.Append(" model ");
+			out.Append(profile->m_Model.View());
+			out.Append("\n");
+			return;
+		}
+		out.Append("Claude ");
+		out.Append(profile->m_Model.View());
+		out.Append("\n");
+	}
+
+	Core::String UsageText(const ClaudeAccount& account, const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, int64 now) {
+		Core::StringBuilder out;
+		out.Append("Claude Code: ");
+		if (account.m_CliPath.IsEmpty()) out.Append("no CLI found yet");
+		else {
+			out.Append(account.m_CliVersion.IsEmpty() ? Core::StringView("found") : account.m_CliVersion.View());
+			out.Append(account.m_SignIn == "signed_in" && IsSubscriptionAuth(account.m_AuthMethod.View()) ? Core::StringView(", on the Claude subscription") : Core::StringView(", NOT signed in to a Claude subscription (Claude turns are refused)"));
+		}
+		const ClaudeUsage& usage = account.m_Usage;
+		if (!usage.m_Plan.IsEmpty()) {
+			out.Append("; plan ");
+			out.Append(usage.m_Plan.View());
+		}
+		out.Append("\n");
+		const PaceDays days = account.Days();
+		if (!usage.m_Known || !usage.m_Available) out.Append("The plan's usage is not known");
+		else {
+			out.Append("The plan's windows (pace 1.0x lasts exactly to the reset; above it runs out early");
+			out.Append(days.m_WorkWeek ? Core::StringView("; a week's pace counts only its work days, ai.claude.paceDays):\n") : Core::StringView("):\n"));
+			for (const UsageWindow* window : usage.m_Windows) WindowLine(out, window, days, now);
+		}
+		if (!usage.m_Error.IsEmpty()) {
+			out.Append(" (the last ask failed: ");
+			out.Append(usage.m_Error.View());
+			out.Append(")");
+		}
+		if (!usage.m_Known || !usage.m_Available) out.Append("\n");
+		UsedUpLine(out, usage, now);
+		out.Append("Models (ai.models):\n");
+		for (const ModelProfile* profile : models) ProfileLine(out, profile);
+		Core::Array<RoleChain*> chains = ClaudeChains(models, groupsJson, account, now);
+		if (chains.IsEmpty()) return out.ToString();
+		out.Append("Chains with Claude (ai.groups; a chat's mode picks the role - ask: primary, plan: planning, agent: implementation; a role left off is primary):\n");
+		for (const RoleChain* chain : chains) {
+			out.Append("- ");
+			out.Append(chain->m_Group.View());
+			out.Append(" / ");
+			out.Append(chain->m_Role.View());
+			out.Append(": ");
+			out.Append(ChainText(*chain).View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	static Core::Array<ModelProfile*> ModelsOf(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return ReadModels(call.m_Context->Setting(Core::StringView("ai.models"), WsId(call.m_Ws)).View(), problems);
+	}
+
+	static ToolOutcome UsageRun(Chats* chats, const ToolInvocation& call) {
+		if (call.m_Args.Member("refresh").AsBool()) chats->m_Claude->Refresh(false);
+		else chats->m_Claude->SyncIfStale();
+		Core::Array<ModelProfile*> models = ModelsOf(call);
+		Core::String groups = call.m_Context->Setting(Core::StringView("ai.groups"), WsId(call.m_Ws));
+		IED::HostLock guard(*call.m_Context);
+		Core::StringBuilder out;
+		out.Append(UsageText(*chats->m_Claude, models, groups.View(), ToolsNowMs()).View());
+		out.Append("This chat: ");
+		out.Append(call.m_Chat->m_PinnedModel.IsEmpty() ? Core::StringView("its group's model") : (Core::String("pinned to ") + call.m_Chat->m_PinnedModel.View()).View());
+		out.Append(" (chat_set_model changes it for the next turns)\n");
+		return ToolResult(out.View(), Core::StringView("Claude usage"));
+	}
+
+	// The chat the call names, this one when it names none; null with `problem`.
+	static Chat* Target(Chats* chats, Chat* self, const ToolInvocation& call, Core::String& problem) {
+		Core::StringView id = call.m_Args.Member("chat").AsView();
+		if (id.IsEmpty() || id == self->m_ChatId.View()) return self;
+		for (Chat* each : chats->InWorkspace(call.m_Ws.m_Id.View()))
+			if (each->m_ChatId.View() == id) return each;
+		problem = (Core::String("there is no chat ") + id) + " in this workspace; chat_list lists them";
+		return nullptr;
+	}
+
+	static ToolOutcome SetModelRun(Chats* chats, Chat* self, const ToolInvocation& call) {
+		Core::StringView name = call.m_Args.Member("model").AsView();
+		Core::Array<ModelProfile*> models = ModelsOf(call);
+		if (!name.IsEmpty() && !FindModel(models, name)) {
+			Core::StringBuilder known;
+			for (ModelProfile* profile : models) {
+				if (!known.IsEmpty()) known.Append(", ");
+				known.Append(profile->m_Name.View());
+			}
+			return ToolError(((Core::String("chat_set_model: there is no model ") + name) + " in ai.models; they are " + known.View()).View());
+		}
+		IED::HostLock guard(*call.m_Context);
+		Core::String problem;
+		Chat* chat = Target(chats, self, call, problem);
+		if (!chat) return ToolError((Core::String("chat_set_model: ") + problem.View()).View());
+		chat->m_PinnedModel = Core::String(name);
+		chats->Changed(chat);
+		Core::StringBuilder said;
+		said.Append(chat == self ? "This chat's" : "That chat's");
+		said.Append(" next turns use ");
+		said.Append(name.IsEmpty() ? Core::StringView("its group's model again") : name);
+		said.Append(chat == self ? "; this turn goes on with the model it started on." : ".");
+		return ToolResult(said.View(), (Core::String("Model: ") + (name.IsEmpty() ? Core::StringView("the group's") : name)).View());
+	}
+
+	static ToolSpec* ModelTool(const char* name, const char* description, const char* parameters, ToolClass toolClass) {
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Name = Core::String(name);
+		spec->m_Description = Core::String(description);
+		spec->m_Parameters = Core::String(parameters);
+		spec->m_ToolClass = toolClass;
+		spec->m_ParallelSafe = toolClass == ToolClass::Read;
+		spec->m_InPlan = toolClass == ToolClass::Read;
+		spec->m_Deferred = true;
+		spec->m_Group = Core::String("models");
+		return spec;
+	}
+
+	void AddModelTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
+		ToolSpec* usage = ModelTool("ai_usage", "The Claude plan's usage: each window (the 5-hour session, the week, the per-model weeks) - how much is used, how far through it is, its pace (1.0x lasts exactly to the reset) and when it resets - the models of ai.models, and which model pacing picks now. Use it before handing out work to decide which model a chat should use. Example: ai_usage({\"refresh\": true})",
+			"{\"type\": \"object\", \"properties\": {\"refresh\": {\"type\": \"boolean\", \"description\": \"ask the CLI now rather than use the last answer\"}}, \"additionalProperties\": false}", ToolClass::Read);
+		usage->m_Plan = [](const ToolInvocation& call) -> ToolPlan {
+			ToolPlan plan;
+			plan.m_Subject = Core::String("ai.usage(*)");
+			plan.m_Summary = Core::String("Read Claude's usage");
+			return plan;
+		};
+		usage->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return UsageRun(chats, call); };
+		registry.Add(usage);
+		ToolSpec* pin = ModelTool("chat_set_model", "Pin a model of ai.models for a chat's next turns (this chat's, or another chat's by id), over its group's primary; \"\" goes back to the group's. Use a cheaper model for routine work to stretch Claude's usage, the strongest while it is under pace. Example: chat_set_model({\"model\": \"claude-sonnet\", \"chat\": \"c18f2a\"})",
+			"{\"type\": \"object\", \"properties\": {\"model\": {\"type\": \"string\"}, \"chat\": {\"type\": \"string\"}}, \"required\": [\"model\"], \"additionalProperties\": false}", ToolClass::Exec);
+		pin->m_Plan = [](const ToolInvocation& call) -> ToolPlan {
+			ToolPlan plan;
+			Core::StringView name = call.m_Args.Member("model").AsView();
+			plan.m_Subject = (Core::String("chat.model(") + (name.IsEmpty() ? Core::StringView("*") : name)) + ")";
+			plan.m_Summary = (Core::String("Use ") + (name.IsEmpty() ? Core::StringView("the group's model") : name)) + " for the next turns";
+			return plan;
+		};
+		pin->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SetModelRun(chats, chat, call); };
+		registry.Add(pin);
+	}
+}

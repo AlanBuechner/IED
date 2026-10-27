@@ -1,0 +1,31 @@
+include "Queue.ch"
+
+namespace Terminal
+{
+	void MessageQueue::Push(Core::StringView message) {
+		Threading::LockGuard guard(m_Lock);
+		if (m_Closed) return;
+		m_Messages.Push(Core::String(message));
+		m_Ready.NotifyOne();
+	}
+
+	bool MessageQueue::Next(Core::String& message, int64 timeoutMs) {
+		Threading::LockGuard guard(m_Lock);
+		if (m_Messages.IsEmpty() && !m_Closed) m_Ready.WaitFor(m_Lock, timeoutMs * 1000000);
+		if (m_Messages.IsEmpty()) return false;
+		message = m_Messages[0];
+		m_Messages.RemoveAt(0);
+		return true;
+	}
+
+	void MessageQueue::Close() {
+		Threading::LockGuard guard(m_Lock);
+		m_Closed = true;
+		m_Ready.NotifyAll();
+	}
+
+	bool MessageQueue::IsClosed() {
+		Threading::LockGuard guard(m_Lock);
+		return m_Closed;
+	}
+}

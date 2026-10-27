@@ -1,0 +1,37 @@
+// sourcelines: an error line of a build or the Error List gets the source line it names under it.
+
+include "SourceLines.ch"
+
+static bool ReadMain(Core::StringView path, Core::String& text) {
+	if (path != "src/main.cf") return false;
+	text = Core::String("include \"bedrock.ch\"\r\n\r\nint32 main() {\r\n\tauto x = 1;\r\n\treturn x;\r\n}\r\n");
+	return true;
+}
+
+[test("server.ai.sourcelines")]
+class SourceLineTests {
+	[test("line_at")]
+	public static void TestSourceLineAt() {
+		Core::StringView text = Core::StringView("one\ntwo\r\nthree");
+		assert_se("one", Core::String(Ai::SourceLineAt(text, 1)).CStr(), "the first line");
+		assert_se("two", Core::String(Ai::SourceLineAt(text, 2)).CStr(), "a CRLF line without its CR");
+		assert_se("three", Core::String(Ai::SourceLineAt(text, 3)).CStr(), "the last line, no break after it");
+		assert_true(Ai::SourceLineAt(text, 4).IsEmpty(), "past the end");
+	}
+
+	[test("under_errors")]
+	public static void TestUnderErrors() {
+		Core::String said = Ai::WithSourceLines(Core::StringView("src/main.cf:4:2: error: unknown type 'auto'\nsrc/main.cf:5:9: warning: unused\nsrc/other.cf:1:1: error: gone\n"), ReadMain);
+		assert_se("src/main.cf:4:2: error: unknown type 'auto'\n    4 | auto x = 1;\nsrc/main.cf:5:9: warning: unused\nsrc/other.cf:1:1: error: gone\n", said.CStr(),
+			"an error gets its line, trimmed; a warning and an unreadable file get none");
+	}
+
+	[test("drive_paths")]
+	public static void TestDrivePaths() {
+		Core::String said = Ai::WithSourceLines(Core::StringView("C:/w/src/main.cf:3:1: error: x\n"), [](Core::StringView path, Core::String& text) -> bool {
+			text = Core::String("a\nb\nc\n");
+			return path == "C:/w/src/main.cf";
+		});
+		assert_se("C:/w/src/main.cf:3:1: error: x\n    3 | c\n", said.CStr(), "the drive's colon stays in the path");
+	}
+}

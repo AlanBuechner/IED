@@ -1,0 +1,203 @@
+include "Auth.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	int64 UnixMs() { return Platform::UnixTimeNs() / 1000000; }
+	int64 MonotonicMs() { return clock_now_ns() / 1000000; }
+
+	static FS::Path AuthFile(const Server* server, const char* name) { return FS::Path(server->m_Config.m_DataDir.View()) / "auth" / name; }
+
+	void Auth::Init(Server* server) {
+		this.m_Server = server;
+		m_Log = SecurityLog((FS::Path(server->m_Config.m_DataDir.View()) / "logs" / "security.log").View());
+		Auth* self = this;
+		server->m_Rpc.Register("auth.setPassword", [self](Call& call, const Params& params) -> Core::String { return self->SetPasswordMethod(call, params); });
+		server->m_Rpc.Register("auth.devices", [self](Call& call, const Params& params) -> Core::String { return self->DevicesMethod(call, params); });
+		server->m_Rpc.Register("auth.revoke", [self](Call& call, const Params& params) -> Core::String { return self->RevokeMethod(call, params); });
+	}
+
+	static bool ReadOwner(const FS::Path& file, Core::String& hash, Core::String& error) {
+		if (!FS::FileExists(file.CStr())) return true;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(text.View(), *doc);
+		Serialization::DomNode password = parsed.Ok() ? parsed.root.Member("password") : Serialization::DomNode();
+		if (password.Kind() != Serialization::DomKind::String) {
+			error = Core::String("not an owner file: ") + file.View();
+			return false;
+		}
+		hash = Core::String(password.AsView());
+		return true;
+	}
+
+	bool Auth::Load(Core::String& error) {
+		FS::Path data = FS::Path(m_Server->m_Config.m_DataDir.View());
+		if (!FS::MakeDirectories((data / "auth").CStr()) || !FS::MakeDirectories((data / "logs").CStr())) {
+			error = Core::String("cannot make the data folder ") + data.View();
+			return false;
+		}
+		return ReadOwner(AuthFile(m_Server, "owner.json"), m_PasswordHash, error) && m_Devices.Load(AuthFile(m_Server, "devices.json").View(), UnixMs(), error);
+	}
+
+	void Auth::Record(const char* event, Core::StringView fields) { m_Log.Record(UnixMs(), event, fields); }
+
+	static Core::String DeviceField(const Device* device) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("device", device->m_Id.View());
+		json.Field("name", device->m_Name.View());
+		json.EndObject();
+		Core::StringView members = json.View();
+		return Core::String(members.Substring(1, members.ByteLength() - 2));
+	}
+
+	static void ForgetDeadTokens(Core::HashMap<Core::String, int64>& tokens, int64 nowMs) {
+		Core::Array<Core::String> dead;
+		for (const Core::KeyValue<Core::String, int64>& token : tokens)
+			if (token.value <= nowMs) dead.Push(token.key);
+		for (const Core::String& key : dead) tokens.Remove(key);
+	}
+
+	Core::String Auth::MintLaunchToken(int64 ttlMs) {
+		ForgetDeadTokens(m_Tokens, MonotonicMs());
+		Core::String token = NewSecret();
+		if (!token.IsEmpty()) m_Tokens.Insert(SecretDigest(token.View()), MonotonicMs() + ttlMs);
+		return token;
+	}
+
+	Device* Auth::Exchange(Core::StringView token, Core::StringView deviceName, Core::String& cookie) {
+		Core::String digest = SecretDigest(token);
+		int64 diesMs = 0;
+		if (!m_Tokens.TryGet(digest, diesMs)) return nullptr;
+		m_Tokens.Remove(digest);
+		if (MonotonicMs() >= diesMs) return nullptr;
+		Device* device = m_Devices.Create(deviceName, DeviceKind::Token, UnixMs(), cookie);
+		if (device) Record("token-exchanged", DeviceField(device).View());
+		return device;
+	}
+
+	Device* Auth::Authenticate(Core::StringView cookie, bool& refresh) { return m_Devices.Find(cookie, UnixMs(), refresh); }
+
+	static Core::String AddressField(Core::StringView address) {
+		Core::StringBuilder text;
+		text.Append("\"address\":");
+		text.Append(JsonString(address).View());
+		return text.ToString();
+	}
+
+	LoginResult Auth::Login(Core::StringView address, Core::StringView password, Core::StringView deviceName) {
+		Threading::LockGuard oneHash(m_Hashing);
+		Core::String stored;
+		LoginResult refused;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			refused.m_RetryAfterS = m_Throttle.RetryAfterS(address, MonotonicMs());
+			if (refused.m_RetryAfterS > 0) refused.m_Outcome = LoginOutcome::Locked;
+			else if (m_PasswordHash.IsEmpty()) refused.m_Outcome = LoginOutcome::NoPassword;
+			else stored = m_PasswordHash;
+		}
+		if (stored.IsEmpty()) return refused;
+		const bool matched = Crypto::VerifyPassword(password, stored.View());
+		Threading::LockGuard guard(m_Server->m_Lock);
+		return Finish(address, matched, deviceName);
+	}
+
+	LoginResult Auth::Finish(Core::StringView address, bool matched, Core::StringView deviceName) {
+		LoginResult result;
+		if (!matched) {
+			const bool locked = m_Throttle.Failed(address, MonotonicMs());
+			Record(locked ? "locked-out" : "login-failed", AddressField(address).View());
+			result.m_Outcome = LoginOutcome::WrongPassword;
+			return result;
+		}
+		m_Throttle.Succeeded(address);
+		result.m_Device = m_Devices.Create(deviceName, DeviceKind::Password, UnixMs(), result.m_Cookie);
+		result.m_Outcome = result.m_Device ? LoginOutcome::Ok : LoginOutcome::Failed;
+		if (result.m_Device) Record("login", (DeviceField(result.m_Device) + "," + AddressField(address).View()).View());
+		return result;
+	}
+
+	void Auth::Logout(Device* device) {
+		Record("logout", DeviceField(device).View());
+		Core::String id = device->m_Id;
+		m_Devices.Remove(device);
+		Disconnect(id.View());
+	}
+
+	bool Auth::SavePassword(Core::StringView hash) {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Field("password", hash);
+		json.EndObject();
+		return FS::WriteFileAtomically(AuthFile(m_Server, "owner.json").CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+
+	void Auth::ChangePassword(Core::StringView current, Core::StringView password) {
+		Core::String stored;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			stored = m_PasswordHash;
+		}
+		if (!stored.IsEmpty() && !Crypto::VerifyPassword(current, stored.View())) throw RpcError(ErrorCode::Forbidden, "the current password is wrong");
+		Core::String made = Crypto::HashPassword(password, Crypto::DefaultArgon2Params());
+		Threading::LockGuard guard(m_Server->m_Lock);
+		if (made.IsEmpty() || !SavePassword(made.View())) throw RpcError(ErrorCode::Internal, "the password could not be stored");
+		m_PasswordHash = made;
+		Record("password-set", Core::StringView(""));
+	}
+
+	Core::String Auth::SetPasswordMethod(Call& call, const Params& params) {
+		Core::String password = params.Str("password");
+		Core::String current = params.Str("current", Core::StringView(""));
+		if (password.View().CharCount() < c_MinPasswordChars) throw RpcError(ErrorCode::BadRequest, "a password has at least 12 characters");
+		{
+			Threading::UnlockGuard released(m_Server->m_Lock);
+			Threading::LockGuard oneHash(m_Hashing);
+			ChangePassword(current.View(), password.View());
+		}
+		return Core::String("{}");
+	}
+
+	Core::String Auth::DevicesMethod(Call& call, const Params& params) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("devices"));
+		json.BeginArray();
+		for (const Device* device : m_Devices.All()) {
+			Core::String entry = device->ToJson();
+			Core::StringView members = entry.View().Substring(0, entry.View().ByteLength() - 1);
+			Core::StringBuilder text;
+			text.Append(members);
+			text.Append(device->m_Id.View() == call.m_Session->m_AuthDevice.View() ? ",\"current\":true}" : ",\"current\":false}");
+			json.Raw(text.View());
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Auth::RevokeMethod(Call& call, const Params& params) {
+		Core::String id = params.Str("deviceId");
+		Device* device = m_Devices.ById(id.View());
+		if (!device) throw RpcError(ErrorCode::NotFound, "no such device");
+		Record("device-revoked", DeviceField(device).View());
+		m_Devices.Remove(device);
+		Disconnect(id.View());
+		return Core::String("{}");
+	}
+
+	// Sends bye to each socket of the device, then closes them with the lock released.
+	void Auth::Disconnect(Core::StringView deviceId) {
+		Core::Array<Session*> closing;
+		for (Session* session : m_Server->m_Sessions)
+			if (session->m_AuthDevice.View() == deviceId) closing.Push(session);
+		for (Session* session : closing) session->Push(ByeFrame("auth-revoked").View());
+		Threading::UnlockGuard released(m_Server->m_Lock);
+		for (Session* session : closing) session->FlushAndClose(1008, "auth-revoked");
+		// And the device's sockets to workspace servers, which pass through the master (docs/11).
+		if (m_Server->m_Proxy) m_Server->m_Proxy->Revoke(deviceId);
+	}
+}

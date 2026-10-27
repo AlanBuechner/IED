@@ -1,0 +1,619 @@
+include "api/Plugin.ch"
+include "Chat.ch"
+include "aitools/Images.ch"
+
+namespace Ai
+{
+	int64 ChatNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	Core::StringView WsId(const IED::Workspace& ws) { return ws.m_Id.View(); }
+
+	const char* ChatModeName(ChatMode mode) {
+		if (mode == ChatMode::Ask) return "ask";
+		return mode == ChatMode::Plan ? "plan" : "agent";
+	}
+
+	bool ReadChatMode(Core::StringView text, ChatMode& mode) {
+		if (text == "ask") mode = ChatMode::Ask;
+		else if (text == "plan") mode = ChatMode::Plan;
+		else if (text == "agent") mode = ChatMode::Agent;
+		else return false;
+		return true;
+	}
+
+	const char* PermissionModeName(PermissionMode mode) {
+		const char*[4] names = { "plan", "ask", "acceptEdits", "auto" };
+		return names[(int32)mode];
+	}
+
+	bool ReadPermissionMode(Core::StringView text, PermissionMode& mode) {
+		if (text == "plan") mode = PermissionMode::Plan;
+		else if (text == "ask") mode = PermissionMode::Ask;
+		else if (text == "acceptEdits") mode = PermissionMode::AcceptEdits;
+		else if (text == "auto") mode = PermissionMode::Auto;
+		else return false;
+		return true;
+	}
+
+	const char* ChatStateName(ChatState state) {
+		const char*[5] names = { "idle", "running", "awaiting_approval", "awaiting_answer", "paused" };
+		return names[(int32)state];
+	}
+
+	PermissionMode DefaultPermission(ChatMode mode) { return mode == ChatMode::Plan ? PermissionMode::Plan : PermissionMode::Auto; }
+
+	// --- Segments and messages ---------------------------------------------------------------------------------------
+
+	void WriteToolImages(IED::JsonWriter& json, const Core::Array<IED::ToolImage>& images) {
+		json.Key(Core::StringView("images"));
+		json.BeginArray();
+		for (const IED::ToolImage& image : images) {
+			json.BeginObject();
+			json.Field("mime", image.m_Mime.View());
+			json.Field("path", image.m_Path.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void ReadToolImages(const Serialization::DomNode& list, Core::Array<IED::ToolImage>& images) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			IED::ToolImage image;
+			image.m_Mime = Core::String(list.At(i).Member("mime").AsView());
+			image.m_Path = Core::String(list.At(i).Member("path").AsView());
+			images.Push(image);
+		}
+	}
+
+	// A message's from?, mentions? and attachments?, each only when it has one.
+	static void WriteMessageFields(IED::JsonWriter& json, Core::StringView fromChatId, Core::StringView fromTitle, const Core::Array<Mention>& mentions,
+		const Core::Array<Attachment>& attachments) {
+		if (!fromChatId.IsEmpty()) {
+			json.Key(Core::StringView("from"));
+			json.BeginObject();
+			json.Field("chatId", fromChatId);
+			json.Field("title", fromTitle);
+			json.EndObject();
+		}
+		if (!mentions.IsEmpty()) {
+			json.Key(Core::StringView("mentions"));
+			WriteMentions(json, mentions);
+		}
+		if (!attachments.IsEmpty()) {
+			json.Key(Core::StringView("attachments"));
+			WriteAttachments(json, attachments);
+		}
+	}
+
+	void Segment::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		WriteFields(json);
+		json.EndObject();
+	}
+
+	void Segment::WriteFields(IED::JsonWriter& json) const {
+		json.Field("segId", m_SegId.View());
+		json.Field("type", m_Type.View());
+		json.BoolField("done", m_Done);
+		if (!m_Model.IsEmpty()) json.Field("model", m_Model.View());
+		if (m_Type == "tool") {
+			json.Field("tool", m_Tool.View());
+			json.Field("callId", m_CallId.View());
+			json.Field("argsText", m_ArgsText.View());
+			if (!m_State.IsEmpty()) json.Field("state", m_State.View());
+			if (!m_Source.IsEmpty()) json.Field("source", m_Source.View());
+			if (m_Ms > 0) json.IntField("ms", m_Ms);
+			if (m_Plus > 0) json.IntField("plus", m_Plus);
+			if (m_Minus > 0) json.IntField("minus", m_Minus);
+			if (m_State == "ok" || m_State == "error" || m_State == "denied" || m_State == "interrupted") {
+				json.Key(Core::StringView("result"));
+				json.BeginObject();
+				json.Field("preview", m_Preview.View());
+				json.BoolField("isError", m_IsError);
+				if (!m_Images.IsEmpty()) WriteToolImages(json, m_Images);
+				json.EndObject();
+			}
+		}
+		else json.Field("text", m_Text.View());
+		if (m_Type == "message") WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Mentions, m_Attachments);
+		if (m_AtMs > 0) json.IntField("atMs", m_AtMs);
+		if (!m_Kind.IsEmpty()) json.Field("kind", m_Kind.View());
+		if (m_Tokens > 0) json.IntField("tokens", m_Tokens);
+	}
+
+	void Segment::Read(const Serialization::DomNode& node) {
+		m_SegId = Core::String(node.Member("segId").AsView());
+		m_Type = Core::String(node.Member("type").AsView());
+		m_Text = Core::String(node.Member("text").AsView());
+		m_Done = true;
+		m_Model = Core::String(node.Member("model").AsView());
+		m_Kind = Core::String(node.Member("kind").AsView());
+		m_Tool = Core::String(node.Member("tool").AsView());
+		m_CallId = Core::String(node.Member("callId").AsView());
+		m_ArgsText = Core::String(node.Member("argsText").AsView());
+		m_State = Core::String(node.Member("state").AsView());
+		m_Source = Core::String(node.Member("source").AsView());
+		m_Ms = node.Member("ms").AsInt();
+		m_Plus = node.Member("plus").AsInt();
+		m_Minus = node.Member("minus").AsInt();
+		m_Preview = Core::String(node.Member("result").Member("preview").AsView());
+		m_IsError = node.Member("result").Member("isError").AsBool();
+		ReadToolImages(node.Member("result").Member("images"), m_Images);
+		m_Tokens = node.Member("tokens").AsInt();
+		ReadMentions(node.Member("mentions"), m_Mentions);
+		ReadAttachments(node.Member("attachments"), m_Attachments);
+		m_FromChatId = Core::String(node.Member("from").Member("chatId").AsView());
+		m_FromTitle = Core::String(node.Member("from").Member("title").AsView());
+		m_AtMs = node.Member("atMs").AsInt();
+	}
+
+	void ModelMessage::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("role", m_Role.View());
+		json.Field("content", m_Content.View());
+		if (!m_ToolCalls.IsEmpty()) json.RawField("tool_calls", m_ToolCalls.View());
+		if (!m_ToolCallId.IsEmpty()) json.Field("tool_call_id", m_ToolCallId.View());
+		if (!m_Images.IsEmpty()) WriteToolImages(json, m_Images);
+		if (!m_Reasoning.IsEmpty()) json.Field("reasoning_content", m_Reasoning.View());
+		json.EndObject();
+	}
+
+	Core::StringView ModelMessage::SentText() const { return m_Shown.IsEmpty() ? m_Content.View() : m_Shown.View(); }
+
+	bool ModelMessage::SendsImages() const { return !m_ImagesOut && !m_Images.IsEmpty(); }
+
+	void ModelMessage::WriteRequest(IED::JsonWriter& json, Core::StringView unsent, bool withReasoning) const {
+		json.BeginObject();
+		json.Field("role", m_Role.View());
+		Core::String text = unsent.IsEmpty() ? Core::String(SentText()) : Core::String(SentText()) + ImagesAsText(m_Images, unsent).View();
+		json.Field("content", text.View());
+		if (withReasoning && !m_Reasoning.IsEmpty()) json.Field("reasoning_content", m_Reasoning.View());
+		if (!m_ToolCalls.IsEmpty()) json.RawField("tool_calls", m_ToolCalls.View());
+		if (!m_ToolCallId.IsEmpty()) json.Field("tool_call_id", m_ToolCallId.View());
+		json.EndObject();
+	}
+
+	void ModelMessage::Read(const Serialization::DomNode& node) {
+		m_Role = Core::String(node.Member("role").AsView());
+		m_Content = Core::String(node.Member("content").AsView());
+		if (node.Member("tool_calls").IsValid()) m_ToolCalls = IED::NodeJson(node.Member("tool_calls"));
+		m_ToolCallId = Core::String(node.Member("tool_call_id").AsView());
+		ReadToolImages(node.Member("images"), m_Images);
+		m_Reasoning = Core::String(node.Member("reasoning_content").AsView());
+	}
+
+	// --- What an owner's message names ------------------------------------------------------------------------------
+
+	void WriteMentions(IED::JsonWriter& json, const Core::Array<Mention>& mentions) {
+		json.BeginArray();
+		for (const Mention& mention : mentions) {
+			json.BeginObject();
+			json.Field("kind", mention.m_Kind.View());
+			json.Field("ref", mention.m_Ref.View());
+			json.Field("label", mention.m_Label.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void WriteAttachments(IED::JsonWriter& json, const Core::Array<Attachment>& attachments) {
+		json.BeginArray();
+		for (const Attachment& attachment : attachments) {
+			json.BeginObject();
+			json.Field("name", attachment.m_Name.View());
+			json.Field("path", attachment.m_Path.View());
+			json.Field("mime", attachment.m_Mime.View());
+			json.IntField("bytes", attachment.m_Bytes);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void ReadMentions(const Serialization::DomNode& list, Core::Array<Mention>& mentions) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Mention mention;
+			mention.m_Kind = Core::String(list.At(i).Member("kind").AsView());
+			mention.m_Ref = Core::String(list.At(i).Member("ref").AsView());
+			mention.m_Label = Core::String(list.At(i).Member("label").AsView());
+			mentions.Push(mention);
+		}
+	}
+
+	void ReadAttachments(const Serialization::DomNode& list, Core::Array<Attachment>& attachments) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Attachment attachment;
+			attachment.m_Name = Core::String(list.At(i).Member("name").AsView());
+			attachment.m_Path = Core::String(list.At(i).Member("path").AsView());
+			attachment.m_Mime = Core::String(list.At(i).Member("mime").AsView());
+			attachment.m_Bytes = list.At(i).Member("bytes").AsInt();
+			attachments.Push(attachment);
+		}
+	}
+
+	void OwnerMessage::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("text", m_Text.View());
+		WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Mentions, m_Attachments);
+		json.EndObject();
+	}
+
+	void OwnerMessage::Read(const Serialization::DomNode& node) {
+		if (node.Kind() == Serialization::DomKind::String) {
+			m_Text = Core::String(node.AsView());
+			return;
+		}
+		m_Text = Core::String(node.Member("text").AsView());
+		m_FromChatId = Core::String(node.Member("from").Member("chatId").AsView());
+		m_FromTitle = Core::String(node.Member("from").Member("title").AsView());
+		ReadMentions(node.Member("mentions"), m_Mentions);
+		ReadAttachments(node.Member("attachments"), m_Attachments);
+	}
+
+	// --- Turns -------------------------------------------------------------------------------------------------------
+
+	Segment* Turn::FindSegment(Core::StringView segId) const {
+		for (Segment* segment : m_Segments)
+			if (segment->m_SegId.View() == segId) return segment;
+		return nullptr;
+	}
+
+	Segment* Turn::ToolSegment(Core::StringView callId) const {
+		for (Segment* segment : m_Segments)
+			if (segment->m_Type == "tool" && segment->m_CallId.View() == callId) return segment;
+		return nullptr;
+	}
+
+	void Turn::WriteUser(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("text", m_UserText.View());
+		if (!m_FromChatId.IsEmpty()) {
+			json.Key(Core::StringView("from"));
+			json.BeginObject();
+			json.Field("chatId", m_FromChatId.View());
+			json.Field("title", m_FromTitle.View());
+			json.EndObject();
+		}
+		if (!m_Resumed.IsEmpty()) json.Field("resumed", m_Resumed.View());
+		if (!m_Origin.IsEmpty()) json.Field("origin", m_Origin.View());
+		if (!m_Mentions.IsEmpty()) {
+			json.Key(Core::StringView("mentions"));
+			WriteMentions(json, m_Mentions);
+		}
+		if (!m_Attachments.IsEmpty()) {
+			json.Key(Core::StringView("attachments"));
+			WriteAttachments(json, m_Attachments);
+		}
+		json.EndObject();
+	}
+
+	void Turn::WriteJson(IED::JsonWriter& json, bool withMessages) const {
+		json.BeginObject();
+		json.Field("turnId", m_TurnId.View());
+		json.Key(Core::StringView("user"));
+		WriteUser(json);
+		if (m_Hops > 0) json.IntField("hops", m_Hops);
+		json.Field("mode", ChatModeName(m_Mode));
+		json.Field("model", m_Model.View());
+		json.Field("group", m_Group.View());
+		if (!m_Effort.IsEmpty()) json.Field("effort", m_Effort.View());
+		json.Key(Core::StringView("segments"));
+		json.BeginArray();
+		for (Segment* segment : m_Segments) segment->WriteJson(json);
+		json.EndArray();
+		if (m_Stop.IsEmpty()) {
+			json.Key(Core::StringView("stop"));
+			json.Null();
+		}
+		else json.Field("stop", m_Stop.View());
+		json.Key(Core::StringView("recoveries"));
+		json.BeginArray();
+		for (const Core::String& recovery : m_Recoveries) json.String(recovery.View());
+		json.EndArray();
+		json.IntField("tokensIn", m_TokensIn);
+		json.IntField("tokensOut", m_TokensOut);
+		if (m_TtftMs > 0) json.IntField("ttftMs", m_TtftMs);
+		if (m_GenMs > 0) json.IntField("genMs", m_GenMs);
+		json.IntField("startedMs", m_StartedMs);
+		if (m_EndedMs > 0) json.IntField("endedMs", m_EndedMs);
+		if (!m_Prefill.IsEmpty() && !withMessages) json.RawField("prefill", m_Prefill.View());
+		if (withMessages) {
+			json.Key(Core::StringView("messages"));
+			json.BeginArray();
+			for (ModelMessage* message : m_Messages) message->WriteJson(json);
+			json.EndArray();
+		}
+		json.EndObject();
+	}
+
+	void Turn::Read(const Serialization::DomNode& node) {
+		m_TurnId = Core::String(node.Member("turnId").AsView());
+		m_UserText = Core::String(node.Member("user").Member("text").AsView());
+		m_FromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
+		m_FromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
+		m_Resumed = Core::String(node.Member("user").Member("resumed").AsView());
+		m_Origin = Core::String(node.Member("user").Member("origin").AsView());
+		ReadMentions(node.Member("user").Member("mentions"), m_Mentions);
+		ReadAttachments(node.Member("user").Member("attachments"), m_Attachments);
+		m_Hops = node.Member("hops").AsInt();
+		ReadChatMode(node.Member("mode").AsView(), m_Mode);
+		m_Model = Core::String(node.Member("model").AsView());
+		m_Group = Core::String(node.Member("group").AsView());
+		m_Effort = Core::String(node.Member("effort").AsView());
+		Serialization::DomNode list = node.Member("segments");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Segment* segment = new Segment();
+			segment->Read(list.At(i));
+			m_Segments.Push(segment);
+		}
+		m_Stop = Core::String(node.Member("stop").AsView());
+		Serialization::DomNode done = node.Member("recoveries");
+		for (int64 i = 0; i < done.Count(); ++i) m_Recoveries.Push(Core::String(done.At(i).AsView()));
+		m_TokensIn = node.Member("tokensIn").AsInt();
+		m_TokensOut = node.Member("tokensOut").AsInt();
+		m_TtftMs = node.Member("ttftMs").AsInt();
+		m_GenMs = node.Member("genMs").AsInt();
+		m_StartedMs = node.Member("startedMs").AsInt();
+		m_EndedMs = node.Member("endedMs").AsInt();
+		Serialization::DomNode sent = node.Member("messages");
+		for (int64 i = 0; i < sent.Count(); ++i) {
+			ModelMessage* message = new ModelMessage();
+			message->Read(sent.At(i));
+			m_Messages.Push(message);
+		}
+	}
+
+	// --- Waiting -----------------------------------------------------------------------------------------------------
+
+	void Approval::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("approvalId", m_ApprovalId.View());
+		json.Field("callId", m_CallId.View());
+		json.Field("tool", m_Tool.View());
+		json.RawField("args", m_Args.IsEmpty() ? Core::StringView("{}") : m_Args.View());
+		json.Field("summary", m_Summary.View());
+		json.Field("why", m_Why.View());
+		json.Field("subject", m_Subject.View());
+		if (!m_Diff.IsEmpty()) json.Field("diff", m_Diff.View());
+		if (m_Plus > 0) json.IntField("plus", m_Plus);
+		if (m_Minus > 0) json.IntField("minus", m_Minus);
+		json.EndObject();
+	}
+
+	void Question::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("questionId", m_QuestionId.View());
+		json.Field("callId", m_CallId.View());
+		json.Field("question", m_Question.View());
+		json.Key(Core::StringView("options"));
+		json.BeginArray();
+		for (const Core::String& option : m_Options) json.String(option.View());
+		json.EndArray();
+		json.BoolField("allowText", m_AllowText);
+		json.EndObject();
+	}
+
+	// --- The chat ----------------------------------------------------------------------------------------------------
+
+	Core::String Chat::NextId(const char* prefix) {
+		m_Counter += 1;
+		Core::StringBuilder id;
+		id.Append(prefix);
+		id.AppendInt(m_Counter);
+		return id.ToString();
+	}
+
+	int64 Chat::WaitingApprovals() const {
+		int64 waiting = 0;
+		for (Approval* approval : m_Approvals)
+			if (approval->m_Decision.IsEmpty()) waiting += 1;
+		return waiting;
+	}
+
+	void Chat::WriteSummary(IED::JsonWriter& json) const {
+		json.Field("chatId", m_ChatId.View());
+		json.Field("wsId", m_WsId.View());
+		json.Field("title", m_Title.View());
+		json.Field("mode", ChatModeName(m_Mode));
+		json.Field("permission", PermissionModeName(m_Permission));
+		json.Field("group", m_Group.View());
+		json.Field("effort", m_Effort.View());
+		json.Field("pinnedModel", m_PinnedModel.View());
+		json.Field("state", ChatStateName(m_State));
+		if (!m_StateReason.IsEmpty()) json.Field("stateReason", m_StateReason.View());
+		if (!m_Turns.IsEmpty() && !Current()->m_Stop.IsEmpty()) json.Field("lastStop", Current()->m_Stop.View());
+		json.IntField("turnCount", m_Turns.Count());
+		json.IntField("updatedMs", m_UpdatedMs);
+		int64 done = 0;
+		for (ChatTask* task : m_Tasks)
+			if (task->m_Status == "done" || task->m_Status == "skipped") done += 1;
+		json.IntField("tasksDone", done);
+		json.IntField("tasksTotal", m_Tasks.Count());
+		json.IntField("approvalsWaiting", WaitingApprovals());
+		int64 running = 0;
+		for (BackgroundTask* task : m_Background)
+			if (task->Running()) running += 1;
+		json.IntField("backgroundRunning", running);
+		if (!m_Agent.IsEmpty()) json.Field("agent", m_Agent.View());
+		if (!m_ParentChatId.IsEmpty()) json.Field("parentChatId", m_ParentChatId.View());
+	}
+
+	Core::String Chat::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Chat::WriteTasks(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ChatTask* task : m_Tasks) {
+			json.BeginObject();
+			json.Field("id", task->m_Id.View());
+			json.Field("title", task->m_Title.View());
+			json.Field("status", task->m_Status.View());
+			if (!task->m_Note.IsEmpty()) json.Field("note", task->m_Note.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void Chat::WriteQueued(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (OwnerMessage* message : m_Queued) json.String(message->m_Text.View());
+		json.EndArray();
+	}
+
+	void Chat::WritePending(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (OwnerMessage* message : m_Pending) json.String(message->m_Text.View());
+		json.EndArray();
+	}
+
+	void Chat::WriteModified(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ModifiedFile* file : m_Modified) {
+			json.BeginObject();
+			json.Field("path", file->m_Path.View());
+			json.IntField("plus", file->m_Plus);
+			json.IntField("minus", file->m_Minus);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void Chat::WriteResources(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ChatResource* resource : m_Resources) {
+			json.BeginObject();
+			json.Field("ref", resource->m_Ref.View());
+			json.Field("title", resource->m_Title.View());
+			json.Field("kind", resource->m_Kind.View());
+			if (!resource->m_Close.IsEmpty()) json.Field("close", resource->m_Close.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void Chat::WriteBackground(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (BackgroundTask* task : m_Background) task->WriteJson(json, true);
+		json.EndArray();
+	}
+
+	BackgroundTask* Chat::FindBackground(Core::StringView taskId) const {
+		for (BackgroundTask* task : m_Background)
+			if (task->m_TaskId.View() == taskId) return task;
+		return nullptr;
+	}
+
+	void BackgroundTask::WriteJson(IED::JsonWriter& json, bool withOutput) const {
+		json.BeginObject();
+		json.Field("taskId", m_TaskId.View());
+		json.Field("kind", m_Kind.View());
+		json.Field("title", m_Title.View());
+		json.Field("state", m_State.View());
+		json.IntField("startedMs", m_StartedMs);
+		if (m_EndedMs > 0) json.IntField("endedMs", m_EndedMs);
+		if (!Running() && m_Kind != "agent") json.IntField("exitCode", m_ExitCode);
+		json.Field("summary", m_Summary.View());
+		if (!m_AgentChatId.IsEmpty()) json.Field("chatId", m_AgentChatId.View());
+		if (m_Told) json.BoolField("told", true);
+		if (withOutput) json.Field("output", m_Output.View());
+		json.EndObject();
+	}
+
+	void BackgroundTask::Read(const Serialization::DomNode& node) {
+		m_TaskId = Core::String(node.Member("taskId").AsView());
+		m_Kind = Core::String(node.Member("kind").AsView());
+		m_Title = Core::String(node.Member("title").AsView());
+		m_State = Core::String(node.Member("state").AsView());
+		m_StartedMs = node.Member("startedMs").AsInt();
+		m_EndedMs = node.Member("endedMs").AsInt();
+		m_ExitCode = node.Member("exitCode").AsInt();
+		m_Summary = Core::String(node.Member("summary").AsView());
+		m_Output = Core::String(node.Member("output").AsView());
+		m_AgentChatId = Core::String(node.Member("chatId").AsView());
+		m_Told = node.Member("told").AsBool();
+	}
+
+	int64 Clip::Lines() const {
+		int64 lines = 0;
+		Core::StringView view = m_Text.View();
+		for (int64 i = 0; i < view.ByteLength(); ++i)
+			if (view.ByteAt(i) == '\n') lines += 1;
+		return view.IsEmpty() || view.EndsWith(Core::StringView("\n")) ? lines : lines + 1;
+	}
+
+	void Chat::WriteClips(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (Clip* clip : m_Clips) {
+			Core::StringView text = clip->m_Text.View();
+			int64 cut = text.ByteLength() < c_ClipShownBytes ? text.ByteLength() : c_ClipShownBytes;
+			while (cut > 0 && cut < text.ByteLength() && ((uint8)text.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+			json.BeginObject();
+			json.Field("name", clip->m_Name.View());
+			json.Field("source", clip->m_Source.View());
+			json.IntField("lines", clip->Lines());
+			json.IntField("bytes", text.ByteLength());
+			json.Field("text", text.Substring(0, cut));
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteInUse(IED::JsonWriter& json, Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) {
+		json.Field("model", model);
+		json.Field("groupInUse", groupInUse);
+		json.Field("roleEffort", roleEffort);
+	}
+
+	Core::String Chat::ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		WriteInUse(json, model, groupInUse, roleEffort);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		WriteInUse(json, model, groupInUse, roleEffort);
+		json.Key(Core::StringView("tasks"));
+		WriteTasks(json);
+		json.Key(Core::StringView("queued"));
+		WriteQueued(json);
+		json.Key(Core::StringView("pending"));
+		WritePending(json);
+		json.Key(Core::StringView("modified"));
+		WriteModified(json);
+		json.Key(Core::StringView("resources"));
+		WriteResources(json);
+		json.Key(Core::StringView("clips"));
+		WriteClips(json);
+		json.Key(Core::StringView("background"));
+		WriteBackground(json);
+		json.Key(Core::StringView("context"));
+		if (m_Context.IsEmpty()) json.Null();
+		else json.Raw(m_Context.View());
+		const int64 first = m_Turns.Count() > recent ? m_Turns.Count() - recent : 0;
+		json.BoolField("hasMore", first > 0);
+		json.Key(Core::StringView("turns"));
+		json.BeginArray();
+		for (int64 i = first; i < m_Turns.Count(); ++i) m_Turns[i]->WriteJson(json, false);
+		json.EndArray();
+		json.Key(Core::StringView("pendingApprovals"));
+		json.BeginArray();
+		for (Approval* approval : m_Approvals)
+			if (approval->m_Decision.IsEmpty()) approval->WriteJson(json);
+		json.EndArray();
+		json.Key(Core::StringView("pendingQuestion"));
+		if (m_Question && !m_Question->m_Answered) m_Question->WriteJson(json);
+		else json.Null();
+		json.EndObject();
+		return json.ToString();
+	}
+}

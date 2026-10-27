@@ -2,13 +2,13 @@
 
 **Status:** built 2026-10-21 (owner's request: "a developer mode in the settings when we are building from source so the
 AI can fix issues with the C4 compiler or IED itself as it is working on stuff"): `plugins/developer`, the chat's
-`ai.roots` routing (`plugins/chat/code/roots.cf`), `IED::OpenFolder`; server checks `test_developer.py`. Rebuild and
+`ai.roots` routing (`plugins/chat/code/chats/Roots.cf`), `IED::OpenFolder`; server checks `test_developer.py`. Rebuild and
 relaunch built 2026-10-21 (owner's request: "in the settings we should add a re build and relaunch to make this easy for
 me to keep the desktop build up to date"). Autonomy built 2026-10-23 (owner: "the point of the developer mode that IED and
 C4 edits are gated behind is so the AI can fix language bugs and iterate in IED and automatically rebuild and relaunch
 IED and start its self back up to test the changes"; "developer mode should be disabled by default and only available to
 enable if you are building from source"): off by default, writes and commands in `ied:/` follow the chat's permission
-mode, `ied_relaunch`, the host's relaunch (`src/host/relaunch.ch`, `docs/27` "Relaunch") and the chat going on after it
+mode, `ied_relaunch`, the host's relaunch (`src/host/Relaunch.ch`, `docs/27` "Relaunch") and the chat going on after it
 (`docs/12` "Restart behavior"); server checks `test_developer.py` `RelaunchTests`, `test_control.py`,
 `test_desktop.py`. Plugin folders writable and the note on every failing call built 2026-10-26 (owner's items 23 and
 33, `docs/30`): items 1 and 5 below; server checks `test_developer.py`, `test_plugin_folders.py`. Not yet: see "Where
@@ -154,7 +154,7 @@ plugin API like the others, and the chat plugin learns of the source through a b
   a time whichever workspace asks; a workspace server's copy gives the chat its `ai.roots`, the section and the tools,
   and its `ied_relaunch` calls the master's `ied.developer.install` and `IED::RelaunchServer`, which relaunches the
   master and with it every workspace server.
-- **`IED::OpenFolder(path, ws, problem)`** (new in `src/api/workspace.ch`, permission `workspace.open`): a plugin opens a
+- **`IED::OpenFolder(path, ws, problem)`** (new in `src/api/Workspace.ch`, permission `workspace.open`): a plugin opens a
   folder as a workspace, or finds the open one rooted there - the same as the owner opening it, so its watcher, document
   store and plugins run. Generic: any plugin with the permission may use it. It opens the folder inside the calling
   plugin's workspace server, with the id `<wsId>.<n>` (developer mode's source in a chat of `w2` is `w2.1`): the chat's
@@ -173,7 +173,7 @@ plugin API like the others, and the chat plugin learns of the source through a b
 - **`ied.developer.install`** (a binding the plugin provides and its own `ied_relaunch` consumes): `{}` ->
   `{state, exitCode, tail}` once `nuke install-ied` has ended; it waits as long as the build takes, so it is for a tool
   on a thread of its own.
-- **`IED::RelaunchServer(reason, problem)`** (`src/api/relaunching.ch`, permission `server.relaunch`): the host's
+- **`IED::RelaunchServer(reason, problem)`** (`src/api/Relaunching.ch`, permission `server.relaunch`): the host's
   relaunch (`docs/27` "Relaunch"); generic, for any plugin that installs IED.
 - **The system message section and the tools** are entries the plugin's code contributes when it activates
   (`PluginContext::Contribute`), only when the server runs from source, each with `when: config.developer.enabled`; the
@@ -183,8 +183,8 @@ plugin API like the others, and the chat plugin learns of the source through a b
   `ied.developer/state` and the workspace's settings.
 - **The settings page** is the plugin's `settingsPages` entry `ied.developer` (Environment > Developer, view
   `DeveloperSettings`, `plugins/developer/ui/buildpage.js`); it draws `developer.enabled` with the settings window's own
-  row (`settings.row(key)`, `docs/07`) and the build below it. The build runs in `code/builds.cf`; the checkout and the
-  record are found in `code/source.cf`.
+  row (`settings.row(key)`, `docs/07`) and the build below it. The build runs in `code/Builds.cf`; the checkout and the
+  record are found in `code/Source.cf`.
 - **Where it is not yet:** the chat's Modified files list keeps to the chat's workspace (an `ied:/` write shows in its
   tool card).
 

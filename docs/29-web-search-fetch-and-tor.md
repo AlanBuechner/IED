@@ -166,7 +166,7 @@ A body past `webfetch.maxBytes` (5 MB) is cut there and said to be. Direct: no T
 humanity") comes back as an error naming it and suggesting `browser_open`, which runs a real browser. Stack Overflow's
 JavaScript challenge stops every fetcher that is not one.
 
-**Conversion.** HTML becomes Markdown in C4 (`code/html.cf`): a tolerant tokenizer (tags, attributes, comments,
+**Conversion.** HTML becomes Markdown in C4 (`code/Html.cf`): a tolerant tokenizer (tags, attributes, comments,
 character references - named, decimal, hex, the legacy ones without `;` - and raw text in `title` and `textarea`;
 `script` and `style` leave nothing), then a writer that keeps headings, paragraphs, line breaks, lists (nested,
 numbered from `start`, items closed by the next), links made absolute against the final URL or `<base href>` (same-page
@@ -254,7 +254,7 @@ fetchers' command lines and report), `frontend/tests/websearch.test.js`, and the
 Found and fixed on the way, in the host: a plugin's binding calling the plugin's own binding (which runs at once, on the
 plugin's thread, with the server lock released) left the thread marked as holding the lock, so a binding of another
 plugin called from inside it waited on the lock's condition without owning the lock, and the server hung for good. The
-host now clears the mark wherever it releases the lock for plugin code (`CodeUnlocked`, `src/plugins/code.ch`).
+host now clears the mark wherever it releases the lock for plugin code (`CodeUnlocked`, `src/plugins/Code.ch`).
 
 ## Licenses
 

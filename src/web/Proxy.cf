@@ -1,0 +1,211 @@
+include "Proxy.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const int32 c_UpstreamConnectMs = 5000;
+	const int32 c_FetchMs = 120000;
+	const int32 c_PumpSliceMs = 1000;
+	const int64 c_TunnelPingNs = 20000000000;
+
+	bool WorkspaceRoute(Core::StringView path, Core::StringView& wsId, Core::StringView& rest) {
+		if (!path.StartsWith(Core::StringView("/w/"))) return false;
+		const int64 slash = path.IndexOf('/', 3);
+		if (slash <= 3) return false;
+		wsId = path.Substring(3, slash - 3);
+		rest = path.Substring(slash, path.ByteLength() - slash);
+		return true;
+	}
+
+	Core::String UpstreamTarget(Core::StringView path, Core::StringView rest, Core::StringView query) {
+		const bool own = rest == "/ws" || rest.StartsWith(Core::StringView("/api/"));
+		Core::String target = Core::String(own ? rest : path);
+		if (!query.IsEmpty()) target = (target + "?") + query;
+		return target;
+	}
+
+	Core::StringView ServingWorkspace(Core::StringView wsId) {
+		const int64 dot = wsId.IndexOf('.', 0);
+		return dot < 0 ? wsId : wsId.Substring(0, dot);
+	}
+
+	int32 TunnelCloseCode(int32 code) {
+		if (code == 1000 || code == 1001 || code == 1002 || code == 1003 || code == 1007 || code == 1008 || code == 1011 || code == 1012) return code;
+		return 1012;
+	}
+
+	static void Refuse(Http::Response& response, int32 status, const char* error, Core::StringView message) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("error", error);
+		json.Field("message", message);
+		json.EndObject();
+		AnswerJson(response, status, json.View());
+	}
+
+	void Proxy::Forward(const Http::Request& request, Http::Response& response, Core::StringView wsId, Device* device) {
+		Core::StringView named;
+		Core::StringView rest;
+		WorkspaceRoute(request.path.View(), named, rest);
+		Core::StringView serving = ServingWorkspace(wsId);
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			if (!m_Server->m_Workspaces->Listed(serving)) {
+				Refuse(response, 404, "not-found", (Core::String("no workspace ") + wsId + " is open").View());
+				return;
+			}
+		}
+		int32 port = 0;
+		Core::String secret;
+		if (!m_Server->m_Servers->AwaitReady(serving, c_ServerAwaitMs, port, secret)) {
+			Refuse(response, 503, "unavailable", (Core::String("the server of workspace ") + serving + " is not running: it is starting, restarting or failed").View());
+			return;
+		}
+		if (rest == "/ws") WebSocket(request, response, wsId, port, secret.View(), device);
+		else Fetch(request, response, UpstreamTarget(request.path.View(), rest, request.query.View()).View(), port, secret.View(), device);
+	}
+
+	static bool HopHeader(Core::StringView name) {
+		const char*[9] skipped = { "Host", "Cookie", "Connection", "Upgrade", "Accept-Encoding", "Content-Length", "Transfer-Encoding", "X-IED-Secret", "X-IED-Device" };
+		for (int32 i = 0; i < 9; ++i)
+			if (Http::EqualsIgnoringCase(name, Core::StringView(skipped[i]))) return true;
+		return false;
+	}
+
+	void Proxy::Fetch(const Http::Request& request, Http::Response& response, Core::StringView target, int32 port, Core::StringView secret, Device* device) {
+		Http::Request upstream;
+		upstream.method = request.method;
+		upstream.target = Core::String(target);
+		for (int64 i = 0; i < request.headers.Count(); ++i) {
+			const Http::Header& header = request.headers.At(i);
+			if (!HopHeader(header.name.View())) upstream.headers.Add(header.name.View(), header.value.View());
+		}
+		upstream.headers.Set(Core::StringView("X-IED-Secret"), secret);
+		upstream.headers.Set(Core::StringView("X-IED-Device"), device->m_Id.View());
+		upstream.body = request.body;
+		Http::FetchResult got = Http::Fetch(Net::Address::Loopback(port), upstream, c_FetchMs);
+		if (!got.ok) {
+			Refuse(response, 502, "unavailable", (Core::String("the workspace server did not answer: ") + got.error.View()).View());
+			return;
+		}
+		response.status = got.response.status;
+		for (int64 i = 0; i < got.response.headers.Count(); ++i) {
+			const Http::Header& header = got.response.headers.At(i);
+			if (!HopHeader(header.name.View()) && !Http::EqualsIgnoringCase(header.name.View(), Core::StringView("Content-Encoding"))) response.headers.Add(header.name.View(), header.value.View());
+		}
+		response.body = got.response.body;
+	}
+
+	// The workspace server's socket for a client: its device, and whether the client is on this machine (`local=1`),
+	// which only the master can tell - the workspace server's own peer is always the master.
+	static Core::String UpstreamUrl(int32 port, Core::StringView secret, Core::StringView deviceId, bool local) {
+		Core::StringBuilder url;
+		url.Append("ws://127.0.0.1:");
+		url.AppendInt(port);
+		url.Append("/ws?secret=");
+		url.Append(secret);
+		url.Append("&device=");
+		url.Append(deviceId);
+		if (local) url.Append("&local=1");
+		return url.ToString();
+	}
+
+	void Proxy::WebSocket(const Http::Request& request, Http::Response& response, Core::StringView wsId, int32 port, Core::StringView secret, Device* device) {
+		if (!Http::IsWebSocketRequest(request)) {
+			Refuse(response, 400, "bad-request", Core::StringView("/w/<wsId>/ws is a WebSocket"));
+			return;
+		}
+		Upstream* upstream = new Upstream();
+		upstream->m_Socket = Http::WebSocket::Connect(UpstreamUrl(port, secret, device->m_Id.View(), request.peer.IsValid() && request.peer.IsLoopback()).View(), c_UpstreamConnectMs);
+		if (!upstream->m_Socket.IsOpen()) {
+			Refuse(response, 503, "unavailable", (Core::String("the workspace server's socket did not open: ") + upstream->m_Socket.Error()).View());
+			return;
+		}
+		Tunnel* tunnel = new Tunnel();
+		tunnel->m_WsId = Core::String(wsId);
+		tunnel->m_DeviceId = device->m_Id;
+		tunnel->m_Upstream = upstream;
+		Proxy* self = this;
+		const bool accepted = Http::AcceptWebSocket(request, response, [self, tunnel](Http::WebSocket& socket) {
+			tunnel->m_Client = &socket;
+			self->Add(tunnel);
+			self->Pump(tunnel);
+			self->Remove(tunnel);
+			Threading::LockGuard gone(tunnel->m_Use);
+			tunnel->m_Gone = true;
+		});
+		if (!accepted) upstream->m_Socket.Close(1001, Core::StringView("the browser's upgrade was refused"));
+	}
+
+	// On the browser's connection thread: its messages to the workspace server, while a thread of its own sends the
+	// workspace server's to the browser; when one side ends, the other is closed.
+	void Proxy::Pump(Tunnel* tunnel) {
+		Http::WebSocket* client = tunnel->m_Client;
+		Upstream* upstream = tunnel->m_Upstream;
+		Threading::Thread back = Threading::Thread::Run([client, upstream]() {
+			Http::WebSocketMessage message;
+			for (;;) {
+				if (!upstream->m_Socket.Receive(message, c_PumpSliceMs)) {
+					if (upstream->m_Socket.TimedOut()) continue;
+					break;
+				}
+				const bool sent = message.kind == Http::MessageKind::Text ? client->SendText(message.Text()) : client->SendBinary((const void*)message.data.Data(), message.data.Count());
+				if (!sent) break;
+			}
+			if (client->IsOpen()) client->Close(TunnelCloseCode(upstream->m_Socket.CloseCode()), Core::StringView(upstream->m_Socket.CloseReason()));
+		});
+		Http::WebSocketMessage message;
+		int64 pinged = clock_now_ns();
+		for (;;) {
+			if (!client->Receive(message, c_PumpSliceMs)) {
+				if (!client->TimedOut()) break;
+			}
+			else {
+				const bool sent = message.kind == Http::MessageKind::Text ? upstream->m_Socket.SendText(message.Text()) : upstream->m_Socket.SendBinary((const void*)message.data.Data(), message.data.Count());
+				if (!sent) break;
+			}
+			if (!upstream->m_Socket.IsOpen()) break;
+			if (clock_now_ns() - pinged > c_TunnelPingNs) {
+				client->Ping(Core::StringView("ied"));
+				pinged = clock_now_ns();
+			}
+		}
+		if (upstream->m_Socket.IsOpen()) upstream->m_Socket.Close(1001, Core::StringView("the browser left"));
+		back.Join();
+	}
+
+	void Proxy::Add(Tunnel* tunnel) {
+		Threading::LockGuard guard(m_Lock);
+		m_Tunnels.Push(tunnel);
+	}
+
+	void Proxy::Remove(Tunnel* tunnel) {
+		Threading::LockGuard guard(m_Lock);
+		for (int64 i = 0; i < m_Tunnels.Count(); ++i)
+			if (m_Tunnels[i] == tunnel) {
+				m_Tunnels.RemoveAt(i);
+				return;
+			}
+	}
+
+	int64 Proxy::Count() {
+		Threading::LockGuard guard(m_Lock);
+		return m_Tunnels.Count();
+	}
+
+	void Proxy::Revoke(Core::StringView deviceId) {
+		Core::Array<Tunnel*> closing;
+		{
+			Threading::LockGuard guard(m_Lock);
+			for (Tunnel* tunnel : m_Tunnels)
+				if (tunnel->m_DeviceId.View() == deviceId) closing.Push(tunnel);
+		}
+		for (Tunnel* tunnel : closing) {
+			Threading::LockGuard held(tunnel->m_Use);
+			if (tunnel->m_Gone) continue;
+			tunnel->m_Client->SendText(ByeFrame("auth-revoked").View());
+			tunnel->m_Client->Close(1008, Core::StringView("auth-revoked"));
+			tunnel->m_Upstream->m_Socket.Close(1001, Core::StringView("auth-revoked"));
+		}
+	}
+}

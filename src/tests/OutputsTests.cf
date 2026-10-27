@@ -1,0 +1,14 @@
+// services/outputs: an output's tail kept to its last bytes, cut at a line start.
+
+include "services/Outputs.ch"
+
+[test("server.outputs")]
+class OutputUnitTests {
+	[test("bounded")]
+	public static void TestBounded() {
+		assert_se("a\nb\n", Ied::Bounded(Core::StringView("a\n"), Core::StringView("b\n"), 100).CStr(), "under the limit: all of it");
+		assert_se("ccc\n", Ied::Bounded(Core::StringView("aaa\nbbb\n"), Core::StringView("ccc\n"), 6).CStr(), "over it: whole lines from the end");
+		assert_se("6789", Ied::Bounded(Core::StringView(""), Core::StringView("0123456789"), 4).CStr(), "one long line: its end");
+		assert_se("\xc3\xa9b", Ied::Bounded(Core::StringView(""), Core::StringView("a\xc3\xa9\xc3\xa9b"), 4).CStr(), "never half a character");
+	}
+}

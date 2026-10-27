@@ -1,0 +1,257 @@
+// webfetch: character references, the tokenizer, links made absolute, HTML as Markdown and as text, what a body is,
+// Latin-1 bodies, windows of a long page, and curl's command line and report.
+
+include "Html.ch"
+include "HtmlTokens.ch"
+include "Urls.ch"
+include "Pages.ch"
+
+static Core::String Md(const char* html) {
+	Core::String title;
+	return WebFetch::HtmlToText(Core::StringView(html), Core::StringView("https://example.com/docs/guide/intro.html"), false, title);
+}
+
+static Core::String Plain(const char* html) {
+	Core::String title;
+	return WebFetch::HtmlToText(Core::StringView(html), Core::StringView("https://example.com/docs/"), true, title);
+}
+
+static void Same(Core::StringView expected, Core::StringView actual) {
+	Core::String a = Core::String(expected);
+	Core::String b = Core::String(actual);
+	assert_se(a.CStr(), b.CStr(), "converted text");
+}
+
+[test("server.webfetch.tokens")]
+class WebFetchTokenTests {
+	[test("character_references")]
+	public static void TestEntities() {
+		Same(Core::StringView("a & b < c > d \"e\" 'f'"), WebFetch::DecodeEntities(Core::StringView("a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#x27;")).View());
+		assert_eq((int64)160, (int64)WebFetch::NamedEntity(Core::StringView("nbsp")), "nbsp");
+		assert_eq((int64)215, (int64)WebFetch::NamedEntity(Core::StringView("times")), "times");
+		assert_eq((int64)223, (int64)WebFetch::NamedEntity(Core::StringView("szlig")), "szlig");
+		assert_eq((int64)247, (int64)WebFetch::NamedEntity(Core::StringView("divide")), "divide");
+		assert_eq((int64)255, (int64)WebFetch::NamedEntity(Core::StringView("yuml")), "yuml: the Latin-1 run ends where it should");
+		assert_eq((int64)931, (int64)WebFetch::NamedEntity(Core::StringView("Sigma")), "Sigma after the gap at 930");
+		assert_eq((int64)969, (int64)WebFetch::NamedEntity(Core::StringView("omega")), "omega");
+		assert_eq((int64)8212, (int64)WebFetch::NamedEntity(Core::StringView("mdash")), "mdash");
+		assert_eq((int64)-1, (int64)WebFetch::NamedEntity(Core::StringView("nosuch")), "unknown");
+		Same(Core::StringView("&nosuch; & &; AT&T"), WebFetch::DecodeEntities(Core::StringView("&nosuch; & &; AT&T")).View());
+		Same(Core::StringView("x&y"), WebFetch::DecodeEntities(Core::StringView("x&ampy")).View());
+		Core::String e = WebFetch::DecodeEntities(Core::StringView("caf&eacute; &#233;"));
+		assert_eq((int64)8, e.ByteLength(), "caf, a space and two 2-byte characters");
+	}
+
+	[test("tags_attributes_comments_raw_text")]
+	public static void TestTokens() {
+		Core::Array<WebFetch::HtmlToken> tokens = WebFetch::Tokenize(Core::StringView("<!DOCTYPE html><!-- a < b --><P Class='x' data-v=\"1 &amp; 2\" hidden>Hi<br/><script>if (a<b) x();</script></p><title>A &amp; B</title>"));
+		assert_eq((int64)7, tokens.Count(), "p, text, br, /p, title, its text, /title");
+		assert_true(tokens[0].m_Kind == WebFetch::TokenKind::Start && tokens[0].m_Name.View() == "p", "p start");
+		assert_true(WebFetch::AttributeOf(tokens[0], "class") == "x", "class");
+		assert_true(WebFetch::AttributeOf(tokens[0], "data-v") == "1 & 2", "decoded value");
+		assert_true(WebFetch::HasAttribute(tokens[0], "hidden"), "bare attribute");
+		assert_true(tokens[1].m_Text.View() == "Hi", "text");
+		assert_true(tokens[2].m_Name.View() == "br" && tokens[2].m_SelfClosing, "br/");
+		assert_true(tokens[3].m_Kind == WebFetch::TokenKind::End && tokens[3].m_Name.View() == "p", "the script's content dropped, its end tag consumed");
+		assert_true(tokens[5].m_Text.View() == "A & B", "title text decoded");
+	}
+
+	[test("a_lone_lt_is_text")]
+	public static void TestLooseAngle() {
+		Core::Array<WebFetch::HtmlToken> tokens = WebFetch::Tokenize(Core::StringView("a < b and 1 <2"));
+		assert_eq((int64)1, tokens.Count(), "one text");
+		assert_true(tokens[0].m_Text.View() == "a < b and 1 <2", tokens[0].m_Text.CStr());
+	}
+}
+
+[test("server.webfetch.urls")]
+class WebFetchUrlTests {
+	[test("relative_root_scheme_relative_query_fragment")]
+	public static void TestResolve() {
+		Core::StringView base = Core::StringView("https://example.com/docs/guide/intro.html?x=1#top");
+		Same(Core::StringView("https://example.com/docs/guide/next.html"), WebFetch::ResolveUrl(base, Core::StringView("next.html")).View());
+		Same(Core::StringView("https://example.com/docs/api/"), WebFetch::ResolveUrl(base, Core::StringView("../api/")).View());
+		Same(Core::StringView("https://example.com/top"), WebFetch::ResolveUrl(base, Core::StringView("../../../top")).View());
+		Same(Core::StringView("https://example.com/a/b"), WebFetch::ResolveUrl(base, Core::StringView("/a/./b")).View());
+		Same(Core::StringView("https://cdn.example.net/x.png"), WebFetch::ResolveUrl(base, Core::StringView("//cdn.example.net/x.png")).View());
+		Same(Core::StringView("https://example.com/docs/guide/intro.html?y=2"), WebFetch::ResolveUrl(base, Core::StringView("?y=2")).View());
+		Same(Core::StringView("https://example.com/docs/guide/intro.html?x=1#more"), WebFetch::ResolveUrl(base, Core::StringView("#more")).View());
+		Same(Core::StringView("http://other.org/p"), WebFetch::ResolveUrl(base, Core::StringView("http://other.org/p")).View());
+		Same(Core::StringView("mailto:a@b.c"), WebFetch::ResolveUrl(base, Core::StringView("mailto:a@b.c")).View());
+		assert_true(WebFetch::ResolveUrl(base, Core::StringView("javascript:void(0)")).IsEmpty(), "javascript: is no link");
+		assert_true(WebFetch::ResolveUrl(base, Core::StringView("  ")).IsEmpty(), "blank");
+		Same(Core::StringView("https://example.com/x"), WebFetch::ResolveUrl(Core::StringView("https://example.com"), Core::StringView("x")).View());
+	}
+}
+
+[test("server.webfetch.markdown")]
+class WebFetchMarkdownTests {
+	[test("headings_paragraphs_emphasis_links")]
+	public static void TestBlocks() {
+		Same(Core::StringView("# Title\n\nSome **bold** and _it_ text with a [link](https://example.com/docs/guide/a.html).\n\nNext `code` here."),
+			Md("<h1>Title</h1><p>Some <b>bold</b> and <em>it</em>\n text with a <a href='a.html'>link</a>.</p><p>Next <code>code</code> here.</p>").View());
+	}
+
+	[test("empty_elements_leave_no_marks")]
+	public static void TestEmpty() {
+		Same(Core::StringView("text [x](https://e.org/)"), Md("<p><b> </b>text <a href='https://e.org/'><img src='i.png'>x</a><a href='#top'></a><h2></h2></p>").View());
+	}
+
+	[test("nested_lists_numbered_from_start_implied_ends")]
+	public static void TestLists() {
+		Same(Core::StringView("- one\n- two\n  - inner\n- three\n\n3. c\n4. d"),
+			Md("<ul><li>one<li>two<ul><li>inner</ul><li>three</ul><ol start='3'><li>c</li><li>d</li></ol>").View());
+	}
+
+	[test("code_blocks_keep_their_text_and_language")]
+	public static void TestPre() {
+		Same(Core::StringView("Before\n\n```rust\nfn main() {\n    let a = 1 < 2;\n}\n```\n\nAfter"),
+			Md("<p>Before</p><pre><code class=\"language-rust\">\nfn main() {\n    let a = 1 &lt; 2;\n}\n</code></pre><p>After</p>").View());
+	}
+
+	[test("tables_as_pipe_rows")]
+	public static void TestTable() {
+		Same(Core::StringView("| Name | Value |\n| --- | --- |\n| a | 1 |\n| b | 2 |"),
+			Md("<table><tr><th>Name<th>Value<tr><td>a<td>1</tr><tr><td>b</td><td><p>2</p></td></tr></table>").View());
+	}
+
+	[test("quotes_rules_images_breaks")]
+	public static void TestQuote() {
+		Same(Core::StringView("> quoted\n> line\n\n---\n\n[image: A cat]"),
+			Md("<blockquote><p>quoted<br>line</p></blockquote><hr><img alt=' A  cat ' src='/cat.png'>").View());
+	}
+
+	[test("chrome_is_left_out_main_is_all")]
+	public static void TestMain() {
+		Same(Core::StringView("## Body\n\nThe content."),
+			Md("<html><head><title>T</title><style>p{}</style></head><body><nav>Menu</nav><div hidden>secret</div><main><h2>Body</h2><p>The content.</p><aside>ad</aside></main><footer>(c)</footer></body></html>").View());
+		Same(Core::StringView("kept"), Md("<body><p>Start</p><article>kept</article></body>").View());
+		Same(Core::StringView("one\n\ntwo"), Md("<article>one</article><article>two</article>").View());
+	}
+
+	[test("chrome_by_role_class_or_id_never_the_page_itself")]
+	public static void TestChrome() {
+		Same(Core::StringView("Body text"),
+			Md("<div class='vector-dropdown mw-portlet'><ul><li><a href='x'>Deutsch</a></ul></div><div role='navigation'>Home</div><div id='cookie-banner'>OK</div><p class='lead-text'>Body text</p>").View());
+		Same(Core::StringView("kept"), Md("<body class='has-sidebar'><p class='menuitems-of-the-day'>kept</p></body>").View());
+	}
+
+	[test("the_title_and_base_href")]
+	public static void TestTitleBase() {
+		Core::String title;
+		Core::String text = WebFetch::HtmlToText(Core::StringView("<head><title>\n  My  Page </title><base href='https://cdn.org/root/'></head><a href='x'>x</a>"), Core::StringView("https://a.com/"), false, title);
+		Same(Core::StringView("My Page"), title.View());
+		Same(Core::StringView("[x](https://cdn.org/root/x)"), text.View());
+	}
+
+	[test("plain_text_has_no_marks")]
+	public static void TestPlain() {
+		Same(Core::StringView("Title\n\nSome bold link.\n\n- a\n- b\n\nName | Value\na | 1\n\nfn x()"),
+			Plain("<h1>Title</h1><p>Some <b>bold</b> <a href='y'>link</a>.</p><ul><li>a<li>b</ul><table><tr><th>Name<th>Value<tr><td>a<td>1</table><pre>fn x()</pre>").View());
+	}
+}
+
+[test("server.webfetch.pages")]
+class WebFetchPageTests {
+	[test("what_a_body_is")]
+	public static void TestKinds() {
+		assert_true(WebFetch::KindOf(Core::StringView("text/html; charset=utf-8"), Core::StringView("")) == WebFetch::PageKind::Html, "html");
+		assert_true(WebFetch::KindOf(Core::StringView("application/json"), Core::StringView("{}")) == WebFetch::PageKind::Text, "json");
+		assert_true(WebFetch::KindOf(Core::StringView("application/vnd.api+json"), Core::StringView("{}")) == WebFetch::PageKind::Text, "+json");
+		assert_true(WebFetch::KindOf(Core::StringView("text/plain"), Core::StringView("x")) == WebFetch::PageKind::Text, "text");
+		assert_true(WebFetch::KindOf(Core::StringView("application/pdf"), Core::StringView("%PDF")) == WebFetch::PageKind::Other, "pdf");
+		assert_true(WebFetch::KindOf(Core::StringView(""), Core::StringView("  <!DOCTYPE HTML><p>")) == WebFetch::PageKind::Html, "sniffed html");
+		assert_true(WebFetch::KindOf(Core::StringView(""), Core::StringView("plain words")) == WebFetch::PageKind::Text, "untyped text");
+	}
+
+	[test("latin_1_and_windows_1252_bodies")]
+	public static void TestCharsets() {
+		char8[4] latin;
+		latin[0] = (char8)'c';
+		latin[1] = (char8)0xE9;
+		latin[2] = (char8)0x93;
+		latin[3] = (char8)'!';
+		Core::StringView body = Core::StringView(&latin[0], 4);
+		Core::String converted = WebFetch::AsUtf8(body, Core::StringView("text/html; charset=ISO-8859-1"));
+		assert_eq((int64)7, converted.ByteLength(), "c, e-acute (2 bytes), a left double quote (3 bytes), !");
+		assert_true(converted.View().IsValidUtf8(), "valid UTF-8");
+		Core::String sniffed = WebFetch::AsUtf8(body, Core::StringView("text/html"));
+		assert_eq((int64)7, sniffed.ByteLength(), "not UTF-8 and nothing said: read as Windows-1252");
+		Core::String kept = WebFetch::AsUtf8(Core::StringView("caf\xC3\xA9"), Core::StringView("text/html"));
+		assert_eq((int64)5, kept.ByteLength(), "UTF-8 stays");
+	}
+
+	[test("windows_of_a_long_page")]
+	public static void TestWindows() {
+		WebFetch::FetchedPage page;
+		page.m_Url = Core::String("https://e.org/a");
+		page.m_FinalUrl = Core::String("https://e.org/a/");
+		page.m_Status = 200;
+		page.m_ContentType = Core::String("text/html");
+		page.m_Title = Core::String("A");
+		page.m_Text = Core::String("0123456789abcdefghij");
+		Core::String first = WebFetch::WindowText(page, 0, 8);
+		assert_true(first.View().StartsWith(Core::StringView("URL: https://e.org/a/\nStatus: 200\nType: text/html\nTitle: A\nLength: 20 characters\n\n01234567\n")), first.CStr());
+		assert_true(first.View().Contains(Core::StringView("[Characters 0-8 of 20: web_fetch with start=8 gives the next ones.]")), first.CStr());
+		Core::String last = WebFetch::WindowText(page, 16, 8);
+		assert_true(last.View().Contains(Core::StringView("\n\nghij\n\n[Characters 16-20 of 20.]")), last.CStr());
+		Core::String past = WebFetch::WindowText(page, 30, 8);
+		assert_true(past.View().Contains(Core::StringView("Nothing from start=30: the text has 20 characters.")), past.CStr());
+		Core::String whole = WebFetch::WindowText(page, 0, 100);
+		assert_true(!whole.View().Contains(Core::StringView("[Characters")), whole.CStr());
+	}
+
+	[test("bot_checks_are_told_apart")]
+	public static void TestBotCheck() {
+		WebFetch::FetchedPage page;
+		page.m_Title = Core::String("Just a moment...");
+		assert_true(WebFetch::IsBotCheck(page), "Cloudflare");
+		page.m_Title = Core::String("Reddit - Prove your humanity");
+		assert_true(WebFetch::IsBotCheck(page), "Reddit");
+		page.m_Title = Core::String("select in tokio - Rust");
+		assert_true(!WebFetch::IsBotCheck(page), "a page");
+	}
+
+	[test("the_impersonating_fetchers_command_line")]
+	public static void TestImpersonator() {
+		WebFetch::FetchOptions options;
+		options.m_Seconds = 20;
+		options.m_MaxBytes = 5000;
+		Core::Array<Core::String> args = WebFetch::ImpersonatorArguments(Core::StringView("https://e.org/"), Core::StringView("C:/p/fetch.py"), Core::StringView("C:/v/pk"),
+			Core::StringView("chrome"), options);
+		Core::StringBuilder joined;
+		for (const Core::String& arg : args) {
+			joined.Append(arg.View());
+			joined.Append(" ");
+		}
+		assert_se("-I C:/p/fetch.py --packages C:/v/pk --impersonate chrome --timeout 20 --max-bytes 5000 --url https://e.org/ ", joined.CStr(), "arguments");
+	}
+
+	[test("curls_command_line_and_report")]
+	public static void TestCurl() {
+		WebFetch::FetchOptions options;
+		options.m_UserAgent = Core::String("UA");
+		options.m_Seconds = 30;
+		options.m_MaxBytes = 1000;
+		Core::Array<Core::String> args = WebFetch::CurlArguments(Core::StringView("https://e.org/[x]"), options);
+		Core::StringBuilder joined;
+		for (const Core::String& arg : args) {
+			joined.Append(arg.View());
+			joined.Append(" ");
+		}
+		assert_true(joined.View().Contains(Core::StringView("--proto =http,https --proto-redir =http,https")), joined.CStr());
+		assert_true(joined.View().Contains(Core::StringView("--globoff")), "brackets in URLs are not globs");
+		assert_true(joined.View().Contains(Core::StringView("--max-time 30 --max-filesize 1000")), joined.CStr());
+		assert_true(joined.View().EndsWith(Core::StringView("--url https://e.org/[x] ")), joined.CStr());
+		WebFetch::Fetched fetched;
+		int64 code = -1;
+		Core::String message;
+		assert_true(WebFetch::ReadReport(Core::StringView("curl: (63) Maximum file size exceeded\n\nIED-WEBFETCH\t200\ttext/html; charset=utf-8\thttps://e.org/b\t63\tMaximum file size exceeded\n"), fetched, code, message), "report");
+		assert_eq((int64)200, (int64)fetched.m_Status, "status");
+		assert_true(fetched.m_ContentType.View() == "text/html; charset=utf-8", fetched.m_ContentType.CStr());
+		assert_true(fetched.m_FinalUrl.View() == "https://e.org/b", fetched.m_FinalUrl.CStr());
+		assert_eq((int64)63, code, "exit code");
+		assert_true(message.View() == "Maximum file size exceeded", message.CStr());
+		assert_true(!WebFetch::ReadReport(Core::StringView("curl: (6) Could not resolve host: x"), fetched, code, message), "no report");
+	}
+}

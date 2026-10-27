@@ -1,0 +1,84 @@
+include "Options.ch"
+
+namespace Desktop
+{
+	const char* Usage() {
+		return "usage: ied-desktop [<path>[:<line>[:<col>]]]   a window on a folder or file (default: IED's home)\n"
+			"options: --control <name> (another server's pipe), --data <dir> (the app's state elsewhere),\n"
+			"         --debug-port <n> (the window's DevTools protocol on a loopback port),\n"
+			"         --register / --unregister (IED in your Start menu, or not)\n";
+	}
+
+	static bool TakeValue(const Core::Array<Core::String>& arguments, int64& i, Core::String& value, Core::String& error) {
+		if (i + 1 >= arguments.Count()) {
+			error = Core::String(arguments[i].View()) + " needs a value";
+			return false;
+		}
+		i += 1;
+		value = arguments[i];
+		return true;
+	}
+
+	static bool TakePort(Core::StringView text, int32& port, Core::String& error) {
+		int64 number = 0;
+		if (!Core::ParseInt64(text, number) || number < 1 || number > 65535) {
+			error = Core::String("--debug-port is not a port: ") + text;
+			return false;
+		}
+		port = (int32)number;
+		return true;
+	}
+
+	static bool TakeOption(const Core::Array<Core::String>& arguments, int64& i, Options& options, Core::String& error) {
+		Core::StringView option = arguments[i].View();
+		Core::String value;
+		if (option == "--help" || option == "-h") {
+			options.m_Help = true;
+			return true;
+		}
+		if (option == "--register" || option == "--unregister") {
+			options.m_Registering = option == "--register";
+			options.m_Unregistering = option == "--unregister";
+			return true;
+		}
+		if (option != "--control" && option != "--data" && option != "--debug-port" && option != "--relaunch") {
+			error = Core::String("unknown option ") + option;
+			return false;
+		}
+		if (!TakeValue(arguments, i, value, error)) return false;
+		if (option == "--control") options.m_Control = value;
+		else if (option == "--data") options.m_DataDir = value;
+		else if (option == "--relaunch") options.m_Relaunch = value;
+		else return TakePort(value.View(), options.m_DebugPort, error);
+		return true;
+	}
+
+	bool ParseOptions(const Core::Array<Core::String>& arguments, Options& options, Core::String& error) {
+		bool positional = false;
+		for (int64 i = 0; i < arguments.Count(); ++i) {
+			Core::StringView argument = arguments[i].View();
+			if (argument.StartsWith(Core::StringView("-"))) {
+				if (!TakeOption(arguments, i, options, error)) return false;
+			}
+			else if (positional) {
+				error = Core::String("one path at a time: ") + argument;
+				return false;
+			}
+			else {
+				positional = true;
+				Launch::SplitLocation(argument, options.m_Path, options.m_Line, options.m_Col);
+			}
+		}
+		return true;
+	}
+
+	FS::Path DataFolder(const Options& options) {
+		if (!options.m_DataDir.IsEmpty()) return FS::Path(FS::AbsolutePath(options.m_DataDir.CStr()).View());
+		return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED" / "desktop";
+	}
+
+	FS::Path LogFilePath(const Options& options) {
+		if (!options.m_DataDir.IsEmpty()) return DataFolder(options) / "desktop.log";
+		return Launch::LogsFolder() / "desktop.log";
+	}
+}

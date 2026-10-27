@@ -1,0 +1,158 @@
+include "Profiles.ch"
+include "fs/Glob.ch"
+include "web/Params.ch"
+
+namespace Ied
+{
+	static Core::Array<Core::String> StringsOf(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	// A boolean-or-when option: "true", "" for false or none, the clause itself.
+	static Core::String Condition(const Serialization::DomNode& value) {
+		if (value.Kind() == Serialization::DomKind::Bool) return value.AsBool() ? Core::String("true") : Core::String();
+		return Core::String(value.AsView().Trimmed());
+	}
+
+	LspProfile* ReadLspProfile(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
+		LspProfile* profile = new LspProfile();
+		profile->m_Id = Core::String(node.Member("id").AsView());
+		profile->m_Label = Core::String(node.Member("label").AsView());
+		profile->m_PluginId = Core::String(pluginId);
+		profile->m_PluginDir = pluginDir;
+		profile->m_Command = Core::String(node.Member("command").AsView());
+		profile->m_Args = StringsOf(node.Member("args"));
+		Serialization::DomNode env = node.Member("env");
+		for (int64 i = 0; i < env.Count(); ++i) profile->m_Environment.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		profile->m_Cwd = Core::String(node.Member("cwd").AsView());
+		Serialization::DomNode selector = node.Member("selector");
+		profile->m_Languages = StringsOf(selector.Member("languages"));
+		profile->m_Extensions = StringsOf(selector.Member("extensions"));
+		profile->m_Globs = StringsOf(selector.Member("globs"));
+		Serialization::DomNode options = node.Member("initializationOptions");
+		profile->m_InitializationOptions = options.Kind() == Serialization::DomKind::Object ? NodeJson(options) : Core::String("{}");
+		profile->m_InitializationOptionsFile = Core::String(node.Member("initializationOptionsFile").AsView());
+		profile->m_OptionsFiles = Core::String(node.Member("initializationOptionsFiles").Member("files").AsView());
+		profile->m_OptionsFilesKey = Core::String(node.Member("initializationOptionsFiles").Member("key").AsView());
+		profile->m_PluginCodeOption = Core::String(node.Member("pluginCodeOption").AsView());
+		profile->m_Staged = node.Member("launchMode").AsView() == "staged";
+		profile->m_PerProject = node.Member("scope").AsView() == "project";
+		Core::StringView encoding = node.Member("positionEncoding").AsView();
+		profile->m_Negotiate = encoding.IsEmpty() || encoding == "negotiate";
+		profile->m_Encoding = PositionEncoding::Utf16;
+		if (!profile->m_Negotiate) ParsePositionEncoding(encoding, profile->m_Encoding);
+		profile->m_IntegerIds = node.Member("requestIds").AsView() == "integer";
+		profile->m_Refetch = StringsOf(node.Member("refetchOnDiagnostics"));
+		profile->m_FilterCodeActions = node.Member("codeActionsNeedClientFilter").AsBool();
+		profile->m_AiRequests = node.Member("aiExposedRequests").IsValid() ? NodeJson(node.Member("aiExposedRequests")) : Core::String("[]");
+		profile->m_FormatOnAiWrite = Condition(node.Member("formatOnAiWrite"));
+		profile->m_DiagnosticsOnAiWrite = Condition(node.Member("diagnosticsOnAiWrite"));
+		profile->m_When = Core::String(node.Member("when").AsView());
+		return profile;
+	}
+
+	void ReadLspProfiles(const Serialization::DomNode& contributes, Core::StringView pluginId, const FS::Path& pluginDir, Core::Array<LspProfile*>& profiles) {
+		Serialization::DomNode list = contributes.Member("lspProfiles");
+		for (int64 i = 0; i < list.Count(); ++i) profiles.Push(ReadLspProfile(list.At(i), pluginId, pluginDir));
+	}
+
+	static int32 Fold(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool EndsWithIgnoringCase(Core::StringView text, Core::StringView end) {
+		if (end.IsEmpty() || text.ByteLength() < end.ByteLength()) return false;
+		const int64 offset = text.ByteLength() - end.ByteLength();
+		for (int64 i = 0; i < end.ByteLength(); ++i)
+			if (Fold(text.ByteAt(offset + i)) != Fold(end.ByteAt(i))) return false;
+		return true;
+	}
+
+	bool ProfileSelects(const LspProfile* profile, Core::StringView languageId, Core::StringView path) {
+		for (const Core::String& language : profile->m_Languages)
+			if (language.View() == languageId) return true;
+		for (const Core::String& extension : profile->m_Extensions)
+			if (EndsWithIgnoringCase(path, extension.View())) return true;
+		for (const Core::String& glob : profile->m_Globs)
+			if (GlobMatch(glob.View(), path)) return true;
+		return false;
+	}
+
+	LspProfile* ProfileServing(const Core::Array<LspProfile*>& profiles, Core::StringView languageId, Core::StringView path) {
+		for (int64 i = profiles.Count() - 1; i >= 0; --i)
+			if (ProfileSelects(profiles[i], languageId, path)) return profiles[i];
+		return nullptr;
+	}
+
+	// The setting's value as text: a string as it is, a number or a boolean as written; nothing for anything else.
+	static void AppendConfig(Core::StringView key, const ProfileVariables& variables, Core::StringBuilder& out) {
+		if (!variables.m_Config) return;
+		Core::String json = variables.m_Config(key);
+		if (json.IsEmpty()) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		if (value.Kind() == Serialization::DomKind::String) out.Append(value.AsView());
+		else if (value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float || value.Kind() == Serialization::DomKind::Bool) out.Append(json.View().Trimmed());
+	}
+
+	// A variable of the server's environment; nothing when it is not set.
+	static void AppendEnvironment(Core::StringView name, Core::StringBuilder& out) {
+		Core::String value;
+		if (Platform::TryGetEnvironmentVariable(Core::String(name).CStr(), value)) out.Append(value.View());
+	}
+
+	static bool ExpandOne(Core::StringView name, const ProfileVariables& variables, Core::StringBuilder& out) {
+		if (name.StartsWith(Core::StringView("config:"))) AppendConfig(name.Substring(7, name.ByteLength() - 7), variables, out);
+		else if (name == "pluginDir") out.Append(variables.m_PluginDir.View());
+		else if (name == "workspaceDir") out.Append(variables.m_WorkspaceDir.View());
+		else if (name == "solutionDir") out.Append(variables.m_SolutionDir.View());
+		else if (name == "projectName") out.Append(variables.m_ProjectName.View());
+		else if (name == "projectDir") out.Append(variables.m_ProjectDir.View());
+		else if (name == "iedHome") out.Append(variables.m_IedHome.View());
+		else if (name == "pluginState") out.Append(variables.m_PluginState.View());
+		else if (name.StartsWith(Core::StringView("env:"))) AppendEnvironment(name.Substring(4, name.ByteLength() - 4), out);
+		else if (name.StartsWith(Core::StringView("tool:"))) {
+			if (variables.m_Tool) out.Append(variables.m_Tool(name.Substring(5, name.ByteLength() - 5)).View());
+		}
+		else return false;
+		return true;
+	}
+
+	Core::String ExpandProfileVariables(Core::StringView text, const ProfileVariables& variables) {
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			Core::StringView rest = text.Substring(at, text.ByteLength() - at);
+			const int64 found = rest.IndexOf(Core::StringView("${"));
+			if (found < 0) {
+				out.Append(rest);
+				break;
+			}
+			const int64 close = rest.IndexOf('}', found);
+			if (close < 0) {
+				out.Append(rest);
+				break;
+			}
+			out.Append(rest.Substring(0, found));
+			Core::StringView name = rest.Substring(found + 2, close - found - 2);
+			if (!ExpandOne(name, variables, out)) out.Append(rest.Substring(found, close - found + 1));
+			at += close + 1;
+		}
+		return out.ToString();
+	}
+
+	void ExpandProfileArgument(Core::StringView text, const ProfileVariables& variables, Core::Array<Core::String>& out) {
+		const bool whole = text.StartsWith(Core::StringView("${config:")) && text.EndsWith(Core::StringView("}")) && text.IndexOf('}', 0) == text.ByteLength() - 1;
+		if (whole && variables.m_Config) {
+			Core::String json = variables.m_Config(text.Substring(9, text.ByteLength() - 10));
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::DomNode value = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+			if (value.Kind() == Serialization::DomKind::Array) {
+				for (int64 i = 0; i < value.Count(); ++i)
+					if (value.At(i).Kind() == Serialization::DomKind::String) out.Push(Core::String(value.At(i).AsView()));
+				return;
+			}
+		}
+		out.Push(ExpandProfileVariables(text, variables));
+	}
+}

@@ -1,0 +1,99 @@
+// gpu_limiter (docs/13 T-GPU-15, docs/22 "Performance"): where a pass's or draw's GPU time goes, found by experiments on
+// the replay GPU - the range timed as captured, then with its draws changed: a trivial pixel shader, a one-pixel
+// scissor, color writes off - each the median of several replays, with the share of the time each part of the
+// pipeline takes and the largest named.
+include "ToolText.ch"
+
+namespace GpuDebug
+{
+	const int64 c_LimiterRepeat = 5;
+
+	static void AppendVariant(Core::StringBuilder& text, const Serialization::DomNode& variant, const char* what, double captured) {
+		text.Append("  ");
+		text.Append(what);
+		text.Append(": ");
+		Serialization::DomNode ms = variant.Member("ms");
+		if (!ms.IsValid() || ms.IsNull()) {
+			text.Append("did not run");
+			if (variant.Member("problem").IsValid()) {
+				text.Append(" (");
+				text.Append(variant.Member("problem").AsView());
+				text.Append(")");
+			}
+			text.Append("\n");
+			return;
+		}
+		AppendMs(text, ms.AsFloat());
+		if (captured > 0.0 && variant.Member("id").AsView() != "captured") {
+			text.Append(" (");
+			text.AppendDouble(100.0 * (ms.AsFloat() - captured) / captured, 0);
+			text.Append("%, ");
+			text.AppendInt(variant.Member("changed").AsInt());
+			text.Append(" draws changed)");
+		}
+		text.Append("\n");
+	}
+
+	static void AppendShare(Core::StringBuilder& text, const Serialization::DomNode& shares, const char* key, const char* what) {
+		Serialization::DomNode share = shares.Member(key);
+		text.Append("  ");
+		text.Append(what);
+		text.Append(": ");
+		if (!share.IsValid() || share.IsNull()) text.Append("-");
+		else {
+			text.AppendDouble(share.AsFloat() * 100.0, 0);
+			text.Append("%");
+		}
+		text.Append("\n");
+	}
+
+	static const char* Advice(Core::StringView limiter) {
+		if (limiter == "vertices") return "vertex and primitive work: fewer or lighter vertices (LODs, culling what is off screen, a cheaper vertex shader).";
+		if (limiter == "pixelShading") return "pixel shading: a cheaper pixel shader, or fewer pixels shaded (less overdraw, a depth prepass, a lower resolution).";
+		if (limiter == "rasterization") return "rasterization and depth: many small triangles or overdraw - pixels rasterized and depth tested cost more than their shading.";
+		if (limiter == "colorOutput") return "color output: blending and render-target bandwidth (fewer or narrower targets, less blending).";
+		return "unknown.";
+	}
+
+	Core::String LimiterText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args) {
+		const int64 eid = IntArg(args, "eid", 0);
+		if (!eid) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("eid is required: a pass (marker) or an action"));
+		Core::StringBuilder params;
+		params.Append("{\"eid\":");
+		params.AppendInt(eid);
+		params.Append(",\"repeat\":");
+		params.AppendInt(IntArg(args, "repeat", c_LimiterRepeat));
+		params.Append("}");
+		Serialization::DomNode result = AskTool(debugger, target, "experiments", params.View());
+		Core::StringBuilder text;
+		text.Append("EID ");
+		text.AppendInt(result.Member("first").AsInt());
+		text.Append(" to ");
+		text.AppendInt(result.Member("last").AsInt());
+		text.Append(" (");
+		text.AppendInt(result.Member("draws").AsInt());
+		text.Append(" draws, ");
+		text.AppendInt(result.Member("dispatches").AsInt());
+		text.Append(" dispatches), GPU time, the median of ");
+		text.AppendInt(result.Member("repeat").AsInt());
+		text.Append(" replays each:\n");
+		Serialization::DomNode variants = result.Member("variants");
+		const double captured = variants.At(0).Member("ms").IsNull() ? 0.0 : variants.At(0).Member("ms").AsFloat();
+		const char*[4] names = {"as captured", "every pixel shader trivial", "every scissor one pixel", "color writes off"};
+		for (int64 i = 0; i < variants.Count() && i < 4; i += 1) AppendVariant(text, variants.At(i), names[i], captured);
+		if (result.Member("tooShort").AsBool()) {
+			text.Append("The range took under 2 microseconds: what the experiments save is the timer's noise. Ask about the pass around it.\n");
+			return text.ToString();
+		}
+		Serialization::DomNode shares = result.Member("shares");
+		text.Append("Shares of the captured time (they overlap):\n");
+		AppendShare(text, shares, "vertices", "vertex and primitive work (left when no pixel is drawn)");
+		AppendShare(text, shares, "pixelShading", "pixel shading (saved by a trivial pixel shader)");
+		AppendShare(text, shares, "rasterization", "rasterization and depth (between the two)");
+		AppendShare(text, shares, "colorOutput", "color output (saved with color writes off)");
+		text.Append("Limiter: ");
+		text.Append(Advice(result.Member("limiter").AsView()));
+		text.Append("\n");
+		return text.ToString();
+	}
+}

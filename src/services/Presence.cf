@@ -1,0 +1,164 @@
+include "Presence.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	static bool IsLevel(Core::StringView level) { return level == "info" || level == "warning" || level == "error" || level == "attention"; }
+
+	Core::String NotificationJson(const Notification& note) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", note.m_Id.View());
+		json.Field("level", note.m_Level.View());
+		json.Field("text", note.m_Text.View());
+		json.IntField("ts", note.m_Ts);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Presence::Init(Server* server) {
+		this.m_Server = server;
+		m_NextNote = 1;
+		Presence* self = this;
+		server->m_Hub.Add(Core::StringView("server"), [self]() -> Core::String { return self->Snapshot(); });
+		server->m_Rpc.Register("server.info", [self](Call& call, const Params& params) -> Core::String { return self->Info(call, params); });
+		server->m_Rpc.Register("server.notify", [self](Call& call, const Params& params) -> Core::String { return self->Notify(call, params); });
+		server->m_Rpc.Register("server.dismiss", [self](Call& call, const Params& params) -> Core::String { return self->Dismiss(call, params); });
+	}
+
+	// The master's own methods and topics a client sends it (docs/10 "Routing"); its plugins' code adds theirs.
+	static Core::Array<Core::String> MasterMethods() {
+		const char*[16] names = {
+			"server.info", "server.notify", "server.dismiss", "ws.list", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent",
+			"ws.close", "ws.restart", "auth.setPassword", "auth.devices", "auth.revoke", "plugins.setEnabled", "plugins.approve",
+			"testhooks.mintToken", "testhooks.relaunch"
+		};
+		Core::Array<Core::String> methods;
+		for (int32 i = 0; i < 16; ++i) methods.Push(Core::String(names[i]));
+		return methods;
+	}
+
+	Core::String Presence::RoutesJson() const {
+		Core::Array<Core::String> methods = MasterMethods();
+		Core::Array<Core::String> topics;
+		topics.Push(Core::String("server"));
+		m_Server->m_Code->Registered(methods, topics);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("methods"));
+		json.BeginArray();
+		for (const Core::String& name : methods) json.String(name.View());
+		json.EndArray();
+		json.Key(Core::StringView("topics"));
+		json.BeginArray();
+		for (const Core::String& key : topics) json.String(key.View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Presence::RoutesChanged() {
+		if (!m_Server->IsMaster()) return;
+		Core::String routes = RoutesJson();
+		if (routes.View() == m_Published.View()) return;
+		m_Published = routes;
+		m_Server->m_Hub.Publish(Core::StringView("server"), "routes.changed", (Core::String("{\"routes\":") + routes.View() + "}").View());
+	}
+
+	Core::String Presence::Snapshot() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("serverVersion", m_Server->m_Config.m_Version.View());
+		if (m_Server->IsMaster()) {
+			json.RawField("routes", RoutesJson().View());
+			json.Key(Core::StringView("master"));
+			json.BeginObject();
+			json.IntField("pid", (int64)Platform::ProcessId());
+			json.IntField("startedMs", m_Server->m_StartedMs);
+			json.EndObject();
+		}
+		Core::String workspaces = m_Server->m_Workspaces->SummariesJson();
+		json.RawField("workspaces", workspaces.View());
+		json.RawField("recent", m_Server->m_Recent.Json().View());
+		json.Key(Core::StringView("clients"));
+		json.BeginArray();
+		for (int64 i = 0; i < m_Server->m_Sessions.Count(); ++i) json.Raw(m_Server->m_Sessions[i]->ClientJson().View());
+		json.EndArray();
+		json.Key(Core::StringView("notifications"));
+		json.BeginArray();
+		for (int64 i = 0; i < m_Notifications.Count(); ++i) json.Raw(NotificationJson(m_Notifications[i]).View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Presence::Connected(Session* session) { m_Server->m_Hub.Publish(Core::StringView("server"), "device.connected", session->ClientJson().View()); }
+
+	void Presence::Disconnected(Session* session) { m_Server->m_Hub.Publish(Core::StringView("server"), "device.disconnected", session->ClientJson().View()); }
+
+	Core::String Presence::Info(Call& call, const Params& params) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("serverVersion", m_Server->m_Config.m_Version.View());
+		json.Field("sessionEpoch", m_Server->m_Epoch.View());
+		json.IntField("proto", c_ProtocolVersion);
+		json.BoolField("mock", false);
+		json.BoolField("testHooks", m_Server->m_Config.m_TestHooks);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Presence::Add(Core::StringView level, Core::StringView text) {
+		if (!m_Server->IsMaster() && m_Server->m_Master) {
+			JsonWriter params;
+			params.BeginObject();
+			params.Field("level", level);
+			params.Field("text", text);
+			params.EndObject();
+			Core::String result;
+			Core::String problem;
+			if (!m_Server->m_Master->Call(&m_Server->m_Lock, Core::StringView("master.notify"), params.View(), result, problem))
+				m_Server->Log((Core::String("a notification did not reach the master: ") + problem.View()).View());
+			return Core::String();
+		}
+		Notification note;
+		note.m_Level = Core::String(level);
+		note.m_Text = Core::String(text);
+		Core::StringBuilder id;
+		id.Append("n");
+		id.AppendInt(m_NextNote);
+		m_NextNote += 1;
+		note.m_Id = id.ToString();
+		note.m_Ts = Platform::UnixTimeNs() / 1000000;
+		Core::String data = NotificationJson(note);
+		m_Notifications.Push(note);
+		m_Server->m_Hub.Publish(Core::StringView("server"), "notification", data.View());
+		return note.m_Id;
+	}
+
+	Core::String Presence::Notify(Call& call, const Params& params) {
+		Core::String level = params.Str("level", Core::StringView("info"));
+		if (!IsLevel(level.View())) throw RpcError(ErrorCode::BadRequest, "level must be one of info, warning, error, attention");
+		Core::String id = Add(level.View(), params.Str("text").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", id.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Presence::Dismiss(Call& call, const Params& params) {
+		Core::String id = params.Str("id");
+		for (int64 i = 0; i < m_Notifications.Count(); ++i) {
+			if (m_Notifications[i].m_Id.View() != id.View()) continue;
+			m_Notifications.RemoveAt(i);
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("id", id.View());
+			data.EndObject();
+			m_Server->m_Hub.Publish(Core::StringView("server"), "notification.dismissed", data.View());
+			return Core::String("{}");
+		}
+		throw RpcError(ErrorCode::NotFound, "no such notification");
+	}
+}

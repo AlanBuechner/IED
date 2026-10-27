@@ -1,0 +1,262 @@
+// The Chrome trace event format (the Trace Event Format document): complete (X) and begin/end (B/E) events become
+// zones on their thread, instant events messages, counters plots, async begin/end (b/e) tasks, and the metadata events
+// name the threads and the process. Times are microseconds, floats; the stream's clock counts nanoseconds.
+include "Importers.ch"
+include "api/Protocol.ch"
+
+namespace Profiler
+{
+	const int64 c_ChromeEventsPerChunk = 100000;
+	const int64 c_MostArgsText = 240;
+
+	// One thing that happens on a thread, in the order it is written: a zone's begin or end, a message, a task event.
+	struct ChromeItem
+	{
+		public int64 m_T;
+		public int64 m_Sequence;
+		public EventType m_Type;
+		public uint64 m_A;
+		public uint64 m_B;
+	}
+
+	struct ChromeSpan
+	{
+		public int64 m_Start;
+		public int64 m_End;
+		public uint64 m_Site;
+		public uint64 m_Text;
+	}
+
+	class ChromeThread
+	{
+		public uint64 m_Id;
+		public Core::String m_Name;
+		public Core::Array<ChromeSpan> m_Spans;
+		public Core::Array<ChromeSpan> m_Open;      // B events waiting for their E
+		public Core::Array<ChromeItem> m_Items;
+	}
+
+	class ChromeImport
+	{
+		public StreamBuilder* m_Builder;
+		public Core::HashMap<Core::String, ChromeThread*> m_ThreadOf;   // "pid/tid"
+		public Core::Array<ChromeThread*> m_Threads;
+		public Core::HashMap<Core::String, uint64> m_PlotOf;
+		public Core::Array<int64> m_PlotTimes;
+		public Core::Array<uint64> m_PlotIds;
+		public Core::Array<double> m_PlotValues;
+		public Core::HashMap<Core::String, uint64> m_AsyncTask;        // "cat/id/name" -> task id
+		public Core::String m_App;
+		public int64 m_Sequence;
+		public int64 m_Earliest = -1;
+	}
+
+	static Core::String IdText(const Serialization::DomNode& node) {
+		if (node.Kind() == Serialization::DomKind::String) return Core::String(node.AsView());
+		Core::StringBuilder text;
+		text.AppendInt(node.AsInt());
+		return text.ToString();
+	}
+
+	static ChromeThread* ThreadOf(ChromeImport& import, const Serialization::DomNode& event) {
+		Core::String key = IdText(event.Member("pid")) + "/" + IdText(event.Member("tid")).View();
+		ChromeThread* thread = nullptr;
+		if (import.m_ThreadOf.TryGet(key, thread)) return thread;
+		thread = new ChromeThread();
+		thread->m_Id = (uint64)import.m_Threads.Count() + 1;
+		import.m_Threads.Push(thread);
+		import.m_ThreadOf.Insert(key, thread);
+		return thread;
+	}
+
+	static int64 Nanoseconds(const Serialization::DomNode& micros) {
+		return (int64)(micros.AsFloat() * 1000.0 + 0.5);
+	}
+
+	// A short text of an event's args, for its zone.
+	static uint64 ArgsText(ChromeImport& import, const Serialization::DomNode& args) {
+		if (args.Kind() != Serialization::DomKind::Object || args.Count() == 0) return 0;
+		Core::String json = IED::NodeJson(args);
+		if (json.ByteLength() > c_MostArgsText) json = Core::String(json.View().Substring(0, c_MostArgsText)) + "...";
+		return import.m_Builder->String(json.View());
+	}
+
+	static void AddItem(ChromeImport& import, ChromeThread* thread, int64 t, EventType type, uint64 a, uint64 b) {
+		ChromeItem item;
+		item.m_T = t;
+		item.m_Sequence = import.m_Sequence;
+		item.m_Type = type;
+		item.m_A = a;
+		item.m_B = b;
+		import.m_Sequence += 1;
+		thread->m_Items.Push(item);
+	}
+
+	static void Counter(ChromeImport& import, const Serialization::DomNode& event, int64 t) {
+		const Serialization::DomNode args = event.Member("args");
+		for (int64 i = 0; i < args.Count(); ++i) {
+			const Serialization::DomNode value = args.ValueAt(i);
+			if (value.Kind() != Serialization::DomKind::Int && value.Kind() != Serialization::DomKind::Float) continue;
+			Core::String name = Core::String(event.Member("name").AsView());
+			if (args.Count() > 1) name = (name + ".") + args.KeyAt(i);
+			uint64 id;
+			if (!import.m_PlotOf.TryGet(name, id)) {
+				id = (uint64)import.m_PlotOf.Count() + 1;
+				import.m_PlotOf.Insert(name, id);
+			}
+			import.m_PlotTimes.Push(t);
+			import.m_PlotIds.Push(id);
+			import.m_PlotValues.Push(value.AsFloat());
+		}
+	}
+
+	static void AsyncTask(ChromeImport& import, ChromeThread* thread, const Serialization::DomNode& event, Core::StringView phase, int64 t) {
+		Core::String key = (IdText(event.Member("cat")) + "/") + IdText(event.Member("id")).View();
+		key = (key + "/") + event.Member("name").AsView();
+		if (phase == "b") {
+			const uint64 id = (uint64)import.m_AsyncTask.Count() + 1;
+			import.m_AsyncTask.Remove(key);
+			import.m_AsyncTask.Insert(key, id);
+			AddItem(import, thread, t, EventType::TaskBegin, id, import.m_Builder->String(event.Member("name").AsView()));
+			return;
+		}
+		uint64 id;
+		if (import.m_AsyncTask.TryGet(key, id)) AddItem(import, thread, t, EventType::TaskEnd, id, 0);
+	}
+
+	static void ReadEvent(ChromeImport& import, const Serialization::DomNode& event) {
+		Core::StringView phase = event.Member("ph").AsView();
+		if (phase == "M") {
+			const Core::StringView name = event.Member("args").Member("name").AsView();
+			if (event.Member("name").AsView() == "thread_name") ThreadOf(import, event)->m_Name = Core::String(name);
+			else if (event.Member("name").AsView() == "process_name" && import.m_App.IsEmpty()) import.m_App = Core::String(name);
+			return;
+		}
+		if (!event.Member("ts").IsValid()) return;
+		const int64 t = Nanoseconds(event.Member("ts"));
+		if (import.m_Earliest < 0 || t < import.m_Earliest) import.m_Earliest = t;
+		if (phase == "C") {
+			Counter(import, event, t);
+			return;
+		}
+		ChromeThread* thread = ThreadOf(import, event);
+		if (phase == "X" || phase == "B") {
+			ChromeSpan span;
+			span.m_Start = t;
+			span.m_End = phase == "X" ? t + Nanoseconds(event.Member("dur")) : -1;
+			span.m_Site = import.m_Builder->Site(event.Member("name").AsView(), Core::StringView(""), event.Member("cat").AsView(), 0);
+			span.m_Text = ArgsText(import, event.Member("args"));
+			if (phase == "X") thread->m_Spans.Push(span);
+			else thread->m_Open.Push(span);
+		}
+		else if (phase == "E") {
+			if (thread->m_Open.IsEmpty()) return;
+			ChromeSpan span = thread->m_Open.Pop();
+			span.m_End = t < span.m_Start ? span.m_Start : t;
+			thread->m_Spans.Push(span);
+		}
+		else if (phase == "i" || phase == "I" || phase == "R" || phase == "n") AddItem(import, thread, t, EventType::Message, import.m_Builder->String(event.Member("name").AsView()), 0);
+		else if (phase == "b" || phase == "e") AsyncTask(import, thread, event, phase, t);
+	}
+
+	// A thread's spans as begin and end items in nesting order: by start, the longer first, each ended before the
+	// next one that starts after it ends. A span that overlaps its parent's end is cut there.
+	static void Nest(ChromeImport& import, ChromeThread* thread) {
+		for (ChromeSpan& span : thread->m_Open) span.m_End = span.m_Start;
+		thread->m_Spans.Append(thread->m_Open);
+		thread->m_Spans.SortBy([](const ChromeSpan& a, const ChromeSpan& b) -> bool { return a.m_Start != b.m_Start ? a.m_Start < b.m_Start : a.m_End > b.m_End; });
+		Core::Array<int64> ends;
+		for (ChromeSpan& span : thread->m_Spans) {
+			while (!ends.IsEmpty() && ends.Back() <= span.m_Start) AddItem(import, thread, ends.Pop(), EventType::ZoneEnd, 0, 0);
+			if (!ends.IsEmpty() && span.m_End > ends.Back()) span.m_End = ends.Back();
+			AddItem(import, thread, span.m_Start, EventType::ZoneBegin, span.m_Site, span.m_Text);
+			ends.Push(span.m_End);
+		}
+		while (!ends.IsEmpty()) AddItem(import, thread, ends.Pop(), EventType::ZoneEnd, 0, 0);
+	}
+
+	static void WriteItem(WireWriter& w, const ChromeItem& item) {
+		w.Type(item.m_Type);
+		w.Time(item.m_T);
+		if (item.m_Type == EventType::ZoneBegin) {
+			w.Varint(item.m_A);
+			if (item.m_B != 0) {
+				w.Type(EventType::ZoneText);
+				w.Varint(item.m_B);
+			}
+		}
+		else if (item.m_Type == EventType::Message) {
+			w.Varint(2);
+			w.Varint(item.m_A);
+			w.Varint(0);
+		}
+		else if (item.m_Type == EventType::TaskBegin) {
+			w.Varint(item.m_A);
+			w.Varint(item.m_B);
+			w.Varint(0);
+		}
+		else if (item.m_Type == EventType::TaskEnd) w.Varint(item.m_A);
+	}
+
+	static void WriteThread(ChromeImport& import, ChromeThread* thread) {
+		Nest(import, thread);
+		thread->m_Items.SortBy([](const ChromeItem& a, const ChromeItem& b) -> bool { return a.m_T != b.m_T ? a.m_T < b.m_T : a.m_Sequence < b.m_Sequence; });
+		StreamBuilder& builder = *import.m_Builder;
+		const uint64 name = thread->m_Name.IsEmpty() ? 0 : builder.String(thread->m_Name.View());
+		for (int64 first = 0; first < thread->m_Items.Count() || first == 0; first += c_ChromeEventsPerChunk) {
+			const int64 base = thread->m_Items.IsEmpty() ? import.m_Earliest : thread->m_Items[first].m_T;
+			builder.BeginChunk(thread->m_Id, base);
+			if (first == 0 && name != 0) {
+				builder.Body().Type(EventType::ThreadName);
+				builder.Body().Time(base);
+				builder.Body().Varint(name);
+			}
+			for (int64 i = first; i < thread->m_Items.Count() && i < first + c_ChromeEventsPerChunk; ++i) WriteItem(builder.Body(), thread->m_Items[i]);
+			builder.EndChunk();
+			if (thread->m_Items.IsEmpty()) break;
+		}
+	}
+
+	static void WritePlots(ChromeImport& import) {
+		if (import.m_PlotIds.IsEmpty()) return;
+		StreamBuilder& builder = *import.m_Builder;
+		Core::Array<int64> order;
+		for (int64 i = 0; i < import.m_PlotIds.Count(); ++i) order.Push(i);
+		order.SortBy([&import](const int64& a, const int64& b) -> bool { return import.m_PlotTimes[a] < import.m_PlotTimes[b]; });
+		builder.BeginChunk(0, import.m_Earliest);
+		for (const Core::KeyValue<Core::String, uint64>& plot : import.m_PlotOf) {
+			builder.Body().Type(EventType::PlotDef);
+			builder.Body().Varint(plot.value);
+			builder.Body().Varint(builder.String(plot.key.View()));
+			builder.Body().Varint(0);
+			builder.Body().Varint(0);
+		}
+		for (int64 i : order) {
+			builder.Body().Type(EventType::PlotValue);
+			builder.Body().Time(import.m_PlotTimes[i]);
+			builder.Body().Varint(import.m_PlotIds[i]);
+			builder.Body().Double(import.m_PlotValues[i]);
+		}
+		builder.EndChunk();
+	}
+
+	bool ImportChromeTrace(Core::StringView json, Core::StringView app, Core::Array<uint8>& stream, Core::String& problem) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode root = Serialization::ReadJson(json, *doc).root;
+		Serialization::DomNode events = root.Kind() == Serialization::DomKind::Array ? root : root.Member("traceEvents");
+		if (events.Kind() != Serialization::DomKind::Array) {
+			problem = Core::String("not a Chrome trace: no traceEvents array");
+			return false;
+		}
+		ChromeImport import;
+		StreamBuilder* builder = new StreamBuilder();
+		import.m_Builder = builder;
+		for (int64 i = 0; i < events.Count(); ++i) ReadEvent(import, events.At(i));
+		if (import.m_Earliest < 0) import.m_Earliest = 0;
+		builder->Hello(import.m_App.IsEmpty() ? app : import.m_App.View(), 0, 1000000000, import.m_Earliest, 0);
+		for (ChromeThread* thread : import.m_Threads) WriteThread(import, thread);
+		WritePlots(import);
+		stream = builder->Bytes();
+		return true;
+	}
+}

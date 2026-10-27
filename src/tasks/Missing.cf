@@ -1,0 +1,79 @@
+include "Missing.ch"
+
+namespace Ied
+{
+	Core::String ProgramSetting(Core::StringView text) {
+		Core::StringView rest = text.Trimmed();
+		if (rest.StartsWith(Core::StringView("\""))) rest = rest.Substring(1, rest.ByteLength() - 1);
+		if (!rest.StartsWith(Core::StringView("${config:"))) return Core::String();
+		const int64 end = rest.IndexOf('}', 0);
+		return end < 0 ? Core::String() : Core::String(rest.Substring(9, end - 9));
+	}
+
+	Core::String ProgramWord(Core::StringView commandLine) {
+		Core::StringView rest = commandLine.Trimmed();
+		if (rest.StartsWith(Core::StringView("\""))) {
+			const int64 close = rest.IndexOf('"', 1);
+			return Core::String(close < 0 ? rest.Substring(1, rest.ByteLength() - 1) : rest.Substring(1, close - 1));
+		}
+		const int64 space = rest.IndexOf(' ', 0);
+		return Core::String(space < 0 ? rest : rest.Substring(0, space));
+	}
+
+	// `file` as it is, or with one of `extensions` when it has none; empty when neither is a file.
+	static Core::String FileWithExtension(const FS::Path& file, Core::StringView extensions) {
+		if (FS::FileExists(file.CStr())) return Core::String(file.View());
+		if (!file.Extension().IsEmpty()) return Core::String();
+		for (Core::StringView extension : extensions.Split(';')) {
+			Core::String candidate = Core::String(file.View()) + extension.Trimmed().ToLower().View();
+			if (!extension.Trimmed().IsEmpty() && FS::FileExists(candidate.CStr())) return candidate;
+		}
+		return Core::String();
+	}
+
+	Core::String FoundProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions) {
+		FS::Path given = FS::Path(program);
+		if (program.IsEmpty()) return Core::String();
+		if (given.IsAbsolute()) return FileWithExtension(given, extensions);
+		if (program.IndexOf('/', 0) >= 0 || program.IndexOf('\\', 0) >= 0) return FileWithExtension(cwd.IsEmpty() ? given : FS::Path(cwd) / program, extensions);
+		if (!cwd.IsEmpty()) {
+			Core::String here = FileWithExtension(FS::Path(cwd) / program, extensions);
+			if (!here.IsEmpty()) return here;
+		}
+		for (Core::StringView folder : path.Split(';')) {
+			if (folder.Trimmed().IsEmpty()) continue;
+			Core::String found = FileWithExtension(FS::Path(folder.Trimmed()) / program, extensions);
+			if (!found.IsEmpty()) return found;
+		}
+		return Core::String();
+	}
+
+	bool FindsProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions) {
+		return !FoundProgram(program, cwd, path, extensions).IsEmpty();
+	}
+
+	Core::String FindProgramFile(Core::StringView program) {
+		Core::String path;
+		Core::String extensions;
+		if (!Platform::TryGetEnvironmentVariable("PATH", path)) path = Core::String();
+		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
+		return FoundProgram(program, Core::StringView(""), path.View(), extensions.View());
+	}
+
+	Core::String MissingProgramNote(Core::StringView program, Core::StringView setting) {
+		return (Core::String("\x1b[31m") + MissingProgramText(program, setting).View()) + "\x1b[0m\r\n";
+	}
+
+	Core::String MissingProgramText(Core::StringView program, Core::StringView setting) {
+		Core::StringBuilder note;
+		note.Append(program);
+		note.Append(" was not found: it is not a program in the step's folder or on PATH. ");
+		if (setting.IsEmpty()) note.Append("Give its full path, or put its folder on PATH.");
+		else {
+			note.Append("Set ");
+			note.Append(setting);
+			note.Append(" (Settings) to its full path, or put its folder on PATH and restart IED.");
+		}
+		return note.ToString();
+	}
+}

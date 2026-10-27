@@ -1,0 +1,55 @@
+// What the replay measured (docs/22 "Performance"): a session keeps its last timing and compareTiming answers and each
+// range's experiments, so a client that comes back - a reload, another device - shows them again (gpu.measurements).
+include "Gpu.ch"
+
+namespace GpuDebug
+{
+	void Debugger::Keep(Session* session, Core::StringView method, Serialization::DomNode params, Core::StringView answer) {
+		if (params.IsValid() && params.Member("side").AsView() == "b") return;
+		Core::String name = Core::String(method);
+		Core::String kept = Core::String(answer);
+		const int64 eid = params.IsValid() ? params.Member("eid").AsInt() : 0;
+		m_Context->Atomically([session, name, kept, eid](IED::Events& events) {
+			if (name.View() == "timing") {
+				session->m_Timing = kept;
+				session->m_TimingStale = false;
+				session->m_CompareTiming = Core::String();
+				session->m_Experiments.Clear();
+			}
+			else if (name.View() == "compareTiming") session->m_CompareTiming = kept;
+			else if (name.View() == "experiments") {
+				for (int64 i = 0; i < session->m_Experiments.Count(); ++i)
+					if (session->m_Experiments[i]->m_Eid == eid) {
+						session->m_Experiments.RemoveAt(i);
+						break;
+					}
+				Experimented* experimented = new Experimented();
+				experimented->m_Eid = eid;
+				experimented->m_Answer = kept;
+				session->m_Experiments.Push(experimented);
+			}
+		});
+	}
+
+	void Session::Edited() {
+		if (!m_Timing.IsEmpty()) m_TimingStale = true;
+		m_CompareTiming = Core::String();
+		m_Experiments.Clear();
+	}
+
+	Core::String Debugger::Measurements(Session* session) {
+		IED::JsonWriter* json = new IED::JsonWriter();
+		m_Context->Atomically([session, json](IED::Events& events) {
+			json->BeginObject();
+			if (!session->m_Timing.IsEmpty()) json->RawField("timing", session->m_Timing.View());
+			json->BoolField("timingStale", session->m_TimingStale);
+			if (!session->m_CompareTiming.IsEmpty()) json->RawField("compareTiming", session->m_CompareTiming.View());
+			json->Key(Core::StringView("experiments"));
+			json->BeginArray();
+			for (Experimented* experimented : session->m_Experiments) json->Raw(experimented->m_Answer.View());
+			json->EndArray();
+			json->EndObject();
+		});
+		return json->ToString();
+	}
+}

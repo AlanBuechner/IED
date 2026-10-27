@@ -1,0 +1,23 @@
+include "Schemas.ch"
+
+namespace Ied
+{
+	const char*[3] c_HostSchemaFiles = { c_ManifestSchema, c_SolutionSchema, c_ProjectSchema };
+
+	bool HostSchemas::Load(Core::StringView home, Core::String& error) {
+		m_Registry = new Serialization::SchemaRegistry();
+		m_Folder = FS::Path(home) / "shared" / "host-api" / "schemas";
+		for (int32 i = 0; i < 3; ++i)
+			if (!m_Registry->Load((m_Folder / c_HostSchemaFiles[i]).View(), error)) return false;
+		return true;
+	}
+
+	Core::String HostSchemas::Name(const char* file) const { return Core::String((m_Folder / file).View()); }
+
+	Core::Array<Core::String> HostSchemas::Check(const char* file, const Serialization::DomNode& value) {
+		Core::Array<Core::String> problems;
+		for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(*m_Registry, Name(file).View(), Core::StringView(""), value))
+			problems.Push((Core::String(problem.path.IsEmpty() ? Core::StringView("/") : problem.path.View()) + ": ") + problem.message.View());
+		return problems;
+	}
+}

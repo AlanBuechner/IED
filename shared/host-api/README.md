@@ -28,12 +28,12 @@ Validate the examples after any schema change. The schemas use a draft 2020-12 s
 For `runtime.kind = "c4"` (`docs/26` section 2; the `js` and `process` runtimes are gone). The server compiles the plugin's `runtime.sources` (default `code/`) with its script host when the code starts, against the server headers under `src/api/` - the only ones a plugin may include:
 
 ```c4
-include "api/plugin.ch"
+include "api/Plugin.ch"
 
 namespace Markup
 {
 	// toolCalls[].function: IED::ToolResult <Name>(const IED::ToolCall& call)
-	IED::ToolResult Outline(const IED::ToolCall& call) { ... IED::ReadFile(call.workspace, path, text, problem) ... }
+	IED::ToolResult Outline(const IED::ToolCall& call) { ... IED::ReadFile(call.m_Workspace, path, text, problem) ... }
 
 	// toolCalls[].plan: IED::ToolPlan <Name>(const IED::ToolCall& call) - what a call asking the owner will do, for its
 	// approval card (summary, unified diff, counts, or an error that fails it); it only reads
@@ -47,7 +47,7 @@ namespace Markup
 	{
 		context.Provide(Core::StringView("markup.format"), [](const Serialization::DomNode& args) -> IED::Result { ... });
 		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { ... });
-		context.OnWorkspace([](const IED::Workspace& ws) { ... });   // then Contribute(point, ws.id, entries, problem)
+		context.OnWorkspace([](const IED::Workspace& ws) { ... });   // then Contribute(point, ws.m_Id, entries, problem)
 	}
 }
 ```

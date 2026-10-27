@@ -1,0 +1,20 @@
+include "SecurityLog.ch"
+
+namespace Ied
+{
+	bool SecurityLog::Record(int64 unixMs, const char* event, Core::StringView fields) {
+		Core::StringBuilder line;
+		line.Append("{\"ts\":");
+		line.AppendInt(unixMs);
+		line.Append(",\"event\":\"");
+		line.Append(event);
+		line.AppendByte('"');
+		if (!fields.IsEmpty()) {
+			line.AppendByte(',');
+			line.Append(fields);
+		}
+		line.Append("}\n");
+		FS::File out = FS::File(m_File.CStr(), "ab");
+		return out.IsOpen() && out.Write((const void*)line.View().Data(), line.View().ByteLength()) == line.View().ByteLength();
+	}
+}

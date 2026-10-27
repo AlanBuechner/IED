@@ -19,12 +19,12 @@ from server import EXECUTABLE_ENV, REPO, IedServer, ServerTestCase, server_state
 COMPILE_SECONDS = 120
 BROKEN = "\nnamespace Probe { int32 Broken() { return missing_name; } }\n"
 
-PROBE = r'''include "api/plugin.ch"
+PROBE = r'''include "api/Plugin.ch"
 
 namespace Probe
 {
-	int64 heard = 0;
-	IED::PluginContext* plugin = nullptr;
+	int64 s_Heard = 0;
+	IED::PluginContext* s_Plugin = nullptr;
 
 	IED::Result Echo(const Serialization::DomNode& args)
 	{
@@ -32,7 +32,7 @@ namespace Probe
 		out.Append("{\"said\":");
 		Serialization::WriteJsonString(args.Member("text").AsView(), &out);
 		out.Append(",\"heard\":");
-		out.AppendInt(heard);
+		out.AppendInt(s_Heard);
 		out.Append(",\"version\":VERSION}");
 		return IED::Answer(out.View());
 	}
@@ -51,7 +51,7 @@ namespace Probe
 
 	IED::Result ThrowOnThread(const Serialization::DomNode& args)
 	{
-		plugin->StartThread([]() { Refuse(); });
+		s_Plugin->StartThread([]() { Refuse(); });
 		return IED::Answer(Core::StringView("{}"));
 	}
 
@@ -59,62 +59,62 @@ namespace Probe
 	{
 		Core::StringBuilder entries;
 		entries.Append("[{\"id\":\"probe.hello\",\"title\":\"Hello ");
-		entries.Append(ws.name.View());
+		entries.Append(ws.m_Name.View());
 		entries.Append("\"}]");
 		Core::String problem;
-		plugin->Contribute(Core::StringView("commands"), ws.id.View(), entries.View(), problem);
+		s_Plugin->Contribute(Core::StringView("commands"), ws.m_Id.View(), entries.View(), problem);
 	}
 
 	void Activate(IED::PluginContext& context)
 	{
-		plugin = &context;
+		s_Plugin = &context;
 		context.Log(Core::StringView("probe started"));
 		context.Provide(Core::StringView("probe.echo"), Echo);
 		context.Provide(Core::StringView("probe.crash"), Crash);
 		context.Provide(Core::StringView("probe.throwOnThread"), ThrowOnThread);
-		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { heard += 1; });
+		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { s_Heard += 1; });
 		context.OnWorkspace(Opened);
 	}
 }
 '''
 
-SERVER = r'''include "api/plugin.ch"
+SERVER = r'''include "api/Plugin.ch"
 
 namespace Serve
 {
-	int64 changes = 0;
-	int64 trusts = 0;
-	IED::PluginContext* plugin = nullptr;
+	int64 s_Changes = 0;
+	int64 s_Trusts = 0;
+	IED::PluginContext* s_Plugin = nullptr;
 
 	Core::String Counts()
 	{
 		Core::StringBuilder out;
 		out.Append("{\"changes\":");
-		out.AppendInt(changes);
+		out.AppendInt(s_Changes);
 		out.Append(",\"trusts\":");
-		out.AppendInt(trusts);
+		out.AppendInt(s_Trusts);
 		out.Append("}");
 		return out.ToString();
 	}
 
 	Core::String Ping(const IED::Request& request)
 	{
-		if (request.params.Str("say", Core::StringView("")).View() == "boom") throw IED::RpcError(IED::ErrorCode::Conflict, "boom refused");
-		plugin->Publish(Core::StringView("test.serve/news"), "said", Core::StringView("{\"n\":1}"));
-		plugin->Output(request.params.Str("wsId").View(), Core::StringView("serve"), Core::StringView("pinged\n"));
+		if (request.m_Params.Str("say", Core::StringView("")).View() == "boom") throw IED::RpcError(IED::ErrorCode::Conflict, "boom refused");
+		s_Plugin->Publish(Core::StringView("test.serve/news"), "said", Core::StringView("{\"n\":1}"));
+		s_Plugin->Output(request.m_Params.Str("wsId").View(), Core::StringView("serve"), Core::StringView("pinged\n"));
 		return Counts();
 	}
 
 	void Activate(IED::PluginContext& context)
 	{
-		plugin = &context;
+		s_Plugin = &context;
 		Core::String problem;
 		context.Method(Core::StringView("test.serve/ping"), Ping, problem);
 		if (!context.Method(Core::StringView("git.repos"), Ping, problem)) context.Log(problem.View());
 		context.Topic(Core::StringView("test.serve/news"), Core::StringView("{\"pushed\":true}"));
 		context.TopicFrom(Core::StringView("test.serve/counts"), Counts);
-		context.OnFilesChanged([](const IED::FileChanges& files) { changes += files.changes.Count(); });
-		context.OnTrustChanged([](const IED::Workspace& ws) { trusts += 1; });
+		context.OnFilesChanged([](const IED::FileChanges& files) { s_Changes += files.m_Changes.Count(); });
+		context.OnTrustChanged([](const IED::Workspace& ws) { s_Trusts += 1; });
 	}
 }
 '''
@@ -122,7 +122,7 @@ namespace Serve
 
 # A binding that calls the plugin's own binding (which runs at once, on its thread), which calls another plugin's: the
 # web search tool's shape (its tool calls websearch.search, which calls tor.proxy).
-RELAY = r'''include "api/plugin.ch"
+RELAY = r'''include "api/Plugin.ch"
 
 namespace Relay
 {
@@ -345,9 +345,9 @@ class PluginCodeTests(ServerTestCase):
 		self.assertIsNone(self.server.process.poll(), "the server runs on")
 
 	async def test_diagnostics_the_allow_list_and_a_failed_rebuild(self):
-		folder = self.builtin(probe_manifest(), {"code/probe.cf": "include \"api/plugin.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) { undefined_thing(); } }\n"})
+		folder = self.builtin(probe_manifest(), {"code/probe.cf": "include \"api/Plugin.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) { undefined_thing(); } }\n"})
 		self.add(os.path.join(self.home, "plugins", "test.sneaky"), probe_manifest("test.sneaky", contributes={}),
-			{"code/sneaky.cf": "include \"api/plugin.ch\"\ninclude \"host/server.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) {} }\n"})
+			{"code/sneaky.cf": "include \"api/Plugin.ch\"\ninclude \"host/Server.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) {} }\n"})
 		self.start()
 		await self.connect()
 		broken = await self.settled("test.probe")

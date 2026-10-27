@@ -1,0 +1,70 @@
+include "Com.ch"
+
+namespace Desktop
+{
+	int32 Hresult(void* argument) { return (int32)(int64)argument; }
+
+	bool SameGuid(const _GUID* a, const _GUID* b) {
+		if (a->Data1 != b->Data1 || a->Data2 != b->Data2 || a->Data3 != b->Data3) return false;
+		for (int32 i = 0; i < 8; ++i)
+			if (a->Data4[i] != b->Data4[i]) return false;
+		return true;
+	}
+
+	// IUnknown's {00000000-0000-0000-C000-000000000046}.
+	static bool IsUnknown(const _GUID* iid) {
+		if (iid->Data1 != 0 || iid->Data2 != 0 || iid->Data3 != 0 || iid->Data4[0] != 0xC0) return false;
+		for (int32 i = 1; i < 7; ++i)
+			if (iid->Data4[i] != 0) return false;
+		return iid->Data4[7] == 0x46;
+	}
+
+	int32 CallbackQuery(void* self, const _GUID* iid, void** out) {
+		Callback* callback = (Callback*)self;
+		if (IsUnknown(iid) || SameGuid(iid, &callback->m_Iid)) {
+			*out = self;
+			callback->m_References += 1;
+			return c_Ok;
+		}
+		*out = null;
+		return c_NoInterface;
+	}
+
+	// The owner's set keeps the object; counting only keeps COM's bookkeeping honest.
+	uint32 CallbackAddRef(void* self) {
+		Callback* callback = (Callback*)self;
+		callback->m_References += 1;
+		return (uint32)callback->m_References;
+	}
+
+	uint32 CallbackRelease(void* self) {
+		Callback* callback = (Callback*)self;
+		if (callback->m_References > 1) callback->m_References -= 1;
+		return (uint32)callback->m_References;
+	}
+
+	// Nothing C4 throws may unwind into WebView2's frames.
+	int32 CallbackInvoke(void* self, void* first, void* second) {
+		Callback* callback = (Callback*)self;
+		try {
+			return callback->m_Invoked(first, second);
+		}
+		catch (...) {
+			return c_Failed;
+		}
+	}
+
+	Callback* CallbackSet::Add(const _GUID* iid, Invoked invoked) {
+		Callback* callback = new Callback();
+		callback->m_Own.m_QueryInterface = CallbackQuery;
+		callback->m_Own.m_AddRef = CallbackAddRef;
+		callback->m_Own.m_Release = CallbackRelease;
+		callback->m_Own.m_Invoke = CallbackInvoke;
+		callback->m_Table = &callback->m_Own;
+		callback->m_Iid = *iid;
+		callback->m_References = 1;
+		callback->m_Invoked = invoked;
+		m_Items.Push(callback);
+		return callback;
+	}
+}

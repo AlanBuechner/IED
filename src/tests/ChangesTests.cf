@@ -1,0 +1,79 @@
+// fs/changes: folding a watcher's changes per path, renames as a delete and a create, overflow, Windows separators.
+
+include "fs/Changes.ch"
+
+static FS::Change Raw(FS::ChangeKind kind, const char* path) {
+	FS::Change change;
+	change.kind = kind;
+	change.path = Core::String(path);
+	return change;
+}
+
+static Core::String Folded(const Ied::ChangeBatch& batch) {
+	Core::StringBuilder text;
+	for (const Ied::TreeChange& change : batch.Changes()) {
+		if (!text.IsEmpty()) text.AppendByte(' ');
+		text.Append(change.m_Path.View());
+		text.AppendByte('=');
+		text.Append(Ied::TreeChangeName(change.m_Kind));
+	}
+	return text.ToString();
+}
+
+[test("server.changes")]
+class ChangeTests {
+	[test("fold")]
+	public static void TestFold() {
+		Ied::TreeChangeKind after = Ied::TreeChangeKind::Changed;
+		assert_true(!Ied::FoldChange(Ied::TreeChangeKind::Created, FS::ChangeKind::Removed, after), "created then removed cancels out");
+		assert_true(Ied::FoldChange(Ied::TreeChangeKind::Created, FS::ChangeKind::Modified, after) && after == Ied::TreeChangeKind::Created, "created then modified is created");
+		assert_true(Ied::FoldChange(Ied::TreeChangeKind::Deleted, FS::ChangeKind::Added, after) && after == Ied::TreeChangeKind::Changed, "deleted then added is changed");
+		assert_true(Ied::FoldChange(Ied::TreeChangeKind::Changed, FS::ChangeKind::Removed, after) && after == Ied::TreeChangeKind::Deleted, "changed then removed is deleted");
+		assert_true(Ied::FoldChange(Ied::TreeChangeKind::Changed, FS::ChangeKind::Modified, after) && after == Ied::TreeChangeKind::Changed, "changed stays changed");
+	}
+
+	[test("batch")]
+	public static void TestBatch() {
+		Ied::ChangeBatch batch;
+		assert_true(batch.IsEmpty(), "a new batch is empty");
+		batch.Add(Raw(FS::ChangeKind::Added, "src\\a.cf"));
+		batch.Add(Raw(FS::ChangeKind::Modified, "src\\a.cf"));
+		batch.Add(Raw(FS::ChangeKind::Modified, "b.txt"));
+		batch.Add(Raw(FS::ChangeKind::Modified, "b.txt"));
+		assert_se("src/a.cf=created b.txt=changed", Folded(batch).CStr(), "one per path, in first-change order, '/' separators");
+		batch.Add(Raw(FS::ChangeKind::Removed, "src\\a.cf"));
+		assert_se("b.txt=changed", Folded(batch).CStr(), "a file made and removed within the batch is nothing");
+		batch.Add(Raw(FS::ChangeKind::Added, "src\\a.cf"));
+		assert_se("src/a.cf=created b.txt=changed", Folded(batch).CStr(), "and made again is created");
+		batch.Add(Raw(FS::ChangeKind::Removed, "b.txt"));
+		batch.Add(Raw(FS::ChangeKind::Removed, "src\\a.cf"));
+		assert_se("b.txt=deleted", Folded(batch).CStr(), "a path that existed before is deleted");
+		batch.Clear();
+		assert_true(batch.IsEmpty() && Folded(batch).IsEmpty(), "cleared");
+	}
+
+	[test("rename_and_overflow")]
+	public static void TestRenameAndOverflow() {
+		Ied::ChangeBatch batch;
+		FS::Change rename = Raw(FS::ChangeKind::Renamed, "docs\\new.md");
+		rename.oldPath = Core::String("docs\\old.md");
+		batch.Add(rename);
+		assert_se("docs/old.md=deleted docs/new.md=created", Folded(batch).CStr(), "a rename is a delete and a create");
+		batch.Clear();
+		batch.Add(Raw(FS::ChangeKind::Overflow, ""));
+		assert_true(!batch.IsEmpty() && batch.Overflowed() && batch.Changes().IsEmpty(), "an overflow alone still asks for a look");
+	}
+
+	[test("burst")]
+	public static void TestBurst() {
+		Ied::ChangeBatch batch;
+		for (int32 round = 0; round < 3; ++round)
+			for (int32 i = 0; i < 5000; ++i) {
+				Core::StringBuilder path;
+				path.Append("gen/f");
+				path.AppendInt(i);
+				batch.Add(Raw(round == 0 ? FS::ChangeKind::Added : FS::ChangeKind::Modified, path.CStr()));
+			}
+		assert_eq((int64)5000, batch.Changes().Count(), "15000 changes of 5000 files fold to 5000");
+	}
+}

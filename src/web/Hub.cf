@@ -1,0 +1,170 @@
+include "Hub.ch"
+include "Session.ch"
+
+namespace Ied
+{
+	const int64 c_Megabyte = 1048576;
+
+	Core::StringView TopicKind(Core::StringView key) {
+		int64 start = 0;
+		for (int64 i = 0; i < key.ByteLength(); ++i)
+			if (key.ByteAt(i) == '/') start = i + 1;
+		int64 end = start;
+		while (end < key.ByteLength() && key.ByteAt(end) != ':') end += 1;
+		return key.Substring(start, end - start);
+	}
+
+	static bool IsCoalescibleKind(Core::StringView kind) { return kind == "out" || kind == "run" || kind == "term" || kind == "chat"; }
+
+	TopicLimits Hub::DefaultLimits(Core::StringView key) {
+		Core::StringView kind = TopicKind(key);
+		TopicLimits limits;
+		limits.m_Events = 2000;
+		limits.m_Bytes = 4 * c_Megabyte;
+		if (kind == "chat") { limits.m_Events = 20000; limits.m_Bytes = 8 * c_Megabyte; }
+		if (kind == "run") { limits.m_Events = 50000; limits.m_Bytes = 16 * c_Megabyte; }
+		if (kind == "term") { limits.m_Events = 1000000; limits.m_Bytes = 5 * c_Megabyte; }
+		limits.m_Coalescible = IsCoalescibleKind(kind);
+		return limits;
+	}
+
+	Core::String MergeData(const Merge& merge) {
+		Core::StringBuilder data;
+		data.AppendByte('{');
+		data.Append(merge.m_Rest.View());
+		if (!merge.m_Rest.IsEmpty()) data.AppendByte(',');
+		Serialization::WriteJsonString(merge.m_Field.View(), &data);
+		data.AppendByte(':');
+		Serialization::WriteJsonString(merge.m_Text.View(), &data);
+		data.AppendByte('}');
+		return data.ToString();
+	}
+
+	Core::String EventFrame(Core::StringView topic, int64 seq, Core::StringView kind, Core::StringView data) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "evt");
+		json.Field("topic", topic);
+		json.IntField("seq", seq);
+		json.Field("kind", kind);
+		json.RawField("data", data);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Topic -------------------------------------------------------------------------------------------------------
+
+	int64 Topic::ReplayBytes(int64 cursor) const {
+		int64 total = 0;
+		for (Event* event : m_Ring)
+			if (event->m_Seq > cursor) total += event->m_Bytes;
+		return total;
+	}
+
+	Core::Array<Event*> Topic::EventsAfter(int64 cursor) const {
+		Core::Array<Event*> after;
+		for (Event* event : m_Ring)
+			if (event->m_Seq > cursor) after.Push(event);
+		return after;
+	}
+
+	Core::String Topic::SnapshotFrame() const {
+		Core::String data = m_Snapshot();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "snap");
+		json.Field("topic", m_Key.View());
+		json.IntField("seq", m_Seq);
+		json.RawField("data", data.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Topic::Append(Event* event) {
+		m_Seq = event->m_Seq;
+		m_Ring.Push(event);
+		m_RingBytes += event->m_Bytes;
+		while (!m_Ring.IsEmpty() && (m_Ring.Count() > m_Limits.m_Events || m_RingBytes > m_Limits.m_Bytes)) m_RingBytes -= m_Ring.Pop()->m_Bytes;
+	}
+
+	void Topic::ClearRing() {
+		m_Ring.Clear();
+		m_RingBytes = 0;
+	}
+
+	void Topic::Subscribe(Session* session) {
+		for (int64 i = 0; i < m_Subscribers.Count(); ++i)
+			if (m_Subscribers[i] == session) return;
+		m_Subscribers.Push(session);
+	}
+
+	void Topic::Unsubscribe(Session* session) {
+		for (int64 i = 0; i < m_Subscribers.Count(); ++i)
+			if (m_Subscribers[i] == session) { m_Subscribers.RemoveAt(i); return; }
+	}
+
+	// --- Hub ---------------------------------------------------------------------------------------------------------
+
+	Topic* Hub::Add(Core::StringView key, Snapshot snapshot, TopicLimits limits) {
+		Core::String name = Core::String(key);
+		if (m_Topics.Contains(name)) return nullptr;
+		Topic* topic = new Topic();
+		topic->m_Key = name;
+		topic->m_Snapshot = snapshot;
+		topic->m_Limits = limits;
+		m_Topics.Insert(name, topic);
+		return topic;
+	}
+
+	Topic* Hub::Find(Core::StringView key) const {
+		Topic* found = nullptr;
+		m_Topics.TryGet(Core::String(key), found);
+		return found;
+	}
+
+	int64 Hub::Deliver(Topic* topic, Event* event) {
+		topic->Append(event);
+		Core::Array<Session*> subscribers = topic->m_Subscribers;
+		for (int64 i = 0; i < subscribers.Count(); ++i) subscribers[i]->Deliver(topic, event);
+		return event->m_Seq;
+	}
+
+	int64 Hub::Publish(Core::StringView key, const char* kind, Core::StringView data) {
+		Topic* topic = Find(key);
+		if (!topic) return 0;
+		Event* event = new Event();
+		event->m_Seq = topic->m_Seq + 1;
+		event->m_Kind = Core::String(kind);
+		event->m_Text = EventFrame(key, event->m_Seq, event->m_Kind.View(), data);
+		event->m_Bytes = event->m_Text.ByteLength();
+		if (m_Tapped) m_Tap(key, event->m_Kind.View(), data);
+		return Deliver(topic, event);
+	}
+
+	int64 Hub::PublishMergeable(Core::StringView key, const char* kind, const Merge& merge) {
+		Topic* topic = Find(key);
+		if (!topic) return 0;
+		Core::String data = MergeData(merge);
+		Event* event = new Event();
+		event->m_Seq = topic->m_Seq + 1;
+		event->m_Kind = Core::String(kind);
+		event->m_Text = EventFrame(key, event->m_Seq, event->m_Kind.View(), data.View());
+		event->m_Bytes = event->m_Text.ByteLength();
+		event->m_Mergeable = topic->m_Limits.m_Coalescible;
+		event->m_Merge = merge;
+		if (m_Tapped) m_Tap(key, event->m_Kind.View(), data.View());
+		return Deliver(topic, event);
+	}
+
+	void Hub::Remove(Core::StringView key) {
+		Topic* topic = Find(key);
+		if (!topic) return;
+		Core::Array<Session*> subscribers = topic->m_Subscribers;
+		for (int64 i = 0; i < subscribers.Count(); ++i) subscribers[i]->Forget(topic->m_Key.View());
+		m_Topics.Remove(Core::String(key));
+	}
+
+	void Hub::ClearRings() {
+		for (KeyValue<Core::String, Topic*>& entry : m_Topics) entry.value->ClearRing();
+	}
+}

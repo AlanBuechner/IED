@@ -1,0 +1,208 @@
+include "Skills.ch"
+
+namespace Ai
+{
+	static Core::String ReadText(const FS::Path& file) {
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	// The frontmatter of `text`: what lies between a first line "---" and the next; empty when there is none.
+	// `bodyStart` is where the body after it starts.
+	static Core::StringView Frontmatter(Core::StringView text, int64& bodyStart) {
+		bodyStart = 0;
+		const int64 first = text.IndexOf('\n', 0);
+		if (first < 0 || text.Substring(0, first).Trimmed() != "---") return Core::StringView("");
+		int64 at = first + 1;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			if (end < 0) end = text.ByteLength();
+			if (text.Substring(at, end - at).Trimmed() == "---") {
+				bodyStart = end < text.ByteLength() ? end + 1 : end;
+				return text.Substring(first + 1, at - first - 1);
+			}
+			at = end + 1;
+		}
+		return Core::StringView("");
+	}
+
+	static void AddWords(const Serialization::DomNode& node, Core::Array<Core::String>& into) {
+		if (node.Kind() == Serialization::DomKind::String) into.Push(Core::String(node.AsView()));
+		for (int64 i = 0; node.Kind() == Serialization::DomKind::Array && i < node.Count(); ++i) into.Push(Core::String(node.At(i).AsView()));
+	}
+
+	Skill* ReadSkill(const FS::Path& file, Core::StringView source, Core::String& problem) {
+		Core::String text = ReadText(file);
+		int64 bodyStart = 0;
+		Core::StringView front = Frontmatter(text.View(), bodyStart);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadYaml(front, *doc);
+		Serialization::DomNode root = read.root;
+		const bool named = read.Ok() && root.Kind() == Serialization::DomKind::Object && !root.Member("name").AsView().IsEmpty() && !root.Member("description").AsView().IsEmpty();
+		if (!named) {
+			problem = (Core::String(file.View()) + ": ") + (read.Ok() ? "a skill's frontmatter needs a name and a description" : read.error);
+			return nullptr;
+		}
+		Skill* skill = new Skill();
+		skill->m_Name = Core::String(root.Member("name").AsView());
+		skill->m_Description = Core::String(root.Member("description").AsView().Trimmed());
+		AddWords(root.Member("keywords"), skill->m_Keywords);
+		AddWords(root.Member("triggers"), skill->m_Keywords);
+		skill->m_File = file;
+		skill->m_Source = Core::String(source);
+		return skill;
+	}
+
+	Skill* SkillNamed(const Core::Array<Skill*>& skills, Core::StringView name) {
+		for (Skill* skill : skills)
+			if (skill->m_Name.View() == name) return skill;
+		return nullptr;
+	}
+
+	Core::Array<Skill*> ReadSkills(const Core::Array<SkillFolder*>& folders, Core::Array<Core::String>& problems) {
+		Core::Array<Skill*> skills;
+		for (SkillFolder* folder : folders) {
+			if (!FS::IsDirectory(folder->m_Folder.CStr())) continue;
+			FS::Directory listing = FS::Directory(folder->m_Folder.CStr());
+			for (FS::DirectoryEntry& entry : listing) {
+				FS::Path file = (folder->m_Folder / entry.name.View()) / "SKILL.md";
+				if (entry.kind != FS::EntryKind::Directory || !FS::FileExists(file.CStr())) continue;
+				Core::String problem;
+				Skill* skill = ReadSkill(file, folder->m_Source.View(), problem);
+				if (skill && !folder->m_Shown.IsEmpty()) skill->m_Shown = ((folder->m_Shown + "/") + entry.name.View()) + "/SKILL.md";
+				if (skill) skill->m_ReadOnly = folder->m_ReadOnly;
+				if (!skill) problems.Push(problem);
+				else if (!SkillNamed(skills, skill->m_Name.View())) skills.Push(skill);
+			}
+		}
+		skills.SortBy([](Skill* a, Skill* b) -> bool { return a->m_Name.View() < b->m_Name.View(); });
+		return skills;
+	}
+
+	// --- Finding a skill ---------------------------------------------------------------------------------------------
+
+	static int32 FoldAscii(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static Core::String Lowered(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) out.AppendByte(FoldAscii(text.ByteAt(i)));
+		return out.ToString();
+	}
+
+	static bool IsWordByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c >= 128; }
+
+	// The words of `text`, lowered: runs of letters and digits.
+	static Core::Array<Core::String> Words(Core::StringView text) {
+		Core::String lowered = Lowered(text);
+		Core::Array<Core::String> words;
+		int64 start = -1;
+		for (int64 i = 0; i <= lowered.View().ByteLength(); ++i) {
+			const bool word = i < lowered.View().ByteLength() && IsWordByte(lowered.View().ByteAt(i));
+			if (word && start < 0) start = i;
+			else if (!word && start >= 0) {
+				if (i - start > 1) words.Push(Core::String(lowered.View().Substring(start, i - start)));
+				start = -1;
+			}
+		}
+		return words;
+	}
+
+	// How well `skill` matches `words`: each word found in its name counts three, in its description or keywords one.
+	static int64 Score(const Skill* skill, const Core::Array<Core::String>& words) {
+		Core::String name = Lowered(skill->m_Name.View());
+		Core::StringBuilder rest;
+		rest.Append(skill->m_Description.View());
+		for (const Core::String& keyword : skill->m_Keywords) {
+			rest.Append(" ");
+			rest.Append(keyword.View());
+		}
+		Core::String about = Lowered(rest.View());
+		int64 score = 0;
+		for (const Core::String& word : words) {
+			if (name.View().Contains(word.View())) score += 3;
+			else if (about.View().Contains(word.View())) score += 1;
+		}
+		return score;
+	}
+
+	class ScoredSkill
+	{
+		public Skill* m_Skill;
+		public int64 m_Score;
+	}
+
+	Core::Array<Skill*> SearchSkills(const Core::Array<Skill*>& skills, Core::StringView query, int64 most) {
+		Core::Array<Core::String> words = Words(query);
+		Core::Array<ScoredSkill*> scored;
+		for (Skill* skill : skills) {
+			ScoredSkill* entry = new ScoredSkill();
+			entry->m_Skill = skill;
+			entry->m_Score = Score(skill, words);
+			if (entry->m_Score > 0) scored.Push(entry);
+		}
+		scored.SortBy([](ScoredSkill* a, ScoredSkill* b) -> bool { return a->m_Score > b->m_Score || (a->m_Score == b->m_Score && a->m_Skill->m_Name.View() < b->m_Skill->m_Name.View()); });
+		Core::Array<Skill*> found;
+		for (ScoredSkill* entry : scored)
+			if (found.Count() < most) found.Push(entry->m_Skill);
+		return found;
+	}
+
+	// --- The system message's list -----------------------------------------------------------------------------------
+
+	static Core::String IndexLine(const Skill* skill) {
+		Core::StringView description = skill->m_Description.View();
+		Core::StringBuilder line;
+		line.Append("- ");
+		line.Append(skill->m_Name.View());
+		line.Append(": ");
+		if (description.ByteLength() <= c_SkillIndexDescriptionBytes) line.Append(description);
+		else {
+			line.Append(description.Substring(0, c_SkillIndexDescriptionBytes));
+			line.Append("...");
+		}
+		line.Append("\n");
+		return line.ToString();
+	}
+
+	SkillsIndexLimits DefaultSkillsIndexLimits() {
+		SkillsIndexLimits limits;
+		limits.m_Listed = 40;
+		limits.m_Shown = 15;
+		limits.m_Bytes = 800 * 4;
+		return limits;
+	}
+
+	// The skills the list names, in its order: all of them up to `listed`, else the `shown` the hint names best and then
+	// the first others.
+	static Core::Array<Skill*> Listed(const Core::Array<Skill*>& skills, Core::StringView hint, const SkillsIndexLimits& limits) {
+		if (skills.Count() <= limits.m_Listed) return skills;
+		Core::Array<Skill*> listed = SearchSkills(skills, hint, limits.m_Shown);
+		for (Skill* skill : skills)
+			if (listed.Count() < limits.m_Shown && !SkillNamed(listed, skill->m_Name.View())) listed.Push(skill);
+		return listed;
+	}
+
+	Core::String SkillsIndex(const Core::Array<Skill*>& skills, Core::StringView hint, const SkillsIndexLimits& limits) {
+		Core::StringBuilder out;
+		int64 written = 0;
+		for (Skill* skill : Listed(skills, hint, limits)) {
+			Core::String line = IndexLine(skill);
+			if (out.ByteLength() + line.View().ByteLength() > limits.m_Bytes) break;
+			out.Append(line.View());
+			written += 1;
+		}
+		if (written < skills.Count()) {
+			out.Append("(");
+			out.AppendInt(skills.Count() - written);
+			out.Append(" more: skill_search finds them)\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String SkillBody(const Skill* skill) {
+		Core::String text = ReadText(skill->m_File);
+		int64 bodyStart = 0;
+		Frontmatter(text.View(), bodyStart);
+		return Core::String(text.View().Substring(bodyStart, text.View().ByteLength() - bodyStart).Trimmed());
+	}
+}

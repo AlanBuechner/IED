@@ -1,0 +1,34 @@
+include "Effort.ch"
+
+namespace Ai
+{
+	Core::StringView EffortOf(Core::StringView chatEffort, Core::StringView roleEffort) { return chatEffort.IsEmpty() ? roleEffort : chatEffort; }
+
+	// The profile's own fields for `effort`, each written as it is.
+	static void WriteMapped(IED::JsonWriter& json, Core::StringView mapping, Core::StringView effort) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(mapping, *doc);
+		Core::String level = Core::String(effort);
+		Serialization::DomNode fields = read.Ok() ? read.root.Member(level.CStr()) : Serialization::DomNode();
+		for (int64 i = 0; fields.Kind() == Serialization::DomKind::Object && i < fields.Count(); ++i) {
+			Core::String key = Core::String(fields.KeyAt(i));
+			json.RawField(key.CStr(), IED::NodeJson(fields.ValueAt(i)).View());
+		}
+	}
+
+	void WriteEffort(IED::JsonWriter& json, const ModelProfile& profile, Core::StringView effort, bool llamaCpp) {
+		if (effort.IsEmpty()) return;
+		if (!profile.m_Effort.IsEmpty()) {
+			WriteMapped(json, profile.m_Effort.View(), effort);
+			return;
+		}
+		if (!llamaCpp) {
+			json.Field("reasoning_effort", effort);
+			return;
+		}
+		json.Key(Core::StringView("chat_template_kwargs"));
+		json.BeginObject();
+		json.Field("reasoning_effort", effort);
+		json.EndObject();
+	}
+}

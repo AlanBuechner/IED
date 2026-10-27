@@ -14,7 +14,7 @@ from iedclient import Client, RpcFailure
 from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
-FAKE_TOR = r'''include "api/plugin.ch"
+FAKE_TOR = r'''include "api/Plugin.ch"
 
 namespace FakeTor
 {

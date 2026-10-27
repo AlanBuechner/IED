@@ -1,0 +1,136 @@
+// Telling allocations apart (T-PRF-5, T-PRF-13): live clients send no call stacks with their allocations, so an
+// allocation is placed by the zone its thread was in when it allocated - the innermost one, or the path down to it.
+include "Analysis.ch"
+
+namespace Profiler
+{
+	const int32 c_SizeClasses = 8;
+
+	bool InnermostZoneAt(const Capture& capture, int32 track, int64 t, int64& depth, int64& index) {
+		if (track < 0 || (int64)track >= capture.m_Tracks.Count()) return false;
+		const ThreadTrack* thread = capture.m_Tracks[(int64)track];
+		bool found = false;
+		for (int64 d = 0; d < thread->m_Levels.Count(); ++d) {
+			const ZoneLevel* level = thread->m_Levels[d];
+			const int64 i = level->FirstEndingAfter(t);
+			if (i >= level->Count() || level->m_Starts[i] > t) break;
+			depth = d;
+			index = i;
+			found = true;
+		}
+		return found;
+	}
+
+	int64 FrameAt(const FrameSet* set, int64 t) {
+		if (!set) return -1;
+		const int64 i = set->m_Starts.UpperBound(t) - 1;
+		if (i < 0 || (set->m_Ends[i] != c_Open && set->m_Ends[i] <= t)) return -1;
+		return i;
+	}
+
+	bool AllocationsHaveCallstacks(const Capture& capture) {
+		for (const Allocation& allocation : capture.m_Allocations)
+			if (allocation.m_Callstack != 0) return true;
+		return false;
+	}
+
+	bool AllocGroupNamed(Core::StringView name, AllocGroup& out) {
+		if (name == "zone") out = AllocGroup::Zone;
+		else if (name == "path") out = AllocGroup::Path;
+		else if (name == "thread") out = AllocGroup::Thread;
+		else if (name == "pool") out = AllocGroup::Pool;
+		else if (name == "size") out = AllocGroup::Size;
+		else if (name == "callstack") out = AllocGroup::Callstack;
+		else if (name == "function") out = AllocGroup::Function;
+		else return false;
+		return true;
+	}
+
+	uint64 LeafAddress(const Capture& capture, uint64 callstack) {
+		const Core::Array<uint64>* frames = capture.m_Callstacks.Find(callstack);
+		return frames && !frames->IsEmpty() ? (*frames)[0] : 0;
+	}
+
+	AllocGroup DefaultAllocGroup(const Capture& capture) {
+		return AllocationsHaveCallstacks(capture) ? AllocGroup::Callstack : AllocGroup::Zone;
+	}
+
+	static int64 SizeClass(int64 size) {
+		const int64[7] bounds = { 16, 64, 256, 1024, 4096, 65536, 1048576 };
+		for (int64 i = 0; i < c_SizeClasses - 1; ++i)
+			if (size <= bounds[i]) return i;
+		return c_SizeClasses - 1;
+	}
+
+	static const char* SizeLabel(int64 sizeClass) {
+		const char*[8] labels = { "1-16 B", "17-64 B", "65-256 B", "257 B-1 KiB", "1-4 KiB", "4-64 KiB", "64 KiB-1 MiB", "over 1 MiB" };
+		return labels[sizeClass];
+	}
+
+	void AllocGrouper::Init(const Capture& of, AllocGroup groupBy) {
+		m_Capture = &of;
+		m_By = groupBy;
+	}
+
+	uint64 AllocGrouper::KeyOf(const Allocation& allocation) {
+		if (m_By == AllocGroup::Thread) return (uint64)allocation.m_Track;
+		if (m_By == AllocGroup::Pool) return allocation.m_Pool;
+		if (m_By == AllocGroup::Size) return (uint64)SizeClass(allocation.m_Size);
+		if (m_By == AllocGroup::Callstack) return allocation.m_Callstack;
+		if (m_By == AllocGroup::Function) return LeafAddress(*m_Capture, allocation.m_Callstack);
+		int64 depth;
+		int64 index;
+		if (!InnermostZoneAt(*m_Capture, allocation.m_Track, allocation.m_T, depth, index)) return 0;
+		return KeyOfZone((int64)allocation.m_Track, depth, index);
+	}
+
+	uint64 AllocGrouper::KeyOfZone(int64 trackIndex, int64 depth, int64 index) {
+		const ThreadTrack* track = m_Capture->m_Tracks[trackIndex];
+		if (m_By == AllocGroup::Thread) return (uint64)trackIndex;
+		if (m_By != AllocGroup::Path) return (uint64)track->m_Levels[depth]->m_Sites[index];
+		const int64 at = track->m_Levels[depth]->m_Starts[index];
+		Core::StringBuilder path;
+		for (int64 d = 0; d <= depth; ++d) {
+			const ZoneLevel* level = track->m_Levels[d];
+			const int64 i = d == depth ? index : level->FirstEndingAfter(at);
+			if (d > 0) path.Append(" > ");
+			path.Append(m_Capture->SiteName((uint64)level->m_Sites[i]));
+		}
+		Core::String text = path.ToString();
+		uint64 id;
+		if (m_PathIds.TryGet(text, id)) return id;
+		m_Paths.Push(text);
+		m_PathSites.Push((uint64)track->m_Levels[depth]->m_Sites[index]);
+		id = (uint64)m_Paths.Count();
+		m_PathIds.Insert(text, id);
+		return id;
+	}
+
+	void AllocGrouper::WriteLabel(IED::JsonWriter& json, uint64 key, uint64 callstack) const {
+		if (m_By == AllocGroup::Thread) json.Field("label", TrackLabel(*m_Capture, m_Capture->m_Tracks[(int64)key], m_Capture->m_LastTicks).View());
+		else if (m_By == AllocGroup::Pool) {
+			Pool* pool = nullptr;
+			m_Capture->m_PoolOf.TryGet(key, pool);
+			Core::StringView name = pool ? m_Capture->Text(pool->m_NameStr) : Core::StringView("");
+			json.Field("label", name.IsEmpty() ? Core::StringView("heap") : name);
+		}
+		else if (m_By == AllocGroup::Size) json.Field("label", SizeLabel((int64)key));
+		else if (m_By == AllocGroup::Zone || m_By == AllocGroup::Path) {
+			const uint64 site = m_By == AllocGroup::Path ? (key == 0 ? 0 : m_PathSites[(int64)key - 1]) : key;
+			if (m_By == AllocGroup::Path) json.Field("label", key == 0 ? Core::StringView("(outside any zone)") : m_Paths[(int64)key - 1].View());
+			else json.Field("label", key == 0 ? Core::StringView("(outside any zone)") : m_Capture->SiteName(key));
+			const SrcLoc* loc = site == 0 ? nullptr : m_Capture->m_Srclocs.Find(site);
+			json.Field("file", loc ? m_Capture->SourceText(loc->m_FileStr).View() : Core::StringView(""));
+			json.IntField("line", loc ? (int64)loc->m_Line : 0);
+		}
+		else if (m_By == AllocGroup::Function) {
+			const SymbolRecord* symbol = m_Capture->m_Symbols.Find(key);
+			json.Field("label", symbol ? m_Capture->Text(symbol->m_FunctionStr) : Core::StringView(key == 0 ? "(no call stack)" : "(unknown function)"));
+			json.Field("file", symbol ? m_Capture->SourceText(symbol->m_FileStr).View() : Core::StringView(""));
+			json.IntField("line", symbol ? (int64)symbol->m_Line : 0);
+		}
+		else json.Field("label", callstack == 0 ? Core::StringView("(no call stack)") : Core::StringView("call stack"));
+		json.Key(Core::StringView("callstack"));
+		WriteCallstack(json, *m_Capture, m_By == AllocGroup::Callstack ? callstack : 0);
+	}
+}

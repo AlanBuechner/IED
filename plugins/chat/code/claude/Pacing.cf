@@ -1,0 +1,153 @@
+include "api/Plugin.ch"
+include "Pacing.ch"
+
+namespace Ai
+{
+	static const char* StateName(PlaceState state) { return state == PlaceState::Use ? "use" : "over"; }
+
+	static Core::String Number(double value) {
+		Core::StringBuilder out;
+		out.AppendDouble(value, 2);
+		return out.ToString();
+	}
+
+	ChainPlace* PlaceNow(const ModelProfile& profile, const PaceLimit& pace, bool pinned, const ClaudeAccount& account, int64 nowMs) {
+		ChainPlace* place = new ChainPlace();
+		place->m_Model = profile.m_Name;
+		place->m_Claude = profile.IsClaude();
+		place->m_Pace = pace;
+		place->m_State = PlaceState::Use;
+		if (!profile.IsClaude() || pinned || pace.m_Max <= 0) return place;
+		Core::String why;
+		const double now = PaceAgainst(account.m_Usage, account.Days(), profile.m_Model.View(), pace.m_Target.View(), nowMs, why);
+		if (now > pace.m_Max) {
+			place->m_State = PlaceState::Over;
+			place->m_Over = now / pace.m_Max;
+			place->m_Why = (why + ", over its ") + Number(pace.m_Max).View() + "x";
+		}
+		return place;
+	}
+
+	Core::Array<ChainPlace*> PlacesOf(const Core::Array<ModelProfile*>& candidates, const RoleModel& role, Core::StringView pinned, const ClaudeAccount& account, int64 nowMs) {
+		Core::Array<ChainPlace*> places;
+		for (int64 i = 0; i < candidates.Count(); ++i) {
+			ModelProfile* profile = candidates[i];
+			places.Push(PlaceNow(*profile, role.PaceOf(profile->m_Name.View()), i == 0 && profile->m_Name.View() == pinned, account, nowMs));
+		}
+		return places;
+	}
+
+	Core::Array<ChainPlace*> TurnOrder(const Core::Array<ChainPlace*>& places) {
+		Core::Array<ChainPlace*> ordered;
+		for (ChainPlace* place : places)
+			if (place->m_State == PlaceState::Use) ordered.Push(place);
+		const int64 used = ordered.Count();
+		for (ChainPlace* place : places) {
+			if (place->m_State == PlaceState::Use) continue;
+			int64 at = ordered.Count();
+			while (at > used && ordered[at - 1]->m_Over > place->m_Over) at -= 1;
+			ordered.Insert(at, place);
+		}
+		return ordered;
+	}
+
+	Core::Array<ChainPlace*> PassedOver(const Core::Array<ChainPlace*>& places, const Core::Array<ChainPlace*>& order) {
+		Core::Array<ChainPlace*> passed;
+		for (ChainPlace* place : places) {
+			if (!order.IsEmpty() && place == order[0]) break;
+			if (place->m_State != PlaceState::Use) passed.Push(place);
+		}
+		return passed;
+	}
+
+	static RoleChain* ChainOf(const Core::Array<ModelProfile*>& models, const RoleModel& role, const ClaudeAccount& account, int64 nowMs) {
+		RoleChain* chain = new RoleChain();
+		for (int64 i = -1; i < role.m_Fallback.Count(); ++i) {
+			ModelProfile* profile = FindModel(models, i < 0 ? role.m_Model.View() : role.m_Fallback[i].View());
+			if (profile) chain->m_Places.Push(PlaceNow(*profile, i < 0 ? role.m_Pace : role.m_FallbackPaces[i], false, account, nowMs));
+		}
+		Core::Array<ChainPlace*> order = TurnOrder(chain->m_Places);
+		if (!order.IsEmpty()) chain->m_Now = order[0]->m_Model;
+		return chain;
+	}
+
+	static bool HasClaude(const RoleChain* chain) {
+		for (const ChainPlace* place : chain->m_Places)
+			if (place->m_Claude) return true;
+		return false;
+	}
+
+	Core::Array<RoleChain*> ClaudeChains(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, const ClaudeAccount& account, int64 nowMs) {
+		Core::Array<RoleChain*> chains;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode groups = Serialization::ReadJson(groupsJson, *doc).root;
+		for (int64 g = 0; groups.Kind() == Serialization::DomKind::Object && g < groups.Count(); ++g) {
+			Serialization::DomNode roles = groups.ValueAt(g);
+			for (int64 r = 0; roles.Kind() == Serialization::DomKind::Object && r < roles.Count(); ++r) {
+				RoleModel role;
+				if (!ReadRole(groupsJson, groups.KeyAt(g), roles.KeyAt(r), role)) continue;
+				RoleChain* chain = ChainOf(models, role, account, nowMs);
+				if (!HasClaude(chain)) continue;
+				chain->m_Group = Core::String(groups.KeyAt(g));
+				chain->m_Role = Core::String(roles.KeyAt(r));
+				chains.Push(chain);
+			}
+		}
+		return chains;
+	}
+
+	void WriteChains(IED::JsonWriter& json, const Core::Array<RoleChain*>& chains) {
+		json.BeginArray();
+		for (const RoleChain* chain : chains) {
+			json.BeginObject();
+			json.Field("group", chain->m_Group.View());
+			json.Field("role", chain->m_Role.View());
+			json.Field("now", chain->m_Now.View());
+			json.Key(Core::StringView("places"));
+			json.BeginArray();
+			for (const ChainPlace* place : chain->m_Places) {
+				json.BeginObject();
+				json.Field("model", place->m_Model.View());
+				json.BoolField("claude", place->m_Claude);
+				if (place->m_Pace.m_Max > 0) {
+					json.Key(Core::StringView("pace"));
+					json.BeginObject();
+					json.RawField("max", Number(place->m_Pace.m_Max).View());
+					json.Field("target", place->m_Pace.m_Target.View());
+					json.EndObject();
+				}
+				json.Field("state", StateName(place->m_State));
+				if (!place->m_Why.IsEmpty()) json.Field("why", place->m_Why.View());
+				json.EndObject();
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String ChainText(const RoleChain& chain) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < chain.m_Places.Count(); ++i) {
+			const ChainPlace* place = chain.m_Places[i];
+			if (i > 0) out.Append(" > ");
+			out.Append(place->m_Model.View());
+			if (place->m_Pace.m_Max > 0) {
+				out.Append(" (pace up to ");
+				out.Append(Number(place->m_Pace.m_Max).View());
+				out.Append("x, ");
+				out.Append(place->m_Pace.m_Target.View());
+				out.Append(")");
+			}
+			if (place->m_State == PlaceState::Over) {
+				out.Append(" [over: ");
+				out.Append(place->m_Why.View());
+				out.Append("]");
+			}
+		}
+		out.Append(" - a turn uses ");
+		out.Append(chain.m_Now.IsEmpty() ? Core::StringView("none (no model of the chain is in ai.models)") : chain.m_Now.View());
+		out.Append(" now");
+		return out.ToString();
+	}
+}

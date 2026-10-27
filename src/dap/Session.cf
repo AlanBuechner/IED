@@ -1,0 +1,484 @@
+include "Session.ch"
+include "lsp/Framing.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const int64 c_DapReadBytes = 65536;
+	const int64 c_DapWaitSliceNs = 50000000;
+	const int64 c_DapWriterSliceMs = 200;
+	const int64 c_DapStackFrames = 20;
+
+	const char* DebugStateName(DebugState state) {
+		if (state == DebugState::Building) return "building";
+		if (state == DebugState::Starting) return "starting";
+		if (state == DebugState::Running) return "running";
+		if (state == DebugState::Stopped) return "stopped";
+		if (state == DebugState::Ended) return "ended";
+		return "failed";
+	}
+
+	void DebugSession::Init(Server* server, Workspace* ws, Core::StringView id, const DebugLaunch& launch) {
+		this.m_Server = server;
+		this.m_Ws = ws;
+		this.m_Id = Core::String(id);
+		this.m_Launch = launch;
+		this.m_State = DebugState::Building;
+		this.m_Capabilities = Core::String("{}");
+		this.m_Threads = Core::String("[]");
+		this.m_Frames = Core::String("[]");
+		this.m_NextSeq = 1;
+	}
+
+	Core::String DebugSession::SummaryJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Id.View());
+		json.Field("name", m_Launch.m_Name.View());
+		json.Field("project", m_Launch.m_Project.View());
+		json.Field("type", m_Launch.m_Type.View());
+		json.Field("state", DebugStateName(m_State));
+		json.IntField("revision", m_Revision);
+		json.Field("problem", m_Problem.View());
+		json.Key(Core::StringView("exitCode"));
+		if (m_Exited) json.Int(m_ExitCode);
+		else json.Null();
+		json.Key(Core::StringView("stop"));
+		if (m_State == DebugState::Stopped) {
+			json.BeginObject();
+			json.IntField("threadId", m_StopThread);
+			json.Field("reason", m_StopReason.View());
+			json.Field("description", m_StopDescription.View());
+			json.EndObject();
+		}
+		else json.Null();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Starting ----------------------------------------------------------------------------------------------------
+
+	static ProfileVariables VariablesOf(Server* server, Workspace* ws, const DapProvider* provider, Core::StringView project) {
+		ProfileVariables variables;
+		variables.m_PluginDir = Core::String(provider->m_PluginDir.View());
+		variables.m_WorkspaceDir = Core::String(ws->m_Root.View());
+		variables.m_SolutionDir = Core::String(ws->m_Root.View());
+		variables.m_ProjectName = Core::String(project);
+		Settings* settings = server->m_Settings;
+		variables.m_Config = [settings, ws](Core::StringView key) -> Core::String { return settings->Effective(ws, Core::StringView(""), key); };
+		variables.m_IedHome = server->m_Config.m_HomeDir;
+		variables.m_PluginState = Core::String((FS::Path(server->m_Config.m_DataDir.View()) / "plugins" / provider->m_PluginId.View()).View());
+		Tools* tools = server->m_Tools;
+		variables.m_Tool = [tools, ws](Core::StringView id) -> Core::String { return tools->ProgramFor(ws, id); };
+		return variables;
+	}
+
+	// As a language server's (docs/24): with launchMode staged, a copy of the adapter's folder keyed by the program's
+	// size and time, so the adapter can be rebuilt while a session runs.
+	Core::String DebugSession::ProgramToRun(Core::String& error) const {
+		if (m_Server->m_Tools->LacksProgram(m_Ws, m_Provider->m_Command.View(), error)) return Core::String();
+		Core::String command = ExpandProfileVariables(m_Provider->m_Command.View(), VariablesOf(m_Server, m_Ws, m_Provider, m_Launch.m_Project.View()));
+		FS::Path program = FS::AbsolutePath(command.CStr());
+		if (!m_Provider->m_Staged) return command;
+		FS::FileInfo info;
+		if (!FS::GetInfo(program.CStr(), info)) {
+			error = Core::String("no program ") + command.View();
+			return Core::String();
+		}
+		Core::StringBuilder key;
+		key.AppendInt(info.size);
+		key.Append("-");
+		key.AppendInt(info.modifiedNs);
+		FS::Path stage = FS::Path(m_Server->m_Config.m_StateDir.View()) / "dap-stage" / m_Provider->m_Type.View() / key.View();
+		FS::Path staged = stage / program.FileName();
+		if (!FS::FileExists(staged.CStr()) && FS::CopyTree(program.Parent().CStr(), stage.CStr()) < 0) {
+			error = Core::String("cannot stage ") + program.Parent().View() + " in " + stage.View();
+			return Core::String();
+		}
+		return Core::String(staged.View());
+	}
+
+	// `text` with ${port} as the port IED listens on for the adapter.
+	static Core::String WithPort(Core::StringView text, int32 port) {
+		const int64 at = text.IndexOf(Core::StringView("${port}"));
+		if (at < 0) return Core::String(text);
+		Core::StringBuilder out;
+		out.Append(text.Substring(0, at));
+		out.AppendInt(port);
+		out.Append(text.Substring(at + 7, text.ByteLength()));
+		return out.ToString();
+	}
+
+	// Over stdio the adapter's input and output are the protocol; over tcp its output and errors are only a log.
+	Process::StartInfo DebugSession::StartInfoFor(Core::StringView program, int32 port) const {
+		ProfileVariables variables = VariablesOf(m_Server, m_Ws, m_Provider, m_Launch.m_Project.View());
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		for (const Core::String& arg : m_Provider->m_Args) ExpandProfileArgument(WithPort(arg.View(), port).View(), variables, info.arguments);
+		for (const Core::String& entry : m_Provider->m_Environment) info.environment.Push(ExpandProfileVariables(entry.View(), variables));
+		info.environment = m_Server->m_Tools->EnvironmentFor(m_Ws, info.environment);
+		info.workingDirectory = m_Provider->m_Cwd.IsEmpty() ? Core::String(m_Ws->m_Root.View()) : ExpandProfileVariables(m_Provider->m_Cwd.View(), variables);
+		info.input = m_Provider->m_Tcp ? Process::Redirect::Null : Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		info.errors = m_Provider->m_Tcp ? Process::Redirect::ToOutput : Process::Redirect::Pipe;
+		return info;
+	}
+
+	static Core::String InitializeArguments(Core::StringView type) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("clientID", "ied");
+		json.Field("clientName", "IED");
+		json.Field("adapterID", type);
+		json.Field("locale", "en");
+		json.BoolField("linesStartAt1", true);
+		json.BoolField("columnsStartAt1", true);
+		json.Field("pathFormat", "path");
+		json.BoolField("supportsVariableType", true);
+		json.BoolField("supportsVariablePaging", false);
+		json.BoolField("supportsRunInTerminalRequest", false);
+		json.BoolField("supportsStartDebuggingRequest", false);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void DebugSession::Start(DapProvider* provider) {
+		this.m_Provider = provider;
+		m_State = DebugState::Starting;
+		Core::String error;
+		Core::String program = ProgramToRun(error);
+		if (program.IsEmpty()) {
+			Fail(error.View());
+			return;
+		}
+		Net::TcpListener* listener = nullptr;
+		int32 port = 0;
+		if (provider->m_Tcp) {
+			listener = new Net::TcpListener();
+			if (!listener->Listen(Net::Address::Loopback(0))) {
+				Fail((Core::String("cannot listen for the debug adapter: ") + listener->Error()).View());
+				return;
+			}
+			port = listener->LocalAddress().port;
+		}
+		Process::Child started = Process::Child::Start(StartInfoFor(program.View(), port));
+		if (!started.IsOpen()) {
+			if (listener) listener->Close();
+			Fail(((Core::String("cannot start the ") + provider->m_Label.View()) + " debug adapter: " + started.Error()).View());
+			return;
+		}
+		m_Run += 1;
+		const int64 thisRun = m_Run;
+		m_Child = new Process::Child(take(started));
+		m_Outgoing = new MessageQueue();
+		DebugSession* self = this;
+		Process::Child* process = m_Child;
+		MessageQueue* queue = m_Outgoing;
+		if (listener) {
+			Threading::Thread::Run([self, listener, process, queue, thisRun]() { self->AcceptLoop(listener, process, queue, thisRun); }).Detach();
+			Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, Process::Stream::Output, thisRun); }).Detach();
+		}
+		else {
+			DapChannel* channel = new DapChannel();
+			channel->m_Child = process;
+			Talk(channel, process, queue, thisRun);
+			Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, Process::Stream::Errors, thisRun); }).Detach();
+		}
+		Ask(Core::StringView("initialize"), InitializeArguments(provider->m_Type.View()).View(), [self](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			self->Initialized(ok, body, message);
+		});
+		m_Server->m_Debugger->StateChanged(this);
+	}
+
+	// The adapter's capabilities are in: the program is launched (or attached to); the adapter's `initialized` event
+	// then asks for the breakpoints (docs/25 "Sessions").
+	void DebugSession::Initialized(bool ok, const Serialization::DomNode& body, Core::StringView message) {
+		if (!ok) {
+			Fail((Core::String("the debug adapter refused initialize: ") + message).View());
+			return;
+		}
+		m_Capabilities = body.IsValid() ? NodeJson(body) : Core::String("{}");
+		DebugSession* self = this;
+		Ask(m_Launch.m_Request.View(), m_Launch.m_Arguments.View(), [self](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			if (!ok) self->Fail(((Core::String("the program could not be started: ") + message)).View());
+		});
+	}
+
+	// --- Talking -----------------------------------------------------------------------------------------------------
+
+	void DebugSession::Write(Core::StringView json) {
+		if (m_Outgoing) m_Outgoing->Push(FrameMessage(json).View());
+	}
+
+	int64 DebugSession::Send(Core::StringView command, Core::StringView arguments, DapAnswer* answer) {
+		const int64 seq = m_NextSeq;
+		m_NextSeq += 1;
+		m_Answers.Insert(seq, answer);
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("seq", seq);
+		json.Field("type", "request");
+		json.Field("command", command);
+		json.RawField("arguments", arguments.IsEmpty() ? Core::StringView("{}") : arguments);
+		json.EndObject();
+		Write(json.View());
+		return seq;
+	}
+
+	void DebugSession::Ask(Core::StringView command, Core::StringView arguments, DapThen then) {
+		DapAnswer* answer = new DapAnswer();
+		answer->m_Then = then;
+		answer->m_HasThen = true;
+		Send(command, arguments, answer);
+	}
+
+	Core::String DebugSession::Request(Call& call, Core::StringView command, Core::StringView arguments) {
+		if (!m_Child || !IsLive()) throw RpcError(ErrorCode::Unavailable, (Core::String("the debug session is ") + DebugStateName(m_State)).View());
+		DapAnswer* answer = new DapAnswer();
+		answer->m_Wake = call.m_Cancel;
+		const int64 seq = Send(command, arguments, answer);
+		const int64 deadline = clock_now_ns() + c_DapRequestTimeoutMs * 1000000;
+		while (!answer->m_Done && !call.m_Cancel->IsCancelled() && clock_now_ns() < deadline) call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_DapWaitSliceNs);
+		m_Answers.Remove(seq);
+		if (answer->m_Done && answer->m_Ok) return answer->m_Body;
+		if (answer->m_Done) throw RpcError(ErrorCode::PluginError, answer->m_Message.IsEmpty() ? Core::StringView("the debug adapter failed") : answer->m_Message.View());
+		if (call.m_Cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		throw RpcError(ErrorCode::Timeout, (Core::String(command) + " took longer than the debug adapter's time").View());
+	}
+
+	void DebugSession::Stop() {
+		if (!IsLive()) return;
+		if (!m_Child) {
+			m_State = DebugState::Ended;
+			m_Server->m_Debugger->StateChanged(this);
+			return;
+		}
+		const bool terminate = m_Capabilities.View().Contains(Core::StringView("\"supportsTerminateRequest\":true"));
+		DebugSession* self = this;
+		Ask(terminate ? Core::StringView("terminate") : Core::StringView("disconnect"), Core::StringView("{}"), [self](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			if (!ok) self->Ask(Core::StringView("disconnect"), Core::StringView("{\"terminateDebuggee\":true}"), [](bool ok, const Serialization::DomNode& body, Core::StringView message) {});
+		});
+		Process::Child* process = m_Child;
+		Threading::Thread::Run([process]() { if (process->Wait(c_DapExitGraceMs * 2) == Process::kTimedOut) process->Kill(); }).Detach();
+	}
+
+	void DebugSession::Fail(Core::StringView why) {
+		m_State = DebugState::Failed;
+		m_Problem = Core::String(why);
+		if (m_Child) m_Child->Kill();
+		m_Server->m_Debugger->StateChanged(this);
+	}
+
+	// --- What the adapter sends --------------------------------------------------------------------------------------
+
+	void DebugSession::Dispatch(Core::StringView body) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(body, *doc);
+		if (!read.Ok()) {
+			m_Server->m_Debugger->Log(this, (Core::String("a message that is not JSON: ") + body.Substring(0, 200)).View());
+			return;
+		}
+		Core::StringView type = read.root.Member("type").AsView();
+		if (type == "response") Answered(read.root);
+		else if (type == "event") Happened(read.root.Member("event").AsView(), read.root.Member("body"));
+		else if (type == "request") Respond(read.root);
+	}
+
+	void DebugSession::Answered(const Serialization::DomNode& message) {
+		const int64 seq = message.Member("request_seq").AsInt();
+		DapAnswer** found = m_Answers.Find(seq);
+		if (!found) return;
+		DapAnswer* answer = *found;
+		answer->m_Done = true;
+		answer->m_Ok = message.Member("success").AsBool();
+		answer->m_Body = message.Member("body").IsValid() ? NodeJson(message.Member("body")) : Core::String("null");
+		answer->m_Message = Core::String(message.Member("message").AsView());
+		Serialization::DomNode error = message.Member("body").Member("error").Member("format");
+		if (!answer->m_Ok && error.Kind() == Serialization::DomKind::String) answer->m_Message = Core::String(error.AsView());
+		if (answer->m_HasThen) {
+			m_Answers.Remove(seq);
+			answer->m_Then(answer->m_Ok, message.Member("body"), answer->m_Message.View());
+		}
+		else if (answer->m_Wake) answer->m_Wake->m_Wake.NotifyAll();
+	}
+
+	// Reverse requests IED does not take yet (runInTerminal, startDebugging) are refused, so the adapter does without.
+	void DebugSession::Respond(const Serialization::DomNode& request) {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("seq", m_NextSeq);
+		m_NextSeq += 1;
+		json.Field("type", "response");
+		json.IntField("request_seq", request.Member("seq").AsInt());
+		json.Field("command", request.Member("command").AsView());
+		json.BoolField("success", false);
+		json.Field("message", (Core::String("IED does not take ") + request.Member("command").AsView()).View());
+		json.EndObject();
+		Write(json.View());
+	}
+
+	void DebugSession::Happened(Core::StringView event, const Serialization::DomNode& body) {
+		if (event == "initialized") m_Server->m_Debugger->Configure(this);
+		else if (event == "stopped") Stopped(body);
+		else if (event == "continued") Continued();
+		else if (event == "exited") {
+			m_Exited = true;
+			m_ExitCode = body.Member("exitCode").AsInt();
+		}
+		else if (event == "terminated") Terminated();
+		else if (event == "process") Named(body);
+		else m_Server->m_Debugger->Event(this, event, body);
+	}
+
+	// The adapter named the program's process: what it uses is sampled from now on (docs/25 "Diagnostic Tools").
+	void DebugSession::Named(const Serialization::DomNode& body) {
+		const int64 processId = body.Member("systemProcessId").AsInt();
+		if (processId <= 0 || m_Usage) return;
+		m_Usage = new ProgramUsage();
+		m_Usage->m_ProcessId = (uint32)processId;
+		m_Usage->m_Name = Core::String(body.Member("name").AsView());
+		m_Server->m_Debugger->ProgramNamed(this);
+	}
+
+	// The program stopped: its threads and the stopped thread's top frames are fetched before clients hear of it, so
+	// the stop arrives with where it is.
+	void DebugSession::Stopped(const Serialization::DomNode& body) {
+		m_State = DebugState::Stopped;
+		m_Revision += 1;
+		m_StopThread = body.Member("threadId").AsInt();
+		m_StopReason = Core::String(body.Member("reason").AsView());
+		m_StopDescription = Core::String(body.Member("description").AsView().IsEmpty() ? body.Member("text").AsView() : body.Member("description").AsView());
+		const int64 stopped = m_Revision;
+		DebugSession* self = this;
+		Ask(Core::StringView("threads"), Core::StringView("{}"), [self, stopped](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			self->m_Threads = ok ? NodeJson(body.Member("threads")) : Core::String("[]");
+			if (self->m_StopThread == 0 && ok && body.Member("threads").Count() > 0) self->m_StopThread = body.Member("threads").At(0).Member("id").AsInt();
+			self->FetchFrames(stopped);
+		});
+	}
+
+	void DebugSession::FetchFrames(int64 stopped) {
+		JsonWriter arguments;
+		arguments.BeginObject();
+		arguments.IntField("threadId", m_StopThread);
+		arguments.IntField("startFrame", 0);
+		arguments.IntField("levels", c_DapStackFrames);
+		arguments.EndObject();
+		DebugSession* self = this;
+		Ask(Core::StringView("stackTrace"), arguments.View(), [self, stopped](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			if (self->m_Revision != stopped) return;
+			self->m_Frames = ok ? NodeJson(body.Member("stackFrames")) : Core::String("[]");
+			self->m_Server->m_Debugger->StopShown(self);
+		});
+	}
+
+	void DebugSession::Continued() {
+		if (m_State != DebugState::Stopped) return;
+		Ran();
+	}
+
+	void DebugSession::Ran() {
+		m_State = DebugState::Running;
+		m_Revision += 1;
+		m_Frames = Core::String("[]");
+		m_Server->m_Debugger->StateChanged(this);
+	}
+
+	void DebugSession::Terminated() {
+		if (!IsLive()) return;
+		m_State = DebugState::Ended;
+		m_Server->m_Debugger->StateChanged(this);
+		Ask(Core::StringView("disconnect"), Core::StringView("{}"), [](bool ok, const Serialization::DomNode& body, Core::StringView message) {});
+		Process::Child* process = m_Child;
+		Threading::Thread::Run([process]() { if (process->Wait(c_DapExitGraceMs) == Process::kTimedOut) process->Kill(); }).Detach();
+	}
+
+	// --- Ending ------------------------------------------------------------------------------------------------------
+
+	// The adapter's process ended (lock held): waiting requests fail, and a session that had not ended has now.
+	void DebugSession::Exited() {
+		for (const Core::KeyValue<int64, DapAnswer*>& entry : m_Answers) {
+			entry.value->m_Done = true;
+			entry.value->m_Ok = false;
+			entry.value->m_Message = Core::String("the debug adapter exited");
+			if (entry.value->m_Wake) entry.value->m_Wake->m_Wake.NotifyAll();
+		}
+		m_Answers.Clear();
+		if (m_Outgoing) m_Outgoing->Close();
+		if (!IsLive()) return;
+		if (m_State == DebugState::Starting) Fail(Core::StringView("the debug adapter exited before the program started"));
+		else {
+			m_State = DebugState::Ended;
+			m_Server->m_Debugger->StateChanged(this);
+		}
+	}
+
+	// --- The threads -------------------------------------------------------------------------------------------------
+
+	// A writer and a reader on `channel`; messages queued before it opened (initialize) go first.
+	void DebugSession::Talk(DapChannel* channel, Process::Child* process, MessageQueue* queue, int64 thisRun) {
+		DebugSession* self = this;
+		Threading::Thread::Run([self, channel, queue]() { self->WriteLoop(channel, queue); }).Detach();
+		Threading::Thread::Run([self, channel, process, thisRun]() { self->ReadLoop(channel, process, thisRun); }).Detach();
+	}
+
+	// Transport tcp: the adapter connects to the port it was given, within kDapConnectTimeoutMs.
+	void DebugSession::AcceptLoop(Net::TcpListener* listener, Process::Child* process, MessageQueue* queue, int64 thisRun) {
+		Net::TcpStream accepted = listener->Accept(c_DapConnectTimeoutMs);
+		const Core::String why = Core::String(listener->Error());
+		listener->Close();
+		Threading::LockGuard guard(m_Server->m_Lock);
+		if (m_Run != thisRun) return;
+		if (!accepted.IsOpen()) {
+			Fail((Core::String("the debug adapter did not connect: ") + (why.IsEmpty() ? Core::StringView("it took too long") : why.View())).View());
+			return;
+		}
+		DapChannel* channel = new DapChannel();
+		channel->m_Child = process;
+		channel->m_Stream = new Net::TcpStream(take(accepted));
+		Talk(channel, process, queue, thisRun);
+	}
+
+	void DebugSession::WriteLoop(DapChannel* channel, MessageQueue* queue) {
+		Core::String message;
+		while (queue->Next(message, c_DapWriterSliceMs) || !queue->IsClosed()) {
+			if (!message.IsEmpty() && !channel->Write(message.View())) return;
+			message = Core::String();
+		}
+	}
+
+	void DebugSession::ReadLoop(DapChannel* channel, Process::Child* process, int64 thisRun) {
+		FrameReader frames;
+		char[c_DapReadBytes] buffer;
+		for (;;) {
+			const int64 got = channel->Read((void*)&buffer[0], c_DapReadBytes);
+			if (got <= 0) break;
+			frames.Feed(Core::StringView(&buffer[0], got));
+			Core::String body;
+			while (frames.Next(body)) {
+				Threading::LockGuard guard(m_Server->m_Lock);
+				if (m_Run == thisRun) Dispatch(body.View());
+			}
+			if (frames.Failed()) {
+				Threading::LockGuard guard(m_Server->m_Lock);
+				if (m_Run == thisRun) m_Server->m_Debugger->Log(this, frames.Failure());
+				process->Kill();
+				break;
+			}
+		}
+		if (channel->m_Stream) channel->m_Stream->Close();
+		if (process->Wait(c_DapExitGraceMs) == Process::kTimedOut) process->Kill();
+		Threading::LockGuard guard(m_Server->m_Lock);
+		if (m_Run == thisRun) Exited();
+	}
+
+	void DebugSession::ErrorLoop(Process::Child* process, Process::Stream stream, int64 thisRun) {
+		char[c_DapReadBytes] buffer;
+		for (;;) {
+			const int64 got = process->Read(stream, (void*)&buffer[0], c_DapReadBytes);
+			if (got <= 0) break;
+			Threading::LockGuard guard(m_Server->m_Lock);
+			if (m_Run == thisRun) m_Server->m_Debugger->Log(this, Core::StringView(&buffer[0], got));
+		}
+	}
+}

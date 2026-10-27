@@ -1,0 +1,135 @@
+include "api/Plugin.ch"
+include "Probe.ch"
+include "Request.ch"
+
+namespace Ai
+{
+	const int32 c_ProbePollMs = 100;
+
+	static int64 ProbeNowMs() { return clock_now_ns() / 1000000; }
+
+	static Serialization::DomNode ParseProbeJson(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	Core::String ServerRoot(Core::StringView endpoint) {
+		Core::StringView root = endpoint;
+		while (root.EndsWith(Core::StringView("/"))) root = root.Substring(0, root.ByteLength() - 1);
+		if (root.EndsWith(Core::StringView("/v1"))) root = root.Substring(0, root.ByteLength() - 3);
+		return Core::String(root);
+	}
+
+	// A number a server may send as a JSON number or a string.
+	static int64 Count(const Serialization::DomNode& node) {
+		if (node.Kind() != Serialization::DomKind::String) return node.AsInt();
+		int64 value = 0;
+		Core::StringView text = node.AsView();
+		for (int64 i = 0; i < text.ByteLength() && text.ByteAt(i) >= '0' && text.ByteAt(i) <= '9'; ++i) value = value * 10 + (text.ByteAt(i) - '0');
+		return value;
+	}
+
+	static int64 ListedWindow(const Serialization::DomNode& model) {
+		if (model.Member("max_model_len").IsValid()) return Count(model.Member("max_model_len"));
+		return model.Member("meta").Member("n_ctx").IsValid() ? Count(model.Member("meta").Member("n_ctx")) : 0;
+	}
+
+	void ReadModelList(Core::StringView json, ModelProbe& probe, Core::StringView wanted) {
+		Serialization::DomNode data = ParseProbeJson(json).Member("data");
+		bool found = false;
+		for (int64 i = 0; data.Kind() == Serialization::DomKind::Array && i < data.Count(); ++i) {
+			Serialization::DomNode model = data.At(i);
+			probe.m_Models.Push(Core::String(model.Member("id").AsView()));
+			const int64 window = ListedWindow(model);
+			const bool isWanted = !wanted.IsEmpty() && model.Member("id").AsView() == wanted;
+			if (window > 0 && (isWanted || (!found && probe.m_ContextWindow == 0))) probe.m_ContextWindow = window;
+			found = found || (isWanted && window > 0);
+			if (probe.m_TrainContext == 0 || isWanted) probe.m_TrainContext = Count(model.Member("meta").Member("n_ctx_train"));
+		}
+	}
+
+	void ReadModelList(Core::StringView json, ModelProbe& probe) { ReadModelList(json, probe, Core::StringView("")); }
+
+	void ReadProps(Core::StringView json, ModelProbe& probe) {
+		Serialization::DomNode props = ParseProbeJson(json);
+		Serialization::DomNode slotContext = props.Member("default_generation_settings").Member("n_ctx");
+		if (!slotContext.IsValid()) return;
+		probe.m_Server = Core::String("llama.cpp");
+		probe.m_ContextWindow = Count(slotContext);
+		probe.m_Slots = Count(props.Member("total_slots"));
+		probe.m_Vision = props.Member("modalities").Member("vision").AsBool();
+	}
+
+	bool FetchText(Core::StringView url, const Core::Array<Core::String>& headers, int32 timeoutMs, int32& status, Core::String& body, Core::String& error) {
+		StreamingRequest http;
+		if (!http.Get(url, headers, timeoutMs, error)) return false;
+		const int64 until = ProbeNowMs() + timeoutMs;
+		BodyRead read = BodyRead::Waiting;
+		while (read == BodyRead::Waiting && ProbeNowMs() < until) read = http.ReadHead(c_ProbePollMs);
+		if (read != BodyRead::Bytes) {
+			error = read == BodyRead::Failed ? Core::String(http.Error()) : Core::String("no answer in time");
+			return false;
+		}
+		status = http.Status();
+		while (ProbeNowMs() < until) {
+			read = http.Read(body, c_ProbePollMs);
+			if (read == BodyRead::Ended) return true;
+			if (read == BodyRead::Failed) {
+				error = Core::String(http.Error());
+				return false;
+			}
+		}
+		error = Core::String("the answer did not finish in time");
+		return false;
+	}
+
+	ModelProbe ProbeModel(const ModelProfile& profile, int32 timeoutMs) {
+		ModelProbe probe;
+		probe.m_Server = Core::String("OpenAI-compatible");
+		Core::Array<Core::String> headers;
+		Core::String key;
+		if (!profile.m_ApiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile.m_ApiKeyEnv.CStr(), key)) headers.Push(Core::String("Authorization: Bearer ") + key.View());
+		const int64 started = ProbeNowMs();
+		int32 status = 0;
+		Core::String body;
+		if (!FetchText((profile.m_Endpoint + "/models").View(), headers, timeoutMs, status, body, probe.m_Error)) return probe;
+		probe.m_Ms = ProbeNowMs() - started;
+		if (status != 200) {
+			Core::StringBuilder said;
+			said.Append("HTTP ");
+			said.AppendInt(status);
+			said.Append(" from /models: ");
+			said.Append(body.View().Substring(0, body.ByteLength() < 200 ? body.ByteLength() : 200));
+			probe.m_Error = said.ToString();
+			return probe;
+		}
+		ReadModelList(body.View(), probe, profile.m_Model.View());
+		for (const Core::String& id : probe.m_Models) probe.m_ModelServed = probe.m_ModelServed || id == profile.m_Model;
+		Core::String props;
+		Core::String ignored;
+		if (FetchText((ServerRoot(profile.m_Endpoint.View()) + "/props").View(), headers, timeoutMs, status, props, ignored) && status == 200) ReadProps(props.View(), probe);
+		probe.m_Ok = true;
+		return probe;
+	}
+
+	Core::String ModelProbe::JsonText() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", m_Ok);
+		if (!m_Error.IsEmpty()) json.Field("error", m_Error.View());
+		json.Field("server", m_Server.View());
+		json.Key(Core::StringView("models"));
+		json.BeginArray();
+		for (const Core::String& model : m_Models) json.String(model.View());
+		json.EndArray();
+		json.BoolField("modelServed", m_ModelServed);
+		json.IntField("contextWindow", m_ContextWindow);
+		json.IntField("trainContext", m_TrainContext);
+		json.IntField("slots", m_Slots);
+		json.BoolField("vision", m_Vision);
+		json.IntField("ms", m_Ms);
+		json.EndObject();
+		return json.ToString();
+	}
+}

@@ -1,0 +1,669 @@
+// The AI's first look at a capture (T-PRF-19 profile_diagnose): the problems that stand out, most costly first, each
+// with its evidence and the tool call that looks closer. Every finding comes from the same analyses the other tools
+// answer from, held to the thresholds below (docs/16 "Finding problems").
+include "ToolText.ch"
+include "analysis/Investigate.ch"
+
+namespace Profiler
+{
+	const double c_SlowShareMedium = 0.01;       // of the frames
+	const double c_SlowShareHigh = 0.05;
+	const double c_SpikeMedium = 3.0;            // the worst frame against the median
+	const double c_SpikeHigh = 4.0;
+	const double c_HotShare = 0.25;              // a zone's own time against its thread's busy time (or the capture)
+	const double c_BoundShare = 0.5;             // a frame thread this busy is the bottleneck
+	const double c_SerializedShare = 0.75;       // the busiest thread's share while the others idle
+	const double c_IdleShare = 0.25;
+	const double c_SerializedBusy = 1.5;         // threads busy at once
+	const double c_LockWaitMedium = 0.01;        // waits against the capture
+	const double c_LockWaitHigh = 0.05;
+	const double c_ThreadWaitMedium = 0.05;      // a thread's waits against its busy time
+	const double c_ThreadWaitHigh = 0.2;
+	const double c_AllocsPerFrameMedium = 100.0;
+	const double c_AllocsPerFrameHigh = 1000.0;
+	const int64 c_NativeTakers = 3;                 // the zones named as taking the most native memory
+	const int64 c_AllocBytesPerFrameMedium = 65536;
+	const int64 c_AllocBytesPerFrameHigh = 1048576;
+	const double c_AllocsPerSecondMedium = 50000.0;
+	const int64 c_FloorRises = 7;                // of 9 steps
+	const double c_FloorGrowth = 1.1;
+	const int64 c_LeastGrowthBytes = 1048576;
+	const int64 c_LargeGrowthBytes = 4194304;    // growth this large counts whatever the series started at
+	const double c_HeapAfterGrowth = 1.2;
+	const int64 c_LeastLeaked = 100;
+	const double c_GcPauseShare = 0.02;
+	const int64 c_GcInSlowFrames = 3;
+
+	enum class Area { Frames, Cpu, Locks, Memory, Instrumentation }
+
+	class Finding
+	{
+		public int32 m_Rank;                      // 0 high, 1 medium, 2 low
+		public int64 m_Order;
+		public Area m_Area;
+		public Core::String m_Title;
+		public Core::Array<Core::String> m_Evidence;
+		public Core::String m_Next;
+	}
+
+	class Findings
+	{
+		public Core::Array<Finding*> m_List;
+
+		public Finding* Add(int32 rank, Area area, Core::String title, const char* next) {
+			Finding* finding = new Finding();
+			finding->m_Rank = rank;
+			finding->m_Order = m_List.Count();
+			finding->m_Area = area;
+			finding->m_Title = title;
+			finding->m_Next = Core::String(next);
+			m_List.Push(finding);
+			return finding;
+		}
+	}
+
+	static bool Shown(Core::StringView focus, Area area) {
+		if (focus.IsEmpty() || focus == "all") return true;
+		if (focus == "frames") return area == Area::Frames;
+		if (focus == "cpu") return area == Area::Cpu;
+		if (focus == "locks") return area == Area::Locks;
+		if (focus == "memory") return area == Area::Memory;
+		return area == Area::Instrumentation;
+	}
+
+	// --- Frames and CPU -----------------------------------------------------------------------------------------------
+
+	static void SlowFrameFinding(Findings& out, const Capture& capture) {
+		HitchAsk ask;
+		ask.m_Limit = 0;
+		Serialization::DomNode h = ParseJson(Hitches(capture, ask));
+		const int64 frames = h.Member("frames").AsInt();
+		const int64 slow = h.Member("slow").AsInt();
+		if (frames == 0 || slow == 0) return;
+		const double share = (double)slow / (double)frames;
+		const double spike = h.Member("medianNs").AsInt() > 0 ? (double)h.Member("worstNs").AsInt() / (double)h.Member("medianNs").AsInt() : 0.0;
+		const int32 rank = share >= c_SlowShareHigh || spike >= c_SpikeHigh ? 0 : (share >= c_SlowShareMedium || spike >= c_SpikeMedium ? 1 : 2);
+		Core::StringBuilder title;
+		title.Append("Slow frames: ");
+		title.Append(Number(slow).View());
+		title.Append(" of ");
+		title.Append(Number(frames).View());
+		title.Append(" (");
+		title.Append(Percent(share).View());
+		title.Append(") took over ");
+		title.Append(Duration(h.Member("thresholdNs").AsInt()).View());
+		title.Append(", twice the median ");
+		title.Append(Duration(h.Member("medianNs").AsInt()).View());
+		title.Append("; the worst ");
+		title.Append(Duration(h.Member("worstNs").AsInt()).View());
+		Finding* finding = out.Add(rank, Area::Frames, title.ToString(), "profile_hitches");
+		Serialization::DomNode causes = h.Member("causes");
+		for (int64 i = 0; i < causes.Count() && i < 3; ++i) {
+			Serialization::DomNode c = causes.At(i);
+			Core::StringBuilder line;
+			line.Append(c.Member("name").AsView());
+			if (!c.Member("thread").AsView().IsEmpty()) {
+				line.Append(" on ");
+				line.Append(c.Member("thread").AsView());
+			}
+			line.Append(" in ");
+			line.Append(Number(c.Member("frames").AsInt()).View());
+			line.Append(" of them");
+			if (c.Member("kind").AsView() != "allocations") {
+				line.Append(", ");
+				line.Append(Duration(c.Member("meanNs").AsInt()).View());
+				line.Append(c.Member("kind").AsView() == "zone" ? " over its usual time on average" : " on average");
+			}
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	// The zone that takes most of the frame thread's time (else of the capture's): where to look for a faster frame.
+	static void HotZoneFinding(Findings& out, const Serialization::DomNode& summary, const Serialization::DomNode& threads) {
+		Serialization::DomNode list = threads.Member("threads");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode t = list.At(i);
+			Serialization::DomNode top = t.Member("top");
+			if (!t.Member("marksFrames").AsBool() || top.Count() == 0 || t.Member("busyNs").AsInt() <= 0) continue;
+			const double share = (double)top.At(0).Member("selfNs").AsInt() / (double)t.Member("busyNs").AsInt();
+			if (share < c_HotShare) return;
+			Core::StringBuilder title;
+			title.Append("Where the frame thread's time goes: ");
+			title.Append(top.At(0).Member("name").AsView());
+			title.Append(" takes ");
+			title.Append(Percent(share).View());
+			title.Append(" of ");
+			title.Append(t.Member("name").AsView());
+			title.Append("'s busy time (its own time ");
+			title.Append(Duration(top.At(0).Member("selfNs").AsInt()).View());
+			title.Append("); ");
+			title.Append(t.Member("name").AsView());
+			title.Append(" is busy ");
+			title.Append(Percent(t.Member("share").AsFloat()).View());
+			title.Append(" of the time");
+			Finding* finding = out.Add(t.Member("share").AsFloat() >= c_BoundShare ? 1 : 2, Area::Cpu, title.ToString(), "profile_find_zone, then profile_flame");
+			for (int64 k = 1; k < top.Count(); ++k) {
+				Core::StringBuilder line;
+				line.Append("then ");
+				line.Append(top.At(k).Member("name").AsView());
+				line.AppendByte(' ');
+				line.Append(Duration(top.At(k).Member("selfNs").AsInt()).View());
+				finding->m_Evidence.Push(line.ToString());
+			}
+			return;
+		}
+		Serialization::DomNode rows = summary.Member("topBySelf").Member("rows");
+		const int64 duration = summary.Member("durationNs").AsInt();
+		if (rows.Count() == 0 || duration <= 0) return;
+		Serialization::DomNode top = rows.At(0);
+		const double share = (double)top.Member("selfNs").AsInt() / (double)duration;
+		if (share < c_HotShare) return;
+		Core::StringBuilder title;
+		title.Append("Where the time goes: ");
+		title.Append(top.Member("name").AsView());
+		title.Append("'s own time is ");
+		title.Append(Duration(top.Member("selfNs").AsInt()).View());
+		title.Append(", ");
+		title.Append(Percent(share).View());
+		title.Append(" of the capture");
+		Finding* finding = out.Add(2, Area::Cpu, title.ToString(), "profile_find_zone, then profile_flame");
+		Core::StringBuilder line;
+		line.Append(Number(top.Member("count").AsInt()).View());
+		line.Append(" calls, median ");
+		line.Append(Duration(top.Member("medianNs").AsInt()).View());
+		line.Append(", p95 ");
+		line.Append(Duration(top.Member("p95Ns").AsInt()).View());
+		if (!top.Member("file").AsView().IsEmpty()) {
+			line.Append(", at ");
+			line.Append(top.Member("file").AsView());
+			line.AppendByte(':');
+			line.AppendInt(top.Member("line").AsInt());
+		}
+		finding->m_Evidence.Push(line.ToString());
+	}
+
+	static void SerializedFinding(Findings& out, const Serialization::DomNode& t) {
+		Serialization::DomNode threads = t.Member("threads");
+		if (threads.Count() < 2 || t.Member("meanBusyThreads").AsFloat() >= c_SerializedBusy) return;
+		Serialization::DomNode busiest = threads.At(0);
+		if (busiest.Member("share").AsFloat() < c_SerializedShare) return;
+		int64 idle = 0;
+		for (int64 i = 1; i < threads.Count(); ++i)
+			if (threads.At(i).Member("share").AsFloat() < c_IdleShare) idle += 1;
+		if (idle == 0) return;
+		Core::StringBuilder title;
+		title.Append("Work on one thread: ");
+		title.Append(busiest.Member("name").AsView());
+		title.Append(" is busy ");
+		title.Append(Percent(busiest.Member("share").AsFloat()).View());
+		title.Append(" of the time while ");
+		title.Append(Number(idle).View());
+		title.Append(idle == 1 ? " other thread is" : " other threads are");
+		title.Append(" busy under ");
+		title.Append(Percent(c_IdleShare).View());
+		Finding* finding = out.Add(1, Area::Cpu, title.ToString(), "profile_threads");
+		Serialization::DomNode top = busiest.Member("top");
+		for (int64 i = 0; i < top.Count(); ++i) {
+			Core::StringBuilder line;
+			line.Append(top.At(i).Member("name").AsView());
+			line.Append(" takes ");
+			line.Append(Duration(top.At(i).Member("selfNs").AsInt()).View());
+			line.Append(" of it");
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	// --- Locks --------------------------------------------------------------------------------------------------------
+
+	// The thread that spent the largest part of its busy time waiting for locks, and that part.
+	static double MostWaiting(const Serialization::DomNode& threads, Core::String& name) {
+		double most = 0.0;
+		Serialization::DomNode list = threads.Member("threads");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			const int64 wait = list.At(i).Member("waitNs").AsInt();
+			const int64 busy = list.At(i).Member("busyNs").AsInt();
+			const double part = wait == 0 ? 0.0 : (double)wait / (double)(busy > wait ? busy : wait);
+			if (part <= most) continue;
+			most = part;
+			name = Core::String(list.At(i).Member("name").AsView());
+		}
+		return most;
+	}
+
+	static void LockFindings(Findings& out, const Capture& capture, const Serialization::DomNode& threads, int64 duration) {
+		LockAsk ask;
+		ask.m_Limit = 3;
+		Serialization::DomNode rows = ParseJson(Locks(capture, ask)).Member("rows");
+		Core::String waiter;
+		const double waiting = MostWaiting(threads, waiter);
+		for (int64 i = 0; i < rows.Count(); ++i) {
+			Serialization::DomNode r = rows.At(i);
+			const double share = duration > 0 ? (double)r.Member("waitNs").AsInt() / (double)duration : 0.0;
+			const bool stuck = r.Member("stuck").AsInt() > 0;
+			const bool slowsWaiter = i == 0 && waiting >= c_ThreadWaitMedium;
+			if (!stuck && share < c_LockWaitMedium && !slowsWaiter) continue;
+			Core::StringBuilder title;
+			title.Append(stuck ? "A thread still waits for lock " : "Lock contention on ");
+			title.Append(r.Member("name").AsView());
+			title.Append(stuck ? " when the capture ends (a deadlock or a stuck thread)" : "");
+			title.Append(": threads waited ");
+			title.Append(Duration(r.Member("waitNs").AsInt()).View());
+			title.Append(" (");
+			title.Append(Percent(share).View());
+			title.Append(" of the capture), ");
+			title.Append(Percent(r.Member("contention").AsFloat()).View());
+			title.Append(" of its holds contended");
+			Finding* finding = out.Add(stuck || share >= c_LockWaitHigh || (slowsWaiter && waiting >= c_ThreadWaitHigh) ? 0 : 1, Area::Locks, title.ToString(), "profile_locks");
+			if (slowsWaiter) {
+				Core::StringBuilder part;
+				part.Append(waiter.View());
+				part.Append(" spent ");
+				part.Append(Percent(waiting).View());
+				part.Append(" of its busy time waiting for locks");
+				finding->m_Evidence.Push(part.ToString());
+			}
+			Core::StringBuilder line;
+			line.Append(Number(r.Member("blocked").AsInt()).View());
+			line.Append(" waits, the longest ");
+			line.Append(Duration(r.Member("maxWaitNs").AsInt()).View());
+			line.Append("; held ");
+			line.Append(Duration(r.Member("holdNs").AsInt()).View());
+			line.Append(" in all over ");
+			line.Append(Number(r.Member("acquisitions").AsInt()).View());
+			line.Append(" holds");
+			if (!r.Member("file").AsView().IsEmpty()) {
+				line.Append(", made at ");
+				line.Append(r.Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(r.Member("line").AsInt());
+			}
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	// --- Memory -------------------------------------------------------------------------------------------------------
+
+	// The functions the collector's samples say allocated the most bytes, as evidence of a counted capture's finding.
+	static void SampledFunctions(Finding* finding, const Capture& capture) {
+		AllocAsk ask;
+		ask.m_Source = AllocSource::Samples;
+		ask.m_GroupBy = AllocGroup::Function;
+		ask.m_ByBytes = true;
+		ask.m_Limit = 3;
+		Serialization::DomNode groups = ParseJson(Allocations(capture, ask)).Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Core::StringBuilder line;
+			line.Append("sampled: ");
+			line.Append(groups.At(i).Member("label").AsView());
+			line.Append(" allocated ");
+			line.Append(Percent(groups.At(i).Member("share").AsFloat()).View());
+			line.Append(" of the sampled bytes");
+			if (!groups.At(i).Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(groups.At(i).Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(groups.At(i).Member("line").AsInt());
+			}
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	static void AllocationFinding(Findings& out, const Capture& capture) {
+		AllocAsk ask;
+		ask.m_GroupBy = DefaultAllocGroup(capture);
+		ask.m_Limit = 3;
+		Serialization::DomNode a = ParseJson(Allocations(capture, ask));
+		Serialization::DomNode groups = a.Member("groups");
+		if (a.Member("source").AsView() == "samples") {
+			Finding* finding = out.Add(2, Area::Memory, Core::String("Allocation samples: where the sampled bytes were allocated"), "profile_allocations");
+			for (int64 i = 0; i < groups.Count(); ++i) {
+				Core::StringBuilder line;
+				line.Append(groups.At(i).Member("label").AsView());
+				line.Append(": ");
+				line.Append(Percent(groups.At(i).Member("share").AsFloat()).View());
+				finding->m_Evidence.Push(line.ToString());
+			}
+			return;
+		}
+		const bool counted = a.Member("source").AsView() == "zones";
+		if ((!counted && a.Member("source").AsView() != "events") || a.Member("count").AsInt() == 0) return;
+		Serialization::DomNode frames = a.Member("frames");
+		const bool framed = frames.IsValid() && !frames.IsNull();
+		const double perFrame = framed ? frames.Member("meanCount").AsFloat() : 0.0;
+		const int64 bytesPerFrame = framed ? frames.Member("meanBytes").AsInt() : 0;
+		const double perSecond = a.Member("perSecond").AsFloat();
+		int32 rank;
+		if (framed && (perFrame >= c_AllocsPerFrameHigh || bytesPerFrame >= c_AllocBytesPerFrameHigh)) rank = 0;
+		else if (framed ? perFrame >= c_AllocsPerFrameMedium || bytesPerFrame >= c_AllocBytesPerFrameMedium : perSecond >= c_AllocsPerSecondMedium) rank = 1;
+		else return;
+		Core::StringBuilder title;
+		title.Append("Allocations every frame: ");
+		if (framed) {
+			title.Append(Decimal(perFrame).View());
+			title.Append(" a frame (");
+			title.Append(Bytes(bytesPerFrame).View());
+			title.Append(")");
+		}
+		else {
+			title.Append(Decimal(perSecond).View());
+			title.Append(" a second");
+		}
+		if (counted) title.Append(", garbage for the collector to find");
+		else {
+			title.Append(", ");
+			title.Append(Percent((double)a.Member("churn").AsInt() / (double)a.Member("count").AsInt()).View());
+			title.Append(" freed again right away (churn)");
+		}
+		Finding* finding = out.Add(rank, Area::Memory, title.ToString(), "profile_allocations");
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			if (g.Member("count").AsInt() == 0) continue;   // a zone in the counts only for the native memory it gave back
+			Core::StringBuilder line;
+			line.Append(g.Member("label").AsView());
+			line.Append(": ");
+			if (framed) {
+				line.Append(Decimal(g.Member("perFrame").AsFloat()).View());
+				line.Append(" a frame, ");
+			}
+			line.Append(Number(g.Member("count").AsInt()).View());
+			line.Append(" in all, mean size ");
+			line.Append(Bytes(g.Member("meanSize").AsInt()).View());
+			if (!g.Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(g.Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(g.Member("line").AsInt());
+			}
+			finding->m_Evidence.Push(line.ToString());
+		}
+		if (counted && a.Member("samples").AsInt() > 0) SampledFunctions(finding, capture);
+	}
+
+	static bool SeriesGrows(const Serialization::DomNode& s) {
+		const double start = s.Member("floorStart").AsFloat();
+		const double peak = s.Member("floorPeak").AsFloat();
+		const double growth = peak - start;
+		return s.Member("floorRises").AsInt() >= c_FloorRises && growth >= (double)c_LeastGrowthBytes && (peak >= start * c_FloorGrowth || growth >= (double)c_LargeGrowthBytes);
+	}
+
+	// The memory series that did not grow while another did: the growth is not in them. A collected heap's floor is
+	// what its collections left, so a small one beside a growing process means memory outside the collected objects.
+	static void FlatSeriesEvidence(Finding* finding, const Serialization::DomNode& series, const Serialization::DomNode& after) {
+		if (after.IsValid() && !after.IsNull() && after.Member("last").AsInt() - after.Member("first").AsInt() < c_LeastGrowthBytes) {
+			Core::StringBuilder line;
+			line.Append("the collected heap left after each collection stays small (");
+			line.Append(Bytes(after.Member("first").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Bytes(after.Member("last").AsInt()).View());
+			line.Append("): the growth is outside the collector's objects - containers' buffers or native memory");
+			finding->m_Evidence.Push(line.ToString());
+		}
+		for (int64 i = 0; i < series.Count(); ++i) {
+			Serialization::DomNode s = series.At(i);
+			if (SeriesGrows(s) || s.Member("floorPeak").AsFloat() - s.Member("floorStart").AsFloat() >= (double)c_LeastGrowthBytes) continue;
+			Core::StringBuilder line;
+			line.Append(s.Member("name").AsView());
+			line.Append(" stays flat (its floor ");
+			line.Append(Bytes((int64)s.Member("floorStart").AsFloat()).View());
+			line.Append(" -> ");
+			line.Append(Bytes((int64)s.Member("floorPeak").AsFloat()).View());
+			line.Append("): the growth is not there");
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	// The zones that took the most native memory (a collected program's containers' buffers), as evidence of growth.
+	static void NativeZoneEvidence(Finding* finding, const Capture& capture) {
+		AllocAsk ask;
+		ask.m_Source = AllocSource::Zones;
+		ask.m_GroupBy = AllocGroup::Zone;
+		ask.m_Limit = 200;
+		Serialization::DomNode a = ParseJson(Allocations(capture, ask));
+		if (a.Member("source").AsView() != "zones" || a.Member("inZoneNativeBytes").AsInt() == 0) return;
+		Core::Array<Serialization::DomNode> takers;
+		Serialization::DomNode groups = a.Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i)
+			if (groups.At(i).Member("nativeBytes").AsInt() > 0) takers.Push(groups.At(i));
+		takers.SortBy([](const Serialization::DomNode& x, const Serialization::DomNode& y) -> bool { return x.Member("nativeBytes").AsInt() > y.Member("nativeBytes").AsInt(); });
+		for (int64 i = 0; i < takers.Count() && i < (int64)c_NativeTakers; ++i) {
+			Serialization::DomNode g = takers[i];
+			Core::StringBuilder line;
+			line.Append(g.Member("label").AsView());
+			line.Append(" took ");
+			line.Append(Bytes(g.Member("nativeBytes").AsInt()).View());
+			line.Append(" of native memory (");
+			line.Append(Bytes(g.Member("nativeBytesPerFrame").AsInt()).View());
+			line.Append(" a frame");
+			if (g.Member("nativeFreed").AsInt() > 0) {
+				line.Append(", and gave back ");
+				line.Append(Bytes(g.Member("nativeFreed").AsInt()).View());
+			}
+			line.Append(")");
+			if (!g.Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(g.Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(g.Member("line").AsInt());
+			}
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	static bool HeapAfterGrows(const Serialization::DomNode& after) {
+		if (!after.IsValid() || after.IsNull() || after.Member("count").AsInt() < 4) return false;
+		const int64 steps = after.Member("count").AsInt() - 1;
+		return (double)after.Member("rises").AsInt() >= 0.75 * (double)steps && (double)after.Member("last").AsInt() >= (double)after.Member("first").AsInt() * c_HeapAfterGrowth;
+	}
+
+	static void LeakEvidence(Core::Array<Core::String>& lines, const Serialization::DomNode& groups) {
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			if (!g.Member("accumulating").AsBool() || g.Member("count").AsInt() < c_LeastLeaked) continue;
+			Core::StringBuilder line;
+			line.Append(g.Member("label").AsView());
+			line.Append(" holds ");
+			line.Append(Number(g.Member("count").AsInt()).View());
+			line.Append(" allocations (");
+			line.Append(Bytes(g.Member("bytes").AsInt()).View());
+			line.Append(") made all through the capture and never freed");
+			if (!g.Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(g.Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(g.Member("line").AsInt());
+			}
+			lines.Push(line.ToString());
+		}
+	}
+
+	// The types a collected heap's census says keep accumulating.
+	static void CensusEvidence(Core::Array<Core::String>& lines, const Capture& capture) {
+		Serialization::DomNode types = ParseJson(CensusTrend(capture, -1, -1, 10)).Member("types");
+		for (int64 i = 0; i < types.Count(); ++i) {
+			Serialization::DomNode t = types.At(i);
+			if (!t.Member("accumulating").AsBool()) continue;
+			Core::StringBuilder line;
+			line.Append(t.Member("name").AsView());
+			line.Append(": ");
+			line.Append(Number(t.Member("firstObjects").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Number(t.Member("lastObjects").AsInt()).View());
+			line.Append(" live objects (");
+			line.Append(Bytes(t.Member("firstBytes").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Bytes(t.Member("lastBytes").AsInt()).View());
+			line.Append(")");
+			if (t.Member("lastNativeBytes").AsInt() > 0) {
+				line.Append(" holding ");
+				line.Append(Bytes(t.Member("firstNativeBytes").AsInt()).View());
+				line.Append(" -> ");
+				line.Append(Bytes(t.Member("lastNativeBytes").AsInt()).View());
+				line.Append(" of native memory");
+			}
+			line.Append(", more after ");
+			line.AppendInt(t.Member("rises").AsInt());
+			line.Append(" of ");
+			line.AppendInt(t.Member("steps").AsInt());
+			line.Append(" collections");
+			lines.Push(line.ToString());
+		}
+	}
+
+	static void GrowthFinding(Findings& out, const Capture& capture, const Serialization::DomNode& trend) {
+		Serialization::DomNode leaks;
+		bool haveLeaks = false;
+		if (!capture.m_Allocations.IsEmpty()) {
+			LeakAsk ask;
+			ask.m_GroupBy = DefaultAllocGroup(capture);
+			ask.m_Limit = 5;
+			ask.m_BeforeTeardown = true;
+			leaks = ParseJson(Leaks(capture, ask)).Member("groups");
+			haveLeaks = true;
+		}
+		Finding* finding = nullptr;
+		Serialization::DomNode series = trend.Member("series");
+		for (int64 i = 0; i < series.Count(); ++i) {
+			Serialization::DomNode s = series.At(i);
+			if (!SeriesGrows(s)) continue;
+			Core::StringBuilder line;
+			line.Append(s.Member("kind").AsView() == "pool" ? "pool " : "");
+			line.Append(s.Member("name").AsView());
+			line.Append("'s floor rose from ");
+			line.Append(Bytes((int64)s.Member("floorStart").AsFloat()).View());
+			line.Append(" to ");
+			line.Append(Bytes((int64)s.Member("floorPeak").AsFloat()).View());
+			line.Append(" (in ");
+			line.AppendInt(s.Member("floorRises").AsInt());
+			line.Append(" of ");
+			line.AppendInt(s.Member("steps").AsInt() - 1);
+			line.Append(" steps), ");
+			const double seconds = (double)(s.Member("floorPeakNs").AsInt() - trend.Member("fromNs").AsInt()) / 1e9;
+			line.Append(Bytes(seconds > 0.0 ? (int64)((s.Member("floorPeak").AsFloat() - s.Member("floorStart").AsFloat()) / seconds) : 0).View());
+			line.Append(" a second");
+			if (!finding) finding = out.Add(0, Area::Memory, Core::String("Memory keeps growing"), "profile_memory, then profile_leaks");
+			finding->m_Evidence.Push(line.ToString());
+		}
+		Serialization::DomNode after = trend.Member("gc").Member("heapAfter");
+		if (finding) FlatSeriesEvidence(finding, series, after);
+		if (finding) NativeZoneEvidence(finding, capture);
+		if (HeapAfterGrows(after)) {
+			Core::StringBuilder line;
+			line.Append("the heap left after each collection grew from ");
+			line.Append(Bytes(after.Member("first").AsInt()).View());
+			line.Append(" to ");
+			line.Append(Bytes(after.Member("last").AsInt()).View());
+			if (!finding) finding = out.Add(0, Area::Memory, Core::String("Memory keeps growing"), "profile_memory, then profile_leaks");
+			finding->m_Evidence.Push(line.ToString());
+		}
+		const bool census = !haveLeaks && !capture.m_Censuses.IsEmpty();
+		Core::Array<Core::String> kept;
+		if (census) CensusEvidence(kept, capture);
+		else if (!haveLeaks) return;
+		else LeakEvidence(kept, leaks);
+		if (kept.IsEmpty()) return;
+		if (!finding) finding = out.Add(1, Area::Memory, Core::String(census ? "Live objects keep accumulating from one collection to the next" : "Allocations never freed keep accumulating"), "profile_leaks");
+		for (const Core::String& line : kept) finding->m_Evidence.Push(line);
+	}
+
+	static void CollectionFinding(Findings& out, const Serialization::DomNode& trend, int64 duration) {
+		Serialization::DomNode gc = trend.Member("gc");
+		const double share = duration > 0 ? (double)gc.Member("pauseNs").AsInt() / (double)duration : 0.0;
+		const int64 inSlow = gc.Member("inSlowFrames").AsInt();
+		if (share < c_GcPauseShare && inSlow < c_GcInSlowFrames) return;
+		Core::StringBuilder title;
+		title.Append("Collections paused the program ");
+		title.Append(Duration(gc.Member("pauseNs").AsInt()).View());
+		title.Append(" (");
+		title.Append(Percent(share).View());
+		title.Append(" of the capture) in ");
+		title.Append(Number(gc.Member("count").AsInt()).View());
+		title.Append(" collections; ");
+		title.Append(Number(inSlow).View());
+		title.Append(" fell in slow frames");
+		Finding* finding = out.Add(share >= c_GcPauseShare && inSlow >= c_GcInSlowFrames ? 0 : 1, Area::Memory, title.ToString(), "profile_memory and profile_allocations (less garbage, fewer collections)");
+		Serialization::DomNode longest = gc.Member("longest");
+		if (longest.Count() > 0) {
+			Core::StringBuilder line;
+			line.Append("the longest paused ");
+			line.Append(Duration(longest.At(0).Member("pauseNs").AsInt()).View());
+			line.Append(" at ");
+			line.Append(Instant(longest.At(0).Member("startNs").AsInt()).View());
+			finding->m_Evidence.Push(line.ToString());
+		}
+	}
+
+	static void InstrumentationFinding(Findings& out, const Serialization::DomNode& summary) {
+		const int64 dropped = summary.Member("eventsDropped").AsInt();
+		const int64 warnings = summary.Member("warningCount").AsInt();
+		if (dropped == 0 && warnings == 0) return;
+		Core::StringBuilder title;
+		title.Append("The recording is incomplete or unbalanced: ");
+		title.Append(Number(dropped).View());
+		title.Append(" events dropped by the client, ");
+		title.Append(Number(warnings).View());
+		title.Append(" warnings (numbers above may be off)");
+		Finding* finding = out.Add(dropped > 0 ? 1 : 2, Area::Instrumentation, title.ToString(), "profile_summary");
+		Serialization::DomNode list = summary.Member("warnings");
+		for (int64 i = 0; i < list.Count() && i < 3; ++i) finding->m_Evidence.Push(Core::String(list.At(i).AsView()));
+	}
+
+	// --- The answer ---------------------------------------------------------------------------------------------------
+
+	Core::String DiagnoseText(const Capture& capture, Core::StringView id, const Serialization::DomNode& args) {
+		Core::StringView focus = args.Member("focus").AsView();
+		Serialization::DomNode summary = ParseJson(Summary(capture));
+		const int64 duration = summary.Member("durationNs").AsInt();
+		Findings findings;
+		SlowFrameFinding(findings, capture);
+		Serialization::DomNode trend = ParseJson(MemoryTrend(capture, -1, -1, 10));
+		GrowthFinding(findings, capture, trend);
+		Serialization::DomNode threads = ParseJson(Threads(capture, -1, -1));
+		LockFindings(findings, capture, threads, duration);
+		AllocationFinding(findings, capture);
+		CollectionFinding(findings, trend, duration);
+		HotZoneFinding(findings, summary, threads);
+		SerializedFinding(findings, threads);
+		InstrumentationFinding(findings, summary);
+		findings.m_List.SortBy([](Finding* a, Finding* b) -> bool { return a->m_Rank != b->m_Rank ? a->m_Rank < b->m_Rank : a->m_Order < b->m_Order; });
+		Core::StringBuilder out;
+		out.Append("Capture ");
+		out.Append(id);
+		out.Append(" (");
+		out.Append(summary.Member("app").AsView());
+		out.Append("), ");
+		out.Append(Duration(duration).View());
+		Serialization::DomNode frames = summary.Member("frames");
+		if (frames.IsValid() && !frames.IsNull() && frames.Member("count").AsInt() > 0) {
+			out.Append(", ");
+			out.Append(Number(frames.Member("count").AsInt()).View());
+			out.Append(" frames (median ");
+			out.Append(Duration(frames.Member("medianNs").AsInt()).View());
+			out.Append(", p99 ");
+			out.Append(Duration(frames.Member("p99Ns").AsInt()).View());
+			out.Append(")");
+		}
+		out.Append(".\n");
+		const char*[3] ranks = { "high", "medium", "low" };
+		int64 shown = 0;
+		for (const Finding* finding : findings.m_List) {
+			if (!Shown(focus, finding->m_Area)) continue;
+			shown += 1;
+			out.AppendInt(shown);
+			out.Append(". [");
+			out.Append(ranks[finding->m_Rank]);
+			out.Append("] ");
+			out.Append(finding->m_Title.View());
+			out.Append(".\n");
+			for (const Core::String& line : finding->m_Evidence) {
+				out.Append("   - ");
+				out.Append(line.View());
+				out.AppendByte('\n');
+			}
+			out.Append("   Look closer: ");
+			out.Append(finding->m_Next.View());
+			out.AppendByte('\n');
+		}
+		if (shown == 0) out.Append("Nothing stands out: frames are steady, memory does not keep growing, no lock is contended and allocations are few. profile_top_zones by self shows where the time goes.\n");
+		return out.ToString();
+	}
+}

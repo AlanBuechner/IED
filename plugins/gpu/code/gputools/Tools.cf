@@ -1,0 +1,65 @@
+// The gpu_* AI tools (docs/13 T-GPU, the manifest's toolCalls): each forwards to the gpu.query binding the plugin
+// provides, which answers from the plugin's library and replay sessions; gpu_texture's answer carries a picture.
+include "ToolText.ch"
+include "api/Bindings.ch"
+include "api/Tools.ch"
+
+namespace GpuDebug
+{
+	const char* c_QueryBinding = "gpu.query";
+
+	void ProvideQuery(Debugger* debugger) {
+		debugger->m_Context->Provide(Core::StringView(c_QueryBinding), [debugger](const Serialization::DomNode& call) -> IED::Result {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(call.Member("wsId").AsView(), ws)) return IED::Refusal(Core::StringView("no such workspace"));
+			try {
+				ToolAnswer answer = AnswerTool(debugger, ws, call.Member("tool").AsView(), call.Member("args"));
+				IED::JsonWriter json;
+				json.BeginObject();
+				json.Field("text", answer.m_Text.View());
+				if (!answer.m_Image.IsEmpty()) json.Field("image", answer.m_Image.View());
+				json.EndObject();
+				return IED::Answer(json.View());
+			}
+			catch (IED::RpcError failed) {
+				return IED::Refusal(failed.m_Message.View());
+			}
+		});
+	}
+
+	static IED::ToolResult Through(const char* tool, const IED::ToolCall& call) {
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("wsId", call.m_Workspace.m_Id.View());
+		args.Field("tool", tool);
+		args.RawField("args", IED::NodeJson(call.m_Args).View());
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView(c_QueryBinding), args.View());
+		if (!answer.Ok()) return IED::ToolFailure(answer.m_Error.View());
+		Serialization::DomNode result = ParseAnswer(answer.m_Json.View());
+		IED::ToolResult tool = IED::ToolText(result.Member("text").AsView());
+		if (result.Member("image").IsValid()) {
+			IED::ToolImage image;
+			image.m_Mime = Core::String("image/png");
+			image.m_Path = Core::String(result.Member("image").AsView());
+			tool.m_Images.Push(image);
+		}
+		return tool;
+	}
+
+	IED::ToolResult CapturesTool(const IED::ToolCall& call) { return Through("captures", call); }
+	IED::ToolResult CaptureTool(const IED::ToolCall& call) { return Through("capture", call); }
+	IED::ToolResult EventsTool(const IED::ToolCall& call) { return Through("events", call); }
+	IED::ToolResult ResourcesTool(const IED::ToolCall& call) { return Through("resources", call); }
+	IED::ToolResult StateTool(const IED::ToolCall& call) { return Through("state", call); }
+	IED::ToolResult ShaderTool(const IED::ToolCall& call) { return Through("shader", call); }
+	IED::ToolResult PixelTool(const IED::ToolCall& call) { return Through("pixel", call); }
+	IED::ToolResult BufferTool(const IED::ToolCall& call) { return Through("buffer", call); }
+	IED::ToolResult TextureTool(const IED::ToolCall& call) { return Through("texture", call); }
+	IED::ToolResult ScanTool(const IED::ToolCall& call) { return Through("scan", call); }
+	IED::ToolResult DebugShaderTool(const IED::ToolCall& call) { return Through("debug", call); }
+	IED::ToolResult CompareTool(const IED::ToolCall& call) { return Through("compare", call); }
+	IED::ToolResult ReplayWithShaderTool(const IED::ToolCall& call) { return Through("edit", call); }
+	IED::ToolResult LimiterTool(const IED::ToolCall& call) { return Through("limiter", call); }
+	IED::ToolResult TimingTool(const IED::ToolCall& call) { return Through("timing", call); }
+}

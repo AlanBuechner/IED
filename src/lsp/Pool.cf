@@ -1,0 +1,1078 @@
+include "Pool.ch"
+include "Uris.ch"
+include "host/Server.ch"
+include "plugins/Context.ch"
+include "settings/Merge.ch"
+include "plugins/Code.ch"
+include "fs/Glob.ch"
+
+namespace Ied
+{
+	Core::String LspTopic(const Workspace* ws) { return Core::String("lsp:") + ws->m_WsId.View(); }
+
+	// An external document's path is already its file: URI (docs/10 "Files outside the workspace").
+	static Core::String DocumentFileUri(const Document* doc) { return doc->m_External ? doc->m_Path : FileUriOf(doc->m_Ws->At(doc->m_Path.View()).View()); }
+
+	static Core::String DocumentIedUri(const Document* doc) { return doc->m_External ? doc->m_Path : IedUriOf(doc->m_Ws->m_WsId.View(), doc->m_Path.View()); }
+
+	static Core::String NamedKey(const Workspace* ws, Core::StringView uri) { return (ws->m_WsId + "|") + uri; }
+
+	// The project whose server serves `path` under `profile`: the owning project, for a project-scoped profile in a
+	// solution; else none (the workspace-wide server).
+	static ProjectModel* ProjectFor(const Workspace* ws, const LspProfile* profile, Core::StringView path) {
+		if (!profile->m_PerProject || !ws->m_Solution) return nullptr;
+		return ws->m_Solution->Owning(ws->At(path));
+	}
+
+	static Core::String NameOf(const ProjectModel* project) { return project ? project->m_Name : Core::String(); }
+
+	void LspPool::Init(Server* server) {
+		this.m_Server = server;
+		this.m_Sweeping = false;
+		LspPool* self = this;
+		server->m_Rpc.Register("lsp.request", [self](Call& call, const Params& params) -> Core::String { return self->RequestMethod(call, params); });
+		server->m_Rpc.Register("lsp.capabilities", [self](Call& call, const Params& params) -> Core::String { return self->CapabilitiesMethod(call, params); });
+		server->m_Rpc.Register("lsp.status", [self](Call& call, const Params& params) -> Core::String { return self->StatusMethod(call, params); });
+		server->m_Rpc.Register("lsp.restart", [self](Call& call, const Params& params) -> Core::String { return self->RestartMethod(call, params); });
+		server->m_Rpc.Register("lsp.workspaceSymbols", [self](Call& call, const Params& params) -> Core::String { return self->WorkspaceSymbolsMethod(call, params); });
+	}
+
+	void LspPool::WorkspaceOpened(Workspace* ws) {
+		LspPool* self = this;
+		m_Server->m_Hub.Add(LspTopic(ws).View(), [self, ws]() -> Core::String { return self->StatusSnapshot(ws); });
+	}
+
+	void LspPool::StopAll() {
+		for (LanguageServer* language : m_Languages) language->Stop();
+		m_Languages.Clear();
+	}
+
+	// --- Which server serves a document ------------------------------------------------------------------------------
+
+	Core::Array<LspProfile*> LspPool::ProfilesFor(Workspace* ws) {
+		Core::Array<LspProfile*> profiles;
+		for (const Contribution& given : m_Server->m_Plugins->Entries(ws, Core::StringView("lspProfiles")))
+			profiles.Push(ReadLspProfile(given.m_Entry, given.m_Plugin->m_Manifest->m_Id.View(), given.m_Plugin->m_Manifest->m_Folder));
+		Core::Array<LspProfile*> allowed;
+		for (LspProfile* profile : profiles)
+			if (Allowed(ws, profile)) allowed.Push(profile);
+		return allowed;
+	}
+
+	bool LspPool::Allowed(Workspace* ws, const LspProfile* profile) {
+		Core::String error;
+		const bool holds = WhenHolds(profile->m_When.View(), WorkspaceWhen(m_Server, ws), error);
+		if (!error.IsEmpty()) m_Server->Log((((Core::String("the when of language server profile ") + profile->m_Id.View()) + " does not parse: ") + error.View()).View());
+		return holds;
+	}
+
+	LanguageServer* LspPool::Find(Workspace* ws, Core::StringView profileId, Core::StringView project) const {
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws && language->m_Profile->m_Id.View() == profileId && language->m_Project.View() == project) return language;
+		return nullptr;
+	}
+
+	LanguageServer* LspPool::Create(Workspace* ws, LspProfile* profile, const ProjectModel* project) {
+		LanguageServer* language = new LanguageServer(m_Server, ws, profile, NameOf(project).View(), project ? project->m_Root : FS::Path());
+		m_Languages.Push(language);
+		if (!m_Sweeping) {
+			m_Sweeping = true;
+			LspPool* self = this;
+			Threading::Thread::Run([self]() { self->SweepLoop(); }).Detach();
+		}
+		return language;
+	}
+
+	LanguageServer* LspPool::NamerOf(Workspace* ws, Core::StringView uri) const {
+		NamedFile* file = nullptr;
+		if (!m_Named.TryGet(NamedKey(ws, uri), file)) return nullptr;
+		return Find(ws, file->m_Profile.View(), file->m_Project.View());
+	}
+
+	bool LspPool::WasNamed(Workspace* ws, Core::StringView uri) const { return m_Named.Contains(NamedKey(ws, uri)); }
+
+	LanguageServer* LspPool::NamerServing(Workspace* ws, Core::StringView uri, bool start) {
+		LanguageServer* language = NamerOf(ws, uri);
+		NamedFile* file = nullptr;
+		if (language || !start || !m_Named.TryGet(NamedKey(ws, uri), file)) return language;
+		// Its server stopped since (idle, lsp.idleStopMinutes): the file is still its to serve.
+		for (LspProfile* profile : ProfilesFor(ws)) {
+			if (profile->m_Id.View() != file->m_Profile.View()) continue;
+			ProjectModel* project = file->m_Project.IsEmpty() || !ws->m_Solution ? nullptr : ws->m_Solution->Project(file->m_Project.View());
+			if (!file->m_Project.IsEmpty() && !project) return nullptr;
+			language = Create(ws, profile, project);
+			language->Start();
+			return language;
+		}
+		return nullptr;
+	}
+
+	LanguageServer* LspPool::Serving(Document* doc, bool start) {
+		if (doc->m_External) return NamerServing(doc->m_Ws, doc->m_Path.View(), start);
+		return ServingPath(doc->m_Ws, doc->m_Path.View(), start);
+	}
+
+	LanguageServer* LspPool::ServingPath(Workspace* ws, Core::StringView path, bool start) {
+		Core::String languageId = m_Server->m_Plugins->LanguageOf(ws, path);
+		LspProfile* profile = ProfileServing(ProfilesFor(ws), languageId.View(), path);
+		if (!profile) return nullptr;
+		ProjectModel* project = ProjectFor(ws, profile, path);
+		LanguageServer* language = Find(ws, profile->m_Id.View(), NameOf(project).View());
+		if (language || !start) return language;
+		language = Create(ws, profile, project);
+		language->Start();
+		return language;
+	}
+
+	void LspPool::AwaitServer(Call& call, LanguageServer* language) {
+		if (language->AwaitRunning(call, c_LspStartTimeoutMs)) return;
+		Core::String why = (Core::String("the language server ") + language->m_Profile->m_Id.View()) + " is " + LspStateName(language->m_State);
+		if (!language->m_Problem.IsEmpty()) why = (why + ": ") + language->m_Problem.View();
+		throw RpcError(ErrorCode::Unavailable, why.View());
+	}
+
+	// The server serving `doc`, running and with the document open; throws not_found or unavailable.
+	LanguageServer* LspPool::Ready(Call& call, Document* doc) {
+		LanguageServer* language = Serving(doc, true);
+		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + doc->m_Path.View()).View());
+		AwaitServer(call, language);
+		OpenOn(language, doc);
+		return language;
+	}
+
+	static bool IsFileUri(Core::StringView path) { return path.StartsWith(Core::StringView("file:")); }
+
+	LanguageServer* LspPool::ReadyFor(Call& call, Workspace* ws, Core::StringView path) {
+		LanguageServer* language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
+		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + path).View());
+		AwaitServer(call, language);
+		Document* doc = m_Server->m_Documents->Find(ws, path);
+		if (doc) OpenOn(language, doc);
+		else OpenTransient(language, ws, path);
+		return language;
+	}
+
+	// --- Documents ---------------------------------------------------------------------------------------------------
+
+	void LspPool::DocumentOpened(Document* doc) {
+		LanguageServer* language = Serving(doc, true);
+		if (language && language->m_State == LspState::Running) OpenOn(language, doc);
+	}
+
+	static Core::String TextDocumentJson(Core::StringView uri) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", uri);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void SendOpen(LanguageServer* language, Core::StringView uri, Core::StringView languageId, int64 version, Core::StringView text) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", uri);
+		json.Field("languageId", languageId);
+		json.IntField("version", version);
+		json.Field("text", text);
+		json.EndObject();
+		json.EndObject();
+		language->Notify(Core::StringView("textDocument/didOpen"), json.View());
+	}
+
+	static void SendText(LanguageServer* language, Core::StringView uri, int64 version, Core::StringView text) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", uri);
+		json.IntField("version", version);
+		json.EndObject();
+		json.Key(Core::StringView("contentChanges"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("text", text);
+		json.EndObject();
+		json.EndArray();
+		json.EndObject();
+		language->Notify(Core::StringView("textDocument/didChange"), json.View());
+	}
+
+	// The file: URI a server knows plugin code's `path` by.
+	static Core::String ServerUriOf(Workspace* ws, Core::StringView path) { return IsFileUri(path) ? Core::String(path) : FileUriOf(ws->At(path).View()); }
+
+	// The transient open of `path` on `language`, at its index; -1 when it is not one.
+	static int64 TransientIndex(const LanguageServer* language, Core::StringView path) {
+		for (int64 i = 0; i < language->m_Transient.Count(); ++i)
+			if (language->m_Transient[i]->m_Path.View() == path) return i;
+		return -1;
+	}
+
+	static void CloseTransient(LanguageServer* language, Workspace* ws, int64 index) {
+		TransientFile* file = language->m_Transient[index];
+		language->m_Transient.RemoveAt(index);
+		language->m_Documents.Remove(file->m_Path);
+		if (language->m_State == LspState::Running) language->Notify(Core::StringView("textDocument/didClose"), TextDocumentJson(ServerUriOf(ws, file->m_Path.View()).View()).View());
+	}
+
+	void LspPool::OpenOn(LanguageServer* language, Document* doc) {
+		const int64 transient = TransientIndex(language, doc->m_Path.View());
+		if (transient >= 0) CloseTransient(language, doc->m_Ws, transient);
+		if (language->m_Documents.Contains(doc->m_Path)) return;
+		language->m_Documents.Insert(doc->m_Path, true);
+		SendOpen(language, DocumentFileUri(doc).View(), m_Server->m_Plugins->LanguageOf(doc->m_Ws, doc->m_Path.View()).View(), doc->m_Version, doc->m_Text.View());
+	}
+
+	void LspPool::OpenTransient(LanguageServer* language, Workspace* ws, Core::StringView path) {
+		const int64 revision = IsFileUri(path) ? 0 : m_Server->m_Workspaces->Revision(ws, path);
+		const int64 at = TransientIndex(language, path);
+		TransientFile* file = at >= 0 ? language->m_Transient[at] : nullptr;
+		if (file) language->m_Transient.RemoveAt(at);
+		else if (language->m_Documents.Contains(Core::String(path))) return;
+		if (file && file->m_Revision == revision) {
+			language->m_Transient.Push(file);
+			return;
+		}
+		Core::String clientUri = IsFileUri(path) ? Core::String(path) : IedUriOf(ws->m_WsId.View(), path);
+		Core::String text;
+		if (!TextOf(ws, clientUri.View(), text)) throw RpcError(ErrorCode::NotFound, (Core::String("no file ") + path).View());
+		if (file) {
+			file->m_Revision = revision;
+			file->m_Version += 1;
+			language->m_Transient.Push(file);
+			SendText(language, ServerUriOf(ws, path).View(), file->m_Version, text.View());
+			return;
+		}
+		file = new TransientFile();
+		file->m_Path = Core::String(path);
+		file->m_Revision = revision;
+		file->m_Version = 1;
+		language->m_Transient.Push(file);
+		language->m_Documents.Insert(file->m_Path, true);
+		SendOpen(language, ServerUriOf(ws, path).View(), m_Server->m_Plugins->LanguageOf(ws, path).View(), file->m_Version, text.View());
+		while (language->m_Transient.Count() > c_LspTransientMost) CloseTransient(language, ws, 0);
+	}
+
+	// The servers that have `doc` open.
+	static Core::Array<LanguageServer*> Holding(const Core::Array<LanguageServer*>& languages, const Document* doc) {
+		Core::Array<LanguageServer*> holding;
+		for (LanguageServer* language : languages)
+			if (language->m_Ws == doc->m_Ws && language->m_State == LspState::Running && language->m_Documents.Contains(doc->m_Path)) holding.Push(language);
+		return holding;
+	}
+
+	void LspPool::DocumentChanged(Document* doc) {
+		for (LanguageServer* language : Holding(m_Languages, doc)) SendText(language, DocumentFileUri(doc).View(), doc->m_Version, doc->m_Text.View());
+	}
+
+	void LspPool::DocumentSaved(Document* doc) {
+		for (LanguageServer* language : Holding(m_Languages, doc)) {
+			JsonWriter json;
+			json.BeginObject();
+			json.Key(Core::StringView("textDocument"));
+			json.BeginObject();
+			json.Field("uri", DocumentFileUri(doc).View());
+			json.EndObject();
+			json.EndObject();
+			language->Notify(Core::StringView("textDocument/didSave"), json.View());
+		}
+	}
+
+	void LspPool::DocumentRenamed(Document* doc, Core::StringView oldPath) {
+		Core::String old = Core::String(oldPath);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", FileUriOf(doc->m_Ws->At(oldPath).View()).View());
+		json.EndObject();
+		json.EndObject();
+		for (LanguageServer* language : m_Languages) {
+			if (language->m_Ws != doc->m_Ws || !language->m_Documents.Contains(old)) continue;
+			language->m_Documents.Remove(old);
+			if (language->m_State == LspState::Running) language->Notify(Core::StringView("textDocument/didClose"), json.View());
+		}
+		ForgetDiagnostics(doc->m_Ws, oldPath);
+		DocumentOpened(doc);
+	}
+
+	void LspPool::TrustChanged(Workspace* ws) {
+		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
+		for (int64 i = m_Languages.Count() - 1; i >= 0; --i) {
+			LanguageServer* language = m_Languages[i];
+			if (language->m_Ws != ws) continue;
+			bool allowed = false;
+			for (LspProfile* profile : profiles)
+				if (profile->m_Id.View() == language->m_Profile->m_Id.View()) allowed = true;
+			if (allowed) continue;
+			language->Stop();
+			m_Languages.RemoveAt(i);
+		}
+		for (const Core::String& path : m_Server->m_Documents->OpenPaths(ws)) DocumentOpened(m_Server->m_Documents->Find(ws, path.View()));
+	}
+
+	void LspPool::ToolsChanged(Workspace* ws) {
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws && language->m_State == LspState::Failed) language->Relaunch();
+	}
+
+	// Whether `language` still serves what it did: its project, where it was; or, serving no project, only files that
+	// no project holds.
+	static bool StillServes(const LanguageServer* language) {
+		const Workspace* ws = language->m_Ws;
+		if (!language->m_Profile->m_PerProject || !ws->m_Solution) return true;
+		if (language->m_Project.IsEmpty()) {
+			for (const Core::KeyValue<Core::String, bool>& open : language->m_Documents)
+				if (ws->m_Solution->Owning(ws->At(open.key.View()))) return false;
+			return true;
+		}
+		ProjectModel* project = ws->m_Solution->Project(language->m_Project.View());
+		return project && project->m_Root == language->m_ProjectDir;
+	}
+
+	void LspPool::ProjectsChanged(Workspace* ws) {
+		bool stopped = false;
+		for (int64 i = m_Languages.Count() - 1; i >= 0; --i) {
+			LanguageServer* language = m_Languages[i];
+			if (language->m_Ws != ws || StillServes(language)) continue;
+			language->Stop();
+			m_Languages.RemoveAt(i);
+			stopped = true;
+		}
+		if (!stopped) return;
+		for (const Core::String& path : m_Server->m_Documents->OpenPaths(ws)) DocumentOpened(m_Server->m_Documents->Find(ws, path.View()));
+	}
+
+	// --- What a LanguageServer hands over -----------------------------------------------------------------------------
+
+	void LspPool::Running(LanguageServer* language) {
+		SendOptionsFilesIfChanged(language);   // one changed while it started: FilesChanged passes over a starting server
+		Workspace* ws = language->m_Ws;
+		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
+		for (const Core::String& path : m_Server->m_Documents->OpenPaths(ws)) {
+			LspProfile* profile = ProfileServing(profiles, m_Server->m_Plugins->LanguageOf(ws, path.View()).View(), path.View());
+			if (!profile || profile->m_Id.View() != language->m_Profile->m_Id.View()) continue;
+			if (NameOf(ProjectFor(ws, profile, path.View())).View() == language->m_Project.View()) OpenOn(language, m_Server->m_Documents->Find(ws, path.View()));
+		}
+	}
+
+	void LspPool::StateChanged(LanguageServer* language) {
+		if (language->m_State == LspState::Failed || language->m_State == LspState::Stopped) ClearDiagnostics(language);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("profile", language->m_Profile->m_Id.View());
+		data.Field("project", language->m_Project.View());
+		data.Field("state", LspStateName(language->m_State));
+		data.Field("problem", language->m_Problem.View());
+		data.EndObject();
+		m_Server->m_Hub.Publish(LspTopic(language->m_Ws).View(), "lsp.state", data.View());
+	}
+
+	void LspPool::Log(LanguageServer* language, Core::StringView text) {
+		Core::StringBuilder lines;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			if (end < 0) end = text.ByteLength();
+			Core::StringView line = text.Substring(at, end - at);
+			if (!line.Trimmed().IsEmpty()) {
+				lines.Append(LogStamp(Platform::UnixTimeNs()).View());
+				lines.Append("[");
+				lines.Append(language->Source().View());
+				lines.Append("] ");
+				lines.Append(line.Trimmed());
+				lines.Append("\n");
+			}
+			at = end + 1;
+		}
+		m_Server->m_Outputs->Append(language->m_Ws, Core::StringView(c_ServerLogSource), lines.View());
+	}
+
+	// A line for the output from a `$/progress` value: its title as it begins, its message as it ends.
+	static Core::String ProgressLine(const Serialization::DomNode& value) {
+		Core::StringView kind = value.Member("kind").AsView();
+		Core::StringView message = value.Member("message").AsView();
+		if (kind == "begin") return message.IsEmpty() ? Core::String(value.Member("title").AsView()) : (Core::String(value.Member("title").AsView()) + ": ") + message;
+		if (kind == "end") return Core::String(message);
+		return Core::String();
+	}
+
+	// The work a server reports begun and ended, so plugin code can wait for an index (AwaitIndexes).
+	static void Progressed(LanguageServer* language, const Serialization::DomNode& params) {
+		Core::String token = NodeJson(params.Member("token"));
+		Core::StringView kind = params.Member("value").Member("kind").AsView();
+		if (kind == "begin") {
+			language->m_Progress.At(token) = true;
+			language->m_Progressed = true;
+		}
+		else if (kind == "end") language->m_Progress.Remove(token);
+	}
+
+	void LspPool::Notification(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params) {
+		if (method == "textDocument/publishDiagnostics") Diagnostics(language, params);
+		else if (method == "window/logMessage" || method == "window/showMessage") Log(language, params.Member("message").AsView());
+		else if (method == "$/progress") {
+			Progressed(language, params);
+			Log(language, ProgressLine(params.Member("value")).View());
+		}
+	}
+
+	Core::String LspPool::ServerRequest(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params) {
+		if (method == "workspace/configuration") {
+			JsonWriter json;
+			json.BeginArray();
+			for (int64 i = 0; i < params.Member("items").Count(); ++i) json.Null();
+			json.EndArray();
+			return json.ToString();
+		}
+		if (method == "workspace/workspaceFolders") {
+			JsonWriter json;
+			json.BeginArray();
+			json.BeginObject();
+			json.Field("uri", FileUriOf(language->m_Ws->m_Root.View()).View());
+			json.Field("name", language->m_Ws->m_Name.View());
+			json.EndObject();
+			json.EndArray();
+			return json.ToString();
+		}
+		if (method == "workspace/applyEdit") return Core::String("{\"applied\":false,\"failureReason\":\"IED does not apply a language server's edits yet\"}");
+		if (method == "window/showMessageRequest") Log(language, params.Member("message").AsView());
+		const Core::StringView prefix = Core::StringView("workspace/");
+		const Core::StringView suffix = Core::StringView("/refresh");
+		if (method.StartsWith(prefix) && method.EndsWith(suffix) && method.ByteLength() > prefix.ByteLength() + suffix.ByteLength()) {
+			Core::Array<Core::String> kinds;
+			kinds.Push(Core::String(method.Substring(prefix.ByteLength(), method.ByteLength() - prefix.ByteLength() - suffix.ByteLength())));
+			Refresh(language->m_Ws, Core::StringView(""), kinds);
+		}
+		return Core::String("null");
+	}
+
+	Core::String LspPool::InitializationOptions(LanguageServer* language) {
+		Core::String options = ProfileOptions(language);
+		const LspProfile* profile = language->m_Profile;
+		if (!profile->m_OptionsFilesKey.IsEmpty()) {
+			language->m_OptionsFilesSent = OptionsFilesJson(language);
+			JsonWriter files;
+			files.BeginObject();
+			files.RawField(profile->m_OptionsFilesKey.CStr(), language->m_OptionsFilesSent.View());
+			files.EndObject();
+			options = MergeJson(options.View(), files.View(), MergeKind::Merge);
+		}
+		if (profile->m_PluginCodeOption.IsEmpty()) return options;
+		JsonWriter scopes;
+		scopes.BeginObject();
+		scopes.Key(profile->m_PluginCodeOption.View());
+		scopes.Raw(m_Server->m_Code->ScopesJson(language->m_Ws).View());
+		scopes.EndObject();
+		return MergeJson(options.View(), scopes.View(), MergeKind::Merge);
+	}
+
+	Core::String LspPool::ProfileOptions(const LanguageServer* language) {
+		const LspProfile* profile = language->m_Profile;
+		if (profile->m_InitializationOptionsFile.IsEmpty()) return profile->m_InitializationOptions;
+		FS::Path file = FS::Path(ExpandProfileVariables(profile->m_InitializationOptionsFile.View(), language->Variables()).View());
+		if (!file.IsAbsolute()) file = language->m_Ws->m_Root / file.View();
+		if (!FS::FileExists(file.CStr())) return profile->m_InitializationOptions;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			m_Server->Log((((Core::String("the initializationOptionsFile of ") + profile->m_Id.View()) + " is not a JSON object: ") + file.View()).View());
+			return profile->m_InitializationOptions;
+		}
+		return MergeJson(profile->m_InitializationOptions.View(), text.View(), MergeKind::Merge);
+	}
+
+	// --- Options files -----------------------------------------------------------------------------------------------
+
+	// The folder and the file name pattern a profile's initializationOptionsFiles names, its variables expanded.
+	static FS::Path OptionsFilesFolder(const LanguageServer* language, Core::String& pattern) {
+		FS::Path files = FS::Path(ExpandProfileVariables(language->m_Profile->m_OptionsFiles.View(), language->Variables()).View());
+		if (!files.IsAbsolute()) files = language->m_Ws->m_Root / files.View();
+		pattern = Core::String(files.FileName());
+		return files.Parent();
+	}
+
+	// A file name without its last extension: "Game.json" is "Game".
+	static Core::String Stem(Core::StringView name) {
+		int64 dot = -1;
+		for (int64 i = 0; i < name.ByteLength(); ++i)
+			if (name.ByteAt(i) == '.') dot = i;
+		return Core::String(dot > 0 ? name.Substring(0, dot) : name);
+	}
+
+	Core::String LspPool::OptionsFilesJson(LanguageServer* language) {
+		Core::String pattern;
+		FS::Path folder = OptionsFilesFolder(language, pattern);
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& name : ExpandGlob(folder, pattern.View())) {
+			if (name.View().IndexOf('/', 0) >= 0) continue;   // a file of a folder below
+			FS::Path file = folder / name.View();
+			FS::File opened = FS::File(file.CStr(), "rb");
+			Core::String text = opened.IsOpen() ? opened.ReadText() : Core::String();
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+			if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+				Log(language, (Core::String("left out of its initializationOptionsFiles, not a JSON object: ") + file.View()).View());
+				continue;
+			}
+			json.RawField(Stem(name.View()).CStr(), NodeJson(read.root).View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Whether the file the watcher saw change at `path` (relative to the workspace folder, where a build writes it - not
+	// Workspace::At, which takes .ied/local to a folder workspace's state elsewhere) is one `language`'s
+	// initializationOptionsFiles names.
+	static bool NamesOptionsFile(const LanguageServer* language, Core::StringView path) {
+		Core::String pattern;
+		FS::Path folder = OptionsFilesFolder(language, pattern);
+		Core::String relative;
+		if (!RelativeTo(folder.View(), (language->m_Ws->m_Root / path).View(), relative) || relative.View().IndexOf('/', 0) >= 0) return false;
+		return GlobMatch(pattern.View(), relative.View());
+	}
+
+	void LspPool::FilesChanged(Workspace* ws, const ChangeBatch& batch) {
+		for (LanguageServer* language : m_Languages) {
+			if (language->m_Ws != ws || language->m_State != LspState::Running || language->m_Profile->m_OptionsFilesKey.IsEmpty()) continue;
+			bool named = batch.Overflowed();
+			for (const TreeChange& change : batch.Changes()) named = named || NamesOptionsFile(language, change.m_Path.View());
+			if (named) SendOptionsFilesIfChanged(language);
+		}
+	}
+
+	void LspPool::SendOptionsFilesIfChanged(LanguageServer* language) {
+		if (language->m_Profile->m_OptionsFilesKey.IsEmpty()) return;
+		Core::String files = OptionsFilesJson(language);
+		if (files.View() == language->m_OptionsFilesSent.View()) return;
+		language->m_OptionsFilesSent = files;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("settings"));
+		json.BeginObject();
+		json.RawField(language->m_Profile->m_OptionsFilesKey.CStr(), files.View());
+		json.EndObject();
+		json.EndObject();
+		language->Notify(Core::StringView("workspace/didChangeConfiguration"), json.View());
+	}
+
+	// --- Idle servers ------------------------------------------------------------------------------------------------
+
+	void LspPool::SweepLoop() {
+		for (;;) {
+			Threading::Thread::Sleep(c_LspSweepNs);
+			Threading::LockGuard guard(m_Server->m_Lock);
+			StopIdle(clock_now_ns());
+		}
+	}
+
+	int64 LspPool::IdleLimitNs(Workspace* ws) {
+		Core::String json = m_Server->m_Settings->Effective(ws, Core::StringView(""), Core::StringView(c_LspIdleSetting));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		const bool number = value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float;
+		const double minutes = number ? value.AsFloat() : 0.0;
+		return minutes > 0.0 ? (int64)(minutes * 60000000000.0) : 0;
+	}
+
+	bool LspPool::Shown(const LanguageServer* language) const {
+		for (const Core::KeyValue<Core::String, bool>& open : language->m_Documents) {
+			Document* doc = m_Server->m_Documents->Find(language->m_Ws, open.key.View());
+			Topic* topic = doc ? m_Server->m_Hub.Find(doc->Topic().View()) : nullptr;
+			if (topic && topic->m_Subscribers.Count() > 0) return true;
+		}
+		return false;
+	}
+
+	// "10 minutes", "1 minute", "3 seconds".
+	static Core::String DurationText(int64 ns) {
+		Core::StringBuilder text;
+		const int64 seconds = ns / 1000000000;
+		if (seconds >= 60 && seconds % 60 == 0) {
+			text.AppendInt(seconds / 60);
+			text.Append(seconds == 60 ? " minute" : " minutes");
+		}
+		else {
+			text.AppendInt(seconds);
+			text.Append(seconds == 1 ? " second" : " seconds");
+		}
+		return text.ToString();
+	}
+
+	void LspPool::StopIdle(int64 nowNs) {
+		for (int64 i = m_Languages.Count() - 1; i >= 0; --i) {
+			LanguageServer* language = m_Languages[i];
+			// One starting (also again, after it exited) has no documents yet and is about to be needed; one answering is.
+			if (language->m_State != LspState::Running || language->Answering()) continue;
+			if (Shown(language)) {
+				language->m_UsedNs = nowNs;
+				continue;
+			}
+			const int64 limitNs = IdleLimitNs(language->m_Ws);
+			if (limitNs <= 0 || nowNs - language->m_UsedNs < limitNs) continue;
+			Log(language, (Core::String("stopped: no window showed one of its documents for ") + DurationText(limitNs).View() + " (" + c_LspIdleSetting + "); it starts again when one is shown").View());
+			language->Stop();
+			m_Languages.RemoveAt(i);
+		}
+	}
+
+	// --- Diagnostics -------------------------------------------------------------------------------------------------
+
+	// The version of `path` last sent to `language`; -1 when it has the file open in no way IED knows. A publication of
+	// an older one is not what an AI write waits for (PublishMark).
+	static int64 SentVersion(Server* server, LanguageServer* language, Core::StringView path) {
+		Document* doc = server->m_Documents->Find(language->m_Ws, path);
+		if (doc && language->m_Documents.Contains(Core::String(path))) return doc->m_Version;
+		const int64 at = TransientIndex(language, path);
+		return at >= 0 ? language->m_Transient[at]->m_Version : -1;
+	}
+
+	void LspPool::Diagnostics(LanguageServer* language, const Serialization::DomNode& params) {
+		Workspace* ws = language->m_Ws;
+		Core::String absolute;
+		Core::String path;
+		if (!PathOfFileUri(params.Member("uri").AsView(), absolute) || !RelativeTo(ws->m_Root.View(), absolute.View(), path)) return;
+		Serialization::DomNode list = params.Member("diagnostics");
+		m_LineCache.Clear();
+		Core::String items = list.Kind() == Serialization::DomKind::Array ? RewriteJson(list, RewriteFor(language, params.Member("uri").AsView(), false)) : Core::String("[]");
+		m_Server->m_Diagnostics->Set(ws, path.View(), language->Source().View(), items.View());
+		Serialization::DomNode version = params.Member("version");
+		if (version.Kind() != Serialization::DomKind::Int || version.AsInt() >= SentVersion(m_Server, language, path.View())) {
+			Core::String key = NamedKey(ws, path.View());
+			int64 seen = 0;
+			m_Publishes.TryGet(key, seen);
+			m_Publishes.Insert(key, seen + 1);
+		}
+		if (items.View() == "[]") language->m_Published.Remove(path);
+		else language->m_Published.Insert(path, true);
+		if (!language->m_Profile->m_Refetch.IsEmpty()) Refresh(ws, path.View(), language->m_Profile->m_Refetch);
+	}
+
+	// A server that failed or stopped no longer vouches for what it published.
+	void LspPool::ClearDiagnostics(LanguageServer* language) {
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, bool>& entry : language->m_Published) paths.Push(entry.key);
+		language->m_Published.Clear();
+		for (const Core::String& path : paths) m_Server->m_Diagnostics->Set(language->m_Ws, path.View(), language->Source().View(), Core::StringView("[]"));
+	}
+
+	void LspPool::ForgetDiagnostics(Workspace* ws, Core::StringView path) {
+		m_Server->m_Diagnostics->Forget(ws, path);
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws) language->m_Published.Remove(Core::String(path));
+	}
+
+	void LspPool::Refresh(Workspace* ws, Core::StringView path, const Core::Array<Core::String>& kinds) {
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("path"));
+		if (path.IsEmpty()) data.Null();
+		else data.String(path);
+		data.Key(Core::StringView("kinds"));
+		data.BeginArray();
+		for (const Core::String& kind : kinds) data.String(kind.View());
+		data.EndArray();
+		data.EndObject();
+		m_Server->m_Hub.Publish(LspTopic(ws).View(), "lsp.refresh", data.View());
+	}
+
+	Core::String LspPool::StatusSnapshot(Workspace* ws) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("servers"));
+		json.BeginArray();
+		for (LanguageServer* language : m_Languages) {
+			if (language->m_Ws != ws) continue;
+			json.BeginObject();
+			json.Field("profile", language->m_Profile->m_Id.View());
+			json.Field("label", language->m_Profile->m_Label.View());
+			json.Field("plugin", language->m_Profile->m_PluginId.View());
+			json.Field("project", language->m_Project.View());
+			json.Field("state", LspStateName(language->m_State));
+			json.IntField("pid", (int64)language->m_Pid);
+			json.IntField("restarts", (int64)language->m_Restarts);
+			json.Field("problem", language->m_Problem.View());
+			json.Key(Core::StringView("memory"));
+			Process::Usage usage;   // only a running server's process is surely its own (a pid of one that exited may be another's)
+			if (language->m_State == LspState::Running && language->m_Pid != 0 && Process::GetUsage(language->m_Pid, usage)) {
+				json.BeginObject();
+				json.IntField("privateBytes", usage.privateBytes);
+				json.IntField("workingSetBytes", usage.workingSetBytes);
+				json.EndObject();
+			}
+			else json.Null();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Positions and URIs ------------------------------------------------------------------------------------------
+
+	// The text of the document `uri` names: the open document's, else the file's on disk.
+	bool LspPool::TextOf(Workspace* ws, Core::StringView uri, Core::String& text) {
+		Core::String wsId;
+		Core::String relative;
+		Core::String absolute;
+		Workspace* owner = nullptr;
+		if (ParseIedUri(uri, wsId, relative)) {
+			owner = m_Server->m_Workspaces->Find(wsId.View());
+			if (!owner) return false;
+			absolute = Core::String(owner->At(relative.View()).View());
+		}
+		else if (PathOfFileUri(uri, absolute) && RelativeTo(ws->m_Root.View(), absolute.View(), relative)) owner = ws;
+		else if (absolute.IsEmpty()) return false;
+		Document* doc = owner ? m_Server->m_Documents->Find(owner, relative.View()) : nullptr;
+		if (doc) {
+			text = doc->m_Text;
+			return true;
+		}
+		if (!FS::FileExists(absolute.CStr())) return false;
+		FS::File opened = FS::File(absolute.CStr(), "rb");
+		text = opened.ReadText();
+		return true;
+	}
+
+	const LineIndex* LspPool::LinesOf(Workspace* ws, Core::StringView uri) {
+		LineIndex* lines = nullptr;
+		if (m_LineCache.TryGet(Core::String(uri), lines)) return lines;
+		Core::String text;
+		if (!TextOf(ws, uri, text)) return nullptr;
+		lines = new LineIndex(text.View());
+		m_LineCache.Insert(Core::String(uri), lines);
+		return lines;
+	}
+
+	Core::String LspPool::ToClientUri(LanguageServer* language, Core::StringView uri) {
+		Workspace* ws = language->m_Ws;
+		Core::String absolute;
+		Core::String relative;
+		if (!PathOfFileUri(uri, absolute)) return Core::String(uri);
+		if (RelativeTo(ws->m_Root.View(), absolute.View(), relative)) return IedUriOf(ws->m_WsId.View(), relative.View());
+		Core::String canonical = CanonicalFileUri(uri);
+		NameFile(ws, canonical.View(), language->m_Profile->m_Id.View(), language->m_Project.View());
+		return canonical;
+	}
+
+	void LspPool::NameFile(Workspace* ws, Core::StringView uri, Core::StringView profile, Core::StringView project) {
+		Core::String key = NamedKey(ws, uri);
+		if (m_Named.Contains(key)) return;
+		NamedFile* file = new NamedFile();
+		file->m_Profile = Core::String(profile);
+		file->m_Project = Core::String(project);
+		m_Named.Insert(key, file);
+	}
+
+	Core::String LspPool::ToServerUri(Core::StringView uri) const {
+		Core::String wsId;
+		Core::String relative;
+		if (!ParseIedUri(uri, wsId, relative)) return Core::String(uri);
+		Workspace* owner = m_Server->m_Workspaces->Find(wsId.View());
+		return owner ? FileUriOf(owner->At(relative.View()).View()) : Core::String(uri);
+	}
+
+	Rewrite LspPool::RewriteFor(LanguageServer* language, Core::StringView uri, bool toServer) {
+		LspPool* self = this;
+		Workspace* ws = language->m_Ws;
+		Rewrite rewrite;
+		rewrite.m_From = toServer ? PositionEncoding::Utf16 : language->m_Encoding;
+		rewrite.m_To = toServer ? language->m_Encoding : PositionEncoding::Utf16;
+		rewrite.m_Lines = [self, ws](Core::StringView named) -> const LineIndex* { return self->LinesOf(ws, named); };
+		if (toServer) rewrite.m_MapUri = [self](Core::StringView named) -> Core::String { return self->ToServerUri(named); };
+		else rewrite.m_MapUri = [self, language](Core::StringView named) -> Core::String { return self->ToClientUri(language, named); };
+		rewrite.m_Uri = Core::String(uri);
+		return rewrite;
+	}
+
+	static Core::String RewriteText(Core::StringView json, const Rewrite& rewrite) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		if (!read.Ok()) return Core::String(json);
+		return RewriteJson(read.root, rewrite);
+	}
+
+	// Semantic tokens with their columns in UTF-16; `result` is the server's, of `text`.
+	static Core::String TokensForClient(Core::StringView result, Core::StringView text, PositionEncoding from) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode tokens = Serialization::ReadJson(result, *doc).root;
+		Serialization::DomNode data = tokens.Member("data");
+		if (from == PositionEncoding::Utf16 || data.Kind() != Serialization::DomKind::Array) return Core::String(result);
+		Core::Array<int64> numbers;
+		for (int64 i = 0; i < data.Count(); ++i) numbers.Push(data.At(i).AsInt());
+		LineIndex lines = LineIndex(text);
+		JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; i < tokens.Count(); ++i) {
+			if (tokens.KeyAt(i) == "data") continue;
+			json.Key(tokens.KeyAt(i));
+			json.Raw(NodeJson(tokens.ValueAt(i)).View());
+		}
+		json.Key(Core::StringView("data"));
+		json.BeginArray();
+		for (int64 number : RewriteSemanticTokens(numbers, lines, from, PositionEncoding::Utf16)) json.Int(number);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static bool IsSemanticTokensRequest(Core::StringView method) { return method == "textDocument/semanticTokens/full" || method == "textDocument/semanticTokens/range"; }
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	Core::String LspPool::Asked(Call& call, LanguageServer* language, Core::StringView clientUri, Core::StringView serverUri, Core::StringView method, Core::StringView params) {
+		m_LineCache.Clear();
+		Core::String sent = RewriteText(params, RewriteFor(language, clientUri, true));
+		Core::String result = language->Request(call, method, sent.View(), c_LspRequestTimeoutMs);
+		m_LineCache.Clear();
+		if (!IsSemanticTokensRequest(method)) return RewriteText(result.View(), RewriteFor(language, serverUri, false));
+		Core::String text;
+		TextOf(language->m_Ws, clientUri, text);
+		return TokensForClient(result.View(), text.View(), language->m_Encoding);
+	}
+
+	Core::String LspPool::RequestMethod(Call& call, const Params& params) {
+		Document* doc = m_Server->m_Documents->Get(params.Str("docId").View());
+		Core::String method = params.Str("method");
+		LanguageServer* language = Ready(call, doc);
+		Serialization::DomNode given = params.Field("params");
+		Core::String givenJson = given.IsValid() ? NodeJson(given) : Core::String("{}");
+		Core::String asked = WithTextDocument(givenJson.View(), DocumentIedUri(doc).View());
+		Core::String answer = Asked(call, language, DocumentIedUri(doc).View(), DocumentFileUri(doc).View(), method.View(), asked.View());
+		if (method.View() != "textDocument/codeAction" || !language->m_Profile->m_FilterCodeActions) return answer;
+		Serialization::DomDoc* parsed = new Serialization::DomDoc();
+		return FilterCodeActions(Serialization::ReadJson(answer.View(), *parsed).root, given.Member("range"));
+	}
+
+	// --- For plugin code -----------------------------------------------------------------------------------------------
+
+	Core::String LspPool::RequestFor(Call& call, Workspace* ws, Core::StringView path, Core::StringView method, Core::StringView params, bool withDocument) {
+		LanguageServer* language = ReadyFor(call, ws, path);
+		Core::String clientUri = IsFileUri(path) ? Core::String(path) : IedUriOf(ws->m_WsId.View(), path);
+		Core::String asked = withDocument ? WithTextDocument(params, clientUri.View()) : Core::String(params);
+		return Asked(call, language, clientUri.View(), ServerUriOf(ws, path).View(), method, asked.View());
+	}
+
+	Core::String LspPool::ServingFor(Call& call, Workspace* ws, Core::StringView path) {
+		LanguageServer* language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("profile"));
+		if (!language) {
+			json.Null();
+			json.EndObject();
+			return json.ToString();
+		}
+		json.String(language->m_Profile->m_Id.View());
+		AwaitServer(call, language);
+		json.RawField("capabilities", language->m_Capabilities.View());
+		json.RawField("aiRequests", language->m_Profile->m_AiRequests.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool LspPool::Scanned(Workspace* ws) const { return m_Scanned.Contains(ws->m_WsId); }
+
+	void LspPool::StartFor(Call& call, Workspace* ws, const Core::Array<Core::String>& paths) {
+		m_Scanned.Insert(ws->m_WsId, true);
+		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
+		Core::Array<LanguageServer*> started;
+		Core::Array<Core::String> firsts;   // the file that called for each, opened on it as a person's would be
+		for (const Core::String& path : paths) {
+			LspProfile* profile = ProfileServing(profiles, m_Server->m_Plugins->LanguageOf(ws, path.View()).View(), path.View());
+			if (!profile) continue;
+			ProjectModel* project = ProjectFor(ws, profile, path.View());
+			if (profile->m_PerProject && ws->m_Solution && !project) continue;   // outside every project: started when a document opens
+			if (Find(ws, profile->m_Id.View(), NameOf(project).View())) continue;
+			LanguageServer* language = Create(ws, profile, project);
+			language->Start();
+			started.Push(language);
+			firsts.Push(path);
+		}
+		Core::Array<LanguageServer*> mine;
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws) mine.Push(language);
+		const int64 deadline = clock_now_ns() + c_LspStartTimeoutMs * 1000000;
+		for (LanguageServer* language : mine) {
+			const int64 left = (deadline - clock_now_ns()) / 1000000;
+			if (left > 0) language->AwaitRunning(call, left);
+		}
+		for (int64 i = 0; i < started.Count(); ++i) {
+			if (started[i]->m_State != LspState::Running || m_Server->m_Documents->Find(ws, firsts[i].View())) continue;
+			try {
+				OpenTransient(started[i], ws, firsts[i].View());
+			}
+			catch (RpcError& failed) {
+				Log(started[i], (Core::String("could not open ") + firsts[i].View() + ": " + failed.m_Message.View()).View());
+			}
+		}
+	}
+
+	void LspPool::AwaitIndexes(Call& call, const Core::Array<LanguageServer*>& servers, int64 ms) {
+		const int64 deadline = clock_now_ns() + ms * 1000000;
+		for (;;) {
+			bool busy = false;
+			for (LanguageServer* language : servers) {
+				if (language->m_State != LspState::Running) continue;
+				language->m_UsedNs = clock_now_ns();   // waited for: not idle
+				const bool fresh = clock_now_ns() - language->m_StartedNs < c_LspIndexGraceMs * 1000000;
+				busy = busy || language->m_Progress.Count() > 0 || (fresh && !language->m_Progressed);
+			}
+			if (!busy || call.m_Cancel->IsCancelled() || clock_now_ns() >= deadline) return;
+			call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_LspIndexSliceNs);
+		}
+	}
+
+	Core::String LspPool::SymbolsFor(Call& call, Workspace* ws, Core::StringView query) {
+		Core::Array<LanguageServer*> asked;
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws && language->m_State == LspState::Running && OffersWorkspaceSymbols(language)) asked.Push(language);
+		AwaitIndexes(call, asked, c_LspIndexWaitMs);
+		JsonWriter json;
+		json.BeginArray();
+		for (LanguageServer* language : asked) SymbolsOf(call, language, query, json);
+		json.EndArray();
+		return json.ToString();
+	}
+
+	bool LspPool::NamedText(Workspace* ws, Core::StringView uri, Core::String& text) { return WasNamed(ws, uri) && TextOf(ws, uri, text); }
+
+	Core::String LspPool::CapabilitiesMethod(Call& call, const Params& params) {
+		Document* doc = m_Server->m_Documents->Get(params.Str("docId").View());
+		LanguageServer* language = Serving(doc, true);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("profile"));
+		if (!language) {
+			json.Null();
+			json.EndObject();
+			return json.ToString();
+		}
+		json.String(language->m_Profile->m_Id.View());
+		if (language->AwaitRunning(call, c_LspStartTimeoutMs)) OpenOn(language, doc);
+		json.Field("state", LspStateName(language->m_State));
+		json.RawField("capabilities", language->m_Capabilities.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String LspPool::StatusMethod(Call& call, const Params& params) { return StatusSnapshot(m_Server->m_Workspaces->Get(params.Str("wsId").View())); }
+
+	Core::String LspPool::RestartMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::String id = params.Str("profile");
+		Core::String projectName = params.Str("project", Core::StringView(""));
+		LanguageServer* language = Find(ws, id.View(), projectName.View());
+		if (!language) {
+			LspProfile* profile = nullptr;
+			for (LspProfile* candidate : ProfilesFor(ws))
+				if (candidate->m_Id.View() == id.View()) profile = candidate;
+			if (!profile) throw RpcError(ErrorCode::NotFound, (Core::String("no language server profile ") + id.View()).View());
+			ProjectModel* project = projectName.IsEmpty() || !ws->m_Solution ? nullptr : ws->m_Solution->Project(projectName.View());
+			if (!projectName.IsEmpty() && (!profile->m_PerProject || !project)) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + projectName.View() + " for " + id.View()).View());
+			language = Create(ws, profile, project);
+		}
+		language->Relaunch();
+		return StatusSnapshot(ws);
+	}
+
+	static bool OffersWorkspaceSymbols(const LanguageServer* language) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode provider = Serialization::ReadJson(language->m_Capabilities.View(), *doc).root.Member("workspaceSymbolProvider");
+		return provider.Kind() == Serialization::DomKind::Object || (provider.Kind() == Serialization::DomKind::Bool && provider.AsBool());
+	}
+
+	// Every running server of the workspace that offers workspace symbols is asked; one that fails or times out is left
+	// out rather than failing the rest.
+	Core::String LspPool::WorkspaceSymbolsMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::String query = params.Str("query", Core::StringView(""));
+		JsonWriter json;
+		json.BeginObject();
+		json.RawField("symbols", SymbolsFor(call, ws, query.View()).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void LspPool::SymbolsOf(Call& call, LanguageServer* language, Core::StringView query, JsonWriter& json) {
+		JsonWriter asked;
+		asked.BeginObject();
+		asked.Field("query", query);
+		asked.EndObject();
+		Core::String result;
+		try {
+			result = language->Request(call, Core::StringView("workspace/symbol"), asked.View(), c_LspRequestTimeoutMs);
+		}
+		catch (RpcError& failed) {
+			if (failed.m_Code == ErrorCode::Cancelled) throw failed;
+			Log(language, (Core::String("workspace/symbol failed: ") + failed.m_Message.View()).View());
+			return;
+		}
+		m_LineCache.Clear();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode symbols = Serialization::ReadJson(RewriteText(result.View(), RewriteFor(language, Core::StringView(""), false)).View(), *doc).root;
+		for (int64 i = 0; i < symbols.Count(); ++i) {
+			Serialization::DomNode symbol = symbols.At(i);
+			json.BeginObject();
+			for (int64 m = 0; m < symbol.Count(); ++m) {
+				json.Key(symbol.KeyAt(m));
+				json.Raw(NodeJson(symbol.ValueAt(m)).View());
+			}
+			json.Field("source", language->Source().View());
+			json.EndObject();
+		}
+	}
+
+	// --- Message helpers ---------------------------------------------------------------------------------------------
+
+	Core::String WithTextDocument(Core::StringView params, Core::StringView uri) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode given = Serialization::ReadJson(params, *doc).root;
+		JsonWriter json;
+		json.BeginObject();
+		if (given.Kind() == Serialization::DomKind::Object)
+			for (int64 i = 0; i < given.Count(); ++i) {
+				if (given.KeyAt(i) == "textDocument") continue;
+				json.Key(given.KeyAt(i));
+				json.Raw(NodeJson(given.ValueAt(i)).View());
+			}
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", uri);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static bool IsBefore(const Serialization::DomNode& a, const Serialization::DomNode& b) {
+		const int64 aLine = a.Member("line").AsInt();
+		const int64 bLine = b.Member("line").AsInt();
+		return aLine < bLine || (aLine == bLine && a.Member("character").AsInt() < b.Member("character").AsInt());
+	}
+
+	static bool Meets(const Serialization::DomNode& a, const Serialization::DomNode& b) {
+		return !IsBefore(a.Member("end"), b.Member("start")) && !IsBefore(b.Member("end"), a.Member("start"));
+	}
+
+	Core::String FilterCodeActions(const Serialization::DomNode& actions, const Serialization::DomNode& range) {
+		if (actions.Kind() != Serialization::DomKind::Array || range.Kind() != Serialization::DomKind::Object) return actions.IsValid() ? NodeJson(actions) : Core::String("null");
+		JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; i < actions.Count(); ++i) {
+			Serialization::DomNode action = actions.At(i);
+			Serialization::DomNode diagnostics = action.Member("diagnostics");
+			bool keep = diagnostics.Kind() != Serialization::DomKind::Array || diagnostics.Count() == 0;
+			for (int64 j = 0; j < diagnostics.Count() && !keep; ++j) keep = Meets(diagnostics.At(j).Member("range"), range);
+			if (keep) json.Raw(NodeJson(action).View());
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+}

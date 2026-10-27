@@ -1,0 +1,42 @@
+// Importers other plugins contribute (docs/16 "Importers"): how their commands' words are expanded.
+
+include "Contributed.ch"
+
+[test("server.profiler.contributed")]
+class ContributedImporterTests
+{
+	static Profiler::ContributedImporter Importer() {
+		Profiler::ContributedImporter importer;
+		importer.m_Id = Core::String("go.trace");
+		importer.m_Folder = Core::String("C:/ied/plugins/go");
+		return importer;
+	}
+
+	static Profiler::ImporterRun Run() {
+		Profiler::ImporterRun run;
+		run.m_Context = null;
+		run.m_Input = Core::String("C:/work/trace.out");
+		run.m_Output = Core::String("C:/work/.ied/local/captures/.import-trace");
+		return run;
+	}
+
+	[test("variables")]
+	public static void TestVariables() {
+		Core::String word;
+		Core::String problem;
+		assert_true(Profiler::ExpandImporterWord(Core::StringView("${pluginFolder}/importer"), Importer(), Run(), word, problem), "a plugin folder expands");
+		assert_true(word.View() == "C:/ied/plugins/go/importer", "the plugin's folder");
+		assert_true(Profiler::ExpandImporterWord(Core::StringView("in=${input};out=${output}!"), Importer(), Run(), word, problem), "two in one word");
+		assert_true(word.View() == "in=C:/work/trace.out;out=C:/work/.ied/local/captures/.import-trace!", "both, with the text around them");
+		assert_true(Profiler::ExpandImporterWord(Core::StringView("run"), Importer(), Run(), word, problem) && word.View() == "run", "a word without variables");
+	}
+
+	[test("unknown")]
+	public static void TestUnknown() {
+		Core::String word;
+		Core::String problem;
+		assert_true(!Profiler::ExpandImporterWord(Core::StringView("${workspaceRoot}"), Importer(), Run(), word, problem), "an unknown variable fails");
+		assert_true(problem.View() == "the importer go.trace names an unknown variable ${workspaceRoot}", "and says which");
+		assert_true(Profiler::ExpandImporterWord(Core::StringView("${input"), Importer(), Run(), word, problem) && word.View() == "${input", "an unclosed one is text");
+	}
+}

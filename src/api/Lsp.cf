@@ -1,0 +1,199 @@
+include "Lsp.ch"
+include "Documents.ch"
+include "host/Server.ch"
+include "lsp/Pool.ch"
+include "lsp/Uris.ch"
+include "fs/Walk.ch"
+include "fs/Search.ch"
+
+namespace IED
+{
+	const int64 c_LspScanMostFiles = 20000;
+
+	// A request of the server's own, cancelled by nobody: plugin code waits at most a language server's time.
+	static Ied::Call ServerCall(Ied::Server* server) {
+		Ied::Call call;
+		call.m_Server = server;
+		call.m_Session = nullptr;
+		call.m_Cancel = new Ied::CancelToken();
+		return call;
+	}
+
+	// A workspace path normalized, or a file: URI made canonical; throws bad_request.
+	static Core::String Target(Core::StringView path) {
+		if (path.StartsWith(Core::StringView("file:"))) return Ied::CanonicalFileUri(path);
+		return Ied::NormalizePath(path);
+	}
+
+	bool LspRequest(const Workspace& ws, Core::StringView path, Core::StringView method, Core::StringView params, bool withDocument, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			result = server->m_Lsp->RequestFor(call, found, Target(path).View(), method, params, withDocument);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool LspServing(const Workspace& ws, Core::StringView path, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			result = server->m_Lsp->ServingFor(call, found, Target(path).View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	// The files under `root` a scan maps to language servers, without the lock: the default excludes and what .gitignore
+	// files ignore passed over, at most kLspScanMostFiles.
+	static Core::Array<Core::String> FilesOf(Core::StringView root) {
+		Core::Array<Core::String>* files = new Core::Array<Core::String>();
+		Ied::FileWalk walk;
+		walk.m_Root = FS::Path(root);
+		walk.m_Exclude = Ied::DefaultSearchExcludes();
+		walk.m_UseIgnoreFiles = true;
+		walk.m_Cancel = nullptr;
+		walk.Run([files](Core::StringView path) -> bool {
+			files->Push(Core::String(path));
+			return files->Count() < c_LspScanMostFiles;
+		});
+		return *files;
+	}
+
+	bool LspWorkspaceSymbols(const Workspace& ws, Core::StringView query, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		bool scanned = false;
+		{
+			Ied::ApiLock guard(server);
+			Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+			if (!found) return false;
+			scanned = server->m_Lsp->Scanned(found);
+		}
+		Core::Array<Core::String> paths;
+		if (!scanned) paths = FilesOf(ws.m_Root.View());
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			if (!server->m_Lsp->Scanned(found)) server->m_Lsp->StartFor(call, found, paths);
+			result = server->m_Lsp->SymbolsFor(call, found, query);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool WorkspacePathOf(const Workspace& ws, Core::StringView uri, Core::String& path) {
+		Core::String wsId;
+		return Ied::ParseIedUri(uri, wsId, path) && wsId.View() == ws.m_Id.View();
+	}
+
+	bool LocalPathOf(Core::StringView uri, Core::String& path) { return Ied::PathOfFileUri(uri, path); }
+
+	Core::String FileUriOfPath(Core::StringView path) { return Ied::CanonicalFileUri(Ied::FileUriOf(path).View()); }
+
+	bool LspAiWrite(const Workspace& ws, Core::StringView path, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			result = server->m_Lsp->AiWriteFor(found, Ied::NormalizePath(path).View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	int64 LspPublishMark(const Workspace& ws, Core::StringView path) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return 0;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return 0;
+		try {
+			return server->m_Lsp->PublishMark(found, Ied::NormalizePath(path).View());
+		}
+		catch (Ied::RpcError& error) {
+			return 0;
+		}
+	}
+
+	bool LspDiagnosticsAfter(const Workspace& ws, Core::StringView path, int64 mark, int64 ms, Core::String& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			result = server->m_Lsp->DiagnosticsAfter(call, found, Ied::NormalizePath(path).View(), mark, ms);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool LspFormatted(const Workspace& ws, Core::StringView path, int64 tabSize, bool insertSpaces, int64 ms, Core::String& formatted, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		try {
+			Ied::Call call = ServerCall(server);
+			formatted = server->m_Lsp->FormattedFor(call, found, Ied::NormalizePath(path).View(), tabSize, insertSpaces, ms);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool LspFileText(const Workspace& ws, Core::StringView uri, Core::String& text, Core::String& problem) {
+		Core::String path;
+		if (WorkspacePathOf(ws, uri, path)) return TextAsEdited(ws, path.View(), text, problem);
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
+		if (!found) return false;
+		if (server->m_Lsp->NamedText(found, Ied::CanonicalFileUri(uri).View(), text)) return true;
+		problem = (Core::String("no language server of the workspace named ") + uri) + "; only those files are readable from outside it";
+		return false;
+	}
+}

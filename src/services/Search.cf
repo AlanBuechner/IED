@@ -1,0 +1,123 @@
+include "Search.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const int64 c_SearchWaitSliceNs = 50000000;
+
+	static Core::Array<Core::String> Strings(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i)
+			if (list.At(i).Kind() == Serialization::DomKind::String) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	SearchQuery SearchQueryOf(const Params& params) {
+		SearchQuery query;
+		query.m_Text = params.Str("query");
+		if (query.m_Text.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "the query is empty");
+		query.m_Regex = params.Bool("regex", false);
+		query.m_CaseSensitive = params.Bool("caseSensitive", false);
+		query.m_Include = Strings(params.Field("include"));
+		query.m_Exclude = params.Has("exclude") ? Strings(params.Field("exclude")) : DefaultSearchExcludes();
+		query.m_UseIgnoreFiles = params.Bool("useIgnoreFiles", true);
+		const int64 most = params.Int("maxResults", c_SearchDefaultResults);
+		query.m_MaxResults = most < 1 ? 1 : most > c_SearchMostResults ? c_SearchMostResults : most;
+		LineMatcher matcher = LineMatcher(query);
+		if (!matcher.IsValid()) throw RpcError(ErrorCode::BadRequest, (Core::String("the regex does not compile: ") + matcher.Error()).View());
+		return query;
+	}
+
+	Core::String SearchResultJson(const SearchResult& result) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("matches"));
+		json.BeginArray();
+		for (const SearchMatch& match : result.m_Matches) {
+			json.BeginObject();
+			json.Field("path", match.m_Path.View());
+			json.IntField("line", match.m_Line);
+			json.IntField("col", match.m_Col);
+			json.Field("preview", match.m_Preview.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.BoolField("truncated", result.m_Truncated);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Search::Init(Server* server) {
+		this.m_Server = server;
+		Search* self = this;
+		server->m_Rpc.Register("fs.search", [self](Call& call, const Params& params) -> Core::String { return self->SearchMethod(call, params); });
+		server->m_Rpc.Register("fs.files", [self](Call& call, const Params& params) -> Core::String { return self->FilesMethod(call, params); });
+	}
+
+	Core::HashMap<Core::String, Core::String> Search::OpenTexts(Workspace* ws) const {
+		Core::HashMap<Core::String, Core::String> texts;
+		for (const Core::String& path : m_Server->m_Documents->OpenPaths(ws)) texts.Insert(path, m_Server->m_Documents->Find(ws, path.View())->m_Text);
+		return texts;
+	}
+
+	Core::String Search::SearchMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		SearchQuery query = SearchQueryOf(params);
+		SearchJob* job = new SearchJob();
+		FS::Path root = ws->m_Root;
+		Core::HashMap<Core::String, Core::String> open = OpenTexts(ws);
+		CancelToken* cancel = call.m_Cancel;
+		Server* host = m_Server;
+		Threading::Thread::Run([job, root, query, open, cancel, host]() {
+			SearchResult result = SearchFolder(root, query, open, &cancel->m_Cancelled);
+			Threading::LockGuard guard(host->m_Lock);
+			job->m_Result = result;
+			job->m_Done = true;
+			cancel->m_Wake.NotifyAll();
+		}).Detach();
+		Await(call, job);
+		return SearchResultJson(job->m_Result);
+	}
+
+	void Search::Await(Call& call, SearchJob* job) {
+		while (!job->m_Done && !call.m_Cancel->IsCancelled()) call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_SearchWaitSliceNs);
+		if (!job->m_Done) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+	}
+
+	Core::String Search::FilesMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::String query = params.Str("query", Core::StringView(""));
+		const int64 asked = params.Int("maxResults", c_FilesDefaultResults);
+		const int64 most = asked < 1 ? 1 : asked > c_FilesMostResults ? c_FilesMostResults : asked;
+		SearchJob* job = new SearchJob();
+		FS::Path root = ws->m_Root;
+		CancelToken* cancel = call.m_Cancel;
+		Server* host = m_Server;
+		Threading::Thread::Run([job, root, query, most, cancel, host]() {
+			FileWalk walk;
+			walk.m_Root = root;
+			walk.m_Exclude = DefaultSearchExcludes();
+			walk.m_UseIgnoreFiles = true;
+			walk.m_Cancel = &cancel->m_Cancelled;
+			Core::Array<FileMatch> files = FindFiles(walk, query.View(), most);
+			Threading::LockGuard guard(host->m_Lock);
+			job->m_Files = files;
+			job->m_Done = true;
+			cancel->m_Wake.NotifyAll();
+		}).Detach();
+		Await(call, job);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("files"));
+		json.BeginArray();
+		for (const FileMatch& match : job->m_Files) {
+			json.BeginObject();
+			json.Field("path", match.m_Path.View());
+			json.IntField("score", match.m_Score);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

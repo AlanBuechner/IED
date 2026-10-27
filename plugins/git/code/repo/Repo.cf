@@ -1,0 +1,274 @@
+include "Repo.ch"
+include "api/Protocol.ch"
+
+namespace Git
+{
+	Core::String GitOp::ToJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("opId", m_OpId.View());
+		json.Field("kind", m_Kind.View());
+		json.Field("title", m_Title.View());
+		json.Key(Core::StringView("lines"));
+		json.BeginArray();
+		for (const Core::String& line : m_Lines) json.String(line.View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GitRepo::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("repoId", m_RepoId.View());
+		json.Field("root", m_Relative.View());
+		json.Field("name", m_Name.View());
+		json.Field("kind", m_Kind.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GitRepo::SnapshotJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("repoId", m_RepoId.View());
+		json.Field("root", m_Relative.View());
+		json.RawField("head", m_HeadJson.IsEmpty() ? Core::StringView("null") : m_HeadJson.View());
+		json.RawField("changes", m_ChangesJson.IsEmpty() ? Core::StringView("null") : m_ChangesJson.View());
+		json.RawField("refs", m_RefsJson.IsEmpty() ? Core::StringView("null") : m_RefsJson.View());
+		if (m_Op) json.RawField("op", m_Op->ToJson().View());
+		else json.RawField("op", Core::StringView("null"));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GitHeadJson(const GitHead& head, Core::StringView state) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("branch", head.m_Branch.View());
+		json.Field("oid", head.m_Oid.View());
+		json.BoolField("detached", head.m_Detached);
+		json.Field("upstream", head.m_Upstream.View());
+		json.IntField("ahead", head.m_Ahead);
+		json.IntField("behind", head.m_Behind);
+		json.Field("state", state);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void WriteChange(IED::JsonWriter& json, const GitChange& change) {
+		json.BeginObject();
+		json.Field("path", change.m_Path.View());
+		if (!change.m_OldPath.IsEmpty()) json.Field("oldPath", change.m_OldPath.View());
+		json.Field("status", change.m_Status.View());
+		json.EndObject();
+	}
+
+	static void WriteChanges(IED::JsonWriter& json, const char* key, const Core::Array<GitChange>& changes) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (int64 i = 0; i < changes.Count() && i < c_GitListLimit; ++i) WriteChange(json, changes[i]);
+		json.EndArray();
+	}
+
+	Core::String GitChangesJson(const GitStatus& status) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteChanges(json, "staged", status.m_Staged);
+		WriteChanges(json, "unstaged", status.m_Unstaged);
+		WriteChanges(json, "untracked", status.m_Untracked);
+		WriteChanges(json, "conflicted", status.m_Conflicted);
+		const bool truncated = status.m_Staged.Count() > c_GitListLimit || status.m_Unstaged.Count() > c_GitListLimit || status.m_Untracked.Count() > c_GitListLimit;
+		if (truncated) json.BoolField("truncated", true);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void WriteBranches(IED::JsonWriter& json, const Core::Array<GitRef>& branches) {
+		json.Key(Core::StringView("branches"));
+		json.BeginArray();
+		for (const GitRef& branch : branches) {
+			json.BeginObject();
+			json.Field("name", branch.m_Name.View());
+			json.Field("oid", branch.m_Oid.View());
+			json.Field("upstream", branch.m_Upstream.View());
+			json.IntField("ahead", branch.m_Ahead);
+			json.IntField("behind", branch.m_Behind);
+			json.BoolField("current", branch.m_Current);
+			json.BoolField("gone", branch.m_Gone);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	// Each remote with its branches ("origin/main" under origin as "main").
+	static void WriteRemotes(IED::JsonWriter& json, const GitRefsRead& read) {
+		json.Key(Core::StringView("remotes"));
+		json.BeginArray();
+		for (const GitRemote& remote : read.m_Remotes) {
+			json.BeginObject();
+			json.Field("name", remote.m_Name.View());
+			json.Field("url", remote.m_Url.View());
+			json.Key(Core::StringView("branches"));
+			json.BeginArray();
+			Core::String prefix = remote.m_Name + "/";
+			for (const GitRef& branch : read.m_Refs.m_RemoteBranches) {
+				if (!branch.m_Name.View().StartsWith(prefix.View())) continue;
+				json.BeginObject();
+				json.Field("name", branch.m_Name.View().Substring(prefix.View().ByteLength(), branch.m_Name.View().ByteLength() - prefix.View().ByteLength()));
+				json.Field("oid", branch.m_Oid.View());
+				json.EndObject();
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteTags(IED::JsonWriter& json, const Core::Array<GitRef>& tags) {
+		json.Key(Core::StringView("tags"));
+		json.BeginArray();
+		for (const GitRef& tag : tags) {
+			json.BeginObject();
+			json.Field("name", tag.m_Name.View());
+			json.Field("oid", tag.m_Oid.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteStashes(IED::JsonWriter& json, const Core::Array<GitStash>& stashes) {
+		json.Key(Core::StringView("stashes"));
+		json.BeginArray();
+		for (const GitStash& stash : stashes) {
+			json.BeginObject();
+			json.IntField("index", stash.m_Index);
+			json.Field("message", stash.m_Message.View());
+			json.Field("oid", stash.m_Oid.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static bool SameFolder(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i) {
+			int32 x = a.ByteAt(i);
+			int32 y = b.ByteAt(i);
+			if (x == '\\') x = '/';
+			if (y == '\\') y = '/';
+			if (x >= 'A' && x <= 'Z') x += 32;
+			if (y >= 'A' && y <= 'Z') y += 32;
+			if (x != y) return false;
+		}
+		return true;
+	}
+
+	static void WriteWorktrees(IED::JsonWriter& json, const Core::Array<GitWorktree>& worktrees, const FS::Path& root) {
+		json.Key(Core::StringView("worktrees"));
+		json.BeginArray();
+		for (const GitWorktree& worktree : worktrees) {
+			if (worktree.m_Bare) continue;
+			json.BeginObject();
+			json.Field("path", worktree.m_Path.View());
+			json.Field("branch", worktree.m_Branch.View());
+			json.Field("oid", worktree.m_Oid.View());
+			json.BoolField("current", SameFolder(worktree.m_Path.View(), root.View()));
+			json.BoolField("locked", worktree.m_Locked);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteSubmodules(IED::JsonWriter& json, const Core::Array<GitSubmodule>& submodules) {
+		json.Key(Core::StringView("submodules"));
+		json.BeginArray();
+		for (const GitSubmodule& submodule : submodules) {
+			json.BeginObject();
+			json.Field("path", submodule.m_Path.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String GitRefsJson(const GitRefsRead& read, const FS::Path& root) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteBranches(json, read.m_Refs.m_Branches);
+		WriteRemotes(json, read);
+		WriteTags(json, read.m_Refs.m_Tags);
+		WriteStashes(json, read.m_Stashes);
+		WriteWorktrees(json, read.m_Worktrees, root);
+		WriteSubmodules(json, read.m_Submodules);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GitLogJson(const Core::Array<GitCommit>& commits, bool more) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("commits"));
+		json.BeginArray();
+		for (const GitCommit& commit : commits) {
+			json.BeginObject();
+			json.Field("oid", commit.m_Oid.View());
+			json.Key(Core::StringView("parents"));
+			json.BeginArray();
+			for (const Core::String& parent : commit.m_Parents) json.String(parent.View());
+			json.EndArray();
+			json.Field("author", commit.m_Author.View());
+			json.Field("email", commit.m_Email.View());
+			json.IntField("authorMs", commit.m_AuthorMs);
+			json.Field("subject", commit.m_Subject.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.BoolField("more", more);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GitFilesJson(const Core::Array<GitFileChange>& files) {
+		IED::JsonWriter json;
+		json.BeginArray();
+		for (const GitFileChange& file : files) {
+			json.BeginObject();
+			json.Field("path", file.m_Path.View());
+			if (!file.m_OldPath.IsEmpty()) json.Field("oldPath", file.m_OldPath.View());
+			json.Field("status", file.m_Status.View());
+			json.IntField("added", file.m_Added);
+			json.IntField("removed", file.m_Removed);
+			json.BoolField("binary", file.m_Binary);
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	Core::String GitDiffJson(Core::StringView path, Core::StringView oldPath, const GitDiff& diff, bool truncated) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path);
+		if (!oldPath.IsEmpty()) json.Field("oldPath", oldPath);
+		json.BoolField("binary", diff.m_Binary);
+		json.Key(Core::StringView("hunks"));
+		json.BeginArray();
+		for (const GitHunk& hunk : diff.m_Hunks) {
+			json.BeginObject();
+			json.IntField("oldStart", hunk.m_OldStart);
+			json.IntField("oldLines", hunk.m_OldLines);
+			json.IntField("newStart", hunk.m_NewStart);
+			json.IntField("newLines", hunk.m_NewLines);
+			json.Field("header", hunk.m_Header.View());
+			json.Key(Core::StringView("lines"));
+			json.BeginArray();
+			for (const Core::String& line : hunk.m_Lines) json.String(line.View());
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.BoolField("truncated", truncated);
+		json.EndObject();
+		return json.ToString();
+	}
+}

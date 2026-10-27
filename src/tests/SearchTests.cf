@@ -1,0 +1,96 @@
+// fs/search: queries as literals and regexes, columns in UTF-16 units, one match per line, includes and excludes,
+// and a folder searched in name order with open documents searched as they are.
+
+include "fs/Search.ch"
+
+static Ied::SearchQuery Query(const char* text, bool regex, bool caseSensitive) {
+	Ied::SearchQuery query;
+	query.m_Text = Core::String(text);
+	query.m_Regex = regex;
+	query.m_CaseSensitive = caseSensitive;
+	query.m_MaxResults = 100;
+	return query;
+}
+
+static int64 Column(const char* text, const char* line, bool regex, bool caseSensitive) {
+	Ied::LineMatcher matcher = Ied::LineMatcher(Query(text, regex, caseSensitive));
+	return matcher.Find(Core::StringView(line));
+}
+
+static void WriteBytes(const FS::Path& file, const char* bytes, int64 count) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::File opened = FS::File(file.CStr(), "wb");
+	opened.Write((const void*)bytes, count);
+}
+
+static void Write(const FS::Path& file, const char* text) { WriteBytes(file, text, Core::StringView(text).ByteLength()); }
+
+[test("server.search")]
+class SearchTests {
+	[test("matching")]
+	public static void TestMatching() {
+		assert_eq(6, Column("world", "Hello World", false, false), "a literal, any case");
+		assert_eq(-1, Column("world", "Hello World", false, true), "with case");
+		assert_eq(1, Column("a.b", "xa.b", false, true), "the literal's '.' is a dot");
+		assert_eq(-1, Column("a.b", "xaxb", false, true), "and only a dot");
+		assert_eq(2, Column("\\bfoo\\d+", "a foo12", true, true), "a regex");
+		assert_eq(2, Column("x", "\xc3\xa9 x", false, true), "the column counts UTF-16 units, not bytes");
+		assert_eq(2, Column("x", "\xf0\x9f\x98\x80x", false, true), "an emoji before it is two units");
+		assert_eq(-1, Column("^", "abc", true, true), "an empty match is no match");
+		assert_se("a\\.b\\*\\(c\\)", Ied::EscapeRegex(Core::StringView("a.b*(c)")).CStr(), "escaped");
+		Ied::LineMatcher broken = Ied::LineMatcher(Query("(", true, true));
+		assert_true(!broken.IsValid(), "a regex that does not compile");
+	}
+
+	[test("text")]
+	public static void TestText() {
+		Ied::LineMatcher matcher = Ied::LineMatcher(Query("x", false, true));
+		Ied::SearchResult result;
+		Ied::SearchText(Core::StringView("a.c"), Core::StringView("x x\r\nnone\r\n  xy  \r\nx"), matcher, 10, result);
+		assert_eq(3, result.m_Matches.Count(), "the first match of each line");
+		assert_eq(2, result.m_Matches[1].m_Line, "lines counted across CRLF");
+		assert_se("xy", result.m_Matches[1].m_Preview.CStr(), "the preview is the line trimmed");
+		assert_eq(2, result.m_Matches[1].m_Col, "the column is in the line as it is");
+		Ied::SearchResult limited;
+		Ied::SearchText(Core::StringView("a.c"), Core::StringView("x\nx\nx"), matcher, 2, limited);
+		assert_true(limited.m_Matches.Count() == 2 && limited.m_Truncated, "stopped at the limit, and says so");
+	}
+
+	[test("include_exclude")]
+	public static void TestIncludeExclude() {
+		Ied::SearchQuery query = Query("x", false, false);
+		query.m_Exclude = Ied::DefaultSearchExcludes();
+		assert_true(Ied::IsSearched(Core::StringView("src/a.c"), query), "a source");
+		assert_true(!Ied::IsSearched(Core::StringView("web/node_modules"), query), "a package folder");
+		assert_true(!Ied::IsSearched(Core::StringView("build"), query), "a build folder at the top");
+		query.m_Include.Push(Core::String("**/*.c"));
+		assert_true(Ied::IsSearched(Core::StringView("src/a.c"), query) && !Ied::IsSearched(Core::StringView("src/a.h"), query), "includes");
+	}
+
+	[test("folder")]
+	public static void TestFolder() {
+		FS::Path root = FS::TempDirectory() / "ied-search-test";
+		FS::RemoveAll(root.CStr());
+		Write(root / "b.txt", "needle on disk\n");
+		Write(root / "a.txt", "nothing\n");
+		Write(root / "sub" / "c.txt", "a needle\n");
+		Write(root / "node_modules" / "d.txt", "needle in a package\n");
+		WriteBytes(root / "data.bin", "needle\0binary", 13);
+		Core::HashMap<Core::String, Core::String> open;
+		open.Insert(Core::String("a.txt"), Core::String("needle unsaved\n"));
+		Ied::SearchQuery query = Query("needle", false, false);
+		query.m_Exclude = Ied::DefaultSearchExcludes();
+		Ied::SearchResult result = Ied::SearchFolder(root, query, open, nullptr);
+		assert_eq(3, result.m_Matches.Count(), "three files hold it");
+		assert_se("a.txt", result.m_Matches[0].m_Path.CStr(), "in path order, the open document first");
+		assert_se("needle unsaved", result.m_Matches[0].m_Preview.CStr(), "searched as it is open, not as on disk");
+		assert_se("sub/c.txt", result.m_Matches[2].m_Path.CStr(), "a folder's files");
+		Write(root / ".gitignore", "*.skip\n");
+		Write(root / "sub" / "x.skip", "needle ignored\n");
+		query.m_UseIgnoreFiles = true;
+		assert_eq(3, Ied::SearchFolder(root, query, open, nullptr).m_Matches.Count(), "what .gitignore ignores is skipped");
+		query.m_UseIgnoreFiles = false;
+		assert_eq(4, Ied::SearchFolder(root, query, open, nullptr).m_Matches.Count(), "unless the query says otherwise");
+		FS::RemoveAll(root.CStr());
+	}
+}

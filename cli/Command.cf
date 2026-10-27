@@ -1,0 +1,48 @@
+include "Command.ch"
+
+namespace Cli
+{
+	const char* Usage() {
+		return "usage: ied [<path>[:<line>[:<col>]]]   open a folder or file in IED (default: this folder)\n"
+			"       ied status | url | stop\n"
+			"options: --control <name> (another server's pipe), --no-browser (print the URL),\n"
+			"         --browser (the default browser, not the desktop app)\n";
+	}
+
+	static Verb VerbOf(Core::StringView word, bool& known) {
+		known = true;
+		if (word == "status") return Verb::Status;
+		if (word == "url") return Verb::Url;
+		if (word == "stop") return Verb::Stop;
+		if (word == "help" || word == "--help" || word == "-h") return Verb::Help;
+		known = false;
+		return Verb::Open;
+	}
+
+	bool ParseCommand(const Core::Array<Core::String>& arguments, Command& command, Core::String& error) {
+		command.m_Verb = Verb::Open;
+		bool positional = false;
+		for (int64 i = 0; i < arguments.Count(); ++i) {
+			Core::StringView argument = arguments[i].View();
+			if (argument == "--no-browser") command.m_NoBrowser = true;
+			else if (argument == "--browser") command.m_Browser = true;
+			else if (argument == "--control" && i + 1 < arguments.Count()) command.m_Control = arguments[++i];
+			else if (argument.StartsWith(Core::StringView("--")) && argument != "--help") {
+				error = Core::String("unknown option ") + argument;
+				return false;
+			}
+			else if (positional) {
+				error = Core::String("one path or command at a time: ") + argument;
+				return false;
+			}
+			else {
+				positional = true;
+				bool known = false;
+				command.m_Verb = VerbOf(argument, known);
+				if (!known) Launch::SplitLocation(argument, command.m_Path, command.m_Line, command.m_Col);
+			}
+		}
+		if (command.m_Verb == Verb::Open && command.m_Path.IsEmpty()) command.m_Path = Core::String(".");
+		return true;
+	}
+}

@@ -1,0 +1,109 @@
+include "Programs.ch"
+
+namespace Launch
+{
+	// `<name>.exe` beside this program, else in the build layout's `../<name>/` folder.
+	static FS::Path SiblingProgram(const char* name) {
+		Core::String file = Core::String(name) + ".exe";
+		FS::Path here = Platform::ExecutablePath().Parent();
+		FS::Path beside = here / file.View();
+		if (FS::FileExists(beside.CStr())) return beside;
+		FS::Path sibling = here.Parent() / name / file.View();
+		return FS::FileExists(sibling.CStr()) ? sibling : FS::Path();
+	}
+
+	FS::Path ServerProgram() { return SiblingProgram("ied-server"); }
+
+	FS::Path DesktopProgram() { return SiblingProgram("ied-desktop"); }
+
+	FS::Path WebClientFolder() {
+		for (FS::Path at = Platform::ExecutablePath().Parent(); !at.IsEmpty(); at = at.Parent()) {
+			FS::Path candidate = at / "frontend";
+			if (FS::FileExists((candidate / "login.html").CStr())) return candidate;
+			if (at.Parent().View() == at.View()) break;
+		}
+		return FS::Path();
+	}
+
+	static Process::StartInfo ServerStart(const FS::Path& program, Core::StringView control) {
+		Process::StartInfo info;
+		info.program = Core::String(program.View());
+		FS::Path web = WebClientFolder();
+		if (!web.IsEmpty()) {
+			info.arguments.Push(Core::String("--static"));
+			info.arguments.Push(Core::String(web.View()));
+		}
+		if (!control.IsEmpty()) {
+			info.arguments.Push(Core::String("--control"));
+			info.arguments.Push(Core::String(control));
+		}
+		// No stream shared, so it gets a hidden console of its own and outlives the program that started it.
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		info.killOnClose = false;
+		return info;
+	}
+
+	bool ServerGone(Core::StringView control) {
+		Core::String name = ControlName(control);
+		Net::LocalStream probe = Net::LocalStream::Connect(name.CStr(), 0);
+		return !probe.IsOpen() && !probe.TimedOut();
+	}
+
+	bool AwaitGone(Core::StringView control) {
+		const int64 deadline = clock_now_ns() + c_ServerStartMs * 1000000;
+		while (clock_now_ns() < deadline) {
+			if (ServerGone(control)) return true;
+			Threading::Thread::Sleep(50000000);
+		}
+		return false;
+	}
+
+	Net::LocalStream StartServer(Core::StringView control, Core::String& error, Process::Child* started) {
+		FS::Path program = ServerProgram();
+		if (program.IsEmpty()) {
+			error = Core::String("ied-server.exe is not beside ") + Platform::ExecutablePath().FileName();
+			return Net::LocalStream();
+		}
+		Process::Child child = Process::Child::Start(ServerStart(program, control));
+		if (!child.IsOpen()) {
+			error = Core::String("ied-server did not start: ") + child.Error();
+			return Net::LocalStream();
+		}
+		const int64 deadline = clock_now_ns() + c_ServerStartMs * 1000000;
+		Core::String name = ControlName(control);
+		while (clock_now_ns() < deadline) {
+			Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), c_ConnectMs);
+			if (stream.IsOpen()) {
+				if (started) *started = take(child);
+				return stream;
+			}
+			if (child.Wait(100) != Process::kTimedOut) break;
+		}
+		const int64 code = child.Wait(0);
+		if (code == c_AnotherServerExit) {
+			Net::LocalStream other = Net::LocalStream::Connect(name.CStr(), c_ConnectMs);
+			if (other.IsOpen()) return other;
+		}
+		if (code < 0) {
+			error = Core::String("ied-server started but its control pipe never opened");
+			return Net::LocalStream();
+		}
+		Core::StringBuilder ended;
+		ended.Append("ied-server ended (");
+		ended.Append(ExitCodeText(code).View());
+		ended.Append(") before its control pipe opened; ");
+		ended.Append((LogsFolder() / "server.log").View());
+		ended.Append(" says why");
+		error = ended.ToString();
+		return Net::LocalStream();
+	}
+
+	Net::LocalStream Reach(Core::StringView control, Core::String& error, Process::Child* started) {
+		Core::String name = ControlName(control);
+		Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), c_ConnectMs);
+		if (stream.IsOpen()) return take(stream);
+		return StartServer(control, error, started);
+	}
+}

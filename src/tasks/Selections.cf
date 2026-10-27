@@ -1,0 +1,71 @@
+include "Selections.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	static void WriteValues(JsonWriter& json, const Core::HashMap<Core::String, Core::String>& values) {
+		json.BeginObject();
+		for (const Core::KeyValue<Core::String, Core::String>& entry : values) json.Field(entry.key.CStr(), entry.value.View());
+		json.EndObject();
+	}
+
+	bool TaskSelections::Value(Core::StringView project, Core::StringView key, bool solutionScope, Core::String& value) const {
+		if (solutionScope) return m_Solution.TryGet(Core::String(key), value);
+		Core::HashMap<Core::String, Core::String>* values = nullptr;
+		return m_Projects.TryGet(Core::String(project), values) && values->TryGet(Core::String(key), value);
+	}
+
+	void TaskSelections::Set(Core::StringView project, Core::StringView key, bool solutionScope, Core::StringView value) {
+		if (solutionScope) {
+			m_Solution.Insert(Core::String(key), Core::String(value));
+			return;
+		}
+		Core::HashMap<Core::String, Core::String>* values = nullptr;
+		if (!m_Projects.TryGet(Core::String(project), values)) {
+			values = new Core::HashMap<Core::String, Core::String>();
+			m_Projects.Insert(Core::String(project), values);
+		}
+		values->Insert(Core::String(key), Core::String(value));
+	}
+
+	Core::String TaskSelections::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("startupProject", m_StartupProject.View());
+		json.Key(Core::StringView("solution"));
+		WriteValues(json, m_Solution);
+		json.Key(Core::StringView("projects"));
+		json.BeginObject();
+		for (const Core::KeyValue<Core::String, Core::HashMap<Core::String, Core::String>*>& entry : m_Projects) {
+			json.Key(entry.key.View());
+			WriteValues(json, *entry.value);
+		}
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	TaskSelections ReadTaskSelections(const FS::Path& file) {
+		TaskSelections selections;
+		if (!FS::FileExists(file.CStr())) return selections;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode root = Serialization::ReadJson(text.View(), *doc).root;
+		selections.m_StartupProject = Core::String(root.Member("startupProject").AsView());
+		Serialization::DomNode solution = root.Member("solution");
+		for (int64 i = 0; solution.Kind() == Serialization::DomKind::Object && i < solution.Count(); ++i) selections.Set(Core::StringView(""), solution.KeyAt(i), true, solution.ValueAt(i).AsView());
+		Serialization::DomNode projects = root.Member("projects");
+		for (int64 i = 0; projects.Kind() == Serialization::DomKind::Object && i < projects.Count(); ++i) {
+			Serialization::DomNode values = projects.ValueAt(i);
+			for (int64 j = 0; values.Kind() == Serialization::DomKind::Object && j < values.Count(); ++j) selections.Set(projects.KeyAt(i), values.KeyAt(j), false, values.ValueAt(j).AsView());
+		}
+		return selections;
+	}
+
+	bool WriteTaskSelections(const FS::Path& file, const TaskSelections& selections) {
+		FS::MakeDirectories(file.Parent().CStr());
+		Core::String json = selections.ToJson();
+		return FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+}

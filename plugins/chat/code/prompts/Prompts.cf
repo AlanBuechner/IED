@@ -1,0 +1,103 @@
+include "Prompts.ch"
+include "aitools/LineDiff.ch"
+
+namespace Ai
+{
+	static Core::String ReadPrompt(const FS::Path& file, Core::Array<Core::String>& problems) {
+		if (!FS::FileExists(file.CStr())) {
+			problems.Push(Core::String("missing prompt file ") + file.View());
+			return Core::String();
+		}
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		return Core::String(text.View().Trimmed());
+	}
+
+	Core::HashMap<Core::String, Core::String> MarkdownSections(Core::StringView text) {
+		Core::HashMap<Core::String, Core::String> sections;
+		Core::String name;
+		Core::StringBuilder body;
+		for (Core::StringView line : SplitLines(text)) {
+			if (!line.StartsWith(Core::StringView("## "))) {
+				body.Append(line);
+				body.Append("\n");
+				continue;
+			}
+			if (!name.IsEmpty()) sections.Insert(name, Core::String(body.View().Trimmed()));
+			name = Core::String(line.Substring(3, line.ByteLength() - 3).Trimmed());
+			body.Clear();
+		}
+		if (!name.IsEmpty()) sections.Insert(name, Core::String(body.View().Trimmed()));
+		return sections;
+	}
+
+	void Prompts::Load(const FS::Path& folder, Core::Array<Core::String>& problems) {
+		m_Base = ReadPrompt(folder / "base-system.md", problems);
+		m_Style = ReadPrompt(folder / "style-default.md", problems);
+		const char*[3] names = { "ask", "plan", "agent" };
+		for (const char* name : names) m_Modes.Insert(Core::String(name), ReadPrompt(folder / ((Core::String("mode-") + name) + ".md").View(), problems));
+		m_Notes = MarkdownSections(ReadPrompt(folder / "harness-notes.md", problems).View());
+	}
+
+	Core::String Prompts::System(ChatMode mode, const SystemContext& context) const {
+		Core::StringBuilder out;
+		out.Append(m_Base.View());
+		out.Append("\n\n");
+		out.Append(m_Style.View());
+		out.Append("\n\n");
+		out.Append(m_Modes.Get(Core::String(ChatModeName(mode))).View());
+		Core::StringView agentsMd = context.m_AgentsMd.View();
+		if (!agentsMd.IsEmpty()) {
+			out.Append("\n\n# The project's AGENTS.md\n\n");
+			if (agentsMd.ByteLength() <= c_AgentsMdMostBytes) out.Append(agentsMd);
+			else {
+				out.Append(agentsMd.Substring(0, c_AgentsMdMostBytes));
+				out.Append("\n[AGENTS.md continues; read it with fs_read]");
+			}
+		}
+		if (!context.m_Sections.IsEmpty()) {
+			out.Append("\n\n# From the workspace's plugins\n\n");
+			out.Append(context.m_Sections.View());
+		}
+		if (!context.m_Agents.IsEmpty()) {
+			out.Append("\n\n# Sub-agents\n\n");
+			out.Append(context.m_Agents.View());
+		}
+		out.Append("\n\n# Workspace\n\n");
+		out.Append(context.m_Workspace.View());
+		if (context.m_Deferred) {
+			out.Append("\n\n# Deferred tools\n\nTools whose description ends in [deferred] are listed with their first sentence only, to keep the context small. tool_search gives a deferred tool's whole description and parameters (words for what you need, or select: and their names). You may also call one directly: if its arguments are wrong, the error shows its parameters.");
+		}
+		if (!context.m_Docs.IsEmpty()) {
+			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language. The files are in their plugins' folders, which docs_read names (plugins:/<plugin id>/..., read-only).\n\n");
+			out.Append(context.m_Docs.View());
+		}
+		if (!context.m_Skills.IsEmpty()) {
+			out.Append("\n\n# Skills\n\nGuides for this workspace's languages, tools and conventions. Read the one that fits the task with skill_read before you start it; skill_search finds skills by words. The workspace's own skills are in .ied/skills/; a plugin's are in its folder, plugins:/<plugin id>/ (fs_read, fs_list, fs_glob and search_text take such paths), and are read-only.\n\n");
+			out.Append(context.m_Skills.View());
+		}
+		return out.ToString();
+	}
+
+	Core::String Prompts::Note(const char* name, const Core::Array<Core::String>& values) const {
+		Core::String text = m_Notes.Get(Core::String(name));
+		if (text.IsEmpty()) text = Core::String(name);
+		for (int64 i = 0; i + 1 < values.Count(); i += 2) {
+			Core::String key = (Core::String("{") + values[i].View()) + "}";
+			Core::StringBuilder out;
+			Core::StringView rest = text.View();
+			for (;;) {
+				const int64 found = rest.IndexOf(key.View());
+				if (found < 0) break;
+				out.Append(rest.Substring(0, found));
+				out.Append(values[i + 1].View());
+				rest = rest.Substring(found + key.ByteLength(), rest.ByteLength() - found - key.ByteLength());
+			}
+			out.Append(rest);
+			text = out.ToString();
+		}
+		return text;
+	}
+
+	Core::String Prompts::Note(const char* name) const { return Note(name, Core::Array<Core::String>()); }
+}

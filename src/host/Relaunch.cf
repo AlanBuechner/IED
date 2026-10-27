@@ -1,0 +1,63 @@
+include "Relaunch.ch"
+
+namespace Ied
+{
+	bool Relaunch::Ask(Core::StringView why, int64 nowMs) {
+		if (m_State != RelaunchState::None) return false;
+		m_State = RelaunchState::Asked;
+		m_AskedMs = nowMs;
+		m_Reason = Core::String(why);
+		return true;
+	}
+
+	bool Relaunch::Shown(int64 nowMs) const { return m_State == RelaunchState::Asked && nowMs >= m_AskedMs + c_RelaunchGraceMs; }
+
+	bool Relaunch::Claim(int64 nowMs) {
+		if (!Shown(nowMs)) return false;
+		m_State = RelaunchState::Claimed;
+		m_ClaimedMs = nowMs;
+		return true;
+	}
+
+	bool Relaunch::Due(int64 nowMs) {
+		const bool unclaimed = m_State == RelaunchState::Asked && nowMs >= m_AskedMs + c_RelaunchGraceMs + c_RelaunchClaimMs;
+		const bool stalled = m_State == RelaunchState::Claimed && nowMs >= m_ClaimedMs + c_RelaunchClaimedMs;
+		if (!unclaimed && !stalled) return false;
+		m_State = RelaunchState::Starting;
+		return true;
+	}
+
+	static bool TakesValue(Core::StringView option) { return option == "--workspace" || option == "--port"; }
+
+	Core::Array<Core::String> RelaunchArguments(const Core::Array<Core::String>& given, int32 port, const Core::Array<Core::String>& paths) {
+		Core::Array<Core::String> arguments;
+		for (int64 i = 0; i < given.Count(); ++i) {
+			Core::StringView option = given[i].View();
+			if (TakesValue(option)) i += 1;
+			else if (option != "--relaunched") arguments.Push(given[i]);
+		}
+		Core::StringBuilder number;
+		number.AppendInt(port);
+		arguments.Push(Core::String("--port"));
+		arguments.Push(number.ToString());
+		arguments.Push(Core::String("--relaunched"));
+		for (const Core::String& path : paths) {
+			arguments.Push(Core::String("--workspace"));
+			arguments.Push(path);
+		}
+		return arguments;
+	}
+
+	bool StartAgain(const Core::Array<Core::String>& arguments, Core::String& problem) {
+		Process::StartInfo info;
+		info.program = Core::String(Platform::ExecutablePath().View());
+		info.arguments = arguments;
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		info.killOnClose = false;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) problem = Core::String(child.Error());
+		return child.IsOpen();
+	}
+}

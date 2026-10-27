@@ -1,0 +1,80 @@
+// agents: a group's sub-agents read from ai.groups, which of them a chat may run (the orchestrator every one, an agent
+// those its calls name), a sub-agent chat's model chain, and the system section that says when delegating pays
+// (docs/04 "A group is a topology").
+
+include "Agents.ch"
+
+static Core::StringView AgentText(const char* text) { return Core::StringView(text); }
+
+const char* c_Topology = "{\"team\": {\"primary\": {\"model\": \"big\"}, \"agents\": {"
+	"\"coder\": {\"model\": \"small\", \"temperature\": 0, \"description\": \"Edits code\", \"calls\": [\"reviewer\"], \"fallback\": [\"big\"]},"
+	"\"reviewer\": {\"model\": \"big\", \"mode\": \"ask\", \"description\": \"Reviews diffs\"},"
+	"\"lead\": {\"model\": \"big\", \"mode\": \"plan\", \"calls\": [\"*\"]},"
+	"\"broken\": {\"description\": \"no model\"}}}}";
+
+static Core::Array<Core::String> NamesOf(const Core::Array<Ai::AgentSpec*>& agents) {
+	Core::Array<Core::String> names;
+	for (const Ai::AgentSpec* agent : agents) names.Push(agent->m_Name);
+	return names;
+}
+
+static Core::String Joined(const Core::Array<Core::String>& names) {
+	Core::StringBuilder out;
+	for (const Core::String& name : names) {
+		if (out.ByteLength() > 0) out.Append(",");
+		out.Append(name.View());
+	}
+	return out.ToString();
+}
+
+[test("server.ai.agents")]
+class AgentTests {
+	[test("a_groups_agents")]
+	public static void TestGroupAgents() {
+		Core::Array<Ai::AgentSpec*> agents = Ai::GroupAgents(AgentText(c_Topology), AgentText("team"));
+		assert_se("coder,reviewer,lead", Joined(NamesOf(agents)).CStr(), "every agent with a model, in order");
+		assert_true(agents[0]->m_Mode == Ai::ChatMode::Agent, "agent mode by default");
+		assert_true(agents[1]->m_Mode == Ai::ChatMode::Ask, "the agent's own mode");
+		assert_se("Edits code", agents[0]->m_Description.CStr(), "what it is for");
+		assert_se("small", agents[0]->m_Role.m_Model.CStr(), "its model");
+		assert_true(agents[0]->m_Role.m_HasTemperature, "its temperature");
+		assert_eq((int64)0, Ai::GroupAgents(AgentText(c_Topology), AgentText("other")).Count(), "a group without agents");
+	}
+
+	[test("who_runs_whom")]
+	public static void TestCallable() {
+		Core::Array<Ai::AgentSpec*> agents = Ai::GroupAgents(AgentText(c_Topology), AgentText("team"));
+		assert_se("coder,reviewer,lead", Joined(NamesOf(Ai::CallableAgents(agents, AgentText("")))).CStr(), "the orchestrator runs every agent");
+		assert_se("reviewer", Joined(NamesOf(Ai::CallableAgents(agents, AgentText("coder")))).CStr(), "an agent runs those it calls");
+		assert_se("", Joined(NamesOf(Ai::CallableAgents(agents, AgentText("reviewer")))).CStr(), "an agent that calls none runs none");
+		assert_se("coder,reviewer", Joined(NamesOf(Ai::CallableAgents(agents, AgentText("lead")))).CStr(), "* runs every other");
+		assert_se("", Joined(NamesOf(Ai::CallableAgents(agents, AgentText("gone")))).CStr(), "an agent the group lost runs none");
+	}
+
+	[test("a_sub_agents_chain")]
+	public static void TestChain() {
+		Core::Array<Core::String> problems;
+		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(AgentText("{\"big\": {\"endpoint\": \"http://a/v1\"}, \"small\": {\"endpoint\": \"http://b/v1\"}}"), problems);
+		Ai::RoleModel role;
+		Core::Array<Ai::ModelProfile*> chain = Ai::TurnCandidates(models, AgentText(c_Topology), AgentText("team"), AgentText("coder"), AgentText("agent"), AgentText(""), role);
+		assert_eq((int64)2, chain.Count(), "the agent's model, then its fallback");
+		assert_se("small", chain[0]->m_Name.CStr(), "the agent's model first");
+		assert_se("big", chain[1]->m_Name.CStr(), "its fallback");
+		Ai::RoleModel orchestrator;
+		Core::Array<Ai::ModelProfile*> own = Ai::TurnCandidates(models, AgentText(c_Topology), AgentText("team"), AgentText(""), AgentText("agent"), AgentText(""), orchestrator);
+		assert_se("big", own[0]->m_Name.CStr(), "an orchestrator runs on the group's primary");
+		Ai::RoleModel pinned;
+		assert_se("small", Ai::TurnCandidates(models, AgentText(c_Topology), AgentText("team"), AgentText(""), AgentText("ask"), AgentText("small"), pinned)[0]->m_Name.CStr(), "a chat's own model first");
+	}
+
+	[test("the_section_says_when_it_pays")]
+	public static void TestSection() {
+		Core::Array<Core::String> problems;
+		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(AgentText("{\"big\": {\"endpoint\": \"http://a/v1\", \"privacy\": \"cloud\"}, \"small\": {\"endpoint\": \"http://b/v1\"}}"), problems);
+		Core::String section = Ai::AgentsSection(Ai::GroupAgents(AgentText(c_Topology), AgentText("team")), models);
+		assert_true(section.View().Contains(AgentText("- coder (small, local, agent mode): Edits code")), "each agent with its model, privacy, mode and use");
+		assert_true(section.View().Contains(AgentText("- reviewer (big, cloud, ask mode): Reviews diffs")), "a cloud model says so");
+		assert_true(section.View().Contains(AgentText("Do it yourself when")), "when not to delegate");
+		assert_se("", Ai::AgentsSection(Core::Array<Ai::AgentSpec*>(), models).CStr(), "no agents, no section");
+	}
+}

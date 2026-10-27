@@ -1,0 +1,56 @@
+// fs/glob: '*', '?', "**" and {a,b} sets against paths, case folded; what counts as a glob.
+
+include "fs/Glob.ch"
+
+static bool Match(const char* pattern, const char* path) { return Ied::GlobMatch(Core::StringView(pattern), Core::StringView(path)); }
+
+[test("server.glob")]
+class GlobTests {
+	[test("segments")]
+	public static void TestSegments() {
+		assert_true(Match("build/ied/*.iedproj", "build/ied/Game.iedproj"), "a star in the last segment");
+		assert_true(!Match("build/ied/*.iedproj", "build/ied/sub/Game.iedproj"), "a star stays in its segment");
+		assert_true(Match("src/?.cf", "src/a.cf") && !Match("src/?.cf", "src/ab.cf"), "one character");
+		assert_true(Match("BUILD\\ied\\game.IEDPROJ", "build/ied/Game.iedproj"), "case and separators folded");
+		assert_true(Match("*", "anything") && !Match("*", "a/b"), "a lone star");
+		assert_true(Match("a*b*c", "aXXbYYc") && !Match("a*b*c", "aXXbYY"), "stars that must back up");
+	}
+
+	[test("double_star")]
+	public static void TestDoubleStar() {
+		assert_true(Match("**/*.iedproj", "Game.iedproj"), "no folders");
+		assert_true(Match("**/*.iedproj", "a/b/c/Game.iedproj"), "many folders");
+		assert_true(Match("build/**/x.json", "build/x.json") && Match("build/**/x.json", "build/a/b/x.json"), "in the middle");
+		assert_true(!Match("build/**/x.json", "other/x.json"), "but not elsewhere");
+		assert_true(Match("**", "a/b/c"), "everything");
+	}
+
+	[test("sets")]
+	public static void TestSets() {
+		assert_true(Match("{frontend,plugins}/**/*.js", "frontend/src/a.js") && Match("{frontend,plugins}/**/*.js", "plugins/x/ui/b.js"), "either folder");
+		assert_true(!Match("{frontend,plugins}/**/*.js", "src/a.js"), "but no other");
+		assert_true(Match("src/*.{cf,ch}", "src/a.ch") && !Match("src/*.{cf,ch}", "src/a.cpp"), "in a segment");
+		assert_true(Match("{a,b/{c,d}}/x", "b/d/x") && Match("{a,b/{c,d}}/x", "a/x") && !Match("{a,b/{c,d}}/x", "b/x"), "nested");
+		assert_true(Match("x.{,bak}", "x.") && Match("x.{,bak}", "x.bak"), "an empty alternative");
+		assert_true(Match("a{b", "a{b") && !Match("a{b", "ab"), "a set that never closes is plain text");
+	}
+
+	[test("expand_sets")]
+	public static void TestExpandSets() {
+		FS::Path root = FS::TempDirectory() / "ied-glob-sets-test";
+		FS::MakeDirectories((root / "a").CStr());
+		FS::MakeDirectories((root / "b").CStr());
+		FS::WriteFileAtomically((root / "a" / "x.md").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "b" / "y.md").CStr(), (const void*)"y", 1);
+		Core::Array<Core::String> found = Ied::ExpandGlob(root, Core::StringView("{a,b,a}/*.md"));
+		assert_true(found.Count() == 2 && found[0] == "a/x.md" && found[1] == "b/y.md", "each alternative searched, a file found twice listed once");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("is_glob")]
+	public static void TestIsGlob() {
+		assert_true(Ied::IsGlob(Core::StringView("a/*.x")) && Ied::IsGlob(Core::StringView("?")), "wildcards");
+		assert_true(Ied::IsGlob(Core::StringView("src/{a,b}.iedproj")), "a set");
+		assert_true(!Ied::IsGlob(Core::StringView("tools/Tool.iedproj")), "a plain path");
+	}
+}

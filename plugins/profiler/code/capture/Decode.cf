@@ -1,0 +1,188 @@
+include "Decode.ch"
+
+namespace Profiler
+{
+	// Each event's fields after its type byte: t a time delta, v a varint, s an inline string, f a double, l a list.
+	static const char* LayoutOf(uint8 type) {
+		switch ((EventType)type) {
+			case EventType::Hello: return "vsvvvvvs";
+			case EventType::Calibration: return "vv";
+			case EventType::Bye: return "v";
+			case EventType::Warning: return "vv";
+			case EventType::Stats: return "vvv";
+			case EventType::StringDef: return "vs";
+			case EventType::SrcLocDef: return "vvvvvv";
+			case EventType::ThreadDef: return "vvv";
+			case EventType::ThreadName: return "tv";
+			case EventType::ZoneBegin: return "tv";
+			case EventType::ZoneBeginNamed: return "tvv";
+			case EventType::ZoneEnd: return "t";
+			case EventType::ZoneText: return "v";
+			case EventType::ZoneValue: return "v";
+			case EventType::ZoneColor: return "v";
+			case EventType::ZoneCallstack: return "v";
+			case EventType::ZoneAllocs: return "vv";
+			case EventType::ZoneNative: return "v";
+			case EventType::ZoneNativeFreed: return "v";
+			case EventType::TaskBegin: return "tvvv";
+			case EventType::TaskEnd: return "tv";
+			case EventType::TaskSuspend: return "tv";
+			case EventType::TaskResume: return "tv";
+			case EventType::FrameMark: return "tv";
+			case EventType::FrameBegin: return "tv";
+			case EventType::FrameEnd: return "tv";
+			case EventType::PlotDef: return "vvvv";
+			case EventType::PlotValue: return "tvf";
+			case EventType::Message: return "tvvv";
+			case EventType::PoolDef: return "vv";
+			case EventType::Alloc: return "tvvvvv";
+			case EventType::Free: return "tvvv";
+			case EventType::PoolReset: return "tv";
+			case EventType::GcBegin: return "tvv";
+			case EventType::GcEnd: return "tvvvvv";
+			case EventType::AllocCount: return "tvv";
+			case EventType::HeapCensus: return "tv";
+			case EventType::HeapCensusType: return "vvv";
+			case EventType::HeapCensusTypeNative: return "vvvv";
+			case EventType::LockDef: return "vvv";
+			case EventType::LockWait: return "tv";
+			case EventType::LockObtain: return "tv";
+			case EventType::LockRelease: return "tv";
+			case EventType::ModuleDef: return "vvvv";
+			case EventType::CallstackDef: return "vl";
+			case EventType::Sample: return "tvvvv";
+			case EventType::SymbolDef: return "vvvv";
+			case EventType::GpuContextDef: return "vvvv";
+			case EventType::GpuCalibration: return "vvv";
+			case EventType::GpuZoneBegin: return "tvvv";
+			case EventType::GpuZoneEnd: return "tvv";
+			case EventType::GpuTime: return "vvv";
+			default: return nullptr;
+		}
+	}
+
+	static bool NamesItsThread(EventType type) {
+		return type == EventType::Alloc || type == EventType::Free || type == EventType::Sample;
+	}
+
+	// Reads one event's fields by its layout; false when the bytes run out first.
+	static bool ReadFields(WireReader& reader, const char* layout, Event& event, int64& cursor, Core::Array<uint64>& list) {
+		int32 varints = 0;
+		int32 texts = 0;
+		for (const char* c = layout; *c != (char)0; ++c) {
+			if (*c == 't') {
+				int64 delta;
+				if (!reader.Zigzag(delta)) return false;
+				cursor += delta;
+				event.m_Ticks = cursor;
+				event.m_Timed = true;
+			}
+			else if (*c == 'v') {
+				if (!reader.Varint(event.m_Fields[varints])) return false;
+				varints += 1;
+			}
+			else if (*c == 's') {
+				Core::StringView text;
+				if (!reader.Text(text)) return false;
+				if (texts == 0) event.m_Text = text;
+				else event.m_Text2 = text;
+				texts += 1;
+			}
+			else if (*c == 'f') {
+				if (!reader.Double(event.m_Number)) return false;
+			}
+			else if (*c == 'l') {
+				uint64 count;
+				if (!reader.Varint(count) || count > (uint64)c_ChunkMostBytes) return false;
+				list.Clear();
+				for (uint64 i = 0; i < count; ++i) {
+					uint64 value;
+					if (!reader.Varint(value)) return false;
+					list.Push(value);
+				}
+				event.m_List = &list;
+			}
+		}
+		return true;
+	}
+
+	bool DecodeChunk(const uint8* bytes, int64 length, const EventVisitor& visit, Core::String& problem) {
+		WireReader reader = WireReader(bytes, length);
+		uint8 kind;
+		uint64 thread;
+		uint64 base;
+		if (!reader.Byte(kind) || !reader.Varint(thread) || !reader.Varint(base)) {
+			problem = Core::String("a chunk ends inside its header");
+			return false;
+		}
+		int64 cursor = (int64)base;
+		Core::Array<uint64> list;
+		while (!reader.AtEnd()) {
+			uint8 type;
+			reader.Byte(type);
+			const char* layout = LayoutOf(type);
+			if (layout == nullptr) {
+				Core::StringBuilder why;
+				why.Append("unknown event type 0x");
+				why.AppendHex((uint64)type);
+				why.Append(" ends its chunk");
+				problem = why.ToString();
+				return false;
+			}
+			Event event;
+			event.m_Type = (EventType)type;
+			event.m_ChunkKind = kind;
+			event.m_Thread = thread;
+			if (!ReadFields(reader, layout, event, cursor, list)) {
+				problem = Core::String("an event runs past the end of its chunk");
+				return false;
+			}
+			if (NamesItsThread(event.m_Type)) event.m_Thread = event.m_Fields[0];
+			visit(event);
+		}
+		return true;
+	}
+
+	// --- The stream ---------------------------------------------------------------------------------------------------
+
+	void ChunkStream::Feed(const uint8* bytes, int64 length) {
+		if (m_At > 0 && m_At == m_Buffer.Count()) {
+			m_Buffer.Clear();
+			m_At = 0;
+		}
+		else if (m_At > 1048576) {
+			m_Buffer.RemoveRange(0, m_At);
+			m_At = 0;
+		}
+		m_Buffer.Append(bytes, length);
+	}
+
+	bool ChunkStream::ReadPreamble() {
+		if (m_Buffer.Count() - m_At < c_PreambleBytes) return false;
+		const uint8* p = m_Buffer.Data() + m_At;
+		if (p[0] != (uint8)'I' || p[1] != (uint8)'T' || p[2] != (uint8)'P' || p[3] != (uint8)'1') m_Problem = Core::String("not an ITP stream");
+		else if (((uint16)p[4] | ((uint16)p[5] << 8)) > c_ItpVersion) m_Problem = Core::String("a newer ITP version than this server reads");
+		m_At += c_PreambleBytes;
+		m_Consumed += c_PreambleBytes;
+		m_Started = true;
+		return m_Problem.IsEmpty();
+	}
+
+	bool ChunkStream::Next(const uint8*& chunk, int64& length) {
+		if (!m_Problem.IsEmpty()) return false;
+		if (!m_Started && !ReadPreamble()) return false;
+		if (m_Buffer.Count() - m_At < c_ChunkHeaderLength) return false;
+		const uint8* p = m_Buffer.Data() + m_At;
+		const int64 size = (int64)((uint32)p[0] | ((uint32)p[1] << 8) | ((uint32)p[2] << 16) | ((uint32)p[3] << 24));
+		if (size <= 0 || size > c_ChunkMostBytes) {
+			m_Problem = Core::String("a chunk length no client writes");
+			return false;
+		}
+		if (m_Buffer.Count() - m_At - c_ChunkHeaderLength < size) return false;
+		chunk = p + c_ChunkHeaderLength;
+		length = size;
+		m_At += c_ChunkHeaderLength + size;
+		m_Consumed += c_ChunkHeaderLength + size;
+		return true;
+	}
+}

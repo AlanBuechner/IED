@@ -1,0 +1,155 @@
+// The flame graph (F-PRF-22): zones merged by their call path - a node per name under its parent - over a range, from
+// the zones themselves or from call stack samples (imported profiles, F-PRF-51).
+include "Analysis.ch"
+
+namespace Profiler
+{
+	class FlameNode
+	{
+		public Core::String m_Name;
+		public int64 m_Parent = -1;
+		public int64 m_Total;
+		public int64 m_Self;
+		public int64 m_Count;
+		public Core::Array<int64> m_Children;
+	}
+
+	class FlameTree
+	{
+		public Core::Array<FlameNode*> m_Nodes;
+		public Core::HashMap<Core::String, int64> m_ChildOf;   // "<parent>/<name>" -> node
+
+		[operator("create")] public void Init() {
+			FlameNode* root = new FlameNode();
+			root->m_Name = Core::String("all");
+			m_Nodes.Push(root);
+		}
+
+		public int64 Child(int64 parent, Core::StringView name) {
+			Core::StringBuilder key;
+			key.AppendInt(parent);
+			key.AppendByte('/');
+			key.Append(name);
+			int64 node;
+			if (m_ChildOf.TryGet(key.ToString(), node)) return node;
+			FlameNode* child = new FlameNode();
+			child->m_Name = Core::String(name);
+			child->m_Parent = parent;
+			m_Nodes.Push(child);
+			node = m_Nodes.Count() - 1;
+			m_Nodes[parent]->m_Children.Push(node);
+			m_ChildOf.Insert(key.ToString(), node);
+			return node;
+		}
+	}
+
+	// A zone and the zones under it, added below `parent`.
+	static void AddZone(FlameTree& tree, const Capture& capture, const ThreadTrack* track, int64 depth, int64 i, int64 parent, Range range) {
+		const ZoneLevel* level = track->m_Levels[depth];
+		const int64 start = level->m_Starts[i];
+		const int64 end = level->EndOr(i, capture.m_LastTicks);
+		const int64 node = tree.Child(parent, capture.ZoneName(track, level, i));
+		FlameNode* n = tree.m_Nodes[node];
+		const int64 duration = end - start;
+		n->m_Total += duration;
+		n->m_Count += 1;
+		int64 children = 0;
+		if (depth + 1 < track->m_Levels.Count()) {
+			const ZoneLevel* below = track->m_Levels[depth + 1];
+			const int64 stop = below->FirstStartingAt(end);
+			for (int64 k = below->FirstStartingAt(start); k < stop; ++k) {
+				children += below->EndOr(k, capture.m_LastTicks) - below->m_Starts[k];
+				AddZone(tree, capture, track, depth + 1, k, node, range);
+			}
+		}
+		n->m_Self += duration - children > 0 ? duration - children : 0;
+	}
+
+	static void FromZones(FlameTree& tree, const Capture& capture, const FlameAsk& ask, Range range) {
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			if (ask.m_Track >= 0 && t != (int64)ask.m_Track) continue;
+			const ThreadTrack* track = capture.m_Tracks[t];
+			if (track->m_Levels.IsEmpty()) continue;
+			const ZoneLevel* top = track->m_Levels[0];
+			const int64 stop = top->FirstStartingAt(range.m_End);
+			for (int64 i = top->FirstStartingAt(range.m_Begin); i < stop; ++i) AddZone(tree, capture, track, 0, i, 0, range);
+		}
+	}
+
+	static Core::String FrameName(const Capture& capture, uint64 address) {
+		const SymbolRecord* symbol = capture.m_Symbols.Find(address);
+		if (symbol && symbol->m_FunctionStr != 0) return Core::String(capture.Text(symbol->m_FunctionStr));
+		Core::StringBuilder text;
+		text.Append("0x");
+		text.AppendHex(address);
+		return text.ToString();
+	}
+
+	static void FromSamples(FlameTree& tree, const Capture& capture, const FlameAsk& ask, Range range) {
+		for (const SampleRecord& sample : capture.m_Samples) {
+			if (ask.m_Track >= 0 && sample.m_Track != ask.m_Track) continue;
+			if (!range.Holds(sample.m_T) && !(sample.m_T == 0 && range.m_Begin == 0)) continue;
+			const Core::Array<uint64>* frames = capture.m_Callstacks.Find(sample.m_Callstack);
+			int64 node = 0;
+			tree.m_Nodes[0]->m_Total += sample.m_Weight;
+			tree.m_Nodes[0]->m_Count += 1;
+			for (int64 i = frames ? frames->Count() - 1 : -1; i >= 0; --i) {
+				node = tree.Child(node, FrameName(capture, (*frames)[i]).View());
+				tree.m_Nodes[node]->m_Total += sample.m_Weight;
+				tree.m_Nodes[node]->m_Count += 1;
+			}
+			tree.m_Nodes[node]->m_Self += sample.m_Weight;
+		}
+	}
+
+	// The weight units of the capture's samples: the kind the first sample has.
+	static const char* SampleUnit(const Capture& capture) {
+		if (capture.m_Samples.IsEmpty()) return "ns";
+		const int32 kind = capture.m_Samples[0].m_Kind;
+		if (kind == 0) return "ns";
+		if (kind == 2) return "bytes";
+		if (kind == 3) return "objects";
+		return "samples";
+	}
+
+	static void WriteNode(IED::JsonWriter& json, const FlameTree& tree, const Capture& capture, int64 index, bool ticks, int64 smallest) {
+		const FlameNode* node = tree.m_Nodes[index];
+		json.BeginObject();
+		json.Field("name", node->m_Name.View());
+		json.IntField("total", ticks ? capture.m_Clock.Ns(node->m_Total) : node->m_Total);
+		json.IntField("self", ticks ? capture.m_Clock.Ns(node->m_Self) : node->m_Self);
+		json.IntField("count", node->m_Count);
+		json.Key(Core::StringView("children"));
+		json.BeginArray();
+		Core::Array<int64> order = node->m_Children;
+		order.SortBy([&tree](const int64& a, const int64& b) -> bool { return tree.m_Nodes[a]->m_Total > tree.m_Nodes[b]->m_Total; });
+		for (int64 child : order)
+			if (tree.m_Nodes[child]->m_Total >= smallest) WriteNode(json, tree, capture, child, ticks, smallest);
+		json.EndArray();
+		json.EndObject();
+	}
+
+	Core::String Flame(const Capture& capture, const FlameAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.m_FromNs, ask.m_ToNs);
+		FlameTree tree;
+		const bool samples = ask.m_Samples || (capture.ZoneCount() == 0 && !capture.m_Samples.IsEmpty());
+		if (samples) FromSamples(tree, capture, ask, range);
+		else {
+			FromZones(tree, capture, ask, range);
+			for (int64 child : tree.m_Nodes[0]->m_Children) tree.m_Nodes[0]->m_Total += tree.m_Nodes[child]->m_Total;
+		}
+		Core::Array<int64> totals;
+		for (const FlameNode* node : tree.m_Nodes) totals.Push(node->m_Total);
+		totals.Sort();
+		const int64 smallest = totals.Count() > (int64)ask.m_MostNodes ? totals[totals.Count() - (int64)ask.m_MostNodes] : 0;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("source", samples ? "samples" : "zones");
+		json.Field("unit", samples ? SampleUnit(capture) : "ns");
+		json.IntField("nodes", tree.m_Nodes.Count());
+		json.Key(Core::StringView("root"));
+		WriteNode(json, tree, capture, 0, !samples, smallest);
+		json.EndObject();
+		return json.ToString();
+	}
+}

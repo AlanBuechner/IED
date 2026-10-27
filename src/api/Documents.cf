@@ -1,0 +1,128 @@
+include "Documents.ch"
+include "host/Server.ch"
+include "fs/TextEdit.ch"
+
+namespace IED
+{
+	// The workspace `ws` names for the calling plugin with `permission`, and `path` made workspace-relative; null with
+	// `problem` when either is refused. With the lock held.
+	static Ied::Workspace* Reached(Ied::CodeInstance* instance, const Workspace& ws, Core::StringView path, const char* permission, Core::String& relative, Core::String& problem) {
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), permission, problem);
+		if (!found) return nullptr;
+		try {
+			relative = Ied::NormalizePath(path);
+			return found;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return nullptr;
+		}
+	}
+
+	bool TextAsEdited(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.read", relative, problem);
+		if (!found) return false;
+		Ied::Document* doc = server->m_Documents->Find(found, relative.View());
+		if (doc) {
+			text = doc->m_Text;
+			return true;
+		}
+		try {
+			text = server->m_Workspaces->Read(found, relative.View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool Exists(const Workspace& ws, Core::StringView path) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.read", relative, problem);
+		return found && (server->m_Workspaces->Revision(found, relative.View()) > 0 || server->m_Documents->Find(found, relative.View()));
+	}
+
+	bool WriteThrough(const Workspace& ws, Core::StringView path, Core::StringView text, Core::StringView actor, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.write", relative, problem);
+		if (!found) return false;
+		try {
+			Ied::Document* doc = server->m_Documents->Find(found, relative.View());
+			if (!doc) {
+				const int64 revision = server->m_Workspaces->Write(found, relative.View(), text, -1);
+				server->m_Documents->OnDiskWrite(found, relative.View(), text, revision);
+				return true;
+			}
+			Ied::Change whole;
+			whole.m_End = Ied::EndPosition(doc->m_Text.View());
+			whole.m_Text = Core::String(text);
+			Core::Array<Ied::Change> changes;
+			changes.Push(whole);
+			server->m_Documents->ApplyEdit(doc, doc->m_Version, changes, actor, Core::StringView(""));
+			server->m_Documents->Save(doc);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool Search(const Workspace& ws, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Core::HashMap<Core::String, Core::String> open;
+		FS::Path root;
+		{
+			Ied::ApiLock guard(server);
+			Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "fs.read", problem);
+			if (!found) return false;
+			root = found->m_Root;
+			for (const Core::String& path : server->m_Documents->OpenPaths(found)) open.Insert(path, server->m_Documents->Find(found, path.View())->m_Text);
+		}
+		Ied::LineMatcher matcher = Ied::LineMatcher(query);
+		if (!matcher.IsValid()) {
+			problem = Core::String("the pattern is not a valid regex: ") + matcher.Error();
+			return false;
+		}
+		result = Ied::SearchFolder(root, query, open, cancel);
+		return true;
+	}
+
+	bool SearchFolder(Core::StringView folder, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		if (!instance->May(Core::StringView("fs.read"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission fs.read");
+			return false;
+		}
+		if (!FS::IsDirectory(Core::String(folder).CStr())) {
+			problem = Core::String("no folder ") + folder;
+			return false;
+		}
+		Ied::LineMatcher matcher = Ied::LineMatcher(query);
+		if (!matcher.IsValid()) {
+			problem = Core::String("the pattern is not a valid regex: ") + matcher.Error();
+			return false;
+		}
+		Core::HashMap<Core::String, Core::String> none;
+		result = Ied::SearchFolder(FS::Path(folder), query, none, cancel);
+		return true;
+	}
+}

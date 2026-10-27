@@ -1,0 +1,418 @@
+include "Servers.ch"
+include "Server.ch"
+include "Trust.ch"
+include "Programs.ch"
+
+namespace Ied
+{
+	const int64 c_ServerPollNs = 100000000;
+	const int64 c_ExitWindowMs = 60000;
+	const int64 c_KeeperEndMs = 2000;
+
+	static int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	const char* ServerStateName(ServerState state) {
+		if (state == ServerState::Starting) return "starting";
+		if (state == ServerState::Ready) return "ready";
+		if (state == ServerState::Restarting) return "restarting";
+		if (state == ServerState::Stopping) return "stopping";
+		return "failed";
+	}
+
+	Core::String FolderKey(Core::StringView root) {
+		Core::String digest = TextDigest(TrustKey(root).View());
+		return Core::String(digest.View().Substring(0, 16));
+	}
+
+	bool SameSecret(Core::StringView a, Core::StringView b) {
+		if (a.IsEmpty() || a.ByteLength() != b.ByteLength()) return false;
+		return Crypto::ConstantTimeEquals((const void*)a.Data(), (const void*)b.Data(), a.ByteLength());
+	}
+
+	void WorkspaceServers::Init(Server* server) {
+		this.m_Server = server;
+		m_MasterControl = ControlName(server->m_Config);
+		WorkspaceServers* self = this;
+		server->m_Rpc.Register("ws.restart", [self](Call& call, const Params& params) -> Core::String { return self->RestartMethod(call, params); });
+		server->m_Rpc.Register("ws.close", [self](Call& call, const Params& params) -> Core::String { return self->CloseMethod(call, params); });
+	}
+
+	WorkspaceServer* WorkspaceServers::Find(Core::StringView wsId) const {
+		for (WorkspaceServer* record : m_Records)
+			if (record->m_WsId.View() == wsId) return record;
+		return nullptr;
+	}
+
+	void WorkspaceServers::Start(Workspace* ws) {
+		WorkspaceServer* record = new WorkspaceServer();
+		record->m_WsId = ws->m_WsId;
+		record->m_Target = Core::String(ws->m_Target.IsEmpty() ? ws->m_Root.View() : ws->m_Target.View());
+		record->m_Root = Core::String(ws->m_Root.View());
+		record->m_Control = (m_MasterControl + "-") + ws->m_WsId.View();
+		Core::String key = FolderKey(ws->m_Root.View());
+		FS::Path data = FS::Path(m_Server->m_Config.m_DataDir.View());
+		record->m_StateDir = Core::String((data / "servers" / key.View()).View());
+		record->m_LogPath = Core::String((data / "logs" / (Core::String("workspace-") + key.View() + ".log").View()).View());
+		record->m_State = ServerState::Starting;
+		record->m_ExitCode = -1;
+		m_Records.Push(record);
+		if (!m_Running) return;
+		WorkspaceServers* self = this;
+		record->m_Keeping = true;
+		Threading::Thread::Run([self, record]() { self->Keep(record); }).Detach();
+	}
+
+	void WorkspaceServers::Begin() {
+		if (m_Running) return;
+		m_Running = true;
+		WorkspaceServers* self = this;
+		for (WorkspaceServer* record : m_Records) {
+			record->m_Keeping = true;
+			Threading::Thread::Run([self, record]() { self->Keep(record); }).Detach();
+		}
+	}
+
+	void WorkspaceServers::Retarget(Core::StringView wsId, Core::StringView target) {
+		WorkspaceServer* record = Find(wsId);
+		if (record) record->m_Target = Core::String(target);
+	}
+
+	Core::String WorkspaceServers::StateJson(Core::StringView wsId) const {
+		WorkspaceServer* record = Find(wsId);
+		if (!record) return Core::String("null");
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("state", ServerStateName(record->m_State));
+		json.IntField("pid", record->m_Pid);
+		json.IntField("startedMs", record->m_StartedMs);
+		json.IntField("restarts", record->m_Restarts);
+		if (record->m_ExitCode >= 0) json.IntField("exitCode", record->m_ExitCode);
+		if (!record->m_Problem.IsEmpty()) json.Field("problem", record->m_Problem.View());
+		json.Field("log", record->m_LogPath.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// workspace.changed on the server topic: the workspace's summary with its server's state.
+	void WorkspaceServers::Changed(WorkspaceServer* record) {
+		record->m_Changed.NotifyAll();
+		Workspace* ws = m_Server->m_Workspaces->Listed(record->m_WsId.View());
+		if (ws) m_Server->m_Hub.Publish(Core::StringView("server"), "workspace.changed", ws->SummaryJson().View());
+	}
+
+	Core::Array<Core::String> WorkspaceServers::Arguments(const WorkspaceServer* record) const {
+		const ServerConfig& config = m_Server->m_Config;
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String("--role"));
+		argv.Push(Core::String("workspace"));
+		argv.Push(Core::String("--ws-id"));
+		argv.Push(record->m_WsId);
+		argv.Push(Core::String("--workspace"));
+		argv.Push(record->m_Target);
+		argv.Push(Core::String("--master"));
+		argv.Push(m_MasterControl);
+		argv.Push(Core::String("--control"));
+		argv.Push(record->m_Control);
+		argv.Push(Core::String("--data"));
+		argv.Push(config.m_DataDir);
+		argv.Push(Core::String("--app-data"));
+		argv.Push(config.m_AppDataDir);
+		argv.Push(Core::String("--state"));
+		argv.Push(record->m_StateDir);
+		argv.Push(Core::String("--log"));
+		argv.Push(record->m_LogPath);
+		if (!config.m_HomeDir.IsEmpty()) {
+			argv.Push(Core::String("--home"));
+			argv.Push(config.m_HomeDir);
+		}
+		if (!config.m_StaticDir.IsEmpty()) {
+			argv.Push(Core::String("--static"));
+			argv.Push(config.m_StaticDir);
+		}
+		if (config.m_TestHooks) argv.Push(Core::String("--test-hooks"));
+		if (config.m_Quiet) argv.Push(Core::String("--quiet"));
+		if (config.m_DebugScripts >= 0) {
+			argv.Push(Core::String("--debug-scripts"));
+			argv.Push(Core::String(config.m_DebugScripts ? "on" : "off"));
+		}
+		Core::StringBuilder idle;
+		idle.AppendInt(config.m_IdleTimeoutMs / 1000);
+		argv.Push(Core::String("--idle-timeout"));
+		argv.Push(idle.ToString());
+		Core::StringBuilder budget;
+		budget.AppendInt(config.m_OutboundBudget / (1024 * 1024));
+		argv.Push(Core::String("--outbound-budget-mb"));
+		argv.Push(budget.ToString());
+		Core::StringBuilder coalesce;
+		coalesce.AppendInt(config.m_CoalesceBytes / 1024);
+		argv.Push(Core::String("--coalesce-kb"));
+		argv.Push(coalesce.ToString());
+		if (!record->m_RestartedAfter.IsEmpty()) {
+			argv.Push(Core::String("--restarted-after"));
+			argv.Push(record->m_RestartedAfter);
+		}
+		return argv;
+	}
+
+	// The process started (the lock is held): false with `problem` when it could not be.
+	bool WorkspaceServers::StartProcess(WorkspaceServer* record, Core::String& problem) {
+		record->m_Secret = NewSecret();
+		Process::StartInfo info;
+		info.program = Core::String(Platform::ExecutablePath().View());
+		info.arguments = Arguments(record);
+		info.environment.Push(Core::String("IED_SERVER_SECRET=") + record->m_Secret.View());
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Inherit;
+		info.killOnClose = true;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			problem = Core::String("it did not start: ") + started.Error();
+			return false;
+		}
+		Process::Child* child = new Process::Child();
+		*child = take(started);
+		record->m_Child = child;
+		record->m_Pid = (int64)child->Id();
+		record->m_StartedMs = NowMs();
+		record->m_Port = 0;
+		return true;
+	}
+
+	// Waits (no lock held) until the server's pipe answers its status, or it exits, or kServerReadyMs pass; its port
+	// then. False with `problem` when it is not ready.
+	bool WorkspaceServers::AwaitStarted(WorkspaceServer* record, Core::String& problem) {
+		const int64 deadline = clock_now_ns() + c_ServerReadyMs * 1000000;
+		while (clock_now_ns() < deadline) {
+			if (record->m_Child->Wait(0) != Process::kTimedOut) {
+				problem = Core::String("it ended before it was ready");
+				return false;
+			}
+			Net::LocalStream stream = Net::LocalStream::Connect(record->m_Control.CStr(), 200);
+			if (stream.IsOpen()) {
+				Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
+				Serialization::DomDoc* doc = new Serialization::DomDoc();
+				Serialization::ReadResult read = Serialization::ReadJson(reply.m_Result.View(), *doc);
+				const int64 port = read.Ok() ? read.root.Member("result").Member("port").AsInt() : 0;
+				// Its own answer, not one from the server it replaces still holding the pipe a moment.
+				const bool own = read.Ok() && read.root.Member("result").Member("pid").AsInt() == record->m_Pid;
+				if (reply.m_Ok && port > 0 && own) {
+					Threading::LockGuard guard(m_Server->m_Lock);
+					record->m_Port = (int32)port;
+					return true;
+				}
+			}
+			Threading::Thread::Sleep(c_ServerPollNs);
+		}
+		problem = Core::String("it was not ready within a minute");
+		return false;
+	}
+
+	// One server's life: started, waited for, watched; started again after an exit nobody asked for, or after a
+	// restart; until it is closed or the master stops.
+	void WorkspaceServers::Keep(WorkspaceServer* record) {
+		for (;;) {
+			Core::String problem;
+			bool launched = false;
+			{
+				Threading::LockGuard guard(m_Server->m_Lock);
+				if (record->m_Closing || record->m_Shutdown) break;
+				launched = StartProcess(record, problem);
+				// A restart asked for from here on is this run's.
+				record->m_RestartAsked = false;
+				Core::StringBuilder line;
+				line.Append("workspace server ");
+				line.Append(record->m_WsId.View());
+				if (launched) {
+					line.Append(" started for ");
+					line.Append(record->m_Target.View());
+					line.Append(", pid ");
+					line.AppendInt(record->m_Pid);
+				}
+				else {
+					line.Append(" could not start: ");
+					line.Append(problem.View());
+				}
+				m_Server->Log(line.View());
+			}
+			if (launched && AwaitStarted(record, problem)) {
+				Threading::LockGuard guard(m_Server->m_Lock);
+				// Unless a restart or a close was asked while it started: its stop is on the way.
+				if (!record->m_RestartAsked && !record->m_Closing && !record->m_Shutdown) {
+					record->m_State = ServerState::Ready;
+					Changed(record);
+				}
+			}
+			// One that never became ready (it hangs in its start) is ended, and counts as an exit.
+			else if (launched && record->m_Child->Wait(0) == Process::kTimedOut) record->m_Child->Kill();
+			const int64 code = launched ? record->m_Child->Wait(Process::kWaitForever) : -1;
+			Threading::LockGuard guard(m_Server->m_Lock);
+			Exited(record, code, problem.View());
+			if (record->m_Closing || record->m_Shutdown) break;
+			while (record->m_State == ServerState::Failed && !record->m_RestartAsked && !record->m_Closing && !record->m_Shutdown) record->m_Changed.Wait(m_Server->m_Lock);
+			if (record->m_Closing || record->m_Shutdown) break;
+		}
+		Threading::LockGuard guard(m_Server->m_Lock);
+		record->m_Keeping = false;
+		record->m_Changed.NotifyAll();
+		if (!record->m_Closing) return;
+		for (int64 i = 0; i < m_Records.Count(); ++i)
+			if (m_Records[i] == record) m_Records.RemoveAt(i);
+		m_Server->m_Workspaces->Closed(record->m_WsId.View());
+	}
+
+	// How a run ended (the lock is held): asked for, or not - then counted, and started again unless it was the
+	// kServerExitsPerMinute'th within a minute.
+	void WorkspaceServers::Exited(WorkspaceServer* record, int64 code, Core::StringView how) {
+		// The Child is not closed here: a stopper thread may still wait on it; it closes when it is collected.
+		record->m_Child = nullptr;
+		record->m_Port = 0;
+		record->m_ExitCode = code;
+		Core::String ended = code >= 0 ? Launch::ExitCodeText(code) : Core::String(how);
+		const bool asked = record->m_RestartAsked || record->m_Closing || record->m_Shutdown;
+		m_Server->Log((((Core::String("workspace server ") + record->m_WsId.View()) + (asked ? " stopped (" : " exited unasked (")) + ended.View() + "); its log: " + record->m_LogPath.View()).View());
+		if (record->m_Closing || record->m_Shutdown) {
+			record->m_State = ServerState::Stopping;
+			Changed(record);
+			return;
+		}
+		if (record->m_RestartAsked) {
+			record->m_RestartedAfter = Core::String("a restart someone asked for");
+			record->m_Problem = Core::String();
+			record->m_State = ServerState::Restarting;
+			record->m_Restarts += 1;
+			Changed(record);
+			return;
+		}
+		const int64 now = NowMs();
+		Core::Array<int64> recent;
+		for (int64 at : record->m_ExitsMs)
+			if (now - at < c_ExitWindowMs) recent.Push(at);
+		recent.Push(now);
+		record->m_ExitsMs = recent;
+		record->m_Problem = (Core::String("its last run ended: ") + ended.View()) + (how.IsEmpty() || code < 0 ? Core::String("") : Core::String(" (") + how + ")").View();
+		record->m_RestartedAfter = record->m_Problem;
+		if (recent.Count() >= c_ServerExitsPerMinute) {
+			record->m_State = ServerState::Failed;
+			m_Server->Log((((Core::String("workspace server ") + record->m_WsId.View()) + " failed: it ended ") + Core::String("three times within a minute") + "; ws.restart starts it again").View());
+		}
+		else {
+			record->m_State = ServerState::Restarting;
+			record->m_Restarts += 1;
+		}
+		Changed(record);
+	}
+
+	// Its pipe told to stop, from a thread of its own (no lock held); ended after kServerStopMs if it has not.
+	void WorkspaceServers::AskStop(WorkspaceServer* record) {
+		Core::String control = record->m_Control;
+		Process::Child* child = record->m_Child;
+		Threading::Thread::Run([control, child]() {
+			Net::LocalStream stream = Net::LocalStream::Connect(control.CStr(), 2000);
+			if (stream.IsOpen()) Launch::Ask(stream, Core::StringView("stop"), Core::StringView(""));
+			if (child && child->Wait((int32)c_ServerStopMs) == Process::kTimedOut) child->Kill();
+		}).Detach();
+	}
+
+	void WorkspaceServers::Restart(Core::StringView wsId) {
+		WorkspaceServer* record = Find(wsId);
+		if (!record || record->m_Closing) throw RpcError(ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
+		record->m_RestartAsked = true;
+		m_Server->Log(((Core::String("workspace server ") + wsId) + ": restart asked").View());
+		if (record->m_State == ServerState::Failed) {
+			record->m_State = ServerState::Starting;
+			record->m_ExitsMs.Clear();
+			Changed(record);
+			return;
+		}
+		record->m_State = ServerState::Restarting;
+		Changed(record);
+		AskStop(record);
+	}
+
+	void WorkspaceServers::Close(Core::StringView wsId) {
+		WorkspaceServer* record = Find(wsId);
+		if (!record || record->m_Closing) throw RpcError(ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
+		record->m_Closing = true;
+		record->m_State = ServerState::Stopping;
+		m_Server->Log(((Core::String("workspace ") + wsId) + ": closing").View());
+		Changed(record);
+		if (record->m_Child) AskStop(record);
+	}
+
+	bool WorkspaceServers::AwaitReady(Core::StringView wsId, int64 ms, int32& port, Core::String& secret) {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		const int64 deadline = clock_now_ns() + ms * 1000000;
+		for (;;) {
+			WorkspaceServer* record = Find(wsId);
+			if (!record || record->m_Closing || record->m_Shutdown || record->m_State == ServerState::Failed) return false;
+			if (record->m_State == ServerState::Ready && record->m_Port > 0) {
+				port = record->m_Port;
+				secret = record->m_Secret;
+				return true;
+			}
+			const int64 left = deadline - clock_now_ns();
+			if (left <= 0) return false;
+			record->m_Changed.WaitFor(m_Server->m_Lock, left);
+		}
+	}
+
+	void WorkspaceServers::StopAll() {
+		Core::Array<Core::String> controls;
+		Core::Array<Process::Child*> children;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			for (WorkspaceServer* record : m_Records) {
+				record->m_Shutdown = true;
+				record->m_Changed.NotifyAll();
+				if (!record->m_Child) continue;
+				controls.Push(record->m_Control);
+				children.Push(record->m_Child);
+			}
+		}
+		for (int64 i = 0; i < controls.Count(); ++i) {
+			Core::String control = controls[i];
+			Net::LocalStream stream = Net::LocalStream::Connect(control.CStr(), 2000);
+			if (stream.IsOpen()) Launch::Ask(stream, Core::StringView("stop"), Core::StringView(""));
+		}
+		const int64 deadline = clock_now_ns() + c_ServerStopMs * 1000000;
+		for (Process::Child* child : children) {
+			const int64 left = (deadline - clock_now_ns()) / 1000000;
+			if (child->Wait(left > 0 ? (int32)left : 0) == Process::kTimedOut) child->Kill();
+		}
+		AwaitKeepers();
+	}
+
+	// The keepers have logged how their servers ended and published it before the master goes on to end its process.
+	void WorkspaceServers::AwaitKeepers() {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		Core::Array<WorkspaceServer*> kept = m_Records;
+		const int64 deadline = clock_now_ns() + c_KeeperEndMs * 1000000;
+		for (WorkspaceServer* record : kept)
+			while (record->m_Keeping && clock_now_ns() < deadline) record->m_Changed.WaitFor(m_Server->m_Lock, deadline - clock_now_ns());
+	}
+
+	void WorkspaceServers::TellAll(Core::StringView method, Core::StringView paramsJson) {
+		Core::Array<Core::String> controls;
+		for (WorkspaceServer* record : m_Records)
+			if (record->m_State == ServerState::Ready && !record->m_Closing && !record->m_Shutdown) controls.Push(record->m_Control);
+		if (controls.IsEmpty()) return;
+		Threading::UnlockGuard released(m_Server->m_Lock);
+		for (const Core::String& control : controls) {
+			Net::LocalStream stream = Net::LocalStream::Connect(control.CStr(), 2000);
+			if (stream.IsOpen()) Launch::AskWithin(stream, method, paramsJson, 10000);
+		}
+	}
+
+	Core::String WorkspaceServers::RestartMethod(Call& call, const Params& params) {
+		Core::String wsId = params.Str("wsId");
+		Restart(wsId.View());
+		Workspace* ws = m_Server->m_Workspaces->Listed(wsId.View());
+		return ws->SummaryJson();
+	}
+
+	Core::String WorkspaceServers::CloseMethod(Call& call, const Params& params) {
+		Close(params.Str("wsId").View());
+		return Core::String("{}");
+	}
+}

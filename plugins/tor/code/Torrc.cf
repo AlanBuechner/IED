@@ -1,0 +1,135 @@
+include "Torrc.ch"
+
+namespace Tor
+{
+	// A path option's value, quoted (torrc reads a quoted value as a C string, so a '#' in a path is not a comment).
+	static void PathLine(Core::StringBuilder& text, const char* option, Core::StringView path) {
+		text.Append(option);
+		text.Append(" \"");
+		for (int64 i = 0; i < path.ByteLength(); ++i) {
+			const int32 c = path.ByteAt(i);
+			if (c == '"' || c == '\\') text.AppendByte('\\');
+			text.AppendByte(c);
+		}
+		text.Append("\"\n");
+	}
+
+	Core::String TorrcText(const TorFiles& files, const Core::Array<Core::String>& exitCountries) {
+		Core::StringBuilder text;
+		text.Append("# Written by IED's Tor plugin (docs/29) at each start.\n");
+		text.Append("SocksPort 127.0.0.1:auto\n");
+		text.Append("ControlPort 127.0.0.1:auto\n");
+		text.Append("CookieAuthentication 1\n");
+		text.Append("AvoidDiskWrites 1\n");
+		PathLine(text, "DataDirectory", (files.m_State + "/data").View());
+		PathLine(text, "ControlPortWriteToFile", (files.m_State + "/control-port").View());
+		if (!files.m_Geoip.IsEmpty()) PathLine(text, "GeoIPFile", files.m_Geoip.View());
+		if (!files.m_Geoip6.IsEmpty()) PathLine(text, "GeoIPv6File", files.m_Geoip6.View());
+		if (!exitCountries.IsEmpty()) {
+			text.Append("ExitNodes ");
+			for (int64 i = 0; i < exitCountries.Count(); ++i) {
+				if (i > 0) text.Append(",");
+				text.Append("{");
+				for (int64 j = 0; j < exitCountries[i].ByteLength(); ++j) {
+					const int32 c = exitCountries[i].View().ByteAt(j);
+					text.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+				}
+				text.Append("}");
+			}
+			text.Append("\nStrictNodes 1\n");
+		}
+		// Log's value is split in three at spaces, the third (the file) keeping the rest: a path with spaces is fine.
+		text.Append("Log notice file ");
+		text.Append(files.m_State.View());
+		text.Append("/tor.log\n");
+		return text.ToString();
+	}
+
+	// The port after the last ':' of "host:port".
+	static int32 PortAfterColon(Core::StringView address) {
+		int64 colon = address.ByteLength() - 1;
+		while (colon >= 0 && address.ByteAt(colon) != ':') colon -= 1;
+		int64 port = 0;
+		if (colon < 0 || !Core::ParseInt64(address.Substring(colon + 1, address.ByteLength() - colon - 1), port)) return 0;
+		return port > 0 && port <= 65535 ? (int32)port : 0;
+	}
+
+	int32 ControlPortOf(Core::StringView text) {
+		Core::StringView line = text.Trimmed();
+		const int64 newline = line.IndexOf('\n', 0);
+		if (newline >= 0) line = line.Substring(0, newline).Trimmed();
+		if (!line.StartsWith(Core::StringView("PORT="))) return 0;
+		return PortAfterColon(line.Substring(5, line.ByteLength() - 5));
+	}
+
+	int32 SocksPortOf(Core::StringView reply) {
+		const int64 equals = reply.IndexOf(Core::StringView("net/listeners/socks="));
+		if (equals < 0) return 0;
+		Core::StringView value = reply.Substring(equals + 20, reply.ByteLength() - equals - 20).Trimmed();
+		if (value.StartsWith(Core::StringView("\""))) value = value.Substring(1, value.ByteLength() - 1);
+		const int64 end = value.IndexOf('"', 0);
+		if (end >= 0) value = value.Substring(0, end);
+		const int64 space = value.IndexOf(' ', 0);
+		if (space >= 0) value = value.Substring(0, space);
+		return PortAfterColon(value);
+	}
+
+	// The value of `key=` in a reply's space-separated fields, a quoted one without its quotes; empty when absent.
+	static Core::StringView FieldOf(Core::StringView reply, Core::StringView key) {
+		int64 at = 0;
+		while (at < reply.ByteLength()) {
+			Core::StringView rest = reply.Substring(at, reply.ByteLength() - at);
+			const int64 found = rest.IndexOf(key);
+			if (found < 0) return Core::StringView("");
+			const int64 start = at + found;
+			const bool boundary = start == 0 || reply.ByteAt(start - 1) == ' ';
+			const int64 valueStart = start + key.ByteLength();
+			if (boundary && valueStart < reply.ByteLength() && reply.ByteAt(valueStart) == '=') {
+				Core::StringView value = reply.Substring(valueStart + 1, reply.ByteLength() - valueStart - 1);
+				if (value.StartsWith(Core::StringView("\""))) {
+					const int64 close = value.IndexOf('"', 1);
+					return close < 0 ? value.Substring(1, value.ByteLength() - 1) : value.Substring(1, close - 1);
+				}
+				const int64 space = value.IndexOf(' ', 0);
+				return space < 0 ? value : value.Substring(0, space);
+			}
+			at = start + key.ByteLength();
+		}
+		return Core::StringView("");
+	}
+
+	bool BootstrapOf(Core::StringView reply, int32& progress, Core::String& summary) {
+		int64 value = 0;
+		if (!Core::ParseInt64(FieldOf(reply, Core::StringView("PROGRESS")), value) || value < 0 || value > 100) return false;
+		progress = (int32)value;
+		summary = Core::String(FieldOf(reply, Core::StringView("SUMMARY")));
+		return true;
+	}
+
+	Core::String Hex(const uint8* bytes, int64 count) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < count; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	Core::String LogTail(Core::StringView text, int32 lines) {
+		Core::Array<Core::StringView> all;
+		Core::Array<Core::StringView> loud;
+		Core::StringView rest = text;
+		while (!rest.IsEmpty()) {
+			const int64 end = rest.IndexOf('\n', 0);
+			Core::StringView line = (end < 0 ? rest : rest.Substring(0, end)).Trimmed();
+			rest = end < 0 ? Core::StringView("") : rest.Substring(end + 1, rest.ByteLength() - end - 1);
+			if (line.IsEmpty()) continue;
+			all.Push(line);
+			if (line.Contains(Core::StringView("[warn]")) || line.Contains(Core::StringView("[err]"))) loud.Push(line);
+		}
+		const Core::Array<Core::StringView>* chosen = loud.IsEmpty() ? &all : &loud;
+		Core::StringBuilder tail;
+		for (int64 i = chosen->Count() > lines ? chosen->Count() - lines : 0; i < chosen->Count(); ++i) {
+			if (!tail.IsEmpty()) tail.Append(" | ");
+			tail.Append(chosen->At(i));
+		}
+		return tail.ToString();
+	}
+}

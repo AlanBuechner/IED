@@ -40,7 +40,7 @@ export function applyChanges(text, changes) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Rebasing (the server's rule, src/fs/textedit.cf, and its mirror for a client with edits of its own in flight)
+// Rebasing (the server's rule, src/fs/TextEdit.cf, and its mirror for a client with edits of its own in flight)
 
 export class OverlapError extends EditError {}
 

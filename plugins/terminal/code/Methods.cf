@@ -1,0 +1,250 @@
+// The term.* methods (docs/10 "Terminals"). Each reads and changes the terminals inside a change (Atomically) and
+// throws its protocol error after it, from what the change found.
+include "Terminal.ch"
+
+namespace Terminal
+{
+	const int32 c_TerminalMostColumns = 1000;
+	const int32 c_TerminalMostRows = 500;
+
+	// Why a method refuses, found inside a change and thrown after it.
+	class Refusal
+	{
+		public bool m_Set;
+		public IED::ErrorCode m_Code;
+		public Core::String m_Message;
+		public Core::String m_Data;
+
+		public void Set(IED::ErrorCode why, Core::StringView text) {
+			m_Set = true;
+			m_Code = why;
+			m_Message = Core::String(text);
+		}
+
+		public void ThrowIfSet() const {
+			if (m_Set) throw IED::RpcError(m_Code, m_Message.View(), m_Data.View());
+		}
+	}
+
+	static Term* Named(Terminals* terms, Core::StringView termId, Refusal* refusal) {
+		for (Term* terminal : terms->m_Terminals)
+			if (terminal->m_TermId.View() == termId) return terminal;
+		refusal->Set(IED::ErrorCode::NotFound, (Core::String("no terminal ") + termId).View());
+		return nullptr;
+	}
+
+	static int32 Clamped(int64 value, int32 fallback, int32 most) {
+		if (value <= 0) return fallback;
+		return value > most ? most : (int32)value;
+	}
+
+	static Core::String Empty() { return Core::String("{}"); }
+
+	static IED::Workspace WorkspaceParam(const IED::Params& params) {
+		Core::String wsId = params.Str("wsId");
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId.View()).View());
+		return ws;
+	}
+
+	// The profiles New Terminal falls back on, in order, when no default is set (the terminal plugin's own).
+	static Core::Array<Core::String> Fallbacks() {
+		Core::Array<Core::String> ids;
+		ids.Push(Core::String("pwsh"));
+		ids.Push(Core::String("powershell"));
+		ids.Push(Core::String("cmd"));
+		return ids;
+	}
+
+	// The profile a new terminal runs: the one `params` names, else the default (null when the terminal.shell setting
+	// or the fallback shells decide). Throws not_found for an unknown one and unavailable for one that cannot start.
+	static Profile* ChosenProfile(Terminals* terms, const IED::Workspace& ws, const IED::Params& params) {
+		Core::Array<Profile*> profiles = ProfilesOf(terms->m_Context, ws);
+		Core::String named = params.Str("profile", Core::StringView(""));
+		if (named.IsEmpty()) named = DefaultProfile(terms->m_Context, ws, profiles, Fallbacks());
+		if (named.IsEmpty()) return nullptr;
+		Profile* profile = ProfileNamed(profiles, named.View());
+		if (!profile) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no terminal profile ") + named.View()).View());
+		if (!profile->m_Available) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("the ") + profile->m_Title.View()) + " terminal cannot start: ") + profile->m_Problem.View()).View());
+		return profile;
+	}
+
+	static Core::String CreateMethod(Terminals* terms, const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		IED::Workspace ws = WorkspaceParam(params);
+		Core::String cwd;
+		Core::String within = params.Str("cwd", Core::StringView(""));
+		if (!within.IsEmpty()) {
+			FS::Path folder = FS::Path(ws.m_Root.View()) / IED::NormalizePath(within.View()).View();
+			if (!FS::IsDirectory(folder.CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no folder ") + within.View()).View());
+			cwd = Core::String(folder.View());
+		}
+		Core::Array<Core::String> argv;
+		Serialization::DomNode given = params.Field("argv");
+		for (int64 i = 0; given.Kind() == Serialization::DomKind::Array && i < given.Count(); ++i) argv.Push(Core::String(given.At(i).AsView()));
+		Core::Array<Core::String> environment;
+		Core::String title = params.Str("title", Core::StringView(""));
+		Profile* profile = argv.IsEmpty() ? ChosenProfile(terms, ws, params) : nullptr;
+		if (profile) {
+			argv = profile->m_Argv;
+			environment = profile->m_Environment;
+			if (cwd.IsEmpty()) cwd = profile->m_Cwd;
+			if (title.IsEmpty()) title = profile->m_Title;
+		}
+		if (cwd.IsEmpty()) cwd = ws.m_Root;
+		environment = IED::ToolEnvironment(ws, environment);
+		const int32 cols = Clamped(params.Int("cols", 0), c_TerminalDefaultColumns, c_TerminalMostColumns);
+		const int32 rows = Clamped(params.Int("rows", 0), c_TerminalDefaultRows, c_TerminalMostRows);
+		Term* terminal = terms->Create(ws.m_Id.View(), argv, environment, cwd.View(), title.View(), profile ? profile->m_Id.View() : Core::StringView(""), Core::StringView("shell"), request.m_ClientId.View(), cols, rows);
+		Core::String* summary = new Core::String();
+		terms->m_Context->Atomically([terminal, summary](IED::Events& events) { *summary = terminal->SummaryJson(); });
+		return *summary;
+	}
+
+	static Core::String ProfilesMethod(Terminals* terms, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceParam(request.m_Params);
+		Core::Array<Profile*> profiles = ProfilesOf(terms->m_Context, ws);
+		return ProfilesJson(profiles, DefaultProfile(terms->m_Context, ws, profiles, Fallbacks()).View(), DefaultSetting(terms->m_Context, ws.m_Id.View()).View());
+	}
+
+	static Core::String ListMethod(Terminals* terms, const IED::Request& request) {
+		Core::String wsId = request.m_Params.Str("wsId");
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId.View()).View());
+		Core::String* list = new Core::String();
+		terms->m_Context->Atomically([terms, wsId, list](IED::Events& events) { *list = terms->ListJson(wsId.View()); });
+		return *list;
+	}
+
+	static Core::String InputMethod(Terminals* terms, const IED::Request& request) {
+		Core::String termId = request.m_Params.Str("termId");
+		Core::String keys = request.m_Params.Str("data");
+		Core::String client = request.m_ClientId;
+		Refusal* refusal = new Refusal();
+		terms->m_Context->Atomically([terms, termId, keys, client, refusal](IED::Events& events) {
+			Term* terminal = Named(terms, termId.View(), refusal);
+			if (!terminal) return;
+			if (terminal->m_Holder.View() != client.View()) {
+				IED::JsonWriter data;
+				data.BeginObject();
+				data.Field("reason", "lease");
+				data.Field("holder", terminal->m_Holder.View());
+				data.EndObject();
+				refusal->Set(IED::ErrorCode::Forbidden, Core::StringView("another window is typing in this terminal"));
+				refusal->m_Data = data.ToString();
+				return;
+			}
+			if (!terminal->m_Alive) {
+				refusal->Set(IED::ErrorCode::Conflict, Core::StringView("the terminal's program has exited"));
+				return;
+			}
+			terminal->m_Input->Push(keys.View());
+		});
+		refusal->ThrowIfSet();
+		return Empty();
+	}
+
+	static Core::String TakeLeaseMethod(Terminals* terms, const IED::Request& request) {
+		Core::String termId = request.m_Params.Str("termId");
+		Core::String client = request.m_ClientId;
+		Refusal* refusal = new Refusal();
+		Core::String* answer = new Core::String();
+		terms->m_Context->Atomically([terms, termId, client, refusal, answer](IED::Events& events) {
+			Term* terminal = Named(terms, termId.View(), refusal);
+			if (!terminal) return;
+			terminal->m_Holder = client;
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("holder", terminal->m_Holder.View());
+			json.EndObject();
+			*answer = json.ToString();
+			events.Publish(terminal->Topic().View(), "lease", answer->View());
+			terms->Changed(events, terminal, "term.changed");
+		});
+		refusal->ThrowIfSet();
+		return *answer;
+	}
+
+	static Core::String ResizeMethod(Terminals* terms, const IED::Request& request) {
+		Core::String termId = request.m_Params.Str("termId");
+		Core::String client = request.m_ClientId;
+		const int64 wantCols = request.m_Params.Int("cols");
+		const int64 wantRows = request.m_Params.Int("rows");
+		Refusal* refusal = new Refusal();
+		terms->m_Context->Atomically([terms, termId, client, wantCols, wantRows, refusal](IED::Events& events) {
+			Term* terminal = Named(terms, termId.View(), refusal);
+			if (!terminal || terminal->m_Holder.View() != client.View() || !terminal->m_Alive) return;
+			const int32 cols = Clamped(wantCols, terminal->m_Cols, c_TerminalMostColumns);
+			const int32 rows = Clamped(wantRows, terminal->m_Rows, c_TerminalMostRows);
+			if (cols == terminal->m_Cols && rows == terminal->m_Rows) return;
+			terminal->m_Cols = cols;
+			terminal->m_Rows = rows;
+			terminal->m_Child->Resize(cols, rows);
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.IntField("cols", cols);
+			json.IntField("rows", rows);
+			json.EndObject();
+			events.Publish(terminal->Topic().View(), "resize", json.View());
+		});
+		refusal->ThrowIfSet();
+		return Empty();
+	}
+
+	static Core::String RenameMethod(Terminals* terms, const IED::Request& request) {
+		Core::String termId = request.m_Params.Str("termId");
+		Core::String title = request.m_Params.Str("title");
+		if (title.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "a terminal needs a title");
+		Refusal* refusal = new Refusal();
+		Core::String* summary = new Core::String();
+		terms->m_Context->Atomically([terms, termId, title, refusal, summary](IED::Events& events) {
+			Term* terminal = Named(terms, termId.View(), refusal);
+			if (!terminal) return;
+			terminal->m_Title = Core::String(title.View().Trimmed());
+			terms->Changed(events, terminal, "term.changed");
+			*summary = terminal->SummaryJson();
+		});
+		refusal->ThrowIfSet();
+		return *summary;
+	}
+
+	static Core::String CloseMethod(Terminals* terms, const IED::Request& request) {
+		Core::String termId = request.m_Params.Str("termId");
+		Refusal* refusal = new Refusal();
+		Core::Array<Term*>* closed = new Core::Array<Term*>();
+		terms->m_Context->Atomically([terms, termId, refusal, closed](IED::Events& events) {
+			Term* terminal = Named(terms, termId.View(), refusal);
+			if (!terminal) return;
+			terminal->m_Alive = false;
+			terminal->m_Input->Close();
+			terminal->m_Child->Kill();
+			for (int64 i = 0; i < terms->m_Terminals.Count(); ++i)
+				if (terms->m_Terminals[i] == terminal) {
+					terms->m_Terminals.RemoveAt(i);
+					break;
+				}
+			terms->Changed(events, terminal, "term.removed");
+			closed->Push(terminal);
+		});
+		refusal->ThrowIfSet();
+		for (Term* terminal : *closed) terms->m_Context->RemoveTopic(terminal->Topic().View());
+		return Empty();
+	}
+
+	static void Register(Terminals* terms, const char* name, func<Core::String(Terminals*, const IED::Request&)> method) {
+		Core::String problem;
+		if (!terms->m_Context->Method(Core::StringView(name), [terms, method](const IED::Request& request) -> Core::String { return method(terms, request); }, problem))
+			terms->m_Context->Log(problem.View());
+	}
+
+	void RegisterMethods(Terminals* terms) {
+		Register(terms, "term.create", CreateMethod);
+		Register(terms, "term.list", ListMethod);
+		Register(terms, "term.profiles", ProfilesMethod);
+		Register(terms, "term.input", InputMethod);
+		Register(terms, "term.takeLease", TakeLeaseMethod);
+		Register(terms, "term.resize", ResizeMethod);
+		Register(terms, "term.rename", RenameMethod);
+		Register(terms, "term.close", CloseMethod);
+	}
+}

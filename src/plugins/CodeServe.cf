@@ -1,0 +1,211 @@
+// What plugin code serves beyond its own thread (docs/26 "Built-ins on the API"): protocol methods on their requests'
+// threads, the topics it made, and the workspace events it follows.
+
+include "Code.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	void CodeScope::Init(CodeInstance* instance) {
+		m_Saved = CurrentCode();
+		SetCurrentCode(instance);
+	}
+
+	void CodeScope::Delete() { SetCurrentCode(m_Saved); }
+
+	thread_local bool s_THostLockHeld = false;
+
+	bool HostLockHeld() { return s_THostLockHeld; }
+
+	void SetHostLockHeld(bool held) { s_THostLockHeld = held; }
+
+	void ApiLock::Init(Server* server) {
+		this.m_Server = server;
+		m_Taken = !s_THostLockHeld;
+		if (!m_Taken) return;
+		server->m_Lock.Lock();
+		s_THostLockHeld = true;
+	}
+
+	void ApiLock::Delete() {
+		if (!m_Taken) return;
+		s_THostLockHeld = false;
+		m_Server->m_Lock.Unlock();
+	}
+
+	void CodeUnlocked::Init(Server* server) {
+		this.m_Server = server;
+		m_Held = s_THostLockHeld;
+		s_THostLockHeld = false;
+		server->m_Lock.Unlock();
+	}
+
+	void CodeUnlocked::Delete() {
+		m_Server->m_Lock.Lock();
+		s_THostLockHeld = m_Held;
+	}
+
+	CodeInstance* ApiCaller(Core::String& problem) {
+		CodeInstance* instance = CurrentCode();
+		if (!instance) problem = Core::String("the plugin API is for a plugin's code, on its thread");
+		return instance;
+	}
+
+	Workspace* PermittedWorkspace(CodeInstance* instance, Core::StringView wsId, const char* permission, Core::String& problem) {
+		Server* server = instance->m_Runtime->m_Server;
+		if (permission[0] != 0 && !instance->May(Core::StringView(permission))) {
+			problem = (Core::String("the plugin's manifest does not ask for the permission ") + permission);
+			return nullptr;
+		}
+		Workspace* found = server->m_Workspaces->Find(wsId);
+		if (!found || !server->m_Code->LoadedIn(instance, found)) {
+			problem = (Core::String("no open workspace ") + wsId) + " for this plugin";
+			return nullptr;
+		}
+		return found;
+	}
+
+	bool CodeRuntime::MayName(CodeInstance* instance, Core::StringView name) const {
+		if (instance->m_Builtin) return true;
+		Core::String prefix = instance->m_PluginId + "/";
+		return name.StartsWith(prefix.View()) && name.ByteLength() > prefix.ByteLength();
+	}
+
+	// --- Methods -------------------------------------------------------------------------------------------------------
+
+	// A method's run, for its guard: its answer, or the protocol error it threw.
+	class MethodRun
+	{
+		public Core::String m_Result;
+		public IED::RpcError m_Error;
+		public bool m_Refused;
+	}
+
+	Core::String CodeRuntime::CallMethod(CodeInstance* instance, const IED::MethodHandler& handler, Call& call, const Params& params) {
+		if (instance->m_Stopping || instance->m_State != CodeState::Active)
+			throw RpcError(ErrorCode::Unavailable, (((Core::String("plugin ") + instance->m_PluginId.View()) + " is not running: ") + instance->m_Problem.View()).View());
+		IED::Request* request = new IED::Request();
+		request->m_Params = params;
+		request->m_ClientId = Core::String(call.ClientId());
+		CancelToken* cancel = call.m_Cancel;
+		request->m_Stopped = [cancel]() -> bool { return cancel->IsCancelled(); };
+		MethodRun* run = new MethodRun();
+		IED::MethodHandler answer = handler;
+		Core::String problem;
+		bool ran = false;
+		instance->m_Running += 1;
+		{
+			CodeUnlocked unlocked(m_Server);
+			CodeScope scope(instance);
+			ran = GuardedCall(instance, [answer, request, run]() {
+				try {
+					run->m_Result = answer(*request);
+				}
+				catch (IED::RpcError& error) {
+					run->m_Error = error;
+					run->m_Refused = true;
+				}
+			}, problem);
+		}
+		instance->m_Running -= 1;
+		if (instance->m_Running == 0) instance->m_Idle.NotifyAll();
+		if (!ran) throw RpcError(ErrorCode::PluginError, (((Core::String("plugin ") + instance->m_PluginId.View()) + ": ") + problem.View()).View());
+		if (run->m_Refused) throw run->m_Error;
+		return run->m_Result;
+	}
+
+	// --- Topics --------------------------------------------------------------------------------------------------------
+
+	PluginTopic* CodeRuntime::TopicOf(CodeInstance* instance, Core::StringView key) const {
+		for (PluginTopic* topic : instance->m_Topics)
+			if (topic->m_Key.View() == key) return topic;
+		return nullptr;
+	}
+
+	Core::String CodeRuntime::PulledSnapshot(CodeInstance* instance, PluginTopic* topic) {
+		if (instance->m_State != CodeState::Active) return Core::String("{}");
+		Core::String* text = new Core::String("{}");
+		Core::String problem;
+		CodeScope scope(instance);
+		func<Core::String()> pull = topic->m_Pull;
+		const bool held = HostLockHeld();
+		SetHostLockHeld(true);
+		const bool pulled = GuardedCallLocked(instance, [pull, text]() { *text = pull(); }, problem);
+		SetHostLockHeld(held);
+		if (!pulled)
+			m_Server->Log((((((Core::String("plugin ") + instance->m_PluginId.View()) + ": the snapshot of ") + topic->m_Key.View()) + ": ") + problem.View()).View());
+		return *text;
+	}
+
+	void CodeRuntime::Unregister(CodeInstance* instance) {
+		for (const Core::String& method : instance->m_Methods) m_Server->m_Rpc.Unregister(method.View());
+		instance->m_Methods.Clear();
+		for (PluginTopic* topic : instance->m_Topics) m_Server->m_Hub.Remove(topic->m_Key.View());
+		instance->m_Topics.Clear();
+		for (PluginWatch* watch : instance->m_Watches) watch->m_Stopped = true;
+		instance->m_Watches.Clear();
+	}
+
+	void CodeRuntime::QueueWatched(CodeInstance* instance, PluginWatch* watch, func<void(const Core::Array<Core::String>&)> handler, const Core::Array<Core::String>& paths) {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		if (watch->m_Stopped || instance->m_State != CodeState::Active) return;
+		Core::Array<Core::String>* given = new Core::Array<Core::String>();
+		*given = paths;
+		Queue(instance, [instance, handler, given]() {
+			Core::String problem;
+			GuardedCall(instance, [handler, given]() { handler(*given); }, problem);
+		});
+	}
+
+	bool DeclaresOutput(Plugin* plugin, Core::StringView source) {
+		Serialization::DomNode sources = plugin->m_Manifest->m_Contributes.Member("outputSources");
+		for (int64 i = 0; i < sources.Count(); ++i)
+			if (sources.At(i).Member("id").AsView() == source) return true;
+		return false;
+	}
+
+	// --- Workspace events ----------------------------------------------------------------------------------------------
+
+	void CodeRuntime::TrustChanged(Workspace* ws) {
+		IED::Workspace shown = PluginWorkspace(m_Server, ws);
+		for (CodeInstance* instance : m_Instances) {
+			if (!instance->m_WantsTrust || instance->m_State != CodeState::Active || !LoadedIn(instance, ws)) continue;
+			Queue(instance, [instance, shown]() {
+				for (const IED::WorkspaceHandler& handler : instance->m_Handlers.m_TrustHandlers) {
+					Core::String problem;
+					if (!GuardedCall(instance, [handler, shown]() { handler(shown); }, problem)) return;
+				}
+			});
+		}
+	}
+
+	static const char* ChangeName(TreeChangeKind kind) {
+		if (kind == TreeChangeKind::Created) return "created";
+		return kind == TreeChangeKind::Deleted ? "deleted" : "changed";
+	}
+
+	void CodeRuntime::FilesChanged(Workspace* ws, const ChangeBatch& batch) {
+		IED::FileChanges* changes = nullptr;
+		for (CodeInstance* instance : m_Instances) {
+			if (!instance->m_WantsFiles || instance->m_State != CodeState::Active || !LoadedIn(instance, ws)) continue;
+			if (!changes) {
+				changes = new IED::FileChanges();
+				changes->m_WsId = ws->m_WsId;
+				changes->m_Overflowed = batch.Overflowed();
+				for (const TreeChange& change : batch.Changes()) {
+					IED::FileChange each;
+					each.m_Path = change.m_Path;
+					each.m_Change = Core::String(ChangeName(change.m_Kind));
+					changes->m_Changes.Push(each);
+				}
+			}
+			IED::FileChanges* given = changes;
+			Queue(instance, [instance, given]() {
+				for (const IED::FilesHandler& handler : instance->m_Handlers.m_FilesHandlers) {
+					Core::String problem;
+					if (!GuardedCall(instance, [handler, given]() { handler(*given); }, problem)) return;
+				}
+			});
+		}
+	}
+}

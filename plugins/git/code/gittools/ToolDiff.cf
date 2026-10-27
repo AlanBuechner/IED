@@ -1,0 +1,249 @@
+// git_diff's and git_blame's text (ToolText.ch).
+
+include "ToolText.ch"
+include "repo/WorkingDiff.ch"
+
+namespace Git
+{
+	// A file of a diff: its path, where its text starts in the shown diff and its counts.
+	struct DiffFile
+	{
+		public Core::String m_Path;
+		public int64 m_Start;
+		public int64 m_Added;
+		public int64 m_Removed;
+		public bool m_Binary;
+	}
+
+	static Core::StringView Rest(Core::StringView line, int64 from) {
+		return line.Substring(from, line.ByteLength() - from);
+	}
+
+	// The path a "diff --git a/X b/Y" line names: Y, after the last " b/".
+	static Core::String HeaderPath(Core::StringView line) {
+		Core::StringView names = Rest(line, 11);
+		int64 at = -1;
+		for (int64 i = 0; i + 3 <= names.ByteLength(); ++i)
+			if (names.Substring(i, 3) == " b/") at = i;
+		return at < 0 ? Core::String(names) : Core::String(Rest(names, at + 3));
+	}
+
+	static void AppendCounts(Core::StringBuilder& out, const DiffFile& file) {
+		if (file.m_Binary) {
+			out.Append("binary");
+			return;
+		}
+		out.Append("+");
+		out.AppendInt(file.m_Added);
+		out.Append(" -");
+		out.AppendInt(file.m_Removed);
+	}
+
+	static void AppendSummary(Core::StringBuilder& out, const Core::Array<DiffFile>& files) {
+		DiffFile total;
+		for (const DiffFile& file : files) {
+			total.m_Added += file.m_Added;
+			total.m_Removed += file.m_Removed;
+		}
+		out.AppendInt(files.Count());
+		out.Append(files.Count() == 1 ? " file changed, " : " files changed, ");
+		AppendCounts(out, total);
+		out.Append(files.Count() == 1 ? "\n" : ":\n");
+		for (int64 i = 0; files.Count() > 1 && i < files.Count() && i < c_ToolListMost; ++i) {
+			out.Append("  ");
+			out.Append(files[i].m_Path.View());
+			out.Append("  ");
+			AppendCounts(out, files[i]);
+			out.Append("\n");
+		}
+		if (files.Count() > c_ToolListMost) out.Append("  ...\n");
+	}
+
+	// What a cut at `cut` bytes left out: the file shown in part and the files not shown.
+	static void AppendCut(Core::StringBuilder& out, const Core::Array<DiffFile>& files, int64 cut, int64 most) {
+		Core::String part;
+		int64 hidden = 0;
+		for (const DiffFile& file : files) {
+			if (file.m_Start >= cut) hidden += 1;
+			else part = file.m_Path;
+		}
+		out.Append("[the diff is cut at ");
+		out.AppendInt(most / 1024);
+		out.Append(" KB: ");
+		out.Append(part.View());
+		out.Append(" is shown in part");
+		if (hidden > 0) {
+			out.Append(" and ");
+			out.AppendInt(hidden);
+			out.Append(hidden == 1 ? " more file is not shown" : " more files are not shown");
+		}
+		out.Append("; ask for fewer paths to see the rest]\n");
+	}
+
+	Core::String DiffText(Core::StringView diff, bool numbered, int64 most) {
+		Core::Array<DiffFile> files;
+		Core::StringBuilder shown;
+		int64 hunk = 0;
+		bool inHunks = false;
+		for (Core::StringView line : SplitOn(diff, '\n')) {
+			if (line.StartsWith(Core::StringView("diff --git ")) || line.StartsWith(Core::StringView("diff --cc "))) {
+				DiffFile file;
+				file.m_Path = line.StartsWith(Core::StringView("diff --cc ")) ? Core::String(Rest(line, 10)) : HeaderPath(line);
+				file.m_Start = shown.ByteLength();
+				files.Push(file);
+				hunk = 0;
+				inHunks = false;
+			}
+			else if (!files.IsEmpty()) {
+				DiffFile& file = files[files.Count() - 1];
+				if (line.StartsWith(Core::StringView("@@"))) {
+					inHunks = true;
+					hunk += 1;
+				}
+				else if (!inHunks && line.StartsWith(Core::StringView("+++ b/"))) file.m_Path = Core::String(Rest(line, 6).Trimmed());
+				else if (!inHunks && line.StartsWith(Core::StringView("Binary files "))) file.m_Binary = true;
+				else if (inHunks && line.StartsWith(Core::StringView("+"))) file.m_Added += 1;
+				else if (inHunks && line.StartsWith(Core::StringView("-"))) file.m_Removed += 1;
+			}
+			shown.Append(line);
+			if (numbered && inHunks && line.StartsWith(Core::StringView("@@"))) {
+				shown.Append(" (hunk ");
+				shown.AppendInt(hunk);
+				shown.Append(")");
+			}
+			shown.Append("\n");
+		}
+		if (files.IsEmpty()) return Core::String("");
+		Core::StringBuilder out;
+		AppendSummary(out, files);
+		out.Append("\n");
+		bool truncated = false;
+		Core::StringView kept = CutAtLine(shown.View(), most, truncated);
+		out.Append(kept);
+		if (truncated) AppendCut(out, files, kept.ByteLength(), most);
+		return out.ToString();
+	}
+
+	// --- Blame ---------------------------------------------------------------------------------------------------------
+
+	struct BlameCommit
+	{
+		public Core::String m_Oid;
+		public Core::String m_Author;
+		public int64 m_Seconds;
+		public int32 m_Offset;   // the author's time zone, seconds ahead of UTC
+		public Core::String m_Summary;
+	}
+
+	struct BlameLine
+	{
+		public int64 m_Number;
+		public int64 m_Commit;   // into the commits
+		public Core::String m_Text;
+	}
+
+	static bool IsHex(int32 c) {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+	}
+
+	// "<40 hex> <source line> <line> [<count>]": the line that starts a blamed line's entry.
+	static bool IsEntry(Core::StringView line) {
+		if (line.ByteLength() < 42 || line.ByteAt(40) != ' ') return false;
+		for (int64 i = 0; i < 40; ++i)
+			if (!IsHex(line.ByteAt(i))) return false;
+		return true;
+	}
+
+	// "+0200" as seconds ahead of UTC.
+	static int32 ZoneOffset(Core::StringView zone) {
+		if (zone.ByteLength() != 5) return 0;
+		const int32 hours = (zone.ByteAt(1) - '0') * 10 + (zone.ByteAt(2) - '0');
+		const int32 minutes = (zone.ByteAt(3) - '0') * 10 + (zone.ByteAt(4) - '0');
+		const int32 seconds = hours * 3600 + minutes * 60;
+		return zone.ByteAt(0) == '-' ? -seconds : seconds;
+	}
+
+	static int64 CommitIndex(Core::Array<BlameCommit>& commits, Core::StringView oid) {
+		for (int64 i = 0; i < commits.Count(); ++i)
+			if (commits[i].m_Oid.View() == oid) return i;
+		BlameCommit commit;
+		commit.m_Oid = Core::String(oid);
+		commits.Push(commit);
+		return commits.Count() - 1;
+	}
+
+	static void ReadCommitField(BlameCommit& commit, Core::StringView line) {
+		if (line.StartsWith(Core::StringView("author "))) commit.m_Author = Core::String(Rest(line, 7));
+		else if (line.StartsWith(Core::StringView("author-time "))) Core::ParseInt64(Rest(line, 12), commit.m_Seconds);
+		else if (line.StartsWith(Core::StringView("author-tz "))) commit.m_Offset = ZoneOffset(Rest(line, 10));
+		else if (line.StartsWith(Core::StringView("summary "))) commit.m_Summary = Core::String(Rest(line, 8));
+	}
+
+	static void AppendTwo(Core::StringBuilder& out, int32 value) {
+		if (value < 10) out.Append("0");
+		out.AppendInt(value);
+	}
+
+	static void AppendCommit(Core::StringBuilder& out, const BlameCommit& commit) {
+		out.Append("  ");
+		out.Append(commit.m_Oid.View().Substring(0, 7));
+		if (commit.m_Oid.View().StartsWith(Core::StringView("0000000000"))) {
+			out.Append(" not committed yet\n");
+			return;
+		}
+		Platform::CalendarTime day = Platform::CalendarAtOffset(commit.m_Seconds * Platform::kNanosecondsPerSecond, commit.m_Offset);
+		out.Append(" ");
+		out.AppendInt(day.year);
+		out.Append("-");
+		AppendTwo(out, day.month);
+		out.Append("-");
+		AppendTwo(out, day.day);
+		out.Append(" ");
+		out.Append(commit.m_Author.View());
+		out.Append(": ");
+		out.Append(commit.m_Summary.View());
+		out.Append("\n");
+	}
+
+	Core::String BlameText(Core::StringView porcelain, Core::StringView path) {
+		Core::Array<BlameCommit> commits;
+		Core::Array<BlameLine> lines;
+		int64 current = -1;
+		int64 number = 0;
+		for (Core::StringView line : SplitOn(porcelain, '\n')) {
+			if (line.StartsWith(Core::StringView("\t"))) {
+				BlameLine blamed;
+				blamed.m_Number = number;
+				blamed.m_Commit = current;
+				blamed.m_Text = Core::String(Rest(line, 1));
+				if (current >= 0) lines.Push(blamed);
+			}
+			else if (IsEntry(line)) {
+				current = CommitIndex(commits, line.Substring(0, 40));
+				Core::Array<Core::StringView> fields = SplitOn(line, ' ');
+				if (fields.Count() > 2) Core::ParseInt64(fields[2], number);
+			}
+			else if (current >= 0) ReadCommitField(commits[current], line);
+		}
+		if (lines.IsEmpty()) return (Core::String(path) + ": no lines to blame") + "\n";
+		Core::StringBuilder out;
+		out.Append(path);
+		out.Append(", lines ");
+		out.AppendInt(lines[0].m_Number);
+		out.Append("-");
+		out.AppendInt(lines[lines.Count() - 1].m_Number);
+		out.Append(", from ");
+		out.AppendInt(commits.Count());
+		out.Append(commits.Count() == 1 ? " commit:\n" : " commits:\n");
+		for (const BlameCommit& commit : commits) AppendCommit(out, commit);
+		for (const BlameLine& blamed : lines) {
+			out.AppendInt(blamed.m_Number);
+			out.Append(" ");
+			out.Append(commits[blamed.m_Commit].m_Oid.View().Substring(0, 7));
+			out.Append("\t");
+			out.Append(blamed.m_Text.View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+}

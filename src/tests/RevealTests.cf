@@ -1,0 +1,18 @@
+// fs/reveal: Explorer by its whole path, a folder opened, a file only after "/select," - never a file to open.
+
+include "fs/Reveal.ch"
+
+[test("server.reveal")]
+class RevealTests {
+	[test("command")]
+	public static void TestCommand() {
+		Process::StartInfo folder = Ied::RevealCommand(FS::Path("C:/Work/proj/src"), true);
+		assert_true(folder.program.View().EndsWith(Core::StringView("\\explorer.exe")), "Explorer by its whole path, not looked for in the current folder");
+		assert_eq(1, folder.arguments.Count(), "a folder: its path alone");
+		assert_true(folder.arguments[0] == "C:\\Work\\proj\\src", "in backslashes");
+		Process::StartInfo file = Ied::RevealCommand(FS::Path("C:/Work/proj/src/tool.exe"), false);
+		assert_eq(2, file.arguments.Count(), "a file: /select, and its path");
+		assert_true(file.arguments[0] == "/select," && file.arguments[1] == "C:\\Work\\proj\\src\\tool.exe", "selected in its folder, never started");
+		assert_true(!folder.killOnClose && !file.killOnClose, "the window outlives the call");
+	}
+}

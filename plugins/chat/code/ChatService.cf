@@ -1,0 +1,685 @@
+include "api/Plugin.ch"
+include "ChatService.ch"
+include "claude/Pacing.ch"
+include "run/Run.ch"
+include "chats/Sent.ch"
+
+namespace Ai
+{
+	const int64 c_TitleMostBytes = 48;
+	const int64 c_ProbeWaitSliceNs = 50000000;
+
+	Core::String ChatsTopic(Core::StringView wsId) { return Core::String("chats:") + wsId; }
+
+	IED::Workspace OpenWorkspace(Core::StringView wsId) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
+		return ws;
+	}
+
+	void Chats::Init(IED::PluginContext* context) {
+		this.m_Context = context;
+		m_Tools = CoreTools();
+		for (const Core::String& problem : m_Tools->m_Problems) context->Log(problem.View());
+		Core::Array<Core::String> problems;
+		m_Prompts.Load(FS::Path(context->Folder().View()) / "prompts", problems);
+		for (const Core::String& problem : problems) context->Log(problem.View());
+		Chats* self = this;
+		Register("chat.list", [self](const IED::Request& request) -> Core::String { return self->ListMethod(request); });
+		Register("chat.create", [self](const IED::Request& request) -> Core::String { return self->CreateMethod(request); });
+		Register("chat.set", [self](const IED::Request& request) -> Core::String { return self->SetMethod(request); });
+		Register("chat.send", [self](const IED::Request& request) -> Core::String { return self->SendMethod(request); });
+		Register("chat.unqueue", [self](const IED::Request& request) -> Core::String { return self->UnqueueMethod(request); });
+		Register("chat.stop", [self](const IED::Request& request) -> Core::String { return self->StopMethod(request); });
+		Register("chat.stopTask", [self](const IED::Request& request) -> Core::String { return self->StopTaskMethod(request); });
+		Register("chat.approve", [self](const IED::Request& request) -> Core::String { return self->ApproveMethod(request); });
+		Register("chat.answer", [self](const IED::Request& request) -> Core::String { return self->AnswerMethod(request); });
+		Register("chat.history", [self](const IED::Request& request) -> Core::String { return self->HistoryMethod(request); });
+		Register("chat.revert", [self](const IED::Request& request) -> Core::String { return self->RevertMethod(request); });
+		Register("ai.probe", [self](const IED::Request& request) -> Core::String { return self->ProbeMethod(request); });
+		Register("chat.delete", [self](const IED::Request& request) -> Core::String { return self->DeleteMethod(request); });
+		Register("chat.restore", [self](const IED::Request& request) -> Core::String { return self->RestoreMethod(request); });
+		Register("chat.purge", [self](const IED::Request& request) -> Core::String { return self->PurgeMethod(request); });
+		m_Claude = new ClaudeAccount(context);
+		LoadWindows();
+		context->StartThread([self]() { self->ClaudeKeeper(); });
+		context->StartThread([self]() { self->DeletedKeeper(); });
+		context->OnDeactivate([self]() {
+			IED::HostLock guard(*self->m_Context);
+			self->m_Stopping = true;
+			for (Core::KeyValue<Core::String, ClaudeSession*>& entry : self->m_ClaudeSessions) entry.value->Stop();
+		});
+	}
+
+	// Each method runs inside the host lock, with the copy of the master's Claude account no older than kAccountFreshMs
+	// (docs/01 "Processes"): a turn it starts picks its model from the plan's usage as it is now.
+	void Chats::Register(const char* name, IED::MethodHandler method) {
+		IED::PluginContext* plugin = m_Context;
+		Chats* self = this;
+		Core::String problem;
+		if (!m_Context->Method(Core::StringView(name), [plugin, self, method](const IED::Request& request) -> Core::String {
+			if (self->m_Claude) self->m_Claude->SyncIfStale();
+			IED::HostLock guard(*plugin);
+			return method(request);
+		}, problem))
+			m_Context->Log(problem.View());
+	}
+
+	void Chats::WorkspaceOpened(const IED::Workspace& ws) {
+		IED::HostLock guard(*m_Context);
+		Chats* self = this;
+		Core::String wsId = ws.m_Id;
+		m_Context->TopicFrom(ChatsTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->ListSnapshot(wsId.View()); });
+		Core::Array<Core::String> problems;
+		for (Chat* chat : LoadChats(LocalStateOf(ws), ws.m_Id.View(), Core::StringView(c_InterruptedNote), problems)) {
+			m_Chats.Push(chat);
+			AddTopic(chat);
+		}
+		for (const Core::String& problem : problems) m_Context->Log(problem.View());
+		LoadDeleted(ws);
+		PurgeExpired();
+		ResumeLater(wsId.View());
+	}
+
+	void Chats::ResumeLater(Core::StringView wsId) {
+		Chats* self = this;
+		Core::String id = Core::String(wsId);
+		m_Context->StartThread([self, id]() {
+			Threading::Thread::Sleep(c_ResumeDelayNs);
+			IED::HostLock guard(*self->m_Context);
+			self->Resume(id.View());
+		});
+	}
+
+	void Chats::Resume(Core::StringView wsId) {
+		IED::Workspace ws;
+		if (m_Stopping || !IED::FindWorkspace(wsId, ws)) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String policy = Core::String(Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.resumeInterrupted"), wsId).View(), *doc).root.AsView());
+		for (Chat* chat : InWorkspace(wsId)) {
+			Core::String reason = ResumeReason(chat, policy.View());
+			if (reason.IsEmpty()) continue;
+			OwnerMessage message;
+			message.m_Text = ResumeText(reason.View(), chat->m_Resume.View());
+			m_Context->Log((((Core::String("chat ") + chat->m_ChatId.View()) + " goes on after the restart (") + reason.View() + ")").View());
+			StartTurn(chat, message, 0, reason.CStr());
+		}
+	}
+
+	Chat* Chats::Get(Core::StringView chatId) const {
+		for (Chat* chat : m_Chats)
+			if (chat->m_ChatId.View() == chatId) return chat;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no chat ") + chatId).View());
+	}
+
+	IED::Workspace Chats::WorkspaceOf(const Chat* chat) const { return OpenWorkspace(chat->m_WsId.View()); }
+
+	void Chats::Publish(Chat* chat, const char* kind, Core::StringView data) { m_Context->Publish(chat->Topic().View(), kind, data); }
+
+	void Chats::PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge) { m_Context->PublishMergeable(chat->Topic().View(), kind, merge); }
+
+	// The chat's group: its own, else ai.defaultGroup, else the first group.
+	static Core::String GroupOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws) {
+		if (!chat->m_Group.IsEmpty()) return chat->m_Group;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String fallback = Core::String(Serialization::ReadJson(context->Setting(Core::StringView("ai.defaultGroup"), WsId(ws)).View(), *doc).root.AsView());
+		if (!fallback.IsEmpty()) return fallback;
+		Core::Array<Core::String> names = GroupNames(context->Setting(Core::StringView("ai.groups"), WsId(ws)).View());
+		return names.IsEmpty() ? Core::String() : names[0];
+	}
+
+	Core::String Chats::GroupOfChat(const Chat* chat, const IED::Workspace& ws) const { return GroupOf(m_Context, chat, ws); }
+
+	// The models the chat's group gives a turn in the chat's mode, in order (docs/04 "Which role a turn uses"); `role` gets the
+	// role.
+	static Core::Array<ModelProfile*> CandidatesOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		return TurnCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
+			Core::StringView(ChatModeName(chat->m_Mode)), chat->m_PinnedModel.View(), role);
+	}
+
+	Core::String Chats::NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const {
+		RoleModel role;
+		Core::Array<ModelProfile*> candidates = CandidatesOf(m_Context, chat, ws, role);
+		group = GroupOf(m_Context, chat, ws);
+		roleEffort = chat->RunsAlone() ? Core::String() : role.m_Effort;
+		if (candidates.IsEmpty()) return Core::String();
+		Core::Array<ChainPlace*> order = TurnOrder(PlacesOf(candidates, role, chat->m_PinnedModel.View(), *m_Claude, ChatNowMs()));
+		return order.IsEmpty() ? candidates[0]->m_Name : order[0]->m_Model;
+	}
+
+	Core::String Chats::ModelOf(const Chat* chat) const {
+		Core::String group;
+		Core::String roleEffort;
+		return NextModel(chat, WorkspaceOf(chat), group, roleEffort);
+	}
+
+	// A chat with turns always has a meter: one kept none is made from its turns (MeterFromTurns).
+	Core::String Chats::Snapshot(Chat* chat) {
+		Core::String group;
+		Core::String roleEffort;
+		IED::Workspace ws = WorkspaceOf(chat);
+		if (chat->m_Context.IsEmpty() && !chat->m_Turns.IsEmpty()) chat->m_Context = MeterFromTurns(this, chat, ws);
+		else if (!chat->m_Context.IsEmpty() && !HasIedParts(chat->m_Context.View())) chat->m_Context = ResplitContext(this, chat, ws);
+		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude") CountClaude(chat, ws);
+		Core::String model = NextModel(chat, ws, group, roleEffort);
+		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), c_ChatSnapshotTurns);
+	}
+
+	void Chats::Changed(Chat* chat) {
+		IED::Workspace ws = WorkspaceOf(chat);
+		Core::String group;
+		Core::String roleEffort;
+		Core::String model = NextModel(chat, ws, group, roleEffort);
+		MeterFor(chat, ws, model.View());
+		Publish(chat, "chat.changed", chat->ChangedJson(model.View(), group.View(), roleEffort.View()).View());
+		m_Context->Publish(ChatsTopic(chat->m_WsId.View()).View(), "chat.changed", chat->SummaryJson().View());
+		SaveChatHeader(LocalStateOf(ws), chat);
+	}
+
+	void Chats::MeterFor(Chat* chat, const IED::Workspace& ws, Core::StringView model) {
+		if (chat->m_Run || chat->m_Context.IsEmpty() || model.IsEmpty() || ContextModel(chat->m_Context.View()).View() == model) return;
+		Core::Array<Core::String> problems;
+		ModelProfile* profile = FindModel(ReadModels(m_Context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems), model);
+		if (!profile) return;
+		chat->m_Context = ContextForModel(chat->m_Context.View(), WindowOf(profile), model, profile->IsClaude());
+		Publish(chat, "context.changed", chat->m_Context.View());
+	}
+
+	int64 Chats::WindowOf(const ModelProfile* profile) const {
+		int64 found = 0;
+		m_Windows.TryGet(profile->m_Name, found);
+		if (profile->m_ContextWindow > 0 && (found == 0 || profile->m_ContextWindow < found)) return profile->m_ContextWindow;
+		return found;
+	}
+
+	static FS::Path WindowsFile(IED::PluginContext* context) { return FS::Path(context->StateFolder().View()) / "windows.json"; }
+
+	bool Chats::LearnWindow(Core::StringView model, int64 window) {
+		if (window <= 0) return false;
+		int64 known = 0;
+		m_Windows.TryGet(Core::String(model), known);
+		if (known == window) return false;
+		m_Windows.At(Core::String(model)) = window;
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (Core::KeyValue<Core::String, int64>& entry : m_Windows) {
+			json.Key(entry.key.View());
+			json.Int(entry.value);
+		}
+		json.EndObject();
+		FS::Path file = WindowsFile(m_Context);
+		FS::MakeDirectories(file.Parent().CStr());
+		Core::String text = json.ToString();
+		FS::WriteFileAtomically(file.CStr(), (const void*)text.View().Data(), text.ByteLength());
+		return true;
+	}
+
+	void Chats::LoadWindows() {
+		FS::Path file = WindowsFile(m_Context);
+		if (!FS::FileExists(file.CStr())) return;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen()) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(opened.ReadText().View(), *doc);
+		if (!parsed.Ok() || parsed.root.Kind() != Serialization::DomKind::Object) return;
+		for (int64 i = 0; i < parsed.root.Count(); ++i)
+			if (parsed.root.ValueAt(i).AsInt() > 0) m_Windows.At(Core::String(parsed.root.KeyAt(i))) = parsed.root.ValueAt(i).AsInt();
+	}
+
+	Core::String Chats::ListSnapshot(Core::StringView wsId) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("chats"));
+		json.BeginArray();
+		for (Chat* chat : m_Chats) {
+			if (chat->m_WsId.View() != wsId) continue;
+			json.BeginObject();
+			chat->WriteSummary(json);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("deleted"));
+		WriteDeleted(json, wsId);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Chats::AddTopic(Chat* chat) {
+		Chats* self = this;
+		m_Context->TopicFrom(chat->Topic().View(), [self, chat]() -> Core::String { return self->Snapshot(chat); });
+	}
+
+	// --- Turns -------------------------------------------------------------------------------------------------------
+
+	static Core::String TitleFrom(Core::StringView text) {
+		Core::StringView line = text.Trimmed();
+		const int64 lineEnd = line.IndexOf('\n', 0);
+		if (lineEnd >= 0) line = line.Substring(0, lineEnd).Trimmed();
+		if (line.ByteLength() <= c_TitleMostBytes) return Core::String(line);
+		int64 cut = c_TitleMostBytes;
+		while (cut > 0 && ((uint8)line.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		return Core::String(line.Substring(0, cut)) + "...";
+	}
+
+	Core::String ModelText(const Chat* to, const OwnerMessage& message) {
+		if (message.m_FromChatId.IsEmpty()) return message.m_Text;
+		Core::StringBuilder out;
+		if (!to->m_Agent.IsEmpty() && to->m_ParentChatId == message.m_FromChatId) {
+			out.Append("You are the sub-agent \"");
+			out.Append(to->m_Agent.View());
+			out.Append("\" of chat \"");
+			out.Append(message.m_FromTitle.View());
+			out.Append("\" (");
+			out.Append(message.m_FromChatId.View());
+			out.Append("). This is its task for you; you start with none of its conversation. Your final answer goes back to it by itself when your turn ends: make it complete and self-contained - what you did, what you found, what is left.\n\n");
+			out.Append(message.m_Text.View());
+			return out.ToString();
+		}
+		out.Append("Message from chat \"");
+		out.Append(message.m_FromTitle.View());
+		out.Append("\" (");
+		out.Append(message.m_FromChatId.View());
+		out.Append("); answer it with chat_send if it asks for an answer:\n\n");
+		out.Append(message.m_Text.View());
+		return out.ToString();
+	}
+
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& message) { StartTurn(chat, message, 0); }
+
+	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, int64 hops, const char* resumed, const char* origin) {
+		IED::Workspace ws = WorkspaceOf(chat);
+		Core::StringView text = sent.m_Text.View();
+		Turn* turn = new Turn();
+		turn->m_TurnId = chat->NextId("u");
+		turn->m_UserText = sent.m_Text;
+		turn->m_Mentions = sent.m_Mentions;
+		turn->m_Attachments = sent.m_Attachments;
+		turn->m_Hops = hops;
+		turn->m_Resumed = Core::String(resumed);
+		turn->m_Origin = Core::String(origin);
+		chat->m_Resume = Core::String();
+		turn->m_FromChatId = sent.m_FromChatId;
+		turn->m_FromTitle = sent.m_FromTitle;
+		turn->m_Mode = chat->m_Mode;
+		turn->m_Group = GroupOf(m_Context, chat, ws);
+		turn->m_Model = ModelOf(chat);
+		turn->m_StartedMs = ChatNowMs();
+		ModelMessage* message = new ModelMessage();
+		message->m_Role = Core::String("user");
+		message->m_Content = ModelText(chat, sent);
+		turn->m_Messages.Push(message);
+		chat->m_Turns.Push(turn);
+		if (chat->m_Title == c_NewChatTitle) chat->m_Title = TitleFrom(text);
+		chat->m_Run = new ChatRun();
+		chat->m_Run->m_Turn = turn;
+		chat->m_State = ChatState::Running;
+		chat->m_StateReason = Core::String();
+		chat->m_UpdatedMs = turn->m_StartedMs;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->m_TurnId.View());
+		data.Field("mode", ChatModeName(turn->m_Mode));
+		data.Field("group", turn->m_Group.View());
+		data.Field("model", turn->m_Model.View());
+		data.Key(Core::StringView("user"));
+		turn->WriteUser(data);
+		data.IntField("startedMs", turn->m_StartedMs);
+		data.EndObject();
+		Publish(chat, "turn.start", data.View());
+		Changed(chat);
+		StartRun(this, chat, ws);
+	}
+
+	Core::Array<Chat*> Chats::InWorkspace(Core::StringView wsId) const {
+		Core::Array<Chat*> found;
+		for (Chat* chat : m_Chats)
+			if (chat->m_WsId.View() == wsId) found.Push(chat);
+		return found;
+	}
+
+	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
+		OwnerMessage* message = new OwnerMessage();
+		message->m_Text = Core::String(text);
+		message->m_FromChatId = from->m_ChatId;
+		message->m_FromTitle = from->m_Title;
+		if (!chat->m_Run) {
+			StartTurn(chat, *message, hops);
+			return true;
+		}
+		Pend(chat, message);
+		if (hops > chat->m_Run->m_Turn->m_Hops) chat->m_Run->m_Turn->m_Hops = hops;
+		return false;
+	}
+
+	void Chats::Pend(Chat* chat, OwnerMessage* message) {
+		chat->m_Pending.Push(message);
+		QueueChanged(chat);
+		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
+	}
+
+	// A chat not yet announced: kept and given its topic.
+	Chat* Chats::NewChat(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group) {
+		Chat* chat = new Chat();
+		Core::StringBuilder id;
+		id.Append("c");
+		id.AppendHex((uint64)(Platform::UnixTimeNs() / 1000));
+		chat->m_ChatId = id.ToString();
+		chat->m_WsId = ws.m_Id;
+		chat->m_Title = Core::String(title);
+		chat->m_Mode = mode;
+		chat->m_Permission = DefaultPermission(mode);
+		chat->m_Group = Core::String(group);
+		chat->m_CreatedMs = ChatNowMs();
+		chat->m_UpdatedMs = chat->m_CreatedMs;
+		m_Chats.Push(chat);
+		AddTopic(chat);
+		return chat;
+	}
+
+	// The chat saved and announced on its workspace's chats: topic.
+	void Chats::Announce(const IED::Workspace& ws, Chat* chat) {
+		SaveChatHeader(LocalStateOf(ws), chat);
+		m_Context->Publish(ChatsTopic(ws.m_Id.View()).View(), "chat.created", chat->SummaryJson().View());
+	}
+
+	Chat* Chats::Create(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group) {
+		Chat* chat = NewChat(ws, title, mode, group);
+		Announce(ws, chat);
+		return chat;
+	}
+
+	void Chats::TurnEnded(Chat* chat) {
+		AgentTurnEnded(chat);
+		if (chat->Current()->m_Stop != "finished") return;
+		if (chat->m_Queued.IsEmpty()) {
+			WakeForBackground(chat);
+			return;
+		}
+		OwnerMessage* next = chat->m_Queued[0];
+		chat->m_Queued.RemoveAt(0);
+		QueueChanged(chat);
+		StartTurn(chat, *next);
+	}
+
+	void Chats::QueueChanged(Chat* chat) {
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("queued"));
+		chat->WriteQueued(data);
+		data.Key(Core::StringView("pending"));
+		chat->WritePending(data);
+		data.EndObject();
+		Publish(chat, "queue.changed", data.View());
+	}
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	Core::String Chats::ListMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		return ListSnapshot(OpenWorkspace(params.Str("wsId").View()).m_Id.View());
+	}
+
+	static void ReadSettings(Chat* chat, const IED::Params& params) {
+		if (params.Has("title")) chat->m_Title = params.Str("title");
+		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->m_Mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
+		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->m_Permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
+		if (params.Has("group")) chat->m_Group = params.Str("group");
+		if (params.Has("effort")) {
+			Core::String effort = params.Str("effort");
+			if (!effort.IsEmpty() && !IsEffort(effort.View())) throw IED::RpcError(IED::ErrorCode::BadRequest, "effort must be low, medium, high, xhigh, max or empty (its role's)");
+			chat->m_Effort = effort;
+		}
+	}
+
+	// chat.set {model}: a model of ai.models pinned over the group's primary, "" back to the group's (docs/04 "Switching models").
+	static void ReadPinnedModel(IED::PluginContext* context, const IED::Workspace& ws, Chat* chat, const IED::Params& params) {
+		if (!params.Has("model")) return;
+		Core::String name = params.Str("model");
+		Core::Array<Core::String> problems;
+		if (!name.IsEmpty() && !FindModel(ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems), name.View()))
+			throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String("no model ") + name.View()) + " in ai.models").View());
+		chat->m_PinnedModel = name;
+	}
+
+	Core::String Chats::CreateMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		IED::Workspace ws = OpenWorkspace(params.Str("wsId").View());
+		ChatMode mode = ChatMode::Agent;
+		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
+		Chat* chat = NewChat(ws, Core::StringView(c_NewChatTitle), mode, Core::StringView(""));
+		ReadPinnedModel(m_Context, ws, chat, params);
+		ReadSettings(chat, params);
+		Announce(ws, chat);
+		return chat->SummaryJson();
+	}
+
+	// A chat runs on a group or on one model (docs/04 "One choice per chat"): a group alone clears the model, a model
+	// alone the group.
+	Core::String Chats::SetMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		ReadPinnedModel(m_Context, WorkspaceOf(chat), chat, params);
+		ReadSettings(chat, params);
+		if (params.Has("group") && !params.Has("model")) chat->m_PinnedModel = Core::String();
+		if (params.Has("model") && !params.Str("model").IsEmpty() && !params.Has("group")) chat->m_Group = Core::String();
+		Changed(chat);
+		return chat->SummaryJson();
+	}
+
+	// chat.stopTask {chatId, taskId}: one of the chat's background tasks stopped (docs/04 "Background tasks").
+	Core::String Chats::StopTaskMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		BackgroundTask* task = chat->FindBackground(params.Str("taskId").View());
+		if (!task) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no background task ") + params.Str("taskId").View()).View());
+		if (task->Running()) StopBackground(task);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", task->m_State.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::SendMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		OwnerMessage* message = new OwnerMessage();
+		message->m_Text = params.Str("text");
+		if (message->m_Text.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "text is empty");
+		Core::String delivery = params.Str("as", Core::StringView("message"));
+		if (delivery != "message" && delivery != "queue") throw IED::RpcError(IED::ErrorCode::BadRequest, "as must be message or queue");
+		message->m_Mentions = SentMentions(params.Field("mentions"));
+		message->m_Attachments = KeepAttachments(chat, WorkspaceOf(chat), params.Field("attachments"));
+		IED::JsonWriter json;
+		json.BeginObject();
+		if (!chat->m_Run) {
+			StartTurn(chat, *message);
+			json.Field("turnId", chat->Current()->m_TurnId.View());
+		}
+		else if (delivery == "message") {
+			Pend(chat, message);
+			json.IntField("pending", chat->m_Pending.Count());
+		}
+		else {
+			chat->m_Queued.Push(message);
+			QueueChanged(chat);
+			SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
+			json.IntField("queued", chat->m_Queued.Count());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::UnqueueMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		const int64 index = params.Int("index");
+		if (index < 0 || index >= chat->m_Queued.Count()) throw IED::RpcError(IED::ErrorCode::NotFound, "no queued message at that index");
+		const bool start = params.Bool("start", false);
+		if (start && chat->m_Run) throw IED::RpcError(IED::ErrorCode::Conflict, "a turn is running: the message starts when it ends");
+		OwnerMessage* message = chat->m_Queued[index];
+		chat->m_Queued.RemoveAt(index);
+		QueueChanged(chat);
+		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("queued"));
+		chat->WriteQueued(json);
+		json.Key(Core::StringView("message"));
+		message->WriteJson(json);
+		if (start) {
+			StartTurn(chat, *message);
+			json.Field("turnId", chat->Current()->m_TurnId.View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::StopMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		if (chat->m_Run) {
+			chat->m_Run->m_Cancelled = true;
+			chat->m_Run->m_Wake.NotifyAll();
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", ChatStateName(chat->m_State));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::ApproveMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String approvalId = params.Str("approvalId");
+		Core::String decision = params.Str("decision");
+		if (decision != "allow" && decision != "deny" && decision != "chat") throw IED::RpcError(IED::ErrorCode::BadRequest, "decision must be allow, deny or chat");
+		Approval* approval = nullptr;
+		for (Approval* each : chat->m_Approvals)
+			if (each->m_ApprovalId == approvalId) approval = each;
+		if (!approval) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no approval ") + approvalId.View() + " is waiting").View());
+		if (!approval->m_Decision.IsEmpty()) {
+			IED::JsonWriter answered;
+			answered.BeginObject();
+			answered.Field("decision", approval->m_Decision.View());
+			answered.Field("by", approval->m_By.View());
+			answered.EndObject();
+			throw IED::RpcError(IED::ErrorCode::Conflict, "another device answered first", answered.View());
+		}
+		approval->m_Decision = decision;
+		approval->m_Message = params.Str("message", Core::StringView(""));
+		approval->m_By = Core::String(request.m_ClientId.View());
+		chat->m_Run->m_Wake.NotifyAll();
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("approvalId", approvalId.View());
+		data.Field("decision", decision.View());
+		data.Field("by", approval->m_By.View());
+		data.EndObject();
+		Publish(chat, "approval.resolved", data.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("decision", decision.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::AnswerMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String questionId = params.Str("questionId");
+		Question* question = chat->m_Question;
+		if (!question || question->m_QuestionId != questionId) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no question ") + questionId.View() + " is waiting").View());
+		if (question->m_Answered) throw IED::RpcError(IED::ErrorCode::Conflict, "another device answered first");
+		question->m_Answer = params.Str("answer");
+		question->m_Answered = true;
+		chat->m_Run->m_Wake.NotifyAll();
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("questionId", questionId.View());
+		data.Field("answer", question->m_Answer.View());
+		data.Field("by", request.m_ClientId.View());
+		data.EndObject();
+		Publish(chat, "question.resolved", data.View());
+		return Core::String("{}");
+	}
+
+	Core::String Chats::HistoryMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String before = params.Str("before", Core::StringView(""));
+		const int64 limit = params.Int("limit", c_ChatSnapshotTurns);
+		int64 end = chat->m_Turns.Count();
+		for (int64 i = 0; i < chat->m_Turns.Count(); ++i)
+			if (chat->m_Turns[i]->m_TurnId == before) end = i;
+		const int64 start = end - limit > 0 ? end - limit : 0;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("turns"));
+		json.BeginArray();
+		for (int64 i = start; i < end; ++i) chat->m_Turns[i]->WriteJson(json, false);
+		json.EndArray();
+		json.BoolField("hasMore", start > 0);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Model probes ------------------------------------------------------------------------------------------------
+
+	class ProbeJob
+	{
+		public bool m_Done;
+		public ModelProbe m_Probe;
+		public Core::String m_Claude;    // a claude-code profile's answer, whole
+		public Threading::ConditionVariable m_Ready;
+	}
+
+	// ai.probe {wsId, model} asks a profile's server what it serves (settings' "Test connection"); {wsId, profile} tests a
+	// profile not saved yet (an ai.models entry). What it learns of a saved profile's window is kept for its turns.
+	Core::String Chats::ProbeMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		// Without a workspace (Settings from the start page) the models are the app tier's.
+		Core::String wsId = params.Str("wsId", Core::StringView(""));
+		if (!wsId.IsEmpty()) OpenWorkspace(wsId.View());
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models;
+		Core::String name;
+		if (params.Has("profile")) {
+			name = Core::String("probe");
+			models = ReadModels((Core::String("{\"probe\": ") + IED::NodeJson(params.Field("profile")).View() + "}").View(), problems);
+		}
+		else {
+			name = params.Str("model");
+			models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), wsId.View()).View(), problems);
+		}
+		ModelProfile* profile = FindModel(models, name.View());
+		if (!profile) throw IED::RpcError(IED::ErrorCode::BadRequest, (problems.IsEmpty() ? (Core::String("no model ") + name.View() + " in ai.models") : problems[0]).View());
+		ProbeJob* job = new ProbeJob();
+		IED::PluginContext* plugin = m_Context;
+		ModelProfile* asked = profile;
+		ClaudeAccount* account = m_Claude;
+		plugin->StartThread([job, asked, plugin, account]() {
+			Core::String claudeAnswer;
+			ModelProbe probe;
+			if (asked->IsClaude()) claudeAnswer = ProbeClaude(account, plugin, *asked);
+			else probe = ProbeModel(*asked, c_ProbeTimeoutMs);
+			IED::HostLock guard(*plugin);
+			job->m_Probe = probe;
+			job->m_Claude = claudeAnswer;
+			job->m_Done = true;
+			job->m_Ready.NotifyAll();
+		});
+		IED::HostLock guard(*m_Context);
+		while (!job->m_Done && !request.Cancelled()) guard.Wait(job->m_Ready, c_ProbeWaitSliceNs);
+		if (!job->m_Done) throw IED::RpcError(IED::ErrorCode::Cancelled, "request cancelled");
+		if (!job->m_Claude.IsEmpty()) return job->m_Claude;
+		if (!params.Has("profile") && job->m_Probe.m_ContextWindow > 0) {
+			LearnWindow(name.View(), job->m_Probe.m_ContextWindow);
+			m_Probed.At(name) = true;
+		}
+		return job->m_Probe.JsonText();
+	}
+}

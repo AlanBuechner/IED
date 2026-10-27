@@ -1,0 +1,114 @@
+include "Recent.ch"
+include "Trust.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	static RecentProject ProjectFrom(const Serialization::DomNode& node) {
+		RecentProject project;
+		project.m_Path = Core::String(node.Member("path").AsView());
+		project.m_Name = Core::String(node.Member("name").AsView());
+		project.m_Kind = Core::String(node.Member("kind").AsView());
+		project.m_Opened = node.Member("opened").AsInt();
+		project.m_Favorite = node.Member("favorite").AsBool();
+		return project;
+	}
+
+	void RecentProjects::Load(Core::StringView file, Core::String& error) {
+		this.m_File = Core::String(file);
+		m_Items.Clear();
+		if (!FS::FileExists(this.m_File.CStr())) return;
+		FS::File opened = FS::File(this.m_File.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		Serialization::DomNode projects = read.Ok() ? read.root.Member("projects") : Serialization::DomNode();
+		if (projects.Kind() != Serialization::DomKind::Array) {
+			error = Core::String("ignoring ") + file + ": not a recent projects file";
+			return;
+		}
+		for (int64 i = 0; i < projects.Count(); ++i) {
+			RecentProject project = ProjectFrom(projects.At(i));
+			if (!project.m_Path.IsEmpty() && IndexOf(project.m_Path.View()) < 0) m_Items.Push(project);
+		}
+	}
+
+	int64 RecentProjects::IndexOf(Core::StringView path) const {
+		Core::String key = TrustKey(path);
+		for (int64 i = 0; i < m_Items.Count(); ++i)
+			if (TrustKey(m_Items[i].m_Path.View()).View() == key.View()) return i;
+		return -1;
+	}
+
+	bool RecentProjects::Contains(Core::StringView path) const { return IndexOf(path) >= 0; }
+
+	bool RecentProjects::Opened(Core::StringView path, Core::StringView name, Core::StringView kind, int64 now) {
+		RecentProject project;
+		const int64 at = IndexOf(path);
+		if (at >= 0) {
+			project = m_Items[at];
+			m_Items.RemoveAt(at);
+		}
+		project.m_Path = Core::String(path);
+		project.m_Name = Core::String(name);
+		project.m_Kind = Core::String(kind);
+		project.m_Opened = now;
+		m_Items.Insert(0, project);
+		int64 others = 0;
+		for (int64 i = 0; i < m_Items.Count(); ++i) {
+			if (m_Items[i].m_Favorite) continue;
+			others += 1;
+			if (others > c_RecentLimit) {
+				m_Items.RemoveAt(i);
+				i -= 1;
+			}
+		}
+		return Save();
+	}
+
+	bool RecentProjects::SetFavorite(Core::StringView path, bool favorite) {
+		const int64 at = IndexOf(path);
+		if (at < 0) return false;
+		m_Items[at].m_Favorite = favorite;
+		return Save();
+	}
+
+	bool RecentProjects::Forget(Core::StringView path) {
+		const int64 at = IndexOf(path);
+		if (at < 0) return false;
+		m_Items.RemoveAt(at);
+		return Save();
+	}
+
+	static void WriteProject(JsonWriter& json, const RecentProject& project, bool withExists) {
+		json.BeginObject();
+		json.Field("path", project.m_Path.View());
+		json.Field("name", project.m_Name.View());
+		json.Field("kind", project.m_Kind.View());
+		json.IntField("opened", project.m_Opened);
+		json.BoolField("favorite", project.m_Favorite);
+		if (withExists) json.BoolField("exists", FS::FileExists(project.m_Path.CStr()) || FS::IsDirectory(project.m_Path.CStr()));
+		json.EndObject();
+	}
+
+	Core::String RecentProjects::Json() const {
+		JsonWriter json;
+		json.BeginArray();
+		for (const RecentProject& project : m_Items) WriteProject(json, project, true);
+		json.EndArray();
+		return json.ToString();
+	}
+
+	bool RecentProjects::Save() {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("projects"));
+		json.BeginArray();
+		for (const RecentProject& project : m_Items) WriteProject(json, project, false);
+		json.EndArray();
+		json.EndObject();
+		FS::MakeDirectories(FS::Path(m_File.View()).Parent().CStr());
+		return FS::WriteFileAtomically(m_File.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+}

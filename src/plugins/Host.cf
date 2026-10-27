@@ -1,0 +1,480 @@
+include "Host.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const char* PluginStateName(PluginState state) {
+		if (state == PluginState::Loaded) return "loaded";
+		if (state == PluginState::Disabled) return "disabled";
+		if (state == PluginState::NeedsApproval) return "needsApproval";
+		if (state == PluginState::Overridden) return "overridden";
+		if (state == PluginState::Untrusted) return "untrusted";
+		return "failed";
+	}
+
+	static void StringList(JsonWriter& json, const char* key, const Core::Array<Core::String>& items) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Core::String& item : items) json.String(item.View());
+		json.EndArray();
+	}
+
+	Core::String Plugin::SummaryJson(Core::StringView code) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Manifest->m_Id.View());
+		json.Field("name", m_Manifest->m_Name.View());
+		json.Field("version", m_Manifest->m_Version.View());
+		json.Field("kind", m_Manifest->m_Kind.View());
+		json.Field("source", PluginSourceName(m_Manifest->m_Source));
+		json.Field("state", PluginStateName(m_State));
+		if (!m_OverriddenBy.IsEmpty()) json.Field("overriddenBy", m_OverriddenBy.View());
+		StringList(json, "problems", m_Manifest->m_Problems);
+		StringList(json, "permissions", m_Manifest->m_Permissions);
+		Core::Array<Core::String> points;
+		for (int64 i = 0; i < m_Manifest->m_Contributes.Count(); ++i) points.Push(Core::String(m_Manifest->m_Contributes.KeyAt(i)));
+		StringList(json, "contributes", points);
+		if (!code.IsEmpty()) json.RawField("code", code);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String PluginHost::Summary(Plugin* plugin, Workspace* ws) const {
+		CodeInstance* instance = m_Server->m_Code->For(plugin, ws);
+		return plugin->SummaryJson(instance ? m_Server->m_Code->SummaryJson(instance).View() : Core::StringView(""));
+	}
+
+	void PluginHost::Init(Server* server) {
+		this.m_Server = server;
+		PluginHost* self = this;
+		server->m_Hub.Add(Core::StringView("plugins"), [self]() -> Core::String { return self->Snapshot(); });
+		server->m_Rpc.Register("plugins.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		// The owner's choices are the master's to write (plugins.json, docs/01 "Processes"); its workspace servers read them.
+		if (server->IsMaster()) {
+			server->m_Rpc.Register("plugins.setEnabled", [self](Call& call, const Params& params) -> Core::String { return self->SetEnabledMethod(call, params); });
+			server->m_Rpc.Register("plugins.approve", [self](Call& call, const Params& params) -> Core::String { return self->ApproveMethod(call, params); });
+		}
+		server->m_Rpc.Register("plugins.contributions", [self](Call& call, const Params& params) -> Core::String { return self->ContributionsMethod(call, params); });
+		server->m_Rpc.Register("plugins.reload", [self](Call& call, const Params& params) -> Core::String { return self->ReloadMethod(call, params); });
+	}
+
+	// --- Finding and choosing ------------------------------------------------------------------------------------------
+
+	void PluginHost::Discover(const FS::Path& folder, PluginSource source, Core::Array<Manifest*>& found) {
+		if (folder.IsEmpty() || !FS::IsDirectory(folder.CStr())) return;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			FS::Path candidate = folder / entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory && FS::FileExists((candidate / c_ManifestFile).CStr()))
+				found.Push(ReadManifest(candidate, source, *m_Server->m_Schemas.m_Registry, m_Server->m_Schemas.Name(c_ManifestSchema).View()));
+		}
+	}
+
+	static int32 Precedence(PluginSource source) { return source == PluginSource::Project ? 3 : source == PluginSource::App ? 2 : 1; }
+
+	// The state a plugin would have on its own: its problems, the owner's approval, the owner's switch.
+	static PluginState OwnState(Plugin* plugin, const Core::HashMap<Core::String, Core::String>& approved, const Core::HashMap<Core::String, bool>& disabled) {
+		Manifest* manifest = plugin->m_Manifest;
+		if (!manifest->m_Problems.IsEmpty()) return PluginState::Failed;
+		if (manifest->m_Source == PluginSource::App) {
+			plugin->m_Digest = FolderDigest(manifest->m_Folder);
+			Core::String allowed;
+			if (!approved.TryGet(manifest->m_Id, allowed) || allowed.View() != plugin->m_Digest.View()) return PluginState::NeedsApproval;
+		}
+		return disabled.Contains(manifest->m_Id) ? PluginState::Disabled : PluginState::Loaded;
+	}
+
+	// Of the plugins with one id, the one from the strongest source that can load wins; those under it are overridden.
+	void PluginHost::Choose(const Core::Array<Manifest*>& found) {
+		m_Plugins.Clear();
+		Core::HashMap<Core::String, Plugin*> winners;
+		for (Manifest* manifest : found) {
+			Plugin* plugin = new Plugin();
+			plugin->m_Manifest = manifest;
+			plugin->m_State = OwnState(plugin, m_Approved, m_Disabled);
+			m_Plugins.Push(plugin);
+		}
+		for (Plugin* plugin : m_Plugins) {
+			if (plugin->m_State == PluginState::Failed || plugin->m_State == PluginState::NeedsApproval) continue;
+			Plugin* best = nullptr;
+			const bool known = winners.TryGet(plugin->m_Manifest->m_Id, best);
+			if (!known || Precedence(plugin->m_Manifest->m_Source) > Precedence(best->m_Manifest->m_Source)) winners.At(plugin->m_Manifest->m_Id) = plugin;
+		}
+		for (Plugin* plugin : m_Plugins) {
+			Plugin* winner = nullptr;
+			if (!winners.TryGet(plugin->m_Manifest->m_Id, winner) || winner == plugin) continue;
+			if (Precedence(plugin->m_Manifest->m_Source) > Precedence(winner->m_Manifest->m_Source)) continue;
+			plugin->m_State = PluginState::Overridden;
+			plugin->m_OverriddenBy = Core::String(PluginSourceName(winner->m_Manifest->m_Source));
+		}
+	}
+
+	static Plugin* LoadedWithId(const Core::Array<Plugin*>& plugins, Core::StringView id) {
+		for (Plugin* plugin : plugins)
+			if (plugin->m_State == PluginState::Loaded && plugin->m_Manifest->m_Id.View() == id) return plugin;
+		return nullptr;
+	}
+
+	// Whether `plugin` reaches itself through required dependencies on loaded plugins.
+	static bool InCycle(const Core::Array<Plugin*>& plugins, Plugin* start, Plugin* at, int32 depth) {
+		if (depth > plugins.Count()) return false;
+		for (Dependency* dependency : at->m_Manifest->m_Dependencies) {
+			Plugin* next = dependency->m_Optional ? nullptr : LoadedWithId(plugins, dependency->m_Id.View());
+			if (next == start || (next && InCycle(plugins, start, next, depth + 1))) return true;
+		}
+		return false;
+	}
+
+	static bool Unmet(const Core::Array<Plugin*>& plugins, Plugin* plugin) {
+		for (Dependency* dependency : plugin->m_Manifest->m_Dependencies) {
+			if (dependency->m_Optional) continue;
+			Plugin* needed = LoadedWithId(plugins, dependency->m_Id.View());
+			if (needed && VersionInRange(needed->m_Manifest->m_Version.View(), dependency->m_Version.View())) continue;
+			Core::String why = (((Core::String("needs ") + dependency->m_Id.View()) + " ") + dependency->m_Version.View());
+			plugin->m_Manifest->m_Problems.Push(needed ? (why + ", but " + needed->m_Manifest->m_Version.View() + " is loaded") : (why + ", which is not loaded"));
+			return true;
+		}
+		if (!InCycle(plugins, plugin, plugin, 0)) return false;
+		plugin->m_Manifest->m_Problems.Push(Core::String("its dependencies lead back to it"));
+		return true;
+	}
+
+	// A plugin whose dependency fails fails too, so this repeats until nothing changes.
+	void PluginHost::CheckDependencies() {
+		bool changed = true;
+		while (changed) {
+			changed = false;
+			for (Plugin* plugin : m_Plugins)
+				if (plugin->m_State == PluginState::Loaded && Unmet(m_Plugins, plugin)) {
+					plugin->m_State = PluginState::Failed;
+					changed = true;
+				}
+		}
+	}
+
+	void PluginHost::Load() {
+		ReadChoices();
+		FS::Path home = FS::Path(HomeFolder(m_Server->m_Config).View());
+		Core::Array<Manifest*> found;
+		Discover(home.IsEmpty() ? FS::Path() : home / "plugins", PluginSource::BuiltIn, found);
+		Discover(FS::Path(AppDataFolder(m_Server->m_Config).View()) / "plugins", PluginSource::App, found);
+		Choose(found);
+		CheckDependencies();
+		for (Plugin* plugin : m_Plugins)
+			for (const Core::String& problem : plugin->m_Manifest->m_Problems)
+				m_Server->Log((((Core::String("plugin ") + plugin->m_Manifest->m_Id.View()) + ": ") + problem.View()).View());
+		Changed();
+		m_Server->m_Settings->Load();
+		m_Server->m_Code->Reconcile(nullptr);
+		for (Workspace* ws : m_Server->m_Workspaces->All()) {
+			m_Server->m_Code->Reconcile(ws);
+			m_Server->m_Outputs->PluginsChanged(ws);
+			m_Server->m_Documents->LanguagesChanged(ws);
+			if (m_Server->m_Tools) m_Server->m_Tools->PluginsChanged(ws);
+		}
+	}
+
+	Plugin* PluginHost::Get(Core::StringView id) const {
+		for (Plugin* plugin : m_Plugins)
+			if (plugin->m_Manifest->m_Id.View() == id && plugin->m_State == PluginState::Loaded) return plugin;
+		for (Plugin* plugin : m_Plugins)
+			if (plugin->m_Manifest->m_Id.View() == id) return plugin;
+		return nullptr;
+	}
+
+	FS::Path PluginHost::FileOf(Workspace* ws, Core::StringView id, Core::StringView path) {
+		Core::Array<Plugin*> candidates = ws ? LoadedFor(ws) : m_Plugins;
+		Plugin* plugin = LoadedWithId(candidates, id);
+		if (!plugin) return FS::Path();
+		Core::String relative;
+		try {
+			relative = NormalizePath(path);
+		}
+		catch (RpcError& refused) {
+			return FS::Path();
+		}
+		FS::Path file = plugin->m_Manifest->m_Folder / relative.View();
+		return !relative.IsEmpty() && FS::FileExists(file.CStr()) ? file : FS::Path();
+	}
+
+	// --- The owner's choices -------------------------------------------------------------------------------------------
+
+	static FS::Path ChoicesFile(const ServerConfig& config) { return FS::Path(AppDataFolder(config).View()) / "plugins.json"; }
+
+	void PluginHost::ReadChoices() {
+		m_Disabled.Clear();
+		m_Approved.Clear();
+		FS::Path file = ChoicesFile(m_Server->m_Config);
+		if (!FS::FileExists(file.CStr())) return;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		if (!read.Ok()) {
+			m_Server->Log((Core::String("ignoring ") + file.View() + ": not JSON").View());
+			return;
+		}
+		Serialization::DomNode off = read.root.Member("disabled");
+		for (int64 i = 0; i < off.Count(); ++i) m_Disabled.At(Core::String(off.At(i).AsView())) = true;
+		Serialization::DomNode allowed = read.root.Member("approved");
+		for (int64 i = 0; i < allowed.Count(); ++i) m_Approved.At(Core::String(allowed.KeyAt(i))) = Core::String(allowed.ValueAt(i).AsView());
+	}
+
+	bool PluginHost::SaveChoices() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("disabled"));
+		json.BeginArray();
+		for (const Core::KeyValue<Core::String, bool>& entry : m_Disabled) json.String(entry.key.View());
+		json.EndArray();
+		json.Key(Core::StringView("approved"));
+		json.BeginObject();
+		for (const Core::KeyValue<Core::String, Core::String>& entry : m_Approved) json.Field(entry.key.CStr(), entry.value.View());
+		json.EndObject();
+		json.EndObject();
+		FS::Path file = ChoicesFile(m_Server->m_Config);
+		FS::MakeDirectories(file.Parent().CStr());
+		return FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+
+	// --- The topic and the methods -------------------------------------------------------------------------------------
+
+	Core::String PluginHost::Snapshot() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		for (Plugin* plugin : m_Plugins) json.Raw(Summary(plugin, nullptr).View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void PluginHost::Changed() { m_Server->m_Hub.Publish(Core::StringView("plugins"), "plugins.changed", Snapshot().View()); }
+
+	static Workspace* WorkspaceParam(Server* server, const Params& params) {
+		return params.Has("wsId") ? server->m_Workspaces->Get(params.Str("wsId").View()) : nullptr;
+	}
+
+	// One local plugin: the solution's expected id must be the manifest's.
+	static Plugin* ReadLocalPlugin(Server* server, LocalPlugin* local, bool trusted, const Core::HashMap<Core::String, bool>& disabled) {
+		Plugin* plugin = new Plugin();
+		plugin->m_Manifest = ReadManifest(local->m_Folder, PluginSource::Project, *server->m_Schemas.m_Registry, server->m_Schemas.Name(c_ManifestSchema).View());
+		Manifest* manifest = plugin->m_Manifest;
+		if (!local->m_Id.IsEmpty() && manifest->m_Problems.IsEmpty() && manifest->m_Id.View() != local->m_Id.View())
+			manifest->m_Problems.Push((((Core::String("the solution expects id ") + local->m_Id.View()) + ", the manifest says ") + manifest->m_Id.View()));
+		if (!manifest->m_Problems.IsEmpty()) plugin->m_State = PluginState::Failed;
+		else if (!trusted) plugin->m_State = PluginState::Untrusted;
+		else if (!local->m_Enabled || disabled.Contains(manifest->m_Id)) plugin->m_State = PluginState::Disabled;
+		else plugin->m_State = PluginState::Loaded;
+		return plugin;
+	}
+
+	// The workspace's own plugins: each folder of <root>/.ied/plugins/ that holds a manifest (docs/26 section 7).
+	static Core::Array<LocalPlugin*> WorkspacePlugins(Workspace* ws) {
+		Core::Array<LocalPlugin*> found;
+		FS::Path folder = ws->m_Root / ".ied" / "plugins";
+		if (!FS::IsDirectory(folder.CStr())) return found;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			FS::Path candidate = folder / entry.name.View();
+			if (entry.kind != FS::EntryKind::Directory || !FS::FileExists((candidate / c_ManifestFile).CStr())) continue;
+			LocalPlugin* local = new LocalPlugin();
+			local->m_Folder = candidate;
+			local->m_Enabled = true;
+			found.Push(local);
+		}
+		return found;
+	}
+
+	// Of a workspace's plugins with one id, the first that can load is the one (the solution's pins come first); the
+	// others are overridden by it.
+	static void FirstOfEachId(Core::Array<Plugin*>& local) {
+		for (Plugin* plugin : local) {
+			if (plugin->m_State != PluginState::Loaded) continue;
+			for (Plugin* earlier : local) {
+				if (earlier == plugin) break;
+				if (earlier->m_State != PluginState::Loaded || earlier->m_Manifest->m_Id.View() != plugin->m_Manifest->m_Id.View()) continue;
+				plugin->m_State = PluginState::Overridden;
+				plugin->m_OverriddenBy = Core::String(PluginSourceName(PluginSource::Project));
+				break;
+			}
+		}
+	}
+
+	Core::Array<Plugin*> PluginHost::LocalFor(Workspace* ws) {
+		Core::Array<Plugin*> local;
+		if (!ws) return local;
+		if (ws->m_Solution)
+			for (LocalPlugin* entry : ws->m_Solution->m_LocalPlugins) local.Push(ReadLocalPlugin(m_Server, entry, ws->m_Trusted, m_Disabled));
+		for (LocalPlugin* entry : WorkspacePlugins(ws)) local.Push(ReadLocalPlugin(m_Server, entry, ws->m_Trusted, m_Disabled));
+		FirstOfEachId(local);
+		return local;
+	}
+
+	Core::Array<Plugin*> PluginHost::LoadedFor(Workspace* ws) {
+		Core::Array<Plugin*> local = LocalFor(ws);
+		Core::Array<Plugin*> loaded;
+		for (Plugin* plugin : m_Plugins) {
+			if (plugin->m_State != PluginState::Loaded) continue;
+			bool overridden = false;
+			for (Plugin* mine : local)
+				if (mine->m_State == PluginState::Loaded && mine->m_Manifest->m_Id.View() == plugin->m_Manifest->m_Id.View()) overridden = true;
+			if (!overridden) loaded.Push(plugin);
+		}
+		for (Plugin* mine : local)
+			if (mine->m_State == PluginState::Loaded) loaded.Push(mine);
+		return loaded;
+	}
+
+	Core::String PluginHost::LanguageOf(Workspace* ws, Core::StringView path) {
+		Core::Array<Serialization::DomNode> contributes;
+		for (Plugin* plugin : LoadedFor(ws)) contributes.Push(plugin->m_Manifest->m_Contributes);
+		return LanguageFor(contributes, path);
+	}
+
+	Core::String PluginHost::ListMethod(Call& call, const Params& params) {
+		Workspace* ws = WorkspaceParam(m_Server, params);
+		if (!ws) return Snapshot();
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		for (Plugin* plugin : m_Plugins) json.Raw(Summary(plugin, ws).View());
+		for (Plugin* plugin : LocalFor(ws)) json.Raw(Summary(plugin, ws).View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Plugin* Known(PluginHost* host, Core::StringView id) {
+		Plugin* plugin = host->Get(id);
+		if (!plugin) throw RpcError(ErrorCode::NotFound, (Core::String("no plugin ") + id).View());
+		return plugin;
+	}
+
+	Core::String PluginHost::SetEnabledMethod(Call& call, const Params& params) {
+		Core::String id = params.Str("id");
+		Known(this, id.View());
+		if (params.Bool("enabled", true)) m_Disabled.Remove(id);
+		else m_Disabled.At(id) = true;
+		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
+		// The workspace servers read the choices first: a client hears plugins.changed from the master and asks its workspace
+		// server for the contributions, which must be the new ones by then.
+		if (m_Server->m_Servers) m_Server->m_Servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
+		Load();
+		return Summary(Get(id.View()), nullptr);
+	}
+
+	Core::String PluginHost::ApproveMethod(Call& call, const Params& params) {
+		Core::String id = params.Str("id");
+		Plugin* plugin = nullptr;
+		for (Plugin* candidate : m_Plugins)
+			if (candidate->m_Manifest->m_Id.View() == id.View() && candidate->m_Manifest->m_Source == PluginSource::App) plugin = candidate;
+		if (!plugin) throw RpcError(ErrorCode::NotFound, (Core::String("no app plugin ") + id.View()).View());
+		m_Approved.At(id) = FolderDigest(plugin->m_Manifest->m_Folder);
+		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
+		m_Server->m_Auth->Record("plugin-approved", (Core::String("\"plugin\":") + JsonString(id.View()).View()).View());
+		if (m_Server->m_Servers) m_Server->m_Servers->TellAll(Core::StringView("choices.changed"), Core::StringView(""));
+		Load();
+		return Summary(Get(id.View()), nullptr);
+	}
+
+	// Where the browser imports a plugin's UI module from: a local plugin's files are served per workspace.
+	static Core::String UiUrl(const Workspace* ws, const Manifest* manifest) {
+		Core::String base = manifest->m_Source == PluginSource::Project ? ((Core::String("/w/") + ws->m_WsId.View()) + "/plugins/") : Core::String("/plugins/");
+		return ((base + manifest->m_Id.View()) + "/") + manifest->m_Ui.View();
+	}
+
+	Core::String PluginHost::ContributionsMethod(Call& call, const Params& params) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		Workspace* ws = WorkspaceParam(m_Server, params);
+		for (Plugin* plugin : LoadedFor(ws)) {
+			json.BeginObject();
+			json.Field("id", plugin->m_Manifest->m_Id.View());
+			json.Field("source", PluginSourceName(plugin->m_Manifest->m_Source));
+			json.RawField("contributes", ContributesJson(plugin, ws).View());
+			if (!plugin->m_Manifest->m_Ui.IsEmpty()) json.Field("ui", UiUrl(ws, plugin->m_Manifest).View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Contributions from code ---------------------------------------------------------------------------------------
+
+	Core::Array<Contribution> PluginHost::Entries(Workspace* ws, Core::StringView point) {
+		Core::Array<Contribution> entries;
+		Core::String key = Core::String(point);
+		Core::Array<Plugin*> from = ws ? LoadedFor(ws) : m_Plugins;
+		for (Plugin* plugin : from) {
+			if (!ws && plugin->m_State != PluginState::Loaded) continue;
+			Serialization::DomNode listed = plugin->m_Manifest->m_Contributes.Member(key.CStr());
+			for (int64 i = 0; i < listed.Count(); ++i) entries.Push(Contribution(plugin, listed.At(i)));
+			CodeInstance* instance = m_Server->m_Code->For(plugin, ws);
+			if (!instance) continue;
+			Core::Array<Serialization::DomNode> computed;
+			m_Server->m_Code->ComputedFor(instance, ws, point, computed);
+			for (const Serialization::DomNode& entry : computed) entries.Push(Contribution(plugin, entry, true));
+		}
+		return entries;
+	}
+
+	// The manifest's contributes with the entries the plugin's code computed for `ws` after each array point's own.
+	Core::String PluginHost::ContributesJson(Plugin* plugin, Workspace* ws) const {
+		Serialization::DomNode contributes = plugin->m_Manifest->m_Contributes;
+		CodeInstance* instance = m_Server->m_Code->For(plugin, ws);
+		if (!instance || instance->m_Contributed.IsEmpty()) return contributes.IsValid() ? NodeJson(contributes) : Core::String("{}");
+		Core::Array<Core::String> points;
+		for (int64 i = 0; i < contributes.Count(); ++i) points.Push(Core::String(contributes.KeyAt(i)));
+		for (Contributed* given : instance->m_Contributed)
+			if (!points.Contains(given->m_Point)) points.Push(given->m_Point);
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& point : points) {
+			Serialization::DomNode listed = contributes.Member(point.CStr());
+			Core::Array<Serialization::DomNode> computed;
+			m_Server->m_Code->ComputedFor(instance, ws, point.View(), computed);
+			if (computed.IsEmpty() && !listed.IsValid()) continue;
+			json.Key(point.View());
+			if (computed.IsEmpty() || (listed.IsValid() && listed.Kind() != Serialization::DomKind::Array)) {
+				json.Raw(NodeJson(listed).View());
+				continue;
+			}
+			json.BeginArray();
+			for (int64 i = 0; i < listed.Count(); ++i) json.Raw(NodeJson(listed.At(i)).View());
+			for (const Serialization::DomNode& entry : computed) json.Raw(NodeJson(entry).View());
+			json.EndArray();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void PluginHost::CodeChanged(CodeInstance* instance) {
+		if (!instance->IsProject()) {
+			Changed();
+			return;
+		}
+		Workspace* ws = m_Server->m_Workspaces->Find(instance->m_WsId.View());
+		if (ws) m_Server->m_Hub.Publish((Core::String("ws:") + ws->m_WsId.View()).View(), "plugins.changed", Core::StringView("{}"));
+	}
+
+	void PluginHost::ContributionsChanged(CodeInstance* instance, Core::StringView wsId) {
+		for (Workspace* ws : m_Server->m_Workspaces->All()) {
+			if (!wsId.IsEmpty() && ws->m_WsId.View() != wsId) continue;
+			if (m_Server->m_Code->LoadedIn(instance, ws)) m_Server->m_Workspaces->ContributionsChanged(ws);
+		}
+		if (!instance->IsProject() && wsId.IsEmpty()) Changed();
+	}
+
+	Core::String PluginHost::ReloadMethod(Call& call, const Params& params) {
+		Load();
+		m_Server->m_Code->RetryFailed();
+		return Snapshot();
+	}
+}

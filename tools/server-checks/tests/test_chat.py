@@ -72,22 +72,22 @@ CODE_PLUGIN = {
 			{"name": "demo_snap", "description": "Show the screen.", "class": "read", "function": "DemoCode::Snap", "inputSchema": {"type": "object"}},
 			{"name": "demo_page", "description": "Open the demo page for the chat.", "class": "read", "function": "DemoCode::Page", "inputSchema": {"type": "object"}}]}}
 
-CODE_PLUGIN_SOURCE = r'''include "api/plugin.ch"
+CODE_PLUGIN_SOURCE = r'''include "api/Plugin.ch"
 
 namespace DemoCode
 {
-	int64 calls = 0;
+	int64 s_Calls = 0;
 
 	IED::ToolResult Shout(const IED::ToolCall& call)
 	{
 		Core::String text;
 		Core::String problem;
-		if (!IED::ReadFile(call.workspace, call.args.Member("path").AsView(), text, problem)) return IED::ToolFailure(problem.View());
+		if (!IED::ReadFile(call.m_Workspace, call.m_Args.Member("path").AsView(), text, problem)) return IED::ToolFailure(problem.View());
 		Core::StringBuilder out;
 		Core::StringView first = text.View().Substring(0, text.View().IndexOf('\n', 0));
 		for (int64 i = 0; i < first.ByteLength(); ++i) out.AppendByte(first.ByteAt(i) >= 'a' && first.ByteAt(i) <= 'z' ? first.ByteAt(i) - 32 : first.ByteAt(i));
 		out.Append("! (in ");
-		out.Append(call.workspace.name.View());
+		out.Append(call.m_Workspace.m_Name.View());
 		out.Append(")");
 		return IED::ToolText(out.View());
 	}
@@ -96,13 +96,13 @@ namespace DemoCode
 	{
 		IED::ToolResult result = IED::ToolText(Core::StringView("the screen"));
 		IED::ToolImage shot;
-		shot.mime = Core::String("image/png");
-		shot.path = Core::String("shots/screen.png");
-		result.images.Push(shot);
+		shot.m_Mime = Core::String("image/png");
+		shot.m_Path = Core::String("shots/screen.png");
+		result.m_Images.Push(shot);
 		IED::ToolImage elsewhere;
-		elsewhere.mime = Core::String("image/png");
-		elsewhere.path = Core::String("../outside.png");
-		result.images.Push(elsewhere);
+		elsewhere.m_Mime = Core::String("image/png");
+		elsewhere.m_Path = Core::String("../outside.png");
+		result.m_Images.Push(elsewhere);
 		return result;
 	}
 
@@ -110,17 +110,17 @@ namespace DemoCode
 	{
 		Core::StringBuilder args;
 		args.Append("{\"chatId\":\"");
-		args.Append(call.chatId.View());
+		args.Append(call.m_ChatId.View());
 		args.Append("\",\"ref\":\"demo:page1\",\"title\":\"Demo page\",\"kind\":\"page\"}");
 		IED::Result told = IED::CallBinding(Core::StringView("chat.resource"), args.View());
-		return told.Ok() ? IED::ToolText(Core::StringView("opened")) : IED::ToolFailure(told.error.View());
+		return told.Ok() ? IED::ToolText(Core::StringView("opened")) : IED::ToolFailure(told.m_Error.View());
 	}
 
 	Core::String Section(const IED::Workspace& ws)
 	{
 		Core::StringBuilder out;
 		out.Append("Workspace ");
-		out.Append(ws.name.View());
+		out.Append(ws.m_Name.View());
 		out.Append(" is computed by C4 plugin code.");
 		return out.ToString();
 	}
@@ -128,10 +128,10 @@ namespace DemoCode
 	void Activate(IED::PluginContext& context)
 	{
 		context.Provide(Core::StringView("demo.count"), [](const Serialization::DomNode& args) -> IED::Result {
-			calls += 1;
+			s_Calls += 1;
 			Core::StringBuilder out;
 			out.Append("{\"calls\":");
-			out.AppendInt(calls);
+			out.AppendInt(s_Calls);
 			out.Append("}");
 			return IED::Answer(out.View());
 		});

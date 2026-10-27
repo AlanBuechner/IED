@@ -1,0 +1,211 @@
+include "Builds.ch"
+
+namespace Developer
+{
+	const char* c_StateTopic = "ied.developer/state";
+	const int64 c_BuildPollMs = 200;
+	const int64 c_BuildDrainMs = 2000;
+
+	static int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	const char* BuildStateName(BuildState state) {
+		const char*[5] names = { "idle", "running", "succeeded", "failed", "canceled" };
+		return names[(int32)state];
+	}
+
+	Core::Array<Core::String> CompleteLines(Core::String& pending, Core::StringView text) {
+		Core::Array<Core::String> complete;
+		pending.Append(text);
+		Core::StringView all = pending.View();
+		int64 start = 0;
+		for (int64 end = all.IndexOf('\n', 0); end >= 0; end = all.IndexOf('\n', start)) {
+			const int64 stop = end > start && all.ByteAt(end - 1) == '\r' ? end - 1 : end;
+			complete.Push(Core::String(all.Substring(start, stop - start)));
+			start = end + 1;
+		}
+		pending = Core::String(all.Substring(start, all.ByteLength() - start));
+		return complete;
+	}
+
+	void Builds::Init(IED::PluginContext* context, Core::String source) {
+		this.m_Context = context;
+		this.m_Source = source;
+		m_Installed = ReadInstallRecord(IED::HomeFolder().View(), m_Record);
+		m_Behind = -1;
+		m_State = BuildState::Idle;
+		m_StartedMs = 0;
+		m_EndedMs = 0;
+		m_ExitCode = 0;
+		m_Canceled.Store(false);
+	}
+
+	Core::String Builds::SnapshotJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("source", m_Source.View());
+		json.Key(Core::StringView("install"));
+		if (m_Installed) {
+			json.BeginObject();
+			json.Field("commit", m_Record.m_Commit.View());
+			json.BoolField("dirty", m_Record.m_Dirty);
+			json.IntField("installedMs", m_Record.m_InstalledMs);
+			json.EndObject();
+		}
+		else json.Null();
+		json.Field("head", m_Head.View());
+		json.IntField("behind", m_Behind);
+		json.Key(Core::StringView("build"));
+		WriteBuild(json);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Builds::WriteBuild(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("state", BuildStateName(m_State));
+		json.IntField("startedMs", m_StartedMs);
+		json.IntField("endedMs", m_EndedMs);
+		json.IntField("exitCode", m_ExitCode);
+		json.Key(Core::StringView("lines"));
+		json.BeginArray();
+		for (const Core::String& line : m_Lines) json.String(line.View());
+		json.EndArray();
+		json.EndObject();
+	}
+
+	void Builds::Refresh() {
+		Core::String found = HeadCommit(m_Source.View());
+		InstallRecord now;
+		const bool has = ReadInstallRecord(IED::HomeFolder().View(), now);
+		const int64 count = has ? CommitsSince(m_Source.View(), now.m_Commit.View()) : -1;
+		Builds* self = this;
+		m_Context->Atomically([self, found, now, has, count](IED::Events& events) {
+			self->m_Head = found;
+			self->m_Record = now;
+			self->m_Installed = has;
+			self->m_Behind = count;
+			events.Publish(Core::StringView(c_StateTopic), "changed", self->SnapshotJson().View());
+		});
+	}
+
+	bool Builds::Start(Core::String& problem) {
+		bool started = false;
+		Builds* self = this;
+		m_Context->Atomically([self, &started](IED::Events& events) {
+			if (self->m_State == BuildState::Running) return;
+			self->m_State = BuildState::Running;
+			self->m_StartedMs = NowMs();
+			self->m_EndedMs = 0;
+			self->m_ExitCode = 0;
+			self->m_Lines.Clear();
+			self->m_Canceled.Store(false);
+			started = true;
+			events.Publish(Core::StringView(c_StateTopic), "changed", self->SnapshotJson().View());
+		});
+		if (!started) {
+			problem = Core::String("a rebuild is already running");
+			return false;
+		}
+		m_Context->StartThread([self]() { self->Run(); });
+		return true;
+	}
+
+	void Builds::Cancel() { m_Canceled.Store(true); }
+
+	static Core::String LastLines(const Core::Array<Core::String>& lines, int64 most) {
+		Core::StringBuilder tail;
+		for (int64 i = lines.Count() > most ? lines.Count() - most : 0; i < lines.Count(); ++i) {
+			tail.Append(lines[i].View());
+			tail.Append("\n");
+		}
+		return tail.ToString();
+	}
+
+	BuildState Builds::AwaitInstall(int64& code, Core::String& tail, int64 most) {
+		Core::String running;
+		Start(running);
+		for (;;) {
+			{
+				IED::HostLock guard(*m_Context);
+				if (m_State != BuildState::Running) {
+					code = m_ExitCode;
+					tail = LastLines(m_Lines, most);
+					return m_State;
+				}
+			}
+			Threading::Thread::Sleep(c_InstallPollNs);
+		}
+	}
+
+	// `cmd /c <checkout>\nuke.bat install-ied`, its output published as it comes.
+	void Builds::Run() {
+		Process::StartInfo info;
+		info.program = Core::String("cmd.exe");
+		info.arguments.Push(Core::String("/d"));
+		info.arguments.Push(Core::String("/c"));
+		info.arguments.Push(Core::String((FS::Path(m_Source.View()) / Core::StringView("nuke.bat")).View()));
+		info.arguments.Push(Core::String("install-ied"));
+		info.workingDirectory = m_Source;
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::ToOutput;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) {
+			Core::Array<Core::String> said;
+			said.Push(Core::String("nuke install-ied did not start: ") + child.Error());
+			Publish(said);
+			Finish(BuildState::Failed, -1);
+			return;
+		}
+		const int64 deadline = NowMs() + c_BuildMostSeconds * 1000;
+		int64 exitedAt = -1;
+		Core::String pending;
+		char8[16384] buffer;
+		while (child.HasOutput()) {
+			if (m_Canceled.Load() || NowMs() > deadline) {
+				child.Kill();
+				break;
+			}
+			if (exitedAt < 0 && child.Wait(0) != Process::kTimedOut) exitedAt = NowMs();
+			if (exitedAt >= 0 && NowMs() - exitedAt > c_BuildDrainMs) break;
+			Process::Stream from;
+			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, c_BuildPollMs);
+			if (got > 0) Publish(CompleteLines(pending, Core::StringView(&buffer[0], got)));
+			else if (got != Process::kTimedOut && got != 0) break;
+		}
+		if (!pending.IsEmpty()) Publish(CompleteLines(pending, Core::StringView("\n")));
+		const int64 code = child.Wait(5000);
+		if (m_Canceled.Load()) Finish(BuildState::Canceled, code);
+		else Finish(code == 0 ? BuildState::Succeeded : BuildState::Failed, code);
+		Refresh();
+	}
+
+	void Builds::Publish(const Core::Array<Core::String>& added) {
+		if (added.IsEmpty()) return;
+		Builds* self = this;
+		m_Context->Atomically([self, added](IED::Events& events) {
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Key(Core::StringView("lines"));
+			json.BeginArray();
+			for (const Core::String& line : added) {
+				self->m_Lines.Push(line);
+				json.String(line.View());
+			}
+			json.EndArray();
+			json.EndObject();
+			while (self->m_Lines.Count() > c_BuildLogLines) self->m_Lines.RemoveAt(0);
+			events.Publish(Core::StringView(c_StateTopic), "build.lines", json.View());
+		});
+	}
+
+	void Builds::Finish(BuildState finished, int64 code) {
+		Builds* self = this;
+		m_Context->Atomically([self, finished, code](IED::Events& events) {
+			self->m_State = finished;
+			self->m_ExitCode = code;
+			self->m_EndedMs = NowMs();
+			events.Publish(Core::StringView(c_StateTopic), "changed", self->SnapshotJson().View());
+		});
+	}
+}

@@ -1,0 +1,125 @@
+include "api/Plugin.ch"
+include "SkillTools.ch"
+include "prompts/Contributed.ch"
+
+namespace Ai
+{
+	static Core::Array<Skill*> WorkspaceSkills(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return SkillsOf(call.m_Context, call.m_Ws, problems);
+	}
+
+	static ToolPlan SkillPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.m_Subject = (Core::String("skill(") + (call.m_Args.Member("name").IsValid() ? call.m_Args.Member("name").AsView() : call.m_Args.Member("query").AsView())) + ")";
+		return plan;
+	}
+
+	static ToolOutcome SearchRun(const ToolInvocation& call) {
+		Core::Array<Skill*> found = SearchSkills(WorkspaceSkills(call), call.m_Args.Member("query").AsView(), c_SkillSearchMost);
+		Core::StringBuilder out;
+		for (Skill* skill : found) {
+			out.Append(skill->m_Name.View());
+			out.Append(" (");
+			out.Append(skill->m_Source.View());
+			out.Append("): ");
+			out.Append(skill->m_Description.View());
+			out.Append("\n");
+		}
+		if (found.IsEmpty()) out.Append("[no skill matches; try other words]\n");
+		Core::StringBuilder preview;
+		preview.AppendInt(found.Count());
+		preview.Append(found.Count() == 1 ? " skill" : " skills");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// The file `relative` of a skill's folder; empty when it leaves the folder.
+	static FS::Path SkillFile(const Skill* skill, Core::StringView relative) {
+		if (relative.Contains(Core::StringView("..")) || relative.StartsWith(Core::StringView("/")) || relative.IndexOf(':', 0) >= 0) return FS::Path();
+		return skill->m_File.Parent() / relative;
+	}
+
+	// Where the skill lives, so the model can open the files beside it: its SKILL.md as the file tools name it, whether
+	// it is read-only (a plugin's), and what its folder holds. "" for a skill no file tool reaches (the app's).
+	static Core::String SkillPlace(const Skill* skill) {
+		if (skill->m_Shown.IsEmpty()) return Core::String();
+		Core::StringView folder = skill->m_Shown.View().Substring(0, skill->m_Shown.ByteLength() - 9);   // without "/SKILL.md"
+		Core::StringBuilder out;
+		out.Append("\n\n[This skill is ");
+		out.Append(skill->m_Shown.View());
+		if (skill->m_ReadOnly) out.Append(", read-only: a plugin's file");
+		Core::StringBuilder beside;
+		int64 count = 0;
+		for (FS::DirectoryEntry& entry : FS::Directory(skill->m_File.Parent().CStr())) {
+			if (entry.name.View() == "SKILL.md") continue;
+			if (count == c_SkillPlaceMostEntries) {
+				beside.Append(", ...");
+				break;
+			}
+			if (count > 0) beside.Append(", ");
+			beside.Append(entry.name.View());
+			if (entry.kind == FS::EntryKind::Directory) beside.Append("/");
+			count += 1;
+		}
+		if (count > 0) {
+			out.Append(". Beside it in ");
+			out.Append(folder);
+			out.Append("/: ");
+			out.Append(beside.View());
+			out.Append(" - read them with skill_read and file, or fs_read and fs_list there");
+		}
+		out.Append("]");
+		return out.ToString();
+	}
+
+	static ToolOutcome ReadRun(const ToolInvocation& call) {
+		Core::Array<Skill*> skills = WorkspaceSkills(call);
+		Skill* skill = SkillNamed(skills, call.m_Args.Member("name").AsView());
+		if (!skill) {
+			Core::StringBuilder names;
+			for (Skill* each : skills) {
+				if (names.ByteLength() > 0) names.Append(", ");
+				names.Append(each->m_Name.View());
+			}
+			return ToolError(((Core::String("skill_read: there is no skill ") + call.m_Args.Member("name").AsView()) + "; the skills are: " + names.View()).View());
+		}
+		Core::StringView relative = call.m_Args.Member("file").AsView();
+		if (relative.IsEmpty() || relative == "SKILL.md") return ToolResult((SkillBody(skill) + SkillPlace(skill).View()).View(), skill->m_Description.View());
+		FS::Path file = SkillFile(skill, relative);
+		if (file.IsEmpty() || !FS::FileExists(file.CStr())) return ToolError(((Core::String("skill_read: the skill ") + skill->m_Name.View()) + " has no file " + relative + SkillPlace(skill).View()).View());
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Core::StringView kept = text.View().ByteLength() <= c_SkillReadMostBytes ? text.View() : text.View().Substring(0, c_SkillReadMostBytes);
+		if (skill->m_Shown.IsEmpty()) return ToolResult(kept, relative);
+		Core::StringBuilder out;
+		out.Append(kept);
+		out.Append("\n\n[");
+		out.Append(skill->m_Shown.View().Substring(0, skill->m_Shown.ByteLength() - 8));
+		out.Append(relative);
+		out.Append(skill->m_ReadOnly ? ", read-only: a plugin's file]" : "]");
+		return ToolResult(out.View(), relative);
+	}
+
+	static ToolSpec* SkillSpec(const char* name, const char* description, const char* parameters) {
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Name = Core::String(name);
+		spec->m_Description = Core::String(description);
+		spec->m_Parameters = Core::String(parameters);
+		spec->m_ToolClass = ToolClass::Read;
+		spec->m_ParallelSafe = true;
+		spec->m_InPlan = true;
+		spec->m_Plan = SkillPlan;
+		return spec;
+	}
+
+	void AddSkillTools(ToolRegistry& registry) {
+		ToolSpec* search = SkillSpec("skill_search", "Find skills (how-to guides for this workspace's languages, tools and conventions) by words; returns name (source): description. Example: skill_search({\"query\": \"write a unit test\"})",
+			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}");
+		search->m_Run = SearchRun;
+		registry.Add(search);
+		ToolSpec* read = SkillSpec("skill_read", "Read a skill's guide (its SKILL.md), or another file of its folder that the guide names. Example: skill_read({\"name\": \"nuke\"})",
+			"{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"minLength\": 1}, \"file\": {\"type\": \"string\", \"description\": \"a file of the skill's folder, relative to it\"}}, \"required\": [\"name\"], \"additionalProperties\": false}");
+		read->m_Run = ReadRun;
+		registry.Add(read);
+	}
+}

@@ -1,0 +1,53 @@
+// superseded reads: a compression notes the file reads a later read of the same range, or a write, made stale - in what
+// the requests send; the chat keeps each read whole.
+
+include "Superseded.ch"
+
+static Ai::ModelMessage* Calls(const char* toolCalls) {
+	Ai::ModelMessage* message = new Ai::ModelMessage();
+	message->m_Role = Core::String("assistant");
+	message->m_ToolCalls = Core::String(toolCalls);
+	return message;
+}
+
+static Ai::ModelMessage* Result(const char* callId, const char* content) {
+	Ai::ModelMessage* message = new Ai::ModelMessage();
+	message->m_Role = Core::String("tool");
+	message->m_ToolCallId = Core::String(callId);
+	message->m_Content = Core::String(content);
+	return message;
+}
+
+[test("server.ai.superseded")]
+class SupersededTests {
+	[test("reads_made_stale")]
+	public static void TestStale() {
+		Core::Array<Ai::ModelMessage*> messages;
+		messages.Push(Calls("[{\"id\": \"r1\", \"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"arguments\": \"{\\\"path\\\": \\\"a.cf\\\"}\"}}, {\"id\": \"r2\", \"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"arguments\": \"{\\\"path\\\": \\\"b.cf\\\"}\"}}]"));
+		messages.Push(Result("r1", "1\tfirst a"));
+		messages.Push(Result("r2", "1\tfirst b"));
+		messages.Push(Calls("[{\"id\": \"r3\", \"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"arguments\": \"{\\\"path\\\": \\\"a.cf\\\"}\"}}, {\"id\": \"r4\", \"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"arguments\": \"{\\\"path\\\": \\\"b.cf\\\", \\\"offset\\\": 40}\"}}]"));
+		messages.Push(Result("r3", "1\tsecond a"));
+		messages.Push(Result("r4", "40\tb on"));
+		messages.Push(Calls("[{\"id\": \"e1\", \"type\": \"function\", \"function\": {\"name\": \"fs_edit\", \"arguments\": \"{\\\"path\\\": \\\"a.cf\\\", \\\"edits\\\": []}\"}}]"));
+		messages.Push(Result("e1", "edited"));
+		assert_eq((int64)2, Ai::DropSuperseded(messages, messages.Count()), "the first read of a.cf, and the second (edited after)");
+		assert_se("[superseded: a.cf was read again later]", Core::String(messages[1]->SentText()).CStr(), "read again");
+		assert_true(messages[1]->m_Content.View().EndsWith(Core::StringView("first a")), "what the requests send changed, not the chat's result");
+		assert_se("1\tfirst b", messages[2]->m_Content.CStr(), "another range of b.cf is not the same read");
+		assert_se("[out of date: a.cf was changed later by fs_edit; read it again if you need it]", Core::String(messages[4]->SentText()).CStr(), "edited after");
+		assert_se("edited", messages[7]->m_Content.CStr(), "a write's result stays");
+		assert_eq((int64)0, Ai::DropSuperseded(messages, messages.Count()), "nothing twice");
+	}
+
+	[test("recent_kept")]
+	public static void TestRecentKept() {
+		Core::Array<Ai::ModelMessage*> messages;
+		messages.Push(Calls("[{\"id\": \"r1\", \"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"arguments\": \"{\\\"path\\\": \\\"a.cf\\\"}\"}}]"));
+		messages.Push(Result("r1", "1\tfirst"));
+		messages.Push(Calls("[{\"id\": \"w1\", \"type\": \"function\", \"function\": {\"name\": \"fs_write\", \"arguments\": \"{\\\"path\\\": \\\"a.cf\\\", \\\"content\\\": \\\"x\\\"}\"}}]"));
+		messages.Push(Result("w1", "written"));
+		assert_eq((int64)0, Ai::DropSuperseded(messages, 1), "the read is among the recent messages");
+		assert_eq((int64)1, Ai::DropSuperseded(messages, 2), "and then it is not");
+	}
+}

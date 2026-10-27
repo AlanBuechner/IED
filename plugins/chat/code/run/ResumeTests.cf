@@ -1,0 +1,62 @@
+// Chats that go on by themselves after a restart (Resume.ch, docs/12 "Restart behavior"): a tool that restarted the
+// server, an Agent turn the restart cut off as ai.resumeInterrupted says, and the limit on turns cut off again and again.
+
+include "Resume.ch"
+
+static Ai::Turn* Ended(Ai::Chat* chat, const char* stop, const char* resumed) {
+	Ai::Turn* turn = new Ai::Turn();
+	turn->m_Stop = Core::String(stop);
+	turn->m_Resumed = Core::String(resumed);
+	chat->m_Turns.Push(turn);
+	return turn;
+}
+
+static Ai::Chat* AgentChat() {
+	Ai::Chat* chat = new Ai::Chat();
+	chat->m_Mode = Ai::ChatMode::Agent;
+	return chat;
+}
+
+[test("server.ai.resume")]
+class ResumeTests {
+	[test("cut_off")]
+	public static void TestCutOff() {
+		Ai::Chat* chat = AgentChat();
+		assert_true(Ai::ResumeReason(chat, Core::StringView("agent")).IsEmpty(), "a new chat waits");
+		Ended(chat, "finished", "");
+		assert_true(Ai::ResumeReason(chat, Core::StringView("agent")).IsEmpty(), "a turn that ended waits");
+		Ended(chat, "interrupted", "");
+		assert_se("interrupted", Ai::ResumeReason(chat, Core::StringView("agent")).CStr(), "an Agent turn the restart cut off goes on");
+		assert_true(Ai::ResumeReason(chat, Core::StringView("never")).IsEmpty(), "unless the owner said never");
+		chat->m_Mode = Ai::ChatMode::Ask;
+		assert_true(Ai::ResumeReason(chat, Core::StringView("agent")).IsEmpty(), "an Ask chat waits for the owner");
+		assert_se("interrupted", Ai::ResumeReason(chat, Core::StringView("always")).CStr(), "unless the owner said always");
+		chat->m_Run = new Ai::ChatRun();
+		assert_true(Ai::ResumeReason(chat, Core::StringView("always")).IsEmpty(), "a chat already running");
+	}
+
+	[test("again_and_again")]
+	public static void TestAgainAndAgain() {
+		Ai::Chat* chat = AgentChat();
+		Ended(chat, "interrupted", "");
+		for (int64 i = 0; i < Ai::c_MostResumes - 1; ++i) Ended(chat, "interrupted", "interrupted");
+		assert_se("interrupted", Ai::ResumeReason(chat, Core::StringView("agent")).CStr(), "a few restarts in a row");
+		Ended(chat, "interrupted", "interrupted");
+		assert_true(Ai::ResumeReason(chat, Core::StringView("agent")).IsEmpty(), "a turn cut off by every restart is left to the owner");
+		Ended(chat, "finished", "");
+		Ended(chat, "interrupted", "");
+		assert_se("interrupted", Ai::ResumeReason(chat, Core::StringView("agent")).CStr(), "a turn that ended starts the count again");
+	}
+
+	[test("relaunch")]
+	public static void TestRelaunch() {
+		Ai::Chat* chat = AgentChat();
+		chat->m_Mode = Ai::ChatMode::Ask;
+		Ended(chat, "finished", "");
+		chat->m_Resume = Core::String("ied_relaunch");
+		assert_se("relaunch", Ai::ResumeReason(chat, Core::StringView("never")).CStr(), "a tool that restarted IED on purpose: the chat goes on whatever the mode");
+		Core::String text = Ai::ResumeText(Core::StringView("relaunch"), chat->m_Resume.View());
+		assert_true(text.View().Contains(Core::StringView("ied_relaunch")), "the model is told which call restarted it");
+		assert_true(Ai::ResumeText(Core::StringView("interrupted"), Core::StringView("")).View().Contains(Core::StringView("cut it off")), "or that the restart cut its turn off");
+	}
+}

@@ -1,0 +1,93 @@
+include "TierFile.ch"
+include "web/Json.ch"
+include "web/Params.ch"
+
+namespace Ied
+{
+	void TierFile::Problem(int32 line, Core::StringView key, Core::StringView message) {
+		TierProblem* problem = new TierProblem();
+		problem->m_Line = line;
+		problem->m_Key = Core::String(key);
+		problem->m_Message = Core::String(message);
+		m_Problems.Push(problem);
+	}
+
+	bool TierFile::Reload(SettingsCatalog& catalog, bool force) {
+		Core::String now;
+		if (FS::FileExists(m_File.CStr())) {
+			FS::File opened = FS::File(m_File.CStr(), "rb");
+			now = opened.ReadText();
+		}
+		if (m_Loaded && !force && now.View() == m_Text.View()) return false;
+		if (!m_Loaded || now.View() != m_Text.View()) m_Revision += 1;
+		m_Loaded = true;
+		m_Text = now;
+		Check(catalog);
+		return true;
+	}
+
+	// Each member's value is checked on its own: a bad one is reported and the key keeps its last valid value; a key
+	// no longer in the file loses its value.
+	void TierFile::Check(SettingsCatalog& catalog) {
+		m_Problems.Clear();
+		Core::StringView view = m_Text.View();
+		if (view.Trimmed().IsEmpty()) {
+			m_Values.Clear();
+			return;
+		}
+		TopLevel top;
+		Core::String error;
+		if (!ScanMembers(view, top, error)) {
+			Problem(1, Core::StringView(""), (Core::String("not a settings file: ") + error.View()).View());
+			return;
+		}
+		Core::HashMap<Core::String, Core::String> kept;
+		for (MemberSpan* member : top.m_Members) {
+			const int32 line = LineOf(view, member->m_KeyStart);
+			Core::StringView key = member->m_Key.View();
+			Core::String last;
+			const bool hadValue = m_Values.TryGet(member->m_Key, last);
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJsonc(view.Substring(member->m_ValueStart, member->m_ValueEnd - member->m_ValueStart), *doc);
+			SettingInfo* setting = catalog.Get(key);
+			Core::Array<Core::String> wrong;
+			if (!setting) wrong.Push(Core::String("unknown setting"));
+			else if (!catalog.AllowedIn(setting, m_Tier.View())) wrong.Push((Core::String("cannot be set in the ") + m_Tier.View()) + " tier");
+			else if (!read.Ok()) wrong.Push(Core::String("not a JSON value"));
+			else wrong = catalog.Check(setting, read.root);
+			for (const Core::String& message : wrong) Problem(line, key, message.View());
+			if (wrong.IsEmpty()) kept.At(member->m_Key) = NodeJson(read.root);
+			else if (hadValue && setting) kept.At(member->m_Key) = last;
+		}
+		m_Values = kept;
+	}
+
+	bool TierFile::Write(SettingsCatalog& catalog, Core::StringView newText, Core::String& error) {
+		FS::MakeDirectories(m_File.Parent().CStr());
+		if (!FS::WriteFileAtomically(m_File.CStr(), (const void*)newText.Data(), newText.ByteLength())) {
+			error = Core::String("cannot write ") + m_File.View();
+			return false;
+		}
+		Reload(catalog, false);
+		return true;
+	}
+
+	Core::String TierFile::StateJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("file", m_File.View());
+		json.IntField("revision", m_Revision);
+		json.Key(Core::StringView("problems"));
+		json.BeginArray();
+		for (TierProblem* problem : m_Problems) {
+			json.BeginObject();
+			json.IntField("line", problem->m_Line);
+			if (!problem->m_Key.IsEmpty()) json.Field("key", problem->m_Key.View());
+			json.Field("message", problem->m_Message.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

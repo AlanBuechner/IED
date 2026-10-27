@@ -1,0 +1,416 @@
+include "ClaudeAccount.ch"
+include "Pacing.ch"
+
+namespace Ai
+{
+	static int64 AccountNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	void ClaudeAccount::Init(IED::PluginContext* context) {
+		this.m_Context = context;
+		m_Usage.m_ExtraUtilization = -1;
+		m_Replica = context->Server() != "master";
+		if (m_Replica) return;
+		ClaudeAccount* self = this;
+		context->TopicFrom(Core::StringView(c_UsageTopic), [self]() -> Core::String { return self->SnapshotJson(); });
+		context->Provide(Core::StringView("ai.claude.account"), [self](const Serialization::DomNode& args) -> IED::Result { return self->AccountBinding(args); });
+		Core::String problem;
+		if (!context->Method(Core::StringView("ai.usage"), [self](const IED::Request& request) -> Core::String { return self->UsageMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.signIn"), [self](const IED::Request& request) -> Core::String { return self->SignInMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.install"), [self](const IED::Request& request) -> Core::String { return self->InstallMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.setup"), [self](const IED::Request& request) -> Core::String { return self->SetupMethod(request); }, problem)) context->Log(problem.View());
+		// the snapshot's chains and paces follow ai.groups, ai.models and ai.claude.paceDays as they change
+		context->Listen(Core::StringView("settings.changed"), [self](const IED::Event& event) {
+			if (!event.m_Topic.View().StartsWith(Core::StringView("settings:"))) return;
+			IED::HostLock guard(*self->m_Context);
+			self->Changed();
+		});
+	}
+
+	Core::Array<Core::String> ClaudeAccount::Command() const {
+		return FindClaude(ClaudeCommandSetting(m_Context->Setting(Core::StringView("ai.claude.command"), Core::StringView("")).View()));
+	}
+
+	void ClaudeAccount::Watch(func<bool()> done, func<void(bool)> after) {
+		m_Context->StartThread([done, after]() {
+			const int64 until = AccountNowMs() + c_ClaudeWindowWatchMs;
+			bool succeeded = false;
+			while (!succeeded && AccountNowMs() < until) {
+				Threading::Thread::Sleep(c_ClaudeWindowPollNs);
+				succeeded = done();
+			}
+			after(succeeded);
+		});
+	}
+
+	bool ClaudeAccount::Claim(bool& waiting) {
+		IED::HostLock guard(*m_Context);
+		if (waiting) return false;
+		waiting = true;
+		Changed();
+		return true;
+	}
+
+	void ClaudeAccount::Release(bool& waiting) {
+		IED::HostLock guard(*m_Context);
+		waiting = false;
+		Changed();
+	}
+
+	Core::String ClaudeAccount::SignInMethod(const IED::Request& request) {
+		if (!c_ClaudeSubscriptionOffered) throw IED::RpcError(IED::ErrorCode::Unavailable, c_ClaudeNotOffered);
+		Core::Array<Core::String> command = Command();
+		if (command.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, "no Claude Code CLI was found: install it first");
+		if (!Claim(m_SigningIn)) {
+			IED::HostLock guard(*m_Context);
+			return SnapshotJson();
+		}
+		Core::Array<Core::String> login = command;
+		login.Push(Core::String("auth"));
+		login.Push(Core::String("login"));
+		login.Push(Core::String("--claudeai"));
+		Core::String problem;
+		if (!OpenClaudeWindow(Core::StringView("Claude Code sign-in"), login, problem)) {
+			Release(m_SigningIn);
+			throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		ClaudeAccount* self = this;
+		Core::String folder = m_Context->StateFolder();
+		IED::HostLock guard(*m_Context);
+		Watch([command, folder]() -> bool {
+			bool signedIn = false;
+			Core::String method = ClaudeAuthMethod(command, folder.View(), signedIn);
+			return signedIn && IsSubscriptionAuth(method.View());
+		}, [self](bool succeeded) {
+			self->Refresh(true);
+			Core::String problem;
+			if (succeeded && !self->Configured() && !self->Setup(true, problem)) self->m_Context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
+			self->Release(self->m_SigningIn);
+		});
+		return SnapshotJson();
+	}
+
+	Core::String ClaudeAccount::InstallMethod(const IED::Request& request) {
+		if (!c_ClaudeSubscriptionOffered) throw IED::RpcError(IED::ErrorCode::Unavailable, c_ClaudeNotOffered);
+		if (!Command().IsEmpty()) throw IED::RpcError(IED::ErrorCode::Conflict, "Claude Code is installed already");
+		if (!Claim(m_Installing)) {
+			IED::HostLock guard(*m_Context);
+			return SnapshotJson();
+		}
+		Core::Array<Core::String> install;
+		const char*[6] words = { "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command" };
+		for (int64 i = 0; i < 6; ++i) install.Push(Core::String(words[i]));
+		install.Push(Core::String(c_ClaudeInstallScript));
+		Core::String problem;
+		if (!OpenClaudeWindow(Core::StringView("Install Claude Code"), install, problem)) {
+			Release(m_Installing);
+			throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		ClaudeAccount* self = this;
+		IED::HostLock guard(*m_Context);
+		Watch([self]() -> bool { return !self->Command().IsEmpty(); }, [self](bool found) {
+			if (found) self->Refresh(true);
+			self->Release(self->m_Installing);
+		});
+		return SnapshotJson();
+	}
+
+	Core::String ClaudeAccount::SetupMethod(const IED::Request& request) {
+		Core::String problem;
+		if (!Setup(true, problem) && !problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		IED::HostLock guard(*m_Context);
+		return SnapshotJson();
+	}
+
+	bool ClaudeAccount::Setup(bool force, Core::String& problem) {
+		if (!c_ClaudeSubscriptionOffered) {
+			problem = Core::String(c_ClaudeNotOffered);
+			return false;
+		}
+		FS::Path mark = FS::Path(m_Context->StateFolder().View()) / "claude-setup.json";
+		if (!force && FS::FileExists(mark.CStr())) return false;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String defaultGroup = Core::String(Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.defaultGroup"), Core::StringView("")).View(), *doc).root.AsView());
+		Core::String models;
+		Core::String groups;
+		WithClaudeModels(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), m_Context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), defaultGroup.View(), models, groups);
+		if (!m_Context->SetSetting(Core::StringView("ai.models"), models.View(), problem) || !m_Context->SetSetting(Core::StringView("ai.groups"), groups.View(), problem)) return false;
+		Core::StringBuilder stamp;
+		stamp.Append("{\"setUpMs\": ");
+		stamp.AppendInt(AccountNowMs());
+		stamp.Append("}");
+		FS::WriteFileAtomically(mark.CStr(), (const void*)stamp.View().Data(), stamp.View().ByteLength());
+		m_Context->Log(Core::StringView("Claude is set up: the Claude models and the claude group are in the app settings (Settings > AI > Claude)"));
+		IED::HostLock guard(*m_Context);
+		Changed();
+		return true;
+	}
+
+	// ai.usage {refresh?}: the snapshot, the CLI asked first when `refresh`.
+	Core::String ClaudeAccount::UsageMethod(const IED::Request& request) {
+		if (request.m_Params.Bool("refresh", false)) Refresh(true);
+		IED::HostLock guard(*m_Context);
+		return SnapshotJson();
+	}
+
+	// get_usage asked of a CLI process of IED's own (no session kept, no model request); an invalid node with `error`.
+	static Serialization::DomNode AskUsage(const Core::Array<Core::String>& command, Core::StringView folder, Core::String& error) {
+		Core::Array<Core::String> argv = command;
+		for (const Core::String& argument : ClaudeBaseArguments()) argv.Push(argument);
+		argv.Push(Core::String("--no-session-persistence"));
+		ClaudeProcess* process = new ClaudeProcess();
+		Serialization::DomNode answer;
+		if (!process->Start(argv, folder, ClaudeEnvironment(), error)) return answer;
+		ClaudeServe refuse = [process](ClaudeLine* line) { process->Send(ControlRefusalLine(line->m_Root.Member("request_id").AsView(), Core::StringView("IED's usage check answers nothing")).View()); };
+		if (process->Request(Core::StringView("{\"subtype\":\"initialize\"}"), c_UsageProcessMs, error, refuse).IsValid())
+			answer = process->Request(Core::StringView("{\"subtype\":\"get_usage\",\"skip_behaviors\":true}"), c_UsageProcessMs, error, refuse);
+		process->Stop();
+		return answer;
+	}
+
+	void ClaudeAccount::MigrateAuto() {
+		Core::String models;
+		Core::String groups;
+		if (!WithoutAutoProfiles(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), m_Context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), models, groups)) return;
+		Core::String problem;
+		if (!m_Context->SetSetting(Core::StringView("ai.groups"), groups.View(), problem) || !m_Context->SetSetting(Core::StringView("ai.models"), models.View(), problem)) {
+			m_Context->Log((Core::String("Claude's pacing could not be moved into ai.groups: ") + problem.View()).View());
+			return;
+		}
+		m_Context->Log(Core::StringView("Claude's pacing moved into ai.groups: each role that named a model auto profile has its ladder as paced places (docs/04 Pacing)"));
+	}
+
+	void ClaudeAccount::Refresh(bool force) {
+		if (m_Replica) {
+			Sync(true, force);
+			return;
+		}
+		MigrateAuto();
+		{
+			IED::HostLock guard(*m_Context);
+			if (m_Refreshing) return;
+			if (!force && m_Usage.m_UpdatedMs > 0 && AccountNowMs() - m_Usage.m_UpdatedMs < c_UsageFreshMs) return;
+			m_Refreshing = true;
+			Changed();
+		}
+		Core::Array<Core::String> command = Command();
+		Core::String folder = m_Context->StateFolder();
+		Core::String version = ClaudeVersion(command, folder.View());
+		bool signedIn = false;
+		Core::String method = ClaudeAuthMethod(command, folder.View(), signedIn);
+		Core::String error;
+		Serialization::DomNode answer;
+		if (command.IsEmpty()) error = Core::String("no Claude Code CLI was found: install it, or set ai.claude.command");
+		else if (signedIn) answer = AskUsage(command, folder.View(), error);
+		Core::String problem;
+		if (signedIn && IsSubscriptionAuth(method.View()) && c_ClaudeSubscriptionOffered && !Configured() && !Setup(false, problem) && !problem.IsEmpty())
+			m_Context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
+		IED::HostLock guard(*m_Context);
+		m_Refreshing = false;
+		m_Asked = true;
+		m_CliPath = command.IsEmpty() ? Core::String() : command[0];
+		if (!version.IsEmpty()) m_CliVersion = version;
+		if (!method.IsEmpty()) {
+			m_SignIn = Core::String(signedIn ? "signed_in" : "signed_out");
+			m_AuthMethod = method;
+		}
+		if (answer.IsValid() && ReadUsage(answer, m_Usage, AccountNowMs())) m_Usage.m_Error = Core::String();
+		else if (!signedIn && !command.IsEmpty()) m_Usage.Forget();
+		else m_Usage.m_Error = error.IsEmpty() ? Core::String("the CLI's usage answer was not one IED reads") : error;
+		Changed();
+	}
+
+	void ClaudeAccount::TookUsage(const Serialization::DomNode& response) {
+		if (!ReadUsage(response, m_Usage, AccountNowMs())) return;
+		if (m_Replica) Learned("usage", (Core::String("{\"response\":") + IED::NodeJson(response).View() + "}").View());
+		Changed();
+	}
+
+	void ClaudeAccount::TookAuth(bool signedIn, Core::StringView method) {
+		if (method.IsEmpty()) return;
+		m_SignIn = Core::String(signedIn ? "signed_in" : "signed_out");
+		m_AuthMethod = Core::String(method);
+		if (m_Replica) {
+			IED::JsonWriter fact;
+			fact.BeginObject();
+			fact.BoolField("signedIn", signedIn);
+			fact.Field("method", method);
+			fact.EndObject();
+			Learned("auth", fact.View());
+		}
+		Changed();
+	}
+
+	void ClaudeAccount::TookRateLimit(const Serialization::DomNode& info) {
+		TakeRateLimit(info, m_Usage, AccountNowMs());
+		if (m_Replica) Learned("rateLimit", (Core::String("{\"info\":") + IED::NodeJson(info).View() + "}").View());
+		Changed();
+	}
+
+	// --- The master's account and a workspace server's copy (docs/01 "Processes") -------------------------------------
+
+	Core::String ClaudeAccount::StateJson() {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("cliPath", m_CliPath.View());
+		json.Field("cliVersion", m_CliVersion.View());
+		json.Field("signIn", m_SignIn.View());
+		json.Field("authMethod", m_AuthMethod.View());
+		json.BoolField("refreshing", m_Refreshing);
+		json.BoolField("asked", m_Asked);
+		json.BoolField("signingIn", m_SigningIn);
+		json.BoolField("installing", m_Installing);
+		json.Key(Core::StringView("usage"));
+		WriteUsage(json, m_Usage, Days(), AccountNowMs());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void ClaudeAccount::TakeState(const Serialization::DomNode& state) {
+		if (state.Kind() != Serialization::DomKind::Object) return;
+		m_CliPath = Core::String(state.Member("cliPath").AsView());
+		m_CliVersion = Core::String(state.Member("cliVersion").AsView());
+		m_SignIn = Core::String(state.Member("signIn").AsView());
+		m_AuthMethod = Core::String(state.Member("authMethod").AsView());
+		m_Refreshing = state.Member("refreshing").AsBool();
+		m_Asked = state.Member("asked").AsBool();
+		m_SigningIn = state.Member("signingIn").AsBool();
+		m_Installing = state.Member("installing").AsBool();
+		Serialization::DomNode taken = state.Member("usage");
+		m_Usage.Forget();
+		m_Usage.m_Known = taken.Member("known").AsBool();
+		m_Usage.m_Available = taken.Member("available").AsBool();
+		m_Usage.m_Plan = Core::String(taken.Member("plan").AsView());
+		m_Usage.m_Status = Core::String(taken.Member("status").AsView());
+		m_Usage.m_LimitedBy = Core::String(taken.Member("limitedBy").AsView());
+		m_Usage.m_LimitResetsAtMs = taken.Member("limitResetsAtMs").AsInt();
+		m_Usage.m_ExtraEnabled = taken.Member("extraEnabled").AsBool();
+		m_Usage.m_ExtraUtilization = taken.Member("extraUtilization").IsValid() ? taken.Member("extraUtilization").AsFloat() : -1;
+		m_Usage.m_UpdatedMs = taken.Member("updatedMs").AsInt();
+		m_Usage.m_Error = Core::String(taken.Member("error").AsView());
+		Serialization::DomNode windows = taken.Member("windows");
+		for (int64 i = 0; i < windows.Count(); ++i) {
+			Serialization::DomNode window = windows.At(i);
+			UsageWindow* kept = m_Usage.Window(window.Member("id").AsView());
+			kept->m_Label = Core::String(window.Member("label").AsView());
+			kept->m_Model = Core::String(window.Member("model").AsView());
+			kept->m_Separate = window.Member("separate").AsBool();
+			kept->m_Utilization = window.Member("utilization").AsFloat();
+			kept->m_ResetsAtMs = window.Member("resetsAtMs").AsInt();
+			kept->m_LengthMs = window.Member("lengthMs").AsInt();
+		}
+	}
+
+	void ClaudeAccount::Learned(const char* kind, Core::StringView fact) {
+		m_Learned.Push(((Core::String("{\"kind\":\"") + kind) + "\",\"fact\":" + fact) + "}");
+		if (m_Sending) return;
+		m_Sending = true;
+		ClaudeAccount* self = this;
+		m_Context->StartThread([self]() { self->Sync(false, false); });
+	}
+
+	void ClaudeAccount::Sync(bool refresh, bool force) {
+		Core::Array<Core::String> sent;
+		{
+			IED::HostLock guard(*m_Context);
+			sent = m_Learned;
+			m_Learned.Clear();
+			m_Sending = false;
+		}
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Key(Core::StringView("learned"));
+		args.BeginArray();
+		for (const Core::String& fact : sent) args.Raw(fact.View());
+		args.EndArray();
+		args.BoolField("refresh", refresh);
+		args.BoolField("force", force);
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView("ai.claude.account"), args.View());
+		if (!answer.Ok()) {
+			m_Context->Log((Core::String("the master's Claude account did not answer: ") + answer.m_Error.View()).View());
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(answer.m_Json.View(), *doc);
+		IED::HostLock guard(*m_Context);
+		if (!read.Ok()) return;
+		TakeState(read.root);
+		m_SyncedMs = AccountNowMs();
+	}
+
+	void ClaudeAccount::SyncIfStale() {
+		if (!m_Replica) return;
+		{
+			IED::HostLock guard(*m_Context);
+			if (AccountNowMs() - m_SyncedMs < c_AccountFreshMs) return;
+		}
+		Sync(false, false);
+	}
+
+	IED::Result ClaudeAccount::AccountBinding(const Serialization::DomNode& args) {
+		Serialization::DomNode facts = args.Member("learned");
+		{
+			IED::HostLock guard(*m_Context);
+			for (int64 i = 0; i < facts.Count(); ++i) {
+				Core::StringView kind = facts.At(i).Member("kind").AsView();
+				Serialization::DomNode fact = facts.At(i).Member("fact");
+				if (kind == "usage") TookUsage(fact.Member("response"));
+				else if (kind == "rateLimit") TookRateLimit(fact.Member("info"));
+				else if (kind == "auth") TookAuth(fact.Member("signedIn").AsBool(), fact.Member("method").AsView());
+			}
+		}
+		if (args.Member("refresh").AsBool()) Refresh(args.Member("force").AsBool());
+		IED::HostLock guard(*m_Context);
+		return IED::Answer(StateJson().View());
+	}
+
+	PaceDays ClaudeAccount::Days() const {
+		if (!m_Context) return EveryDay();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		if (Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.claude.paceDays"), Core::StringView("")).View(), *doc).root.AsView() != "workweek") return EveryDay();
+		Serialization::DomDoc* daysDoc = new Serialization::DomDoc();
+		return WorkDaysOnly(ReadWorkDays(Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.claude.workDays"), Core::StringView("")).View(), *daysDoc).root));
+	}
+
+	bool ClaudeAccount::Configured() const {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode models = Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), *doc).root;
+		for (int64 i = 0; models.Kind() == Serialization::DomKind::Object && i < models.Count(); ++i)
+			if (models.ValueAt(i).Member("provider").AsView() == "claude-code") return true;
+		return false;
+	}
+
+	Core::String ClaudeAccount::SnapshotJson() {
+		const int64 now = AccountNowMs();
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("claude"));
+		json.BeginObject();
+		json.BoolField("offered", c_ClaudeSubscriptionOffered);
+		json.BoolField("configured", Configured());
+		json.Key(Core::StringView("cli"));
+		json.BeginObject();
+		json.BoolField("asked", m_Asked);
+		json.Field("path", m_CliPath.View());
+		json.Field("version", m_CliVersion.View());
+		json.Field("signIn", m_SignIn.View());
+		json.Field("authMethod", m_AuthMethod.View());
+		json.BoolField("subscription", m_SignIn == "signed_in" && IsSubscriptionAuth(m_AuthMethod.View()));
+		json.BoolField("signingIn", m_SigningIn);
+		json.BoolField("installing", m_Installing);
+		json.EndObject();
+		json.BoolField("refreshing", m_Refreshing);
+		json.IntField("nowMs", now);
+		json.Key(Core::StringView("chains"));
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), problems);
+		WriteChains(json, ClaudeChains(models, m_Context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), *this, now));
+		json.Key(Core::StringView("usage"));
+		WriteUsage(json, m_Usage, Days(), now);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void ClaudeAccount::Changed() { m_Context->Publish(Core::StringView(c_UsageTopic), "usage.changed", SnapshotJson().View()); }
+}

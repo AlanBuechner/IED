@@ -1,0 +1,196 @@
+include "AuthGate.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const int64 c_CookieMaxAgeS = 2592000;   // 30 days
+
+	void AnswerJson(Http::Response& response, int32 status, Core::StringView json) {
+		response.status = status;
+		response.SetText(Core::StringView("application/json"), json);
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-store"));
+	}
+
+	// The part of `text` up to `separator` (or all of it), with `rest` moved past the separator.
+	static Core::StringView NextPart(Core::StringView& rest, char separator) {
+		const int64 at = rest.IndexOf(separator, 0);
+		Core::StringView part = at < 0 ? rest : rest.Substring(0, at);
+		rest = at < 0 ? Core::StringView("") : rest.Substring(at + 1, rest.ByteLength() - at - 1);
+		return part;
+	}
+
+	// "name=value" pairs separated by `separator`: the value of `name`.
+	static Core::StringView PairValue(Core::StringView text, char separator, Core::StringView name) {
+		Core::StringView rest = text;
+		while (!rest.IsEmpty()) {
+			Core::StringView pair = NextPart(rest, separator).Trimmed();
+			const int64 equals = pair.IndexOf('=', 0);
+			if (equals >= 0 && pair.Substring(0, equals) == name) return pair.Substring(equals + 1, pair.ByteLength() - equals - 1);
+		}
+		return Core::StringView("");
+	}
+
+	Core::StringView CookieValue(Core::StringView header, Core::StringView name) { return PairValue(header, ';', name); }
+
+	Core::StringView QueryValue(Core::StringView query, Core::StringView name) { return PairValue(query, '&', name); }
+
+	static const char* BrowserOf(Core::StringView agent) {
+		if (agent.Contains(Core::StringView("Edg/"))) return "Edge";
+		if (agent.Contains(Core::StringView("Firefox/"))) return "Firefox";
+		if (agent.Contains(Core::StringView("Chrome/"))) return "Chrome";
+		if (agent.Contains(Core::StringView("Safari/"))) return "Safari";
+		return "";
+	}
+
+	static const char* SystemOf(Core::StringView agent) {
+		if (agent.Contains(Core::StringView("Windows"))) return "Windows";
+		if (agent.Contains(Core::StringView("Android"))) return "Android";
+		if (agent.Contains(Core::StringView("iPhone")) || agent.Contains(Core::StringView("iPad"))) return "iOS";
+		if (agent.Contains(Core::StringView("Mac OS X"))) return "macOS";
+		if (agent.Contains(Core::StringView("Linux"))) return "Linux";
+		return "";
+	}
+
+	Core::String DeviceNameFrom(Core::StringView userAgent) {
+		Core::StringView browser = Core::StringView(BrowserOf(userAgent));
+		Core::StringView system = Core::StringView(SystemOf(userAgent));
+		if (browser.IsEmpty()) return Core::String("Unknown browser");
+		Core::StringBuilder name;
+		name.Append(browser);
+		if (!system.IsEmpty()) {
+			name.Append(" on ");
+			name.Append(system);
+		}
+		return name.ToString();
+	}
+
+	static Core::String UserAgentName(const Http::Request& request) {
+		const Core::String* agent = request.headers.Find(Core::StringView("User-Agent"));
+		return DeviceNameFrom(agent ? agent->View() : Core::StringView(""));
+	}
+
+	Core::String AuthGate::CookieName() const {
+		Core::StringBuilder name;
+		name.Append("ied-");
+		name.AppendInt(m_Server->m_Port);
+		return name.ToString();
+	}
+
+	void AuthGate::SetCookie(Http::Response& response, Core::StringView value, int64 maxAgeS) const {
+		Core::StringBuilder cookie;
+		cookie.Append(CookieName().View());
+		cookie.AppendByte('=');
+		cookie.Append(value);
+		cookie.Append("; HttpOnly; SameSite=Strict; Path=/; Max-Age=");
+		cookie.AppendInt(maxAgeS);
+		response.headers.Add(Core::StringView("Set-Cookie"), cookie.View());
+	}
+
+	Device* AuthGate::DeviceOf(const Http::Request& request, Http::Response& response) {
+		const Core::String* header = request.headers.Find(Core::StringView("Cookie"));
+		Core::StringView cookie = header ? CookieValue(header->View(), CookieName().View()) : Core::StringView("");
+		if (cookie.IsEmpty()) return nullptr;
+		bool refresh = false;
+		Device* device = nullptr;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			device = m_Server->m_Auth->Authenticate(cookie, refresh);
+		}
+		if (device && refresh) SetCookie(response, cookie, c_CookieMaxAgeS);
+		return device;
+	}
+
+	bool AuthGate::Exchange(const Http::Request& request, Http::Response& response) {
+		Core::StringView token = QueryValue(request.query.View(), Core::StringView("t"));
+		if (token.IsEmpty()) return false;
+		Core::String cookie;
+		Device* device = nullptr;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			device = m_Server->m_Auth->Exchange(token, UserAgentName(request).View(), cookie);
+		}
+		if (!device) return false;
+		response.status = 303;
+		response.headers.Set(Core::StringView("Location"), request.path.View());
+		response.headers.Set(Core::StringView("Referrer-Policy"), Core::StringView("no-referrer"));
+		SetCookie(response, cookie.View(), c_CookieMaxAgeS);
+		return true;
+	}
+
+	bool AuthGate::IsPublic(Core::StringView path) const {
+		return path == "/login.html" || path == "/login.js" || path == "/favicon.ico" || path.StartsWith(Core::StringView("/css/"));
+	}
+
+	void AuthGate::Api(Core::StringView path, const Http::Request& request, Http::Response& response) {
+		const bool get = request.method.View() == "GET";
+		if (path == "/api/auth/state" && get) State(request, response);
+		else if (path == "/api/auth/login" && request.method.View() == "POST") Login(request, response);
+		else if (path == "/api/auth/logout" && request.method.View() == "POST") Logout(request, response);
+		else AnswerJson(response, 404, Core::StringView("{\"error\":\"not-found\"}"));
+	}
+
+	void AuthGate::State(const Http::Request& request, Http::Response& response) {
+		Device* device = DeviceOf(request, response);
+		JsonWriter json;
+		json.BeginObject();
+		json.BoolField("authenticated", device != nullptr);
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			json.BoolField("passwordSet", m_Server->m_Auth->HasPassword());
+			if (device) json.RawField("device", device->ToJson().View());
+			else {
+				json.Key(Core::StringView("device"));
+				json.Null();
+			}
+		}
+		json.EndObject();
+		AnswerJson(response, 200, json.View());
+	}
+
+	static void AnswerLocked(Http::Response& response, int64 retryAfterS) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("error", "locked");
+		json.IntField("retryAfterS", retryAfterS);
+		json.EndObject();
+		AnswerJson(response, 429, json.View());
+		Core::StringBuilder seconds;
+		seconds.AppendInt(retryAfterS);
+		response.headers.Set(Core::StringView("Retry-After"), seconds.View());
+	}
+
+	static Core::String PeerKey(const Http::Request& request) {
+		return request.peer.IsValid() ? request.peer.WithPort(0).ToString() : Core::String("unknown");
+	}
+
+	void AuthGate::Login(const Http::Request& request, Http::Response& response) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(request.BodyText(), *doc);
+		Serialization::DomNode password = parsed.Ok() ? parsed.root.Member("password") : Serialization::DomNode();
+		if (password.Kind() != Serialization::DomKind::String) {
+			AnswerJson(response, 400, Core::StringView("{\"error\":\"bad-request\"}"));
+			return;
+		}
+		Serialization::DomNode named = parsed.root.Member("device");
+		Core::String name = named.Kind() == Serialization::DomKind::String ? Core::String(named.AsView()) : UserAgentName(request);
+		LoginResult result = m_Server->m_Auth->Login(PeerKey(request).View(), password.AsView(), name.View());
+		if (result.m_Outcome == LoginOutcome::Locked) AnswerLocked(response, result.m_RetryAfterS);
+		else if (result.m_Outcome == LoginOutcome::WrongPassword) AnswerJson(response, 401, Core::StringView("{\"error\":\"wrong-password\"}"));
+		else if (result.m_Outcome == LoginOutcome::NoPassword) AnswerJson(response, 409, Core::StringView("{\"error\":\"no-password\"}"));
+		else if (result.m_Outcome == LoginOutcome::Failed) AnswerJson(response, 500, Core::StringView("{\"error\":\"internal\"}"));
+		else {
+			AnswerJson(response, 200, (Core::String("{\"device\":") + result.m_Device->ToJson().View() + "}").View());
+			SetCookie(response, result.m_Cookie.View(), c_CookieMaxAgeS);
+		}
+	}
+
+	void AuthGate::Logout(const Http::Request& request, Http::Response& response) {
+		Device* device = DeviceOf(request, response);
+		if (device) {
+			Threading::LockGuard guard(m_Server->m_Lock);
+			m_Server->m_Auth->Logout(device);
+		}
+		AnswerJson(response, 200, Core::StringView("{}"));
+		SetCookie(response, Core::StringView(""), 0);
+	}
+}

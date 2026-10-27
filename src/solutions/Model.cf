@@ -1,0 +1,201 @@
+include "Model.ch"
+include "web/Json.ch"
+include "web/Params.ch"
+include "services/Workspaces.ch"
+
+namespace Ied
+{
+	static bool EndsWithFolded(Core::StringView text, const char* suffix) {
+		Core::StringView end = Core::StringView(suffix);
+		if (text.ByteLength() < end.ByteLength()) return false;
+		const int64 start = text.ByteLength() - end.ByteLength();
+		for (int64 i = 0; i < end.ByteLength(); ++i) {
+			int32 c = text.ByteAt(start + i);
+			if (c >= 'A' && c <= 'Z') c += 32;
+			if (c != end.ByteAt(i)) return false;
+		}
+		return true;
+	}
+
+	bool IsSolutionFile(Core::StringView path) { return EndsWithFolded(path, ".iedsln") || EndsWithFolded(path, ".ied.sln"); }
+
+	bool IsProjectFile(Core::StringView path) { return EndsWithFolded(path, ".iedproj") || EndsWithFolded(path, ".ied.proj"); }
+
+	FS::Path SolutionIn(const FS::Path& folder) {
+		FS::Path found;
+		int64 count = 0;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			if (entry.kind != FS::EntryKind::File || !IsSolutionFile(entry.name.View())) continue;
+			count += 1;
+			found = folder / entry.name.View();
+		}
+		return count == 1 ? found : FS::Path();
+	}
+
+	// A JSONC file into `doc`: its root, or an invalid node with a problem.
+	static Serialization::DomNode ReadFile(const FS::Path& file, Serialization::DomDoc* doc, Core::Array<Core::String>& problems) {
+		if (!FS::FileExists(file.CStr())) {
+			problems.Push(Core::String("no such file ") + file.View());
+			return Serialization::DomNode();
+		}
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		if (read.Ok()) return read.root;
+		Core::StringBuilder why;
+		why.Append(file.FileName());
+		why.Append(": not JSON: ");
+		why.Append(read.error);
+		why.Append(" (line ");
+		why.AppendInt(read.line);
+		why.AppendByte(')');
+		problems.Push(why.ToString());
+		return Serialization::DomNode();
+	}
+
+	static void Validated(HostSchemas& schemas, const char* schema, const FS::Path& file, const Serialization::DomNode& data, Core::Array<Core::String>& problems) {
+		for (const Core::String& problem : schemas.Check(schema, data)) problems.Push((Core::String(file.FileName()) + " ") + problem.View());
+	}
+
+	static FS::Path Resolved(const FS::Path& folder, Core::StringView relative) {
+		FS::Path joined = relative.IsEmpty() || relative == "." ? folder : folder / relative;
+		FS::Path canonical = FS::CanonicalPath(joined.CStr());
+		return canonical.IsEmpty() ? joined.Normalized() : canonical;
+	}
+
+	static ProjectModel* ReadProject(const FS::Path& file, HostSchemas& schemas) {
+		ProjectModel* project = new ProjectModel();
+		project->m_File = file;
+		project->m_Doc = new Serialization::DomDoc();
+		project->m_Data = ReadFile(file, project->m_Doc, project->m_Problems);
+		project->m_Name = Core::String(file.Stem());
+		if (!project->m_Data.IsValid()) return project;
+		Validated(schemas, c_ProjectSchema, file, project->m_Data, project->m_Problems);
+		if (project->m_Data.Member("name").Kind() == Serialization::DomKind::String) project->m_Name = Core::String(project->m_Data.Member("name").AsView());
+		Serialization::DomNode root = project->m_Data.Member("root");
+		project->m_Root = Resolved(file.Parent(), root.IsValid() ? root.AsView() : Core::StringView("."));
+		project->m_Kind = Core::String(project->m_Data.Member("kind").AsView());
+		if (!FS::IsDirectory(project->m_Root.CStr())) project->m_Problems.Push((Core::String(file.FileName()) + " /root: no folder ") + project->m_Root.View());
+		return project;
+	}
+
+	// One "projects" entry: a file or a glob, each match read; an entry that finds nothing is a problem unless optional.
+	static void ReadEntry(SolutionModel* solution, const Serialization::DomNode& entry, HostSchemas& schemas) {
+		Core::StringView pattern = entry.Member("file").AsView();
+		const bool optional = entry.Member("optional").AsBool();
+		Core::Array<Core::String> files;
+		if (IsGlob(pattern)) files = ExpandGlob(solution->m_Folder, pattern);
+		else if (FS::FileExists((solution->m_Folder / pattern).CStr())) files.Push(Core::String(pattern));
+		if (files.IsEmpty() && !optional) solution->m_Problems.Push((Core::String("no project file matches ") + pattern));
+		for (const Core::String& relative : files) {
+			FS::Path file = Resolved(solution->m_Folder, relative.View());
+			Core::String inside;
+			if (RelativeTo(solution->m_Folder.View(), file.View(), inside)) solution->m_Watched.Push(inside);
+			solution->m_Projects.Push(ReadProject(file, schemas));
+		}
+	}
+
+	static void CheckNames(SolutionModel* solution) {
+		for (int64 i = 0; i < solution->m_Projects.Count(); ++i)
+			for (int64 j = 0; j < i; ++j)
+				if (solution->m_Projects[i]->m_Name.View() == solution->m_Projects[j]->m_Name.View())
+					solution->m_Problems.Push((Core::String("two projects are named ") + solution->m_Projects[i]->m_Name.View()));
+	}
+
+	static void ReadLocalPlugins(SolutionModel* solution) {
+		Serialization::DomNode list = solution->m_Data.Member("localPlugins");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			LocalPlugin* plugin = new LocalPlugin();
+			plugin->m_Id = Core::String(list.At(i).Member("id").AsView());
+			plugin->m_Folder = Resolved(solution->m_Folder, list.At(i).Member("path").AsView());
+			Serialization::DomNode enabled = list.At(i).Member("enabled");
+			plugin->m_Enabled = !enabled.IsValid() || enabled.AsBool();
+			solution->m_LocalPlugins.Push(plugin);
+		}
+	}
+
+	SolutionModel* ReadSolution(const FS::Path& file, HostSchemas& schemas) {
+		SolutionModel* solution = new SolutionModel();
+		solution->m_File = file;
+		solution->m_Folder = file.Parent();
+		solution->m_Name = Core::String(file.FileName().Substring(0, file.FileName().ByteLength() - 8));
+		solution->m_Watched.Push(Core::String(file.FileName()));
+		solution->m_Doc = new Serialization::DomDoc();
+		solution->m_Data = ReadFile(file, solution->m_Doc, solution->m_Problems);
+		if (!solution->m_Data.IsValid()) return solution;
+		Validated(schemas, c_SolutionSchema, file, solution->m_Data, solution->m_Problems);
+		if (solution->m_Data.Member("name").Kind() == Serialization::DomKind::String) solution->m_Name = Core::String(solution->m_Data.Member("name").AsView());
+		Serialization::DomNode entries = solution->m_Data.Member("projects");
+		for (int64 i = 0; i < entries.Count(); ++i) ReadEntry(solution, entries.At(i), schemas);
+		CheckNames(solution);
+		ReadLocalPlugins(solution);
+		return solution;
+	}
+
+	ProjectModel* SolutionModel::Project(Core::StringView name) const {
+		for (ProjectModel* project : m_Projects)
+			if (project->m_Name.View() == name) return project;
+		return nullptr;
+	}
+
+	ProjectModel* SolutionModel::Owning(const FS::Path& path) const {
+		ProjectModel* best = nullptr;
+		Core::String relative;
+		for (ProjectModel* project : m_Projects)
+			if (RelativeTo(project->m_Root.View(), path.View(), relative) && (!best || project->m_Root.View().ByteLength() > best->m_Root.View().ByteLength())) best = project;
+		return best;
+	}
+
+	static void Strings(JsonWriter& json, const char* key, const Core::Array<Core::String>& items) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Core::String& item : items) json.String(item.View());
+		json.EndArray();
+	}
+
+	Core::String ProjectModel::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("name", m_Name.View());
+		json.Field("file", m_File.View());
+		json.Field("root", m_Root.View());
+		json.Field("kind", m_Kind.View());
+		Strings(json, "problems", m_Problems);
+		json.RawField("data", m_Data.IsValid() ? NodeJson(m_Data).View() : Core::StringView("null"));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void RawMember(JsonWriter& json, const char* key, const Serialization::DomNode& data, const char* fallback) {
+		Serialization::DomNode value = data.Member(key);
+		json.RawField(key, value.IsValid() ? NodeJson(value).View() : Core::StringView(fallback));
+	}
+
+	Core::String SolutionModel::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("name", m_Name.View());
+		json.Field("file", m_File.View());
+		Strings(json, "problems", m_Problems);
+		RawMember(json, "groups", m_Data, "[]");
+		RawMember(json, "items", m_Data, "[]");
+		RawMember(json, "generator", m_Data, "null");
+		json.Key(Core::StringView("localPlugins"));
+		json.BeginArray();
+		for (LocalPlugin* plugin : m_LocalPlugins) {
+			json.BeginObject();
+			json.Field("id", plugin->m_Id.View());
+			json.Field("path", plugin->m_Folder.View());
+			json.BoolField("enabled", plugin->m_Enabled);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("projects"));
+		json.BeginArray();
+		for (ProjectModel* project : m_Projects) json.Raw(project->ToJson().View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

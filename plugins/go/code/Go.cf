@@ -1,0 +1,78 @@
+// The Go plugin's server code (docs/26 section 2): the system-message section that names the workspace's Go modules -
+// each go.mod's module path and Go version - so the AI writes import paths and language features that fit.
+include "api/Plugin.ch"
+
+namespace Go
+{
+	// What a go.mod says.
+	class Module
+	{
+		public Core::String m_Folder;    // workspace-relative; "" for the root
+		public Core::String m_Path;      // `module`
+		public Core::String m_Version;   // `go`
+	}
+
+	// The rest of `line` after `key` and a space, without quotes; empty when it does not start so.
+	Core::StringView Directive(Core::StringView line, Core::StringView key)
+	{
+		if (!line.StartsWith(key) || line.ByteLength() <= key.ByteLength() || line.ByteAt(key.ByteLength()) != ' ') return Core::StringView("");
+		Core::StringView rest = line.Substring(key.ByteLength(), line.ByteLength() - key.ByteLength()).Trimmed();
+		if (rest.ByteLength() >= 2 && rest.ByteAt(0) == '"' && rest.ByteAt(rest.ByteLength() - 1) == '"') return rest.Substring(1, rest.ByteLength() - 2);
+		return rest;
+	}
+
+	bool ReadModule(const IED::Workspace& ws, Core::StringView folder, Module& module)
+	{
+		Core::String file = folder.IsEmpty() ? Core::String("go.mod") : Core::String(folder) + "/go.mod";
+		Core::String text;
+		Core::String problem;
+		if (!IED::ReadFile(ws, file.View(), text, problem)) return false;
+		module.m_Folder = Core::String(folder);
+		Core::StringView rest = text.View();
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView line = rest.Substring(0, end).Trimmed();
+			rest = end < rest.ByteLength() ? rest.Substring(end + 1, rest.ByteLength() - end - 1) : Core::StringView("");
+			if (module.m_Path.IsEmpty()) module.m_Path = Core::String(Directive(line, Core::StringView("module")));
+			if (module.m_Version.IsEmpty()) module.m_Version = Core::String(Directive(line, Core::StringView("go")));
+		}
+		return !module.m_Path.IsEmpty();
+	}
+
+	// The root, then each Go project's folder, once each.
+	Core::Array<Core::String> ModuleFolders(const IED::Workspace& ws)
+	{
+		Core::Array<Core::String> folders;
+		folders.Push(Core::String(""));
+		for (const IED::Project& project : ws.m_Projects)
+			if (project.m_Language.View() == "go" && !folders.Contains(project.m_Folder)) folders.Push(project.m_Folder);
+		return folders;
+	}
+
+	Core::String Section(const IED::Workspace& ws)
+	{
+		Core::StringBuilder list;
+		for (const Core::String& folder : ModuleFolders(ws)) {
+			Module module;
+			if (!ReadModule(ws, folder.View(), module)) continue;
+			list.Append("- `");
+			list.Append(module.m_Path.View());
+			list.Append("` in ");
+			list.Append(module.m_Folder.IsEmpty() ? Core::StringView("the root") : module.m_Folder.View());
+			if (!module.m_Version.IsEmpty()) {
+				list.Append(", go ");
+				list.Append(module.m_Version.View());
+			}
+			list.Append("\n");
+		}
+		if (list.ByteLength() == 0) return Core::String("");
+		Core::StringBuilder out;
+		out.Append("Go modules here (go.mod):\n");
+		out.Append(list.View());
+		out.Append("A package's import path is its module path and its folder under the module. Keep go.mod and go.sum to the go tool (go get, go mod tidy).");
+		return out.ToString();
+	}
+
+	void Activate(IED::PluginContext& context) {}
+}

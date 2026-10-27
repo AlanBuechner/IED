@@ -1,0 +1,15 @@
+// The ied.browser plugin's entry (runtime.entry "Browser::Activate").
+
+include "Browser.ch"
+
+namespace Browser
+{
+	void Activate(IED::PluginContext& context) {
+		Browsers* browsers = new Browsers(&context);
+		RegisterMethods(browsers);
+		ProvideBindings(browsers);
+		browsers->Start();
+		context.OnWorkspace([browsers](const IED::Workspace& ws) { browsers->Opened(ws); });
+		context.OnDeactivate([browsers]() { browsers->m_Engine.Stop(); });
+	}
+}

@@ -1,0 +1,131 @@
+// The AI's answers about locks (T-PRF-11 profile_locks) and notes (T-PRF-12 profile_annotate, the summary's notes).
+include "ToolText.ch"
+include "analysis/Locks.ch"
+
+namespace Profiler
+{
+	const int32 c_ToolLocks = 20;
+
+	static Core::String LockSource(const Serialization::DomNode& row) {
+		if (row.Member("file").AsView().IsEmpty()) return Core::String();
+		Core::StringBuilder text;
+		text.Append(row.Member("file").AsView());
+		text.AppendByte(':');
+		text.AppendInt(row.Member("line").AsInt());
+		return text.ToString();
+	}
+
+	static void LockRows(Core::StringBuilder& out, const Serialization::DomNode& rows) {
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[10] titles = { "Lock", "Waits", "Waited", "Max wait", "Contended", "Holds", "Held", "Max hold", "Threads", "Source" };
+		for (int32 i = 0; i < 10; ++i) head->Push(Core::String(titles[i]));
+		for (int64 i = 0; i < rows.Count(); ++i) {
+			Serialization::DomNode r = rows.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(r.Member("name").AsView()) + (r.Member("stuck").AsInt() > 0 ? " (still waited for at the end)" : ""));
+			row->Push(Number(r.Member("blocked").AsInt()));
+			row->Push(Duration(r.Member("waitNs").AsInt()));
+			row->Push(Duration(r.Member("maxWaitNs").AsInt()));
+			row->Push(Number(r.Member("contended").AsInt()) + " (" + Percent(r.Member("contention").AsFloat()).View() + ")");
+			row->Push(Number(r.Member("acquisitions").AsInt()));
+			row->Push(Duration(r.Member("holdNs").AsInt()));
+			row->Push(Duration(r.Member("maxHoldNs").AsInt()));
+			row->Push(Number(r.Member("threads").AsInt()));
+			row->Push(LockSource(r));
+		}
+		table.Write(out);
+	}
+
+	static void WorstWaits(Core::StringBuilder& out, const Serialization::DomNode& rows) {
+		for (int64 i = 0; i < rows.Count() && i < 5; ++i) {
+			Serialization::DomNode worst = rows.At(i).Member("worst");
+			if (!worst.IsValid() || worst.IsNull()) continue;
+			out.Append("- ");
+			out.Append(rows.At(i).Member("name").AsView());
+			out.Append(": ");
+			out.Append(worst.Member("thread").AsView());
+			out.Append(" waited ");
+			out.Append(Duration(worst.Member("toNs").AsInt() - worst.Member("fromNs").AsInt()).View());
+			out.Append(" from ");
+			out.Append(Instant(worst.Member("fromNs").AsInt()).View());
+			out.AppendByte('\n');
+		}
+	}
+
+	Core::String LocksText(const Capture& capture, const Serialization::DomNode& args) {
+		LockAsk ask;
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		Core::StringView by = args.Member("by").AsView();
+		ask.m_Order = by == "max_wait" ? LockOrder::MaxWait : (by == "contended" ? LockOrder::Contended : (by == "hold" ? LockOrder::Hold : (by == "acquisitions" ? LockOrder::Acquisitions : LockOrder::Wait)));
+		ask.m_Limit = args.Member("n").IsValid() ? (int32)args.Member("n").AsInt() : c_ToolLocks;
+		Serialization::DomNode answer = ParseJson(Locks(capture, ask));
+		Core::StringBuilder out;
+		if (answer.Member("locks").AsInt() == 0) {
+			out.Append("The capture has no locks: the program reports none (the profiler skill says how to instrument them).\n");
+			return out.ToString();
+		}
+		out.AppendInt(answer.Member("rowCount").AsInt());
+		out.Append(" of the capture's ");
+		out.AppendInt(answer.Member("locks").AsInt());
+		out.Append(" locks were used in the range. Waits are time a thread was blocked; a hold is contended when another thread was waiting as it was released.\n");
+		LockRows(out, answer.Member("rows"));
+		out.Append("\nThe longest waits:\n");
+		WorstWaits(out, answer.Member("rows"));
+		return out.ToString();
+	}
+
+	Core::String TopLocksText(const Serialization::DomNode& locks) {
+		if (locks.Count() == 0) return Core::String();
+		Core::StringBuilder out;
+		out.Append("\nBusiest locks (profile_locks for more):\n");
+		LockRows(out, locks);
+		return out.ToString();
+	}
+
+	Core::String NotesText(const Core::Array<Annotation>& notes) {
+		if (notes.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("\nNotes on the capture:\n");
+		for (const Annotation& note : notes) {
+			out.Append("- ");
+			out.Append(Instant(note.m_FromNs).View());
+			if (note.m_ToNs > note.m_FromNs) {
+				out.Append(" to ");
+				out.Append(Instant(note.m_ToNs).View());
+			}
+			out.Append(note.m_By.View() == "ai" ? " (yours): " : " (the owner's): ");
+			out.Append(note.m_Text.View());
+			out.AppendByte('\n');
+		}
+		return out.ToString();
+	}
+
+	Core::String AnnotateText(ProfilerPlugin* profiler, Core::StringView id, const Serialization::DomNode& args) {
+		const int64 from = MsArg(args, "from_ms");
+		const int64 to = MsArg(args, "to_ms");
+		if (from < 0) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("from_ms is required"));
+		int64 duration;
+		{
+			Capture* capture = profiler->Loaded(id);
+			Threading::LockGuard held(capture->m_Lock);
+			duration = capture->DurationNs();
+		}
+		if (from > duration) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("the capture is only ") + Duration(duration).View() + " long").View());
+		Annotation added = AddAnnotation(profiler, id, from, to < 0 ? from : (to > duration ? duration : to), args.Member("text").AsView(), Core::StringView("ai"));
+		Core::StringBuilder out;
+		out.Append("Added note ");
+		out.Append(added.m_Id.View());
+		out.Append(" on capture ");
+		out.Append(id);
+		out.Append(" at ");
+		out.Append(Instant(added.m_FromNs).View());
+		if (added.m_ToNs > added.m_FromNs) {
+			out.Append(" to ");
+			out.Append(Instant(added.m_ToNs).View());
+		}
+		out.Append(". The owner sees it on the timeline and in the Notes window.\n");
+		return out.ToString();
+	}
+}

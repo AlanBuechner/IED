@@ -1,0 +1,35 @@
+include "Watching.ch"
+
+namespace Ied
+{
+	bool FolderWatch::Start(const FS::Path& folder, BatchHandler handle, Core::String& error) {
+		m_Watcher = new FS::Watcher(folder.CStr());
+		if (!m_Watcher->IsOpen()) {
+			error = Core::String(m_Watcher->Error());
+			return false;
+		}
+		FolderWatch* self = this;
+		m_Thread = Threading::Thread::Run([self, handle]() { self->Run(handle); });
+		return true;
+	}
+
+	// Waits forever while nothing is gathered, then a quiet spell at most; a batch that keeps growing goes out after
+	// kLongestBatchMs anyway, so a long burst still shows up as it happens.
+	void FolderWatch::Run(BatchHandler handle) {
+		ChangeBatch batch;
+		int64 firstNs = 0;
+		for (;;) {
+			FS::Change change;
+			const bool more = m_Watcher->Next(change, batch.IsEmpty() ? FS::kWaitForever : c_QuietMs);
+			if (!more && !m_Watcher->TimedOut()) return;
+			if (more) {
+				if (batch.IsEmpty()) firstNs = clock_now_ns();
+				batch.Add(change);
+				if (clock_now_ns() - firstNs < c_LongestBatchMs * 1000000) continue;
+			}
+			if (batch.IsEmpty()) continue;
+			handle(batch);
+			batch.Clear();
+		}
+	}
+}

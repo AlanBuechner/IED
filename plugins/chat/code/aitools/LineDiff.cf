@@ -1,0 +1,179 @@
+include "LineDiff.ch"
+
+namespace Ai
+{
+	// One line of the edit script: ' ' kept, '-' removed, '+' added, with its line in each text (0-based).
+	struct DiffOp
+	{
+		public char8 m_Kind;
+		public int64 m_OldLine;
+		public int64 m_NewLine;
+	}
+
+	Core::Array<Core::StringView> SplitLines(Core::StringView text) {
+		Core::Array<Core::StringView> lines;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			if (end < 0) end = text.ByteLength();
+			int64 cut = end;
+			if (cut > at && text.ByteAt(cut - 1) == '\r') cut -= 1;
+			lines.Push(text.Substring(at, cut - at));
+			at = end + 1;
+		}
+		return lines;
+	}
+
+	// "a,b" as its count b; "a" alone counts 1.
+	static int64 RangeCount(Core::StringView range) {
+		const int64 comma = range.IndexOf(',', 0);
+		if (comma < 0) return 1;
+		int64 count = 0;
+		Core::ParseInt64(range.Substring(comma + 1, range.ByteLength() - comma - 1), count);
+		return count;
+	}
+
+	// The old and new line counts a "@@ -a,b +c,d @@" line gives; false when it is not one.
+	static bool HunkCounts(Core::StringView line, int64& oldCount, int64& newCount) {
+		if (!line.StartsWith(Core::StringView("@@ -"))) return false;
+		const int64 plus = line.IndexOf(Core::StringView(" +"));
+		const int64 close = plus < 0 ? -1 : line.IndexOf(Core::StringView(" @@"), plus);
+		if (close < 0) return false;
+		oldCount = RangeCount(line.Substring(4, plus - 4));
+		newCount = RangeCount(line.Substring(plus + 2, close - plus - 2));
+		return true;
+	}
+
+	void CountDiff(Core::StringView unified, int64& plus, int64& minus) {
+		plus = 0;
+		minus = 0;
+		int64 oldLeft = 0;
+		int64 newLeft = 0;
+		for (Core::StringView line : SplitLines(unified)) {
+			if (oldLeft <= 0 && newLeft <= 0) {
+				HunkCounts(line, oldLeft, newLeft);
+				continue;
+			}
+			const int32 kind = line.IsEmpty() ? ' ' : line.ByteAt(0);
+			if (kind == '\\') continue;
+			if (kind != '+') oldLeft -= 1;
+			if (kind != '-') newLeft -= 1;
+			if (kind == '+') plus += 1;
+			if (kind == '-') minus += 1;
+		}
+	}
+
+	static DiffOp Op(char8 kind, int64 oldLine, int64 newLine) {
+		DiffOp op;
+		op.m_Kind = kind;
+		op.m_OldLine = oldLine;
+		op.m_NewLine = newLine;
+		return op;
+	}
+
+	// The middle's script by longest common subsequence: lengths of the suffixes' LCS, then a walk from the start.
+	static void CommonSubsequence(const Core::Array<Core::StringView>& a, const Core::Array<Core::StringView>& b, int64 from, int64 aEnd, int64 bEnd, Core::Array<DiffOp>& ops) {
+		const int64 n = aEnd - from;
+		const int64 m = bEnd - from;
+		Core::Array<int32> lengths;
+		lengths.Resize((n + 1) * (m + 1));
+		for (int64 i = n - 1; i >= 0; --i)
+			for (int64 j = m - 1; j >= 0; --j) {
+				const int32 skipBoth = lengths[(i + 1) * (m + 1) + j + 1] + 1;
+				const int32 skipA = lengths[(i + 1) * (m + 1) + j];
+				const int32 skipB = lengths[i * (m + 1) + j + 1];
+				lengths[i * (m + 1) + j] = a[from + i] == b[from + j] ? skipBoth : skipA > skipB ? skipA : skipB;
+			}
+		int64 i = 0;
+		int64 j = 0;
+		while (i < n || j < m) {
+			if (i < n && j < m && a[from + i] == b[from + j]) {
+				ops.Push(Op(' ', from + i, from + j));
+				i += 1;
+				j += 1;
+			}
+			else if (j < m && (i == n || lengths[i * (m + 1) + j + 1] >= lengths[(i + 1) * (m + 1) + j])) {
+				ops.Push(Op('+', from + i, from + j));
+				j += 1;
+			}
+			else {
+				ops.Push(Op('-', from + i, from + j));
+				i += 1;
+			}
+		}
+	}
+
+	static Core::Array<DiffOp> Script(const Core::Array<Core::StringView>& a, const Core::Array<Core::StringView>& b) {
+		int64 head = 0;
+		while (head < a.Count() && head < b.Count() && a[head] == b[head]) head += 1;
+		int64 tail = 0;
+		while (tail < a.Count() - head && tail < b.Count() - head && a[a.Count() - 1 - tail] == b[b.Count() - 1 - tail]) tail += 1;
+		Core::Array<DiffOp> ops;
+		for (int64 i = 0; i < head; ++i) ops.Push(Op(' ', i, i));
+		const int64 aEnd = a.Count() - tail;
+		const int64 bEnd = b.Count() - tail;
+		if ((aEnd - head) * (bEnd - head) <= c_LineDiffMostCells) CommonSubsequence(a, b, head, aEnd, bEnd, ops);
+		else {
+			for (int64 i = head; i < aEnd; ++i) ops.Push(Op('-', i, head));
+			for (int64 j = head; j < bEnd; ++j) ops.Push(Op('+', aEnd, j));
+		}
+		for (int64 k = 0; k < tail; ++k) ops.Push(Op(' ', aEnd + k, bEnd + k));
+		return ops;
+	}
+
+	static void Hunk(const Core::Array<DiffOp>& ops, int64 first, int64 last, const Core::Array<Core::StringView>& a, const Core::Array<Core::StringView>& b, Core::StringBuilder& out) {
+		int64 oldCount = 0;
+		int64 newCount = 0;
+		for (int64 k = first; k <= last; ++k) {
+			if (ops[k].m_Kind != '+') oldCount += 1;
+			if (ops[k].m_Kind != '-') newCount += 1;
+		}
+		out.Append("@@ -");
+		out.AppendInt(oldCount > 0 ? ops[first].m_OldLine + 1 : ops[first].m_OldLine);
+		out.Append(",");
+		out.AppendInt(oldCount);
+		out.Append(" +");
+		out.AppendInt(newCount > 0 ? ops[first].m_NewLine + 1 : ops[first].m_NewLine);
+		out.Append(",");
+		out.AppendInt(newCount);
+		out.Append(" @@\n");
+		for (int64 k = first; k <= last; ++k) {
+			out.AppendByte(ops[k].m_Kind);
+			out.Append(ops[k].m_Kind == '+' ? b[ops[k].m_NewLine] : a[ops[k].m_OldLine]);
+			out.Append("\n");
+		}
+	}
+
+	LineDiff DiffLines(Core::StringView before, Core::StringView after, int64 context) {
+		Core::Array<Core::StringView> a = SplitLines(before);
+		Core::Array<Core::StringView> b = SplitLines(after);
+		Core::Array<DiffOp> ops = Script(a, b);
+		LineDiff diff;
+		Core::StringBuilder out;
+		int64 k = 0;
+		while (k < ops.Count()) {
+			if (ops[k].m_Kind == ' ') {
+				k += 1;
+				continue;
+			}
+			const int64 first = k - context > 0 ? k - context : 0;
+			int64 last = k;
+			int64 quiet = 0;
+			while (k < ops.Count() && quiet <= 2 * context) {
+				if (ops[k].m_Kind == ' ') quiet += 1;
+				else {
+					quiet = 0;
+					last = k;
+					if (ops[k].m_Kind == '+') diff.m_Plus += 1;
+					else diff.m_Minus += 1;
+				}
+				k += 1;
+			}
+			const int64 end = last + context < ops.Count() - 1 ? last + context : ops.Count() - 1;
+			Hunk(ops, first, end, a, b, out);
+			k = end + 1;
+		}
+		diff.m_Unified = out.ToString();
+		return diff;
+	}
+}

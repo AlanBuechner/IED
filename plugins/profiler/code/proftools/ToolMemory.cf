@@ -1,0 +1,601 @@
+// The AI's answers about memory (T-PRF-5 profile_leaks, T-PRF-13 profile_allocations, T-PRF-14 profile_memory,
+// T-PRF-20 profile_plots): what a program keeps, where it allocates, how its memory moves and its own counters.
+include "ToolText.ch"
+include "analysis/Investigate.ch"
+
+namespace Profiler
+{
+	const int32 c_ToolLeakGroups = 15;
+	const int32 c_ToolAllocGroups = 15;
+	const int32 c_ToolStackFrames = 12;
+
+	static AllocGroup GroupArg(const Capture& capture, const Serialization::DomNode& args) {
+		AllocGroup group;
+		if (!AllocGroupNamed(args.Member("group_by").AsView(), group)) group = DefaultAllocGroup(capture);
+		return group;
+	}
+
+	static const char* GroupTitle(AllocGroup group) {
+		if (group == AllocGroup::Path) return "zone path";
+		if (group == AllocGroup::Thread) return "thread";
+		if (group == AllocGroup::Pool) return "pool";
+		if (group == AllocGroup::Size) return "size";
+		if (group == AllocGroup::Callstack) return "call stack";
+		if (group == AllocGroup::Function) return "function";
+		return "zone";
+	}
+
+	static Core::String Source(const Serialization::DomNode& row) {
+		if (row.Member("file").AsView().IsEmpty()) return Core::String();
+		Core::StringBuilder text;
+		text.Append(row.Member("file").AsView());
+		if (row.Member("line").AsInt() > 0) {
+			text.AppendByte(':');
+			text.AppendInt(row.Member("line").AsInt());
+		}
+		return text.ToString();
+	}
+
+	// A call stack's frames, the innermost first; the trailing ones without a name (the runtime's and the system's code
+	// under a program's entry point) are counted, not listed.
+	static void StackLines(Core::StringBuilder& out, const Serialization::DomNode& stack) {
+		int64 named = stack.Count();
+		while (named > 0 && stack.At(named - 1).AsView().StartsWith(Core::StringView("0x"))) named -= 1;
+		const int64 shown = named < (int64)c_ToolStackFrames ? named : (int64)c_ToolStackFrames;
+		for (int64 k = 0; k < shown; ++k) {
+			out.Append("    ");
+			out.Append(stack.At(k).AsView());
+			out.AppendByte('\n');
+		}
+		const int64 left = stack.Count() - shown;
+		if (left == 0) return;
+		out.Append("    (");
+		out.Append(Number(left).View());
+		out.Append(left == 1 ? " more frame" : " more frames");
+		out.Append(shown < named ? ")\n" : ", without a name)\n");
+	}
+
+	// --- profile_leaks ------------------------------------------------------------------------------------------------
+
+	static Core::String Pattern(const Serialization::DomNode& g) {
+		if (g.Member("accumulating").AsBool()) return Core::String("keeps accumulating");
+		if (g.Member("spread").AsInt() <= 1) return Core::String("made at once");
+		Core::StringBuilder text;
+		text.Append("made in ");
+		text.AppendInt(g.Member("spread").AsInt());
+		text.Append(" of 10 tenths");
+		return text.ToString();
+	}
+
+	static void PoolLines(Core::StringBuilder& out, const Capture& capture) {
+		Serialization::DomNode memory = ParseJson(Memory(capture, -1, -1, 1));
+		Serialization::DomNode pools = memory.Member("pools");
+		for (int64 i = 0; i < pools.Count(); ++i) {
+			Serialization::DomNode p = pools.At(i);
+			out.Append("Pool ");
+			out.Append(p.Member("name").AsView());
+			out.Append(": peak ");
+			out.Append(Bytes(p.Member("peak").AsInt()).View());
+			out.Append(", in use at the end ");
+			out.Append(Bytes(p.Member("inUse").AsInt()).View());
+			out.Append(", ");
+			out.Append(Number(p.Member("allocs").AsInt()).View());
+			out.Append(" allocations, ");
+			out.Append(Number(p.Member("frees").AsInt()).View());
+			out.Append(" frees");
+			if (p.Member("earlierFrees").AsInt() > 0) {
+				out.Append(" (and ");
+				out.Append(Number(p.Member("earlierFrees").AsInt()).View());
+				out.Append(" of blocks allocated before the capture began)");
+			}
+			out.AppendByte('\n');
+		}
+	}
+
+	// What a collected program keeps: the types whose live objects grew from one collection's census to the next.
+	static Core::String CensusText(const Capture& capture, const Serialization::DomNode& args) {
+		Serialization::DomNode c = ParseJson(CensusTrend(capture, MsArg(args, "from_ms"), MsArg(args, "to_ms"), c_ToolLeakGroups));
+		Core::StringBuilder out;
+		out.Append("Live objects by type, from the census after each of ");
+		out.Append(Number(c.Member("censuses").AsInt()).View());
+		out.Append(" collections between ");
+		out.Append(Instant(c.Member("firstNs").AsInt()).View());
+		out.Append(" and ");
+		out.Append(Instant(c.Member("lastNs").AsInt()).View());
+		out.Append(", the most growth first (");
+		out.Append(Number(c.Member("typeCount").AsInt()).View());
+		out.Append(" types):\n");
+		const bool native = c.Member("native").AsBool();
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[9] titles = { "type", "objects first", "objects last", "bytes first", "bytes last", "native first", "native last", "rose in", "pattern" };
+		for (int32 i = 0; i < 9; ++i)
+			if (native || (i != 5 && i != 6)) head->Push(Core::String(titles[i]));
+		Serialization::DomNode types = c.Member("types");
+		for (int64 i = 0; i < types.Count(); ++i) {
+			Serialization::DomNode t = types.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(t.Member("name").AsView()));
+			row->Push(Number(t.Member("firstObjects").AsInt()));
+			row->Push(Number(t.Member("lastObjects").AsInt()));
+			row->Push(Bytes(t.Member("firstBytes").AsInt()));
+			row->Push(Bytes(t.Member("lastBytes").AsInt()));
+			if (native) {
+				row->Push(Bytes(t.Member("firstNativeBytes").AsInt()));
+				row->Push(Bytes(t.Member("lastNativeBytes").AsInt()));
+			}
+			Core::StringBuilder rose;
+			rose.AppendInt(t.Member("rises").AsInt());
+			rose.Append(" of ");
+			rose.AppendInt(t.Member("steps").AsInt());
+			row->Push(rose.ToString());
+			row->Push(Core::String(t.Member("accumulating").AsBool() ? "keeps accumulating" : (t.Member("lastBytes").AsInt() > t.Member("firstBytes").AsInt() ? "grew" : "steady")));
+		}
+		table.Write(out);
+		if (native) out.Append("\"native\" is the native memory a type's live objects hold through their containers (buffers by capacity): a small object that owns a buffer weighs the buffer.\n");
+		out.Append("In a collected heap a leak is objects still reachable: a type that keeps accumulating is held by something that lives on (a cache, a list, an event handler never removed). Find who keeps references to it.\n");
+		return out.ToString();
+	}
+
+	Core::String LeaksText(const Capture& capture, const Serialization::DomNode& args) {
+		LeakAsk ask;
+		ask.m_GroupBy = GroupArg(capture, args);
+		ask.m_AtNs = MsArg(args, "at_ms");
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		ask.m_Limit = c_ToolLeakGroups;
+		ask.m_BeforeTeardown = true;
+		Serialization::DomNode leaks = ParseJson(Leaks(capture, ask));
+		Core::StringBuilder out;
+		if (leaks.Member("teardownNs").AsInt() >= 0) {
+			out.Append("The program freed most of its memory as it ended, after ");
+			out.Append(Instant(leaks.Member("teardownNs").AsInt()).View());
+			out.Append(", so this reads what was live just before that (at_ms asks another time).\n");
+		}
+		if (capture.m_Allocations.IsEmpty() && !capture.m_Censuses.IsEmpty()) return CensusText(capture, args);
+		if (capture.m_Allocations.IsEmpty()) {
+			out.Append("The capture has no allocation events and no census of live objects, so there is nothing to find live: profile_memory shows whether memory keeps growing (a GC heap, a pool) and profile_allocations reads what the program counted or sampled.\n");
+			return out.ToString();
+		}
+		out.Append(Number(leaks.Member("count").AsInt()).View());
+		out.Append(" allocations (");
+		out.Append(Bytes(leaks.Member("bytes").AsInt()).View());
+		out.Append(") are live at ");
+		out.Append(Instant(leaks.Member("atNs").AsInt()).View());
+		out.Append(" of those made from ");
+		out.Append(Instant(leaks.Member("fromNs").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(leaks.Member("toNs").AsInt()).View());
+		out.Append(", by ");
+		out.Append(GroupTitle(ask.m_GroupBy));
+		out.Append(", the most bytes first:\n");
+		Serialization::DomNode groups = leaks.Member("groups");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[8] titles = { GroupTitle(ask.m_GroupBy), "live", "bytes", "first made", "last made", "per second", "pattern", "source" };
+		for (int32 i = 0; i < 8; ++i) head->Push(Core::String(titles[i]));
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(g.Member("label").AsView()));
+			row->Push(Number(g.Member("count").AsInt()));
+			row->Push(Bytes(g.Member("bytes").AsInt()));
+			row->Push(Instant(g.Member("firstNs").AsInt()));
+			row->Push(Instant(g.Member("lastNs").AsInt()));
+			row->Push(Decimal(g.Member("perSecond").AsFloat()));
+			row->Push(Pattern(g));
+			row->Push(Source(g));
+		}
+		table.Write(out);
+		if (ask.m_GroupBy == AllocGroup::Callstack)
+			for (int64 i = 0; i < groups.Count(); ++i) {
+				out.Append(groups.At(i).Member("label").AsView());
+				out.Append(" #");
+				out.AppendInt(i + 1);
+				out.Append(":\n");
+				StackLines(out, groups.At(i).Member("callstack"));
+			}
+		PoolLines(out, capture);
+		out.Append("A group that keeps accumulating (made all through the window, never freed) is a likely leak; one made at once is a cache or a load. from_ms/to_ms around a level's load and unload finds what it left behind; profile_memory shows whether the memory keeps growing.\n");
+		return out.ToString();
+	}
+
+	// --- profile_allocations ------------------------------------------------------------------------------------------
+
+	static void AllocationTotals(Core::StringBuilder& out, const Serialization::DomNode& a) {
+		AllocationTotalsLine(out, a);
+		const int64 count = a.Member("count").AsInt();
+		out.Append("Churn: ");
+		out.Append(Percent(count == 0 ? 0.0 : (double)a.Member("churn").AsInt() / (double)count).View());
+		out.Append(a.Member("churnWindow").AsView() == "frame" ? " were freed within the frame they were made in" : " were freed within 10 ms");
+		out.Append(". Still live at the range's end: ");
+		out.Append(Number(a.Member("live").AsInt()).View());
+		out.Append(" (");
+		out.Append(Bytes(a.Member("liveBytes").AsInt()).View());
+		out.Append(").\n");
+	}
+
+	static void AllocationTotalsLine(Core::StringBuilder& out, const Serialization::DomNode& a) {
+		out.Append("Allocations from ");
+		out.Append(Instant(a.Member("fromNs").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(a.Member("toNs").AsInt()).View());
+		out.Append(": ");
+		out.Append(Number(a.Member("count").AsInt()).View());
+		out.Append(" (");
+		out.Append(Bytes(a.Member("bytes").AsInt()).View());
+		out.Append("), ");
+		out.Append(Decimal(a.Member("perSecond").AsFloat()).View());
+		out.Append(" a second (");
+		out.Append(Bytes((int64)a.Member("bytesPerSecond").AsFloat()).View());
+		out.Append(" a second).\n");
+		Serialization::DomNode frames = a.Member("frames");
+		if (frames.IsValid() && !frames.IsNull()) {
+			out.Append("Per frame (");
+			out.Append(Number(frames.Member("count").AsInt()).View());
+			out.Append(" frames): mean ");
+			out.Append(Decimal(frames.Member("meanCount").AsFloat()).View());
+			out.Append(" (");
+			out.Append(Bytes(frames.Member("meanBytes").AsInt()).View());
+			out.Append("), median ");
+			out.Append(Number(frames.Member("medianCount").AsInt()).View());
+			out.Append(", p95 ");
+			out.Append(Number(frames.Member("p95Count").AsInt()).View());
+			out.Append(", the most ");
+			out.Append(Number(frames.Member("maxCount").AsInt()).View());
+			out.Append(" (");
+			out.Append(Bytes(frames.Member("maxBytes").AsInt()).View());
+			out.Append(") in frame ");
+			out.AppendInt(frames.Member("maxIndex").AsInt());
+			out.Append(" at ");
+			out.Append(Instant(frames.Member("maxStartNs").AsInt()).View());
+			out.Append(".\n");
+		}
+	}
+
+	static void AllocationRows(Core::StringBuilder& out, const Serialization::DomNode& groups, AllocGroup group) {
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[10] titles = { GroupTitle(group), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "churn", "live at end", "thread", "source" };
+		for (int32 i = 0; i < 10; ++i) head->Push(Core::String(titles[i]));
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			const int64 count = g.Member("count").AsInt();
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(g.Member("label").AsView()));
+			row->Push(Number(count));
+			row->Push(Decimal(g.Member("perFrame").AsFloat()));
+			row->Push(Bytes(g.Member("bytes").AsInt()));
+			row->Push(Bytes(g.Member("bytesPerFrame").AsInt()));
+			row->Push(Bytes(g.Member("meanSize").AsInt()));
+			row->Push(Percent(count == 0 ? 0.0 : (double)g.Member("churn").AsInt() / (double)count));
+			row->Push(Number(g.Member("live").AsInt()));
+			Core::String thread = Core::String(g.Member("thread").AsView());
+			if (g.Member("threads").AsInt() > 1) {
+				Core::StringBuilder more;
+				more.Append(" +");
+				more.AppendInt(g.Member("threads").AsInt() - 1);
+				thread = thread + more.View();
+			}
+			row->Push(thread);
+			row->Push(Source(g));
+		}
+		table.Write(out);
+		if (group == AllocGroup::Callstack)
+			for (int64 i = 0; i < groups.Count(); ++i) {
+				out.Append("#");
+				out.AppendInt(i + 1);
+				out.Append(":\n");
+				StackLines(out, groups.At(i).Member("callstack"));
+			}
+	}
+
+	static void SampleRows(Core::StringBuilder& out, const Serialization::DomNode& a, AllocGroup group) {
+		const bool bytes = a.Member("unit").AsView() == "bytes";
+		out.Append("The capture has no allocation events; from its ");
+		out.Append(Number(a.Member("samples").AsInt()).View());
+		out.Append(" allocation samples (");
+		out.Append(bytes ? "bytes" : "objects");
+		out.Append(", ");
+		out.Append(bytes ? Bytes(a.Member("weight").AsInt()).View() : Number(a.Member("weight").AsInt()).View());
+		out.Append(" sampled), by ");
+		out.Append(group == AllocGroup::Thread ? "thread" : (group == AllocGroup::Callstack ? "call stack" : "function"));
+		out.Append(":\n");
+		Serialization::DomNode groups = a.Member("groups");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		head->Push(Core::String(group == AllocGroup::Thread ? "thread" : "function"));
+		head->Push(Core::String(bytes ? "bytes" : "objects"));
+		head->Push(Core::String("share"));
+		head->Push(Core::String("source"));
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(g.Member("label").AsView()));
+			row->Push(bytes ? Bytes(g.Member("weight").AsInt()) : Number(g.Member("weight").AsInt()));
+			row->Push(Percent(g.Member("share").AsFloat()));
+			row->Push(Source(g));
+		}
+		table.Write(out);
+		if (group == AllocGroup::Callstack)
+			for (int64 i = 0; i < groups.Count(); ++i) {
+				out.Append("#");
+				out.AppendInt(i + 1);
+				out.Append(":\n");
+				StackLines(out, groups.At(i).Member("callstack"));
+			}
+	}
+
+	// A client that counted allocations per zone (C4's collector): no event each, so no churn or what stays live, but
+	// each zone's own count and the process's per frame.
+	static void CountedRows(Core::StringBuilder& out, const Serialization::DomNode& a, AllocGroup group) {
+		AllocationTotalsLine(out, a);
+		out.Append("Counted by the program's collector, not sent one by one: ");
+		out.Append(Number(a.Member("inZones").AsInt()).View());
+		out.Append(" of them (");
+		out.Append(Bytes(a.Member("inZoneBytes").AsInt()).View());
+		out.Append(") inside zones");
+		if (a.Member("inZoneNativeBytes").AsInt() > 0) {
+			out.Append(", and the zones took ");
+			out.Append(Bytes(a.Member("inZoneNativeBytes").AsInt()).View());
+			out.Append(" of native memory (containers' buffers, raw blocks: the \"native\" column; \"native freed\" what they gave back, wherever it was taken)");
+		}
+		out.Append(". By ");
+		out.Append(GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone));
+		out.Append(", each zone's own (its children's left to them):\n");
+		const int64 samples = a.Member("samples").AsInt();
+		if (samples > 0) {
+			out.Append("The collector also sampled ");
+			out.Append(Number(samples).View());
+			out.Append(" allocations with their call stacks: group_by \"callstack\" shows the functions that allocated, inside zones or not.\n");
+		}
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[10] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "native", "native freed", "thread", "source" };
+		for (int32 i = 0; i < 10; ++i) head->Push(Core::String(titles[i]));
+		Serialization::DomNode groups = a.Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(g.Member("label").AsView()));
+			row->Push(Number(g.Member("count").AsInt()));
+			row->Push(Decimal(g.Member("perFrame").AsFloat()));
+			row->Push(Bytes(g.Member("bytes").AsInt()));
+			row->Push(Bytes(g.Member("bytesPerFrame").AsInt()));
+			row->Push(Bytes(g.Member("meanSize").AsInt()));
+			row->Push(g.Member("nativeBytes").AsInt() > 0 ? Bytes(g.Member("nativeBytes").AsInt()) : Core::String());
+			row->Push(g.Member("nativeFreed").AsInt() > 0 ? Bytes(g.Member("nativeFreed").AsInt()) : Core::String());
+			row->Push(Core::String(g.Member("thread").AsView()));
+			row->Push(Source(g));
+		}
+		table.Write(out);
+		out.Append("In a collected heap whatever a frame allocates and drops is garbage the collector must find: fewer allocations in a hot zone mean fewer and shorter collections (profile_memory). Reuse objects and buffers across frames.\n");
+	}
+
+	Core::String AllocationsText(const Capture& capture, const Serialization::DomNode& args) {
+		AllocAsk ask;
+		ask.m_GroupBy = GroupArg(capture, args);
+		ask.m_ByBytes = args.Member("by").AsView() == "bytes";
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		ask.m_Limit = args.Member("n").IsValid() ? (int32)args.Member("n").AsInt() : c_ToolAllocGroups;
+		Serialization::DomNode a = ParseJson(Allocations(capture, ask));
+		Core::StringBuilder out;
+		Core::StringView source = a.Member("source").AsView();
+		if (source == "none") {
+			out.Append("The capture has no allocations: its program reports none. They come from C and C++ (itp_alloc, a replaced operator new), Rust (ied_profiler::Tracked as the global allocator), C4 pools (Profile::Alloc) and the Go client's allocation samples; profile_memory still shows the heaps the program plots.\n");
+			return out.ToString();
+		}
+		if (source == "samples") {
+			SampleRows(out, a, ask.m_GroupBy);
+			return out.ToString();
+		}
+		if (source == "zones") {
+			CountedRows(out, a, ask.m_GroupBy);
+			return out.ToString();
+		}
+		AllocationTotals(out, a);
+		out.Append("By ");
+		out.Append(GroupTitle(ask.m_GroupBy));
+		out.Append(ask.m_GroupBy == AllocGroup::Zone ? " (the innermost zone open on the allocating thread)" : "");
+		out.Append(ask.m_ByBytes ? ", the most bytes first; " : ", the most allocations first; ");
+		out.Append(Number(a.Member("groupCount").AsInt()).View());
+		out.Append(" groups:\n");
+		AllocationRows(out, a.Member("groups"), ask.m_GroupBy);
+		out.Append("Churn is garbage a frame leaves behind: reuse the memory (a pool, a reserved buffer, a scratch arena) where a zone allocates every frame. group_by \"path\" shows the zones around an allocation; from_ms/to_ms narrows to a frame.\n");
+		return out.ToString();
+	}
+
+	// --- profile_memory -----------------------------------------------------------------------------------------------
+
+	static Core::String Amount(double value, bool bytes) {
+		if (bytes) return Bytes((int64)value);
+		Core::StringBuilder text;
+		text.AppendDouble(value, value == (double)(int64)value ? 0 : 3);
+		return text.ToString();
+	}
+
+	static void SeriesLines(Core::StringBuilder& out, const Serialization::DomNode& s) {
+		const bool pool = s.Member("kind").AsView() == "pool";
+		const double start = s.Member("start").AsFloat();
+		const double end = s.Member("end").AsFloat();
+		out.Append(pool ? "Pool " : "Plot ");
+		out.Append(s.Member("name").AsView());
+		out.Append(": ");
+		out.Append(Bytes((int64)start).View());
+		out.Append(" -> ");
+		out.Append(Bytes((int64)end).View());
+		out.Append(" (");
+		out.Append(end >= start ? "+" : "-");
+		out.Append(Bytes((int64)(end >= start ? end - start : start - end)).View());
+		out.Append(", ");
+		out.Append(end >= start ? "+" : "-");
+		const double perSecond = s.Member("perSecond").AsFloat();
+		out.Append(Bytes((int64)(perSecond < 0.0 ? -perSecond : perSecond)).View());
+		out.Append(" a second), rose in ");
+		out.AppendInt(s.Member("rises").AsInt());
+		out.Append(" of ");
+		out.AppendInt(s.Member("steps").AsInt());
+		out.Append(" steps; peak ");
+		out.Append(Bytes((int64)s.Member("peak").AsFloat()).View());
+		out.Append(" at ");
+		out.Append(Instant(s.Member("peakNs").AsInt()).View());
+		out.Append("; its floor (the lowest in each step) ");
+		out.Append(Bytes((int64)s.Member("floorStart").AsFloat()).View());
+		out.Append(" -> ");
+		out.Append(Bytes((int64)s.Member("floorEnd").AsFloat()).View());
+		out.Append(", at its highest ");
+		out.Append(Bytes((int64)s.Member("floorPeak").AsFloat()).View());
+		out.Append(" from ");
+		out.Append(Instant(s.Member("floorPeakNs").AsInt()).View());
+		out.Append(", rose in ");
+		out.AppendInt(s.Member("floorRises").AsInt());
+		out.Append(" of ");
+		out.AppendInt(s.Member("steps").AsInt() - 1);
+		out.Append(" steps");
+		if (pool) {
+			out.Append("; ");
+			out.Append(Number(s.Member("allocs").AsInt()).View());
+			out.Append(" allocations and ");
+			out.Append(Number(s.Member("frees").AsInt()).View());
+			out.Append(" frees in the capture");
+		}
+		out.Append(".\n");
+		TextTable table;
+		Core::Array<Core::String>* at = table.Row();
+		Core::Array<Core::String>* value = table.Row();
+		Core::Array<Core::String>* floor = table.Row();
+		at->Push(Core::String("  ms"));
+		value->Push(Core::String("  value"));
+		floor->Push(Core::String("  floor"));
+		Serialization::DomNode values = s.Member("values");
+		Serialization::DomNode floors = s.Member("floors");
+		for (int64 k = 0; k < values.Count(); ++k) {
+			Core::StringBuilder ms;
+			ms.AppendDouble((double)values.At(k).At(0).AsInt() / 1000000.0, 0);
+			at->Push(ms.ToString());
+			value->Push(Bytes((int64)values.At(k).At(1).AsFloat()));
+			floor->Push(k < floors.Count() ? Bytes((int64)floors.At(k).AsFloat()) : Core::String(""));
+		}
+		table.Write(out);
+	}
+
+	static void CollectionLines(Core::StringBuilder& out, const Serialization::DomNode& gc) {
+		if (gc.Member("count").AsInt() == 0) {
+			out.Append("Collections: none in the range.\n");
+			return;
+		}
+		out.Append("Collections: ");
+		out.Append(Number(gc.Member("count").AsInt()).View());
+		out.Append(" (");
+		out.Append(Decimal(gc.Member("perSecond").AsFloat()).View());
+		out.Append(" a second), paused ");
+		out.Append(Duration(gc.Member("pauseNs").AsInt()).View());
+		out.Append(" in all; ");
+		out.Append(Number(gc.Member("inSlowFrames").AsInt()).View());
+		out.Append(" fell in slow frames.");
+		Serialization::DomNode after = gc.Member("heapAfter");
+		if (after.IsValid() && !after.IsNull()) {
+			out.Append(" The heap left after each: ");
+			out.Append(Bytes(after.Member("first").AsInt()).View());
+			out.Append(" -> ");
+			out.Append(Bytes(after.Member("last").AsInt()).View());
+			out.Append(", larger than the one before after ");
+			out.AppendInt(after.Member("rises").AsInt());
+			out.Append(" of ");
+			out.AppendInt(after.Member("count").AsInt() - 1);
+			out.Append(".");
+		}
+		out.Append("\nThe longest:\n");
+		Serialization::DomNode longest = gc.Member("longest");
+		for (int64 i = 0; i < longest.Count(); ++i) {
+			Serialization::DomNode g = longest.At(i);
+			out.Append("  ");
+			out.Append(Duration(g.Member("pauseNs").AsInt()).View());
+			out.Append(" at ");
+			out.Append(Instant(g.Member("startNs").AsInt()).View());
+			if (g.Member("frame").AsInt() >= 0) {
+				out.Append(" in frame ");
+				out.AppendInt(g.Member("frame").AsInt());
+				out.Append(g.Member("slowFrame").AsBool() ? " (a slow one)" : "");
+			}
+			if (g.Member("freedBytes").AsInt() >= 0) {
+				out.Append(", freed ");
+				out.Append(Bytes(g.Member("freedBytes").AsInt()).View());
+			}
+			out.AppendByte('\n');
+		}
+	}
+
+	Core::String MemoryText(const Capture& capture, const Serialization::DomNode& args) {
+		const int32 points = args.Member("points").IsValid() ? (int32)args.Member("points").AsInt() : 10;
+		Serialization::DomNode m = ParseJson(MemoryTrend(capture, MsArg(args, "from_ms"), MsArg(args, "to_ms"), points));
+		Core::StringBuilder out;
+		out.Append("Memory from ");
+		out.Append(Instant(m.Member("fromNs").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(m.Member("toNs").AsInt()).View());
+		out.Append(":\n");
+		Serialization::DomNode series = m.Member("series");
+		if (series.Count() == 0) out.Append("No pool and no memory plot: the program reports no memory (a GC heap, a pool or a memory plot).\n");
+		for (int64 i = 0; i < series.Count(); ++i) SeriesLines(out, series.At(i));
+		if (m.Member("teardownNs").AsInt() >= 0) {
+			out.Append("The program freed most of its memory as it ended, after ");
+			out.Append(Instant(m.Member("teardownNs").AsInt()).View());
+			out.Append(": the values at the end are its teardown, the floor's highest is what it held.\n");
+		}
+		CollectionLines(out, m.Member("gc"));
+		if (!capture.m_Censuses.IsEmpty()) {
+			out.Append("The collector took a census of live objects by type after ");
+			out.Append(Number(capture.m_Censuses.Count()).View());
+			out.Append(" collections: profile_leaks says which types keep accumulating.\n");
+		}
+		out.Append("Reading it: a floor that keeps rising is memory the program keeps (profile_leaks finds what, for allocation events); a high peak over a flat floor is churn (profile_allocations); collections in slow frames make hitches (profile_hitches).\n");
+		return out.ToString();
+	}
+
+	// --- profile_plots ------------------------------------------------------------------------------------------------
+
+	Core::String PlotsText(const Capture& capture, const Serialization::DomNode& args) {
+		const int32 points = args.Member("points").IsValid() ? (int32)args.Member("points").AsInt() : 10;
+		Serialization::DomNode answer = ParseJson(Plots(capture, args.Member("name").AsView(), MsArg(args, "from_ms"), MsArg(args, "to_ms"), points));
+		Serialization::DomNode plots = answer.Member("plots");
+		Core::StringBuilder out;
+		if (plots.Count() == 0) {
+			out.Append(args.Member("name").AsView().IsEmpty() ? "The capture has no counters (plots) besides memory; profile_memory reads memory plots.\n" : "No plot has that name.\n");
+			return out.ToString();
+		}
+		for (int64 i = 0; i < plots.Count(); ++i) {
+			Serialization::DomNode p = plots.At(i);
+			const bool bytes = p.Member("kind").AsInt() == 1;
+			out.Append("Plot ");
+			out.Append(p.Member("name").AsView());
+			out.Append(": min ");
+			out.Append(Amount(p.Member("min").AsFloat(), bytes).View());
+			out.Append(", mean ");
+			out.Append(Amount(p.Member("mean").AsFloat(), bytes).View());
+			out.Append(", max ");
+			out.Append(Amount(p.Member("max").AsFloat(), bytes).View());
+			out.Append(", last ");
+			out.Append(Amount(p.Member("last").AsFloat(), bytes).View());
+			out.Append(p.Member("kind").AsInt() == 2 ? " (percent)" : "");
+			out.Append(" over ");
+			out.Append(Number(p.Member("samples").AsInt()).View());
+			out.Append(" samples\n");
+			TextTable table;
+			Core::Array<Core::String>* at = table.Row();
+			Core::Array<Core::String>* value = table.Row();
+			at->Push(Core::String("  ms"));
+			value->Push(Core::String("  value"));
+			Serialization::DomNode values = p.Member("values");
+			for (int64 k = 0; k < values.Count(); ++k) {
+				Core::StringBuilder ms;
+				ms.AppendDouble((double)values.At(k).At(0).AsInt() / 1000000.0, 0);
+				at->Push(ms.ToString());
+				value->Push(Amount(values.At(k).At(1).AsFloat(), bytes));
+			}
+			table.Write(out);
+		}
+		return out.ToString();
+	}
+}

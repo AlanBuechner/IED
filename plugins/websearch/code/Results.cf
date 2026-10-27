@@ -1,0 +1,263 @@
+include "Results.ch"
+include "SearxConfig.ch"
+include "api/Plugin.ch"
+
+namespace WebSearch
+{
+	const int64 c_SnippetBytes = 320;
+	const int64 c_TitleBytes = 200;
+	const int64 c_AnswerBytes = 600;
+
+	Core::String UrlEncode(Core::StringView text) {
+		Core::StringBuilder encoded;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			const bool plain = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+			if (plain) encoded.AppendByte(c);
+			else {
+				const char* digits = "0123456789ABCDEF";
+				encoded.AppendByte('%');
+				encoded.AppendByte(digits[c >> 4]);
+				encoded.AppendByte(digits[c & 15]);
+			}
+		}
+		return encoded.ToString();
+	}
+
+	Core::String SearchTarget(const SearchRequest& request) {
+		Core::StringBuilder target;
+		target.Append("/search?q=");
+		target.Append(UrlEncode(request.m_Query.View()).View());
+		target.Append("&format=json&pageno=");
+		target.AppendInt(request.m_Page < 1 ? 1 : request.m_Page);
+		target.Append("&safesearch=");
+		target.AppendInt(request.m_SafeSearch);
+		if (!request.m_Engines.IsEmpty()) {
+			target.Append("&engines=");
+			for (int64 i = 0; i < request.m_Engines.Count(); ++i) {
+				if (i > 0) target.Append("%2C");
+				target.Append(UrlEncode(request.m_Engines[i].View()).View());
+			}
+		}
+		if (!request.m_TimeRange.IsEmpty()) {
+			target.Append("&time_range=");
+			target.Append(UrlEncode(request.m_TimeRange.View()).View());
+		}
+		if (!request.m_Language.IsEmpty() && request.m_Language.View() != "auto") {
+			target.Append("&language=");
+			target.Append(UrlEncode(request.m_Language.View()).View());
+		}
+		return target.ToString();
+	}
+
+	// `text` on one line (runs of white space as one space), cut at `limit` bytes on a whole character with "...".
+	static Core::String OneLine(Core::StringView text, int64 limit) {
+		Core::StringBuilder line;
+		bool space = false;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+				space = !line.IsEmpty();
+				continue;
+			}
+			if (space) line.AppendByte(' ');
+			space = false;
+			line.AppendByte(c);
+		}
+		if (line.ByteLength() <= limit) return line.ToString();
+		int64 cut = limit;
+		while (cut > 0 && (line.View().ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		return Core::String(line.View().Substring(0, cut)) + "...";
+	}
+
+	static Core::String DatePart(Core::StringView published) {
+		if (published.ByteLength() < 10) return Core::String();
+		Core::StringView date = published.Substring(0, 10);
+		for (int64 i = 0; i < 10; ++i) {
+			const int32 c = date.ByteAt(i);
+			const bool dash = i == 4 || i == 7;
+			if (dash ? c != '-' : (c < '0' || c > '9')) return Core::String();
+		}
+		return Core::String(date);
+	}
+
+	static void ReadHits(const Serialization::DomNode& list, SearchResults& results) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode item = list.At(i);
+			SearchHit hit;
+			hit.m_Url = Core::String(item.Member("url").AsView());
+			if (hit.m_Url.IsEmpty()) continue;
+			hit.m_Title = OneLine(item.Member("title").AsView(), c_TitleBytes);
+			hit.m_Content = OneLine(item.Member("content").AsView(), c_SnippetBytes);
+			hit.m_Published = DatePart(item.Member("publishedDate").AsView());
+			Serialization::DomNode engines = item.Member("engines");
+			for (int64 j = 0; j < engines.Count(); ++j) hit.m_Engines.Push(Core::String(engines.At(j).AsView()));
+			if (hit.m_Engines.IsEmpty() && !item.Member("engine").AsView().IsEmpty()) hit.m_Engines.Push(Core::String(item.Member("engine").AsView()));
+			results.m_Hits.Push(hit);
+		}
+	}
+
+	// An answer is a string, or an object with its text in "answer" (SearXNG's answerers and plugins).
+	static void ReadAnswers(const Serialization::DomNode& list, SearchResults& results) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode item = list.At(i);
+			Core::StringView text = item.Kind() == Serialization::DomKind::String ? item.AsView() : item.Member("answer").AsView();
+			if (!text.IsEmpty()) results.m_Answers.Push(OneLine(text, c_AnswerBytes));
+		}
+	}
+
+	bool ParseResults(Core::StringView json, SearchResults& results, Core::String& error) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(json, *doc);
+		if (!parsed.Ok() || parsed.root.Kind() != Serialization::DomKind::Object || parsed.root.Member("results").Kind() != Serialization::DomKind::Array) {
+			error = Core::String("SearXNG did not answer with its JSON (is json among its search.formats?)");
+			return false;
+		}
+		ReadHits(parsed.root.Member("results"), results);
+		ReadAnswers(parsed.root.Member("answers"), results);
+		Serialization::DomNode suggestions = parsed.root.Member("suggestions");
+		for (int64 i = 0; i < suggestions.Count(); ++i) results.m_Suggestions.Push(OneLine(suggestions.At(i).AsView(), c_TitleBytes));
+		Serialization::DomNode failed = parsed.root.Member("unresponsive_engines");
+		for (int64 i = 0; i < failed.Count(); ++i) {
+			EngineFailure failure;
+			failure.m_Engine = Core::String(failed.At(i).At(0).AsView());
+			failure.m_Reason = Core::String(failed.At(i).At(1).AsView());
+			if (!failure.m_Engine.IsEmpty()) results.m_Failed.Push(failure);
+		}
+		return true;
+	}
+
+	bool IsBlock(Core::StringView reason) {
+		Core::String lower = Lowercase(reason);
+		Core::StringView text = lower.View();
+		return text.Contains(Core::StringView("captcha")) || text.Contains(Core::StringView("access denied")) || text.Contains(Core::StringView("too many requests"));
+	}
+
+	int64 BlockedCount(const SearchResults& results) {
+		int64 count = 0;
+		for (const EngineFailure& failure : results.m_Failed)
+			if (IsBlock(failure.m_Reason.View())) count += 1;
+		return count;
+	}
+
+	static void AppendList(Core::StringBuilder& text, const Core::Array<Core::String>& items, const char* separator) {
+		for (int64 i = 0; i < items.Count(); ++i) {
+			if (i > 0) text.Append(separator);
+			text.Append(items[i].View());
+		}
+	}
+
+	static void AppendFailures(Core::StringBuilder& text, const SearchResults& results) {
+		if (results.m_Failed.IsEmpty()) return;
+		text.Append("Engines that failed: ");
+		for (int64 i = 0; i < results.m_Failed.Count(); ++i) {
+			if (i > 0) text.Append(", ");
+			text.Append(results.m_Failed[i].m_Engine.View());
+			text.Append(" (");
+			text.Append(results.m_Failed[i].m_Reason.View());
+			text.Append(")");
+		}
+		text.Append("\n");
+	}
+
+	Core::String ResultsText(const SearchRequest& request, const SearchResults& results, bool viaTor) {
+		Core::StringBuilder text;
+		const int64 shown = results.m_Hits.Count() < request.m_Count ? results.m_Hits.Count() : request.m_Count;
+		text.Append(shown == 0 ? "No results for \"" : "Results for \"");
+		text.Append(request.m_Query.View());
+		text.Append("\" (");
+		if (request.m_Page > 1) {
+			text.Append("page ");
+			text.AppendInt(request.m_Page);
+			text.Append(", ");
+		}
+		text.Append(viaTor ? "through Tor; " : "");
+		AppendList(text, request.m_Engines, ", ");
+		text.Append(")\n\n");
+		for (int64 i = 0; i < shown; ++i) {
+			const SearchHit& hit = results.m_Hits[i];
+			text.AppendInt(i + 1);
+			text.Append(". ");
+			text.Append(hit.m_Title.IsEmpty() ? hit.m_Url.View() : hit.m_Title.View());
+			text.Append("\n   ");
+			text.Append(hit.m_Url.View());
+			text.Append("\n");
+			if (!hit.m_Content.IsEmpty()) {
+				text.Append("   ");
+				text.Append(hit.m_Content.View());
+				text.Append("\n");
+			}
+			text.Append("   ");
+			AppendList(text, hit.m_Engines, ", ");
+			if (!hit.m_Published.IsEmpty()) {
+				text.Append(" | ");
+				text.Append(hit.m_Published.View());
+			}
+			text.Append("\n\n");
+		}
+		for (const Core::String& answer : results.m_Answers) {
+			text.Append("Answer: ");
+			text.Append(answer.View());
+			text.Append("\n");
+		}
+		if (!results.m_Suggestions.IsEmpty()) {
+			text.Append("Suggestions: ");
+			AppendList(text, results.m_Suggestions, "; ");
+			text.Append("\n");
+		}
+		AppendFailures(text, results);
+		if (shown == 0) text.Append("Try other words, other engines, or no time_range.\n");
+		else {
+			text.Append("Showing ");
+			text.AppendInt(shown);
+			text.Append(" of ");
+			text.AppendInt(results.m_Hits.Count());
+			text.Append(" results; page=");
+			text.AppendInt((request.m_Page < 1 ? 1 : request.m_Page) + 1);
+			text.Append(" gives more, web_fetch(url) reads one.\n");
+		}
+		return text.ToString();
+	}
+
+	static void StringArray(IED::JsonWriter& json, const char* key, const Core::Array<Core::String>& items) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Core::String& item : items) json.String(item.View());
+		json.EndArray();
+	}
+
+	Core::String ResultsJson(const SearchRequest& request, const SearchResults& results, bool viaTor) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("query", request.m_Query.View());
+		json.BoolField("viaTor", viaTor);
+		json.Field("text", ResultsText(request, results, viaTor).View());
+		json.Key(Core::StringView("results"));
+		json.BeginArray();
+		for (int64 i = 0; i < results.m_Hits.Count() && i < request.m_Count; ++i) {
+			const SearchHit& hit = results.m_Hits[i];
+			json.BeginObject();
+			json.Field("title", hit.m_Title.View());
+			json.Field("url", hit.m_Url.View());
+			json.Field("content", hit.m_Content.View());
+			StringArray(json, "engines", hit.m_Engines);
+			if (!hit.m_Published.IsEmpty()) json.Field("published", hit.m_Published.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.IntField("total", results.m_Hits.Count());
+		StringArray(json, "answers", results.m_Answers);
+		StringArray(json, "suggestions", results.m_Suggestions);
+		json.Key(Core::StringView("failed"));
+		json.BeginArray();
+		for (const EngineFailure& failure : results.m_Failed) {
+			json.BeginArray();
+			json.String(failure.m_Engine.View());
+			json.String(failure.m_Reason.View());
+			json.EndArray();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

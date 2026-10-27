@@ -1,0 +1,168 @@
+include "api/Plugin.ch"
+include "PluginTools.ch"
+include "Work.ch"
+
+namespace Ai
+{
+	static ToolClass ClassOf(Core::StringView name) {
+		if (name == "read") return ToolClass::Read;
+		if (name == "write") return ToolClass::Write;
+		if (name == "meta") return ToolClass::Meta;
+		return ToolClass::Exec;
+	}
+
+	// An argument's value as one word: text as it is, anything else as JSON.
+	static Core::String ArgumentText(const Serialization::DomNode& value) {
+		if (!value.IsValid() || value.Kind() == Serialization::DomKind::Null) return Core::String();
+		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : IED::NodeJson(value);
+	}
+
+	// The value of one ${...}: an argument of the call, a setting or a language tool; anything else is left as written.
+	static Core::String Variable(Core::StringView name, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
+		if (name.StartsWith(Core::StringView("args."))) {
+			Core::String key = Core::String(name.Substring(5, name.ByteLength() - 5));
+			return ArgumentText(args.Member(key.CStr()));
+		}
+		if (name.StartsWith(Core::StringView("config:"))) return setting(name.Substring(7, name.ByteLength() - 7));
+		if (name.StartsWith(Core::StringView("tool:"))) return tool(name.Substring(5, name.ByteLength() - 5));
+		return (Core::String("${") + name) + "}";
+	}
+
+	// `word` with each ${...} replaced.
+	static Core::String ExpandWord(Core::StringView word, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
+		Core::StringBuilder out;
+		Core::StringView rest = word;
+		for (;;) {
+			const int64 open = rest.IndexOf(Core::StringView("${"));
+			const int64 close = open < 0 ? -1 : rest.IndexOf('}', open);
+			if (close < 0) break;
+			out.Append(rest.Substring(0, open));
+			out.Append(Variable(rest.Substring(open + 2, close - open - 2), args, setting, tool).View());
+			rest = rest.Substring(close + 1, rest.ByteLength() - close - 1);
+		}
+		out.Append(rest);
+		return out.ToString();
+	}
+
+	Core::Array<Core::String> ExpandToolArgv(const Core::Array<Core::String>& words, const Serialization::DomNode& args, const ToolSetting& setting, const ToolSetting& tool) {
+		Core::Array<Core::String> argv;
+		for (const Core::String& word : words) {
+			Core::StringView view = word.View();
+			const bool whole = view.StartsWith(Core::StringView("${args.")) && view.EndsWith(Core::StringView("}")) && view.IndexOf('}', 0) == view.ByteLength() - 1;
+			Core::String name = whole ? Core::String(view.Substring(7, view.ByteLength() - 8)) : Core::String();
+			Serialization::DomNode value = whole ? args.Member(name.CStr()) : Serialization::DomNode();
+			if (whole && value.Kind() == Serialization::DomKind::Array)
+				for (int64 i = 0; i < value.Count(); ++i) argv.Push(ArgumentText(value.At(i)));
+			else argv.Push(ExpandWord(view, args, setting, tool));
+		}
+		return argv;
+	}
+
+	// What a command tool runs, held by its planner and runner.
+	class CommandToolEntry
+	{
+		public Core::String m_Name;
+		public Core::Array<Core::String> m_Run;
+		public Core::String m_Cwd;
+		public bool m_Json;
+		public int64 m_Seconds;
+	}
+
+	static Core::String Joined(const Core::Array<Core::String>& words) {
+		Core::StringBuilder out;
+		for (const Core::String& word : words) {
+			if (out.ByteLength() > 0) out.Append(" ");
+			out.Append(word.View());
+		}
+		return out.ToString();
+	}
+
+	// A setting of the call's workspace, read under the lock (a tool runs without it).
+	static ToolSetting SettingOf(const ToolInvocation& call) {
+		IED::PluginContext* context = call.m_Context;
+		IED::Workspace ws = call.m_Ws;
+		return [context, ws](Core::StringView key) -> Core::String {
+			Core::String json = context->Setting(key, WsId(ws));
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::DomNode value = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+			return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : Core::String(json.View().Trimmed());
+		};
+	}
+
+	// A language tool's program in the call's workspace (docs/26 "Language tools").
+	static ToolSetting ToolOf(const ToolInvocation& call) {
+		IED::Workspace ws = call.m_Ws;
+		return [ws](Core::StringView id) -> Core::String { return IED::ToolProgram(ws, id); };
+	}
+
+	static ToolPlan CommandPlan(const CommandToolEntry* entry, const ToolInvocation& call) {
+		ToolPlan plan;
+		Core::String line = Joined(ExpandToolArgv(entry->m_Run, call.m_Args, SettingOf(call), ToolOf(call)));
+		plan.m_Subject = (Core::String("shell(") + line.View()) + ")";
+		plan.m_Summary = (Core::String("Run `") + line.View()) + "`";
+		if (!call.m_Ws.m_Trusted) plan.m_Error = entry->m_Name + ": the workspace is not trusted, so nothing may run in it; ask the owner to trust it";
+		return plan;
+	}
+
+	bool IsBatchFile(Core::StringView program) {
+		Core::String lower = program.ToLower();
+		return lower.View().EndsWith(Core::StringView(".cmd")) || lower.View().EndsWith(Core::StringView(".bat"));
+	}
+
+	bool BatchLine(const Core::Array<Core::String>& argv, Core::String& line, Core::String& problem) {
+		Core::StringBuilder out;
+		for (const Core::String& word : argv) {
+			Core::StringView text = word.View();
+			if (text.IndexOf('"', 0) >= 0 || text.IndexOf('%', 0) >= 0 || text.IndexOf('\n', 0) >= 0 || text.IndexOf('\r', 0) >= 0) {
+				problem = (Core::String("the command runs a batch file through cmd.exe, which would read the quote, '%' or line break in ") + text) + "; leave them out";
+				return false;
+			}
+			if (out.ByteLength() > 0) out.Append(" ");
+			out.AppendByte('"');
+			out.Append(text);
+			out.AppendByte('"');
+		}
+		line = out.ToString();
+		return true;
+	}
+
+	static ToolOutcome CommandRun(const CommandToolEntry* entry, const ToolInvocation& call) {
+		ToolCommand command;
+		Core::Array<Core::String> argv = ExpandToolArgv(entry->m_Run, call.m_Args, SettingOf(call), ToolOf(call));
+		Core::String problem;
+		if (!IsBatchFile(argv[0].View())) command.m_Argv = argv;
+		else if (!BatchLine(argv, command.m_Shell, problem)) return ToolError(((entry->m_Name + ": ") + problem.View()).View());
+		command.m_Cwd = entry->m_Cwd;
+		command.m_Seconds = entry->m_Seconds;
+		command.m_Tool = entry->m_Name;
+		return RunToolCommand(call, command, entry->m_Json);
+	}
+
+	ToolSpec* CommandTool(const Serialization::DomNode& node, Core::StringView pluginId, Core::String& problem) {
+		Serialization::DomNode run = node.Member("run");
+		if (run.Kind() != Serialization::DomKind::Array || run.Count() == 0) {
+			problem = (((Core::String("plugin ") + pluginId) + ": the tool ") + node.Member("name").AsView()) + " runs no command";
+			return nullptr;
+		}
+		CommandToolEntry* entry = new CommandToolEntry();
+		entry->m_Name = Core::String(node.Member("name").AsView());
+		for (int64 i = 0; i < run.Count(); ++i) entry->m_Run.Push(Core::String(run.At(i).AsView()));
+		entry->m_Cwd = IED::NormalizePath(node.Member("cwd").AsView());
+		entry->m_Json = node.Member("output").AsView() == "json";
+		entry->m_Seconds = node.Member("timeoutSeconds").IsValid() ? node.Member("timeoutSeconds").AsInt() : c_ShellDefaultSeconds;
+		if (entry->m_Seconds < 1 || entry->m_Seconds > c_ShellMostSeconds) entry->m_Seconds = c_ShellMostSeconds;
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Name = entry->m_Name;
+		spec->m_Description = Core::String(node.Member("description").AsView());
+		spec->m_Parameters = IED::NodeJson(node.Member("inputSchema"));
+		spec->m_ToolClass = ClassOf(node.Member("class").AsView());
+		spec->m_ParallelSafe = spec->m_ToolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
+		spec->m_InPlan = spec->m_ToolClass == ToolClass::Read;
+		spec->m_Deferred = !node.Member("preload").AsBool();
+		spec->m_Group = node.Member("group").AsView().IsEmpty() ? Core::String(pluginId) : Core::String(node.Member("group").AsView());
+		spec->m_Asks = node.Member("approval").AsView() == "ask";
+		spec->m_Plan = [entry](const ToolInvocation& call) -> ToolPlan { return CommandPlan(entry, call); };
+		spec->m_Run = [entry](const ToolInvocation& call) -> ToolOutcome { return CommandRun(entry, call); };
+		return spec;
+	}
+}

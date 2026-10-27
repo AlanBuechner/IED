@@ -1,0 +1,317 @@
+// The gpu.* methods (docs/22 "Server and protocol"). Library and target state is read and changed inside changes
+// (Atomically); a replay request waits on its session, never the server's lock.
+include "Gpu.ch"
+
+namespace GpuDebug
+{
+	static IED::Workspace WorkspaceOf(const IED::Request& request) {
+		Core::String wsId = request.m_Params.Str("wsId");
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId.View()).View());
+		return ws;
+	}
+
+	// A holder for what a change finds, read after it.
+	class Found
+	{
+		public Capture* m_Capture;
+		public Target* m_Target;
+		public Session* m_Session;
+		public Core::String m_Text;
+	}
+
+	static Capture* CaptureOf(Debugger* debugger, Core::StringView wsId, Core::StringView captureId) {
+		Found* found = new Found();
+		Core::String ws = Core::String(wsId);
+		Core::String id = Core::String(captureId);
+		debugger->m_Context->Atomically([debugger, ws, id, found](IED::Events& events) {
+			Library** library = debugger->m_Libraries.Find(ws);
+			if (library) found->m_Capture = (*library)->Find(id.View());
+		});
+		if (!found->m_Capture) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
+		return found->m_Capture;
+	}
+
+	static Target* TargetOf(Debugger* debugger, Core::StringView targetId) {
+		Found* found = new Found();
+		Core::String id = Core::String(targetId);
+		debugger->m_Context->Atomically([debugger, id, found](IED::Events& events) {
+			for (Target* target : debugger->m_Targets)
+				if (target->m_Id == id) found->m_Target = target;
+		});
+		if (!found->m_Target) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no program ") + targetId).View());
+		return found->m_Target;
+	}
+
+	static Session* SessionOf(Debugger* debugger, Core::StringView sessionId) {
+		Found* found = new Found();
+		Core::String id = Core::String(sessionId);
+		debugger->m_Context->Atomically([debugger, id, found](IED::Events& events) {
+			for (Session* session : debugger->m_Sessions)
+				if (session->m_Id == id) found->m_Session = session;
+		});
+		if (!found->m_Session) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no replay session ") + sessionId).View());
+		return found->m_Session;
+	}
+
+	static Core::String StatusMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Found* found = new Found();
+		Core::String wsId = ws.m_Id;
+		debugger->m_Context->Atomically([debugger, wsId, found](IED::Events& events) { found->m_Text = debugger->SnapshotJson(wsId.View()); });
+		return found->m_Text;
+	}
+
+	static Core::String RescanMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		debugger->Rescan(ws.m_Id.View());
+		return StatusMethod(debugger, request);
+	}
+
+	static void StringsOf(Serialization::DomNode node, Core::Array<Core::String>& out) {
+		if (node.Kind() == Serialization::DomKind::String && !node.AsView().IsEmpty()) out.Push(Core::String(node.AsView()));
+		for (int64 i = 0; node.Kind() == Serialization::DomKind::Array && i < node.Count(); ++i) out.Push(Core::String(node.At(i).AsView()));
+	}
+
+	Target* LaunchConfigured(Debugger* debugger, const IED::Workspace& ws, Core::StringView project, Core::StringView configurationName) {
+		if (!ws.m_Trusted) throw IED::RpcError(IED::ErrorCode::Forbidden, Core::StringView("the workspace is not trusted: nothing runs in it"));
+		IED::Launch launch = IED::ResolveLaunch(ws, project, configurationName);
+		if (!launch.m_Problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, launch.m_Problem.View());
+		if (!launch.m_PreLaunchTask.IsEmpty()) {
+			IED::TaskOutcome built = IED::RunTask(ws, launch.m_Project.View(), launch.m_PreLaunchTask.View(), Core::StringView(""));
+			if (!built.m_Problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build could not run: ") + built.m_Problem.View()).View());
+			if (!built.m_Succeeded) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build failed: ") + built.m_Label.View()).View());
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode configuration = Serialization::ReadJson(launch.m_Configuration.View(), *doc).root;
+		Core::String program = Core::String(configuration.Member("program").AsView());
+		if (program.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("the launch configuration of ") + launch.m_Project.View() + " names no program").View());
+		Core::Array<Core::String> args;
+		Core::Array<Core::String> environment;
+		StringsOf(configuration.Member("args"), args);
+		Core::String cwd = configuration.Member("cwd").AsView().IsEmpty() ? ws.m_Root : Core::String(configuration.Member("cwd").AsView());
+		Serialization::DomNode env = configuration.Member("env");
+		for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i)
+			environment.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		return debugger->Launch(ws, program.View(), args, cwd.View(), environment);
+	}
+
+	void RequestCapture(Debugger* debugger, Target* target, int64 frames) {
+		if (target->m_State.View() == "exited") throw IED::RpcError(IED::ErrorCode::Conflict, Core::StringView("the program has exited"));
+		if (!target->m_Connected)
+			throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the program has not loaded the capture library: a D3D12 program loads it through Gpu::Capture (C4) or flashbang_app.h; a Vulkan program gets it from the loader"));
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("cmd", "capture");
+		json.IntField("frames", frames);
+		json.EndObject();
+		if (!debugger->Send(target, json.View())) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the program's control pipe closed"));
+		target->m_Capturing = true;
+		debugger->Changed(target);
+	}
+
+	// The program to launch: given in the request, or the project's debug configuration (built first when it names a
+	// pre-launch task).
+	static Core::String LaunchMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Core::String program = request.m_Params.Str("program", Core::StringView(""));
+		if (program.IsEmpty())
+			return LaunchConfigured(debugger, ws, request.m_Params.Str("project", Core::StringView("")).View(), request.m_Params.Str("configuration", Core::StringView("")).View())->Json();
+		if (!ws.m_Trusted) throw IED::RpcError(IED::ErrorCode::Forbidden, Core::StringView("the workspace is not trusted: nothing runs in it"));
+		Core::Array<Core::String> args;
+		Core::Array<Core::String> environment;
+		StringsOf(request.m_Params.Field("args"), args);
+		Core::String cwd = ws.m_Root;
+		Core::String within = request.m_Params.Str("cwd", Core::StringView(""));
+		if (!within.IsEmpty()) cwd = Core::String((FS::Path(ws.m_Root.View()) / IED::NormalizePath(within.View()).View()).View());
+		Target* target = debugger->Launch(ws, program.View(), args, cwd.View(), environment);
+		return target->Json();
+	}
+
+	static Core::String CaptureMethod(Debugger* debugger, const IED::Request& request) {
+		Target* target = TargetOf(debugger, request.m_Params.Str("targetId").View());
+		RequestCapture(debugger, target, request.m_Params.Int("frames", 1));
+		return target->Json();
+	}
+
+	static Core::String StopMethod(Debugger* debugger, const IED::Request& request) {
+		Target* target = TargetOf(debugger, request.m_Params.Str("targetId").View());
+		if (target->m_Child) target->m_Child->Kill();
+		return Core::String("{}");
+	}
+
+	static Core::String DeleteMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Capture* capture = CaptureOf(debugger, ws.m_Id.View(), request.m_Params.Str("captureId").View());
+		// Its replay ends first: the replayer has the file open.
+		Core::Array<Session*>* open = new Core::Array<Session*>();
+		Core::String path = capture->m_Path;
+		debugger->m_Context->Atomically([debugger, path, open](IED::Events& events) {
+			for (Session* session : debugger->m_Sessions)
+				if (session->m_Path == path) open->Push(session);
+		});
+		for (Session* session : *open) debugger->Close(session, Core::StringView("the capture was deleted"));
+		Core::String problem;
+		Core::Array<Core::String> extensions = {Core::String(".flash"), Core::String(".json"), Core::String(".png")};
+		for (const Core::String& extension : extensions) {
+			Core::String relative = (((Core::String(c_CaptureFolder) + "/") + capture->m_Id.View()) + extension.View());
+			if (FS::FileExists(IED::WorkspaceFile(ws, relative.View()).CStr()) && !IED::MoveToTrash(ws.m_Id.View(), relative.View(), problem))
+				throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+		}
+		debugger->Rescan(ws.m_Id.View());
+		return Core::String("{}");
+	}
+
+	static Core::String CommentMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Capture* capture = CaptureOf(debugger, ws.m_Id.View(), request.m_Params.Str("captureId").View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode meta = Serialization::ReadJson(capture->m_Sidecar.View(), *doc).root;
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; meta.Kind() == Serialization::DomKind::Object && i < meta.Count(); ++i) {
+			if (meta.KeyAt(i) == "comment") continue;
+			json.Key(meta.KeyAt(i));
+			json.Raw(IED::NodeJson(meta.ValueAt(i)).View());
+		}
+		json.Field("comment", request.m_Params.Str("text").View());
+		json.EndObject();
+		FS::Path sidecar = FS::Path(capture->m_Path.View()).WithExtension(Core::StringView(".json"));
+		if (!FS::WriteFileAtomically(sidecar.CStr(), (const void*)json.View().Data(), json.View().ByteLength()))
+			throw IED::RpcError(IED::ErrorCode::Internal, Core::StringView("the comment could not be saved"));
+		debugger->Rescan(ws.m_Id.View());
+		return Core::String("{}");
+	}
+
+	static Core::String OpenMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Capture* capture = CaptureOf(debugger, ws.m_Id.View(), request.m_Params.Str("captureId").View());
+		Session* session = debugger->Open(ws.m_Id.View(), capture);
+		return session->Json();
+	}
+
+	static Core::String ReplayMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		Core::String method = request.m_Params.Str("method");
+		// What names a file on the server stays the server's: the capture it opens, the PNG it writes; the session's
+		// edits are the server's to keep (gpu.editShader).
+		Core::StringView name = method.View();
+		if (name == "initialize" || name == "png" || name == "compareOpen" || name == "compareClose" || name == "editShader" || name == "revertShader")
+			throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("gpu.replay does not send ") + method.View()).View());
+		Serialization::DomNode params = request.m_Params.Field("params");
+		Core::String blob;
+		Core::String result = debugger->Call(session, method.View(), params.IsValid() ? IED::NodeJson(params).View() : Core::StringView("{}"), blob);
+		debugger->Keep(session, method.View(), params, result.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("result", result.View());
+		if (!blob.IsEmpty()) json.Field("blob", blob.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// gpu.compare {sessionId, captureId}: the session's capture compared with another of its workspace ("" stops):
+	// {session, result} with compareOpen's result.
+	static Core::String CompareMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		Core::String captureId = request.m_Params.Str("captureId");
+		Capture* other = captureId.IsEmpty() ? nullptr : CaptureOf(debugger, session->m_WsId.View(), captureId.View());
+		Core::String result = debugger->Compare(session, other);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("session", session->Json().View());
+		json.RawField("result", result.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static IED::Workspace WorkspaceOfSession(Session* session) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(session->m_WsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("the session's workspace is closed"));
+		return ws;
+	}
+
+	// gpu.shaderSource {sessionId, eid, stage}: what an edit of the stage's shader starts from (docs/22 "Edit and Replay").
+	static Core::String ShaderSourceMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		Capture* capture = CaptureOf(debugger, session->m_WsId.View(), session->m_CaptureId.View());
+		return debugger->ShaderSource(session, WorkspaceOfSession(session), capture, request.m_Params.Int("eid", 0), request.m_Params.Str("stage").View());
+	}
+
+	// gpu.editShader {sessionId, eid, stage, path?, text?, language?, entry?, profile?}: the edit compiled into the replay.
+	static Core::String EditShaderMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		Capture* capture = CaptureOf(debugger, session->m_WsId.View(), session->m_CaptureId.View());
+		ShaderEditRequest edit;
+		edit.m_Eid = request.m_Params.Int("eid", 0);
+		edit.m_Stage = request.m_Params.Str("stage");
+		edit.m_Language = request.m_Params.Str("language", Core::StringView(""));
+		edit.m_Path = request.m_Params.Str("path", Core::StringView(""));
+		edit.m_Text = request.m_Params.Str("text", Core::StringView(""));
+		edit.m_Entry = request.m_Params.Str("entry", Core::StringView(""));
+		edit.m_Profile = request.m_Params.Str("profile", Core::StringView(""));
+		if (edit.m_Language.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("language is required: hlsl or spirv"));
+		return debugger->EditShader(session, WorkspaceOfSession(session), capture, edit);
+	}
+
+	// gpu.revertShader {sessionId, key?}: one edited shader put back, or all.
+	static Core::String RevertShaderMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		return debugger->RevertShader(session, request.m_Params.Str("key", Core::StringView("")).View());
+	}
+
+	// gpu.measurements {sessionId}: the timing, compare timing and experiments the session keeps.
+	static Core::String MeasurementsMethod(Debugger* debugger, const IED::Request& request) {
+		return debugger->Measurements(SessionOf(debugger, request.m_Params.Str("sessionId").View()));
+	}
+
+	static Core::String CloseMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.m_Params.Str("sessionId").View());
+		debugger->Close(session, Core::StringView("closed"));
+		return Core::String("{}");
+	}
+
+	static void Register(Debugger* debugger, const char* name, func<Core::String(Debugger*, const IED::Request&)> method) {
+		Core::String problem;
+		if (!debugger->m_Context->Method(Core::StringView(name), [debugger, method](const IED::Request& request) -> Core::String { return method(debugger, request); }, problem))
+			debugger->m_Context->Log(problem.View());
+	}
+
+	void RegisterMethods(Debugger* debugger) {
+		Register(debugger, "gpu.status", StatusMethod);
+		Register(debugger, "gpu.rescan", RescanMethod);
+		Register(debugger, "gpu.launch", LaunchMethod);
+		Register(debugger, "gpu.capture", CaptureMethod);
+		Register(debugger, "gpu.stop", StopMethod);
+		Register(debugger, "gpu.delete", DeleteMethod);
+		Register(debugger, "gpu.comment", CommentMethod);
+		Register(debugger, "gpu.open", OpenMethod);
+		Register(debugger, "gpu.replay", ReplayMethod);
+		Register(debugger, "gpu.compare", CompareMethod);
+		Register(debugger, "gpu.measurements", MeasurementsMethod);
+		Register(debugger, "gpu.shaderSource", ShaderSourceMethod);
+		Register(debugger, "gpu.editShader", EditShaderMethod);
+		Register(debugger, "gpu.revertShader", RevertShaderMethod);
+		Register(debugger, "gpu.close", CloseMethod);
+	}
+
+	// Captures written by a program, or deleted by hand, show at once.
+	static void FilesChanged(Debugger* debugger, const IED::FileChanges& changes) {
+		Core::String prefix = Core::String(c_CaptureFolder) + "/";
+		for (const IED::FileChange& change : changes.m_Changes) {
+			if (change.m_Path.View().StartsWith(prefix.View())) {
+				debugger->Rescan(changes.m_WsId.View());
+				return;
+			}
+		}
+		if (changes.m_Overflowed) debugger->Rescan(changes.m_WsId.View());
+	}
+
+	void Activate(IED::PluginContext& context) {
+		Debugger* debugger = new Debugger(&context);
+		RegisterMethods(debugger);
+		ProvideQuery(debugger);
+		context.OnWorkspace([debugger](const IED::Workspace& ws) { debugger->Opened(ws); });
+		context.OnFilesChanged([debugger](const IED::FileChanges& changes) { FilesChanged(debugger, changes); });
+	}
+}

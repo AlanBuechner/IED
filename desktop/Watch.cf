@@ -1,0 +1,78 @@
+include "Watch.ch"
+include "App.ch"
+
+namespace Desktop
+{
+	bool RestartBudget::Allow(int64 now) {
+		Core::Array<int64> recent;
+		for (int64 i = 0; i < m_Starts.Count(); ++i)
+			if (now - m_Starts[i] < c_RestartWindowNs) recent.Push(m_Starts[i]);
+		m_Starts = recent;
+		if (m_Starts.Count() >= c_ServerRestarts) return false;
+		m_Starts.Push(now);
+		return true;
+	}
+
+	void Watch::Start(App* app) {
+		if (Running()) return;
+		this.m_App = app;
+		m_Stopping.Store(false);
+		Watch* self = this;
+		m_Thread = Threading::Thread::Run([self]() { self->Loop(); });
+	}
+
+	void Watch::Stop() {
+		m_Stopping.Store(true);
+		if (m_Thread.IsJoinable()) m_Thread.Join();
+	}
+
+	void Watch::Reset() {
+		Threading::LockGuard guard(m_Mutex);
+		m_Budget.Reset();
+		m_Exhausted = false;
+	}
+
+	// The workspaces the server has open, while it answers, for the app to open again if it has to start it again.
+	void Watch::Look() {
+		Net::LocalStream stream = Net::LocalStream::Connect(Launch::ControlName(m_App->m_Options.m_Control.View()).CStr(), Launch::c_ConnectMs);
+		if (!stream.IsOpen()) return;
+		Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
+		if (!reply.m_Ok) return;
+		m_App->Remember(reply.m_Result.View());
+		if (!ReplyFlag(reply.m_Result.View(), "relaunch")) return;
+		Launch::Reply claim = Launch::Ask(stream, Core::StringView("relaunch.claim"), Core::StringView(""));
+		if (claim.m_Ok && ReplyFlag(claim.m_Result.View(), "claimed")) m_App->ServerAsksRelaunch();
+	}
+
+	void Watch::Loop() {
+		Look();
+		while (!m_Stopping.Load()) {
+			for (int64 slept = 0; slept < c_WatchIntervalNs && !m_Stopping.Load(); slept += c_WatchSliceNs) Threading::Thread::Sleep(c_WatchSliceNs);
+			if (!m_Stopping.Load()) Check();
+		}
+	}
+
+	void Watch::Check() {
+		if (!Launch::ServerGone(m_App->m_Options.m_Control.View())) {
+			Look();
+			return;
+		}
+		{
+			Threading::LockGuard guard(m_Mutex);
+			if (m_Exhausted) return;
+		}
+		m_App->ServerGone();
+		{
+			Threading::LockGuard guard(m_Mutex);
+			if (!m_Budget.Allow(clock_now_ns())) {
+				m_Exhausted = true;
+				m_App->ServerFailed(Core::StringView("The server stopped three times in a minute, so it is not started again until you retry."));
+				return;
+			}
+		}
+		Core::String error;
+		Net::LocalStream stream = m_App->EnsureServer(error);
+		if (stream.IsOpen()) m_App->ServerBack();
+		else m_App->ServerFailed(error.View());
+	}
+}

@@ -1,0 +1,170 @@
+include "Model.ch"
+
+namespace Ied
+{
+	static Core::Array<Core::String> StringList(const Serialization::DomNode& node) {
+		Core::Array<Core::String> strings;
+		if (node.Kind() == Serialization::DomKind::String) strings.Push(Core::String(node.AsView()));
+		for (int64 i = 0; node.Kind() == Serialization::DomKind::Array && i < node.Count(); ++i) strings.Push(Core::String(node.At(i).AsView()));
+		return strings;
+	}
+
+	static Core::String Text(const Serialization::DomNode& node, const char* member) { return Core::String(node.Member(member).AsView()); }
+
+	static TaskVariable* ReadVariable(Core::StringView key, const Serialization::DomNode& node) {
+		TaskVariable* variable = new TaskVariable();
+		variable->m_Key = Core::String(key);
+		variable->m_Kind = Text(node, "kind");
+		variable->m_Label = Text(node, "label");
+		variable->m_Values = StringList(node.Member("values"));
+		Serialization::DomNode initial = node.Member("default");
+		if (initial.Kind() == Serialization::DomKind::Bool) variable->m_DefaultValue = Core::String(initial.AsBool() ? "true" : "false");
+		else variable->m_DefaultValue = Core::String(initial.AsView());
+		variable->m_SolutionScope = node.Member("scope").AsView() == "solution";
+		return variable;
+	}
+
+	static OnlyIf OnlyIfOf(Core::StringView text) {
+		if (text == "prevFailure") return OnlyIf::PrevFailure;
+		if (text == "always") return OnlyIf::Always;
+		return OnlyIf::PrevSuccess;
+	}
+
+	static Concurrency ConcurrencyOf(Core::StringView text) {
+		if (text == "single") return Concurrency::Single;
+		if (text == "restart") return Concurrency::Restart;
+		if (text == "parallel") return Concurrency::Parallel;
+		return Concurrency::Queue;
+	}
+
+	TaskStep* ReadTaskStep(const Serialization::DomNode& node) {
+		return ReadStep(node);
+	}
+
+	static TaskStep* ReadStep(const Serialization::DomNode& node) {
+		TaskStep* step = new TaskStep();
+		Serialization::DomNode run = node.Member("run");
+		if (run.Kind() == Serialization::DomKind::Array) step->m_Argv = StringList(run);
+		else if (run.Kind() == Serialization::DomKind::String) step->m_Shell = Core::String(run.AsView());
+		if (node.Member("task").Kind() == Serialization::DomKind::String) step->m_Kind = StepKind::Task;
+		else if (node.Member("debug").Kind() == Serialization::DomKind::String) step->m_Kind = StepKind::Debug;
+		else if (node.Member("binding").Kind() == Serialization::DomKind::String) step->m_Kind = StepKind::Binding;
+		else step->m_Kind = StepKind::Run;
+		step->m_Name = Text(node, step->m_Kind == StepKind::Task ? "task" : step->m_Kind == StepKind::Debug ? "debug" : "binding");
+		step->m_Label = Text(node, "label");
+		step->m_Cwd = Text(node, "cwd");
+		Serialization::DomNode env = node.Member("env");
+		for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i) step->m_Env.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		step->m_Output = Text(node, "output");
+		step->m_Matchers = StringList(node.Member("problemMatcher"));
+		step->m_OnlyIf = OnlyIfOf(node.Member("onlyIf").AsView());
+		step->m_When = Text(node, "when");
+		step->m_TimeoutSeconds = node.Member("timeoutSeconds").AsInt();
+		return step;
+	}
+
+	static TaskDef* ReadTask(Core::StringView key, const Serialization::DomNode& node) {
+		TaskDef* task = new TaskDef();
+		task->m_Key = Core::String(key);
+		task->m_Label = node.Member("label").Kind() == Serialization::DomKind::String ? Text(node, "label") : Core::String(key);
+		task->m_Icon = Text(node, "icon");
+		task->m_Tooltip = Text(node, "tooltip");
+		task->m_Slot = Text(node, "slot");
+		task->m_Concurrency = ConcurrencyOf(node.Member("concurrency").AsView());
+		task->m_SaveAll = node.Member("saveBefore").AsView() != "none";
+		task->m_When = Text(node, "when");
+		Serialization::DomNode steps = node.Member("steps");
+		for (int64 i = 0; i < steps.Count(); ++i) task->m_Steps.Push(ReadStep(steps.At(i)));
+		return task;
+	}
+
+	static void PutVariable(OfferedTasks& into, TaskVariable* variable) {
+		for (int64 i = 0; i < into.m_Variables.Count(); ++i)
+			if (into.m_Variables[i]->m_Key.View() == variable->m_Key.View()) {
+				into.m_Variables[i] = variable;
+				return;
+			}
+		into.m_Variables.Push(variable);
+	}
+
+	static void PutTask(OfferedTasks& into, TaskDef* task) {
+		for (int64 i = 0; i < into.m_Tasks.Count(); ++i)
+			if (into.m_Tasks[i]->m_Key.View() == task->m_Key.View()) {
+				into.m_Tasks[i] = task;
+				return;
+			}
+		into.m_Tasks.Push(task);
+	}
+
+	void ReadTaskEntries(const Serialization::DomNode& node, Core::StringView origin, OfferedTasks& into) {
+		Serialization::DomNode variables = node.Member("variables");
+		for (int64 i = 0; variables.Kind() == Serialization::DomKind::Object && i < variables.Count(); ++i) PutVariable(into, ReadVariable(variables.KeyAt(i), variables.ValueAt(i)));
+		Serialization::DomNode tasks = node.Member("tasks");
+		for (int64 i = 0; tasks.Kind() == Serialization::DomKind::Object && i < tasks.Count(); ++i) {
+			TaskDef* task = ReadTask(tasks.KeyAt(i), tasks.ValueAt(i));
+			if (task->m_Steps.IsEmpty()) into.m_Problems.Push(((((Core::String(origin) + ": the task ") + task->m_Key.View()) + " has no steps")));
+			else PutTask(into, task);
+		}
+		if (node.Member("toolbar").Kind() == Serialization::DomKind::Array) into.m_Toolbar = StringList(node.Member("toolbar"));
+		if (node.Member("problemMatcher").Kind() != Serialization::DomKind::Null) into.m_DefaultMatchers = StringList(node.Member("problemMatcher"));
+		ReadDebugEntries(node.Member("debug"), origin, into);
+	}
+
+	void ApplyDefaultMatchers(OfferedTasks& offered) {
+		if (offered.m_DefaultMatchers.IsEmpty()) return;
+		for (TaskDef* task : offered.m_Tasks)
+			for (TaskStep* step : task->m_Steps)
+				if (step->m_Kind == StepKind::Run && step->m_Matchers.IsEmpty()) step->m_Matchers = offered.m_DefaultMatchers;
+	}
+
+	static void ReadDebugEntries(const Serialization::DomNode& debug, Core::StringView origin, OfferedTasks& into) {
+		if (debug.Kind() != Serialization::DomKind::Object) return;
+		if (debug.Member("default").Kind() == Serialization::DomKind::String) into.m_DebugDefault = Core::String(debug.Member("default").AsView());
+		Serialization::DomNode configurations = debug.Member("configurations");
+		for (int64 i = 0; configurations.Kind() == Serialization::DomKind::Object && i < configurations.Count(); ++i) {
+			Serialization::DomNode node = configurations.ValueAt(i);
+			if (node.Member("type").AsView().IsEmpty() || node.Member("request").AsView().IsEmpty()) {
+				into.m_Problems.Push((((Core::String(origin) + ": the debug configuration ") + configurations.KeyAt(i)) + " needs a type and a request"));
+				continue;
+			}
+			DebugConfig* config = new DebugConfig();
+			config->m_Name = Core::String(configurations.KeyAt(i));
+			config->m_Node = node;
+			PutDebug(into, config);
+		}
+	}
+
+	static void PutDebug(OfferedTasks& into, DebugConfig* config) {
+		for (int64 i = 0; i < into.m_DebugConfigs.Count(); ++i)
+			if (into.m_DebugConfigs[i]->m_Name.View() == config->m_Name.View()) {
+				into.m_DebugConfigs[i] = config;
+				return;
+			}
+		into.m_DebugConfigs.Push(config);
+	}
+
+	TaskVariable* OfferedTasks::Variable(Core::StringView key) const {
+		for (TaskVariable* variable : m_Variables)
+			if (variable->m_Key.View() == key) return variable;
+		return nullptr;
+	}
+
+	TaskDef* OfferedTasks::Task(Core::StringView key) const {
+		for (TaskDef* task : m_Tasks)
+			if (task->m_Key.View() == key) return task;
+		return nullptr;
+	}
+
+	TaskDef* OfferedTasks::InSlot(Core::StringView slot) const {
+		for (TaskDef* task : m_Tasks)
+			if (task->m_Slot.View() == slot) return task;
+		return nullptr;
+	}
+
+	DebugConfig* OfferedTasks::Debug(Core::StringView name) const {
+		Core::StringView wanted = name.IsEmpty() ? m_DebugDefault.View() : name;
+		for (DebugConfig* config : m_DebugConfigs)
+			if (config->m_Name.View() == wanted) return config;
+		return name.IsEmpty() && !m_DebugConfigs.IsEmpty() ? m_DebugConfigs[0] : nullptr;
+	}
+}

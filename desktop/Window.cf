@@ -1,0 +1,198 @@
+// The Win32 side of a window: creation, placement, the dark frame, and the messages it answers.
+
+include "Window.ch"
+include "App.ch"
+
+namespace Desktop
+{
+	// The frame's colors, theme.css's (COLORREF is 0x00BBGGRR): --bg-0 caption, --border-0 border, --text-0 title.
+	const uint32 c_CaptionColor = 0x000E0E0E;
+	const uint32 c_BorderColor = 0x00262626;
+	const uint32 c_TitleColor = 0x00E8E8E8;
+
+	Core::Array<char16> Wide(Core::StringView text) { return Core::ToUtf16(text, true); }
+
+	Core::String TakeWide(char16* text) {
+		if (text == null) return Core::String();
+		int64 count = 0;
+		while (text[count] != 0) count += 1;
+		Core::String utf8 = Core::FromUtf16((const char16*)text, count);
+		CoTaskMemFree((void*)text);
+		return utf8;
+	}
+
+	Core::String Failure(Core::StringView what, int32 hresult) {
+		Core::StringBuilder text;
+		text.Append(what);
+		text.Append(" (HRESULT ");
+		text.AppendInt(hresult);
+		text.AppendByte(')');
+		return text.ToString();
+	}
+
+	static void DarkFrame(HWND__* hwnd) {
+		int32 dark = 1;
+		DwmSetWindowAttribute(hwnd, (uint32)DWMWA_USE_IMMERSIVE_DARK_MODE, (const void*)&dark, 4);
+		// Windows 11 colors the caption and border; Windows 10 ignores the attributes and keeps the dark caption.
+		uint32 caption = c_CaptionColor;
+		uint32 border = c_BorderColor;
+		uint32 title = c_TitleColor;
+		DwmSetWindowAttribute(hwnd, (uint32)DWMWA_CAPTION_COLOR, (const void*)&caption, 4);
+		DwmSetWindowAttribute(hwnd, (uint32)DWMWA_BORDER_COLOR, (const void*)&border, 4);
+		DwmSetWindowAttribute(hwnd, (uint32)DWMWA_TEXT_COLOR, (const void*)&title, 4);
+	}
+
+	static int32 Smaller(int32 a, int32 b) { return a < b ? a : b; }
+
+	// The placement as Windows keeps it, or centered on the primary monitor's work area when there is none to keep or
+	// it would land on no monitor.
+	static tagWINDOWPLACEMENT PlacementOnScreen(const Placement& placement) {
+		tagWINDOWPLACEMENT shown;
+		shown.length = 44;
+		shown.showCmd = (uint32)(placement.m_Maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+		tagRECT wanted;
+		wanted.left = placement.m_X;
+		wanted.top = placement.m_Y;
+		wanted.right = placement.m_X + placement.m_Width;
+		wanted.bottom = placement.m_Y + placement.m_Height;
+		if (placement.m_Known && MonitorFromRect(&wanted, (uint32)MONITOR_DEFAULTTONULL) != null) {
+			shown.rcNormalPosition = wanted;
+			return shown;
+		}
+		tagRECT work;
+		SystemParametersInfoW((uint32)SPI_GETWORKAREA, 0, (void*)&work, 0);
+		const int32 width = Smaller(c_DefaultWidth, (work.right - work.left) * 9 / 10);
+		const int32 height = Smaller(c_DefaultHeight, (work.bottom - work.top) * 9 / 10);
+		shown.rcNormalPosition.left = work.left + (work.right - work.left - width) / 2;
+		shown.rcNormalPosition.top = work.top + (work.bottom - work.top - height) / 2;
+		shown.rcNormalPosition.right = shown.rcNormalPosition.left + width;
+		shown.rcNormalPosition.bottom = shown.rcNormalPosition.top + height;
+		shown.showCmd = (uint32)SW_SHOWNORMAL;
+		return shown;
+	}
+
+	bool Window::Create(HINSTANCE__* instance, const Placement& placement) {
+		Core::Array<char16> className = Wide(Core::StringView(c_WindowClass));
+		Core::Array<char16> title = Wide(Core::StringView("IED"));
+		m_Hwnd = CreateWindowExW(0, className.Data(), title.Data(), (uint32)WS_OVERLAPPEDWINDOW, (int32)CW_USEDEFAULT, (int32)CW_USEDEFAULT,
+			c_DefaultWidth, c_DefaultHeight, null, null, instance, (void*)this);
+		if (m_Hwnd == null) return false;
+		DarkFrame(m_Hwnd);
+		tagWINDOWPLACEMENT shown = PlacementOnScreen(placement);
+		SetWindowPlacement(m_Hwnd, &shown);
+		return true;
+	}
+
+	void Window::BringToFront() {
+		if (m_Hwnd == null) return;
+		if (IsIconic(m_Hwnd) != 0) ShowWindow(m_Hwnd, (int32)SW_RESTORE);
+		if (SetForegroundWindow(m_Hwnd) != 0) return;
+		FLASHWINFO flash;
+		flash.cbSize = 32;
+		flash.hwnd = m_Hwnd;
+		flash.dwFlags = (uint32)(FLASHW_ALL | FLASHW_TIMERNOFG);
+		flash.uCount = 0;
+		flash.dwTimeout = 0;
+		FlashWindowEx(&flash);
+	}
+
+	Placement Window::CurrentPlacement() const {
+		Placement placement;
+		tagWINDOWPLACEMENT now;
+		now.length = 44;
+		if (m_Hwnd == null || GetWindowPlacement(m_Hwnd, &now) == 0) return placement;
+		placement.m_Known = true;
+		placement.m_X = now.rcNormalPosition.left;
+		placement.m_Y = now.rcNormalPosition.top;
+		placement.m_Width = now.rcNormalPosition.right - now.rcNormalPosition.left;
+		placement.m_Height = now.rcNormalPosition.bottom - now.rcNormalPosition.top;
+		placement.m_Maximized = IsZoomed(m_Hwnd) != 0;
+		return placement;
+	}
+
+	void Window::Close() {
+		if (m_Hwnd != null) PostMessageW(m_Hwnd, (uint32)WM_CLOSE, 0, 0);
+	}
+
+	void Window::Alert(Core::StringView text) {
+		Core::Array<char16> body = Wide(text);
+		Core::Array<char16> caption = Wide(Core::StringView("IED"));
+		MessageBoxW(m_Hwnd, body.Data(), caption.Data(), (uint32)MB_ICONERROR);
+	}
+
+	bool Window::Handle(uint32 message, uint64 wParam, int64 lParam, int64& result) {
+		result = 0;
+		if (message == (uint32)WM_SIZE) {
+			if (m_Controller != null) {
+				m_Controller->put_IsVisible(wParam == (uint64)SIZE_MINIMIZED ? 0 : 1);
+				if (wParam != (uint64)SIZE_MINIMIZED) Fit();
+			}
+			return true;
+		}
+		if (message == (uint32)WM_MOVE || message == (uint32)WM_MOVING) {
+			if (m_Controller != null) m_Controller->NotifyParentWindowPositionChanged();
+			return false;
+		}
+		if (message == (uint32)WM_SETFOCUS) {
+			if (m_Controller != null) m_Controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+			return true;
+		}
+		if (message == (uint32)WM_GETMINMAXINFO) {
+			tagMINMAXINFO* limits = (tagMINMAXINFO*)(void*)lParam;
+			limits->ptMinTrackSize.x = c_MinWidth;
+			limits->ptMinTrackSize.y = c_MinHeight;
+			return true;
+		}
+		if (message == (uint32)WM_DPICHANGED) {
+			const tagRECT* suggested = (const tagRECT*)(void*)lParam;
+			SetWindowPos(m_Hwnd, null, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top,
+				(uint32)(SWP_NOZORDER | SWP_NOACTIVATE));
+			return true;
+		}
+		if (message == c_ResolvedMessage) {
+			m_App->DeliverResolved(this);
+			return true;
+		}
+		if (message == c_OpenFolderMessage) {
+			m_App->OpenFolder(this);
+			return true;
+		}
+		if (message == c_RelaunchMessage) {
+			m_App->Relaunch();
+			return true;
+		}
+		if (message == c_FocusMessage) {
+			BringToFront();
+			return true;
+		}
+		if (message == (uint32)WM_CLOSE) {
+			m_App->Closing(this);
+			if (m_Controller != null) m_Controller->Close();
+			m_Controller = null;
+			m_Webview = null;
+			DestroyWindow(m_Hwnd);
+			return true;
+		}
+		if (message == (uint32)WM_NCDESTROY) {
+			HWND__* gone = m_Hwnd;
+			m_Hwnd = null;
+			m_App->Closed(this, gone);
+			return false;
+		}
+		return false;
+	}
+
+	int64 WindowProcedure(HWND__* hwnd, uint32 message, uint64 wParam, int64 lParam) {
+		if (message == (uint32)WM_NCCREATE) {
+			const tagCREATESTRUCTW* creating = (const tagCREATESTRUCTW*)(void*)lParam;
+			Window* window = (Window*)creating->lpCreateParams;
+			window->m_Hwnd = hwnd;
+			SetWindowLongPtrW(hwnd, GWLP_USERDATA, (int64)(void*)window);
+		}
+		Window* window = (Window*)(void*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+		int64 result = 0;
+		if (window != null && window->Handle(message, wParam, lParam, result)) return result;
+		if (message == (uint32)WM_NCDESTROY) SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+		return DefWindowProcW(hwnd, message, wParam, lParam);
+	}
+}

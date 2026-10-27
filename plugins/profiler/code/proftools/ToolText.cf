@@ -1,0 +1,711 @@
+include "ToolText.ch"
+include "analysis/Analysis.ch"
+
+namespace Profiler
+{
+	const int32 c_ToolZones = 25;
+	const int32 c_ToolInstances = 10;
+	const int32 c_ToolMessages = 100;
+	const int32 c_ToolFlameDepth = 12;
+	const double c_ToolFlameMinPercent = 1.0;
+
+	Serialization::DomNode ParseJson(const Core::String& json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json.View(), *doc).root;
+	}
+
+	static void AppendFixed(Core::StringBuilder& text, double value, int32 decimals) {
+		text.AppendDouble(value, decimals);
+	}
+
+	Core::String Duration(int64 ns) {
+		Core::StringBuilder text;
+		const double value = (double)(ns < 0 ? -ns : ns);
+		if (ns < 0) text.AppendByte('-');
+		if (value < 1000.0) {
+			text.AppendInt((int64)value);
+			text.Append(" ns");
+		}
+		else if (value < 1000000.0) {
+			AppendFixed(text, value / 1000.0, value < 10000.0 ? 2 : 1);
+			text.Append(" us");
+		}
+		else if (value < 1000000000.0) {
+			AppendFixed(text, value / 1000000.0, value < 10000000.0 ? 2 : (value < 100000000.0 ? 1 : 0));
+			text.Append(" ms");
+		}
+		else {
+			AppendFixed(text, value / 1000000000.0, 3);
+			text.Append(" s");
+		}
+		return text.ToString();
+	}
+
+	Core::String Instant(int64 ns) {
+		Core::StringBuilder text;
+		AppendFixed(text, (double)ns / 1000000.0, 3);
+		text.Append(" ms");
+		return text.ToString();
+	}
+
+	Core::String Bytes(int64 bytes) {
+		Core::StringBuilder text;
+		const double value = (double)bytes;
+		if (bytes < 1024) {
+			text.AppendInt(bytes);
+			text.Append(" B");
+		}
+		else if (value < 1048576.0) {
+			AppendFixed(text, value / 1024.0, 1);
+			text.Append(" KiB");
+		}
+		else if (value < 1073741824.0) {
+			AppendFixed(text, value / 1048576.0, 1);
+			text.Append(" MiB");
+		}
+		else {
+			AppendFixed(text, value / 1073741824.0, 2);
+			text.Append(" GiB");
+		}
+		return text.ToString();
+	}
+
+	Core::String Number(int64 value) {
+		Core::StringBuilder digits;
+		digits.AppendInt(value < 0 ? -value : value);
+		Core::StringView all = digits.View();
+		Core::StringBuilder text;
+		if (value < 0) text.AppendByte('-');
+		for (int64 i = 0; i < all.ByteLength(); ++i) {
+			if (i > 0 && (all.ByteLength() - i) % 3 == 0) text.AppendByte(',');
+			text.AppendByte(all.Data()[i]);
+		}
+		return text.ToString();
+	}
+
+	Core::String Percent(double fraction) {
+		Core::StringBuilder text;
+		text.AppendDouble(fraction * 100.0, 1);
+		text.AppendByte('%');
+		return text.ToString();
+	}
+
+	Core::String Decimal(double value) {
+		Core::StringBuilder text;
+		text.AppendDouble(value, 1);
+		return text.ToString();
+	}
+
+	Core::Array<Core::String>* TextTable::Row() {
+		Core::Array<Core::String>* row = new Core::Array<Core::String>();
+		m_Rows.Push(row);
+		return row;
+	}
+
+	void TextTable::Write(Core::StringBuilder& out) const {
+		Core::Array<int64> widths;
+		for (const Core::Array<Core::String>* row : m_Rows)
+			for (int64 c = 0; c < row->Count(); ++c) {
+				if (widths.Count() <= c) widths.Push(0);
+				if ((*row)[c].ByteLength() > widths[c]) widths[c] = (*row)[c].ByteLength();
+			}
+		for (const Core::Array<Core::String>* row : m_Rows) {
+			for (int64 c = 0; c < row->Count(); ++c) {
+				const int64 pad = widths[c] - (*row)[c].ByteLength();
+				if (c > 0) {
+					out.Append("  ");
+					for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
+				}
+				out.Append((*row)[c].View());
+				if (c == 0 && row->Count() > 1)
+					for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
+			}
+			out.AppendByte('\n');
+		}
+	}
+
+	// --- Naming a capture ---------------------------------------------------------------------------------------------
+
+	Core::String ResolveCapture(ProfilerPlugin* profiler, ProfWorkspace* ws, Core::StringView named) {
+		profiler->Rescan(ws);
+		if (named.IsEmpty() || named == "latest") {
+			CaptureEntry* best = nullptr;
+			for (const Core::KeyValue<Core::String, CaptureEntry*>& item : profiler->m_Captures) {
+				CaptureEntry* entry = item.value;
+				if (entry->m_WsId.View() != ws->m_WsId.View()) continue;
+				if (!best || (entry->m_Live && !best->m_Live) || (entry->m_Live == best->m_Live && entry->m_ModifiedNs > best->m_ModifiedNs)) best = entry;
+			}
+			if (!best) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("the workspace has no captures yet: profile_capture records one, or run the program with IED_PROFILER"));
+			return best->m_Id;
+		}
+		if (profiler->Entry(named)) return Core::String(named);
+		for (const Core::KeyValue<Core::String, CaptureEntry*>& item : profiler->m_Captures) {
+			CaptureEntry* entry = item.value;
+			FS::Path path = FS::Path(entry->m_Path.View());
+			if (entry->m_WsId.View() == ws->m_WsId.View() && (entry->m_Relative.View() == named || path.FileName() == named || path.Stem() == named)) return entry->m_Id;
+		}
+		FS::Path path = ws->File(IED::NormalizePath(named).View());
+		if (FS::FileExists(path.CStr())) return profiler->EntryForPath(ws, path.View())->m_Id;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + named + " (profile_list names them)").View());
+	}
+
+	// --- Each tool ----------------------------------------------------------------------------------------------------
+
+	int64 MsArg(const Serialization::DomNode& args, const char* name) {
+		const Serialization::DomNode value = args.Member(name);
+		return value.IsValid() && !value.IsNull() ? (int64)(value.AsFloat() * 1000000.0) : -1;
+	}
+
+	static Core::String ListText(ProfilerPlugin* profiler, ProfWorkspace* ws) {
+		profiler->Rescan(ws);
+		Serialization::DomNode captures = ParseJson(profiler->LibraryJson(ws)).Member("captures");
+		if (captures.Count() == 0) return Core::String("No captures yet. profile_capture records one; a program run with IED_PROFILER set connects by itself.");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		head->Push(Core::String("capture"));
+		head->Push(Core::String("app"));
+		head->Push(Core::String("started"));
+		head->Push(Core::String("duration"));
+		head->Push(Core::String("zones"));
+		head->Push(Core::String("frames"));
+		head->Push(Core::String("state"));
+		for (int64 i = 0; i < captures.Count(); ++i) {
+			Serialization::DomNode entry = captures.At(i);
+			Serialization::DomNode meta = entry.Member("metadata");
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(entry.Member("captureId").AsView()));
+			row->Push(Core::String(meta.Member("app").AsView()));
+			Core::StringBuilder started;
+			const Platform::CalendarTime at = Platform::LocalCalendar(meta.Member("startUnixNs").AsInt() > 0 ? meta.Member("startUnixNs").AsInt() : entry.Member("modifiedNs").AsInt());
+			started.AppendIntBase(at.year, 10, 4);
+			started.AppendByte('-');
+			started.AppendIntBase(at.month, 10, 2);
+			started.AppendByte('-');
+			started.AppendIntBase(at.day, 10, 2);
+			started.AppendByte(' ');
+			started.AppendIntBase(at.hour, 10, 2);
+			started.AppendByte(':');
+			started.AppendIntBase(at.minute, 10, 2);
+			started.AppendByte(':');
+			started.AppendIntBase(at.second, 10, 2);
+			row->Push(started.ToString());
+			row->Push(Duration(meta.Member("durationNs").AsInt()));
+			row->Push(Number(meta.Member("zones").AsInt()));
+			row->Push(Number(meta.Member("frames").AsInt()));
+			row->Push(Core::String(entry.Member("live").AsBool() ? "recording" : "saved"));
+		}
+		Core::StringBuilder out;
+		table.Write(out);
+		out.Append("Paths are under ");
+		out.Append(c_CapturesFolder);
+		out.Append("; a capture id or a file name names a capture to the other profile_* tools.");
+		return out.ToString();
+	}
+
+	static void ZoneRows(Core::StringBuilder& out, const Serialization::DomNode& rows, bool grouped) {
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		head->Push(Core::String("zone"));
+		if (grouped) head->Push(Core::String("in"));
+		head->Push(Core::String("count"));
+		head->Push(Core::String("total"));
+		head->Push(Core::String("self"));
+		head->Push(Core::String("mean"));
+		head->Push(Core::String("median"));
+		head->Push(Core::String("p95"));
+		head->Push(Core::String("max"));
+		head->Push(Core::String("source"));
+		for (int64 i = 0; i < rows.Count(); ++i) {
+			Serialization::DomNode r = rows.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(r.Member("name").AsView()));
+			if (grouped) row->Push(Core::String(r.Member("group").AsView()));
+			row->Push(Number(r.Member("count").AsInt()));
+			row->Push(Duration(r.Member("totalNs").AsInt()));
+			row->Push(Duration(r.Member("selfNs").AsInt()));
+			row->Push(Duration(r.Member("meanNs").AsInt()));
+			row->Push(Duration(r.Member("medianNs").AsInt()));
+			row->Push(Duration(r.Member("p95Ns").AsInt()));
+			row->Push(Duration(r.Member("maxNs").AsInt()));
+			Core::StringBuilder source;
+			source.Append(r.Member("file").AsView());
+			if (r.Member("line").AsInt() > 0) {
+				source.AppendByte(':');
+				source.AppendInt(r.Member("line").AsInt());
+			}
+			row->Push(source.ToString());
+		}
+		table.Write(out);
+	}
+
+	static void FrameLine(Core::StringBuilder& out, const Serialization::DomNode& frames) {
+		if (!frames.IsValid() || frames.IsNull() || frames.Member("count").AsInt() == 0) {
+			out.Append("Frames: none marked (the program calls no frame mark).\n");
+			return;
+		}
+		out.Append("Frames: ");
+		out.AppendInt(frames.Member("count").AsInt());
+		out.Append(", mean ");
+		out.Append(Duration(frames.Member("meanNs").AsInt()).View());
+		out.Append(", median ");
+		out.Append(Duration(frames.Member("medianNs").AsInt()).View());
+		out.Append(", p95 ");
+		out.Append(Duration(frames.Member("p95Ns").AsInt()).View());
+		out.Append(", p99 ");
+		out.Append(Duration(frames.Member("p99Ns").AsInt()).View());
+		out.Append(", max ");
+		out.Append(Duration(frames.Member("maxNs").AsInt()).View());
+		out.AppendByte('\n');
+	}
+
+	static Core::String SummaryText(const Capture& capture, Core::StringView id) {
+		Serialization::DomNode s = ParseJson(Summary(capture));
+		Core::StringBuilder out;
+		out.Append("Capture ");
+		out.Append(id);
+		out.Append(": ");
+		out.Append(s.Member("app").AsView());
+		out.Append(" (pid ");
+		out.AppendInt(s.Member("pid").AsInt());
+		out.Append("), ");
+		out.Append(Duration(s.Member("durationNs").AsInt()).View());
+		out.Append(s.Member("live").AsBool() ? ", still recording\n" : "\n");
+		out.Append("Events ");
+		out.Append(Number(s.Member("events").AsInt()).View());
+		out.Append(", zones ");
+		out.Append(Number(s.Member("zones").AsInt()).View());
+		out.Append(", messages ");
+		out.Append(Number(s.Member("messages").AsInt()).View());
+		if (s.Member("samples").AsInt() > 0) {
+			out.Append(", samples ");
+			out.AppendInt(s.Member("samples").AsInt());
+		}
+		if (s.Member("eventsDropped").AsInt() > 0) {
+			out.Append(", dropped by the client ");
+			out.AppendInt(s.Member("eventsDropped").AsInt());
+		}
+		out.AppendByte('\n');
+		FrameLine(out, s.Member("frames"));
+		Serialization::DomNode threads = s.Member("threads");
+		out.Append("Threads: ");
+		for (int64 i = 0; i < threads.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(threads.At(i).Member("name").AsView());
+			out.Append(" (");
+			out.Append(Number(threads.At(i).Member("zones").AsInt()).View());
+			out.Append(" zones");
+			if (threads.At(i).Member("renames").AsInt() > 0) {
+				out.Append(", renamed ");
+				out.AppendInt(threads.At(i).Member("renames").AsInt());
+				out.Append("x");
+			}
+			out.AppendByte(')');
+		}
+		out.Append("\n\nCostliest zones by self time:\n");
+		ZoneRows(out, s.Member("topBySelf").Member("rows"), false);
+		out.Append("\nCostliest zones by total time:\n");
+		ZoneRows(out, s.Member("topByTotal").Member("rows"), false);
+		Serialization::DomNode tasks = s.Member("tasks");
+		if (tasks.Count() > 0) {
+			out.Append("\nTasks: ");
+			for (int64 i = 0; i < tasks.Count(); ++i) {
+				if (i > 0) out.Append(", ");
+				Serialization::DomNode task = tasks.At(i);
+				out.Append(task.Member("name").AsView());
+				out.Append(" (");
+				out.AppendInt(task.Member("runs").AsInt());
+				out.Append(" runs on ");
+				out.AppendInt(task.Member("threads").AsInt());
+				out.Append(" threads, busy ");
+				out.Append(Duration(task.Member("busyNs").AsInt()).View());
+				out.AppendByte(')');
+			}
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode memory = s.Member("memory");
+		if (memory.Member("allocations").AsInt() > 0 || memory.Member("collections").AsInt() > 0) {
+			out.Append("\nMemory: ");
+			out.Append(Number(memory.Member("allocations").AsInt()).View());
+			out.Append(" allocations");
+			const int64 frames = s.Member("frames").IsNull() ? 0 : s.Member("frames").Member("count").AsInt();
+			if (frames > 0 && memory.Member("allocations").AsInt() > 0) {
+				out.Append(" (");
+				out.Append(Decimal((double)memory.Member("allocations").AsInt() / (double)frames).View());
+				out.Append(" a frame)");
+			}
+			out.Append(", ");
+			out.AppendInt(memory.Member("liveAtEnd").AsInt());
+			out.Append(" live at the end (");
+			out.Append(Bytes(memory.Member("liveBytesAtEnd").AsInt()).View());
+			out.Append("); ");
+			out.AppendInt(memory.Member("collections").AsInt());
+			out.Append(" collections pausing ");
+			out.Append(Duration(memory.Member("gcPauseNs").AsInt()).View());
+			out.Append(" in all, the longest ");
+			out.Append(Duration(memory.Member("gcLongestNs").AsInt()).View());
+			out.AppendByte('\n');
+		}
+		out.Append(TopLocksText(s.Member("locks")).View());
+		if (s.Member("warningCount").AsInt() > 0) {
+			out.Append("\nWarnings (");
+			out.AppendInt(s.Member("warningCount").AsInt());
+			out.Append("):\n");
+			Serialization::DomNode warnings = s.Member("warnings");
+			for (int64 i = 0; i < warnings.Count(); ++i) {
+				out.Append("- ");
+				out.Append(warnings.At(i).AsView());
+				out.AppendByte('\n');
+			}
+		}
+		return out.ToString();
+	}
+
+	static StatsOrder ToolOrder(Core::StringView by) {
+		if (by == "total") return StatsOrder::Total;
+		if (by == "count") return StatsOrder::Count;
+		if (by == "mean") return StatsOrder::Mean;
+		if (by == "median") return StatsOrder::Median;
+		if (by == "p95") return StatsOrder::P95;
+		if (by == "max") return StatsOrder::Max;
+		return StatsOrder::Self;
+	}
+
+	static Core::String TopZonesText(const Capture& capture, const Serialization::DomNode& args) {
+		StatsAsk ask;
+		ask.m_Order = ToolOrder(args.Member("by").AsView());
+		Core::StringView group = args.Member("group_by").AsView();
+		ask.m_GroupBy = group == "thread" ? GroupBy::Thread : (group == "task" ? GroupBy::Task : GroupBy::Zone);
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		ask.m_Filter = Core::String(args.Member("filter").AsView());
+		ask.m_Limit = args.Member("n").IsValid() ? (int32)args.Member("n").AsInt() : c_ToolZones;
+		Serialization::DomNode answer = ParseJson(Stats(capture, ask));
+		Core::StringBuilder out;
+		out.Append("Range ");
+		out.Append(Instant(answer.Member("from").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(answer.Member("to").AsInt()).View());
+		out.Append("; ");
+		out.AppendInt(answer.Member("rowCount").AsInt());
+		out.Append(" rows, the first ");
+		out.AppendInt(answer.Member("rows").Count());
+		out.Append(":\n");
+		ZoneRows(out, answer.Member("rows"), ask.m_GroupBy != GroupBy::Zone);
+		return out.ToString();
+	}
+
+	static Core::String FrameText(const Capture& capture, const Serialization::DomNode& args) {
+		const Serialization::DomNode index = args.Member("index");
+		const int64 which = index.Kind() == Serialization::DomKind::Int ? index.AsInt() : -1;
+		Core::String json = FrameBreakdown(capture, which);
+		if (json.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such frame (the capture may mark none)"));
+		Serialization::DomNode f = ParseJson(json);
+		Core::StringBuilder out;
+		out.Append("Frame ");
+		out.AppendInt(f.Member("index").AsInt());
+		out.Append(" at ");
+		out.Append(Instant(f.Member("startNs").AsInt()).View());
+		out.Append(" took ");
+		out.Append(Duration(f.Member("durationNs").AsInt()).View());
+		out.AppendByte('\n');
+		FrameLine(out, f.Member("frames"));
+		Serialization::DomNode threads = f.Member("threads");
+		for (int64 i = 0; i < threads.Count(); ++i) {
+			Serialization::DomNode t = threads.At(i);
+			out.Append("\n");
+			out.Append(t.Member("thread").AsView());
+			out.Append(" busy ");
+			out.Append(Duration(t.Member("busyNs").AsInt()).View());
+			out.Append(":\n");
+			Serialization::DomNode zones = t.Member("zones");
+			for (int64 k = 0; k < zones.Count() && k < (int64)c_ToolZones; ++k) {
+				out.Append("  ");
+				out.Append(zones.At(k).Member("name").AsView());
+				out.Append(" ");
+				out.Append(Duration(zones.At(k).Member("durationNs").AsInt()).View());
+				out.Append(" [");
+				out.Append(zones.At(k).Member("ref").AsView());
+				out.Append("]\n");
+			}
+		}
+		out.Append("\nCostliest zones in the frame by self time:\n");
+		ZoneRows(out, f.Member("topZones").Member("rows"), false);
+		Serialization::DomNode gcs = f.Member("gc");
+		for (int64 i = 0; i < gcs.Count(); ++i) {
+			out.Append("GC (generation ");
+			out.AppendInt(gcs.At(i).Member("generation").AsInt());
+			out.Append(") paused ");
+			out.Append(Duration(gcs.At(i).Member("pauseNs").AsInt()).View());
+			if (gcs.At(i).Member("freedBytes").AsInt() >= 0) {
+				out.Append(", freed ");
+				out.Append(Bytes(gcs.At(i).Member("freedBytes").AsInt()).View());
+			}
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode gpu = f.Member("gpu");
+		for (int64 i = 0; i < gpu.Count(); ++i) {
+			out.Append("GPU ");
+			out.Append(gpu.At(i).Member("queue").AsView());
+			out.Append(": ");
+			out.Append(gpu.At(i).Member("name").AsView());
+			out.Append(" ");
+			out.Append(Duration(gpu.At(i).Member("durationNs").AsInt()).View());
+			out.AppendByte('\n');
+		}
+		return out.ToString();
+	}
+
+	static Core::String FindZoneText(const Capture& capture, const Serialization::DomNode& args) {
+		FindAsk ask;
+		ask.m_Name = Core::String(args.Member("name").AsView());
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		ask.m_Bins = 12;
+		ask.m_Limit = c_ToolInstances;
+		Serialization::DomNode z = ParseJson(FindZone(capture, ask));
+		Core::StringBuilder out;
+		out.Append(z.Member("name").AsView());
+		out.Append(": ");
+		out.AppendInt(z.Member("count").AsInt());
+		out.Append(" instances, total ");
+		out.Append(Duration(z.Member("totalNs").AsInt()).View());
+		if (z.Member("count").AsInt() == 0) {
+			out.Append(" (no zone has this name; profile_top_zones lists the names)");
+			return out.ToString();
+		}
+		out.Append(", mean ");
+		out.Append(Duration(z.Member("meanNs").AsInt()).View());
+		out.Append(", median ");
+		out.Append(Duration(z.Member("medianNs").AsInt()).View());
+		out.Append(", p95 ");
+		out.Append(Duration(z.Member("p95Ns").AsInt()).View());
+		out.Append(", min ");
+		out.Append(Duration(z.Member("minNs").AsInt()).View());
+		out.Append(", max ");
+		out.Append(Duration(z.Member("maxNs").AsInt()).View());
+		out.Append("\nDistribution:\n");
+		Serialization::DomNode bins = z.Member("bins");
+		for (int64 i = 0; i < bins.Count(); ++i) {
+			if (bins.At(i).At(2).AsInt() == 0) continue;
+			out.Append("  ");
+			out.Append(Duration((int64)bins.At(i).At(0).AsFloat()).View());
+			out.Append(" - ");
+			out.Append(Duration((int64)bins.At(i).At(1).AsFloat()).View());
+			out.Append(": ");
+			out.AppendInt(bins.At(i).At(2).AsInt());
+			out.AppendByte('\n');
+		}
+		out.Append("Slowest:\n");
+		Serialization::DomNode instances = z.Member("instances");
+		for (int64 i = 0; i < instances.Count(); ++i) {
+			out.Append("  ");
+			out.Append(Duration(instances.At(i).Member("durationNs").AsInt()).View());
+			out.Append(" at ");
+			out.Append(Instant(instances.At(i).Member("startNs").AsInt()).View());
+			out.Append(" on ");
+			out.Append(instances.At(i).Member("thread").AsView());
+			out.Append(" [");
+			out.Append(instances.At(i).Member("ref").AsView());
+			out.Append("]\n");
+		}
+		return out.ToString();
+	}
+
+	static void FlameNodeText(Core::StringBuilder& out, const Serialization::DomNode& node, int32 depth, int32 mostDepth, double rootTotal, double minPercent, bool time) {
+		Serialization::DomNode children = node.Member("children");
+		for (int64 i = 0; i < children.Count(); ++i) {
+			Serialization::DomNode child = children.At(i);
+			const double percent = rootTotal > 0.0 ? 100.0 * (double)child.Member("total").AsInt() / rootTotal : 0.0;
+			if (percent < minPercent) continue;
+			for (int32 k = 0; k < depth; ++k) out.Append("  ");
+			out.Append(child.Member("name").AsView());
+			out.Append("  ");
+			out.AppendDouble(percent, 1);
+			out.Append("%  total ");
+			out.Append(time ? Duration(child.Member("total").AsInt()).View() : Number(child.Member("total").AsInt()).View());
+			out.Append("  self ");
+			out.Append(time ? Duration(child.Member("self").AsInt()).View() : Number(child.Member("self").AsInt()).View());
+			out.Append("  x");
+			out.AppendInt(child.Member("count").AsInt());
+			out.AppendByte('\n');
+			if (depth + 1 < mostDepth) FlameNodeText(out, child, depth + 1, mostDepth, rootTotal, minPercent, time);
+		}
+	}
+
+	static Core::String FlameText(const Capture& capture, const Serialization::DomNode& args) {
+		FlameAsk ask;
+		ask.m_FromNs = MsArg(args, "from_ms");
+		ask.m_ToNs = MsArg(args, "to_ms");
+		Serialization::DomNode flame = ParseJson(Flame(capture, ask));
+		Serialization::DomNode root = flame.Member("root");
+		const bool time = flame.Member("unit").AsView() == "ns";
+		const int32 depth = args.Member("depth").IsValid() ? (int32)args.Member("depth").AsInt() : c_ToolFlameDepth;
+		const double minPercent = args.Member("min_percent").IsValid() ? args.Member("min_percent").AsFloat() : c_ToolFlameMinPercent;
+		Core::StringBuilder out;
+		out.Append("Call tree from ");
+		out.Append(flame.Member("source").AsView());
+		out.Append(" (unit ");
+		out.Append(flame.Member("unit").AsView());
+		out.Append("), total ");
+		out.Append(time ? Duration(root.Member("total").AsInt()).View() : Number(root.Member("total").AsInt()).View());
+		out.Append("; nodes under ");
+		out.AppendDouble(minPercent, 1);
+		out.Append("% left out:\n");
+		FlameNodeText(out, root, 0, depth, (double)root.Member("total").AsInt(), minPercent, time);
+		return out.ToString();
+	}
+
+	static Core::String MessagesText(const Capture& capture, const Serialization::DomNode& args) {
+		const int32 limit = args.Member("limit").IsValid() ? (int32)args.Member("limit").AsInt() : c_ToolMessages;
+		Serialization::DomNode answer = ParseJson(Messages(capture, -1, -1, (int32)args.Member("severity").AsInt(), args.Member("text").AsView(), 0, limit));
+		Serialization::DomNode messages = answer.Member("messages");
+		Core::StringBuilder out;
+		out.AppendInt(answer.Member("total").AsInt());
+		out.Append(" messages match");
+		if (answer.Member("total").AsInt() > messages.Count()) {
+			out.Append(", the first ");
+			out.AppendInt(messages.Count());
+		}
+		out.Append(":\n");
+		const char*[6] severities = { "trace", "debug", "info", "warning", "error", "fatal" };
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			Serialization::DomNode m = messages.At(i);
+			const int64 severity = m.Member("severity").AsInt();
+			out.Append(Instant(m.Member("timeNs").AsInt()).View());
+			out.Append(" [");
+			out.Append(severity >= 0 && severity < 6 ? severities[severity] : "?");
+			out.Append("] ");
+			out.Append(m.Member("thread").AsView());
+			out.Append(": ");
+			out.Append(m.Member("text").AsView());
+			out.AppendByte('\n');
+		}
+		return out.ToString();
+	}
+
+	static Core::String CompareText(const Capture& a, const Capture& b, Core::StringView idA, Core::StringView idB, int32 limit) {
+		Serialization::DomNode c = ParseJson(Compare(a, b, limit));
+		Core::StringBuilder out;
+		out.Append("A = ");
+		out.Append(idA);
+		out.Append(" (");
+		out.Append(Duration(c.Member("durationANs").AsInt()).View());
+		out.Append("), B = ");
+		out.Append(idB);
+		out.Append(" (");
+		out.Append(Duration(c.Member("durationBNs").AsInt()).View());
+		out.Append(")\nA ");
+		FrameLine(out, c.Member("frames").Member("a"));
+		out.Append("B ");
+		FrameLine(out, c.Member("frames").Member("b"));
+		Serialization::DomNode memoryA = c.Member("memory").Member("a");
+		Serialization::DomNode memoryB = c.Member("memory").Member("b");
+		if (memoryA.Member("allocations").AsInt() + memoryB.Member("allocations").AsInt() + memoryA.Member("peakBytes").AsInt() + memoryB.Member("peakBytes").AsInt() + memoryA.Member("collections").AsInt() + memoryB.Member("collections").AsInt() > 0) {
+			TextTable memory;
+			Core::Array<Core::String>* head = memory.Row();
+			const char*[7] titles = { "memory", "allocations", "a frame", "peak", "collections", "paused", "longest" };
+			for (int32 i = 0; i < 7; ++i) head->Push(Core::String(titles[i]));
+			for (int32 side = 0; side < 2; ++side) {
+				Serialization::DomNode m = side == 0 ? memoryA : memoryB;
+				Core::Array<Core::String>* row = memory.Row();
+				row->Push(Core::String(side == 0 ? "A" : "B"));
+				row->Push(Number(m.Member("allocations").AsInt()));
+				row->Push(Decimal(m.Member("allocationsPerFrame").AsFloat()));
+				row->Push(Bytes(m.Member("peakBytes").AsInt()));
+				row->Push(Number(m.Member("collections").AsInt()));
+				row->Push(Duration(m.Member("gcPauseNs").AsInt()));
+				row->Push(Duration(m.Member("gcLongestNs").AsInt()));
+			}
+			out.AppendByte('\n');
+			memory.Write(out);
+		}
+		out.Append("\nZones whose total time changed most (B - A):\n");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		head->Push(Core::String("zone"));
+		head->Push(Core::String("A count"));
+		head->Push(Core::String("A total"));
+		head->Push(Core::String("A mean"));
+		head->Push(Core::String("B count"));
+		head->Push(Core::String("B total"));
+		head->Push(Core::String("B mean"));
+		head->Push(Core::String("change"));
+		Serialization::DomNode zones = c.Member("zones");
+		for (int64 i = 0; i < zones.Count(); ++i) {
+			Serialization::DomNode z = zones.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(z.Member("name").AsView()));
+			row->Push(Number(z.Member("a").Member("count").AsInt()));
+			row->Push(Duration(z.Member("a").Member("totalNs").AsInt()));
+			row->Push(Duration(z.Member("a").Member("meanNs").AsInt()));
+			row->Push(Number(z.Member("b").Member("count").AsInt()));
+			row->Push(Duration(z.Member("b").Member("totalNs").AsInt()));
+			row->Push(Duration(z.Member("b").Member("meanNs").AsInt()));
+			Core::String change = Duration(z.Member("totalChangeNs").AsInt());
+			row->Push(z.Member("totalChangeNs").AsInt() > 0 ? Core::String("+") + change.View() : change);
+		}
+		table.Write(out);
+		return out.ToString();
+	}
+
+	// --- Dispatch -----------------------------------------------------------------------------------------------------
+
+	static ProfWorkspace* ToolWorkspace(ProfilerPlugin* profiler, Core::StringView wsId) {
+		ProfWorkspace* ws = profiler->Workspace(wsId);
+		if (!ws) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("the profiler does not serve this workspace"));
+		return ws;
+	}
+
+	static Core::String NotesOf(ProfilerPlugin* profiler, Core::StringView id) {
+		Threading::LockGuard guard(profiler->m_Lock);
+		CaptureEntry* entry = profiler->Entry(id);
+		return entry ? NotesText(profiler->AnnotationsOf(entry)) : Core::String();
+	}
+
+	static Core::String Resolved(ProfilerPlugin* profiler, Core::StringView wsId, Core::StringView named) {
+		Threading::LockGuard guard(profiler->m_Lock);
+		return ResolveCapture(profiler, ToolWorkspace(profiler, wsId), named);
+	}
+
+	Core::String ToolAnswer(ProfilerPlugin* profiler, Core::StringView wsId, Core::StringView tool, const Serialization::DomNode& args) {
+		if (tool == "list") {
+			Threading::LockGuard guard(profiler->m_Lock);
+			return ListText(profiler, ToolWorkspace(profiler, wsId));
+		}
+		if (tool == "compare") {
+			Core::String idA = Resolved(profiler, wsId, args.Member("a").AsView());
+			Core::String idB = Resolved(profiler, wsId, args.Member("b").AsView());
+			Capture* a = profiler->Loaded(idA.View());
+			Capture* b = profiler->Loaded(idB.View());
+			const int32 limit = args.Member("n").IsValid() ? (int32)args.Member("n").AsInt() : c_ToolZones;
+			Capture* lower = a < b ? a : b;
+			Capture* higher = a < b ? b : a;
+			Threading::LockGuard first(lower->m_Lock);
+			if (a == b) return CompareText(*a, *b, idA.View(), idB.View(), limit);
+			Threading::LockGuard second(higher->m_Lock);
+			return CompareText(*a, *b, idA.View(), idB.View(), limit);
+		}
+		Core::String id = Resolved(profiler, wsId, args.Member("capture").AsView());
+		if (tool == "annotate") return AnnotateText(profiler, id.View(), args);
+		Core::String notes = tool == "summary" ? NotesOf(profiler, id.View()) : Core::String();
+		Capture* capture = profiler->Loaded(id.View());
+		Threading::LockGuard held(capture->m_Lock);
+		if (tool == "summary") return SummaryText(*capture, id.View()) + notes.View() + "\nprofile_diagnose lists the problems that stand out, with where to look closer.\n";
+		if (tool == "locks") return LocksText(*capture, args);
+		if (tool == "top_zones") return TopZonesText(*capture, args);
+		if (tool == "frame") return FrameText(*capture, args);
+		if (tool == "find_zone") return FindZoneText(*capture, args);
+		if (tool == "flame") return FlameText(*capture, args);
+		if (tool == "messages") return MessagesText(*capture, args);
+		if (tool == "leaks") return LeaksText(*capture, args);
+		if (tool == "allocations") return AllocationsText(*capture, args);
+		if (tool == "memory") return MemoryText(*capture, args);
+		if (tool == "plots") return PlotsText(*capture, args);
+		if (tool == "hitches") return HitchesText(*capture, args);
+		if (tool == "threads") return ThreadsText(*capture, args);
+		if (tool == "zone") return ZoneText(*capture, args);
+		if (tool == "timeline") return TimelineText(*capture, args);
+		if (tool == "diagnose") return DiagnoseText(*capture, id.View(), args);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no profiler tool ") + tool).View());
+	}
+}

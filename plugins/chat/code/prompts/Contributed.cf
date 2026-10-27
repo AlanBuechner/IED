@@ -1,0 +1,226 @@
+include "api/Plugin.ch"
+include "Contributed.ch"
+include "aitools/Catalog.ch"
+include "aitools/PluginTools.ch"
+include "aitools/CodeTools.ch"
+include "chats/Roots.ch"
+
+namespace Ai
+{
+	static Core::Array<Core::StringView> SplitPath(Core::StringView path) {
+		Core::Array<Core::StringView> parts;
+		int64 start = 0;
+		for (int64 i = 0; i <= path.ByteLength(); ++i)
+			if (i == path.ByteLength() || path.ByteAt(i) == '/' || path.ByteAt(i) == '\\') {
+				parts.Push(path.Substring(start, i - start));
+				start = i + 1;
+			}
+		return parts;
+	}
+
+	FS::Path EntryPath(const IED::Contribution& given, Core::StringView relative) {
+		if (given.m_Computed && FS::Path(relative).IsAbsolute()) return FS::Path(relative).Normalized();
+		if (relative.IsEmpty() || relative.StartsWith(Core::StringView("/")) || relative.StartsWith(Core::StringView("\\")) || relative.IndexOf(':', 0) >= 0) return FS::Path();
+		for (Core::StringView part : SplitPath(relative))
+			if (part == "..") return FS::Path();
+		return FS::Path(given.m_Folder.View()) / relative;
+	}
+
+	static SkillFolder* Folder(const FS::Path& folder, Core::StringView source, Core::StringView shown, bool readOnly) {
+		SkillFolder* entry = new SkillFolder();
+		entry->m_Folder = folder;
+		entry->m_Source = Core::String(source);
+		entry->m_Shown = Core::String(shown);
+		entry->m_ReadOnly = readOnly;
+		return entry;
+	}
+
+	static Core::String Who(const IED::Contribution& given) { return Core::String("plugin ") + given.m_PluginId.View(); }
+
+	// A folder of a plugin as the file tools name it: plugins:/<id>/<relative>; "" for one outside the plugin (a
+	// computed entry's: the c4 plugin's docs of its toolchain), which plugins:/ does not reach.
+	static Core::String PluginShown(const IED::Contribution& given, Core::StringView relative) {
+		if (given.m_Computed && FS::Path(relative.Trimmed()).IsAbsolute()) return Core::String("");
+		return JoinPath(((Core::String(c_PluginsAlias) + ":/") + given.m_PluginId.View()).View(), relative.Trimmed());
+	}
+
+	// Whether a plugin is the workspace's own (.ied/plugins/), whose files its chats change like the rest of it.
+	static bool WorkspaceOwns(const IED::Workspace& ws, const IED::Contribution& given) {
+		Core::String relative;
+		return IED::RelativeTo(ws.m_Root.View(), given.m_Folder.View(), relative) && relative.View().StartsWith(Core::StringView(".ied/plugins/"));
+	}
+
+	Core::Array<Skill*> SkillsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::Array<SkillFolder*> folders;
+		folders.Push(Folder(FS::Path(ws.m_Root.View()) / ".ied" / "skills", Core::StringView("project"), Core::StringView(".ied/skills"), false));
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("skills"))) {
+			FS::Path folder = EntryPath(given, given.m_Entry.AsView());
+			if (folder.IsEmpty()) problems.Push((Who(given) + ": a skills folder must be inside the plugin: ") + given.m_Entry.AsView());
+			else folders.Push(Folder(folder, Who(given).View(), PluginShown(given, given.m_Entry.AsView()).View(), !WorkspaceOwns(ws, given)));
+		}
+		folders.Push(Folder(FS::Path(IED::AppFolder().View()) / "skills", Core::StringView("app"), Core::StringView(""), false));
+		return ReadSkills(folders, problems);
+	}
+
+	Core::Array<DocsFolder*> DocsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::Array<DocsFolder*> folders;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiDocs"))) {
+			FS::Path folder = EntryPath(given, given.m_Entry.Member("folder").AsView());
+			if (folder.IsEmpty()) {
+				problems.Push((Who(given) + ": a docs folder must be inside the plugin: ") + given.m_Entry.Member("folder").AsView());
+				continue;
+			}
+			DocsFolder* docs = new DocsFolder();
+			docs->m_Id = Core::String(given.m_Entry.Member("id").AsView());
+			docs->m_Title = Core::String(given.m_Entry.Member("title").AsView());
+			docs->m_Folder = folder;
+			docs->m_Shown = PluginShown(given, given.m_Entry.Member("folder").AsView());
+			docs->m_ReadOnly = !WorkspaceOwns(ws, given);
+			folders.Push(docs);
+		}
+		return folders;
+	}
+
+	Core::Array<ErrorHint*> HintsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::Array<ErrorHint*> hints;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiHints"))) {
+			Core::String error;
+			if (!IED::WhenHolds(ws, given.m_Entry.Member("when").AsView(), error)) continue;
+			ErrorHint* hint = new ErrorHint();
+			hint->m_Pattern = Core::Regex(given.m_Entry.Member("match").AsView());
+			if (!hint->m_Pattern.IsValid()) {
+				problems.Push((Who(given) + ": an error hint's match is not a regex: ") + given.m_Entry.Member("match").AsView());
+				continue;
+			}
+			hint->m_Text = Core::String(given.m_Entry.Member("hint").AsView());
+			hints.Push(hint);
+		}
+		return hints;
+	}
+
+	Core::Array<ErrorHint*> CallHints(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return HintsOf(call.m_Context, call.m_Ws, problems);
+	}
+
+	Core::String FailureNotes(const IED::Workspace& ws, Core::StringView tool) {
+		Core::StringBuilder out;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiToolFailureNotes"))) {
+			Core::String error;
+			if (!IED::WhenHolds(ws, given.m_Entry.Member("when").AsView(), error)) continue;
+			Core::StringView text = given.m_Entry.Member("text").AsView().Trimmed();
+			if (text.IsEmpty()) continue;
+			if (out.ByteLength() > 0) out.Append("\n\n");
+			Core::StringView rest = text;
+			for (;;) {
+				const int64 at = rest.IndexOf(Core::StringView("{tool}"));
+				if (at < 0) break;
+				out.Append(rest.Substring(0, at));
+				out.Append(tool);
+				rest = rest.Substring(at + 6, rest.ByteLength() - at - 6);
+			}
+			out.Append(rest);
+		}
+		return out.ToString();
+	}
+
+	static Core::Array<DocsFolder*> CallDocs(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return DocsOf(call.m_Context, call.m_Ws, problems);
+	}
+
+	// --- System-message sections -------------------------------------------------------------------------------------
+
+	static Core::String ReadAll(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	// A section's text: its `text`, its `file` inside the plugin, or what its `function` computes for `ws`; empty with a
+	// problem when the file is not there or the function failed.
+	static Core::String SectionText(const IED::Workspace& ws, const IED::Contribution& given, Core::Array<Core::String>& problems) {
+		Serialization::DomNode section = given.m_Entry;
+		if (section.Member("text").IsValid()) return Core::String(section.Member("text").AsView().Trimmed());
+		if (section.Member("function").IsValid()) {
+			Core::String text;
+			Core::String problem;
+			if (!IED::PluginSection(ws, given.m_PluginId.View(), section.Member("function").AsView(), text, problem)) problems.Push(problem);
+			return Core::String(text.View().Trimmed());
+		}
+		FS::Path file = EntryPath(given, section.Member("file").AsView());
+		Core::String text = file.IsEmpty() ? Core::String() : ReadAll(file);
+		if (text.IsEmpty()) problems.Push(((Who(given) + ": the section ") + section.Member("id").AsView()) + " has no text to give");
+		return Core::String(text.View().Trimmed());
+	}
+
+	static Core::StringView Capped(Core::StringView text, int64 bytes) { return text.ByteLength() <= bytes ? text : text.Substring(0, bytes); }
+
+	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::StringBuilder out;
+		int64 left = c_SectionsMostTokens * c_BytesPerToken;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("systemMessageSections"))) {
+			if (left <= 0) break;
+			Serialization::DomNode section = given.m_Entry;
+			Core::String error;
+			if (!IED::WhenHolds(ws, section.Member("when").AsView(), error)) {
+				if (!error.IsEmpty()) problems.Push(((Who(given) + ": the when of section ") + section.Member("id").AsView()) + " does not parse: " + error.View());
+				continue;
+			}
+			const int64 tokens = section.Member("maxTokens").IsValid() ? section.Member("maxTokens").AsInt() : c_SectionDefaultTokens;
+			Core::String text = SectionText(ws, given, problems);
+			if (text.IsEmpty()) continue;
+			Core::StringView kept = Capped(Capped(text.View(), tokens * c_BytesPerToken), left);
+			out.Append("## ");
+			out.Append(given.m_PluginName.View());
+			out.Append("\n\n");
+			out.Append(kept);
+			out.Append("\n\n");
+			left -= kept.ByteLength();
+		}
+		return Core::String(out.View().Trimmed());
+	}
+
+	// --- Tool calls --------------------------------------------------------------------------------------------------
+
+	void AwaitToolStarts(const IED::Workspace& ws, const bool* cancelled) {
+		if (!ws.m_Trusted) return;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", ws.m_Id.View());
+		json.EndObject();
+		Core::String args = json.ToString();
+		const int64 started = clock_now_ns() / 1000000;
+		for (;;) {
+			IED::Result answer = IED::CallBinding(Core::StringView("mcp.ensure"), args.View());
+			if (!answer.Ok()) return;
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			const int64 waitMs = Serialization::ReadJson(answer.m_Json.View(), *doc).root.Member("waitMs").AsInt();
+			const int64 waited = clock_now_ns() / 1000000 - started;
+			if (waitMs <= 0 || waited >= c_ToolStartMostMs || (cancelled && *cancelled)) return;
+			Threading::Thread::Sleep(c_ToolStartPollMs * 1000000);
+		}
+	}
+
+	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		ToolRegistry* registry = CoreTools();
+		if (!DocsOf(context, ws, problems).IsEmpty()) AddDocsTools(*registry, CallDocs);
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("toolCalls"))) {
+			Serialization::DomNode entry = given.m_Entry;
+			Core::String error;
+			if (!IED::WhenHolds(ws, entry.Member("when").AsView(), error)) continue;
+			Core::StringView name = entry.Member("name").AsView();
+			Core::String who = (Who(given) + ": the tool ") + name;
+			if (registry->Find(name)) {
+				problems.Push(who + " is already a tool");
+				continue;
+			}
+			Core::String problem;
+			ToolSpec* spec = entry.Member("run").IsValid() ? CommandTool(entry, given.m_PluginId.View(), problem) : CodeTool(entry, given.m_PluginId.View(), problem);
+			if (spec) registry->Add(spec);
+			else problems.Push(problem);
+		}
+		for (const Core::String& problem : registry->m_Problems) problems.Push(problem);
+		return registry;
+	}
+}

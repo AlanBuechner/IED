@@ -1,0 +1,255 @@
+include "Tools.ch"
+include "api/Bindings.ch"
+include "api/Tools.ch"
+
+namespace Git
+{
+	void RequireRepos(const GitWorkspace* found) {
+		if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace has no git side");
+		if (found->m_Error == "untrusted") throw IED::RpcError(IED::ErrorCode::Untrusted, "git does not run in an untrusted workspace; ask the owner to trust it");
+		if (!found->m_Error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, found->m_Error.View());
+		if (found->m_Repos.IsEmpty() && found->m_Discover) throw IED::RpcError(IED::ErrorCode::Busy, "the workspace's repositories are still being found; try again in a moment");
+		if (found->m_Repos.IsEmpty())
+			throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace's folder is in no git repository, and the git tools see only the workspace's repositories; for a repository elsewhere run git with shell_run in its folder");
+	}
+
+	GitPlace PlaceOf(const GitRepo* repo) {
+		Core::String within;
+		if (repo->m_Relative == "..") IED::RelativeTo(repo->m_Root.View(), repo->m_WsRoot.View(), within);
+		return PlaceFrom(repo->m_Relative.View(), within.View());
+	}
+
+	static ToolRepo Target(GitRepo* repo) {
+		ToolRepo target;
+		target.m_Repo = repo;
+		target.m_Place = PlaceOf(repo);
+		return target;
+	}
+
+	static Core::String RepoNames(const GitWorkspace* found) {
+		Core::StringBuilder names;
+		for (GitRepo* repo : found->m_Repos) {
+			if (!names.IsEmpty()) names.Append(", ");
+			names.Append(PlaceOf(repo).Name());
+		}
+		return names.ToString();
+	}
+
+	// The repository whose folder holds `path` most closely; null when none does.
+	static GitRepo* Holder(const GitWorkspace* found, Core::StringView path) {
+		GitRepo* best = nullptr;
+		int64 bestLength = -1;
+		for (GitRepo* repo : found->m_Repos) {
+			GitPlace place = PlaceOf(repo);
+			Core::String inside;
+			if (!place.ToRepo(path, inside) || place.m_Folder.View().ByteLength() <= bestLength) continue;
+			best = repo;
+			bestLength = place.m_Folder.View().ByteLength();
+		}
+		return best;
+	}
+
+	static GitRepo* Named(const GitWorkspace* found, Core::StringView asked) {
+		Core::String folder = ToolPath(asked);
+		for (GitRepo* repo : found->m_Repos)
+			if (PlaceOf(repo).m_Folder == folder) return repo;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (((Core::String("no repository at '") + asked) + "'; the workspace's are: ") + RepoNames(found).View()).View());
+	}
+
+	static GitRepo* ByPaths(const GitWorkspace* found, const Core::Array<Core::String>& paths) {
+		GitRepo* repo = Holder(found, paths[0].View());
+		if (!repo) throw IED::RpcError(IED::ErrorCode::NotFound, ((Core::String(paths[0]) + " is in no repository of the workspace; its repositories are: ") + RepoNames(found).View()).View());
+		for (const Core::String& path : paths)
+			if (Holder(found, path.View()) != repo) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String(paths[0]) + " and ") + path.View()) + " are in different repositories; ask for one repository at a time").View());
+		return repo;
+	}
+
+	ToolRepo ToolRepoFor(GitWorkspace* found, const Serialization::DomNode& args, const Core::Array<Core::String>& paths) {
+		RequireRepos(found);
+		if (args.Member("repo").IsValid()) return Target(Named(found, args.Member("repo").AsView()));
+		if (!paths.IsEmpty()) return Target(ByPaths(found, paths));
+		for (GitRepo* repo : found->m_Repos)
+			if (repo->m_Relative.IsEmpty() || repo->m_Relative == "..") return Target(repo);
+		if (found->m_Repos.Count() == 1) return Target(found->m_Repos[0]);
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("the workspace's folder is in no repository of its own; name one with repo: ") + RepoNames(found).View()).View());
+	}
+
+	Core::Array<Core::String> ListArg(const Serialization::DomNode& args, const char* key) {
+		Core::Array<Core::String> items;
+		Serialization::DomNode list = args.Member(key);
+		for (int64 i = 0; i < list.Count(); ++i) items.Push(Core::String(list.At(i).AsView()));
+		return items;
+	}
+
+	Core::Array<Core::String> RepoPaths(const ToolRepo& target, const Core::Array<Core::String>& paths) {
+		Core::Array<Core::String> inside;
+		for (const Core::String& path : paths) {
+			Core::String repoPath;
+			if (!target.m_Place.ToRepo(path.View(), repoPath)) throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String(path) + " is not in the repository ") + target.m_Place.Name()).View());
+			inside.Push(repoPath);
+		}
+		return inside;
+	}
+
+	Core::String NameArg(const Serialization::DomNode& args, const char* key) {
+		Core::StringView name = args.Member(key).AsView().Trimmed();
+		if (name.StartsWith(Core::StringView("-"))) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String(key) + " is not a name git takes: it starts with '-'").View());
+		return Core::String(name);
+	}
+
+	GitRun TryRun(GitPlugin* git, GitRepo* repo, const Core::Array<Core::String>& arguments) {
+		GitCli cli = git->CliFor(repo->m_WsId.View());
+		FS::Path root = repo->m_Root;
+		Threading::UnlockGuard released(git->m_Lock);
+		return cli.Run(root, arguments, c_GitReadTimeoutMs);
+	}
+
+	bool IsUnborn(GitPlugin* git, GitRepo* repo) {
+		return !TryRun(git, repo, GitArgs("rev-parse", "--verify", "--quiet", "HEAD")).Ok();
+	}
+
+	void AddArgs(Core::Array<Core::String>& arguments, const Core::Array<Core::String>& more) {
+		for (const Core::String& each : more) arguments.Push(each);
+	}
+
+	Core::String RepoStatus(GitPlugin* git, GitRepo* repo) {
+		GitRun run = git->RunOrThrow(repo, GitArgs("status", "--porcelain=v2", "-z", "--branch"), c_GitReadTimeoutMs, IED::ErrorCode::Unavailable);
+		return StatusText(ParseStatus(run.m_Output.View()), GitRepoState(repo->m_GitDir).View(), PlaceOf(repo), repo->m_Name.View());
+	}
+
+	Core::String SectionText(const GitWorkspace* found) {
+		if (!found || found->m_Repos.IsEmpty()) return Core::String("");
+		Core::StringBuilder out;
+		if (found->m_Repos.Count() == 1) out.Append("The workspace is in a git repository. ");
+		else {
+			out.Append("The workspace has git repositories at ");
+			out.Append(RepoNames(found).View());
+			out.Append(" (the git_* tools take `repo` for one; a path names its own). ");
+		}
+		out.Append("Read it with git_status, git_diff, git_log, git_show, git_blame and git_branches rather than git in a shell. ");
+		out.Append("Stage, commit, branch or stash (git_stage, git_commit, git_branch, git_stash) only when the owner asks; nothing here pushes.");
+		return out.ToString();
+	}
+
+	static Core::String AnswerTool(GitPlugin* git, GitWorkspace* found, Core::StringView tool, const Serialization::DomNode& args) {
+		if (tool == "section") return SectionText(found);
+		if (tool == "status") return StatusAnswer(git, found, args);
+		if (tool == "diff") return DiffAnswer(git, found, args);
+		if (tool == "log") return LogAnswer(git, found, args);
+		if (tool == "show") return ShowAnswer(git, found, args);
+		if (tool == "blame") return BlameAnswer(git, found, args);
+		if (tool == "branches") return BranchesAnswer(git, found, args);
+		if (tool == "stage") return StageAnswer(git, found, args, true);
+		if (tool == "unstage") return StageAnswer(git, found, args, false);
+		if (tool == "commit") return CommitAnswer(git, found, args);
+		if (tool == "branch") return BranchAnswer(git, found, args);
+		if (tool == "stash") return StashAnswer(git, found, args);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no git tool ") + tool).View());
+	}
+
+	static GitToolPlan PlanTool(GitPlugin* git, GitWorkspace* found, Core::StringView tool, const Serialization::DomNode& args) {
+		if (tool == "stage") return PlanStage(git, found, args, true);
+		if (tool == "unstage") return PlanStage(git, found, args, false);
+		if (tool == "commit") return PlanCommit(git, found, args);
+		if (tool == "branch") return PlanBranch(git, found, args);
+		if (tool == "stash") return PlanStash(git, found, args);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no plan for the git tool ") + tool).View());
+	}
+
+	static void WritePlan(IED::JsonWriter& json, const GitToolPlan& plan) {
+		json.Field("summary", plan.m_Summary.View());
+		json.Field("diff", plan.m_Diff.View());
+		json.IntField("plus", plan.m_Plus);
+		json.IntField("minus", plan.m_Minus);
+	}
+
+	void ProvideQuery(GitPlugin* git) {
+		git->m_Context->Provide(Core::StringView(c_QueryBinding), [git](const Serialization::DomNode& call) -> IED::Result {
+			Threading::LockGuard guard(git->m_Lock);
+			const bool plan = call.Member("plan").AsBool();
+			IED::JsonWriter json;
+			json.BeginObject();
+			try {
+				GitWorkspace* found = git->Find(call.Member("wsId").AsView());
+				if (plan) WritePlan(json, PlanTool(git, found, call.Member("tool").AsView(), call.Member("args")));
+				else json.Field("text", AnswerTool(git, found, call.Member("tool").AsView(), call.Member("args")).View());
+			}
+			catch (IED::RpcError& failed) {
+				if (!plan) return IED::Refusal(failed.m_Message.View());
+				json.Field("error", failed.m_Message.View());
+			}
+			json.EndObject();
+			return IED::Answer(json.View());
+		});
+	}
+
+	// --- The tool functions (the manifest's toolCalls) --------------------------------------------------------------
+
+	static IED::Result Query(const char* tool, Core::StringView wsId, Core::StringView args, bool plan) {
+		IED::JsonWriter call;
+		call.BeginObject();
+		call.Field("wsId", wsId);
+		call.Field("tool", tool);
+		call.RawField("args", args);
+		if (plan) call.BoolField("plan", true);
+		call.EndObject();
+		return IED::CallBinding(Core::StringView(c_QueryBinding), call.View());
+	}
+
+	static Core::String Ask(const char* tool, Core::StringView wsId, Core::StringView args, Core::String& problem) {
+		IED::Result answer = Query(tool, wsId, args, false);
+		if (!answer.Ok()) {
+			problem = answer.m_Error;
+			return Core::String("");
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Core::String(Serialization::ReadJson(answer.m_Json.View(), *doc).root.Member("text").AsView());
+	}
+
+	static IED::ToolResult Through(const char* tool, const IED::ToolCall& call) {
+		Core::String problem;
+		Core::String text = Ask(tool, call.m_Workspace.m_Id.View(), IED::NodeJson(call.m_Args).View(), problem);
+		return problem.IsEmpty() ? IED::ToolText(text.View()) : IED::ToolFailure(problem.View());
+	}
+
+	IED::ToolResult StatusTool(const IED::ToolCall& call) { return Through("status", call); }
+	IED::ToolResult DiffTool(const IED::ToolCall& call) { return Through("diff", call); }
+	IED::ToolResult LogTool(const IED::ToolCall& call) { return Through("log", call); }
+	IED::ToolResult ShowTool(const IED::ToolCall& call) { return Through("show", call); }
+	IED::ToolResult BlameTool(const IED::ToolCall& call) { return Through("blame", call); }
+	IED::ToolResult BranchesTool(const IED::ToolCall& call) { return Through("branches", call); }
+	IED::ToolResult StageTool(const IED::ToolCall& call) { return Through("stage", call); }
+	IED::ToolResult UnstageTool(const IED::ToolCall& call) { return Through("unstage", call); }
+	IED::ToolResult CommitTool(const IED::ToolCall& call) { return Through("commit", call); }
+	IED::ToolResult BranchTool(const IED::ToolCall& call) { return Through("branch", call); }
+	IED::ToolResult StashTool(const IED::ToolCall& call) { return Through("stash", call); }
+
+	// A plan the binding could not give says so on the card, which otherwise shows the call as it is.
+	static IED::ToolPlan PlanThrough(const char* tool, const IED::ToolCall& call) {
+		IED::ToolPlan plan;
+		IED::Result answer = Query(tool, call.m_Workspace.m_Id.View(), IED::NodeJson(call.m_Args).View(), true);
+		if (!answer.Ok()) {
+			plan.m_Summary = (((Core::String("git could not tell what ") + call.m_Name.View()) + " will do: ") + answer.m_Error.View());
+			return plan;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode said = Serialization::ReadJson(answer.m_Json.View(), *doc).root;
+		plan.m_Summary = Core::String(said.Member("summary").AsView());
+		plan.m_Diff = Core::String(said.Member("diff").AsView());
+		plan.m_Plus = said.Member("plus").AsInt();
+		plan.m_Minus = said.Member("minus").AsInt();
+		plan.m_Error = Core::String(said.Member("error").AsView());
+		return plan;
+	}
+
+	IED::ToolPlan StagePlan(const IED::ToolCall& call) { return PlanThrough("stage", call); }
+	IED::ToolPlan UnstagePlan(const IED::ToolCall& call) { return PlanThrough("unstage", call); }
+	IED::ToolPlan CommitPlan(const IED::ToolCall& call) { return PlanThrough("commit", call); }
+	IED::ToolPlan BranchPlan(const IED::ToolCall& call) { return PlanThrough("branch", call); }
+	IED::ToolPlan StashPlan(const IED::ToolCall& call) { return PlanThrough("stash", call); }
+
+	Core::String Section(const IED::Workspace& ws) {
+		Core::String problem;
+		return Ask("section", ws.m_Id.View(), Core::StringView("{}"), problem);
+	}
+}

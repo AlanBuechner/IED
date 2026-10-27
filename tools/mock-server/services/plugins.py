@@ -93,7 +93,7 @@ class Plugins:
 		self.server.docs.languages_changed()
 
 	def language_of(self, path):
-		"""The language the loaded plugins give a file (as src/plugins/languages.ch): a file name wins over an extension,
+		"""The language the loaded plugins give a file (as src/plugins/Languages.ch): a file name wins over an extension,
 		the plugin loaded last wins, extensions fold case."""
 		name = path.replace("\\", "/").rsplit("/", 1)[-1]
 		dot = name.rfind(".")

@@ -1,5 +1,5 @@
 // fileuris.js - files outside the workspace (docs/10 "Files outside the workspace") are documents named by their
-// `file:` URI, in the one form the server gives it (src/lsp/uris.cf CanonicalFileUri): the path with '/' separators and
+// `file:` URI, in the one form the server gives it (src/lsp/Uris.cf CanonicalFileUri): the path with '/' separators and
 // an upper-case drive letter, its UTF-8 bytes percent-encoded but for letters, digits and "-._~/:". Monaco writes the
 // same URI another way ("file:///c%3A/..."), so a tab and a document are always named by this form.
 

@@ -1,0 +1,53 @@
+include "Usage.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	static void WriteSample(JsonWriter& json, const UsageSample& sample) {
+		Core::StringBuilder cpu;
+		cpu.AppendInt(sample.m_CpuTenths / 10);
+		cpu.Append(".");
+		cpu.AppendInt(sample.m_CpuTenths % 10);
+		json.BeginArray();
+		json.Int(sample.m_Ms);
+		json.Raw(cpu.View());
+		json.Int(sample.m_PrivateBytes);
+		json.Int(sample.m_WorkingSetBytes);
+		json.EndArray();
+	}
+
+	void ProgramUsage::Add(const UsageSample& sample) {
+		m_Samples.Push(sample);
+		while (m_Samples.Count() > c_UsageSamplesKept) m_Samples.RemoveAt(0);
+	}
+
+	Core::String ProgramUsage::Json() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("processId", (int64)m_ProcessId);
+		json.Field("name", m_Name.View());
+		json.Key(Core::StringView("samples"));
+		json.BeginArray();
+		for (const UsageSample& sample : m_Samples) WriteSample(json, sample);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ProgramUsage::EventJson(const UsageSample& sample) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("processId", (int64)m_ProcessId);
+		json.Field("name", m_Name.View());
+		json.Key(Core::StringView("sample"));
+		WriteSample(json, sample);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	int64 CpuTenths(int64 cpuNs, int64 wallNs, int32 processors) {
+		if (cpuNs <= 0 || wallNs <= 0 || processors <= 0) return 0;
+		const int64 tenths = cpuNs * 1000 / (wallNs * (int64)processors);
+		return tenths > 1000 ? 1000 : tenths;
+	}
+}

@@ -2,7 +2,7 @@
 // prints ("path:line:col"), gopls as the language server, Delve as the debugger (its DAP mode: `dlv dap` dialing IED's
 // port, adapter type "go", docs/25), the go preset for a folder with a go.mod - Build, Run and Test through the go tool
 // with the `go` matcher, Launch and Test configurations - in a Nuke workspace the go driver in nuke/ with the go.nuke
-// preset (docs/26 section 6), and C4 code (code/go.cf) whose system-message section names the workspace's Go modules.
+// preset (docs/26 section 6), and C4 code (code/Go.cf) whose system-message section names the workspace's Go modules.
 // Its tools (docs/26 "Language tools"): Go itself, gopls and Delve, found on PATH, where go install puts them or in
 // IED's tools folder, checked against the go version go.mod asks for (its toolchain line, else its go line, as a
 // minimum), and installed with one click: Go from go.dev's archive (its SHA-256 pinned for the plugin's version, else

@@ -1,0 +1,85 @@
+// Resources (docs/04 "MCP" Resources): what the workspace's servers list with resources/list, for the composer's @ list,
+// and one read with resources/read when a turn that mentions it starts (the chat's mention kind "mcp").
+
+include "Servers.ch"
+
+namespace Mcp
+{
+	const int64 c_ResourceReadMostMs = 25000;   // within a binding's 30 s
+
+	static int64 ResourcesNowMs() { return clock_now_ns() / 1000000; }
+
+	Core::String McpService::ResourcesJson(Core::StringView wsId) {
+		Ensure(wsId);
+		Threading::LockGuard guard(m_Lock);
+		WorkspaceServers* place = Find(wsId);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("resources"));
+		json.BeginArray();
+		for (int64 i = 0; place && place->m_Ws.m_Trusted && i < place->m_Servers.Count(); ++i) {
+			ServerEntry* entry = place->m_Servers[i];
+			if (!entry->m_Config->m_Enabled) continue;
+			for (McpResource* resource : entry->m_Resources) {
+				json.BeginObject();
+				json.Field("server", entry->m_Config->m_Name.View());
+				json.Field("uri", resource->m_Uri.View());
+				json.Field("name", resource->m_Name.View());
+				if (!resource->m_Title.IsEmpty()) json.Field("title", resource->m_Title.View());
+				if (!resource->m_Description.IsEmpty()) json.Field("description", resource->m_Description.View());
+				if (!resource->m_MimeType.IsEmpty()) json.Field("mimeType", resource->m_MimeType.View());
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpService::ReadResource(Core::StringView wsId, Core::StringView server, Core::StringView uri, Core::String& error) {
+		WorkspaceServers* place = nullptr;
+		ServerEntry* entry = nullptr;
+		{
+			Threading::LockGuard guard(m_Lock);
+			place = Find(wsId);
+			entry = place ? FindEntryLocked(place, server, c_AnyGeneration) : nullptr;
+			if (!entry) error = (Core::String("there is no MCP server ") + server) + " in this workspace";
+			else if (!place->m_Ws.m_Trusted) error = Core::String("the workspace is not trusted: MCP servers start only in a trusted workspace");
+			else if (!entry->m_Config->m_Enabled) error = (Core::String("the MCP server ") + server) + " is turned off";
+		}
+		if (!error.IsEmpty()) return Core::String();
+		bool cancelled = false;
+		if (!AwaitRunning(place, entry, &cancelled, error)) {
+			error = ((Core::String("the MCP server ") + server) + " is not running: ") + error.View();
+			return Core::String();
+		}
+		McpClient* client = nullptr;
+		int64 waitMs = 0;
+		IED::Workspace ws;
+		{
+			Threading::LockGuard guard(m_Lock);
+			client = entry->m_Client;
+			waitMs = entry->m_Config->m_TimeoutSeconds * 1000;
+			ws = place->m_Ws;
+		}
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.Field("uri", uri);
+		params.EndObject();
+		Serialization::DomNode answer = client ? client->Call(Core::StringView("resources/read"), params.View(), (int32)(waitMs < c_ResourceReadMostMs ? waitMs : c_ResourceReadMostMs), &cancelled, error) : Serialization::DomNode();
+		{
+			Threading::LockGuard guard(m_Lock);
+			entry->m_Calls -= 1;
+			entry->m_LastUsedMs = ResourcesNowMs();
+		}
+		if (!answer.IsValid()) {
+			error = ((Core::String(server) + ": resources/read ") + uri + " failed: ") + (client ? error.View() : Core::StringView("it stopped"));
+			return Core::String();
+		}
+		CallContent content = ReadResourceResult(answer);
+		Core::Array<Core::String> paths;
+		for (ContentPart* part : content.m_Parts) paths.Push(part->m_Kind == PartKind::File ? SaveMedia(ws, server, part) : Core::String());
+		Core::String text = CallText(content, paths);
+		return text.IsEmpty() ? Core::String("(the resource is empty)") : text;
+	}
+}

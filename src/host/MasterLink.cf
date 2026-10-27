@@ -1,0 +1,41 @@
+include "MasterLink.ch"
+include "web/Rpc.ch"
+include "web/Params.ch"
+include "Programs.ch"
+
+namespace Ied
+{
+	static bool Exchange(Core::StringView control, Core::StringView method, Core::StringView paramsJson, int32 timeoutMs, Core::String& result, Core::String& problem) {
+		Net::LocalStream stream = Net::LocalStream::Connect(Core::String(control).CStr(), Launch::c_ConnectMs);
+		if (!stream.IsOpen()) {
+			problem = Core::String("the master server does not answer on its pipe");
+			return false;
+		}
+		Launch::Reply reply = Launch::AskWithin(stream, method, paramsJson, timeoutMs);
+		if (!reply.m_Ok) {
+			problem = reply.m_Error;
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(reply.m_Result.View(), *doc);
+		result = read.Ok() ? NodeJson(read.root.Member("result")) : Core::String("null");
+		return true;
+	}
+
+	bool MasterLink::Call(Threading::Mutex* held, Core::StringView method, Core::StringView paramsJson, Core::String& result, Core::String& problem, int32 timeoutMs) {
+		if (m_Control.IsEmpty()) {
+			problem = Core::String("this server has no master");
+			return false;
+		}
+		if (!held) return Exchange(m_Control.View(), method, paramsJson, timeoutMs, result, problem);
+		Threading::UnlockGuard released(*held);
+		return Exchange(m_Control.View(), method, paramsJson, timeoutMs, result, problem);
+	}
+
+	Core::String MasterLink::Ask(Threading::Mutex* held, Core::StringView method, Core::StringView paramsJson) {
+		Core::String result;
+		Core::String problem;
+		if (!Call(held, method, paramsJson, result, problem)) throw RpcError(ErrorCode::Unavailable, problem.View());
+		return result;
+	}
+}

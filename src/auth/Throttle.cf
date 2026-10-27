@@ -1,0 +1,36 @@
+include "Throttle.ch"
+
+namespace Ied
+{
+	int64 LoginThrottle::RetryAfterS(Core::StringView address, int64 nowMs) const {
+		LoginAttempts* entry = nullptr;
+		if (!m_Attempts.TryGet(Core::String(address), entry) || entry->m_LockedUntilMs <= nowMs) return 0;
+		return (entry->m_LockedUntilMs - nowMs + 999) / 1000;
+	}
+
+	static int64 LockoutMs(int32 lockouts) {
+		int64 ms = c_FirstLockoutMs;
+		for (int32 i = 1; i < lockouts && ms < c_LongestLockoutMs; ++i) ms *= 2;
+		return ms < c_LongestLockoutMs ? ms : c_LongestLockoutMs;
+	}
+
+	bool LoginThrottle::Failed(Core::StringView address, int64 nowMs) {
+		Core::String key = Core::String(address);
+		LoginAttempts* entry = nullptr;
+		if (!m_Attempts.TryGet(key, entry)) {
+			entry = new LoginAttempts();
+			m_Attempts.Insert(key, entry);
+		}
+		if (nowMs - entry->m_LastFailureMs > c_LongestLockoutMs) entry->m_Lockouts = 0;
+		entry->m_LastFailureMs = nowMs;
+		while (entry->m_Failures.Count() > 0 && nowMs - entry->m_Failures[0] >= c_FailureWindowMs) entry->m_Failures.RemoveAt(0);
+		entry->m_Failures.Push(nowMs);
+		if (entry->m_Failures.Count() < c_FailuresBeforeLockout) return false;
+		entry->m_Failures.Clear();
+		entry->m_Lockouts += 1;
+		entry->m_LockedUntilMs = nowMs + LockoutMs(entry->m_Lockouts);
+		return true;
+	}
+
+	void LoginThrottle::Succeeded(Core::StringView address) { m_Attempts.Remove(Core::String(address)); }
+}

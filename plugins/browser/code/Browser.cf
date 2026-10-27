@@ -1,0 +1,701 @@
+include "Browser.ch"
+include "Store.ch"
+
+namespace Browser
+{
+	Core::String BrowserTopic(Core::StringView wsId) { return Core::String("browser:") + wsId; }
+
+	static IED::RpcError Unavailable(Core::StringView why) { return IED::RpcError(IED::ErrorCode::Unavailable, why); }
+
+	void Browsers::Start() {
+		Browsers* self = this;
+		m_Context->StartThread([self]() { self->WorkLoop(); });
+	}
+
+	void Browsers::Opened(const IED::Workspace& ws) {
+		Browsers* self = this;
+		Core::String wsId = ws.m_Id;
+		Core::Array<Page*> restored = LoadPages(ws);
+		for (Page* page : restored) m_Context->TopicFrom(page->Topic().View(), [page]() -> Core::String { return page->SnapshotJson(); });
+		m_Context->Atomically([self, restored](IED::Events& events) {
+			for (Page* page : restored) self->m_Pages.Push(page);
+		});
+		m_Context->TopicFrom(BrowserTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->ListJson(wsId.View()); });
+	}
+
+	Core::String Browsers::ListJson(Core::StringView wsId) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("pages"));
+		json.BeginArray();
+		for (Page* page : m_Pages)
+			if (page->m_WsId.View() == wsId) json.Raw(page->SummaryJson().View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Browsers::Changed(IED::Events& events, Page* page) {
+		Core::String summary = page->SummaryJson();
+		events.Publish(BrowserTopic(page->m_WsId.View()).View(), "page.changed", summary.View());
+		events.Publish(page->Topic().View(), "changed", summary.View());
+		TellChat(page, true);
+	}
+
+	// A server without the chat plugin refuses the call, which changes nothing; a chat not loaded yet refuses it too, and
+	// the worker tells it again (FollowChats).
+	void Browsers::TellChat(Page* page, bool open) {
+		if (page->m_ChatId.IsEmpty()) return;
+		Core::String title = open ? (page->m_Title.IsEmpty() ? page->m_Url : page->m_Title) : Core::String();
+		if (title.View() == page->m_ToldChat.View()) return;
+		page->m_ToldChat = title;
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("chatId", page->m_ChatId.View());
+		args.Field("ref", (Core::String("browser:") + page->m_PageId.View()).View());
+		if (open) args.Field("title", title.View());
+		args.Field("kind", Core::StringView("page"));
+		if (open) args.Field("close", Core::StringView(c_ForceCloseCommand));
+		args.BoolField("open", open);
+		args.EndObject();
+		Core::String text = args.ToString();
+		Browsers* self = this;
+		Later([self, page, text, title]() {
+			if (IED::CallBinding(Core::StringView("chat.resource"), text.View()).Ok()) return;
+			IED::HostLock lock(*self->m_Context);
+			if (page->m_ToldChat.View() == title.View()) page->m_ToldChat = Core::String();
+		});
+	}
+
+	Page* Browsers::Find(Core::StringView pageId) {
+		IED::HostLock lock(*m_Context);
+		for (Page* page : m_Pages)
+			if (page->m_PageId.View() == pageId) return page;
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no page ") + pageId).View());
+	}
+
+	// --- The engine and its contexts --------------------------------------------------------------------------------
+
+	static Core::String SettingText(IED::PluginContext* context, const char* key) {
+		Core::String json = context->Setting(Core::StringView(key), Core::StringView(""));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(json.View(), *doc);
+		return parsed.Ok() && parsed.root.Kind() == Serialization::DomKind::String ? Core::String(parsed.root.AsView()) : Core::String();
+	}
+
+	// Under `starting`.
+	void Browsers::EnsureEngine() {
+		if (m_Engine.Running()) return;
+		m_Engine.Stop();
+		m_Contexts.Clear();
+		FS::Path executable = FindBrowser(SettingText(m_Context, "browser.executable").View());
+		if (executable.IsEmpty()) throw Unavailable(Core::StringView("no browser to run pages in: install Microsoft Edge, or set browser.executable"));
+		FS::Path profile = FS::Path(m_Context->StateFolder().View()) / "profile";
+		Core::String error;
+		if (!m_Engine.Start(executable, profile, error)) throw Unavailable(error.View());
+		Browsers* self = this;
+		CdpConnection* cdp = m_Engine.m_Cdp;
+		m_Context->StartThread([self, cdp]() {
+			cdp->ReadLoop([self](const CdpEvent& event) { self->Event(event); }, [self](Core::StringView why) { self->EngineClosed(why); });
+		});
+		cdp->Call(Core::StringView(""), Core::StringView("Target.setDiscoverTargets"), Core::StringView("{\"discover\":true}"));
+		m_Context->Log((Core::String("the browser runs: ") + executable.View()).View());
+	}
+
+	// Under `starting`.
+	Core::String Browsers::ContextFor(Core::StringView wsId) {
+		Core::String known;
+		if (m_Contexts.TryGet(Core::String(wsId), known)) return known;
+		CdpReply made = m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.createBrowserContext"), Core::StringView("{\"disposeOnDetach\":false}"));
+		if (!made.m_Ok) throw Unavailable((Core::String("the browser made no context for the workspace: ") + made.m_Error.View()).View());
+		Core::String id = Core::String(made.m_Result.Member("browserContextId").AsView());
+		m_Contexts.Insert(Core::String(wsId), id);
+		return id;
+	}
+
+	void Browsers::EngineClosed(Core::StringView why) {
+		m_Context->Log((Core::String("the browser stopped: ") + why).View());
+		Core::Array<Page*> loaded;
+		{
+			IED::HostLock lock(*m_Context);
+			for (Page* page : m_Pages)
+				if (page->m_Live) loaded.Push(page);
+		}
+		for (Page* page : loaded) Unloaded(page);
+	}
+
+	// --- Pages ------------------------------------------------------------------------------------------------------
+
+	static bool StartsWithIgnoringCase(Core::StringView text, const char* prefix) {
+		Core::StringView wanted = Core::StringView(prefix);
+		return text.ByteLength() >= wanted.ByteLength() && Http::EqualsIgnoringCase(text.Substring(0, wanted.ByteLength()), wanted);
+	}
+
+	static bool LocalHost(Core::StringView host) {
+		if (StartsWithIgnoringCase(host, "localhost") || host.StartsWith(Core::StringView("[::1]"))) return true;
+		return host.ByteLength() > 0 && host.ByteAt(0) >= '0' && host.ByteAt(0) <= '9';
+	}
+
+	// "javascript:", "mailto:", ... - letters then a colon not followed by a digit ("localhost:3000" is a host and port).
+	static bool HasScheme(Core::StringView url) {
+		int64 i = 0;
+		while (i < url.ByteLength() && ((url.ByteAt(i) >= 'a' && url.ByteAt(i) <= 'z') || (url.ByteAt(i) >= 'A' && url.ByteAt(i) <= 'Z'))) i += 1;
+		if (i == 0 || i >= url.ByteLength() || url.ByteAt(i) != ':') return false;
+		return i + 1 >= url.ByteLength() || url.ByteAt(i + 1) < '0' || url.ByteAt(i + 1) > '9';
+	}
+
+	Core::String Browsers::Allowed(Core::StringView wsId, Core::StringView typed) const {
+		Core::StringView url = typed.Trimmed();
+		if (url.IsEmpty() || url == "about:blank") return Core::String("about:blank");
+		if (StartsWithIgnoringCase(url, "http://") || StartsWithIgnoringCase(url, "https://")) return Core::String(url);
+		if (StartsWithIgnoringCase(url, "file:")) {
+			IED::Workspace ws;
+			Core::String relative;
+			Core::String path = FilePath(url);
+			if (IED::FindWorkspace(wsId, ws) && !path.IsEmpty() && IED::RelativeTo(ws.m_Root.View(), path.View(), relative)) return Core::String(url);
+			throw IED::RpcError(IED::ErrorCode::Forbidden, "only the workspace's own files open in the browser");
+		}
+		if (url.IndexOf(Core::StringView("://")) >= 0 || HasScheme(url))
+			throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("the browser opens http, https and the workspace's files, not ") + url).View());
+		return (Core::String(LocalHost(url) ? "http://" : "https://") + url);
+	}
+
+	Page* Browsers::Open(Core::StringView wsId, Core::StringView url, int32 width, int32 height, int32 scalePercent, Core::StringView opener,
+			Core::StringView chatId) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
+		Page* page = new Page();
+		page->m_PageId = NewPageId();
+		page->m_WsId = Core::String(wsId);
+		page->m_Url = Allowed(wsId, url);
+		page->m_Opener = Core::String(opener);
+		page->m_ChatId = Core::String(chatId);
+		page->m_Width = width > 0 ? width : c_DefaultPageWidth;
+		page->m_Height = height > 0 ? height : c_DefaultPageHeight;
+		page->m_ScalePercent = scalePercent > 0 ? scalePercent : 100;
+		Browsers* self = this;
+		m_Context->TopicFrom(page->Topic().View(), [page]() -> Core::String { return page->SnapshotJson(); });
+		m_Context->Atomically([self, page](IED::Events& events) {
+			self->m_Pages.Push(page);
+			events.Publish(BrowserTopic(page->m_WsId.View()).View(), "page.added", page->SummaryJson().View());
+		});
+		Persist(wsId);
+		Load(page);
+		return page;
+	}
+
+	void Browsers::Load(Page* page) {
+		Threading::LockGuard guard(m_Starting);
+		Core::String url;
+		{
+			IED::HostLock lock(*m_Context);
+			if (page->m_Live) return;
+			url = page->m_Url;
+		}
+		EnsureEngine();
+		Core::String browserContext = ContextFor(page->m_WsId.View());
+		Core::StringBuilder params;
+		params.Append("{\"url\":\"about:blank\",\"browserContextId\":");
+		params.Append(JsonText(browserContext.View()).View());
+		params.AppendByte('}');
+		CdpReply created = m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.createTarget"), params.View());
+		if (!created.m_Ok) throw Unavailable((Core::String("the browser made no page: ") + created.m_Error.View()).View());
+		Attach(page, created.m_Result.Member("targetId").AsView(), url.View());
+	}
+
+	// Under `starting`: the page on the target `targetId` - attached, its domains on, its title reported, its viewport
+	// set - then at `navigateTo` unless that is "" or about:blank.
+	void Browsers::Attach(Page* page, Core::StringView target, Core::StringView navigateTo) {
+		Core::String targetId = Core::String(target);
+		Core::String url = Core::String(navigateTo);
+		CdpReply attached = m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.attachToTarget"),
+			(Core::String("{\"flatten\":true,\"targetId\":") + JsonText(targetId.View()).View() + "}").View());
+		if (!attached.m_Ok) throw Unavailable((Core::String("the browser's page did not attach: ") + attached.m_Error.View()).View());
+		Core::String sessionId = Core::String(attached.m_Result.Member("sessionId").AsView());
+		{
+			Threading::LockGuard routes(m_Frames);
+			m_BySession.At(sessionId) = page;
+			m_ByTarget.At(targetId) = page;
+			page->m_LastUsedNs = clock_now_ns();
+		}
+		Browsers* self = this;
+		m_Context->Atomically([self, page, targetId, sessionId](IED::Events& events) {
+			page->m_TargetId = targetId;
+			page->m_SessionId = sessionId;
+			page->m_Live = true;
+			self->Changed(events, page);
+		});
+		Core::Array<Core::String> domains;
+		domains.Push(Core::String("Page.enable"));
+		domains.Push(Core::String("Runtime.enable"));
+		domains.Push(Core::String("Network.enable"));
+		domains.Push(Core::String("Log.enable"));
+		domains.Push(Core::String("Inspector.enable"));
+		for (const Core::String& domain : domains) m_Engine.m_Cdp->Call(sessionId.View(), domain.View(), Core::StringView(""));
+		m_Engine.m_Cdp->Call(sessionId.View(), Core::StringView("Runtime.addBinding"), Core::StringView("{\"name\":\"__iedPageTitle\"}"));
+		m_Engine.m_Cdp->Call(sessionId.View(), Core::StringView("Page.addScriptToEvaluateOnNewDocument"),
+			(Core::String("{\"source\":") + JsonText(Core::StringView(c_TitleReporter)).View() + "}").View());
+		Viewport(page);
+		if (!url.IsEmpty() && url.View() != "about:blank")
+			m_Engine.m_Cdp->Call(sessionId.View(), Core::StringView("Page.navigate"), (Core::String("{\"url\":") + JsonText(url.View()).View() + "}").View());
+	}
+
+	// A page another page opened (a target="_blank" link, window.open): a page of its own in the same workspace, with
+	// the opener's viewport and opener, told as added with its parent.
+	void Browsers::Adopt(Page* parent, Core::StringView targetId, Core::StringView url) {
+		Page* page = new Page();
+		page->m_PageId = NewPageId();
+		page->m_Url = Core::String(url);
+		{
+			IED::HostLock lock(*m_Context);
+			page->m_WsId = parent->m_WsId;
+			page->m_Opener = parent->m_Opener;
+			page->m_ChatId = parent->m_ChatId;
+			page->m_Parent = parent->m_PageId;
+			page->m_Width = parent->m_Width;
+			page->m_Height = parent->m_Height;
+			page->m_ScalePercent = parent->m_ScalePercent;
+		}
+		Browsers* self = this;
+		m_Context->TopicFrom(page->Topic().View(), [page]() -> Core::String { return page->SnapshotJson(); });
+		m_Context->Atomically([self, page](IED::Events& events) {
+			self->m_Pages.Push(page);
+			events.Publish(BrowserTopic(page->m_WsId.View()).View(), "page.added", page->SummaryJson().View());
+		});
+		Persist(page->m_WsId.View());
+		{
+			Threading::LockGuard guard(m_Starting);
+			if (!m_Engine.Running()) return;
+			Attach(page, targetId, Core::StringView(""));
+		}
+		// It may have loaded before it was attached: its address and title are asked of it.
+		RefreshState(page);
+		Persist(page->m_WsId.View());
+	}
+
+	CdpReply Browsers::Call(Page* page, Core::StringView method, Core::StringView paramsJson) {
+		{
+			Threading::LockGuard guard(m_Frames);
+			page->m_LastUsedNs = clock_now_ns();
+		}
+		Core::String sessionId;
+		{
+			IED::HostLock lock(*m_Context);
+			sessionId = page->m_SessionId;
+		}
+		if (sessionId.IsEmpty() || !m_Engine.Running()) throw Unavailable(Core::StringView("the page is not loaded"));
+		CdpReply reply = m_Engine.m_Cdp->Call(sessionId.View(), method, paramsJson);
+		if (!reply.m_Ok) throw IED::RpcError(IED::ErrorCode::PluginError, (Core::String(method) + ": " + reply.m_Error.View()).View());
+		return reply;
+	}
+
+	void Browsers::Viewport(Page* page) {
+		Core::StringBuilder params;
+		{
+			IED::HostLock lock(*m_Context);
+			params.Append("{\"mobile\":false,\"width\":");
+			params.AppendInt(page->m_Width);
+			params.Append(",\"height\":");
+			params.AppendInt(page->m_Height);
+			params.Append(",\"deviceScaleFactor\":");
+			params.Append(ScaleText(page->m_ScalePercent).View());
+			params.AppendByte('}');
+		}
+		Call(page, Core::StringView("Emulation.setDeviceMetricsOverride"), params.View());
+	}
+
+	bool Browsers::Navigate(Page* page, Core::StringView url) {
+		Core::String target = Allowed(page->m_WsId.View(), url);
+		Load(page);
+		CdpReply reply = Call(page, Core::StringView("Page.navigate"), (Core::String("{\"url\":") + JsonText(target.View()).View() + "}").View());
+		Core::StringView failed = reply.m_Result.Member("errorText").AsView();
+		// A navigation within the document (only the #fragment differs) has no loader: no load event will come.
+		const bool newDocument = failed.IsEmpty() && !reply.m_Result.Member("loaderId").AsView().IsEmpty();
+		if (!failed.IsEmpty()) {
+			ConsoleEntry entry;
+			entry.m_Level = Core::String("error");
+			entry.m_Text = Core::String("navigation to ") + target.View() + " failed: " + failed;
+			entry.m_Url = target;
+			entry.m_Time = clock_now_ns() / 1000000;
+			m_Context->Atomically([page, entry](IED::Events& events) {
+				ConsoleEntry& added = page->AddConsole(entry);
+				events.Publish(page->Topic().View(), "console", (Core::String("{\"entries\":[") + ConsoleJson(added).View() + "]}").View());
+			});
+		}
+		return newDocument;
+	}
+
+	void Browsers::Back(Page* page, int32 step) {
+		Load(page);
+		CdpReply history = Call(page, Core::StringView("Page.getNavigationHistory"), Core::StringView(""));
+		const int64 index = history.m_Result.Member("currentIndex").AsInt() + step;
+		Serialization::DomNode entries = history.m_Result.Member("entries");
+		if (index < 0 || index >= entries.Count()) return;
+		Core::StringBuilder params;
+		params.Append("{\"entryId\":");
+		params.AppendInt(entries.At(index).Member("id").AsInt());
+		params.AppendByte('}');
+		Call(page, Core::StringView("Page.navigateToHistoryEntry"), params.View());
+	}
+
+	void Browsers::Reload(Page* page) {
+		bool wasLive = false;
+		{
+			IED::HostLock lock(*m_Context);
+			wasLive = page->m_Live;
+		}
+		Load(page);
+		if (wasLive) Call(page, Core::StringView("Page.reload"), Core::StringView(""));
+	}
+
+	void Browsers::StopLoading(Page* page) { Call(page, Core::StringView("Page.stopLoading"), Core::StringView("")); }
+
+	void Browsers::Resize(Page* page, int32 width, int32 height, int32 scalePercent) {
+		if (width < 200 || height < 150 || width > 8192 || height > 8192 || scalePercent < 50 || scalePercent > 400)
+			throw IED::RpcError(IED::ErrorCode::BadRequest, "a viewport from 200x150 to 8192x8192 at a scale from 0.5 to 4");
+		Browsers* self = this;
+		m_Context->Atomically([self, page, width, height, scalePercent](IED::Events& events) {
+			page->m_Width = width;
+			page->m_Height = height;
+			page->m_ScalePercent = scalePercent;
+			self->Changed(events, page);
+		});
+		Persist(page->m_WsId.View());
+		bool live = false;
+		{
+			IED::HostLock lock(*m_Context);
+			live = page->m_Live;
+		}
+		if (!live) return;
+		Viewport(page);
+		// The screencast keeps the size it started with: stop it, and a waiting pull starts it again at the new size.
+		bool screencasting = false;
+		{
+			Threading::LockGuard guard(m_Frames);
+			screencasting = page->m_Screencasting;
+		}
+		if (screencasting) {
+			try {
+				Call(page, Core::StringView("Page.stopScreencast"), Core::StringView(""));
+			}
+			catch (IED::RpcError failed) {
+			}
+		}
+		Threading::LockGuard guard(m_Frames);
+		page->m_Screencasting = false;
+		m_FrameArrived.NotifyAll();
+	}
+
+	void Browsers::Close(Page* page) {
+		Core::String targetId;
+		{
+			IED::HostLock lock(*m_Context);
+			targetId = page->m_TargetId;
+		}
+		if (!targetId.IsEmpty() && m_Engine.Running())
+			m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.closeTarget"), (Core::String("{\"targetId\":") + JsonText(targetId.View()).View() + "}").View());
+		{
+			Threading::LockGuard routes(m_Frames);
+			m_BySession.Remove(page->m_SessionId);
+			m_ByTarget.Remove(page->m_TargetId);
+		}
+		Browsers* self = this;
+		m_Context->Atomically([self, page](IED::Events& events) {
+			Core::Array<Page*> kept;
+			for (Page* other : self->m_Pages)
+				if (other != page) kept.Push(other);
+			self->m_Pages = kept;
+			page->m_Live = false;
+			self->TellChat(page, false);
+			events.Publish(page->Topic().View(), "closed", Core::StringView("{}"));
+			events.Publish(BrowserTopic(page->m_WsId.View()).View(), "page.removed", (Core::String("{\"pageId\":") + JsonText(page->m_PageId.View()).View() + "}").View());
+		});
+		m_Context->RemoveTopic(page->Topic().View());
+		Persist(page->m_WsId.View());
+	}
+
+	bool Browsers::CloseByPerson(Page* page) {
+		Core::String chatId;
+		{
+			IED::HostLock lock(*m_Context);
+			chatId = page->m_ChatId;
+		}
+		if (!chatId.IsEmpty()) return false;
+		Close(page);
+		return true;
+	}
+
+	ChatSeen Browsers::SeeChat(Core::StringView chatId) {
+		IED::Result state = IED::CallBinding(Core::StringView("chat.state"), (Core::String("{\"chatId\":") + JsonText(chatId).View() + "}").View());
+		if (!state.Ok()) return ChatSeen::Unknown;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(state.m_Json.View(), *doc);
+		if (!parsed.Ok()) return ChatSeen::Unknown;
+		return parsed.root.Member("deleted").AsBool() ? ChatSeen::Deleted : ChatSeen::There;
+	}
+
+	void Browsers::FollowChats() {
+		Core::Array<Page*> owned;
+		Core::Array<Core::String> chats;
+		{
+			IED::HostLock lock(*m_Context);
+			for (Page* page : m_Pages) {
+				if (page->m_ChatId.IsEmpty()) continue;
+				owned.Push(page);
+				chats.Push(page->m_ChatId);
+			}
+		}
+		for (int64 i = 0; i < owned.Count(); ++i) {
+			const ChatSeen seen = SeeChat(chats[i].View());
+			if (seen == ChatSeen::Deleted) {
+				m_Context->Log(((Core::String("page ") + owned[i]->m_PageId.View()) + " closed: chat " + chats[i].View() + " was deleted").View());
+				Close(owned[i]);
+				continue;
+			}
+			if (seen != ChatSeen::There) continue;
+			IED::HostLock lock(*m_Context);
+			if (owned[i]->m_ToldChat.IsEmpty()) TellChat(owned[i], true);
+		}
+	}
+
+	void Browsers::Unloaded(Page* page) {
+		{
+			Threading::LockGuard routes(m_Frames);
+			m_BySession.Remove(page->m_SessionId);
+			m_ByTarget.Remove(page->m_TargetId);
+			page->m_Screencasting = false;
+			m_FrameArrived.NotifyAll();
+		}
+		Browsers* self = this;
+		m_Context->Atomically([self, page](IED::Events& events) {
+			page->m_Live = false;
+			page->m_Loading = false;
+			page->m_SessionId = Core::String();
+			page->m_TargetId = Core::String();
+			self->Changed(events, page);
+		});
+	}
+
+	void Browsers::Acted(Page* page, Core::StringView actionJson) {
+		Core::String action = Core::String(actionJson);
+		m_Context->Atomically([page, action](IED::Events& events) {
+			page->m_LastAction = action;
+			events.Publish(page->Topic().View(), "action", action.View());
+		});
+	}
+
+	// --- Loads and frames -------------------------------------------------------------------------------------------
+
+	int64 Browsers::Loads(Page* page) {
+		Threading::LockGuard guard(m_Frames);
+		return page->m_Loads;
+	}
+
+	bool Browsers::AwaitLoad(Page* page, int64 loadsBefore, int64 ns) {
+		const int64 deadline = clock_now_ns() + ns;
+		Threading::LockGuard guard(m_Frames);
+		while (page->m_Loads <= loadsBefore) {
+			const int64 left = deadline - clock_now_ns();
+			if (left <= 0) return false;
+			m_FrameArrived.WaitFor(m_Frames, left);
+		}
+		return true;
+	}
+
+	// Starts the page's screencast; false when the page cannot take it now (a navigation is swapping its renderer).
+	bool Browsers::StartScreencast(Page* page) {
+		Core::StringBuilder params;
+		{
+			IED::HostLock lock(*m_Context);
+			params.Append("{\"format\":\"jpeg\",\"quality\":80,\"everyNthFrame\":1,\"maxWidth\":");
+			params.AppendInt(page->m_Width * page->m_ScalePercent / 100);
+			params.Append(",\"maxHeight\":");
+			params.AppendInt(page->m_Height * page->m_ScalePercent / 100);
+			params.AppendByte('}');
+		}
+		try {
+			Call(page, Core::StringView("Page.startScreencast"), params.View());
+			return true;
+		}
+		catch (IED::RpcError failed) {
+			return false;
+		}
+	}
+
+	Core::String Browsers::Frame(Page* page, int64 after) {
+		Load(page);
+		const int64 deadline = clock_now_ns() + c_FrameWaitNs;
+		for (;;) {
+			bool start = false;
+			{
+				Threading::LockGuard guard(m_Frames);
+				page->m_LastPullNs = clock_now_ns();
+				if (page->m_FrameSeq > after || clock_now_ns() >= deadline) break;
+				start = !page->m_Screencasting;
+				page->m_Screencasting = true;
+			}
+			if (start && !StartScreencast(page)) {
+				{
+					Threading::LockGuard guard(m_Frames);
+					page->m_Screencasting = false;
+				}
+				Threading::Thread::Sleep(c_ScreencastRetryNs);
+				continue;
+			}
+			// Until a frame comes, the time is up, or a navigation stops the screencast (then it starts again).
+			Threading::LockGuard guard(m_Frames);
+			while (page->m_FrameSeq <= after && page->m_Screencasting) {
+				const int64 left = deadline - clock_now_ns();
+				if (left <= 0) break;
+				m_FrameArrived.WaitFor(m_Frames, left);
+			}
+		}
+		Threading::LockGuard guard(m_Frames);
+		IED::JsonWriter json;
+		json.BeginObject();
+		if (page->m_FrameSeq <= after) json.IntField("seq", after);
+		else {
+			json.IntField("seq", page->m_FrameSeq);
+			json.Field("mime", "image/jpeg");
+			json.Field("data", page->m_FrameData.View());
+			json.IntField("width", page->m_FrameWidth);
+			json.IntField("height", page->m_FrameHeight);
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- The worker -------------------------------------------------------------------------------------------------
+
+	void Browsers::Later(func<void()> job) {
+		Threading::LockGuard guard(m_Jobs);
+		m_Queue.Push(job);
+		m_JobAdded.NotifyOne();
+	}
+
+	void Browsers::WorkLoop() {
+		for (;;) {
+			Core::Array<func<void()>> ready;
+			{
+				Threading::LockGuard guard(m_Jobs);
+				if (m_Queue.IsEmpty()) m_JobAdded.WaitFor(m_Jobs, c_WorkerTickNs);
+				ready = m_Queue;
+				m_Queue.Clear();
+			}
+			for (func<void()> job : ready) {
+				try {
+					job();
+				}
+				catch (IED::RpcError failed) {
+					m_Context->Log(failed.m_Message.View());
+				}
+			}
+			StopIdleScreencasts();
+			FollowChats();
+			UnloadIdlePages();
+		}
+	}
+
+	int64 Browsers::UnloadAfterNs() {
+		Core::String json = m_Context->Setting(Core::StringView("browser.unloadAfterSeconds"), Core::StringView(""));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(json.View(), *doc);
+		const int64 seconds = parsed.Ok() && parsed.root.Kind() == Serialization::DomKind::Int ? parsed.root.AsInt() : c_DefaultUnloadSeconds;
+		return seconds * 1000000000;
+	}
+
+	void Browsers::UnloadIdlePages() {
+		const int64 after = UnloadAfterNs();
+		if (after <= 0) return;
+		const int64 now = clock_now_ns();
+		Core::Array<Page*> idle;
+		bool anyLoaded = false;
+		{
+			Threading::LockGuard guard(m_Frames);
+			for (Core::KeyValue<Core::String, Page*>& entry : m_BySession) {
+				Page* page = entry.value;
+				const int64 last = page->m_LastPullNs > page->m_LastUsedNs ? page->m_LastPullNs : page->m_LastUsedNs;
+				if (now - last > after) idle.Push(page);
+				else anyLoaded = true;
+			}
+		}
+		for (Page* page : idle) {
+			Core::String targetId;
+			{
+				IED::HostLock lock(*m_Context);
+				targetId = page->m_TargetId;
+			}
+			if (m_Engine.Running() && !targetId.IsEmpty())
+				m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.closeTarget"), (Core::String("{\"targetId\":") + JsonText(targetId.View()).View() + "}").View());
+			Unloaded(page);
+		}
+		if (anyLoaded || !m_Engine.Running()) {
+			m_IdleSinceNs = now;
+			return;
+		}
+		if (m_IdleSinceNs == 0) m_IdleSinceNs = now;
+		if (now - m_IdleSinceNs <= after) return;
+		m_IdleSinceNs = 0;
+		Threading::LockGuard guard(m_Starting);
+		m_Engine.Stop();
+		m_Contexts.Clear();
+		m_Context->Log(Core::StringView("the browser stopped: no page was loaded for browser.unloadAfterSeconds"));
+	}
+
+	void Browsers::StopIdleScreencasts() {
+		Core::Array<Page*> idle;
+		{
+			Threading::LockGuard guard(m_Frames);
+			const int64 now = clock_now_ns();
+			for (Core::KeyValue<Core::String, Page*>& entry : m_BySession)
+				if (entry.value->m_Screencasting && now - entry.value->m_LastPullNs > c_ScreencastIdleNs) {
+					entry.value->m_Screencasting = false;
+					idle.Push(entry.value);
+				}
+		}
+		for (Page* page : idle) {
+			try {
+				Call(page, Core::StringView("Page.stopScreencast"), Core::StringView(""));
+			}
+			catch (IED::RpcError failed) {
+			}
+		}
+	}
+
+	void Browsers::RefreshState(Page* page) {
+		CdpReply history = Call(page, Core::StringView("Page.getNavigationHistory"), Core::StringView(""));
+		const int64 index = history.m_Result.Member("currentIndex").AsInt();
+		const int64 count = history.m_Result.Member("entries").Count();
+		Core::String url = Core::String(history.m_Result.Member("entries").At(index).Member("url").AsView());
+		CdpReply titled = Call(page, Core::StringView("Runtime.evaluate"), Core::StringView("{\"expression\":\"document.title\",\"returnByValue\":true}"));
+		Core::String title = Core::String(titled.m_Result.Member("result").Member("value").AsView());
+		Browsers* self = this;
+		m_Context->Atomically([self, page, index, count, title, url](IED::Events& events) {
+			const bool back = index > 0;
+			const bool forward = index + 1 < count;
+			const bool named = !title.IsEmpty() && title.View() != page->m_Title.View();
+			const bool moved = !url.IsEmpty() && url.View() != page->m_Url.View();
+			if (back == page->m_CanGoBack && forward == page->m_CanGoForward && !named && !moved) return;
+			page->m_CanGoBack = back;
+			page->m_CanGoForward = forward;
+			if (named) page->m_Title = title;
+			if (moved) page->m_Url = url;
+			self->Changed(events, page);
+		});
+	}
+
+	void Browsers::Persist(Core::StringView wsId) {
+		Browsers* self = this;
+		Core::String id = Core::String(wsId);
+		Later([self, id]() {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(id.View(), ws)) return;
+			Core::String json;
+			{
+				IED::HostLock lock(*self->m_Context);
+				json = PagesJson(self->m_Pages, id.View());
+			}
+			SavePages(ws, json.View());
+		});
+	}
+}

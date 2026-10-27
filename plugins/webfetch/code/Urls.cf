@@ -1,0 +1,89 @@
+include "Urls.ch"
+
+namespace WebFetch
+{
+	Core::String SchemeOf(Core::StringView url) {
+		Core::StringBuilder scheme;
+		for (int64 i = 0; i < url.ByteLength(); ++i) {
+			const int32 c = url.ByteAt(i);
+			if (c == ':') return i > 0 ? scheme.ToString() : Core::String();
+			const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+			const bool other = i > 0 && ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.');
+			if (!letter && !other) return Core::String();
+			scheme.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return Core::String();
+	}
+
+	// Where the authority ends after "scheme://" (the path's start); -1 when `url` has no "://".
+	static int64 PathStart(Core::StringView url) {
+		const int64 slashes = url.IndexOf(Core::StringView("://"));
+		if (slashes < 0) return -1;
+		int64 i = slashes + 3;
+		while (i < url.ByteLength() && url.ByteAt(i) != '/' && url.ByteAt(i) != '?' && url.ByteAt(i) != '#') i += 1;
+		return i;
+	}
+
+	// Where the path ends: at the query, the fragment or the end.
+	static int64 PathEnd(Core::StringView url, int64 from) {
+		int64 i = from;
+		while (i < url.ByteLength() && url.ByteAt(i) != '?' && url.ByteAt(i) != '#') i += 1;
+		return i;
+	}
+
+	// "/a/b/../c/./d" -> "/a/c/d" (RFC 3986's dot-segment removal); the query and fragment after the path are kept.
+	static Core::String WithoutDots(Core::StringView path) {
+		const int64 end = PathEnd(path, 0);
+		Core::Array<Core::StringView> kept;
+		int64 at = path.ByteLength() > 0 && path.ByteAt(0) == '/' ? 1 : 0;
+		while (at <= end) {
+			int64 slash = path.IndexOf('/', at);
+			if (slash < 0 || slash > end) slash = end;
+			Core::StringView segment = path.Substring(at, slash - at);
+			const bool last = slash == end;
+			if (segment == "..") {
+				if (!kept.IsEmpty()) kept.Pop();
+				if (last) kept.Push(Core::StringView(""));
+			}
+			else if (segment == ".") {
+				if (last) kept.Push(Core::StringView(""));
+			}
+			else kept.Push(segment);
+			at = slash + 1;
+		}
+		Core::StringBuilder out;
+		for (int64 i = 0; i < kept.Count(); ++i) {
+			out.Append("/");
+			out.Append(kept[i]);
+		}
+		if (out.IsEmpty()) out.Append("/");
+		out.Append(path.Substring(end, path.ByteLength() - end));
+		return out.ToString();
+	}
+
+	Core::String ResolveUrl(Core::StringView base, Core::StringView href) {
+		Core::StringView link = href.Trimmed();
+		if (link.IsEmpty()) return Core::String();
+		Core::String scheme = SchemeOf(link);
+		if (!scheme.IsEmpty()) {
+			if (scheme.View() == "javascript" || scheme.View() == "data" || scheme.View() == "vbscript") return Core::String();
+			return Core::String(link);
+		}
+		const int64 pathStart = PathStart(base);
+		if (pathStart < 0) return Core::String(link);
+		Core::StringView origin = base.Substring(0, pathStart);
+		if (link.StartsWith(Core::StringView("//"))) return SchemeOf(base) + ":" + link;
+		const int64 pathEnd = PathEnd(base, pathStart);
+		if (link.ByteAt(0) == '#') {
+			const int64 hash = base.IndexOf('#', 0);
+			return Core::String(hash < 0 ? base : base.Substring(0, hash)) + link;
+		}
+		if (link.ByteAt(0) == '?') return (Core::String(origin) + (pathEnd > pathStart ? base.Substring(pathStart, pathEnd - pathStart) : Core::StringView("/"))) + link;
+		if (link.ByteAt(0) == '/') return Core::String(origin) + WithoutDots(link).View();
+		Core::StringView path = base.Substring(pathStart, pathEnd - pathStart);
+		int64 lastSlash = path.ByteLength() - 1;
+		while (lastSlash >= 0 && path.ByteAt(lastSlash) != '/') lastSlash -= 1;
+		Core::String folder = lastSlash < 0 ? Core::String("/") : Core::String(path.Substring(0, lastSlash + 1));
+		return Core::String(origin) + WithoutDots((folder + link).View()).View();
+	}
+}

@@ -1,0 +1,104 @@
+// Live objects by type over the collections (docs/16 HeapCensus): in a collected heap a leak is objects still
+// reachable, so the types whose live count keeps rising from one census to the next are what the program keeps.
+include "Investigate.ch"
+
+namespace Profiler
+{
+	const double c_CensusRises = 0.7;           // of the steps between censuses
+	const double c_CensusGrowth = 1.2;
+	const int64 c_CensusLeastGrowthBytes = 65536;
+	const int64 c_CensusLeastGrowthObjects = 500;   // small objects that each hold native memory leak by count, not size
+
+	// One type across the censuses: its live objects, their bytes and the native memory they hold in each (0 where it
+	// had none). What a type holds is both: a small object that owns a buffer is the buffer's size.
+	class TypeSeries
+	{
+		public uint64 m_NameStr;
+		public Core::Array<int64> m_Objects;
+		public Core::Array<int64> m_Bytes;
+		public Core::Array<int64> m_Natives;
+
+		public int64 Held(int64 k) const { return m_Bytes[k] + m_Natives[k]; }
+
+		public int64 Rises() const {
+			int64 rises = 0;
+			for (int64 k = 1; k < m_Bytes.Count(); ++k)
+				if (Held(k) > Held(k - 1)) rises += 1;
+			return rises;
+		}
+
+		public int64 Peak() const {
+			int64 peak = 0;
+			for (int64 k = 0; k < m_Bytes.Count(); ++k)
+				if (Held(k) > peak) peak = Held(k);
+			return peak;
+		}
+
+		public int64 Growth() const { return Held(m_Bytes.Count() - 1) - Held(0); }
+
+		public bool Accumulating() const {
+			const int64 steps = m_Bytes.Count() - 1;
+			const bool grewEnough = Growth() >= c_CensusLeastGrowthBytes || m_Objects.Back() - m_Objects[0] >= c_CensusLeastGrowthObjects;
+			return steps >= 2 && (double)Rises() >= c_CensusRises * (double)steps && (double)Held(steps) >= (double)Held(0) * c_CensusGrowth && grewEnough;
+		}
+	}
+
+	static void GatherTypes(const Core::Array<const HeapCensus*>& chosen, Core::Array<TypeSeries*>& out) {
+		Core::HashMap<uint64, TypeSeries*> seriesOf;
+		for (int64 k = 0; k < chosen.Count(); ++k) {
+			for (const CensusType& type : chosen[k]->m_Types) {
+				TypeSeries* series = nullptr;
+				if (!seriesOf.TryGet(type.m_NameStr, series)) {
+					series = new TypeSeries();
+					series->m_NameStr = type.m_NameStr;
+					series->m_Objects.Resize(chosen.Count());
+					series->m_Bytes.Resize(chosen.Count());
+					series->m_Natives.Resize(chosen.Count());
+					seriesOf.Insert(type.m_NameStr, series);
+					out.Push(series);
+				}
+				series->m_Objects[k] += type.m_Objects;
+				series->m_Bytes[k] += type.m_Bytes;
+				series->m_Natives[k] += type.m_NativeBytes;
+			}
+		}
+		out.SortBy([](TypeSeries* a, TypeSeries* b) -> bool { return a->Growth() != b->Growth() ? a->Growth() > b->Growth() : a->Held(a->m_Bytes.Count() - 1) > b->Held(b->m_Bytes.Count() - 1); });
+	}
+
+	Core::String CensusTrend(const Capture& capture, int64 fromNs, int64 toNs, int32 limit) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		Core::Array<const HeapCensus*> chosen;
+		for (const HeapCensus* census : capture.m_Censuses)
+			if (range.Holds(census->m_T)) chosen.Push(census);
+		Core::Array<TypeSeries*> series;
+		GatherTypes(chosen, series);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("censuses", chosen.Count());
+		json.IntField("firstNs", chosen.IsEmpty() ? -1 : capture.m_Clock.Ns(chosen[0]->m_T));
+		json.IntField("lastNs", chosen.IsEmpty() ? -1 : capture.m_Clock.Ns(chosen.Back()->m_T));
+		json.IntField("typeCount", series.Count());
+		json.BoolField("native", capture.m_CensusNative);
+		json.Key(Core::StringView("types"));
+		json.BeginArray();
+		for (int64 i = 0; i < series.Count() && i < (int64)limit; ++i) {
+			const TypeSeries* s = series[i];
+			json.BeginObject();
+			json.Field("name", capture.Text(s->m_NameStr));
+			json.IntField("firstObjects", s->m_Objects[0]);
+			json.IntField("lastObjects", s->m_Objects.Back());
+			json.IntField("firstBytes", s->m_Bytes[0]);
+			json.IntField("lastBytes", s->m_Bytes.Back());
+			json.IntField("firstNativeBytes", s->m_Natives[0]);
+			json.IntField("lastNativeBytes", s->m_Natives.Back());
+			json.IntField("peakBytes", s->Peak());
+			json.IntField("rises", s->Rises());
+			json.IntField("steps", s->m_Bytes.Count() - 1);
+			json.BoolField("accumulating", s->Accumulating());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

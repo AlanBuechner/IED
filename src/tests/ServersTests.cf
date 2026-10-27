@@ -1,0 +1,66 @@
+// The master and its workspace servers (docs/01 "Processes", docs/10 "Routing", docs/11 "Workspace servers"): the
+// paths the master passes on and what the workspace server is asked for, the close code a browser gets, the secret's
+// comparison, a folder's key, and which app-data files a workspace server reads again.
+
+include "host/Server.ch"
+
+[test("server.servers")]
+class ServersTests {
+	[test("workspace_routes")]
+	public static void TestWorkspaceRoutes() {
+		Core::StringView wsId;
+		Core::StringView rest;
+		assert_true(Ied::WorkspaceRoute(Core::StringView("/w/w2/ws"), wsId, rest), "a workspace's socket");
+		assert_true(wsId == "w2" && rest == "/ws", "its id and the rest");
+		assert_true(Ied::WorkspaceRoute(Core::StringView("/w/w3.1/files/a/b.png"), wsId, rest) && wsId == "w3.1" && rest == "/files/a/b.png", "a file");
+		assert_true(!Ied::WorkspaceRoute(Core::StringView("/ws"), wsId, rest), "the master's own socket");
+		assert_true(!Ied::WorkspaceRoute(Core::StringView("/w//ws"), wsId, rest), "no id");
+		assert_true(!Ied::WorkspaceRoute(Core::StringView("/plugins/x/ui.js"), wsId, rest), "a global plugin's file");
+	}
+
+	[test("upstream_targets")]
+	public static void TestUpstreamTargets() {
+		assert_se("/ws", Ied::UpstreamTarget(Core::StringView("/w/w2/ws"), Core::StringView("/ws"), Core::StringView("")).CStr(), "the socket without the prefix");
+		assert_se("/api/blob/b4", Ied::UpstreamTarget(Core::StringView("/w/w2/api/blob/b4"), Core::StringView("/api/blob/b4"), Core::StringView("")).CStr(), "the API without it");
+		assert_se("/w/w2/files/a.png?v=2", Ied::UpstreamTarget(Core::StringView("/w/w2/files/a.png"), Core::StringView("/files/a.png"), Core::StringView("v=2")).CStr(), "a workspace's path as it is, with its query");
+		assert_true(Ied::ServingWorkspace(Core::StringView("w2.1")) == "w2" && Ied::ServingWorkspace(Core::StringView("w2")) == "w2", "a folder a plugin opened is its server's");
+	}
+
+	[test("close_codes")]
+	public static void TestCloseCodes() {
+		assert_eq((int64)1001, (int64)Ied::TunnelCloseCode(1001), "going away, as said");
+		assert_eq((int64)1008, (int64)Ied::TunnelCloseCode(1008), "auth revoked");
+		assert_eq((int64)1012, (int64)Ied::TunnelCloseCode(1006), "gone without a word: restarting");
+		assert_eq((int64)1012, (int64)Ied::TunnelCloseCode(0), "never opened");
+	}
+
+	[test("secrets_and_keys")]
+	public static void TestSecretsAndKeys() {
+		Core::String secret = Ied::NewSecret();
+		assert_eq((int64)64, secret.ByteLength(), "32 bytes as hex");
+		assert_true(Ied::SameSecret(secret.View(), secret.View()), "itself");
+		Core::String other = Core::String(secret.View().Substring(0, 63)) + "x";
+		assert_true(!Ied::SameSecret(other.View(), secret.View()), "one digit off");
+		assert_true(!Ied::SameSecret(Core::StringView(""), Core::StringView("")), "an empty secret is none");
+		assert_true(!Ied::SameSecret(Core::StringView("ab"), secret.View()), "another length");
+		assert_se(Ied::FolderKey(Core::StringView("C:/Work/Game")).CStr(), Ied::FolderKey(Core::StringView("c:\\work\\game\\")).CStr(), "case and separators do not matter");
+		assert_eq((int64)16, Ied::FolderKey(Core::StringView("C:/Work/Game")).ByteLength(), "16 hex digits");
+	}
+
+	[test("app_data_changes")]
+	public static void TestAppDataChanges() {
+		Ied::ChangeBatch batch;
+		batch.Add(Modified("trust.json"));
+		assert_true(Ied::TouchesTrust(batch) && !Ied::TouchesChoices(batch) && !Ied::TouchesPlugins(batch), "trust.json alone");
+		Ied::ChangeBatch choices;
+		choices.Add(Modified("plugins.json"));
+		assert_true(Ied::TouchesChoices(choices) && !Ied::TouchesPlugins(choices), "plugins.json is the choices, not the plugins folder");
+	}
+
+	private static FS::Change Modified(const char* path) {
+		FS::Change change;
+		change.kind = FS::ChangeKind::Modified;
+		change.path = Core::String(path);
+		return change;
+	}
+}

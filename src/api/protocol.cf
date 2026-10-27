@@ -1,6 +1,0 @@
-include "protocol.ch"
-
-namespace IED
-{
-	Core::String NodeJson(const Serialization::DomNode& node) { return Ied::NodeJson(node); }
-}

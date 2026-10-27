@@ -1,0 +1,147 @@
+include "Projects.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	static const char* c_ProjectsPermission = "workspace.projects";
+
+	// The calling plugin when it may change projects; null with `problem` when not.
+	static Ied::CodeInstance* Manager(Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return nullptr;
+		if (instance->May(Core::StringView(c_ProjectsPermission))) return instance;
+		problem = Core::String("the plugin's manifest does not ask for the permission workspace.projects");
+		return nullptr;
+	}
+
+	// The open workspace `wsId` the plugin may change projects of; "" is none (null, no problem).
+	static bool Target(Ied::CodeInstance* instance, Core::StringView wsId, Ied::Workspace*& ws, Core::String& problem) {
+		ws = nullptr;
+		if (wsId.IsEmpty()) return true;
+		ws = Ied::PermittedWorkspace(instance, wsId, c_ProjectsPermission, problem);
+		return ws != nullptr;
+	}
+
+	static void Told(const Ied::ProjectChange* made, ProjectChange& change) {
+		change.m_WsId = made->m_Ws->m_WsId;
+		change.m_WorkspaceName = made->m_Ws->m_Name;
+		change.m_WorkspaceKind = made->m_Ws->m_Kind;
+		change.m_Path = made->m_Path;
+		change.m_Project = made->m_Project;
+		change.m_TrashId = made->m_TrashId;
+		change.m_Notes = made->m_Notes;
+		change.m_Log = made->m_Log;
+	}
+
+	// Runs `change` with the server lock held; false with the refusal's message when it throws.
+	static bool Changing(Ied::Server* server, func<Ied::ProjectChange*()> change, ProjectChange& told, Core::String& problem) {
+		Ied::ApiLock guard(server);
+		try {
+			Told(change(), told);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+			return false;
+		}
+	}
+
+	bool ProjectTemplates(Core::StringView wsId, Core::Array<ProjectTemplate>& templates, Core::String& location, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws;
+		if (!Target(instance, wsId, ws, problem)) return false;
+		for (Ied::ProjectTemplate* made : server->m_Projects->All()) {
+			ProjectTemplate shown;
+			shown.m_Key = made->m_Key;
+			shown.m_Title = Core::String(made->m_Entry.Member("title").AsView());
+			shown.m_Description = Core::String(made->m_Entry.Member("description").AsView());
+			shown.m_Language = Core::String(made->m_Entry.Member("language").AsView());
+			Serialization::DomNode tags = made->m_Entry.Member("tags");
+			for (int64 i = 0; i < tags.Count(); ++i) shown.m_Tags.Push(Core::String(tags.At(i).AsView()));
+			shown.m_CanAdd = Ied::TemplateCanAdd(made, ws);
+			templates.Push(shown);
+		}
+		location = Ied::DefaultProjectLocation(server);
+		return true;
+	}
+
+	bool CreateProject(Core::StringView key, Core::StringView name, Core::StringView location, Core::StringView intoWsId, ProjectChange& change, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Core::String wanted = Core::String(key);
+		Core::String called = Core::String(name);
+		Core::String folder = Core::String(location);
+		Core::String into = Core::String(intoWsId);
+		return Changing(server, [server, instance, wanted, called, folder, into, &problem]() -> Ied::ProjectChange* {
+			Ied::Workspace* ws;
+			if (!Target(instance, into.View(), ws, problem)) throw Ied::RpcError(Ied::ErrorCode::Forbidden, problem.View());
+			return server->m_Projects->Create(wanted.View(), called.View(), folder.View(), ws);
+		}, change, problem);
+	}
+
+	static Ied::ProjectOptions Options(const ProjectChoices& choices) {
+		Ied::ProjectOptions options;
+		options.m_Name = choices.m_Name;
+		options.m_Kind = choices.m_Kind;
+		options.m_Language = choices.m_Language;
+		return options;
+	}
+
+	bool ImportFolder(Core::StringView folder, const ProjectChoices& choices, ProjectChange& change, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		if (!FS::Path(folder).IsAbsolute()) {
+			problem = Core::String("give the folder as a full path");
+			return false;
+		}
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		FS::Path path = FS::Path(folder);
+		Ied::ProjectOptions options = Options(choices);
+		return Changing(server, [server, path, options]() -> Ied::ProjectChange* { return server->m_ProjectManager->Import(path, options); }, change, problem);
+	}
+
+	bool AddProject(Core::StringView wsId, Core::StringView folder, const ProjectChoices& choices, ProjectChange& change, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Core::String id = Core::String(wsId);
+		Core::String relative = Core::String(folder);
+		Ied::ProjectOptions options = Options(choices);
+		return Changing(server, [server, instance, id, relative, options, &problem]() -> Ied::ProjectChange* {
+			Ied::Workspace* ws;
+			if (!Target(instance, id.View(), ws, problem) || !ws) throw Ied::RpcError(Ied::ErrorCode::NotFound, problem.View());
+			return server->m_ProjectManager->Add(ws, relative.View(), options);
+		}, change, problem);
+	}
+
+	bool RemoveProject(Core::StringView wsId, Core::StringView name, bool deleteFiles, ProjectChange& change, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Core::String id = Core::String(wsId);
+		Core::String project = Core::String(name);
+		return Changing(server, [server, instance, id, project, deleteFiles, &problem]() -> Ied::ProjectChange* {
+			Ied::Workspace* ws;
+			if (!Target(instance, id.View(), ws, problem) || !ws) throw Ied::RpcError(Ied::ErrorCode::NotFound, problem.View());
+			return server->m_ProjectManager->Remove(ws, project.View(), deleteFiles);
+		}, change, problem);
+	}
+
+	bool MoveProject(Core::StringView wsId, Core::StringView name, Core::StringView to, ProjectChange& change, Core::String& problem) {
+		Ied::CodeInstance* instance = Manager(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Core::String id = Core::String(wsId);
+		Core::String project = Core::String(name);
+		Core::String target = Core::String(to);
+		return Changing(server, [server, instance, id, project, target, &problem]() -> Ied::ProjectChange* {
+			Ied::Workspace* ws;
+			if (!Target(instance, id.View(), ws, problem) || !ws) throw Ied::RpcError(Ied::ErrorCode::NotFound, problem.View());
+			return server->m_ProjectManager->Move(ws, project.View(), target.View());
+		}, change, problem);
+	}
+}

@@ -1,0 +1,70 @@
+// gpu_capture (docs/13 T-GPU-1): the startup project built and launched for capture as Launch for Capture does it, the
+// next frame captured once the program's capture library answers, the program stopped, and the new capture's events.
+include "ToolText.ch"
+
+namespace GpuDebug
+{
+	const int64 c_ConnectWaitMs = 120000;
+	const int64 c_CaptureWaitMs = 60000;
+	const int64 c_ExitWaitMs = 10000;
+	const int64 c_CapturePollNs = 100000000;
+
+	static bool Exited(Target* target) { return target->m_State.View() == "exited"; }
+
+	static bool Answering(Target* target) { return target->m_Connected && !target->m_Apis.IsEmpty() && target->m_Apis.View() != "[]"; }
+
+	static void Stop(Target* target) {
+		if (target->m_Child) target->m_Child->Kill();
+		const int64 deadline = NowMs() + c_ExitWaitMs;
+		while (!Exited(target) && NowMs() < deadline) Threading::Thread::Sleep(c_CapturePollNs);
+	}
+
+	// The library's capture written at `path`, after the rescan the captured event started.
+	static Core::String CaptureIdOf(Debugger* debugger, Core::StringView wsId, Core::StringView path) {
+		Core::String file = Core::String(FS::Path(path).FileName());
+		Core::String id = file.View().EndsWith(Core::StringView(".flash")) ? Core::String(file.View().Substring(0, file.View().ByteLength() - 6)) : file;
+		debugger->Rescan(wsId);
+		return id;
+	}
+
+	Core::String CaptureText(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		Target* target = LaunchConfigured(debugger, ws, args.Member("project").AsView(), args.Member("configuration").AsView());
+		int64 deadline = NowMs() + c_ConnectWaitMs;
+		while (!Answering(target) && !Exited(target) && NowMs() < deadline) Threading::Thread::Sleep(c_CapturePollNs);
+		if (!Answering(target)) {
+			const bool exited = Exited(target);
+			Stop(target);
+			if (exited) {
+				Core::StringBuilder why;
+				why.Append("the program exited (code ");
+				why.AppendInt(target->m_ExitCode);
+				why.Append(") before its capture library answered");
+				throw IED::RpcError(IED::ErrorCode::Unavailable, why.View());
+			}
+			throw IED::RpcError(IED::ErrorCode::Timeout, Core::StringView("the program's capture library did not answer within 2 minutes: a D3D12 program loads it through Gpu::Capture (C4) or flashbang_app.h; a Vulkan program gets it from the loader"));
+		}
+		Core::String before = target->m_LastCapture;
+		RequestCapture(debugger, target, 1);
+		deadline = NowMs() + c_CaptureWaitMs;
+		while (target->m_LastCapture == before && target->m_Capturing && !Exited(target) && NowMs() < deadline) Threading::Thread::Sleep(c_CapturePollNs);
+		Core::String path = target->m_LastCapture;
+		Stop(target);
+		if (path == before) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("no frame was captured: the program stopped presenting, or its capture failed (Output > GPU says why)"));
+		Core::String id = CaptureIdOf(debugger, ws.m_Id.View(), path.View());
+		IED::JsonWriter named;
+		named.BeginObject();
+		named.Field("capture", id.View());
+		named.IntField("max", 80);
+		named.EndObject();
+		Serialization::DomNode asked = ParseAnswer(named.View());
+		ToolCapture capture = OpenNamed(debugger, ws, asked);
+		Core::StringBuilder text;
+		text.Append("Captured ");
+		text.Append(id.View());
+		text.Append(" from ");
+		text.Append(target->m_Name.View());
+		text.Append("; the program is stopped.\n");
+		text.Append(EventsText(debugger, capture, asked).View());
+		return text.ToString();
+	}
+}

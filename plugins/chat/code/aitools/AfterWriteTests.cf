@@ -1,0 +1,39 @@
+// afterwrite: the indentation a formatting request names, and what a write's result says of its language server's
+// diagnostics (docs/24 "After an AI edit").
+
+include "AfterWrite.ch"
+
+[test("server.ai.afterwrite")]
+class AfterWriteTests {
+	[test("indentation")]
+	public static void TestIndentation() {
+		int64 tabSize = 0;
+		bool spaces = true;
+		Ai::IndentationOf(Core::StringView("a\n\tb\n\t\tc\n"), tabSize, spaces);
+		assert_true(!spaces, "tabs");
+		assert_eq((int64)4, tabSize, "four wide");
+		Ai::IndentationOf(Core::StringView("a\n  b\n    c\n  /*\n   * d\n   */\n"), tabSize, spaces);
+		assert_true(spaces, "spaces");
+		assert_eq((int64)2, tabSize, "two wide: a comment's ' * ' does not count");
+		Ai::IndentationOf(Core::StringView("flat\n\n"), tabSize, spaces);
+		assert_true(!spaces, "no indentation: tabs, the default");
+		assert_eq((int64)4, tabSize, "four wide");
+	}
+
+	[test("fresh")]
+	public static void TestFresh() {
+		Core::String said = Ai::DiagnosticsSaid(Core::StringView("{\"profile\": \"c4\", \"label\": \"C4LSP\", \"state\": \"fresh\", \"items\": [{\"range\": {\"start\": {\"line\": 2, \"character\": 4}}, \"severity\": 1, \"message\": \"no type Foo\\nmore\"}, {\"range\": {\"start\": {\"line\": 9, \"character\": 0}}, \"severity\": 2, \"message\": \"unused\"}], \"elsewhere\": [{\"path\": \"src/b.cf\", \"errors\": 2, \"warnings\": 1}], \"elsewhereFiles\": 3}"), 1500);
+		assert_true(said.View().StartsWith(Core::StringView("Language server (C4LSP): 1 error, 1 warning in this file - what the code says now, not a failure of this call")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView("\n  line 3:5: error: no type Foo\n  line 10:1: warning: unused\n")), said.CStr());
+		assert_true(said.View().EndsWith(Core::StringView("Other files it finds problems in: src/b.cf (2 errors, 1 warning), and 2 more files.")), said.CStr());
+		Core::String clean = Ai::DiagnosticsSaid(Core::StringView("{\"profile\": \"c4\", \"label\": \"C4LSP\", \"state\": \"fresh\", \"items\": [], \"elsewhere\": []}"), 1500);
+		assert_se("Language server (C4LSP): no problems in this file.", clean.CStr(), "nothing to say");
+	}
+
+	[test("not_yet")]
+	public static void TestNotYet() {
+		assert_se("Language server (Fake): nothing new about this file within 600 ms; problems_list has its diagnostics once it gives them.", Ai::DiagnosticsSaid(Core::StringView("{\"profile\": \"f\", \"label\": \"Fake\", \"state\": \"stale\", \"items\": []}"), 600).CStr(), "stale");
+		assert_true(Ai::DiagnosticsSaid(Core::StringView("{\"profile\": \"f\", \"label\": \"Fake\", \"state\": \"starting\"}"), 600).View().Contains(Core::StringView("still starting")), "starting");
+		assert_se("", Ai::DiagnosticsSaid(Core::StringView("{\"profile\": null}"), 600).CStr(), "no server serves it");
+	}
+}

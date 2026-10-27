@@ -1,0 +1,86 @@
+include "Capture.ch"
+include "api/Workspace.ch"
+
+namespace Profiler
+{
+	ZoneExtra* ThreadTrack::InnermostExtra() {
+		if (m_Open.IsEmpty()) return nullptr;
+		const OpenZone& zone = m_Open.Back();
+		ZoneLevel* level = m_Levels[zone.m_Depth];
+		if (level->m_Extras[zone.m_Index] == 0) {
+			ZoneExtra extra;
+			m_Extras.Push(extra);
+			level->m_Extras[zone.m_Index] = (uint32)m_Extras.Count();
+		}
+		return &m_Extras[(int64)level->m_Extras[zone.m_Index] - 1];
+	}
+
+	uint64 ThreadTrack::NameAt(int64 t) const {
+		const int64 i = m_NameTimes.UpperBound(t);
+		return i == 0 ? (m_NameStrs.IsEmpty() ? 0 : m_NameStrs[0]) : m_NameStrs[i - 1];
+	}
+
+	int64 FrameSet::Completed() const {
+		if (m_Ends.IsEmpty()) return 0;
+		return m_Ends.Back() == c_Open ? m_Ends.Count() - 1 : m_Ends.Count();
+	}
+
+	bool GpuContext::ToCpu(int64 gpuTicks, const Clock& clock, int64 cpuFreqHz, int64& out) const {
+		if (m_CalibrationGpu.IsEmpty() || cpuFreqHz <= 0) return false;
+		int64 nearest = m_CalibrationGpu.UpperBound(gpuTicks);
+		if (nearest > 0) nearest -= 1;
+		const double gpuNs = (double)(gpuTicks - m_CalibrationGpu[nearest]) * m_PeriodPs / 1000.0;
+		const int64 cpuTicks = m_CalibrationCpu[nearest] + (int64)(gpuNs / clock.m_NsPerTick);
+		out = cpuTicks - clock.m_StartTicks;
+		return true;
+	}
+
+	bool GpuContext::Span(const GpuZone& zone, const Clock& clock, int64 cpuFreqHz, int64& begin, int64& end) const {
+		if (zone.m_GpuBegin == c_NoGpuTime || zone.m_GpuEnd == c_NoGpuTime) return false;
+		return ToCpu(zone.m_GpuBegin, clock, cpuFreqHz, begin) && ToCpu(zone.m_GpuEnd, clock, cpuFreqHz, end);
+	}
+
+	Core::StringView Capture::Text(uint64 id) const {
+		if (id == 0) return Core::StringView("");
+		const Core::String* text = m_Strings.Find(id);
+		return text ? text->View() : Core::StringView("");
+	}
+
+	Core::String Capture::SourceText(uint64 fileStr) const {
+		Core::String relative;
+		if (!m_SourceRoot.IsEmpty() && IED::RelativeTo(m_SourceRoot.View(), Text(fileStr), relative)) return relative;
+		return Core::String(Text(fileStr));
+	}
+
+	Core::StringView Capture::SiteName(uint64 site) const {
+		const SrcLoc* loc = m_Srclocs.Find(site);
+		if (!loc) return Core::StringView("?");
+		Core::StringView name = Text(loc->m_NameStr);
+		if (name.IsEmpty()) name = Text(loc->m_FunctionStr);
+		return name.IsEmpty() ? Core::StringView("?") : name;
+	}
+
+	Core::StringView Capture::ZoneName(const ThreadTrack* track, const ZoneLevel* level, int64 index) const {
+		const uint32 extra = level->m_Extras[index];
+		if (extra != 0) {
+			const uint64 named = track->m_Extras[(int64)extra - 1].m_NameStr;
+			if (named != 0 && !Text(named).IsEmpty()) return Text(named);
+		}
+		return SiteName((uint64)level->m_Sites[index]);
+	}
+
+	void Capture::Warn(int64 t, Core::StringView text) {
+		m_WarningCount += 1;
+		if (m_Warnings.Count() >= c_MostWarnings) return;
+		WarningRecord warning;
+		warning.m_T = t;
+		warning.m_Text = Core::String(text);
+		m_Warnings.Push(warning);
+	}
+
+	int64 Capture::ZoneCount() const {
+		int64 count = 0;
+		for (const ThreadTrack* track : m_Tracks) count += track->m_Zones;
+		return count;
+	}
+}

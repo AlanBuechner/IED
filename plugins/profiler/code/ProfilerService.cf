@@ -1,0 +1,479 @@
+include "ProfilerService.ch"
+include "analysis/Analysis.ch"
+include "api/Tasks.ch"
+
+namespace Profiler
+{
+	const int32 c_AcceptWaitMs = 500;
+	const int32 c_ReceiveWaitMs = 500;
+	const int64 c_HelloWaitNs = 10000000000;
+	const int64 c_ReceiveBytes = 65536;
+	const int32 c_TokenBytes = 16;
+	const char* c_ConnectVariable = "profiler.connect";
+
+	static Core::String StatusJson(const CaptureEntry* entry, const Capture& capture);
+
+	void ProfilerPlugin::Init(IED::PluginContext* context) {
+		this.m_Context = context;
+	}
+
+	static Core::String Hex(const uint8* bytes, int64 count) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < count; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	static Core::String NewToken() {
+		uint8[16] bytes;
+		Platform::RandomBytes((void*)&bytes[0], c_TokenBytes);
+		return Hex(&bytes[0], c_TokenBytes);
+	}
+
+	Core::String CaptureIdFor(Core::StringView wsId, Core::StringView relativePath) {
+		Core::StringBuilder id;
+		id.Append(wsId);
+		id.AppendByte(':');
+		id.AppendUIntBase(Core::String(relativePath).Hash(), 16, 16);
+		return id.ToString();
+	}
+
+	Core::String CaptureFileName(Core::StringView app, int64 unixNs) {
+		Core::StringBuilder name;
+		for (int64 i = 0; i < app.ByteLength() && name.ByteLength() < 48; ++i) {
+			const char c = app.Data()[i];
+			const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+			name.AppendByte(plain ? (int32)c : (int32)'_');
+		}
+		if (name.ByteLength() == 0) name.Append("capture");
+		const Platform::CalendarTime at = Platform::LocalCalendar(unixNs);
+		name.AppendByte('-');
+		name.AppendIntBase(at.year, 10, 4);
+		name.AppendIntBase(at.month, 10, 2);
+		name.AppendIntBase(at.day, 10, 2);
+		name.AppendByte('-');
+		name.AppendIntBase(at.hour, 10, 2);
+		name.AppendIntBase(at.minute, 10, 2);
+		name.AppendIntBase(at.second, 10, 2);
+		name.Append(c_TraceExtension);
+		return name.ToString();
+	}
+
+	// --- Workspaces and the library ---------------------------------------------------------------------------------
+
+	ProfWorkspace* ProfilerPlugin::Workspace(Core::StringView wsId) const {
+		ProfWorkspace* ws = nullptr;
+		m_Workspaces.TryGet(Core::String(wsId), ws);
+		return ws;
+	}
+
+	ProfWorkspace* ProfilerPlugin::WorkspaceOfToken(Core::StringView token) const {
+		if (token.IsEmpty()) return nullptr;
+		for (const Core::KeyValue<Core::String, ProfWorkspace*>& entry : m_Workspaces)
+			if (entry.value->m_Token.View() == token) return entry.value;
+		return nullptr;
+	}
+
+	CaptureEntry* ProfilerPlugin::Entry(Core::StringView captureId) const {
+		CaptureEntry* entry = nullptr;
+		m_Captures.TryGet(Core::String(captureId), entry);
+		return entry;
+	}
+
+	CaptureEntry* ProfilerPlugin::EntryForPath(ProfWorkspace* ws, Core::StringView absolutePath) {
+		Core::String relative;
+		Core::String kept;
+		if (IED::RelativeTo(ws->m_Workspace.m_LocalState.View(), absolutePath, kept)) relative = Core::String(".ied/local/") + kept.View();
+		else if (!IED::RelativeTo(ws->m_Workspace.m_Root.View(), absolutePath, relative)) relative = Core::String(absolutePath);
+		relative = IED::NormalizePath(relative.View());
+		Core::String id = CaptureIdFor(ws->m_WsId.View(), relative.View());
+		CaptureEntry* entry = Entry(id.View());
+		if (entry) return entry;
+		entry = new CaptureEntry();
+		entry->m_Id = id;
+		entry->m_WsId = ws->m_WsId;
+		entry->m_Path = Core::String(absolutePath);
+		entry->m_Relative = relative;
+		m_Captures.Insert(id, entry);
+		return entry;
+	}
+
+	static bool InLibrary(const ProfWorkspace* ws, const CaptureEntry* entry) {
+		return entry->m_WsId.View() == ws->m_WsId.View() && entry->m_Relative.View().StartsWith(Core::StringView(c_CapturesFolder));
+	}
+
+	void ProfilerPlugin::Rescan(ProfWorkspace* ws) {
+		FS::Path folder = ws->Captures();
+		Core::HashSet<Core::String> present;
+		for (FS::DirectoryEntry& file : FS::Directory(folder.CStr())) {
+			if (file.kind != FS::EntryKind::File || !file.name.View().EndsWith(Core::StringView(c_TraceExtension))) continue;
+			FS::Path path = folder / file.name.View();
+			CaptureEntry* entry = EntryForPath(ws, path.View());
+			present.Add(entry->m_Id);
+			FS::FileInfo info;
+			if (entry->m_Live || !FS::GetInfo(path.CStr(), info)) continue;
+			if (info.size == entry->m_SizeBytes && info.modifiedNs == entry->m_ModifiedNs) continue;
+			entry->m_SizeBytes = info.size;
+			entry->m_ModifiedNs = info.modifiedNs;
+			TraceLayout layout;
+			Core::String problem;
+			entry->m_Metadata = ReadLayout(path.CStr(), layout, problem) ? layout.m_Metadata : Core::String();
+		}
+		Core::Array<Core::String> gone;
+		for (const Core::KeyValue<Core::String, CaptureEntry*>& entry : m_Captures)
+			if (InLibrary(ws, entry.value) && !entry.value->m_Live && !present.Contains(entry.key)) gone.Push(entry.key);
+		for (const Core::String& id : gone) m_Captures.Remove(id);
+	}
+
+	static void WriteEntry(IED::JsonWriter& json, const CaptureEntry* entry) {
+		json.BeginObject();
+		json.Field("captureId", entry->m_Id.View());
+		json.Field("path", entry->m_Relative.View());
+		FS::Path path = FS::Path(entry->m_Path.View());
+		json.Field("name", path.FileName());
+		json.BoolField("live", entry->m_Live);
+		json.BoolField("loaded", entry->m_Capture != nullptr);
+		json.Field("app", entry->m_Live && entry->m_Capture ? entry->m_Capture->m_AppName.View() : Core::StringView(""));
+		json.IntField("sizeBytes", entry->m_SizeBytes);
+		json.IntField("modifiedNs", entry->m_ModifiedNs);
+		json.RawField("metadata", entry->m_Metadata.IsEmpty() ? Core::StringView("null") : entry->m_Metadata.View());
+		json.EndObject();
+	}
+
+	Core::String ProfilerPlugin::LibraryJson(ProfWorkspace* ws) {
+		Core::Array<CaptureEntry*> list;
+		for (const Core::KeyValue<Core::String, CaptureEntry*>& entry : m_Captures)
+			if (entry.value->m_WsId.View() == ws->m_WsId.View()) list.Push(entry.value);
+		list.SortBy([](CaptureEntry* a, CaptureEntry* b) -> bool { return a->m_Live != b->m_Live ? a->m_Live : a->m_ModifiedNs > b->m_ModifiedNs; });
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("captures"));
+		json.BeginArray();
+		for (const CaptureEntry* entry : list) WriteEntry(json, entry);
+		json.EndArray();
+		json.Key(Core::StringView("connect"));
+		json.BeginObject();
+		json.IntField("port", m_Port);
+		json.Field("env", ConnectEnvironment(ws).View());
+		json.Field("folder", c_CapturesFolder);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ProfilerPlugin::ConnectEnvironment(const ProfWorkspace* ws) const {
+		Core::StringBuilder text;
+		text.Append("127.0.0.1:");
+		text.AppendInt(m_Port);
+		text.Append(";token=");
+		text.Append(ws->m_Token.View());
+		return text.ToString();
+	}
+
+	void ProfilerPlugin::PublishLibrary(ProfWorkspace* ws) {
+		Core::String library = LibraryJson(ws);
+		Core::String topic = Core::String("profs:") + ws->m_WsId.View();
+		m_Context->Topic(topic.View(), library.View());
+		m_Context->Publish(topic.View(), "captures.changed", library.View());
+	}
+
+	void ProfilerPlugin::Opened(const IED::Workspace& ws) {
+		Threading::LockGuard guard(m_Lock);
+		if (Workspace(ws.m_Id.View())) return;
+		ProfWorkspace* p = new ProfWorkspace();
+		p->m_WsId = ws.m_Id;
+		p->m_Workspace = ws;
+		p->m_Token = NewToken();
+		m_Workspaces.Insert(ws.m_Id, p);
+		Rescan(p);
+		IED::SetTaskVariable(ws.m_Id.View(), Core::StringView(c_ConnectVariable), ConnectEnvironment(p).View());
+		PublishLibrary(p);
+	}
+
+	// --- Loading ------------------------------------------------------------------------------------------------------
+
+	// The least recently used captures that are neither live nor the one just loaded go, beyond the most kept.
+	static void Unload(ProfilerPlugin* profiler, CaptureEntry* keep) {
+		Core::Array<CaptureEntry*> loaded;
+		for (const Core::KeyValue<Core::String, CaptureEntry*>& entry : profiler->m_Captures)
+			if (entry.value->m_Capture && !entry.value->m_Live && entry.value != keep) loaded.Push(entry.value);
+		loaded.SortBy([](CaptureEntry* a, CaptureEntry* b) -> bool { return a->m_LastUsed < b->m_LastUsed; });
+		for (int64 i = 0; i + (int64)c_MostLoadedCaptures <= loaded.Count(); ++i) loaded[i]->m_Capture = nullptr;
+	}
+
+	Capture* ProfilerPlugin::Loaded(Core::StringView captureId) {
+		Core::String path;
+		Core::String sourceRoot;
+		{
+			Threading::LockGuard guard(m_Lock);
+			CaptureEntry* entry = Entry(captureId);
+			if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
+			m_Clock += 1;
+			entry->m_LastUsed = m_Clock;
+			if (entry->m_Capture) return entry->m_Capture;
+			path = entry->m_Path;
+			const ProfWorkspace* ws = Workspace(entry->m_WsId.View());
+			if (ws) sourceRoot = ws->m_Workspace.m_Root;
+		}
+		Capture* capture = new Capture();
+		TraceLayout layout;
+		Core::String problem;
+		if (!LoadTraceFile(path.CStr(), *capture, layout, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		capture->m_SourceRoot = sourceRoot;
+		Threading::LockGuard guard(m_Lock);
+		CaptureEntry* entry = Entry(captureId);
+		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
+		if (!entry->m_Capture) entry->m_Capture = capture;
+		Unload(this, entry);
+		{
+			Threading::LockGuard held(entry->m_Capture->m_Lock);
+			m_Context->Topic(entry->Topic().View(), StatusJson(entry, *entry->m_Capture).View());
+		}
+		return entry->m_Capture;
+	}
+
+	void ProfilerPlugin::ForgetCapture(Core::StringView captureId) {
+		Threading::LockGuard guard(m_Lock);
+		CaptureEntry* entry = Entry(captureId);
+		if (entry && !entry->m_Live) entry->m_Capture = nullptr;
+	}
+
+	// --- Connections --------------------------------------------------------------------------------------------------
+
+	Core::String MetadataJson(const Capture& capture, Core::StringView ended) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("app", capture.m_AppName.View());
+		json.IntField("pid", (int64)capture.m_Pid);
+		json.IntField("startUnixNs", capture.m_StartUnixNs);
+		json.IntField("durationNs", capture.DurationNs());
+		json.IntField("events", capture.m_Events);
+		json.IntField("zones", capture.ZoneCount());
+		const FrameSet* frames = MainFrameSet(capture);
+		json.IntField("frames", frames ? frames->Completed() : 0);
+		json.IntField("warnings", capture.m_WarningCount);
+		json.Field("ended", ended);
+		json.Key(Core::StringView("annotations"));
+		json.BeginArray();
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String StatusJson(const CaptureEntry* entry, const Capture& capture) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("captureId", entry->m_Id.View());
+		json.BoolField("live", entry->m_Live);
+		json.Field("app", capture.m_AppName.View());
+		json.IntField("durationNs", capture.DurationNs());
+		json.IntField("events", capture.m_Events);
+		json.IntField("zones", capture.ZoneCount());
+		json.IntField("bytes", capture.m_Bytes);
+		json.IntField("warnings", capture.m_WarningCount);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The token a stream's first chunk says hello with; false when the chunk is not a Hello.
+	static bool HelloOf(const uint8* chunk, int64 length, Core::String& token, Core::String& app, int64& startUnixNs) {
+		bool found = false;
+		bool* seen = &found;
+		Core::String* tokenOut = &token;
+		Core::String* appOut = &app;
+		int64* startOut = &startUnixNs;
+		Core::String problem;
+		DecodeChunk(chunk, length, [seen, tokenOut, appOut, startOut](const Event& event) {
+			if (*seen || event.m_Type != EventType::Hello) return;
+			*seen = true;
+			*appOut = Core::String(event.m_Text);
+			*tokenOut = Core::String(event.m_Text2);
+			*startOut = (int64)event.m_Fields[4];
+		}, problem);
+		return found;
+	}
+
+	// Makes the capture's entry and trace file once its Hello names a workspace; null when it names none.
+	static CaptureEntry* Begin(ProfilerPlugin* profiler, Net::TcpStream* stream, Capture* capture, Core::StringView token, Core::StringView app, int64 startUnixNs, TraceWriter& writer) {
+		Threading::LockGuard guard(profiler->m_Lock);
+		ProfWorkspace* ws = profiler->WorkspaceOfToken(token);
+		if (!ws) return nullptr;
+		FS::Path folder = ws->Captures();
+		FS::MakeDirectories(folder.CStr());
+		const int64 when = startUnixNs > 0 ? startUnixNs : Platform::UnixTimeNs();
+		FS::Path path = folder / CaptureFileName(app, when).View();
+		for (int32 n = 2; FS::FileExists(path.CStr()); ++n) {
+			Core::StringBuilder name;
+			name.Append(path.Stem());
+			name.AppendByte('_');
+			name.AppendInt(n);
+			name.Append(c_TraceExtension);
+			path = folder / name.View();
+		}
+		Core::String problem;
+		if (!writer.Open(path.CStr(), problem)) {
+			profiler->m_Context->Log(problem.View());
+			return nullptr;
+		}
+		CaptureEntry* entry = profiler->EntryForPath(ws, path.View());
+		capture->m_SourceRoot = ws->m_Workspace.m_Root;
+		entry->m_Capture = capture;
+		entry->m_Live = true;
+		entry->m_Connection = stream;
+		entry->m_ModifiedNs = when;
+		profiler->m_Context->Topic(entry->Topic().View(), StatusJson(entry, *capture).View());
+		profiler->PublishLibrary(ws);
+		return entry;
+	}
+
+	static void End(ProfilerPlugin* profiler, CaptureEntry* entry, Capture* capture, TraceWriter& writer, Core::StringView why) {
+		Core::String metadata;
+		{
+			Threading::LockGuard held(capture->m_Lock);
+			Finish(*capture);
+			metadata = MetadataJson(*capture, why);
+		}
+		Threading::LockGuard guard(profiler->m_Lock);
+		metadata = MetadataWith(metadata.View(), profiler->AnnotationsOf(entry));
+		writer.Finish(metadata.View());
+		entry->m_Live = false;
+		entry->m_Connection = nullptr;
+		entry->m_Metadata = metadata;
+		FS::FileInfo info;
+		if (FS::GetInfo(entry->m_Path.CStr(), info)) {
+			entry->m_SizeBytes = info.size;
+			entry->m_ModifiedNs = info.modifiedNs;
+		}
+		Core::String status = StatusJson(entry, *capture);
+		profiler->m_Context->Topic(entry->Topic().View(), status.View());
+		profiler->m_Context->Publish(entry->Topic().View(), "ended", status.View());
+		ProfWorkspace* ws = profiler->Workspace(entry->m_WsId.View());
+		if (ws) profiler->PublishLibrary(ws);
+	}
+
+	static void ApplyWhole(Capture* capture, ChunkStream& chunks) {
+		Threading::LockGuard held(capture->m_Lock);
+		const uint8* chunk;
+		int64 length;
+		while (chunks.Next(chunk, length)) ApplyChunk(*capture, chunk, length);
+	}
+
+	void ProfilerPlugin::Serve(Net::TcpStream* stream) {
+		Capture* capture = new Capture();
+		ChunkStream chunks;
+		TraceWriter writer;
+		CaptureEntry* entry = nullptr;
+		Core::Array<uint8> early;
+		Core::Array<uint8> block;
+		block.Resize(c_ReceiveBytes);
+		const int64 deadline = clock_now_ns() + c_HelloWaitNs;
+		Core::StringView why = Core::StringView("closed");
+		while (!m_Stopping) {
+			const int64 got = stream->Receive((void*)block.Data(), c_ReceiveBytes, c_ReceiveWaitMs);
+			if (got == Net::kTimedOut) {
+				if (!entry && clock_now_ns() > deadline) break;
+				continue;
+			}
+			if (got <= 0) break;
+			if (entry) {
+				writer.Append(block.Data(), got);
+				chunks.Feed(block.Data(), got);
+				ApplyWhole(capture, chunks);
+				if (capture->m_Ended) {
+					why = Core::StringView("bye");
+					break;
+				}
+				continue;
+			}
+			early.Append(block.Data(), got);
+			chunks.Feed(block.Data(), got);
+			const uint8* first;
+			int64 length;
+			if (!chunks.Next(first, length)) {
+				if (!chunks.Problem().IsEmpty()) break;
+				continue;
+			}
+			Core::String token;
+			Core::String app;
+			int64 startUnixNs = 0;
+			if (!HelloOf(first, length, token, app, startUnixNs)) break;
+			entry = Begin(this, stream, capture, token.View(), app.View(), startUnixNs, writer);
+			if (!entry) break;
+			writer.Append(early.Data(), early.Count());
+			{
+				Threading::LockGuard held(capture->m_Lock);
+				ApplyChunk(*capture, first, length);
+			}
+			ApplyWhole(capture, chunks);
+			if (capture->m_Ended) {
+				why = Core::StringView("bye");
+				break;
+			}
+		}
+		if (m_Stopping) why = Core::StringView("stopped");
+		if (entry) End(this, entry, capture, writer, why);
+		stream->Close();
+	}
+
+	// --- Threads ------------------------------------------------------------------------------------------------------
+
+	static void AcceptLoop(ProfilerPlugin* profiler) {
+		while (!profiler->m_Stopping) {
+			Net::TcpStream accepted = profiler->m_Listener->Accept(c_AcceptWaitMs);
+			if (!accepted.IsOpen()) continue;
+			Net::TcpStream* stream = new Net::TcpStream(take(accepted));
+			profiler->m_Context->StartThread([profiler, stream]() { profiler->Serve(stream); });
+		}
+	}
+
+	// Publishes each live capture's progress a few times a second.
+	static void Ticker(ProfilerPlugin* profiler) {
+		while (!profiler->m_Stopping) {
+			Threading::Thread::Sleep(c_TickerNs);
+			Threading::LockGuard guard(profiler->m_Lock);
+			for (const Core::KeyValue<Core::String, CaptureEntry*>& item : profiler->m_Captures) {
+				CaptureEntry* entry = item.value;
+				if (!entry->m_Live || !entry->m_Capture) continue;
+				Core::String status;
+				{
+					Threading::LockGuard held(entry->m_Capture->m_Lock);
+					if (entry->m_Capture->m_Events == entry->m_PublishedEvents) continue;
+					entry->m_PublishedEvents = entry->m_Capture->m_Events;
+					status = StatusJson(entry, *entry->m_Capture);
+				}
+				profiler->m_Context->Topic(entry->Topic().View(), status.View());
+				profiler->m_Context->Publish(entry->Topic().View(), "stats", status.View());
+			}
+		}
+	}
+
+	static int32 ConfiguredPort(IED::PluginContext* context) {
+		Core::String text = context->Setting(Core::StringView("profiler.port"), Core::StringView(""));
+		int64 value = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const char c = text.View().Data()[i];
+			if (c < '0' || c > '9') return 0;
+			value = value * 10 + (int64)(c - '0');
+		}
+		return value > 65535 ? 0 : (int32)value;
+	}
+
+	void ProfilerPlugin::Start() {
+		m_Listener = new Net::TcpListener();
+		if (!m_Listener->Listen(Net::Address::Loopback(ConfiguredPort(m_Context))) && !m_Listener->Listen(Net::Address::Loopback(0))) {
+			m_Context->Log((Core::String("the profiler cannot listen: ") + m_Listener->Error()).View());
+			return;
+		}
+		m_Port = m_Listener->LocalAddress().port;
+		ProfilerPlugin* self = this;
+		m_Context->StartThread([self]() { AcceptLoop(self); });
+		m_Context->StartThread([self]() { Ticker(self); });
+	}
+
+	void ProfilerPlugin::Stop() {
+		Threading::LockGuard guard(m_Lock);
+		m_Stopping = true;
+		if (m_Listener) m_Listener->Close();
+		for (const Core::KeyValue<Core::String, CaptureEntry*>& entry : m_Captures)
+			if (entry.value->m_Connection) entry.value->m_Connection->Shutdown(Net::Shutdown::Both);
+	}
+}

@@ -1,0 +1,34 @@
+// The `ied` command line: verbs, options and what is refused (locations and the control channel: launcher/tests).
+
+include "Command.ch"
+
+static Cli::Command Parsed(const char* first, const char* second, bool& ok) {
+	Core::Array<Core::String> arguments;
+	if (first) arguments.Push(Core::String(first));
+	if (second) arguments.Push(Core::String(second));
+	Cli::Command command;
+	Core::String error;
+	ok = Cli::ParseCommand(arguments, command, error);
+	return command;
+}
+
+[test("cli.command")]
+class CommandTests {
+	[test("verbs_and_options")]
+	public static void TestVerbsAndOptions() {
+		bool ok = false;
+		Cli::Command none = Parsed(nullptr, nullptr, ok);
+		assert_true(ok && none.m_Verb == Cli::Verb::Open && none.m_Path.View() == ".", "no arguments opens this folder");
+		assert_true(Parsed("status", nullptr, ok).m_Verb == Cli::Verb::Status && ok, "status");
+		assert_true(Parsed("stop", nullptr, ok).m_Verb == Cli::Verb::Stop && ok, "stop");
+		assert_true(Parsed("url", nullptr, ok).m_Verb == Cli::Verb::Url && ok, "url");
+		assert_true(Parsed("--help", nullptr, ok).m_Verb == Cli::Verb::Help && ok, "help");
+		Cli::Command open = Parsed("--no-browser", "game/main.cf:9", ok);
+		assert_true(ok && open.m_NoBrowser && open.m_Path.View() == "game/main.cf" && open.m_Line == 9, "an option and a location");
+		assert_true(Parsed("--browser", nullptr, ok).m_Browser && ok, "the default browser over the desktop app");
+		Parsed("--bogus", nullptr, ok);
+		assert_true(!ok, "an unknown option");
+		Parsed("a", "b", ok);
+		assert_true(!ok, "two paths");
+	}
+}

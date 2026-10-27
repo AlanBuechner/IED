@@ -1,0 +1,254 @@
+// Memory and counters over time (T-PRF-14, T-PRF-20). A series - a pool's bytes in use, a plot - is read at evenly
+// spaced points; its floor is the lowest it got in each step between them, which for a collected heap is about what
+// stayed alive. A floor that keeps rising is memory the program keeps.
+include "Investigate.ch"
+
+namespace Profiler
+{
+	const int32 c_MostPoints = 100;
+	const int32 c_LongestCollections = 5;
+
+	// A pool's or a plot's samples, read as numbers.
+	struct SeriesView
+	{
+		public const Core::Array<int64>* m_Times;
+		public const Core::Array<int64>* m_Whole;     // a pool's bytes
+		public const Core::Array<double>* m_Real;     // a plot's values
+
+		public int64 Count() const { return m_Times->Count(); }
+		public double At(int64 i) const { return m_Whole ? (double)(*m_Whole)[i] : (*m_Real)[i]; }
+	}
+
+	static SeriesView PoolSeries(const Pool* pool) {
+		SeriesView view;
+		view.m_Times = &pool->m_Times;
+		view.m_Whole = &pool->m_Bytes;
+		view.m_Real = nullptr;
+		return view;
+	}
+
+	static SeriesView PlotSeries(const Plot* plot) {
+		SeriesView view;
+		view.m_Times = &plot->m_Times;
+		view.m_Whole = nullptr;
+		view.m_Real = &plot->m_Values;
+		return view;
+	}
+
+	// The value at `t`: the last sample at or before it, else the first after it.
+	static double ValueAt(const SeriesView& series, int64 t) {
+		const int64 i = series.m_Times->UpperBound(t) - 1;
+		return series.At(i < 0 ? 0 : i);
+	}
+
+	static int32 PointsOf(int32 asked) {
+		return asked < 2 ? 10 : (asked > c_MostPoints ? c_MostPoints : asked);
+	}
+
+	static int64 PointTime(Range range, int32 points, int32 k) {
+		return range.m_Begin + (range.Length() - 1) * (int64)k / (int64)points;
+	}
+
+	static void WriteSeries(IED::JsonWriter& json, const Capture& capture, const SeriesView& series, Range range, int32 points) {
+		Core::Array<double> values;
+		Core::Array<double> floors;
+		for (int32 k = 0; k <= points; ++k) values.Push(ValueAt(series, PointTime(range, points, k)));
+		double peak = values[0];
+		int64 peakAt = range.m_Begin;
+		for (int32 k = 0; k < points; ++k) {
+			const int64 begin = PointTime(range, points, k);
+			const int64 end = PointTime(range, points, k + 1);
+			double floor = values[k] < values[k + 1] ? values[k] : values[k + 1];
+			const int64 stop = series.m_Times->UpperBound(end);
+			for (int64 i = series.m_Times->LowerBound(begin); i < stop; ++i) {
+				const double v = series.At(i);
+				if (v < floor) floor = v;
+				if (v > peak) {
+					peak = v;
+					peakAt = (*series.m_Times)[i];
+				}
+			}
+			floors.Push(floor);
+		}
+		int64 rises = 0;
+		int64 floorRises = 0;
+		int32 highest = 0;
+		for (int32 k = 1; k < points; ++k)
+			if (floors[k] > floors[highest]) highest = k;
+		for (int32 k = 1; k <= points; ++k)
+			if (values[k] > values[k - 1]) rises += 1;
+		for (int32 k = 1; k < points; ++k)
+			if (floors[k] > floors[k - 1]) floorRises += 1;
+		const double seconds = (double)capture.m_Clock.Ns(range.Length()) / 1e9;
+		NumberField(json, "start", values[0], 1);
+		NumberField(json, "end", values[points], 1);
+		NumberField(json, "perSecond", seconds > 0.0 ? (values[points] - values[0]) / seconds : 0.0, 1);
+		json.IntField("rises", rises);
+		json.IntField("steps", points);
+		NumberField(json, "peak", peak, 1);
+		json.IntField("peakNs", capture.m_Clock.Ns(peakAt));
+		NumberField(json, "floorStart", floors[0], 1);
+		NumberField(json, "floorEnd", floors[points - 1], 1);
+		json.IntField("floorRises", floorRises);
+		NumberField(json, "floorPeak", floors[highest], 1);
+		json.IntField("floorPeakNs", capture.m_Clock.Ns(PointTime(range, points, highest)));
+		json.Key(Core::StringView("values"));
+		json.BeginArray();
+		for (int32 k = 0; k <= points; ++k) {
+			json.BeginArray();
+			json.Int(capture.m_Clock.Ns(PointTime(range, points, k)));
+			WriteNumber(json, values[k], 1);
+			json.EndArray();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("floors"));
+		json.BeginArray();
+		for (double floor : floors) WriteNumber(json, floor, 1);
+		json.EndArray();
+	}
+
+	static void WriteCollections(IED::JsonWriter& json, const Capture& capture, Range range) {
+		Core::Array<int64> slow;
+		int64 threshold;
+		int64 median;
+		const FrameSet* set = MainFrameSet(capture);
+		SlowFrames(capture, set, -1, slow, threshold, median);
+		Core::HashMap<int64, bool> isSlow;
+		for (int64 f : slow) isSlow.Insert(f, true);
+		Core::Array<int64> chosen;
+		int64 pause = 0;
+		int64 inSlow = 0;
+		int64 afterCount = 0;
+		int64 afterRises = 0;
+		int64 firstAfter = 0;
+		int64 lastAfter = 0;
+		for (int64 i = 0; i < capture.m_Gcs.Count(); ++i) {
+			const GcRecord& gc = capture.m_Gcs[i];
+			if (gc.m_End == c_Open || !range.Overlaps(gc.m_Begin, gc.m_End + 1)) continue;
+			chosen.Push(i);
+			pause += gc.m_End - gc.m_Begin;
+			if (isSlow.Contains(FrameAt(set, gc.m_Begin))) inSlow += 1;
+			if (gc.m_BytesAfter <= 0) continue;
+			if (afterCount == 0) firstAfter = gc.m_BytesAfter;
+			else if (gc.m_BytesAfter > lastAfter) afterRises += 1;
+			lastAfter = gc.m_BytesAfter;
+			afterCount += 1;
+		}
+		const double seconds = (double)capture.m_Clock.Ns(range.Length()) / 1e9;
+		json.Key(Core::StringView("gc"));
+		json.BeginObject();
+		json.IntField("count", chosen.Count());
+		NumberField(json, "perSecond", seconds > 0.0 ? (double)chosen.Count() / seconds : 0.0, 2);
+		json.IntField("pauseNs", capture.m_Clock.Ns(pause));
+		json.IntField("inSlowFrames", inSlow);
+		json.Key(Core::StringView("heapAfter"));
+		if (afterCount < 2) json.Null();
+		else {
+			json.BeginObject();
+			json.IntField("count", afterCount);
+			json.IntField("first", firstAfter);
+			json.IntField("last", lastAfter);
+			json.IntField("rises", afterRises);
+			json.EndObject();
+		}
+		chosen.SortBy([&capture](const int64& a, const int64& b) -> bool { return capture.m_Gcs[a].m_End - capture.m_Gcs[a].m_Begin > capture.m_Gcs[b].m_End - capture.m_Gcs[b].m_Begin; });
+		json.Key(Core::StringView("longest"));
+		json.BeginArray();
+		for (int64 k = 0; k < chosen.Count() && k < (int64)c_LongestCollections; ++k) {
+			const GcRecord& gc = capture.m_Gcs[chosen[k]];
+			const int64 frame = FrameAt(set, gc.m_Begin);
+			json.BeginObject();
+			json.IntField("startNs", capture.m_Clock.Ns(gc.m_Begin));
+			json.IntField("pauseNs", capture.m_Clock.Ns(gc.m_End - gc.m_Begin));
+			json.IntField("generation", gc.m_Generation);
+			json.IntField("freedBytes", gc.Freed());
+			json.IntField("frame", frame);
+			json.BoolField("slowFrame", isSlow.Contains(frame));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	Core::String MemoryTrend(const Capture& capture, int64 fromNs, int64 toNs, int32 points) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		const int32 n = PointsOf(points);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("fromNs", capture.m_Clock.Ns(range.m_Begin));
+		json.IntField("toNs", capture.m_Clock.Ns(range.m_End > capture.m_LastTicks ? capture.m_LastTicks : range.m_End));
+		json.Key(Core::StringView("series"));
+		json.BeginArray();
+		for (const Pool* pool : capture.m_Pools) {
+			if (pool->m_Times.IsEmpty()) continue;
+			json.BeginObject();
+			json.Field("kind", "pool");
+			Core::StringView name = capture.Text(pool->m_NameStr);
+			json.Field("name", name.IsEmpty() ? Core::StringView("heap") : name);
+			json.IntField("allocs", pool->m_Allocs);
+			json.IntField("frees", pool->m_Frees);
+			WriteSeries(json, capture, PoolSeries(pool), range, n);
+			json.EndObject();
+		}
+		for (const Plot* plot : capture.m_Plots) {
+			if (plot->m_Kind != 1 || plot->m_Times.IsEmpty()) continue;
+			json.BeginObject();
+			json.Field("kind", "plot");
+			json.Field("name", capture.Text(plot->m_NameStr));
+			WriteSeries(json, capture, PlotSeries(plot), range, n);
+			json.EndObject();
+		}
+		json.EndArray();
+		WriteCollections(json, capture, range);
+		const int64 teardown = TeardownAt(capture);
+		json.IntField("teardownNs", teardown < 0 ? -1 : capture.m_Clock.Ns(teardown));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Plots(const Capture& capture, Core::StringView name, int64 fromNs, int64 toNs, int32 points) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		const int32 n = PointsOf(points);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plots"));
+		json.BeginArray();
+		for (const Plot* plot : capture.m_Plots) {
+			if (plot->m_Times.IsEmpty() || (name.IsEmpty() ? plot->m_Kind == 1 : !ContainsNoCase(capture.Text(plot->m_NameStr), name))) continue;
+			const SeriesView series = PlotSeries(plot);
+			double least = 0.0;
+			double most = 0.0;
+			double sum = 0.0;
+			int64 count = 0;
+			const int64 stop = plot->m_Times.LowerBound(range.m_End);
+			for (int64 i = plot->m_Times.LowerBound(range.m_Begin); i < stop; ++i) {
+				const double v = plot->m_Values[i];
+				if (count == 0 || v < least) least = v;
+				if (count == 0 || v > most) most = v;
+				sum += v;
+				count += 1;
+			}
+			json.BeginObject();
+			json.Field("name", capture.Text(plot->m_NameStr));
+			json.IntField("kind", (int64)plot->m_Kind);
+			json.IntField("samples", count);
+			NumberField(json, "min", least, 3);
+			NumberField(json, "mean", count == 0 ? 0.0 : sum / (double)count, 3);
+			NumberField(json, "max", most, 3);
+			NumberField(json, "last", ValueAt(series, range.m_End - 1), 3);
+			json.Key(Core::StringView("values"));
+			json.BeginArray();
+			for (int32 k = 0; k <= n; ++k) {
+				json.BeginArray();
+				json.Int(capture.m_Clock.Ns(PointTime(range, n, k)));
+				WriteNumber(json, ValueAt(series, PointTime(range, n, k)), 3);
+				json.EndArray();
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

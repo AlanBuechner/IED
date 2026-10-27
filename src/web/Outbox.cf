@@ -1,0 +1,150 @@
+include "Outbox.ch"
+
+namespace Ied
+{
+	void Outbox::Append(OutItem* item) {
+		m_Items.Push(item);
+		m_Bytes += item->m_Bytes;
+		if (!item->m_Topic.IsEmpty()) m_TopicBytes.At(item->m_Topic) += item->m_Bytes;
+		m_Ready.NotifyOne();
+	}
+
+	void Outbox::PushControl(Core::StringView text) {
+		Threading::LockGuard guard(m_Mutex);
+		if (m_Closed) return;
+		OutItem* item = new OutItem();
+		item->m_Text = Core::String(text);
+		item->m_Bytes = text.ByteLength();
+		Append(item);
+	}
+
+	Gap Outbox::PushEvent(Core::StringView topic, const Event* event) {
+		Threading::LockGuard guard(m_Mutex);
+		if (m_Closed) return Gap();
+		if (event->m_Mergeable && m_Bytes >= m_CoalesceBytes && MergeIntoTail(topic, event)) return EnforceBudget();
+		OutItem* item = new OutItem();
+		item->m_Text = event->m_Text;
+		item->m_Bytes = event->m_Bytes;
+		item->m_Topic = Core::String(topic);
+		item->m_FirstSeq = event->m_Seq;
+		item->m_Seq = event->m_Seq;
+		item->m_Kind = event->m_Kind;
+		item->m_Mergeable = event->m_Mergeable;
+		item->m_Merge = event->m_Merge;
+		Append(item);
+		return EnforceBudget();
+	}
+
+	bool Outbox::MergeIntoTail(Core::StringView topic, const Event* event) {
+		if (m_Items.IsEmpty()) return false;
+		OutItem* tail = m_Items.Back();
+		if (!tail->m_Mergeable || tail->m_Topic.View() != topic || tail->m_Kind.View() != event->m_Kind.View()) return false;
+		if (tail->m_Bytes + event->m_Bytes > c_MaxMergedBytes) return false;
+		if (tail->m_Merge.m_Field.View() != event->m_Merge.m_Field.View() || tail->m_Merge.m_Rest.View() != event->m_Merge.m_Rest.View()) return false;
+		tail->m_Merge.m_Text.Append(event->m_Merge.m_Text.View());
+		Core::String data = MergeData(tail->m_Merge);
+		Core::String text = EventFrame(topic, event->m_Seq, event->m_Kind.View(), data.View());
+		const int64 grown = text.ByteLength() - tail->m_Bytes;
+		m_Bytes += grown;
+		m_TopicBytes.At(tail->m_Topic) += grown;
+		tail->m_Text = take(text);
+		tail->m_Bytes += grown;
+		tail->m_Seq = event->m_Seq;
+		return true;
+	}
+
+	Core::StringView Outbox::Heaviest() const {
+		Core::StringView heaviest;
+		int64 most = -1;
+		for (const Core::KeyValue<Core::String, int64>& entry : m_TopicBytes)
+			if (entry.value > most) { most = entry.value; heaviest = entry.key.View(); }
+		return heaviest;
+	}
+
+	Gap Outbox::EnforceBudget() {
+		Gap gap;
+		if (m_Bytes <= m_Budget || m_TopicBytes.IsEmpty()) return gap;
+		gap.m_Topic = Core::String(Heaviest());
+		gap.m_First = -1;
+		for (OutItem* item : m_Items) {
+			if (item->m_Topic.View() != gap.m_Topic.View()) continue;
+			if (gap.m_First < 0) gap.m_First = item->m_FirstSeq;
+			gap.m_Last = item->m_Seq;
+		}
+		gap.m_Dropped = true;
+		Remove(gap.m_Topic.View());
+		return gap;
+	}
+
+	void Outbox::Remove(Core::StringView topic) {
+		Core::Queue<OutItem*> kept;
+		for (OutItem* item : m_Items) {
+			if (item->m_Topic.View() == topic) m_Bytes -= item->m_Bytes;
+			else kept.Push(item);
+		}
+		m_Items = take(kept);
+		m_TopicBytes.Remove(Core::String(topic));
+	}
+
+	void Outbox::DropTopic(Core::StringView topic) {
+		Threading::LockGuard guard(m_Mutex);
+		if (m_TopicBytes.Contains(Core::String(topic))) Remove(topic);
+	}
+
+	bool Outbox::Next(Core::String& text, int32 timeoutMs) {
+		Threading::LockGuard guard(m_Mutex);
+		if (m_Items.IsEmpty() && !m_Closed) m_Ready.WaitFor(m_Mutex, (int64)timeoutMs * 1000000);
+		if (m_Closed || m_Items.IsEmpty()) return false;
+		OutItem* item = m_Items.Pop();
+		m_Bytes -= item->m_Bytes;
+		if (!item->m_Topic.IsEmpty()) {
+			int64* held = m_TopicBytes.Find(item->m_Topic);
+			if (held) {
+				*held -= item->m_Bytes;
+				if (*held <= 0) m_TopicBytes.Remove(item->m_Topic);
+			}
+		}
+		text = take(item->m_Text);
+		return true;
+	}
+
+	void Outbox::Close() {
+		Threading::LockGuard guard(m_Mutex);
+		m_Closed = true;
+		m_Items.Clear();
+		m_TopicBytes.Clear();
+		m_Bytes = 0;
+		m_Ready.NotifyAll();
+	}
+
+	bool Outbox::IsEmpty() {
+		Threading::LockGuard guard(m_Mutex);
+		return m_Items.IsEmpty();
+	}
+
+	bool Outbox::IsClosed() {
+		Threading::LockGuard guard(m_Mutex);
+		return m_Closed;
+	}
+
+	int64 Outbox::Bytes() {
+		Threading::LockGuard guard(m_Mutex);
+		return m_Bytes;
+	}
+
+	int64 Outbox::Budget() {
+		Threading::LockGuard guard(m_Mutex);
+		return m_Budget;
+	}
+
+	int64 Outbox::CoalesceBytes() {
+		Threading::LockGuard guard(m_Mutex);
+		return m_CoalesceBytes;
+	}
+
+	void Outbox::Configure(int64 budget, int64 coalesceBytes) {
+		Threading::LockGuard guard(m_Mutex);
+		this.m_Budget = budget;
+		this.m_CoalesceBytes = coalesceBytes;
+	}
+}

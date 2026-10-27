@@ -32,7 +32,7 @@ def code_plugin(folder, plugin_id, sources=None):
 	write(os.path.join(folder, "ied-plugin.json"), {"manifestVersion": 1, "id": plugin_id, "name": plugin_id, "version": "1.0.0", "ied": {"api": "^1"}, "runtime": runtime})
 	for source in sources or ["code"]:
 		path = os.path.join(folder, source)
-		write(path if path.endswith(".cf") else os.path.join(path, "scripted.cf"), 'include "api/plugin.ch"\n\nnamespace Scripted\n{\n\tvoid Activate(IED::PluginContext& context) {}\n}\n')
+		write(path if path.endswith(".cf") else os.path.join(path, "scripted.cf"), 'include "api/Plugin.ch"\n\nnamespace Scripted\n{\n\tvoid Activate(IED::PluginContext& context) {}\n}\n')
 
 
 def fake_home(home, log):

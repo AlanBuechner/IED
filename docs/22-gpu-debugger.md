@@ -244,7 +244,7 @@ the captured frame.
 - **Undoing and the diff**: `revertShader {key?}` puts one shader back, or all; `edits {}` lists them; `editDiff
   {eid, id?, mip?, maxSize?}` reads the event's output with the captured shaders, then with the edits, and diffs them
   texel by texel as compare does (`|captured - edited|`, changed pixels, largest and mean difference, the box).
-- **The server** (`code/edits.cf`): `gpu.shaderSource {sessionId, eid, stage}` adds `link`, the workspace file the
+- **The server** (`code/Edits.cf`): `gpu.shaderSource {sessionId, eid, stage}` adds `link`, the workspace file the
   shader was last edited from with its entry, profile and language (kept per program and shader key in
   `.ied/local/gpu-captures/shader-links.json`, so the next capture's edit starts from the same file); `gpu.editShader
   {sessionId, eid, stage, language, path?, text?, entry?, profile?}` compiles a workspace file as the editor holds it
@@ -406,13 +406,13 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   DXBC of Shader Model 5.1 (`common/dxbc.cpp`, `replay/d3d12/debug.cpp`), the UI's `ui/debugger.js`, and
   `gpu_debug_shader`.
 - **Edit and Replay** ("Edit and Replay" above): `common/hlsl.cpp`, `common/shaderedit.cpp`, `replay/d3d12/edit.cpp`,
-  `replay/vulkan/vkedit.cpp` and `vkassemble.cpp`, `replay/sessionedit.cpp`, `code/edits.cf`, the UI's `ui/editpane.js`,
+  `replay/vulkan/vkedit.cpp` and `vkassemble.cpp`, `replay/sessionedit.cpp`, `code/Edits.cf`, the UI's `ui/editpane.js`,
   and `gpu_replay_with_shader`.
 - **Compare** ("Compare" above): `common/compare.cpp`, `replay/sessioncompare.cpp`, `gpu.compare`, the UI's
   `ui/compare.js`, and `gpu_compare`.
 - **Performance** ("Performance" above): the counting replay in `replay/d3d12/timing.cpp` and
-  `replay/vulkan/vktiming.cpp`, the experiments, `code/measurements.cf`, the UI's `ui/perf.js`, and `gpu_limiter`.
-- **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
+  `replay/vulkan/vktiming.cpp`, the experiments, `code/Measurements.cf`, the UI's `ui/perf.js`, and `gpu_limiter`.
+- **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/gputools/Tools.cf`, `ToolText.cf`, `ToolInspect.cf`, and
   the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
   `plugins/gpu/samples/c4`.

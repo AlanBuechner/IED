@@ -1,0 +1,345 @@
+// The prof.* methods (docs/16 "The server does the heavy lifting", docs/10). Every query names a capture, loads it if
+// it is not in memory, and answers from it under the capture's lock; times are nanoseconds since the capture started.
+include "ProfilerService.ch"
+include "analysis/Timeline.ch"
+include "analysis/Analysis.ch"
+include "importers/Importers.ch"
+include "Contributed.ch"
+include "analysis/Locks.ch"
+
+namespace Profiler
+{
+	const int32 c_MostWidth = 16384;
+
+	static int32 Width(const IED::Params& params, int32 fallback) {
+		const int64 width = params.Int("width", fallback);
+		return width < 1 ? 1 : (width > c_MostWidth ? c_MostWidth : (int32)width);
+	}
+
+	static Core::String Answer(ProfilerPlugin* profiler, const IED::Params& params, const func<Core::String(const Capture&)>& query) {
+		Capture* capture = profiler->Loaded(params.Str("captureId").View());
+		Threading::LockGuard held(capture->m_Lock);
+		return query(*capture);
+	}
+
+	static LaneMode ModeOf(Core::StringView text) {
+		return text == "tasks" ? LaneMode::Tasks : LaneMode::Threads;
+	}
+
+	static GroupBy GroupOf(Core::StringView text) {
+		if (text == "thread") return GroupBy::Thread;
+		if (text == "task") return GroupBy::Task;
+		return GroupBy::Zone;
+	}
+
+	static StatsOrder OrderOf(Core::StringView text) {
+		if (text == "self") return StatsOrder::Self;
+		if (text == "count") return StatsOrder::Count;
+		if (text == "mean") return StatsOrder::Mean;
+		if (text == "median") return StatsOrder::Median;
+		if (text == "p95") return StatsOrder::P95;
+		if (text == "max") return StatsOrder::Max;
+		if (text == "name") return StatsOrder::Name;
+		return StatsOrder::Total;
+	}
+
+	static LockOrder LockOrderOf(Core::StringView text) {
+		if (text == "maxWait") return LockOrder::MaxWait;
+		if (text == "contended") return LockOrder::Contended;
+		if (text == "hold") return LockOrder::Hold;
+		if (text == "acquisitions") return LockOrder::Acquisitions;
+		if (text == "name") return LockOrder::Name;
+		return LockOrder::Wait;
+	}
+
+
+	static ProfWorkspace* WorkspaceOrThrow(ProfilerPlugin* profiler, Core::StringView wsId) {
+		ProfWorkspace* ws = profiler->Workspace(wsId);
+		if (!ws) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
+		return ws;
+	}
+
+	// --- The library --------------------------------------------------------------------------------------------------
+
+	static Core::String CapturesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Threading::LockGuard guard(profiler->m_Lock);
+		ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
+		profiler->Rescan(ws);
+		return profiler->LibraryJson(ws);
+	}
+
+	// A trace file of the workspace becomes a capture (opened from the Solution Explorer or a launch URL).
+	static Core::String OpenMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Core::String id;
+		{
+			Threading::LockGuard guard(profiler->m_Lock);
+			ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
+			FS::Path path = ws->File(IED::NormalizePath(params.Str("path").View()).View());
+			if (!FS::FileExists(path.CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no file ") + params.Str("path").View()).View());
+			CaptureEntry* entry = profiler->EntryForPath(ws, path.View());
+			FS::FileInfo info;
+			if (FS::GetInfo(path.CStr(), info)) {
+				entry->m_SizeBytes = info.size;
+				entry->m_ModifiedNs = info.modifiedNs;
+			}
+			id = entry->m_Id;
+		}
+		profiler->Loaded(id.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("captureId", id.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String CloseMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		profiler->ForgetCapture(params.Str("captureId").View());
+		return Core::String("{}");
+	}
+
+	static Core::String StopMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Threading::LockGuard guard(profiler->m_Lock);
+		CaptureEntry* entry = profiler->Entry(params.Str("captureId").View());
+		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + params.Str("captureId").View()).View());
+		if (!entry->m_Live || !entry->m_Connection) throw IED::RpcError(IED::ErrorCode::Conflict, Core::StringView("the capture is not live"));
+		entry->m_Connection->Shutdown(Net::Shutdown::Both);
+		return Core::String("{}");
+	}
+
+	static Core::String DeleteMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Core::String wsId;
+		Core::String relative;
+		{
+			Threading::LockGuard guard(profiler->m_Lock);
+			CaptureEntry* entry = profiler->Entry(params.Str("captureId").View());
+			if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + params.Str("captureId").View()).View());
+			if (entry->m_Live) throw IED::RpcError(IED::ErrorCode::Conflict, Core::StringView("stop the capture before deleting it"));
+			wsId = entry->m_WsId;
+			relative = entry->m_Relative;
+		}
+		Core::String problem;
+		if (!IED::MoveToTrash(wsId.View(), relative.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		Threading::LockGuard guard(profiler->m_Lock);
+		profiler->m_Captures.Remove(params.Str("captureId"));
+		ProfWorkspace* ws = profiler->Workspace(wsId.View());
+		if (ws) profiler->PublishLibrary(ws);
+		return Core::String("{}");
+	}
+
+	// A file another plugin's importer takes (a Go execution trace): converted by its command, then read.
+	static Core::String ImportThroughPlugin(ProfilerPlugin* profiler, const ContributedImporter& importer, Core::StringView wsId, Core::StringView source, Core::StringView target, Core::String& problem) {
+		ImporterRun run;
+		run.m_Context = profiler->m_Context;
+		if (!IED::FindWorkspace(wsId, run.m_Ws)) {
+			problem = Core::String("the workspace is not open");
+			return Core::String();
+		}
+		run.m_Input = Core::String(source);
+		run.m_Output = Core::String((FS::Path(target) / (Core::String(".import-") + FS::Path(source).Stem()).View()).View());
+		if (!RunContributedImporter(importer, run, problem)) {
+			FS::RemoveFile(run.m_Output.CStr());
+			return Core::String();
+		}
+		Core::String written = ImportConverted(run.m_Output.View(), source, importer.m_Id.View(), target, problem);
+		FS::RemoveFile(run.m_Output.CStr());
+		return written;
+	}
+
+	static Core::String ImportMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		FS::Path source;
+		FS::Path target;
+		{
+			Threading::LockGuard guard(profiler->m_Lock);
+			ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
+			source = ws->File(IED::NormalizePath(params.Str("path").View()).View());
+			target = ws->Captures();
+		}
+		FS::MakeDirectories(target.CStr());
+		Core::String problem;
+		ContributedImporter importer;
+		Core::String written = FindContributedImporter(params.Str("wsId").View(), source.View(), importer)
+			? ImportThroughPlugin(profiler, importer, params.Str("wsId").View(), source.View(), target.View(), problem)
+			: ImportFile(source.View(), target.View(), problem);
+		if (written.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, problem.View());
+		Core::String id;
+		{
+			Threading::LockGuard guard(profiler->m_Lock);
+			ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
+			profiler->Rescan(ws);
+			id = profiler->EntryForPath(ws, written.View())->m_Id;
+			profiler->PublishLibrary(ws);
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("captureId", id.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Queries ------------------------------------------------------------------------------------------------------
+
+	static Core::String TimelineMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		TimelineAsk ask;
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_Width = Width(params, 1000);
+		ask.m_Mode = ModeOf(params.Str("mode", Core::StringView("threads")).View());
+		ask.m_MostDepth = (int32)params.Int("depth", 64);
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Timeline(capture, ask); });
+	}
+
+	static Core::String StatsMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		StatsAsk ask;
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_GroupBy = GroupOf(params.Str("groupBy", Core::StringView("zone")).View());
+		ask.m_Order = OrderOf(params.Str("order", Core::StringView("total")).View());
+		ask.m_Filter = params.Str("filter", Core::StringView(""));
+		ask.m_Limit = (int32)params.Int("limit", 500);
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Stats(capture, ask); });
+	}
+
+	static Core::String FindZoneMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		FindAsk ask;
+		ask.m_Site = (uint64)params.Int("site", 0);
+		ask.m_Name = params.Str("name", Core::StringView(""));
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_Bins = (int32)params.Int("bins", 64);
+		ask.m_LowNs = params.Int("low", -1);
+		ask.m_HighNs = params.Int("high", -1);
+		ask.m_Limit = (int32)params.Int("limit", 100);
+		if (ask.m_Site == 0 && ask.m_Name.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("name a zone by its site or its name"));
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return FindZone(capture, ask); });
+	}
+
+	static Core::String ZoneMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		ZoneRef ref;
+		if (!ZoneRef::Parse(params.Str("ref").View(), ref)) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("a zone reference is track:depth:index"));
+		Core::String answer = Answer(profiler, params, [ref](const Capture& capture) -> Core::String { return ZoneDetails(capture, ref); });
+		if (answer.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such zone"));
+		return answer;
+	}
+
+	static Core::String FlameMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		FlameAsk ask;
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_Track = (int32)params.Int("track", -1);
+		ask.m_Samples = params.Bool("samples", false);
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Flame(capture, ask); });
+	}
+
+	static Core::String MemoryMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int64 from = params.Int("from", -1);
+		const int64 to = params.Int("to", -1);
+		const int32 width = Width(params, 600);
+		return Answer(profiler, params, [from, to, width](const Capture& capture) -> Core::String { return Memory(capture, from, to, width); });
+	}
+
+	static Core::String LeaksMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		LeakAsk ask;
+		ask.m_AtNs = params.Int("at", -1);
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_Limit = (int32)params.Int("limit", 200);
+		const bool named = AllocGroupNamed(params.Str("groupBy", Core::StringView("")).View(), ask.m_GroupBy);
+		return Answer(profiler, params, [ask, named](const Capture& capture) -> Core::String {
+			LeakAsk asked = ask;
+			if (!named) asked.m_GroupBy = DefaultAllocGroup(capture);
+			return Leaks(capture, asked);
+		});
+	}
+
+	static Core::String MessagesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int64 from = params.Int("from", -1);
+		const int64 to = params.Int("to", -1);
+		const int32 severity = (int32)params.Int("severity", 0);
+		Core::String text = params.Str("text", Core::StringView(""));
+		const int64 offset = params.Int("offset", 0);
+		const int32 limit = (int32)params.Int("limit", 500);
+		return Answer(profiler, params, [from, to, severity, text, offset, limit](const Capture& capture) -> Core::String { return Messages(capture, from, to, severity, text.View(), offset, limit); });
+	}
+
+	static Core::String FramesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int32 width = Width(params, 1000);
+		return Answer(profiler, params, [width](const Capture& capture) -> Core::String { return FrameGraph(capture, width); });
+	}
+
+	static Core::String FrameMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int64 index = params.Int("index", -1);
+		Core::String answer = Answer(profiler, params, [index](const Capture& capture) -> Core::String { return FrameBreakdown(capture, index); });
+		if (answer.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such frame"));
+		return answer;
+	}
+
+	static Core::String LocksMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		LockAsk ask;
+		ask.m_FromNs = params.Int("from", -1);
+		ask.m_ToNs = params.Int("to", -1);
+		ask.m_Order = LockOrderOf(params.Str("order", Core::StringView("wait")).View());
+		ask.m_Limit = (int32)params.Int("limit", 200);
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Locks(capture, ask); });
+	}
+
+	static Core::String LockHoldMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const uint64 lock = (uint64)params.Int("lock");
+		const int32 track = (int32)params.Int("track");
+		const int64 index = params.Int("index");
+		Core::String answer = Answer(profiler, params, [lock, track, index](const Capture& capture) -> Core::String { return LockHold(capture, lock, track, index); });
+		if (answer.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such hold of the lock"));
+		return answer;
+	}
+
+	static Core::String SummaryMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		return Answer(profiler, params, [](const Capture& capture) -> Core::String { return Summary(capture); });
+	}
+
+	static Core::String CompareMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Capture* a = profiler->Loaded(params.Str("a").View());
+		Capture* b = profiler->Loaded(params.Str("b").View());
+		const int32 limit = (int32)params.Int("limit", 100);
+		if (a == b) {
+			Threading::LockGuard held(a->m_Lock);
+			return Compare(*a, *b, limit);
+		}
+		Capture* lower = a < b ? a : b;
+		Capture* higher = a < b ? b : a;
+		Threading::LockGuard first(lower->m_Lock);
+		Threading::LockGuard second(higher->m_Lock);
+		return Compare(*a, *b, limit);
+	}
+
+	// --- Registration -------------------------------------------------------------------------------------------------
+
+	void RegisterMethod(ProfilerPlugin* profiler, const char* name, func<Core::String(ProfilerPlugin*, const IED::Params&)> method) {
+		Core::String problem;
+		if (!profiler->m_Context->Method(Core::StringView(name), [profiler, method](const IED::Request& request) -> Core::String { return method(profiler, request.m_Params); }, problem))
+			profiler->m_Context->Log(problem.View());
+	}
+
+	void RegisterMethods(ProfilerPlugin* profiler) {
+		RegisterMethod(profiler, "prof.captures", CapturesMethod);
+		RegisterMethod(profiler, "prof.open", OpenMethod);
+		RegisterMethod(profiler, "prof.close", CloseMethod);
+		RegisterMethod(profiler, "prof.stop", StopMethod);
+		RegisterMethod(profiler, "prof.delete", DeleteMethod);
+		RegisterMethod(profiler, "prof.import", ImportMethod);
+		RegisterMethod(profiler, "prof.timeline", TimelineMethod);
+		RegisterMethod(profiler, "prof.stats", StatsMethod);
+		RegisterMethod(profiler, "prof.findZone", FindZoneMethod);
+		RegisterMethod(profiler, "prof.zone", ZoneMethod);
+		RegisterMethod(profiler, "prof.flame", FlameMethod);
+		RegisterMethod(profiler, "prof.memory", MemoryMethod);
+		RegisterMethod(profiler, "prof.leaks", LeaksMethod);
+		RegisterMethod(profiler, "prof.messages", MessagesMethod);
+		RegisterMethod(profiler, "prof.frames", FramesMethod);
+		RegisterMethod(profiler, "prof.frame", FrameMethod);
+		RegisterMethod(profiler, "prof.summary", SummaryMethod);
+		RegisterMethod(profiler, "prof.compare", CompareMethod);
+		RegisterMethod(profiler, "prof.locks", LocksMethod);
+		RegisterMethod(profiler, "prof.lockHold", LockHoldMethod);
+		RegisterAnnotationMethods(profiler);
+		RegisterInvestigationMethods(profiler);
+	}
+}

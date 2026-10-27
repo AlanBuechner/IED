@@ -1,0 +1,100 @@
+// Claude's own count of an idle chat's context (docs/04 "Context management"): a Claude chat shown without the CLI's
+// count - its last turn ran on an older server, or before a restart - has its session resumed, as its next turn would
+// (its system message, IED's tools, its model and effort), and asked get_context_usage; no model request is made. The
+// session stays for the next turn and stops when idle (ClaudeChats.cf).
+
+include "run/Run.ch"
+include "ClaudeCli.ch"
+include "ClaudeWire.ch"
+include "run/Effort.ch"
+
+namespace Ai
+{
+	const int32 c_ClaudeCountAskMs = 30000;
+
+	static int64 CountNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	void Chats::CountClaude(Chat* chat, const IED::Workspace& ws) {
+		chat->m_ClaudeAsked = true;
+		Chats* self = this;
+		IED::Workspace place = ws;
+		m_Context->StartThread([self, chat, place]() { self->AskClaudeCount(chat, place); });
+	}
+
+	// What resuming the chat's session needs, read under the lock: its session (marked in use), the system message, the
+	// tools, the model and the effort; null when the chat runs a turn, is not on Claude, or has no session to resume.
+	ClaudeSession* Chats::ClaudeCountSetup(Chat* chat, const IED::Workspace& ws, ClaudeCountStart& start) {
+		if (chat->m_Run || chat->m_ClaudeSession.IsEmpty()) return nullptr;
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		Core::String group;
+		Core::String roleEffort;
+		start.m_Profile = FindModel(models, NextModel(chat, ws, group, roleEffort).View());
+		if (!start.m_Profile || !start.m_Profile->IsClaude()) return nullptr;
+		ClaudeSession* session = SessionOf(chat);
+		if (session->m_InUse) return nullptr;
+		Core::Array<Core::String> contributed;
+		ToolRegistry* tools = TurnTools(this, chat, ws, contributed);
+		start.m_System = TurnSystem(this, chat, ws, tools, chat->Current() ? chat->Current()->m_UserText.View() : Core::StringView(""), models, contributed);
+		Core::String sent = ToolsSent(tools, chat->m_Mode, true);
+		start.m_Tools = McpToolsResult(sent.View());
+		start.m_ToolsBytes = sent.ByteLength();
+		start.m_Effort = Core::String(EffortOf(chat->m_Effort.View(), roleEffort.View()));
+		start.m_Command = FindClaude(ClaudeCommandSetting(m_Context->Setting(Core::StringView("ai.claude.command"), Core::StringView("")).View()));
+		session->m_InUse = true;
+		return session;
+	}
+
+	// The session running on the chat's conversation: resumed, never a new one (a new session has nothing to count).
+	static bool Resumed(ClaudeSession* session, const ClaudeCountStart& start, const FS::Path& systemFile, Core::StringView folder, Core::String& problem) {
+		session->SetTools(start.m_Tools.View());
+		if (!session->Running()) {
+			if (start.m_Command.IsEmpty() || session->m_SessionId.IsEmpty()) {
+				problem = Core::String("no Claude Code CLI, or no session to resume");
+				return false;
+			}
+			bool signedIn = false;
+			if (!IsSubscriptionAuth(ClaudeAuthMethod(start.m_Command, folder, signedIn).View()) || !signedIn) {
+				problem = Core::String("the Claude Code CLI is not signed in to a subscription");
+				return false;
+			}
+			FS::MakeDirectories(systemFile.Parent().CStr());
+			FS::WriteFileAtomically(systemFile.CStr(), (const void*)start.m_System.View().Data(), start.m_System.ByteLength());
+			session->m_Model = start.m_Profile->m_Model;
+			session->m_Effort = start.m_Effort;
+			session->m_SystemHash = start.m_System.View().Hash();
+			if (!session->Start(start.m_Command, folder, systemFile.View(), problem)) return false;
+		}
+		return session->m_Model == start.m_Profile->m_Model || session->SetModel(start.m_Profile->m_Model.View(), problem);
+	}
+
+	void Chats::AskClaudeCount(Chat* chat, IED::Workspace ws) {
+		ClaudeCountStart start;
+		ClaudeSession* session = nullptr;
+		{
+			IED::HostLock guard(*m_Context);
+			session = ClaudeCountSetup(chat, ws, start);
+		}
+		if (!session) return;
+		Core::String problem;
+		Serialization::DomNode usage;
+		if (Resumed(session, start, ChatFolder(LocalStateOf(ws), chat->m_ChatId.View()) / "claude-system.md", ws.m_Root.View(), problem))
+			usage = session->m_Process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), c_ClaudeCountAskMs, problem,
+				[session](ClaudeLine* line) { session->Serve(line); });
+		IED::HostLock guard(*m_Context);
+		session->m_InUse = false;
+		session->m_IdleSinceMs = CountNowMs();
+		int64 used = 0;
+		int64 window = 0;
+		if (!usage.IsValid() || !ReadClaudeContext(usage, used, window)) {
+			m_Context->Log((((Core::String("Claude did not count chat ") + chat->m_ChatId.View()) + "'s context: ") + (problem.IsEmpty() ? Core::StringView("no count in its answer") : problem.View())).View());
+			return;
+		}
+		if (chat->m_Run) return;
+		LearnWindow(start.m_Profile->m_Name.View(), window);
+		Core::Array<ContextPart> parts = ScaledParts(ContextParts(chat, start.m_System.ByteLength(), start.m_ToolsBytes), used);
+		chat->m_Context = ContextJson(WindowOf(start.m_Profile), used, start.m_Profile->m_Name.View(), true, parts, Core::StringView("claude"));
+		Publish(chat, "context.changed", chat->m_Context.View());
+		SaveChatHeader(LocalStateOf(ws), chat);
+	}
+}

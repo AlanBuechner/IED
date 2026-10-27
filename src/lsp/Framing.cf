@@ -1,0 +1,62 @@
+include "Framing.ch"
+
+namespace Ied
+{
+	static int32 Lower(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool StartsWithIgnoringCase(Core::StringView text, const char* prefix) {
+		Core::StringView wanted = Core::StringView(prefix);
+		if (text.ByteLength() < wanted.ByteLength()) return false;
+		for (int64 i = 0; i < wanted.ByteLength(); ++i)
+			if (Lower(text.ByteAt(i)) != Lower(wanted.ByteAt(i))) return false;
+		return true;
+	}
+
+	int64 ContentLengthOf(Core::StringView header) {
+		int64 at = 0;
+		while (at <= header.ByteLength()) {
+			int64 end = header.IndexOf('\n', at);
+			if (end < 0) end = header.ByteLength();
+			Core::StringView line = header.Substring(at, end - at);
+			if (line.ByteLength() > 0 && line.ByteAt(line.ByteLength() - 1) == '\r') line = line.Substring(0, line.ByteLength() - 1);
+			if (StartsWithIgnoringCase(line, "content-length:")) {
+				Core::StringView value = line.Substring(15, line.ByteLength() - 15).Trimmed();
+				int64 length = 0;
+				if (value.IsEmpty() || !Core::ParseInt64(value, length) || length < 0 || length > c_LspMaxMessageBytes) return -1;
+				return length;
+			}
+			at = end + 1;
+		}
+		return -1;
+	}
+
+	void FrameReader::Feed(Core::StringView bytes) {
+		if (!Failed()) m_Pending.Append(bytes);
+	}
+
+	bool FrameReader::Next(Core::String& body) {
+		if (Failed()) return false;
+		Core::StringView text = m_Pending.View();
+		const int64 split = text.IndexOf(Core::StringView("\r\n\r\n"));
+		if (split < 0) return false;
+		const int64 length = ContentLengthOf(text.Substring(0, split));
+		if (length < 0) {
+			m_Failure = Core::String("a message header without a valid Content-Length");
+			return false;
+		}
+		const int64 start = split + 4;
+		if (text.ByteLength() - start < length) return false;
+		body = Core::String(text.Substring(start, length));
+		m_Pending = Core::String(text.Substring(start + length, text.ByteLength() - start - length));
+		return true;
+	}
+
+	Core::String FrameMessage(Core::StringView body) {
+		Core::StringBuilder framed;
+		framed.Append("Content-Length: ");
+		framed.AppendInt(body.ByteLength());
+		framed.Append("\r\n\r\n");
+		framed.Append(body);
+		return framed.ToString();
+	}
+}

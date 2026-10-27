@@ -1,0 +1,175 @@
+include "SolutionFile.ch"
+include "settings/JsonEdit.ch"
+include "fs/Glob.ch"
+include "web/Json.ch"
+include "web/Params.ch"
+
+namespace Ied
+{
+	Core::String NewProjectFileText(Core::StringView name, Core::StringView root, Core::StringView kind, Core::StringView language, const Core::Array<Core::String>& presets) {
+		Core::StringBuilder text;
+		text.Append("{\n\t\"version\": 1,\n\t\"name\": ");
+		text.Append(JsonString(name).View());
+		text.Append(",\n\t\"root\": ");
+		text.Append(JsonString(root).View());
+		text.Append(",\n\t\"kind\": ");
+		text.Append(JsonString(kind).View());
+		if (!language.IsEmpty()) {
+			text.Append(",\n\t\"language\": ");
+			text.Append(JsonString(language).View());
+		}
+		if (!presets.IsEmpty()) {
+			text.Append(",\n\t\"presets\": [");
+			for (int64 i = 0; i < presets.Count(); ++i) {
+				if (i > 0) text.Append(", ");
+				text.Append(JsonString(presets[i].View()).View());
+			}
+			text.Append("]");
+		}
+		text.Append("\n}\n");
+		return text.ToString();
+	}
+
+	// A projects array's text, one entry a line: `entries` (JSON objects) as they are.
+	static Core::String ProjectsJson(const Core::Array<Core::String>& entries) {
+		if (entries.IsEmpty()) return Core::String("[]");
+		Core::StringBuilder text;
+		text.Append("[");
+		for (int64 i = 0; i < entries.Count(); ++i) {
+			text.Append(i > 0 ? ",\n\t\t" : "\n\t\t");
+			text.Append(entries[i].View());
+		}
+		text.Append("\n\t]");
+		return text.ToString();
+	}
+
+	static Core::String FileEntry(Core::StringView file) { return (Core::String("{\"file\": ") + JsonString(file).View()) + "}"; }
+
+	Core::String NewSolutionFileText(Core::StringView name, const Core::Array<Core::String>& files) {
+		Core::Array<Core::String> entries;
+		for (const Core::String& file : files) entries.Push(FileEntry(file.View()));
+		Core::StringBuilder text;
+		text.Append("{\n\t\"version\": 1,\n\t\"name\": ");
+		text.Append(JsonString(name).View());
+		text.Append(",\n\t\"projects\": ");
+		text.Append(ProjectsJson(entries).View());
+		text.Append("\n}\n");
+		return text.ToString();
+	}
+
+	// The solution file's `projects` entries as JSON text each, and their `file`s.
+	static bool ReadEntries(Core::StringView text, Core::Array<Core::String>& entries, Core::Array<Core::String>& files, Core::String& error) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJsonc(text, doc);
+		if (!read.Ok()) {
+			error = Core::String("the solution file is not JSON: ") + read.error;
+			return false;
+		}
+		Serialization::DomNode projects = read.root.Member("projects");
+		for (int64 i = 0; i < projects.Count(); ++i) {
+			entries.Push(NodeJson(projects.At(i)));
+			files.Push(Core::String(projects.At(i).Member("file").AsView()));
+		}
+		return true;
+	}
+
+	static bool SamePath(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i) {
+			int32 x = a.ByteAt(i) == '\\' ? '/' : a.ByteAt(i);
+			int32 y = b.ByteAt(i) == '\\' ? '/' : b.ByteAt(i);
+			if (x >= 'A' && x <= 'Z') x += 32;
+			if (y >= 'A' && y <= 'Z') y += 32;
+			if (x != y) return false;
+		}
+		return true;
+	}
+
+	static Core::StringView Plain(Core::StringView path) { return path.StartsWith(Core::StringView("./")) ? path.Substring(2, path.ByteLength() - 2) : path; }
+
+	bool ListProjectFile(Core::StringView text, Core::StringView file, Core::String& edited, Core::String& error) {
+		Core::Array<Core::String> entries;
+		Core::Array<Core::String> files;
+		if (!ReadEntries(text, entries, files, error)) return false;
+		entries.Push(FileEntry(file));
+		return SetMember(text, Core::StringView("projects"), ProjectsJson(entries).View(), edited, error);
+	}
+
+	bool RelistProjectFile(Core::StringView text, Core::StringView from, Core::StringView to, Core::String& edited, Core::String& error) {
+		Core::Array<Core::String> entries;
+		Core::Array<Core::String> files;
+		if (!ReadEntries(text, entries, files, error)) return false;
+		for (int64 i = 0; i < entries.Count(); ++i)
+			if (SamePath(Plain(files[i].View()), from)) entries[i] = FileEntry(to);
+		return SetMember(text, Core::StringView("projects"), ProjectsJson(entries).View(), edited, error);
+	}
+
+	bool ListsProjectFile(Core::StringView text, Core::StringView file) {
+		Core::Array<Core::String> entries;
+		Core::Array<Core::String> files;
+		Core::String error;
+		if (!ReadEntries(text, entries, files, error)) return false;
+		for (const Core::String& listed : files)
+			if (SamePath(Plain(listed.View()), file) || (IsGlob(listed.View()) && GlobMatch(Plain(listed.View()), file))) return true;
+		return false;
+	}
+
+	// `groups` without the project `name`, as JSON; `found` says whether any group named it.
+	static Core::String GroupsWithout(const Serialization::DomNode& groups, Core::StringView name, bool& found) {
+		JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode group = groups.At(i);
+			json.BeginObject();
+			json.Field("name", group.Member("name").AsView());
+			Serialization::DomNode projects = group.Member("projects");
+			if (projects.IsValid()) {
+				json.Key(Core::StringView("projects"));
+				json.BeginArray();
+				for (int64 j = 0; j < projects.Count(); ++j) {
+					if (projects.At(j).AsView() == name) found = true;
+					else json.String(projects.At(j).AsView());
+				}
+				json.EndArray();
+			}
+			if (group.Member("groups").IsValid()) json.RawField("groups", GroupsWithout(group.Member("groups"), name, found).View());
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	bool UnlistProject(Core::StringView text, Core::StringView file, Core::StringView name, Core::String& edited, Core::String& error) {
+		Core::Array<Core::String> entries;
+		Core::Array<Core::String> files;
+		if (!ReadEntries(text, entries, files, error)) return false;
+		Core::Array<Core::String> kept;
+		for (int64 i = 0; i < entries.Count(); ++i)
+			if (!SamePath(Plain(files[i].View()), file)) kept.Push(entries[i]);
+		Core::String listed;
+		if (!SetMember(text, Core::StringView("projects"), ProjectsJson(kept).View(), listed, error)) return false;
+		Serialization::DomDoc doc;
+		Serialization::DomNode groups = Serialization::ReadJsonc(text, doc).root.Member("groups");
+		bool found = false;
+		Core::String without = groups.IsValid() ? GroupsWithout(groups, name, found) : Core::String();
+		if (!found) {
+			edited = listed;
+			return true;
+		}
+		return SetMember(listed.View(), Core::StringView("groups"), without.View(), edited, error);
+	}
+
+	Core::String PathBetween(Core::StringView from, Core::StringView to) {
+		Core::Array<Core::StringView> a = from.IsEmpty() ? Core::Array<Core::StringView>() : from.Split('/');
+		Core::Array<Core::StringView> b = to.IsEmpty() ? Core::Array<Core::StringView>() : to.Split('/');
+		int64 common = 0;
+		while (common < a.Count() && common < b.Count() && SamePath(a[common], b[common])) common += 1;
+		Core::StringBuilder way;
+		for (int64 i = common; i < a.Count(); ++i) way.Append(way.IsEmpty() ? ".." : "/..");
+		for (int64 i = common; i < b.Count(); ++i) {
+			if (!way.IsEmpty()) way.AppendByte('/');
+			way.Append(b[i]);
+		}
+		return way.IsEmpty() ? Core::String(".") : way.ToString();
+	}
+}

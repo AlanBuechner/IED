@@ -174,7 +174,7 @@ def usage_window(id, label, utilization, through, length_ms, now, work_week=Fals
 
 
 def claude_usage(now, pace_days="week"):
-	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claudewire.cf); `pace_days`
+	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claude/ClaudeWire.cf); `pace_days`
 	ai.claude.paceDays."""
 	work = pace_days == "workweek"
 	windows = [usage_window("five_hour", "Session (5 h)", 68, 0.5, 5 * 3600000, now), usage_window("seven_day", "Week", 41, 0.45, 7 * DAY_MS, now, work),

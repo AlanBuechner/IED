@@ -1,0 +1,110 @@
+include "Writer.ch"
+
+namespace WebFetch
+{
+	static bool IsBlank(int32 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
+
+	void PageWriter::LinePrefix() {
+		if (!m_Plain)
+			for (int32 i = 0; i < m_QuoteDepth; ++i) m_Out.Append("> ");
+		if (m_ListDepth <= 0) return;
+		for (int32 i = 1; i < m_ListDepth; ++i) m_Out.Append("  ");
+		if (m_ItemMarker.IsEmpty()) m_Out.Append("  ");
+		else m_Out.Append(m_ItemMarker.View());
+		m_ItemMarker = Core::String();
+	}
+
+	// What is owed before the next text: the breaks, the line's prefix, a space, the held marks.
+	void PageWriter::Flush() {
+		if (m_Breaks > 0 && m_Out.ByteLength() > 0) {
+			for (int32 i = 0; i < m_Breaks; ++i) m_Out.AppendByte('\n');
+			m_LineStart = true;
+		}
+		m_Breaks = 0;
+		if (m_LineStart) {
+			LinePrefix();
+			m_LineStart = false;
+			m_Space = false;
+		}
+		if (m_Space && m_Out.ByteLength() > 0 && m_Out.View().ByteAt(m_Out.ByteLength() - 1) != ' ') m_Out.AppendByte(' ');
+		m_Space = false;
+		if (!m_Marks.IsEmpty()) {
+			m_Out.Append(m_Marks.View());
+			m_Marks.Clear();
+		}
+	}
+
+	void PageWriter::Text(Core::StringView text) {
+		int64 i = 0;
+		const int64 n = text.ByteLength();
+		if (m_Preformatted) {
+			if (n > 0 && (m_Breaks > 0 || m_LineStart)) Flush();
+			for (; i < n; ++i)
+				if (text.ByteAt(i) != '\r') m_Out.AppendByte(text.ByteAt(i));
+			return;
+		}
+		while (i < n) {
+			if (IsBlank(text.ByteAt(i))) {
+				m_Space = true;
+				i += 1;
+				continue;
+			}
+			Flush();
+			const int64 start = i;
+			while (i < n && !IsBlank(text.ByteAt(i))) i += 1;
+			m_Out.Append(text.Substring(start, i - start));
+		}
+	}
+
+	void PageWriter::Open(Core::StringView mark) { m_Marks.Append(mark); }
+
+	bool PageWriter::Discard(Core::StringView mark) {
+		if (!m_Marks.View().EndsWith(mark)) return false;
+		m_Marks.Truncate(m_Marks.ByteLength() - mark.ByteLength());
+		return true;
+	}
+
+	void PageWriter::Close(Core::StringView mark) {
+		if (!Discard(mark)) m_Out.Append(mark);
+	}
+
+	void PageWriter::Inline(Core::StringView text) {
+		Flush();
+		m_Out.Append(text);
+	}
+
+	void PageWriter::Break(int32 lines) {
+		if (m_CellDepth > 0) {
+			m_Space = true;
+			return;
+		}
+		if (m_Breaks < lines) m_Breaks = lines;
+	}
+
+	void PageWriter::Append(Core::StringView text) { m_Out.Append(text); }
+
+	bool PageWriter::EndsWithNewline() const {
+		return m_Out.ByteLength() > 0 && m_Out.View().ByteAt(m_Out.ByteLength() - 1) == '\n';
+	}
+
+	Core::String PageWriter::Finish() const {
+		Core::StringBuilder text;
+		Core::StringView all = m_Out.View();
+		int64 blankLines = 0;
+		int64 at = 0;
+		while (at < all.ByteLength()) {
+			int64 end = all.IndexOf('\n', at);
+			if (end < 0) end = all.ByteLength();
+			int64 last = end;
+			while (last > at && IsBlank(all.ByteAt(last - 1))) last -= 1;
+			if (last == at) blankLines += 1;
+			else {
+				if (!text.IsEmpty()) text.Append(blankLines > 0 ? "\n\n" : "\n");
+				text.Append(all.Substring(at, last - at));
+				blankLines = 0;
+			}
+			at = end + 1;
+		}
+		return text.ToString();
+	}
+}

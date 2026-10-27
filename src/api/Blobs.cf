@@ -1,0 +1,30 @@
+include "Blobs.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	Core::String PutBlob(Core::StringView contentType, const Core::Array<uint8>& bytes, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String();
+		if (bytes.Count() > Ied::c_BlobsMaxBytes) {
+			problem = Core::String("a blob is at most 256 MiB");
+			return Core::String();
+		}
+		return instance->m_Runtime->m_Server->m_Blobs->Put(contentType, bytes);
+	}
+
+	bool ReadBlob(Core::StringView id, Core::String& contentType, Core::Array<uint8>& bytes, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Blob* blob = server->m_Blobs->Get(id);
+		if (!blob) {
+			problem = Core::String("the upload is no longer kept: send it again");
+			return false;
+		}
+		contentType = blob->m_ContentType;
+		bytes = blob->m_Bytes;
+		return true;
+	}
+}

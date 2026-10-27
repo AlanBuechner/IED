@@ -1,0 +1,61 @@
+include "SourceLines.ch"
+include "LineDiff.ch"
+
+namespace Ai
+{
+	Core::StringView SourceLineAt(Core::StringView text, int64 number) {
+		int64 at = 0;
+		for (int64 line = 1; line < number; ++line) {
+			const int64 end = text.IndexOf('\n', at);
+			if (end < 0) return Core::StringView("");
+			at = end + 1;
+		}
+		int64 end = text.IndexOf('\n', at);
+		if (end < 0) end = text.ByteLength();
+		if (end > at && text.ByteAt(end - 1) == '\r') end -= 1;
+		return text.Substring(at, end - at);
+	}
+
+	// The path and line of `path:line:col: error: ...`; false for any other line.
+	static bool ErrorPlace(Core::StringView line, Core::StringView& path, int64& number) {
+		const int64 marker = line.IndexOf(Core::StringView(": error: "));
+		if (marker < 0) return false;
+		Core::StringView place = line.Substring(0, marker);
+		int64[2] colons = { -1, -1 };
+		for (int64 i = place.ByteLength() - 1; i >= 0 && colons[1] < 0; --i) {
+			if (place.ByteAt(i) != ':') continue;
+			if (colons[0] < 0) colons[0] = i;
+			else colons[1] = i;
+		}
+		if (colons[1] <= 0) return false;
+		path = place.Substring(0, colons[1]);
+		return Core::ParseInt64(place.Substring(colons[1] + 1, colons[0] - colons[1] - 1), number) && number > 0;
+	}
+
+	Core::String WithSourceLines(Core::StringView problems, func<bool(Core::StringView path, Core::String& text)> read) {
+		Core::StringBuilder out;
+		Core::String readPath;
+		Core::String readText;
+		bool readable = false;
+		int64 added = 0;
+		for (Core::StringView line : SplitLines(problems)) {
+			out.Append(line);
+			out.Append("\n");
+			Core::StringView path;
+			int64 number = 0;
+			if (added >= c_SourceLinesMost || !ErrorPlace(line, path, number)) continue;
+			if (readPath.View() != path) {
+				readPath = Core::String(path);
+				readText = Core::String("");
+				readable = read(path, readText);
+			}
+			Core::StringView source = readable ? SourceLineAt(readText.View(), number).Trimmed() : Core::StringView("");
+			if (source.IsEmpty()) continue;
+			added += 1;
+			Core::Format(&out, "    {0:D} | ", number);
+			out.Append(source.Substring(0, c_SourceLineMostBytes));
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+}

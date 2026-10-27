@@ -1,0 +1,17 @@
+include "Tools.ch"
+
+namespace IED
+{
+	ToolResult ToolText(Core::StringView content) {
+		ToolResult result;
+		result.m_Content = Core::String(content);
+		return result;
+	}
+
+	ToolResult ToolFailure(Core::StringView message) {
+		ToolResult result;
+		result.m_Content = Core::String(message);
+		result.m_IsError = true;
+		return result;
+	}
+}

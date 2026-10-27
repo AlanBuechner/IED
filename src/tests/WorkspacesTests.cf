@@ -1,0 +1,72 @@
+// services/workspaces' and services/trash's honest parts: workspace-relative paths, the paths no one browses, the
+// ids that name trash entries, and which files are solutions and projects (the names before too) and which folder
+// opens as its solution.
+
+include "services/Workspaces.ch"
+include "services/Trash.ch"
+include "solutions/Model.ch"
+
+static bool Refused(const char* path) {
+	try {
+		Ied::NormalizePath(Core::StringView(path));
+	}
+	catch (Ied::RpcError& error) {
+		return error.m_Code == Ied::ErrorCode::BadRequest;
+	}
+	return false;
+}
+
+[test("server.workspaces")]
+class WorkspaceTests {
+	[test("normalize_path")]
+	public static void TestNormalizePath() {
+		assert_se("src/main.cf", Ied::NormalizePath(Core::StringView("src/main.cf")).CStr(), "as it is");
+		assert_se("src/main.cf", Ied::NormalizePath(Core::StringView("src\\main.cf")).CStr(), "backslashes");
+		assert_se("a/b", Ied::NormalizePath(Core::StringView("/a//b/")).CStr(), "empty parts dropped");
+		assert_true(Ied::NormalizePath(Core::StringView("")).IsEmpty(), "the root");
+		const char*[5] bad = { "..", "a/../b", "./a", "C:/Windows", "a/." };
+		for (int32 i = 0; i < 5; ++i) assert_true(Refused(bad[i]), bad[i]);
+	}
+
+	[test("hidden_paths")]
+	public static void TestHiddenPaths() {
+		assert_true(Ied::IsHiddenPath(Core::StringView(".git")) && Ied::IsHiddenPath(Core::StringView(".git/HEAD")), "a repository's folder");
+		assert_true(!Ied::IsHiddenPath(Core::StringView(".github/workflows/ci.yml")), "not a folder that merely starts alike");
+		assert_true(!Ied::IsHiddenPath(Core::StringView("src/.gitignore")), "nor a file named like it");
+	}
+
+	[test("trash_ids")]
+	public static void TestTrashIds() {
+		assert_true(Ied::IsTrashId(Core::StringView("1792555292665-3")), "the form MoveIn makes");
+		const char*[6] bad = { "", "..", "../x", "1-2/..", "C:", "1792555292665-3\\.." };
+		for (int32 i = 0; i < 6; ++i) assert_true(!Ied::IsTrashId(Core::StringView(bad[i])), bad[i]);
+	}
+
+	[test("text_digest")]
+	public static void TestTextDigest() {
+		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Ied::TextDigest(Core::StringView("abc")).CStr(), "SHA-256, hex");
+	}
+
+	[test("solution_files")]
+	public static void TestSolutionFiles() {
+		assert_true(Ied::IsSolutionFile(Core::StringView("C:/Work/Game.iedsln")) && Ied::IsSolutionFile(Core::StringView("Game.IEDSLN")), "the name, in any case");
+		assert_true(Ied::IsSolutionFile(Core::StringView("Game.ied.sln")), "the name before");
+		assert_true(!Ied::IsSolutionFile(Core::StringView("Game.sln")), "Visual Studio's");
+		assert_true(Ied::IsProjectFile(Core::StringView("build/ied/Game.iedproj")) && Ied::IsProjectFile(Core::StringView("Game.ied.proj")), "a project, either name");
+		assert_true(!Ied::IsProjectFile(Core::StringView("Game.vcxproj")), "not another tool's");
+		FS::Path root = FS::TempDirectory() / "ied-solution-files-test";
+		FS::RemoveAll(root.CStr());
+		FS::MakeDirectories((root / "none").CStr());
+		FS::MakeDirectories((root / "one").CStr());
+		FS::MakeDirectories((root / "two").CStr());
+		const char* text = "{}";
+		FS::WriteFileAtomically((root / "one" / "Game.iedsln").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "one" / "README.md").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "two" / "A.iedsln").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "two" / "B.ied.sln").CStr(), (const void*)text, 2);
+		assert_true(Ied::SolutionIn(root / "none").IsEmpty(), "no solution");
+		assert_true(Ied::SolutionIn(root / "one").View().EndsWith(Core::StringView("Game.iedsln")), "the one solution");
+		assert_true(Ied::SolutionIn(root / "two").IsEmpty(), "two: no choice made");
+		FS::RemoveAll(root.CStr());
+	}
+}

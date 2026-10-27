@@ -1,0 +1,135 @@
+// git: what the CLI prints in its machine formats read into values, and the patches that stage part of a file.
+
+include "repo/Parse.ch"
+include "repo/Patch.ch"
+include "repo/WorkingDiff.ch"
+
+static Core::StringView View(const char* text) { return Core::StringView(text); }
+
+// `text` with '|' standing for NUL and '^' for the unit separator, as the formats print them.
+static Core::String Machine(const char* text) {
+	Core::StringBuilder out;
+	for (int64 i = 0; text[i] != 0; ++i) {
+		const char c = text[i];
+		if (c == '|') out.AppendByte(0);
+		else if (c == '^') out.AppendByte(31);
+		else out.AppendByte(c);
+	}
+	return out.ToString();
+}
+
+[test("server.git.parse")]
+class GitParseTests {
+	[test("status")]
+	public static void TestStatus() {
+		Core::String text = Machine("# branch.oid 6d4a|# branch.head main|# branch.upstream origin/main|# branch.ab +2 -1|1 .M N... 100644 100644 100644 814f 814f a.txt|1 A. N... 000000 100644 100644 0000 3e75 n.txt|2 R. N... 100644 100644 100644 587b 587b R100 sub/space.txt|sub/sp ace.txt|u UU N... 100644 100644 100644 100644 aaaa bbbb cccc both.c|? un tracked.txt|");
+		Git::GitStatus status = Git::ParseStatus(text.View());
+		assert_true(status.m_Head.m_Branch == "main" && status.m_Head.m_Oid == "6d4a" && status.m_Head.m_Upstream == "origin/main", "the branch lines");
+		assert_true(status.m_Head.m_Ahead == 2 && status.m_Head.m_Behind == 1 && !status.m_Head.m_Detached, "ahead and behind");
+		assert_true(status.m_Staged.Count() == 2 && status.m_Staged[0].m_Path == "n.txt" && status.m_Staged[0].m_Status == "A", "an added file is staged");
+		assert_true(status.m_Staged[1].m_Path == "sub/space.txt" && status.m_Staged[1].m_OldPath == "sub/sp ace.txt" && status.m_Staged[1].m_Status == "R", "a rename keeps its source, spaces and all");
+		assert_true(status.m_Unstaged.Count() == 1 && status.m_Unstaged[0].m_Path == "a.txt" && status.m_Unstaged[0].m_Status == "M", "a work tree change");
+		assert_true(status.m_Conflicted.Count() == 1 && status.m_Conflicted[0].m_Path == "both.c" && status.m_Conflicted[0].m_Status == "UU", "a conflict with its two letters");
+		assert_true(status.m_Untracked.Count() == 1 && status.m_Untracked[0].m_Path == "un tracked.txt", "untracked");
+	}
+
+	[test("status_detached_and_unborn")]
+	public static void TestStatusDetachedAndUnborn() {
+		Git::GitStatus detached = Git::ParseStatus(Machine("# branch.oid 94cd|# branch.head (detached)|").View());
+		assert_true(detached.m_Head.m_Detached && detached.m_Head.m_Branch.IsEmpty() && detached.m_Head.m_Oid == "94cd", "detached");
+		Git::GitStatus unborn = Git::ParseStatus(Machine("# branch.oid (initial)|# branch.head main|").View());
+		assert_true(unborn.m_Head.m_Oid.IsEmpty() && unborn.m_Head.m_Branch == "main", "before the first commit");
+	}
+
+	[test("refs")]
+	public static void TestRefs() {
+		Core::String text = Machine("refs/heads/feat^94cd^^origin/feat^[ahead 3, behind 1]^ \nrefs/heads/main^6d4a^^origin/main^^*\nrefs/heads/old^1111^^origin/old^[gone]^ \nrefs/remotes/origin/HEAD^6d4a^^^^ \nrefs/remotes/origin/main^6d4a^^^^ \nrefs/tags/v1^94cd^^^^ \nrefs/tags/v2^ta9^c0mm^^^ \n");
+		Git::GitRefs refs = Git::ParseRefs(text.View());
+		assert_true(refs.m_Branches.Count() == 3, "three branches");
+		assert_true(refs.m_Branches[0].m_Name == "feat" && refs.m_Branches[0].m_Ahead == 3 && refs.m_Branches[0].m_Behind == 1 && !refs.m_Branches[0].m_Current, "tracking counts");
+		assert_true(refs.m_Branches[1].m_Current && refs.m_Branches[1].m_Upstream == "origin/main", "the current branch");
+		assert_true(refs.m_Branches[2].m_Gone, "an upstream that is gone");
+		assert_true(refs.m_RemoteBranches.Count() == 1 && refs.m_RemoteBranches[0].m_Name == "origin/main", "a remote's HEAD is left out");
+		assert_true(refs.m_Tags.Count() == 2 && refs.m_Tags[1].m_Oid == "c0mm", "an annotated tag is its commit");
+	}
+
+	[test("log")]
+	public static void TestLog() {
+		Core::String text = Machine("94cd^6d4a^A B^a@b.c^1792592576^second line|6d4a^^A B^a@b.c^1792592000^first|m3rg^94cd 6d4a^C^c@d.e^1792593000^Merge branch 'feat'");
+		Core::Array<Git::GitCommit> commits = Git::ParseLog(text.View());
+		assert_true(commits.Count() == 3, "three commits");
+		assert_true(commits[0].m_Oid == "94cd" && commits[0].m_Parents.Count() == 1 && commits[0].m_AuthorMs == 1792592576000, "the fields");
+		assert_true(commits[1].m_Parents.IsEmpty() && commits[1].m_Subject == "first", "a root commit has no parents");
+		assert_true(commits[2].m_Parents.Count() == 2 && commits[2].m_Parents[1] == "6d4a", "a merge's parents in order");
+	}
+
+	[test("name_status_and_numstat")]
+	public static void TestNameStatusAndNumstat() {
+		Core::Array<Git::GitFileChange> files = Git::ParseNameStatus(Machine("M|a.txt|R087|old name.c|new.c|A|logo.png|").View());
+		assert_true(files.Count() == 3 && files[1].m_Status == "R" && files[1].m_OldPath == "old name.c" && files[1].m_Path == "new.c", "a rename's two paths");
+		Git::AddNumstat(files, Machine("2\t1\ta.txt|5\t3\t|old name.c|new.c|-\t-\tlogo.png|").View());
+		assert_true(files[0].m_Added == 2 && files[0].m_Removed == 1, "counts");
+		assert_true(files[1].m_Added == 5 && files[1].m_Removed == 3, "a rename's counts");
+		assert_true(files[2].m_Binary, "binary");
+	}
+
+	[test("diff")]
+	public static void TestDiff() {
+		Git::GitDiff diff = Git::ParseDiff(View("diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@ intro\n one\n-two\n+TWO\n+2.5\n three\n@@ -10 +11,0 @@\n-ten\n\\ No newline at end of file\n"));
+		assert_true(diff.m_FileHeader.Count() == 4 && !diff.m_Binary, "the file header");
+		assert_true(diff.m_Hunks.Count() == 2, "two hunks");
+		assert_true(diff.m_Hunks[0].m_OldStart == 1 && diff.m_Hunks[0].m_OldLines == 3 && diff.m_Hunks[0].m_NewStart == 1 && diff.m_Hunks[0].m_NewLines == 4, "the first hunk's numbers");
+		assert_true(diff.m_Hunks[0].m_Lines.Count() == 5 && diff.m_Hunks[0].m_Header == "@@ -1,3 +1,4 @@ intro", "its lines and header");
+		assert_true(diff.m_Hunks[1].m_OldStart == 10 && diff.m_Hunks[1].m_OldLines == 1 && diff.m_Hunks[1].m_NewLines == 0, "a count left out is 1");
+		Git::GitDiff binary = Git::ParseDiff(View("diff --git a/x.png b/x.png\nBinary files a/x.png and b/x.png differ\n"));
+		assert_true(binary.m_Binary && binary.m_Hunks.IsEmpty(), "a binary file");
+	}
+
+	[test("stashes_worktrees_remotes")]
+	public static void TestStashesWorktreesRemotes() {
+		Core::Array<Git::GitStash> stashes = Git::ParseStashes(Machine("aaaa^WIP on main: 6d4a first|bbbb^On feat: fmt experiment|").View());
+		assert_true(stashes.Count() == 2 && stashes[1].m_Index == 1 && stashes[1].m_Message == "On feat: fmt experiment", "stashes by index");
+		Core::Array<Git::GitWorktree> worktrees = Git::ParseWorktrees(Machine("worktree C:/Work/Game|HEAD 6d4a|branch refs/heads/main||worktree C:/Work/fix|HEAD 94cd|detached|locked agent||").View());
+		assert_true(worktrees.Count() == 2 && worktrees[0].m_Branch == "main" && worktrees[1].m_Branch.IsEmpty() && worktrees[1].m_Locked, "worktrees");
+		Core::Array<Git::GitRemote> remotes = Git::ParseRemotes(View("remote.origin.url https://example.com/a.git\nremote.my.fork.url git@host:me/a.git\n"));
+		assert_true(remotes.Count() == 2 && remotes[1].m_Name == "my.fork" && remotes[1].m_Url == "git@host:me/a.git", "a remote's name may hold dots");
+	}
+}
+
+[test("server.git.patch")]
+class GitPatchTests {
+	static Git::GitDiff Sample() {
+		return Git::ParseDiff(View("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,4 +1,4 @@\n one\n-two\n+TWO\n+2.5\n three\n-four\n@@ -20,2 +20,3 @@\n x\n+y\n z\n"));
+	}
+
+	[test("whole_hunk")]
+	public static void TestWholeHunk() {
+		Core::String patch = Git::HunkPatch(Sample(), 1, Core::Array<int64>(), false);
+		assert_true(patch == "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -20,2 +20,3 @@\n x\n+y\n z\n", "the header and the one hunk");
+	}
+
+	[test("chosen_lines")]
+	public static void TestChosenLines() {
+		Core::Array<int64> chosen;
+		chosen.Push(2);
+		Core::String patch = Git::HunkPatch(Sample(), 0, chosen, false);
+		assert_true(patch.View().Contains(View("@@ -1,4 +1,5 @@\n one\n two\n+TWO\n three\n four\n")), "an added line alone: the removed lines stay as context");
+		Core::String reverse = Git::HunkPatch(Sample(), 0, chosen, true);
+		assert_true(reverse.View().Contains(View("@@ -1,3 +1,4 @@\n one\n+TWO\n 2.5\n three\n")), "unstaging: the other added lines are context, the removed ones go");
+		Core::Array<int64> context;
+		context.Push(0);
+		assert_true(Git::HunkPatch(Sample(), 0, context, false).IsEmpty(), "context alone changes nothing");
+		assert_true(Git::HunkPatch(Sample(), 5, Core::Array<int64>(), false).IsEmpty(), "no such hunk");
+	}
+}
+
+[test("server.git.workingdiff")]
+class GitWorkingDiffTests {
+	[test("cut_at_a_line")]
+	public static void TestCut() {
+		bool truncated = true;
+		assert_true(Git::CutAtLine(View("a\nb\n"), 10, truncated) == "a\nb\n" && !truncated, "short enough: all of it");
+		assert_true(Git::CutAtLine(View("one\ntwo\nthree\n"), 9, truncated) == "one\ntwo\n" && truncated, "cut where a line starts");
+		assert_true(Git::CutAtLine(View("a long first line"), 4, truncated).IsEmpty() && truncated, "no whole line fits: nothing");
+	}
+}

@@ -1,0 +1,53 @@
+include "Params.ch"
+
+namespace Ied
+{
+	static RpcError WrongType(const char* name, const char* label) {
+		Core::StringBuilder message;
+		message.Append("param '");
+		message.Append(name);
+		message.Append("' must be ");
+		message.Append(label);
+		return RpcError(ErrorCode::BadRequest, message.View());
+	}
+
+	Serialization::DomNode Params::Field(const char* name) const {
+		if (m_Object.Kind() != Serialization::DomKind::Object) return Serialization::DomNode();
+		return m_Object.Member(name);
+	}
+
+	Serialization::DomNode Params::Required(const char* name, Serialization::DomKind kind, const char* label) const {
+		Serialization::DomNode value = Field(name);
+		if (!value.IsValid()) {
+			Core::StringBuilder message;
+			message.Append("missing param '");
+			message.Append(name);
+			message.Append("'");
+			throw RpcError(ErrorCode::BadRequest, message.View());
+		}
+		if (value.Kind() != kind) throw WrongType(name, label);
+		return value;
+	}
+
+	Core::String Params::Str(const char* name) const { return Core::String(Required(name, Serialization::DomKind::String, "a string").AsView()); }
+
+	Core::String Params::Str(const char* name, Core::StringView fallback) const {
+		return Has(name) ? Str(name) : Core::String(fallback);
+	}
+
+	int64 Params::Int(const char* name) const { return Required(name, Serialization::DomKind::Int, "an integer").AsInt(); }
+
+	int64 Params::Int(const char* name, int64 fallback) const { return Has(name) ? Int(name) : fallback; }
+
+	bool Params::Bool(const char* name, bool fallback) const {
+		return Has(name) ? Required(name, Serialization::DomKind::Bool, "a boolean").AsBool() : fallback;
+	}
+
+	Serialization::DomNode Params::List(const char* name) const { return Required(name, Serialization::DomKind::Array, "an array"); }
+
+	Core::String NodeJson(const Serialization::DomNode& node) {
+		Core::StringBuilder text;
+		Serialization::WriteJson(node, &text, 0);
+		return text.ToString();
+	}
+}

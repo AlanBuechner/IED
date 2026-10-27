@@ -1,0 +1,157 @@
+// Each workspace's capture library (docs/22 "Storage"): the .flash files in .ied/local/captures with the sidecar JSON
+// and thumbnail the capture library writes beside each, read again whenever files change there.
+include "Gpu.ch"
+
+namespace GpuDebug
+{
+	int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	Core::String LibraryTopic(Core::StringView wsId) { return Core::String("gpu:") + wsId; }
+
+	static Core::String ReadText(const FS::Path& path) {
+		FS::File file = FS::File(path.CStr(), "rb");
+		if (!file.IsOpen()) return Core::String();
+		return file.ReadText();
+	}
+
+	// The sidecar's text when it is a JSON object; "{}" otherwise (a capture still being written, a damaged file).
+	static Core::String Sidecar(const FS::Path& path) {
+		Core::String text = ReadText(path);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) return Core::String("{}");
+		return text;
+	}
+
+	Core::Array<Capture*> ScanCaptures(const FS::Path& folder) {
+		Core::Array<Capture*> found;
+		FS::Directory directory = FS::Directory(folder.CStr());
+		if (!directory.IsOpen()) return found;
+		FS::DirectoryEntry entry;
+		while (directory.Next(entry)) {
+			if (entry.kind != FS::EntryKind::File || !entry.name.View().EndsWith(Core::StringView(".flash"))) continue;
+			FS::Path file = folder / entry.name.View();
+			Capture* capture = new Capture();
+			capture->m_Id = Core::String(file.Stem());
+			capture->m_Path = Core::String(file.View());
+			capture->m_Bytes = FS::FileSize(file.CStr());
+			capture->m_Sidecar = Sidecar(file.WithExtension(Core::StringView(".json")));
+			capture->m_Thumbnail = FS::FileExists(file.WithExtension(Core::StringView(".png")).CStr());
+			found.Push(capture);
+		}
+		// Newest first: names end in their time and frame, so the reverse of name order.
+		for (int64 i = 1; i < found.Count(); ++i) {
+			Capture* moving = found[i];
+			int64 j = i - 1;
+			while (j >= 0 && found[j]->m_Id.View() < moving->m_Id.View()) {
+				found[j + 1] = found[j];
+				--j;
+			}
+			found[j + 1] = moving;
+		}
+		return found;
+	}
+
+	Core::String Capture::Json(Core::StringView wsId) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Id.View());
+		json.Field("file", FS::Path(m_Path.View()).FileName());
+		json.IntField("bytes", m_Bytes);
+		if (m_Thumbnail) json.Field("thumbnail", ((((Core::String("/w/") + wsId) + "/files/") + c_CaptureFolder) + "/" + m_Id.View() + ".png").View());
+		json.RawField("meta", m_Sidecar.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Capture* Library::Find(Core::StringView id) const {
+		for (Capture* capture : m_Captures)
+			if (capture->m_Id.View() == id) return capture;
+		return nullptr;
+	}
+
+	Core::String Library::Json() const {
+		IED::JsonWriter json;
+		json.BeginArray();
+		for (Capture* capture : m_Captures) json.Raw(capture->Json(m_WsId.View()).View());
+		json.EndArray();
+		return json.ToString();
+	}
+
+	Core::String Debugger::NextId(const char* prefix) {
+		m_Made += 1;
+		Core::StringBuilder id;
+		id.Append(prefix);
+		id.AppendInt(m_Made);
+		return id.ToString();
+	}
+
+	Core::String Debugger::TargetsJson(Core::StringView wsId) {
+		IED::JsonWriter json;
+		json.BeginArray();
+		for (Target* target : m_Targets)
+			if (target->m_WsId.View() == wsId) json.Raw(target->Json().View());
+		json.EndArray();
+		return json.ToString();
+	}
+
+	Core::String Debugger::SnapshotJson(Core::StringView wsId) {
+		Library** library = m_Libraries.Find(Core::String(wsId));
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("captures", library ? (*library)->Json().View() : Core::StringView("[]"));
+		json.RawField("targets", TargetsJson(wsId).View());
+		json.Field("captureFolder", c_CaptureFolder);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static bool HasNative(const FS::Path& folder) {
+		return FS::FileExists((folder / "flashbang.dll").CStr()) && FS::FileExists((folder / "flashbang-replay.exe").CStr());
+	}
+
+	Core::String Debugger::NativeFolder(Core::StringView wsId) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String setting = m_Context->Setting(Core::StringView("gpu.nativeFolder"), wsId);
+		Serialization::DomNode chosen = setting.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(setting.View(), *doc).root;
+		if (chosen.Kind() == Serialization::DomKind::String && !chosen.AsView().IsEmpty())
+			return HasNative(FS::Path(chosen.AsView())) ? Core::String(chosen.AsView()) : Core::String();
+		// An installed IED keeps them in the plugin's bin; a checkout of this repository in its build folder.
+		FS::Path plugin = FS::Path(m_Context->Folder().View());
+		if (HasNative(plugin / "bin")) return Core::String((plugin / "bin").View());
+		FS::Path builds = plugin.Parent().Parent() / "build" / "bin";
+		Core::Array<Core::String> configs = {Core::String("Development"), Core::String("Debug"), Core::String("Dist")};
+		for (const Core::String& config : configs) {
+			FS::Path folder = builds / (config + "-windows-x64").View() / "flashbang";
+			if (HasNative(folder)) return Core::String(folder.View());
+		}
+		return Core::String();
+	}
+
+	void Debugger::Opened(const IED::Workspace& ws) {
+		Library* library = new Library();
+		library->m_WsId = ws.m_Id;
+		library->m_Folder = IED::WorkspaceFile(ws, Core::StringView(c_CaptureFolder));
+		library->m_Captures = ScanCaptures(library->Folder());
+		Debugger* self = this;
+		Core::String wsId = ws.m_Id;
+		m_Context->Atomically([self, library, wsId](IED::Events& events) { self->m_Libraries.Insert(wsId, library); });
+		m_Context->TopicFrom(LibraryTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->SnapshotJson(wsId.View()); });
+	}
+
+	void Debugger::Rescan(Core::StringView wsId) {
+		Library** found = m_Libraries.Find(Core::String(wsId));
+		if (!found) return;
+		Library* library = *found;
+		Core::Array<Capture*> captures = ScanCaptures(library->Folder());
+		Core::String id = Core::String(wsId);
+		m_Context->Atomically([library, captures, id](IED::Events& events) {
+			library->m_Captures = captures;
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.RawField("captures", library->Json().View());
+			json.EndObject();
+			events.Publish(LibraryTopic(id.View()).View(), "captures", json.View());
+		});
+	}
+}

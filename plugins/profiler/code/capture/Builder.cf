@@ -1,0 +1,92 @@
+include "Builder.ch"
+
+namespace Profiler
+{
+	void StreamBuilder::Init() {
+		m_Defs = new WireWriter();
+		m_Body = new WireWriter();
+	}
+
+	void StreamBuilder::Append(const WireWriter& from) {
+		const Core::Array<uint8>& bytes = from.Bytes();
+		if (bytes.Count() > c_PreambleBytes) m_Out.Append(bytes.Data() + c_PreambleBytes, bytes.Count() - c_PreambleBytes);
+	}
+
+	void StreamBuilder::Hello(Core::StringView app, uint64 pid, int64 clockFreqHz, int64 startTicks, int64 startUnixNs) {
+		WireWriter hello;
+		hello.BeginChunk(c_GlobalChunk, 0, startTicks);
+		hello.Type(EventType::Hello);
+		hello.Varint(c_ItpVersion);
+		hello.Text(app);
+		hello.Varint(pid);
+		hello.Varint((uint64)clockFreqHz);
+		hello.Varint((uint64)startTicks);
+		hello.Varint((uint64)startUnixNs);
+		hello.Varint(0);
+		hello.Text(Core::StringView(""));
+		hello.EndChunk();
+		Append(hello);
+	}
+
+	void StreamBuilder::OpenDefinitions() {
+		if (m_DefsOpen) return;
+		m_Defs->BeginChunk(c_GlobalChunk, 0, 0);
+		m_DefsOpen = true;
+	}
+
+	uint64 StreamBuilder::String(Core::StringView text) {
+		if (text.IsEmpty()) return 0;
+		uint64 id;
+		if (m_Strings.TryGet(Core::String(text), id)) return id;
+		id = (uint64)m_Strings.Count() + 1;
+		m_Strings.Insert(Core::String(text), id);
+		OpenDefinitions();
+		m_Defs->Type(EventType::StringDef);
+		m_Defs->Varint(id);
+		m_Defs->Text(text);
+		return id;
+	}
+
+	uint64 StreamBuilder::Site(Core::StringView name, Core::StringView function, Core::StringView file, uint64 line) {
+		Core::StringBuilder key;
+		key.Append(name);
+		key.AppendByte(0);
+		key.Append(function);
+		key.AppendByte(0);
+		key.Append(file);
+		key.AppendByte(0);
+		key.AppendUInt(line);
+		uint64 id;
+		if (m_Sites.TryGet(key.ToString(), id)) return id;
+		const uint64 nameStr = String(name);
+		const uint64 functionStr = String(function);
+		const uint64 fileStr = String(file);
+		id = (uint64)m_Sites.Count() + 1;
+		m_Sites.Insert(key.ToString(), id);
+		OpenDefinitions();
+		m_Defs->Type(EventType::SrcLocDef);
+		m_Defs->Varint(id);
+		m_Defs->Varint(nameStr);
+		m_Defs->Varint(functionStr);
+		m_Defs->Varint(fileStr);
+		m_Defs->Varint(line);
+		m_Defs->Varint(0);
+		return id;
+	}
+
+	void StreamBuilder::BeginChunk(uint64 thread, int64 baseTicks) {
+		m_Body->BeginChunk(thread == 0 ? c_GlobalChunk : c_ThreadChunk, thread, baseTicks);
+	}
+
+	void StreamBuilder::EndChunk() {
+		m_Body->EndChunk();
+		if (m_DefsOpen) {
+			m_Defs->EndChunk();
+			Append(*m_Defs);
+			m_Defs = new WireWriter();
+			m_DefsOpen = false;
+		}
+		Append(*m_Body);
+		m_Body = new WireWriter();
+	}
+}

@@ -1,0 +1,69 @@
+// contextmeter: the parts scaled to the server's count, the meter drawn again for another model's window, and the
+// compress mark only for a model IED compresses (docs/04 "Context management").
+
+include "ContextMeter.ch"
+
+static Ai::ContextPart MeterPart(const char* name, int64 tokens) {
+	Ai::ContextPart part;
+	part.m_Name = Core::String(name);
+	part.m_Tokens = tokens;
+	return part;
+}
+
+static Core::Array<Ai::ContextPart> FourParts() {
+	Core::Array<Ai::ContextPart> parts;
+	parts.Push(MeterPart("System prompt", 1000));
+	parts.Push(MeterPart("Tool definitions", 3000));
+	parts.Push(MeterPart("Messages", 4000));
+	parts.Push(MeterPart("Tool results", 2000));
+	return parts;
+}
+
+[test("server.ai.contextmeter")]
+class ContextMeterTests {
+	[test("parts_add_up_to_the_count")]
+	public static void TestScaled() {
+		Core::Array<Ai::ContextPart> scaled = Ai::ScaledParts(FourParts(), 12345);
+		int64 total = 0;
+		for (const Ai::ContextPart& part : scaled) total += part.m_Tokens;
+		assert_eq((int64)12345, total, "the parts add up to the server's count");
+		assert_eq((int64)1235, scaled[0].m_Tokens, "each in its share");
+		assert_eq((int64)1000, Ai::ScaledParts(FourParts(), 0)[0].m_Tokens, "no count: the estimates as they are");
+	}
+
+	[test("another_models_window")]
+	public static void TestForModel() {
+		Core::String local = Ai::ContextJson(32768, 20000, Core::StringView("qwen"), false, Ai::ScaledParts(FourParts(), 20000));
+		assert_true(local.View().Contains(Core::StringView("\"compressAt\":85")), "IED compresses a local model's context");
+		assert_true(!local.View().Contains(Core::StringView("compacts")), "a local model does not compact itself");
+		assert_se("qwen", Ai::ContextModel(local.View()).CStr(), "the model it counted");
+		Core::String claude = Ai::ContextForModel(local.View(), 200000, Core::StringView("claude-opus"), true);
+		assert_true(claude.View().Contains(Core::StringView("\"window\":200000")), "the new model's window");
+		assert_true(claude.View().Contains(Core::StringView("\"used\":20000")), "the same count");
+		assert_true(claude.View().Contains(Core::StringView("\"compacts\":true")) && !claude.View().Contains(Core::StringView("compressAt")), "Claude compacts its own");
+		assert_se("claude-opus", Ai::ContextModel(claude.View()).CStr(), "the model it is drawn for");
+		assert_se("", Ai::ContextModel(Core::StringView("")).CStr(), "no meter, no model");
+		assert_true(!local.View().Contains(Core::StringView("estimated")) && !local.View().Contains(Core::StringView("source")), "a plain count");
+	}
+
+	[test("claudes_count")]
+	public static void TestClaudeCount() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode usage = Serialization::ReadJson(Core::StringView("{\"totalTokens\": 479667, \"maxTokens\": 1000000, \"rawMaxTokens\": 1000000, \"categories\": ["
+			"{\"name\": \"System prompt\", \"tokens\": 10347, \"kind\": \"used\"}, {\"name\": \"Messages\", \"tokens\": 469320, \"kind\": \"used\"},"
+			"{\"name\": \"Free space\", \"tokens\": 475333, \"kind\": \"free\"}, {\"name\": \"Autocompact buffer\", \"tokens\": 45000, \"kind\": \"buffer\"}]}"), *doc).root;
+		int64 used = 0;
+		int64 window = 0;
+		assert_true(Ai::ReadClaudeContext(usage, used, window), "a count");
+		assert_eq((int64)479667, used, "the CLI's total");
+		assert_eq((int64)1000000, window, "its window");
+		Core::Array<Ai::ContextPart> parts = Ai::ScaledParts(FourParts(), used);
+		Core::String meter = Ai::ContextJson(window, used, Core::StringView("claude-opus"), true, parts, Core::StringView("claude"));
+		assert_se("claude", Ai::ContextSource(meter.View()).CStr(), "the count is Claude's");
+		assert_true(Ai::HasIedParts(meter.View()), "IED's four parts");
+		assert_true(!Ai::HasIedParts(Core::StringView("{\"parts\": [{\"name\": \"System prompt\", \"tokens\": 1}, {\"name\": \"Messages\", \"tokens\": 2}]}")), "the CLI's rows are not");
+		assert_true(meter.View().Contains(Core::StringView("\"name\":\"Tool definitions\"")) && meter.View().Contains(Core::StringView("\"name\":\"Tool results\"")), "IED's four parts");
+		Serialization::DomNode none = Serialization::ReadJson(Core::StringView("{\"categories\": []}"), *doc).root;
+		assert_true(!Ai::ReadClaudeContext(none, used, window), "no count, nothing");
+	}
+}

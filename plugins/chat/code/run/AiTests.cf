@@ -1,0 +1,350 @@
+// ai: server-sent events, one completion put together from its chunks, the dialects local models write, and what a
+// model server says of itself - its window, and the gauges that say whether it has work in flight.
+
+include "Sse.ch"
+include "Completion.ch"
+include "Dialect.ch"
+include "Probe.ch"
+include "chats/Models.ch"
+include "Step.ch"
+
+static Core::StringView View(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.sse")]
+class SseTests {
+	[test("events_and_comments")]
+	public static void TestEventsAndComments() {
+		Ai::SseReader sse;
+		sse.Feed(View(": keepalive\n\ndata: {\"a\":1}\n"));
+		Ai::SseEvent event;
+		assert_true(sse.Next(event), "the comment");
+		assert_true(event.m_Kind == Ai::SseKind::Comment, "kept apart from data");
+		assert_true(!sse.Next(event), "the event has not ended");
+		sse.Feed(View("\r\ndata: [DONE]\n\n"));
+		assert_true(sse.Next(event) && event.m_Data.View() == "{\"a\":1}", "a CRLF blank line ends it");
+		assert_true(sse.Next(event) && event.m_Data.View() == "[DONE]", "then the next");
+	}
+
+	[test("data_lines_join")]
+	public static void TestDataLinesJoin() {
+		Ai::SseReader sse;
+		sse.Feed(View("data: one\ndata:two\nevent: x\n\n"));
+		Ai::SseEvent event;
+		assert_true(sse.Next(event) && event.m_Data.View() == "one\ntwo", "data lines join with a newline; the space after the colon is optional");
+	}
+
+	[test("bytes_split_anywhere")]
+	public static void TestBytesSplitAnywhere() {
+		Core::StringView stream = View("data: {\"x\":\"hello\"}\n\ndata: [DONE]\n\n");
+		Ai::SseReader sse;
+		Ai::SseEvent event;
+		int32 events = 0;
+		for (int64 i = 0; i < stream.ByteLength(); ++i) {
+			sse.Feed(stream.Substring(i, 1));
+			while (sse.Next(event)) events += 1;
+		}
+		assert_eq(2, events, "one byte at a time");
+	}
+
+	[test("flush_takes_an_unended_event")]
+	public static void TestFlush() {
+		Ai::SseReader sse;
+		sse.Feed(View("data: last"));
+		Ai::SseEvent event;
+		assert_true(!sse.Next(event), "no blank line yet");
+		assert_true(sse.Flush(event) && event.m_Data.View() == "last", "a server that closed without it");
+	}
+}
+
+[test("server.ai.completion")]
+class CompletionTests {
+	[test("content_reasoning_finish_usage")]
+	public static void TestContent() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"delta\":{\"reasoning_content\":\"hm\"}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"reasoning\":\" ok\"}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3},\"timings\":{\"prompt_per_second\":250.5}}"), deltas);
+		completion.Take(View("[DONE]"), deltas);
+		assert_true(completion.m_Content.View() == "Hello", "content joins");
+		assert_true(completion.m_Reasoning.View() == "hm ok", "reasoning_content and reasoning both count");
+		assert_true(completion.m_FinishReason.View() == "stop", "the finish reason");
+		assert_eq((int64)12, completion.m_PromptTokens, "usage");
+		assert_eq((int64)3, completion.m_CompletionTokens, "usage");
+		assert_true(completion.m_PromptPerSecond > 250.0, "llama.cpp's timings");
+		assert_true(completion.m_Done, "[DONE]");
+		assert_eq((int64)4, deltas.Count(), "one delta per piece");
+		assert_true(deltas[0].m_Kind == Ai::DeltaKind::Reasoning && deltas[2].m_Kind == Ai::DeltaKind::Content, "kinds");
+	}
+
+	[test("prompt_progress")]
+	public static void TestProgress() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null}}],\"object\":\"chat.completion.chunk\",\"prompt_progress\":{\"total\":655,\"cache\":0,\"processed\":139,\"time_ms\":313}}"), deltas);
+		assert_eq((int64)1, deltas.Count(), "llama.cpp's progress, and no content from a null one");
+		assert_true(deltas[0].m_Kind == Ai::DeltaKind::Progress, "a progress delta");
+		assert_true(deltas[0].m_Text.View().Contains(View("\"processed\":139")) && deltas[0].m_Text.View().Contains(View("\"total\":655")), "its object as it came");
+		assert_true(completion.m_Content.IsEmpty(), "nothing said yet");
+	}
+
+	[test("the_prefill_rate_a_step_teaches")]
+	public static void TestMeasuredPrefillRate() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":149000}}}"), deltas);
+		assert_eq((int64)1000, completion.ReadTokens(), "what the server had to read, not the whole prompt");
+		assert_true(completion.MeasuredPrefillRate(1300) <= 0.0, "a cached answer in a second teaches nothing: its rate would starve the next cold read");
+
+		Ai::Completion cold;
+		cold.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":1000}}}"), deltas);
+		assert_eq((int64)149000, cold.ReadTokens(), "the rest of the prompt was read");
+		assert_true(cold.MeasuredPrefillRate(40000) > 3600.0 && cold.MeasuredPrefillRate(40000) < 3900.0, "read tokens over the wait");
+
+		Ai::Completion quiet;
+		quiet.Take(View("{\"usage\":{\"prompt_tokens\":150000,\"completion_tokens\":1}}"), deltas);
+		assert_eq((int64)150000, quiet.ReadTokens(), "a server that says nothing of its cache: all of it was read");
+		assert_true(quiet.MeasuredPrefillRate(2000) > 74000.0, "its wait for the first token was the read");
+		assert_true(quiet.MeasuredPrefillRate(2000, 4000) > 1999.0 && quiet.MeasuredPrefillRate(2000, 4000) < 2001.0, "unless the request only added to a prefix it held: the added tokens were the read");
+		assert_true(quiet.MeasuredPrefillRate(2000, 500) <= 0.0, "and too few of those teach nothing");
+
+		Ai::Completion llama;
+		llama.Take(View("{\"usage\":{\"prompt_tokens\":9000},\"timings\":{\"prompt_n\":9000,\"cache_n\":8000,\"prompt_per_second\":1200.5}}"), deltas);
+		assert_eq((int64)1000, llama.ReadTokens(), "llama.cpp counts the cached prefix in timings");
+		assert_true(llama.MeasuredPrefillRate(100000) > 1200.0 && llama.MeasuredPrefillRate(100000) < 1201.0, "what the server measured reading");
+	}
+
+	[test("malformed_chunk_is_skipped")]
+	public static void TestMalformed() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"delta\":{\"content\":\"a\"}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"del"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"content\":\"b\"}}]}"), deltas);
+		assert_eq((int64)1, completion.m_MalformedChunks, "counted");
+		assert_true(completion.m_Content.View() == "ab", "and skipped");
+	}
+	[test("error_in_the_stream")]
+	public static void TestError() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"error\":{\"message\":\"context length exceeded\",\"code\":400}}"), deltas);
+		assert_true(completion.m_Errored && completion.m_ErrorMessage.View() == "context length exceeded", "the server's message");
+	}
+
+	[test("tool_calls_merge_by_id_then_index")]
+	public static void TestToolCalls() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\",\"function\":{\"name\":\"fs_read\",\"arguments\":\"{\\\"pa\"}}]}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":1}\"}}]}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"b\",\"function\":{\"name\":\"fs_list\",\"arguments\":\"{}\"}}]}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}"), deltas);
+		assert_eq((int64)2, completion.m_Calls.Count(), "two ids at one index stay two calls");
+		assert_true(completion.m_Calls[0]->m_Name.View() == "fs_read" && completion.m_Calls[0]->m_Arguments.View() == "{\"path\":1}", "an id-less delta joins the latest call at its index");
+		assert_true(completion.m_Calls[1]->m_Name.View() == "fs_list", "the second call");
+		assert_true(deltas[1].m_Call == 0 && deltas[2].m_Call == 1, "deltas name their call");
+	}
+
+	[test("id_arriving_late_joins")]
+	public static void TestLateId() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"finish\",\"arguments\":\"\"}}]}}]}"), deltas);
+		completion.Take(View("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"arguments\":\"{}\"}}]}}]}"), deltas);
+		assert_eq((int64)1, completion.m_Calls.Count(), "an id first seen later joins the id-less call at its index");
+		assert_true(completion.m_Calls[0]->m_Id.View() == "c1" && completion.m_Calls[0]->m_Arguments.View() == "{}", "and gives it the id");
+	}
+}
+
+[test("server.ai.dialect")]
+class DialectTests {
+	[test("think_split_across_chunks")]
+	public static void TestThink() {
+		Ai::ThinkSplitter splitter;
+		Core::String thinking;
+		Core::String visible;
+		const char*[5] chunks = { "<thi", "nk>plan", "ning</th", "ink>Hello <", "b>" };
+		for (int32 i = 0; i < 5; ++i) splitter.Feed(View(chunks[i]), thinking, visible);
+		splitter.Flush(thinking, visible);
+		assert_true(thinking.View() == "planning", "the reasoning");
+		assert_true(visible.View() == "Hello <b>", "the rest, a '<' that was not a tag included");
+		assert_true(splitter.SawThink() && !splitter.InThink(), "closed");
+	}
+
+	[test("unclosed_think_is_reasoning")]
+	public static void TestUnclosedThink() {
+		Ai::ThinkSplitter splitter;
+		Core::String thinking;
+		Core::String visible;
+		splitter.Feed(View("<think>still going"), thinking, visible);
+		splitter.Flush(thinking, visible);
+		assert_true(thinking.View() == "still going" && visible.IsEmpty() && splitter.InThink(), "a cut stream ends inside");
+	}
+
+	[test("hermes")]
+	public static void TestHermes() {
+		Core::String rest;
+		Core::Array<Ai::TextToolCall> calls = Ai::ParseTextToolCalls(View("Reading it.\n<tool_call>\n{\"name\": \"fs_read\", \"arguments\": {\"path\": \"a.cf\"}}\n</tool_call>"), rest);
+		assert_eq((int64)1, calls.Count(), "one call");
+		assert_true(calls[0].m_Name.View() == "fs_read", "its name");
+		assert_true(calls[0].m_Arguments.View() == "{\"path\":\"a.cf\"}", "its arguments as JSON");
+		assert_true(rest.View() == "Reading it.", "the prose around it");
+	}
+
+	[test("qwen")]
+	public static void TestQwen() {
+		Core::String rest;
+		Core::Array<Ai::TextToolCall> calls = Ai::ParseTextToolCalls(View("<tool_call>\n<function=fs_read>\n<parameter=path>\nsrc/a.cf\n</parameter>\n<parameter=offset>\n10\n</parameter>\n</function>\n</tool_call>"), rest);
+		assert_eq((int64)1, calls.Count(), "one call");
+		assert_true(calls[0].m_Name.View() == "fs_read", "its name");
+		assert_true(calls[0].m_Arguments.View() == "{\"path\":\"src/a.cf\",\"offset\":10}", "a raw value is a string, a JSON one stays JSON");
+	}
+
+	[test("mistral_list_and_args")]
+	public static void TestMistral() {
+		Core::String rest;
+		Core::Array<Ai::TextToolCall> calls = Ai::ParseTextToolCalls(View("[TOOL_CALLS][{\"name\": \"fs_list\", \"arguments\": {}}, {\"name\": \"finish\", \"arguments\": {\"summary\": \"x\"}}]"), rest);
+		assert_eq((int64)2, calls.Count(), "a list of calls");
+		assert_true(calls[1].m_Name.View() == "finish" && rest.IsEmpty(), "both, nothing left");
+		calls = Ai::ParseTextToolCalls(View("[TOOL_CALLS]fs_read[ARGS]{\"path\": \"b\"}"), rest);
+		assert_eq((int64)1, calls.Count(), "the name[ARGS] form");
+		assert_true(calls[0].m_Name.View() == "fs_read" && calls[0].m_Arguments.View() == "{\"path\": \"b\"}", "arguments as written");
+	}
+
+	[test("fenced_json")]
+	public static void TestFenced() {
+		Core::String rest;
+		Core::Array<Ai::TextToolCall> calls = Ai::ParseTextToolCalls(View("I'll list it:\n```json\n{\"name\": \"fs_list\", \"parameters\": {\"path\": \".\"}}\n```"), rest);
+		assert_eq((int64)1, calls.Count(), "one call");
+		assert_true(calls[0].m_Name.View() == "fs_list" && calls[0].m_Arguments.View() == "{\"path\":\".\"}", "parameters count as arguments");
+		calls = Ai::ParseTextToolCalls(View("```json\n{\"a\": 1}\n```"), rest);
+		assert_eq((int64)0, calls.Count(), "a fenced object without a name is just code");
+	}
+
+	[test("harmony")]
+	public static void TestHarmony() {
+		Core::String rest;
+		Core::Array<Ai::TextToolCall> calls = Ai::ParseTextToolCalls(View("<|start|>assistant<|channel|>commentary to=functions.fs_read <|constrain|>json<|message|>{\"path\": \"c\"}<|call|>"), rest);
+		assert_eq((int64)1, calls.Count(), "one call");
+		assert_true(calls[0].m_Name.View() == "fs_read" && calls[0].m_Arguments.View() == "{\"path\": \"c\"}", "name and arguments");
+	}
+
+	[test("prose_is_not_a_call")]
+	public static void TestProse() {
+		Core::String rest;
+		assert_eq((int64)0, Ai::ParseTextToolCalls(View("I will now read the file."), rest).Count(), "no calls");
+		assert_true(!Ai::LooksLikeTextToolCall(View("I will now read the file.")), "nothing that looks like one");
+		assert_true(Ai::LooksLikeTextToolCall(View("<tool_call>{\"name\": \"fs_read\", \"argu")), "a cut call looks like one");
+	}
+}
+
+[test("server.ai.probe")]
+class ProbeTests {
+	[test("llamacpp_props_and_models")]
+	public static void TestLlamaCpp() {
+		Ai::ModelProbe probe;
+		Ai::ReadModelList(View("{\"object\": \"list\", \"data\": [{\"id\": \"qwen\", \"meta\": {\"n_ctx\": 262144, \"n_ctx_train\": 262144}}]}"), probe);
+		assert_eq((int64)262144, probe.m_ContextWindow, "llama.cpp's meta.n_ctx");
+		Ai::ReadProps(View("{\"default_generation_settings\": {\"n_ctx\": 65536}, \"total_slots\": 4}"), probe);
+		assert_true(probe.m_Server.View() == "llama.cpp", "/props names llama.cpp");
+		assert_eq((int64)65536, probe.m_ContextWindow, "the slot context wins over the model's");
+		assert_eq((int64)4, probe.m_Slots, "slots");
+		assert_true(probe.m_Models.Count() == 1 && probe.m_Models[0].View() == "qwen", "the ids");
+		assert_true(!probe.m_Vision, "no modalities: no images");
+		Ai::ReadProps(View("{\"default_generation_settings\": {\"n_ctx\": 8192}, \"modalities\": {\"vision\": true, \"audio\": false}}"), probe);
+		assert_true(probe.m_Vision, "a vision projector loaded");
+	}
+
+	[test("vllm_max_model_len")]
+	public static void TestVllm() {
+		Ai::ModelProbe probe;
+		Ai::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\"}]}"), probe);
+		assert_eq((int64)32768, probe.m_ContextWindow, "vLLM's max_model_len");
+		assert_eq((int64)2, probe.m_Models.Count(), "every model");
+		Ai::ReadProps(View("{\"error\": \"not found\"}"), probe);
+		assert_eq((int64)32768, probe.m_ContextWindow, "props without a slot context change nothing");
+	}
+
+	[test("the_profiles_model_wins")]
+	public static void TestWantedModel() {
+		Ai::ModelProbe probe;
+		Ai::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\", \"max_model_len\": 131072}]}"), probe, View("b"));
+		assert_eq((int64)131072, probe.m_ContextWindow, "the window of the model the profile names");
+		Ai::ModelProbe other;
+		Ai::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\"}]}"), other, View("b"));
+		assert_eq((int64)32768, other.m_ContextWindow, "the first model's when the profile's says none");
+	}
+
+	[test("server_root")]
+	public static void TestServerRoot() {
+		assert_true(Ai::ServerRoot(View("http://h:8080/v1")).View() == "http://h:8080", "/v1 off");
+		assert_true(Ai::ServerRoot(View("http://h:8080/v1/")).View() == "http://h:8080", "a trailing slash too");
+		assert_true(Ai::ServerRoot(View("http://h:11434")).View() == "http://h:11434", "no /v1 stays");
+	}
+
+	// A vLLM's real answer, cut to the lines that matter (the owner's server, 2026-10-25: the gauges 6 kB into a 71 kB body).
+	[test("what_a_servers_gauges_say_of_its_work")]
+	public static void TestMetricsLiveness() {
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 1.0\n")), "a vLLM, working");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 1.0\n")), "the gauge above 0");
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running{engine=\"0\"} 0.0\n")), "a vLLM, idle");
+		assert_true(!Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting{engine=\"0\"} 0.0\n")), "both gauges 0: nothing in its engine");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting{engine=\"0\",reason=\"capacity\"} 1.0\n")), "queued work counts as work");
+		assert_true(Ai::MetricsSayWorking(View("vllm:num_requests_running{engine=\"0\"} 0.0\nvllm:num_requests_waiting_by_reason{engine=\"0\",reason=\"capacity\"} 1.0\n")), "and so does vLLM 0.32's split of it by reason");
+		assert_true(!Ai::MetricsHasRequestGauges(View("process_cpu_seconds_total 1245.88\nvllm:prefix_cache_hits_total 1.0e+08\n")), "no request gauges: nothing to ask it with");
+		assert_true(Ai::MetricsHasRequestGauges(View("vllm:num_requests_running 1.0\n")), "a gauge with no labels");
+		assert_true(!Ai::MetricsSayWorking(View("vllm:num_requests_running_created 1.792e+09\n")), "the _created series is a different metric, not the gauge");
+		assert_true(!Ai::MetricsHasRequestGauges(View("vllm:num_requests_running_created 1.792e+09\n")), "and says nothing of the server either");
+		assert_true(!Ai::MetricsSayWorking(View("")), "an empty answer");
+		// An engine's lines come after the process's own, far into a large answer: reading only the head of it used to
+		// decide a healthy vLLM says nothing of itself (the owner's server, 2026-10-25: the gauges 2 kB into 71 kB).
+		assert_true(Ai::MetricsHasRequestGauges(View("# HELP python_gc_objects_collected_total Objects collected during gc\n"
+													  "python_gc_objects_collected_total{generation=\"2\"} 42897.0\n"
+													  "# TYPE vllm:num_requests_running gauge\n"
+													  "vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 0.0\n")),
+													  "the gauges past the head of a big answer, and a # TYPE line is no gauge");
+	}
+}
+
+[test("server.ai.models")]
+class ModelTests {
+	[test("an_off_role_uses_primary")]
+	public static void TestOffRole() {
+		Core::Array<Core::String> problems;
+		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(View("{\"a\": {\"endpoint\": \"http://a/v1\"}, \"b\": {\"endpoint\": \"http://b/v1\"}}"), problems);
+		const char* groups = "{\"g\": {\"primary\": {\"model\": \"b\", \"fallback\": [\"a\"]}, \"worker\": {\"model\": \"a\"}}}";
+		Ai::RoleModel role;
+		Core::Array<Ai::ModelProfile*> worker = Ai::RoleCandidates(models, View(groups), View("g"), View("worker"), role);
+		assert_true(worker.Count() == 1 && worker[0]->m_Name.View() == "a", "a role that is on uses its model");
+		Ai::RoleModel off;
+		Core::Array<Ai::ModelProfile*> planning = Ai::RoleCandidates(models, View(groups), View("g"), View("planning"), off);
+		assert_true(planning.Count() == 2 && planning[0]->m_Name.View() == "b" && planning[1]->m_Name.View() == "a", "an off role is the primary, fallbacks too");
+		Ai::RoleModel none;
+		Core::Array<Ai::ModelProfile*> first = Ai::RoleCandidates(models, View("{}"), View("g"), View("primary"), none);
+		assert_true(first.Count() == 1 && first[0]->m_Name.View() == "a", "no group: the first model");
+		assert_true(problems.IsEmpty(), "both profiles read");
+	}
+
+	[test("a_chain_with_paces")]
+	public static void TestChainPaces() {
+		const char* groups = "{\"g\": {\"primary\": {\"model\": \"opus\", \"pace\": {\"max\": 1.0, \"target\": \"week\"}, \"fallback\": [{\"model\": \"haiku\", \"pace\": {\"max\": 1.5}}, \"local\", {\"model\": \"sonnet\"}]}}}";
+		Ai::RoleModel role;
+		assert_true(Ai::ReadRole(View(groups), View("g"), View("primary"), role), "read");
+		assert_true(role.m_Pace.m_Max == 1.0 && role.m_Pace.m_Target == "week", "the role's model has its pace");
+		assert_true(role.m_Fallback.Count() == 3 && role.m_Fallback[0] == "haiku" && role.m_Fallback[1] == "local" && role.m_Fallback[2] == "sonnet", "a fallback is a name or {model, pace}");
+		assert_true(role.PaceOf(View("haiku")).m_Max == 1.5 && role.PaceOf(View("haiku")).m_Target == "both", "target both when it names none");
+		assert_true(role.PaceOf(View("local")).m_Max == 0 && role.PaceOf(View("sonnet")).m_Max == 0 && role.PaceOf(View("nowhere")).m_Max == 0, "no pace: always");
+		Core::Array<Core::String> problems;
+		Ai::ReadModels(View("{\"old\": {\"provider\": \"claude-code\", \"model\": \"auto\"}}"), problems);
+		assert_true(problems.Count() == 1 && problems[0].View().Contains(View("model auto is gone")), "an auto profile is refused");
+	}
+
+	[test("a_turns_role_comes_from_its_mode")]
+	public static void TestRoleOfMode() {
+		assert_se("primary", Core::String(Ai::RoleOfMode(View("ask"))).CStr(), "ask");
+		assert_se("planning", Core::String(Ai::RoleOfMode(View("plan"))).CStr(), "plan");
+		assert_se("implementation", Core::String(Ai::RoleOfMode(View("agent"))).CStr(), "agent");
+	}
+}

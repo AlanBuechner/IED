@@ -1,0 +1,408 @@
+include "ChatStore.ch"
+include "Models.ch"
+
+namespace Ai
+{
+	FS::Path LocalStateOf(const IED::Workspace& ws) { return FS::Path(IED::WorkspaceFile(ws, Core::StringView(".ied/local")).View()); }
+
+	FS::Path ChatFolder(const FS::Path& state, Core::StringView chatId) { return state / "chats" / chatId; }
+
+	static void WriteWhole(const FS::Path& file, Core::StringView text) {
+		FS::MakeDirectories(file.Parent().CStr());
+		FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+	}
+
+	// A chat's file as UTF-8: one written before the JSON writer kept to UTF-8 (C4 BUG-384) can hold a console's
+	// bytes, which read as U+FFFD rather than lose the whole file to the JSON reader.
+	static Core::String ReadWhole(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		return text.View().IsValidUtf8() ? text : Core::ValidUtf8(text.View());
+	}
+
+	static Serialization::DomNode ParseJson(Core::StringView text) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	void SaveChatHeader(const FS::Path& state, const Chat* chat) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("chatId", chat->m_ChatId.View());
+		json.Field("title", chat->m_Title.View());
+		json.Field("mode", ChatModeName(chat->m_Mode));
+		json.Field("permission", PermissionModeName(chat->m_Permission));
+		json.Field("group", chat->m_Group.View());
+		if (!chat->m_Effort.IsEmpty()) json.Field("effort", chat->m_Effort.View());
+		if (!chat->m_PinnedModel.IsEmpty()) json.Field("pinnedModel", chat->m_PinnedModel.View());
+		if (!chat->m_ClaudeSession.IsEmpty()) {
+			json.Key(Core::StringView("claude"));
+			json.BeginObject();
+			json.Field("session", chat->m_ClaudeSession.View());
+			json.Key(Core::StringView("turns"));
+			json.BeginArray();
+			for (const Core::String& turnId : chat->m_ClaudeTurns) json.String(turnId.View());
+			json.EndArray();
+			json.EndObject();
+		}
+		if (!chat->m_Context.IsEmpty()) json.RawField("context", chat->m_Context.View());
+		// The calibration of IED's estimate, so a restart neither compresses early nor late (docs/04 "Context management").
+		if (!chat->m_EstimateModel.IsEmpty()) {
+			json.Field("estimateModel", chat->m_EstimateModel.View());
+			json.IntField("estimateOffset", chat->m_EstimateOffset);
+			json.IntField("lastPromptTokens", chat->m_LastPromptTokens);
+			json.IntField("promptHead", chat->m_PromptHead);
+			if (chat->m_PromptRewritten) json.BoolField("promptRewritten", true);
+		}
+		json.Key(Core::StringView("compressedTurns"));
+		json.BeginArray();
+		for (const Turn* turn : chat->m_Turns)
+			if (turn->m_Compressed) json.String(turn->m_TurnId.View());
+		json.EndArray();
+		json.IntField("createdMs", chat->m_CreatedMs);
+		json.IntField("updatedMs", chat->m_UpdatedMs);
+		json.IntField("counter", chat->m_Counter);
+		if (!chat->m_Resume.IsEmpty()) json.Field("resume", chat->m_Resume.View());
+		json.Key(Core::StringView("tasks"));
+		chat->WriteTasks(json);
+		json.Key(Core::StringView("queued"));
+		json.BeginArray();
+		for (OwnerMessage* message : chat->m_Queued) message->WriteJson(json);
+		json.EndArray();
+		json.Key(Core::StringView("pending"));
+		json.BeginArray();
+		for (OwnerMessage* message : chat->m_Pending) message->WriteJson(json);
+		json.EndArray();
+		json.Key(Core::StringView("loadedTools"));
+		json.BeginArray();
+		for (const Core::String& name : chat->m_LoadedTools) json.String(name.View());
+		json.EndArray();
+		json.Key(Core::StringView("allowed"));
+		json.BeginArray();
+		for (const Core::String& subject : chat->m_Allowed) json.String(subject.View());
+		json.EndArray();
+		json.Key(Core::StringView("modified"));
+		chat->WriteModified(json);
+		json.Key(Core::StringView("clips"));
+		json.BeginArray();
+		for (Clip* clip : chat->m_Clips) {
+			json.BeginObject();
+			json.Field("name", clip->m_Name.View());
+			json.Field("source", clip->m_Source.View());
+			json.Field("text", clip->m_Text.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("background"));
+		chat->WriteBackground(json);
+		if (!chat->m_Agent.IsEmpty()) json.Field("agent", chat->m_Agent.View());
+		if (!chat->m_ParentChatId.IsEmpty()) json.Field("parentChatId", chat->m_ParentChatId.View());
+		json.EndObject();
+		WriteWhole(ChatFolder(state, chat->m_ChatId.View()) / "chat.json", json.View());
+	}
+
+	void AppendTurn(const FS::Path& state, const Chat* chat, const Turn* turn) {
+		FS::Path folder = ChatFolder(state, chat->m_ChatId.View());
+		FS::MakeDirectories(folder.CStr());
+		IED::JsonWriter json;
+		turn->WriteJson(json, true);
+		Core::String line = json.ToString() + "\n";
+		FS::File out = FS::File((folder / "turns.jsonl").CStr(), "ab");
+		out.Write((const void*)line.View().Data(), line.ByteLength());
+		out.Sync();
+	}
+
+	void SaveRunningTurn(const FS::Path& state, const Chat* chat, const Turn* turn) {
+		IED::JsonWriter json;
+		turn->WriteJson(json, true);
+		WriteWhole(ChatFolder(state, chat->m_ChatId.View()) / "running.json", json.View());
+	}
+
+	void ForgetRunningTurn(const FS::Path& state, const Chat* chat) { FS::RemoveFile((ChatFolder(state, chat->m_ChatId.View()) / "running.json").CStr()); }
+
+	void SaveContextView(const FS::Path& state, const Chat* chat) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		for (const Turn* turn : chat->m_Turns)
+			for (int64 i = 0; i < turn->m_Messages.Count(); ++i) {
+				const ModelMessage* message = turn->m_Messages[i];
+				if (message->m_Shown.IsEmpty() && !message->m_ImagesOut) continue;
+				json.BeginObject();
+				json.Field("turn", turn->m_TurnId.View());
+				json.IntField("at", i);
+				if (!message->m_Shown.IsEmpty()) json.Field("shown", message->m_Shown.View());
+				if (message->m_ImagesOut) json.BoolField("imagesOut", true);
+				json.EndObject();
+			}
+		json.EndArray();
+		json.EndObject();
+		WriteWhole(ChatFolder(state, chat->m_ChatId.View()) / "context.json", json.View());
+	}
+
+	static Turn* TurnNamed(const Chat* chat, Core::StringView turnId) {
+		for (Turn* turn : chat->m_Turns)
+			if (turn->m_TurnId.View() == turnId) return turn;
+		return nullptr;
+	}
+
+	// What compression showed of the messages, as context.json kept it; a message it names that is not there is passed
+	// over (the view is of what requests send, never the chat's record).
+	static void ReadContextView(Chat* chat, const Serialization::DomNode& view) {
+		Serialization::DomNode messages = view.Member("messages");
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			Serialization::DomNode entry = messages.At(i);
+			Turn* turn = TurnNamed(chat, entry.Member("turn").AsView());
+			const int64 at = entry.Member("at").AsInt();
+			if (!turn || at < 0 || at >= turn->m_Messages.Count()) continue;
+			turn->m_Messages[at]->m_Shown = Core::String(entry.Member("shown").AsView());
+			turn->m_Messages[at]->m_ImagesOut = entry.Member("imagesOut").AsBool();
+		}
+	}
+
+	static void ReadHeader(Chat* chat, const Serialization::DomNode& header) {
+		chat->m_Title = Core::String(header.Member("title").AsView());
+		ReadChatMode(header.Member("mode").AsView(), chat->m_Mode);
+		ReadPermissionMode(header.Member("permission").AsView(), chat->m_Permission);
+		chat->m_Group = Core::String(header.Member("group").AsView());
+		if (IsEffort(header.Member("effort").AsView())) chat->m_Effort = Core::String(header.Member("effort").AsView());
+		chat->m_PinnedModel = Core::String(header.Member("pinnedModel").AsView());
+		chat->m_ClaudeSession = Core::String(header.Member("claude").Member("session").AsView());
+		Serialization::DomNode claudeTurns = header.Member("claude").Member("turns");
+		for (int64 i = 0; i < claudeTurns.Count(); ++i) chat->m_ClaudeTurns.Push(Core::String(claudeTurns.At(i).AsView()));
+		if (header.Member("context").Kind() == Serialization::DomKind::Object) {
+			Core::StringBuilder context;
+			Serialization::WriteJson(header.Member("context"), &context, 0);
+			chat->m_Context = context.ToString();
+		}
+		chat->m_EstimateModel = Core::String(header.Member("estimateModel").AsView());
+		chat->m_EstimateOffset = header.Member("estimateOffset").AsInt();
+		chat->m_LastPromptTokens = header.Member("lastPromptTokens").AsInt();
+		chat->m_PromptHead = header.Member("promptHead").AsInt();
+		chat->m_PromptRewritten = header.Member("promptRewritten").AsBool();
+		chat->m_CreatedMs = header.Member("createdMs").AsInt();
+		chat->m_UpdatedMs = header.Member("updatedMs").AsInt();
+		chat->m_Counter = header.Member("counter").AsInt();
+		chat->m_Resume = Core::String(header.Member("resume").AsView());
+		Serialization::DomNode tasks = header.Member("tasks");
+		for (int64 i = 0; i < tasks.Count(); ++i) {
+			ChatTask* task = new ChatTask();
+			task->m_Id = Core::String(tasks.At(i).Member("id").AsView());
+			task->m_Title = Core::String(tasks.At(i).Member("title").AsView());
+			task->m_Status = Core::String(tasks.At(i).Member("status").AsView());
+			task->m_Note = Core::String(tasks.At(i).Member("note").AsView());
+			chat->m_Tasks.Push(task);
+		}
+		Serialization::DomNode queued = header.Member("queued");
+		for (int64 i = 0; i < queued.Count(); ++i) {
+			OwnerMessage* message = new OwnerMessage();
+			message->Read(queued.At(i));
+			chat->m_Queued.Push(message);
+		}
+		// Messages the turn a restart cut off had not taken yet wait for the next turn.
+		Serialization::DomNode pending = header.Member("pending");
+		for (int64 i = 0; i < pending.Count(); ++i) {
+			OwnerMessage* message = new OwnerMessage();
+			message->Read(pending.At(i));
+			chat->m_Queued.Push(message);
+		}
+		Serialization::DomNode loaded = header.Member("loadedTools");
+		for (int64 i = 0; i < loaded.Count(); ++i) chat->m_LoadedTools.Push(Core::String(loaded.At(i).AsView()));
+		Serialization::DomNode allowed = header.Member("allowed");
+		for (int64 i = 0; i < allowed.Count(); ++i) chat->m_Allowed.Push(Core::String(allowed.At(i).AsView()));
+		Serialization::DomNode modified = header.Member("modified");
+		for (int64 i = 0; i < modified.Count(); ++i) {
+			ModifiedFile* file = new ModifiedFile();
+			file->m_Path = Core::String(modified.At(i).Member("path").AsView());
+			file->m_Plus = modified.At(i).Member("plus").AsInt();
+			file->m_Minus = modified.At(i).Member("minus").AsInt();
+			chat->m_Modified.Push(file);
+		}
+		Serialization::DomNode clips = header.Member("clips");
+		for (int64 i = 0; i < clips.Count(); ++i) {
+			Clip* clip = new Clip();
+			clip->m_Name = Core::String(clips.At(i).Member("name").AsView());
+			clip->m_Source = Core::String(clips.At(i).Member("source").AsView());
+			clip->m_Text = Core::String(clips.At(i).Member("text").AsView());
+			chat->m_Clips.Push(clip);
+		}
+		// A task the server's stop ended with its process: lost, and told with the chat's next turn.
+		Serialization::DomNode background = header.Member("background");
+		for (int64 i = 0; i < background.Count(); ++i) {
+			BackgroundTask* task = new BackgroundTask();
+			task->Read(background.At(i));
+			if (task->Running()) {
+				task->m_State = Core::String("lost");
+				task->m_Summary = Core::String("lost: the server stopped while it ran");
+				task->m_EndedMs = chat->m_UpdatedMs;
+			}
+			chat->m_Background.Push(task);
+		}
+		chat->m_Agent = Core::String(header.Member("agent").AsView());
+		chat->m_ParentChatId = Core::String(header.Member("parentChatId").AsView());
+	}
+
+	static void ReadTurns(Chat* chat, Core::StringView text) {
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			if (end < 0) end = text.ByteLength();
+			Serialization::DomNode node = ParseJson(text.Substring(at, end - at));
+			if (node.Kind() == Serialization::DomKind::Object) {
+				Turn* turn = new Turn();
+				turn->Read(node);
+				chat->m_Turns.Push(turn);
+			}
+			at = end + 1;
+		}
+	}
+
+	// Whether `message` answers the call `callId`.
+	static bool Answers(const ModelMessage* message, Core::StringView callId) { return message->m_Role == "tool" && message->m_ToolCallId.View() == callId; }
+
+	// The calls of the turn's messages that have no result get one saying the restart cut them off.
+	void CloseOpenCalls(Turn* turn, Core::StringView note) {
+		Core::Array<Core::String> open;
+		for (ModelMessage* message : turn->m_Messages) {
+			if (message->m_ToolCalls.IsEmpty()) continue;
+			Serialization::DomNode calls = ParseJson(message->m_ToolCalls.View());
+			for (int64 i = 0; i < calls.Count(); ++i) open.Push(Core::String(calls.At(i).Member("id").AsView()));
+		}
+		for (const Core::String& callId : open) {
+			bool answered = false;
+			for (ModelMessage* message : turn->m_Messages) answered = answered || Answers(message, callId.View());
+			if (answered) continue;
+			ModelMessage* result = new ModelMessage();
+			result->m_Role = Core::String("tool");
+			result->m_ToolCallId = callId;
+			result->m_Content = Core::String(note);
+			turn->m_Messages.Push(result);
+		}
+	}
+
+	static void Interrupted(Chat* chat, const FS::Path& state, Turn* turn, Core::StringView note) {
+		for (Segment* segment : turn->m_Segments) {
+			if (segment->m_Type != "tool" || segment->m_State == "ok" || segment->m_State == "error" || segment->m_State == "denied") continue;
+			segment->m_State = Core::String("interrupted");
+			segment->m_Preview = Core::String(note);
+			segment->m_IsError = true;
+		}
+		CloseOpenCalls(turn, note);
+		turn->m_Stop = Core::String("interrupted");
+		turn->m_EndedMs = ChatNowMs();
+		chat->m_Turns.Push(turn);
+		chat->m_State = ChatState::Paused;
+		chat->m_StateReason = Core::String("interrupted");
+		AppendTurn(state, chat, turn);
+		ForgetRunningTurn(state, chat);
+	}
+
+	Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
+		FS::Path folder = ChatFolder(state, chatId);
+		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
+		if (header.Kind() != Serialization::DomKind::Object) {
+			problems.Push((Core::String("chat ") + chatId) + ": chat.json is missing or not JSON");
+			return nullptr;
+		}
+		Chat* chat = new Chat();
+		chat->m_ChatId = Core::String(chatId);
+		chat->m_WsId = Core::String(wsId);
+		ReadHeader(chat, header);
+		ReadTurns(chat, ReadWhole(folder / "turns.jsonl").View());
+		Serialization::DomNode compressed = header.Member("compressedTurns");
+		for (int64 i = 0; i < compressed.Count(); ++i)
+			for (Turn* turn : chat->m_Turns)
+				if (turn->m_TurnId.View() == compressed.At(i).AsView()) turn->m_Compressed = true;
+		Serialization::DomNode running = ParseJson(ReadWhole(folder / "running.json").View());
+		if (running.Kind() == Serialization::DomKind::Object) {
+			Turn* turn = new Turn();
+			turn->Read(running);
+			Interrupted(chat, state, turn, note);
+		}
+		ReadContextView(chat, ParseJson(ReadWhole(folder / "context.json").View()));
+		return chat;
+	}
+
+	Core::Array<Chat*> LoadChats(const FS::Path& state, Core::StringView wsId, Core::StringView interruptedNote, Core::Array<Core::String>& problems) {
+		Core::Array<Chat*> chats;
+		FS::Directory folder = FS::Directory((state / "chats").CStr());
+		if (!folder.IsOpen()) return chats;
+		for (FS::DirectoryEntry& entry : folder) {
+			if (entry.kind != FS::EntryKind::Directory) continue;
+			Chat* chat = LoadChat(state, wsId, entry.name.View(), interruptedNote, problems);
+			if (chat) chats.Push(chat);
+		}
+		return chats;
+	}
+
+	// --- Deleted chats ------------------------------------------------------------------------------------------------
+
+	FS::Path DeletedChatFolder(const FS::Path& state, Core::StringView chatId) { return state / "chats-deleted" / chatId; }
+
+	static bool MoveFolder(const FS::Path& from, const FS::Path& to, Core::String& problem) {
+		FS::MakeDirectories(to.Parent().CStr());
+		FS::RemoveAll(to.CStr());
+		if (FS::Rename(from.CStr(), to.CStr())) return true;
+		problem = (Core::String("could not move ") + from.View()) + " to " + to.View();
+		return false;
+	}
+
+	bool MoveToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem) {
+		FS::Path folder = DeletedChatFolder(state, chatId);
+		if (!MoveFolder(ChatFolder(state, chatId), folder, problem)) return false;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("deletedMs", nowMs);
+		json.EndObject();
+		WriteWhole(folder / "deleted.json", json.View());
+		return true;
+	}
+
+	bool MoveFromDeleted(const FS::Path& state, Core::StringView chatId, Core::String& problem) {
+		if (!MoveFolder(DeletedChatFolder(state, chatId), ChatFolder(state, chatId), problem)) return false;
+		FS::RemoveFile((ChatFolder(state, chatId) / "deleted.json").CStr());
+		return true;
+	}
+
+	static int64 CountLines(Core::StringView text) {
+		int64 lines = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.Data()[i] == '\n') lines += 1;
+		return lines;
+	}
+
+	static DeletedChat* LoadDeletedChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::Array<Core::String>& problems) {
+		FS::Path folder = DeletedChatFolder(state, chatId);
+		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
+		Serialization::DomNode deleted = ParseJson(ReadWhole(folder / "deleted.json").View());
+		if (header.Kind() != Serialization::DomKind::Object || deleted.Kind() != Serialization::DomKind::Object) {
+			problems.Push((Core::String("deleted chat ") + chatId) + ": chat.json or deleted.json is missing or not JSON");
+			return nullptr;
+		}
+		DeletedChat* chat = new DeletedChat();
+		chat->m_ChatId = Core::String(chatId);
+		chat->m_WsId = Core::String(wsId);
+		chat->m_Title = Core::String(header.Member("title").AsView());
+		chat->m_UpdatedMs = header.Member("updatedMs").AsInt();
+		chat->m_DeletedMs = deleted.Member("deletedMs").AsInt();
+		chat->m_TurnCount = CountLines(ReadWhole(folder / "turns.jsonl").View());
+		return chat;
+	}
+
+	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems) {
+		Core::Array<DeletedChat*> chats;
+		FS::Directory folder = FS::Directory((state / "chats-deleted").CStr());
+		if (!folder.IsOpen()) return chats;
+		for (FS::DirectoryEntry& entry : folder) {
+			if (entry.kind != FS::EntryKind::Directory) continue;
+			DeletedChat* chat = LoadDeletedChat(state, wsId, entry.name.View(), problems);
+			if (chat) chats.Push(chat);
+		}
+		return chats;
+	}
+
+	void PurgeDeletedChat(const FS::Path& state, Core::StringView chatId) { FS::RemoveAll(DeletedChatFolder(state, chatId).CStr()); }
+}

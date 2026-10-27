@@ -1,0 +1,45 @@
+// ied-desktop: IED's desktop app (docs/27). A window per IED view with the web client in WebView2; the user's
+// ied-server is started when none runs, and again when it dies while windows are open.
+
+include "App.ch"
+include "Shortcut.ch"
+include "FileTypes.ch"
+
+static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
+	Core::Array<Core::String> arguments;
+	for (int32 i = 1; i < argc; ++i) arguments.Push(Core::String((const char*)argv[i]));
+	return arguments;
+}
+
+// A windowed program has no console to print to, so usage and errors go to a message box.
+static int32 Tell(Core::StringView text, bool failed) {
+	Core::Array<char16> body = Desktop::Wide(text);
+	Core::Array<char16> caption = Desktop::Wide(Core::StringView("IED"));
+	MessageBoxW(null, body.Data(), caption.Data(), (uint32)(failed ? MB_ICONERROR : MB_ICONINFORMATION));
+	return failed ? 2 : 0;
+}
+
+// --register / --unregister: the Start menu's shortcut to this program, and IED's files opening in it. No message box:
+// a script runs these, and gets the exit code and, on a stderr it handed over, why.
+static int32 Registered(const Desktop::Options& options) {
+	Core::String error;
+	Core::String appData = Platform::GetEnvironmentVariable("APPDATA");
+	Core::StringView classes = Core::StringView(Desktop::c_UserClasses);
+	const bool done = options.m_Registering
+		? Desktop::Register(Platform::ExecutablePath(), appData.View(), error) && Desktop::RegisterFileTypes(Platform::ExecutablePath(), classes, error)
+		: Desktop::Unregister(appData.View(), error) && Desktop::UnregisterFileTypes(classes, error);
+	Desktop::AssociationsChanged();
+	if (!done) Platform::WriteError((Core::String("ied-desktop: ") + error.View() + "\n").View());
+	return done ? 0 : 1;
+}
+
+int32 main(int32 argc, char8** argv) {
+	Desktop::Options options;
+	Core::String error;
+	if (!Desktop::ParseOptions(Arguments(argc, argv), options, error))
+		return Tell((Core::String("ied-desktop: ") + error.View() + "\n\n" + Desktop::Usage()).View(), true);
+	if (options.m_Help) return Tell(Core::StringView(Desktop::Usage()), false);
+	if (options.m_Registering || options.m_Unregistering) return Registered(options);
+	Desktop::App* app = new Desktop::App(options);
+	return app->Run();
+}

@@ -1,0 +1,446 @@
+include "Front.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const int64 c_MaxUploadBytes = 67108864;
+	const char* c_ContentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+		"font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
+		"frame-ancestors 'self'";
+
+	static void Answer(Http::Response& response, int32 status, Core::StringView text) {
+		response.status = status;
+		Core::StringBuilder body;
+		body.Append(text);
+		body.AppendByte('\n');
+		response.SetText(Core::StringView("text/plain; charset=utf-8"), body.View());
+	}
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	bool PercentDecode(Core::StringView text, Core::String& decoded) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c != '%') { out.AppendByte(c); continue; }
+			if (i + 2 >= text.ByteLength() || HexValue(text.ByteAt(i + 1)) < 0 || HexValue(text.ByteAt(i + 2)) < 0) return false;
+			out.AppendByte(HexValue(text.ByteAt(i + 1)) * 16 + HexValue(text.ByteAt(i + 2)));
+			i += 2;
+		}
+		decoded = out.ToString();
+		return true;
+	}
+
+	static Core::String Lowered(Core::StringView text) {
+		Core::StringBuilder lower;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			lower.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return lower.ToString();
+	}
+
+	const char* ContentTypeOf(Core::StringView fileExtension) {
+		Core::String lowered = Lowered(fileExtension);
+		Core::StringView extension = lowered.View();
+		if (extension == ".html") return "text/html; charset=utf-8";
+		if (extension == ".js" || extension == ".mjs") return "text/javascript; charset=utf-8";
+		if (extension == ".css") return "text/css; charset=utf-8";
+		if (extension == ".json" || extension == ".map") return "application/json";
+		if (extension == ".svg") return "image/svg+xml";
+		if (extension == ".png") return "image/png";
+		if (extension == ".jpg" || extension == ".jpeg") return "image/jpeg";
+		if (extension == ".gif") return "image/gif";
+		if (extension == ".webp") return "image/webp";
+		if (extension == ".bmp") return "image/bmp";
+		if (extension == ".ico") return "image/x-icon";
+		if (extension == ".woff2") return "font/woff2";
+		if (extension == ".ttf") return "font/ttf";
+		if (extension == ".wasm") return "application/wasm";
+		if (extension == ".txt" || extension == ".md") return "text/plain; charset=utf-8";
+		return "application/octet-stream";
+	}
+
+	// docs/11: nothing sniffed, no referrer (a launch token in a URL must not leak), and on a page the content policy.
+	static void SecureHeaders(Http::Response& response, bool page) {
+		response.headers.Set(Core::StringView("X-Content-Type-Options"), Core::StringView("nosniff"));
+		response.headers.Set(Core::StringView("Referrer-Policy"), Core::StringView("no-referrer"));
+		if (page) response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView(c_ContentPolicy));
+	}
+
+	static bool IsWildcardBind(Core::StringView host) { return host.IsEmpty() || host == "0.0.0.0" || host == "::"; }
+
+	static int32 LowerAscii(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool SameIgnoringCase(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i)
+			if (LowerAscii(a.ByteAt(i)) != LowerAscii(b.ByteAt(i))) return false;
+		return true;
+	}
+
+	// The name part of a Host header: "[::1]" of "[::1]:8765", "localhost" of "localhost:8765".
+	static Core::StringView HostName(Core::StringView host) {
+		if (host.StartsWith(Core::StringView("["))) {
+			const int64 close = host.IndexOf(']', 0);
+			return close < 0 ? host : host.Substring(0, close + 1);
+		}
+		const int64 colon = host.IndexOf(':', 0);
+		return colon < 0 ? host : host.Substring(0, colon);
+	}
+
+	bool Front::HostAllowed(const Http::Request& request) const {
+		if (IsWildcardBind(m_Server->m_Config.m_Host.View())) return true;
+		const Core::String* host = request.headers.Find(Core::StringView("Host"));
+		Core::StringView name = HostName(host ? host->View() : Core::StringView(""));
+		if (SameIgnoringCase(name, Core::StringView("localhost")) || name == "127.0.0.1" || name == "[::1]") return true;
+		if (SameIgnoringCase(name, m_Server->m_Config.m_Host.View())) return true;
+		for (int64 i = 0; i < m_Server->m_Config.m_AllowHosts.Count(); ++i)
+			if (SameIgnoringCase(name, m_Server->m_Config.m_AllowHosts[i].View())) return true;
+		return false;
+	}
+
+	bool Front::OriginAllowed(const Http::Request& request) const {
+		const Core::String* origin = request.headers.Find(Core::StringView("Origin"));
+		if (!origin) return true;
+		const Core::String* host = request.headers.Find(Core::StringView("Host"));
+		Core::StringView hostText = host ? host->View() : Core::StringView("");
+		if (origin->View() == (Core::String("http://") + hostText).View() || origin->View() == (Core::String("https://") + hostText).View()) return true;
+		for (int64 i = 0; i < m_Server->m_Config.m_AllowOrigins.Count(); ++i)
+			if (origin->View() == m_Server->m_Config.m_AllowOrigins[i].View()) return true;
+		return false;
+	}
+
+	// Text the client accepts gzipped goes gzipped (the web client's scripts, Monaco's above all, on a phone's first load);
+	// the fastest level, since most bodies are read from disk for each request.
+	void Front::Handle(const Http::Request& request, Http::Response& response) {
+		Respond(request, response);
+		Http::CompressResponse(request, response, Compression::kFastestLevel);
+	}
+
+	// A workspace server's: the secret the master gave it (the header, or on a WebSocket upgrade the query) - anything
+	// else is refused before it is read further (docs/11 "Workspace servers").
+	bool Front::FromMaster(const Http::Request& request) const {
+		const Core::String* header = request.headers.Find(Core::StringView("X-IED-Secret"));
+		Core::StringView sent = header ? header->View() : QueryValue(request.query.View(), Core::StringView("secret"));
+		return SameSecret(sent, m_Server->m_Config.m_Secret.View());
+	}
+
+	static Core::String SentDevice(const Http::Request& request) {
+		const Core::String* header = request.headers.Find(Core::StringView("X-IED-Device"));
+		return Core::String(header ? header->View() : QueryValue(request.query.View(), Core::StringView("device")));
+	}
+
+	// A workspace server answers only its master: its sockets, uploads, blobs, its workspaces' files and plugin files.
+	void Front::RespondToMaster(const Http::Request& request, Http::Response& response) {
+		if (!HostAllowed(request) || !FromMaster(request)) {
+			AnswerJson(response, 403, Core::StringView("{\"error\":\"forbidden\",\"message\":\"a workspace server answers only its IED master server (docs/11)\"}"));
+			return;
+		}
+		Core::StringView path = request.path.View();
+		Core::StringView wsId;
+		Core::StringView rest;
+		// Whether the client is on the master's machine is the master's to say (`local=1`): this socket is the master's.
+		if (path == "/ws") Attach(request, response, SentDevice(request).View(), QueryValue(request.query.View(), Core::StringView("local")) == "1");
+		else if (path == "/healthz") Health(response);
+		else if (path == "/api/upload") Upload(request, response);
+		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
+		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
+		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, rest)) PluginFile(wsId, rest, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, rest)) WorkspaceImage(wsId, rest, response);
+		else Answer(response, 404, Core::StringView("not found"));
+	}
+
+	void Front::Respond(const Http::Request& request, Http::Response& response) {
+		if (!m_Server->IsMaster()) {
+			RespondToMaster(request, response);
+			return;
+		}
+		if (!HostAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Host is not allowed (DNS rebinding protection; see --allow-host)"));
+			return;
+		}
+		Core::StringView path = request.path.View();
+		if (path == "/healthz") Health(response);
+		else if (path.StartsWith(Core::StringView("/api/auth/")) && request.method.View() != "GET" && !OriginAllowed(request))
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+		else if (path.StartsWith(Core::StringView("/api/auth/"))) m_Gate.Api(path, request, response);
+		else if (request.method.View() == "GET" && m_Gate.Exchange(request, response)) {}
+		else {
+			Device* device = m_Gate.DeviceOf(request, response);
+			if (device) Route(path, request, response, device);
+			else Unauthenticated(path, request, response);
+		}
+	}
+
+	// "/w/<wsId>/<area>/<rest>": true, with the workspace's id and <rest>.
+	static bool WorkspacePath(Core::StringView path, Core::StringView area, Core::StringView& wsId, Core::StringView& rest) {
+		if (!path.StartsWith(Core::StringView("/w/"))) return false;
+		const int64 slash = path.IndexOf('/', 3);
+		if (slash < 0) return false;
+		Core::StringView after = path.Substring(slash + 1, path.ByteLength());
+		if (!after.StartsWith(area) || after.ByteLength() <= area.ByteLength() || after.ByteAt(area.ByteLength()) != '/') return false;
+		wsId = path.Substring(3, slash - 3);
+		rest = after.Substring(area.ByteLength() + 1, after.ByteLength());
+		return true;
+	}
+
+	// The image types a workspace file is served as: none that is markup, so nothing a repository holds runs script here.
+	static bool IsServedImage(Core::StringView extension) {
+		Core::String lowered = Lowered(extension);
+		Core::StringView e = lowered.View();
+		return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".gif" || e == ".webp" || e == ".bmp" || e == ".ico";
+	}
+
+	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
+		Core::StringView wsId;
+		Core::StringView pluginPath;
+		if (WorkspaceRoute(path, wsId, pluginPath)) {
+			const bool upgrade = pluginPath == "/ws" || request.method.View() != "GET";
+			if (upgrade && !OriginAllowed(request)) Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			else m_Server->m_Proxy->Forward(request, response, wsId, device);
+		}
+		else if (path == "/ws") WebSocket(request, response, device);
+		else if (path == "/api/upload") Upload(request, response);
+		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
+		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
+		else if (path.StartsWith(Core::StringView("/plugins/"))) PluginFile(Core::StringView(), path.Substring(9, path.ByteLength()), response);
+		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, pluginPath)) WorkspaceImage(wsId, pluginPath, response);
+		else if (path.StartsWith(Core::StringView("/ui-kit/"))) FolderFile(FS::Path(m_Server->m_Config.m_HomeDir.View()) / "shared" / "ui-kit", path.Substring(7, path.ByteLength()), response);
+		else if (path.StartsWith(Core::StringView("/codicons/"))) Codicon(path.Substring(10, path.ByteLength()), response);
+		else if (path.StartsWith(Core::StringView("/vendor/"))) VendorFile(path.Substring(7, path.ByteLength()), response);
+		else StaticFile(path, response);
+	}
+
+	// Without a session: the login page for a page, 401 for the rest.
+	void Front::Unauthenticated(Core::StringView path, const Http::Request& request, Http::Response& response) {
+		const bool get = request.method.View() == "GET";
+		if (get && m_Gate.IsPublic(path)) StaticFile(path, response);
+		else if (path.StartsWith(Core::StringView("/api/"))) AnswerJson(response, 401, Core::StringView("{\"error\":\"unauthenticated\"}"));
+		else if (!get || path == "/ws" || m_Server->m_Config.m_StaticDir.IsEmpty())
+			Answer(response, 401, Core::StringView("sign in first: open the link the server printed (OPEN ...)"));
+		else {
+			StaticFile(Core::StringView("/login.html"), response);
+			if (response.status == 200) response.status = 401;
+		}
+	}
+
+	void Front::WebSocket(const Http::Request& request, Http::Response& response, Device* device) {
+		if (!OriginAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			return;
+		}
+		Attach(request, response, device->m_Id.View(), request.peer.IsValid() && request.peer.IsLoopback());
+	}
+
+	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device, bool local) {
+		Server* shared = m_Server;
+		Core::String deviceId = Core::String(device);
+		Http::AcceptWebSocket(request, response, [shared, deviceId, local](Http::WebSocket& socket) {
+			Session* session = new Session(shared, &socket, Core::StringView("client"));
+			session->m_AuthDevice = deviceId;
+			session->m_Local = local;
+			session->Run();
+		});
+	}
+
+	void Front::Health(Http::Response& response) {
+		JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", true);
+		json.Field("serverVersion", m_Server->m_Config.m_Version.View());
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			json.Field("sessionEpoch", m_Server->m_Epoch.View());
+		}
+		json.EndObject();
+		response.SetText(Core::StringView("application/json"), json.View());
+	}
+
+	void Front::Upload(const Http::Request& request, Http::Response& response) {
+		if (request.method.View() != "PUT") {
+			Answer(response, 405, Core::StringView("use PUT"));
+			return;
+		}
+		if (m_Server->IsMaster() && !OriginAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			return;
+		}
+		if (request.body.Count() > c_MaxUploadBytes) {
+			Answer(response, 413, Core::StringView("an upload is at most 64 MiB"));
+			return;
+		}
+		const Core::String* type = request.headers.Find(Core::StringView("Content-Type"));
+		Core::String id = m_Server->m_Blobs->Put(type ? type->View() : Core::StringView("application/octet-stream"), request.body);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("blobId", id.View());
+		json.IntField("size", request.body.Count());
+		json.EndObject();
+		response.status = 201;
+		response.SetText(Core::StringView("application/json"), json.View());
+	}
+
+	void Front::Blob(Core::StringView id, const Http::Request& request, Http::Response& response) {
+		if (request.method.View() != "GET") {
+			Answer(response, 405, Core::StringView("use GET"));
+			return;
+		}
+		Ied::Blob* blob = m_Server->m_Blobs->Get(id);
+		if (!blob) {
+			Answer(response, 404, Core::StringView("no such blob"));
+			return;
+		}
+		response.body = blob->m_Bytes;
+		response.headers.Set(Core::StringView("Content-Type"), blob->m_ContentType.View());
+	}
+
+	// /plugins/<id>/<path> (`wsId` empty) or /w/<wsId>/plugins/<id>/<path>: a loaded plugin's file (grammars, icons, UI
+	// modules), never one outside its folder.
+	void Front::PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response) {
+		Core::String decoded;
+		if (!PercentDecode(path, decoded) || decoded.View().IndexOf('/', 0) < 0) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		Core::StringView text = decoded.View();
+		const int64 split = text.IndexOf('/', 0);
+		FS::Path file;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			Workspace* ws = wsId.IsEmpty() ? nullptr : m_Server->m_Workspaces->Find(wsId);
+			if (wsId.IsEmpty() || ws) file = m_Server->m_Plugins->FileOf(ws, text.Substring(0, split), text.Substring(split + 1, text.ByteLength()));
+		}
+		if (file.IsEmpty()) Answer(response, 404, Core::StringView("not found"));
+		else SendFile(file, response);
+	}
+
+	void Front::WorkspaceImage(Core::StringView wsId, Core::StringView path, Http::Response& response) {
+		Core::String decoded;
+		Core::String relative;
+		if (!PercentDecode(path, decoded)) {
+			Answer(response, 400, Core::StringView("malformed path"));
+			return;
+		}
+		try {
+			relative = NormalizePath(decoded.View());
+		}
+		catch (RpcError& error) {
+			Answer(response, 403, Core::StringView("that path escapes the workspace"));
+			return;
+		}
+		FS::Path file;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			Workspace* ws = m_Server->m_Workspaces->Find(wsId);
+			if (ws && !relative.IsEmpty()) file = ws->At(relative.View());
+		}
+		if (file.IsEmpty() || !IsServedImage(Core::StringView(file.Extension())) || !FS::FileExists(file.CStr())) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		SendFile(file, response);
+		response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView("default-src 'none'; sandbox"));
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-cache"));
+	}
+
+	// /codicons/<name>.svg: one codicon from the install's third_party/codicons.
+	void Front::Codicon(Core::StringView file, Http::Response& response) {
+		if (!IsCodiconFile(file)) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		FS::Path icons = FS::Path(m_Server->m_Config.m_HomeDir.View()) / "third_party" / "codicons" / "src" / "icons";
+		FS::Path icon = icons / file;
+		if (!FS::FileExists(icon.CStr())) {
+			Core::String other = CodiconAliasFile(icons, file.Substring(0, file.ByteLength() - 4));
+			if (other.IsEmpty()) {
+				Answer(response, 404, Core::StringView("not found"));
+				return;
+			}
+			icon = icons / other.View();
+		}
+		SendFile(icon, response);
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("max-age=86400"));
+	}
+
+	Core::String CodiconAliasFile(const FS::Path& icons, Core::StringView name) {
+		FS::Path mapping = icons.Parent() / "template" / "mapping.json";
+		if (!FS::FileExists(mapping.CStr())) return Core::String();
+		FS::File opened = FS::File(mapping.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		if (!read.Ok()) return Core::String();
+		for (int64 i = 0; i < read.root.Count(); ++i) {
+			Serialization::DomNode names = read.root.ValueAt(i);
+			if (!NamesInclude(names, name)) continue;
+			for (int64 n = 0; n < names.Count(); ++n) {
+				Core::String file = Core::String(names.At(n).AsView()) + ".svg";
+				if (IsCodiconFile(file.View()) && FS::FileExists((icons / file.View()).CStr())) return file;
+			}
+		}
+		return Core::String();
+	}
+
+	bool NamesInclude(const Serialization::DomNode& names, Core::StringView name) {
+		for (int64 n = 0; n < names.Count(); ++n) if (names.At(n).AsView() == name) return true;
+		return false;
+	}
+
+	bool IsCodiconFile(Core::StringView file) {
+		if (!file.EndsWith(Core::StringView(".svg")) || file.ByteLength() <= 4) return false;
+		for (int64 i = 0; i < file.ByteLength() - 4; ++i) {
+			const int32 c = file.ByteAt(i);
+			if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+		}
+		return true;
+	}
+
+	// /vendor/<library>/<path>: the install's vendor/web libraries (Monaco, xterm.js), the same for every version of a
+	// library, so browsers may keep them a day.
+	void Front::VendorFile(Core::StringView path, Http::Response& response) {
+		FolderFile(FS::Path(m_Server->m_Config.m_HomeDir.View()) / "vendor" / "web", path, response);
+		if (response.status == 200) response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("max-age=86400"));
+	}
+
+	void Front::StaticFile(Core::StringView path, Http::Response& response) {
+		if (m_Server->m_Config.m_StaticDir.IsEmpty()) Answer(response, 404, Core::StringView("no web client is served (see --static)"));
+		else FolderFile(FS::Path(m_Server->m_Config.m_StaticDir.View()), path, response);
+	}
+
+	// A file under `root` named by a URL path; a folder's index.html. Nothing outside `root`.
+	void Front::FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response) {
+		Core::String decoded;
+		if (!PercentDecode(path, decoded)) {
+			Answer(response, 400, Core::StringView("malformed path"));
+			return;
+		}
+		Core::String relative;
+		try {
+			relative = NormalizePath(decoded.View());
+		}
+		catch (RpcError& error) {
+			Answer(response, 403, Core::StringView("that path escapes the web client's folder"));
+			return;
+		}
+		FS::Path file = root;
+		if (!relative.IsEmpty()) file = file / relative.View();
+		if (FS::IsDirectory(file.CStr())) file = file / "index.html";
+		if (!FS::FileExists(file.CStr())) Answer(response, 404, Core::StringView("not found"));
+		else SendFile(file, response);
+	}
+
+	void Front::SendFile(const FS::Path& file, Http::Response& response) {
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String body = opened.ReadText();
+		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), body.View());
+		SecureHeaders(response, file.Extension() == ".html");
+	}
+}

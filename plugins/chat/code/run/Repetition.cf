@@ -1,0 +1,24 @@
+include "Repetition.ch"
+
+namespace Ai
+{
+	const int64 c_RepetitionProbeBytes = 32;
+
+	// Whether every byte of the last `tailBytes` equals the one `period` before it.
+	static bool PeriodicTail(const char* bytes, int64 length, int64 tailBytes, int64 period) {
+		for (int64 i = length - tailBytes; i < length; ++i)
+			if (bytes[i] != bytes[i - period]) return false;
+		return true;
+	}
+
+	int64 RepeatedTailPeriod(Core::StringView text, int64 tailBytes) {
+		const int64 length = text.ByteLength();
+		if (length < tailBytes + c_RepetitionProbeBytes) return 0;
+		const char* bytes = text.Data();
+		const char* probe = bytes + length - c_RepetitionProbeBytes;
+		const int64 mostPeriod = tailBytes / 4 < c_RepetitionMostPeriod ? tailBytes / 4 : c_RepetitionMostPeriod;
+		for (int64 period = 1; period <= mostPeriod; ++period)
+			if (memcmp(probe - period, probe, c_RepetitionProbeBytes) == 0 && PeriodicTail(bytes, length, tailBytes, period)) return period;
+		return 0;
+	}
+}

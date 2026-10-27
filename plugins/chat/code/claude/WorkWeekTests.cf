@@ -1,0 +1,112 @@
+// workweek: a weekly window's pace over its work days (docs/04 "Pacing", ai.claude.paceDays): the counted time across a
+// reset in the middle of the week and one on a weekend, the weekend standing still, the days off a bar marks, a zone
+// ahead of UTC and a daylight saving change.
+
+include "ClaudeWire.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+static int64 At(const char* iso) { return Ai::IsoToMs(Text(iso)); }
+
+static Serialization::DomNode Parse(const char* json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Text(json), *doc).root;
+}
+
+static const int64 c_HourMs = 3600 * 1000;
+
+// Monday to Friday in a zone `offsetSeconds` ahead of UTC that never changes.
+static Ai::PaceDays WorkWeekAt(int32 offsetSeconds) {
+	Ai::PaceDays days;
+	days.m_WorkWeek = true;
+	days.m_WorkDays = Ai::c_WorkWeekDays;
+	days.m_OffsetOf = [offsetSeconds](int64 atMs) -> int32 { return offsetSeconds; };
+	return days;
+}
+
+static Ai::UsageWindow* Week(int64 resetsAtMs, double used) {
+	Ai::UsageWindow* window = new Ai::UsageWindow();
+	window->m_Id = Core::String("seven_day");
+	window->m_LengthMs = Ai::c_WeekWindowMs;
+	window->m_ResetsAtMs = resetsAtMs;
+	window->m_Utilization = used;
+	return window;
+}
+
+static bool Near(double value, double expected) { return value > expected - 0.001 && value < expected + 0.001; }
+
+[test("server.ai.workweek")]
+class WorkWeekTests {
+	[test("every_day_counts_unless_the_work_week_is_on")]
+	public static void TestEveryDay() {
+		const Ai::PaceDays days = Ai::EveryDay();
+		const int64 from = At("2025-10-22T14:00:00Z");
+		assert_true(Ai::CountedMs(days, from, from + Ai::c_WeekWindowMs) == Ai::c_WeekWindowMs, "the whole week");
+		assert_true(Ai::DaysOffIn(days, from, from + Ai::c_WeekWindowMs).IsEmpty(), "no days off");
+		assert_true(!Ai::CountsWorkDays(*Week(from + Ai::c_WeekWindowMs, 10), days), "a week's pace counts every day");
+		assert_true(Ai::ReadWorkDays(Parse("[\"mon\", \"wed\"]")) == ((1 << 1) | (1 << 3)) && Ai::ReadWorkDays(Parse("null")) == Ai::c_WorkWeekDays && Ai::ReadWorkDays(Parse("[]")) == 0, "ai.claude.workDays");
+		Ai::PaceDays none = WorkWeekAt(0);
+		none.m_WorkDays = 0;
+		assert_true(!Ai::CountsWorkDays(*Week(from + Ai::c_WeekWindowMs, 10), none), "no work day named: every day counts");
+	}
+
+	// A week that resets on a Wednesday at 14:00 (UTC here): 10 h of that Wednesday, Thursday, Friday, Monday, Tuesday and
+	// 14 h of the next Wednesday are its 120 work hours.
+	[test("a_week_that_resets_mid_week")]
+	public static void TestMidWeekReset() {
+		const Ai::PaceDays days = WorkWeekAt(0);
+		const int64 start = At("2025-10-22T14:00:00Z");
+		const int64 reset = start + Ai::c_WeekWindowMs;
+		assert_true(Ai::CountedMs(days, start, reset) == 120 * c_HourMs, "five work days in the seven");
+		Ai::UsageWindow* week = Week(reset, 58.0 / 1.2);
+		assert_true(Ai::CountsWorkDays(*week, days), "a weekly window counts its work days");
+		assert_true(Near(Ai::Through(*week, days, At("2025-10-23T14:00:00Z")), 0.2), "a day in: 24 of the 120 work hours");
+		const double friday = Ai::Through(*week, days, At("2025-10-25T00:00:00Z"));
+		assert_true(Near(friday, 58.0 / 120.0), "the work week's end: 58 hours");
+		assert_true(Near(Ai::Through(*week, days, At("2025-10-25T12:00:00Z")), friday) && Near(Ai::Through(*week, days, At("2025-10-26T23:00:00Z")), friday), "a weekend: the counted time stands still");
+		assert_true(Near(Ai::Through(*week, days, At("2025-10-27T06:00:00Z")), 64.0 / 120.0), "and goes on on Monday");
+		const double saturday = Ai::Pace(*week, days, At("2025-10-25T12:00:00Z"));
+		const double sunday = Ai::Pace(*week, days, At("2025-10-26T23:00:00Z"));
+		assert_true(Near(saturday, 1.0) && Near(sunday, 1.0), "the pace does not fall over the weekend");
+		assert_true(Ai::Pace(*week, Ai::EveryDay(), At("2025-10-26T23:00:00Z")) < 0.93, "as it does when every day counts");
+		Core::Array<Ai::DaysOff> off = Ai::DaysOffIn(days, start, reset);
+		assert_true(off.Count() == 1 && off[0].m_StartMs == At("2025-10-25T00:00:00Z") && off[0].m_EndMs == At("2025-10-27T00:00:00Z") && Near(off[0].m_At, 58.0 / 120.0),
+			"one weekend inside the window, where the even line stands through it");
+		Ai::UsageWindow* session = Week(At("2025-10-25T14:00:00Z"), 50);
+		session->m_Id = Core::String("five_hour");
+		session->m_LengthMs = 5 * c_HourMs;
+		assert_true(!Ai::CountsWorkDays(*session, days) && Near(Ai::Through(*session, days, At("2025-10-25T11:30:00Z")), 0.5), "the 5-hour session counts every hour, on a Saturday too");
+	}
+
+	[test("a_week_that_resets_on_a_weekend")]
+	public static void TestWeekendReset() {
+		const Ai::PaceDays days = WorkWeekAt(0);
+		const int64 start = At("2025-10-25T10:00:00Z");
+		const int64 reset = start + Ai::c_WeekWindowMs;
+		assert_true(Ai::CountedMs(days, start, reset) == 120 * c_HourMs, "Monday to Friday");
+		assert_true(Ai::Through(*Week(reset, 2), days, At("2025-10-26T12:00:00Z")) == 0.0 && Ai::Pace(*Week(reset, 2), days, At("2025-10-26T12:00:00Z")) == 0.0, "the weekend before the work week: nothing counted yet, a little use no pace");
+		assert_true(Ai::Pace(*Week(reset, 10), days, At("2025-10-26T12:00:00Z")) > 4.9, "a tenth of the week spent before the work week starts is far ahead of it");
+		assert_true(Ai::Through(*Week(reset, 90), days, At("2025-11-01T09:00:00Z")) == 1.0 && Near(Ai::Pace(*Week(reset, 90), days, At("2025-11-01T09:00:00Z")), 0.9), "no work time left: all of it gone");
+		Core::Array<Ai::DaysOff> off = Ai::DaysOffIn(days, start, reset);
+		assert_true(off.Count() == 2 && off[0].m_StartMs == start && off[0].m_EndMs == At("2025-10-27T00:00:00Z") && off[0].m_At == 0.0, "the weekend it starts in, at the bar's start");
+		assert_true(off[1].m_StartMs == At("2025-11-01T00:00:00Z") && off[1].m_EndMs == reset && off[1].m_At == 1.0, "the weekend it resets in, at its end");
+	}
+
+	[test("the_local_time_zone_and_daylight_saving")]
+	public static void TestTimeZones() {
+		const int64 start = At("2025-10-22T14:00:00Z");
+		const int64 reset = start + Ai::c_WeekWindowMs;
+		Core::Array<Ai::DaysOff> off = Ai::DaysOffIn(WorkWeekAt(2 * 3600), start, reset);
+		assert_true(off.Count() == 1 && off[0].m_StartMs == At("2025-10-24T22:00:00Z") && off[0].m_EndMs == At("2025-10-26T22:00:00Z"), "two hours ahead of UTC: the weekend starts at its midnight");
+		// Central European time: summer time (UTC+2) ends at 01:00 UTC on Sunday 2025-10-26, so that Sunday is 25 hours long.
+		const int64 change = At("2025-10-26T01:00:00Z");
+		Ai::PaceDays sundays;
+		sundays.m_WorkWeek = true;
+		sundays.m_WorkDays = 1;
+		sundays.m_OffsetOf = [change](int64 atMs) -> int32 { return atMs < change ? 7200 : 3600; };
+		assert_true(Ai::CountedMs(sundays, start, reset) == 25 * c_HourMs, "the Sunday daylight saving time ends on lasts 25 hours");
+		off = Ai::DaysOffIn(sundays, start, reset);
+		assert_true(off.Count() == 2 && off[0].m_EndMs == At("2025-10-25T22:00:00Z") && off[1].m_StartMs == At("2025-10-26T23:00:00Z"), "from its midnight in summer time to the next in winter time");
+		assert_true(Near(Ai::Through(*Week(reset, 10), sundays, At("2025-10-26T10:30:00Z")), 0.5), "half way through it, half way through the window's counted time");
+	}
+}

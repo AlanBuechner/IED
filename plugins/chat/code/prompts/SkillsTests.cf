@@ -1,0 +1,123 @@
+// ai/skills and plugin command tools (docs/26 section 8): a SKILL.md's frontmatter with inline and block lists, one
+// without a name, the first folder of a name winning, finding skills by words, the system message's list past its
+// limit, and a command tool's argv with the call's arguments put in.
+
+include "Skills.ch"
+include "aitools/PluginTools.ch"
+
+static void WriteText(const FS::Path& file, const char* text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::File opened = FS::File(file.CStr(), "wb");
+	opened.Write((const void*)text, Core::StringView(text).ByteLength());
+}
+
+static Serialization::DomNode SkillJson(const char* text) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Core::StringView(text), *doc).root;
+}
+
+static Ai::SkillFolder* Folder(const FS::Path& folder, const char* source) {
+	Ai::SkillFolder* entry = new Ai::SkillFolder();
+	entry->m_Folder = folder;
+	entry->m_Source = Core::String(source);
+	return entry;
+}
+
+static Ai::Skill* Named(const char* name, const char* description) {
+	Ai::Skill* skill = new Ai::Skill();
+	skill->m_Name = Core::String(name);
+	skill->m_Description = Core::String(description);
+	return skill;
+}
+
+[test("server.skills")]
+class SkillsTests {
+	[test("frontmatter")]
+	public static void TestFrontmatter() {
+		FS::Path root = FS::TempDirectory() / "ied-skills-test";
+		FS::RemoveAll(root.CStr());
+		WriteText(root / "a" / "SKILL.md", "---\r\nname: testing\r\ndescription: How to write tests.\r\nkeywords: [assert, fixture]\r\ntriggers:\r\n  - \"write a test\"\r\n---\r\n\r\n# Testing\r\n\r\nUse asserts.\r\n");
+		WriteText(root / "b" / "SKILL.md", "---\ndescription: no name\n---\nbody\n");
+		WriteText(root / "c" / "SKILL.md", "# no frontmatter at all\n");
+		Core::String problem;
+		Ai::Skill* skill = Ai::ReadSkill(root / "a" / "SKILL.md", Core::StringView("project"), problem);
+		assert_true(skill != nullptr, problem.CStr());
+		assert_se("testing", skill->m_Name.CStr(), "the name");
+		assert_se("How to write tests.", skill->m_Description.CStr(), "the description");
+		assert_eq((int64)3, skill->m_Keywords.Count(), "keywords and triggers both, inline and block lists");
+		assert_se("write a test", skill->m_Keywords[2].CStr(), "a block list item");
+		assert_se("# Testing\r\n\r\nUse asserts.", Ai::SkillBody(skill).CStr(), "the body without its frontmatter");
+		assert_true(Ai::ReadSkill(root / "b" / "SKILL.md", Core::StringView("project"), problem) == nullptr, "no name: not a skill");
+		assert_true(problem.View().Contains(Core::StringView("needs a name and a description")), problem.CStr());
+		assert_true(Ai::ReadSkill(root / "c" / "SKILL.md", Core::StringView("project"), problem) == nullptr, "no frontmatter: not a skill");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("first_of_a_name_wins")]
+	public static void TestFirstOfANameWins() {
+		FS::Path root = FS::TempDirectory() / "ied-skills-order";
+		FS::RemoveAll(root.CStr());
+		WriteText(root / "project" / "greet" / "SKILL.md", "---\nname: greet\ndescription: the project's\n---\n");
+		WriteText(root / "plugin" / "greet" / "SKILL.md", "---\nname: greet\ndescription: the plugin's\n---\n");
+		WriteText(root / "plugin" / "build" / "SKILL.md", "---\nname: build\ndescription: building\n---\n");
+		WriteText(root / "plugin" / "broken" / "SKILL.md", "---\nname: [unclosed\n---\n");
+		Core::Array<Ai::SkillFolder*> folders;
+		folders.Push(Folder(root / "project", "project"));
+		folders.Push(Folder(root / "plugin", "plugin p"));
+		folders.Push(Folder(root / "missing", "app"));
+		Core::Array<Core::String> problems;
+		Core::Array<Ai::Skill*> skills = Ai::ReadSkills(folders, problems);
+		assert_eq((int64)2, skills.Count(), "build and one greet");
+		assert_se("build", skills[0]->m_Name.CStr(), "in name order");
+		assert_se("the project's", Ai::SkillNamed(skills, Core::StringView("greet"))->m_Description.CStr(), "the first folder's greet");
+		assert_eq((int64)1, problems.Count(), "the broken one is a problem, the missing folder is not");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("search_and_index")]
+	public static void TestSearchAndIndex() {
+		Core::Array<Ai::Skill*> skills;
+		skills.Push(Named("c4-testing", "Unit tests in C4."));
+		skills.Push(Named("nuke", "Building with Nuke: build, run, test."));
+		skills.Push(Named("style", "Code style."));
+		Core::Array<Ai::Skill*> found = Ai::SearchSkills(skills, Core::StringView("How do I run a TEST?"), 10);
+		assert_eq((int64)2, found.Count(), "style matches no word");
+		assert_se("c4-testing", found[0]->m_Name.CStr(), "a word in the name counts most");
+		assert_true(Ai::SearchSkills(skills, Core::StringView("nothing here"), 10).IsEmpty(), "no word found: none");
+		Ai::SkillsIndexLimits limits = Ai::DefaultSkillsIndexLimits();
+		Core::String all = Ai::SkillsIndex(skills, Core::StringView(""), limits);
+		assert_se("- c4-testing: Unit tests in C4.\n- nuke: Building with Nuke: build, run, test.\n- style: Code style.\n", all.CStr(), "every skill under the limit");
+		limits.m_Listed = 2;
+		limits.m_Shown = 1;
+		assert_se("- style: Code style.\n(2 more: skill_search finds them)\n", Ai::SkillsIndex(skills, Core::StringView("style please"), limits).CStr(), "past the limit, the hint's best");
+		limits = Ai::DefaultSkillsIndexLimits();
+		limits.m_Bytes = 40;
+		assert_se("- c4-testing: Unit tests in C4.\n(2 more: skill_search finds them)\n", Ai::SkillsIndex(skills, Core::StringView(""), limits).CStr(), "within the byte cap");
+	}
+
+	[test("command_tool_argv")]
+	public static void TestCommandToolArgv() {
+		Core::Array<Core::String> words;
+		words.Push(Core::String("cargo"));
+		words.Push(Core::String("--package=${args.package}"));
+		words.Push(Core::String("${args.features}"));
+		words.Push(Core::String("${args.missing}"));
+		words.Push(Core::String("--path=${config:tool.path}"));
+		words.Push(Core::String("${other}"));
+		words.Push(Core::String("${tool:cargo}"));
+		Ai::ToolSetting setting = [](Core::StringView key) -> Core::String { return key == "tool.path" ? Core::String("C:/bin") : Core::String(); };
+		Ai::ToolSetting tool = [](Core::StringView id) -> Core::String { return id == "cargo" ? Core::String("C:/rust/cargo.exe") : Core::String(); };
+		Core::Array<Core::String> argv = Ai::ExpandToolArgv(words, SkillJson("{\"package\": \"game\", \"features\": [\"a\", \"b\"]}"), setting, tool);
+		assert_eq((int64)8, argv.Count(), "a list argument as a whole word is a word per item");
+		assert_se("C:/rust/cargo.exe", argv[7].CStr(), "a language tool's program");
+		assert_se("--path=C:/bin", argv[5].CStr(), "a setting");
+		assert_se("${other}", argv[6].CStr(), "anything else as written");
+		assert_se("--package=game", argv[1].CStr(), "an argument inside a word");
+		assert_se("b", argv[3].CStr(), "the list's items");
+		assert_se("", argv[4].CStr(), "an argument the call left out is empty");
+		Core::String problem;
+		assert_true(Ai::CommandTool(SkillJson("{\"name\": \"x\", \"binding\": \"a.b\"}"), Core::StringView("p"), problem) == nullptr, "no command: not a command tool");
+		Ai::ToolSpec* spec = Ai::CommandTool(SkillJson("{\"name\": \"cargo_meta\", \"description\": \"d\", \"class\": \"read\", \"inputSchema\": {\"type\": \"object\"}, \"run\": [\"cargo\", \"metadata\"]}"), Core::StringView("p"), problem);
+		assert_true(spec != nullptr && spec->m_ToolClass == Ai::ToolClass::Read && spec->m_InPlan, "a read tool is offered in Plan mode");
+	}
+}

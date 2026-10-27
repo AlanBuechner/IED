@@ -1,0 +1,357 @@
+// Why the slow frames are slow (T-PRF-15). A frame is slow past a threshold - twice the median frame when none is
+// asked. In each, every zone's self time on its thread is set against what that zone takes in a frame on average - on
+// the thread that marks the frames as it is, on another thread scaled by the frame's length, since a worker that runs
+// all the time does more of it in a longer frame without slowing it: the zones far past their usual time, the
+// collections, lock waits and allocations against their usual, and the warnings logged in it are the causes. Then the
+// causes are counted over every slow frame.
+include "Investigate.ch"
+
+namespace Profiler
+{
+	const int32 c_HitchZones = 4;
+	const int32 c_HitchWaits = 2;
+	const int32 c_HitchMessages = 3;
+	const int32 c_HitchCauses = 10;
+	const int32 c_WarningSeverity = 3;
+
+	void SlowFrames(const Capture& capture, const FrameSet* set, int64 thresholdTicks, Core::Array<int64>& out, int64& threshold, int64& median) {
+		out.Clear();
+		threshold = 0;
+		median = 0;
+		if (!set) return;
+		Core::Array<int64> durations;
+		for (int64 i = 0; i < set->m_Starts.Count(); ++i)
+			if (set->m_Ends[i] != c_Open) durations.Push(set->m_Ends[i] - set->m_Starts[i]);
+		durations.Sort();
+		median = Quantile(durations, 0.5);
+		threshold = thresholdTicks >= 0 ? thresholdTicks : median * 2;
+		if (threshold <= 0) return;
+		for (int64 i = 0; i < set->m_Starts.Count(); ++i)
+			if (set->m_Ends[i] != c_Open && set->m_Ends[i] - set->m_Starts[i] > threshold) out.Push(i);
+		out.SortBy([set](const int64& a, const int64& b) -> bool { return set->m_Ends[a] - set->m_Starts[a] > set->m_Ends[b] - set->m_Starts[b]; });
+	}
+
+	static uint64 TrackSite(int64 track, uint64 site) {
+		return ((uint64)track << 32) | site;
+	}
+
+	// What each zone (per thread) takes in a frame on average, over every completed frame.
+	class UsualTimes
+	{
+		public Core::HashMap<uint64, int64> m_SelfOf;
+		public int64 m_Frames;
+		public int64 m_MeanFrame;                 // ticks
+		public int64 m_FrameTrack = -1;
+		public Core::Array<int64> m_AllocsOf;     // allocations in each frame
+		public double m_AllocMean;
+
+		public void Build(const Capture& capture, const FrameSet* set) {
+			m_Frames = set->Completed();
+			m_FrameTrack = (int64)set->m_Track;
+			m_AllocsOf.Resize(set->m_Starts.Count());
+			if (m_Frames == 0) return;
+			const int64 begin = set->m_Starts[0];
+			const int64 end = set->m_Ends[m_Frames - 1];
+			m_MeanFrame = (end - begin) / m_Frames;
+			for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+				const ThreadTrack* track = capture.m_Tracks[t];
+				for (const ZoneLevel* level : track->m_Levels) {
+					const int64 stop = level->FirstStartingAt(end);
+					for (int64 i = level->FirstStartingAt(begin); i < stop; ++i) {
+						if (level->m_Ends[i] == c_Open) continue;
+						const uint64 key = TrackSite(t, (uint64)level->m_Sites[i]);
+						int64* known = m_SelfOf.Find(key);
+						if (known) *known += level->m_Selfs[i];
+						else m_SelfOf.Insert(key, level->m_Selfs[i]);
+					}
+				}
+			}
+			Core::Array<int64> bytesOf;
+			if (!FrameAllocations(capture, set, m_AllocsOf, bytesOf)) return;
+			int64 allocs = 0;
+			for (int64 f = 0; f < m_Frames; ++f) allocs += m_AllocsOf[f];
+			m_AllocMean = (double)allocs / (double)m_Frames;
+		}
+
+		public int64 PerFrame(uint64 key) const {
+			int64 total = 0;
+			m_SelfOf.TryGet(key, total);
+			return m_Frames == 0 ? 0 : total / m_Frames;
+		}
+
+		// What a zone usually takes in a frame `length` long: as much on the frame thread, in proportion elsewhere.
+		public int64 Usual(uint64 key, int64 track, int64 length) const {
+			const int64 perFrame = PerFrame(key);
+			if (m_FrameTrack < 0 || track == m_FrameTrack || m_MeanFrame <= 0) return perFrame;
+			return (int64)((double)perFrame * (double)length / (double)m_MeanFrame);
+		}
+	}
+
+	// A zone's time in one frame on one thread, and its longest instance there.
+	class FrameZone
+	{
+		public uint64 m_Key;
+		public int64 m_Track;
+		public uint64 m_Site;
+		public int64 m_Self;
+		public int64 m_Excess;
+		public int64 m_Longest = -1;
+		public ZoneRef m_Ref;
+	}
+
+	class LockWaitIn
+	{
+		public uint64 m_Lock;
+		public int32 m_Track;
+		public int64 m_Ns;
+	}
+
+	// A cause counted over the slow frames.
+	class Cause
+	{
+		public Core::String m_Kind;
+		public Core::String m_Name;
+		public Core::String m_Thread;
+		public int64 m_Frames;
+		public int64 m_Total;
+	}
+
+	class CauseTally
+	{
+		public Core::HashMap<Core::String, int64> m_SlotOf;
+		public Core::Array<Cause*> m_Causes;
+
+		public void Add(const char* kind, Core::StringView name, Core::StringView thread, int64 ticks) {
+			Core::String key = Core::String(kind) + ":" + name + "@" + thread;
+			int64 slot;
+			if (!m_SlotOf.TryGet(key, slot)) {
+				Cause* cause = new Cause();
+				cause->m_Kind = Core::String(kind);
+				cause->m_Name = Core::String(name);
+				cause->m_Thread = Core::String(thread);
+				slot = m_Causes.Count();
+				m_Causes.Push(cause);
+				m_SlotOf.Insert(key, slot);
+			}
+			m_Causes[slot]->m_Frames += 1;
+			m_Causes[slot]->m_Total += ticks;
+		}
+	}
+
+	static void ZonesInFrame(const Capture& capture, const UsualTimes& usual, Range frame, Core::Array<FrameZone*>& out) {
+		Core::HashMap<uint64, FrameZone*> zoneOf;
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.m_Tracks[t];
+			for (int64 depth = 0; depth < track->m_Levels.Count(); ++depth) {
+				const ZoneLevel* level = track->m_Levels[depth];
+				const int64 stop = level->FirstStartingAt(frame.m_End);
+				for (int64 i = level->FirstStartingAt(frame.m_Begin); i < stop; ++i) {
+					if (level->m_Ends[i] == c_Open) continue;
+					const uint64 key = TrackSite(t, (uint64)level->m_Sites[i]);
+					FrameZone* zone = nullptr;
+					if (!zoneOf.TryGet(key, zone)) {
+						zone = new FrameZone();
+						zone->m_Key = key;
+						zone->m_Track = t;
+						zone->m_Site = (uint64)level->m_Sites[i];
+						out.Push(zone);
+						zoneOf.Insert(key, zone);
+					}
+					zone->m_Self += level->m_Selfs[i];
+					if (level->m_Ends[i] - level->m_Starts[i] > zone->m_Longest) {
+						zone->m_Longest = level->m_Ends[i] - level->m_Starts[i];
+						zone->m_Ref = ZoneRef::Of(t, depth, i);
+					}
+				}
+			}
+		}
+		for (FrameZone* zone : out) zone->m_Excess = zone->m_Self - usual.Usual(zone->m_Key, zone->m_Track, frame.Length());
+		out.SortBy([](FrameZone* a, FrameZone* b) -> bool { return a->m_Excess > b->m_Excess; });
+	}
+
+	static int64 Overlap(Range range, int64 begin, int64 end) {
+		const int64 from = begin > range.m_Begin ? begin : range.m_Begin;
+		const int64 to = end < range.m_End ? end : range.m_End;
+		return to > from ? to - from : 0;
+	}
+
+	static void WaitsInFrame(const Capture& capture, Range frame, Core::Array<LockWaitIn*>& out) {
+		for (const LockInfo* lock : capture.m_LockList) {
+			for (const LockTrack* holder : lock->m_Tracks) {
+				int64 ns = 0;
+				for (int64 i = FirstReleasedAfter(holder, frame.m_Begin, capture.m_LastTicks); i < holder->m_Spans.Count(); ++i) {
+					const LockSpan& span = holder->m_Spans[i];
+					if (span.m_Wait >= frame.m_End) break;
+					ns += Overlap(frame, span.m_Wait, span.m_Obtain);
+				}
+				if (holder->m_WaitingSince >= 0) ns += Overlap(frame, holder->m_WaitingSince, capture.m_LastTicks);
+				if (ns == 0) continue;
+				LockWaitIn* wait = new LockWaitIn();
+				wait->m_Lock = lock->m_Id;
+				wait->m_Track = holder->m_Track;
+				wait->m_Ns = ns;
+				out.Push(wait);
+			}
+		}
+		out.SortBy([](LockWaitIn* a, LockWaitIn* b) -> bool { return a->m_Ns > b->m_Ns; });
+	}
+
+	static int64 GcInFrame(const Capture& capture, Range frame, int64& count) {
+		int64 ns = 0;
+		count = 0;
+		for (const GcRecord& gc : capture.m_Gcs) {
+			if (gc.m_End == c_Open) continue;
+			const int64 overlap = Overlap(frame, gc.m_Begin, gc.m_End);
+			if (overlap == 0) continue;
+			ns += overlap;
+			count += 1;
+		}
+		return ns;
+	}
+
+	// The time the frame thread spent inside its top-level zones during a frame.
+	static int64 FrameThreadBusy(const Capture& capture, int64 track, Range frame) {
+		if (track < 0 || track >= capture.m_Tracks.Count() || capture.m_Tracks[track]->m_Levels.IsEmpty()) return -1;
+		const ZoneLevel* top = capture.m_Tracks[track]->m_Levels[0];
+		int64 busy = 0;
+		const int64 stop = top->FirstStartingAt(frame.m_End);
+		for (int64 i = top->FirstEndingAfter(frame.m_Begin); i < stop; ++i) busy += Overlap(frame, top->m_Starts[i], top->EndOr(i, capture.m_LastTicks));
+		return busy;
+	}
+
+	static int64 FirstMessageAt(const Capture& capture, int64 t) {
+		int64 low = 0;
+		int64 high = capture.m_Messages.Count();
+		while (low < high) {
+			const int64 mid = (low + high) / 2;
+			if (capture.m_Messages[mid].m_T < t) low = mid + 1;
+			else high = mid;
+		}
+		return low;
+	}
+
+	static void WriteSlowFrame(IED::JsonWriter& json, const Capture& capture, const FrameSet* set, const UsualTimes& usual, int64 f, int64 median, CauseTally& causes, bool detail) {
+		Range frame;
+		frame.m_Begin = set->m_Starts[f];
+		frame.m_End = set->m_Ends[f];
+		Core::Array<FrameZone*> zones;
+		ZonesInFrame(capture, usual, frame, zones);
+		Core::Array<LockWaitIn*> waits;
+		WaitsInFrame(capture, frame, waits);
+		int64 gcCount;
+		const int64 gcNs = GcInFrame(capture, frame, gcCount);
+		const int64 least = frame.Length() / 100;
+		for (int64 k = 0; k < zones.Count() && k < (int64)c_HitchZones && zones[k]->m_Excess > least; ++k)
+			causes.Add("zone", capture.SiteName(zones[k]->m_Site), TrackLabel(capture, capture.m_Tracks[zones[k]->m_Track], frame.m_Begin).View(), zones[k]->m_Excess);
+		if (gcCount > 0) causes.Add("gc", Core::StringView("collections"), Core::StringView(""), gcNs);
+		for (int64 k = 0; k < waits.Count() && k < (int64)c_HitchWaits; ++k) {
+			LockInfo* lock = nullptr;
+			capture.m_Locks.TryGet(waits[k]->m_Lock, lock);
+			causes.Add("lock", LockName(capture, lock).View(), TrackLabel(capture, capture.m_Tracks[(int64)waits[k]->m_Track], frame.m_Begin).View(), waits[k]->m_Ns);
+		}
+		const int64 allocs = usual.m_AllocsOf[f];
+		if (usual.m_AllocMean > 0.0 && (double)allocs > usual.m_AllocMean * 2.0) causes.Add("allocations", Core::StringView("allocations"), Core::StringView(""), 0);
+		if (!detail) return;
+		json.BeginObject();
+		json.IntField("index", f);
+		json.IntField("startNs", capture.m_Clock.Ns(frame.m_Begin));
+		json.IntField("durationNs", capture.m_Clock.Ns(frame.Length()));
+		json.IntField("overNs", capture.m_Clock.Ns(frame.Length() - median));
+		const int64 busy = FrameThreadBusy(capture, (int64)set->m_Track, frame);
+		json.Field("frameThread", busy < 0 ? Core::StringView("") : TrackLabel(capture, capture.m_Tracks[(int64)set->m_Track], frame.m_Begin).View());
+		json.IntField("frameThreadBusyNs", busy < 0 ? -1 : capture.m_Clock.Ns(busy));
+		json.Key(Core::StringView("zones"));
+		json.BeginArray();
+		for (int64 k = 0; k < zones.Count() && k < (int64)c_HitchZones && zones[k]->m_Excess > least; ++k) {
+			const FrameZone* zone = zones[k];
+			const SrcLoc* loc = capture.m_Srclocs.Find(zone->m_Site);
+			json.BeginObject();
+			json.Field("name", capture.SiteName(zone->m_Site));
+			json.Field("thread", TrackLabel(capture, capture.m_Tracks[zone->m_Track], frame.m_Begin).View());
+			json.Field("ref", zone->m_Ref.Text().View());
+			json.Field("file", loc ? capture.SourceText(loc->m_FileStr).View() : Core::StringView(""));
+			json.IntField("line", loc ? (int64)loc->m_Line : 0);
+			json.IntField("selfNs", capture.m_Clock.Ns(zone->m_Self));
+			json.IntField("usualNs", capture.m_Clock.Ns(usual.Usual(zone->m_Key, zone->m_Track, frame.Length())));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("gc"));
+		json.BeginObject();
+		json.IntField("count", gcCount);
+		json.IntField("ns", capture.m_Clock.Ns(gcNs));
+		json.EndObject();
+		json.Key(Core::StringView("waits"));
+		json.BeginArray();
+		for (int64 k = 0; k < waits.Count() && k < (int64)c_HitchWaits; ++k) {
+			LockInfo* lock = nullptr;
+			capture.m_Locks.TryGet(waits[k]->m_Lock, lock);
+			json.BeginObject();
+			json.Field("lock", LockName(capture, lock).View());
+			json.Field("thread", TrackLabel(capture, capture.m_Tracks[(int64)waits[k]->m_Track], frame.m_Begin).View());
+			json.IntField("ns", capture.m_Clock.Ns(waits[k]->m_Ns));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("allocations"));
+		json.BeginObject();
+		json.IntField("count", allocs);
+		NumberField(json, "usual", usual.m_AllocMean, 1);
+		json.EndObject();
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		int64 written = 0;
+		for (int64 i = FirstMessageAt(capture, frame.m_Begin); i < capture.m_Messages.Count() && capture.m_Messages[i].m_T < frame.m_End && written < (int64)c_HitchMessages; ++i) {
+			const MessageRecord& message = capture.m_Messages[i];
+			if (message.m_Severity < c_WarningSeverity) continue;
+			json.BeginObject();
+			json.IntField("timeNs", capture.m_Clock.Ns(message.m_T));
+			json.IntField("severity", message.m_Severity);
+			json.Field("text", capture.Text(message.m_TextStr));
+			json.EndObject();
+			written += 1;
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	Core::String Hitches(const Capture& capture, const HitchAsk& ask) {
+		const FrameSet* set = MainFrameSet(capture);
+		Core::Array<int64> slow;
+		int64 threshold;
+		int64 median;
+		SlowFrames(capture, set, ask.m_ThresholdNs < 0 ? -1 : capture.m_Clock.Ticks(ask.m_ThresholdNs), slow, threshold, median);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("frames", set ? set->Completed() : 0);
+		json.IntField("medianNs", capture.m_Clock.Ns(median));
+		json.IntField("thresholdNs", capture.m_Clock.Ns(threshold));
+		json.IntField("slow", slow.Count());
+		json.IntField("worstNs", slow.IsEmpty() ? 0 : capture.m_Clock.Ns(set->m_Ends[slow[0]] - set->m_Starts[slow[0]]));
+		CauseTally causes;
+		json.Key(Core::StringView("list"));
+		json.BeginArray();
+		if (!slow.IsEmpty()) {
+			UsualTimes usual;
+			usual.Build(capture, set);
+			for (int64 k = 0; k < slow.Count(); ++k) WriteSlowFrame(json, capture, set, usual, slow[k], median, causes, k < (int64)ask.m_Limit);
+		}
+		json.EndArray();
+		causes.m_Causes.SortBy([](Cause* a, Cause* b) -> bool { return a->m_Frames != b->m_Frames ? a->m_Frames > b->m_Frames : a->m_Total > b->m_Total; });
+		json.Key(Core::StringView("causes"));
+		json.BeginArray();
+		for (int64 k = 0; k < causes.m_Causes.Count() && k < (int64)c_HitchCauses; ++k) {
+			const Cause* cause = causes.m_Causes[k];
+			json.BeginObject();
+			json.Field("kind", cause->m_Kind.View());
+			json.Field("name", cause->m_Name.View());
+			json.Field("thread", cause->m_Thread.View());
+			json.IntField("frames", cause->m_Frames);
+			json.IntField("meanNs", capture.m_Clock.Ns(cause->m_Total / cause->m_Frames));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

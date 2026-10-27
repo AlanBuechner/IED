@@ -1,0 +1,534 @@
+include "Service.ch"
+include "host/Server.ch"
+include "plugins/Context.ch"
+include "Commands.ch"
+
+namespace Ied
+{
+	Core::String ToolsTopic(const Workspace* ws) { return Core::String("tools:") + ws->m_WsId.View(); }
+
+	FS::Path ToolsFolder(Server* server) { return FS::Path(server->m_Config.m_DataDir.View()) / "tools"; }
+
+	void Tools::Init(Server* server) {
+		this.m_Server = server;
+		Tools* self = this;
+		server->m_Rpc.Register("tools.status", [self](Call& call, const Params& params) -> Core::String { return self->StatusMethod(call, params); });
+		server->m_Rpc.Register("tools.detect", [self](Call& call, const Params& params) -> Core::String { return self->DetectMethod(call, params); });
+		server->m_Rpc.Register("tools.install", [self](Call& call, const Params& params) -> Core::String { return self->InstallMethod(call, params); });
+		server->m_Rpc.Register("tools.cancel", [self](Call& call, const Params& params) -> Core::String { return self->CancelMethod(call, params); });
+		server->m_Rpc.Register("tools.dismiss", [self](Call& call, const Params& params) -> Core::String { return self->DismissMethod(call, params); });
+	}
+
+	// --- Workspaces --------------------------------------------------------------------------------------------------
+
+	WorkspaceTools* Tools::EntryOf(Workspace* ws) {
+		for (WorkspaceTools* entry : m_Entries)
+			if (entry->m_Ws == ws) return entry;
+		return nullptr;
+	}
+
+	WorkspaceTools* Tools::EntryParam(const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		WorkspaceTools* entry = EntryOf(ws);
+		if (!entry) throw RpcError(ErrorCode::NotFound, (Core::String("no workspace ") + ws->m_WsId.View()).View());
+		return entry;
+	}
+
+	void Tools::WorkspaceOpened(Workspace* ws) {
+		WorkspaceTools* entry = new WorkspaceTools();
+		entry->m_Ws = ws;
+		m_Entries.Push(entry);
+		Tools* self = this;
+		m_Server->m_Hub.Add(ToolsTopic(ws).View(), [self, entry]() -> Core::String { return self->Snapshot(entry); });
+		Detect(entry);
+	}
+
+	void Tools::TrustChanged(Workspace* ws) {
+		WorkspaceTools* entry = EntryOf(ws);
+		if (entry) Detect(entry);
+	}
+
+	void Tools::PluginsChanged(Workspace* ws) { TrustChanged(ws); }
+
+	// A setting may name a tool's program: when one of the tools' settings changed, they are found again.
+	void Tools::SettingsChanged(Workspace* ws) {
+		WorkspaceTools* entry = EntryOf(ws);
+		if (entry && entry->m_Detected && ToolSettings(ws) != entry->m_Settings) Detect(entry);
+	}
+
+	Core::String Tools::ToolSettings(Workspace* ws) {
+		Core::StringBuilder values;
+		for (const ToolSpec* spec : ToolsOf(ws))
+			if (!spec->m_Setting.IsEmpty()) {
+				values.Append(spec->m_Setting.View());
+				values.Append("=");
+				values.Append(SettingText(ws, spec->m_Setting.View()).View());
+				values.Append("\n");
+			}
+		return values.ToString();
+	}
+
+	// A pin file (go.mod, rust-toolchain.toml) that changed: its tools are found again.
+	void Tools::FilesChanged(Workspace* ws, const ChangeBatch& batch) {
+		WorkspaceTools* entry = EntryOf(ws);
+		if (!entry || !entry->m_Detected) return;
+		if (batch.Overflowed()) {
+			Detect(entry);
+			return;
+		}
+		for (const TreeChange& change : batch.Changes()) {
+			Core::StringView name = FS::Path(change.m_Path.View()).FileName();
+			for (const Core::String& pinned : entry->m_PinFiles)
+				if (pinned.View() == name) {
+					Detect(entry);
+					return;
+				}
+		}
+	}
+
+	Core::Array<ToolSpec*> Tools::AllToolsOf(Workspace* ws) {
+		Core::Array<ToolSpec*> all;
+		for (const Contribution& given : m_Server->m_Plugins->Entries(ws, Core::StringView("tools")))
+			all.Push(ReadToolSpec(given.m_Entry, given.m_Plugin->m_Manifest->m_Id.View(), given.m_Plugin->m_Manifest->m_Name.View(), given.m_Plugin->m_Manifest->m_Folder));
+		return LastOfEachId(all);
+	}
+
+	Core::Array<ToolSpec*> Tools::ToolsOf(Workspace* ws) {
+		Core::Array<ToolSpec*> holding;
+		WhenLookup lookup = WorkspaceWhen(m_Server, ws);
+		for (ToolSpec* spec : AllToolsOf(ws)) {
+			Core::String error;
+			if (WhenHolds(spec->m_When.View(), lookup, error)) holding.Push(spec);
+			else if (!error.IsEmpty()) m_Server->Log((((Core::String("the when of tool ") + spec->m_Id.View()) + " does not parse: ") + error.View()).View());
+		}
+		return holding;
+	}
+
+	// --- Finding them ------------------------------------------------------------------------------------------------
+
+	Core::String Tools::SettingText(Workspace* ws, Core::StringView key) {
+		if (key.IsEmpty()) return Core::String();
+		Core::String json = m_Server->m_Settings->Effective(ws, Core::StringView(""), key);
+		if (json.IsEmpty()) return Core::String();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : Core::String();
+	}
+
+	ProfileVariables Tools::VariablesFor(Workspace* ws, const ToolSpec* spec) {
+		ProfileVariables variables;
+		variables.m_PluginDir = Core::String(spec->m_PluginDir.View());
+		variables.m_WorkspaceDir = Core::String(ws->m_Root.View());
+		variables.m_SolutionDir = Core::String(ws->m_Root.View());
+		variables.m_IedHome = m_Server->m_Config.m_HomeDir;
+		variables.m_PluginState = Core::String((FS::Path(m_Server->m_Config.m_DataDir.View()) / "plugins" / spec->m_PluginId.View()).View());
+		Settings* settings = m_Server->m_Settings;
+		variables.m_Config = [settings, ws](Core::StringView key) -> Core::String { return settings->Effective(ws, Core::StringView(""), key); };
+		Tools* self = this;
+		variables.m_Tool = [self, ws](Core::StringView id) -> Core::String { return self->ProgramFor(ws, id); };
+		return variables;
+	}
+
+	// The projects' code roots inside the workspace, relative to it: where a pin file may be besides the root.
+	Core::Array<Core::String> Tools::ProjectFolders(Workspace* ws) {
+		Core::Array<Core::String> folders;
+		folders.Push(Core::String(""));
+		if (!ws->m_Solution) return folders;
+		for (const ProjectModel* project : ws->m_Solution->m_Projects) {
+			Core::String relative;
+			if (!RelativeTo(ws->m_Root.View(), project->m_Root.View(), relative) || relative.IsEmpty()) continue;
+			bool known = false;
+			for (const Core::String& folder : folders) known = known || folder == relative;
+			if (!known) folders.Push(relative);
+		}
+		return folders;
+	}
+
+	DetectJob* Tools::JobFor(Workspace* ws, ToolSpec* spec) {
+		DetectJob* job = new DetectJob();
+		job->m_Spec = spec;
+		Core::String looked;
+		job->m_Candidates = ToolCandidates(spec, SettingText(ws, spec->m_Setting.View()).View(), VariablesFor(ws, spec), ToolsFolder(m_Server), looked);
+		job->m_Looked = looked;
+		job->m_Cwd = Core::String(ws->m_Root.View());
+		job->m_Pin = FindPin(ws->m_Root, ProjectFolders(ws), spec->m_VersionFrom);
+		job->m_Environment = EnvironmentFor(ws, Core::Array<Core::String>());
+		return job;
+	}
+
+	void Tools::Detect(WorkspaceTools* entry) {
+		if (entry->m_Detecting) {
+			entry->m_Dirty = true;
+			return;
+		}
+		entry->m_Detecting = true;
+		Publish(entry);
+		Tools* self = this;
+		Threading::Thread::Run([self, entry]() { self->DetectLoop(entry); }).Detach();
+	}
+
+	// The jobs read with the lock held, the programs asked without it, the statuses kept with it; again while something
+	// changed in between.
+	void Tools::DetectLoop(WorkspaceTools* entry) {
+		for (;;) {
+			Core::Array<DetectJob*> jobs;
+			{
+				Threading::LockGuard guard(m_Server->m_Lock);
+				entry->m_Dirty = false;
+				entry->m_Settings = ToolSettings(entry->m_Ws);
+				entry->m_PinFiles.Clear();
+				if (entry->m_Ws->m_Trusted)
+					for (ToolSpec* spec : ToolsOf(entry->m_Ws)) {
+						jobs.Push(JobFor(entry->m_Ws, spec));
+						for (const VersionSource* source : spec->m_VersionFrom) entry->m_PinFiles.Push(Core::String(FS::Path(source->m_File.View()).FileName()));
+					}
+			}
+			Core::Array<ToolStatus*> found;
+			for (DetectJob* job : jobs) found.Push(DetectTool(*job));
+			Threading::LockGuard guard(m_Server->m_Lock);
+			bool arrived = false;
+			for (const ToolStatus* status : found) {
+				ToolStatus* before = StatusOf(entry, status->m_Spec->m_Id.View());
+				arrived = arrived || (before && before->Lacking() && !status->Lacking());
+			}
+			entry->m_Statuses = found;
+			entry->m_Detected = true;
+			if (arrived) m_Server->m_Lsp->ToolsChanged(entry->m_Ws);
+			for (const ToolStatus* status : found)
+				if (!status->Lacking()) entry->m_Failures.Remove(status->m_Spec->m_Id);
+			if (entry->m_Dirty) continue;
+			entry->m_Detecting = false;
+			Publish(entry);
+			return;
+		}
+	}
+
+	ToolStatus* Tools::StatusOf(WorkspaceTools* entry, Core::StringView id) {
+		for (ToolStatus* status : entry->m_Statuses)
+			if (status->m_Spec->m_Id.View() == id) return status;
+		return nullptr;
+	}
+
+	void Tools::Store(WorkspaceTools* entry, ToolStatus* status) {
+		for (int64 i = 0; i < entry->m_Statuses.Count(); ++i)
+			if (entry->m_Statuses[i]->m_Spec->m_Id == status->m_Spec->m_Id) {
+				entry->m_Statuses[i] = status;
+				return;
+			}
+		entry->m_Statuses.Push(status);
+	}
+
+	Core::String Tools::ProgramFor(Workspace* ws, Core::StringView id) {
+		WorkspaceTools* entry = EntryOf(ws);
+		ToolStatus* status = entry ? StatusOf(entry, id) : nullptr;
+		if (status && !status->m_Path.IsEmpty()) return status->m_Path;
+		for (ToolSpec* spec : AllToolsOf(ws)) {
+			if (spec->m_Id.View() != id) continue;
+			Core::String looked;
+			Core::String setting = SettingText(ws, spec->m_Setting.View());
+			Core::Array<ToolCandidate> candidates = ToolCandidates(spec, setting.View(), VariablesFor(ws, spec), ToolsFolder(m_Server), looked);
+			if (!candidates.IsEmpty()) return candidates[0].m_Path;
+			return setting.View().Trimmed().IsEmpty() ? spec->m_Program : Core::String(setting.View().Trimmed());
+		}
+		return Core::String();
+	}
+
+	bool Tools::LacksProgram(Workspace* ws, Core::StringView command, Core::String& problem) {
+		Core::StringView text = command.Trimmed();
+		if (!text.StartsWith(Core::StringView("${tool:")) || !text.EndsWith(Core::StringView("}")) || text.IndexOf('}', 0) != text.ByteLength() - 1) return false;
+		WorkspaceTools* entry = EntryOf(ws);
+		ToolStatus* status = entry ? StatusOf(entry, text.Substring(7, text.ByteLength() - 8)) : nullptr;
+		if (!status || (status->m_State != "missing" && status->m_State != "failed")) return false;
+		Core::String failure;
+		const bool failed = entry->m_Failures.TryGet(status->m_Spec->m_Id, failure);
+		Core::StringView why = failed ? failure.View() : status->m_Problem.View();
+		while (why.EndsWith(Core::StringView("."))) why = why.Substring(0, why.ByteLength() - 1);
+		problem = (((status->m_Spec->m_Title + " is not installed: ") + why) + ". ") + (status->m_Spec->CanInstall() ? "Settings > Languages installs it." : "Settings > Languages says how to get it.");
+		return true;
+	}
+
+	Core::Array<Core::String> Tools::EnvironmentFor(Workspace* ws, const Core::Array<Core::String>& environment) {
+		WorkspaceTools* entry = EntryOf(ws);
+		if (!entry) return environment;
+		Core::StringBuilder folders;
+		Core::Array<Core::String> seen;
+		for (const ToolStatus* status : entry->m_Statuses) {
+			if (!status->m_Spec->m_OnPath || status->m_Path.IsEmpty() || status->m_Source == "path" || status->m_Source == "setting") continue;
+			Core::String folder = Core::String(FS::Path(status->m_Path.View()).Parent().View());
+			bool known = false;
+			for (const Core::String& each : seen) known = known || each == folder;
+			if (known) continue;
+			seen.Push(folder);
+			if (folders.ByteLength() > 0) folders.Append(";");
+			folders.Append(folder.View());
+		}
+		return WithPathFirst(environment, folders.View());
+	}
+
+	// --- The topic ---------------------------------------------------------------------------------------------------
+
+	// The ids of the tools the workspace lacks, ','-separated: what a dismissed banner is compared against.
+	Core::String Tools::Lacking(WorkspaceTools* entry) {
+		Core::StringBuilder ids;
+		for (const ToolStatus* status : entry->m_Statuses)
+			if (status->Lacking()) {
+				if (ids.ByteLength() > 0) ids.Append(",");
+				ids.Append(status->m_Spec->m_Id.View());
+			}
+		return ids.ToString();
+	}
+
+	static bool Queued(const WorkspaceTools* entry, Core::StringView id) {
+		for (const Core::String& each : entry->m_Queued)
+			if (each.View() == id) return true;
+		return false;
+	}
+
+	// {trusted, detected, detecting, install: {tools, current} | null, busy (an install runs for another workspace),
+	// dismissed, tools: [status]} - each status as ToolStatus::Json, with state installing, queued or failed over it.
+	Core::String Tools::Snapshot(WorkspaceTools* entry) {
+		Core::Array<ToolStatus*> shown = entry->m_Statuses;
+		if (!entry->m_Ws->m_Trusted || !entry->m_Detected) {
+			shown.Clear();
+			for (ToolSpec* spec : ToolsOf(entry->m_Ws)) {
+				ToolStatus* status = new ToolStatus();
+				status->m_Spec = spec;
+				status->m_State = Core::String("unchecked");
+				shown.Push(status);
+			}
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.BoolField("trusted", entry->m_Ws->m_Trusted);
+		json.BoolField("detected", entry->m_Detected);
+		json.BoolField("detecting", entry->m_Detecting);
+		json.Key(Core::StringView("install"));
+		if (m_Installing != entry) json.Null();
+		else {
+			json.BeginObject();
+			json.Key(Core::StringView("tools"));
+			json.BeginArray();
+			for (const Core::String& id : entry->m_Queued) json.String(id.View());
+			json.EndArray();
+			json.Field("current", entry->m_Current.View());
+			json.EndObject();
+		}
+		json.BoolField("busy", m_Installing != nullptr && m_Installing != entry);
+		Core::String lacking = Lacking(entry);
+		json.BoolField("dismissed", !lacking.IsEmpty() && lacking == entry->m_Dismissed);
+		json.Key(Core::StringView("tools"));
+		json.BeginArray();
+		for (ToolStatus* status : shown) {
+			ToolStatus* each = status;
+			Core::String failure;
+			const bool failed = status->Lacking() && entry->m_Failures.TryGet(status->m_Spec->m_Id, failure);
+			const bool now = m_Installing == entry && entry->m_Current == status->m_Spec->m_Id;
+			if (failed || now || (m_Installing == entry && Queued(entry, status->m_Spec->m_Id.View()))) {
+				each = status->Copy();
+				each->m_State = Core::String(now ? "installing" : failed ? "failed" : "queued");
+				if (failed && !now) each->m_Problem = failure;
+			}
+			json.Raw(each->Json().View());
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Tools::SnapshotJson(Workspace* ws) {
+		WorkspaceTools* entry = EntryOf(ws);
+		return entry ? Snapshot(entry) : Core::String();
+	}
+
+	void Tools::Publish(WorkspaceTools* entry) { m_Server->m_Hub.Publish(ToolsTopic(entry->m_Ws).View(), "tools.changed", Snapshot(entry).View()); }
+
+	// --- Installing --------------------------------------------------------------------------------------------------
+
+	void Tools::Say(WorkspaceTools* entry, Core::StringView text) { m_Server->m_Outputs->Append(entry->m_Ws, Core::StringView(c_ToolsOutputSource), text); }
+
+	InstallPlan Tools::PlanFor(WorkspaceTools* entry, ToolSpec* spec) {
+		InstallPlan plan;
+		ToolStatus* status = StatusOf(entry, spec->m_Id.View());
+		PinnedVersion pin = status ? status->m_Pin : FindPin(entry->m_Ws->m_Root, ProjectFolders(entry->m_Ws), spec->m_VersionFrom);
+		plan.m_Spec = spec;
+		plan.m_Version = ToolInstallVersion(spec, pin);
+		plan.m_Folder = ToolsFolder(m_Server) / spec->m_Id.View() / plan.m_Version.View();
+		plan.m_Downloads = ToolsFolder(m_Server) / ".downloads";
+		plan.m_Cwd = Core::String(entry->m_Ws->m_Root.View());
+		plan.m_Environment = EnvironmentFor(entry->m_Ws, Core::Array<Core::String>());
+		Tools* self = this;
+		Server* host = m_Server;
+		Workspace* ws = entry->m_Ws;
+		Core::String version = plan.m_Version;
+		Core::String folder = Core::String(plan.m_Folder.View());
+		plan.m_Expand = [self, host, ws, spec, version, folder](Core::StringView text) -> Core::String {
+			Core::String own = ReplaceAll(ReplaceAll(text, Core::StringView("${version}"), version.View()).View(), Core::StringView("${installDir}"), folder.View());
+			Threading::LockGuard guard(host->m_Lock);
+			return ExpandProfileVariables(own.View(), self->VariablesFor(ws, spec));
+		};
+		return plan;
+	}
+
+	void Tools::InstallLoop(WorkspaceTools* entry, Core::Array<ToolSpec*> order, InstallControl* control) {
+		Tools* self = this;
+		Server* host = m_Server;
+		InstallSay say = [self, host, entry](Core::StringView text) {
+			Threading::LockGuard guard(host->m_Lock);
+			self->Say(entry, text);
+		};
+		Core::Array<Core::String> done;
+		Core::String failure;
+		for (ToolSpec* spec : order) {
+			InstallPlan plan;
+			{
+				Threading::LockGuard guard(m_Server->m_Lock);
+				entry->m_Current = spec->m_Id;
+				Publish(entry);
+				plan = PlanFor(entry, spec);
+				Say(entry, ((((Core::String("\r\n== Installing ") + spec->m_Title.View()) + " ") + plan.m_Version.View()) + " into " + plan.m_Folder.View() + "\r\n").View());
+			}
+			Core::String problem;
+			bool installed = false;
+			if (!IsFolderSafeVersion(plan.m_Version.View())) problem = (Core::String("the version to install, '") + plan.m_Version.View()) + "', cannot name a folder";
+			else installed = RunInstall(plan, control, say, problem);
+			DetectJob* job = nullptr;
+			{
+				Threading::LockGuard guard(m_Server->m_Lock);
+				job = JobFor(entry->m_Ws, spec);
+			}
+			ToolStatus* status = DetectTool(*job);
+			Threading::LockGuard guard(m_Server->m_Lock);
+			Store(entry, status);
+			if (installed && status->m_State != "found") {
+				installed = false;
+				problem = Core::String("it was installed, but it is still not found: ") + status->m_Problem.View();
+			}
+			if (!installed) {
+				entry->m_Failures.At(spec->m_Id) = problem;
+				failure = ((spec->m_Title + " was not installed: ") + problem.View());
+				Say(entry, ((Core::String("\x1b[31m") + failure.View()) + "\x1b[0m\r\n").View());
+				break;
+			}
+			entry->m_Failures.Remove(spec->m_Id);
+			done.Push((spec->m_Title + " ") + (status->m_Version.IsEmpty() ? plan.m_Version : status->m_Version).View());
+			Say(entry, ((Core::String("\x1b[32mInstalled ") + done[done.Count() - 1].View()) + ": " + status->m_Path.View() + "\x1b[0m\r\n").View());
+		}
+		Threading::LockGuard guard(m_Server->m_Lock);
+		entry->m_Current = Core::String();
+		entry->m_Queued.Clear();
+		m_Installing = nullptr;
+		this.m_Control = nullptr;
+		Publish(entry);
+		for (WorkspaceTools* other : m_Entries)
+			if (other != entry) Publish(other);
+		if (!done.IsEmpty()) m_Server->m_Presence->Add(Core::StringView("info"), (Core::String("Installed ") + Core::Join(done, ", ").View()).View());
+		if (!failure.IsEmpty()) m_Server->m_Presence->Add(Core::StringView("error"), failure.View());
+		m_Server->m_Lsp->ToolsChanged(entry->m_Ws);
+		for (WorkspaceTools* other : m_Entries)
+			if (other != entry) Detect(other);
+	}
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	Core::String Tools::StatusMethod(Call& call, const Params& params) { return Snapshot(EntryParam(params)); }
+
+	Core::String Tools::DetectMethod(Call& call, const Params& params) {
+		WorkspaceTools* entry = EntryParam(params);
+		if (!entry->m_Ws->m_Trusted) throw RpcError(ErrorCode::Forbidden, "the workspace is not trusted: no program is run to find its tools");
+		Detect(entry);
+		return Core::String("{}");
+	}
+
+	static ToolSpec* SpecNamed(const Core::Array<ToolSpec*>& specs, Core::StringView id) {
+		for (ToolSpec* spec : specs)
+			if (spec->m_Id.View() == id) return spec;
+		return nullptr;
+	}
+
+	static bool Has(const Core::Array<ToolSpec*>& specs, const ToolSpec* spec) {
+		for (const ToolSpec* each : specs)
+			if (each == spec) return true;
+		return false;
+	}
+
+	Core::String Tools::InstallMethod(Call& call, const Params& params) {
+		WorkspaceTools* entry = EntryParam(params);
+		if (!entry->m_Ws->m_Trusted) throw RpcError(ErrorCode::Forbidden, "the workspace is not trusted: nothing is installed for it");
+		if (m_Installing) throw RpcError(ErrorCode::Conflict, (Core::String("an install of language tools runs already, for ") + m_Installing->m_Ws->m_Name.View()).View());
+		Core::Array<ToolSpec*> specs = ToolsOf(entry->m_Ws);
+		Core::Array<ToolSpec*> targets;
+		Serialization::DomNode named = params.List("tools");
+		for (int64 i = 0; named.Kind() == Serialization::DomKind::Array && i < named.Count(); ++i) {
+			ToolSpec* spec = SpecNamed(specs, named.At(i).AsView());
+			if (!spec) throw RpcError(ErrorCode::NotFound, (Core::String("the workspace needs no tool ") + named.At(i).AsView()).View());
+			if (!spec->CanInstall()) throw RpcError(ErrorCode::BadRequest, ((spec->m_Title + " cannot be installed by IED") + (spec->m_Homepage.IsEmpty() ? Core::String() : Core::String(": see ") + spec->m_Homepage.View()).View()).View());
+			if (!Has(targets, spec)) targets.Push(spec);
+		}
+		if (named.Kind() != Serialization::DomKind::Array || named.Count() == 0)
+			for (ToolSpec* spec : specs) {
+				ToolStatus* status = StatusOf(entry, spec->m_Id.View());
+				if (status && status->Lacking() && spec->CanInstall()) targets.Push(spec);
+			}
+		for (int64 i = 0; i < targets.Count(); ++i)
+			for (const Core::String& required : targets[i]->m_Requires) {
+				ToolSpec* spec = SpecNamed(specs, required.View());
+				ToolStatus* status = spec ? StatusOf(entry, required.View()) : nullptr;
+				if (!spec || Has(targets, spec) || (status && status->m_State == "found")) continue;
+				if (!spec->CanInstall()) throw RpcError(ErrorCode::BadRequest, (((targets[i]->m_Title + " needs ") + spec->m_Title.View()) + ", which IED cannot install").View());
+				targets.Push(spec);
+			}
+		if (targets.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "nothing to install: no tool the workspace lacks has an install");
+		Core::Array<ToolSpec*> order = InstallOrder(targets);
+		JsonWriter refused;
+		refused.BeginObject();
+		refused.Field("reason", "userScope");
+		refused.Key(Core::StringView("tools"));
+		refused.BeginArray();
+		bool forUser = false;
+		for (const ToolSpec* spec : order)
+			if (spec->InstallsForUser()) {
+				refused.String(spec->m_Id.View());
+				forUser = true;
+			}
+		refused.EndArray();
+		refused.EndObject();
+		if (forUser && !params.Bool("allowUserScope", false))
+			throw RpcError(ErrorCode::Forbidden, "an install writes outside IED's tools folder, for your user: ask, then pass allowUserScope", refused.View());
+		m_Installing = entry;
+		m_Control = new InstallControl();
+		entry->m_Queued.Clear();
+		for (const ToolSpec* spec : order) {
+			entry->m_Queued.Push(spec->m_Id);
+			entry->m_Failures.Remove(spec->m_Id);
+		}
+		Publish(entry);
+		for (WorkspaceTools* other : m_Entries)
+			if (other != entry) Publish(other);
+		Tools* self = this;
+		InstallControl* running = m_Control;
+		Threading::Thread::Run([self, entry, order, running]() { self->InstallLoop(entry, order, running); }).Detach();
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("tools"));
+		json.BeginArray();
+		for (const ToolSpec* spec : order) json.String(spec->m_Id.View());
+		json.EndArray();
+		json.Field("output", c_ToolsOutputSource);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Tools::CancelMethod(Call& call, const Params& params) {
+		WorkspaceTools* entry = EntryParam(params);
+		if (m_Installing != entry || !m_Control) throw RpcError(ErrorCode::NotFound, "no install runs for this workspace");
+		m_Control->Cancel();
+		return Core::String("{}");
+	}
+
+	Core::String Tools::DismissMethod(Call& call, const Params& params) {
+		WorkspaceTools* entry = EntryParam(params);
+		entry->m_Dismissed = Lacking(entry);
+		Publish(entry);
+		return Core::String("{}");
+	}
+}

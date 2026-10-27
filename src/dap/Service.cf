@@ -1,0 +1,460 @@
+include "Service.ch"
+include "host/Server.ch"
+include "plugins/Context.ch"
+include "lsp/Uris.ch"
+
+namespace Ied
+{
+	Core::String DebugTopic(const Workspace* ws) { return Core::String("dbg:") + ws->m_WsId.View(); }
+
+	Core::String SessionTopic(const DebugSession* session) { return (DebugTopic(session->m_Ws) + ":") + session->m_Id.View(); }
+
+	void Debugger::Init(Server* server) {
+		this.m_Server = server;
+		Debugger* self = this;
+		server->m_Rpc.Register("dbg.start", [self](Call& call, const Params& params) -> Core::String { return self->StartMethod(call, params); });
+		server->m_Rpc.Register("dbg.stop", [self](Call& call, const Params& params) -> Core::String { return self->StopMethod(call, params); });
+		server->m_Rpc.Register("dbg.restart", [self](Call& call, const Params& params) -> Core::String { return self->RestartMethod(call, params); });
+		server->m_Rpc.Register("dbg.sessions", [self](Call& call, const Params& params) -> Core::String { return self->SessionsMethod(call, params); });
+		server->m_Rpc.Register("dbg.continue", [self](Call& call, const Params& params) -> Core::String { return self->Control(params, Core::StringView("continue"), true); });
+		server->m_Rpc.Register("dbg.next", [self](Call& call, const Params& params) -> Core::String { return self->Control(params, Core::StringView("next"), true); });
+		server->m_Rpc.Register("dbg.stepIn", [self](Call& call, const Params& params) -> Core::String { return self->Control(params, Core::StringView("stepIn"), true); });
+		server->m_Rpc.Register("dbg.stepOut", [self](Call& call, const Params& params) -> Core::String { return self->Control(params, Core::StringView("stepOut"), true); });
+		server->m_Rpc.Register("dbg.pause", [self](Call& call, const Params& params) -> Core::String { return self->Control(params, Core::StringView("pause"), false); });
+		server->m_Rpc.Register("dbg.stackTrace", [self](Call& call, const Params& params) -> Core::String { return self->StackTraceMethod(call, params); });
+		server->m_Rpc.Register("dbg.scopes", [self](Call& call, const Params& params) -> Core::String { return self->PassMethod(call, params, Core::StringView("scopes")); });
+		server->m_Rpc.Register("dbg.variables", [self](Call& call, const Params& params) -> Core::String { return self->PassMethod(call, params, Core::StringView("variables")); });
+		server->m_Rpc.Register("dbg.evaluate", [self](Call& call, const Params& params) -> Core::String { return self->PassMethod(call, params, Core::StringView("evaluate")); });
+		server->m_Rpc.Register("dbg.request", [self](Call& call, const Params& params) -> Core::String { return self->RequestMethod(call, params); });
+	}
+
+	void Debugger::WorkspaceOpened(Workspace* ws) {
+		Debugger* self = this;
+		m_Server->m_Hub.Add(DebugTopic(ws).View(), [self, ws]() -> Core::String { return self->WorkspaceSnapshot(ws); });
+	}
+
+	DapProvider* Debugger::ProviderFor(Workspace* ws, Core::StringView type) {
+		Core::Array<DapProvider*> providers;
+		for (const Contribution& given : m_Server->m_Plugins->Entries(ws, Core::StringView("dapProviders")))
+			providers.Push(ReadDapProvider(given.m_Entry, given.m_Plugin->m_Manifest->m_Id.View(), given.m_Plugin->m_Manifest->m_Folder));
+		DapProvider* provider = ProviderOfType(providers, type);
+		if (!provider) return nullptr;
+		Core::String error;
+		const bool holds = WhenHolds(provider->m_When.View(), WorkspaceWhen(m_Server, ws), error);
+		if (!error.IsEmpty()) m_Server->Log((((Core::String("the when of debug adapter ") + provider->m_Type.View()) + " does not parse: ") + error.View()).View());
+		return holds ? provider : nullptr;
+	}
+
+	DebugSession* Debugger::Find(Core::StringView sessionId) {
+		for (DebugSession* session : m_Sessions)
+			if (session->m_Id.View() == sessionId) return session;
+		throw RpcError(ErrorCode::NotFound, (Core::String("no debug session ") + sessionId).View());
+	}
+
+	// Ended sessions beyond kDebugSessionsKept go, their topics with them.
+	void Debugger::Keep(DebugSession* session) {
+		m_Sessions.Push(session);
+		DebugSession* shown = session;
+		Debugger* self = this;
+		m_Server->m_Hub.Add(SessionTopic(session).View(), [self, shown]() -> Core::String { return self->SessionSnapshot(shown); });
+		while (m_Sessions.Count() > c_DebugSessionsKept) {
+			int64 oldest = -1;
+			for (int64 i = 0; i < m_Sessions.Count() && oldest < 0; ++i)
+				if (!m_Sessions[i]->IsLive()) oldest = i;
+			if (oldest < 0) break;
+			m_Server->m_Hub.Remove(SessionTopic(m_Sessions[oldest]).View());
+			m_Sessions.RemoveAt(oldest);
+		}
+	}
+
+	// --- What sessions report ----------------------------------------------------------------------------------------
+
+	void Debugger::StateChanged(DebugSession* session) {
+		Core::String summary = session->SummaryJson();
+		m_Server->m_Hub.Publish(DebugTopic(session->m_Ws).View(), "dbg.session", summary.View());
+		m_Server->m_Hub.Publish(SessionTopic(session).View(), "dbg.state", summary.View());
+		if (!session->IsLive()) m_Server->m_Breakpoints->SessionGone(session->m_Ws, session->m_Id.View());
+		if (session->m_State == DebugState::Failed) m_Server->m_Outputs->Append(session->m_Ws, Core::StringView("debug"), ((Core::String("\x1b[31m") + session->m_Problem.View()) + "\x1b[0m\r\n").View());
+	}
+
+	void Debugger::StopShown(DebugSession* session) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		JsonWriter json;
+		json.BeginObject();
+		json.RawField("session", session->SummaryJson().View());
+		json.RawField("threads", session->m_Threads.View());
+		json.RawField("frames", ClientFrames(session, Serialization::ReadJson(session->m_Frames.View(), *doc).root).View());
+		json.EndObject();
+		m_Server->m_Hub.Publish(SessionTopic(session).View(), "dbg.stopped", json.View());
+		m_Server->m_Hub.Publish(DebugTopic(session->m_Ws).View(), "dbg.session", session->SummaryJson().View());
+	}
+
+	void Debugger::Configure(DebugSession* session) {
+		session->m_Configured = true;
+		for (const Core::String& path : m_Server->m_Breakpoints->FilesOf(session->m_Ws)) SendBreakpoints(session, path.View(), [](bool ok, const Serialization::DomNode& body, Core::StringView message) {});
+		SendExceptionFilters(session);
+		DebugSession* configured = session;
+		session->Ask(Core::StringView("configurationDone"), Core::StringView("{}"), [configured](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			if (configured->m_State == DebugState::Starting) configured->Ran();
+		});
+	}
+
+	void Debugger::Event(DebugSession* session, Core::StringView event, const Serialization::DomNode& body) {
+		if (event == "output") {
+			Core::StringView category = body.Member("category").AsView();
+			if (category == "telemetry") return;
+			Core::StringView text = body.Member("output").AsView();
+			session->m_Output.Push(Core::String(text));
+			while (session->m_Output.Count() > c_DapOutputLinesKept) session->m_Output.RemoveAt(0);
+			JsonWriter json;
+			json.BeginObject();
+			json.Field("category", category.IsEmpty() ? Core::StringView("console") : category);
+			json.Field("text", text);
+			json.EndObject();
+			m_Server->m_Hub.Publish(SessionTopic(session).View(), "dbg.output", json.View());
+			m_Server->m_Outputs->Append(session->m_Ws, Core::StringView("debug"), text);
+		}
+		else if (event == "breakpoint") m_Server->m_Breakpoints->Changed(session->m_Ws, session->m_Id.View(), body.Member("breakpoint"));
+	}
+
+	void Debugger::Log(DebugSession* session, Core::StringView text) {
+		m_Server->Log((((Core::String("[debug ") + session->m_Launch.m_Type.View()) + "] ") + text.Trimmed()).View());
+	}
+
+	// --- What the program uses (Diagnostic Tools) --------------------------------------------------------------------
+
+	void Debugger::ProgramNamed(DebugSession* session) {
+		Debugger* self = this;
+		DebugSession* watched = session;
+		const uint32 processId = session->m_Usage->m_ProcessId;
+		Threading::Thread::Run([self, watched, processId]() { self->Sample(watched, processId); }).Detach();
+	}
+
+	// A thread of its own: reads the process every kUsageIntervalMs, the lock held only to keep and publish a sample,
+	// until the session ends or the process cannot be read (it ended, or the system will not say).
+	void Debugger::Sample(DebugSession* session, uint32 processId) {
+		const int32 processors = Platform::GetProcessorInfo().logicalProcessors;
+		Process::Usage last;
+		if (!Process::GetUsage(processId, last)) return;
+		const int64 startNs = clock_now_ns();
+		int64 lastNs = startNs;
+		while (true) {
+			Threading::Thread::Sleep(c_UsageIntervalMs * 1000000);
+			Process::Usage now;
+			const bool read = Process::GetUsage(processId, now);
+			const int64 nowNs = clock_now_ns();
+			Threading::LockGuard guard(m_Server->m_Lock);
+			if (!read || !session->IsLive()) return;
+			UsageSample sample;
+			sample.m_Ms = (nowNs - startNs) / 1000000;
+			sample.m_CpuTenths = CpuTenths(now.cpuTimeNs - last.cpuTimeNs, nowNs - lastNs, processors);
+			sample.m_PrivateBytes = now.privateBytes;
+			sample.m_WorkingSetBytes = now.workingSetBytes;
+			session->m_Usage->Add(sample);
+			m_Server->m_Hub.Publish(SessionTopic(session).View(), "dbg.usage", session->m_Usage->EventJson(sample).View());
+			last = now;
+			lastNs = nowNs;
+		}
+	}
+
+	// --- Breakpoints and exception filters ---------------------------------------------------------------------------
+
+	static bool Takes(const DebugSession* session, const char* capability) {
+		return session->m_Capabilities.View().Contains(((Core::String("\"") + capability) + "\":true").View());
+	}
+
+	// Why the adapter cannot take `breakpoint`, or nothing.
+	static Core::String Refusal(const DebugSession* session, const SourceBreakpoint* breakpoint) {
+		if (!breakpoint->m_Condition.IsEmpty() && !Takes(session, "supportsConditionalBreakpoints")) return (Core::String("the ") + session->m_Launch.m_Type.View()) + " debugger takes no conditions";
+		if (!breakpoint->m_HitCondition.IsEmpty() && !Takes(session, "supportsHitConditionalBreakpoints")) return (Core::String("the ") + session->m_Launch.m_Type.View()) + " debugger takes no hit counts";
+		if (!breakpoint->m_LogMessage.IsEmpty() && !Takes(session, "supportsLogPoints")) return (Core::String("the ") + session->m_Launch.m_Type.View()) + " debugger takes no log points";
+		return Core::String();
+	}
+
+	static BoundBreakpoint* Unbound(const SourceBreakpoint* breakpoint, Core::StringView why) {
+		BoundBreakpoint* bound = new BoundBreakpoint();
+		bound->m_Line = breakpoint->m_Line;
+		bound->m_BoundLine = breakpoint->m_Line;
+		bound->m_Message = Core::String(why);
+		return bound;
+	}
+
+	static BoundBreakpoint* BoundFrom(const SourceBreakpoint* breakpoint, const Serialization::DomNode& result) {
+		BoundBreakpoint* bound = new BoundBreakpoint();
+		bound->m_Line = breakpoint->m_Line;
+		bound->m_Id = result.Member("id").AsInt();
+		bound->m_Verified = result.Member("verified").AsBool();
+		bound->m_BoundLine = result.Member("line").Kind() == Serialization::DomKind::Int ? result.Member("line").AsInt() - 1 : breakpoint->m_Line;
+		bound->m_Message = Core::String(result.Member("message").AsView());
+		return bound;
+	}
+
+	void Debugger::SendBreakpoints(DebugSession* session, Core::StringView path, DapThen then) {
+		Core::Array<SourceBreakpoint*> sent;
+		Core::Array<SourceBreakpoint*> refused;
+		for (SourceBreakpoint* breakpoint : m_Server->m_Breakpoints->Of(session->m_Ws, path)) {
+			if (!breakpoint->m_Enabled) continue;
+			if (Refusal(session, breakpoint).IsEmpty()) sent.Push(breakpoint);
+			else refused.Push(breakpoint);
+		}
+		FS::Path file = session->m_Ws->At(path);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("source"));
+		json.BeginObject();
+		json.Field("name", file.FileName());
+		json.Field("path", file.View());
+		json.EndObject();
+		json.Key(Core::StringView("breakpoints"));
+		json.BeginArray();
+		for (const SourceBreakpoint* breakpoint : sent) {
+			json.BeginObject();
+			json.IntField("line", breakpoint->m_Line + 1);
+			if (!breakpoint->m_Condition.IsEmpty()) json.Field("condition", breakpoint->m_Condition.View());
+			if (!breakpoint->m_HitCondition.IsEmpty()) json.Field("hitCondition", breakpoint->m_HitCondition.View());
+			if (!breakpoint->m_LogMessage.IsEmpty()) json.Field("logMessage", breakpoint->m_LogMessage.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		Server* host = m_Server;
+		const Core::String where = Core::String(path);
+		session->Ask(Core::StringView("setBreakpoints"), json.View(), [host, session, where, sent, refused, then](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			Core::Array<BoundBreakpoint*> list;
+			for (int64 i = 0; i < sent.Count(); ++i) list.Push(ok ? BoundFrom(sent[i], body.Member("breakpoints").At(i)) : Unbound(sent[i], message));
+			for (const SourceBreakpoint* breakpoint : refused) list.Push(Unbound(breakpoint, Refusal(session, breakpoint).View()));
+			host->m_Breakpoints->Bound(session->m_Ws, session->m_Id.View(), where.View(), list);
+			then(ok, body, message);
+		});
+	}
+
+	// The filters the adapter turns on by default (F-DBG-14; choosing them per workspace comes with the Exception
+	// Settings window).
+	void Debugger::SendExceptionFilters(DebugSession* session) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode filters = Serialization::ReadJson(session->m_Capabilities.View(), *doc).root.Member("exceptionBreakpointFilters");
+		if (filters.Kind() != Serialization::DomKind::Array) return;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("filters"));
+		json.BeginArray();
+		for (int64 i = 0; i < filters.Count(); ++i)
+			if (filters.At(i).Member("default").AsBool()) json.String(filters.At(i).Member("filter").AsView());
+		json.EndArray();
+		json.EndObject();
+		session->Ask(Core::StringView("setExceptionBreakpoints"), json.View(), [](bool ok, const Serialization::DomNode& body, Core::StringView message) {});
+	}
+
+	void Debugger::BreakpointsChanged(Workspace* ws, Core::StringView path) {
+		for (DebugSession* session : m_Sessions)
+			if (session->m_Ws == ws && session->IsLive() && session->m_Configured) SendBreakpoints(session, path, [](bool ok, const Serialization::DomNode& body, Core::StringView message) {});
+	}
+
+	// --- Paths and positions -----------------------------------------------------------------------------------------
+
+	// A frame's source for clients: a workspace path, else a file: URI the session named (so it opens read-only), else
+	// the adapter's own reference.
+	void Debugger::WriteClientSource(DebugSession* session, JsonWriter& json, const Serialization::DomNode& source) {
+		json.BeginObject();
+		json.Field("name", source.Member("name").AsView());
+		Core::StringView path = source.Member("path").AsView();
+		Core::String relative;
+		if (!path.IsEmpty() && RelativeTo(session->m_Ws->m_Root.View(), path, relative) && !relative.IsEmpty()) json.Field("path", relative.View());
+		else if (!path.IsEmpty() && FS::FileExists(Core::String(path).CStr())) {
+			Core::String uri = CanonicalFileUri(FileUriOf(path).View());
+			m_Server->m_Lsp->NameFile(session->m_Ws, uri.View(), (Core::String("dap:") + session->m_Launch.m_Type.View()).View(), session->m_Launch.m_Project.View());
+			json.Field("uri", uri.View());
+		}
+		if (source.Member("sourceReference").AsInt() > 0) json.IntField("sourceReference", source.Member("sourceReference").AsInt());
+		json.EndObject();
+	}
+
+	Core::String Debugger::ClientFrames(DebugSession* session, const Serialization::DomNode& frames) {
+		JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; frames.Kind() == Serialization::DomKind::Array && i < frames.Count(); ++i) {
+			Serialization::DomNode frame = frames.At(i);
+			json.BeginObject();
+			json.IntField("id", frame.Member("id").AsInt());
+			json.Field("name", frame.Member("name").AsView());
+			json.IntField("line", frame.Member("line").AsInt() > 0 ? frame.Member("line").AsInt() - 1 : 0);
+			json.IntField("column", frame.Member("column").AsInt() > 0 ? frame.Member("column").AsInt() - 1 : 0);
+			if (!frame.Member("presentationHint").AsView().IsEmpty()) json.Field("presentationHint", frame.Member("presentationHint").AsView());
+			if (frame.Member("source").IsValid()) {
+				json.Key(Core::StringView("source"));
+				WriteClientSource(session, json, frame.Member("source"));
+			}
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// --- Snapshots ---------------------------------------------------------------------------------------------------
+
+	// {sessions: [summary]}
+	Core::String Debugger::WorkspaceSnapshot(Workspace* ws) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("sessions"));
+		json.BeginArray();
+		for (DebugSession* session : m_Sessions)
+			if (session->m_Ws == ws) json.Raw(session->SummaryJson().View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// {session, threads, frames, output: [text], usage: ProgramUsage | null}
+	Core::String Debugger::SessionSnapshot(DebugSession* session) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		JsonWriter json;
+		json.BeginObject();
+		json.RawField("session", session->SummaryJson().View());
+		json.RawField("threads", session->m_Threads.View());
+		json.RawField("frames", ClientFrames(session, Serialization::ReadJson(session->m_Frames.View(), *doc).root).View());
+		json.Key(Core::StringView("output"));
+		json.BeginArray();
+		for (const Core::String& text : session->m_Output) json.String(text.View());
+		json.EndArray();
+		json.Key(Core::StringView("usage"));
+		if (session->m_Usage) json.Raw(session->m_Usage->Json().View());
+		else json.Null();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	Core::String Debugger::StartMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		if (!ws->m_Trusted) throw RpcError(ErrorCode::Forbidden, "debugging runs the workspace's code: trust the workspace first");
+		DebugLaunch launch = m_Server->m_Tasks->ResolveDebug(ws, params.Str("project", Core::StringView("")).View(), params.Str("configuration", Core::StringView("")).View());
+		DapProvider* provider = ProviderFor(ws, launch.m_Type.View());
+		if (!provider) throw RpcError(ErrorCode::NotFound, (Core::String("no plugin offers a debug adapter of type ") + launch.m_Type.View()).View());
+		TaskRun* before = launch.m_PreLaunchTask.IsEmpty() ? nullptr : m_Server->m_Tasks->RunTask(ws, launch.m_Project.View(), launch.m_PreLaunchTask.View(), Core::StringView(""), Serialization::DomNode());
+		m_Started += 1;
+		Core::StringBuilder id;
+		id.Append("d");
+		id.AppendInt(m_Started);
+		DebugSession* session = new DebugSession(m_Server, ws, id.View(), launch);
+		if (before) session->m_BuildRunId = before->m_RunId;
+		Keep(session);
+		m_Server->m_Outputs->Clear(ws, Core::StringView("debug"));
+		if (!before) session->Start(provider);
+		else {
+			StateChanged(session);
+			Server* host = m_Server;
+			Threading::Thread::Run([host, session, before, provider]() {
+				Threading::LockGuard guard(host->m_Lock);
+				const bool built = host->m_Tasks->AwaitEnd(before);
+				if (session->m_State != DebugState::Building) return;
+				if (built) session->Start(provider);
+				else session->Fail(((Core::String("the pre-launch task ") + session->m_Launch.m_PreLaunchTask.View()) + " failed").View());
+			}).Detach();
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("sessionId", session->m_Id.View());
+		json.Field("topic", SessionTopic(session).View());
+		json.Field("output", before && !before->m_Steps.IsEmpty() ? before->m_Steps[0]->m_Output.CStr() : "debug");
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Debugger::StopMethod(Call& call, const Params& params) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		if (session->m_State == DebugState::Building) {
+			session->m_State = DebugState::Ended;
+			StateChanged(session);
+			TaskRun* build = m_Server->m_Tasks->Run(session->m_BuildRunId.View());
+			if (build && build->IsActive()) m_Server->m_Tasks->Cancel(build);
+		}
+		else session->Stop();
+		return Core::String("{}");
+	}
+
+	Core::String Debugger::RestartMethod(Call& call, const Params& params) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		StopMethod(call, params);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", session->m_Ws->m_WsId.View());
+		json.Field("project", session->m_Launch.m_Project.View());
+		json.Field("configuration", session->m_Launch.m_Name.View());
+		json.EndObject();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return StartMethod(call, Params(Serialization::ReadJson(json.View(), *doc).root));
+	}
+
+	Core::String Debugger::SessionsMethod(Call& call, const Params& params) {
+		return WorkspaceSnapshot(m_Server->m_Workspaces->Get(params.Str("wsId").View()));
+	}
+
+	// continue, next, stepIn, stepOut (the program must be stopped) and pause (running): a revision that is not the
+	// session's is a conflict, and the session moves on at once, so a second press from another device conflicts too.
+	Core::String Debugger::Control(const Params& params, Core::StringView command, bool whenStopped) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		if (!session->IsLive()) throw RpcError(ErrorCode::Conflict, "the debug session has ended");
+		if (params.Has("revision") && params.Int("revision") != session->m_Revision) throw RpcError(ErrorCode::Conflict, "the debug session moved on: refresh and try again");
+		if (whenStopped && session->m_State != DebugState::Stopped) throw RpcError(ErrorCode::Conflict, "the program is not stopped");
+		if (!whenStopped && session->m_State != DebugState::Running) throw RpcError(ErrorCode::Conflict, "the program is not running");
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("threadId", params.Int("threadId", session->m_StopThread));
+		json.EndObject();
+		if (whenStopped) session->Ran();
+		const int64 at = session->m_Revision;
+		Debugger* self = this;
+		session->Ask(command, json.View(), [self, session, at](bool ok, const Serialization::DomNode& body, Core::StringView message) {
+			if (!ok) self->Log(session, message);
+		});
+		JsonWriter answer;
+		answer.BeginObject();
+		answer.IntField("revision", at);
+		answer.EndObject();
+		return answer.ToString();
+	}
+
+	Core::String Debugger::StackTraceMethod(Call& call, const Params& params) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("threadId", params.Int("threadId", session->m_StopThread));
+		json.IntField("startFrame", params.Int("startFrame", 0));
+		json.IntField("levels", params.Int("levels", 50));
+		json.EndObject();
+		Core::String answered = session->Request(call, Core::StringView("stackTrace"), json.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode body = Serialization::ReadJson(answered.View(), *doc).root;
+		JsonWriter result;
+		result.BeginObject();
+		result.RawField("stackFrames", ClientFrames(session, body.Member("stackFrames")).View());
+		result.IntField("totalFrames", body.Member("totalFrames").AsInt());
+		result.EndObject();
+		return result.ToString();
+	}
+
+	// scopes {frameId}, variables {variablesReference}, evaluate {expression, frameId?, context?}: the adapter's answer.
+	Core::String Debugger::PassMethod(Call& call, const Params& params, Core::StringView command) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		JsonWriter json;
+		json.BeginObject();
+		if (command == "scopes") json.IntField("frameId", params.Int("frameId"));
+		else if (command == "variables") json.IntField("variablesReference", params.Int("variablesReference"));
+		else {
+			json.Field("expression", params.Str("expression").View());
+			if (params.Has("frameId")) json.IntField("frameId", params.Int("frameId"));
+			json.Field("context", params.Str("context", Core::StringView("watch")).View());
+		}
+		json.EndObject();
+		return session->Request(call, command, json.View());
+	}
+
+	Core::String Debugger::RequestMethod(Call& call, const Params& params) {
+		DebugSession* session = Find(params.Str("sessionId").View());
+		Serialization::DomNode arguments = params.Field("arguments");
+		const Core::String json = arguments.IsValid() ? NodeJson(arguments) : Core::String("{}");
+		return session->Request(call, params.Str("command").View(), json.View());
+	}
+}

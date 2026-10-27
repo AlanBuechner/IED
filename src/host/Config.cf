@@ -1,0 +1,170 @@
+include "Config.ch"
+
+namespace Ied
+{
+	const int64 c_Kilobyte = 1024;
+
+	ServerConfig DefaultConfig() {
+		ServerConfig config;
+		config.m_Version = Core::String("0.1.0");
+		config.m_Host = Core::String("127.0.0.1");
+		config.m_Port = 8765;
+		config.m_IdleTimeoutMs = 60000;
+		config.m_OutboundBudget = 4 * c_Kilobyte * c_Kilobyte;
+		config.m_CoalesceBytes = 256 * c_Kilobyte;
+		return config;
+	}
+
+	// A count small enough that any unit it is multiplied by still fits.
+	static bool ParseCount(Core::StringView text, int64& value) {
+		const int64 kMostCount = 1000000000;
+		int64 parsed = 0;
+		if (!Core::ParseInt64(text, parsed) || parsed < 0 || parsed > kMostCount) return false;
+		value = parsed;
+		return true;
+	}
+
+	static bool Fail(Core::String& error, Core::StringView option, const char* why) {
+		Core::StringBuilder text;
+		text.Append(option);
+		text.Append(": ");
+		text.Append(why);
+		error = text.ToString();
+		return false;
+	}
+
+	// One option and its value (when it takes one) at `i`; `i` moves past them.
+	static bool ParseOption(const Core::Array<Core::String>& arguments, int64& i, ServerConfig& config, Core::String& error) {
+		Core::StringView option = arguments[i].View();
+		if (option == "--test-hooks") { config.m_TestHooks = true; return true; }
+		if (option == "--quiet") { config.m_Quiet = true; return true; }
+		if (option == "--relaunched") { config.m_Relaunched = true; return true; }
+		if (i + 1 >= arguments.Count()) return Fail(error, option, "needs a value (or is unknown)");
+		i += 1;
+		Core::StringView value = arguments[i].View();
+		int64 number = 0;
+		if (option == "--role") {
+			if (value != "master" && value != "workspace") return Fail(error, option, "is master or workspace");
+			config.m_Role = value == "workspace" ? ServerRole::Workspace : ServerRole::Master;
+		}
+		else if (option == "--ws-id") config.m_WsId = Core::String(value);
+		else if (option == "--master") config.m_MasterControl = Core::String(value);
+		else if (option == "--state") config.m_StateDir = Core::String(value);
+		else if (option == "--log") config.m_LogPath = Core::String(value);
+		else if (option == "--restarted-after") config.m_RestartedAfter = Core::String(value);
+		else if (option == "--host") config.m_Host = Core::String(value);
+		else if (option == "--static") config.m_StaticDir = Core::String(value);
+		else if (option == "--data") config.m_DataDir = Core::String(value);
+		else if (option == "--home") config.m_HomeDir = Core::String(value);
+		else if (option == "--app-data") config.m_AppDataDir = Core::String(value);
+		else if (option == "--control") config.m_ControlName = Core::String(value);
+		else if (option == "--workspace") config.m_Workspaces.Push(Core::String(value));
+		else if (option == "--allow-origin") config.m_AllowOrigins.Push(Core::String(value));
+		else if (option == "--allow-host") config.m_AllowHosts.Push(Core::String(value));
+		else if (option == "--debug-scripts") {
+			if (value != "on" && value != "off") return Fail(error, option, "is on or off");
+			config.m_DebugScripts = value == "on" ? 1 : 0;
+		}
+		else if (!ParseCount(value, number)) return Fail(error, option, "is unknown, or its value is not a count");
+		else if (option == "--port" && number <= 65535) {
+			config.m_Port = (int32)number;
+			config.m_PortGiven = true;
+		}
+		else if (option == "--idle-timeout") config.m_IdleTimeoutMs = number * 1000;
+		else if (option == "--outbound-budget-mb") config.m_OutboundBudget = number * c_Kilobyte * c_Kilobyte;
+		else if (option == "--coalesce-kb") config.m_CoalesceBytes = number * c_Kilobyte;
+		else return Fail(error, option, "is unknown or out of range");
+		return true;
+	}
+
+	bool ParseArguments(const Core::Array<Core::String>& arguments, ServerConfig& config, Core::String& error) {
+		config.m_Arguments = arguments;
+		for (int64 i = 0; i < arguments.Count(); ++i)
+			if (!ParseOption(arguments, i, config, error)) return false;
+		if (!IsWorkspaceServer(config)) return true;
+		if (config.m_WsId.IsEmpty() || config.m_MasterControl.IsEmpty() || config.m_Workspaces.Count() != 1) {
+			error = Core::String("--role workspace needs --ws-id, --master and one --workspace (only the master starts one)");
+			return false;
+		}
+		// Loopback only, on a port of the system's choosing (docs/11 "Workspace servers").
+		config.m_Host = Core::String("127.0.0.1");
+		config.m_Port = 0;
+		config.m_PortGiven = false;
+		return true;
+	}
+
+	bool IsWorkspaceServer(const ServerConfig& config) { return config.m_Role == ServerRole::Workspace; }
+
+	Core::String StateFolder(const ServerConfig& config) { return config.m_StateDir.IsEmpty() ? DataFolder(config) : config.m_StateDir; }
+
+	Core::String LogPath(const ServerConfig& config) {
+		if (!config.m_LogPath.IsEmpty()) return config.m_LogPath;
+		return Core::String((FS::Path(DataFolder(config).View()) / "logs" / "server.log").View());
+	}
+
+	static Core::String RandomHex(int32 bytes) {
+		uint8[16] random;
+		Platform::RandomBytes((void*)&random[0], bytes);
+		Core::StringBuilder text;
+		for (int32 i = 0; i < bytes; ++i) text.AppendUIntBase((uint64)random[i], 16, 2);
+		return text.ToString();
+	}
+
+	Core::String DataFolder(const ServerConfig& config) {
+		if (!config.m_DataDir.IsEmpty()) return config.m_DataDir;
+		if (config.m_TestHooks) return Core::String((FS::TempDirectory() / (Core::String("ied-data-") + RandomHex(6).View()).View()).View());
+		return Core::String((FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED").View());
+	}
+
+	Core::String HomeFolder(const ServerConfig& config) {
+		if (!config.m_HomeDir.IsEmpty()) return config.m_HomeDir;
+		for (FS::Path at = Platform::ExecutablePath().Parent(); !at.IsEmpty(); at = at.Parent()) {
+			if (FS::FileExists((at / "shared" / "host-api" / "schemas" / "plugin-manifest.v1.schema.json").CStr())) return Core::String(at.View());
+			if (at.Parent().View() == at.View()) break;
+		}
+		return Core::String();
+	}
+
+	Core::String StaticFolder(const ServerConfig& config) {
+		if (!config.m_StaticDir.IsEmpty()) return config.m_StaticDir;
+		Core::String home = HomeFolder(config);
+		return home.IsEmpty() ? home : Core::String((FS::Path(home.View()) / "frontend").View());
+	}
+
+	Core::String AppDataFolder(const ServerConfig& config) {
+		if (!config.m_AppDataDir.IsEmpty()) return config.m_AppDataDir;
+		if (config.m_TestHooks) return Core::String((FS::Path(DataFolder(config).View()) / "app").View());
+		return Core::String((FS::Path(Platform::GetEnvironmentVariable("APPDATA").View()) / "IED").View());
+	}
+
+	Core::String ControlName(const ServerConfig& config) {
+		if (!config.m_ControlName.IsEmpty()) return config.m_ControlName;
+		if (config.m_TestHooks) return Net::UserLocalName((Core::String("ied-test-") + RandomHex(6).View()).CStr());
+		return Net::UserLocalName("ied");
+	}
+
+	Core::String BrowserHost(const ServerConfig& config) {
+		Core::StringView host = config.m_Host.View();
+		if (host == "0.0.0.0" || host.IsEmpty()) return Core::String("127.0.0.1");
+		if (host == "::") return Core::String("[::1]");
+		return host.IndexOf(':', 0) >= 0 ? (Core::String("[") + host) + "]" : Core::String(host);
+	}
+
+	Core::String LaunchUrl(const ServerConfig& config, int32 port, Core::StringView token, Core::StringView fragment) {
+		Core::StringBuilder url;
+		url.Append("http://");
+		url.Append(BrowserHost(config).View());
+		url.AppendByte(':');
+		url.AppendInt(port);
+		url.AppendByte('/');
+		if (!token.IsEmpty()) {
+			url.Append("?t=");
+			url.Append(token);
+		}
+		if (!fragment.IsEmpty()) {
+			url.AppendByte('#');
+			url.Append(fragment);
+		}
+		return url.ToString();
+	}
+}

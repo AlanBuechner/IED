@@ -1,0 +1,28 @@
+include "Expand.ch"
+
+namespace Ied
+{
+	bool ExpandTaskText(Core::StringView text, const TaskLookup& lookup, Core::String& out, Core::String& unknown) {
+		Core::StringBuilder expanded;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int64 open = text.Substring(at, text.ByteLength() - at).IndexOf(Core::StringView("${"));
+			const int64 close = open < 0 ? -1 : text.IndexOf('}', at + open + 2);
+			if (open < 0 || close < 0) {
+				expanded.Append(text.Substring(at, text.ByteLength() - at));
+				break;
+			}
+			expanded.Append(text.Substring(at, open));
+			Core::StringView name = text.Substring(at + open + 2, close - at - open - 2);
+			Core::String value;
+			if (!lookup(name, value)) {
+				unknown = Core::String(name);
+				return false;
+			}
+			expanded.Append(value.View());
+			at = close + 1;
+		}
+		out = expanded.ToString();
+		return true;
+	}
+}

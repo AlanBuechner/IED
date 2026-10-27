@@ -1,0 +1,202 @@
+// Programs launched for capture (docs/22 "Capture flow"): started with the capture environment - where the capture
+// library is, where captures go, the Vulkan layer's variables - their output in the GPU output source, and their
+// capture library's control pipe (\\.\pipe\flashbang-<pid>) heard and spoken to, one JSON object per line.
+include "Gpu.ch"
+
+namespace GpuDebug
+{
+	const int32 c_PipeRetryMs = 500;
+	const int64 c_OutputReadBytes = 16384;
+
+	Core::String Target::Json() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Id.View());
+		json.Field("name", m_Name.View());
+		json.Field("program", m_Program.View());
+		json.IntField("pid", m_Pid);
+		json.Field("state", m_State.View());
+		json.Key(Core::StringView("exitCode"));
+		if (m_State.View() == "exited") json.Int(m_ExitCode);
+		else json.Null();
+		json.BoolField("connected", m_Connected);
+		json.RawField("apis", m_Apis.IsEmpty() ? Core::StringView("[]") : m_Apis.View());
+		json.IntField("frame", m_Frame);
+		json.BoolField("capturing", m_Capturing);
+		json.Field("lastCapture", m_LastCapture.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Debugger::Changed(Target* target) {
+		Debugger* self = this;
+		Core::String wsId = target->m_WsId;
+		m_Context->Atomically([self, wsId](IED::Events& events) {
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.RawField("targets", self->TargetsJson(wsId.View()).View());
+			json.EndObject();
+			events.Publish(LibraryTopic(wsId.View()).View(), "targets", json.View());
+		});
+	}
+
+	// `existing` (a variable's current value, "" for none) with `added` in front: VK_INSTANCE_LAYERS keeps the
+	// program's own layers.
+	static Core::String Prepended(Core::StringView added, Core::StringView existing) {
+		if (existing.IsEmpty()) return Core::String(added);
+		return (Core::String(added) + ";") + existing;
+	}
+
+	Target* Debugger::Launch(const IED::Workspace& ws, Core::StringView program, const Core::Array<Core::String>& args, Core::StringView cwd, const Core::Array<Core::String>& environment) {
+		Core::String native = NativeFolder(ws.m_Id.View());
+		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the GPU debugger's native parts are not built: run nuke build flashbang"));
+		FS::Path captures = FS::Path(IED::WorkspaceFile(ws, Core::StringView(c_CaptureFolder)).View());
+		FS::MakeDirectories(captures.CStr());
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		for (const Core::String& arg : args) info.arguments.Push(arg);
+		info.workingDirectory = Core::String(cwd);
+		for (const Core::String& variable : environment) info.environment.Push(variable);
+		Core::String layers;
+		Platform::TryGetEnvironmentVariable("VK_INSTANCE_LAYERS", layers);
+		info.environment.Push(Core::String("FLASHBANG_DLL=") + (FS::Path(native.View()) / "flashbang.dll").View());
+		info.environment.Push(Core::String("FLASHBANG_CAPTURE_DIR=") + captures.View());
+		info.environment.Push(Core::String("VK_ADD_LAYER_PATH=") + native.View());
+		info.environment.Push(Core::String("VK_INSTANCE_LAYERS=") + Prepended(Core::StringView("VK_LAYER_IED_flashbang"), layers.View()).View());
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::ToOutput;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the program could not start: ") + started.Error()).View());
+		Target* target = new Target();
+		target->m_WsId = ws.m_Id;
+		target->m_Program = Core::String(program);
+		target->m_Name = Core::String(FS::Path(program).FileName());
+		target->m_Pid = (int64)started.Id();
+		target->m_State = Core::String("running");
+		target->m_Child = new Process::Child(take(started));
+		Debugger* self = this;
+		m_Context->Atomically([self, target](IED::Events& events) {
+			target->m_Id = self->NextId("t");
+			self->m_Targets.Push(target);
+		});
+		m_Context->Output(ws.m_Id.View(), Core::StringView("gpu"), ((Core::String("Launched for capture: ") + program) + "\r\n").View());
+		Changed(target);
+		Watch(target);
+		return target;
+	}
+
+	void Debugger::ReadOutput(Core::String wsId, Process::Child* child, Core::StringView label) {
+		char[c_OutputReadBytes] buffer;
+		Core::String carried;
+		for (;;) {
+			const int64 got = child->Read(Process::Stream::Output, (void*)&buffer[0], c_OutputReadBytes, Process::kWaitForever);
+			if (got <= 0) break;
+			Core::String bytes = carried + Core::StringView((const char*)&buffer[0], got);
+			const int64 whole = IED::WholeCharacters(bytes.View());
+			carried = Core::String(bytes.View().Substring(whole, bytes.ByteLength() - whole));
+			m_Context->Output(wsId.View(), Core::StringView("gpu"), bytes.View().Substring(0, whole));
+		}
+	}
+
+	void Debugger::Watch(Target* target) {
+		Debugger* self = this;
+		Process::Child* child = target->m_Child;
+		Core::String wsId = target->m_WsId;
+		Threading::Thread::Run([self, wsId, child]() { self->ReadOutput(wsId, child, Core::StringView("program")); }).Detach();
+		Threading::Thread::Run([self, target]() { self->Listen(target); }).Detach();
+	}
+
+	// Connects to the program's control pipe as soon as its capture library opens it, hears it until it goes, and
+	// tries again while the program runs; then records how the program ended.
+	void Debugger::Listen(Target* target) {
+		Core::StringBuilder name;
+		name.Append("flashbang-");
+		name.AppendInt(target->m_Pid);
+		Core::String pipeName = name.ToString();
+		while (target->m_Child->Wait(0) == Process::kTimedOut) {
+			Net::LocalStream stream = Net::LocalStream::Connect(pipeName.CStr(), c_PipeRetryMs);
+			if (!stream.IsOpen()) {
+				Threading::Thread::Sleep((int64)c_PipeRetryMs * 1000000);
+				continue;
+			}
+			Net::LocalStream* pipe = new Net::LocalStream(take(stream));
+			{
+				Threading::LockGuard guard(target->m_SendLock);
+				target->m_Pipe = pipe;
+			}
+			target->m_Connected = true;
+			Changed(target);
+			char[4096] buffer;
+			Core::String pending;
+			for (;;) {
+				const int64 got = pipe->Receive((void*)&buffer[0], 4096, 1000);
+				if (got == Net::kTimedOut) {
+					if (target->m_Child->Wait(0) != Process::kTimedOut) break;
+					continue;
+				}
+				if (got <= 0) break;
+				pending = pending + Core::StringView((const char*)&buffer[0], got);
+				for (;;) {
+					const int64 newline = pending.View().IndexOf('\n', 0);
+					if (newline < 0) break;
+					Core::String line = Core::String(pending.View().Substring(0, newline).Trimmed());
+					pending = Core::String(pending.View().Substring(newline + 1, pending.ByteLength() - newline - 1));
+					if (!line.IsEmpty()) Heard(target, line.View());
+				}
+			}
+			{
+				Threading::LockGuard guard(target->m_SendLock);
+				target->m_Pipe = nullptr;
+			}
+			pipe->Close();
+			target->m_Connected = false;
+			Changed(target);
+		}
+		const int64 code = target->m_Child->Wait();
+		target->m_State = Core::String("exited");
+		target->m_ExitCode = code;
+		target->m_Capturing = false;
+		Core::StringBuilder text;
+		text.Append(target->m_Name.View());
+		text.Append(" exited with code ");
+		text.AppendInt(code);
+		text.Append("\r\n");
+		m_Context->Output(target->m_WsId.View(), Core::StringView("gpu"), text.View());
+		Changed(target);
+		Rescan(target->m_WsId.View());
+	}
+
+	// One event from the capture library: hello and status (what it captures, its frame), captured, error.
+	void Debugger::Heard(Target* target, Core::StringView line) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(line, *doc);
+		if (!read.Ok()) return;
+		Serialization::DomNode message = read.root;
+		Core::StringView event = message.Member("event").AsView();
+		if (event == "hello" || event == "status") {
+			target->m_Apis = IED::NodeJson(message.Member("apis"));
+			target->m_Frame = message.Member("frame").AsInt();
+			target->m_Capturing = message.Member("capturing").AsBool();
+			Changed(target);
+		}
+		else if (event == "captured") {
+			target->m_LastCapture = Core::String(message.Member("path").AsView());
+			target->m_Capturing = false;
+			m_Context->Output(target->m_WsId.View(), Core::StringView("gpu"), ((Core::String("Captured: ") + target->m_LastCapture.View()) + "\r\n").View());
+			Changed(target);
+			Rescan(target->m_WsId.View());
+		}
+		else if (event == "error") {
+			target->m_Capturing = false;
+			m_Context->Output(target->m_WsId.View(), Core::StringView("gpu"), ((Core::String("Capture failed: ") + message.Member("message").AsView()) + "\r\n").View());
+			Changed(target);
+		}
+	}
+
+	bool Debugger::Send(Target* target, Core::StringView line) {
+		Threading::LockGuard guard(target->m_SendLock);
+		if (!target->m_Pipe) return false;
+		return target->m_Pipe->SendText((Core::String(line) + "\n").View(), 2000);
+	}
+}

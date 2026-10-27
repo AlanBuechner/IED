@@ -1,0 +1,668 @@
+include "api/Plugin.ch"
+include "Run.ch"
+include "prompts/Contributed.ch"
+include "aitools/ChatTools.ch"
+include "context/History.ch"
+include "aitools/Clipboard.ch"
+include "aitools/ModelTools.ch"
+include "chats/Mentions.ch"
+include "aitools/Agents.ch"
+
+namespace Ai
+{
+	static int64 RunNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	void StartRun(Chats* chats, Chat* chat, const IED::Workspace& ws) {
+		TurnRun* runner = new TurnRun();
+		runner->m_Context = chats->m_Context;
+		runner->m_Chats = chats;
+		runner->m_Chat = chat;
+		runner->m_Run = chat->m_Run;
+		runner->m_Turn = chat->m_Run->m_Turn;
+		runner->m_Ws = ws;
+		chats->m_Context->StartThread([runner]() { runner->Execute(); });
+	}
+
+	void TurnRun::Execute() {
+		try {
+			AwaitToolStarts(m_Ws, &m_Run->m_Cancelled);
+			if (Prepare()) {
+				ResolveMessage();
+				while (!m_Ending) Step();
+			}
+		}
+		catch (IED::RpcError& error) {
+			Failed(error.m_Message.View(), Platform::StackText().View());
+		}
+		catch (...) {
+			Failed(Core::StringView(""), Platform::StackText().View());
+		}
+		EndClaude();
+		End();
+	}
+
+	void TurnRun::Failed(Core::StringView message, Core::StringView stack) {
+		Core::StringBuilder line;
+		line.Append("chat ");
+		line.Append(m_Chat->m_ChatId.View());
+		line.Append(": turn ");
+		line.Append(m_Turn->m_TurnId.View());
+		line.Append(" ended on an exception nothing caught");
+		if (!message.IsEmpty()) {
+			line.Append(": ");
+			line.Append(message);
+		}
+		line.AppendByte('\n');
+		line.Append(stack);
+		m_Context->Log(line.View());
+		Core::StringBuilder note;
+		note.Append("IED stopped this turn: its own code failed");
+		if (!message.IsEmpty()) {
+			note.Append(" (");
+			note.Append(message);
+			note.Append(")");
+		}
+		note.Append(". Where it failed is in the server's log, logs/server.log.");
+		IED::HostLock guard(*m_Context);
+		UiNote(Core::StringView("harness_error"), note.View());
+		m_Ending = true;
+		m_Pausing = false;
+		m_Stop = Core::String("harness_error");
+	}
+
+	// --- Preparing ---------------------------------------------------------------------------------------------------
+
+	static Core::String SettingString(IED::PluginContext* context, const IED::Workspace& ws, const char* key) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String json = context->Setting(Core::StringView(key), WsId(ws));
+		return Core::String(Serialization::ReadJson(json.View(), *doc).root.AsView());
+	}
+
+	static Core::String AgentsMd(const IED::Workspace& ws) {
+		FS::Path file = FS::Path(ws.m_Root.View()) / "AGENTS.md";
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	static Core::String WorkspaceSummary(const IED::Workspace& ws) {
+		Core::StringBuilder out;
+		out.Append("Name: ");
+		out.Append(ws.m_Name.View());
+		out.Append(" (a ");
+		out.Append(ws.m_Kind.View());
+		out.Append(" workspace)\nRoot: ");
+		out.Append(FS::Path(ws.m_Root.View()).View());
+		out.Append("\nPaths in tools are relative to the root, with / separators.");
+		if (!ws.m_Projects.IsEmpty()) {
+			out.Append("\nProjects:");
+			for (const IED::Project& project : ws.m_Projects) {
+				out.Append(" ");
+				out.Append(project.m_Name.View());
+				out.Append(" (");
+				out.Append(project.m_Kind.View());
+				// Where its code is: a project's files are not always under a src folder, and docs/14 "Assembly order"
+				// promises each one's root.
+				if (!project.m_Folder.IsEmpty()) {
+					out.Append(Core::StringView(", code in "));
+					out.Append(project.m_Folder.View());
+				}
+				out.Append(")");
+			}
+		}
+		if (!ws.m_Trusted) out.Append("\nThe workspace is not trusted: commands and builds cannot run until the owner trusts it.");
+		return out.ToString();
+	}
+
+	bool TurnRun::Prepare() {
+		IED::HostLock guard(*m_Context);
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), WsId(m_Ws)).View(), problems);
+		for (const Core::String& problem : problems) m_Context->Log(problem.View());
+		Core::String groups = m_Context->Setting(Core::StringView("ai.groups"), WsId(m_Ws));
+		m_Candidates = TurnCandidates(models, groups.View(), m_Turn->m_Group.View(), m_Chat->m_Agent.View(), Core::StringView(ChatModeName(m_Turn->m_Mode)), m_Chat->m_PinnedModel.View(), m_Role);
+		if (m_Chat->RunsAlone()) m_Role.m_Effort = Core::String();
+		m_Rules = ReadPermissionRules(m_Context->Setting(Core::StringView("ai.permissions"), WsId(m_Ws)).View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		m_MaxSteps = Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.maxSteps"), WsId(m_Ws)).View(), *doc).root.AsInt();
+		if (m_MaxSteps < 0) m_MaxSteps = 0;
+		ChooseClaude();
+		if (!m_Candidates.IsEmpty()) m_Turn->m_Model = m_Candidates[0]->m_Name;
+		if (m_Candidates.IsEmpty()) {
+			UiNote(Core::StringView("no_model"), Core::StringView(c_ClaudeSubscriptionOffered ? "No model is set up for this chat: sign in to Claude with your Pro or Max subscription in Settings > AI > Claude, or add a model to ai.models (an OpenAI-compatible endpoint) in Settings." : "No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
+			Finish(Core::StringView("no_model"));
+			return false;
+		}
+		Core::Array<Core::String> contributed;
+		m_Tools = TurnTools(m_Chats, m_Chat, m_Ws, contributed);
+		m_System = TurnSystem(m_Chats, m_Chat, m_Ws, m_Tools, m_Turn->m_UserText.View(), models, contributed);
+		for (const Core::String& problem : contributed) m_Context->Log(problem.View());
+		return true;
+	}
+
+	ToolRegistry* TurnTools(Chats* chats, Chat* chat, const IED::Workspace& ws, Core::Array<Core::String>& contributed) {
+		IED::PluginContext* context = chats->m_Context;
+		ToolRegistry* tools = ToolsFor(context, ws, contributed);
+		AddChatTools(*tools, chats, chat);
+		AddHistoryTools(*tools, chat);
+		AddClipboardTools(*tools, chats, chat);
+		AddModelTools(*tools, chats, chat);
+		AddBackgroundTools(*tools, chats, chat);
+		AddAgentTools(*tools, chats, chat, ws);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		if (Serialization::ReadJson(context->Setting(Core::StringView("ai.tools.loadAll"), WsId(ws)).View(), *doc).root.AsBool()) tools->LoadAll();
+		return tools;
+	}
+
+	Core::String TurnSystem(Chats* chats, Chat* chat, const IED::Workspace& ws, ToolRegistry* tools, Core::StringView userText, const Core::Array<ModelProfile*>& models,
+		Core::Array<Core::String>& contributed) {
+		IED::PluginContext* context = chats->m_Context;
+		SystemContext prompt;
+		prompt.m_AgentsMd = AgentsMd(ws);
+		prompt.m_Sections = PluginSections(context, ws, contributed);
+		prompt.m_Workspace = WorkspaceSummary(ws);
+		// The skills a long list names are the ones the chat's first message asks about, for the whole chat: a system
+		// message that changed with each turn's words would make the model's server read the conversation again.
+		Core::StringView hint = chat->m_Turns.IsEmpty() ? userText : chat->m_Turns[0]->m_UserText.View();
+		prompt.m_Skills = SkillsIndex(SkillsOf(context, ws, contributed), hint, DefaultSkillsIndexLimits());
+		prompt.m_Docs = DocsIndex(DocsOf(context, ws, contributed));
+		prompt.m_Deferred = tools->HasDeferred(chat->m_Mode);
+		prompt.m_Agents = AgentsSection(AgentsOf(chats, chat, ws), models);
+		return chats->m_Prompts.System(chat->m_Mode, prompt);
+	}
+
+	// IED's parts of what the chat's next turn would send, estimated.
+	static Core::Array<ContextPart> NextTurnParts(Chats* chats, Chat* chat, const IED::Workspace& ws, const Core::Array<ModelProfile*>& models, bool claude) {
+		Core::Array<Core::String> contributed;
+		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
+		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->m_UserText.View() : Core::StringView(""), models, contributed);
+		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->m_Mode, claude).ByteLength());
+	}
+
+	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(chats->m_Context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode meter = Serialization::ReadJson(chat->m_Context.View(), *doc).root;
+		const int64 used = meter.Member("used").AsInt();
+		const bool claude = meter.Member("compacts").AsBool();
+		Core::Array<ContextPart> parts = ScaledParts(NextTurnParts(chats, chat, ws, models, claude), used);
+		return ContextJson(meter.Member("window").AsInt(), used, meter.Member("model").AsView(), claude, parts, meter.Member("source").AsView());
+	}
+
+	Core::String MeterFromTurns(Chats* chats, Chat* chat, const IED::Workspace& ws) {
+		IED::PluginContext* context = chats->m_Context;
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+		Core::String group;
+		Core::String roleEffort;
+		Core::String model = chats->NextModel(chat, ws, group, roleEffort);
+		ModelProfile* profile = FindModel(models, model.View());
+		const bool claude = profile && profile->IsClaude();
+		Core::Array<ContextPart> parts = NextTurnParts(chats, chat, ws, models, claude);
+		int64 used = 0;
+		for (int64 i = chat->m_Turns.Count() - 1; i >= 0 && used == 0; --i) used = chat->m_Turns[i]->m_TokensIn;
+		if (used == 0)
+			for (const ContextPart& part : parts) used += part.m_Tokens;
+		return ContextJson(profile ? chats->WindowOf(profile) : 0, used, model.View(), claude, ScaledParts(parts, used));
+	}
+
+	// What the owner's message names, read now, and its attachments, into the message the model is sent (Mentions.ch):
+	// the turn's stored message, so later steps, a retry and the transcript keep what the model saw.
+	void TurnRun::ResolveMessage() {
+		Core::Array<Mention> mentions;
+		Core::Array<Attachment> attachments;
+		{
+			IED::HostLock guard(*m_Context);
+			mentions = m_Turn->m_Mentions;
+			attachments = m_Turn->m_Attachments;
+		}
+		if (mentions.IsEmpty() && attachments.IsEmpty()) return;
+		Core::Array<IED::ToolImage> images;
+		Core::String added = MessageExtras(mentions, attachments, images);
+		IED::HostLock guard(*m_Context);
+		ModelMessage* message = m_Turn->m_Messages[0];
+		message->m_Content = message->m_Content + added.View();
+		message->m_Images = images;
+		SaveRunning();
+	}
+
+	Core::String TurnRun::MessageExtras(const Core::Array<Mention>& mentions, const Core::Array<Attachment>& attachments, Core::Array<IED::ToolImage>& images) {
+		ToolInvocation call;
+		call.m_Context = m_Context;
+		call.m_Ws = m_Ws;
+		call.m_Chat = m_Chat;
+		call.m_CallId = Core::String("mention");
+		call.m_Cancelled = &m_Run->m_Cancelled;
+		Core::StringBuilder added;
+		for (const Mention& mention : mentions) {
+			added.Append("\n\n");
+			added.Append(MentionBlock(mention, ReadMention(*m_Tools, call, mention).View()).View());
+		}
+		for (const Attachment& attachment : attachments) {
+			if (!AttachedImage(attachment)) {
+				added.Append("\n");
+				added.Append(AttachedNote(attachment).View());
+				continue;
+			}
+			IED::ToolImage image;
+			image.m_Mime = attachment.m_Mime;
+			image.m_Path = attachment.m_Path;
+			images.Push(image);
+		}
+		return added.ToString();
+	}
+
+	// --- A step ------------------------------------------------------------------------------------------------------
+
+	// A profile's server is asked once per server run (docs/12 "Truth about the model's context window"): the window it
+	// reports, for a profile that names none, whether it streams prompt progress and whether it takes images, for a
+	// profile that does not say; a server that did not answer is asked again a minute later. The lock is not held.
+	void TurnRun::Discover() {
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		if (profile->IsClaude()) return;
+		bool asked = false;
+		int64 failedMs = 0;
+		{
+			IED::HostLock guard(*m_Context);
+			m_Chats->m_Probed.TryGet(profile->m_Name, asked);
+			m_Chats->m_ProbeFailedMs.TryGet(profile->m_Name, failedMs);
+		}
+		if (asked || (failedMs > 0 && ChatNowMs() - failedMs < c_RunProbeRetryMs)) return;
+		ModelProbe probe = ProbeModel(*profile, c_ProbeTimeoutMs);
+		IED::HostLock guard(*m_Context);
+		if (!probe.m_Ok) {
+			m_Chats->m_ProbeFailedMs.At(profile->m_Name) = ChatNowMs();
+			return;
+		}
+		m_Chats->m_Probed.At(profile->m_Name) = true;
+		m_Chats->m_LlamaCpp.At(profile->m_Name) = probe.m_Server == "llama.cpp";
+		m_Chats->m_SeesImages.At(profile->m_Name) = probe.m_Vision;
+		m_Chats->LearnWindow(profile->m_Name.View(), probe.m_ContextWindow);
+	}
+
+	void TurnRun::Step() {
+		Discover();
+		const bool onClaude = m_Candidates[m_Candidate]->IsClaude();
+		{
+			IED::HostLock guard(*m_Context);
+			if (m_Run->m_Cancelled) {
+				Finish(Core::StringView("user_cancelled"));
+				return;
+			}
+			if (m_MaxSteps > 0 && m_Steps >= m_MaxSteps) {
+				Pause(Core::StringView("budget"), Core::StringView("the turn used its step budget (ai.maxSteps); send a message to continue"));
+				return;
+			}
+		}
+		DeliverMessages(onClaude && m_Claude && m_Claude->m_Querying);
+		StepRequest request;
+		int64 estimate = 0;
+		int64 estimateBefore = 0;
+		{
+			IED::HostLock guard(*m_Context);
+			if (m_MaxSteps > 0 && m_Steps == m_MaxSteps * 8 / 10 && m_Steps > 0) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("percent"));
+				values.Push(Core::String("80"));
+				values.Push(Core::String("budget"));
+				values.Push(Core::String("steps"));
+				HarnessNote(Core::StringView("budget_warning"), m_Chats->m_Prompts.Note("budget_warning", values).View());
+			}
+			Core::String ended = m_Chats->TellEnded(m_Chat);
+			if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
+			if (!onClaude) {
+				if (Window() > 0 && CalibratedTokens() * 100 > Window() * c_ContextCompressAtPercent && Compress()) m_Turn->m_Recoveries.Push(CompressedAt());
+				request = Request();
+				estimate = request.m_PromptTokens;
+				EstimatePrefill(request);
+			}
+			estimateBefore = EstimateTokens();
+			SaveRunning();
+		}
+		m_Steps += 1;
+		TurnRun* self = this;
+		StepEvents events = [self](StepEventKind kind, Core::StringView delta, int64 call) { self->OnEvent(kind, delta, call); };
+		StepResult* result = onClaude ? ClaudeStep(events) : RunStep(request, events, &m_Run->m_Cancelled);
+		{
+			IED::HostLock guard(*m_Context);
+			CloseStreaming();
+			Prefill(Core::StringView(""));
+			Account(result, estimate, estimateBefore);
+		}
+		Handle(Classify(*result), result);
+		m_CallSegments.Clear();
+	}
+
+	// Whether every call's arguments are JSON: a reply cut by max_tokens after its calls were complete.
+	static bool CallsComplete(const StepResult* result) {
+		if (result->m_Calls.IsEmpty()) return false;
+		for (ToolCallDraft* call : result->m_Calls) {
+			Serialization::DomNode args;
+			if (!ReadToolArguments(call->m_Arguments.View(), args)) return false;
+		}
+		return true;
+	}
+
+	static bool IsTransport(StepVerdict verdict) { return verdict == StepVerdict::ConnectFailed || verdict == StepVerdict::HttpError; }
+
+	static bool IsCut(StepVerdict verdict) {
+		return verdict == StepVerdict::Disconnected || verdict == StepVerdict::StalledPrefill || verdict == StepVerdict::StalledStream || verdict == StepVerdict::StepCap;
+	}
+
+	void TurnRun::Handle(StepVerdict verdict, StepResult* result) {
+		if (verdict == StepVerdict::ToolCalls || (verdict == StepVerdict::MaxTokens && CallsComplete(result))) {
+			{
+				IED::HostLock guard(*m_Context);
+				Progress();
+				RecordAssistant(result, true);
+			}
+			ExecuteCalls(result);
+			return;
+		}
+		if (IsTransport(verdict)) {
+			Transport(verdict, result);
+			return;
+		}
+		IED::HostLock guard(*m_Context);
+		if (verdict == StepVerdict::Cancelled) {
+			RecordAssistant(result, false);
+			Finish(Core::StringView("user_cancelled"));
+		}
+		else if (verdict == StepVerdict::Answer) {
+			Progress();
+			RecordAssistant(result, false);
+			if (m_Chat->m_Mode != ChatMode::Agent) Finish(Core::StringView("finished"));
+			else NoProgress();
+		}
+		else if (verdict == StepVerdict::AnnouncedNoAction) {
+			RecordAssistant(result, false);
+			Core::String action;
+			AnnouncesAction(result->m_Text.View(), action);
+			Core::Array<Core::String> values;
+			values.Push(Core::String("action"));
+			values.Push(action);
+			Nudge("announced_no_action", 2, m_Chats->m_Prompts.Note("announced_no_action", values).View());
+		}
+		else if (verdict == StepVerdict::Repetition) Nudge("repetition", 2, m_Chats->m_Prompts.Note("repeated_output").View());
+		else if (verdict == StepVerdict::Empty) Nudge("empty", 2, m_Chats->m_Prompts.Note("empty_reply").View());
+		else if (verdict == StepVerdict::ReasoningOnly) Nudge("reasoning_only", 2, m_Chats->m_Prompts.Note("reasoning_only").View());
+		else if (verdict == StepVerdict::MaxTokens) {
+			RecordAssistant(result, false);
+			if (result->m_Calls.IsEmpty()) Nudge("max_tokens", 3, m_Chats->m_Prompts.Note("continue_after_max_tokens").View());
+			else {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(result->m_Calls[result->m_Calls.Count() - 1]->m_Name);
+				Nudge("max_tokens", 3, m_Chats->m_Prompts.Note("retry_tool_call_after_cut", values).View());
+			}
+		}
+		else if (verdict == StepVerdict::UnparsedToolCall) {
+			RecordAssistant(result, false);
+			Nudge("unparsed_tool_call", 2, m_Chats->m_Prompts.Note("unparsed_tool_call").View());
+		}
+		else if (IsCut(verdict)) {
+			if (verdict == StepVerdict::StalledPrefill) PrefillRanShort(result);
+			Retry(verdict, result, 2);
+		}
+		else Overflow(result);
+	}
+
+	// --- Recovery ----------------------------------------------------------------------------------------------------
+
+	void TurnRun::Progress() {
+		m_Counts.Clear();
+		m_Attempts = 0;
+		m_PrefillFloorMs = 0;
+	}
+
+	// A prefill that ran out its watchdog: the server was still reading, so nothing may be given the deadline that just
+	// failed. Its floor for the rest of the turn is twice what this step waited - the doubling the watchdog's rule already
+	// applies to an estimate (docs/12 "Watchdogs") - and a step that makes progress clears it.
+	//
+	// When the server was asked in the meantime and said it had the work, the model learns too that its prompt is read at
+	// no better than tokens/waited: the engine had the request and then did not, so the wait was real and the next step -
+	// or the next turn - is sized by it rather than by a rate that has not seen a read this slow. A server that never
+	// confirmed is left alone: for it the deadline is the only clock there is, and a rate learned from one slow step would
+	// fire that clock early.
+	void TurnRun::PrefillRanShort(const StepResult* result) {
+		const int64 needed = 2 * result->m_PrefillWaitMs;
+		if (needed > m_PrefillFloorMs) m_PrefillFloorMs = needed;
+		if (result->m_PrefillConfirms <= 0 || result->m_PrefillWaitMs <= 0 || result->m_PromptTokens <= 0) return;
+		const double waited = (double)result->m_PromptTokens * 1000.0 / (double)result->m_PrefillWaitMs;
+		double known = 0;
+		const Core::String name = m_Candidates[m_Candidate]->m_Name;
+		m_Chats->m_PrefillRates.TryGet(name, known);
+		if (known <= 0 || waited < known) m_Chats->m_PrefillRates.At(name) = waited;
+	}
+
+	static Core::String Counted(Core::StringView what, int64 count) {
+		Core::StringBuilder text;
+		text.Append(what);
+		text.Append(" (");
+		text.AppendInt(count);
+		text.Append("x)");
+		return text.ToString();
+	}
+
+	// How a compression of the context is named in the turn's recoveries, at the percent the setting uses.
+	static Core::String CompressedAt() {
+		Core::StringBuilder text;
+		text.Append("compressed the context at ");
+		text.AppendInt(c_ContextCompressAtPercent);
+		text.Append("%");
+		return text.ToString();
+	}
+
+	// One more recovery of `reason` this step: the note goes to the model, or the chat pauses past `bound`.
+	bool TurnRun::Nudge(const char* reason, int64 bound, Core::StringView note) {
+		Core::String key = Core::String(reason);
+		int64 count = 0;
+		m_Counts.TryGet(key, count);
+		count += 1;
+		m_Counts.At(key) = count;
+		if (count > bound) {
+			Pause(Core::StringView(reason), ((Core::String("the model kept stopping the same way (") + reason) + ") after the harness's notes").View());
+			return false;
+		}
+		const bool continuing = key == "max_tokens" || key == "disconnected_mid_stream" || key == "stalled_stream" || key == "stalled_prefill" || key == "step_cap";
+		HarnessNote(Core::StringView(reason), note);
+		m_Turn->m_Recoveries.Push(Counted(((Core::String(continuing ? "continued after " : "nudged after ") + reason)).View(), count));
+		return true;
+	}
+
+	void TurnRun::NoProgress() {
+		m_NoProgress += 1;
+		if (m_NoProgress > c_RunNoProgressBound) {
+			Pause(Core::StringView("no_progress"), Core::StringView("the model replied several times without a tool call or finish"));
+			return;
+		}
+		HarnessNote(Core::StringView("agent_no_finish"), m_Chats->m_Prompts.Note("agent_no_finish").View());
+		m_Turn->m_Recoveries.Push(Counted(Core::StringView("nudged to act or finish"), m_NoProgress));
+	}
+
+	void TurnRun::Retry(StepVerdict verdict, StepResult* result, int64 bound) {
+		const char* reason = VerdictName(verdict);
+		if (!result->m_Text.View().Trimmed().IsEmpty()) {
+			RecordAssistant(result, false);
+			Nudge(reason, bound, m_Chats->m_Prompts.Note("continue_after_disconnect").View());
+			return;
+		}
+		Core::String key = Core::String(reason);
+		int64 count = 0;
+		m_Counts.TryGet(key, count);
+		m_Counts.At(key) = count + 1;
+		if (count + 1 > bound) Pause(Core::StringView(reason), StallWhy(Core::StringView(reason), result).View());
+		else m_Turn->m_Recoveries.Push(Counted((Core::String("retried after ") + reason).View(), count + 1));
+	}
+
+	// Why a step that was cut with nothing to continue from paused: a stalled prefill names the watchdog's own numbers, since
+	// the usual cause is a server that reads the prompt slower than the rate measured on earlier steps (docs/12 "Watchdogs")
+	// rather than a server that died. When the server was asked while it read, how it answered is part of the numbers.
+	Core::String TurnRun::StallWhy(Core::StringView reason, const StepResult* result) {
+		if (reason != "stalled_prefill" || result->m_PrefillBudgetMs <= 0) return Core::String("the model server stopped answering");
+		Core::StringBuilder why;
+		why.Append("it waited ");
+		why.AppendInt(result->m_PrefillWaitMs / 1000);
+		why.Append(" s for the first token, past the ");
+		why.AppendInt(result->m_PrefillBudgetMs / 1000);
+		why.Append(" s the prefill watchdog allows (its base, plus twice the estimated read of ");
+		why.AppendInt(result->m_PromptTokens);
+		why.Append(" prompt tokens at ");
+		why.AppendInt((int64)(result->m_PrefillRate + 0.5));
+		why.Append(" tok/s, a rate measured on earlier steps).");
+		if (result->m_PrefillConfirms > 0) {
+			why.Append(" It was asked ");
+			why.AppendInt(result->m_PrefillConfirms);
+			why.Append(" times while it waited and each time said the work was still in its engine, so the request was never cancelled and the wait grew to what the server itself reports reading at; at the last ask it no longer had it. A prompt the engine let go of is not one a retry finds again at the same deadline: what helps is a smaller prompt (a new chat, or letting the context compress further). The slower rate this wait teaches the model is kept, so its next turn is sized by it (Settings > AI > Models, watchdog.prefillRate, sets the rate assumed before one is measured).");
+			return why.ToString();
+		}
+		why.Append(" The server says nothing of itself, so the watchdog could only guess from the silence: another chat may be using the server, or its prefix cache went cold (a tool set loaded mid-turn, thinking sent back, a server restart). Send a message to retry, or set a slower watchdog.prefillRate for the model in Settings > AI > Models.");
+		return why.ToString();
+	}
+
+	static int64 Backoff(int64 attempt, int64 retryAfterMs) {
+		if (retryAfterMs > 0) return retryAfterMs < c_RunMostBackoffMs ? retryAfterMs : c_RunMostBackoffMs;
+		const int64 base = (int64)1000 << (attempt - 1 < 5 ? attempt - 1 : 5);
+		return base + (Platform::UnixTimeNs() / 1000) % (base / 4 + 1);
+	}
+
+	static Core::String TransportReason(StepVerdict verdict, const StepResult* result) {
+		if (verdict == StepVerdict::ConnectFailed) return Core::String("connect_failed");
+		Core::StringBuilder reason;
+		reason.Append("http_error ");
+		reason.AppendInt(result->m_HttpStatus);
+		return reason.ToString();
+	}
+
+	void TurnRun::Transport(StepVerdict verdict, StepResult* result) {
+		int64 waitMs = 0;
+		{
+			IED::HostLock guard(*m_Context);
+			if (!m_ClaudeBlocked.IsEmpty()) {
+				ClaudeBlocked();
+				return;
+			}
+			Core::String reason = TransportReason(verdict, result);
+			Core::String error = result->m_Completion->m_Errored ? result->m_Completion->m_ErrorMessage : result->m_Error;
+			const bool retryable = verdict == StepVerdict::ConnectFailed || result->m_HttpStatus == 429 || result->m_HttpStatus >= 500 || result->m_HttpStatus == 200;
+			if (!retryable) {
+				Pause(reason.View(), ((reason + ": ") + error.View().Substring(0, error.ByteLength() < 400 ? error.ByteLength() : 400)).View());
+				return;
+			}
+			m_Attempts += 1;
+			if (m_Attempts >= c_RunTransportAttempts) {
+				Pause(reason.View(), ((reason + " after retries: ") + error.View().Substring(0, error.ByteLength() < 400 ? error.ByteLength() : 400)).View());
+				return;
+			}
+			if (m_Attempts >= c_RunFallbackAfter && m_Candidate + 1 < m_Candidates.Count()) {
+				m_Candidate += 1;
+				m_Turn->m_Model = m_Candidates[m_Candidate]->m_Name;
+				Core::String switched = ((Core::String("switched to ") + m_Candidates[m_Candidate]->m_Name.View()) + " after ") + reason.View();
+				UiNote(Core::StringView("routing"), switched.View());
+				m_Turn->m_Recoveries.Push(switched);
+				return;
+			}
+			m_Turn->m_Recoveries.Push(Counted((Core::String("retried after ") + reason.View()).View(), m_Attempts));
+			waitMs = Backoff(m_Attempts, result->m_RetryAfterMs);
+		}
+		Sleep(waitMs);
+	}
+
+	void TurnRun::Overflow(StepResult* result) {
+		Core::String error = result->m_Completion->m_Errored ? result->m_Completion->m_ErrorMessage : result->m_Error;
+		const int64 limit = ContextLimitIn(error.View());
+		if (limit > 0) m_Chats->LearnWindow(m_Candidates[m_Candidate]->m_Name.View(), limit);
+		Core::String key = Core::String("context_overflow");
+		int64 count = 0;
+		m_Counts.TryGet(key, count);
+		m_Counts.At(key) = count + 1;
+		if (count + 1 > 3) {
+			Pause(key.View(), Core::StringView("the conversation does not fit the model's context, even compressed"));
+			return;
+		}
+		if (Compress()) {
+			m_Turn->m_Recoveries.Push(Counted(Core::StringView("compressed after context_overflow"), count + 1));
+			return;
+		}
+		if (limit > 0 && EstimateTokens() < limit) {
+			m_Turn->m_Recoveries.Push(Counted(Core::StringView("retried after context_overflow"), count + 1));
+			return;
+		}
+		Pause(key.View(), Core::StringView("the conversation does not fit the model's context and nothing is left to compress"));
+	}
+
+	// Waits `ms` unless the run is stopped first; the lock is not held.
+	bool TurnRun::Sleep(int64 ms) {
+		IED::HostLock guard(*m_Context);
+		const int64 until = RunNowMs() + ms;
+		while (!m_Run->m_Cancelled && RunNowMs() < until) guard.Wait(m_Run->m_Wake, (until - RunNowMs()) * 1000000);
+		return !m_Run->m_Cancelled;
+	}
+
+	// --- Ending ------------------------------------------------------------------------------------------------------
+
+	void TurnRun::Pause(Core::StringView reason, Core::StringView why) {
+		if (m_Ending) return;
+		m_Ending = true;
+		m_Pausing = true;
+		m_Stop = Core::String(reason);
+		m_PauseWhy = Core::String(why);
+	}
+
+	// A turn about to finish with a message waiting goes on: the next step gives it to the model. The lock is held.
+	void TurnRun::Finish(Core::StringView reason) {
+		if (m_Ending || (reason == "finished" && (!m_Chat->m_Pending.IsEmpty() || !m_ClaudeAside.IsEmpty() || m_Chats->HasUntold(m_Chat)))) return;
+		m_Ending = true;
+		m_Stop = Core::String(reason);
+	}
+
+	void TurnRun::End() {
+		IED::HostLock guard(*m_Context);
+		CloseStreaming();
+		for (Approval* approval : m_Chat->m_Approvals) {
+			if (!approval->m_Decision.IsEmpty()) continue;
+			approval->m_Decision = Core::String("withdrawn");
+			IED::JsonWriter data;
+			data.BeginObject();
+			data.Field("approvalId", approval->m_ApprovalId.View());
+			data.Field("decision", "withdrawn");
+			data.EndObject();
+			m_Chats->Publish(m_Chat, "approval.resolved", data.View());
+		}
+		m_Chat->m_Approvals.Clear();
+		m_Chat->m_Question = nullptr;
+		if (!m_Chat->m_Pending.IsEmpty()) {
+			for (OwnerMessage* message : m_Chat->m_Pending) m_Chat->m_Queued.Push(message);
+			m_Chat->m_Pending.Clear();
+			m_Chats->QueueChanged(m_Chat);
+		}
+		if (m_Pausing) UiNote(Core::StringView("paused"), ((Core::String("Paused (") + m_Stop.View()) + "): " + m_PauseWhy.View() + ". Send a message to continue.").View());
+		CloseOpenCalls(m_Turn, Core::StringView("The call did not run: the turn ended first."));
+		m_Turn->m_Stop = m_Stop;
+		m_Turn->m_EndedMs = RunNowMs();
+		m_Chat->m_Run = nullptr;
+		m_Chat->m_State = m_Pausing ? ChatState::Paused : ChatState::Idle;
+		m_Chat->m_StateReason = m_Pausing ? m_Stop : Core::String();
+		m_Chat->m_UpdatedMs = m_Turn->m_EndedMs;
+		AppendTurn(LocalStateOf(m_Ws), m_Chat, m_Turn);
+		ForgetRunningTurn(LocalStateOf(m_Ws), m_Chat);
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", m_Turn->m_TurnId.View());
+		data.Field("stop", m_Stop.View());
+		data.Key(Core::StringView("recoveries"));
+		data.BeginArray();
+		for (const Core::String& recovery : m_Turn->m_Recoveries) data.String(recovery.View());
+		data.EndArray();
+		data.IntField("tokensIn", m_Turn->m_TokensIn);
+		data.IntField("tokensOut", m_Turn->m_TokensOut);
+		data.IntField("ttftMs", m_Turn->m_TtftMs);
+		data.IntField("genMs", m_Turn->m_GenMs);
+		data.IntField("endedMs", m_Turn->m_EndedMs);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "turn.end", data.View());
+		m_Chats->Changed(m_Chat);
+		m_Chats->TurnEnded(m_Chat);
+	}
+}

@@ -1,0 +1,264 @@
+// fb-sample-c4 - a D3D12 program in C4 for the GPU debugger (IED docs/22 "Capture"): it loads IED's capture library
+// through Bedrock's Gpu::Capture, hands it its device, and each frame clears a render target inside a marker between
+// StartFrame and EndFrame - the frame bounds of a program with no swap chain. It opens no window. Started by Launch
+// for Capture it runs until stopped; with FLASHBANG_DLL set by hand and --capture-frame it captures itself. It times
+// the clear on the GPU with two timestamp queries, a zone of IED's profiler (Profile::GpuContext, docs/16): run with
+// IED_PROFILER set, the profiler's GPU lane shows it under the frame.
+//   fb-sample-c4 [--frames N] [--capture-frame K]      N = 0 (the default): until stopped
+
+extern "c++" include "d3d12.hpp" {
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	lib("d3d12.lib");
+	lib("kernel32.lib");
+}
+
+include "bedrock.ch"
+include "Gpu.ch"
+include "profile.ch"
+
+const int32 c_TargetSize = 256;
+const int64 c_FrameNs = 16000000;
+const uint32 c_Queries = 64;                 // the profiler's ring of timestamp slots: 32 zones
+const int64 c_CalibrateEveryFrames = 60;
+const uint64 c_PicosecondsASecond = 1000000000000;
+
+static Profile::Site s_ClearSite = Profile::Site("Clear", __FILE__, __LINE__);
+
+class Options
+{
+	public int64 m_Frames;
+	public int64 m_CaptureFrame;
+}
+
+class Renderer
+{
+	public ID3D12Device* m_Device;
+	public ID3D12CommandQueue* m_Queue;
+	public ID3D12CommandAllocator* m_Allocator;
+	public ID3D12GraphicsCommandList* m_List;
+	public ID3D12DescriptorHeap* m_Heap;
+	public ID3D12Resource* m_Target;
+	public ID3D12Fence* m_Fence;
+	public void* m_Idle;         // the event the fence sets when the GPU is done
+	public uint64 m_Submitted;   // the fence value of the last frame
+	public ID3D12QueryHeap* m_Timestamps;
+	public ID3D12Resource* m_Readback;    // where the frame's timestamps are resolved to, two for each slot pair
+	public Profile::GpuContext* m_Gpu;
+	public Core::String m_Problem;
+}
+
+Options ParseOptions(int32 argc, char** argv) {
+	Options options;
+	options.m_Frames = 0;
+	options.m_CaptureFrame = -1;
+	for (int32 i = 1; i + 1 < argc; i += 2) {
+		Core::StringView name = Core::StringView(argv[i]);
+		int64 value = 0;
+		if (!Core::ParseInt64(Core::StringView(argv[i + 1]), value)) continue;
+		if (name == "--frames") options.m_Frames = value;
+		else if (name == "--capture-frame") options.m_CaptureFrame = value;
+	}
+	return options;
+}
+
+bool Failed(Renderer& r, const char* step, int32 hr) {
+	if (hr == 0) return false;
+	Core::StringBuilder text;
+	text.Append(step);
+	text.Append(" failed: hr ");
+	text.AppendInt(hr);
+	r.m_Problem = text.ToString();
+	return true;
+}
+
+bool CreateQueue(Renderer& r) {
+	D3D12_COMMAND_QUEUE_DESC desc;
+	memset(&desc, 0, sizeof(D3D12_COMMAND_QUEUE_DESC));
+	desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	void* queue = nullptr;
+	if (Failed(r, "CreateCommandQueue", r.m_Device->CreateCommandQueue(&desc, __uuidof(ID3D12CommandQueue), &queue))) return false;
+	r.m_Queue = (ID3D12CommandQueue*)queue;
+	r.m_Queue->SetName(u"Direct queue");
+	void* allocator = nullptr;
+	if (Failed(r, "CreateCommandAllocator", r.m_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &allocator))) return false;
+	r.m_Allocator = (ID3D12CommandAllocator*)allocator;
+	void* list = nullptr;
+	if (Failed(r, "CreateCommandList", r.m_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, r.m_Allocator, nullptr, __uuidof(ID3D12GraphicsCommandList), &list))) return false;
+	r.m_List = (ID3D12GraphicsCommandList*)list;
+	r.m_List->Close();
+	void* fence = nullptr;
+	if (Failed(r, "CreateFence", r.m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &fence))) return false;
+	r.m_Fence = (ID3D12Fence*)fence;
+	r.m_Fence->SetName(u"Frame fence");
+	r.m_Idle = CreateEventA(nullptr, 0, 0, nullptr);
+	return true;
+}
+
+bool CreateTarget(Renderer& r) {
+	D3D12_HEAP_PROPERTIES heap;
+	memset(&heap, 0, sizeof(D3D12_HEAP_PROPERTIES));
+	heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+	D3D12_RESOURCE_DESC desc;
+	memset(&desc, 0, sizeof(D3D12_RESOURCE_DESC));
+	desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	desc.Width = (uint64)c_TargetSize;
+	desc.Height = c_TargetSize;
+	desc.DepthOrArraySize = 1;
+	desc.MipLevels = 1;
+	desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.SampleDesc.Count = 1;
+	desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+	D3D12_CLEAR_VALUE clear;
+	memset(&clear, 0, sizeof(D3D12_CLEAR_VALUE));
+	clear.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	void* target = nullptr;
+	if (Failed(r, "CreateCommittedResource", r.m_Device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &clear, __uuidof(ID3D12Resource), &target))) return false;
+	r.m_Target = (ID3D12Resource*)target;
+	r.m_Target->SetName(u"Target");
+	D3D12_DESCRIPTOR_HEAP_DESC views;
+	memset(&views, 0, sizeof(D3D12_DESCRIPTOR_HEAP_DESC));
+	views.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	views.NumDescriptors = 1;
+	void* descriptors = nullptr;
+	if (Failed(r, "CreateDescriptorHeap", r.m_Device->CreateDescriptorHeap(&views, __uuidof(ID3D12DescriptorHeap), &descriptors))) return false;
+	r.m_Heap = (ID3D12DescriptorHeap*)descriptors;
+	r.m_Device->CreateRenderTargetView(r.m_Target, nullptr, r.m_Heap->GetCPUDescriptorHandleForHeapStart());
+	return true;
+}
+
+// The queue's timestamp queries and the buffer they are read back from, and the profiler's context for the queue.
+bool CreateTimer(Renderer& r) {
+	D3D12_QUERY_HEAP_DESC queries;
+	memset(&queries, 0, sizeof(D3D12_QUERY_HEAP_DESC));
+	queries.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+	queries.Count = c_Queries;
+	void* heap = nullptr;
+	if (Failed(r, "CreateQueryHeap", r.m_Device->CreateQueryHeap(&queries, __uuidof(ID3D12QueryHeap), &heap))) return false;
+	r.m_Timestamps = (ID3D12QueryHeap*)heap;
+	D3D12_HEAP_PROPERTIES readable;
+	memset(&readable, 0, sizeof(D3D12_HEAP_PROPERTIES));
+	readable.Type = D3D12_HEAP_TYPE_READBACK;
+	D3D12_RESOURCE_DESC desc;
+	memset(&desc, 0, sizeof(D3D12_RESOURCE_DESC));
+	desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	desc.Width = (uint64)c_Queries * 8;
+	desc.Height = 1;
+	desc.DepthOrArraySize = 1;
+	desc.MipLevels = 1;
+	desc.SampleDesc.Count = 1;
+	desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	void* buffer = nullptr;
+	if (Failed(r, "CreateCommittedResource", r.m_Device->CreateCommittedResource(&readable, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, __uuidof(ID3D12Resource), &buffer))) return false;
+	r.m_Readback = (ID3D12Resource*)buffer;
+	r.m_Readback->SetName(u"Timestamps");
+	uint64 frequency = 0;
+	if (Failed(r, "GetTimestampFrequency", r.m_Queue->GetTimestampFrequency(&frequency)) || frequency == 0) return false;
+	r.m_Gpu = new Profile::GpuContext(Profile::GpuApi::D3D12, Core::StringView("Direct queue"), c_PicosecondsASecond / frequency, c_Queries);
+	return true;
+}
+
+// The device (wrapped for capture when the library is loaded), its queue, the render target and the timer.
+bool Create(Renderer& r, Gpu::Capture& capture) {
+	void* device = nullptr;
+	if (Failed(r, "D3D12CreateDevice", D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &device))) return false;
+	r.m_Device = (ID3D12Device*)capture.WrapD3D12Device(device);
+	return CreateQueue(r) && CreateTarget(r) && CreateTimer(r);
+}
+
+// The CPU's and the GPU's clocks read together, so the profiler puts the GPU's times on the CPU's timeline.
+void Calibrate(Renderer& r) {
+	uint64 gpuTicks = 0;
+	uint64 cpuTicks = 0;
+	if (r.m_Queue->GetClockCalibration(&gpuTicks, &cpuTicks) == 0) r.m_Gpu->Calibrate((int64)cpuTicks, gpuTicks);
+}
+
+// The two timestamps of the zone that took `query`, once the frame's fence passed.
+void ReadTimes(Renderer& r, uint32 query) {
+	void* mapped = nullptr;
+	D3D12_RANGE range;
+	range.Begin = (uint64)query * 8;
+	range.End = range.Begin + 16;
+	if (r.m_Readback->Map(0, &range, &mapped) != 0) return;
+	const uint64* ticks = (const uint64*)((uint8*)mapped + range.Begin);
+	r.m_Gpu->Time(query, ticks[0]);
+	r.m_Gpu->Time(query + 1, ticks[1]);
+	D3D12_RANGE nothing;
+	nothing.Begin = 0;
+	nothing.End = 0;
+	r.m_Readback->Unmap(0, &nothing);
+}
+
+// The target cleared to a color that moves with `frame`, inside a "Clear" marker and a GPU zone of the same name: the
+// slot pair it took.
+uint32 RecordClear(Renderer& r, int64 frame) {
+	Profile::GpuZone zone(*r.m_Gpu, s_ClearSite);
+	const char16* marker = u"Clear";
+	r.m_List->BeginEvent(0, (const void*)marker, 12);
+	r.m_List->EndQuery(r.m_Timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.BeginQuery());
+	float[4] color;
+	color[0] = 0.25f;
+	color[1] = 0.5f;
+	color[2] = (float)(frame % 4) * 0.25f;
+	color[3] = 1.0f;
+	r.m_List->ClearRenderTargetView(r.m_Heap->GetCPUDescriptorHandleForHeapStart(), &color[0], 0, nullptr);
+	r.m_List->EndQuery(r.m_Timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.EndQuery());
+	r.m_List->EndEvent();
+	r.m_List->ResolveQueryData(r.m_Timestamps, D3D12_QUERY_TYPE_TIMESTAMP, zone.BeginQuery(), 2, r.m_Readback, (uint64)zone.BeginQuery() * 8);
+	return zone.BeginQuery();
+}
+
+// One frame: the clear, timed; waits for the GPU, then hands the profiler the clear's timestamps.
+void Render(Renderer& r, int64 frame) {
+	if (frame % c_CalibrateEveryFrames == 0) Calibrate(r);
+	r.m_Allocator->Reset();
+	r.m_List->Reset(r.m_Allocator, nullptr);
+	const uint32 query = RecordClear(r, frame);
+	r.m_List->Close();
+	r.m_Queue->ExecuteCommandLists(1, &r.m_List);
+	r.m_Submitted += 1;
+	r.m_Queue->Signal(r.m_Fence, r.m_Submitted);
+	if (r.m_Fence->GetCompletedValue() < r.m_Submitted) {
+		r.m_Fence->SetEventOnCompletion(r.m_Submitted, r.m_Idle);
+		WaitForSingleObject(r.m_Idle, INFINITE);
+	}
+	ReadTimes(r, query);
+}
+
+void Destroy(Renderer& r) {
+	if (r.m_List) r.m_List->Release();
+	if (r.m_Allocator) r.m_Allocator->Release();
+	if (r.m_Heap) r.m_Heap->Release();
+	if (r.m_Target) r.m_Target->Release();
+	if (r.m_Fence) r.m_Fence->Release();
+	if (r.m_Readback) r.m_Readback->Release();
+	if (r.m_Timestamps) r.m_Timestamps->Release();
+	if (r.m_Queue) r.m_Queue->Release();
+	if (r.m_Device) r.m_Device->Release();
+	if (r.m_Idle) CloseHandle(r.m_Idle);
+}
+
+int32 main(int32 argc, char** argv) {
+	Options options = ParseOptions(argc, argv);
+	Gpu::Capture capture;
+	if (!capture.Load()) printf("not captured: %s\n", capture.Error());
+	Renderer r;
+	if (!Create(r, capture)) {
+		printf("no D3D12 device: %s\n", r.m_Problem.CStr());
+		Destroy(r);
+		return 2;
+	}
+	capture.SetComment(Core::StringView("fb-sample-c4"));
+	for (int64 frame = 0; options.m_Frames == 0 || frame < options.m_Frames; ++frame) {
+		if (frame == options.m_CaptureFrame) capture.TriggerCapture(1);
+		capture.StartFrame();
+		capture.Annotate(Core::StringView("frame"), Core::StringView(frame % 2 == 0 ? "even" : "odd"));
+		Render(r, frame);
+		capture.EndFrame();
+		Profile::Frame();
+		Threading::Thread::Sleep(c_FrameNs);
+	}
+	for (int32 i = 0; i < capture.CaptureCount(); ++i) printf("captured %s\n", capture.CapturePath(i).CStr());
+	Destroy(r);
+	return 0;
+}

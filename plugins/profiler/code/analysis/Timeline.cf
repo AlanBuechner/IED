@@ -1,0 +1,609 @@
+include "Timeline.ch"
+include "Analysis.ch"
+include "Locks.ch"
+
+namespace Profiler
+{
+	const int32 c_MostGcBands = 500;
+	const int32 c_FramesPerPixelShown = 3;
+	const int64 c_PixelsPerRename = 4;
+	const int32 c_MostLockRows = 12;
+
+	// What every lane of one answer shares.
+	class TimelineWriter
+	{
+		public const Capture* m_Capture;
+		public IED::JsonWriter* m_Json;
+		public NameTable m_Names;
+		public Range m_Range;
+		public int64 m_Pixel;        // ticks one pixel covers, at least 1
+		public int32 m_MostDepth;
+		public Core::HashMap<uint64, LockWaits*> m_WaitsOf;
+
+		public int64 Ns(int64 ticks) const { return m_Capture->m_Clock.Ns(ticks); }
+	}
+
+	// --- Zones of one depth -----------------------------------------------------------------------------------------
+
+	static void WriteZone(TimelineWriter& w, const ThreadTrack* track, int64 trackIndex, const ZoneLevel* level, int64 depth, int64 shownDepth, int64 i) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.BeginArray();
+		json.Int(shownDepth);
+		json.Int(w.Ns(level->m_Starts[i]));
+		json.Int(w.Ns(level->EndOr(i, w.m_Capture->m_LastTicks)));
+		json.Int(w.m_Names.Index(w.m_Capture->ZoneName(track, level, i)));
+		json.String(ZoneRef::Of(trackIndex, depth, i).Text().View());
+		json.EndArray();
+	}
+
+	static void WriteMerged(TimelineWriter& w, const ZoneLevel* level, int64 shownDepth, int64 first, int64 last) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.BeginArray();
+		json.Int(shownDepth);
+		json.Int(w.Ns(level->m_Starts[first]));
+		json.Int(w.Ns(level->EndOr(last, w.m_Capture->m_LastTicks)));
+		json.Int(-1);
+		json.Int(last - first + 1);
+		json.EndArray();
+	}
+
+	// The zones of one depth that start in [from, to) - or, with `overlapping`, that overlap the range - with zones
+	// narrower than a pixel merged into runs.
+	static void WriteLevel(TimelineWriter& w, const ThreadTrack* track, int64 trackIndex, int64 depth, int64 shownDepth, int64 from, int64 to, bool overlapping) {
+		const ZoneLevel* level = track->m_Levels[depth];
+		const int64 now = w.m_Capture->m_LastTicks;
+		const int64 stop = level->FirstStartingAt(to);
+		int64 i = overlapping ? level->FirstEndingAfter(from) : level->FirstStartingAt(from);
+		while (i < stop) {
+			const int64 start = level->m_Starts[i];
+			if (level->EndOr(i, now) - start >= w.m_Pixel) {
+				WriteZone(w, track, trackIndex, level, depth, shownDepth, i);
+				i += 1;
+				continue;
+			}
+			int64 next = level->FirstStartingAt(start + w.m_Pixel);
+			if (next > stop) next = stop;
+			if (next <= i) next = i + 1;
+			int64 last = next - 1;
+			if (last > i && level->EndOr(last, now) - level->m_Starts[last] >= w.m_Pixel) last -= 1;
+			if (last == i) WriteZone(w, track, trackIndex, level, depth, shownDepth, i);
+			else WriteMerged(w, level, shownDepth, i, last);
+			i = last + 1;
+		}
+	}
+
+	// --- Lock rows of a thread lane -----------------------------------------------------------------------------------
+
+	// One lock row's segments as written: [start, end, state, hold index] - a wait (blocked) and the hold after it - or
+	// a run of segments narrower than a pixel merged as [start, end, its worst state, -count].
+	class LockRowWriter
+	{
+		public TimelineWriter* m_W;
+		public int64 m_Start;
+		public int64 m_End;
+		public int32 m_State;
+		public int64 m_Index;
+		public int64 m_Count;
+
+		public void Add(int64 from, int64 to, LockState kind, int64 hold) {
+			if (to - from >= m_W->m_Pixel) {
+				Flush();
+				Write(from, to, (int32)kind, hold);
+				return;
+			}
+			if (m_Count > 0 && from - m_End < m_W->m_Pixel && m_End - m_Start < m_W->m_Pixel) {
+				if (to > m_End) m_End = to;
+				if ((int32)kind > m_State) m_State = (int32)kind;
+				m_Count += 1;
+				return;
+			}
+			Flush();
+			m_Start = from;
+			m_End = to;
+			m_State = (int32)kind;
+			m_Index = hold;
+			m_Count = 1;
+		}
+
+		public void Flush() {
+			if (m_Count == 0) return;
+			Write(m_Start, m_End, m_State, m_Count == 1 ? m_Index : -m_Count);
+			m_Count = 0;
+		}
+
+		private void Write(int64 from, int64 to, int32 kind, int64 ref) {
+			IED::JsonWriter& json = *m_W->m_Json;
+			json.BeginArray();
+			json.Int(m_W->Ns(from));
+			json.Int(m_W->Ns(to));
+			json.Int((int64)kind);
+			json.Int(ref);
+			json.EndArray();
+		}
+	}
+
+	static LockWaits* WaitsOf(TimelineWriter& w, const LockInfo* lock) {
+		LockWaits* waits = nullptr;
+		if (w.m_WaitsOf.TryGet(lock->m_Id, waits)) return waits;
+		waits = new LockWaits();
+		waits->Build(*w.m_Capture, lock, w.m_Range);
+		w.m_WaitsOf.Insert(lock->m_Id, waits);
+		return waits;
+	}
+
+	static void WriteLockRow(TimelineWriter& w, const LockInfo* lock, const LockTrack* holder) {
+		IED::JsonWriter& json = *w.m_Json;
+		const int64 now = w.m_Capture->m_LastTicks;
+		const LockWaits* waits = WaitsOf(w, lock);
+		json.BeginObject();
+		json.IntField("lock", (int64)lock->m_Id);
+		json.Field("name", LockName(*w.m_Capture, lock).View());
+		json.Key(Core::StringView("items"));
+		json.BeginArray();
+		LockRowWriter row;
+		row.m_W = &w;
+		for (int64 i = FirstReleasedAfter(holder, w.m_Range.m_Begin, now); i < holder->m_Spans.Count(); ++i) {
+			const LockSpan& span = holder->m_Spans[i];
+			if (span.m_Wait >= w.m_Range.m_End) break;
+			if (span.m_Obtain > span.m_Wait) row.Add(span.m_Wait, span.m_Obtain, LockState::Blocked, i);
+			const bool contended = span.m_Release != c_Open && waits->Covers(span.m_Release);
+			row.Add(span.m_Obtain, ReleaseOr(span, now), contended ? LockState::Contended : LockState::Held, i);
+		}
+		if (holder->m_WaitingSince >= 0 && holder->m_WaitingSince < w.m_Range.m_End) row.Add(holder->m_WaitingSince, now, LockState::Blocked, holder->m_Spans.Count());
+		row.Flush();
+		json.EndArray();
+		json.EndObject();
+	}
+
+	// The locks a thread used, in the order they appeared, each a row under its zones (at most kMostLockRows, so a
+	// thread's rows stay put as the view moves; "locksHidden" says how many more).
+	static void WriteLockRows(TimelineWriter& w, int64 trackIndex) {
+		IED::JsonWriter& json = *w.m_Json;
+		int64 hidden = 0;
+		int32 written = 0;
+		json.Key(Core::StringView("locks"));
+		json.BeginArray();
+		for (const LockInfo* lock : w.m_Capture->m_LockList) {
+			LockTrack* holder = nullptr;
+			if (!lock->m_TrackOf.TryGet((int32)trackIndex, holder)) continue;
+			if (written >= c_MostLockRows) hidden += 1;
+			else {
+				WriteLockRow(w, lock, holder);
+				written += 1;
+			}
+		}
+		json.EndArray();
+		json.IntField("locksHidden", hidden);
+	}
+
+	// --- Thread lanes -------------------------------------------------------------------------------------------------
+
+	// The renames in the range, unless there are more than a quarter of the pixels: then each would be a sliver, and
+	// "renamesDense" says how many there were.
+	static void WriteRenames(TimelineWriter& w, const ThreadTrack* track) {
+		IED::JsonWriter& json = *w.m_Json;
+		const int64 first = track->m_NameTimes.UpperBound(w.m_Range.m_Begin);
+		const int64 end = track->m_NameTimes.LowerBound(w.m_Range.m_End);
+		const bool dense = (end - first) * c_PixelsPerRename > w.m_Range.Length() / w.m_Pixel;
+		json.IntField("renamesInRange", end - first);
+		json.Key(Core::StringView("renames"));
+		json.BeginArray();
+		for (int64 i = first; !dense && i < end; ++i) {
+			json.BeginArray();
+			json.Int(w.Ns(track->m_NameTimes[i]));
+			json.String(w.m_Capture->Text(track->m_NameStrs[i]));
+			json.EndArray();
+		}
+		json.EndArray();
+	}
+
+	static void WriteThreadLane(TimelineWriter& w, int64 trackIndex) {
+		const ThreadTrack* track = w.m_Capture->m_Tracks[trackIndex];
+		IED::JsonWriter& json = *w.m_Json;
+		json.BeginObject();
+		Core::StringBuilder id;
+		id.Append("thread:");
+		id.AppendInt(trackIndex);
+		json.Field("id", id.View());
+		json.Field("kind", "thread");
+		json.Field("label", TrackLabel(*w.m_Capture, track, w.m_Range.m_Begin).View());
+		json.IntField("track", trackIndex);
+		json.IntField("osId", (int64)track->m_OsId);
+		json.Field("group", w.m_Capture->Text(track->m_GroupStr));
+		json.IntField("renamed", track->m_NameTimes.Count() > 1 ? track->m_NameTimes.Count() - 1 : 0);
+		json.IntField("depth", track->m_Levels.Count() < (int64)w.m_MostDepth ? track->m_Levels.Count() : (int64)w.m_MostDepth);
+		WriteRenames(w, track);
+		json.Key(Core::StringView("zones"));
+		json.BeginArray();
+		for (int64 depth = 0; depth < track->m_Levels.Count() && depth < (int64)w.m_MostDepth; ++depth) WriteLevel(w, track, trackIndex, depth, depth, w.m_Range.m_Begin, w.m_Range.m_End, true);
+		json.EndArray();
+		WriteLockRows(w, trackIndex);
+		json.EndObject();
+	}
+
+	// --- Task lanes ---------------------------------------------------------------------------------------------------
+
+	// One interval in which a task ran on a thread, as a task lane shows it.
+	struct Slice
+	{
+		public int64 m_Start;
+		public int64 m_End;
+		public int32 m_Track;
+		public int32 m_Row;
+	}
+
+	// The shallowest depth with a zone starting in [from, to): the task's own zones begin there.
+	static int64 BaseDepth(const ThreadTrack* track, int64 from, int64 to) {
+		for (int64 depth = 0; depth < track->m_Levels.Count(); ++depth) {
+			const ZoneLevel* level = track->m_Levels[depth];
+			const int64 i = level->FirstStartingAt(from);
+			if (i < level->Count() && level->m_Starts[i] < to) return depth;
+		}
+		return -1;
+	}
+
+	// The deepest the task's zones go below their base in [from, to), plus one.
+	static int64 DepthBelow(const ThreadTrack* track, int64 base, int64 from, int64 to) {
+		int64 depth = base;
+		while (depth < track->m_Levels.Count()) {
+			const ZoneLevel* level = track->m_Levels[depth];
+			const int64 i = level->FirstStartingAt(from);
+			if (i >= level->Count() || level->m_Starts[i] >= to) break;
+			depth += 1;
+		}
+		return depth - base;
+	}
+
+	// Rows for slices that overlap: each slice takes the first row free at its start.
+	static int32 AssignRows(Core::Array<Slice>& slices) {
+		slices.SortBy([](const Slice& a, const Slice& b) -> bool { return a.m_Start < b.m_Start; });
+		Core::Array<int64> rowEnds;
+		for (Slice& slice : slices) {
+			int32 row = 0;
+			while ((int64)row < rowEnds.Count() && rowEnds[row] > slice.m_Start) row += 1;
+			if ((int64)row == rowEnds.Count()) rowEnds.Push(slice.m_End);
+			else rowEnds[row] = slice.m_End;
+			slice.m_Row = row;
+		}
+		return (int32)rowEnds.Count();
+	}
+
+	static void WriteTaskZones(TimelineWriter& w, const Slice& slice, int64 rowDepth) {
+		const ThreadTrack* track = w.m_Capture->m_Tracks[slice.m_Track];
+		const int64 from = slice.m_Start > w.m_Range.m_Begin ? slice.m_Start : w.m_Range.m_Begin;
+		const int64 to = slice.m_End < w.m_Range.m_End ? slice.m_End : w.m_Range.m_End;
+		const int64 base = BaseDepth(track, slice.m_Start, slice.m_End);
+		if (base < 0) return;
+		for (int64 depth = base; depth < track->m_Levels.Count() && depth - base < rowDepth; ++depth)
+			WriteLevel(w, track, slice.m_Track, depth, (int64)slice.m_Row * rowDepth + depth - base, from, to, false);
+	}
+
+	static void WriteSliceLane(TimelineWriter& w, Core::StringView id, Core::StringView label, int64 runs, Core::Array<Slice>& slices) {
+		IED::JsonWriter& json = *w.m_Json;
+		const int32 rows = AssignRows(slices);
+		int64 rowDepth = 1;
+		Core::HashSet<int32> threads;
+		for (const Slice& slice : slices) {
+			threads.Add(slice.m_Track);
+			const ThreadTrack* track = w.m_Capture->m_Tracks[slice.m_Track];
+			const int64 base = BaseDepth(track, slice.m_Start, slice.m_End);
+			const int64 below = base < 0 ? 0 : DepthBelow(track, base, slice.m_Start, slice.m_End);
+			if (below > rowDepth) rowDepth = below;
+		}
+		if (rowDepth > (int64)w.m_MostDepth) rowDepth = w.m_MostDepth;
+		json.BeginObject();
+		json.Field("id", id);
+		json.Field("kind", "task");
+		json.Field("label", label);
+		json.IntField("runs", runs);
+		json.IntField("threads", threads.Count());
+		json.IntField("rows", rows);
+		json.IntField("rowDepth", rowDepth);
+		json.IntField("depth", (int64)(rows < 1 ? 1 : rows) * rowDepth);
+		json.Key(Core::StringView("slices"));
+		json.BeginArray();
+		for (const Slice& slice : slices) {
+			json.BeginArray();
+			json.Int(w.Ns(slice.m_Start));
+			json.Int(w.Ns(slice.m_End));
+			json.Int(slice.m_Track);
+			json.Int(slice.m_Row);
+			json.EndArray();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("zones"));
+		json.BeginArray();
+		for (const Slice& slice : slices) WriteTaskZones(w, slice, rowDepth);
+		json.EndArray();
+		json.EndObject();
+	}
+
+	static void SlicesOf(const TimelineWriter& w, const TaskLane* lane, Core::Array<Slice>& slices) {
+		for (const TaskRuns* runs : lane->m_Runs) {
+			int64 i = runs->m_Starts.UpperBound(w.m_Range.m_Begin);
+			while (i > 0 && (runs->m_Ends[i - 1] == c_Open || runs->m_Ends[i - 1] > w.m_Range.m_Begin)) i -= 1;
+			for (; i < runs->m_Starts.Count() && runs->m_Starts[i] < w.m_Range.m_End; ++i) {
+				Slice slice;
+				slice.m_Start = runs->m_Starts[i];
+				slice.m_End = runs->m_Ends[i] == c_Open ? w.m_Capture->m_LastTicks : runs->m_Ends[i];
+				slice.m_Track = runs->m_Track;
+				if (slice.m_End > w.m_Range.m_Begin) slices.Push(slice);
+			}
+		}
+	}
+
+	// The by-task fallback for captures without task events: a renamed thread's segments, grouped by name.
+	static void RenamedSegments(const TimelineWriter& w, Core::HashMap<Core::String, Core::Array<Slice>*>& byName, Core::Array<Core::String>& order) {
+		for (int64 t = 0; t < w.m_Capture->m_Tracks.Count(); ++t) {
+			const ThreadTrack* track = w.m_Capture->m_Tracks[t];
+			if (track->m_NameTimes.Count() < 2) continue;
+			for (int64 i = 0; i < track->m_NameTimes.Count(); ++i) {
+				Slice slice;
+				slice.m_Start = track->m_NameTimes[i];
+				slice.m_End = i + 1 < track->m_NameTimes.Count() ? track->m_NameTimes[i + 1] : w.m_Capture->m_LastTicks;
+				slice.m_Track = (int32)t;
+				if (!w.m_Range.Overlaps(slice.m_Start, slice.m_End)) continue;
+				Core::String name = Core::String(w.m_Capture->Text(track->m_NameStrs[i]));
+				Core::Array<Slice>** found = byName.Find(name);
+				if (!found) {
+					byName.Insert(name, new Core::Array<Slice>());
+					order.Push(name);
+					found = byName.Find(name);
+				}
+				(*found)->Push(slice);
+			}
+		}
+	}
+
+	static bool RanTasks(const Capture& capture, int64 trackIndex) {
+		for (const TaskLane* lane : capture.m_TaskLanes)
+			if (lane->m_RunsOf.Find((int32)trackIndex)) return true;
+		return false;
+	}
+
+	static void WriteTaskModeLanes(TimelineWriter& w) {
+		const Capture& capture = *w.m_Capture;
+		const bool fromRenames = capture.m_TaskLanes.IsEmpty();
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			const bool replaced = fromRenames ? capture.m_Tracks[t]->m_NameTimes.Count() > 1 : RanTasks(capture, t);
+			if (!replaced && capture.m_Tracks[t]->m_Zones > 0) WriteThreadLane(w, t);
+		}
+		if (!fromRenames) {
+			for (const TaskLane* lane : capture.m_TaskLanes) {
+				Core::Array<Slice> slices;
+				SlicesOf(w, lane, slices);
+				Core::String id = Core::String("task:") + capture.Text(lane->m_NameStr);
+				WriteSliceLane(w, id.View(), capture.Text(lane->m_NameStr), lane->m_Count, slices);
+			}
+			return;
+		}
+		Core::HashMap<Core::String, Core::Array<Slice>*> byName;
+		Core::Array<Core::String> order;
+		RenamedSegments(w, byName, order);
+		for (const Core::String& name : order) {
+			Core::Array<Slice>* slices = *byName.Find(name);
+			Core::String id = Core::String("task:") + name.View();
+			WriteSliceLane(w, id.View(), name.View(), slices->Count(), *slices);
+		}
+	}
+
+	// --- GPU, frames, collections, messages, plots --------------------------------------------------------------------
+
+	static void WriteGpuLanes(TimelineWriter& w) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.Key(Core::StringView("gpu"));
+		json.BeginArray();
+		for (const GpuContext* gpu : w.m_Capture->m_Gpus) {
+			json.BeginObject();
+			Core::StringBuilder id;
+			id.Append("gpu:");
+			id.AppendUInt(gpu->m_Id);
+			json.Field("id", id.View());
+			Core::StringView name = w.m_Capture->Text(gpu->m_NameStr);
+			json.Field("label", name.IsEmpty() ? Core::StringView("GPU") : name);
+			int64 depth = 0;
+			json.Key(Core::StringView("zones"));
+			json.BeginArray();
+			for (const GpuZone& zone : gpu->m_Zones) {
+				int64 cpuBegin;
+				int64 cpuEnd;
+				if (!gpu->Span(zone, w.m_Capture->m_Clock, w.m_Capture->m_ClockFreqHz, cpuBegin, cpuEnd)) continue;
+				if (!w.m_Range.Overlaps(cpuBegin, cpuEnd)) continue;
+				if ((int64)zone.m_Depth + 1 > depth) depth = (int64)zone.m_Depth + 1;
+				json.BeginArray();
+				json.Int(zone.m_Depth);
+				json.Int(w.Ns(cpuBegin));
+				json.Int(w.Ns(cpuEnd));
+				json.Int(w.m_Names.Index(w.m_Capture->SiteName((uint64)zone.m_Site)));
+				json.Int(w.Ns(zone.m_CpuBegin));
+				json.EndArray();
+			}
+			json.EndArray();
+			json.IntField("depth", depth < 1 ? 1 : depth);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteFrames(TimelineWriter& w) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.Key(Core::StringView("frames"));
+		const FrameSet* set = MainFrameSet(*w.m_Capture);
+		if (!set) {
+			json.Null();
+			return;
+		}
+		int64 first = set->m_Starts.UpperBound(w.m_Range.m_Begin);
+		if (first > 0) first -= 1;
+		const int64 last = set->m_Starts.LowerBound(w.m_Range.m_End);
+		json.BeginObject();
+		json.Field("set", w.m_Capture->Text(set->m_NameStr).IsEmpty() ? Core::StringView("Frame") : w.m_Capture->Text(set->m_NameStr));
+		const bool dense = (last - first) * c_FramesPerPixelShown > w.m_Range.Length() / w.m_Pixel;
+		json.BoolField("dense", dense);
+		json.Key(Core::StringView("items"));
+		json.BeginArray();
+		if (!dense) {
+			for (int64 i = first; i < last; ++i) {
+				if (set->m_Ends[i] == c_Open) continue;
+				json.BeginArray();
+				json.Int(i);
+				json.Int(w.Ns(set->m_Starts[i]));
+				json.Int(w.Ns(set->m_Ends[i]));
+				json.EndArray();
+			}
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	static void WriteCollections(TimelineWriter& w) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.Key(Core::StringView("gc"));
+		json.BeginArray();
+		int32 written = 0;
+		for (const GcRecord& gc : w.m_Capture->m_Gcs) {
+			const int64 end = gc.m_End == c_Open ? w.m_Capture->m_LastTicks : gc.m_End;
+			if (!w.m_Range.Overlaps(gc.m_Begin, end + 1) || written >= c_MostGcBands) continue;
+			json.BeginArray();
+			json.Int(w.Ns(gc.m_Begin));
+			json.Int(w.Ns(end));
+			json.Int(gc.m_Kind);
+			json.Int(gc.m_Generation);
+			json.Int(gc.Freed());
+			json.EndArray();
+			written += 1;
+		}
+		json.EndArray();
+	}
+
+	static int64 FirstMessageAt(const Capture& capture, int64 t) {
+		int64 low = 0;
+		int64 high = capture.m_Messages.Count();
+		while (low < high) {
+			const int64 mid = (low + high) / 2;
+			if (capture.m_Messages[mid].m_T < t) low = mid + 1;
+			else high = mid;
+		}
+		return low;
+	}
+
+	static void WriteMessages(TimelineWriter& w, int32 most) {
+		IED::JsonWriter& json = *w.m_Json;
+		const int64 first = FirstMessageAt(*w.m_Capture, w.m_Range.m_Begin);
+		const int64 end = FirstMessageAt(*w.m_Capture, w.m_Range.m_End);
+		json.IntField("messagesInRange", end - first);
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		for (int64 i = first; i < end && i - first < (int64)most; ++i) {
+			const MessageRecord& message = w.m_Capture->m_Messages[i];
+			json.BeginArray();
+			json.Int(w.Ns(message.m_T));
+			json.Int(message.m_Severity);
+			json.String(w.m_Capture->Text(message.m_TextStr));
+			json.Int(message.m_Track);
+			json.EndArray();
+		}
+		json.EndArray();
+	}
+
+	static void WritePoint(IED::JsonWriter& json, int64 ns, double low, double high) {
+		json.BeginArray();
+		json.Int(ns);
+		WriteNumber(json, low, -1);
+		WriteNumber(json, high, -1);
+		json.EndArray();
+	}
+
+	// A plot's values in the range, as [time, lowest, highest] per pixel when there are more than the pixels hold; one
+	// value on each side of the range keeps the line running to the edges.
+	static void WritePlotPoints(TimelineWriter& w, const Core::Array<int64>& times, const Core::Array<double>& values) {
+		IED::JsonWriter& json = *w.m_Json;
+		int64 first = times.LowerBound(w.m_Range.m_Begin);
+		if (first > 0) first -= 1;
+		int64 end = times.LowerBound(w.m_Range.m_End);
+		if (end < times.Count()) end += 1;
+		json.BeginArray();
+		int64 i = first;
+		while (i < end) {
+			const int64 bucketEnd = times[i] - (times[i] - w.m_Range.m_Begin) % w.m_Pixel + w.m_Pixel;
+			double low = values[i];
+			double high = values[i];
+			const int64 t = times[i];
+			i += 1;
+			while (i < end && times[i] < bucketEnd && times[i] >= w.m_Range.m_Begin && times[i] < w.m_Range.m_End) {
+				if (values[i] < low) low = values[i];
+				if (values[i] > high) high = values[i];
+				i += 1;
+			}
+			WritePoint(json, w.Ns(t), low, high);
+		}
+		json.EndArray();
+	}
+
+	static void WritePlots(TimelineWriter& w) {
+		IED::JsonWriter& json = *w.m_Json;
+		json.Key(Core::StringView("plots"));
+		json.BeginArray();
+		for (const Plot* plot : w.m_Capture->m_Plots) {
+			json.BeginObject();
+			json.IntField("id", (int64)plot->m_Id);
+			json.Field("name", w.m_Capture->Text(plot->m_NameStr));
+			json.IntField("kind", (int64)plot->m_Kind);
+			json.Key(Core::StringView("points"));
+			WritePlotPoints(w, plot->m_Times, plot->m_Values);
+			json.EndObject();
+		}
+		for (const Pool* pool : w.m_Capture->m_Pools) {
+			if (pool->m_Times.IsEmpty()) continue;
+			Core::Array<double> bytes;
+			for (int64 value : pool->m_Bytes) bytes.Push((double)value);
+			json.BeginObject();
+			Core::StringBuilder id;
+			id.Append("pool:");
+			id.AppendUInt(pool->m_Id);
+			json.Field("id", id.View());
+			Core::String name = Core::String("Memory: ") + (w.m_Capture->Text(pool->m_NameStr).IsEmpty() ? Core::StringView("heap") : w.m_Capture->Text(pool->m_NameStr));
+			json.Field("name", name.View());
+			json.IntField("kind", 1);
+			json.Key(Core::StringView("points"));
+			WritePlotPoints(w, pool->m_Times, bytes);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	// --- The answer ---------------------------------------------------------------------------------------------------
+
+	Core::String Timeline(const Capture& capture, const TimelineAsk& ask) {
+		IED::JsonWriter json;
+		TimelineWriter w;
+		w.m_Capture = &capture;
+		w.m_Json = &json;
+		w.m_Range = RangeOfNs(capture, ask.m_FromNs, ask.m_ToNs);
+		w.m_Pixel = w.m_Range.Length() / (int64)(ask.m_Width < 1 ? 1 : ask.m_Width);
+		if (w.m_Pixel < 1) w.m_Pixel = 1;
+		w.m_MostDepth = ask.m_MostDepth < 1 ? 1 : (ask.m_MostDepth > c_MostDepth + 1 ? c_MostDepth + 1 : ask.m_MostDepth);
+		json.BeginObject();
+		json.IntField("from", capture.m_Clock.Ns(w.m_Range.m_Begin));
+		json.IntField("to", capture.m_Clock.Ns(w.m_Range.m_End));
+		json.IntField("durationNs", capture.DurationNs());
+		json.BoolField("live", !capture.m_Ended);
+		json.IntField("pixelNs", capture.m_Clock.Ns(w.m_Pixel));
+		json.Key(Core::StringView("lanes"));
+		json.BeginArray();
+		if (ask.m_Mode == LaneMode::Tasks) WriteTaskModeLanes(w);
+		else
+			for (int64 t = 0; t < capture.m_Tracks.Count(); ++t)
+				if (capture.m_Tracks[t]->m_Zones > 0 || capture.m_Tracks[t]->m_NameTimes.Count() > 0) WriteThreadLane(w, t);
+		json.EndArray();
+		WriteGpuLanes(w);
+		WriteFrames(w);
+		WriteCollections(w);
+		WriteMessages(w, ask.m_MostMessages);
+		WritePlots(w);
+		json.Key(Core::StringView("names"));
+		w.m_Names.Write(json);
+		json.EndObject();
+		return json.ToString();
+	}
+}

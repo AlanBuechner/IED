@@ -1,0 +1,153 @@
+include "api/Plugin.ch"
+include "CodeTools.ch"
+include "Images.ch"
+include "LineDiff.ch"
+include "chats/ChatStore.ch"
+
+namespace Ai
+{
+	// What a code tool calls, held by its planner and runner.
+	class CodeToolEntry
+	{
+		public Core::String m_Name;
+		public Serialization::DomNode m_Entry;   // its toolCalls entry: a `function` or a `binding`
+		public Core::String m_PluginId;
+		public bool m_Untrusted;          // availableUntrusted
+		public int64 m_Seconds;
+	}
+
+	static ToolClass CodeToolClass(Core::StringView name) {
+		if (name == "read") return ToolClass::Read;
+		if (name == "write") return ToolClass::Write;
+		if (name == "meta") return ToolClass::Meta;
+		return ToolClass::Exec;
+	}
+
+	static ToolPlan CodeToolPlan(const CodeToolEntry* entry, const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.m_Subject = (((Core::String("plugin(") + entry->m_PluginId.View()) + "/") + entry->m_Name.View()) + ")";
+		plan.m_Summary = ((Core::String("Run ") + entry->m_Name.View()) + " (plugin ") + entry->m_PluginId.View();
+		plan.m_Summary = plan.m_Summary + ")";
+		if (!call.m_Ws.m_Trusted && !entry->m_Untrusted) plan.m_Error = entry->m_Name + ": the workspace is not trusted, so plugin tools may not run in it; ask the owner to trust it";
+		return plan;
+	}
+
+	static IED::ToolCall CodeToolCall(const CodeToolEntry* entry, const ToolInvocation& call) {
+		IED::ToolCall request;
+		request.m_Name = entry->m_Name;
+		request.m_Args = call.m_Args;
+		request.m_Workspace = call.m_Ws;
+		request.m_ChatId = call.m_Chat ? call.m_Chat->m_ChatId : Core::String("");
+		request.m_Cancelled = call.m_Cancelled;
+		return request;
+	}
+
+	// The first line of `text`.
+	static Core::StringView FirstLine(Core::StringView text) {
+		const int64 end = text.IndexOf('\n', 0);
+		return (end < 0 ? text : text.Substring(0, end)).Trimmed();
+	}
+
+	// `text` cut at the last line start at or before `most` bytes.
+	static Core::StringView CutAtLine(Core::StringView text, int64 most) {
+		if (text.ByteLength() <= most) return text;
+		int64 end = most;
+		while (end > 0 && text.ByteAt(end - 1) != '\n') end -= 1;
+		return text.Substring(0, end);
+	}
+
+	void MergePlan(ToolPlan& plan, const IED::ToolPlan& planned, Core::StringView tool) {
+		if (!planned.m_Error.IsEmpty()) {
+			plan.m_Error = (Core::String(tool) + ": ") + planned.m_Error.View();
+			return;
+		}
+		Core::StringView summary = FirstLine(planned.m_Summary.View());
+		if (!summary.IsEmpty()) plan.m_Summary = Core::String(summary);
+		plan.m_Diff = Core::String(CutAtLine(planned.m_Diff.View(), c_PlanDiffMostBytes));
+		plan.m_Plus = planned.m_Plus;
+		plan.m_Minus = planned.m_Minus;
+		if (plan.m_Plus == 0 && plan.m_Minus == 0) CountDiff(planned.m_Diff.View(), plan.m_Plus, plan.m_Minus);
+	}
+
+	// A call that asks the owner: the plugin's `plan` of it on the card. A plan that cannot be had leaves the card as it
+	// is, saying why.
+	static void CodeToolDetail(const CodeToolEntry* entry, const ToolInvocation& call, ToolPlan& plan) {
+		IED::ToolPlan planned;
+		Core::String problem;
+		if (IED::PlanPluginTool(entry->m_PluginId.View(), entry->m_Entry, CodeToolCall(entry, call), planned, problem)) {
+			MergePlan(plan, planned, entry->m_Name.View());
+			return;
+		}
+		plan.m_Summary = (plan.m_Summary + "; no plan: ") + problem.View();
+		Core::String said = ((((Core::String("plugin ") + entry->m_PluginId.View()) + ": the plan of ") + entry->m_Name.View()) + " failed: ") + problem.View();
+		call.m_Context->Log(said.View());
+	}
+
+	// The result's images a request can send; the others named in its text, with why. The card names them all.
+	static void AttachImages(ToolOutcome& outcome, const IED::Workspace& ws, const Core::Array<IED::ToolImage>& images) {
+		if (images.IsEmpty()) return;
+		Core::Array<Core::String> notes;
+		outcome.m_Images = AcceptedImages(ws, images, notes);
+		Core::StringBuilder shown;
+		shown.Append(outcome.m_Preview.IsEmpty() ? outcome.m_Content.View() : outcome.m_Preview.View());
+		for (const IED::ToolImage& image : outcome.m_Images) {
+			shown.Append("\n[image ");
+			shown.Append(image.m_Path.View());
+			shown.Append("]");
+		}
+		for (const Core::String& note : notes) {
+			shown.Append("\n");
+			shown.Append(note.View());
+			outcome.m_Content = (outcome.m_Content + "\n") + note.View();
+		}
+		outcome.m_Preview = shown.ToString();
+	}
+
+	// The call restarts the server: the chat goes on by itself once it is back (Resume.ch).
+	static void ResumeAfterRestart(const ToolInvocation& call, Core::StringView tool) {
+		IED::HostLock guard(*call.m_Context);
+		call.m_Chat->m_Resume = Core::String(tool);
+		SaveChatHeader(LocalStateOf(call.m_Ws), call.m_Chat);
+	}
+
+	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
+		const int64 started = clock_now_ns();
+		IED::ToolResult result = IED::RunPluginTool(entry->m_PluginId.View(), entry->m_Entry, CodeToolCall(entry, call), entry->m_Seconds);
+		if (result.m_Restarts && call.m_Chat) ResumeAfterRestart(call, entry->m_Name.View());
+		ToolOutcome outcome = ToolResult(result.m_Content.View(), result.m_Preview.View());
+		outcome.m_IsError = result.m_IsError;
+		outcome.m_ReportsFailure = result.m_ReportsFailure;
+		AttachImages(outcome, call.m_Ws, result.m_Images);
+		outcome.m_Source = result.m_Source.IsEmpty() ? Core::String("plugin ") + entry->m_PluginId.View() : result.m_Source;
+		outcome.m_Ms = (clock_now_ns() - started) / 1000000;
+		outcome.m_Timed = true;
+		return outcome;
+	}
+
+	ToolSpec* CodeTool(const Serialization::DomNode& node, Core::StringView pluginId, Core::String& problem) {
+		CodeToolEntry* entry = new CodeToolEntry();
+		entry->m_Name = Core::String(node.Member("name").AsView());
+		if (node.Member("function").AsView().IsEmpty() && node.Member("binding").AsView().IsEmpty()) {
+			problem = (((Core::String("plugin ") + pluginId) + ": the tool ") + entry->m_Name.View()) + " names no command, function or binding";
+			return nullptr;
+		}
+		entry->m_Entry = node;
+		entry->m_PluginId = Core::String(pluginId);
+		entry->m_Untrusted = node.Member("availableUntrusted").AsBool();
+		entry->m_Seconds = node.Member("timeoutSeconds").IsValid() ? node.Member("timeoutSeconds").AsInt() : c_CodeToolDefaultSeconds;
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Name = entry->m_Name;
+		spec->m_Description = Core::String(node.Member("description").AsView());
+		spec->m_Parameters = IED::NodeJson(node.Member("inputSchema"));
+		spec->m_ToolClass = CodeToolClass(node.Member("class").AsView());
+		spec->m_ParallelSafe = spec->m_ToolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
+		spec->m_InPlan = spec->m_ToolClass == ToolClass::Read;
+		spec->m_Deferred = !node.Member("preload").AsBool();
+		spec->m_Group = node.Member("group").AsView().IsEmpty() ? Core::String(pluginId) : Core::String(node.Member("group").AsView());
+		spec->m_Asks = node.Member("approval").AsView() == "ask";
+		spec->m_Plan = [entry](const ToolInvocation& call) -> ToolPlan { return CodeToolPlan(entry, call); };
+		if (!node.Member("plan").AsView().IsEmpty()) spec->m_Detail = [entry](const ToolInvocation& call, ToolPlan& plan) { CodeToolDetail(entry, call, plan); };
+		spec->m_Run = [entry](const ToolInvocation& call) -> ToolOutcome { return CodeToolRun(entry, call); };
+		return spec;
+	}
+}

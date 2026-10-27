@@ -1,0 +1,106 @@
+include "Rpc.ch"
+include "Session.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	Outcome Failure(const RpcError& error) {
+		Outcome outcome;
+		outcome.m_Json = error.ToJson();
+		return outcome;
+	}
+
+	Outcome Success(Core::StringView json) {
+		Outcome outcome;
+		outcome.m_Ok = true;
+		outcome.m_Json = Core::String(json);
+		return outcome;
+	}
+
+	Core::StringView Call::ClientId() const { return m_Session->m_ClientId.View(); }
+
+	void Call::Sleep(int64 ms) {
+		const int64 deadline = clock_now_ns() + ms * 1000000;
+		for (int64 left = ms * 1000000; left > 0 && !m_Cancel->IsCancelled(); left = deadline - clock_now_ns())
+			m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, left);
+		if (m_Cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+	}
+
+	void Call::OpenStream(CancelToken* token) { m_Session->m_Streams.Insert(m_RequestId, token); }
+
+	Core::Array<Core::String> Rpc::Names() const {
+		Core::Array<Core::String> names;
+		for (const Core::KeyValue<Core::String, Method>& entry : m_Methods) names.Push(entry.key);
+		names.Sort();
+		return names;
+	}
+
+	Outcome Rpc::Invoke(Call& call, Core::StringView method, const Params& params) {
+		Method* found = m_Methods.Find(Core::String(method));
+		if (!found) {
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("method", method);
+			data.EndObject();
+			Core::StringBuilder message;
+			message.Append("unknown method '");
+			message.Append(method);
+			message.Append("'");
+			return Failure(RpcError(ErrorCode::NotFound, message.View(), data.View()));
+		}
+		try {
+			return Success((*found)(call, params).View());
+		}
+		catch (RpcError& error) {
+			return Failure(error);
+		}
+		catch (...) {
+			return Failure(RpcError(ErrorCode::Internal, "the method failed"));
+		}
+	}
+
+	void Rpc::ExpireOps(int64 nowNs) {
+		Core::Array<Core::String> expired;
+		for (const Core::KeyValue<Core::String, OpEntry*>& entry : m_Ops)
+			if (entry.value->m_Done && nowNs - entry.value->m_CreatedNs > c_OpLifetimeNs) expired.Push(entry.key);
+		for (int64 i = 0; i < expired.Count(); ++i) m_Ops.Remove(expired[i]);
+	}
+
+	// A duplicate of a request still running waits for it (the server lock is released meanwhile).
+	Outcome Rpc::RunOnce(Call& call, Core::StringView method, const Params& params) {
+		const int64 now = clock_now_ns();
+		ExpireOps(now);
+		Core::StringBuilder key;
+		key.Append(call.ClientId());
+		key.AppendByte(' ');
+		key.Append(call.m_OpId.View());
+		Core::String name = key.ToString();
+		OpEntry** existing = m_Ops.Find(name);
+		if (existing) {
+			OpEntry* entry = *existing;
+			if (entry->m_Method.View() != method) {
+				Core::StringBuilder message;
+				message.Append("opId '");
+				message.Append(call.m_OpId.View());
+				message.Append("' was already used for ");
+				message.Append(entry->m_Method.View());
+				return Failure(RpcError(ErrorCode::BadRequest, message.View()));
+			}
+			while (!entry->m_Done) call.m_Server->m_Changed.Wait(call.m_Server->m_Lock);
+			return entry->m_Outcome;
+		}
+		OpEntry* entry = new OpEntry();
+		entry->m_Method = Core::String(method);
+		entry->m_CreatedNs = now;
+		m_Ops.Insert(name, entry);
+		entry->m_Outcome = Invoke(call, method, params);
+		entry->m_Done = true;
+		call.m_Server->m_Changed.NotifyAll();
+		return entry->m_Outcome;
+	}
+
+	Outcome Rpc::Run(Call& call, Core::StringView method, const Params& params) {
+		if (call.m_OpId.IsEmpty()) return Invoke(call, method, params);
+		return RunOnce(call, method, params);
+	}
+}

@@ -1,0 +1,44 @@
+include "Appdata.ch"
+include "Server.ch"
+
+namespace Ied
+{
+	bool TouchesSettings(const ChangeBatch& batch) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.m_Path.View() == "settings.json") return true;
+		return batch.Overflowed();
+	}
+
+	bool TouchesPlugins(const ChangeBatch& batch) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.m_Path.View() == "plugins" || change.m_Path.View().StartsWith(Core::StringView("plugins/"))) return true;
+		return batch.Overflowed();
+	}
+
+	static bool Touches(const ChangeBatch& batch, const char* file) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.m_Path.View() == file) return true;
+		return batch.Overflowed();
+	}
+
+	bool TouchesTrust(const ChangeBatch& batch) { return Touches(batch, "trust.json"); }
+
+	bool TouchesChoices(const ChangeBatch& batch) { return Touches(batch, "plugins.json"); }
+
+	bool AppDataWatch::Start(Server* server, Core::String& error) {
+		FS::Path folder = FS::Path(server->m_Config.m_AppDataDir.View());
+		FS::MakeDirectories(folder.CStr());
+		return m_Watch.Start(folder, [server](const ChangeBatch& batch) {
+			Threading::LockGuard guard(server->m_Lock);
+			// The master writes plugins.json and trust.json; a workspace server reads them again (docs/01 "Processes").
+			if (TouchesPlugins(batch) || (!server->IsMaster() && TouchesChoices(batch))) server->m_Plugins->Load();
+			else if (TouchesSettings(batch)) server->m_Settings->AppFileChanged();
+			if (!server->IsMaster() && TouchesTrust(batch)) {
+				Core::String problem;
+				server->m_Trust.Reload(problem);
+				if (!problem.IsEmpty()) server->Log(problem.View());
+				server->m_Workspaces->TrustFileChanged();
+			}
+		}, error);
+	}
+}

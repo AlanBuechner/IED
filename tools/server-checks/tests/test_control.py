@@ -138,7 +138,7 @@ class ControlTests(ServerTestCase):
 		text = "\n".join(server_log(self.server))
 		self.assertIn("[%d] C4: fatal: an exception was thrown and not caught" % self.server.process.pid, text)
 		self.assertIn('"testhooks.crash"', text, "the thread's name")
-		self.assertRegex(text, r"\(\S*testhooks\.cf:\d+\)", "the line that threw, named from the PDB")
+		self.assertRegex(text, r"\(\S*TestHooks\.cf:\d+\)", "the line that threw, named from the PDB")
 
 	async def ask_relaunch(self):
 		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
@@ -160,7 +160,7 @@ class ControlTests(ServerTestCase):
 	async def test_the_desktop_app_claims_a_relaunch(self):
 		"""A relaunch a plugin asks for (testhooks.relaunch here) shows in the status once the asker's answer is out; the
 		desktop app that watches claims it (relaunch.claim) and stops the server itself, which then starts nothing
-		(host/relaunch.ch)."""
+		(host/Relaunch.ch)."""
 		await self.ask_relaunch()
 		self.assertFalse(self.result("status")["relaunch"], "not while the asker's answer goes out")
 		self.assertEqual({"claimed": False}, self.result("relaunch.claim"), "nor claimed then")

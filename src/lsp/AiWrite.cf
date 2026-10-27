@@ -1,0 +1,180 @@
+include "Pool.ch"
+include "Uris.ch"
+include "host/Server.ch"
+include "plugins/Context.ch"
+include "fs/TextEdit.ch"
+
+namespace Ied
+{
+	const int64 c_AiWriteSliceNs = 20000000;
+	const int64 c_AiWriteElsewhereMost = 5;   // other files a result names
+
+	static Core::String KeyOf(const Workspace* ws, Core::StringView path) { return (ws->m_WsId + "|") + path; }
+
+	static Core::String LabelOf(const LspProfile* profile) { return profile->m_Label.IsEmpty() ? profile->m_Id : profile->m_Label; }
+
+	// A profile's boolean-or-when option ("true", "", a clause) in `ws`.
+	static bool Asks(Server* server, Workspace* ws, Core::StringView condition) {
+		if (condition.IsEmpty()) return false;
+		if (condition == "true") return true;
+		Core::String error;
+		const bool holds = WhenHolds(condition, WorkspaceWhen(server, ws), error);
+		if (!error.IsEmpty()) server->Log(((Core::String("a language server profile's AI write option does not parse: ") + condition) + ": " + error.View()).View());
+		return holds;
+	}
+
+	Core::String LspPool::AiWriteFor(Workspace* ws, Core::StringView path) {
+		LspProfile* profile = ProfileServing(ProfilesFor(ws), m_Server->m_Plugins->LanguageOf(ws, path).View(), path);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("profile"));
+		if (!profile) {
+			json.Null();
+			json.EndObject();
+			return json.ToString();
+		}
+		json.String(profile->m_Id.View());
+		json.Field("label", LabelOf(profile).View());
+		json.BoolField("format", Asks(m_Server, ws, profile->m_FormatOnAiWrite.View()));
+		json.BoolField("diagnostics", Asks(m_Server, ws, profile->m_DiagnosticsOnAiWrite.View()));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	int64 LspPool::PublishMark(Workspace* ws, Core::StringView path) const {
+		int64 seen = 0;
+		m_Publishes.TryGet(KeyOf(ws, path), seen);
+		return seen;
+	}
+
+	// How many of a diagnostics array's items are errors (severity 1, or none given) and warnings (2).
+	static void CountSeverities(Core::StringView items, int64& errors, int64& warnings) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode list = Serialization::ReadJson(items, *doc).root;
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode severity = list.At(i).Member("severity");
+			const int64 level = severity.IsValid() ? severity.AsInt() : 1;
+			if (level == 1) errors += 1;
+			else if (level == 2) warnings += 1;
+		}
+	}
+
+	// A file's problems, for an AI write's result.
+	struct AiWriteCount
+	{
+		public Core::String m_Path;
+		public int64 m_Errors;
+		public int64 m_Warnings;
+	}
+
+	// The other files `language` published problems for, those with the most errors first.
+	static void WriteElsewhere(JsonWriter& json, Server* server, LanguageServer* language, Core::StringView path) {
+		Core::Array<AiWriteCount> counts;
+		for (const Core::KeyValue<Core::String, bool>& entry : language->m_Published) {
+			if (entry.key.View() == path) continue;
+			AiWriteCount count = AiWriteCount{ entry.key, 0, 0 };
+			CountSeverities(server->m_Diagnostics->Of(language->m_Ws, entry.key.View(), language->Source().View()).View(), count.m_Errors, count.m_Warnings);
+			if (count.m_Errors + count.m_Warnings > 0) counts.Push(count);
+		}
+		counts.SortBy([](const AiWriteCount& a, const AiWriteCount& b) -> bool { return a.m_Errors != b.m_Errors ? a.m_Errors > b.m_Errors : a.m_Path.View() < b.m_Path.View(); });
+		json.Key(Core::StringView("elsewhere"));
+		json.BeginArray();
+		for (int64 i = 0; i < counts.Count() && i < c_AiWriteElsewhereMost; ++i) {
+			json.BeginObject();
+			json.Field("path", counts[i].m_Path.View());
+			json.IntField("errors", counts[i].m_Errors);
+			json.IntField("warnings", counts[i].m_Warnings);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.IntField("elsewhereFiles", counts.Count());
+	}
+
+	// Waits, the lock released, until `language` runs or `deadline` (ns) passes.
+	static void AwaitStart(Call& call, LanguageServer* language, int64 deadline) {
+		const int64 left = (deadline - clock_now_ns()) / 1000000;
+		if (language->m_State == LspState::Starting && left > 0) language->AwaitRunning(call, left);
+	}
+
+	Core::String LspPool::DiagnosticsAfter(Call& call, Workspace* ws, Core::StringView path, int64 mark, int64 ms) {
+		const int64 deadline = clock_now_ns() + ms * 1000000;
+		LanguageServer* language = ServingPath(ws, path, true);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("profile"));
+		if (!language) {
+			json.Null();
+			json.EndObject();
+			return json.ToString();
+		}
+		json.String(language->m_Profile->m_Id.View());
+		json.Field("label", LabelOf(language->m_Profile).View());
+		AwaitStart(call, language, deadline);
+		if (language->m_State != LspState::Running) {
+			json.Field("state", language->m_State == LspState::Starting ? "starting" : "down");
+			json.EndObject();
+			return json.ToString();
+		}
+		Document* doc = m_Server->m_Documents->Find(ws, path);
+		if (doc) OpenOn(language, doc);
+		else OpenTransient(language, ws, path);
+		while (PublishMark(ws, path) <= mark && !call.m_Cancel->IsCancelled() && clock_now_ns() < deadline) call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_AiWriteSliceNs);
+		json.Field("state", PublishMark(ws, path) > mark ? "fresh" : "stale");
+		json.RawField("items", m_Server->m_Diagnostics->Of(ws, path, language->Source().View()).View());
+		WriteElsewhere(json, m_Server, language, path);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Whether a server's capabilities say it formats whole files.
+	static bool Formats(Core::StringView capabilities) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode provider = Serialization::ReadJson(capabilities, *doc).root.Member("documentFormattingProvider");
+		return provider.Kind() == Serialization::DomKind::Object || provider.AsBool();
+	}
+
+	// The TextEdits of a formatting answer (client positions) as changes; false with `error` for a malformed one.
+	static bool EditsAsChanges(const Serialization::DomNode& edits, Core::Array<Change>& changes, Core::String& error) {
+		for (int64 i = 0; i < edits.Count(); ++i) {
+			Serialization::DomNode edit = edits.At(i);
+			Serialization::DomNode range = edit.Member("range");
+			if (!range.Member("start").IsValid() || !range.Member("end").IsValid()) {
+				error = Core::String("an edit without a range");
+				return false;
+			}
+			Change change;
+			change.m_Start = Pos{ range.Member("start").Member("line").AsInt(), range.Member("start").Member("character").AsInt() };
+			change.m_End = Pos{ range.Member("end").Member("line").AsInt(), range.Member("end").Member("character").AsInt() };
+			change.m_Text = Core::String(edit.Member("newText").AsView());
+			changes.Push(change);
+		}
+		return true;
+	}
+
+	Core::String LspPool::FormattedFor(Call& call, Workspace* ws, Core::StringView path, int64 tabSize, bool insertSpaces, int64 ms) {
+		LanguageServer* language = ServingPath(ws, path, true);
+		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + path).View());
+		AwaitStart(call, language, clock_now_ns() + ms * 1000000);
+		Core::String label = LabelOf(language->m_Profile);
+		if (language->m_State != LspState::Running) throw RpcError(ErrorCode::Unavailable, ((label + " is ") + LspStateName(language->m_State)).View());
+		if (!Formats(language->m_Capabilities.View())) throw RpcError(ErrorCode::Unavailable, (label + " does not format files").View());
+		JsonWriter params;
+		params.BeginObject();
+		params.Key(Core::StringView("options"));
+		params.BeginObject();
+		params.IntField("tabSize", tabSize);
+		params.BoolField("insertSpaces", insertSpaces);
+		params.EndObject();
+		params.EndObject();
+		Core::String answer = RequestFor(call, ws, path, Core::StringView("textDocument/formatting"), params.View(), true);
+		Core::String text;
+		if (!TextOf(ws, IedUriOf(ws->m_WsId.View(), path).View(), text)) throw RpcError(ErrorCode::NotFound, (Core::String("no file ") + path).View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode edits = Serialization::ReadJson(answer.View(), *doc).root;
+		Core::Array<Change> changes;
+		Core::String error;
+		Core::String formatted;
+		if (!EditsAsChanges(edits, changes, error) || !ApplyChanges(text.View(), changes, formatted, error)) throw RpcError(ErrorCode::Unavailable, ((label + "'s formatting does not apply: ") + error.View()).View());
+		return formatted;
+	}
+}

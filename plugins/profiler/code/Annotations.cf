@@ -1,0 +1,90 @@
+include "Annotations.ch"
+
+namespace Profiler
+{
+	static Annotation ReadOne(const Serialization::DomNode& node) {
+		Annotation annotation;
+		annotation.m_Id = Core::String(node.Member("id").AsView());
+		annotation.m_FromNs = node.Member("fromNs").AsInt();
+		annotation.m_ToNs = node.Member("toNs").IsValid() ? node.Member("toNs").AsInt() : annotation.m_FromNs;
+		annotation.m_Text = Core::String(node.Member("text").AsView());
+		annotation.m_By = Core::String(node.Member("by").AsView().IsEmpty() ? Core::StringView("owner") : node.Member("by").AsView());
+		annotation.m_CreatedUnixNs = node.Member("createdUnixNs").AsInt();
+		return annotation;
+	}
+
+	Core::Array<Annotation> ReadAnnotations(Core::StringView metadata) {
+		Core::Array<Annotation> annotations;
+		if (metadata.Trimmed().IsEmpty()) return annotations;
+		Serialization::DomDoc doc;
+		Serialization::DomNode list = Serialization::ReadJson(metadata, doc).root.Member("annotations");
+		for (int64 i = 0; i < list.Count(); ++i)
+			if (!list.At(i).Member("id").AsView().IsEmpty()) annotations.Push(ReadOne(list.At(i)));
+		return annotations;
+	}
+
+	void WriteAnnotation(IED::JsonWriter& json, const Annotation& annotation) {
+		json.BeginObject();
+		json.Field("id", annotation.m_Id.View());
+		json.IntField("fromNs", annotation.m_FromNs);
+		json.IntField("toNs", annotation.m_ToNs);
+		json.Field("text", annotation.m_Text.View());
+		json.Field("by", annotation.m_By.View());
+		json.IntField("createdUnixNs", annotation.m_CreatedUnixNs);
+		json.EndObject();
+	}
+
+	void WriteAnnotations(IED::JsonWriter& json, const Core::Array<Annotation>& annotations) {
+		json.BeginArray();
+		for (const Annotation& annotation : annotations) WriteAnnotation(json, annotation);
+		json.EndArray();
+	}
+
+	Core::String MetadataWith(Core::StringView metadata, const Core::Array<Annotation>& annotations) {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = metadata.Trimmed().IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(metadata, doc).root;
+		IED::JsonWriter json;
+		json.BeginObject();
+		if (root.Kind() == Serialization::DomKind::Object)
+			for (int64 i = 0; i < root.Count(); ++i) {
+				if (root.KeyAt(i) == "annotations") continue;
+				json.Key(root.KeyAt(i));
+				json.Raw(IED::NodeJson(root.ValueAt(i)).View());
+			}
+		json.Key(Core::StringView("annotations"));
+		WriteAnnotations(json, annotations);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static int64 NumberAfterN(Core::StringView id) {
+		if (id.ByteLength() < 2 || id.ByteAt(0) != (int32)'n') return 0;
+		int64 value = 0;
+		for (int64 i = 1; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (c < (int32)'0' || c > (int32)'9') return 0;
+			value = value * 10 + (int64)(c - (int32)'0');
+		}
+		return value;
+	}
+
+	Core::String NextAnnotationId(const Core::Array<Annotation>& annotations) {
+		int64 most = 0;
+		for (const Annotation& annotation : annotations) {
+			const int64 n = NumberAfterN(annotation.m_Id.View());
+			if (n > most) most = n;
+		}
+		Core::StringBuilder id;
+		id.AppendByte('n');
+		id.AppendInt(most + 1);
+		return id.ToString();
+	}
+
+	bool AnnotationText(Core::StringView given, Core::String& text, Core::String& problem) {
+		Core::StringView trimmed = given.Trimmed();
+		if (trimmed.IsEmpty()) problem = Core::String("an annotation needs text");
+		else if (trimmed.ByteLength() > c_MostAnnotationBytes) problem = Core::String("an annotation's text is at most 2000 bytes");
+		else text = Core::String(trimmed);
+		return problem.IsEmpty();
+	}
+}

@@ -1,0 +1,51 @@
+include "Sse.ch"
+
+namespace Ai
+{
+	void SseReader::Feed(Core::StringView bytes) { m_Pending.Append(bytes); }
+
+	bool SseReader::Next(SseEvent& event) {
+		for (;;) {
+			const int64 end = m_Pending.View().IndexOf('\n', 0);
+			if (end < 0) return false;
+			Core::StringView line = m_Pending.View().Substring(0, end);
+			if (line.EndsWith(Core::StringView("\r"))) line = line.Substring(0, line.ByteLength() - 1);
+			const Core::String kept = Core::String(line);
+			m_Pending = Core::String(m_Pending.View().Substring(end + 1, m_Pending.ByteLength() - end - 1));
+			if (Line(kept.View(), event)) return true;
+		}
+	}
+
+	// One line: true when it completes an event (a blank line after data) or is a comment.
+	bool SseReader::Line(Core::StringView line, SseEvent& event) {
+		if (line.IsEmpty()) {
+			if (!m_HasData) return false;
+			event.m_Kind = SseKind::Data;
+			event.m_Data = m_Data;
+			m_Data = Core::String();
+			m_HasData = false;
+			return true;
+		}
+		if (line.ByteAt(0) == ':') {
+			event.m_Kind = SseKind::Comment;
+			event.m_Data = Core::String(line.Substring(1, line.ByteLength() - 1));
+			return true;
+		}
+		if (!line.StartsWith(Core::StringView("data:"))) return false;
+		Core::StringView value = line.Substring(5, line.ByteLength() - 5);
+		if (value.StartsWith(Core::StringView(" "))) value = value.Substring(1, value.ByteLength() - 1);
+		if (m_HasData) m_Data.Append("\n");
+		m_Data.Append(value);
+		m_HasData = true;
+		return false;
+	}
+
+	bool SseReader::Flush(SseEvent& event) {
+		if (!m_Pending.IsEmpty()) {
+			const Core::String last = m_Pending;
+			m_Pending = Core::String();
+			if (Line(last.View(), event)) return true;
+		}
+		return Line(Core::StringView(""), event);
+	}
+}

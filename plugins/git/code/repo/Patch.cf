@@ -1,0 +1,66 @@
+include "Patch.ch"
+
+namespace Git
+{
+	static bool Chosen(const Core::Array<int64>& chosen, int64 index) {
+		if (chosen.IsEmpty()) return true;
+		for (int64 each : chosen)
+			if (each == index) return true;
+		return false;
+	}
+
+	// The hunk's lines as the patch has them: chosen changes, the rest dropped or turned into context.
+	static Core::Array<Core::String> PatchLines(const GitHunk& hunk, const Core::Array<int64>& chosen, bool reverse) {
+		Core::Array<Core::String> lines;
+		bool keptLast = true;
+		for (int64 i = 0; i < hunk.m_Lines.Count(); ++i) {
+			Core::StringView line = hunk.m_Lines[i].View();
+			if (line.IsEmpty()) continue;
+			const int32 kind = line.ByteAt(0);
+			if (kind == '\\') {
+				if (keptLast) lines.Push(Core::String(line));
+				continue;
+			}
+			keptLast = kind == ' ' || Chosen(chosen, i) || kind == (reverse ? '+' : '-');
+			if (!keptLast) continue;
+			if (kind == ' ' || Chosen(chosen, i)) lines.Push(Core::String(line));
+			else lines.Push(Core::String(" ") + line.Substring(1, line.ByteLength() - 1));
+		}
+		return lines;
+	}
+
+	Core::String HunkPatch(const GitDiff& diff, int64 hunk, const Core::Array<int64>& chosen, bool reverse) {
+		if (hunk < 0 || hunk >= diff.m_Hunks.Count()) return Core::String("");
+		const GitHunk& source = diff.m_Hunks[hunk];
+		Core::Array<Core::String> lines = PatchLines(source, chosen, reverse);
+		int64 oldCount = 0;
+		int64 newCount = 0;
+		bool changes = false;
+		for (const Core::String& line : lines) {
+			const int32 kind = line.View().ByteAt(0);
+			if (kind == ' ' || kind == '-') oldCount += 1;
+			if (kind == ' ' || kind == '+') newCount += 1;
+			changes = changes || kind == '+' || kind == '-';
+		}
+		if (!changes) return Core::String("");
+		Core::StringBuilder patch;
+		for (const Core::String& line : diff.m_FileHeader) {
+			patch.Append(line.View());
+			patch.AppendByte('\n');
+		}
+		patch.Append("@@ -");
+		patch.AppendInt(source.m_OldStart);
+		patch.AppendByte(',');
+		patch.AppendInt(oldCount);
+		patch.Append(" +");
+		patch.AppendInt(source.m_NewStart);
+		patch.AppendByte(',');
+		patch.AppendInt(newCount);
+		patch.Append(" @@\n");
+		for (const Core::String& line : lines) {
+			patch.Append(line.View());
+			patch.AppendByte('\n');
+		}
+		return patch.ToString();
+	}
+}

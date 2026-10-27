@@ -20,7 +20,7 @@ CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
 WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
 WORKSPACE_FILE = re.compile(r"^/w/([^/]+)/files/(.*)$")
 WORKSPACE_OWN = re.compile(r"^/w/[^/]+(/ws|/api/.*)$")
-# The image types a workspace file is served as (src/web/front.cf IsServedImage): none that is markup.
+# The image types a workspace file is served as (src/web/Front.cf IsServedImage): none that is markup.
 SERVED_IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".ico": "image/x-icon"}
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
 WILDCARD_BINDS = {"0.0.0.0", "::", ""}

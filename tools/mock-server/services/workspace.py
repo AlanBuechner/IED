@@ -9,7 +9,7 @@ from rpc import RpcError
 
 SEARCH_DEFAULT_RESULTS = 2000
 SEARCH_MOST_RESULTS = 20000
-# The folders fs.search skips when a query names no exclusions (src/fs/search.cf DefaultSearchExcludes).
+# The folders fs.search skips when a query names no exclusions (src/fs/Search.cf DefaultSearchExcludes).
 SEARCH_EXCLUDES = ["**/.git", "**/node_modules", "**/build", "**/bin", "**/bin-int", "**/toolchains", "**/vendor", "**/third_party", "**/__pycache__"]
 
 
@@ -366,7 +366,7 @@ class Workspaces:
 
 
 def fuzzy_score(query, path):
-	"""src/fs/fuzzy.cf's FuzzyScore: the query's characters in order, any case; the name first, runs and word starts."""
+	"""src/fs/Fuzzy.cf's FuzzyScore: the query's characters in order, any case; the name first, runs and word starts."""
 	def match_in(text):
 		score, at, previous = 0, 0, -2
 		lowered = text.lower()
@@ -391,7 +391,7 @@ def fuzzy_score(query, path):
 
 
 def _glob_regex(glob):
-	"""src/fs/glob.cf's rule: '*' within a segment, '?' one character, a '**' segment any number of segments."""
+	"""src/fs/Glob.cf's rule: '*' within a segment, '?' one character, a '**' segment any number of segments."""
 	out = ""
 	for i, part in enumerate(glob.split("/")):
 		if part == "**":

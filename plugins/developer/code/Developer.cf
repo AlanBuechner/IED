@@ -1,0 +1,279 @@
+include "Developer.ch"
+
+namespace Developer
+{
+	const char* c_Alias = "ied";
+	const char* c_KnownBugs = "C4/docs/status/known-bugs.md";
+	// Only an owner's chat in a trusted workspace gets it: an untrusted workspace's files could steer the AI into IED's own
+	// source.
+	const char* c_When = "config.developer.enabled && workspaceTrusted";
+
+	// --- The source ------------------------------------------------------------------------------------------------
+
+	// The source as a workspace: the open one rooted there, or opened now.
+	static bool SourceWorkspace(IED::Workspace& ws, Core::String& problem) {
+		Core::String source = SourceFolder();
+		if (source.IsEmpty()) {
+			problem = Core::String("IED is not running from its source checkout");
+			return false;
+		}
+		return IED::OpenFolder(source.View(), ws, problem);
+	}
+
+	// --- What a chat is told and given ----------------------------------------------------------------------------
+
+	static Core::String SectionEntries(Core::StringView source) {
+		Core::StringBuilder text;
+		text.Append("# IED itself (developer mode)\n\nThis IED is built from its source checkout at ");
+		text.Append(source);
+		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); writes and commands there follow this chat's permission mode. ");
+		text.Append("The plugins' folders (plugins:/<plugin id>/: their skills, docs and manifests) are writable too: a write there goes to the plugin's folder in ied:/ (a built-in plugin's ied:/plugins/<name>/). The c4 plugin is built in (ied:/plugins/c4/), and a Nuke solution's is the toolchain's copy nuke build makes from it and ied:/C4/docs/: change those, then ied_rebuild. ");
+		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed. ");
+		text.Append("When the running IED needs the fix (its server, a plugin, the web client), ied_relaunch installs it and relaunches IED; this chat then continues on the new build.\n\n");
+		text.Append("Every failing tool call is a chance to fix IED's tools, and its result says so: before you move on, change IED so that it cannot fail this way again. If the tool did something wrong (a bug, a case it should handle), fix the tool in ied:/. If your call was wrong because the tool's description, the system prompt or a skill misled you (a name, an argument, what it returns), correct that text so the next call is not misled the same way. ");
+		text.Append("The core tools' descriptions are in ied:/plugins/chat/code (each tool's Spec), the system prompt in ied:/plugins/chat/prompts, a plugin's tools in its ied-plugin.json or its code, its skills in its skills/ folder. Say in the chat what you changed. Then make the call again.");
+		IED::JsonWriter json;
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("id", "source");
+		json.Field("text", text.View());
+		json.IntField("maxTokens", c_SectionTokens);
+		json.Field("when", c_When);
+		json.EndObject();
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// The note every failing call's result carries while developer mode is on (aiToolFailureNotes, docs/28): the owner
+	// wants each one to end in a change to IED that keeps it from happening again.
+	static Core::String FailureNoteEntries() {
+		IED::JsonWriter json;
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("id", "fix-the-cause");
+		json.Field("text", "[Developer mode] {tool} failed. Before you go on, change IED so that this cannot happen again, and say in the chat what you changed: fix the tool's code in ied:/ if it did something wrong; otherwise correct what misled your call - the tool's description or schema (a core tool's Spec in ied:/plugins/chat/code, a plugin's tool in its ied-plugin.json or its code), the system prompt (ied:/plugins/chat/prompts) or the skill you followed (plugins:/<plugin id>/skills/, which writes to its source in ied:/). Then make the call again.");
+		json.Field("when", c_When);
+		json.EndObject();
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// A long tool runs on a thread of its own (`ownThread`), so ai.roots and the other tools go on meanwhile.
+	static void ToolEntry(IED::JsonWriter& json, const char* name, const char* toolClass, const char* description, const char* function, int64 seconds) {
+		json.BeginObject();
+		json.Field("name", name);
+		json.Field("description", description);
+		json.Field("class", toolClass);
+		json.RawField("inputSchema", Core::StringView("{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}"));
+		json.Field("function", function);
+		json.IntField("timeoutSeconds", seconds);
+		json.BoolField("ownThread", seconds > c_QuickSeconds);
+		json.Field("when", c_When);
+		json.EndObject();
+	}
+
+	static Core::String ToolEntries() {
+		IED::JsonWriter json;
+		json.BeginArray();
+		ToolEntry(json, "ied_rebuild", "exec", "Build IED's source checkout (ied:/) with nuke build: the C4 toolchain (the dev toolchain workspaces pinned to dev use at once) and the IED server. The running IED keeps its build: ied_relaunch moves it onto the fix. Returns the end of the output.", "Developer::RebuildTool", c_BuildSeconds);
+		ToolEntry(json, "ied_gates", "exec", "Run nuke gates in IED's source checkout: every C4 test suite. Returns the end of the output.", "Developer::GatesTool", c_BuildSeconds);
+		ToolEntry(json, "ied_relaunch", "exec", "Install IED's source checkout (ied:/) as the running IED with nuke install-ied - the C4 toolchain, the server, the web client, the plugins and the desktop app - then relaunch IED onto it. Use it when a fix to IED or the C4 toolchain needs the running IED to change. The restart ends this turn; once IED is back, this chat continues by itself with a message saying so, to check the fix on the new build. A failed build installs nothing, keeps IED running and returns the end of its output.", "Developer::RelaunchTool", c_BuildSeconds);
+		ToolEntry(json, "ied_known_bugs", "read", "The open entries of ied:/C4/docs/status/known-bugs.md and the next free BUG id, to check whether a bug is known before recording it.", "Developer::KnownBugsTool", c_QuickSeconds);
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// ai.roots: {wsId, open?} -> {roots: [{alias, title, folder, confirm, home, wsId?}]}; empty while developer.enabled is
+	// off in `wsId`, or `wsId` is not trusted. `home`: the source is what the server's home was built or installed from,
+	// so a plugin of the home is written in the source (plugins:/, docs/13 "Plugin folders").
+	static IED::Result Roots(IED::PluginContext* context, Core::StringView source, const Serialization::DomNode& args) {
+		IED::Workspace asking;
+		const bool trusted = IED::FindWorkspace(args.Member("wsId").AsView(), asking) && asking.m_Trusted;
+		const bool enabled = trusted && context->Setting(Core::StringView("developer.enabled"), args.Member("wsId").AsView()) == "true";
+		IED::Workspace ws;
+		Core::String problem;
+		const bool opening = enabled && args.Member("open").AsView() == c_Alias;
+		if (opening && !IED::OpenFolder(source, ws, problem)) return IED::Refusal(problem.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("roots"));
+		json.BeginArray();
+		if (enabled) {
+			json.BeginObject();
+			json.Field("alias", c_Alias);
+			json.Field("title", "IED source");
+			json.Field("folder", source);
+			json.BoolField("confirm", false);
+			json.BoolField("home", true);
+			if (opening) json.Field("wsId", ws.m_Id.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return IED::Answer(json.View());
+	}
+
+	// ied.developer.install: {} -> {state, exitCode, tail}, once the install that runs, or one started now, has ended.
+	static IED::Result Install(Builds* builds) {
+		int64 code = 0;
+		Core::String tail;
+		const BuildState ended = builds->AwaitInstall(code, tail, c_TailLines);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", BuildStateName(ended));
+		json.IntField("exitCode", code);
+		json.Field("tail", tail.View());
+		json.EndObject();
+		return IED::Answer(json.View());
+	}
+
+	// ied.developer/rebuild, /cancel and /refresh: the settings page's Rebuild and relaunch (Builds.ch).
+	static void ProvideBuildMethods(IED::PluginContext& context, Builds* builds, Core::StringView source) {
+		const bool hasSource = !source.IsEmpty();
+		Core::String problem;
+		context.Method(Core::StringView("ied.developer/rebuild"), [builds, hasSource](const IED::Request& request) -> Core::String {
+			Core::String refused;
+			if (!hasSource) throw IED::RpcError(IED::ErrorCode::Unavailable, "IED has no source checkout to build: it is neither run from one nor installed from one");
+			if (!builds->Start(refused)) throw IED::RpcError(IED::ErrorCode::Conflict, refused.View());
+			return Core::String("{}");
+		}, problem);
+		context.Method(Core::StringView("ied.developer/cancel"), [builds](const IED::Request& request) -> Core::String {
+			builds->Cancel();
+			return Core::String("{}");
+		}, problem);
+		context.Method(Core::StringView("ied.developer/refresh"), [builds](const IED::Request& request) -> Core::String {
+			builds->Refresh();
+			return Core::String("{}");
+		}, problem);
+		if (!problem.IsEmpty()) context.Log(problem.View());
+	}
+
+	// The install build is the app's, one at a time, in the master; a workspace server's copy gives its chats the source
+	// (ai.roots), the section and the tools, whose ied_relaunch asks the master's build (docs/28 "Which server").
+	void Activate(IED::PluginContext& context) {
+		Core::String source = SourceFolder();
+		if (context.Server() == "master") {
+			Builds* builds = new Builds(&context, source);
+			context.TopicFrom(Core::StringView("ied.developer/state"), [builds]() -> Core::String { return builds->SnapshotJson(); });
+			ProvideBuildMethods(context, builds, source.View());
+			if (source.IsEmpty()) return;
+			context.StartThread([builds]() { builds->Refresh(); });
+			context.Provide(Core::StringView("ied.developer.install"), [builds](const Serialization::DomNode& args) -> IED::Result { return Install(builds); });
+			return;
+		}
+		if (source.IsEmpty()) return;
+		Core::String problem;
+		if (!context.Contribute(Core::StringView("systemMessageSections"), Core::StringView(""), SectionEntries(source.View()).View(), problem)) context.Log(problem.View());
+		if (!context.Contribute(Core::StringView("toolCalls"), Core::StringView(""), ToolEntries().View(), problem)) context.Log(problem.View());
+		if (!context.Contribute(Core::StringView("aiToolFailureNotes"), Core::StringView(""), FailureNoteEntries().View(), problem)) context.Log(problem.View());
+		IED::PluginContext* at = &context;
+		context.Provide(Core::StringView("ai.roots"), [at, source](const Serialization::DomNode& args) -> IED::Result { return Roots(at, source.View(), args); });
+	}
+
+	// --- Tools ----------------------------------------------------------------------------------------------------
+
+	Core::String OutputTail(Core::StringView output, int64 most) {
+		if (output.ByteLength() <= most) return Core::String(output);
+		Core::StringView tail = output.Substring(output.ByteLength() - most, most);
+		const int64 line = tail.IndexOf(Core::StringView("\n"));
+		return Core::String("[...]\n") + (line >= 0 ? tail.Substring(line + 1, tail.ByteLength() - line - 1) : tail);
+	}
+
+	// `nuke <verb>` in the source, its exit and the end of its output.
+	static IED::ToolResult Nuke(const char* verb) {
+		IED::Workspace ws;
+		Core::String problem;
+		if (!SourceWorkspace(ws, problem)) return IED::ToolFailure(problem.View());
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String("cmd.exe"));
+		argv.Push(Core::String("/d"));
+		argv.Push(Core::String("/c"));
+		argv.Push(Core::String((FS::Path(ws.m_Root.View()) / Core::StringView("nuke.bat")).View()));
+		argv.Push(Core::String(verb));
+		IED::CommandResult ran = IED::RunCommand(ws, argv, Core::StringView(""), c_BuildSeconds);
+		if (!ran.m_Started || !ran.m_Problem.IsEmpty()) return IED::ToolFailure(((Core::String("nuke ") + verb) + ": " + ran.m_Problem.View()).View());
+		Core::StringBuilder out;
+		out.Append("nuke ");
+		out.Append(verb);
+		out.Append(ran.m_ExitCode == 0 ? " succeeded" : " failed (exit ");
+		if (ran.m_ExitCode != 0) {
+			out.AppendInt(ran.m_ExitCode);
+			out.Append(")");
+		}
+		out.Append(":\n");
+		out.Append(OutputTail(ran.m_Output.View(), c_TailBytes).View());
+		IED::ToolResult result = IED::ToolText(out.View());
+		result.m_IsError = ran.m_ExitCode != 0;
+		result.m_ReportsFailure = result.m_IsError;
+		return result;
+	}
+
+	IED::ToolResult RebuildTool(const IED::ToolCall& call) { return Nuke("build"); }
+
+	IED::ToolResult GatesTool(const IED::ToolCall& call) { return Nuke("gates"); }
+
+	IED::ToolResult RelaunchTool(const IED::ToolCall& call) {
+		IED::Result installed = IED::CallBinding(Core::StringView("ied.developer.install"), Core::StringView("{}"));
+		if (!installed.Ok()) return IED::ToolFailure(installed.m_Error.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode ended = Serialization::ReadJson(installed.m_Json.View(), *doc).root;
+		if (ended.Member("state").AsView() != "succeeded") {
+			Core::StringBuilder failed;
+			failed.Append("nuke install-ied ");
+			failed.Append(ended.Member("state").AsView());
+			failed.Append(" (exit ");
+			failed.AppendInt(ended.Member("exitCode").AsInt());
+			failed.Append("); nothing was installed and IED keeps running its build:\n");
+			failed.Append(ended.Member("tail").AsView());
+			return IED::ToolFailure(failed.View());
+		}
+		Core::String problem;
+		if (!IED::RelaunchServer((Core::String("ied_relaunch in chat ") + call.m_ChatId.View()).View(), problem))
+			return IED::ToolFailure((Core::String("Installed, but IED could not relaunch: ") + problem.View()).View());
+		IED::ToolResult result = IED::ToolText(Core::StringView("Installed. IED relaunches onto the new build in a few seconds, which ends this turn: end your reply now and call no other tool. Once IED is back, this chat continues by itself with a message saying so."));
+		result.m_Restarts = true;
+		return result;
+	}
+
+	Core::String OpenBugs(Core::StringView knownBugs) {
+		Core::StringBuilder out;
+		bool fenced = false;
+		bool inBug = false;
+		int64 count = 0;
+		int64 at = 0;
+		while (at < knownBugs.ByteLength()) {
+			int64 end = knownBugs.IndexOf('\n', at);
+			end = end < 0 ? knownBugs.ByteLength() : end;
+			Core::StringView line = knownBugs.Substring(at, end - at).Trimmed();
+			at = end + 1;
+			if (line.StartsWith(Core::StringView("```"))) fenced = !fenced;
+			if (fenced) continue;
+			if (line.StartsWith(Core::StringView("Next ID:"))) {
+				out.Append(line);
+				out.Append("\n");
+			}
+			if (line.StartsWith(Core::StringView("#"))) inBug = line.StartsWith(Core::StringView("### BUG-"));
+			if (line.StartsWith(Core::StringView("### BUG-"))) {
+				out.Append("\n");
+				out.Append(line.Substring(4, line.ByteLength() - 4));
+				out.Append("\n");
+				count += 1;
+			}
+			else if (inBug && (line.StartsWith(Core::StringView("- **Severity:**")) || line.StartsWith(Core::StringView("- **Status:**")) || line.StartsWith(Core::StringView("- **Symptom:**")))) {
+				out.Append(line);
+				out.Append("\n");
+			}
+		}
+		if (count == 0) out.Append("\nNo open bugs.\n");
+		return out.ToString();
+	}
+
+	IED::ToolResult KnownBugsTool(const IED::ToolCall& call) {
+		IED::Workspace ws;
+		Core::String problem;
+		if (!SourceWorkspace(ws, problem)) return IED::ToolFailure(problem.View());
+		Core::String text;
+		if (!IED::ReadFile(ws, Core::StringView(c_KnownBugs), text, problem)) return IED::ToolFailure(problem.View());
+		return IED::ToolText(OpenBugs(text.View()).View());
+	}
+}

@@ -1,0 +1,346 @@
+include "Documents.ch"
+include "host/Server.ch"
+include "lsp/Uris.ch"
+
+namespace Ied
+{
+	static void Conflict(const char* message, int64 version, const char* reason) {
+		JsonWriter data;
+		data.BeginObject();
+		data.IntField("version", version);
+		data.Field("reason", reason);
+		data.EndObject();
+		throw RpcError(ErrorCode::Conflict, message, data.View());
+	}
+
+	Core::Array<Change> ChangesParam(const Params& params) {
+		Core::Array<Change> changes;
+		Core::String error;
+		if (!ParseChanges(params.List("changes"), changes, error)) throw RpcError(ErrorCode::BadRequest, error.View());
+		return changes;
+	}
+
+	void Documents::Init(Server* server) {
+		this.m_Server = server;
+		Documents* self = this;
+		server->m_Rpc.Register("doc.open", [self](Call& call, const Params& params) -> Core::String { return self->OpenMethod(call, params); });
+		server->m_Rpc.Register("doc.edit", [self](Call& call, const Params& params) -> Core::String { return self->EditMethod(call, params); });
+		server->m_Rpc.Register("doc.takeLease", [self](Call& call, const Params& params) -> Core::String { return self->TakeLeaseMethod(call, params); });
+		server->m_Rpc.Register("doc.save", [self](Call& call, const Params& params) -> Core::String { return self->SaveMethod(call, params); });
+		server->m_Rpc.Register("doc.baseline", [self](Call& call, const Params& params) -> Core::String { return self->BaselineMethod(call, params); });
+	}
+
+	Document* Documents::Get(Core::StringView docId) const {
+		Document* doc = nullptr;
+		if (m_ById.TryGet(Core::String(docId), doc)) return doc;
+		throw RpcError(ErrorCode::NotFound, "no such document");
+	}
+
+	Document* Documents::Find(Workspace* ws, Core::StringView path) const {
+		Document* doc = nullptr;
+		m_ByPath.TryGet((ws->m_WsId + "/") + path, doc);
+		return doc;
+	}
+
+	Core::String Documents::Snapshot(const Document* doc) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("docId", doc->m_DocId.View());
+		json.Field("wsId", doc->m_Ws->m_WsId.View());
+		json.Field("path", doc->m_Path.View());
+		json.Field("text", doc->m_Text.View());
+		json.IntField("version", doc->m_Version);
+		json.Key(Core::StringView("lease"));
+		json.BeginObject();
+		json.Key(Core::StringView("holder"));
+		if (doc->m_Holder.IsEmpty()) json.Null();
+		else json.String(doc->m_Holder.View());
+		json.EndObject();
+		json.BoolField("dirty", doc->m_Dirty);
+		json.BoolField("readOnly", doc->m_External);
+		json.Field("languageId", m_Server->m_Plugins->LanguageOf(doc->m_Ws, doc->m_Path.View()).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Document* Documents::Open(Workspace* ws, Core::StringView path) {
+		Core::String key = (ws->m_WsId + "/") + path;
+		Document* doc = nullptr;
+		if (m_ByPath.TryGet(key, doc)) return doc;
+		return Added(ws, key.View(), path, m_Server->m_Workspaces->Read(ws, path), false);
+	}
+
+	Document* Documents::OpenExternal(Workspace* ws, Core::StringView uri) {
+		Core::String canonical = CanonicalFileUri(uri);
+		if (canonical.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "uri is not a file: URI");
+		Core::String key = (ws->m_WsId + "/") + canonical.View();
+		Document* doc = nullptr;
+		if (m_ByPath.TryGet(key, doc)) return doc;
+		if (!m_Server->m_Lsp->WasNamed(ws, canonical.View())) throw RpcError(ErrorCode::Forbidden, "only a file a language server of the workspace named opens from outside it");
+		Core::String absolute;
+		PathOfFileUri(canonical.View(), absolute);
+		if (!FS::FileExists(absolute.CStr())) throw RpcError(ErrorCode::NotFound, (Core::String("no file ") + absolute.View()).View());
+		FS::File file = FS::File(absolute.CStr(), "rb");
+		return Added(ws, key.View(), canonical.View(), file.ReadText(), true);
+	}
+
+	Document* Documents::Added(Workspace* ws, Core::StringView key, Core::StringView path, Core::String text, bool external) {
+		Document* doc = new Document();
+		m_Opened += 1;
+		Core::StringBuilder id;
+		id.Append("d");
+		id.AppendInt(m_Opened);
+		doc->m_DocId = id.ToString();
+		doc->m_Ws = ws;
+		doc->m_Path = Core::String(path);
+		doc->m_External = external;
+		doc->m_Text = take(text);
+		doc->m_Saved = doc->m_Text;
+		doc->m_Opened = doc->m_Text;
+		doc->m_Version = 1;
+		doc->m_LanguageId = m_Server->m_Plugins->LanguageOf(ws, path);
+		m_ById.Insert(doc->m_DocId, doc);
+		m_ByPath.Insert(Core::String(key), doc);
+		Documents* self = this;
+		Document* created = doc;
+		m_Server->m_Hub.Add(doc->Topic().View(), [self, created]() -> Core::String { return self->Snapshot(created); });
+		m_Server->m_Lsp->DocumentOpened(doc);
+		return doc;
+	}
+
+	Core::Array<Change> Documents::Rebase(const Document* doc, int64 baseVersion, const Core::Array<Change>& changes) const {
+		if (baseVersion == doc->m_Version) return changes;
+		if (doc->m_Version - baseVersion > doc->m_History.Count()) Conflict("baseVersion is too old to rebase", doc->m_Version, "too-old");
+		Core::Array<Core::Array<Change>> sets;
+		for (VersionChanges* step : doc->m_History)
+			if (step->m_Version > baseVersion) sets.Push(step->m_Changes);
+		Core::Array<Change> rebased;
+		if (!RebaseChanges(changes, sets, rebased)) Conflict("the edit overlaps a change made since its base version", doc->m_Version, "overlap");
+		return rebased;
+	}
+
+	Core::String Documents::ApplyEdit(Document* doc, int64 baseVersion, const Core::Array<Change>& changes, Core::StringView origin, Core::StringView opId) {
+		if (baseVersion > doc->m_Version || baseVersion < 1) throw RpcError(ErrorCode::BadRequest, "baseVersion is not a version of this document");
+		Core::Array<Change> rebased = Rebase(doc, baseVersion, changes);
+		Core::String text;
+		Core::String error;
+		if (!ApplyChanges(doc->m_Text.View(), rebased, text, error)) throw RpcError(ErrorCode::BadRequest, error.View());
+		doc->m_Text = take(text);
+		doc->m_Version += 1;
+		VersionChanges* step = new VersionChanges();
+		step->m_Version = doc->m_Version;
+		step->m_Changes = rebased;
+		doc->m_History.Push(step);
+		while (doc->m_History.Count() > c_DocumentHistoryVersions) doc->m_History.Pop();
+		if (origin == "disk") doc->m_Saved = doc->m_Text;
+		doc->m_Dirty = doc->m_Text.View() != doc->m_Saved.View();
+		Core::String changesJson = ChangesJson(rebased);
+		const bool wasRebased = baseVersion != doc->m_Version - 1;
+		JsonWriter event;
+		event.BeginObject();
+		event.Field("docId", doc->m_DocId.View());
+		event.IntField("version", doc->m_Version);
+		event.RawField("changes", changesJson.View());
+		event.Field("origin", origin);
+		event.BoolField("dirty", doc->m_Dirty);
+		if (wasRebased) event.IntField("rebasedFrom", baseVersion);
+		if (!opId.IsEmpty()) event.Field("opId", opId);
+		event.EndObject();
+		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.edit", event.View());
+		m_Server->m_Lsp->DocumentChanged(doc);
+		JsonWriter result;
+		result.BeginObject();
+		result.IntField("version", doc->m_Version);
+		result.RawField("changes", changesJson.View());
+		result.BoolField("rebased", wasRebased);
+		result.EndObject();
+		return result.ToString();
+	}
+
+	static Core::String PathKey(const Workspace* ws, Core::StringView path) { return (ws->m_WsId + "/") + path; }
+
+	bool Documents::IsOpen(Workspace* ws, Core::StringView path) const { return m_ByPath.Contains(PathKey(ws, path)); }
+
+	Core::Array<Core::String> Documents::OpenPaths(Workspace* ws) const {
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, Document*>& entry : m_ByPath)
+			if (entry.value->m_Ws == ws) paths.Push(entry.value->m_Path);
+		return paths;
+	}
+
+	void Documents::Renamed(Workspace* ws, Core::StringView from, Core::StringView to) {
+		Document* doc = nullptr;
+		if (!m_ByPath.TryGet(PathKey(ws, from), doc)) return;
+		m_ByPath.Remove(PathKey(ws, from));
+		doc->m_Path = Core::String(to);
+		m_ByPath.Insert(PathKey(ws, to), doc);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->m_DocId.View());
+		data.Field("path", to);
+		data.EndObject();
+		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.renamed", data.View());
+		m_Server->m_Lsp->DocumentRenamed(doc, from);
+	}
+
+	void Documents::LanguagesChanged(Workspace* ws) {
+		for (const Core::KeyValue<Core::String, Document*>& entry : m_ById) {
+			Document* doc = entry.value;
+			if (doc->m_Ws != ws) continue;
+			Core::String languageId = m_Server->m_Plugins->LanguageOf(ws, doc->m_Path.View());
+			if (languageId.View() == doc->m_LanguageId.View()) continue;
+			doc->m_LanguageId = languageId;
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("docId", doc->m_DocId.View());
+			data.Field("languageId", languageId.View());
+			data.EndObject();
+			m_Server->m_Hub.Publish(doc->Topic().View(), "doc.language", data.View());
+		}
+	}
+
+	void Documents::OnDiskDeleted(Workspace* ws, Core::StringView path) {
+		Document* doc = nullptr;
+		if (!m_ByPath.TryGet(PathKey(ws, path), doc)) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->m_DocId.View());
+		data.IntField("revision", 0);
+		data.EndObject();
+		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.diskChanged", data.View());
+	}
+
+	void Documents::OnDiskWrite(Workspace* ws, Core::StringView path, Core::StringView text, int64 revision) {
+		Document* doc = nullptr;
+		if (!m_ByPath.TryGet((ws->m_WsId + "/") + path, doc) || doc->m_Text.View() == text) return;
+		if (doc->m_Dirty) {
+			doc->m_Saved = Core::String(text);
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("docId", doc->m_DocId.View());
+			data.IntField("revision", revision);
+			data.EndObject();
+			m_Server->m_Hub.Publish(doc->Topic().View(), "doc.diskChanged", data.View());
+			return;
+		}
+		Change all;
+		all.m_End = EndPosition(doc->m_Text.View());
+		all.m_Text = Core::String(text);
+		Core::Array<Change> changes;
+		changes.Push(all);
+		ApplyEdit(doc, doc->m_Version, changes, Core::StringView("disk"), Core::StringView(""));
+	}
+
+	void Documents::Grant(Document* doc, Core::StringView clientId) {
+		doc->m_Holder = Core::String(clientId);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->m_DocId.View());
+		data.Field("holder", clientId);
+		data.EndObject();
+		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.lease", data.View());
+	}
+
+	Core::String Documents::OpenMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, NormalizePath(params.Str("path").View()).View());
+		if (doc->m_Holder.IsEmpty() && !doc->m_External) Grant(doc, call.ClientId());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("docId", doc->m_DocId.View());
+		json.Field("path", doc->m_Path.View());
+		json.IntField("version", doc->m_Version);
+		json.Key(Core::StringView("holder"));
+		if (doc->m_Holder.IsEmpty()) json.Null();
+		else json.String(doc->m_Holder.View());
+		json.BoolField("readOnly", doc->m_External);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// A file outside the workspace is only shown (docs/10): no lease, no edit, no save.
+	static void RefuseExternal(const Document* doc) {
+		if (!doc->m_External) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("reason", "read_only");
+		data.EndObject();
+		throw RpcError(ErrorCode::Forbidden, "the file is outside the workspace and read-only", data.View());
+	}
+
+	Core::String Documents::EditMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
+		if (doc->m_Holder.View() != call.ClientId()) {
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("reason", "lease");
+			data.Key(Core::StringView("holder"));
+			if (doc->m_Holder.IsEmpty()) data.Null();
+			else data.String(doc->m_Holder.View());
+			data.EndObject();
+			throw RpcError(ErrorCode::Forbidden, "only the lease holder may edit", data.View());
+		}
+		Core::Array<Change> changes = ChangesParam(params);
+		Core::String origin = Core::String("user:") + call.ClientId();
+		return ApplyEdit(doc, params.Int("baseVersion"), changes, origin.View(), call.m_OpId.View());
+	}
+
+	Core::String Documents::TakeLeaseMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
+		if (doc->m_Holder.View() != call.ClientId()) Grant(doc, call.ClientId());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("holder", doc->m_Holder.View());
+		json.IntField("version", doc->m_Version);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	int64 Documents::Save(Document* doc) {
+		const int64 revision = m_Server->m_Workspaces->Write(doc->m_Ws, doc->m_Path.View(), doc->m_Text.View(), -1);
+		doc->m_Saved = doc->m_Text;
+		doc->m_Dirty = false;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->m_DocId.View());
+		data.IntField("version", doc->m_Version);
+		data.IntField("revision", revision);
+		data.EndObject();
+		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.saved", data.View());
+		m_Server->m_Lsp->DocumentSaved(doc);
+		return revision;
+	}
+
+	int64 Documents::SaveAll(Workspace* ws) {
+		Core::Array<Document*> dirty;
+		for (const Core::KeyValue<Core::String, Document*>& entry : m_ByPath)
+			if (entry.value->m_Ws == ws && entry.value->m_Dirty && !entry.value->m_External) dirty.Push(entry.value);
+		for (Document* doc : dirty) Save(doc);
+		return dirty.Count();
+	}
+
+	Core::String Documents::SaveMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
+		const int64 revision = Save(doc);
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", doc->m_Version);
+		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Documents::BaselineMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", doc->m_Version);
+		json.Field("opened", doc->m_Opened.View());
+		json.Field("saved", doc->m_Saved.View());
+		json.EndObject();
+		return json.ToString();
+	}
+}

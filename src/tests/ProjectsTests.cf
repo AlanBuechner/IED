@@ -1,0 +1,73 @@
+// projects: what can name a new project, ${name} filled in a template's paths and text, and the solution and project
+// files IED writes and edits for a solution written by hand.
+
+include "projects/Templates.ch"
+include "projects/SolutionFile.ch"
+
+static Core::StringView ProjectView(const char* text) { return Core::StringView(text); }
+
+[test("server.projects")]
+class ProjectsTests {
+	[test("names")]
+	public static void TestNames() {
+		assert_true(Ied::IsProjectName(Core::StringView("Game")) && Ied::IsProjectName(Core::StringView("my_game-2.0")) && Ied::IsProjectName(Core::StringView("_tool")), "letters, digits, '_', '.', '-'");
+		assert_true(!Ied::IsProjectName(Core::StringView("")), "none");
+		assert_true(!Ied::IsProjectName(Core::StringView("bad name")), "a space");
+		assert_true(!Ied::IsProjectName(Core::StringView("-dash")) && !Ied::IsProjectName(Core::StringView(".hidden")), "not first");
+		assert_true(!Ied::IsProjectName(Core::StringView("a/b")) && !Ied::IsProjectName(Core::StringView("..")), "no folders");
+		Core::StringBuilder long;
+		for (int64 i = 0; i < 65; ++i) long.Append("a");
+		assert_true(!Ied::IsProjectName(long.View()), "64 at most");
+	}
+
+	[test("with_name")]
+	public static void TestWithName() {
+		assert_se("src/Game.h", Ied::WithName(Core::StringView("src/${name}.h"), Core::StringView("Game")).CStr(), "a path");
+		assert_se("Game says hi to Game", Ied::WithName(Core::StringView("${name} says hi to ${name}"), Core::StringView("Game")).CStr(), "every one");
+		assert_se("${other} stays", Ied::WithName(Core::StringView("${other} stays"), Core::StringView("Game")).CStr(), "only ${name}");
+		assert_se("", Ied::WithName(Core::StringView(""), Core::StringView("Game")).CStr(), "nothing");
+	}
+
+	[test("new_files")]
+	public static void TestNewFiles() {
+		Core::Array<Core::String> presets;
+		presets.Push(Core::String("go"));
+		assert_se("{\n\t\"version\": 1,\n\t\"name\": \"Tool\",\n\t\"root\": \".\",\n\t\"kind\": \"executable\",\n\t\"language\": \"go\",\n\t\"presets\": [\"go\"]\n}\n",
+			Ied::NewProjectFileText(ProjectView("Tool"), ProjectView("."), ProjectView("executable"), ProjectView("go"), presets).CStr(), "a project file");
+		assert_se("{\n\t\"version\": 1,\n\t\"name\": \"Doc\",\n\t\"root\": \".\",\n\t\"kind\": \"other\"\n}\n",
+			Ied::NewProjectFileText(ProjectView("Doc"), ProjectView("."), ProjectView("other"), ProjectView(""), Core::Array<Core::String>()).CStr(), "without a language or presets");
+		Core::Array<Core::String> files;
+		files.Push(Core::String("Tool.iedproj"));
+		assert_se("{\n\t\"version\": 1,\n\t\"name\": \"Tool\",\n\t\"projects\": [\n\t\t{\"file\": \"Tool.iedproj\"}\n\t]\n}\n", Ied::NewSolutionFileText(ProjectView("Tool"), files).CStr(), "a solution file");
+	}
+
+	[test("listing")]
+	public static void TestListing() {
+		Core::StringView text = ProjectView("{\n\t// mine\n\t\"version\": 1,\n\t\"name\": \"G\",\n\t\"projects\": [{\"file\": \"Game.iedproj\"}, {\"file\": \"ide/*.iedproj\"}],\n\t\"groups\": [{\"name\": \"Tools\", \"projects\": [\"Packer\", \"Other\"]}]\n}\n");
+		Core::String edited;
+		Core::String error;
+		assert_true(Ied::ListProjectFile(text, ProjectView("tools/Packer/Packer.iedproj"), edited, error), error.CStr());
+		assert_true(edited.View().IndexOf(ProjectView("// mine")) >= 0, "the comments stay");
+		assert_true(Ied::ListsProjectFile(edited.View(), ProjectView("tools/Packer/Packer.iedproj")), "listed");
+		assert_true(Ied::ListsProjectFile(text, ProjectView("ide/Engine.iedproj")) && !Ied::ListsProjectFile(text, ProjectView("ide/sub/Engine.iedproj")), "a glob lists what it matches");
+		assert_true(Ied::ListsProjectFile(text, ProjectView("game.IEDPROJ")), "paths compare as Windows compares them");
+		Core::String moved;
+		assert_true(Ied::RelistProjectFile(edited.View(), ProjectView("tools/Packer/Packer.iedproj"), ProjectView("libs/Packer/Packer.iedproj"), moved, error), error.CStr());
+		assert_true(Ied::ListsProjectFile(moved.View(), ProjectView("libs/Packer/Packer.iedproj")) && !Ied::ListsProjectFile(moved.View(), ProjectView("tools/Packer/Packer.iedproj")), "relisted where it went");
+		Core::String removed;
+		assert_true(Ied::UnlistProject(moved.View(), ProjectView("libs/Packer/Packer.iedproj"), ProjectView("Packer"), removed, error), error.CStr());
+		assert_true(!Ied::ListsProjectFile(removed.View(), ProjectView("libs/Packer/Packer.iedproj")), "unlisted");
+		assert_true(removed.View().IndexOf(ProjectView("\"Packer\"")) < 0 && removed.View().IndexOf(ProjectView("\"Other\"")) >= 0, "and out of its group, the group's others kept");
+		assert_true(removed.View().IndexOf(ProjectView("// mine")) >= 0, "the comments still stay");
+		assert_true(!Ied::ListProjectFile(ProjectView("not json"), ProjectView("a.iedproj"), edited, error) && error.View().IndexOf(ProjectView("not JSON")) >= 0, "a broken file is said so");
+	}
+
+	[test("path_between")]
+	public static void TestPathBetween() {
+		assert_se("../libs/Engine", Ied::PathBetween(ProjectView("ide"), ProjectView("libs/Engine")).CStr(), "up and down");
+		assert_se("Engine", Ied::PathBetween(ProjectView(""), ProjectView("Engine")).CStr(), "from the root");
+		assert_se("../..", Ied::PathBetween(ProjectView("build/ied"), ProjectView("")).CStr(), "to the root");
+		assert_se(".", Ied::PathBetween(ProjectView("a/b"), ProjectView("A/B")).CStr(), "the same folder, as Windows compares names");
+		assert_se("../c", Ied::PathBetween(ProjectView("a/b"), ProjectView("a/c")).CStr(), "a sibling");
+	}
+}

@@ -1,0 +1,26 @@
+include "Reveal.ch"
+
+namespace Ied
+{
+	static Core::String Backslashes(Core::StringView path) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '/' ? '\\' : path.ByteAt(i));
+		return text.ToString();
+	}
+
+	// Explorer by its whole path: a name would be looked for in the current folder first, which may be a workspace's.
+	static Core::String ExplorerProgram() {
+		Core::String windows = Platform::GetEnvironmentVariable("SystemRoot");
+		return Backslashes((FS::Path(windows.IsEmpty() ? Core::StringView("C:\\Windows") : windows.View()) / "explorer.exe").View());
+	}
+
+	Process::StartInfo RevealCommand(const FS::Path& target, bool folder) {
+		Process::StartInfo info;
+		info.program = ExplorerProgram();
+		if (!folder) info.arguments.Push(Core::String("/select,"));
+		info.arguments.Push(Backslashes(target.View()));
+		// Explorer hands the window to the shell's own process and exits; the window must outlive this call.
+		info.killOnClose = false;
+		return info;
+	}
+}

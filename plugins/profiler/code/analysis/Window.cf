@@ -1,0 +1,250 @@
+// What happened in a stretch of time (T-PRF-17, T-PRF-18): a window's zones, lock waits and messages per thread in
+// time order, and what happened inside one zone on its thread - the allocations it made, the locks it waited for, what
+// it logged and the collections that stopped it.
+include "Investigate.ch"
+
+namespace Profiler
+{
+	const int32 c_InsideWaits = 5;
+	const int32 c_InsideMessages = 5;
+
+	struct WindowEntry
+	{
+		public int64 m_T;
+		public int32 m_Kind;                  // 0 zone, 1 lock wait, 2 message
+		public int64 m_Depth;
+		public int64 m_Index;                 // the zone's index at its depth, the lock's id or the message's index
+		public int64 m_Ns;
+	}
+
+	// The times of a thread's allocations in a range, sorted, so the allocations inside a zone are counted by search.
+	static void AllocationTimes(const Capture& capture, int64 track, Range range, Core::Array<int64>& out) {
+		for (const Allocation& allocation : capture.m_Allocations)
+			if ((int64)allocation.m_Track == track && range.Holds(allocation.m_T)) out.Push(allocation.m_T);
+		out.Sort();
+	}
+
+	static void ZoneEntries(const ThreadTrack* track, Range range, int32 depth, Core::Array<WindowEntry>& out) {
+		for (int64 d = 0; d < track->m_Levels.Count() && d <= (int64)depth; ++d) {
+			const ZoneLevel* level = track->m_Levels[d];
+			const int64 stop = level->FirstStartingAt(range.m_End);
+			for (int64 i = level->FirstEndingAfter(range.m_Begin); i < stop; ++i) {
+				WindowEntry entry;
+				entry.m_T = level->m_Starts[i];
+				entry.m_Kind = 0;
+				entry.m_Depth = d;
+				entry.m_Index = i;
+				out.Push(entry);
+			}
+		}
+	}
+
+	static void WaitEntries(const Capture& capture, int64 track, Range range, Core::Array<WindowEntry>& out) {
+		for (const LockInfo* lock : capture.m_LockList) {
+			LockTrack* holder = nullptr;
+			if (!lock->m_TrackOf.TryGet((int32)track, holder)) continue;
+			for (int64 i = FirstReleasedAfter(holder, range.m_Begin, capture.m_LastTicks); i < holder->m_Spans.Count(); ++i) {
+				const LockSpan& span = holder->m_Spans[i];
+				if (span.m_Wait >= range.m_End) break;
+				if (span.m_Obtain <= span.m_Wait || span.m_Obtain <= range.m_Begin) continue;
+				WindowEntry entry;
+				entry.m_T = span.m_Wait;
+				entry.m_Kind = 1;
+				entry.m_Index = (int64)lock->m_Id;
+				entry.m_Ns = span.m_Obtain - span.m_Wait;
+				out.Push(entry);
+			}
+		}
+	}
+
+	static void MessageEntries(const Capture& capture, int64 track, Range range, Core::Array<WindowEntry>& out) {
+		for (int64 i = 0; i < capture.m_Messages.Count(); ++i) {
+			const MessageRecord& message = capture.m_Messages[i];
+			if ((int64)message.m_Track != track || !range.Holds(message.m_T)) continue;
+			WindowEntry entry;
+			entry.m_T = message.m_T;
+			entry.m_Kind = 2;
+			entry.m_Index = i;
+			out.Push(entry);
+		}
+	}
+
+
+	static int64 CountBetween(const Core::Array<int64>& sorted, int64 begin, int64 end) {
+		return sorted.LowerBound(end) - sorted.LowerBound(begin);
+	}
+
+	static void WriteEntry(IED::JsonWriter& json, const Capture& capture, int64 t, const WindowEntry& entry, const Core::Array<int64>& allocs) {
+		const ThreadTrack* track = capture.m_Tracks[t];
+		json.BeginObject();
+		json.IntField("startNs", capture.m_Clock.Ns(entry.m_T));
+		if (entry.m_Kind == 0) {
+			const ZoneLevel* level = track->m_Levels[entry.m_Depth];
+			const int64 end = level->EndOr(entry.m_Index, capture.m_LastTicks);
+			json.Field("kind", "zone");
+			json.Field("name", capture.ZoneName(track, level, entry.m_Index));
+			json.Field("site", capture.SiteName((uint64)level->m_Sites[entry.m_Index]));
+			json.IntField("depth", entry.m_Depth);
+			json.IntField("durationNs", capture.m_Clock.Ns(end - entry.m_T));
+			json.Field("ref", ZoneRef::Of(t, entry.m_Depth, entry.m_Index).Text().View());
+			json.IntField("allocations", capture.m_Allocations.IsEmpty() ? ZoneCountsOf(track, level, entry.m_Index).m_Objects : CountBetween(allocs, entry.m_T, end));
+		}
+		else if (entry.m_Kind == 1) {
+			LockInfo* lock = nullptr;
+			capture.m_Locks.TryGet((uint64)entry.m_Index, lock);
+			json.Field("kind", "wait");
+			json.Field("lock", LockName(capture, lock).View());
+			json.IntField("durationNs", capture.m_Clock.Ns(entry.m_Ns));
+		}
+		else {
+			const MessageRecord& message = capture.m_Messages[entry.m_Index];
+			json.Field("kind", "message");
+			json.IntField("severity", message.m_Severity);
+			json.Field("text", capture.Text(message.m_TextStr));
+		}
+		json.EndObject();
+	}
+
+	Core::String Window(const Capture& capture, const WindowAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.m_FromNs, ask.m_ToNs);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("fromNs", capture.m_Clock.Ns(range.m_Begin));
+		json.IntField("toNs", capture.m_Clock.Ns(range.m_End > capture.m_LastTicks ? capture.m_LastTicks : range.m_End));
+		int64 written = 0;
+		int64 left = 0;
+		json.Key(Core::StringView("threads"));
+		json.BeginArray();
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.m_Tracks[t];
+			Core::String name = TrackLabel(capture, track, range.m_Begin);
+			if (!ContainsNoCase(name.View(), ask.m_Thread.View())) continue;
+			Core::Array<WindowEntry> entries;
+			ZoneEntries(track, range, ask.m_Depth, entries);
+			WaitEntries(capture, t, range, entries);
+			MessageEntries(capture, t, range, entries);
+			if (entries.IsEmpty()) continue;
+			entries.SortBy([](const WindowEntry& a, const WindowEntry& b) -> bool { return a.m_T != b.m_T ? a.m_T < b.m_T : a.m_Depth < b.m_Depth; });
+			Core::Array<int64> allocs;
+			AllocationTimes(capture, t, range, allocs);
+			json.BeginObject();
+			json.Field("name", name.View());
+			json.IntField("track", t);
+			json.Key(Core::StringView("entries"));
+			json.BeginArray();
+			for (const WindowEntry& entry : entries) {
+				if (written >= (int64)ask.m_Limit) {
+					left += 1;
+					continue;
+				}
+				WriteEntry(json, capture, t, entry, allocs);
+				written += 1;
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.IntField("left", left);
+		json.Key(Core::StringView("gc"));
+		json.BeginArray();
+		for (const GcRecord& gc : capture.m_Gcs) {
+			if (gc.m_End == c_Open || !range.Overlaps(gc.m_Begin, gc.m_End + 1)) continue;
+			json.BeginObject();
+			json.IntField("startNs", capture.m_Clock.Ns(gc.m_Begin));
+			json.IntField("pauseNs", capture.m_Clock.Ns(gc.m_End - gc.m_Begin));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Inside one zone ----------------------------------------------------------------------------------------------
+
+	// `all` its children's included, `own` without them; `freedInside` -1 when not known.
+	static void WriteAllocationsObject(IED::JsonWriter& json, const ZoneCounts& all, const ZoneCounts& own, int64 freedInside) {
+		json.Key(Core::StringView("allocations"));
+		json.BeginObject();
+		json.IntField("count", all.m_Objects);
+		json.IntField("bytes", all.m_Bytes);
+		json.IntField("nativeBytes", all.m_NativeBytes);
+		json.IntField("nativeFreed", all.m_NativeFreed);
+		json.IntField("selfCount", own.m_Objects);
+		json.IntField("selfBytes", own.m_Bytes);
+		json.IntField("selfNativeBytes", own.m_NativeBytes);
+		json.IntField("selfNativeFreed", own.m_NativeFreed);
+		json.IntField("freedInside", freedInside);
+		json.EndObject();
+	}
+
+	// Whether one of the zones of `children` (the level under the zone asked about) holds `t`.
+	static bool InChild(const ZoneLevel* children, int64 t) {
+		if (!children) return false;
+		const int64 j = children->FirstEndingAfter(t);
+		return j < children->Count() && children->m_Starts[j] <= t;
+	}
+
+	// The zone's allocations, its children's included, and its own: the events its thread made in it, else what it
+	// counted itself (what was freed in it is not known then, -1).
+	static void WriteInsideAllocations(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, Range span) {
+		const int32 track = (int32)ref.Track();
+		const ThreadTrack* thread = capture.m_Tracks[ref.Track()];
+		if (capture.m_Allocations.IsEmpty() && capture.m_ZoneAllocs > 0) {
+			WriteAllocationsObject(json, ZoneCountsOf(thread, thread->m_Levels[ref.Depth()], ref.Index()), ZoneOwnCounts(capture, ref), -1);
+			return;
+		}
+		const ZoneLevel* children = ref.Depth() + 1 < thread->m_Levels.Count() ? thread->m_Levels[ref.Depth() + 1] : nullptr;
+		ZoneCounts all;
+		ZoneCounts own;
+		int64 freedInside = 0;
+		for (const Allocation& allocation : capture.m_Allocations) {
+			if (allocation.m_Track != track || !span.Holds(allocation.m_T)) continue;
+			all.m_Objects += 1;
+			all.m_Bytes += allocation.m_Size;
+			if (!InChild(children, allocation.m_T)) {
+				own.m_Objects += 1;
+				own.m_Bytes += allocation.m_Size;
+			}
+			if (allocation.m_Freed != c_Open && allocation.m_Freed < span.m_End) freedInside += 1;
+		}
+		WriteAllocationsObject(json, all, own, freedInside);
+	}
+
+	void WriteInside(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, int64 begin, int64 end) {
+		const int32 track = (int32)ref.Track();
+		Range span;
+		span.m_Begin = begin;
+		span.m_End = end > begin ? end : begin + 1;
+		json.Key(Core::StringView("inside"));
+		json.BeginObject();
+		WriteInsideAllocations(json, capture, ref, span);
+		Core::Array<int64> noAllocations;
+		Core::Array<WindowEntry> waits;
+		WaitEntries(capture, (int64)track, span, waits);
+		waits.SortBy([](const WindowEntry& a, const WindowEntry& b) -> bool { return a.m_Ns > b.m_Ns; });
+		int64 waited = 0;
+		for (const WindowEntry& wait : waits) waited += wait.m_Ns;
+		json.IntField("waitNs", capture.m_Clock.Ns(waited));
+		json.Key(Core::StringView("waits"));
+		json.BeginArray();
+		for (int64 k = 0; k < waits.Count() && k < (int64)c_InsideWaits; ++k) WriteEntry(json, capture, (int64)track, waits[k], noAllocations);
+		json.EndArray();
+		Core::Array<WindowEntry> messages;
+		MessageEntries(capture, (int64)track, span, messages);
+		json.IntField("messageCount", messages.Count());
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		for (int64 k = 0; k < messages.Count() && k < (int64)c_InsideMessages; ++k) WriteEntry(json, capture, (int64)track, messages[k], noAllocations);
+		json.EndArray();
+		int64 gcPause = 0;
+		int64 gcCount = 0;
+		for (const GcRecord& gc : capture.m_Gcs) {
+			if (gc.m_End == c_Open || !span.Overlaps(gc.m_Begin, gc.m_End)) continue;
+			gcPause += gc.m_End - gc.m_Begin;
+			gcCount += 1;
+		}
+		json.IntField("gcCount", gcCount);
+		json.IntField("gcPauseNs", capture.m_Clock.Ns(gcPause));
+		json.EndObject();
+	}
+}

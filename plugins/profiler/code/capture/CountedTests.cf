@@ -1,0 +1,397 @@
+// Allocations a collected program counts instead of sending (ZoneAllocs, AllocCount) and its censuses of live objects
+// (HeapCensus): each zone's own allocations, per frame, inside a zone, in a slow frame's usual, and the types that keep
+// accumulating; with the collector's allocation samples beside the counts, the functions that allocated - checked on
+// a capture built event by event.
+
+include "analysis/Investigate.ch"
+include "Ingest.ch"
+include "proftools/ToolText.ch"
+
+// One thread (1 ns ticks) marks a frame every 100 ns from 0 to 500. Each frame: Frame 0..80 (its own 5 allocations)
+// with Spawn 10..20 (300 objects, 43200 bytes, and a 4 KiB array Frame gives back) and Cache 30..31 (one object, 4096
+// bytes, and 8 KiB of native memory its thread took). The process counts 316
+// allocations a frame at each mark (10 outside any zone) and plots its memory, 1 MB rising 100 KB a frame. Censuses at
+// 50, 150, 250, 350: Particle steady, CacheEntry growing 100 KB each time, Texture shrinking, Handle growing by 600
+// small objects (under 64 KiB in all) and Tiny by 100; each CacheEntry holds a 4 KiB buffer (native memory).
+static void WriteCounted(Profiler::WireWriter& w) {
+	w.BeginChunk(Profiler::c_GlobalChunk, 0, 0);
+	w.Type(Profiler::EventType::Hello);
+	w.Varint(1);
+	w.Text(Core::StringView("c4game"));
+	w.Varint(3);
+	w.Varint(1000000000);
+	w.Varint(0);
+	w.Varint(0);
+	w.Varint(0);
+	w.Text(Core::StringView(""));
+	const char*[7] names = { "", "Frame", "Spawn", "Cache", "Particle", "CacheEntry", "Texture" };
+	for (uint64 id = 1; id <= 6; ++id) {
+		w.Type(Profiler::EventType::StringDef);
+		w.Varint(id);
+		w.Text(Core::StringView(names[id]));
+		if (id > 3) continue;
+		w.Type(Profiler::EventType::SrcLocDef);
+		w.Varint(id);
+		w.Varint(id);
+		w.Varint(0);
+		w.Varint(0);
+		w.Varint(id * 10);
+		w.Varint(0);
+	}
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(7);
+	w.Text(Core::StringView("Process memory"));
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(8);
+	w.Text(Core::StringView("Handle"));
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(9);
+	w.Text(Core::StringView("Tiny"));
+	w.Type(Profiler::EventType::PlotDef);
+	w.Varint(1);
+	w.Varint(7);
+	w.Varint(1);
+	w.Varint(0);
+	w.EndChunk();
+	FramesCountingAllocations(w);
+	CountsAndCensuses(w);
+}
+
+static Profiler::Capture* Read(Profiler::WireWriter& w) {
+	Profiler::Capture* capture = new Profiler::Capture();
+	Profiler::ChunkStream stream;
+	stream.Feed(w.Bytes().Data(), w.Length());
+	const uint8* chunk;
+	int64 length;
+	while (stream.Next(chunk, length)) Profiler::ApplyChunk(*capture, chunk, length);
+	Profiler::Finish(*capture);
+	return capture;
+}
+
+static Profiler::Capture* CountedCapture() {
+	Profiler::WireWriter w;
+	WriteCounted(w);
+	return Read(w);
+}
+
+static void SampleStack(Profiler::WireWriter& w, uint64 id, uint64 address, uint64 name, uint64 file, uint64 line) {
+	w.Type(Profiler::EventType::CallstackDef);
+	w.Varint(id);
+	w.Varint(2);
+	w.Varint(address);
+	w.Varint(0x9000);
+	w.Type(Profiler::EventType::SymbolDef);
+	w.Varint(address);
+	w.Varint(name);
+	w.Varint(file);
+	w.Varint(line);
+}
+
+// The counted capture, and the collector's samples of the main thread's allocations (64 KiB each, in the global chunk
+// naming the thread): nine in Particles::Spawn (at 0x1000), one in Cache::Remember (at 0x3000).
+static Profiler::Capture* SampledCapture() {
+	Profiler::WireWriter w;
+	WriteCounted(w);
+	w.BeginChunk(Profiler::c_GlobalChunk, 0, 0);
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(20);
+	w.Text(Core::StringView("Particles::Spawn"));
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(21);
+	w.Text(Core::StringView("Cache::Remember"));
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(22);
+	w.Text(Core::StringView("src/main.cf"));
+	SampleStack(w, 1, 0x1000, 20, 22, 24);
+	SampleStack(w, 2, 0x3000, 21, 0, 0);
+	for (int64 i = 0; i < 10; ++i) {
+		w.Type(Profiler::EventType::Sample);
+		w.Time(i * 40 + 15);
+		w.Varint(1);
+		w.Varint(i < 9 ? 1 : 2);
+		w.Varint(2);
+		w.Varint(65536);
+	}
+	w.EndChunk();
+	return Read(w);
+}
+
+static void ZoneNative(Profiler::WireWriter& w, uint64 bytes) {
+	w.Type(Profiler::EventType::ZoneNative);
+	w.Varint(bytes);
+}
+
+static void ZoneNativeFreed(Profiler::WireWriter& w, uint64 bytes) {
+	w.Type(Profiler::EventType::ZoneNativeFreed);
+	w.Varint(bytes);
+}
+
+static void CountedZone(Profiler::WireWriter& w, uint64 site, int64 begin, int64 end, uint64 objects, uint64 bytes, uint64 native) {
+	w.Type(Profiler::EventType::ZoneBegin);
+	w.Time(begin);
+	w.Varint(site);
+	w.Type(Profiler::EventType::ZoneAllocs);
+	w.Varint(objects);
+	w.Varint(bytes);
+	if (native > 0) ZoneNative(w, native);
+	w.Type(Profiler::EventType::ZoneEnd);
+	w.Time(end);
+}
+
+static void FramesCountingAllocations(Profiler::WireWriter& w) {
+	w.BeginChunk(Profiler::c_ThreadChunk, 1, 0);
+	for (int64 f = 0; f <= 5; ++f) {
+		const int64 t = f * 100;
+		w.Type(Profiler::EventType::FrameMark);
+		w.Time(t);
+		w.Varint(0);
+		if (f == 5) break;
+		w.Type(Profiler::EventType::ZoneBegin);
+		w.Time(t);
+		w.Varint(1);
+		CountedZone(w, 2, t + 10, t + 20, 300, 43200, 4096);
+		CountedZone(w, 3, t + 30, t + 31, 1, 4096, 8192);
+		w.Type(Profiler::EventType::ZoneAllocs);
+		w.Varint(306);
+		w.Varint(43200 + 4096 + 500);
+		ZoneNative(w, 4096 + 8192);
+		ZoneNativeFreed(w, 4096);
+		w.Type(Profiler::EventType::ZoneEnd);
+		w.Time(t + 80);
+	}
+	w.EndChunk();
+}
+
+static void CensusLineNative(Profiler::WireWriter& w, uint64 name, uint64 objects, uint64 bytes, uint64 native) {
+	w.Type(Profiler::EventType::HeapCensusTypeNative);
+	w.Varint(name);
+	w.Varint(objects);
+	w.Varint(bytes);
+	w.Varint(native);
+}
+
+static void CensusLine(Profiler::WireWriter& w, uint64 name, uint64 objects, uint64 bytes) {
+	w.Type(Profiler::EventType::HeapCensusType);
+	w.Varint(name);
+	w.Varint(objects);
+	w.Varint(bytes);
+}
+
+static void CountsAndCensuses(Profiler::WireWriter& w) {
+	w.BeginChunk(Profiler::c_GlobalChunk, 0, 0);
+	for (int64 f = 0; f <= 5; ++f) {
+		w.Type(Profiler::EventType::AllocCount);
+		w.Time(f * 100);
+		w.Varint((uint64)(316 * f));
+		w.Varint((uint64)(48296 * f));
+		w.Type(Profiler::EventType::PlotValue);
+		w.Time(f * 100);
+		w.Varint(1);
+		w.Double((double)(1000000 + 100000 * f));
+		if (f == 4 || f == 5) continue;
+		w.Type(Profiler::EventType::HeapCensus);
+		w.Time(f * 100 + 50);
+		w.Varint(5);
+		CensusLine(w, 4, 300, 43200);
+		CensusLineNative(w, 5, (uint64)(100 * (f + 1)), (uint64)(100000 * (f + 1)), (uint64)(4096 * 100 * (f + 1)));
+		CensusLine(w, 6, (uint64)(10 - f), (uint64)(1000000 - f * 100000));
+		CensusLine(w, 8, (uint64)(600 * (f + 1)), (uint64)(9600 * (f + 1)));
+		CensusLine(w, 9, (uint64)(100 * (f + 1)), (uint64)(1600 * (f + 1)));
+	}
+	w.EndChunk();
+}
+
+static Serialization::DomNode Json(const Core::String& json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(json.View(), *doc).root;
+}
+
+[test("server.profiler.counted")]
+class ProfilerCountedTests {
+	[test("each_zone_its_own_allocations")]
+	public static void TestZones() {
+		Profiler::Capture* capture = CountedCapture();
+		assert_true(capture->m_ZoneAllocs == 15 && capture->m_AllocCounter.m_Times.Count() == 6 && capture->m_Censuses.Count() == 4, "read as sent");
+		Profiler::AllocAsk ask;
+		ask.m_GroupBy = Profiler::AllocGroup::Zone;
+		Serialization::DomNode a = Json(Profiler::Allocations(*capture, ask));
+		assert_true(a.Member("source").AsView() == "zones" && a.Member("count").AsInt() == 1580 && a.Member("inZones").AsInt() == 1530, "the process's count, and the zones' share of it");
+		Serialization::DomNode groups = a.Member("groups");
+		assert_true(groups.At(0).Member("label").AsView() == "Spawn" && groups.At(0).Member("count").AsInt() == 1500 && groups.At(0).Member("perFrame").AsFloat() == 300.0, "Spawn's 300 a frame");
+		assert_true(groups.At(1).Member("label").AsView() == "Frame" && groups.At(1).Member("count").AsInt() == 25, "Frame's own five, its children's left to them");
+		assert_true(groups.At(1).Member("nativeBytes").AsInt() == 0 && groups.At(2).Member("label").AsView() == "Cache" && groups.At(2).Member("nativeBytes").AsInt() == 5 * 8192 && groups.At(2).Member("nativeBytesPerFrame").AsInt() == 8192, "the native memory is Cache's, not Frame's");
+		assert_eq(5 * (4096 + 8192), a.Member("inZoneNativeBytes").AsInt(), "the zones' native memory in all");
+		assert_true(groups.At(1).Member("nativeFreed").AsInt() == 5 * 4096 && a.Member("inZoneNativeFreed").AsInt() == 5 * 4096, "Frame gave back what Spawn's array took");
+		assert_true(a.Member("frames").Member("medianCount").AsInt() == 316, "a frame's allocations from the process's count");
+		ask.m_GroupBy = Profiler::AllocGroup::Path;
+		assert_true(Json(Profiler::Allocations(*capture, ask)).Member("groups").At(0).Member("label").AsView() == "Frame > Spawn", "by path");
+		assert_true(Profiler::AllocationTotal(*capture) == 1580, "the total the summaries show");
+	}
+
+	[test("a_frame_and_a_zone_count_them_too")]
+	public static void TestFramesAndInside() {
+		Profiler::Capture* capture = CountedCapture();
+		Core::Array<int64> objects;
+		Core::Array<int64> bytes;
+		assert_true(Profiler::FrameAllocations(*capture, Profiler::MainFrameSet(*capture), objects, bytes) && objects[2] == 316 && bytes[2] == 48296, "each frame's from the count");
+		Profiler::ZoneRef ref;
+		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:0:1"), ref), "a ref");
+		Serialization::DomNode inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
+		assert_true(inside.Member("count").AsInt() == 306 && inside.Member("freedInside").AsInt() == -1, "a zone's own count, its children's included");
+		assert_true(inside.Member("selfCount").AsInt() == 5 && inside.Member("selfBytes").AsInt() == 500, "and its own, its children's left to them");
+		assert_true(inside.Member("nativeBytes").AsInt() == 4096 + 8192 && inside.Member("selfNativeBytes").AsInt() == 0, "the native memory taken in it, none by itself");
+		assert_true(inside.Member("nativeFreed").AsInt() == 4096 && inside.Member("selfNativeFreed").AsInt() == 4096, "and given back by itself");
+		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:1:0"), ref), "a child's ref");
+		inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
+		assert_true(inside.Member("count").AsInt() == 300 && inside.Member("selfCount").AsInt() == 300, "a zone with no children: all its own");
+	}
+
+	[test("growth_names_the_zones_that_took_native_memory")]
+	public static void TestNativeGrowth() {
+		Profiler::WireWriter w;
+		WriteCounted(w);
+		w.BeginChunk(Profiler::c_GlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::StringDef);
+		w.Varint(30);
+		w.Text(Core::StringView("Native memory"));
+		w.Type(Profiler::EventType::PlotDef);
+		w.Varint(2);
+		w.Varint(30);
+		w.Varint(1);
+		w.Varint(0);
+		for (int64 k = 0; k <= 50; ++k) {
+			w.Type(Profiler::EventType::PlotValue);
+			w.Time(k * 10);
+			w.Varint(2);
+			w.Double((double)(1000000 + 200000 * k));
+		}
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_eq(15, capture->m_ZoneAllocs, "a zone with both counts is counted once");
+		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
+		assert_true(text.View().Contains(Core::StringView("Native memory's floor rose")), "the native memory climbs");
+		assert_true(text.View().Contains(Core::StringView("Cache took 40.0 KiB of native memory (8.0 KiB a frame)")), "and the zone that took it is named");
+		assert_true(text.View().Contains(Core::StringView("CacheEntry: 100 -> 400 live objects")) && text.View().Contains(Core::StringView("of native memory, more after")), "the census names the type and the native memory it holds");
+	}
+
+	[test("the_memory_window_draws_the_memory_plots")]
+	public static void TestMemoryPlots() {
+		Profiler::Capture* capture = CountedCapture();
+		Serialization::DomNode m = Json(Profiler::Memory(*capture, -1, -1, 100));
+		assert_eq(0, m.Member("pools").Count(), "no pools: nothing was sent allocation by allocation");
+		Serialization::DomNode plots = m.Member("plots");
+		assert_eq(1, plots.Count(), "the one plot of bytes");
+		assert_true(plots.At(0).Member("name").AsView() == "Process memory" && plots.At(0).Member("now").AsInt() == 1500000 && plots.At(0).Member("peak").AsInt() == 1500000, "its last value and peak");
+		Serialization::DomNode usage = plots.At(0).Member("usage");
+		assert_true(usage.Count() == 6 && usage.At(0).At(1).AsInt() == 1000000 && usage.At(5).At(2).AsInt() == 1500000, "drawn like a pool's usage");
+	}
+
+	[test("types_that_keep_accumulating")]
+	public static void TestCensus() {
+		Profiler::Capture* capture = CountedCapture();
+		Serialization::DomNode c = Json(Profiler::CensusTrend(*capture, -1, -1, 10));
+		assert_true(c.Member("censuses").AsInt() == 4 && c.Member("typeCount").AsInt() == 5, "four censuses of five types");
+		Serialization::DomNode first = c.Member("types").At(0);
+		assert_true(first.Member("name").AsView() == "CacheEntry" && first.Member("accumulating").AsBool(), "CacheEntry grew the most and keeps accumulating");
+		assert_true(c.Member("native").AsBool() && first.Member("firstNativeBytes").AsInt() == 409600 && first.Member("lastNativeBytes").AsInt() == 4 * 409600, "and the native memory its objects hold");
+		assert_true(first.Member("rises").AsInt() == 3 && first.Member("lastObjects").AsInt() == 400, "more after each collection");
+		for (int64 i = 1; i < c.Member("types").Count(); ++i) {
+			Serialization::DomNode type = c.Member("types").At(i);
+			const bool handle = type.Member("name").AsView() == "Handle";
+			assert_true(type.Member("accumulating").AsBool() == handle, "Handle accumulates by its 1,800 more objects though they are under 64 KiB; Tiny's 300 and the others do not");
+		}
+		assert_true(Json(Profiler::CensusTrend(*capture, 100, 260, 10)).Member("censuses").AsInt() == 2, "the censuses in a range");
+	}
+
+	// Frames of 200 objects in Spawn, and a Release zone that only gives native memory back: the allocation finding
+	// names Spawn and leaves out a zone that allocated nothing.
+	[test("a_zone_that_only_gave_memory_back_is_no_allocator")]
+	public static void TestOnlyGaveBack() {
+		Profiler::WireWriter w;
+		w.BeginChunk(Profiler::c_GlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::Hello);
+		w.Varint(1);
+		w.Text(Core::StringView("c4game"));
+		w.Varint(3);
+		w.Varint(1000000000);
+		w.Varint(0);
+		w.Varint(0);
+		w.Varint(0);
+		w.Text(Core::StringView(""));
+		const char*[3] names = { "", "Spawn", "Release" };
+		for (uint64 id = 1; id <= 2; ++id) {
+			w.Type(Profiler::EventType::StringDef);
+			w.Varint(id);
+			w.Text(Core::StringView(names[id]));
+			w.Type(Profiler::EventType::SrcLocDef);
+			w.Varint(id);
+			w.Varint(id);
+			w.Varint(0);
+			w.Varint(0);
+			w.Varint(id * 10);
+			w.Varint(0);
+		}
+		w.EndChunk();
+		w.BeginChunk(Profiler::c_ThreadChunk, 1, 0);
+		for (int64 f = 0; f <= 5; ++f) {
+			w.Type(Profiler::EventType::FrameMark);
+			w.Time(f * 100);
+			w.Varint(0);
+			if (f == 5) break;
+			CountedZone(w, 1, f * 100 + 10, f * 100 + 20, 200, 4800, 0);
+			w.Type(Profiler::EventType::ZoneBegin);
+			w.Time(f * 100 + 30);
+			w.Varint(2);
+			ZoneNativeFreed(w, 4096);
+			w.Type(Profiler::EventType::ZoneEnd);
+			w.Time(f * 100 + 31);
+		}
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
+		assert_true(text.View().Contains(Core::StringView("Spawn: 200.0 a frame")), "Spawn is named as allocating every frame");
+		assert_true(!text.View().Contains(Core::StringView("Release:")), "Release, which only gave memory back, is not");
+	}
+
+	[test("a_source_under_the_workspace_is_named_relative_to_it")]
+	public static void TestSourceText() {
+		Profiler::Capture* capture = new Profiler::Capture();
+		capture->m_Strings.Insert(1, Core::String("C:\\Work\\Game\\src\\main.cf"));
+		capture->m_Strings.Insert(2, Core::String("D:\\Other\\lib.cf"));
+		capture->m_Strings.Insert(3, Core::String("main.cf"));
+		assert_true(capture->SourceText(1) == "C:\\Work\\Game\\src\\main.cf", "without a workspace, as the client named it");
+		capture->m_SourceRoot = Core::String("c:/work/game");
+		assert_true(capture->SourceText(1) == "src/main.cf", "under the workspace, relative to it whatever the case and slashes");
+		assert_true(capture->SourceText(2) == "D:\\Other\\lib.cf" && capture->SourceText(3) == "main.cf", "elsewhere, or already relative, as named");
+		assert_true(capture->SourceText(0).IsEmpty(), "no file, none");
+	}
+
+	[test("samples_beside_the_counts_name_the_functions")]
+	public static void TestSamples() {
+		Profiler::Capture* capture = SampledCapture();
+		Profiler::AllocAsk ask;
+		ask.m_GroupBy = Profiler::AllocGroup::Zone;
+		Serialization::DomNode zones = Json(Profiler::Allocations(*capture, ask));
+		assert_true(zones.Member("source").AsView() == "zones" && zones.Member("samples").AsInt() == 10, "by zone from the counts, saying samples are there");
+		ask.m_GroupBy = Profiler::AllocGroup::Function;
+		ask.m_ByBytes = true;
+		Serialization::DomNode functions = Json(Profiler::Allocations(*capture, ask));
+		assert_true(functions.Member("source").AsView() == "samples", "by function from the samples");
+		Serialization::DomNode first = functions.Member("groups").At(0);
+		assert_true(first.Member("label").AsView() == "Particles::Spawn" && first.Member("weight").AsInt() == 9 * 65536 && first.Member("share").AsFloat() == 0.9, "Spawn's nine samples, 90%");
+		ask.m_GroupBy = Profiler::AllocGroup::Callstack;
+		assert_true(Json(Profiler::Allocations(*capture, ask)).Member("groups").Count() == 2, "or by call stack");
+		ask.m_Source = Profiler::AllocSource::Zones;
+		assert_true(Json(Profiler::Allocations(*capture, ask)).Member("source").AsView() == "zones", "a source asked for is the one read");
+		int32 main;
+		assert_true(capture->m_TrackOf.TryGet(1, main) && capture->m_Samples[0].m_Track == main, "each sample the thread it names");
+		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
+		assert_true(text.View().Contains(Core::StringView("sampled: Particles::Spawn allocated 90.0% of the sampled bytes, at src/main.cf:24")), "the diagnosis names the function that allocated, and its line when the client knew it");
+		assert_true(text.View().Contains(Core::StringView("sampled: Cache::Remember allocated 10.0% of the sampled bytes\n")), "and none when it did not");
+		Core::String stacks = Profiler::AllocationsText(*capture, Json(Core::String("{\"group_by\":\"callstack\"}")));
+		assert_true(stacks.View().Contains(Core::StringView("    Particles::Spawn (src/main.cf:24)\n    (1 more frame, without a name)\n")), "a stack's unnamed tail is counted, not listed");
+		Profiler::AllocAsk none;
+		none.m_GroupBy = Profiler::AllocGroup::Function;
+		assert_true(Json(Profiler::Allocations(*CountedCapture(), none)).Member("source").AsView() == "zones", "without samples, by zone however asked");
+	}
+}

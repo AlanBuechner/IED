@@ -337,7 +337,7 @@ class DesktopTests(ServerTestCase):
 	def test_a_relaunch_the_server_asks_for_moves_the_app_and_its_server(self):
 		"""The server asks to be relaunched (developer mode's ied_relaunch, docs/28; testhooks.relaunch here): the app's
 		watch claims it and relaunches itself and the server as its own Relaunch does, so the server starts nothing of its
-		own (src/host/relaunch.ch). The first server is the check's, with test hooks, on the app's pipe."""
+		own (src/host/Relaunch.ch). The first server is the check's, with test hooks, on the app's pipe."""
 		server = IedServer(control=self.control)
 		self.addCleanup(server.stop)
 		self.assertTrue(server.started, server.error)

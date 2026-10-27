@@ -1,0 +1,60 @@
+// plugins/when: when-clauses as the server evaluates them - the same cases as frontend/tests/when.test.js.
+
+include "plugins/When.ch"
+
+static Ied::WhenValue Context(Core::StringView key) {
+	if (key == "workspaceTrusted") return Ied::WhenBool(true);
+	if (key == "deviceClass") return Ied::WhenText(Core::StringView("desktop"));
+	if (key == "resourceExtname") return Ied::WhenText(Core::StringView(".cf"));
+	if (key == "count") return Ied::WhenNumber(3);
+	if (key == "empty") return Ied::WhenText(Core::StringView(""));
+	if (key == "zero") return Ied::WhenNumber(0);
+	if (key == "config.c4.languageServer") return Ied::WhenFromJson(Core::StringView("true"));
+	return Ied::WhenNone();
+}
+
+static bool Holds(const char* clause) {
+	Core::String error;
+	const bool result = Ied::WhenHolds(Core::StringView(clause), Context, error);
+	return result && error.IsEmpty();
+}
+
+static bool Refused(const char* clause) {
+	Core::String error;
+	Ied::WhenHolds(Core::StringView(clause), Context, error);
+	return !error.IsEmpty();
+}
+
+[test("server.when")]
+class WhenTests {
+	[test("keys_and_logic")]
+	public static void TestKeysAndLogic() {
+		assert_true(Holds("") && Holds("   "), "an empty clause holds");
+		assert_true(Holds("workspaceTrusted") && !Holds("missing"), "bare keys");
+		assert_true(!Holds("empty") && !Holds("zero") && Holds("count"), "truthiness");
+		assert_true(Holds("config.c4.languageServer"), "a setting's JSON value");
+		assert_true(Holds("!missing") && Holds("!!workspaceTrusted"), "not");
+		assert_true(Holds("workspaceTrusted && count") && !Holds("workspaceTrusted && missing"), "and");
+		assert_true(Holds("missing || count"), "or");
+		assert_true(Holds("missing && missing || workspaceTrusted"), "&& binds tighter");
+		assert_true(!Holds("missing && (missing || workspaceTrusted)"), "parentheses");
+		assert_true(Holds("workspaceTrusted && config.c4.languageServer"), "the c4 profile's clause");
+	}
+
+	[test("comparisons")]
+	public static void TestComparisons() {
+		assert_true(Holds("resourceExtname == '.cf'") && Holds("resourceExtname == \".cf\"") && !Holds("resourceExtname == '.ch'"), "==");
+		assert_true(Holds("resourceExtname != '.ch'") && Holds("missing != 'x'") && !Holds("missing == ''"), "!= and missing keys");
+		assert_true(Holds("count == 3") && Holds("count == '3'") && Holds("workspaceTrusted == true"), "across kinds, as text");
+		assert_true(Holds("count > 2") && Holds("count >= 3") && Holds("count < 4") && Holds("count <= 3") && Holds("count > -1") && Holds("count < 3.5"), "ordering");
+		assert_true(Holds("resourceExtname =~ /^\\.c[fh]$/") && !Holds("resourceExtname =~ /^\\.h$/"), "regex");
+		assert_true(Holds("deviceClass =~ /DESK/i") && !Holds("missing =~ /./"), "flags; a missing key is empty text");
+	}
+
+	[test("refused")]
+	public static void TestRefused() {
+		assert_true(Refused("&&") && Refused("a &&") && Refused("(a") && Refused("a)") && Refused("a == "), "structure");
+		assert_true(Refused("'open") && Refused("a =~ b") && Refused("a =~ /open") && Refused("a @ b") && Refused("a b"), "tokens");
+		assert_true(Refused("a =~ /(/"), "a regex that does not compile");
+	}
+}

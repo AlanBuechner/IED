@@ -1,0 +1,154 @@
+include "Glob.ch"
+
+namespace Ied
+{
+	const int64 c_MostGlobFiles = 100000;
+
+	static int32 Folded(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool IsSeparator(int32 c) { return c == '/' || c == '\\'; }
+
+	static Core::Array<Core::StringView> Segments(Core::StringView text) {
+		Core::Array<Core::StringView> parts;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && !IsSeparator(text.ByteAt(i))) continue;
+			if (i > start) parts.Push(text.Substring(start, i - start));
+			start = i + 1;
+		}
+		return parts;
+	}
+
+	// One segment against a pattern with '*' and '?': the last '*' is where a mismatch backs up to.
+	static bool SegmentMatch(Core::StringView pattern, Core::StringView text) {
+		int64 p = 0;
+		int64 t = 0;
+		int64 star = -1;
+		int64 resume = 0;
+		while (t < text.ByteLength()) {
+			const int32 c = p < pattern.ByteLength() ? pattern.ByteAt(p) : -1;
+			if (c == '*') {
+				star = p;
+				resume = t;
+				p += 1;
+			}
+			else if (c == '?' || (c >= 0 && Folded(c) == Folded(text.ByteAt(t)))) {
+				p += 1;
+				t += 1;
+			}
+			else if (star >= 0) {
+				p = star + 1;
+				resume += 1;
+				t = resume;
+			}
+			else return false;
+		}
+		while (p < pattern.ByteLength() && pattern.ByteAt(p) == '*') p += 1;
+		return p == pattern.ByteLength();
+	}
+
+	static bool SegmentsMatch(const Core::Array<Core::StringView>& pattern, int64 i, const Core::Array<Core::StringView>& path, int64 j) {
+		if (i == pattern.Count()) return j == path.Count();
+		if (pattern[i] == "**") {
+			for (int64 k = j; k <= path.Count(); ++k)
+				if (SegmentsMatch(pattern, i + 1, path, k)) return true;
+			return false;
+		}
+		return j < path.Count() && SegmentMatch(pattern[i], path[j]) && SegmentsMatch(pattern, i + 1, path, j + 1);
+	}
+
+	// The first `{...}` set of `pattern` from `open`: where it closes, and the commas that part its alternatives (sets
+	// inside it are an alternative's own). False when it never closes.
+	static bool SetAt(Core::StringView pattern, int64 open, int64& close, Core::Array<int64>& commas) {
+		int64 depth = 0;
+		for (int64 i = open; i < pattern.ByteLength(); ++i) {
+			const int32 c = pattern.ByteAt(i);
+			if (c == '{') depth += 1;
+			else if (c == ',' && depth == 1) commas.Push(i);
+			else if (c == '}') {
+				depth -= 1;
+				if (depth > 0) continue;
+				close = i;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// `pattern` with its `{a,b}` sets written out, one pattern per alternative: "src/{a,b}/*.js" is "src/a/*.js" and
+	// "src/b/*.js". A '{' that never closes stays as it is.
+	static Core::Array<Core::String> Alternatives(Core::StringView pattern) {
+		Core::Array<Core::String> out;
+		const int64 open = pattern.IndexOf('{', 0);
+		int64 close = -1;
+		Core::Array<int64> commas;
+		if (open < 0 || !SetAt(pattern, open, close, commas)) {
+			out.Push(Core::String(pattern));
+			return out;
+		}
+		commas.Push(close);
+		Core::StringView head = pattern.Substring(0, open);
+		Core::StringView tail = pattern.Substring(close + 1, pattern.ByteLength() - close - 1);
+		int64 start = open + 1;
+		for (int64 end : commas) {
+			Core::StringBuilder one;
+			one.Append(head);
+			one.Append(pattern.Substring(start, end - start));
+			one.Append(tail);
+			Core::String written = one.ToString();
+			Core::Array<Core::String> expanded = Alternatives(written.View());
+			for (const Core::String& each : expanded) out.Push(each);
+			start = end + 1;
+		}
+		return out;
+	}
+
+	static bool HasSet(Core::StringView pattern) {
+		const int64 open = pattern.IndexOf('{', 0);
+		return open >= 0 && pattern.IndexOf('}', open) > open;
+	}
+
+	static bool OneMatch(Core::StringView pattern, Core::StringView path) { return SegmentsMatch(Segments(pattern), 0, Segments(path), 0); }
+
+	bool GlobMatch(Core::StringView pattern, Core::StringView path) {
+		if (!HasSet(pattern)) return OneMatch(pattern, path);
+		for (const Core::String& one : Alternatives(pattern))
+			if (OneMatch(one.View(), path)) return true;
+		return false;
+	}
+
+	bool IsGlob(Core::StringView pattern) { return pattern.IndexOf('*', 0) >= 0 || pattern.IndexOf('?', 0) >= 0 || HasSet(pattern); }
+
+	static void Walk(const FS::Path& folder, Core::StringView relative, Core::StringView pattern, Core::Array<Core::String>& found) {
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			if (found.Count() >= c_MostGlobFiles) return;
+			Core::String path = relative.IsEmpty() ? entry.name : (Core::String(relative) + "/") + entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory && entry.name.View() != ".git") Walk(folder / entry.name.View(), path.View(), pattern, found);
+			else if (entry.kind == FS::EntryKind::File && GlobMatch(pattern, path.View())) found.Push(path);
+		}
+	}
+
+	// Only the folder named by the pattern's leading plain segments is searched.
+	static void ExpandOne(const FS::Path& root, Core::StringView pattern, Core::Array<Core::String>& found) {
+		Core::Array<Core::StringView> parts = Segments(pattern);
+		Core::StringBuilder prefix;
+		for (int64 i = 0; i + 1 < parts.Count() && !IsGlob(parts[i]) && parts[i] != "**"; ++i) {
+			if (!prefix.IsEmpty()) prefix.AppendByte('/');
+			prefix.Append(parts[i]);
+		}
+		FS::Path start = prefix.IsEmpty() ? root : root / prefix.View();
+		if (FS::IsDirectory(start.CStr())) Walk(start, prefix.View(), pattern, found);
+	}
+
+	// Each `{a,b}` alternative is searched on its own; a file two of them find is listed once.
+	Core::Array<Core::String> ExpandGlob(const FS::Path& root, Core::StringView pattern) {
+		Core::Array<Core::String> found;
+		for (const Core::String& one : Alternatives(pattern)) ExpandOne(root, one.View(), found);
+		found.Sort();
+		Core::Array<Core::String> unique;
+		for (const Core::String& path : found)
+			if (unique.IsEmpty() || unique[unique.Count() - 1].View() != path.View()) unique.Push(path);
+		return unique;
+	}
+}

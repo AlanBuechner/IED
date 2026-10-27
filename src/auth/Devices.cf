@@ -1,0 +1,147 @@
+include "Devices.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	const int64 c_SecretBytes = 32;
+
+	Core::String NewSecret() {
+		uint8[32] bytes;
+		if (!Platform::RandomBytes((void*)&bytes[0], c_SecretBytes)) return Core::String();
+		Core::StringBuilder text;
+		for (int64 i = 0; i < c_SecretBytes; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	Core::String SecretDigest(Core::StringView secret) { return Crypto::Sha256((const void*)secret.Data(), secret.ByteLength()).ToHex(); }
+
+	const char* DeviceKindName(DeviceKind kind) { return kind == DeviceKind::Token ? "token" : "password"; }
+
+	Core::String Device::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Id.View());
+		json.Field("name", m_Name.View());
+		json.Field("kind", DeviceKindName(m_Kind));
+		json.IntField("created", m_CreatedMs);
+		json.IntField("lastSeen", m_LastSeenMs);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static bool ReadDevice(const Serialization::DomNode& node, int64 nowMs, Device& device) {
+		Serialization::DomNode kind = node.Member("kind");
+		if (node.Member("id").Kind() != Serialization::DomKind::String || node.Member("secretSha256").Kind() != Serialization::DomKind::String) return false;
+		if (node.Member("created").Kind() != Serialization::DomKind::Int || node.Member("lastSeen").Kind() != Serialization::DomKind::Int) return false;
+		device.m_Id = Core::String(node.Member("id").AsView());
+		device.m_Name = Core::String(node.Member("name").AsView());
+		device.m_Kind = kind.AsView() == "password" ? DeviceKind::Password : DeviceKind::Token;
+		device.m_CreatedMs = node.Member("created").AsInt();
+		device.m_LastSeenMs = node.Member("lastSeen").AsInt();
+		device.m_RefreshedMs = device.m_LastSeenMs;
+		device.m_SecretDigest = Core::String(node.Member("secretSha256").AsView());
+		return true;
+	}
+
+	bool DeviceStore::Load(Core::StringView file, int64 nowMs, Core::String& error) {
+		this.m_File = Core::String(file);
+		m_Devices.Clear();
+		if (!FS::FileExists(this.m_File.CStr())) return true;
+		FS::File opened = FS::File(this.m_File.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(text.View(), *doc);
+		Serialization::DomNode list = parsed.Ok() ? parsed.root.Member("devices") : Serialization::DomNode();
+		if (list.Kind() != Serialization::DomKind::Array) {
+			error = Core::String("auth/devices.json is not a devices file: ") + file;
+			return false;
+		}
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Device* device = new Device();
+			if (!ReadDevice(list.At(i), nowMs, *device)) {
+				error = Core::String("auth/devices.json has a malformed device: ") + file;
+				return false;
+			}
+			if (nowMs - device->m_LastSeenMs < c_DeviceLifetimeMs) m_Devices.Push(device);
+		}
+		return true;
+	}
+
+	static Core::String NewDeviceId() {
+		Core::String secret = NewSecret();
+		return secret.IsEmpty() ? secret : Core::String("dev-") + secret.View().Substring(0, 12);
+	}
+
+	Device* DeviceStore::Create(Core::StringView name, DeviceKind kind, int64 nowMs, Core::String& cookie) {
+		cookie = NewSecret();
+		Core::String id = NewDeviceId();
+		if (cookie.IsEmpty() || id.IsEmpty()) return nullptr;
+		Device* device = new Device();
+		device->m_Id = id;
+		device->m_Name = Core::String(name);
+		device->m_Kind = kind;
+		device->m_CreatedMs = nowMs;
+		device->m_LastSeenMs = nowMs;
+		device->m_RefreshedMs = nowMs;
+		device->m_SecretDigest = SecretDigest(cookie.View());
+		m_Devices.Push(device);
+		Save();
+		return device;
+	}
+
+	Device* DeviceStore::Find(Core::StringView cookie, int64 nowMs, bool& refresh) {
+		refresh = false;
+		if (cookie.ByteLength() != c_SecretBytes * 2) return nullptr;
+		Core::String digest = SecretDigest(cookie);
+		for (int64 i = 0; i < m_Devices.Count(); ++i) {
+			Device* device = m_Devices[i];
+			if (device->m_SecretDigest.View() != digest.View()) continue;
+			if (nowMs - device->m_LastSeenMs >= c_DeviceLifetimeMs) {
+				Remove(device);
+				return nullptr;
+			}
+			device->m_LastSeenMs = nowMs;
+			refresh = nowMs - device->m_RefreshedMs >= c_CookieRefreshMs;
+			if (refresh) {
+				device->m_RefreshedMs = nowMs;
+				Save();
+			}
+			return device;
+		}
+		return nullptr;
+	}
+
+	Device* DeviceStore::ById(Core::StringView id) const {
+		for (int64 i = 0; i < m_Devices.Count(); ++i)
+			if (m_Devices[i]->m_Id.View() == id) return m_Devices[i];
+		return nullptr;
+	}
+
+	void DeviceStore::Remove(Device* device) {
+		for (int64 i = 0; i < m_Devices.Count(); ++i)
+			if (m_Devices[i] == device) { m_Devices.RemoveAt(i); break; }
+		Save();
+	}
+
+	bool DeviceStore::Save() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("devices"));
+		json.BeginArray();
+		for (int64 i = 0; i < m_Devices.Count(); ++i) {
+			const Device* device = m_Devices[i];
+			json.BeginObject();
+			json.Field("id", device->m_Id.View());
+			json.Field("name", device->m_Name.View());
+			json.Field("kind", DeviceKindName(device->m_Kind));
+			json.IntField("created", device->m_CreatedMs);
+			json.IntField("lastSeen", device->m_LastSeenMs);
+			json.Field("secretSha256", device->m_SecretDigest.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return FS::WriteFileAtomically(m_File.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+}

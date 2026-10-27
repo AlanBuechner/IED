@@ -1,0 +1,239 @@
+// The WebView2 side of a window (docs/27 "The page and its keys"): its controller and settings, where navigations
+// go, the page's messages, permissions, and recovering from a crashed renderer.
+
+include "Window.ch"
+include "App.ch"
+
+namespace Desktop
+{
+	void Window::Attach(ICoreWebView2Environment* environment) {
+		Window* self = this;
+		Callback* ready = m_Callbacks.Add(__uuidof(ICoreWebView2CreateCoreWebView2ControllerCompletedHandler),
+			[self](void* error, void* created) -> int32 {
+				self->ControllerReady(Hresult(error), created);
+				return c_Ok;
+			});
+		const int32 started = environment->CreateCoreWebView2Controller(m_Hwnd, (void*)ready);
+		if (started != c_Ok) m_App->Report(Core::StringView("the WebView2 control could not be created"), started);
+	}
+
+	void Window::ControllerReady(int32 error, void* created) {
+		if (error != c_Ok || created == null) {
+			m_App->Report(Core::StringView("the WebView2 control could not be created"), error);
+			return;
+		}
+		if (m_Hwnd == null) return;
+		m_Controller = (ICoreWebView2Controller*)created;
+		m_Controller->AddRef();
+		void* view = null;
+		m_Controller->get_CoreWebView2(&view);
+		m_Webview = (ICoreWebView2*)view;
+		Configure();
+		Listen();
+		Fit();
+		ShowPending();
+	}
+
+	void Window::Configure() {
+		void* found = null;
+		ICoreWebView2Settings* settings = null;
+		m_Webview->get_Settings((void**)&settings);
+		settings->put_IsStatusBarEnabled(0);
+		settings->put_IsZoomControlEnabled(0);
+		settings->put_AreDevToolsEnabled(1);
+		settings->put_AreDefaultContextMenusEnabled(1);
+		if (settings->QueryInterface(__uuidof(ICoreWebView2Settings3), &found) == c_Ok) {
+			ICoreWebView2Settings3* keys = (ICoreWebView2Settings3*)found;
+			keys->put_AreBrowserAcceleratorKeysEnabled(0);
+			keys->Release();
+		}
+		found = null;
+		if (m_Controller->QueryInterface(__uuidof(ICoreWebView2Controller2), &found) == c_Ok) {
+			ICoreWebView2Controller2* colored = (ICoreWebView2Controller2*)found;
+			COREWEBVIEW2_COLOR background;
+			background.A = 255;
+			background.R = 14;
+			background.G = 14;
+			background.B = 14;
+			colored->put_DefaultBackgroundColor(background);
+			colored->Release();
+		}
+		Core::Array<char16> script = Wide(BridgeScript(Core::StringView(c_DesktopVersion)).View());
+		m_Webview->AddScriptToExecuteOnDocumentCreated(script.Data(), null);
+	}
+
+	void Window::Listen() {
+		Window* self = this;
+		EventRegistrationToken token;
+		m_Webview->add_DocumentTitleChanged((void*)m_Callbacks.Add(__uuidof(ICoreWebView2DocumentTitleChangedEventHandler),
+			[self](void* sender, void* args) -> int32 { self->TitleChanged(); return c_Ok; }), &token);
+		m_Webview->add_NavigationStarting((void*)m_Callbacks.Add(__uuidof(ICoreWebView2NavigationStartingEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->NavigationStarting((ICoreWebView2NavigationStartingEventArgs*)args); }), &token);
+		m_Webview->add_NavigationCompleted((void*)m_Callbacks.Add(__uuidof(ICoreWebView2NavigationCompletedEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->NavigationCompleted((ICoreWebView2NavigationCompletedEventArgs*)args); }), &token);
+		m_Webview->add_NewWindowRequested((void*)m_Callbacks.Add(__uuidof(ICoreWebView2NewWindowRequestedEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->NewWindowRequested((ICoreWebView2NewWindowRequestedEventArgs*)args); }), &token);
+		m_Webview->add_WebMessageReceived((void*)m_Callbacks.Add(__uuidof(ICoreWebView2WebMessageReceivedEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->MessageReceived((ICoreWebView2WebMessageReceivedEventArgs*)args); }), &token);
+		m_Webview->add_PermissionRequested((void*)m_Callbacks.Add(__uuidof(ICoreWebView2PermissionRequestedEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->PermissionRequested((ICoreWebView2PermissionRequestedEventArgs*)args); }), &token);
+		m_Webview->add_ProcessFailed((void*)m_Callbacks.Add(__uuidof(ICoreWebView2ProcessFailedEventHandler),
+			[self](void* sender, void* args) -> int32 { return self->ProcessFailed((ICoreWebView2ProcessFailedEventArgs*)args); }), &token);
+	}
+
+	void Window::Fit() {
+		if (m_Controller == null || m_Hwnd == null) return;
+		tagRECT bounds;
+		GetClientRect(m_Hwnd, &bounds);
+		m_Controller->put_Bounds(bounds);
+	}
+
+	void Window::Show(Core::StringView url) {
+		m_Origin = OriginOf(url);
+		m_PendingUrl = Core::String(url);
+		m_PendingHtml = Core::String();
+		ShowPending();
+	}
+
+	void Window::ShowStatus(Core::StringView title, Core::StringView detail) {
+		m_PendingUrl = Core::String();
+		m_PendingHtml = StatusPage(title, detail, true);
+		ShowPending();
+	}
+
+	void Window::ShowPending() {
+		if (m_Webview == null) return;
+		if (!m_PendingUrl.IsEmpty()) {
+			Core::Array<char16> url = Wide(m_PendingUrl.View());
+			m_PendingUrl = Core::String();
+			m_ShowingStatus = false;
+			m_Webview->Navigate(url.Data());
+		}
+		else if (!m_PendingHtml.IsEmpty()) {
+			Core::Array<char16> html = Wide(m_PendingHtml.View());
+			m_PendingHtml = Core::String();
+			m_ShowingStatus = true;
+			m_Webview->NavigateToString(html.Data());
+		}
+	}
+
+	Core::String Window::CurrentUrl() const {
+		if (!m_PageUrl.IsEmpty()) return m_PageUrl;
+		if (m_Webview == null) return Core::String();
+		char16* raw = null;
+		m_Webview->get_Source(&raw);
+		return TakeWide(raw);
+	}
+
+	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
+		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !m_ShowingStatus && OriginOf(url).View() == m_Origin.View()) return;
+		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : Core::String(url);
+		if (!url.IsEmpty()) Show(shown.View());
+		else if (arrival == Arrival::Folder) Alert((Core::String("IED could not open the folder: ") + error).View());
+		else ShowStatus(Core::StringView("IED could not start its server"), error);
+	}
+
+	void Window::TitleChanged() {
+		char16* title = null;
+		m_Webview->get_DocumentTitle(&title);
+		Core::String text = TakeWide(title);
+		// The app's own pages are titled "IED"; the web client names its workspace.
+		Core::Array<char16> shown = Wide(text.IsEmpty() ? Core::StringView("IED") : text.View());
+		SetWindowTextW(m_Hwnd, shown.Data());
+	}
+
+	int32 Window::NavigationStarting(ICoreWebView2NavigationStartingEventArgs* args) {
+		char16* raw = null;
+		args->get_Uri(&raw);
+		Core::String url = TakeWide(raw);
+		Destination where = NavigationTarget(url.View(), m_Origin.View());
+		if (where == Destination::Here) return c_Ok;
+		args->put_Cancel(1);
+		if (where == Destination::External) Launch::OpenExternal(url.View());
+		return c_Ok;
+	}
+
+	// A page of the server that cannot be reached: the server went away between asking for the URL and loading it.
+	int32 Window::NavigationCompleted(ICoreWebView2NavigationCompletedEventArgs* args) {
+		int32 succeeded = 0;
+		args->get_IsSuccess(&succeeded);
+		if (succeeded != 0 || m_ShowingStatus) return c_Ok;
+		COREWEBVIEW2_WEB_ERROR_STATUS status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+		args->get_WebErrorStatus(&status);
+		if (status == COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT || status == COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE ||
+			status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_RESET || status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED ||
+			status == COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED)
+			ShowStatus(Core::StringView("IED could not reach its server"), Core::StringView("The page did not load. Retry starts the server again if it is not running."));
+		return c_Ok;
+	}
+
+	int32 Window::NewWindowRequested(ICoreWebView2NewWindowRequestedEventArgs* args) {
+		char16* raw = null;
+		args->get_Uri(&raw);
+		Core::String url = TakeWide(raw);
+		args->put_Handled(1);
+		Destination where = NewWindowTarget(url.View(), m_Origin.View());
+		if (where == Destination::NewWindow) m_App->OpenUrl(url.View());
+		else if (where == Destination::External) Launch::OpenExternal(url.View());
+		return c_Ok;
+	}
+
+	int32 Window::MessageReceived(ICoreWebView2WebMessageReceivedEventArgs* args) {
+		char16* rawSource = null;
+		args->get_Source(&rawSource);
+		Core::String source = TakeWide(rawSource);
+		char16* rawText = null;
+		if (args->TryGetWebMessageAsString(&rawText) != c_Ok) return c_Ok;
+		Core::String text = TakeWide(rawText);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(text.View(), *doc);
+		if (!parsed.Ok()) return c_Ok;
+		Core::StringView type = parsed.root.Member("type").AsView();
+		// The app's own status page may only ask to retry; everything else must come from the server's pages.
+		if (type == "retry") {
+			m_App->Retry();
+			return c_Ok;
+		}
+		if (NavigationTarget(source.View(), m_Origin.View()) != Destination::Here || OriginOf(source.View()).IsEmpty()) return c_Ok;
+		if (type == "devTools") m_Webview->OpenDevToolsWindow();
+		// The picker is modal: it runs from the window's own message, not inside WebView2's event.
+		else if (type == "openFolder") PostMessageW(m_Hwnd, c_OpenFolderMessage, 0, 0);
+		else if (type == "openInWeb") m_App->OpenInWeb(parsed.root.Member("path").AsView());
+		else if (type == "location") m_PageUrl = Core::String(parsed.root.Member("url").AsView());
+		else if (type == "relaunch") PostMessageW(m_Hwnd, c_RelaunchMessage, 0, 0);
+		else if (type == "focus") PostMessageW(m_Hwnd, c_FocusMessage, 0, 0);
+		else if (type == "openExternal") Launch::OpenExternal(parsed.root.Member("url").AsView());
+		else if (type == "newWindow") {
+			Core::StringView url = parsed.root.Member("url").AsView();
+			if (url.IsEmpty()) m_App->OpenHome();
+			else if (NewWindowTarget(url, m_Origin.View()) == Destination::NewWindow) m_App->OpenUrl(url);
+		}
+		return c_Ok;
+	}
+
+	// The server's pages may read the clipboard (paste in the terminal) and show notifications.
+	int32 Window::PermissionRequested(ICoreWebView2PermissionRequestedEventArgs* args) {
+		char16* raw = null;
+		args->get_Uri(&raw);
+		Core::String url = TakeWide(raw);
+		COREWEBVIEW2_PERMISSION_KIND kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+		args->get_PermissionKind(&kind);
+		const bool ours = !OriginOf(url.View()).IsEmpty() && NavigationTarget(url.View(), m_Origin.View()) == Destination::Here;
+		if (ours && (kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ || kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS))
+			args->put_State(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+		return c_Ok;
+	}
+
+	int32 Window::ProcessFailed(ICoreWebView2ProcessFailedEventArgs* args) {
+		COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+		args->get_ProcessFailedKind(&kind);
+		if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED) {
+			m_Controller = null;
+			m_Webview = null;
+			m_App->BrowserExited();
+		}
+		else if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE)
+			m_Webview->Reload();
+		return c_Ok;
+	}
+}

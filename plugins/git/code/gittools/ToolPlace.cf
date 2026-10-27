@@ -1,0 +1,64 @@
+include "ToolPlace.ch"
+include "api/Workspace.ch"
+
+namespace Git
+{
+	// `path` with `folder` and the '/' after it taken off its start; false when it does not start so.
+	static bool Under(Core::StringView path, Core::StringView folder, Core::String& rest) {
+		if (path == folder) {
+			rest = Core::String("");
+			return true;
+		}
+		if (path.ByteLength() <= folder.ByteLength() || !path.StartsWith(folder) || path.ByteAt(folder.ByteLength()) != '/') return false;
+		rest = Core::String(path.Substring(folder.ByteLength() + 1, path.ByteLength() - folder.ByteLength() - 1));
+		return true;
+	}
+
+	static Core::String Joined(Core::StringView folder, Core::StringView path) {
+		if (folder.IsEmpty()) return Core::String(path);
+		if (path.IsEmpty()) return Core::String(folder);
+		return (Core::String(folder) + "/") + path;
+	}
+
+	Core::String ToolPath(Core::StringView path) {
+		Core::StringView text = path.Trimmed();
+		while (text.StartsWith(Core::StringView("./")) || text.StartsWith(Core::StringView(".\\"))) text = text.Substring(2, text.ByteLength() - 2);
+		if (text == "." || text.IsEmpty()) return Core::String("");
+		return IED::NormalizePath(text);
+	}
+
+	bool GitPlace::ToRepo(Core::StringView path, Core::String& repoPath) const {
+		Core::String clean = ToolPath(path);
+		Core::String inside = clean;
+		if (!m_Folder.IsEmpty() && !Under(clean.View(), m_Folder.View(), inside)) return false;
+		repoPath = Joined(m_Within.View(), inside.View());
+		if (repoPath.IsEmpty()) repoPath = Core::String(".");
+		return true;
+	}
+
+	bool GitPlace::FromRepo(Core::StringView repoPath, Core::String& path) const {
+		Core::String inside = Core::String(repoPath);
+		if (!m_Within.IsEmpty() && !Under(repoPath, m_Within.View(), inside)) return false;
+		path = Joined(m_Folder.View(), inside.View());
+		return true;
+	}
+
+	Core::Array<Core::String> GitPlace::DiffOptions() const {
+		Core::Array<Core::String> options;
+		if (!m_Within.IsEmpty()) options.Push(Core::String("--relative=") + m_Within.View());
+		if (!m_Folder.IsEmpty()) {
+			options.Push((Core::String("--src-prefix=a/") + m_Folder.View()) + "/");
+			options.Push((Core::String("--dst-prefix=b/") + m_Folder.View()) + "/");
+		}
+		return options;
+	}
+
+	Core::StringView GitPlace::Name() const { return m_Folder.IsEmpty() ? Core::StringView(".") : m_Folder.View(); }
+
+	GitPlace PlaceFrom(Core::StringView relative, Core::StringView within) {
+		GitPlace place;
+		if (relative == "..") place.m_Within = Core::String(within);
+		else place.m_Folder = Core::String(relative);
+		return place;
+	}
+}

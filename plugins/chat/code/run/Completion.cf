@@ -1,0 +1,114 @@
+include "api/Plugin.ch"
+include "Completion.ch"
+
+namespace Ai
+{
+	static CompletionDelta Delta(DeltaKind kind, Core::StringView text, int64 call) {
+		CompletionDelta delta;
+		delta.m_Kind = kind;
+		delta.m_Text = Core::String(text);
+		delta.m_Call = call;
+		return delta;
+	}
+
+	void Completion::Take(Core::StringView data, Core::Array<CompletionDelta>& deltas) {
+		if (data.Trimmed() == "[DONE]") {
+			m_Done = true;
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(data, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			m_MalformedChunks += 1;
+			return;
+		}
+		m_Chunks += 1;
+		Serialization::DomNode error = read.root.Member("error");
+		if (error.IsValid()) {
+			m_Errored = true;
+			m_ErrorMessage = error.Kind() == Serialization::DomKind::String ? Core::String(error.AsView()) : Core::String(error.Member("message").AsView());
+			if (m_ErrorMessage.IsEmpty()) m_ErrorMessage = IED::NodeJson(error);
+			return;
+		}
+		Serialization::DomNode progress = read.root.Member("prompt_progress");
+		if (progress.Kind() == Serialization::DomKind::Object) deltas.Push(Delta(DeltaKind::Progress, IED::NodeJson(progress).View(), -1));
+		Serialization::DomNode choices = read.root.Member("choices");
+		for (int64 i = 0; choices.Kind() == Serialization::DomKind::Array && i < choices.Count(); ++i) TakeChoice(choices.At(i), deltas);
+		TakeUsage(read.root);
+	}
+
+	void Completion::TakeChoice(const Serialization::DomNode& choice, Core::Array<CompletionDelta>& deltas) {
+		Serialization::DomNode delta = choice.Member("delta").IsValid() ? choice.Member("delta") : choice.Member("message");
+		Core::StringView text = delta.Member("content").AsView();
+		if (!text.IsEmpty()) {
+			m_Content.Append(text);
+			deltas.Push(Delta(DeltaKind::Content, text, -1));
+		}
+		const char*[3] fields = { "reasoning_content", "reasoning", "thinking" };
+		for (int32 f = 0; f < 3; ++f) {
+			Core::StringView thought = delta.Member(fields[f]).AsView();
+			if (thought.IsEmpty()) continue;
+			m_Reasoning.Append(thought);
+			deltas.Push(Delta(DeltaKind::Reasoning, thought, -1));
+		}
+		Serialization::DomNode calls = delta.Member("tool_calls");
+		for (int64 i = 0; calls.Kind() == Serialization::DomKind::Array && i < calls.Count(); ++i) TakeToolCall(calls.At(i), deltas);
+		Serialization::DomNode finish = choice.Member("finish_reason");
+		if (finish.Kind() == Serialization::DomKind::String) m_FinishReason = Core::String(finish.AsView());
+	}
+
+	// A call's delta joins the call with its id; without an id, the latest call at its index; else it starts one.
+	void Completion::TakeToolCall(const Serialization::DomNode& delta, Core::Array<CompletionDelta>& deltas) {
+		Core::StringView id = delta.Member("id").AsView();
+		const int64 index = delta.Member("index").Kind() == Serialization::DomKind::Int ? delta.Member("index").AsInt() : m_Calls.Count();
+		int64 at = -1;
+		for (int64 i = m_Calls.Count() - 1; i >= 0 && at < 0; --i) {
+			if (!id.IsEmpty() ? m_Calls[i]->m_Id.View() == id : m_Calls[i]->m_Index == index) at = i;
+		}
+		if (at < 0 && !id.IsEmpty()) {
+			for (int64 i = m_Calls.Count() - 1; i >= 0 && at < 0; --i)
+				if (m_Calls[i]->m_Id.IsEmpty() && m_Calls[i]->m_Index == index) at = i;
+		}
+		if (at < 0) {
+			ToolCallDraft* call = new ToolCallDraft();
+			call->m_Id = Core::String(id);
+			call->m_Index = index;
+			m_Calls.Push(call);
+			at = m_Calls.Count() - 1;
+		}
+		ToolCallDraft* call = m_Calls[at];
+		if (call->m_Id.IsEmpty() && !id.IsEmpty()) call->m_Id = Core::String(id);
+		Serialization::DomNode function = delta.Member("function");
+		Core::StringView name = function.Member("name").AsView();
+		if (call->m_Name.IsEmpty() && !name.IsEmpty()) call->m_Name = Core::String(name);
+		Core::StringView arguments = function.Member("arguments").AsView();
+		call->m_Arguments.Append(arguments);
+		deltas.Push(Delta(DeltaKind::ToolCall, arguments, at));
+	}
+
+	void Completion::TakeUsage(const Serialization::DomNode& root) {
+		Serialization::DomNode usage = root.Member("usage");
+		if (usage.Kind() == Serialization::DomKind::Object) {
+			if (usage.Member("prompt_tokens").IsValid()) m_PromptTokens = usage.Member("prompt_tokens").AsInt();
+			if (usage.Member("completion_tokens").IsValid()) m_CompletionTokens = usage.Member("completion_tokens").AsInt();
+			const Serialization::DomNode cached = usage.Member("prompt_tokens_details").Member("cached_tokens");
+			if (cached.IsValid()) m_CachedTokens = cached.AsInt();   // vLLM's count of the prefix it did not have to read
+		}
+		Serialization::DomNode timings = root.Member("timings");
+		if (timings.Member("prompt_per_second").IsValid()) m_PromptPerSecond = timings.Member("prompt_per_second").AsFloat();
+		if (timings.Member("cache_n").IsValid()) m_CachedTokens = timings.Member("cache_n").AsInt();   // llama.cpp's own count
+	}
+
+	double Completion::MeasuredPrefillRate(int64 ttftMs, int64 expectedRead) const {
+		if (m_PromptPerSecond > 0) return m_PromptPerSecond;   // llama.cpp measured its own read: it says nothing of a cache wait
+		// A server that does not say what its cache held: the read IED expected of it, rather than the whole prompt a
+		// cached step answers in a second.
+		const int64 read = m_CachedTokens < 0 && expectedRead >= 0 && expectedRead < m_PromptTokens ? expectedRead : ReadTokens();
+		if (read < c_CompletionReadTeachingTokens || ttftMs <= 0) return 0.0;   // little read: the wait was queueing, not reading
+		return (double)read * 1000.0 / (double)ttftMs;
+	}
+
+	int64 Completion::ReadTokens() const {
+		return m_CachedTokens < 0 || m_CachedTokens > m_PromptTokens ? m_PromptTokens : m_PromptTokens - m_CachedTokens;
+	}
+}

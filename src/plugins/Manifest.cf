@@ -1,0 +1,205 @@
+include "Manifest.ch"
+
+namespace Ied
+{
+	const char* PluginSourceName(PluginSource source) {
+		if (source == PluginSource::BuiltIn) return "builtin";
+		if (source == PluginSource::App) return "app";
+		return "project";
+	}
+
+	// --- Versions ------------------------------------------------------------------------------------------------------
+
+	// "1.2.3", "1.2", "1" (and "x" or "*" for a part) into `parts`, with how many were given; false for anything else.
+	static bool ParseVersion(Core::StringView text, int64* parts, int32& given) {
+		const int64 dash = text.IndexOf('-', 0);
+		Core::StringView core = dash < 0 ? text : text.Substring(0, dash);
+		given = 0;
+		int64 at = 0;
+		while (at <= core.ByteLength() && given < 3) {
+			int64 end = core.IndexOf('.', at);
+			if (end < 0) end = core.ByteLength();
+			Core::StringView part = core.Substring(at, end - at);
+			if (part == "x" || part == "*") break;
+			if (!Core::ParseInt64(part, parts[given]) || parts[given] < 0) return false;
+			given += 1;
+			at = end + 1;
+		}
+		for (int32 i = given; i < 3; ++i) parts[i] = 0;
+		return given > 0 || core == "x" || core == "*";
+	}
+
+	static int32 Compare(const int64* a, const int64* b) {
+		for (int32 i = 0; i < 3; ++i)
+			if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+		return 0;
+	}
+
+	// The first version past a range's family: "^1.2" -> 2.0.0, "^0.3" -> 0.4.0, "~1.2" -> 1.3.0, "1.2" -> 1.3.0.
+	static void Ceiling(const int64* floor, int32 given, bool caret, int64* ceiling) {
+		for (int32 i = 0; i < 3; ++i) ceiling[i] = 0;
+		const int32 level = caret ? (floor[0] > 0 || given == 1 ? 0 : 1) : (given >= 2 ? 1 : 0);
+		for (int32 i = 0; i < level; ++i) ceiling[i] = floor[i];
+		ceiling[level] = floor[level] + 1;
+	}
+
+	bool VersionInRange(Core::StringView version, Core::StringView range) {
+		int64[3] have;
+		int32 haveGiven = 0;
+		if (!ParseVersion(version, &have[0], haveGiven) || haveGiven != 3) return false;
+		Core::StringView text = range.Trimmed();
+		if (text == "*" || text.IsEmpty()) return true;
+		const bool caret = text.StartsWith(Core::StringView("^"));
+		const bool tilde = text.StartsWith(Core::StringView("~"));
+		const bool atLeast = text.StartsWith(Core::StringView(">="));
+		Core::StringView bound = text.Substring(caret || tilde ? 1 : atLeast ? 2 : 0, text.ByteLength());
+		int64[3] floor;
+		int32 given = 0;
+		if (!ParseVersion(bound, &floor[0], given)) return false;
+		if (Compare(&have[0], &floor[0]) < 0) return false;
+		if (atLeast) return true;
+		if (!caret && !tilde && given == 3) return Compare(&have[0], &floor[0]) == 0;
+		int64[3] ceiling;
+		Ceiling(&floor[0], given, caret, &ceiling[0]);
+		return Compare(&have[0], &ceiling[0]) < 0;
+	}
+
+	// --- Reading -------------------------------------------------------------------------------------------------------
+
+	static void Problem(Manifest* manifest, Core::StringView text) { manifest->m_Problems.Push(Core::String(text)); }
+
+	static Core::Array<Core::String> Strings(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	static void FillFields(Manifest* manifest) {
+		Serialization::DomNode root = manifest->m_Root;
+		manifest->m_Id = Core::String(root.Member("id").AsView());
+		manifest->m_Name = Core::String(root.Member("name").AsView());
+		manifest->m_Version = Core::String(root.Member("version").AsView());
+		manifest->m_Description = Core::String(root.Member("description").AsView());
+		manifest->m_Kind = Core::String(root.Member("runtime").Member("kind").AsView());
+		manifest->m_Ui = Core::String(root.Member("runtime").Member("ui").AsView());
+		manifest->m_Entry = Core::String(root.Member("runtime").Member("entry").AsView());
+		manifest->m_Sources = Strings(root.Member("runtime").Member("sources"));
+		if (manifest->m_Sources.IsEmpty()) manifest->m_Sources.Push(Core::String("code"));
+		manifest->m_Servers = Strings(root.Member("runtime").Member("servers"));
+		if (manifest->m_Servers.IsEmpty() || manifest->m_Source == PluginSource::Project) {
+			manifest->m_Servers.Clear();
+			manifest->m_Servers.Push(Core::String("workspace"));
+		}
+		manifest->m_Activation = Strings(root.Member("activation"));
+		manifest->m_ApiRange = Core::String(root.Member("ied").Member("api").AsView());
+		manifest->m_Permissions = Strings(root.Member("permissions"));
+		manifest->m_Contributes = root.Member("contributes");
+		Serialization::DomNode dependencies = root.Member("dependencies");
+		for (int64 i = 0; i < dependencies.Count(); ++i) {
+			Dependency* dependency = new Dependency();
+			dependency->m_Id = Core::String(dependencies.At(i).Member("id").AsView());
+			dependency->m_Version = Core::String(dependencies.At(i).Member("version").AsView());
+			dependency->m_Optional = dependencies.At(i).Member("optional").AsBool();
+			manifest->m_Dependencies.Push(dependency);
+		}
+	}
+
+	bool IsUiPath(const FS::Path& folder, Core::StringView path) {
+		if (path.IsEmpty() || path.ByteAt(0) == '/' || path.Contains(Core::StringView(".."))) return false;
+		for (int64 i = 0; i < path.ByteLength(); ++i) {
+			const int32 c = path.ByteAt(i);
+			const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '/';
+			if (!plain) return false;
+		}
+		return FS::FileExists((folder / path).CStr());
+	}
+
+	// A c4 plugin names its entry and code that lies in its folder (docs/26 section 2).
+	static void CheckCode(Manifest* manifest) {
+		if (manifest->m_Entry.IsEmpty()) Problem(manifest, Core::StringView("runtime.entry: a c4 plugin names its entry function ('Markup::Activate')"));
+		for (const Core::String& source : manifest->m_Sources) {
+			Core::StringView name = source.View();
+			const bool inside = !name.IsEmpty() && name.ByteAt(0) != '/' && !name.Contains(Core::StringView("..")) && !name.Contains(Core::StringView(":"));
+			FS::Path path = manifest->m_Folder / name;
+			if (!inside || (!FS::IsDirectory(path.CStr()) && !FS::FileExists(path.CStr())))
+				Problem(manifest, (Core::String("runtime.sources: '") + source.View() + "' is not a folder or file in the plugin's folder").View());
+		}
+	}
+
+	// What the schema cannot say: whether this host can load it.
+	static void CheckHost(Manifest* manifest) {
+		if (!VersionInRange(Core::StringView(c_HostApiVersion), manifest->m_ApiRange.View()))
+			Problem(manifest, ((Core::String("needs host API ") + manifest->m_ApiRange.View()) + ", this host has " + c_HostApiVersion).View());
+		const bool builtin = manifest->m_Kind.View() == "builtin";
+		if (builtin && manifest->m_Source != PluginSource::BuiltIn) Problem(manifest, Core::StringView("a builtin plugin ships with IED itself"));
+		if (!builtin && manifest->m_Kind.View() != "declarative" && manifest->m_Kind.View() != "c4")
+			Problem(manifest, (Core::String("runtime kind '") + manifest->m_Kind.View() + "' is not one this host runs (builtin, declarative, c4)").View());
+		if (manifest->m_Kind.View() == "c4") CheckCode(manifest);
+		if (!manifest->m_Ui.IsEmpty() && !IsUiPath(manifest->m_Folder, manifest->m_Ui.View()))
+			Problem(manifest, (Core::String("runtime.ui '") + manifest->m_Ui.View() + "' is not a file in the plugin's folder named with letters, digits, '.', '_', '-' and '/'").View());
+	}
+
+	Manifest* ReadManifest(const FS::Path& folder, PluginSource source, Serialization::SchemaRegistry& schemas, Core::StringView schemaName) {
+		Manifest* manifest = new Manifest();
+		manifest->m_Folder = folder;
+		manifest->m_Source = source;
+		manifest->m_Id = Core::String(folder.FileName());
+		FS::Path file = folder / c_ManifestFile;
+		if (!FS::FileExists(file.CStr())) {
+			Problem(manifest, Core::StringView("no ied-plugin.json"));
+			return manifest;
+		}
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		manifest->m_Doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *manifest->m_Doc);
+		if (!read.Ok()) {
+			Core::StringBuilder why;
+			why.Append("ied-plugin.json is not JSON: ");
+			why.Append(read.error);
+			why.Append(" (line ");
+			why.AppendInt(read.line);
+			why.AppendByte(')');
+			Problem(manifest, why.View());
+			return manifest;
+		}
+		manifest->m_Root = read.root;
+		for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(schemas, schemaName, Core::StringView(""), read.root))
+			Problem(manifest, ((Core::String(problem.path.IsEmpty() ? Core::StringView("/") : problem.path.View()) + ": ") + problem.message.View()).View());
+		FillFields(manifest);
+		if (manifest->m_Id.IsEmpty()) manifest->m_Id = Core::String(folder.FileName());
+		if (manifest->m_Problems.IsEmpty()) CheckHost(manifest);
+		return manifest;
+	}
+
+	// --- Approval digests ----------------------------------------------------------------------------------------------
+
+	static void ListFiles(const FS::Path& folder, Core::StringView prefix, Core::Array<Core::String>& files) {
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			Core::String relative = prefix.IsEmpty() ? entry.name : (Core::String(prefix) + "/") + entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory) ListFiles(folder / entry.name.View(), relative.View(), files);
+			else if (entry.kind == FS::EntryKind::File) files.Push(relative);
+		}
+	}
+
+	Core::String FolderDigest(const FS::Path& folder) {
+		Core::Array<Core::String> files;
+		ListFiles(folder, Core::StringView(""), files);
+		files.Sort();
+		Crypto::Sha256Builder digest;
+		uint8[1] separator = { (uint8)0 };
+		for (const Core::String& relative : files) {
+			FS::File opened = FS::File((folder / relative.View()).CStr(), "rb");
+			Core::String bytes = opened.ReadText();
+			digest.Add((const void*)relative.View().Data(), relative.View().ByteLength());
+			digest.Add((const void*)&separator[0], 1);
+			Core::StringBuilder length;
+			length.AppendInt(bytes.View().ByteLength());
+			digest.Add((const void*)length.View().Data(), length.View().ByteLength());
+			digest.Add((const void*)&separator[0], 1);
+			digest.Add((const void*)bytes.View().Data(), bytes.View().ByteLength());
+		}
+		return digest.Finish().ToHex();
+	}
+}

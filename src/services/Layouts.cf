@@ -1,0 +1,130 @@
+include "Layouts.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	const char*[3] c_DeviceClasses = { "desktop", "tablet", "phone" };
+
+	bool IsDeviceClass(Core::StringView name) {
+		for (const char* known : c_DeviceClasses)
+			if (name == known) return true;
+		return false;
+	}
+
+	FS::Path LayoutFolder(const Workspace* ws) { return ws->m_LocalState / "layout"; }
+
+	Core::String LayoutTopic(const Workspace* ws, Core::StringView deviceClass) {
+		return ((Core::String("layout:") + ws->m_WsId.View()) + ":") + deviceClass;
+	}
+
+	bool ReadLayoutFile(Core::StringView text, int64& revision, Core::String& json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text, *doc);
+		if (!read.Ok()) return false;
+		Serialization::DomNode stored = read.root.Member("revision");
+		Serialization::DomNode layout = read.root.Member("layout");
+		if (stored.Kind() != Serialization::DomKind::Int || stored.AsInt() < 0) return false;
+		if (layout.Kind() != Serialization::DomKind::Object && !(layout.IsValid() && layout.IsNull())) return false;
+		revision = stored.AsInt();
+		json = NodeJson(layout);
+		return true;
+	}
+
+	void Layouts::Init(Server* server) {
+		this.m_Server = server;
+		Layouts* self = this;
+		server->m_Rpc.Register("layout.set", [self](Call& call, const Params& params) -> Core::String { return self->SetMethod(call, params); });
+	}
+
+	void Layouts::Opened(Workspace* ws) {
+		Layouts* self = this;
+		for (const char* deviceClass : c_DeviceClasses) {
+			StoredLayout* layout = Load(ws, Core::StringView(deviceClass));
+			m_Layouts.Push(layout);
+			m_Server->m_Hub.Add(LayoutTopic(ws, layout->m_DeviceClass.View()).View(), [self, layout]() -> Core::String { return self->Snapshot(layout); });
+		}
+	}
+
+	StoredLayout* Layouts::Find(const Workspace* ws, Core::StringView deviceClass) const {
+		for (StoredLayout* layout : m_Layouts)
+			if (layout->m_Ws == ws && layout->m_DeviceClass.View() == deviceClass) return layout;
+		return nullptr;
+	}
+
+	StoredLayout* Layouts::Load(Workspace* ws, Core::StringView deviceClass) {
+		StoredLayout* layout = new StoredLayout();
+		layout->m_Ws = ws;
+		layout->m_DeviceClass = Core::String(deviceClass);
+		layout->m_Revision = 0;
+		layout->m_Json = Core::String("null");
+		FS::Path file = FileOf(layout);
+		if (!FS::FileExists(file.CStr())) return layout;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		if (!ReadLayoutFile(text.View(), layout->m_Revision, layout->m_Json)) {
+			layout->m_Revision = 0;
+			layout->m_Json = Core::String("null");
+			m_Server->Log((Core::String("ignoring ") + file.View() + ": not a layout file").View());
+		}
+		return layout;
+	}
+
+	FS::Path Layouts::FileOf(const StoredLayout* layout) const {
+		return LayoutFolder(layout->m_Ws) / (layout->m_DeviceClass + ".json").View();
+	}
+
+	bool Layouts::Save(const StoredLayout* layout, Core::StringView json, int64 revision) const {
+		JsonWriter text;
+		text.BeginObject();
+		text.IntField("revision", revision);
+		text.RawField("layout", json);
+		text.EndObject();
+		FS::Path file = FileOf(layout);
+		FS::MakeDirectories(file.Parent().CStr());
+		return FS::WriteFileAtomically(file.CStr(), (const void*)text.View().Data(), text.View().ByteLength());
+	}
+
+	Core::String Layouts::Snapshot(const StoredLayout* layout) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("revision", layout->m_Revision);
+		json.RawField("layout", layout->m_Json.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Layouts::SetMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::String deviceClass = params.Str("deviceClass");
+		StoredLayout* layout = Find(ws, deviceClass.View());
+		if (!layout) throw RpcError(ErrorCode::BadRequest, "deviceClass must be desktop, tablet or phone");
+		if (!params.Has("layout")) throw RpcError(ErrorCode::BadRequest, "missing field 'layout'");
+		Serialization::DomNode node = params.Field("layout");
+		if (node.Kind() != Serialization::DomKind::Object && !node.IsNull()) throw RpcError(ErrorCode::BadRequest, "layout must be an object or null");
+		const int64 expected = params.Int("expectedRevision");
+		if (expected != layout->m_Revision) {
+			JsonWriter data;
+			data.BeginObject();
+			data.IntField("revision", layout->m_Revision);
+			data.EndObject();
+			throw RpcError(ErrorCode::Conflict, "the layout changed since that revision", data.View());
+		}
+		Core::String json = NodeJson(node);
+		if (json.ByteLength() > c_LayoutMaxBytes) throw RpcError(ErrorCode::BadRequest, "a layout is at most 256 KB");
+		if (!Save(layout, json.View(), layout->m_Revision + 1)) throw RpcError(ErrorCode::Unavailable, "the layout could not be saved");
+		layout->m_Revision += 1;
+		layout->m_Json = json;
+		JsonWriter changed;
+		changed.BeginObject();
+		changed.IntField("revision", layout->m_Revision);
+		changed.RawField("layout", layout->m_Json.View());
+		changed.Field("by", call.ClientId());
+		changed.EndObject();
+		m_Server->m_Hub.Publish(LayoutTopic(ws, deviceClass.View()).View(), "layout.changed", changed.View());
+		JsonWriter result;
+		result.BeginObject();
+		result.IntField("revision", layout->m_Revision);
+		result.EndObject();
+		return result.ToString();
+	}
+}

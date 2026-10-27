@@ -1,0 +1,301 @@
+// Replay sessions (docs/22 "Replay"): one flashbang-replay process per open capture, spoken to with ied-gpu/1 on its
+// stdio - `Content-Length: N\r\n[Binary-Length: M\r\n]\r\n` then N bytes of JSON-RPC and M bytes of binary. Requests
+// from any client go out one after another; a thread reads the replies and wakes each request's waiter. A replayer
+// that exits fails what waits and marks the session failed; the next gpu.open starts it again.
+include "Gpu.ch"
+
+namespace GpuDebug
+{
+	const int64 c_ReplyReadBytes = 1 << 20;
+
+	// A session a change found, handed out of it.
+	class SessionRef
+	{
+		public Session* m_Session;
+	}
+
+	Core::String Session::Json() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("sessionId", m_Id.View());
+		json.Field("wsId", m_WsId.View());
+		json.Field("captureId", m_CaptureId.View());
+		json.Field("state", m_State.View());
+		if (!m_Problem.IsEmpty()) json.Field("problem", m_Problem.View());
+		if (!m_Summary.IsEmpty()) json.RawField("summary", m_Summary.View());
+		if (!m_CompareId.IsEmpty()) json.Field("compareWith", m_CompareId.View());
+		if (!m_Edits.IsEmpty()) json.RawField("edits", m_Edits.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void PublishState(IED::PluginContext* context, Session* session) {
+		context->Atomically([session](IED::Events& events) { events.Publish(session->Topic().View(), "state", session->Json().View()); });
+	}
+
+	Session* Debugger::Open(Core::StringView wsId, Capture* capture) {
+		CloseIdle();
+		SessionRef* existing = new SessionRef();
+		Core::String path = capture->m_Path;
+		Debugger* self = this;
+		m_Context->Atomically([self, path, existing](IED::Events& events) {
+			for (Session* session : self->m_Sessions)
+				if (session->m_Path == path && session->m_Alive) existing->m_Session = session;
+		});
+		if (existing->m_Session) {
+			existing->m_Session->m_LastUsedMs = NowMs();
+			return existing->m_Session;
+		}
+		Core::String native = NativeFolder(wsId);
+		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the GPU debugger's native parts are not built: run nuke build flashbang"));
+		Process::StartInfo info;
+		info.program = Core::String((FS::Path(native.View()) / "flashbang-replay.exe").View());
+		info.arguments.Push(Core::String("--rpc"));
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the replayer could not start: ") + started.Error()).View());
+		Session* session = new Session();
+		session->m_WsId = Core::String(wsId);
+		session->m_CaptureId = capture->m_Id;
+		session->m_Path = path;
+		session->m_State = Core::String("starting");
+		session->m_Child = new Process::Child(take(started));
+		session->m_LastUsedMs = NowMs();
+		session->m_Alive = true;
+		m_Context->Atomically([self, session](IED::Events& events) {
+			session->m_Id = self->NextId("rs");
+			self->m_Sessions.Push(session);
+		});
+		m_Context->TopicFrom(session->Topic().View(), [session]() -> Core::String { return session->Json(); });
+		Threading::Thread::Run([self, session]() { self->ReadReplies(session); }).Detach();
+		Threading::Thread::Run([self, session]() {
+			char[4096] buffer;
+			for (;;) {
+				const int64 got = session->m_Child->Read(Process::Stream::Errors, (void*)&buffer[0], 4096, Process::kWaitForever);
+				if (got <= 0) break;
+				self->m_Context->Output(session->m_WsId.View(), Core::StringView("gpu"), Core::StringView((const char*)&buffer[0], got));
+			}
+		}).Detach();
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.Field("capture", path.View());
+		params.Key(Core::StringView("options"));
+		params.BeginObject();
+		params.BoolField("debugLayer", m_Context->Setting(Core::StringView("gpu.replayDebugLayer"), wsId).View() == "true");
+		params.EndObject();
+		params.EndObject();
+		try {
+			Core::String blob;
+			session->m_Summary = Call(session, Core::StringView("initialize"), params.View(), blob);
+			session->m_State = Core::String("ready");
+		}
+		catch (IED::RpcError& error) {
+			session->m_Problem = error.m_Message;
+			Close(session, error.m_Message.View());
+			throw;
+		}
+		PublishState(m_Context, session);
+		return session;
+	}
+
+	Core::String Debugger::Compare(Session* session, Capture* other) {
+		Core::String blob;
+		Core::String opened("{}");
+		Core::String id;
+		if (other) {
+			IED::JsonWriter params;
+			params.BeginObject();
+			params.Field("capture", other->m_Path.View());
+			params.Key(Core::StringView("options"));
+			params.BeginObject();
+			params.BoolField("debugLayer", m_Context->Setting(Core::StringView("gpu.replayDebugLayer"), session->m_WsId.View()).View() == "true");
+			params.EndObject();
+			params.EndObject();
+			opened = Call(session, Core::StringView("compareOpen"), params.View(), blob);
+			id = other->m_Id;
+		}
+		else Call(session, Core::StringView("compareClose"), Core::StringView("{}"), blob);
+		m_Context->Atomically([session, id](IED::Events& events) {
+			if (session->m_CompareId.View() != id.View()) session->m_CompareTiming = Core::String();
+			session->m_CompareId = id;
+			events.Publish(session->Topic().View(), "state", session->Json().View());
+		});
+		return opened;
+	}
+
+	static Core::String Frame(Core::StringView json) {
+		Core::StringBuilder frame;
+		frame.Append("Content-Length: ");
+		frame.AppendInt(json.ByteLength());
+		frame.Append("\r\n\r\n");
+		frame.Append(json);
+		return frame.ToString();
+	}
+
+	Core::String Debugger::Call(Session* session, Core::StringView method, Core::StringView params, Core::String& blob) {
+		Core::Array<uint8> binary;
+		Core::String result = Ask(session, method, params, binary);
+		if (!binary.IsEmpty()) {
+			Core::String problem;
+			blob = IED::PutBlob(Core::StringView("application/octet-stream"), binary, problem);
+			if (blob.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		return result;
+	}
+
+	Core::String Debugger::Ask(Session* session, Core::StringView method, Core::StringView params, Core::Array<uint8>& binary) {
+		Pending* pending = new Pending();
+		int64 id = 0;
+		{
+			Threading::LockGuard guard(session->m_Lock);
+			if (!session->m_Alive) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the replay ended: ") + session->m_Problem.View()).View());
+			session->m_NextId += 1;
+			id = session->m_NextId;
+			session->m_Pending.Insert(id, pending);
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("jsonrpc", "2.0");
+			json.IntField("id", id);
+			json.Field("method", method);
+			json.RawField("params", params.IsEmpty() ? Core::StringView("{}") : params);
+			json.EndObject();
+			if (!session->m_Child->WriteText(Frame(json.View()).View())) {
+				session->m_Pending.Remove(id);
+				throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the replayer does not take requests"));
+			}
+			session->m_LastUsedMs = NowMs();
+			const int64 deadline = NowMs() + c_ReplayWaitMs;
+			while (!pending->m_Done && session->m_Alive && NowMs() < deadline) session->m_Answered.WaitFor(session->m_Lock, 1000000000);
+			session->m_Pending.Remove(id);
+			session->m_LastUsedMs = NowMs();
+		}
+		if (!pending->m_Done) throw IED::RpcError(IED::ErrorCode::Unavailable, session->m_Alive ? Core::StringView("the replayer did not answer in time") : (Core::String("the replay ended: ") + session->m_Problem.View()).View());
+		if (!pending->m_Error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, pending->m_Error.View());
+		binary = pending->m_Binary;
+		return pending->m_Result;
+	}
+
+	// A reply or a notification: a reply wakes its request; progress goes to the session's topic.
+	void Debugger::Reply(Session* session, Core::StringView json, Core::Array<uint8>& binary) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		if (!read.Ok()) return;
+		Serialization::DomNode message = read.root;
+		Serialization::DomNode id = message.Member("id");
+		if (!id.IsValid()) {
+			if (message.Member("method").AsView() == "progress") {
+				Core::String data = IED::NodeJson(message.Member("params"));
+				m_Context->Atomically([session, data](IED::Events& events) { events.Publish(session->Topic().View(), "progress", data.View()); });
+			}
+			return;
+		}
+		Threading::LockGuard guard(session->m_Lock);
+		Pending** found = session->m_Pending.Find(id.AsInt());
+		if (!found) return;
+		Pending* pending = *found;
+		Serialization::DomNode error = message.Member("error");
+		if (error.IsValid()) pending->m_Error = Core::String(error.Member("message").AsView());
+		else pending->m_Result = IED::NodeJson(message.Member("result"));
+		pending->m_Binary = binary;
+		pending->m_Done = true;
+		session->m_Answered.NotifyAll();
+	}
+
+	// The value of header `name` ("Content-Length") in the header block `headers`, -1 when absent.
+	static int64 HeaderValue(Core::StringView headers, Core::StringView name) {
+		const int64 at = headers.IndexOf(name);
+		if (at < 0) return -1;
+		int64 value = 0;
+		for (int64 i = at + name.ByteLength(); i < headers.ByteLength(); ++i) {
+			const int32 c = headers.ByteAt(i);
+			if (c == ' ' || c == ':') continue;
+			if (c < '0' || c > '9') break;
+			value = value * 10 + (c - '0');
+		}
+		return value;
+	}
+
+	void Debugger::ReadReplies(Session* session) {
+		Core::Array<uint8> buffer;
+		Core::Array<uint8> chunk;
+		chunk.Resize(c_ReplyReadBytes);
+		for (;;) {
+			const int64 got = session->m_Child->Read(Process::Stream::Output, (void*)chunk.Data(), c_ReplyReadBytes, Process::kWaitForever);
+			if (got <= 0) break;
+			buffer.Append(chunk.Data(), got);
+			// Every whole message in the buffer.
+			for (;;) {
+				Core::StringView text = Core::StringView((const char*)buffer.Data(), buffer.Count());
+				const int64 end = text.IndexOf(Core::StringView("\r\n\r\n"));
+				if (end < 0) break;
+				Core::StringView headers = text.Substring(0, end);
+				const int64 length = HeaderValue(headers, Core::StringView("Content-Length"));
+				int64 binaryLength = HeaderValue(headers, Core::StringView("Binary-Length"));
+				if (binaryLength < 0) binaryLength = 0;
+				const int64 total = end + 4 + length + binaryLength;
+				if (length < 0 || buffer.Count() < total) break;
+				Core::String json = Core::String(text.Substring(end + 4, length));
+				Core::Array<uint8> binary;
+				if (binaryLength) binary.Append(buffer.Data() + end + 4 + length, binaryLength);
+				buffer.RemoveRange(0, total);
+				Reply(session, json.View(), binary);
+			}
+		}
+		const int64 code = session->m_Child->Wait(5000);
+		Core::StringBuilder problem;
+		problem.Append("the replayer exited");
+		if (code >= 0) {
+			problem.Append(" with code ");
+			problem.AppendInt(code);
+		}
+		Ended(session, problem.View());
+	}
+
+	void Debugger::Ended(Session* session, Core::StringView problem) {
+		{
+			Threading::LockGuard guard(session->m_Lock);
+			if (!session->m_Alive) return;
+			session->m_Alive = false;
+			if (session->m_Problem.IsEmpty()) session->m_Problem = Core::String(problem);
+			if (session->m_State.View() != "ended") session->m_State = Core::String("failed");
+			session->m_Answered.NotifyAll();
+		}
+		PublishState(m_Context, session);
+	}
+
+	void Debugger::Close(Session* session, Core::StringView why) {
+		{
+			Threading::LockGuard guard(session->m_Lock);
+			if (session->m_Alive) {
+				session->m_State = Core::String("ended");
+				session->m_Problem = Core::String(why);
+			}
+		}
+		// The replayer leaves on shutdown; one that hangs is ended.
+		if (session->m_Alive) session->m_Child->WriteText(Frame(Core::StringView("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"params\":{}}")).View());
+		session->m_Child->CloseInput();
+		if (session->m_Child->Wait(3000) == Process::kTimedOut) session->m_Child->Kill();
+		Ended(session, why);
+		Debugger* self = this;
+		m_Context->Atomically([self, session](IED::Events& events) {
+			for (int64 i = 0; i < self->m_Sessions.Count(); ++i)
+				if (self->m_Sessions[i] == session) {
+					self->m_Sessions.RemoveAt(i);
+					break;
+				}
+		});
+	}
+
+	void Debugger::CloseIdle() {
+		Core::Array<Session*>* idle = new Core::Array<Session*>();
+		const int64 now = NowMs();
+		Debugger* self = this;
+		m_Context->Atomically([self, now, idle](IED::Events& events) {
+			for (Session* session : self->m_Sessions)
+				if (session->m_Alive && now - session->m_LastUsedMs > c_SessionIdleMs) idle->Push(session);
+		});
+		for (Session* session : *idle) Close(session, Core::StringView("nobody used it for 30 minutes"));
+	}
+}

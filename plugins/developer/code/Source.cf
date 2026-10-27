@@ -1,0 +1,77 @@
+include "Source.ch"
+
+namespace Developer
+{
+	const char* c_InstallRecord = "install.json";
+	const int64 c_GitMs = 10000;
+
+	bool IsCheckout(Core::StringView folder) {
+		if (folder.IsEmpty()) return false;
+		FS::Path root = FS::Path(folder);
+		const bool git = FS::IsDirectory((root / Core::StringView(".git")).CStr()) || FS::FileExists((root / Core::StringView(".git")).CStr());
+		const bool compiler = FS::IsDirectory((root / Core::StringView("C4/C4Lib/src")).CStr());
+		const bool server = FS::FileExists((root / Core::StringView("src/nuke.toml")).CStr());
+		return git && compiler && server;
+	}
+
+	bool ReadInstallRecord(Core::StringView home, InstallRecord& record) {
+		FS::Path file = FS::Path(home) / Core::StringView(c_InstallRecord);
+		if (!FS::FileExists(file.CStr())) return false;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok()) return false;
+		record.m_Source = Core::String(read.root.Member("source").AsView());
+		record.m_Commit = Core::String(read.root.Member("commit").AsView());
+		record.m_Dirty = read.root.Member("dirty").AsBool();
+		record.m_InstalledMs = read.root.Member("installedMs").AsInt();
+		return !record.m_Source.IsEmpty();
+	}
+
+	Core::String SourceOf(Core::StringView home, const InstallRecord* record) {
+		if (IsCheckout(home)) return Core::String(home);
+		return record && IsCheckout(record->m_Source.View()) ? record->m_Source : Core::String();
+	}
+
+	Core::String SourceFolder() {
+		Core::String home = IED::HomeFolder();
+		InstallRecord record;
+		const bool installed = ReadInstallRecord(home.View(), record);
+		return SourceOf(home.View(), installed ? &record : nullptr);
+	}
+
+	static Process::Output Git(Core::StringView checkout, const Core::Array<Core::String>& arguments) {
+		Process::StartInfo info;
+		info.program = Core::String("git");
+		info.arguments = arguments;
+		info.workingDirectory = Core::String(checkout);
+		info.errors = Process::Redirect::Pipe;
+		return Process::Run(info, c_GitMs);
+	}
+
+	Core::String HeadCommit(Core::StringView checkout) {
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String("rev-parse"));
+		arguments.Push(Core::String("HEAD"));
+		Process::Output out = Git(checkout, arguments);
+		return out.exitCode == 0 ? Core::String(out.output.View().Trimmed()) : Core::String();
+	}
+
+	int64 CommitsSince(Core::StringView checkout, Core::StringView commit) {
+		if (commit.IsEmpty()) return -1;
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String("rev-list"));
+		arguments.Push(Core::String("--count"));
+		arguments.Push((Core::String(commit) + "..") + "HEAD");
+		Process::Output out = Git(checkout, arguments);
+		if (out.exitCode != 0) return -1;
+		Core::StringView digits = out.output.View().Trimmed();
+		int64 count = 0;
+		for (int64 i = 0; i < digits.ByteLength(); ++i) {
+			if (digits.ByteAt(i) < '0' || digits.ByteAt(i) > '9') return -1;
+			count = count * 10 + (digits.ByteAt(i) - '0');
+		}
+		return digits.IsEmpty() ? -1 : count;
+	}
+}

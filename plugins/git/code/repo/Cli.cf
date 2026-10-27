@@ -1,0 +1,84 @@
+include "Cli.ch"
+
+namespace Git
+{
+	Core::String GitRun::Problem() const {
+		Core::StringView text = m_Errors.View().Trimmed();
+		if (text.IsEmpty()) text = m_Output.View().Trimmed();
+		if (!text.IsEmpty()) return Core::String(text);
+		Core::StringBuilder why;
+		why.Append("git exited with ");
+		why.AppendInt(m_ExitCode);
+		return why.ToString();
+	}
+
+	Process::StartInfo GitCli::StartInfoFor(const FS::Path& folder, const Core::Array<Core::String>& arguments) const {
+		Process::StartInfo info;
+		info.program = m_Program;
+		info.arguments.Push(Core::String("-c"));
+		info.arguments.Push(Core::String("core.quotepath=off"));
+		info.arguments.Push(Core::String("-c"));
+		info.arguments.Push(Core::String("color.ui=never"));
+		for (const Core::String& argument : arguments) info.arguments.Push(argument);
+		info.workingDirectory = Core::String(folder.View());
+		info.environment.Push(Core::String("GIT_TERMINAL_PROMPT=0"));
+		info.environment.Push(Core::String("GIT_OPTIONAL_LOCKS=0"));
+		info.environment.Push(Core::String("LC_ALL=C"));
+		info.environment.Push(Core::String("GIT_EDITOR=:"));
+		info.environment.Push(Core::String("GIT_PAGER=cat"));
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::ToOutput;
+		return info;
+	}
+
+	GitRun GitCli::Run(const FS::Path& folder, const Core::Array<Core::String>& arguments, int32 timeoutMs) const {
+		Process::StartInfo info = StartInfoFor(folder, arguments);
+		info.errors = Process::Redirect::Pipe;
+		Process::Output out = Process::Run(info, timeoutMs);
+		GitRun run;
+		run.m_ExitCode = out.exitCode;
+		run.m_Output = out.output;
+		run.m_Errors = out.errors;
+		if (out.exitCode == Process::kError) run.m_Errors = Core::String("git did not run: ") + out.error.View();
+		if (out.exitCode == Process::kTimedOut) run.m_Errors = Core::String("git took too long and was stopped: ") + GitCommandLine(arguments).View();
+		return run;
+	}
+
+	Core::Array<Core::String> GitArgs(const char* a) {
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String(a));
+		return arguments;
+	}
+
+	Core::Array<Core::String> GitArgs(const char* a, const char* b) {
+		Core::Array<Core::String> arguments = GitArgs(a);
+		arguments.Push(Core::String(b));
+		return arguments;
+	}
+
+	Core::Array<Core::String> GitArgs(const char* a, const char* b, const char* c) {
+		Core::Array<Core::String> arguments = GitArgs(a, b);
+		arguments.Push(Core::String(c));
+		return arguments;
+	}
+
+	Core::Array<Core::String> GitArgs(const char* a, const char* b, const char* c, const char* d) {
+		Core::Array<Core::String> arguments = GitArgs(a, b, c);
+		arguments.Push(Core::String(d));
+		return arguments;
+	}
+
+	Core::String GitCommandLine(const Core::Array<Core::String>& arguments) {
+		Core::StringBuilder line;
+		line.Append("git");
+		for (const Core::String& argument : arguments) {
+			line.AppendByte(' ');
+			const bool quoted = argument.View().IsEmpty() || argument.View().IndexOf(' ', 0) >= 0;
+			if (quoted) line.AppendByte('"');
+			line.Append(argument.View());
+			if (quoted) line.AppendByte('"');
+		}
+		return line.ToString();
+	}
+}

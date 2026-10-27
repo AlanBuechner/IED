@@ -1,0 +1,104 @@
+include "Tasks.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	TaskOutcome RunTask(const Workspace& ws, Core::StringView project, Core::StringView key, Core::StringView slot) {
+		TaskOutcome outcome;
+		Ied::CodeInstance* instance = Ied::ApiCaller(outcome.m_Problem);
+		if (!instance) return outcome;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "process.spawn", outcome.m_Problem);
+		if (!found) return outcome;
+		if (!found->m_Trusted) {
+			outcome.m_Problem = Core::String("the workspace is not trusted: nothing runs in it");
+			return outcome;
+		}
+		try {
+			Ied::TaskRun* run = server->m_Tasks->RunTask(found, project, key, slot, Serialization::DomNode());
+			outcome.m_Succeeded = server->m_Tasks->AwaitEnd(run);
+			outcome.m_Cancelled = run->m_Status == Ied::RunStatus::Cancelled;
+			outcome.m_Label = run->m_Label;
+			outcome.m_Ms = run->m_EndedMs - run->m_StartedMs;
+			outcome.m_Tail = run->m_Tail;
+			outcome.m_Problems = Ied::RunProblemsJson(run);
+		}
+		catch (Ied::RpcError& error) {
+			outcome.m_Problem = error.m_Message;
+		}
+		return outcome;
+	}
+
+	Core::String StartTask(const Workspace& ws, Core::StringView project, Core::StringView key, Core::StringView slot, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String();
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "process.spawn", problem);
+		if (!found) return Core::String();
+		if (!found->m_Trusted) {
+			problem = Core::String("the workspace is not trusted: nothing runs in it");
+			return Core::String();
+		}
+		try {
+			return server->m_Tasks->RunTask(found, project, key, slot, Serialization::DomNode())->m_RunId;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.m_Message;
+		}
+		return Core::String();
+	}
+
+	bool TaskEnded(Core::StringView runId, TaskOutcome& outcome) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(outcome.m_Problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::TaskRun* run = server->m_Tasks->Run(runId);
+		if (!run) {
+			outcome.m_Problem = Core::String("no run ") + runId;
+			return false;
+		}
+		if (run->IsActive()) return false;
+		outcome.m_Succeeded = run->m_Status == Ied::RunStatus::Succeeded;
+		outcome.m_Cancelled = run->m_Status == Ied::RunStatus::Cancelled;
+		outcome.m_Label = run->m_Label;
+		outcome.m_Ms = run->m_EndedMs - run->m_StartedMs;
+		outcome.m_Tail = run->m_Tail;
+		outcome.m_Problems = Ied::RunProblemsJson(run);
+		return true;
+	}
+
+	bool CancelTask(Core::StringView runId) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::TaskRun* run = server->m_Tasks->Run(runId);
+		if (!run || !run->IsActive()) return false;
+		server->m_Tasks->Cancel(run);
+		return true;
+	}
+
+	Core::String Problems(const Workspace& ws) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return Core::String("{\"files\":{}}");
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "fs.read", problem);
+		return found ? server->m_Diagnostics->Snapshot(found) : Core::String("{\"files\":{}}");
+	}
+
+	bool SetTaskVariable(Core::StringView wsId, Core::StringView name, Core::StringView value) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		server->m_Tasks->SetVariable(wsId, name, value);
+		return true;
+	}
+}

@@ -1,0 +1,90 @@
+// gpu_replay_with_shader (docs/13 T-GPU-10, docs/22 "Edit and Replay"): a shader edited - a workspace file as the editor
+// holds it, or the given source - and the frame replayed with it: whether it compiled (the compiler's diagnostics when
+// not), the pipelines it went into, and how the output at the event changed. The captured shader comes back unless
+// `keep`.
+include "ToolText.ch"
+
+namespace GpuDebug
+{
+	static void AppendDiagnostics(Core::StringBuilder& text, const Serialization::DomNode& diagnostics, Core::StringView where) {
+		for (int64 i = 0; i < diagnostics.Count(); i += 1) {
+			Serialization::DomNode d = diagnostics.At(i);
+			text.Append("  ");
+			text.Append(where);
+			text.Append(":");
+			text.AppendInt(d.Member("line").AsInt());
+			if (d.Member("column").AsInt()) {
+				text.Append(":");
+				text.AppendInt(d.Member("column").AsInt());
+			}
+			text.Append(": ");
+			text.Append(d.Member("severity").AsView());
+			text.Append(": ");
+			text.Append(d.Member("text").AsView());
+			text.Append("\n");
+		}
+	}
+
+	Core::String ReplayWithShaderText(Debugger* debugger, const IED::Workspace& ws, const ToolCapture& target, const Serialization::DomNode& args) {
+		ShaderEditRequest edit;
+		edit.m_Eid = IntArg(args, "eid", 0);
+		edit.m_Stage = Core::String(args.Member("stage").AsView());
+		edit.m_Path = Core::String(args.Member("path").AsView());
+		edit.m_Text = Core::String(args.Member("source").AsView());
+		edit.m_Entry = Core::String(args.Member("entry").AsView());
+		edit.m_Profile = Core::String(args.Member("profile").AsView());
+		edit.m_Language = Core::String(args.Member("language").AsView());
+		if (!edit.m_Eid || edit.m_Stage.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("eid and stage are required"));
+		if (edit.m_Path.IsEmpty() == edit.m_Text.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give the edit as path (a workspace file) or as source, one of them"));
+		if (edit.m_Language.IsEmpty()) edit.m_Language = Core::String(target.m_Api.View() == "Vulkan" && !edit.m_Path.View().EndsWith(Core::StringView(".hlsl")) ? "spirv" : "hlsl");
+		Serialization::DomNode result = ParseAnswer(debugger->EditShader(target.m_Session, ws, target.m_Capture, edit).View());
+		Core::StringView where = edit.m_Path.IsEmpty() ? Core::StringView("source") : edit.m_Path.View();
+		Core::StringBuilder text;
+		if (!result.Member("ok").AsBool()) {
+			text.Append("The edit did not go in: it did not compile, or does not fit the pipeline. The capture's shader stays.\n");
+			AppendDiagnostics(text, result.Member("diagnostics"), where);
+			return text.ToString();
+		}
+		Serialization::DomNode pipelines = result.Member("pipelines");
+		text.Append("Edited the ");
+		text.Append(edit.m_Stage.View());
+		text.Append(" shader (key ");
+		text.Append(result.Member("key").AsView());
+		text.Append(", ");
+		text.Append(result.Member("profile").AsView());
+		text.Append(", entry ");
+		text.Append(result.Member("entry").AsView());
+		text.Append(") from ");
+		text.Append(where);
+		text.Append(" in ");
+		text.AppendInt(pipelines.Count());
+		text.Append(pipelines.Count() == 1 ? " pipeline:" : " pipelines:");
+		for (int64 i = 0; i < pipelines.Count(); i += 1) {
+			text.Append(i ? ", " : " ");
+			text.Append(pipelines.At(i).AsView());
+		}
+		text.Append(".\n");
+		AppendDiagnostics(text, result.Member("diagnostics"), where);
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.IntField("eid", edit.m_Eid);
+		params.EndObject();
+		text.Append("At EID ");
+		text.AppendInt(edit.m_Eid);
+		text.Append(", against the captured frame: ");
+		try {
+			AppendImageDifference(text, AskTool(debugger, target, "editDiff", params.View()));
+		}
+		catch (IED::RpcError failed) {
+			text.Append(failed.m_Message.View());
+			text.Append("\n");
+		}
+		if (args.Member("keep").AsBool()) {
+			text.Append("The edit stays in the capture's replay: the UI shows it (Revert there puts the captured shader back).\n");
+			return text.ToString();
+		}
+		debugger->RevertShader(target.m_Session, result.Member("key").AsView());
+		text.Append("The captured shader is back (keep: true leaves the edit in the replay for the UI).\n");
+		return text.ToString();
+	}
+}

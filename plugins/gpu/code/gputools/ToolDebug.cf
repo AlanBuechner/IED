@@ -1,0 +1,87 @@
+// gpu_debug_shader (docs/13 T-GPU-5): one invocation of a draw's or dispatch's shader stepped through on the replay
+// GPU - a pixel's fragment, a vertex, a compute thread - as the lines it ran, each with the value it made.
+include "ToolText.ch"
+
+namespace GpuDebug
+{
+	const int64 c_DebugSteps = 300;
+
+	Core::String DebugText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args) {
+		const int64 eid = IntArg(args, "eid", 0);
+		if (!eid) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("eid is required"));
+		Core::StringView stage = args.Member("stage").AsView();
+		if (stage.IsEmpty()) stage = Core::StringView("fs");
+		IED::JsonWriter params;
+		params.BeginObject();
+		params.IntField("eid", eid);
+		params.Field("stage", stage);
+		params.IntField("x", IntArg(args, "x", 0));
+		params.IntField("y", IntArg(args, "y", 0));
+		params.IntField("vertex", IntArg(args, "vertex", 0));
+		params.IntField("instance", IntArg(args, "instance", 0));
+		params.Key(Core::StringView("thread"));
+		params.BeginArray();
+		Serialization::DomNode thread = args.Member("thread");
+		for (int64 k = 0; k < 3; k += 1) params.Int(k < thread.Count() ? thread.At(k).AsInt() : 0);
+		params.EndArray();
+		params.EndObject();
+		Serialization::DomNode trace = AskTool(debugger, target, "debugShader", params.View());
+		Serialization::DomNode invocations = trace.Member("invocations");
+		Core::StringBuilder text;
+		text.Append(stage);
+		text.Append(" shader of pipeline ");
+		text.Append(trace.Member("pipeline").AsView());
+		text.Append(" at EID ");
+		text.AppendInt(eid);
+		text.Append(": ");
+		if (!invocations.Count()) {
+			text.Append("no invocation ran for that ");
+			text.Append(stage == "cs" ? "thread." : stage == "vs" ? "vertex." : "pixel (the draw covers no fragment there).");
+			text.Append("\n");
+			return text.ToString();
+		}
+		const int64 which = IntArg(args, "invocation", 1);
+		if (which < 1 || which > invocations.Count()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("invocation is out of range"));
+		text.AppendInt(invocations.Count());
+		text.Append(invocations.Count() == 1 ? " invocation ran" : " invocations ran (a pixel's fragments: each primitive covering it, front to back or not)");
+		text.Append("; invocation ");
+		text.AppendInt(which);
+		text.Append(" step by step (listing line: instruction => value):\n");
+		// The listing's lines, found by offset as they are needed.
+		Core::StringView listing = trace.Member("listing").AsView();
+		Core::Array<int64> starts;
+		starts.Push(0);
+		for (int64 at = 0; at < listing.ByteLength(); at += 1)
+			if (listing.ByteAt(at) == (int32)'\n') starts.Push(at + 1);
+		Serialization::DomNode sites = trace.Member("sites");
+		Serialization::DomNode steps = invocations.At(which - 1).Member("steps");
+		const int64 limit = IntArg(args, "max", c_DebugSteps);
+		for (int64 k = 0; k < steps.Count() && k < limit; k += 1) {
+			Serialization::DomNode site = sites.At(steps.At(k).At(0).AsInt());
+			const int64 line = site.At(0).AsInt();
+			text.Append("  ");
+			text.AppendInt(line + 1);
+			text.Append(": ");
+			if (line < starts.Count()) {
+				const int64 begin = starts[line];
+				const int64 end = line + 1 < starts.Count() ? starts[line + 1] - 1 : listing.ByteLength();
+				text.Append(listing.Substring(begin, end - begin).Trimmed());
+			}
+			text.Append(" => ");
+			// DXBC sites name the register they wrote.
+			if (site.Count() > 4) {
+				text.Append(site.At(4).AsView());
+				text.Append(" = ");
+			}
+			text.Append(steps.At(k).At(1).AsView());
+			text.Append("\n");
+		}
+		if (steps.Count() > limit) {
+			text.Append("  ... ");
+			text.AppendInt(steps.Count() - limit);
+			text.Append(" more steps (raise max)\n");
+		}
+		if (invocations.At(which - 1).Member("truncated").AsBool()) text.Append("The trace was cut: the invocation ran more steps than the debugger records.\n");
+		return text.ToString();
+	}
+}

@@ -1,0 +1,21 @@
+include "Outputs.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	bool OutputTail(Core::StringView wsId, Core::StringView sourceId, Core::String& text, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, wsId, "fs.read", problem);
+		if (!ws) return false;
+		const Ied::OutputSource* source = server->m_Outputs->Find(ws, sourceId);
+		if (!source) {
+			problem = Core::String("the workspace has no output source ") + sourceId;
+			return false;
+		}
+		text = source->m_Tail;
+		return true;
+	}
+}

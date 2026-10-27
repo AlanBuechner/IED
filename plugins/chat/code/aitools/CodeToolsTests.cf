@@ -1,0 +1,112 @@
+// The code tools' reading of language servers' answers (docs/13 "Navigating code"): names split and matched with their
+// owners, lines numbered, a hover's declaration and doc summary, semantic token modifiers, and the tools' schemas.
+
+include "Catalog.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.codetools")]
+class CodeToolsTests {
+	[test("names_and_owners")]
+	public static void TestNames() {
+		Core::Array<Core::String> parts = Ai::NameParts(Text("Ai::Ring.Push"));
+		assert_true(parts.Count() == 3 && parts[0].View() == "Ai" && parts[2].View() == "Push", "split at :: and .");
+		assert_true(Ai::QualifiedMatches(Text("game::Ring::Push"), Text("Ring::Push")), "a suffix of whole parts");
+		assert_true(Ai::QualifiedMatches(Text("game::Ring::Push"), Text("game.Ring.Push")), "dots read as ::");
+		assert_true(!Ai::QualifiedMatches(Text("game::BigRing::Push"), Text("Ring::Push")), "not part of a name");
+		Ai::CodeSymbol symbol;
+		symbol.m_Name = Core::String("Ring::Push");
+		symbol.m_Container = Core::String("game");
+		assert_true(symbol.Qualified().View() == "game::Ring::Push", "an out-of-line definition's name under its namespace");
+		assert_true(Core::StringView(Ai::SymbolKindName(6)) == "method" && Core::StringView(Ai::SymbolKindName(99)) == "symbol", "kinds");
+		assert_true(Ai::HoldsMembers(5) && Ai::HoldsMembers(10) && !Ai::HoldsMembers(12), "classes and enums hold members, functions do not");
+		Core::Array<Core::String> words = Ai::NameWords(Text("LanguageServerPool"));
+		assert_true(words.Count() == 3 && words[0].View() == "Language" && words[2].View() == "Pool", "camel case");
+		words = Ai::NameWords(Text("LSPPool of the ws_id"));
+		assert_true(words.Count() == 3 && words[0].View() == "LSP" && words[1].View() == "Pool" && words[2].View() == "the", "an acronym, spaces and underscores; short words left out");
+	}
+
+	[test("paths_given")]
+	public static void TestPaths() {
+		IED::Workspace ws;
+		ws.m_Root = Core::String("C:/Work/Game");
+		Ai::CodeQuery query = Ai::CodeQuery(ws);
+		assert_true(query.FileOf(Text("src\\a.cf")).View() == "src/a.cf", "a workspace path, normalized");
+		assert_true(query.FileOf(Text("C:\\Work\\Game\\src\\a.cf")).View() == "src/a.cf", "the workspace's file by its absolute path");
+		Core::String outside = query.FileOf(Text("C:\\Lib\\Bedrock\\core.ch"));
+		assert_true(outside.View().StartsWith(Text("file:")) && outside.View().EndsWith(Text("/Lib/Bedrock/core.ch")), outside.CStr());
+		assert_true(query.FileOf(Text("file:///C:/Lib/x.ch")).View() == "file:///C:/Lib/x.ch", "a file: URI as it is");
+	}
+
+	[test("numbered_spans")]
+	public static void TestNumbered() {
+		Core::StringView text = Text("a\r\nb\nc\n");
+		assert_true(Ai::NumberedSpan(text, 1, 2, 10).View() == "2\tb\n3\tc\n", "from 1, CR left out, no phantom last line");
+		Core::String cut = Ai::NumberedSpan(text, 0, 2, 2);
+		assert_true(cut.View().StartsWith(Text("1\ta\n2\tb\n[stopped at line 2 of 1-3; fs_read with offset 3 reads on]")), cut.CStr());
+		Ai::CodeSpan at;
+		at.m_StartLine = 4;
+		at.m_StartCharacter = 7;
+		assert_true(Ai::PositionParams(at, Text("\"context\": {}")).View() == "{\"position\": {\"line\": 4, \"character\": 7}, \"context\": {}}", "a position, then more");
+	}
+
+	[test("uses_as_code")]
+	public static void TestUsesAsCode() {
+		Core::StringView name = Text("LspPool");
+		assert_true(Ai::UsesAsCode(Text("\t\tlsp = new LspPool(self);"), name), "constructed");
+		assert_true(Ai::UsesAsCode(Text("\tvoid LspPool::Init(Server* server) {"), name), "an owner's qualifier");
+		assert_true(Ai::UsesAsCode(Text("\tpublic LspPool* lsp;"), name), "a pointer declared");
+		assert_true(Ai::UsesAsCode(Text("void Fill(LspPool& pool)"), name), "a reference parameter");
+		assert_true(Ai::UsesAsCode(Text("Core::Array<LspPool*> pools = Ied::LspPool::All();"), Text("All")), "a call through ::");
+		assert_true(Ai::UsesAsCode(Text("server->lsp->Serving(doc)"), Text("Serving")), "a call through ->");
+		assert_true(!Ai::UsesAsCode(Text("// LspPool(self) in a comment"), name), "a comment line");
+		assert_true(!Ai::UsesAsCode(Text("say(\"LspPool(self)\");"), name), "inside a string");
+		assert_true(!Ai::UsesAsCode(Text("the LspPool alone"), name), "a bare word");
+		assert_true(!Ai::UsesAsCode(Text("MyLspPool(1)"), name), "part of a longer name");
+		assert_true(!Ai::UsesAsCode(Text("LspPool *"), name), "a star with nothing declared");
+	}
+
+	[test("hover_declaration_and_summary")]
+	public static void TestHover() {
+		Core::StringView clangd = Text("### field `values`\n\n---\nType: `int[64]`\n\nOffset: 8 bytes\n\nSize: 256 bytes, alignment 4 bytes\n\n---\n```cpp\n// In Ring\nprivate: int values[64]\n```");
+		assert_true(Ai::HoverDeclaration(clangd).View() == "private: int values[64]", "the code block, its comments left out");
+		assert_true(Ai::HoverSummary(clangd).IsEmpty(), "labelled facts are no doc comment");
+		Core::StringView method = Text("### instance-method `Count`\n\n---\n\xE2\x86\x92 `int`\n\nHow many values it holds.\n\n---\n```cpp\npublic: int Count() const\n```");
+		assert_true(Ai::HoverSummary(method).View() == "How many values it holds.", Ai::HoverSummary(method).CStr());
+		assert_true(Ai::HoverDeclaration(Text("```c4\nfunction int64 Count(\n  int a)\n```\nmore")).View() == "function int64 Count( int a)", "lines joined");
+		assert_true(Ai::HoverDeclaration(Text("just prose")).IsEmpty(), "no block, no declaration");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode marked = Serialization::ReadJson(Text("{\"contents\": [{\"language\": \"cpp\", \"value\": \"int x\"}, \"the x\"]}"), *doc).root;
+		assert_true(Ai::HoverText(marked).View() == "```cpp\nint x\n```\n\nthe x", "MarkedStrings joined as markdown");
+	}
+
+	[test("semantic_token_modifiers")]
+	public static void TestTokens() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode legend = Serialization::ReadJson(Text("{\"tokenTypes\": [\"method\"], \"tokenModifiers\": [\"declaration\", \"static\", \"readonly\"]}"), *doc).root;
+		Serialization::DomNode data = Serialization::ReadJson(Text("[2, 4, 5, 0, 3, 0, 10, 3, 0, 4, 1, 2, 4, 0, 0]"), *doc).root;
+		Core::Array<Ai::CodeToken> tokens = Ai::DecodeTokens(data, legend);
+		assert_eq((int64)3, tokens.Count(), "five numbers a token");
+		assert_true(tokens[0].m_Line == 2 && tokens[0].m_Character == 4 && tokens[0].m_Modifiers.Count() == 2 && tokens[0].m_Modifiers[1].View() == "static", "declaration, static");
+		assert_true(tokens[1].m_Line == 2 && tokens[1].m_Character == 14 && tokens[1].m_Modifiers[0].View() == "readonly", "on the same line: relative column");
+		assert_true(tokens[2].m_Line == 3 && tokens[2].m_Character == 2 && tokens[2].m_Modifiers.IsEmpty(), "a new line: its own column");
+	}
+
+	[test("tools_load_core_and_deferred")]
+	public static void TestTools() {
+		Ai::ToolRegistry* registry = Ai::CoreTools();
+		assert_eq((int64)0, registry->m_Problems.Count(), registry->m_Problems.IsEmpty() ? "" : registry->m_Problems[0].CStr());
+		Core::String request = registry->RequestTools(Ai::ChatMode::Plan, false);
+		assert_true(request.View().Contains(Text("\"name\":\"code_read_symbol\"")) && request.View().Contains(Text("\"name\":\"code_references\"")), "the core code tools, in Plan mode too");
+		assert_true(request.View().Contains(Text("\"name\":\"code_members\"")) && request.View().Contains(Text("\"name\":\"code_call_hierarchy\"")), "with members and the call hierarchy, which a model never loads itself");
+		Core::String asked = registry->RequestTools(Ai::ChatMode::Ask, false);
+		const int64 hover = asked.View().IndexOf(Text("\"name\":\"code_hover\""));
+		assert_true(hover >= 0 && asked.View().Substring(hover, asked.ByteLength() - hover).IndexOf(Text("[deferred]")) < 200, "the rest of the code group is deferred");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		assert_eq((int64)0, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"outgoing\", \"depth\": 2}"), *doc).root).Count(), "a good call");
+		assert_eq((int64)1, registry->Check(registry->Find(Text("code_call_hierarchy")), Serialization::ReadJson(Text("{\"symbol\": \"Ring::Push\", \"direction\": \"up\"}"), *doc).root).Count(), "a direction it does not take");
+		Core::Array<Core::String> suggested = registry->Suggest(Text("read_file"), Ai::ChatMode::Ask);
+		assert_true(suggested.Contains(Core::String("fs_read")), "a file tool still suggested for read_file beside the longer code tools");
+		assert_true(registry->Suggest(Text("find_references"), Ai::ChatMode::Ask).Contains(Core::String("code_references")), "a shared word");
+	}
+}

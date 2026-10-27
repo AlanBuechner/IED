@@ -1,0 +1,148 @@
+include "JsonRpc.ch"
+
+namespace Mcp
+{
+	static Message* Invalid(Core::StringView text) {
+		Message* message = new Message();
+		message->m_Kind = MessageKind::Invalid;
+		message->m_Number = -1;
+		message->m_Text = Core::String(text);
+		return message;
+	}
+
+	// One message of a read document.
+	static Message* MessageOf(const Serialization::DomNode& node, Serialization::DomDoc* doc, Core::StringView text) {
+		if (node.Kind() != Serialization::DomKind::Object || node.Member("jsonrpc").AsView() != "2.0") return Invalid(text);
+		Message* message = new Message();
+		message->m_Doc = doc;
+		message->m_Text = Core::String(text);
+		message->m_Number = -1;
+		Serialization::DomNode id = node.Member("id");
+		const bool hasId = id.IsValid() && id.Kind() != Serialization::DomKind::Null;
+		if (hasId) {
+			message->m_Id = IED::NodeJson(id);
+			if (id.Kind() == Serialization::DomKind::Int) message->m_Number = id.AsInt();
+		}
+		message->m_Method = Core::String(node.Member("method").AsView());
+		message->m_Params = node.Member("params");
+		message->m_Result = node.Member("result");
+		message->m_Error = node.Member("error");
+		if (!message->m_Method.IsEmpty()) message->m_Kind = hasId ? MessageKind::Request : MessageKind::Notification;
+		else if (hasId && (message->m_Result.IsValid() || message->m_Error.IsValid())) message->m_Kind = MessageKind::Response;
+		else if (!hasId && message->m_Error.IsValid()) message->m_Kind = MessageKind::Response;   // an error about a message it could not read
+		else message->m_Kind = MessageKind::Invalid;
+		return message;
+	}
+
+	Core::Array<Message*> ReadMessages(Core::StringView text) {
+		Core::Array<Message*> messages;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text, *doc);
+		if (!read.Ok()) {
+			messages.Push(Invalid(text));
+			return messages;
+		}
+		if (read.root.Kind() == Serialization::DomKind::Array) {
+			for (int64 i = 0; i < read.root.Count(); ++i) messages.Push(MessageOf(read.root.At(i), doc, IED::NodeJson(read.root.At(i)).View()));
+			return messages;
+		}
+		messages.Push(MessageOf(read.root, doc, text));
+		return messages;
+	}
+
+	Core::String RequestText(int64 id, Core::StringView method, Core::StringView paramsJson) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.IntField("id", id);
+		json.Field("method", method);
+		if (!paramsJson.IsEmpty()) json.RawField("params", paramsJson);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String NotificationText(Core::StringView method, Core::StringView paramsJson) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.Field("method", method);
+		if (!paramsJson.IsEmpty()) json.RawField("params", paramsJson);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ResultText(Core::StringView idJson, Core::StringView resultJson) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.RawField("id", idJson);
+		json.RawField("result", resultJson);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ErrorText(Core::StringView idJson, int64 code, Core::StringView message) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.RawField("id", idJson.IsEmpty() ? Core::StringView("null") : idJson);
+		json.Key(Core::StringView("error"));
+		json.BeginObject();
+		json.IntField("code", code);
+		json.Field("message", message);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Describe(const Serialization::DomNode& error) {
+		Core::StringBuilder out;
+		Core::StringView text = error.Member("message").AsView();
+		out.Append(text.IsEmpty() ? Core::StringView("an error with no message") : text);
+		if (error.Member("code").IsValid()) {
+			out.Append(" (code ");
+			out.AppendInt(error.Member("code").AsInt());
+			out.Append(")");
+		}
+		return out.ToString();
+	}
+
+	Core::String InitializeParams(Core::StringView clientVersion) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("protocolVersion", c_ProtocolVersion);
+		json.Key(Core::StringView("capabilities"));
+		json.BeginObject();
+		json.EndObject();
+		json.Key(Core::StringView("clientInfo"));
+		json.BeginObject();
+		json.Field("name", "IED");
+		json.Field("title", "IED");
+		json.Field("version", clientVersion);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool KnownVersion(Core::StringView version) { return version == "2025-06-18" || version == "2025-03-26" || version == "2024-11-05"; }
+
+	void LineSplitter::Feed(Core::StringView bytes) { m_Pending.Append(bytes); }
+
+	bool LineSplitter::Next(Core::String& line) {
+		for (;;) {
+			const int64 end = m_Pending.View().IndexOf('\n', 0);
+			if (end < 0) return false;
+			Core::StringView found = m_Pending.View().Substring(0, end);
+			if (found.EndsWith(Core::StringView("\r"))) found = found.Substring(0, found.ByteLength() - 1);
+			line = Core::String(found);
+			m_Pending = Core::String(m_Pending.View().Substring(end + 1, m_Pending.ByteLength() - end - 1));
+			if (!line.View().Trimmed().IsEmpty()) return true;
+		}
+	}
+
+	Core::String LineSplitter::Rest() {
+		Core::String rest = m_Pending;
+		m_Pending = Core::String();
+		return Core::String(rest.View().Trimmed());
+	}
+}

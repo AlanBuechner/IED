@@ -1,0 +1,128 @@
+// How busy each thread is (T-PRF-16): the time inside its top-level zones, the longest stretch between them, the time
+// it waited for locks and its costliest zones; and how many threads were busy at once on average, which says whether
+// the work runs side by side or one thread at a time.
+include "Investigate.ch"
+
+namespace Profiler
+{
+	const int32 c_ThreadTopZones = 3;
+
+	class ThreadUse
+	{
+		public int64 m_Track;
+		public int64 m_Busy;
+		public int64 m_Zones;
+		public int64 m_LongestIdle;
+		public int64 m_LongestIdleAt = -1;
+		public int64 m_Wait;
+		public Core::HashMap<uint64, int64> m_SelfOf;
+		public Core::Array<uint64> m_Sites;
+	}
+
+	// The time a thread spent waiting for locks within a range.
+	static int64 WaitingIn(const Capture& capture, int64 track, Range range) {
+		int64 total = 0;
+		for (const LockInfo* lock : capture.m_LockList) {
+			LockTrack* holder = nullptr;
+			if (!lock->m_TrackOf.TryGet((int32)track, holder)) continue;
+			for (int64 i = FirstReleasedAfter(holder, range.m_Begin, capture.m_LastTicks); i < holder->m_Spans.Count(); ++i) {
+				const LockSpan& span = holder->m_Spans[i];
+				if (span.m_Wait >= range.m_End) break;
+				const int64 from = span.m_Wait > range.m_Begin ? span.m_Wait : range.m_Begin;
+				const int64 to = span.m_Obtain < range.m_End ? span.m_Obtain : range.m_End;
+				if (to > from) total += to - from;
+			}
+			if (holder->m_WaitingSince >= 0 && holder->m_WaitingSince < range.m_End) total += range.m_End - (holder->m_WaitingSince > range.m_Begin ? holder->m_WaitingSince : range.m_Begin);
+		}
+		return total;
+	}
+
+	static void TopLevelUse(const Capture& capture, const ZoneLevel* top, Range range, ThreadUse* use) {
+		const int64 stop = top->FirstStartingAt(range.m_End);
+		int64 previousEnd = -1;
+		for (int64 i = top->FirstEndingAfter(range.m_Begin); i < stop; ++i) {
+			const int64 start = top->m_Starts[i] > range.m_Begin ? top->m_Starts[i] : range.m_Begin;
+			int64 end = top->EndOr(i, capture.m_LastTicks);
+			if (end > range.m_End) end = range.m_End;
+			use->m_Busy += end - start;
+			if (previousEnd >= 0 && start - previousEnd > use->m_LongestIdle) {
+				use->m_LongestIdle = start - previousEnd;
+				use->m_LongestIdleAt = previousEnd;
+			}
+			previousEnd = end;
+		}
+	}
+
+	static void SelfBySite(const ThreadTrack* track, Range range, ThreadUse* use) {
+		for (const ZoneLevel* level : track->m_Levels) {
+			const int64 stop = level->FirstStartingAt(range.m_End);
+			const int64 first = level->FirstStartingAt(range.m_Begin);
+			use->m_Zones += stop - first;
+			for (int64 i = first; i < stop; ++i) {
+				if (level->m_Ends[i] == c_Open) continue;
+				const uint64 site = (uint64)level->m_Sites[i];
+				int64* known = use->m_SelfOf.Find(site);
+				if (known) *known += level->m_Selfs[i];
+				else {
+					use->m_SelfOf.Insert(site, level->m_Selfs[i]);
+					use->m_Sites.Push(site);
+				}
+			}
+		}
+		use->m_Sites.SortBy([use](const uint64& a, const uint64& b) -> bool { return *use->m_SelfOf.Find(a) > *use->m_SelfOf.Find(b); });
+	}
+
+	static void WriteUse(IED::JsonWriter& json, const Capture& capture, const ThreadUse* use, Range range) {
+		json.BeginObject();
+		json.IntField("track", use->m_Track);
+		const FrameSet* frames = MainFrameSet(capture);
+		json.BoolField("marksFrames", frames && (int64)frames->m_Track == use->m_Track);
+		json.Field("name", TrackLabel(capture, capture.m_Tracks[use->m_Track], range.m_Begin).View());
+		json.IntField("busyNs", capture.m_Clock.Ns(use->m_Busy));
+		NumberField(json, "share", (double)use->m_Busy / (double)range.Length(), 4);
+		json.IntField("zones", use->m_Zones);
+		json.IntField("longestIdleNs", capture.m_Clock.Ns(use->m_LongestIdle));
+		json.IntField("longestIdleAtNs", use->m_LongestIdleAt < 0 ? -1 : capture.m_Clock.Ns(use->m_LongestIdleAt));
+		json.IntField("waitNs", capture.m_Clock.Ns(use->m_Wait));
+		json.Key(Core::StringView("top"));
+		json.BeginArray();
+		for (int64 k = 0; k < use->m_Sites.Count() && k < (int64)c_ThreadTopZones; ++k) {
+			json.BeginObject();
+			json.Field("name", capture.SiteName(use->m_Sites[k]));
+			json.IntField("selfNs", capture.m_Clock.Ns(*use->m_SelfOf.Find(use->m_Sites[k])));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	Core::String Threads(const Capture& capture, int64 fromNs, int64 toNs) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		Core::Array<ThreadUse*> uses;
+		int64 busy = 0;
+		for (int64 t = 0; t < capture.m_Tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.m_Tracks[t];
+			if (track->m_Levels.IsEmpty()) continue;
+			ThreadUse* use = new ThreadUse();
+			use->m_Track = t;
+			TopLevelUse(capture, track->m_Levels[0], range, use);
+			SelfBySite(track, range, use);
+			if (use->m_Busy == 0 && use->m_Zones == 0) continue;
+			use->m_Wait = WaitingIn(capture, t, range);
+			busy += use->m_Busy;
+			uses.Push(use);
+		}
+		uses.SortBy([](ThreadUse* a, ThreadUse* b) -> bool { return a->m_Busy > b->m_Busy; });
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("fromNs", capture.m_Clock.Ns(range.m_Begin));
+		json.IntField("toNs", capture.m_Clock.Ns(range.m_End > capture.m_LastTicks ? capture.m_LastTicks : range.m_End));
+		NumberField(json, "meanBusyThreads", (double)busy / (double)range.Length(), 2);
+		json.Key(Core::StringView("threads"));
+		json.BeginArray();
+		for (const ThreadUse* use : uses) WriteUse(json, capture, use, range);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

@@ -1,0 +1,57 @@
+include "WorkingDiff.ch"
+
+namespace Git
+{
+	// The repository's changes under a line naming it; git's words when it cannot read them. The lock is held.
+	static void AppendRepo(GitPlugin* git, GitRepo* repo, Core::StringBuilder& out) {
+		out.Append("# repository ");
+		out.Append(repo->m_Relative.IsEmpty() ? Core::StringView(".") : repo->m_Relative.View());
+		out.Append("\n");
+		try {
+			GitRun diff = git->RunOrThrow(repo, GitArgs("diff", "--no-ext-diff", "HEAD"), c_GitReadTimeoutMs, IED::ErrorCode::Unavailable);
+			Core::Array<Core::String> untracked = GitArgs("ls-files", "--others", "--exclude-standard", "--");
+			untracked.Push(Core::String(c_NotWorkingFiles));
+			GitRun others = git->RunOrThrow(repo, untracked, c_GitReadTimeoutMs, IED::ErrorCode::Unavailable);
+			out.Append(diff.m_Output.IsEmpty() ? Core::StringView("(no changes to tracked files)\n") : diff.m_Output.View());
+			if (!others.m_Output.IsEmpty()) {
+				out.Append("# untracked files\n");
+				out.Append(others.m_Output.View());
+			}
+		}
+		catch (IED::RpcError& error) {
+			out.Append("(git could not read it: ");
+			out.Append(error.m_Message.View());
+			out.Append(")\n");
+		}
+	}
+
+	Core::StringView CutAtLine(Core::StringView text, int64 most, bool& truncated) {
+		truncated = text.ByteLength() > most;
+		if (!truncated) return text;
+		int64 cut = most;
+		while (cut > 0 && text.ByteAt(cut - 1) != '\n') cut -= 1;
+		return text.Substring(0, cut);
+	}
+
+	IED::Result WorkingDiff(GitPlugin* git, const Serialization::DomNode& args) {
+		Threading::LockGuard guard(git->m_Lock);
+		GitWorkspace* found = git->Find(args.Member("wsId").AsView());
+		if (!found) return IED::Refusal(Core::StringView("the workspace has no git side"));
+		if (!found->m_Error.IsEmpty())
+			return IED::Refusal(found->m_Error == "untrusted" ? Core::StringView("git does not run in an untrusted workspace") : found->m_Error.View());
+		int64 most = args.Member("maxBytes").AsInt();
+		if (most <= 0) most = c_WorkingDiffDefaultBytes;
+		Core::Array<GitRepo*> repos = found->m_Repos;
+		Core::StringBuilder out;
+		for (GitRepo* repo : repos) AppendRepo(git, repo, out);
+		bool truncated = false;
+		Core::String text = out.ToString();
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("text", CutAtLine(text.View(), most, truncated));
+		json.BoolField("truncated", truncated);
+		json.IntField("repos", repos.Count());
+		json.EndObject();
+		return IED::Answer(json.View());
+	}
+}

@@ -1,0 +1,65 @@
+include "Merge.ch"
+
+namespace Ied
+{
+	static Serialization::DomNode Copy(Serialization::DomDoc& doc, const Serialization::DomNode& node);
+
+	static Serialization::DomNode CopyContainer(Serialization::DomDoc& doc, const Serialization::DomNode& node) {
+		const bool object = node.Kind() == Serialization::DomKind::Object;
+		Serialization::DomNode copy = object ? doc.NewObject() : doc.NewArray();
+		for (int64 i = 0; i < node.Count(); ++i) {
+			if (object) doc.AddMember(copy, node.KeyAt(i), Copy(doc, node.ValueAt(i)));
+			else doc.Add(copy, Copy(doc, node.At(i)));
+		}
+		return copy;
+	}
+
+	static Serialization::DomNode Copy(Serialization::DomDoc& doc, const Serialization::DomNode& node) {
+		const Serialization::DomKind kind = node.Kind();
+		if (kind == Serialization::DomKind::Object || kind == Serialization::DomKind::Array) return CopyContainer(doc, node);
+		if (kind == Serialization::DomKind::Bool) return doc.NewBool(node.AsBool());
+		if (kind == Serialization::DomKind::Int) return doc.NewInt(node.AsInt());
+		if (kind == Serialization::DomKind::Float) return doc.NewFloat(node.AsFloat());
+		if (kind == Serialization::DomKind::String) return doc.NewString(node.AsView());
+		return doc.NewNull();
+	}
+
+	static bool IsObject(const Serialization::DomNode& node) { return node.Kind() == Serialization::DomKind::Object; }
+
+	// `base`'s members, each replaced or (when both are objects) merged with `over`'s, then `over`'s new ones.
+	static Serialization::DomNode MergeObjects(Serialization::DomDoc& doc, const Serialization::DomNode& base, const Serialization::DomNode& over) {
+		Serialization::DomNode merged = doc.NewObject();
+		for (int64 i = 0; i < base.Count(); ++i) {
+			Serialization::DomNode replacement = over.Member(Core::String(base.KeyAt(i)).CStr());
+			Serialization::DomNode value = !replacement.IsValid() ? Copy(doc, base.ValueAt(i))
+				: IsObject(replacement) && IsObject(base.ValueAt(i)) ? MergeObjects(doc, base.ValueAt(i), replacement) : Copy(doc, replacement);
+			doc.AddMember(merged, base.KeyAt(i), value);
+		}
+		for (int64 i = 0; i < over.Count(); ++i)
+			if (!base.Member(Core::String(over.KeyAt(i)).CStr()).IsValid()) doc.AddMember(merged, over.KeyAt(i), Copy(doc, over.ValueAt(i)));
+		return merged;
+	}
+
+	static Serialization::DomNode Appended(Serialization::DomDoc& doc, const Serialization::DomNode& base, const Serialization::DomNode& over) {
+		Serialization::DomNode list = doc.NewArray();
+		for (int64 i = 0; i < base.Count(); ++i) doc.Add(list, Copy(doc, base.At(i)));
+		for (int64 i = 0; i < over.Count(); ++i) doc.Add(list, Copy(doc, over.At(i)));
+		return list;
+	}
+
+	Core::String MergeJson(Core::StringView base, Core::StringView over, MergeKind kind) {
+		Serialization::DomDoc baseDoc;
+		Serialization::DomDoc overDoc;
+		Serialization::ReadResult a = Serialization::ReadJson(base, baseDoc);
+		Serialization::ReadResult b = Serialization::ReadJson(over, overDoc);
+		if (!a.Ok() || !b.Ok() || kind == MergeKind::Replace) return Core::String(over);
+		const bool objects = IsObject(a.root) && IsObject(b.root);
+		const bool lists = a.root.Kind() == Serialization::DomKind::Array && b.root.Kind() == Serialization::DomKind::Array;
+		if ((kind == MergeKind::Merge && !objects) || (kind == MergeKind::Append && !lists)) return Core::String(over);
+		Serialization::DomDoc result;
+		Serialization::DomNode merged = kind == MergeKind::Merge ? MergeObjects(result, a.root, b.root) : Appended(result, a.root, b.root);
+		Core::StringBuilder text;
+		Serialization::WriteJson(merged, &text, 0);
+		return text.ToString();
+	}
+}

@@ -1,0 +1,373 @@
+include "When.ch"
+
+namespace Ied
+{
+	WhenValue WhenNone() {
+		WhenValue value;
+		value.m_Kind = WhenKind::None;
+		return value;
+	}
+
+	WhenValue WhenBool(bool flag) {
+		WhenValue value;
+		value.m_Kind = WhenKind::Bool;
+		value.m_Flag = flag;
+		return value;
+	}
+
+	WhenValue WhenNumber(double number) {
+		WhenValue value;
+		value.m_Kind = WhenKind::Number;
+		value.m_Number = number;
+		return value;
+	}
+
+	WhenValue WhenText(Core::StringView text) {
+		WhenValue value;
+		value.m_Kind = WhenKind::Text;
+		value.m_Text = Core::String(text);
+		return value;
+	}
+
+	WhenValue WhenFromJson(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		if (!read.Ok()) return WhenNone();
+		Serialization::DomNode node = read.root;
+		if (node.Kind() == Serialization::DomKind::Bool) return WhenBool(node.AsBool());
+		if (node.Kind() == Serialization::DomKind::Int || node.Kind() == Serialization::DomKind::Float) return WhenNumber(node.AsFloat());
+		if (node.Kind() == Serialization::DomKind::String) return WhenText(node.AsView());
+		return WhenNone();
+	}
+
+	// --- Tokens ------------------------------------------------------------------------------------------------------
+
+	enum class TokenKind { Op, Value, Key, Pattern }
+
+	class WhenToken
+	{
+		public TokenKind m_Kind;
+		public Core::String m_Text;      // an operator, a key's name, a pattern's source
+		public WhenValue m_Value;
+		public Core::String m_Flags;     // a pattern's
+	}
+
+	static const char*[12] c_Operators = { "&&", "||", "==", "!=", "<=", ">=", "=~", "<", ">", "!", "(", ")" };
+
+	static bool IsSpace(int32 c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+	static bool IsDigit(int32 c) { return c >= '0' && c <= '9'; }
+	static bool IsWordStart(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '$'; }
+	static bool IsWordPart(int32 c) { return IsWordStart(c) || IsDigit(c) || c == '.' || c == '-'; }
+
+	static double NumberOf(Core::StringView text) {
+		double value = 0;
+		double scale = 0;
+		bool negative = false;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == '-') negative = true;
+			else if (c == '.') scale = 1;
+			else if (scale > 0) {
+				scale /= 10;
+				value += (c - '0') * scale;
+			}
+			else value = value * 10 + (c - '0');
+		}
+		return negative ? -value : value;
+	}
+
+	class WhenTokenizer
+	{
+		[operator("create")] public void Init(Core::StringView text) { this.m_Text = text; }
+
+		public bool Run(Core::Array<WhenToken>& tokens, Core::String& error) {
+			int64 at = 0;
+			while (at < m_Text.ByteLength()) {
+				const int32 c = m_Text.ByteAt(at);
+				if (IsSpace(c)) at += 1;
+				else if (!Next(at, tokens, error)) return false;
+			}
+			return true;
+		}
+
+		private bool Next(int64& at, Core::Array<WhenToken>& tokens, Core::String& error) {
+			for (const char* op : c_Operators) {
+				if (!m_Text.Substring(at, m_Text.ByteLength() - at).StartsWith(Core::StringView(op))) continue;
+				WhenToken token;
+				token.m_Kind = TokenKind::Op;
+				token.m_Text = Core::String(op);
+				tokens.Push(token);
+				at += Core::StringView(op).ByteLength();
+				return Core::StringView(op) == "=~" ? PatternToken(at, tokens, error) : true;
+			}
+			const int32 c = m_Text.ByteAt(at);
+			if (c == '\'' || c == '"') return StringToken(at, tokens, error);
+			if (IsDigit(c) || (c == '-' && at + 1 < m_Text.ByteLength() && IsDigit(m_Text.ByteAt(at + 1)))) return NumberToken(at, tokens);
+			if (IsWordStart(c)) return WordToken(at, tokens);
+			error = Fail("unexpected character", at);
+			return false;
+		}
+
+		private bool StringToken(int64& at, Core::Array<WhenToken>& tokens, Core::String& error) {
+			const int32 quote = m_Text.ByteAt(at);
+			const int64 start = at;
+			Core::StringBuilder value;
+			at += 1;
+			while (at < m_Text.ByteLength() && m_Text.ByteAt(at) != quote) {
+				if (m_Text.ByteAt(at) == '\\' && at + 1 < m_Text.ByteLength()) at += 1;
+				value.AppendByte(m_Text.ByteAt(at));
+				at += 1;
+			}
+			if (at >= m_Text.ByteLength()) {
+				error = Fail("unterminated string", start);
+				return false;
+			}
+			at += 1;
+			WhenToken token;
+			token.m_Kind = TokenKind::Value;
+			token.m_Value = WhenText(value.View());
+			tokens.Push(token);
+			return true;
+		}
+
+		private bool NumberToken(int64& at, Core::Array<WhenToken>& tokens) {
+			const int64 start = at;
+			if (m_Text.ByteAt(at) == '-') at += 1;
+			while (at < m_Text.ByteLength() && IsDigit(m_Text.ByteAt(at))) at += 1;
+			if (at + 1 < m_Text.ByteLength() && m_Text.ByteAt(at) == '.' && IsDigit(m_Text.ByteAt(at + 1))) {
+				at += 1;
+				while (at < m_Text.ByteLength() && IsDigit(m_Text.ByteAt(at))) at += 1;
+			}
+			WhenToken token;
+			token.m_Kind = TokenKind::Value;
+			token.m_Value = WhenNumber(NumberOf(m_Text.Substring(start, at - start)));
+			tokens.Push(token);
+			return true;
+		}
+
+		private bool WordToken(int64& at, Core::Array<WhenToken>& tokens) {
+			const int64 start = at;
+			while (at < m_Text.ByteLength() && IsWordPart(m_Text.ByteAt(at))) at += 1;
+			Core::StringView word = m_Text.Substring(start, at - start);
+			WhenToken token;
+			if (word == "true" || word == "false") {
+				token.m_Kind = TokenKind::Value;
+				token.m_Value = WhenBool(word == "true");
+			}
+			else {
+				token.m_Kind = TokenKind::Key;
+				token.m_Text = Core::String(word);
+			}
+			tokens.Push(token);
+			return true;
+		}
+
+		private bool PatternToken(int64& at, Core::Array<WhenToken>& tokens, Core::String& error) {
+			while (at < m_Text.ByteLength() && IsSpace(m_Text.ByteAt(at))) at += 1;
+			if (at >= m_Text.ByteLength() || m_Text.ByteAt(at) != '/') {
+				error = Fail("=~ needs a /regex/", at);
+				return false;
+			}
+			const int64 start = at;
+			int64 end = at + 1;
+			while (end < m_Text.ByteLength() && m_Text.ByteAt(end) != '/') end += m_Text.ByteAt(end) == '\\' ? 2 : 1;
+			if (end >= m_Text.ByteLength()) {
+				error = Fail("unterminated regex", start);
+				return false;
+			}
+			WhenToken token;
+			token.m_Kind = TokenKind::Pattern;
+			token.m_Text = Core::String(m_Text.Substring(start + 1, end - start - 1));
+			at = end + 1;
+			while (at < m_Text.ByteLength() && m_Text.ByteAt(at) >= 'a' && m_Text.ByteAt(at) <= 'z') {
+				token.m_Flags.Append(m_Text.Substring(at, 1));
+				at += 1;
+			}
+			tokens.Push(token);
+			return true;
+		}
+
+		private Core::String Fail(const char* what, int64 at) const {
+			Core::StringBuilder message;
+			message.Append(what);
+			message.Append(" at ");
+			message.AppendInt(at);
+			message.Append(" in '");
+			message.Append(m_Text);
+			message.Append("'");
+			return message.ToString();
+		}
+
+		private Core::StringView m_Text;
+	}
+
+	// --- Evaluation --------------------------------------------------------------------------------------------------
+
+	static bool Truthy(const WhenValue& value) {
+		if (value.m_Kind == WhenKind::Bool) return value.m_Flag;
+		if (value.m_Kind == WhenKind::Number) return value.m_Number != 0;
+		if (value.m_Kind == WhenKind::Text) return !value.m_Text.IsEmpty();
+		return false;
+	}
+
+	// A value as JavaScript's String() writes it, for comparing values of different kinds.
+	static Core::String TextOf(const WhenValue& value) {
+		if (value.m_Kind == WhenKind::Text) return value.m_Text;
+		if (value.m_Kind == WhenKind::Bool) return Core::String(value.m_Flag ? "true" : "false");
+		Core::StringBuilder out;
+		const int64 whole = (int64)value.m_Number;
+		if ((double)whole == value.m_Number) out.AppendInt(whole);
+		else out.AppendDouble(value.m_Number, 6);
+		return out.ToString();
+	}
+
+	static bool Equal(const WhenValue& a, const WhenValue& b) {
+		if (a.m_Kind == WhenKind::None || b.m_Kind == WhenKind::None) return a.m_Kind == b.m_Kind;
+		if (a.m_Kind == WhenKind::Number && b.m_Kind == WhenKind::Number) return a.m_Number == b.m_Number;
+		return TextOf(a).View() == TextOf(b).View();
+	}
+
+	static double NumericOf(const WhenValue& value) {
+		if (value.m_Kind == WhenKind::Number) return value.m_Number;
+		if (value.m_Kind == WhenKind::Bool) return value.m_Flag ? 1 : 0;
+		if (value.m_Kind == WhenKind::Text) return NumberOf(value.m_Text.View());
+		return 0;
+	}
+
+	class WhenParser
+	{
+		[operator("create")] public void Init(const Core::Array<WhenToken>& tokens, const WhenLookup& lookup, Core::StringView clause) {
+			this.m_Tokens = tokens;
+			this.m_Lookup = lookup;
+			this.m_Clause = clause;
+			this.m_At = 0;
+		}
+
+		public bool Parse(bool& result, Core::String& error) {
+			if (!Or(result)) {
+				error = m_Problem;
+				return false;
+			}
+			if (m_At < m_Tokens.Count()) {
+				error = Fail(((Core::String("unexpected '") + m_Tokens[m_At].m_Text.View()) + "'").View());
+				return false;
+			}
+			return true;
+		}
+
+		private bool Peek(const char* op) const { return m_At < m_Tokens.Count() && m_Tokens[m_At].m_Kind == TokenKind::Op && m_Tokens[m_At].m_Text.View() == op; }
+
+		private bool Or(bool& result) {
+			if (!And(result)) return false;
+			while (Peek("||")) {
+				m_At += 1;
+				bool right = false;
+				if (!And(right)) return false;
+				result = result || right;
+			}
+			return true;
+		}
+
+		private bool And(bool& result) {
+			if (!Unary(result)) return false;
+			while (Peek("&&")) {
+				m_At += 1;
+				bool right = false;
+				if (!Unary(right)) return false;
+				result = result && right;
+			}
+			return true;
+		}
+
+		private bool Unary(bool& result) {
+			if (!Peek("!")) return Primary(result);
+			m_At += 1;
+			if (!Unary(result)) return false;
+			result = !result;
+			return true;
+		}
+
+		private bool Primary(bool& result) {
+			if (Peek("(")) {
+				m_At += 1;
+				if (!Or(result)) return false;
+				if (!Peek(")")) return Failed(Core::StringView("missing ')'"));
+				m_At += 1;
+				return true;
+			}
+			WhenValue left;
+			if (!Operand(left)) return false;
+			if (m_At < m_Tokens.Count() && m_Tokens[m_At].m_Kind == TokenKind::Op && IsComparison(m_Tokens[m_At].m_Text.View())) return Compare(left, result);
+			result = Truthy(left);
+			return true;
+		}
+
+		private static bool IsComparison(Core::StringView op) { return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" || op == "=~"; }
+
+		private bool Compare(const WhenValue& left, bool& result) {
+			Core::String op = m_Tokens[m_At].m_Text;
+			m_At += 1;
+			if (op.View() == "=~") return MatchPattern(left, result);
+			WhenValue right;
+			if (!Operand(right)) return false;
+			if (op.View() == "==") result = Equal(left, right);
+			else if (op.View() == "!=") result = !Equal(left, right);
+			else if (op.View() == "<") result = NumericOf(left) < NumericOf(right);
+			else if (op.View() == "<=") result = NumericOf(left) <= NumericOf(right);
+			else if (op.View() == ">") result = NumericOf(left) > NumericOf(right);
+			else result = NumericOf(left) >= NumericOf(right);
+			return true;
+		}
+
+		private bool MatchPattern(const WhenValue& left, bool& result) {
+			if (m_At >= m_Tokens.Count() || m_Tokens[m_At].m_Kind != TokenKind::Pattern) return Failed(Core::StringView("=~ needs a /regex/"));
+			Core::StringBuilder source;
+			if (!m_Tokens[m_At].m_Flags.IsEmpty()) {
+				source.Append("(?");
+				for (int64 i = 0; i < m_Tokens[m_At].m_Flags.ByteLength(); ++i)
+					if (m_Tokens[m_At].m_Flags.View().ByteAt(i) == 'i' || m_Tokens[m_At].m_Flags.View().ByteAt(i) == 'm' || m_Tokens[m_At].m_Flags.View().ByteAt(i) == 's') source.AppendByte(m_Tokens[m_At].m_Flags.View().ByteAt(i));
+				source.Append(")");
+			}
+			source.Append(m_Tokens[m_At].m_Text.View());
+			m_At += 1;
+			Core::Regex regex = Core::Regex(source.View());
+			if (!regex.IsValid()) return Failed(Core::StringView("bad regex"));
+			result = regex.Contains(left.m_Kind == WhenKind::None ? Core::StringView("") : TextOf(left).View());
+			return true;
+		}
+
+		private bool Operand(WhenValue& value) {
+			if (m_At >= m_Tokens.Count()) return Failed(Core::StringView("unexpected end"));
+			const WhenToken& token = m_Tokens[m_At];
+			if (token.m_Kind == TokenKind::Op || token.m_Kind == TokenKind::Pattern) return Failed(((Core::String("unexpected '") + token.m_Text.View()) + "'").View());
+			m_At += 1;
+			value = token.m_Kind == TokenKind::Key ? m_Lookup(token.m_Text.View()) : token.m_Value;
+			return true;
+		}
+
+		private bool Failed(Core::StringView message) {
+			m_Problem = Fail(message);
+			return false;
+		}
+
+		private Core::String Fail(Core::StringView message) const { return ((Core::String(message) + " in '") + m_Clause) + "'"; }
+
+		private Core::Array<WhenToken> m_Tokens;
+		private WhenLookup m_Lookup;
+		private Core::StringView m_Clause;
+		private int64 m_At;
+		private Core::String m_Problem;
+	}
+
+	bool WhenHolds(Core::StringView clause, const WhenLookup& lookup, Core::String& error) {
+		Core::StringView trimmed = clause.Trimmed();
+		if (trimmed.IsEmpty()) return true;
+		Core::Array<WhenToken> tokens;
+		WhenTokenizer tokenizer = WhenTokenizer(trimmed);
+		if (!tokenizer.Run(tokens, error)) return false;
+		bool result = false;
+		WhenParser parser = WhenParser(tokens, lookup, trimmed);
+		if (!parser.Parse(result, error)) return false;
+		return result;
+	}
+}

@@ -23,7 +23,7 @@ opens it in that window.
 |---|---|
 | `main` | the program: the command line, then the app |
 | `app` | the windows, the WebView2 environment, reaching the server off the UI thread, the server watch's news |
-| `window` (`window.cf`, `view.cf`) | one window: Win32 (frame, placement, messages) and its WebView2 (settings, events, navigation policy) |
+| `window` (`Window.cf`, `View.cf`) | one window: Win32 (frame, placement, messages) and its WebView2 (settings, events, navigation policy) |
 | `com` | COM callback objects written in C4 |
 | `watch` | the thread that starts the server again (at most three times a minute) |
 | `pages` | where navigations go, the page's `window.iedDesktop` script, the app's own status pages |
@@ -31,7 +31,7 @@ opens it in that window.
 | `shortcut` | the Start menu's `IED.lnk` (`IShellLinkW`, `IPersistFile`) |
 | `folder` | File > Open Folder's picker (`IFileOpenDialog` in folder mode) |
 | `filetypes` | `.iedsln` and `.iedfed` opening in this program (`HKCU\Software\Classes`) |
-| `native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
+| `Native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
 | `resources/` | the icon (`ied.svg`, rendered to `ied.ico` by `make_icon.py`), version and manifest, compiled into the exe |
 | `tests/` | the parts that need no window (`nuke test ied-desktop`) |
 

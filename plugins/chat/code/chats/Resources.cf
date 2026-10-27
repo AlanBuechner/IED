@@ -1,0 +1,67 @@
+include "api/Plugin.ch"
+include "Resources.ch"
+
+namespace Ai
+{
+	// {chatId, ref, title?, kind?, close?, open?}: `open` false takes the tab off the chat's list; `close` the UI command
+	// that closes the thing for good, which the side panel's Force close runs with {ref}.
+	static IED::Result ChatResourceCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
+		IED::HostLock guard(*context);
+		Core::StringView ref = args.Member("ref").AsView();
+		if (ref.IsEmpty()) return IED::Refusal(Core::StringView("ref is empty"));
+		Chat* chat = nullptr;
+		try {
+			chat = chats->Get(args.Member("chatId").AsView());
+		}
+		catch (IED::RpcError& error) {
+			return IED::Refusal(error.m_Message.View());
+		}
+		const bool open = !args.Member("open").IsValid() || args.Member("open").AsBool();
+		int64 at = -1;
+		for (int64 i = 0; i < chat->m_Resources.Count(); ++i)
+			if (chat->m_Resources[i]->m_Ref.View() == ref) at = i;
+		if (!open && at >= 0) chat->m_Resources.RemoveAt(at);
+		if (open) {
+			ChatResource* resource = at >= 0 ? chat->m_Resources[at] : new ChatResource();
+			resource->m_Ref = Core::String(ref);
+			if (args.Member("title").IsValid()) resource->m_Title = Core::String(args.Member("title").AsView());
+			if (args.Member("kind").IsValid()) resource->m_Kind = Core::String(args.Member("kind").AsView());
+			if (args.Member("close").IsValid()) resource->m_Close = Core::String(args.Member("close").AsView());
+			if (at < 0) chat->m_Resources.Push(resource);
+		}
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("resources"));
+		chat->WriteResources(data);
+		data.EndObject();
+		chats->Publish(chat, "resources.changed", data.View());
+		return IED::Answer(Core::StringView("{}"));
+	}
+
+	// {chatId} -> {state, running}: `running` while a turn is in flight, waiting on an approval or answer included; a
+	// deleted chat (kept among the deleted until purged) is {state: "deleted", running: false, deleted: true}, so what a
+	// plugin kept open for it can close (docs/27).
+	static IED::Result ChatStateCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
+		IED::HostLock guard(*context);
+		Chat* chat = nullptr;
+		try {
+			chat = chats->Get(args.Member("chatId").AsView());
+		}
+		catch (IED::RpcError& error) {
+			if (chats->IsDeleted(args.Member("chatId").AsView())) return IED::Answer(Core::StringView("{\"state\":\"deleted\",\"running\":false,\"deleted\":true}"));
+			return IED::Refusal(error.m_Message.View());
+		}
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("state", ChatStateName(chat->m_State));
+		data.BoolField("running", chat->m_Run != nullptr);
+		data.EndObject();
+		return IED::Answer(data.View());
+	}
+
+	void ProvideChatResources(IED::PluginContext& context, Chats* chats) {
+		IED::PluginContext* at = &context;
+		context.Provide(Core::StringView("chat.resource"), [at, chats](const Serialization::DomNode& args) -> IED::Result { return ChatResourceCall(at, chats, args); });
+		context.Provide(Core::StringView("chat.state"), [at, chats](const Serialization::DomNode& args) -> IED::Result { return ChatStateCall(at, chats, args); });
+	}
+}

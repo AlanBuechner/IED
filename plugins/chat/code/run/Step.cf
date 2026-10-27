@@ -1,0 +1,435 @@
+include "api/Plugin.ch"
+include "Step.ch"
+include "Request.ch"
+include "Sse.ch"
+include "Dialect.ch"
+include "Repetition.ch"
+include "Probe.ch"
+
+namespace Ai
+{
+	const int32 c_StepPollMs = 250;
+	const int64 c_StepHeldBytes = 48;          // the text tail held back in case it opens a tool call
+	const int64 c_StepErrorBodyMs = 5000;
+	const int64 c_StepErrorBodyBytes = 16384;
+	const int32 c_StepLivenessMs = 2000;       // how long the server gets to say whether it has the work: a healthy vLLM
+												// answers /metrics in milliseconds even while reading a 283k prompt (measured),
+												// and a longer wait would only hold up a Stop
+	const int64 c_StepLivenessEveryMs = 1000;  // asked at most this often, however often the deadline is checked
+	const int32 c_StepLivenessMost = 10;       // asks that got nothing to read before the watchdog is believed over them:
+													// about twenty seconds of grace for a status page that is slow or busy
+	const int64 c_StepMetricsBytes = 1024 * 1024;   // a Prometheus answer read no further than this
+	const char* c_VllmRunning = "vllm:num_requests_running";   // what vLLM's gauges say about the engine
+	const char* c_VllmWaiting = "vllm:num_requests_waiting";   // its 0.32 split of that count too, below: its lines start
+													// with this name, so GaugeNamed would take them for it
+	const char* c_VllmWaitingByReason = "vllm:num_requests_waiting_by_reason";
+
+	static int64 StepNowMs() { return clock_now_ns() / 1000000; }
+
+	// What a step's stream has handed out so far, and the clocks its watchdogs read.
+	class StepStream
+	{
+		public StepResult* m_Result;
+		public const StepEvents* m_Events;
+		public ThinkSplitter m_Splitter;
+		public Core::String m_Visible;      // the prose so far, <think> blocks out
+		public int64 m_Released;            // bytes of `visible` handed out as Text
+		public bool m_CallOpened;           // a text tool call opened: what follows is withheld
+		public int64 m_StartMs;
+		public int64 m_LastByteMs;
+		public int64 m_PrefillDeadlineMs;
+		public int64 m_PrefillExtendMs;     // what a keepalive comment or a progress report adds before the first token
+		public int64 m_ThinkingChecked;     // the lengths at their last repetition check
+		public int64 m_VisibleChecked;
+		public int64 m_ArgumentsChecked;    // of call `checkedCall`, the one streaming
+		public int64 m_CheckedCall;
+		public bool m_Repeating;            // the reply is caught in a loop: the stream ends
+		public const StepRequest* m_Request;
+		// Whether the server is still asked whether it has the work: cleared when an answer carries no request gauges (or
+		// when there is no root to ask). What the last answer said is kept in `working` and used until the next ask.
+		public bool m_Askable;
+		public int64 m_LivenessAskedMs;
+		public int32 m_LivenessUnknown;   // asks that got nothing to read
+		public bool m_Working;
+	}
+
+	// Never cuts a UTF-8 sequence: the end moves back to the start of the code point it falls in.
+	static int64 CharacterBoundary(Core::StringView text, int64 end) {
+		while (end > 0 && end < text.ByteLength() && ((uint8)text.ByteAt(end) & 0xC0) == 0x80) end -= 1;
+		return end;
+	}
+
+	static void Release(StepStream& stream, bool all) {
+		if (!stream.m_CallOpened) {
+			const int64 from = stream.m_Released > c_StepHeldBytes ? stream.m_Released - c_StepHeldBytes : 0;
+			const int64 opener = TextToolCallStart(stream.m_Visible.View().Substring(from, stream.m_Visible.ByteLength() - from));
+			if (opener >= 0) stream.m_CallOpened = true;
+			const int64 limit = opener >= 0 ? from + opener : all ? stream.m_Visible.ByteLength() : stream.m_Visible.ByteLength() - c_StepHeldBytes;
+			const int64 end = CharacterBoundary(stream.m_Visible.View(), limit);
+			if (end > stream.m_Released) {
+				(*stream.m_Events)(StepEventKind::Text, stream.m_Visible.View().Substring(stream.m_Released, end - stream.m_Released), -1);
+				stream.m_Released = end;
+			}
+		}
+	}
+
+	static void TakeContent(StepStream& stream, Core::StringView text) {
+		Core::String thinking;
+		Core::String visible;
+		stream.m_Splitter.Feed(text, thinking, visible);
+		if (!thinking.IsEmpty()) {
+			stream.m_Result->m_Thinking.Append(thinking.View());
+			(*stream.m_Events)(StepEventKind::Thinking, thinking.View(), -1);
+		}
+		stream.m_Visible.Append(visible.View());
+		Release(stream, false);
+	}
+
+	// The server is still at work before the first token: the prefill watchdog waits longer.
+	static void ExtendPrefill(StepStream& stream, int64 ms) {
+		const int64 extended = StepNowMs() + ms;
+		if (stream.m_Result->m_TtftMs < 0 && extended > stream.m_PrefillDeadlineMs) stream.m_PrefillDeadlineMs = extended;
+	}
+
+	static void ExtendPrefill(StepStream& stream) { ExtendPrefill(stream, stream.m_PrefillExtendMs); }
+
+	// Whether `text` grew enough since its last check to be checked again, and now ends in a loop; moves the mark.
+	static bool Loops(Core::StringView text, int64& checked, int64 tailBytes) {
+		if (text.ByteLength() - checked < c_RepetitionCheckBytes) return false;
+		checked = text.ByteLength();
+		return RepeatedTailPeriod(text, tailBytes) > 0;
+	}
+
+	static void CheckRepetition(StepStream& stream, const CompletionDelta& delta) {
+		if (delta.m_Kind == DeltaKind::ToolCall) {
+			if (delta.m_Call != stream.m_CheckedCall) {
+				stream.m_CheckedCall = delta.m_Call;
+				stream.m_ArgumentsChecked = 0;
+			}
+			if (Loops(stream.m_Result->m_Completion->m_Calls[delta.m_Call]->m_Arguments.View(), stream.m_ArgumentsChecked, c_RepetitionArgumentBytes)) stream.m_Repeating = true;
+			return;
+		}
+		if (Loops(stream.m_Result->m_Thinking.View(), stream.m_ThinkingChecked, c_RepetitionTailBytes) || Loops(stream.m_Visible.View(), stream.m_VisibleChecked, c_RepetitionTailBytes)) stream.m_Repeating = true;
+	}
+
+	static void TakeDelta(StepStream& stream, const CompletionDelta& delta, int64& knownCalls) {
+		if (delta.m_Kind == DeltaKind::Progress) {
+			ExtendPrefill(stream);
+			if (stream.m_Result->m_TtftMs < 0) (*stream.m_Events)(StepEventKind::Progress, delta.m_Text.View(), -1);
+			return;
+		}
+		if (stream.m_Result->m_TtftMs < 0) stream.m_Result->m_TtftMs = StepNowMs() - stream.m_StartMs;
+		if (delta.m_Kind == DeltaKind::Content) TakeContent(stream, delta.m_Text.View());
+		else if (delta.m_Kind == DeltaKind::Reasoning) {
+			stream.m_Result->m_Thinking.Append(delta.m_Text.View());
+			(*stream.m_Events)(StepEventKind::Thinking, delta.m_Text.View(), -1);
+		}
+		else {
+			if (delta.m_Call >= knownCalls) {
+				knownCalls = delta.m_Call + 1;
+				Release(stream, true);
+				(*stream.m_Events)(StepEventKind::CallStarted, stream.m_Result->m_Completion->m_Calls[delta.m_Call]->m_Name.View(), delta.m_Call);
+			}
+			if (!delta.m_Text.IsEmpty()) (*stream.m_Events)(StepEventKind::CallArguments, delta.m_Text.View(), delta.m_Call);
+		}
+		CheckRepetition(stream, delta);
+	}
+
+	static void TakeEvent(StepStream& stream, const SseEvent& event, int64& knownCalls) {
+		if (event.m_Kind == SseKind::Comment) {
+			stream.m_Result->m_Keepalives += 1;
+			ExtendPrefill(stream);
+			return;
+		}
+		Core::Array<CompletionDelta> deltas;
+		stream.m_Result->m_Completion->Take(event.m_Data.View(), deltas);
+		for (const CompletionDelta& delta : deltas) TakeDelta(stream, delta, knownCalls);
+	}
+
+	// The end of the stream: held text out, and calls written as text taken from the prose.
+	static void Finish(StepStream& stream) {
+		Core::String thinking;
+		Core::String visible;
+		stream.m_Splitter.Flush(thinking, visible);
+		stream.m_Result->m_Thinking.Append(thinking.View());
+		stream.m_Visible.Append(visible.View());
+		Release(stream, true);
+		StepResult* result = stream.m_Result;
+		for (ToolCallDraft* call : result->m_Completion->m_Calls) result->m_Calls.Push(call);
+		result->m_Text = stream.m_Visible;
+		if (!result->m_Calls.IsEmpty()) return;
+		Core::String rest;
+		Core::Array<TextToolCall> found = ParseTextToolCalls(stream.m_Visible.View(), rest);
+		for (int64 i = 0; i < found.Count(); ++i) {
+			ToolCallDraft* call = new ToolCallDraft();
+			call->m_Name = found[i].m_Name;
+			call->m_Arguments = found[i].m_Arguments;
+			call->m_Index = i;
+			result->m_Calls.Push(call);
+		}
+		result->m_TextCalls = !found.IsEmpty();
+		if (result->m_TextCalls) result->m_Text = rest;
+		else result->m_UnparsedCall = stream.m_CallOpened;
+	}
+
+	static int64 RetryAfterMs(const Http::Response& head) {
+		const Core::String* value = head.headers.Find(Core::StringView("retry-after"));
+		if (!value) return 0;
+		int64 seconds = 0;
+		for (int64 i = 0; i < value->ByteLength() && value->View().ByteAt(i) >= '0' && value->View().ByteAt(i) <= '9'; ++i) seconds = seconds * 10 + (value->View().ByteAt(i) - '0');
+		return seconds * 1000;
+	}
+
+	// A refused request's body, bounded: the server says why there.
+	static Core::String ErrorBody(StreamingRequest& http) {
+		Core::String body;
+		const int64 until = StepNowMs() + c_StepErrorBodyMs;
+		while (StepNowMs() < until && body.ByteLength() < c_StepErrorBodyBytes) {
+			const BodyRead read = http.Read(body, c_StepPollMs);
+			if (read == BodyRead::Ended || read == BodyRead::Failed) break;
+		}
+		return body;
+	}
+
+	// The prefill watchdog fired: what it waited and what it allowed, for the pause to say (docs/12 "Watchdogs"). The
+	// budget is the deadline as it stood then, keepalives included, not the one the request started with.
+	static void StalledPrefill(StepStream& stream) {
+		stream.m_Result->m_End = WireEnd::StalledPrefill;
+		stream.m_Result->m_PrefillWaitMs = StepNowMs() - stream.m_StartMs;
+		stream.m_Result->m_PrefillBudgetMs = stream.m_PrefillDeadlineMs - stream.m_StartMs;
+	}
+
+	// The number after the last space of a Prometheus line (`name{labels} 1.0`); false when there is none.
+	static bool TrailingNumber(Core::StringView line, double& value) {
+		int64 at = line.ByteLength() - 1;
+		while (at > 0 && line.ByteAt(at) != ' ') at -= 1;
+		return at > 0 && Core::ParseDouble(line.Substring(at + 1, line.ByteLength() - at - 1).Trimmed(), value);
+	}
+
+	// Whether `line` is the gauge named `name`: it starts with the name and a `{` of labels or the value's space follows
+	// it - `vllm:num_requests_running_created` is a different metric.
+	static bool GaugeNamed(Core::StringView line, Core::StringView name) {
+		if (!line.StartsWith(name)) return false;
+		if (line.ByteLength() == name.ByteLength()) return true;
+		const int32 after = line.ByteAt(name.ByteLength());
+		return after == '{' || after == ' ';
+	}
+
+	// What one pass over a server's Prometheus answer says of it: whether its vLLM request gauges are there at all
+	// (`found`: what makes a server worth asking) and whether one of them puts work in the engine (`working`: what the
+	// prefill watchdog acts on). The whole answer is read, not a window of it: an engine's lines come after the process's
+	// own in a large one (the owner's vLLM's sit 2 kB into a 71 kB body).
+	struct MetricsLiveness
+	{
+		public bool m_Found;
+		public bool m_Working;
+	}
+
+	MetricsLiveness ReadMetricsLiveness(Core::StringView text) {
+		MetricsLiveness liveness;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int64 end = text.IndexOf('\n', at);
+			const Core::StringView line = text.Substring(at, (end < 0 ? text.ByteLength() : end) - at);
+			at = end < 0 ? text.ByteLength() : end + 1;
+			const bool running = GaugeNamed(line, Core::StringView(c_VllmRunning));
+			const bool waiting = GaugeNamed(line, Core::StringView(c_VllmWaiting));
+			const bool byReason = line.StartsWith(Core::StringView(c_VllmWaitingByReason));   // also starts with kVllmWaiting
+			if (!running && !waiting && !byReason) continue;
+			liveness.m_Found = true;
+			double value = 0;
+			if (TrailingNumber(line, value) && value > 0) liveness.m_Working = true;
+		}
+		return liveness;
+	}
+
+	bool MetricsSayWorking(Core::StringView text) { return ReadMetricsLiveness(text).m_Working; }
+
+	bool MetricsHasRequestGauges(Core::StringView text) { return ReadMetricsLiveness(text).m_Found; }
+
+	// What asking the server came to: its engine has no work (`Idle`), has work in it (`Working`), or the ask found nothing
+	// to read (`Unknown`) - no answer, or an answer that is not a status page. Only `Idle` is a stall.
+	enum class Liveness { Idle, Working, Unknown }
+
+	// Whether the server says it has work in its engine. A vLLM reads a 250k prompt for a minute and a half with nothing
+	// on the wire (no keepalives, no usage before the end), so the prefill watchdog asks rather than guessing from
+	// silence: the gauges saying work is in flight extend the deadline, and a server that answers, is silent on the wire
+	// and idle in its engine really did stop. Asked at most every kStepLivenessEveryMs.
+	//
+	// Only vLLM's gauges are asked. llama.cpp is left to its `prompt_progress` reports, which already extend the
+	// deadline as they arrive (docs/12 "Watchdogs"): its `/slots` `is_processing` says a slot is busy, not that it is
+	// reading this prompt, and a hung server keeps saying busy forever.
+	//
+	// An answer with no request gauges in it - a 404, or a status page that never names them - means this server has
+	// nothing to say and is not asked again, so the clock decides, as it did before the question existed. An ask that got
+	// nothing to read says nothing either way: the deadline moves by the asking alone and it is tried again, until
+	// kStepLivenessMost in a row found nothing - then the server is the dead one it has begun to look like. Giving up on
+	// the first slow reply is how a healthy long prefill was called a stall.
+	static Liveness ServerSaysWorking(StepStream& stream) {
+		const int64 now = StepNowMs();
+		if (!stream.m_Askable) return Liveness::Idle;
+		if (now - stream.m_LivenessAskedMs < c_StepLivenessEveryMs) return stream.m_Working ? Liveness::Working : Liveness::Idle;
+		stream.m_LivenessAskedMs = now;
+		if (stream.m_Request->m_ServerRoot.IsEmpty()) {
+			stream.m_Askable = false;
+			stream.m_Working = false;
+			return Liveness::Idle;
+		}
+		Core::String body;
+		Core::String error;
+		int32 status = 0;
+		if (!FetchText((stream.m_Request->m_ServerRoot + "/metrics").View(), stream.m_Request->m_Headers, c_StepLivenessMs, status, body, error)) {
+			stream.m_LivenessUnknown += 1;
+			return stream.m_LivenessUnknown >= c_StepLivenessMost ? Liveness::Idle : Liveness::Unknown;
+		}
+		if (status == 404) {   // it says there is no /metrics here: nothing is asked again
+			stream.m_Askable = false;
+			stream.m_Working = false;
+			return Liveness::Idle;
+		}
+		if (status != 200) {   // busy or an error page: nothing learned, asked again
+			stream.m_LivenessUnknown += 1;
+			return stream.m_LivenessUnknown >= c_StepLivenessMost ? Liveness::Idle : Liveness::Unknown;
+		}
+		const MetricsLiveness liveness = ReadMetricsLiveness(
+			body.View().Substring(0, body.ByteLength() < c_StepMetricsBytes ? body.ByteLength() : c_StepMetricsBytes));
+		stream.m_LivenessUnknown = 0;   // it answered: what it has said since then is what counts
+		if (!liveness.m_Found) {
+			stream.m_Askable = false;   // no request gauges: nothing is asked again
+			stream.m_Working = false;
+			return Liveness::Idle;
+		}
+		stream.m_Working = liveness.m_Working;
+		return liveness.m_Working ? Liveness::Working : Liveness::Idle;
+	}
+
+	// The prefill deadline passed. A server that says it is still reading does not get its request cancelled - the read
+	// starts over on a retry, so cancelling a healthy long prefill is what turns it into a stall - so the deadline moves
+	// by what a keepalive would and the client is told what the wait is. An ask that got nothing back moves it by the ask
+	// alone and is tried again, so one slow status page never ends a request that is being served.
+	static bool PrefillDeadlinePassed(StepStream& stream) {
+		if (StepNowMs() <= stream.m_PrefillDeadlineMs) return false;
+		const Liveness liveness = ServerSaysWorking(stream);
+		if (liveness == Liveness::Idle) {
+			StalledPrefill(stream);
+			return true;
+		}
+		if (liveness != Liveness::Working) {
+			ExtendPrefill(stream, c_StepLivenessMs);   // the ask itself is what this wait cost: it is asked again next second
+			return false;
+		}
+		stream.m_Result->m_PrefillConfirms += 1;
+		ExtendPrefill(stream);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("working", true);
+		json.IntField("total", stream.m_Request->m_PromptTokens);
+		json.IntField("waitedMs", StepNowMs() - stream.m_StartMs);
+		json.EndObject();
+		(*stream.m_Events)(StepEventKind::Working, json.ToString().View(), -1);
+		return false;
+	}
+
+	static bool AwaitHead(StreamingRequest& http, StepStream& stream, const bool* cancelled) {
+		for (;;) {
+			if (*cancelled) {
+				stream.m_Result->m_End = WireEnd::Cancelled;
+				return false;
+			}
+			const BodyRead read = http.ReadHead(c_StepPollMs);
+			if (read == BodyRead::Bytes) return true;
+			if (read == BodyRead::Failed) {
+				stream.m_Result->m_End = WireEnd::ConnectFailed;
+				stream.m_Result->m_Error = Core::String(http.Error());
+				return false;
+			}
+			if (PrefillDeadlinePassed(stream)) return false;
+		}
+	}
+
+	// Whether the stream's silence has outlasted its watchdog; sets the end when it has.
+	static bool Stalled(StepStream& stream, const StepRequest& request) {
+		const int64 now = StepNowMs();
+		if (now - stream.m_StartMs > request.m_CapMs) stream.m_Result->m_End = WireEnd::StepCap;
+		else if (stream.m_Result->m_TtftMs < 0 && PrefillDeadlinePassed(stream)) return true;
+		else if (stream.m_Result->m_TtftMs >= 0 && now - stream.m_LastByteMs > request.m_IdleMs) stream.m_Result->m_End = WireEnd::StalledStream;
+		else return false;
+		return true;
+	}
+
+	static void ReadEvents(StreamingRequest& http, StepStream& stream, const StepRequest& request, const bool* cancelled) {
+		SseReader sse;
+		SseEvent event;
+		int64 knownCalls = 0;
+		for (;;) {
+			if (*cancelled) {
+				stream.m_Result->m_End = WireEnd::Cancelled;
+				return;
+			}
+			Core::String bytes;
+			const BodyRead read = http.Read(bytes, c_StepPollMs);
+			if (!bytes.IsEmpty()) {
+				stream.m_LastByteMs = StepNowMs();
+				sse.Feed(bytes.View());
+				while (sse.Next(event)) TakeEvent(stream, event, knownCalls);
+				if (stream.m_Repeating) {
+					stream.m_Result->m_End = WireEnd::Repetition;
+					return;
+				}
+				if (stream.m_Result->m_Completion->m_Done) {
+					stream.m_Result->m_End = WireEnd::Completed;
+					return;
+				}
+			}
+			if (read == BodyRead::Ended || read == BodyRead::Failed) {
+				if (sse.Flush(event)) TakeEvent(stream, event, knownCalls);
+				const bool ended = stream.m_Result->m_Completion->m_Done || !stream.m_Result->m_Completion->m_FinishReason.IsEmpty();
+				stream.m_Result->m_End = ended ? WireEnd::Completed : WireEnd::Disconnected;
+				if (!ended && read == BodyRead::Failed) stream.m_Result->m_Error = Core::String(http.Error());
+				return;
+			}
+			if (read == BodyRead::Waiting && Stalled(stream, request)) return;
+		}
+	}
+
+	StepResult* RunStep(const StepRequest& request, const StepEvents& events, const bool* cancelled) {
+		StepStream stream;
+		stream.m_Result = new StepResult();
+		stream.m_Result->m_PromptTokens = request.m_PromptTokens;
+		stream.m_Result->m_PrefillRate = request.m_ReadMs > 0 ? (double)request.m_PromptTokens * 1000.0 / (double)request.m_ReadMs : 0.0;
+		stream.m_Events = &events;
+		stream.m_Request = &request;
+		stream.m_StartMs = StepNowMs();
+		stream.m_LastByteMs = stream.m_StartMs;
+		stream.m_LivenessAskedMs = 0;   // never asked
+		stream.m_Askable = true;      // asked until an answer carries no request gauges
+		stream.m_LivenessUnknown = 0;
+		stream.m_Working = false;
+		stream.m_PrefillDeadlineMs = stream.m_StartMs + request.m_PrefillMs;
+		stream.m_PrefillExtendMs = request.m_PrefillExtendMs;
+		StreamingRequest http;
+		Core::String error;
+		if (!http.Send(request.m_Url.View(), request.m_Headers, request.m_Body.View(), request.m_ConnectMs, error)) {
+			stream.m_Result->m_End = WireEnd::ConnectFailed;
+			stream.m_Result->m_Error = error;
+		}
+		else if (AwaitHead(http, stream, cancelled)) {
+			stream.m_Result->m_HttpStatus = http.Status();
+			if (http.Status() != 200) {
+				stream.m_Result->m_End = WireEnd::HttpError;
+				stream.m_Result->m_RetryAfterMs = RetryAfterMs(http.Head());
+				stream.m_Result->m_Error = ErrorBody(http);
+			}
+			else ReadEvents(http, stream, request, cancelled);
+		}
+		http.Close();
+		Finish(stream);
+		stream.m_Result->m_Ms = StepNowMs() - stream.m_StartMs;
+		return stream.m_Result;
+	}
+
+	const char* WireEndName(WireEnd end) {
+		const char*[9] names = { "completed", "connect_failed", "http_error", "disconnected_mid_stream", "stalled_prefill", "stalled_stream", "step_cap", "user_cancelled", "repetition" };
+		return names[(int32)end];
+	}
+}

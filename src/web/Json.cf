@@ -1,0 +1,60 @@
+include "Json.ch"
+
+namespace Ied
+{
+	void JsonWriter::BeforeValue() {
+		if (m_AfterKey) { m_AfterKey = false; return; }
+		if (m_Empty.IsEmpty()) return;
+		if (!m_Empty.Back()) m_Text.AppendByte(',');
+		m_Empty.Back() = false;
+	}
+
+	void JsonWriter::Open(int32 bracket) {
+		BeforeValue();
+		m_Text.AppendByte(bracket);
+		m_Empty.Push(true);
+	}
+
+	void JsonWriter::Close(int32 bracket) {
+		m_Empty.Pop();
+		m_Text.AppendByte(bracket);
+	}
+
+	void JsonWriter::Key(Core::StringView key) {
+		BeforeValue();
+		Serialization::WriteJsonString(key, &m_Text);
+		m_Text.AppendByte(':');
+		m_AfterKey = true;
+	}
+
+	void JsonWriter::String(Core::StringView value) {
+		BeforeValue();
+		Serialization::WriteJsonString(value, &m_Text);
+	}
+
+	void JsonWriter::Int(int64 value) {
+		BeforeValue();
+		m_Text.AppendInt(value);
+	}
+
+	void JsonWriter::Bool(bool value) {
+		BeforeValue();
+		m_Text.Append(value ? "true" : "false");
+	}
+
+	void JsonWriter::Null() {
+		BeforeValue();
+		m_Text.Append("null");
+	}
+
+	void JsonWriter::Raw(Core::StringView json) {
+		BeforeValue();
+		m_Text.Append(json);
+	}
+
+	Core::String JsonString(Core::StringView text) {
+		Core::StringBuilder out;
+		Serialization::WriteJsonString(text, &out);
+		return out.ToString();
+	}
+}

@@ -1,0 +1,115 @@
+include "Spec.ch"
+
+namespace Ied
+{
+	static Core::Array<Core::String> StringsOf(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; list.Kind() == Serialization::DomKind::Array && i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	static Core::Array<Core::String> EnvironmentOf(const Serialization::DomNode& env) {
+		Core::Array<Core::String> entries;
+		for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i) entries.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		return entries;
+	}
+
+	static InstallStep* ReadStep(const Serialization::DomNode& node) {
+		InstallStep* step = new InstallStep();
+		step->m_Label = Core::String(node.Member("label").AsView());
+		step->m_Download = Core::String(node.Member("download").AsView());
+		step->m_Sha256 = node.Member("sha256").AsView().ToLower();
+		step->m_Sha256Url = Core::String(node.Member("sha256Url").AsView());
+		step->m_Extract = node.Member("extract").AsView().IsEmpty() ? Core::String("zip") : Core::String(node.Member("extract").AsView());
+		step->m_Strip = node.Member("strip").AsInt();
+		step->m_FileName = Core::String(node.Member("fileName").AsView());
+		step->m_Run = StringsOf(node.Member("run"));
+		step->m_Environment = EnvironmentOf(node.Member("env"));
+		step->m_Cwd = Core::String(node.Member("cwd").AsView());
+		step->m_UserScope = node.Member("scope").AsView() == "user";
+		if (step->m_Label.IsEmpty()) step->m_Label = step->m_Download.IsEmpty() ? (step->m_Run.IsEmpty() ? Core::String("step") : step->m_Run[0]) : Core::String("Download");
+		return step;
+	}
+
+	bool ToolSpec::InstallsForUser() const {
+		for (const InstallStep* step : m_Steps)
+			if (step->m_UserScope) return true;
+		return false;
+	}
+
+	ToolSpec* ReadToolSpec(const Serialization::DomNode& node, Core::StringView pluginId, Core::StringView pluginName, const FS::Path& pluginDir) {
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Id = Core::String(node.Member("id").AsView());
+		spec->m_Title = node.Member("title").AsView().IsEmpty() ? spec->m_Id : Core::String(node.Member("title").AsView());
+		spec->m_Kind = node.Member("kind").AsView().IsEmpty() ? Core::String("other") : Core::String(node.Member("kind").AsView());
+		spec->m_PluginId = Core::String(pluginId);
+		spec->m_PluginName = Core::String(pluginName);
+		spec->m_PluginDir = pluginDir;
+		spec->m_When = Core::String(node.Member("when").AsView());
+		spec->m_Program = Core::String(node.Member("program").AsView());
+		spec->m_Setting = Core::String(node.Member("setting").AsView());
+		spec->m_Bundled = StringsOf(node.Member("bundled"));
+		spec->m_SearchPaths = StringsOf(node.Member("searchPaths"));
+		Serialization::DomNode detect = node.Member("detect");
+		spec->m_VersionArgs = StringsOf(detect.Member("args"));
+		spec->m_VersionPattern = Core::String(detect.Member("pattern").AsView());
+		spec->m_VersionEnvironment = EnvironmentOf(detect.Member("env"));
+		Serialization::DomNode from = node.Member("versionFrom");
+		for (int64 i = 0; from.Kind() == Serialization::DomKind::Array && i < from.Count(); ++i) {
+			VersionSource* source = new VersionSource();
+			source->m_File = Core::String(from.At(i).Member("file").AsView());
+			source->m_Regexp = Core::String(from.At(i).Member("regexp").AsView());
+			source->m_Minimum = from.At(i).Member("match").AsView() == "minimum";
+			spec->m_VersionFrom.Push(source);
+		}
+		spec->m_Requires = StringsOf(node.Member("requires"));
+		Serialization::DomNode install = node.Member("install");
+		spec->m_InstallVersion = Core::String(install.Member("version").AsView());
+		spec->m_InstallBin = Core::String(install.Member("bin").AsView());
+		Serialization::DomNode steps = install.Member(c_ToolSystem);
+		for (int64 i = 0; steps.Kind() == Serialization::DomKind::Array && i < steps.Count(); ++i) spec->m_Steps.Push(ReadStep(steps.At(i)));
+		spec->m_Homepage = Core::String(node.Member("homepage").AsView());
+		spec->m_OnPath = node.Member("onPath").AsBool();
+		return spec;
+	}
+
+	Core::Array<ToolSpec*> LastOfEachId(const Core::Array<ToolSpec*>& tools) {
+		Core::Array<ToolSpec*> kept;
+		for (int64 i = 0; i < tools.Count(); ++i) {
+			bool replaced = false;
+			for (int64 j = i + 1; j < tools.Count() && !replaced; ++j) replaced = tools[j]->m_Id == tools[i]->m_Id;
+			if (!replaced) kept.Push(tools[i]);
+		}
+		return kept;
+	}
+
+	static bool Listed(const Core::Array<ToolSpec*>& tools, Core::StringView id) {
+		for (const ToolSpec* tool : tools)
+			if (tool->m_Id.View() == id) return true;
+		return false;
+	}
+
+	static ToolSpec* Named(const Core::Array<ToolSpec*>& tools, Core::StringView id) {
+		for (ToolSpec* tool : tools)
+			if (tool->m_Id.View() == id) return tool;
+		return nullptr;
+	}
+
+	// `tool` after what it requires; `visiting` breaks a cycle (a tool that requires itself, at any depth, goes once).
+	static void Place(ToolSpec* tool, const Core::Array<ToolSpec*>& tools, Core::Array<ToolSpec*>& order, Core::Array<ToolSpec*>& visiting) {
+		if (Listed(order, tool->m_Id.View()) || Listed(visiting, tool->m_Id.View())) return;
+		visiting.Push(tool);
+		for (const Core::String& required : tool->m_Requires) {
+			ToolSpec* first = Named(tools, required.View());
+			if (first) Place(first, tools, order, visiting);
+		}
+		order.Push(tool);
+	}
+
+	Core::Array<ToolSpec*> InstallOrder(const Core::Array<ToolSpec*>& tools) {
+		Core::Array<ToolSpec*> order;
+		Core::Array<ToolSpec*> visiting;
+		for (ToolSpec* tool : tools) Place(tool, tools, order, visiting);
+		return order;
+	}
+}

@@ -1,0 +1,184 @@
+include "Trash.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	Core::String TrashEntry::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("id", m_Id.View());
+		json.Field("root", m_Root.View());
+		json.Field("path", m_Path.View());
+		json.Field("kind", m_Kind.View());
+		json.IntField("deletedMs", m_DeletedMs);
+		json.IntField("bytes", m_Bytes);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	int64 SizeOnDisk(const FS::Path& path) {
+		FS::FileInfo info;
+		if (!FS::GetInfo(path.CStr(), info, false)) return 0;
+		if (info.kind != FS::EntryKind::Directory) return info.size;
+		int64 total = 0;
+		for (FS::DirectoryEntry& entry : FS::Directory(path.CStr()))
+			if (entry.kind != FS::EntryKind::Link) total += SizeOnDisk(path / entry.name.View());
+		return total;
+	}
+
+	bool MoveTree(const FS::Path& from, const FS::Path& to, bool folder) {
+		if (FS::Rename(from.CStr(), to.CStr())) return true;
+		const bool copied = folder ? FS::CopyTree(from.CStr(), to.CStr()) >= 0 : FS::CopyFile(from.CStr(), to.CStr(), false);
+		if (!copied) {
+			FS::RemoveAll(to.CStr());
+			return false;
+		}
+		return FS::RemoveAll(from.CStr()) >= 0;
+	}
+
+	static bool WriteText(const FS::Path& file, Core::StringView text) {
+		FS::File opened = FS::File(file.CStr(), "wb");
+		return opened.IsOpen() && opened.Write((const void*)text.Data(), text.ByteLength()) == text.ByteLength();
+	}
+
+	void Trash::Init(Server* server) {
+		this.m_Server = server;
+		Trash* self = this;
+		server->m_Rpc.Register("trash.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		server->m_Rpc.Register("trash.restore", [self](Call& call, const Params& params) -> Core::String { return self->RestoreMethod(call, params); });
+		server->m_Rpc.Register("trash.purge", [self](Call& call, const Params& params) -> Core::String { return self->PurgeMethod(call, params); });
+	}
+
+	FS::Path Trash::Folder() const { return FS::Path(m_Server->m_Config.m_DataDir.View()) / "trash"; }
+
+	Core::String Trash::MoveIn(Workspace* ws, Core::StringView path, bool folder) {
+		TrashEntry entry;
+		const int64 nowMs = Platform::UnixTimeNs() / 1000000;
+		m_Made += 1;
+		Core::StringBuilder id;
+		id.AppendInt(nowMs);
+		id.Append("-");
+		id.AppendInt(m_Made);
+		entry.m_Id = id.ToString();
+		entry.m_Root = Core::String(ws->m_Root.View());
+		entry.m_Path = Core::String(path);
+		entry.m_Kind = Core::String(folder ? "folder" : "file");
+		entry.m_DeletedMs = nowMs;
+		FS::Path source = ws->At(path);
+		entry.m_Bytes = SizeOnDisk(source);
+		FS::Path place = Folder() / entry.m_Id.View();
+		FS::Path content = place / "content";
+		if (!FS::MakeDirectories(content.CStr()) || !MoveTree(source, content / source.FileName(), folder)) {
+			FS::RemoveAll(place.CStr());
+			throw RpcError(ErrorCode::Unavailable, "it could not be moved to the trash, so it was not deleted");
+		}
+		if (!WriteText(place / "entry.json", entry.ToJson().View())) m_Server->Log((Core::String("the trash entry ") + entry.m_Id.View() + " has no entry.json; it cannot be restored").View());
+		Trim();
+		return entry.m_Id;
+	}
+
+	// An id as MoveIn makes them ("<ms>-<n>"): never a path that could leave the trash folder.
+	bool IsTrashId(Core::StringView id) {
+		if (id.IsEmpty() || id.ByteLength() > 40) return false;
+		for (int64 i = 0; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (!(c >= '0' && c <= '9') && c != '-') return false;
+		}
+		return true;
+	}
+
+	TrashEntry* Trash::Read(Core::StringView id) const {
+		if (!IsTrashId(id)) return nullptr;
+		FS::Path file = Folder() / id / "entry.json";
+		if (!FS::FileExists(file.CStr())) return nullptr;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok()) return nullptr;
+		TrashEntry* entry = new TrashEntry();
+		entry->m_Id = Core::String(id);
+		entry->m_Root = Core::String(read.root.Member("root").AsView());
+		entry->m_Path = Core::String(read.root.Member("path").AsView());
+		entry->m_Kind = Core::String(read.root.Member("kind").AsView());
+		entry->m_DeletedMs = read.root.Member("deletedMs").AsInt();
+		entry->m_Bytes = read.root.Member("bytes").AsInt();
+		return entry;
+	}
+
+	Core::Array<TrashEntry*> Trash::Entries() const {
+		Core::Array<TrashEntry*> entries;
+		for (FS::DirectoryEntry& item : FS::Directory(Folder().CStr())) {
+			if (item.kind != FS::EntryKind::Directory) continue;
+			TrashEntry* entry = Read(item.name.View());
+			if (entry) entries.Push(entry);
+		}
+		for (int64 i = 1; i < entries.Count(); ++i)
+			for (int64 j = i; j > 0 && entries[j - 1]->m_DeletedMs < entries[j]->m_DeletedMs; --j) {
+				TrashEntry* swap = entries[j];
+				entries[j] = entries[j - 1];
+				entries[j - 1] = swap;
+			}
+		return entries;
+	}
+
+	// The oldest entries go while the trash is over its cap.
+	void Trash::Trim() {
+		Core::Array<TrashEntry*> entries = Entries();
+		int64 total = 0;
+		for (TrashEntry* entry : entries) total += entry->m_Bytes;
+		for (int64 i = entries.Count() - 1; i > 0 && total > c_TrashCapBytes; --i) {
+			FS::RemoveAll((Folder() / entries[i]->m_Id.View()).CStr());
+			total -= entries[i]->m_Bytes;
+		}
+	}
+
+	Core::String Trash::ListMethod(Call& call, const Params& params) {
+		Workspace* ws = params.Has("wsId") ? m_Server->m_Workspaces->Get(params.Str("wsId").View()) : nullptr;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("entries"));
+		json.BeginArray();
+		int64 total = 0;
+		Core::String relative;
+		for (TrashEntry* entry : Entries()) {
+			total += entry->m_Bytes;
+			if (!ws || (RelativeTo(ws->m_Root.View(), entry->m_Root.View(), relative) && relative.IsEmpty())) json.Raw(entry->ToJson().View());
+		}
+		json.EndArray();
+		json.IntField("bytes", total);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Trash::RestoreMethod(Call& call, const Params& params) {
+		Core::String id = params.Str("id");
+		TrashEntry* entry = Read(id.View());
+		if (!entry) throw RpcError(ErrorCode::NotFound, (Core::String("no trash entry ") + id.View()).View());
+		FS::Path target = FS::Path(entry->m_Root.View()) / entry->m_Path.View();
+		if (FS::FileExists(target.CStr()) || FS::IsDirectory(target.CStr())) throw RpcError(ErrorCode::Conflict, (Core::String("something is at ") + entry->m_Path.View() + " now").View());
+		FS::MakeDirectories(target.Parent().CStr());
+		const bool folder = entry->m_Kind.View() == "folder";
+		FS::Path content = Folder() / id.View() / "content" / target.FileName();
+		if (!MoveTree(content, target, folder)) throw RpcError(ErrorCode::Unavailable, "it could not be moved back");
+		FS::RemoveAll((Folder() / id.View()).CStr());
+		Workspace* ws = m_Server->m_Workspaces->ForRoot(FS::Path(entry->m_Root.View()));
+		JsonWriter json;
+		json.BeginObject();
+		if (ws) json.Field("wsId", ws->m_WsId.View());
+		json.Field("path", entry->m_Path.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Trash::PurgeMethod(Call& call, const Params& params) {
+		if (params.Bool("all", false)) {
+			if (FS::RemoveAll(Folder().CStr()) < 0) throw RpcError(ErrorCode::Unavailable, "some of the trash could not be removed");
+			return Core::String("{}");
+		}
+		Core::String id = params.Str("id");
+		if (!Read(id.View())) throw RpcError(ErrorCode::NotFound, (Core::String("no trash entry ") + id.View()).View());
+		if (FS::RemoveAll((Folder() / id.View()).CStr()) < 0) throw RpcError(ErrorCode::Unavailable, "the entry could not be removed");
+		return Core::String("{}");
+	}
+}

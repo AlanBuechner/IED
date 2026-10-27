@@ -1,0 +1,157 @@
+include "Transport.ch"
+
+namespace WebFetch
+{
+	const int64 c_ErrorBytes = 65536;
+	const int64 c_SlackBytes = 1048576;   // past the fetcher's own limit before the plugin stops reading
+
+	Core::String CurlProgram(Core::StringView configured) {
+		if (!configured.IsEmpty()) return Core::String(configured);
+		Core::String root;
+		if (Platform::TryGetEnvironmentVariable("SystemRoot", root) && !root.IsEmpty()) {
+			Core::String system = root + "\\System32\\curl.exe";
+			if (FS::FileExists(system.CStr())) return system;
+		}
+		return Core::String("curl");
+	}
+
+	Core::Array<Core::String> CurlArguments(Core::StringView url, const FetchOptions& options) {
+		Core::Array<Core::String> arguments;
+		const char*[10] fixed = { "--silent", "--show-error", "--location", "--globoff", "--compressed", "--max-redirs", "8", "--proto", "=http,https", "--proto-redir" };
+		for (int64 i = 0; i < 10; ++i) arguments.Push(Core::String(fixed[i]));
+		arguments.Push(Core::String("=http,https"));
+		Core::StringBuilder number;
+		number.AppendInt(options.m_Seconds);
+		arguments.Push(Core::String("--max-time"));
+		arguments.Push(number.ToString());
+		number.Clear();
+		number.AppendInt(options.m_MaxBytes);
+		arguments.Push(Core::String("--max-filesize"));
+		arguments.Push(number.ToString());
+		arguments.Push(Core::String("--connect-timeout"));
+		arguments.Push(Core::String("15"));
+		arguments.Push(Core::String("--user-agent"));
+		arguments.Push(options.m_UserAgent);
+		arguments.Push(Core::String("--header"));
+		arguments.Push(Core::String("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5"));
+		arguments.Push(Core::String("--header"));
+		arguments.Push(Core::String("Accept-Language: en-US,en;q=0.9"));
+		arguments.Push(Core::String("--write-out"));
+		arguments.Push((Core::String("%{stderr}\\n") + c_ReportMarker) + "\\t%{http_code}\\t%{content_type}\\t%{url_effective}\\t%{exitcode}\\t%{errormsg}\\n");
+		arguments.Push(Core::String("--url"));
+		arguments.Push(Core::String(url));
+		return arguments;
+	}
+
+	static Core::String Number(int64 value) {
+		Core::StringBuilder text;
+		text.AppendInt(value);
+		return text.ToString();
+	}
+
+	Core::Array<Core::String> ImpersonatorArguments(Core::StringView url, Core::StringView script, Core::StringView packages, Core::StringView browser,
+		const FetchOptions& options) {
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String("-I"));
+		arguments.Push(Core::String(script));
+		arguments.Push(Core::String("--packages"));
+		arguments.Push(Core::String(packages));
+		arguments.Push(Core::String("--impersonate"));
+		arguments.Push(Core::String(browser));
+		arguments.Push(Core::String("--timeout"));
+		arguments.Push(Number(options.m_Seconds));
+		arguments.Push(Core::String("--max-bytes"));
+		arguments.Push(Number(options.m_MaxBytes));
+		arguments.Push(Core::String("--url"));
+		arguments.Push(Core::String(url));
+		return arguments;
+	}
+
+	// The tab-separated field `index` of `line`.
+	static Core::StringView FieldAt(Core::StringView line, int32 index) {
+		int64 at = 0;
+		for (int32 i = 0; i < index; ++i) {
+			const int64 tab = line.IndexOf('\t', at);
+			if (tab < 0) return Core::StringView("");
+			at = tab + 1;
+		}
+		int64 end = line.IndexOf('\t', at);
+		if (end < 0) end = line.ByteLength();
+		return line.Substring(at, end - at).Trimmed();
+	}
+
+	bool ReadReport(Core::StringView errors, Fetched& fetched, int64& exitCode, Core::String& message) {
+		const int64 at = errors.IndexOf(Core::StringView(c_ReportMarker));
+		if (at < 0) return false;
+		Core::StringView line = errors.Substring(at, errors.ByteLength() - at);
+		const int64 newline = line.IndexOf('\n', 0);
+		if (newline >= 0) line = line.Substring(0, newline);
+		int64 status = 0;
+		Core::ParseInt64(FieldAt(line, 1), status);
+		fetched.m_Status = (int32)status;
+		fetched.m_ContentType = Core::String(FieldAt(line, 2));
+		fetched.m_FinalUrl = Core::String(FieldAt(line, 3));
+		exitCode = 0;
+		Core::ParseInt64(FieldAt(line, 4), exitCode);
+		message = Core::String(FieldAt(line, 5));
+		return true;
+	}
+
+	// The fetcher's own complaint ("curl: (6) Could not resolve host: x") when it wrote no report.
+	static Core::String Complaint(Core::StringView errors) {
+		Core::StringView text = errors.Trimmed();
+		const int64 newline = text.IndexOf('\n', 0);
+		return Core::String(newline < 0 ? text : text.Substring(0, newline).Trimmed());
+	}
+
+	Fetched RunFetcher(Core::StringView program, const Core::Array<Core::String>& arguments, const FetchOptions& options) {
+		Fetched fetched;
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		info.arguments = arguments;
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) {
+			fetched.m_Error = ((Core::String("the fetcher did not start (") + program) + ": ") + child.Error() + ")";
+			return fetched;
+		}
+		Core::StringBuilder body;
+		Core::StringBuilder errors;
+		const int64 deadline = clock_now_ns() + (options.m_Seconds + 10) * 1000000000;
+		char8[16384] buffer;
+		while (child.HasOutput()) {
+			if (clock_now_ns() > deadline) {
+				child.Kill();
+				fetched.m_Error = Core::String("the fetch did not finish in time and was stopped");
+				break;
+			}
+			Process::Stream from;
+			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, 200);
+			if (got == Process::kTimedOut) continue;
+			if (got < 0) break;
+			if (got == 0) continue;
+			if (from == Process::Stream::Output) body.AppendBytes(&buffer[0], got);
+			else if (errors.ByteLength() < c_ErrorBytes) errors.AppendBytes(&buffer[0], got);
+			if (body.ByteLength() > options.m_MaxBytes + c_SlackBytes) {
+				child.Kill();
+				fetched.m_Cut = true;
+				break;
+			}
+		}
+		child.Wait(5000);
+		fetched.m_Body = body.ToString();
+		int64 exitCode = 0;
+		Core::String message;
+		if (!ReadReport(errors.View(), fetched, exitCode, message)) {
+			if (fetched.m_Error.IsEmpty() && !fetched.m_Cut) fetched.m_Error = Complaint(errors.View());
+			if (fetched.m_Error.IsEmpty() && !fetched.m_Cut) fetched.m_Error = Core::String("the fetcher gave no report");
+			return fetched;
+		}
+		// A response that stopped part way (too large, out of time, the connection gone) is still worth its start.
+		if (exitCode != 0 && fetched.m_Status != 0) fetched.m_Cut = true;
+		else if (exitCode != 0) fetched.m_Error = message.IsEmpty() ? Complaint(errors.View()) : message;
+		return fetched;
+	}
+}

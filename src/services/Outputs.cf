@@ -1,0 +1,144 @@
+include "Outputs.ch"
+include "host/Server.ch"
+
+namespace Ied
+{
+	Core::String Bounded(Core::StringView tail, Core::StringView text, int64 limit) {
+		Core::StringBuilder both;
+		both.Append(tail);
+		both.Append(text);
+		Core::StringView all = both.View();
+		if (all.ByteLength() <= limit) return both.ToString();
+		Core::StringView kept = all.Substring(all.ByteLength() - limit, limit);
+		const int64 lineStart = kept.IndexOf('\n', 0);
+		if (lineStart >= 0) return Core::String(kept.Substring(lineStart + 1, kept.ByteLength()));
+		int64 start = 0;
+		while (start < kept.ByteLength() && (kept.ByteAt(start) & 0xC0) == 0x80) start += 1;
+		return Core::String(kept.Substring(start, kept.ByteLength()));
+	}
+
+	int64 WholeCharacters(Core::StringView bytes) {
+		int64 end = bytes.ByteLength();
+		for (int64 back = 1; back <= 3 && back <= end; ++back) {
+			const int32 c = bytes.ByteAt(end - back) & 0xFF;
+			if ((c & 0xC0) == 0x80) continue;
+			const int64 length = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+			return length > back ? end - back : end;
+		}
+		return end;
+	}
+
+	Core::String OutputTopic(const Workspace* ws, Core::StringView sourceId) { return ((Core::String("out:") + ws->m_WsId.View()) + ":") + sourceId; }
+
+	void Outputs::Init(Server* server) {
+		this.m_Server = server;
+		Outputs* self = this;
+		server->m_Rpc.Register("out.sources", [self](Call& call, const Params& params) -> Core::String { return self->SourcesMethod(call, params); });
+		server->m_Rpc.Register("out.clear", [self](Call& call, const Params& params) -> Core::String { return self->ClearMethod(call, params); });
+	}
+
+	OutputSource* Outputs::Add(WorkspaceOutputs* outputs, Core::StringView id, Core::StringView label) {
+		OutputSource* source = new OutputSource();
+		source->m_Id = Core::String(id);
+		source->m_Label = Core::String(label);
+		const int64 last = outputs->m_Sources.Count();
+		if (last > 0 && outputs->m_Sources[last - 1]->m_Id.View() == c_ServerLogSource) outputs->m_Sources.Insert(last - 1, source);
+		else outputs->m_Sources.Push(source);
+		Outputs* self = this;
+		m_Server->m_Hub.Add(OutputTopic(outputs->m_Ws, source->m_Id.View()).View(), [self, source]() -> Core::String { return self->Snapshot(source); });
+		return source;
+	}
+
+	void Outputs::Opened(Workspace* ws) {
+		WorkspaceOutputs* outputs = new WorkspaceOutputs();
+		outputs->m_Ws = ws;
+		m_Opened.Push(outputs);
+		Add(outputs, Core::StringView("build"), Core::StringView("Build"));
+		Add(outputs, Core::StringView("run"), Core::StringView("Run"));
+		Add(outputs, Core::StringView("test"), Core::StringView("Tests"));
+		Add(outputs, Core::StringView("debug"), Core::StringView("Debug"));
+		Add(outputs, Core::StringView("tools"), Core::StringView("Language Tools"));
+		Add(outputs, Core::StringView(c_ServerLogSource), Core::StringView("IED"))->m_Tail = m_LogTail;
+		PluginsChanged(ws);
+	}
+
+	void Outputs::PluginsChanged(Workspace* ws) {
+		for (WorkspaceOutputs* outputs : m_Opened) {
+			if (outputs->m_Ws != ws) continue;
+			for (const Contribution& given : m_Server->m_Plugins->Entries(ws, Core::StringView("outputSources"))) {
+				Core::StringView id = given.m_Entry.Member("id").AsView();
+				if (!id.IsEmpty() && !Find(ws, id)) Add(outputs, id, given.m_Entry.Member("title").AsView());
+			}
+		}
+	}
+
+	OutputSource* Outputs::Find(Workspace* ws, Core::StringView sourceId) const {
+		for (WorkspaceOutputs* outputs : m_Opened)
+			if (outputs->m_Ws == ws)
+				for (OutputSource* source : outputs->m_Sources)
+					if (source->m_Id.View() == sourceId) return source;
+		return nullptr;
+	}
+
+	void Outputs::Append(Workspace* ws, Core::StringView sourceId, Core::StringView text) {
+		OutputSource* source = Find(ws, sourceId);
+		if (!source || text.IsEmpty()) return;
+		source->m_Tail = Bounded(source->m_Tail.View(), text, c_OutputTailBytes);
+		Merge merge;
+		merge.m_Field = Core::String("text");
+		merge.m_Text = Core::String(text);
+		m_Server->m_Hub.PublishMergeable(OutputTopic(ws, sourceId).View(), "append", merge);
+	}
+
+	void Outputs::Log(Core::StringView line) {
+		Core::String text = Core::String(line) + "\n";
+		m_LogTail = Bounded(m_LogTail.View(), text.View(), c_OutputTailBytes);
+		for (WorkspaceOutputs* outputs : m_Opened) Append(outputs->m_Ws, Core::StringView(c_ServerLogSource), text.View());
+	}
+
+	Core::String Outputs::Snapshot(const OutputSource* source) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("sourceId", source->m_Id.View());
+		json.Field("label", source->m_Label.View());
+		json.Field("tail", source->m_Tail.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Outputs::SourcesMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("sources"));
+		json.BeginArray();
+		for (WorkspaceOutputs* outputs : m_Opened) {
+			if (outputs->m_Ws != ws) continue;
+			for (OutputSource* source : outputs->m_Sources) {
+				json.BeginObject();
+				json.Field("sourceId", source->m_Id.View());
+				json.Field("label", source->m_Label.View());
+				json.Field("topic", OutputTopic(ws, source->m_Id.View()).View());
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Outputs::ClearMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::String sourceId = params.Str("sourceId");
+		if (!Find(ws, sourceId.View())) throw RpcError(ErrorCode::NotFound, (Core::String("no output source ") + sourceId.View()).View());
+		Clear(ws, sourceId.View());
+		return Core::String("{}");
+	}
+
+	void Outputs::Clear(Workspace* ws, Core::StringView sourceId) {
+		OutputSource* source = Find(ws, sourceId);
+		if (!source) return;
+		source->m_Tail = Core::String();
+		m_Server->m_Hub.Publish(OutputTopic(ws, sourceId).View(), "clear", Core::StringView("{}"));
+	}
+}

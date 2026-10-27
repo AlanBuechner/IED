@@ -1,0 +1,111 @@
+include "api/Plugin.ch"
+include "Media.ch"
+include "Images.ch"
+include "ImageInfo.ch"
+
+namespace Ai
+{
+	Core::String ImageMime(Core::StringView path) {
+		int64 dot = path.ByteLength() - 1;
+		while (dot >= 0 && path.ByteAt(dot) != '.' && path.ByteAt(dot) != '/') dot -= 1;
+		if (dot < 0 || path.ByteAt(dot) != '.') return Core::String();
+		Core::StringBuilder extension;
+		for (int64 i = dot + 1; i < path.ByteLength(); ++i) {
+			const int32 c = path.ByteAt(i);
+			extension.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		Core::StringView e = extension.View();
+		if (e == "png") return Core::String("image/png");
+		if (e == "jpg" || e == "jpeg") return Core::String("image/jpeg");
+		if (e == "webp") return Core::String("image/webp");
+		if (e == "gif") return Core::String("image/gif");
+		return Core::String();
+	}
+
+	static ToolPlan ViewPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Summary = Core::String("View ") + call.m_Args.Member("path").AsView();
+		return plan;
+	}
+
+	static ToolOutcome ViewRun(const ToolInvocation& call) {
+		IED::ToolImage image;
+		image.m_Path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		image.m_Mime = ImageMime(image.m_Path.View());
+		if (image.m_Mime.IsEmpty()) return ToolError(((Core::String("image_view: ") + image.m_Path.View()) + " is not a PNG, JPEG, WebP or GIF file").View());
+		Core::Array<IED::ToolImage> named;
+		named.Push(image);
+		Core::Array<Core::String> notes;
+		Core::Array<IED::ToolImage> shown = AcceptedImages(call.m_Ws, named, notes);
+		if (shown.IsEmpty()) return ToolError((Core::String("image_view: ") + notes[0].View()).View());
+		Core::StringBuilder said;
+		said.Append("The image ");
+		said.Append(image.m_Path.View());
+		said.Append(" (");
+		said.Append(image.m_Mime.View());
+		said.Append(", ");
+		said.AppendInt((FS::FileSize(IED::WorkspaceFile(call.m_Ws, image.m_Path.View()).CStr()) + 1023) / 1024);
+		said.Append(" KB).");
+		ToolOutcome outcome = ToolResult(said.View(), ((Core::String("[image ") + image.m_Path.View()) + "]").View());
+		outcome.m_Images = shown;
+		return outcome;
+	}
+
+	static ToolPlan InfoPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Summary = Core::String("Read the header of ") + call.m_Args.Member("path").AsView();
+		return plan;
+	}
+
+	static ToolOutcome InfoRun(const ToolInvocation& call) {
+		Core::String path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		FS::Path file = FS::Path(IED::WorkspaceFile(call.m_Ws, path.View()).View());
+		const int64 size = FS::FileSize(file.CStr());
+		if (size < 0) return ToolError(((Core::String("image_info: there is no file ") + path.View()) + "; use fs_glob to find files by name").View());
+		Core::Array<uint8> head;
+		head.Resize(size < c_ImageInfoHeadBytes ? size : c_ImageInfoHeadBytes);
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen() || opened.ReadAll((void*)head.Data(), head.Count()) != head.Count()) return ToolError((Core::String("image_info: cannot read ") + path.View()).View());
+		ImageInfo info;
+		Core::String problem;
+		if (!ReadImageInfo(head, info, problem)) return ToolError(((Core::String("image_info: ") + path.View()) + ": " + problem.View()).View());
+		Core::StringBuilder said;
+		said.Append(path.View());
+		said.Append(": ");
+		said.Append(info.Summary().View());
+		said.Append(", ");
+		said.AppendInt((size + 1023) / 1024);
+		said.Append(" KB");
+		return ToolResult(said.View(), said.View());
+	}
+
+	void AddMediaTools(ToolRegistry& registry) {
+		ToolSpec* info = new ToolSpec();
+		info->m_Name = Core::String("image_info");
+		info->m_Description = Core::String("What an image file is, from its header: format, size, mip levels, pixel format (DDS textures: BC1-BC7, sRGB, cube, array), alpha. PNG, JPEG, GIF, WebP, BMP and DDS. Example: image_info({\"path\": \"assets/rock_albedo.dds\"})");
+		info->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
+		info->m_ToolClass = ToolClass::Read;
+		info->m_ParallelSafe = true;
+		info->m_InPlan = true;
+		info->m_Deferred = true;
+		info->m_Group = Core::String("media");
+		info->m_FolderRoots = true;
+		info->m_Plan = InfoPlan;
+		info->m_Run = InfoRun;
+		registry.Add(info);
+		ToolSpec* view = new ToolSpec();
+		view->m_Name = Core::String("image_view");
+		view->m_Description = Core::String("Look at an image file of the workspace (PNG, JPEG, WebP or GIF, at most 4 MB): a screenshot, a texture, a diagram. Example: image_view({\"path\": \"docs/shots/menu.png\"})");
+		view->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
+		view->m_ToolClass = ToolClass::Read;
+		view->m_ParallelSafe = true;
+		view->m_InPlan = true;
+		view->m_Deferred = true;
+		view->m_Group = Core::String("media");
+		view->m_Plan = ViewPlan;
+		view->m_Run = ViewRun;
+		registry.Add(view);
+	}
+}

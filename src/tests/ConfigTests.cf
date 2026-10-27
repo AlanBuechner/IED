@@ -1,0 +1,54 @@
+// host/config: the command line - --debug-scripts on, off or as the server was built, and a value it does not take.
+
+include "host/Config.ch"
+
+static bool Parse(const char* option, const char* value, Ied::ServerConfig& config, Core::String& error) {
+	Core::Array<Core::String> arguments;
+	arguments.Push(Core::String(option));
+	arguments.Push(Core::String(value));
+	config = Ied::DefaultConfig();
+	return Ied::ParseArguments(arguments, config, error);
+}
+
+[test("server.config")]
+class ConfigTests {
+	[test("debug_scripts")]
+	public static void TestDebugScripts() {
+		Ied::ServerConfig config = Ied::DefaultConfig();
+		assert_eq((int64)-1, (int64)config.m_DebugScripts, "as the server was built");
+		Core::String error;
+		assert_true(Parse("--debug-scripts", "on", config, error), error.CStr());
+		assert_eq((int64)1, (int64)config.m_DebugScripts, "on");
+		assert_true(Parse("--debug-scripts", "off", config, error), error.CStr());
+		assert_eq((int64)0, (int64)config.m_DebugScripts, "off");
+		assert_true(!Parse("--debug-scripts", "yes", config, error), "only on or off");
+		assert_se("--debug-scripts: is on or off", error.CStr(), "the error says what it takes");
+	}
+
+	// docs/01 "Processes": the master by default; a workspace server only with what its master gives it, on loopback.
+	[test("roles")]
+	public static void TestRoles() {
+		Ied::ServerConfig config = Ied::DefaultConfig();
+		assert_true(!Ied::IsWorkspaceServer(config), "the master by default");
+		Core::String error;
+		assert_true(!Parse("--role", "helper", config, error), "master or workspace");
+		Core::Array<Core::String> arguments;
+		const char*[16] given = { "--role", "workspace", "--ws-id", "w2", "--workspace", "C:/game", "--master", "ied-x", "--host", "0.0.0.0", "--port", "8765", "--state", "C:/data/servers/k", "--log", "C:/data/logs/workspace-k.log" };
+		for (int32 i = 0; i < 16; ++i) arguments.Push(Core::String(given[i]));
+		config = Ied::DefaultConfig();
+		assert_true(Ied::ParseArguments(arguments, config, error), error.CStr());
+		assert_true(Ied::IsWorkspaceServer(config), "a workspace server");
+		assert_se("w2", config.m_WsId.CStr(), "its workspace's id");
+		assert_se("ied-x", config.m_MasterControl.CStr(), "its master's pipe");
+		assert_se("127.0.0.1", config.m_Host.CStr(), "loopback whatever --host says");
+		assert_eq((int64)0, (int64)config.m_Port, "a port of the system's choosing");
+		assert_se("C:/data/servers/k", Ied::StateFolder(config).CStr(), "its own state");
+		assert_se("C:/data/logs/workspace-k.log", Ied::LogPath(config).CStr(), "its own log");
+		Core::Array<Core::String> bare;
+		bare.Push(Core::String("--role"));
+		bare.Push(Core::String("workspace"));
+		config = Ied::DefaultConfig();
+		assert_true(!Ied::ParseArguments(bare, config, error), "not without its master's arguments");
+		assert_true(error.View().Contains(Core::StringView("only the master starts one")), error.CStr());
+	}
+}

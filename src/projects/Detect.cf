@@ -1,0 +1,91 @@
+include "Detect.ch"
+include "host/Server.ch"
+include "plugins/Context.ch"
+include "plugins/Languages.ch"
+include "fs/Walk.ch"
+include "fs/Search.ch"
+
+namespace Ied
+{
+	// The language whose projectIcons marker lies in `names`, first entry first; "" for none.
+	static Core::String MarkedLanguage(const Core::Array<Contribution>& icons, const Core::Array<Core::String>& names) {
+		for (const Contribution& icon : icons) {
+			Serialization::DomNode markers = icon.m_Entry.Member("markers");
+			for (int64 i = 0; i < markers.Count(); ++i)
+				if (MarkerNamed(names, markers.At(i).AsView())) return Core::String(icon.m_Entry.Member("languageId").AsView());
+		}
+		return Core::String();
+	}
+
+	static bool Drawn(const Core::Array<Contribution>& icons, Core::StringView language) {
+		for (const Contribution& icon : icons)
+			if (icon.m_Entry.Member("languageId").AsView() == language) return true;
+		return false;
+	}
+
+	// The language most of the folder's files are in, of those `icons` draw (a tie: the one drawn first); "" for none.
+	static Core::String CountedLanguage(Server* server, Workspace* ws, const FS::Path& folder, const Core::Array<Contribution>& icons) {
+		Core::Array<Serialization::DomNode> contributes;
+		for (Plugin* plugin : server->m_Plugins->LoadedFor(ws)) contributes.Push(plugin->m_Manifest->m_Contributes);
+		Core::HashMap<Core::String, int64> counts;
+		int64 seen = 0;
+		FileWalk walk;
+		walk.m_Root = folder;
+		walk.m_Exclude = DefaultSearchExcludes();
+		walk.m_UseIgnoreFiles = true;
+		walk.m_Cancel = nullptr;
+		walk.Run([&contributes, &icons, &counts, &seen](Core::StringView path) -> bool {
+			Core::String language = LanguageFor(contributes, path);
+			int64 had = 0;
+			counts.TryGet(language, had);
+			if (Drawn(icons, language.View())) counts.At(language) = had + 1;
+			seen += 1;
+			return seen < c_DetectFilesMost;
+		});
+		Core::String best;
+		int64 most = 0;
+		for (const Contribution& icon : icons) {
+			int64 count = 0;
+			Core::String language = Core::String(icon.m_Entry.Member("languageId").AsView());
+			if (counts.TryGet(language, count) && count > most) {
+				best = language;
+				most = count;
+			}
+		}
+		return best;
+	}
+
+	// Whether the plugin giving `preset` builds `language`: it declares no languages, or that one among them.
+	static bool OfLanguage(const Contribution& preset, Core::StringView language) {
+		Serialization::DomNode languages = preset.m_Plugin->m_Manifest->m_Contributes.Member("languages");
+		if (languages.Count() == 0) return true;
+		for (int64 i = 0; i < languages.Count(); ++i)
+			if (languages.At(i).Member("id").AsView() == language) return true;
+		return false;
+	}
+
+	static Core::Array<Core::String> DetectedPresets(const Core::Array<Contribution>& presets, const Core::Array<Core::String>& names, Core::StringView language) {
+		Core::Array<Contribution> found;
+		for (const Contribution& preset : presets) {
+			Core::StringView detect = preset.m_Entry.Member("detect").AsView();
+			if (!detect.IsEmpty() && MarkerNamed(names, detect) && OfLanguage(preset, language)) found.Push(preset);
+		}
+		Core::Array<Core::String> ids;
+		for (const Contribution& preset : found) {
+			bool extended = false;
+			for (const Contribution& other : found) extended = extended || other.m_Entry.Member("extends").AsView() == preset.m_Entry.Member("id").AsView();
+			if (!extended) ids.Push(Core::String(preset.m_Entry.Member("id").AsView()));
+		}
+		return ids;
+	}
+
+	FolderFacts DetectFolder(Server* server, Workspace* ws, const FS::Path& folder) {
+		FolderFacts facts;
+		Core::Array<Contribution> icons = server->m_Plugins->Entries(ws, Core::StringView("projectIcons"));
+		Core::Array<Core::String> names = FolderNames(folder);
+		facts.m_Language = MarkedLanguage(icons, names);
+		if (facts.m_Language.IsEmpty()) facts.m_Language = CountedLanguage(server, ws, folder, icons);
+		facts.m_Presets = DetectedPresets(server->m_Plugins->Entries(ws, Core::StringView("taskPresets")), names, facts.m_Language.View());
+		return facts;
+	}
+}

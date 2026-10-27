@@ -1,0 +1,77 @@
+// git: what the AI's git write tools show on their approval cards (docs/13 "What the approval card shows"): a diff a
+// file at a time within its bound, new files, the hunks a call takes, and the summaries' words.
+
+include "Tools.ch"
+
+static bool Shows(const Core::String& text, const char* part) { return text.View().Contains(Core::StringView(part)); }
+
+static const char* c_PlannedDiff = "diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@ intro\n one\n-two\n+TWO\n+2.5\n three\n@@ -10 +11 @@\n-ten\n+TEN\ndiff --git a/logo.png b/logo.png\nindex 3..4 100644\nBinary files a/logo.png and b/logo.png differ\n";
+
+[test("server.git.plans")]
+class GitPlanTests {
+	[test("diff_whole_then_named")]
+	public static void TestDiff() {
+		Git::PlanDiff whole;
+		whole.AddDiff(Core::StringView(c_PlannedDiff));
+		assert_true(whole.m_Text.View() == c_PlannedDiff, "within the bound: as git printed it");
+		assert_true(whole.m_Files == 2 && whole.m_Plus == 3 && whole.m_Minus == 2 && whole.m_Named == 0, "counted");
+		Git::PlanDiff cut;
+		cut.m_Most = 120;
+		cut.AddDiff(Core::StringView(c_PlannedDiff));
+		Core::String text = cut.m_Text.ToString();
+		assert_true(cut.m_Named == 2 && cut.m_Plus == 3 && cut.m_Minus == 2, "past the bound: named, still counted");
+		assert_true(Shows(text, "+++ b/a.txt\ndiff --git a/logo.png") && !Shows(text, "@@") && !Shows(text, "Binary"), text.CStr());
+		Git::PlanDiff none;
+		none.AddDiff(Core::StringView(""));
+		assert_true(none.m_Files == 0 && none.m_Text.ByteLength() == 0, "no diff, no files");
+	}
+
+	[test("new_files")]
+	public static void TestNewFiles() {
+		Git::PlanDiff diff;
+		diff.AddNewFile(Core::StringView("lib/n.txt"), Core::StringView("diff --git a/n.txt b/n.txt\nnew file mode 100644\nindex 0000000..422c2b7\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,2 @@\n+a\n+b\n"));
+		assert_true(diff.m_Text.View() == "diff --git a/lib/n.txt b/lib/n.txt\nnew file mode 100644\n--- /dev/null\n+++ b/lib/n.txt\n@@ -0,0 +1,2 @@\n+a\n+b\n", diff.m_Text.ToString().CStr());
+		diff.AddNewFile(Core::StringView("bin.dat"), Core::StringView("diff --git a/bin.dat b/bin.dat\nnew file mode 100644\nindex 0000000..bdc955b\nBinary files /dev/null and b/bin.dat differ\n"));
+		assert_true(Shows(diff.m_Text.ToString(), "+++ b/bin.dat\nBinary files /dev/null and b/bin.dat differ\n"), "binary, under its workspace path");
+		diff.AddNewFile(Core::StringView("empty.txt"), Core::StringView("diff --git a/empty.txt b/empty.txt\nnew file mode 100644\nindex 0000000..e69de29\n"));
+		assert_true(diff.m_Files == 3 && diff.m_Plus == 2 && diff.m_Named == 0, "an empty file has no lines to leave out");
+		diff.AddNewFile(Core::StringView("late.txt"), Core::StringView(""));
+		assert_true(diff.m_Files == 4 && diff.m_Named == 1 && diff.m_Text.View().EndsWith(Core::StringView("+++ b/late.txt\n")), "one not read is named");
+		Git::PlanDiff full;
+		full.m_Most = 10;
+		full.AddNewFile(Core::StringView("past.txt"), Core::StringView(""));
+		assert_true(full.m_Named == 1, "named once, past the bound too");
+	}
+
+	[test("hunks_taken")]
+	public static void TestHunks() {
+		Git::GitDiff parsed = Git::ParseDiff(Core::StringView("diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@ intro\n one\n-two\n+TWO\n+2.5\n three\n@@ -10 +11 @@\n-ten\n+TEN\n"));
+		Core::Array<int64> second;
+		second.Push(2);
+		Core::String one = Git::HunksDiff(parsed, Core::StringView("src/a.txt"), second);
+		assert_true(one == "diff --git a/src/a.txt b/src/a.txt\n--- a/src/a.txt\n+++ b/src/a.txt\n@@ -10 +11 @@ (hunk 2)\n-ten\n+TEN\n", one.CStr());
+		Core::Array<int64> both;
+		both.Push(1);
+		both.Push(2);
+		Core::String two = Git::HunksDiff(parsed, Core::StringView("a.txt"), both);
+		assert_true(Shows(two, "@@ -1,3 +1,4 @@ intro (hunk 1)\n one\n") && two.View().EndsWith(Core::StringView("(hunk 2)\n-ten\n+TEN\n")), "in order");
+		Git::GitDiff created = Git::ParseDiff(Core::StringView("diff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1 @@\n+x\n"));
+		Core::Array<int64> first;
+		first.Push(1);
+		Core::String added = Git::HunksDiff(created, Core::StringView("lib/n"), first);
+		assert_true(added.View().StartsWith(Core::StringView("diff --git a/lib/n b/lib/n\n--- /dev/null\n+++ b/lib/n\n@@ -0,0 +1 @@ (hunk 1)\n+x\n")), added.CStr());
+	}
+
+	[test("words")]
+	public static void TestWords() {
+		assert_true(Git::CountWords(1, 2, 0) == "1 file, +2 -0" && Git::CountWords(3, 12, 4) == "3 files, +12 -4", "counts");
+		Core::Array<Core::String> paths;
+		paths.Push(Core::String("a.c"));
+		assert_true(Git::PathWords(paths) == "a.c", "one");
+		paths.Push(Core::String("b.c"));
+		paths.Push(Core::String("c.c"));
+		paths.Push(Core::String("d.c"));
+		paths.Push(Core::String("e.c"));
+		assert_true(Git::PathWords(paths) == "a.c, b.c, c.c and 2 more", Git::PathWords(paths).CStr());
+	}
+}

@@ -1,0 +1,67 @@
+include "Shortcut.ch"
+
+namespace Desktop
+{
+	const char* c_ShortcutName = "IED.lnk";
+	const char* c_ShortcutDescription = "IED: the IDE and AI workbench";
+
+	FS::Path StartMenuFolder(Core::StringView appData) { return FS::Path(appData) / "Microsoft" / "Windows" / "Start Menu" / "Programs"; }
+
+	FS::Path ShortcutPath(Core::StringView appData) { return StartMenuFolder(appData) / c_ShortcutName; }
+
+	// CLSID_ShellLink, {00021401-0000-0000-C000-000000000046}.
+	static _GUID ShellLinkClass() {
+		_GUID id;
+		id.Data1 = 0x00021401;
+		id.Data2 = 0;
+		id.Data3 = 0;
+		id.Data4[0] = 0xC0;
+		for (int32 i = 1; i < 7; ++i) id.Data4[i] = 0;
+		id.Data4[7] = 0x46;
+		return id;
+	}
+
+	bool Register(const FS::Path& program, Core::StringView appData, Core::String& error) {
+		FS::Path folder = StartMenuFolder(appData);
+		if (!FS::MakeDirectories(folder.CStr())) {
+			error = Core::String("the Start menu folder could not be made: ") + folder.View();
+			return false;
+		}
+		CoInitializeEx(null, (uint32)COINIT_APARTMENTTHREADED);
+		_GUID shellLink = ShellLinkClass();
+		void* made = null;
+		int32 hr = CoCreateInstance((const void*)&shellLink, null, (uint32)CLSCTX_INPROC_SERVER, (const void*)__uuidof(IShellLinkW), &made);
+		if (hr != c_Ok || made == null) {
+			error = Failure(Core::StringView("the shell made no shortcut"), hr);
+			return false;
+		}
+		IShellLinkW* link = (IShellLinkW*)made;
+		Core::Array<char16> target = Wide(program.View());
+		Core::Array<char16> folderOf = Wide(program.Parent().View());
+		Core::Array<char16> description = Wide(Core::StringView(c_ShortcutDescription));
+		link->SetPath(target.Data());
+		link->SetWorkingDirectory(folderOf.Data());
+		link->SetDescription(description.Data());
+		link->SetIconLocation(target.Data(), 0);
+		void* file = null;
+		hr = link->QueryInterface(__uuidof(IPersistFile), &file);
+		if (hr == c_Ok && file != null) {
+			Core::Array<char16> where = Wide(ShortcutPath(appData).View());
+			hr = ((IPersistFile*)file)->Save(where.Data(), 1);
+			((IPersistFile*)file)->Release();
+		}
+		link->Release();
+		if (hr != c_Ok) {
+			error = Failure(Core::StringView("the shortcut was not saved"), hr);
+			return false;
+		}
+		return true;
+	}
+
+	bool Unregister(Core::StringView appData, Core::String& error) {
+		FS::Path shortcut = ShortcutPath(appData);
+		if (!FS::FileExists(shortcut.CStr()) || FS::RemoveFile(shortcut.CStr())) return true;
+		error = Core::String("the shortcut could not be removed: ") + shortcut.View();
+		return false;
+	}
+}

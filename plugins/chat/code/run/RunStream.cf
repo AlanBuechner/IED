@@ -1,0 +1,491 @@
+include "api/Plugin.ch"
+include "Run.ch"
+include "aitools/Images.ch"
+include "context/Superseded.ch"
+include "Effort.ch"
+
+namespace Ai
+{
+	const char* c_TrimmedNote = "\n[trimmed to save context; call the tool again if you need it]";
+	const char* c_ImagesTrimmedNote = "\n[its images were left out to save context; call the tool again if you need them]";
+	const int64 c_TrimmedKeepBytes = 300;
+	const int64 c_TrimBelowBytes = 600;
+	const int64 c_RecentMessagesKept = 4;
+	// What a chat's bytes are worth in tokens, for the prompt size an estimate is made of - what the prefill watchdog's
+	// budget is built from. Measured with the serving model's tokenizer on this repo's transcripts (31 windows, 2.8 MB:
+	// 3.15 bytes per token; a request's JSON of code, paths and escapes 3.0-3.4, prose 4.4), where bytes/4 read a quarter
+	// low on the same bytes (docs/12 "Truth about the model's context window").
+	const double c_ContextBytesPerToken = 3.15;
+
+	static int64 StreamNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	// --- The request -------------------------------------------------------------------------------------------------
+
+	static void WriteTemperature(IED::JsonWriter& json, double temperature) {
+		Core::StringBuilder text;
+		text.AppendDouble(temperature, 3);
+		json.Key(Core::StringView("temperature"));
+		json.Raw(text.View());
+	}
+
+	// What a request does with images (Images.ch): whether the model is sent any, and how many of the oldest it names
+	// instead; what it sent.
+	class RequestImages
+	{
+		public bool m_Vision;
+		public int64 m_Older;     // images still to name rather than send
+		public int64 m_Sent;
+		public int64 m_Encoded;   // bytes of base64 written
+	}
+
+	// Why the message's images are not sent; empty when they are.
+	static Core::StringView Unsent(const ModelMessage* message, RequestImages& images) {
+		if (!message->SendsImages()) return Core::StringView("");
+		if (!images.m_Vision) return Core::StringView(c_ImagesNotSent);
+		if (images.m_Older <= 0) return Core::StringView("");
+		images.m_Older -= message->m_Images.Count();
+		return Core::StringView(c_ImagesEarlier);
+	}
+
+	// The messages as a request sends them: after a step's results, the images they name in a user message, to a model
+	// that sees images (Images.ch); the owner's attached images in their message.
+	static void WriteMessages(IED::JsonWriter& json, const IED::Workspace& ws, const Core::Array<ModelMessage*>& messages, RequestImages& images, bool withReasoning) {
+		Core::Array<ModelMessage*> shown;
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			ModelMessage* message = messages[i];
+			Core::StringView unsent = Unsent(message, images);
+			if (message->m_Role == "user" && unsent.IsEmpty() && message->SendsImages()) {
+				images.m_Encoded += WriteUserWithImages(json, ws, message);
+				images.m_Sent += message->m_Images.Count();
+				continue;
+			}
+			message->WriteRequest(json, unsent, withReasoning);
+			if (unsent.IsEmpty() && message->SendsImages()) {
+				shown.Push(message);
+				images.m_Sent += message->m_Images.Count();
+			}
+			const bool resultsEnd = i + 1 == messages.Count() || messages[i + 1]->m_Role != "tool";
+			if (resultsEnd && !shown.IsEmpty()) {
+				images.m_Encoded += WriteImagesMessage(json, ws, shown);
+				shown.Clear();
+			}
+		}
+	}
+
+	Core::String TurnRun::RequestBody(int64& promptTokens) {
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		RequestImages images;
+		images.m_Vision = profile->m_Vision;
+		if (!profile->m_VisionSet) m_Chats->m_SeesImages.TryGet(profile->m_Name, images.m_Vision);
+		for (Turn* each : m_Chat->m_Turns)
+			if (!each->m_Compressed) images.m_Older += CountImages(each->m_Messages);
+		images.m_Older -= c_RequestImagesSent;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("model", profile->m_Model.View());
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("role", "system");
+		json.Field("content", m_System.View());
+		json.EndObject();
+		bool llamaCpp = false;
+		m_Chats->m_LlamaCpp.TryGet(profile->m_Name, llamaCpp);
+		// The turn's earlier thinking goes back to a llama.cpp server: its templates show a step's reasoning with the step,
+		// and without it the model works its plan out again at every step.
+		const bool keepThinking = llamaCpp && profile->m_KeepThinking;
+		for (Turn* each : m_Chat->m_Turns)
+			if (!each->m_Compressed) WriteMessages(json, m_Ws, each->m_Messages, images, keepThinking && each == m_Turn);
+		json.EndArray();
+		json.RawField("tools", m_Tools->RequestTools(m_Chat->m_Mode, false).View());
+		json.BoolField("stream", true);
+		if (llamaCpp) json.BoolField("return_progress", true);
+		json.Key(Core::StringView("stream_options"));
+		json.BeginObject();
+		json.BoolField("include_usage", true);
+		json.EndObject();
+		if (m_Role.m_HasTemperature) WriteTemperature(json, m_Role.m_Temperature);
+		m_Turn->m_Effort = Core::String(EffortOf(m_Chat->m_Effort.View(), m_Role.m_Effort.View()));
+		WriteEffort(json, *profile, m_Turn->m_Effort.View(), llamaCpp);
+		if (profile->m_MaxOutput > 0) json.IntField("max_tokens", profile->m_MaxOutput);
+		json.EndObject();
+		Core::String body = json.ToString();
+		promptTokens = RequestTokens((int64)body.ByteLength(), images.m_Encoded, images.m_Sent);
+		return body;
+	}
+
+	StepRequest TurnRun::Request() {
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		StepRequest request;
+		request.m_Url = profile->CompletionsUrl();
+		Core::String key;
+		if (!profile->m_ApiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->m_ApiKeyEnv.CStr(), key)) request.m_Headers.Push(Core::String("Authorization: Bearer ") + key.View());
+		request.m_Body = RequestBody(request.m_PromptTokens);
+		m_RequestHead = (int64)(m_System.View().Hash() ^ m_Tools->RequestTools(m_Chat->m_Mode, false).View().Hash());
+		request.m_ReadTokens = ExpectedRead(request.m_PromptTokens, m_RequestHead);
+		m_RequestRead = request.m_ReadTokens;
+		double rate = profile->m_PrefillRate;
+		m_Chats->m_PrefillRates.TryGet(profile->m_Name, rate);
+		request.m_ConnectMs = profile->m_ConnectMs;
+		request.m_ReadMs = (int64)((double)request.m_PromptTokens * 1000.0 / rate);
+		const int64 budget = profile->m_PrefillBaseMs + 2 * request.m_ReadMs;   // base + twice the estimated read (docs/12)
+		request.m_PrefillMs = budget > m_PrefillFloorMs ? budget : m_PrefillFloorMs;   // never the deadline that just failed
+		request.m_PrefillExtendMs = profile->m_PrefillBaseMs;
+		request.m_IdleMs = profile->m_IdleMs;
+		request.m_CapMs = profile->m_StepCapMs;
+		request.m_ServerRoot = ServerRoot(profile->m_Endpoint.View());
+		return request;
+	}
+
+	int64 TurnRun::ExpectedRead(int64 promptTokens, int64 head) const {
+		const bool sameFront = !m_Chat->m_PromptRewritten && m_Chat->m_PromptHead == head && m_Chat->m_LastPromptTokens > 0
+			&& m_Chat->m_EstimateModel.View() == m_Candidates[m_Candidate]->m_Name.View();
+		if (!sameFront) return promptTokens;
+		const int64 added = CalibratedTokens() - m_Chat->m_LastPromptTokens;
+		if (added < 0) return 0;
+		return added < promptTokens ? added : promptTokens;
+	}
+
+	// --- Segments as the reply streams -------------------------------------------------------------------------------
+
+	Segment* TurnRun::NewSegment(const char* type) {
+		Segment* segment = new Segment();
+		segment->m_SegId = m_Chat->NextId("s");
+		segment->m_Type = Core::String(type);
+		segment->m_Model = m_Candidates.IsEmpty() ? Core::String() : m_Candidates[m_Candidate]->m_Name;
+		return segment;
+	}
+
+	// The segment joins the turn: segment.start carries it as it starts (a note's text, a tool's name and call).
+	Segment* TurnRun::Begin(Segment* segment) {
+		Prefill(Core::StringView(""));
+		m_Turn->m_Segments.Push(segment);
+		m_OpenedMs = StreamNowMs();
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", m_Turn->m_TurnId.View());
+		segment->WriteFields(data);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "segment.start", data.View());
+		return segment;
+	}
+
+	void TurnRun::Close(Segment* segment) {
+		if (!segment || segment->m_Done) return;
+		segment->m_Done = true;
+		segment->m_Tokens = (segment->m_Text.ByteLength() + segment->m_ArgsText.ByteLength() + 3) / 4;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("segId", segment->m_SegId.View());
+		data.IntField("tokens", segment->m_Tokens);
+		data.IntField("ms", StreamNowMs() - m_OpenedMs);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "segment.end", data.View());
+	}
+
+	void TurnRun::CloseStreaming() {
+		Close(m_Thinking);
+		Close(m_Text);
+		for (Segment* segment : m_CallSegments) Close(segment);
+		m_Thinking = nullptr;
+		m_Text = nullptr;
+	}
+
+	// Mergeable: a slow client gets a segment's queued deltas as one (docs/10 "Backpressure").
+	static void PublishDelta(Chats* chats, Chat* chat, const Segment* segment, const char* field, Core::StringView text) {
+		Core::StringBuilder rest;
+		rest.Append("\"segId\":");
+		Serialization::WriteJsonString(segment->m_SegId.View(), &rest);
+		IED::Merge merge;
+		merge.m_Field = Core::String(field);
+		merge.m_Text = Core::String(text);
+		merge.m_Rest = rest.ToString();
+		chats->PublishMergeable(chat, "segment.delta", merge);
+	}
+
+	void TurnRun::OnEvent(StepEventKind kind, Core::StringView delta, int64 call) {
+		IED::HostLock guard(*m_Context);
+		if (kind == StepEventKind::Thinking) {
+			if (!m_Thinking) {
+				Close(m_Text);
+				m_Text = nullptr;
+				m_Thinking = Begin(NewSegment("thinking"));
+			}
+			m_Thinking->m_Text.Append(delta);
+			PublishDelta(m_Chats, m_Chat, m_Thinking, "text", delta);
+		}
+		else if (kind == StepEventKind::Text) {
+			Close(m_Thinking);
+			m_Thinking = nullptr;
+			if (!m_Text) m_Text = Begin(NewSegment("text"));
+			m_Text->m_Text.Append(delta);
+			PublishDelta(m_Chats, m_Chat, m_Text, "text", delta);
+		}
+		else if (kind == StepEventKind::CallStarted) {
+			CloseStreaming();
+			Segment* segment = NewSegment("tool");
+			segment->m_Tool = Core::String(delta);
+			segment->m_CallId = m_Chat->NextId("k");
+			segment->m_State = Core::String("streaming");
+			m_CallSegments.Push(Begin(segment));
+		}
+		else if (kind == StepEventKind::Progress) Prefill(delta);
+		else if (kind == StepEventKind::Working) Prefill(delta);
+		else if (call >= 0 && call < m_CallSegments.Count()) {
+			m_CallSegments[call]->m_ArgsText.Append(delta);
+			PublishDelta(m_Chats, m_Chat, m_CallSegments[call], "argsText", delta);
+		}
+	}
+
+	// A server that reports no progress (vLLM) gets the read estimated from what it measured: the part of the prompt past
+	// what its cache holds (ExpectedRead, from the last request's own count) at the rate it read earlier steps' new tokens.
+	void TurnRun::EstimatePrefill(const StepRequest& request) {
+		bool llamaCpp = false;
+		m_Chats->m_LlamaCpp.TryGet(m_Candidates[m_Candidate]->m_Name, llamaCpp);
+		const int64 readMs = request.m_PromptTokens > 0 ? request.m_ReadMs * request.m_ReadTokens / request.m_PromptTokens : 0;
+		if (llamaCpp || readMs < c_RunEstimateShownMs) return;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("estimated", true);
+		json.IntField("total", request.m_PromptTokens);
+		json.IntField("read", request.m_ReadTokens);
+		json.IntField("estimatedMs", readMs);
+		json.IntField("startedMs", StreamNowMs());
+		json.EndObject();
+		Prefill(json.View());
+	}
+
+	void TurnRun::Prefill(Core::StringView progress) {
+		if (progress.IsEmpty() && m_Turn->m_Prefill.IsEmpty()) return;
+		m_Turn->m_Prefill = Core::String(progress);
+		const int64 now = StreamNowMs();
+		if (!progress.IsEmpty() && now - m_ProgressMs < c_RunProgressEveryMs) return;
+		m_ProgressMs = now;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", m_Turn->m_TurnId.View());
+		data.Key(Core::StringView("prefill"));
+		if (progress.IsEmpty()) data.Null();
+		else data.Raw(progress);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "turn.progress", data.View());
+	}
+
+	// --- Notes -------------------------------------------------------------------------------------------------------
+
+	void TurnRun::UiNote(Core::StringView kind, Core::StringView note) {
+		Segment* segment = NewSegment("harness");
+		segment->m_Kind = Core::String(kind);
+		segment->m_Text = Core::String(note);
+		Close(Begin(segment));
+	}
+
+	void TurnRun::HarnessNote(Core::StringView kind, Core::StringView note) {
+		UiNote(kind, note);
+		ModelMessage* message = new ModelMessage();
+		message->m_Role = Core::String("user");
+		message->m_Content = Core::String(note);
+		m_Turn->m_Messages.Push(message);
+	}
+
+	// Taken under the lock, their mentions read without it; a turn stopped meanwhile leaves them for End to queue.
+	void TurnRun::DeliverMessages(bool inResult) {
+		Core::Array<OwnerMessage*> arrived;
+		{
+			IED::HostLock guard(*m_Context);
+			if (m_Run->m_Cancelled || m_Chat->m_Pending.IsEmpty()) return;
+			arrived = m_Chat->m_Pending;
+			m_Chat->m_Pending.Clear();
+		}
+		Core::Array<ModelMessage*> messages;
+		for (OwnerMessage* sent : arrived) {
+			ModelMessage* message = new ModelMessage();
+			message->m_Role = Core::String("user");
+			message->m_Content = ModelText(m_Chat, *sent) + MessageExtras(sent->m_Mentions, sent->m_Attachments, message->m_Images).View();
+			if (inResult) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("text"));
+				values.Push(message->m_Content);
+				message->m_Content = m_Chats->m_Prompts.Note("steering", values);
+			}
+			messages.Push(message);
+		}
+		IED::HostLock guard(*m_Context);
+		if (m_Run->m_Cancelled) {
+			for (OwnerMessage* later : m_Chat->m_Pending) arrived.Push(later);
+			m_Chat->m_Pending = arrived;
+			return;
+		}
+		for (int64 i = 0; i < arrived.Count(); ++i) {
+			Segment* segment = NewSegment("message");
+			segment->m_Text = arrived[i]->m_Text;
+			segment->m_Mentions = arrived[i]->m_Mentions;
+			segment->m_Attachments = arrived[i]->m_Attachments;
+			segment->m_FromChatId = arrived[i]->m_FromChatId;
+			segment->m_FromTitle = arrived[i]->m_FromTitle;
+			segment->m_AtMs = StreamNowMs();
+			Close(Begin(segment));
+			m_Turn->m_Messages.Push(messages[i]);
+		}
+		m_Chats->QueueChanged(m_Chat);
+		SaveChatHeader(LocalStateOf(m_Ws), m_Chat);
+		SaveRunning();
+	}
+
+	// --- Accounting --------------------------------------------------------------------------------------------------
+
+	int64 TurnRun::Window() const { return m_Chats->WindowOf(m_Candidates[m_Candidate]); }
+
+	// What a chat's text counts as, and what a message counts as: its text, calls and thinking (sent back where the server
+	// keeps it) at that rate, an image as an image.
+	static int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / c_ContextBytesPerToken); }
+
+	static int64 MessageTokens(const ModelMessage* message) {
+		return BytesToTokens(message->SentText().ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
+			+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
+	}
+
+	int64 TurnRun::EstimateTokens() const {
+		int64 tokens = BytesToTokens(m_System.ByteLength());
+		for (Turn* each : m_Chat->m_Turns)
+			if (!each->m_Compressed)
+				for (ModelMessage* message : each->m_Messages) tokens += MessageTokens(message);
+		return tokens;
+	}
+
+	// What a request costs with no server count of its own: its text, and the images it sends as images. `bodyBytes` all
+	// the JSON holds, `imageBytes` the part of it the encoded images carry.
+	static int64 RequestTokens(int64 bodyBytes, int64 imageBytes, int64 sentImages) {
+		return BytesToTokens(bodyBytes - imageBytes) + sentImages * c_ToolImageTokens;
+	}
+
+	int64 TurnRun::CalibratedTokens() const {
+		const int64 estimate = EstimateTokens();
+		if (m_Chat->m_EstimateModel.View() != m_Candidates[m_Candidate]->m_Name.View()) return estimate;
+		return estimate + m_Chat->m_EstimateOffset > 0 ? estimate + m_Chat->m_EstimateOffset : estimate;
+	}
+
+	static ContextPart Part(const char* name, int64 tokens) {
+		ContextPart part;
+		part.m_Name = Core::String(name);
+		part.m_Tokens = tokens;
+		return part;
+	}
+
+	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, bool claude) { return tools->RequestTools(mode, claude); }
+
+	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat->m_Mode, m_Candidates[m_Candidate]->IsClaude()); }
+
+	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
+		int64 messages = 0;
+		int64 results = 0;
+		for (Turn* each : chat->m_Turns)
+			if (!each->m_Compressed)
+				for (ModelMessage* message : each->m_Messages) {
+					if (message->m_Role == "tool") results += MessageTokens(message);
+					else messages += MessageTokens(message);
+				}
+		Core::Array<ContextPart> parts;
+		parts.Push(Part("System prompt", BytesToTokens(systemBytes)));
+		parts.Push(Part("Tool definitions", BytesToTokens(toolsBytes)));
+		parts.Push(Part("Messages", messages));
+		parts.Push(Part("Tool results", results));
+		return parts;
+	}
+
+	void TurnRun::PublishContext(int64 used) {
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		m_Chat->m_Context = ContextJson(Window(), used, profile->m_Name.View(), profile->IsClaude(), ScaledParts(ContextParts(m_Chat, m_System.ByteLength(), SentTools().ByteLength()), used));
+		m_Chats->Publish(m_Chat, "context.changed", m_Chat->m_Context.View());
+		SaveChatHeader(LocalStateOf(m_Ws), m_Chat);
+	}
+
+	void TurnRun::Account(const StepResult* result, int64 promptEstimate, int64 estimateBefore) {
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		const Completion* completion = result->m_Completion;
+		// A step that failed before an answer (no connection, an error status, a stall, Claude's error line) counted
+		// nothing: the meter keeps the last step's count.
+		if (completion->m_PromptTokens <= 0 && result->m_Text.IsEmpty() && result->m_Thinking.IsEmpty() && result->m_Calls.IsEmpty()) return;
+		const int64 output = completion->m_CompletionTokens > 0 ? completion->m_CompletionTokens
+			: BytesToTokens(result->m_Text.ByteLength() + result->m_Thinking.ByteLength());
+		if (completion->m_PromptTokens > 0) {
+			m_Turn->m_TokensIn = completion->m_PromptTokens;
+			m_Chat->m_EstimateOffset = completion->m_PromptTokens - estimateBefore;
+			m_Chat->m_EstimateModel = profile->m_Name;
+			m_Chat->m_LastPromptTokens = completion->m_PromptTokens;
+			m_Chat->m_PromptHead = m_RequestHead;
+			m_Chat->m_PromptRewritten = false;
+		}
+		else m_Turn->m_TokensIn = promptEstimate > 0 ? promptEstimate : CalibratedTokens();
+		m_Turn->m_TokensOut += output;
+		if (result->m_TtftMs >= 0) {
+			m_Turn->m_TtftMs = result->m_TtftMs;
+			m_Turn->m_GenMs += result->m_Ms - result->m_TtftMs;
+		}
+		const double rate = completion->MeasuredPrefillRate(result->m_TtftMs, m_RequestRead);
+		if (rate > 0) m_Chats->m_PrefillRates.At(profile->m_Name) = rate;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", m_Turn->m_TurnId.View());
+		data.Field("model", m_Turn->m_Model.View());
+		data.IntField("tokensIn", m_Turn->m_TokensIn);
+		data.IntField("tokensOut", m_Turn->m_TokensOut);
+		data.IntField("ttftMs", m_Turn->m_TtftMs);
+		data.IntField("genMs", m_Turn->m_GenMs);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "turn.stats", data.View());
+		PublishContext(m_Turn->m_TokensIn + output);
+	}
+
+	// Mechanical compression (docs/04 "Context management"): file reads a later call made stale noted as such, tool
+	// results older than the last few messages trimmed; when that is not enough, whole earlier turns left out. Only what
+	// the requests send changes - each message's `shown`, kept in context.json so a restart sends the same - while the
+	// chat keeps every message whole. Whether anything changed.
+	bool TurnRun::Compress() {
+		Core::Array<ModelMessage*> sent;
+		int64 keepFrom = -1;
+		for (Turn* each : m_Chat->m_Turns) {
+			if (each->m_Compressed) continue;
+			for (int64 i = 0; i < each->m_Messages.Count(); ++i) {
+				if (each == m_Turn && keepFrom < 0 && i >= each->m_Messages.Count() - c_RecentMessagesKept) keepFrom = sent.Count();
+				sent.Push(each->m_Messages[i]);
+			}
+		}
+		bool changed = DropSuperseded(sent, keepFrom < 0 ? sent.Count() : keepFrom) > 0;
+		for (Turn* each : m_Chat->m_Turns)
+			for (int64 i = 0; i < each->m_Messages.Count(); ++i) {
+				ModelMessage* message = each->m_Messages[i];
+				if (each == m_Turn && i >= each->m_Messages.Count() - c_RecentMessagesKept) continue;
+				if (message->m_Role != "tool") continue;
+				if (message->SendsImages()) {
+					message->m_ImagesOut = true;
+					message->m_Shown = Core::String(message->SentText()) + c_ImagesTrimmedNote;
+					changed = true;
+				}
+				if (message->SentText().ByteLength() < c_TrimBelowBytes) continue;
+				message->m_Shown = Core::String(message->SentText().Substring(0, c_TrimmedKeepBytes)) + c_TrimmedNote;
+				changed = true;
+			}
+		const int64 target = Window() / 2;
+		int64 leftOut = 0;
+		for (Turn* each : m_Chat->m_Turns) {
+			if (target <= 0 || EstimateTokens() <= target || each == m_Turn) break;
+			if (each->m_Compressed) continue;
+			each->m_Compressed = true;
+			changed = true;
+			leftOut += 1;
+		}
+		// The note only for what it says: whole turns gone from the requests. Trimming a stale read or a long tool result
+		// keeps the conversation in order, so it leaves no note (the owner, on a note that appeared after a restart with
+		// nothing left out: it read as if the history had been cleared).
+		if (leftOut > 0) HarnessNote(Core::StringView("context_compressed"), m_Chats->m_Prompts.Note("context_compressed").View());
+		if (changed) {
+			m_Chat->m_PromptRewritten = true;
+			SaveContextView(LocalStateOf(m_Ws), m_Chat);
+			SaveChatHeader(LocalStateOf(m_Ws), m_Chat);
+		}
+		return changed;
+	}
+
+	void TurnRun::SaveRunning() { SaveRunningTurn(LocalStateOf(m_Ws), m_Chat, m_Turn); }
+}

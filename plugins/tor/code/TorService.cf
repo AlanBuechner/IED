@@ -1,0 +1,285 @@
+include "TorService.ch"
+
+namespace Tor
+{
+	const char* StateName(TorState state) {
+		if (state == TorState::Starting) return "starting";
+		if (state == TorState::Ready) return "ready";
+		if (state == TorState::Failed) return "failed";
+		return "stopped";
+	}
+
+	static Core::String Slashes(Core::StringView path) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return text.ToString();
+	}
+
+	static Core::String ReadText(Core::StringView path) {
+		Core::String file = Core::String(path);
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.IsOpen() ? opened.ReadText() : Core::String();
+	}
+
+	static bool WriteText(Core::StringView path, Core::StringView text) {
+		Core::String file = Core::String(path);
+		return FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+	}
+
+	static Serialization::DomNode SettingNode(IED::PluginContext* context, const char* key) {
+		Core::String json = context->Setting(Core::StringView(key), Core::StringView(""));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json.View(), *doc).root;
+	}
+
+	static Core::String SecondsText(int64 ns) {
+		Core::StringBuilder text;
+		text.AppendInt(ns / 1000000000);
+		text.Append(" s");
+		return text.ToString();
+	}
+
+	void TorService::Start() {
+		m_State = Slashes(m_Context->StateFolder().View());
+		m_Current = TorState::Stopped;
+		{
+			Threading::LockGuard guard(m_Lock);
+			Publish();
+		}
+		TorService* self = this;
+		m_Context->StartThread([self]() { self->Watch(); });
+	}
+
+	Core::String TorService::DesiredTorrc(Core::String& program, Core::String& problem) {
+		Core::StringView configured = SettingNode(m_Context, "tor.executable").AsView();
+		Core::String bundle = Slashes(IED::HomeFolder().View()) + "/vendor/tor";
+		program = configured.IsEmpty() ? bundle + "/tor/tor.exe" : Slashes(configured);
+		if (!FS::FileExists(program.CStr())) {
+			problem = configured.IsEmpty() ? Core::String("Tor is not installed: run setup.bat (it installs the Tor Expert Bundle into vendor/tor), or set tor.executable")
+				: Core::String("tor.executable names no file: ") + configured;
+			return Core::String();
+		}
+		TorFiles files;
+		files.m_State = m_State;
+		Core::String data = configured.IsEmpty() ? bundle + "/data" : Slashes(FS::Path(program.View()).Parent().View()) + "/../data";
+		if (FS::FileExists((data + "/geoip").CStr())) files.m_Geoip = data + "/geoip";
+		if (FS::FileExists((data + "/geoip6").CStr())) files.m_Geoip6 = data + "/geoip6";
+		Core::Array<Core::String> countries;
+		Serialization::DomNode list = SettingNode(m_Context, "tor.exitCountries");
+		for (int64 i = 0; i < list.Count(); ++i) countries.Push(Core::String(list.At(i).AsView()));
+		return TorrcText(files, countries);
+	}
+
+	void TorService::Launch(Core::StringView text, Core::StringView program) {
+		FS::MakeDirectories((m_State + "/data").CStr());
+		FS::RemoveFile((m_State + "/control-port").CStr());
+		FS::RemoveFile((m_State + "/tor.log").CStr());
+		Core::String torrcPath = m_State + "/torrc";
+		Core::String defaultsPath = m_State + "/torrc-defaults";
+		if (!WriteText(torrcPath.View(), text) || !WriteText(defaultsPath.View(), Core::StringView("# Empty: the bundle's defaults are Tor Browser's.\n"))) {
+			Halt(TorState::Failed, (Core::String("the torrc cannot be written in ") + m_State.View()).View());
+			return;
+		}
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		info.arguments.Push(Core::String("--defaults-torrc"));
+		info.arguments.Push(defaultsPath);
+		info.arguments.Push(Core::String("-f"));
+		info.arguments.Push(torrcPath);
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			Halt(TorState::Failed, (Core::String("Tor did not start: ") + started.Error()).View());
+			return;
+		}
+		m_Process = new Process::Child(take(started));
+		m_Executable = Core::String(program);
+		m_Torrc = Core::String(text);
+		m_Current = TorState::Starting;
+		m_Progress = 0;
+		m_Summary = Core::String("Starting");
+		m_Error = Core::String();
+		m_SocksPort = 0;
+		m_StartedNs = clock_now_ns();
+		m_Context->Log((Core::String("Tor starts: ") + program).View());
+	}
+
+	void TorService::Halt(TorState next, Core::StringView why) {
+		m_Control.Close();
+		if (m_Process != null) {
+			m_Process->Kill();
+			m_Process->Close();
+			m_Process = null;
+		}
+		if (next == TorState::Failed) {
+			m_FailedNs = clock_now_ns();
+			m_Context->Log((Core::String("Tor failed: ") + why).View());
+		}
+		else if (m_Current != TorState::Stopped && !why.IsEmpty()) m_Context->Log((Core::String("Tor stopped: ") + why).View());
+		m_Current = next;
+		m_Error = next == TorState::Failed ? Core::String(why) : Core::String();
+		m_SocksPort = 0;
+		m_Torrc = Core::String();
+	}
+
+	Core::String TorService::LogTailText() {
+		Core::String tail = LogTail(ReadText((m_State + "/tor.log").View()).View(), 3);
+		return tail.IsEmpty() ? Core::String("it wrote nothing to its log") : tail;
+	}
+
+	Core::String TorService::Proxy() {
+		Threading::LockGuard guard(m_Lock);
+		m_UsedNs = clock_now_ns();
+		Core::String program;
+		Core::String problem;
+		Core::String desired = DesiredTorrc(program, problem);
+		if (!problem.IsEmpty()) {
+			if (m_Current != TorState::Failed || m_Error.View() != problem.View()) Halt(TorState::Failed, problem.View());
+		}
+		else {
+			if ((m_Current == TorState::Starting || m_Current == TorState::Ready) && desired.View() != m_Torrc.View()) Halt(TorState::Stopped, Core::StringView("its settings changed"));
+			if (m_Current == TorState::Stopped || (m_Current == TorState::Failed && m_UsedNs - m_FailedNs >= c_RetryAfterFailureNs)) Launch(desired.View(), program.View());
+		}
+		Publish();
+		return StatusJson();
+	}
+
+	Core::String TorService::NewCircuit() {
+		Threading::LockGuard guard(m_Lock);
+		IED::JsonWriter json;
+		json.BeginObject();
+		const int64 now = clock_now_ns();
+		if (m_Current != TorState::Ready) {
+			json.BoolField("changed", false);
+			json.IntField("waitSeconds", 0);
+			json.Field("error", Core::StringView("Tor is not running"));
+		}
+		else if (m_NewCircuitNs != 0 && now - m_NewCircuitNs < c_NewCircuitSpacingNs) {
+			json.BoolField("changed", false);
+			json.IntField("waitSeconds", (c_NewCircuitSpacingNs - (now - m_NewCircuitNs) + 999999999) / 1000000000);
+		}
+		else {
+			Core::Array<Core::String> lines;
+			Core::String problem;
+			const bool sent = m_Control.Command(Core::StringView("SIGNAL NEWNYM"), lines, problem);
+			if (sent) m_NewCircuitNs = now;
+			json.BoolField("changed", sent);
+			json.IntField("waitSeconds", 0);
+			if (!sent) json.Field("error", problem.View());
+			else m_Context->Log(Core::StringView("Tor: new circuits for new connections"));
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TorService::Status() {
+		Threading::LockGuard guard(m_Lock);
+		return StatusJson();
+	}
+
+	void TorService::Stop(bool final) {
+		Threading::LockGuard guard(m_Lock);
+		if (final) m_Stopping = true;
+		Halt(TorState::Stopped, final ? Core::StringView("") : Core::StringView("asked to stop"));
+		Publish();
+	}
+
+	// --- The watcher ------------------------------------------------------------------------------------------------
+
+	void TorService::Watch() {
+		while (true) {
+			{
+				Threading::LockGuard guard(m_Lock);
+				if (m_Stopping) return;
+				const int64 now = clock_now_ns();
+				if (m_Current == TorState::Starting) StepStarting(now);
+				else if (m_Current == TorState::Ready) StepReady(now);
+				Publish();
+			}
+			Threading::Thread::Sleep(c_WatchTickNs);
+		}
+	}
+
+	void TorService::StepStarting(int64 now) {
+		if (m_Process->Wait(0) != Process::kTimedOut) {
+			Halt(TorState::Failed, (Core::String("Tor stopped as it started: ") + LogTailText().View()).View());
+			return;
+		}
+		if (now - m_StartedNs > c_StartLimitNs) {
+			Halt(TorState::Failed, (((Core::String("Tor did not reach its network within ") + SecondsText(c_StartLimitNs).View()) + " (" + m_Summary.View()) + "): " + LogTailText().View()).View());
+			return;
+		}
+		Core::String problem;
+		if (!m_Control.IsOpen()) {
+			const int32 port = ControlPortOf(ReadText((m_State + "/control-port").View()).View());
+			if (port == 0 || !m_Control.Open(port, (m_State + "/data/control_auth_cookie").View(), problem)) return;
+		}
+		Core::Array<Core::String> lines;
+		if (!m_Control.Command(Core::StringView("GETINFO status/bootstrap-phase"), lines, problem)) return;
+		for (const Core::String& line : lines) BootstrapOf(line.View(), m_Progress, m_Summary);
+		if (m_Progress < 100) return;
+		if (!m_Control.Command(Core::StringView("GETINFO net/listeners/socks"), lines, problem)) return;
+		int32 port = 0;
+		for (const Core::String& line : lines)
+			if (port == 0) port = SocksPortOf(line.View());
+		if (port == 0) {
+			Halt(TorState::Failed, Core::StringView("Tor bootstrapped but listens on no SOCKS port"));
+			return;
+		}
+		m_SocksPort = port;
+		m_Current = TorState::Ready;
+		m_CheckedNs = now;
+		Core::StringBuilder line;
+		line.Append("Tor is ready in ");
+		line.Append(SecondsText(now - m_StartedNs).View());
+		line.Append(": SOCKS 127.0.0.1:");
+		line.AppendInt(port);
+		m_Context->Log(line.View());
+	}
+
+	void TorService::StepReady(int64 now) {
+		if (now - m_CheckedNs < c_AliveCheckNs) return;
+		m_CheckedNs = now;
+		if (m_Process->Wait(0) != Process::kTimedOut) {
+			Halt(TorState::Failed, (Core::String("Tor stopped: ") + LogTailText().View()).View());
+			return;
+		}
+		Serialization::DomNode configured = SettingNode(m_Context, "tor.stopAfterSeconds");
+		const int64 stopAfter = configured.IsValid() && !configured.IsNull() ? configured.AsInt() : c_DefaultStopAfterSeconds;
+		if (stopAfter > 0 && now - m_UsedNs > stopAfter * 1000000000) Halt(TorState::Stopped, (Core::String("unused for ") + SecondsText(now - m_UsedNs).View()).View());
+	}
+
+	// --- Status -----------------------------------------------------------------------------------------------------
+
+	Core::String TorService::StatusJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", StateName(m_Current));
+		json.IntField("progress", m_Current == TorState::Ready ? 100 : m_Progress);
+		json.Field("summary", m_Summary.View());
+		if (!m_Error.IsEmpty()) json.Field("error", m_Error.View());
+		if (m_Current == TorState::Ready) {
+			Core::StringBuilder socks;
+			socks.Append("socks5h://127.0.0.1:");
+			socks.AppendInt(m_SocksPort);
+			json.Field("socks", socks.View());
+			json.Field("host", Core::StringView("127.0.0.1"));
+			json.IntField("port", m_SocksPort);
+		}
+		if (!m_Executable.IsEmpty()) json.Field("executable", m_Executable.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Under `lock` (its order before the server's): the topic's snapshot and a status event, when the state changed.
+	void TorService::Publish() {
+		Core::String json = StatusJson();
+		if (json.View() == m_Published.View()) return;
+		m_Published = json;
+		m_Context->Topic(Core::StringView(c_StatusTopic), json.View());
+		m_Context->Publish(Core::StringView(c_StatusTopic), "status", json.View());
+	}
+}

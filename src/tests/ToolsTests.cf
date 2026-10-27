@@ -1,0 +1,190 @@
+// tools: language tools (docs/26 "Language tools") - versions compared and checked against a pin, the pin a workspace's
+// files give, what an install gives, a tools entry read, the install order, IED's installs newest first, a download's
+// digest, a batch file's command line, PATH with the tools' folders first, and ${tool:} and the other new profile
+// variables.
+
+include "tools/Service.ch"
+include "tools/Commands.ch"
+
+static Serialization::DomNode Json(const char* text) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Core::StringView(text), *doc).root;
+}
+
+static void WriteText(const FS::Path& file, const char* text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::File opened = FS::File(file.CStr(), "wb");
+	opened.Write((const void*)text, Core::StringView(text).ByteLength());
+}
+
+static Ied::VersionSource* Source(const char* file, const char* regexp, bool minimum) {
+	Ied::VersionSource* source = new Ied::VersionSource();
+	source->m_File = Core::String(file);
+	source->m_Regexp = Core::String(regexp);
+	source->m_Minimum = minimum;
+	return source;
+}
+
+static Ied::ToolSpec* Spec(const char* id, const char* requires) {
+	Ied::ToolSpec* spec = new Ied::ToolSpec();
+	spec->m_Id = Core::String(id);
+	if (requires) spec->m_Requires.Push(Core::String(requires));
+	return spec;
+}
+
+[test("server.tools")]
+class ToolsTests {
+	[test("versions")]
+	public static void TestVersions() {
+		assert_true(Ied::CompareVersions(Core::StringView("1.10"), Core::StringView("1.9")) > 0, "by number, not text");
+		assert_true(Ied::CompareVersions(Core::StringView("1.2"), Core::StringView("1.2.0")) == 0, "a missing part is 0");
+		assert_true(Ied::CompareVersions(Core::StringView("go1.22.3"), Core::StringView("1.22")) > 0, "from the first digit");
+		assert_true(Ied::CompareVersions(Core::StringView("1.77.0-nightly"), Core::StringView("1.77.0")) == 0, "what follows the numbers is not compared");
+		assert_true(Ied::VersionSatisfies(Core::StringView("1.26.6"), Core::StringView("1.22"), true), "a minimum");
+		assert_true(!Ied::VersionSatisfies(Core::StringView("1.20.1"), Core::StringView("1.22"), true), "below the minimum");
+		assert_true(Ied::VersionSatisfies(Core::StringView("1.75.2"), Core::StringView("1.75"), false), "exact: its patches");
+		assert_true(!Ied::VersionSatisfies(Core::StringView("1.76.0"), Core::StringView("1.75"), false), "exact: not the next");
+		assert_true(!Ied::VersionSatisfies(Core::StringView("1.7"), Core::StringView("1.75"), false), "exact: not a shorter one");
+		assert_true(Ied::VersionSatisfies(Core::StringView("1.98.1"), Core::StringView("stable"), false), "a channel is the tool's business");
+		assert_true(Ied::IsNumericVersion(Core::StringView("1.75")) && !Ied::IsNumericVersion(Core::StringView("nightly-2024-01-01")), "numeric");
+		Ied::PinnedVersion pin;
+		assert_se("1.27.3", Ied::VersionToInstall(pin, Core::StringView("1.27.3")).CStr(), "no pin: the plugin's version");
+		pin.m_Version = Core::String("1.22");
+		pin.m_Minimum = true;
+		assert_se("1.27.3", Ied::VersionToInstall(pin, Core::StringView("1.27.3")).CStr(), "an older minimum: the plugin's version");
+		pin.m_Version = Core::String("1.28.1");
+		assert_se("1.28.1", Ied::VersionToInstall(pin, Core::StringView("1.27.3")).CStr(), "a newer minimum: the pin");
+		pin.m_Version = Core::String("1.75.0");
+		pin.m_Minimum = false;
+		assert_se("1.75.0", Ied::VersionToInstall(pin, Core::StringView("stable")).CStr(), "an exact pin");
+		Ied::PinnedVersion none;
+		assert_se("latest", Ied::ToolInstallVersion(Spec("ra", nullptr), none).CStr(), "neither names one");
+		assert_true(Ied::IsFolderSafeVersion(Core::StringView("1.27.3")) && Ied::IsFolderSafeVersion(Core::StringView("nightly-2024-01-01")), "folder names");
+		assert_true(!Ied::IsFolderSafeVersion(Core::StringView("..")) && !Ied::IsFolderSafeVersion(Core::StringView("1/2")) && !Ied::IsFolderSafeVersion(Core::StringView("")), "never a path");
+	}
+
+	[test("pins")]
+	public static void TestPins() {
+		FS::Path root = FS::TempDirectory() / "ied-tools-pins-test";
+		FS::RemoveAll(root.CStr());
+		WriteText(root / "go.mod", "module x\n\ngo 1.22\n\ntoolchain go1.22.3\n");
+		WriteText(root / "tools" / "rust-toolchain.toml", "[toolchain]\nchannel = \"1.75.0\"\n");
+		Core::Array<Ied::VersionSource*> go;
+		go.Push(Source("go.mod", "^toolchain\\s+go(\\d[^\\s]*)", true));
+		go.Push(Source("go.mod", "^go\\s+(\\d[^\\s]*)", true));
+		Core::Array<Core::String> folders;
+		folders.Push(Core::String(""));
+		folders.Push(Core::String("tools"));
+		Ied::PinnedVersion pin = Ied::FindPin(root, folders, go);
+		assert_true(pin.m_Version == "1.22.3" && pin.m_Minimum && pin.m_File == "go.mod", "the first source that matches: the toolchain line");
+		Core::Array<Ied::VersionSource*> rust;
+		rust.Push(Source("rust-toolchain.toml", "^\\s*channel\\s*=\\s*\"([^\"]+)\"", false));
+		pin = Ied::FindPin(root, folders, rust);
+		assert_true(pin.m_Version == "1.75.0" && !pin.m_Minimum && pin.m_File == "tools/rust-toolchain.toml", "a project's folder");
+		Core::Array<Ied::VersionSource*> none;
+		none.Push(Source("nothing.txt", "(x)", false));
+		assert_true(Ied::FindPin(root, folders, none).m_Version.IsEmpty(), "no file: no pin");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("spec")]
+	public static void TestSpec() {
+		Serialization::DomNode entry = Json("{\"id\": \"gopls\", \"title\": \"gopls\", \"kind\": \"languageServer\", \"program\": \"gopls\", \"setting\": \"go.gopls.path\", \"onPath\": true,"
+			" \"searchPaths\": [\"${env:USERPROFILE}/go/bin\"], \"detect\": {\"args\": [\"version\"], \"pattern\": \"gopls v?(\\\\S+)\", \"env\": {\"GOTOOLCHAIN\": \"local\"}},"
+			" \"requires\": [\"go\"], \"install\": {\"version\": \"0.24.0\", \"bin\": \"bin\", \"windows\": [{\"run\": [\"${tool:go}\", \"install\"], \"env\": {\"GOBIN\": \"${installDir}\"}},"
+			" {\"download\": \"https://x/a.zip\", \"sha256\": \"ABCDEF\", \"strip\": 1, \"scope\": \"user\"}], \"linux\": [{\"run\": [\"sh\"]}]}}");
+		Ied::ToolSpec* spec = Ied::ReadToolSpec(entry, Core::StringView("ied.go"), Core::StringView("Go"), FS::Path("C:/p"));
+		assert_true(spec->m_Id == "gopls" && spec->m_Kind == "languageServer" && spec->m_Setting == "go.gopls.path" && spec->m_OnPath, "its identity");
+		assert_true(spec->m_VersionArgs.Count() == 1 && spec->m_VersionEnvironment[0] == "GOTOOLCHAIN=local", "how its version is read");
+		assert_true(spec->m_InstallVersion == "0.24.0" && spec->m_InstallBin == "bin" && spec->m_Steps.Count() == 2, "this system's steps only");
+		assert_true(spec->m_Steps[0]->m_Environment[0] == "GOBIN=${installDir}" && spec->m_Steps[0]->m_Label == "${tool:go}", "a command, labelled by its program");
+		assert_true(spec->m_Steps[1]->m_Sha256 == "abcdef" && spec->m_Steps[1]->m_Extract == "zip" && spec->m_Steps[1]->m_Strip == 1, "a download, its digest in lower case");
+		assert_true(spec->InstallsForUser() && spec->CanInstall(), "a step for the user");
+		assert_true(!Ied::ReadToolSpec(Json("{\"id\": \"x\", \"program\": \"x\"}"), Core::StringView("p"), Core::StringView("P"), FS::Path("C:/p"))->CanInstall(), "no install");
+	}
+
+	[test("order")]
+	public static void TestOrder() {
+		Core::Array<Ied::ToolSpec*> tools;
+		tools.Push(Spec("dlv", "go"));
+		tools.Push(Spec("gopls", "go"));
+		tools.Push(Spec("go", nullptr));
+		tools.Push(Spec("loop", "loop"));
+		Core::Array<Ied::ToolSpec*> order = Ied::InstallOrder(tools);
+		assert_eq((int64)4, order.Count(), "each once");
+		assert_true(order[0]->m_Id == "go" && order[1]->m_Id == "dlv" && order[2]->m_Id == "gopls" && order[3]->m_Id == "loop", "what is required first; a cycle once");
+		Core::Array<Ied::ToolSpec*> both;
+		both.Push(Spec("clangd", nullptr));
+		both.Push(Spec("codelldb", nullptr));
+		both.Push(Spec("clangd", "x"));
+		Core::Array<Ied::ToolSpec*> kept = Ied::LastOfEachId(both);
+		assert_true(kept.Count() == 2 && kept[0]->m_Id == "codelldb" && kept[1]->m_Requires.Count() == 1, "of one id, the last plugin's");
+	}
+
+	[test("installed")]
+	public static void TestInstalled() {
+		FS::Path root = FS::TempDirectory() / "ied-tools-installed-test";
+		FS::RemoveAll(root.CStr());
+		FS::MakeDirectories((root / "go" / "1.9.2").CStr());
+		FS::MakeDirectories((root / "go" / "1.27.3").CStr());
+		FS::MakeDirectories((root / "go" / "1.10.0").CStr());
+		WriteText(root / "go" / "1.27.3" / "bin" / "go.exe", "x");
+		Core::Array<Core::String> versions = Ied::InstalledVersions(root, Core::StringView("go"));
+		assert_true(versions.Count() == 3 && versions[0] == "1.27.3" && versions[1] == "1.10.0" && versions[2] == "1.9.2", "newest first");
+		Ied::ToolSpec* spec = Spec("go", nullptr);
+		spec->m_Program = Core::String("go");
+		spec->m_InstallBin = Core::String("bin");
+		spec->m_Setting = Core::String("go.path");
+		Ied::ProfileVariables variables;
+		Core::String looked;
+		Core::Array<Ied::ToolCandidate> found = Ied::ToolCandidates(spec, Core::StringView(""), variables, root, looked);
+		assert_true(!found.IsEmpty() && found[0].m_Source == "installed" && found[0].m_Version == "1.27.3", "IED's install, with its folder's version");
+		Core::Array<Ied::ToolCandidate> named = Ied::ToolCandidates(spec, Core::StringView("C:/nowhere/go.exe"), variables, root, looked);
+		assert_true(named.IsEmpty() && looked.View().Contains(Core::StringView("the setting go.path names")), "a setting: nothing else is tried");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("downloads_and_commands")]
+	public static void TestDownloadsAndCommands() {
+		assert_se("5b6c5b556525810463b5c897b50dc7a82d6a3dc0bfaf55d990a7e9f31d6b2318", Ied::DigestIn(Core::StringView("5B6C5B556525810463B5C897B50DC7A82D6A3DC0BFAF55D990A7E9F31D6B2318  go.zip\n")).CStr(), "a .sha256 file");
+		assert_se("", Ied::DigestIn(Core::StringView("sha256:abc")).CStr(), "no 64 digits");
+		assert_se("rustup-init.exe", Ied::UrlFileName(Core::StringView("https://x/y/rustup-init.exe?a=1")).CStr(), "a URL's file");
+		assert_se("download", Ied::UrlFileName(Core::StringView("https://x/")).CStr(), "none");
+		assert_se("go install gopls@v0.24.0", Ied::ReplaceAll(Core::StringView("go install gopls@v${version}"), Core::StringView("${version}"), Core::StringView("0.24.0")).CStr(), "replaced");
+		FS::Path file = FS::TempDirectory() / "ied-tools-digest-test.txt";
+		WriteText(file, "abc");
+		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Ied::FileDigest(file).CStr(), "SHA-256 of abc");
+		FS::RemoveFile(file.CStr());
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String("C:/t/fakec.cmd"));
+		argv.Push(Core::String("install"));
+		Core::String line;
+		Core::String problem;
+		assert_true(Ied::IsBatchProgram(Core::StringView("C:/t/FAKEC.CMD")) && !Ied::IsBatchProgram(Core::StringView("go.exe")), "by extension");
+		assert_true(Ied::QuotedBatchLine(argv, line, problem) && line == "\"C:/t/fakec.cmd\" \"install\"", "each word quoted");
+		argv.Push(Core::String("%PATH%"));
+		assert_true(!Ied::QuotedBatchLine(argv, line, problem) && !problem.IsEmpty(), "cmd.exe reads % inside quotes");
+		Core::Array<Core::String> environment;
+		environment.Push(Core::String("A=1"));
+		environment.Push(Core::String("Path=C:/old"));
+		Core::Array<Core::String> first = Ied::WithPathFirst(environment, Core::StringView("C:/tools/go/bin"));
+		assert_true(first.Count() == 2 && first[0] == "A=1" && first[1] == "PATH=C:/tools/go/bin;C:/old", "before the PATH given");
+		assert_eq((int64)2, Ied::WithPathFirst(environment, Core::StringView("")).Count(), "nothing to add: as it was");
+		assert_se("0.24.0", Ied::VersionIn(Core::StringView("golang.org/x/tools/gopls v0.24.0\n    built with go1.26"), Core::StringView("gopls v?(\\d+\\.\\d+\\.\\d+)")).CStr(), "a version in the output");
+		assert_se("", Ied::VersionIn(Core::StringView("nothing"), Core::StringView("v(\\d+)")).CStr(), "none");
+	}
+
+	[test("variables")]
+	public static void TestVariables() {
+		Ied::ProfileVariables variables;
+		variables.m_IedHome = Core::String("C:/IED");
+		variables.m_PluginState = Core::String("C:/data/plugins/ied.python");
+		variables.m_Tool = [](Core::StringView id) -> Core::String { return id == "go" ? Core::String("C:/tools/go/bin/go.exe") : Core::String(); };
+		assert_se("C:/IED/vendor/python/python.exe", Ied::ExpandProfileVariables(Core::StringView("${iedHome}/vendor/python/python.exe"), variables).CStr(), "the install");
+		assert_se("C:/data/plugins/ied.python/packages", Ied::ExpandProfileVariables(Core::StringView("${pluginState}/packages"), variables).CStr(), "the plugin's state");
+		assert_se("C:/tools/go/bin/go.exe version", Ied::ExpandProfileVariables(Core::StringView("${tool:go} version"), variables).CStr(), "a tool's program");
+		assert_se("[]", (Core::String("[") + Ied::ExpandProfileVariables(Core::StringView("${tool:none}"), variables).View() + "]").CStr(), "a tool nobody names: nothing");
+		Core::String root;
+		if (Platform::TryGetEnvironmentVariable("SystemRoot", root)) assert_se(root.CStr(), Ied::ExpandProfileVariables(Core::StringView("${env:SystemRoot}"), variables).CStr(), "the server's environment");
+	}
+}

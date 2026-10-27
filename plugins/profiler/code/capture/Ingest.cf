@@ -1,0 +1,715 @@
+include "Ingest.ch"
+
+namespace Profiler
+{
+	const double c_NsPerSecond = 1000000000.0;
+	const double c_CalibrationLeastSeconds = 0.5;
+
+	// --- Finding or making the capture's parts -------------------------------------------------------------------------
+
+	static int32 TrackFor(Capture& capture, uint64 clientId) {
+		int32 index;
+		if (capture.m_TrackOf.TryGet(clientId, index)) return index;
+		ThreadTrack* track = new ThreadTrack();
+		track->m_ClientId = clientId;
+		capture.m_Tracks.Push(track);
+		index = (int32)(capture.m_Tracks.Count() - 1);
+		capture.m_TrackOf.Insert(clientId, index);
+		return index;
+	}
+
+	static FrameSet* FrameSetFor(Capture& capture, uint64 nameStr) {
+		FrameSet* set = nullptr;
+		if (capture.m_FrameSetOf.TryGet(nameStr, set)) return set;
+		set = new FrameSet();
+		set->m_NameStr = nameStr;
+		capture.m_FrameSets.Push(set);
+		capture.m_FrameSetOf.Insert(nameStr, set);
+		return set;
+	}
+
+	static Plot* PlotFor(Capture& capture, uint64 id) {
+		Plot* plot = nullptr;
+		if (capture.m_PlotOf.TryGet(id, plot)) return plot;
+		plot = new Plot();
+		plot->m_Id = id;
+		capture.m_Plots.Push(plot);
+		capture.m_PlotOf.Insert(id, plot);
+		return plot;
+	}
+
+	static Pool* PoolFor(Capture& capture, uint64 id) {
+		Pool* pool = nullptr;
+		if (capture.m_PoolOf.TryGet(id, pool)) return pool;
+		pool = new Pool();
+		pool->m_Id = id;
+		capture.m_Pools.Push(pool);
+		capture.m_PoolOf.Insert(id, pool);
+		return pool;
+	}
+
+	static TaskLane* LaneFor(Capture& capture, uint64 nameStr) {
+		TaskLane* lane = nullptr;
+		if (capture.m_TaskLaneOf.TryGet(nameStr, lane)) return lane;
+		lane = new TaskLane();
+		lane->m_NameStr = nameStr;
+		capture.m_TaskLanes.Push(lane);
+		capture.m_TaskLaneOf.Insert(nameStr, lane);
+		return lane;
+	}
+
+	static TaskRuns* RunsFor(TaskLane* lane, int32 track) {
+		TaskRuns* runs = nullptr;
+		if (lane->m_RunsOf.TryGet(track, runs)) return runs;
+		runs = new TaskRuns();
+		runs->m_Track = track;
+		lane->m_Runs.Push(runs);
+		lane->m_RunsOf.Insert(track, runs);
+		return runs;
+	}
+
+	static GpuContext* GpuFor(Capture& capture, uint64 id) {
+		GpuContext* gpu = nullptr;
+		if (capture.m_GpuOf.TryGet(id, gpu)) return gpu;
+		gpu = new GpuContext();
+		gpu->m_Id = id;
+		capture.m_Gpus.Push(gpu);
+		capture.m_GpuOf.Insert(id, gpu);
+		return gpu;
+	}
+
+	static LockInfo* LockFor(Capture& capture, uint64 id) {
+		LockInfo* lock = nullptr;
+		if (capture.m_Locks.TryGet(id, lock)) return lock;
+		lock = new LockInfo();
+		lock->m_Id = id;
+		capture.m_Locks.Insert(id, lock);
+		capture.m_LockList.Push(lock);
+		return lock;
+	}
+
+	static LockTrack* HolderOf(LockInfo* lock, int32 track) {
+		LockTrack* holder = nullptr;
+		if (lock->m_TrackOf.TryGet(track, holder)) return holder;
+		holder = new LockTrack();
+		holder->m_Track = track;
+		lock->m_TrackOf.Insert(track, holder);
+		lock->m_Tracks.Push(holder);
+		return holder;
+	}
+
+	static SiteStats* StatsFor(Capture& capture, uint64 site) {
+		SiteStats* stats = nullptr;
+		if (capture.m_Sites.TryGet(site, stats)) return stats;
+		stats = new SiteStats();
+		capture.m_Sites.Insert(site, stats);
+		return stats;
+	}
+
+	// Where `t` goes in a time-sorted array: after every time not later than it (most events arrive in order, so the
+	// search starts from the end).
+	static int64 SortedSlot(const Core::Array<int64>& times, int64 t) {
+		int64 at = times.Count();
+		while (at > 0 && times[at - 1] > t) at -= 1;
+		return at;
+	}
+
+	static void Set(Core::HashMap<uint64, Core::String>& map, uint64 key, Core::StringView value) {
+		Core::String* existing = map.Find(key);
+		if (existing) *existing = Core::String(value);
+		else map.Insert(key, Core::String(value));
+	}
+
+	// --- Session ------------------------------------------------------------------------------------------------------
+
+	static void Hello(Capture& capture, const Event& event) {
+		capture.m_Hello = true;
+		capture.m_AppName = Core::String(event.m_Text);
+		capture.m_Pid = event.m_Fields[1];
+		capture.m_ClockFreqHz = (int64)event.m_Fields[2];
+		capture.m_Clock.m_StartTicks = (int64)event.m_Fields[3];
+		capture.m_StartUnixNs = (int64)event.m_Fields[4];
+		capture.m_Flags = event.m_Fields[5];
+		capture.m_Clock.m_NsPerTick = capture.m_ClockFreqHz > 0 ? c_NsPerSecond / (double)capture.m_ClockFreqHz : 1.0;
+	}
+
+	// A client that estimated its clock's frequency is corrected by its calibration pairs, once they span enough time.
+	static void Calibrate(Capture& capture, const Event& event) {
+		capture.m_CalibrationTicks.Push((int64)event.m_Fields[0]);
+		capture.m_CalibrationUnixNs.Push((int64)event.m_Fields[1]);
+		if ((capture.m_Flags & c_EstimatedClockFlag) == 0 || capture.m_CalibrationTicks.Count() < 2) return;
+		const int64 ticks = capture.m_CalibrationTicks.Back() - capture.m_CalibrationTicks[0];
+		const int64 ns = capture.m_CalibrationUnixNs.Back() - capture.m_CalibrationUnixNs[0];
+		if (ticks <= 0 || (double)ns < c_CalibrationLeastSeconds * c_NsPerSecond) return;
+		capture.m_Clock.m_NsPerTick = (double)ns / (double)ticks;
+	}
+
+	// --- Zones --------------------------------------------------------------------------------------------------------
+
+	static ZoneLevel* LevelAt(ThreadTrack* track, int32 depth) {
+		while (track->m_Levels.Count() <= (int64)depth) track->m_Levels.Push(new ZoneLevel());
+		return track->m_Levels[depth];
+	}
+
+	static void BeginZone(Capture& capture, int32 trackIndex, int64 t, uint64 site, uint64 nameStr) {
+		ThreadTrack* track = capture.m_Tracks[trackIndex];
+		const int32 depth = (int32)track->m_Open.Count();
+		if (depth > c_MostDepth) {
+			track->m_Overflow += 1;
+			if (track->m_Overflow == 1) capture.Warn(t, Core::StringView("zones nested deeper than 255 levels were left out"));
+			return;
+		}
+		ZoneLevel* level = LevelAt(track, depth);
+		int64 start = t;
+		if (level->Count() > 0 && level->m_Ends.Back() != c_Open && level->m_Ends.Back() > start) start = level->m_Ends.Back();
+		level->m_Starts.Push(start);
+		level->m_Ends.Push(c_Open);
+		level->m_Selfs.Push(0);
+		level->m_Sites.Push((uint32)site);
+		level->m_Extras.Push(0);
+		OpenZone zone;
+		zone.m_Depth = depth;
+		zone.m_Index = level->Count() - 1;
+		track->m_Open.Push(zone);
+		track->m_Zones += 1;
+		StatsFor(capture, site)->m_Refs.Push(ZoneRef::Of(trackIndex, depth, zone.m_Index).m_Bits);
+		if (nameStr != 0) track->InnermostExtra()->m_NameStr = nameStr;
+	}
+
+	static void EndZone(Capture& capture, int32 trackIndex, int64 t) {
+		ThreadTrack* track = capture.m_Tracks[trackIndex];
+		if (track->m_Overflow > 0) {
+			track->m_Overflow -= 1;
+			return;
+		}
+		if (track->m_Open.IsEmpty()) {
+			capture.Warn(t, Core::StringView("a zone ended that never began; the end was left out"));
+			return;
+		}
+		const OpenZone zone = track->m_Open.Pop();
+		ZoneLevel* level = track->m_Levels[zone.m_Depth];
+		const int64 start = level->m_Starts[zone.m_Index];
+		const int64 end = t < start ? start : t;
+		const int64 duration = end - start;
+		const int64 self = duration - zone.m_ChildTicks < 0 ? 0 : duration - zone.m_ChildTicks;
+		level->m_Ends[zone.m_Index] = end;
+		level->m_Selfs[zone.m_Index] = self;
+		if (!track->m_Open.IsEmpty()) track->m_Open.Back().m_ChildTicks += duration;
+		SiteStats* stats = StatsFor(capture, (uint64)level->m_Sites[zone.m_Index]);
+		stats->m_Count += 1;
+		stats->m_Total += duration;
+		stats->m_Self += self;
+		if (duration > stats->m_Most) stats->m_Most = duration;
+		if (stats->m_Least < 0 || duration < stats->m_Least) stats->m_Least = duration;
+	}
+
+	static void DescribeZone(Capture& capture, int32 trackIndex, const Event& event) {
+		ZoneExtra* extra = capture.m_Tracks[trackIndex]->InnermostExtra();
+		if (!extra) {
+			capture.Warn(capture.m_LastTicks, Core::StringView("zone text or a value came with no zone open"));
+			return;
+		}
+		if (event.m_Type == EventType::ZoneText) extra->m_TextStr = event.m_Fields[0];
+		else if (event.m_Type == EventType::ZoneValue) {
+			extra->m_Value = event.m_Fields[0];
+			extra->m_HasValue = true;
+		}
+		else if (event.m_Type == EventType::ZoneColor) extra->m_Color = (uint32)event.m_Fields[0];
+		else if (event.m_Type == EventType::ZoneAllocs || event.m_Type == EventType::ZoneNative || event.m_Type == EventType::ZoneNativeFreed) {
+			if (event.m_Type == EventType::ZoneAllocs) {
+				extra->m_AllocObjects = event.m_Fields[0];
+				extra->m_AllocBytes = event.m_Fields[1];
+			}
+			else if (event.m_Type == EventType::ZoneNative) extra->m_NativeBytes = event.m_Fields[0];
+			else extra->m_NativeFreed = event.m_Fields[0];
+			if (!extra->m_Counted) capture.m_ZoneAllocs += 1;
+			extra->m_Counted = true;
+		}
+		else extra->m_Callstack = event.m_Fields[0];
+	}
+
+	// --- Counted allocations and censuses -------------------------------------------------------------------------
+
+	static void CountAllocations(Capture& capture, const Event& event, int64 t) {
+		AllocCounter& counter = capture.m_AllocCounter;
+		const int64 at = SortedSlot(counter.m_Times, t);
+		counter.m_Times.Insert(at, t);
+		counter.m_Objects.Insert(at, (int64)event.m_Fields[0]);
+		counter.m_Bytes.Insert(at, (int64)event.m_Fields[1]);
+	}
+
+	static void BeginCensus(Capture& capture, const Event& event, int64 t) {
+		HeapCensus* census = new HeapCensus();
+		census->m_T = t;
+		census->m_Expected = (int64)event.m_Fields[0];
+		capture.m_Censuses.Push(census);
+	}
+
+	static void CensusLine(Capture& capture, const Event& event) {
+		HeapCensus* census = capture.m_Censuses.IsEmpty() ? nullptr : capture.m_Censuses.Back();
+		if (!census || census->m_Types.Count() >= census->m_Expected) {
+			capture.Warn(capture.m_LastTicks, Core::StringView("a census line came with no census to take it"));
+			return;
+		}
+		CensusType type;
+		type.m_NameStr = event.m_Fields[0];
+		type.m_Objects = (int64)event.m_Fields[1];
+		type.m_Bytes = (int64)event.m_Fields[2];
+		if (event.m_Type == EventType::HeapCensusTypeNative) {
+			type.m_NativeBytes = (int64)event.m_Fields[3];
+			capture.m_CensusNative = true;
+		}
+		census->m_Types.Push(type);
+	}
+
+	// --- Tasks --------------------------------------------------------------------------------------------------------
+
+	static void StopRunning(TaskInfo* task, int64 t) {
+		if (!task->m_Running) return;
+		const int64 start = task->m_Running->m_Starts[task->m_RunningEntry];
+		task->m_Running->m_Ends[task->m_RunningEntry] = t < start ? start : t;
+		task->m_Running = nullptr;
+	}
+
+	static void StartRunning(Capture& capture, TaskInfo* task, int32 track, int64 t) {
+		StopRunning(task, t);
+		TaskLane* lane = LaneFor(capture, task->m_NameStr);
+		TaskRuns* runs = RunsFor(lane, track);
+		runs->m_Starts.Push(t);
+		runs->m_Ends.Push(c_Open);
+		runs->m_Tasks.Push(task->m_Id);
+		lane->m_Count += 1;
+		task->m_Running = runs;
+		task->m_RunningEntry = runs->m_Starts.Count() - 1;
+		task->m_Runs += 1;
+	}
+
+	static TaskInfo* KnownTask(Capture& capture, uint64 id, int64 t) {
+		TaskInfo* task = nullptr;
+		if (capture.m_Tasks.TryGet(id, task)) return task;
+		capture.Warn(t, Core::StringView("an event named a task that never began"));
+		return nullptr;
+	}
+
+	static void TaskEvent(Capture& capture, int32 track, const Event& event, int64 t) {
+		if (event.m_Type == EventType::TaskBegin) {
+			TaskInfo* task = new TaskInfo();
+			task->m_Id = event.m_Fields[0];
+			task->m_NameStr = event.m_Fields[1];
+			task->m_Parent = event.m_Fields[2];
+			task->m_Begin = t;
+			if (!capture.m_Tasks.Insert(task->m_Id, task)) {
+				capture.Warn(t, Core::StringView("a task id was used twice; the second task was left out"));
+				return;
+			}
+			StartRunning(capture, task, track, t);
+			return;
+		}
+		TaskInfo* task = KnownTask(capture, event.m_Fields[0], t);
+		if (!task) return;
+		if (event.m_Type == EventType::TaskResume) StartRunning(capture, task, track, t);
+		else StopRunning(task, t);
+		if (event.m_Type == EventType::TaskEnd) task->m_End = t;
+	}
+
+	// --- Frames, plots, messages --------------------------------------------------------------------------------------
+
+	static void FrameEvent(Capture& capture, int32 track, const Event& event, int64 t) {
+		FrameSet* set = FrameSetFor(capture, event.m_Fields[0]);
+		if (set->m_Track < 0 && event.m_ChunkKind == c_ThreadChunk) set->m_Track = track;
+		const bool open = !set->m_Ends.IsEmpty() && set->m_Ends.Back() == c_Open;
+		if (event.m_Type == EventType::FrameEnd) {
+			if (open) set->m_Ends.Back() = t;
+			else capture.Warn(t, Core::StringView("a frame ended that never began"));
+			return;
+		}
+		if (event.m_Type == EventType::FrameBegin) set->m_Discontinuous = true;
+		if (open) set->m_Ends.Back() = t;
+		set->m_Starts.Push(t);
+		set->m_Ends.Push(c_Open);
+	}
+
+	static void PlotValue(Capture& capture, const Event& event, int64 t) {
+		Plot* plot = PlotFor(capture, event.m_Fields[0]);
+		const int64 at = SortedSlot(plot->m_Times, t);
+		plot->m_Times.Insert(at, t);
+		plot->m_Values.Insert(at, event.m_Number);
+	}
+
+	static void Message(Capture& capture, int32 track, const Event& event, int64 t) {
+		MessageRecord message;
+		message.m_T = t;
+		message.m_Track = track;
+		message.m_Severity = (int32)event.m_Fields[0];
+		message.m_TextStr = event.m_Fields[1];
+		message.m_Color = (uint32)event.m_Fields[2];
+		int64 at = capture.m_Messages.Count();
+		while (at > 0 && capture.m_Messages[at - 1].m_T > t) at -= 1;
+		capture.m_Messages.Insert(at, message);
+	}
+
+	// --- Memory -------------------------------------------------------------------------------------------------------
+
+	static void Used(Pool* pool, int64 t, int64 change) {
+		pool->m_InUse += change;
+		if (pool->m_InUse > pool->m_Peak) pool->m_Peak = pool->m_InUse;
+		const int64 when = !pool->m_Times.IsEmpty() && pool->m_Times.Back() > t ? pool->m_Times.Back() : t;
+		pool->m_Times.Push(when);
+		pool->m_Bytes.Push(pool->m_InUse);
+	}
+
+	static void Release(Capture& capture, Pool* pool, int64 index, int64 t) {
+		Allocation& allocation = capture.m_Allocations[index];
+		allocation.m_Freed = t < allocation.m_T ? allocation.m_T : t;
+		pool->m_Frees += 1;
+		Used(pool, t, -allocation.m_Size);
+	}
+
+	static void Alloc(Capture& capture, int32 track, const Event& event, int64 t) {
+		Pool* pool = PoolFor(capture, event.m_Fields[1]);
+		const uint64 address = event.m_Fields[2];
+		int64 existing;
+		if (pool->m_Live.TryGet(address, existing)) {
+			capture.Warn(t, Core::StringView("an address was allocated again before it was freed; the first allocation is taken as freed"));
+			Release(capture, pool, existing, t);
+			pool->m_Live.Remove(address);
+		}
+		Allocation allocation;
+		allocation.m_T = t;
+		allocation.m_Address = address;
+		allocation.m_Size = (int64)event.m_Fields[3];
+		allocation.m_Track = track;
+		allocation.m_Callstack = event.m_Fields[4];
+		allocation.m_Pool = pool->m_Id;
+		capture.m_Allocations.Push(allocation);
+		pool->m_Live.Insert(address, capture.m_Allocations.Count() - 1);
+		pool->m_Allocs += 1;
+		Used(pool, t, allocation.m_Size);
+	}
+
+	static void Free(Capture& capture, const Event& event, int64 t) {
+		Pool* pool = PoolFor(capture, event.m_Fields[1]);
+		const uint64 address = event.m_Fields[2];
+		int64 index;
+		if (!pool->m_Live.TryGet(address, index)) {
+			pool->m_EarlierFrees += 1;
+			return;
+		}
+		pool->m_Live.Remove(address);
+		Release(capture, pool, index, t);
+	}
+
+	static void ResetPool(Capture& capture, const Event& event, int64 t) {
+		Pool* pool = PoolFor(capture, event.m_Fields[0]);
+		for (Core::KeyValue<uint64, int64>& entry : pool->m_Live) Release(capture, pool, entry.value, t);
+		pool->m_Live.Clear();
+	}
+
+	static void GcEvent(Capture& capture, const Event& event, int64 t) {
+		if (event.m_Type == EventType::GcBegin) {
+			GcRecord gc;
+			gc.m_Begin = t;
+			gc.m_Kind = (int32)event.m_Fields[0];
+			gc.m_Generation = (int32)event.m_Fields[1];
+			capture.m_Gcs.Push(gc);
+			return;
+		}
+		if (capture.m_Gcs.IsEmpty() || capture.m_Gcs.Back().m_End != c_Open) {
+			GcRecord unbegun;
+			unbegun.m_Begin = t;
+			capture.m_Gcs.Push(unbegun);
+		}
+		GcRecord& gc = capture.m_Gcs.Back();
+		gc.m_End = t < gc.m_Begin ? gc.m_Begin : t;
+		gc.m_BytesBefore = (int64)event.m_Fields[0];
+		gc.m_BytesAfter = (int64)event.m_Fields[1];
+		gc.m_ObjectsFreed = (int64)event.m_Fields[2];
+		gc.m_Pinned = (int64)event.m_Fields[3];
+		gc.m_Roots = (int64)event.m_Fields[4];
+	}
+
+	// --- GPU ----------------------------------------------------------------------------------------------------------
+
+	// A slot's time into the zone waiting for it (its begin or its end), else kept for the next zone that takes the slot.
+	static void GpuTime(GpuContext* gpu, uint64 query, int64 ticks) {
+		int64 waiting;
+		if (!gpu->m_Waiting.TryGet(query, waiting)) {
+			gpu->m_Early.Remove(query);
+			gpu->m_Early.Insert(query, ticks);
+			return;
+		}
+		gpu->m_Waiting.Remove(query);
+		GpuZone& zone = gpu->m_Zones[waiting];
+		if (zone.m_BeginQuery == query && zone.m_GpuBegin == c_NoGpuTime) zone.m_GpuBegin = ticks;
+		else zone.m_GpuEnd = ticks;
+	}
+
+	// The zone `index` now waits for the time of `query`: at once when it came first.
+	static int64 AwaitGpuTime(GpuContext* gpu, uint64 query, int64 index) {
+		int64 early;
+		if (gpu->m_Early.TryGet(query, early)) {
+			gpu->m_Early.Remove(query);
+			return early;
+		}
+		gpu->m_Waiting.Remove(query);
+		gpu->m_Waiting.Insert(query, index);
+		return c_NoGpuTime;
+	}
+
+	static Core::Array<int64>* OpenGpuZones(GpuContext* gpu, int32 track) {
+		if (!gpu->m_Open.Find(track)) gpu->m_Open.Insert(track, Core::Array<int64>());
+		return gpu->m_Open.Find(track);
+	}
+
+	static void BeginGpuZone(GpuContext* gpu, int32 track, const Event& event, int64 t) {
+		Core::Array<int64>* open = OpenGpuZones(gpu, track);
+		GpuZone zone;
+		zone.m_CpuBegin = t;
+		zone.m_BeginQuery = event.m_Fields[1];
+		zone.m_Site = (uint32)event.m_Fields[2];
+		zone.m_Depth = (int32)open->Count();
+		zone.m_Track = track;
+		const int64 index = gpu->m_Zones.Count();
+		zone.m_GpuBegin = AwaitGpuTime(gpu, zone.m_BeginQuery, index);
+		gpu->m_Zones.Push(zone);
+		open->Push(index);
+	}
+
+	static void EndGpuZone(Capture& capture, GpuContext* gpu, int32 track, const Event& event, int64 t) {
+		Core::Array<int64>* open = OpenGpuZones(gpu, track);
+		if (open->IsEmpty()) {
+			capture.Warn(t, Core::StringView("a GPU zone ended that never began"));
+			return;
+		}
+		const int64 index = open->Pop();
+		GpuZone& zone = gpu->m_Zones[index];
+		zone.m_CpuEnd = t;
+		zone.m_EndQuery = event.m_Fields[1];
+		zone.m_GpuEnd = AwaitGpuTime(gpu, zone.m_EndQuery, index);
+	}
+
+	static void GpuEvent(Capture& capture, int32 track, const Event& event, int64 t) {
+		GpuContext* gpu = GpuFor(capture, event.m_Fields[0]);
+		if (event.m_Type == EventType::GpuContextDef) {
+			gpu->m_Api = event.m_Fields[1];
+			gpu->m_NameStr = event.m_Fields[2];
+			gpu->m_PeriodPs = event.m_Fields[3] == 0 ? 1.0 : (double)event.m_Fields[3];
+		}
+		else if (event.m_Type == EventType::GpuCalibration) {
+			gpu->m_CalibrationCpu.Push((int64)event.m_Fields[1]);
+			gpu->m_CalibrationGpu.Push((int64)event.m_Fields[2]);
+		}
+		else if (event.m_Type == EventType::GpuTime) GpuTime(gpu, event.m_Fields[1], (int64)event.m_Fields[2]);
+		else if (event.m_Type == EventType::GpuZoneBegin) BeginGpuZone(gpu, track, event, t);
+		else EndGpuZone(capture, gpu, track, event, t);
+	}
+
+	// --- Definitions --------------------------------------------------------------------------------------------------
+
+	static void Define(Capture& capture, const Event& event) {
+		if (event.m_Type == EventType::StringDef) Set(capture.m_Strings, event.m_Fields[0], event.m_Text);
+		else if (event.m_Type == EventType::SrcLocDef) {
+			SrcLoc loc;
+			loc.m_NameStr = event.m_Fields[1];
+			loc.m_FunctionStr = event.m_Fields[2];
+			loc.m_FileStr = event.m_Fields[3];
+			loc.m_Line = event.m_Fields[4];
+			loc.m_Color = (uint32)event.m_Fields[5];
+			SrcLoc* existing = capture.m_Srclocs.Find(event.m_Fields[0]);
+			if (existing) *existing = loc;
+			else capture.m_Srclocs.Insert(event.m_Fields[0], loc);
+		}
+		else if (event.m_Type == EventType::ThreadDef) {
+			ThreadTrack* track = capture.m_Tracks[TrackFor(capture, event.m_Fields[0])];
+			track->m_OsId = event.m_Fields[1];
+			track->m_GroupStr = event.m_Fields[2];
+		}
+		else if (event.m_Type == EventType::PlotDef) {
+			Plot* plot = PlotFor(capture, event.m_Fields[0]);
+			plot->m_NameStr = event.m_Fields[1];
+			plot->m_Kind = event.m_Fields[2];
+		}
+		else if (event.m_Type == EventType::PoolDef) PoolFor(capture, event.m_Fields[0])->m_NameStr = event.m_Fields[1];
+		else if (event.m_Type == EventType::LockDef) {
+			LockInfo* lock = LockFor(capture, event.m_Fields[0]);
+			lock->m_NameStr = event.m_Fields[1];
+			lock->m_Site = event.m_Fields[2];
+		}
+		else if (event.m_Type == EventType::ModuleDef) {
+			ModuleRecord module;
+			module.m_Base = event.m_Fields[0];
+			module.m_Size = event.m_Fields[1];
+			module.m_PathStr = event.m_Fields[2];
+			module.m_DebugIdStr = event.m_Fields[3];
+			capture.m_Modules.Push(module);
+		}
+		else if (event.m_Type == EventType::CallstackDef) {
+			Core::Array<uint64> frames;
+			if (event.m_List) frames.Append(*event.m_List);
+			Core::Array<uint64>* existing = capture.m_Callstacks.Find(event.m_Fields[0]);
+			if (existing) *existing = frames;
+			else capture.m_Callstacks.Insert(event.m_Fields[0], frames);
+		}
+		else if (event.m_Type == EventType::SymbolDef) {
+			SymbolRecord symbol;
+			symbol.m_FunctionStr = event.m_Fields[1];
+			symbol.m_FileStr = event.m_Fields[2];
+			symbol.m_Line = event.m_Fields[3];
+			SymbolRecord* existing = capture.m_Symbols.Find(event.m_Fields[0]);
+			if (existing) *existing = symbol;
+			else capture.m_Symbols.Insert(event.m_Fields[0], symbol);
+		}
+	}
+
+	static void ObtainLock(LockInfo* lock, LockTrack* holder, bool shared, int64 t) {
+		holder->m_Depth += 1;
+		if (holder->m_Depth > 1) return;
+		LockSpan span;
+		span.m_Wait = holder->m_WaitingSince >= 0 ? holder->m_WaitingSince : t;
+		span.m_Obtain = t;
+		span.m_Shared = shared;
+		holder->m_Spans.Push(span);
+		holder->m_WaitingSince = -1;
+		lock->m_Acquisitions += 1;
+	}
+
+	// A lock's wait, obtain or release on a thread (the field is the lock id times two, plus one for a shared hold).
+	static void Lock(Capture& capture, int32 track, const Event& event, int64 t) {
+		LockInfo* lock = LockFor(capture, event.m_Fields[0] >> 1);
+		LockTrack* holder = HolderOf(lock, track);
+		if (event.m_Type == EventType::LockWait) {
+			if (holder->m_Depth == 0 && holder->m_WaitingSince < 0) holder->m_WaitingSince = t;
+		}
+		else if (event.m_Type == EventType::LockObtain) ObtainLock(lock, holder, (event.m_Fields[0] & 1) != 0, t);
+		else if (holder->m_Depth == 0) capture.Warn(t, Core::StringView("a lock was released that was not held; the release was left out"));
+		else {
+			holder->m_Depth -= 1;
+			if (holder->m_Depth == 0) holder->m_Spans.Back().m_Release = t;
+		}
+	}
+
+	static void Sample(Capture& capture, int32 track, const Event& event, int64 t) {
+		SampleRecord sample;
+		sample.m_T = t;
+		sample.m_Track = track;
+		sample.m_Callstack = event.m_Fields[1];
+		sample.m_Kind = (int32)event.m_Fields[2];
+		sample.m_Weight = (int64)event.m_Fields[3];
+		capture.m_Samples.Push(sample);
+	}
+
+	// --- Dispatch -----------------------------------------------------------------------------------------------------
+
+	static bool IsDefinition(EventType type) {
+		return type == EventType::StringDef || type == EventType::SrcLocDef || type == EventType::ThreadDef || type == EventType::PlotDef || type == EventType::PoolDef || type == EventType::LockDef || type == EventType::ModuleDef || type == EventType::CallstackDef || type == EventType::SymbolDef;
+	}
+
+	static bool Within(EventType type, EventType first, EventType last) {
+		return (uint8)type >= (uint8)first && (uint8)type <= (uint8)last;
+	}
+
+	static bool IsGpu(EventType type) { return Within(type, EventType::GpuContextDef, EventType::GpuTime); }
+
+	// Events that happen on a thread make its track; the global chunk's thread 0 is the process itself.
+	static int32 TrackOfEvent(Capture& capture, const Event& event) {
+		return TrackFor(capture, event.m_Thread);
+	}
+
+	// An event that names its thread in its first field (Alloc, Sample: sent in global chunks): that thread, else the
+	// chunk's when it names none.
+	static int32 TrackNamedBy(Capture& capture, const Event& event) {
+		return event.m_Fields[0] != 0 ? TrackFor(capture, event.m_Fields[0]) : TrackOfEvent(capture, event);
+	}
+
+	static void ApplyTimed(Capture& capture, const Event& event, int64 t) {
+		const EventType type = event.m_Type;
+		if (type == EventType::ZoneBegin) BeginZone(capture, TrackOfEvent(capture, event), t, event.m_Fields[0], 0);
+		else if (type == EventType::ZoneBeginNamed) BeginZone(capture, TrackOfEvent(capture, event), t, event.m_Fields[0], event.m_Fields[1]);
+		else if (type == EventType::ZoneEnd) EndZone(capture, TrackOfEvent(capture, event), t);
+		else if (type == EventType::ThreadName) {
+			ThreadTrack* track = capture.m_Tracks[TrackOfEvent(capture, event)];
+			track->m_NameTimes.Push(t);
+			track->m_NameStrs.Push(event.m_Fields[0]);
+		}
+		else if (Within(type, EventType::TaskBegin, EventType::TaskResume)) TaskEvent(capture, TrackOfEvent(capture, event), event, t);
+		else if (Within(type, EventType::FrameMark, EventType::FrameEnd)) FrameEvent(capture, TrackOfEvent(capture, event), event, t);
+		else if (type == EventType::PlotValue) PlotValue(capture, event, t);
+		else if (type == EventType::Message) Message(capture, TrackOfEvent(capture, event), event, t);
+		else if (type == EventType::Alloc) Alloc(capture, TrackNamedBy(capture, event), event, t);
+		else if (type == EventType::Free) Free(capture, event, t);
+		else if (type == EventType::PoolReset) ResetPool(capture, event, t);
+		else if (type == EventType::GcBegin || type == EventType::GcEnd) GcEvent(capture, event, t);
+		else if (type == EventType::AllocCount) CountAllocations(capture, event, t);
+		else if (type == EventType::HeapCensus) BeginCensus(capture, event, t);
+		else if (Within(type, EventType::LockWait, EventType::LockRelease)) Lock(capture, TrackOfEvent(capture, event), event, t);
+		else if (type == EventType::Sample) Sample(capture, TrackNamedBy(capture, event), event, t);
+		else if (IsGpu(type)) GpuEvent(capture, TrackOfEvent(capture, event), event, t);
+	}
+
+	static void NoteTime(Capture& capture, const Event& event, int64 t) {
+		if (t > capture.m_LastTicks) capture.m_LastTicks = t;
+		if (event.m_ChunkKind != c_ThreadChunk) return;
+		ThreadTrack* track = capture.m_Tracks[TrackFor(capture, event.m_Thread)];
+		if (track->m_FirstTicks < 0 || t < track->m_FirstTicks) track->m_FirstTicks = t;
+		if (t > track->m_LastTicks) track->m_LastTicks = t;
+	}
+
+	void Apply(Capture& capture, const Event& event) {
+		capture.m_Events += 1;
+		const EventType type = event.m_Type;
+		if (type == EventType::Hello) Hello(capture, event);
+		else if (type == EventType::Calibration) Calibrate(capture, event);
+		else if (type == EventType::Bye) {
+			capture.m_Ended = true;
+			capture.m_ByeReason = event.m_Fields[0];
+		}
+		else if (type == EventType::Warning) capture.Warn(capture.m_LastTicks, (Core::String("the client said: ") + capture.Text(event.m_Fields[1])).View());
+		else if (type == EventType::Stats) capture.m_EventsDropped = event.m_Fields[1];
+		else if (IsDefinition(type)) Define(capture, event);
+		else if (Within(type, EventType::ZoneText, EventType::ZoneNativeFreed)) DescribeZone(capture, TrackOfEvent(capture, event), event);
+		else if (type == EventType::HeapCensusType || type == EventType::HeapCensusTypeNative) CensusLine(capture, event);
+		else if (event.m_Timed || IsGpu(type)) {
+			const int64 t = event.m_Timed ? event.m_Ticks - capture.m_Clock.m_StartTicks : capture.m_LastTicks;
+			if (event.m_Timed) NoteTime(capture, event, t);
+			ApplyTimed(capture, event, t);
+		}
+	}
+
+	void ApplyChunk(Capture& capture, const uint8* chunk, int64 length) {
+		Core::String problem;
+		Capture* target = &capture;
+		if (!DecodeChunk(chunk, length, [target](const Event& event) { Apply(*target, event); }, problem)) capture.Warn(capture.m_LastTicks, problem.View());
+		capture.m_Bytes += length + c_ChunkHeaderLength;
+	}
+
+	// --- The end ------------------------------------------------------------------------------------------------------
+
+	static int64 CloseOpenZones(Capture& capture) {
+		int64 closed = 0;
+		for (int64 i = 0; i < capture.m_Tracks.Count(); ++i) {
+			ThreadTrack* track = capture.m_Tracks[i];
+			track->m_Overflow = 0;
+			while (!track->m_Open.IsEmpty()) {
+				EndZone(capture, (int32)i, capture.m_LastTicks);
+				closed += 1;
+			}
+		}
+		return closed;
+	}
+
+	void Finish(Capture& capture) {
+		capture.m_Ended = true;
+		const int64 closed = CloseOpenZones(capture);
+		if (closed > 0) {
+			Core::StringBuilder text;
+			text.AppendInt(closed);
+			text.Append(closed == 1 ? " zone was still open at the end and was closed there" : " zones were still open at the end and were closed there");
+			capture.Warn(capture.m_LastTicks, text.View());
+		}
+		for (Core::KeyValue<uint64, TaskInfo*>& entry : capture.m_Tasks) StopRunning(entry.value, capture.m_LastTicks);
+		for (FrameSet* set : capture.m_FrameSets)
+			if (set->m_Discontinuous && !set->m_Ends.IsEmpty() && set->m_Ends.Back() == c_Open) set->m_Ends.Back() = capture.m_LastTicks;
+		for (GcRecord& gc : capture.m_Gcs)
+			if (gc.m_End == c_Open) gc.m_End = capture.m_LastTicks;
+	}
+}

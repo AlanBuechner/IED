@@ -1,0 +1,493 @@
+include "api/Plugin.ch"
+include "Run.ch"
+include "chats/Roots.ch"
+include "aitools/Clipboard.ch"
+include "prompts/Contributed.ch"
+
+namespace Ai
+{
+	const int64 c_PreviewBytes = 4000;
+
+	static int64 ToolNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	static Core::String ModelCallId(Chat* chat) {
+		chat->m_Counter += 1;
+		Core::StringBuilder id;
+		id.Append("call");
+		id.AppendIntBase(chat->m_Counter, 10, 5);
+		return id.ToString();
+	}
+
+	void TurnRun::RecordAssistant(const StepResult* result, bool withCalls) {
+		ModelMessage* message = new ModelMessage();
+		message->m_Role = Core::String("assistant");
+		message->m_Content = result->m_Text;
+		message->m_Reasoning = result->m_Thinking;
+		if (withCalls && !result->m_Calls.IsEmpty()) {
+			IED::JsonWriter calls;
+			calls.BeginArray();
+			for (ToolCallDraft* call : result->m_Calls) {
+				if (call->m_Id.IsEmpty()) call->m_Id = ModelCallId(m_Chat);
+				calls.BeginObject();
+				calls.Field("id", call->m_Id.View());
+				calls.Field("type", "function");
+				calls.Key(Core::StringView("function"));
+				calls.BeginObject();
+				calls.Field("name", call->m_Name.View());
+				calls.Field("arguments", call->m_Arguments.IsEmpty() ? Core::StringView("{}") : call->m_Arguments.View());
+				calls.EndObject();
+				calls.EndObject();
+			}
+			calls.EndArray();
+			message->m_ToolCalls = calls.ToString();
+		}
+		if (message->m_Content.IsEmpty() && message->m_ToolCalls.IsEmpty()) return;
+		m_Turn->m_Messages.Push(message);
+	}
+
+	void TurnRun::ExecuteCalls(StepResult* result) {
+		{
+			IED::HostLock guard(*m_Context);
+			for (int64 i = m_CallSegments.Count(); i < result->m_Calls.Count(); ++i) {
+				Segment* segment = NewSegment("tool");
+				segment->m_Tool = result->m_Calls[i]->m_Name;
+				segment->m_CallId = m_Chat->NextId("k");
+				segment->m_ArgsText = result->m_Calls[i]->m_Arguments;
+				segment->m_State = Core::String("streaming");
+				m_CallSegments.Push(Begin(segment));
+				Close(segment);
+			}
+		}
+		for (int64 i = 0; i < result->m_Calls.Count() && !m_Ending; ++i) ExecuteCall(result->m_Calls[i], m_CallSegments[i], result->m_Calls[i]->m_Id.View(), i == result->m_Calls.Count() - 1);
+		IED::HostLock guard(*m_Context);
+		CloseOpenCalls(m_Turn, Core::StringView("The call did not run: an earlier call in the same reply ended the turn."));
+		SaveRunning();
+	}
+
+	static Core::String Joined(const Core::Array<Core::String>& items, const char* separator) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < items.Count(); ++i) {
+			if (i > 0) out.Append(separator);
+			out.Append(items[i].View());
+		}
+		return out.ToString();
+	}
+
+	// The plugins' notes for a call that failed (aiToolFailureNotes: developer mode's "fix the cause in IED") after its
+	// result for the model; the card keeps the error alone.
+	static void AddFailureNotes(const IED::Workspace& ws, Core::StringView tool, ToolOutcome& outcome) {
+		Core::String notes = FailureNotes(ws, tool);
+		if (notes.IsEmpty()) return;
+		if (outcome.m_Preview.IsEmpty()) outcome.m_Preview = outcome.m_Content;
+		outcome.m_Content = (outcome.m_Content + "\n\n") + notes.View();
+	}
+
+	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId, bool last) {
+		const int64 started = ToolNowMs();
+		ToolOutcome outcome;
+		ToolSpec* spec = m_Tools->Find(call->m_Name.View());
+		Serialization::DomNode args;
+		if (!spec || !m_Tools->Offered(spec, m_Chat->m_Mode)) {
+			Core::Array<Core::String> values;
+			values.Push(Core::String("name"));
+			values.Push(call->m_Name);
+			values.Push(Core::String("suggestions"));
+			values.Push(Joined(m_Tools->Suggest(call->m_Name.View(), m_Chat->m_Mode), " or "));
+			outcome = ToolError(m_Chats->m_Prompts.Note("unknown_tool", values).View());
+		}
+		else {
+			Core::Array<Core::String> problems;
+			Core::String missing;
+			if (!ReadToolArguments(call->m_Arguments.View(), args)) problems.Push(Core::String("the arguments are not a JSON object"));
+			else if (Pasted(args, missing)) problems = m_Tools->Check(spec, args);
+			if (!missing.IsEmpty()) outcome = UnknownClip(call->m_Name.View(), missing.View());
+			else if (problems.IsEmpty()) {
+				m_Malformed = 0;
+				if (spec->m_Deferred) {
+					IED::HostLock guard(*m_Context);
+					LoadTool(spec);
+				}
+				outcome = RunCall(spec, call, segment, args);
+			}
+			else {
+				m_Malformed += 1;
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(call->m_Name);
+				values.Push(Core::String("error"));
+				values.Push(Joined(problems, "; "));
+				values.Push(Core::String("schema_excerpt"));
+				values.Push(spec->m_Parameters);
+				outcome = ToolError(m_Chats->m_Prompts.Note("invalid_tool_args", values).View());
+			}
+		}
+		if (outcome.m_IsError && !outcome.m_Denied && !outcome.m_ReportsFailure && !m_Run->m_Cancelled) AddFailureNotes(m_Ws, call->m_Name.View(), outcome);
+		{
+			IED::HostLock guard(*m_Context);
+			Resolve(segment, outcome, outcome.m_Timed ? outcome.m_Ms : ToolNowMs() - started);
+			ModelMessage* message = new ModelMessage();
+			message->m_Role = Core::String("tool");
+			message->m_ToolCallId = Core::String(modelId);
+			message->m_Content = outcome.m_Content.ByteLength() <= c_RunKeptToolResultBytes ? outcome.m_Content : Core::String(outcome.m_Content.View().Substring(0, c_RunKeptToolResultBytes)) + "\n[result truncated]";
+			message->m_Images = outcome.m_Images;
+			m_Turn->m_Messages.Push(message);
+			TrackLoop(call, outcome);
+			if (m_Malformed > c_RunMalformedBound) Pause(Core::StringView("malformed_tool_call"), Core::StringView("the model kept sending tool arguments that do not fit the tool's schema"));
+			SaveRunning();
+		}
+		if (m_Claude && m_Candidates[m_Candidate]->IsClaude()) AnswerClaude(modelId, outcome, last);
+	}
+
+	bool TurnRun::Pasted(Serialization::DomNode& args, Core::String& missing) {
+		IED::HostLock guard(*m_Context);
+		return PasteArguments(args, m_Chat->m_Clips, args, missing);
+	}
+
+	ToolOutcome TurnRun::UnknownClip(Core::StringView tool, Core::StringView missing) {
+		Core::Array<Core::String> names;
+		{
+			IED::HostLock guard(*m_Context);
+			for (Clip* clip : m_Chat->m_Clips) names.Push(clip->m_Name);
+		}
+		Core::Array<Core::String> values;
+		values.Push(Core::String("tool"));
+		values.Push(Core::String(tool));
+		values.Push(Core::String("name"));
+		values.Push(Core::String(missing));
+		values.Push(Core::String("clips"));
+		values.Push(names.IsEmpty() ? Core::String("the clipboard is empty") : Core::String("the clips are ") + Joined(names, ", ").View());
+		return ToolError(m_Chats->m_Prompts.Note("unknown_clip", values).View());
+	}
+
+	ToolOutcome TurnRun::RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args) {
+		if (!spec->m_Run) return RunMeta(spec, segment, args);
+		ToolInvocation invocation;
+		invocation.m_Context = m_Context;
+		invocation.m_Ws = m_Ws;
+		invocation.m_Chat = m_Chat;
+		invocation.m_CallId = segment->m_CallId;
+		invocation.m_Args = args;
+		invocation.m_Cancelled = &m_Run->m_Cancelled;
+		Core::String rootAlias = RootAlias(args);
+		RootTarget root;
+		if (!rootAlias.IsEmpty()) {
+			Core::String problem;
+			if (!ResolveRoot(m_Ws, args, rootAlias.View(), spec->m_ToolClass != ToolClass::Read, root, problem)) return ToolError(((spec->m_Name + ": ") + problem.View()).View());
+			if (!root.m_Answer.IsEmpty()) return ToolResult(root.m_Answer.View(), Core::StringView("the plugins' folders"));
+			if (IsFolderRoot(root.m_Ws) && !spec->m_FolderRoots) return ToolError(((spec->m_Name + ": a plugin's folder (plugins:/) is no workspace, so ") + spec->m_Name.View() + " does not work there; fs_read, fs_list, fs_glob, search_text and image_info read it").View());
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			invocation.m_Ws = root.m_Ws;
+			invocation.m_Args = Serialization::ReadJson(root.m_Args.View(), *doc).root;
+			invocation.m_Shown = root.m_Shown;
+		}
+		else if (spec->m_ToolClass == ToolClass::Write && spec->m_Group.IsEmpty()) {
+			Core::String problem;
+			if (!MayWriteThere(m_Ws, args, problem)) return ToolError(((spec->m_Name + ": ") + problem.View()).View());
+		}
+		try {
+			ToolPlan plan = spec->m_Plan(invocation);
+			if (!plan.m_Error.IsEmpty()) return ToolError(plan.m_Error.View());
+			if (!root.m_RootAlias.IsEmpty()) plan.m_Subject = PrefixedSubject(plan.m_Subject.View(), root.m_Shown.View());
+			Core::String why;
+			Permit permit = Permit::Allow;
+			bool allowedInRoot = false;
+			{
+				IED::HostLock guard(*m_Context);
+				permit = Decide(m_Chat->m_Permission, spec->m_ToolClass, m_Rules, m_Chat->m_Allowed, plan.m_Subject.View(), why);
+				if (spec->m_Asks) permit = AskUntilAllowed(permit, spec->m_ToolClass, m_Rules, m_Chat->m_Allowed, plan.m_Subject.View(), why);
+				if (!root.m_RootAlias.IsEmpty()) allowedInRoot = AllowedInRoot(m_Rules, m_Chat->m_Allowed, plan.m_Subject.View(), root.m_RootAlias.View());
+			}
+			if (!root.m_RootAlias.IsEmpty() && root.m_Confirm && spec->m_ToolClass != ToolClass::Read && permit == Permit::Allow && !allowedInRoot) {
+				permit = Permit::Ask;
+				why = (Core::String("every write and command in ") + root.m_RootAlias.View()) + ":/ asks the owner until they allow it for this chat";
+			}
+			if (permit == Permit::Deny) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(spec->m_Name);
+				values.Push(Core::String("why"));
+				values.Push(why);
+				ToolOutcome refused = ToolError(m_Chats->m_Prompts.Note("refused_call", values).View());
+				refused.m_Denied = true;
+				return refused;
+			}
+			if (permit == Permit::Ask) {
+				if (spec->m_Detail) spec->m_Detail(invocation, plan);
+				if (!plan.m_Error.IsEmpty()) return ToolError(plan.m_Error.View());
+				ToolOutcome refused;
+				if (!AwaitApproval(spec, segment, plan, why.View(), args, refused)) return refused;
+			}
+			{
+				IED::HostLock guard(*m_Context);
+				ToolState(segment, "running");
+			}
+			const int64 ran = ToolNowMs();
+			ToolOutcome outcome = spec->m_Run(invocation);
+			outcome.m_Ms = ToolNowMs() - ran;
+			outcome.m_Timed = true;
+			if (!root.m_Note.IsEmpty() && !outcome.m_IsError) outcome.m_Content = (root.m_Note + "\n") + outcome.m_Content.View();
+			if (spec->m_ToolClass == ToolClass::Write && !outcome.m_IsError && root.m_RootAlias.IsEmpty() && !invocation.m_Args.Member("path").AsView().IsEmpty()) {
+				IED::HostLock guard(*m_Context);
+				TrackModified(IED::NormalizePath(invocation.m_Args.Member("path").AsView()).View(), outcome.m_Plus, outcome.m_Minus);
+			}
+			return outcome;
+		}
+		catch (IED::RpcError& error) {
+			return ToolError(((spec->m_Name + ": ") + error.m_Message.View()).View());
+		}
+	}
+
+	void TurnRun::LoadTool(const ToolSpec* spec) {
+		if (!m_Chat->m_LoadedTools.Contains(spec->m_Name)) m_Chat->m_LoadedTools.Push(spec->m_Name);
+	}
+
+	ToolOutcome TurnRun::SearchTools(const Serialization::DomNode& args) {
+		Core::StringView query = args.Member("query").AsView();
+		Core::Array<ToolSpec*> found = m_Tools->SearchDeferred(query, m_Chat->m_Mode, c_ToolSearchMost);
+		if (found.IsEmpty()) return ToolError(((Core::String("tool_search: no deferred tool matches '") + query) + "'; they are the tools whose description ends in [deferred]").View());
+		Core::StringBuilder said;
+		Core::StringBuilder names;
+		said.Append("Call them by name:\n");
+		for (ToolSpec* spec : found) {
+			LoadTool(spec);
+			said.Append("\n## ");
+			said.Append(spec->m_Name.View());
+			said.Append("\n");
+			said.Append(spec->m_Description.View());
+			said.Append("\nParameters: ");
+			said.Append(spec->m_Parameters.View());
+			said.Append("\n");
+			if (!names.IsEmpty()) names.Append(", ");
+			names.Append(spec->m_Name.View());
+		}
+		return ToolResult(said.View(), (Core::String("Loaded ") + names.View()).View());
+	}
+
+	ToolOutcome TurnRun::RunMeta(ToolSpec* spec, Segment* segment, const Serialization::DomNode& args) {
+		if (spec->m_Name == "ask_user") return AskUser(segment, args);
+		IED::HostLock guard(*m_Context);
+		ToolState(segment, "running");
+		if (spec->m_Name == "tasks_set") return SetTasks(args);
+		if (spec->m_Name == "tool_search") return SearchTools(args);
+		if (spec->m_Name == "task_update") return UpdateTask(args);
+		return FinishCall(args);
+	}
+
+	// --- Waiting for the owner ---------------------------------------------------------------------------------------
+
+	bool TurnRun::AwaitApproval(ToolSpec* spec, Segment* segment, const ToolPlan& plan, Core::StringView why, const Serialization::DomNode& args, ToolOutcome& refused) {
+		IED::HostLock guard(*m_Context);
+		Approval* approval = new Approval();
+		approval->m_ApprovalId = m_Chat->NextId("a");
+		approval->m_CallId = segment->m_CallId;
+		approval->m_Tool = spec->m_Name;
+		approval->m_Args = IED::NodeJson(args);
+		approval->m_Summary = plan.m_Summary;
+		approval->m_Why = (Core::String(ChatModeName(m_Chat->m_Mode)) + " mode, ") + why;
+		approval->m_Subject = ChatAllowRule(plan.m_Subject.View());
+		approval->m_Diff = plan.m_Diff;
+		approval->m_Plus = plan.m_Plus;
+		approval->m_Minus = plan.m_Minus;
+		m_Chat->m_Approvals.Push(approval);
+		m_Chat->m_State = ChatState::AwaitingApproval;
+		ToolState(segment, "awaiting_approval");
+		IED::JsonWriter data;
+		approval->WriteJson(data);
+		m_Chats->Publish(m_Chat, "approval.request", data.View());
+		m_Chats->Changed(m_Chat);
+		SaveRunning();
+		while (approval->m_Decision.IsEmpty() && !m_Run->m_Cancelled) guard.Wait(m_Run->m_Wake, -1);
+		m_Chat->m_State = ChatState::Running;
+		m_Chats->Changed(m_Chat);
+		if (approval->m_Decision.IsEmpty()) {
+			refused = ToolError(Core::StringView("The run was stopped before the user answered."));
+			refused.m_Denied = true;
+			return false;
+		}
+		if (approval->m_Decision == "deny") {
+			Core::Array<Core::String> values;
+			values.Push(Core::String("tool"));
+			values.Push(spec->m_Name);
+			values.Push(Core::String("message"));
+			values.Push(approval->m_Message.IsEmpty() ? Core::String() : Core::String(" Their reason: ") + approval->m_Message.View());
+			refused = ToolError(m_Chats->m_Prompts.Note("denied_by_user", values).View());
+			refused.m_Denied = true;
+			return false;
+		}
+		if (approval->m_Decision == "chat") {
+			bool known = false;
+			for (const Core::String& rule : m_Chat->m_Allowed) known = known || rule == approval->m_Subject;
+			if (!known) m_Chat->m_Allowed.Push(approval->m_Subject);
+		}
+		return true;
+	}
+
+	ToolOutcome TurnRun::AskUser(Segment* segment, const Serialization::DomNode& args) {
+		IED::HostLock guard(*m_Context);
+		ToolState(segment, "awaiting_answer");
+		Question* question = new Question();
+		question->m_QuestionId = m_Chat->NextId("q");
+		question->m_CallId = segment->m_CallId;
+		question->m_Question = Core::String(args.Member("question").AsView());
+		Serialization::DomNode options = args.Member("options");
+		for (int64 i = 0; i < options.Count(); ++i) question->m_Options.Push(Core::String(options.At(i).AsView()));
+		question->m_AllowText = question->m_Options.IsEmpty() || args.Member("allow_text").AsBool();
+		m_Chat->m_Question = question;
+		m_Chat->m_State = ChatState::AwaitingAnswer;
+		IED::JsonWriter data;
+		question->WriteJson(data);
+		m_Chats->Publish(m_Chat, "question.request", data.View());
+		m_Chats->Changed(m_Chat);
+		SaveRunning();
+		while (!question->m_Answered && !m_Run->m_Cancelled) guard.Wait(m_Run->m_Wake, -1);
+		m_Chat->m_Question = nullptr;
+		m_Chat->m_State = ChatState::Running;
+		m_Chats->Changed(m_Chat);
+		if (!question->m_Answered) return ToolError(Core::StringView("The run was stopped before the user answered."));
+		Core::Array<Core::String> values;
+		values.Push(Core::String("answer"));
+		values.Push(question->m_Answer);
+		return ToolResult(m_Chats->m_Prompts.Note("user_answer", values).View(), question->m_Answer.View());
+	}
+
+	// --- The run's own tools -----------------------------------------------------------------------------------------
+
+	static Core::String TaskLines(const Chat* chat) {
+		Core::StringBuilder out;
+		for (ChatTask* task : chat->m_Tasks) {
+			out.Append(task->m_Id.View());
+			out.Append(" ");
+			out.Append(task->m_Title.View());
+			out.Append(" (");
+			out.Append(task->m_Status.View());
+			out.Append(")\n");
+		}
+		return out.ToString();
+	}
+
+	static void PublishTasks(Chats* chats, Chat* chat) {
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("items"));
+		chat->WriteTasks(data);
+		data.EndObject();
+		chats->Publish(chat, "tasks.changed", data.View());
+		chats->Changed(chat);
+	}
+
+	ToolOutcome TurnRun::SetTasks(const Serialization::DomNode& args) {
+		m_Chat->m_Tasks.Clear();
+		Serialization::DomNode items = args.Member("items");
+		for (int64 i = 0; i < items.Count(); ++i) {
+			ChatTask* task = new ChatTask();
+			Core::StringBuilder id;
+			id.Append("t");
+			id.AppendInt(i + 1);
+			task->m_Id = id.ToString();
+			task->m_Title = Core::String(items.At(i).Member("title").AsView());
+			task->m_Status = items.At(i).Member("status").IsValid() ? Core::String(items.At(i).Member("status").AsView()) : Core::String("pending");
+			m_Chat->m_Tasks.Push(task);
+		}
+		PublishTasks(m_Chats, m_Chat);
+		Core::StringBuilder preview;
+		preview.AppendInt(m_Chat->m_Tasks.Count());
+		preview.Append(" tasks");
+		return ToolResult((Core::String("The task list is now:\n") + TaskLines(m_Chat).View()).View(), preview.View());
+	}
+
+	ToolOutcome TurnRun::UpdateTask(const Serialization::DomNode& args) {
+		for (ChatTask* task : m_Chat->m_Tasks) {
+			if (task->m_Id.View() != args.Member("id").AsView()) continue;
+			task->m_Status = Core::String(args.Member("status").AsView());
+			if (args.Member("note").IsValid()) task->m_Note = Core::String(args.Member("note").AsView());
+			PublishTasks(m_Chats, m_Chat);
+			return ToolResult(((task->m_Id + " is now ") + task->m_Status.View()).View(), ((task->m_Title + ": ") + task->m_Status.View()).View());
+		}
+		if (m_Chat->m_Tasks.IsEmpty())
+			return ToolError(Core::StringView("task_update: the chat has no tasks yet; make the list first with tasks_set({\"items\": [{\"title\": \"...\", \"status\": \"in_progress\"}, {\"title\": \"...\"}]})"));
+		return ToolError(((Core::String("task_update: there is no task ") + args.Member("id").AsView()) + "; the tasks are:\n" + TaskLines(m_Chat).View()).View());
+	}
+
+	ToolOutcome TurnRun::FinishCall(const Serialization::DomNode& args) {
+		Core::Array<Core::String> open;
+		for (ChatTask* task : m_Chat->m_Tasks)
+			if (task->m_Status == "pending" || task->m_Status == "in_progress") open.Push(task->m_Title);
+		if (!open.IsEmpty() && !m_FinishNudged) {
+			m_FinishNudged = true;
+			Core::Array<Core::String> values;
+			values.Push(Core::String("tasks"));
+			values.Push(Joined(open, ", "));
+			return ToolError(m_Chats->m_Prompts.Note("open_tasks_on_finish", values).View());
+		}
+		Finish(Core::StringView("finished"));
+		return ToolResult(Core::StringView("The turn is finished."), args.Member("summary").AsView());
+	}
+
+	// --- Cards -------------------------------------------------------------------------------------------------------
+
+	void TurnRun::ToolState(Segment* segment, const char* state) {
+		segment->m_State = Core::String(state);
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("callId", segment->m_CallId.View());
+		data.Field("state", state);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "tool.state", data.View());
+	}
+
+	void TurnRun::Resolve(Segment* segment, const ToolOutcome& outcome, int64 ms) {
+		segment->m_State = Core::String(outcome.m_Denied ? "denied" : outcome.m_IsError ? "error" : "ok");
+		Core::StringView shown = outcome.m_Preview.IsEmpty() ? outcome.m_Content.View() : outcome.m_Preview.View();
+		segment->m_Preview = Core::String(shown.Substring(0, shown.ByteLength() < c_PreviewBytes ? shown.ByteLength() : c_PreviewBytes));
+		segment->m_IsError = outcome.m_IsError;
+		segment->m_Ms = outcome.m_Denied ? 0 : ms;
+		segment->m_Plus = outcome.m_Plus;
+		segment->m_Minus = outcome.m_Minus;
+		segment->m_Source = outcome.m_Source.IsEmpty() ? Core::String("built-in") : outcome.m_Source;
+		segment->m_Images = outcome.m_Images;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("callId", segment->m_CallId.View());
+		data.Field("state", segment->m_State.View());
+		if (!outcome.m_Denied) data.IntField("ms", ms);
+		if (segment->m_Plus > 0) data.IntField("plus", segment->m_Plus);
+		if (segment->m_Minus > 0) data.IntField("minus", segment->m_Minus);
+		data.Field("source", segment->m_Source.View());
+		data.Key(Core::StringView("result"));
+		data.BeginObject();
+		data.Field("preview", segment->m_Preview.View());
+		data.BoolField("isError", segment->m_IsError);
+		if (!segment->m_Images.IsEmpty()) WriteToolImages(data, segment->m_Images);
+		data.EndObject();
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "tool.state", data.View());
+	}
+
+	void TurnRun::TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome) {
+		Core::String key = ((call->m_Name + "\n") + call->m_Arguments.View() + "\n") + outcome.m_Content.View();
+		if (outcome.m_IsError && key == m_LastCallKey) m_SameErrors += 1;
+		else m_SameErrors = outcome.m_IsError ? 1 : 0;
+		m_LastCallKey = key;
+		if (m_SameErrors >= c_RunSameErrorBound) Pause(Core::StringView("loop_detected"), ((Core::String("the same call (") + call->m_Name.View()) + ") failed the same way 3 times in a row").View());
+	}
+
+	void TurnRun::TrackModified(Core::StringView path, int64 plus, int64 minus) {
+		ModifiedFile* file = nullptr;
+		for (ModifiedFile* each : m_Chat->m_Modified)
+			if (each->m_Path.View() == path) file = each;
+		if (!file) {
+			file = new ModifiedFile();
+			file->m_Path = Core::String(path);
+			m_Chat->m_Modified.Push(file);
+		}
+		file->m_Plus += plus;
+		file->m_Minus += minus;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("files"));
+		m_Chat->WriteModified(data);
+		data.EndObject();
+		m_Chats->Publish(m_Chat, "files.changed", data.View());
+		SaveChatHeader(LocalStateOf(m_Ws), m_Chat);
+	}
+}

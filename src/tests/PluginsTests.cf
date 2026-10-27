@@ -1,0 +1,49 @@
+// plugins/manifest: version ranges, as dependencies and "ied.api" use them; the UI module's path.
+
+include "plugins/Manifest.ch"
+
+static bool In(const char* version, const char* range) { return Ied::VersionInRange(Core::StringView(version), Core::StringView(range)); }
+
+[test("server.plugins")]
+class PluginTests {
+	[test("caret")]
+	public static void TestCaret() {
+		assert_true(In("1.0.0", "^1") && In("1.9.3", "^1") && !In("2.0.0", "^1"), "^1: any 1.x");
+		assert_true(In("1.2.0", "^1.2") && In("1.7.1", "^1.2") && !In("1.1.9", "^1.2"), "^1.2: at least 1.2, below 2");
+		assert_true(In("0.3.5", "^0.3") && !In("0.4.0", "^0.3"), "^0.3: below 1.0, the minor is the family");
+	}
+
+	[test("tilde_exact_and_floors")]
+	public static void TestTildeExactAndFloors() {
+		assert_true(In("1.2.3", "~1.2.3") && In("1.2.9", "~1.2.3") && !In("1.3.0", "~1.2.3"), "~1.2.3: the same minor");
+		assert_true(In("1.2.3", "1.2.3") && !In("1.2.4", "1.2.3"), "an exact version");
+		assert_true(In("1.4.0", "1.x") && In("1.4.0", "1") && !In("2.0.0", "1.x"), "1.x and 1");
+		assert_true(In("1.2.7", "1.2") && !In("1.3.0", "1.2"), "1.2: that minor");
+		assert_true(In("5.0.0", ">=1.2") && !In("1.1.0", ">=1.2"), ">=");
+		assert_true(In("0.0.1", "*") && In("3.1.4", ""), "anything");
+	}
+
+	[test("refused")]
+	public static void TestRefused() {
+		assert_true(!In("1.2", "^1") && !In("one", "^1"), "a version has three numbers");
+		assert_true(!In("1.0.0", "^banana") && !In("1.0.0", "^-1"), "a range that is not one");
+		assert_true(In("1.2.3-beta.1", "^1.2"), "a pre-release counts as its version");
+	}
+
+	[test("ui_path")]
+	public static void TestUiPath() {
+		Core::StringBuilder name;
+		name.Append("ied-ui-path-");
+		name.AppendInt(Platform::UnixTimeNs());
+		FS::Path folder = FS::TempDirectory() / name.View();
+		FS::MakeDirectories((folder / "ui").CStr());
+		FS::WriteFileAtomically((folder / "ui" / "index.js").CStr(), (const void*)"export {}", 9);
+		assert_true(Ied::IsUiPath(folder, Core::StringView("ui/index.js")), "a file in the folder");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui/missing.js")), "a file that is not there");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui")), "a folder");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("../ui/index.js")) && !Ied::IsUiPath(folder, Core::StringView("/ui/index.js")), "nothing outside it");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui/in dex.js")) && !Ied::IsUiPath(folder, Core::StringView("ui\\index.js")), "only what a URL carries as it is");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("")), "empty");
+		FS::RemoveAll(folder.CStr());
+	}
+}

@@ -1,0 +1,326 @@
+include "Plugin.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	static Ied::CodeInstance* Of(void* host) { return (Ied::CodeInstance*)host; }
+
+	// A registration from anywhere but the plugin's own thread would race with its calls.
+	static bool OnItsThread(Ied::CodeInstance* instance, const char* method) {
+		if (Ied::CurrentCode() == instance) return true;
+		instance->m_Runtime->m_Server->Log(((((Core::String("plugin ") + instance->m_PluginId.View()) + ": PluginContext::") + method) + " was called off the plugin's thread and did nothing").View());
+		return false;
+	}
+
+	Core::String PluginContext::Id() const { return Of(m_Host)->m_PluginId; }
+
+	Core::String PluginContext::Folder() const { return Core::String(Of(m_Host)->m_Folder.View()); }
+
+	Core::String PluginContext::WorkspaceId() const { return Of(m_Host)->m_WsId; }
+
+	Core::String PluginContext::Server() const { return Core::String(Of(m_Host)->m_Runtime->m_Server->IsMaster() ? "master" : "workspace"); }
+
+	Core::String PluginContext::StateFolder() const {
+		Ied::CodeInstance* instance = Of(m_Host);
+		FS::Path folder = FS::Path(instance->m_Runtime->m_Server->m_Config.m_StateDir.View()) / "plugins" / instance->m_PluginId.View();
+		FS::MakeDirectories(folder.CStr());
+		return Core::String(folder.View());
+	}
+
+	void PluginContext::Log(Core::StringView line) const {
+		Ied::CodeInstance* instance = Of(m_Host);
+		instance->m_Runtime->m_Server->Log((((Core::String("[") + instance->m_PluginId.View()) + "] ") + line).View());
+	}
+
+	Core::String PluginContext::Setting(Core::StringView key, Core::StringView wsId) const {
+		Ied::Server* server = Of(m_Host)->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws = wsId.IsEmpty() ? nullptr : server->m_Workspaces->Find(wsId);
+		return server->m_Settings->Effective(ws, Core::StringView(""), key);
+	}
+
+	bool PluginContext::SetSetting(Core::StringView key, Core::StringView valueJson, Core::String& problem) const {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!instance->May(Core::StringView("settings.write"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission settings.write");
+			return false;
+		}
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		return server->m_Settings->SetApp(key, valueJson, problem);
+	}
+
+	void PluginContext::Provide(Core::StringView name, Binding handler) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "Provide")) return;
+		instance->m_Handlers.m_Bindings.At(Core::String(name)) = handler;
+		Ied::ApiLock guard(instance->m_Runtime->m_Server);
+		instance->m_Provides.At(Core::String(name)) = true;
+	}
+
+	void PluginContext::Listen(Core::StringView kind, EventHandler handler) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "Listen")) return;
+		instance->m_Handlers.m_ListenKinds.Push(Core::String(kind));
+		instance->m_Handlers.m_Listeners.Push(handler);
+		Ied::ApiLock guard(instance->m_Runtime->m_Server);
+		instance->m_Hears.At(Core::String(kind)) = true;
+	}
+
+	void PluginContext::OnWorkspace(WorkspaceHandler opened) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "OnWorkspace")) return;
+		instance->m_Handlers.m_WorkspaceHandlers.Push(opened);
+		Core::Array<Workspace> open = Workspaces();
+		for (const Workspace& ws : open) opened(ws);
+	}
+
+	void PluginContext::OnDeactivate(func<void()> handler) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (OnItsThread(instance, "OnDeactivate")) instance->m_Handlers.m_DeactivateHandlers.Push(handler);
+	}
+
+	void PluginContext::OnTrustChanged(WorkspaceHandler handler) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "OnTrustChanged")) return;
+		instance->m_Handlers.m_TrustHandlers.Push(handler);
+		Ied::ApiLock guard(instance->m_Runtime->m_Server);
+		instance->m_WantsTrust = true;
+	}
+
+	void PluginContext::OnFilesChanged(FilesHandler handler) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "OnFilesChanged")) return;
+		instance->m_Handlers.m_FilesHandlers.Push(handler);
+		Ied::ApiLock guard(instance->m_Runtime->m_Server);
+		instance->m_WantsFiles = true;
+	}
+
+	bool PluginContext::WatchFolder(Core::StringView folder, func<void(const Core::Array<Core::String>&)> handler, Core::String& problem) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::CodeRuntime* runtime = instance->m_Runtime;
+		Ied::PluginWatch* watch = new Ied::PluginWatch();
+		watch->m_Watch = new Ied::FolderWatch();
+		const bool started = watch->m_Watch->Start(FS::Path(folder), [runtime, instance, watch, handler](const Ied::ChangeBatch& batch) {
+			if (watch->m_Stopped) return;
+			Core::Array<Core::String> paths;
+			for (const Ied::TreeChange& change : batch.Changes()) paths.Push(change.m_Path);
+			runtime->QueueWatched(instance, watch, handler, paths);
+		}, problem);
+		if (!started) return false;
+		Ied::ApiLock guard(runtime->m_Server);
+		instance->m_Watches.Push(watch);
+		return true;
+	}
+
+	bool PluginContext::Method(Core::StringView name, MethodHandler handler, Core::String& problem) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (!OnItsThread(instance, "Method")) {
+			problem = Core::String("Method is for the plugin's thread");
+			return false;
+		}
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		if (!instance->m_Runtime->MayName(instance, name)) {
+			problem = (((Core::String("a plugin's methods are named ") + instance->m_PluginId.View()) + "/<method>, not ") + name);
+			return false;
+		}
+		if (server->m_Rpc.Has(name)) {
+			problem = (Core::String("the method ") + name) + " is taken";
+			return false;
+		}
+		Core::String key = Core::String(name);
+		instance->m_Methods.Push(key);
+		Ied::CodeRuntime* runtime = instance->m_Runtime;
+		server->m_Rpc.Register(key.CStr(), [runtime, instance, handler](Ied::Call& call, const Ied::Params& params) -> Core::String {
+			return runtime->CallMethod(instance, handler, call, params);
+		});
+		server->m_Presence->RoutesChanged();
+		return true;
+	}
+
+	// The plugin's topic `key`, made when it has none and the name is its to take; null (and a log line) when not.
+	static Ied::PluginTopic* OwnTopic(Ied::CodeInstance* instance, Core::StringView key) {
+		Ied::CodeRuntime* runtime = instance->m_Runtime;
+		Ied::PluginTopic* topic = runtime->TopicOf(instance, key);
+		if (topic) return topic;
+		if (!runtime->MayName(instance, key) || runtime->m_Server->m_Hub.Find(key)) {
+			runtime->m_Server->Log(((((Core::String("plugin ") + instance->m_PluginId.View()) + ": the topic ") + key) + " is not its to make").View());
+			return nullptr;
+		}
+		topic = new Ied::PluginTopic();
+		topic->m_Key = Core::String(key);
+		instance->m_Topics.Push(topic);
+		runtime->m_Server->m_Presence->RoutesChanged();
+		return topic;
+	}
+
+	void PluginContext::Topic(Core::StringView key, Core::StringView snapshot) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		const bool made = instance->m_Runtime->TopicOf(instance, key) == nullptr;
+		Ied::PluginTopic* topic = OwnTopic(instance, key);
+		if (!topic) return;
+		topic->m_Text = Core::String(snapshot);
+		if (made) server->m_Hub.Add(key, [topic]() -> Core::String { return topic->m_Text; });
+	}
+
+	void PluginContext::TopicFrom(Core::StringView key, func<Core::String()> snapshot) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::CodeRuntime* runtime = instance->m_Runtime;
+		Ied::ApiLock guard(runtime->m_Server);
+		if (runtime->TopicOf(instance, key)) return;
+		Ied::PluginTopic* topic = OwnTopic(instance, key);
+		if (!topic) return;
+		topic->m_Pull = snapshot;
+		topic->m_Pulled = true;
+		runtime->m_Server->m_Hub.Add(key, [runtime, instance, topic]() -> Core::String { return runtime->PulledSnapshot(instance, topic); });
+	}
+
+	void PluginContext::Publish(Core::StringView key, const char* kind, Core::StringView data) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		if (instance->m_Runtime->TopicOf(instance, key)) server->m_Hub.Publish(key, kind, data);
+	}
+
+	void Events::Publish(Core::StringView key, const char* kind, Core::StringView data) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (instance->m_Runtime->TopicOf(instance, key)) instance->m_Runtime->m_Server->m_Hub.Publish(key, kind, data);
+	}
+
+	void Events::PublishMergeable(Core::StringView key, const char* kind, const Merge& merge) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (instance->m_Runtime->TopicOf(instance, key)) instance->m_Runtime->m_Server->m_Hub.PublishMergeable(key, kind, merge);
+	}
+
+	// The end of a plugin's thread that let an exception escape: its message and where it was thrown, in the log.
+	static void ThreadFailed(Ied::CodeInstance* instance, Core::StringView message, Core::StringView stack) {
+		Core::StringBuilder line;
+		line.Append("plugin ");
+		line.Append(instance->m_PluginId.View());
+		line.Append(": a thread of its own ended on an exception nothing caught");
+		if (!message.IsEmpty()) {
+			line.Append(": ");
+			line.Append(message);
+		}
+		line.AppendByte('\n');
+		line.Append(stack);
+		instance->m_Runtime->m_Server->Log(line.View());
+	}
+
+	void PluginContext::StartThread(func<void()> body) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Threading::Thread::Run([instance, body]() {
+			Ied::CodeScope scope(instance);
+			try {
+				body();
+			}
+			catch (Ied::RpcError& error) {
+				ThreadFailed(instance, error.m_Message.View(), Platform::StackText().View());
+			}
+			catch (...) {
+				ThreadFailed(instance, Core::StringView(""), Platform::StackText().View());
+			}
+		}).Detach();
+	}
+
+	void HostLock::Init(const PluginContext& context) {
+		m_Host = context.Handle();
+		m_Taken = !Ied::HostLockHeld();
+		if (!m_Taken) return;
+		Of(m_Host)->m_Runtime->m_Server->m_Lock.Lock();
+		Ied::SetHostLockHeld(true);
+	}
+
+	void HostLock::Delete() {
+		if (!m_Taken) return;
+		Ied::SetHostLockHeld(false);
+		Of(m_Host)->m_Runtime->m_Server->m_Lock.Unlock();
+	}
+
+	void HostLock::Wait(Threading::ConditionVariable& condition, int64 ns) {
+		Ied::Server* server = Of(m_Host)->m_Runtime->m_Server;
+		if (ns < 0) condition.Wait(server->m_Lock);
+		else condition.WaitFor(server->m_Lock, ns);
+	}
+
+	void Events::Wait(Threading::ConditionVariable& condition, int64 ns) {
+		Ied::Server* server = Of(m_Host)->m_Runtime->m_Server;
+		if (ns < 0) condition.Wait(server->m_Lock);
+		else condition.WaitFor(server->m_Lock, ns);
+	}
+
+	void PluginContext::PublishMergeable(Core::StringView key, const char* kind, const Merge& merge) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		if (instance->m_Runtime->TopicOf(instance, key)) server->m_Hub.PublishMergeable(key, kind, merge);
+	}
+
+	void PluginContext::Atomically(func<void(Events& events)> change) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Events* events = new Events(m_Host);
+		Core::String problem;
+		if (!Ied::GuardedCallLocked(instance, [change, events]() { change(*events); }, problem))
+			server->Log((((Core::String("plugin ") + instance->m_PluginId.View()) + ": a change: ") + problem.View()).View());
+	}
+
+	void PluginContext::RemoveTopic(Core::StringView key) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		for (int64 i = 0; i < instance->m_Topics.Count(); ++i)
+			if (instance->m_Topics[i]->m_Key.View() == key) {
+				instance->m_Topics.RemoveAt(i);
+				server->m_Hub.Remove(key);
+				return;
+			}
+	}
+
+	void PluginContext::Output(Core::StringView wsId, Core::StringView source, Core::StringView text) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* ws = server->m_Workspaces->Find(wsId);
+		Ied::Plugin* plugin = instance->m_Runtime->PluginOf(instance);
+		if (!ws || !plugin || !Ied::DeclaresOutput(plugin, source)) return;
+		server->m_Outputs->Append(ws, source, text);
+	}
+
+	bool PluginContext::Contribute(Core::StringView point, Core::StringView wsId, Core::StringView entries, Core::String& problem) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		if (point == "menus" || point == "fileOpener" || point == "fileNesting" || point == "settings" || point == "bindings") {
+			problem = (Core::String("'") + point) + "' comes from the manifest only: code computes array points";
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(entries, *doc);
+		bool objects = read.Ok() && read.root.Kind() == Serialization::DomKind::Array;
+		for (int64 i = 0; objects && i < read.root.Count(); ++i) objects = read.root.At(i).Kind() == Serialization::DomKind::Object;
+		if (!objects) {
+			problem = (Core::String("the entries of '") + point) + "' are not a JSON array of objects";
+			return false;
+		}
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		for (int64 i = 0; i < instance->m_Contributed.Count(); ++i)
+			if (instance->m_Contributed[i]->m_Point.View() == point && instance->m_Contributed[i]->m_WsId.View() == wsId) {
+				instance->m_Contributed.RemoveAt(i);
+				break;
+			}
+		if (read.root.Count() > 0) {
+			Ied::Contributed* given = new Ied::Contributed();
+			given->m_Point = Core::String(point);
+			given->m_WsId = Core::String(wsId);
+			given->m_Doc = doc;
+			given->m_Entries = read.root;
+			instance->m_Contributed.Push(given);
+		}
+		server->m_Plugins->ContributionsChanged(instance, wsId);
+		return true;
+	}
+}

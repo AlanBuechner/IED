@@ -1,0 +1,135 @@
+include "Request.ch"
+
+namespace Ai
+{
+	const int64 c_RequestReadBytes = 65536;
+	const int64 c_RequestMostHeadBytes = 65536;
+	const int64 c_RequestMostBodyBytes = 256 * 1024 * 1024;
+
+	bool StreamingRequest::Request(Core::StringView method, Core::StringView url, const Core::Array<Core::String>& headers, Core::StringView body, int32 connectMs, Core::String& error) {
+		this.m_Method = Core::String(method);
+		const Http::Url parsed = Http::ParseUrl(url);
+		if (!parsed.valid || parsed.webSocket) {
+			error = Core::String("not an http://host[:port]/path URL: ") + url;
+			return false;
+		}
+		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
+		if (!found.Found()) {
+			error = found.error;
+			return false;
+		}
+		m_Stream = Net::TcpStream::Connect(found.addresses[0], connectMs);
+		if (!m_Stream.IsOpen()) {
+			error = Core::String(m_Stream.Error());
+			return false;
+		}
+		Core::StringBuilder request;
+		request.Append(this.m_Method.View());
+		request.Append(" ");
+		request.Append(parsed.target.View());
+		request.Append(" HTTP/1.1\r\nHost: ");
+		request.Append(Http::HostHeader(parsed).View());
+		request.Append("\r\nContent-Type: application/json\r\nAccept: text/event-stream\r\nConnection: close\r\nContent-Length: ");
+		request.AppendInt(body.ByteLength());
+		request.Append("\r\n");
+		for (const Core::String& header : headers) {
+			request.Append(header.View());
+			request.Append("\r\n");
+		}
+		request.Append("\r\n");
+		request.Append(body);
+		if (!m_Stream.SendText(request.View(), connectMs)) {
+			error = Core::String(m_Stream.Error());
+			return false;
+		}
+		return true;
+	}
+
+	BodyRead StreamingRequest::Receive(int32 waitMs) {
+		if (m_Closed) return BodyRead::Ended;
+		char[c_RequestReadBytes] buffer;
+		const int64 got = m_Stream.Receive((void*)&buffer[0], c_RequestReadBytes, waitMs);
+		if (got > 0) {
+			m_Raw.Append(Core::StringView(&buffer[0], got));
+			return BodyRead::Bytes;
+		}
+		if (got == 0) {
+			m_Closed = true;
+			return BodyRead::Ended;
+		}
+		if (m_Stream.TimedOut()) return BodyRead::Waiting;
+		m_Error = Core::String(m_Stream.Error());
+		return BodyRead::Failed;
+	}
+
+	BodyRead StreamingRequest::ReadHead(int32 waitMs) {
+		for (;;) {
+			const Http::HeadParse parse = Http::ParseResponseHead(m_Raw.View(), c_RequestMostHeadBytes, m_Head);
+			if (parse.status == Http::ParseStatus::Complete && m_Head.status >= 200) {
+				m_Raw = Core::String(m_Raw.View().Substring(parse.length, m_Raw.ByteLength() - parse.length));
+				m_Framing = Http::ResponseFraming(m_Head.headers, m_Head.status, m_Method.View());
+				m_HeadIn = true;
+				return BodyRead::Bytes;
+			}
+			if (parse.status == Http::ParseStatus::Complete) {
+				m_Raw = Core::String(m_Raw.View().Substring(parse.length, m_Raw.ByteLength() - parse.length));
+				continue;
+			}
+			if (parse.status != Http::ParseStatus::Incomplete) {
+				m_Error = parse.error;
+				return BodyRead::Failed;
+			}
+			const BodyRead got = Receive(waitMs);
+			if (got == BodyRead::Ended) {
+				m_Error = Core::String("the connection ended before the response head");
+				return BodyRead::Failed;
+			}
+			if (got != BodyRead::Bytes) return got;
+		}
+	}
+
+	// What `raw` holds of the body, decoded as its framing says.
+	BodyRead StreamingRequest::Decode(Core::String& out) {
+		if (m_Framing.kind == Http::BodyKind::Chunked) {
+			Core::Array<uint8> body;
+			const Http::ChunkedStep step = m_Chunks.Feed(m_Raw.View(), c_RequestMostBodyBytes, body);
+			m_Raw = Core::String(m_Raw.View().Substring(step.consumed, m_Raw.ByteLength() - step.consumed));
+			out.Append(Core::StringView((const char*)body.Data(), body.Count()));
+			if (step.status == Http::ParseStatus::Complete) return BodyRead::Ended;
+			if (step.status != Http::ParseStatus::Incomplete) {
+				m_Error = step.error;
+				return BodyRead::Failed;
+			}
+			return body.Count() > 0 ? BodyRead::Bytes : BodyRead::Waiting;
+		}
+		const int64 had = m_Raw.ByteLength();
+		out.Append(m_Raw.View());
+		m_BodyRead += had;
+		m_Raw = Core::String();
+		if (m_Framing.kind == Http::BodyKind::Length && m_BodyRead >= m_Framing.length) return BodyRead::Ended;
+		if (m_Framing.kind == Http::BodyKind::None) return BodyRead::Ended;
+		return had > 0 ? BodyRead::Bytes : BodyRead::Waiting;
+	}
+
+	BodyRead StreamingRequest::Read(Core::String& out, int32 waitMs) {
+		if (!m_HeadIn) {
+			m_Error = Core::String("the response head is not in");
+			return BodyRead::Failed;
+		}
+		if (!m_Raw.IsEmpty()) {
+			const BodyRead decoded = Decode(out);
+			if (decoded != BodyRead::Waiting) return decoded;
+		}
+		const BodyRead got = Receive(waitMs);
+		if (got == BodyRead::Ended) {
+			const BodyRead last = Decode(out);
+			if (m_Framing.kind == Http::BodyKind::Chunked && last != BodyRead::Ended) {
+				m_Error = Core::String("the connection ended inside a chunked body");
+				return BodyRead::Failed;
+			}
+			return BodyRead::Ended;
+		}
+		if (got != BodyRead::Bytes) return got;
+		return Decode(out);
+	}
+}

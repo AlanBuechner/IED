@@ -1,0 +1,35 @@
+include "Bindings.ch"
+include "host/Server.ch"
+
+namespace IED
+{
+	Result Answer(Core::StringView json) {
+		Result result;
+		result.m_Json = Core::String(json);
+		return result;
+	}
+
+	Result Refusal(Core::StringView error) {
+		Result result;
+		result.m_Error = Core::String(error);
+		return result;
+	}
+
+	Result CallBinding(Core::StringView name, Core::StringView args) {
+		Ied::CodeInstance* caller = Ied::CurrentCode();
+		if (!caller) return Refusal(Core::StringView("the plugin API is for a plugin's code, on its thread"));
+		Ied::Server* server = caller->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		Ied::Plugin* plugin = server->m_Code->PluginOf(caller);
+		if (!plugin || !Ied::ConsumesBinding(plugin, name))
+			return Refusal(((Core::String("the plugin's manifest does not consume '") + name) + "' (bindings.consumes)").View());
+		Ied::Workspace* ws = caller->IsProject() ? server->m_Workspaces->Find(caller->m_WsId.View()) : nullptr;
+		Ied::CodeInstance* provider = server->m_Code->Provider(ws, name);
+		if (provider) return Ied::InvokeBinding(server, provider, name, args, Ied::NeverStopped());
+		if (!server->m_Master || !Ied::ProvidedAnywhere(server, ws, name)) return Refusal(((Core::String("no plugin provides the server binding '") + name) + "'").View());
+		// A binding of the plugin's own, answered by its code in the master (developer mode's install build): as long as
+		// it takes, as a call into its own binding would here.
+		const int64 wait = Ied::ProvidesBinding(plugin, name) ? Ied::c_OwnBindingForwardMs : IED::c_BindingWaitMs;
+		return Ied::ForwardBinding(server, name, args, wait);
+	}
+}

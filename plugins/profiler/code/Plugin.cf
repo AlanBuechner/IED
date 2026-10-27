@@ -1,0 +1,15 @@
+// The ied.profiler built-in's entry (docs/26 "Built-ins on the API").
+include "ProfilerService.ch"
+
+namespace Profiler
+{
+	void Activate(IED::PluginContext& context)
+	{
+		ProfilerPlugin* profiler = new ProfilerPlugin(&context);
+		profiler->Start();
+		RegisterMethods(profiler);
+		ProvideQuery(profiler);
+		context.OnWorkspace([profiler](const IED::Workspace& ws) { profiler->Opened(ws); });
+		context.OnDeactivate([profiler]() { profiler->Stop(); });
+	}
+}

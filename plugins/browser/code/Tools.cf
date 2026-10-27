@@ -1,0 +1,54 @@
+// The AI's browser tools (docs/13 T-BRW, the manifest's toolCalls): each calls its browser.* binding for the call's
+// workspace, with the call's chat (a page it opens is then listed in that chat), and tells the model what it answered;
+// a screenshot comes with its image.
+
+include "Browser.ch"
+
+namespace Browser
+{
+	// The call's arguments (a JSON object) with `member` ("\"key\":value") added.
+	static Core::String WithMember(const Serialization::DomNode& args, Core::StringView member) {
+		Core::String json = IED::NodeJson(args);
+		Core::String body = Core::String(json.View().Substring(0, json.ByteLength() - 1));
+		return (body + (json.ByteLength() > 2 ? "," : "")) + member + "}";
+	}
+
+	static IED::ToolResult Through(const char* binding, const IED::ToolCall& call) {
+		Core::String asked = call.m_ChatId.IsEmpty() ? IED::NodeJson(call.m_Args) : WithMember(call.m_Args, (Core::String("\"chatId\":") + JsonText(call.m_ChatId.View()).View()).View());
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("wsId", call.m_Workspace.m_Id.View());
+		args.RawField("args", asked.View());
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView(binding), args.View());
+		if (!answer.Ok()) return IED::ToolFailure(answer.m_Error.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(answer.m_Json.View(), *doc);
+		Core::StringView text = parsed.root.Member("text").AsView();
+		IED::ToolResult result = parsed.root.Member("isError").AsBool() ? IED::ToolFailure(text) : IED::ToolText(text);
+		Core::StringView image = parsed.root.Member("image").AsView();
+		if (!image.IsEmpty()) {
+			IED::ToolImage shot;
+			shot.m_Mime = Core::String("image/png");
+			shot.m_Path = Core::String(image);
+			result.m_Images.Push(shot);
+		}
+		return result;
+	}
+
+	IED::ToolResult OpenTool(const IED::ToolCall& call) { return Through("browser.openPage", call); }
+	IED::ToolResult NavigateTool(const IED::ToolCall& call) { return Through("browser.navigatePage", call); }
+	IED::ToolResult SnapshotTool(const IED::ToolCall& call) { return Through("browser.snapshot", call); }
+	IED::ToolResult ScreenshotTool(const IED::ToolCall& call) { return Through("browser.screenshot", call); }
+	IED::ToolResult ActTool(const IED::ToolCall& call) { return Through("browser.act", call); }
+	IED::ToolResult ConsoleTool(const IED::ToolCall& call) { return Through("browser.console", call); }
+	IED::ToolResult NetworkTool(const IED::ToolCall& call) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		IED::ToolCall asked = call;
+		Core::String withNetwork = WithMember(call.m_Args, Core::StringView("\"network\":true"));
+		asked.m_Args = Serialization::ReadJson(withNetwork.View(), *doc).root;
+		return Through("browser.console", asked);
+	}
+	IED::ToolResult EvalTool(const IED::ToolCall& call) { return Through("browser.eval", call); }
+	IED::ToolResult CloseTool(const IED::ToolCall& call) { return Through("browser.closePage", call); }
+}

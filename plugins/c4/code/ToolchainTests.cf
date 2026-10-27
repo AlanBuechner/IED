@@ -1,0 +1,97 @@
+// Which toolchain the c4 plugin's tools come from (Toolchain.ch).
+
+include "Toolchain.ch"
+
+static C4Plugin::ToolchainQuery StoreQuery() {
+	C4Plugin::ToolchainQuery query;
+	query.m_Root = Core::String("C:/work/game");
+	query.m_Store = Core::String("C:/ied/toolchains/c4");
+	query.m_Installed.Push(Core::String("0.1.0"));
+	query.m_Installed.Push(Core::String("dev"));
+	query.m_Installed.Push(Core::String("0.10.0"));
+	query.m_Installed.Push(Core::String("0.2.0"));
+	return query;
+}
+
+[test("server.c4plugin.toolchain")]
+class ToolchainTests {
+	[test("setting_then_pin")]
+	public static void TestSettingThenPin() {
+		C4Plugin::ToolchainQuery query = StoreQuery();
+		query.m_Setting = Core::String("dev");
+		query.m_Pin = Core::String("0.2.0");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "C:/ied/toolchains/c4/dev", "the app's setting before the workspace's pin");
+		query.m_Setting = Core::String("D:/c4/mine");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "D:/c4/mine", "a folder setting as it is");
+		query.m_Setting = Core::String("");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "C:/ied/toolchains/c4/0.2.0", "the workspace's pinned version");
+		query.m_Pin = Core::String("./tools/c4");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "C:/work/game/tools/c4", "a pinned folder relative to the workspace");
+		query.m_Pin = Core::String("latest");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "C:/ied/toolchains/c4/0.10.0", "latest: the newest numbered version, by its numbers");
+	}
+
+	[test("newest_when_unpinned")]
+	public static void TestNewest() {
+		C4Plugin::ToolchainQuery query = StoreQuery();
+		C4Plugin::ToolchainChoice choice = C4Plugin::ChooseToolchain(query);
+		assert_true(choice.m_Folder == "C:/ied/toolchains/c4/0.10.0", "no pin: the newest installed");
+		assert_true(choice.m_Reason.View().Contains(Core::StringView("newest")), "it says why");
+		query.m_Installed.Clear();
+		query.m_Installed.Push(Core::String("dev"));
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder == "C:/ied/toolchains/c4/dev", "only dev: dev");
+	}
+
+	[test("none_fits")]
+	public static void TestNone() {
+		C4Plugin::ToolchainQuery query = StoreQuery();
+		query.m_Pin = Core::String("9.9.9");
+		C4Plugin::ToolchainChoice missing = C4Plugin::ChooseToolchain(query);
+		assert_true(missing.m_Folder.IsEmpty(), "a pinned version that is not installed");
+		assert_true(missing.m_Reason.View().Contains(Core::StringView("9.9.9, which is not installed in C:/ied/toolchains/c4")), "says which and where");
+		query.m_Pin = Core::String("");
+		query.m_Installed.Clear();
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder.IsEmpty(), "an empty store");
+		query.m_Store = Core::String("");
+		C4Plugin::ToolchainChoice nowhere = C4Plugin::ChooseToolchain(query);
+		assert_true(nowhere.m_Folder.IsEmpty() && nowhere.m_Reason.View().Contains(Core::StringView("no toolchain store")), "no store at all");
+		query.m_Pin = Core::String("dev");
+		assert_true(C4Plugin::ChooseToolchain(query).m_Folder.IsEmpty(), "a version with no store to look in");
+	}
+
+	[test("workspace_pin")]
+	public static void TestPin() {
+		assert_true(C4Plugin::WorkspaceToolchain(Core::StringView("[workspace]\nname = \"G\"\ntoolchain = \"0.1.0\"\n")) == "0.1.0", "the plain form");
+		assert_true(C4Plugin::WorkspaceToolchain(Core::StringView("# c\r\n[workspace] # the root\r\n  toolchain='dev'  # pinned\r\n")) == "dev", "single quotes, CRLF, comments");
+		assert_true(C4Plugin::WorkspaceToolchain(Core::StringView("[project]\ntoolchain = \"x\"\n[workspace]\nname = \"G\"\n")).IsEmpty(), "another table's key does not count");
+		assert_true(C4Plugin::WorkspaceToolchain(Core::StringView("[workspace]\ntoolchains = \"x\"\n[workspace.steps]\ntoolchain = \"y\"\n")).IsEmpty(), "neither a longer key nor a subtable");
+		assert_true(C4Plugin::WorkspaceToolchain(Core::StringView("")).IsEmpty(), "no manifest text");
+	}
+
+	[test("versions")]
+	public static void TestVersions() {
+		assert_true(C4Plugin::IsVersion(Core::StringView("0.1.0")) && C4Plugin::IsVersion(Core::StringView("1.2.3-rc.1")) && C4Plugin::IsVersion(Core::StringView("1.2.3+b5")), "numbered versions");
+		assert_true(!C4Plugin::IsVersion(Core::StringView("dev")) && !C4Plugin::IsVersion(Core::StringView("1.2")) && !C4Plugin::IsVersion(Core::StringView("1.2.3-")) && !C4Plugin::IsVersion(Core::StringView("1.x.3")), "not versions");
+		assert_true(C4Plugin::VersionBefore(Core::StringView("0.9.0"), Core::StringView("0.10.0")), "by number, not by text");
+		assert_true(!C4Plugin::VersionBefore(Core::StringView("1.0.0"), Core::StringView("1.0.0")), "not before itself");
+		Core::Array<Core::String> names;
+		assert_true(C4Plugin::NewestVersion(names).IsEmpty(), "none");
+		assert_true(C4Plugin::NamesFolder(Core::StringView("./c4")) && C4Plugin::NamesFolder(Core::StringView("C:\\c4")) && !C4Plugin::NamesFolder(Core::StringView("0.1.0")), "folders and names, as Nuke reads them");
+	}
+
+	[test("finding_nuke")]
+	public static void TestNuke() {
+		assert_true(C4Plugin::CheckoutOfCommand(Core::StringView("C:/GameDev/IED/bin/nuke.cmd")) == "C:/GameDev/IED", "a path's checkout");
+		assert_true(C4Plugin::CheckoutOfCommand(Core::StringView("\"C:\\ied\\bin\\nuke.cmd\"")) == "C:/ied", "quoted, backslashes");
+		assert_true(C4Plugin::CheckoutOfCommand(Core::StringView("nuke")).IsEmpty(), "a bare name is looked up on PATH");
+		Core::Array<Core::String> candidates = C4Plugin::CommandCandidates(Core::StringView("nuke"), Core::StringView("C:\\a;;\"C:\\b c\";"));
+		assert_eq((int64)6, candidates.Count(), "three names in each of the two folders");
+		assert_true(candidates[0] == "C:\\a/nuke.cmd" && candidates[3] == "C:\\b c/nuke.cmd" && candidates[5] == "C:\\b c/nuke", "in PATH's order, quotes taken off");
+	}
+
+	[test("filling_in")]
+	public static void TestFill() {
+		Core::String filled = C4Plugin::WithToolchain(Core::StringView("[{\"command\": \"${c4.toolchain}/tools/C4LSP/C4LSP.exe\", \"env\": {\"C4_HOME\": \"${c4.toolchain}\"}, \"x\": \"${pluginDir}\"}]"), Core::StringView("C:/tc"));
+		assert_true(filled == "[{\"command\": \"C:/tc/tools/C4LSP/C4LSP.exe\", \"env\": {\"C4_HOME\": \"C:/tc\"}, \"x\": \"${pluginDir}\"}]", "each use, other variables left to the host");
+	}
+}

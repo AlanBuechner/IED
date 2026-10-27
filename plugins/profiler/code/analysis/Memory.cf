@@ -1,0 +1,224 @@
+// Memory (F-PRF-30, F-PRF-31, F-PRF-33): each pool's bytes in use over time with its totals, the memory plots (a
+// collected program's GC heap and process memory), collections, and the allocations live at a time grouped by call
+// stack, pool or thread.
+include "Analysis.ch"
+
+namespace Profiler
+{
+	const int32 c_MostLeakAddresses = 8;
+
+	// A series' [time, lowest, highest] per `pixel` of the range: `valueAt(i)` is its i-th sample's.
+	static void WriteUsage(IED::JsonWriter& json, const Capture& capture, const Core::Array<int64>& times, const func<int64(int64)>& valueAt, Range range, int64 pixel) {
+		json.BeginArray();
+		int64 i = times.LowerBound(range.m_Begin);
+		if (i > 0) i -= 1;
+		int64 end = times.LowerBound(range.m_End);
+		if (end < times.Count()) end += 1;
+		while (i < end) {
+			const int64 t = times[i];
+			int64 low = valueAt(i);
+			int64 high = low;
+			i += 1;
+			while (i < end && times[i] < t + pixel) {
+				const int64 value = valueAt(i);
+				if (value < low) low = value;
+				if (value > high) high = value;
+				i += 1;
+			}
+			json.BeginArray();
+			json.Int(capture.m_Clock.Ns(t));
+			json.Int(low);
+			json.Int(high);
+			json.EndArray();
+		}
+		json.EndArray();
+	}
+
+	static void WriteGcTotals(IED::JsonWriter& json, const Capture& capture, Range range) {
+		int64 count = 0;
+		int64 pause = 0;
+		int64 longest = 0;
+		int64 freed = -1;
+		for (const GcRecord& gc : capture.m_Gcs) {
+			if (gc.m_End == c_Open || !range.Overlaps(gc.m_Begin, gc.m_End + 1)) continue;
+			count += 1;
+			pause += gc.m_End - gc.m_Begin;
+			if (gc.m_End - gc.m_Begin > longest) longest = gc.m_End - gc.m_Begin;
+			if (gc.Freed() >= 0) freed = (freed < 0 ? 0 : freed) + gc.Freed();
+		}
+		json.Key(Core::StringView("gc"));
+		json.BeginObject();
+		json.IntField("count", count);
+		json.IntField("pauseNs", capture.m_Clock.Ns(pause));
+		json.IntField("longestNs", capture.m_Clock.Ns(longest));
+		json.IntField("freedBytes", freed);
+		json.EndObject();
+	}
+
+	// The plots of bytes (kind 1): their last value, peak and usage, like a pool's.
+	static void WriteMemoryPlots(IED::JsonWriter& json, const Capture& capture, Range range, int64 pixel) {
+		json.Key(Core::StringView("plots"));
+		json.BeginArray();
+		for (const Plot* plot : capture.m_Plots) {
+			if (plot->m_Kind != 1 || plot->m_Times.IsEmpty()) continue;
+			double peak = plot->m_Values[0];
+			for (double value : plot->m_Values)
+				if (value > peak) peak = value;
+			json.BeginObject();
+			json.Field("name", capture.Text(plot->m_NameStr));
+			json.IntField("now", (int64)plot->m_Values.Back());
+			json.IntField("peak", (int64)peak);
+			json.Key(Core::StringView("usage"));
+			WriteUsage(json, capture, plot->m_Times, [plot](int64 i) -> int64 { return (int64)plot->m_Values[i]; }, range, pixel);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String Memory(const Capture& capture, int64 fromNs, int64 toNs, int32 width) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		int64 pixel = range.Length() / (int64)(width < 1 ? 1 : width);
+		if (pixel < 1) pixel = 1;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("pools"));
+		json.BeginArray();
+		for (const Pool* pool : capture.m_Pools) {
+			json.BeginObject();
+			json.IntField("id", (int64)pool->m_Id);
+			Core::StringView name = capture.Text(pool->m_NameStr);
+			json.Field("name", name.IsEmpty() ? Core::StringView("heap") : name);
+			json.IntField("inUse", pool->m_InUse);
+			json.IntField("peak", pool->m_Peak);
+			json.IntField("allocs", pool->m_Allocs);
+			json.IntField("frees", pool->m_Frees);
+			json.IntField("earlierFrees", pool->m_EarlierFrees);
+			json.IntField("live", pool->m_Live.Count());
+			json.Key(Core::StringView("usage"));
+			WriteUsage(json, capture, pool->m_Times, [pool](int64 i) -> int64 { return pool->m_Bytes[i]; }, range, pixel);
+			json.EndObject();
+		}
+		json.EndArray();
+		WriteMemoryPlots(json, capture, range, pixel);
+		WriteGcTotals(json, capture, range);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Leaks --------------------------------------------------------------------------------------------------------
+
+	const int32 c_LeakSlices = 10;
+	const int32 c_AccumulatingSlices = 6;
+	const int64 c_LeastToAccumulate = 10;
+
+	// The allocations of one group still live at the time asked, and when in the window they were made.
+	class LeakGroupRow
+	{
+		public uint64 m_Key;
+		public int64 m_Count;
+		public int64 m_Bytes;
+		public uint64 m_Callstack;
+		public int64 m_First = -1;
+		public int64 m_Last;
+		public Core::Array<int64> m_Slices;
+		public Core::Array<uint64> m_Addresses;
+
+		// In how many tenths of the window its live allocations were made: most of them for a steady leak, one for a
+		// cache filled at once.
+		public int64 Spread() const {
+			int64 used = 0;
+			for (int64 n : m_Slices)
+				if (n > 0) used += 1;
+			return used;
+		}
+	}
+
+	static void WriteLeakRow(IED::JsonWriter& json, const Capture& capture, const AllocGrouper& grouper, const LeakGroupRow* row, int64 window) {
+		json.BeginObject();
+		grouper.WriteLabel(json, row->m_Key, row->m_Callstack);
+		json.IntField("count", row->m_Count);
+		json.IntField("bytes", row->m_Bytes);
+		json.IntField("firstNs", capture.m_Clock.Ns(row->m_First));
+		json.IntField("lastNs", capture.m_Clock.Ns(row->m_Last));
+		json.IntField("spread", row->Spread());
+		NumberField(json, "perSecond", (double)row->m_Count * 1e9 / (double)capture.m_Clock.Ns(window), 2);
+		json.BoolField("accumulating", row->m_Count >= c_LeastToAccumulate && row->Spread() >= c_AccumulatingSlices);
+		json.Key(Core::StringView("addresses"));
+		json.BeginArray();
+		for (uint64 address : row->m_Addresses) {
+			Core::StringBuilder hex;
+			hex.Append("0x");
+			hex.AppendHex(address);
+			json.String(hex.View());
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	const int64 c_LeastTeardownBytes = 1048576;
+
+	int64 TeardownAt(const Capture& capture) {
+		const Pool* largest = nullptr;
+		for (const Pool* pool : capture.m_Pools)
+			if (!largest || pool->m_Peak > largest->m_Peak) largest = pool;
+		if (!largest || largest->m_Times.IsEmpty()) return -1;
+		const int64 tail = largest->m_Times.LowerBound(capture.m_LastTicks - capture.m_LastTicks / 10);
+		int64 high = -1;
+		for (int64 i = tail; i < largest->m_Bytes.Count(); ++i)
+			if (high < 0 || largest->m_Bytes[i] >= largest->m_Bytes[high]) high = i;
+		if (high < 0 || largest->m_Bytes[high] < c_LeastTeardownBytes || largest->m_InUse * 4 >= largest->m_Bytes[high]) return -1;
+		return largest->m_Times[high];
+	}
+
+	Core::String Leaks(const Capture& capture, const LeakAsk& ask) {
+		const int64 teardown = ask.m_AtNs < 0 && ask.m_BeforeTeardown ? TeardownAt(capture) : -1;
+		const int64 at = teardown >= 0 ? teardown + 1 : (ask.m_AtNs < 0 ? capture.m_LastTicks + 1 : capture.m_Clock.Ticks(ask.m_AtNs));
+		const int64 from = ask.m_FromNs < 0 ? 0 : capture.m_Clock.Ticks(ask.m_FromNs);
+		const int64 to = ask.m_ToNs < 0 || capture.m_Clock.Ticks(ask.m_ToNs) > at ? at : capture.m_Clock.Ticks(ask.m_ToNs);
+		const int64 window = to - from > 0 ? to - from : 1;
+		AllocGrouper grouper(capture, ask.m_GroupBy);
+		Core::HashMap<uint64, LeakGroupRow*> rowOf;
+		Core::Array<LeakGroupRow*> rows;
+		int64 liveCount = 0;
+		int64 liveBytes = 0;
+		for (const Allocation& allocation : capture.m_Allocations) {
+			if (allocation.m_T < from || allocation.m_T >= to || (allocation.m_Freed != c_Open && allocation.m_Freed < at)) continue;
+			const uint64 key = grouper.KeyOf(allocation);
+			LeakGroupRow* row = nullptr;
+			if (!rowOf.TryGet(key, row)) {
+				row = new LeakGroupRow();
+				row->m_Key = key;
+				row->m_Callstack = allocation.m_Callstack;
+				row->m_Slices.Resize(c_LeakSlices);
+				rows.Push(row);
+				rowOf.Insert(key, row);
+			}
+			row->m_Count += 1;
+			row->m_Bytes += allocation.m_Size;
+			if (row->m_First < 0 || allocation.m_T < row->m_First) row->m_First = allocation.m_T;
+			if (allocation.m_T > row->m_Last) row->m_Last = allocation.m_T;
+			int64 slice = (allocation.m_T - from) * (int64)c_LeakSlices / window;
+			if (slice >= c_LeakSlices) slice = c_LeakSlices - 1;
+			row->m_Slices[slice] += 1;
+			if (row->m_Addresses.Count() < c_MostLeakAddresses) row->m_Addresses.Push(allocation.m_Address);
+			liveCount += 1;
+			liveBytes += allocation.m_Size;
+		}
+		rows.SortBy([](LeakGroupRow* a, LeakGroupRow* b) -> bool { return a->m_Bytes > b->m_Bytes; });
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("atNs", capture.m_Clock.Ns(at > capture.m_LastTicks ? capture.m_LastTicks : at));
+		json.IntField("teardownNs", teardown < 0 ? -1 : capture.m_Clock.Ns(teardown));
+		json.IntField("fromNs", capture.m_Clock.Ns(from));
+		json.IntField("toNs", capture.m_Clock.Ns(to > capture.m_LastTicks ? capture.m_LastTicks : to));
+		json.IntField("count", liveCount);
+		json.IntField("bytes", liveBytes);
+		json.IntField("groupCount", rows.Count());
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.m_Limit; ++i) WriteLeakRow(json, capture, grouper, rows[i], window);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

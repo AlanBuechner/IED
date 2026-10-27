@@ -1,0 +1,446 @@
+include "Html.ch"
+include "HtmlTokens.ch"
+include "Urls.ch"
+include "Writer.ch"
+
+namespace WebFetch
+{
+	static bool IsVoid(Core::StringView n) {
+		return n == "br" || n == "img" || n == "hr" || n == "input" || n == "meta" || n == "link" || n == "source" || n == "wbr" || n == "area"
+			|| n == "base" || n == "col" || n == "embed" || n == "param" || n == "track" || n == "keygen";
+	}
+
+	// Page chrome and what has no text for a reader: left out with everything inside.
+	static bool IsDropped(Core::StringView n) {
+		return n == "head" || n == "script" || n == "style" || n == "nav" || n == "aside" || n == "footer" || n == "noscript" || n == "template"
+			|| n == "svg" || n == "math" || n == "iframe" || n == "button" || n == "select" || n == "canvas" || n == "object" || n == "audio"
+			|| n == "video" || n == "map" || n == "dialog" || n == "textarea";
+	}
+
+	// A word of a class or id that marks page chrome: menus, navigation, sidebars, footers, cookie and newsletter banners,
+	// share buttons, Wikipedia's language and tool menus.
+	static bool IsChromeWord(Core::StringView w) {
+		return w == "nav" || w == "navbar" || w == "navbox" || w == "navigation" || w == "menu" || w == "menubar" || w == "sidebar"
+			|| w == "footer" || w == "breadcrumb" || w == "breadcrumbs" || w == "cookie" || w == "cookies" || w == "consent" || w == "banner"
+			|| w == "share" || w == "social" || w == "advert" || w == "advertisement" || w == "ads" || w == "promo" || w == "popup"
+			|| w == "modal" || w == "noprint" || w == "editsection" || w == "dropdown" || w == "portlet" || w == "toolbar" || w == "skiplink"
+			|| w == "newsletter" || w == "subscribe";
+	}
+
+	// Whether `text` (a class or an id) has a chrome word among the words its non-letters separate.
+	static bool HasChromeWord(Core::StringView text) {
+		Core::StringBuilder word;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			const int32 c = i < text.ByteLength() ? text.ByteAt(i) : ' ';
+			const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+			if (letter) {
+				word.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+				continue;
+			}
+			if (!word.IsEmpty() && IsChromeWord(word.View())) return true;
+			word.Clear();
+		}
+		return false;
+	}
+
+	// Chrome by its ARIA role or its class or id words; never the page itself or its main content.
+	static bool IsChrome(const HtmlToken& token) {
+		Core::StringView n = token.m_Name.View();
+		if (n == "html" || n == "body" || n == "main" || n == "article") return false;
+		Core::StringView role = AttributeOf(token, "role");
+		if (role == "navigation" || role == "menu" || role == "menubar" || role == "search" || role == "banner" || role == "complementary"
+			|| role == "contentinfo" || role == "toolbar" || role == "dialog")
+			return true;
+		return HasChromeWord(AttributeOf(token, "class")) || HasChromeWord(AttributeOf(token, "id"));
+	}
+
+	// Blocks with a blank line around them.
+	static bool IsParagraph(Core::StringView n) {
+		return n == "p" || n == "section" || n == "article" || n == "main" || n == "header" || n == "figure" || n == "fieldset" || n == "details"
+			|| n == "dl" || n == "address" || n == "hgroup" || n == "form";
+	}
+
+	// Blocks on a line of their own.
+	static bool IsLine(Core::StringView n) {
+		return n == "div" || n == "figcaption" || n == "summary" || n == "legend" || n == "center" || n == "dt" || n == "dd" || n == "caption"
+			|| n == "body" || n == "label" || n == "tbody" || n == "thead" || n == "tfoot";
+	}
+
+	static int32 HeadingLevel(Core::StringView n) {
+		if (n.ByteLength() != 2 || n.ByteAt(0) != 'h') return 0;
+		const int32 level = n.ByteAt(1) - '0';
+		return level >= 1 && level <= 6 ? level : 0;
+	}
+
+	// "## " for level 2.
+	static Core::String HeadingMark(int32 level) {
+		Core::StringBuilder mark;
+		for (int32 i = 0; i < level; ++i) mark.Append("#");
+		mark.Append(" ");
+		return mark.ToString();
+	}
+
+	static const char* InlineMark(Core::StringView n) {
+		if (n == "strong" || n == "b") return "**";
+		if (n == "em" || n == "i") return "_";
+		if (n == "s" || n == "del" || n == "strike") return "~~";
+		return null;
+	}
+
+	// A code block's language from "language-rust" / "lang-rust" in its class.
+	static Core::String LanguageOf(const HtmlToken& token) {
+		Core::StringView classes = AttributeOf(token, "class");
+		int64 at = classes.IndexOf(Core::StringView("language-"));
+		int64 skip = 9;
+		if (at < 0) {
+			at = classes.IndexOf(Core::StringView("lang-"));
+			skip = 5;
+		}
+		if (at < 0 || (at > 0 && classes.ByteAt(at - 1) != ' ')) return Core::String();
+		int64 end = at + skip;
+		while (end < classes.ByteLength() && classes.ByteAt(end) != ' ') end += 1;
+		return Core::String(classes.Substring(at + skip, end - at - skip));
+	}
+
+	static Core::String Spaced(Core::StringView text) {
+		PageWriter writer;
+		writer.Text(text);
+		return writer.Finish();
+	}
+
+	struct OpenElement
+	{
+		public Core::String m_Name;
+		public bool m_Dropped;
+		public Core::String m_Href;   // an <a>'s, made absolute; "" for none
+	}
+
+	struct ListLevel
+	{
+		public bool m_Ordered;
+		public int64 m_Next;
+	}
+
+	struct TableState
+	{
+		public int64 m_Rows;
+		public int64 m_Cells;
+	}
+
+	class PageConverter
+	{
+		[operator("create")] public void Init() {}
+
+		public void Start(const HtmlToken& token);
+		public void End(Core::StringView name);
+		public void Text(Core::StringView text);
+		public Core::String Finish();
+
+		public PageWriter m_Writer;
+		public Core::String m_Base;
+
+		private void Enter(const HtmlToken& token, OpenElement& entry);
+		private void Leave(const OpenElement& entry);
+		private void PopTo(int64 count);
+		// Closes the innermost open element named one of `names`, unless one named in `stops` is nearer.
+		private void CloseImplied(const char* a, const char* b, const char* stopA, const char* stopB);
+
+		private Core::Array<OpenElement> m_Stack;
+		private int64 m_Dropped;   // open elements that are, or are inside, a left-out one
+		private Core::Array<ListLevel> m_Lists;
+		private Core::Array<TableState> m_Tables;
+		private int32 m_PreDepth;
+		private bool m_FencePending;
+		private bool m_FenceWritten;
+		private Core::String m_PreLanguage;
+	}
+
+	void PageConverter::PopTo(int64 count) {
+		while (m_Stack.Count() > count) {
+			OpenElement entry = m_Stack.Pop();
+			if (entry.m_Dropped) m_Dropped -= 1;
+			else Leave(entry);
+		}
+	}
+
+	void PageConverter::CloseImplied(const char* a, const char* b, const char* stopA, const char* stopB) {
+		for (int64 i = m_Stack.Count() - 1; i >= 0; --i) {
+			Core::StringView name = m_Stack[i].m_Name.View();
+			if (name == a || (b != null && name == b)) {
+				PopTo(i);
+				return;
+			}
+			if (name == stopA || (stopB != null && name == stopB)) return;
+		}
+	}
+
+	void PageConverter::Start(const HtmlToken& token) {
+		Core::StringView name = token.m_Name.View();
+		if (name == "li") CloseImplied("li", null, "ul", "ol");
+		else if (name == "tr") CloseImplied("tr", null, "table", null);
+		else if (name == "td" || name == "th") CloseImplied("td", "th", "tr", "table");
+		else if (name == "dt" || name == "dd") CloseImplied("dt", "dd", "dl", null);
+		else if (name == "p" && !m_Stack.IsEmpty() && m_Stack.Back().m_Name.View() == "p") PopTo(m_Stack.Count() - 1);
+		OpenElement entry;
+		entry.m_Name = token.m_Name;
+		entry.m_Dropped = m_Dropped > 0 || IsDropped(name) || IsChrome(token) || HasAttribute(token, "hidden") || AttributeOf(token, "aria-hidden") == "true";
+		const bool empty = IsVoid(name) || token.m_SelfClosing;
+		if (entry.m_Dropped) {
+			if (empty) return;
+			m_Dropped += 1;
+			m_Stack.Push(entry);
+			return;
+		}
+		Enter(token, entry);
+		if (empty) Leave(entry);
+		else m_Stack.Push(entry);
+	}
+
+	void PageConverter::End(Core::StringView name) {
+		for (int64 i = m_Stack.Count() - 1; i >= 0; --i)
+			if (m_Stack[i].m_Name.View() == name) {
+				PopTo(i);
+				return;
+			}
+	}
+
+	void PageConverter::Text(Core::StringView text) {
+		if (m_Dropped > 0) return;
+		Core::StringView rest = text;
+		if (m_PreDepth > 0 && m_FencePending) {
+			if (rest.StartsWith(Core::StringView("\r\n"))) rest = rest.Substring(2, rest.ByteLength() - 2);
+			else if (rest.StartsWith(Core::StringView("\n"))) rest = rest.Substring(1, rest.ByteLength() - 1);
+			if (rest.IsEmpty()) return;
+			m_FencePending = false;
+			m_FenceWritten = true;
+			if (!m_Writer.m_Plain) {
+				m_Writer.Inline((Core::String("```") + m_PreLanguage.View()).View());
+				m_Writer.Append(Core::StringView("\n"));
+			}
+		}
+		m_Writer.Text(rest);
+	}
+
+	void PageConverter::Enter(const HtmlToken& token, OpenElement& entry) {
+		Core::StringView name = token.m_Name.View();
+		const bool plain = m_Writer.m_Plain;
+		const int32 level = HeadingLevel(name);
+		const char* mark = InlineMark(name);
+		if (level > 0) {
+			m_Writer.Break(2);
+			if (!plain) m_Writer.Open(HeadingMark(level).View());
+		}
+		else if (mark != null) {
+			if (!plain && m_PreDepth == 0) m_Writer.Open(Core::StringView(mark));
+		}
+		else if (IsParagraph(name)) m_Writer.Break(2);
+		else if (IsLine(name)) m_Writer.Break(1);
+		else if (name == "br") {
+			if (m_PreDepth > 0) m_Writer.Text(Core::StringView("\n"));
+			else m_Writer.Break(1);
+		}
+		else if (name == "hr") {
+			m_Writer.Break(2);
+			if (!plain) m_Writer.Inline(Core::StringView("---"));
+			m_Writer.Break(2);
+		}
+		else if (name == "ul" || name == "ol") {
+			m_Writer.Break(m_Lists.IsEmpty() ? 2 : 1);
+			ListLevel list;
+			list.m_Ordered = name == "ol";
+			int64 start = 1;
+			list.m_Next = Core::ParseInt64(AttributeOf(token, "start"), start) ? start : 1;
+			m_Lists.Push(list);
+			m_Writer.m_ListDepth = (int32)m_Lists.Count();
+		}
+		else if (name == "li") {
+			m_Writer.Break(1);
+			Core::StringBuilder marker;
+			if (!m_Lists.IsEmpty() && m_Lists.Back().m_Ordered) {
+				marker.AppendInt(m_Lists.Back().m_Next);
+				marker.Append(". ");
+				m_Lists.Back().m_Next += 1;
+			}
+			else marker.Append("- ");
+			m_Writer.m_ItemMarker = marker.ToString();
+			if (m_Lists.IsEmpty()) m_Writer.m_ListDepth = 1;
+		}
+		else if (name == "blockquote") {
+			m_Writer.Break(2);
+			m_Writer.m_QuoteDepth += 1;
+		}
+		else if (name == "pre") {
+			m_Writer.Break(2);
+			m_PreDepth += 1;
+			m_Writer.m_Preformatted = true;
+			if (m_PreDepth == 1) {
+				m_FencePending = true;
+				m_FenceWritten = false;
+				m_PreLanguage = LanguageOf(token);
+			}
+		}
+		else if (name == "code") {
+			if (m_PreDepth > 0) {
+				if (m_FencePending && m_PreLanguage.IsEmpty()) m_PreLanguage = LanguageOf(token);
+			}
+			else if (!plain) m_Writer.Open(Core::StringView("`"));
+		}
+		else if (name == "a") {
+			Core::String href = ResolveUrl(m_Base.View(), AttributeOf(token, "href"));
+			const bool samePage = AttributeOf(token, "href").Trimmed().StartsWith(Core::StringView("#"));
+			entry.m_Href = samePage ? Core::String() : href;
+			if (!plain && !entry.m_Href.IsEmpty()) m_Writer.Open(Core::StringView("["));
+		}
+		else if (name == "img") {
+			// Its alt text only: web_fetch shows no images, and their addresses are long (thumbnails, tracking).
+			Core::StringView alt = AttributeOf(token, "alt").Trimmed();
+			if (!plain && !alt.IsEmpty()) m_Writer.Inline(((Core::String("[image: ") + Spaced(alt).View()) + "]").View());
+		}
+		else if (name == "table") {
+			m_Writer.Break(2);
+			TableState table;
+			m_Tables.Push(table);
+		}
+		else if (name == "tr") {
+			m_Writer.Break(1);
+			if (!m_Tables.IsEmpty()) m_Tables.Back().m_Cells = 0;
+		}
+		else if (name == "td" || name == "th") {
+			if (!m_Tables.IsEmpty()) {
+				const bool first = m_Tables.Back().m_Cells == 0;
+				if (!first) m_Writer.Inline(Core::StringView(" | "));
+				else if (!plain) m_Writer.Inline(Core::StringView("| "));
+				m_Tables.Back().m_Cells += 1;
+			}
+			m_Writer.m_CellDepth += 1;
+		}
+	}
+
+	void PageConverter::Leave(const OpenElement& entry) {
+		Core::StringView name = entry.m_Name.View();
+		const bool plain = m_Writer.m_Plain;
+		const int32 level = HeadingLevel(name);
+		const char* mark = InlineMark(name);
+		if (level > 0) {
+			if (!plain) m_Writer.Discard(HeadingMark(level).View());
+			m_Writer.Break(2);
+		}
+		else if (mark != null) {
+			if (!plain && m_PreDepth == 0) m_Writer.Close(Core::StringView(mark));
+		}
+		else if (IsParagraph(name)) m_Writer.Break(2);
+		else if (IsLine(name)) m_Writer.Break(1);
+		else if (name == "ul" || name == "ol") {
+			if (!m_Lists.IsEmpty()) m_Lists.Pop();
+			m_Writer.m_ListDepth = (int32)m_Lists.Count();
+			m_Writer.m_ItemMarker = Core::String();
+			m_Writer.Break(m_Lists.IsEmpty() ? 2 : 1);
+		}
+		else if (name == "li") {
+			m_Writer.Break(1);
+			m_Writer.m_ItemMarker = Core::String();
+			if (m_Lists.IsEmpty()) m_Writer.m_ListDepth = 0;
+		}
+		else if (name == "blockquote") {
+			if (m_Writer.m_QuoteDepth > 0) m_Writer.m_QuoteDepth -= 1;
+			m_Writer.Break(2);
+		}
+		else if (name == "pre") {
+			if (m_PreDepth == 1 && m_FenceWritten && !plain) {
+				if (!m_Writer.EndsWithNewline()) m_Writer.Append(Core::StringView("\n"));
+				m_Writer.Append(Core::StringView("```"));
+			}
+			if (m_PreDepth > 0) m_PreDepth -= 1;
+			m_Writer.m_Preformatted = m_PreDepth > 0;
+			if (m_PreDepth == 0) m_FencePending = false;
+			m_Writer.Break(2);
+		}
+		else if (name == "code") {
+			if (m_PreDepth == 0 && !plain) m_Writer.Close(Core::StringView("`"));
+		}
+		else if (name == "a") {
+			if (!plain && !entry.m_Href.IsEmpty() && !m_Writer.Discard(Core::StringView("["))) m_Writer.Append(((Core::String("](") + entry.m_Href.View()) + ")").View());
+		}
+		else if (name == "tr") {
+			if (!m_Tables.IsEmpty() && m_Tables.Back().m_Cells > 0) {
+				if (!plain) m_Writer.Append(Core::StringView(" |"));
+				if (m_Tables.Back().m_Rows == 0 && !plain) {
+					Core::StringBuilder rule;
+					rule.Append("\n|");
+					for (int64 i = 0; i < m_Tables.Back().m_Cells; ++i) rule.Append(" --- |");
+					m_Writer.Append(rule.View());
+				}
+				m_Tables.Back().m_Rows += 1;
+			}
+			m_Writer.Break(1);
+		}
+		else if (name == "td" || name == "th") {
+			if (m_Writer.m_CellDepth > 0) m_Writer.m_CellDepth -= 1;
+		}
+		else if (name == "table") {
+			if (!m_Tables.IsEmpty()) m_Tables.Pop();
+			m_Writer.Break(2);
+		}
+	}
+
+	Core::String PageConverter::Finish() {
+		PopTo(0);
+		return m_Writer.Finish();
+	}
+
+	// The tokens to write: the page's first <main>, else its only <article>, else all of it - [from, to).
+	static void ContentRange(const Core::Array<HtmlToken>& tokens, int64& from, int64& to) {
+		from = 0;
+		to = tokens.Count();
+		const char*[2] names = { "main", "article" };
+		for (int64 n = 0; n < 2; ++n) {
+			int64 starts = 0;
+			int64 first = -1;
+			int64 last = -1;
+			int64 depth = 0;
+			for (int64 i = 0; i < tokens.Count(); ++i) {
+				if (tokens[i].m_Name.View() != names[n]) continue;
+				if (tokens[i].m_Kind == TokenKind::Start) {
+					if (depth == 0) {
+						starts += 1;
+						if (first < 0) first = i;
+					}
+					depth += 1;
+				}
+				else if (tokens[i].m_Kind == TokenKind::End && depth > 0) {
+					depth -= 1;
+					if (depth == 0 && last < 0 && first >= 0) last = i;
+				}
+			}
+			if (first >= 0 && (n == 0 || starts == 1)) {
+				from = first;
+				to = last < 0 ? tokens.Count() : last + 1;
+				return;
+			}
+		}
+	}
+
+	Core::String HtmlToText(Core::StringView html, Core::StringView pageUrl, bool plain, Core::String& title) {
+		Core::Array<HtmlToken> tokens = Tokenize(html);
+		PageConverter converter;
+		converter.m_Writer.m_Plain = plain;
+		converter.m_Base = Core::String(pageUrl);
+		title = Core::String();
+		for (int64 i = 0; i < tokens.Count(); ++i) {
+			const HtmlToken& token = tokens[i];
+			if (token.m_Kind != TokenKind::Start) continue;
+			if (token.m_Name.View() == "base" && !AttributeOf(token, "href").IsEmpty()) converter.m_Base = ResolveUrl(pageUrl, AttributeOf(token, "href"));
+			if (token.m_Name.View() == "title" && title.IsEmpty() && i + 1 < tokens.Count() && tokens[i + 1].m_Kind == TokenKind::Text) title = Spaced(tokens[i + 1].m_Text.View());
+		}
+		int64 from = 0;
+		int64 to = 0;
+		ContentRange(tokens, from, to);
+		for (int64 i = from; i < to; ++i) {
+			const HtmlToken& token = tokens[i];
+			if (token.m_Kind == TokenKind::Start) converter.Start(token);
+			else if (token.m_Kind == TokenKind::End) converter.End(token.m_Name.View());
+			else converter.Text(token.m_Text.View());
+		}
+		return converter.Finish();
+	}
+}

@@ -1,0 +1,421 @@
+include "Background.ch"
+
+namespace Ai
+{
+	const int32 c_BackgroundReadPollMs = 250;
+	const int64 c_BackgroundDrainMs = 1000;    // after the command exits, what its children still write
+
+	Core::String TaskDuration(int64 ms) {
+		Core::StringBuilder out;
+		const int64 seconds = ms / 1000;
+		if (seconds < 120) {
+			out.AppendInt(seconds);
+			out.Append(" s");
+		}
+		else if (seconds < 7200) {
+			out.AppendInt(seconds / 60);
+			out.Append(" min");
+		}
+		else {
+			out.AppendInt(seconds / 3600);
+			out.Append(" h");
+		}
+		return out.ToString();
+	}
+
+	// --- The chat's tasks (Chats members) ----------------------------------------------------------------------------
+
+	BackgroundTask* Chats::StartBackground(Chat* chat, Core::StringView kind, Core::StringView title) {
+		BackgroundTask* task = new BackgroundTask();
+		task->m_TaskId = chat->NextId("bg-");
+		task->m_Kind = Core::String(kind);
+		task->m_Title = Core::String(title);
+		task->m_State = Core::String("running");
+		task->m_StartedMs = ChatNowMs();
+		int64 at = 0;
+		while (chat->m_Background.Count() >= c_BackgroundKept && at < chat->m_Background.Count()) {
+			if (!chat->m_Background[at]->Running() && chat->m_Background[at]->m_Told) chat->m_Background.RemoveAt(at);
+			else at += 1;
+		}
+		chat->m_Background.Push(task);
+		BackgroundChanged(chat);
+		return task;
+	}
+
+	void Chats::BackgroundChanged(Chat* chat) {
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("tasks"));
+		chat->WriteBackground(data);
+		data.EndObject();
+		Publish(chat, "background.changed", data.View());
+		Changed(chat);
+	}
+
+	bool Chats::HasUntold(const Chat* chat) const {
+		for (BackgroundTask* task : chat->m_Background)
+			if (!task->Running() && !task->m_Told) return true;
+		return false;
+	}
+
+	static void AppendTold(Core::StringBuilder& out, const BackgroundTask* task) {
+		out.Append("- ");
+		out.Append(task->m_TaskId.View());
+		out.Append(" (");
+		out.Append(task->m_Kind.View());
+		out.Append(": ");
+		out.Append(task->m_Title.View());
+		if (!task->m_AgentChatId.IsEmpty()) {
+			out.Append(", chat ");
+			out.Append(task->m_AgentChatId.View());
+		}
+		out.Append("): ");
+		out.Append(task->m_Summary.View());
+		out.Append(" after ");
+		out.Append(TaskDuration(task->m_EndedMs - task->m_StartedMs).View());
+		Core::String tail = TailOf(task->m_Output.View(), c_BackgroundToldLines, c_BackgroundToldBytes);
+		if (tail.IsEmpty()) {
+			out.Append(".\n");
+			return;
+		}
+		out.Append(task->m_Kind == "agent" ? ". Its answer:\n" : ". The end of its output:\n");
+		out.Append(tail.View());
+		if (!tail.View().EndsWith(Core::StringView("\n"))) out.Append("\n");
+	}
+
+	Core::String Chats::TellEnded(Chat* chat) {
+		Core::StringBuilder out;
+		for (BackgroundTask* task : chat->m_Background) {
+			if (task->Running() || task->m_Told) continue;
+			if (out.ByteLength() == 0) out.Append("Background tasks you started have ended:\n");
+			AppendTold(out, task);
+			task->m_Told = true;
+		}
+		if (out.ByteLength() == 0) return Core::String();
+		out.Append("background_status <id> shows more of one. Check what an agent did before you rely on it.");
+		BackgroundChanged(chat);
+		return out.ToString();
+	}
+
+	void Chats::StopBackground(BackgroundTask* task) {
+		task->m_StopAsked = true;
+		if (task->m_AgentChatId.IsEmpty()) return;
+		for (Chat* agent : m_Chats)
+			if (agent->m_ChatId == task->m_AgentChatId && agent->m_Run) {
+				agent->m_Run->m_Cancelled = true;
+				agent->m_Run->m_Wake.NotifyAll();
+			}
+	}
+
+	void Chats::BackgroundEnded(Chat* chat, BackgroundTask* task) {
+		BackgroundChanged(chat);
+		WakeForBackground(chat);
+	}
+
+	// An idle chat starts a turn to hear of its ended tasks; a running one hears them at its next step, a paused or
+	// waiting one with its next turn.
+	void Chats::WakeForBackground(Chat* chat) {
+		if (chat->m_Run || chat->m_State != ChatState::Idle) return;
+		Core::String told = TellEnded(chat);
+		if (told.IsEmpty()) return;
+		OwnerMessage message;
+		message.m_Text = told;
+		StartTurn(chat, message, 0, "", "background");
+	}
+
+	// --- Running them ------------------------------------------------------------------------------------------------
+
+	// Reads a background command's output into its task and the AI output source until it ends, runs out of time or is
+	// stopped, then ends the task.
+	static void FollowCommand(Chats* chats, Chat* chat, BackgroundTask* task, Process::Child* child, Core::String wsId, int64 seconds) {
+		IED::PluginContext* context = chats->m_Context;
+		const int64 deadline = ChatNowMs() + seconds * 1000;
+		int64 exitedAt = -1;
+		Core::String stopped;
+		char8[16384] buffer;
+		while (child->HasOutput()) {
+			bool stop = false;
+			{
+				IED::HostLock guard(*context);
+				stop = task->m_StopAsked;
+			}
+			if (stop || ChatNowMs() > deadline) {
+				stopped = Core::String(stop ? "stopped" : "ran out of time and was stopped");
+				child->Kill();
+				break;
+			}
+			if (exitedAt < 0 && child->Wait(0) != Process::kTimedOut) exitedAt = ChatNowMs();
+			if (exitedAt >= 0 && ChatNowMs() - exitedAt > c_BackgroundDrainMs) break;
+			Process::Stream from;
+			const int64 got = child->ReadAny((void*)&buffer[0], 16384, from, c_BackgroundReadPollMs);
+			if (got > 0) {
+				Core::StringView text = Core::StringView(&buffer[0], got);
+				context->Output(wsId.View(), Core::StringView(c_AiOutputSource), text);
+				IED::HostLock guard(*context);
+				task->m_Output = IED::BoundedText(task->m_Output.View(), text, c_BackgroundKeptBytes);
+			}
+			else if (got != Process::kTimedOut && got != 0) break;
+		}
+		const int64 code = child->Wait(5000);
+		IED::HostLock guard(*context);
+		task->m_EndedMs = ChatNowMs();
+		task->m_ExitCode = stopped.IsEmpty() ? code : -1;
+		task->m_State = Core::String(!stopped.IsEmpty() ? "stopped" : code == 0 ? "done" : "failed");
+		Core::StringBuilder summary;
+		if (stopped.IsEmpty()) {
+			summary.Append("exit ");
+			summary.AppendInt(code);
+		}
+		else summary.Append(stopped.View());
+		task->m_Summary = summary.ToString();
+		chats->BackgroundEnded(chat, task);
+	}
+
+	static ToolInvocation* HeldCall(const ToolInvocation& call, BackgroundTask* task) {
+		ToolInvocation* held = new ToolInvocation();
+		held->m_Context = call.m_Context;
+		held->m_Ws = call.m_Ws;
+		held->m_Chat = call.m_Chat;
+		held->m_CallId = call.m_CallId;
+		held->m_Args = call.m_Args;
+		held->m_Cancelled = &task->m_StopAsked;
+		return held;
+	}
+
+	static Core::String Started(const BackgroundTask* task, Core::StringView what) {
+		Core::StringBuilder out;
+		out.Append("Started background task ");
+		out.Append(task->m_TaskId.View());
+		out.Append(": ");
+		out.Append(what);
+		out.Append(". Go on with other work: you are told when it ends. background_status ");
+		out.Append(task->m_TaskId.View());
+		out.Append(" shows it so far, background_wait waits for it, background_stop stops it.");
+		return out.ToString();
+	}
+
+	static ToolOutcome StartCommand(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		ToolCommand command = ShellCommandOf(call, c_BackgroundDefaultSeconds, c_BackgroundMostSeconds);
+		BackgroundTask* task = nullptr;
+		{
+			IED::HostLock guard(*call.m_Context);
+			task = chats->StartBackground(chat, Core::StringView("command"), command.m_Shell.View());
+		}
+		Core::String problem;
+		Process::Child* child = StartToolCommand(*HeldCall(call, task), command, problem);
+		if (!child) {
+			IED::HostLock guard(*call.m_Context);
+			task->m_State = Core::String("failed");
+			task->m_Summary = problem;
+			task->m_EndedMs = ChatNowMs();
+			task->m_Told = true;
+			chats->BackgroundChanged(chat);
+			return ToolError(problem.View());
+		}
+		Core::String wsId = call.m_Ws.m_Id;
+		const int64 seconds = command.m_Seconds;
+		call.m_Context->StartThread([chats, chat, task, child, wsId, seconds]() { FollowCommand(chats, chat, task, child, wsId, seconds); });
+		ToolOutcome outcome = ToolResult(Started(task, (Core::String("`") + command.m_Shell.View() + "`").View()).View(), (task->m_TaskId + " started").View());
+		outcome.m_Source = Core::String("Output: AI");
+		return outcome;
+	}
+
+	static Core::String TaskTitle(const ToolInvocation& call) {
+		Core::String title = call.m_Args.Member("task").IsValid() ? Core::String(call.m_Args.Member("task").AsView()) : Core::String("build");
+		if (call.m_Args.Member("project").IsValid()) title = (title + " of ") + call.m_Args.Member("project").AsView();
+		return title;
+	}
+
+	static ToolOutcome StartBuild(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		BackgroundTask* task = nullptr;
+		{
+			IED::HostLock guard(*call.m_Context);
+			task = chats->StartBackground(chat, Core::StringView("task"), TaskTitle(call).View());
+		}
+		ToolInvocation* held = HeldCall(call, task);
+		call.m_Context->StartThread([chats, chat, task, held]() {
+			ToolOutcome outcome = BuildRun(*held);
+			IED::HostLock guard(*held->m_Context);
+			task->m_EndedMs = ChatNowMs();
+			task->m_ExitCode = outcome.m_IsError ? 1 : 0;
+			task->m_State = Core::String(task->m_StopAsked ? "stopped" : outcome.m_IsError ? "failed" : "done");
+			const int64 lineEnd = outcome.m_Content.View().IndexOf('\n', 0);
+			task->m_Summary = Core::String(lineEnd < 0 ? outcome.m_Content.View() : outcome.m_Content.View().Substring(0, lineEnd));
+			task->m_Output = IED::BoundedText(Core::StringView(""), outcome.m_Content.View(), c_BackgroundKeptBytes);
+			chats->BackgroundEnded(chat, task);
+		});
+		ToolOutcome outcome = ToolResult(Started(task, (Core::String("the ") + TaskTitle(call).View() + " task").View()).View(), (task->m_TaskId + " started").View());
+		outcome.m_Source = Core::String("Output: Build");
+		return outcome;
+	}
+
+	// --- The tools ---------------------------------------------------------------------------------------------------
+
+	static void StatusLine(Core::StringBuilder& out, const BackgroundTask* task) {
+		out.Append(task->m_TaskId.View());
+		out.Append(" ");
+		out.Append(task->m_State.View());
+		out.Append(" ");
+		out.Append(TaskDuration((task->Running() ? ChatNowMs() : task->m_EndedMs) - task->m_StartedMs).View());
+		out.Append(": ");
+		out.Append(task->m_Kind.View());
+		out.Append(" ");
+		out.Append(task->m_Title.View());
+		if (!task->m_AgentChatId.IsEmpty()) {
+			out.Append(" (chat ");
+			out.Append(task->m_AgentChatId.View());
+			out.Append(")");
+		}
+		if (!task->Running() && !task->m_Summary.IsEmpty()) {
+			out.Append(" - ");
+			out.Append(task->m_Summary.View());
+		}
+		out.Append("\n");
+	}
+
+	// One task with its output's end; an ended one is told by this.
+	static Core::String TaskText(BackgroundTask* task) {
+		Core::StringBuilder out;
+		StatusLine(out, task);
+		Core::String tail = TailOf(task->m_Output.View(), c_ShellTailLines, c_ShellTailBytes);
+		if (!tail.IsEmpty()) {
+			out.Append(task->m_Kind == "agent" ? "Its answer:\n" : task->Running() ? "Its output so far (the end):\n" : "The end of its output:\n");
+			out.Append(tail.View());
+		}
+		else if (task->Running()) out.Append("No output yet.");
+		if (!task->Running()) task->m_Told = true;
+		return out.ToString();
+	}
+
+	static ToolPlan BackgroundPlan(const ToolInvocation& call, const char* kind) {
+		ToolPlan plan;
+		Core::StringView id = call.m_Args.Member("id").AsView();
+		plan.m_Subject = ((Core::String(kind) + "(") + (id.IsEmpty() ? Core::StringView("*") : id)) + ")";
+		plan.m_Summary = Core::String(kind) + (id.IsEmpty() ? Core::String() : Core::String(" ") + id);
+		return plan;
+	}
+
+	static ToolOutcome StatusRun(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		IED::HostLock guard(*call.m_Context);
+		Core::StringView id = call.m_Args.Member("id").AsView();
+		if (!id.IsEmpty()) {
+			BackgroundTask* task = chat->FindBackground(id);
+			if (!task) return ToolError((Core::String("background_status: this chat has no task ") + id).View());
+			Core::String text = TaskText(task);
+			chats->BackgroundChanged(chat);
+			return ToolResult(text.View(), (task->m_TaskId + " " + task->m_State.View()).View());
+		}
+		if (chat->m_Background.IsEmpty()) return ToolResult(Core::StringView("This chat has started no background task."), Core::StringView("none"));
+		Core::StringBuilder out;
+		int64 running = 0;
+		for (BackgroundTask* task : chat->m_Background) {
+			StatusLine(out, task);
+			if (task->Running()) running += 1;
+		}
+		Core::StringBuilder preview;
+		preview.AppendInt(running);
+		preview.Append(" running of ");
+		preview.AppendInt(chat->m_Background.Count());
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// The task `id` names; else one that ended and was not told, else the first running one; null with `problem`, which
+	// lists how the chat's tasks went when none runs.
+	static BackgroundTask* Awaited(Chat* chat, Core::StringView id, Core::String& problem) {
+		if (!id.IsEmpty()) {
+			BackgroundTask* task = chat->FindBackground(id);
+			if (!task) problem = Core::String("background_wait: this chat has no task ") + id;
+			return task;
+		}
+		for (BackgroundTask* task : chat->m_Background)
+			if (!task->Running() && !task->m_Told) return task;
+		for (BackgroundTask* task : chat->m_Background)
+			if (task->Running()) return task;
+		Core::StringBuilder out;
+		out.Append("background_wait: no background task is running");
+		out.Append(chat->m_Background.IsEmpty() ? "." : "; they ended:\n");
+		for (BackgroundTask* task : chat->m_Background) StatusLine(out, task);
+		problem = out.ToString();
+		return nullptr;
+	}
+
+	static ToolOutcome WaitRun(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		const int64 seconds = call.m_Args.Member("seconds").IsValid() ? call.m_Args.Member("seconds").AsInt() : c_BackgroundWaitDefaultSeconds;
+		const int64 deadline = ChatNowMs() + (seconds < 1 || seconds > c_BackgroundWaitMostSeconds ? c_BackgroundWaitMostSeconds : seconds) * 1000;
+		Core::StringView id = call.m_Args.Member("id").AsView();
+		for (;;) {
+			{
+				IED::HostLock guard(*call.m_Context);
+				Core::String problem;
+				BackgroundTask* task = Awaited(chat, id, problem);
+				if (!task) return ToolError(problem.View());
+				if (!task->Running()) {
+					Core::String text = TaskText(task);
+					chats->BackgroundChanged(chat);
+					return ToolResult(text.View(), (task->m_TaskId + " " + task->m_State.View()).View());
+				}
+				if (*call.m_Cancelled) return ToolError(Core::StringView("background_wait: the run was stopped"));
+				if (ChatNowMs() > deadline) {
+					Core::StringBuilder out;
+					out.Append("background_wait: ");
+					out.Append(task->m_TaskId.View());
+					out.Append(" is still running; wait again, or go on - you are told when it ends.\n");
+					out.Append(TaskText(task).View());
+					return ToolResult(out.View(), (task->m_TaskId + " still running").View());
+				}
+			}
+			Threading::Thread::Sleep(c_BackgroundPollNs);
+		}
+	}
+
+	static ToolOutcome StopRun(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		IED::HostLock guard(*call.m_Context);
+		Core::StringView id = call.m_Args.Member("id").AsView();
+		BackgroundTask* task = chat->FindBackground(id);
+		if (!task) return ToolError((Core::String("background_stop: this chat has no task ") + id).View());
+		if (!task->Running()) return ToolResult((task->m_TaskId + " already ended: " + task->m_Summary.View()).View(), (task->m_TaskId + " ended").View());
+		chats->StopBackground(task);
+		return ToolResult((Core::String("Stopping ") + task->m_TaskId.View() + "; you are told when it has ended.").View(), (Core::String("stopping ") + task->m_TaskId.View()).View());
+	}
+
+	static ToolSpec* BackgroundTool(const char* name, const char* description, const char* parameters, ToolClass toolClass, const char* kind) {
+		ToolSpec* spec = new ToolSpec();
+		spec->m_Name = Core::String(name);
+		spec->m_Description = Core::String(description);
+		spec->m_Parameters = Core::String(parameters);
+		spec->m_ToolClass = toolClass;
+		spec->m_ParallelSafe = toolClass == ToolClass::Read;
+		spec->m_InPlan = true;
+		spec->m_Deferred = true;
+		spec->m_Group = Core::String("background");
+		Core::String subject = Core::String(kind);
+		spec->m_Plan = [subject](const ToolInvocation& call) -> ToolPlan { return BackgroundPlan(call, subject.CStr()); };
+		return spec;
+	}
+
+	// The tool `name` takes `background`: its foreground run otherwise.
+	static void Backgrounded(ToolRegistry& registry, const char* name, func<ToolOutcome(const ToolInvocation& call)> start) {
+		ToolSpec* spec = registry.Find(Core::StringView(name));
+		if (!spec) return;
+		ToolRunner foreground = spec->m_Run;
+		spec->m_Run = [foreground, start](const ToolInvocation& call) -> ToolOutcome { return call.m_Args.Member("background").AsBool() ? start(call) : foreground(call); };
+	}
+
+	void AddBackgroundTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
+		Backgrounded(registry, "shell_run", [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StartCommand(chats, chat, call); });
+		Backgrounded(registry, "build_run", [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StartBuild(chats, chat, call); });
+		ToolSpec* status = BackgroundTool("background_status", "This chat's background tasks (shell_run or build_run with background, agent_run): each one's state and time; with id, one task with the end of its output (an agent's answer). Example: background_status({\"id\": \"bg-3\"})",
+			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
+		status->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StatusRun(chats, chat, call); };
+		registry.Add(status);
+		ToolSpec* wait = BackgroundTool("background_wait", "Wait for a background task to end (id), or for any of this chat's; returns how it ended with the end of its output. seconds: at most 600, 120 by default. You are told when a task ends anyway: wait only when you cannot go on without it. Example: background_wait({\"id\": \"bg-3\", \"seconds\": 300})",
+			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"seconds\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 600}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
+		wait->m_ParallelSafe = false;
+		wait->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, chat, call); };
+		registry.Add(wait);
+		ToolSpec* stop = BackgroundTool("background_stop", "Stop one of this chat's background tasks: a command is killed, a task cancelled, an agent's turn stopped. Example: background_stop({\"id\": \"bg-3\"})",
+			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}}, \"required\": [\"id\"], \"additionalProperties\": false}", ToolClass::Meta, "background.stop");
+		stop->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StopRun(chats, chat, call); };
+		registry.Add(stop);
+	}
+}

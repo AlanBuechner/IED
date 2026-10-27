@@ -1,0 +1,62 @@
+// host/recent: the recent projects - newest first, opened again moves up, favorites kept past the limit, paths matched
+// without regard to case or separators, and the file read back.
+
+include "host/Recent.ch"
+
+static Core::String PathOf(int64 n) {
+	Core::StringBuilder path;
+	path.Append("C:/Work/P");
+	path.AppendInt(n);
+	return path.ToString();
+}
+
+[test("server.recent")]
+class RecentTests {
+	[test("order_and_limit")]
+	public static void TestOrderAndLimit() {
+		FS::Path file = FS::TempDirectory() / "ied-recent-test" / "recent.json";
+		FS::RemoveAll(file.Parent().CStr());
+		Ied::RecentProjects recent;
+		Core::String error;
+		recent.Load(file.View(), error);
+		assert_true(error.IsEmpty() && recent.All().IsEmpty(), "none yet");
+		assert_true(recent.Opened(Core::StringView("C:/Work/Game"), Core::StringView("Game"), Core::StringView("folder"), 100), "written");
+		recent.Opened(Core::StringView("C:/Work/Tools/Tools.iedsln"), Core::StringView("Tools"), Core::StringView("solution"), 200);
+		assert_se("Tools", recent.All()[0].m_Name.CStr(), "newest first");
+		recent.Opened(Core::StringView("c:\\work\\game\\"), Core::StringView("Game"), Core::StringView("folder"), 300);
+		assert_eq(2, recent.All().Count(), "the same folder, in other case and separators");
+		assert_true(recent.All()[0].m_Opened == 300 && recent.All()[0].m_Path == "c:\\work\\game\\", "moved up, as it was opened now");
+		assert_true(recent.SetFavorite(Core::StringView("C:/Work/Tools/Tools.iedsln"), true), "a favorite");
+		assert_true(!recent.SetFavorite(Core::StringView("C:/Elsewhere"), true), "only a listed one");
+		for (int64 i = 0; i < Ied::c_RecentLimit + 5; ++i) recent.Opened(PathOf(i).View(), Core::StringView("P"), Core::StringView("folder"), 1000 + i);
+		assert_eq(Ied::c_RecentLimit + 1, recent.All().Count(), "the limit, and the favorite besides");
+		assert_true(recent.Contains(Core::StringView("C:/Work/Tools/Tools.iedsln")), "the favorite stays");
+		assert_true(!recent.Contains(Core::StringView("C:/Work/Game")) && !recent.Contains(PathOf(0).View()), "the oldest went");
+		assert_true(recent.Forget(PathOf(Ied::c_RecentLimit + 4).View()) && !recent.Contains(PathOf(Ied::c_RecentLimit + 4).View()), "forgotten");
+		Ied::RecentProjects again;
+		again.Load(file.View(), error);
+		assert_eq(recent.All().Count(), again.All().Count(), "read back");
+		assert_true(again.All()[Ied::c_RecentLimit - 1].m_Favorite && again.All()[0].m_Opened == 1000 + Ied::c_RecentLimit + 3, "favorites and times kept");
+		FS::RemoveAll(file.Parent().CStr());
+	}
+
+	[test("json_and_bad_file")]
+	public static void TestJsonAndBadFile() {
+		FS::Path folder = FS::TempDirectory() / "ied-recent-json-test";
+		FS::RemoveAll(folder.CStr());
+		FS::MakeDirectories(folder.CStr());
+		Ied::RecentProjects recent;
+		Core::String error;
+		recent.Load((folder / "recent.json").View(), error);
+		recent.Opened(folder.View(), Core::StringView("here"), Core::StringView("folder"), 5);
+		recent.Opened(Core::StringView("C:/no/such/folder/anywhere"), Core::StringView("gone"), Core::StringView("folder"), 6);
+		Core::String json = recent.Json();
+		assert_true(json.View().StartsWith(Core::StringView("[{\"path\":\"C:/no/such/folder/anywhere\",\"name\":\"gone\",\"kind\":\"folder\",\"opened\":6,\"favorite\":false,\"exists\":false}")), json.CStr());
+		assert_true(json.View().Contains(Core::StringView("\"name\":\"here\",\"kind\":\"folder\",\"opened\":5,\"favorite\":false,\"exists\":true")), "a folder that is there");
+		FS::WriteFileAtomically((folder / "broken.json").CStr(), (const void*)"{\"projects\": 3}", 15);
+		Ied::RecentProjects broken;
+		broken.Load((folder / "broken.json").View(), error);
+		assert_true(!error.IsEmpty() && broken.All().IsEmpty(), "not a recent projects file: said, and empty");
+		FS::RemoveAll(folder.CStr());
+	}
+}

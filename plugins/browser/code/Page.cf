@@ -1,0 +1,117 @@
+include "Page.ch"
+
+namespace Browser
+{
+	Core::String ScaleText(int32 percent) {
+		Core::StringBuilder text;
+		text.AppendInt(percent / 100);
+		if (percent % 100 != 0) {
+			text.AppendByte('.');
+			int32 rest = percent % 100;
+			text.AppendByte((char8)('0' + rest / 10));
+			if (rest % 10 != 0) text.AppendByte((char8)('0' + rest % 10));
+		}
+		return text.ToString();
+	}
+
+	Core::String NewPageId() {
+		uint8[6] bytes;
+		Platform::RandomBytes((void*)&bytes[0], 6);
+		Core::StringBuilder id;
+		id.Append("pg-");
+		for (int32 i = 0; i < 6; ++i) id.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return id.ToString();
+	}
+
+	Core::String Page::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("pageId", m_PageId.View());
+		json.Field("wsId", m_WsId.View());
+		json.Field("url", m_Url.View());
+		json.Field("title", m_Title.View());
+		json.BoolField("loading", m_Loading);
+		json.BoolField("canGoBack", m_CanGoBack);
+		json.BoolField("canGoForward", m_CanGoForward);
+		json.IntField("width", m_Width);
+		json.IntField("height", m_Height);
+		json.RawField("scale", ScaleText(m_ScalePercent).View());
+		json.Field("opener", m_Opener.View());
+		json.Field("parent", m_Parent.View());
+		json.BoolField("live", m_Live);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ConsoleJson(const ConsoleEntry& entry) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("seq", entry.m_Seq);
+		json.Field("level", entry.m_Level.View());
+		json.Field("text", entry.m_Text.View());
+		json.Field("url", entry.m_Url.View());
+		json.IntField("line", entry.m_Line);
+		json.IntField("time", entry.m_Time);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String NetworkJson(const NetworkEntry& entry) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("seq", entry.m_Seq);
+		json.Field("method", entry.m_Method.View());
+		json.Field("url", entry.m_Url.View());
+		json.IntField("status", entry.m_Status);
+		json.Field("error", entry.m_Error.View());
+		json.Field("type", entry.m_Type.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Page::SnapshotJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("page", SummaryJson().View());
+		json.Key(Core::StringView("console"));
+		json.BeginArray();
+		for (const ConsoleEntry& entry : m_Console) json.Raw(ConsoleJson(entry).View());
+		json.EndArray();
+		json.Key(Core::StringView("network"));
+		json.BeginArray();
+		for (const NetworkEntry& entry : m_Network) json.Raw(NetworkJson(entry).View());
+		json.EndArray();
+		json.RawField("lastAction", m_LastAction.IsEmpty() ? Core::StringView("null") : m_LastAction.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The newest `kept` of `ring`, once it holds a quarter more than that.
+	template<T> static void Trim(Core::Array<T>& ring, int64 kept) {
+		if (ring.Count() <= kept + kept / 4) return;
+		Core::Array<T> newest;
+		for (int64 i = ring.Count() - kept; i < ring.Count(); ++i) newest.Push(ring[i]);
+		ring = newest;
+	}
+
+	ConsoleEntry& Page::AddConsole(ConsoleEntry entry) {
+		m_ConsoleSeq += 1;
+		entry.m_Seq = m_ConsoleSeq;
+		m_Console.Push(entry);
+		Trim(m_Console, c_ConsoleKept);
+		return m_Console[m_Console.Count() - 1];
+	}
+
+	NetworkEntry& Page::AddNetwork(NetworkEntry entry) {
+		m_NetworkSeq += 1;
+		entry.m_Seq = m_NetworkSeq;
+		m_Network.Push(entry);
+		Trim(m_Network, c_NetworkKept);
+		return m_Network[m_Network.Count() - 1];
+	}
+
+	void Page::TrackRequest(Core::StringView requestId, Core::StringView described) {
+		if (m_Requests.Count() >= c_RequestsTracked) m_Requests.Clear();
+		m_Requests.At(Core::String(requestId)) = Core::String(described);
+	}
+}

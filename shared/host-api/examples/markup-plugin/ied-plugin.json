@@ -1,7 +1,7 @@
 // Example (docs/26): a project's own language as a plugin. A game that writes its dialogue in a markup language of
 // its own commits this folder as .ied/plugins/dialogue/; whoever opens the trusted workspace gets the language, its
 // icons, the places its compiler prints, a Nuke preset for the projects written in it, a skill and a system-message
-// section for the AI, a tool that checks a file (a command), and one in C4 (code/dialogue.cf, compiled by IED's script
+// section for the AI, a tool that checks a file (a command), and one in C4 (code/Dialogue.cf, compiled by IED's script
 // host when the plugin loads) that lists a file's speakers. A Nuke driver under nuke/ would build the projects
 // written in it (docs/26 section 6).
 {

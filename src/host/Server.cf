@@ -1,0 +1,174 @@
+include "Server.ch"
+
+namespace Ied
+{
+	Core::String NewEpoch() {
+		uint8[6] bytes;
+		Platform::RandomBytes((void*)&bytes[0], 6);
+		Core::StringBuilder text;
+		text.Append("e-");
+		for (int32 i = 0; i < 6; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	void Server::Init(ServerConfig config) {
+		this.m_Config = config;
+		this.m_Config.m_DataDir = DataFolder(config);
+		this.m_Config.m_HomeDir = HomeFolder(config);
+		this.m_Config.m_StaticDir = StaticFolder(this.m_Config);
+		this.m_Config.m_AppDataDir = AppDataFolder(this.m_Config);
+		this.m_Config.m_StateDir = StateFolder(this.m_Config);
+		this.m_Config.m_LogPath = LogPath(this.m_Config);
+		m_StartedMs = Platform::UnixTimeNs() / 1000000;
+		m_LogFile.Open(this.m_Config.m_LogPath.View());
+		LogStart();
+		Core::String trustError;
+		m_Trust.Load((FS::Path(this.m_Config.m_AppDataDir.View()) / "trust.json").View(), trustError);
+		if (!trustError.IsEmpty()) Log(trustError.View());
+		Core::String recentError;
+		m_Recent.Load((FS::Path(this.m_Config.m_DataDir.View()) / "recent.json").View(), recentError);
+		if (!recentError.IsEmpty()) Log(recentError.View());
+		Core::String schemaError;
+		if (!m_Schemas.Load(this.m_Config.m_HomeDir.View(), schemaError)) Log((Core::String("the host API schemas are missing: ") + schemaError.View()).View());
+		m_Epoch = NewEpoch();
+		Server* self = this;
+		// Opening the configured workspaces reaches settings, plugins and documents: they exist first.
+		m_Presence = new Presence(self);
+		m_Auth = new Auth(self);
+		m_Plugins = new PluginHost(self);
+		m_Code = new CodeRuntime(self);
+		m_Settings = new Settings(self);
+		m_Documents = new Documents(self);
+		m_Blobs = new Blobs();
+		m_Outputs = new Outputs(self);
+		m_Layouts = new Layouts(self);
+		m_Trash = new Trash(self);
+		m_Search = new Search(self);
+		m_Diagnostics = new Diagnostics(self);
+		m_Lsp = new LspPool(self);
+		m_Tasks = new Tasks(self);
+		m_Breakpoints = new Breakpoints(self);
+		m_Debugger = new Debugger(self);
+		m_Tools = new Tools(self);
+		m_Projects = new ProjectTemplates(self);
+		m_ProjectManager = new ProjectManager(self);
+		if (IsMaster()) {
+			m_Servers = new WorkspaceServers(self);
+			m_Proxy = new Proxy(self);
+		}
+		else m_Master = new MasterLink(this.m_Config.m_MasterControl.View());
+		m_LogThread = Threading::Thread::Run([self]() { self->m_LogPump.Run(self); });
+		// From here on the log pump, the git thread and each workspace's watcher once it opens reach the services under the
+		// lock.
+		Threading::LockGuard guard(m_Lock);
+		if (!this.m_Config.m_RestartedAfter.IsEmpty()) Log((Core::String("restarted after: ") + this.m_Config.m_RestartedAfter.View()).View());
+		m_Workspaces = new Workspaces(self);
+		if (config.m_TestHooks) m_TestHooks = new TestHooks(self);
+	}
+
+	Core::String LogStamp(int64 unixNs) {
+		Platform::CalendarTime now = Platform::LocalCalendar(unixNs);
+		Core::StringBuilder stamp;
+		stamp.AppendByte('[');
+		stamp.AppendIntBase(now.hour, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(now.minute, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(now.second, 10, 2);
+		stamp.Append("] ");
+		return stamp.ToString();
+	}
+
+	void Server::Log(Core::StringView line) {
+		Core::String stamped = LogStamp(Platform::UnixTimeNs()) + line;
+		if (!m_Config.m_Quiet) Platform::WriteError(((Core::String("[ied] ") + stamped.View()) + "\n").View());
+		m_LogFile.Write(line);
+		m_LogPump.Push(stamped.View());
+	}
+
+	// The first line of a run in logs/server.log: which server, and where its state and install are.
+	void Server::LogStart() {
+		Core::StringBuilder line;
+		line.Append("start: ied-server ");
+		line.Append(m_Config.m_Version.View());
+		if (!IsMaster()) {
+			line.Append(", workspace server ");
+			line.Append(m_Config.m_WsId.View());
+			line.Append(" for ");
+			line.Append(m_Config.m_Workspaces[0].View());
+		}
+		line.Append(" (");
+		line.Append(Platform::ExecutablePath().View());
+		line.Append("), data ");
+		line.Append(m_Config.m_DataDir.View());
+		line.Append(", home ");
+		line.Append(m_Config.m_HomeDir.View());
+		if (m_Config.m_Relaunched) line.Append(", relaunched");
+		m_LogFile.Write(line.View());
+	}
+
+	void LogPump::Push(Core::StringView line) {
+		Threading::LockGuard guard(m_Lock);
+		m_Pending.Push(Core::String(line));
+		m_Ready.NotifyOne();
+	}
+
+	void LogPump::Run(Server* server) {
+		for (;;) {
+			Core::Array<Core::String> lines;
+			{
+				Threading::LockGuard guard(m_Lock);
+				while (m_Pending.IsEmpty()) m_Ready.Wait(m_Lock);
+				lines = m_Pending;
+				m_Pending.Clear();
+			}
+			Threading::LockGuard serverGuard(server->m_Lock);
+			for (const Core::String& line : lines) server->m_Outputs->Log(line.View());
+		}
+	}
+
+	bool Server::RecordTrust(const FS::Path& root, bool trusted) {
+		if (IsMaster()) {
+			if (!m_Trust.Set(root, trusted)) return false;
+			m_Auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(root.View()).View()).View());
+			m_Workspaces->TrustSaid(root, trusted);
+			return true;
+		}
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("root", root.View());
+		params.BoolField("trusted", trusted);
+		params.EndObject();
+		Core::String result;
+		Core::String problem;
+		if (!m_Master->Call(&m_Lock, Core::StringView("master.trust"), params.View(), result, problem)) {
+			Log((Core::String("the trust choice did not reach the master: ") + problem.View()).View());
+			return false;
+		}
+		m_Trust.Remember(root, trusted);
+		return true;
+	}
+
+	void Server::RemoveSession(Session* session) {
+		for (int64 i = 0; i < m_Sessions.Count(); ++i)
+			if (m_Sessions[i] == session) { m_Sessions.RemoveAt(i); return; }
+	}
+
+	void Server::Restart() {
+		Core::Array<Session*> closing;
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (m_TestHooks) m_TestHooks->OnRestart();
+			m_Epoch = NewEpoch();
+			m_Hub.ClearRings();
+			m_Rpc.ClearOps();
+			closing = m_Sessions;
+			for (int64 i = 0; i < closing.Count(); ++i) closing[i]->Push(ByeFrame("server-restart").View());
+		}
+		for (int64 i = 0; i < closing.Count(); ++i) closing[i]->FlushAndClose(1001, "server-restart");
+		Core::StringBuilder line;
+		line.Append("simulated restart; new epoch ");
+		line.Append(m_Epoch.View());
+		Log(line.View());
+	}
+}
