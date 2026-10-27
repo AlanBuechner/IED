@@ -45,7 +45,7 @@
 		"settingsPages": [
 			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },
 			{ "id": "ied.chat.groups", "page": "AI", "title": "Model Groups", "view": "ModelGroupsSettings", "keys": ["ai.groups", "ai.defaultGroup"] },
-			{ "id": "ied.chat.claude", "page": "AI", "title": "Claude", "view": "ClaudeSettings", "keys": ["ai.claude.command", "ai.claude.usageRefreshMinutes"] }
+			{ "id": "ied.chat.claude", "page": "AI", "title": "Claude", "view": "ClaudeSettings", "keys": ["ai.claude.command", "ai.claude.usageRefreshMinutes", "ai.claude.paceDays", "ai.claude.workDays"] }
 		],
 		"activities": [
 			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "documents": ["chat", "browser"], "emptyWell": ["ied.chat.new"], "newTab": "ied.chat.new" }

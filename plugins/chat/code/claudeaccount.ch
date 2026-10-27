@@ -39,15 +39,11 @@ namespace Ai
 		public void TookRateLimit(const Serialization::DomNode& info);
 		// Inside the host lock: what `claude auth status` said as a session started.
 		public void TookAuth(bool signedIn, Core::StringView method);
-		// Inside the host lock: a turn on Claude `model` met a usage limit. Unless the window the CLI said refused it holds it
-		// back already, the model's pool is used up until `untilMs` (0: until the plan says) - the shared one, or the window of
-		// its own a model metered apart (Fable) has.
-		public void MetLimit(Core::StringView model, int64 untilMs);
-		// Inside the host lock: when Claude `model` frees - the windows that limit it, used up, and the usage limits its turns
-		// met - or 0 when it is free; "" for the shared pool, the models without a window of their own.
-		public int64 BlockedUntil(Core::StringView model, int64 nowMs) const;
+		// The time a weekly window's pace counts (ai.claude.paceDays, ai.claude.workDays): every day, or the work days; every
+		// day without a plugin context.
+		public PaceDays Days() const;
 		// {claude: {offered, configured, cli: {asked, path, version, signIn, authMethod, subscription, signingIn, installing},
-		// refreshing, blockedUntilMs, nowMs, chains: WriteChains, usage: WriteUsage}}
+		// refreshing, nowMs, chains: WriteChains, usage: WriteUsage}}
 		public Core::String SnapshotJson();
 		// Whether ai.models names a claude-code profile.
 		public bool Configured() const;
@@ -57,8 +53,6 @@ namespace Ai
 		public Core::String cliVersion;
 		public Core::String signIn;          // signed_in, signed_out; empty before the CLI was asked
 		public Core::String authMethod;      // as `claude auth status` says (claude.ai, api_key, ...)
-		public int64 blockedUntilMs;         // a usage limit a turn on a model of the shared pool met
-		public Core::HashMap<Core::String, int64> apartBlockedUntilMs;   // one a turn on a model metered apart met, by its window's model
 		public bool refreshing;
 		public bool asked;                   // the CLI looked for and asked at least once since the server started
 		public bool signingIn;               // a sign-in window is open and watched

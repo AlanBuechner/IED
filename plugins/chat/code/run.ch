@@ -126,9 +126,10 @@ namespace Ai
 		private void TrackModified(Core::StringView path, int64 plus, int64 minus);
 
 		// --- runclaude.cf: Claude through the owner's CLI (docs/04 "The Claude Code provider") ---
-		// The candidates in the order the plan's usage leaves them (docs/04 "Pacing"): a Claude model over its place's pace
-		// after the rest, a used-up one left out; why the last went, when every candidate did. The lock is held.
-		private Core::String ChooseClaude();
+		// The candidates in the order the plan's pace leaves them (docs/04 "Pacing"): a Claude model over its place's pace
+		// after the rest. None is left out for usage IED reads as used up: Claude's own refusal moves a turn on
+		// (ClaudeBlocked). The lock is held.
+		private void ChooseClaude();
 		// The model the candidate in use runs on Claude.
 		private Core::String ClaudeModel() const;
 		// One step: what the session has not seen sent, the CLI's stream read to the response's end.
@@ -150,9 +151,9 @@ namespace Ai
 		private void ClaudeContext(const Serialization::DomNode& usage);
 		// Reads the query to its result.
 		private void DrainClaude();
-		// Claude cannot serve the turn (`claudeBlocked`: a usage limit, no subscription sign-in): the next candidate that is
-		// not Claude - or after a usage limit a Claude one with room left (Fable, metered apart) - or a pause saying why. The
-		// lock is held.
+		// Claude cannot serve the turn (`claudeBlocked`): after the CLI refused it for a usage limit, the chain's next
+		// candidate, Claude or not; after no subscription sign-in or no CLI, the next that is not Claude; or a pause saying
+		// why. The next turn asks Claude again. The lock is held.
 		private void ClaudeBlocked();
 		// The call's result to the CLI's tools/call for it; the step's `last` call's carries the messages that came meanwhile.
 		private void AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome, bool last);

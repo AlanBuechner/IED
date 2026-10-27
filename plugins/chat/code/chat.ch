@@ -305,6 +305,8 @@ namespace Ai
 		public int64 counter;
 
 		public Turn* Current() const { return turns.IsEmpty() ? nullptr : turns[turns.Count() - 1]; }
+		// It runs on a single model of its own, not a group (docs/04 "One choice per chat"): no group's effort applies.
+		public bool RunsAlone() const { return !pinnedModel.IsEmpty() && group.IsEmpty() && agent.IsEmpty(); }
 		public Core::String NextId(const char* prefix);
 		public Core::String Topic() const { return Core::String("chat:") + chatId.View(); }
 		public Core::String SummaryJson() const;

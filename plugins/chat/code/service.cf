@@ -139,7 +139,7 @@ namespace Ai
 		RoleModel role;
 		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, ws, role);
 		group = GroupOf(context, chat, ws);
-		roleEffort = role.effort;
+		roleEffort = chat->RunsAlone() ? Core::String() : role.effort;
 		if (candidates.IsEmpty()) return Core::String();
 		Core::Array<ChainPlace*> order = TurnOrder(PlacesOf(candidates, role, chat->pinnedModel.View(), *claude, ChatNowMs()));
 		return order.IsEmpty() ? candidates[0]->name : order[0]->model;

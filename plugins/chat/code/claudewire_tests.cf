@@ -108,69 +108,77 @@ class ClaudeWireTests {
 
 	[test("pace")]
 	public static void TestPace() {
+		const Ai::PaceDays days = Ai::EveryDay();
 		Ai::ClaudeUsage* usage = Plan();
 		Ai::UsageWindow* half = Window(*usage, "five_hour", 50, Ai::kSessionWindowMs / 2);
-		assert_true(Ai::Through(*half, kNow) > 0.49 && Ai::Through(*half, kNow) < 0.51, "half way through");
-		assert_true(Ai::Pace(*half, kNow) > 0.99 && Ai::Pace(*half, kNow) < 1.01, "half used half way: on the even line");
+		assert_true(Ai::Through(*half, days, kNow) > 0.49 && Ai::Through(*half, days, kNow) < 0.51, "half way through");
+		assert_true(Ai::Pace(*half, days, kNow) > 0.99 && Ai::Pace(*half, days, kNow) < 1.01, "half used half way: on the even line");
 		Ai::UsageWindow* early = Window(*usage, "seven_day", 2, Ai::kWeekWindowMs - 3600 * 1000);
-		assert_true(Ai::Pace(*early, kNow) == 0.0, "an hour into the week with 2% used counts as no pace");
+		assert_true(Ai::Pace(*early, days, kNow) == 0.0, "an hour into the week with 2% used counts as no pace");
 		Ai::UsageWindow* reset = Window(*usage, "seven_day_opus", 90, -1000);
-		assert_true(Ai::Pace(*reset, kNow) == 0.0 && !Ai::UsedUp(*reset, kNow), "a window past its reset");
+		assert_true(Ai::Pace(*reset, days, kNow) == 0.0 && !Ai::UsedUp(*reset, kNow), "a window past its reset");
 	}
 
 	[test("pace_against_a_target")]
 	public static void TestPaceAgainst() {
+		const Ai::PaceDays days = Ai::EveryDay();
 		Core::String why;
 		Ai::ClaudeUsage* busy = Plan();
 		Window(*busy, "five_hour", 20, Ai::kSessionWindowMs / 2);
 		Window(*busy, "seven_day", 60, Ai::kWeekWindowMs / 2);
-		const double both = Ai::PaceAgainst(*busy, Text("opus"), Text("both"), kNow, why);
+		const double both = Ai::PaceAgainst(*busy, days, Text("opus"), Text("both"), kNow, why);
 		assert_true(both > 1.19 && both < 1.21, "the week's 1.2x is the worse");
 		assert_se("the week is at 1.20x pace", why.CStr(), "why");
-		const double session = Ai::PaceAgainst(*busy, Text("opus"), Text("session"), kNow, why);
+		const double session = Ai::PaceAgainst(*busy, days, Text("opus"), Text("session"), kNow, why);
 		assert_true(session > 0.39 && session < 0.41 && why.View().Contains(Text("5-hour session")), "against the session only");
 		Ai::ClaudeUsage* opusWeek = Plan();
 		Window(*opusWeek, "seven_day", 10, Ai::kWeekWindowMs / 2);
 		Window(*opusWeek, "seven_day_opus", 90, Ai::kWeekWindowMs / 2);
-		assert_true(Ai::PaceAgainst(*opusWeek, Text("opus"), Text("week"), kNow, why) > 1.79 && why.View().Contains(Text("Opus week is at 1.80x")), "its own week counts for the week");
-		assert_true(Ai::PaceAgainst(*opusWeek, Text("sonnet"), Text("week"), kNow, why) < 0.21, "not for another model");
+		assert_true(Ai::PaceAgainst(*opusWeek, days, Text("opus"), Text("week"), kNow, why) > 1.79 && why.View().Contains(Text("Opus week is at 1.80x")), "its own week counts for the week");
+		assert_true(Ai::PaceAgainst(*opusWeek, days, Text("sonnet"), Text("week"), kNow, why) < 0.21, "not for another model");
 		Ai::ClaudeUsage unknown;
-		assert_true(Ai::PaceAgainst(unknown, Text("opus"), Text("both"), kNow, why) == 0.0 && why.IsEmpty(), "usage unknown: no pace");
+		assert_true(Ai::PaceAgainst(unknown, days, Text("opus"), Text("both"), kNow, why) == 0.0 && why.IsEmpty(), "usage unknown: no pace");
 		assert_true(Ai::IsPacingTarget(Text("week")) && !Ai::IsPacingTarget(Text("month")), "targets");
 	}
 
-	[test("a_model_metered_apart_runs_while_the_week_is_used_up")]
-	public static void TestMeteredApart() {
+	// Owner, 2026-10-26: the shared weekly limit applies to Fable too; Fable's own week is a limit on top of it.
+	[test("a_model_scoped_week_adds_to_the_shared_one")]
+	public static void TestModelScopedWeek() {
+		const Ai::PaceDays days = Ai::EveryDay();
 		Ai::ClaudeAccount* account = new Ai::ClaudeAccount();
 		Ai::ClaudeUsage& usage = account->usage;
 		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"five_hour\": {\"utilization\": 30, \"resets_at\": \"2025-10-22T18:20:00Z\"}, \"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}, \"model_scoped\": [{\"display_name\": \"Fable\", \"utilization\": 20, \"resets_at\": \"2025-10-25T16:20:00Z\"}]}}"), usage, kNow);
 		Ai::UsageWindow* session = usage.Find(Text("five_hour"));
 		Ai::UsageWindow* week = usage.Find(Text("seven_day"));
 		Ai::UsageWindow* fable = usage.Find(Text("model:fable"));
-		assert_true(fable && fable->separate && !week->separate, "a model_scoped window is metered apart");
-		assert_true(Ai::Limits(usage, *week, Text("opus")) && !Ai::Limits(usage, *week, Text("claude-fable-5-1")), "the shared week limits opus, not fable");
-		assert_true(Ai::Limits(usage, *session, Text("fable")) && Ai::Limits(usage, *fable, Text("fable")) && !Ai::Limits(usage, *fable, Text("opus")), "the session limits every model, fable's week fable alone");
+		assert_true(fable && fable->separate && !week->separate, "a model_scoped window is Fable's own week");
+		assert_true(Ai::Limits(usage, *week, Text("opus")) && Ai::Limits(usage, *week, Text("claude-fable-5-1")), "the shared week limits every model, Fable too");
+		assert_true(Ai::Limits(usage, *session, Text("fable")) && Ai::Limits(usage, *fable, Text("fable")) && !Ai::Limits(usage, *fable, Text("opus")), "the session limits every model, Fable's week Fable alone");
 		Core::String why;
-		assert_true(Ai::PaceAgainst(usage, Text("fable"), Text("week"), kNow, why) < 0.5 && why.View().Contains(Text("Fable week")), "fable is paced by its own week");
-		assert_true(account->BlockedUntil(Text("opus"), kNow) == week->resetsAtMs && account->BlockedUntil(Text("fable"), kNow) == 0, "the used-up week holds opus back until it resets, not fable");
-		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->state == Ai::PlaceState::Use, "fable's place is in use");
-		Ai::ChainPlace* opus = Ai::PlaceNow(*Claude("claude-opus", "opus"), Ai::PaceLimit(), false, *account, kNow);
-		assert_true(opus->state == Ai::PlaceState::UsedUp && opus->why.View().Contains(Text("frees in 3 d")), "opus's is used up");
-		account->apartBlockedUntilMs.At(Core::String("fable")) = kNow + 3600 * 1000;
-		assert_true(account->BlockedUntil(Text("fable"), kNow) == kNow + 3600 * 1000 && account->BlockedUntil(Text(""), kNow) == week->resetsAtMs, "a usage limit a fable turn met holds back fable alone");
-		account->apartBlockedUntilMs.Remove(Core::String("fable"));
-		account->blockedUntilMs = kNow + (int64)5 * 24 * 3600 * 1000;
-		assert_true(account->BlockedUntil(Text("sonnet"), kNow) == account->blockedUntilMs && account->BlockedUntil(Text("fable"), kNow) == 0, "one a turn of the shared pool met, that pool");
+		assert_true(Ai::PaceAgainst(usage, days, Text("fable"), Text("week"), kNow, why) > 1.7 && why.View().StartsWith(Text("the week is at 1.75x")), "the used-up shared week paces Fable: the worse of the two");
+		week->utilization = 40;
+		fable->utilization = 80;
+		assert_true(Ai::PaceAgainst(usage, days, Text("fable"), Text("week"), kNow, why) > 1.39 && why.View().StartsWith(Text("Fable week is at 1.40x")), "and Fable's own week when it is the worse");
+		assert_true(Ai::PaceAgainst(usage, days, Text("opus"), Text("week"), kNow, why) < 0.71, "not another model's");
+		week->utilization = 100;
+
+		// Owner, 2026-10-26: IED's reading of the usage never leaves Claude out of a turn; Claude's own refusal does.
+		assert_true(Ai::PlaceNow(*Claude("claude-opus", "opus"), Ai::PaceLimit(), false, *account, kNow)->state == Ai::PlaceState::Use, "a used-up week leaves Opus in the turn: Claude says whether it has room");
+		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->state == Ai::PlaceState::Use, "and Fable");
+		Ai::PaceLimit paced;
+		paced.max = 1.0;
+		paced.target = Core::String("both");
+		Ai::ChainPlace* opus = Ai::PlaceNow(*Claude("claude-opus", "opus"), paced, false, *account, kNow);
+		assert_true(opus->state == Ai::PlaceState::Over && opus->why.View().Contains(Text("the week is at 1.75x pace, over its 1.00x")), "a place with a pace still steps aside while the plan runs ahead of it");
+		assert_true(Ai::PlaceNow(*Claude("claude-opus", "opus"), paced, true, *account, kNow)->state == Ai::PlaceState::Use, "a pinned model never");
 
 		Ai::TakeRateLimit(Parse("{\"status\": \"rejected\", \"rateLimitType\": \"seven_day_overage_included\", \"resetsAt\": 1761400000, \"unifiedWindows\": {\"seven_day_overage_included\": {\"utilization\": 1.0, \"resetsAt\": 1761400000}}}"), usage, kNow);
-		assert_true(usage.windows.Count() == 3 && Ai::UsedUp(*fable, kNow) && Ai::RejectedWindow(usage, kNow) == fable, "the CLI's Fable limit is fable's model_scoped window");
-		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->why.View().StartsWith(Text("Fable week is used up")), "its own week used up says so");
+		assert_true(usage.windows.Count() == 3 && Ai::UsedUp(*fable, kNow) && Ai::RejectedWindow(usage, kNow) == fable, "the CLI's Fable limit is Fable's model_scoped window");
+		assert_true(Ai::PlaceNow(*Claude("claude-fable", "fable"), Ai::PaceLimit(), false, *account, kNow)->state == Ai::PlaceState::Use, "its own week refused: the next turn asks Claude again all the same");
 		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"five_hour\": {\"utilization\": 31, \"resets_at\": \"2025-10-22T18:20:00Z\"}, \"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}}}"), usage, kNow);
 		assert_true(usage.Find(Text("model:fable")) == fable && fable->separate, "an answer that names no model_scoped windows keeps those known");
 		Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"seven_day\": {\"utilization\": 100, \"resets_at\": \"2025-10-25T16:20:00Z\"}, \"model_scoped\": []}}"), usage, kNow);
-		assert_true(!usage.Find(Text("model:fable")) && account->BlockedUntil(Text("claude-fable-5-1"), kNow) == 0 && account->BlockedUntil(Text("sonnet"), kNow) > 0, "an empty list: none, and fable is metered apart all the same, as the CLI has it");
-		assert_se("fable", Ai::ApartModel(usage, Text("claude-fable-5-1")).CStr(), "fable's pool");
-		assert_true(Ai::ApartModel(usage, Text("opus")).IsEmpty(), "opus is of the shared pool");
+		assert_true(!usage.Find(Text("model:fable")) && Ai::Limits(usage, *usage.Find(Text("seven_day")), Text("claude-fable-5-1")), "an empty list: none, and the shared week limits Fable all the same");
 
 		Ai::ClaudeUsage eventOnly;
 		Ai::TakeRateLimit(Parse("{\"status\": \"allowed_warning\", \"rateLimitType\": \"seven_day_overage_included\", \"utilization\": 0.9, \"resetsAt\": 1761400000}"), eventOnly, kNow);
@@ -182,14 +190,14 @@ class ClaudeWireTests {
 	public static void TestTurnOrder() {
 		Core::Array<Ai::ChainPlace*> places;
 		places.Push(Place("claude-opus", Ai::PlaceState::Over, 1.85));
-		places.Push(Place("claude-sonnet", Ai::PlaceState::UsedUp, 0));
 		places.Push(Place("claude-haiku", Ai::PlaceState::Over, 1.23));
 		places.Push(Place("qwen", Ai::PlaceState::Use, 0));
+		places.Push(Place("claude-sonnet", Ai::PlaceState::Use, 0));
 		Core::Array<Ai::ChainPlace*> order = Ai::TurnOrder(places);
-		assert_true(order.Count() == 3 && order[0]->model == "qwen" && order[1]->model == "claude-haiku" && order[2]->model == "claude-opus",
-			"in use first, then over their pace, the least over first (haiku 1.23x past its 1.5x before opus 1.85x past its 1.0x); used up left out");
+		assert_true(order.Count() == 4 && order[0]->model == "qwen" && order[1]->model == "claude-sonnet" && order[2]->model == "claude-haiku" && order[3]->model == "claude-opus",
+			"in use first, in order, then over their pace, the least over first (haiku 1.23x past its 1.5x before opus 1.85x past its 1.0x); none left out");
 		Core::Array<Ai::ChainPlace*> passed = Ai::PassedOver(places, order);
-		assert_true(passed.Count() == 3 && passed[0]->model == "claude-opus" && passed[2]->model == "claude-haiku", "every place ahead of qwen that is not in use is passed over");
+		assert_true(passed.Count() == 2 && passed[0]->model == "claude-opus" && passed[1]->model == "claude-haiku", "every place ahead of qwen over its pace is passed over");
 	}
 
 	[test("only_the_places_ahead_of_the_turns_model_are_passed_over")]
@@ -197,7 +205,7 @@ class ClaudeWireTests {
 		Core::Array<Ai::ChainPlace*> pinned;
 		pinned.Push(Place("fake", Ai::PlaceState::Use, 0));
 		pinned.Push(Place("claude-opus", Ai::PlaceState::Over, 1.85));
-		pinned.Push(Place("claude-sonnet", Ai::PlaceState::UsedUp, 0));
+		pinned.Push(Place("claude-sonnet", Ai::PlaceState::Over, 1.4));
 		assert_true(Ai::PassedOver(pinned, Ai::TurnOrder(pinned)).IsEmpty(), "a pinned model in use: the group's fallbacks behind it are not skipped");
 		Core::Array<Ai::ChainPlace*> over;
 		over.Push(Place("claude-opus", Ai::PlaceState::Over, 1.85));
@@ -206,9 +214,9 @@ class ClaudeWireTests {
 		Core::Array<Ai::ChainPlace*> passed = Ai::PassedOver(over, Ai::TurnOrder(over));
 		assert_true(passed.Count() == 2 && passed[0]->model == "claude-opus" && passed[1]->model == "claude-sonnet", "every place over its pace: the least over is used, not skipped");
 		Core::Array<Ai::ChainPlace*> none;
-		none.Push(Place("claude-opus", Ai::PlaceState::UsedUp, 0));
+		none.Push(Place("claude-opus", Ai::PlaceState::Over, 1.2));
 		none.Push(Place("qwen", Ai::PlaceState::Use, 0));
-		none.Push(Place("claude-haiku", Ai::PlaceState::UsedUp, 0));
+		none.Push(Place("claude-haiku", Ai::PlaceState::Over, 1.1));
 		passed = Ai::PassedOver(none, Core::Array<Ai::ChainPlace*>());
 		assert_true(passed.Count() == 2 && passed[1]->model == "claude-haiku", "no order: every place not in use");
 	}

@@ -5,6 +5,7 @@
 
 include "chat.ch"
 include "completion.ch"
+include "workweek.ch"
 
 namespace Ai
 {
@@ -13,7 +14,6 @@ namespace Ai
 	const char* kClaudeToolPrefix = "mcp__ied__";
 	const char* kClaudeServerName = "ied";
 	const int64 kHistoryTextBytes = 48 * 1024;   // of the earlier turns a new session is told
-	const char* kApartModel = "fable";           // the CLI's overage-included model, metered on a weekly "Fable limit" of its own
 
 	// One window of the plan's limits.
 	class UsageWindow
@@ -21,7 +21,7 @@ namespace Ai
 		public Core::String id;          // five_hour, seven_day, seven_day_opus, seven_day_sonnet, model:<name>
 		public Core::String label;       // "Session (5 h)", "Week", "Opus week"
 		public Core::String model;       // a per-model window's model in lower case ("opus", "fable"); empty for the shared ones
-		public bool separate;            // its model is metered here instead of in the shared week (model_scoped: Fable's)
+		public bool separate;            // a model_scoped window: a weekly limit of its model's own on top of the shared week (Fable's)
 		public double utilization;       // percent used, 0-100 (past 100 when usage ran over)
 		public int64 resetsAtMs;         // 0 when unknown
 		public int64 lengthMs;
@@ -58,28 +58,31 @@ namespace Ai
 	UsageWindow* RejectedWindow(const ClaudeUsage& usage, int64 nowMs);
 	// An ISO 8601 time ("2026-10-22T19:00:00.5+00:00", "...Z") as Unix milliseconds; 0 when it is not one.
 	int64 IsoToMs(Core::StringView text);
-	// How far through `window` is at `nowMs`, 0 to 1 (1 when its reset is unknown, 0 once it has reset).
-	double Through(const UsageWindow& window, int64 nowMs);
-	// The window's pace: its use against the even line that runs out at its reset (1.0); 0 early in a window that is
-	// barely used, and once it has reset.
-	double Pace(const UsageWindow& window, int64 nowMs);
+	// Whether `window` is a weekly one, whose pace `days` may count the work week of.
+	bool IsWeekly(const UsageWindow& window);
+	// Whether `days` counts only the work days of `window`: a weekly window, the work week on with a work day named.
+	bool CountsWorkDays(const UsageWindow& window, const PaceDays& days);
+	// How far through `window` is at `nowMs`, 0 to 1 (1 when its reset is unknown, 0 once it has reset), in the time `days`
+	// counts: a weekly window's work time so far over its work time in all, when the work week is on (CountsWorkDays).
+	double Through(const UsageWindow& window, const PaceDays& days, int64 nowMs);
+	// The window's pace: its use against the even line that runs out at its reset (1.0), through as `days` counts it; 0
+	// early in a window that is barely used, and once it has reset.
+	double Pace(const UsageWindow& window, const PaceDays& days, int64 nowMs);
 	// Whether the window is used up and has not reset yet.
 	bool UsedUp(const UsageWindow& window, int64 nowMs);
 	// The weekly window of `model` alone: opus and sonnet their own, another a model_scoped one its name contains.
 	UsageWindow* ModelWindow(const ClaudeUsage& usage, Core::StringView model);
-	// The model a window of its own meters Claude `model` as ("fable"): its model_scoped window's, or before one is known
-	// kApartModel's, as the CLI has it; empty for a model of the shared pool.
-	Core::String ApartModel(const ClaudeUsage& usage, Core::StringView model);
-	// Whether `window` limits Claude `model`: its own window does and another model's does not; the 5-hour session limits
-	// every model, the shared week every one not metered apart (ApartModel).
+	// Whether `window` limits Claude `model`: the 5-hour session and the shared week limit every model, a model's own
+	// window (seven_day_opus, a model_scoped one) that model alone.
 	bool Limits(const ClaudeUsage& usage, const UsageWindow& window, Core::StringView model);
-	// {known, available, plan, status, limitedBy, limitResetsAtMs, extra?, updatedMs, error?, windows: [{id, label, model?,
-	// separate?, utilization, resetsAtMs, lengthMs, through, pace}]} - the clients' and the AI's view.
-	void WriteUsage(IED::JsonWriter& json, const ClaudeUsage& usage, int64 nowMs);
+	// {known, available, plan, status, limitedBy, limitResetsAtMs, extra?, updatedMs, error?, paceDays, windows: [{id, label,
+	// model?, separate?, utilization, resetsAtMs, lengthMs, through, pace, usedUp, workWeek?, daysOff?: [{startMs, endMs,
+	// at}]}]} - the clients' and the AI's view, through and pace as `days` counts them.
+	void WriteUsage(IED::JsonWriter& json, const ClaudeUsage& usage, const PaceDays& days, int64 nowMs);
 
 	// The pace of `model` against `target` (session, week, both) now: the worst of the windows that limit and pace it, `why`
 	// which ("the week is at 1.85x pace"; docs/04 "Pacing"); 0 and empty when the usage is unknown or no window paces it.
-	double PaceAgainst(const ClaudeUsage& usage, Core::StringView model, Core::StringView target, int64 nowMs, Core::String& why);
+	double PaceAgainst(const ClaudeUsage& usage, const PaceDays& days, Core::StringView model, Core::StringView target, int64 nowMs, Core::String& why);
 	// Whether `target` is one pacing knows.
 	bool IsPacingTarget(Core::StringView target);
 	// When `atMs` comes, from `nowMs`, as a note says it: "in 2 h 14 min", "in 35 min", "in 3 d 4 h", "now".
@@ -150,9 +153,9 @@ namespace Ai
 	// ai.models and ai.groups (their JSON) with Claude set up (docs/04 "Setting it up"): the Claude profiles added - claude-opus,
 	// claude-sonnet, claude-haiku, claude-fable; one already there of a name kept as it is - and a `claude` group unless one is
 	// there, its primary chain stepping down as the plan runs ahead of pace: claude-opus (1.0), claude-sonnet (1.25),
-	// claude-haiku (1.5), claude-fable (1.0: metered apart, so against its own week and the session), then the default
-	// group's primary when that is not Claude (else the first model that is not); `defaultGroup` the ai.defaultGroup value
-	// (empty: the first group).
+	// claude-haiku (1.5), claude-fable (1.0: the worse of the shared windows and its own week), then the default group's
+	// primary when that is not Claude (else the first model that is not); `defaultGroup` the ai.defaultGroup value (empty:
+	// the first group).
 	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut);
 	// Whether the ai.models value (JSON) names a claude-code profile.
 	bool HasClaudeModel(Core::StringView models);

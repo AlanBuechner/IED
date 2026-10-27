@@ -121,16 +121,12 @@ namespace Ai
 		for (const Core::String& problem : problems) context->Log(problem.View());
 		Core::String groups = context->Setting(Core::StringView("ai.groups"), WsId(ws));
 		candidates = TurnCandidates(models, groups.View(), turn->group.View(), chat->agent.View(), Core::StringView(ChatModeName(turn->mode)), chat->pinnedModel.View(), role);
+		if (chat->RunsAlone()) role.effort = Core::String();
 		rules = ReadPermissionRules(context->Setting(Core::StringView("ai.permissions"), WsId(ws)).View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		maxSteps = Serialization::ReadJson(context->Setting(Core::StringView("ai.maxSteps"), WsId(ws)).View(), *doc).root.AsInt();
 		if (maxSteps < 0) maxSteps = 0;
-		const bool configured = !candidates.IsEmpty();
-		Core::String claudeOut = ChooseClaude();
-		if (configured && candidates.IsEmpty()) {
-			Pause(Core::StringView("usage_limit"), claudeOut.View());
-			return false;
-		}
+		ChooseClaude();
 		if (!candidates.IsEmpty()) turn->model = candidates[0]->name;
 		if (candidates.IsEmpty()) {
 			UiNote(Core::StringView("no_model"), Core::StringView(kClaudeSubscriptionOffered ? "No model is set up for this chat: sign in to Claude with your Pro or Max subscription in Settings > AI > Claude, or add a model to ai.models (an OpenAI-compatible endpoint) in Settings." : "No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));

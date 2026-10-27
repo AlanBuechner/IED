@@ -222,6 +222,20 @@
 			"x-ied-tiers": ["app", "solution"],
 			"description": "How long an AI write waits for the language server's diagnostics of the file (and for a starting server) before it returns without them; problems_list has them later."
 		},
+		"ai.claude.paceDays": {
+			"enum": ["week", "workweek"],
+			"default": "week",
+			"x-ied-tiers": ["app"],
+			"description": "What a weekly window's pace counts (docs/04 Pacing): week - all seven days; workweek - only the work days (ai.claude.workDays), midnight to midnight in the time zone of the computer IED runs on, so a weekend does not count and the pace stands still through it. The bars still show the whole week, with a mark where the even line stands through each weekend. The 5-hour session counts every hour either way."
+		},
+		"ai.claude.workDays": {
+			"type": "array",
+			"items": { "enum": ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] },
+			"uniqueItems": true,
+			"default": ["mon", "tue", "wed", "thu", "fri"],
+			"x-ied-tiers": ["app"],
+			"description": "The work days a weekly window's pace counts when ai.claude.paceDays is workweek; none named: every day."
+		},
 		"ai.tools.loadAll": {
 			"type": "boolean",
 			"default": false,

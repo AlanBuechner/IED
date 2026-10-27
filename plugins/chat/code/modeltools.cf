@@ -11,7 +11,7 @@ namespace Ai
 		out.Append("%");
 	}
 
-	static void WindowLine(Core::StringBuilder& out, const UsageWindow* window, int64 now) {
+	static void WindowLine(Core::StringBuilder& out, const UsageWindow* window, const PaceDays& days, int64 now) {
 		out.Append("- ");
 		out.Append(window->label.View());
 		out.Append(": ");
@@ -21,34 +21,27 @@ namespace Ai
 			out.Append(", resets ");
 			out.Append(ResetText(window->resetsAtMs, now).View());
 			out.Append("; ");
-			Percent(out, Through(*window, now) * 100.0);
-			out.Append(" through; pace ");
-			out.AppendDouble(Pace(*window, now), 2);
+			Percent(out, Through(*window, days, now) * 100.0);
+			out.Append(CountsWorkDays(*window, days) ? Core::StringView(" through its work days; pace ") : Core::StringView(" through; pace "));
+			out.AppendDouble(Pace(*window, days, now), 2);
 			out.Append("x");
 		}
 		if (window->separate) {
 			out.Append(" (");
 			out.Append(window->model.View());
-			out.Append(" is metered here, apart from the shared week)");
+			out.Append("'s own week, on top of the shared week and the session)");
 		}
 		if (UsedUp(*window, now)) out.Append(" - USED UP");
 		out.Append("\n");
 	}
 
-	// The shared pool used up: when it frees, and the models metered apart that still run.
-	static void BlockedLine(Core::StringBuilder& out, const ClaudeAccount& account, int64 now) {
-		const int64 blocked = account.BlockedUntil(Core::StringView(""), now);
-		if (blocked <= 0) return;
-		out.Append("Claude's shared limits are used up; they free ");
-		out.Append(ResetText(blocked, now).View());
-		for (const UsageWindow* window : account.usage.windows) {
-			if (!window->separate || account.BlockedUntil(window->model.View(), now) > 0) continue;
-			out.Append("; ");
-			out.Append(window->model.View());
-			out.Append(" still runs on ");
-			out.Append(window->label.View());
+	// A window used up keeps no turn from asking Claude (docs/04 "Usage"): what happens instead.
+	static void UsedUpLine(Core::StringBuilder& out, const ClaudeUsage& usage, int64 now) {
+		for (const UsageWindow* window : usage.windows) {
+			if (!UsedUp(*window, now)) continue;
+			out.Append("A window used up does not keep Claude out of a turn: each turn asks Claude first (a plan upgraded mid-week works at once), Claude's own refusal moves it to the next model of its chain, and the next turn asks Claude again.\n");
+			return;
 		}
-		out.Append("\n");
 	}
 
 	static void ProfileLine(Core::StringBuilder& out, const ModelProfile* profile) {
@@ -81,10 +74,12 @@ namespace Ai
 			out.Append(usage.plan.View());
 		}
 		out.Append("\n");
+		const PaceDays days = account.Days();
 		if (!usage.known || !usage.available) out.Append("The plan's usage is not known");
 		else {
-			out.Append("The plan's windows (pace 1.0x lasts exactly to the reset; above it runs out early):\n");
-			for (const UsageWindow* window : usage.windows) WindowLine(out, window, now);
+			out.Append("The plan's windows (pace 1.0x lasts exactly to the reset; above it runs out early");
+			out.Append(days.workWeek ? Core::StringView("; a week's pace counts only its work days, ai.claude.paceDays):\n") : Core::StringView("):\n"));
+			for (const UsageWindow* window : usage.windows) WindowLine(out, window, days, now);
 		}
 		if (!usage.error.IsEmpty()) {
 			out.Append(" (the last ask failed: ");
@@ -92,7 +87,7 @@ namespace Ai
 			out.Append(")");
 		}
 		if (!usage.known || !usage.available) out.Append("\n");
-		BlockedLine(out, account, now);
+		UsedUpLine(out, usage, now);
 		out.Append("Models (ai.models):\n");
 		for (const ModelProfile* profile : models) ProfileLine(out, profile);
 		Core::Array<RoleChain*> chains = ClaudeChains(models, groupsJson, account, now);

@@ -19,9 +19,14 @@ and a week, and some models have a weekly window of their own. Each has a utiliz
 **pace**: its use against the even line that runs out exactly at the reset. 1.00x lasts to the reset; 1.50x runs out with
 a third of the window left; 0.50x leaves half of it unused.
 
-The Opus and Sonnet weeks are parts of the shared week. Fable is **metered apart**: it has a week of its own ("Fable
-week", marked "apart from the shared week" in `ai_usage`), and the shared week used up does not stop it - only the 5-hour
-session and its own week do.
+The 5-hour session and the shared week limit every Claude model. The Opus and Sonnet weeks, and Fable's own week ("Fable
+week"), are limits of that model's on top of them: Fable is stopped by the shared week like the others, and by its own.
+When the owner sets the week's pace to the work week (`ai.claude.paceDays`), a weekly window's pace counts only the work
+days: it stands still over a weekend, and `ai_usage` says "through its work days".
+
+A window used up does not keep Claude out of a turn: every turn asks Claude first (the plan may have been upgraded
+mid-week, or the reading may be off), Claude's own refusal moves the turn to the next model of its chain, and the next
+turn asks Claude again.
 
 `ai_usage` shows every window with its pace and reset, the models of `ai.models`, and for each group chain with a Claude
 model which model a turn uses now and why the ones before it are passed over. Read it before handing out work, and again
@@ -34,14 +39,13 @@ in a long run.
 - **Ahead of pace:** keep the strongest model for the decisions and give routine work - renames, mechanical edits,
   searching, writing tests that follow a pattern - to a helper chat on a cheaper model:
   `chat_create({"title": "Rename the fields", "text": "...", "model": "claude-sonnet"})` or `claude-haiku` for the simplest.
-- **The shared week used up:** Opus, Sonnet and Haiku turns go down their chain until it frees; Fable still runs while its
-  own week has room, so give the work that needs Claude to a chat on `claude-fable`, the rest to a local model, and say so
-  to the owner.
-- **A window used up that stops every Claude model** (the 5-hour session): Claude turns go to the group's fallback (a local
-  model) until it frees; say so to the owner and give the work a local model can do to a chat pinned to it.
+- **A window used up** (the 5-hour session or the shared week): Claude will likely refuse every model it limits - Fable
+  too - and each turn then falls to its chain's local model after Claude says so. Say so to the owner, and give the work a
+  local model can do to a chat pinned to it, rather than waiting on refusals; Claude is asked again each turn, so a plan
+  upgraded meanwhile is used at once.
 - `chat_set_model({"model": "claude-sonnet", "chat": "<id>"})` moves a chat's next turns; `""` gives it back its group's
   model. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
-- A group's chain with paces (the `claude` group's: opus, sonnet, haiku, then fable on its own week) already steps down as
+- A group's chain with paces (the `claude` group's: opus, sonnet, haiku, then fable) already steps down as
   the windows run ahead of pace; pinning is for when you know the work better than the pace does.
 
 ## Not to do

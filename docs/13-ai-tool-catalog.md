@@ -258,7 +258,7 @@ under pace and give routine work a cheaper one (`docs/04` "Pacing", "Switching m
 
 | Tool | Class | Notes |
 |---|---|---|
-| `ai_usage(refresh?)` | read | Claude Code's version and whether it is on the Claude subscription, the plan; each window (the 5-hour session, the week, the per-model weeks): percent used, when it resets, how far through it is, its pace; when Claude frees if it is used up; each `ai.models` profile; each group role whose chain has a Claude model, with every place's pace and state (over its pace, used up) and the model a turn of it uses now (a chat's mode picks the role); this chat's pinned model. `refresh` asks the CLI first. Subject `ai.usage(*)` |
+| `ai_usage(refresh?)` | read | Claude Code's version and whether it is on the Claude subscription, the plan; each window (the 5-hour session, the week, the per-model weeks): percent used, when it resets, how far through it is, its pace (over its work days when ai.claude.paceDays is workweek); that a window used up keeps no turn from asking Claude; each `ai.models` profile; each group role whose chain has a Claude model, with every place's pace and state (in use or over its pace) and the model a turn of it uses now (a chat's mode picks the role); this chat's pinned model. `refresh` asks the CLI first. Subject `ai.usage(*)` |
 | `chat_set_model(model, chat?)` | exec | pins a model of `ai.models` for a chat's next turns (this chat's, or another's by id), `""` back to the group's; the current turn keeps its model. An unknown name fails listing the names. Subject `chat.model(<name>)` |
 
 ### `clipboard` (built, 2026-10-21; deferred)

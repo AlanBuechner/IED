@@ -18,18 +18,14 @@ namespace Ai
 
 	// --- Which Claude ----------------------------------------------------------------------------------------------------
 
-	Core::String TurnRun::ChooseClaude() {
+	void TurnRun::ChooseClaude() {
 		Core::Array<ChainPlace*> places = PlacesOf(candidates, role, chat->pinnedModel.View(), *chats->claude, ClaudeNowMs());
 		Core::Array<ChainPlace*> order = TurnOrder(places);
-		Core::String out;
-		for (const ChainPlace* place : PassedOver(places, order)) {
-			out = place->why;
-			UiNote(Core::StringView("routing"), ((place->model + (place->state == PlaceState::Over ? " skipped for pace: " : " left out: ")) + place->why.View()).View());
-		}
+		for (const ChainPlace* place : PassedOver(places, order))
+			UiNote(Core::StringView("routing"), ((place->model + " skipped for pace: ") + place->why.View()).View());
 		Core::Array<ModelProfile*> kept;
 		for (const ChainPlace* place : order) kept.Push(FindModel(candidates, place->model.View()));
 		candidates = kept;
-		return candidates.IsEmpty() ? out : Core::String();
 	}
 
 	Core::String TurnRun::ClaudeModel() const { return candidates[candidate]->model; }
@@ -321,6 +317,16 @@ namespace Ai
 		else if (subtype == "compact_boundary") UiNote(Core::StringView("context_compressed"), Core::StringView("Claude Code compacted the conversation to fit its context."));
 	}
 
+	// Why a turn moves off a Claude model the CLI refused for its usage limit: what the CLI said, and when it frees as the
+	// refusal or the rate_limit_event before it named it. Inside the host lock.
+	static Core::String RefusalText(Core::StringView said, const ClaudeAccount& account, int64 nowMs) {
+		int64 frees = LimitResetIn(said);
+		UsageWindow* rejected = RejectedWindow(account.usage, nowMs);
+		if (frees <= nowMs && rejected) frees = rejected->resetsAtMs;
+		Core::String text = (Core::String("Claude refused the request: its usage limit is reached (") + said) + ")";
+		return frees > nowMs ? (text + "; it frees ") + ResetText(frees, nowMs).View() : text;
+	}
+
 	// The text of a message's first text block.
 	static Core::String MessageText(const ClaudeLine* line) {
 		Serialization::DomNode content = line->root.Member("message").Member("content");
@@ -338,10 +344,7 @@ namespace Ai
 			result->httpStatus = 429;
 			result->error = (Core::String("Claude's usage limit: ") + said.View());
 			IED::HostLock guard(*context);
-			const Core::String model = ClaudeModel();
-			chats->claude->MetLimit(model.View(), LimitResetIn(said.View()));
-			const int64 now = ClaudeNowMs();
-			claudeBlocked = ((Core::String("Claude's usage limit is reached (") + said.View()) + "); it frees ") + ResetText(chats->claude->BlockedUntil(model.View(), now), now).View();
+			claudeBlocked = RefusalText(said.View(), *chats->claude, ClaudeNowMs());
 			claudeBlockedStop = Core::String("usage_limit");
 			return;
 		}
@@ -393,20 +396,17 @@ namespace Ai
 		claude->Settle(Core::StringView(kClaudeTurnOverNote), false, kClaudeDrainMs, [self](ClaudeLine* line) { self->ClaudeAside(line); });
 	}
 
-	// Whether `profile` can take a turn Claude refused: a model that is not Claude, or after a usage limit a Claude one with
-	// room left (one metered apart from the pool that ran out: Fable).
-	static bool TakesOver(const ModelProfile& profile, bool usageLimit, const ClaudeAccount& account, int64 nowMs) {
-		if (!profile.IsClaude()) return true;
-		return usageLimit && PlaceNow(profile, PaceLimit(), true, account, nowMs)->state != PlaceState::UsedUp;
-	}
+	// Whether `profile` can take a turn Claude could not serve: after a usage limit any model, Claude ones too - Claude
+	// itself says whether it has room for them, whatever IED reads of the usage -; after no sign-in or no CLI, a model that
+	// is not Claude.
+	static bool TakesOver(const ModelProfile& profile, bool usageLimit) { return usageLimit || !profile.IsClaude(); }
 
 	void TurnRun::ClaudeBlocked() {
 		const Core::String why = claudeBlocked;
 		claudeBlocked = Core::String();
 		const bool usageLimit = claudeBlockedStop == "usage_limit";
-		const int64 now = ClaudeNowMs();
 		int64 next = candidate + 1;
-		while (next < candidates.Count() && !TakesOver(*candidates[next], usageLimit, *chats->claude, now)) next += 1;
+		while (next < candidates.Count() && !TakesOver(*candidates[next], usageLimit)) next += 1;
 		if (next >= candidates.Count()) {
 			Pause(claudeBlockedStop.View(), why.View());
 			return;

@@ -1,8 +1,9 @@
 """Claude through the owner's Claude Code CLI (docs/04 "The Claude Code provider") against tools/fake-claude: a turn streams
 and its tool calls run through IED's own path, the session is kept between turns and resumed after a restart, the plan's
-usage reaches the aiusage topic, pacing walks a group's chain, a chat's mode picks its role, a usage limit moves the turn to the fallback, the shared week
-used up leaves Fable (metered apart) running, a pinned model
-wins over the group's, and Claude runs on the subscription only - never an API key."""
+usage reaches the aiusage topic, pacing walks a group's chain (over the work week when ai.claude.paceDays says), a chat's
+mode picks its role, a window IED reads as used up leaves no Claude model out - only Claude's own refusal moves a turn
+down its chain, and the next turn asks Claude again -, the shared week paces Fable too, a pinned model wins over the
+group's, and Claude runs on the subscription only - never an API key."""
 
 import datetime
 import json
@@ -23,7 +24,7 @@ def iso(seconds_from_now):
 
 def plan_usage(session=None, week=None, opus=None, fable=None):
 	"""get_usage's answer for a Max plan: each window (utilization, seconds until it resets) or None; `fable` the
-	model_scoped week Fable is metered on apart from the shared one."""
+	model_scoped week, Fable's own limit on top of the shared one."""
 	def window(value):
 		return {"utilization": value[0], "resets_at": iso(value[1])} if value else None
 	limits = {"five_hour": window(session), "seven_day": window(week), "seven_day_opus": window(opus), "seven_day_sonnet": None}
@@ -386,98 +387,104 @@ class ClaudeUsageTests(ClaudeCase):
 		await self.turn(agent)
 		self.assertEqual("fake", (await self.last_turn(agent))["model"], "Agent mode: implementation, off here, so primary")
 
-	async def test_a_usage_limit_moves_the_turn_to_the_fallback(self):
+	def chain(self, usage, group="claude", role="primary"):
+		return [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == (group, role)][0]
+
+	async def test_a_refusal_moves_the_turn_to_the_fallback_and_the_next_turn_asks_claude_again(self):
+		"""Owner, 2026-10-26: Claude itself rejects a request before a turn moves on, so a plan upgraded mid-week is used at
+		once; IED keeps no block of its own."""
 		await self.use_claude()
-		self.script({"error": "rate_limit", "text": "Claude AI usage limit reached|%d" % (int(time.time()) + 2 * HOUR)})
+		self.script({"error": "rate_limit", "text": "Claude AI usage limit reached|%d" % (int(time.time()) + 2 * HOUR)}, {"blocks": [{"text": "Claude has room again."}]})
 		self.model.queue(text_step("The local model took over."))
 		chat_id, _ = await self.chat()
 		end = await self.turn(chat_id)
 		self.assertEqual("finished", end["stop"], end)
 		turn = await self.last_turn(chat_id)
-		self.assertTrue(any("switched to fake" in n and "usage limit" in n for n in self.notes(turn)), turn["segments"])
+		self.assertEqual("fake", turn["model"])
+		self.assertTrue(any(n.startswith("switched to fake: Claude refused the request: its usage limit is reached") and "it frees in " in n for n in self.notes(turn)), self.notes(turn))
 		usage = await self.client.request("ai.usage", {})
-		self.assertGreater(usage["claude"]["blockedUntilMs"], time.time() * 1000 + HOUR * 1000)
-		self.model.queue(text_step("Still local."))
+		self.assertNotIn("blockedUntilMs", usage["claude"], "IED keeps no block of its own")
+		self.assertEqual("claude-opus", self.chain(usage)["now"])
 		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"])
-		self.assertTrue(any(n.startswith("claude-opus left out") for n in self.notes(await self.last_turn(chat_id))), "the next turn skips Claude until it frees")
+		last = await self.last_turn(chat_id)
+		self.assertEqual("claude-opus", last["model"], "the next turn asks Claude again")
+		self.assertEqual([], self.notes(last), "and leaves nothing out")
+		self.assertEqual("Claude has room again.", self.segments(last, "text")[-1]["text"].strip())
 
 	FABLE = {"claude-fable": {"provider": "claude-code", "model": "fable"}}
 	FABLE_CHAIN = {"claude": {"primary": {"model": "claude-opus", "fallback": ["claude-fable", "fake"]}}}
 
-	async def test_a_used_up_week_leaves_fable_its_own(self):
-		"""Fable is metered on a week of its own (model_scoped; the CLI's "Fable limit"): the shared week used up holds back
-		the other Claude models, not Fable - in a chain or pinned."""
+	async def test_a_used_up_week_leaves_no_claude_model_out(self):
+		"""The week IED reads as used up (100%) keeps no Claude model out of a turn: Claude says whether it has room - a plan
+		upgraded mid-week, or a reading that is off - and the usage is still shown."""
 		await self.use_claude(models=self.FABLE, groups=self.FABLE_CHAIN)
 		self.put("usage.json", plan_usage(session=(30, 4 * HOUR), week=(100, 2 * 24 * HOUR), fable=(20, 2 * 24 * HOUR)))
 		usage = await self.client.request("ai.usage", {"refresh": True})
 		windows = {w["id"]: w for w in usage["claude"]["usage"]["windows"]}
-		self.assertTrue(windows["model:fable"].get("separate") and not windows["seven_day"].get("separate"), windows)
-		chain = [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == ("claude", "primary")][0]
-		self.assertEqual([("claude-opus", "used_up"), ("claude-fable", "use"), ("fake", "use")], [(p["model"], p["state"]) for p in chain["places"]])
-		self.assertEqual("claude-fable", chain["now"])
-		self.assertGreater(usage["claude"]["blockedUntilMs"], time.time() * 1000, "the shared pool is used up")
-		self.script({"blocks": [{"text": "Fable here."}]}, {"blocks": [{"text": "Pinned Fable."}]})
+		self.assertTrue(windows["seven_day"]["usedUp"] and windows["model:fable"].get("separate") and not windows["seven_day"].get("separate"), windows)
+		chain = self.chain(usage)
+		self.assertEqual([("claude-opus", "use"), ("claude-fable", "use"), ("fake", "use")], [(p["model"], p["state"]) for p in chain["places"]])
+		self.assertEqual("claude-opus", chain["now"])
+		self.script({"blocks": [{"text": "Opus, after a plan upgrade."}]})
 		chat_id, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		turn = await self.last_turn(chat_id)
-		self.assertEqual("claude-fable", turn["model"])
-		self.assertTrue(any(n.startswith("claude-opus left out: the plan's usage is used up") for n in self.notes(turn)), self.notes(turn))
+		self.assertEqual(("claude-opus", []), (turn["model"], self.notes(turn)))
 		argv = self.sessions_started()[-1]
-		self.assertEqual("fable", argv[argv.index("--model") + 1])
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"claude": {"primary": {"model": "claude-opus", "fallback": ["fake"]}}}})
-		pinned, _ = await self.chat()
-		await self.client.request("chat.set", {"chatId": pinned, "model": "claude-fable"})
-		self.assertEqual("finished", (await self.turn(pinned))["stop"])
-		self.assertEqual("claude-fable", (await self.last_turn(pinned))["model"], "a chat pinned to Fable runs on it")
+		self.assertEqual("opus", argv[argv.index("--model") + 1])
 
-	async def test_the_setups_chain_goes_to_fable_before_the_local_model(self):
-		"""The setup's chain (opus 1.0, sonnet 1.25, haiku 1.5, fable 1.0, local): Fable takes the turns the shared week is used
-		up or too far ahead of pace for, while its own week is on pace; past that, the local model."""
+	async def test_the_shared_week_paces_fable_too(self):
+		"""Owner, 2026-10-26: the shared weekly limit applies to Fable; its own week is a limit on top. In the setup's chain
+		(opus 1.0, sonnet 1.25, haiku 1.5, fable 1.0, local) Fable's pace is the worse of the two."""
 		await self.use_claude(models=dict(self.FABLE, **self.SONNET, **{"claude-haiku": {"provider": "claude-code", "model": "haiku"}}), groups={"claude": {"primary": {
 			"model": "claude-opus", "pace": {"max": 1.0}, "fallback": [{"model": "claude-sonnet", "pace": {"max": 1.25}}, {"model": "claude-haiku", "pace": {"max": 1.5}},
 			{"model": "claude-fable", "pace": {"max": 1.0}}, "fake"]}}})
 
 		async def now(week, fable):
 			self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=week, fable=fable))
-			usage = await self.client.request("ai.usage", {"refresh": True})
-			return [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == ("claude", "primary")][0]
+			return self.chain(await self.client.request("ai.usage", {"refresh": True}))
 
 		half = int(3.5 * 24 * HOUR)
-		chain = await now(week=(100, half), fable=(10, half))
-		self.assertEqual(("claude-fable", "used_up"), (chain["now"], chain["places"][0]["state"]), chain)
-		self.script({"blocks": [{"text": "Fable, the week being used up."}]})
+		chain = await now(week=(90, half), fable=(10, half))
+		self.assertEqual("fake", chain["now"], "the week at 1.80x: every Claude place over its pace, Fable's too")
+		self.assertEqual(["over", "over", "over", "over", "use"], [p["state"] for p in chain["places"]])
+		self.assertIn("the week is at 1.80x pace", chain["places"][3]["why"])
+		chain = await now(week=(40, half), fable=(90, half))
+		self.assertEqual(("claude-opus", "over"), (chain["now"], chain["places"][3]["state"]), "the week on pace, Fable's own week ahead")
+		self.assertIn("Fable week is at 1.80x pace", chain["places"][3]["why"])
+		await now(week=(100, half), fable=(10, half))
+		self.model.queue(text_step("Local, the week being used up."))
 		chat_id, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
-		self.assertEqual("claude-fable", (await self.last_turn(chat_id))["model"])
-		chain = await now(week=(90, half), fable=(10, half))
-		self.assertEqual("claude-fable", chain["now"], "the week at 1.80x: opus, sonnet and haiku over their pace, Fable on its own at 0.20x")
-		self.assertEqual(["over", "over", "over", "use", "use"], [p["state"] for p in chain["places"]])
-		chain = await now(week=(90, half), fable=(90, half))
-		self.assertEqual(("fake", "over"), (chain["now"], chain["places"][3]["state"]), "Fable's own week at 1.80x too: the local model")
-		self.assertIn("Fable week is at 1.80x pace", chain["places"][3]["why"])
+		turn = await self.last_turn(chat_id)
+		self.assertEqual("fake", turn["model"], "a used-up week runs far ahead of every pace: the chain's paces step aside as before")
+		self.assertEqual(["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"], [n.split(" ")[0] for n in self.notes(turn)])
 
-	async def test_a_weekly_limit_met_on_opus_moves_the_turn_to_fable(self):
-		"""A turn the shared week refuses goes on down the chain to a Claude model metered apart, Fable, before a local one;
-		the next turn starts on Fable."""
+	async def test_a_refusal_goes_down_the_chain_and_claude_says_for_each_model(self):
+		"""A turn Claude refuses goes on to the chain's next model - another Claude model too, which Claude refuses or takes -
+		and the next turn starts on the chain's first again."""
 		await self.use_claude(models=self.FABLE, groups=self.FABLE_CHAIN)
 		self.put("usage.json", plan_usage(session=(30, 4 * HOUR), week=(100, 2 * 24 * HOUR), fable=(10, 2 * 24 * HOUR)))
-		self.script({"rateLimit": {"status": "rejected", "rateLimitType": "seven_day", "resetsAt": int(time.time()) + 2 * 24 * HOUR}, "error": "rate_limit", "text": "You've hit your weekly limit"},
-			{"blocks": [{"text": "Fable took over."}]}, {"blocks": [{"text": "Fable again."}]})
+		refused = {"rateLimit": {"status": "rejected", "rateLimitType": "seven_day", "resetsAt": int(time.time()) + 2 * 24 * HOUR}, "error": "rate_limit", "text": "You've hit your weekly limit"}
+		self.script(refused, refused, {"blocks": [{"text": "Opus again."}]})
+		self.model.queue(text_step("Local took over."))
 		chat_id, _ = await self.chat()
 		end = await self.turn(chat_id)
 		self.assertEqual("finished", end["stop"], end)
 		turn = await self.last_turn(chat_id)
-		self.assertEqual("claude-fable", turn["model"])
-		self.assertTrue(any(n.startswith("switched to claude-fable: Claude's usage limit is reached") for n in self.notes(turn)), self.notes(turn))
-		self.assertIn("fable", [m["request"].get("model") for m in self.received("control_request") if m["request"]["subtype"] == "set_model"], "the session moved to Fable")
-		self.assertEqual("Fable took over.", self.segments(turn, "text")[-1]["text"].strip())
+		self.assertEqual("fake", turn["model"])
+		notes = self.notes(turn)
+		self.assertTrue(any(n.startswith("switched to claude-fable: Claude refused the request") and "it frees in " in n for n in notes), notes)
+		self.assertTrue(any(n.startswith("switched to fake: Claude refused the request") for n in notes), notes)
+		self.assertIn("fable", [m["request"].get("model") for m in self.received("control_request") if m["request"]["subtype"] == "set_model"], "Fable was asked")
+		self.assertEqual("Local took over.", self.segments(turn, "text")[-1]["text"].strip())
 		usage = await self.client.request("ai.usage", {})
-		chain = [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == ("claude", "primary")][0]
-		self.assertEqual("claude-fable", chain["now"])
+		self.assertTrue({w["id"]: w for w in usage["claude"]["usage"]["windows"]}["seven_day"]["usedUp"], "the refusal shows in the usage")
+		self.assertEqual("claude-opus", self.chain(usage)["now"], "and keeps no model out")
 		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"])
 		last = await self.last_turn(chat_id)
-		self.assertEqual("claude-fable", last["model"])
-		self.assertTrue(any(n.startswith("claude-opus left out") for n in self.notes(last)), self.notes(last))
+		self.assertEqual(("claude-opus", []), (last["model"], self.notes(last)), "the next turn asks Claude again")
+		self.assertEqual("Opus again.", self.segments(last, "text")[-1]["text"].strip())
 
 	async def test_a_usage_limit_without_a_fallback_pauses(self):
 		await self.use_claude(groups={"claude": {"primary": {"model": "claude-opus"}}})
@@ -486,6 +493,31 @@ class ClaudeUsageTests(ClaudeCase):
 		end = await self.turn(chat_id)
 		self.assertEqual("usage_limit", end["stop"], end)
 		self.assertEqual("paused", (await self.summary(chat_id))["state"])
+		self.assertTrue(any("Claude refused the request" in n for n in self.notes(await self.last_turn(chat_id), "paused")))
+
+	async def test_a_weeks_pace_over_the_work_week(self):
+		"""ai.claude.paceDays "workweek": a weekly window's pace counts only the work days of the server's local time zone, and
+		the window says where its days off are; the 5-hour session counts every hour."""
+		await self.use_claude(models=self.SONNET, groups=self.LADDER)
+		self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=(50, int(3.5 * 24 * HOUR))))
+		every = {w["id"]: w for w in (await self.client.request("ai.usage", {"refresh": True}))["claude"]["usage"]["windows"]}
+		self.assertEqual(None, every["seven_day"].get("workWeek"))
+		self.assertAlmostEqual(0.5, every["seven_day"]["through"], places=2)
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.claude.paceDays", "value": "workweek"})
+		usage = (await self.client.request("ai.usage", {}))["claude"]["usage"]
+		self.assertEqual("workweek", usage["paceDays"])
+		windows = {w["id"]: w for w in usage["windows"]}
+		week = windows["seven_day"]
+		self.assertTrue(week["workWeek"] and 1 <= len(week["daysOff"]) <= 2, week)
+		off = sum(d["endMs"] - d["startMs"] for d in week["daysOff"])
+		self.assertTrue(47 * HOUR * 1000 <= off <= 49 * HOUR * 1000, "two days off in the week: %s" % week["daysOff"])
+		self.assertTrue(all(0 <= d["at"] <= 1 for d in week["daysOff"]))
+		self.assertAlmostEqual(week["pace"], week["utilization"] / 100 / week["through"], places=2)
+		self.assertEqual(None, windows["five_hour"].get("workWeek"))
+		self.assertAlmostEqual(0.2, windows["five_hour"]["through"], places=2)
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.claude.workDays", "value": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]})
+		week = {w["id"]: w for w in (await self.client.request("ai.usage", {}))["claude"]["usage"]["windows"]}["seven_day"]
+		self.assertEqual(([], 0.5), (week["daysOff"], round(week["through"], 2)), "every day a work day: as the whole week")
 
 
 class ClaudeSetupTests(ClaudeCase):

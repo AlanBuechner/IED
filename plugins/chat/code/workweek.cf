@@ -1,0 +1,110 @@
+include "workweek.ch"
+
+namespace Ai
+{
+	const int64 kCalendarDayMs = 24 * 3600 * 1000;
+	const int64 kCalendarHalfDayMs = 12 * 3600 * 1000;
+	const int64 kIntoNextDayMs = 26 * 3600 * 1000;   // from a local midnight, a time in the next local day: days run 23 h to 25 h
+	const char*[7] kDayNames = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
+
+	PaceDays EveryDay() {
+		PaceDays days;
+		days.workDays = kWorkWeekDays;
+		return days;
+	}
+
+	PaceDays WorkDaysOnly(int32 workDays) {
+		PaceDays days;
+		days.workWeek = true;
+		days.workDays = workDays;
+		days.offsetOf = [](int64 atMs) -> int32 { return Platform::LocalOffsetSeconds(atMs * 1000000); };
+		return days;
+	}
+
+	int32 ReadWorkDays(const Serialization::DomNode& days) {
+		if (days.Kind() != Serialization::DomKind::Array) return kWorkWeekDays;
+		int32 mask = 0;
+		for (int64 i = 0; i < days.Count(); ++i)
+			for (int32 day = 0; day < 7; ++day)
+				if (days.At(i).AsView() == Core::StringView(kDayNames[day])) mask = mask | (1 << day);
+		return mask;
+	}
+
+	// The local midnight that starts the day holding `atMs`, as the offset there has it (DST changes at night, not at
+	// midnight); never after `atMs`.
+	static int64 MidnightOf(const PaceDays& days, int64 atMs) {
+		const int32 offset = days.offsetOf(atMs);
+		Platform::CalendarTime local = Platform::CalendarAtOffset(atMs * 1000000, offset);
+		local.hour = 0;
+		local.minute = 0;
+		local.second = 0;
+		local.nanosecond = 0;
+		int64 ns = 0;
+		Platform::ToUnixNs(local, ns);
+		const int32 there = days.offsetOf(ns / 1000000);
+		if (there != offset) {
+			local.utcOffsetSeconds = there;
+			Platform::ToUnixNs(local, ns);
+		}
+		return ns / 1000000 <= atMs ? ns / 1000000 : atMs;
+	}
+
+	// The local midnight after the one at `dayMs`.
+	static int64 NextMidnight(const PaceDays& days, int64 dayMs) {
+		const int64 next = MidnightOf(days, dayMs + kIntoNextDayMs);
+		return next > dayMs ? next : dayMs + kCalendarDayMs;
+	}
+
+	// Whether the local day starting at `dayMs` is a work day (its weekday read at its noon).
+	static bool IsWorkDay(const PaceDays& days, int64 dayMs) {
+		const int64 noon = dayMs + kCalendarHalfDayMs;
+		const int32 weekday = (int32)Platform::CalendarAtOffset(noon * 1000000, days.offsetOf(noon)).weekday;
+		return ((days.workDays >> weekday) & 1) != 0;
+	}
+
+	static int64 Later(int64 a, int64 b) { return a > b ? a : b; }
+	static int64 Sooner(int64 a, int64 b) { return a < b ? a : b; }
+
+	int64 CountedMs(const PaceDays& days, int64 fromMs, int64 toMs) {
+		if (toMs <= fromMs) return 0;
+		if (!days.workWeek) return toMs - fromMs;
+		int64 counted = 0;
+		for (int64 day = MidnightOf(days, fromMs); day < toMs;) {
+			const int64 next = NextMidnight(days, day);
+			if (IsWorkDay(days, day)) counted += Sooner(next, toMs) - Later(day, fromMs);
+			day = next;
+		}
+		return counted;
+	}
+
+	static void AddDaysOff(Core::Array<DaysOff>& stretches, int64 startMs, int64 endMs, int64 countedBefore, int64 total) {
+		DaysOff off;
+		off.startMs = startMs;
+		off.endMs = endMs;
+		off.at = total > 0 ? (double)countedBefore / (double)total : 0.0;
+		stretches.Push(off);
+	}
+
+	Core::Array<DaysOff> DaysOffIn(const PaceDays& days, int64 fromMs, int64 toMs) {
+		Core::Array<DaysOff> stretches;
+		if (!days.workWeek || toMs <= fromMs) return stretches;
+		const int64 total = CountedMs(days, fromMs, toMs);
+		int64 counted = 0;
+		int64 offSince = -1;
+		for (int64 day = MidnightOf(days, fromMs); day < toMs;) {
+			const int64 next = NextMidnight(days, day);
+			const int64 start = Later(day, fromMs);
+			if (!IsWorkDay(days, day)) {
+				if (offSince < 0) offSince = start;
+			}
+			else {
+				if (offSince >= 0) AddDaysOff(stretches, offSince, start, counted, total);
+				offSince = -1;
+				counted += Sooner(next, toMs) - start;
+			}
+			day = next;
+		}
+		if (offSince >= 0) AddDaysOff(stretches, offSince, toMs, counted, total);
+		return stretches;
+	}
+}

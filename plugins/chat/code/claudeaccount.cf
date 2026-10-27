@@ -3,8 +3,6 @@ include "pacing.ch"
 
 namespace Ai
 {
-	const int64 kUsageUnknownBlockMs = 15 * 60 * 1000;   // a usage limit that names no reset: look again after this
-
 	static int64 AccountNowMs() { return Platform::UnixTimeNs() / 1000000; }
 
 	void ClaudeAccount::Init(IED::PluginContext* context) {
@@ -17,6 +15,12 @@ namespace Ai
 		if (!context->Method(Core::StringView("ai.claude.signIn"), [self](const IED::Request& request) -> Core::String { return self->SignInMethod(request); }, problem)) context->Log(problem.View());
 		if (!context->Method(Core::StringView("ai.claude.install"), [self](const IED::Request& request) -> Core::String { return self->InstallMethod(request); }, problem)) context->Log(problem.View());
 		if (!context->Method(Core::StringView("ai.claude.setup"), [self](const IED::Request& request) -> Core::String { return self->SetupMethod(request); }, problem)) context->Log(problem.View());
+		// the snapshot's chains and paces follow ai.groups, ai.models and ai.claude.paceDays as they change
+		context->Listen(Core::StringView("settings.changed"), [self](const IED::Event& event) {
+			if (!event.topic.View().StartsWith(Core::StringView("settings:"))) return;
+			IED::HostLock guard(*self->context);
+			self->Changed();
+		});
 	}
 
 	Core::Array<Core::String> ClaudeAccount::Command() const {
@@ -225,26 +229,12 @@ namespace Ai
 		Changed();
 	}
 
-	void ClaudeAccount::MetLimit(Core::StringView model, int64 untilMs) {
-		const int64 now = AccountNowMs();
-		UsageWindow* rejected = RejectedWindow(usage, now);
-		if (rejected && Limits(usage, *rejected, model)) return;
-		int64 until = untilMs;
-		if (until <= now) until = usage.limitResetsAtMs > now ? usage.limitResetsAtMs : now + kUsageUnknownBlockMs;
-		Core::String apart = ApartModel(usage, model);
-		if (!apart.IsEmpty()) apartBlockedUntilMs.At(apart) = until;
-		else blockedUntilMs = until;
-		Changed();
-	}
-
-	int64 ClaudeAccount::BlockedUntil(Core::StringView model, int64 nowMs) const {
-		Core::String apart = ApartModel(usage, model);
-		int64 until = blockedUntilMs;
-		if (!apart.IsEmpty() && !apartBlockedUntilMs.TryGet(apart, until)) until = 0;
-		if (until <= nowMs) until = 0;
-		for (UsageWindow* window : usage.windows)
-			if (Limits(usage, *window, model) && UsedUp(*window, nowMs) && window->resetsAtMs > until) until = window->resetsAtMs;
-		return until;
+	PaceDays ClaudeAccount::Days() const {
+		if (!context) return EveryDay();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		if (Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.paceDays"), Core::StringView("")).View(), *doc).root.AsView() != "workweek") return EveryDay();
+		Serialization::DomDoc* daysDoc = new Serialization::DomDoc();
+		return WorkDaysOnly(ReadWorkDays(Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.workDays"), Core::StringView("")).View(), *daysDoc).root));
 	}
 
 	bool ClaudeAccount::Configured() const {
@@ -275,14 +265,13 @@ namespace Ai
 		json.BoolField("installing", installing);
 		json.EndObject();
 		json.BoolField("refreshing", refreshing);
-		json.IntField("blockedUntilMs", BlockedUntil(Core::StringView(""), now));
 		json.IntField("nowMs", now);
 		json.Key(Core::StringView("chains"));
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), problems);
 		WriteChains(json, ClaudeChains(models, context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), *this, now));
 		json.Key(Core::StringView("usage"));
-		WriteUsage(json, usage, now);
+		WriteUsage(json, usage, Days(), now);
 		json.EndObject();
 		json.EndObject();
 		return json.ToString();

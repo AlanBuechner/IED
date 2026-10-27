@@ -3,7 +3,7 @@ include "pacing.ch"
 
 namespace Ai
 {
-	static const char* StateName(PlaceState state) { return state == PlaceState::Use ? "use" : state == PlaceState::Over ? "over" : "used_up"; }
+	static const char* StateName(PlaceState state) { return state == PlaceState::Use ? "use" : "over"; }
 
 	static Core::String Number(double value) {
 		Core::StringBuilder out;
@@ -17,25 +17,13 @@ namespace Ai
 		place->claude = profile.IsClaude();
 		place->pace = pace;
 		place->state = PlaceState::Use;
-		if (!profile.IsClaude()) return place;
-		const int64 blocked = account.BlockedUntil(profile.model.View(), nowMs);
-		UsageWindow* own = ModelWindow(account.usage, profile.model.View());
-		if (own && UsedUp(*own, nowMs)) {
-			place->state = PlaceState::UsedUp;
-			place->why = (own->label + " is used up; it frees ") + ResetText(blocked, nowMs).View();
-		}
-		else if (blocked > 0) {
-			place->state = PlaceState::UsedUp;
-			place->why = Core::String("the plan's usage is used up; it frees ") + ResetText(blocked, nowMs).View();
-		}
-		else if (!pinned && pace.max > 0) {
-			Core::String why;
-			const double now = PaceAgainst(account.usage, profile.model.View(), pace.target.View(), nowMs, why);
-			if (now > pace.max) {
-				place->state = PlaceState::Over;
-				place->over = now / pace.max;
-				place->why = (why + ", over its ") + Number(pace.max).View() + "x";
-			}
+		if (!profile.IsClaude() || pinned || pace.max <= 0) return place;
+		Core::String why;
+		const double now = PaceAgainst(account.usage, account.Days(), profile.model.View(), pace.target.View(), nowMs, why);
+		if (now > pace.max) {
+			place->state = PlaceState::Over;
+			place->over = now / pace.max;
+			place->why = (why + ", over its ") + Number(pace.max).View() + "x";
 		}
 		return place;
 	}
@@ -55,7 +43,7 @@ namespace Ai
 			if (place->state == PlaceState::Use) ordered.Push(place);
 		const int64 used = ordered.Count();
 		for (ChainPlace* place : places) {
-			if (place->state != PlaceState::Over) continue;
+			if (place->state == PlaceState::Use) continue;
 			int64 at = ordered.Count();
 			while (at > used && ordered[at - 1]->over > place->over) at -= 1;
 			ordered.Insert(at, place);
@@ -151,14 +139,14 @@ namespace Ai
 				out.Append(place->pace.target.View());
 				out.Append(")");
 			}
-			if (place->state != PlaceState::Use) {
-				out.Append(place->state == PlaceState::Over ? Core::StringView(" [over: ") : Core::StringView(" [used up: "));
+			if (place->state == PlaceState::Over) {
+				out.Append(" [over: ");
 				out.Append(place->why.View());
 				out.Append("]");
 			}
 		}
 		out.Append(" - a turn uses ");
-		out.Append(chain.now.IsEmpty() ? Core::StringView("none (Claude is used up)") : chain.now.View());
+		out.Append(chain.now.IsEmpty() ? Core::StringView("none (no model of the chain is in ai.models)") : chain.now.View());
 		out.Append(" now");
 		return out.ToString();
 	}
