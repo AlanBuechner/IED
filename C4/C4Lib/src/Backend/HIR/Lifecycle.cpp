@@ -377,7 +377,7 @@ namespace Scripting
 		}
 		case HIRNode::Kind::Sequence: return static_cast<const SequenceNode*>(node)->fresh;
 		case HIRNode::Kind::Transfer: return true;
-		case HIRNode::Kind::Ternary: return AsObject(node->type) != nullptr;
+		case HIRNode::Kind::Ternary: return node->type->GetKind() != TypeKind::Reference && AsObject(node->type) != nullptr;
 		default: return false;
 		}
 	}

@@ -8,7 +8,7 @@ namespace Scripting
 	struct CodeBlockNode; struct ExpressionStatementNode;
 	struct ReturnStatementNode; struct IfStatementNode;
 	struct SwitchStatementNode; struct SwitchCaseNode; struct BreakStatementNode; struct ContinueStatementNode;
-	struct FunctionDefinitionNode; struct AliasDefinitionNode;
+	struct FunctionDefinitionNode; struct AliasDefinitionNode; struct TernaryExpressionNode;
 
 	/// One lexical block while it lowers: its model scope layer and its place on the goto block path.
 	/// Every BlockNode a body lowers into is entered through exactly one RegionScope, so the scope chain,
@@ -58,6 +58,8 @@ namespace Scripting
 		bool OwnedByThisFunction(const LValue* lv) const;
 		const LValue* OwningLocal(const LValue* lv) const;
 		QueryResult<const HIRNode*> ReturnReference(const ReturnStatementNode* n, const Type* retType, const LValue* lv);
+		QueryResult<const HIRNode*> ReferenceTo(const ReturnStatementNode* n, const Type* retType, const AstNode* node);
+		QueryResult<const HIRNode*> ChosenReference(const ReturnStatementNode* n, const Type* retType, const TernaryExpressionNode* choice);
 		QueryResult<const HIRNode*> ReturnFromVoid(const ReturnStatementNode* n, const Value& value);
 		Core::String FunctionName() const;
 		QueryResult<void> LowerStatements(const CodeBlockNode* n, BlockNode* target);

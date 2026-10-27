@@ -27,6 +27,8 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
+#include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
+#include "Parser/Nodes/Expressions/TernaryExpressionNode.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/AliasType.h"
 #include <algorithm>
@@ -258,6 +260,33 @@ namespace Scripting
 		return m_Ctx.AddressAs(retType, lv);
 	}
 
+	// What a reference return gives for `node`: a location's address, or for a conditional the address of the location
+	// its condition chooses, each branch checked as a returned location (BUG-398).
+	QueryResult<const HIRNode*> StmtLowerer::ReferenceTo(const ReturnStatementNode* n, const Type* retType, const AstNode* node)
+	{
+		while (const auto* parenthesized = dynamic_cast<const ParenthesizedExpressionNode*>(node)) node = parenthesized->GetExpression().Get();
+		if (const auto* choice = dynamic_cast<const TernaryExpressionNode*>(node)) return ChosenReference(n, retType, choice);
+		auto v = ExprLowerer(m_Ctx).ResolveFor(node, retType);
+		if (!v.Ok()) return QueryResult<const HIRNode*>::Fail(v.error, v.message);
+		if (!v.value.isLValue)
+			return m_Ctx.Fail(n, QueryResult<const HIRNode*>::Fail(QueryError::NotAValue, "cannot return a reference to a temporary from '" +
+				FunctionName() + "': return a location (a variable, a field, an element), not a value"));
+		return ReturnReference(n, retType, v.value.lvalue);
+	}
+
+	QueryResult<const HIRNode*> StmtLowerer::ChosenReference(const ReturnStatementNode* n, const Type* retType, const TernaryExpressionNode* choice)
+	{
+		auto cond = ExprLowerer(m_Ctx).ResolveExpr(choice->GetCondition().Get());
+		if (!cond.Ok()) return QueryResult<const HIRNode*>::Fail(cond.error, cond.message);
+		if (Core::String why = ImplicitConversion::ConditionProblem(m_Ctx, cond.value.type); !why.empty())
+			return m_Ctx.Fail(choice->GetCondition().Get(), QueryResult<const HIRNode*>::Fail(QueryError::NotAValue, why));
+		auto chosen = ReferenceTo(n, retType, choice->GetThenBranch().Get());
+		if (!chosen.Ok()) return chosen;
+		auto other = ReferenceTo(n, retType, choice->GetElseBranch().Get());
+		if (!other.Ok()) return other;
+		return QueryResult<const HIRNode*>(m_Ctx.out->NewNode<TernaryNode>(retType, m_Ctx.LoadIfNeeded(cond.value), chosen.value, other.value));
+	}
+
 	// `return F();` in a void function returns F's void result; any other value has nowhere to go.
 	QueryResult<const HIRNode*> StmtLowerer::ReturnFromVoid(const ReturnStatementNode* n, const Value& value)
 	{
@@ -276,12 +305,12 @@ namespace Scripting
 
 	QueryResult<const HIRNode*> StmtLowerer::LowerReturnValue(const ReturnStatementNode* n, const Type* retType)
 	{
+		// A REFERENCE return binds the ADDRESS of the location (of `p` itself in `int32*& Ref() { return p; }`).
+		if (retType && retType->GetKind() == TypeKind::Reference) return ReferenceTo(n, retType, n->GetExpression().Get());
+
 		ExprLowerer expr(m_Ctx);
 		auto v = expr.ResolveFor(n->GetExpression().Get(), retType);
 		if (!v.Ok()) return QueryResult<const HIRNode*>::Fail(v.error, v.message);
-
-		// A REFERENCE return binds the ADDRESS of the location (of `p` itself in `int32*& Ref() { return p; }`).
-		if (retType && retType->GetKind() == TypeKind::Reference && v.value.isLValue) return ReturnReference(n, retType, v.value.lvalue);
 
 		// A by-value object leaves the function as a relocated local - left zero, so its scope-exit
 		// destruction does nothing - or as a copy of anything else (docs/language/06).

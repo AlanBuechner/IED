@@ -1,0 +1,7 @@
+include "bedrock.ch"
+
+Core::Array<int32> Make() { return Core::Array<int32>(); }
+
+const Core::Array<int32>& Returned() { return Make(); }
+
+int32 main() { return (int32)Returned().Count(); }

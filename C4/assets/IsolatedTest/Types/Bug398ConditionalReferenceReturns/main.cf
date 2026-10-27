@@ -1,0 +1,40 @@
+// BUG-398: a function returning a reference returns the location a conditional chooses: `return flag ? none : items;`
+// of two members failed IR verification (the conditional made a copy, returned as if it were the address).
+include "bedrock.ch"
+
+class Holder
+{
+	public const Core::Array<int32>& Pick() const { return flag ? none : items; }
+	public Core::Array<int32>& PickToChange() { return flag ? none : items; }
+	public int32& Slot(int32 which) { return which == 0 ? first : (which == 1 ? second : *spare); }
+	public const int32& Smaller() const { return (first < second ? first : second); }
+
+	public bool flag;
+	public Core::Array<int32> items;
+	public Core::Array<int32> none;
+	public int32 first;
+	public int32 second;
+	public int32* spare;
+}
+
+int32 main() {
+	int32 failed = 0;
+	Holder* holder = new Holder();
+	holder->items.Push(7);
+	holder->items.Push(8);
+	if (holder->Pick().Count() != 2 || &holder->Pick() != &holder->items) failed += 1;
+	holder->flag = true;
+	if (!holder->Pick().IsEmpty() || &holder->Pick() != &holder->none) failed += 2;
+	holder->PickToChange().Push(3);
+	if (holder->none.Count() != 1 || holder->none[0] != 3) failed += 4;
+	int32 extra = 0;
+	holder->spare = &extra;
+	holder->Slot(0) = 10;
+	holder->Slot(1) = 20;
+	holder->Slot(2) = 30;
+	if (holder->first != 10 || holder->second != 20 || extra != 30) failed += 8;
+	if (&holder->Smaller() != &holder->first) failed += 16;
+	holder->first = 50;
+	if (holder->Smaller() != 20) failed += 32;
+	return failed;
+}

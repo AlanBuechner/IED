@@ -151,7 +151,9 @@ Rules enforced today:
   sub-object; a conversion would make a temporary it cannot hold (`cannot bind 'int32&' to a 'float': a
   reference names a location of its own type`).
 - A function cannot return a reference to its own local or by-value parameter, or a part of one (`cannot
-  return a reference to the local 'v': it ends when the function returns`).
+  return a reference to the local 'v': it ends when the function returns`), nor to a temporary (`cannot return
+  a reference to a temporary from 'F'`). It may return a conditional of locations, `return flag ? none :
+  items;`: the location the condition chooses, each branch checked as a returned location is.
 - A non-const reference binds only an argument of its referent type (or a derived object, through its
   base sub-object). A `const T&` binds anything that converts to `T` implicitly (4.9): the value is
   converted into a temporary, destroyed at the end of the full expression (D-32). `const float&` accepts an

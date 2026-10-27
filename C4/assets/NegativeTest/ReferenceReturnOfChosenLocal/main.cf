@@ -1,0 +1,8 @@
+int32 g_Kept;
+
+const int32& Chosen(bool which) {
+	int32 local = 3;
+	return which ? g_Kept : local;
+}
+
+int32 main() { return Chosen(true); }
