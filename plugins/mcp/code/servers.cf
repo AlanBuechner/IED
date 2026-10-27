@@ -36,8 +36,21 @@ namespace Mcp
 		}
 	}
 
-	// `schema` as JSON with the keywords Bedrock's validator does not know left out (unevaluatedProperties,
-	// $dynamicRef, the content* ones, draft 7's list of items, ...), at every depth; each one left out named in `dropped`.
+	const char*[36] kSchemaKeywords = { "$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples",
+		"deprecated", "readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions", "type", "enum", "const",
+		"pattern", "minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "required",
+		"properties", "additionalProperties", "items", "minItems", "maxItems", "uniqueItems", "oneOf", "anyOf", "allOf", "not",
+		"$ref" };
+
+	static bool KnownKeyword(Core::StringView key) {
+		if (key.StartsWith(Core::StringView("x-"))) return true;
+		for (int64 i = 0; i < 36; ++i)
+			if (key == kSchemaKeywords[i]) return true;
+		return false;
+	}
+
+	// `schema` as JSON with the keywords Bedrock's validator does not know left out (propertyNames, patternProperties,
+	// multipleOf, if/then/else, a list of items, ...), at every depth; each one left out named in `dropped`.
 	static void WriteLoadable(IED::JsonWriter& json, const Serialization::DomNode& schema, Core::Array<Core::String>& dropped) {
 		if (schema.Kind() != Serialization::DomKind::Object) {
 			json.Raw(IED::NodeJson(schema).View());
@@ -47,10 +60,10 @@ namespace Mcp
 		for (int64 i = 0; i < schema.Count(); ++i) {
 			Core::StringView key = schema.KeyAt(i);
 			Serialization::DomNode value = schema.ValueAt(i);
-			const bool named = Serialization::HoldsNamedSchemas(key);
-			const bool single = Serialization::HoldsOneSchema(key);
-			const bool list = Serialization::HoldsSchemaList(key);
-			if (!Serialization::IsSchemaKeyword(key) || (key == "items" && value.Kind() == Serialization::DomKind::Array)) {
+			const bool named = key == "properties" || key == "$defs";
+			const bool single = key == "items" || key == "additionalProperties" || key == "not";
+			const bool list = key == "oneOf" || key == "anyOf" || key == "allOf";
+			if (!KnownKeyword(key) || (key == "items" && value.Kind() == Serialization::DomKind::Array)) {
 				if (!dropped.Contains(Core::String(key))) dropped.Push(Core::String(key));
 				continue;
 			}

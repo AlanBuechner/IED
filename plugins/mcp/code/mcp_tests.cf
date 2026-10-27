@@ -147,16 +147,10 @@ class McpToolTests {
 		Core::String note;
 		Core::String kept = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"integer\", \"title\": \"A\"}}, \"required\": [\"a\"]}", doc), note);
 		assert_true(note.IsEmpty() && kept.View().Contains(Core::StringView("\"required\":[\"a\"]")), kept.CStr());
-		Core::String stripped = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"tags\": {\"type\": \"object\", \"unevaluatedProperties\": false, \"additionalProperties\": {\"type\": \"string\", \"contentEncoding\": \"base64\"}}}}", doc), note);
-		assert_true(!stripped.View().Contains(Core::StringView("unevaluatedProperties")) && !stripped.View().Contains(Core::StringView("contentEncoding")), stripped.CStr());
+		Core::String stripped = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"tags\": {\"type\": \"object\", \"propertyNames\": {\"pattern\": \"^x\"}, \"additionalProperties\": {\"type\": \"string\", \"multipleOf\": 2}}}}", doc), note);
+		assert_true(!stripped.View().Contains(Core::StringView("propertyNames")) && !stripped.View().Contains(Core::StringView("multipleOf")), stripped.CStr());
 		assert_true(stripped.View().Contains(Core::StringView("\"additionalProperties\":{\"type\":\"string\"}")), "the rest kept, at every depth");
-		assert_true(note.View().Contains(Core::StringView("unevaluatedProperties, contentEncoding")), note.CStr());
-		note = Core::String();
-		Core::String full = Mcp::UsableSchema(Json("{\"type\": \"object\", \"properties\": {\"tags\": {\"type\": \"object\", \"propertyNames\": {\"pattern\": \"^x\"}, \"patternProperties\": {\"^x\": {\"type\": \"number\", \"multipleOf\": 0.5}}}, \"mode\": {\"if\": {\"const\": \"a\"}, \"then\": {\"minLength\": 1}}}, \"dependentRequired\": {\"a\": [\"b\"]}}", doc), note);
-		assert_true(note.IsEmpty() && full.View().Contains(Core::StringView("\"multipleOf\":0.5")) && full.View().Contains(Core::StringView("\"propertyNames\"")) && full.View().Contains(Core::StringView("\"then\":{\"minLength\":1}")), full.CStr());
-		note = Core::String();
-		Core::String tuple = Mcp::UsableSchema(Json("{\"type\": \"array\", \"items\": [{\"type\": \"string\"}]}", doc), note);
-		assert_true(!tuple.View().Contains(Core::StringView("items")) && note.View().Contains(Core::StringView("items")), "draft 7's list of items is left out");
+		assert_true(note.View().Contains(Core::StringView("propertyNames, multipleOf")), note.CStr());
 		note = Core::String();
 		assert_true(Mcp::UsableSchema(Json("[1]", doc), note).View() == "{\"type\":\"object\"}" && !note.IsEmpty(), "not an object");
 	}

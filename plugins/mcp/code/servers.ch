@@ -194,6 +194,6 @@ namespace Mcp
 	// The delay before the restart after `exits` exits in a row: 1, 2, 4, 8, 16 s, then 30 s.
 	int64 RestartDelayMs(int64 exits);
 	// A tool's inputSchema as the chat's validator can load it and a model takes it: the server's less the keywords Bedrock's
-	// validator does not know (unevaluatedProperties, $dynamicRef, ...; named in `note`), or {"type":"object"} with `note`.
+	// validator does not know (propertyNames, patternProperties, ...; named in `note`), or {"type":"object"} with `note`.
 	Core::String UsableSchema(const Serialization::DomNode& schema, Core::String& note);
 }
