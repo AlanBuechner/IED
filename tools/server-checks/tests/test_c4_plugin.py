@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 from frames import FrameChecker
-from iedclient import Client
+from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
 sys.path.insert(0, os.path.join(REPO, "C4"))
@@ -90,7 +90,7 @@ class C4PluginTests(ServerTestCase):
 		shutil.rmtree(self.root, ignore_errors=True)
 
 	async def connect(self):
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
 
 	async def asyncTearDown(self):
 		if getattr(self, "client", None):
