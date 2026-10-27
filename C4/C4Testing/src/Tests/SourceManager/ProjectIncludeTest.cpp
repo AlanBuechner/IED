@@ -133,6 +133,24 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void ProjectIncludeTest::TwoSourceFoldersWithOnePathAreAmbiguous()
+	{
+		// IED's server: src/ and every built-in plugin's code/ are source folders of one project (BUG-400).
+		Workspace w("folders");
+		w.Write("Game/git/Service.ch", "");
+		w.Write("Game/chat/Service.ch", "");
+		w.Write("Game/chat/only.ch", "");
+		w.Write("Game/chat/aitools/tools.cf", "");
+		w.Register("root = \"Game\"\n[[project]]\nname = \"Game\"\nsources = [\"Game/git\", \"Game/chat\"]\n");
+		const IncludeTarget target = w.sources.ResolveInclude("Service.ch", w.Id("Game/chat/aitools/tools.cf"));
+		TEST_ASSERT_EQ(target.id, (uint32)0);
+		TEST_ASSERT(target.error.find("'Service.ch' is in two source folders of project 'Game'") == 0);
+		// A path one folder has, and a file beside its includer, are no ambiguity.
+		TEST_ASSERT_EQ(w.sources.ResolveInclude("only.ch", w.Id("Game/chat/aitools/tools.cf")).id, w.Id("Game/chat/only.ch"));
+		TEST_ASSERT_EQ(w.sources.ResolveInclude("Service.ch", w.Id("Game/chat/only.ch")).id, w.Id("Game/chat/Service.ch"));
+		TEST_PASSED();
+	}
+
 	void ProjectIncludeTest::AProjectCannotReachItsUser()
 	{
 		Workspace w("reach");

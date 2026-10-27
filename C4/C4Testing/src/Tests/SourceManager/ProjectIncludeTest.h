@@ -22,6 +22,8 @@ namespace Testing
 		TEST_FUNC(SourceManager.Projects)
 		void TwoDependenciesWithOnePathAreAmbiguous();
 		TEST_FUNC(SourceManager.Projects)
+		void TwoSourceFoldersWithOnePathAreAmbiguous();
+		TEST_FUNC(SourceManager.Projects)
 		void AProjectCannotReachItsUser();
 		TEST_FUNC(SourceManager.Projects)
 		void EachFileStartsWithItsProjectsMacros();

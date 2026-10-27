@@ -321,14 +321,23 @@ namespace Scripting
 		return folders;
 	}
 
-	uint32 SourceManager::InProject(uint32 project, const std::string& written) const
+	IncludeTarget SourceManager::InProject(uint32 project, const std::string& written) const
 	{
+		uint32 found = 0;
 		for (const std::string& folder : FoldersOf(project))
-			if (uint32 id = InFolder(folder, written)) return id;
+		{
+			const uint32 id = InFolder(folder, written);
+			if (!id || id == found) continue;
+			if (found)
+				return { 0, "'" + written + "' is in two source folders of project '" + m_Projects.At(project).name + "' (" +
+					m_Sources.at(found).absPath + " and " + m_Sources.at(id).absPath + "): rename one, or include it by a path only one of them has" };
+			found = id;
+		}
+		if (found) return { found };
 		auto it = m_NameToId.find(written);
-		if (it == m_NameToId.end()) return 0;
+		if (it == m_NameToId.end()) return {};
 		const SourceInfo& named = m_Sources.at(it->second);
-		return named.byName && named.project == project ? it->second : 0;
+		return { named.byName && named.project == project ? it->second : 0 };
 	}
 
 	IncludeTarget SourceManager::InDependencies(uint32 project, const std::string& written) const
@@ -337,7 +346,9 @@ namespace Scripting
 		for (uint32 used : m_Projects.Uses(project))
 		{
 			if (used == project) continue;
-			const uint32 id = InProject(used, written);
+			const IncludeTarget in = InProject(used, written);
+			if (!in.error.empty()) return in;
+			const uint32 id = in.id;
 			if (!id || id == found) continue;
 			if (found)
 				return { 0, "'" + written + "' is a file of both '" + m_Projects.At(foundIn).name + "' (" + m_Sources.at(found).absPath +
@@ -351,9 +362,13 @@ namespace Scripting
 	std::string SourceManager::OutOfReach(uint32 project, const std::string& written) const
 	{
 		for (uint32 other = 0; other < m_Projects.Count(); ++other)
-			if (!m_Projects.CanUse(project, other) && InProject(other, written))
+		{
+			if (m_Projects.CanUse(project, other)) continue;
+			const IncludeTarget in = InProject(other, written);
+			if (in.id || !in.error.empty())
 				return "cannot include '" + written + "': it is a file of project '" + m_Projects.At(other).name + "', and project '" +
 					m_Projects.At(project).name + "' does not depend on '" + m_Projects.At(other).name + "'";
+		}
 		return "";
 	}
 
@@ -366,7 +381,7 @@ namespace Scripting
 			if (uint32 id = BesideRequester(*from, written)) return { id };
 		if (from && from->library) return { InFolder(m_LibraryRoot, written) };
 		const uint32 project = from ? from->project : m_Projects.Root();
-		if (uint32 id = InProject(project, written)) return { id };
+		if (IncludeTarget own = InProject(project, written); own.id || !own.error.empty()) return own;
 		IncludeTarget dependency = InDependencies(project, written);
 		if (dependency.id || !dependency.error.empty()) return dependency;
 		if (uint32 id = InFolder(m_LibraryRoot, written)) return { id };

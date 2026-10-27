@@ -83,7 +83,8 @@ namespace Scripting
 		std::vector<std::string> FoldersOf(uint32 project) const;
 		uint32 InFolder(const std::string& folder, const std::string& written) const;
 		uint32 BesideRequester(const SourceInfo& requester, const std::string& written) const;
-		uint32 InProject(uint32 project, const std::string& written) const;
+		// The project's file at `written`, from its source and include folders; an error when two of them have the path.
+		IncludeTarget InProject(uint32 project, const std::string& written) const;
 		IncludeTarget InDependencies(uint32 project, const std::string& written) const;
 		std::string OutOfReach(uint32 project, const std::string& written) const;
 

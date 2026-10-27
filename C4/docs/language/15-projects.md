@@ -79,7 +79,9 @@ ENGINE_EDITOR = "1"
    3. the source and include folders of the projects it depends on, directly or not;
    4. the default library.
 
-   Two dependencies that both have the path, at the same step, are an error naming both files.
+   Two folders that both have the path at the same step - two of the project's own source and include folders, or two
+   dependencies - are an error naming both files (`'Service.ch' is in two source folders of project 'ied-server'
+   (.../git/code/Service.ch and .../chat/code/Service.ch): rename one, or include it by a path only one of them has`).
 4. **A project uses only what it depends on.** Including a file of a project that is not the file's own and not a
    dependency of it is an error: `cannot include 'player.ch': it is a file of project 'Game', and project 'Engine'
    does not depend on 'Game'`. Names follow the same rule: in a body a name is visible only through includes
