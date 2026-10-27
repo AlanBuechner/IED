@@ -351,6 +351,16 @@ class CommandTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		self.assertNotIn("Renderer", read(self.path("nuke.toml")))
 
+	def test_add_a_branch_and_a_nested_package(self):
+		self.windowing()
+		self.workspace({}, depends=())
+		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--branch", "main")
+		self.assertEqual(code, 0, out)
+		self.assertIn('"Windowing/Win32" = { source = "engine", branch = "main" }', read(self.path("nuke.toml")))
+		entry = self.lock()[("engine", "Windowing")]
+		self.assertEqual(entry["commit"], git("rev-parse", "main", cwd=self.engine.work), "the branch's tip, locked")
+		self.assertEqual(entry["uses"], ["Windowing", "Windowing/Win32"])
+
 	def test_status(self):
 		self.windowing()
 		self.workspace({"Windowing": "\"engine@^0.1\""})
