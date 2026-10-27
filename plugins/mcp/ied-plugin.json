@@ -24,7 +24,7 @@
 				{ "name": "mcp.status", "version": "1", "kind": "function", "description": "A workspace's servers as the topic mcp:<wsId> shows them: {wsId} -> {trusted, servers: [...]}" },
 				{ "name": "mcp.readResource", "version": "1", "kind": "function", "description": "A resource of a workspace's MCP server read with resources/read, as the model reads it: {wsId, server, uri} -> {text}; a blob is saved under .ied/local/mcp/media and named. The chat reads an @ mention of kind mcp with it." },
 				{ "name": "mcp.tool", "version": "1", "kind": "function", "description": "What a chat tool of an MCP server is: {wsId, tool} -> {server, tool, title, permission, state}; refused when it cannot be called now (gone, turned off, the workspace untrusted)." },
-				{ "name": "mcp.call", "version": "1", "kind": "function", "description": "Starts a call of a chat tool of an MCP server and answers at once: {wsId, tool, arguments, chatId?} -> {callId}. The server is started first when it is not running." },
+				{ "name": "mcp.call", "version": "1", "kind": "function", "description": "Starts a call of a chat tool of an MCP server and answers at once: {wsId, tool, arguments, chatId?} -> {callId, waitMs}; waitMs is how long the call can take at most (its start and its timeoutSeconds). The server is started first when it is not running." },
 				{ "name": "mcp.result", "version": "1", "kind": "function", "description": "What a call came to, waiting at most waitMs (250; at most 5000): {callId, waitMs?} -> {done, content?, isError?, source?, images?: [{mime, path}]}; once done, the call is forgotten." },
 				{ "name": "mcp.cancel", "version": "1", "kind": "function", "description": "Cancels a call at its server (notifications/cancelled): {callId} -> {}" }
 			],

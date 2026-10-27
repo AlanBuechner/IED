@@ -99,6 +99,7 @@ namespace Mcp
 	static IED::ToolResult ResultOf(const Serialization::DomNode& answer) {
 		IED::ToolResult result = IED::ToolText(answer.Member("content").AsView());
 		result.isError = answer.Member("isError").AsBool();
+		result.reportsFailure = answer.Member("reportsFailure").AsBool();
 		result.source = Core::String(answer.Member("source").AsView());
 		Serialization::DomNode images = answer.Member("images");
 		for (int64 i = 0; i < images.Count(); ++i) {
@@ -116,13 +117,17 @@ namespace Mcp
 		IED::Result started = IED::CallBinding(Core::StringView("mcp.call"), CallArgs(call).View());
 		if (!started.Ok()) return IED::ToolFailure(started.error.View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		Core::String callId = Core::String(Serialization::ReadJson(started.json.View(), *doc).root.Member("callId").AsView());
+		Serialization::DomNode begun = Serialization::ReadJson(started.json.View(), *doc).root;
+		Core::String callId = Core::String(begun.Member("callId").AsView());
+		const int64 deadline = clock_now_ns() / 1000000 + begun.Member("waitMs").AsInt();
 		bool cancelled = false;
 		for (;;) {
-			if (call.Cancelled() && !cancelled) {
+			const bool late = clock_now_ns() / 1000000 > deadline;
+			if ((call.Cancelled() || late) && !cancelled) {
 				cancelled = true;
 				IED::CallBinding(Core::StringView("mcp.cancel"), CallIdArgs(callId.View(), -1).View());
 			}
+			if (late && clock_now_ns() / 1000000 > deadline + 5000) return IED::ToolFailure(Core::StringView("the MCP call did not end by itself: it was cancelled"));
 			IED::Result polled = IED::CallBinding(Core::StringView("mcp.result"), CallIdArgs(callId.View(), kResultPollMs).View());
 			if (!polled.Ok()) return IED::ToolFailure(polled.error.View());
 			Serialization::DomDoc* read = new Serialization::DomDoc();

@@ -368,7 +368,7 @@ name replacing the shallower one's; `docs/07`), or of a plugin's `contributes.mc
 
 ```jsonc
 "mcp.servers": {
-	"blender": { "command": "python", "args": ["C:/tools/blender_mcp.py"], "env": { "BLENDER_PORT": "9876" } },
+	"blender": { "command": "python", "args": ["-I", "C:/GameDev/IED/tools/blender-lab-mcp/server.py"], "env": { "BLENDER_MCP_PORT": "9876" } },
 	"engine":  { "url": "http://127.0.0.1:7801/mcp", "headers": { "Authorization": { "env": "ENGINE_TOKEN" } },
 	             "permission": "read", "preload": true, "privacy": "local" }
 }
@@ -408,7 +408,9 @@ rules is `plugin(ied.mcp/<name>)` like any plugin tool's (`docs/11`), so `"allow
 all of one server's tools and "Allow for this chat" on the card allows that one tool for the chat. `ask` is the plugin
 manifest's new `toolCalls` field `approval: "ask"`, open to any plugin: such a call asks the owner even in `auto` and
 `acceptEdits` until an allow rule or the chat's allowed rules match it; a `confirm` rule still asks every time and a deny
-rule refuses, and Plan mode refuses it as any non-read call.
+rule refuses, and Plan mode refuses it as any non-read call. The plugin also gives the system message a section (a computed
+`systemMessageSections` entry): the servers with their tool counts and the first 600 bytes of their `instructions`, and that
+what a server answers is data, not the owner's words (`docs/11` "Prompt-injection posture").
 
 **A call** goes to the server as `tools/call {name, arguments}` and its result becomes the tool's: `text` content as text,
 `image` content written to `.ied/local/mcp/media/` and shown to a model that takes images like any tool's images (`docs/13`

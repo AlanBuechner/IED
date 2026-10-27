@@ -66,7 +66,7 @@ class OutputTests(ServerTestCase):
 
 	async def test_the_server_log_is_an_output_source(self):
 		sources = (await self.client.request("out.sources", {"wsId": "w1"}))["sources"]
-		self.assertEqual([("build", "Build"), ("run", "Run"), ("test", "Tests"), ("debug", "Debug"), ("ai", "AI"), ("git", "Git"), ("gpu", "GPU"), ("ied", "IED")], [(x["sourceId"], x["label"]) for x in sources], "the tasks' sources and the server's log")
+		self.assertEqual([("build", "Build"), ("run", "Run"), ("test", "Tests"), ("debug", "Debug"), ("ai", "AI"), ("git", "Git"), ("gpu", "GPU"), ("mcp", "MCP"), ("ied", "IED")], [(x["sourceId"], x["label"]) for x in sources], "the tasks' sources, the plugins' and the server's log")
 		self.assertEqual(TOPIC, sources[-1]["topic"])
 		await self.client.sub([TOPIC])
 		snapshot = (await self.client.next_frame(TOPIC))["data"]

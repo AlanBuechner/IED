@@ -62,8 +62,13 @@ namespace Mcp
 		Core::String arguments = args.Member("arguments").Kind() == Serialization::DomKind::Object ? IED::NodeJson(args.Member("arguments")) : Core::String("{}");
 		if (DescribeTool(wsId.View(), tool.View(), error).IsEmpty()) return Core::String();
 		RunningCall* call = new RunningCall();
+		int64 waitMs = 0;
 		{
 			Threading::LockGuard guard(lock);
+			WorkspaceServers* place = Find(wsId.View());
+			ServerEntry* entry = nullptr;
+			McpTool* found = nullptr;
+			if (place && ToolOf(place, tool.View(), entry, found)) waitMs = (entry->config->timeoutSeconds + entry->config->startSeconds + 10) * 1000;
 			callCount += 1;
 			Core::StringBuilder id;
 			id.Append("mc-");
@@ -77,6 +82,7 @@ namespace Mcp
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("callId", call->callId.View());
+		json.IntField("waitMs", waitMs);
 		json.EndObject();
 		return json.ToString();
 	}
@@ -227,12 +233,14 @@ namespace Mcp
 		if (result.content.IsEmpty() && result.images.IsEmpty()) result.content = Core::String("(the tool answered with no content)");
 		else if (result.content.IsEmpty()) result.content = Core::String("(an image)");
 		result.isError = content.isError;
+		result.reportsFailure = content.isError;   // the server's tool said it failed: the call itself worked
 		return result;
 	}
 
 	static void WriteResult(IED::JsonWriter& json, const IED::ToolResult& result) {
 		json.Field("content", result.content.View());
 		json.BoolField("isError", result.isError);
+		json.BoolField("reportsFailure", result.reportsFailure);
 		json.Field("source", result.source.View());
 		json.Key(Core::StringView("images"));
 		json.BeginArray();
