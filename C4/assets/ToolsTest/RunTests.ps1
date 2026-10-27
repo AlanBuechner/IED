@@ -21,13 +21,15 @@ function Get-Tree([string]$dir) {
     return $tree
 }
 
-# The Bedrock copy next to C4.exe is exactly Bedrock/ (no missing, extra or different file; BUG-099).
+# The Bedrock copy next to C4.exe is exactly Bedrock/ (no missing, extra or different file; BUG-099) - but its Nuke
+# manifest, which makes the library a project of the workspace and is never shipped (C4/nuke.toml's copy excludes it).
 function Test-ShippedBedrockMirrorsSource {
     $shipped = Join-Path (Split-Path -Parent $repoRoot) "build/bin/Development-windows-x64/C4/Bedrock"
     $source  = Join-Path $repoRoot "Bedrock"
     if (-not (Test-Path $shipped)) { return @("no Bedrock next to C4.exe: $shipped (build first)") }
     $failures = @()
     $want = Get-Tree $source
+    $want.Remove("nuke.toml")
     $have = Get-Tree $shipped
     foreach ($path in $want.Keys) {
         if (-not $have.ContainsKey($path)) { $failures += "missing from the shipped Bedrock: $path" }
