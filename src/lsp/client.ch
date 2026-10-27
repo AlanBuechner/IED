@@ -73,6 +73,8 @@ namespace Ied
 		public void Stop();
 		// Stops it if it runs and starts it again, its exits forgotten (lsp.restart).
 		public void Relaunch();
+		// Whether a request to it waits for its answer.
+		public bool Answering() const { return answers.Count() > 0; }
 		// What its profile's ${...} variables stand for.
 		public ProfileVariables Variables() const;
 		// The source of its diagnostics: the profile id, "/<project>" added for a project's server.
@@ -88,6 +90,8 @@ namespace Ied
 		private void Answered(int64 id, const Serialization::DomNode& message);
 		private void Initialized(const LspAnswer* answer);
 		private void Exited();
+		// Every request waiting for an answer gets `why` as the server's error (it stopped or exited).
+		private void FailAnswers(Core::StringView why);
 		private void Fail(Core::StringView why);
 		private void Restart(int64 run);
 		private void ReadLoop(Process::Child* child, int64 run);

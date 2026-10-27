@@ -55,26 +55,26 @@ namespace C4LSP::Server
 		std::string SymbolKey(const Features::WorkspaceSymbol& symbol) { return symbol.name + "@" + LocationKey(symbol.location); }
 
 		// What a query at a place asks the other programs about: the place itself in an analysis that compiles its
-		// document, else where its target is declared (a use in a file of a project only one program holds).
+		// document, else the declaration the place names (a use in a file of a project only one program holds).
 		struct Anchor
 		{
 			std::string uri;
 			Protocol::Position position;
-			std::optional<Protocol::Location> declaration; // none when the place is a declaration's own name
-
-			std::string DeclarationUri() const { return declaration ? declaration->uri : uri; }
+			Protocol::Location declaration;
 
 			std::pair<std::string, Protocol::Position> In(const CompilationSession& other) const
 			{
-				if (other.FindSourceIdByUri(uri) != 0 || !declaration) return { uri, position };
-				return { declaration->uri, declaration->range.start };
+				if (other.FindSourceIdByUri(uri) != 0) return { uri, position };
+				return { declaration.uri, declaration.range.start };
 			}
 		};
 
-		Anchor AnchorAt(CompilationSession& session, const std::string& uri, const Protocol::Position& position)
+		// None off a declaration, and none for a parameter or a local: no other program sees those.
+		std::optional<Anchor> AnchorAt(CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 		{
-			const Core::Vector<Protocol::Location> found = Features::Definition::At(session, uri, position);
-			return { uri, position, found.Empty() ? std::nullopt : std::optional<Protocol::Location>(found[0]) };
+			const std::optional<Protocol::Location> declaration = Features::Definition::SharedDeclarationAt(session, uri, position);
+			if (!declaration) return std::nullopt;
+			return Anchor{ uri, position, *declaration };
 		}
 	}
 
@@ -102,15 +102,12 @@ namespace C4LSP::Server
 		auto session = SnapshotForRequest(uri);
 		const bool includeDeclaration = params.Member("context").Member("includeDeclaration").GetBool(false);
 		auto locations = Features::References::At(*session, uri, position, includeDeclaration);
-		if (!locations.Empty())
-		{
-			const Anchor anchor = AnchorAt(*session, uri, position);
-			for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
+		if (const auto anchor = AnchorAt(*session, uri, position))
+			for (const auto& other : OtherAnalyses(uri, anchor->declaration.uri))
 			{
-				const auto [at, place] = anchor.In(*other);
+				const auto [at, place] = anchor->In(*other);
 				AppendNew(locations, Features::References::At(*other, at, place, includeDeclaration), LocationKey);
 			}
-		}
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
@@ -141,7 +138,7 @@ namespace C4LSP::Server
 	void LspServer::HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params)
 	{
 		const std::string query = params.Member("query").GetString(""); // {query: "..."} per the LSP spec
-		WaitForPendingWork(std::chrono::milliseconds(10'000));
+		AwaitWork(std::chrono::milliseconds(10'000));
 		Core::Vector<Features::WorkspaceSymbol> symbols;
 		for (const auto& session : AllAnalyses())
 			AppendNew(symbols, Features::WorkspaceSymbols::ForQuery(*session, query), SymbolKey);
@@ -206,12 +203,12 @@ namespace C4LSP::Server
 		const Protocol::Position position = ExtractPosition(params);
 		auto session = SnapshotForRequest(uri);
 		auto locations = Features::Implementation::At(*session, uri, position);
-		const Anchor anchor = AnchorAt(*session, uri, position);
-		for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
-		{
-			const auto [at, place] = anchor.In(*other);
-			AppendNew(locations, Features::Implementation::At(*other, at, place), LocationKey);
-		}
+		if (const auto anchor = AnchorAt(*session, uri, position))
+			for (const auto& other : OtherAnalyses(uri, anchor->declaration.uri))
+			{
+				const auto [at, place] = anchor->In(*other);
+				AppendNew(locations, Features::Implementation::At(*other, at, place), LocationKey);
+			}
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
@@ -223,15 +220,13 @@ namespace C4LSP::Server
 		const Protocol::Position position = ExtractPosition(params);
 		auto session = SnapshotForRequest(uri);
 		auto result = Features::Rename::At(*session, uri, position);
-		if (result.found)
-		{
-			const Anchor anchor = AnchorAt(*session, uri, position);
-			for (const auto& other : OtherAnalyses(uri, anchor.DeclarationUri()))
+		const auto anchor = result.found ? AnchorAt(*session, uri, position) : std::nullopt;
+		if (anchor)
+			for (const auto& other : OtherAnalyses(uri, anchor->declaration.uri))
 			{
-				const auto [at, place] = anchor.In(*other);
+				const auto [at, place] = anchor->In(*other);
 				AppendNew(result.occurrences, Features::Rename::At(*other, at, place).occurrences, OccurrenceKey);
 			}
-		}
 		SendResponse(id, Protocol::LspJson::Rename(result, newName));
 	}
 

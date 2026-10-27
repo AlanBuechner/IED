@@ -2,12 +2,13 @@
 publishes a diagnostic on every "bad" of an open document (a warning on every "meh"; nothing at all for a document with
 "silent" in it), formats a document by making each "messy" "tidy" (one edit per word, at its column in the negotiated
 encoding), answers hover with the position it got and definition with
-another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, answers "fake/slow" after {seconds}, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
 import re
 import sys
+import time
 
 LOG = open(sys.argv[1], "a", encoding="utf-8")
 STDIN = sys.stdin.buffer
@@ -102,6 +103,9 @@ def answer(message):
 		return formatting(params["textDocument"]["uri"])
 	if method == "fake/echo":
 		return {"got": params}
+	if method == "fake/slow":
+		time.sleep(params.get("seconds", 1))
+		return {"slept": params.get("seconds", 1)}
 	if method == "fake/crash":
 		sys.exit(3)
 	return None

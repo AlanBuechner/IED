@@ -117,9 +117,15 @@ a module's files are compiled only inside the programs that use it. One server s
   of a virtual method, in every project that includes the declaring one), `rename`, `callHierarchy/incomingCalls`,
   `typeHierarchy/subtypes` and `workspace/symbol`. Besides the document's own program, as few programs as hold every
   project that uses the declaring one (every project, for a file of the default library) are asked - at the same place
-  when they compile the document, else at the declaration - analyzed for the query when they were not (waited for 25 s
-  at most), and kept three minutes after; answers are merged, each place once. `workspace/symbol` asks programs that
-  hold every project.
+  when they compile the document, else at the declaration - analyzed for the query when they were not (a request waits
+  25 s at most in all, under IED's 30 s), and kept three minutes after; answers are merged, each place once. A
+  parameter or a function's local asks no other program.
+- **Threads.** Analyses are made on the worker; a request reads them on the reading thread while the worker publishes
+  diagnostics from them, so the two take turns (the resolver's caches and the model's query-time instantiations are not
+  thread-safe): a request holds them but while it waits for the worker. A setting that changes what the diagnostics say
+  (`tidy`) republishes them on the worker, after any older publish. `workspace/symbol` asks programs that
+  hold every project, so a search of the workspace's symbols costs every program's analysis for those three
+  minutes.
 
 ### Memory
 
@@ -141,7 +147,7 @@ and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 G
 | Item | Status |
 |---|---|
 | Incremental re-analysis (today each change recompiles the program). | **Planned** |
-| One parse of a module several analyzed programs share (each program parses Bedrock and its modules today). | **Planned** |
+| One parse of a module several analyzed programs share (each program parses Bedrock and its modules today; plan B76). | **Planned** |
 
 ---
 

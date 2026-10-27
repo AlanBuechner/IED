@@ -127,6 +127,26 @@ class LanguageServerTests(ServerTestCase):
 		self.assertEqual("at 0:3", hover["contents"], "asked about a document, it started again")
 		self.assertEqual("running", (await self.client.request("lsp.status", {"wsId": "w1"}))["servers"][0]["state"])
 
+	async def test_an_idle_server_is_not_stopped_while_it_answers(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "lsp.idleStopMinutes", "value": 0.05})
+		doc = await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		slept = await self.client.request("lsp.request", {"docId": doc, "method": "fake/slow", "params": {"seconds": 5}}, timeout=20)
+		self.assertEqual(5, slept["slept"], "a request longer than the idle time (3 s) is answered")
+		self.assertEqual("running", (await self.client.request("lsp.status", {"wsId": "w1"}))["servers"][0]["state"])
+
+	async def test_a_file_outside_the_workspace_starts_its_stopped_server_again(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "lsp.idleStopMinutes", "value": 0.05})
+		write(os.path.join(self.root, "far.fk"), "far bad\n")
+		write(os.path.join(self.workspace, "c.fk"), "go far\n")
+		doc = await self.open("c.fk")
+		await self.diagnostics("c.fk")
+		named = (await self.client.request("lsp.request", {"docId": doc, "method": "textDocument/definition", "params": {"position": {"line": 0, "character": 3}}}))[0]["uri"]
+		far = (await self.client.request("doc.open", {"wsId": "w1", "uri": named}))["docId"]
+		await self.client.wait_for("lsp:w1", lambda f: f["t"] == "evt" and f["data"]["state"] == "stopped", timeout=15)
+		hover = await self.client.request("lsp.request", {"docId": far, "method": "textDocument/hover", "params": {"position": {"line": 0, "character": 4}}})
+		self.assertEqual("at 0:4", hover["contents"], "the server that named it serves it again")
+
 	async def test_a_server_whose_document_a_window_shows_keeps_running(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "lsp.idleStopMinutes", "value": 0.05})
 		doc = await self.open("a.fk")

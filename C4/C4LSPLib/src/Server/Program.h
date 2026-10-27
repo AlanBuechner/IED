@@ -56,5 +56,6 @@ namespace C4LSP::Server
 		ProgramOptions m_Options;
 		std::optional<Scripting::ProjectSet> m_Projects;
 		std::string m_Stamp; // the description file's size and time when it was read
+		mutable std::map<std::string, bool> m_Owned; // path -> Owns, found once per description (every pass asks for each open document)
 	};
 } // namespace C4LSP::Server

@@ -22,6 +22,10 @@ namespace Testing
 		TEST_FUNC(Lsp.Programs)
 		void TestReferencesReachEveryProgram();
 
+		// A parameter or a local is no other program's: a query about one analyzes nothing more.
+		TEST_FUNC(Lsp.Programs)
+		void TestALocalAsksNoOtherProgram();
+
 		// Every override of a virtual method, in the projects of other programs too.
 		TEST_FUNC(Lsp.Programs)
 		void TestImplementationsReachEveryProgram();

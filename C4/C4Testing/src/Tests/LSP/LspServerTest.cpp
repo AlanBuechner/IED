@@ -1169,7 +1169,8 @@ int32 main() {
 		// Phase 2: the user flips the setting in the editor's settings menu. The host pushes the effective
 		// profile settings via didChangeConfiguration WITHOUT restarting the server; the live republish
 		// must add the finding immediately (no recompile, no document change).
-		feedConfig(true); // synchronous handler: the republish is already framed by the time this returns
+		feedConfig(true);
+		m_Server->WaitForCurrentWork(); // the republish is the worker's, so it never lands before an older publish
 		TEST_ASSERT(hasTidyFinding(uri));
 
 		// Phase 3: flip back off - the live republish clears it again.

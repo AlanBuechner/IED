@@ -91,8 +91,24 @@ namespace Ied
 
 	bool LspPool::WasNamed(Workspace* ws, Core::StringView uri) const { return named.Contains(NamedKey(ws, uri)); }
 
+	LanguageServer* LspPool::NamerServing(Workspace* ws, Core::StringView uri, bool start) {
+		LanguageServer* language = NamerOf(ws, uri);
+		NamedFile* file = nullptr;
+		if (language || !start || !named.TryGet(NamedKey(ws, uri), file)) return language;
+		// Its server stopped since (idle, lsp.idleStopMinutes): the file is still its to serve.
+		for (LspProfile* profile : ProfilesFor(ws)) {
+			if (profile->id.View() != file->profile.View()) continue;
+			ProjectModel* project = file->project.IsEmpty() || !ws->solution ? nullptr : ws->solution->Project(file->project.View());
+			if (!file->project.IsEmpty() && !project) return nullptr;
+			language = Create(ws, profile, project);
+			language->Start();
+			return language;
+		}
+		return nullptr;
+	}
+
 	LanguageServer* LspPool::Serving(Document* doc, bool start) {
-		if (doc->external) return NamerOf(doc->ws, doc->path.View());
+		if (doc->external) return NamerServing(doc->ws, doc->path.View(), start);
 		return ServingPath(doc->ws, doc->path.View(), start);
 	}
 
@@ -127,7 +143,7 @@ namespace Ied
 	static bool IsFileUri(Core::StringView path) { return path.StartsWith(Core::StringView("file:")); }
 
 	LanguageServer* LspPool::ReadyFor(Call& call, Workspace* ws, Core::StringView path) {
-		LanguageServer* language = IsFileUri(path) ? NamerOf(ws, path) : ServingPath(ws, path, true);
+		LanguageServer* language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
 		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + path).View());
 		AwaitServer(call, language);
 		Document* doc = server->documents->Find(ws, path);
@@ -329,6 +345,7 @@ namespace Ied
 	// --- What a LanguageServer hands over -----------------------------------------------------------------------------
 
 	void LspPool::Running(LanguageServer* language) {
+		SendOptionsFilesIfChanged(language);   // one changed while it started: FilesChanged passes over a starting server
 		Workspace* ws = language->ws;
 		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
 		for (const Core::String& path : server->documents->OpenPaths(ws)) {
@@ -522,19 +539,23 @@ namespace Ied
 			if (language->ws != ws || language->state != LspState::Running || language->profile->optionsFilesKey.IsEmpty()) continue;
 			bool named = batch.Overflowed();
 			for (const TreeChange& change : batch.Changes()) named = named || NamesOptionsFile(language, change.path.View());
-			if (!named) continue;
-			Core::String files = OptionsFilesJson(language);
-			if (files.View() == language->optionsFilesSent.View()) continue;
-			language->optionsFilesSent = files;
-			JsonWriter json;
-			json.BeginObject();
-			json.Key(Core::StringView("settings"));
-			json.BeginObject();
-			json.RawField(language->profile->optionsFilesKey.CStr(), files.View());
-			json.EndObject();
-			json.EndObject();
-			language->Notify(Core::StringView("workspace/didChangeConfiguration"), json.View());
+			if (named) SendOptionsFilesIfChanged(language);
 		}
+	}
+
+	void LspPool::SendOptionsFilesIfChanged(LanguageServer* language) {
+		if (language->profile->optionsFilesKey.IsEmpty()) return;
+		Core::String files = OptionsFilesJson(language);
+		if (files.View() == language->optionsFilesSent.View()) return;
+		language->optionsFilesSent = files;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("settings"));
+		json.BeginObject();
+		json.RawField(language->profile->optionsFilesKey.CStr(), files.View());
+		json.EndObject();
+		json.EndObject();
+		language->Notify(Core::StringView("workspace/didChangeConfiguration"), json.View());
 	}
 
 	// --- Idle servers ------------------------------------------------------------------------------------------------
@@ -583,7 +604,8 @@ namespace Ied
 	void LspPool::StopIdle(int64 nowNs) {
 		for (int64 i = languages.Count() - 1; i >= 0; --i) {
 			LanguageServer* language = languages[i];
-			if (language->state != LspState::Running && language->state != LspState::Starting) continue;
+			// One starting (also again, after it exited) has no documents yet and is about to be needed; one answering is.
+			if (language->state != LspState::Running || language->Answering()) continue;
 			if (Shown(language)) {
 				language->usedNs = nowNs;
 				continue;
@@ -673,9 +695,8 @@ namespace Ied
 			json.IntField("restarts", (int64)language->restarts);
 			json.Field("problem", language->problem.View());
 			json.Key(Core::StringView("memory"));
-			Process::Usage usage;
-			const bool live = language->state == LspState::Running || language->state == LspState::Starting;
-			if (live && language->pid != 0 && Process::GetUsage(language->pid, usage)) {
+			Process::Usage usage;   // only a running server's process is surely its own (a pid of one that exited may be another's)
+			if (language->state == LspState::Running && language->pid != 0 && Process::GetUsage(language->pid, usage)) {
 				json.BeginObject();
 				json.IntField("privateBytes", usage.privateBytes);
 				json.IntField("workingSetBytes", usage.workingSetBytes);
@@ -835,7 +856,7 @@ namespace Ied
 	}
 
 	Core::String LspPool::ServingFor(Call& call, Workspace* ws, Core::StringView path) {
-		LanguageServer* language = IsFileUri(path) ? NamerOf(ws, path) : ServingPath(ws, path, true);
+		LanguageServer* language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
 		JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("profile"));
@@ -895,6 +916,7 @@ namespace Ied
 			bool busy = false;
 			for (LanguageServer* language : servers) {
 				if (language->state != LspState::Running) continue;
+				language->usedNs = clock_now_ns();   // waited for: not idle
 				const bool fresh = clock_now_ns() - language->startedNs < kLspIndexGraceMs * 1000000;
 				busy = busy || language->progress.Count() > 0 || (fresh && !language->progressed);
 			}

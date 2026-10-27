@@ -119,7 +119,7 @@ class LspTests {
 			" \"env\": {\"C4_HOME\": \"${pluginDir}\"}, \"selector\": {\"extensions\": [\".cf\", \".ch\"], \"globs\": [\"**/*.c4x\"]},"
 			" \"launchMode\": \"staged\", \"scope\": \"project\", \"positionEncoding\": \"bytes\", \"requestIds\": \"integer\","
 			" \"refetchOnDiagnostics\": [\"semanticTokens\"], \"codeActionsNeedClientFilter\": true, \"when\": \"workspaceTrusted\","
-			" \"initializationOptions\": {\"tidy\": true}}"
+			" \"initializationOptions\": {\"tidy\": true}, \"initializationOptionsFiles\": {\"files\": \"${workspaceDir}/opts/*.json\", \"key\": \"programs\"}}"
 			"]}"), *doc).root;
 		Core::Array<Ied::LspProfile*> profiles;
 		Ied::ReadLspProfiles(contributes, Core::StringView("c4"), FS::Path("C:/tc/ied"), profiles);
@@ -129,6 +129,9 @@ class LspTests {
 		assert_true(profiles[0]->negotiate && !profiles[0]->staged && !profiles[0]->perProject && profiles[0]->initializationOptions == "{}", "the defaults");
 		assert_se("{\"tidy\":true}", c4->initializationOptions.CStr(), "initialization options as JSON");
 		assert_se("C4_HOME=${pluginDir}", c4->environment[0].CStr(), "the environment");
+		assert_se("${workspaceDir}/opts/*.json", c4->optionsFiles.CStr(), "the options files");
+		assert_se("programs", c4->optionsFilesKey.CStr(), "their key");
+		assert_true(profiles[0]->optionsFiles.IsEmpty() && profiles[0]->optionsFilesKey.IsEmpty(), "none by default");
 		assert_true(Ied::ProfileServing(profiles, Core::StringView("c4"), Core::StringView("src/a.CF")) == c4, "by extension, any case");
 		assert_true(Ied::ProfileServing(profiles, Core::StringView("plaintext"), Core::StringView("x/y/z.c4x")) == c4, "by glob");
 		assert_true(Ied::ProfileServing(profiles, Core::StringView("cpp"), Core::StringView("a.hpp")) == profiles[0], "by language");

@@ -28,6 +28,7 @@ namespace C4LSP::Server
 	void Program::ReadDescription()
 	{
 		m_Projects.reset();
+		m_Owned.clear();
 		m_Stamp = m_Options.projectsFile.empty() ? "" : StampOf(m_Options.projectsFile);
 		if (m_Stamp.empty()) return;
 		const Scripting::ProjectFileResult read = Scripting::ReadProjectFile(PathOf(m_Options.projectsFile));
@@ -45,7 +46,12 @@ namespace C4LSP::Server
 
 	bool Program::Owns(const std::string& path) const
 	{
-		return m_Projects && m_Projects->OwnerOf(PathOf(path)).has_value();
+		if (!m_Projects) return false;
+		auto known = m_Owned.find(path);
+		if (known != m_Owned.end()) return known->second;
+		const bool owned = m_Projects->OwnerOf(PathOf(path)).has_value();
+		m_Owned.emplace(path, owned);
+		return owned;
 	}
 
 	std::set<std::string> Program::ProjectNames() const

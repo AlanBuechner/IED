@@ -173,6 +173,7 @@ namespace Ied
 	}
 
 	bool LanguageServer::AwaitRunning(Call& call, int64 timeoutMs) {
+		usedNs = clock_now_ns();   // someone needs it
 		const int64 deadline = clock_now_ns() + timeoutMs * 1000000;
 		while (state == LspState::Starting && !call.cancel->IsCancelled() && clock_now_ns() < deadline) call.cancel->wake.WaitFor(server->lock, kLspWaitSliceNs);
 		if (call.cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
@@ -241,6 +242,7 @@ namespace Ied
 		}
 		state = LspState::Stopped;
 		run += 1;
+		FailAnswers(Core::StringView("the language server stopped"));   // its threads are no longer heard, so nothing else answers them
 		if (outgoing) outgoing->Close();
 		Process::Child* process = child;
 		if (process && running) Threading::Thread::Run([process]() { if (process->Wait(kLspExitGraceMs) == Process::kTimedOut) process->Kill(); }).Detach();
@@ -323,14 +325,23 @@ namespace Ied
 	}
 
 	// The process ended (lock held): pending requests fail; it starts again after a pause, unless it ended too often.
-	void LanguageServer::Exited() {
+	void LanguageServer::FailAnswers(Core::StringView why) {
+		JsonWriter error;
+		error.BeginObject();
+		error.IntField("code", -32099);
+		error.Field("message", why);
+		error.EndObject();
 		for (const Core::KeyValue<int64, LspAnswer*>& entry : answers) {
 			entry.value->done = true;
 			entry.value->ok = false;
-			entry.value->json = Core::String("{\"code\":-32099,\"message\":\"the language server exited\"}");
+			entry.value->json = error.ToString();
 			if (entry.value->wake) entry.value->wake->wake.NotifyAll();
 		}
 		answers.Clear();
+	}
+
+	void LanguageServer::Exited() {
+		FailAnswers(Core::StringView("the language server exited"));
 		documents.Clear();
 		transient.Clear();
 		progress.Clear();

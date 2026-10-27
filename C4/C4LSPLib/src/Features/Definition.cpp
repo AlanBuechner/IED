@@ -21,6 +21,36 @@
 
 namespace C4LSP::Features
 {
+	// A parameter, or a variable declared inside a function: nothing outside that function names it.
+	static bool IsFunctionLocal(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	{
+		if (declaration.Type() == Scripting::NodeType::Parameter)
+			return true;
+		if (declaration.Type() != Scripting::NodeType::VariableDefinition)
+			return false;
+		const Core::Vector<const Scripting::AstNode*> path = DeclarationText::PathTo(session, declaration);
+		for (uint32 i = 0; i + 1 < path.Count(); ++i)
+			if (path[i]->Type() == Scripting::NodeType::FunctionDefinition)
+				return true;
+		return false;
+	}
+
+	std::optional<Protocol::Location> Definition::SharedDeclarationAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
+	{
+		const uint32 sourceId = session.FindSourceIdByUri(uri);
+		if (sourceId == 0)
+			return std::nullopt;
+		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
+		if (!unit || !unit->GetRootAST())
+			return std::nullopt;
+		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
+		const Scripting::AstNode* target = located.Found() ? TargetAt(session, sourceId, located, position) : nullptr;
+		if (!target || IsFunctionLocal(session, *target))
+			return std::nullopt;
+		return LocationForDeclaration(session, *target);
+	}
+
 	Core::Vector<Protocol::Location> Definition::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
 		// An include directive beats symbol resolution: the caret is on `include "path.ch"` (the

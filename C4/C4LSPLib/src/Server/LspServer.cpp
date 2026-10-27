@@ -12,11 +12,23 @@ namespace C4LSP::Server
 {
 	namespace
 	{
-		// How long a query across programs keeps the analyses it asked for, and how long it waits for them.
+		// How long a query across programs keeps the analyses it asked for.
 		constexpr auto kConsultedKept = std::chrono::minutes(3);
-		constexpr auto kConsultWait = std::chrono::seconds(25);
+		// How long a request waits for analyses in all, from when it arrived: under IED's 30 s request timeout.
+		constexpr auto kRequestBudget = std::chrono::seconds(25);
+		// How long a request waits for the edits before it to be analyzed.
+		constexpr auto kFreshWait = std::chrono::seconds(10);
 		// How often the worker looks for analyses it may let go while nothing changes.
 		constexpr auto kReleaseEvery = std::chrono::seconds(30);
+
+		// The read thread holds the query lock while it answers a request; it gives it up while it waits for the
+		// worker, which publishes from the same analyses meanwhile.
+		struct QueryReleased
+		{
+			std::mutex& held;
+			explicit QueryReleased(std::mutex& query) : held(query) { held.unlock(); }
+			~QueryReleased() { held.lock(); }
+		};
 
 		std::string PathOfUri(const std::string& uri) { return Protocol::DocumentUri::FromUri(uri); }
 
@@ -60,9 +72,16 @@ namespace C4LSP::Server
 		// Wait for pending work (bounded), then snapshot: didChange is applied to m_Documents and analyzed on the worker,
 		// so answering before that swap-in would answer for stale text (completion after typing "x." would offer globals
 		// instead of x's members). On a very large program one analysis can outlive any client's request timeout, so past
-		// the deadline the current snapshot answers. The editor's LSP request timeout is 15s; 10s stays below it.
-		WaitForPendingWork(std::chrono::milliseconds(10'000));
+		// the deadline the current snapshot answers.
+		AwaitWork(kFreshWait);
 		return GetSnapshot(uri);
+	}
+
+	void LspServer::AwaitWork(std::chrono::milliseconds most)
+	{
+		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
+		QueryReleased waiting(m_QueryMutex);
+		WaitForPendingWork(std::max(std::chrono::milliseconds(0), std::min(most, left)));
 	}
 
 	int32 LspServer::ScopeOfUri(const std::string& uri) const
@@ -149,6 +168,46 @@ namespace C4LSP::Server
 		return analyzed;
 	}
 
+	namespace
+	{
+		// What the planner knows of `program` for `docs` (the session lock held).
+		ProgramFacts FactsOf(Program& program, const EditorDocuments& docs)
+		{
+			if (program.Refresh()) program.stale = true;
+			ProgramFacts facts;
+			for (const auto& doc : docs) facts.owns.push_back(program.Owns(PathOfUri(doc.first)));
+			facts.analyzed = program.session != nullptr;
+			facts.projects = program.ProjectNames().size();
+			return facts;
+		}
+
+		// Where the open documents go: the documents each program takes (every open one it holds; the options' own
+		// also takes those no program holds), the program each is analyzed in, and the programs that analysis needs.
+		struct Placement
+		{
+			std::vector<EditorDocuments> taken;
+			std::map<std::string, std::shared_ptr<Program>> analyzing;
+			std::set<size_t> needed;
+		};
+
+		Placement Place(const std::vector<std::shared_ptr<Program>>& programs, const std::vector<ProgramFacts>& facts, const EditorDocuments& docs)
+		{
+			const std::vector<int32> assigned = AssignDocuments(facts, docs.size());
+			Placement placement;
+			placement.taken.resize(programs.size());
+			for (size_t d = 0; d < docs.size(); ++d)
+			{
+				for (size_t p = 0; p < programs.size(); ++p)
+					if (facts[p].owns[d]) placement.taken[p].push_back(docs[d]);
+				const size_t placed = assigned[d] >= 0 ? static_cast<size_t>(assigned[d]) : 0;
+				if (assigned[d] < 0) placement.taken[0].push_back(docs[d]);
+				placement.analyzing[docs[d].first] = programs[placed];
+				placement.needed.insert(placed);
+			}
+			return placement;
+		}
+	}
+
 	std::vector<std::string> LspServer::AnalyzePrograms(const EditorDocuments& docs)
 	{
 		std::vector<std::shared_ptr<Program>> programs;
@@ -158,67 +217,52 @@ namespace C4LSP::Server
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
 			programs = m_Programs;
 			before = m_Analyzing;
-			for (const auto& program : programs)
-			{
-				if (program->Refresh()) program->stale = true;
-				ProgramFacts known;
-				for (const auto& doc : docs) known.owns.push_back(program->Owns(PathOfUri(doc.first)));
-				known.analyzed = program->session != nullptr;
-				known.projects = program->ProjectNames().size();
-				facts.push_back(std::move(known));
-			}
+			for (const auto& program : programs) facts.push_back(FactsOf(*program, docs));
 		}
-		const std::vector<int32> assigned = AssignDocuments(facts, docs.size());
-
-		// Each program analyzes every open document it holds; the options' own also takes those no program holds.
-		std::vector<EditorDocuments> taken(programs.size());
-		std::map<std::string, std::shared_ptr<Program>> analyzing;
-		std::set<size_t> needed;
-		for (size_t d = 0; d < docs.size(); ++d)
-		{
-			for (size_t p = 0; p < programs.size(); ++p)
-				if (facts[p].owns[d]) taken[p].push_back(docs[d]);
-			const size_t placed = assigned[d] >= 0 ? static_cast<size_t>(assigned[d]) : 0;
-			if (assigned[d] < 0) taken[0].push_back(docs[d]);
-			analyzing[docs[d].first] = programs[placed];
-			needed.insert(placed);
-		}
-		const auto now = std::chrono::steady_clock::now();
-		{
-			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			for (size_t p = 0; p < programs.size(); ++p)
-				if (programs[p]->wantedUntil > now) needed.insert(p);
-		}
+		Placement placement = Place(programs, facts, docs);
+		for (size_t p : WantedNow(programs)) placement.needed.insert(p);
 
 		std::vector<std::string> analyzed;
-		for (size_t p : needed)
-		{
-			const auto inputs = InputsOf(taken[p]);
-			{
-				std::lock_guard<std::mutex> lock(m_SessionMutex);
-				if (programs[p]->session && !programs[p]->stale && programs[p]->analyzedWith == inputs) continue;
-			}
-			std::shared_ptr<CompilationSession> fresh = programs[p]->Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken[p]);
-			{
-				std::lock_guard<std::mutex> lock(m_SessionMutex);
-				programs[p]->session = fresh;
-				programs[p]->analyzedWith = inputs;
-				programs[p]->stale = false;
-			}
-			for (const auto& [uri, program] : analyzing)
-				if (program == programs[p]) analyzed.push_back(uri);
-		}
-		for (const auto& [uri, program] : analyzing)
+		for (size_t p : placement.needed)
+			if (AnalyzeIfChanged(*programs[p], placement.taken[p]))
+				for (const auto& [uri, program] : placement.analyzing)
+					if (program == programs[p]) analyzed.push_back(uri);
+		for (const auto& [uri, program] : placement.analyzing)
 		{
 			auto was = before.find(uri);
 			if (was == before.end() || was->second != program) analyzed.push_back(uri);
 		}
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			m_Analyzing = std::move(analyzing);
+			m_Analyzing = std::move(placement.analyzing);
 		}
 		ReleaseUnneeded();
 		return analyzed;
+	}
+
+	std::vector<size_t> LspServer::WantedNow(const std::vector<std::shared_ptr<Program>>& programs) const
+	{
+		const auto now = std::chrono::steady_clock::now();
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		std::vector<size_t> wanted;
+		for (size_t p = 0; p < programs.size(); ++p)
+			if (programs[p]->wantedUntil > now) wanted.push_back(p);
+		return wanted;
+	}
+
+	bool LspServer::AnalyzeIfChanged(Program& program, const EditorDocuments& taken)
+	{
+		const auto inputs = InputsOf(taken);
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			if (program.session && !program.stale && program.analyzedWith == inputs) return false;
+		}
+		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken);
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		program.session = fresh;
+		program.analyzedWith = inputs;
+		program.stale = false;
+		return true;
 	}
 
 	void LspServer::ReleaseUnneeded()
@@ -287,7 +331,7 @@ namespace C4LSP::Server
 		if (missing)
 		{
 			PostRecompile();
-			WaitForPendingWork(std::chrono::duration_cast<std::chrono::milliseconds>(kConsultWait));
+			AwaitWork(std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget));
 		}
 		std::vector<std::shared_ptr<CompilationSession>> sessions;
 		std::lock_guard<std::mutex> lock(m_SessionMutex);
@@ -368,6 +412,13 @@ namespace C4LSP::Server
 			if (ScopeOfUri(doc.first) < 0) programDocs.push_back(doc);
 		std::vector<std::string> analyzed = AnalyzeScripts(docs);
 		for (std::string& uri : AnalyzePrograms(programDocs)) analyzed.push_back(std::move(uri));
+		bool everyDocument = false;
+		{
+			std::lock_guard<std::mutex> lock(m_WorkMutex);
+			std::swap(everyDocument, m_RepublishAll);
+		}
+		if (everyDocument)
+			for (const auto& [uri, text] : docs) analyzed.push_back(uri);
 		Publish(analyzed);
 	}
 
@@ -381,6 +432,7 @@ namespace C4LSP::Server
 				std::lock_guard<std::mutex> lock(m_DocMutex);
 				if (!m_Documents.IsOpen(uri)) continue;
 			}
+			std::lock_guard<std::mutex> querying(m_QueryMutex); // the read thread may be answering from the same analysis
 			auto analyzed = GetSnapshot(uri);
 			auto diagnostics = Features::Diagnostics::ForDocument(*analyzed, uri);
 			// C4 Tidy appends its non-error code-quality findings to the same publish so the editor's squiggle list shows
@@ -410,6 +462,10 @@ namespace C4LSP::Server
 	{
 		const std::string method = message.Member("method").GetString();
 		const Json::Value id = message.Member("id");
+		// The features' resolver caches and the model's query-time instantiations are not thread-safe: a request holds the
+		// analyses (the worker publishes from them too) except while it waits for the worker (AwaitWork).
+		std::lock_guard<std::mutex> querying(m_QueryMutex);
+		m_RequestStart = std::chrono::steady_clock::now();
 		// params must OWN its copy: Value::Member returns by value, so binding a const ref here would dangle.
 		Json::Value params = message.HasMember("params") ? message.Member("params") : Json::Value::Null();
 		// The request's document is where its positions (and its answer's without a URI) are; a UTF-16 client's columns

@@ -58,6 +58,9 @@ namespace C4LSP::Server
 		// The analysis that answers about `uri`: its script scope's (initializationOptions.scripts), else its program's.
 		std::shared_ptr<CompilationSession> GetSnapshot(const std::string& uri) const;
 		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri);
+		// A request waits for the worker: at most `most`, and never past the request's budget; the analyses are the
+		// worker's meanwhile (the query lock released).
+		void AwaitWork(std::chrono::milliseconds most);
 		// The program answering about `uri` (the session lock held): the one its document is analyzed in, else one whose
 		// analysis compiled the file, else the options' own.
 		std::shared_ptr<Program> ProgramOfLocked(const std::string& uri) const;
@@ -81,6 +84,11 @@ namespace C4LSP::Server
 		// The worker's pass over the programs: which program analyzes each document, analyses made again where their
 		// documents changed, those no longer needed let go. Returns the documents whose analysis is new.
 		std::vector<std::string> AnalyzePrograms(const EditorDocuments& docs);
+		// Of `programs`, those a query across programs keeps analyzed now (their indexes).
+		std::vector<size_t> WantedNow(const std::vector<std::shared_ptr<Program>>& programs) const;
+		// `program` analyzed again with `taken` (the open documents it holds) when they, its description or its options
+		// changed since its last analysis; true when it was.
+		bool AnalyzeIfChanged(Program& program, const EditorDocuments& taken);
 		// The script scopes' analyses made again where their documents changed; returns those documents.
 		std::vector<std::string> AnalyzeScripts(const EditorDocuments& docs);
 		// Analyses neither the open documents nor a recent query need, let go.
@@ -162,6 +170,8 @@ namespace C4LSP::Server
 		bool m_ShouldExit = false;
 
 		mutable std::mutex m_SessionMutex; // guards m_Programs, the programs' analyses, m_Analyzing and m_ScriptSessions
+		std::mutex m_QueryMutex;   // held while features read analyses: by a request (but while it waits) and by Publish
+		std::chrono::steady_clock::time_point m_RequestStart; // when the request being answered arrived
 		std::mutex m_DocMutex;     // guards m_Documents (read thread mutates, worker reads)
 		std::mutex m_SendMutex;    // serializes output frames so two threads never interleave a message
 
@@ -171,6 +181,7 @@ namespace C4LSP::Server
 		bool m_WorkerStarted = false;
 		bool m_Working = false;  // a pass is currently running on the worker
 		bool m_Dirty = false;    // a pass is queued
+		bool m_RepublishAll = false; // the next pass publishes every open document (a setting changed what they show)
 		bool m_WorkShutdown = false;
 	};
 } // namespace C4LSP::Server

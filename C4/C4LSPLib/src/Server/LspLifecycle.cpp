@@ -53,27 +53,15 @@ namespace C4LSP::Server
 				Features::CodeActions::SetCreateDefinitionEnabled(createDefinition.GetBool());
 		}
 
-		// No documents open yet: the flag is stored and the next recompile picks it up. With no work
-		// queued, PostRecompile would build an empty session and publish nothing - harmless either way,
-		// but only queue when there is actually something to republish.
 		if (!tidyChanged)
 			return;
-
-		std::vector<std::pair<std::string, std::string>> docs;
+		// Every open document's diagnostics again, with the new tidy state, from the analyses as they are (a pass analyzes
+		// only what changed): on the worker, so a publish of the old state never lands after the new one.
 		{
-			std::lock_guard<std::mutex> lock(m_DocMutex);
-			m_Documents.ForEachDocument([&](const std::string& uri, const std::string& text) {
-				docs.emplace_back(uri, text);
-			});
+			std::lock_guard<std::mutex> lock(m_WorkMutex);
+			m_RepublishAll = true;
 		}
-		if (docs.empty())
-			return;
-
-		// Republish from the CURRENT snapshots without analyzing again: a pass would rebuild every program just to flip
-		// one flag. Each open document's diagnostics, with the new tidy state, as a pass publishes them.
-		std::vector<std::string> uris;
-		for (const auto& [uri, text] : docs) uris.push_back(uri);
-		Publish(uris);
+		PostRecompile();
 	}
 
 	void LspServer::HandleInitialize(const Json::Value& id, const Json::Value& params)

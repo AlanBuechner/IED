@@ -100,6 +100,8 @@ namespace Ied
 		// Its profile's initializationOptionsFiles: {<file name without its extension>: <the file's object>}, in name order;
 		// "{}" when none is there (a file that is not a JSON object is left out, and said so in the output).
 		private Core::String OptionsFilesJson(LanguageServer* language);
+		// workspace/didChangeConfiguration with the files when they read otherwise than last sent.
+		private void SendOptionsFilesIfChanged(LanguageServer* language);
 		// Every second, on a thread of its own: a server none of whose documents a window shows, and that nothing asked or
 		// told anything for lsp.idleStopMinutes, stops and leaves the pool; it starts again when it is needed.
 		private void SweepLoop();
@@ -118,6 +120,8 @@ namespace Ied
 		private LanguageServer* ServingPath(Workspace* ws, Core::StringView path, bool start);
 		// The server that named a file outside `ws` (its file: URI), if it is still there.
 		private LanguageServer* NamerOf(Workspace* ws, Core::StringView uri) const;
+		// That server, started again with `start` when it stopped since (idle); null for a file no server named.
+		private LanguageServer* NamerServing(Workspace* ws, Core::StringView uri, bool start);
 		// The server running, or throws unavailable.
 		private void AwaitServer(Call& call, LanguageServer* language);
 		private LanguageServer* Ready(Call& call, Document* doc);

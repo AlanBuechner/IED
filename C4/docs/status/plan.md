@@ -2317,6 +2317,32 @@ methods that return structs by value (B74 adds the test); data exported from the
 - **Steps:** split `C4LSP` into a static library and a thin exe; move the 12 LSP tests from
   `C4Testing/disabled_tests/` to `C4Testing/src/Tests/LSP/` and make them pass.
 
+#### B75 - One language server for every program of a workspace
+- **Closes:** BUG-387 (a module's files analyzed alone, no program describing them), BUG-388 (the server's memory
+  grew with every compile), BUG-389 (no LSP options after a failed compile), BUG-390 (base lists in references).
+  **Design:** [editor](../tools/03-editor-lsp-dap.md#one-server-for-every-program), IED `docs/24`.
+- **Depends on:** B27, B38. **Status:** Done (2026-10-27, owner's list 27/28).
+- **Done notes:** `initializationOptions.programs` and `didChangeConfiguration {settings: {programs}}`
+  (`Server/ProgramOptions`); `Server/Program` (a program's options, its description's projects, its analysis, what
+  it took); `Server/ProgramPlan` (as few programs as hold the open documents; the programs a query about a
+  declaration asks too); `LspServer` analyzes only the programs that changed, lets go of the ones no document or
+  recent query needs, and merges references, implementation, rename, incoming calls, subtypes and workspace symbols
+  across programs. `CompilerInstance::SetMaxThreads` (the server parses one file at a time) and
+  `Lexer::ReleaseTokens` (every compile). The locator and the reference scanner see a type's base list. Nuke writes
+  the options in a `finally`. Tests: C4Testing `Lsp.Programs` (11) and `Lsp.Navigation.References`; IED server
+  checks `OptionsFilesTests` and the idle ones; Nuke `test_a_compile_that_fails_still_writes_the_ide_options`.
+  Measured: IED `docs/24` "C4LSP memory, measured".
+
+#### B76 - One parse of a module the analyzed programs share
+- **Depends on:** B75. **Status:** Planned.
+- **Why:** each analyzed program parses Bedrock and every module it holds again (two Claymore programs share most of
+  the engine); one parse per file and macro inputs, shared by the programs' analyses, would cut a workspace's memory
+  to about one program's plus what each adds.
+- **Steps:** (1) source ids and units a session can take from another (a file's parse depends only on its text, its
+  project's defines and what its includes carry - the cache key); (2) `MergeIncludes` without mutating a shared
+  root (the merged view per analysis); (3) the program model built over shared units; (4) measure against B75's
+  numbers.
+
 #### B28 - Debug info and C4DAP
 - **Depends on:** A1..A3 (done). **Status:** Done.
 - **Steps:** (1) `DIBuilder` in codegen (compile unit per file, subprograms, locals from slots, line

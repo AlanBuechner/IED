@@ -19,10 +19,10 @@ namespace Testing
 	{
 		// An engine module, a game module on it, a client program with the game, and a tool program with the engine alone.
 		const char* kEngineHeader =
-			"namespace Engine\n{\n\tinterface IModule\n\t{\n\t\tpublic virtual int32 Run() = 0;\n\t}\n\n\tint32 EngineValue();\n}\n";
-		const char* kEngineSource = "include \"Runtime/module.ch\"\n\nnamespace Engine\n{\n\tint32 EngineValue() { return 7; }\n}\n";
+			"namespace Engine\n{\n\tinterface IModule\n\t{\n\t\tpublic virtual int32 Run() = 0;\n\t}\n\n\tint32 EngineValue();\n\tint32 GameOnly();\n}\n";
+		const char* kEngineSource = "include \"Runtime/module.ch\"\n\nnamespace Engine\n{\n\tint32 EngineValue() { return 7; }\n\tint32 GameOnly() { return 8; }\n}\n";
 		const char* kGameModule =
-			"include \"Runtime/module.ch\"\n\nnamespace Game\n{\n\tclass Module : Engine::IModule\n\t{\n\t\tpublic override int32 Run() { return Engine::EngineValue(); }\n\t}\n}\n";
+			"include \"Runtime/module.ch\"\n\nnamespace Game\n{\n\tclass Module : Engine::IModule\n\t{\n\t\tpublic override int32 Run() { return Engine::EngineValue() + Engine::GameOnly(); }\n\t}\n}\n";
 		const char* kClientMain = "include \"Game/game_module.ch\"\n\nint32 main()\n{\n\tGame::Module module;\n\treturn module.Run();\n}\n";
 		const char* kToolMain =
 			"include \"Runtime/module.ch\"\n\nnamespace Tool\n{\n\tclass Module : Engine::IModule\n\t{\n\t\tpublic override int32 Run() { return Engine::EngineValue() + 1; }\n\t}\n}\n\n"
@@ -157,6 +157,30 @@ namespace Testing
 		const std::string fromUse = UrisOf(server.Request("textDocument/references", atUse));
 		TEST_ASSERT(Names(fromUse, ws.gameModule));
 		TEST_ASSERT(Names(fromUse, ws.engineSource));
+
+		// None in the program asked (the tool's), and no declaration asked for: the others are asked all the same.
+		Value gameOnly = ServerHarness::At(ws.engineHeader, kEngineHeader, "GameOnly");
+		Value withoutDeclaration = Value::MakeObject();
+		withoutDeclaration.SetMember("includeDeclaration", Value::Bool(false));
+		gameOnly.SetMember("context", withoutDeclaration);
+		const std::string onlyInGame = UrisOf(server.Request("textDocument/references", gameOnly));
+		TEST_ASSERT(Names(onlyInGame, ws.gameModule));
+		fs::remove_all(ws.root);
+		TEST_PASSED();
+	}
+
+	void LspProgramsTest::TestALocalAsksNoOtherProgram()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_programs_local");
+		ServerHarness server(FileUri(ws.root));
+		server.Initialize(ws.WithPrograms());
+		server.Open(ws.toolMain, kToolMain);
+		Value params = ServerHarness::At(ws.toolMain, kToolMain, "module.Run");
+		Value context = Value::MakeObject();
+		context.SetMember("includeDeclaration", Value::Bool(true));
+		params.SetMember("context", context);
+		TEST_ASSERT_EQ(server.Request("textDocument/references", params).Size(), 2u); // `module;` and `module.Run()`
+		TEST_ASSERT_EQ(server.Server().AnalyzedProgramCount(), size_t(1)); // the client's was not analyzed for it
 		fs::remove_all(ws.root);
 		TEST_PASSED();
 	}

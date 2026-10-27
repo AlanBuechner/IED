@@ -2,6 +2,7 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
+#include <optional>
 
 namespace Scripting { class AstNode; class ProgramModel; }
 
@@ -39,6 +40,10 @@ namespace C4LSP::Features
 		/// The declaration whose own name is at `position` - `Push` of `void Ring::Push()` is the function, its `Ring`
 		/// the type - not its type, parameters or body (BUG-349). Null elsewhere.
 		static const Scripting::AstNode* DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
+
+		/// Where the declaration TargetAt finds at a position is, for asking another analysis about it (a query across
+		/// programs); none off a declaration, and none for a parameter or a function's local, which no other program sees.
+		static std::optional<Protocol::Location> SharedDeclarationAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 
 	private:
 
