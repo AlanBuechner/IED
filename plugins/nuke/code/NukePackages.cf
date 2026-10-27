@@ -24,7 +24,7 @@ namespace NukePlugin
 		return FirstPart(line.Substring(0, equals));
 	}
 
-	static bool IsPackagesName(Core::StringView name) { return name == "sources" || name == "packages"; }
+	static bool IsPackagesName(Core::StringView name) { return name == "dependencies"; }
 
 	bool UsesPackages(Core::StringView manifest) {
 		bool atRoot = true;
@@ -94,7 +94,7 @@ namespace NukePlugin
 
 	bool IsPackageAction(Core::StringView action) {
 		return action == "update" || action == "add" || action == "remove" || action == "develop" || action == "lock"
-			|| action == "pull" || action == "release" || action == "source";
+			|| action == "pull" || action == "release";
 	}
 
 	// Nuke's own report of what failed: from its last line starting "nuke:" to the end; "" when it printed none.

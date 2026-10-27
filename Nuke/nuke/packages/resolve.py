@@ -62,6 +62,7 @@ class Root:
 	requirement: object     # manifest.PackageRequirement
 	by: str
 	file: str = None        # the manifest that declares it
+	project: str = None     # the workspace's project that declares it
 
 
 @dataclass

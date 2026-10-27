@@ -1,5 +1,5 @@
 // The nuke plugin's package fetch (docs/31 section 6): for each trusted workspace that uses Nuke packages (its
-// nuke.toml has [sources] or [packages], or it has a lock: packages/nuke.lock, or nuke.lock from older Nukes),
+// nuke.toml has [dependencies], or it has a lock: packages/nuke.lock, or nuke.lock from older Nukes),
 // `nuke package status --fetch` when it opens or is trusted, then every nuke.packages.fetchMinutes. Nuke fetches each
 // develop clone and writes
 // .ied/local/readonly/nuke.json again, which the server reads by itself (docs/10 "Read-only folders"): a clone that fell

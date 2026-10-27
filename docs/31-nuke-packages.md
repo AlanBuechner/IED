@@ -17,68 +17,68 @@ The user reference is [`Nuke/README.md`](../Nuke/README.md) section 12; this doc
 
 | Term | Is |
 |---|---|
-| **source** | a git repository of packages, named by its URL in a `[packages]` entry (`git = "https://github.com/AlanBuechner/Claymore.git"`) or by a short name from the workspace's `[sources]`. Any URL git can fetch: https, ssh, a local path |
-| **package** | a folder of a source whose `nuke.toml` has a `[package]` table; named by its path in the repository (`Windowing`, `Renderer/RHI/DX12`). Its projects are its own folder's `[project]` and every project folder below it that is not inside another package |
-| **version** | a git tag: `<package path>/v<semver>` (`Windowing/v1.2.0`), or `v<semver>` for the repository as a whole - Go's convention for modules in subfolders, so a Go module in a package folder has the same versions for `go get` |
-| **sub-package** | a package inside another one. Without tags of its own it is released with the nearest package above it that has some (the repository's `v` tags at the top); with its own tags it is versioned on its own |
-| **versioned package** | a package that has tags of its own, or the repository root: the unit a version is chosen for. Every package released with it comes from the same commit |
-| **lock** | `packages/nuke.lock`: the exact commit of every versioned package the workspace uses. Generated from `nuke.toml`, ignored with the packages folder |
+| **repository** | a git repository of packages. Any URL git can fetch: https, ssh, a local path |
+| **package** | a folder of a repository whose `nuke.toml` has a `[package]` table with its `version`; named by its folder in the repository (`Windowing`, `Renderer/RHI/DX12`). Its projects are its own folder's `[project]` and every project folder below it that is not inside another package |
+| **source** | what a dependency names: a package - the repository's URL followed by the package's folder (`https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12`) - or a local folder (a project of the same package) |
+| **version** | a package's `[package] version`, and the git tag `<package folder>/v<semver>` (`Windowing/v1.2.0`), or `v<semver>` for the repository as a whole - Go's convention for modules in subfolders, so a Go module in a package folder has the same versions for `go get` |
+| **versioned package** | a package that has tags of its own, or the repository root: the unit a version is chosen for. A package inside it without tags of its own is released with it, from the same commit |
+| **lock** | `packages/nuke.lock`: the exact commit of every versioned package the workspace uses. Generated from the manifests, ignored with the packages folder |
 | **locked** | a package installed read-only at the lock's commit: the default |
-| **writable** (develop) | a source a workspace edits: a git clone of the repository inside the workspace, built from its working tree - `writable = true` on its entry in `nuke.toml`, or `nuke package develop` on one machine |
+| **writable** (develop) | a repository a workspace edits: a git clone inside the workspace, built from its working tree - `writable = true` on a dependency, or `nuke package develop` on one machine |
 
-A workspace says what it uses in its `nuke.toml`, as Cargo's git dependencies do, and nothing else - the build pulls it:
+A project says what it uses in its own `nuke.toml`, one form for everything, as Cargo's dependencies do - and nothing
+else is written: any Nuke command pulls it.
 
 ```toml
-[packages]   # name = { the repository, the package's folder in it, the version } - private: git's own credentials
-Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Windowing", version = "^0.2" }
-RhiD3D12  = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Renderer/RHI/DX12", version = "~0.3.1", writable = true }
-Utils     = { git = "git@github.com:me/utils.git", path = "Utils", branch = "main" }   # no release yet: a branch's tip
-Strings   = { git = "git@github.com:me/utils.git", path = "Strings", rev = "1a2b3c4d" } # or one commit
+[dependencies]   # name = { source, versions accepted } - private repositories: git's own credentials
+RhiD3D12  = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12", version = "~0.3.1" }
+Windowing = { source = "https://github.com/AlanBuechner/Claymore.git/Windowing", version = "^0.2", writable = true }
+Utils     = { source = "git@github.com:me/utils.git/Utils", branch = "main" }      # no release yet: a branch's tip
+Strings   = { source = "git@github.com:me/utils.git/Strings", rev = "1a2b3c4d" }   # or one commit
+Core      = { source = "../Core" }                                                # a project of the same package
 ```
 
-The name is the entry's own (messages and `nuke package remove` use it); `path` defaults to it. A repository used often
-can have a short name, `[sources] claymore = "<url>"`, and then `source = "claymore"` stands for the URL
-(`Windowing = "claymore@^0.2"` is the short form at the path `Windowing`). `writable = true` makes the build clone the package's
-repository into the workspace (one clone per repository: all its packages build from it); without it every package is
-installed locked. Taking `writable` away returns the repository to locked installs at the next build, which refuses
-while the clone has uncommitted changes or unpushed commits.
+The name is the entry's own (messages and `nuke package remove` use it). A dependency's projects are linked to the
+project by themselves; `depends` stays only for workspaces that name their own projects that way. `writable = true`
+makes the build clone the package's repository into the workspace (one clone per repository: all its packages build from
+it); without it every package is installed locked. Taking `writable` away returns the repository to locked installs at
+the next build, which refuses while the clone has uncommitted changes or unpushed commits.
 
-and its projects use the packages' projects by name, as they use their own: `depends = ["Windowing", "Win32", "RhiD3D12"]`.
-A project is compiled into a program only when something depends on it, so **which sub-packages a game uses is what its
-projects depend on**: a game that depends on `Win32` and not `Linux` gets Windowing's Win32 backend and never resolves
-what the Linux one needs.
+A project is compiled into a program only when something depends on it, so **which packages a game uses is what its
+projects name**: a game that names `Windowing/Win32` and not `Windowing/Linux` gets the Win32 backend and never
+resolves what the Linux one needs.
 
-A package says what it needs from other sources; what it needs from its own repository Nuke reads from its projects'
-`depends`:
+A package says what it needs the same way - every package, its own repository's too, by URL - and only a project of
+the same package by its folder:
 
 ```toml
 # Renderer/RHI/DX12/nuke.toml in the claymore repository
 [package]
+version = "0.2.1"
 description = "The Direct3D 12 backend of the RHI"
-
-[package.dependencies]
-Agility = { source = "https://github.com/me/D3D12Agility.git", version = "^1.614" }
 
 [project]
 name = "RhiD3D12"
 kind = "module"
-depends = ["Rhi", "Agility"]
+
+[dependencies]
+Rhi     = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RHI", version = "^0.2.1" }
+Agility = { source = "https://github.com/me/D3D12Agility.git/SDK", version = "^1.614" }
 ```
 
-The repository's own workspace uses every package's dependencies, so the repository builds and tests all of its packages
-together before it releases them.
+A local dependency that leaves its package is refused: whoever uses a package must get everything it uses, so a package
+reaches another package only by its URL. The repository's own workspace takes the packages its dependencies name on
+its own repository (one of the checkout's remotes) from its folders, so it builds and tests all of its packages together
+before it releases them.
 
 ## 2. Resolution
 
-1. **Requirements.** The workspace's `[packages]`, and every used package's `[package.dependencies]`. A version
+1. **Requirements.** The workspace's projects' `[dependencies]`, and every used package's. A version
    requirement is Cargo's: `1.2` and `^1.2` take any later version with the same major (or the same minor below 1.0),
    `~1.2.3` the same minor, `=1.2.3` one version, `>=1.2, <1.5` a range, `*` any. Prerelease versions only when a
    requirement names one.
-2. **Inferred requirements inside a repository.** A package whose project depends on a project of another package of
-   the same repository needs that package. Released with the same versioned package, it comes from the same commit;
-   versioned on its own, it needs at least the version that package had at the dependent's commit (the latest of its
-   tags in that commit's history), with the same major. Nothing to write: the repository's projects already say it, and
-   it holds at every commit.
+2. **Nothing is inferred.** A package's `[dependencies]` at the chosen version are the requirements it adds; a project
+   of it that depends on another package's project without naming that package is an error that says what to write.
 3. **Choice.** The highest version that satisfies every requirement on a versioned package. A workspace that has a lock
    keeps each locked version that still satisfies them (adding a package never moves another); `nuke package update`
    chooses the highest again. An update never moves a package back to an older commit than its lock's (a lock on an
@@ -105,7 +105,7 @@ together before it releases them.
 
 ```text
 MyGame/
-  nuke.toml            [workspace], [packages] (and [sources]): the one file you write
+  nuke.toml            [workspace]; each project's nuke.toml has its [dependencies]: the files you write
   packages/            Nuke's, all generated (in .git/info/exclude; [workspace] packages-dir changes the name)
     nuke.lock          the commit of every package: written from nuke.toml
     claymore/
@@ -163,8 +163,8 @@ Nuke writes the state IED needs on every command: `.ied/local/packages.json` (ea
 projects and whether it is writable; each develop clone's branch and how far it is ahead of and behind its remote) and
 `.ied/local/readonly/nuke.json` (the folders no one may write, each with the reason and the way out). "Behind" is what
 the clone last fetched: `nuke package status --fetch` fetches first, and IED's `nuke` plugin runs it by itself
-(2026-10-27, `plugins/nuke/code/`): in each trusted workspace that uses packages (its `nuke.toml` has `[sources]` or
-`[packages]`, or it has a lock), when the workspace opens or is trusted and then every
+(2026-10-27, `plugins/nuke/code/`): in each trusted workspace that uses packages (its `nuke.toml` has `[dependencies]`,
+or it has a lock), when the workspace opens or is trusted and then every
 `nuke.packages.fetchMinutes` (default 5; 0 turns it off). IED's server reads the file Nuke rewrites through its watcher
 (`docs/10` "Read-only folders"), so a clone that falls behind its remote turns read-only in the editor with no Nuke
 command run by hand; the plugin parses and enforces nothing itself. A fetch that fails (no network, a sign-in missing)
@@ -238,7 +238,7 @@ plugin's `ui/` and `code/PackageManager.cf`) is Visual Studio's NuGet window for
 | Installed | every versioned package of the lock: version, locked or developed, a newer release | the selected one's details: description, source and links (its repository, its files at this version, the commit), the requirement that brings it or the packages that do, its folder, sub-packages and projects, **Depends on** (each requirement and the version it reached) and **Required by** (the workspace and the packages that need it, with what they accept) |
 | Updates | the packages with a newer release: one `update` reaches (within the locked version's major), or a new major only a changed requirement takes | Update all (`nuke package update`), or one |
 | Browse | a source's packages at its default branch (`nuke package browse`): every released version, whether the workspace has it | Install a chosen version |
-| Sources | the workspace's `[sources]`, and the sources only packages' dependencies name | add (checked reachable first), remove (refused while used), browse |
+| Repositories | the repositories the workspace's projects name, and those only packages' dependencies name | browse |
 
 Choosing a version writes a requirement: `^version` for the newest release of its line (later fixes still come with
 updates), `=version` for an older one (`^` would keep the newer release locked); the line under the picker says which.
@@ -261,7 +261,7 @@ the timed fetch) in a workspace whose window was opened.
 |---|---|---|
 | P-1 | A package is a folder with a `[package]` table in its `nuke.toml`, named by its path in the repository; no registry and no index file | The repository is the registry: nothing to publish to, nothing to keep in step; a private repository needs nothing but git access |
 | P-2 | Versions are git tags `<path>/v<semver>` (or `v<semver>` for the whole repository); a package without tags of its own is released with the nearest package above it that has some | One repository holds many independently versioned packages, or one version for all; Go uses the same tags, so Go modules and Nuke packages share versions; `ls-remote` alone lists every version |
-| P-3 | Same-repository dependencies are inferred from projects' `depends` and the tag history; other sources' are declared in `[package.dependencies]` | The repository already says which of its projects use which; writing it twice would drift. Another source needs a URL and a requirement, which nothing else gives |
+| P-3 | Every dependency is written in `[dependencies]` - a package by its repository's URL and folder, its own repository's too; a local folder only within the same package (refused outside it) - and nothing is inferred (owner, 2026-10-27: "a package could depend on another package in another repo"; "one system that will handle both local packages and remote packages"). Earlier: same-repository dependencies were inferred from `depends` and tags | A package manager can follow links it reads, across repositories; a package carries what it uses |
 | P-4 | The workspace lists versioned packages; which of their projects and sub-packages are used follows the projects' `depends` | "Optional submodules for what platforms you want to support" without a feature system: a backend no project depends on costs nothing, and its own dependencies are never resolved |
 | P-5 | The lock (`packages/nuke.lock`) holds commits, and a develop checkout's HEAD goes into it on every command; it is generated from `nuke.toml` and ignored with the packages (owner, 2026-10-27: "the lock file is a generated file so it should be ignored") | A checkout keeps the versions it chose until `update` or a changed requirement, and builds offline; `nuke.toml` is what the program commits - a version it must build with exactly is `=x.y.z` there. Earlier it was committed beside `nuke.toml`, so a game's commit pinned every package's commit; the owner made `nuke.toml` the only file a program keeps |
 | P-6 | Packages are installed inside the workspace (`packages/`), locked ones read-only on disk; mirrors are shared per machine | IED edits only workspace files; read-only on disk stops every writer, not only IED; mirrors make a second workspace's install a local copy |
@@ -269,4 +269,4 @@ the timed fetch) in a workspace whose window was opened.
 | P-8 | Files of a package are writable only in a develop checkout that is not behind its remote | The owner's lock-out, sharpened: there is exactly one writable copy of a package line, and it is the newest |
 | P-9 | Nuke resolves only Nuke packages; language package managers keep their own dependencies | Native first (N-15); Nuke adds the cross-language graph, not a second resolver for crates and modules |
 | P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles; IED's gopls and rust-analyzer get workspace-wide ones through their profiles' `initializationOptionsFile` | Developing a package must not change what the program commits, and one codebase must hold for every language and in the editor: the tools build the clone the way their own users would, one language server serves the workspace as before, and removing one folder brings back the releases |
-| P-11 | A workspace's `nuke.toml` alone says what it uses - a `[packages]` entry carries its repository's git URL (`git = ...`) and whether it is `writable` - and any Nuke command, a build first of all, pulls and clones to match; `[sources]` and the `nuke package` commands are conveniences over the same file | The owner: "give it a package at a git url and list a version, then when I build it pulls that package down, write-locked or writable if it says so" - Cargo's model. What a checkout of the workspace builds is what its committed manifest says, on every machine |
+| P-11 | The manifests alone say what a workspace uses - each project's `[dependencies]` names a source (`"<repository URL>/<folder>"`) and whether it is `writable` - and any Nuke command, a build first of all, pulls and clones to match; the `nuke package` commands are conveniences over the same files | The owner: "give it a package at a git url and list a version, then when I build it pulls that package down, write-locked or writable if it says so" - Cargo's model. What a checkout of the workspace builds is what its committed manifest says, on every machine |

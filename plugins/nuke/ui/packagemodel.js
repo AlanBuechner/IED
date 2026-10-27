@@ -84,11 +84,15 @@ export function treeLink(web, line, version) {
 	return web ? web + "/tree/" + tagOf(line, version) + (line ? "/" + line : "") : null;
 }
 
-// How an action names the source: its [sources] name, else its URL (a [packages] entry's git URL, or a source only a
-// package's dependencies name).
-export function sourceWord(body, item) {
-	const named = (body.sources || []).find((s) => !s.transitive && !s.git && sameRepository(s.url, item.url));
-	return named ? named.name : item.url;
+// The source a [dependencies] entry names the versioned package by: "<repository URL>/<its folder>".
+export function sourceOf(item) {
+	return item.path ? item.url + "/" + item.path : item.url;
+}
+
+// The words that make a project's [dependencies] entry `source` want `requirement` (`project`: the one declaring it,
+// else Nuke's choice - the workspace's default project).
+export function addWords(source, requirement, project) {
+	return ["add", source, requirement].concat(project ? ["--project", project] : []);
 }
 
 // Rows of the Installed tab: every versioned package the lock holds, by name.

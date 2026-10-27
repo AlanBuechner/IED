@@ -18,7 +18,8 @@ from server import REPO, IedServer, ServerTestCase
 PLUGIN = os.path.join(REPO, "plugins", "nuke")
 CLONE = "packages/claymore"
 REASON = "claymore is 1 commit(s) behind origin/main: pull it"
-MANIFEST = '[workspace]\nname = "Game"\n\n[sources]\nclaymore = "https://example.invalid/claymore.git"\n\n[packages]\nWindowing = "claymore@^0.2"\n'
+MANIFEST = ('[workspace]\nname = "Game"\n\n[project]\nname = "Game"\n\n[dependencies]\n'
+	'Windowing = { source = "https://example.invalid/claymore.git/Windowing", version = "^0.2" }\n')
 FAKE_NUKE = """@echo off
 echo %*>> "%~dp0calls.txt"
 if exist "%~dp0fail.txt" (
@@ -144,7 +145,7 @@ class NukePluginFetchTests(ServerTestCase):
 		await self.start()
 		await self.trust()
 		await asyncio.sleep(4)
-		self.assertEqual([], self.calls(), "a workspace without [sources], [packages] or nuke.lock has nothing to fetch")
+		self.assertEqual([], self.calls(), "a workspace without [dependencies] or a lock has nothing to fetch")
 		write(os.path.join(self.game, "packages", "nuke.lock"), "version = 1\n")
 		await self.until_calls(1, seconds=6)
 		await self.client.request("settings.set", {"tier": "app", "key": "nuke.packages.fetchMinutes", "value": 0})

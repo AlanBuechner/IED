@@ -15,13 +15,12 @@ static IED::CommandResult Ran(int32 exitCode, const char* output, const char* pr
 class NukePackagesTests {
 	[test("uses_packages")]
 	public static void TestUsesPackages() {
-		assert_true(NukePlugin::UsesPackages(Core::StringView("[workspace]\nname = \"Game\"\n\n[sources]\nclaymore = \"https://x/claymore.git\"\n")), "a [sources] table");
-		assert_true(NukePlugin::UsesPackages(Core::StringView("[packages]   # what it uses\r\nWindowing = \"claymore@^0.2\"\r\n")), "a [packages] table, CRLF and a comment");
-		assert_true(NukePlugin::UsesPackages(Core::StringView("[workspace]\n[packages.Renderer]\nsource = \"claymore\"\n")), "a table under [packages]");
-		assert_true(NukePlugin::UsesPackages(Core::StringView("packages.Windowing = \"claymore@^0.2\"\n[workspace]\n")), "a dotted key before any table");
+		assert_true(NukePlugin::UsesPackages(Core::StringView("[project]\nname = \"Game\"\n\n[dependencies]\nWin32 = { source = \"https://x/c.git/Windowing/Win32\" }\n")), "a [dependencies] table");
+		assert_true(NukePlugin::UsesPackages(Core::StringView("[dependencies]   # what it uses\r\nCore = { source = \"../Core\" }\r\n")), "CRLF and a comment");
+		assert_true(NukePlugin::UsesPackages(Core::StringView("[project]\n[dependencies.Renderer]\nsource = \"https://x/c.git/Renderer\"\n")), "a table under [dependencies]");
+		assert_true(NukePlugin::UsesPackages(Core::StringView("dependencies.Win32 = { source = \"https://x/c.git/W\" }\n[project]\n")), "a dotted key before any table");
 		assert_true(!NukePlugin::UsesPackages(Core::StringView("[workspace]\npackages-dir = \"deps\"\n[project]\nname = \"Game\"\n")), "packages-dir is no package");
-		assert_true(!NukePlugin::UsesPackages(Core::StringView("[package]\ndescription = \"x\"\n[package.dependencies]\nA = { source = \"u\" }\n")), "a package's own manifest uses none by itself");
-		assert_true(!NukePlugin::UsesPackages(Core::StringView("[workspace]\nsources = 1\n# [packages]\n")), "a key inside another table, a comment");
+		assert_true(!NukePlugin::UsesPackages(Core::StringView("[workspace]\ndependencies = 1\n# [dependencies]\n")), "a key inside another table, a comment");
 	}
 
 	[test("interval")]

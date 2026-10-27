@@ -54,7 +54,7 @@ namespace NukePlugin
 			Serialization::DomNode list = args.Member("args");
 			for (int64 i = 0; i < list.Count(); ++i) job.m_Words.Push(Core::String(list.At(i).AsView()));
 			if (job.m_Words.IsEmpty() || !IsPackageAction(job.m_Words[0].View()))
-				return IED::Refusal(Core::StringView("not a package action: update, add, remove, develop, lock, pull, release or source"));
+				return IED::Refusal(Core::StringView("not a package action: update, add, remove, develop, lock, pull or release"));
 			return self->Ask(args.Member("wsId").AsView(), job);
 		});
 	}

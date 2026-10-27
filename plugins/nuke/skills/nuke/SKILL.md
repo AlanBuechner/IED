@@ -63,33 +63,32 @@ ${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words 
 
 ## Packages
 
-Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). The workspace's `nuke.toml` lists what
-it uses in `[packages]`, each entry with its repository's git URL and a version, as Cargo's git dependencies:
-`RhiD3D12 = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Renderer/RHI/DX12", version = "^0.2" }`
-(the package's folder in the repository; `source = "<[sources] name>"` instead of `git` for a short name). Any Nuke
-command, a build first of all, pulls them; nothing but `nuke.toml` is ever edited by hand. Its projects depend on the
-packages' projects by name. `packages/nuke.lock` (generated, not committed) pins each package's commit; installs live
-in `packages/` and are read-only, unless the entry says `writable = true`: then the build clones the repository into
-`packages/<source>/` to edit.
+Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). A project's `nuke.toml` lists what it uses
+in `[dependencies]`, one form for everything, as Cargo's dependencies:
+`RhiD3D12 = { source = "https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12", version = "^0.2.1" }` (the
+repository's URL, then the package's folder there) or `Core = { source = "../Core" }` (a project of the same package).
+Any Nuke command, a build first of all, pulls them and what they need; nothing but `nuke.toml` files are edited by
+hand, and a dependency's projects are linked without `depends`. `packages/nuke.lock` (generated, not committed) pins
+each package's commit; installs live in `packages/` and are read-only, unless the dependency says `writable = true`:
+then the build clones the repository into `packages/<repository>/` to edit.
 
     nuke package status [--fetch] [--json]   versions, commits, projects, locked or developed (tool: nuke_packages)
     nuke package update [NAME...]            newest versions the requirements allow
-    nuke package add SOURCE PACKAGE [REQ]    use one more package (SOURCE: a [sources] name or a git URL;
-                                             --writable: a clone to edit)
-    nuke package develop SOURCE              packages/<source>/ becomes a git clone: edit the package with the program
-    nuke package pull SOURCE                 a clone behind its remote is read-only until pulled (IED fetches
+    nuke package add SOURCE [REQ]            add a dependency to a project (--project NAME; --writable: a clone)
+    nuke package develop REPOSITORY          packages/<name>/ becomes a git clone: edit the package with the program
+    nuke package pull REPOSITORY             a clone behind its remote is read-only until pulled (IED fetches
                                              every few minutes, so a clone can turn read-only mid-task: pull it)
-    nuke package lock SOURCE                 back to read-only installs (the clone's commits must be pushed first)
-    nuke package release PACKAGE... --minor  tag and push the next versions (asks the owner: it publishes)
+    nuke package lock REPOSITORY             back to read-only installs (the clone's commits must be pushed first)
+    nuke package release PACKAGE... --minor  write the next versions, commit, tag and push (asks the owner: it publishes)
 
 - **Never edit, copy or patch a file under `packages/` that is locked**: it is a released version, read-only on disk
-  and in IED. To change it, make it writable (`writable = true` in nuke.toml for everyone who checks the workspace out,
-  or `develop` its source on this machine), edit the clone, build, commit there, push; the program's lock follows the
-  clone's commits, so no release is needed to keep working.
-- A package is a folder with `[package]` in its `nuke.toml`; its versions are tags `<path>/v<semver>`; a sub-package
-  (a package inside one) is released with it. Dependencies inside a repository are read from projects' `depends`;
-  other repositories are named in `[package.dependencies]`.
-- A conflict error names every requirement and who made it: change the workspace's requirement, or update or release
+  and in IED. To change it, make it writable (`writable = true` on its dependency for everyone who checks the workspace
+  out, or `develop` its repository on this machine), edit the clone, build, commit there, push; the program's lock
+  follows the clone's commits, so no release is needed to keep working.
+- A package is a folder with `[package]` (its `version`) in its `nuke.toml`; its versions are also tags
+  `<folder>/v<semver>`. A package lists every package it uses in `[dependencies]` by URL, its own repository's too;
+  only a project of the same package is a local folder - Nuke refuses one outside the package.
+- A conflict error names every requirement and who made it: change the project's requirement, or update or release
   the package that made the other one.
 
 ## Toolchains and compiler bugs

@@ -645,7 +645,7 @@ class CommandTests(PackageTest):
 		body = json.loads(out[out.index("{"):])
 		self.assertEqual(body["sources"], [{"name": "engine", "url": self.engine.url, "web": None}])
 		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": f"{self.engine.url}/Renderer", "url": self.engine.url,
-			"requirement": "^1.0", "kind": "version", "by": "project Game", "file": "Game/nuke.toml"}])
+			"requirement": "^1.0", "kind": "version", "by": "project Game", "file": "Game/nuke.toml", "project": "Game"}])
 		packages = {p["path"]: p for p in body["packages"]}
 		renderer, windowing = packages["Renderer"], packages["Windowing"]
 		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2")])

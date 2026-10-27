@@ -5,7 +5,7 @@ include "api/Process.ch"
 
 namespace NukePlugin
 {
-	// Whether a nuke.toml uses packages: a [sources] or [packages] table, or a table under one of them.
+	// Whether a nuke.toml uses packages: a [dependencies] table, or a table under it.
 	bool UsesPackages(Core::StringView manifest);
 	// The time between two fetches for a nuke.packages.fetchMinutes value (JSON): its minutes in ms; 0 when it is off.
 	int64 FetchIntervalMs(Core::StringView settingJson);
@@ -17,8 +17,7 @@ namespace NukePlugin
 	// The JSON document Nuke printed among its notes: from the first line that starts with '{' to the last that starts
 	// with '}' (its --json output is indented, so only its own braces start a line); "" when there is none.
 	Core::String PrintedJson(Core::StringView output);
-	// Whether the Package Manager may run `nuke package <action>`: update, add, remove, develop, lock, pull, release or
-	// source.
+	// Whether the Package Manager may run `nuke package <action>`: update, add, remove, develop, lock, pull or release.
 	bool IsPackageAction(Core::StringView action);
 	// What went wrong in a fetch's run: why it did not run, else Nuke's error, else the end of its output; "" when it
 	// worked.

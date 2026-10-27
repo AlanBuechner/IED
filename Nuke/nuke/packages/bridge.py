@@ -58,6 +58,8 @@ def _requirement(spec, root):
 		"kind": "branch" if r.branch else "rev" if r.rev else "version", "by": root.by}
 	if root.file:
 		item["file"] = _relative(root.file, spec.dir)
+	if root.project:
+		item["project"] = root.project
 	if r.writable:
 		item["writable"] = True
 	return item

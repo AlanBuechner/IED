@@ -23,8 +23,8 @@
 		"bindings": {
 			"provides": [
 				{ "name": "nuke.packages.refresh", "version": "1", "kind": "function", "description": "Reads workspace wsId's packages again (nuke package status --json; fetch: ask the remotes first) into the topic packages:<wsId>: {wsId, fetch?} -> {queued}." },
-				{ "name": "nuke.packages.browse", "version": "1", "kind": "function", "description": "Reads the packages a source offers (nuke package browse <source> --json; offline: from the machine's mirror, no fetch) into packages:<wsId>: {wsId, source, offline?} -> {queued}." },
-				{ "name": "nuke.packages.run", "version": "1", "kind": "function", "description": "Runs nuke package <args> in workspace wsId after what is queued there - args[0] update, add, remove, develop, lock, pull, release or source - its output in packages:<wsId>, then reads the status again: {wsId, args} -> {queued}." }
+				{ "name": "nuke.packages.browse", "version": "1", "kind": "function", "description": "Reads the packages a repository offers (nuke package browse <its URL or name> --json; offline: from the machine's mirror, no fetch) into packages:<wsId>: {wsId, source, offline?} -> {queued}." },
+				{ "name": "nuke.packages.run", "version": "1", "kind": "function", "description": "Runs nuke package <args> in workspace wsId after what is queued there - args[0] update, add, remove, develop, lock, pull or release - its output in packages:<wsId>, then reads the status again: {wsId, args} -> {queued}." }
 			],
 			"consumes": [
 				{ "name": "nuke.packages.refresh", "version": "1" },
@@ -44,7 +44,7 @@
 			]
 		},
 		"systemMessageSections": [
-			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies. Projects under packages/ come from Nuke packages (nuke_packages): a locked package is read-only - to change one, develop its source (nuke_package develop), never edit or copy its files." }
+			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies. A project lists the packages it uses in its nuke.toml's [dependencies] as { source = \"<repository URL>/<package folder>\", version = \"^1.0\" } (or a local folder of the same package); any Nuke command pulls them into packages/ (nuke_packages lists them). A locked package is read-only - to change one, mark its dependency writable = true or develop its repository (nuke_package develop), never edit or copy its files." }
 		],
 		"toolCalls": [
 			{
@@ -67,13 +67,13 @@
 			},
 			{
 				"name": "nuke_package",
-				"description": "Change the workspace's packages. develop SOURCE: its packages build from a clone in packages/<source>/ to edit together with the program (the lock follows the clone's commits). lock SOURCE: back to read-only installs once the clone's commits are pushed. pull SOURCE: bring a clone up to date (a clone behind its remote is read-only). update [NAME...]: the newest versions the requirements allow. add SOURCE PACKAGE [REQUIREMENT]: use a package (SOURCE a [sources] name or a git URL). remove PACKAGE.",
+				"description": "Change the workspace's packages. develop SOURCE: its packages build from a clone in packages/<source>/ to edit together with the program (the lock follows the clone's commits). lock SOURCE: back to read-only installs once the clone's commits are pushed. pull SOURCE: bring a clone up to date (a clone behind its remote is read-only). update [NAME...]: the newest versions the requirements allow. add SOURCE [REQUIREMENT] [--project NAME]: a project uses a package (SOURCE \"<repository URL>/<package folder>\") or a local folder of its own package. remove NAME [--project NAME].",
 				"class": "exec",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
 						"action": { "enum": ["develop", "lock", "pull", "update", "add", "remove"] },
-						"arguments": { "type": "array", "items": { "type": "string" }, "description": "The action's words: a source, a package path, a requirement." }
+						"arguments": { "type": "array", "items": { "type": "string" }, "description": "The action's words: a repository's name or URL, a source, a requirement, --project NAME." }
 					},
 					"required": ["action"],
 					"additionalProperties": false
@@ -91,7 +91,7 @@
 					"properties": {
 						"packages": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Package paths in their repository (Windowing, Renderer/RHI)." },
 						"part": { "enum": ["--patch", "--minor", "--major"] },
-						"source": { "type": "string", "description": "Which develop clone, when several sources are developed." }
+						"source": { "type": "string", "description": "Which develop clone (its repository's name), when several are developed." }
 					},
 					"required": ["packages"],
 					"additionalProperties": false

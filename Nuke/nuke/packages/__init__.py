@@ -104,7 +104,7 @@ def workspace_roots(spec, projects=None):
 		declared.add(os.path.relpath(project.dir, spec.dir).replace("\\", "/"))
 		for requirement in project.dependencies:
 			if requirement.url is not None and local.path_of(requirement.url, requirement.path) is None:
-				roots.append(Root(requirement.url, requirement, f"project {project.name}", project.file))
+				roots.append(Root(requirement.url, requirement, f"project {project.name}", project.file, project.name))
 	for folder, package in sorted(local.by_path.items()):
 		if (folder or ".") in declared:
 			continue

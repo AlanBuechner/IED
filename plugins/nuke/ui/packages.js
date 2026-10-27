@@ -7,10 +7,10 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog, choiceDialog } from "/ui-kit/dialog.js";
 import {
 	browseRows, checkoutOf, descriptionOf, filtered, installedRows, packageName, requirementFor, requirementMeaning, requirementOf,
-	rowBringing, sameRepository, sourceWord, treeLink, updateOf, updateRows,
+	rowBringing, sameRepository, sourceOf, addWords, treeLink, updateOf, updateRows,
 } from "./packagemodel.js";
 
-const TABS = [["installed", "Installed"], ["updates", "Updates"], ["browse", "Browse"], ["sources", "Sources"]];
+const TABS = [["installed", "Installed"], ["updates", "Updates"], ["browse", "Browse"], ["sources", "Repositories"]];
 const STALE_MS = 60000;   // a status older than this is read again when the tab opens
 
 export class PackagesView {
@@ -146,7 +146,7 @@ export class PackagesView {
 	}
 
 	renderList(body, rows) {
-		const head = this.tab === "browse" ? this.browseHead(body) : this.tab === "sources" ? this.sourceForm() : this.tab === "updates" && rows.length ? this.updateAll(rows) : null;
+		const head = this.tab === "browse" ? this.browseHead(body) : this.tab === "updates" && rows.length ? this.updateAll(rows) : null;
 		const items = rows.map((row) => this.rowElement(body, row));
 		replace(this.list, head, items.length ? items : h("div.pm-empty.muted", null, this.emptyText(body)));
 	}
@@ -175,13 +175,13 @@ export class PackagesView {
 	}
 
 	rowDescription(row) {
-		if (this.tab === "sources") return row.item.url + (row.item.transitive ? " (named by a package's dependencies)" : row.item.git ? " (a [packages] entry's git URL)" : "");
+		if (this.tab === "sources") return row.item.url + (row.item.transitive ? " (named by a package's dependencies)" : "");
 		return row.item.description !== undefined ? row.item.description : descriptionOf(row.item);
 	}
 
 	rowSide(body, row) {
 		const item = row.item;
-		if (this.tab === "sources") return row.item.transitive ? h("span.chip", null, "transitive") : row.item.git ? h("span.chip", null, "git") : null;
+		if (this.tab === "sources") return row.item.transitive ? h("span.chip", null, "transitive") : null;
 		if (this.tab === "browse") {
 			const newest = (item.versions || [])[0];
 			return [item.locked ? h("span.chip.ok", { title: "The workspace has " + item.locked }, item.locked) : null, h("span.pm-version", null, newest || "unreleased")];
@@ -204,13 +204,6 @@ export class PackagesView {
 		this.browseSource = source;
 		if (source && (again || !this.browsed())) this.call("nuke.packages.browse", { source });
 		this.render();
-	}
-
-	sourceForm() {
-		const name = h("input.input-field", { placeholder: "Name (claymore)", "aria-label": "Source name" });
-		const url = h("input.input-field.grow", { placeholder: "Git URL (https://github.com/owner/repo.git)", "aria-label": "Source URL" });
-		const add = () => name.value.trim() && url.value.trim() && this.run(["source", "add", name.value.trim(), url.value.trim()]);
-		return h("form.pm-list-head.pm-source-form", { on: { submit: (event) => { event.preventDefault(); add(); } } }, name, url, h("button.btn", { type: "submit" }, "Add source"));
 	}
 
 	updateAll(rows) {
@@ -311,19 +304,18 @@ export class PackagesView {
 		const wanted = requirementFor(versions, versions.includes(chosen) ? chosen : versions[0]);
 		const select = h("select.input-field", { "aria-label": "Version", on: { change: (event) => { this.versions.set(row.key, event.target.value); this.render(); } } },
 			versions.map((v) => h("option", { value: v, selected: v === chosen }, v + (v === item.version ? " (installed)" : ""))));
-		const source = requirement ? requirement.source : sourceWord(body, item);
-		const path = requirement ? requirement.path : item.path;
+		const words = addWords(requirement ? requirement.source : sourceOf(item), wanted, requirement && requirement.project);
 		const same = requirement && requirement.requirement === wanted;
 		const apply = h("button.btn", {
 			disabled: same || undefined,
-			title: "nuke package add " + source + " " + path + " " + wanted,
-			on: { click: () => this.run(["add", source, path, wanted]) },
+			title: "nuke package " + words.join(" "),
+			on: { click: () => this.run(words) },
 		}, requirement ? "Change requirement" : "Require it directly");
 		return h("div.pm-picker", null, h("span.muted", null, "Version"), select, apply, h("div.pm-meaning.muted", null, wanted + ": " + requirementMeaning(wanted)));
 	}
 
 	actions(body, item, requirement, checkout) {
-		const source = sourceWord(body, item);
+		const source = item.source;
 		const update = updateOf(item);
 		const buttons = [];
 		if (update && !update.breaking) buttons.push(this.button("Update to " + update.version, ["update", packageName(item.source, item.path)], true));
@@ -335,7 +327,8 @@ export class PackagesView {
 		else {
 			buttons.push(this.button("Develop", ["develop", source], false, null, "Clone " + item.source + " into the packages folder and build from it, to change it with the program"));
 		}
-		if (requirement) buttons.push(this.button("Remove", ["remove", requirement.path], false, { title: "Remove " + requirement.path, message: "The workspace stops using " + requirement.path + " (its [packages] entry goes; projects that depend on it stop building).", confirm: "Remove", danger: true }));
+		if (requirement) buttons.push(this.button("Remove", ["remove", requirement.name].concat(requirement.project ? ["--project", requirement.project] : []), false,
+			{ title: "Remove " + requirement.name, message: (requirement.project || "The project") + " stops using " + requirement.source + " (its [dependencies] entry goes).", confirm: "Remove", danger: true }));
 		return h("div.pm-actions", null, buttons);
 	}
 
@@ -358,11 +351,12 @@ export class PackagesView {
 		const versions = item.versions || [];
 		const chosen = this.versions.get(row.key) || versions[0];
 		const wanted = chosen ? requirementFor(versions, chosen) : null;
-		const install = () => (wanted ? this.run(["add", result.source, item.path, wanted]) : this.run(["add", result.source, item.path, "--rev", result.commit]));
+		const source = item.path ? result.url + "/" + item.path : result.url;
+		const install = () => this.run(wanted ? addWords(source, wanted) : ["add", source, "--rev", result.commit]);
 		const picker = versions.length
 			? h("div.pm-picker", null, h("span.muted", null, "Version"),
 				h("select.input-field", { "aria-label": "Version", on: { change: (event) => { this.versions.set(row.key, event.target.value); this.render(); } } }, versions.map((v) => h("option", { value: v, selected: v === chosen }, v))),
-				h("button.btn.primary", { title: "nuke package add " + result.source + " " + item.path + " " + wanted, on: { click: install } }, item.requirement ? "Change requirement" : "Install"),
+				h("button.btn.primary", { title: "nuke package " + addWords(source, wanted).join(" "), on: { click: install } }, item.requirement ? "Change requirement" : "Install"),
 				h("div.pm-meaning.muted", null, wanted + ": " + requirementMeaning(wanted)))
 			: h("div.pm-picker", null, h("span.muted", null, "No release yet."), h("button.btn", { on: { click: install } }, "Install at " + result.commit.slice(0, 8)));
 		return [
@@ -377,8 +371,8 @@ export class PackagesView {
 				chosen && result.web ? ["At " + chosen, this.link("its files at " + chosen, treeLink(result.web, item.line, chosen))] : null,
 			]),
 			picker,
-			item.requirement ? h("div.pm-actions", null, this.button("Remove", ["remove", item.path], false, { title: "Remove " + item.path, message: "The workspace stops using " + item.path + ".", confirm: "Remove", danger: true })) : null,
-			this.section("Depends on", (item.dependencies || []).map((d) => this.edge(packageName(d.source || result.source, d.path), d.requirement, ""))),
+			item.requirement ? h("div.pm-actions", null, this.button("Remove", ["remove", source], false, { title: "Remove " + item.path, message: "The projects that use " + source + " stop using it.", confirm: "Remove", danger: true })) : null,
+			this.section("Depends on", (item.dependencies || []).map((d) => this.edge(d.url ? packageName(result.source, d.path) : d.path, d.url ? d.requirement : "(a project of this package)", ""))),
 		];
 	}
 
@@ -388,8 +382,7 @@ export class PackagesView {
 			h("div.pm-title", null, icon("repo"), h("span.pm-name", null, source.name), source.transitive ? h("span.chip", null, "transitive") : null),
 			this.facts([["URL", source.url], ["Page", this.link(source.web || "none (a local repository)", source.web)], ["Used", used.join(", ") || "nothing yet"]]),
 			h("div.pm-actions", null,
-				h("button.btn.primary", { on: { click: () => { this.tab = "browse"; this.browse(source.name); } } }, "Browse"),
-				source.transitive || source.git ? null : this.button("Remove", ["source", "remove", source.name], false, { title: "Remove " + source.name, message: "The source leaves [sources]. Nuke refuses while a package of it is used.", confirm: "Remove", danger: true })),
+				h("button.btn.primary", { on: { click: () => { this.tab = "browse"; this.browse(source.name); } } }, "Browse")),
 		];
 	}
 
