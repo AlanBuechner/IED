@@ -472,17 +472,36 @@ namespace
 	};
 }
 
-// A crash of the compiler itself is reported as one, with the faulting offset inside C4.exe (and the stack's),
-// which llvm-symbolizer turns into source lines against this build's C4.pdb.
+// The faulting thread's frames from the fault's own context, outward, by each function's unwind data (the filter runs
+// on top of the exception's dispatch, where a capture of the current stack finds nothing of the fault, BUG-394).
+static void ReportFaultingStack(CONTEXT context, uintptr_t base)
+{
+	constexpr int kMostFrames = 48;
+	for (int i = 0; i < kMostFrames && context.Rip != 0; ++i)
+	{
+		fprintf(stderr, "  C4.exe+0x%llx\n", (unsigned long long)(context.Rip - base));
+		DWORD64 imageBase = 0;
+		PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(context.Rip, &imageBase, nullptr);
+		if (!function)
+		{
+			context.Rip = *reinterpret_cast<const DWORD64*>(context.Rsp); // a leaf: its return address is on top
+			context.Rsp += sizeof(DWORD64);
+			continue;
+		}
+		void* handlerData = nullptr;
+		DWORD64 establisher = 0;
+		RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, context.Rip, function, &context, &handlerData, &establisher, nullptr);
+	}
+}
+
+// A crash of the compiler itself is reported as one, with the faulting offset inside C4.exe and the stack's, which
+// llvm-symbolizer turns into source lines against this build's C4.pdb.
 static LONG WINAPI ReportInternalError(EXCEPTION_POINTERS* ep)
 {
 	const auto base = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-	const auto offset = [base](const void* at) { return (unsigned long long)(reinterpret_cast<uintptr_t>(at) - base); };
 	fprintf(stderr, "C4: internal compiler error: exception 0x%lx at C4.exe+0x%llx\n", ep->ExceptionRecord->ExceptionCode,
-		offset(ep->ExceptionRecord->ExceptionAddress));
-	void* frames[32];
-	const USHORT count = CaptureStackBackTrace(1, 32, frames, nullptr);
-	for (USHORT i = 0; i < count; ++i) fprintf(stderr, "  C4.exe+0x%llx\n", offset(frames[i]));
+		(unsigned long long)(reinterpret_cast<uintptr_t>(ep->ExceptionRecord->ExceptionAddress) - base));
+	ReportFaultingStack(*ep->ContextRecord, base);
 	fprintf(stderr, "Please report it with the program that triggered it.\n");
 	return EXCEPTION_EXECUTE_HANDLER;
 }
