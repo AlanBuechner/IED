@@ -39,6 +39,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 31 | Showing a workspace file in the OS file manager (2026-10-26) | A server method, `fs.reveal`: workspace-relative paths that stay inside the workspace's folder, a folder opened and a file selected (never opened), only for a client on the server's machine (`welcome.local`); the menu rows are hidden elsewhere rather than opening a window on a desktop the person is not at | `docs/10`, `docs/11`, `docs/15` |
 | 32 | What a tether does when its tab is replaced in a preview tab's place (2026-10-26) | The replacing tab takes the tether over (it was dropped): a preview stays with its group and follows the files browsed there | `docs/15` "Tethered tabs" |
 | 33 | Ctrl+, without a workspace (2026-10-26) | VS's Ctrl+, stays Go To All; where no workspace is shown (the start page), which has no Go To All, it opens Settings | `docs/15` "Keyboard" |
+| 34 | A package manager for Nuke (owner, 2026-10-27) | Packages are folders of git repositories with `[package]`, versioned by Go-style tags, locked by commit in `nuke.lock`, installed read-only inside the workspace; a source is developed in place as a clone whose HEAD the lock follows; the only writable copy of a package is a develop checkout that is not behind its remote, which IED enforces through read-only folders any tool can name (`.ied/local/readonly/`) | `docs/31`, `docs/23` N-28 |
 
 ## Open - owner's call
 

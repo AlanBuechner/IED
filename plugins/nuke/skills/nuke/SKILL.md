@@ -1,11 +1,14 @@
 ---
 name: nuke
-description: Building, running and testing C4 workspaces with Nuke - the nuke command line (chained commands, configurations, projects), nuke.toml workspace and project manifests, custom build steps and commands, versioned C4 toolchains, and what to do when the compiler itself is wrong.
+description: Building, running and testing C4 workspaces with Nuke - the nuke command line (chained commands, configurations, projects), nuke.toml workspace and project manifests, custom build steps and commands, packages from git repositories (versions, the lock, developing a package in place, releasing), versioned C4 toolchains, and what to do when the compiler itself is wrong.
 triggers:
   - "nuke build run test"
   - "nuke.toml"
   - "add a build step"
   - "custom nuke command"
+  - "nuke package"
+  - "nuke.lock"
+  - "change a package"
   - "which C4 toolchain"
   - "compiler bug"
 ---
@@ -56,6 +59,29 @@ attach steps to them with `phase = "kit"`. Python steps: `python = "file.py:func
 listed in `scripts = [...]` define `register(nuke)` and call `nuke.command(...)` / `nuke.step(...)`.
 Variables: `${workspace.dir} ${project.dir} ${project.name} ${config} ${arch} ${bin} ${int} ${output}
 ${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words after `--`).
+
+## Packages
+
+Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). The workspace names repositories in
+`[sources]` and what it uses in `[packages]` (`Windowing = "claymore@^0.2"`); its projects depend on the packages'
+projects by name. `nuke.lock` (committed) pins each package's commit; installs live in `packages/` and are read-only.
+
+    nuke package status [--fetch] [--json]   versions, commits, projects, locked or developed (tool: nuke_packages)
+    nuke package update [NAME...]            newest versions the requirements allow
+    nuke package add SOURCE PACKAGE [REQ]    use one more package (SOURCE: a [sources] name or a git URL)
+    nuke package develop SOURCE              packages/<source>/ becomes a git clone: edit the package with the program
+    nuke package pull SOURCE                 a clone behind its remote is read-only until pulled
+    nuke package lock SOURCE                 back to read-only installs (the clone's commits must be pushed first)
+    nuke package release PACKAGE... --minor  tag and push the next versions (asks the owner: it publishes)
+
+- **Never edit, copy or patch a file under `packages/` that is locked**: it is a released version, read-only on disk
+  and in IED. To change it, `develop` its source, edit the clone, build, commit there, push; the program's lock follows
+  the clone's commits, so no release is needed to keep working.
+- A package is a folder with `[package]` in its `nuke.toml`; its versions are tags `<path>/v<semver>`; a sub-package
+  (a package inside one) is released with it. Dependencies inside a repository are read from projects' `depends`;
+  other repositories are named in `[package.dependencies]`.
+- A conflict error names every requirement and who made it: change the workspace's requirement, or update or release
+  the package that made the other one.
 
 ## Toolchains and compiler bugs
 

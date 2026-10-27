@@ -51,6 +51,8 @@ namespace Ai
 			const bool whole = view.StartsWith(Core::StringView("${args.")) && view.EndsWith(Core::StringView("}")) && view.IndexOf('}', 0) == view.ByteLength() - 1;
 			Core::String name = whole ? Core::String(view.Substring(7, view.ByteLength() - 8)) : Core::String();
 			Serialization::DomNode value = whole ? args.Member(name.CStr()) : Serialization::DomNode();
+			// An argument the call left out is no word at all, not an empty one a program would read as a value.
+			if (whole && (!value.IsValid() || value.Kind() == Serialization::DomKind::Null)) continue;
 			if (whole && value.Kind() == Serialization::DomKind::Array)
 				for (int64 i = 0; i < value.Count(); ++i) argv.Push(ArgumentText(value.At(i)));
 			else argv.Push(ExpandWord(view, args, setting, tool));

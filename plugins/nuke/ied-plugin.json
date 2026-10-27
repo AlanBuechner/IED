@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "Build/Nuke" },
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies." }
+			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies. Projects under packages/ come from Nuke packages (nuke_packages): a locked package is read-only - to change one, develop its source (nuke_package develop), never edit or copy its files." }
 		],
 		"toolCalls": [
 			{
@@ -28,6 +28,49 @@
 				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
 				"run": ["${config:nuke.command}", "list", "--json"],
 				"output": "json",
+				"when": "workspaceContains.nuke.toml"
+			},
+			{
+				"name": "nuke_packages",
+				"description": "The workspace's Nuke packages (projects from git repositories, docs/31): each versioned package's source, version, commit, projects, folder and whether it is locked (read-only) or developed in a git clone (writable while it is not behind its remote); each clone's branch and how far it is ahead of and behind its remote. fetch: ask the remotes for newer releases and fetch the clones first.",
+				"class": "read",
+				"inputSchema": { "type": "object", "properties": { "options": { "type": "array", "items": { "enum": ["--fetch"] }, "description": "[\"--fetch\"]: ask the remotes first (network)." } }, "additionalProperties": false },
+				"run": ["${config:nuke.command}", "package", "status", "--json", "${args.options}"],
+				"output": "json",
+				"when": "workspaceContains.nuke.toml"
+			},
+			{
+				"name": "nuke_package",
+				"description": "Change the workspace's packages. develop SOURCE: its packages build from a clone in packages/<source>/ to edit together with the program (the lock follows the clone's commits). lock SOURCE: back to read-only installs once the clone's commits are pushed. pull SOURCE: bring a clone up to date (a clone behind its remote is read-only). update [NAME...]: the newest versions the requirements allow. add SOURCE PACKAGE [REQUIREMENT]: use a package (SOURCE a [sources] name or a git URL). remove PACKAGE.",
+				"class": "exec",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"action": { "enum": ["develop", "lock", "pull", "update", "add", "remove"] },
+						"arguments": { "type": "array", "items": { "type": "string" }, "description": "The action's words: a source, a package path, a requirement." }
+					},
+					"required": ["action"],
+					"additionalProperties": false
+				},
+				"run": ["${config:nuke.command}", "package", "${args.action}", "${args.arguments}"],
+				"when": "workspaceContains.nuke.toml"
+			},
+			{
+				"name": "nuke_package_release",
+				"description": "Release packages: tag each one's next version at HEAD of its checkout (a develop clone, or this repository of packages) and push the branch and the tags. Refuses uncommitted changes, a checkout behind its remote, and a package using another of its repository with unreleased changes; releases again the dependents a new version would leave behind. Without a part, a first release is 0.1.0 and later ones a patch.",
+				"class": "net",
+				"approval": "ask",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"packages": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Package paths in their repository (Windowing, Renderer/RHI)." },
+						"part": { "enum": ["--patch", "--minor", "--major"] },
+						"source": { "type": "string", "description": "Which develop clone, when several sources are developed." }
+					},
+					"required": ["packages"],
+					"additionalProperties": false
+				},
+				"run": ["${config:nuke.command}", "package", "release", "${args.packages}", "${args.part}", "--source=${args.source}"],
 				"when": "workspaceContains.nuke.toml"
 			}
 		],

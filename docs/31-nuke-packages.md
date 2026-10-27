@@ -149,9 +149,11 @@ that two projects never change a common module in conflicting ways. The rule Nuk
 3. **Nuke knows every checkout of a source on the machine.** `nuke package status` names the other workspaces developing
    the same source with uncommitted changes, which no remote can show yet.
 
-Nuke writes the state IED needs (`.ied/local/packages.json`: each package's folder, version, mode, whether it is
-writable and why not) on every command and on `nuke package status --fetch`, which IED's `nuke` plugin runs when a
-workspace opens and every few minutes so "behind" is noticed without a build.
+Nuke writes the state IED needs on every command: `.ied/local/packages.json` (each package's folder, version, mode,
+projects and whether it is writable; each develop clone's branch and how far it is ahead of and behind its remote) and
+`.ied/local/readonly/nuke.json` (the folders no one may write, each with the reason and the way out). "Behind" is what
+the clone last fetched: `nuke package status --fetch` fetches first (a periodic one from IED's `nuke` plugin is a
+follow-up: the plugin has no code yet).
 
 ## 7. Other package managers
 
