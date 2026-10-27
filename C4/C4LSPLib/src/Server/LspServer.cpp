@@ -151,21 +151,41 @@ namespace C4LSP::Server
 			if (scope >= 0) scopeDocs[scope].push_back(doc);
 		}
 		m_ScriptInputs.resize(m_Scripts.size());
+		m_ScriptHosts.resize(m_Scripts.size());
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			m_ScriptSessions.resize(m_Scripts.size());
+		}
 		std::vector<std::string> analyzed;
 		for (size_t scope = 0; scope < m_Scripts.size(); ++scope)
-		{
-			const auto inputs = InputsOf(scopeDocs[scope]);
-			if (inputs == m_ScriptInputs[scope] && (inputs.empty() || m_ScriptSessions[scope])) continue;
-			std::shared_ptr<CompilationSession> session = scopeDocs[scope].empty() ? nullptr : BuildScriptSession(scope, scopeDocs[scope]);
-			{
-				std::lock_guard<std::mutex> lock(m_SessionMutex);
-				m_ScriptSessions.resize(m_Scripts.size());
-				m_ScriptSessions[scope] = session;
-			}
-			m_ScriptInputs[scope] = inputs;
-			for (const auto& [uri, text] : scopeDocs[scope]) analyzed.push_back(uri);
-		}
+			if (AnalyzeScopeIfChanged(scope, scopeDocs[scope]))
+				for (const auto& [uri, text] : scopeDocs[scope]) analyzed.push_back(uri);
 		return analyzed;
+	}
+
+	bool LspServer::AnalyzeScopeIfChanged(size_t scope, const EditorDocuments& docs)
+	{
+		const bool analyzed = m_ScriptSessions[scope] != nullptr; // the worker's own field: no lock to read it
+		if (docs.empty())
+		{
+			if (!analyzed) return false; // no document of it opened yet: its interface is not even read
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			m_ScriptSessions[scope].reset(); // its last document closed
+			m_ScriptInputs[scope].clear();
+			m_ScriptHosts[scope].reset();
+			return false;
+		}
+		const auto inputs = InputsOf(docs);
+		std::shared_ptr<const LoadedInterface> host = m_Interfaces.Get(m_Scripts[scope].interfacePath); // read again when its file changed
+		if (analyzed && inputs == m_ScriptInputs[scope] && host == m_ScriptHosts[scope]) return false;
+		std::shared_ptr<CompilationSession> session = BuildScriptSession(scope, docs);
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			m_ScriptSessions[scope] = session;
+		}
+		m_ScriptInputs[scope] = inputs;
+		m_ScriptHosts[scope] = host;
+		return true;
 	}
 
 	namespace

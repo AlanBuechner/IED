@@ -89,6 +89,8 @@ namespace C4LSP::Server
 		// `program` analyzed again with `taken` (the open documents it holds) when they, its description or its options
 		// changed since its last analysis; true when it was.
 		bool AnalyzeIfChanged(Program& program, const EditorDocuments& taken);
+		// A script scope's analysis made again when its documents or its host's interface changed; true when it was.
+		bool AnalyzeScopeIfChanged(size_t scope, const EditorDocuments& docs);
 		// The script scopes' analyses made again where their documents changed; returns those documents.
 		std::vector<std::string> AnalyzeScripts(const EditorDocuments& docs);
 		// Analyses neither the open documents nor a recent query need, let go.
@@ -163,6 +165,7 @@ namespace C4LSP::Server
 		InterfaceCache m_Interfaces;                   // the scopes' host interfaces (the worker's)
 		std::vector<std::shared_ptr<CompilationSession>> m_ScriptSessions; // per scope, null while none of its documents is open
 		std::vector<std::map<std::string, size_t>> m_ScriptInputs;         // per scope, the documents its session took (the worker's)
+		std::vector<std::shared_ptr<const LoadedInterface>> m_ScriptHosts; // per scope, the interface its session took (the worker's)
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
 		std::string m_RequestUri;                      // the document of the request being answered
 		bool m_Initialized = false;
