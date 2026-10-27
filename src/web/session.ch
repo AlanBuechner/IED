@@ -61,7 +61,7 @@ namespace Ied
 		private FrameRead ReadFrame(Serialization::DomNode& frame, int32 timeoutMs);
 		private int32 Dispatch(const Serialization::DomNode& frame);
 		private void OnRequest(const Serialization::DomNode& frame);
-		private void ServeRequest(Serialization::DomNode frame, CancelToken* token);
+		private void ServeRequest(Serialization::DomNode frame, CancelToken* token, int64 ticket);
 		private void OnCancel(int64 id);
 		private void OnSubscribe(const Serialization::DomNode& frame);
 		private void OnUnsubscribe(const Serialization::DomNode& topics);
@@ -81,6 +81,10 @@ namespace Ied
 		// stack, and that thread takes this before it returns.
 		private Threading::Mutex socketUse;
 		private bool socketGone;
+		// Requests sent and started (under the lock): each starts once those sent before it have.
+		private int64 requestsSent;
+		private int64 requestsStarted;
+		private Threading::ConditionVariable requestTurn;
 	}
 
 	// A frame's cursor for `key`, or -1 when it gives none.

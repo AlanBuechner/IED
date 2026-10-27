@@ -70,7 +70,7 @@ Every frame is an object with a `t` (type) field.
 { "t": "bye",     "reason": "server-restart|auth-revoked|protocol-mismatch" }
 ```
 
-- **Requests** (`req`/`res`) are for commands and queries. `id` is a client-chosen integer, unique per socket. Every request can be cancelled. Long operations return quickly with a handle (e.g. `{ "runId": ... }`) and report progress on a topic.
+- **Requests** (`req`/`res`) are for commands and queries. `id` is a client-chosen integer, unique per socket. A socket's requests start in the order they were sent and then run side by side, so their responses may overtake one another (keystrokes sent a request each still reach their target as typed). Every request can be cancelled. Long operations return quickly with a handle (e.g. `{ "runId": ... }`) and report progress on a topic.
 - **Events** (`evt`) are ordered per **topic** with a monotonically increasing `seq`. The client tracks the last `seq` it has applied per topic.
 - **Snapshots** (`snap`) carry a topic's full current state as of `seq`; events after that `seq` apply on top.
 

@@ -186,12 +186,18 @@ namespace Ied
 		inflight.Insert(id, token);
 		Session* self = this;
 		Serialization::DomNode request = frame;
-		Threading::Thread::Run([self, request, token]() { self->ServeRequest(request, token); }).Detach();
+		const int64 ticket = requestsSent;
+		requestsSent += 1;
+		Threading::Thread::Run([self, request, token, ticket]() { self->ServeRequest(request, token, ticket); }).Detach();
 	}
 
-	// On the request's own thread.
-	void Session::ServeRequest(Serialization::DomNode frame, CancelToken* token) {
+	// On the request's own thread, once the requests sent before it have started: they run side by side, but start in
+	// the order sent (keystrokes sent a request each reach their target as typed).
+	void Session::ServeRequest(Serialization::DomNode frame, CancelToken* token, int64 ticket) {
 		Threading::LockGuard guard(server->lock);
+		while (requestsStarted != ticket) requestTurn.Wait(server->lock);
+		requestsStarted += 1;
+		requestTurn.NotifyAll();
 		Call call;
 		call.server = server;
 		call.session = this;

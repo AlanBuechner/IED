@@ -21,6 +21,15 @@ class RequestTests(ProtocolTest):
 		self.assertEqual("slow", (await asyncio.wait_for(slow, 5))["result"]["result"])
 		self.assertEqual(slow_id, slow.result()["id"])
 
+	async def test_requests_start_in_the_order_they_were_sent(self):
+		"""Requests run side by side, but each socket's start in the order sent: keystrokes sent a request each (a
+		terminal's, a browser page's) reach their target as typed."""
+		client = await self.client()
+		name = new_id("order")
+		sent = [client.start_request("testhooks.counter", {"name": name}) for _ in range(200)]
+		values = [(await asyncio.wait_for(future, 10))["result"]["value"] for _, future, _ in sent]
+		self.assertEqual(list(range(1, 201)), values)
+
 	async def test_every_error_code_passes_through_with_data(self):
 		client = await self.client()
 		for code in ERROR_CODES:
