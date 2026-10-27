@@ -43,7 +43,8 @@ Until the zip and the installer exist, a checkout installs itself: `nuke install
   chats\                                 generic (no-project) chats
 
 %LOCALAPPDATA%\IED\                      (machine-local state)
-  logs\ (server.log, desktop.log: docs/12 "Logs"; security.log: docs/11), cache\ (indexes, symbol caches), trash\, services\ (SearXNG and tor runtime state), recent.json (recent projects and favorites, docs/10), trust.json, devices.json
+  logs\ (server.log the master's, workspace-<key>.log each workspace server's, desktop.log: docs/12 "Logs"; security.log: docs/11), cache\ (indexes, symbol caches), trash\, services\ (SearXNG and tor runtime state), recent.json (recent projects and favorites, docs/10), trust.json, devices.json
+  servers\<key>\                         a workspace server's own state: its plugins' state folders (the browser's Edge profile), its script cache (docs/01 "Processes")
 ```
 
 Per workspace: `.ied/` (committed) and `.ied/local/` (gitignored) as in `docs/03`.

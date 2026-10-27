@@ -232,6 +232,12 @@ extra usage - from the CLI's `get_usage {skip_behaviors: true}` control request,
 CLI process of its own (no model request, no usage spent): when a client asks (`ai.usage {refresh: true}`), after each Claude
 turn, and every `ai.claude.usageRefreshMinutes` (default 10; 0 never) while a `claude-code` profile is set up. Between, each
 `rate_limit_event` a session streams updates the windows it names. It is on the app-wide topic `aiusage` (`docs/10`).
+The account is the master server's (`docs/01` "Processes"): the chat plugin's code there asks the CLI, opens the sign-in
+and install windows, sets Claude up and owns `aiusage`, `ai.usage` and `ai.claude.*`. Chats run in workspace servers,
+each with a copy of the account: it takes the master's state through the `ai.claude.account` binding every 15 s and
+before a method of the chat plugin when its copy is older than 2 s (so a turn picks its model from the usage as it is
+now), and what its sessions learn - a `get_usage` answer, a `rate_limit_event`, an auth status, a limit a turn met - goes
+to the master at once, so a limit met in one workspace holds the others back.
 
 Which windows limit a model (owner, 2026-10-26: "there is a bug where it treats the fable limit seperatly from the weekly
 limit"): the 5-hour session and the shared week (`seven_day`) limit every model; `seven_day_opus`, `seven_day_sonnet` and a

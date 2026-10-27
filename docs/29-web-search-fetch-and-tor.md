@@ -24,6 +24,12 @@ fail with the reason (never a silent search from this machine's address); disabl
 takes its tool away. Each plugin also adds one short system-message section naming its tool, and `ied.websearch` the
 `web-research` skill (query wording, narrowing engines and dates, reading in windows, bot checks, citing sources).
 
+**Which server** (2026-10-26, `docs/01` "Processes"): SearXNG and Tor are the app's, one of each, in the master
+server: `ied.tor` runs there only (`runtime.servers: ["master"]`), `ied.websearch` runs SearXNG, its methods and topic
+there and in each workspace server only the `web_search` tool, whose `websearch.search` (a binding marked `master`)
+the master answers; the Search settings page's methods and topic are the master's routes. `ied.webfetch` stays in each
+workspace server: it runs no service.
+
 ## Tor (`ied.tor`)
 
 **Program.** `tor.executable`, else `<home>/vendor/tor/tor/tor.exe` - the Tor Expert Bundle, `tools/setup/deps.toml`
