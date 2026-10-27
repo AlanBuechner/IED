@@ -1,0 +1,12 @@
+# c4-outline written in C4: the same tool through C4's interop (C4/docs/language/13-interop.md), which binds the
+# toolchain's C4Api.h itself - its opaque c4a_parse* becomes void* - and links C4Api.lib, with C4Api.dll copied beside
+# the program. A C4 project names the toolchain's files itself: a C4 program takes in no C/C++ library's settings.
+[project]
+name = "c4-outline-c4"
+kind = "executable"
+description = "c4-outline in C4, through interop"
+includes = ["${toolchain.dir}/C4Api"]
+links = ["${toolchain.dir}/C4Api/C4Api.lib"]
+
+[[project.copy]]
+from = "${toolchain.dir}/C4Api/C4Api.dll"

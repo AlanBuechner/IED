@@ -98,7 +98,7 @@ class RealToolchainTests(unittest.TestCase):
 		write_files(folder, {"nuke.toml": read(manifest).replace('toolchain = "dev"', f'toolchain = "{TOOLCHAIN.version}"')})
 		code, out = self.nuke("test", cwd=folder)
 		self.assertEqual(code, 0, out)
-		self.assertIn("c4-outline: 3 fixture(s), 0 problem(s)", out)
+		self.assertIn("c4-outline: 2 tool(s), 3 fixture(s), 0 problem(s)", out)
 		self.assertTrue(os.path.isfile(os.path.join(folder, "build", "bin", "Development-windows-x64", "c4-outline", "C4Api.dll")), "the DLL beside the tool")
 
 

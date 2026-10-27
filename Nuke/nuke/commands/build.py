@@ -3,6 +3,7 @@
 import os
 
 from .. import fsutil, languages
+from ..variables import expand
 from ..c4 import compile as c4compile
 from ..c4 import ide_bridge
 from . import base
@@ -39,9 +40,10 @@ def copy_files(session, project):
 	destination_root = session.bin_dir(project)
 	copied = 0
 	for module in session.c4_modules(project):
+		values = session.variables(module)
 		for copy in module.copies:
-			source = fsutil.join(module.dir, copy.source)
-			dest = fsutil.join(destination_root, copy.dest)
+			source = fsutil.join(module.dir, expand(copy.source, values))
+			dest = fsutil.join(destination_root, expand(copy.dest, values))
 			if os.path.isdir(source):
 				copied += fsutil.copy_tree_if_newer(source, dest)
 			elif os.path.isfile(source):

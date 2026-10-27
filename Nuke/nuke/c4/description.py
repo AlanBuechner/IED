@@ -1,5 +1,6 @@
 """The build description C4.exe reads with --projects (C4/docs/language/15-projects.md): the root program and
-every C4 module it depends on, each with its sources, include folders, defines and dependencies."""
+every C4 module it depends on, each with its sources, include folders, defines and dependencies. A module's sources and
+include folders expand its ${variables}, as every manifest string does (${toolchain.dir}/C4Api: a toolchain's headers)."""
 
 import os
 from dataclasses import dataclass
@@ -16,7 +17,11 @@ class Module:
 	defines: dict
 
 
-def module_for(workspace, project, configuration):
+def _unexpanded(project, text):
+	return text
+
+
+def module_for(workspace, project, configuration, expand=_unexpanded):
 	override = project.config_overrides.get(configuration.name)
 	defines = dict(project.defines)
 	if override:
@@ -26,15 +31,16 @@ def module_for(workspace, project, configuration):
 	depends = tuple(d.name for d in (workspace.find_project(n) for n in project.depends) if d.is_c4)
 	return Module(
 		name=project.name,
-		sources=tuple(_absolute(project.dir, s) for s in project.sources),
-		includes=tuple(_absolute(project.dir, i) for i in project.includes),
+		sources=tuple(_absolute(project.dir, expand(project, s)) for s in project.sources),
+		includes=tuple(_absolute(project.dir, expand(project, i)) for i in project.includes),
 		depends=depends,
 		defines=defines,
 	)
 
 
-def modules_for(workspace, root, configuration):
-	return [module_for(workspace, p, configuration) for p in graph.c4_modules(workspace, root)]
+def modules_for(workspace, root, configuration, expand=_unexpanded):
+	"""`expand(project, text)`: `text` with that project's ${variables}."""
+	return [module_for(workspace, p, configuration, expand) for p in graph.c4_modules(workspace, root)]
 
 
 def _absolute(base, path):

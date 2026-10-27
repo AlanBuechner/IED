@@ -91,10 +91,38 @@ reads, `-D` definitions, an exit code, and a test project (`nuke test`) that che
 
 A toolchain from before the C API (0.1.0) has no `C4Api/` folder: the build stops with the files that are not there.
 
+**From C4**, the header binds through interop ([language/13-interop.md](../language/13-interop.md)): the opaque
+`c4a_parse*` becomes `void*`, the structs and enums are C4's. A C4 project names the toolchain's files itself, since a
+C4 program takes in no C/C++ library's settings - the sample's `c4/` project is `c4-outline` written this way, checked
+against the same fixtures:
+
+```toml
+[project]
+name = "c4-outline-c4"
+includes = ["${toolchain.dir}/C4Api"]          # where extern "c" include "C4Api.h" finds the header
+links = ["${toolchain.dir}/C4Api/C4Api.lib"]
+
+[[project.copy]]
+from = "${toolchain.dir}/C4Api/C4Api.dll"
+```
+
+```c4
+include "bedrock.ch"
+extern "c" include "C4Api.h"
+
+int32 main(int32 argc, char8** argv)
+{
+	c4a_parse_options options;
+	options.path = argv[1];
+	void* parse = c4a_parse_source(&options);
+	int32 count = (int32)c4a_declaration_count(parse);
+	c4a_parse_destroy(parse);
+	return count;
+}
+```
+
 **Without Nuke**, use the files directly: compile with `-I <toolchain>/C4Api`, link `<toolchain>/C4Api/C4Api.lib`
-(MSVC ABI), and ship `C4Api.dll` beside the program. From C4, bind the header through interop
-([language/13-interop.md](../language/13-interop.md)) with `[link("<toolchain>/C4Api/C4Api.lib")]` and copy the
-DLL beside the program.
+(MSVC ABI), and ship `C4Api.dll` beside the program.
 
 ## 4. In the IED repository
 

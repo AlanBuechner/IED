@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from .. import fsutil, process
 from ..errors import StepFailed
-from ..variables import expand_argv
+from ..variables import expand, expand_argv
 from . import description
 
 ARGS_STAMP = "compile.args"
@@ -41,7 +41,7 @@ def plan(session, project, test=False):
 	configuration = session.configuration
 	int_dir = session.int_dir(project) + ("/tests" if test else "")
 	output = session.test_output(project) if test else session.output(project)
-	modules = description.modules_for(session.workspace, project, configuration)
+	modules = description.modules_for(session.workspace, project, configuration, lambda module, text: expand(text, session.variables(module)))
 	description_path = fsutil.join(int_dir, DESCRIPTION_FILE)
 	argv = toolchain.compiler_command() + ["--projects", description_path, f"-O{configuration.optimize}"]
 	if configuration.debug_info:

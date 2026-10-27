@@ -98,6 +98,20 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(code, 0, out)
 		self.assertNotIn("--incremental", self.compiles()[0])
 
+	def test_sources_includes_and_copies_expand_variables(self):
+		"""A manifest string expands its ${variables}: a module's include folder in the toolchain (C4Api's header for C4's
+		interop), its sources in the workspace, and a copy from anywhere (C4Api.dll beside a C4 tool)."""
+		self.files({"Engine/nuke.toml": "[project]\nkind = \"module\"\nsources = [\"${workspace.dir}/Engine/src\"]\n"
+			"includes = [\"${toolchain.dir}/C4Api\", \"${project.dir}/third\"]\n"
+			"[[project.copy]]\nfrom = \"${project.dir}/shaders\"\nto = \"${project.name}-shaders\"\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		engine = tomllib.loads(read(self.int("Game", "projects.toml")))["project"][1]
+		self.assertEqual(engine["sources"], [self.path("Engine", "src").replace("\\", "/")])
+		toolchain = self.store.resolve("1.0.0", self.root).dir
+		self.assertEqual(engine["includes"], [toolchain.replace("\\", "/") + "/C4Api", self.path("Engine", "third").replace("\\", "/")])
+		self.assertTrue(os.path.isfile(self.bin("Game", "Engine-shaders", "a.hlsl")), "the copy, its source and place expanded")
+
 	def test_build_description(self):
 		self.nuke("build")
 		description = tomllib.loads(read(self.int("Game", "projects.toml")))

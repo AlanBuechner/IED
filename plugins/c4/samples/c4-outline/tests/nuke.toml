@@ -1,19 +1,19 @@
-# c4-outline against its fixtures (check_outline.py): each fixtures/<name>.cf outlined and compared with
-# <name>.expected, its exit code with what the expected output says, and C4Api.dll beside the program.
+# c4-outline and c4-outline-c4 against the fixtures (check_outline.py): each fixtures/<name>.cf outlined and compared
+# with <name>.expected, the exit code with what the expected output says, and C4Api.dll beside each program.
 [project]
 name = "outline-check"
 kind = "custom"
-description = "c4-outline against its fixtures"
-depends = ["c4-outline"]
+description = "c4-outline and c4-outline-c4 against the fixtures"
+depends = ["c4-outline", "c4-outline-c4"]
 
 [[project.steps]]
 name = "build-tool"
 phase = "pre-test"
-description = "build c4-outline first: nuke test builds no custom project's dependencies"
-run = ["${python}", "${nuke}", "build", "c4-outline", "${config}"]
+description = "build the tools first: nuke test builds no custom project's dependencies"
+run = ["${python}", "${nuke}", "build", "c4-outline", "c4-outline-c4", "${config}"]
 
 [[project.steps]]
 name = "fixtures"
 phase = "test"
-description = "c4-outline against tests/fixtures"
-run = ["${python}", "-I", "check_outline.py", "${bin.root}/c4-outline/c4-outline.exe"]
+description = "both tools against tests/fixtures"
+run = ["${python}", "-I", "check_outline.py", "${bin.root}/c4-outline/c4-outline.exe", "${bin.root}/c4-outline-c4/c4-outline-c4.exe"]

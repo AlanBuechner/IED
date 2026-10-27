@@ -1,0 +1,90 @@
+// c4-outline in C4: the declarations and syntax errors of C4 sources through the compiler's C API, printed as the C++
+// tool prints them (../src/main.cpp), so the same fixtures check both.
+//
+//   c4-outline-c4 [-D NAME[=VALUE]]... FILE...
+
+include "bedrock.ch"
+extern "c" include "C4Api.h"
+
+// The depth of the declaration at `index`: how many declarations it is in.
+int32 Depth(void* parse, int32 parent)
+{
+	int32 depth = 0;
+	while (parent >= 0) {
+		c4a_declaration up;
+		c4a_declaration_at(parse, (uint32)parent, &up);
+		parent = up.parent;
+		depth += 1;
+	}
+	return depth;
+}
+
+void PrintDeclarations(void* parse)
+{
+	for (uint32 i = 0; i < c4a_declaration_count(parse); ++i) {
+		c4a_declaration declaration;
+		c4a_declaration_at(parse, i, &declaration);
+		for (int32 indent = 0; indent < 2 + 2 * Depth(parse, declaration.parent); ++indent) printf(" ");
+		printf("%s %s (%u:%u)\n", c4a_kind_name(declaration.kind), declaration.name, declaration.name_at.line, declaration.name_at.column);
+	}
+}
+
+// Prints the diagnostics; whether one is an error.
+bool PrintDiagnostics(void* parse, const char8* file)
+{
+	bool error = false;
+	for (uint32 i = 0; i < c4a_diagnostic_count(parse); ++i) {
+		c4a_diagnostic diagnostic;
+		c4a_diagnostic_at(parse, i, &diagnostic);
+		const bool isError = diagnostic.severity == C4A_ERROR;
+		error = error || isError;
+		printf("%s(%u,%u): %s: %s\n", file, diagnostic.at.line, diagnostic.at.column, isError ? "error" : "warning", diagnostic.message);
+	}
+	return error;
+}
+
+// Outlines one file with `defines`; whether it has an error.
+bool Outline(const char8* file, const char8** defines, uint32 defineCount)
+{
+	c4a_parse_options options;
+	options.path = file;
+	options.text = null;
+	options.length = 0;
+	options.defines = defines;
+	options.define_count = defineCount;
+	void* parse = c4a_parse_source(&options);
+	printf("%s\n", file);
+	PrintDeclarations(parse);
+	const bool error = PrintDiagnostics(parse, file) || c4a_parse_read(parse) == 0;
+	c4a_parse_destroy(parse);
+	return error;
+}
+
+int32 main(int32 argc, char8** argv)
+{
+	const char8*[64] defines;
+	uint32 defineCount = 0;
+	int32 files = 0;
+	bool failed = false;
+	for (int32 i = 1; i < argc; ++i) {
+		const char8* word = argv[i];
+		if (word[0] == '-' && word[1] == 'D' && word[2] == 0 && i + 1 < argc && defineCount < 64) {
+			defines[defineCount] = argv[i + 1];
+			defineCount += 1;
+			i += 1;
+		}
+		else if (word[0] == '-' && word[1] == 'D' && word[2] != 0 && defineCount < 64) {
+			defines[defineCount] = &word[2];
+			defineCount += 1;
+		}
+		else {
+			files += 1;
+			failed = Outline(word, &defines[0], defineCount) || failed;
+		}
+	}
+	if (files == 0) {
+		Platform::WriteError(Core::StringView("usage: c4-outline-c4 [-D NAME[=VALUE]]... FILE...\n"));
+		return 2;
+	}
+	return failed ? 1 : 0;
+}
