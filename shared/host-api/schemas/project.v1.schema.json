@@ -36,7 +36,24 @@
 		"lspProfiles": { "type": "array", "items": { "type": "string" } },
 		"env": { "type": "object", "additionalProperties": { "type": "string" } },
 		"sandbox": { "type": "string", "description": "Default sandbox name for tasks with target 'sandbox'." },
-		"references": { "type": "array", "items": { "type": "string" }, "description": "Other project names this depends on (display only; the build system decides build order)." }
+		"references": { "type": "array", "items": { "type": "string" }, "description": "Other project names this depends on (display only; the build system decides build order)." },
+		"packages": {
+			"type": "array",
+			"description": "The external packages this project uses directly (a build system's packages, crates, modules), shown under its Dependencies node; display only.",
+			"items": {
+				"type": "object",
+				"required": ["name"],
+				"additionalProperties": false,
+				"properties": {
+					"name": { "type": "string" },
+					"version": { "type": "string" },
+					"source": { "type": "string", "description": "Where it comes from: a repository URL, a registry." },
+					"detail": { "type": "string", "description": "A short note shown dim after the version (locked, developed)." },
+					"link": { "type": "string", "description": "A web page for this version (its tree on the repository's host)." },
+					"readOnly": { "type": "boolean", "description": "Its files are installed read-only (docs/10 'Read-only folders')." }
+				}
+			}
+		}
 	},
 	"$defs": {
 		"variable": {

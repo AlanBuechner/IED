@@ -63,7 +63,8 @@
 			"properties": {
 				"name": { "type": "string" },
 				"projects": { "type": "array", "items": { "type": "string", "description": "Project name (from the .iedproj 'name')." } },
-				"groups": { "type": "array", "items": { "$ref": "#/$defs/group" } }
+				"groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+				"items": { "type": "array", "items": { "type": "string" }, "description": "Files shown in this folder (workspace-relative), as VS solution folders hold files: a package's manifest." }
 			}
 		}
 	}

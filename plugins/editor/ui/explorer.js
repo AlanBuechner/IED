@@ -177,7 +177,10 @@ export class Explorer {
 		if (node.kind === "solution") return this.solutionChildren();
 		if (node.kind === "group") return this.groupChildren(node.group, node.id);
 		if (node.kind === "items") return this.ied.workspace.solution.items.map((path) => ({ id: node.id + "/" + path, kind: "file", name: baseName(path), path }));
-		if (node.kind === "project") return node.path === null ? [] : this.list(node.path, node.id);
+		if (node.kind === "project") return [...this.dependencyNodes(node), ...(node.path === null ? [] : await this.list(node.path, node.id))];
+		if (node.kind === "deps") return this.dependencyChildren(node);
+		if (node.kind === "dep-packages") return node.project.data.packages.map((pkg) => ({ id: node.id + "/" + pkg.name, kind: "package", name: pkg.name, pkg }));
+		if (node.kind === "dep-projects") return node.project.data.references.map((name) => ({ id: node.id + "/" + name, kind: "reference", name }));
 		return this.list(node.path, node.id);
 	}
 
@@ -207,6 +210,23 @@ export class Explorer {
 			if (project) nodes.push(this.projectNode(project, id));
 			else nodes.push({ id: id + "/missing:" + name, kind: "missing", name, problem: "no project named " + name });
 		}
+		for (const path of group.items || []) nodes.push({ id: id + "/item:" + path, kind: "file", name: baseName(path), path });
+		return nodes;
+	}
+
+	// A project's Dependencies node (VS's): the projects it references and the packages it uses, as its file names them
+	// (project.v1 `references`, `packages`); none when it names neither.
+	dependencyNodes(node) {
+		const data = node.project.data || {};
+		if (!(data.packages || []).length && !(data.references || []).length) return [];
+		return [{ id: node.id + "/deps", kind: "deps", name: "Dependencies", expandable: true, project: node.project }];
+	}
+
+	dependencyChildren(node) {
+		const data = node.project.data || {};
+		const nodes = [];
+		if ((data.packages || []).length) nodes.push({ id: node.id + "/packages", kind: "dep-packages", name: "Packages", expandable: true, project: node.project });
+		if ((data.references || []).length) nodes.push({ id: node.id + "/projects", kind: "dep-projects", name: "Projects", expandable: true, project: node.project });
 		return nodes;
 	}
 
@@ -235,6 +255,13 @@ export class Explorer {
 	renderRow(node, row) {
 		row.append(this.iconOf(node), h("span.name", null, ...this.nameParts(node)));
 		if (node.kind === "project" && node.name === this.startup) row.classList.add("startup");
+		if (node.kind === "package") {
+			const pkg = node.pkg;
+			row.append(h("span.meta.ex-version", null, [pkg.version, pkg.detail].filter(Boolean).join(", ")));
+			if (pkg.readOnly) row.append(icon("lock", "ex-lock"));
+			row.title = [pkg.name + (pkg.version ? " " + pkg.version : ""), pkg.source, pkg.link ? pkg.link + " (Enter opens it)" : ""].filter(Boolean).join("\n");
+			return;
+		}
 		const readOnly = this.readOnlyReason(node.path);
 		if (readOnly) {
 			row.classList.add("readonly");
@@ -264,6 +291,13 @@ export class Explorer {
 		if (node.kind === "group" || node.kind === "items" || node.kind === "folder") return icons.folder(open);
 		if (node.kind === "project") return icons.project(node.project, this.markerNames(node));
 		if (node.kind === "missing") return icon("warning", "c-warn");
+		if (node.kind === "deps") return icon("references");
+		if (node.kind === "dep-packages" || node.kind === "package") return icon("package");
+		if (node.kind === "dep-projects") return icons.folder(open);
+		if (node.kind === "reference") {
+			const project = (this.ied.workspace.solution.projects || []).find((p) => p.name === node.name);
+			return project ? icons.project(project, []) : icon("references");
+		}
 		return icons.file(node.name);
 	}
 
@@ -411,6 +445,7 @@ export class Explorer {
 
 	open(node, options) {
 		if (node.kind === "file") this.ied.tabs.open("doc:" + node.path, { preview: options.preview });
+		else if (node.kind === "package" && node.pkg.link) this.ied.commands.run("ied.browser.open", { url: node.pkg.link });
 	}
 
 	menu(node, at) {
