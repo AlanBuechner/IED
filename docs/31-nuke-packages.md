@@ -159,8 +159,17 @@ that two projects never change a common module in conflicting ways. The rule Nuk
 Nuke writes the state IED needs on every command: `.ied/local/packages.json` (each package's folder, version, mode,
 projects and whether it is writable; each develop clone's branch and how far it is ahead of and behind its remote) and
 `.ied/local/readonly/nuke.json` (the folders no one may write, each with the reason and the way out). "Behind" is what
-the clone last fetched: `nuke package status --fetch` fetches first (a periodic one from IED's `nuke` plugin is a
-follow-up: the plugin has no code yet).
+the clone last fetched: `nuke package status --fetch` fetches first, and IED's `nuke` plugin runs it by itself
+(2026-10-27, `plugins/nuke/code/`): in each trusted workspace that uses packages (its `nuke.toml` has `[sources]` or
+`[packages]`, or it has a `nuke.lock`), when the workspace opens or is trusted and then every
+`nuke.packages.fetchMinutes` (default 5; 0 turns it off). IED's server reads the file Nuke rewrites through its watcher
+(`docs/10` "Read-only folders"), so a clone that falls behind its remote turns read-only in the editor with no Nuke
+command run by hand; the plugin parses and enforces nothing itself. A fetch that fails (no network, a sign-in missing)
+is told once in the workspace's IED output, and again only after one has worked. The fetch fetches every clone even
+when one of them cannot be fetched, so the others are still marked, and git never asks for a sign-in under Nuke - not
+on the terminal and not in the credential manager's window (`GCM_INTERACTIVE=never`) - so the timer never opens one;
+`git ls-remote <url>` in a terminal signs in once. Checked by `tools/server-checks/tests/test_nuke_plugin.py` (a fake
+`nuke.command`) and Nuke's `test_packages.py`.
 
 ## 7. Other package managers
 

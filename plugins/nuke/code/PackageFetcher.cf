@@ -1,0 +1,71 @@
+include "PackageFetcher.ch"
+include "NukePackages.ch"
+
+namespace NukePlugin
+{
+	const int64 c_TickNs = 1000000000;
+
+	static int64 NowMs() { return clock_now_ns() / 1000000; }
+
+	void PackageFetcher::Start() {
+		PackageFetcher* self = this;
+		m_Context->StartThread([self]() { self->Keep(); });
+	}
+
+	void PackageFetcher::Stop() {
+		Threading::LockGuard guard(m_Lock);
+		m_Stopping = true;
+	}
+
+	bool PackageFetcher::Stopping() {
+		Threading::LockGuard guard(m_Lock);
+		return m_Stopping;
+	}
+
+	// m_CheckedMs and m_Failing are this thread's alone.
+	void PackageFetcher::Keep() {
+		while (!Stopping()) {
+			for (const IED::Workspace& ws : IED::Workspaces())
+				if (!Stopping() && Due(ws, NowMs()) && HasPackages(ws)) Tell(ws, Fetch(ws));
+			Threading::Thread::Sleep(c_TickNs);
+		}
+	}
+
+	// Whether `ws` is to be checked now - trusted, with fetching on, and not checked within the interval - marked
+	// checked when it is. One untrusted or with fetching off is checked as soon as that changes.
+	bool PackageFetcher::Due(const IED::Workspace& ws, int64 nowMs) {
+		const int64 intervalMs = FetchIntervalMs(m_Context->Setting(Core::StringView(c_FetchMinutesKey), ws.m_Id.View()).View());
+		if (!ws.m_Trusted || intervalMs <= 0) {
+			m_CheckedMs.Remove(ws.m_Id);
+			return false;
+		}
+		int64 checkedMs = 0;
+		if (m_CheckedMs.TryGet(ws.m_Id, checkedMs) && nowMs - checkedMs < intervalMs) return false;
+		m_CheckedMs.At(ws.m_Id) = nowMs;
+		return true;
+	}
+
+	bool PackageFetcher::HasPackages(const IED::Workspace& ws) {
+		if (IED::Exists(ws, Core::StringView("nuke.lock"))) return true;
+		Core::String manifest;
+		Core::String problem;
+		return IED::ReadFile(ws, Core::StringView("nuke.toml"), manifest, problem) && UsesPackages(manifest.View());
+	}
+
+	// Runs the fetch in `ws`: "" when it worked, else what went wrong.
+	Core::String PackageFetcher::Fetch(const IED::Workspace& ws) {
+		Core::String command = NukeCommand(m_Context->Setting(Core::StringView(c_CommandKey), ws.m_Id.View()).View());
+		Core::String program = IED::FindProgram(command.View());
+		if (program.IsEmpty()) return (Core::String("nuke.command names ") + command.View()) + ", which is not a file or a program on PATH";
+		return FetchFailure(IED::RunCommand(ws, FetchCommand(program.View()), Core::StringView(""), c_FetchSeconds));
+	}
+
+	void PackageFetcher::Tell(const IED::Workspace& ws, const Core::String& failure) {
+		bool failed = false;
+		m_Failing.TryGet(ws.m_Id, failed);
+		if (failed == !failure.IsEmpty()) return;
+		m_Failing.At(ws.m_Id) = !failure.IsEmpty();
+		if (failure.IsEmpty()) m_Context->Log((ws.m_Name + ": its Nuke packages are fetched again").View());
+		else m_Context->Log(((ws.m_Name + ": its Nuke packages could not be fetched (nuke package status --fetch), so a develop clone that falls behind its remote is not made read-only until a fetch works: ") + failure.View()).View());
+	}
+}

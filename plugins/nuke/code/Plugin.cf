@@ -1,0 +1,14 @@
+// The built-in nuke plugin's entry (docs/26 "Built-ins on the API"): its declarative contributions are the manifest's;
+// its code fetches each workspace's Nuke packages on a timer, so a develop clone behind its remote turns read-only by
+// itself (PackageFetcher.ch, docs/31 section 6).
+include "PackageFetcher.ch"
+
+namespace NukePlugin
+{
+	void Activate(IED::PluginContext& context)
+	{
+		PackageFetcher* fetcher = new PackageFetcher(&context);
+		fetcher->Start();
+		context.OnDeactivate([fetcher]() { fetcher->Stop(); });
+	}
+}

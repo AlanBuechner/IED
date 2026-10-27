@@ -70,7 +70,8 @@ projects by name. `nuke.lock` (committed) pins each package's commit; installs l
     nuke package update [NAME...]            newest versions the requirements allow
     nuke package add SOURCE PACKAGE [REQ]    use one more package (SOURCE: a [sources] name or a git URL)
     nuke package develop SOURCE              packages/<source>/ becomes a git clone: edit the package with the program
-    nuke package pull SOURCE                 a clone behind its remote is read-only until pulled
+    nuke package pull SOURCE                 a clone behind its remote is read-only until pulled (IED fetches
+                                             every few minutes, so a clone can turn read-only mid-task: pull it)
     nuke package lock SOURCE                 back to read-only installs (the clone's commits must be pushed first)
     nuke package release PACKAGE... --minor  tag and push the next versions (asks the owner: it publishes)
 

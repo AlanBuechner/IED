@@ -1,7 +1,8 @@
 """Git, run as a program: the one tool packages need. Git's own configuration does authentication (the credential
 manager, SSH keys), so a private repository works wherever `git clone` works; Nuke never sees a credential. Git never
-asks on the terminal (GIT_TERMINAL_PROMPT=0): a build in IED has no one to answer, so a missing sign-in is an error
-saying how to sign in."""
+asks - on the terminal (GIT_TERMINAL_PROMPT=0) or in the credential manager's window (GCM_INTERACTIVE=never): a build in
+IED, or the fetch IED's nuke plugin runs on a timer, has no one to answer, so a missing sign-in is an error saying how
+to sign in."""
 
 import os
 import shutil
@@ -12,7 +13,7 @@ import tempfile
 from ..errors import NukeError
 
 TOOL_ENV = "NUKE_TOOL_GIT"
-QUIET_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_ADVICE": "0", "LC_ALL": "C"}
+QUIET_ENV = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_ADVICE": "0", "LC_ALL": "C"}
 
 
 class GitError(NukeError):

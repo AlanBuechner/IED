@@ -129,19 +129,34 @@ class _Context:
 def _status(cli, args):
 	options = _parse("status", args, lambda p: (p.add_argument("--fetch", action="store_true"), p.add_argument("--json", action="store_true")))
 	context = _Context(cli)
-	if options.fetch:
-		for url, folder in context.state.checkouts().items():
-			if os.path.isdir(folder):
-				git.run(["fetch", "--quiet", "--prune"], cwd=folder, what=f"git fetch in {folder}")
+	unfetched = _fetch_checkouts(context) if options.fetch else []
 	workspace = context.load()
 	joined = [p for p in workspace.projects.values() if p.package]
 	body, _ = bridge.describe(context.spec, context.state, context.lock(), context.state.checkouts(), joined)
 	if options.fetch:
 		_newest(context, body)
 	if options.json:
+		if unfetched:
+			body["unfetched"] = unfetched
 		cli.log.line(json.dumps(body, indent=2))
-		return 0
+		return 1 if unfetched else 0
 	_print_status(context, body)
+	if unfetched:
+		raise NukeError("\n".join(unfetched))
+	return 0
+
+
+def _fetch_checkouts(context):
+	"""Fetch every develop checkout, one that cannot be fetched not keeping the others' state from being written (IED's
+	nuke plugin runs `status --fetch` on a timer, IED docs/31 section 6); what could not be fetched, and why."""
+	unfetched = []
+	for url, folder in context.state.checkouts().items():
+		if os.path.isdir(folder):
+			try:
+				git.run(["fetch", "--quiet", "--prune"], cwd=folder, what=f"git fetch in {folder}")
+			except git.GitError as error:
+				unfetched.append(str(git.unreachable(url, error)))
+	return unfetched
 
 
 def _newest(context, body):

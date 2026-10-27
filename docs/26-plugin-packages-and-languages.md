@@ -177,7 +177,7 @@ A language plugin owns everything about its language. The host and the default f
 | `ied.lua`, `ied.sql` | Lua, SQL | icons | |
 | `ied.filetypes` | (no language) | media, archive, binary, license icons; plain text | |
 | `c4` (built in, and in every C4 toolchain) | C4 | `plugins/c4`: its skills (`plugins/c4/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section, `c4.nuke` extending Nuke's preset, New Project's Console App and Module, C4LSP and C4DAP of the workspace's toolchain ("The c4 plugin and its toolchains" below), and a Nuke package that brings C4Api, the compiler's C API for tools (section 6) | C4 code: `c4_*` AI tools, test provider |
-| `ied.nuke` (built in) | (no language: the build system) | the `nuke` preset, `nuke.command`, the `nuke.toml` icon, the Nuke skill, a section and the `nuke_list` tool | |
+| `ied.nuke` (built in) | (no language: the build system) | the `nuke` preset, `nuke.command`, the `nuke.toml` icon, the Nuke skill, a section and the `nuke_*` tools | C4 code (`plugins/nuke/code/`, compiled in): fetches a workspace's Nuke packages when it opens and every `nuke.packages.fetchMinutes`, so a develop clone behind its remote turns read-only by itself (`docs/31` section 6) |
 
 ### The c4 plugin and its toolchains
 

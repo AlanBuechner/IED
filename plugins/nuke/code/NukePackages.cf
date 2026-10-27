@@ -1,0 +1,107 @@
+include "NukePackages.ch"
+include "api/Text.ch"
+
+namespace NukePlugin
+{
+	// --- nuke.toml ---------------------------------------------------------------------------------------------------
+
+	static Core::StringView FirstPart(Core::StringView dotted) {
+		const int64 dot = dotted.IndexOf('.');
+		return (dot >= 0 ? dotted.Substring(0, dot) : dotted).Trimmed();
+	}
+
+	// The first part of a table header's name: "packages" for "[packages]" and "[packages.Renderer]".
+	static Core::StringView TableName(Core::StringView line) {
+		const int64 end = line.IndexOf(']');
+		if (line.StartsWith(Core::StringView("[[")) || end < 1) return Core::StringView("");
+		return FirstPart(line.Substring(1, end - 1));
+	}
+
+	// The first part of the key a `key = value` line sets: "packages" for `packages.Windowing = "..."`.
+	static Core::StringView KeyName(Core::StringView line) {
+		const int64 equals = line.IndexOf('=');
+		if (equals < 1 || line.StartsWith(Core::StringView("#"))) return Core::StringView("");
+		return FirstPart(line.Substring(0, equals));
+	}
+
+	static bool IsPackagesName(Core::StringView name) { return name == "sources" || name == "packages"; }
+
+	bool UsesPackages(Core::StringView manifest) {
+		bool atRoot = true;
+		for (Core::StringView raw : manifest.Split('\n')) {
+			Core::StringView line = raw.Trimmed();
+			if (line.StartsWith(Core::StringView("["))) {
+				if (IsPackagesName(TableName(line))) return true;
+				atRoot = false;
+			}
+			else if (atRoot && IsPackagesName(KeyName(line))) return true;
+		}
+		return false;
+	}
+
+	// --- Settings ----------------------------------------------------------------------------------------------------
+
+	int64 FetchIntervalMs(Core::StringView settingJson) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(settingJson, *doc);
+		if (!read.Ok() || (read.root.Kind() != Serialization::DomKind::Int && read.root.Kind() != Serialization::DomKind::Float)) return 0;
+		const double minutes = read.root.AsFloat();
+		return minutes > 0.0 ? (int64)(minutes * 60000.0) : 0;
+	}
+
+	Core::String NukeCommand(Core::StringView settingJson) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(settingJson, *doc);
+		Core::StringView command = read.Ok() && read.root.Kind() == Serialization::DomKind::String ? read.root.AsView().Trimmed() : Core::StringView("");
+		if (command.ByteLength() >= 2 && command.ByteAt(0) == '"' && command.ByteAt(command.ByteLength() - 1) == '"') command = command.Substring(1, command.ByteLength() - 2);
+		return command.IsEmpty() ? Core::String("nuke") : Core::String(command);
+	}
+
+	// --- The command and what it said --------------------------------------------------------------------------------
+
+	static bool IsBatchFile(Core::StringView program) {
+		Core::String lower = program.ToLower();
+		return lower.View().EndsWith(Core::StringView(".cmd")) || lower.View().EndsWith(Core::StringView(".bat"));
+	}
+
+	Core::Array<Core::String> FetchCommand(Core::StringView program) {
+		Core::Array<Core::String> argv;
+		if (IsBatchFile(program)) {
+			argv.Push(Core::String("cmd.exe"));
+			argv.Push(Core::String("/d"));
+			argv.Push(Core::String("/c"));
+		}
+		argv.Push(Core::String(program));
+		argv.Push(Core::String("package"));
+		argv.Push(Core::String("status"));
+		argv.Push(Core::String("--fetch"));
+		return argv;
+	}
+
+	// Nuke's own report of what failed: from its last line starting "nuke:" to the end; "" when it printed none.
+	static Core::StringView NukeError(Core::StringView output) {
+		int64 found = output.StartsWith(Core::StringView("nuke:")) ? 0 : -1;
+		for (int64 at = output.IndexOf(Core::StringView("\nnuke:")); at >= 0; at = output.IndexOf(Core::StringView("\nnuke:"), at + 1)) found = at + 1;
+		return found >= 0 ? output.Substring(found, output.ByteLength() - found).Trimmed() : Core::StringView("");
+	}
+
+	static Core::String Bounded(Core::StringView text) {
+		if (text.ByteLength() <= c_FailureBytes) return Core::String(text);
+		return Core::String(text.Substring(0, IED::WholeCharacters(text.Substring(0, c_FailureBytes)))) + " [...]";
+	}
+
+	Core::String FetchFailure(const IED::CommandResult& ran) {
+		if (!ran.m_Problem.IsEmpty()) return ran.m_Problem;
+		if (ran.m_ExitCode == 0) return Core::String("");
+		Core::StringView error = NukeError(ran.m_Output.View());
+		if (error.IsEmpty()) error = ran.m_Output.View().Trimmed();
+		Core::StringBuilder out;
+		out.Append("exit ");
+		out.AppendInt(ran.m_ExitCode);
+		if (!error.IsEmpty()) {
+			out.Append(": ");
+			out.Append(Bounded(error).View());
+		}
+		return out.ToString();
+	}
+}

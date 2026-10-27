@@ -452,6 +452,31 @@ class DevelopTests(PackageTest):
 		readonly = json.loads(read(self.path(".ied", "local", "readonly", "nuke.json")))
 		self.assertEqual(readonly["paths"], [])
 
+	def test_a_checkout_that_cannot_be_fetched_does_not_hide_another_behind(self):
+		self.windowing()
+		utils = Remote(self.tmp, "utils")
+		utils.commit({"nuke.toml": "[workspace]\nname = \"Utils\"\n", "Strings/nuke.toml": module("Strings", package="strings"),
+			"Strings/src/Strings/strings.ch": ""}, tags=["Strings/v0.1.0"])
+		self.workspace({"Windowing": "\"engine@^0.2\"", "Strings": "\"utils@^0.1\""}, depends=("Windowing", "Strings"),
+			sources={"engine": self.engine.url, "utils": utils.url})
+		for source in ("engine", "utils"):
+			code, out = self.nuke("package", "develop", source)
+			self.assertEqual(code, 0, out)
+		gone = os.path.join(self.tmp, "gone.git").replace("\\", "/")
+		git("remote", "set-url", "origin", gone, cwd=self.path("packages", "utils"))
+		self.engine.commit({"Windowing/src/Windowing/window.ch": "// someone else\n"})
+		code, out = self.nuke("package", "status", "--fetch")
+		self.assertEqual(code, 1, out)
+		self.assertIn("cannot read " + utils.url, out)
+		self.assertIn("1 behind", out, "the clone that was fetched is still told")
+		readonly = json.loads(read(self.path(".ied", "local", "readonly", "nuke.json")))
+		self.assertEqual([p["path"] for p in readonly["paths"]], ["packages/engine"])
+		code, out = self.nuke("package", "status", "--fetch", "--json")
+		self.assertEqual(code, 1, out)
+		body = json.loads(out)
+		self.assertEqual(1, len(body["unfetched"]), body)
+		self.assertEqual({"engine": 1, "utils": 0}, {c["source"]: c["behind"] for c in body["checkouts"]})
+
 	def test_a_breaking_release_releases_its_dependents_again(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n",
 			"Windowing/nuke.toml": module("Windowing", package="windows"), "Windowing/src/Windowing/w.ch": "",

@@ -3,7 +3,9 @@
 // `nuke <verb> <config> <project> -a <arch>`), the command that starts Nuke, and nuke.toml's icon. A language's plugin
 // extends the preset as `<language>.nuke` with its compiler's problem matchers and its launch configuration (the C4
 // toolchain's plugin: `c4.nuke`); `nuke init --ied` names that preset in each project's file. Its skill (skills/nuke)
-// teaches the AI Nuke's commands and manifests.
+// teaches the AI Nuke's commands and manifests. Its code (code/, built in) fetches a workspace's Nuke packages when it
+// opens and every nuke.packages.fetchMinutes, so a develop clone that falls behind its remote turns read-only by itself
+// (docs/31 section 6).
 {
 	"manifestVersion": 1,
 	"id": "ied.nuke",
@@ -12,8 +14,9 @@
 	"description": "Builds, runs and tests with the Nuke build system, for every language it builds.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "declarative" },
-	"permissions": ["process.spawn"],
+	"runtime": { "kind": "builtin", "entry": "NukePlugin::Activate" },
+	"activation": ["onWorkspaceContains:nuke.toml"],
+	"permissions": ["process.spawn", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Build/Nuke" },
 		"skills": ["skills"],

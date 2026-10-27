@@ -580,8 +580,9 @@ depends = ["Windowing", "Agility"]
   checkout's `.git/info/exclude`, not `.gitignore`, so search in IED and the AI's tools - which skip what `.gitignore`
   ignores - find the packages' code. Each repository is mirrored once per machine in `<nuke home>/.cache/packages/git/`
   (`NUKE_PACKAGE_CACHE`).
-- **Private repositories** need nothing of Nuke: git's credential manager or SSH key does it. Git never prompts on the
-  terminal under Nuke; a missing sign-in is an error saying to run `git ls-remote <url>` once.
+- **Private repositories** need nothing of Nuke: git's credential manager or SSH key does it. Git never prompts under
+  Nuke - not on the terminal, not in the credential manager's window (IED runs `nuke package status --fetch` on a
+  timer, IED `docs/31` section 6); a missing sign-in is an error saying to run `git ls-remote <url>` once.
 - **A repository of packages is a workspace** too: its root `nuke.toml` has `[workspace]`, it builds and tests every
   package together, and its packages' `[package.dependencies]` are its own requirements.
 

@@ -7,6 +7,12 @@
 			"type": "string",
 			"default": "nuke",
 			"description": "How the Nuke tasks start Nuke: a name on PATH or the path of nuke.cmd (bin/ in the IED repository)."
+		},
+		"nuke.packages.fetchMinutes": {
+			"type": "number",
+			"minimum": 0,
+			"default": 5,
+			"description": "How often IED fetches a trusted workspace's Nuke packages (nuke package status --fetch), in minutes; also when the workspace opens. A develop clone that falls behind its remote then turns read-only by itself until it is pulled. 0: never (only Nuke commands you run notice)."
 		}
 	}
 }
