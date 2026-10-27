@@ -26,6 +26,7 @@ static const DWORD kAcceptFlags = ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETEC
 
 typedef struct TlsSession
 {
+	const TlsApi* api;
 	int64_t socket;
 	bool server;
 	CredHandle credentials;
@@ -131,10 +132,11 @@ static void KeepExtra(TlsSession* s, const SecBuffer* extra)
 
 // --- sessions --------------------------------------------------------------------------------------------------------
 
-static TlsSession* NewSession(int64_t socket, bool server)
+static TlsSession* NewSession(const TlsApi* api, int64_t socket, bool server)
 {
 	TlsSession* s = (TlsSession*)calloc(1, sizeof(TlsSession));
 	if (!s) return NULL;
+	s->api = api;
 	s->socket = socket;
 	s->server = server;
 	InitializeSRWLock(&s->sendLock);
@@ -147,9 +149,9 @@ static TlsSession* NewSession(int64_t socket, bool server)
 
 static void FreeSession(TlsSession* s)
 {
-	if (s->hasContext) DeleteSecurityContext(&s->context);
-	if (s->ownsCredentials) FreeCredentialsHandle(&s->credentials);
-	if (s->extraRoots) CertCloseStore(s->extraRoots, 0);
+	if (s->hasContext) s->api->sspi->DeleteSecurityContext(&s->context);
+	if (s->ownsCredentials) s->api->sspi->FreeCredentialsHandle(&s->credentials);
+	if (s->extraRoots) s->api->CertCloseStore(s->extraRoots, 0);
 	free(s->host);
 	free(s->input);
 	free(s->plain);
@@ -169,10 +171,10 @@ static TlsSession* SessionOf(int64_t handle) { return handle == -1 ? NULL : (Tls
 // The record sizes and the protocol, once the handshake is done.
 static int64_t LearnConnection(TlsSession* s, char* error, int64_t capacity)
 {
-	SECURITY_STATUS status = QueryContextAttributesW(&s->context, SECPKG_ATTR_STREAM_SIZES, &s->sizes);
+	SECURITY_STATUS status = s->api->sspi->QueryContextAttributesW(&s->context, SECPKG_ATTR_STREAM_SIZES, &s->sizes);
 	if (status != SEC_E_OK) return c4_tls_win32_failed("the TLS session has no record sizes", status, error, capacity);
 	SecPkgContext_ConnectionInfo info;
-	status = QueryContextAttributesW(&s->context, SECPKG_ATTR_CONNECTION_INFO, &info);
+	status = s->api->sspi->QueryContextAttributesW(&s->context, SECPKG_ATTR_CONNECTION_INFO, &info);
 	s->version = status == SEC_E_OK && (info.dwProtocol & SP_PROT_TLS1_3) ? kTlsVersion13 : kTlsVersion12;
 	s->record = (uint8_t*)malloc((size_t)s->sizes.cbHeader + s->sizes.cbMaximumMessage + s->sizes.cbTrailer);
 	if (!s->record) return c4_tls_win32_refused("out of memory for TLS records", error, capacity);
@@ -189,7 +191,8 @@ static DWORD UrlWaitMs(ULONGLONG deadline)
 
 static int64_t CheckServer(TlsSession* s, ULONGLONG deadline, char* error, int64_t capacity)
 {
-	return c4_tls_win32_check_server(&s->context, s->host, s->hostText, s->extraRoots, UrlWaitMs(deadline), error, capacity);
+	const TlsServerCheck check = { s->host, s->hostText, s->extraRoots, UrlWaitMs(deadline) };
+	return c4_tls_win32_check_server(s->api, &s->context, &check, error, capacity);
 }
 
 // --- the handshake ---------------------------------------------------------------------------------------------------
@@ -200,8 +203,8 @@ static SECURITY_STATUS HandshakeStep(TlsSession* s, bool first, SecBufferDesc* i
 	DWORD attributes = 0;
 	AcquireSRWLockExclusive(&s->contextLock);
 	const SECURITY_STATUS status = s->server
-		? AcceptSecurityContext(&s->credentials, first ? NULL : &s->context, in, kAcceptFlags, 0, &s->context, out, &attributes, NULL)
-		: InitializeSecurityContextW(&s->credentials, first ? NULL : &s->context, s->host, kInitiateFlags, 0, 0, in, 0, &s->context, out, &attributes, NULL);
+		? s->api->sspi->AcceptSecurityContext(&s->credentials, first ? NULL : &s->context, in, kAcceptFlags, 0, &s->context, out, &attributes, NULL)
+		: s->api->sspi->InitializeSecurityContextW(&s->credentials, first ? NULL : &s->context, s->host, kInitiateFlags, 0, 0, in, 0, &s->context, out, &attributes, NULL);
 	ReleaseSRWLockExclusive(&s->contextLock);
 	return status;
 }
@@ -241,7 +244,7 @@ static int64_t SendToken(TlsSession* s, SecBuffer* token, int32_t waitMs, char* 
 {
 	if (!token->pvBuffer) return 0;
 	const int64_t sent = token->cbBuffer > 0 ? SendAllOn(s->socket, (const uint8_t*)token->pvBuffer, token->cbBuffer, waitMs, error, capacity) : 0;
-	FreeContextBuffer(token->pvBuffer);
+	s->api->sspi->FreeContextBuffer(token->pvBuffer);
 	token->pvBuffer = NULL;
 	return sent < 0 ? sent : 0;
 }
@@ -303,9 +306,9 @@ static int64_t PrepareClient(TlsSession* s, const c4_tls_client_options* options
 	c4_copy_text(options->hostName, s->hostText, sizeof(s->hostText));
 	s->host = c4_utf8_to_wide(options->hostName);
 	if (!s->host) return c4_tls_win32_refused("the host name is not UTF-8", error, capacity);
-	if (options->extraRootsSize > 0 && !c4_tls_win32_load_roots(options->extraRoots, options->extraRootsSize, &s->extraRoots, error, capacity))
+	if (options->extraRootsSize > 0 && !c4_tls_win32_load_roots(s->api, options->extraRoots, options->extraRootsSize, &s->extraRoots, error, capacity))
 		return kNetError;
-	const SECURITY_STATUS acquired = c4_tls_win32_credentials(false, NULL, &s->credentials);
+	const SECURITY_STATUS acquired = c4_tls_win32_credentials(s->api, false, NULL, &s->credentials);
 	if (acquired != SEC_E_OK) return c4_tls_win32_failed("SChannel refused TLS client credentials", acquired, error, capacity);
 	s->ownsCredentials = true;
 	return 0;
@@ -317,7 +320,9 @@ int64_t c4_tls_connect(int64_t socket, const c4_tls_client_options* options, int
 		return c4_tls_win32_refused("a connected socket and a host name are needed", error, errorCapacity);
 	if (options->extraRootsSize < 0 || (options->extraRootsSize > 0 && !options->extraRoots))
 		return c4_tls_win32_refused("the extra roots are malformed", error, errorCapacity);
-	TlsSession* s = NewSession(socket, false);
+	const TlsApi* api = c4_tls_win32_api(error, errorCapacity);
+	if (!api) return kNetError;
+	TlsSession* s = NewSession(api, socket, false);
 	if (!s) return c4_tls_win32_refused("out of memory for a TLS session", error, errorCapacity);
 	const ULONGLONG deadline = DeadlineAfter(timeoutMs);
 	int64_t result = PrepareClient(s, options, error, errorCapacity);
@@ -332,7 +337,7 @@ int64_t c4_tls_accept(int64_t socket, int64_t identity, int32_t timeoutMs, char*
 {
 	const TlsIdentity* id = identity == -1 ? NULL : (const TlsIdentity*)(intptr_t)identity;
 	if (socket < 0 || !id) return c4_tls_win32_refused("an accepted socket and an identity are needed", error, errorCapacity);
-	TlsSession* s = NewSession(socket, true);
+	TlsSession* s = NewSession(id->api, socket, true);
 	if (!s) return c4_tls_win32_refused("out of memory for a TLS session", error, errorCapacity);
 	s->credentials = id->credentials;
 	int64_t result = Handshake(s, true, DeadlineAfter(timeoutMs), error, errorCapacity);
@@ -357,7 +362,7 @@ static int64_t SendRecord(TlsSession* s, const void* data, int64_t size, int32_t
 		{ 0, SECBUFFER_EMPTY, NULL } };
 	SecBufferDesc desc = { SECBUFFER_VERSION, 4, buffers };
 	AcquireSRWLockExclusive(&s->contextLock);
-	const SECURITY_STATUS status = EncryptMessage(&s->context, 0, &desc, 0);
+	const SECURITY_STATUS status = s->api->sspi->EncryptMessage(&s->context, 0, &desc, 0);
 	ReleaseSRWLockExclusive(&s->contextLock);
 	if (status != SEC_E_OK) return c4_tls_win32_failed("a TLS record could not be encrypted", status, error, capacity);
 	const int64_t total = (int64_t)buffers[0].cbBuffer + buffers[1].cbBuffer + buffers[2].cbBuffer;
@@ -421,7 +426,7 @@ static SECURITY_STATUS DecryptRecord(TlsSession* s)
 		{ 0, SECBUFFER_EMPTY, NULL }, { 0, SECBUFFER_EMPTY, NULL } };
 	SecBufferDesc desc = { SECBUFFER_VERSION, 4, buffers };
 	AcquireSRWLockExclusive(&s->contextLock);
-	const SECURITY_STATUS status = DecryptMessage(&s->context, &desc, 0, NULL);
+	const SECURITY_STATUS status = s->api->sspi->DecryptMessage(&s->context, &desc, 0, NULL);
 	ReleaseSRWLockExclusive(&s->contextLock);
 	if (status == SEC_E_INCOMPLETE_MESSAGE) s->inputIncomplete = true;
 	if (status != SEC_E_OK && status != SEC_I_RENEGOTIATE && status != SEC_I_CONTEXT_EXPIRED) return status;
@@ -531,7 +536,7 @@ static int32_t SendCloseNotify(TlsSession* s)
 	SecBuffer control = { sizeof(type), SECBUFFER_TOKEN, &type };
 	SecBufferDesc controlDesc = { SECBUFFER_VERSION, 1, &control };
 	AcquireSRWLockExclusive(&s->contextLock);
-	SECURITY_STATUS status = ApplyControlToken(&s->context, &controlDesc);
+	SECURITY_STATUS status = s->api->sspi->ApplyControlToken(&s->context, &controlDesc);
 	ReleaseSRWLockExclusive(&s->contextLock);
 	s->closeSent = true;
 	if (status != SEC_E_OK) return kNetError;
@@ -541,7 +546,7 @@ static int32_t SendCloseNotify(TlsSession* s)
 	char ignored[kTlsReasonBytes];
 	const bool made = status == SEC_E_OK || status == SEC_I_CONTEXT_EXPIRED;
 	const bool sent = made && out[0].pvBuffer && out[0].cbBuffer > 0 && SendToken(s, &out[0], 0, ignored, sizeof(ignored)) == 0;
-	if (out[0].pvBuffer) FreeContextBuffer(out[0].pvBuffer);
+	if (out[0].pvBuffer) s->api->sspi->FreeContextBuffer(out[0].pvBuffer);
 	return sent ? 0 : kNetError;
 }
 

@@ -2,9 +2,10 @@
 // TLS behind Bedrock's Net::TcpStream (D-84): a connected TCP socket of NetRuntimeC.h secured with TLS 1.2 or 1.3, as
 // the client (c4_tls_connect: the server's certificate checked against the system's roots, or extra ones the caller
 // trusts, and against the host name) or as the server (c4_tls_accept, proving itself with an identity loaded from a
-// PKCS #12 file). One implementation file per OS (Net/TlsWin32.c, SChannel). A session or an identity is an int64
-// handle, -1 for none. A session sends and receives on its socket; the socket stays the caller's to shut down and
-// close, after c4_tls_free. A call that can fail writes why into `error` as NetRuntimeC.h's calls do.
+// PKCS #12 file). One set of implementation files per OS (Net/Tls*Win32.c: SChannel, its DLLs loaded when TLS is
+// first used). A session or an identity is an int64 handle, -1 for none. A session sends and receives on its socket;
+// the socket stays the caller's to shut down and close, after c4_tls_free. A call that can fail writes why into
+// `error` as NetRuntimeC.h's calls do.
 //
 // Threads: one send and one receive may run at once on a session (each kind is serialized); c4_tls_free runs alone,
 // once no other call is in it (a socket shut down both ways ends a call that waits).

@@ -1061,7 +1061,8 @@ Covered by `Bedrock/Tests/platform_*_tests.cf` and, for faults on protected page
 
 **Status:** **Implemented** (B49, D-65; TLS B77, D-84): TCP and UDP over IPv4 and IPv6, name resolution, waiting on
 many sockets, and TLS on TCP streams, through small C APIs in the runtime (`C4Runtime/NetRuntimeC.h`,
-`C4Runtime/Net/SocketsWin32.c` over Winsock 2; `C4Runtime/TlsRuntimeC.h`, `C4Runtime/Net/Tls*Win32.c` over SChannel).
+`C4Runtime/Net/SocketsWin32.c` over Winsock 2; `C4Runtime/TlsRuntimeC.h`, `C4Runtime/Net/Tls*Win32.c` over SChannel,
+whose DLLs a program loads only when it first uses TLS).
 Windows only today: the runtime's files for another system come with the Linux port (B31). HTTP is built on it
 (section 14).
 
