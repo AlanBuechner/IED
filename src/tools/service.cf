@@ -86,13 +86,17 @@ namespace Ied
 		}
 	}
 
-	Core::Array<ToolSpec*> Tools::ToolsOf(Workspace* ws) {
+	Core::Array<ToolSpec*> Tools::AllToolsOf(Workspace* ws) {
 		Core::Array<ToolSpec*> all;
 		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("tools")))
 			all.Push(ReadToolSpec(given.entry, given.plugin->manifest->id.View(), given.plugin->manifest->name.View(), given.plugin->manifest->folder));
+		return LastOfEachId(all);
+	}
+
+	Core::Array<ToolSpec*> Tools::ToolsOf(Workspace* ws) {
 		Core::Array<ToolSpec*> holding;
 		WhenLookup lookup = WorkspaceWhen(server, ws);
-		for (ToolSpec* spec : LastOfEachId(all)) {
+		for (ToolSpec* spec : AllToolsOf(ws)) {
 			Core::String error;
 			if (WhenHolds(spec->when.View(), lookup, error)) holding.Push(spec);
 			else if (!error.IsEmpty()) server->Log((((Core::String("the when of tool ") + spec->id.View()) + " does not parse: ") + error.View()).View());
@@ -218,7 +222,7 @@ namespace Ied
 		WorkspaceTools* entry = EntryOf(ws);
 		ToolStatus* status = entry ? StatusOf(entry, id) : nullptr;
 		if (status && !status->path.IsEmpty()) return status->path;
-		for (ToolSpec* spec : ToolsOf(ws)) {
+		for (ToolSpec* spec : AllToolsOf(ws)) {
 			if (spec->id.View() != id) continue;
 			Core::String looked;
 			Core::String setting = SettingText(ws, spec->setting.View());
