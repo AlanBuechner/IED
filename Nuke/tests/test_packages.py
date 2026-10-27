@@ -300,6 +300,31 @@ class ResolveTests(PackageTest):
 		self.assertEqual(code, 1)
 		self.assertIn("has no releases", out)
 
+	def test_a_branch_keeps_its_locked_commit_only_while_the_branch_has_it(self):
+		self.windowing()
+		first = git("rev-list", "-n", "1", "Windowing/v0.1.0", cwd=self.engine.work)
+		self.workspace({"Windowing": "{ source = \"engine\", branch = \"main\" }"})
+		self.projects()
+		main = self.lock()[("engine", "Windowing")]["commit"]
+		self.assertEqual(main, git("rev-parse", "main", cwd=self.engine.work))
+		self.engine.commit({"Windowing/src/Windowing/window.ch": "// later on main\n"})
+		self.projects()
+		self.assertEqual(main, self.lock()[("engine", "Windowing")]["commit"], "a newer tip waits for update")
+		git("checkout", "--quiet", "-b", "other", first, cwd=self.engine.work)
+		other = self.engine.commit({"Windowing/src/Windowing/window.ch": "// other\n"})
+		git("push", "--quiet", "origin", "other", cwd=self.engine.work)
+		self.workspace({"Windowing": "{ source = \"engine\", branch = \"other\" }"})
+		self.projects()
+		self.assertEqual(other, self.lock()[("engine", "Windowing")]["commit"], "main's commit is not on other: its tip")
+
+	def test_a_missing_package_names_the_ones_there(self):
+		self.windowing()
+		self.workspace({"Physics": "\"engine@*\""}, depends=())
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1)
+		self.assertIn("no Physics/nuke.toml with a [package] table (its packages there: ", out)
+		self.assertNotIn("0.0.0+", out, "no made-up version for the repository's tip")
+
 	def test_a_clash_of_project_names_is_an_error(self):
 		self.windowing()
 		self.workspace({"Windowing": "\"engine@^0.2\""})

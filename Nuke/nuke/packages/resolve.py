@@ -189,8 +189,11 @@ class Resolver:
 		found = repo.index(choice.commit)
 		info = found.packages.get(path)
 		if info is None:
-			where = "its checkout" if repo.develop else f"{choice.version} ({choice.commit[:8]})"
-			raise NukeError(f"{repo.name} has no package '{path}' in {where}: no folder with a [package] table there")
+			released = choice.version.release != semver.Version(0, 0, 0) or not choice.version.build
+			where = "its checkout" if repo.develop else f"{key[1] or 'the repository'} {choice.version} ({choice.commit[:8]})" if released \
+				else f"commit {choice.commit[:8]}"
+			raise NukeError(f"{repo.name} has no package '{path}' at {where}: no {path}/nuke.toml with a [package] table "
+				f"(its packages there: {', '.join(sorted(p for p in found.packages if p)) or 'none'})")
 		label = f"{repo.name}:{path or '(repository)'} {choice.version}"
 		elsewhere = set()
 		for dependency in info.dependencies:
@@ -261,9 +264,11 @@ class Resolver:
 			commit = locked.commit if locked and locked.commit.startswith(rev) else repo.resolve_rev(rev)
 			return self._pinned(repo, line, commit, versions, needs)
 		if branches:
-			if locked and not updating and not self._excluded(key, locked.commit):
+			tip = repo.branch_commit(next(iter(branches)))
+			# The locked commit stays while it is on the branch (moving to another branch moves the lock to its tip).
+			if locked and not updating and not self._excluded(key, locked.commit) and repo.is_ancestor(locked.commit, tip):
 				return self._pinned(repo, line, locked.commit, versions, needs)
-			return self._pinned(repo, line, repo.branch_commit(next(iter(branches))), versions, needs)
+			return self._pinned(repo, line, tip, versions, needs)
 		if locked and not updating and not self._excluded(key, locked.commit):
 			version = semver.parse_version(locked.version)
 			if version is not None and all(n.value.matches(version) for n in versions):
