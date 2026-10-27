@@ -184,6 +184,10 @@
 	.cs-row { height: var(--row-h-touch); }
 }
 
+/* The link key held: hovers are see-through and let the pointer reach the code beneath them (hoverpassthrough.js). */
+.monaco-editor.links-held .monaco-resizable-hover, .monaco-editor.links-held .monaco-hover { pointer-events: none; }
+.monaco-editor.links-held .monaco-hover { opacity: 0.35; }
+
 .output-text .out-loc { text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 2px; cursor: pointer; }
 .output-text .out-loc:hover { text-decoration-color: currentColor; }
 

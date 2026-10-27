@@ -3,7 +3,8 @@
 // shows unsaved changes, and Ctrl+S saves (an untitled file asks where to, untitled.js; until then it is saved where it
 // is as it is typed). Language features come from the language servers (language.js), and the links written in the text
 // open on a middle click or a Ctrl+click (editorlinks.js); Ctrl held over the code keeps underlining the symbols that
-// have a definition as the pointer moves (definitionlinks.js). A file
+// have a definition as the pointer moves (definitionlinks.js), and the hovers let the pointer through meanwhile
+// (hoverpassthrough.js). A file
 // mixing line endings opens read-only: Monaco would make them one kind and the positions it reports would no longer be
 // the server's.
 
@@ -15,6 +16,7 @@ import { ChangeMargin } from "./changemargin.js";
 import { displayPath, isFileUri } from "/ui-kit/fileuris.js";
 import { isUntitled, saveUntitledAs } from "./untitled.js";
 import { keepDefinitionLinksAsking } from "./definitionlinks.js";
+import { letHoversPassWhileLinking } from "./hoverpassthrough.js";
 
 const NOTICE_MS = 8000;
 // An untitled file is saved this long after its last edit (untitled.js): it lives in the local state, not the workspace.
@@ -43,6 +45,7 @@ export class CodeEditor {
 		ctx.el.append(this.bar, this.host);
 		this.editor = monaco.editor.create(this.host, editorOptions(monaco));
 		keepDefinitionLinksAsking(this.editor);
+		this.stopHoverPassing = letHoversPassWhileLinking(this.editor);
 		this.margin =new ChangeMargin(this.editor, this.ied.client, (message, e) => this.ied.report(message, e));
 		this.editor.onDidFocusEditorText(() => this.focused());
 		this.editor.onDidScrollChange((event) => {
@@ -68,6 +71,7 @@ export class CodeEditor {
 		for (const dispose of this.attachments) if (typeof dispose === "function") dispose();
 		this.margin.dispose();
 		this.sync.dispose();
+		this.stopHoverPassing();
 		this.editor.dispose();
 		if (this.model) this.model.dispose();
 	}
