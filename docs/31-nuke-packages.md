@@ -119,8 +119,11 @@ MyGame/
 
 Packages are inside the workspace because IED edits only files of the workspace (files outside it open read-only,
 `docs/10`), and so they show in the Solution Explorer, the file tree, search and the language server like the
-workspace's own projects. The folder is kept out of git by the checkout's own `.git/info/exclude` rather than
-`.gitignore`, because search in IED and the AI's tools skip what `.gitignore` files ignore. The cache shares the git
+workspace's own projects. What Nuke puts there is kept out of git by the checkout's own `.git/info/exclude` rather
+than `.gitignore`, because search in IED and the AI's tools skip what `.gitignore` files ignore - each entry by name
+(`/packages/nuke.lock`, `/packages/claymore/`), never the whole folder: only what Nuke made there is its own, and
+any other folder in it is the workspace's, found and committed like any other (a `Packages/` folder of sources is the
+same folder on Windows; it must not vanish from discovery and git because of its name). The cache shares the git
 objects among every workspace of the machine.
 
 ## 5. Developing a package with the program

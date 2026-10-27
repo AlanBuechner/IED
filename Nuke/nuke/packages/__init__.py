@@ -55,9 +55,9 @@ def sync(spec, projects, options):
 	roots = workspace_roots(spec, projects)
 	wanted = sorted({name for p in projects.values() for name in p.depends if name.lower() not in local})
 	lock = lockfile.read(spec)
+	writable.follow_checkout(spec, roots, state, cache, options.log)    # before anything returns: it lets go too
 	if not roots and lock is None:
 		return []
-	writable.follow_checkout(spec, roots, state, cache, options.log)
 	stopping = writable.follow_manifest(spec, roots, state, cache, options.log)
 	checkouts = {url: folder for url, folder in state.checkouts().items()}
 	digest = _digest(roots, checkouts)
@@ -157,7 +157,7 @@ class LocalPackages:
 	no repository, from a package of this one) and the package's path from the repository's top."""
 
 	def __init__(self, spec):
-		self.by_path = index.in_folder(spec.dir, spec.name, skip=(spec.packages_dir,)).packages   # workspace-relative
+		self.by_path = index.in_folder(spec.dir, spec.name).packages   # workspace-relative
 		top, self.remotes = git.checkout_remotes(spec.dir)
 		prefix = os.path.relpath(spec.dir, top).replace("\\", "/") if top else "."
 		self.prefix = "" if prefix == "." else prefix

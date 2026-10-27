@@ -501,7 +501,7 @@ def _release_repository(context, source):
 			raise NukeError(f"{source} is not being developed in this workspace (`nuke package develop {source}` first)")
 		folder, url = checkouts[source]
 		return folder, url, source
-	if os.path.exists(os.path.join(context.root, ".git")) and index.in_folder(context.root, context.spec.name, skip=(context.spec.packages_dir,)).packages:
+	if os.path.exists(os.path.join(context.root, ".git")) and index.in_folder(context.root, context.spec.name).packages:
 		return context.root, None, context.spec.name
 	if len(checkouts) == 1:
 		source, (folder, url) = next(iter(checkouts.items()))

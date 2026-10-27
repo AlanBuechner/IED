@@ -128,6 +128,7 @@ def load_workspace(root, package_options=None):
 	"""The workspace at `root`, with the projects of the packages it uses (installed and locked first: packages/__init__.py;
 	`package_options` carries the log and what to update)."""
 	spec, projects = read_projects(root)
+	package_installs.ensure_ignored(spec.dir, spec.packages_dir)     # files only: what git skips matches the folder
 	packages_module.check_local(spec, projects)
 	if packages_module.active(spec, projects):
 		options = package_options or packages_module.Options(Log(messages=sys.stderr))
@@ -216,11 +217,11 @@ def _package_libraries(packages):
 
 
 def _project_folders(spec):
-	"""The workspace's own project folders: never anything in its packages folder, whose projects come with packages."""
-	package_installs.check_folder(spec)
-	installed = os.path.join(spec.dir, spec.packages_dir)
+	"""The workspace's own project folders: never what Nuke made in its packages folder (installed packages, clones),
+	whose projects come with packages - anything else there is the workspace's like any other folder."""
+	generated = package_installs.owned_paths(spec)
 	if spec.projects is None:
-		return discover(spec.dir, tuple(spec.exclude) + (spec.packages_dir.strip("/\\").replace("\\", "/"),))
+		return discover(spec.dir, tuple(spec.exclude) + tuple(generated))
 	folders = []
 	for entry in spec.projects:
 		matches = _match_entry(spec.dir, entry)
@@ -228,7 +229,7 @@ def _project_folders(spec):
 			raise NukeError(f"{spec.file}: workspace.projects entry '{entry}' matches no folder with a {MANIFEST_NAME}")
 		if glob.has_magic(entry):
 			matches = [m for m in matches if not fsutil.matches_any(os.path.relpath(m, spec.dir), spec.exclude)
-				and not fsutil.is_within(m, installed)]
+				and not any(fsutil.is_within(m, os.path.join(spec.dir, g)) for g in generated)]
 		folders.extend(m for m in matches if not any(fsutil.same_path(m, f) for f in folders))
 	return folders
 

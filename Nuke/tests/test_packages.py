@@ -214,41 +214,44 @@ class ManifestTests(PackageTest):
 
 
 class PackagesFolderTests(PackageTest):
-	"""The packages folder is Nuke's alone: a folder of the workspace's own in it is refused, never skipped unseen."""
+	"""Only what Nuke made in the packages folder is Nuke's: any other folder there - `Packages/` on Windows is the same
+	folder - is the workspace's, found as a project and seen by git."""
 
-	def own_projects_in(self, folder):
+	def own_projects_in(self, folder, dependencies=""):
 		self.files({
 			"nuke.toml": "[workspace]\nname = \"Engine\"\ntoolchain = \"1.0.0\"\n",
-			f"{folder}/ECS/nuke.toml": module("ECS"),
+			f"{folder}/ECS/nuke.toml": module("ECS") + dependencies,
 			f"{folder}/ECS/src/ECS/ecs.ch": "",
 		})
 		git("init", "--quiet", "-b", "main", cwd=self.root)
-		exclude = os.path.join(self.root, ".git", "info", "exclude")
 		write_files(self.root, {".git/info/exclude": "# Nuke's packages folder: installed packages and nuke.lock, all generated\n/packages/\n"})
-		return exclude
+		return os.path.join(self.root, ".git", "info", "exclude")
 
-	def test_a_project_in_a_folder_named_like_it_is_refused_where_case_does_not_count(self):
-		exclude = self.own_projects_in("Packages")
-		code, out = self.nuke("list", "--json")
-		if os.path.normcase("Packages") != os.path.normcase("packages"):
-			self.assertEqual(code, 0, out)
-			self.assertIn("ECS", [p["name"] for p in json.loads(out)["projects"]])
-			return
-		self.assertNotEqual(code, 0, out)
-		self.assertIn("Packages/ECS/nuke.toml is the workspace's own", out)
-		self.assertIn("does not tell from Packages/", out)
-		self.assertIn("packages-dir = \"deps\"", out)
-		self.assertNotIn("/packages/", read(exclude), "git sees the folder again")
-		self.files({"nuke.toml": "[workspace]\nname = \"Engine\"\ntoolchain = \"1.0.0\"\npackages-dir = \"deps\"\n"})
-		code, out = self.nuke("list", "--json")
-		self.assertEqual(code, 0, out)
-		self.assertIn("ECS", [p["name"] for p in json.loads(out)["projects"]], "with another packages folder it is a project")
+	def untracked(self):
+		return git("status", "--porcelain", "--untracked-files=all", cwd=self.root).splitlines()
 
-	def test_a_project_in_the_packages_folder_is_refused(self):
-		self.own_projects_in("packages")
-		code, out = self.nuke("list", "--json")
-		self.assertNotEqual(code, 0, out)
-		self.assertIn("packages/ECS/nuke.toml is the workspace's own", out)
+	def test_a_folder_named_packages_holds_projects_like_any_other(self):
+		for folder in ("Packages", "packages"):
+			with self.subTest(folder=folder):
+				if os.path.exists(self.root):
+					shutil.rmtree(self.root)
+				exclude = self.own_projects_in(folder)
+				self.assertIn("ECS", self.projects())
+				self.assertEqual([], [line for line in read(exclude).splitlines() if line.startswith("/packages") or "Nuke" in line],
+					"an older Nuke's line for the whole folder goes, and nothing of Nuke's is there to ignore")
+				self.assertIn(f"?? {folder}/ECS/nuke.toml", self.untracked())
+
+	def test_what_nuke_installs_beside_them_is_ignored_entry_by_entry(self):
+		self.windowing()
+		exclude = self.own_projects_in("packages", "[dependencies]\n" + f"Windowing = {needs(self.engine.url, 'Windowing', '^0.2')}\n")
+		projects = self.projects()
+		self.assertIn("Windowing", projects["ECS"]["depends"], "the folder's own project uses a package installed beside it")
+		self.assertEqual(projects["Windowing"]["dir"].replace("\\", "/"), self.path("packages", "engine", "Windowing@0.2.0", "Windowing").replace("\\", "/"))
+		self.assertEqual(["/packages/engine/", "/packages/nuke-packages.json", "/packages/nuke.lock"],
+			sorted(line for line in read(exclude).splitlines() if line.startswith("/packages")))
+		untracked = self.untracked()
+		self.assertIn("?? packages/ECS/nuke.toml", untracked)
+		self.assertEqual([], [line for line in untracked if "packages/engine" in line or "nuke.lock" in line or "nuke-packages" in line])
 
 
 class LocalDependencyTests(PackageTest):
@@ -376,6 +379,19 @@ class ProjectDependencyTests(PackageTest):
 		with open(self.path("packages", "nuke-packages.json"), encoding="utf-8") as f:
 			self.assertEqual({}, json.load(f)["develop"])
 		self.assertTrue(os.path.isfile(os.path.join(self.engine.work, "Windowing", "Win32", "nuke.toml")), "the checkout is untouched")
+
+	def test_the_checkout_is_let_go_with_no_lock_left_too(self):
+		self.sample()
+		self.projects()
+		os.remove(self.path("packages", "nuke.lock"))
+		self.files({
+			"Game/nuke.toml": "[project]\nname = \"Game\"\nkind = \"executable\"\n[dependencies]\nTools = { source = \"Tools\" }\n",
+			"Tools/nuke.toml": "[project]\nname = \"Tools\"\nkind = \"module\"\n",
+			"Tools/src/Tools/tools.ch": "",
+		})
+		self.assertIn("Tools", self.projects()["Game"]["depends"])
+		with open(self.path("packages", "nuke-packages.json"), encoding="utf-8") as f:
+			self.assertEqual({}, json.load(f)["develop"])
 
 	def test_a_version_written_by_hand_is_released_as_it_is(self):
 		self.engine_with_dependencies()
@@ -506,7 +522,9 @@ class ResolveTests(PackageTest):
 		os.replace(self.path("packages", "nuke.lock"), self.path("nuke.lock"))     # where Nuke kept it before
 		self.projects()
 		self.assertTrue(os.path.isfile(self.path("packages", "nuke.lock")) and not os.path.exists(self.path("nuke.lock")), "it moves")
-		self.assertEqual(1, read(os.path.join(self.tmp, "game", ".git", "info", "exclude")).count("/MyGame/packages/"), "once")
+		lines = read(os.path.join(self.tmp, "game", ".git", "info", "exclude")).splitlines()
+		self.assertEqual(["/MyGame/packages/engine/", "/MyGame/packages/nuke-packages.json", "/MyGame/packages/nuke.lock"],
+			sorted(line for line in lines if line.startswith("/MyGame/packages")), "what Nuke made, each once")
 
 	def test_a_project_named_by_its_folder_keeps_its_name(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n", "Assets/nuke.toml": "[package]\n[project]\nkind = \"module\"\n",

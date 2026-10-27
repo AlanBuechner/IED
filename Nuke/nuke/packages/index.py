@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from .. import manifest as manifests
 from ..errors import NukeError
 from ..manifest import MANIFEST_NAME
-from . import git
+from . import git, install
 
-# Never part of a package: build output, the repository's own installed packages (packages-dir), hidden folders.
+# Never part of a package: build output, hidden folders (and, on disk, what Nuke installed: in_folder).
 SKIP = {"build", "bin", "bin-int", "node_modules", "__pycache__"}
 
 
@@ -36,7 +36,6 @@ class PackageInfo:
 @dataclass
 class RepoIndex:
 	packages: dict = field(default_factory=dict)   # path -> PackageInfo
-	packages_dir: str = "packages"
 	digest: str = ""     # of the manifests its packages were read from: what they hold and need changes only with it
 
 	def owner(self, project_name):
@@ -61,9 +60,9 @@ def _parent(path):
 	return path.rpartition("/")[0]
 
 
-def _skipped(relative, packages_dir):
+def _skipped(relative):
 	parts = relative.split("/") if relative else []
-	return any(p in SKIP or p.startswith(".") for p in parts) or (packages_dir and relative.startswith(packages_dir.rstrip("/") + "/"))
+	return any(p in SKIP or p.startswith(".") for p in parts)
 
 
 def build(manifest_texts, label):
@@ -74,16 +73,13 @@ def build(manifest_texts, label):
 			raw[path] = tomllib.loads(data.decode("utf-8"))
 		except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
 			raise NukeError(f"{label}: {path}: {error}") from None
-	root = raw.get(MANIFEST_NAME, {})
-	workspace = root.get("workspace") if isinstance(root.get("workspace"), dict) else {}
-	packages_dir = workspace.get("packages-dir", "packages") if isinstance(workspace.get("packages-dir", "packages"), str) else "packages"
-	index = RepoIndex(packages_dir=packages_dir)
+	index = RepoIndex()
 	# A workspace inside the repository (a sample game) is its own: nothing in it belongs to the repository's packages.
 	nested = [_parent(p) for p, d in raw.items() if p != MANIFEST_NAME and isinstance(d.get("workspace"), dict)]
 	folders = {}
 	for path, data in raw.items():
 		folder = _parent(path) if path != MANIFEST_NAME else ""
-		if not _skipped(folder, packages_dir) and not any(folder == n or folder.startswith(n + "/") for n in nested):
+		if not _skipped(folder) and not any(folder == n or folder.startswith(n + "/") for n in nested):
 			folders[folder] = (path, data)
 	index.digest = _digest({path: manifest_texts[path] for path, _ in folders.values()})
 	parsed = {}
@@ -104,6 +100,19 @@ def build(manifest_texts, label):
 		package = index.packages[path]
 		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects), package.version)
 	return index
+
+
+def _generated(folder, root_manifest):
+	"""What Nuke made in the packages folder of the workspace at `folder` (its root manifest's bytes given), as
+	normcased paths from `folder`."""
+	try:
+		workspace = tomllib.loads(root_manifest.decode("utf-8")).get("workspace")
+	except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+		return set()        # build() names the error
+	packages_dir = workspace.get("packages-dir") if isinstance(workspace, dict) else None
+	packages_dir = packages_dir if isinstance(packages_dir, str) and packages_dir.strip() else "packages"
+	base = packages_dir.strip("/\\").replace("\\", "/")
+	return {os.path.normcase(f"{base}/{name}") for name in install.owned(os.path.join(folder, packages_dir))}
 
 
 def _digest(texts):
@@ -127,20 +136,23 @@ def at_commit(repo, commit, label):
 	return build(git.read_files(repo, commit, paths), label)
 
 
-def in_folder(folder, label, prefix="", skip=()):
-	"""The index of a folder on disk: a develop checkout (the repository), or an installed versioned package whose folder
-	is `prefix` in its repository. `skip`: folders (relative) not to enter, such as the workspace's own packages folder."""
+def in_folder(folder, label, prefix=""):
+	"""The index of a folder on disk: a develop checkout or a workspace (the repository), or an installed versioned
+	package whose folder is `prefix` in its repository. What Nuke made in the folder's packages folder - installed
+	packages, clones - is not entered; anything else there is the repository's like any other folder."""
 	texts = {}
-	skipped = {s.strip("/").replace("\\", "/") for s in skip}
+	generated = set()
 	for base, dirs, files in os.walk(folder):
 		relative = os.path.relpath(base, folder).replace("\\", "/")
 		relative = "" if relative == "." else relative
-		dirs[:] = sorted(d for d in dirs if d not in SKIP and not d.startswith(".")
-			and (f"{relative}/{d}" if relative else d) not in skipped)
 		if MANIFEST_NAME in files:
 			path = "/".join(part for part in (prefix, relative, MANIFEST_NAME) if part)
 			with open(os.path.join(base, MANIFEST_NAME), "rb") as f:
 				texts[path] = f.read()
-			if relative and b"[workspace]" in texts[path]:
-				dirs[:] = []        # a workspace of its own (build() leaves it out): its installed packages too
+			if not relative:
+				generated = _generated(folder, texts[path])
+		dirs[:] = sorted(d for d in dirs if d not in SKIP and not d.startswith(".")
+			and os.path.normcase(f"{relative}/{d}" if relative else d) not in generated)
+		if relative and MANIFEST_NAME in files and b"[workspace]" in texts[path]:
+			dirs[:] = []        # a workspace of its own (build() leaves it out): its installed packages too
 	return build(texts, label)

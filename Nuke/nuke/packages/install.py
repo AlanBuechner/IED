@@ -1,6 +1,7 @@
 """The packages folder of a workspace (`packages/`, [workspace] packages-dir): each locked versioned package exported from
 its mirror into `<source>/<path>@<version>/` with every file read-only, each source being developed as a git clone in
-`<source>/`, and nuke-packages.json saying which is which. Nothing in it is committed (ensure_ignored)."""
+`<source>/`, and nuke-packages.json saying which is which. Nothing Nuke puts there is committed (ensure_ignored); the
+folder may hold the workspace's own folders too, which are its own (owned)."""
 
 import json
 import os
@@ -10,14 +11,13 @@ import sys
 
 from .. import fsutil
 from ..errors import NukeError
-from ..manifest import MANIFEST_NAME
 from . import git
 from .store import repository_name
 
-IGNORED_NOTE = "# Nuke's packages folder: installed packages and nuke.lock, all generated"
-
 STATE = "nuke-packages.json"
 FORMAT = 1
+GENERATED = ("nuke.lock", STATE, "nuget")      # the lock, this state, nuget.py's installs
+IGNORED_NOTE = "# What Nuke made in its packages folder: installed packages, clones, nuke.lock (all generated)"
 
 
 def folder(workspace_dir, packages_dir):
@@ -116,74 +116,55 @@ def prune(state, wanted, log):
 		log.detail(f"removed {relative} (no longer used)")
 
 
+def owned(root):
+	"""The entries of a packages folder Nuke made, by name: its files, each source's folder of installs or its clone, a
+	clone moved aside. Nothing else there is Nuke's: whatever else the folder holds - `Packages/` on Windows is the same
+	folder as `packages/` - is the workspace's own, found, built and committed like any other folder."""
+	if not os.path.isdir(root):
+		return []
+	state = State(root)
+	sources = {os.path.normcase(relative.split("/", 1)[0]) for relative in state.installed}
+	sources |= {os.path.normcase(entry["folder"].replace("\\", "/").split("/", 1)[0]) for entry in state.develop.values()
+		if not os.path.isabs(entry.get("folder", ""))}
+	return sorted(name for name in os.listdir(root) if name in GENERATED or name.startswith(".") or os.path.normcase(name) in sources)
+
+
+def owned_paths(spec):
+	"""owned() of the workspace's packages folder, as paths from the workspace's folder."""
+	base = spec.packages_dir.strip("/\\").replace("\\", "/")
+	return [f"{base}/{name}" for name in owned(folder(spec.dir, spec.packages_dir))]
+
+
 def ensure_ignored(workspace_dir, packages_dir):
-	"""The packages folder kept out of git by the checkout's own exclude file (.git/info/exclude), not by .gitignore: git
-	ignores it all the same, while search in IED and the AI's tools, which skip what .gitignore files ignore, still find
-	the packages' code - one codebase with the program's (docs/31 section 4)."""
-	exclude, entry = _exclude_entry(workspace_dir, packages_dir)
+	"""What Nuke made in the packages folder kept out of git by the checkout's own exclude file (.git/info/exclude), not by
+	.gitignore: git ignores it all the same, while search in IED and the AI's tools, which skip what .gitignore files
+	ignore, still find the packages' code - one codebase with the program's (docs/31 section 4). Entry by entry, so
+	nothing else in the folder is ever hidden; read and written as files, no git process."""
+	top, exclude = git.exclude_file(workspace_dir)
 	if exclude is None:
 		return
+	root = folder(workspace_dir, packages_dir)
+	relative = os.path.relpath(root, top).replace("\\", "/")
+	used = os.path.isfile(os.path.join(root, STATE))       # Nuke has used the folder: its lock may come just after
+	names = set(owned(root)) | ({"nuke.lock", STATE} if used else set())
+	entries = [f"/{relative}/{name}" + ("/" if os.path.isdir(os.path.join(root, name)) else "") for name in sorted(names)]
 	text = fsutil.read_text(exclude) or ""
-	if entry in (line.strip() for line in text.splitlines()):
-		return
-	os.makedirs(os.path.dirname(exclude), exist_ok=True)
-	addition = ("" if not text or text.endswith("\n") else "\n") + f"{IGNORED_NOTE}\n{entry}\n"
-	with open(exclude, "a", encoding="utf-8", newline="\n") as f:
-		f.write(addition)
-
-
-def forget_ignored(workspace_dir, packages_dir):
-	"""Takes ensure_ignored's entry (and the note above it) out of the exclude file again."""
-	exclude, entry = _exclude_entry(workspace_dir, packages_dir)
-	text = fsutil.read_text(exclude) if exclude else None
-	if not text:
-		return
-	lines, kept = text.splitlines(), []
-	for line in lines:
-		if line.strip() == entry:
-			while kept and kept[-1].startswith("# Nuke's"):
-				kept.pop()
-			continue
-		kept.append(line)
-	if len(kept) != len(lines):
+	lines = _without_entries(text.splitlines(), f"/{relative}/")
+	if entries:
+		lines += [IGNORED_NOTE] + entries
+	wanted = "".join(line + "\n" for line in lines)
+	if wanted != text:
+		os.makedirs(os.path.dirname(exclude), exist_ok=True)
 		with open(exclude, "w", encoding="utf-8", newline="\n") as f:
-			f.write("".join(line + "\n" for line in kept))
+			f.write(wanted)
 
 
-def _exclude_entry(workspace_dir, packages_dir):
-	"""(the checkout's exclude file, the packages folder's line in it), or (None, None) outside a checkout."""
-	top = git.run(["rev-parse", "--show-toplevel"], cwd=workspace_dir, check=False)
-	exclude = git.run(["rev-parse", "--git-path", "info/exclude"], cwd=workspace_dir, check=False)
-	if not top or not exclude:
-		return None, None
-	folder = os.path.relpath(os.path.join(workspace_dir, packages_dir), top.strip()).replace("\\", "/")
-	return os.path.join(workspace_dir, exclude.strip()), f"/{folder}/"
-
-
-def check_folder(spec):
-	"""The packages folder is Nuke's alone: discovery and git skip it. A folder of the workspace's own in it - a project,
-	or `Packages/` where the file system does not tell it from `packages/` - is refused instead of being skipped without
-	a word, and the exclude entry that kept it out of git goes."""
-	root = folder(spec.dir, spec.packages_dir)
-	if not os.path.isdir(root):
-		return
-	state = State(root)
-	nukes = {os.path.normcase(relative.split("/", 1)[0]) for relative in state.installed}
-	nukes |= {os.path.normcase(entry["folder"].replace("\\", "/").split("/", 1)[0]) for entry in state.develop.values()
-		if not os.path.isabs(entry.get("folder", ""))}
-	for name in sorted(os.listdir(root)):
-		path = os.path.join(root, name)
-		if name.startswith(".") or os.path.normcase(name) in nukes or not os.path.isdir(path):
-			continue
-		manifest = next((os.path.join(base, MANIFEST_NAME) for base, _, files in os.walk(path) if MANIFEST_NAME in files), None)
-		if manifest is not None:
-			forget_ignored(spec.dir, spec.packages_dir)
-			shown = os.path.relpath(os.path.realpath(manifest), os.path.realpath(spec.dir)).replace("\\", "/")
-			on_disk = os.path.basename(os.path.realpath(root))
-			same = "" if on_disk == os.path.basename(root) else f", which this file system does not tell from {on_disk}/"
-			raise NukeError(f"{spec.file}: {shown} is the workspace's own, but it is in the folder Nuke installs packages "
-				f"into ([workspace] packages-dir, \"{spec.packages_dir}\"{same}) - builds and git skip that folder: give Nuke "
-				f"another one in [workspace], such as packages-dir = \"deps\"")
+def _without_entries(lines, prefix):
+	"""An exclude file's lines less Nuke's for one packages folder: each line under `prefix` (the whole folder, as older
+	Nukes wrote it, or an entry of it), and a note of Nuke's with no line of its own left after it."""
+	kept = [line for line in lines if not line.strip().startswith(prefix)]
+	return [line for i, line in enumerate(kept)
+		if not (line.startswith("# Nuke's") or line.startswith("# What Nuke made")) or (i + 1 < len(kept) and kept[i + 1].strip().startswith("/"))]
 
 
 def check_checkout(folder, url):
