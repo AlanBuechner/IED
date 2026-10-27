@@ -18,8 +18,8 @@ HELD_WAIT_SECONDS = 20   # how long a clone may be held before it can step aside
 
 
 def source_name(spec, url):
-	"""The folder name of a source under packages/: its [sources] name, else its repository's name."""
-	return next((name for name, u in spec.sources.items() if url_key(u) == url_key(url)), None) or repository_name(url)
+	"""The folder name of a repository under packages/: its name (claymore for .../Claymore.git)."""
+	return repository_name(url)
 
 
 def declared(spec, roots):

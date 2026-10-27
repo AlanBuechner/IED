@@ -199,7 +199,9 @@ class Resolver:
 		label = f"{repo.name}:{path or '(repository)'} {choice.version}"
 		elsewhere = set()
 		for dependency in info.dependencies:
-			target = self.repositories.get(self._dependency_url(repo, found, dependency, label))
+			if dependency.local is not None:
+				continue        # a project of this package: it comes with it
+			target = self.repositories.get(dependency.url)
 			target_key = (target.key, target.line_of(dependency.path))
 			if target_key != key:
 				need(target_key, requirement_need(dependency, label, key, choice.commit))
@@ -220,17 +222,6 @@ class Resolver:
 					continue
 				use(key, owner)
 		return elsewhere
-
-	def _dependency_url(self, repo, found, dependency, label):
-		if dependency.source is None:
-			return repo.url
-		if is_url(dependency.source):
-			return dependency.source
-		url = found.sources.get(dependency.source)
-		if url is None:
-			raise NukeError(f"{label}: its dependency {dependency.path} names source '{dependency.source}', which the "
-				f"repository's [sources] does not have")
-		return url
 
 	def _find(self, name, current, used):
 		"""(key, package path) of the package whose project is called `name`, among every chosen versioned package."""

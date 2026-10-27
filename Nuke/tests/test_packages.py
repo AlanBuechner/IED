@@ -66,7 +66,7 @@ def module(name, depends=(), package=None, dependencies=None):
 
 def needs(url, path, version):
 	"""A [dependencies] entry: the package at `path` of the repository at `url`."""
-	return f"{{ git = \"{url}\", path = \"{path}\", version = \"{version}\" }}"
+	return f"{{ source = \"{url}/{path}\", version = \"{version}\" }}"
 
 
 class PackageTest(WorkspaceTest):
@@ -85,14 +85,31 @@ class PackageTest(WorkspaceTest):
 		super().tearDown()
 
 	def workspace(self, packages, depends=("Windowing",), sources=None):
+		"""Game: a workspace whose project Game names `packages` in [dependencies] - each {name: "<repository>@<requirement>"
+		or a table of source (a repository's name in `sources`), path (else the name), version, branch, rev, writable} - and
+		depends on `depends`."""
 		sources = sources or {"engine": self.engine.url}
+		entries = "".join(f"{name} = {self.entry(name, value, sources)}\n" for name, value in packages.items())
 		self.files({
-			"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n"
-				"[sources]\n" + "".join(f"{k} = \"{v}\"\n" for k, v in sources.items())
-				+ "[packages]\n" + "".join(f"{k} = {v}\n" for k, v in packages.items()),
-			"Game/nuke.toml": "[project]\ndepends = [" + ", ".join(f'"{d}"' for d in depends) + "]\n",
+			"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n",
+			"Game/nuke.toml": "[project]\ndepends = [" + ", ".join(f'"{d}"' for d in depends) + "]\n"
+				+ ("[dependencies]\n" + entries if entries else ""),
 			"Game/src/main.cf": "int32 main() { return 0; }\n",
 		})
+
+	@staticmethod
+	def entry(name, value, sources):
+		"""A [dependencies] entry in Nuke's form, { source = "<repository URL>/<folder>", ... }, from a test's shorthand."""
+		import tomllib
+		parsed = tomllib.loads(f"x = {value}")["x"]
+		if isinstance(parsed, str):
+			repository, _, requirement = parsed.rpartition("@")
+			parsed = {"source": repository, "version": requirement or "*"}
+		table = dict(parsed)
+		repository, path = table.pop("source"), table.pop("path", name)
+		fields = [f'source = "{sources.get(repository, repository)}/{path}"']
+		fields += [f"{k} = {str(v).lower() if isinstance(v, bool) else json.dumps(v)}" for k, v in table.items()]
+		return "{ " + ", ".join(fields) + " }"
 
 	def projects(self):
 		code, out = self.nuke("list", "--json")
@@ -159,45 +176,68 @@ class SemverTests(unittest.TestCase):
 
 
 class ManifestTests(PackageTest):
-	def test_short_form_needs_a_source(self):
-		self.files({"nuke.toml": "[workspace]\n[packages]\nWindowing = \"^1.0\"\n"})
-		code, out = self.nuke("list")
-		self.assertEqual(code, 1)
-		self.assertIn("must name its source", out)
-
-	def test_unknown_source_is_named(self):
-		self.files({"nuke.toml": "[workspace]\n[sources]\nengine = \"x\"\n[packages]\nWindowing = \"engin@^1.0\"\n"})
-		code, out = self.nuke("list")
-		self.assertEqual(code, 1)
-		self.assertIn("did you mean 'engine'", out)
-
-	def test_package_tables_belong_to_the_workspace_file(self):
-		self.files({"nuke.toml": "[workspace]\n", "Game/nuke.toml": "[project]\n[packages]\nX = \"a@1\"\n"})
-		code, out = self.nuke("list")
-		self.assertEqual(code, 1)
-		self.assertIn("belong to the workspace file", out)
-
-	def test_git_takes_a_url_and_writable_is_the_workspace_s_own(self):
+	def test_a_dependency_is_a_source_and_a_version(self):
 		cases = [
-			("Windowing = { git = \"engine\", version = \"^1.0\" }", "must be a git URL"),
-			("Windowing = { git = \"https://x/e.git\", source = \"e\" }", "git or source, not both"),
-			("Windowing = { git = \"https://x/e.git\", rev = \"1a2b\", writable = true }", "not rev"),
-			("Windowing = { version = \"^1.0\" }", "needs its repository"),
+			("Windowing = \"engine@^1.0\"", "must be a table"),
+			("Windowing = { version = \"^1.0\" }", "needs its source"),
+			("Windowing = { source = \"https://x/o/e.git/Windowing\", version = \"^1\", rev = \"1a2b\" }", "one of version, branch and rev"),
+			("Windowing = { source = \"https://x/o/e.git/Windowing\", rev = \"1a2b\", writable = true }", "not rev"),
+			("Windowing = { source = \"../Windowing\", version = \"^1.0\" }", "a local folder"),
 		]
 		for entry, message in cases:
-			self.files({"nuke.toml": f"[workspace]\n[packages]\n{entry}\n"})
+			self.files({"nuke.toml": f"[project]\nname = \"Game\"\n[dependencies]\n{entry}\n"})
 			code, out = self.nuke("list")
 			self.assertEqual(code, 1, entry)
 			self.assertIn(message, out, entry)
+
+	def test_the_old_tables_say_what_to_write(self):
+		for table in ("[sources]\ne = \"https://x/o/e.git\"", "[packages]\nWindowing = \"e@^1\""):
+			self.files({"nuke.toml": f"[workspace]\n{table}\n"})
+			code, out = self.nuke("list")
+			self.assertEqual(code, 1)
+			self.assertIn("is gone: each project lists the packages it uses in its own [dependencies]", out)
 		self.files({"nuke.toml": "[workspace]\n", "Lib/nuke.toml": "[package]\n[package.dependencies]\n"
-			"X = { git = \"https://x/e.git\", version = \"^1\" }\n[project]\nname = \"Lib\"\n"})
+			"X = { source = \"https://x/o/e.git/X\", version = \"^1\" }\n[project]\nname = \"Lib\"\n"})
 		code, out = self.nuke("list")
 		self.assertEqual(code, 1)
 		self.assertIn("is now [dependencies]", out)
-		self.files({"Lib/nuke.toml": "[package]\n[project]\nname = \"Lib\"\n[dependencies]\nX = { path = \"X\", version = \"^1\" }\n"})
+
+	def test_sources_name_a_repository_and_a_folder(self):
+		split = manifest.split_source
+		self.assertEqual(split("https://github.com/AlanBuechner/Claymore.git/Renderer/RHI/DX12"), ("https://github.com/AlanBuechner/Claymore.git", "Renderer/RHI/DX12"))
+		self.assertEqual(split("https://github.com/AlanBuechner/Claymore/Renderer/RHI"), ("https://github.com/AlanBuechner/Claymore", "Renderer/RHI"))
+		self.assertEqual(split("git@github.com:me/utils.git/Strings"), ("git@github.com:me/utils.git", "Strings"))
+		self.assertEqual(split("https://github.com/me/utils.git"), ("https://github.com/me/utils.git", ""), "a repository that is one package")
+		self.assertEqual(split("C:/repos/engine.git/Windowing"), ("C:/repos/engine.git", "Windowing"), "a local repository")
+		self.assertEqual(split("../Game"), (None, "../Game"), "a local folder")
+
+
+class LocalDependencyTests(PackageTest):
+	"""A local dependency is a folder of the same package: it links that project, and never reaches outside the package."""
+
+	def test_a_local_dependency_links_a_project_of_the_same_package(self):
+		self.files({
+			"nuke.toml": "[workspace]\nname = \"Lib\"\n",
+			"Lib/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Lib\"\nkind = \"module\"\n[dependencies]\n"
+				"Core = { source = \"Core\" }\n",
+			"Lib/Core/nuke.toml": "[project]\nname = \"LibCore\"\nkind = \"module\"\n",
+			"Game/nuke.toml": "[project]\nname = \"Game\"\n[dependencies]\nLib = { source = \"../Lib\" }\n",
+		})
+		projects = self.projects()
+		self.assertIn("LibCore", projects["Lib"]["depends"], "relative to the project")
+		self.assertIn("Lib", projects["Game"]["depends"], "a project in no package uses the workspace's")
+
+	def test_a_local_dependency_stays_inside_its_package(self):
+		self.files({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Windowing/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Windowing\"\nkind = \"module\"\n",
+			"Input/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Input\"\nkind = \"module\"\n[dependencies]\n"
+				"Windowing = { source = \"../Windowing\" }\n",
+		})
 		code, out = self.nuke("list")
 		self.assertEqual(code, 1)
-		self.assertIn("needs its repository", out, "a package names the repository of what it needs, its own too")
+		self.assertIn("is not in package Input: a local dependency is a project of the same package", out)
+		self.assertIn("named by its repository", out)
 
 
 class ProjectDependencyTests(PackageTest):
@@ -207,7 +247,7 @@ class ProjectDependencyTests(PackageTest):
 	def engine_with_dependencies(self):
 		"""Windowing 0.2.0 and its Win32 backend, which names Windowing in its [dependencies] by the repository's URL."""
 		win32 = (f"[package]\nversion = \"0.2.0\"\ndescription = \"the Win32 backend\"\n[project]\nname = \"Win32\"\nkind = \"module\"\n"
-			f"[dependencies]\nWindowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2\" }}\n")
+			f"[dependencies]\nWindowing = {needs(self.engine.url, 'Windowing', '^0.2')}\n")
 		self.engine.commit({
 			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
 			"Windowing/nuke.toml": "[package]\nversion = \"0.2.0\"\n[project]\nname = \"Windowing\"\nkind = \"module\"\n",
@@ -219,8 +259,7 @@ class ProjectDependencyTests(PackageTest):
 	def test_a_lone_project_s_dependencies_are_pulled_and_linked(self):
 		self.engine_with_dependencies()
 		self.files({
-			"nuke.toml": f"[project]\nname = \"Game\"\nkind = \"executable\"\n[dependencies]\n"
-				f"Win32 = {{ git = \"{self.engine.url}\", path = \"Windowing/Win32\", version = \"^0.2\" }}\n",
+			"nuke.toml": f"[project]\nname = \"Game\"\nkind = \"executable\"\n[dependencies]\nWin32 = {needs(self.engine.url, 'Windowing/Win32', '^0.2')}\n",
 			"src/main.cf": "int32 main() { return 0; }\n",
 		})
 		projects = self.projects()
@@ -254,32 +293,25 @@ class ProjectDependencyTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		self.assertIn("also releasing Windowing/Win32 0.2.6", out, "Win32 wanted ^0.2")
 		self.assertEqual("Release Windowing 0.3.0, Windowing/Win32 0.2.6", git("log", "-1", "--format=%s", "Windowing/v0.3.0", cwd=self.engine.work))
-		self.assertIn('path = "Windowing", version = "^0.3.0"', read(win32))
-
-	def test_a_project_must_name_its_dependency_s_repository(self):
-		self.files({"nuke.toml": "[project]\nname = \"Game\"\n[dependencies]\nWin32 = { path = \"Windowing/Win32\", version = \"^0.2\" }\n"})
-		code, out = self.nuke("list")
-		self.assertEqual(code, 1)
-		self.assertIn("needs its repository", out)
+		self.assertIn(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.3.0')}", read(win32))
 
 
-class CargoStyleTests(PackageTest):
-	"""A workspace whose nuke.toml alone names its packages - a git URL and a version, as Cargo's git dependencies - and
-	whether they are writable: any Nuke command, a build first of all, pulls them."""
+class WritableTests(PackageTest):
+	"""A project's dependency is locked - installed read-only - unless it says writable: then its repository is a clone."""
 
-	def manifest(self, entry):
+	def game(self, entry):
 		self.files({
-			"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n[packages]\n" + entry + "\n",
-			"Game/nuke.toml": "[project]\ndepends = [\"Windowing\", \"Win32\"]\n",
+			"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n",
+			"Game/nuke.toml": "[project]\ndepends = [\"Win32\"]\n" + (f"[dependencies]\n{entry}\n" if entry else ""),
 			"Game/src/main.cf": "int32 main() { return 0; }\n",
 		})
 
-	def test_a_git_url_and_a_version_are_all_a_workspace_needs(self):
+	def test_a_source_and_a_version_are_all_a_project_needs(self):
 		self.windowing()
-		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.1\" }}")
+		self.game(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.1')}")
 		code, out = self.nuke("package", "develop", "enGINE", "--at", os.path.join(self.tmp, "nowhere"))
 		self.assertEqual(code, 1)
-		self.assertNotIn("no source named", out, "a source named by its git URL is found by its repository's name")
+		self.assertNotIn("no repository named", out, "a repository is found by its name")
 		projects = self.projects()
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.1.0", "the newest release ^0.1 allows")
 		windowing = projects["Windowing"]["dir"]
@@ -288,15 +320,14 @@ class CargoStyleTests(PackageTest):
 		self.assertIn("Win32", projects, "a sub-package the game depends on comes with it")
 		code, out = self.nuke("package", "status", "--json")
 		self.assertEqual(code, 0, out)
-		sources = json.loads(out[out.index("{"):])["sources"]
-		self.assertEqual([(s["name"], s.get("git")) for s in sources], [("engine", True)], "named by its git URL")
+		self.assertEqual([s["name"] for s in json.loads(out[out.index("{"):])["sources"]], ["engine"])
 
-	def test_writable_in_nuke_toml_is_a_clone_and_taking_it_away_locks_again(self):
+	def test_writable_is_a_clone_and_taking_it_away_locks_again(self):
 		self.windowing()
-		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2\", writable = true }}")
+		self.game(f"Windowing = {{ source = \"{self.engine.url}/Windowing\", version = \"^0.2\", writable = true }}")
 		projects = self.projects()
 		clone = self.path("packages", "engine")
-		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "the build cloned the source")
+		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "the build cloned the repository")
 		self.assertTrue(projects["Windowing"]["dir"].replace("\\", "/").endswith("packages/engine/Windowing"))
 		self.assertTrue(os.access(os.path.join(clone, "Windowing", "nuke.toml"), os.W_OK), "writable")
 		code, out = self.nuke("package", "status")
@@ -312,7 +343,7 @@ class CargoStyleTests(PackageTest):
 		self.projects()
 		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "another checkout of the workspace clones it again")
 		write_files(clone, {"Windowing/src/Windowing/window.ch": "// edited\n"})
-		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2\" }}")
+		self.game(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.2')}")
 		code, out = self.nuke("list", "--json")
 		self.assertEqual(code, 1, out)
 		self.assertIn("uncommitted change", out, "work no remote has is never thrown away")
@@ -323,16 +354,16 @@ class CargoStyleTests(PackageTest):
 		self.assertIn("Windowing@0.2.0", projects["Windowing"]["dir"].replace("\\", "/"))
 		self.assertFalse(os.path.isdir(self.path("packages", ".engine.develop")), "the clone set aside is gone")
 
-	def test_add_writes_the_cargo_form_for_a_url(self):
+	def test_add_writes_a_source_and_a_version(self):
 		self.windowing()
-		self.manifest("")
-		code, out = self.nuke("package", "add", self.engine.url, "Windowing")
+		self.game("")
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2.0\" }}", read(self.path("Game", "nuke.toml")))
-		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0", "--writable")
+		self.assertIn(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.2.0')}", read(self.path("Game", "nuke.toml")))
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Renderer", "^1.0", "--writable")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", path = \"Renderer\", version = \"^1.0\", writable = true }}", read(self.path("Game", "nuke.toml")))
-		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")), "writable: the source is a clone")
+		self.assertIn(f"Renderer = {{ source = \"{self.engine.url}/Renderer\", version = \"^1.0\", writable = true }}", read(self.path("Game", "nuke.toml")))
+		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")), "writable: the repository is a clone")
 
 
 class ResolveTests(PackageTest):
@@ -437,7 +468,7 @@ class ResolveTests(PackageTest):
 		code, out = self.nuke("list")
 		self.assertEqual(code, 1)
 		self.assertIn("no version of engine:Windowing", out)
-		self.assertIn("the workspace wants ^0.1", out)
+		self.assertIn("project Game wants ^0.1", out)
 		self.assertIn("engine:Renderer 1.0.0", out)
 
 	def test_backtracking_finds_an_older_dependent(self):
@@ -460,7 +491,7 @@ class ResolveTests(PackageTest):
 		strings.commit({"nuke.toml": "[workspace]\n", "Strings/nuke.toml": module("Strings", package="text"),
 			"Strings/src/Strings/s.ch": ""}, tags=["Strings/v1.0.0", "Strings/v1.1.0"])
 		self.engine.commit({
-			"nuke.toml": f"[workspace]\n[sources]\nstrings = \"{strings.url}\"\n",
+			"nuke.toml": "[workspace]\n",
 			"Console/nuke.toml": module("Console", package="console", dependencies={"Strings": needs(strings.url, "Strings", "^1.1")}),
 			"Console/src/Console/c.ch": "",
 		}, tags=["Console/v0.1.0"])
@@ -545,8 +576,8 @@ class ResolveTests(PackageTest):
 		self.assertEqual(project["root"], "../../packages/engine/Windowing@0.2.0/Windowing/Win32")
 		self.assertEqual([p["name"] for p in project["packages"]], ["Windowing"], "Win32 uses Windowing")
 		game = json.loads(read(self.path("build", "ied", "Game.iedproj")))
-		self.assertEqual(game["packages"], [{"name": "Windowing/Win32", "version": "0.2.0", "source": self.engine.url,
-			"detail": "engine, locked", "readOnly": True}], "a local repository has no web page to link")
+		self.assertEqual(game["packages"], [{"name": n, "version": "0.2.0", "source": self.engine.url, "detail": "engine, locked",
+			"readOnly": True} for n in ("Windowing", "Windowing/Win32")], "a local repository has no web page to link")
 
 	def test_a_package_manifest_of_no_project_shows_in_its_folder(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n", "Core/nuke.toml": "[package]\ndescription = \"the basics\"\n",
@@ -572,31 +603,39 @@ class CommandTests(PackageTest):
 	def test_add_writes_the_newest_release_and_remove_drops_it(self):
 		self.windowing()
 		self.workspace({}, depends=())
-		code, out = self.nuke("package", "add", "engine", "Windowing")
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.2.0" }', read(self.path("Game", "nuke.toml")))
-		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0")
+		self.assertIn(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.2.0')}", read(self.path("Game", "nuke.toml")))
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Renderer", "^1.0")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Renderer = { source = "engine", path = "Renderer", version = "^1.0" }', read(self.path("Game", "nuke.toml")))
+		self.assertIn(f"Renderer = {needs(self.engine.url, 'Renderer', '^1.0')}", read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "remove", "Renderer")
 		self.assertEqual(code, 0, out)
 		self.assertNotIn("Renderer", read(self.path("Game", "nuke.toml")))
-		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--name", "Backend")
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Windowing/Win32", "--name", "Backend")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Backend = { source = "engine", path = "Windowing/Win32", version = "^0.2.0" }', read(self.path("Game", "nuke.toml")))
+		self.assertIn(f"Backend = {needs(self.engine.url, 'Windowing/Win32', '^0.2.0')}", read(self.path("Game", "nuke.toml")))
 		code, out = self.nuke("package", "remove", "Windowing/Win32")
 		self.assertEqual(code, 0, out)
-		self.assertNotIn("Backend", read(self.path("Game", "nuke.toml")), "an entry is removed by its name or its path")
+		self.assertNotIn("Backend", read(self.path("Game", "nuke.toml")), "an entry is removed by its name, source or folder")
 
 	def test_add_a_branch_and_a_nested_package(self):
 		self.windowing()
 		self.workspace({}, depends=())
-		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--branch", "main")
+		code, out = self.nuke("package", "add", f"{self.engine.url}/Windowing/Win32", "--branch", "main")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Win32 = { source = "engine", path = "Windowing/Win32", branch = "main" }', read(self.path("Game", "nuke.toml")))
+		self.assertIn(f"Win32 = {{ source = \"{self.engine.url}/Windowing/Win32\", branch = \"main\" }}", read(self.path("Game", "nuke.toml")))
 		entry = self.lock()[("engine", "Windowing")]
 		self.assertEqual(entry["commit"], git("rev-parse", "main", cwd=self.engine.work), "the branch's tip, locked")
 		self.assertEqual(entry["uses"], ["Windowing", "Windowing/Win32"])
+
+	def test_add_a_local_project(self):
+		self.workspace({}, depends=())
+		self.files({"Lib/nuke.toml": "[project]\nname = \"Lib\"\nkind = \"module\"\n"})
+		code, out = self.nuke("package", "add", "../Lib", "--project", "Game")
+		self.assertEqual(code, 0, out)
+		self.assertIn('Lib = { source = "../Lib" }', read(self.path("Game", "nuke.toml")))
+		self.assertIn("Lib", self.projects()["Game"]["depends"])
 
 	def test_status_json_has_the_dependency_graph_and_the_versions(self):
 		self.windowing()
@@ -605,16 +644,16 @@ class CommandTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		body = json.loads(out[out.index("{"):])
 		self.assertEqual(body["sources"], [{"name": "engine", "url": self.engine.url, "web": None}])
-		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0",
-			"kind": "version", "by": "the workspace", "file": "nuke.toml"}])
+		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": f"{self.engine.url}/Renderer", "url": self.engine.url,
+			"requirement": "^1.0", "kind": "version", "by": "project Game", "file": "Game/nuke.toml"}])
 		packages = {p["path"]: p for p in body["packages"]}
 		renderer, windowing = packages["Renderer"], packages["Windowing"]
 		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2")])
 		self.assertEqual([(r["requirement"], r["from"] != "") for r in windowing["requiredBy"]], [("^0.2", True)], "Renderer needs it")
-		self.assertEqual(renderer["requiredBy"][0]["by"], "the workspace")
+		self.assertEqual(renderer["requiredBy"][0]["by"], "project Game")
 		self.assertEqual(windowing["versions"], ["0.2.0", "0.1.0"])
 		self.assertEqual(renderer["packages"], [{"path": "Renderer", "description": "the renderer", "projects": ["Renderer"],
-			"dependencies": [{"path": "Windowing", "source": self.engine.url, "requirement": "^0.2"}]}])
+			"dependencies": [{"name": "Windowing", "source": f"{self.engine.url}/Windowing", "url": self.engine.url, "path": "Windowing", "requirement": "^0.2"}]}])
 		state_file = self.path("packages", "nuke-packages.json")
 		state = json.loads(read(state_file))
 		del state["needs"]
@@ -627,29 +666,19 @@ class CommandTests(PackageTest):
 		self.assertEqual([d["path"] for d in renderer["dependsOn"]], ["Windowing"], "a state from before the graph gets it")
 		self.assertEqual(read(self.path("packages", "nuke.lock")), lock_before, "and the lock stays")
 
-	def test_browse_and_sources(self):
+	def test_browse(self):
 		self.windowing()
 		self.workspace({}, depends=())
-		code, out = self.nuke("package", "source", "add", "more", self.engine.url)
-		self.assertEqual(code, 0, out)
-		self.assertIn(f'more = "{self.engine.url}"', read(self.path("nuke.toml")))
-		code, out = self.nuke("package", "browse", "more", "--json")
-		self.assertEqual(code, 0, out)
-		listed = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}
-		self.assertEqual(sorted(listed), ["Renderer", "Windowing", "Windowing/Win32"])
-		self.assertEqual((listed["Windowing/Win32"]["line"], listed["Windowing/Win32"]["versions"]), ("Windowing", ["0.2.0", "0.1.0"]))
-		self.assertEqual(listed["Renderer"]["description"], "the renderer")
-		code, out = self.nuke("package", "source", "add", "nowhere", os.path.join(self.tmp, "missing.git"))
+		for repository in (self.engine.url, f"{self.engine.url}/Windowing"):
+			code, out = self.nuke("package", "browse", repository, "--json")
+			self.assertEqual(code, 0, out)
+			listed = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}
+			self.assertEqual(sorted(listed), ["Renderer", "Windowing", "Windowing/Win32"])
+			self.assertEqual((listed["Windowing/Win32"]["line"], listed["Windowing/Win32"]["versions"]), ("Windowing", ["0.2.0", "0.1.0"]))
+			self.assertEqual(listed["Renderer"]["description"], "the renderer")
+		code, out = self.nuke("package", "browse", os.path.join(self.tmp, "missing.git"))
 		self.assertEqual(code, 1)
 		self.assertIn("cannot read", out)
-		self.nuke("package", "add", "more", "Windowing")
-		code, out = self.nuke("package", "source", "remove", "more")
-		self.assertEqual(code, 1)
-		self.assertIn("used by Windowing", out)
-		self.nuke("package", "remove", "Windowing")
-		code, out = self.nuke("package", "source", "remove", "more")
-		self.assertEqual(code, 0, out)
-		self.assertNotIn("more =", read(self.path("nuke.toml")))
 
 	def test_status(self):
 		self.windowing()
@@ -705,7 +734,7 @@ class DevelopTests(PackageTest):
 		self.assertIn('version = "0.3.0"', read(os.path.join(checkout, "Windowing", "nuke.toml")), "the version is in the manifest")
 		self.assertEqual("Release Windowing 0.3.0, Renderer 1.0.1", git("log", "-1", "--format=%s", "Windowing/v0.3.0", cwd=checkout),
 			"Renderer wanted Windowing ^0.2: it takes ^0.3.0 and is released again with it")
-		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.3.0" }', read(self.path("nuke.toml")))
+		self.assertIn(f"Windowing = {needs(self.engine.url, 'Windowing', '^0.3.0')}", read(self.path("Game", "nuke.toml")))
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.3.0")
 
 		write_files(self.root, {"build/develop/Server/go.work": "go 1.21\n"})
@@ -912,13 +941,12 @@ class NativeToolTests(PackageTest):
 
 	def game_with_go_and_rust(self):
 		self.files({
-			"nuke.toml": f"[workspace]\nname = \"Game\"\n[sources]\nengine = \"{self.engine.url}\"\n"
-				"[packages]\nNetcode = \"engine@^0.1\"\nMathx = \"engine@^0.1\"\n",
-			"Server/nuke.toml": "[project]\nlanguage = \"go\"\n",
+			"nuke.toml": "[workspace]\nname = \"Game\"\n",
+			"Server/nuke.toml": f"[project]\nlanguage = \"go\"\n[dependencies]\nNetcode = {needs(self.engine.url, 'Netcode', '^0.1')}\n",
 			"Server/go.mod": "module example.com/game/server\n\ngo 1.21\n\nrequire example.com/engine/netcode v0.1.0\n",
 			"Server/main.go": "package main\n\nimport (\n\t\"fmt\"\n\n\t\"example.com/engine/netcode\"\n)\n\n"
 				"func main() { fmt.Println(\"netcode \" + netcode.Version()) }\n",
-			"Game/nuke.toml": "[project]\nlanguage = \"rust\"\n",
+			"Game/nuke.toml": f"[project]\nlanguage = \"rust\"\n[dependencies]\nMathx = {needs(self.engine.url, 'Mathx', '^0.1')}\n",
 			"Game/Cargo.toml": "[package]\nname = \"game\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n"
 				f"mathx = {{ git = \"file:///{self.engine.url}\", tag = \"Mathx/v0.1.0\" }}\n",
 			"Game/src/main.rs": "fn main() { println!(\"mathx {}\", mathx::version()); }\n",

@@ -44,7 +44,7 @@ class Origin:
 
 def active(spec, projects=None):
 	"""Whether the workspace uses packages at all: anything else costs no file access."""
-	return bool(spec.sources or spec.packages) or any(p.dependencies for p in (projects or {}).values()) or lockfile.exists(spec)
+	return any(p.dependencies for p in (projects or {}).values()) or lockfile.exists(spec)
 
 
 def sync(spec, projects, options):
@@ -96,37 +96,58 @@ def _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, ca
 
 
 def workspace_roots(spec, projects=None):
-	"""The workspace's own needs: each of its projects' [dependencies], its [packages], and what its own packages need
-	- less the packages its own folders hold, which a dependency on its own repository takes from here."""
+	"""The workspace's own needs: the packages from git its projects' [dependencies] name, and what its own packages
+	need - less the packages its own folders hold, which a dependency on its own repository takes from here."""
 	local = local_packages(spec)
-	roots = [Root(spec.sources.get(r.source) or r.source, r, "the workspace", spec.file) for r in spec.packages
-		if local.path_of(spec.sources.get(r.source) or r.source, r.path) is None]
-	declared = set()
+	roots, declared = [], set()
 	for project in sorted((p for p in (projects or {}).values() if p.package is None), key=lambda p: p.name.lower()):
 		declared.add(os.path.relpath(project.dir, spec.dir).replace("\\", "/"))
 		for requirement in project.dependencies:
-			url = source_url(spec, requirement, project.file)
-			if local.path_of(url, requirement.path) is None:
-				roots.append(Root(url, requirement, f"project {project.name}", project.file))
+			if requirement.url is not None and local.path_of(requirement.url, requirement.path) is None:
+				roots.append(Root(requirement.url, requirement, f"project {project.name}", project.file))
 	for folder, package in sorted(local.by_path.items()):
 		if (folder or ".") in declared:
 			continue
 		for requirement in package.dependencies:
-			url = source_url(spec, requirement, f"{folder or '.'}/nuke.toml")
-			if local.path_of(url, requirement.path) is None:
-				roots.append(Root(url, requirement, f"the workspace's package {folder or '(root)'}"))
+			if requirement.url is not None and local.path_of(requirement.url, requirement.path) is None:
+				roots.append(Root(requirement.url, requirement, f"the workspace's package {folder or '(root)'}"))
 	return roots
 
 
-def source_url(spec, requirement, file):
-	"""The repository a dependency names: its URL, a [sources] name's, or None for its own repository."""
-	if requirement.source is None or is_url(requirement.source):
-		return requirement.source
-	url = spec.sources.get(requirement.source)
-	if url is None:
-		raise NukeError(f"{file}: {requirement.name or requirement.path} names source '{requirement.source}', which the "
-			f"workspace's [sources] does not have (or give its git URL: git = \"<url>\")")
-	return url
+def check_local(spec, projects):
+	"""Each local dependency of the workspace's projects names a project of the same package (or, for a project in no
+	package, of the workspace): a package brings everything it uses, so whoever uses it gets that too."""
+	local = local_packages(spec)
+	for project in projects.values():
+		if project.package is not None:
+			continue
+		for requirement in project.dependencies:
+			if requirement.local is None:
+				continue
+			target = local_target(projects, project, requirement)
+			if target is None:
+				raise NukeError(f"{project.file}: dependencies.{requirement.name}: no project in '{requirement.local}' (a folder "
+					f"of the project or of its package)")
+			mine, theirs = local.package_holding(spec, project.dir), local.package_holding(spec, target.dir)
+			if mine is not None and mine != theirs:     # a project in no package is no one's dependency: any of the workspace's
+				raise NukeError(f"{project.file}: dependencies.{requirement.name}: {target.name} ('{requirement.local}') is not in "
+					f"package {mine}: a local dependency is a project of the same package; another package is named by its "
+					f"repository: {{ source = \"<repository URL>/{theirs or '<its folder>'}\", version = \"...\" }}")
+
+
+def local_target(projects, project, requirement):
+	"""The project a local dependency names: the folder relative to the project's, else to one of the folders above it
+	(its package's or workspace's root)."""
+	by_dir = {os.path.normcase(os.path.normpath(p.dir)): p for p in projects.values()}
+	base = os.path.normpath(project.dir)
+	while True:
+		found = by_dir.get(os.path.normcase(os.path.normpath(os.path.join(base, requirement.local))))
+		if found is not None:
+			return found
+		parent = os.path.dirname(base)
+		if parent == base:
+			return None
+		base = parent
 
 
 class LocalPackages:
@@ -149,6 +170,17 @@ class LocalPackages:
 				return None
 			path = path[len(self.prefix) + 1:]
 		return path if path in self.by_path else None
+
+	def package_holding(self, spec, folder):
+		"""The workspace-relative path of the package `folder` is part of (the nearest one at or above it), or None."""
+		relative = os.path.relpath(folder, spec.dir).replace("\\", "/")
+		relative = "" if relative == "." else relative
+		while True:
+			if relative in self.by_path:
+				return relative
+			if not relative or relative.startswith(".."):
+				return None
+			relative = relative.rpartition("/")[0]
 
 
 @functools.lru_cache(maxsize=8)
@@ -178,7 +210,11 @@ def link(spec, projects):
 	for name, project in projects.items():
 		names = []
 		for requirement in project.dependencies:
-			names += _provided(spec, local, provided, project, requirement)
+			if requirement.local is not None:
+				target = local_target(projects, project, requirement)
+				names += [target.name] if target is not None else []
+			else:
+				names += _provided(spec, local, provided, project, requirement)
 		known = {d.lower() for d in project.depends} | {project.name.lower()}
 		extra = [n for n in dict.fromkeys(names) if n.lower() not in known]
 		linked[name] = replace(project, depends=tuple(project.depends) + tuple(extra)) if extra else project
@@ -186,16 +222,9 @@ def link(spec, projects):
 
 
 def _provided(spec, local, provided, project, requirement):
-	origin = project.package
-	if origin is None:
-		url = source_url(spec, requirement, project.file)
-		path = local.path_of(url, requirement.path)
-		return provided.get(("", path), []) if path is not None else provided.get((url_key(url), requirement.path), [])
-	if requirement.source is None:
-		return provided.get((url_key(origin.url), requirement.path), [])
-	if is_url(requirement.source):
-		return provided.get((url_key(requirement.source), requirement.path), [])
-	return next((names for (key, path), names in provided.items() if key and path == requirement.path), [])
+	"""The projects of the package a dependency from git names: this workspace's own, or a package's."""
+	path = local.path_of(requirement.url, requirement.path) if project.package is None else None
+	return provided.get(("", path), []) if path is not None else provided.get((url_key(requirement.url), requirement.path), [])
 
 
 def _digest(roots, checkouts):
@@ -249,7 +278,7 @@ def _load_projects(entry, info, base, develop):
 
 def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options):
 	log = options.log
-	repositories = Repositories(cache, spec.sources, checkouts, fresh=options.update is not None)
+	repositories = Repositories(cache, {}, checkouts, fresh=options.update is not None)
 	log.note("resolving packages" + (" (choosing the newest versions)" if options.update is not None else ""))
 	resolver = Resolver(roots, wanted, local, repositories, locked=lock, update=_update_keys(options.update))
 	result = resolver.solve()

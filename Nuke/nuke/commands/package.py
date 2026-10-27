@@ -10,7 +10,7 @@ from .. import fsutil, ied_files, tomledit
 from .. import packages
 from .. import workspace as workspaces
 from ..errors import NukeError
-from ..manifest import MANIFEST_NAME, is_url, load
+from ..manifest import MANIFEST_NAME, split_source
 from ..packages import bridge, git, index, install, lockfile, semver, writable
 from ..packages.repository import Repository
 from ..packages.store import Cache, repository_name, same_repository, url_key, web_url
@@ -22,11 +22,12 @@ USAGE = """nuke package [status] [--fetch] [--json]
 nuke package update [NAME...]
   choose the newest versions the requirements allow (all, or the named sources, packages or source:package), never an
   older commit than the lock's
-nuke package add SOURCE PACKAGE [REQUIREMENT] [--branch NAME | --rev COMMIT] [--name NAME]
-  use PACKAGE (its path in the repository) of SOURCE (a [sources] name, or a git URL that [sources] then names); without a
-  requirement, ^ the newest release (the default branch's tip when it has none)
-nuke package remove PACKAGE
-  stop using it
+nuke package add SOURCE [REQUIREMENT] [--project NAME] [--name NAME] [--branch NAME | --rev COMMIT] [--writable]
+  add SOURCE to a project's [dependencies]: a package from git, "<repository URL>/<its folder>" (without a requirement,
+  ^ its newest release; the default branch's tip when it has none), or a local folder of the same package; the project
+  is --project, else the one the current folder is in, else the workspace's default
+nuke package remove NAME [--project NAME]
+  take a dependency out of the projects that list it (by its name, source or folder)
 nuke package develop SOURCE [--at FOLDER]
   build the source's packages from a git checkout: packages/<source>/, a clone at the tip of its default branch (or an
   existing clone, --at); nuke.lock follows the checkout's commits, and the workspace's Go and Rust projects - and IED's
@@ -40,11 +41,9 @@ nuke package pull SOURCE
 nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
   tag the packages' next versions at HEAD of their checkout (a develop checkout, or this workspace's own repository) and
   push the branch and the tags; the first release of a package is 0.1.0, then a patch release unless told
-nuke package browse SOURCE [--json] [--offline]
-  every package of a source at the tip of its default branch: description, the versioned package it is released with
-  and its releases, its projects and dependencies, and what the workspace requires and has locked of it
-nuke package source list | add NAME URL | remove NAME
-  the workspace's [sources]: a URL is checked with git before it is added; a source a package uses is not removed"""
+nuke package browse REPOSITORY [--json] [--offline]
+  every package of a repository (its URL, or the name of one the workspace uses) at the tip of its default branch:
+  description, version and releases, its projects and dependencies, and what the workspace requires and has locked"""
 
 
 class Package(base.Command):
@@ -59,7 +58,7 @@ class Package(base.Command):
 		verb = args[0] if args and not args[0].startswith("-") else "status"
 		rest = args[1:] if args and not args[0].startswith("-") else list(args)
 		actions = {"status": _status, "update": _update, "add": _add, "remove": _remove, "develop": _develop,
-			"lock": _lock, "pull": _pull, "release": _release, "browse": _browse, "source": _sources}
+			"lock": _lock, "pull": _pull, "release": _release, "browse": _browse}
 		if verb in ("help", "-h", "--help") or "-h" in rest or "--help" in rest:
 			cli.log.line(USAGE)
 			return 0
@@ -92,12 +91,9 @@ class _Context:
 		self.state = install.State(install.folder(root, self.spec.packages_dir))
 
 	def requirements(self):
-		"""(requirement, its URL, the project declaring it or None for the workspace's [packages]) of every dependency the
-		workspace's manifests declare."""
-		found = [(r, self.spec.sources.get(r.source) or r.source, None) for r in self.spec.packages]
-		for project in sorted(self.projects.values(), key=lambda p: p.name.lower()):
-			found += [(r, self.spec.sources.get(r.source) or r.source, project) for r in project.dependencies]
-		return found
+		"""(requirement, the project naming it) of every package from git the workspace's projects name."""
+		return [(r, project) for project in sorted(self.projects.values(), key=lambda p: p.name.lower())
+			for r in project.dependencies if r.url is not None]
 
 	def project(self, name):
 		"""The project a dependency is added to: `name`, else the one whose folder holds the current folder, else the
@@ -128,21 +124,19 @@ class _Context:
 		return lockfile.read(self.spec) or lockfile.Lock()
 
 	def source(self, name):
-		"""(url, folder name) of a source: a [sources] name, a source the lock names, the repository name of a
-		[packages] entry's git URL (claymore for .../Claymore.git), or a URL."""
-		if name in self.spec.sources:
-			return self.spec.sources[name], name
+		"""(url, folder name) of a repository: a URL (with or without a package's folder after it), or the name of one the
+		workspace uses (claymore for .../Claymore.git)."""
+		url, _ = split_source(name)
+		if url is not None:
+			return url, repository_name(url)
 		for entry in self.lock().packages:
 			if entry.source.lower() == name.lower():
 				return entry.url, entry.source
-		if is_url(name):
-			named = next((n for n, u in self.spec.sources.items() if url_key(u) == url_key(name)), None)
-			return name, named or repository_name(name)
-		for requirement, url, _ in self.requirements():
-			if is_url(url) and repository_name(url).lower() == name.lower():
-				return url, repository_name(url)
-		known = sorted(set(self.spec.sources) | {repository_name(url) for _, url, _ in self.requirements() if is_url(url)})
-		raise NukeError(f"no source named '{name}' (the workspace's sources: {', '.join(known) or 'none'})")
+		for requirement, _ in self.requirements():
+			if repository_name(requirement.url).lower() == name.lower():
+				return requirement.url, repository_name(requirement.url)
+		known = sorted({repository_name(r.url) for r, _ in self.requirements()})
+		raise NukeError(f"no repository named '{name}' (the workspace's: {', '.join(known) or 'none'}; or give its URL)")
 
 	def checkout(self, url):
 		entry = self.state.develop.get(url_key(url))
@@ -230,7 +224,7 @@ def _browse(cli, args):
 		git.fetch(mirror, url)
 	tip = repo.default_commit()
 	found = repo.index(tip)
-	wanted = {r.path: r.describe() for r, used, _ in context.requirements() if used and url_key(used) == url_key(url)}
+	wanted = {r.path: r.describe() for r, _ in context.requirements() if url_key(r.url) == url_key(url)}
 	locked = {e.line: e.version for e in context.lock().packages if url_key(e.url) == url_key(url)}
 	items = []
 	for path in sorted(found.packages):
@@ -250,40 +244,11 @@ def _browse(cli, args):
 	return 0
 
 
-def _sources(cli, args):
-	options = _parse("source", args, lambda p: (p.add_argument("action", choices=["list", "add", "remove"]),
-		p.add_argument("name", nargs="?"), p.add_argument("url", nargs="?")))
-	context = _Context(cli)
-	path, text = context.manifest_text()
-	if options.action == "list":
-		for name, url in context.spec.sources.items():
-			cli.log.line(f"{name:<16} {url}" + (f"  ({web_url(url)})" if web_url(url) else ""))
-		return 0
-	if not options.name:
-		raise NukeError(f"usage: nuke package source {options.action} NAME" + (" URL" if options.action == "add" else ""))
-	if options.action == "add":
-		if not options.url:
-			raise NukeError("usage: nuke package source add NAME URL")
-		git.remote_refs(options.url)      # reachable, signed in: the error says how when not
-		context.write_manifest(path, tomledit.set_key(text, "sources", options.name, options.url))
-		context.load()
-		cli.log.note(f"source {options.name} is {options.url}")
-		return 0
-	users = [r.path for r, _, _ in context.requirements() if r.source == options.name]
-	if users:
-		raise NukeError(f"source {options.name} is used by {', '.join(users)}: remove those packages first")
-	if options.name not in context.spec.sources:
-		raise NukeError(f"no source named '{options.name}'")
-	context.write_manifest(path, tomledit.remove_key(text, "sources", options.name))
-	context.load()
-	cli.log.note(f"source {options.name} removed")
-	return 0
-
-
 def _package_json(found, path):
 	info = found.packages[path]
 	return {"path": path, "description": info.description, "projects": [p.name for p in info.projects],
-		"dependencies": [{"path": d.path, "source": d.source, "requirement": d.describe()} for d in info.dependencies]}
+		"dependencies": [{"name": d.name, "source": d.source, "url": d.url, "path": d.path if d.url else d.local,
+			"requirement": d.describe()} for d in info.dependencies]}
 
 
 def _print_status(context, body):
@@ -314,7 +279,7 @@ def _update(cli, args):
 	context = _Context(cli)
 	names = [a for a in args if not a.startswith("-")]
 	if names:
-		known = {s.lower() for s in context.spec.sources} | {r.path.lower() for r, _, _ in context.requirements()}
+		known = {repository_name(r.url).lower() for r, _ in context.requirements()} | {r.path.lower() for r, _ in context.requirements()}
 		for entry in context.lock().packages:
 			known |= {entry.source.lower(), entry.line.lower(), f"{entry.source}:{entry.line}".lower()}
 		unknown = [n for n in names if n.lower() not in known]
@@ -329,46 +294,41 @@ def _update(cli, args):
 
 
 def _add(cli, args):
-	options = _parse("add", args, lambda p: (p.add_argument("source"), p.add_argument("package"), p.add_argument("requirement", nargs="?"),
+	options = _parse("add", args, lambda p: (p.add_argument("source"), p.add_argument("requirement", nargs="?"),
 		p.add_argument("--branch"), p.add_argument("--rev"), p.add_argument("--writable", action="store_true"), p.add_argument("--name"),
 		p.add_argument("--project")))
 	context = _Context(cli)
 	project = context.project(options.project)
-	source = options.source
-	if is_url(source):
-		source = next((n for n, u in context.spec.sources.items() if url_key(u) == url_key(source)), source)
-	elif source not in context.spec.sources:
-		raise NukeError(f"no source named '{source}' in [sources]: give its git URL instead")
-	package = options.package.strip("/")
-	name = options.name or _entry_name(project, package)
+	url, folder = split_source(options.source)
+	name = options.name or _entry_name(project, options.source, folder or repository_name(url or options.source))
 	with open(project.file, encoding="utf-8") as f:
 		text = f.read()
-	context.write_manifest(project.file, tomledit.set_key(text, "dependencies", name, _entry(source, package, options, options.requirement or "*")))
+	context.write_manifest(project.file, tomledit.set_key(text, "dependencies", name, _entry(options, url, options.requirement or "*")))
 	try:
 		context.load()
 	except NukeError:
 		context.write_manifest(project.file, text)
 		raise
-	if not options.requirement and not options.branch and not options.rev:
-		_pin_newest(context, project.file, source, package, name, options)
-	context.log.note(f"{project.name} uses {package} from {source} as {name}" + (" (writable: a clone in the packages folder)" if options.writable else ""))
+	if url is not None and not options.requirement and not options.branch and not options.rev:
+		_pin_newest(context, project.file, url, folder, name, options)
+	context.log.note(f"{project.name} uses {options.source} as {name}" + (" (writable: a clone in the packages folder)" if options.writable else ""))
 
 
-def _entry_name(project, package):
-	"""An entry's name: the package's folder name (Win32 for Windowing/Win32), its whole path when that is taken by
-	another package, or the entry that already names this package."""
+def _entry_name(project, source, folder):
+	"""An entry's name: the entry that already names this source, else the package's folder name (Win32 for
+	.../Windowing/Win32), else the whole folder when that name is taken."""
 	for requirement in project.dependencies:
-		if requirement.path == package:
+		if requirement.source == source:
 			return requirement.name
-	short = package.rpartition("/")[2]
-	return package if any(r.name == short for r in project.dependencies) else short
+	short = folder.rstrip("/").rpartition("/")[2] or folder
+	return folder if any(r.name == short for r in project.dependencies) else short
 
 
-def _entry(source, package, options, requirement):
-	"""The [dependencies] entry for `package`: its repository (git = the URL, or source = a [sources] name), its folder
-	there (path), the version requirement, branch or commit, and writable - Cargo's form: { git = "<url>", path =
-	"Windowing", version = "^0.2" }."""
-	value = {"git" if is_url(source) else "source": source, "path": package}
+def _entry(options, url, requirement):
+	"""A [dependencies] entry: { source, version | branch | rev, writable }; a local folder's is its source alone."""
+	value = {"source": options.source}
+	if url is None:
+		return value
 	if options.branch or options.rev:
 		value["branch" if options.branch else "rev"] = options.branch or options.rev
 	else:
@@ -378,15 +338,14 @@ def _entry(source, package, options, requirement):
 	return value
 
 
-def _pin_newest(context, file, source, package, name, options):
+def _pin_newest(context, file, url, folder, name, options):
 	"""`*` becomes ^ the version the lock chose, when that is a release."""
-	url = source if is_url(source) else context.spec.sources[source]
 	for entry in context.lock().packages:
 		version = semver.parse_version(entry.version)
-		if url_key(entry.url) == url_key(url) and package in entry.uses and version is not None and not version.build:
+		if url_key(entry.url) == url_key(url) and folder in entry.uses and version is not None and not version.build:
 			with open(file, encoding="utf-8") as f:
 				text = f.read()
-			context.write_manifest(file, tomledit.set_key(text, "dependencies", name, _entry(source, package, options, f"^{version}")))
+			context.write_manifest(file, tomledit.set_key(text, "dependencies", name, _entry(options, url, f"^{version}")))
 			context.load()
 			return
 
@@ -394,16 +353,16 @@ def _pin_newest(context, file, source, package, name, options):
 def _remove(cli, args):
 	options = _parse("remove", args, lambda p: (p.add_argument("package"), p.add_argument("--project")))
 	context = _Context(cli)
-	found = [(r, project) for r, _, project in context.requirements() if options.package in (r.name, r.path)
-		and (not options.project or (project is not None and project.name.lower() == options.project.lower()))]
+	wanted = options.package.strip("/")
+	found = [(r, project) for project in context.projects.values() for r in project.dependencies
+		if wanted in (r.name, r.source, r.path) and (not options.project or project.name.lower() == options.project.lower())]
 	if not found:
-		raise NukeError(f"no project of the workspace names a package '{options.package}' in its [dependencies]")
+		raise NukeError(f"no project of the workspace names a dependency '{options.package}' in its [dependencies]")
 	for requirement, project in found:
-		file = project.file if project is not None else context.spec.file
-		with open(file, encoding="utf-8") as f:
+		with open(project.file, encoding="utf-8") as f:
 			text = f.read()
-		context.write_manifest(file, tomledit.remove_key(text, "dependencies" if project is not None else "packages", requirement.name))
-		context.log.note(f"{project.name if project else 'the workspace'} no longer uses {requirement.path}")
+		context.write_manifest(project.file, tomledit.remove_key(text, "dependencies", requirement.name))
+		context.log.note(f"{project.name} no longer uses {requirement.source}")
 	context.load()
 
 
@@ -438,7 +397,7 @@ def _lock(cli, args):
 	url, name = context.source(options.source)
 	if context.checkout(url) is None:
 		raise NukeError(f"{name} is not being developed in this workspace")
-	marked = [r.path for r, used, _ in context.requirements() if r.writable and used and url_key(used) == url_key(url)]
+	marked = [r.name for r, _ in context.requirements() if r.writable and url_key(r.url) == url_key(url)]
 	if marked:
 		raise NukeError(f"nuke.toml marks {', '.join(marked)} writable: take `writable = true` away there, and the next build "
 			f"goes back to locked installs")
@@ -551,7 +510,7 @@ def _own_repository(repo, folder):
 	urls = [repo.url] + remotes
 
 	def ours(requirement):
-		return is_url(requirement.source) and any(same_repository(requirement.source, u) for u in urls)
+		return requirement.url is not None and any(same_repository(requirement.url, u) for u in urls)
 	return ours
 
 
@@ -656,11 +615,7 @@ def _write_versions(folder, found, versions, moved):
 
 def _dependency_value(requirement, version):
 	"""A [dependencies] or [packages] entry for `requirement` wanting `version`."""
-	value = {}
-	if requirement.source is not None:
-		value["git" if is_url(requirement.source) else "source"] = requirement.source
-	value["path"] = requirement.path
-	value["version"] = version
+	value = {"source": requirement.source, "version": version}
 	if requirement.writable:
 		value["writable"] = True
 	return value
@@ -679,10 +634,9 @@ def _follow_release(context, url, name, tags):
 				continue
 			with open(root.file, encoding="utf-8") as f:
 				text = f.read()
-			table = "packages" if os.path.normcase(os.path.abspath(root.file)) == os.path.normcase(os.path.abspath(context.spec.file)) else "dependencies"
-			text = tomledit.set_key(text, table, requirement.name or requirement.path, _dependency_value(requirement, f"^{version}"))
+			text = tomledit.set_key(text, "dependencies", requirement.name, _dependency_value(requirement, f"^{version}"))
 			context.write_manifest(root.file, text)
-			context.log.note(f"{os.path.relpath(root.file, context.root)}: {requirement.name or requirement.path} now wants ^{version}")
+			context.log.note(f"{os.path.relpath(root.file, context.root)}: {requirement.name} now wants ^{version}")
 	context.load(resolve=True)
 
 

@@ -127,6 +127,7 @@ def load_workspace(root, package_options=None):
 	"""The workspace at `root`, with the projects of the packages it uses (installed and locked first: packages/__init__.py;
 	`package_options` carries the log and what to update)."""
 	spec, projects = read_projects(root)
+	packages_module.check_local(spec, projects)
 	if packages_module.active(spec, projects):
 		options = package_options or packages_module.Options(Log(messages=sys.stderr))
 		for project in packages_module.sync(spec, projects, options):

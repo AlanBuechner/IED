@@ -119,25 +119,28 @@ class WorkspaceSpec:
 	languages: dict = field(default_factory=dict)   # [languages]: language -> its package's folder (languages.py)
 	language_settings: dict = field(default_factory=dict)   # [languages.<id>] tables: language -> what its driver reads
 	ied_plugins: tuple = ()         # folders or globs of the IED plugins it develops: projects of IED's solution (ied_files.py)
-	sources: dict = field(default_factory=dict)     # [sources]: name -> git URL of a repository of packages
-	packages: tuple = ()            # [packages]: PackageRequirements of what it uses
 	packages_dir: str = "packages"  # where Nuke installs packages, relative to the workspace
 
 
 @dataclass(frozen=True)
 class PackageRequirement:
-	"""A package a workspace or a package needs: its path in its source's repository, the source (a [sources] name or a
-	URL; None for the same repository), and a version requirement, a branch or a commit (none of them: any version)."""
-	path: str
-	origin: str                     # the manifest that asks for it
-	source: str = None
+	"""A [dependencies] entry. Its source as written is a package in a git repository - "<repository URL>/<the package's
+	folder there>": `url` and `path` - wanted at a version, a branch or a commit (none: any version), or a folder of the
+	project's own package (`local`)."""
+	name: str                       # its key in the manifest
+	origin: str                     # the manifest that names it
+	source: str                     # as written
+	url: str = None                 # the repository of a package from git; None for a local dependency
+	path: str = ""                  # the package's folder in its repository ("" for the repository as a whole)
+	local: str = None               # a local dependency's folder, as written
 	version: str = None
 	branch: str = None
 	rev: str = None
-	writable: bool = False          # the workspace develops its source: a git clone, not read-only installs
-	name: str = None                # its key in the manifest (the path when the entry names none)
+	writable: bool = False          # the workspace develops its repository: a git clone, not read-only installs
 
 	def describe(self):
+		if self.local is not None:
+			return "its own package"
 		if self.branch:
 			return f"branch {self.branch}"
 		if self.rev:
@@ -273,85 +276,76 @@ def parse(data, path):
 	commands = root.subtables("commands")
 	languages = _languages(root.table("languages"))
 	package_table = root.table("package")
-	sources = _sources(root.table("sources"))
-	packages = root.table("packages")
 	dependencies_table = root.table("dependencies")
+	for gone in ("sources", "packages"):
+		if root.table(gone) is not None:
+			raise NukeError(f"{path}: [{gone}] is gone: each project lists the packages it uses in its own [dependencies], "
+				f"as Name = {{ source = \"https://github.com/owner/repo.git/Folder/Of/Package\", version = \"^1.0\" }}")
 	root.done()
 	if workspace_table is None and project_table is None and package_table is None:
 		raise NukeError(f"{path}: needs a [workspace], [project] or [package] table")
-	if workspace_table is None and (configurations or commands or any(languages) or sources or packages is not None):
-		raise NukeError(f"{path}: [configurations], [commands], [languages], [sources] and [packages] belong to the workspace file")
+	if workspace_table is None and (configurations or commands or any(languages)):
+		raise NukeError(f"{path}: [configurations], [commands] and [languages] belong to the workspace file")
 	if dependencies_table is not None and project_table is None and package_table is None:
 		raise NukeError(f"{path}: [dependencies] belong to a project or a package (a [project] or [package] table)")
-	requirements = _requirements(packages, path, needs_source=True) if packages is not None else ()
-	# Every dependency names its repository, its own included: a package can live in any repository.
-	dependencies = _requirements(dependencies_table, path, needs_source=True, writable=True) if dependencies_table is not None else ()
-	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path, sources, requirements) if workspace_table else None
+	dependencies = _dependencies(dependencies_table, path) if dependencies_table is not None else ()
+	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path) if workspace_table else None
 	project = _project(project_table, folder, path, dependencies) if project_table else None
 	package = _package(package_table, folder, path, dependencies) if package_table else None
 	return ManifestFile(path, workspace, project, package)
 
 
-def _sources(t):
-	"""[sources]: name -> the git URL of a repository of packages (`claymore = "https://..."`, or `{ git = "..." }`)."""
-	sources = {}
-	if t is None:
-		return sources
-	for name, value in t.data.items():
-		t.read.add(name)
-		if isinstance(value, dict) and set(value) == {"git"}:
-			value = value["git"]
-		if not isinstance(value, str) or not value:
-			raise NukeError(f"{t.file}: sources.{name} must be a git URL (or a table with git = the URL)")
-		if not PROJECT_NAME.match(name):
-			raise NukeError(f"{t.file}: '{name}' is not a valid source name (letters, digits, '_', '.', '-')")
-		sources[name] = value
-	return sources
-
-
-def _requirements(t, path, needs_source, writable=None):
-	"""[dependencies] (or a workspace's [packages]): name -> a table of git (the repository's URL) or source (a
-	[sources] name), path (the package's folder in the repository; the name when it has none), version, branch or rev,
-	and writable; or "<source>@<requirement>" for the package at the name's path."""
+def _dependencies(t, path):
+	"""[dependencies]: name -> { source = "<repository URL>/<package folder>", version | branch | rev, writable } for a
+	package from git, or { source = "<folder>" } for a project of the same package."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
-		where = f"{t.where}.{key}"
-		if isinstance(value, str):
-			source, at, version = value.rpartition("@")
-			if not at and needs_source:
-				raise NukeError(f"{path}: {where} must name its source, as \"<source>@{value or '*'}\" or a table: "
-					f"{{ git = \"<url>\", version = \"{value or '*'}\" }}")
-			requirement = PackageRequirement(key, path, source=source or None, version=version or "*", name=key)
-		elif isinstance(value, dict):
-			requirement = _requirement_table(Table(value, where, path), key, path, needs_source, needs_source if writable is None else writable)
-		else:
-			raise NukeError(f"{path}: {where} must be \"<source>@<version>\" or a table (git or source, version, branch, rev)")
-		if not PACKAGE_PATH.match(requirement.path):
-			raise NukeError(f"{path}: {where}: '{requirement.path}' is not a package path (folders of its repository, like Renderer/RHI)")
-		found.append(requirement)
+		where = f"dependencies.{key}"
+		if not isinstance(value, dict):
+			raise NukeError(f"{path}: {where} must be a table: {{ source = \"https://host/owner/repo.git/Folder\", version = \"^1.0\" }}, "
+				f"or {{ source = \"../Folder\" }} for a project of the same package")
+		table = Table(value, where, path)
+		source = table.string("source")
+		if not source:
+			raise NukeError(f"{path}: {where} needs its source: the package's repository URL and folder, or a local folder")
+		version, branch, rev = table.string("version"), table.string("branch"), table.string("rev")
+		writable = table.boolean("writable", False)
+		table.done()
+		url, folder = split_source(source)
+		if url is None:
+			if version or branch or rev or writable:
+				raise NukeError(f"{path}: {where}: '{source}' is a local folder - a project of the same package, built with "
+					f"it - so it takes no version, branch, rev or writable")
+			found.append(PackageRequirement(key, path, source, local=folder))
+			continue
+		if sum(x is not None for x in (version, branch, rev)) > 1:
+			raise NukeError(f"{path}: {where} takes one of version, branch and rev")
+		if folder and not PACKAGE_PATH.match(folder):
+			raise NukeError(f"{path}: {where}: '{folder}' is not a folder of the repository (like Renderer/RHI)")
+		if writable and rev:
+			raise NukeError(f"{path}: {where}: a writable package is a clone on a branch, so it takes version or branch, not rev")
+		found.append(PackageRequirement(key, path, source, url=url, path=folder,
+			version=version if (version or branch or rev) else "*", branch=branch, rev=rev, writable=writable))
 	return tuple(found)
 
 
-def _requirement_table(table, key, path, needs_source, may_be_writable):
-	where = table.where
-	git = table.string("git")
-	source = table.string("source")
-	if git is not None and source is not None:
-		raise NukeError(f"{path}: {where} takes git or source, not both")
-	if git is not None and not is_url(git):
-		raise NukeError(f"{path}: {where}.git must be a git URL (https://..., git@host:owner/repo.git or a path), not '{git}'")
-	writable = table.boolean("writable", False) if may_be_writable else False
-	requirement = PackageRequirement(table.string("path") or key, path, source=git or source, version=table.string("version"),
-		branch=table.string("branch"), rev=table.string("rev"), writable=writable, name=key)
-	table.done()
-	if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
-		raise NukeError(f"{path}: {where} takes one of version, branch and rev")
-	if needs_source and not requirement.source:
-		raise NukeError(f"{path}: {where} needs its repository: git = \"<url>\" (or source, a name from [sources])")
-	if writable and requirement.rev:
-		raise NukeError(f"{path}: {where}: a writable package is a clone on a branch, so it takes version or branch, not rev")
-	return requirement
+REMOTE = re.compile(r"^([a-z][a-z0-9+.-]*://[^/]+/[^/]+/[^/]+|[\w.-]+@[\w.-]+:[^/]+/[^/]+)(/.*)?$", re.IGNORECASE)
+
+
+def split_source(source):
+	"""(repository URL, the package's folder there) of a source in a git repository - "<URL>.git/<folder>", or a URL of
+	a host's owner/repository followed by the folder - else (None, the local folder it is)."""
+	text = source.strip().replace("\\", "/")
+	marker = text.find(".git/")
+	if marker >= 0:
+		return text[:marker + 4], text[marker + 5:].strip("/")
+	if text.endswith(".git"):
+		return text, ""
+	match = REMOTE.match(text)
+	if match:
+		return match.group(1), (match.group(2) or "").strip("/")
+	return None, text
 
 
 def _package(t, folder, path, dependencies=()):
@@ -374,11 +368,11 @@ def _package(t, folder, path, dependencies=()):
 
 
 def is_url(text):
-	"""Whether a package's source is a URL or a path (rather than a name from [sources])."""
-	return bool(text) and any(c in text for c in "/:\\")
+	"""Whether `text` names a git repository (rather than a repository's name, or a local folder)."""
+	return bool(text) and split_source(text)[0] is not None
 
 
-def _workspace(t, configurations, commands, languages, folder, path, sources=None, requirements=()):
+def _workspace(t, configurations, commands, languages, folder, path):
 	t.where = "workspace"
 	spec = WorkspaceSpec(
 		name=t.string("name") or os.path.basename(folder),
@@ -397,16 +391,9 @@ def _workspace(t, configurations, commands, languages, folder, path, sources=Non
 		languages=languages[0],
 		language_settings=languages[1],
 		ied_plugins=t.strings("ied-plugins"),
-		sources=sources or {},
-		packages=requirements,
 		packages_dir=t.string("packages-dir", "packages"),
 	)
 	t.done()
-	for requirement in spec.packages:
-		if not is_url(requirement.source) and requirement.source not in spec.sources:
-			hint = difflib.get_close_matches(requirement.source, list(spec.sources), n=1)
-			suggestion = f" (did you mean '{hint[0]}'?)" if hint else " (add it to [sources])"
-			raise NukeError(f"{path}: packages.{requirement.path} names source '{requirement.source}', which [sources] does not have{suggestion}")
 	parts = spec.packages_dir.replace("\\", "/").split("/")
 	if os.path.isabs(spec.packages_dir) or ".." in parts or not spec.packages_dir.strip():
 		raise NukeError(f"{path}: workspace.packages-dir must be a folder inside the workspace")

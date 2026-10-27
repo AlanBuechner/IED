@@ -1,6 +1,6 @@
 """What a repository holds at one commit, or in a checkout's working tree: its packages (folders whose nuke.toml has a
 [package] table), the projects each one owns (its own folder's [project] and every project folder below it that is not
-inside another package), and the repository workspace's [sources]. Read without checking anything out: one `git ls-tree`
+inside another package). Read without checking anything out: one `git ls-tree`
 and one `git cat-file --batch` per commit."""
 
 import os
@@ -35,7 +35,6 @@ class PackageInfo:
 @dataclass
 class RepoIndex:
 	packages: dict = field(default_factory=dict)   # path -> PackageInfo
-	sources: dict = field(default_factory=dict)    # the repository workspace's [sources]
 	packages_dir: str = "packages"
 
 	def owner(self, project_name):
@@ -91,8 +90,6 @@ def build(manifest_texts, label):
 	for folder, spec in parsed.items():
 		if spec.package is not None:
 			index.packages[folder] = PackageInfo(folder, spec.package.description, spec.package.dependencies, (), spec.package.version)
-	if "" in parsed and parsed[""].workspace is not None:
-		index.sources = dict(parsed[""].workspace.sources)
 	owned = {path: [] for path in index.packages}
 	for folder, spec in sorted(parsed.items()):
 		if spec.project is None:

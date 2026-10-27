@@ -54,7 +54,7 @@ def write(spec, roots, state, lock, checkouts, joined):
 
 def _requirement(spec, root):
 	r = root.requirement
-	item = {"name": r.name or r.path, "path": r.path, "source": r.source, "url": root.url, "requirement": r.describe(),
+	item = {"name": r.name, "path": r.path, "source": r.source, "url": root.url, "requirement": r.describe(),
 		"kind": "branch" if r.branch else "rev" if r.rev else "version", "by": root.by}
 	if root.file:
 		item["file"] = _relative(root.file, spec.dir)
@@ -114,11 +114,11 @@ def describe(spec, roots, state, lock, checkouts, joined):
 		checkout_items.append(dict(status, source=source, url=url, folder=_relative(folder, spec.dir), writable=writable))
 		if not writable and fsutil.is_within(folder, spec.dir):
 			readonly.append({"path": _relative(folder, spec.dir), "reason": behind_reason(source, status)})
-	sources = [{"name": name, "url": url, "web": web_url(url)} for name, url in spec.sources.items()]
+	sources = []
 	named = {url_key(e.url): e.source for e in lock.packages}
 	for root in roots:
 		if all(url_key(s["url"]) != url_key(root.url) for s in sources):
-			sources.append({"name": named.get(url_key(root.url)) or repository_name(root.url), "url": root.url, "web": web_url(root.url), "git": True})
+			sources.append({"name": named.get(url_key(root.url)) or repository_name(root.url), "url": root.url, "web": web_url(root.url)})
 	for entry in lock.packages:
 		if all(url_key(s["url"]) != url_key(entry.url) for s in sources):
 			sources.append({"name": entry.source, "url": entry.url, "web": web_url(entry.url), "transitive": True})
