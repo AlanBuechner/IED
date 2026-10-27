@@ -201,6 +201,7 @@ namespace Desktop
 		else if (type == "openInWeb") app->OpenInWeb(parsed.root.Member("path").AsView());
 		else if (type == "location") pageUrl = Core::String(parsed.root.Member("url").AsView());
 		else if (type == "relaunch") PostMessageW(hwnd, kRelaunchMessage, 0, 0);
+		else if (type == "focus") PostMessageW(hwnd, kFocusMessage, 0, 0);
 		else if (type == "openExternal") Launch::OpenExternal(parsed.root.Member("url").AsView());
 		else if (type == "newWindow") {
 			Core::StringView url = parsed.root.Member("url").AsView();

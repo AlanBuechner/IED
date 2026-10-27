@@ -14,6 +14,7 @@ import { MentionSource } from "./mentions.js";
 import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
 import { choicesFrom } from "./modelpicker.js";
+import { askToNotify, notifySetting } from "./turnnotices.js";
 
 const NEAR_BOTTOM_PX = 80;
 const OWNER_SCROLL_MS = 800;   // a scroll this soon after the owner's wheel, touch or key is theirs
@@ -107,6 +108,7 @@ export class ChatPane {
 
 	// ai.chats.panelRows: how many rows a long list of the details panel shows until Show all.
 	settingsChanged(values) {
+		this.notify = notifySetting(values);
 		const rows = values && values["ai.chats.panelRows"] ? values["ai.chats.panelRows"].value : PREVIEW_ROWS;
 		const count = Number.isInteger(rows) && rows > 0 ? rows : PREVIEW_ROWS;
 		if (count === this.panel.previewRows) return;
@@ -313,6 +315,7 @@ export class ChatPane {
 	// extras: {mentions, attachments}, sent when there are any; `revertTo` (an edited message): the chat is reverted to
 	// before that turn first, once the owner says so.
 	async send(text, as, extras) {
+		askToNotify(this.notify);
 		if (extras && extras.revertTo && !(await this.revertTo(extras.revertTo))) return false;
 		if (!this.chatId && !(await this.createChat())) return false;
 		const params = { chatId: this.chatId, text, as };

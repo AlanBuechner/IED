@@ -1,6 +1,7 @@
 // index.js - the chat plugin's UI module (docs/04, docs/15 "Chat activity"): chats as tabs ("chat:<chatId>"; "chat:new"
 // a draft) in the Chat activity's document well, the Chats tool window (every chat and its state, the deleted ones),
-// the status bar's "AI: 1 running, 1 needs you" and the Chat activity's badge (from chats:<wsId>), Claude's plan usage
+// the status bar's "AI: 1 running, 1 needs you", the Chat activity's badge and the toasts of a turn that ended or waits
+// on the owner (from chats:<wsId>), Claude's plan usage
 // (from aiusage), Settings > AI > Models, Model Groups and Claude, and the commands that open the activity, start, stop,
 // rename and delete chats and show Claude's usage.
 
@@ -12,6 +13,7 @@ import { deleteChat, renameChat } from "./chatactions.js";
 import { ModelsPage } from "./modelsettings.js";
 import { ModelGroupsPage } from "./groupsettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
+import { TurnNotices, notifySetting } from "./turnnotices.js";
 
 const tabViews = new Set();   // this window's chat tabs, the one focused last at the end
 
@@ -42,9 +44,11 @@ export function activate(ied) {
 	badgeActiveChats(ied);
 }
 
-// The Chat activity's button shows the workspace's chats in a turn: how many need the owner (warn), else how many run.
+// The Chat activity's button shows the workspace's chats in a turn: how many need the owner (warn), else how many run;
+// and a chat's turn that ends or waits on the owner is told where they are not looking (turnnotices.js).
 function badgeActiveChats(ied) {
 	let stop = null;
+	const notices = new TurnNotices(ied, (chatId) => showChat(ied, chatId));
 	const follow = () => {
 		if (stop) stop();
 		stop = null;
@@ -53,19 +57,35 @@ function badgeActiveChats(ied) {
 		if (!wsId) return;
 		const list = new ChatList();
 		const render = () => ied.activities.badge("ied.chat", chatBadge(list.chats));
-		stop = ied.client.subscribe("chats:" + wsId, {
+		const stopChats = ied.client.subscribe("chats:" + wsId, {
 			snap: (data) => {
 				list.snapshot(data);
 				render();
 			},
 			evt: (kind, data) => {
+				const before = kind === "chat.changed" ? list.find(data.chatId) : null;
 				list.event(kind, data);
 				render();
+				if (before) notices.changed(Object.assign({}, before), data);
 			},
 		});
+		const stopSettings = ied.client.subscribe("settings:" + wsId, {
+			snap: (data) => (notices.setting = notifySetting(data.values)),
+			evt: (kind, data) => kind === "settings.changed" && (notices.setting = notifySetting(data.values)),
+		});
+		stop = () => {
+			stopChats();
+			stopSettings();
+		};
 	};
 	if (ied.workspace.on) ied.workspace.on(follow);
 	follow();
+}
+
+// A chat shown in this window: its tab in the Chat activity, opened there or chosen.
+async function showChat(ied, chatId) {
+	await ied.commands.run("shell.showActivity", { id: "ied.chat" });
+	ied.tabs.open("chat:" + chatId, { preview: false });
 }
 
 // The badge for the workspace's chats: null while none is in a turn.

@@ -157,6 +157,7 @@ class DesktopTests {
 		assert_true(script.View().Contains(Core::StringView("openFolder: () => post(\"openFolder\")")), "File > Open Folder");
 		assert_true(script.View().Contains(Core::StringView("relaunch: () => post(\"relaunch\")")) && script.View().Contains(Core::StringView("openInWeb: (path) => post(\"openInWeb\", { path: String(path) })")), "relaunch, open in web");
 		assert_true(script.View().Contains(Core::StringView("post(\"location\", { url: location.href })")), "the address told as history changes it");
+		assert_true(script.View().Contains(Core::StringView("focus: () => post(\"focus\")")), "a notification's click brings the window to the front");
 	}
 
 	[test("restart_budget")]

@@ -237,6 +237,19 @@ class DesktopTests(ServerTestCase):
 		self.assertTrue(os.path.isfile(os.path.join(self.root, "local", "IED", "desktop", "webview", "EBWebView", "Local State")) or
 			os.path.isdir(os.path.join(self.root, "local", "IED", "desktop", "webview")), "the WebView2 profile is the app's own")
 
+	def test_the_page_brings_its_minimized_window_to_the_front(self):
+		"""A chat notification's click (docs/15 "Chat") asks the bridge to bring the window forward (iedDesktop.focus): a
+		minimized window is restored, and comes to the front or flashes its taskbar button when Windows refuses that."""
+		self.start_app()
+		page = self.wait(self.signed_in_page, "signed-in window")
+		user32 = ctypes.WinDLL("user32")
+		hwnd = self.wait(lambda: next((h for h, (pid, _) in desktop_windows().items() if pid == self.app.pid), None), "the app's window")
+		user32.ShowWindow(ctypes.wintypes.HWND(hwnd), 6)   # SW_MINIMIZE
+		self.wait(lambda: user32.IsIconic(ctypes.wintypes.HWND(hwnd)), "the window minimized", 10)
+		self.assertEqual("function", evaluate(page, "typeof window.iedDesktop.focus"))
+		evaluate(page, "window.iedDesktop.focus()")
+		self.wait(lambda: not user32.IsIconic(ctypes.wintypes.HWND(hwnd)), "the window restored", 10)
+
 	def test_a_server_that_dies_is_started_again_with_the_windows_workspace(self):
 		"""docs/27 "The server dies while windows are open": the app starts the server again and opens the workspace the
 		window showed on it, and the window shows it again - killed or stopped (`ied stop`) alike. Its log

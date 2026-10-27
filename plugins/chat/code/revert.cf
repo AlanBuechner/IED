@@ -73,6 +73,11 @@ namespace Ai
 		for (int64 i = at; i < chat->turns.Count(); ++i) dropped.Push(chat->turns[i]->turnId);
 		while (chat->turns.Count() > at) chat->turns.RemoveAt(chat->turns.Count() - 1);
 		LeaveDroppedClaude(chat, dropped);
+		SaveContextView(LocalStateOf(ws), chat);
+		// The model server's prefix cache held the dropped turns: the next read is estimated as a chat's first.
+		chat->lastPromptTokens = 0;
+		chat->promptHead = 0;
+		chat->promptRewritten = false;
 		chat->context = Core::String();
 		chat->resume = Core::String();
 		chat->state = ChatState::Idle;

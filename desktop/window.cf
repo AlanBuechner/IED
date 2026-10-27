@@ -83,6 +83,19 @@ namespace Desktop
 		return true;
 	}
 
+	void Window::BringToFront() {
+		if (hwnd == null) return;
+		if (IsIconic(hwnd) != 0) ShowWindow(hwnd, (int32)SW_RESTORE);
+		if (SetForegroundWindow(hwnd) != 0) return;
+		FLASHWINFO flash;
+		flash.cbSize = 32;
+		flash.hwnd = hwnd;
+		flash.dwFlags = (uint32)(FLASHW_ALL | FLASHW_TIMERNOFG);
+		flash.uCount = 0;
+		flash.dwTimeout = 0;
+		FlashWindowEx(&flash);
+	}
+
 	Placement Window::CurrentPlacement() const {
 		Placement placement;
 		tagWINDOWPLACEMENT now;
@@ -146,6 +159,10 @@ namespace Desktop
 		}
 		if (message == kRelaunchMessage) {
 			app->Relaunch();
+			return true;
+		}
+		if (message == kFocusMessage) {
+			BringToFront();
 			return true;
 		}
 		if (message == (uint32)WM_CLOSE) {

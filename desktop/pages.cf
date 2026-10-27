@@ -54,6 +54,7 @@ namespace Desktop
 		script.Append("\t\topenExternal: (url) => post(\"openExternal\", { url: String(url) }),\n");
 		script.Append("\t\topenInWeb: (path) => post(\"openInWeb\", { path: String(path) }),\n");
 		script.Append("\t\tretry: () => post(\"retry\"),\n");
+		script.Append("\t\tfocus: () => post(\"focus\"),\n");
 		script.Append("\t}) });\n");
 		// The page's address as history changes it (WebView2's Source does not follow history.replaceState).
 		script.Append("\tconst tell = () => post(\"location\", { url: location.href });\n");

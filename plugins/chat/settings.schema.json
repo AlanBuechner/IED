@@ -173,6 +173,13 @@
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Days a deleted chat is kept, whole and restorable from the Chats list's Deleted section, before it is removed for good (docs/04 Deleting a chat)."
 		},
+		"ai.chats.notify": {
+			"type": "string",
+			"enum": ["all", "toasts", "off"],
+			"default": "all",
+			"x-ied-tiers": ["app"],
+			"description": "Telling you when a chat's turn ends or waits for you (an approval, a question) in a window that is not showing that chat: all - a toast, and a system notification while the window is in the background (the browser asks once whether IED may show them); toasts - only the toast; off - neither. Clicking either opens the chat there, the desktop app's window brought to the front (docs/15 Chat)."
+		},
 		"ai.chats.panelRows": {
 			"type": "integer",
 			"minimum": 1,

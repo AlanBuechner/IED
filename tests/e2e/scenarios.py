@@ -1814,6 +1814,30 @@ def chat_edit_and_resend(run):
 
 
 @scenario(viewports=("desktop", "phone"))
+def chat_turn_toasts(run):
+	"""A chat's turn that ends where the owner is not looking is a toast naming the chat, whose Open shows it (owner,
+	2026-10-26: "toasts when the AI has finished or needs user input. clicking on it should open it"); the chat shown
+	tells nothing."""
+	page = open_chat(run)
+	other = run.request("chat.create", {"wsId": page.evaluate("ied_shell.wsId"), "mode": "ask", "permission": "ask", "title": "Background work"})["chatId"]
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": "Done in the background.", "chunk": 6}, {"finish": "stop"}), model_script({"text": "Done here.", "chunk": 6}, {"finish": "stop"}))
+	run.request("chat.send", {"chatId": other, "text": "Where is the entry point?"})
+	toast = ".toast:has-text('Background work')"
+	page.wait_for_selector(toast + " .toast-action:has-text('Open')", timeout=30000)
+	check("finished" in run.texts(toast)[0], "it says what happened: %s" % run.texts(toast))
+	run.shot("toast")
+	page.click(toast + " .toast-action")
+	page.wait_for_selector(".view[data-ref='chat:%s'] .chat-input:visible" % other, timeout=10000)
+	run.shot("opened")
+	page.fill(".view[data-ref='chat:%s'] .chat-input" % other, "And the frame count?")
+	page.press(".view[data-ref='chat:%s'] .chat-input" % other, "Enter")
+	page.wait_for_selector(".view[data-ref='chat:%s'] .chat-turn:nth-child(2) .chat-foot:has-text('Finished')" % other, timeout=30000)
+	time.sleep(0.5)
+	check(page.query_selector(toast) is None, "the chat shown tells nothing")
+
+
+@scenario(viewports=("desktop", "phone"))
 def chat_composer_chips_and_plain_paste(run):
 	"""@-mentions in the composer show as chips, a folder's apart from a file's (owner: "better styling for files using
 	@some/path/file.txt or @some/folder"), and text pasted from a formatted page goes in plain (owner: "if i copy and past

@@ -420,6 +420,7 @@ namespace Ai
 		json.Field("pinnedModel", pinnedModel.View());
 		json.Field("state", ChatStateName(state));
 		if (!stateReason.IsEmpty()) json.Field("stateReason", stateReason.View());
+		if (!turns.IsEmpty() && !Current()->stop.IsEmpty()) json.Field("lastStop", Current()->stop.View());
 		json.IntField("turnCount", turns.Count());
 		json.IntField("updatedMs", updatedMs);
 		int64 done = 0;

@@ -1143,6 +1143,16 @@ class ChatTests(ChatCase):
 			self.model.queue(text_step("Answer " + word + "."))
 			self.assertEqual("finished", (await self.turn(chat_id, word))["stop"])
 		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
+		# what compression shows of a kept turn and of a dropped one (context.json), as a restart reads it
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		view = os.path.join(local_state(self.data, self.repo), "chats", chat_id, "context.json")
+		write(view, json.dumps({"messages": [{"turn": history[0]["turnId"], "at": 0, "shown": "one, shown shorter"}, {"turn": history[1]["turnId"], "at": 0, "shown": "two, shown shorter"}]}))
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub([topic])
+		await self.client.next_frame(topic)
 		reply = await self.client.request("chat.revert", {"chatId": chat_id, "turnId": history[1]["turnId"]})
 		self.assertEqual((history[1]["turnId"], 2), (reply["turnId"], reply["dropped"]))
 		self.assertTrue(reply["file"].startswith("reverted/") and reply["file"].endswith("-" + history[1]["turnId"] + ".jsonl"), reply)
@@ -1157,10 +1167,15 @@ class ChatTests(ChatCase):
 		self.assertEqual((1, "idle"), (told["snapshot"]["turnCount"], told["snapshot"]["state"]))
 		self.assertTrue(told["snapshot"]["context"], "the meter is made again from the turns kept")
 		self.assertEqual(1, (await self.summary(chat_id))["turnCount"])
+		with open(view, encoding="utf-8") as f:
+			self.assertEqual([history[0]["turnId"]], [m["turn"] for m in json.load(f)["messages"]], "context.json keeps the turns kept only")
+		with open(os.path.join(os.path.dirname(view), "chat.json"), encoding="utf-8") as f:
+			header = json.load(f)
+		self.assertEqual((0, 0), (header.get("lastPromptTokens", 0), header.get("promptHead", 0)), "what the server's cache held is forgotten")
 		self.model.queue(text_step("Answer two again."))
 		self.assertEqual("finished", (await self.turn(chat_id, "two again"))["stop"])
 		said = [m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] in ("user", "assistant")]
-		self.assertEqual(["one", "Answer one.", "two again"], [s.strip() for s in said], "the model is sent only what the chat kept")
+		self.assertEqual(["one, shown shorter", "Answer one.", "two again"], [s.strip() for s in said], "the model is sent only what the chat kept, as compression shows it")
 		turn_ids = [t["turnId"] for t in (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]]
 		self.assertNotIn(turn_ids[1], [t["turnId"] for t in moved], "a new turn never takes a dropped turn's id")
 		self.client.abort()

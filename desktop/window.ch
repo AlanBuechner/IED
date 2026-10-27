@@ -11,6 +11,7 @@ namespace Desktop
 	const uint32 kResolvedMessage = 0x8001;     // WM_APP + 1: a resolver thread left a URL or an error
 	const uint32 kOpenFolderMessage = 0x8004;   // WM_APP + 4: the page asked for File > Open Folder
 	const uint32 kRelaunchMessage = 0x8005;     // WM_APP + 5: the page asked the app to relaunch onto the newest install
+	const uint32 kFocusMessage = 0x8007;        // WM_APP + 7: the page asked to be brought to the front (a notification's click)
 
 	// Why a window asked the server for a URL: its first page; IED's start page (a window opened without a path); the
 	// server back after the watch started it again (the page stays unless the server's origin moved); a folder the
@@ -36,6 +37,9 @@ namespace Desktop
 		public void Resolved(Core::StringView url, Core::StringView error, Arrival arrival);
 		// A message box over this window.
 		public void Alert(Core::StringView text);
+		// The window restored when minimized and brought to the front; when Windows refuses that (another program has the
+		// foreground), its taskbar button flashes until it is chosen.
+		public void BringToFront();
 		public Placement CurrentPlacement() const;
 		// The page's address now (as its script told it, else WebView2's Source); empty before it has one.
 		public Core::String CurrentUrl() const;
