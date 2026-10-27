@@ -62,13 +62,17 @@ ${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words 
 
 ## Packages
 
-Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). The workspace names repositories in
-`[sources]` and what it uses in `[packages]` (`Windowing = "claymore@^0.2"`); its projects depend on the packages'
-projects by name. `nuke.lock` (committed) pins each package's commit; installs live in `packages/` and are read-only.
+Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). The workspace's `nuke.toml` lists what
+it uses in `[packages]`, each entry with its repository's git URL and a version, as Cargo's git dependencies:
+`Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }` (or a `[sources]` short name:
+`Windowing = "claymore@^0.2"`). Any Nuke command, a build first of all, pulls them. Its projects depend on the packages'
+projects by name. `nuke.lock` (committed) pins each package's commit; installs live in `packages/` and are read-only,
+unless the entry says `writable = true`: then the build clones the repository into `packages/<source>/` to edit.
 
     nuke package status [--fetch] [--json]   versions, commits, projects, locked or developed (tool: nuke_packages)
     nuke package update [NAME...]            newest versions the requirements allow
-    nuke package add SOURCE PACKAGE [REQ]    use one more package (SOURCE: a [sources] name or a git URL)
+    nuke package add SOURCE PACKAGE [REQ]    use one more package (SOURCE: a [sources] name or a git URL;
+                                             --writable: a clone to edit)
     nuke package develop SOURCE              packages/<source>/ becomes a git clone: edit the package with the program
     nuke package pull SOURCE                 a clone behind its remote is read-only until pulled (IED fetches
                                              every few minutes, so a clone can turn read-only mid-task: pull it)
@@ -76,8 +80,9 @@ projects by name. `nuke.lock` (committed) pins each package's commit; installs l
     nuke package release PACKAGE... --minor  tag and push the next versions (asks the owner: it publishes)
 
 - **Never edit, copy or patch a file under `packages/` that is locked**: it is a released version, read-only on disk
-  and in IED. To change it, `develop` its source, edit the clone, build, commit there, push; the program's lock follows
-  the clone's commits, so no release is needed to keep working.
+  and in IED. To change it, make it writable (`writable = true` in nuke.toml for everyone who checks the workspace out,
+  or `develop` its source on this machine), edit the clone, build, commit there, push; the program's lock follows the
+  clone's commits, so no release is needed to keep working.
 - A package is a folder with `[package]` in its `nuke.toml`; its versions are tags `<path>/v<semver>`; a sub-package
   (a package inside one) is released with it. Dependencies inside a repository are read from projects' `depends`;
   other repositories are named in `[package.dependencies]`.

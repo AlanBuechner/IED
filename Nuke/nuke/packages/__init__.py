@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from .. import fsutil
 from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, is_url, load
-from . import bridge, git, index, install, lockfile
+from . import bridge, git, index, install, lockfile, writable
 from .resolve import Repositories, Resolver, Root
 from .store import Cache, url_key
 
@@ -52,22 +52,36 @@ def sync(spec, projects, options):
 	local = {p.name.lower() for p in projects.values()}
 	roots = workspace_roots(spec)
 	wanted = sorted({name for p in projects.values() for name in p.depends if name.lower() not in local})
-	checkouts = {url: folder for url, folder in state.checkouts().items()}
-	digest = _digest(roots, checkouts)
 	lock = lockfile.read(spec.dir)
 	if not roots and lock is None:
 		return []
-	joined = None
-	if options.update is None and not options.resolve and lock is not None and lock.digest == digest:
-		joined = _from_lock(state, lock, checkouts, local, wanted)
-	if joined is not None and lock.packages and not state.has_needs:
-		joined, lock = _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options, joined)
-	if joined is None:
-		joined, lock = _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
+	stopping = writable.follow_manifest(spec, state, cache, options.log)
+	checkouts = {url: folder for url, folder in state.checkouts().items()}
+	digest = _digest(roots, checkouts)
+	try:
+		joined, lock = _joined(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
+	except (NukeError, OSError):
+		for stop in reversed(stopping):
+			stop.undo()
+		raise
+	for stop in stopping:
+		stop.finish(cache)
 	_check_names(joined, projects)
 	if spec.ide:
 		bridge.write(spec, state, lock, checkouts, joined)
 	return joined
+
+
+def _joined(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options):
+	"""(the packages' projects, the lock): from the lock as it is while it matches, else resolved again."""
+	joined = None
+	if options.update is None and not options.resolve and lock is not None and lock.digest == digest:
+		joined = _from_lock(state, lock, checkouts, local, wanted)
+	if joined is not None and lock.packages and not state.has_needs:
+		return _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options, joined)
+	if joined is None:
+		return _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
+	return joined, lock
 
 
 def _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options, joined):

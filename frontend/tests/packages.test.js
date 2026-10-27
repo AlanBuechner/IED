@@ -8,7 +8,8 @@ import {
 
 const BODY = {
 	sources: [{ name: "claymore", url: "https://github.com/AlanBuechner/Claymore.git", web: "https://github.com/AlanBuechner/Claymore" },
-		{ name: "utils", url: "https://github.com/x/utils", web: "https://github.com/x/utils", transitive: true }],
+		{ name: "utils", url: "https://github.com/x/utils", web: "https://github.com/x/utils", transitive: true },
+		{ name: "Mathx", url: "https://github.com/x/mathx.git", web: "https://github.com/x/mathx", git: true }],
 	requirements: [{ path: "Windowing", source: "claymore", url: "https://github.com/AlanBuechner/Claymore.git", requirement: "^0.1", kind: "version" }],
 	packages: [
 		{ source: "claymore", url: "https://github.com/alanbuechner/claymore", path: "Windowing", version: "0.1.0", uses: ["Windowing", "Windowing/Win32"], compatible: "0.1.1", newest: "0.2.0", packages: [{ path: "Windowing", description: "Windows and raw input", projects: ["Windowing"] }] },
@@ -53,6 +54,7 @@ test("packages: which requirement brings a package, and how actions name its sou
 	assertEqual(requirementOf(BODY, BODY.packages[1]), null, "only other packages need it");
 	assertEqual(sourceWord(BODY, BODY.packages[0]), "claymore", "a [sources] name");
 	assertEqual(sourceWord(BODY, BODY.packages[2]), "https://github.com/x/utils", "a source only dependencies name: its URL");
+	assertEqual(sourceWord(BODY, { url: "https://github.com/x/mathx" }), "https://github.com/x/mathx", "a [packages] entry's git URL: its URL");
 	assertEqual(rowBringing(BODY, "Windowing/Win32").key, "claymore:Windowing", "a Solution Explorer package node");
 });
 

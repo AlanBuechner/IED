@@ -536,16 +536,32 @@ One repository holds as many packages as you like, each versioned on its own, so
 repository and every program takes the parts it needs. Design and reasons: IED `docs/31`.
 
 ```toml
-# the workspace's nuke.toml
-[sources]                                   # repositories of packages: any URL git can fetch
+# the workspace's nuke.toml: what it uses, by each package's path in its repository - Cargo's git dependencies
+[packages]
+Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }
+Renderer  = { git = "https://github.com/AlanBuechner/Claymore.git", version = "~0.3.1", writable = true }
+Utils     = { git = "git@github.com:me/utils.git", branch = "main" }   # follow a branch (the lock pins its commit)
+Strings   = { git = "git@github.com:me/utils.git", rev = "1a2b3c4d" }  # one commit
+```
+
+That is all a build needs: any Nuke command (`nuke build` first of all) fetches what the lock lacks, installs it under
+`packages/` and writes `nuke.lock`. A repository used often can get a short name in `[sources]`, after which
+`Windowing = "claymore@^0.2"` says the same as the first line (`source = "claymore"` in a table).
+
+```toml
+[sources]                                   # optional: names for repositories
 claymore = "https://github.com/AlanBuechner/Claymore.git"
 
-[packages]                                  # what the workspace uses, by its path in the repository
+[packages]
 Windowing = "claymore@^0.2"                 # <source>@<version requirement>
-Renderer  = { source = "claymore", version = "~0.3.1" }
-Utils     = { source = "utils", branch = "main" }       # follow a branch (the lock pins its commit)
-Strings   = { source = "utils", rev = "1a2b3c4d" }      # one commit
 ```
+
+**Locked or writable.** A package is installed **locked** - read-only on disk, at the lock's commit - unless its entry
+says `writable = true`: then the build clones its repository into `packages/<source>/` (where the clone is missing:
+on another checkout of the workspace too) and every package of that repository builds from the clone, so you edit it
+together with the program (section "Developing a package" below). Taking `writable` away goes back to locked installs at
+the next build - refused while the clone has uncommitted changes or commits no remote has, so no work is lost.
+`nuke package develop` and `nuke package lock` do the same for one machine without changing `nuke.toml`.
 
 The workspace's projects then name the packages' projects as they name their own: `depends = ["Windowing",
 "WindowingWin32"]`. A package's projects are compiled into a program only when it depends on them.
@@ -594,8 +610,9 @@ depends = ["Windowing", "Agility"]
 nuke package [status] [--fetch] [--json]   the versioned packages: version, commit, locked or developed, projects;
                                            --fetch: newer releases on the remotes, how far each checkout is behind
 nuke package update [NAME...]              the newest versions the requirements allow (all, or sources / packages)
-nuke package add SOURCE PACKAGE [REQ]      use a package (SOURCE a [sources] name or a URL); without REQ, ^ its newest
-            [--branch NAME | --rev C]      release
+nuke package add SOURCE PACKAGE [REQ]      use a package (SOURCE a [sources] name, or a URL: { git = URL, ... });
+            [--branch NAME | --rev C]      without REQ, ^ its newest release; --writable: a clone to edit
+            [--writable]
 nuke package remove PACKAGE                stop using it
 nuke package develop SOURCE [--at DIR]     build the source from a git clone in packages/<source>/ (or DIR)
 nuke package lock SOURCE [--keep]          back to locked installs (refused while the clone has unpushed work; the

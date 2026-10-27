@@ -84,9 +84,10 @@ export function treeLink(web, line, version) {
 	return web ? web + "/tree/" + tagOf(line, version) + (line ? "/" + line : "") : null;
 }
 
-// How an action names the source: its [sources] name, else its URL (a source only a package's dependencies name).
+// How an action names the source: its [sources] name, else its URL (a [packages] entry's git URL, or a source only a
+// package's dependencies name).
 export function sourceWord(body, item) {
-	const named = (body.sources || []).find((s) => !s.transitive && sameRepository(s.url, item.url));
+	const named = (body.sources || []).find((s) => !s.transitive && !s.git && sameRepository(s.url, item.url));
 	return named ? named.name : item.url;
 }
 

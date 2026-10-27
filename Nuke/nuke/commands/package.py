@@ -5,19 +5,16 @@ removing a package in the manifest."""
 import argparse
 import json
 import os
-import time
 
 from .. import fsutil, ied_files, tomledit
 from .. import packages
 from .. import workspace as workspaces
 from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, is_url, load
-from ..packages import bridge, git, index, install, lockfile, semver
+from ..packages import bridge, git, index, install, lockfile, semver, writable
 from ..packages.repository import Repository
 from ..packages.store import Cache, repository_name, url_key, web_url
 from . import base
-
-HELD_WAIT_SECONDS = 20   # how long `lock` waits for a program to let go of the clone (IED restarts a language server in a few)
 
 USAGE = """nuke package [status] [--fetch] [--json]
   every versioned package the workspace uses: version, commit, locked or developed, the projects it brings; --fetch asks
@@ -306,43 +303,49 @@ def _update(cli, args):
 
 def _add(cli, args):
 	options = _parse("add", args, lambda p: (p.add_argument("source"), p.add_argument("package"), p.add_argument("requirement", nargs="?"),
-		p.add_argument("--branch"), p.add_argument("--rev"), p.add_argument("--name")))
+		p.add_argument("--branch"), p.add_argument("--rev"), p.add_argument("--writable", action="store_true")))
 	context = _Context(cli)
 	path, text = context.manifest_text()
-	original = text
 	source = options.source
 	if is_url(source):
-		named = next((n for n, u in context.spec.sources.items() if url_key(u) == url_key(source)), None)
-		if named is None:
-			named = options.name or repository_name(source)
-			text = tomledit.set_key(text, "sources", named, source)
-		source = named
+		source = next((n for n, u in context.spec.sources.items() if url_key(u) == url_key(source)), source)
 	elif source not in context.spec.sources:
 		raise NukeError(f"no source named '{source}' in [sources]: give its git URL instead")
 	package = options.package.strip("/")
-	if options.branch or options.rev:
-		value = {"source": source, ("branch" if options.branch else "rev"): options.branch or options.rev}
-	else:
-		value = f"{source}@{options.requirement or '*'}"
-	context.write_manifest(path, tomledit.set_key(text, "packages", package, value))
+	context.write_manifest(path, tomledit.set_key(text, "packages", package, _entry(source, options, options.requirement or "*")))
 	try:
 		context.load()
 	except NukeError:
-		context.write_manifest(path, original)
+		context.write_manifest(path, text)
 		raise
 	if not options.requirement and not options.branch and not options.rev:
-		_pin_newest(context, path, source, package)
-	context.log.note(f"the workspace uses {source}:{package}")
+		_pin_newest(context, path, source, package, options)
+	context.log.note(f"the workspace uses {package} from {source}" + (" (writable: a clone in the packages folder)" if options.writable else ""))
 
 
-def _pin_newest(context, path, source, package):
+def _entry(source, options, requirement):
+	"""The [packages] value: "<source>@<requirement>" for a [sources] name; a table for a git URL, a branch, a commit or
+	a writable package (Cargo's form: { git = "<url>", version = "^0.2" })."""
+	if not is_url(source) and not options.branch and not options.rev and not options.writable:
+		return f"{source}@{requirement}"
+	value = {"git" if is_url(source) else "source": source}
+	if options.branch or options.rev:
+		value["branch" if options.branch else "rev"] = options.branch or options.rev
+	else:
+		value["version"] = requirement
+	if options.writable:
+		value["writable"] = True
+	return value
+
+
+def _pin_newest(context, path, source, package, options):
 	"""`*` becomes ^ the version the lock chose, when that is a release."""
-	url = context.spec.sources[source]
+	url = source if is_url(source) else context.spec.sources[source]
 	for entry in context.lock().packages:
 		version = semver.parse_version(entry.version)
 		if url_key(entry.url) == url_key(url) and package in entry.uses and version is not None and not version.build:
 			_, text = context.manifest_text()
-			context.write_manifest(path, tomledit.set_key(text, "packages", package, f"{source}@^{version}"))
+			context.write_manifest(path, tomledit.set_key(text, "packages", package, _entry(source, options, f"^{version}")))
 			context.load()
 			return
 
@@ -372,98 +375,39 @@ def _develop(cli, args):
 		if origin and url_key(origin) != key:
 			raise NukeError(f"{folder} is a clone of {origin}, not of {url}")
 	else:
-		folder = fsutil.join(context.state.root, name)
-		if not os.path.exists(os.path.join(folder, ".git")):
-			_make_room(context, key, folder)
-			mirror = context.cache.mirror(url)
-			git.fetch(mirror, url)
-			context.log.note(f"cloning {url} into {os.path.relpath(folder, context.root)}")
-			git.clone(url, folder, reference=mirror)
-		elif url_key(git.remote_url(folder) or "") != key:
-			raise NukeError(f"{folder} is a clone of {git.remote_url(folder)}, not of {url}")
-	relative = os.path.relpath(folder, context.state.root).replace("\\", "/") if fsutil.is_within(folder, context.state.root) else folder
-	context.state.develop[key] = {"url": url, "source": name, "folder": relative}
-	context.state.save()
-	context.cache.record_checkout(url, folder)
+		folder = writable.clone(context.state, context.cache, context.log, url, name)
+	writable.start(context.state, context.cache, url, name, folder, by_manifest=False)
 	context.load(resolve=True)
 	context.log.note(f"developing {name} in {folder} (branch {git.branch(folder) or 'detached'}): its packages build from "
-		f"there and nuke.lock follows its commits; `nuke package lock {name}` goes back")
+		f"there and nuke.lock follows its commits; `nuke package lock {name}` goes back (to keep it for every checkout of "
+		f"the workspace, mark its package `writable = true` in nuke.toml)")
 	for other in context.cache.checkouts().get(key, []):
 		if not fsutil.same_path(other, folder) and os.path.isdir(other) and git.changes(other):
 			context.log.warn(f"{name} is also being changed in {other} (uncommitted changes there)")
-
-
-def _make_room(context, key, folder):
-	"""The source's locked installs go: its folder becomes the clone."""
-	for relative, entry in list(context.state.installed.items()):
-		if url_key(entry.get("url", "")) == key:
-			install.remove(fsutil.join(context.state.root, relative))
-			del context.state.installed[relative]
-	context.state.save()
-	if os.path.isdir(folder) and os.listdir(folder):
-		raise NukeError(f"{folder} is in the way (not a clone of the source); move it, then develop again")
-	if os.path.isdir(folder):
-		os.rmdir(folder)
 
 
 def _lock(cli, args):
 	options = _parse("lock", args, lambda p: (p.add_argument("source"), p.add_argument("--keep", action="store_true")))
 	context = _Context(cli)
 	url, name = context.source(options.source)
-	folder = context.checkout(url)
-	if folder is None:
+	if context.checkout(url) is None:
 		raise NukeError(f"{name} is not being developed in this workspace")
-	inside = fsutil.is_within(folder, context.state.root)
-	if os.path.isdir(folder):
-		changed = git.changes(folder)
-		if changed:
-			raise NukeError(f"{folder} has {len(changed)} uncommitted change(s): commit and push them (or discard them) first\n  "
-				+ "\n  ".join(changed[:10]))
-		unpushed = git.unpushed(folder)
-		if unpushed:
-			raise NukeError(f"{folder} has {len(unpushed)} commit(s) no remote has: push them first (the lock names "
-				f"{unpushed[0][:8]}, which other machines could not fetch)")
+	marked = [r.path for r in context.spec.packages if r.writable and url_key(context.spec.sources.get(r.source) or r.source) == url_key(url)]
+	if marked:
+		raise NukeError(f"nuke.toml marks {', '.join(marked)} writable: take `writable = true` away there, and the next build "
+			f"goes back to locked installs")
 	# Go, Rust and IED's language servers go back to the releases first: a language server pointed at the clone holds
 	# files in it until IED starts it again without them. Loading writes again what the sources still developed need.
 	install.remove(workspaces.develop_root(context.root))
-	# The clone steps aside (its folder is where the installs go) and comes back if the lock cannot be installed.
-	aside = fsutil.join(context.state.root, f".{name}.develop") if inside else None
-	if aside:
-		install.remove(aside)
-		_move_aside(folder, aside, name)
-	entry = context.state.develop.pop(url_key(url))
-	context.state.save()
+	stop = writable.Stopping(context.state, url_key(url))
+	stop.begin()
 	try:
 		context.load(resolve=True)
 	except (NukeError, OSError):
-		if aside:
-			install.remove(folder)
-			os.replace(aside, folder)
-		context.state = install.State(context.state.root)
-		context.state.develop[url_key(url)] = entry
-		context.state.save()
+		stop.undo()
 		raise
-	context.cache.record_checkout(url, folder, present=False)
-	if aside and not options.keep:
-		install.remove(aside)
-	elif aside:
-		os.replace(aside, fsutil.join(context.state.root, f"{name}.kept"))
+	stop.finish(context.cache, keep=options.keep)
 	context.log.note(f"{name} is locked again: its packages are installed read-only at the lock's commits")
-
-
-def _move_aside(folder, aside, name):
-	"""Renames the clone; while another program holds a file in it (a language server IED is starting again without it)
-	Nuke waits for it a while, then says what to close. Nothing has changed then but what the next command writes again."""
-	deadline = time.monotonic() + HELD_WAIT_SECONDS
-	while True:
-		try:
-			os.replace(folder, aside)
-			return
-		except PermissionError as error:
-			if time.monotonic() >= deadline:
-				raise NukeError(f"{folder} is in use by another program ({error.strerror}): close what has a file of it open - an "
-					f"editor, a terminal in it, a language server - and run `nuke package lock {name}` again") from None
-			time.sleep(0.25)
 
 
 def _pull(cli, args):

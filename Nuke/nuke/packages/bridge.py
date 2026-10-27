@@ -12,7 +12,7 @@ import os
 
 from .. import fsutil
 from . import git, install
-from .store import url_key, web_links, web_url
+from .store import repository_name, url_key, web_links, web_url
 
 
 def edge_key(url, line):
@@ -104,6 +104,11 @@ def describe(spec, state, lock, checkouts, joined):
 		if not writable and fsutil.is_within(folder, spec.dir):
 			readonly.append({"path": _relative(folder, spec.dir), "reason": behind_reason(source, status)})
 	sources = [{"name": name, "url": url, "web": web_url(url)} for name, url in spec.sources.items()]
+	named = {url_key(e.url): e.source for e in lock.packages}
+	for requirement in spec.packages:
+		url = spec.sources.get(requirement.source) or requirement.source
+		if all(url_key(s["url"]) != url_key(url) for s in sources):
+			sources.append({"name": named.get(url_key(url)) or repository_name(url), "url": url, "web": web_url(url), "git": True})
 	for entry in lock.packages:
 		if all(url_key(s["url"]) != url_key(entry.url) for s in sources):
 			sources.append({"name": entry.source, "url": entry.url, "web": web_url(entry.url), "transitive": True})

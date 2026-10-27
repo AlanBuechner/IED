@@ -1,5 +1,6 @@
 """Editing a manifest's text in place: one key of one table set or removed, every comment and line around it kept, so a
-command that changes a manifest leaves the rest of it as its owner wrote it. Values are strings and lists of strings."""
+command that changes a manifest leaves the rest of it as its owner wrote it. Values are strings, booleans, lists of
+strings and inline tables of those."""
 
 import re
 
@@ -9,6 +10,8 @@ BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def render(value):
+	if isinstance(value, bool):
+		return "true" if value else "false"
 	if isinstance(value, str):
 		return _string(value)
 	if isinstance(value, dict):

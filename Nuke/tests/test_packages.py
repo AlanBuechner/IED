@@ -170,6 +170,90 @@ class ManifestTests(PackageTest):
 		self.assertEqual(code, 1)
 		self.assertIn("belong to the workspace file", out)
 
+	def test_git_takes_a_url_and_writable_is_the_workspace_s_own(self):
+		cases = [
+			("Windowing = { git = \"engine\", version = \"^1.0\" }", "must be a git URL"),
+			("Windowing = { git = \"https://x/e.git\", source = \"e\" }", "git or source, not both"),
+			("Windowing = { git = \"https://x/e.git\", rev = \"1a2b\", writable = true }", "not rev"),
+			("Windowing = { version = \"^1.0\" }", "needs its repository"),
+		]
+		for entry, message in cases:
+			self.files({"nuke.toml": f"[workspace]\n[packages]\n{entry}\n"})
+			code, out = self.nuke("list")
+			self.assertEqual(code, 1, entry)
+			self.assertIn(message, out, entry)
+		self.files({"nuke.toml": "[workspace]\n", "Lib/nuke.toml": "[package]\n[package.dependencies]\n"
+			"X = { git = \"https://x/e.git\", version = \"^1\", writable = true }\n[project]\nname = \"Lib\"\n"})
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1)
+		self.assertIn("writable", out, "a package cannot make its dependencies writable for its users")
+
+
+class CargoStyleTests(PackageTest):
+	"""A workspace whose nuke.toml alone names its packages - a git URL and a version, as Cargo's git dependencies - and
+	whether they are writable: any Nuke command, a build first of all, pulls them."""
+
+	def manifest(self, entry):
+		self.files({
+			"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n[packages]\n" + entry + "\n",
+			"Game/nuke.toml": "[project]\ndepends = [\"Windowing\", \"Win32\"]\n",
+			"Game/src/main.cf": "int32 main() { return 0; }\n",
+		})
+
+	def test_a_git_url_and_a_version_are_all_a_workspace_needs(self):
+		self.windowing()
+		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.1\" }}")
+		projects = self.projects()
+		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.1.0", "the newest release ^0.1 allows")
+		windowing = projects["Windowing"]["dir"]
+		self.assertIn("Windowing@0.1.0", windowing.replace("\\", "/"))
+		self.assertFalse(os.access(os.path.join(windowing, "nuke.toml"), os.W_OK), "locked: read-only on disk")
+		self.assertIn("Win32", projects, "a sub-package the game depends on comes with it")
+		code, out = self.nuke("package", "status", "--json")
+		self.assertEqual(code, 0, out)
+		sources = json.loads(out[out.index("{"):])["sources"]
+		self.assertEqual([(s["name"], s.get("git")) for s in sources], [("engine", True)], "named by its git URL")
+
+	def test_writable_in_nuke_toml_is_a_clone_and_taking_it_away_locks_again(self):
+		self.windowing()
+		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2\", writable = true }}")
+		projects = self.projects()
+		clone = self.path("packages", "engine")
+		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "the build cloned the source")
+		self.assertTrue(projects["Windowing"]["dir"].replace("\\", "/").endswith("packages/engine/Windowing"))
+		self.assertTrue(os.access(os.path.join(clone, "Windowing", "nuke.toml"), os.W_OK), "writable")
+		code, out = self.nuke("package", "lock", "engine")
+		self.assertEqual(code, 1)
+		self.assertIn("writable = true", out, "nuke.toml decides, not a command")
+		for base, _, files in os.walk(self.path("packages")):
+			for name in files:
+				os.chmod(os.path.join(base, name), stat.S_IWRITE | stat.S_IREAD)
+		shutil.rmtree(self.path("packages"))
+		self.projects()
+		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "another checkout of the workspace clones it again")
+		write_files(clone, {"Windowing/src/Windowing/window.ch": "// edited\n"})
+		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2\" }}")
+		code, out = self.nuke("list", "--json")
+		self.assertEqual(code, 1, out)
+		self.assertIn("uncommitted change", out, "work no remote has is never thrown away")
+		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "the clone stays")
+		git("checkout", "--", ".", cwd=clone)
+		projects = self.projects()
+		self.assertFalse(os.path.exists(clone + "/.git"), "back to locked installs")
+		self.assertIn("Windowing@0.2.0", projects["Windowing"]["dir"].replace("\\", "/"))
+		self.assertFalse(os.path.isdir(self.path("packages", ".engine.develop")), "the clone set aside is gone")
+
+	def test_add_writes_the_cargo_form_for_a_url(self):
+		self.windowing()
+		self.manifest("")
+		code, out = self.nuke("package", "add", self.engine.url, "Windowing")
+		self.assertEqual(code, 0, out)
+		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2.0\" }}", read(self.path("nuke.toml")))
+		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0", "--writable")
+		self.assertEqual(code, 0, out)
+		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", version = \"^1.0\", writable = true }}", read(self.path("nuke.toml")))
+		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")), "writable: the source is a clone")
+
 
 class ResolveTests(PackageTest):
 	def test_highest_matching_release_is_installed_read_only_and_locked(self):

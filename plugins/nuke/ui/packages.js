@@ -175,13 +175,13 @@ export class PackagesView {
 	}
 
 	rowDescription(row) {
-		if (this.tab === "sources") return row.item.url + (row.item.transitive ? " (named by a package's dependencies)" : "");
+		if (this.tab === "sources") return row.item.url + (row.item.transitive ? " (named by a package's dependencies)" : row.item.git ? " (a [packages] entry's git URL)" : "");
 		return row.item.description !== undefined ? row.item.description : descriptionOf(row.item);
 	}
 
 	rowSide(body, row) {
 		const item = row.item;
-		if (this.tab === "sources") return row.item.transitive ? h("span.chip", null, "transitive") : null;
+		if (this.tab === "sources") return row.item.transitive ? h("span.chip", null, "transitive") : row.item.git ? h("span.chip", null, "git") : null;
 		if (this.tab === "browse") {
 			const newest = (item.versions || [])[0];
 			return [item.locked ? h("span.chip.ok", { title: "The workspace has " + item.locked }, item.locked) : null, h("span.pm-version", null, newest || "unreleased")];
@@ -389,7 +389,7 @@ export class PackagesView {
 			this.facts([["URL", source.url], ["Page", this.link(source.web || "none (a local repository)", source.web)], ["Used", used.join(", ") || "nothing yet"]]),
 			h("div.pm-actions", null,
 				h("button.btn.primary", { on: { click: () => { this.tab = "browse"; this.browse(source.name); } } }, "Browse"),
-				source.transitive ? null : this.button("Remove", ["source", "remove", source.name], false, { title: "Remove " + source.name, message: "The source leaves [sources]. Nuke refuses while a package of it is used.", confirm: "Remove", danger: true })),
+				source.transitive || source.git ? null : this.button("Remove", ["source", "remove", source.name], false, { title: "Remove " + source.name, message: "The source leaves [sources]. Nuke refuses while a package of it is used.", confirm: "Remove", danger: true })),
 		];
 	}
 

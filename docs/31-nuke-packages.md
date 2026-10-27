@@ -17,26 +17,30 @@ The user reference is [`Nuke/README.md`](../Nuke/README.md) section 12; this doc
 
 | Term | Is |
 |---|---|
-| **source** | a git repository of packages, named in a workspace's `[sources]` (`claymore = "https://github.com/AlanBuechner/Claymore.git"`). Any URL git can fetch: https, ssh, a local path |
+| **source** | a git repository of packages, named by its URL in a `[packages]` entry (`git = "https://github.com/AlanBuechner/Claymore.git"`) or by a short name from the workspace's `[sources]`. Any URL git can fetch: https, ssh, a local path |
 | **package** | a folder of a source whose `nuke.toml` has a `[package]` table; named by its path in the repository (`Windowing`, `Renderer/RHI/DX12`). Its projects are its own folder's `[project]` and every project folder below it that is not inside another package |
 | **version** | a git tag: `<package path>/v<semver>` (`Windowing/v1.2.0`), or `v<semver>` for the repository as a whole - Go's convention for modules in subfolders, so a Go module in a package folder has the same versions for `go get` |
 | **sub-package** | a package inside another one. Without tags of its own it is released with the nearest package above it that has some (the repository's `v` tags at the top); with its own tags it is versioned on its own |
 | **versioned package** | a package that has tags of its own, or the repository root: the unit a version is chosen for. Every package released with it comes from the same commit |
 | **lock** | `nuke.lock` beside the workspace's `nuke.toml`: the exact commit of every versioned package the workspace uses. Committed |
-| **develop** | a source a workspace edits: a git checkout of the repository inside the workspace, built from its working tree |
+| **locked** | a package installed read-only at the lock's commit: the default |
+| **writable** (develop) | a source a workspace edits: a git clone of the repository inside the workspace, built from its working tree - `writable = true` on its entry in `nuke.toml`, or `nuke package develop` on one machine |
 
-A workspace says what it uses:
+A workspace says what it uses in its `nuke.toml`, as Cargo's git dependencies do, and nothing else - the build pulls it:
 
 ```toml
-[sources]
-claymore = "https://github.com/AlanBuechner/Claymore.git"   # private: git's own credentials (credential manager, SSH keys)
-
 [packages]
-Windowing = "claymore@^0.2"                                # short form: <source>@<version requirement>
-Renderer  = { source = "claymore", version = "~0.3.1" }
-Utils     = { source = "utils", branch = "main" }          # no release yet: a branch's tip (the lock pins its commit)
-Strings   = { source = "utils", rev = "1a2b3c4d" }         # or one commit
+Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }   # private: git's own credentials
+Renderer  = { git = "https://github.com/AlanBuechner/Claymore.git", version = "~0.3.1", writable = true }
+Utils     = { git = "git@github.com:me/utils.git", branch = "main" }   # no release yet: a branch's tip (the lock pins its commit)
+Strings   = { git = "git@github.com:me/utils.git", rev = "1a2b3c4d" }  # or one commit
 ```
+
+A repository used often can have a short name, `[sources] claymore = "<url>"`, and then `Windowing = "claymore@^0.2"`
+(or `{ source = "claymore", version = "^0.2" }`) says the same. `writable = true` makes the build clone the package's
+repository into the workspace (one clone per repository: all its packages build from it); without it every package is
+installed locked. Taking `writable` away returns the repository to locked installs at the next build, which refuses
+while the clone has uncommitted changes or unpushed commits.
 
 and its projects use the packages' projects by name, as they use their own: `depends = ["Windowing", "Win32", "RhiD3D12"]`.
 A project is compiled into a program only when something depends on it, so **which sub-packages a game uses is what its
@@ -266,3 +270,4 @@ the timed fetch) in a workspace whose window was opened.
 | P-8 | Files of a package are writable only in a develop checkout that is not behind its remote | The owner's lock-out, sharpened: there is exactly one writable copy of a package line, and it is the newest |
 | P-9 | Nuke resolves only Nuke packages; language package managers keep their own dependencies | Native first (N-15); Nuke adds the cross-language graph, not a second resolver for crates and modules |
 | P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles; IED's gopls and rust-analyzer get workspace-wide ones through their profiles' `initializationOptionsFile` | Developing a package must not change what the program commits, and one codebase must hold for every language and in the editor: the tools build the clone the way their own users would, one language server serves the workspace as before, and removing one folder brings back the releases |
+| P-11 | A workspace's `nuke.toml` alone says what it uses - a `[packages]` entry carries its repository's git URL (`git = ...`) and whether it is `writable` - and any Nuke command, a build first of all, pulls and clones to match; `[sources]` and the `nuke package` commands are conveniences over the same file | The owner: "give it a package at a git url and list a version, then when I build it pulls that package down, write-locked or writable if it says so" - Cargo's model. What a checkout of the workspace builds is what its committed manifest says, on every machine |

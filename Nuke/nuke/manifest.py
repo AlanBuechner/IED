@@ -131,6 +131,7 @@ class PackageRequirement:
 	version: str = None
 	branch: str = None
 	rev: str = None
+	writable: bool = False          # the workspace develops its source: a git clone, not read-only installs
 
 	def describe(self):
 		if self.branch:
@@ -300,7 +301,8 @@ def _sources(t):
 
 def _requirements(t, path, needs_source):
 	"""[packages] or [package.dependencies]: package path -> "<source>@<requirement>" (or, in a package, just the
-	requirement: its own repository), or a table of source, version, branch, rev and path."""
+	requirement: its own repository), or a table of git (a URL) or source (a [sources] name or a URL), version, branch,
+	rev and path - and, in a workspace's [packages], writable."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
@@ -308,23 +310,38 @@ def _requirements(t, path, needs_source):
 		if isinstance(value, str):
 			source, at, version = value.rpartition("@")
 			if not at and needs_source:
-				raise NukeError(f"{path}: {where} must name its source, as \"<source>@{value or '*'}\" or a table with source and version")
+				raise NukeError(f"{path}: {where} must name its source, as \"<source>@{value or '*'}\" or a table: "
+					f"{{ git = \"<url>\", version = \"{value or '*'}\" }}")
 			requirement = PackageRequirement(key, path, source=source or None, version=version or "*")
 		elif isinstance(value, dict):
-			table = Table(value, where, path)
-			requirement = PackageRequirement(table.string("path") or key, path, source=table.string("source"),
-				version=table.string("version"), branch=table.string("branch"), rev=table.string("rev"))
-			table.done()
-			if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
-				raise NukeError(f"{path}: {where} takes one of version, branch and rev")
-			if needs_source and not requirement.source:
-				raise NukeError(f"{path}: {where} needs a source (a name from [sources], or a git URL)")
+			requirement = _requirement_table(Table(value, where, path), key, path, needs_source)
 		else:
-			raise NukeError(f"{path}: {where} must be \"<source>@<version>\" or a table (source, version, branch, rev)")
+			raise NukeError(f"{path}: {where} must be \"<source>@<version>\" or a table (git or source, version, branch, rev)")
 		if not PACKAGE_PATH.match(requirement.path):
 			raise NukeError(f"{path}: {where}: '{requirement.path}' is not a package path (folders of its repository, like Renderer/RHI)")
 		found.append(requirement)
 	return tuple(found)
+
+
+def _requirement_table(table, key, path, in_workspace):
+	where = table.where
+	git = table.string("git")
+	source = table.string("source")
+	if git is not None and source is not None:
+		raise NukeError(f"{path}: {where} takes git or source, not both")
+	if git is not None and not is_url(git):
+		raise NukeError(f"{path}: {where}.git must be a git URL (https://..., git@host:owner/repo.git or a path), not '{git}'")
+	writable = table.boolean("writable", False) if in_workspace else False
+	requirement = PackageRequirement(table.string("path") or key, path, source=git or source, version=table.string("version"),
+		branch=table.string("branch"), rev=table.string("rev"), writable=writable)
+	table.done()
+	if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
+		raise NukeError(f"{path}: {where} takes one of version, branch and rev")
+	if in_workspace and not requirement.source:
+		raise NukeError(f"{path}: {where} needs its repository: git = \"<url>\" (or source, a name from [sources])")
+	if writable and requirement.rev:
+		raise NukeError(f"{path}: {where}: a writable package is a clone on a branch, so it takes version or branch, not rev")
+	return requirement
 
 
 def _package(t, folder, path):
