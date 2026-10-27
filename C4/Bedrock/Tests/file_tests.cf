@@ -234,3 +234,32 @@ public static void TestWriteAtomically() {
 	assert_eq(0, Leftovers(folder), "and a failed write cleans up after itself");
 	FS::RemoveAll(folder.CStr());
 }
+
+static int32 s_heldOpen = 0;
+
+// Opens `path` for reading as another program would (no FILE_SHARE_DELETE) and keeps it open for 200 ms.
+static void HoldOpen(Core::String path) {
+	FS::File reader = FS::File(path.CStr(), "rb");
+	atomic_store(&s_heldOpen, reader.IsOpen() ? 1 : -1, MemoryOrder::Release);
+	Threading::Thread::Sleep(200000000);
+}
+
+// BUG-395: a replace waits out a reader that holds the file open for a moment, as a virus scanner does.
+[test("file.write_atomically_while_held")]
+public static void TestWriteAtomicallyWhileHeld() {
+	FS::Path folder = ScratchFile("c4_bedrock_atomic_held_test");
+	FS::RemoveAll(folder.CStr());
+	FS::MakeDirectories(folder.CStr());
+	FS::Path file = folder / "chat.json";
+	assert_true(FS::WriteFileAtomically(file.CStr(), (const void*)"{\"v\":1}", 7), "the first save");
+	atomic_store(&s_heldOpen, 0, MemoryOrder::Release);
+	Core::String path = Core::String(file.View());
+	Threading::Thread reader = Threading::Thread::Run([path]() { HoldOpen(path); });
+	while (atomic_load(&s_heldOpen, MemoryOrder::Acquire) == 0) Threading::Thread::Yield();
+	assert_eq(1, (int64)s_heldOpen, "another handle holds the file");
+	assert_true(FS::WriteFileAtomically(file.CStr(), (const void*)"{\"v\":22}", 8), "a save while it is held waits it out");
+	reader.Join();
+	assert_se("{\"v\":22}", FileText(file).CStr(), "and the new bytes are there");
+	assert_eq(0, Leftovers(folder), "with no temporary left behind");
+	FS::RemoveAll(folder.CStr());
+}
