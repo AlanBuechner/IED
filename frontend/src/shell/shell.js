@@ -16,6 +16,7 @@ import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
 import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
+import { tabKindOf, dockFor } from "./dockplace.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
@@ -440,24 +441,10 @@ export class Shell {
 		return Boolean(activity) && !activity.view;
 	}
 
-	// Whether dock host `activityId`'s document well takes tabs like `ref`: its `documents` (tab kinds) name the ref's
-	// kind, or it names none.
-	takesTab(activityId, ref) {
-		const activity = this.contributions.activity(activityId);
-		if (!activity || activity.view) return false;
-		const kind = ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : null;
-		return !activity.documents || activity.documents.includes(kind);
-	}
-
 	// The dock host a tab opens into: the current activity when it takes the tab, else the first that names its kind,
 	// else the first that takes any.
 	dockActivity(ref) {
-		const current = this.currentActivity();
-		if (current && this.takesTab(current, ref)) return current;
-		const kind = ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : null;
-		const hosts = this.contributions.activities.filter((a) => !a.view);
-		const host = hosts.find((a) => a.documents && a.documents.includes(kind)) || hosts.find((a) => !a.documents) || hosts[0];
-		return host ? host.id : null;
+		return dockFor(tabKindOf(ref), this.contributions.activity(this.currentActivity()), this.contributions.activities);
 	}
 
 	// The layout mode shown: the layout document's, which every window of the device class shows.
@@ -780,7 +767,7 @@ export class Shell {
 		const resource = ref ? this.views.resourceOf(ref) : null;
 		return {
 			tabRef: ref || undefined,
-			tabKind: ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : undefined,
+			tabKind: tabKindOf(ref) || undefined,
 			resourcePath: resource || undefined,
 			resourceExtname: resource && /\.[^./]+$/.test(resource) ? /\.[^./]+$/.exec(resource)[0].toLowerCase() : undefined,
 		};
@@ -818,7 +805,7 @@ export class Shell {
 		const activityId = ref ? this.activityOf(ref) : null;
 		const owner = activityId ? T.groupOf(this.treeOf(activityId), ref) : null;
 		this.context.set("tabRef", ref || undefined);
-		this.context.set("tabKind", ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : undefined);
+		this.context.set("tabKind", tabKindOf(ref) || undefined);
 		this.context.set("tabTethered", (ref && partnersOf(this.doc, ref).length > 0) || undefined);
 		this.context.set("tabInToolGroup", (owner && !owner.well) || undefined);
 		this.context.set("tabAutoHidden", (owner && T.hiddenIn(owner, ref)) || undefined);

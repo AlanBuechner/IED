@@ -6,6 +6,7 @@ import "./keys.test.js";
 import "./layouttree.test.js";
 import "./tabs.test.js";
 import "./dock.test.js";
+import "./dockplace.test.js";
 import "./tabsnew.test.js";
 import "./views.test.js";
 import "./layoutstore.test.js";

@@ -1,4 +1,4 @@
-// editorlinks.js - the links written in a document's text (F-EDT-55, owner 2026-11-08: a middle click on one opens the
+// editorlinks.js - the links written in a document's text (F-EDT-55, owner 2026-10-25: a middle click on one opens the
 // file or the page in a tab of its own, as a web browser's middle click opens a new tab). Monaco's own link feature
 // shows them - its underline, its hover, the Ctrl+Click that opens one - and does the clicking, with the middle click
 // turned on (editorview.js). It asks this plugin two things: which words of a document are links, of every language (a

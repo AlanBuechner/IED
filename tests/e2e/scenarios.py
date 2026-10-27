@@ -2190,6 +2190,42 @@ def browser_tab(run):
 	run.wait_text(titles, "Went hello", timeout=20000)
 
 
+@scenario(viewports=("desktop",), targets=("real",))
+def browser_tab_opens_where_the_person_is(run):
+	"""A page opens in the activity you are in (docs/15 "Docking", docs/27 "The Browser tab"; the owner, 2026-10-26:
+	"when opening the web browser in the chats it should open it in the chats window and when opening it in the text
+	editor it should open it in the text editor"): Web Browser from the chat strip's + puts its tab in the chats' well,
+	and from the Editor's strip with the documents'."""
+
+	seen = []
+
+	def opened_in(activity):
+		"""The activity whose group holds the pages opened since it was last called, which fails when none went to
+		`activity` or one went elsewhere (a page kept from the other activity stays where it was)."""
+		nonlocal seen
+		groups = page.evaluate("() => ied_shell.tabsState().groups.filter((g) => g.well).map((g) => [g.activity, g.tabs.filter((ref) => ref.startsWith('browser:'))])")
+		pages = [ref for _, tabs in groups for ref in tabs]
+		fresh = [ref for ref in pages if ref not in seen]
+		seen = pages
+		mine = [a for a, tabs in groups if any(ref in fresh for ref in tabs)]
+		check(len(fresh) == 1, "one page opened: %s" % fresh)
+		check(mine == [activity], "%s is %s's tab, of %s" % (fresh[0], activity, groups))
+
+	page = open_chat(run)
+	page.click(".dock-host:not([hidden]) .tabs-new", button="right")
+	page.click(".menu .menu-item:has-text('Web Browser')")
+	page.wait_for_selector(".dock-host[data-activity='ied.chat'] .tab[data-ref^='browser:']", timeout=20000)
+	opened_in("ied.chat")
+	run.shot("in-chat")
+
+	run.show_activity("ied.editor")
+	page.click(".dock-host:not([hidden]) .tabs-new", button="right")
+	page.click(".menu .menu-item:has-text('Web Browser')")
+	page.wait_for_selector(".dock-host[data-activity='ied.editor'] .tab[data-ref^='browser:']", timeout=20000)
+	opened_in("ied.editor")
+	run.shot("in-editor")
+
+
 # The place of a character of a document's editor, in page coordinates, or why the editor is not to be clicked in.
 EDITOR_POINT = """([path, line, column]) => {
 	const view = ied_shell.views.entries.get('doc:' + path);
@@ -2208,7 +2244,7 @@ EDITOR_POINT = """([path, line, column]) => {
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))
 def document_links_open_on_middle_click(run):
-	"""The links written in a document's text (F-EDT-92, docs/15 "Links", owner 2026-11-08): Monaco underlines a web
+	"""The links written in a document's text (F-EDT-92, docs/15 "Links", owner 2026-10-25): Monaco underlines a web
 	address and a path that names a file of the workspace, and leaves a member access, a version and a folder plain. A
 	middle click opens the address in a Browser tab and the file in a document tab of its own - the two ways the owner
 	asked for (a page or a file opened in another tab by the middle button, as in a web browser). A link of an answer
