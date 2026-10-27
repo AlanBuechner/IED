@@ -11,10 +11,12 @@ import hashlib
 import json
 import os
 import re
+import tomllib
 from dataclasses import dataclass, replace
 
 from . import develop_files, fsutil, languages
 from .errors import NukeError
+from .packages.store import web_links
 
 PROJECTS_DIR = "build/ied"
 SHARED_VARIABLES = {"config", "arch"}   # a custom project's output may use these: IED's Nuke presets define them too
@@ -22,7 +24,7 @@ RECORD = ".ied/local/generated.json"
 PLUGIN_ID = "c4"
 BASE_PRESET = "nuke"  # IED's own Nuke preset (its ied.nuke plugin): Build, Run, Test and the toolbar run Nuke
 KINDS = {"executable": "executable", "module": "library", "library": "library", "custom": "other"}
-ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
+ITEMS = ("README.md", "AGENTS.md", "nuke.toml", "nuke.lock")
 PLUGIN_GROUP = "IED Plugins"
 PACKAGE_GROUP = "Packages"
 PLUGIN_MANIFEST = "ied-plugin.json"
@@ -127,17 +129,23 @@ def plugin_projects(workspace):
 	return projects
 
 
-def groups(projects):
+def groups(projects, items=()):
 	"""The solution's display folders from the projects' `group` ("C4", "Engine/Tools" nests): sorted by name, each with
-	its projects by name and the folders inside it; [] when no project names one."""
-	root = {"groups": {}, "projects": []}
-	for spec in projects:
-		if not spec.group:
-			continue
+	its projects by name, the files `items` puts there ((group, workspace-relative file)) and the folders inside it; []
+	when no project names one."""
+	root = {"groups": {}, "projects": [], "items": []}
+
+	def node_of(group):
 		node = root
-		for name in [part for part in spec.group.replace("\\", "/").split("/") if part]:
-			node = node["groups"].setdefault(name, {"groups": {}, "projects": []})
-		node["projects"].append(spec.name)
+		for name in [part for part in group.replace("\\", "/").split("/") if part]:
+			node = node["groups"].setdefault(name, {"groups": {}, "projects": [], "items": []})
+		return node
+	for spec in projects:
+		if spec.group:
+			node_of(spec.group)["projects"].append(spec.name)
+	for group, path in items:
+		if group:
+			node_of(group)["items"].append(path)
 
 	def written(node):
 		folders = []
@@ -148,16 +156,44 @@ def groups(projects):
 				body["projects"] = sorted(inner["projects"], key=str.lower)
 			if inner["groups"]:
 				body["groups"] = written(inner)
+			if inner["items"]:
+				body["items"] = sorted(set(inner["items"]), key=str.lower)
 			folders.append(body)
 		return folders
 	return written(root)
 
 
+def package_items(workspace, specs):
+	"""(group, workspace-relative manifest) of every package manifest that is no project's own - a folder above projects
+	whose nuke.toml has [package] alone (Claymore's Core/nuke.toml, an installed Renderer/nuke.toml) - for the solution
+	folder of that package, so the Solution Explorer shows every package's manifest."""
+	found = {}
+	for spec in specs:
+		if not _inside(spec.dir, workspace.dir):
+			continue
+		folder, top = os.path.dirname(spec.dir), (spec.package.folder if spec.package else workspace.dir)
+		while _inside(folder, workspace.dir) and fsutil.is_within(folder, top) and not fsutil.same_path(folder, workspace.dir):
+			if folder not in found:
+				found[folder] = _package_only(folder) and (shown_folder(workspace.dir, spec, folder), _relative(fsutil.join(folder, "nuke.toml"), workspace.dir))
+			folder = os.path.dirname(folder)
+	return [item for item in found.values() if item]
+
+
+def _package_only(folder):
+	try:
+		with open(os.path.join(folder, "nuke.toml"), "rb") as f:
+			data = tomllib.load(f)
+	except (OSError, tomllib.TOMLDecodeError):
+		return False
+	return "package" in data and "project" not in data
+
+
 def solution(workspace, plugin, plugins=()):
-	"""The solution: its projects' files, folders (the projects' groups, the plugins' "IED Plugins"), items, local
-	plugins and how it is made again."""
+	"""The solution: its projects' files, folders (the projects' groups, the plugins' "IED Plugins", the packages'
+	manifests), items, local plugins and how it is made again."""
 	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.iedproj", "optional": True}]}
-	folders = groups([shown(spec) for spec in listed_projects(workspace)] + list(plugins))
+	listed = listed_projects(workspace)
+	folders = groups([shown(spec) for spec in listed] + list(plugins), package_items(workspace, listed))
 	if folders:
 		body["groups"] = folders
 	items = [item for item in ITEMS if os.path.isfile(fsutil.join(workspace.dir, item))]
@@ -205,12 +241,29 @@ def plugin_project(workspace, plugin):
 	return {"version": 1, "name": plugin.name, "root": _relative(plugin.dir, folder), "kind": "plugin"}
 
 
+def _repo_path(origin, folder):
+	"""Where `folder` (inside a package's install or clone) is in its repository."""
+	relative = os.path.relpath(folder, origin.folder).replace("\\", "/")
+	relative = "" if relative == "." else relative
+	return relative if origin.develop else "/".join(part for part in (origin.line, relative) if part)
+
+
 def shown(spec):
-	"""A package's project shows in the Solution Explorer's "Packages" folder, under its source and its package's path
-	(Packages/claymore/Windowing/Win32), whatever group its own repository gives it."""
+	"""A package's project shows in the Solution Explorer's "Packages" folder, under its source and the folders it sits
+	in in its repository (WindowingWin32, at Windowing/Win32, in Packages/claymore/Windowing), whatever group its own
+	repository gives it."""
 	if spec.package is None:
 		return spec
-	return replace(spec, group="/".join(part for part in (PACKAGE_GROUP, spec.package.source, spec.package.package) if part))
+	parent = _repo_path(spec.package, spec.dir).rpartition("/")[0]
+	return replace(spec, group="/".join(part for part in (PACKAGE_GROUP, spec.package.source, parent) if part))
+
+
+def shown_folder(workspace_dir, spec, folder):
+	"""The solution folder for `folder`, a folder at or above the project `spec`: in "Packages/<source>/<its path in the
+	repository>" for a package's, else its path in the workspace."""
+	if spec.package is None:
+		return _relative(folder, workspace_dir)
+	return "/".join(part for part in (PACKAGE_GROUP, spec.package.source, _repo_path(spec.package, folder)) if part)
 
 
 def project(workspace, spec):
@@ -229,7 +282,29 @@ def project(workspace, spec):
 		body["language"] = spec.language
 	if spec.depends:
 		body["references"] = list(spec.depends)
+	used = packages_used(workspace, spec)
+	if used:
+		body["packages"] = used
 	return body
+
+
+def packages_used(workspace, spec):
+	"""The packages a project uses directly - those of the projects in its `depends` - for its Dependencies node in the
+	Solution Explorer: name, version, source (the repository), detail and the version's page on its host."""
+	found = {}
+	for name in spec.depends:
+		dependency = workspace.find_project(name)
+		origin = dependency.package if dependency is not None else None
+		if origin is None or (origin.url, origin.package) in found:
+			continue
+		ref = origin.commit if "+" in origin.version else (f"{origin.line}/v{origin.version}" if origin.line else f"v{origin.version}")
+		item = {"name": origin.package or origin.source, "version": origin.version, "source": origin.url,
+			"detail": f"{origin.source}, {'developed in a clone' if origin.develop else 'locked'}", "readOnly": not origin.develop}
+		link = web_links(origin.url, ref, origin.package).get("tree")
+		if link:
+			item["link"] = link
+		found[(origin.url, origin.package)] = item
+	return sorted(found.values(), key=lambda item: item["name"].lower())
 
 
 def _text(body):

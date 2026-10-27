@@ -14,7 +14,7 @@ from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, is_url, load
 from ..packages import bridge, git, index, install, lockfile, semver
 from ..packages.repository import Repository
-from ..packages.store import Cache, repository_name, url_key
+from ..packages.store import Cache, repository_name, url_key, web_url
 from . import base
 
 HELD_WAIT_SECONDS = 20   # how long `lock` waits for a program to let go of the clone (IED restarts a language server in a few)
@@ -42,7 +42,12 @@ nuke package pull SOURCE
   bring a develop checkout up to date with its remote (git pull --rebase)
 nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
   tag the packages' next versions at HEAD of their checkout (a develop checkout, or this workspace's own repository) and
-  push the branch and the tags; the first release of a package is 0.1.0, then a patch release unless told"""
+  push the branch and the tags; the first release of a package is 0.1.0, then a patch release unless told
+nuke package browse SOURCE [--json] [--offline]
+  every package of a source at the tip of its default branch: description, the versioned package it is released with
+  and its releases, its projects and dependencies, and what the workspace requires and has locked of it
+nuke package source list | add NAME URL | remove NAME
+  the workspace's [sources]: a URL is checked with git before it is added; a source a package uses is not removed"""
 
 
 class Package(base.Command):
@@ -57,7 +62,7 @@ class Package(base.Command):
 		verb = args[0] if args and not args[0].startswith("-") else "status"
 		rest = args[1:] if args and not args[0].startswith("-") else list(args)
 		actions = {"status": _status, "update": _update, "add": _add, "remove": _remove, "develop": _develop,
-			"lock": _lock, "pull": _pull, "release": _release}
+			"lock": _lock, "pull": _pull, "release": _release, "browse": _browse, "source": _sources}
 		if verb in ("help", "-h", "--help") or "-h" in rest or "--help" in rest:
 			cli.log.line(USAGE)
 			return 0
@@ -138,8 +143,7 @@ def _status(cli, args):
 	workspace = context.load()
 	joined = [p for p in workspace.projects.values() if p.package]
 	body, _ = bridge.describe(context.spec, context.state, context.lock(), context.state.checkouts(), joined)
-	if options.fetch:
-		_newest(context, body)
+	_enrich(context, body, options.fetch)
 	if options.json:
 		if unfetched:
 			body["unfetched"] = unfetched
@@ -164,19 +168,93 @@ def _fetch_checkouts(context):
 	return unfetched
 
 
-def _newest(context, body):
-	"""Each locked package's newest release on its remote, where it is newer than the lock's."""
+def _enrich(context, body, fetch):
+	"""Each versioned package's releases (newest first; from its remote with --fetch, else what the machine's mirror
+	knows), `newest` where one is newer than the lock's, and the packages of it the workspace uses with their
+	descriptions and declared dependencies."""
 	repositories = {}
+	checkouts = {url_key(u): f for u, f in context.state.checkouts().items()}
 	for item in body["packages"]:
-		if item["mode"] != "locked":
-			continue
 		key = url_key(item["url"])
 		if key not in repositories:
-			repositories[key] = Repository(item["url"], item["source"], context.cache, fresh=True)
-		releases = repositories[key].releases(item["path"])
+			repositories[key] = Repository(item["url"], item["source"], context.cache, checkout=checkouts.get(key),
+				fresh=fetch and key not in checkouts)
+		repo = repositories[key]
+		releases = repo.releases(item["path"])
+		item["versions"] = [str(version) for version, _ in releases]
 		current = semver.parse_version(item["version"])
 		if releases and current is not None and current.release < releases[0][0]:
 			item["newest"] = str(releases[0][0])
+		found = repo.index(item["commit"])
+		item["packages"] = [_package_json(found, path) for path in item["uses"] if path in found.packages]
+
+
+def _browse(cli, args):
+	options = _parse("browse", args, lambda p: (p.add_argument("source"), p.add_argument("--json", action="store_true"),
+		p.add_argument("--offline", action="store_true")))
+	context = _Context(cli)
+	url, name = context.source(options.source)
+	repo = Repository(url, name, context.cache, fresh=not options.offline)
+	mirror = context.cache.mirror(url)
+	if not options.offline:
+		git.fetch(mirror, url)
+	tip = repo.default_commit()
+	found = repo.index(tip)
+	wanted = {r.path: r.describe() for r in context.spec.packages
+		if url_key(context.spec.sources.get(r.source) or r.source) == url_key(url)}
+	locked = {e.line: e.version for e in context.lock().packages if url_key(e.url) == url_key(url)}
+	items = []
+	for path in sorted(found.packages):
+		line = repo.line_of(path)
+		items.append(dict(_package_json(found, path), line=line, versions=[str(v) for v, _ in repo.releases(line)],
+			requirement=wanted.get(path), locked=locked.get(line)))
+	body = {"source": name, "url": url, "web": web_url(url), "commit": tip, "packages": items}
+	if options.json:
+		cli.log.line(json.dumps(body, indent=2))
+		return 0
+	cli.log.line(f"{name}: {url} at {tip[:8]}")
+	width = max((len(i["path"]) for i in items), default=0)
+	for item in items:
+		version = item["versions"][0] if item["versions"] else "unreleased"
+		mark = f"  [uses {item['requirement']}]" if item["requirement"] else ""
+		cli.log.line(f"  {item['path'] or '(repository)':<{width}}  {version:<10} {item['description']}{mark}")
+	return 0
+
+
+def _sources(cli, args):
+	options = _parse("source", args, lambda p: (p.add_argument("action", choices=["list", "add", "remove"]),
+		p.add_argument("name", nargs="?"), p.add_argument("url", nargs="?")))
+	context = _Context(cli)
+	path, text = context.manifest_text()
+	if options.action == "list":
+		for name, url in context.spec.sources.items():
+			cli.log.line(f"{name:<16} {url}" + (f"  ({web_url(url)})" if web_url(url) else ""))
+		return 0
+	if not options.name:
+		raise NukeError(f"usage: nuke package source {options.action} NAME" + (" URL" if options.action == "add" else ""))
+	if options.action == "add":
+		if not options.url:
+			raise NukeError("usage: nuke package source add NAME URL")
+		git.remote_refs(options.url)      # reachable, signed in: the error says how when not
+		context.write_manifest(path, tomledit.set_key(text, "sources", options.name, options.url))
+		context.load()
+		cli.log.note(f"source {options.name} is {options.url}")
+		return 0
+	users = [r.path for r in context.spec.packages if r.source == options.name]
+	if users:
+		raise NukeError(f"source {options.name} is used by {', '.join(users)}: remove those packages first")
+	if options.name not in context.spec.sources:
+		raise NukeError(f"no source named '{options.name}'")
+	context.write_manifest(path, tomledit.remove_key(text, "sources", options.name))
+	context.load()
+	cli.log.note(f"source {options.name} removed")
+	return 0
+
+
+def _package_json(found, path):
+	info = found.packages[path]
+	return {"path": path, "description": info.description, "projects": [p.name for p in info.projects],
+		"dependencies": [{"path": d.path, "source": d.source, "requirement": d.describe()} for d in info.dependencies]}
 
 
 def _print_status(context, body):

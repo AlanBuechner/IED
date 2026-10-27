@@ -164,6 +164,7 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 		for path in sorted(selected.uses):
 			joined += _load_projects(entry, found.packages[path], base, choice.develop)
 	install.prune(state, wanted_installs, log)
+	state.needs = _edges(result)
 	for repo in repositories.all():
 		if repo.develop and url_key(repo.url) in state.develop:
 			state.develop[url_key(repo.url)]["head"] = repo.head()    # the lock is current while HEAD stays here
@@ -173,6 +174,20 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 	if lockfile.write(spec.dir, new_lock):
 		_report_changes(log, previous, new_lock)
 	return joined, new_lock
+
+
+def _edges(result):
+	"""{edge_key: [{by, requirement, from}]}: who needs each versioned package and what they accept (`from` the edge_key of
+	the package that needs it, "" for the workspace) - the dependency graph IED's package manager shows."""
+	edges = {}
+	for selected in result.selected:
+		seen = []
+		for need in selected.needs:
+			item = {"by": need.by, "requirement": need.describe(), "from": f"{need.by_key[0]}#{need.by_key[1]}" if need.by_key else ""}
+			if item not in seen:
+				seen.append(item)
+		edges[bridge.edge_key(selected.repo.url, selected.line)] = seen
+	return edges
 
 
 def _update_keys(update):

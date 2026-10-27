@@ -355,16 +355,39 @@ class ResolveTests(PackageTest):
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
 		solution = json.loads(read(self.path("Game.iedsln")))
+		self.assertIn("nuke.lock", solution["items"])
 		packages = next(g for g in solution["groups"] if g["name"] == "Packages")
 		engine = packages["groups"][0]
-		self.assertEqual(engine["name"], "engine")
+		self.assertEqual((engine["name"], engine["projects"]), ("engine", ["Windowing"]), "folders as in the repository")
 		windowing = engine["groups"][0]
-		self.assertEqual((windowing["name"], windowing["projects"]), ("Windowing", ["Windowing"]))
-		self.assertEqual(windowing["groups"][0]["projects"], ["Win32"])
+		self.assertEqual((windowing["name"], windowing["projects"]), ("Windowing", ["Win32"]))
 		project = json.loads(read(self.path("build", "ied", "Win32.iedproj")))
 		self.assertEqual(project["buildSystem"]["package"]["mode"], "locked")
 		self.assertEqual(project["buildSystem"]["package"]["version"], "0.2.0")
 		self.assertEqual(project["root"], "../../packages/engine/Windowing@0.2.0/Windowing/Win32")
+		self.assertEqual([p["name"] for p in project["packages"]], ["Windowing"], "Win32 uses Windowing")
+		game = json.loads(read(self.path("build", "ied", "Game.iedproj")))
+		self.assertEqual(game["packages"], [{"name": "Windowing/Win32", "version": "0.2.0", "source": self.engine.url,
+			"detail": "engine, locked", "readOnly": True}], "a local repository has no web page to link")
+
+	def test_a_package_manifest_of_no_project_shows_in_its_folder(self):
+		self.engine.commit({"nuke.toml": "[workspace]\n", "Core/nuke.toml": "[package]\ndescription = \"the basics\"\n",
+			"Core/Base/nuke.toml": module("Base", package="logging"), "Core/Base/src/Base/b.ch": ""}, tags=["Core/v0.1.0"])
+		self.workspace({"Core": "\"engine@^0.1\""}, depends=("Base",))
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		solution = json.loads(read(self.path("Game.iedsln")))
+		core = solution["groups"][0]["groups"][0]["groups"][0]
+		self.assertEqual((core["name"], core["projects"], core["items"]), ("Core", ["Base"], ["packages/engine/Core@0.1.0/Core/nuke.toml"]))
+
+	def test_github_links(self):
+		from nuke.packages.store import web_links, web_url
+		self.assertEqual("https://github.com/me/Engine", web_url("https://github.com/me/Engine.git"))
+		self.assertEqual("https://github.com/me/Engine", web_url("git@github.com:me/Engine.git"))
+		self.assertEqual("https://github.com/me/Engine", web_url("ssh://git@github.com/me/Engine.git"))
+		self.assertIsNone(web_url("C:/repos/engine.git"))
+		links = web_links("https://github.com/me/Engine.git", "Windowing/v0.2.0", "Windowing")
+		self.assertEqual("https://github.com/me/Engine/tree/Windowing/v0.2.0/Windowing", links["tree"])
 
 
 class CommandTests(PackageTest):
@@ -390,6 +413,46 @@ class CommandTests(PackageTest):
 		entry = self.lock()[("engine", "Windowing")]
 		self.assertEqual(entry["commit"], git("rev-parse", "main", cwd=self.engine.work), "the branch's tip, locked")
 		self.assertEqual(entry["uses"], ["Windowing", "Windowing/Win32"])
+
+	def test_status_json_has_the_dependency_graph_and_the_versions(self):
+		self.windowing()
+		self.workspace({"Renderer": "\"engine@^1.0\""}, depends=("Renderer",))
+		code, out = self.nuke("package", "status", "--json")
+		self.assertEqual(code, 0, out)
+		body = json.loads(out[out.index("{"):])
+		self.assertEqual(body["sources"], [{"name": "engine", "url": self.engine.url, "web": None}])
+		self.assertEqual(body["requirements"], [{"path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0", "kind": "version"}])
+		packages = {p["path"]: p for p in body["packages"]}
+		renderer, windowing = packages["Renderer"], packages["Windowing"]
+		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2.0")])
+		self.assertEqual([(r["requirement"], r["from"] != "") for r in windowing["requiredBy"]], [("^0.2.0", True)], "Renderer needs it")
+		self.assertEqual(renderer["requiredBy"][0]["by"], "the workspace")
+		self.assertEqual(windowing["versions"], ["0.2.0", "0.1.0"])
+		self.assertEqual(renderer["packages"], [{"path": "Renderer", "description": "the renderer", "projects": ["Renderer"], "dependencies": []}])
+
+	def test_browse_and_sources(self):
+		self.windowing()
+		self.workspace({}, depends=())
+		code, out = self.nuke("package", "source", "add", "more", self.engine.url)
+		self.assertEqual(code, 0, out)
+		self.assertIn(f'more = "{self.engine.url}"', read(self.path("nuke.toml")))
+		code, out = self.nuke("package", "browse", "more", "--json")
+		self.assertEqual(code, 0, out)
+		listed = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}
+		self.assertEqual(sorted(listed), ["Renderer", "Windowing", "Windowing/Win32"])
+		self.assertEqual((listed["Windowing/Win32"]["line"], listed["Windowing/Win32"]["versions"]), ("Windowing", ["0.2.0", "0.1.0"]))
+		self.assertEqual(listed["Renderer"]["description"], "the renderer")
+		code, out = self.nuke("package", "source", "add", "nowhere", os.path.join(self.tmp, "missing.git"))
+		self.assertEqual(code, 1)
+		self.assertIn("cannot read", out)
+		self.nuke("package", "add", "more", "Windowing")
+		code, out = self.nuke("package", "source", "remove", "more")
+		self.assertEqual(code, 1)
+		self.assertIn("used by Windowing", out)
+		self.nuke("package", "remove", "Windowing")
+		code, out = self.nuke("package", "source", "remove", "more")
+		self.assertEqual(code, 0, out)
+		self.assertNotIn("more =", read(self.path("nuke.toml")))
 
 	def test_status(self):
 		self.windowing()

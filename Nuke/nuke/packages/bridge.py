@@ -12,7 +12,12 @@ import os
 
 from .. import fsutil
 from . import git, install
-from .store import url_key
+from .store import url_key, web_links, web_url
+
+
+def edge_key(url, line):
+	"""How the dependency edges name a versioned package: its repository (url_key) and its path there."""
+	return f"{url_key(url)}#{line}"
 
 PACKAGES = ".ied/local/packages.json"
 READONLY = ".ied/local/readonly/nuke.json"
@@ -47,6 +52,29 @@ def write(spec, state, lock, checkouts, joined):
 	fsutil.write_if_changed(fsutil.join(spec.dir, READONLY), json.dumps({"version": 1, "writer": "nuke", "paths": readonly}, indent=2) + "\n")
 
 
+def _ref(entry):
+	"""The tag of a locked release, else its commit: what its links point at."""
+	if "+" in entry.version:
+		return entry.commit
+	return f"{entry.line}/v{entry.version}" if entry.line else f"v{entry.version}"
+
+
+def _dependencies(entry, state, lock):
+	"""What the versioned package needs of others (edges from it), each with the package it reached and its version."""
+	by_key = {edge_key(e.url, e.line): e for e in lock.packages}
+	mine = edge_key(entry.url, entry.line)
+	found = []
+	for key, needs in sorted(state.needs.items()):
+		target = by_key.get(key)
+		for need in needs:
+			if need.get("from") == mine and target is not None:
+				item = {"source": target.source, "url": target.url, "path": target.line, "version": target.version,
+					"requirement": need.get("requirement", "*"), "because": need.get("by", "")}
+				if item not in found:
+					found.append(item)
+	return found
+
+
 def describe(spec, state, lock, checkouts, joined):
 	"""(packages.json's body, the read-only folders)."""
 	developed = {url_key(url): folder for url, folder in checkouts.items()}
@@ -57,7 +85,8 @@ def describe(spec, state, lock, checkouts, joined):
 		projects = sorted(p.name for p in joined if p.package and url_key(p.package.url) == url_key(entry.url) and p.package.line == entry.line)
 		item = {"source": entry.source, "url": entry.url, "path": entry.line, "version": entry.version, "commit": entry.commit,
 			"uses": list(entry.uses), "projects": projects, "folder": _relative(folder, spec.dir),
-			"mode": "develop" if checkout else "locked"}
+			"mode": "develop" if checkout else "locked", "links": web_links(entry.url, _ref(entry), entry.line),
+			"requiredBy": state.needs.get(edge_key(entry.url, entry.line), []), "dependsOn": _dependencies(entry, state, lock)}
 		if checkout:
 			if checkout not in described:
 				described[checkout] = checkout_status(checkout)
@@ -74,5 +103,12 @@ def describe(spec, state, lock, checkouts, joined):
 		checkout_items.append(dict(status, source=source, url=url, folder=_relative(folder, spec.dir), writable=writable))
 		if not writable and fsutil.is_within(folder, spec.dir):
 			readonly.append({"path": _relative(folder, spec.dir), "reason": behind_reason(source, status)})
-	body = {"version": 1, "packagesFolder": spec.packages_dir.replace("\\", "/"), "packages": packages, "checkouts": checkout_items}
+	sources = [{"name": name, "url": url, "web": web_url(url)} for name, url in spec.sources.items()]
+	for entry in lock.packages:
+		if all(url_key(s["url"]) != url_key(entry.url) for s in sources):
+			sources.append({"name": entry.source, "url": entry.url, "web": web_url(entry.url), "transitive": True})
+	requirements = [{"path": r.path, "source": r.source, "url": spec.sources.get(r.source) or r.source, "requirement": r.describe(),
+		"kind": "branch" if r.branch else "rev" if r.rev else "version"} for r in spec.packages]
+	body = {"version": 1, "packagesFolder": spec.packages_dir.replace("\\", "/"), "sources": sources, "requirements": requirements,
+		"packages": packages, "checkouts": checkout_items}
 	return body, readonly

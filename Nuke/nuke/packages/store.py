@@ -50,6 +50,31 @@ def _identity(url):
 	return url_key(f"{remote.group(1).lower()}/{remote.group(2).strip('/')}")
 
 
+def web_url(url):
+	"""The repository's page on its host, for links (https://github.com/owner/repo for its https or SSH URL); None for a
+	local path."""
+	text = url.strip().rstrip("/")
+	if text.lower().endswith(".git"):
+		text = text[:-4]
+	match = re.match(r"^(?:ssh://)?[^@/]+@([^:/]+)[:/](.+)$", text)
+	if match:
+		return f"https://{match.group(1)}/{match.group(2).lstrip('/')}"
+	if re.match(r"^https?://", text):
+		return re.sub(r"^(https?://)[^@/]+@", r"\1", text)
+	return None
+
+
+def web_links(url, ref, path=""):
+	"""{repository, tree, commit} pages for a package at `ref` (a tag or a commit), or {} for a local repository."""
+	web = web_url(url)
+	if not web:
+		return {}
+	links = {"repository": web, "tree": f"{web}/tree/{ref}" + (f"/{path}" if path else "")}
+	if re.fullmatch(r"[0-9a-f]{40}", ref):
+		links["commit"] = f"{web}/commit/{ref}"
+	return links
+
+
 def repository_name(url):
 	"""The folder name a repository reached by its URL alone gets under packages/ (its last path part)."""
 	name = re.split(r"[/:\\]", url_key(url))[-1]

@@ -46,9 +46,10 @@ class State:
 			data = {}
 		self.develop = data.get("develop", {}) if isinstance(data.get("develop"), dict) else {}
 		self.installed = data.get("installed", {}) if isinstance(data.get("installed"), dict) else {}
+		self.needs = data.get("needs", {}) if isinstance(data.get("needs"), dict) else {}   # the last resolution's edges
 
 	def save(self):
-		body = {"format": FORMAT, "develop": self.develop, "installed": self.installed}
+		body = {"format": FORMAT, "develop": self.develop, "installed": self.installed, "needs": self.needs}
 		fsutil.write_if_changed(self.path, json.dumps(body, indent=2, sort_keys=True) + "\n")
 
 	def checkouts(self):
