@@ -19,7 +19,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
 | File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |
 | TCP sockets, event loop (IOCP), timers | **exists** | `Net::` TCP, UDP, resolution, `Poll`, blocking calls with timeouts (C4 B49); `Net::EventLoop` with socket watches, timers and work posted from other threads (B54, readiness-based over `WSAPoll`; tested with 1000 connections on one loop) |
-| HTTP/1.1, WebSocket, SHA-1, base64, TLS | **exists** except TLS | `Http::` server (thread per connection) and client (B50), WebSockets (B51), `Core::Sha1`, `Core::Base64*` |
+| HTTP/1.1, WebSocket, SHA-1, base64, TLS | **exists** | `Http::` server (thread per connection) and client (B50), WebSockets (B51), `Core::Sha1`, `Core::Base64*`; TLS over SChannel (B77): `Net::TcpStream::StartTls` / `AcceptTls`, https and wss in the client, `Http::Server::UseTls` |
 | Child processes with pipes, job objects, env vars | **exists** | `Process::Child` / `Process::Run` (C4 B52): pipes with timeouts, `ReadAny`, job objects (kill the tree, kill on close), environment changes; env get/set in `Platform::` (B40) |
 | ConPTY | **exists** | `Process::StartInfo::terminal` (B52): keyboard in, VT screen out, `Resize` |
 | Wall-clock time / dates | **exists** | `Platform::UnixTimeNs`, calendars and UTC offsets (B40) |
