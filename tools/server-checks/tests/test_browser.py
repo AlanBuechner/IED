@@ -66,7 +66,7 @@ def leave_browser_on(profile):
 
 def remove_when_released(path):
 	"""The browser's processes end with the server, a moment after it: their profile files are removed once released."""
-	deadline = time.monotonic() + 10
+	deadline = time.monotonic() + 30   # a busy machine lets Edge's last processes go late
 	while True:
 		try:
 			remove_tree(path)

@@ -286,6 +286,7 @@ namespace Ied
 		LspAnswer** found = answers.Find(id);
 		if (!found) return;
 		LspAnswer* answer = *found;
+		usedNs = clock_now_ns();   // idle counts from the last answer, not from when a long request was sent
 		answer->done = true;
 		answer->ok = !message.Member("error").IsValid();
 		answer->json = NodeJson(answer->ok ? message.Member("result") : message.Member("error"));
