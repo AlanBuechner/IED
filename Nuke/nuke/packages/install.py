@@ -11,6 +11,7 @@ import sys
 from .. import fsutil
 from ..errors import NukeError
 from . import git
+from .store import repository_name
 
 STATE = "nuke-packages.json"
 FORMAT = 1
@@ -23,6 +24,12 @@ def folder(workspace_dir, packages_dir):
 def export_name(source, line, version):
 	"""The folder of a locked versioned package, relative to the packages folder."""
 	return f"{source}/{line or source}@{version}"
+
+
+def content_name(source, line, version, url):
+	"""Where the versioned package's own folder sits in its install: inside it, under the name it has in its repository
+	(the repository's own for the whole repository), so a project named by its folder keeps its name."""
+	return f"{export_name(source, line, version)}/{line.rpartition('/')[2] if line else repository_name(url)}"
 
 
 class State:
@@ -75,19 +82,21 @@ def remove(path):
 
 
 def export(state, mirror, url, source, line, version, commit, log):
-	"""The locked versioned package in place; returns its folder. Re-exported when another commit sits there."""
+	"""The locked versioned package in place; returns the folder holding its content (content_name). Exported again
+	when another commit sits there."""
 	relative = export_name(source, line, version)
 	target = fsutil.join(state.root, relative)
+	content = fsutil.join(state.root, content_name(source, line, version, url))
 	entry = state.installed.get(relative)
-	if entry and entry.get("commit") == commit and os.path.isdir(target):
-		return target
+	if entry and entry.get("commit") == commit and os.path.isdir(content):
+		return content
 	remove(target)
 	log.note(f"installing {source}:{line or '(repository)'} {version} ({commit[:8]})")
-	os.makedirs(os.path.dirname(target), exist_ok=True)
-	git.export(mirror, commit, line, target)
+	os.makedirs(target, exist_ok=True)
+	git.export(mirror, commit, line, content)
 	make_read_only(target)
 	state.installed[relative] = {"url": url, "line": line, "commit": commit}
-	return target
+	return content
 
 
 def prune(state, wanted, log):

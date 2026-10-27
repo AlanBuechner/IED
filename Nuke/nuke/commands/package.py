@@ -32,7 +32,7 @@ nuke package develop SOURCE [--at FOLDER]
   existing clone, --at); nuke.lock follows the checkout's commits
 nuke package lock SOURCE [--keep]
   stop developing: the lock's commits are installed read-only again and the clone goes (refused while it has changes
-  that are not committed and pushed; --keep leaves the folder)
+  that are not committed and pushed; --keep moves the clone to packages/<source>.kept instead)
 nuke package pull SOURCE
   bring a develop checkout up to date with its remote (git pull --rebase)
 nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
@@ -318,12 +318,28 @@ def _lock(cli, args):
 		if unpushed:
 			raise NukeError(f"{folder} has {len(unpushed)} commit(s) no remote has: push them first (the lock names "
 				f"{unpushed[0][:8]}, which other machines could not fetch)")
-	del context.state.develop[url_key(url)]
+	entry = context.state.develop.pop(url_key(url))
 	context.state.save()
+	# The clone steps aside (its folder is where the installs go) and comes back if the lock cannot be installed.
+	aside = fsutil.join(context.state.root, f".{name}.develop") if inside else None
+	if aside:
+		install.remove(aside)
+		os.replace(folder, aside)
+	try:
+		context.load(resolve=True)
+	except (NukeError, OSError):
+		if aside:
+			install.remove(folder)
+			os.replace(aside, folder)
+		context.state = install.State(context.state.root)
+		context.state.develop[url_key(url)] = entry
+		context.state.save()
+		raise
 	context.cache.record_checkout(url, folder, present=False)
-	if inside and not options.keep:
-		install.remove(folder)
-	context.load(resolve=True)
+	if aside and not options.keep:
+		install.remove(aside)
+	elif aside:
+		os.replace(aside, fsutil.join(context.state.root, f"{name}.kept"))
 	context.log.note(f"{name} is locked again: its packages are installed read-only at the lock's commits")
 
 
@@ -371,9 +387,12 @@ def _release(cli, args):
 		if path not in found.packages:
 			raise NukeError(f"{name} has no package '{path}' at HEAD (no [package] table in {path}/{MANIFEST_NAME})")
 	_check_released_dependencies(repo, found, paths, head, folder)
+	versions = {path: _next_version(repo, path, options) for path in paths}
+	for path, version, why in _dependents(repo, found, versions):
+		versions[path] = version
+		context.log.note(f"also releasing {path} {version}, so a release of it accepts the new versions ({'; '.join(why)})")
 	tags = []
-	for path in paths:
-		version = _next_version(repo, path, options)
+	for path, version in versions.items():
 		tag = repo.tag_name(path, version)
 		git.run(["tag", "-a", tag, "-m", f"{path} {version}", head], cwd=folder, what=f"git tag {tag}")
 		tags.append((path, version, tag))
@@ -427,6 +446,42 @@ def _check_released_dependencies(repo, found, paths, head, folder):
 
 def _under(path, folder):
 	return not folder or path == folder or path.startswith(folder + "/")
+
+
+def _dependents(repo, found, versions):
+	"""The released packages of the repository whose newest release would not accept a version being released (it was
+	made against an older, incompatible release): each is released again (a patch) at the same commit, which accepts
+	it. Yields (path, version, the projects that use it)."""
+	pending = dict(versions)
+
+	def released_line(owner):
+		inside = [p for p in pending if p and _under(owner, p)]
+		return max(inside, key=len) if inside else repo.line_of(owner)
+
+	lines = {}
+	for path, info in found.packages.items():
+		lines.setdefault(repo.line_of(path), []).extend(info.projects)   # a sub-package's projects are its package's
+	added = True
+	while added:
+		added = False
+		for line in sorted(lines):
+			if line in pending or not repo.releases(line):
+				continue
+			newest, commit = repo.releases(line)[0]
+			why = set()
+			for project in lines[line]:
+				for dependency in project.depends:
+					owner = found.owner(dependency)
+					target = released_line(owner) if owner is not None else None
+					if target is None or target == line or target not in pending:
+						continue
+					before = repo.release_before(target, commit)
+					if before is not None and not semver.compatible(before).matches(pending[target]):
+						why.add(f"its {project.name} needs {target} ^{before}")
+			if why:
+				pending[line] = semver.bump(newest, "patch")
+				added = True
+				yield line, pending[line], sorted(why)
 
 
 def _next_version(repo, path, options):

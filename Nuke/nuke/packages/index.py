@@ -76,10 +76,12 @@ def build(manifest_texts, label):
 	workspace = root.get("workspace") if isinstance(root.get("workspace"), dict) else {}
 	packages_dir = workspace.get("packages-dir", "packages") if isinstance(workspace.get("packages-dir", "packages"), str) else "packages"
 	index = RepoIndex(packages_dir=packages_dir)
+	# A workspace inside the repository (a sample game) is its own: nothing in it belongs to the repository's packages.
+	nested = [_parent(p) for p, d in raw.items() if p != MANIFEST_NAME and isinstance(d.get("workspace"), dict)]
 	folders = {}
 	for path, data in raw.items():
 		folder = _parent(path) if path != MANIFEST_NAME else ""
-		if not _skipped(folder, packages_dir):
+		if not _skipped(folder, packages_dir) and not any(folder == n or folder.startswith(n + "/") for n in nested):
 			folders[folder] = (path, data)
 	parsed = {}
 	for folder, (path, data) in folders.items():
@@ -131,4 +133,6 @@ def in_folder(folder, label, prefix="", skip=()):
 			path = "/".join(part for part in (prefix, relative, MANIFEST_NAME) if part)
 			with open(os.path.join(base, MANIFEST_NAME), "rb") as f:
 				texts[path] = f.read()
+			if relative and b"[workspace]" in texts[path]:
+				dirs[:] = []        # a workspace of its own (build() leaves it out): its installed packages too
 	return build(texts, label)

@@ -176,10 +176,27 @@ class ResolveTests(PackageTest):
 		entry = self.lock()[("engine", "Windowing")]
 		self.assertEqual(entry["version"], "0.1.0")
 		self.assertEqual(entry["uses"], ["Windowing"])
-		installed = self.path("packages", "engine", "Windowing@0.1.0", "src", "Windowing", "window.ch")
+		installed = self.path("packages", "engine", "Windowing@0.1.0", "Windowing", "src", "Windowing", "window.ch")
 		self.assertEqual(read(installed), "// 0.1\n")
 		self.assertFalse(os.access(installed, os.W_OK), "a locked package's files are read-only")
 		self.assertIn("packages/", read(self.path(".gitignore")) if os.path.isfile(self.path(".gitignore")) else "packages/")
+
+	def test_a_project_named_by_its_folder_keeps_its_name(self):
+		self.engine.commit({"nuke.toml": "[workspace]\n", "Assets/nuke.toml": "[package]\n[project]\nkind = \"module\"\n",
+			"Assets/src/Assets/a.ch": ""}, tags=["Assets/v0.1.0"])
+		self.workspace({"Assets": "\"engine@^0.1\""}, depends=("Assets",))
+		self.assertIn("Assets", self.projects())
+
+	def test_a_workspace_inside_the_repository_is_not_part_of_its_packages(self):
+		self.engine.commit({"nuke.toml": "[workspace]\n", "Assets/nuke.toml": module("Assets", package="assets"),
+			"Assets/src/Assets/a.ch": "",
+			"Assets/Samples/Game/nuke.toml": "[workspace]\n[sources]\ne = \"x\"\n",
+			"Assets/Samples/Game/Mod/nuke.toml": module("SampleMod", package="a sample's own"),
+		}, tags=["Assets/v0.1.0"])
+		self.workspace({"Assets": "\"engine@^0.1\""}, depends=("Assets",))
+		projects = self.projects()
+		self.assertIn("Assets", projects)
+		self.assertNotIn("SampleMod", projects)
 
 	def test_a_sub_package_joins_when_a_project_depends_on_it(self):
 		self.windowing()
@@ -197,7 +214,7 @@ class ResolveTests(PackageTest):
 		import tomllib
 		description = tomllib.loads(read(self.path("build", "int", "Development-windows-x64", "Game", "projects.toml")))
 		sources = {p["name"]: p["sources"] for p in description["project"]}
-		self.assertTrue(sources["Windowing"][0].endswith("packages/engine/Windowing@0.2.0/src"), sources)
+		self.assertTrue(sources["Windowing"][0].endswith("packages/engine/Windowing@0.2.0/Windowing/src"), sources)
 
 	def test_the_lock_is_used_offline_without_git(self):
 		self.windowing()
@@ -290,6 +307,23 @@ class ResolveTests(PackageTest):
 		self.assertEqual(packages["packages"][0]["projects"], ["Windowing"])
 		self.assertFalse(packages["packages"][0]["writable"])
 
+	def test_the_ied_solution_shows_package_projects_in_a_packages_folder(self):
+		self.windowing()
+		self.workspace({"Windowing": "\"engine@^0.2\""}, depends=("Win32",))
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		solution = json.loads(read(self.path("Game.iedsln")))
+		packages = next(g for g in solution["groups"] if g["name"] == "Packages")
+		engine = packages["groups"][0]
+		self.assertEqual(engine["name"], "engine")
+		windowing = engine["groups"][0]
+		self.assertEqual((windowing["name"], windowing["projects"]), ("Windowing", ["Windowing"]))
+		self.assertEqual(windowing["groups"][0]["projects"], ["Win32"])
+		project = json.loads(read(self.path("build", "ied", "Win32.iedproj")))
+		self.assertEqual(project["buildSystem"]["package"]["mode"], "locked")
+		self.assertEqual(project["buildSystem"]["package"]["version"], "0.2.0")
+		self.assertEqual(project["root"], "../../packages/engine/Windowing@0.2.0/Windowing/Win32")
+
 
 class CommandTests(PackageTest):
 	def test_add_writes_the_newest_release_and_remove_drops_it(self):
@@ -327,9 +361,9 @@ class DevelopTests(PackageTest):
 		self.assertFalse(os.path.isdir(self.path("packages", "engine", "Windowing@0.2.0")))
 		projects = self.projects()
 		self.assertTrue(projects["Windowing"]["dir"].replace("\\", "/").endswith("packages/engine/Windowing"), projects["Windowing"])
-		head = git("rev-parse", "HEAD", cwd=checkout)
-		self.assertEqual(self.lock()[("engine", "Windowing")]["commit"], head, "the lock follows the checkout")
-		self.assertTrue(self.lock()[("engine", "Windowing")]["version"].startswith("0.2.0+1."), "the tip is Renderer's commit after 0.2.0")
+		entry = self.lock()[("engine", "Windowing")]
+		self.assertEqual((entry["version"], entry["commit"]), ("0.2.0", git("rev-list", "-n", "1", "Windowing/v0.2.0", cwd=checkout)),
+			"the tip only changed Renderer: Windowing stays at its release")
 
 		# Edit the package in place, commit: the lock follows without a release.
 		write_files(checkout, {"Windowing/src/Windowing/window.ch": "// edited in the game\n"})
@@ -352,7 +386,7 @@ class DevelopTests(PackageTest):
 		code, out = self.nuke("package", "lock", "engine")
 		self.assertEqual(code, 0, out)
 		self.assertFalse(os.path.isdir(os.path.join(checkout, ".git")))
-		self.assertEqual(read(self.path("packages", "engine", "Windowing@0.3.0", "src", "Windowing", "window.ch")), "// edited in the game\n")
+		self.assertEqual(read(self.path("packages", "engine", "Windowing@0.3.0", "Windowing", "src", "Windowing", "window.ch")), "// edited in the game\n")
 
 	def test_a_checkout_behind_its_remote_is_read_only(self):
 		self.windowing()
@@ -370,6 +404,26 @@ class DevelopTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		readonly = json.loads(read(self.path(".ied", "local", "readonly", "nuke.json")))
 		self.assertEqual(readonly["paths"], [])
+
+	def test_a_breaking_release_releases_its_dependents_again(self):
+		self.engine.commit({"nuke.toml": "[workspace]\n",
+			"Windowing/nuke.toml": module("Windowing", package="windows"), "Windowing/src/Windowing/w.ch": "",
+			"Input/nuke.toml": module("Input", ["Windowing"], package="input"), "Input/src/Input/i.ch": ""},
+			tags=["Windowing/v0.1.0", "Input/v0.1.0"])
+		self.workspace({"Windowing": "\"engine@^0.1\"", "Input": "\"engine@^0.1\""}, depends=("Input",))
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		checkout = self.path("packages", "engine")
+		write_files(checkout, {"Windowing/src/Windowing/w.ch": "// a breaking change\n"})
+		git("commit", "--quiet", "-am", "windowing 0.2", cwd=checkout)
+		code, out = self.nuke("package", "release", "Windowing", "--minor")
+		self.assertEqual(code, 0, out)
+		self.assertIn("also releasing Input 0.1.1", out)
+		self.assertIn("Input/v0.1.1", git("ls-remote", "--tags", self.engine.url))
+		code, out = self.nuke("package", "lock", "engine")
+		self.assertEqual(code, 0, out)
+		lock = self.lock()
+		self.assertEqual((lock[("engine", "Windowing")]["version"], lock[("engine", "Input")]["version"]), ("0.2.0", "0.1.1"))
 
 	def test_release_refuses_a_dependency_with_unreleased_changes(self):
 		self.windowing()

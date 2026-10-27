@@ -19,6 +19,7 @@ Design and decisions: [`../docs/23-nuke-build-system.md`](../docs/23-nuke-build-
 - [9c. C and C++ projects](#9c-c-and-c-projects)
 - [10. This repository as a workspace](#10-this-repository-as-a-workspace)
 - [11. Layout of Nuke itself](#11-layout-of-nuke-itself)
+- [12. Packages](#12-packages)
 
 ---
 
@@ -514,9 +515,107 @@ Nuke/
     variables.py      ${name} expansion
     configs.py        built-in and workspace configurations
     languages.py      language packages and drivers: finding them, loading them, their context (section 9b)
+    packages/         packages from git (section 12): versions, the resolver, the lock, installs, IED's view
     c4/               compiling C4 programs and harnesses, the build description, the IDE bridge
     commands/         one module per built-in command
   templates/          what `nuke init` writes
   tests/              python -m unittest discover -s Nuke/tests (unit tests use a stub compiler;
-                      test_integration.py uses a real installed toolchain and skips without one)
+                      test_integration.py uses a real installed toolchain and skips without one;
+                      test_packages.py makes real git repositories in a temporary folder)
 ```
+
+## 12. Packages
+
+A **package** is a folder of a git repository whose `nuke.toml` has a `[package]` table; its projects (the folder's own
+`[project]` and every project folder below it that is not inside another package) join any workspace that uses it.
+One repository holds as many packages as you like, each versioned on its own, so common code lives in one private
+repository and every program takes the parts it needs. Design and reasons: IED `docs/31`.
+
+```toml
+# the workspace's nuke.toml
+[sources]                                   # repositories of packages: any URL git can fetch
+claymore = "https://github.com/AlanBuechner/Claymore.git"
+
+[packages]                                  # what the workspace uses, by its path in the repository
+Windowing = "claymore@^0.2"                 # <source>@<version requirement>
+Renderer  = { source = "claymore", version = "~0.3.1" }
+Utils     = { source = "utils", branch = "main" }       # follow a branch (the lock pins its commit)
+Strings   = { source = "utils", rev = "1a2b3c4d" }      # one commit
+```
+
+The workspace's projects then name the packages' projects as they name their own: `depends = ["Windowing",
+"WindowingWin32"]`. A package's projects are compiled into a program only when it depends on them.
+
+```toml
+# Windowing/Win32/nuke.toml in the claymore repository: a sub-package with a project
+[package]
+description = "The Win32 backend of Windowing"
+
+[package.dependencies]                      # what it needs from other repositories (its own: read from depends)
+Agility = { source = "https://github.com/me/Agility.git", version = "^1.6" }
+
+[project]
+name = "WindowingWin32"
+kind = "module"
+depends = ["Windowing", "Agility"]
+```
+
+- **Versions are git tags**: `<package path>/v<semver>` (`Windowing/v0.2.0`, `Renderer/RHI/v1.0.0`), or `v<semver>` for
+  the whole repository - Go's tags for modules in subfolders. A package without tags of its own (a **sub-package**) is
+  released with the nearest package above it that has some, else with the repository's `v` tags.
+- **Requirements** are Cargo's: `^1.2` (same major; same minor below 1.0), `~1.2.3` (same minor), `=1.2.3`, `>=1.2, <1.5`,
+  `*`. A bare `1.2` is `^1.2`. `*` on a package that was never released takes the default branch's tip.
+- **Dependencies inside a repository need nothing written**: a package whose project depends on a project of another
+  package of the same repository needs that package - from the same commit when they are released together, else at
+  least the release it had at the dependent's commit. Other repositories are named in `[package.dependencies]`
+  (`source` a URL, or a name from the repository's own `[sources]`; a dependency without `source` is a package of the
+  same repository, pinned to a requirement).
+- **Resolution** takes the highest version every requirement accepts, keeps a locked version while it still does, and
+  when requirements on a package exclude each other tries older versions of the packages that made them before it
+  stops with every requirement and who made it.
+- **`nuke.lock`** (commit it) holds the commit of each versioned package and the packages of it used. While it matches
+  the manifests and everything is installed, Nuke reads only files: no git process, no network.
+- **Installs** go into the workspace's `packages/` folder (`[workspace] packages-dir`; Nuke adds it to `.gitignore`): a
+  locked package is `packages/<source>/<path>@<version>/` with every file read-only. Each repository is mirrored once per
+  machine in `<nuke home>/.cache/packages/git/` (`NUKE_PACKAGE_CACHE`).
+- **Private repositories** need nothing of Nuke: git's credential manager or SSH key does it. Git never prompts on the
+  terminal under Nuke; a missing sign-in is an error saying to run `git ls-remote <url>` once.
+- **A repository of packages is a workspace** too: its root `nuke.toml` has `[workspace]`, it builds and tests every
+  package together, and its packages' `[package.dependencies]` are its own requirements.
+
+```text
+nuke package [status] [--fetch] [--json]   the versioned packages: version, commit, locked or developed, projects;
+                                           --fetch: newer releases on the remotes, how far each checkout is behind
+nuke package update [NAME...]              the newest versions the requirements allow (all, or sources / packages)
+nuke package add SOURCE PACKAGE [REQ]      use a package (SOURCE a [sources] name or a URL); without REQ, ^ its newest
+            [--branch NAME | --rev C]      release
+nuke package remove PACKAGE                stop using it
+nuke package develop SOURCE [--at DIR]     build the source from a git clone in packages/<source>/ (or DIR)
+nuke package lock SOURCE [--keep]          back to locked installs (refused while the clone has unpushed work; the
+                                           clone stays when the lock cannot be installed; --keep moves it aside)
+nuke package pull SOURCE                   bring a develop clone up to date (git pull --rebase)
+nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
+```
+
+**Developing a package with the program that uses it.** `nuke package develop claymore` clones the repository into
+`packages/claymore/` at the tip of its default branch; from then on every claymore package builds from that working
+tree, so the program and the packages are edited, built, run and debugged as one codebase. Every Nuke command writes the
+clone's HEAD into `nuke.lock` - its release (`0.2.0`) or a pseudo-version after it (`0.2.0+3.1a2b3c4d`, three commits
+later) - so a commit of the program pins exactly the package code it was built with, released or not; another machine
+builds it once the clone's commits are pushed. `nuke package release Windowing --minor` tags `Windowing/v0.3.0` at HEAD
+and pushes the branch and the tag; it refuses uncommitted changes, a clone behind its remote, and a package of the same
+repository it uses with unreleased changes (it says to release that one too), and moves the workspace's requirement
+(`claymore@^0.3.0`) when the new version is outside it. `nuke package lock claymore` goes back to read-only installs at
+the lock's commits.
+
+**One writable copy.** A locked package's files are read-only. A develop clone that is behind its remote - another
+checkout pushed changes since - is read-only to IED until `nuke package pull` brings it up to date, so every change
+starts from the newest code. Nuke writes what IED needs on every command: `.ied/local/packages.json` (every package,
+its folder, version, mode and projects; every clone with its branch and how far it is ahead and behind) and
+`.ied/local/readonly/nuke.json` (the folders IED opens read-only, each with the reason). `nuke init --ied` puts the
+packages' projects in the solution's `Packages/<source>/<package>` folders, their project files naming the package's
+version and mode (`buildSystem.package`).
+
+**Other package managers.** A Rust or Go project inside a package keeps its own manifest, lockfile and cache; Nuke
+never resolves crates or modules. The tags are Go's, so a Go module in a package folder has the same versions for
+`go get`, and Cargo's git dependencies take the same tag.

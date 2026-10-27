@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import fsutil, languages
 from .errors import NukeError
@@ -24,6 +24,7 @@ BASE_PRESET = "nuke"  # IED's own Nuke preset (its ied.nuke plugin): Build, Run,
 KINDS = {"executable": "executable", "module": "library", "library": "library", "custom": "other"}
 ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
 PLUGIN_GROUP = "IED Plugins"
+PACKAGE_GROUP = "Packages"
 PLUGIN_MANIFEST = "ied-plugin.json"
 
 
@@ -156,7 +157,7 @@ def solution(workspace, plugin, plugins=()):
 	"""The solution: its projects' files, folders (the projects' groups, the plugins' "IED Plugins"), items, local
 	plugins and how it is made again."""
 	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.iedproj", "optional": True}]}
-	folders = groups(listed_projects(workspace) + list(plugins))
+	folders = groups([shown(spec) for spec in listed_projects(workspace)] + list(plugins))
 	if folders:
 		body["groups"] = folders
 	items = [item for item in ITEMS if os.path.isfile(fsutil.join(workspace.dir, item))]
@@ -204,12 +205,24 @@ def plugin_project(workspace, plugin):
 	return {"version": 1, "name": plugin.name, "root": _relative(plugin.dir, folder), "kind": "plugin"}
 
 
+def shown(spec):
+	"""A package's project shows in the Solution Explorer's "Packages" folder, under its source and its package's path
+	(Packages/claymore/Windowing/Win32), whatever group its own repository gives it."""
+	if spec.package is None:
+		return spec
+	return replace(spec, group="/".join(part for part in (PACKAGE_GROUP, spec.package.source, spec.package.package) if part))
+
+
 def project(workspace, spec):
 	folder = fsutil.join(workspace.dir, PROJECTS_DIR)
 	build_system = {"id": "nuke", "projectName": spec.name}
 	program = output(workspace, spec)
 	if program:
 		build_system["output"] = program
+	if spec.package is not None:
+		origin = spec.package
+		build_system["package"] = {"source": origin.source, "path": origin.package, "version": origin.version,
+			"commit": origin.commit, "mode": "develop" if origin.develop else "locked"}
 	body = {"version": 1, "name": spec.name, "root": _relative(spec.dir, folder), "kind": KINDS.get(spec.kind, "other"),
 		"buildSystem": build_system, "presets": [preset(workspace, spec)]}
 	if spec.language:

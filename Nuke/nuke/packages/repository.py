@@ -162,3 +162,11 @@ class Repository:
 
 	def is_ancestor(self, older, newer):
 		return git.is_ancestor(self.repo_dir(), older, newer)
+
+	def release_commit(self, line, version):
+		"""The commit a release's tag names (peeled), or None."""
+		return self.refs().get(f"refs/tags/{self.tag_name(line, version)}")
+
+	def unchanged(self, line, older, newer):
+		"""Whether the versioned package's folder is the same at both commits."""
+		return git.run(["diff", "--quiet", older, newer, "--", line or "."], cwd=self.repo_dir(), check=False) is not None

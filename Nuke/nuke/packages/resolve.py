@@ -279,8 +279,10 @@ class Resolver:
 				f"{repo.tag_pattern(line).replace('[0-9]*', 'X.Y.Z')}; release one with `nuke package release`, or use branch = \"main\")")
 			raise Conflict(repo, line, needs, detail)
 		if updating and locked and not self._excluded(key, locked.commit) and locked.commit != choice.commit:
+			# Never back to an older commit than the lock's, unless the package's folder is the same there.
 			version = semver.parse_version(locked.version)
-			if version is not None and all(n.value.matches(version) for n in versions) and repo.is_ancestor(choice.commit, locked.commit):
+			if version is not None and all(n.value.matches(version) for n in versions) and repo.is_ancestor(choice.commit, locked.commit) \
+					and not repo.unchanged(line, choice.commit, locked.commit):
 				return Choice(locked.commit, version)
 		return choice
 
@@ -301,8 +303,15 @@ class Resolver:
 		return Choice(commit, version)
 
 	def _develop_choice(self, repo, line, needs):
+		"""A source being developed: its HEAD - or, for a versioned package whose folder is the same at HEAD as at its
+		last release, that release, so the lock moves only for the packages a commit changed."""
 		commit = repo.head()
 		version = repo.version_of(line, commit)
+		if version.build:
+			release = repo.release_before(line, commit)
+			tagged = repo.release_commit(line, release) if release else None
+			if tagged and repo.unchanged(line, tagged, commit):
+				commit, version = tagged, release
 		for n in needs:
 			if n.kind == "version" and not n.value.matches(version):
 				self.warnings.append(f"{repo.name}:{line or '(repository)'} is {version} in its checkout, but {n.by} wants {n.value}")

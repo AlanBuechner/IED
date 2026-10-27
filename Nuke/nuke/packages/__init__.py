@@ -107,12 +107,13 @@ def _from_lock(state, lock, checkouts, local, wanted):
 	for entry in lock.packages:
 		checkout = developed.get(url_key(entry.url))
 		if checkout is not None:
-			if not os.path.isdir(checkout) or git.head(checkout) != entry.commit:
+			resolved_at = state.develop.get(url_key(entry.url), {}).get("head")
+			if not os.path.isdir(checkout) or git.head(checkout) != resolved_at:
 				return None
 			base, found = checkout, index.in_folder(checkout, entry.source)
 		else:
 			relative = install.export_name(entry.source, entry.line, entry.version)
-			base = fsutil.join(state.root, relative)
+			base = fsutil.join(state.root, install.content_name(entry.source, entry.line, entry.version, entry.url))
 			if state.installed.get(relative, {}).get("commit") != entry.commit or not os.path.isdir(base):
 				return None
 			found = index.in_folder(base, entry.source, prefix=entry.line)
@@ -163,6 +164,9 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 		for path in sorted(selected.uses):
 			joined += _load_projects(entry, found.packages[path], base, choice.develop)
 	install.prune(state, wanted_installs, log)
+	for repo in repositories.all():
+		if repo.develop and url_key(repo.url) in state.develop:
+			state.develop[url_key(repo.url)]["head"] = repo.head()    # the lock is current while HEAD stays here
 	state.save()
 	install.ensure_ignored(spec.dir, spec.packages_dir)
 	previous = lockfile.read(spec.dir)
