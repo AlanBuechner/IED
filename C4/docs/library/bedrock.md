@@ -567,9 +567,10 @@ for (Core::StringView chunk = file.Next(); !chunk.IsEmpty(); chunk = file.Next()
   (a `func`, a map with other keys) the same. `Serialization::ToJson(value, indent)` / `FromJson(text, value)` and
   `ToYaml` / `FromYaml` do it in one call for any `T` (found through `nameof(T)`). Reading fills the members the
   text has and keeps the other fields; `null` keeps a field too. Arrays and maps it fills must start empty, and
-  their new elements start zero rather than created, then take what the text has - a type whose zero is a valid
-  value (every Bedrock value type is). A member that does not fit its field (a string for a number, a name that is
-  no enumerator, more elements than a `T[N]`) makes the read false. The pieces: `DescribeValue(nameof(T))`,
+  each element it adds is constructed (`Reflection::Type::Construct`: its field initializers and creates run), then
+  takes what the text has, so the fields an element's text leaves out keep their defaults; an element type that
+  cannot start from nothing (its creates all take arguments) is not read. A member that does not fit its field (a
+  string for a number, a name that is no enumerator, more elements than a `T[N]`) makes the read false. The pieces: `DescribeValue(nameof(T))`,
   `WriteValue(doc, type, &value)`, `ReadValue(node, type, &value)`, `ReadFields`.
 
 ```c4
@@ -753,7 +754,13 @@ Particle* p = (Particle*)particles.Take();
 ## 8. Reflection (`Reflection/reflect.ch`)
 
 The `Reflection` namespace (`Type`, `Field`, `Method`, `Param`, `EnumValue`, `Variable`, `Function`,
-`Group`, `FindType`, ...). Documented in [runtime/02-reflection.md](../runtime/02-reflection.md).
+`Group`, `FindType`, ...). Documented in [runtime/02-reflection.md](../runtime/02-reflection.md). For storage of a type
+known only at run time (an ECS pool's chunks, a component the editor adds by name, a script's type) a `Type` does
+what `new (p) T()`, `new (to) T(*from)` and `destroy(p)` do - `Construct(object)`, `CopyTo(to, from)`,
+`Destroy(object)` - and says what it needs: `HoldsPointers()` (scan the chunk), `IsDefaultConstructible()`,
+`IsCopyable()`, `IsAbstract()`, `IsTriviallyDestructible()`, `IsTriviallyCopyable()`. A `Method` says which operator it
+is (`OperatorRole()`, `HasOperatorRole("create")`). Tests: `reflection_type_tests.cf` (`reflection.type.construct`,
+`copy`, `destroy`).
 
 ---
 

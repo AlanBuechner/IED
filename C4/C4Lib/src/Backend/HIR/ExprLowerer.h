@@ -69,6 +69,10 @@ namespace Scripting
 
 		/// The value of `callee`'s default for parameter `index` (which has one), computed for this call.
 		QueryResult<Value> DefaultArgument(const FunctionRecord& callee, uint32 index);
+		/// `new (storage) T(args)` once `storage` (a T*) and the arguments are lowered: the object zeroed with its vptrs,
+		/// then started as `T(args)` starts one; the value is the pointer. `site` (null in code the compiler writes) is
+		/// where a failure is reported.
+		QueryResult<Value> PlacementNew(const AstNode* site, const ObjectType* type, const HIRNode* storage, const std::vector<ConstructionArgument>& args);
 	private:
 		QueryResult<Value> ResolveBracedObject(const AstNode* site, const ObjectType* obj, const BracedInitializerNode* brace);
 		friend class LambdaLowerer; // builds a closure object through ResolveConstruct
@@ -224,6 +228,8 @@ namespace Scripting
 		QueryResult<Value> ResolveNew(const NewExpressionNode* n);
 		QueryResult<Value> ResolveConstruct(const AstNode* callee, const ObjectType* obj, const std::vector<ConstructionArgument>& args, bool braced);
 		QueryResult<Value> NewScalar(const AstNode* n, NewNode* nw, const std::vector<ConstructionArgument>& args);
+		/// `new T(args)` of an object type at `nw` (its storage, or none for the managed heap).
+		QueryResult<Value> NewObject(const AstNode* site, NewNode* nw, const ObjectType* obj, const std::vector<ConstructionArgument>& args, bool braced);
 		Value NewHolding(NewNode* nw, const HIRNode* value);
 		const HIRNode* AfterPrelude(const std::vector<const HIRNode*>& prelude, const HIRNode* value, bool fresh);
 		QueryResult<const HIRNode*> PlacementStorage(const NewExpressionNode* n, const Type* ptrT);

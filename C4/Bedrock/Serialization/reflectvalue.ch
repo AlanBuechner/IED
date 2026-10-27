@@ -35,7 +35,8 @@ namespace Serialization
 	// The DOM form of the value of `type` at `at`.
 	DomNode WriteValue(DomDoc& doc, const ValueType& type, const void* at);
 	// `node` read into the value of `type` at `at`: an object's fields that `node` has (the rest kept), an array or map
-	// that must be empty (its elements start zero, then read). False when `node` does not fit the type.
+	// that must be empty (each element it adds is constructed, so the fields `node` leaves out keep their defaults, then
+	// read). False when `node` does not fit the type, or an element type cannot be constructed.
 	bool ReadValue(const DomNode& node, const ValueType& type, void* at);
 	// The fields of the object at `at` that `node` has, read: how many, or -1 when one did not fit.
 	int32 ReadFields(const DomNode& node, Reflection::Type type, void* at);

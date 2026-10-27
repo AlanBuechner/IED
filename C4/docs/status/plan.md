@@ -1814,7 +1814,32 @@ methods that return structs by value (B74 adds the test); data exported from the
 #### B71 - Reflected construction, destruction and copy for every object type
 - **Design:** [reflection](../runtime/02-reflection.md),
   [lifecycle 6.4](../language/06-lifecycle-and-operators.md#64-copy-move-and-assignment). **Depends on:** B70 step 1
-  (the same pointer query). **Status:** Blocked (B70).
+  (the same pointer query). **Status:** Done.
+- **Done notes:** `c4_type_info` gains `construct`, `destroy`, `copy` (`c4_construct_fn`, `c4_destroy_fn`,
+  `c4_copy_fn`) and `flags` (`reflect_TYPE_HOLDS_POINTERS`, `_DEFAULT_CONSTRUCTIBLE`, `_COPYABLE`, `_ABSTRACT`);
+  `c4_method_info` gains `operatorRole` (the canonical `[operator]` names, comma-separated). `Backend/HIR/TypeOperations`
+  decides a type's flags and which thunks it needs (`TypeOperationsOf`) and lowers each thunk as the source form would:
+  `new ((T*)p) T()` and `new ((T*)to) T(*from)` through `ExprLowerer::PlacementNew` (the `new` lowering's own
+  `NewObject`: zeroed storage, vptrs, the plan of `T()` / `T(x)`), `destroy` through `Lifecycle::DestroyNow`.
+  `CodeGenDriver::EmitTypeThunks` (`Backend/CodeGen/TypeThunkEmission.cpp`) emits them for every registered type like
+  the invoke thunks (on the threads, placed by name, local), before and after global initialization, and a thunk
+  that does not lower takes the operation off the type's flags. The symbols are `__c4_reflect_construct_<type>` and
+  alike: a first try named the copy `__c4_copy_<type>`, which is the compiler-written copy's own symbol, and the two
+  became one broken function. Its crash showed BUG-394, fixed: an internal compiler error printed no stack (the filter
+  captured its own), and it walks the fault's context now (`src/Source.cpp`). A class-template instance whose copy is its template's counts as copyable only when its
+  type arguments are (`ArgumentsCopy`), so a copy thunk never instantiates `CopyFrom` for an element that cannot be
+  copied. Runtime: `reflect_type_flags`, `_has_destroy`, `_has_copy`, `reflect_type_construct` (zeroes, then the
+  thunk), `reflect_type_destroy`, `reflect_type_copy`, `reflect_method_handle_operator_role`; the operator role is
+  owned by the record. Bedrock: `Reflection::Type::Construct`, `Destroy`, `CopyTo`, `HoldsPointers`,
+  `IsDefaultConstructible`, `IsCopyable`, `IsAbstract`, `IsTriviallyDestructible`, `IsTriviallyCopyable`;
+  `Method::OperatorRole`, `HasOperatorRole`; B56's reader constructs the array elements and map values it adds (and
+  refuses an element type that cannot start from nothing). Tests: IsolatedTest `Reflection/TypeOperations` (field
+  initializers only; a member's create, copy and delete, also where the program copies the type itself; a copy
+  operator; a delete and no copy, and an array of it; creates that take arguments; a template instance the program
+  never makes, and one with members; a base's delete; a class with an interface's vptrs; an interface; an enum; the
+  pointer flags; a deep copy of an array and a string), `Reflection/StackedRegistrations` (flags and a start follow the
+  registration in front), ScriptTest `TypeOperations` (a script's types, a template instance it only names, gone after
+  the unload), Bedrock `reflection.type.construct`, `.copy`, `.destroy` and `serialization.reflect.defaults`.
 - **Why:** Claymore's ECS keeps components in chunked pools, and knows some component types only through reflection:
   types a script declares, a component the editor adds by name, a scene read from disk. A pool must construct,
   destroy and copy those in place, and must know whether their chunks need scanning. Today (probe, 2026-10-23):

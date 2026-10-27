@@ -184,3 +184,41 @@ class ReflectValueTests {
 		assert_true(SameSettings(written, read), "the same");
 	}
 }
+
+// An element with defaults: what a document leaves out keeps them.
+struct RvUnit
+{
+	public Core::String name;
+	public int32 hp = 100;
+	public float speed = 1.5f;
+	public Core::Array<int32> tags;
+}
+
+struct RvArmy
+{
+	public Core::Array<RvUnit> units;
+	public Core::HashMap<Core::String, RvUnit> reserves;
+}
+
+struct RvNeedsArguments
+{
+	[operator("create")] public void Init(int32 v) { value = v; }
+	public int32 value;
+}
+
+struct RvStrict { public Core::Array<RvNeedsArguments> items; }
+
+[test("serialization.reflect")]
+class ReflectDefaultsTests {
+	[test("defaults")]
+	public static void TestDefaults() {
+		RvArmy army;
+		assert_true(Serialization::FromJson(Core::StringView("{\"units\":[{\"name\":\"orc\"},{\"hp\":7,\"tags\":[1]}],\"reserves\":{\"elf\":{\"speed\":3}}}"), army), "read");
+		assert_true(army.units.Count() == 2 && army.units[0].name == "orc" && army.units[0].hp == 100 && army.units[0].speed == 1.5f, "an element's field the document leaves out keeps its default");
+		assert_true(army.units[1].hp == 7 && army.units[1].speed == 1.5f && army.units[1].tags.Count() == 1, "and one it gives takes its value");
+		const RvUnit* elf = army.reserves.Find(Core::String("elf"));
+		assert_true(elf != null && elf->hp == 100 && elf->speed == 3.0f, "a map's value too");
+		RvStrict strict;
+		assert_true(!Serialization::FromJson(Core::StringView("{\"items\":[{\"value\":1}]}"), strict) && strict.items.IsEmpty(), "an element that cannot start from nothing is not read");
+	}
+}

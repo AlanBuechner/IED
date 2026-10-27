@@ -221,11 +221,25 @@ namespace Serialization
 		return true;
 	}
 
+	// A value the reader adds (an array's element, a map's value) at zero storage `at`, started as `new (at) T()` starts
+	// it: an object's field initializers and creates run; every other kind starts zero. False when it cannot start.
+	static bool Construct(const ValueType& type, void* at) {
+		return type.kind != ValueKind::Object || type.type.Construct(at);
+	}
+
+	static bool ConstructElements(const ValueType& element, void* first, int64 count) {
+		for (int64 i = 0; i < count; ++i)
+			if (!Construct(element, (void*)((uint8*)first + i * element.size))) return false;
+		return true;
+	}
+
 	static bool ReadArray(const DomNode& node, const ValueType& type, void* at) {
 		const ValueType element = DescribeValue(type.element.CStr());
 		if (node.Kind() != DomKind::Array || element.kind == ValueKind::Unsupported) return false;
+		if (element.kind == ValueKind::Object && !element.type.IsDefaultConstructible()) return false;
 		if (!Core::ResizeEmptyArray(at, node.Count(), element.size, element.align)) return false;
-		return ReadElements(node, element, ((Core::ArrayLayout*)at)->data);
+		void* first = ((Core::ArrayLayout*)at)->data;
+		return ConstructElements(element, first, node.Count()) && ReadElements(node, element, first);
 	}
 
 	static bool ReadFixedArray(const DomNode& node, const ValueType& type, void* at) {
@@ -260,12 +274,14 @@ namespace Serialization
 		if (node.Kind() != DomKind::Object || map.count != 0) return false;
 		if (node.Count() == 0) return true;
 		const ValueType mapped = DescribeValue(type.element.CStr());
+		if (mapped.kind == ValueKind::Object && !mapped.type.IsDefaultConstructible()) return false;
 		ReserveMap(map, entries, node.Count(), type);
 		for (int64 i = 0; i < node.Count(); ++i) {
 			const Core::StringView key = node.KeyAt(i);
 			if (SlotOfKey(map, *entries, key, type.entrySize) >= 0) continue;   // the first of duplicate keys stays
 			uint8* entry = AddKey(map, *entries, key, type.entrySize);
-			if (!ReadValue(node.ValueAt(i), mapped, (void*)(entry + type.valueOffset))) return false;
+			void* value = (void*)(entry + type.valueOffset);
+			if (!Construct(mapped, value) || !ReadValue(node.ValueAt(i), mapped, value)) return false;
 		}
 		return true;
 	}

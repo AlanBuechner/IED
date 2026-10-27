@@ -161,7 +161,8 @@ assets\build-output\iso\SwizzleLanguage.exe
   (copied beside the built program). The host exits 0 when every check held; with `-O2` the host and its scripts
   are both `-O2`. Cases: `HostCalls`, `Classes`, `Templates`, `Callbacks`, `Exceptions`, `GC`, `Reflection`,
   `Lifecycle`, `ThreadLocals`, `Macros`, `Diagnostics`, `MultiFile`, `Reload`, `CrashIsolation`, `ScriptTests`,
-  `Concurrency`, `Interop`, `WideVectors` (BUG-252: 256- and 512-bit vectors both ways across a baseline host and
+  `Concurrency`, `Interop`, `TypeOperations` (a script's types constructed, copied and destroyed through
+  reflection), `WideVectors` (BUG-252: 256- and 512-bit vectors both ways across a baseline host and
   its script, which compiles for the host's target), `WideVectorsAvx2`. A case's `flags.txt` holds more compiler
   flags for its host (`WideVectorsAvx2` builds for `-march=x86-64-v3`, so its script may use `simd_fma`). Output in
   `assets/build-output/script/<O0|O2>/<case>/` (`run.log`).

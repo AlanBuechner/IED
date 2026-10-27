@@ -29,6 +29,7 @@ static rt_method* own_methods(uint32_t count, const c4_method_info* source)
         m->base = source[i];
         m->base.name = rt_dup_str(source[i].name);
         m->base.returnType = rt_dup_str(source[i].returnType);
+        m->base.operatorRole = rt_dup_str(source[i].operatorRole ? source[i].operatorRole : "");
         m->params = rt_dup_params(source[i].paramCount, source[i].params);
         m->base.params = m->params;
         if (!m->params) m->base.paramCount = 0;
@@ -87,6 +88,7 @@ void rt_release_type(rt_type* t, rt_groups* groups)
     {
         free((char*)t->methods[i].base.name);
         free((char*)t->methods[i].base.returnType);
+        free((char*)t->methods[i].base.operatorRole);
         rt_free_params(t->methods[i].base.paramCount, t->methods[i].params);
         rt_release_annotations(t->methods[i].base.annotationCount, t->methods[i].base.annotations);
     }

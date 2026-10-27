@@ -1,0 +1,33 @@
+include "counts.ch"
+
+namespace Comps
+{
+	struct Tracked
+	{
+		[operator("create")] public void Init() { Counts::g_creates += 1; id = 4; }
+		[operator("delete")] public void Delete() { Counts::g_deletes += 1; }
+		[operator("copy")] public void CopyFrom(const Tracked& other) { Counts::g_copies += 1; id = other.id + 10; }
+		public int32 id;
+	}
+
+	struct Health
+	{
+		public Tracked tracked;
+		public int32 hp = 50;
+		public Core::Array<int32> history;
+		public Core::String name;
+	}
+
+	struct Position { public float x = 1.0f; public float y; public float z; }
+
+	struct Unique
+	{
+		[operator("delete")] public void Delete() { Counts::g_deletes += 1; }
+		public int32 value;
+	}
+
+	template<T> struct Slot { public T value; public int32 index = 9; }
+
+	// Names an instance the script never makes: reflection's thunks are all its code.
+	Slot<Health>* g_slot = null;
+}

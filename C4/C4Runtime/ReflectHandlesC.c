@@ -55,6 +55,34 @@ int32_t reflect_is_virtual_type(const c4_type_info* t)
     return 0;
 }
 
+// ------------------------------------------------------------------ type operations
+
+uint32_t reflect_type_flags(const c4_type_info* t) { return t ? t->flags : 0; }
+uint32_t reflect_type_has_destroy(const c4_type_info* t) { return t && t->destroy ? 1 : 0; }
+uint32_t reflect_type_has_copy(const c4_type_info* t) { return t && t->copy ? 1 : 0; }
+
+uint32_t reflect_type_construct(const c4_type_info* t, void* object)
+{
+    if (!t || !object || !(t->flags & reflect_TYPE_DEFAULT_CONSTRUCTIBLE)) return 0;
+    memset(object, 0, (size_t)t->size);
+    if (t->construct) t->construct(object);
+    return 1;
+}
+
+void reflect_type_destroy(const c4_type_info* t, void* object)
+{
+    if (t && object && t->destroy) t->destroy(object);
+}
+
+uint32_t reflect_type_copy(const c4_type_info* t, void* to, const void* from)
+{
+    if (!t || !to || !from || !(t->flags & reflect_TYPE_COPYABLE)) return 0;
+    memset(to, 0, (size_t)t->size);
+    if (t->copy) t->copy(to, from);
+    else memcpy(to, from, (size_t)t->size);
+    return 1;
+}
+
 // ------------------------------------------------------------------ members
 
 const char* reflect_field_handle_name(const c4_field_info* f) { return f ? f->name : 0; }
@@ -70,6 +98,7 @@ uint32_t reflect_method_handle_param_count(const c4_method_info* m) { return m ?
 uint32_t reflect_method_handle_is_virtual(const c4_method_info* m) { return m ? m->isVirtual : 0; }
 uint32_t reflect_method_handle_is_static(const c4_method_info* m) { return m ? m->isStatic : 0; }
 uint32_t reflect_method_handle_is_const(const c4_method_info* m) { return m ? m->isConst : 0; }
+const char* reflect_method_handle_operator_role(const c4_method_info* m) { return m ? m->operatorRole : 0; }
 const char* reflect_method_handle_return_type_name(const c4_method_info* m) { return m ? m->returnType : 0; }
 const c4_param_info* reflect_method_param(const c4_method_info* m, uint32_t i)
 { return (m && i < m->paramCount) ? &m->params[i] : 0; }

@@ -29,7 +29,7 @@ What is registered:
 
 | Entity | Identity | Recorded data |
 |---|---|---|
-| Object types (class/struct/interface) | the qualified, argument-aware name: `Geo::Point`, `Geo::Box<int32>`, `Outer::Inner` | size, align, non-static fields `{name, type name, size, offset, isConst}`, methods `{name, params {name, type}, return type, isStatic, isVirtual, isConst, invoke thunk}`, primary base name, `[group]` names. Pure packed SIMD vector types are skipped. |
+| Object types (class/struct/interface) | the qualified, argument-aware name: `Geo::Point`, `Geo::Box<int32>`, `Outer::Inner` | size, align, non-static fields `{name, type name, size, offset, isConst}`, methods `{name, params {name, type}, return type, isStatic, isVirtual, isConst, invoke thunk, operator role}`, primary base name, `[group]` names, its flags and its construct, destroy and copy thunks (section 2). Pure packed SIMD vector types are skipped. |
 | Enums | the qualified name | size, align, `{name, int64 value}` per enumerator |
 | Global variables and static data members | the emitted symbol; found by the qualified name (`Ns::g_hp`, `Type::s_count`) | type name, size, align, isConst, owner type of a static member, groups, and the variable's **live address** |
 | Free functions and methods (every template-instantiated method too) | the emitted symbol, so each overload is its own entry; found by the qualified name of a free function (`Ns::Add`) or the plain name of a method | return type, params `{name, type}`, isStatic, isVariadic, owner type, groups, invoke thunk |
@@ -58,6 +58,24 @@ for the main executable). The tag is the unit of hot reload.
   is a field of its own; every later view, a lane's second name (`r` beside `x`) and the whole-lane array
   name bytes already named, and `Field.IsAlias()` is true for them. The serializers skip aliases, so declare
   the view that should be written first.
+- **Operations on storage.** Every object type has what reflection runs to start, end and copy one in storage it is
+  given, as `new (p) T()`, `destroy(p)` and `new (to) T(*from)` do (D-05..D-07): `construct(void* object)` on zero
+  storage (its vptrs, its parts' creates and field initializers, its default create), `destroy(void* object)`, and
+  `copy(void* to, const void* from)` on zero `to`. Each is a thunk the compiler writes per type (a template instance
+  its own), named `__c4_reflect_construct_<type>` and alike, and NULL when the operation runs nothing (zero is the
+  whole start, nothing to destroy, a byte copy is the copy) or cannot be done; a type with nothing to run gets none,
+  which keeps the image small. Its `flags` say what cannot be done: `reflect_TYPE_HOLDS_POINTERS` (a value may hold a
+  managed pointer, `holds_pointers`: storage for it must be scanned), `reflect_TYPE_DEFAULT_CONSTRUCTIBLE` (false for
+  a type whose creates all take arguments), `reflect_TYPE_COPYABLE` (false for a type with a `delete` and no copy,
+  [lifecycle 6.4](../language/06-lifecycle-and-operators.md#64-copy-move-and-assignment), or with a part that is; a
+  class-template instance whose copy is its template's counts as copyable only when its type arguments are, as a
+  container copies its elements) and `reflect_TYPE_ABSTRACT` (an abstract class or an interface: no start, no copy).
+  An enum or a union has no thunks and starts, copies and ends as bytes. The thunks are emitted for every type the
+  program registers, so a type the program never makes (a script's component, a template instance it only names)
+  can still be made: their code, and what it calls, is part of the program. A method's `operatorRole` names the
+  operators it is ("create", "delete", "copy", "assign,copy" for one that is two, "" for none), so a host tells the
+  creates from other methods of the same name. A script compiles against its host's interface and the compiled-script
+  cache keys on the compiler's build, so no image of an older layout is ever registered.
 - **Stable records.** The runtime deep-copies the emitted tables and every string into owned records,
   so handles stay valid when the same identity registers again (the entry is refilled in place) and
   the tables may live in an image that is later unloaded.
@@ -111,10 +129,10 @@ missing name or index gives an invalid handle, so check `IsValid()`.
 
 | Class | Accessors |
 |---|---|
-| `Type` | `IsValid, Name, Tag, Kind, SizeOf, AlignOf, IsVirtualType, BaseName, FieldCount, FindField(name), FieldAt(i), MethodCount, FindMethod(name), MethodAt(i), EnumCount, EnumAt(i), FindByName(name)`; range-for over fields; `Methods()` and `Enums()` views for range-for |
+| `Type` | `IsValid, Name, Tag, Kind, SizeOf, AlignOf, IsVirtualType, BaseName, FieldCount, FindField(name), FieldAt(i), MethodCount, FindMethod(name), MethodAt(i), EnumCount, EnumAt(i), FindByName(name)`; range-for over fields; `Methods()` and `Enums()` views for range-for; `HoldsPointers, IsDefaultConstructible, IsCopyable, IsAbstract, IsTriviallyDestructible, IsTriviallyCopyable`, `Construct(object)` (the storage zeroed, then the type's start; false when it is not default constructible), `Destroy(object)`, `CopyTo(to, from)` (false when it cannot be copied) |
 | `Field` | `IsValid, Name, Offset, SizeOf, TypeName, TypeOf, IsConst, IsAlias, AddressIn(object), Get(object, out), Set(object, value)` |
 | `Annotation` | `IsValid, Name, ArgCount, ArgKind(i)` (an `AnnotationArg`: `Int`, `Float`, `Bool`, `String`)`, IntArg(i), FloatArg(i), BoolArg(i), StringArg(i)` |
-| `Method` | `IsValid, Name, ParamCount, IsVirtual, IsStatic, IsConst, ParamAt(i), ReturnTypeName, ReturnType, IsInvokable, Invoke(object, result, arguments), Call(object, result, args...)` |
+| `Method` | `IsValid, Name, ParamCount, IsVirtual, IsStatic, IsConst, ParamAt(i), ReturnTypeName, ReturnType, OperatorRole, HasOperatorRole(role), IsInvokable, Invoke(object, result, arguments), Call(object, result, args...)` |
 | `Param` | `IsValid, Name, TypeName, TypeOf` |
 | `EnumValue` | `IsValid, Name, Value` |
 | `Variable` | `IsValid, Name, Tag, TypeName, IsConst, OwnerName, TypeOf, Address` |
@@ -273,7 +291,8 @@ your own wrapper or calling from C. Name accessors return `const char*`.
 | Template instantiations | **Implemented** - each registers under its argument-aware name (`Box<int32>`, `Box<Geo::Point>`) |
 | Namespaced types, enums and functions | **Implemented** - qualified names |
 | Overloaded functions | **Implemented** - one entry per overload, keyed by symbol |
-| Operators, virtuals, inheritance | **Partial** - operators appear as their method names, `IsVirtual` for every dispatched method, single primary base name only |
+| Operators, virtuals, inheritance | **Partial** - operators appear as their method names with their operator role (`OperatorRole`), `IsVirtual` for every dispatched method, single primary base name only |
+| Construct, destroy and copy an object of a type known by name; whether its storage must be scanned | **Implemented** (B71) - section 2, IsolatedTest `Reflection/TypeOperations`, ScriptTest `TypeOperations` |
 | Groups | **Implemented** |
 | Annotations on types, enums, fields, methods, parameters, functions, variables | **Implemented** (section 3.3) |
 | Unload by tag | **Implemented** |
@@ -285,7 +304,8 @@ your own wrapper or calling from C. Name accessors return `const char*`.
 | Capacity | **Implemented** - growable storage, hash-indexed lookups |
 | Thread safety | **Implemented** - a reader-writer lock: lookups, counts, iteration and groups share it; registration and unload take it alone; unload listeners run without it. Reading a handle takes no lock, so a source must not be unloaded or re-registered while other threads still read its handles |
 
-Tests: Bedrock `reflection_layout_tests.cf` (named and namespaced unions, class views, packed lanes and
+Tests: Bedrock `reflection_type_tests.cf` (construct, copy and destroy through a type's thunks, the flags),
+`reflection_layout_tests.cf` (named and namespaced unions, class views, packed lanes and
 vectors, aliases, union groups), `reflection_tests.cf` (iteration, qualified and template names, overloads, parameter
 names, flags, virtual methods, static members, field access, local enums), `reflection_invoke_tests.cf`
 (free, static, instance, virtual and interface calls; reference, struct and object results; reference and

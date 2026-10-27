@@ -22,6 +22,12 @@
 #define reflect_KIND_VARIABLE 17
 #define reflect_KIND_FUNCTION 18
 
+// A type's flags (c4_type_info.flags).
+#define reflect_TYPE_HOLDS_POINTERS        1u  // a value may hold a managed pointer (holds_pointers): its storage is scanned
+#define reflect_TYPE_DEFAULT_CONSTRUCTIBLE 2u  // `new (p) T()` is valid: the object zero, then `construct` when it has one
+#define reflect_TYPE_COPYABLE              4u  // `new (to) T(*from)` is valid: `to` zero, then `copy`, or the bytes when it has none
+#define reflect_TYPE_ABSTRACT              8u  // no object of it can exist on its own: an abstract class or an interface
+
 #define reflect_ARG_INT    1
 #define reflect_ARG_FLOAT  2
 #define reflect_ARG_BOOL   3
@@ -47,6 +53,12 @@ typedef struct c4_annotation_info {
 // address of argument i as the parameter's type, and the result is built in `result` (a reference result
 // stores the referent's address there; unused for void).
 typedef void (*c4_invoke_fn)(const void* code, void* object, void* result, void** arguments);
+
+// What a type's lifecycle runs on storage it is given (docs/runtime/02 section 2): construct and copy are given zero
+// storage (`to` for copy), destroy a live object it leaves raw memory.
+typedef void (*c4_construct_fn)(void* object);
+typedef void (*c4_destroy_fn)(void* object);
+typedef void (*c4_copy_fn)(void* to, const void* from);
 
 // One parameter of a reflected function or method.
 typedef struct c4_param_info {
@@ -81,6 +93,7 @@ typedef struct c4_method_info {
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
     const void* code;              // what a shared invoke thunk calls; NULL for a thunk of its own
+    const char* operatorRole;      // its canonical [operator] names ("create", "delete", "assign,copy"), "" for none
 } c4_method_info;
 
 // One enumerator of a reflected enum.
@@ -106,6 +119,10 @@ typedef struct c4_type_info {
     const char* const* groups;
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
+    c4_construct_fn construct;     // what `new (p) T()` runs on zero storage; NULL when zero is the whole start, or none is possible
+    c4_destroy_fn destroy;         // what `destroy(p)` runs; NULL when there is nothing to destroy
+    c4_copy_fn copy;               // what `new (to) T(*from)` runs on zero `to`; NULL when a byte copy is the copy
+    uint32_t flags;                // reflect_TYPE_*
 } c4_type_info;
 
 // A global variable or static data member.
@@ -204,6 +221,15 @@ uint32_t    reflect_method_count(const c4_type_info* t);
 uint32_t    reflect_enum_count(const c4_type_info* t);
 const char* reflect_base_name(const c4_type_info* t);
 int32_t     reflect_is_virtual_type(const c4_type_info* t);
+uint32_t    reflect_type_flags(const c4_type_info* t);
+uint32_t    reflect_type_has_destroy(const c4_type_info* t);   // 1 when destroying one runs code
+uint32_t    reflect_type_has_copy(const c4_type_info* t);      // 1 when copying one runs code
+// The object at `object` zeroed and started as `new (object) T()` starts it: 1, or 0 (nothing written) when the type is
+// not default constructible. The others: `destroy(object)`, and `to` zeroed then made a copy of `from` (0 when the
+// type cannot be copied). The type's code may throw.
+uint32_t    reflect_type_construct(const c4_type_info* t, void* object);
+void        reflect_type_destroy(const c4_type_info* t, void* object);
+uint32_t    reflect_type_copy(const c4_type_info* t, void* to, const void* from);
 const c4_field_info*  reflect_field(const c4_type_info* t, const char* name);
 const c4_method_info* reflect_method(const c4_type_info* t, const char* name);
 const c4_field_info*  reflect_field_at(const c4_type_info* t, uint32_t i);
@@ -226,6 +252,7 @@ uint32_t     reflect_method_handle_is_virtual(const c4_method_info* m);
 uint32_t     reflect_method_handle_is_static(const c4_method_info* m);
 uint32_t     reflect_method_handle_is_const(const c4_method_info* m);
 const char*  reflect_method_handle_return_type_name(const c4_method_info* m);
+const char*  reflect_method_handle_operator_role(const c4_method_info* m);
 const c4_param_info* reflect_method_param(const c4_method_info* m, uint32_t i);
 const c4_type_info*  reflect_method_return_handle(const c4_method_info* m);
 

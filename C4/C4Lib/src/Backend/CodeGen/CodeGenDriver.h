@@ -6,6 +6,7 @@
 #include "Backend/CodeGen/ProgramPlacement.h"
 #include "Backend/CodeGen/ParallelLowering.h"
 #include "Backend/HIR/GlobalInit.h"
+#include "Backend/HIR/TypeOperations.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/ErrorTracker.h"
 #include <llvm/IR/LLVMContext.h>
@@ -203,6 +204,27 @@ namespace Scripting
 		InvokeEntry InvokeEntryOf(const ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk);
 		/// The code reflection records as `target`'s address; none for a function without code (a pure virtual method).
 		llvm::Function* CodeOf(const FunctionRecord& target, ModuleContext& home);
+		/// Reflection's construct, destroy and copy thunks (docs/runtime/02 section 2) for each object type it registers
+		/// that has not had its turn yet, then every function the thunks reach. A thunk that does not lower leaves its
+		/// type without the operation (Backend/CodeGen/TypeThunkEmission.cpp).
+		bool EmitTypeThunks(ProgramModel& model, std::string* errorMessage);
+		/// A type's thunk to lower.
+		struct TypeThunkJob
+		{
+			const ObjectType* type = nullptr;
+			TypeOperation op = TypeOperation::Construct;
+			FunctionRecord* thunk = nullptr;
+		};
+		/// Each type the model has made since the last call: its flags, and the thunks it needs.
+		std::vector<TypeThunkJob> PlanTypeThunks(ProgramModel& model);
+		TypeThunkJob TypeThunk(ProgramModel& model, const ObjectType* type, TypeOperation op);
+		/// The type has no thunk for `op`: what reflection then cannot do with it (no start without its construct, no
+		/// copy without its copy, neither without its destroy).
+		void WithoutThunk(const ObjectType* type, TypeOperation op);
+		/// A type made after the last thunks were planned (by the reflection image's own questions) gets its flags,
+		/// without the operations that need code.
+		void SettleTypeEntries(ProgramModel& model);
+		bool RegistersType(const ProgramModel& model, const ObjectType* type) const;
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
 		/// here, or a virtual method (the thunk dispatches through the object).
 		Core::Vector<const FunctionRecord*> NewInvokeTargets(ProgramModel& model);
@@ -277,6 +299,8 @@ namespace Scripting
 		std::unordered_map<std::string, const FunctionRecord*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
 		std::unordered_map<const FunctionRecord*, llvm::Function*> m_ThunkFunctions; // each thunk emitted, in its partition
 		InvokeThunks m_Thunks;
+		TypeThunks m_TypeThunks;                         // every object type reflection registers, with its flags and thunks
+		uint32 m_TypesPlanned = 0;                       // the model's object types PlanTypeThunks has looked at
 		ImageDescription m_Image; // a split program's reflection image (D-82)
 		std::string m_ImageKey;
 		std::future<std::string> m_ImageKeying; // the key while its thread works it out

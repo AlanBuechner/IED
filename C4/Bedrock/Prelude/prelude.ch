@@ -156,6 +156,12 @@
 [link("reflect_enum_handle_name")] const char* reflect_enum_handle_name(void* handle) noexcept;
 [link("reflect_enum_handle_value")] int64 reflect_enum_handle_value(void* handle) noexcept;
 [link("reflect_is_virtual_type")] int32 reflect_is_virtual_type(void* handle) noexcept;
+[link("reflect_type_flags")] uint32 reflect_type_flags(void* handle) noexcept;
+[link("reflect_type_has_destroy")] uint32 reflect_type_has_destroy(void* handle) noexcept;
+[link("reflect_type_has_copy")] uint32 reflect_type_has_copy(void* handle) noexcept;
+[link("reflect_type_construct")] uint32 reflect_type_construct(void* handle, void* object);
+[link("reflect_type_destroy")] void reflect_type_destroy(void* handle, void* object);
+[link("reflect_type_copy")] uint32 reflect_type_copy(void* handle, void* to, const void* from);
 [link("reflect_variable")] void* reflect_variable(void* name) noexcept;
 [link("reflect_function")] void* reflect_function(void* name) noexcept;
 [link("reflect_function_in")] void* reflect_function_in(void* tag, void* name) noexcept;
@@ -197,6 +203,7 @@
 [link("reflect_method_handle_is_static")] uint32 reflect_method_handle_is_static(void* handle) noexcept;
 [link("reflect_method_handle_is_const")] uint32 reflect_method_handle_is_const(void* handle) noexcept;
 [link("reflect_method_handle_return_type_name")] const char* reflect_method_handle_return_type_name(void* handle) noexcept;
+[link("reflect_method_handle_operator_role")] const char* reflect_method_handle_operator_role(void* handle) noexcept;
 [link("reflect_param_handle_name")] const char* reflect_param_handle_name(void* handle) noexcept;
 [link("reflect_param_handle_type_name")] const char* reflect_param_handle_type_name(void* handle) noexcept;
 [link("reflect_variable_handle_type_name")] const char* reflect_variable_handle_type_name(void* handle) noexcept;

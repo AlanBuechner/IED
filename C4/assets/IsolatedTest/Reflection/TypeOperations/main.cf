@@ -1,0 +1,269 @@
+// B71: reflection constructs, destroys and copies an object of a type it knows only by name, as `new (p) T()`,
+// `destroy(p)` and `new (to) T(*from)` would: field initializers, members' creates and deletes, a copy operator, a
+// template instance the program never makes, a base's delete, vptrs. A type that cannot start from nothing or be copied
+// says so, and an enum or an abstract type has no thunks. Each case runs in zeroed storage, and counts every create,
+// delete and copy so each runs once.
+include "bedrock.ch"
+
+int32 g_creates = 0;
+int32 g_deletes = 0;
+int32 g_copies = 0;
+int32 g_failures = 0;
+
+void Check(bool holds, const char* what)
+{
+	if (holds) return;
+	printf("FAIL: %s\n", what);
+	g_failures += 1;
+}
+
+void ResetCounts()
+{
+	g_creates = 0;
+	g_deletes = 0;
+	g_copies = 0;
+}
+
+struct Initialized { public int32 hp = 100; public float speed = 2.5f; public int32 plain; }
+
+struct Counted
+{
+	[operator("create")] public void Init() { g_creates += 1; value = 9; }
+	[operator("delete")] public void Delete() { g_deletes += 1; }
+	[operator("copy")] public void CopyFrom(const Counted& other) { g_copies += 1; value = other.value; }
+	public int32 value;
+}
+
+struct Holder { public Counted counted; public int32 extra; }
+
+struct Copier
+{
+	public int32 value;
+	[operator("copy")] public void CopyFrom(const Copier& other) { g_copies += 1; value = other.value + 1; }
+	public void Plain() {}
+}
+
+struct Unique
+{
+	[operator("delete")] public void Delete() { g_deletes += 1; }
+	public int32 value;
+}
+
+struct NeedsArguments
+{
+	[operator("create")] public void Init(int32 v) { value = v; }
+	public int32 value;
+}
+
+template<T> struct Box
+{
+	[operator("create")] public void Init() { g_creates += 1; }
+	[operator("delete")] public void Delete() { g_deletes += 1; }
+	public T value;
+	public int32 tag = 7;
+}
+
+template<T> struct Pair { public T first; public T second; }
+
+Box<int64>* g_onlyNamed = null;   // the program never makes a Box<int64>: reflection's thunks are all its code
+Core::Array<Unique>* g_uniques = null;
+Pair<Counted>* g_pairs = null;
+
+class BaseWithDelete
+{
+	[operator("delete")] public void Delete() { g_deletes += 1; }
+	public int32 base;
+}
+
+class Derived : BaseWithDelete { public int32 extra = 3; }
+
+enum class Mood { Calm, Angry }
+
+interface IShape { int32 Sides(); }
+
+class Square : IShape
+{
+	public int32 Sides() { return 4; }
+	public int32 size = 2;
+}
+
+struct Numbers { public float[4] values; public int64 count; }
+struct Linked { public Linked* next; public int32 value; }
+struct Inventory { public Core::Array<int32> items; public Core::String name; }
+
+// Storage for one object: 16-byte aligned, zero.
+struct Storage
+{
+	public uint64[16] words;
+	public void* At() { return (void*)&words[0]; }
+}
+
+Reflection::Type TypeNamed(const char* name)
+{
+	Reflection::Type type = Reflection::FindType(name);
+	Check(type.IsValid(), name);
+	return type;
+}
+
+void TestInitializers()
+{
+	Reflection::Type type = TypeNamed("Initialized");
+	Storage a;
+	Storage b;
+	Check(type.IsDefaultConstructible() && type.IsCopyable() && type.IsTriviallyDestructible() && type.IsTriviallyCopyable(), "field initializers only: constructible, bytes copy and end it");
+	Check(type.Construct(a.At()), "constructed");
+	Initialized* made = (Initialized*)a.At();
+	Check(made->hp == 100 && made->speed == 2.5f && made->plain == 0, "its field initializers ran");
+	made->plain = 5;
+	Check(type.CopyTo(b.At(), a.At()) && ((Initialized*)b.At())->plain == 5 && ((Initialized*)b.At())->hp == 100, "copied by its bytes");
+	type.Destroy(a.At());
+}
+
+// The program copies a Holder itself too, so the compiler-written copy the thunk calls is emitted here first.
+int32 CopiedHere()
+{
+	Holder first;
+	Holder second = first;
+	return second.counted.value;
+}
+
+void TestMembersLifecycle()
+{
+	Check(CopiedHere() == 9, "the program's own copy");
+	Reflection::Type type = TypeNamed("Holder");
+	ResetCounts();
+	Storage a;
+	Storage b;
+	Check(type.IsDefaultConstructible() && type.IsCopyable() && !type.IsTriviallyDestructible() && !type.IsTriviallyCopyable(), "a member's lifecycle is the type's");
+	Check(type.Construct(a.At()) && g_creates == 1 && ((Holder*)a.At())->counted.value == 9, "the member's create ran once");
+	Check(type.CopyTo(b.At(), a.At()) && g_copies == 1 && ((Holder*)b.At())->counted.value == 9, "and its copy");
+	type.Destroy(a.At());
+	type.Destroy(b.At());
+	Check(g_deletes == 2 && g_creates == 1, "and its delete, once for each object");
+}
+
+void TestCopyOperator()
+{
+	Reflection::Type type = TypeNamed("Copier");
+	ResetCounts();
+	Storage a;
+	Storage b;
+	Check(type.Construct(a.At()), "constructed");
+	((Copier*)a.At())->value = 41;
+	Check(type.CopyTo(b.At(), a.At()) && ((Copier*)b.At())->value == 42 && g_copies == 1, "the copy operator ran once");
+	Check(Core::StringView(type.FindMethod("CopyFrom").OperatorRole()) == "copy" && type.FindMethod("CopyFrom").HasOperatorRole("copy"), "the method says it is the copy");
+	Check(Core::StringView(type.FindMethod("Plain").OperatorRole()).IsEmpty() && !type.FindMethod("Plain").HasOperatorRole("copy"), "a plain method is no operator");
+}
+
+void TestNotCopyable()
+{
+	Reflection::Type type = TypeNamed("Unique");
+	ResetCounts();
+	Storage a;
+	Storage b;
+	Check(type.IsDefaultConstructible() && !type.IsCopyable() && !type.IsTriviallyCopyable(), "a delete and no copy: not copyable");
+	Check(type.Construct(a.At()), "constructed");
+	Check(!type.CopyTo(b.At(), a.At()) && b.words[0] == 0, "a copy is refused and writes nothing");
+	type.Destroy(a.At());
+	Check(g_deletes == 1, "destroyed once");
+	Check(!TypeNamed("Core::Array<Unique>").IsCopyable() && TypeNamed("Core::Array<Unique>").IsDefaultConstructible(), "nor is an array of it");
+	Check(TypeNamed("Unique").FindMethod("Delete").HasOperatorRole("delete"), "the delete says so");
+}
+
+void TestArgumentCreates()
+{
+	Reflection::Type type = TypeNamed("NeedsArguments");
+	Storage a;
+	a.words[0] = 0;
+	Check(!type.IsDefaultConstructible() && type.IsCopyable(), "creates that all take arguments: no start from nothing");
+	Check(!type.Construct(a.At()), "Construct refuses it");
+	Check(Core::StringView(type.FindMethod("Init").OperatorRole()) == "create", "its create says so");
+}
+
+void TestTemplateInstance()
+{
+	Reflection::Type type = TypeNamed("Box<int64>");
+	ResetCounts();
+	Storage a;
+	Storage b;
+	Check(type.Construct(a.At()) && g_creates == 1 && ((Box<int64>*)a.At())->tag == 7, "a template instance's create and initializers");
+	Check(!type.IsCopyable() && !type.CopyTo(b.At(), a.At()), "a delete and no copy: not copyable, an instance or not");
+	type.Destroy(a.At());
+	Check(g_deletes == 1, "its delete");
+	Reflection::Type pair = TypeNamed("Pair<Counted>");
+	ResetCounts();
+	Check(pair.Construct(a.At()) && g_creates == 2, "an instance holding two members with creates");
+	Check(pair.CopyTo(b.At(), a.At()) && g_copies == 2, "copied memberwise: each member's copy");
+	pair.Destroy(a.At());
+	pair.Destroy(b.At());
+	Check(g_deletes == 4, "and each member's delete");
+}
+
+void TestDerived()
+{
+	Reflection::Type type = TypeNamed("Derived");
+	ResetCounts();
+	Storage a;
+	Check(type.Construct(a.At()) && ((Derived*)a.At())->extra == 3, "a derived type's initializer");
+	Check(!type.IsTriviallyDestructible() && !type.IsCopyable(), "its base's delete makes it destroyed and not copyable");
+	type.Destroy(a.At());
+	Check(g_deletes == 1, "the base's delete ran once");
+}
+
+void TestVirtual()
+{
+	Reflection::Type type = TypeNamed("Square");
+	Storage a;
+	Check(type.IsDefaultConstructible() && !type.IsAbstract(), "a class implementing an interface");
+	Check(type.Construct(a.At()) && ((Square*)a.At())->size == 2, "constructed");
+	IShape* shape = (IShape*)(Square*)a.At();
+	Check(shape->Sides() == 4, "with its vptrs: a call through its interface dispatches");
+	Reflection::Type shapeType = TypeNamed("IShape");
+	Check(shapeType.IsAbstract() && !shapeType.IsDefaultConstructible() && !shapeType.IsCopyable(), "an interface is abstract");
+	Check(!shapeType.Construct(a.At()), "and is never constructed");
+}
+
+void TestEnumAndFlags()
+{
+	Reflection::Type mood = TypeNamed("Mood");
+	Storage a;
+	a.words[0] = 99;
+	Check(mood.IsDefaultConstructible() && mood.IsCopyable() && mood.IsTriviallyDestructible() && mood.IsTriviallyCopyable(), "an enum: no thunks");
+	Check(mood.Construct(a.At()) && a.words[0] == 0, "constructed as zero");
+	Check(!mood.HoldsPointers() && !TypeNamed("Numbers").HoldsPointers(), "pointer-free types hold no pointers");
+	Check(TypeNamed("Linked").HoldsPointers() && TypeNamed("Inventory").HoldsPointers(), "and pointer-holding ones do");
+}
+
+void TestContainers()
+{
+	Reflection::Type type = TypeNamed("Inventory");
+	Storage a;
+	Storage b;
+	Check(type.Construct(a.At()), "constructed");
+	Inventory* first = (Inventory*)a.At();
+	first->items.Push(1);
+	first->items.Push(2);
+	first->name = Core::String("bag");
+	Check(type.CopyTo(b.At(), a.At()), "copied");
+	Inventory* second = (Inventory*)b.At();
+	second->items.Push(3);
+	Check(first->items.Count() == 2 && second->items.Count() == 3 && second->name == "bag", "a deep copy: its own array and string");
+	type.Destroy(a.At());
+	type.Destroy(b.At());
+}
+
+int32 main()
+{
+	TestInitializers();
+	TestMembersLifecycle();
+	TestCopyOperator();
+	TestNotCopyable();
+	TestArgumentCreates();
+	TestTemplateInstance();
+	TestDerived();
+	TestVirtual();
+	TestEnumAndFlags();
+	TestContainers();
+	if (g_onlyNamed != null || g_uniques != null || g_pairs != null) g_failures += 1;
+	return g_failures;
+}

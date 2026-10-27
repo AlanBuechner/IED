@@ -1,0 +1,115 @@
+// Reflection::Type's operations on storage (docs/runtime/02 section 2): Construct, CopyTo and Destroy run what
+// `new (p) T()`, `new (to) T(*from)` and `destroy(p)` run for a type known only by its name, and the flags say what
+// cannot be done (an abstract type, creates that all take arguments, a delete without a copy) and what needs no code.
+
+include "bedrock.ch"
+
+static int32 s_rtCreates = 0;
+static int32 s_rtDeletes = 0;
+static int32 s_rtCopies = 0;
+
+struct RtResource
+{
+	[operator("create")] public void Init() { s_rtCreates += 1; handle = 5; }
+	[operator("delete")] public void Delete() { s_rtDeletes += 1; }
+	[operator("copy")] public void CopyFrom(const RtResource& other) { s_rtCopies += 1; handle = other.handle + 1; }
+	public int32 handle;
+}
+
+struct RtComponent
+{
+	public Core::String label;
+	public int32 count = 3;
+	public RtResource resource;
+	public Core::Array<float> weights;
+}
+
+struct RtOwner
+{
+	[operator("delete")] public void Delete() { s_rtDeletes += 1; }
+	public int32 id;
+}
+
+struct RtPlain { public float x; public float y; }
+
+interface RtShape { int32 Corners(); }
+
+// Room for one object, zero.
+struct RtStorage
+{
+	public uint64[16] words;
+	public void* At() { return (void*)&words[0]; }
+}
+
+static void ResetCounts() {
+	s_rtCreates = 0;
+	s_rtDeletes = 0;
+	s_rtCopies = 0;
+}
+
+[test("reflection.type")]
+class ReflectionTypeTests {
+	[test("construct")]
+	public static void TestConstruct() {
+		ResetCounts();
+		Reflection::Type type = Reflection::FindType("RtComponent");
+		RtStorage storage;
+		assert_true(type.IsDefaultConstructible() && type.HoldsPointers() && !type.IsAbstract(), "a component's flags");
+		assert_true(type.Construct(storage.At()), "constructed");
+		RtComponent* made = (RtComponent*)storage.At();
+		assert_true(made->count == 3 && made->resource.handle == 5 && s_rtCreates == 1 && made->label.IsEmpty(), "initializers and members' creates ran once");
+		made->weights.Push(0.5f);
+		type.Destroy(storage.At());
+		Reflection::Type plain = Reflection::FindType("RtPlain");
+		assert_true(plain.IsDefaultConstructible() && !plain.HoldsPointers() && plain.IsTriviallyDestructible() && plain.IsTriviallyCopyable(), "plain data needs no code");
+		RtStorage dirty;
+		dirty.words[0] = 0xFFFFFFFFFFFFFFFF;
+		assert_true(plain.Construct(dirty.At()) && dirty.words[0] == 0, "and starts zero, whatever the storage held");
+		Reflection::Type shape = Reflection::FindType("RtShape");
+		assert_true(shape.IsAbstract() && !shape.Construct(dirty.At()), "an interface is not constructed");
+		assert_true(!Reflection::Type(nullptr).Construct(dirty.At()), "nor is an invalid type");
+	}
+
+	[test("copy")]
+	public static void TestCopy() {
+		ResetCounts();
+		Reflection::Type type = Reflection::FindType("RtComponent");
+		RtStorage from;
+		RtStorage to;
+		assert_true(type.Construct(from.At()), "constructed");
+		RtComponent* original = (RtComponent*)from.At();
+		original->label = Core::String("rock");
+		original->weights.Push(2.0f);
+		assert_true(type.IsCopyable() && !type.IsTriviallyCopyable() && type.CopyTo(to.At(), from.At()), "copied");
+		RtComponent* copy = (RtComponent*)to.At();
+		assert_true(copy->label == "rock" && copy->count == 3 && copy->resource.handle == 6 && s_rtCopies == 1, "each member copied, the copy operator once");
+		copy->weights.Push(3.0f);
+		assert_true(original->weights.Count() == 1 && copy->weights.Count() == 2, "into a buffer of its own");
+		type.Destroy(from.At());
+		type.Destroy(to.At());
+		Reflection::Type owner = Reflection::FindType("RtOwner");
+		RtStorage other;
+		assert_true(!owner.IsCopyable() && owner.Construct(from.At()) && !owner.CopyTo(other.At(), from.At()), "a delete without a copy is not copied");
+		owner.Destroy(from.At());
+	}
+
+	[test("destroy")]
+	public static void TestDestroy() {
+		ResetCounts();
+		Reflection::Type type = Reflection::FindType("RtComponent");
+		RtStorage storage;
+		assert_true(!type.IsTriviallyDestructible() && type.Construct(storage.At()), "constructed");
+		((RtComponent*)storage.At())->label = Core::String("a label long enough to own a buffer");
+		type.Destroy(storage.At());
+		assert_eq(1, (int64)s_rtDeletes, "the member's delete ran once");
+		Reflection::Type owner = Reflection::FindType("RtOwner");
+		assert_true(owner.Construct(storage.At()), "an owner");
+		owner.Destroy(storage.At());
+		assert_eq(2, (int64)s_rtDeletes, "its own delete");
+		Reflection::Type plain = Reflection::FindType("RtPlain");
+		plain.Destroy(storage.At());
+		assert_eq(2, (int64)s_rtDeletes, "plain data runs nothing");
+		Reflection::Method create = Reflection::FindType("RtResource").FindMethod("Init");
+		assert_true(create.HasOperatorRole("create") && !create.HasOperatorRole("delete"), "a method says which operator it is");
+	}
+}

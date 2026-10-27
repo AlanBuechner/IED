@@ -12,6 +12,7 @@ namespace llvm { class Function; class GlobalVariable; }
 namespace Scripting
 {
 	class ModuleContext;
+	class ObjectType;
 	class ProgramModel;
 	struct FunctionRecord;
 
@@ -27,6 +28,19 @@ namespace Scripting
 	/// The functions reflection can call, each with its thunk.
 	using InvokeThunks = std::unordered_map<const FunctionRecord*, InvokeEntry>;
 
+	/// What reflection runs on an object type's storage (docs/runtime/02 section 2): its flags (`reflect_TYPE_*`) and its
+	/// construct, destroy and copy thunks, each null when the operation runs nothing or cannot be done.
+	struct TypeEntry
+	{
+		uint32 flags = 0;
+		llvm::Function* construct = nullptr;
+		llvm::Function* destroy = nullptr;
+		llvm::Function* copy = nullptr;
+	};
+
+	/// Every object type reflection registers, with its entry.
+	using TypeThunks = std::unordered_map<const ObjectType*, TypeEntry>;
+
 	/// What a script's host registered already (docs/runtime/04): its symbols and its types' names. Null fields in a
 	/// program's own build.
 	struct HostEntities
@@ -40,6 +54,9 @@ namespace Scripting
 	/// (`c4_` names), functions local to a body or functions the compiler wrote (BUG-238).
 	bool ReflectedFunction(const FunctionRecord& function);
 
+	/// Whether reflection registers the object type: a defined one with a name, not a closure or a return list.
+	bool ReflectedType(const ProgramModel& model, const ObjectType* object);
+
 	/// The symbol of a function's own invoke thunk: `__c4_invoke_` plus the function's symbol, escaped
 	/// (`QualifiedName.h` EscapedText).
 	std::string InvokeThunkSymbol(const FunctionRecord& function);
@@ -50,12 +67,13 @@ namespace Scripting
 
 	/// The program's reflection image (docs/runtime/02, ABI in C4Runtime/ReflectABI.h) as the model describes it:
 	/// tables of its types, enums, unions, globals and functions in one `c4_reflect_image`. A function in `thunks`
-	/// records its invoke thunk, and the code a shared thunk calls; a global, its storage in `module`. What `host`
+	/// records its invoke thunk, and the code a shared thunk calls; an object type its flags and lifecycle thunks from
+	/// `types` (none for one missing there); a global, its storage in `module`. What `host`
 	/// registered is left out (a script's image holds only the script's own). An annotation argument that does not
 	/// fold is reported in `errors` once. Empty when there is nothing to register. It reads the model, so it runs where
 	/// the model may be read; ReflectionTables builds it anywhere (D-82).
 	ImageDescription DescribeReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
-		const HostEntities& host, ErrorTracker& errors);
+		const TypeThunks& types, const HostEntities& host, ErrorTracker& errors);
 
 	/// The qualified names of the types, enums and unions the program's image registers, in its order.
 	std::vector<std::string> ReflectedTypeNames(const ProgramModel& model);

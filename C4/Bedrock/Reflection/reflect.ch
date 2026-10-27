@@ -12,6 +12,25 @@ namespace Reflection
 	// What a registered entity is (the runtime's reflect_KIND_* values).
 	enum class EntityKind : uint32 { Object = 14, Enum = 15, Union = 16, Variable = 17, Function = 18 }
 
+	// A type's flags (the runtime's reflect_TYPE_* values).
+	const uint32 kTypeHoldsPointers = 1u;
+	const uint32 kTypeDefaultConstructible = 2u;
+	const uint32 kTypeCopyable = 4u;
+	const uint32 kTypeAbstract = 8u;
+
+	// Whether the comma-separated `roles` (a method's operator roles) has `role`.
+	bool HasRole(const char* roles, const char* role) {
+		if (roles == nullptr || role == nullptr) return false;
+		const uint64 length = strlen((void*)role);
+		for (const char* at = roles; *at != (char)0; ) {
+			const char* end = at;
+			while (*end != (char)0 && *end != ',') end += 1;
+			if ((uint64)(end - at) == length && strncmp((void*)at, (void*)role, length) == 0) return true;
+			at = *end == ',' ? end + 1 : end;
+		}
+		return false;
+	}
+
 	// An annotation the compiler does not act on (D-42), such as `[Range(0, 1)]`: its name as written and its
 	// arguments, folded at compile time. Every entity handle has AnnotationCount, AnnotationAt and
 	// FindAnnotation; a missing name gives an invalid Annotation.
@@ -177,6 +196,10 @@ namespace Reflection
 		public Param ParamAt(int64 i) const { return Param(reflect_method_param(handle, (uint32)i)); }
 		public const char* ReturnTypeName() const { return reflect_method_handle_return_type_name(handle); }
 		public Type ReturnType() const { return Type(reflect_method_return_handle(handle)); }
+		// The operators it is, as [operator] names them canonically: "create", "delete", "copy", "assign,copy" for one
+		// that is two; "" for a method that is no operator. HasOperatorRole asks for one of them.
+		public const char* OperatorRole() const { return reflect_method_handle_operator_role(handle); }
+		public bool HasOperatorRole(const char* role) const { return HasRole(OperatorRole(), role); }
 		public int64 AnnotationCount() const { return (int64)reflect_method_annotation_count(handle); }
 		public Annotation AnnotationAt(int64 i) const { return Annotation(reflect_method_annotation_at(handle, (uint32)i)); }
 		public Annotation FindAnnotation(const char* name) const { return FindAnnotationIn(*this, name); }
@@ -216,6 +239,23 @@ namespace Reflection
 		public bool IsVirtualType() const { return reflect_is_virtual_type(handle) != 0; }
 		public EntityKind Kind() const { return (EntityKind)reflect_kind_of(handle); }
 		public const char* BaseName() const { return reflect_base_name(handle); }
+
+		// What its lifecycle needs, for storage of a type known only at run time (a pool's chunk): whether a value
+		// may hold managed pointers (its storage must be scanned), can start from nothing or be copied, can exist on
+		// its own, and whether destroying or copying one runs code.
+		public bool HoldsPointers() const { return (reflect_type_flags(handle) & kTypeHoldsPointers) != 0u; }
+		public bool IsDefaultConstructible() const { return (reflect_type_flags(handle) & kTypeDefaultConstructible) != 0u; }
+		public bool IsCopyable() const { return (reflect_type_flags(handle) & kTypeCopyable) != 0u; }
+		public bool IsAbstract() const { return (reflect_type_flags(handle) & kTypeAbstract) != 0u; }
+		public bool IsTriviallyDestructible() const { return IsValid() && reflect_type_has_destroy(handle) == 0u; }
+		public bool IsTriviallyCopyable() const { return IsCopyable() && reflect_type_has_copy(handle) == 0u; }
+		// `new (object) T()`: the storage zeroed, then the type's start; false (nothing written) when it is not
+		// default constructible. Destroy runs `destroy(object)`; the storage is then raw memory. CopyTo makes `to`
+		// a copy of `from` (`new (to) T(*from)`, `to` zeroed first); false when it cannot be copied. The type's
+		// creates, deletes and copies may throw.
+		public bool Construct(void* object) const { return reflect_type_construct(handle, object) != 0u; }
+		public void Destroy(void* object) const { reflect_type_destroy(handle, object); }
+		public bool CopyTo(void* to, const void* from) const { return reflect_type_copy(handle, to, from) != 0u; }
 
 		// fields (handle-based: returns a Field you can query further)
 		public int64 FieldCount() const { return (int64)reflect_field_count(handle); }

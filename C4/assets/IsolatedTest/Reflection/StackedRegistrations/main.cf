@@ -1,6 +1,7 @@
 // An identity registered under several tags keeps each registration (docs/runtime/04 section 5): the latest is the
 // one found, unloading its tag brings the one it hid back, unloading a tag behind it removes only that one, and a
-// script never takes a host's type away. Handles stay valid throughout.
+// script never takes a host's type away. Handles stay valid throughout, and a type's flags and start are those of
+// the registration in front (B71).
 extern "c" include "script.h"
 extern "c" source "script.c"
 include "bedrock.ch"
@@ -28,11 +29,16 @@ int32 main()
 
 	ScriptRegisterUnder("a", 1);
 	Reflection::Type enemy = Reflection::FindType("Script::Enemy");
+	int32 made = 0;
+	if (!enemy.Construct((void*)&made) || made != 1 || enemy.HoldsPointers()) failures++;
 	ScriptRegisterUnder("b", 2);
 	if (VersionOf("Script::Enemy") != 2 || FunctionVersion() != 2) failures++;
+	if (!enemy.HoldsPointers() || enemy.IsDefaultConstructible() || enemy.Construct((void*)&made)) failures++; // b's flags, no start
 	if (enemy.FindAnnotation("Version").IntArg(0) != 2) failures++;           // the same handle sees the latest
 	if (Reflection::UnloadSource("b") != 3) failures++;
 	if (VersionOf("Script::Enemy") != 1 || FunctionVersion() != 1) failures++;  // a's came back
+	made = 0;
+	if (!enemy.Construct((void*)&made) || made != 1 || enemy.HoldsPointers()) failures++; // with its flags and start
 	if ((int32*)Reflection::FindVariable("Script::g_value").Address() != ScriptValueOf(1)) failures++;
 	if (enemy.FindAnnotation("Version").IntArg(0) != 1) failures++;
 
@@ -40,6 +46,7 @@ int32 main()
 	ScriptRegisterUnder("c", 3);
 	if (Reflection::UnloadSource("b") != 0) failures++;                           // b was behind c: c still holds them
 	if (VersionOf("Script::Enemy") != 3) failures++;
+	if (!enemy.Construct((void*)&made) || made != 3 || enemy.IsCopyable()) failures++;
 	if (Reflection::UnloadSource("c") != 3) failures++;
 	if (VersionOf("Script::Enemy") != 1) failures++;                             // b's went with b, so a's is next
 

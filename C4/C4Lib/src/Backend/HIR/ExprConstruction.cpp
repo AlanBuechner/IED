@@ -75,14 +75,28 @@ namespace Scripting
 		if (!args.Ok()) return QueryResult<Value>::Fail(args.error, args.message);
 		const auto* obj = dynamic_cast<const ObjectType*>(objT);
 		if (!obj) return NewScalar(n, nw, args.value);
-		auto plan = PlanConstruction(m_Ctx, *this, obj, args.value, n->HasBraces(), n);
+		return NewObject(n, nw, obj, args.value, n->HasBraces());
+	}
+
+	QueryResult<Value> ExprLowerer::NewObject(const AstNode* site, NewNode* nw, const ObjectType* obj, const std::vector<ConstructionArgument>& args,
+		bool braced)
+	{
+		auto plan = PlanConstruction(m_Ctx, *this, obj, args, braced, site);
 		if (!plan.Ok()) return QueryResult<Value>::Fail(plan.error, plan.message);
 		if (!nw->placement) nw->finalizer = Lifecycle(m_Ctx).Destroy(obj);
 		if (plan.value.whole) return NewHolding(nw, plan.value.whole);
 		nw->ctor = plan.value.create;
 		nw->aggregateInit = plan.value.aggregate;
 		nw->args = plan.value.args;
-		return Value::R(AfterPrelude(plan.value.prelude, nw, false), ptrT);
+		return Value::R(AfterPrelude(plan.value.prelude, nw, false), nw->type);
+	}
+
+	QueryResult<Value> ExprLowerer::PlacementNew(const AstNode* site, const ObjectType* type, const HIRNode* storage,
+		const std::vector<ConstructionArgument>& args)
+	{
+		auto* nw = m_Ctx.out->NewNode<NewNode>(m_Ctx.queries().TypeStore()->Pointer(type), type);
+		nw->placement = storage;
+		return NewObject(site, nw, type, args, false);
 	}
 
 	const HIRNode* ExprLowerer::AfterPrelude(const std::vector<const HIRNode*>& prelude, const HIRNode* value, bool fresh)

@@ -1,0 +1,83 @@
+// B71: the host constructs, copies and destroys objects of types a script declares, which it knows only by name, in its
+// own storage, through the script's thunks: field initializers, members' creates, copies and deletes, a template instance
+// the script never makes; the flags say what cannot be copied and what holds pointers. After the unload the types are
+// gone.
+include "scripttest.ch"
+include "counts.ch"
+
+// Room for one object, zero.
+struct Storage
+{
+	public uint64[32] words;
+	public void* At() { return (void*)&words[0]; }
+}
+
+void ResetCounts()
+{
+	Counts::g_creates = 0;
+	Counts::g_deletes = 0;
+	Counts::g_copies = 0;
+}
+
+int32 IntAt(void* object, Reflection::Type type, const char* field)
+{
+	int32 value = -1;
+	type.FindField(field).Get(object, value);
+	return value;
+}
+
+void CheckHealth(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Reflection::Type health = script->FindType("Comps::Health");
+	checks.That(health.IsValid() && health.IsDefaultConstructible() && health.IsCopyable() && health.HoldsPointers(), "the script's component and its flags");
+	if (!health.IsValid()) return;
+	Reflection::Type tracked = script->FindType("Comps::Tracked");
+	ResetCounts();
+	Storage first;
+	Storage second;
+	checks.That(health.Construct(first.At()), "constructed in the host's storage");
+	checks.Equal(50, IntAt(first.At(), health, "hp"), "its field initializer ran");
+	void* member = (void*)((uint8*)first.At() + health.FindField("tracked").Offset());
+	checks.Equal(4, IntAt(member, tracked, "id"), "and its member's create");
+	checks.That(health.CopyTo(second.At(), first.At()), "copied");
+	void* copied = (void*)((uint8*)second.At() + health.FindField("tracked").Offset());
+	checks.Equal(14, IntAt(copied, tracked, "id"), "through the member's copy");
+	health.Destroy(first.At());
+	health.Destroy(second.At());
+	checks.Equal(1, Counts::g_creates, "one create");
+	checks.Equal(1, Counts::g_copies, "one copy");
+	checks.Equal(2, Counts::g_deletes, "a delete for each object");
+}
+
+void CheckOthers(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Reflection::Type position = script->FindType("Comps::Position");
+	Storage storage;
+	checks.That(position.IsValid() && !position.HoldsPointers() && position.IsTriviallyDestructible() && position.IsTriviallyCopyable(), "plain data");
+	checks.That(position.Construct(storage.At()) && *(float*)storage.At() == 1.0f, "its initializer");
+	Reflection::Type unique = script->FindType("Comps::Unique");
+	checks.That(unique.IsValid() && !unique.IsCopyable(), "a delete without a copy is not copyable");
+	Reflection::Type slot = script->FindType("Comps::Slot<Comps::Health>");
+	ResetCounts();
+	checks.That(slot.IsValid() && slot.Construct(storage.At()), "a template instance the script never made");
+	checks.Equal(9, IntAt(storage.At(), slot, "index"), "with its initializer");
+	checks.Equal(1, Counts::g_creates, "and its member's member's create");
+	slot.Destroy(storage.At());
+	checks.Equal(1, Counts::g_deletes, "destroyed");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("TypeOperations");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "components", "components.cf"));
+	if (script->Ok())
+	{
+		CheckHealth(script, checks);
+		CheckOthers(script, checks);
+	}
+	script->Unload();
+	checks.That(!Reflection::FindType("Comps::Health").IsValid() && !Reflection::FindType("Comps::Slot<Comps::Health>").IsValid(), "after the unload the types are gone");
+	return checks.End("TypeOperations");
+}

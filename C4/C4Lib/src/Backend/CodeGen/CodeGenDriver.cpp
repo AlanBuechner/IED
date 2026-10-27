@@ -516,7 +516,8 @@ namespace Scripting
 	{
 		const HostEntities host{ m_Script ? m_Script->hostSymbols : nullptr, m_Script ? m_Script->hostTypes : nullptr,
 			m_Script ? m_Script->interfaceUnits : 0 };
-		ImageDescription description = DescribeReflectionImage(m_MCtx, model, m_Thunks, host, m_LoweringErrors);
+		SettleTypeEntries(model);
+		ImageDescription description = DescribeReflectionImage(m_MCtx, model, m_Thunks, m_TypeThunks, host, m_LoweringErrors);
 		if (LoweringFailed(errorMessage)) return false;
 		if (description.Empty()) return true;
 		llvm::GlobalVariable* image = m_Others.empty() ? BuildImageHere(description) : KeepImageApart(std::move(description));
@@ -739,18 +740,19 @@ namespace Scripting
 		else B.CreateRet(llvm::ConstantInt::get(exitCodeType, 0));
 	}
 
-	// Invoke thunks and global initialization come after every body, so the template instances the bodies and thunks
-	// make start their static data members too; the functions global initialization reaches get their thunks after it.
+	// Invoke and type thunks and global initialization come after every body, so the template instances the bodies and
+	// thunks make start their static data members too; the functions and types global initialization reaches get their
+	// thunks after it, and the methods those thunks reach theirs.
 	bool CodeGenDriver::EmitStaticState(ProgramModel& model, std::string* errorMessage)
 	{
 		auto step = std::chrono::steady_clock::now();
 		if (m_ShareVtables && !EmitEveryVtable(model, errorMessage)) return false;
 		Timed("vtables", step);
-		if (!EmitInvokeThunks(model, errorMessage)) return false;
+		if (!EmitInvokeThunks(model, errorMessage) || !EmitTypeThunks(model, errorMessage)) return false;
 		Timed("thunks", step);
 		if (!EmitGlobalInit(model, errorMessage)) return false;
 		Timed("global starts", step);
-		if (!EmitInvokeThunks(model, errorMessage)) return false;
+		if (!EmitInvokeThunks(model, errorMessage) || !EmitTypeThunks(model, errorMessage) || !EmitInvokeThunks(model, errorMessage)) return false;
 		Timed("thunks", step);
 		MaterializeGlobals(model);
 		Timed("globals", step);

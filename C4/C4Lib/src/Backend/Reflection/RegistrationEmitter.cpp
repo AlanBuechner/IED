@@ -1,6 +1,7 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/HIR/InvokeThunk.h"
+#include "Backend/HIR/TypeOperations.h"
 #include "Model/Annotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/Types/EnumType.h"
@@ -39,11 +40,6 @@ namespace Scripting
 		};
 		using Names = std::unordered_set<std::string_view, NameHash>;
 
-		bool Reflected(const ProgramModel& model, const ObjectType* object)
-		{
-			return object && object->IsDefined() && !model.ClosureOf(object) && !object->IsReturnList() && !object->GetName().empty();
-		}
-
 		// A field a serializer reads and writes: one outside any union, or one of its union's first view. The others
 		// name the same bytes again (BUG-194).
 		bool IsAlias(const Core::Vector<ObjectType::FieldInfo>& fields, const ObjectType::FieldInfo& field, bool inUnion)
@@ -56,8 +52,8 @@ namespace Scripting
 		class ImageWriter
 		{
 		public:
-			ImageWriter(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks, ErrorTracker& errors)
-				: m_Module(module), m_Model(model), m_Thunks(thunks), m_Errors(errors) {}
+			ImageWriter(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks, const TypeThunks& types, ErrorTracker& errors)
+				: m_Module(module), m_Model(model), m_Thunks(thunks), m_TypeThunks(types), m_Errors(errors) {}
 
 			void AddType(const ObjectType& object)
 			{
@@ -66,10 +62,13 @@ namespace Scripting
 				const Table methods = Methods(object);
 				const Table groups = Groups(object.GetGroups());
 				const Table annotations = Annotations(object.GetDeclNode(), m_Model.TypeScope(&object));
+				const auto known = m_TypeThunks.find(&object);
+				const TypeEntry entry = known != m_TypeThunks.end() ? known->second : TypeEntry{};
 				m_Types.push_back({ U32(reflect_KIND_OBJECT), TypeText(&object), U64(object.GetSize()),
 					U64(object.GetAlignment()), fields.count, fields.rows, methods.count, methods.rows,
 					Text(!bases.Empty() && bases[0] ? QualifiedName(bases[0]) : std::string()), U32(0), Null(),
-					groups.count, groups.rows, annotations.count, annotations.rows });
+					groups.count, groups.rows, annotations.count, annotations.rows,
+					Symbol(entry.construct), Symbol(entry.destroy), Symbol(entry.copy), U32(entry.flags) });
 			}
 
 			void AddUnion(const UnionType& un)
@@ -83,7 +82,7 @@ namespace Scripting
 				const Table annotations = Annotations(un.GetDeclNode(), un.GetDeclScope());
 				m_Types.push_back({ U32(reflect_KIND_UNION), TypeText(&un), U64(un.GetSize()),
 					U64(un.GetAlignment()), fields.count, fields.rows, U32(0), Null(), Text(""), U32(0), Null(),
-					groups.count, groups.rows, annotations.count, annotations.rows });
+					groups.count, groups.rows, annotations.count, annotations.rows, Null(), Null(), Null(), U32(PlainTypeFlags(&un)) });
 			}
 
 			void AddEnum(const EnumType& en)
@@ -94,7 +93,8 @@ namespace Scripting
 				const Table annotations = Annotations(en.GetDeclNode(), en.GetDeclScope());
 				m_Types.push_back({ U32(reflect_KIND_ENUM), TypeText(&en), U64(en.GetSize()),
 					U64(en.GetAlignment()), U32(0), Null(), U32(0), Null(), Text(""), U32(en.GetMemberCount()),
-					m_Image.Table(ImageShape::EnumValue, std::move(values)), U32(0), Null(), annotations.count, annotations.rows });
+					m_Image.Table(ImageShape::EnumValue, std::move(values)), U32(0), Null(), annotations.count, annotations.rows,
+					Null(), Null(), Null(), U32(PlainTypeFlags(&en)) });
 			}
 
 			void AddVariable(const SymbolInfo& variable)
@@ -193,6 +193,14 @@ namespace Scripting
 
 			// The function's own code, which FunctionContaining finds a return address in; null when it has no thunk.
 			ImageValue Address(const InvokeEntry* entry) { return Symbol(entry ? entry->function : nullptr); }
+
+			// The method's canonical [operator] names, comma-separated; "" for a method that is no operator.
+			static std::string OperatorRole(const ObjectType::MethodInfo& method)
+			{
+				std::string role;
+				for (const Core::String& name : method.m_OperatorAnnotations) role += (role.empty() ? "" : ",") + std::string(name.c_str());
+				return role;
+			}
 
 			Table Groups(const Core::Vector<Core::String>& groups)
 			{
@@ -341,7 +349,7 @@ namespace Scripting
 					const InvokeEntry* entry = ThunkEntry(record);
 					rows.push_back({ Text(method.mName), params.count, params.rows, TypeText(method.m_ReturnType),
 						U32(method.m_IsStatic ? 1 : 0), U32(VirtualTables::IsVirtual(&object, method) ? 1 : 0), U32(method.m_IsConst ? 1 : 0),
-						Invoke(entry), annotations.count, annotations.rows, Code(entry) });
+						Invoke(entry), annotations.count, annotations.rows, Code(entry), Text(OperatorRole(method)) });
 				}
 				return Rows(ImageShape::Method, std::move(rows));
 			}
@@ -350,6 +358,7 @@ namespace Scripting
 			ImageDescription m_Image;
 			const ProgramModel& m_Model;
 			const InvokeThunks& m_Thunks;
+			const TypeThunks& m_TypeThunks;
 			ErrorTracker& m_Errors;
 			std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // annotation failures already reported, by location
 			std::unordered_map<const FunctionRecord*, Table> m_RecordAnnotations;
@@ -369,6 +378,11 @@ namespace Scripting
 			!function.mangledName.empty() && function.mangledName.rfind("c4_", 0) != 0;
 	}
 
+	bool ReflectedType(const ProgramModel& model, const ObjectType* object)
+	{
+		return object && object->IsDefined() && !model.ClosureOf(object) && !object->IsReturnList() && !object->GetName().empty();
+	}
+
 	std::string InvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_" + EscapedText(function.mangledName); }
 
 	std::string SharedInvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_sig_" + EscapedText(InvokeSignature(function)); }
@@ -377,7 +391,7 @@ namespace Scripting
 	{
 		std::vector<std::string> names;
 		for (const ObjectType* object : model.ObjectTypes())
-			if (Reflected(model, object)) names.push_back(QualifiedName(object).c_str());
+			if (ReflectedType(model, object)) names.push_back(QualifiedName(object).c_str());
 		for (const EnumType* en : model.EnumTypes())
 			if (en && !en->GetName().empty()) names.push_back(QualifiedName(en).c_str());
 		for (const UnionType* un : model.UnionTypes())
@@ -386,14 +400,14 @@ namespace Scripting
 	}
 
 	ImageDescription DescribeReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
-		const HostEntities& host, ErrorTracker& errors)
+		const TypeThunks& types, const HostEntities& host, ErrorTracker& errors)
 	{
 		auto hostType = [&](const Type* type) { return host.types && host.types->count(QualifiedName(type).c_str()); };
 		auto hostSymbol = [&](const Core::String& symbol) { return host.symbols && host.symbols->count(symbol.c_str()); };
 		auto hostUnit = [&](uint32 unit) { return unit >= 1 && unit <= host.interfaceUnits; };
-		ImageWriter writer(module, model, thunks, errors);
+		ImageWriter writer(module, model, thunks, types, errors);
 		for (const ObjectType* object : model.ObjectTypes())
-			if (Reflected(model, object) && !hostType(object)) writer.AddType(*object);
+			if (ReflectedType(model, object) && !hostType(object)) writer.AddType(*object);
 		for (const EnumType* en : model.EnumTypes())
 			if (en && !en->GetName().empty() && !hostType(en)) writer.AddEnum(*en);
 		for (const UnionType* un : model.UnionTypes())
