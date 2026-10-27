@@ -170,8 +170,9 @@ def _fetch_checkouts(context):
 
 def _enrich(context, body, fetch):
 	"""Each versioned package's releases (newest first; from its remote with --fetch, else what the machine's mirror
-	knows), `newest` where one is newer than the lock's, and the packages of it the workspace uses with their
-	descriptions and declared dependencies."""
+	knows), `newest` where one is newer than the lock's and `compatible`, the newest of those with the locked version's
+	major (Cargo's ^, what `update` reaches unless a requirement holds it back), and the packages of it the workspace
+	uses with their descriptions and declared dependencies."""
 	repositories = {}
 	checkouts = {url_key(u): f for u, f in context.state.checkouts().items()}
 	for item in body["packages"]:
@@ -185,6 +186,10 @@ def _enrich(context, body, fetch):
 		current = semver.parse_version(item["version"])
 		if releases and current is not None and current.release < releases[0][0]:
 			item["newest"] = str(releases[0][0])
+			allowed = semver.compatible(current)
+			reachable = next((v for v, _ in releases if current.release < v and allowed.matches(v)), None)
+			if reachable is not None:
+				item["compatible"] = str(reachable)
 		found = repo.index(item["commit"])
 		item["packages"] = [_package_json(found, path) for path in item["uses"] if path in found.packages]
 

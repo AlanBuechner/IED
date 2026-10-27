@@ -60,12 +60,23 @@ def sync(spec, projects, options):
 	joined = None
 	if options.update is None and not options.resolve and lock is not None and lock.digest == digest:
 		joined = _from_lock(state, lock, checkouts, local, wanted)
+	if joined is not None and lock.packages and not state.has_needs:
+		joined, lock = _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options, joined)
 	if joined is None:
 		joined, lock = _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
 	_check_names(joined, projects)
 	if spec.ide:
 		bridge.write(spec, state, lock, checkouts, joined)
 	return joined
+
+
+def _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options, joined):
+	"""A state from before the dependency graph was recorded (status shows it, and IED's package manager): one
+	resolution, which keeps every locked version, records it. Without the network it waits for the next time."""
+	try:
+		return _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
+	except NukeError:
+		return joined, lock
 
 
 def workspace_roots(spec):

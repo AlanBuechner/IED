@@ -1,0 +1,79 @@
+/* packages.css - the Package Manager tab (docs/31 section 8): Visual Studio's NuGet window in the editor's density - */
+/* tabs and search on top, the list beside the details, the last action's output below; a phone shows the list or */
+/* the details. Tokens only (docs/07). */
+
+.pm { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg-2); color: var(--text-0); font-size: var(--font-size-ui); }
+.pm-bar { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-3); flex: none; flex-wrap: wrap; background: var(--bg-1); border-bottom: var(--border-width) solid var(--border-0); }
+.pm-tabs { display: flex; align-self: stretch; }
+.pm-tab { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-1); font: inherit; cursor: pointer; }
+.pm-tab:hover { color: var(--text-0); background: var(--veil); }
+.pm-tab.on { color: var(--text-0); border-bottom-color: var(--text-0); font-weight: var(--font-weight-semibold); }
+.pm-search { width: 200px; height: var(--input-h); }
+.pm-busy { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pm-banner { flex: none; font-size: var(--font-size-sm); border-bottom: var(--border-width) solid var(--border-0); }
+.pm-error, .pm-warn { padding: var(--space-2) var(--space-4); white-space: pre-wrap; word-break: break-word; }
+.pm-error { color: var(--accent-error); background: var(--tint-error); }
+.pm-warn { color: var(--accent-warn); background: var(--tint-warn); }
+
+.pm-body { flex: 1; min-height: 0; display: flex; }
+.pm-list { flex: 1 1 50%; min-width: 0; overflow: auto; outline: none; border-right: var(--border-width) solid var(--border-0); }
+.pm-list:focus-visible { box-shadow: inset 0 0 0 1px var(--focus); }
+.pm-list-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); position: sticky; top: 0; z-index: 1; }
+.pm-source { flex: 1; min-width: 0; height: var(--input-h); }
+.pm-source-form .input-field { height: var(--input-h); min-width: 0; }
+.pm-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); cursor: default; }
+.pm-row:hover { background: var(--veil); }
+.pm-row.sel { background: var(--selection); }
+.pm-list:focus .pm-row.sel { background: var(--selection-active); }
+.pm-row > .ci { flex: none; color: var(--text-1); }
+.pm-row-main { flex: 1; min-width: 0; }
+.pm-row-name { font-weight: var(--font-weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-row-desc { font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-row-side { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+.pm-version { font-family: var(--font-mono); font-size: var(--font-size-sm); color: var(--text-1); }
+.pm-lock { display: inline-flex; color: var(--text-2); }
+.pm-lock .ci { width: 14px; height: 14px; }
+.pm-empty { padding: var(--space-5) var(--space-4); }
+
+.pm-details { flex: 1 1 50%; min-width: 0; overflow: auto; padding: var(--space-4) var(--space-5); }
+.pm-back { display: none; margin: 0 0 var(--space-3) calc(-1 * var(--space-3)); }
+.pm-title { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; font-size: var(--font-size-lg); }
+.pm-name { font-weight: var(--font-weight-semibold); word-break: break-word; }
+.pm-title .pm-version { font-size: var(--font-size-ui); }
+.pm-desc { margin: var(--space-2) 0 var(--space-4); color: var(--text-1); }
+.pm-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-5); margin: 0 0 var(--space-4); font-size: var(--font-size-sm); }
+.pm-facts dt { color: var(--text-2); }
+.pm-facts dd { margin: 0; word-break: break-word; }
+.pm-link { color: var(--link); text-decoration: none; }
+.pm-link:hover { text-decoration: underline; }
+.pm-picker { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) 0; border-top: var(--border-width) solid var(--border-0); }
+.pm-picker select { height: var(--input-h); min-width: 120px; }
+.pm-meaning { flex-basis: 100%; font-size: var(--font-size-sm); }
+.pm-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-3) 0; border-top: var(--border-width) solid var(--border-0); }
+.pm-section { padding: var(--space-3) 0; border-top: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); }
+.pm-section-title { margin-bottom: var(--space-2); color: var(--text-2); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; }
+.pm-edge { padding: 1px 0; word-break: break-word; }
+
+.pm-output { flex: none; display: flex; flex-direction: column; max-height: 35%; background: var(--bg-1); border-top: var(--border-width) solid var(--border-0); }
+.pm-output-head { display: flex; align-items: center; gap: var(--space-2); height: 26px; padding: 0 var(--space-3); flex: none; border: 0; background: none; color: var(--text-1); font: inherit; font-size: var(--font-size-sm); text-align: left; cursor: pointer; }
+.pm-output-head:hover { background: var(--veil); }
+.pm-output-command { flex: 1; min-width: 0; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-output-state { flex: none; }
+.pm-output.failed .pm-output-state { color: var(--accent-error); }
+.pm-output-text { display: none; flex: 1; min-height: 0; margin: 0; padding: var(--space-2) var(--space-4); overflow: auto; font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); color: var(--text-1); white-space: pre-wrap; word-break: break-word; }
+.pm-output.open .pm-output-text { display: block; }
+
+.app.phone .pm-bar { padding: var(--space-1) var(--space-2); }
+.app.phone .pm-tabs { flex-basis: 100%; overflow-x: auto; min-height: var(--row-h-touch); }
+.app.phone .pm-search { flex: 1; width: auto; min-width: 0; }
+.app.phone .pm-fetch { display: none; }
+.app.phone .pm-busy { flex-basis: 100%; }
+.app.phone .pm-busy:empty { display: none; }
+.app.phone .pm-list { border-right: 0; }
+.app.phone .pm-row { min-height: var(--row-h-touch); }
+.app.phone .pm-details { display: none; padding: var(--space-3) var(--space-4); }
+.app.phone .pm-showing-details .pm-list { display: none; }
+.app.phone .pm-showing-details .pm-details { display: block; }
+.app.phone .pm-back { display: inline-flex; }
+.app.phone .pm-source-form { flex-wrap: wrap; }

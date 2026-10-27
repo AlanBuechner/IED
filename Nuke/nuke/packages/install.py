@@ -47,6 +47,7 @@ class State:
 		self.develop = data.get("develop", {}) if isinstance(data.get("develop"), dict) else {}
 		self.installed = data.get("installed", {}) if isinstance(data.get("installed"), dict) else {}
 		self.needs = data.get("needs", {}) if isinstance(data.get("needs"), dict) else {}   # the last resolution's edges
+		self.has_needs = "needs" in data   # false for a state written before the edges were recorded
 
 	def save(self):
 		body = {"format": FORMAT, "develop": self.develop, "installed": self.installed, "needs": self.needs}

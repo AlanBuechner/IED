@@ -57,7 +57,10 @@ namespace NukePlugin
 		Core::String command = NukeCommand(m_Context->Setting(Core::StringView(c_CommandKey), ws.m_Id.View()).View());
 		Core::String program = IED::FindProgram(command.View());
 		if (program.IsEmpty()) return (Core::String("nuke.command names ") + command.View()) + ", which is not a file or a program on PATH";
-		return FetchFailure(IED::RunCommand(ws, FetchCommand(program.View()), Core::StringView(""), c_FetchSeconds));
+		Core::Array<Core::String> words;
+		words.Push(Core::String("status"));
+		words.Push(Core::String("--fetch"));
+		return FetchFailure(IED::RunCommand(ws, PackageCommand(program.View(), words), Core::StringView(""), c_FetchSeconds));
 	}
 
 	void PackageFetcher::Tell(const IED::Workspace& ws, const Core::String& failure) {

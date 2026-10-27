@@ -602,7 +602,18 @@ nuke package lock SOURCE [--keep]          back to locked installs (refused whil
                                            clone stays when the lock cannot be installed; --keep moves it aside)
 nuke package pull SOURCE                   bring a develop clone up to date (git pull --rebase)
 nuke package release PACKAGE... [--major | --minor | --patch | --version X.Y.Z] [--source NAME] [--no-push]
+nuke package browse SOURCE [--offline] [--json]   the packages at a source's default branch, each with its versions,
+                                           whether the workspace uses it and what it has; --offline: no fetch
+nuke package source [list | add NAME URL | remove NAME]   the workspace's [sources] (add checks the URL is reachable;
+                                           remove refuses while a package of it is used)
 ```
+
+`status --json` is what IED's Package Manager reads: `sources` and `requirements` (the workspace's), `packages` (each
+versioned package of the lock: `source`, `url`, `path`, `version`, `commit`, `uses`, `projects`, `folder`, `mode`,
+`writable`, `links` to its pages on the source's host, `versions` newest first, `newest` and `compatible` - the newest
+release, and the newest `update` reaches within the locked version's major - when newer than the lock's, `packages` with
+descriptions, `dependsOn` and `requiredBy`: the dependency graph with each requirement), `checkouts` (each develop clone)
+and, with `--fetch`, `unfetched` (clones that could not be fetched; exit status 1).
 
 **Developing a package with the program that uses it.** `nuke package develop claymore` clones the repository into
 `packages/claymore/` at the tip of its default branch; from then on every claymore package builds from that working
@@ -619,9 +630,11 @@ the lock's commits.
 checkout pushed changes since - is read-only to IED until `nuke package pull` brings it up to date, so every change
 starts from the newest code. Nuke writes what IED needs on every command: `.ied/local/packages.json` (every package,
 its folder, version, mode and projects; every clone with its branch and how far it is ahead and behind) and
-`.ied/local/readonly/nuke.json` (the folders IED opens read-only, each with the reason). `nuke init --ied` puts the
-packages' projects in the solution's `Packages/<source>/<package>` folders, their project files naming the package's
-version and mode (`buildSystem.package`).
+`.ied/local/readonly/nuke.json` (the folders IED opens read-only, each with the reason). `nuke init --ied` (and every
+package command) puts the packages' projects in the solution's `Packages/<source>/<folder>` folders, their project
+files naming the package's version and mode (`buildSystem.package`) and the packages each project uses (`packages`,
+its Dependencies node); a package manifest above its projects is an item of the solution folder it belongs to. IED's
+Package Manager (IED `docs/31` section 8) runs these commands for you.
 
 **Other package managers.** A Rust or Go project keeps its own manifest, lockfile and cache; Nuke never resolves
 crates or modules and never writes `go.mod`, `go.sum`, `Cargo.toml` or `Cargo.lock`. The tags are Go's, so a Go module

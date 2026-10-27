@@ -51,6 +51,7 @@ import "./editorsettings.test.js";
 import "./keyboard.test.js";
 import "./fileicons.test.js";
 import "./browser.test.js";
+import "./packages.test.js";
 import "./desktop.test.js";
 import "./startpage.test.js";
 import "./profiler.test.js";

@@ -216,7 +216,43 @@ checkouts (`ctx.checkouts`), in a folder of the project's under `build/develop/`
 never put where the tools look by themselves (a `go.work` or `.cargo/config.toml` in the project would be the
 project's own, and committed).
 
-## 8. Decisions
+## 8. Packages in IED
+
+Every project of a repository of packages is a package (its `nuke.toml` has a `[package]` table), so IED shows the
+packages where it shows projects, and manages them in a window of their own.
+
+**Solution Explorer.** `nuke init --ied` (and every package command) writes a package manifest that holds no project -
+a versioned package's folder above its projects, such as `Renderer/nuke.toml` - as an item of the solution folder it
+belongs to, and the projects a workspace gets from packages under `Packages/<source>/<folder>`. Each project has a
+**Dependencies** node: **Packages**, the packages its `depends` reach (name, version, source, locked or developed,
+a lock marker when read-only; opening one opens its page at that version on the source's host), and **Projects**.
+
+**The Package Manager** (Tools > Manage Packages..., or a solution, project or package's context menu; the `nuke`
+plugin's `ui/` and `code/PackageManager.cf`) is Visual Studio's NuGet window for Nuke packages:
+
+| Tab | Shows | Does |
+|---|---|---|
+| Installed | every versioned package of the lock: version, locked or developed, a newer release | the selected one's details: description, source and links (its repository, its files at this version, the commit), the requirement that brings it or the packages that do, its folder, sub-packages and projects, **Depends on** (each requirement and the version it reached) and **Required by** (the workspace and the packages that need it, with what they accept) |
+| Updates | the packages with a newer release: one `update` reaches (within the locked version's major), or a new major only a changed requirement takes | Update all (`nuke package update`), or one |
+| Browse | a source's packages at its default branch (`nuke package browse`): every released version, whether the workspace has it | Install a chosen version |
+| Sources | the workspace's `[sources]`, and the sources only packages' dependencies name | add (checked reachable first), remove (refused while used), browse |
+
+Choosing a version writes a requirement: `^version` for the newest release of its line (later fixes still come with
+updates), `=version` for an older one (`^` would keep the newer release locked); the line under the picker says which.
+The details also Develop a source, Pull a clone that is behind, Release a developed package (patch, minor or major,
+after a confirmation: it pushes) and Lock it again, and Remove a requirement - each a `nuke package` command, shown with
+its output below the list.
+
+The window holds no state of its own (`docs/01`): the plugin's code keeps each workspace's last status, what each source
+offered, the command running and the last one's output on the topic `packages:<wsId>`, and runs the commands one at a
+time in that workspace (trusted) after what is queued there, through three bindings that answer at once:
+`nuke.packages.refresh {wsId, fetch?}` (`status --json`), `nuke.packages.browse {wsId, source, offline?}` and
+`nuke.packages.run {wsId, args}` (only the actions above). So a closed browser loses nothing: a release goes on, and its
+output is there when the window opens again on any device. The status is read again after each action, and when the
+manifest, the lock or `.ied/local/packages.json` changes by other hands (a terminal, the AI's `nuke_package` tool,
+the timed fetch) in a workspace whose window was opened.
+
+## 9. Decisions
 
 | # | Decision | Why |
 |---|---|---|

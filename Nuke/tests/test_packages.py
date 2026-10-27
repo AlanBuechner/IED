@@ -429,6 +429,17 @@ class CommandTests(PackageTest):
 		self.assertEqual(renderer["requiredBy"][0]["by"], "the workspace")
 		self.assertEqual(windowing["versions"], ["0.2.0", "0.1.0"])
 		self.assertEqual(renderer["packages"], [{"path": "Renderer", "description": "the renderer", "projects": ["Renderer"], "dependencies": []}])
+		state_file = self.path("packages", "nuke-packages.json")
+		state = json.loads(read(state_file))
+		del state["needs"]
+		with open(state_file, "w", encoding="utf-8") as f:
+			json.dump(state, f)
+		lock_before = read(self.path("nuke.lock"))
+		code, out = self.nuke("package", "status", "--json")
+		self.assertEqual(code, 0, out)
+		renderer = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}["Renderer"]
+		self.assertEqual([d["path"] for d in renderer["dependsOn"]], ["Windowing"], "a state from before the graph gets it")
+		self.assertEqual(read(self.path("nuke.lock")), lock_before, "and the lock stays")
 
 	def test_browse_and_sources(self):
 		self.windowing()
@@ -462,6 +473,16 @@ class CommandTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		self.assertIn("engine:Windowing", out)
 		self.assertIn("0.2.0 available", out)
+
+	def test_status_json_tells_an_update_from_a_breaking_one(self):
+		self.windowing()
+		self.engine.commit({"Windowing/src/Windowing/fix.ch": ""}, tags=["Windowing/v0.1.1"])
+		self.workspace({"Windowing": "\"engine@=0.1.0\""}, depends=())
+		code, out = self.nuke("package", "status", "--json", "--fetch")
+		self.assertEqual(code, 0, out)
+		windowing = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}["Windowing"]
+		self.assertEqual((windowing["version"], windowing["newest"], windowing["compatible"]), ("0.1.0", "0.2.0", "0.1.1"))
+		self.assertEqual(windowing["versions"], ["0.2.0", "0.1.1", "0.1.0"])
 
 
 class DevelopTests(PackageTest):

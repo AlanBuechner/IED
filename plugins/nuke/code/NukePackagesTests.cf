@@ -40,10 +40,29 @@ class NukePackagesTests {
 		assert_true(NukePlugin::NukeCommand(Core::StringView("\"\\\"C:/IED/bin/nuke.cmd\\\"\"")) == "C:/IED/bin/nuke.cmd", "a path written quoted");
 		assert_true(NukePlugin::NukeCommand(Core::StringView("\"\"")) == "nuke", "empty: nuke");
 		assert_true(NukePlugin::NukeCommand(Core::StringView("null")) == "nuke", "unset: nuke");
-		Core::Array<Core::String> batch = NukePlugin::FetchCommand(Core::StringView("C:/IED/bin/NUKE.CMD"));
+		Core::Array<Core::String> words;
+		words.Push(Core::String("status"));
+		words.Push(Core::String("--fetch"));
+		Core::Array<Core::String> batch = NukePlugin::PackageCommand(Core::StringView("C:/IED/bin/NUKE.CMD"), words);
 		assert_true(batch.Count() == 7 && batch[0] == "cmd.exe" && batch[3] == "C:/IED/bin/NUKE.CMD" && batch[6] == "--fetch", "a batch file through cmd.exe");
-		Core::Array<Core::String> program = NukePlugin::FetchCommand(Core::StringView("D:/nuke.exe"));
+		Core::Array<Core::String> program = NukePlugin::PackageCommand(Core::StringView("D:/nuke.exe"), words);
 		assert_true(program.Count() == 4 && program[0] == "D:/nuke.exe" && program[1] == "package" && program[2] == "status", "a program itself");
+	}
+
+	[test("printed_json")]
+	public static void TestPrintedJson() {
+		Core::String found = NukePlugin::PrintedJson(Core::StringView("nuke: fetching claymore\n{\n  \"packages\": [\n    {\n      \"path\": \"UI\"\n    }\n  ]\n}\nnuke: warning: x\n"));
+		assert_true(found == "{\n  \"packages\": [\n    {\n      \"path\": \"UI\"\n    }\n  ]\n}", "the document between the notes, its inner braces indented");
+		assert_true(NukePlugin::PrintedJson(Core::StringView("{}\r\n")) == "{}", "one line, CRLF");
+		assert_true(NukePlugin::PrintedJson(Core::StringView("{\r\n  \"a\": 1\r\n}\r\n")) == "{\r\n  \"a\": 1\r\n}", "CRLF lines");
+		assert_true(NukePlugin::PrintedJson(Core::StringView("nuke: error: no source named 'x'\n")).IsEmpty(), "no document");
+		assert_true(NukePlugin::PrintedJson(Core::StringView("{\n  \"cut\": 1\n")).IsEmpty(), "a document cut short");
+	}
+
+	[test("actions")]
+	public static void TestActions() {
+		assert_true(NukePlugin::IsPackageAction(Core::StringView("update")) && NukePlugin::IsPackageAction(Core::StringView("release")), "actions");
+		assert_true(!NukePlugin::IsPackageAction(Core::StringView("status")) && !NukePlugin::IsPackageAction(Core::StringView("--help")) && !NukePlugin::IsPackageAction(Core::StringView("")), "not actions");
 	}
 
 	[test("failure")]

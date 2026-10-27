@@ -1,0 +1,263 @@
+include "PackageManager.ch"
+include "NukePackages.ch"
+
+namespace NukePlugin
+{
+	const int64 c_QuietMs = 2000;   // file changes this soon after a job are its own
+
+	static int64 UnixMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	Core::String PackagesTopic(Core::StringView wsId) { return Core::String("packages:") + wsId; }
+
+	static Core::Array<Core::String> Words(const char* first, const char* second) {
+		Core::Array<Core::String> words;
+		words.Push(Core::String(first));
+		words.Push(Core::String(second));
+		return words;
+	}
+
+	// Whether a workspace's change is one to its packages: what the Package Manager shows is to be read again.
+	static bool TouchesPackages(const IED::FileChanges& changes) {
+		for (const IED::FileChange& change : changes.m_Changes)
+			if (change.m_Path == "nuke.toml" || change.m_Path == "nuke.lock" || change.m_Path == ".ied/local/packages.json") return true;
+		return false;
+	}
+
+	void PackageManager::Start() {
+		PackageManager* self = this;
+		m_Context->OnWorkspace([self](const IED::Workspace& ws) {
+			Core::String wsId = ws.m_Id;
+			self->m_Context->TopicFrom(PackagesTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->SnapshotJson(self->Of(wsId.View())); });
+		});
+		m_Context->OnFilesChanged([self](const IED::FileChanges& changes) { self->Changed(changes); });
+		m_Context->Provide(Core::StringView("nuke.packages.refresh"), [self](const Serialization::DomNode& args) -> IED::Result {
+			PackageJob job;
+			job.m_Kind = Core::String("status");
+			job.m_Words = Words("status", "--json");
+			if (args.Member("fetch").AsBool()) job.m_Words.Push(Core::String("--fetch"));
+			return self->Ask(args.Member("wsId").AsView(), job);
+		});
+		m_Context->Provide(Core::StringView("nuke.packages.browse"), [self](const Serialization::DomNode& args) -> IED::Result {
+			PackageJob job;
+			job.m_Kind = Core::String("browse");
+			job.m_Source = Core::String(args.Member("source").AsView());
+			if (job.m_Source.IsEmpty()) return IED::Refusal(Core::StringView("name the source to browse"));
+			job.m_Words.Push(Core::String("browse"));
+			job.m_Words.Push(job.m_Source);
+			job.m_Words.Push(Core::String("--json"));
+			if (args.Member("offline").AsBool()) job.m_Words.Push(Core::String("--offline"));
+			return self->Ask(args.Member("wsId").AsView(), job);
+		});
+		m_Context->Provide(Core::StringView("nuke.packages.run"), [self](const Serialization::DomNode& args) -> IED::Result {
+			PackageJob job;
+			job.m_Kind = Core::String("action");
+			Serialization::DomNode list = args.Member("args");
+			for (int64 i = 0; i < list.Count(); ++i) job.m_Words.Push(Core::String(list.At(i).AsView()));
+			if (job.m_Words.IsEmpty() || !IsPackageAction(job.m_Words[0].View()))
+				return IED::Refusal(Core::StringView("not a package action: update, add, remove, develop, lock, pull, release or source"));
+			return self->Ask(args.Member("wsId").AsView(), job);
+		});
+	}
+
+	void PackageManager::Stop() {
+		IED::HostLock lock(*m_Context);
+		m_Stopping = true;
+	}
+
+	// A binding's job: queued in a trusted workspace (refused in another), answered at once.
+	IED::Result PackageManager::Ask(Core::StringView wsId, const PackageJob& job) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) return IED::Refusal((Core::String("no open workspace ") + wsId).View());
+		if (!ws.m_Trusted) return IED::Refusal(Core::StringView("trust the workspace first: its packages are managed by running Nuke in it"));
+		Queue(wsId, job);
+		return IED::Answer(Core::StringView("{\"queued\":true}"));
+	}
+
+	// Adds `job` to the workspace's queue - a status or browse already waiting there takes its place instead (a status
+	// keeping --fetch when either asks for it) - and starts the thread that runs it when none does.
+	void PackageManager::Queue(Core::StringView wsId, const PackageJob& job) {
+		bool start = false;
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspacePackages* packages = Of(wsId);
+			if (m_Stopping) return;
+			bool waiting = false;
+			for (PackageJob& queued : packages->m_Queue) {
+				if (queued.m_Kind != job.m_Kind || job.m_Kind == "action" || queued.m_Source != job.m_Source) continue;
+				if (job.m_Words.Count() > queued.m_Words.Count()) queued.m_Words = job.m_Words;
+				waiting = true;
+			}
+			if (!waiting) packages->m_Queue.Push(job);
+			start = !packages->m_Working;
+			packages->m_Working = true;
+			m_Context->Publish(PackagesTopic(wsId).View(), "changed", SnapshotJson(packages).View());
+		}
+		if (!start) return;
+		PackageManager* self = this;
+		Core::String id = Core::String(wsId);
+		m_Context->StartThread([self, id]() { self->Work(id.View()); });
+	}
+
+	// A change to the manifest, the lock or Nuke's packages.json made by hand or by another command - not by a job, which
+	// reads the status again itself - in a workspace whose Package Manager was opened: it shows the status again.
+	void PackageManager::Changed(const IED::FileChanges& changes) {
+		if (!TouchesPackages(changes)) return;
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspacePackages* packages = Of(changes.m_WsId.View());
+			if (packages->m_StatusMs == 0 || packages->m_Working || UnixMs() - packages->m_IdleMs < c_QuietMs) return;
+		}
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(changes.m_WsId.View(), ws) || !ws.m_Trusted) return;
+		PackageJob job;
+		job.m_Kind = Core::String("status");
+		job.m_Words = Words("status", "--json");
+		Queue(changes.m_WsId.View(), job);
+	}
+
+	void PackageManager::Work(Core::StringView wsId) {
+		PackageJob job;
+		while (Next(wsId, job)) {
+			Core::String problem;
+			IED::CommandResult ran = Run(wsId, job, problem);
+			Finish(wsId, job, ran, problem.View());
+		}
+	}
+
+	// The next job, marked as running; false when there is none (the thread ends, the workspace idle).
+	bool PackageManager::Next(Core::StringView wsId, PackageJob& job) {
+		IED::HostLock lock(*m_Context);
+		WorkspacePackages* packages = Of(wsId);
+		const bool more = !m_Stopping && !packages->m_Queue.IsEmpty();
+		if (more) {
+			job = packages->m_Queue.Front();
+			packages->m_Queue.RemoveAt(0);
+			packages->m_Busy = job.m_Kind == "action" ? job.m_Words[0] : job.m_Kind == "browse" ? Core::String("browse ") + job.m_Source.View() : job.m_Kind;
+			if (job.m_Kind == "action") {
+				packages->m_Run.m_Id += 1;
+				packages->m_Run.m_Words = job.m_Words;
+				packages->m_Run.m_Running = true;
+				packages->m_Run.m_ExitCode = 0;
+				packages->m_Run.m_Output = Core::String("");
+				packages->m_Run.m_StartedMs = UnixMs();
+				packages->m_Run.m_EndedMs = 0;
+			}
+		}
+		else {
+			packages->m_Working = false;
+			packages->m_Busy = Core::String("");
+			packages->m_IdleMs = UnixMs();
+		}
+		m_Context->Publish(PackagesTopic(wsId).View(), "changed", SnapshotJson(packages).View());
+		return more;
+	}
+
+	// Runs the job's command; `problem` when it could not run at all.
+	IED::CommandResult PackageManager::Run(Core::StringView wsId, const PackageJob& job, Core::String& problem) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws) || !ws.m_Trusted) {
+			problem = Core::String("the workspace is closed or no longer trusted");
+			return IED::CommandResult();
+		}
+		Core::String command = NukeCommand(m_Context->Setting(Core::StringView(c_CommandKey), wsId).View());
+		Core::String program = IED::FindProgram(command.View());
+		if (program.IsEmpty()) {
+			problem = (Core::String("nuke.command names ") + command.View()) + ", which is not a file or a program on PATH";
+			return IED::CommandResult();
+		}
+		IED::CommandResult ran = IED::RunCommand(ws, PackageCommand(program.View(), job.m_Words), Core::StringView(""), job.m_Kind == "action" ? c_ActionSeconds : c_StatusSeconds);
+		problem = ran.m_Problem;
+		return ran;
+	}
+
+	// What a job found: a status or browse's document (or why there is none), an action's exit code and output - and a
+	// status after an action, since it changed what there is.
+	void PackageManager::Finish(Core::StringView wsId, const PackageJob& job, const IED::CommandResult& ran, Core::StringView problem) {
+		IED::HostLock lock(*m_Context);
+		WorkspacePackages* packages = Of(wsId);
+		Core::String json = problem.IsEmpty() ? PrintedJson(ran.m_Output.View()) : Core::String("");
+		Core::String error = !json.IsEmpty() ? Core::String("") : !problem.IsEmpty() ? Core::String(problem) : FetchFailure(ran);
+		if (job.m_Kind == "status") {
+			if (!json.IsEmpty()) packages->m_Status = json;
+			packages->m_StatusError = error;
+			packages->m_StatusMs = UnixMs();
+		}
+		else if (job.m_Kind == "browse") {
+			BrowseResult found;
+			found.m_Source = job.m_Source;
+			found.m_Result = json;
+			found.m_Error = error;
+			found.m_Ms = UnixMs();
+			for (int64 i = packages->m_Browsed.Count() - 1; i >= 0; --i)
+				if (packages->m_Browsed[i].m_Source == job.m_Source) packages->m_Browsed.RemoveAt(i);
+			packages->m_Browsed.Push(found);
+		}
+		else {
+			packages->m_Run.m_Running = false;
+			packages->m_Run.m_ExitCode = problem.IsEmpty() ? ran.m_ExitCode : -1;
+			packages->m_Run.m_Output = problem.IsEmpty() ? ran.m_Output : Core::String(problem);
+			packages->m_Run.m_EndedMs = UnixMs();
+			PackageJob status;
+			status.m_Kind = Core::String("status");
+			status.m_Words = Words("status", "--json");
+			packages->m_Queue.Push(status);
+		}
+		m_Context->Publish(PackagesTopic(wsId).View(), "changed", SnapshotJson(packages).View());
+	}
+
+	WorkspacePackages* PackageManager::Of(Core::StringView wsId) {
+		Core::String key = Core::String(wsId);
+		WorkspacePackages* packages = nullptr;
+		if (m_Workspaces.TryGet(key, packages)) return packages;
+		packages = new WorkspacePackages();
+		packages->m_WsId = key;
+		m_Workspaces.At(key) = packages;
+		return packages;
+	}
+
+	static void RawOrNull(IED::JsonWriter& json, const char* key, const Core::String& document) {
+		json.Key(Core::StringView(key));
+		if (document.IsEmpty()) json.Null();
+		else json.Raw(document.View());
+	}
+
+	Core::String PackageManager::SnapshotJson(WorkspacePackages* packages) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		RawOrNull(json, "status", packages->m_Status);
+		json.Field("statusError", packages->m_StatusError.View());
+		json.IntField("statusMs", packages->m_StatusMs);
+		json.Key(Core::StringView("browse"));
+		json.BeginArray();
+		for (const BrowseResult& found : packages->m_Browsed) {
+			json.BeginObject();
+			json.Field("source", found.m_Source.View());
+			RawOrNull(json, "result", found.m_Result);
+			json.Field("error", found.m_Error.View());
+			json.IntField("ms", found.m_Ms);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Field("busy", packages->m_Busy.View());
+		json.IntField("queued", packages->m_Queue.Count());
+		json.Key(Core::StringView("run"));
+		const PackageRun& run = packages->m_Run;
+		if (run.m_Id == 0) json.Null();
+		else {
+			json.BeginObject();
+			json.IntField("id", run.m_Id);
+			json.Key(Core::StringView("args"));
+			json.BeginArray();
+			for (const Core::String& word : run.m_Words) json.String(word.View());
+			json.EndArray();
+			json.BoolField("running", run.m_Running);
+			json.IntField("exitCode", run.m_ExitCode);
+			json.Field("output", run.m_Output.View());
+			json.IntField("startedMs", run.m_StartedMs);
+			json.IntField("endedMs", run.m_EndedMs);
+			json.EndObject();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+}

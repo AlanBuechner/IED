@@ -64,7 +64,7 @@ namespace NukePlugin
 		return lower.View().EndsWith(Core::StringView(".cmd")) || lower.View().EndsWith(Core::StringView(".bat"));
 	}
 
-	Core::Array<Core::String> FetchCommand(Core::StringView program) {
+	Core::Array<Core::String> PackageCommand(Core::StringView program, const Core::Array<Core::String>& words) {
 		Core::Array<Core::String> argv;
 		if (IsBatchFile(program)) {
 			argv.Push(Core::String("cmd.exe"));
@@ -73,9 +73,28 @@ namespace NukePlugin
 		}
 		argv.Push(Core::String(program));
 		argv.Push(Core::String("package"));
-		argv.Push(Core::String("status"));
-		argv.Push(Core::String("--fetch"));
+		for (const Core::String& word : words) argv.Push(word);
 		return argv;
+	}
+
+	Core::String PrintedJson(Core::StringView output) {
+		int64 start = -1;
+		int64 end = -1;
+		for (int64 at = 0; at < output.ByteLength();) {
+			int64 next = output.IndexOf('\n', at);
+			if (next < 0) next = output.ByteLength();
+			Core::StringView line = output.Substring(at, next - at);
+			if (start < 0 && line.StartsWith(Core::StringView("{"))) start = at;
+			Core::StringView closing = line.Trimmed();
+			if (start >= 0 && (at == start || line.StartsWith(Core::StringView("}"))) && closing.EndsWith(Core::StringView("}"))) end = at + closing.ByteLength();
+			at = next + 1;
+		}
+		return end > start && start >= 0 ? Core::String(output.Substring(start, end - start)) : Core::String("");
+	}
+
+	bool IsPackageAction(Core::StringView action) {
+		return action == "update" || action == "add" || action == "remove" || action == "develop" || action == "lock"
+			|| action == "pull" || action == "release" || action == "source";
 	}
 
 	// Nuke's own report of what failed: from its last line starting "nuke:" to the end; "" when it printed none.

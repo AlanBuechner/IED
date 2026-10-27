@@ -5,7 +5,7 @@
 // toolchain's plugin: `c4.nuke`); `nuke init --ied` names that preset in each project's file. Its skill (skills/nuke)
 // teaches the AI Nuke's commands and manifests. Its code (code/, built in) fetches a workspace's Nuke packages when it
 // opens and every nuke.packages.fetchMinutes, so a develop clone that falls behind its remote turns read-only by itself
-// (docs/31 section 6).
+// (docs/31 section 6); and it runs the Package Manager's Nuke commands for its window (ui/, docs/31 section 8).
 {
 	"manifestVersion": 1,
 	"id": "ied.nuke",
@@ -14,12 +14,35 @@
 	"description": "Builds, runs and tests with the Nuke build system, for every language it builds.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "entry": "NukePlugin::Activate" },
+	"runtime": { "kind": "builtin", "entry": "NukePlugin::Activate", "ui": "ui/index.js" },
 	"activation": ["onWorkspaceContains:nuke.toml"],
 	"permissions": ["process.spawn", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Build/Nuke" },
 		"skills": ["skills"],
+		"bindings": {
+			"provides": [
+				{ "name": "nuke.packages.refresh", "version": "1", "kind": "function", "description": "Reads workspace wsId's packages again (nuke package status --json; fetch: ask the remotes first) into the topic packages:<wsId>: {wsId, fetch?} -> {queued}." },
+				{ "name": "nuke.packages.browse", "version": "1", "kind": "function", "description": "Reads the packages a source offers (nuke package browse <source> --json; offline: from the machine's mirror, no fetch) into packages:<wsId>: {wsId, source, offline?} -> {queued}." },
+				{ "name": "nuke.packages.run", "version": "1", "kind": "function", "description": "Runs nuke package <args> in workspace wsId after what is queued there - args[0] update, add, remove, develop, lock, pull, release or source - its output in packages:<wsId>, then reads the status again: {wsId, args} -> {queued}." }
+			],
+			"consumes": [
+				{ "name": "nuke.packages.refresh", "version": "1" },
+				{ "name": "nuke.packages.browse", "version": "1" },
+				{ "name": "nuke.packages.run", "version": "1" }
+			]
+		},
+		"commands": [
+			{ "id": "ied.nuke.packages", "title": "Manage Packages...", "category": "Nuke", "icon": "$(package)" }
+		],
+		"menus": {
+			"menubar/tools": [
+				{ "command": "ied.nuke.packages", "group": "2_packages" }
+			],
+			"explorer/context": [
+				{ "command": "ied.nuke.packages", "group": "3_packages", "when": "explorerItemKind == 'solution' || explorerItemKind == 'project' || explorerItemKind == 'deps' || explorerItemKind == 'dep-packages' || explorerItemKind == 'package'" }
+			]
+		},
 		"systemMessageSections": [
 			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies. Projects under packages/ come from Nuke packages (nuke_packages): a locked package is read-only - to change one, develop its source (nuke_package develop), never edit or copy its files." }
 		],

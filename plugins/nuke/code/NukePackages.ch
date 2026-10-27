@@ -1,5 +1,5 @@
-// What the nuke plugin's package fetch (PackageFetcher.ch) decides from text alone: whether a workspace uses Nuke
-// packages, how often it fetches, the command that fetches and what a failed fetch says.
+// What the nuke plugin's package code (PackageFetcher.ch, PackageManager.ch) decides from text alone: whether a
+// workspace uses Nuke packages, how often it fetches, the commands it runs and what they said.
 
 include "api/Process.ch"
 
@@ -12,8 +12,14 @@ namespace NukePlugin
 	// The nuke.command setting's value (JSON) as a command: its string without the quotes it may be written with,
 	// "nuke" when it is unset or empty.
 	Core::String NukeCommand(Core::StringView settingJson);
-	// `<program> package status --fetch`, a batch file run through cmd.exe.
-	Core::Array<Core::String> FetchCommand(Core::StringView program);
+	// `<program> package <words...>`, a batch file run through cmd.exe.
+	Core::Array<Core::String> PackageCommand(Core::StringView program, const Core::Array<Core::String>& words);
+	// The JSON document Nuke printed among its notes: from the first line that starts with '{' to the last that starts
+	// with '}' (its --json output is indented, so only its own braces start a line); "" when there is none.
+	Core::String PrintedJson(Core::StringView output);
+	// Whether the Package Manager may run `nuke package <action>`: update, add, remove, develop, lock, pull, release or
+	// source.
+	bool IsPackageAction(Core::StringView action);
 	// What went wrong in a fetch's run: why it did not run, else Nuke's error, else the end of its output; "" when it
 	// worked.
 	Core::String FetchFailure(const IED::CommandResult& ran);
