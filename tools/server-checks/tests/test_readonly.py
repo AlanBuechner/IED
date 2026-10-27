@@ -14,6 +14,7 @@ from frames import FrameChecker
 from iedclient import RpcFailure
 from routed import RoutedClient
 from server import IedServer, ServerTestCase
+from test_chat import ChatCase, call_step, text_step, write
 
 LOCKED = "packages/lib/Lib@1.0.0"
 REASON = "lib:Lib 1.0.0 is a locked package: develop it to change it"
@@ -99,3 +100,29 @@ class ReadOnlyFolderTests(ServerTestCase):
 		lease = [f for f in flipped if f["t"] == "evt" and f["kind"] == "doc.lease"]
 		self.assertEqual(None, lease[-1]["data"]["holder"], "the lease went first")
 		await self.refused("doc.save", {"docId": doc})
+
+
+class ReadOnlyAiTests(ChatCase):
+	"""The AI's writes go where a person's do: refused in a read-only folder, with the reason as the tool's result."""
+
+	def start_server(self):
+		write(os.path.join(self.repo, *LOCKED.split("/"), "src", "lib.c"), "int lib;\n")
+		write(os.path.join(self.repo, ".ied", "local", "readonly", "nuke.json"), json.dumps({"version": 1, "paths": [{"path": LOCKED, "reason": REASON}]}))
+		return IedServer(data=self.data, extra=("--home", self.home, "--workspace", self.repo))
+
+	async def test_the_ai_is_told_why_it_cannot_write_there(self):
+		chat_id, _ = await self.chat(permission="auto")
+		self.model.queue(
+			call_step("fs_write", {"path": LOCKED + "/src/lib.c", "content": "int changed;\n"}, "w1"),
+			call_step("fs_edit", {"path": LOCKED + "/src/lib.c", "edits": [{"old": "lib", "new": "changed"}]}, "e1"),
+			call_step("fs_write", {"path": "src/notes.txt", "content": "fine\n"}, "w2"),
+			text_step("Done."))
+		end = await self.turn(chat_id)
+		self.assertEqual("finished", end["stop"], end)
+		sent = self.model.requests()[-1]["body"]["messages"]
+		results = {m["tool_call_id"]: m["content"] for m in sent if m["role"] == "tool"}
+		for call in ("w1", "e1"):
+			self.assertIn(REASON, results[call], call)
+		self.assertIn("saved", results["w2"], "elsewhere it writes")
+		with open(os.path.join(self.repo, *LOCKED.split("/"), "src", "lib.c"), newline="") as f:
+			self.assertEqual("int lib;\n", f.read())
