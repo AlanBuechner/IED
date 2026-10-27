@@ -174,7 +174,7 @@ namespace C4LSP::Features
 				if (first && IsAllWhitespace(text.substr(ls, first->start - ls)))
 				{
 					uint32 target = depth;
-					if (IsCloser(first->type))
+					if (IsCloser(first->type) || IsAccessLabel(firstIdx, lastIdx))
 						target = depth > 0 ? static_cast<uint32>(depth) - 1 : 0;
 					std::string want = IndentString(target);
 					if (text.substr(ls, first->start - ls) != want)
@@ -201,6 +201,15 @@ namespace C4LSP::Features
 					for (uint32 i = firstIdx; hasToken && i <= lastIdx; ++i)
 						depth += Delta(tokens[i]);
 				}
+			}
+
+			// `public:`, `private:`, `protected:` sit at their class's indentation, one level out from the members.
+			// A C#-style modifier (`public void F();`) is a member and stays with the others.
+			bool IsAccessLabel(size_t firstIdx, size_t lastIdx) const
+			{
+				TokenType type = tokens[firstIdx].type;
+				bool access = type == TokenType::Public || type == TokenType::Private || type == TokenType::Protected;
+				return access && firstIdx < lastIdx && tokens[firstIdx + 1].type == TokenType::Colon;
 			}
 
 			void FixSpacing()

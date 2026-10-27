@@ -299,4 +299,35 @@ namespace Testing
 		TEST_ASSERT(!Contains(out, "\n "));
 		TEST_PASSED();
 	}
+
+	void LspFormattingTest::TestAccessLabelsSitAtTheirClassIndentation()
+	{
+		std::string text = "namespace Game\n{\n";
+		text += "\tclass SomeClass\n";
+		text += "\t{\n";
+		text += "\t\tpublic:\n";            // at the members' level: one tab out
+		text += "\t\tpublic void Run();\n"; // a C#-style modifier: a member, not a label
+		text += "private: // state\n";      // too far out: back to the class's level
+		text += "\t\tint32 m_Count;\n";
+		text += "\t\t\tprotected :\n";      // a spaced colon is still a label
+		text += "\t\tvoid Grow();\n";
+		text += "\t};\n";
+		text += "}\n";
+
+		std::string want = "namespace Game\n{\n\tclass SomeClass\n\t{\n\tpublic:\n\t\tpublic void Run();\n";
+		want += "\tprivate: // state\n\t\tint32 m_Count;\n\tprotected :\n\t\tvoid Grow();\n\t};\n}\n";
+		TEST_ASSERT(Apply(text, Features::Formatting::Format(text, { 4, false })) == want);
+		TEST_ASSERT(Features::Formatting::Format(want, { 4, false }).empty());
+
+		std::string spaced = "class SomeClass{\n    public:\n    int x;\n}\n";
+		TEST_ASSERT(Apply(spaced, Features::Formatting::Format(spaced, {})) == "class SomeClass{\npublic:\n    int x;\n}\n");
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestAccessLabelOutsideAnyBlockStaysAtColumnZero()
+	{
+		std::string text = "public:\nint32 x;\n";
+		TEST_ASSERT(Features::Formatting::Format(text, { 4, false }).empty());
+		TEST_PASSED();
+	}
 } // namespace Testing

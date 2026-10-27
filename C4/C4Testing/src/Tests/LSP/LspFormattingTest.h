@@ -65,6 +65,14 @@ namespace Testing
 		TEST_FUNC(Lsp.Features.Formatting)
 		void TestMultiDimInitializerOnlyChangesLeadingWhitespace();
 
+		// `public:`, `private:` and `protected:` sit at their class's indentation, one level out from the members they
+		// label; a C#-style modifier on a member (`public void F();`) leaves the member where it is.
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestAccessLabelsSitAtTheirClassIndentation();
+
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestAccessLabelOutsideAnyBlockStaysAtColumnZero();
+
 	private:
 		// Apply a set of TextEdits (0-based line/char, LSP semantics) to `text` and return the result.
 		static std::string Apply(const std::string& text, const std::vector<C4LSP::Protocol::TextEdit>& edits);
