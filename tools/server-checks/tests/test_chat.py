@@ -15,7 +15,7 @@ import urllib.request
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import REPO, IedServer, ServerTestCase, local_state
+from server import REPO, IedServer, ServerTestCase, local_state, read_json_file
 
 FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 MAIN = "int main(void)\n{\n\treturn 0;\n}\n"
@@ -1167,10 +1167,8 @@ class ChatTests(ChatCase):
 		self.assertEqual((1, "idle"), (told["snapshot"]["turnCount"], told["snapshot"]["state"]))
 		self.assertTrue(told["snapshot"]["context"], "the meter is made again from the turns kept")
 		self.assertEqual(1, (await self.summary(chat_id))["turnCount"])
-		with open(view, encoding="utf-8") as f:
-			self.assertEqual([history[0]["turnId"]], [m["turn"] for m in json.load(f)["messages"]], "context.json keeps the turns kept only")
-		with open(os.path.join(os.path.dirname(view), "chat.json"), encoding="utf-8") as f:
-			header = json.load(f)
+		self.assertEqual([history[0]["turnId"]], [m["turn"] for m in read_json_file(view)["messages"]], "context.json keeps the turns kept only")
+		header = read_json_file(os.path.join(os.path.dirname(view), "chat.json"))
 		self.assertEqual((0, 0), (header.get("lastPromptTokens", 0), header.get("promptHead", 0)), "what the server's cache held is forgotten")
 		self.model.queue(text_step("Answer two again."))
 		self.assertEqual("finished", (await self.turn(chat_id, "two again"))["stop"])

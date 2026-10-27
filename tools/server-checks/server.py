@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.parse
 
@@ -35,6 +36,20 @@ def local_state(data, folder):
 	folder. The workspace's ".ied/local/..." paths name files here."""
 	key = hashlib.sha256(trust_key(os.path.realpath(folder)).encode("utf-8")).hexdigest()[:16]
 	return os.path.join(data, "app", "workspaces", key)
+
+
+def read_json_file(path, seconds=3.0):
+	"""A JSON file the server writes, read as it stands: the server replaces such files whole (write beside, then move),
+	and on Windows a read that meets the move gets a sharing error for a moment, so it is tried again."""
+	deadline = time.monotonic() + seconds
+	while True:
+		try:
+			with open(path, encoding="utf-8") as f:
+				return json.load(f)
+		except PermissionError:
+			if time.monotonic() > deadline:
+				raise
+			time.sleep(0.05)
 
 
 def workspace_file(data, folder, path):

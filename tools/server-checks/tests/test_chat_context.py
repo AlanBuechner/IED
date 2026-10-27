@@ -7,7 +7,7 @@ import os
 
 from frames import FrameChecker
 from iedclient import Client
-from server import local_state
+from server import local_state, read_json_file
 from test_chat import ChatCase, call_step, text_step, write
 
 
@@ -39,8 +39,7 @@ class ContextMeterTests(ChatCase):
 		await self.restart()
 		after = (await self.snapshot(topic))["context"]
 		self.assertEqual((counted["used"], counted["window"], counted["model"]), (after["used"], after["window"], after["model"]), "the count kept in chat.json")
-		with open(self.header(chat_id), encoding="utf-8") as f:
-			self.assertEqual([], json.load(f)["compressedTurns"], "no turn left out yet")
+		self.assertEqual([], read_json_file(self.header(chat_id))["compressedTurns"], "no turn left out yet")
 
 	async def test_a_chat_without_a_meter_gets_its_last_turns_count(self):
 		chat_id, topic = await self.chat()
@@ -49,8 +48,7 @@ class ContextMeterTests(ChatCase):
 		await self.restart()
 		self.client.abort()
 		self.server.stop(remove_data=False)
-		with open(self.header(chat_id), encoding="utf-8") as f:
-			header = json.load(f)
+		header = read_json_file(self.header(chat_id))
 		del header["context"]
 		with open(self.header(chat_id), "w", encoding="utf-8") as f:
 			json.dump(header, f)
@@ -88,8 +86,7 @@ class HistoryTests(ChatCase):
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		self.model.queue(text_step("Now the next turn."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"], "a turn after it is what compression can leave out")
-		with open(self.header(chat_id), encoding="utf-8") as f:
-			dropped = json.load(f)["compressedTurns"]
+		dropped = read_json_file(self.header(chat_id))["compressedTurns"]
 		self.assertIn("u1", dropped, ("the first turn is out of the requests now: ", dropped))
 		self.model.queue(call_step("history_search", {"query": "zephyr"}, "h1"),
 			call_step("history_read", {"turn": "u1"}, "h2"), text_step("Found it."))

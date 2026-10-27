@@ -13,7 +13,7 @@ import sys
 
 from test_chat import TURN_SECONDS, ChatCase, call_step, text_step, write
 from iedclient import RpcFailure
-from server import REPO, local_state
+from server import REPO, local_state, read_json_file
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(16))
 FAILING = "import sys; sys.stdout.write('\\x1b[31mbuild failed\\x1b[0m: 2 errors\\r\\n'); sys.stdout.flush()"
@@ -171,8 +171,7 @@ class MentionTests(ChatCase):
 		mention = [{"kind": "file", "ref": "notes.txt", "label": "notes.txt"}]
 		queued = await self.client.request("chat.send", {"chatId": chat_id, "text": "then @notes.txt", "as": "queue", "mentions": mention})
 		self.assertEqual(1, queued["queued"])
-		with open(self.state_file(".ied/local/chats/%s/chat.json" % chat_id), encoding="utf-8") as f:
-			self.assertEqual([{"text": "then @notes.txt", "mentions": mention}], json.load(f)["queued"], "the header keeps it whole")
+		self.assertEqual([{"text": "then @notes.txt", "mentions": mention}], read_json_file(self.state_file(".ied/local/chats/%s/chat.json" % chat_id))["queued"], "the header keeps it whole")
 		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "deny"})
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.start" and f["data"]["user"]["text"] == "then @notes.txt", timeout=TURN_SECONDS)
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
