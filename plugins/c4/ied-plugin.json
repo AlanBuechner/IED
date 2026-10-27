@@ -1,10 +1,11 @@
-// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar and how C4LSP's semantic
-// tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink, `preprocessor` gray), C4LSP - one server per
-// workspace, given every program's options Nuke writes (it analyzes each document in a program that compiles it) - C4DAP,
-// the c4 and c4-test problem matchers and output links, the c4.nuke task preset (IED's `nuke` preset with C4's matchers
-// and Launch configuration, IED docs/06, docs/25, docs/26), and how C4 files and projects look (teal "C4", a header
-// "h"), and the AI skills of this version of the language (skills/). Ships in every toolchain as <toolchain>/ied/
-// (MakeToolchain.py); a solution names it in its localPlugins.
+// The C4 language in IED (C4/docs/tools/03-editor-lsp-dap.md, docs/26 "The c4 plugin and its toolchains"): the language
+// with its grammar and how C4LSP's semantic tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink,
+// `preprocessor` gray), C4LSP - one server per workspace, given every program's options Nuke writes (it analyzes each
+// document in a program that compiles it) - and C4DAP of the C4 toolchain a workspace uses (toolchain-contributions.json,
+// code/), the c4 and c4-test problem matchers and output links, the c4.nuke task preset (IED's `nuke` preset with C4's
+// matchers and Launch configuration, IED docs/06, docs/25, docs/26), how C4 files and projects look (teal "C4", a
+// header "h"), and the AI skills of this version of the language (skills/). A built-in plugin; every toolchain ships its
+// own declarative copy as <toolchain>/ied/ (C4/MakeToolchain.py), which a Nuke solution names in its localPlugins.
 {
 	"manifestVersion": 1,
 	"id": "c4",
@@ -13,7 +14,7 @@
 	"description": "C4 sources: the language, its grammar and C4LSP (diagnostics, completion, navigation, formatting, refactoring).",
 	"publisher": "C4",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "declarative" },
+	"runtime": { "kind": "builtin", "entry": "C4Plugin::Activate" },
 	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
 	"contributes": {
@@ -118,17 +119,6 @@
 				}
 			}
 		],
-		"dapProviders": [
-			{
-				"type": "c4",
-				"label": "C4",
-				"command": "${pluginDir}/../tools/C4DAP/C4DAP.exe",
-				"env": { "C4_HOME": "${pluginDir}/.." },
-				"launchMode": "staged",
-				"languages": ["c4"],
-				"when": "workspaceTrusted"
-			}
-		],
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },
 		"skills": ["skills"],
 		"aiHints": [
@@ -146,34 +136,8 @@
 			{"match": "has type '(char8\\*|const char8\\*|String)' but parameter '\\w+' expects 'StringView'", "hint": "Nothing converts to a StringView by itself: pass Core::StringView(\"text\") for a literal, s.View() for a Core::String."},
 			{"match": "cannot initialize '(String|StringView)' from '(int32|int64|double)'", "hint": "Numbers become text through Core::StringBuilder.AppendInt / AppendDouble or Core::Format, not a constructor."}
 		],
-		"aiDocs": [ { "id": "c4", "title": "C4 language, Bedrock library (library/bedrock-api.md: every type's and function's signatures; library/bedrock.md: the guide), runtime and tools reference", "folder": "docs" } ],
 		"systemMessageSections": [
 			{ "id": "c4", "when": "workspaceLanguage.c4", "maxTokens": 600, "text": "C4 (.cf sources, .ch headers) looks like C++ but is not, and C++ habits are its usual compile errors. Read the c4-language skill before writing C4, c4-testing before writing tests. What every program needs:\n- One program per project: all .cf/.ch files of its source folders (nuke.toml `sources`, default src/) compile together. `include \"x.ch\"` (no #include, no ../). File-scope names are program-wide unless `static`: two files may not both define `kMax` or `Parse`; a `static` constant, variable or helper is private to its file.\n- Entry: `int32 main(int32 argc, char** argv)`. Types: int32, int64, uint8, float, double, bool, char8. No `auto`: write the type. Arrays and pointers belong to the type: `int32[4] a;`, not `int a[4]`.\n- Class members are private unless marked, each one: `public int64 count;`. Constructors, destructors and operators are annotated methods: `[operator(\"create\")] public void Init(int64 n) { ... }`, `[operator(\"delete\")]`, `[operator(\"==\")]`. Make objects with `T x = T(args);` or `T x(args);`; `new T(args)` is garbage collected. A lambda that returns a value names its type: `[](int32 x) -> bool { return x > 0; }`.\n- Library: `include \"bedrock.ch\"`; there is no std::. Core::String (made explicitly: `Core::String(\"text\")`; `s == \"text\"` works), Core::StringView (Split(','), Trimmed, Substring), Core::StringBuilder, Core::Array<T> (Push, Count, Sort, SortBy), Core::HashMap<K, V> (Find, Insert, m[k]), Core::ParseInt64 / ParseDouble, FS::File, Platform::WriteOutput / WriteError (a StringView). Counts are int64. `Core::Format(&builder, \"{0}: {1}\", name, count)` writes Strings, views and numbers as they are; printf is C's: a String goes as `s.CStr()`. Standard input: `Platform::InputLines lines; while (lines.Next(line))`.\n- Before using a Bedrock type or function, read its exact signatures in the API digest: `docs_read({\"path\": \"c4/library/bedrock-api.md\", \"heading\": \"Core::HashMap\"})`; docs_search finds a function by name (`docs_search({\"query\": \"ParseInt64\"})`). Never guess C++ names (Push, not push_back; Count, not size), and do not read the toolchain's headers through the shell.\n- Tests: `[test(\"group.name\")] static void F() { assert_eq((int64)2, Count(), \"why\"); }` in a source folder's tests/. Build and test with build_run (task \"test\"); try the built program with program_run: `build/bin/Development-windows-x64/<project>/<project>.exe`." }
-		],
-		"lspProfiles": [
-			{
-				"id": "c4-language-server",
-				"label": "C4LSP",
-				"command": "${pluginDir}/../tools/C4LSP/C4LSP.exe",
-				"env": { "C4_HOME": "${pluginDir}/.." },
-				"selector": { "languages": ["c4"] },
-				"scope": "workspace",
-				"initializationOptionsFiles": { "files": "${workspaceDir}/.ied/local/lsp-options/*.json", "key": "programs" },
-				"pluginCodeOption": "scripts",
-				"launchMode": "staged",
-				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
-				"codeActionsNeedClientFilter": true,
-				"aiExposedRequests": [
-					{
-						"method": "c4/expandMacro",
-						"purpose": "expandMacro",
-						"description": "The C4 macro used at a position and what that use expands to: {textDocument, position} -> {name, expansion}, or null where no macro is used."
-					}
-				],
-				"formatOnAiWrite": true,
-				"diagnosticsOnAiWrite": true,
-				"when": "config.c4.languageServer"
-			}
 		]
 	}
 }

@@ -1,0 +1,18 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "C4 language settings",
+	"type": "object",
+	"properties": {
+		"c4.languageServer": {
+			"type": "boolean",
+			"default": true,
+			"description": "Run C4LSP for C4 sources: diagnostics, completion, navigation, formatting and refactoring."
+		},
+		"c4.toolchain": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The C4 toolchain the language server and the debugger come from where no toolchain's own copy of this plugin is loaded (a folder opened without a Nuke solution): a toolchain folder, or a version installed in Nuke's toolchain store (0.1.0, dev, latest). Empty: the workspace's nuke.toml toolchain, else the newest installed one."
+		}
+	}
+}

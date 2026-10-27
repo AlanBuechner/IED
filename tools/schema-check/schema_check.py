@@ -42,9 +42,12 @@ RULES = [
 	("*.frames.jsonl", "frames"),
 ]
 SKIP_DIRS = {".git", "build", "bin-int", "third_party", "node_modules", "__pycache__", "local"}
-# The plugins IED and the C4 toolchain ship: a manifest the schema refuses fails to load in every workspace (BUG-385:
-# the C4 plugin's section maxTokens over the schema's 600 left every C4 workspace without its language server).
-DEFAULT_TARGETS = [HOST_API / "examples", TOOLS / "schema-check" / "fixtures", REPO / "plugins", REPO / "C4" / "IedPlugin"]
+# The plugins IED ships: a manifest the schema refuses fails to load in every workspace (BUG-385: the C4 plugin's
+# section maxTokens over the schema's 600 left every C4 workspace without its language server).
+DEFAULT_TARGETS = [HOST_API / "examples", TOOLS / "schema-check" / "fixtures", REPO / "plugins"]
+# Every C4 toolchain ships its own copy of the c4 plugin, whose manifest C4/MakeToolchain.py writes from these two.
+C4_PLUGIN = REPO / "plugins" / "c4"
+C4_TOOLCHAIN_SOURCES = (C4_PLUGIN / "ied-plugin.json", C4_PLUGIN / "toolchain-contributions.json")
 
 
 def schema_for(path):
@@ -102,19 +105,38 @@ def _validate_lines(validator, path):
 	return problems
 
 
-def run(targets, forced_schema, out):
+def toolchain_manifest_problems(registry):
+	"""The problems of the manifest a toolchain's copy of the c4 plugin gets (C4/MakeToolchain.py)."""
+	sys.path.insert(0, str(REPO / "C4"))
+	import MakeToolchain
+	manifest, contributions = (path.read_text(encoding="utf-8") for path in C4_TOOLCHAIN_SOURCES)
+	try:
+		instance = jsonc.loads(MakeToolchain.toolchain_manifest(manifest, contributions))
+	except ValueError as e:
+		return ["cannot parse: %s" % e]
+	return [str(p) for p in minischema.Validator(registry, SCHEMAS["plugin-manifest"]).validate(instance)]
+
+
+def report(out, name, kind, problems):
+	out.write("%-4s %s (%s)\n" % ("FAIL" if problems else "ok", name, kind))
+	for p in problems:
+		out.write("     %s\n" % p)
+
+
+def run(targets, forced_schema, out, toolchain_copy=False):
 	registry = minischema.Registry()
 	check_schemas(registry)
 	files = [(f, forced_schema or schema_for(f)) for t in targets for f in discover(t)]
 	failures = 0
 	for path, kind in files:
 		problems = validate_file(registry, path, kind)
-		status = "FAIL" if problems else "ok"
-		out.write("%-4s %s (%s)\n" % (status, _display(path), kind))
-		for p in problems:
-			out.write("     %s\n" % p)
+		report(out, _display(path), kind, problems)
 		failures += bool(problems)
-	out.write("%d schema(s) checked, %d file(s) validated, %d failed\n" % (len(SCHEMAS), len(files), failures))
+	if toolchain_copy:
+		problems = toolchain_manifest_problems(registry)
+		report(out, "plugins/c4/ied-plugin.json as a toolchain ships it", "plugin-manifest", problems)
+		failures += bool(problems)
+	out.write("%d schema(s) checked, %d file(s) validated, %d failed\n" % (len(SCHEMAS), len(files) + int(toolchain_copy), failures))
 	return 1 if failures else 0
 
 
@@ -132,7 +154,7 @@ def main(argv):
 	args = parser.parse_args(argv)
 	forced = args.schema if args.schema in SCHEMAS or not args.schema else str(pathlib.Path(args.schema).resolve())
 	try:
-		return run(args.targets or DEFAULT_TARGETS, forced, sys.stdout)
+		return run(args.targets or DEFAULT_TARGETS, forced, sys.stdout, toolchain_copy=not args.targets)
 	except minischema.SchemaError as e:
 		sys.stderr.write("schema error: %s\n" % e)
 		return 2

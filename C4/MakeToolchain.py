@@ -10,8 +10,10 @@
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs, and library/bedrock-api.md: the
 #                           Bedrock API digest, made from the headers the toolchain ships (ApiDigest.py)
-#     ied/                  the IED plugin for this version of the language, its AI skills included (IedPlugin/), and
-#                           ied/docs/, a copy of docs/ the plugin's aiDocs contribution reads
+#     ied/                  the IED plugin for this version of the language (plugins/c4 of the repository: its grammar,
+#                           settings and AI skills, not its server code or its Nuke package), with a declarative copy of
+#                           its manifest that names this toolchain's language server, debug adapter and reference docs
+#                           (toolchain-contributions.json, ${pluginDir}/..), and ied/docs/, a copy of docs/ for those
 #
 # The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.
 # C4/nuke.toml runs this after every Development build to refresh the "dev" toolchain.
@@ -28,6 +30,13 @@ sys.dont_write_bytecode = True
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPOSITORY = os.path.dirname(HERE)
+PLUGIN = os.path.join(REPOSITORY, "plugins", "c4")
+# What of the plugin a toolchain does not ship: its server code is compiled into IED (docs/26), its Nuke package
+# (nuke/, libraries/) and samples are the checkout's.
+PLUGIN_LEFT_OUT = ("code", "nuke", "libraries", "samples", "ied-plugin.json", "toolchain-contributions.json")
+PLUGIN_MANIFEST = "ied-plugin.json"
+TOOLCHAIN_CONTRIBUTIONS = "toolchain-contributions.json"
+TOOLCHAIN_VARIABLE = "${c4.toolchain}"
 
 sys.path.insert(0, HERE)  # Nuke runs this isolated (python -I), which leaves the script's own folder out
 from ApiDigest import write_digest
@@ -72,6 +81,45 @@ def _is_junction(path):
 	return hasattr(os.path, "isjunction") and os.path.isjunction(path)
 
 
+def plugin_files(plugin):
+	"""The files of the IED plugin a toolchain ships, relative to it."""
+	return [rel for rel in files_below(plugin) if rel.replace("\\", "/").split("/")[0] not in PLUGIN_LEFT_OUT]
+
+
+def without_comments(text):
+	"""JSON text without its whole-line // comments (the plugin's files comment only whole lines); the comments too."""
+	lines = text.splitlines()
+	comments = [line for line in lines if line.lstrip().startswith("//")]
+	return "\n".join(line for line in lines if not line.lstrip().startswith("//")), comments
+
+
+def toolchain_manifest(manifest_text, contributions_text):
+	"""The manifest of a toolchain's copy of the plugin: declarative (its server code is the built-in's), with the
+	toolchain's tools and docs from toolchain-contributions.json, the toolchain being the folder above the plugin."""
+	body, comments = without_comments(manifest_text)
+	manifest = json.loads(body)
+	contributions = json.loads(without_comments(contributions_text)[0].replace(TOOLCHAIN_VARIABLE, "${pluginDir}/.."))
+	manifest["runtime"] = {"kind": "declarative"}
+	manifest["contributes"].update(contributions)
+	header = comments + ["// This toolchain's copy, written by C4/MakeToolchain.py: declarative, naming the toolchain's own tools and docs."]
+	return "\n".join(header) + "\n" + json.dumps(manifest, indent="\t") + "\n"
+
+
+def plugin_manifest(build):
+	"""The toolchain copy's manifest, kept in the build beside the compiler (rewritten only when it changes)."""
+	out = os.path.join(build, "C4", "generated", "ied", PLUGIN_MANIFEST)
+	with open(os.path.join(PLUGIN, PLUGIN_MANIFEST), encoding="utf-8") as f:
+		manifest = f.read()
+	with open(os.path.join(PLUGIN, TOOLCHAIN_CONTRIBUTIONS), encoding="utf-8") as f:
+		contributions = f.read()
+	text = toolchain_manifest(manifest, contributions)
+	if not os.path.isfile(out) or open(out, encoding="utf-8").read() != text:
+		os.makedirs(os.path.dirname(out), exist_ok=True)
+		with open(out, "w", encoding="utf-8", newline="\n") as f:
+			f.write(text)
+	return out
+
+
 def bedrock_digest(build):
 	"""The Bedrock API digest of the compiler's own copy of the library, kept in the build beside it (rewritten only when
 	the headers say something new)."""
@@ -113,8 +161,9 @@ def plan(build, repo, digest):
 	for doc, source in shipped_docs(repo, digest).items():
 		files[os.path.join("docs", *doc.split("/"))] = source
 		files[os.path.join("ied", "docs", *doc.split("/"))] = source  # the plugin's aiDocs folder
-	for rel in files_below(os.path.join(repo, "IedPlugin")):
-		files[os.path.join("ied", rel)] = os.path.join(repo, "IedPlugin", rel)
+	for rel in plugin_files(PLUGIN):
+		files[os.path.join("ied", rel)] = os.path.join(PLUGIN, rel)
+	files[os.path.join("ied", PLUGIN_MANIFEST)] = plugin_manifest(build)
 	return {os.path.normpath(k): v for k, v in files.items()}
 
 

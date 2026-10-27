@@ -1,0 +1,46 @@
+// What the c4 plugin contributes from a C4 toolchain (docs/26 "The c4 plugin and its toolchains"), in the manifest's
+// shapes, ${c4.toolchain} standing for the toolchain's folder. The built-in copy's code (code/plugin.cf) gives the
+// language server and the debug adapter of the toolchain a workspace uses; C4/MakeToolchain.py writes all three points
+// into a toolchain's own copy of the manifest, with ${pluginDir}/.. for the folder, the reference docs being that
+// copy's ied/docs.
+{
+	"lspProfiles": [
+		{
+			"id": "c4-language-server",
+			"label": "C4LSP",
+			"command": "${c4.toolchain}/tools/C4LSP/C4LSP.exe",
+			"env": { "C4_HOME": "${c4.toolchain}" },
+			"selector": { "languages": ["c4"] },
+			"scope": "workspace",
+			"initializationOptionsFiles": { "files": "${workspaceDir}/.ied/local/lsp-options/*.json", "key": "programs" },
+			"pluginCodeOption": "scripts",
+			"launchMode": "staged",
+			"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
+			"codeActionsNeedClientFilter": true,
+			"aiExposedRequests": [
+				{
+					"method": "c4/expandMacro",
+					"purpose": "expandMacro",
+					"description": "The C4 macro used at a position and what that use expands to: {textDocument, position} -> {name, expansion}, or null where no macro is used."
+				}
+			],
+			"formatOnAiWrite": true,
+			"diagnosticsOnAiWrite": true,
+			"when": "config.c4.languageServer && workspaceTrusted"
+		}
+	],
+	"dapProviders": [
+		{
+			"type": "c4",
+			"label": "C4",
+			"command": "${c4.toolchain}/tools/C4DAP/C4DAP.exe",
+			"env": { "C4_HOME": "${c4.toolchain}" },
+			"launchMode": "staged",
+			"languages": ["c4"],
+			"when": "workspaceTrusted"
+		}
+	],
+	"aiDocs": [
+		{ "id": "c4", "title": "C4 language, Bedrock library (library/bedrock-api.md: every type's and function's signatures; library/bedrock.md: the guide), runtime and tools reference", "folder": "docs" }
+	]
+}

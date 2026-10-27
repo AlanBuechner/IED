@@ -1,0 +1,182 @@
+include "toolchain.ch"
+
+namespace C4Plugin
+{
+	static Core::String Joined(Core::StringView folder, Core::StringView name) {
+		return (Core::String(folder) + "/") + name;
+	}
+
+	static ToolchainChoice Chosen(Core::StringView folder, const Core::String& reason) {
+		ToolchainChoice choice;
+		choice.folder = Core::String(folder);
+		choice.reason = reason;
+		return choice;
+	}
+
+	static ToolchainChoice NoneFits(const Core::String& reason) { return Chosen(Core::StringView(""), reason); }
+
+	// A folder name relative to the workspace, or as it is when it has a root.
+	static Core::String FolderOf(Core::StringView name, Core::StringView root) {
+		FS::Path path = FS::Path(name);
+		return Core::String((path.IsAbsolute() ? path : FS::Path(root) / name).Normalized().View());
+	}
+
+	// What a name means in the store: an installed version, "latest" (the newest numbered one) or "dev".
+	static ToolchainChoice Installed(const ToolchainQuery& query, Core::StringView name, Core::StringView from) {
+		if (query.store.IsEmpty()) return NoneFits((Core::String(from) + " names toolchain ") + name + ", but no toolchain store was found (NUKE_TOOLCHAINS, or the toolchains folder of the Nuke checkout nuke.command names)");
+		Core::String version = name == "latest" ? NewestVersion(query.installed) : Core::String(name);
+		if (version.IsEmpty() || !query.installed.Contains(version)) return NoneFits(((((Core::String(from) + " names toolchain ") + name) + ", which is not installed in ") + query.store.View()));
+		return Chosen(Joined(query.store.View(), version.View()).View(), (((Core::String(from) + ": ") + version.View()) + " in ") + query.store.View());
+	}
+
+	static ToolchainChoice Named(const ToolchainQuery& query, Core::StringView name, Core::StringView from) {
+		if (NamesFolder(name)) return Chosen(FolderOf(name, query.root.View()).View(), Core::String(from));
+		return Installed(query, name, from);
+	}
+
+	ToolchainChoice ChooseToolchain(const ToolchainQuery& query) {
+		if (!query.setting.IsEmpty()) return Named(query, query.setting.View(), Core::StringView("the c4.toolchain setting"));
+		if (!query.pin.IsEmpty()) return Named(query, query.pin.View(), Core::StringView("the workspace's nuke.toml"));
+		if (query.store.IsEmpty()) return NoneFits(Core::String("no toolchain store was found (NUKE_TOOLCHAINS, or the toolchains folder of the Nuke checkout nuke.command names)"));
+		Core::String newest = NewestVersion(query.installed);
+		if (!newest.IsEmpty()) return Chosen(Joined(query.store.View(), newest.View()).View(), (Core::String("the newest installed toolchain, ") + newest.View()) + " in " + query.store.View());
+		if (query.installed.Contains(Core::String("dev"))) return Chosen(Joined(query.store.View(), Core::StringView("dev")).View(), (Core::String("the dev toolchain in ") + query.store.View()));
+		return NoneFits((Core::String("no toolchain is installed in ") + query.store.View()));
+	}
+
+	// --- nuke.toml ---------------------------------------------------------------------------------------------------
+
+	// A TOML string's text: "a", 'a', or a bare value up to a comment.
+	static Core::StringView ValueText(Core::StringView value) {
+		Core::StringView rest = value.Trimmed();
+		if (rest.IsEmpty()) return rest;
+		const int32 quote = rest.ByteAt(0);
+		if (quote == '"' || quote == '\'') {
+			const int64 end = rest.IndexOf((char)quote, 1);
+			return end > 0 ? rest.Substring(1, end - 1) : Core::StringView("");
+		}
+		const int64 comment = rest.IndexOf('#');
+		return (comment >= 0 ? rest.Substring(0, comment) : rest).Trimmed();
+	}
+
+	// The value of `key = value` on `line`, or false when the line sets another key.
+	static bool KeyValue(Core::StringView line, Core::StringView key, Core::StringView& value) {
+		if (!line.StartsWith(key)) return false;
+		Core::StringView rest = line.Substring(key.ByteLength(), line.ByteLength() - key.ByteLength()).Trimmed();
+		if (rest.IsEmpty() || rest.ByteAt(0) != '=') return false;
+		value = ValueText(rest.Substring(1, rest.ByteLength() - 1));
+		return true;
+	}
+
+	static bool IsTableHeader(Core::StringView line) { return line.StartsWith(Core::StringView("[")); }
+
+	static bool IsWorkspaceHeader(Core::StringView line) {
+		if (!line.StartsWith(Core::StringView("[workspace]"))) return false;
+		Core::StringView rest = line.Substring(11, line.ByteLength() - 11).Trimmed();
+		return rest.IsEmpty() || rest.ByteAt(0) == '#';
+	}
+
+	Core::String WorkspaceToolchain(Core::StringView manifest) {
+		bool inWorkspace = false;
+		for (Core::StringView raw : manifest.Split('\n')) {
+			Core::StringView line = raw.Trimmed();
+			if (IsTableHeader(line)) inWorkspace = IsWorkspaceHeader(line);
+			Core::StringView value;
+			if (inWorkspace && KeyValue(line, Core::StringView("toolchain"), value)) return Core::String(value);
+		}
+		return Core::String("");
+	}
+
+	// --- Names and versions --------------------------------------------------------------------------------------------
+
+	bool NamesFolder(Core::StringView name) {
+		return name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0 || name.IndexOf(':') >= 0 || name.StartsWith(Core::StringView("."));
+	}
+
+	static bool IsDigits(Core::StringView part) {
+		if (part.IsEmpty()) return false;
+		for (int64 i = 0; i < part.ByteLength(); ++i)
+			if (part.ByteAt(i) < '0' || part.ByteAt(i) > '9') return false;
+		return true;
+	}
+
+	// The 1.2.3 of a version, before a -pre or +build.
+	static Core::StringView VersionCore(Core::StringView name) {
+		int64 end = name.ByteLength();
+		const int64 dash = name.IndexOf('-');
+		const int64 plus = name.IndexOf('+');
+		if (dash >= 0 && dash < end) end = dash;
+		if (plus >= 0 && plus < end) end = plus;
+		return name.Substring(0, end);
+	}
+
+	bool IsVersion(Core::StringView name) {
+		Core::StringView core = VersionCore(name);
+		if (core.ByteLength() < name.ByteLength() && core.ByteLength() + 1 == name.ByteLength()) return false;
+		Core::Array<Core::StringView> parts = core.Split('.');
+		return parts.Count() == 3 && IsDigits(parts[0]) && IsDigits(parts[1]) && IsDigits(parts[2]);
+	}
+
+	bool VersionBefore(Core::StringView a, Core::StringView b) {
+		Core::Array<Core::StringView> left = VersionCore(a).Split('.');
+		Core::Array<Core::StringView> right = VersionCore(b).Split('.');
+		for (int64 i = 0; i < 3; ++i) {
+			int64 x = 0;
+			int64 y = 0;
+			Core::ParseInt64(left[i], x);
+			Core::ParseInt64(right[i], y);
+			if (x != y) return x < y;
+		}
+		return false;
+	}
+
+	Core::String NewestVersion(const Core::Array<Core::String>& names) {
+		Core::String newest;
+		for (const Core::String& name : names)
+			if (IsVersion(name.View()) && (newest.IsEmpty() || VersionBefore(newest.View(), name.View()))) newest = name;
+		return newest;
+	}
+
+	// --- Finding Nuke ---------------------------------------------------------------------------------------------------
+
+	// `text` without the spaces and the double quotes around it.
+	static Core::StringView Unquoted(Core::StringView text) {
+		Core::StringView rest = text.Trimmed();
+		if (rest.ByteLength() >= 2 && rest.ByteAt(0) == '"' && rest.ByteAt(rest.ByteLength() - 1) == '"') return rest.Substring(1, rest.ByteLength() - 2);
+		return rest;
+	}
+
+	Core::String CheckoutOfCommand(Core::StringView command) {
+		Core::StringView path = Unquoted(command);
+		if (!NamesFolder(path)) return Core::String("");
+		FS::Path bin = FS::Path(path).Parent();
+		return Core::String(bin.Parent().Normalized().View());
+	}
+
+	Core::Array<Core::String> CommandCandidates(Core::StringView name, Core::StringView path) {
+		Core::Array<Core::String> candidates;
+		for (Core::StringView raw : path.Split(';')) {
+			Core::StringView folder = Unquoted(raw);
+			if (folder.IsEmpty()) continue;
+			candidates.Push(Joined(folder, (Core::String(name) + ".cmd").View()));
+			candidates.Push(Joined(folder, (Core::String(name) + ".bat").View()));
+			candidates.Push(Joined(folder, name));
+		}
+		return candidates;
+	}
+
+	Core::String WithToolchain(Core::StringView entries, Core::StringView folder) {
+		Core::StringView variable = Core::StringView(kToolchainVariable);
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (true) {
+			const int64 found = entries.IndexOf(variable, at);
+			if (found < 0) break;
+			out.Append(entries.Substring(at, found - at));
+			out.Append(folder);
+			at = found + variable.ByteLength();
+		}
+		out.Append(entries.Substring(at, entries.ByteLength() - at));
+		return out.ToString();
+	}
+}

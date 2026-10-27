@@ -6,7 +6,7 @@ description = "The IED server: HTTP, the protocol v1 WebSocket hub (docs/10), wo
 # Its log (logs/server.log) is the launcher's LogFile, the one ied-desktop keeps desktop.log with.
 depends = ["launcher"]
 # The built-in plugins' server code is part of the server (docs/26 "Built-ins on the API").
-sources = [".", "../plugins/git/code", "../plugins/terminal/code", "../plugins/chat/code", "../plugins/browser/code", "../plugins/profiler/code", "../plugins/gpu/code", "../plugins/developer/code", "../plugins/tor/code", "../plugins/websearch/code", "../plugins/webfetch/code", "../plugins/mcp/code"]
+sources = [".", "../plugins/git/code", "../plugins/terminal/code", "../plugins/chat/code", "../plugins/browser/code", "../plugins/profiler/code", "../plugins/gpu/code", "../plugins/developer/code", "../plugins/c4/code", "../plugins/tor/code", "../plugins/websearch/code", "../plugins/webfetch/code", "../plugins/mcp/code"]
 links = ["ws2_32"]
 # A script host (C4/docs/runtime/04): ied-server.c4i and C4Script.dll ship beside the exe, and plugin code (docs/26
 # section 2) compiles against that interface.
