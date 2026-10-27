@@ -46,8 +46,7 @@ class NukePluginFetchTests(ServerTestCase):
 		self.root = tempfile.mkdtemp(prefix="ied-nuke-plugin-")
 		self.home = os.path.join(self.root, "home")
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
-		for name in ("ied-plugin.json", "settings.schema.json"):
-			write(os.path.join(self.home, "plugins", "nuke", name), open(os.path.join(PLUGIN, name), encoding="utf-8").read())
+		shutil.copytree(PLUGIN, os.path.join(self.home, "plugins", "nuke"))     # its manifest names its UI module and skills
 		self.fake = os.path.join(self.root, "fake")
 		write(os.path.join(self.fake, "nuke.cmd"), FAKE_NUKE)
 		self.game = os.path.join(self.root, "game")

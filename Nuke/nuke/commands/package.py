@@ -614,7 +614,7 @@ def _write_versions(folder, found, versions, moved):
 
 
 def _dependency_value(requirement, version):
-	"""A [dependencies] or [packages] entry for `requirement` wanting `version`."""
+	"""A [dependencies] entry for `requirement` wanting `version`."""
 	value = {"source": requirement.source, "version": version}
 	if requirement.writable:
 		value["writable"] = True
@@ -622,8 +622,8 @@ def _dependency_value(requirement, version):
 
 
 def _follow_release(context, url, name, tags):
-	"""The workspace that develops the source wants what it released: a requirement - a project's [dependencies] or the
-	workspace's [packages] - that the new version does not meet becomes ^ that version, so going back to locked keeps it."""
+	"""The workspace that develops the source wants what it released: a project's [dependencies] entry the new version
+	does not meet becomes ^ that version, so going back to locked keeps it."""
 	workspace = context.load()
 	for root in packages.workspace_roots(context.spec, workspace.projects):
 		requirement = root.requirement

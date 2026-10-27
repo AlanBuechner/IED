@@ -1,7 +1,7 @@
 """Packages: versioned projects from git repositories (IED docs/31, Nuke/README.md section 12).
 
-A workspace names repositories in [sources] and what it uses of them in [packages]; `sync` makes the packages' projects
-part of the workspace. While nuke.lock matches the manifests and every locked package is installed, sync only reads
+Each project names the packages it uses in [dependencies] (a source - "<repository URL>/<folder>" - and a version);
+`sync` makes the packages' projects part of the workspace. While nuke.lock matches the manifests and every locked package is installed, sync only reads
 files. Otherwise it resolves (resolve.py: one `git ls-remote` per source at most, manifests read from the machine's
 mirrors), installs what changed (install.py) and writes the lock. A source being developed (`nuke package develop`)
 builds from its checkout, and the lock follows the checkout's HEAD."""

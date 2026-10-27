@@ -1,9 +1,7 @@
 """Choosing a version of every versioned package a workspace needs (docs/31 section 2).
 
-Needs come from the workspace's [packages], from each used package's [package.dependencies], and - inside a repository -
-from its projects' `depends`: a project of another package of the same repository released on its own needs at least the
-release that package had at the dependent's commit. A package is used when the workspace lists it or a used project
-depends on one of its projects. Each versioned package gets the highest version every need on it accepts, its locked one
+Needs come from the workspace's projects' [dependencies] and from each used package's, at the version chosen for it;
+nothing is inferred. A package is used when a dependency names it or a used project depends on one of its projects. Each versioned package gets the highest version every need on it accepts, its locked one
 while that still does (unless it is being updated), and never an older commit than its lock's on an update. When needs
 exclude each other, the package that made the last of them tries its next lower version; when only the workspace's own
 needs conflict, the error names every need and who made it."""
@@ -56,8 +54,7 @@ class Selected:
 
 @dataclass
 class Root:
-	"""A need of the workspace itself: a project's [dependencies] entry, a [packages] entry, or a dependency of one of
-	its own packages."""
+	"""A need of the workspace itself: a project's [dependencies] entry, or a dependency of one of its own packages."""
 	url: str
 	requirement: object     # manifest.PackageRequirement
 	by: str
@@ -314,8 +311,7 @@ class Resolver:
 
 
 class Repositories:
-	"""Every repository of one resolution, by URL: named by the workspace's [sources] where it names them, else by the
-	repository's own name (made unique)."""
+	"""Every repository of one resolution, by URL: named by its repository's name (made unique)."""
 
 	def __init__(self, cache, names, checkouts, fresh=False):
 		self.cache = cache

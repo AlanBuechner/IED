@@ -1,7 +1,7 @@
 """Writable packages (IED docs/31 section 5): a source the workspace develops builds from a git clone of its repository
 in the packages folder instead of read-only installs, and the lock follows the clone's HEAD.
 
-`writable = true` on a [packages] entry declares it in nuke.toml, so the build makes the clone wherever it is missing
+`writable = true` on a dependency declares it in nuke.toml, so the build makes the clone wherever it is missing
 (every package of that repository then builds from it: one clone per source); `nuke package develop` does the same for
 one machine only. Taking `writable` away goes back to locked installs at the next build, which is refused while the
 clone holds work no remote has - nothing written there is ever thrown away."""

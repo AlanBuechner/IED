@@ -14,9 +14,8 @@ import zipfile
 from support import read, write_files, WorkspaceTest
 
 from nuke import manifest
-from nuke.commands import package as package_command
 from nuke.errors import NukeError
-from nuke.packages import checkouts, semver, store
+from nuke.packages import checkouts, semver, store, writable
 
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Test",
 	"GIT_COMMITTER_EMAIL": "test@example.com"}
@@ -417,7 +416,7 @@ class ResolveTests(PackageTest):
 	def test_a_workspace_inside_the_repository_is_not_part_of_its_packages(self):
 		self.engine.commit({"nuke.toml": "[workspace]\n", "Assets/nuke.toml": module("Assets", package="assets"),
 			"Assets/src/Assets/a.ch": "",
-			"Assets/Samples/Game/nuke.toml": "[workspace]\n[sources]\ne = \"x\"\n",
+			"Assets/Samples/Game/nuke.toml": "[workspace]\nname = \"Sample\"\n",
 			"Assets/Samples/Game/Mod/nuke.toml": module("SampleMod", package="a sample's own"),
 		}, tags=["Assets/v0.1.0"])
 		self.workspace({"Assets": "\"engine@^0.1\""}, depends=("Assets",))
@@ -818,13 +817,13 @@ class DevelopTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		held = os.path.join(self.path("packages", "engine"), "Windowing", "nuke.toml")
 		write_files(self.root, {"build/develop/gopls.json": "{}\n"})
-		original = package_command.HELD_WAIT_SECONDS
-		package_command.HELD_WAIT_SECONDS = 0.5
+		original = writable.HELD_WAIT_SECONDS
+		writable.HELD_WAIT_SECONDS = 0.5
 		try:
 			with open(held, encoding="utf-8"):
 				code, out = self.nuke("package", "lock", "engine")
 		finally:
-			package_command.HELD_WAIT_SECONDS = original
+			writable.HELD_WAIT_SECONDS = original
 		self.assertEqual(code, 1, out)
 		self.assertIn("is in use by another program", out)
 		self.assertTrue(json.loads(read(self.path("packages", "nuke-packages.json")))["develop"], "still developed")
