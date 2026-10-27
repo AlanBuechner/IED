@@ -41,6 +41,9 @@ namespace Ied
 		public Core::Array<Core::String> m_Watched;   // workspace-relative files a change in which means reading it again
 
 		public ProjectModel* Project(Core::StringView name) const;
+		// The projects its groups name that no project file gives, in the order they are named (a generated solution
+		// whose generator has not run since its groups changed).
+		public Core::Array<Core::String> UngivenProjects() const;
 		// The project whose code root holds `path` (the deepest one); null for none.
 		public ProjectModel* Owning(const FS::Path& path) const;
 		// {name, file, problems, groups, items, generator, localPlugins: [{id, path, enabled}], projects: [...]}

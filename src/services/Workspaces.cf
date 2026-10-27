@@ -317,6 +317,7 @@ namespace Ied
 		m_Server->m_Hub.Publish((Core::String("ws:") + ws->m_WsId.View()).View(), "solution.changed", data.View());
 		m_Server->m_Tasks->ProjectsChanged(ws);
 		m_Server->m_Lsp->ProjectsChanged(ws);
+		m_Server->m_ProjectManager->RefreshGenerated(ws);
 	}
 
 	static bool TouchesSolution(const Workspace* ws, const ChangeBatch& batch) {
@@ -868,6 +869,7 @@ namespace Ied
 		m_Server->m_Documents->LanguagesChanged(ws);
 		m_Server->m_Outputs->PluginsChanged(ws);
 		m_Server->m_Tasks->ProjectsChanged(ws);
+		m_Server->m_ProjectManager->RefreshGenerated(ws);
 		JsonWriter data;
 		data.BeginObject();
 		data.BoolField("trusted", ws->m_Trusted);

@@ -300,6 +300,26 @@ class ProjectSystemTests(ProjectManagementCase):
 		await self.refused("bad_request", "made by `fake generate`", "project.add", {"wsId": "w1", "folder": "docs"})
 
 
+class StaleGeneratedSolutionTests(ProjectManagementCase):
+	"""A pull brought a generated solution whose groups name a project its generator never wrote a file for here (the
+	owner's IED.iedsln naming C4Api and the IED plugins): once the workspace is trusted, IED runs the project system's
+	generate itself and the project appears; untrusted, nothing runs."""
+
+	def prepare(self):
+		super().prepare()
+		write(os.path.join(self.folder, "fake.json"), {"projects": {"Game": "src", "Packer": "tools/packer"}})
+		write(os.path.join(self.folder, "Sys.iedsln"), {"version": 1, "name": "Sys", "projects": [{"file": "build/ied/*.iedproj", "optional": True}],
+			"groups": [{"name": "All", "projects": ["Game", "Packer"]}], "generator": {"run": ["fake", "generate"]}})
+		write(os.path.join(self.folder, "build", "ied", "Game.iedproj"), {"version": 1, "name": "Game", "root": "../../src", "kind": "executable"})
+
+	async def test_the_generator_runs_for_projects_without_files(self):
+		self.assertFalse(os.path.exists(self.path("build", "ied", "Packer.iedproj")), "untrusted: the build system's generator does not run")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		frames = await self.client.wait_for("ws:w1", lambda f: f.get("kind") == "solution.changed" and sorted(p["name"] for p in f["data"]["solution"]["projects"]) == ["Game", "Packer"])
+		self.assertTrue(frames)
+		self.assertTrue(os.path.isfile(self.path("build", "ied", "Packer.iedproj")))
+
+
 @unittest.skipUnless(os.path.exists(NUKE), "no nuke.bat")
 class NukeSolutionTests(ProjectManagementCase):
 	"""The nuke plugin's project system: `nuke project add/remove/move` change the manifests, `nuke init --ied` writes the

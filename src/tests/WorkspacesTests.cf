@@ -47,6 +47,23 @@ class WorkspaceTests {
 		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Ied::TextDigest(Core::StringView("abc")).CStr(), "SHA-256, hex");
 	}
 
+	[test("ungiven_projects")]
+	public static void TestUngivenProjects() {
+		Ied::SolutionModel* solution = new Ied::SolutionModel();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		solution->m_Data = Serialization::ReadJson(Core::StringView(
+			"{\"groups\": [{\"name\": \"C4\", \"projects\": [\"C4\", \"C4Api\"]}, {\"name\": \"Plugins\", \"projects\": [\"ied.chat\"], \"groups\": [{\"name\": \"More\", \"projects\": [\"ied.git\", \"C4Api\"]}]}]}"), *doc).root;
+		Ied::ProjectModel* given = new Ied::ProjectModel();
+		given->m_Name = Core::String("C4");
+		solution->m_Projects.Push(given);
+		Core::Array<Core::String> ungiven = solution->UngivenProjects();
+		assert_eq(3, ungiven.Count(), "a project named twice counts once; one a file gives does not count");
+		assert_true(ungiven[0] == "C4Api" && ungiven[1] == "ied.chat" && ungiven[2] == "ied.git", "in the order named, nested groups too");
+		Ied::SolutionModel* plain = new Ied::SolutionModel();
+		plain->m_Data = Serialization::ReadJson(Core::StringView("{\"projects\": []}"), *doc).root;
+		assert_true(plain->UngivenProjects().IsEmpty(), "no groups, nothing ungiven");
+	}
+
 	[test("solution_files")]
 	public static void TestSolutionFiles() {
 		assert_true(Ied::IsSolutionFile(Core::StringView("C:/Work/Game.iedsln")) && Ied::IsSolutionFile(Core::StringView("Game.IEDSLN")), "the name, in any case");

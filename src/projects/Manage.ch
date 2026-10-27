@@ -37,6 +37,11 @@ namespace Ied
 		public ProjectChange* Remove(Workspace* ws, Core::StringView name, bool deleteFiles);
 		// The project `name`'s folder moved to `to` (workspace-relative), the documents open in it following it.
 		public ProjectChange* Move(Workspace* ws, Core::StringView name, Core::StringView to);
+		// A solution its project system generates whose groups name projects no project file gives - a pull brought the
+		// solution and its generator has not run here since: the project system's generate runs in the background, once
+		// for each such state, in a trusted workspace (the master's records are left to their servers), and the model is
+		// read again when it is done. Never throws: what fails goes to the log.
+		public void RefreshGenerated(Workspace* ws);
 
 	private:
 		// `operation`'s steps of `system`, planned (with the lock held) for the solution in `folder`.
@@ -56,6 +61,7 @@ namespace Ied
 		private Core::String MoveMethod(Call& call, const Params& params);
 
 		private Server* m_Server;
+		private Core::Array<Core::String> m_Refreshed;   // the solution states RefreshGenerated ran a generator for
 	}
 
 	// {workspace, path, project, trashId?, notes, log}

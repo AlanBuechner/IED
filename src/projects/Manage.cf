@@ -81,6 +81,74 @@ namespace Ied
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
+	// Generated solutions kept in step
+
+	const int64 c_UngivenNamesShown = 3;
+
+	// "C4Api, ied.chat, ied.git and 27 more"
+	static Core::String NamesSaid(const Core::Array<Core::String>& names) {
+		Core::StringBuilder out;
+		const int64 shown = names.Count() < c_UngivenNamesShown ? names.Count() : c_UngivenNamesShown;
+		for (int64 i = 0; i < shown; ++i) {
+			if (i > 0) out.Append(i + 1 == names.Count() ? " and " : ", ");
+			out.Append(names[i].View());
+		}
+		if (names.Count() > shown) {
+			out.Append(" and ");
+			out.AppendInt(names.Count() - shown);
+			out.Append(" more");
+		}
+		return out.ToString();
+	}
+
+	static Core::String StateOf(const SolutionModel* solution, const Core::Array<Core::String>& ungiven) {
+		Core::StringBuilder state;
+		state.Append(ForwardSlashes(solution->m_File.View()).View());
+		for (const Core::String& name : ungiven) {
+			state.AppendByte('|');
+			state.Append(name.View());
+		}
+		return state.ToString();
+	}
+
+	// Runs `steps` on a thread of their own, then reads the workspace's solution again, the lock taken for that.
+	static void GenerateInBackground(Server* server, Core::String wsId, Core::Array<ProjectStep*> steps) {
+		Threading::Thread::Run([server, wsId, steps]() {
+			Threading::Thread::SetCurrentName("projects.generate");
+			Core::StringBuilder log;
+			Core::String problem = RunProjectSteps(steps, log);
+			Threading::LockGuard guard(server->m_Lock);
+			if (!problem.IsEmpty()) {
+				server->Log((Core::String("the solution's generator failed: ") + problem.View()).View());
+				return;
+			}
+			Workspace* ws = server->m_Workspaces->Find(wsId.View());
+			if (ws && ws->m_Solution) server->m_Workspaces->SolutionChanged(ws);
+		}).Detach();
+	}
+
+	void ProjectManager::RefreshGenerated(Workspace* ws) {
+		SolutionModel* solution = ws->m_Solution;
+		if (m_Server->IsMaster() || !solution || !ws->m_Trusted || !solution->m_Data.Member("generator").IsValid()) return;
+		Core::Array<Core::String> ungiven = solution->UngivenProjects();
+		Serialization::DomNode system = ungiven.IsEmpty() ? Serialization::DomNode() : SystemFor(m_Server, ws, ws->m_Root);
+		if (!system.IsValid()) return;
+		Core::String state = StateOf(solution, ungiven);
+		if (m_Refreshed.Contains(state)) return;
+		m_Refreshed.Push(state);
+		Core::Array<ProjectStep*> steps;
+		try {
+			steps = Plan(ws, ws->m_Root, system, "generate", EmptyValues());
+		}
+		catch (RpcError& error) {
+			m_Server->Log((Core::String("the solution's generator cannot run: ") + error.m_Message.View()).View());
+			return;
+		}
+		m_Server->Log((((((Core::String("solution ") + solution->m_Name.View()) + " names projects no project file gives (") + NamesSaid(ungiven).View()) + "): the ") + SystemLabel(system).View() + " project system writes them again").View());
+		GenerateInBackground(m_Server, ws->m_WsId, steps);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
 	// Files
 
 	void ProjectManager::WriteNew(Workspace* ws, const FS::Path& folder, Core::StringView relative, Core::StringView text) {

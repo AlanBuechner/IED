@@ -139,6 +139,23 @@ namespace Ied
 		return nullptr;
 	}
 
+	static void CollectUngiven(const SolutionModel* solution, const Serialization::DomNode& groups, Core::Array<Core::String>& ungiven) {
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode projects = groups.At(i).Member("projects");
+			for (int64 k = 0; k < projects.Count(); ++k) {
+				Core::String name = Core::String(projects.At(k).AsView());
+				if (!solution->Project(name.View()) && !ungiven.Contains(name)) ungiven.Push(name);
+			}
+			CollectUngiven(solution, groups.At(i).Member("groups"), ungiven);
+		}
+	}
+
+	Core::Array<Core::String> SolutionModel::UngivenProjects() const {
+		Core::Array<Core::String> ungiven;
+		CollectUngiven(this, m_Data.Member("groups"), ungiven);
+		return ungiven;
+	}
+
 	ProjectModel* SolutionModel::Owning(const FS::Path& path) const {
 		ProjectModel* best = nullptr;
 		Core::String relative;

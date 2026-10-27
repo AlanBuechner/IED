@@ -156,6 +156,14 @@ static void AwaitRoutes(Ied::Server* server) {
 	}
 }
 
+// A workspace server's generated solution whose generator has not run since a pull: written again once the plugins,
+// whose project systems run generators, are loaded.
+static void RefreshGeneratedSolutions(Ied::Server* server) {
+	if (server->IsMaster()) return;
+	Threading::LockGuard guard(server->m_Lock);
+	for (Ied::Workspace* ws : server->m_Workspaces->All()) server->m_ProjectManager->RefreshGenerated(ws);
+}
+
 static void AnnounceStart(Ied::Server* server) {
 	if (!server->IsMaster()) return;
 	Announce("LISTENING", ListeningUrl(server->m_Config, server->m_Port).View());
@@ -204,6 +212,7 @@ int32 main(int32 argc, char8** argv) {
 	}
 	AnnounceStart(server);
 	server->m_LogFile.Write((Core::String("listening: ") + ListeningUrl(config, server->m_Port).View()).View());
+	RefreshGeneratedSolutions(server);
 	WatchMaster(server, control);
 	http->Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
 	server->m_LogFile.Write(Core::StringView("exit: the HTTP server stopped"));
