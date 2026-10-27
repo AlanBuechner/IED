@@ -674,15 +674,25 @@ start.
 `Serialization::SchemaRegistry` loads JSON Schema documents (`Load(path)` from JSONC files, `Add(name, text)` from
 memory) and resolves `$ref`s within and across them (`"#/$defs/x"`, `"../common.json#/$defs/y"`; names are folded:
 `/` separators, no `.` or `..`, ASCII case). The dialect is the draft 2020-12 subset that IED's
-`tools/pylib/minischema.py` knows:
+`tools/pylib/minischema.py` knows, which covers what tools' schemas use (MCP servers' tool schemas among them):
 
 - assertions: `type enum const pattern minLength maxLength minimum maximum exclusiveMinimum exclusiveMaximum
-  required properties additionalProperties items minItems maxItems uniqueItems oneOf anyOf allOf not $ref`;
-- annotations: `$schema $id $defs $comment title description default examples deprecated readOnly writeOnly format
-  markdownDescription enumDescriptions`, and any key starting with `x-` (such as `x-ied-tiers`).
+  multipleOf required properties patternProperties additionalProperties propertyNames minProperties maxProperties
+  dependentRequired dependentSchemas items prefixItems minItems maxItems uniqueItems contains minContains maxContains
+  oneOf anyOf allOf not if then else $ref`;
+- annotations: `$schema $id $defs definitions $comment title description default examples deprecated readOnly
+  writeOnly format markdownDescription enumDescriptions`, and any key starting with `x-` (such as `x-ied-tiers`).
+  `definitions` is draft 7's name of `$defs`: a `$ref` to `#/definitions/x` resolves like any pointer.
 
-Loading refuses any other keyword, and a `pattern` that does not compile (patterns are `Core::Regex`, searched for
-anywhere in the string), so a schema never relies on a check nothing makes.
+As 2020-12 defines them: `patternProperties` checks each member whose name a pattern matches (and such a member is no
+`additionalProperties` one), `propertyNames` checks each member's name as a string, `multipleOf` holds for integers
+exactly and for floats within a part in 10^9 of the quotient (0.3 is a multiple of 0.1), `contains` wants at least
+`minContains` matching items (1 when it is not given) and at most `maxContains`, `items` after a `prefixItems` checks
+the items past the prefix, and `if` picks `then` or `else` (it reports nothing itself). Not supported:
+`unevaluatedProperties`, `unevaluatedItems`, `$dynamicRef` / `$anchor` and the `content*` keywords. Loading refuses any
+other keyword, a `pattern` or `patternProperties` name that does not compile (patterns are `Core::Regex`, searched for
+anywhere in the string) and a `multipleOf` that is not a positive number, so a schema never relies on a check nothing
+makes.
 
 `Serialization::ValidateJson(registry, name, pointer, value)` returns the `SchemaProblem`s (`path`, a JSON pointer
 into the value with `~0` and `~1` escapes, and `message`); none means valid. The checks and messages match
@@ -1179,7 +1189,11 @@ if (got.ok) printf("%d\n", got.response.status);
   is false when the connection closed (`CloseCode()`, `CloseReason()`), failed (`Error()`) or the wait timed out
   (`TimedOut()`; still open). `LastReceivedNs()` is when bytes last came from the peer, a pong included, so a server
   can tell a quiet client from a gone one. `SendText`, `SendBinary`, `Ping` and `Close(code, reason)` are safe from any thread
-  while another receives - a server can push from anywhere. Bad frames close the connection with the RFC's code:
+  while another receives - a server can push from anywhere. A send waits for the peer at most the send wait
+  (`SetSendWaitMs`, 10 s by default, for each 64 KiB): a peer that stopped reading (a phone asleep) then has the
+  connection cut off - shut down both ways, which ends the receiving thread's wait too, closing code 1006, and every
+  later send false at once. `Close`, and a receive that ends the connection, never wait behind another thread's send:
+  when one holds the connection for more than 200 ms they cut it off rather than send the close frame. Bad frames close the connection with the RFC's code:
   1002 (an unmasked client frame, reserved bits, an unknown opcode, a length not in its shortest form, a fragmented
   or long control frame, a stray continuation), 1007 (text that is not UTF-8), 1009 (over `SetMaxMessageBytes`, 16
   MiB by default). The frame layer is pure functions too (`ParseFrame`, `WriteFrame`, `ReadClosePayload`,
@@ -1191,10 +1205,11 @@ targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers;
 client's address a handler sees, three
 pipelined requests on one connection, a chunked request, HEAD, Expect: 100-continue, HTTP/1.0, the refusals, a
 handler that throws, 8 concurrent clients and Stop from a handler; the client's chunked, until-close and interim
-responses and its failures. `websocket_tests.cf` (16): frames at every length form, masked and not, every rule a
+responses and its failures. `websocket_tests.cf` (18): frames at every length form, masked and not, every rule a
 frame can break, close payloads, RFC 6455's own handshake example, and on loopback the echo of text and 100 KB of
 binary, fragments with a ping between them, the 1002 / 1007 / 1009 closes, a close from either side, the server
-stopping, 100 pushes from 4 threads, timeouts and failed connections. `encoding_tests.cf` covers SHA-1 (FIPS 180
+stopping, 100 pushes from 4 threads, timeouts, a peer that never reads (the send gives up after its wait; a Close
+does not wait behind a held send, which ends too) and failed connections. `encoding_tests.cf` covers SHA-1 (FIPS 180
 vectors, a million bytes, pieces against whole) and Base64 (RFC 4648 vectors, every byte, malformed text).
 
 ---
@@ -1471,9 +1486,9 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 78 files, 688 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 79 files, 709 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
-reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
+reflection_invoke, reflection_annotation, reflection_layout, reflection_type, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
 platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes, platform_source_line, textparts). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 

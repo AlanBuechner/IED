@@ -6,19 +6,22 @@ ignores. Bedrock's Serialization::ValidateJson (C4, B68) implements the same dia
 Python's re with re.ASCII (ECMA-262 \\d and \\w are ASCII-only).
 """
 
+import math
 import os
 import re
 
 import jsonc
 
 ANNOTATIONS = {
-	"$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples", "deprecated",
+	"$schema", "$id", "$defs", "definitions", "$comment", "title", "description", "default", "examples", "deprecated",
 	"readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions",
 }
 ASSERTIONS = {
 	"type", "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
-	"exclusiveMinimum", "exclusiveMaximum", "required", "properties", "additionalProperties",
-	"items", "minItems", "maxItems", "uniqueItems", "oneOf", "anyOf", "allOf", "not", "$ref",
+	"exclusiveMinimum", "exclusiveMaximum", "multipleOf", "required", "properties", "patternProperties",
+	"additionalProperties", "propertyNames", "minProperties", "maxProperties", "dependentRequired", "dependentSchemas",
+	"items", "prefixItems", "minItems", "maxItems", "uniqueItems", "contains", "minContains", "maxContains",
+	"oneOf", "anyOf", "allOf", "not", "if", "then", "else", "$ref",
 }
 KEYWORDS = ANNOTATIONS | ASSERTIONS
 
@@ -118,17 +121,19 @@ def check_schema(schema, where, pointer=""):
 	for key, value in schema.items():
 		if key not in KEYWORDS and not key.startswith("x-"):
 			raise SchemaError("%s#%s: unsupported keyword %r" % (where, pointer, key))
+		if key == "multipleOf" and (isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0):
+			raise SchemaError("%s#%s: multipleOf is a number greater than 0" % (where, pointer))
 		for sub_pointer, sub in _subschemas(key, value, pointer):
 			check_schema(sub, where, sub_pointer)
 
 
 def _subschemas(key, value, pointer):
 	here = "%s/%s" % (pointer, key)
-	if key in ("properties", "$defs"):
+	if key in ("properties", "$defs", "definitions", "patternProperties", "dependentSchemas"):
 		return [("%s/%s" % (here, k), v) for k, v in value.items()]
-	if key in ("items", "additionalProperties", "not"):
+	if key in ("items", "additionalProperties", "not", "propertyNames", "contains", "if", "then", "else"):
 		return [(here, value)]
-	if key in ("oneOf", "anyOf", "allOf"):
+	if key in ("oneOf", "anyOf", "allOf", "prefixItems"):
 		return [("%s/%d" % (here, i), v) for i, v in enumerate(value)]
 	return []
 
@@ -262,6 +267,22 @@ def _c_exclusive_maximum(v, schema, arg, base, value, path, out):
 		out.append(Problem(path, "%r is not less than %r" % (value, arg)))
 
 
+# How far a quotient may be from a whole number and still count as one (0.3 / 0.1 is 2.9999999999999996).
+MULTIPLE_TOLERANCE = 1e-9
+
+
+def _is_multiple(value, of):
+	if json_type(value) == "integer" and isinstance(value, int) and isinstance(of, int):
+		return value % of == 0
+	quotient = value / of
+	return abs(quotient - math.floor(quotient + 0.5)) <= MULTIPLE_TOLERANCE * max(1.0, abs(quotient))
+
+
+def _c_multiple_of(v, schema, arg, base, value, path, out):
+	if _numeric(value) and not _is_multiple(value, arg):
+		out.append(Problem(path, "%r is not a multiple of %r" % (value, arg)))
+
+
 def _c_required(v, schema, arg, base, value, path, out):
 	if isinstance(value, dict):
 		for name in arg:
@@ -276,12 +297,53 @@ def _c_properties(v, schema, arg, base, value, path, out):
 				v._check(sub, base, value[name], _child(path, name), out)
 
 
+def _c_pattern_properties(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict):
+		for name in value:
+			for pattern, sub in arg.items():
+				if v.registry.pattern(pattern).search(name):
+					v._check(sub, base, value[name], _child(path, name), out)
+
+
+def _c_property_names(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict):
+		for name in value:
+			v._check(arg, base, name, _child(path, name), out)
+
+
+def _c_min_properties(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict) and len(value) < arg:
+		out.append(Problem(path, "expected at least %d properties, got %d" % (arg, len(value))))
+
+
+def _c_max_properties(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict) and len(value) > arg:
+		out.append(Problem(path, "expected at most %d properties, got %d" % (arg, len(value))))
+
+
+def _c_dependent_required(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict):
+		for name, needed in arg.items():
+			if name in value:
+				for other in needed:
+					if other not in value:
+						out.append(Problem(path, "property %r requires property %r" % (name, other)))
+
+
+def _c_dependent_schemas(v, schema, arg, base, value, path, out):
+	if isinstance(value, dict):
+		for name, sub in arg.items():
+			if name in value:
+				v._check(sub, base, value, path, out)
+
+
 def _c_additional(v, schema, arg, base, value, path, out):
 	if not isinstance(value, dict):
 		return
 	declared = schema.get("properties", {})
+	patterns = schema.get("patternProperties", {})
 	for name in value:
-		if name in declared:
+		if name in declared or any(v.registry.pattern(p).search(name) for p in patterns):
 			continue
 		if arg is False:
 			out.append(Problem(path, "unexpected property %r" % name))
@@ -291,8 +353,32 @@ def _c_additional(v, schema, arg, base, value, path, out):
 
 def _c_items(v, schema, arg, base, value, path, out):
 	if isinstance(value, list):
-		for i, item in enumerate(value):
-			v._check(arg, base, item, _child(path, i), out)
+		for i in range(len(schema.get("prefixItems", [])), len(value)):
+			v._check(arg, base, value[i], _child(path, i), out)
+
+
+def _c_prefix_items(v, schema, arg, base, value, path, out):
+	if isinstance(value, list):
+		for i, (sub, item) in enumerate(zip(arg, value)):
+			v._check(sub, base, item, _child(path, i), out)
+
+
+def _c_contains(v, schema, arg, base, value, path, out):
+	if not isinstance(value, list):
+		return
+	matching = sum(1 for i, item in enumerate(value) if not v._branch_problems(arg, base, item, _child(path, i)))
+	least = schema.get("minContains", 1)
+	most = schema.get("maxContains")
+	if matching < least:
+		out.append(Problem(path, "expected at least %d items that match 'contains', got %d" % (least, matching)))
+	elif most is not None and matching > most:
+		out.append(Problem(path, "expected at most %d items that match 'contains', got %d" % (most, matching)))
+
+
+def _c_if(v, schema, arg, base, value, path, out):
+	chosen = schema.get("then" if not v._branch_problems(arg, base, value, path) else "else")
+	if chosen is not None:
+		v._check(chosen, base, value, path, out)
 
 
 def _c_min_items(v, schema, arg, base, value, path, out):
@@ -370,10 +456,20 @@ _CHECKS = {
 	"maximum": _c_maximum,
 	"exclusiveMinimum": _c_exclusive_minimum,
 	"exclusiveMaximum": _c_exclusive_maximum,
+	"multipleOf": _c_multiple_of,
 	"required": _c_required,
 	"properties": _c_properties,
+	"patternProperties": _c_pattern_properties,
 	"additionalProperties": _c_additional,
+	"propertyNames": _c_property_names,
+	"minProperties": _c_min_properties,
+	"maxProperties": _c_max_properties,
+	"dependentRequired": _c_dependent_required,
+	"dependentSchemas": _c_dependent_schemas,
 	"items": _c_items,
+	"prefixItems": _c_prefix_items,
+	"contains": _c_contains,
+	"if": _c_if,
 	"minItems": _c_min_items,
 	"maxItems": _c_max_items,
 	"uniqueItems": _c_unique_items,

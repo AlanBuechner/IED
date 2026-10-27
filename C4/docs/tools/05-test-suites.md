@@ -238,7 +238,7 @@ lines in 401 files, `-O0` in 4.4 s and `-O2` in 15.0 s with `-j 3`; 60 s on 4 th
 
 ## 7. Bedrock tests
 
-`Bedrock/Tests/*_tests.cf` (37 files, 340 tests; also built for `-O2 -march=x86-64-v3` and `-march=native`). See
+`Bedrock/Tests/*_tests.cf` (79 files, 709 tests; also built for `-O2 -march=x86-64-v3` and `-march=native`). See
 [library/bedrock.md](../library/bedrock.md).
 The exit code of the `-test` executable is the failed-assertion count.
 

@@ -82,6 +82,53 @@ class KeywordTests(unittest.TestCase):
 		self.assertTrue(self.problems({"minLength": 2}, "a"))
 		self.assertTrue(self.problems({"maxLength": 1}, "ab"))
 
+	def test_multiple_of(self):
+		self.assertFalse(self.problems({"multipleOf": 3}, 9))
+		self.assertFalse(self.problems({"multipleOf": 3}, 12.0))
+		self.assertIn("/: 10 is not a multiple of 3", self.problems({"multipleOf": 3}, 10))
+		self.assertFalse(self.problems({"multipleOf": 0.1}, 0.3))
+		self.assertTrue(self.problems({"multipleOf": 0.1}, 0.35))
+		self.assertFalse(self.problems({"multipleOf": 3}, "x"))
+		with self.assertRaises(minischema.SchemaError):
+			minischema.check_schema({"multipleOf": 0}, "s.json")
+
+	def test_pattern_properties_and_property_names(self):
+		schema = {"properties": {"id": {}}, "patternProperties": {"^x-": {"type": "integer"}}, "additionalProperties": False}
+		self.assertFalse(self.problems(schema, {"id": 1, "x-size": 2}))
+		self.assertIn("/x-size: expected integer, got string", self.problems(schema, {"x-size": "2"}))
+		self.assertIn("/: unexpected property 'other'", self.problems(schema, {"other": 1}))
+		names = {"propertyNames": {"pattern": "^[a-z]+$"}}
+		self.assertFalse(self.problems(names, {"ab": 1}))
+		self.assertEqual(["/Bad: 'Bad' does not match pattern '^[a-z]+$'"], self.problems(names, {"Bad": 1}))
+
+	def test_property_counts_and_dependencies(self):
+		self.assertIn("/: expected at least 1 properties, got 0", self.problems({"minProperties": 1}, {}))
+		self.assertIn("/: expected at most 1 properties, got 2", self.problems({"maxProperties": 1}, {"a": 1, "b": 2}))
+		card = {"dependentRequired": {"card": ["cvc"]}, "dependentSchemas": {"limit": {"required": ["currency"]}}}
+		self.assertFalse(self.problems(card, {"card": 1, "cvc": 2}))
+		self.assertIn("/: property 'card' requires property 'cvc'", self.problems(card, {"card": 1}))
+		self.assertIn("/: missing required property 'currency'", self.problems(card, {"limit": 1}))
+
+	def test_contains_and_prefix_items(self):
+		some = {"contains": {"type": "string"}, "minContains": 2, "maxContains": 3}
+		self.assertFalse(self.problems(some, ["a", 1, "b"]))
+		self.assertIn("/: expected at least 2 items that match 'contains', got 1", self.problems(some, ["a", 1]))
+		self.assertIn("/: expected at most 3 items that match 'contains', got 4", self.problems(some, ["a", "b", "c", "d"]))
+		self.assertTrue(self.problems({"contains": {"const": 7}}, []))
+		tuple_schema = {"prefixItems": [{"type": "string"}, {"type": "integer"}], "items": {"type": "boolean"}}
+		self.assertFalse(self.problems(tuple_schema, ["a", 1, True]))
+		self.assertIn("/1: expected integer, got string", self.problems(tuple_schema, ["a", "b"]))
+		self.assertIn("/2: expected boolean, got integer", self.problems(tuple_schema, ["a", 1, 2]))
+
+	def test_conditionals_and_definitions(self):
+		schema = {"if": {"properties": {"country": {"const": "US"}}, "required": ["country"]}, "then": {"required": ["zip"]}, "else": {"required": ["postcode"]}}
+		self.assertFalse(self.problems(schema, {"country": "US", "zip": "1"}))
+		self.assertIn("/: missing required property 'zip'", self.problems(schema, {"country": "US"}))
+		self.assertIn("/: missing required property 'postcode'", self.problems(schema, {}))
+		drafted = {"definitions": {"n": {"type": "integer"}}, "items": {"$ref": "#/definitions/n"}}
+		self.assertFalse(self.problems(drafted, [1]))
+		self.assertTrue(self.problems(drafted, ["x"]))
+
 	def test_combinators(self):
 		one_of = {"oneOf": [{"type": "string"}, {"type": "array"}]}
 		self.assertFalse(self.problems(one_of, "s"))
@@ -112,7 +159,7 @@ class KeywordTests(unittest.TestCase):
 
 	def test_unknown_keyword_is_a_schema_error(self):
 		with self.assertRaises(minischema.SchemaError):
-			validator_for({"properties": {"a": {"patternProperties": {}}}}, self.tmp.name)
+			validator_for({"properties": {"a": {"unevaluatedProperties": False}}}, self.tmp.name)
 
 	def test_annotations_and_x_keywords_are_accepted(self):
 		schema = {"properties": {"a": {"type": "integer", "format": "int32", "x-ied-tiers": ["app"], "x-ied-merge": "replace"}}}

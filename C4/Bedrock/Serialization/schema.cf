@@ -5,20 +5,36 @@ include "Text/integer.ch"
 
 namespace Serialization
 {
-	const char*[14] kAnnotationKeywords = { "$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples",
-		"deprecated", "readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions" };
-	const char*[22] kAssertionKeywords = { "type", "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
-		"exclusiveMinimum", "exclusiveMaximum", "required", "properties", "additionalProperties", "items", "minItems", "maxItems",
-		"uniqueItems", "oneOf", "anyOf", "allOf", "not", "$ref" };
+	const int32 kAnnotationKeywordCount = 15;
+	const int32 kAssertionKeywordCount = 36;
+	// "definitions" is draft 7's "$defs", which the schemas of many tools (MCP servers among them) still use.
+	const char*[15] kAnnotationKeywords = { "$schema", "$id", "$defs", "definitions", "$comment", "title", "description", "default",
+		"examples", "deprecated", "readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions" };
+	const char*[36] kAssertionKeywords = { "type", "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
+		"exclusiveMinimum", "exclusiveMaximum", "multipleOf", "required", "properties", "patternProperties", "additionalProperties",
+		"propertyNames", "minProperties", "maxProperties", "dependentRequired", "dependentSchemas", "items", "prefixItems", "minItems",
+		"maxItems", "uniqueItems", "contains", "minContains", "maxContains", "oneOf", "anyOf", "allOf", "not", "if", "then", "else",
+		"$ref" };
 
 	bool IsSchemaKeyword(Core::StringView key) {
 		if (key.StartsWith(Core::StringView("x-"))) return true;
-		for (int32 i = 0; i < 14; ++i)
+		for (int32 i = 0; i < kAnnotationKeywordCount; ++i)
 			if (key == kAnnotationKeywords[i]) return true;
-		for (int32 i = 0; i < 22; ++i)
+		for (int32 i = 0; i < kAssertionKeywordCount; ++i)
 			if (key == kAssertionKeywords[i]) return true;
 		return false;
 	}
+
+	bool HoldsNamedSchemas(Core::StringView key) {
+		return key == "properties" || key == "$defs" || key == "definitions" || key == "patternProperties" || key == "dependentSchemas";
+	}
+
+	bool HoldsOneSchema(Core::StringView key) {
+		return key == "items" || key == "additionalProperties" || key == "not" || key == "propertyNames" || key == "contains" || key == "if" ||
+			key == "then" || key == "else";
+	}
+
+	bool HoldsSchemaList(Core::StringView key) { return key == "oneOf" || key == "anyOf" || key == "allOf" || key == "prefixItems"; }
 
 	// One part of a JSON pointer with its escapes undone.
 	static Core::String PointerPart(Core::StringView raw) {
@@ -105,18 +121,26 @@ namespace Serialization
 			Core::StringView key = schema.KeyAt(i);
 			DomNode value = schema.ValueAt(i);
 			if (!IsSchemaKeyword(key)) return SchemaError(error, where, "unsupported keyword ", key);
-			const bool named = key == "properties" || key == "$defs";
-			const bool single = key == "items" || key == "additionalProperties" || key == "not";
-			const bool list = key == "oneOf" || key == "anyOf" || key == "allOf";
-			if (key == "pattern" && !patterns.Contains(Core::String(value.AsView()))) {
-				Core::Regex* compiled = new Core::Regex(value.AsView());
-				if (!compiled->IsValid()) return SchemaError(error, where, "a pattern that does not compile: ", Core::StringView(compiled->Error()));
-				patterns.Insert(Core::String(value.AsView()), compiled);
-			}
+			const bool named = HoldsNamedSchemas(key);
+			const bool single = HoldsOneSchema(key);
+			const bool list = HoldsSchemaList(key);
+			if (key == "pattern" && !Compile(value.AsView(), where, error)) return false;
+			for (int64 j = 0; key == "patternProperties" && j < value.Count(); ++j)
+				if (!Compile(value.KeyAt(j), where, error)) return false;
+			if (key == "multipleOf" && (!(value.Kind() == DomKind::Int || value.Kind() == DomKind::Float) || value.AsFloat() <= 0.0))
+				return SchemaError(error, where, "multipleOf is a number greater than 0", Core::StringView(""));
 			if (single && !CheckSchema(value, where, error)) return false;
 			for (int64 j = 0; (named || list) && j < value.Count(); ++j)
 				if (!CheckSchema(named ? value.ValueAt(j) : value.At(j), where, error)) return false;
 		}
+		return true;
+	}
+
+	bool SchemaRegistry::Compile(Core::StringView source, Core::StringView where, Core::String& error) {
+		if (patterns.Contains(Core::String(source))) return true;
+		Core::Regex* compiled = new Core::Regex(source);
+		if (!compiled->IsValid()) return SchemaError(error, where, "a pattern that does not compile: ", Core::StringView(compiled->Error()));
+		patterns.Insert(Core::String(source), compiled);
 		return true;
 	}
 

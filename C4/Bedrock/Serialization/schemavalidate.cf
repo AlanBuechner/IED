@@ -144,6 +144,22 @@ namespace Serialization
 		if (broken) check.Add(path, ((JsonText(value) + broken) + JsonText(argument).View()).View());
 	}
 
+	// How far a quotient may be from a whole number and still count as one: a float's division is not exact
+	// (0.3 / 0.1 is 2.9999999999999996).
+	const double kMultipleTolerance = 0.000000001;
+
+	static bool IsMultiple(const DomNode& value, const DomNode& of) {
+		if (value.Kind() == DomKind::Int && of.Kind() == DomKind::Int) return of.AsInt() != 0 && value.AsInt() % of.AsInt() == 0;
+		const double quotient = value.AsFloat() / of.AsFloat();
+		const double nearest = floor(quotient + 0.5);
+		const double scale = fabs(quotient) > 1.0 ? fabs(quotient) : 1.0;
+		return fabs(quotient - nearest) <= kMultipleTolerance * scale;
+	}
+
+	static void CheckMultiple(SchemaCheck& check, const DomNode& argument, const DomNode& value, Core::StringView path) {
+		if (IsNumber(value) && !IsMultiple(value, argument)) check.Add(path, ((JsonText(value) + " is not a multiple of ") + JsonText(argument).View()).View());
+	}
+
 	// --- Objects and arrays --------------------------------------------------------------------------------------------
 
 	static void CheckRequired(SchemaCheck& check, const DomNode& names, const DomNode& value, Core::StringView path) {
@@ -161,22 +177,84 @@ namespace Serialization
 		}
 	}
 
+	// Whether a pattern of `patterns` (patternProperties) matches `name`.
+	static bool MatchesPattern(SchemaCheck& check, const DomNode& patterns, Core::StringView name) {
+		for (int64 i = 0; patterns.IsValid() && i < patterns.Count(); ++i) {
+			const Core::Regex* pattern = check.registry->Pattern(patterns.KeyAt(i));
+			if (pattern && pattern->Contains(name)) return true;
+		}
+		return false;
+	}
+
+	static void CheckPatternProperties(SchemaCheck& check, const DomNode& patterns, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		for (int64 i = 0; i < value.Count(); ++i)
+			for (int64 p = 0; p < patterns.Count(); ++p) {
+				const Core::Regex* pattern = check.registry->Pattern(patterns.KeyAt(p));
+				if (pattern && pattern->Contains(value.KeyAt(i))) Check(check, patterns.ValueAt(p), base, value.ValueAt(i), Child(path, value.KeyAt(i)).View());
+			}
+	}
+
+	// Each property's name, as a string, against the schema.
+	static void CheckPropertyNames(SchemaCheck& check, const DomNode& schema, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		DomDoc names;
+		for (int64 i = 0; i < value.Count(); ++i) Check(check, schema, base, names.NewString(value.KeyAt(i)), Child(path, value.KeyAt(i)).View());
+	}
+
+	static void CheckPropertyCount(SchemaCheck& check, Core::StringView keyword, const DomNode& argument, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		const bool fewer = keyword == "minProperties" && value.Count() < argument.AsInt();
+		if (!fewer && !(keyword == "maxProperties" && value.Count() > argument.AsInt())) return;
+		Core::StringBuilder message;
+		message.Append(fewer ? "expected at least " : "expected at most ");
+		message.AppendInt(argument.AsInt());
+		message.Append(" properties, got ");
+		message.AppendInt(value.Count());
+		check.Add(path, message.View());
+	}
+
+	static void CheckDependentRequired(SchemaCheck& check, const DomNode& dependencies, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		for (int64 i = 0; i < dependencies.Count(); ++i) {
+			if (!value.Member(Core::String(dependencies.KeyAt(i)).CStr()).IsValid()) continue;
+			DomNode needed = dependencies.ValueAt(i);
+			for (int64 j = 0; j < needed.Count(); ++j)
+				if (!value.Member(Core::String(needed.At(j).AsView()).CStr()).IsValid())
+					check.Add(path, (((Core::String("property ") + Quoted(dependencies.KeyAt(i)).View()) + " requires property ") + JsonText(needed.At(j)).View()).View());
+		}
+	}
+
+	static void CheckDependentSchemas(SchemaCheck& check, const DomNode& dependencies, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		for (int64 i = 0; i < dependencies.Count(); ++i)
+			if (value.Member(Core::String(dependencies.KeyAt(i)).CStr()).IsValid()) Check(check, dependencies.ValueAt(i), base, value, path);
+	}
+
 	static void CheckAdditional(SchemaCheck& check, const DomNode& schema, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
 		if (value.Kind() != DomKind::Object) return;
 		DomNode declared = schema.Member("properties");
+		DomNode patterns = schema.Member("patternProperties");
 		for (int64 i = 0; i < value.Count(); ++i) {
 			Core::StringView name = value.KeyAt(i);
 			if (declared.IsValid() && declared.Member(Core::String(name).CStr()).IsValid()) continue;
+			if (MatchesPattern(check, patterns, name)) continue;
 			if (argument.Kind() == DomKind::Bool && !argument.AsBool()) check.Add(path, (Core::String("unexpected property ") + Quoted(name).View()).View());
 			else Check(check, argument, base, value.ValueAt(i), Child(path, name).View());
 		}
 	}
 
-	static void CheckArray(SchemaCheck& check, Core::StringView keyword, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
+	static void CheckArray(SchemaCheck& check, const DomNode& schema, Core::StringView keyword, const DomNode& argument, Core::StringView base, const DomNode& value,
+		Core::StringView path) {
 		if (value.Kind() != DomKind::Array) return;
 		const int64 count = value.Count();
+		if (keyword == "prefixItems") {
+			for (int64 i = 0; i < count && i < argument.Count(); ++i) Check(check, argument.At(i), base, value.At(i), Index(path, i).View());
+			return;
+		}
 		if (keyword == "items") {
-			for (int64 i = 0; i < count; ++i) Check(check, argument, base, value.At(i), Index(path, i).View());
+			DomNode prefix = schema.Member("prefixItems");
+			for (int64 i = prefix.IsValid() ? prefix.Count() : 0; i < count; ++i) Check(check, argument, base, value.At(i), Index(path, i).View());
 			return;
 		}
 		Core::StringBuilder message;
@@ -211,6 +289,35 @@ namespace Serialization
 		branch.registry = check.registry;
 		Check(branch, schema, base, value, path);
 		return branch.problems;
+	}
+
+	static int64 CountOr(const DomNode& schema, const char* keyword, int64 fallback) {
+		DomNode bound = schema.Member(keyword);
+		return bound.IsValid() ? bound.AsInt() : fallback;
+	}
+
+	// How many items match `contains`: at least minContains (1 when it is not given), at most maxContains.
+	static void CheckContains(SchemaCheck& check, const DomNode& schema, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Array) return;
+		int64 matching = 0;
+		for (int64 i = 0; i < value.Count(); ++i)
+			if (BranchProblems(check, argument, base, value.At(i), Index(path, i).View()).IsEmpty()) matching += 1;
+		const int64 least = CountOr(schema, "minContains", 1);
+		const int64 most = CountOr(schema, "maxContains", -1);
+		const bool fewer = matching < least;
+		if (!fewer && !(most >= 0 && matching > most)) return;
+		Core::StringBuilder message;
+		message.Append(fewer ? "expected at least " : "expected at most ");
+		message.AppendInt(fewer ? least : most);
+		message.Append(" items that match 'contains', got ");
+		message.AppendInt(matching);
+		check.Add(path, message.View());
+	}
+
+	// `then` when the value matches `if`, `else` when it does not; `if` itself reports nothing.
+	static void CheckConditional(SchemaCheck& check, const DomNode& schema, const DomNode& condition, Core::StringView base, const DomNode& value, Core::StringView path) {
+		DomNode chosen = schema.Member(BranchProblems(check, condition, base, value, path).IsEmpty() ? "then" : "else");
+		if (chosen.IsValid()) Check(check, chosen, base, value, path);
 	}
 
 	static int64 Fewest(const Core::Array<Core::Array<SchemaProblem>>& results) {
@@ -294,10 +401,19 @@ namespace Serialization
 		else if (keyword == "const") CheckConst(check, argument, value, path);
 		else if (keyword == "pattern" || keyword == "minLength" || keyword == "maxLength") CheckString(check, keyword, argument, value, path);
 		else if (keyword == "minimum" || keyword == "maximum" || keyword == "exclusiveMinimum" || keyword == "exclusiveMaximum") CheckNumber(check, keyword, argument, value, path);
+		else if (keyword == "multipleOf") CheckMultiple(check, argument, value, path);
 		else if (keyword == "required") CheckRequired(check, argument, value, path);
 		else if (keyword == "properties") CheckProperties(check, argument, base, value, path);
+		else if (keyword == "patternProperties") CheckPatternProperties(check, argument, base, value, path);
 		else if (keyword == "additionalProperties") CheckAdditional(check, schema, argument, base, value, path);
-		else if (keyword == "items" || keyword == "minItems" || keyword == "maxItems" || keyword == "uniqueItems") CheckArray(check, keyword, argument, base, value, path);
+		else if (keyword == "propertyNames") CheckPropertyNames(check, argument, base, value, path);
+		else if (keyword == "minProperties" || keyword == "maxProperties") CheckPropertyCount(check, keyword, argument, value, path);
+		else if (keyword == "dependentRequired") CheckDependentRequired(check, argument, value, path);
+		else if (keyword == "dependentSchemas") CheckDependentSchemas(check, argument, base, value, path);
+		else if (keyword == "items" || keyword == "prefixItems" || keyword == "minItems" || keyword == "maxItems" || keyword == "uniqueItems")
+			CheckArray(check, schema, keyword, argument, base, value, path);
+		else if (keyword == "contains") CheckContains(check, schema, argument, base, value, path);
+		else if (keyword == "if") CheckConditional(check, schema, argument, base, value, path);
 		else if (keyword == "oneOf" || keyword == "anyOf" || keyword == "allOf") CheckCombined(check, keyword, argument, base, value, path);
 		else if (keyword == "not") CheckNot(check, argument, base, value, path);
 		else if (keyword == "$ref") CheckRef(check, argument, base, value, path);

@@ -135,6 +135,79 @@ class SchemaTests {
 		assert_se(": value must not match the 'not' schema", Problems(all, "4").CStr(), "not");
 	}
 
+	[test("multiple_of")]
+	public static void TestMultipleOf() {
+		Serialization::SchemaRegistry* whole = Registry("{\"multipleOf\": 3}");
+		assert_true(Valid(whole, "9") && Valid(whole, "-6") && Valid(whole, "0") && Valid(whole, "12.0"), "multiples of an integer");
+		assert_se(": 10 is not a multiple of 3", Problems(whole, "10").CStr(), "another integer");
+		assert_true(!Valid(whole, "4.5") && Valid(whole, "\"x\""), "a fraction is none; other types pass");
+		Serialization::SchemaRegistry* tenth = Registry("{\"multipleOf\": 0.1}");
+		assert_true(Valid(tenth, "0.3") && Valid(tenth, "2.7") && Valid(tenth, "5"), "a float's multiples, within the division's error");
+		assert_se(": 0.35 is not a multiple of 0.1", Problems(tenth, "0.35").CStr(), "and one that is not");
+		Core::String error;
+		Serialization::SchemaRegistry registry;
+		assert_true(!registry.Add(Core::StringView("zero.json"), Core::StringView("{\"multipleOf\": 0}"), error) && error.View().Contains(Core::StringView("greater than 0")),
+			"multipleOf must be positive");
+	}
+
+	[test("pattern_properties_and_names")]
+	public static void TestPatternProperties() {
+		Serialization::SchemaRegistry* map = Registry(
+			"{\"properties\": {\"id\": {\"type\": \"string\"}}, \"patternProperties\": {\"^x-\": {\"type\": \"integer\"}, \"count$\": {\"minimum\": 0}},"
+			" \"additionalProperties\": false}");
+		assert_true(Valid(map, "{\"id\": \"a\", \"x-size\": 2, \"x-count\": 3}"), "names a pattern matches are no additional properties");
+		assert_se("/x-size: expected integer, got string", Problems(map, "{\"x-size\": \"2\"}").CStr(), "each match against its pattern's schema");
+		assert_true(!Valid(map, "{\"x-count\": -1}") && !Valid(map, "{\"x-count\": 1.5}"), "a name two patterns match is checked against both");
+		assert_se(": unexpected property \"other\"", Problems(map, "{\"other\": 1}").CStr(), "a name nothing matches is additional");
+		Serialization::SchemaRegistry* names = Registry("{\"propertyNames\": {\"pattern\": \"^[a-z_]+$\", \"maxLength\": 4}}");
+		assert_true(Valid(names, "{\"ab\": 1, \"c_d\": 2}"), "every name fits");
+		assert_se("/Bad: \"Bad\" does not match pattern \"^[a-z_]+$\"", Problems(names, "{\"Bad\": 1}").CStr(), "a name that does not, at its member");
+		assert_se("/abcde: string longer than 4", Problems(names, "{\"abcde\": 1}").CStr(), "names are strings to the subschema");
+		Core::String error;
+		Serialization::SchemaRegistry registry;
+		assert_true(!registry.Add(Core::StringView("bad.json"), Core::StringView("{\"patternProperties\": {\"(\": {}}}"), error), "a pattern name that does not compile");
+	}
+
+	[test("property_counts_and_dependencies")]
+	public static void TestPropertyCounts() {
+		Serialization::SchemaRegistry* counted = Registry("{\"minProperties\": 1, \"maxProperties\": 2}");
+		assert_true(Valid(counted, "{\"a\": 1}") && Valid(counted, "[]"), "within the bounds; other types pass");
+		assert_se(": expected at least 1 properties, got 0", Problems(counted, "{}").CStr(), "too few");
+		assert_se(": expected at most 2 properties, got 3", Problems(counted, "{\"a\": 1, \"b\": 2, \"c\": 3}").CStr(), "too many");
+		Serialization::SchemaRegistry* card = Registry(
+			"{\"dependentRequired\": {\"card\": [\"expires\", \"cvc\"]}, \"dependentSchemas\": {\"limit\": {\"required\": [\"currency\"]}}}");
+		assert_true(Valid(card, "{\"card\": 1, \"expires\": 2, \"cvc\": 3}") && Valid(card, "{\"expires\": 2}"), "dependencies met, or not called for");
+		assert_se(": property \"card\" requires property \"cvc\"", Problems(card, "{\"card\": 1, \"expires\": 2}").CStr(), "one missing");
+		assert_se(": missing required property \"currency\"", Problems(card, "{\"limit\": 5}").CStr(), "a dependent schema");
+	}
+
+	[test("contains_and_tuples")]
+	public static void TestContains() {
+		Serialization::SchemaRegistry* some = Registry("{\"contains\": {\"type\": \"string\"}, \"minContains\": 2, \"maxContains\": 3}");
+		assert_true(Valid(some, "[\"a\", 1, \"b\"]") && Valid(some, "{}"), "two strings among the items; other types pass");
+		assert_se(": expected at least 2 items that match 'contains', got 1", Problems(some, "[\"a\", 1]").CStr(), "too few");
+		assert_se(": expected at most 3 items that match 'contains', got 4", Problems(some, "[\"a\", \"b\", \"c\", \"d\"]").CStr(), "too many");
+		Serialization::SchemaRegistry* any = Registry("{\"contains\": {\"const\": 7}}");
+		assert_true(Valid(any, "[1, 7]") && !Valid(any, "[]"), "one at least, by default");
+		Serialization::SchemaRegistry* tuple = Registry("{\"prefixItems\": [{\"type\": \"string\"}, {\"type\": \"integer\"}], \"items\": {\"type\": \"boolean\"}}");
+		assert_true(Valid(tuple, "[\"a\", 1, true, false]") && Valid(tuple, "[\"a\"]"), "the prefix by position, the rest by items");
+		assert_se("/1: expected integer, got string", Problems(tuple, "[\"a\", \"b\"]").CStr(), "a prefix item");
+		assert_se("/2: expected boolean, got integer", Problems(tuple, "[\"a\", 1, 2]").CStr(), "an item after the prefix");
+	}
+
+	[test("conditionals")]
+	public static void TestConditionals() {
+		Serialization::SchemaRegistry* shipping = Registry(
+			"{\"if\": {\"properties\": {\"country\": {\"const\": \"US\"}}, \"required\": [\"country\"]},"
+			" \"then\": {\"required\": [\"zip\"]}, \"else\": {\"required\": [\"postcode\"]}}");
+		assert_true(Valid(shipping, "{\"country\": \"US\", \"zip\": \"1\"}") && Valid(shipping, "{\"country\": \"FR\", \"postcode\": \"2\"}"), "then and else");
+		assert_se(": missing required property \"zip\"", Problems(shipping, "{\"country\": \"US\"}").CStr(), "then, when if matches");
+		assert_se(": missing required property \"postcode\"", Problems(shipping, "{}").CStr(), "else, when it does not");
+		assert_true(Valid(Registry("{\"if\": {\"type\": \"string\"}}"), "1"), "if alone checks nothing");
+		Serialization::SchemaRegistry* drafted = Registry("{\"definitions\": {\"n\": {\"type\": \"integer\"}}, \"items\": {\"$ref\": \"#/definitions/n\"}}");
+		assert_true(Valid(drafted, "[1]") && !Valid(drafted, "[\"x\"]"), "draft 7's definitions, as $defs");
+	}
+
 	[test("references")]
 	public static void TestReferences() {
 		Serialization::SchemaRegistry registry;
