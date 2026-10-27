@@ -1,12 +1,12 @@
 // mentions.js - what the composer's @ list offers (docs/04 "Attachments and @-mentions"): the workspace's files and their
 // folders (fs.files), symbols after "@#" (lsp.workspaceSymbols), terminals (term.list), output sources (out.sources),
-// the other chats (chat.list), and the Error List and the working tree's diff; each a mention {kind, ref, label} the
-// message carries, its "@label" in the text.
+// the other chats (chat.list), the resources of the workspace's MCP servers (mcp.resources, docs/04 "MCP"), and the Error
+// List and the working tree's diff; each a mention {kind, ref, label} the message carries, its "@label" in the text.
 
 const MOST_ROWS = 12;
 const MOST_FILES = 40;
 
-export const KIND_ICONS = { file: "file", folder: "folder", symbol: "symbol-misc", terminal: "terminal", output: "output", problems: "warning", diff: "diff", chat: "comment-discussion" };
+export const KIND_ICONS = { file: "file", folder: "folder", symbol: "symbol-misc", terminal: "terminal", output: "output", problems: "warning", diff: "diff", chat: "comment-discussion", mcp: "plug" };
 
 const FIXED = [
 	{ kind: "problems", ref: "", label: "problems", detail: "the Error List" },
@@ -67,6 +67,11 @@ export function symbolMention(symbol, wsId) {
 	const line = location.range ? location.range.start.line + 1 : 1;
 	const name = symbol.containerName ? symbol.containerName + "::" + symbol.name : symbol.name;
 	return { kind: "symbol", ref: path + ":" + line, label: "#" + name, detail: path };
+}
+
+// An MCP server's resource as a mention: the server and the URI it is read by (resources/read when the turn starts).
+export function resourceMention(resource) {
+	return { kind: "mcp", ref: resource.server + " " + resource.uri, label: "mcp:" + resource.server + "/" + resource.name, detail: resource.title || resource.description || resource.uri };
 }
 
 // A character a label goes on with: a mention written into a longer word or path ("@src/main.c" typed on to
@@ -136,15 +141,17 @@ export class MentionSource {
 
 	async fixedRows() {
 		if (this.fixed) return this.fixed;
-		const [terms, outputs, chats] = await Promise.all([
+		const [terms, outputs, chats, resources] = await Promise.all([
 			this.request("term.list", { wsId: this.wsId }),
 			this.request("out.sources", { wsId: this.wsId }),
 			this.request("chat.list", { wsId: this.wsId }),
+			this.request("mcp.resources", { wsId: this.wsId }),
 		]);
 		const rows = FIXED.slice();
 		for (const term of terms ? terms.terminals : []) rows.push({ kind: "terminal", ref: term.termId, label: "terminal:" + (term.title || term.termId), detail: term.alive ? "running" : "exited" });
 		for (const source of outputs ? outputs.sources : []) rows.push({ kind: "output", ref: source.sourceId, label: "output:" + (source.label || source.sourceId) });
 		for (const chat of chats ? chats.chats : []) if (chat.chatId !== this.chatId) rows.push({ kind: "chat", ref: chat.chatId, label: "chat:" + chat.title, detail: chat.turnCount + " turns" });
+		for (const resource of resources ? resources.resources : []) rows.push(resourceMention(resource));
 		this.fixed = rows;
 		return rows;
 	}

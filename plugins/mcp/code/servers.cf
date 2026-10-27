@@ -194,6 +194,7 @@ namespace Mcp
 					halted.Push(entry);
 					if (entry->config->hash != config->hash) {
 						entry->tools.Clear();
+						entry->resources.Clear();
 						entry->toolsKnown = false;
 					}
 				}
@@ -269,8 +270,9 @@ namespace Mcp
 		Changed(place);
 		McpClient* client = nullptr;
 		Core::Array<McpTool*> tools;
+		Core::Array<McpResource*> resources;
 		Core::String error;
-		bool ok = Connect(place, entry->config, generation, client, tools, new StartLog(), error);
+		bool ok = Connect(place, entry->config, generation, client, tools, resources, new StartLog(), error);
 		bool stale = false;
 		Core::String line;
 		{
@@ -284,6 +286,7 @@ namespace Mcp
 				entry->client = client;
 				entry->state = ServerState::Running;
 				entry->tools = tools;
+				entry->resources = resources;
 				entry->toolsKnown = true;
 				entry->toolsHash = entry->config->hash;
 				entry->serverName = client->serverName;
@@ -397,6 +400,43 @@ namespace Mcp
 		return out.ToString();
 	}
 
+	Core::Array<McpResource*> ReadResourcesPage(const Serialization::DomNode& result, Core::String& cursor) {
+		Core::Array<McpResource*> found;
+		Serialization::DomNode listed = result.Member("resources");
+		for (int64 i = 0; listed.Kind() == Serialization::DomKind::Array && i < listed.Count(); ++i) {
+			Serialization::DomNode given = listed.At(i);
+			if (given.Member("uri").AsView().IsEmpty()) continue;
+			McpResource* resource = new McpResource();
+			resource->uri = Core::String(given.Member("uri").AsView());
+			resource->name = Core::String(given.Member("name").AsView().IsEmpty() ? given.Member("uri").AsView() : given.Member("name").AsView());
+			resource->title = Core::String(given.Member("title").AsView());
+			resource->description = Core::String(given.Member("description").AsView());
+			resource->mimeType = Core::String(given.Member("mimeType").AsView());
+			found.Push(resource);
+		}
+		cursor = Core::String(result.Member("nextCursor").AsView());
+		return found;
+	}
+
+	// Every page of a server's resources/list; false with `error`.
+	static bool ListResources(McpClient* client, const ServerConfig* config, Core::Array<McpResource*>& resources, Core::String& error) {
+		Core::String cursor;
+		for (int64 page = 0; page < kListPagesMost; ++page) {
+			IED::JsonWriter params;
+			params.BeginObject();
+			if (!cursor.IsEmpty()) params.Field("cursor", cursor.View());
+			params.EndObject();
+			Serialization::DomNode result = client->Call(Core::StringView("resources/list"), params.View(), (int32)(config->startSeconds * 1000), nullptr, error);
+			if (!result.IsValid()) {
+				error = Core::String("resources/list: ") + error.View();
+				return false;
+			}
+			for (McpResource* resource : ReadResourcesPage(result, cursor)) resources.Push(resource);
+			if (cursor.IsEmpty()) return true;
+		}
+		return true;
+	}
+
 	// Every page of a server's tools/list, the excluded ones left out, each named uniquely; false with `error`.
 	static bool ListTools(McpClient* client, const ServerConfig* config, Core::Array<McpTool*>& tools, Core::String& error) {
 		Core::String cursor;
@@ -420,7 +460,7 @@ namespace Mcp
 		return true;
 	}
 
-	bool McpService::Connect(WorkspaceServers* place, ServerConfig* config, int64 generation, McpClient*& client, Core::Array<McpTool*>& tools, StartLog* printed, Core::String& error) {
+	bool McpService::Connect(WorkspaceServers* place, ServerConfig* config, int64 generation, McpClient*& client, Core::Array<McpTool*>& tools, Core::Array<McpResource*>& resources, StartLog* printed, Core::String& error) {
 		ServerLaunch launch;
 		IED::Workspace ws;
 		{
@@ -463,6 +503,8 @@ namespace Mcp
 		}
 		for (McpTool* tool : tools)
 			if (!tool->note.IsEmpty()) Note(place, entry, ((tool->name + ": ") + tool->note.View()).View(), name.View());
+		Core::String listing;
+		if (client->hasResources && !ListResources(client, config, resources, listing)) Note(place, entry, (Core::String("its resources are not listed: ") + listing.View()).View(), name.View());
 		return true;
 	}
 
@@ -536,6 +578,13 @@ namespace Mcp
 			context->StartThread([self, ws, server, generation]() { self->Relist(ws.View(), server.View(), generation); });
 			return;
 		}
+		if (message->method == "notifications/resources/list_changed") {
+			McpService* self = this;
+			Core::String ws = Core::String(wsId);
+			Core::String server = Core::String(name);
+			context->StartThread([self, ws, server, generation]() { self->RelistResources(ws.View(), server.View(), generation); });
+			return;
+		}
 		if (message->method == "notifications/message") {
 			Serialization::DomNode data = message->params.Member("data");
 			Core::String text = data.Kind() == Serialization::DomKind::String ? Core::String(data.AsView()) : IED::NodeJson(data);
@@ -573,6 +622,33 @@ namespace Mcp
 		said.AppendInt(tools.Count());
 		said.Append(tools.Count() == 1 ? " tool; a chat's next turn has them" : " tools; a chat's next turn has them");
 		Note(place, entry, said.View(), name);
+		Changed(place);
+	}
+
+	void McpService::RelistResources(Core::StringView wsId, Core::StringView name, int64 generation) {
+		WorkspaceServers* place = nullptr;
+		McpClient* client = nullptr;
+		ServerConfig* config = nullptr;
+		{
+			Threading::LockGuard guard(lock);
+			place = Find(wsId);
+			ServerEntry* entry = place ? FindEntryLocked(place, name, generation) : nullptr;
+			if (!entry || entry->state != ServerState::Running) return;
+			client = entry->client;
+			config = entry->config;
+		}
+		Core::Array<McpResource*> resources;
+		Core::String error;
+		if (!ListResources(client, config, resources, error)) {
+			Note(place, nullptr, (Core::String("its resources changed, but ") + error.View()).View(), name);
+			return;
+		}
+		{
+			Threading::LockGuard guard(lock);
+			ServerEntry* entry = FindEntryLocked(place, name, generation);
+			if (!entry) return;
+			entry->resources = resources;
+		}
 		Changed(place);
 	}
 
@@ -807,9 +883,10 @@ namespace Mcp
 			if (!config) return Refused(problem.View());
 			McpClient* client = nullptr;
 			Core::Array<McpTool*> tools;
+			Core::Array<McpResource*> resources;
 			Core::String error;
 			StartLog* printed = new StartLog();
-			const bool ok = Connect(place, config, kTestGeneration, client, tools, printed, error);
+			const bool ok = Connect(place, config, kTestGeneration, client, tools, resources, printed, error);
 			Core::String json = TestJson(ok, ServiceNowMs() - started, client, tools, error.View(), printed->Tail(8).View());
 			if (ok) client->Close();
 			return json;

@@ -2146,6 +2146,37 @@ def mcp_settings_page(run):
 	run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {}})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def mcp_resource_mention(run):
+	"""An MCP server's resources in the composer's @ list (docs/04 "MCP" Resources): picked like a file, read with
+	resources/read when the turn starts, shown as a chip under the sent message. Against tools/fake-mcp."""
+	import sys
+	page = open_chat(run)
+	ws_id = page.evaluate("ied_shell.wsId")
+	run.request("ws.setTrust", {"wsId": ws_id, "trusted": True})
+	run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {"fake": {"command": sys.executable, "args": ["-I", FAKE_MCP], "permission": "auto"}}})
+	deadline = time.time() + 20
+	while not run.request("mcp.resources", {"wsId": ws_id})["resources"] and time.time() < deadline:
+		time.sleep(0.2)
+	run.target.queue_model(model_script({"text": "The note says to ship it.", "chunk": 6}, {"finish": "stop"}))
+	page.click(".chat-input")
+	page.keyboard.type("What does @mcp:fake/fi")
+	page.wait_for_selector(".chat-mention-list:not([hidden]) .chat-mention-row.on:has-text('@mcp:fake/first-note')", timeout=10000)
+	run.shot("mention-list")
+	page.keyboard.press("Enter")
+	check(page.input_value(".chat-input") == "What does @mcp:fake/first-note ", "the mention is written: %r" % page.input_value(".chat-input"))
+	page.keyboard.type("say?")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	chips = run.texts(".chat-turn:last-child .chat-chips .chat-chip")
+	check(len(chips) == 1 and "@mcp:fake/first-note" in chips[0], "the message shows the resource it named: %s" % chips)
+	user = [m for m in run.target.model_requests()[-1]["body"]["messages"] if m["role"] == "user"][0]
+	text = user["content"] if isinstance(user["content"], str) else user["content"][0]["text"]
+	check('<mention label="@mcp:fake/first-note" kind="mcp">' in text and "ship it" in text, "the model got the resource's text: %r" % text[-300:])
+	run.shot("sent")
+	run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {}})
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Git (docs/10 "Git", mockup 05): the mock's canned repository; the real server's is the fixture made a repository
 # (targets.make_repository).

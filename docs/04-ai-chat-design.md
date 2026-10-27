@@ -6,7 +6,7 @@ The AI is a first-class citizen of IED. This doc covers the AI runtime's cross-c
 
 ## Where things live
 
-- **AI runtime (the `ied.chat` plugin's server code, `plugins/chat/code/`, a built-in on the plugin API - `docs/26` "Built-ins on the API"):** providers, dialect adapters, scheduler and routing, agent loop, tool executor, permissions, context ledger and compression, persistence, egress proxy, MCP client, usage tracking, goal queue and verifier.
+- **AI runtime (the `ied.chat` plugin's server code, `plugins/chat/code/`, a built-in on the plugin API - `docs/26` "Built-ins on the API"):** providers, dialect adapters, scheduler and routing, agent loop, tool executor, permissions, context ledger and compression, persistence, egress proxy, usage tracking, goal queue and verifier. The MCP client is a built-in plugin of its own, `ied.mcp` ("MCP" below).
 - **Chat plugin (`plugins/chat/`):** all chat UI (tabs, streaming views, approval cards, right panel, scratchpad, tasks, Mission Control) and the default tool set's bindings.
 
 ## Providers
@@ -398,9 +398,10 @@ untrusted workspace has no tools that run code at all (`docs/11` "Invariants"). 
 takes their tools away; a project plugin's `mcpServers` come with the plugin, which loads only once the workspace is trusted.
 
 **Its tools.** Each tool of a server is a tool of the chat named `mcp_<server>_<tool>` (lowercase, anything but letters,
-digits and `_` made `_`, at most 64 characters; a clash gets `_2`), in group `mcp_<server>`, described as
-`<server> (MCP): <the server's description>`, with the server's `inputSchema` (one Bedrock's validator cannot load becomes
-`{"type": "object"}`, said in the MCP output). They are deferred unless `preload` says so: in every request's tool list from
+digits and `_` made `_`, runs of `_` as one, at most 64 characters; a clash gets `_2`), in group `mcp_<server>`, with the
+server's own description (a deferred stub shows its first sentence, and the name already says the server) and its
+`inputSchema` less the keywords Bedrock's validator does not know (`propertyNames`, `patternProperties`, `multipleOf`, ...;
+one that still does not load becomes `{"type": "object"}`; both said in the MCP output). They are deferred unless `preload` says so: in every request's tool list from
 a chat's first step as stubs, shown whole by `tool_search` - so a server with 40 tools costs a local model 40 short lines,
 not 40 schemas. A tool's class is `exec` (`permission` `ask` or `auto`) or `read` (`read`); its subject for the permission
 rules is `plugin(ied.mcp/<name>)` like any plugin tool's (`docs/11`), so `"allow": ["plugin(ied.mcp/mcp_blender_*)"]` allows
@@ -452,9 +453,44 @@ environment) or a URL (with headers), the permission, preload, privacy and timeo
 edits the User (app) tier; servers a solution or project file sets are listed with where they come from and edited in that
 file.
 
-**Resources and prompts** (designed, not built): a server's `resources/list` as `@` mentions (`@mcp:<server>/<uri>`, read with
-`resources/read` when the turn starts, as other mentions are, `docs/04` "Attachments and @-mentions"), and its prompts as
-slash commands.
+**Resources** (built): a server that offers resources (`capabilities.resources`) has them listed at its start
+(`resources/list`, page by page, kept with its tools; `notifications/resources/list_changed` lists them again). The composer's
+`@` list offers each as `@mcp:<server>/<name>` (the mention `{kind: "mcp", ref: "<server> <uri>"}`, from the method
+`mcp.resources`, which also starts the servers whose lists are not known yet), and the turn that names one reads it with
+`resources/read` when it starts, as other mentions are read ("Attachments and @-mentions"): text contents as
+`[resource <uri>]` and the text, a blob written to `.ied/local/mcp/media/` and named, through the plugin's binding
+`mcp.readResource`. Reading one is the owner's own act, so it asks nothing. **Prompts** as slash commands are not built: the
+composer has no slash commands yet.
+
+### As built (2026-10-26)
+
+Plugin `ied.mcp`: `plugins/mcp/ied-plugin.json`, `settings.schema.json` (`mcp.servers`, `mcp.idleMinutes`), server code
+`plugins/mcp/code/` - `jsonrpc` (messages written and read, lines out of a stream), `config` (a server's entry, the AI's tool
+names, the hash of what a start uses), `http` (one streamable-HTTP exchange, event streams), `client` (a connection: stdio
+with its reader thread, or HTTP; requests with timeouts and cancellation, the server's requests answered, `initialize`),
+`content` (a call's or a read's answer as the model reads it), `servers` (the servers of each workspace, starts, stops,
+crashes and restarts, the watcher, `mcp.ensure`, Test and Restart), `publish` (the computed `toolCalls` and section, the
+topic, `tools.json`), `calls` (`mcp.call`, `mcp.result`, `mcp.cancel` and the call itself), `resources`, `plugin` (the entry,
+methods, bindings and the tool function `Mcp::CallTool` with its plan `Mcp::PlanTool`); UI `plugins/mcp/ui/` (`mcppage.js`,
+`model.js`, `mcp.css`). In the chat: `AwaitToolStarts` (`contributed.cf`, before a turn's preparation), the toolCalls fields
+`group` and `approval` (`codetools.cf`, `plugintools.cf`, `AskUntilAllowed` in `permissions.cf`, used in `runtools.cf`), the
+card's source from `ToolResult.source`, the mention kind `mcp` (`sent.cf`, `mentions.cf`, `ui/mentions.js`).
+
+Checks: unit `server.mcp.*` (14) and `server.ai.permissions`; server checks `tools/server-checks/tests/test_mcp.py` (14)
+against `tools/fake-mcp/fake_mcp.py` (a stdlib MCP server, stdio or HTTP with JSON or event-stream answers): a chat lists and
+calls the tools (three pages, text, structured, image, resources, an error, the server's ping), an approval in `auto` mode
+until "Allow for this chat", a read-only server in Plan mode, `list_changed` reaching the next turn, a crash restarted, a
+start and a call that never answer, Stop cancelling at the server, the tools offered from `tools.json` after a restart
+without a start, an untrusted workspace with none, Test, Stop and Restart, a resource mention, HTTP with events and with
+JSON, a lost HTTP session, https refused, and a Claude chat calling one through IED's in-process server; frontend
+`mcp.test.js`; e2e `mcp_settings_page` and `mcp_resource_mention` (desktop, phone).
+
+**Checked with a real Blender** (2026-10-26): the owner's Blender 5.2.1 has the Blender Lab "MCP" add-on (lab.blender.org),
+which is only the half inside Blender - a socket on localhost:9876 that runs code it is sent - while its MCP server half is
+not installed. `tools/blender-lab-mcp/server.py` is a stdlib MCP server for that add-on (`scene_info`, `create_object`,
+`run_python`, `viewport_image`); with it as `mcp.servers.blender`, a chat on the fake model listed the real scene, added a
+monkey (asking first, as `permission` `ask` does) and got the viewport as an image the model was sent. Blender Lab's own
+server, once installed, goes in `mcp.servers` the same way.
 
 ## Web egress and secure mode
 
@@ -531,8 +567,9 @@ Drag-drop, paste and picker attachments (images/videos to vision-capable models;
   Error List) and `@diff` (the working tree's changes). Picking one writes `@<label>` into the text - `@src/ring.cf`,
   `@#Game::Ring::Push`, `@terminal:Build`, `@output:Git`, `@chat:Fix the build` - and the composer keeps it as a
   structured reference, `{kind, ref, label}` (`kind` one of `file`, `folder`, `symbol`, `terminal`, `output`,
-  `problems`, `diff`, `chat`; `ref` the path, the symbol's place `path:line` (1-based, its label's name narrowing
-  it; a bare name works too), the terminal or source id, or the chat id). A mention whose `@<label>` is no
+  `problems`, `diff`, `chat`, `mcp`; `ref` the path, the symbol's place `path:line` (1-based, its label's name narrowing
+  it; a bare name works too), the terminal or source id, the chat id, or an MCP server's name and a resource's URI
+  separated by a space, `@mcp:<server>/<name>`, "MCP" above). A mention whose `@<label>` is no
   longer in the text when it is sent is dropped.
 - **Attachments.** The paper clip (a file picker), a paste of files or an image, or files dropped on the composer. Each
   is uploaded at once (`PUT /api/upload`, `docs/10`) and shows as a chip above the text box - an image's picture, any
@@ -617,4 +654,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, checkpoints and rewind, the trajectory files. Sub-agents and background tasks are built (2026-10-23, above).
+**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), checkpoints and rewind, the trajectory files. Sub-agents and background tasks are built (2026-10-23, above); MCP is built (2026-10-26, "MCP" above) as the `ied.mcp` plugin.

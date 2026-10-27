@@ -24,11 +24,22 @@ namespace Mcp
 		});
 		Register(context, "mcp.restart", [service](const IED::Request& request) -> Core::String { return service->Restart(request.params.Str("wsId").View(), request.params.Str("name").View()); });
 		Register(context, "mcp.stop", [service](const IED::Request& request) -> Core::String { return service->StopServer(request.params.Str("wsId").View(), request.params.Str("name").View()); });
+		Register(context, "mcp.resources", [service](const IED::Request& request) -> Core::String { return service->ResourcesJson(request.params.Str("wsId").View()); });
 	}
 
 	static void ProvideBindings(IED::PluginContext& context, McpService* service) {
 		context.Provide(Core::StringView("mcp.ensure"), [service](const Serialization::DomNode& args) -> IED::Result { return IED::Answer(service->Ensure(args.Member("wsId").AsView()).View()); });
 		context.Provide(Core::StringView("mcp.status"), [service](const Serialization::DomNode& args) -> IED::Result { return IED::Answer(service->StatusJson(args.Member("wsId").AsView()).View()); });
+		context.Provide(Core::StringView("mcp.readResource"), [service](const Serialization::DomNode& args) -> IED::Result {
+			Core::String error;
+			Core::String text = service->ReadResource(args.Member("wsId").AsView(), args.Member("server").AsView(), args.Member("uri").AsView(), error);
+			if (!error.IsEmpty()) return IED::Refusal(error.View());
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("text", text.View());
+			json.EndObject();
+			return IED::Answer(json.View());
+		});
 		context.Provide(Core::StringView("mcp.tool"), [service](const Serialization::DomNode& args) -> IED::Result {
 			Core::String error;
 			Core::String json = service->DescribeTool(args.Member("wsId").AsView(), args.Member("tool").AsView(), error);

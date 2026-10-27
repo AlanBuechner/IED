@@ -35,6 +35,16 @@ namespace Mcp
 		public Core::String note;          // why its schema was not taken
 	}
 
+	// A resource a server lists (resources/list): an @ mention in the composer (docs/04 "MCP" Resources).
+	class McpResource
+	{
+		public Core::String uri;
+		public Core::String name;
+		public Core::String title;
+		public Core::String description;
+		public Core::String mimeType;
+	}
+
 	// The lines a start printed, for the error it fails with and Settings' Test.
 	class StartLog
 	{
@@ -57,6 +67,7 @@ namespace Mcp
 		public Core::Array<McpTool*> tools;
 		public bool toolsKnown;
 		public Core::String toolsHash;     // the configuration they were listed with
+		public Core::Array<McpResource*> resources;
 		public Core::String serverName;
 		public Core::String serverVersion;
 		public Core::String protocolVersion;
@@ -120,6 +131,12 @@ namespace Mcp
 		// mcp.tool: {server, tool, title, permission, state} of the chat's tool `aiName`, or empty with `error` when it
 		// cannot be called now.
 		public Core::String DescribeTool(Core::StringView wsId, Core::StringView aiName, Core::String& error);
+		// mcp.resources: every resource the workspace's servers list, {resources: [{server, uri, name, title?,
+		// description?, mimeType?}]}; servers whose lists are not known yet are started (mcp.ensure).
+		public Core::String ResourcesJson(Core::StringView wsId);
+		// mcp.readResource: the resource's contents as the model reads them (text; a blob saved under
+		// .ied/local/mcp/media and named), or empty with `error`.
+		public Core::String ReadResource(Core::StringView wsId, Core::StringView server, Core::StringView uri, Core::String& error);
 		// mcp.call, mcp.result, mcp.cancel.
 		public Core::String StartCall(const Serialization::DomNode& args, Core::String& error);
 		public Core::String CallResult(Core::StringView callId, int64 waitMs, Core::String& error);
@@ -132,6 +149,7 @@ namespace Mcp
 		// Threads of the plugin's own.
 		public void Launch(WorkspaceServers* place, ServerEntry* entry, int64 generation);
 		public void Relist(Core::StringView wsId, Core::StringView name, int64 generation);
+		public void RelistResources(Core::StringView wsId, Core::StringView name, int64 generation);
 		public void RunCall(RunningCall* call, Core::StringView wsId, Core::StringView aiName, Core::StringView arguments);
 		public void Watch();
 
@@ -142,7 +160,7 @@ namespace Mcp
 		private void Reread(WorkspaceServers* place);
 		private Core::Array<ServerConfig*> Configs(WorkspaceServers* place, Core::Array<Core::String>& problems);
 		private bool Begin(WorkspaceServers* place, ServerEntry* entry, int64& generation);
-		private bool Connect(WorkspaceServers* place, ServerConfig* config, int64 generation, McpClient*& client, Core::Array<McpTool*>& tools, StartLog* printed, Core::String& error);
+		private bool Connect(WorkspaceServers* place, ServerConfig* config, int64 generation, McpClient*& client, Core::Array<McpTool*>& tools, Core::Array<McpResource*>& resources, StartLog* printed, Core::String& error);
 		private void Halt(WorkspaceServers* place, ServerEntry* entry, Core::StringView why, bool keepFailed);
 		private bool AwaitRunning(WorkspaceServers* place, ServerEntry* entry, const bool* cancelled, Core::String& error);
 		private IED::ToolResult Invoke(WorkspaceServers* place, ServerEntry* entry, McpTool* tool, Core::StringView arguments, const bool* cancelled);
@@ -171,6 +189,8 @@ namespace Mcp
 	// The tools of a tools/list page with the chat's names for them (mcp_<server>_<tool>, not yet made unique), and its
 	// nextCursor.
 	Core::Array<McpTool*> ReadToolsPage(Core::StringView server, const Serialization::DomNode& result, Core::String& cursor);
+	// The resources of a resources/list page, and its nextCursor.
+	Core::Array<McpResource*> ReadResourcesPage(const Serialization::DomNode& result, Core::String& cursor);
 	// The delay before the restart after `exits` exits in a row: 1, 2, 4, 8, 16 s, then 30 s.
 	int64 RestartDelayMs(int64 exits);
 	// A tool's inputSchema as the chat's validator can load it and a model takes it: the server's less the keywords Bedrock's

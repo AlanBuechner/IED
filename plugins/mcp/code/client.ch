@@ -67,6 +67,7 @@ namespace Mcp
 		public Core::String protocolVersion;
 		public Core::String instructions;
 		public bool toolsChange;                 // capabilities.tools.listChanged
+		public bool hasResources;                // capabilities.resources
 
 		private Serialization::DomNode CallStdio(int64 id, Core::StringView text, int32 waitMs, const bool* cancelled, Core::String& error);
 		private Serialization::DomNode CallHttp(int64 id, Core::StringView text, int32 waitMs, const bool* cancelled, bool initializing, Core::String& error);

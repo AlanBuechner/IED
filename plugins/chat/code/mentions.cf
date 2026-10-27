@@ -187,11 +187,29 @@ namespace Ai
 		return text;
 	}
 
+	// A resource of an MCP server (ref "<server> <uri>"), read by the MCP plugin's binding mcp.readResource.
+	static Core::String FromMcp(const ToolInvocation& call, const Mention& mention) {
+		Core::StringView ref = mention.ref.View();
+		const int64 space = ref.IndexOf(' ', 0);
+		if (space <= 0) return Core::String("(not read: the mention names no MCP server and resource)");
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("wsId", call.ws.id.View());
+		args.Field("server", ref.Substring(0, space));
+		args.Field("uri", ref.Substring(space + 1, ref.ByteLength() - space - 1));
+		args.EndObject();
+		Core::String problem;
+		Serialization::DomNode answer = BindingAnswer(Core::StringView("mcp.readResource"), args.View(), problem);
+		if (!answer.IsValid()) return (Core::String("(not read: ") + problem.View()) + ")";
+		return Core::String(answer.Member("text").AsView());
+	}
+
 	Core::String ReadMention(const ToolRegistry& tools, const ToolInvocation& call, const Mention& mention) {
 		Core::StringView kind = mention.kind.View();
 		if (kind == "output") return FromOutput(call, mention);
 		if (kind == "terminal") return FromTerminal(mention);
 		if (kind == "diff") return FromDiff(call);
+		if (kind == "mcp") return FromMcp(call, mention);
 		return ByTool(tools, call, mention);
 	}
 }

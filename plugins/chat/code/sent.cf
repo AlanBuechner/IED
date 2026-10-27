@@ -7,7 +7,7 @@ namespace Ai
 	static bool KindNeedsRef(Core::StringView kind) { return kind != "problems" && kind != "diff"; }
 
 	static bool KnownKind(Core::StringView kind) {
-		return kind == "file" || kind == "folder" || kind == "symbol" || kind == "terminal" || kind == "output" || kind == "chat" || !KindNeedsRef(kind);
+		return kind == "file" || kind == "folder" || kind == "symbol" || kind == "terminal" || kind == "output" || kind == "chat" || kind == "mcp" || !KindNeedsRef(kind);
 	}
 
 	static void MustBeList(const Serialization::DomNode& list, const char* name) {
@@ -20,7 +20,7 @@ namespace Ai
 		ReadMentions(list, mentions);
 		for (const Mention& mention : mentions) {
 			if (!KnownKind(mention.kind.View()))
-				throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("a mention's kind must be file, folder, symbol, terminal, output, problems, diff or chat, not ") + mention.kind.View()).View());
+				throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("a mention's kind must be file, folder, symbol, terminal, output, problems, diff, chat or mcp, not ") + mention.kind.View()).View());
 			if (KindNeedsRef(mention.kind.View()) && mention.ref.IsEmpty())
 				throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("the mention @") + mention.label.View() + " has no ref").View());
 		}

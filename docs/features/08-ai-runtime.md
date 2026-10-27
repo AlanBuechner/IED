@@ -83,9 +83,9 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-AIR-70 | MCP client: stdio and streamable HTTP transports; tools, resources (as @-mentionable context), prompts (as slash commands) | P1 | US-TOOL-6 |
-| F-AIR-71 | MCP server config at app / solution / project tier (project-defined servers need trust); per-server enable, env, privacy class, egress policy | P1 | US-TOOL-6 |
-| F-AIR-72 | MCP server supervision: start on demand, restart on crash with backoff, logs to an output source, health in settings | P1 | US-OPS-1 |
+| F-AIR-70 | MCP client: stdio and streamable HTTP transports; tools, resources (as @-mentionable context), prompts (as slash commands). Built 2026-10-26 as the `ied.mcp` plugin (`docs/04` "MCP") but for prompts and https | P1 | US-TOOL-6 |
+| F-AIR-71 | MCP server config at app / solution / project tier (project-defined servers need trust); per-server enable, env, privacy class, egress policy. Built (`mcp.servers`; every server needs a trusted workspace) but for the egress policy, which waits for the egress proxy, and the privacy class's effect, which waits for private chats | P1 | US-TOOL-6 |
+| F-AIR-72 | MCP server supervision: start on demand, restart on crash with backoff, logs to an output source, health in settings. Built (`docs/04` "MCP" Lifetime, Failures show) | P1 | US-OPS-1 |
 | F-AIR-73 | IED as an MCP server (stdio shim + HTTP): exposes a curated set of IED tools (LSP navigation, build/test, editor open, diagnostics) to external agents; per-client allowlist | P1 | US-TOOL-9 |
 | F-AIR-74 | Remote MCP OAuth flows | P2 | - |
 

@@ -175,6 +175,22 @@ class McpToolTests {
 		assert_true(Core::StringView(Mcp::ExtensionOf(Core::StringView("image/jpeg"))) == "jpg" && Core::StringView(Mcp::ExtensionOf(Core::StringView("x/y"))) == "bin", "extensions");
 	}
 
+	[test("resources listed and read")]
+	public static void TestResources() {
+		Serialization::DomDoc doc;
+		Core::String cursor;
+		Core::Array<Mcp::McpResource*> listed = Mcp::ReadResourcesPage(Json(
+			"{\"resources\": [{\"uri\": \"x://a\", \"name\": \"a\", \"title\": \"A\", \"mimeType\": \"text/plain\"}, {\"name\": \"no uri\"}, {\"uri\": \"x://b\"}], \"nextCursor\": \"c2\"}", doc), cursor);
+		assert_eq((int64)2, listed.Count(), "one without a URI is left out");
+		assert_true(listed[1]->name.View() == "x://b" && cursor.View() == "c2", "a nameless one is named by its URI");
+		Mcp::CallContent read = Mcp::ReadResourceResult(Json("{\"contents\": [{\"uri\": \"x://a\", \"text\": \"hello\"}, {\"uri\": \"x://p\", \"mimeType\": \"image/png\", \"blob\": \"AAAA\"}]}", doc));
+		Core::Array<Core::String> paths;
+		paths.Push(Core::String(""));
+		paths.Push(Core::String(".ied/local/mcp/media/s-1.png"));
+		Core::String text = Mcp::CallText(read, paths);
+		assert_true(text.View() == "[resource x://a]\nhello\n[resource x://p saved as .ied/local/mcp/media/s-1.png (image/png)]", text.CStr());
+	}
+
 	[test("a long answer is cut with a note")]
 	public static void TestCut() {
 		Mcp::CallContent content;

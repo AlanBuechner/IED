@@ -27,6 +27,9 @@ namespace Mcp
 	}
 
 	CallContent ReadCallResult(const Serialization::DomNode& result);
+	// A resources/read answer's contents: a text one as "[resource <uri>]" and its text, a blob as a file to save (an
+	// image too: a mention carries text only).
+	CallContent ReadResourceResult(const Serialization::DomNode& result);
 	// The text the model is told: the parts in order, a File part as "[<what> saved as <path> (<mime>)]" with paths[i]
 	// (the part's index; empty: "[<what> (<mime>) could not be saved]"); images are left to the tool's images. Cut at
 	// kResultMostBytes with a note.

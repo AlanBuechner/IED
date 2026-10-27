@@ -140,6 +140,7 @@ export class McpPage {
 					mine ? h("button.btn.flat", { dataset: { act: "remove" }, title: "Remove " + server.name, "aria-label": "Remove " + server.name, on: { click: () => this.remove(server.name) } }, icon("trash")) : null)),
 			h("div.mcp-target.mono", { title: server.target }, server.target),
 			h("div.mcp-line.mcp-" + line.tone, null, line.text),
+			server.resources ? h("div.mcp-line", null, server.resources + (server.resources === 1 ? " resource" : " resources") + ": @mcp:" + server.name + "/... in a chat's message") : null,
 			test ? this.testView(test) : null,
 			tools.length ? h("details.mcp-tools", null,
 				h("summary", null, tools.length + (tools.length === 1 ? " tool" : " tools") + (preloaded ? DOT + preloaded + " sent whole with every request" : DOT + "loaded on demand")),

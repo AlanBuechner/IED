@@ -9,6 +9,7 @@ notifications; DELETE ends the session). Stdlib only.
 Tools: echo {text}, add {a, b}, image {}, slow {seconds} (stops when cancelled), crash {} (the process exits with 3),
 fail {} (an isError result), add_tool {} (a new tool extra_<n>, then notifications/tools/list_changed), ping_back {}
 (asks the client ping first), resource {} (an embedded text resource and a resource link), hang {} (never answers).
+Resources (resources/list, resources/read): fake://notes/1 (text) and fake://pixel (a PNG blob).
 --log appends every message it reads, and its pid at start, as JSON lines, so a check sees what IED sent.
 With --http it prints "LISTENING <url>" on stdout once it listens.
 """
@@ -41,6 +42,11 @@ TOOLS = [
 	{"name": "ping_back", "description": "Ping the client, then answer.", "inputSchema": {"type": "object"}},
 	{"name": "resource", "description": "An embedded resource and a link.", "inputSchema": {"type": "object"}},
 	{"name": "hang", "description": "Never answer.", "inputSchema": {"type": "object"}},
+]
+
+RESOURCES = [
+	{"uri": "fake://notes/1", "name": "first-note", "title": "The first note", "mimeType": "text/plain"},
+	{"uri": "fake://pixel", "name": "pixel", "description": "A one-pixel picture", "mimeType": "image/png"},
 ]
 
 
@@ -103,7 +109,7 @@ class Server:
 		if method == "initialize":
 			if self.args.hang_initialize:
 				return
-			self.result(rid, {"protocolVersion": self.args.version, "capabilities": {"tools": {"listChanged": True}, "logging": {}},
+			self.result(rid, {"protocolVersion": self.args.version, "capabilities": {"tools": {"listChanged": True}, "resources": {"listChanged": True}, "logging": {}},
 				"serverInfo": {"name": self.args.name, "version": "1.2.3"}, "instructions": "Fake tools for IED's checks: echo says text back."})
 		elif method == "ping":
 			self.result(rid, {})
@@ -116,6 +122,16 @@ class Server:
 			self.result(rid, page)
 		elif method == "tools/call":
 			self.call(rid, message.get("params", {}))
+		elif method == "resources/list":
+			self.result(rid, {"resources": RESOURCES})
+		elif method == "resources/read":
+			uri = message.get("params", {}).get("uri")
+			if uri == "fake://notes/1":
+				self.result(rid, {"contents": [{"uri": uri, "mimeType": "text/plain", "text": "The first note says: ship it."}]})
+			elif uri == "fake://pixel":
+				self.result(rid, {"contents": [{"uri": uri, "mimeType": "image/png", "blob": PIXEL}]})
+			else:
+				self.error(rid, -32002, "no resource " + str(uri))
 		else:
 			self.error(rid, -32601, "no method " + method)
 

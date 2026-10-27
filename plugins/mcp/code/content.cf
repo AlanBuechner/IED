@@ -68,6 +68,13 @@ namespace Mcp
 		return content;
 	}
 
+	CallContent ReadResourceResult(const Serialization::DomNode& result) {
+		CallContent content;
+		Serialization::DomNode contents = result.Member("contents");
+		for (int64 i = 0; contents.Kind() == Serialization::DomKind::Array && i < contents.Count(); ++i) content.parts.Push(ResourcePart(contents.At(i)));
+		return content;
+	}
+
 	Core::String CallText(const CallContent& content, const Core::Array<Core::String>& paths) {
 		Core::StringBuilder out;
 		for (int64 i = 0; i < content.parts.Count(); ++i) {

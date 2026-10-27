@@ -35,7 +35,7 @@ Owner: `src/settings` (store, schemas, merge) + `frontend/` (settings window). D
 | F-SET-26 | Accounts page: Anthropic API key, Claude Code bridge status (installed CLI, signed-in state as reported by the CLI), usage history | P1 | US-CLD-2 |
 | F-SET-27 | Remote access page: bind address, password, devices (revoke), TLS, URL + QR code for the phone | P0 | US-SRV-4, US-SRV-5 |
 | F-SET-28 | Skills page: all skills by source, search, open, enable/disable per skill, usage counts | P1 | US-CTX-4 |
-| F-SET-29 | MCP page: servers per tier, status, tools list, logs | P1 | US-TOOL-6 |
+| F-SET-29 | MCP page: servers per tier, status, tools list, logs. Built: Settings > AI > MCP Servers (`plugins/mcp/ui`, `docs/07` "MCP servers") | P1 | US-TOOL-6 |
 
 ## Secrets
 

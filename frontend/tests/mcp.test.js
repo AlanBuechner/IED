@@ -3,6 +3,7 @@
 
 import { test, assertEqual } from "./harness.js";
 import { fieldsOf, joinArgs, readPairs, serverFrom, sourceOf, splitArgs, stateLine, testLine } from "/plugins/ied.mcp/ui/model.js";
+import { resourceMention } from "/plugins/ied.chat/ui/mentions.js";
 
 const DOT = " " + String.fromCharCode(0xb7) + " ";
 
@@ -63,6 +64,12 @@ test("mcp: the form's fields as an entry and back", () => {
 		}
 		assertEqual(said, message);
 	}
+});
+
+test("mcp: a resource as a composer mention", () => {
+	assertEqual(resourceMention({ server: "blender", uri: "blender://scene/Cube", name: "Cube", description: "the cube" }),
+		{ kind: "mcp", ref: "blender blender://scene/Cube", label: "mcp:blender/Cube", detail: "the cube" });
+	assertEqual(resourceMention({ server: "fake", uri: "fake://pixel", name: "pixel" }).detail, "fake://pixel", "its URI when it says nothing more");
 });
 
 test("mcp: where a server comes from", () => {

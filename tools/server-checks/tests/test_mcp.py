@@ -107,7 +107,7 @@ class McpChatTests(McpCase):
 		self.assertEqual("finished", (await self.turn(chat_id, timeout=90))["stop"])
 		first = self.sent_tools(0)
 		self.assertEqual(["mcp_fake_" + t for t in TOOLS], [n for n in first if n.startswith("mcp_")], "every page of tools/list, in order")
-		self.assertEqual({"name": "mcp_fake_echo", "description": "fake (MCP): Say the text back. [deferred]", "parameters": {"type": "object"}}, first["mcp_fake_echo"], "a deferred stub")
+		self.assertEqual({"name": "mcp_fake_echo", "description": "Say the text back. [deferred]", "parameters": {"type": "object"}}, first["mcp_fake_echo"], "a deferred stub: the server's own description")
 		self.assertEqual(self.sent_tools(0), self.sent_tools(-1), "the list stays as it was through the turn")
 		system = self.model.requests()[0]["body"]["messages"][0]["content"]
 		self.assertIn("- fake (fake-mcp): 10 tools. Fake tools for IED's checks", system, "the servers and their instructions in the system message")
@@ -242,6 +242,29 @@ class McpChatTests(McpCase):
 		self.assertEqual("finished", (await self.turn(chat_id, "call", timeout=60))["stop"])
 		self.assertEqual("echo: now", self.results()["c1"], "the call started it")
 		self.assertEqual(2, len(self.pids()))
+
+	async def test_a_resource_mention_is_read_when_the_turn_starts(self):
+		await self.use_servers({"fake": stdio_server(self.log_path(), permission="auto")})
+		deadline = time.time() + 20
+		while True:
+			listed = (await self.client.request("mcp.resources", {"wsId": "w1"}))["resources"]
+			if listed or time.time() > deadline:
+				break
+			time.sleep(0.2)
+		self.assertEqual([("fake", "fake://notes/1", "first-note"), ("fake", "fake://pixel", "pixel")], [(r["server"], r["uri"], r["name"]) for r in listed], "the @ list's rows: asking started the server")
+		chat_id, topic = await self.chat(permission="auto")
+		self.model.queue(text_step("Read them."))
+		mentions = [{"kind": "mcp", "ref": "fake fake://notes/1", "label": "mcp:fake/first-note"}, {"kind": "mcp", "ref": "fake fake://pixel", "label": "mcp:fake/pixel"},
+			{"kind": "mcp", "ref": "fake fake://gone", "label": "mcp:fake/gone"}]
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "See @mcp:fake/first-note, @mcp:fake/pixel and @mcp:fake/gone", "mentions": mentions})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=60)
+		user = [m for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "user"][-1]
+		text = user["content"] if isinstance(user["content"], str) else "".join(p.get("text", "") for p in user["content"])
+		self.assertIn('<mention label="@mcp:fake/first-note" kind="mcp">', text)
+		self.assertIn("[resource fake://notes/1]\nThe first note says: ship it.", text, "read with resources/read when the turn started")
+		self.assertIn("[resource fake://pixel saved as .ied/local/mcp/media/fake-", text, "a blob is a file the model can open")
+		self.assertIn("(not read: fake: resources/read fake://gone failed: no resource fake://gone (code -32002))", text)
+		self.assertEqual(["mcp", "mcp", "mcp"], [m["kind"] for m in (await self.last_turn(chat_id))["user"]["mentions"]], "the transcript keeps them")
 
 	async def test_an_untrusted_workspace_has_no_mcp_tools(self):
 		await self.use_servers({"fake": stdio_server(self.log_path(), permission="auto")})

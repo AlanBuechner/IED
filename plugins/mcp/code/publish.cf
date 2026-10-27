@@ -65,6 +65,7 @@ namespace Mcp
 			json.EndObject();
 		}
 		json.EndArray();
+		json.IntField("resources", entry->resources.Count());
 		if (!entry->serverName.IsEmpty()) json.Field("serverName", entry->serverName.View());
 		if (!entry->serverVersion.IsEmpty()) json.Field("serverVersion", entry->serverVersion.View());
 		if (!entry->protocolVersion.IsEmpty()) json.Field("protocolVersion", entry->protocolVersion.View());
@@ -127,9 +128,12 @@ namespace Mcp
 				json.BeginObject();
 				json.Field("name", tool->aiName.View());
 				Core::StringBuilder description;
-				description.Append(config->name.View());
-				description.Append(" (MCP): ");
-				description.Append(tool->description.IsEmpty() ? tool->name.View() : tool->description.View());
+				if (!tool->description.IsEmpty()) description.Append(tool->description.View());
+				else {
+					description.Append(tool->name.View());
+					description.Append(" of the MCP server ");
+					description.Append(config->name.View());
+				}
 				json.Field("description", description.View());
 				json.Field("class", config->permission == Permission::Read ? "read" : "exec");
 				json.Field("group", ToolGroup(config->name.View()).View());
@@ -217,6 +221,18 @@ namespace Mcp
 			json.BeginArray();
 			for (McpTool* tool : entry->tools) WriteCachedTool(json, tool);
 			json.EndArray();
+			json.Key(Core::StringView("resources"));
+			json.BeginArray();
+			for (McpResource* resource : entry->resources) {
+				json.BeginObject();
+				json.Field("uri", resource->uri.View());
+				json.Field("name", resource->name.View());
+				if (!resource->title.IsEmpty()) json.Field("title", resource->title.View());
+				if (!resource->description.IsEmpty()) json.Field("description", resource->description.View());
+				if (!resource->mimeType.IsEmpty()) json.Field("mimeType", resource->mimeType.View());
+				json.EndObject();
+			}
+			json.EndArray();
 			json.EndObject();
 		}
 		json.EndObject();
@@ -259,6 +275,8 @@ namespace Mcp
 			if (tool->name.IsEmpty() || tool->aiName.IsEmpty()) continue;
 			entry->tools.Push(tool);
 		}
+		Core::String cursor;
+		entry->resources = ReadResourcesPage(kept, cursor);
 		entry->toolsKnown = true;
 		entry->toolsHash = entry->config->hash;
 		entry->serverName = Core::String(kept.Member("serverName").AsView());

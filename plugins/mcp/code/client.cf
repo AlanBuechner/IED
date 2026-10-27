@@ -413,6 +413,7 @@ namespace Mcp
 		serverVersion = Core::String(result.Member("serverInfo").Member("version").AsView());
 		instructions = Core::String(result.Member("instructions").AsView());
 		toolsChange = result.Member("capabilities").Member("tools").Member("listChanged").AsBool();
+		hasResources = result.Member("capabilities").Member("resources").IsValid();
 		if (!Notify(Core::StringView("notifications/initialized"), Core::StringView(""))) {
 			error = Core::String("the server did not take notifications/initialized");
 			return false;

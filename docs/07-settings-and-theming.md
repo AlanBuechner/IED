@@ -84,6 +84,17 @@ The bottom sidebar icon opens Settings as a **docked view** (not a modal), style
 
 A plugin draws its own editor for some keys with a `settingsPages` contribution (`docs/02`): it goes under its page, those keys leave the generic rows, and its view gets `ctx.settings` - `keys`, `schema(key)`, `value(key)` (`{value, source}`), `tier()`, `set(key, value, tier?)` (the error to show, or null), `reset(key, tier?)`, `row(key)` (the window's own row for a key, for a page that draws only some of its keys its own way; drawn again by the page on a change) and `onChange(fn)`. The chat plugin's Models and Model Groups are two (`docs/04` "As built"), and Environment > Developer draws `developer.enabled` with `row` above its desktop build (`docs/28`). On a phone the tree is a row of pages above the page.
 
+### MCP servers
+
+The `ied.mcp` plugin's (`plugins/mcp/settings.schema.json`, Settings > AI > MCP Servers, `docs/04` "MCP"): `mcp.servers`
+(app, solution and project tiers, merged member by member - a deeper tier's entry of a name replaces the one above it; each
+`{command, args?, env?, cwd?}` or `{url, headers?}` with `enabled`, `permission` - ask, auto, read -, `preload`, `privacy`,
+`timeoutSeconds`, `startSeconds` and `exclude`; a value of `env` or `headers` may be `{"env": "NAME"}`, read from IED's
+environment, so no secret is written in the file) and `mcp.idleMinutes` (app, solution; 10). The page lists the workspace's
+servers live with their state, tools, resources and output, and adds, edits, turns off and removes User-tier ones; a
+solution's or project's servers are changed in their file, and a plugin's (`mcpServers`, `docs/02`) by an `mcp.servers`
+entry of its name.
+
 ### Host settings
 
 The host declares a few settings of its own next to the plugins': `shared/host-api/schemas/host-settings.v1.schema.json`, owner `ied`, page Environment, read from the install (`--home`) and listed first in `settings.schema`. Today one:
