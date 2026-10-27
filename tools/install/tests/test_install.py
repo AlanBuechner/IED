@@ -99,7 +99,7 @@ class CppToolsTests(unittest.TestCase):
 		write(os.path.join(repo, "vendor", "codelldb", "lldb", "bin", "liblldb.dll"), "lldb")
 		write(os.path.join(repo, "plugins", "cpp", "ied-plugin.json"), "{}")
 		done = dict(report(), missing=[])
-		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), done, install_ied.CPP_TOOLS_FOLDERS)
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), done, keep=install_ied.CPP_TOOLS_FOLDERS)
 		install_ied.install_cpp_tools(repo, target, done)
 		cpp = os.path.join(target, "plugins", "cpp")
 		for path in (("clangd", "bin", "clangd.exe"), ("clangd", "lib", "clang", "22", "include", "stddef.h"), ("codelldb", "adapter", "codelldb.exe"), ("codelldb", "lldb", "bin", "liblldb.dll")):
@@ -107,7 +107,7 @@ class CppToolsTests(unittest.TestCase):
 		self.assertFalse(os.path.exists(os.path.join(cpp, "clangd", "lib", "clang", "22", "lib")), "only the headers clangd reads")
 		self.assertEqual([], done["missing"])
 		again = dict(report(), missing=[])
-		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), again, install_ied.CPP_TOOLS_FOLDERS)
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), again, keep=install_ied.CPP_TOOLS_FOLDERS)
 		install_ied.install_cpp_tools(repo, target, again)
 		self.assertEqual((0, 0), (again["copied"], again["removed"]), "the next install leaves them as they are")
 		shutil.rmtree(os.path.join(repo, "vendor", "codelldb"))

@@ -262,7 +262,7 @@ def install(bin_root, target):
 		source = os.path.join(REPO, tree)
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
-		mirror(source, os.path.join(target, tree), set(skip), report, BUILT_IN_PLACE, CPP_TOOLS_FOLDERS if tree == "plugins" else ())
+		mirror(source, os.path.join(target, tree), set(skip), report, anywhere=BUILT_IN_PLACE, keep=CPP_TOOLS_FOLDERS if tree == "plugins" else ())
 	if not ensure_services(REPO):
 		print("install-ied: setup could not install the web search services (see above); installing without what is missing")
 	for tree, skip in SERVICES:
