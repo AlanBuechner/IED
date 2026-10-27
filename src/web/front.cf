@@ -145,7 +145,8 @@ namespace Ied
 		Core::StringView path = request.path.View();
 		Core::StringView wsId;
 		Core::StringView rest;
-		if (path == "/ws") Attach(request, response, SentDevice(request).View());
+		// Whether the client is on the master's machine is the master's to say (`local=1`): this socket is the master's.
+		if (path == "/ws") Attach(request, response, SentDevice(request).View(), QueryValue(request.query.View(), Core::StringView("local")) == "1");
 		else if (path == "/healthz") Health(response);
 		else if (path == "/api/upload") Upload(request, response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
@@ -235,15 +236,16 @@ namespace Ied
 			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
 			return;
 		}
-		Attach(request, response, device->id.View());
+		Attach(request, response, device->id.View(), request.peer.IsValid() && request.peer.IsLoopback());
 	}
 
-	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device) {
+	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device, bool local) {
 		Server* shared = server;
 		Core::String deviceId = Core::String(device);
-		Http::AcceptWebSocket(request, response, [shared, deviceId](Http::WebSocket& socket) {
+		Http::AcceptWebSocket(request, response, [shared, deviceId, local](Http::WebSocket& socket) {
 			Session* session = new Session(shared, &socket, Core::StringView("client"));
 			session->authDevice = deviceId;
+			session->local = local;
 			session->Run();
 		});
 	}

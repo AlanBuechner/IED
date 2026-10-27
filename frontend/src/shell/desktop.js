@@ -97,7 +97,9 @@ export class DesktopChrome {
 	startPage() {
 		this.dropDocks();
 		this.renderMenubar();
-		replace(this.area, startPageView(this.shell));
+		const view = startPageView(this.shell);
+		// The settings shown in the start page's place stay as they are (their scroll) when the server's state changes.
+		if (this.area.childElementCount !== 1 || this.area.firstElementChild !== view) replace(this.area, view);
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -237,7 +239,7 @@ export class DesktopChrome {
 			el.hidden = el.dataset.ref !== "activity:" + activityId;
 			shell.views.setVisible(el.dataset.ref, !el.hidden);
 		}
-		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page")) empty.remove();
+		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page, :scope > .start-settings")) empty.remove();
 		if (!activityId) {
 			this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
 			return;

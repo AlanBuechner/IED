@@ -151,7 +151,12 @@ class Tasks:
 		lines = params.get("lines", 50000)
 		if type(lines) is not int or not 1 <= lines <= 5000000:
 			raise RpcError("bad_request", "params.lines must be an integer in 1..5000000")
-		run = Run("r%d" % (len(self.runs) + 1), ws_id, task_id, task["label"], project)
+		# `solution`: every project's task of the slot as one run (docs/06); the mock's one project stands for them.
+		solution = p.bool("solution", False, required=False)
+		if solution and slot not in ("build", "rebuild", "clean", "test"):
+			raise RpcError("bad_request", "a solution runs its projects' build, rebuild, clean or test tasks, not %s" % slot)
+		label = {"rebuild": "Rebuild", "clean": "Clean", "test": "Test"}.get(slot, "Build") + " Solution" if solution else task["label"]
+		run = Run("r%d" % (len(self.runs) + 1), ws_id, task_id, label, "" if solution else project)
 		self.runs[run.run_id] = run
 		self.server.hub.add(run.topic, lambda: self.snapshot(run))
 		chosen = {v["key"]: v["value"] for v in self.offer(ws_id)["variables"]}

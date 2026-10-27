@@ -351,6 +351,17 @@ test("layout tree: the tabs a change closes are those it took out, a preview tab
 	assertEqual(L.closedBy(tree, L.moveTab(tree, "mdpreview:b.md", [0], "center")), [], "a tab moved stays open");
 });
 
+test("layout doc: the tab opened in a preview tab's place takes over its tethers", () => {
+	let doc = D.withTether(D.emptyDocument(), "doc:a.md", "mdpreview:a.md", true);
+	doc = D.withTether(doc, "doc:z.h", "doc:z.c", false);
+	const moved = D.withTethersMoved(doc, "doc:a.md", "doc:b.md");
+	assertEqual(moved.tethers, [{ lead: "doc:b.md", follower: "mdpreview:a.md", closes: true }, { lead: "doc:z.h", follower: "doc:z.c", closes: false }], "the lead's place, closing kept");
+	assertEqual(D.withTethersMoved(doc, "doc:q.md", "doc:b.md"), doc, "an untethered tab: nothing");
+	assertEqual(D.withTethersMoved(doc, "doc:a.md", "mdpreview:a.md").tethers, [{ lead: "doc:z.h", follower: "doc:z.c", closes: false }], "never a tab tethered with itself");
+	const twice = D.withTether(D.withTether(D.emptyDocument(), "doc:a.md", "mdpreview:a.md", true), "doc:b.md", "mdpreview:a.md", true);
+	assertEqual(D.withTethersMoved(twice, "doc:a.md", "doc:b.md").tethers.length, 1, "a pair once");
+});
+
 test("layout doc: a phone's tab closed while another shows leaves its back stack", () => {
 	let doc = D.withPhonePane(D.emptyDocument(), "chat:new");
 	doc = D.withPhonePane(doc, "chat:c4");

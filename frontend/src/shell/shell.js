@@ -15,12 +15,13 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
+import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, withTethersMoved, partnersOf, followersOf } from "./layoutdoc.js";
 import { tabKindOf, dockFor } from "./dockplace.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
 import { registerShellViews } from "./hostviews.js";
+import { StartSettings } from "./startsettings.js";
 import { DesktopChrome } from "./desktop.js";
 import { PhoneChrome } from "./phone.js";
 
@@ -59,6 +60,7 @@ export class Shell {
 		this.nextSettingsTier = null;
 		this.nextSettingsProject = null;
 		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
+		this.startSettings = new StartSettings(this);   // Settings on the start page, with no workspace
 		this.nextSettingsTier = null;     // and the tier it edits, with the project whose tier that is
 		this.bindings = new Bindings((id) => {
 			const plugin = this.contributions.plugins.find((p) => p.id === id);
@@ -83,6 +85,7 @@ export class Shell {
 		this.deviceClass = deviceClassOf(window.innerWidth);
 		this.chrome = null;
 		this.focus = null;
+		this.lastWell = null;             // the document group used last, {activity, path}: where an open from a tool window goes
 		this.authProbe = null;
 		this.shellApi = this.makeApi({ id: "shell", base: "/" });
 		this.wsTopic = null;
@@ -112,6 +115,10 @@ export class Shell {
 		this.mountChrome();
 		window.addEventListener("keydown", (event) => this.keybindings.handle(event), true);
 		document.addEventListener("focusin", (event) => this.context.set("inputFocus", isTextInput(event.target)));
+		// docs/15 "Links": the page never follows a link no view answered, nor opens itself again in a window of its own
+		// (a middle click's default; in the desktop app a second IED window), unless the link is marked to open beside it.
+		document.addEventListener("click", (event) => keepPage(event));
+		document.addEventListener("auxclick", (event) => event.button === 1 && keepPage(event));
 		this.client.subscribe("server", { snap: (data) => this.serverSnapshot(data), evt: (kind, data) => this.serverEvent(kind, data) });
 		this.client.subscribe("plugins", { evt: (kind) => kind === "plugins.changed" && this.reloadContributions() });
 		const ownerKeys = (data) => {
@@ -128,6 +135,10 @@ export class Shell {
 
 	connectionChanged(state) {
 		this.context.set("connected", state === "live");
+		// The server says whether this page is on its machine (`welcome.local`): what opens there, as its file manager
+		// (fs.reveal), is offered only then.
+		const welcome = this.client.master ? this.client.master.welcome : this.client.welcome;
+		if (state === "live") this.context.set("serverMachine", Boolean(welcome && welcome.local) || undefined);
 		if (this.chrome) this.chrome.connection(state);
 		clearTimeout(this.authProbe);
 		if (state === "connecting" || state === "reconnecting") this.authProbe = setTimeout(() => this.probeSignIn(), AUTH_PROBE_AFTER_MS);
@@ -244,6 +255,8 @@ export class Shell {
 	async showWorkspace(wsId) {
 		if (wsId === this.wsId && this.layout) return;
 		this.leaveWorkspace();
+		this.lastWell = null;
+		if (wsId) this.startSettings.close(false);
 		this.wsId = wsId;
 		if (this.client.show) this.client.show(wsId);
 		try {
@@ -532,6 +545,16 @@ export class Shell {
 		});
 	}
 
+	// Opening `ref` may close the preview tab whose place it takes: that tab's tethers go to `ref` (docs/15 "Tethered
+	// tabs"), so a preview tethered with what a group shows there keeps following that group.
+	openInTree(activityId, ref, fn) {
+		if (!this.layout || !activityId) return;
+		this.layout.update((doc) => {
+			const changed = this.treeChanged(doc, activityId, fn);
+			return changed.closed.reduce((next, closed) => withTethersMoved(next, closed, ref), changed.doc);
+		});
+	}
+
 	// `doc` with the tree of `activityId` changed by `fn`, and the tabs the change took out of it.
 	treeChanged(doc, activityId, fn) {
 		const mode = doc.mode || DEFAULT_MODE;
@@ -582,9 +605,13 @@ export class Shell {
 
 	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given, with the tier it
 	// edits (`tier`: "app", "solution", "project") and, for a project's, which project (`project`). One open already is
-	// shown and moved to that page; a window with no workspace (the start page) has no layout to open a tab in, so it
-	// says so rather than failing - user settings without a project open is not built yet.
+	// shown and moved to that page. A window with no workspace (the start page) has no layout to open a tab in: the start
+	// page shows the settings in its place, on the User tier (startsettings.js).
 	openSettings(page, tier, project) {
+		if (!this.wsId) {
+			this.startSettings.show(page);
+			return;
+		}
 		const open = [...this.settingsViews].pop();
 		if (open) {
 			if (page || tier || project) open.show(page, tier, project);
@@ -595,7 +622,7 @@ export class Shell {
 		this.nextSettingsTier = tier || null;
 		this.nextSettingsProject = project || null;
 		if (!this.layout) {
-			this.toasts.show("Settings needs a workspace window: open a project first.", "info");
+			this.toasts.show("The workspace is still opening: try Settings again in a moment.", "info");
 			return;
 		}
 		this.openTab(SETTINGS_TAB);
@@ -617,9 +644,9 @@ export class Shell {
 		const where = this.activityOf(ref);
 		if (asked && where && where !== asked) this.changeTree(where, (tree) => T.closeTab(tree, ref));
 		const activityId = asked || where || this.dockActivity(ref);
-		const groupPath = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
+		const groupPath = this.documentGroupPath(activityId);
 		this.layout.update((doc) => withActivity(doc, activityId));
-		this.closeInTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
+		this.openInTree(activityId, ref, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
 		this.slideOut(activityId, ref);
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
 	}
@@ -804,9 +831,26 @@ export class Shell {
 		if (this.layout) this.layout.update((doc) => phoneBack(doc));
 	}
 
+	// The document group a tab opens into in `activityId` (VS): the one with the focus, else - the focus in a tool window,
+	// as when a file is opened from Solution Explorer - the one used last; null leaves it to the tree (its first). A group
+	// that shows a tab closing with a lead in another group (a preview beside its file) sends it to the lead's group,
+	// where the companion follows it (docs/15 "Tethered tabs").
+	documentGroupPath(activityId) {
+		const own = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
+		const path = own || (this.lastWell && this.lastWell.activity === activityId ? this.lastWell.path : null);
+		if (!path) return null;
+		const tree = this.treeOf(activityId);
+		const chosen = T.nodeAt(tree, path);
+		if (!T.isGroup(chosen) || !chosen.well) return null;
+		const lead = (this.doc.tethers || []).find((t) => t.closes && t.follower === chosen.active && t.lead !== chosen.active);
+		const home = lead ? T.groupOf(tree, lead.lead) : null;
+		return home && home !== chosen && home.well ? T.pathOf(tree, home) : path;
+	}
+
 	// The tab with the focus moved (from a dock): context keys follow it.
 	focused(activity, ref, path, well) {
 		this.focus = { activity, ref, path, well };
+		if (well) this.lastWell = { activity, path };
 		this.context.set("activeTab", ref || undefined);
 		this.tabKeys(ref);
 		const keys = this.keysOf(ref);
@@ -980,6 +1024,11 @@ function workspaceInfo() {
 		return () => info.listeners.delete(fn);
 	};
 	return info;
+}
+
+function keepPage(event) {
+	const link = event.defaultPrevented || !event.target.closest ? null : event.target.closest("a[href]");
+	if (link && !link.hasAttribute("target") && !link.hasAttribute("download")) event.preventDefault();
 }
 
 function socketBase() {

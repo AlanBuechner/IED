@@ -63,16 +63,25 @@ class SettingsView {
 				this.searchField.focus();
 			}
 		});
-		this.stop = shell.client.subscribe("settings:" + ctx.wsId, {
+		// Without a workspace (the start page, startsettings.js) there is the User tier alone: settings:app, the global
+		// plugins' schema, and their own pages, imported here since no workspace loaded them.
+		this.plugins = null;
+		this.stop = shell.client.subscribe(ctx.wsId ? "settings:" + ctx.wsId : "settings:app", {
 			snap: (data) => this.received(data),
 			evt: (kind, data) => kind === "settings.changed" && this.received(data),
 		});
 		this.loadSchema();
 	}
 
+	// What a request about the settings names of the workspace: nothing, without one.
+	scope() {
+		return this.ctx.wsId ? { wsId: this.ctx.wsId } : {};
+	}
+
 	async loadSchema() {
 		try {
-			this.schema = (await this.shell.client.request("settings.schema", { wsId: this.ctx.wsId })).settings || {};
+			this.schema = (await this.shell.client.request("settings.schema", this.scope())).settings || {};
+			if (!this.ctx.wsId) this.plugins = await globalPlugins(this.shell);
 		}
 		catch (e) {
 			this.shell.report("settings.schema: " + e.message, e);
@@ -98,17 +107,18 @@ class SettingsView {
 	}
 
 	pages() {
-		const contributed = this.shell.contributions.plugins.flatMap((p) => (p.contributes.settingsPages || []).map((value) => ({ plugin: p, value })));
+		const plugins = this.ctx.wsId ? this.shell.contributions.plugins : this.plugins || [];
+		const contributed = plugins.flatMap((p) => (p.contributes.settingsPages || []).map((value) => ({ plugin: p, value })));
 		return settingsPages(this.schema, shellPages(this.shell).concat(contributed));
 	}
 
 	// Shows the page `page` ("custom:shell.keyboard", "page:AI"); `tier` says which tier to edit and, for a project's
 	// tier, which project (Settings... on a project in Solution Explorer, docs/07). With neither, just the page.
 	show(page, tier, project) {
-		if (tier) this.tier = tier;
+		if (tier) this.tier = this.ctx.wsId ? tier : "app";
 		if (project) this.project = project;
 		if (page) this.pageId = page;
-		if (this.tier === "project" && this.shell.wsId) this.loadProject();
+		if (this.tier === "project" && this.ctx.wsId) this.loadProject();
 		else this.render();
 	}
 
@@ -308,7 +318,7 @@ class SettingsView {
 
 	// The error to show, or null when it was written.
 	async write(key, value, tier) {
-		const params = { tier: tier || this.tier, wsId: this.ctx.wsId, key, value };
+		const params = Object.assign({ tier: tier || this.tier, key, value }, this.scope());
 		if ((tier || this.tier) === "project") params.project = this.project;
 		try {
 			await this.shell.client.request("settings.set", params);
@@ -321,7 +331,7 @@ class SettingsView {
 	}
 
 	async clear(key, tier) {
-		const params = { tier: tier || this.tier, wsId: this.ctx.wsId, key };
+		const params = Object.assign({ tier: tier || this.tier, key }, this.scope());
 		if ((tier || this.tier) === "project") params.project = this.project;
 		try {
 			await this.shell.client.request("settings.reset", params);
@@ -339,6 +349,24 @@ class SettingsView {
 		this.shell.settingsViews.delete(this);
 		for (const entry of this.mounted.values()) if (entry.instance && entry.instance.dispose) entry.instance.dispose();
 	}
+}
+
+// The global plugins with settings pages of their own, for the settings without a workspace: their contributions as the
+// server lists them for no workspace, each UI module imported but not activated - activating it waits for a workspace,
+// whose window imports the same module again and activates it then.
+async function globalPlugins(shell) {
+	const answer = await shell.client.request("plugins.contributions", {});
+	const plugins = answer.plugins.filter((p) => p.ui && ((p.contributes || {}).settingsPages || []).length)
+		.map((p) => ({ id: p.id, source: p.source, contributes: p.contributes, ui: p.ui, base: "/plugins/" + encodeURIComponent(p.id) + "/", module: null }));
+	await Promise.all(plugins.map(async (plugin) => {
+		try {
+			plugin.module = await import(plugin.ui);
+		}
+		catch (e) {
+			shell.report("Plugin '" + plugin.id + "': its settings pages did not load: " + e.message, e);
+		}
+	}));
+	return plugins;
 }
 
 // A refused write as the row shows it: the server's reason and the schema's problems ("/: must be at least 1").

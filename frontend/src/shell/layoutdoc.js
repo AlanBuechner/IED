@@ -70,6 +70,23 @@ export function withRenamedTab(doc, from, to) {
 	return Object.assign({}, doc, doc.tethers ? { tethers } : {}, doc.phone ? { phone } : {});
 }
 
+// The tethers of `from` given to `to`: the tab opened in `from`'s place (a group's preview tab) takes them over, so what
+// is tethered with that place stays with what it shows (docs/15 "Tethered tabs"); one that would tether `to` with
+// itself goes.
+export function withTethersMoved(doc, from, to) {
+	if (!(doc.tethers || []).some((t) => t.lead === from || t.follower === from)) return doc;
+	const swap = (ref) => (ref === from ? to : ref);
+	const moved = doc.tethers.map((t) => Object.assign({}, t, { lead: swap(t.lead), follower: swap(t.follower) })).filter((t) => t.lead !== t.follower);
+	const seen = new Set();
+	const tethers = moved.filter((t) => {
+		const key = [t.lead, t.follower].sort().join("\n");
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+	return Object.assign({}, doc, { tethers });
+}
+
 export function partnersOf(doc, ref) {
 	return (doc.tethers || []).filter((t) => t.lead === ref || t.follower === ref).map((t) => (t.lead === ref ? t.follower : t.lead));
 }

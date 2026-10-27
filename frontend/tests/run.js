@@ -58,5 +58,7 @@ import "./gpu.test.js";
 import "./developer.test.js";
 import "./websearch.test.js";
 import "./mcp.test.js";
+import "./explorersearch.test.js";
+import "./definitionlinks.test.js";
 
 run(document.getElementById("results"));

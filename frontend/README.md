@@ -20,7 +20,8 @@ frontend/
 |  +- shell/           shell.js composes: commands, keybindings (chords, when), menus, views, contributions,
 |                      layouttree.js + layoutdoc.js (pure), layoutstore.js (server sync), dock.js (docking),
 |                      desktop.js / phone.js (chrome), statusbar, banners, toasts, palette, notifications,
-|                      workspaces, hostcommands.js + hostviews.js (the shell's own commands and tabs)
+|                      workspaces (the start page), startsettings.js (Settings there, with no workspace),
+|                      hostcommands.js + hostviews.js (the shell's own commands and tabs)
 +- tests/              in-browser unit tests (harness.js, *.test.js; open /tests/index.html)
 +- mocks/              static HTML mocks of the review screens (M0)
 ```

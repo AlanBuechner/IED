@@ -372,6 +372,15 @@ a { color: var(--link); text-decoration: none; }
 .sp-row:hover .ib, .sp-row:focus-within .ib, .sp-row .ib.on { visibility: visible; }
 .sp-row.gone { cursor: not-allowed; }
 .sp-row.gone .sp-name, .sp-row.gone .sp-when { color: var(--text-2); }
+.sp-start h2 + .btn { margin-top: calc(-1 * var(--space-2)); }
+/* Settings without a workspace, in the start page's place (startsettings.js) */
+.start-settings { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.start-settings-head { flex: none; display: flex; align-items: center; gap: var(--space-4); min-height: 32px; padding: 0 var(--space-4); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; }
+.start-settings-head .muted { overflow: hidden; text-overflow: ellipsis; }
+.start-settings-title { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-0); }
+.start-settings-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.app.phone .start-settings-head { min-height: var(--row-h-touch); }
+.app.phone .start-settings-head .muted { display: none; }
 .app.phone .start-page { padding: var(--space-5) var(--space-4); gap: var(--space-5); justify-content: flex-start; }
 .app.phone .sp-projects, .app.phone .sp-start { flex: 1 1 100%; }
 .app.phone .sp-row { min-height: var(--row-h-touch); }

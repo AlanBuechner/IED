@@ -641,7 +641,9 @@ namespace Ai
 	// profile not saved yet (an ai.models entry). What it learns of a saved profile's window is kept for its turns.
 	Core::String Chats::ProbeMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
-		IED::Workspace ws = OpenWorkspace(params.Str("wsId").View());
+		// Without a workspace (Settings from the start page) the models are the app tier's.
+		Core::String wsId = params.Str("wsId", Core::StringView(""));
+		if (!wsId.IsEmpty()) OpenWorkspace(wsId.View());
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models;
 		Core::String name;
@@ -651,7 +653,7 @@ namespace Ai
 		}
 		else {
 			name = params.Str("model");
-			models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
+			models = ReadModels(context->Setting(Core::StringView("ai.models"), wsId.View()).View(), problems);
 		}
 		ModelProfile* profile = FindModel(models, name.View());
 		if (!profile) throw IED::RpcError(IED::ErrorCode::BadRequest, (problems.IsEmpty() ? (Core::String("no model ") + name.View() + " in ai.models") : problems[0]).View());

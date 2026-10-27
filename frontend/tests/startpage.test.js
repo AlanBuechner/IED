@@ -71,6 +71,15 @@ test("start page: rows open, star and forget; a gone one only says so", () => {
 	assertEqual(startPageView(Object.assign(fakeShell(null), { server: { workspaces: [], recent: [] } }), NOW).querySelector(".sp-none").textContent, "The folders and solutions you open show up here.");
 });
 
+test("start page: Settings is there without a project, and shows in the start page's place", () => {
+	const shell = fakeShell(null);
+	startPageView(shell, NOW).querySelector(".sp-settings").click();
+	assertEqual(shell.calls, [["run", "shell.settings"]], "the User settings, no project needed");
+	const settings = document.createElement("div");
+	shell.startSettings = { shown: true, element: () => settings };
+	assertEqual(startPageView(shell, NOW), settings, "while shown, the settings take the start page's place");
+});
+
 test("start page: the switcher lists the same projects, the shown one's star and the start page", () => {
 	const shell = fakeShell("w1");
 	showWorkspaceSwitcher(shell, { x: 0, y: 0 });

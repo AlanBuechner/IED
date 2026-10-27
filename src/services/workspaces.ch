@@ -124,6 +124,8 @@ namespace Ied
 		private Core::String DeleteMethod(Call& call, const Params& params);
 		private Core::String MakeDirectoryMethod(Call& call, const Params& params);
 		private Core::String RenameMethod(Call& call, const Params& params);
+		// fs.reveal: the path in the server machine's file manager, for a client on that machine.
+		private Core::String RevealMethod(Call& call, const Params& params);
 		private Core::String SetTrustMethod(Call& call, const Params& params);
 		private Core::String OpenRecentMethod(Call& call, const Params& params);
 		// ws.setFavorite, or ws.forgetRecent when `forget`.

@@ -18,6 +18,8 @@ class Session:
 		self.server = server
 		self.sock = sock
 		self.peer = peer
+		# A client on the server's machine (docs/10 `welcome.local`): its socket comes from a loopback address.
+		self.local = str(peer).rsplit(":", 1)[0].strip("[]") in ("127.0.0.1", "::1", "localhost")
 		self.client_id = None
 		self.device = {}
 		self.subs = {}
@@ -69,7 +71,7 @@ class Session:
 		plans, statuses = self._resume_plans(hello.get("resume"))
 		welcome = {
 			"t": "welcome", "proto": hello["proto"], "serverVersion": self.server.version,
-			"sessionEpoch": self.server.epoch, "clientId": self.client_id,
+			"sessionEpoch": self.server.epoch, "clientId": self.client_id, "local": self.local,
 		}
 		if hello.get("resume") is not None:
 			welcome["resume"] = statuses

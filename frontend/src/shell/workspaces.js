@@ -72,8 +72,10 @@ function pickRow(shell, row) {
 	return shell.showWorkspace(row.wsId);
 }
 
-// IED's start page: the projects to go back to, and how to open another.
+// IED's start page: the projects to go back to, how to open another, and the User settings - or those settings, in its
+// place, while they are shown (startsettings.js).
 export function startPageView(shell, now) {
+	if (shell.startSettings && shell.startSettings.shown) return shell.startSettings.element();
 	const groups = projectGroups(shell.server);
 	const sections = [
 		section("Open", groups.open.map(({ ws, project }) => projectRow(shell, project, ws, now))),
@@ -85,7 +87,10 @@ export function startPageView(shell, now) {
 	const ways = shell.menus.resolve("shell/openWorkspace").filter((row) => row.kind === "item").map((row) => h("button.btn", {
 		title: row.keys ? row.label + " (" + row.keys + ")" : null, disabled: !row.enabled, on: { click: () => shell.commands.run(row.command, row.args) },
 	}, row.label));
-	const start = h("section.sp-start", null, h("h2", null, "Get started"), ...ways, h("p", null, (ways.length ? "Or on the server: " : "Open a project on the server: ") + ON_THE_SERVER));
+	const keys = shell.keybindings ? shell.keybindings.labelFor("shell.settings") : "";
+	const settings = h("button.btn.sp-settings", { title: "Settings" + (keys ? " (" + keys + ")" : ""), on: { click: () => shell.commands.run("shell.settings") } }, icon("settings-gear"), "Settings");
+	const start = h("section.sp-start", null, h("h2", null, "Get started"), ...ways, h("p", null, (ways.length ? "Or on the server: " : "Open a project on the server: ") + ON_THE_SERVER),
+		h("h2", null, "Customize"), settings, h("p", null, "Your User settings - AI models, the editor, keyboard shortcuts - apply to every project."));
 	return h("div.start-page", null, projects, start);
 }
 

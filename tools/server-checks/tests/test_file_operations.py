@@ -1,9 +1,11 @@
 """File operations on folders and open documents (docs/10 "Files"): fs.rename moves a folder with its files' revisions and
 the documents open in it, which keep their docId, text and version and get doc.renamed; fs.delete takes a folder only
-with recursive, documents open in it are told, and what it deletes goes to the trash, which lists, restores and purges."""
+with recursive, documents open in it are told, and what it deletes goes to the trash, which lists, restores and purges.
+fs.reveal shows a file or folder of the workspace in the server machine's file manager, and nothing outside it."""
 
 import os
 import shutil
+import subprocess
 import tempfile
 
 from frames import FrameChecker
@@ -64,6 +66,24 @@ class FileOperationTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as taken:
 			await self.call("fs.rename", **{"from": "lib", "to": "top.txt"})
 		self.assertEqual("conflict", taken.exception.code)
+
+	async def test_reveal_shows_a_path_of_the_workspace_on_the_servers_machine(self):
+		self.assertIs(True, self.client.welcome.get("local"), "a socket from the loopback address is on the server's machine")
+		folder = await self.call("fs.reveal", path="src")
+		self.assertEqual((True, False), (folder["folder"], folder["opened"]), "a folder; a server with test hooks starts no file manager")
+		self.assertEqual(os.path.realpath(os.path.join(self.folder, "src")).lower(), os.path.realpath(folder["path"]).lower())
+		self.assertFalse((await self.call("fs.reveal", path="src/a.c"))["folder"], "a file, shown selected in its folder")
+		self.assertTrue((await self.call("fs.reveal", path=""))["folder"], "the workspace's own folder")
+		outside = tempfile.mkdtemp(prefix="ied-outside-")
+		try:
+			subprocess.run(["cmd", "/c", "mklink", "/J", os.path.join(self.folder, "out"), outside], check=True, capture_output=True)
+			for path, code in (("../x", "bad_request"), ("C:/Windows", "bad_request"), ("nothing/here.c", "not_found"), ("out", "forbidden")):
+				with self.assertRaises(RpcFailure) as refused:
+					await self.call("fs.reveal", path=path)
+				self.assertEqual(code, refused.exception.code, path)
+		finally:
+			subprocess.run(["cmd", "/c", "rmdir", os.path.join(self.folder, "out")], capture_output=True)
+			shutil.rmtree(outside, ignore_errors=True)
 
 	async def test_a_renamed_file_takes_its_document(self):
 		doc = await self.open("top.txt")

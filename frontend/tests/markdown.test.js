@@ -6,6 +6,15 @@ import { test, assertEqual } from "./harness.js";
 import { fenceLanguages, renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
 import { resolveRelative } from "/ui-kit/paths.js";
 import { moves } from "/plugins/ied.markdown/ui/follow.js";
+import { linkTarget } from "/ui-kit/linkclicks.js";
+
+test("markdown: what a rendered link names, for the view that answers it", () => {
+	assertEqual(linkTarget("docs/a.md#top"), { kind: "path", href: "docs/a.md#top" }, "a path as written: the view reads it from its folder");
+	assertEqual(linkTarget("/README.md"), { kind: "path", href: "/README.md" });
+	assertEqual(linkTarget("HTTPS://example.com/x"), { kind: "web", href: "HTTPS://example.com/x" });
+	assertEqual(linkTarget("mailto:me@example.com"), { kind: "mail", href: "mailto:me@example.com" });
+	assertEqual([linkTarget("#top"), linkTarget(""), linkTarget("javascript:alert(1)"), linkTarget("file:///C:/x.md")], [null, null, null, null], "nothing to open");
+});
 
 function html(text, options) {
 	const host = document.createElement("div");
@@ -91,4 +100,17 @@ test("markdown: a preview beside its file follows the Markdown file its group sh
 	assertEqual(moves(state("doc:a.md"), tethered), [], "its own file");
 	assertEqual(moves(state("doc:b.md"), () => []), [], "a preview not tethered (opened in place) does not follow");
 	assertEqual(moves(state("doc:b.md", ["doc:a.md", "doc:b.md", "mdpreview:a.md", "mdpreview:b.md"]), tethered), [], "not onto a preview open already");
+});
+
+test("markdown: a preview whose group's preview tab was taken by another file follows that file", () => {
+	// a.md was the group's preview tab; b.md (or c.cf) opened in its place took over the tether (shell openTab).
+	const state = (tabs, active) => ({
+		open: [...tabs, "mdpreview:a.md"],
+		groups: [{ activity: "ied.editor", well: true, tabs, active }, { activity: "ied.editor", well: true, tabs: ["mdpreview:a.md"], active: "mdpreview:a.md" }],
+	});
+	const tetheredTo = (lead) => (ref) => (ref === "mdpreview:a.md" ? [lead] : []);
+	assertEqual(moves(state(["doc:b.md"], "doc:b.md"), tetheredTo("doc:b.md")), [{ from: "mdpreview:a.md", to: "mdpreview:b.md", lead: "doc:b.md" }], "the new file of its group");
+	assertEqual(moves(state(["doc:c.cf"], "doc:c.cf"), tetheredTo("doc:c.cf")), [], "a C4 file in its place: the preview stays on a.md");
+	assertEqual(moves(state(["doc:c.cf", "doc:d.md"], "doc:d.md"), tetheredTo("doc:c.cf")), [{ from: "mdpreview:a.md", to: "mdpreview:d.md", lead: "doc:d.md" }], "then a Markdown file shown there: it follows");
+	assertEqual(moves(state(["doc:b.md"], "doc:b.md"), tetheredTo("chat:x")), [], "tethered with no document: no group to follow");
 });

@@ -44,6 +44,7 @@ namespace Ied
 		public Http::WebSocket* socket;
 		public Core::String peer;
 		public Core::String authDevice;   // the device session the socket was opened with (docs/11)
+		public bool local;                // the socket came from a loopback address: a client on the server's machine
 		public Core::String clientId;
 		public DeviceInfo device;
 		public Outbox outbox;

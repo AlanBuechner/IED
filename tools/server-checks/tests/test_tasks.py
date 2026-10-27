@@ -294,6 +294,18 @@ class TaskTests(ServerTestCase):
 		text = self.text_of(frames)
 		self.assertTrue("cleanup" in text and "project clean" in text and "skipped" not in text, text)
 
+	async def test_the_solution_runs_every_projects_task(self):
+		run_id, frames = await self.run_task(slot="build", solution=True)
+		self.assertEqual(3, self.text_of(frames).count("building Development"), "Game's, Viewer's and Core's build, one run")
+		end = [f for f in frames if f.get("kind") == "run.end"][-1]["data"]
+		self.assertEqual(("Build Solution", "", "build", "succeeded"), (end["label"], end["project"], end["task"], end["status"]))
+		with self.assertRaises(RpcFailure) as none:
+			await self.client.request("task.run", {"wsId": "w1", "slot": "rebuild", "solution": True})
+		self.assertEqual("not_found", none.exception.code, "no project has a rebuild task")
+		with self.assertRaises(RpcFailure) as wrong:
+			await self.client.request("task.run", {"wsId": "w1", "slot": "run", "solution": True})
+		self.assertEqual("bad_request", wrong.exception.code, "a solution builds, cleans and tests; it does not run")
+
 	async def test_cancel_kills_the_whole_tree(self):
 		started = await self.client.request("task.run", {"wsId": "w1", "task": "forever"})
 		await self.client.sub([started["topic"]])

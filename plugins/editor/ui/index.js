@@ -79,11 +79,14 @@ export function activate(ied) {
 		const path = pathOf(args);
 		if (path) ied.tabs.open("doc:" + path, { preview: false });
 	});
-	ied.commands.handle("ied.explorer.refresh", () => Promise.all([...explorers].map((e) => e.refresh())));
+	ied.commands.handle("ied.explorer.refresh", () => Promise.all([...explorers].map((e) => e.reload())));
 	ied.commands.handle("ied.explorer.collapseAll", () => explorers.forEach((e) => e.tree.collapseAll()));
 	ied.commands.handle("ied.explorer.copyPath", (args) => copy(fullPath(ied, pathOf(args))));
 	ied.commands.handle("ied.explorer.copyRelativePath", (args) => copy(pathOf(args) || ""));
 	ied.commands.handle("ied.explorer.projectSettings", (args) => openProjectSettings(ied, args));
+	ied.commands.handle("ied.explorer.openInFileExplorer", (args) => revealPath(ied, args && args.kind === "solution" ? "" : pathOf(args)));
+	ied.commands.handle("ied.explorer.openContainingFolder", (args) => revealPath(ied, pathOf(args)));
+	ied.commands.handle("ied.explorer.search", () => ied.commands.run("shell.showView", { id: "ied.explorer" }).then(() => requestAnimationFrame(() => last(explorers) && last(explorers).focusSearch())));
 	for (const [command, slot] of [["ied.explorer.buildProject", "build"], ["ied.explorer.rebuildProject", "rebuild"], ["ied.explorer.cleanProject", "clean"], ["ied.explorer.testProject", "test"]]) {
 		ied.commands.handle(command, (args) => runProjectTask(ied, tasks, slot, args));
 	}
@@ -110,6 +113,11 @@ export function activate(ied) {
 	ied.commands.handle("ied.task.build", () => tasks.run({ slot: "build" }));
 	ied.commands.handle("ied.task.rebuild", () => tasks.run({ slot: "rebuild" }));
 	ied.commands.handle("ied.task.clean", () => tasks.run({ slot: "clean" }));
+	// VS's Build / Rebuild / Clean Solution: every project's task of the slot, one run on the server (docs/06).
+	for (const [command, slot] of [["ied.task.buildSolution", "build"], ["ied.task.rebuildSolution", "rebuild"], ["ied.task.cleanSolution", "clean"]]) {
+		ied.commands.handle(command, () => tasks.run({ slot, solution: true }));
+	}
+	ied.commands.handle("ied.task.pickStartup", () => pickStartup(ied));
 	ied.commands.handle("ied.debug.start", () => debug.start());
 	ied.commands.handle("ied.debug.stop", () => debug.stop());
 	ied.commands.handle("ied.debug.restart", () => debug.restart());
@@ -120,9 +128,9 @@ export function activate(ied) {
 	ied.commands.handle("ied.debug.toggleBreakpoint", () => toggleBreakpoint());
 	ied.commands.handle("ied.debug.windows", () => ied.commands.run("shell.showView", { id: "ied.breakpoints" }));
 	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
-	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test" }));
+	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test", solution: true }));
 	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
-	ied.commands.handle("ied.task.setStartup", (args) => (args && args.name ? tasks.setStartup(args.name) : pickStartup(ied)));
+	ied.commands.handle("ied.task.setStartup", (args) => (args && args.name && args.kind !== "solution" ? tasks.setStartup(args.name) : pickStartup(ied)));
 	ied.commands.handle("ied.task.showResult", () => (tasks.ended && tasks.ended.status === "failed" && !tasks.runs.size ? ied.commands.run("shell.showView", { id: "ied.errors" }) : ied.commands.run("shell.showView", { id: "ied.output" })));
 	ied.commands.handle("ied.output.show", (args) => showOutput(ied, args && args.sourceId));
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
@@ -469,9 +477,28 @@ async function runProjectTask(ied, tasks, slot, args) {
 	return tasks.run({ slot, project });
 }
 
-// Settings > Project tier, with this project picked (docs/07 "The settings window").
+// Settings on the tier of the row the menu was used on (docs/07 "The settings window"): a solution's own tier, else the
+// Project tier with that project picked.
 function openProjectSettings(ied, args) {
-	ied.commands.run("shell.settings", { tier: "project", project: projectName(ied, args) || undefined });
+	const node = last(explorers) && last(explorers).selected();
+	const solution = args && args.kind ? args.kind === "solution" : Boolean(node && node.kind === "solution");
+	if (solution) ied.commands.run("shell.settings", { tier: "solution" });
+	else ied.commands.run("shell.settings", { tier: "project", project: projectName(ied, args) || undefined });
+}
+
+// A file or folder of the workspace in the server machine's file manager (fs.reveal, docs/10 "Files"): a folder opens,
+// a file shows selected in its folder. `path` "" is the workspace's folder; null is a row outside it.
+async function revealPath(ied, path) {
+	if (path === null || path === undefined) {
+		ied.toast("That item is outside the workspace's folder, so File Explorer cannot show it from here.", { level: "info" });
+		return;
+	}
+	try {
+		await ied.client.request("fs.reveal", { wsId: ied.workspace.wsId, path });
+	}
+	catch (e) {
+		ied.report("File Explorer did not open " + (path || "the workspace's folder") + ": " + e.message, e);
+	}
 }
 
 async function copy(text) {

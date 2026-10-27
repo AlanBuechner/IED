@@ -599,6 +599,90 @@ def exists(run, path):
 		return False
 
 
+@scenario(viewports=("desktop", "phone"))
+def solution_explorer_search(run):
+	"""Solution Explorer's search box (owner, 2026-10-26: "a search box at the top of the solution explorer like in visual
+	studio"; Ctrl+; as in VS): what is typed keeps the files and folders whose names hold it - in folders never opened
+	too, from the server's file list - with the folders above them opened and the text marked; Escape gives the tree back
+	as it was, its open folders open again (docs/15 "Solution Explorer search")."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	needle = "needle-%s" % run.viewport
+	folder = "src/hay-%s" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": folder + "/deep/" + needle + ".c", "text": "int needle;\n"})
+	if run.phone:
+		page.evaluate("() => ied_shell.showView('ied.explorer')")
+	rows = ".explorer .tree-row"
+
+	def wait_rows(wanted, message):
+		for _ in range(50):
+			if wanted(run.texts(rows + " .name")) and not page.query_selector(rows + ".muted"):
+				return
+			time.sleep(0.1)
+		check(False, "%s: %s" % (message, run.texts(rows + " .name")))
+
+	page.wait_for_selector(rows + ":has-text('README.md')")
+	page.click(rows + ":has-text('docs')")
+	wait_rows(lambda names: len(names) > 3 and names.index("docs") + 1 < len(names) and names[names.index("docs") + 1].endswith(".md"), "docs opened")
+	before = run.texts(rows + " .name")
+	if run.phone:
+		page.click(".ex-search-field")
+	else:
+		page.keyboard.press("Control+;")
+		page.wait_for_function("() => document.activeElement.classList.contains('ex-search-field')", timeout=3000)
+	page.keyboard.type(needle)
+	wait_rows(lambda names: names == ["src", "hay-" + run.viewport, "deep", needle + ".c"], "the file in folders never opened, and the folders that lead to it")
+	check(run.texts(rows + " mark.ex-hit") == [needle], "its name marked")
+	check(run.texts(".ex-search-note") == ["1 result"], "the box says how many: %s" % run.texts(".ex-search-note"))
+	run.shot("found")
+	page.fill(".ex-search-field", "hay-" + run.viewport)
+	wait_rows(lambda names: names == ["src", "hay-" + run.viewport], "a folder by its name")
+	check(page.get_attribute(rows + ":has-text('hay-%s')" % run.viewport, "aria-expanded") == "false", "a folder that matches by its name shows closed: opening it shows all it holds")
+	page.focus(".ex-search-field")
+	page.keyboard.press("Escape")
+	wait_rows(lambda names: names == before, "Escape gives the tree back as it was (%s)" % before)
+	check([t for t in run.texts(".ex-search-note") if t] == [], "the note goes with the query")
+	run.shot("restored")
+	run.request("fs.delete", {"wsId": ws, "path": folder, "recursive": True})
+
+
+@scenario(viewports=("desktop",))
+def explorer_menus_reach_outside(run):
+	"""Solution Explorer's menus (owner, 2026-10-26: "better right click menu options ... open in file explorer etc"),
+	grouped as Visual Studio groups them: a folder has Open Folder in File Explorer beside Open in Terminal, a file Open
+	Containing Folder; they ask the server (fs.reveal), which shows the place in its own machine's file manager - one
+	with test hooks starts nothing (docs/10 "Files")."""
+	page = run.open()
+	page.evaluate("""() => {
+		window.ied_revealed = [];
+		const request = ied_shell.client.request.bind(ied_shell.client);
+		ied_shell.client.request = (method, params, options) => {
+			if (method === 'fs.reveal') window.ied_revealed.push(params.path);
+			return request(method, params, options);
+		};
+	}""")
+	rows = ".explorer .tree-row"
+	page.click(rows + ":has-text('src')", button="right")
+	page.wait_for_selector(".menu")
+	labels = run.texts(".menu .menu-item .label")
+	check(labels.index("Open Folder in File Explorer") + 1 == labels.index("Open in Terminal"), "File Explorer and the terminal together: %s" % labels)
+	run.shot("folder-menu")
+	page.click(".menu-item:has-text('Open Folder in File Explorer')")
+	page.wait_for_function("() => window.ied_revealed.length === 1", timeout=5000)
+	page.click(rows + ":has-text('src')")
+	page.wait_for_selector(rows + ":has-text('main.c')")
+	page.click(rows + ":has-text('main.c')", button="right")
+	page.wait_for_selector(".menu")
+	labels = run.texts(".menu .menu-item .label")
+	check("Open Containing Folder" in labels and "Open in Terminal" in labels, "a file's menu: %s" % labels)
+	run.shot("file-menu")
+	page.click(".menu-item:has-text('Open Containing Folder')")
+	page.wait_for_function("() => window.ied_revealed.length === 2", timeout=5000)
+	check(page.evaluate("() => window.ied_revealed") == ["src", "src/main.c"], "the folder, then the file: %s" % page.evaluate("() => window.ied_revealed"))
+	time.sleep(0.3)
+	check(page.query_selector(".toast.error, .toast:has-text('did not open')") is None, "no error")
+
+
 @scenario()
 def explorer_file_operations(run):
 	page = run.open()
@@ -977,11 +1061,49 @@ def markdown_preview_follows_its_group(run):
 
 
 @scenario(viewports=("desktop",))
+def markdown_preview_follows_the_explorer(run):
+	"""The owner's case (2026-10-26, "i will open a .md file preview then i will open a new .md file from the file
+	explorer but the preview tab will not update"): a Markdown file opened from Solution Explorer (its group's preview
+	tab), its preview beside it, then another .md clicked there - it takes the first one's place and its tethers, so the
+	preview shows it. With the focus in the preview's group, a file from Solution Explorer still goes to the group the
+	preview follows (docs/15 "Tethered tabs")."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	names = ["explore-%d-%s.md" % (i, run.viewport) for i in range(3)]
+	for i, name in enumerate(names):
+		run.request("fs.write", {"wsId": ws, "path": "docs/" + name, "text": "# Explored %d\n" % i})
+	host = ".dock-host:not([hidden]) "
+	page.click(host + ".tree-row:has-text('docs')")
+	page.wait_for_selector(host + ".tree-row:has-text('%s')" % names[0])
+	page.click(host + ".tree-row:has-text('%s')" % names[0])
+	page.wait_for_selector(host + ".tab.preview:has-text('%s')" % names[0])
+	page.click(host + ".tabs-tail .tabs-action[data-command='ied.markdown.previewBeside']")
+	page.wait_for_selector(".md-preview h1:has-text('Explored 0')")
+	page.click(host + ".tree-row:has-text('%s')" % names[1])
+	page.wait_for_selector(".md-preview h1:has-text('Explored 1')", timeout=5000)
+	check(page.query_selector(host + ".tab:has-text('Preview %s')" % names[0]) is None, "the preview tab followed, no second one")
+	lead, follower = "doc:docs/" + names[1], "mdpreview:docs/" + names[1]
+	check(page.evaluate("ied_shell.doc.tethers") == [{"lead": lead, "follower": follower, "closes": True}], "tethered to the file it shows: %s" % page.evaluate("ied_shell.doc.tethers"))
+	run.shot("followed")
+	page.click(".md-preview h1")
+	page.click(host + ".tree-row:has-text('%s')" % names[2])
+	page.wait_for_selector(".md-preview h1:has-text('Explored 2')", timeout=5000)
+	wells = page.evaluate("ied_shell.tabsState().groups.filter((g) => g.well && g.activity === 'ied.editor').map((g) => g.tabs)")
+	check(wells == [["doc:docs/" + names[2]], ["mdpreview:docs/" + names[2]]], "opened in the followed group, the preview beside: %s" % wells)
+	run.shot("from-the-preview")
+	page.evaluate("(ref) => ied_shell.closeTab(ref)", "doc:docs/" + names[2])
+	page.wait_for_function("!document.querySelector('.md-preview')", timeout=5000)
+	for name in names:
+		run.request("fs.delete", {"wsId": ws, "path": "docs/" + name})
+
+
+@scenario(viewports=("desktop",))
 def browsing_markdown_leaves_no_editor_behind(run):
 	"""Markdown files browsed one after another in the preview tab, a preview beside the first (owner, 2026-10-23: the
-	app's memory kept rising while browsing .md files): the file the preview tab no longer shows loses its tether, and
-	no editor outlives its tab - the tether's tooltip made the gone file's editor again on every render, and a view that
-	arrived after its tab was released was never disposed."""
+	app's memory kept rising while browsing .md files): no tether names a file the preview tab no longer shows - each
+	file in its place takes the tether over and the preview follows it (owner, 2026-10-26) - and no editor outlives its
+	tab: the tether's tooltip made the gone file's editor again on every render, and a view that arrived after its tab
+	was released was never disposed."""
 	page = run.open()
 	ws = page.evaluate("ied_shell.wsId")
 	paths = ["docs/browse-%d-%s.md" % (i, run.viewport) for i in range(6)]
@@ -995,11 +1117,13 @@ def browsing_markdown_leaves_no_editor_behind(run):
 	for path in paths[1:]:
 		page.evaluate("(path) => ied_shell.openTab('doc:' + path, { preview: true })", path)
 		page.wait_for_function(ready, arg=path, timeout=10000)
+	page.wait_for_selector(".md-preview h1:has-text('Page 5')", timeout=5000)
 	time.sleep(0.5)
-	check(page.evaluate("ied_shell.doc.tethers || []") == [], "the replaced file's tether went with it")
+	tethers = page.evaluate("ied_shell.doc.tethers || []")
+	check(tethers == [{"lead": "doc:" + paths[-1], "follower": "mdpreview:" + paths[-1], "closes": True}], "one tether, the shown file's with its preview: %s" % tethers)
 	check(page.evaluate("monaco.editor.getEditors().length") == 1, "one editor, the open tab's: %s" % page.evaluate("monaco.editor.getEditors().map((e) => e.getModel() && e.getModel().uri.path)"))
-	page.evaluate("(path) => ied_shell.closeTab('mdpreview:' + path)", paths[0])
 	page.evaluate("(path) => ied_shell.closeTab('doc:' + path)", paths[-1])
+	page.wait_for_function("!document.querySelector('.md-preview')", timeout=5000)
 	for path in paths:
 		run.request("fs.delete", {"wsId": ws, "path": path})
 
@@ -2807,11 +2931,98 @@ def document_links_open_on_middle_click(run):
 	chat.wait_for_function("(ref) => ied_shell.tabsState().open.includes(ref)", arg="doc:docs/notes.md", timeout=20000)
 	check(chat.evaluate("() => location.href") == before, "the page did not follow the link itself")
 	run.shot("answer-link")
+	for ref in ("doc:docs/notes.md", "mdpreview:docs/notes.md"):   # the file and its preview beside: on a phone, the chat is the pane again
+		chat.evaluate("(ref) => ied_shell.closeTab(ref)", ref)
+	if not run.phone:
+		chat.evaluate("() => ied_shell.showActivity('ied.chat')")
+	windows = len(chat.context.pages)
+	chat.click(".chat-turn:last-child .chat-text a[href='docs/notes.md']", button="middle")
+	chat.wait_for_function("(ref) => ied_shell.tabsState().open.includes(ref)", arg="doc:docs/notes.md", timeout=20000)
+	check(len(chat.context.pages) == windows and chat.evaluate("() => location.href") == before, "a middle click opens the file as a tab of this window, no window of its own")
 	run.request("fs.delete", {"wsId": ws, "path": path})
 	chat.close()
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def preview_links_open_on_middle_click(run):
+	"""A Markdown preview's links, middle-clicked (owner, 2026-10-26: "currently when i click on a link to a .md file
+	preview it will take me there but a middle click will open a new window rather then open a new tab in the current
+	ied session"): a link to another .md opens that file in a tab of this window, a web address a Browser tab, a place
+	in the page nothing - never a window, and the page itself never leaves (docs/15 "Links")."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	url = run.target.url + "/login.html"
+	name = "linked-other-%s.md" % run.viewport
+	path = "docs/linked-%s.md" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": "docs/" + name, "text": "# Other\n"})
+	run.request("fs.write", {"wsId": ws, "path": path, "text": "# Linked\n\nSee [the other](%s), [the site](%s) and [the top](#top).\n" % (name, url)})
+	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.preview', { path })", path)
+	page.wait_for_selector(".md-preview a[href='%s']" % name, timeout=20000)
+	before, windows = page.url, len(page.context.pages)
+	page.click(".md-preview a[href='%s']" % name, button="middle")
+	page.wait_for_function("(ref) => ied_shell.tabsState().open.includes(ref)", arg="doc:docs/" + name, timeout=20000)
+	check(len(page.context.pages) == windows and page.url == before, "the file opened as a tab of this window: %d pages, %s" % (len(page.context.pages), page.url))
+	run.shot("file-tab")
+	page.evaluate("(ref) => ied_shell.openTab(ref)", "mdpreview:" + path)
+	page.click(".md-preview a[href='%s']" % url, button="middle")
+	page.wait_for_function("() => ied_shell.tabsState().open.some((ref) => ref.startsWith('browser:'))", timeout=20000)
+	check(len(page.context.pages) == windows and page.url == before, "the address opened as a Browser tab, no window")
+	run.shot("web-tab")
+	page.evaluate("(ref) => ied_shell.openTab(ref)", "mdpreview:" + path)
+	page.wait_for_selector(".md-preview a[href='#top']")
+	open_before = page.evaluate("() => ied_shell.tabsState().open.length")
+	page.click(".md-preview a[href='#top']", button="middle")
+	page.click(".md-preview a[href='#top']")
+	time.sleep(0.4)
+	check(page.url == before and page.evaluate("() => ied_shell.tabsState().open.length") == open_before, "a place in the page opens nothing")
+	for ref in ("mdpreview:" + path, "doc:docs/" + name):
+		page.evaluate("(ref) => ied_shell.closeTab(ref)", ref)
+	run.request("fs.delete", {"wsId": ws, "path": path})
+	run.request("fs.delete", {"wsId": ws, "path": "docs/" + name})
+
+
 import profiler_scenarios  # noqa: E402,F401  (the profiler's scenarios register themselves)
+
+
+@scenario(viewports=("desktop", "phone"))
+def settings_without_a_workspace(run):
+	"""The User settings with no project open (owner, 2026-10-26: "we should be able to edit user settings without
+	haveing a project open"): the start page's Settings shows the settings window in the start page's place, on the User
+	tier alone, with the plugins' own pages (AI > Models, its module imported though no workspace activated it); a value
+	set there is the app tier's, Reset takes it away, and Start Page goes back. Ctrl+, opens it there too, where Go To
+	All has nothing to go to (docs/07 "The settings window")."""
+	page = run.open()
+	page.goto(run.target.url + "/#start")
+	page.wait_for_function("window.ied_shell && ied_shell.client && ied_shell.client.state === 'live' && document.querySelector('.start-page .sp-settings')", timeout=20000)
+	page.click(".sp-settings")
+	page.wait_for_selector(".start-settings .settings-window .set-node")
+	check(run.texts(".start-settings .set-seg button") == ["User"], "the User tier alone: %s" % run.texts(".start-settings .set-seg button"))
+	pages = run.texts(".start-settings .set-node .name")
+	check("Text Editor" in pages and "Models" in pages and "Keyboard" in pages, "the schema's pages and the plugins' own: %s" % pages)
+	page.click(".start-settings .set-node:has-text('Text Editor')")
+	page.select_option(".start-settings select[aria-label='editor.wordWrap']", label="on")
+	page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['editor.wordWrap'].value === 'on' && s.values['editor.wordWrap'].source === 'app')", timeout=10000)
+	page.wait_for_selector(".start-settings .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
+	run.shot("user-tier")
+	page.click(".start-settings .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
+	page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['editor.wordWrap'].source === 'default')", timeout=10000)
+	page.click(".start-settings .set-node:has-text('Models')")
+	page.wait_for_selector(".start-settings .set-custom h1:has-text('Models')")
+	check(page.query_selector("link[href$='ui/chat.css']") is not None, "the page's own styles came with it")
+	run.shot("models")
+	page.click(".start-settings-head button:has-text('Start Page')")
+	page.wait_for_selector(".start-page .sp-settings")
+	check(page.query_selector(".settings-window") is None, "the settings went with it")
+	if not run.phone:
+		page.keyboard.press("Control+,")
+	else:
+		page.click(".sp-settings")
+	page.wait_for_selector(".start-settings .settings-window")
+	page.evaluate("() => ied_shell.showWorkspace(ied_shell.server.workspaces[0].wsId)")
+	page.wait_for_selector(".start-settings", state="detached", timeout=10000)
+	check(page.evaluate("() => ied_shell.settingsViews.size") == 0, "opening a workspace closes the start page's settings")
+	page.goto(run.target.url + "/")
+	run.wait_ready()
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))

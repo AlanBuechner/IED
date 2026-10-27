@@ -22,7 +22,8 @@ namespace Ied
 		private void RespondToMaster(const Http::Request& request, Http::Response& response);
 		private bool FromMaster(const Http::Request& request) const;
 		// A protocol session on the upgraded socket, for `device`.
-		private void Attach(const Http::Request& request, Http::Response& response, Core::StringView device);
+		// A client's socket; `local`: the client is on the server's machine (welcome.local, fs.reveal).
+		private void Attach(const Http::Request& request, Http::Response& response, Core::StringView device, bool local);
 		private bool HostAllowed(const Http::Request& request) const;
 		private bool OriginAllowed(const Http::Request& request) const;
 		private void Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device);

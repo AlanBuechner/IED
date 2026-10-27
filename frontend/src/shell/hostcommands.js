@@ -108,6 +108,8 @@ const MENUS = {
 		{ command: "shell.resetLayout", group: "9_layout" },
 	],
 	"menubar/extensions": [{ command: "shell.plugins", group: "1_manage" }],
+	// VS's Tools > Options, last in its menu.
+	"menubar/tools": [{ command: "shell.settings", group: "9_options" }],
 	"menubar/help": [
 		{ command: "shell.keyboardShortcuts", group: "1_keys" },
 		{ command: "shell.about", group: "9_about" },
@@ -147,6 +149,8 @@ const KEYS = [
 	{ command: "shell.previousTab", key: "ctrl+alt+pageup" },
 	{ command: "shell.togglePanel", key: "ctrl+`" },
 	{ command: "shell.openFolder", key: "ctrl+shift+alt+o", when: "desktopApp" },
+	// VS's Ctrl+, is Go To All (the editor plugin's), which needs a workspace; with none shown it is Settings.
+	{ command: "shell.settings", key: "ctrl+,", when: "!workspaceKind" },
 ];
 
 export function registerShellCommands(shell) {

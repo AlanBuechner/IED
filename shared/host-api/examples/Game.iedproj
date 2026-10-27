@@ -13,7 +13,7 @@
 		"build": {
 			"slot": "build",
 			"label": "Build",
-			"icon": "$(gear)",
+			"icon": "$(build)",
 			"steps": [
 				{ "run": ["nuke", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" }
 			]

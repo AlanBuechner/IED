@@ -7,6 +7,7 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
 import { showImage } from "/ui-kit/imageview.js";
+import { answerLinks } from "/ui-kit/linkclicks.js";
 import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
 import { userChips } from "./userchips.js";
 
@@ -29,7 +30,8 @@ function clock(ms) {
 }
 
 // actions: {approve(approval, decision, message), allowAlways(approval), answer(question, text), openFile(path, line?),
-// openChat(chatId), codeBlock(code, fence, closed) (a fenced block's colored <code>), colorDiff(path, spans)}
+// openAddress({kind, href}) (a web or mail address), openChat(chatId), codeBlock(code, fence, closed) (a fenced block's
+// colored <code>), colorDiff(path, spans)}
 export class TranscriptView {
 	constructor(model, actions) {
 		this.model = model;
@@ -42,20 +44,15 @@ export class TranscriptView {
 		this.thinkParts = new WeakMap();   // a thinking segment's element -> its parts (fillThinking)
 		this.frame = 0;
 		this.prefillTimer = 0;
-		this.el.addEventListener("click", (event) => this.linkClicked(event));
+		answerLinks(this.el, (target) => this.followLink(target));
 	}
 
-	// A link in a reply. A web address opens in its own window (markdown.js marks it so); a path of this workspace names a
-	// place in IED, and the page following it itself would leave the IDE. A mail address is for the system's own program,
-	// and "#section" is a place in the page (docs/15 "Links").
-	linkClicked(event) {
-		const link = event.target.closest && event.target.closest("a[href]");
-		if (!link || link.hasAttribute("target")) return null;
-		const href = link.getAttribute("href");
-		if (href.startsWith("#") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(href)) return null;
-		event.preventDefault();
-		this.actions.openFile(decodeURIComponent(href.split("#")[0]));
-		return null;
+	// A link in a reply, clicked or middle-clicked (linkclicks.js, docs/15 "Links"): a path of this workspace opens as a
+	// tab of this window, a web address in a Browser tab, a mail address in the system's own program; the page itself
+	// never follows one, which would leave the IDE.
+	followLink(target) {
+		if (target.kind === "path") this.actions.openFile(decodeURIComponent(target.href.split("#")[0]));
+		else this.actions.openAddress(target);
 	}
 
 	render() {

@@ -144,7 +144,7 @@
 				"label": "Go",
 				"detect": "go.mod",
 				"tasks": {
-					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [ { "run": ["${tool:go}", "build", "./..."], "problemMatcher": "go" } ] },
+					"build": { "label": "Build", "icon": "$(build)", "slot": "build", "steps": [ { "run": ["${tool:go}", "build", "./..."], "problemMatcher": "go" } ] },
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [ { "run": ["${tool:go}", "run", "."], "problemMatcher": "go", "output": "run" } ] },
 					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [ { "run": ["${tool:go}", "test", "./..."], "problemMatcher": "go", "output": "test" } ] },
 					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Run with the profiler connected (IED_PROFILER); the program records through github.com/AlanBuechner/IED/plugins/go/profiler", "steps": [ { "run": ["${tool:go}", "run", "."], "problemMatcher": "go", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } } ] }

@@ -945,6 +945,8 @@ class ChatTests(ChatCase):
 		with self.assertRaises(RpcFailure) as missing:
 			await self.client.request("ai.probe", {"wsId": "w1", "model": "nope"})
 		self.assertEqual("bad_request", missing.exception.code)
+		alone = await self.client.request("ai.probe", {"model": "fake"})
+		self.assertTrue(alone["ok"], "no workspace (Settings on the start page): the User tier's models")
 
 	# --- Messages while a turn runs, and stopping ---------------------------------------------------------------------
 

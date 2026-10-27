@@ -30,6 +30,17 @@
 .explorer .tree-row .meta { font-size: var(--font-size-xs); }
 .explorer .tree-row.problem .name { color: var(--accent-error); }
 .explorer .tree-row.startup .name { font-weight: 600; color: var(--text-0); }
+.ex-search { padding: var(--space-2) var(--space-3); }
+.ex-search-field { flex: 1; min-width: 0; height: var(--row-h); padding: 0 var(--space-3); }
+.ex-search-note { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; font-size: var(--font-size-xs); }
+.ex-search-note:empty { display: none; }
+.ex-hit { background: var(--find-match); color: inherit; border-radius: 2px; }
+
+@media (max-width: 719px) {
+	.ex-search { flex-wrap: wrap; }
+	.ex-search-field { height: var(--row-h-touch); }
+	.ex-search-note { max-width: none; flex-basis: 100%; }
+}
 
 /* Output */
 .output-text {

@@ -73,7 +73,7 @@ def flood_step(count):
 
 
 TASKS = {
-	"build": {"label": "Build", "slot": "build", "icon": "$(gear)", "steps": lambda params: [build_step(params)]},
+	"build": {"label": "Build", "slot": "build", "icon": "$(build)", "steps": lambda params: [build_step(params)]},
 	"build-broken": {"label": "Build (with an error)", "slot": None, "icon": "", "steps": lambda params: [failing_build_step(params)]},
 	"test": {"label": "Test", "slot": "test", "icon": "$(beaker)", "steps": lambda params: [test_step()]},
 	"run": {"label": "Run", "slot": "run", "icon": "$(run)", "steps": lambda params: [build_step(params), run_step()]},

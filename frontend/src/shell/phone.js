@@ -94,8 +94,10 @@ export class PhoneChrome {
 		if (entry.ref === this.shown) this.renderHead(this.paneRef());
 	}
 
+	// The settings shown in the start page's place stay as they are (their scroll) when the server's state changes.
 	startPage() {
-		replace(this.area, startPageView(this.shell));
+		const view = startPageView(this.shell);
+		if (this.area.childElementCount !== 1 || this.area.firstElementChild !== view) replace(this.area, view);
 	}
 
 	renderBanners() {

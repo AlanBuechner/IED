@@ -89,6 +89,7 @@
 				"serverVersion": { "type": "string" },
 				"sessionEpoch": { "type": "string" },
 				"clientId": { "type": "string" },
+				"local": { "type": "boolean", "description": "The socket came from a loopback address: the client runs on the server's machine." },
 				"resume": { "type": "object", "additionalProperties": { "enum": ["ok", "snapshot"] } }
 			}
 		},

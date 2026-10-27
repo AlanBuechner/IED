@@ -3,11 +3,16 @@
 // shows its folder. Folders load when opened; tree.changed keeps them
 // current. A click opens a file in a preview tab, a double click or Enter keeps it open (VS). New files and folders
 // and renames are named in place; a delete asks first. A folder can be added as a project, and a project moved or
-// removed (its files kept, or its folder deleted), through the server's project.* methods.
+// removed (its files kept, or its folder deleted), through the server's project.* methods. The search box above the
+// tree (Ctrl+;) keeps the rows that match and the folders that lead to them (explorersearch.js); emptying it gives the
+// tree back as it was.
 
 import { h, icon } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
 import { choiceDialog, confirmDialog, promptDialog } from "/ui-kit/dialog.js";
+import { SEARCH_LIMIT, SearchState, holds, markedParts } from "./explorersearch.js";
+
+const SEARCH_DELAY_MS = 200;
 
 function parentOf(path) {
 	const slash = path.lastIndexOf("/");
@@ -64,9 +69,18 @@ export class Explorer {
 			this.viewButton,
 			h("span.grow"),
 			h("button.ib", { title: "Collapse All", "aria-label": "Collapse All", on: { click: () => this.tree.collapseAll() } }, icon("collapse-all")),
-			h("button.ib", { title: "Refresh", "aria-label": "Refresh", on: { click: () => this.refresh() } }, icon("refresh")));
+			h("button.ib", { title: "Refresh", "aria-label": "Refresh", on: { click: () => this.reload() } }, icon("refresh")));
+		this.searchField = h("input.input-field.ex-search-field", {
+			type: "search", placeholder: "Search Solution Explorer (Ctrl+;)", "aria-label": "Search Solution Explorer", spellcheck: "false",
+			on: { input: () => this.searchSoon(), keydown: (event) => this.searchKey(event) },
+		});
+		this.searchNote = h("span.ex-search-note.muted", { "aria-live": "polite" });
+		this.search = null;           // the SearchState while the box holds a query
+		this.searchTimer = null;
+		this.searchSeq = 0;           // answers to an older query are dropped
+		this.expandedBefore = null;   // the rows open before the search, given back when it ends
 		const fill = h("div.ed-fill.explorer");
-		ctx.el.append(tools, fill);
+		ctx.el.append(tools, h("div.ed-tools.ex-search", null, this.searchField, this.searchNote), fill);
 		this.tree = new TreeView(fill, {
 			roots: () => this.roots(),
 			children: (node) => this.children(node),
@@ -76,7 +90,7 @@ export class Explorer {
 			menu: (node, at) => this.menu(node, at),
 			select: (node) => this.selectedNode(node),
 		});
-		this.stopWorkspace = this.ied.workspace.on(() => this.refresh());
+		this.stopWorkspace = this.ied.workspace.on(() => this.reload());
 		this.stopTopic = this.ied.client.subscribe("ws:" + ctx.wsId, { evt: (kind, data) => this.workspaceEvent(kind, data) });
 		tasks.follow(ctx.wsId);
 		this.stopTasks = tasks.on(() => this.startupIs(tasks.offer ? tasks.offer.startupProject : null));
@@ -85,6 +99,7 @@ export class Explorer {
 	}
 
 	dispose() {
+		clearTimeout(this.searchTimer);
 		this.mounted.delete(this);
 		this.stopWorkspace();
 		this.stopTopic();
@@ -111,7 +126,12 @@ export class Explorer {
 	switchView() {
 		const ws = this.ied.workspace;
 		writeFolderView(ws.root, !readFolderView(ws.root));
-		this.refresh();
+		this.reload();
+	}
+
+	// The tree read again: searched again while the box holds a query.
+	reload() {
+		return this.search ? this.runSearch() : this.refresh();
 	}
 
 	renderViewButton() {
@@ -137,12 +157,23 @@ export class Explorer {
 		const ws = this.ied.workspace;
 		if (!this.showsFolder()) {
 			const count = ws.solution.projects.length;
+			if (this.search) this.tree.expanded.add("sln");
 			return [{ id: "sln", kind: "solution", name: "Solution '" + ws.solution.name + "' (" + count + (count === 1 ? " project)" : " projects)"), expandable: true }];
 		}
-		return this.list("", "root");
+		const nodes = await this.list("", "root");
+		return this.search ? this.searched(nodes) : nodes;
 	}
 
+	// While searching, a node's children are those the search keeps, except under a row that matched by its own name
+	// and leads to nothing else: opening it shows all it holds.
 	async children(node) {
+		const nodes = await this.childrenOf(node);
+		if (!this.search) return nodes;
+		if (node.unfiltered) return nodes.map((child) => Object.assign(child, { unfiltered: true }));
+		return this.searched(nodes);
+	}
+
+	async childrenOf(node) {
 		if (node.kind === "solution") return this.solutionChildren();
 		if (node.kind === "group") return this.groupChildren(node.group, node.id);
 		if (node.kind === "items") return this.ied.workspace.solution.items.map((path) => ({ id: node.id + "/" + path, kind: "file", name: baseName(path), path }));
@@ -202,7 +233,7 @@ export class Explorer {
 	}
 
 	renderRow(node, row) {
-		row.append(this.iconOf(node), h("span.name", null, node.name));
+		row.append(this.iconOf(node), h("span.name", null, ...this.nameParts(node)));
 		if (node.kind === "project" && node.name === this.startup) row.classList.add("startup");
 		if (node.problem) {
 			row.classList.add("problem");
@@ -235,6 +266,131 @@ export class Explorer {
 			}, () => {});
 		}
 		return this.rootNames.get(node.path);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Search (VS "Search Solution Explorer"): the box's text, looked for in the names of the workspace's files and
+	// folders, its projects and its groups, a moment after the typing stops.
+
+	focusSearch() {
+		this.searchField.focus({ preventScroll: true });
+		this.searchField.select();
+	}
+
+	searchSoon() {
+		clearTimeout(this.searchTimer);
+		this.searchTimer = setTimeout(() => this.runSearch(), SEARCH_DELAY_MS);
+	}
+
+	async runSearch() {
+		clearTimeout(this.searchTimer);
+		const text = this.searchField.value.trim();
+		const seq = ++this.searchSeq;
+		if (!text) return this.endSearch();
+		this.searchNote.textContent = "Searching...";
+		let answer;
+		try {
+			answer = await this.ied.client.request("fs.files", { wsId: this.ctx.wsId, query: text, maxResults: SEARCH_LIMIT });
+		}
+		catch (e) {
+			if (seq === this.searchSeq) this.searchNote.textContent = "The search failed: " + e.message;
+			return undefined;
+		}
+		if (seq !== this.searchSeq) return undefined;
+		const paths = answer.files.map((file) => file.path);
+		if (!this.expandedBefore) this.expandedBefore = new Set(this.tree.expanded);
+		this.search = new SearchState(text, paths, this.showsFolder() ? null : this.ied.workspace.solution, paths.length >= SEARCH_LIMIT);
+		this.tree.expanded.clear();
+		await this.refresh();
+		if (seq === this.searchSeq) this.noteSearch();
+		return undefined;
+	}
+
+	// The box emptied: the tree as it was before the search, its rows opened as they were.
+	endSearch() {
+		this.searchSeq++;
+		clearTimeout(this.searchTimer);
+		this.searchNote.textContent = "";
+		if (!this.search) return undefined;
+		this.search = null;
+		this.tree.expanded = this.expandedBefore || new Set();
+		this.expandedBefore = null;
+		return this.refresh();
+	}
+
+	noteSearch() {
+		const count = this.tree.rows.filter((row) => this.matchesSearch(row.node)).length;
+		const more = this.search.capped ? "; more files hold it: type more to narrow" : "";
+		this.searchNote.textContent = (count ? count + (count === 1 ? " result" : " results") : "No results") + more;
+	}
+
+	// Escape empties the box (and, empty, goes back to the tree); Down or Enter goes to the first result.
+	searchKey(event) {
+		if (event.key === "Escape") {
+			if (this.searchField.value) {
+				this.searchField.value = "";
+				this.endSearch();
+			}
+			else this.tree.focus();
+		}
+		else if (event.key === "ArrowDown" || event.key === "Enter") {
+			const first = this.tree.rows.findIndex((row) => this.matchesSearch(row.node));
+			this.tree.focus();
+			if (first >= 0) this.tree.moveTo(first);
+		}
+		else return;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	// Whether a row matches the search by its own name.
+	matchesSearch(node) {
+		const search = this.search;
+		if (!search || !node || !node.kind) return false;
+		if (node.kind === "project") return search.projects.has(node.name);
+		if (node.kind === "group") return search.groups.has(node.name);
+		if (node.kind === "file" || node.kind === "folder") return search.matched.has(node.path);
+		return node.kind === "missing" && holds(node.name, node.name, search.query);
+	}
+
+	// The rows of `nodes` the search keeps, those that lead to a match opened.
+	searched(nodes) {
+		const search = this.search;
+		const solution = this.ied.workspace.solution;
+		const pathOf = (name) => {
+			const project = solution ? solution.projects.find((p) => p.name === name) : null;
+			return project ? relativeTo(this.ied.workspace.root, project.root) : null;
+		};
+		const kept = [];
+		for (const node of nodes) {
+			let keep = false;
+			let open = false;
+			if (node.kind === "file" || node.kind === "folder") {
+				keep = search.keepsPath(node.path);
+				open = node.kind === "folder" && search.above.has(node.path);
+			}
+			else if (node.kind === "project") {
+				keep = search.keepsProject(node.name, node.path);
+				open = search.opensProject(node.path);
+			}
+			else if (node.kind === "group") {
+				keep = search.keepsGroup(node.group, pathOf);
+				open = search.opensGroup(node.group, pathOf);
+			}
+			else if (node.kind === "items") keep = open = solution.items.some((path) => search.keepsPath(path));
+			else keep = this.matchesSearch(node);
+			if (!keep) continue;
+			node.unfiltered = this.matchesSearch(node) && !open;
+			if (open) this.tree.expanded.add(node.id);
+			kept.push(node);
+		}
+		return kept;
+	}
+
+	// A row's name, the parts that hold the query marked.
+	nameParts(node) {
+		if (!this.matchesSearch(node)) return [node.name];
+		return markedParts(node.name, this.search.query).map((part) => (typeof part === "string" ? part : h("mark.ex-hit", null, part.mark)));
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -381,8 +537,9 @@ export class Explorer {
 	}
 
 	workspaceEvent(kind, data) {
-		if (kind === "solution.changed") return this.refresh();
+		if (kind === "solution.changed") return this.reload();
 		if (kind !== "tree.changed") return undefined;
+		if (this.search) return this.searchSoon();
 		if (data.overflow) return this.refresh();
 		const parents = new Set(data.changes.map((change) => parentOf(change.path)));
 		if (parents.has("") && this.showsFolder()) return this.refresh();

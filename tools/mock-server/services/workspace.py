@@ -75,8 +75,9 @@ class Workspaces:
 		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
 		self.trash = {}
 		self.trash_made = 0
+		self.revealed = []   # the paths fs.reveal was asked for, newest last
 		self.recent = workspace_files.recent_projects(int(time.time() * 1000))
-		for name in ("ws.list", "ws.setTrust", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search", "fs.files",
+		for name in ("ws.list", "ws.setTrust", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.reveal", "fs.search", "fs.files",
 				"trash.list", "trash.restore", "trash.purge"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -282,6 +283,18 @@ class Workspaces:
 			ws.directories.add(path)
 			self._tree_changed(ws, path, "created")
 		return {"path": path}
+
+	async def m_fs_reveal(self, call, p):
+		"""docs/10 "Files": the path in the server machine's file manager; the mock starts nothing."""
+		if not call.session.local:
+			raise RpcError("forbidden", "the file manager opens on the server's machine, and this client is on another device")
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path", "", required=False))
+		folder = path == "" or ws.is_dir(path)
+		if not folder and path not in ws.files:
+			raise RpcError("not_found", "no file or folder %r" % path)
+		self.revealed.append(path)
+		return {"path": (ws.root.rstrip("/\\") + "/" + path) if path else ws.root, "folder": folder, "opened": False}
 
 	async def m_fs_rename(self, call, p):
 		ws = self.get(p.str("wsId"))

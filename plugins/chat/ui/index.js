@@ -23,8 +23,14 @@ function tabOf(args) {
 	return args && args.ref ? views.find((view) => view.ctx.ref === args.ref) || null : views.pop() || null;
 }
 
-export function activate(ied) {
+// The plugin's stylesheet, once: activate() adds it, and so does a settings page shown with no workspace, where nothing
+// activated the plugin (the start page's Settings).
+function addStyles(ied) {
 	if (!document.querySelector("link[href='" + ied.plugin.base + "ui/chat.css']")) document.head.append(h("link", { rel: "stylesheet", href: ied.plugin.base + "ui/chat.css" }));
+}
+
+export function activate(ied) {
+	addStyles(ied);
 	ied.commands.handle("ied.chat.show", () => ied.commands.run("shell.showActivity", { id: "ied.chat" }));
 	ied.commands.handle("ied.chat.new", async () => {
 		await ied.commands.run("shell.showActivity", { id: "ied.chat" });
@@ -120,14 +126,17 @@ export function ChatsList(ctx) {
 
 // Settings > AI > Models and Model Groups (the settingsPages of the manifest).
 export function ModelsSettings(ctx) {
+	addStyles(ctx.ied);
 	return new ModelsPage(ctx);
 }
 
 export function ModelGroupsSettings(ctx) {
+	addStyles(ctx.ied);
 	return new ModelGroupsPage(ctx);
 }
 
 export function ClaudeSettings(ctx) {
+	addStyles(ctx.ied);
 	return new ClaudePage(ctx);
 }
 

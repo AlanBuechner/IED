@@ -454,18 +454,23 @@ test("chat pane: what the chat has open has Open and Force close, from a right c
 	}
 });
 
-test("chat: a link in a reply opens the file it names, an address in its own window", () => {
+test("chat: a link in a reply, clicked or middle-clicked, opens the file it names or the address, never the page", () => {
 	const opened = [];
-	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0 }, { openFile: (path, line) => opened.push([path, line]), loadEarlier: () => {}, codeBlock: () => null });
-	const turn = { turnId: "t1", user: { text: "q" }, segments: [{ segId: "s1", type: "text", done: true, text: "see [the guide](docs/guide.md) and https://example.com/x" }], stop: "finished", recoveries: [] };
+	const addresses = [];
+	const view = new TranscriptView({ turns: [], segment: () => null, segmentId: () => 0 }, { openFile: (path, line) => opened.push([path, line]), openAddress: (target) => addresses.push(target), loadEarlier: () => {}, codeBlock: () => null });
+	const turn = { turnId: "t1", user: { text: "q" }, segments: [{ segId: "s1", type: "text", done: true, text: "see [the guide](docs/guide.md#use), https://example.com/x and [top](#top)" }], stop: "finished", recoveries: [] };
 	view.el.append(...[view.turnEl(turn)]);
-	const file = view.el.querySelector('a[href="docs/guide.md"]');
+	const file = view.el.querySelector('a[href="docs/guide.md#use"]');
 	const web = view.el.querySelector('a[href="https://example.com/x"]');
-	assertTrue(web.hasAttribute("target") && web.getAttribute("rel") === "noopener noreferrer", "an address is marked to open beside the page");
-	const click = (el) => { const e = new MouseEvent("click", { bubbles: true, cancelable: true, view: window }); el.dispatchEvent(e); return e.defaultPrevented; };
-	assertEqual(click(web), false, "nothing is taken back: the browser opens it in a window");
-	assertEqual(click(file), true, "a file of the workspace opens as a tab, and the page itself is not navigated");
-	assertEqual(opened, [["docs/guide.md", undefined]], "the file the path names");
+	assertTrue(web.hasAttribute("target") && web.getAttribute("rel") === "noopener noreferrer", "an address is marked to open beside the page (without a view to answer it)");
+	const press = (el, type, button) => { const e = new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button }); el.dispatchEvent(e); return e.defaultPrevented; };
+	assertEqual(press(file, "click", 0), true, "a file of the workspace opens as a tab, and the page itself is not navigated");
+	assertEqual(press(file, "mousedown", 1), true, "a middle press starts no autoscroll");
+	assertEqual(press(file, "auxclick", 1), true, "a middle click opens it the same way, not a new window of IED's page");
+	assertEqual(press(web, "auxclick", 1), true, "an address too");
+	assertEqual(press(view.el.querySelector('a[href="#top"]'), "click", 0), true, "a place in the page moves nothing");
+	assertEqual(opened, [["docs/guide.md", undefined], ["docs/guide.md", undefined]], "the file the path names, twice");
+	assertEqual(addresses, [{ kind: "web", href: "https://example.com/x" }], "the address, for a Browser tab");
 });
 
 test("chat: a server that says it is still reading the prompt is believed, not called stalled", () => {

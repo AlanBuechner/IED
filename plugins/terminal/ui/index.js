@@ -32,7 +32,16 @@ export function activate(ied) {
 	ied.commands.handle("ied.terminal.kill", (args) => last() && last().kill(args && args.termId));
 	ied.commands.handle("ied.terminal.rename", (args) => last() && last().rename(args && args.termId));
 	ied.commands.handle("ied.terminal.show", () => last() && last().reveal());
-	ied.commands.handle("ied.terminal.openHere", (args) => last() && last().create(args && args.path));
+	ied.commands.handle("ied.terminal.openHere", (args) => last() && last().create(folderOf(args)));
+}
+
+// The folder a Solution Explorer row opens a terminal in: a folder's or project's own, a file's folder, the workspace's
+// folder for the solution (no cwd).
+export function folderOf(args) {
+	if (!args || !args.path || args.kind === "solution") return undefined;
+	if (args.kind !== "file") return args.path;
+	const slash = args.path.lastIndexOf("/");
+	return slash < 0 ? undefined : args.path.slice(0, slash);
 }
 
 function addStylesheet(href) {

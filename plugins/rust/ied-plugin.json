@@ -185,7 +185,7 @@
 					"profile": { "kind": "dropdown", "label": "Profile", "values": ["debug", "release"], "default": "debug", "scope": "solution" }
 				},
 				"tasks": {
-					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [
+					"build": { "label": "Build", "icon": "$(build)", "slot": "build", "steps": [
 						{ "run": ["${tool:cargo}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
 						{ "run": ["${tool:cargo}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
 					] },

@@ -178,7 +178,7 @@ export class ModelsPage {
 
 	async probe(params) {
 		try {
-			return await this.ctx.ied.client.request("ai.probe", Object.assign({ wsId: this.ctx.wsId }, params));
+			return await this.ctx.ied.client.request("ai.probe", Object.assign(this.ctx.wsId ? { wsId: this.ctx.wsId } : {}, params));
 		}
 		catch (e) {
 			return { ok: false, error: e.message, models: [] };

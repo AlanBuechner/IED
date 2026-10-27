@@ -34,6 +34,9 @@ namespace Ied
 		// Starts the task `key` (or the one in `slot`) of `projectName` (empty: the startup project), as task.run does.
 		// Throws not_found and bad_request as task.run answers them.
 		public TaskRun* RunTask(Workspace* ws, Core::StringView projectName, Core::StringView key, Core::StringView slot, const Serialization::DomNode& context);
+		// Starts every project's task in `slot` (build, rebuild, clean or test) as one run, as task.run with `solution`
+		// does (VS's Build Solution). Throws not_found when no project has one.
+		public TaskRun* RunSolution(Workspace* ws, Core::StringView slot, const Serialization::DomNode& context);
 		// Waits, the lock released, until `run` ends: whether it succeeded.
 		public bool AwaitEnd(TaskRun* run);
 		// The debug configuration `name` (empty: the default) of `projectName` (empty: the startup project), its strings
@@ -61,6 +64,13 @@ namespace Ied
 
 		// The run of `task` planned for `project`; throws bad_request naming what does not expand or exist.
 		private TaskRun* Plan(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const TaskDef* task, const Serialization::DomNode& context);
+		// A run with its id, nothing planned in it yet.
+		private TaskRun* NewRun(Workspace* ws);
+		// The run of every project's task in `slot`, one project after another in the solution's order: a project
+		// without one is left out, and one that fails does not stop those after it (the run fails).
+		private TaskRun* PlanSolution(Workspace* ws, Core::StringView slot, const Serialization::DomNode& context);
+		// Starts `run` after another run of its project and task, as its concurrency says.
+		private void Queue(TaskRun* run);
 		// What ${...} stands for in `project`'s tasks and debug configurations (docs/06 "Variables").
 		private TaskLookup LookupFor(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const Serialization::DomNode& context);
 		// `entry` is the onlyIf of the step that runs `task` (a task step's), given to its first step when that one has the

@@ -50,7 +50,7 @@
 				{ "command": "ied.terminal.show", "group": "3_panel" }
 			],
 			"explorer/context": [
-				{ "command": "ied.terminal.openHere", "group": "6_terminal", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project'" }
+				{ "command": "ied.terminal.openHere", "group": "6_terminal", "order": 1, "when": "explorerItemKind == 'solution' || explorerItemKind == 'project' || explorerItemKind == 'folder' || explorerItemKind == 'file'" }
 			],
 			"terminal/context": [
 				{ "command": "ied.terminal.rename", "group": "1_edit" },

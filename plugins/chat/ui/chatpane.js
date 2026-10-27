@@ -5,6 +5,7 @@
 
 import { h, icon } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
+import { openAddress } from "/ui-kit/linkclicks.js";
 import { ChatModel } from "./chatmodel.js";
 import { TranscriptView } from "./transcript.js";
 import { CodeColors } from "./codecolors.js";
@@ -140,6 +141,7 @@ export class ChatPane {
 			set: (change) => this.setChat(change),
 			choices: () => this.choices(),
 			openFile: (path, line) => this.openFile(path, line),
+			openAddress: (target) => openAddress(this.ied, target),
 			openTab: (ref) => this.openTab(ref),
 			closeDetails: () => this.showDetails(false),
 			openChat: (chatId) => this.host.openChat(chatId),

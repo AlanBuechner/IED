@@ -96,7 +96,9 @@ namespace Ied
 		response.body = got.response.body;
 	}
 
-	static Core::String UpstreamUrl(int32 port, Core::StringView secret, Core::StringView deviceId) {
+	// The workspace server's socket for a client: its device, and whether the client is on this machine (`local=1`),
+	// which only the master can tell - the workspace server's own peer is always the master.
+	static Core::String UpstreamUrl(int32 port, Core::StringView secret, Core::StringView deviceId, bool local) {
 		Core::StringBuilder url;
 		url.Append("ws://127.0.0.1:");
 		url.AppendInt(port);
@@ -104,6 +106,7 @@ namespace Ied
 		url.Append(secret);
 		url.Append("&device=");
 		url.Append(deviceId);
+		if (local) url.Append("&local=1");
 		return url.ToString();
 	}
 
@@ -113,7 +116,7 @@ namespace Ied
 			return;
 		}
 		Upstream* upstream = new Upstream();
-		upstream->socket = Http::WebSocket::Connect(UpstreamUrl(port, secret, device->id.View()).View(), kUpstreamConnectMs);
+		upstream->socket = Http::WebSocket::Connect(UpstreamUrl(port, secret, device->id.View(), request.peer.IsValid() && request.peer.IsLoopback()).View(), kUpstreamConnectMs);
 		if (!upstream->socket.IsOpen()) {
 			Refuse(response, 503, "unavailable", (Core::String("the workspace server's socket did not open: ") + upstream->socket.Error()).View());
 			return;

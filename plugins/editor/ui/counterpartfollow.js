@@ -3,7 +3,7 @@
 // file of a `headerSourcePairs` contribution that says `follow`, the other group shows that file's counterpart, in the
 // old one's place and tethered to it. A file without a counterpart leaves the pair as it was.
 
-import { extensionOf, findCounterpart } from "./headersource.js";
+import { counterparts, extensionOf, findCounterpart } from "./headersource.js";
 
 // Whether tab `ref` is a document of a pair that follows.
 export function follows(ref, pairs) {
@@ -12,15 +12,31 @@ export function follows(ref, pairs) {
 	return pairs.some((pair) => pair.follow && (pair.extensions || []).some((e) => e.toLowerCase() === extension));
 }
 
+// Whether `partner` could be the counterpart of `side` (both tab refs): the same name with a paired extension.
+function isCounterpart(side, partner, pairs) {
+	const wanted = partner.slice("doc:".length).toLowerCase();
+	return counterparts(side.slice("doc:".length), pairs).some((path) => path.toLowerCase() === wanted);
+}
+
 // The pairs to move: a following document tethered to one in another group, whose own group shows another following
-// document not tethered yet - [{side, partner, next}], `partner` to become `next`'s counterpart.
+// document not tethered yet - [{side, partner, next}], `partner` to become `next`'s counterpart. A document that took a
+// preview tab's place took its tethers too (the shell's openTab): tethered to a file that is no counterpart of it, it is
+// its own `next`.
 export function moves(state, partnersOf, pairs) {
 	const out = [];
 	const taken = new Set();
 	for (const side of state.open.filter((ref) => follows(ref, pairs))) {
 		const group = state.groups.find((g) => g.tabs.includes(side));
 		const next = group ? group.active : null;
-		if (!next || next === side || !follows(next, pairs) || partnersOf(next).length) continue;
+		if (next === side) {
+			for (const partner of partnersOf(side)) {
+				if (taken.has(side) || taken.has(partner) || group.tabs.includes(partner) || !follows(partner, pairs) || isCounterpart(side, partner, pairs)) continue;
+				taken.add(partner).add(side);   // the pair once: the side in the first group keeps its file
+				out.push({ side, partner, next: side });
+			}
+			continue;
+		}
+		if (!next || !follows(next, pairs) || partnersOf(next).length) continue;
 		for (const partner of partnersOf(side)) {
 			if (taken.has(partner) || group.tabs.includes(partner) || !follows(partner, pairs)) continue;
 			taken.add(partner);

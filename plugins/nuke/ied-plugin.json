@@ -56,7 +56,7 @@
 					"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
 				},
 				"tasks": {
-					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [{ "run": "\"${config:nuke.command}\" build ${config} ${projectName} -a ${arch}" }] },
+					"build": { "label": "Build", "icon": "$(build)", "slot": "build", "steps": [{ "run": "\"${config:nuke.command}\" build ${config} ${projectName} -a ${arch}" }] },
 					"rebuild": { "label": "Rebuild", "slot": "rebuild", "steps": [{ "run": "\"${config:nuke.command}\" rebuild ${config} ${projectName} -a ${arch}" }] },
 					"clean": { "label": "Clean", "slot": "clean", "steps": [{ "run": "\"${config:nuke.command}\" clean ${config} ${projectName} -a ${arch}" }] },
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [{ "run": "\"${config:nuke.command}\" run ${config} ${projectName} -a ${arch}", "output": "run" }] },

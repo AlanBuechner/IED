@@ -40,3 +40,13 @@ test("headersource: a counterpart beside its file follows the file its partner's
 	assertEqual(moves(state("doc:b.c"), (ref) => (ref === "doc:b.c" ? ["doc:b.h"] : tethered(ref)), pairs), [], "the file shown has a partner of its own");
 	assertEqual([follows("doc:src/A.CPP", pairs), follows("doc:x.cf", pairs), follows("mdpreview:a.c", pairs)], [true, false, false]);
 });
+
+test("headersource: a file that took the preview tab's place, and with it the tether, brings its own counterpart", () => {
+	const pairs = [Object.assign({ follow: true }, C)];
+	const state = { open: ["doc:b.c", "doc:a.h"], groups: [{ activity: "ied.editor", well: true, tabs: ["doc:b.c"], active: "doc:b.c" }, { activity: "ied.editor", well: true, tabs: ["doc:a.h"], active: "doc:a.h" }] };
+	const taken = (ref) => ({ "doc:b.c": ["doc:a.h"], "doc:a.h": ["doc:b.c"] })[ref] || [];
+	assertEqual(moves(state, taken, pairs), [{ side: "doc:b.c", partner: "doc:a.h", next: "doc:b.c" }], "a.h is no counterpart of b.c: b.h takes its place");
+	const right = (ref) => ({ "doc:b.c": ["doc:B.H"] })[ref] || [];
+	const shown = { open: ["doc:b.c", "doc:B.H"], groups: [state.groups[0], { activity: "ied.editor", well: true, tabs: ["doc:B.H"], active: "doc:B.H" }] };
+	assertEqual(moves(shown, right, pairs), [], "its own counterpart (any case): settled");
+});

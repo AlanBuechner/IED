@@ -353,7 +353,7 @@ namespace Ied
 		}
 	}
 
-	TaskRun* Tasks::Plan(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const TaskDef* task, const Serialization::DomNode& context) {
+	TaskRun* Tasks::NewRun(Workspace* ws) {
 		TaskRun* run = new TaskRun();
 		started += 1;
 		Core::StringBuilder id;
@@ -361,12 +361,49 @@ namespace Ied
 		id.AppendInt(started);
 		run->runId = id.ToString();
 		run->ws = ws;
+		run->status = RunStatus::Queued;
+		return run;
+	}
+
+	// The label of a solution-wide run: "Build Solution".
+	static Core::String SolutionLabel(Core::StringView slot) {
+		Core::String verb = slot == "rebuild" ? Core::String("Rebuild") : slot == "clean" ? Core::String("Clean") : slot == "test" ? Core::String("Test") : Core::String("Build");
+		return verb + " Solution";
+	}
+
+	TaskRun* Tasks::PlanSolution(Workspace* ws, Core::StringView slot, const Serialization::DomNode& context) {
+		if (slot != "build" && slot != "rebuild" && slot != "clean" && slot != "test") throw RpcError(ErrorCode::BadRequest, (Core::String("a solution runs its projects' build, rebuild, clean or test tasks, not ") + slot).View());
+		TaskRun* run = NewRun(ws);
+		run->task = Core::String(slot);
+		run->label = SolutionLabel(slot);
+		run->concurrency = Concurrency::Single;
+		Core::Array<Core::String> roots;
+		for (TaskProject* project : ProjectsOf(ws)) {
+			OfferedTasks* offered = Offered(ws, project);
+			TaskDef* task = offered->InSlot(slot);
+			if (!task) continue;
+			run->saveFirst = run->saveFirst || task->saveAll;
+			// A step's relative cwd is read from searchRoots[0]: its own project's root while it is planned.
+			run->searchRoots.Clear();
+			run->searchRoots.Push(Core::String(project->root.View()));
+			roots.Push(Core::String(project->root.View()));
+			Core::Array<Core::String> nesting;
+			nesting.Push(task->key);
+			PlanSteps(run, task, offered, LookupFor(ws, project, offered, context), nesting, OnlyIf::Always);
+		}
+		if (run->steps.IsEmpty()) throw RpcError(ErrorCode::NotFound, ((Core::String("no project of the workspace has a ") + slot) + " task").View());
+		roots.Push(Core::String(ws->root.View()));
+		run->searchRoots = roots;
+		return run;
+	}
+
+	TaskRun* Tasks::Plan(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const TaskDef* task, const Serialization::DomNode& context) {
+		TaskRun* run = NewRun(ws);
 		run->project = project->name;
 		run->task = task->key;
 		run->label = task->label;
 		run->concurrency = task->concurrency;
 		run->saveFirst = task->saveAll;
-		run->status = RunStatus::Queued;
 		run->searchRoots.Push(Core::String(project->root.View()));
 		run->searchRoots.Push(Core::String(ws->root.View()));
 		TaskLookup lookup = LookupFor(ws, project, offered, context);
@@ -548,14 +585,24 @@ namespace Ied
 			throw RpcError(ErrorCode::NotFound, what.View());
 		}
 		TaskRun* run = Plan(ws, project, offered, task, context);
+		Queue(run);
+		return run;
+	}
+
+	TaskRun* Tasks::RunSolution(Workspace* ws, Core::StringView slot, const Serialization::DomNode& context) {
+		TaskRun* run = PlanSolution(ws, slot, context);
+		Queue(run);
+		return run;
+	}
+
+	void Tasks::Queue(TaskRun* run) {
 		for (TaskRun* other : runs) {
-			if (other->ws != ws || other->project != run->project || other->task != run->task || !other->IsActive()) continue;
-			if (run->concurrency == Concurrency::Single) throw RpcError(ErrorCode::Conflict, ((Core::String("the task ") + run->task.View()) + " is running already").View());
+			if (other->ws != run->ws || other->project != run->project || other->task != run->task || !other->IsActive()) continue;
+			if (run->concurrency == Concurrency::Single) throw RpcError(ErrorCode::Conflict, ((Core::String("the task ") + run->label.View()) + " is running already").View());
 			if (run->concurrency == Concurrency::Restart) CancelRun(other, ended);
 			if (run->concurrency != Concurrency::Parallel) run->after = other;
 		}
 		Start(run);
-		return run;
 	}
 
 	TaskRun* Tasks::Run(Core::StringView runId) const {
@@ -576,7 +623,9 @@ namespace Ied
 	Core::String Tasks::RunMethod(Call& call, const Params& params) {
 		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
 		if (!ws->trusted) throw RpcError(ErrorCode::Forbidden, "tasks run the workspace's code: trust the workspace first");
-		TaskRun* run = RunTask(ws, params.Str("project", Core::StringView("")).View(), params.Str("task", Core::StringView("")).View(), params.Str("slot", Core::StringView("")).View(), params.Field("context"));
+		TaskRun* run = params.Bool("solution", false)
+			? RunSolution(ws, params.Str("slot").View(), params.Field("context"))
+			: RunTask(ws, params.Str("project", Core::StringView("")).View(), params.Str("task", Core::StringView("")).View(), params.Str("slot", Core::StringView("")).View(), params.Field("context"));
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("runId", run->runId.View());

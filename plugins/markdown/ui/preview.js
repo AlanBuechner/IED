@@ -2,7 +2,8 @@
 // changes - typing in its editor, another writer, the disk - with fenced code colored as the editor colors it (the
 // `editor.colorize` binding, when an editor plugin provides it) and the workspace's images (`/w/<wsId>/files/`,
 // docs/10). Ticking a task box edits its line through the document store, taking the lease as typing would; a link to a
-// workspace file opens it in the editor, a web link a new browser window; a workspace image clicked shows at its size.
+// workspace file, clicked or middle-clicked, opens it in a tab of the editor, a web link in a Browser tab
+// (linkclicks.js); a workspace image clicked shows at its size.
 // It scrolls with its file's editor (`editor.scrolled`). A double-click does what it does in any prose: selects the
 // text under the pointer. The source of the block clicked is Go to Source on the preview's context menu.
 
@@ -13,6 +14,7 @@ import { renderMarkdown, toggleTask } from "/ui-kit/markdown.js";
 import { isFileUri } from "/ui-kit/fileuris.js";
 import { resolveRelative } from "/ui-kit/paths.js";
 import { showImage } from "/ui-kit/imageview.js";
+import { answerLinks, openAddress } from "/ui-kit/linkclicks.js";
 
 const RENDER_MS = 60;
 
@@ -29,6 +31,7 @@ export class MarkdownPreview {
 		this.body = h("div.md-preview", { tabindex: "0" });
 		ctx.el.append(this.body);
 		this.body.addEventListener("click", (event) => this.clicked(event));
+		answerLinks(this.body, (target) => this.followLink(target));
 		this.body.addEventListener("contextmenu", (event) => this.menu(event));
 		this.unfollow = this.ied.bindings.on("editor.scrolled", (data) => {
 			if (data.path === this.path) this.follow(data.line);
@@ -133,20 +136,21 @@ export class MarkdownPreview {
 			this.tick(parseInt(box.getAttribute("data-task"), 10), !box.hasAttribute("checked")).catch((e) => this.ied.report("ticking a task: " + e.message, e));
 			return;
 		}
-		const link = event.target.closest("a[href]");
 		const image = event.target.closest("img[data-path]");
-		if (image && !link) {
-			showImage({ src: image.getAttribute("src"), title: image.dataset.path });
+		if (image && !event.target.closest("a[href]")) showImage({ src: image.getAttribute("src"), title: image.dataset.path });
+	}
+
+	// A link clicked or middle-clicked (linkclicks.js): a file of the workspace opens in a tab of this window, read from the
+	// previewed file's folder - a Markdown file too, which the preview then follows when it opens in the group of the file
+	// it previews (follow.js) - and a web address in a Browser tab.
+	followLink(target) {
+		if (target.kind !== "path") {
+			openAddress(this.ied, target);
 			return;
 		}
-		if (!link) return;
-		event.preventDefault();
-		const href = link.getAttribute("href");
-		if (/^(https?|mailto):/i.test(href)) window.open(href, "_blank", "noopener,noreferrer");
-		else if (!href.startsWith("#") && this.folder !== null) {
-			const path = resolveRelative(this.folder, decodeURIComponent(href.split("#")[0]));
-			if (path) this.ied.commands.run("ied.editor.goTo", { path });
-		}
+		if (this.folder === null) return;
+		const path = resolveRelative(this.folder, decodeURIComponent(target.href.split("#")[0]));
+		if (path) this.ied.commands.run("ied.editor.goTo", { path });
 	}
 
 	// The task box on `line` ticked or cleared in the source, as an edit of this client's.

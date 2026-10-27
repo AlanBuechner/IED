@@ -26,7 +26,7 @@ Nuke was rebuilt when C4 moved into this repository; reference `Nuke/README.md`,
 	"arch":   { "kind": "dropdown", "values": ["x64"], "default": "x64", "scope": "solution" }
 },
 "tasks": {
-	"build": { "slot": "build", "icon": "$(gear)", "steps": [
+	"build": { "slot": "build", "icon": "$(build)", "steps": [
 		{ "run": ["nuke", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"],
 		  "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" } ] },
 	"debug": { "slot": "debug", "icon": "$(debug-start)", "steps": [
@@ -55,7 +55,7 @@ Selections are per machine, in `.ied/local/selections.json`: the startup project
 | `task.list` | `wsId, project?` (the startup project) | `{project, startupProject, projects, variables: [{key, kind, label, values, value, scope}], tasks: [{key, label, icon, tooltip, slot}], toolbar, debug: {default, configurations: [name]}, problems}`; `projects` are those that can be the startup project (not a library or a plugin); `debug` names the debug configurations (`docs/25`) |
 | `task.select` | `wsId, project?, key, value` | the new `task.list`; a value a dropdown does not offer is `bad_request` |
 | `task.setStartup` | `wsId, project` | the new `task.list`; a library or a plugin is `bad_request` ("not a program to run") |
-| `task.run` | `wsId, project?, task` or `slot`, `context?` (`{file, line, selection, testFilter}` for the variables of that name) | `{runId, topic, output}` at once (`output`: the output source its first step writes); `not_found` for no such task or no task in that slot |
+| `task.run` | `wsId, project?, task` or `slot`, `context?` (`{file, line, selection, testFilter}` for the variables of that name); or `wsId, slot, solution: true` | `{runId, topic, output}` at once (`output`: the output source its first step writes); `not_found` for no such task or no task in that slot. With `solution` (VS's Build / Rebuild / Clean Solution, Solution Explorer's solution row, the Build menu, and Run All Tests): every project's task in the slot - `build`, `rebuild`, `clean` or `test`, else `bad_request` - as one run labeled "Build Solution" (and so on) with an empty `project`, the projects one after another in the solution's order, each with its own variables; a project without a task in the slot is left out (`not_found` when none has one), and one that fails does not stop those after it, though the run fails |
 | `task.cancel` | `runId` | `{status}`: the run's process trees are killed |
 | `task.runs` | `wsId` | `{runs: [{runId, project, task, label, status, exitCode, startedMs, endedMs}]}`, the last 50 |
 

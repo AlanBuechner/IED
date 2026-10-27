@@ -2,6 +2,8 @@ include "workspaces.ch"
 include "host/server.ch"
 include "host/trust.ch"
 include "host/servers.ch"
+include "web/session.ch"
+include "fs/reveal.ch"
 
 namespace Ied
 {
@@ -880,6 +882,33 @@ namespace Ied
 		}
 	}
 
+	// A file or folder of the workspace in the file manager of the server's machine: only for a client on that machine
+	// (its socket comes from a loopback address), only inside the workspace's folder once links are followed. A server
+	// with test hooks answers without starting it.
+	Core::String Workspaces::RevealMethod(Call& call, const Params& params) {
+		if (!call.session || !call.session->local) throw RpcError(ErrorCode::Forbidden, "the file manager opens on the server's machine, and this client is on another device");
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path", Core::StringView("")).View());
+		FS::Path target = FS::CanonicalPath(ws->At(path.View()).CStr());
+		if (target.IsEmpty()) throw Missing("file or folder", path.View());
+		Core::String inside;
+		if (!RelativeTo(FS::CanonicalPath(ws->root.CStr()).View(), target.View(), inside)) throw RpcError(ErrorCode::Forbidden, ((Core::String("'") + path.View()) + "' leads outside the workspace's folder").View());
+		const bool folder = FS::IsDirectory(target.CStr());
+		bool opened = false;
+		if (!server->config.testHooks) {
+			Process::Child child = Process::Child::Start(RevealCommand(target, folder));
+			if (!child.IsOpen()) throw RpcError(ErrorCode::Unavailable, "the file manager did not start");
+			opened = true;
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", target.View());
+		json.BoolField("folder", folder);
+		json.BoolField("opened", opened);
+		json.EndObject();
+		return json.ToString();
+	}
+
 	// A project of the recent list opened again; only those: a path the owner never opened comes from the machine.
 	Core::String Workspaces::OpenRecentMethod(Call& call, const Params& params) {
 		Core::String path = params.Str("path");
@@ -915,5 +944,6 @@ namespace Ied
 		server->rpc.Register("fs.delete", [self](Call& call, const Params& params) -> Core::String { return self->DeleteMethod(call, params); });
 		server->rpc.Register("fs.mkdir", [self](Call& call, const Params& params) -> Core::String { return self->MakeDirectoryMethod(call, params); });
 		server->rpc.Register("fs.rename", [self](Call& call, const Params& params) -> Core::String { return self->RenameMethod(call, params); });
+		server->rpc.Register("fs.reveal", [self](Call& call, const Params& params) -> Core::String { return self->RevealMethod(call, params); });
 	}
 }

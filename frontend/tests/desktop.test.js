@@ -53,12 +53,12 @@ test("desktop: Open Folder is there only inside the desktop app", () => {
 
 test("desktop: the start page offers Open Folder, which asks the app", async () => {
 	const plain = startPageView(shellWith(false));
-	assertEqual([...plain.querySelectorAll(".sp-start button")].map((b) => b.textContent), ["New Project..."], "a browser: New Project only");
+	assertEqual([...plain.querySelectorAll(".sp-start button:not(.sp-settings)")].map((b) => b.textContent), ["New Project..."], "a browser: New Project only");
 	assertEqual(plain.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .iedsln>");
 	const shell = shellWith(true);
 	const view = startPageView(shell);
-	assertEqual([...view.querySelectorAll(".sp-start button")].map((b) => b.textContent), ["New Project...", "Open Folder..."]);
-	const button = [...view.querySelectorAll(".sp-start button")].find((b) => b.textContent === "Open Folder...");
+	assertEqual([...view.querySelectorAll(".sp-start button:not(.sp-settings)")].map((b) => b.textContent), ["New Project...", "Open Folder..."]);
+	const button = [...view.querySelectorAll(".sp-start button:not(.sp-settings)")].find((b) => b.textContent === "Open Folder...");
 	assertEqual(view.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .iedsln>", "the command line too");
 	let asked = 0;
 	const before = Object.getOwnPropertyDescriptor(window, "iedDesktop");

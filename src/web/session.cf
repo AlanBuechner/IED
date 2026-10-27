@@ -83,6 +83,7 @@ namespace Ied
 		json.Field("serverVersion", server->config.version.View());
 		json.Field("sessionEpoch", server->epoch.View());
 		json.Field("clientId", clientId.View());
+		json.BoolField("local", local);
 		Core::Array<Topic*> topics;
 		Core::Array<Core::String> statuses;
 		if (resume.IsValid()) {

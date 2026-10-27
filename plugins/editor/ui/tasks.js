@@ -166,7 +166,7 @@ export function TaskStatus(ctx, state) {
 		clearTimeout(timer);
 		if (runs.length) {
 			const run = runs[runs.length - 1];
-			replace(ctx.el, icon("loading", "spin"), " " + run.label + " " + run.project + "... " + elapsedText(Date.now() - (run.startedMs || Date.now())));
+			replace(ctx.el, icon("loading", "spin"), " " + [run.label, run.project].filter(Boolean).join(" ") + "... " + elapsedText(Date.now() - (run.startedMs || Date.now())));
 			timer = setTimeout(render, TICK_MS);
 			return;
 		}
