@@ -94,7 +94,7 @@ class PackageTest(WorkspaceTest):
 
 	def lock(self):
 		import tomllib
-		with open(self.path("nuke.lock"), "rb") as f:
+		with open(self.path("packages", "nuke.lock"), "rb") as f:
 			return {(p["name"], p["path"]): p for p in tomllib.load(f)["package"]}
 
 	def windowing(self):
@@ -203,6 +203,9 @@ class CargoStyleTests(PackageTest):
 	def test_a_git_url_and_a_version_are_all_a_workspace_needs(self):
 		self.windowing()
 		self.manifest(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.1\" }}")
+		code, out = self.nuke("package", "develop", "enGINE", "--at", os.path.join(self.tmp, "nowhere"))
+		self.assertEqual(code, 1)
+		self.assertNotIn("no source named", out, "a source named by its git URL is found by its repository's name")
 		projects = self.projects()
 		self.assertEqual(self.lock()[("engine", "Windowing")]["version"], "0.1.0", "the newest release ^0.1 allows")
 		windowing = projects["Windowing"]["dir"]
@@ -222,6 +225,9 @@ class CargoStyleTests(PackageTest):
 		self.assertTrue(os.path.isdir(os.path.join(clone, ".git")), "the build cloned the source")
 		self.assertTrue(projects["Windowing"]["dir"].replace("\\", "/").endswith("packages/engine/Windowing"))
 		self.assertTrue(os.access(os.path.join(clone, "Windowing", "nuke.toml"), os.W_OK), "writable")
+		code, out = self.nuke("package", "status")
+		self.assertEqual(code, 0, out)
+		self.assertIn("engine: developing in packages/engine", out)
 		code, out = self.nuke("package", "lock", "engine")
 		self.assertEqual(code, 1)
 		self.assertIn("writable = true", out, "nuke.toml decides, not a command")
@@ -248,10 +254,10 @@ class CargoStyleTests(PackageTest):
 		self.manifest("")
 		code, out = self.nuke("package", "add", self.engine.url, "Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", version = \"^0.2.0\" }}", read(self.path("nuke.toml")))
+		self.assertIn(f"Windowing = {{ git = \"{self.engine.url}\", path = \"Windowing\", version = \"^0.2.0\" }}", read(self.path("nuke.toml")))
 		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0", "--writable")
 		self.assertEqual(code, 0, out)
-		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", version = \"^1.0\", writable = true }}", read(self.path("nuke.toml")))
+		self.assertIn(f"Renderer = {{ git = \"{self.engine.url}\", path = \"Renderer\", version = \"^1.0\", writable = true }}", read(self.path("nuke.toml")))
 		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")), "writable: the source is a clone")
 
 
@@ -269,6 +275,19 @@ class ResolveTests(PackageTest):
 		self.assertEqual(read(installed), "// 0.1\n")
 		self.assertFalse(os.access(installed, os.W_OK), "a locked package's files are read-only")
 
+	def test_a_project_that_became_a_sub_package_still_comes(self):
+		self.engine.commit({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Core/nuke.toml": "[package]\ndescription = \"core\"\n",
+			"Core/History/nuke.toml": module("History"),
+			"Runtime/nuke.toml": module("Runtime", ["History"], package="runtime"),
+		}, tags=["Core/v0.1.0", "Runtime/v0.1.0"])
+		self.engine.commit({"Core/History/nuke.toml": module("History", package="history, a package of its own")}, tags=["Core/v0.1.1"])
+		self.workspace({"Runtime": "\"engine@^0.1\"", "Core": "\"engine@^0.1.1\""}, depends=("Runtime",))
+		projects = self.projects()
+		self.assertIn("History", projects, "Runtime 0.1.0 needs History, which Core 0.1.1 has in its sub-package Core/History")
+		self.assertEqual(self.lock()[("engine", "Core")]["uses"], ["Core", "Core/History"])
+
 	def test_git_ignores_the_packages_but_search_does_not(self):
 		self.windowing()
 		git("init", "--quiet", "-b", "main", self.tmp + "/game")
@@ -279,7 +298,11 @@ class ResolveTests(PackageTest):
 		self.assertFalse(os.path.isfile(self.path(".gitignore")), "no .gitignore line: IED's search reads those")
 		self.assertIn("/MyGame/packages/", read(os.path.join(self.tmp, "game", ".git", "info", "exclude")))
 		self.assertEqual("", git("status", "--porcelain", "--untracked-files=all", "--", "MyGame/packages", cwd=self.tmp + "/game"))
+		self.assertTrue(os.path.isfile(self.path("packages", "nuke.lock")), "the lock is generated: ignored with the packages")
+		self.assertFalse(os.path.exists(self.path("nuke.lock")), "nothing beside nuke.toml")
+		os.replace(self.path("packages", "nuke.lock"), self.path("nuke.lock"))     # where Nuke kept it before
 		self.projects()
+		self.assertTrue(os.path.isfile(self.path("packages", "nuke.lock")) and not os.path.exists(self.path("nuke.lock")), "it moves")
 		self.assertEqual(1, read(os.path.join(self.tmp, "game", ".git", "info", "exclude")).count("/MyGame/packages/"), "once")
 
 	def test_a_project_named_by_its_folder_keeps_its_name(self):
@@ -439,7 +462,7 @@ class ResolveTests(PackageTest):
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
 		solution = json.loads(read(self.path("Game.iedsln")))
-		self.assertIn("nuke.lock", solution["items"])
+		self.assertEqual(solution["items"], ["nuke.toml"], "the lock is generated: not an item")
 		packages = next(g for g in solution["groups"] if g["name"] == "Packages")
 		engine = packages["groups"][0]
 		self.assertEqual((engine["name"], engine["projects"]), ("engine", ["Windowing"]), "folders as in the repository")
@@ -480,20 +503,26 @@ class CommandTests(PackageTest):
 		self.workspace({}, depends=())
 		code, out = self.nuke("package", "add", "engine", "Windowing")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Windowing = "engine@^0.2.0"', read(self.path("nuke.toml")))
+		self.assertIn('Windowing = { source = "engine", path = "Windowing", version = "^0.2.0" }', read(self.path("nuke.toml")))
 		code, out = self.nuke("package", "add", self.engine.url, "Renderer", "^1.0")
 		self.assertEqual(code, 0, out)
-		self.assertIn('Renderer = "engine@^1.0"', read(self.path("nuke.toml")))
+		self.assertIn('Renderer = { source = "engine", path = "Renderer", version = "^1.0" }', read(self.path("nuke.toml")))
 		code, out = self.nuke("package", "remove", "Renderer")
 		self.assertEqual(code, 0, out)
 		self.assertNotIn("Renderer", read(self.path("nuke.toml")))
+		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--name", "Backend")
+		self.assertEqual(code, 0, out)
+		self.assertIn('Backend = { source = "engine", path = "Windowing/Win32", version = "^0.2.0" }', read(self.path("nuke.toml")))
+		code, out = self.nuke("package", "remove", "Windowing/Win32")
+		self.assertEqual(code, 0, out)
+		self.assertNotIn("Backend", read(self.path("nuke.toml")), "an entry is removed by its name or its path")
 
 	def test_add_a_branch_and_a_nested_package(self):
 		self.windowing()
 		self.workspace({}, depends=())
 		code, out = self.nuke("package", "add", "engine", "Windowing/Win32", "--branch", "main")
 		self.assertEqual(code, 0, out)
-		self.assertIn('"Windowing/Win32" = { source = "engine", branch = "main" }', read(self.path("nuke.toml")))
+		self.assertIn('Win32 = { source = "engine", path = "Windowing/Win32", branch = "main" }', read(self.path("nuke.toml")))
 		entry = self.lock()[("engine", "Windowing")]
 		self.assertEqual(entry["commit"], git("rev-parse", "main", cwd=self.engine.work), "the branch's tip, locked")
 		self.assertEqual(entry["uses"], ["Windowing", "Windowing/Win32"])
@@ -505,7 +534,7 @@ class CommandTests(PackageTest):
 		self.assertEqual(code, 0, out)
 		body = json.loads(out[out.index("{"):])
 		self.assertEqual(body["sources"], [{"name": "engine", "url": self.engine.url, "web": None}])
-		self.assertEqual(body["requirements"], [{"path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0", "kind": "version"}])
+		self.assertEqual(body["requirements"], [{"name": "Renderer", "path": "Renderer", "source": "engine", "url": self.engine.url, "requirement": "^1.0", "kind": "version"}])
 		packages = {p["path"]: p for p in body["packages"]}
 		renderer, windowing = packages["Renderer"], packages["Windowing"]
 		self.assertEqual([(d["path"], d["version"], d["requirement"]) for d in renderer["dependsOn"]], [("Windowing", "0.2.0", "^0.2.0")])
@@ -518,12 +547,12 @@ class CommandTests(PackageTest):
 		del state["needs"]
 		with open(state_file, "w", encoding="utf-8") as f:
 			json.dump(state, f)
-		lock_before = read(self.path("nuke.lock"))
+		lock_before = read(self.path("packages", "nuke.lock"))
 		code, out = self.nuke("package", "status", "--json")
 		self.assertEqual(code, 0, out)
 		renderer = {p["path"]: p for p in json.loads(out[out.index("{"):])["packages"]}["Renderer"]
 		self.assertEqual([d["path"] for d in renderer["dependsOn"]], ["Windowing"], "a state from before the graph gets it")
-		self.assertEqual(read(self.path("nuke.lock")), lock_before, "and the lock stays")
+		self.assertEqual(read(self.path("packages", "nuke.lock")), lock_before, "and the lock stays")
 
 	def test_browse_and_sources(self):
 		self.windowing()

@@ -46,7 +46,7 @@ namespace NukePlugin
 	}
 
 	bool PackageFetcher::HasPackages(const IED::Workspace& ws) {
-		if (IED::Exists(ws, Core::StringView("nuke.lock"))) return true;
+		if (IED::Exists(ws, Core::StringView("packages/nuke.lock")) || IED::Exists(ws, Core::StringView("nuke.lock"))) return true;
 		Core::String manifest;
 		Core::String problem;
 		return IED::ReadFile(ws, Core::StringView("nuke.toml"), manifest, problem) && UsesPackages(manifest.View());

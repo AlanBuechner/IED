@@ -8,6 +8,7 @@ triggers:
   - "custom nuke command"
   - "nuke package"
   - "nuke.lock"
+  - "add a package"
   - "change a package"
   - "which C4 toolchain"
   - "compiler bug"
@@ -64,10 +65,12 @@ ${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words 
 
 Projects can come from git repositories (`<IED>/Nuke/README.md` section 12). The workspace's `nuke.toml` lists what
 it uses in `[packages]`, each entry with its repository's git URL and a version, as Cargo's git dependencies:
-`Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }` (or a `[sources]` short name:
-`Windowing = "claymore@^0.2"`). Any Nuke command, a build first of all, pulls them. Its projects depend on the packages'
-projects by name. `nuke.lock` (committed) pins each package's commit; installs live in `packages/` and are read-only,
-unless the entry says `writable = true`: then the build clones the repository into `packages/<source>/` to edit.
+`RhiD3D12 = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Renderer/RHI/DX12", version = "^0.2" }`
+(the package's folder in the repository; `source = "<[sources] name>"` instead of `git` for a short name). Any Nuke
+command, a build first of all, pulls them; nothing but `nuke.toml` is ever edited by hand. Its projects depend on the
+packages' projects by name. `packages/nuke.lock` (generated, not committed) pins each package's commit; installs live
+in `packages/` and are read-only, unless the entry says `writable = true`: then the build clones the repository into
+`packages/<source>/` to edit.
 
     nuke package status [--fetch] [--json]   versions, commits, projects, locked or developed (tool: nuke_packages)
     nuke package update [NAME...]            newest versions the requirements allow

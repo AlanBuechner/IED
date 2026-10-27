@@ -145,7 +145,7 @@ class NukePluginFetchTests(ServerTestCase):
 		await self.trust()
 		await asyncio.sleep(4)
 		self.assertEqual([], self.calls(), "a workspace without [sources], [packages] or nuke.lock has nothing to fetch")
-		write(os.path.join(self.game, "nuke.lock"), "version = 1\n")
+		write(os.path.join(self.game, "packages", "nuke.lock"), "version = 1\n")
 		await self.until_calls(1, seconds=6)
 		await self.client.request("settings.set", {"tier": "app", "key": "nuke.packages.fetchMinutes", "value": 0})
 		await asyncio.sleep(1.5)

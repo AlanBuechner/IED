@@ -132,6 +132,7 @@ class PackageRequirement:
 	branch: str = None
 	rev: str = None
 	writable: bool = False          # the workspace develops its source: a git clone, not read-only installs
+	name: str = None                # its key in the manifest (the path when the entry names none)
 
 	def describe(self):
 		if self.branch:
@@ -300,9 +301,10 @@ def _sources(t):
 
 
 def _requirements(t, path, needs_source):
-	"""[packages] or [package.dependencies]: package path -> "<source>@<requirement>" (or, in a package, just the
-	requirement: its own repository), or a table of git (a URL) or source (a [sources] name or a URL), version, branch,
-	rev and path - and, in a workspace's [packages], writable."""
+	"""[packages] or [package.dependencies]: name -> a table of git (a URL) or source (a [sources] name), path (the
+	package's folder in the repository; the name when it has none), version, branch or rev - and, in a workspace's
+	[packages], writable; or "<source>@<requirement>" for the package at the name's path (in a package, just the
+	requirement: its own repository)."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
@@ -312,7 +314,7 @@ def _requirements(t, path, needs_source):
 			if not at and needs_source:
 				raise NukeError(f"{path}: {where} must name its source, as \"<source>@{value or '*'}\" or a table: "
 					f"{{ git = \"<url>\", version = \"{value or '*'}\" }}")
-			requirement = PackageRequirement(key, path, source=source or None, version=version or "*")
+			requirement = PackageRequirement(key, path, source=source or None, version=version or "*", name=key)
 		elif isinstance(value, dict):
 			requirement = _requirement_table(Table(value, where, path), key, path, needs_source)
 		else:
@@ -333,7 +335,7 @@ def _requirement_table(table, key, path, in_workspace):
 		raise NukeError(f"{path}: {where}.git must be a git URL (https://..., git@host:owner/repo.git or a path), not '{git}'")
 	writable = table.boolean("writable", False) if in_workspace else False
 	requirement = PackageRequirement(table.string("path") or key, path, source=git or source, version=table.string("version"),
-		branch=table.string("branch"), rev=table.string("rev"), writable=writable)
+		branch=table.string("branch"), rev=table.string("rev"), writable=writable, name=key)
 	table.done()
 	if sum(x is not None for x in (requirement.version, requirement.branch, requirement.rev)) > 1:
 		raise NukeError(f"{path}: {where} takes one of version, branch and rev")

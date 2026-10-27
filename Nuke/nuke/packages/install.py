@@ -128,7 +128,7 @@ def ensure_ignored(workspace_dir, packages_dir):
 	if entry in (line.strip() for line in text.splitlines()):
 		return
 	os.makedirs(os.path.dirname(exclude), exist_ok=True)
-	addition = ("" if not text or text.endswith("\n") else "\n") + f"# Nuke's installed packages (nuke.lock says which)\n{entry}\n"
+	addition = ("" if not text or text.endswith("\n") else "\n") + f"# Nuke's packages folder: installed packages and nuke.lock, all generated\n{entry}\n"
 	with open(exclude, "a", encoding="utf-8", newline="\n") as f:
 		f.write(addition)
 

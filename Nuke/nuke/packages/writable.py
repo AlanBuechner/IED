@@ -43,7 +43,8 @@ def clone(state, cache, log, url, name, branch=None):
 	make_room(state, key, folder)
 	mirror = cache.mirror(url)
 	git.fetch(mirror, url)
-	log.note(f"cloning {url} into {os.path.relpath(folder, os.path.dirname(state.root))} (writable)")
+	shown = os.path.relpath(folder, os.path.dirname(state.root)).replace("\\", "/")
+	log.note(f"cloning {url} into {shown} (writable)")
 	git.clone(url, folder, reference=mirror)
 	if branch and git.branch(folder) != branch:
 		git.run(["checkout", "--quiet", branch], cwd=folder, what=f"git checkout {branch} in {folder}")

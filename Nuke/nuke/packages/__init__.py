@@ -42,7 +42,7 @@ class Origin:
 
 def active(spec):
 	"""Whether the workspace uses packages at all: anything else costs no file access."""
-	return bool(spec.sources or spec.packages) or os.path.isfile(lockfile.path_of(spec.dir))
+	return bool(spec.sources or spec.packages) or lockfile.exists(spec)
 
 
 def sync(spec, projects, options):
@@ -52,7 +52,7 @@ def sync(spec, projects, options):
 	local = {p.name.lower() for p in projects.values()}
 	roots = workspace_roots(spec)
 	wanted = sorted({name for p in projects.values() for name in p.depends if name.lower() not in local})
-	lock = lockfile.read(spec.dir)
+	lock = lockfile.read(spec)
 	if not roots and lock is None:
 		return []
 	stopping = writable.follow_manifest(spec, state, cache, options.log)
@@ -195,8 +195,8 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 			state.develop[url_key(repo.url)]["head"] = repo.head()    # the lock is current while HEAD stays here
 	state.save()
 	install.ensure_ignored(spec.dir, spec.packages_dir)
-	previous = lockfile.read(spec.dir)
-	if lockfile.write(spec.dir, new_lock):
+	previous = lockfile.read(spec)
+	if lockfile.write(spec, new_lock):
 		_report_changes(log, previous, new_lock)
 	return joined, new_lock
 

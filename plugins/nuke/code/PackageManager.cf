@@ -19,7 +19,7 @@ namespace NukePlugin
 	// Whether a workspace's change is one to its packages: what the Package Manager shows is to be read again.
 	static bool TouchesPackages(const IED::FileChanges& changes) {
 		for (const IED::FileChange& change : changes.m_Changes)
-			if (change.m_Path == "nuke.toml" || change.m_Path == "nuke.lock" || change.m_Path == ".ied/local/packages.json") return true;
+			if (change.m_Path == "nuke.toml" || change.m_Path.View().EndsWith(Core::StringView("nuke.lock")) || change.m_Path == ".ied/local/packages.json") return true;
 		return false;
 	}
 

@@ -103,10 +103,11 @@ class _Context:
 		return workspace
 
 	def lock(self):
-		return lockfile.read(self.root) or lockfile.Lock()
+		return lockfile.read(self.spec) or lockfile.Lock()
 
 	def source(self, name):
-		"""(url, folder name) of a source: a [sources] name, a source the lock names, or a URL."""
+		"""(url, folder name) of a source: a [sources] name, a source the lock names, the repository name of a
+		[packages] entry's git URL (claymore for .../Claymore.git), or a URL."""
 		if name in self.spec.sources:
 			return self.spec.sources[name], name
 		for entry in self.lock().packages:
@@ -115,7 +116,11 @@ class _Context:
 		if is_url(name):
 			named = next((n for n, u in self.spec.sources.items() if url_key(u) == url_key(name)), None)
 			return name, named or repository_name(name)
-		raise NukeError(f"no source named '{name}' (the workspace's [sources]: {', '.join(self.spec.sources) or 'none'})")
+		for requirement in self.spec.packages:
+			if is_url(requirement.source) and repository_name(requirement.source).lower() == name.lower():
+				return requirement.source, repository_name(requirement.source)
+		known = sorted(set(self.spec.sources) | {repository_name(r.source) for r in self.spec.packages if is_url(r.source)})
+		raise NukeError(f"no source named '{name}' (the workspace's sources: {', '.join(known) or 'none'})")
 
 	def checkout(self, url):
 		entry = self.state.develop.get(url_key(url))
@@ -303,7 +308,7 @@ def _update(cli, args):
 
 def _add(cli, args):
 	options = _parse("add", args, lambda p: (p.add_argument("source"), p.add_argument("package"), p.add_argument("requirement", nargs="?"),
-		p.add_argument("--branch"), p.add_argument("--rev"), p.add_argument("--writable", action="store_true")))
+		p.add_argument("--branch"), p.add_argument("--rev"), p.add_argument("--writable", action="store_true"), p.add_argument("--name")))
 	context = _Context(cli)
 	path, text = context.manifest_text()
 	source = options.source
@@ -312,23 +317,33 @@ def _add(cli, args):
 	elif source not in context.spec.sources:
 		raise NukeError(f"no source named '{source}' in [sources]: give its git URL instead")
 	package = options.package.strip("/")
-	context.write_manifest(path, tomledit.set_key(text, "packages", package, _entry(source, options, options.requirement or "*")))
+	name = options.name or _entry_name(context.spec, package)
+	context.write_manifest(path, tomledit.set_key(text, "packages", name, _entry(source, package, options, options.requirement or "*")))
 	try:
 		context.load()
 	except NukeError:
 		context.write_manifest(path, text)
 		raise
 	if not options.requirement and not options.branch and not options.rev:
-		_pin_newest(context, path, source, package, options)
-	context.log.note(f"the workspace uses {package} from {source}" + (" (writable: a clone in the packages folder)" if options.writable else ""))
+		_pin_newest(context, path, source, package, name, options)
+	context.log.note(f"the workspace uses {package} from {source} as {name}" + (" (writable: a clone in the packages folder)" if options.writable else ""))
 
 
-def _entry(source, options, requirement):
-	"""The [packages] value: "<source>@<requirement>" for a [sources] name; a table for a git URL, a branch, a commit or
-	a writable package (Cargo's form: { git = "<url>", version = "^0.2" })."""
-	if not is_url(source) and not options.branch and not options.rev and not options.writable:
-		return f"{source}@{requirement}"
-	value = {"git" if is_url(source) else "source": source}
+def _entry_name(spec, package):
+	"""An entry's name: the package's folder name (Win32 for Windowing/Win32), its whole path when that is taken by
+	another package, or the entry that already names this package."""
+	for requirement in spec.packages:
+		if requirement.path == package:
+			return requirement.name
+	short = package.rpartition("/")[2]
+	return package if any(r.name == short for r in spec.packages) else short
+
+
+def _entry(source, package, options, requirement):
+	"""The [packages] entry for `package`: its repository (git = the URL, or source = a [sources] name), its folder there
+	(path), the version requirement, branch or commit, and writable - Cargo's form: { git = "<url>", path = "Windowing",
+	version = "^0.2" }."""
+	value = {"git" if is_url(source) else "source": source, "path": package}
 	if options.branch or options.rev:
 		value["branch" if options.branch else "rev"] = options.branch or options.rev
 	else:
@@ -338,14 +353,14 @@ def _entry(source, options, requirement):
 	return value
 
 
-def _pin_newest(context, path, source, package, options):
+def _pin_newest(context, path, source, package, name, options):
 	"""`*` becomes ^ the version the lock chose, when that is a release."""
 	url = source if is_url(source) else context.spec.sources[source]
 	for entry in context.lock().packages:
 		version = semver.parse_version(entry.version)
 		if url_key(entry.url) == url_key(url) and package in entry.uses and version is not None and not version.build:
 			_, text = context.manifest_text()
-			context.write_manifest(path, tomledit.set_key(text, "packages", package, _entry(source, options, f"^{version}")))
+			context.write_manifest(path, tomledit.set_key(text, "packages", name, _entry(source, package, options, f"^{version}")))
 			context.load()
 			return
 
@@ -354,11 +369,12 @@ def _remove(cli, args):
 	options = _parse("remove", args, lambda p: p.add_argument("package"))
 	context = _Context(cli)
 	path, text = context.manifest_text()
-	if not tomledit.has_table(text, "packages") or all(r.path != options.package for r in context.spec.packages):
-		raise NukeError(f"the workspace does not use a package '{options.package}' ([packages])")
-	context.write_manifest(path, tomledit.remove_key(text, "packages", options.package))
+	found = next((r for r in context.spec.packages if options.package in (r.name, r.path)), None)
+	if found is None or not tomledit.has_table(text, "packages"):
+		raise NukeError(f"the workspace does not use a package '{options.package}' ([packages] has no entry of that name or path)")
+	context.write_manifest(path, tomledit.remove_key(text, "packages", found.name))
 	context.load()
-	context.log.note(f"the workspace no longer uses {options.package}")
+	context.log.note(f"the workspace no longer uses {found.path}")
 
 
 # --- develop, lock, pull ---------------------------------------------------------------------------

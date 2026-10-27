@@ -112,7 +112,7 @@ def describe(spec, state, lock, checkouts, joined):
 	for entry in lock.packages:
 		if all(url_key(s["url"]) != url_key(entry.url) for s in sources):
 			sources.append({"name": entry.source, "url": entry.url, "web": web_url(entry.url), "transitive": True})
-	requirements = [{"path": r.path, "source": r.source, "url": spec.sources.get(r.source) or r.source, "requirement": r.describe(),
+	requirements = [{"name": r.name or r.path, "path": r.path, "source": r.source, "url": spec.sources.get(r.source) or r.source, "requirement": r.describe(),
 		"kind": "branch" if r.branch else "rev" if r.rev else "version"} for r in spec.packages]
 	body = {"version": 1, "packagesFolder": spec.packages_dir.replace("\\", "/"), "sources": sources, "requirements": requirements,
 		"packages": packages, "checkouts": checkout_items}

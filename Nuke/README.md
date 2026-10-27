@@ -536,24 +536,28 @@ One repository holds as many packages as you like, each versioned on its own, so
 repository and every program takes the parts it needs. Design and reasons: IED `docs/31`.
 
 ```toml
-# the workspace's nuke.toml: what it uses, by each package's path in its repository - Cargo's git dependencies
+# the workspace's nuke.toml: each package it uses - its repository, its folder there, the version - as Cargo's git
+# dependencies; the entry's name is yours (messages and `nuke package remove` use it)
 [packages]
-Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }
-Renderer  = { git = "https://github.com/AlanBuechner/Claymore.git", version = "~0.3.1", writable = true }
-Utils     = { git = "git@github.com:me/utils.git", branch = "main" }   # follow a branch (the lock pins its commit)
-Strings   = { git = "git@github.com:me/utils.git", rev = "1a2b3c4d" }  # one commit
+Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Windowing", version = "^0.2" }
+RhiD3D12  = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Renderer/RHI/DX12", version = "~0.3.1", writable = true }
+Utils     = { git = "git@github.com:me/utils.git", path = "Utils", branch = "main" }   # a branch (the lock pins its commit)
+Strings   = { git = "git@github.com:me/utils.git", path = "Strings", rev = "1a2b3c4d" } # one commit
 ```
 
-That is all a build needs: any Nuke command (`nuke build` first of all) fetches what the lock lacks, installs it under
-`packages/` and writes `nuke.lock`. A repository used often can get a short name in `[sources]`, after which
-`Windowing = "claymore@^0.2"` says the same as the first line (`source = "claymore"` in a table).
+`nuke.toml` is the only file you write: any Nuke command (`nuke build` first of all) fetches what is missing, installs
+it under `packages/` and writes the lock there, `packages/nuke.lock` - generated, and ignored by git with the rest of
+the folder. An entry without `path` is the package at its name's path (`Windowing = { git = "...", version = "^0.2" }`).
+A repository used often can get a short name in `[sources]`; then `source = "claymore"` stands for `git = "<url>"`, and
+`"Windowing" = "claymore@^0.2"` is the short form of an entry whose path is its name.
 
 ```toml
 [sources]                                   # optional: names for repositories
 claymore = "https://github.com/AlanBuechner/Claymore.git"
 
 [packages]
-Windowing = "claymore@^0.2"                 # <source>@<version requirement>
+RhiD3D12  = { source = "claymore", path = "Renderer/RHI/DX12", version = "^0.3" }
+Windowing = "claymore@^0.2"                 # <source>@<version requirement>, at the path "Windowing"
 ```
 
 **Locked or writable.** A package is installed **locked** - read-only on disk, at the lock's commit - unless its entry
@@ -593,8 +597,10 @@ depends = ["Windowing", "Agility"]
 - **Resolution** takes the highest version every requirement accepts, keeps a locked version while it still does, and
   when requirements on a package exclude each other tries older versions of the packages that made them before it
   stops with every requirement and who made it.
-- **`nuke.lock`** (commit it) holds the commit of each versioned package and the packages of it used. While it matches
-  the manifests and everything is installed, Nuke reads only files: no git process, no network.
+- **`packages/nuke.lock`** holds the commit of each versioned package and the packages of it used; Nuke writes it
+  from `nuke.toml` (generated, not committed: each checkout chooses its versions on its first command, and keeps them
+  until `nuke package update` or a changed requirement). While it matches the manifests and everything is installed,
+  Nuke reads only files: no git process, no network. A `nuke.lock` beside `nuke.toml` (older Nukes) moves there.
 - **Installs** go into the workspace's `packages/` folder (`[workspace] packages-dir`): a locked package is
   `packages/<source>/<path>@<version>/<folder>/` with every file read-only. Nuke keeps the folder out of git through the
   checkout's `.git/info/exclude`, not `.gitignore`, so search in IED and the AI's tools - which skip what `.gitignore`
@@ -635,9 +641,8 @@ and, with `--fetch`, `unfetched` (clones that could not be fetched; exit status 
 **Developing a package with the program that uses it.** `nuke package develop claymore` clones the repository into
 `packages/claymore/` at the tip of its default branch; from then on every claymore package builds from that working
 tree, so the program and the packages are edited, built, run and debugged as one codebase. Every Nuke command writes the
-clone's HEAD into `nuke.lock` - its release (`0.2.0`) or a pseudo-version after it (`0.2.0+3.1a2b3c4d`, three commits
-later) - so a commit of the program pins exactly the package code it was built with, released or not; another machine
-builds it once the clone's commits are pushed. `nuke package release Windowing --minor` tags `Windowing/v0.3.0` at HEAD
+clone's HEAD into the lock - its release (`0.2.0`) or a pseudo-version after it (`0.2.0+3.1a2b3c4d`, three commits
+later). `nuke package release Windowing --minor` tags `Windowing/v0.3.0` at HEAD
 and pushes the branch and the tag; it refuses uncommitted changes, a clone behind its remote, and a package of the same
 repository it uses with unreleased changes (it says to release that one too), and moves the workspace's requirement
 (`claymore@^0.3.0`) when the new version is outside it. `nuke package lock claymore` goes back to read-only installs at

@@ -213,8 +213,15 @@ class Resolver:
 				owner_key = (repo.key, repo.line_of(owner))
 				if owner_key != key:
 					need(owner_key, self._inferred(repo, owner_key[1], choice, f"{label} (its project {project.name} uses {name})", key))
-				use(owner_key, owner)
+				use(owner_key, self._owner_at(repo, current[owner_key], owner_key[1], name) or owner)
 		return elsewhere
+
+	def _owner_at(self, repo, choice, line, name):
+		"""The package of `line` that has project `name` at the version chosen for it - which may not be the package that
+		had it when the dependent was released: a project can become a sub-package of its own (Core's History, later
+		Core/History) - or None when it is not in `line` there."""
+		owner = repo.index(choice.commit).owner(name)
+		return owner if owner is not None and repo.line_of(owner) == line else None
 
 	def _inferred(self, repo, line, choice, by, key):
 		"""A package of the same repository released on its own: at least the release it had at the dependent's commit."""

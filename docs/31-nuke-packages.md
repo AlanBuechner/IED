@@ -22,22 +22,23 @@ The user reference is [`Nuke/README.md`](../Nuke/README.md) section 12; this doc
 | **version** | a git tag: `<package path>/v<semver>` (`Windowing/v1.2.0`), or `v<semver>` for the repository as a whole - Go's convention for modules in subfolders, so a Go module in a package folder has the same versions for `go get` |
 | **sub-package** | a package inside another one. Without tags of its own it is released with the nearest package above it that has some (the repository's `v` tags at the top); with its own tags it is versioned on its own |
 | **versioned package** | a package that has tags of its own, or the repository root: the unit a version is chosen for. Every package released with it comes from the same commit |
-| **lock** | `nuke.lock` beside the workspace's `nuke.toml`: the exact commit of every versioned package the workspace uses. Committed |
+| **lock** | `packages/nuke.lock`: the exact commit of every versioned package the workspace uses. Generated from `nuke.toml`, ignored with the packages folder |
 | **locked** | a package installed read-only at the lock's commit: the default |
 | **writable** (develop) | a source a workspace edits: a git clone of the repository inside the workspace, built from its working tree - `writable = true` on its entry in `nuke.toml`, or `nuke package develop` on one machine |
 
 A workspace says what it uses in its `nuke.toml`, as Cargo's git dependencies do, and nothing else - the build pulls it:
 
 ```toml
-[packages]
-Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", version = "^0.2" }   # private: git's own credentials
-Renderer  = { git = "https://github.com/AlanBuechner/Claymore.git", version = "~0.3.1", writable = true }
-Utils     = { git = "git@github.com:me/utils.git", branch = "main" }   # no release yet: a branch's tip (the lock pins its commit)
-Strings   = { git = "git@github.com:me/utils.git", rev = "1a2b3c4d" }  # or one commit
+[packages]   # name = { the repository, the package's folder in it, the version } - private: git's own credentials
+Windowing = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Windowing", version = "^0.2" }
+RhiD3D12  = { git = "https://github.com/AlanBuechner/Claymore.git", path = "Renderer/RHI/DX12", version = "~0.3.1", writable = true }
+Utils     = { git = "git@github.com:me/utils.git", path = "Utils", branch = "main" }   # no release yet: a branch's tip
+Strings   = { git = "git@github.com:me/utils.git", path = "Strings", rev = "1a2b3c4d" } # or one commit
 ```
 
-A repository used often can have a short name, `[sources] claymore = "<url>"`, and then `Windowing = "claymore@^0.2"`
-(or `{ source = "claymore", version = "^0.2" }`) says the same. `writable = true` makes the build clone the package's
+The name is the entry's own (messages and `nuke package remove` use it); `path` defaults to it. A repository used often
+can have a short name, `[sources] claymore = "<url>"`, and then `source = "claymore"` stands for the URL
+(`Windowing = "claymore@^0.2"` is the short form at the path `Windowing`). `writable = true` makes the build clone the package's
 repository into the workspace (one clone per repository: all its packages build from it); without it every package is
 installed locked. Taking `writable` away returns the repository to locked installs at the next build, which refuses
 while the clone has uncommitted changes or unpushed commits.
@@ -104,9 +105,9 @@ together before it releases them.
 
 ```text
 MyGame/
-  nuke.toml            [workspace], [sources], [packages]
-  nuke.lock            committed
-  packages/            Nuke's (in .git/info/exclude; [workspace] packages-dir changes the name)
+  nuke.toml            [workspace], [packages] (and [sources]): the one file you write
+  packages/            Nuke's, all generated (in .git/info/exclude; [workspace] packages-dir changes the name)
+    nuke.lock          the commit of every package: written from nuke.toml
     claymore/
       Windowing@0.2.0/ a locked package: its folder (Windowing/) at its commit, files read-only
       Renderer@0.3.1/
@@ -126,10 +127,8 @@ objects among every workspace of the machine.
 and from then on every claymore package of the workspace builds from that working tree: edit the game and the engine
 modules side by side, build, run, debug, commit each repository when it works. There is no publish step in the loop:
 
-- **The lock follows the checkout.** Every Nuke command records the checkout's HEAD commit in `nuke.lock`, with the
-  version it is (`0.2.0`) or a pseudo-version after the last release (`0.2.0+3.1a2b3c4d`: three commits later). A commit
-  of the game therefore pins exactly the package code it was built with, released or not; another machine builds the
-  same commit once it is pushed (Nuke says so when it is not).
+- **The lock follows the checkout.** Every Nuke command records the checkout's HEAD commit in the lock, with the
+  version it is (`0.2.0`) or a pseudo-version after the last release (`0.2.0+3.1a2b3c4d`: three commits later).
 - **Releasing is optional and one command.** `nuke package release Windowing --minor` (in the clone or in the
   repository's own checkout) tags `Windowing/v0.3.0` at HEAD and pushes the branch and the tag; it refuses while the
   checkout has uncommitted changes or is behind its remote, and when a package of the same repository that Windowing
@@ -165,7 +164,7 @@ projects and whether it is writable; each develop clone's branch and how far it 
 `.ied/local/readonly/nuke.json` (the folders no one may write, each with the reason and the way out). "Behind" is what
 the clone last fetched: `nuke package status --fetch` fetches first, and IED's `nuke` plugin runs it by itself
 (2026-10-27, `plugins/nuke/code/`): in each trusted workspace that uses packages (its `nuke.toml` has `[sources]` or
-`[packages]`, or it has a `nuke.lock`), when the workspace opens or is trusted and then every
+`[packages]`, or it has a lock), when the workspace opens or is trusted and then every
 `nuke.packages.fetchMinutes` (default 5; 0 turns it off). IED's server reads the file Nuke rewrites through its watcher
 (`docs/10` "Read-only folders"), so a clone that falls behind its remote turns read-only in the editor with no Nuke
 command run by hand; the plugin parses and enforces nothing itself. A fetch that fails (no network, a sign-in missing)
@@ -264,7 +263,7 @@ the timed fetch) in a workspace whose window was opened.
 | P-2 | Versions are git tags `<path>/v<semver>` (or `v<semver>` for the whole repository); a package without tags of its own is released with the nearest package above it that has some | One repository holds many independently versioned packages, or one version for all; Go uses the same tags, so Go modules and Nuke packages share versions; `ls-remote` alone lists every version |
 | P-3 | Same-repository dependencies are inferred from projects' `depends` and the tag history; other sources' are declared in `[package.dependencies]` | The repository already says which of its projects use which; writing it twice would drift. Another source needs a URL and a requirement, which nothing else gives |
 | P-4 | The workspace lists versioned packages; which of their projects and sub-packages are used follows the projects' `depends` | "Optional submodules for what platforms you want to support" without a feature system: a backend no project depends on costs nothing, and its own dependencies are never resolved |
-| P-5 | `nuke.lock` holds commits, and a develop checkout's HEAD goes into it on every command | Builds are reproducible from the game's commit alone, released or not, and offline; developing a package never needs a release to keep the game's history exact |
+| P-5 | The lock (`packages/nuke.lock`) holds commits, and a develop checkout's HEAD goes into it on every command; it is generated from `nuke.toml` and ignored with the packages (owner, 2026-10-27: "the lock file is a generated file so it should be ignored") | A checkout keeps the versions it chose until `update` or a changed requirement, and builds offline; `nuke.toml` is what the program commits - a version it must build with exactly is `=x.y.z` there. Earlier it was committed beside `nuke.toml`, so a game's commit pinned every package's commit; the owner made `nuke.toml` the only file a program keeps |
 | P-6 | Packages are installed inside the workspace (`packages/`), locked ones read-only on disk; mirrors are shared per machine | IED edits only workspace files; read-only on disk stops every writer, not only IED; mirrors make a second workspace's install a local copy |
 | P-7 | Develop is per source and per workspace: the whole repository becomes a clone in the workspace | A repository's packages are developed and tested together (its own workspace builds them all); one checkout per source keeps them on one commit |
 | P-8 | Files of a package are writable only in a develop checkout that is not behind its remote | The owner's lock-out, sharpened: there is exactly one writable copy of a package line, and it is the newest |
