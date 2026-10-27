@@ -13,7 +13,7 @@ import os
 import re
 from dataclasses import dataclass, replace
 
-from . import fsutil, languages
+from . import develop_files, fsutil, languages
 from .errors import NukeError
 
 PROJECTS_DIR = "build/ied"
@@ -302,7 +302,9 @@ def refresh(workspace, store, log):
 	"""The IED files made again on every command, as a build system keeps the IDE files it generates in step with its
 	manifests: a pull that adds a project or an IED plugin needs no `nuke init --ied` before IED shows it. Only for a
 	workspace whose solution Nuke makes (and with the bridge on, `ide`), and only with its toolchain found - without it
-	the solution would lose its C4 plugin. Returns the number of files written or removed."""
+	the solution would lose its C4 plugin. Returns the number of files written or removed. What the language servers
+	read of the develop checkouts is written for any workspace (develop_files.py)."""
+	develop_files.write(workspace, log)
 	if not workspace.spec.ide or not generated_by_nuke(workspace):
 		return 0
 	try:

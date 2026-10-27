@@ -18,6 +18,9 @@ A driver module (or package: a module named __init__.py loads with its folder as
 	has_tests(ctx) -> bool    optional (default True)
 	implicit_depends(spec)    optional: projects a project needs besides its `depends` (names), added to them
 	variables(ctx) -> dict    optional: values manifests read as ${<language>.<name>} (ctx: a WorkspaceContext)
+	editor(folder, contexts)  optional: while the workspace develops a package source, {file name: text, or None to
+	                          remove it} in `folder` (build/develop/) for the language server in IED, from the contexts of
+	                          all the workspace's projects in the language (develop_files.py)
 
 A driver reports a project it cannot build with ctx.problem(message) (or, without a context, a ValueError), and a
 failed compile with ctx.fail(what, code).

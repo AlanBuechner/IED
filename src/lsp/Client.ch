@@ -68,6 +68,7 @@ namespace Ied
 		public int64 m_StartedNs;                               // when it last started
 		public int64 m_UsedNs;                                  // when it was last asked or told something, or a window last showed one of its documents
 		public Core::String m_OptionsFilesSent;                 // its initializationOptionsFiles as it last got them (JSON)
+		public Core::String m_OptionsFileRead;                  // its profile's options with its initializationOptionsFile, as it last started with them (JSON)
 
 		// Starts the process (again) and sends initialize; Failed with `problem` when it cannot start.
 		public void Start();

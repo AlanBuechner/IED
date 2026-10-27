@@ -12,6 +12,8 @@ A profile names its server (`command`, `args`, `env`, `cwd`; `${pluginDir}`, `${
 
 **Options files.** `initializationOptionsFiles: {files, key}` hands one server several JSON files: `files` is a path with `${...}` variables whose file name may hold `*` and `?`, and the server's `initializationOptions` get `{<key>: {<file name without .json>: <the file's object>}}` (a file that is not a JSON object is left out and said so in the IED output; files in folders below are not named). When the workspace watcher sees one of them appear, change or go, a running server gets `workspace/didChangeConfiguration {settings: {<key>: {...}}}` with them all (nothing when they read the same as last sent). This is how one server serves every project of a workspace: C4LSP is `scope: workspace` with `{files: "${workspaceDir}/.ied/local/lsp-options/*.json", key: "programs"}`, every program's options file Nuke writes (C4 `docs/tools/03` "One server for every program"). It was one server per project until 2026-10-27 (owner's list 27/28): eight C4LSP processes of 700 MB to 1 GB each for one IED, and a module project - built only inside the programs that depend on it, so it has no options file of its own - analyzed alone, its includes unresolved.
 
+**One options file.** `initializationOptionsFile` names one JSON object merged over the profile's `initializationOptions` (its keys win; a missing file leaves them as they are). Initialization options reach a server only when it starts, so when the watcher sees the file appear, change or go and the options then read otherwise than the server started with, a starting or running server starts again (with a line in the IED output); the same options again start nothing. This is how a language plugin's server follows a Nuke workspace's develop checkouts: gopls reads `build/develop/gopls.json` and rust-analyzer `build/develop/rust-analyzer.json`, which Nuke's go and cargo drivers write while a package source is developed and `nuke package lock` removes (`docs/31` section 7).
+
 ## Lifecycle
 
 - **Lazy.** A server starts when the first document it serves opens in the workspace (`doc.open`), and serves every document of the workspace it matches after that. One process per workspace and profile.
@@ -126,5 +128,5 @@ What dominated, and what changed (C4 `docs/tools/03` "Memory"):
 - `workspace/applyEdit` through the document store as the server's own edit (`origin: lsp`).
 - Profiles whose `when` names `config.*` are chosen again when settings change (today: when a document opens and when trust changes).
 - A project's server is not stopped when its project leaves the solution; it serves on until IED restarts or `lsp.restart`.
-- `settingsBindings` pushed with `didChangeConfiguration`; the single `initializationOptionsFile` watched as `initializationOptionsFiles` are; options files outside the workspace folder are read at start only (the watcher sees the workspace).
+- `settingsBindings` pushed with `didChangeConfiguration`; options files outside the workspace folder are read at start only (the watcher sees the workspace).
 - `tcp` transport.

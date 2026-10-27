@@ -453,6 +453,7 @@ namespace Ied
 
 	Core::String LspPool::InitializationOptions(LanguageServer* language) {
 		Core::String options = ProfileOptions(language);
+		language->m_OptionsFileRead = options;
 		const LspProfile* profile = language->m_Profile;
 		if (!profile->m_OptionsFilesKey.IsEmpty()) {
 			language->m_OptionsFilesSent = OptionsFilesJson(language);
@@ -471,11 +472,16 @@ namespace Ied
 		return MergeJson(options.View(), scopes.View(), MergeKind::Merge);
 	}
 
+	// The file a profile's initializationOptionsFile names, its variables expanded.
+	static FS::Path OptionsFile(const LanguageServer* language) {
+		FS::Path file = FS::Path(ExpandProfileVariables(language->m_Profile->m_InitializationOptionsFile.View(), language->Variables()).View());
+		return file.IsAbsolute() ? file : language->m_Ws->m_Root / file.View();
+	}
+
 	Core::String LspPool::ProfileOptions(const LanguageServer* language) {
 		const LspProfile* profile = language->m_Profile;
 		if (profile->m_InitializationOptionsFile.IsEmpty()) return profile->m_InitializationOptions;
-		FS::Path file = FS::Path(ExpandProfileVariables(profile->m_InitializationOptionsFile.View(), language->Variables()).View());
-		if (!file.IsAbsolute()) file = language->m_Ws->m_Root / file.View();
+		FS::Path file = OptionsFile(language);
 		if (!FS::FileExists(file.CStr())) return profile->m_InitializationOptions;
 		FS::File opened = FS::File(file.CStr(), "rb");
 		Core::String text = opened.ReadText();
@@ -539,13 +545,31 @@ namespace Ied
 		return GlobMatch(pattern.View(), relative.View());
 	}
 
+	// Whether the file the watcher saw change at `path` is `language`'s initializationOptionsFile.
+	static bool NamesInitializationFile(const LanguageServer* language, Core::StringView path) {
+		Core::String relative;
+		return RelativeTo(language->m_Ws->m_Root.View(), OptionsFile(language).View(), relative) && relative.View() == path;
+	}
+
 	void LspPool::FilesChanged(Workspace* ws, const ChangeBatch& batch) {
 		for (LanguageServer* language : m_Languages) {
-			if (language->m_Ws != ws || language->m_State != LspState::Running || language->m_Profile->m_OptionsFilesKey.IsEmpty()) continue;
-			bool named = batch.Overflowed();
-			for (const TreeChange& change : batch.Changes()) named = named || NamesOptionsFile(language, change.m_Path.View());
-			if (named) SendOptionsFilesIfChanged(language);
+			if (language->m_Ws != ws) continue;
+			const LspProfile* profile = language->m_Profile;
+			bool files = batch.Overflowed() && !profile->m_OptionsFilesKey.IsEmpty();
+			bool file = batch.Overflowed() && !profile->m_InitializationOptionsFile.IsEmpty();
+			for (const TreeChange& change : batch.Changes()) {
+				files = files || (!profile->m_OptionsFilesKey.IsEmpty() && NamesOptionsFile(language, change.m_Path.View()));
+				file = file || (!profile->m_InitializationOptionsFile.IsEmpty() && NamesInitializationFile(language, change.m_Path.View()));
+			}
+			if (files && language->m_State == LspState::Running) SendOptionsFilesIfChanged(language);
+			if (file && (language->m_State == LspState::Running || language->m_State == LspState::Starting)) RestartIfOptionsChanged(language);
 		}
+	}
+
+	void LspPool::RestartIfOptionsChanged(LanguageServer* language) {
+		if (ProfileOptions(language).View() == language->m_OptionsFileRead.View()) return;
+		Log(language, Core::StringView("its initializationOptionsFile changed: starting it again with the new options"));
+		language->Relaunch();
 	}
 
 	void LspPool::SendOptionsFilesIfChanged(LanguageServer* language) {

@@ -1,6 +1,7 @@
 // Rust (docs/26 "Language plugins"): the language, its icons and the places rustc prints ("path:line:col", also after
 // "-->"), rust-analyzer as the language server of Rust documents (one per workspace; it finds
-// the Cargo workspace itself), the rust.cargo task preset for a folder with a Cargo.toml - Build, Run, Test and Clean
+// the Cargo workspace itself; while a Nuke workspace develops a package source it gets build/develop/rust-analyzer.json,
+// which the cargo driver writes, and follows the crates into the clone: docs/31 section 7), the rust.cargo task preset for a folder with a Cargo.toml - Build, Run, Test and Clean
 // with a Debug / Release profile, a rustc problem matcher over cargo's short messages - and a Launch configuration that
 // debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25). In a Nuke workspace a
 // project with language = "rust" builds through the cargo driver in nuke/ (docs/26 section 6) and the rust.nuke preset,
@@ -83,6 +84,7 @@
 				"label": "rust-analyzer",
 				"command": "${tool:rust-analyzer}",
 				"selector": { "languages": ["rust"] },
+				"initializationOptionsFile": "${workspaceDir}/build/develop/rust-analyzer.json",
 				"when": "config.rust.languageServer && workspaceTrusted"
 			}
 		],

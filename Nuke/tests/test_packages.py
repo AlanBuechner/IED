@@ -7,12 +7,14 @@ import os
 import shutil
 import stat
 import subprocess
+import threading
 import unittest
 import zipfile
 
 from support import read, write_files, WorkspaceTest
 
 from nuke import manifest
+from nuke.commands import package as package_command
 from nuke.errors import NukeError
 from nuke.packages import checkouts, semver, store
 
@@ -502,6 +504,35 @@ class DevelopTests(PackageTest):
 		lock = self.lock()
 		self.assertEqual((lock[("engine", "Windowing")]["version"], lock[("engine", "Input")]["version"]), ("0.2.0", "0.1.1"))
 
+	@unittest.skipUnless(os.name == "nt", "Windows refuses to rename a folder with a file open in it")
+	def test_lock_waits_for_a_program_holding_the_clone(self):
+		self.windowing()
+		self.workspace({"Windowing": "\"engine@^0.2\""})
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		held = os.path.join(self.path("packages", "engine"), "Windowing", "nuke.toml")
+		write_files(self.root, {"build/develop/gopls.json": "{}\n"})
+		original = package_command.HELD_WAIT_SECONDS
+		package_command.HELD_WAIT_SECONDS = 0.5
+		try:
+			with open(held, encoding="utf-8"):
+				code, out = self.nuke("package", "lock", "engine")
+		finally:
+			package_command.HELD_WAIT_SECONDS = original
+		self.assertEqual(code, 1, out)
+		self.assertIn("is in use by another program", out)
+		self.assertTrue(json.loads(read(self.path("packages", "nuke-packages.json")))["develop"], "still developed")
+		self.assertTrue(os.path.isdir(self.path("packages", "engine", ".git")))
+		self.assertFalse(os.path.exists(self.path("build", "develop")), "what points language servers at the clone went first")
+
+		release = threading.Timer(1.0, lambda: opened.close())
+		opened = open(held, encoding="utf-8")
+		release.start()
+		code, out = self.nuke("package", "lock", "engine")
+		release.join()
+		self.assertEqual(code, 0, out)
+		self.assertTrue(os.path.isdir(self.path("packages", "engine", "Windowing@0.2.0")), "it waited for the file to close")
+
 	def test_drivers_see_the_develop_checkouts(self):
 		self.windowing()
 		self.workspace({"Windowing": "\"engine@^0.2\""})
@@ -637,6 +668,11 @@ class NativeToolTests(PackageTest):
 		code, out = self.nuke("package", "develop", "engine")
 		self.assertEqual(code, 0, out)
 		checkout = self.path("packages", "engine")
+		gopls = json.loads(read(self.path("build", "develop", "gopls.json")))["build.env"]
+		self.assertIn(json.dumps(os.path.normpath(os.path.join(checkout, "Netcode"))), read(gopls["GOWORK"]),
+			"IED's gopls is pointed at the clone by develop itself, before any build")
+		analyzer = json.loads(read(self.path("build", "develop", "rust-analyzer.json")))["cargo"]
+		self.assertIn("[patch.", read(analyzer["configPath"]))
 		write_files(checkout, {"Netcode/netcode.go": go_version("edited"), "Mathx/src/lib.rs": rust_version("edited")})
 		self.assertEqual(("netcode edited", "mathx edited"), self.built())
 		self.assertEqual(before, self.own_files(), "go.mod, go.sum, Cargo.toml and Cargo.lock stay as they are")

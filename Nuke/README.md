@@ -385,8 +385,10 @@ depends = ["Engine"]               # built after Engine, whatever its language
 A driver (`nuke/nuke-language.toml` names it and the IED preset of its projects) is a module - or a Python package,
 when the module named is an `__init__.py` - with `build(ctx) -> [artifacts]`, `program(ctx) -> file name or None`,
 `test(ctx) -> exit code`, and optionally `clean(ctx)`, `has_tests(ctx)`, `implicit_depends(spec) -> [names]` (projects
-a project needs besides its `depends`, added to them: C++ reflection needs the Reflection library and its tools) and
-`variables(ctx) -> {name: value}` (what manifests and steps read as `${<language>.<name>}`: `${cpp.llvm}`); `ctx`
+a project needs besides its `depends`, added to them: C++ reflection needs the Reflection library and its tools),
+`variables(ctx) -> {name: value}` (what manifests and steps read as `${<language>.<name>}`: `${cpp.llvm}`) and
+`editor(folder, contexts) -> {file name: text or None}` (while a package source is developed, files in `build/develop/`
+for the language's server in IED, from the contexts of all the workspace's projects in the language: section 12); `ctx`
 (`nuke/languages.py`) carries the project, the configuration, the platform, the bin and int folders, the extra
 arguments and test filter, `options` (`[project.driver]`), `settings` (the workspace's `[languages.<id>]` table),
 `depends` (the contexts of the projects in `depends`), `expand(text)` (the project's variables), `jobs` (`-j`),
@@ -636,5 +638,13 @@ their own tools, so an edit there reaches the Go and Rust programs without a rel
   `resolver.lockfile-path` keeps the resolution in a `Cargo.lock` beside it, copied from the project's (cargo 1.98 has
   that setting; an older cargo leaves the patched resolution in the project's `Cargo.lock` while developing).
 
-`nuke package lock` removes `build/develop/`, and the tools go back to the releases. The files are what Nuke hands the
-tools: `go` or `cargo` run by hand, gopls and rust-analyzer still see the releases.
+- **IED's language servers**: on every build, test or package command while a source is developed, the drivers'
+  `editor()` write workspace-wide files into `build/develop/` (`nuke/develop_files.py`): `go.work` (every Go project
+  and the clone modules they require) with `gopls.json` naming it, and `cargo.toml` (the `[patch]` tables of every Rust
+  project) with `rust-analyzer.json` naming it and giving each Cargo workspace a lockfile of its own in
+  `target/nuke-develop/`. The go and rust plugins' gopls and rust-analyzer read them, and IED starts them again when
+  the files change, so go-to-definition lands in `packages/<source>/` rather than in the release.
+
+`nuke package lock` removes `build/develop/` first (IED's servers then let go of the clone), waits a while for any
+program still holding a file of the clone, and the tools go back to the releases. `go` or `cargo` run by hand in a
+terminal still see the releases: the files are handed to them by Nuke and IED only.

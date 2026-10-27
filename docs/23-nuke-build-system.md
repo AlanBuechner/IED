@@ -60,8 +60,4 @@ Why Nuke is built the way it is, what it guarantees, and what is left to do. The
   already one whole-program compile).
 - Downloading published toolchains (for machines that do not build the compiler) - a GitHub release per
   numbered version is the planned source; the store layout already matches.
-- Packages (`docs/31`): IED's Go and Rust plugins handing gopls and rust-analyzer the develop files Nuke hands
-  go and cargo (`build/develop/<project>/`, `docs/31` section 7), so the editor follows a module or crate into the
-  clone rather than the release. (IED's `nuke` plugin now runs `nuke package status --fetch` on a timer, so a clone
-  behind its remote turns read-only without a Nuke command: `docs/31` section 6.)
 - Other systems and architectures: the configuration model has the slots (`-a`, `-s`), only x64 Windows exists.

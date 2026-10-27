@@ -271,16 +271,65 @@ class DevelopCheckoutTests(LanguageTest):
 		tables = cargo.patch_tables(ctx.checkouts, crates)
 		self.assertEqual({"https://github.com/alan/engine": {name: os.path.normpath(os.path.join(self.clone, name)) for name in ("geom", "mathx")}},
 			tables, "the source spelled another way is the same repository; crates of other repositories stay theirs")
-		config = tomllib.loads(cargo.render_config(tables, cargo.develop_lock(ctx, own_lock)))
+		lock = os.path.join(ctx.develop_dir, "Cargo.lock")
+		config = tomllib.loads(cargo.render_config(tables, lock))
 		self.assertEqual(os.path.normpath(os.path.join(self.clone, "mathx")), config["patch"]["https://github.com/alan/engine"]["mathx"]["path"])
-		lock = config["resolver"]["lockfile-path"]
+		self.assertEqual(lock, config["resolver"]["lockfile-path"])
+		cargo.copy_newer(own_lock, lock)
 		self.assertEqual(read(own_lock), read(lock), "builds start from the project's own lock")
 		write_files(os.path.dirname(lock), {"Cargo.lock": "# cargo's resolution with the patch\n"})
-		cargo.develop_lock(ctx, own_lock)
+		cargo.copy_newer(own_lock, lock)
 		self.assertEqual("# cargo's resolution with the patch\n", read(lock))
 		os.utime(own_lock, (time.time() + 10, time.time() + 10))
-		cargo.develop_lock(ctx, own_lock)
+		cargo.copy_newer(own_lock, lock)
 		self.assertEqual(read(own_lock), read(lock), "a newer lock of the project's (cargo update) is taken again")
+
+	def test_gopls_gets_one_go_work_of_every_go_project(self):
+		self.files({
+			"Server/go.mod": "module example.com/server\n\ngo 1.21\n\nrequire example.com/engine/net v0.1.0\n",
+			"Tool/go.mod": "module example.com/tool\n\ngo 1.22\n",
+			"packages/engine/net/go.mod": "module example.com/engine/net\n\ngo 1.21\n",
+			"packages/engine/tools/go.mod": "module example.com/engine/tools\n\ngo 1.25\n",
+		})
+		go = self.driver("go")
+		folder = self.path("build", "develop")
+		files = go.editor(folder, [self.context("Server"), self.context("Tool")])
+		uses = [json.loads(line.strip()) for line in files["go.work"].splitlines() if line.startswith("\t")]
+		self.assertEqual([os.path.normpath(self.path(*p.split("/"))) for p in ("Server", "Tool", "packages/engine/net")], uses,
+			"every Go project - gopls serves them all with it - and what they require of the clone")
+		env = json.loads(files["gopls.json"])["build.env"]
+		self.assertEqual(os.path.normpath(os.path.join(folder, "go.work")), env["GOWORK"])
+		self.files({"Tool/go.mod": "module example.com/tool\n\ngo 1.22\n\nrequire example.com/engine/tools v0.1.0\n"})
+		again = go.editor(folder, [self.context("Server"), self.context("Tool")])
+		self.assertNotEqual(env["NUKE_DEVELOP"], json.loads(again["gopls.json"])["build.env"]["NUKE_DEVELOP"],
+			"another go.work changes gopls's options, so IED starts gopls again")
+		self.files({"Server/go.mod": "module example.com/server\n", "Tool/go.mod": "module example.com/tool\n"})
+		self.assertEqual({"go.work": None, "gopls.json": None}, go.editor(folder, [self.context("Server"), self.context("Tool")]))
+
+	@unittest.skipUnless(real("cargo"), "needs cargo")
+	def test_rust_analyzer_gets_the_patches_of_every_rust_project(self):
+		self.files({
+			"packages/engine/mathx/Cargo.toml": "[package]\nname = \"mathx\"\nversion = \"0.1.0\"\n",
+			"Game/Cargo.toml": "[package]\nname = \"game\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+				"mathx = { git = \"https://github.com/Alan/Engine\", tag = \"mathx/v0.1.0\" }\n",
+			"Game/src/main.rs": "fn main() {}\n", "Game/Cargo.lock": "version = 4\n",
+			"Tool/Cargo.toml": "[package]\nname = \"tool\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+			"Tool/src/main.rs": "fn main() {}\n", "Tool/Cargo.lock": "version = 4\n# tool\n",
+		})
+		os.environ.pop("NUKE_TOOL_CARGO")
+		folder = self.path("build", "develop")
+		files = self.driver("rust").editor(folder, [self.context("Game"), self.context("Tool")])
+		self.assertEqual({"mathx": {"path": os.path.normpath(os.path.join(self.clone, "mathx"))}},
+			tomllib.loads(files["cargo.toml"])["patch"]["https://github.com/alan/engine"])
+		self.assertNotIn("resolver", tomllib.loads(files["cargo.toml"]), "each Cargo workspace resolves in a lockfile of its own")
+		cargo = json.loads(files["rust-analyzer.json"])["cargo"]
+		self.assertEqual(os.path.normpath(os.path.join(folder, "cargo.toml")), cargo["configPath"])
+		self.assertEqual("target/nuke-develop/Cargo.lock", cargo["extraEnv"]["CARGO_RESOLVER_LOCKFILE_PATH"])
+		for project in ("Game", "Tool"):
+			self.assertEqual(read(self.path(project, "Cargo.lock")), read(self.path(project, "target", "nuke-develop", "Cargo.lock")),
+				"rust-analyzer resolves every Rust project from its own lock, which stays as it is")
+		self.files({"Game/Cargo.toml": "[package]\nname = \"game\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"})
+		self.assertEqual({"cargo.toml": None, "rust-analyzer.json": None}, self.driver("rust").editor(folder, [self.context("Game"), self.context("Tool")]))
 
 
 class RealToolTests(unittest.TestCase):

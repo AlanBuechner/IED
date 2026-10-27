@@ -6,13 +6,16 @@ platform is GOARCH and GOOS for the run. go.mod, go.sum and Go's build and modul
 While the workspace develops a package source (`nuke package develop`), the modules of its clone that the project
 requires build from the clone: GOWORK names a go.work in build/develop/<project>/ that uses the project and those
 module folders (and whatever the project's own go.work uses), so an edit in the clone needs no release (IED docs/31
-section 7). Nothing of the project changes, and `nuke package lock` removes the go.work.
+section 7). Nothing of the project changes, and `nuke package lock` removes the go.work. For IED's gopls, editor()
+writes one go.work of every Go project of the workspace in build/develop/, and gopls.json, the gopls profile's options,
+naming it.
 
 [project.driver]:
 package = "./cmd/game"  the main package an executable builds (default: the project's folder, ".")
 name = "game"           the program's name (default: the project's)
 """
 
+import hashlib
 import json
 import os
 import re
@@ -65,14 +68,37 @@ def develop_work(ctx):
 	project = read_module(os.path.join(ctx.root, "go.mod"))
 	if project is None:
 		return None
+	used = required(project, clone_modules(ctx.checkouts))
+	return render_work([project] + used, own_works(ctx, [ctx.root])) if used else None
+
+
+def editor(folder, contexts):
+	"""gopls's view of the develop checkouts (IED docs/31 section 7): go.work using every Go project of the workspace -
+	gopls serves them all with it - and the clones' modules they require, and gopls.json, the options of the go plugin's
+	gopls profile, giving gopls that go.work (build.env) with its digest, so a changed go.work starts gopls again. Both
+	go when no project requires a module of a clone."""
+	projects = [m for m in (read_module(os.path.join(ctx.root, "go.mod")) for ctx in contexts) if m is not None]
+	available = clone_modules(contexts[0].checkouts) if contexts else {}
+	used = {}
+	for project in projects:
+		for module in required(project, available):
+			used.setdefault(module.path, module)
+	if not used:
+		return {"go.work": None, "gopls.json": None}
+	text = render_work(projects + [used[path] for path in sorted(used)], own_works(contexts[0], [ctx.root for ctx in contexts]))
+	env = {"GOWORK": os.path.normpath(os.path.join(folder, "go.work")), "NUKE_DEVELOP": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+	return {"go.work": text, "gopls.json": json.dumps({"build.env": env}, indent=2) + "\n"}
+
+
+def clone_modules(checkouts):
+	"""module path -> Module of every Go module in the develop checkouts."""
 	available = {}
-	for checkout in ctx.checkouts:
+	for checkout in checkouts:
 		for path in checkout.files("go.mod"):
 			module = read_module(path)
 			if module is not None and module.path:
 				available.setdefault(module.path, module)
-	used = required(project, available)
-	return render_work(project, used, own_work(ctx)) if used else None
+	return available
 
 
 def read_module(path):
@@ -112,39 +138,45 @@ def required(project, available):
 	return [used[path] for path in sorted(used)]
 
 
-def own_work(ctx):
-	"""The go.work Go would use for the project without Nuke - GOWORK, else the nearest one at or above its folder - as
-	`go work edit -json` reads it, with its folder; None when there is none."""
+def own_works(ctx, folders):
+	"""The go.work files Go would use for `folders` without Nuke - GOWORK, else the nearest one at or above each - as
+	`go work edit -json` reads them, each with its folder."""
+	paths = {}
+	for folder in folders:
+		path = own_work_path(folder)
+		if path is not None:
+			paths.setdefault(os.path.normcase(path), path)
+	return [(json.loads(ctx.capture([ctx.tool("go"), "work", "edit", "-json", path])[1]), os.path.dirname(path)) for path in paths.values()]
+
+
+def own_work_path(folder):
 	path = os.environ.get("GOWORK", "")
-	if path == "off":
-		return None
-	folder = os.path.abspath(ctx.root)
-	while not path:
-		if os.path.isfile(os.path.join(folder, "go.work")):
-			path = os.path.join(folder, "go.work")
-		elif os.path.dirname(folder) == folder:
+	if path:
+		return None if path == "off" else os.path.abspath(path)
+	folder = os.path.abspath(folder)
+	while not os.path.isfile(os.path.join(folder, "go.work")):
+		if os.path.dirname(folder) == folder:
 			return None
 		folder = os.path.dirname(folder)
-	_, out = ctx.capture([ctx.tool("go"), "work", "edit", "-json", path])
-	return json.loads(out), os.path.dirname(os.path.abspath(path))
+	return os.path.join(folder, "go.work")
 
 
-def render_work(project, used, own):
-	"""A go.work of the project and the used modules, keeping what the project's own go.work has. Paths are absolute and
-	the system's own (Go matches a module's folder only in that spelling)."""
-	folders, versions, extra = [project.folder] + [m.folder for m in used], [project.go] + [m.go for m in used], []
-	if own is not None:
-		work, base = own
+def render_work(modules, owns):
+	"""A go.work of `modules`, keeping what the go.work files `owns` have. Paths are absolute and the system's own (Go
+	matches a module's folder only in that spelling)."""
+	folders, versions, toolchains, replaces = [m.folder for m in modules], [m.go for m in modules], [], []
+	for work, base in owns:
 		folders += [os.path.join(base, use["DiskPath"]) for use in work.get("Use") or []]
 		versions.append(work.get("Go") or "")
-		extra += [f"toolchain {work['Toolchain']}"] if work.get("Toolchain") else []
-		extra += [f"replace {replace_line(r, base)}" for r in work.get("Replace") or []]
+		toolchains += [f"toolchain {work['Toolchain']}"] if work.get("Toolchain") else []
+		replaces += [f"replace {replace_line(r, base)}" for r in work.get("Replace") or []]
 	unique = {}
 	for folder in folders:
 		folder = os.path.normpath(os.path.abspath(folder))
 		unique.setdefault(os.path.normcase(folder), folder)
 	lines = ["// Nuke's while a package source is developed: the clone's modules build in place of their releases",
-		"// (IED docs/31 section 7). `nuke package lock` removes this file.", f"go {newest(versions)}"] + extra
+		"// (IED docs/31 section 7). `nuke package lock` removes this file.", f"go {newest(versions)}"]
+	lines += toolchains[:1] + list(dict.fromkeys(replaces))
 	lines += ["", "use ("] + [f"\t{json.dumps(folder)}" for folder in unique.values()] + [")"]
 	return "\n".join(lines) + "\n"
 

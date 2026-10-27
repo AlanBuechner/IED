@@ -56,9 +56,7 @@ class Workspace:
 		return fsutil.join(self.dir, "build")
 
 	def develop_root(self):
-		"""build/develop/: a folder per project for what its driver writes to point the language's tool at the develop
-		checkouts (a go.work, Cargo's [patch]); `nuke package lock` removes it, the next build writes what is still needed."""
-		return fsutil.join(self.output_root(), "develop")
+		return develop_root(self.dir)
 
 	def checkouts(self):
 		"""The sources the workspace develops (packages/checkouts.py)."""
@@ -81,6 +79,13 @@ class Workspace:
 
 
 # ------------------------------------------------------------------------------------------------ #
+
+def develop_root(workspace_dir):
+	"""build/develop/: what the language drivers write to point their tools at the develop checkouts - a folder per
+	project for its builds (a go.work, Cargo's [patch]), and files of their own for IED's language servers
+	(develop_files.py); `nuke package lock` removes it, and the next command writes what is still needed."""
+	return fsutil.join(workspace_dir, "build", "develop")
+
 
 def find_root(start):
 	"""The nearest folder at or above `start` whose nuke.toml has a [workspace] table, else the nearest

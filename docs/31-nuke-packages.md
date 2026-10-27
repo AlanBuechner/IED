@@ -194,11 +194,27 @@ checkouts (`ctx.checkouts`), in a folder of the project's under `build/develop/`
   patched resolution in a `Cargo.lock` beside it, copied from the project's whenever the project's is newer. The
   project's `Cargo.lock` stays as it is (a cargo without that setting writes the patched resolution into it while the
   source is developed; cargo 1.98 has it).
-- **Back to locked.** `nuke package lock` removes `build/develop/`; the next build points the tools again at whatever
-  is still developed.
+- **The editor.** IED's language servers follow the clone too, so go-to-definition, hover and diagnostics in a Go or
+  Rust project land in `packages/<source>/` (editable) rather than in the module cache or Cargo's git checkouts. While
+  a source is developed, every build, test or package command - `nuke package develop` itself, IED's periodic `nuke
+  package status --fetch` - has each driver's `editor(folder, contexts)` write files of the whole workspace into
+  `build/develop/` (`Nuke/nuke/develop_files.py`): for Go a `go.work` using every Go project of the workspace (gopls
+  serves them all with it) and the clone modules they require, and `gopls.json`, `{"build.env": {"GOWORK": ...}}`; for
+  Rust a `cargo.toml` with the `[patch]` tables of every Rust project, and `rust-analyzer.json`, `cargo.configPath`
+  naming it (rust-analyzer passes it to every cargo command, `cargo metadata` included) with
+  `cargo.extraEnv.CARGO_RESOLVER_LOCKFILE_PATH = "target/nuke-develop/Cargo.lock"` - relative, so each Cargo workspace
+  resolves in a lockfile of its own in its `target/`, copied from its `Cargo.lock`, and rust-analyzer's `cargo check`
+  never writes the project's. The go and rust plugins' profiles read them (`initializationOptionsFile`), and IED starts a
+  server again when its file appears, changes or goes (`docs/24` "One options file"); each file holds a digest of the
+  `go.work` or `cargo.toml` (`NUKE_DEVELOP`), so a changed one starts the server again too.
+- **Back to locked.** `nuke package lock` removes `build/develop/` first - IED then starts gopls and rust-analyzer
+  again without the clone, and rust-analyzer lets go of the clone's files - and waits a while for any program still
+  holding a file of the clone before it moves it aside; when one does not let go, it changes nothing and says what to
+  close. The next command points the tools again at whatever is still developed.
 
-The files are what Nuke hands the tools, so `go` or `cargo` run by hand, gopls and rust-analyzer still see the
-releases; IED's Go and Rust plugins giving their language servers the same files is a follow-up (`docs/23`).
+`go` or `cargo` run by hand in a terminal still see the releases: the files are handed to the tools by Nuke and IED,
+never put where the tools look by themselves (a `go.work` or `.cargo/config.toml` in the project would be the
+project's own, and committed).
 
 ## 8. Decisions
 
@@ -213,4 +229,4 @@ releases; IED's Go and Rust plugins giving their language servers the same files
 | P-7 | Develop is per source and per workspace: the whole repository becomes a clone in the workspace | A repository's packages are developed and tested together (its own workspace builds them all); one checkout per source keeps them on one commit |
 | P-8 | Files of a package are writable only in a develop checkout that is not behind its remote | The owner's lock-out, sharpened: there is exactly one writable copy of a package line, and it is the newest |
 | P-9 | Nuke resolves only Nuke packages; language package managers keep their own dependencies | Native first (N-15); Nuke adds the cross-language graph, not a second resolver for crates and modules |
-| P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles | Developing a package must not change what the program commits, and one codebase must hold for every language: the tools build the clone the way their own users would, and removing one folder brings back the releases |
+| P-10 | A develop checkout reaches Go and Rust through the tools' own overrides - `GOWORK`, and cargo's `--config` with `[patch]` and `resolver.lockfile-path` - written per project in `build/develop/`, never through `go.mod`, `Cargo.toml` or their lockfiles; IED's gopls and rust-analyzer get workspace-wide ones through their profiles' `initializationOptionsFile` | Developing a package must not change what the program commits, and one codebase must hold for every language and in the editor: the tools build the clone the way their own users would, one language server serves the workspace as before, and removing one folder brings back the releases |

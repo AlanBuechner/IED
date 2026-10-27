@@ -456,3 +456,71 @@ class OptionsFilesTests(ServerTestCase):
 		write(os.path.join(self.opts, "Game.json"), {"projects": "game2.toml"})
 		await asyncio.sleep(1.5)
 		self.assertEqual(3, len(received(self.log, "workspace/didChangeConfiguration")), "nothing the pattern names changed")
+
+
+class OptionsFileTests(ServerTestCase):
+	"""initializationOptionsFile: the server starts with the file's options merged over the profile's, and starts again
+	when the file appears, changes or goes - the options of initialize reach a server only when it starts - as gopls and
+	rust-analyzer get what Nuke writes while a package source is developed (docs/31 section 7)."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-lsp-file-")
+		self.home = os.path.join(self.root, "home")
+		self.workspace = os.path.join(self.root, "work")
+		self.log = os.path.join(self.root, "fake-lsp.jsonl")
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		shutil.copy(os.path.join(HERE, "fake_lsp.py"), plugin)
+		write(os.path.join(plugin, "ied-plugin.json"), {
+			"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {
+				"languages": [{"id": "fake", "extensions": [".fk"]}],
+				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]},
+					"initializationOptions": {"mine": 1}, "initializationOptionsFile": "${workspaceDir}/build/develop/fake.json"}]}})
+		self.options = os.path.join(self.workspace, "build", "develop", "fake.json")
+		write(os.path.join(self.workspace, "a.fk"), "ok\n")
+		self.server = IedServer(extra=("--home", self.home, "--workspace", self.workspace))
+		self.assertTrue(self.server.started, self.server.error)
+
+	def tearDown(self):
+		self.server.stop()
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await self.client.sub(["diag:w1"])
+		await self.client.next_frame("diag:w1")
+
+	async def asyncTearDown(self):
+		self.assertEqual([], self.client.violations)
+		self.client.abort()
+
+	async def messages(self, method, count):
+		"""The first `count` `method` messages the server got, waited for (20 s at most)."""
+		got = []
+		for _ in range(200):
+			got = received(self.log, method) if os.path.exists(self.log) else []
+			if len(got) >= count:
+				return got
+			await asyncio.sleep(0.1)
+		self.fail("the server got %d %s, not %d" % (len(got), method, count))
+
+	async def starts(self, count):
+		return [m["params"]["initializationOptions"] for m in await self.messages("initialize", count)]
+
+	async def test_the_server_starts_again_when_its_options_file_changes(self):
+		await self.client.request("doc.open", {"wsId": "w1", "path": "a.fk"})
+		self.assertEqual({"mine": 1}, (await self.starts(1))[0], "no file yet: the profile's options")
+		write(self.options, {"develop": {"work": "one"}})
+		self.assertEqual({"mine": 1, "develop": {"work": "one"}}, (await self.starts(2))[1], "the file appeared: merged over them")
+		write(self.options, {"develop": {"work": "two"}})
+		self.assertEqual({"mine": 1, "develop": {"work": "two"}}, (await self.starts(3))[2])
+		write(self.options, {"develop": {"work": "two"}})
+		write(os.path.join(self.workspace, "build", "develop", "go.work"), "go 1.21\n")
+		await asyncio.sleep(1.5)
+		self.assertEqual(3, len(received(self.log, "initialize")), "the same options again, or another file: no new start")
+		os.remove(self.options)
+		self.assertEqual({"mine": 1}, (await self.starts(4))[3], "the file went")
+		await self.messages("textDocument/didOpen", 4)   # each start gets the open document again

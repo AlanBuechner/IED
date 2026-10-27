@@ -5,6 +5,7 @@ removing a package in the manifest."""
 import argparse
 import json
 import os
+import time
 
 from .. import fsutil, ied_files, tomledit
 from .. import packages
@@ -15,6 +16,8 @@ from ..packages import bridge, git, index, install, lockfile, semver
 from ..packages.repository import Repository
 from ..packages.store import Cache, repository_name, url_key
 from . import base
+
+HELD_WAIT_SECONDS = 20   # how long `lock` waits for a program to let go of the clone (IED restarts a language server in a few)
 
 USAGE = """nuke package [status] [--fetch] [--json]
   every versioned package the workspace uses: version, commit, locked or developed, the projects it brings; --fetch asks
@@ -29,8 +32,9 @@ nuke package remove PACKAGE
   stop using it
 nuke package develop SOURCE [--at FOLDER]
   build the source's packages from a git checkout: packages/<source>/, a clone at the tip of its default branch (or an
-  existing clone, --at); nuke.lock follows the checkout's commits, and the workspace's Go and Rust projects build the
-  clone's modules and crates they require (a go.work, Cargo's [patch], under build/develop/)
+  existing clone, --at); nuke.lock follows the checkout's commits, and the workspace's Go and Rust projects - and IED's
+  gopls and rust-analyzer - use the clone's modules and crates they require (a go.work, Cargo's [patch], under
+  build/develop/)
 nuke package lock SOURCE [--keep]
   stop developing: the lock's commits are installed read-only again, Go and Rust go back to their releases and the clone
   goes (refused while it has changes that are not committed and pushed; --keep moves the clone to packages/<source>.kept)
@@ -336,15 +340,18 @@ def _lock(cli, args):
 		if unpushed:
 			raise NukeError(f"{folder} has {len(unpushed)} commit(s) no remote has: push them first (the lock names "
 				f"{unpushed[0][:8]}, which other machines could not fetch)")
-	entry = context.state.develop.pop(url_key(url))
-	context.state.save()
+	# Go, Rust and IED's language servers go back to the releases first: a language server pointed at the clone holds
+	# files in it until IED starts it again without them. Loading writes again what the sources still developed need.
+	install.remove(workspaces.develop_root(context.root))
 	# The clone steps aside (its folder is where the installs go) and comes back if the lock cannot be installed.
 	aside = fsutil.join(context.state.root, f".{name}.develop") if inside else None
 	if aside:
 		install.remove(aside)
-		os.replace(folder, aside)
+		_move_aside(folder, aside, name)
+	entry = context.state.develop.pop(url_key(url))
+	context.state.save()
 	try:
-		workspace = context.load(resolve=True)
+		context.load(resolve=True)
 	except (NukeError, OSError):
 		if aside:
 			install.remove(folder)
@@ -353,14 +360,27 @@ def _lock(cli, args):
 		context.state.develop[url_key(url)] = entry
 		context.state.save()
 		raise
-	# Go and Rust projects go back to the releases; their next build points them again at what is still developed.
-	install.remove(workspace.develop_root())
 	context.cache.record_checkout(url, folder, present=False)
 	if aside and not options.keep:
 		install.remove(aside)
 	elif aside:
 		os.replace(aside, fsutil.join(context.state.root, f"{name}.kept"))
 	context.log.note(f"{name} is locked again: its packages are installed read-only at the lock's commits")
+
+
+def _move_aside(folder, aside, name):
+	"""Renames the clone; while another program holds a file in it (a language server IED is starting again without it)
+	Nuke waits for it a while, then says what to close. Nothing has changed then but what the next command writes again."""
+	deadline = time.monotonic() + HELD_WAIT_SECONDS
+	while True:
+		try:
+			os.replace(folder, aside)
+			return
+		except PermissionError as error:
+			if time.monotonic() >= deadline:
+				raise NukeError(f"{folder} is in use by another program ({error.strerror}): close what has a file of it open - an "
+					f"editor, a terminal in it, a language server - and run `nuke package lock {name}` again") from None
+			time.sleep(0.25)
 
 
 def _pull(cli, args):

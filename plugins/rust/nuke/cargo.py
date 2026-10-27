@@ -8,13 +8,16 @@ While the workspace develops a package source (`nuke package develop`), the crat
 repository's git URL build from its clone: cargo runs with `--config build/develop/<project>/cargo.toml`, whose
 [patch."<url>"] points them at the clone's crate folders, and whose resolver.lockfile-path keeps the resolution in a
 Cargo.lock beside it (copied from the project's), so an edit in the clone needs no release and nothing of the project
-changes (IED docs/31 section 7). `nuke package lock` removes both.
+changes (IED docs/31 section 7). `nuke package lock` removes both. For IED's rust-analyzer, editor() writes one
+cargo.toml for every Rust project of the workspace in build/develop/, and rust-analyzer.json, the rust-analyzer
+profile's options, naming it.
 
 [project.driver]:
 package = "name"  a member of a Cargo workspace (default: the crate in the project's folder)
 bin = "name"      the program `nuke run` starts (default: the package's name)
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -23,6 +26,7 @@ import tomllib
 STAGED_KINDS = {"bin", "cdylib", "dylib", "staticlib"}
 NOT_STAGED = (".rlib", ".rmeta", ".d")
 DEVELOP_CONFIG = "cargo.toml"
+EDITOR_LOCK = "target/nuke-develop/Cargo.lock"   # relative to the Cargo workspace rust-analyzer runs cargo in
 
 
 def profile_args(configuration):
@@ -59,17 +63,50 @@ def develop_args(ctx):
 	clone; [] when it gets none."""
 	if not ctx.checkouts:
 		return []
-	code, out = ctx.capture([ctx.tool("cargo"), "metadata", "--no-deps", "--format-version", "1", "--manifest-path",
-		os.path.join(ctx.root, "Cargo.toml")], check=False)
-	if code != 0:
+	metadata = cargo_metadata(ctx)
+	if metadata is None:
 		return []                      # the build says what is wrong with the manifest
-	metadata = json.loads(out)
 	lock = os.path.join(metadata["workspace_root"], "Cargo.lock")
 	patches = patch_tables(ctx.checkouts, git_crates(metadata, lock))
 	if not patches:
 		ctx.develop_file(DEVELOP_CONFIG, None)
 		return []
-	return ["--config", ctx.develop_file(DEVELOP_CONFIG, render_config(patches, develop_lock(ctx, lock)))]
+	own_lock = os.path.normpath(os.path.join(ctx.develop_dir, "Cargo.lock"))
+	copy_newer(lock, own_lock)
+	return ["--config", ctx.develop_file(DEVELOP_CONFIG, render_config(patches, own_lock))]
+
+
+def editor(folder, contexts):
+	"""rust-analyzer's view of the develop checkouts (IED docs/31 section 7): cargo.toml with the [patch] tables of every
+	Rust project of the workspace, and rust-analyzer.json, the options of the rust plugin's profile - cargo.configPath
+	naming cargo.toml (rust-analyzer passes it to every cargo command, metadata included) and, in cargo.extraEnv, a
+	lockfile of each Cargo workspace's own in its target/ folder (CARGO_RESOLVER_LOCKFILE_PATH, relative: rust-analyzer
+	runs cargo in the Cargo workspace's folder), copied from its Cargo.lock, so the project's lock is never written; with
+	the digest of cargo.toml, so a changed one starts rust-analyzer again. Both go when no project gets a crate of a
+	clone."""
+	patches, roots = {}, []
+	for ctx in contexts:
+		metadata = cargo_metadata(ctx)
+		if metadata is None:
+			continue
+		roots.append(metadata["workspace_root"])
+		for url, crates in patch_tables(ctx.checkouts, git_crates(metadata, os.path.join(metadata["workspace_root"], "Cargo.lock"))).items():
+			patches.setdefault(url, {}).update(crates)
+	if not patches:
+		return {"cargo.toml": None, "rust-analyzer.json": None}
+	for root in roots:
+		copy_newer(os.path.join(root, "Cargo.lock"), os.path.normpath(os.path.join(root, EDITOR_LOCK)))
+	text = render_config(patches, None)
+	env = {"CARGO_RESOLVER_LOCKFILE_PATH": EDITOR_LOCK, "NUKE_DEVELOP": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+	options = {"cargo": {"configPath": os.path.normpath(os.path.join(folder, "cargo.toml")), "extraEnv": env}}
+	return {"cargo.toml": text, "rust-analyzer.json": json.dumps(options, indent=2) + "\n"}
+
+
+def cargo_metadata(ctx):
+	"""`cargo metadata --no-deps` of the project (its manifests, without resolving); None when cargo fails on them."""
+	code, out = ctx.capture([ctx.tool("cargo"), "metadata", "--no-deps", "--format-version", "1", "--manifest-path",
+		os.path.join(ctx.root, "Cargo.toml")], check=False)
+	return json.loads(out) if code == 0 else None
 
 
 def git_crates(metadata, lock):
@@ -119,21 +156,22 @@ def crate_folders(checkout):
 	return found
 
 
-def develop_lock(ctx, lock):
-	"""The Cargo.lock of builds that patch crates: the project's own, copied again whenever it is the newer one."""
-	path = os.path.normpath(os.path.join(ctx.develop_dir, "Cargo.lock"))
-	if os.path.isfile(lock) and (not os.path.isfile(path) or os.path.getmtime(lock) > os.path.getmtime(path)):
-		os.makedirs(os.path.dirname(path), exist_ok=True)
-		shutil.copyfile(lock, path)
-	return path
+def copy_newer(lock, copy):
+	"""A Cargo.lock that patched builds resolve in, so the project's own stays as it is: the project's, copied again
+	whenever it is the newer one."""
+	if os.path.isfile(lock) and (not os.path.isfile(copy) or os.path.getmtime(lock) > os.path.getmtime(copy)):
+		os.makedirs(os.path.dirname(copy), exist_ok=True)
+		shutil.copyfile(lock, copy)
 
 
 def render_config(patches, lock):
-	lines = ["# Nuke's while a package source is developed: these crates build from the clone in place of their releases,",
-		"# and the project's Cargo.lock stays as it is (IED docs/31 section 7). `nuke package lock` removes this file."]
+	"""Cargo's [patch] tables, and with `lock` the lockfile cargo resolves them in."""
+	lines = ["# Nuke's while a package source is developed: these crates build from the clone in place of their releases",
+		"# (IED docs/31 section 7). `nuke package lock` removes this file."]
 	for url, crates in sorted(patches.items()):
 		lines += ["", f"[patch.{json.dumps(url)}]"] + [f"{name} = {{ path = {json.dumps(folder)} }}" for name, folder in sorted(crates.items())]
-	lines += ["", "[resolver]", f"lockfile-path = {json.dumps(lock)}"]
+	if lock is not None:
+		lines += ["", "[resolver]", f"lockfile-path = {json.dumps(lock)}"]
 	return "\n".join(lines) + "\n"
 
 

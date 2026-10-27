@@ -43,7 +43,8 @@ namespace Ied
 		// `doc` was at `oldPath`: closed there on the servers that had it, opened where it is now.
 		public void DocumentRenamed(Document* doc, Core::StringView oldPath);
 		// Files of the workspace changed on disk (the watcher's batch): a running server whose initializationOptionsFiles
-		// name one of them gets those files again (workspace/didChangeConfiguration).
+		// name one of them gets those files again (workspace/didChangeConfiguration); a starting or running server whose
+		// initializationOptionsFile appeared, changed or went starts again when its options now read otherwise.
 		public void FilesChanged(Workspace* ws, const ChangeBatch& batch);
 		// IED stops: shutdown and exit to every server.
 		public void StopAll();
@@ -104,6 +105,9 @@ namespace Ied
 		private Core::String OptionsFilesJson(LanguageServer* language);
 		// workspace/didChangeConfiguration with the files when they read otherwise than last sent.
 		private void SendOptionsFilesIfChanged(LanguageServer* language);
+		// The server started again when its options with its initializationOptionsFile read otherwise than it started with
+		// (initialization options reach a server only when it starts).
+		private void RestartIfOptionsChanged(LanguageServer* language);
 		// Every second, on a thread of its own: a server none of whose documents a window shows, and that nothing asked or
 		// told anything for lsp.idleStopMinutes, stops and leaves the pool; it starts again when it is needed.
 		private void SweepLoop();
