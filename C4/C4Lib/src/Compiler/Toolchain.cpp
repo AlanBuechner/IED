@@ -109,9 +109,11 @@ namespace Scripting::Toolchain
 
 	fs::path Bedrock()
 	{
+		// The library is the folder holding bedrock.ch, not any folder of that name: a build's output folder of the
+		// workspace's Bedrock project (build/bin/<config>/Bedrock, beside a development build's programs) is none.
 		const fs::path installed = Home() / "Bedrock";
-		if (IsFolder(installed)) return installed;
-		const fs::path repository = InRepository("Bedrock");
-		return repository.empty() ? installed : repository;
+		if (IsFile(installed / "bedrock.ch")) return installed;
+		const fs::path repository = InRepository(fs::path("Bedrock") / "bedrock.ch");
+		return repository.empty() ? installed : repository.parent_path();
 	}
 }
