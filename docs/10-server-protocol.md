@@ -16,8 +16,12 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
 | `GET /w/<wsId>/files/<path>` | a workspace's image (PNG, JPEG, GIF, WebP, BMP, ICO) for previews (a Markdown document's pictures): never another type, so a repository's HTML or SVG cannot run script on IED's origin; sent with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy` |
 | `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id; at most 64 MiB each, kept in memory, 256 MiB in all: past that the oldest are dropped and their ids answer 404) |
-| `GET /ws` | **one WebSocket per browser tab**, all real-time traffic |
+| `PUT /w/<wsId>/api/upload`, `GET /w/<wsId>/api/blob/<id>` | the same, kept by the workspace's server: what a chat attaches, what a workspace's plugin hands its UI |
+| `GET /ws` | the master's WebSocket: one per browser tab ("Routing" below) |
+| `GET /w/<wsId>/ws` | the shown workspace's WebSocket: one per tab and workspace server it talks to, passed by the master to that server ("Routing") |
 | `/w/<ws>/port/<n>/...` | port-forward proxy (F-SRV-50) |
+
+Every path above is the master's: it is the only process a browser reaches (`docs/01` "Processes"). It answers `/`, the web client's files, `/plugins/...`, `/ui-kit/`, `/codicons/`, `/vendor/`, `/api/auth/*`, `/healthz` and `/ws` itself, and passes every `/w/<wsId>/...` request - HTTP and the WebSocket - to the server of workspace `wsId` (`/w/<wsId>/ws` reaches it as `/ws`, `/w/<wsId>/api/...` as `/api/...`, the rest as it is), after its own Host, Origin and session checks; the answer comes back as the workspace server gave it. A workspace that is not open answers 404; one whose server is starting or restarting is waited for (15 s at most, then 503 `{"error": "unavailable"}`), so a client that reconnects at once gets the new server.
 
 Every HTTP response with a text body (HTML, scripts, CSS, JSON, SVG, WebAssembly) of 1 KiB or more goes gzipped
 to a client whose `Accept-Encoding` takes gzip, with `Vary: Accept-Encoding` (Bedrock's `Http::CompressResponse` at
@@ -25,7 +29,17 @@ the fastest level, in `Front::Handle`). It is for the phone over a network: Mona
 of 2.5 MB. On loopback it costs about nothing - that script answers in 15 ms either way, the 7 MB TypeScript worker in
 57 ms instead of 25. Images and blobs of other types go as they are.
 
-Rationale for one socket per tab (not per device): tabs can view different workspaces, and a tab is the unit that resumes. The server tracks a **client** = one socket identity (persisted id in `sessionStorage`) belonging to a **device** (persisted id in `localStorage` + auth session).
+Rationale for sockets per tab (not per device): tabs can view different workspaces, and a tab is the unit that resumes. A server tracks a **client** = one socket identity (persisted id in `sessionStorage`, the same on every socket of the tab) belonging to a **device** (persisted id in `localStorage` + auth session).
+
+### Routing: which server a frame goes to
+
+A tab keeps two sockets: the master's (`/ws`) and the shown workspace's (`/w/<wsId>/ws`). Each is a whole protocol v1 session with its own `sessionEpoch`, cursors and resume - the master and a workspace server restart apart from each other, and each socket resumes from its own server's rings and disk as below. The client sends each request and subscription on one of them (`frontend/src/ws/router.js`):
+
+1. A method or topic the master's `routes` name goes to the master. `routes` is in the `server` topic's snapshot, `{methods: [...], topics: [...]}`, and `routes.changed {routes}` follows it: the master's own methods (`server.*`, `ws.list`, `ws.openRecent`, `ws.setFavorite`, `ws.forgetRecent`, `ws.close`, `ws.restart`, `auth.*`, `plugins.setEnabled`, `plugins.approve`, `testhooks.mintToken`, `testhooks.relaunch`), its topic `server`, and the methods and topics the plugins' code in the master registers (`ai.usage`, `ai.claude.*`, `aiusage`; `websearch.*`; `ied.developer/*` - `docs/26` "Servers").
+2. Else, a request whose params name a `wsId`, or a topic whose key holds one as a part (`settings:w2`, `layout:w2:phone`), goes to that workspace's server. A workspace a plugin opened inside a workspace server (`IED::OpenFolder`, developer mode's source) has the id `<wsId>.<n>` and is that server's.
+3. Else it goes to the shown workspace's server (`chat:<chatId>`, `doc:<docId>`, `chat.send {chatId}`), and with no workspace shown, to the master.
+
+The master's socket stays up while a workspace server restarts, so the shell keeps showing the workspaces, their servers' states and the restart action; requests for the workspace wait for its socket (and are sent again with their `opId`, as after any reconnect). A workspace server never sees a cookie: the master's proxy says which device the socket is ("Workspace servers" in `docs/11`).
 
 Frames are JSON text messages, UTF-8. Binary WebSocket messages are reserved for v1.1 (terminal and trace bulk data) - v1 keeps everything JSON to simplify debugging; terminal output is base64 only when it contains invalid UTF-8.
 
@@ -66,7 +80,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 
 | Topic kind | Examples of event kinds | Snapshot contains |
 |---|---|---|
-| `server` | `workspace.opened`, `workspace.changed` (an open workspace's summary changed: a folder became a solution, `docs/03` "Managing projects"), `recent.changed {recent}`, `notification`, `device.connected` | open workspaces, the recent projects ("Workspaces" below), notifications (unread), devices |
+| `server` (the master's) | `workspace.opened`, `workspace.changed` (an open workspace's summary changed: a folder became a solution, `docs/03` "Managing projects"; its server's state changed), `workspace.closed {wsId}`, `recent.changed {recent}`, `routes.changed {routes}`, `notification`, `device.connected` | open workspaces with their servers, the recent projects ("Workspaces" below), the master's `routes` ("Routing" above), notifications (unread), devices, `master: {pid, startedMs}` |
 | `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed {solution, kind, name}` (the workspace's kind and name with it: a folder made a solution changes both), `plugins.changed` (its `.ied/plugins/` changed, a project plugin's code changed state, or code computed new contributions for it: read the contributions again, `docs/26`) | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
 | `plugins` | `plugins.changed` (also when a built-in or app plugin's code changes state) | every plugin's summary and state, with its code's (`docs/02`) |
@@ -93,6 +107,8 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 
 ## Resume
 
+Each socket resumes on its own ("Routing" above): the master's after the master restarts, a workspace's after its server restarts.
+
 1. On connect the client sends `hello` with the `sessionEpoch` it last saw and its per-topic cursors.
 2. If the server's `sessionEpoch` differs (server restarted), every topic resumes by **snapshot**: in-memory ring buffers are gone, but all durable state (chats, docs, layouts, run results) is reloaded from disk.
 3. Otherwise, for each topic: if the ring buffer still holds `cursor+1`, the server replays events from there (`"ok"`); if not, it sends a `snap` (`"snapshot"`).
@@ -117,12 +133,14 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 
 ## Workspaces
 
-A workspace is a folder, a solution (its `.iedsln`'s folder) or the folder of a file opened alone, open on the server until it stops; its `wsId` (`w1`, `w2`, ...) lives for one server run. A summary is `{wsId, name, kind ("folder" | "solution" | "file"), root, trusted}`.
+A workspace is a folder, a solution (its `.iedsln`'s folder) or the folder of a file opened alone, open until it is closed or the master stops; its `wsId` (`w1`, `w2`, ...) is the master's and lives for the master's run - a workspace server that restarts keeps it. A summary is `{wsId, name, kind ("folder" | "solution" | "file"), root, trusted, server}`, `server` its workspace server: `{state, pid, startedMs, restarts, exitCode?, problem?, log}` - `state` `starting`, `ready`, `restarting` (asked, or after an exit nobody asked for), `stopping` or `failed` (it exited three times within a minute: `problem` says how it ended last, `log` is its log file), `restarts` how many times the master started it again, `exitCode` how its last run ended.
 
 | Method | Result |
 |---|---|
 | `ws.list` | `{workspaces: [summary]}` |
-| `ws.setTrust {wsId, trusted}` | `{trusted}`; `trust.changed` on `ws:<wsId>` (`docs/11` "Trust layers") |
+| `ws.close {wsId}` | `{}`: the workspace closes - its server is told to stop (chats, terminals and documents end as at `ied stop`: what is durable stays on disk), ended after 10 s if it has not; `workspace.closed {wsId}` on `server`. The recent projects keep it |
+| `ws.restart {wsId}` | the summary: its server stopped as for `ws.close` and started again with the same `wsId`; its tabs reconnect and resume by snapshot, its chats go on as after any restart (`docs/12` "Restart behavior"). Also what a `failed` server's Restart does |
+| `ws.setTrust {wsId, trusted}` | `{trusted}`; `trust.changed` on `ws:<wsId>` (`docs/11` "Trust layers"); the workspace's server answers it and the master records it |
 | `ws.openRecent {path}` | `{workspace: summary}`: a project of the recent list opened again (or the workspace that holds it); `not_found` for a path that is not listed, or not there any more |
 | `ws.setFavorite {path, favorite}` | `{}`; a listed project made a favorite, or not |
 | `ws.forgetRecent {path}` | `{}`; a listed project taken off the list |
@@ -359,10 +377,23 @@ The pipe name is the single-instance lock: the server claims it before anything 
 |---|---|
 | `url` | `{url}`: `http://<host>:<port>/?t=<launch token>`, which signs a browser in once (`docs/11`) |
 | `open {path, line?, col?}` | `{wsId, path, url}`. `path` is absolute. A folder becomes a workspace unless one holds it already. A file opens in the workspace that holds it, else its folder becomes one; `path` in the result is workspace-relative, and the server topic gets `workspace.opened`. The URL ends in `#open=<wsId>/<path>[:<line>[:<col>]]`, which the web client reads once it has signed in: it shows that workspace and, once its layout is in place, runs the `fileOpener` command (`docs/02`), the editor's showing the file at the place and a Markdown file's preview beside it. |
-| `status` | `{serverVersion, pid, url (without a token), workspaces, clients, relaunch}`: `relaunch` true while the server asks the desktop app watching it to relaunch it (`docs/27` "Relaunch") |
+| `status` | `{serverVersion, pid, url (without a token), workspaces, clients, relaunch}`: `workspaces` the summaries with their servers (above), `relaunch` true while the server asks the desktop app watching it to relaunch it (`docs/27` "Relaunch") |
 | `relaunch.claim` | `{claimed}`: the desktop app takes the relaunch `status` shows, and the server leaves it to the app; false when none is shown |
-| `stop` | `{}`, then every socket gets `bye {reason: "shutdown"}`, the pipe closes and the process ends |
+| `stop` | `{}`, then every workspace server is stopped, every socket gets `bye {reason: "shutdown"}`, the pipe closes and the process ends |
 | (later) `open {wait: true}` | blocks until the document closes (git's editor) |
+
+The pipe is the master's. Its workspace servers use it too, with methods only they call (`params.wsId` their workspace):
+
+| Method | Does |
+|---|---|
+| `master.workspace {wsId, summary, solutionFile?}` | the workspace's name, kind or trust changed (a folder made a solution: the recent projects take the solution file); `workspace.changed` on `server` |
+| `master.settings {key, value}` | writes `key` in the app tier as `settings.set` does (`value` null removes it); the master is the one writer of `settings.json`, re-reading it first |
+| `master.trust {root, trusted}` | records a trust choice in `trust.json` and the audit log |
+| `master.open {path}` | `{workspace: summary}`: a folder or solution a workspace server's method made (`project.create`, `project.import`) opened in a server of its own |
+| `master.binding {name, args}` | `{result}`: a server binding the master's plugins answer (`docs/26` "Servers") |
+| `master.relaunch {reason}` | `IED::RelaunchServer` from a workspace server's plugin: the master's relaunch (`docs/27`) |
+
+Each workspace server has a pipe of its own, `<master's pipe>-<wsId>`, which the master's supervisor alone uses: `status` (`{wsId, pid, port, sessionEpoch, workspaces, clients}`; the server is ready once it answers) and `stop` (as the master's, for its workspace).
 
 Errors are JSON-RPC 2.0's: -32700 not JSON, -32600 not a request, -32601 no such method, -32602 bad params, and -32000 for anything a method refuses (a path that does not exist).
 

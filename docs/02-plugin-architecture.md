@@ -141,7 +141,7 @@ The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from th
 
 ### Server bindings as built
 
-A binding with `side: "server"` (the default) is answered by the providing plugin's C4 code (`PluginContext::Provide`, `docs/26` sections 2 and 4), on that plugin's thread. Another plugin's code calls it with `IED::CallBinding`, a UI module with `ied.bindings.call`, the owner through a command whose contribution names the `binding` (no UI handler needed: the command palette runs it through `plugins.call`), and the AI through a `toolCalls` entry with `binding`. Its answer is JSON; a provider that refuses, faults or takes more than 30 s answers `plugin_error`.
+A binding with `side: "server"` (the default) is answered by the providing plugin's C4 code (`PluginContext::Provide`, `docs/26` sections 2 and 4), on that plugin's thread. Another plugin's code calls it with `IED::CallBinding`, a UI module with `ied.bindings.call`, the owner through a command whose contribution names the `binding` (no UI handler needed: the command palette runs it through `plugins.call`), and the AI through a `toolCalls` entry with `binding`. Its answer is JSON; a provider that refuses, faults or takes more than 30 s answers `plugin_error`. An entry with `"master": true` is answered by the plugin's code in the master server, wherever the caller runs, and a workspace server asks the master for any binding its own plugins' code does not provide (`docs/26` "Servers", `docs/01` "Processes").
 
 ### Icons in the UI API
 

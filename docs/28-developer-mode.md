@@ -148,9 +148,17 @@ Nothing here is in the host. Developer mode is a default plugin, `ied.developer`
 plugin API like the others, and the chat plugin learns of the source through a binding, not a dependency
 (`AGENTS.md` hard rules 1 and 7):
 
+- **Which server** (2026-10-26, `docs/01` "Processes"): the plugin's code runs in the master and in each workspace
+  server (`runtime.servers`, `docs/26` "Servers"). The master's copy owns the install build (the settings page's
+  `ied.developer/*` methods and topic, the `ied.developer.install` binding, marked `master`), so there is one build at
+  a time whichever workspace asks; a workspace server's copy gives the chat its `ai.roots`, the section and the tools,
+  and its `ied_relaunch` calls the master's `ied.developer.install` and `IED::RelaunchServer`, which relaunches the
+  master and with it every workspace server.
 - **`IED::OpenFolder(path, ws, problem)`** (new in `src/api/workspace.ch`, permission `workspace.open`): a plugin opens a
   folder as a workspace, or finds the open one rooted there - the same as the owner opening it, so its watcher, document
-  store and plugins run. Generic: any plugin with the permission may use it.
+  store and plugins run. Generic: any plugin with the permission may use it. It opens the folder inside the calling
+  plugin's workspace server, with the id `<wsId>.<n>` (developer mode's source in a chat of `w2` is `w2.1`): the chat's
+  `ied:/` tools reach it in their own process, and it closes with that server.
 - **`ai.roots`** (a binding the chat plugin consumes, optional; `kind: function`): `{wsId}` -> `{roots: [{alias, wsId,
   title, folder, confirm, home}]}`, other workspaces a chat of `wsId` may reach. A path `<alias>:/<path>` in a file tool
   or a `cwd` names `<path>` in that workspace; `confirm` makes every write and command there ask until a rule naming the

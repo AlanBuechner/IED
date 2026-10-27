@@ -220,7 +220,13 @@ Steps are not capped unless the owner asks: `ai.maxSteps` is 0 (no limit) by def
 
 ## Restart behavior
 
-On server start, runs in `running` or `awaiting_user` are restored:
+Chats live in their workspace's server (`docs/01` "Processes"), so "the server restarts" means that workspace server, for any of three reasons:
+
+- **It exited without being asked** (a crash, a fault nothing caught, Task Manager): the master logs how it ended and starts it again at once with the same `wsId` and folder; its `server.state` is `restarting` meanwhile and its new log begins with what ended the last run. More than three such exits within a minute leave it `failed`, with its exit code and its log named, until the owner restarts it (`ws.restart`: the status bar's server item, the Workspace Servers view, the start page). Its tabs reconnect on their own; the other workspaces never notice.
+- **Someone asked** (`ws.restart`; a folder becoming a solution that the master opened): stopped as at `ied stop`, then started again.
+- **The master restarted** (a relaunch, `ied stop` with the desktop app's watch, a master crash): every workspace server stops with it - they run in its job - and the new master starts one again for each workspace the owner had open, in the order they opened, so they get their `wsId`s back.
+
+In each case, on its start, runs in `running` or `awaiting_user` are restored:
 
 - `awaiting_user` stays awaiting (approval cards come back).
 - A chat's files are read as UTF-8 whatever they hold: one written before C4 BUG-384 kept a console's code-page bytes
@@ -259,6 +265,7 @@ program starts (`launcher/logfile.ch`, which the server and the app share):
   nothing caught on any thread, the collector's own, a fault nothing handled - ends the run with the report: the
   message, the thread's id and name, and the stack, named from `ied-server.pdb` (the install keeps it beside the
   program, `docs/21`).
+- **`workspace-<key>.log`** (beside it; `key` as in `docs/01` "Storage"): a workspace server's own, the same lines for its run - its start names its workspace and `wsId`, and one the master started again after an exit begins with `restarted after: <how the last run ended>`; its crash report too. The master's `server.log` says each workspace server it started (`workspace server w2 started for <folder>, pid N`), how each ended (`... exited with code 1; its log: <file>`), each restart and a `failed` one.
 - **`desktop.log`**: each start of the app, each server it started (`started ied-server, pid N`), how each ended
   (`the server (pid N) stopped answering: it exited with code 1; its log says why: ...`, from the exit code of the
   process it started; a server another program started is only said to be gone), each return (`the server is back`)

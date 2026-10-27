@@ -82,6 +82,18 @@ A device object is `{"id", "name", "kind", "created", "lastSeen"}`, with times i
 
 **Audit events** (`logs/security.log`): `start` (bind address), `token-exchanged`, `login`, `login-failed`, `locked-out`, `logout`, `device-revoked`, `password-set`.
 
+### Workspace servers: only what the master authorized
+
+Everything above is the master's (`docs/01` "Processes"): it holds the port, the cookies, the devices, the password and the launch tokens, and it alone writes the audit log. A workspace server (`--role workspace`) has none of it, and refuses everything the master did not send:
+
+- It listens on `127.0.0.1` on a port of the system's choosing, never beyond loopback whatever `--host` says, and answers only requests whose `Host` is a loopback name.
+- The master makes a **secret** for each workspace server it starts - 32 random bytes as 64 hex digits, new at every start - and hands it over in the child's environment (`IED_SERVER_SECRET`), which the workspace server takes out of its environment before anything else, so no program it starts (a terminal, a build, a language server) inherits it. It is on no command line and in no file.
+- Every request must carry it: the `X-IED-Secret` header on HTTP, the `secret` query parameter on the WebSocket upgrade (Bedrock's WebSocket client sends no headers of its own), compared in constant time. Anything else - no secret, a wrong one, the login page, a launch token, a cookie - is answered 403 `{"error": "forbidden"}` before it is read further; the workspace server has no login page, no `/api/auth/*` and no static files.
+- The master proxies a request only after its own checks (Host, Origin, the session cookie: the rules above), and says which device it is (`X-IED-Device` / `device`): the workspace server's sockets carry that device, as the master's do, for leases and presence.
+- `auth.revoke` closes the device's sockets on the master and every proxied socket of the device (`bye {reason: "auth-revoked"}`, 1008).
+
+So a web page in the owner's browser that finds a workspace server's port gets 403 for everything (it cannot set the header, and cannot read the secret), and a phone or another computer reaches workspaces only through the master's port, its password and its TLS. The master's own control pipe takes the workspace servers' calls (`master.*`, `docs/10`); like every pipe here, only the owner's processes reach it.
+
 ## Trust layers
 
 Three independent switches, each with a narrow meaning:
@@ -92,7 +104,7 @@ Three independent switches, each with a narrow meaning:
 | **Plugin approval** | an installed plugin (by content hash) | whether a global plugin's code may load at all, and with which permissions | built-ins approved; others need approval |
 | **AI permission mode** | a chat (with rules at app/solution tier) | which tool calls run without asking | `auto` within the rules (owner, 2026-10-23: "premissions should default to auto"); Plan mode read-only |
 
-Which folders a client may open is the machine's to say: a new path comes only from the machine itself (`ied <path>` over the control pipe, the desktop app's folder picker), and a client - a phone included - opens again only a project of the server's recent list, which those fill (`ws.openRecent`, `docs/10` "Workspaces"). Workspace trust is recorded in app tier (never in the repo - a repo cannot trust itself). Trust is re-requested when the solution's local-plugin pins, task commands or MCP definitions change (diff shown).
+Which folders a client may open is the machine's to say: a new path comes only from the machine itself (`ied <path>` over the control pipe, the desktop app's folder picker), and a client - a phone included - opens again only a project of the server's recent list, which those fill (`ws.openRecent`, `docs/10` "Workspaces"). Workspace trust is recorded in app tier (never in the repo - a repo cannot trust itself): the workspace's server answers `ws.setTrust` and the master writes `trust.json` and the audit event; every workspace server reads the file again when it changes. Trust is re-requested when the solution's local-plugin pins, task commands or MCP definitions change (diff shown).
 
 ## AI permission model
 
