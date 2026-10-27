@@ -45,6 +45,7 @@ namespace Serialization
 		value.count = count;
 		value.size = element.size * count;
 		value.align = element.align;
+		value.holdsPointers = element.holdsPointers;
 		return value;
 	}
 
@@ -73,8 +74,9 @@ namespace Serialization
 		if (!entry.IsValid() || !key.IsValid() || !mapped.IsValid() || key.Offset() != 0 || Core::StringView(key.TypeName()) != "Core::String") return;
 		value.element = Core::String(mapped.TypeName());
 		value.valueOffset = (int64)mapped.Offset();
-		value.entrySize = (int64)entry.SizeOf();
-		value.entryAlign = (int64)entry.AlignOf();
+		value.entry.bytes = (int64)entry.SizeOf();
+		value.entry.align = (int64)entry.AlignOf();
+		value.entry.holdsPointers = entry.HoldsPointers();
 		value.entriesOffset = (int64)entries.Offset();
 		value.tableOffset = (int64)table.Offset();
 		value.kind = ValueKind::StringMap;
@@ -88,6 +90,7 @@ namespace Serialization
 			value.kind = ValueKind::Pointer;
 			value.size = 8;
 			value.align = 8;
+			value.holdsPointers = true;
 			return value;
 		}
 		if (DescribePrimitive(value)) return value;
@@ -96,6 +99,7 @@ namespace Serialization
 		if (!value.type.IsValid()) return value;
 		value.size = (int64)value.type.SizeOf();
 		value.align = (int64)value.type.AlignOf();
+		value.holdsPointers = value.type.HoldsPointers();
 		if (value.type.Kind() == Reflection::EntityKind::Enum) value.kind = ValueKind::Enum;
 		else if (text == "Core::String") value.kind = ValueKind::String;
 		else if (text.StartsWith(Core::StringView("Core::Array<"))) DescribeArray(value);
@@ -161,7 +165,7 @@ namespace Serialization
 		const ValueType mapped = DescribeValue(type.element.CStr());
 		DomNode object = doc.NewObject();
 		for (int64 i = Core::NextLiveSlot(map, 0); i < map.capacity; i = Core::NextLiveSlot(map, i + 1)) {
-			const uint8* entry = EntryAt(entries, i, type.entrySize);
+			const uint8* entry = EntryAt(entries, i, type.entry.bytes);
 			doc.AddMember(object, ((const Core::String*)entry)->View(), WriteValue(doc, mapped, (const void*)(entry + type.valueOffset)));
 		}
 		return object;
@@ -237,7 +241,11 @@ namespace Serialization
 		const ValueType element = DescribeValue(type.element.CStr());
 		if (node.Kind() != DomKind::Array || element.kind == ValueKind::Unsupported) return false;
 		if (element.kind == ValueKind::Object && !element.type.IsDefaultConstructible()) return false;
-		if (!Core::ResizeEmptyArray(at, node.Count(), element.size, element.align)) return false;
+		Core::ElementStorage storage;
+		storage.bytes = element.size;
+		storage.align = element.align;
+		storage.holdsPointers = element.holdsPointers;
+		if (!Core::ResizeEmptyArray(at, node.Count(), storage)) return false;
 		void* first = ((Core::ArrayLayout*)at)->data;
 		return ConstructElements(element, first, node.Count()) && ReadElements(node, element, first);
 	}
@@ -249,8 +257,8 @@ namespace Serialization
 
 	// Room for `members` keys in an empty map, as HashMap::Reserve gives it.
 	static void ReserveMap(Core::HashTable& map, void** entries, int64 members, const ValueType& type) {
-		Core::FreeTable(map, *entries, type.entryAlign);
-		*entries = Core::AllocateTable(map, Core::CapacityFor(members), type.entrySize, type.entryAlign);
+		Core::FreeTable(map, *entries, type.entry);
+		*entries = Core::AllocateTable(map, Core::CapacityFor(members), type.entry);
 	}
 
 	// The live slot holding `key`, or -1; the key hashes as a Core::String does.
@@ -278,8 +286,8 @@ namespace Serialization
 		ReserveMap(map, entries, node.Count(), type);
 		for (int64 i = 0; i < node.Count(); ++i) {
 			const Core::StringView key = node.KeyAt(i);
-			if (SlotOfKey(map, *entries, key, type.entrySize) >= 0) continue;   // the first of duplicate keys stays
-			uint8* entry = AddKey(map, *entries, key, type.entrySize);
+			if (SlotOfKey(map, *entries, key, type.entry.bytes) >= 0) continue;   // the first of duplicate keys stays
+			uint8* entry = AddKey(map, *entries, key, type.entry.bytes);
 			void* value = (void*)(entry + type.valueOffset);
 			if (!Construct(mapped, value) || !ReadValue(node.ValueAt(i), mapped, value)) return false;
 		}

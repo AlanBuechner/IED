@@ -1,8 +1,9 @@
 // GC pause and throughput under game-like churn (B32). A live world of entities, each with a chain of components
 // and a parent link, stays reachable while every frame allocates short-lived garbage (events, paths, temporary
 // lists) and replaces a share of the world. With workers, the frame's churn runs as frame jobs on the job system.
-// Prints one line of results; the checksum must not depend on the timing.
-//     gc.exe [entities] [frames] [garbagePerFrame] [replacedPerFrame] [workers] [markThreads]
+// Beside the world it can keep a renderer's buffers, an array of floats the collector never reads (B70). Prints one
+// line of results, the longest single stop of any collection among them; the checksum must not depend on the timing.
+//     gc.exe [entities] [frames] [garbagePerFrame] [replacedPerFrame] [workers] [markThreads] [arrayMiB]
 include "bedrock.ch"
 
 [link("strtol")] int32 strtol(const char8* text, char8** end, int32 base);
@@ -24,6 +25,7 @@ struct Settings {
 	public int32 garbage;    // short-lived objects per frame
 	public int32 replaced;   // world entities replaced per frame
 	public int32 workers;    // 0: everything on the main thread
+	public int32 arrayMiB;   // floats kept beside the world
 }
 
 const int32 kComponents = 4;
@@ -79,6 +81,16 @@ int64 WeighWorld(const Core::Array<Entity*>& world, int64 stride) {
 	return total;
 }
 
+// The longest stop of the last collection (one for a stop-the-world collection, several for a concurrent cycle).
+int64 LongestStop() {
+	GC::Pause[16] pauses;
+	const int32 stops = GC::LastPauses(&pauses[0], 16);
+	int64 longest = 0;
+	for (int32 i = 0; i < stops && i < 16; i++)
+		if ((int64)(pauses[i].endNs - pauses[i].startNs) > longest) longest = (int64)(pauses[i].endNs - pauses[i].startNs);
+	return longest;
+}
+
 int32 ArgOr(int32 argc, char8** argv, int32 index, int32 fallback) {
 	return argc > index ? (int32)strtol(argv[index], null, 10) : fallback;
 }
@@ -111,7 +123,11 @@ int32 main(int32 argc, char8** argv) {
 	s.replaced = ArgOr(argc, argv, 4, 200);
 	s.workers = ArgOr(argc, argv, 5, 0);
 	GC::SetMarkThreads(ArgOr(argc, argv, 6, -1));
+	s.arrayMiB = ArgOr(argc, argv, 7, 0);
 
+	Core::Array<float> buffers;   // a renderer's vertices: pointer-free, so never a scan region
+	buffers.Resize((int64)s.arrayMiB * 1048576 / (int64)sizeof(float));
+	for (int64 i = 0; i < buffers.Count(); i += 4096) buffers[i] = (float)(i % 7);
 	Core::Array<Entity*> world;
 	for (int32 i = 0; i < s.entities; i++) world.Push(MakeEntity(i, i > 0 ? world[i / 2] : null));
 	GC::Collect();
@@ -125,6 +141,7 @@ int32 main(int32 argc, char8** argv) {
 	Core::Array<int64> frameTimes;
 	int64 checksum = 0;
 	int64 worstPause = 0;
+	int64 longestStop = 0;
 	uint64 collections = before.collections;
 	const int64 start = clock_now_ns();
 	for (int32 frame = 0; frame < s.frames; frame++) {
@@ -133,23 +150,27 @@ int32 main(int32 argc, char8** argv) {
 		frameTimes.Push(clock_now_ns() - frameStart);
 		const GC::Stats now = GC::GetStats();
 		if (now.collections != collections && (int64)now.lastPauseNs > worstPause) worstPause = (int64)now.lastPauseNs;
+		if (now.collections != collections) {
+			const int64 stop = LongestStop();
+			if (stop > longestStop) longestStop = stop;
+		}
 		collections = now.collections;
 	}
 	const int64 total = clock_now_ns() - start;
-	checksum += WeighWorld(world, 97);
+	checksum += WeighWorld(world, 97) + (int64)buffers.Count();
 	const GC::Stats after = GC::GetStats();
 
 	frameTimes.Sort();
 	const int64 count = frameTimes.Count();
 	const double ms = 1000000.0;
 	printf("checksum=%lld frames=%d avg_frame_ms=%.3f p50_ms=%.3f p99_ms=%.3f worst_frame_ms=%.3f collections=%llu "
-		"gc_ms=%.1f avg_pause_ms=%.3f worst_pause_ms=%.3f gc_share=%.1f%% live_mb=%.1f heap_mb=%.1f allocs_per_s=%.0f\n",
+		"gc_ms=%.1f avg_pause_ms=%.3f worst_pause_ms=%.3f longest_stop_ms=%.3f gc_share=%.1f%% live_mb=%.1f heap_mb=%.1f array_mb=%d allocs_per_s=%.0f\n",
 		checksum, s.frames, (double)total / count / ms, (double)frameTimes[count / 2] / ms, (double)frameTimes[count * 99 / 100] / ms,
 		(double)frameTimes[count - 1] / ms, after.collections - before.collections,
 		(double)(after.pauseNs - before.pauseNs) / ms,
 		after.collections > before.collections ? (double)(after.pauseNs - before.pauseNs) / (double)(after.collections - before.collections) / ms : 0.0,
-		(double)worstPause / ms, 100.0 * (double)(after.pauseNs - before.pauseNs) / (double)total,
-		(double)after.liveBytes / 1048576.0, (double)after.heapBytes / 1048576.0,
+		(double)worstPause / ms, (double)longestStop / ms, 100.0 * (double)(after.pauseNs - before.pauseNs) / (double)total,
+		(double)after.liveBytes / 1048576.0, (double)after.heapBytes / 1048576.0, s.arrayMiB,
 		(double)(after.allocs - before.allocs) / ((double)total / 1000000000.0));
 	return 0;
 }

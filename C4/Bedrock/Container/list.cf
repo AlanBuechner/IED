@@ -17,7 +17,7 @@ namespace Core
 	private ListNode<T>* List::NewNode(T value) {
 		ListNode<T>* node = AllocateElements<ListNode<T>>(1);
 		memset((void*)node, 0, (uint64)sizeof(ListNode<T>));
-		gc_register_region((void*)node, (uint64)sizeof(ListNode<T>));
+		if (holds_pointers(T)) gc_register_region((void*)node, (uint64)sizeof(ListNode<T>));
 		new (&node->value) T(take(value));
 		return node;
 	}
@@ -25,7 +25,7 @@ namespace Core
 	template<T>
 	private void List::FreeNode(ListNode<T>* node) {
 		destroy(&node->value);
-		gc_unregister_region((void*)node);
+		if (holds_pointers(T)) gc_unregister_region((void*)node);
 		FreeElements<ListNode<T>>(node, 1);
 	}
 

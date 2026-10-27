@@ -43,7 +43,6 @@ Next ID: **BUG-395**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
-| [BUG-386](#bug-386-pointer-free-container-buffers-are-scanned-by-the-collector) | Pointer-free container buffers are scanned by the collector | Bedrock | Medium |
 
 ---
 
@@ -52,24 +51,3 @@ Next ID: **BUG-395**
 ## Model, templates and semantics
 
 ## Interop, runtime and Bedrock
-
-### BUG-386 Pointer-free container buffers are scanned by the collector
-- **Area:** Bedrock
-- **Severity:** Medium
-- **Status:** Open
-- **Found:** 2026-10-23
-- **Symptom:** every `Core::Array`, `HashMap`, `List` and `Queue` registers its element buffer as a scan region
-  whatever the element type, so the floats, indices and vertices an engine keeps in them are scanned word by word at
-  every collection. A region is native memory the write watch does not see, so a concurrent cycle copies it whole
-  at each stop and scans it whole at the last: one 256 MiB `Core::Array<float>` beside 64 MiB of live objects took
-  the longest stop of a concurrent cycle from 0.5-2.9 ms to 30-36 ms (D-79 promises about 1 ms) and `GC::Collect`
-  from 6-9 ms to 14-16 ms. Numbers that look like heap addresses also keep garbage alive.
-- **Repro:** `GC::SetConcurrent(0)`; 600,000 live `new` objects of 64 bytes; `Core::Array<float> a; a.Resize(64 *
-  1024 * 1024);`; allocate until `GC::GetStats().collections` moves; the longest of `GC::LastPauses`.
-  `c4_gc_region_count()` is 1. The same 256 MiB as 16,384 slots of 16 KiB in a keep-all `GC::Pool`, each slot
-  holding a pointer, gives 1.4-1.6 ms.
-- **Where:** `Bedrock/Container/storage.ch` (`ResizeScannedBytes`, used by `array.cf`), `hashtable.cf`, `list.cf`,
-  `queue.cf`, `Threading/jobqueue.cf`. No compile-time query gives C4 code `TypeHandle::MayHoldPointers`, the
-  compiler's own noscan decision.
-- **Notes:** fixed by [plan B70](plan.md#b70---pointer-free-buffers-are-not-scanned-bug-386): a `holds_pointers(T)`
-  intrinsic, and containers that register a region only when it is true.

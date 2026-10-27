@@ -58,8 +58,14 @@ int32 main() {
   `delete`.
 - Iteration uses `[operator("begin")]` / `[operator("end")]` plus iterator `notequal`, `dereference` and
   `increment`. Indexing uses `[operator("index")]`.
-- Containers allocate element storage with `raw_alloc` and register it as a GC scan region, so a
-  `Core::Array<T*>` keeps its elements alive. `Array` and `StringBuilder` keep their buffers in `buffer_resize`
+- Containers allocate element storage with `raw_alloc` and register it as a GC scan region only when the element
+  type may hold managed pointers (`holds_pointers`, [14.1](../language/14-builtins.md#1-compiler-intrinsics)), so a
+  `Core::Array<T*>` keeps its elements alive while the floats, indices and vertices of an `Array<float>`, a
+  `HashMap<int64, float>` or a `Queue<int32>` are never scanned (BUG-386): `Array` (`ResizeElements`), `HashMap` and
+  `HashSet` (`EntryStorage`), `List` (each node), `Queue` and `Threading::JobQueue`. A buffer keeps the form it was
+  made with: code that knows the element type only at run time says the same through `Core::ElementStorage` and
+  `Core::EntryStorage` (Serialization's reflection reader takes it from `Reflection::Type::HoldsPointers`).
+  `GC::RegionCount()` says how many regions are registered. `Array` and `StringBuilder` keep their buffers in `buffer_resize`
   memory ([builtins 4](../language/14-builtins.md#4-memory-and-gc)): past 1 MiB a buffer grows in place, its pages
   committed after it instead of the whole buffer copied, so pushing to a large array or appending to a large text
   costs no copies until the buffer outgrows its reservation (8 times its size, at least 64 MiB). They construct,
@@ -110,8 +116,9 @@ true. `Array`, `List`, `Queue`, `HashMap`, `HashSet`, `BitSet`, `String`, `Strin
 | Algorithms | `Sort()` (by `<`), `SortBy(before)`, `Reverse()`, `LowerBound(v)`, `UpperBound(v)`, `LowerBoundBy(v, before)`, `UpperBoundBy(v, before)` |
 | Iteration | range-for through `ArrayIterator<T>` (yields `T&`); a const array iterates through `ConstArrayIterator<T>` (yields `const T&`) |
 
-`Core::ArrayLayout` and `Core::ResizeEmptyArray(array, count, elementBytes, elementAlign)` give code that knows
-the element type only at run time (the reflection codec) an empty array's storage, zeroed.
+`Core::ArrayLayout` and `Core::ResizeEmptyArray(array, count, element)` give code that knows the element type only
+at run time (the reflection codec) an empty array's storage, zeroed; `element` (`Core::ElementStorage`: its size,
+alignment and `holdsPointers`) says what `Array<T>` knows of `T`, so the buffer is scanned as `Array<T>`'s would be.
 
 Growth doubles the capacity (at least 4 on the first insert). Every container's insertions (`Queue::Push`,
 `Stack::Push`, `List::PushBack` and the rest, `HashMap::Insert`) take their value the same way, so

@@ -28,7 +28,7 @@ namespace Core
 	template<K, V, Traits>
 	public void HashMap::Delete() {
 		Clear();
-		FreeTable(table, (void*)entries, (int64)alignof(KeyValue<K, V>));
+		FreeTable(table, (void*)entries, EntryStorageOf<KeyValue<K, V>>());
 		entries = nullptr;
 	}
 
@@ -43,7 +43,7 @@ namespace Core
 	private void HashMap::Rehash(int64 newCapacity) {
 		HashTable old = table;
 		KeyValue<K, V>* from = entries;
-		entries = (KeyValue<K, V>*)AllocateTable(table, newCapacity, (int64)sizeof(KeyValue<K, V>), (int64)alignof(KeyValue<K, V>));
+		entries = (KeyValue<K, V>*)AllocateTable(table, newCapacity, EntryStorageOf<KeyValue<K, V>>());
 		KeyValue<K, V>* to = entries;
 		for (int64 i = NextLiveSlot(old, 0); i < old.capacity; i = NextLiveSlot(old, i + 1)) {
 			const uint64 hash = Traits::Hash(from[i].key);
@@ -51,7 +51,7 @@ namespace Core
 			relocate(&to[slot], &from[i]);
 			Occupy(table, slot, hash);
 		}
-		FreeTable(old, (void*)from, (int64)alignof(KeyValue<K, V>));
+		FreeTable(old, (void*)from, EntryStorageOf<KeyValue<K, V>>());
 	}
 
 	template<K, V, Traits>

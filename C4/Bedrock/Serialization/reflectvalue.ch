@@ -21,11 +21,11 @@ namespace Serialization
 		public Reflection::Type type;    // registered types: objects, enums, arrays, maps
 		public int64 size;
 		public int64 align;
+		public bool holdsPointers;       // a value may hold managed pointers (holds_pointers): an array of it is scanned
 		public Core::String element;     // Array, FixedArray: the element type's name; StringMap: the value type's
 		public int64 count;              // FixedArray: its length
 		public int64 valueOffset;        // StringMap: where a KeyValue<Core::String, V>'s value starts
-		public int64 entrySize;          // StringMap: a KeyValue's size and alignment
-		public int64 entryAlign;
+		public Core::EntryStorage entry; // StringMap: how its KeyValue is stored
 		public int64 entriesOffset;      // StringMap: where the map's entries pointer and its Core::HashTable are
 		public int64 tableOffset;
 	}

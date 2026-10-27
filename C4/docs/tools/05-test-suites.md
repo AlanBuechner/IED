@@ -327,6 +327,20 @@ Concurrent marking (B64, 2026-10-20; the pause columns add up a cycle's stops, e
 
 With 15 workers the marking helpers compete for the 16 processors, which shows in the worst frame.
 
+Large pointer-free buffers (B70, 2026-10-26; 200,000 entities, 300 frames alone, with and without 256 MiB of
+`Core::Array<float>` beside the world, `arrayMiB`; the longest stop is the longest single stop of any collection,
+`longest_stop_ms`). Before B70 every container buffer was a scan region, which a concurrent cycle copies whole at
+each stop (BUG-386):
+
+| Mode | p99 frame | Longest stop | Before B70: p99 frame | Before B70: longest stop |
+|---|---|---|---|---|
+| Stop-the-world, no array | 6.6 ms | 7.5 ms | 6.5 ms | 7.0 ms |
+| Stop-the-world, 256 MiB of floats | 6.7 ms | 8.5 ms | 10.9 ms | 12.0 ms |
+| Concurrent, no array | 1.0 ms | 0.72 ms | 1.2 ms | 0.84 ms |
+| Concurrent, 256 MiB of floats | 1.1 ms | 0.94 ms | 29.1 ms | 28.6 ms |
+
+The timed run ends with this world in both modes; `-Check` keeps 16 MiB beside its small world.
+
 `Benchmarks/compile/` (B32): C4.exe end to end on a one-line program, the Bedrock tests and TestCode, at `-O0`
 and `-O2`, the median of 3 builds with each build's `--time-phases` breakdown; `-Check` builds each once.
 

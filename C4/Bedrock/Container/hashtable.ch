@@ -66,12 +66,27 @@ namespace Core
 	// The capacity a full table moves to: room for twice its live entries; the removed slots are left behind.
 	int64 GrownCapacity(const HashTable& table);
 
-	// A fresh table of `capacity` empty slots, and its entries: zeroed, `entryBytes` each, aligned to `entryAlign` and
-	// registered with the GC (an entry may hold pointers). The previous control bytes and entries must have been taken
-	// or freed.
-	void* AllocateTable(HashTable& table, int64 capacity, int64 entryBytes, int64 entryAlign);
+	// How a table stores its entries: sizeof(E), alignof(E) and holds_pointers(E) (whether the collector scans them).
+	struct EntryStorage
+	{
+		public int64 bytes;
+		public int64 align;
+		public bool holdsPointers;
+	}
+
+	template<E> EntryStorage EntryStorageOf() {
+		EntryStorage storage;
+		storage.bytes = (int64)sizeof(E);
+		storage.align = (int64)alignof(E);
+		storage.holdsPointers = holds_pointers(E);
+		return storage;
+	}
+
+	// A fresh table of `capacity` empty slots, and its entries: zeroed, registered with the GC when an entry may hold
+	// pointers. The previous control bytes and entries must have been taken or freed.
+	void* AllocateTable(HashTable& table, int64 capacity, EntryStorage entry);
 	// Gives the control bytes and `entries` back (the live entries must be destroyed first) and leaves the table zero.
-	void FreeTable(HashTable& table, void* entries, int64 entryAlign);
+	void FreeTable(HashTable& table, void* entries, EntryStorage entry);
 	// Every slot empty again, the storage kept (the live entries must be destroyed first).
 	void EmptyTable(HashTable& table);
 

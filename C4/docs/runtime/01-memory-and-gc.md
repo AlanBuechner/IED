@@ -47,14 +47,14 @@ void Example() {
 }
 ```
 
-Containers that keep `T*` inside raw memory must tell the collector about that memory. Bedrock's
-`Core::Array<T>` does this:
+Containers that keep `T*` inside raw memory must tell the collector about that memory, and only then (a buffer of
+numbers is better left unscanned, `holds_pointers`). Bedrock's containers do this:
 
 ```c4
 data = (T*)raw_alloc((uint64)(capacity * (int64)sizeof(T)));
-gc_register_region((void*)data, (uint64)(capacity * (int64)sizeof(T)));   // scan this buffer for pointers
+if (holds_pointers(T)) gc_register_region((void*)data, (uint64)(capacity * (int64)sizeof(T)));   // scan it for pointers
 ...
-gc_unregister_region((void*)data);                  // before raw_free
+if (holds_pointers(T)) gc_unregister_region((void*)data);   // before raw_free
 raw_free((void*)data);
 ```
 
@@ -130,7 +130,7 @@ declarations.
 | Post-collection callbacks | `c4_gc_register_collection_result(key, fn, user)`, `c4_gc_is_reachable(p)` | `GC::RegisterCollectionResult`, `GC::IsReachable` |
 | Pools: a custom allocator's objects tracked one by one | `c4_gc_pool_create(desc)` (`slot_size`, `slot_count`, `noscan`, `keep_all`, `keep`, `release`, `user_data`), `c4_gc_pool_destroy`, `c4_gc_pool_base` / `_slot_size` / `_slot_count`, `c4_gc_pool_occupy` / `_vacate` / `_occupied` | `GC::Pool` ([Bedrock 7](../library/bedrock.md#pools-memorypoolch)) |
 | Pin / unpin (counted) | `c4_gc_pin(p)`, `c4_gc_unpin(p)` | `GC::Pin`, `GC::Unpin` |
-| Stats | `c4_gc_get_stats`, `c4_gc_allocs`, `c4_gc_collections`, `c4_gc_heap_bytes`, `c4_gc_free_bytes`, `c4_gc_region_count` | `GC::GetStats()`, `gc_allocs()`, `gc_collections()`, `gc_heap_bytes()`, `gc_free_bytes()` |
+| Stats | `c4_gc_get_stats`, `c4_gc_allocs`, `c4_gc_collections`, `c4_gc_heap_bytes`, `c4_gc_free_bytes`, `c4_gc_region_count` | `GC::GetStats()`, `gc_allocs()`, `gc_collections()`, `gc_heap_bytes()`, `gc_free_bytes()`, `GC::RegionCount()` |
 | Census of live objects by type (`{ type, objects, bytes, nativeBytes }`, one entry a type name, by name, the unknown (`NULL`) first) | `c4_gc_set_census(on)` (returns whether it was on), `c4_gc_last_census(out, capacity)`: how many entries the last census has | `GC::SetCensus`, `GC::LastCensus` with `GC::CensusEntry` |
 | Allocations counted (`{ objects, bytes, nativeBytes, nativeFreed }`) | `c4_gc_thread_allocated()`: the calling thread's since it registered, no lock; `c4_gc_allocated()`: every thread's, ended ones included | `GC::ThreadAllocated()`, `GC::Allocated()` as `GC::AllocCounts` |
 | Sampled allocations (`{ bytes, timeNs, threadId, frameCount, frames[32] }`) | `c4_gc_set_alloc_sampling(everyBytes)` (0: off; returns the previous setting), `c4_gc_take_alloc_samples(out, capacity)`: how many it moved, oldest first | `GC::SetAllocSampling`, `GC::TakeAllocSamples` with `GC::AllocSample` |
@@ -155,7 +155,12 @@ callback of an enumerator) accepts any pointer into the object.
 These exist so an engine can use custom allocators and handle-based storage without fighting the GC.
 
 - **Scan regions**: conservative scanning of memory you own (native buffers, FFI state). Unregister before
-  freeing. Registering the same start again replaces its size.
+  freeing. Registering the same start again replaces its size. A region is not write-watched (it is not GC heap): a
+  concurrent cycle copies it whole at every stop and the final stop scans it whole, so a large one lengthens every
+  stop (one 256 MiB region took the longest stop from about 1 ms to 30-36 ms, BUG-386). Register only memory that
+  holds pointers (Bedrock's containers register a buffer only when `holds_pointers` of the element is true); native
+  memory that holds pointers and is large belongs in a keep-all `GC::Pool`, whose slots are heap pages, so only the
+  pages written during a cycle are rescanned (256 MiB in 16 KiB slots: longest stop 1.4-1.6 ms).
 - **Root enumerators**: for storage that holds indices, offsets or handles instead of pointers. Once per
   stop-the-world collection (in each stop of a concurrent cycle) your callback `fn(user, visit, visitContext)` turns handles into pointers and reports each by
   calling `visit(visitContext, ptr)`; the GC then traces them like any other root. It runs while every other

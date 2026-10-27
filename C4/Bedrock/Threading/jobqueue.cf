@@ -10,13 +10,13 @@ namespace Threading
 		if (!cells) return;   // out of memory: every push fails, so jobs run where they are submitted
 		memset((void*)cells, 0, bytes);
 		for (int64 i = 0; i < size; i++) cells[i].sequence = i;
-		gc_register_region((void*)cells, bytes);
+		if (holds_pointers(JobCell)) gc_register_region((void*)cells, bytes);
 		mask = size - 1;
 	}
 
 	void JobQueue::Delete() {
 		if (!cells) return;
-		gc_unregister_region((void*)cells);
+		if (holds_pointers(JobCell)) gc_unregister_region((void*)cells);
 		raw_free((void*)cells);
 		cells = nullptr;
 	}

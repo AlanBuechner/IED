@@ -26,7 +26,7 @@ namespace Core
 	template<T, Traits>
 	public void HashSet::Delete() {
 		Clear();
-		FreeTable(table, (void*)values, (int64)alignof(T));
+		FreeTable(table, (void*)values, EntryStorageOf<T>());
 		values = nullptr;
 	}
 
@@ -40,7 +40,7 @@ namespace Core
 	private void HashSet::Rehash(int64 newCapacity) {
 		HashTable old = table;
 		T* from = values;
-		values = (T*)AllocateTable(table, newCapacity, (int64)sizeof(T), (int64)alignof(T));
+		values = (T*)AllocateTable(table, newCapacity, EntryStorageOf<T>());
 		T* to = values;
 		for (int64 i = NextLiveSlot(old, 0); i < old.capacity; i = NextLiveSlot(old, i + 1)) {
 			const uint64 hash = Traits::Hash(from[i]);
@@ -48,7 +48,7 @@ namespace Core
 			relocate(&to[slot], &from[i]);
 			Occupy(table, slot, hash);
 		}
-		FreeTable(old, (void*)from, (int64)alignof(T));
+		FreeTable(old, (void*)from, EntryStorageOf<T>());
 	}
 
 	template<T, Traits>

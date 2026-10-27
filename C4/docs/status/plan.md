@@ -1770,7 +1770,7 @@ methods that return structs by value (B74 adds the test); data exported from the
 
 #### B70 - Pointer-free buffers are not scanned (BUG-386)
 - **Closes:** BUG-386. **Design:** [memory and GC](../runtime/01-memory-and-gc.md#engine-hooks),
-  [builtins 1](../language/14-builtins.md#1-compiler-intrinsics). **Depends on:** none. **Status:** Ready.
+  [builtins 1](../language/14-builtins.md#1-compiler-intrinsics). **Depends on:** none. **Status:** Done.
 - **Done notes (step 1):** `holds_pointers(T)` is `TypeOfExpressionNode::Kind::HoldsPointers`, folded by
   `CompileTimeQueryValue` to `TypeHandle::MayHoldPointers` of the type as written (references hold an address). The
   parser keeps the same text as a call too (`SpeculativeCall`, also for `holds_native_bytes`), and `CallsProgramFunction`
@@ -1784,6 +1784,20 @@ methods that return structs by value (B74 adds the test); data exported from the
   bases, unions, arrays, function pointers, packed vectors, template arguments, `Core::Array<float>`, `Core::String`,
   in constants and extents), IsolatedTest `Types/HoldsPointersProgramFunction`, `Types/Bug393ConstantsOfResolvingTypes`,
   NegativeTest `HoldsPointersOfValue`.
+- **Done notes (steps 2 and 3):** `Container/storage.ch`: `ResizeElementBytes(..., scanned)` / `ResizeElements<T>`
+  (`buffer_resize` or `buffer_resize_scanned` by `holds_pointers(T)`), `AllocateScannable` / `FreeScannable` (Queue);
+  `HashTable`'s `AllocateTable` / `FreeTable` take a `Core::EntryStorage` (`EntryStorageOf<E>()`, HashMap and HashSet);
+  `List` registers a node only for a pointer-holding `T`; `JobQueue` by `holds_pointers(JobCell)`. Code that knows the
+  element only at run time says what `Array<T>` knows through `Core::ElementStorage` (`ResizeEmptyArray`): the
+  reflection reader takes `holdsPointers` from `Reflection::Type::HoldsPointers` (B71), so a buffer keeps one form
+  whoever grows it. `GC::RegionCount()` binds `c4_gc_region_count`. Measured (`Benchmarks/gc`, 200,000 entities, 300
+  frames alone, with 256 MiB of `Core::Array<float>` beside them): concurrent, the longest stop of a cycle 28.6 ms and
+  the p99 frame 29.1 ms before, 0.94 ms and 1.1 ms after (0.72 ms and 1.0 ms with no array); stop-the-world, the worst
+  pause 12.0 ms before and 8.5 ms after (7.0 ms and 7.5 ms with no array). Tests: IsolatedTest
+  `MemoryGC/Bug386PointerFreeBuffersUnscanned` (no region for `Array<float>`, `Array<Math::FVector3>`,
+  `HashMap<int64, float>`, `Queue<int32>`, `List<int64>`, `HashSet<int32>` and an over-aligned `Array<packed float[8]>`
+  grown past 1 MiB, one for `Array<Node*>` and `Array<Core::String>`; objects whose addresses an `Array<int64>` holds
+  are collected); `Benchmarks/gc` keeps a large-array world beside the entities (`arrayMiB`, `longest_stop_ms`).
 - **Why:** an engine keeps hundreds of MiB of floats, indices and vertices in Bedrock containers. Each buffer is a
   scan region today, scanned at every collection and copied whole at every stop of a concurrent cycle: 30-36 ms stops
   for 256 MiB where D-79 gives about 1 ms.

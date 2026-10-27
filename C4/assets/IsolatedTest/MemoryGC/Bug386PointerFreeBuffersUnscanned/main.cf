@@ -1,0 +1,113 @@
+// BUG-386: a container whose elements cannot hold managed pointers (holds_pointers) keeps its buffer out of the
+// collector's scan regions - floats, vectors, numbers by number, a queue of indices, an over-aligned vector - so a
+// collection never reads it and an address kept in one as a number keeps nothing alive. A container of pointers, and of
+// objects that hold one, still registers its buffer, and the objects it holds stay alive.
+include "bedrock.ch"
+include "math.ch"
+
+const int32 kTargets = 200;
+
+int32 g_finalized = 0;
+int32 g_failures = 0;
+
+struct Target
+{
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized += 1; }
+}
+
+struct Node { public Target* target; }
+
+void Check(bool holds, const char* what)
+{
+	if (holds) return;
+	printf("FAIL: %s\n", what);
+	g_failures += 1;
+}
+
+// Each container grown past a few reallocations and past 1 MiB (where buffers grow in place): the region count must not
+// move for pointer-free elements.
+void CheckUnscanned()
+{
+	const uint64 before = GC::RegionCount();
+	Core::Array<float> floats;
+	floats.Resize(300000);
+	Core::Array<Math::FVector3> vectors;
+	for (int32 i = 0; i < 1000; ++i) vectors.Push(Math::FVector3(1.0f, 2.0f, 3.0f));
+	Core::HashMap<int64, float> map;
+	for (int64 i = 0; i < 1000; ++i) map.Insert(i, (float)i);
+	Core::Queue<int32> queue;
+	for (int32 i = 0; i < 1000; ++i) queue.Push(i);
+	Core::List<int64> list;
+	for (int64 i = 0; i < 100; ++i) list.PushBack(i);
+	Core::HashSet<int32> set;
+	for (int32 i = 0; i < 100; ++i) set.Add(i);
+	Core::Array<packed float[8]> wide;
+	packed float[8] lanes = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
+	for (int32 i = 0; i < 100; ++i) wide.Push(lanes);
+	Check(GC::RegionCount() == before, "pointer-free containers register no region");
+	Check(floats.Count() == 300000 && vectors[999].x == 1.0f && map.Get(999) == 999.0f && queue.Count() == 1000 && wide[99][7] == 8.0f,
+		"and keep their elements");
+}
+
+void CheckScanned()
+{
+	const uint64 before = GC::RegionCount();
+	Core::Array<Node*> nodes;
+	nodes.Push(new Node());
+	Check(GC::RegionCount() == before + 1, "an array of pointers registers its buffer");
+	Core::Array<Core::String> texts;
+	texts.Push(Core::String("held"));
+	Check(GC::RegionCount() == before + 2, "and an array of objects that hold one");
+	nodes.Delete();
+	texts.Delete();
+	Check(GC::RegionCount() == before, "and gives its regions back");
+}
+
+Core::Array<int64>* g_addresses = null;   // the only reference to the integer-held targets: numbers
+Core::Array<Node>* g_nodes = null;        // pointers to the others
+
+void Fill()
+{
+	g_addresses = new Core::Array<int64>();
+	g_nodes = new Core::Array<Node>();
+	for (int32 i = 0; i < kTargets; ++i)
+	{
+		Target* hidden = new Target();
+		g_addresses->Push((int64)hidden);
+		Node node;
+		node.target = new Target();
+		node.target->value = i;
+		g_nodes->Push(node);
+	}
+}
+
+int64 Scrub(int32 depth)
+{
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int32 SumHeld()
+{
+	int32 sum = 0;
+	for (int64 i = 0; i < g_nodes->Count(); ++i) sum += (*g_nodes)[i].target->value;
+	return sum;
+}
+
+int32 main()
+{
+	CheckUnscanned();
+	CheckScanned();
+	Fill();
+	Scrub(8);
+	GC::Collect();
+	GC::Collect();
+	Check(g_finalized >= kTargets - 5, "objects whose addresses an Array<int64> holds as numbers were collected");
+	Check(g_finalized <= kTargets, "those an Array<Node> holds stayed");
+	Check(SumHeld() == kTargets * (kTargets - 1) / 2, "and can still be read");
+	return g_failures;
+}

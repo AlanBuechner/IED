@@ -70,21 +70,21 @@ namespace Core
 		return table.capacity > 0 ? table.capacity * entryBytes + ControlBytes(table.capacity) : 0;
 	}
 
-	void* AllocateTable(HashTable& table, int64 capacity, int64 entryBytes, int64 entryAlign) {
-		const uint64 bytes = (uint64)(capacity * entryBytes);
-		void* entries = (uint64)entryAlign > kRawAllocAlignment ? raw_alloc_aligned(bytes, (uint64)entryAlign) : raw_alloc(bytes);
+	void* AllocateTable(HashTable& table, int64 capacity, EntryStorage entry) {
+		const uint64 bytes = (uint64)(capacity * entry.bytes);
+		void* entries = (uint64)entry.align > kRawAllocAlignment ? raw_alloc_aligned(bytes, (uint64)entry.align) : raw_alloc(bytes);
 		memset(entries, 0, bytes);
-		gc_register_region(entries, bytes);
+		if (entry.holdsPointers) gc_register_region(entries, bytes);
 		table.control = (int8*)raw_alloc((uint64)ControlBytes(capacity));
 		table.capacity = capacity;
 		EmptyTable(table);
 		return entries;
 	}
 
-	void FreeTable(HashTable& table, void* entries, int64 entryAlign) {
+	void FreeTable(HashTable& table, void* entries, EntryStorage entry) {
 		if (entries) {
-			gc_unregister_region(entries);
-			if ((uint64)entryAlign > kRawAllocAlignment) raw_free_aligned(entries);
+			if (entry.holdsPointers) gc_unregister_region(entries);
+			if ((uint64)entry.align > kRawAllocAlignment) raw_free_aligned(entries);
 			else raw_free(entries);
 		}
 		raw_free_sized((void*)table.control, (uint64)ControlBytes(table.capacity));

@@ -110,7 +110,15 @@ namespace Core
 		public int64 capacity;
 	}
 
-	// Gives the empty Array<T> at `array` `count` elements of `elementBytes` aligned to `elementAlign` (sizeof(T) and
-	// alignof(T)), stored as Array<T> stores them and zero rather than created: for element types whose zero is a
-	// valid value. False when the array is not empty.
-	bool ResizeEmptyArray(void* array, int64 count, int64 elementBytes, int64 elementAlign);
+	// What Array<T> knows of T at compile time, for code that knows T only at run time: sizeof(T), alignof(T) and
+	// holds_pointers(T) (whether the buffer is scanned).
+	struct ElementStorage
+	{
+		public int64 bytes;
+		public int64 align;
+		public bool holdsPointers;
+	}
+
+	// Gives the empty Array<T> at `array` `count` elements of `element`, stored as Array<T> stores them and zero rather
+	// than created: the caller constructs them. False when the array is not empty.
+	bool ResizeEmptyArray(void* array, int64 count, ElementStorage element);

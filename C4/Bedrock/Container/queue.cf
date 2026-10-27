@@ -15,7 +15,7 @@ namespace Core
 	template<T>
 	public void Queue::Delete() {
 		Clear();
-		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data, capacity); }
+		FreeScannable<T>(data, capacity);
 		data = nullptr;
 		capacity = 0;
 	}
@@ -39,14 +39,13 @@ namespace Core
 	public void Queue::Reserve(int64 wanted) {
 		int64 grown = NextPowerOfTwo(wanted);
 		if (grown <= capacity) return;
-		T* larger = AllocateElements<T>(grown);
-		gc_register_region((void*)larger, (uint64)(grown * (int64)sizeof(T)));
+		T* larger = AllocateScannable<T>(grown);
 		int64 first = capacity - head < count ? capacity - head : count;   // from head to the old buffer's end
 		if (count > 0) {
 			memcpy((void*)larger, (void*)&data[head], (uint64)(first * (int64)sizeof(T)));
 			memcpy((void*)&larger[first], (void*)data, (uint64)((count - first) * (int64)sizeof(T)));
 		}
-		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data, capacity); }
+		FreeScannable<T>(data, capacity);
 		data = larger;
 		capacity = grown;
 		head = 0;

@@ -115,6 +115,8 @@ namespace GC
 	// Raw memory that may hold managed pointers.
 	[link("c4_gc_register_region")] void RegisterRegion(void* start, uint64 size) noexcept;
 	[link("c4_gc_unregister_region")] void UnregisterRegion(void* start) noexcept;
+	// How many regions are registered: containers register a buffer only when its elements may hold pointers.
+	[link("c4_gc_region_count")] uint64 RegionCount() noexcept;
 
 	[link("c4_gc_register_root_enumerator")] void RegisterRootEnumerator(void* key, RootEnumerator enumerate, void* userData) noexcept;
 	[link("c4_gc_unregister_root_enumerator")] void UnregisterRootEnumerator(void* key) noexcept;

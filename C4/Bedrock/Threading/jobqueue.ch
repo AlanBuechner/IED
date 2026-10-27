@@ -1,7 +1,7 @@
 // The job system's queues (JobSystem, jobs.ch): bounded lock-free multi-producer multi-consumer queues of jobs
 // (D. Vyukov's). Each cell carries a sequence number that says whose turn it is, so a producer and a consumer
 // each own the cell they claimed with one compare-exchange, and a job is stored by value. The cells are scanned
-// by the collector; a taken job's cell is cleared, so the queue keeps no closure alive.
+// by the collector (a job holds its closure); a taken job's cell is cleared, so the queue keeps no closure alive.
 
 include "waitgroup.ch"
 
