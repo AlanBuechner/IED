@@ -173,6 +173,8 @@ int32 main(int32 argc, char8** argv) {
 		Fail(Core::StringView("a workspace server is started by its master, which gives it its secret (docs/11)"));
 		return 2;
 	}
+	// Named once: a test-hooks server's pipe is a random one of its own, and its workspace servers are told the same.
+	config.controlName = Ied::ControlName(config);
 	Net::Address at = BindAddress(config);
 	if (!at.IsValid()) {
 		Fail(Core::StringView("--host is not an address"));

@@ -10,8 +10,10 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import tempfile
 import time
+import urllib.parse
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
@@ -287,6 +289,36 @@ class TwoWorkspaceTests(ServerTestCase):
 		for pid in pids:
 			await_gone(pid)
 		self.assertIn("stopped (code 0)", "\n".join(read_lines(os.path.join(self.server.data, "logs", "server.log"))), "each was asked and stopped")
+
+
+class UnnamedPipeTests(ServerTestCase):
+	"""A test-hooks master started without --control (the conformance runner's) names a pipe of its own once, and its
+	workspace servers are told that one: they stay up instead of leaving a master they cannot find."""
+
+	async def test_a_master_without_a_pipe_name_keeps_its_workspace_servers(self):
+		executable = os.environ["IED_SERVER_CHECKS_SERVER"]
+		process = subprocess.Popen([executable, "--port", "0", "--test-hooks", "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+		try:
+			listening = process.stdout.readline().split(" ", 1)[1].strip()
+			opening = process.stdout.readline().split(" ", 1)[1].strip()
+			url = urllib.parse.urlsplit(opening)
+			connection = http.client.HTTPConnection(url.hostname, url.port, timeout=10)
+			connection.request("GET", "/?" + url.query)
+			reply = connection.getresponse()
+			reply.read()
+			cookie = reply.getheader("Set-Cookie").split(";", 1)[0]
+			connection.close()
+			client = await Client.connect(listening.replace("http", "ws", 1) + "/w/w1/ws", FrameChecker(), headers={"Cookie": cookie}, timeout=30)
+			try:
+				await asyncio.sleep(5)
+				self.assertFalse(client.closed.is_set(), "the workspace server stayed up past its watch of the master")
+				self.assertIn("entries", await client.request("fs.list", {"wsId": "w1", "path": ""}))
+			finally:
+				client.abort()
+		finally:
+			process.terminate()
+			process.wait(10)
+			process.stdout.close()
 
 
 class ResumeAfterKillTests(ChatCase):
