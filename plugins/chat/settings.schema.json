@@ -7,7 +7,7 @@
 			"type": "object",
 			"properties": {
 				"provider": { "enum": ["openai", "claude-code"], "default": "openai", "description": "What serves it: an OpenAI-compatible endpoint, or your own signed-in Claude Code CLI on your Claude subscription (docs/04 The Claude Code provider; never an API key)." },
-				"endpoint": { "type": "string", "pattern": "^http://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1). Not for claude-code." },
+				"endpoint": { "type": "string", "pattern": "^https?://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1), or https:// (the server's certificate checked against the system's roots). Not for claude-code." },
 				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: opus, sonnet, haiku, fable or a full id; default: the CLI's. Which Claude model a turn uses as the plan runs ahead of pace is a group's chain (ai.groups, docs/04 Pacing)." },
 				"pacing": {
 					"type": "object",
