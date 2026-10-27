@@ -1,6 +1,7 @@
 """MCP servers' tools in chats (docs/04 "MCP") against tools/fake-mcp: a chat lists a server's tools as deferred stubs
 and calls them through IED's own path (its permission checks, approval cards and tool cards), on stdio and on streamable
-HTTP; a server's own tool list changing reaches the next turn; a crash restarts it; a server that never answers fails
+HTTP, plain or https (the fake served over TLS with its test CA, trusted through caFile; refused, saying why, without
+it); a server's own tool list changing reaches the next turn; a crash restarts it; a server that never answers fails
 with a clear error; its tools stay offered from the cache after a restart; an untrusted workspace has none; Settings'
 methods test, stop and restart a server; and a Claude chat gets them through IED's in-process MCP server."""
 
@@ -16,6 +17,7 @@ from test_claude import ClaudeCase
 from server import REPO, local_state
 
 FAKE_MCP = os.path.join(REPO, "tools", "fake-mcp", "fake_mcp.py")
+FAKE_CA = os.path.join(REPO, "tools", "fake-mcp", "tls", "ca.pem")
 TOOLS = ["echo", "add", "image", "slow", "crash", "fail", "add_tool", "ping_back", "resource", "hang"]
 
 
@@ -341,10 +343,38 @@ class McpHttpTests(McpCase):
 		self.assertGreaterEqual(self.methods().count("initialize"), 2, "initialized again after the 404")
 		self.assertIn("the server ended the session: starting a new one", await self.output())
 
-	async def test_https_is_refused_with_why(self):
-		tested = await self.client.request("mcp.test", {"wsId": "w1", "name": "far", "server": {"url": "https://example.com/mcp"}})
-		self.assertFalse(tested["ok"])
-		self.assertIn("https is not supported", tested["error"])
+	async def test_an_https_server_is_reached_through_its_ca_file(self):
+		for mode in (["--sse"], []):
+			url = self.start_http("--tls", *mode)
+			self.assertTrue(url.startswith("https://127.0.0.1:"), url)
+			await self.use_servers({"secure": {"url": url, "caFile": FAKE_CA, "permission": "auto"}})
+			chat_id, _ = await self.chat(permission="auto")
+			self.model.queue(call_step("mcp_secure_echo", {"text": "over https"}, "c1"), call_step("mcp_secure_add", {"a": 1, "b": 2}, "c2"), text_step("Done."))
+			self.assertEqual("finished", (await self.turn(chat_id, timeout=60))["stop"], mode)
+			self.assertEqual({"c1": "echo: over https", "c2": "3"}, self.results(), mode)
+			calls = [e["message"] for e in self.received() if e.get("message", {}).get("method") == "tools/call"]
+			self.assertEqual(2, len(calls), "both calls reached the server over TLS, in the session it gave (it answers 404 without one)")
+			server = await self.status("secure")
+			self.assertEqual(("running", "http", "fake-mcp"), (server["state"], server["transport"], server["serverName"]), mode)
+			self.http.kill()
+			self.http.wait(10)
+			self.http.stdout.close()
+			self.http = None
+			os.remove(self.log_path())
+
+	async def test_an_https_server_it_cannot_trust_is_refused_with_why(self):
+		url = self.start_http("--tls")
+		alone = await self.client.request("mcp.test", {"wsId": "w1", "name": "far", "server": {"url": url}})
+		self.assertFalse(alone["ok"])
+		self.assertIn("the certificate of 127.0.0.1 is refused: it is not issued by an authority this machine trusts", alone["error"])
+		gone = await self.client.request("mcp.test", {"wsId": "w1", "name": "far", "server": {"url": url, "caFile": "no-such-ca.pem"}})
+		self.assertFalse(gone["ok"])
+		self.assertIn("its caFile cannot be read: ", gone["error"])
+		self.assertIn("no-such-ca.pem", gone["error"])
+		plain = await self.client.request("mcp.test", {"wsId": "w1", "name": "far", "server": {"url": url.replace("https://", "http://"), "caFile": FAKE_CA}})
+		self.assertFalse(plain["ok"])
+		self.assertIn("a caFile goes with an https:// url", plain["error"])
+		self.assertEqual([], [e for e in self.received() if "message" in e], "nothing reached the server")
 
 
 class McpClaudeTests(ClaudeCase):

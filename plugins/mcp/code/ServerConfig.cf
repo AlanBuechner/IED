@@ -62,7 +62,7 @@ namespace Mcp
 
 	Core::String DefaultPrivacy(Core::StringView url) {
 		if (url.IsEmpty()) return Core::String("local");
-		const Http::Url parsed = Http::ParseUrl(url.StartsWith(Core::StringView("https://")) ? (Core::String("http://") + url.Substring(8, url.ByteLength() - 8)).View() : url);
+		const Http::Url parsed = Http::ParseUrl(url);
 		Core::StringView host = parsed.host.View();
 		const bool loopback = host == "localhost" || host == "::1" || host.StartsWith(Core::StringView("127."));
 		return Core::String(loopback ? "local" : "cloud");
@@ -108,8 +108,8 @@ namespace Mcp
 	static Core::String HashOf(Core::StringView name, const Serialization::DomNode& entry) {
 		Core::StringBuilder text;
 		text.Append(name);
-		const char*[6] keys = { "command", "args", "env", "cwd", "url", "headers" };
-		for (int64 i = 0; i < 6; ++i) {
+		const char*[7] keys = { "command", "args", "env", "cwd", "url", "headers", "caFile" };
+		for (int64 i = 0; i < 7; ++i) {
 			text.Append("\n");
 			text.Append(keys[i]);
 			text.Append("=");
@@ -144,6 +144,11 @@ namespace Mcp
 		}
 		if (!Values(entry.Member("headers"), config->m_Headers, problem)) {
 			problem = Core::String("headers ") + problem.View();
+			return nullptr;
+		}
+		config->m_CaFile = Core::String(entry.Member("caFile").AsView().Trimmed());
+		if (!config->m_CaFile.IsEmpty() && !Http::ParseUrl(config->m_Url.View()).secure) {
+			problem = Core::String("a caFile goes with an https:// url");
 			return nullptr;
 		}
 		config->m_Enabled = !entry.Member("enabled").IsValid() || entry.Member("enabled").AsBool();

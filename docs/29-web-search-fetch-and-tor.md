@@ -122,9 +122,9 @@ waits for Tor. Measured on a cold start: a binding call with `wait: 2` answered 
 **Idle stop.** With no search for `websearch.stopAfterSeconds` (default 1800; 0: never) SearXNG stops; a watcher thread
 also notices a SearXNG that died.
 
-**Another instance.** `websearch.instanceUrl` (`http://host:port`) uses a SearXNG the owner runs instead: nothing is
-started and Tor is that instance's business. It must have `json` in `search.formats`. Plain http only (Bedrock's HTTP
-client has no TLS): a LAN or loopback instance.
+**Another instance.** `websearch.instanceUrl` (`http://host:port`, or `https://` - Bedrock's TLS, the instance's
+certificate checked against the roots Windows trusts) uses a SearXNG the owner runs instead: nothing is started and Tor
+is that instance's business. It must have `json` in `search.formats`.
 
 **Status.** `websearch:status`: `{state: "stopped"|"starting"|"ready"|"failed"|"external", url?, summary?, error?,
 viaTor, engines, unknownEngines, lastSearch?: {query, results, ms, retried, error?, failed: [[engine, reason]]}}`.

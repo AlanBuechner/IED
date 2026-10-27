@@ -2417,6 +2417,7 @@ def model_settings(run):
 
 
 FAKE_MCP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "fake-mcp", "fake_mcp.py")
+FAKE_CA = os.path.join(os.path.dirname(FAKE_MCP), "tls", "ca.pem")
 
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))
@@ -2461,6 +2462,54 @@ def mcp_settings_page(run):
 	run.wait_text(card + " .mcp-line", "stay offered")
 	run.shot("stopped")
 	run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {}})
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def mcp_settings_https(run):
+	"""An https MCP server in Settings > AI > MCP Servers (docs/04 "MCP"): its URL alone is refused with why (the test
+	CA is no root Windows trusts), then Test with the CA file passes and Save writes caFile. Against tools/fake-mcp
+	served over TLS (--tls)."""
+	import subprocess
+	import sys
+	served = subprocess.Popen([sys.executable, "-I", FAKE_MCP, "--http", "0", "--tls"], stdout=subprocess.PIPE, text=True)
+	try:
+		url = served.stdout.readline().split()[1]
+		page = run.open()
+		run.request("ws.setTrust", {"wsId": page.evaluate("ied_shell.wsId"), "trusted": True})
+		open_settings(run, page)
+		page.click(".set-node[data-page='custom:ied.mcp.servers']")
+		pane = ".set-custom[data-page='custom:ied.mcp.servers']"
+		page.wait_for_selector(pane + " button[data-act='add']")
+		page.click(pane + " button[data-act='add']")
+		form = pane + " .mcp-server.editing"
+		page.fill(form + " input[aria-label='Name']", "secure")
+		page.select_option(form + " select[aria-label='Kind']", "url")
+		check(page.is_visible(form + " input[aria-label='CA file']") and not page.is_visible(form + " input[aria-label='Command']"), "a URL's fields, with its CA file")
+		page.fill(form + " input[aria-label='URL']", url)
+		page.click(form + " button[data-act='try']")
+		page.wait_for_selector(form + " .mcp-test .mcp-line.mcp-bad", timeout=20000)
+		run.wait_text(form + " .mcp-test", "not issued by an authority this machine trusts")
+		run.shot("untrusted")
+		page.fill(form + " input[aria-label='CA file']", FAKE_CA.replace("\\", "/"))
+		page.click(form + " button[data-act='try']")
+		page.wait_for_selector(form + " .mcp-test .mcp-line.mcp-ok", timeout=20000)
+		run.wait_text(form + " .mcp-test", "10 tools")
+		run.shot("trusted")
+		page.click(form + " button[data-act='save']")
+		page.wait_for_selector(pane + " .mcp-server[data-server='secure']:not(.editing)")
+		deadline = time.time() + 10
+		while True:
+			servers = run.request("settings.get", {})["values"]["mcp.servers"]["value"]
+			if "secure" in servers or time.time() > deadline:
+				break
+			time.sleep(0.1)
+		check(servers.get("secure", {}) == {"url": url, "caFile": FAKE_CA.replace("\\", "/")}, "written to the User tier: %s" % servers)
+		run.shot("saved")
+	finally:
+		run.request("settings.set", {"tier": "app", "key": "mcp.servers", "value": {}})
+		served.kill()
+		served.wait(10)
+		served.stdout.close()
 
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))

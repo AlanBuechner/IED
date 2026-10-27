@@ -10,19 +10,11 @@ namespace Ai
 		this.m_Method = Core::String(method);
 		const Http::Url parsed = Http::ParseUrl(url);
 		if (!parsed.valid || parsed.webSocket) {
-			error = Core::String("not an http://host[:port]/path URL: ") + url;
+			error = Core::String("not an http:// or https://host[:port]/path URL: ") + url;
 			return false;
 		}
-		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
-		if (!found.Found()) {
-			error = found.error;
-			return false;
-		}
-		m_Stream = Net::TcpStream::Connect(found.addresses[0], connectMs);
-		if (!m_Stream.IsOpen()) {
-			error = Core::String(m_Stream.Error());
-			return false;
-		}
+		m_Stream = Http::ConnectTo(parsed, Net::TlsClientOptions(), connectMs, error);
+		if (!m_Stream.IsOpen()) return false;
 		Core::StringBuilder request;
 		request.Append(this.m_Method.View());
 		request.Append(" ");

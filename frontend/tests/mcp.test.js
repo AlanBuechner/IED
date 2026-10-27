@@ -1,5 +1,6 @@
 // mcp.test.js - Settings > AI > MCP Servers' pure parts (plugins/mcp, docs/04 "MCP"): what a server's state and a test
-// read as, the Add server form's fields as an mcp.servers entry and back, and where a server comes from.
+// read as, the Add server form's fields as an mcp.servers entry and back (an https URL's CA file, the members it does
+// not show kept), and where a server comes from.
 
 import { test, assertEqual } from "./harness.js";
 import { fieldsOf, joinArgs, readPairs, serverFrom, sourceOf, splitArgs, stateLine, testLine } from "/plugins/ied.mcp/ui/model.js";
@@ -49,10 +50,18 @@ test("mcp: the form's fields as an entry and back", () => {
 	assertEqual(web.entry, { url: "http://127.0.0.1:7801/mcp", headers: { Authorization: { env: "TOKEN" } }, permission: "read", preload: true, privacy: "local", enabled: false });
 	const back = fieldsOf("blender", made.entry);
 	assertEqual([back.kind, back.args, back.env, back.permission, back.timeoutSeconds], ["command", "-I C:/tools/blender.py", "PORT=9876", "ask", 300]);
+	const secure = serverFrom({ name: "far", kind: "url", url: "https://mcp.example.com/mcp", headers: "", caFile: " certs/corp-ca.pem ", permission: "ask", enabled: true });
+	assertEqual(secure.entry, { url: "https://mcp.example.com/mcp", caFile: "certs/corp-ca.pem" }, "an https URL with its CA file");
+	assertEqual(fieldsOf("far", secure.entry).caFile, "certs/corp-ca.pem");
+	const edited = fieldsOf("blender", { command: "python", exclude: ["run_python"], caFile: "x.pem" });
+	assertEqual(edited.kept, { exclude: ["run_python"] }, "what the form does not show is kept");
+	edited.timeoutSeconds = "60";
+	assertEqual(serverFrom(edited).entry, { command: "python", timeoutSeconds: 60, exclude: ["run_python"] }, "and goes back when the entry is saved");
 	for (const [fields, message] of [
 		[{ name: "a b", kind: "command", command: "x" }, "a name is 1 to 32 letters, digits, '_' and '-'"],
 		[{ name: "a", kind: "command", command: " " }, "a command is the program IED starts (python, uvx, npx, a path)"],
-		[{ name: "a", kind: "url", url: "ftp://x" }, "the URL must be http://host:port/path"],
+		[{ name: "a", kind: "url", url: "ftp://x" }, "the URL must be http:// or https://host:port/path"],
+		[{ name: "a", kind: "url", url: "http://h/mcp", caFile: "ca.pem" }, "a CA file goes with an https:// URL"],
 		[{ name: "a", kind: "command", command: "x", timeoutSeconds: "1.5" }, "timeoutSeconds must be a whole number of seconds"],
 	]) {
 		let said = "";

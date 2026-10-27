@@ -30,7 +30,7 @@ export class McpPage {
 		replace(ctx.el,
 			h("div.set-crumbs", null, "AI" + ARROW + "MCP Servers" + DOT, h("span.mono", null, KEY)),
 			h("h1", null, "MCP Servers"),
-			h("p.mcp-lead", null, "Programs and services that give the AI more tools: Blender, a game engine, anything that speaks the Model Context Protocol. IED starts a command when a chat first needs it and speaks to it on its standard input and output, or reaches a running server at its http:// URL. Their tools are the chat's tools mcp_<server>_<tool>, loaded on demand, and run with the same permission checks and approval cards as IED's own."),
+			h("p.mcp-lead", null, "Programs and services that give the AI more tools: Blender, a game engine, anything that speaks the Model Context Protocol. IED starts a command when a chat first needs it and speaks to it on its standard input and output, or reaches a running server at its http:// or https:// URL. Their tools are the chat's tools mcp_<server>_<tool>, loaded on demand, and run with the same permission checks and approval cards as IED's own."),
 			this.statusEl,
 			h("div.mcp-bar", null, h("button.btn", { dataset: { act: "add" }, on: { click: () => this.edit("") } }, icon("add"), "Add server")),
 			this.listEl,
@@ -252,8 +252,9 @@ export class McpPage {
 			area("Environment", "env", "NAME=value, one a line; NAME=env:VAR reads IED's VAR"),
 		];
 		const urlFields = [
-			field("URL", "url", { placeholder: "http://127.0.0.1:8000/mcp" }),
+			field("URL", "url", { placeholder: "http://127.0.0.1:8000/mcp or https://..." }),
 			area("Headers", "headers", "Name: value, one a line; Authorization: env:TOKEN reads IED's TOKEN"),
+			field("CA file", "caFile", { placeholder: "https: a PEM file of extra CAs (optional)" }),
 		];
 		const show = () => {
 			for (const el of commandFields) el.hidden = inputs.kind.value !== "command";
@@ -267,6 +268,7 @@ export class McpPage {
 			for (const [key, input] of Object.entries(inputs)) fields[key] = input.value;
 			fields.preload = preload.checked;
 			fields.enabled = draft.enabled;
+			fields.kept = draft.kept;
 			this.draft = Object.assign({}, fields);
 			return serverFrom(fields);
 		};

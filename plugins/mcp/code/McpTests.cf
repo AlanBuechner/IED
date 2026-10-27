@@ -99,6 +99,23 @@ class McpConfigTests {
 		Mcp::ServerConfig* c = Mcp::ReadServer(Core::StringView("s"), Json("{\"command\": \"x\", \"args\": [\"2\"]}", doc), problem);
 		assert_true(a->m_Hash == b->m_Hash, "permission and preload keep the server running");
 		assert_true(a->m_Hash != c->m_Hash, "its arguments start another");
+		Mcp::ServerConfig* plain = Mcp::ReadServer(Core::StringView("s"), Json("{\"url\": \"https://h/mcp\"}", doc), problem);
+		Mcp::ServerConfig* trusting = Mcp::ReadServer(Core::StringView("s"), Json("{\"url\": \"https://h/mcp\", \"caFile\": \"ca.pem\"}", doc), problem);
+		assert_true(plain->m_Hash != trusting->m_Hash, "a caFile starts another");
+	}
+
+	[test("https_and_its_ca_file")]
+	public static void TestHttps() {
+		Serialization::DomDoc doc;
+		Core::String problem;
+		Mcp::ServerConfig* local = Mcp::ReadServer(Core::StringView("s"), Json("{\"url\": \"https://127.0.0.1:8443/mcp\", \"caFile\": \" tls/ca.pem \"}", doc), problem);
+		assert_true(local != nullptr && local->IsHttp() && local->m_CaFile.View() == "tls/ca.pem", problem.CStr());
+		assert_true(local->m_Privacy.View() == "local", "a loopback https URL is local");
+		Mcp::ServerConfig* far = Mcp::ReadServer(Core::StringView("s"), Json("{\"url\": \"HTTPS://example.com/mcp\"}", doc), problem);
+		assert_true(far != nullptr && far->m_Privacy.View() == "cloud" && far->m_CaFile.IsEmpty(), "any other https URL is cloud; no caFile is needed");
+		assert_true(Mcp::ReadServer(Core::StringView("s"), Json("{\"url\": \"http://h/mcp\", \"caFile\": \"ca.pem\"}", doc), problem) == nullptr, "plain http has no certificate");
+		assert_true(problem.View() == "a caFile goes with an https:// url", problem.CStr());
+		assert_true(Mcp::ReadServer(Core::StringView("s"), Json("{\"command\": \"x\", \"caFile\": \"ca.pem\"}", doc), problem) == nullptr, "nor does a command");
 	}
 
 	[test("the_ais_tool_names")]

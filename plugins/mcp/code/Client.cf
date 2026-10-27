@@ -91,12 +91,8 @@ namespace Mcp
 		m_Http = !given.m_Url.IsEmpty();
 		if (m_Http) {
 			const Http::Url parsed = Http::ParseUrl(given.m_Url.View());
-			if (given.m_Url.View().StartsWith(Core::StringView("https://"))) {
-				error = Core::String("https is not supported: IED's HTTP client speaks plain http (a server on this machine or the LAN); put an http:// URL");
-				return false;
-			}
 			if (!parsed.valid || parsed.webSocket) {
-				error = Core::String("not an http://host[:port]/path URL: ") + given.m_Url.View();
+				error = Core::String("not an http:// or https://host[:port]/path URL: ") + given.m_Url.View();
 				return false;
 			}
 			return true;
@@ -217,7 +213,7 @@ namespace Mcp
 	// A message that needs no answer: a notification, or IED's answer to a server's request.
 	bool McpClient::Post(Core::StringView text, Core::String& error) {
 		HttpExchange exchange;
-		if (!exchange.Send(Core::StringView("POST"), m_Launch.m_Url.View(), HttpHeaders(), text, c_ConnectMs, error)) return false;
+		if (!exchange.Send(Core::StringView("POST"), m_Launch.m_Url.View(), m_Launch.m_Tls, HttpHeaders(), text, c_ConnectMs, error)) return false;
 		const BodyRead head = exchange.ReadHead(c_WriteMs);
 		if (head != BodyRead::Bytes) {
 			error = head == BodyRead::Waiting ? Core::String("no answer") : Core::String(exchange.Error());
@@ -312,7 +308,7 @@ namespace Mcp
 		const int64 deadline = NowMs() + waitMs;
 		for (int32 attempt = 0; attempt < 2; ++attempt) {
 			HttpExchange exchange;
-			if (!exchange.Send(Core::StringView("POST"), m_Launch.m_Url.View(), HttpHeaders(), text, c_ConnectMs, error)) return Serialization::DomNode();
+			if (!exchange.Send(Core::StringView("POST"), m_Launch.m_Url.View(), m_Launch.m_Tls, HttpHeaders(), text, c_ConnectMs, error)) return Serialization::DomNode();
 			for (;;) {
 				const BodyRead head = exchange.ReadHead(c_SliceMs);
 				if (head == BodyRead::Bytes) break;
@@ -441,7 +437,7 @@ namespace Mcp
 			if (m_Session.IsEmpty()) return;
 			HttpExchange exchange;
 			Core::String error;
-			if (exchange.Send(Core::StringView("DELETE"), m_Launch.m_Url.View(), HttpHeaders(), Core::StringView(""), c_ConnectMs, error)) exchange.ReadHead(2000);
+			if (exchange.Send(Core::StringView("DELETE"), m_Launch.m_Url.View(), m_Launch.m_Tls, HttpHeaders(), Core::StringView(""), c_ConnectMs, error)) exchange.ReadHead(2000);
 			return;
 		}
 		{

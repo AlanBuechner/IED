@@ -29,8 +29,9 @@ namespace Mcp
 		public Core::String m_ShellLine;                  // stdio through cmd.exe (a batch file such as npx.cmd): the line
 		public Core::String m_Cwd;
 		public Core::Array<Core::String> m_Environment;   // "NAME=value", added to IED's
-		public Core::String m_Url;                        // http
+		public Core::String m_Url;                        // http or https
 		public Core::Array<Core::String> m_Headers;       // "Name: value"
+		public Net::TlsClientOptions m_Tls;               // https: the caFile's roots, trusted besides the system's
 	}
 
 	class PendingCall

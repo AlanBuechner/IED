@@ -1,8 +1,8 @@
 // One HTTP exchange with a streamable-HTTP MCP server (docs/04 "MCP" Protocol): a POST of a JSON-RPC message (or the
-// DELETE that ends a session) with its headers, then the answer's head and its body as it comes - chunked, sized, or
-// until the server closes - each read waiting at most the time given, so the caller can look at its cancel flag between
-// reads. Plain http: Bedrock's client has no TLS. And the event stream such an answer may be: "data:" lines joined, a
-// blank line ending an event.
+// DELETE that ends a session) with its headers, over http or https (Bedrock's TLS: the server's certificate checked
+// against the system's roots and the server's caFile), then the answer's head and its body as it comes - chunked,
+// sized, or until the server closes - each read waiting at most the time given, so the caller can look at its cancel
+// flag between reads. And the event stream such an answer may be: "data:" lines joined, a blank line ending an event.
 
 include "bedrock.ch"
 
@@ -15,8 +15,10 @@ namespace Mcp
 		[operator("create")] public void Init() {}
 		[operator("delete")] public void Delete() { Close(); }
 
-		// Connects to `url` and sends `body` with `headers` ("Name: value"); false with `error`.
-		public bool Send(Core::StringView method, Core::StringView url, const Core::Array<Core::String>& headers, Core::StringView body, int32 connectMs, Core::String& error);
+		// Connects to `url` (https: its certificate checked against `tls`) and sends `body` with `headers` ("Name:
+		// value"); false with `error`.
+		public bool Send(Core::StringView method, Core::StringView url, const Net::TlsClientOptions& tls, const Core::Array<Core::String>& headers,
+			Core::StringView body, int32 connectMs, Core::String& error);
 		// The answer's head: Bytes once it is in, Waiting, or Failed (Error).
 		public BodyRead ReadHead(int32 waitMs);
 		// Body bytes appended to `out`: Bytes, Waiting, Ended (the whole body is in) or Failed.

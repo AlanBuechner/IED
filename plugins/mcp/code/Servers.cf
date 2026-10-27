@@ -339,13 +339,33 @@ namespace Mcp
 		return path.StartsWith(Core::StringView("/")) || path.StartsWith(Core::StringView("\\")) || (path.ByteLength() > 1 && path.ByteAt(1) == ':');
 	}
 
+	// A path of a server's entry: itself when absolute, else from the workspace's root.
+	static Core::String InWorkspace(const IED::Workspace& ws, Core::StringView path) {
+		return IsAbsolute(path) ? Core::String(path) : Core::String((FS::Path(ws.m_Root.View()) / path).View());
+	}
+
+	// The caFile's certificates, the roots an https server's certificate may chain to besides the system's; false with
+	// `error` when it cannot be read.
+	static bool ReadCaFile(const ServerConfig* config, const IED::Workspace& ws, Net::TlsClientOptions& tls, Core::String& error) {
+		if (config->m_CaFile.IsEmpty()) return true;
+		const Core::String path = InWorkspace(ws, config->m_CaFile.View());
+		FS::File file = FS::File(path.CStr(), "rb");
+		if (!file.IsOpen()) {
+			error = Core::String("its caFile cannot be read: ") + path.View();
+			return false;
+		}
+		const Core::String roots = file.ReadText();
+		tls.extraRoots.Append((const uint8*)roots.View().Data(), roots.ByteLength());
+		return true;
+	}
+
 	// What a connection to `config` starts or reaches, in workspace `ws`; false with `error`.
 	static bool LaunchOf(const ServerConfig* config, const IED::Workspace& ws, ServerLaunch& launch, Core::String& error) {
 		if (config->IsHttp()) {
 			launch.m_Url = config->m_Url;
-			return Resolved(config->m_Headers, ": ", launch.m_Headers, error);
+			return Resolved(config->m_Headers, ": ", launch.m_Headers, error) && ReadCaFile(config, ws, launch.m_Tls, error);
 		}
-		launch.m_Cwd = config->m_Cwd.IsEmpty() ? ws.m_Root : IsAbsolute(config->m_Cwd.View()) ? config->m_Cwd : Core::String((FS::Path(ws.m_Root.View()) / config->m_Cwd.View()).View());
+		launch.m_Cwd = config->m_Cwd.IsEmpty() ? ws.m_Root : InWorkspace(ws, config->m_Cwd.View());
 		if (!FS::IsDirectory(launch.m_Cwd.CStr())) {
 			error = Core::String("its folder (cwd) is not there: ") + launch.m_Cwd.View();
 			return false;

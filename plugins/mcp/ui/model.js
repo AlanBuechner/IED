@@ -85,17 +85,24 @@ export function writePairs(pairs, separator) {
 	return Object.entries(pairs || {}).map(([key, value]) => key + (separator === "=" ? "=" : ": ") + (typeof value === "object" ? "env:" + value.env : value)).join("\n");
 }
 
-// The mcp.servers entry the form's fields describe, with its name; throws when one is not usable.
+// The members of an mcp.servers entry the form edits; the rest (exclude) are kept as they were.
+const FORM_KEYS = new Set(["command", "args", "env", "cwd", "url", "headers", "caFile", "permission", "preload", "privacy", "timeoutSeconds", "startSeconds", "enabled"]);
+
+// The mcp.servers entry the form's fields describe, with its name; throws when one is not usable. `fields.kept` holds
+// the members of the entry being edited that the form does not show.
 export function serverFrom(fields) {
 	const name = fields.name.trim();
 	if (!NAME.test(name)) throw new Error("a name is 1 to 32 letters, digits, '_' and '-'");
 	const entry = {};
 	if (fields.kind === "url") {
 		const url = fields.url.trim();
-		if (!/^https?:\/\//.test(url)) throw new Error("the URL must be http://host:port/path");
+		if (!/^https?:\/\//.test(url)) throw new Error("the URL must be http:// or https://host:port/path");
 		entry.url = url;
 		const headers = readPairs(fields.headers || "", ":");
 		if (Object.keys(headers).length) entry.headers = headers;
+		const caFile = (fields.caFile || "").trim();
+		if (caFile && !url.startsWith("https://")) throw new Error("a CA file goes with an https:// URL");
+		if (caFile) entry.caFile = caFile;
 	}
 	else {
 		const command = fields.command.trim();
@@ -117,6 +124,7 @@ export function serverFrom(fields) {
 		entry[key] = value;
 	}
 	if (fields.enabled === false) entry.enabled = false;
+	for (const [key, value] of Object.entries(fields.kept || {})) entry[key] = value;
 	return { name, entry };
 }
 
@@ -131,12 +139,14 @@ export function fieldsOf(name, entry) {
 		cwd: entry.cwd || "",
 		url: entry.url || "",
 		headers: writePairs(entry.headers, ":"),
+		caFile: entry.caFile || "",
 		permission: entry.permission || "ask",
 		preload: entry.preload === true,
 		privacy: entry.privacy || "",
 		timeoutSeconds: entry.timeoutSeconds || "",
 		startSeconds: entry.startSeconds || "",
 		enabled: entry.enabled !== false,
+		kept: Object.fromEntries(Object.entries(entry).filter(([key]) => !FORM_KEYS.has(key))),
 	};
 }
 

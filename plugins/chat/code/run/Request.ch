@@ -1,7 +1,7 @@
 // An HTTP request whose response streams (a model server's SSE, docs/12): send it, read the head, then hand out the
 // body as it arrives - chunked, sized, or until the server closes - each read waiting at most the time given, so the
-// caller's watchdogs decide what a silence means. A POST of JSON, or a GET; plain http (local model servers); one
-// request per connection.
+// caller's watchdogs decide what a silence means. A POST of JSON, or a GET; http (local model servers), or https with
+// the server's certificate checked against the system's roots; one request per connection.
 //     StreamingRequest request;
 //     if (!request.Send(url, headers, body, 5000, error)) ...
 //     request.ReadHead(250) ... request.Read(text, 250)

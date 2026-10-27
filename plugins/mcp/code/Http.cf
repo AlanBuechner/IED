@@ -6,23 +6,16 @@ namespace Mcp
 	const int64 c_HttpMostHeadBytes = 65536;
 	const int64 c_HttpMostBodyBytes = 64 * 1024 * 1024;
 
-	bool HttpExchange::Send(Core::StringView method, Core::StringView url, const Core::Array<Core::String>& headers, Core::StringView body, int32 connectMs, Core::String& error) {
+	bool HttpExchange::Send(Core::StringView method, Core::StringView url, const Net::TlsClientOptions& tls, const Core::Array<Core::String>& headers,
+		Core::StringView body, int32 connectMs, Core::String& error) {
 		this.m_Method = Core::String(method);
 		const Http::Url parsed = Http::ParseUrl(url);
 		if (!parsed.valid || parsed.webSocket) {
-			error = Core::String("not an http://host[:port]/path URL: ") + url;
+			error = Core::String("not an http:// or https://host[:port]/path URL: ") + url;
 			return false;
 		}
-		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
-		if (!found.Found()) {
-			error = (Core::String("cannot find ") + parsed.host.View() + ": ") + found.error.View();
-			return false;
-		}
-		m_Stream = Net::TcpStream::Connect(found.addresses[0], connectMs);
-		if (!m_Stream.IsOpen()) {
-			error = (Core::String("cannot connect to ") + Http::HostHeader(parsed).View() + ": ") + m_Stream.Error();
-			return false;
-		}
+		m_Stream = Http::ConnectTo(parsed, tls, connectMs, error);
+		if (!m_Stream.IsOpen()) return false;
 		Core::StringBuilder request;
 		request.Append(method);
 		request.Append(" ");

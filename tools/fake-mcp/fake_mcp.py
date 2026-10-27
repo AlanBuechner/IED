@@ -1,10 +1,14 @@
 """A scriptable MCP server (docs/04 "MCP", spec 2025-06-18) for IED's MCP client checks
 (tools/server-checks/tests/test_mcp.py): stdio by default (one JSON-RPC message a line on stdin and stdout), or
 streamable HTTP with --http PORT (POST /mcp answered with JSON, or an event stream with --sse; Mcp-Session-Id; 202 for
-notifications; DELETE ends the session). Stdlib only.
+notifications; DELETE ends the session), over TLS (https) with --tls. Stdlib only.
 
 	python -I tools/fake-mcp/fake_mcp.py [--log FILE] [--page-size N] [--hang-initialize] [--exit-at-start CODE]
-	                                    [--version V] [--name NAME] [--http PORT [--sse] [--forget-session-after N]]
+	                                    [--version V] [--name NAME] [--http PORT [--sse] [--forget-session-after N] [--tls]]
+
+--tls serves https with the test PKI in tls/ (made once with OpenSSL, for these checks only - the key is no secret):
+ca.pem (CN=IED fake-mcp Test CA, self-signed, 2026 to 2126), and server.pem with server-key.pem (CN=localhost, SAN
+DNS:localhost and IP:127.0.0.1, serverAuth, issued by ca.pem). A client trusts it through ca.pem (mcp.servers.<name>.caFile).
 
 Tools: echo {text}, add {a, b}, image {}, slow {seconds} (stops when cancelled), crash {} (the process exits with 3),
 fail {} (an isError result), add_tool {} (a new tool extra_<n>, then notifications/tools/list_changed), ping_back {}
@@ -20,10 +24,13 @@ import http.server
 import json
 import os
 import socketserver
+import ssl
 import sys
 import threading
 import time
 import uuid
+
+TLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tls")
 
 # A 1x1 PNG.
 PIXEL = base64.b64encode(bytes.fromhex(
@@ -283,7 +290,13 @@ def run_http(args):
 		daemon_threads = True
 
 	httpd = Threaded(("127.0.0.1", args.http), Handler)
-	print("LISTENING http://127.0.0.1:%d/mcp" % httpd.server_address[1], flush=True)
+	scheme = "http"
+	if args.tls:
+		context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+		context.load_cert_chain(os.path.join(TLS, "server.pem"), os.path.join(TLS, "server-key.pem"))
+		httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+		scheme = "https"
+	print("LISTENING %s://127.0.0.1:%d/mcp" % (scheme, httpd.server_address[1]), flush=True)
 	httpd.serve_forever()
 
 
@@ -298,6 +311,7 @@ def main():
 	parser.add_argument("--http", type=int)
 	parser.add_argument("--sse", action="store_true")
 	parser.add_argument("--forget-session-after", type=int, default=0)
+	parser.add_argument("--tls", action="store_true")
 	args = parser.parse_args()
 	if args.exit_at_start is not None:
 		sys.stderr.write("fake_mcp: exiting at start as asked\n")

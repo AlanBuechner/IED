@@ -405,14 +405,21 @@ name replacing the shallower one's; `docs/07`), or of a plugin's `contributes.mc
 "mcp.servers": {
 	"blender": { "command": "python", "args": ["-I", "C:/GameDev/IED/tools/blender-lab-mcp/server.py"], "env": { "BLENDER_MCP_PORT": "9876" } },
 	"engine":  { "url": "http://127.0.0.1:7801/mcp", "headers": { "Authorization": { "env": "ENGINE_TOKEN" } },
-	             "permission": "read", "preload": true, "privacy": "local" }
+	             "permission": "read", "preload": true, "privacy": "local" },
+	"studio":  { "url": "https://mcp.studio.lan/mcp", "caFile": "certs/studio-ca.pem", "privacy": "lan" }
 }
 ```
 
 - `command` (a program on PATH or a path; a `.cmd` or `.bat` - `npx` - runs through cmd.exe, each word quoted), `args`,
   `env` (added to the server's environment) and `cwd` (relative to the workspace root, which is the default): a server IED
-  starts and speaks to on its standard input and output. Or `url` (`http://`; Bedrock's HTTP client has no TLS, so `https`
-  is refused with that reason) and `headers`: a server already running, spoken to with streamable HTTP. A value in `env` or
+  starts and speaks to on its standard input and output. Or `url` (`http://` or `https://`) and `headers`: a server
+  already running, spoken to with streamable HTTP. An https server is reached through Bedrock's TLS (SChannel; C4
+  `docs/library/bedrock.md` section 13): its certificate must chain to a root Windows trusts, name the URL's host, be
+  valid and not revoked - the check is never turned off. `caFile` (with an https `url`; relative to the workspace root)
+  names a PEM (or DER) file of CA certificates its certificate may chain to besides Windows' own - a local or corporate
+  authority; it adds trust for that server only and never widens the system's. A refusal says why in the server's
+  error and the MCP output ("the certificate of 127.0.0.1 is refused: it is not issued by an authority this machine
+  trusts ..."; "... it was issued for other names"; "... it has expired"), and a caFile that cannot be read says so. A value in `env` or
   `headers` is text or `{"env": "NAME"}`, read from IED's environment when the server starts, so no secret is written in a
   settings file (`docs/11` "Secrets").
 - `enabled` (default true); `exclude`, tool names left out.
@@ -476,7 +483,9 @@ one line of JSON; the server's standard error goes to the output. Streamable HTT
 application/json, text/event-stream`, `MCP-Protocol-Version` and the `Mcp-Session-Id` the server gave at `initialize`, and
 reads a JSON answer or an event stream (with the server's requests and notifications in it) up to the answer; a 404 for a
 session starts a new one once; stopping sends `DELETE`. The client opens no standing GET stream, so a server tells it of a
-changed list only in an answer.
+changed list only in an answer. Every request is a connection of its own (`Connection: close`), over TLS for an https
+URL. Not built: OAuth (the MCP authorization flow); a server that needs a token takes it in `headers`
+(`Authorization: {"env": "NAME"}`).
 
 **Failures show** in the workspace's Output source **MCP** (each start with its command or URL, the server's name and
 version and its tools, its standard error, exits with their code, restarts, timeouts, protocol errors), on the server's row
@@ -514,14 +523,17 @@ methods, bindings and the tool function `Mcp::CallTool` with its plan `Mcp::Plan
 `group` and `approval` (`CodeTools.cf`, `PluginTools.cf`, `AskUntilAllowed` in `Permissions.cf`, used in `RunTools.cf`), the
 card's source from `ToolResult.source`, the mention kind `mcp` (`Sent.cf`, `Mentions.cf`, `ui/mentions.js`).
 
-Checks: unit `server.mcp.*` (14) and `server.ai.permissions`; server checks `tools/server-checks/tests/test_mcp.py` (14)
+Checks: unit `server.mcp.*` (15) and `server.ai.permissions`; server checks `tools/server-checks/tests/test_mcp.py` (15)
 against `tools/fake-mcp/fake_mcp.py` (a stdlib MCP server, stdio or HTTP with JSON or event-stream answers): a chat lists and
 calls the tools (three pages, text, structured, image, resources, an error, the server's ping), an approval in `auto` mode
 until "Allow for this chat", a read-only server in Plan mode, `list_changed` reaching the next turn, a crash restarted, a
 start and a call that never answer, Stop cancelling at the server, the tools offered from `tools.json` after a restart
 without a start, an untrusted workspace with none, Test, Stop and Restart, a resource mention, HTTP with events and with
-JSON, a lost HTTP session, https refused, and a Claude chat calling one through IED's in-process server; frontend
-`mcp.test.js`; e2e `mcp_settings_page` and `mcp_resource_mention` (desktop, phone).
+JSON, a lost HTTP session, https with events and with JSON (the fake served over TLS by Python's `ssl` with its test CA in
+`tools/fake-mcp/tls/`, trusted through `caFile`; the calls in the session it gave), an https server refused without its
+CA with why, a caFile that cannot be read or that goes with plain http, and a Claude chat calling one through IED's
+in-process server; frontend `mcp.test.js` (the form's CA file, members it does not show kept); e2e `mcp_settings_page`,
+`mcp_settings_https` (Test refused, then passing with the CA file, Save) and `mcp_resource_mention` (desktop, phone).
 
 **Checked with a real Blender** (2026-10-26): the owner's Blender 5.2.1 has the Blender Lab "MCP" add-on (lab.blender.org),
 which is only the half inside Blender - a socket on localhost:9876 that runs code it is sent - while its MCP server half is

@@ -1,7 +1,8 @@
 // A server's configuration (docs/04 "MCP"): an mcp.servers entry - a command IED starts (stdio) or a URL it reaches
-// (streamable HTTP), with what the owner says of it: enabled, permission, preload, privacy, the time a call and a start
-// may take, the tools left out - or a plugin's contributes.mcpServers entry, which an mcp.servers entry of its name
-// replaces. Names and the AI's tool names made from them.
+// (streamable HTTP, http or https, with the CA file an https server's certificate may chain to), with what the owner
+// says of it: enabled, permission, preload, privacy, the time a call and a start may take, the tools left out - or a
+// plugin's contributes.mcpServers entry, which an mcp.servers entry of its name replaces. Names and the AI's tool names
+// made from them.
 
 include "api/Plugin.ch"
 
@@ -33,6 +34,7 @@ namespace Mcp
 		public Core::String m_Cwd;
 		public Core::String m_Url;
 		public Core::Array<ConfigValue> m_Headers;
+		public Core::String m_CaFile;               // https: CA certificates trusted besides the system's, as written
 		public bool m_Enabled;
 		public Permission m_Permission;
 		public bool m_PreloadAll;

@@ -60,10 +60,10 @@
 		},
 		"websearch.instanceUrl": {
 			"type": "string",
-			"pattern": "^(http://.+)?$",
+			"pattern": "^(https?://.+)?$",
 			"default": "",
 			"x-ied-tiers": ["app"],
-			"description": "Use a SearXNG you run instead of starting one (http://host:port, with json among its search formats). Tor is then that instance's business. Empty: IED runs its own."
+			"description": "Use a SearXNG you run instead of starting one (http://host:port, or https:// with a certificate Windows trusts; json among its search formats). Tor is then that instance's business. Empty: IED runs its own."
 		},
 		"websearch.python": {
 			"type": "string",

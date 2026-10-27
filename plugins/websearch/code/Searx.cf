@@ -244,8 +244,9 @@ namespace WebSearch
 
 	bool SearxService::External(Core::StringView instance, Core::String& base, Core::String& error) {
 		if (m_Process != null) Halt(SearxState::Stopped, Core::StringView("websearch.instanceUrl names another SearXNG"));
-		if (!instance.StartsWith(Core::StringView("http://"))) {
-			error = Core::String("websearch.instanceUrl must be an http:// address (the server's HTTP client has no TLS): ") + instance;
+		const Http::Url parsed = Http::ParseUrl(instance);
+		if (!parsed.valid || parsed.webSocket) {
+			error = Core::String("websearch.instanceUrl must be an http:// or https:// address: ") + instance;
 			SetState(SearxState::Failed, Core::StringView(""), error.View());
 			return false;
 		}

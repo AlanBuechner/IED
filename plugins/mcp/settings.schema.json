@@ -17,8 +17,9 @@
 				"args": { "type": "array", "items": { "type": "string" }, "description": "Its arguments, each as written." },
 				"env": { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" }, "description": "Variables added to its environment." },
 				"cwd": { "type": "string", "description": "The folder it runs in, relative to the workspace root (the default)." },
-				"url": { "type": "string", "pattern": "^https?://", "description": "A running server's streamable-HTTP endpoint (http://127.0.0.1:8000/mcp). Plain http only: IED's HTTP client has no TLS." },
+				"url": { "type": "string", "pattern": "^https?://", "description": "A running server's streamable-HTTP endpoint: http://127.0.0.1:8000/mcp, or https:// (TLS: its certificate must chain to a root Windows trusts, or to caFile, and name the URL's host)." },
 				"headers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" }, "description": "Headers each HTTP request carries (Authorization)." },
+				"caFile": { "type": "string", "minLength": 1, "description": "With an https url: a PEM (or DER) file of CA certificates its certificate may chain to besides the ones Windows trusts - a local or corporate authority. Relative to the workspace root. It never turns the check off." },
 				"enabled": { "type": "boolean", "default": true },
 				"permission": { "enum": ["ask", "auto", "read"], "default": "ask", "description": "ask: every call of its tools asks you, in any permission mode, until you allow it for the chat (or an ai.permissions allow rule does); auto: its tools are commands that follow the chat's permission mode; read: you say it only reads - its tools run without asking and are offered in Plan mode." },
 				"preload": { "description": "true, or names of its tools: send them whole with every request. Otherwise they are deferred (shown whole by tool_search).", "oneOf": [ { "type": "boolean" }, { "type": "array", "items": { "type": "string" } } ] },
@@ -37,7 +38,7 @@
 			"default": {},
 			"x-ied-tiers": ["app", "solution", "project"],
 			"x-ied-merge": "merge",
-			"description": "MCP servers whose tools the AI gets in a trusted workspace, by name: {command, args?, env?, cwd?} or {url, headers?}, with enabled, permission, preload, privacy, timeoutSeconds, startSeconds and exclude (docs/04 MCP). A deeper tier's entry of a name replaces the one above it."
+			"description": "MCP servers whose tools the AI gets in a trusted workspace, by name: {command, args?, env?, cwd?} or {url, headers?, caFile?}, with enabled, permission, preload, privacy, timeoutSeconds, startSeconds and exclude (docs/04 MCP). A deeper tier's entry of a name replaces the one above it."
 		},
 		"mcp.idleMinutes": {
 			"type": "integer",
