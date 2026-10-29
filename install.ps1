@@ -1,14 +1,14 @@
 # IED one-command installer (Windows x64). Clones (or updates) the repository, runs setup, builds everything and
 # installs IED. Safe to re-run: it pulls, then continues where the last run stopped.
 #
-#   irm https://raw.githubusercontent.com/AlanBuechner/IED/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/AlanBuechner/IED/main/install.ps1 | iex
 #
 # Environment variables (set before the command): IED_DIR = where to clone (default %USERPROFILE%\IED),
-# IED_BRANCH = branch to install (default master), IED_REPO = repository URL.
+# IED_BRANCH = branch to install (default main), IED_REPO = repository URL.
 $ErrorActionPreference = 'Stop'
 
 $repo = if ($env:IED_REPO) { $env:IED_REPO } else { 'https://github.com/AlanBuechner/IED.git' }
-$branch = if ($env:IED_BRANCH) { $env:IED_BRANCH } else { 'master' }
+$branch = if ($env:IED_BRANCH) { $env:IED_BRANCH } else { 'main' }
 $dir = if ($env:IED_DIR) { $env:IED_DIR } else { Join-Path $env:USERPROFILE 'IED' }
 
 function Say($text) { Write-Host "[install] $text" -ForegroundColor Cyan }

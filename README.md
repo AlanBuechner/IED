@@ -27,7 +27,13 @@ the roadmap is `docs/18`.
 In PowerShell (needs git and the Visual Studio C++ build tools): clones into `%USERPROFILE%\IED` (set `IED_DIR` to change it), runs setup, builds everything and installs IED. Re-running updates and continues.
 
 ```powershell
-irm https://raw.githubusercontent.com/AlanBuechner/IED/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/AlanBuechner/IED/main/install.ps1 | iex
+```
+
+While the repository is private (the line above gets a 404), use git, which signs in with the user's own credentials:
+
+```bat
+git clone https://github.com/AlanBuechner/IED.git %USERPROFILE%\IED && powershell -ExecutionPolicy Bypass -File %USERPROFILE%\IED\install.ps1
 ```
 
 ## Getting started (Windows x64)
