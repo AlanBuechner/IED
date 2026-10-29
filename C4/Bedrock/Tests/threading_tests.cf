@@ -32,7 +32,7 @@ class AtomicTests {
 		expected = 7;
 		assert_true(!a.CompareExchange(expected, 99, MemoryOrder::AcqRel), "and fails on another");
 		assert_eq(21, expected, "writing back what it found");
-		while (!a.CompareExchangeWeak(expected, expected + 1, MemoryOrder::Release)) { }
+		while (!a.CompareExchangeWeak(expected, expected + 1, MemoryOrder::Release)) {}
 		assert_eq(22, a.Load(), "a weak retry loop gets there");
 		assert_eq(22, a.FetchAdd(3), "fetch-add returns the old value");
 		assert_eq(25, a.FetchSub(5, MemoryOrder::Relaxed), "fetch-sub too");
@@ -154,13 +154,22 @@ class ThreadTests {
 	}
 
 	// Ten 2 ms sleeps take about 20 ms; on the system's 15.6 ms tick they took 156 (a frame limiter's sleep).
-	[test("sleep_is_precise")]
-	public static void TestSleepIsPrecise() {
+	static int64 TenShortSleeps() {
 		const int64 start = clock_now_ns();
 		for (int32 i = 0; i < 10; i++) Threading::Thread::Sleep(2 * kMillisecond);
-		const int64 took = clock_now_ns() - start;
-		assert_true(took >= 20 * kMillisecond, "a sleep lasts at least its time");
-		assert_true(took < 80 * kMillisecond, "and ends near it, not on the next system tick");
+		return clock_now_ns() - start;
+	}
+
+	// The fastest of three runs: a loaded machine only delays a run, while sleeps on the system tick are slow in every one.
+	[test("sleep_is_precise")]
+	public static void TestSleepIsPrecise() {
+		int64 fastest = TenShortSleeps();
+		for (int32 attempt = 1; attempt < 3; attempt++) {
+			const int64 took = TenShortSleeps();
+			if (took < fastest) fastest = took;
+		}
+		assert_true(fastest >= 20 * kMillisecond, "a sleep lasts at least its time");
+		assert_true(fastest < 80 * kMillisecond, "and ends near it, not on the next system tick");
 	}
 }
 

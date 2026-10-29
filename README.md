@@ -33,8 +33,8 @@ irm https://raw.githubusercontent.com/AlanBuechner/IED/main/install.ps1 | iex
 [`install.ps1`](install.ps1) gets git when the machine has none (portable MinGit, in `%LOCALAPPDATA%\IED\git`), clones
 into `%USERPROFILE%\IED` (set `IED_DIR` to change it), runs `setup.bat` - which downloads a private Python, LLVM, and
 the MSVC C/C++ runtime and Windows SDK straight from Microsoft's Visual Studio packages (Microsoft's license terms apply;
-setup prints the link) - builds the C4 compiler and IED, and installs IED. About 6 GB of disk; re-running it updates and
-continues.
+setup prints the link) - builds the C4 compiler and IED, and installs IED. About 8 minutes on a fast connection and 11 GB of disk (10 GB in
+the checkout, mostly LLVM and the build); re-running it updates and continues.
 
 ## Getting started (Windows x64)
 
