@@ -18,6 +18,38 @@ strip = 1
 probe = "bin/clang.exe"
 share-with-worktrees = true          # git worktrees junction the main checkout's copy (4 GB)
 
+# Not an archive: the MSVC C/C++ runtime (headers, x64 libraries) and the Windows SDK, taken from Visual Studio's channel
+# manifest (url, sha256: VS 2026 18.11.3's; it pins each package by SHA256) and unpacked in Visual Studio's layout
+# (tools/setup/msvc_kit.py), so building needs no Visual Studio. Nuke's C/C++ driver and the C4 compiler use it first.
+[packages.msvc]
+group = "core"
+kind = "msvc"
+version = "14.51 + SDK 10.0.26100"
+description = "the MSVC C/C++ runtime and the Windows SDK the C4 compiler, IED and every C4 program build and link against (no Visual Studio needed)"
+url = "https://download.visualstudio.microsoft.com/download/pr/5f474104-723f-4007-bf4c-92e42a23dcc6/6feafaf09375b7a7534a79845739c8af4a61041fa2cf4b2d86b56a764c734b7f/VisualStudio.vsman"
+sha256 = "417b8d3fee577bdb0e192835692446de51b4626526e4b555162fd9c2fca7dff1"   # the file's own (the channel lists another hash)
+license = "https://go.microsoft.com/fwlink/?LinkId=2327714"   # the VS 2026 Build Tools' license, from the same channel
+dest = "vendor/msvc"
+probe = "VC/Tools/MSVC"
+share-with-worktrees = true
+# The headers; the static runtime (libcmt, libcpmt); the DLL runtime's import libraries (msvcrt, msvcprt, vcruntime,
+# oldnames - in the Store package, despite its name).
+msvc-packages = ["Microsoft.VC.14.51.CRT.Headers.base", "Microsoft.VC.14.51.CRT.x64.Desktop.base", "Microsoft.VC.14.51.CRT.x64.Store.base"]
+architectures = ["x64"]               # the SDK's libraries for other processors are removed
+sdk-package = "Win11SDK_10.0.26100"
+# The "x86" header installers hold the headers every processor shares (security.h is in OnecoreUap Headers x86).
+sdk-installers = [
+	"Windows SDK for Windows Store Apps Headers-x86_en-us.msi",
+	"Windows SDK Desktop Headers x86-x86_en-us.msi",
+	"Windows SDK Desktop Headers x64-x86_en-us.msi",
+	"Windows SDK for Windows Store Apps Headers OnecoreUap-x86_en-us.msi",
+	"Windows SDK OnecoreUap Headers x86-x86_en-us.msi",
+	"Windows SDK OnecoreUap Headers x64-x86_en-us.msi",
+	"Windows SDK for Windows Store Apps Libs-x86_en-us.msi",
+	"Windows SDK Desktop Libs x64-x86_en-us.msi",
+	"Universal CRT Headers Libraries and Sources-x86_en-us.msi",
+]
+
 [packages.monaco-editor]
 group = "ied"
 version = "0.57.0"

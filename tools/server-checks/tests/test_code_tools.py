@@ -337,7 +337,9 @@ class C4CodeToolTests(CodeToolCase):
 			("p1", "code_read_symbol", {"symbol": "TWICE"}),
 			("b1", "code_symbols", {"query": "PriorityQueue", "kind": "class"}),
 			("b2", "fs_read", {"path": BEDROCK_QUEUE, "limit": 5}),
-			("g1", "code_symbols", {"path": "src"}))
+			("g1", "code_symbols", {"path": "src"}),
+			("g2", "code_symbols", {"path": "src", "query": "Push"}),
+			("g3", "code_symbols", {"path": "src", "query": "PriorityQueue"}))
 		self.assertIn("method Game::Ring::Push  src/ring.cf:6\nmethod Game::Ring::Push  src/ring.ch:21\n", results["s1"], "the project's first, Bedrock's after")
 		self.assertNotIn("Its source", results["s1"], "a name several symbols have is only listed")
 		self.assertIn("1 symbol for \"ISink\"\ninterface Game::ISink  src/ring.ch:10\nIts source, src/ring.ch:\n9\t\t// Something values can be written to.\n10\t\tinterface ISink\n", results["s2"], "the only one, with its source")
@@ -364,6 +366,8 @@ class C4CodeToolTests(CodeToolCase):
 		self.assertIn(BEDROCK_QUEUE, results["b1"], "a library's file shown by its absolute path")
 		self.assertTrue(results["b2"].startswith("1\t"), "and fs_read takes that path: %s" % results["b2"][:200])
 		self.assertIn("src is a folder", results["g1"])
+		self.assertIn("method Game::Ring::Push  src/ring.cf:6", results["g2"], "a query with a folder searches it")
+		self.assertIn("[nothing", results["g3"], "and only it: Bedrock's PriorityQueue is outside src")
 		self.assertIn("public int32 Game::Ring::Count() const", results["h1"])
 		self.assertIn("How many values it holds.", results["h1"])
 		self.assertIn("  L24  method  public static int32 Capacity()", results["m1"], "static")

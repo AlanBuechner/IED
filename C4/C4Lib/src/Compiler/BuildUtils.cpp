@@ -211,6 +211,12 @@ namespace Scripting
 		return clang.string();
 	}
 
+	std::vector<std::string> WindowsSysrootFlags(const std::string& sysroot)
+	{
+		if (sysroot.empty()) return {};
+		return { "-Xmicrosoft-windows-sys-root", sysroot };
+	}
+
 	std::vector<std::string> LinkerArguments(const std::string& argument)
 	{
 		if (argument.rfind("-Wl,", 0) == 0)
@@ -314,6 +320,8 @@ namespace Scripting
 		std::vector<std::string> args = {
 			clangPath, "-c", "-target", "x86_64-pc-windows-msvc", "-mstackrealign", "-MD", "-MF", std::string(objPath.c_str()) + ".d"
 		};
+		const std::vector<std::string> sysroot = WindowsSysrootFlags(Toolchain::WindowsSysroot().string());
+		args.insert(args.end(), sysroot.begin(), sysroot.end());
 		args.insert(args.end(), targetFlags.begin(), targetFlags.end());
 		args.insert(args.end(), compileFlags.begin(), compileFlags.end());
 		args.push_back(language == "c++" ? "-std=c++20" : "-std=c11");
@@ -358,14 +366,15 @@ namespace Scripting
 			std::cerr << "error: lld-link.exe was not found beside clang.exe (" << ClangPath() << ")" << std::endl;
 			return false;
 		}
-		// lld-link itself, as clang's driver would run it: it finds the MSVC and Windows SDK libraries on its own (or
-		// through LIB when that is set), and one process less starts. The objects and libraries go in a response file:
+		// lld-link itself, as clang's driver would run it: it takes the MSVC and Windows SDK libraries from setup.bat's kit
+		// (Toolchain::WindowsSysroot), else finds them on its own (or through LIB when that is set), and one process less starts. The objects and libraries go in a response file:
 		// a split program's object paths outgrow a Windows command line (32,767 characters).
 		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
 		if (!WriteLinkInputs(objects, libraries, inputs)) return false;
 		std::vector<std::string> args = { lld.string(), "-nologo", "-out:" + std::string(outputPath.c_str()), "-defaultlib:libcmt",
 			"-defaultlib:oldnames" };
 		if (const fs::path builtins = Toolchain::ClangRuntimeLibraries(); !builtins.empty()) args.push_back("-libpath:" + builtins.string());
+		if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty()) args.push_back("/winsysroot:" + sysroot.string());
 		args.push_back("@" + inputs);
 		if (subsystem == Subsystem::Windows)
 		{

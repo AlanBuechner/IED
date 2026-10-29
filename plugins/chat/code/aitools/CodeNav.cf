@@ -211,7 +211,14 @@ namespace Ai
 		out.Append(NumberedSpan(query.Text(span.m_Path.View()), span.m_StartLine, span.m_EndLine, c_CodeSearchSourceLines).View());
 	}
 
-	static ToolOutcome SearchRun(CodeQuery& query, Core::StringView text, Core::StringView kind) {
+	// Whether the symbol is in the folder `under` (workspace-relative); every symbol when it is empty.
+	static bool InFolder(const CodeSymbol* symbol, Core::StringView under) {
+		if (under.IsEmpty()) return true;
+		Core::StringView path = symbol->m_Selection.m_Path.View();
+		return path.StartsWith(under) && (under.EndsWith(Core::StringView("/")) || (path.ByteLength() > under.ByteLength() && path.ByteAt(under.ByteLength()) == '/'));
+	}
+
+	static ToolOutcome SearchRun(CodeQuery& query, Core::StringView text, Core::StringView kind, Core::StringView under) {
 		Core::Array<CodeSymbol*> found = query.Search(text);
 		Core::Array<Core::String> words = NameWords(text);
 		const bool byWords = found.IsEmpty();
@@ -221,7 +228,7 @@ namespace Ai
 		for (int64 pass = 0; pass < 2; ++pass)
 			for (CodeSymbol* symbol : found) {
 				const bool exact = NameParts(symbol->m_Name.View()).Count() > 0 && NameParts(symbol->m_Name.View())[NameParts(symbol->m_Name.View()).Count() - 1].View() == text;
-				if (KindMatches(symbol, kind) && exact == (pass == 0)) shown.Push(symbol);
+				if (KindMatches(symbol, kind) && InFolder(symbol, under) && exact == (pass == 0)) shown.Push(symbol);
 			}
 		Core::StringBuilder out;
 		if (byWords && !shown.IsEmpty()) {
@@ -268,11 +275,12 @@ namespace Ai
 	static ToolOutcome SymbolsRun(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.m_Ws);
 		Core::String path = query.FileOf(call.m_Args.Member("path").AsView());
-		if (!path.IsEmpty() && FS::IsDirectory((FS::Path(call.m_Ws.m_Root.View()) / path.View()).CStr())) return ToolError((Core::String("code_symbols: ") + path.View() + " is a folder; give one of its files (fs_list lists them), or query to search by name").View());
-		if (!path.IsEmpty()) return OutlineRun(query, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 100);
 		Core::StringView text = call.m_Args.Member("query").AsView();
+		const bool folder = !path.IsEmpty() && FS::IsDirectory((FS::Path(call.m_Ws.m_Root.View()) / path.View()).CStr());
+		if (folder && text.IsEmpty()) return ToolError((Core::String("code_symbols: ") + path.View() + " is a folder; give one of its files (fs_list lists them) for its outline, or a query with it to search the folder by name").View());
+		if (!path.IsEmpty() && !folder) return OutlineRun(query, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 100);
 		if (text.IsEmpty()) return ToolError(Core::StringView("code_symbols: give path (a file's outline) or query (symbols named like it across the workspace)"));
-		return SearchRun(query, text, call.m_Args.Member("kind").AsView());
+		return SearchRun(query, text, call.m_Args.Member("kind").AsView(), folder ? path.View() : Core::StringView(""));
 	}
 
 	// --- code_read_symbol ----------------------------------------------------------------------------------------------------
@@ -638,7 +646,7 @@ namespace Ai
 	}
 
 	void AddCodeNavTools(ToolRegistry& registry) {
-		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query (the only one, when short, with its source), from the language servers (a file none serves - a shader, a config file - is read with fs_read). Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
+		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query (only a folder's when path is that folder; the only one, when short, with its source), from the language servers (a file none serves - a shader, a config file - is read with fs_read). Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
 			Core::StringView("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"query\": {\"type\": \"string\", \"minLength\": 1}, \"kind\": {\"type\": \"string\", \"description\": \"only symbols of this kind: class, method, function, field, variable, enum, ...\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"levels of an outline\"}}, \"additionalProperties\": false}"),
 			false);
 		symbols->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List symbols of"); };

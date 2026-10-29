@@ -1,8 +1,10 @@
 """The C/C++ plugin's driver (plugins/cpp/nuke; IED docs/26 section 6) with the real clang of the repository's LLVM
-release (vendor/llvm) and this machine's Visual Studio: programs linking static libraries and their links, a DLL,
+release (vendor/llvm) and the MSVC runtime and Windows SDK setup.bat installs (vendor/msvc), else this machine's Visual
+Studio: programs linking static libraries and their links, a DLL,
 compiles only when they have to, a failed compile leaving nothing behind, stale objects removed, object name clashes,
 a link past the Windows command line, the compile database, copies and the assets link, test programs, and the checks
-of the driver's settings, and where the LLVM release comes from. Skipped without the LLVM release or Visual Studio."""
+of the driver's settings, and where the LLVM release and the MSVC kit come from. Skipped without the LLVM release or an
+MSVC runtime and Windows SDK."""
 
 import importlib
 import json
@@ -18,6 +20,7 @@ from nuke import languages
 
 REPOSITORY = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LLVM = os.path.join(REPOSITORY, "vendor", "llvm").replace("\\", "/")
+KIT = os.path.join(REPOSITORY, "vendor", "msvc").replace("\\", "/")
 CONFIG = "Development-windows-x64"
 
 
@@ -34,7 +37,7 @@ def has_toolchain():
 	if not os.path.isfile(os.path.join(LLVM, "bin", "clang.exe")):
 		return False
 	try:
-		module("msvc").find()
+		module("msvc").find(KIT)
 	except ValueError:
 		return False
 	return True
@@ -70,7 +73,42 @@ class LlvmFolderTests(unittest.TestCase):
 		self.assertEqual(self.toolchain.checkout_llvm("C:/IED").replace("\\", "/"), "C:/IED/vendor/llvm", "Nuke's home's")
 
 
-@unittest.skipUnless(sys.platform == "win32" and has_toolchain(), "needs vendor/llvm (setup.bat) and Visual Studio's C++ tools")
+class KitTests(unittest.TestCase):
+	"""The MSVC runtime and Windows SDK: setup.bat's kit (Visual Studio's layout) when the checkout has one."""
+
+	def setUp(self):
+		self.msvc = module("msvc")
+		self.root = os.path.join(REPOSITORY, "build", "nuke-tests", "msvc-kit").replace("\\", "/")
+		shutil.rmtree(self.root, ignore_errors=True)
+		for folder in ("VC/Tools/MSVC/14.51.36231/include", "VC/Tools/MSVC/14.51.36231/lib/x64", "VC/Tools/MSVC/14.44.35207/include",
+				"Windows Kits/10/Include/10.0.26100.0/um", "Windows Kits/10/Include/10.0.26100.0/ucrt",
+				"Windows Kits/10/Lib/10.0.26100.0/um/x64", "Windows Kits/10/Lib/10.0.26100.0/ucrt/x64"):
+			os.makedirs(os.path.join(self.root, *folder.split("/")))
+
+	def tearDown(self):
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	def test_the_kit_with_its_newest_toolset(self):
+		sdk = self.msvc.find(self.root)
+		toolset = f"{self.root}/VC/Tools/MSVC/14.51.36231"
+		kits = f"{self.root}/Windows Kits/10"
+		self.assertEqual(sdk.sysroot, self.root, "clang's driver is given the kit")
+		self.assertEqual(sdk.ms_version, "19.51.36231", "cl's version, from the toolset's name: no cl.exe to run")
+		self.assertEqual(sdk.include_dirs, (f"{toolset}/include", f"{kits}/Include/10.0.26100.0/ucrt", f"{kits}/Include/10.0.26100.0/um"),
+			"the newest toolset's headers, then the SDK's that exist")
+		self.assertEqual(sdk.library_dirs, (f"{kits}/Lib/10.0.26100.0/um/x64", f"{kits}/Lib/10.0.26100.0/ucrt/x64", f"{toolset}/lib/x64"))
+
+	def test_a_kit_without_an_sdk_says_to_run_setup(self):
+		shutil.rmtree(os.path.join(self.root, "Windows Kits"))
+		with self.assertRaises(ValueError) as missing:
+			self.msvc.find(self.root)
+		self.assertIn("setup.bat", str(missing.exception))
+
+	def test_the_checkout_kit_is_in_nukes_home(self):
+		self.assertEqual(module("toolchain").checkout_kit("C:/IED").replace("\\", "/"), "C:/IED/vendor/msvc")
+
+
+@unittest.skipUnless(sys.platform == "win32" and has_toolchain(), "needs vendor/llvm and vendor/msvc (setup.bat) or Visual Studio's C++ tools")
 class CppTest(WorkspaceTest):
 	def setUp(self):
 		super().setUp()

@@ -7,8 +7,6 @@
 //   fb-sample-c4 [--frames N] [--capture-frame K]      N = 0 (the default): until stopped
 
 extern "c++" include "d3d12.hpp" {
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
 	lib("d3d12.lib");
 	lib("kernel32.lib");
 }

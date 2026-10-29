@@ -332,6 +332,7 @@ LinkStamp ProgramOutput::StampFor(const std::string& base, const Core::Vector<Co
 	std::vector<std::string> arguments = { m_In.options.outputFile, std::to_string(static_cast<int>(m_In.options.subsystem)) };
 	for (const Core::String& library : libraries) arguments.push_back(library);
 	if (const char* lib = std::getenv("LIB")) arguments.push_back(lib);
+	arguments.push_back(Scripting::Toolchain::WindowsSysroot().string());   // the MSVC and SDK libraries lld-link takes
 	std::vector<std::string> outputs = { m_In.options.outputFile };
 	if (m_In.options.debugInfo) outputs.push_back(debugInfo.final.string());
 	return LinkStamp(base + ".link", inputs, arguments, std::move(outputs));

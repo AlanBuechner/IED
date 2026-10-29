@@ -9,8 +9,6 @@
 // WM_DESTROY -> PostQuitMessage, then GetMessageA returns 0 and we exit. This proves
 // Windows actually invoked the C4 callback (g_wmcreate/g_wmclose are set only by it).
 extern "c" include "windows.h" {
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
 	lib("user32.lib");
 	lib("kernel32.lib");
 }

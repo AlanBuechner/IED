@@ -1,6 +1,6 @@
 """The C++ toolchain a workspace builds with: an LLVM release (clang, lld, llvm-lib; [languages.cpp] llvm, else the
 folder above the clang on PATH, else the one setup.bat installs in Nuke's home, the IED checkout), clang's
-own headers, and the Visual Studio and Windows SDK it targets."""
+own headers, and the MSVC runtime and Windows SDK it targets (setup.bat's kit in the checkout, else Visual Studio's)."""
 
 import functools
 import os
@@ -21,15 +21,25 @@ class Toolchain:
 	library_dirs: tuple    # where a library given by name is looked for
 	ms_version: str
 	settings: Settings
+	sysroot: str = None     # the MSVC and SDK kit's folder when the build uses setup.bat's, for clang's driver
 
 	@property
 	def target(self):
 		return TARGET
 
+	def sysroot_args(self):
+		"""clang driver arguments that take the MSVC and SDK headers and libraries from the kit, not a Visual Studio."""
+		return ["-Xmicrosoft-windows-sys-root", self.sysroot] if self.sysroot else []
+
 
 def checkout_llvm(nuke_home):
 	"""The LLVM release setup.bat installs in Nuke's home (ctx.nuke_home), the IED checkout (tools/setup/deps.toml)."""
 	return os.path.normpath(os.path.join(nuke_home, "vendor", "llvm"))
+
+
+def checkout_kit(nuke_home):
+	"""The MSVC runtime and Windows SDK setup.bat installs in Nuke's home (tools/setup/deps.toml, package msvc)."""
+	return os.path.normpath(os.path.join(nuke_home, "vendor", "msvc"))
 
 
 def llvm_folder(settings, workspace_dir, checkout_llvm):
@@ -53,20 +63,20 @@ def clang_resource_includes(llvm):
 
 
 @functools.lru_cache(maxsize=None)
-def _resolve(llvm, workspace_system_includes, settings):
+def _resolve(llvm, workspace_system_includes, settings, kit):
 	clang = os.path.join(llvm, "bin", "clang.exe").replace("\\", "/")
 	if not os.path.isfile(clang):
 		raise ValueError(f"no clang at {clang} (the workspace's [languages.cpp] llvm names {llvm}; setup.bat installs it)")
-	sdk = msvc.find()
+	sdk = msvc.find(kit)
 	includes = clang_resource_includes(llvm) + workspace_system_includes + sdk.include_dirs
-	return Toolchain(llvm, clang, includes, sdk.library_dirs + (f"{llvm}/lib",), sdk.ms_version, settings)
+	return Toolchain(llvm, clang, includes, sdk.library_dirs + (f"{llvm}/lib",), sdk.ms_version, settings, sdk.sysroot)
 
 
 def resolve(settings, workspace_dir, expand, nuke_home):
-	"""The workspace's toolchain (probed once per LLVM folder: the MSVC version takes a cl.exe run)."""
+	"""The workspace's toolchain (probed once per LLVM folder: an installed Visual Studio's version takes a cl.exe run)."""
 	llvm = llvm_folder(settings, workspace_dir, checkout_llvm(nuke_home))
 	system = tuple(_absolute(expand(folder), workspace_dir) for folder in settings.system_includes)
-	return _resolve(llvm, system, settings)
+	return _resolve(llvm, system, settings, checkout_kit(nuke_home))
 
 
 def _absolute(folder, base):

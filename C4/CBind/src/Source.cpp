@@ -32,6 +32,7 @@ namespace
 		std::vector<std::string> defines;
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>: the C4 build's processor
+		std::string windowsSysroot;            // --winsysroot: the MSVC and SDK kit the compiler uses (Toolchain::WindowsSysroot)
 		std::vector<std::string> clangArgs;   // what clang parses the header with (main builds it)
 	};
 
@@ -48,6 +49,7 @@ namespace
 			if (a == "--lang" && i + 1 < argc) out.language = argv[++i];
 			else if (a == "-D" && i + 1 < argc) out.defines.push_back(argv[++i]);
 			else if (a == "-I" && i + 1 < argc) out.includeDirs.push_back(argv[++i]);
+			else if (a == "--winsysroot" && i + 1 < argc) out.windowsSysroot = argv[++i];
 			else if (a.size() > 2 && a.compare(0, 2, "-m") == 0) out.targetFlags.push_back(a);
 		}
 		return !out.header.empty() && !out.outFile.empty();
@@ -118,7 +120,7 @@ int main(int argc, char** argv)
 	CBindArgs args;
 	if (!ParseArgs(argc, argv, args))
 	{
-		std::cerr << "usage: CBind.exe <header> <outFile> [--lang c|c++] [-D name=value]... [-I dir]... [-march=cpu] [-m[no-]feature]...\n";
+		std::cerr << "usage: CBind.exe <header> <outFile> [--lang c|c++] [-D name=value]... [-I dir]... [-march=cpu] [-m[no-]feature]... [--winsysroot dir]\n";
 		return 1;
 	}
 
@@ -144,6 +146,12 @@ int main(int argc, char** argv)
 	for (const auto& d : args.defines) cmdLine.push_back("-D" + d);
 	for (const auto& i : args.includeDirs) cmdLine.push_back("-I" + i);
 	cmdLine.insert(cmdLine.end(), args.targetFlags.begin(), args.targetFlags.end());
+	if (!args.windowsSysroot.empty())
+	{
+		// The headers the foreign objects compile with (CompileForeignSource), not an installed Visual Studio's.
+		cmdLine.push_back("-Xmicrosoft-windows-sys-root");
+		cmdLine.push_back(args.windowsSysroot);
+	}
 
 	g_args = args; // action reads these at run time
 	g_args.header = headerPath.string();

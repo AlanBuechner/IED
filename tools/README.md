@@ -26,15 +26,16 @@ Python is already part of the toolchain (`setup.bat` installs 3.12 into `vendor/
 `setup.bat` at the repository root runs `setup/setup.py` (after installing the private Python 3.12.10 into `vendor/python`). It is idempotent: re-run it any time.
 
 ```bat
-setup.bat                         git submodules, LLVM for the C4 compiler, the web client's libraries
+setup.bat                         git submodules, LLVM and the MSVC runtime + Windows SDK for every C/C++ and C4 build, the web client's libraries
 setup.bat --toolchain             ... and build the C4 compiler + the "dev" toolchain (nuke build -p C4)
-setup.bat --with extras           ... and the optional packages (WebView2 SDK, SearXNG)
+setup.bat --without ied           ... without the IED packages (web libraries, WebView2 SDK, SearXNG, Tor, CodeLLDB)
 setup.bat --add-to-path           put bin/ (the nuke launcher) on the user PATH without asking
 setup.bat --list                  every package, its pin and whether it is installed
 setup.bat --only llvm --force     re-download and re-extract one package
 ```
 
 - **Pins and SHA256s live in `setup/deps.toml`** - the manifest of record. Bump a package by changing its `url` and `sha256` together, then `setup.bat --only <name> --force`. A download that does not match its hash is never installed.
+- The `msvc` package (`kind = "msvc"`, `setup/msvc_kit.py`) is not an archive: it reads Visual Studio's pinned channel manifest, unpacks the runtime's VSIX packages and has `msiexec /a` unpack the SDK's MSI installers (with the CAB files each names) into `vendor/msvc`, in Visual Studio's layout, then removes the SDK's libraries for other processors. Its record covers the manifest and the packages it takes from it, so changing either reinstalls it. Tests: `python -m unittest discover -s tools/setup/tests`.
 - Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`); LLVM in `vendor/llvm`, which the workspace's `[languages.cpp] llvm` names.
 - In a linked **git worktree**, packages marked `share-with-worktrees` (LLVM, 4 GB) become a directory junction to the main checkout's copy instead of a second download; `--force` replaces the junction, never the main copy.
 - Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the C++ libraries' `plugins/cpp/libraries/yaml/yaml-cpp`.
@@ -46,17 +47,19 @@ setup.bat --only llvm --force     re-download and re-extract one package
 | Dependency | Version | How | Used by | Notes |
 |---|---|---|---|---|
 | LLVM (`clang+llvm-...-windows-msvc`) | 22.1.0 | download (core) | C4 compiler build (Nuke's C/C++ driver), C4 toolchain's clang + lld-link, clangd | 860 MB archive, ~4 GB extracted |
+| MSVC runtime + Windows SDK (`msvc`) | 14.51 + 10.0.26100 | Visual Studio's packages (core, `kind = "msvc"`, `tools/setup/msvc_kit.py`) | every C/C++ compile and link: Nuke's C/C++ driver (`plugins/cpp/nuke/driver/msvc.py`), the C4 compiler's clang, CBind and lld-link (`Toolchain::WindowsSysroot`) | ~260 MB downloaded, ~900 MB in `vendor/msvc` (x64 only). The pin is the VS 2026 channel manifest's file SHA256 (the channel lists a different hash for it); the manifest pins each VSIX/MSI/CAB. The SDK's MSIs unpack with `msiexec /a` (no elevation, nothing registered). The CRT's import libraries for the DLL runtime (`msvcrt`, `msvcprt`, `vcruntime`, `oldnames`) are in the `CRT.x64.Store` package, not `Desktop`. Microsoft's license terms apply. |
 | `monaco-editor` | 0.57.0 | download (ied) | editor plugin | npm tarball; `esm/` is the ESM build, `min/vs/` the minified one, `dev/vs/` for local dev |
 | `@xterm/xterm` + addon-fit + addon-web-links | 6.0.0 / 0.11.0 / 0.12.0 | download (ied) | terminal plugin, output window | npm tarballs |
 | `codicons` | v0.0.46-45 (`8853e0b`) | submodule | shared/ui-kit icon set, `frontend/mocks/build.py icons` | icons CC BY 4.0, code MIT |
 | `quickjs-ng` | v0.17.0 | submodule | JS plugin runtime (`src/jsruntime/`) | chosen over ChakraCore: actively maintained, modern JS, small C sources. **ChakraCore was dropped**: unmaintained since 2020 and its official binary links are dead |
 | `libgit2` | `42a89d7c` | submodule, **opt-in** (`update = none`) | git plumbing candidate (`plugins/git/code/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
-| `Microsoft.Web.WebView2` | 1.0.4258.31 | download (extras) | optional desktop wrapper only | `build/native/include/WebView2.h` + libs. **Not a v1 dependency** - IED is a split server + web client (docs/01) |
-| `searxng` | `d47cb96b` | download (extras) | AI web egress (docs/04) | a tarball, not a submodule: 4 template files have Windows-illegal names (`*.conf:socket`) that break checkout; setup skips them on extract. Packaging: docs/21 |
+| `Microsoft.Web.WebView2` | 1.0.4258.31 | download (ied) | `ied-desktop`, the desktop app (docs/27) | `build/native/include/WebView2.h` + the static loader |
+| `searxng` | `d47cb96b` | download (ied) | AI web egress (docs/04) | a tarball, not a submodule: 4 template files have Windows-illegal names (`*.conf:socket`) that break checkout; setup skips them on extract. Packaging: docs/21 |
 
 ## Gotchas learned while wiring this up (don't relearn them)
 
 1. npm scoped packages download as `<name>-<ver>.tgz` from `registry.npmjs.org/@scope/name/-/`; `npm pack` produces the same bytes.
 2. ChakraCore's aka.ms shortlinks are dead - do not resurrect that dependency.
 3. SearXNG cannot be checked out on Windows (illegal path names); use the codeload tarball and skip the 4 bad entries.
-4. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Nuke relies on the `exit` builtin and normal startup).
+4. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Nuke relies on the `exit` builtin and normal startup). It also leaves a script's own folder off `sys.path`: setup.py puts its folder back to import `msvc_kit`.
+5. A prebuilt LLVM links against the MSVC C++ runtime it was built with: an older Visual Studio's lacks symbols such as `__std_find_first_of_trivial_pos_1` and the C4 compiler fails to link. The pinned `msvc` kit is why every machine builds alike.

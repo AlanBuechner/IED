@@ -267,8 +267,9 @@ straight from the module in memory).
   destruction) and EH (`EHRuntime.cpp`).
 - `LinkWithLLD`: `lld-link` with the main object, runtimes, interop objects, libraries and the `-l` / `-L` /
   `-Wl,` arguments as clang's driver would hand them over (`LinkerArguments`), `libcmt`, `oldnames` and clang's
-  runtime libraries, `/SUBSYSTEM:CONSOLE`; with `-g`, `/DEBUG` (the `.pdb` beside the exe). lld-link finds the MSVC
-  and Windows SDK libraries itself (or through `LIB` when it is set), so no clang process starts for the link.
+  runtime libraries, `/SUBSYSTEM:CONSOLE`; with `-g`, `/DEBUG` (the `.pdb` beside the exe). lld-link takes the MSVC
+  and Windows SDK libraries from `setup.bat`'s kit (`Toolchain::WindowsSysroot`, `/winsysroot`), else finds an
+  installed Visual Studio's itself (or through `LIB` when it is set), so no clang process starts for the link.
 - clang, lld, the runtime sources, CBind and Bedrock come from the install `C4.exe` runs from
   (`Compiler/Toolchain`, [../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)).
 

@@ -84,6 +84,12 @@ namespace Scripting::Toolchain
 		return {};
 	}
 
+	fs::path WindowsSysroot()
+	{
+		const fs::path toolsets = InRepository(fs::path("vendor") / "msvc" / "VC" / "Tools" / "MSVC");
+		return toolsets.empty() ? fs::path() : toolsets.parent_path().parent_path().parent_path();
+	}
+
 	fs::path Runtime()
 	{
 		const fs::path installed = Home() / "C4Runtime";

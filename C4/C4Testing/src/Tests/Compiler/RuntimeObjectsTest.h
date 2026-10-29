@@ -16,6 +16,8 @@ namespace Testing
 		TEST_FUNC(Compiler.Runtime)
 		void CppSourcesCompileAsCpp20();
 		TEST_FUNC(Compiler.Runtime)
+		void SourcesTakeTheWindowsSysroot();
+		TEST_FUNC(Compiler.Runtime)
 		void ChangedBytesNameAnotherObject();
 		TEST_FUNC(Compiler.Runtime)
 		void AChangedHeaderRenamesEveryObject();

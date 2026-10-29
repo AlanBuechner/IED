@@ -106,8 +106,10 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
    compile is an error.
 8. Link with `lld-link` (beside `clang.exe`), given what clang's driver would give it: the main object (reflection
    registration is part of it), the runtime objects, foreign objects, `lib(...)` libraries and the `-l` / `-L` / `-Wl,`
-   arguments, `libcmt`, `oldnames` and clang's runtime libraries, `/SUBSYSTEM:CONSOLE`. lld-link finds the MSVC and
-   Windows SDK libraries itself, or through `LIB` when it is set. With `-g` the link also passes `/DEBUG`, which writes
+   arguments, `libcmt`, `oldnames` and clang's runtime libraries, `/SUBSYSTEM:CONSOLE`. The MSVC runtime's and the
+   Windows SDK's libraries come from the kit `setup.bat` installs in the IED checkout (`vendor/msvc`, found above
+   `C4.exe` like a development build's LLVM: `/winsysroot`; clang and CBind get it as `-Xmicrosoft-windows-sys-root`),
+   so no Visual Studio is needed; without the kit lld-link finds an installed one itself, or through `LIB` when it is set. With `-g` the link also passes `/DEBUG`, which writes
    `<base>.pdb` beside the exe; the objects carry their CodeView types' global hashes (`.debug$H`), so the link does
    not compute them. A build whose link would read the same files (by size and time: the objects, the libraries it
    names or finds through `-L`, the compiler and lld-link) with the same arguments, into an exe and `.pdb` nothing has
@@ -138,7 +140,7 @@ An install is one folder; copying it anywhere gives a working compiler (design D
 | clang, lld | `<home>/toolchain/bin`; a development build also finds the repository's `vendor/llvm/bin` above the executable |
 | Runtime sources | `<home>/C4Runtime`; a development build also finds the repository's `C4/C4Runtime/` |
 | CBind | `<home>/CBind/CBind.exe`, else `CBind/CBind.exe` beside the executable's folder (the development build's `build/bin/<config>/CBind/`) |
-| Windows SDK and MSVC libraries | found by clang (the newest installed) |
+| Windows SDK and MSVC runtime | the IED checkout's `vendor/msvc` (`setup.bat` installs it; found above the executable, so a toolchain in the checkout's store finds it too), given to clang, CBind and lld-link; without it, clang and lld-link find an installed Visual Studio and SDK (the newest) |
 
 When clang or the runtime is missing, `C4.exe` says which folder it looked in and to set `C4_HOME`.
 `Build.py` stages the whole layout into `bin/<config>/C4/`; `MakeToolchain.py` assembles it, with the tools,

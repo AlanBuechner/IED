@@ -1,15 +1,24 @@
-# IED one-command installer (Windows x64). Clones (or updates) the repository, runs setup, builds everything and
-# installs IED. Safe to re-run: it pulls, then continues where the last run stopped.
+# IED one-command installer (Windows 10/11 x64). Needs nothing installed first: it gets git when the machine has none,
+# clones (or updates) the repository, and setup downloads everything else IED builds with - a private Python, LLVM, and
+# the MSVC C/C++ runtime and Windows SDK (no Visual Studio) - then it builds IED and installs it. Safe to re-run: it pulls,
+# then continues where the last run stopped.
 #
 #   irm https://raw.githubusercontent.com/AlanBuechner/IED/main/install.ps1 | iex
 #
 # Environment variables (set before the command): IED_DIR = where to clone (default %USERPROFILE%\IED),
 # IED_BRANCH = branch to install (default main), IED_REPO = repository URL.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'   # Windows PowerShell's progress bar slows Expand-Archive many times over
 
 $repo = if ($env:IED_REPO) { $env:IED_REPO } else { 'https://github.com/AlanBuechner/IED.git' }
 $branch = if ($env:IED_BRANCH) { $env:IED_BRANCH } else { 'main' }
 $dir = if ($env:IED_DIR) { $env:IED_DIR } else { Join-Path $env:USERPROFILE 'IED' }
+
+# Git for Windows' portable MinGit (with Git Credential Manager, which signs in to GitHub), for a machine without git.
+$minGitVersion = '2.56.0.4'
+$minGitUrl = 'https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip'
+$minGitSha256 = 'E3BF78351FE777FBA47DDEE5950082F8A98BB0F02604FDC7BA3EE2CB68FFA877'
+$minGitHome = Join-Path $env:LOCALAPPDATA 'IED\git'
 
 function Say($text) { Write-Host "[install] $text" -ForegroundColor Cyan }
 
@@ -18,35 +27,36 @@ function Run([string]$what, [scriptblock]$command) {
 	if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)" }
 }
 
-# The prebuilt LLVM the C4 compiler links needs a recent MSVC C++ runtime: older toolsets lack symbols such as
-# __std_find_first_of_trivial_pos_1 and fail at link time. Returns the newest toolset folder, or $null.
-function NewestMsvcToolset {
-	$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-	if (-not (Test-Path $vswhere)) { return $null }
-	$installs = & $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-	$toolsets = foreach ($install in $installs) {
-		Get-ChildItem (Join-Path $install 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue
+function AddToUserPath([string]$folder) {
+	$current = [Environment]::GetEnvironmentVariable('Path', 'User')
+	$entries = if ($current) { $current -split ';' | Where-Object { $_ } } else { @() }
+	if ($entries -notcontains $folder) {
+		[Environment]::SetEnvironmentVariable('Path', (@($entries) + $folder) -join ';', 'User')
 	}
-	return $toolsets | Sort-Object { [version]$_.Name } | Select-Object -Last 1
 }
 
-function RuntimeHasRecentStl([string]$toolset) {
-	$library = Join-Path $toolset 'lib\x64\msvcprt.lib'
-	if (-not (Test-Path $library)) { return $false }
-	$text = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($library))
-	return $text.Contains('__std_find_first_of_trivial_pos_1')
+function InstallMinGit {
+	$zip = Join-Path $env:TEMP "MinGit-$minGitVersion-64-bit.zip"
+	Say "no git on this machine: installing MinGit $minGitVersion into $minGitHome"
+	Run 'downloading MinGit' { curl.exe -fsSL --retry 3 -o $zip $minGitUrl }
+	if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $minGitSha256) {
+		Remove-Item $zip
+		throw 'the MinGit download does not match its pinned SHA256; not installing it'
+	}
+	if (Test-Path $minGitHome) { Remove-Item -Recurse -Force $minGitHome }
+	Expand-Archive -Force $zip $minGitHome
+	Remove-Item $zip
 }
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-	throw 'git is required: install it from https://git-scm.com/download/win and run this again.'
+function EnsureGit {
+	if (Get-Command git -ErrorAction SilentlyContinue) { return }
+	$cmd = Join-Path $minGitHome 'cmd'
+	if (-not (Test-Path (Join-Path $cmd 'git.exe'))) { InstallMinGit }
+	$env:Path = "$cmd;$env:Path"
+	AddToUserPath $cmd
 }
-$toolset = NewestMsvcToolset
-if (-not $toolset) {
-	throw 'The Visual Studio C++ build tools (MSVC x64 and the Windows SDK) are required: https://visualstudio.microsoft.com/visual-cpp-build-tools/ - then run this again.'
-}
-if (-not (RuntimeHasRecentStl $toolset.FullName)) {
-	throw "The newest MSVC toolset here ($($toolset.Name)) is too old for the prebuilt LLVM (its C++ runtime lacks __std_find_first_of_trivial_pos_1). Update Visual Studio (or the Build Tools) to the latest release, or install the newest 'MSVC v14x build tools' component in the Visual Studio Installer, then run this again."
-}
+
+EnsureGit
 
 if (Test-Path (Join-Path $dir '.git')) {
 	Say "updating $dir"
@@ -55,18 +65,15 @@ if (Test-Path (Join-Path $dir '.git')) {
 	Run 'git pull' { git -C $dir pull --ff-only origin $branch }
 } else {
 	Say "cloning $repo into $dir"
-	Run 'git clone' { git clone --branch $branch $repo $dir }
+	Run 'git clone' { git -c core.longpaths=true clone --branch $branch $repo $dir }
 }
 
 Set-Location $dir
 
-Say 'setup: private Python, submodules, LLVM, web libraries, and the C4 compiler (the first build takes a while)'
+Say 'setup: Python, git submodules, LLVM, the MSVC runtime and Windows SDK, web libraries; then the C4 compiler (the first run takes a while)'
 Run 'setup' { cmd /c setup.bat --toolchain --add-to-path }
 
-Say 'building everything'
-Run 'nuke build' { cmd /c nuke.bat build }
-
-Say 'installing IED'
+Say 'building and installing IED'
 Run 'nuke install-ied' { cmd /c nuke.bat install-ied }
 
 Say 'done. Open a NEW terminal and run `ied <folder>`, or start IED from the Start menu.'

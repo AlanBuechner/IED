@@ -24,6 +24,12 @@ namespace Scripting::Toolchain
 	/// lib/clang/<version>/lib/windows above Clang's folder. Empty when there are none.
 	fs::path ClangRuntimeLibraries();
 
+	/// The MSVC runtime and Windows SDK that setup.bat installs in the IED checkout (vendor/msvc, Visual Studio's
+	/// layout without Visual Studio), found above the executable as a development build's vendored LLVM is: a toolchain
+	/// in the checkout's store (toolchains/c4/<version>) reaches it too. clang and lld-link are given it (their
+	/// -Xmicrosoft-windows-sys-root and /winsysroot); empty when there is none, and they find an installed Visual Studio.
+	fs::path WindowsSysroot();
+
 	/// The runtime's C and C++ sources: <home>/C4Runtime, or a development build's repository copy. Empty when
 	/// there are none.
 	fs::path Runtime();

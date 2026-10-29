@@ -18,8 +18,6 @@
 // which is exactly what this game does. (C4 COM objects are not reference-counted, so releasing a
 // command list would free the wrapper but NOT clear D3D12's internal allocator association.)
 extern "c++" include "game.hpp" {
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
 	lib("d3d12.lib");
 	lib("dxgi.lib");
 	lib("user32.lib");

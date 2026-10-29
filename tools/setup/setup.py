@@ -13,6 +13,10 @@ import tomllib
 import urllib.request
 import zipfile
 
+# The private Python's python312._pth leaves the script's own folder off sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import msvc_kit  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deps.toml")
 DOWNLOADS = os.path.join(ROOT, "vendor", "_downloads")
@@ -41,9 +45,18 @@ def load_packages():
 		package.setdefault("strip", 0)
 		if package.get("kind") == "pip":
 			package["sha256"] = sha256_of(os.path.join(ROOT, *package["requirements"].split("/")))
+		elif package.get("kind") == "msvc":
+			package["fingerprint"] = kit_fingerprint(package)
 		elif "format" not in package:
 			package["format"] = _format_of(package["url"])
+		package.setdefault("fingerprint", package["sha256"])
 	return packages
+
+
+def kit_fingerprint(package):
+	"""What the MSVC kit installs is the manifest and what it takes from it: a change to either reinstalls it."""
+	chosen = [package["sha256"], package["msvc-packages"], package["sdk-package"], package["sdk-installers"], package["architectures"]]
+	return hashlib.sha256(json.dumps(chosen).encode()).hexdigest()
 
 
 def _format_of(url):
@@ -64,32 +77,37 @@ def installed_state(package):
 	if os.path.isfile(marker):
 		with open(marker, encoding="utf-8") as f:
 			recorded = json.load(f)
-		return "installed" if recorded.get("sha256") == package["sha256"] else "outdated"
+		return "installed" if recorded.get("sha256") == package["fingerprint"] else "outdated"
 	if os.path.exists(os.path.join(dest, *package["probe"].split("/"))):
 		return "unverified"
 	return "missing"
 
 
 def download(package):
-	os.makedirs(DOWNLOADS, exist_ok=True)
 	path = os.path.join(DOWNLOADS, f"{package['name']}-{package['sha256'][:12]}.{package['format']}")
-	if os.path.isfile(path) and sha256_of(path) == package["sha256"]:
+	return fetch(package["url"], package["sha256"], path, f"{package['name']} {package['version']}")
+
+
+def fetch(url, sha256, path, label):
+	"""The file at `url` in `path`, its SHA256 checked; a verified copy already there is kept."""
+	if os.path.isfile(path) and sha256_of(path) == sha256.lower():
 		return path
-	log(f"downloading {package['name']} {package['version']}")
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	log(f"downloading {label}")
 	partial = path + ".part"
-	with urllib.request.urlopen(package["url"]) as response, open(partial, "wb") as out:
+	with urllib.request.urlopen(url) as response, open(partial, "wb") as out:
 		total = int(response.headers.get("Content-Length") or 0)
 		done, shown = 0, 0
 		while chunk := response.read(CHUNK):
 			out.write(chunk)
 			done += len(chunk)
-			if total and done * 10 // total > shown:
+			if total > 16 * CHUNK and done * 10 // total > shown:
 				shown = done * 10 // total
-				log(f"  {package['name']}: {done * 100 // total}%")
+				log(f"  {label}: {done * 100 // total}%")
 	actual = sha256_of(partial)
-	if actual != package["sha256"]:
+	if actual != sha256.lower():
 		os.remove(partial)
-		raise SetupError(f"{package['name']}: the download's SHA256 is {actual}, expected {package['sha256']}; not installing it")
+		raise SetupError(f"{label}: the download's SHA256 is {actual}, expected {sha256.lower()}; not installing it")
 	os.replace(partial, path)
 	return path
 
@@ -111,11 +129,33 @@ def extract(package, archive):
 		_extract_tar(archive, staging, package["strip"], "r:xz" if package["format"] == "txz" else "r:gz")
 	if skipped:
 		log(f"  skipped {skipped} file(s) whose names Windows cannot create")
+	place(package, staging)
+
+
+def place(package, staging):
+	"""The unpacked package in `staging` becomes its dest, with the marker that says what setup installed there."""
+	dest = dest_of(package)
 	remove_installed(dest)
 	os.makedirs(os.path.dirname(dest), exist_ok=True)
 	os.replace(staging, dest)
 	with open(os.path.join(dest, MARKER), "w", encoding="utf-8") as f:
-		json.dump({"name": package["name"], "version": package["version"], "sha256": package["sha256"]}, f, indent=2)
+		json.dump({"name": package["name"], "version": package["version"], "sha256": package["fingerprint"]}, f, indent=2)
+
+
+def install_msvc(package, keep_downloads):
+	"""The MSVC runtime and the Windows SDK (msvc_kit), so nothing needs Visual Studio installed."""
+	staging = dest_of(package) + ".setup-tmp"
+	shutil.rmtree(staging, ignore_errors=True)
+	downloads = os.path.join(DOWNLOADS, package["name"])
+	log(f"installing {package['name']} ({package['version']}) into {package['dest']}")
+	try:
+		msvc_kit.install(package, staging, downloads, fetch, log)
+	except msvc_kit.KitError as error:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise SetupError(str(error)) from None
+	place(package, staging)
+	if not keep_downloads:
+		shutil.rmtree(downloads, ignore_errors=True)
 
 
 def _member_path(name, strip):
@@ -214,10 +254,7 @@ def install_with_pip(package, packages, keep_downloads):
 	if subprocess.run(command).returncode != 0:
 		shutil.rmtree(staging, ignore_errors=True)
 		raise SetupError(f"pip could not install {package['name']} (see above)")
-	remove_installed(dest)
-	os.replace(staging, dest)
-	with open(os.path.join(dest, MARKER), "w", encoding="utf-8") as f:
-		json.dump({"name": package["name"], "version": package["version"], "sha256": package["sha256"]}, f, indent=2)
+	place(package, staging)
 
 
 def install(package, packages, force, keep_downloads):
@@ -232,6 +269,10 @@ def install(package, packages, force, keep_downloads):
 		return
 	if package.get("kind") == "pip":
 		install_with_pip(package, packages, keep_downloads)
+		log(f"{package['name']} {package['version']}: installed")
+		return
+	if package.get("kind") == "msvc":
+		install_msvc(package, keep_downloads)
 		log(f"{package['name']} {package['version']}: installed")
 		return
 	archive = download(package)
@@ -299,7 +340,11 @@ def offer_path(options):
 		return
 	if on_user_path()[0] or not sys.stdin.isatty():
 		return
-	answer = input(f"[setup] add {bin_dir()} to your user PATH so `nuke` works in any folder? [Y/n] ").strip().lower()
+	try:
+		answer = input(f"[setup] add {bin_dir()} to your user PATH so `nuke` works in any folder? [Y/n] ").strip().lower()
+	except EOFError:
+		log("no answer (standard input closed): PATH left as it is; setup.bat --add-to-path adds it")
+		return
 	if answer in ("", "y", "yes"):
 		add_to_user_path()
 

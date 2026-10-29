@@ -413,8 +413,9 @@ package that is an IED plugin in the solution's `localPlugins`.
 ## 9c. C and C++ projects
 
 `language = "cpp"` builds with IED's C/C++ plugin (`plugins/cpp/nuke/driver/`), the C++ build system Frost was, as a
-language driver: an LLVM release's clang compiles each source with its `-cc1` frontend for the MSVC ABI (with Visual
-Studio's headers and the Windows SDK's), and the objects link into an executable (lld), a static library (llvm-lib) or
+language driver: an LLVM release's clang compiles each source with its `-cc1` frontend for the MSVC ABI (with the MSVC
+runtime's headers and the Windows SDK's: the kit `setup.bat` installs in Nuke's home, `vendor/msvc`, else an installed
+Visual Studio's), and the objects link into an executable (lld), a static library (llvm-lib) or
 a DLL (clang `-shared`) in the project's bin folder.
 
 ```toml

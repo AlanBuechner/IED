@@ -24,27 +24,28 @@ the roadmap is `docs/18`.
 
 ## Install in one command (Windows x64)
 
-In PowerShell (needs git and the Visual Studio C++ build tools): clones into `%USERPROFILE%\IED` (set `IED_DIR` to change it), runs setup, builds everything and installs IED. Re-running updates and continues.
+In PowerShell, on any Windows 10/11 x64 machine - nothing needs to be installed first, not even git or Visual Studio:
 
 ```powershell
 irm https://raw.githubusercontent.com/AlanBuechner/IED/main/install.ps1 | iex
 ```
 
-While the repository is private (the line above gets a 404), use git, which signs in with the user's own credentials:
-
-```bat
-git clone https://github.com/AlanBuechner/IED.git %USERPROFILE%\IED && powershell -ExecutionPolicy Bypass -File %USERPROFILE%\IED\install.ps1
-```
+[`install.ps1`](install.ps1) gets git when the machine has none (portable MinGit, in `%LOCALAPPDATA%\IED\git`), clones
+into `%USERPROFILE%\IED` (set `IED_DIR` to change it), runs `setup.bat` - which downloads a private Python, LLVM, and
+the MSVC C/C++ runtime and Windows SDK straight from Microsoft's Visual Studio packages (Microsoft's license terms apply;
+setup prints the link) - builds the C4 compiler and IED, and installs IED. About 6 GB of disk; re-running it updates and
+continues.
 
 ## Getting started (Windows x64)
 
-Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Nuke's C/C++ driver compiles the compiler
-against the MSVC headers and libraries).
+Prerequisites: git. `setup.bat` downloads everything else, pinned by SHA256 in `tools/setup/deps.toml` - including the
+MSVC runtime and Windows SDK every C++ and C4 build compiles and links against (`vendor/msvc`), so no Visual Studio
+is needed and every machine builds alike.
 
 ```bat
 git clone https://github.com/AlanBuechner/IED.git
 cd IED
-setup.bat                 :: private Python, git submodules, LLVM 22.1.0, web libraries (nothing large is committed)
+setup.bat                 :: private Python, git submodules, LLVM 22.1.0, MSVC runtime + Windows SDK, web libraries (nothing large is committed)
 nuke build                :: build the C4 compiler and tools; installs the "dev" C4 toolchain
 nuke test                 :: the compiler's unit tests
 nuke gates                :: every C4 test suite

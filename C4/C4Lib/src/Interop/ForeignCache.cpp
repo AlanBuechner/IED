@@ -1,6 +1,7 @@
 #include "Interop/ForeignCache.h"
 #include "Compiler/FileIo.h"
 #include "Compiler/RuntimeObjects.h"
+#include "Compiler/Toolchain.h"
 #include <cstdio>
 
 namespace Scripting
@@ -19,6 +20,7 @@ namespace Scripting
 		uint64_t FlagsKey(const ForeignObject& fo, const std::string& compiler)
 		{
 			uint64_t key = Mix(0, CompilerIdentity(compiler));
+			key = Mix(key, Toolchain::WindowsSysroot().generic_string());   // the MSVC and SDK kit it compiles against
 			key = Mix(key, fo.srcPath);
 			key = Mix(key, fo.language);
 			for (const auto& list : { &fo.defines, &fo.includeDirs, &fo.targetFlags, &fo.compileFlags })

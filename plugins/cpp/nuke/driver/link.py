@@ -26,6 +26,8 @@ def link_command(toolchain, configuration, target, objects, libraries):
 		command += ["-shared", "-fPIC"]
 	if target.kind != "static" and configuration.debug_info:
 		command.append("-g")
+	if target.kind != "static":
+		command += toolchain.sysroot_args()
 	command += ["-o", target.output] + list(objects) + list(libraries) + list(target.linker_args)
 	return command
 

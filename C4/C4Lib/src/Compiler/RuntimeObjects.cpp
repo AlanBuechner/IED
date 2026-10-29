@@ -62,6 +62,14 @@ namespace Scripting
 			return key;
 		}
 
+		// The MSVC and SDK headers the sources compile with: the kit's folder and setup's record of what it installed there
+		// (none without a kit, for an installed Visual Studio's). Another kit compiles every source again.
+		uint64_t SysrootKey(const fs::path& sysroot, uint64_t seed)
+		{
+			if (sysroot.empty()) return seed;
+			return RuntimeContentKey(Bytes(sysroot / ".setup.json"), RuntimeContentKey(sysroot.generic_string(), seed));
+		}
+
 		std::string ObjectStem(const std::string& relativeSource)
 		{
 			std::string stem = fs::path(relativeSource).replace_extension().generic_string();
@@ -89,7 +97,8 @@ namespace Scripting
 			const std::string clang = ClangPath();
 			if (clang.empty()) return false;
 			const fs::path partial = object.string() + "." + std::to_string(_getpid()) + ".tmp";
-			const std::vector<std::string> args = RuntimeCompileCommand(clang, root.string(), source.string(), partial.string());
+			const std::vector<std::string> args = RuntimeCompileCommand(clang, root.string(), source.string(), partial.string(),
+				Toolchain::WindowsSysroot().string());
 			if (verbose)
 			{
 				std::string line = "Compiling C4 runtime:";
@@ -113,10 +122,12 @@ namespace Scripting
 	}
 
 	std::vector<std::string> RuntimeCompileCommand(const std::string& clang, const std::string& runtimeRoot,
-		const std::string& source, const std::string& output)
+		const std::string& source, const std::string& output, const std::string& windowsSysroot)
 	{
 		std::vector<std::string> args = { clang, "-c", "-target", "x86_64-pc-windows-msvc", kOptimization, "-mstackrealign",
 			"-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-I", runtimeRoot };
+		const std::vector<std::string> sysroot = WindowsSysrootFlags(windowsSysroot);
+		args.insert(args.end(), sysroot.begin(), sysroot.end());
 		if (fs::path(source).extension() == ".cpp") args.push_back("-std=c++20");
 		args.push_back(source);
 		args.push_back("-o");
@@ -135,7 +146,7 @@ namespace Scripting
 		}
 		const fs::path objectDir = ObjectFolder(root);
 		CreateFolders(PathText(objectDir));
-		const uint64_t headersKey = HeadersKey(root);
+		const uint64_t headersKey = SysrootKey(Toolchain::WindowsSysroot(), HeadersKey(root));
 		struct Missing
 		{
 			fs::path source;

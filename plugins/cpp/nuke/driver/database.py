@@ -14,7 +14,7 @@ DRIVER_FLAG_PREFIXES = ("-W", "-f", "-m", "-D", "-U")
 def driver_arguments(toolchain, source, includes, system_includes, defines, compiler_args):
 	"""The clang driver's command for compiling `source` as the build does."""
 	is_c = source.lower().endswith(".c")
-	args = [toolchain.clang, f"--target={toolchain.target}"]
+	args = [toolchain.clang, f"--target={toolchain.target}"] + toolchain.sysroot_args()
 	args += ["-std=" + toolchain.settings.c_standard, "-x", "c"] if is_c else ["-std=" + toolchain.settings.standard, "-x", "c++"]
 	args += ["-fms-extensions", "-fms-compatibility", f"-fms-compatibility-version={toolchain.ms_version}", "-fexceptions"]
 	if not is_c:

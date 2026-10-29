@@ -139,8 +139,8 @@ Adding a test:
   - `ExpectedIR.json` - folders whose emitted `out.ll` must contain every `irContains` substring (for
     features whose effect is the code itself, such as volatile accesses and thread_local storage);
   - `SkipTests.json` - environment-dependent folders (GPU, specific Windows SDK), reported as skipped.
-- Some folders need `-test`, CBind, a DX12 GPU or the Windows SDK version hard-coded in the interop
-  tests (10.0.26100.0).
+- Some folders need `-test`, CBind or a DX12 GPU. The interop tests bind SDK headers (`windows.h`, the D3D12 ones)
+  with no `include_dir`: the compiler finds them in the Windows SDK (`setup.bat`'s `vendor/msvc`, else the installed one).
 - Every folder sits in a category (`README.md` lists them); a regression test names its bug in its first
   comment line.
 

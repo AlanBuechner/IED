@@ -23,8 +23,7 @@ extern "c++" include "cpp.h"             // C++ header (classes, methods, namesp
 extern "c++" source "cpp.cpp"            // compile and link a C++ file
 
 extern "c++" include "game.hpp" {        // optional configuration block
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
-	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	include_dir("third_party/engine/include");
 	define("WIN32_LEAN_AND_MEAN");
 	lib("d3d12.lib"); lib("dxgi.lib"); lib("user32.lib");
 }
@@ -33,11 +32,11 @@ extern "c++" include "game.hpp" {        // optional configuration block
 | Part | Meaning |
 |---|---|
 | `"c"` / `"c++"` | language of the foreign file (selects `-std=c11` or `-std=c++20` and C vs C++ binding rules) |
-| `include "path"` | bind a header: its declarations become visible in this file |
+| `include "path"` | bind a header: its declarations become visible in this file. It is looked for beside the file, in the program's source folders, in `include_dir`s and `-I` folders, then in the Windows SDK's (`um`, `shared`, `ucrt`, `winrt`), so `extern "c" include "windows.h"` needs no `include_dir` |
 | `source "path"` | compile the file with the bundled clang and link the object |
 | `define("NAME")`, `define("NAME", "VALUE")` | preprocessor define for the foreign parse/compile |
 | `include_dir("dir")` | header search directory for the foreign parse/compile |
-| `lib("x.lib")` | link an import/static library; bare names are resolved against the newest installed Windows SDK. `-l x` / `-L dir` on the command line do the same for a whole build |
+| `lib("x.lib")` | link an import/static library; bare names are resolved against the newest Windows SDK (the MSVC runtime and SDK `setup.bat` installs in the IED checkout's `vendor/msvc`, else an installed one). `-l x` / `-L dir` on the command line do the same for a whole build |
 
 Rules:
 

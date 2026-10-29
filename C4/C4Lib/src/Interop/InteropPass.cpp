@@ -291,6 +291,31 @@ namespace Scripting
 			return folders;
 		}
 
+		// The newest version folder below `folder` ("10.0.26100.0"), or empty.
+		fs::path NewestVersion(const fs::path& folder)
+		{
+			std::vector<std::string> versions;
+			if (FileExists(folder.string()))
+				for (const auto& entry : fs::directory_iterator(folder))
+					if (entry.is_directory()) versions.push_back(entry.path().filename().string());
+			if (versions.empty()) return {};
+			return folder / *std::max_element(versions.begin(), versions.end());
+		}
+
+		// The Windows SDK's header folders, where a header no folder of the program has is looked for last: setup.bat's
+		// kit (Toolchain::WindowsSysroot), else the installed SDK. `extern "c" include "d3d12.h"` needs no include_dir.
+		std::vector<std::string> SdkHeaderFolders()
+		{
+			std::vector<fs::path> roots;
+			if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty()) roots.push_back(sysroot / "Windows Kits" / "10" / "Include");
+			roots.push_back("C:/Program Files (x86)/Windows Kits/10/Include");
+			for (const fs::path& root : roots)
+				if (const fs::path version = NewestVersion(root); !version.empty())
+					return { Norm((version / "um").string()), Norm((version / "shared").string()), Norm((version / "ucrt").string()),
+						Norm((version / "winrt").string()) };
+			return {};
+		}
+
 		std::string ResolveHeader(const std::string& headerPath, const std::string& fileDir,
 			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs)
 		{
@@ -304,35 +329,49 @@ namespace Scripting
 				candidates.push_back(Norm(root + "/" + hp));
 			for (const auto& inc : cliIncludeDirs)
 				candidates.push_back(Norm(inc + "/" + hp));
+			if (!isAbs)
+				for (const auto& sdk : SdkHeaderFolders())
+					candidates.push_back(Norm(sdk + "/" + hp));
 
 			for (const auto& c : candidates)
 				if (FileExists(c)) return c;
 			return "";
 		}
 
-		// Resolve a bare import-library name (e.g. "user32.lib") against the installed Windows SDK:
-		// pick the newest 10.x version and its x64 um/lib folder. Returns "" when not found there;
-		// callers fall back to passing the name through for the linker's own search path.
+		// The Windows SDK's library folders: setup.bat's kit (Toolchain::WindowsSysroot), else the installed SDK.
+		std::vector<std::string> SdkLibraryRoots()
+		{
+			std::vector<std::string> roots;
+			if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty())
+				roots.push_back(Norm((sysroot / "Windows Kits" / "10" / "Lib").string()));
+			roots.push_back("C:/Program Files (x86)/Windows Kits/10/Lib");
+			return roots;
+		}
+
+		// Resolve a bare import-library name (e.g. "user32.lib") against the Windows SDK: in each of its library folders,
+		// the newest 10.x version's x64 um folder. Returns "" when not found there; callers fall back to passing the name
+		// through for the linker's own search path.
 		std::string ResolveImportLibrary(const std::string& libName)
 		{
 			if (libName.find('/') != std::string::npos || libName.find('\\') != std::string::npos ||
 				(libName.size() >= 2 && libName[1] == ':'))
 				return Norm(libName); // already a path
 
-			std::string kitsRoot = "C:/Program Files (x86)/Windows Kits/10/Lib";
-			std::vector<std::string> versions;
-			if (FileExists(kitsRoot))
-				for (const auto& entry : fs::directory_iterator(kitsRoot))
-					if (entry.is_directory()) versions.push_back(entry.path().filename().string());
-			if (versions.empty()) return "";
-			std::sort(versions.rbegin(), versions.rend()); // newest first
-
-			for (const auto& v : versions)
+			for (const std::string& kitsRoot : SdkLibraryRoots())
 			{
-				for (const char* sub : { "um/x64", "um/x86" })
+				std::vector<std::string> versions;
+				if (FileExists(kitsRoot))
+					for (const auto& entry : fs::directory_iterator(kitsRoot))
+						if (entry.is_directory()) versions.push_back(entry.path().filename().string());
+				std::sort(versions.rbegin(), versions.rend()); // newest first
+
+				for (const auto& v : versions)
 				{
-					fs::path candidate = fs::path(kitsRoot) / v / sub / libName;
-					if (FileExists(candidate.string())) return Norm(candidate.string());
+					for (const char* sub : { "um/x64", "um/x86" })
+					{
+						fs::path candidate = fs::path(kitsRoot) / v / sub / libName;
+						if (FileExists(candidate.string())) return Norm(candidate.string());
+					}
 				}
 			}
 			return "";
@@ -367,6 +406,11 @@ namespace Scripting
 		for (const auto& d : flags.defines) { Core::String f("-D"); f += d; args.Push(f); }
 		for (const auto& inc : flags.includeDirs) { args.Push("-I"); args.Push(inc); }
 		for (const auto& target : flags.targetFlags) args.Push(target);
+		if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty())
+		{
+			args.Push("--winsysroot");
+			args.Push(sysroot.string());
+		}
 
 		int code = -1;
 		std::string so, se;

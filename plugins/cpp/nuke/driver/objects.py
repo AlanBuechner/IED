@@ -104,7 +104,7 @@ def make_job(toolchain, configuration, target, source, includes, system_includes
 	job = Job(source, obj, dep, name + ".args", command)
 	if header_tool:
 		job.header_tool = [header_tool, "--generated-folder", f"{target.int_dir}/generated", "--source-folder", f"{target.dir}/src", source,
-			"--", toolchain.clang] + base_args(toolchain, source, includes, system_includes, target.defines, system_as_user=True) + ["-DHEADER_TOOL"]
+			"--", toolchain.clang] + toolchain.sysroot_args() + base_args(toolchain, source, includes, system_includes, target.defines, system_as_user=True) + ["-DHEADER_TOOL"]
 	return job
 
 

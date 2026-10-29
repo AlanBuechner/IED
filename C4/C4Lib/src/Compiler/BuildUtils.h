@@ -68,6 +68,10 @@ namespace Scripting
 	// The toolchain's clang.exe (Toolchain::Clang), or empty after printing where it was looked for.
 	std::string ClangPath();
 
+	// clang's driver arguments that take the MSVC runtime's and Windows SDK's headers and libraries from `sysroot`
+	// (Toolchain::WindowsSysroot) instead of an installed Visual Studio; none when it is empty.
+	std::vector<std::string> WindowsSysrootFlags(const std::string& sysroot);
+
 	/// What clang's driver would hand lld-link for one argument of a link's libraries: `-l<name>` is `<name>.lib`,
 	/// `-L<dir>` a search folder, `-Wl,a,b` its arguments; an object, a library or a resource file goes as it is.
 	std::vector<std::string> LinkerArguments(const std::string& argument);

@@ -11,7 +11,8 @@ namespace Scripting
 	// The C4 runtime linked into every executable: each C and C++ source under the install's C4Runtime/ (GC,
 	// reflection, threads, tests, EH, IO, RTTI, memory), compiled by RuntimeCompileCommand into
 	// %TEMP%/c4_runtime/<hash of the runtime folder>/O2/ under RuntimeObjectName, so an object is reused only for
-	// the same bytes of its source and of every runtime header. Appends the object paths; false (with a message on
+	// the same bytes of its source and of every runtime header, compiled against the same MSVC and SDK kit
+	// (Toolchain::WindowsSysroot). Appends the object paths; false (with a message on
 	// stderr) when the runtime folder is missing or a source does not compile.
 	bool EnsureRuntimeObjects(bool verbose, Core::Vector<Core::String>& objects);
 
@@ -26,7 +27,8 @@ namespace Scripting
 	// empty when it cannot be found.
 	std::string RuntimeFolder();
 
-	// The clang command for one runtime source: optimized, warnings are errors, C++ sources as C++20.
+	// The clang command for one runtime source: optimized, warnings are errors, C++ sources as C++20, the MSVC and SDK
+	// headers from `windowsSysroot` when it is not empty (Toolchain::WindowsSysroot).
 	std::vector<std::string> RuntimeCompileCommand(const std::string& clang, const std::string& runtimeRoot,
-		const std::string& source, const std::string& output);
+		const std::string& source, const std::string& output, const std::string& windowsSysroot);
 }
