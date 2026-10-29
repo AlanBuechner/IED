@@ -18,18 +18,34 @@ function Run([string]$what, [scriptblock]$command) {
 	if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)" }
 }
 
-function HasVisualStudioCppTools {
+# The prebuilt LLVM the C4 compiler links needs a recent MSVC C++ runtime: older toolsets lack symbols such as
+# __std_find_first_of_trivial_pos_1 and fail at link time. Returns the newest toolset folder, or $null.
+function NewestMsvcToolset {
 	$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-	if (-not (Test-Path $vswhere)) { return $false }
-	$found = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-	return [bool]$found
+	if (-not (Test-Path $vswhere)) { return $null }
+	$installs = & $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+	$toolsets = foreach ($install in $installs) {
+		Get-ChildItem (Join-Path $install 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue
+	}
+	return $toolsets | Sort-Object { [version]$_.Name } | Select-Object -Last 1
+}
+
+function RuntimeHasRecentStl([string]$toolset) {
+	$library = Join-Path $toolset 'lib\x64\msvcprt.lib'
+	if (-not (Test-Path $library)) { return $false }
+	$text = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($library))
+	return $text.Contains('__std_find_first_of_trivial_pos_1')
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 	throw 'git is required: install it from https://git-scm.com/download/win and run this again.'
 }
-if (-not (HasVisualStudioCppTools)) {
+$toolset = NewestMsvcToolset
+if (-not $toolset) {
 	throw 'The Visual Studio C++ build tools (MSVC x64 and the Windows SDK) are required: https://visualstudio.microsoft.com/visual-cpp-build-tools/ - then run this again.'
+}
+if (-not (RuntimeHasRecentStl $toolset.FullName)) {
+	throw "The newest MSVC toolset here ($($toolset.Name)) is too old for the prebuilt LLVM (its C++ runtime lacks __std_find_first_of_trivial_pos_1). Update Visual Studio (or the Build Tools) to the latest release, or install the newest 'MSVC v14x build tools' component in the Visual Studio Installer, then run this again."
 }
 
 if (Test-Path (Join-Path $dir '.git')) {
