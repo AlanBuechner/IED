@@ -1,4 +1,8 @@
 {
+  "Calls/Bug423MethodOnVoidPointer": {
+    "expect": ["main.cf (5:9) error: 'void' has no method 'Get': a void* points at no type in particular; cast it to the type whose method 'Get' is"],
+    "reason": "BUG-423: a void* has no methods; the call used to find some type's extension method of the name through the hidden prelude's lookup walking into the root, and passed the void* as its this"
+  },
   "Types/PointerLayerConstAddedUnderMutable": {
     "expect": ["main.cf (5:2) error: cannot initialize 'const int32**' from 'int32**': const is added to a pointer's pointee only when every pointer above it points to const too"],
     "reason": "BUG-321: adding const below a mutable layer would let a pointer to const be stored as mutable; the error spells each layer's const and says why"

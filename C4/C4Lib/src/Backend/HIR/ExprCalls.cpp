@@ -143,7 +143,8 @@ namespace Scripting
 		{
 			ConstructionArgument argument;
 			if (args.braced[i]) argument.brace = args.braced[i];
-			else argument.value = args.values[i].isLValue || args.values[i].IsRValue() ? args.values[i] : Value::R(args.nodes[i], args.nodes[i]->type);
+			// `this` keeps no Value of its own in the list (AppendCallArgument): its pointer is the node (BUG-412).
+			else argument.value = args.values[i].type ? args.values[i] : Value::R(args.nodes[i], args.nodes[i]->type);
 			construction.push_back(argument);
 		}
 		return ResolveConstruct(callee, type, construction, false);

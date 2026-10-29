@@ -30,6 +30,9 @@ namespace Scripting
 		QueryResult<void> DeclareLoopVariable(const ForLoopNode* n, const Type* t, const Value& element, BlockNode* body);
 		QueryResult<void> DeclareLoopReference(const ForLoopNode* n, const ReferenceType* ref, const Value& element, BlockNode* body);
 		uint32 DeclareHidden(BlockNode* initBlock, const Type* t, const Core::String& name, const HIRNode* init, bool isConst = false);
+		/// The range evaluated once, before the loop (BUG-431): an addressable location held by its address, any other
+		/// value in a hidden local the loop owns. Every later use of the result reads what was held.
+		Value HoldRange(const Value& range, BlockNode* initBlock);
 
 		LoweringContext& m_Ctx;
 		StmtLowerer& m_Stmts;

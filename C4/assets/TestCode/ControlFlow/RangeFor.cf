@@ -1,6 +1,7 @@
 // ControlFlow - Range-For Loop Tests (implementation)
 include "../Framework/Assert.ch"
 include "RangeFor.ch"
+include "Container/array.ch"
 
 struct RFPoint {
 	int32 x;
@@ -138,7 +139,7 @@ template<T> class RFITplContainer {
 	public T* data;
 	public uint32 n;
 	[operator("begin")] public RFITplIterator<T> Begin() { RFITplIterator<T> it; it.items = this.data; it.index = 0; return it; }
-	[operator("end")]   public RFITplIterator<T> End()   { RFITplIterator<T> it; it.items = this.data; it.index = this.n; return it; }
+	[operator("end")]   public RFITplIterator<T> End() { RFITplIterator<T> it; it.items = this.data; it.index = this.n; return it; }
 }
 
 void TestRangeForTemplateContainer() {
@@ -202,5 +203,57 @@ void TestRangeForByValueCall() {
 		break;
 	}
 	AssertIntEquals(7, first, "range-for over a by-value call yields the first element");
+}
+
+// The range is evaluated once even when it is a location rooted in a call (BUG-431): a member of a by-value call's
+// result, an array a call returns, an element through a pointer a call returns. Each used to run its call again -
+// for `end` (the iterator protocol), or for every element (arrays).
+struct RFIReport {
+	Core::Array<int32> lines;
+	int32[3] fixed;
+}
+
+int32 g_rfi_reports;
+RFIReport g_rfi_kept;
+
+RFIReport MakeRfReport() {
+	g_rfi_reports += 1;
+	RFIReport report;
+	report.lines.Push(g_rfi_reports);
+	report.lines.Push(g_rfi_reports * 10);
+	report.fixed[0] = 1; report.fixed[1] = 2; report.fixed[2] = 3;
+	return report;
+}
+
+RFIReport* KeptRfReport() {
+	g_rfi_reports += 1;
+	return &g_rfi_kept;
+}
+
+void TestRangeForCallRooted() {
+	g_rfi_reports = 0;
+	int32 sum = 0;
+	for (int32 line : MakeRfReport().lines) sum += line;
+	AssertIntEquals(1, g_rfi_reports, "a member of a call's result: the call runs once");
+	AssertIntEquals(11, sum, "and its elements are the ones it made");
+
+	g_rfi_reports = 0;
+	sum = 0;
+	for (int32 value : MakeRfReport().fixed) sum += value;
+	AssertIntEquals(1, g_rfi_reports, "an array of a call's result: the call runs once, not once an element");
+	AssertIntEquals(6, sum, "every element read");
+
+	g_rfi_kept.lines.Clear();
+	g_rfi_kept.lines.Push(4);
+	g_rfi_kept.lines.Push(5);
+	g_rfi_reports = 0;
+	sum = 0;
+	for (int32 line : KeptRfReport()->lines) sum += line;
+	AssertIntEquals(1, g_rfi_reports, "through a pointer a call returns: the call runs once");
+	AssertIntEquals(9, sum, "the pointee's elements");
+
+	g_rfi_reports = 0;
+	for (int32& line : KeptRfReport()->lines) line += 1;
+	AssertIntEquals(11, g_rfi_kept.lines[0] + g_rfi_kept.lines[1], "a reference loop writes through the held location");
 }
 

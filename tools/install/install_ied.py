@@ -1,8 +1,8 @@
 """Installs IED from this checkout's build (docs/21 "Install shape"): the programs and what the server serves and loads
 - the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries, and the
 services web search runs (the private Python, SearXNG with its packages and Tor, which setup installs into the checkout
-first when they are missing, docs/29), pip for the Python terminal, the C/C++ plugin's clangd and CodeLLDB, and Nuke
-with its launchers (docs/21) - copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
+first when they are missing, docs/29), pip for the Python terminal, the C/C++ plugin's clangd and CodeLLDB, the GPU
+debugger's Flashbang (its capture library and replayer, in plugins/gpu/bin), and Nuke with its launchers (docs/21) - copied into %LOCALAPPDATA%\\Programs\\IED (only what changed), then
 `ied-desktop --register` puts IED in the Start menu and
 makes IED's solution files (.iedsln, .iedfed) open in it, and the folder and its bin go on the user's PATH, so
 `ied <folder>` and `nuke` work in a terminal opened afterwards.
@@ -87,6 +87,13 @@ SERVICE_PACKAGES = ("searxng", "pip", "searxng-packages", "tor", "codelldb")
 # install, where its manifest looks first: clangd from the vendored LLVM with clang's builtin headers, which it finds
 # beside itself (../lib/clang/<version>/include), and CodeLLDB's adapter with its LLDB. The mirror of plugins/ keeps them.
 CPP_TOOLS_FOLDERS = ("cpp/clangd", "cpp/codelldb")
+
+# The GPU debugger's native parts (plugins/gpu/nuke.toml, project flashbang), copied into the plugin's bin, where an
+# installed IED looks for them (plugins/gpu/code/Library.cf NativeFolder): the capture library with its Vulkan layer
+# manifest, and the replayer.
+GPU_NATIVE_FOLDER = "gpu/bin"
+GPU_NATIVE_FILES = ("flashbang.dll", "VkLayer_IED_flashbang.json", "flashbang-replay.exe")
+KEPT_PLUGIN_FOLDERS = CPP_TOOLS_FOLDERS + (GPU_NATIVE_FOLDER,)
 
 
 def cpp_tools(repo):
@@ -239,6 +246,18 @@ def install_cpp_tools(repo, target, report):
 			report["missing"].append(name + " (vendor/llvm, vendor/codelldb)")
 
 
+def install_gpu_native(bin_root, target, report):
+	"""Flashbang's files into the GPU plugin's bin; without them (not built) the debugger cannot capture, and says so."""
+	destination = os.path.join(target, "plugins", *GPU_NATIVE_FOLDER.split("/"))
+	for name in GPU_NATIVE_FILES:
+		source = os.path.join(bin_root, "flashbang", name)
+		if not os.path.isfile(source):
+			report["missing"].append("%s (nuke build flashbang)" % name)
+			continue
+		os.makedirs(destination, exist_ok=True)
+		copy_program(source, os.path.join(destination, name), report)
+
+
 def checkout_state(repo):
 	"""(commit, dirty): the checkout's HEAD and whether a tracked file has changes not committed (untracked files, a
 	session's scratch, do not count); ("", False) without git."""
@@ -280,7 +299,7 @@ def install(bin_root, target):
 		source = os.path.join(REPO, tree)
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
-		mirror(source, os.path.join(target, tree), set(skip), report, anywhere=BUILT_IN_PLACE, keep=CPP_TOOLS_FOLDERS if tree == "plugins" else ())
+		mirror(source, os.path.join(target, tree), set(skip), report, anywhere=BUILT_IN_PLACE, keep=KEPT_PLUGIN_FOLDERS if tree == "plugins" else ())
 	if not ensure_services(REPO):
 		print("install-ied: setup could not install the web search services (see above); installing without what is missing")
 	for tree, skip in SERVICES:
@@ -290,6 +309,7 @@ def install(bin_root, target):
 		else:
 			report["missing"].append(tree)
 	install_cpp_tools(REPO, target, report)
+	install_gpu_native(bin_root, target, report)
 	head, dirty = checkout_state(REPO)
 	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000)))
 	return report

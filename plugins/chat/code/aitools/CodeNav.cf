@@ -638,7 +638,7 @@ namespace Ai
 	}
 
 	void AddCodeNavTools(ToolRegistry& registry) {
-		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query (the only one, when short, with its source), from the language servers. Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
+		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query (the only one, when short, with its source), from the language servers (a file none serves - a shader, a config file - is read with fs_read). Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
 			Core::StringView("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"query\": {\"type\": \"string\", \"minLength\": 1}, \"kind\": {\"type\": \"string\", \"description\": \"only symbols of this kind: class, method, function, field, variable, enum, ...\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"levels of an outline\"}}, \"additionalProperties\": false}"),
 			false);
 		symbols->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List symbols of"); };

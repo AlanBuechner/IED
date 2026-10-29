@@ -434,3 +434,31 @@ void TestPackedVectorScalarArithmetic() {
 	AssertFloatEquals(5.0f, cr.x, "composed x");
 	AssertFloatEquals(7.0f, cr.z, "composed z");
 }
+
+// --- A lane bound to a const reference (BUG-429): the reference gets the lane's value, not the vector's first lane ------
+float PVRefLane(const float& lane) { return lane; }
+template<T> T PVRefLaneT(const T& lane) { return lane; }
+template<...Ts> float PVRefSum(const Ts&... lanes) { return (lanes + ...); }
+template<...Ts> float PVRefLast(const Ts&... lanes) {
+	float last = 0.0f;
+	((last = lanes), ...);
+	return last;
+}
+float PVRefRun(const packed float[2]& run) { return run[0] * 10.0f + run[1]; }
+
+void TestPackedVectorLaneReferences() {
+	PVSV3 v = { 2.0f, 0.5f, 3.0f };
+	AssertFloatEquals(3.0f, PVRefLane(v.z), "a lane through a const float&");
+	AssertFloatEquals(0.5f, PVRefLaneT(v.y), "through a template's const T&");
+	AssertFloatEquals(3.0f, PVRefLast(v.x, v.y, v.z), "the last of a pack of lanes");
+	AssertFloatEquals(5.5f, PVRefSum(v.x, v.y, v.z), "every lane of a pack, each its own");
+	PVSV4 q = { 1.0f, 2.0f, 3.0f, 4.0f };
+	int32 i = 3;
+	packed float[4] lanes = q.xyzw;
+	AssertFloatEquals(4.0f, PVRefLane(lanes[i]), "a lane at a runtime index");
+	AssertFloatEquals(3.0f, PVRefLane(q.wzyx[1]), "a run's lane at an index");
+	AssertFloatEquals(43.0f, PVRefRun(q.wz), "a run through a const reference to its packed value");
+	float copied = PVRefLane(v.z);
+	v.z = 9.0f;
+	AssertFloatEquals(3.0f, copied, "the reference saw a copy: later writes to the vector are its own");
+}

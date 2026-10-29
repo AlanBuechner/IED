@@ -273,6 +273,28 @@ namespace Scripting
 		return std::move(built.script);
 	}
 
+	std::unique_ptr<Script> ScriptHost::Prepare(const ScriptCompileOptions& options)
+	{
+		Built built = Build(options);
+		built.script->m_Prepared = std::move(built.linked);
+		built.script->m_PreparedThreadLocals = std::move(built.threadLocals);
+		return std::move(built.script);
+	}
+
+	bool Script::LoadPrepared()
+	{
+		if (!m_Prepared)
+		{
+			m_Diagnostics += "error: the script is not prepared: it did not compile and link, or it loaded already\n";
+			return false;
+		}
+		std::unique_ptr<LinkedScript> linked = std::move(m_Prepared);
+		const std::vector<std::string> threadLocals = std::move(m_PreparedThreadLocals);
+		if (Load(std::move(linked), threadLocals)) return true;
+		Unload(); // nothing of a script that failed stays loaded
+		return false;
+	}
+
 	void ScriptHost::LoadOrUndo(Script& script, std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals)
 	{
 		if (!script.Load(std::move(linked), threadLocals)) script.Unload(); // nothing of a script that failed stays loaded

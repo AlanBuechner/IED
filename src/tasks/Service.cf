@@ -404,8 +404,9 @@ namespace Ied
 		run->m_Label = task->m_Label;
 		run->m_Concurrency = task->m_Concurrency;
 		run->m_SaveFirst = task->m_SaveAll;
-		run->m_SearchRoots.Push(Core::String(project->m_Root.View()));
-		run->m_SearchRoots.Push(Core::String(ws->m_Root.View()));
+		Core::Array<Core::String> others;
+		for (TaskProject* other : ProjectsOf(ws)) others.Push(Core::String(other->m_Root.View()));
+		run->m_SearchRoots = RunSearchRoots(project->m_Root.View(), ws->m_Root.View(), others);
 		TaskLookup lookup = LookupFor(ws, project, offered, context);
 		Core::Array<Core::String> nesting;
 		nesting.Push(task->m_Key);
@@ -575,9 +576,23 @@ namespace Ied
 		return ListJson(ws, named.View());
 	}
 
+	// Names the solution's projects, and how a project folder made since the solution was read joins it.
+	static Core::String NoProjectMessage(const Core::Array<TaskProject*>& projects, Core::StringView name) {
+		Core::StringBuilder out;
+		out.Append("no project to run tasks of: ");
+		out.Append(name);
+		out.Append(" (the solution has ");
+		for (int64 i = 0; i < projects.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(projects[i]->m_Name.View());
+		}
+		out.Append("); a project folder made since the solution was read joins it with project.import (the project_import tool), or in a Nuke workspace with any nuke command");
+		return out.ToString();
+	}
+
 	TaskRun* Tasks::RunTask(Workspace* ws, Core::StringView projectName, Core::StringView key, Core::StringView slot, const Serialization::DomNode& context) {
 		TaskProject* project = ProjectNamed(ws, projectName.IsEmpty() ? StartupProject(ws).View() : projectName);
-		if (!project) throw RpcError(ErrorCode::NotFound, (Core::String("no project to run tasks of: ") + projectName).View());
+		if (!project) throw RpcError(ErrorCode::NotFound, NoProjectMessage(ProjectsOf(ws), projectName).View());
 		OfferedTasks* offered = Offered(ws, project);
 		TaskDef* task = !key.IsEmpty() ? offered->Task(key) : offered->InSlot(slot);
 		if (!task) {
@@ -624,8 +639,8 @@ namespace Ied
 		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
 		if (!ws->m_Trusted) throw RpcError(ErrorCode::Forbidden, "tasks run the workspace's code: trust the workspace first");
 		TaskRun* run = params.Bool("solution", false)
-			? RunSolution(ws, params.Str("slot").View(), params.Field("context"))
-			: RunTask(ws, params.Str("project", Core::StringView("")).View(), params.Str("task", Core::StringView("")).View(), params.Str("slot", Core::StringView("")).View(), params.Field("context"));
+		? RunSolution(ws, params.Str("slot").View(), params.Field("context"))
+		: RunTask(ws, params.Str("project", Core::StringView("")).View(), params.Str("task", Core::StringView("")).View(), params.Str("slot", Core::StringView("")).View(), params.Field("context"));
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("runId", run->m_RunId.View());

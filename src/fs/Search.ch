@@ -34,6 +34,7 @@ namespace Ied
 	{
 		public Core::Array<SearchMatch> m_Matches;
 		public bool m_Truncated;
+		public Core::Array<Core::String> m_TooLarge;   // searched-for files passed over for their size (c_SearchFileLimitBytes)
 	}
 
 	// A query compiled once and matched line by line.

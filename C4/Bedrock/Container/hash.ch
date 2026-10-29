@@ -18,6 +18,12 @@ namespace Core
 		return value ^ (value >> 31);
 	}
 
+	// A hash of several values from their hashes: `seed` with `value` mixed in, so the order counts (a hash of (a, b) is not
+	// one of (b, a)). Start from any seed (0 or a first value's hash) and combine each value's hash in turn.
+	uint64 HashCombine(uint64 seed, uint64 value) {
+		return seed ^ (HashInteger(value) + 0x9e3779b97f4a7c15u + (seed << 6) + (seed >> 2));
+	}
+
 	// The smallest power of two that is at least `value` (and at least 1).
 	int64 NextPowerOfTwo(int64 value) {
 		if (value <= 1) return 1;

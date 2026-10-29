@@ -18,6 +18,10 @@ GUIDE_MD = """# Demo library
 
 What the library offers.
 
+## FrobnicatorDesc
+
+How a Frobnicator is set up: the desc comes first in the file.
+
 ## Frobnicator
 
 A Frobnicator turns widgets into gadgets, one call per batch.
@@ -77,11 +81,14 @@ class WorkToolTests(CodeToolCase):
 			("s1", "docs_search", {"query": "Frobnicate widgets"}),
 			("r1", "docs_read", {"path": "demo/guide.md", "heading": "Frobnicator"}),
 			("r2", "docs_read", {"path": "demo/guide.md"}),
-			("r3", "docs_read", {"path": "demo/missing.md"}))
+			("r3", "docs_read", {"path": "demo/missing.md"}),
+			("r4", "docs_read", {"path": "demo/guide.md", "heading": "frobnicatordesc"}))
 		self.assertIn("demo/guide.md", results["s1"], results["s1"])
 		self.assertIn("Frobnicator", results["s1"], "the section that matches")
 		self.assertIn("int64 Frobnicate(int64 widgets)", results["r1"], "the section's text")
 		self.assertNotIn("Nothing to see", results["r1"], "only that section")
+		self.assertNotIn("the desc comes first", results["r1"], "the heading that is the name, not an earlier one that starts with it")
+		self.assertIn("the desc comes first", results["r4"], "a longer heading by its own name, any case")
 		self.assertIn("Other", results["r2"], "a path alone lists the headings")
 		self.assertIn("missing.md", results["r3"], results["r3"])
 

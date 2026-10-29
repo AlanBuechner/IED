@@ -1,0 +1,38 @@
+// BUG-417: a static method a base declares was not found through a derived type's name (`Derived::F()`), for a plain
+// base and through a class template's instance; the nearest base that declares it wins.
+class Base
+{
+	public static int32 Twice(int32 v) { return v * 2; }
+	public static int32 Name() { return 1; }
+}
+
+class Plain : Base
+{
+}
+
+class Shadowing : Base
+{
+	public static int32 Name() { return 2; }
+}
+
+class Deeper : Shadowing
+{
+}
+
+template<Self> class Generic : Base
+{
+	public static int32 Thrice(int32 v) { return v * 3; }
+}
+
+class Leaf : Generic<Leaf>
+{
+}
+
+int32 main() {
+	int32 a = Plain::Twice(2);
+	int32 b = Leaf::Thrice(2);
+	int32 c = Leaf::Twice(2);
+	int32 d = Deeper::Name();
+	printf("BUG417 a=%d b=%d c=%d d=%d\n", a, b, c, d);
+	return a == 4 && b == 6 && c == 4 && d == 2 ? 0 : 1;
+}

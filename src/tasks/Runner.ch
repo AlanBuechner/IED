@@ -67,6 +67,13 @@ namespace Ied
 	Core::String ProblemSource(const ProblemMatcher* matcher, Core::StringView project);
 	// The problems a run found as the diagnostics snapshot holds them: {<path>: {<source>: [diagnostic]}}.
 	Core::String RunProblemsJson(const TaskRun* run);
+	// Where a matched file is, as a path in the workspace: as written when absolute (or `absolute`), else the first of
+	// `roots` that has it; empty when it is not in the workspace or nowhere to be found.
+	Core::String ResolveProblemFile(Core::StringView file, bool absolute, const Core::Array<Core::String>& roots, Core::StringView workspaceRoot);
+	// Where a run of one project looks for a matched file after its step's own roots: the project, the workspace, then
+	// every other project of the workspace and its src - a build compiles its dependencies' sources too, and a compiler
+	// names their files from their own folders.
+	Core::Array<Core::String> RunSearchRoots(Core::StringView projectRoot, Core::StringView workspaceRoot, const Core::Array<Core::String>& otherProjects);
 
 	// Runs `run` to its end; on a thread of its own, holding no lock. `ended` is notified, under the server lock, when a
 	// run ends.

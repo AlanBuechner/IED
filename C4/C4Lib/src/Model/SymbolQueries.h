@@ -55,6 +55,10 @@ namespace Scripting
 		static Core::String NoMember(const ProgramModel& model, const ObjectType* type, const Core::String& name);
 		QueryResult<const FunctionType*> ResolveAndReturn(const ProgramModel& model, const Core::Vector<OverloadCandidate>& candidates,
 			const Core::Vector<const Type*>& argTypes, const Core::String& name, const FunctionRecord** outRecord = nullptr) const;
+		/// A method called on a receiver that is no object (a number, a void*): its type's extension methods of the name,
+		/// or an error naming the type (BUG-423).
+		QueryResult<const FunctionType*> QueryNonObjectReceiver(const ProgramModel& model, const Core::String& name, const Type* receiverType,
+			const Core::Vector<const Type*>& argTypes, const LookupContext& ctx, const FunctionRecord** outRecord) const;
 
 		static int FunctionTemplateOrder(const ProgramModel& model, const FunctionRecord* a, const FunctionRecord* b);
 		/// Does a record carry the given operator annotation (the [operator("...")] set, doc 08)?
@@ -68,5 +72,8 @@ namespace Scripting
 		/// An error when two candidates share a signature but come from unrelated bases of `type`.
 		QueryResult<void> InheritedSignatureClash(const ObjectType* type, const Core::Vector<OverloadCandidate>& candidates,
 			const Core::String& name) const;
+		/// `Derived::F` naming a static method of a base (BUG-417): the nearest base's static overloads of F.
+		static void CollectInheritedStatics(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* scope,
+			Core::Vector<OverloadCandidate>& candidates);
 	};
 } // namespace Scripting

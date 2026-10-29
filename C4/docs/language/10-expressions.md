@@ -164,8 +164,10 @@ int64 d = offsetof(Outer, inner.value);
   ([06](06-lifecycle-and-operators.md)). The operator is a method of the left operand's type; the
   operands never swap (D-25).
 - The built-in operators take: numbers for `+ - * / % **` (and a pointer with an integer for `p + n`,
-  `n + p`, `p - n`, or two pointers to one type for `p - q`), integers for `& | ^ << >> ~`, numbers or two pointers for comparisons. Anything else
-  is an error that names both types (`operator '&' needs integer operands, not 'float' and 'float'`).
+  `n + p`, `p - n`, or two pointers to one type for `p - q`), integers for `& | ^ << >> ~`, numbers or two pointers for comparisons; `==`
+  and `!=` also take a pointer beside `null` or the constant `0`. Anything else is an error that names both types
+  (`operator '&' needs integer operands, not 'float' and 'float'`; `operator '==' cannot compare a 'bool' and a 'void*'` for
+  `flag == null`, and an integer variable beside a pointer needs a cast).
 - An operand written as a constant that already makes the operation undefined is an error: an integer `/`
   or `%` by `0` (`division by zero: the right operand of '/' is the constant 0`) and a shift count outside 0
   to the operand's width less one (`the shift count 32 is outside 0 to 31 for a 'int32'`).

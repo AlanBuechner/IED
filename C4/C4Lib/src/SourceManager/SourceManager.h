@@ -21,6 +21,7 @@ namespace Scripting
 		uint32 project = 0;   // the project the file belongs to (docs/language/15-projects.md)
 		bool library = false; // a file of the default library (Bedrock)
 		bool byName = false;  // registered by itself (in memory, or one file): includes find it by its display name
+		uint32 bindingsLine = 0; // the line the C bindings the interop pass appended start on; 0: none (BUG-420)
 	};
 
 	/// The file an include names, or why it names none the includer may use.

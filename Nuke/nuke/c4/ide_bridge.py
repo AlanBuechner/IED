@@ -31,6 +31,23 @@ def options(job, toolchain, compiler_args):
 	}
 
 
+def prune(workspace):
+	"""Removes the options of projects the workspace no longer has - renamed, removed, or moved to a workspace of their
+	own: a language server would go on analyzing the files they shared with live projects against a description no build
+	writes again. Returns how many it removed."""
+	folder = fsutil.join(workspace.dir, OPTIONS_DIR)
+	if not os.path.isdir(folder):
+		return 0
+	names = {p.name.lower() for p in workspace.projects.values()}
+	removed = 0
+	for entry in sorted(os.listdir(folder)):
+		stem, extension = os.path.splitext(entry)
+		if extension == ".json" and stem.lower() not in names:
+			os.remove(os.path.join(folder, entry))
+			removed += 1
+	return removed
+
+
 def write(workspace, name, job, toolchain, compiler_args):
 	"""Write (only when changed) and return the options file path."""
 	path = options_path(workspace, name)

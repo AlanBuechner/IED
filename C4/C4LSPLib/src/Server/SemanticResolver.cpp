@@ -635,6 +635,7 @@ namespace C4LSP::Server
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
 			{
+				if (Scripting::IsExtensionMethodKey(name)) continue; // a member of the type it extends, not a global
 				GlobalSymbol gs;
 				gs.name = name;
 				gs.kind = info->kind;
@@ -677,7 +678,7 @@ namespace C4LSP::Server
 			Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
-				if (name == simpleName && info->declNode)
+				if ((name == simpleName || name == Scripting::ExtensionMethodKey(simpleName)) && info->declNode)
 					out.push_back(info->declNode);
 		};
 		walk(m_Model.Symbols()->GetRoot());

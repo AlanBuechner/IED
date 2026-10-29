@@ -27,6 +27,9 @@ namespace Ai
 	// The part of `text` that `range` takes, whole lines with their breaks ("\r\n" read as "\n"); a `numbered` text's lines
 	// go by the numbers of their "<n>\t" gutters, which are left out, and its "[...]" notes are skipped. False with `error`.
 	bool CutClip(Core::StringView text, bool numbered, const ClipRange& range, Core::String& cut, Core::String& error);
+	// What clipboard_copy says of a clip it made or added to: its size and source, how to paste it, its first and last
+	// lines, whether it ends with a line break, and the clip `dropped` to make room.
+	Core::String CopyReport(const Clip* clip, Core::StringView added, Core::StringView source, bool appended, Core::StringView dropped);
 	// Whether every line of `text` is "<n>\t..." or a "[...]" note, as an fs_read result's are.
 	bool LooksNumbered(Core::StringView text);
 	// `text` with each {{clip:<name>}} replaced by that clip's text and {{!clip:<name>}} by {{clip:<name>}}; false with

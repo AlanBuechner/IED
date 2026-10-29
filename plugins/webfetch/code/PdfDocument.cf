@@ -1,0 +1,473 @@
+include "PdfDocument.ch"
+
+namespace WebFetch
+{
+	const int32 c_PdfMaxDepth = 64;
+	const int32 c_PdfMaxHops = 32;
+	const int64 c_PdfHeaderWithin = 1024;
+
+	static bool PdfSpace(int32 c) { return c == 0 || c == 9 || c == 10 || c == 12 || c == 13 || c == 32; }
+
+	static bool PdfDelimiter(int32 c) {
+		return c == '(' || c == ')' || c == '<' || c == '>' || c == '[' || c == ']' || c == '{' || c == '}' || c == '/' || c == '%';
+	}
+
+	static bool PdfDigit(int32 c) { return c >= '0' && c <= '9'; }
+
+	static int32 PdfHexDigit(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	static bool PdfInteger(Core::StringView word) {
+		if (word.IsEmpty()) return false;
+		for (int64 i = 0; i < word.ByteLength(); ++i)
+			if (!PdfDigit(word.ByteAt(i))) return false;
+		return true;
+	}
+
+	// "12", "-3.5", ".25", "+4.": PDF's numbers (no exponents).
+	static bool PdfNumber(Core::StringView word, double& value) {
+		int64 i = 0;
+		double sign = 1.0;
+		if (i < word.ByteLength() && (word.ByteAt(i) == '-' || word.ByteAt(i) == '+')) {
+			if (word.ByteAt(i) == '-') sign = -1.0;
+			i += 1;
+		}
+		bool digits = false;
+		double whole = 0.0;
+		while (i < word.ByteLength() && PdfDigit(word.ByteAt(i))) {
+			whole = whole * 10.0 + (double)(word.ByteAt(i) - '0');
+			digits = true;
+			i += 1;
+		}
+		if (i < word.ByteLength() && word.ByteAt(i) == '.') {
+			i += 1;
+			double scale = 0.1;
+			while (i < word.ByteLength() && PdfDigit(word.ByteAt(i))) {
+				whole += scale * (double)(word.ByteAt(i) - '0');
+				scale *= 0.1;
+				digits = true;
+				i += 1;
+			}
+		}
+		if (!digits || i != word.ByteLength()) return false;
+		value = sign * whole;
+		return true;
+	}
+
+	public const PdfValue* PdfValue::Get(Core::StringView key) const {
+		if (m_Kind != PdfKind::Dict) return null;
+		for (int64 i = 0; i < m_Keys.Count(); ++i)
+			if (m_Keys[i].View() == key) return &m_Items[i];
+		return null;
+	}
+
+	// --- PdfParser --------------------------------------------------------------------------------------------------
+
+	public void PdfParser::SkipSpace() {
+		const int64 length = m_Data.ByteLength();
+		while (m_At < length) {
+			const int32 c = m_Data.ByteAt(m_At);
+			if (c == '%') {
+				while (m_At < length && m_Data.ByteAt(m_At) != '\n' && m_Data.ByteAt(m_At) != '\r') m_At += 1;
+				continue;
+			}
+			if (!PdfSpace(c)) return;
+			m_At += 1;
+		}
+	}
+
+	private Core::StringView PdfParser::Word() {
+		const int64 start = m_At;
+		while (m_At < m_Data.ByteLength() && !PdfSpace(m_Data.ByteAt(m_At)) && !PdfDelimiter(m_Data.ByteAt(m_At))) m_At += 1;
+		return m_Data.Substring(start, m_At - start);
+	}
+
+	private void PdfParser::Name(PdfValue& value) {
+		m_At += 1;
+		Core::StringBuilder text;
+		while (m_At < m_Data.ByteLength()) {
+			const int32 c = m_Data.ByteAt(m_At);
+			if (PdfSpace(c) || PdfDelimiter(c)) break;
+			if (c == '#' && m_At + 2 < m_Data.ByteLength() && PdfHexDigit(m_Data.ByteAt(m_At + 1)) >= 0 && PdfHexDigit(m_Data.ByteAt(m_At + 2)) >= 0) {
+				text.AppendByte(PdfHexDigit(m_Data.ByteAt(m_At + 1)) * 16 + PdfHexDigit(m_Data.ByteAt(m_At + 2)));
+				m_At += 3;
+				continue;
+			}
+			text.AppendByte(c);
+			m_At += 1;
+		}
+		value.m_Kind = PdfKind::Name;
+		value.m_Text = text.ToString();
+	}
+
+	private void PdfParser::Literal(PdfValue& value) {
+		m_At += 1;
+		const int64 length = m_Data.ByteLength();
+		int32 depth = 1;
+		Core::StringBuilder text;
+		while (m_At < length) {
+			const int32 c = m_Data.ByteAt(m_At);
+			m_At += 1;
+			if (c == '\\') {
+				if (m_At >= length) break;
+				const int32 escaped = m_Data.ByteAt(m_At);
+				m_At += 1;
+				if (escaped == 'n') text.AppendByte(10);
+				else if (escaped == 'r') text.AppendByte(13);
+				else if (escaped == 't') text.AppendByte(9);
+				else if (escaped == 'b') text.AppendByte(8);
+				else if (escaped == 'f') text.AppendByte(12);
+				else if (escaped >= '0' && escaped <= '7') {
+					int32 code = escaped - '0';
+					for (int32 more = 0; more < 2 && m_At < length && m_Data.ByteAt(m_At) >= '0' && m_Data.ByteAt(m_At) <= '7'; ++more) {
+						code = code * 8 + (m_Data.ByteAt(m_At) - '0');
+						m_At += 1;
+					}
+					text.AppendByte(code & 255);
+				}
+				else if (escaped == '\r') {
+					if (m_At < length && m_Data.ByteAt(m_At) == '\n') m_At += 1;   // a line continued
+				}
+				else if (escaped != '\n') text.AppendByte(escaped);
+				continue;
+			}
+			if (c == '(') depth += 1;
+			else if (c == ')') {
+				depth -= 1;
+				if (depth == 0) break;
+			}
+			text.AppendByte(c);
+		}
+		value.m_Kind = PdfKind::String;
+		value.m_Text = text.ToString();
+	}
+
+	private void PdfParser::Hex(PdfValue& value) {
+		m_At += 1;
+		Core::StringBuilder bytes;
+		int32 high = -1;
+		while (m_At < m_Data.ByteLength()) {
+			const int32 c = m_Data.ByteAt(m_At);
+			m_At += 1;
+			if (c == '>') break;
+			const int32 digit = PdfHexDigit(c);
+			if (digit < 0) continue;
+			if (high < 0) high = digit;
+			else {
+				bytes.AppendByte(high * 16 + digit);
+				high = -1;
+			}
+		}
+		if (high >= 0) bytes.AppendByte(high * 16);
+		value.m_Kind = PdfKind::String;
+		value.m_Text = bytes.ToString();
+	}
+
+	public bool PdfParser::Next(PdfValue& value, Core::StringView& keyword, bool references) {
+		return Value(value, keyword, references, 0);
+	}
+
+	private bool PdfParser::Value(PdfValue& value, Core::StringView& keyword, bool references, int32 depth) {
+		value = PdfValue();
+		keyword = Core::StringView();
+		SkipSpace();
+		if (AtEnd()) return false;
+		const int32 c = m_Data.ByteAt(m_At);
+		const bool opens = c == '/' || c == '(' || c == '<' || c == '[';
+		if (depth > c_PdfMaxDepth || (PdfDelimiter(c) && !opens)) {
+			keyword = m_Data.Substring(m_At, 1);   // a stray delimiter, or nesting too deep: consumed, so reading goes on
+			m_At += 1;
+			return false;
+		}
+		if (c == '/') {
+			Name(value);
+			return true;
+		}
+		if (c == '(') {
+			Literal(value);
+			return true;
+		}
+		if (c == '<' && m_At + 1 < m_Data.ByteLength() && m_Data.ByteAt(m_At + 1) == '<') {
+			m_At += 2;
+			value.m_Kind = PdfKind::Dict;
+			while (true) {
+				SkipSpace();
+				if (AtEnd()) return true;
+				if (m_Data.ByteAt(m_At) == '>') {
+					m_At += m_At + 1 < m_Data.ByteLength() && m_Data.ByteAt(m_At + 1) == '>' ? 2 : 1;
+					return true;
+				}
+				PdfValue key;
+				Core::StringView word;
+				if (!Value(key, word, references, depth + 1) || key.m_Kind != PdfKind::Name) continue;
+				PdfValue item;
+				Value(item, word, references, depth + 1);   // a key without a value is null
+				value.m_Keys.Push(key.m_Text);
+				value.m_Items.Push(item);
+			}
+		}
+		if (c == '<') {
+			Hex(value);
+			return true;
+		}
+		if (c == '[') {
+			m_At += 1;
+			value.m_Kind = PdfKind::Array;
+			while (true) {
+				SkipSpace();
+				if (AtEnd()) return true;
+				if (m_Data.ByteAt(m_At) == ']') {
+					m_At += 1;
+					return true;
+				}
+				PdfValue item;
+				Core::StringView word;
+				if (Value(item, word, references, depth + 1)) value.m_Items.Push(item);
+			}
+		}
+		Core::StringView word = Word();
+		double number = 0.0;
+		if (PdfNumber(word, number)) {
+			value.m_Kind = PdfKind::Number;
+			value.m_Number = number;
+			if (references && PdfInteger(word)) {
+				const int64 save = m_At;
+				SkipSpace();
+				if (PdfInteger(Word())) {
+					SkipSpace();
+					if (Word() == "R") {
+						value.m_Kind = PdfKind::Ref;
+						value.m_Object = (int64)number;
+						return true;
+					}
+				}
+				m_At = save;
+			}
+			return true;
+		}
+		if (word == "true" || word == "false") {
+			value.m_Kind = PdfKind::Bool;
+			value.m_Number = word == "true" ? 1.0 : 0.0;
+			return true;
+		}
+		if (word == "null") return true;
+		keyword = word;
+		return false;
+	}
+
+	// --- PdfDocument ------------------------------------------------------------------------------------------------
+
+	static void SetEntry(PdfValue& dictionary, Core::StringView key, const PdfValue& value) {
+		dictionary.m_Kind = PdfKind::Dict;
+		for (int64 i = 0; i < dictionary.m_Keys.Count(); ++i)
+			if (dictionary.m_Keys[i].View() == key) {
+				dictionary.m_Items[i] = value;
+				return;
+			}
+		dictionary.m_Keys.Push(Core::String(key));
+		dictionary.m_Items.Push(value);
+	}
+
+	// The trailer's entries text extraction needs, from a trailer or a cross-reference stream's dictionary.
+	static void TakeTrailerEntries(PdfValue& trailer, const PdfValue& from) {
+		const char*[3] keys = { "Root", "Info", "Encrypt" };
+		for (int32 i = 0; i < 3; ++i) {
+			const PdfValue* value = from.Get(Core::StringView(keys[i]));
+			if (value != null) SetEntry(trailer, Core::StringView(keys[i]), *value);
+		}
+	}
+
+	public bool PdfDocument::Parse(Core::StringView data, Core::String& error) {
+		m_Data = data;
+		m_Objects = Core::HashMap<int64, PdfObject*>();
+		m_Trailer = PdfValue();
+		const int64 header = data.IndexOf(Core::StringView("%PDF-"));
+		if (header < 0 || header > c_PdfHeaderWithin) {
+			error = Core::String("no %PDF- header: not a PDF");
+			return false;
+		}
+		const int64 length = data.ByteLength();
+		int64 at = header;
+		while (true) {
+			const int64 found = data.IndexOf(Core::StringView("obj"), at);
+			if (found < 0) break;
+			at = found + 3;
+			if (at < length && !PdfSpace(data.ByteAt(at)) && !PdfDelimiter(data.ByteAt(at))) continue;
+			// "<number> <generation> obj": walk back over the generation and the number.
+			int64 i = found - 1;
+			if (i < 0 || !PdfSpace(data.ByteAt(i))) continue;
+			while (i >= 0 && PdfSpace(data.ByteAt(i))) i -= 1;
+			const int64 generationEnd = i + 1;
+			while (i >= 0 && PdfDigit(data.ByteAt(i))) i -= 1;
+			if (i + 1 == generationEnd || i < 0 || !PdfSpace(data.ByteAt(i))) continue;
+			while (i >= 0 && PdfSpace(data.ByteAt(i))) i -= 1;
+			const int64 numberEnd = i + 1;
+			while (i >= 0 && PdfDigit(data.ByteAt(i))) i -= 1;
+			if (i + 1 == numberEnd || (i >= 0 && !PdfSpace(data.ByteAt(i)) && !PdfDelimiter(data.ByteAt(i)))) continue;
+			int64 number = 0;
+			if (!Core::ParseInt64(data.Substring(i + 1, numberEnd - i - 1), number)) continue;
+			int64 next = at;
+			ReadObjectAt(at, number, next);
+			at = next > at ? next : at;
+		}
+		ReadTrailers();
+		if (m_Trailer.Get(Core::StringView("Encrypt")) != null) {
+			error = Core::String("the PDF is encrypted: its text cannot be read");
+			return false;
+		}
+		UnpackObjectStreams();
+		if (m_Objects.Count() == 0) {
+			error = Core::String("no objects in the file: a damaged PDF");
+			return false;
+		}
+		return true;
+	}
+
+	private void PdfDocument::ReadObjectAt(int64 valueStart, int64 number, int64& next) {
+		PdfParser parser = PdfParser(m_Data, valueStart);
+		PdfObject* object = new PdfObject();
+		Core::StringView keyword;
+		parser.Next(object->m_Value, keyword, true);
+		next = parser.Position();
+		parser.SkipSpace();
+		const int64 afterValue = parser.Position();
+		const int64 length = m_Data.ByteLength();
+		if (m_Data.Substring(afterValue, 6) == "stream") {
+			int64 start = afterValue + 6;
+			if (start < length && m_Data.ByteAt(start) == '\r') start += 1;
+			if (start < length && m_Data.ByteAt(start) == '\n') start += 1;
+			int64 size = -1;
+			const PdfValue* declared = object->m_Value.Get(Core::StringView("Length"));
+			if (declared != null && declared->m_Kind == PdfKind::Number && declared->m_Number >= 0.0 && start + (int64)declared->m_Number <= length) {
+				PdfParser check = PdfParser(m_Data, start + (int64)declared->m_Number);
+				check.SkipSpace();
+				if (m_Data.Substring(check.Position(), 9) == "endstream") size = (int64)declared->m_Number;
+			}
+			if (size < 0) {
+				// An indirect or wrong /Length: up to "endstream", without the line break before it.
+				int64 end = m_Data.IndexOf(Core::StringView("endstream"), start);
+				if (end < 0) end = length;
+				if (end > start && m_Data.ByteAt(end - 1) == '\n') end -= 1;
+				if (end > start && m_Data.ByteAt(end - 1) == '\r') end -= 1;
+				size = end - start;
+			}
+			object->m_StreamStart = start;
+			object->m_StreamLength = size;
+			next = start + size;
+		}
+		m_Objects[number] = object;   // a later definition (an incremental update) replaces an earlier one
+	}
+
+	private void PdfDocument::ReadTrailers() {
+		int64 at = 0;
+		while (true) {
+			const int64 found = m_Data.IndexOf(Core::StringView("trailer"), at);
+			if (found < 0) break;
+			at = found + 7;
+			PdfParser parser = PdfParser(m_Data, at);
+			PdfValue dictionary;
+			Core::StringView keyword;
+			if (parser.Next(dictionary, keyword, true) && dictionary.m_Kind == PdfKind::Dict) TakeTrailerEntries(m_Trailer, dictionary);
+		}
+		// Cross-reference streams (PDF 1.5) carry the trailer's entries in their own dictionaries.
+		for (int64 number : ObjectNumbers()) {
+			PdfObject* object = m_Objects.Get(number);
+			const PdfValue* type = object->m_Value.Get(Core::StringView("Type"));
+			if (type != null && type->IsName(Core::StringView("XRef"))) TakeTrailerEntries(m_Trailer, object->m_Value);
+		}
+	}
+
+	private void PdfDocument::UnpackObjectStreams() {
+		for (int64 number : ObjectNumbers()) {
+			PdfObject* holder = m_Objects.Get(number);
+			const PdfValue* type = holder->m_Value.Get(Core::StringView("Type"));
+			if (type == null || !type->IsName(Core::StringView("ObjStm"))) continue;
+			const PdfValue* count = holder->m_Value.Get(Core::StringView("N"));
+			const PdfValue* first = holder->m_Value.Get(Core::StringView("First"));
+			const Core::Array<uint8>* data = Stream(number);
+			if (data == null || count == null || first == null || count->m_Kind != PdfKind::Number || first->m_Kind != PdfKind::Number) continue;
+			Core::StringView text = Core::StringView((const char*)(const void*)data->Data(), data->Count());
+			PdfParser header = PdfParser(text, 0);
+			for (int64 i = 0; i < (int64)count->m_Number; ++i) {
+				PdfValue packed;
+				PdfValue offset;
+				Core::StringView keyword;
+				if (!header.Next(packed, keyword, false) || !header.Next(offset, keyword, false)) break;
+				const int64 packedNumber = (int64)packed.m_Number;
+				if (m_Objects.Contains(packedNumber)) continue;   // written out in the file as well: that one stands
+				PdfParser body = PdfParser(text, (int64)first->m_Number + (int64)offset.m_Number);
+				PdfObject* object = new PdfObject();
+				body.Next(object->m_Value, keyword, true);
+				m_Objects[packedNumber] = object;
+			}
+		}
+	}
+
+	private bool PdfDocument::Decode(PdfObject& object) {
+		Core::Array<Core::String> filters;
+		const PdfValue* filter = object.m_Value.Get(Core::StringView("Filter"));
+		if (filter != null && filter->m_Kind == PdfKind::Name) filters.Push(filter->m_Text);
+		if (filter != null && filter->m_Kind == PdfKind::Array)
+			for (const PdfValue& each : filter->m_Items) filters.Push(each.m_Text);
+		const PdfValue* parameters = object.m_Value.Get(Core::StringView("DecodeParms"));
+		const PdfValue* predictor = parameters != null ? parameters->Get(Core::StringView("Predictor")) : null;
+		if (predictor != null && predictor->m_Kind == PdfKind::Number && predictor->m_Number > 1.0) return false;   // images and xref streams only
+		Core::Array<uint8> data;
+		data.Resize(object.m_StreamLength);
+		for (int64 i = 0; i < object.m_StreamLength; ++i) data[i] = (uint8)m_Data.ByteAt(object.m_StreamStart + i);
+		for (const Core::String& name : filters) {
+			if (name.View() != "FlateDecode" && name.View() != "Fl") return false;
+			Core::Array<uint8> inflated;
+			if (!Compression::ZlibDecompress(data.Data(), data.Count(), inflated).ok && data.Count() > 2) {
+				// A wrong checksum or header still leaves the data: take what the DEFLATE stream gives.
+				inflated.Clear();
+				Compression::Inflate(data.Data() + 2, data.Count() - 2, inflated);
+			}
+			if (inflated.IsEmpty() && !data.IsEmpty()) return false;
+			data = inflated;
+		}
+		object.m_Data = data;
+		return true;
+	}
+
+	public const PdfObject* PdfDocument::Object(int64 number) const { return m_Objects.Get(number); }
+
+	public Core::Array<int64> PdfDocument::ObjectNumbers() const {
+		Core::Array<int64> numbers;
+		for (const Core::KeyValue<int64, PdfObject*>& entry : m_Objects) numbers.Push(entry.key);
+		numbers.Sort();
+		return numbers;
+	}
+
+	public const PdfValue* PdfDocument::Resolve(const PdfValue* value) const {
+		for (int32 hops = 0; value != null && value->m_Kind == PdfKind::Ref; ++hops) {
+			if (hops == c_PdfMaxHops) return null;
+			PdfObject* object = m_Objects.Get(value->m_Object);
+			value = object == null ? null : &object->m_Value;
+		}
+		return value;
+	}
+
+	public const PdfValue* PdfDocument::Lookup(const PdfValue* dictionary, Core::StringView key) const {
+		const PdfValue* resolved = Resolve(dictionary);
+		return resolved == null ? null : Resolve(resolved->Get(key));
+	}
+
+	public const Core::Array<uint8>* PdfDocument::Stream(int64 number) {
+		PdfObject* object = m_Objects.Get(number);
+		if (object == null || object->m_StreamStart < 0) return null;
+		if (!object->m_Decoded) {
+			object->m_Decoded = true;
+			object->m_Undecodable = !Decode(*object);
+		}
+		return object->m_Undecodable ? null : &object->m_Data;
+	}
+
+	public const Core::Array<uint8>* PdfDocument::Stream(const PdfValue* reference) {
+		return reference != null && reference->m_Kind == PdfKind::Ref ? Stream(reference->m_Object) : null;
+	}
+}

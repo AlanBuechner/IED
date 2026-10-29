@@ -101,9 +101,12 @@ void Use() {
 
 - Methods may be defined inline in the template body or out of line (section 3).
 - Static members work per instantiation: `TplPair<int32, float>::Sum(1, 2)`.
-- A member alias may name a parameter: `alias Type = T; Type val;`.
+- A member alias may name a parameter: `alias Type = T; Type val;`. It is a member of each instance, as a nested type is:
+  `Box<int32>::Type` names it, and so does `A::Type` in a template whose argument `A` is an instance
+  (`template<A> alias ComponentOf = A::Component;`, then `ComponentOf<Ts>...` in a pack expansion).
 - Templates may be declared inside namespaces and used qualified (`Geometry::Cube<int32>`) or
-  through an alias (`alias ICube = Cube<int32>;`).
+  through an alias (`alias ICube = Cube<int32>;`), whose static members are reached through it as well
+  (`ICube::Make()`, `ICube::Size`).
 - A template instance may be a base class (`struct Circle : public Shape<float>`), and operators declared
   on the template base are inherited.
 - Inside the body the template's bare name is the instance being built (C++'s injected class name):

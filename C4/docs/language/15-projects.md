@@ -93,7 +93,8 @@ ENGINE_EDITOR = "1"
 5. **Dependencies form no cycle**; a cycle is an error that prints it (`Game -> Engine -> Game`).
 6. **One program.** Code generation sees one module, so inlining crosses projects, and the one-definition rule
    holds across them: two projects defining the same global name is a redefinition, as linking two C++ libraries
-   with the same symbol would be.
+   with the same symbol would be. Declarations two projects' C bindings repeat are one, each project's
+   ([13-interop.md](13-interop.md#1-extern-declarations)), as two C libraries share the headers they include.
 7. **Tests.** A `-test` build runs the `[test]` functions of every project in the build.
 
 ## 15.4 How the compiler does it
@@ -117,4 +118,5 @@ ENGINE_EDITOR = "1"
 - C4Testing `Lsp.Server`: the editor gets the projects' defines and the boundary error.
 - ToolsTest `ProjectDefines` (each project's defines, and at `-O2` the engine function inlined into the game),
   `ProjectBoundaries` (an include and a declaration across the boundary, an ambiguous path, a cycle, a misspelled
-  key, inputs with `--projects`), `NukeToolchainProject` (a module's own define reaches only the module).
+  key, inputs with `--projects`), `ProjectsShareABoundHeader` (two projects binding one C++ header, one file
+  binding two headers that share it), `NukeToolchainProject` (a module's own define reaches only the module).

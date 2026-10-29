@@ -132,21 +132,22 @@ namespace Scripting
 
 	void TypeStore::FinalizeLayouts()
 	{
-		// Fixed point: walk every object type and recompute layout until nothing changes. Forward
-		// references resolve because every shell exists before this runs (doc 02 pass 2). A type
-		// whose size depends on itself without an indirection never settles - cap the iterations.
+		// Fixed point: walk every object and union type and recompute layout until nothing changes. Forward
+		// references resolve because every shell exists before this runs (doc 02 pass 2). A union is laid out as its
+		// fields resolve, when a struct member may not be laid out yet (BUG-432): it settles here with the objects. A
+		// type whose size depends on itself without an indirection never settles - cap the iterations.
 		for (int32 pass = 0; pass < 8; ++pass)
 		{
 			bool changed = false;
 			for (auto& owned : m_Owned)
 			{
 				if (!owned || !owned->IsValid()) continue;
-				const ObjectType* obj = dynamic_cast<const ObjectType*>(owned.get());
-				if (!obj) continue;
-				size_t beforeSize = obj->GetSize();
-				size_t beforeAlign = obj->GetAlignment();
-				const_cast<ObjectType*>(obj)->CalculateLayout();
-				if (obj->GetSize() != beforeSize || obj->GetAlignment() != beforeAlign)
+				const size_t beforeSize = owned->GetSize();
+				const size_t beforeAlign = owned->GetAlignment();
+				if (auto* obj = dynamic_cast<ObjectType*>(owned.get())) obj->CalculateLayout();
+				else if (auto* un = dynamic_cast<UnionType*>(owned.get()); un && !un->HasPendingFields()) un->CalculateLayout();
+				else continue;
+				if (owned->GetSize() != beforeSize || owned->GetAlignment() != beforeAlign)
 					changed = true;
 			}
 			if (!changed) break;

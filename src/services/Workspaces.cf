@@ -12,6 +12,8 @@ namespace Ied
 		message.Append("path must be workspace-relative without '.' or '..': '");
 		message.Append(path);
 		message.Append("'");
+		// A full path: say what to give instead (the test matches the message's start).
+		if (path.ByteLength() >= 2 && path.ByteAt(1) == ':') message.Append(" is a full path; give it relative to the workspace's root (a plugin's files: plugins:/<id>/..., IED's checkout in developer mode: ied:/...)");
 		return RpcError(ErrorCode::BadRequest, message.View());
 	}
 

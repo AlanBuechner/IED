@@ -61,6 +61,7 @@ namespace Scripting
 		llvm::Value* EmitLoad(const LoadNode* n);
 		llvm::Value* LoadRun(const LValue* run);
 		llvm::Value* RunLaneTable(const LValue* run);
+		llvm::Value* DynamicLaneAddress(const LValue* loc);
 		llvm::Value* EmitStore(const StoreNode* n);
 		llvm::Value* EmitIntrinsicOp(const IntrinsicOpNode* n);
 		llvm::Value* EmitConvert(const ConvertNode* n);

@@ -5,6 +5,9 @@
 #include "Server/SemanticResolver.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <utility>
+#include <vector>
 #include "Parser/AstNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
@@ -35,12 +38,43 @@ namespace C4LSP::Features
 		return outer.empty() ? inner : (inner.empty() ? outer : outer + "::" + inner);
 	}
 
+	static bool EndsWith(const std::string& text, const char* suffix)
+	{
+		const size_t length = std::char_traits<char>::length(suffix);
+		return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
+	}
+
+	// Lower is better: the name itself, then any case, then a prefix, then a part; each with C4 sources before C headers.
+	static int Rank(const WorkspaceSymbol& symbol, const std::string& query, const std::string& lowerQuery)
+	{
+		const std::string lower = ToLower(symbol.name);
+		const int match = symbol.name == query ? 0 : (lower == lowerQuery ? 1 : (lower.rfind(lowerQuery, 0) == 0 ? 2 : 3));
+		const bool c4 = EndsWith(symbol.location.uri, ".cf") || EndsWith(symbol.location.uri, ".ch");
+		return match * 2 + (c4 ? 0 : 1);
+	}
+
+	// A large program (the Windows headers' thousands of names) holds more matches than the cap: the best are kept.
+	static void KeepBest(Core::Vector<WorkspaceSymbol>& symbols, const std::string& query)
+	{
+		const std::string lowerQuery = ToLower(query);
+		std::vector<std::pair<int, uint32>> order; // (rank, index): ranked once, sorted stably by the index
+		order.reserve(symbols.Count());
+		for (uint32 i = 0; i < symbols.Count(); ++i)
+			order.emplace_back(Rank(symbols[i], query, lowerQuery), i);
+		std::sort(order.begin(), order.end());
+		Core::Vector<WorkspaceSymbol> best;
+		for (size_t i = 0; i < order.size() && i < kMaxResults; ++i)
+			best.Push(std::move(symbols[order[i].second]));
+		symbols = std::move(best);
+	}
+
 	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::ForQuery(Server::CompilationSession& session, const std::string& query)
 	{
 		Walk walk{ session, query };
+		walk.limit = query.empty() ? kMaxResults : SIZE_MAX;
 		session.GetResolver().CollectNamespacePaths(walk.namespaces);
 		auto& compiler = session.GetCompiler();
-		for (uint32 sourceId = 1; sourceId <= compiler.SourceCount() && walk.out.Count() < kMaxResults; ++sourceId)
+		for (uint32 sourceId = 1; sourceId <= compiler.SourceCount() && walk.out.Count() < walk.limit; ++sourceId)
 		{
 			if (!compiler.GetSourceManager().HasInfo(sourceId))
 				continue;
@@ -51,12 +85,14 @@ namespace C4LSP::Features
 						AddDeclaration(walk, *child.Get(), sourceId, "", false);
 		}
 		AddMacros(walk);
+		if (!query.empty())
+			KeepBest(walk.out, query);
 		return walk.out;
 	}
 
 	void WorkspaceSymbols::AddMacros(Walk& walk)
 	{
-		for (uint32 sourceId = 1; sourceId <= walk.session.GetCompiler().SourceCount() && walk.out.Count() < kMaxResults; ++sourceId)
+		for (uint32 sourceId = 1; sourceId <= walk.session.GetCompiler().SourceCount() && walk.out.Count() < walk.limit; ++sourceId)
 		{
 			const std::string_view text = walk.session.RawTextOf(sourceId);
 			if (text.find("define") == std::string_view::npos)
@@ -65,7 +101,7 @@ namespace C4LSP::Features
 			if (uri.empty())
 				continue;
 			for (const MacroUses::Definition& macro : MacroUses::DefinitionsIn(text))
-				if (walk.out.Count() < kMaxResults && Matches(macro.name, walk.query))
+				if (walk.out.Count() < walk.limit && Matches(macro.name, walk.query))
 					walk.out.Push(WorkspaceSymbol{ macro.name, SymbolKinds::Function, Protocol::Location{ uri, macro.nameRange }, "" });
 		}
 	}
@@ -73,7 +109,7 @@ namespace C4LSP::Features
 	void WorkspaceSymbols::AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member)
 	{
 		for (const auto& node : nodes)
-			if (node && node->startLocation.sourceId == sourceId && walk.out.Count() < kMaxResults)
+			if (node && node->startLocation.sourceId == sourceId && walk.out.Count() < walk.limit)
 				AddDeclaration(walk, *node.Get(), sourceId, container, member);
 	}
 
@@ -88,7 +124,7 @@ namespace C4LSP::Features
 			// Keep descending when the namespace did not match: "Player" must still find Player inside it.
 			const std::string inner = ns.IsRoot() ? container : Joined(container, ns.Name());
 			for (const auto& child : node.Children())
-				if (child && child->startLocation.sourceId == sourceId && walk.out.Count() < kMaxResults)
+				if (child && child->startLocation.sourceId == sourceId && walk.out.Count() < walk.limit)
 					AddDeclaration(walk, *child.Get(), sourceId, inner, false);
 			break;
 		}
@@ -132,7 +168,7 @@ namespace C4LSP::Features
 	void WorkspaceSymbols::Push(Walk& walk, const Scripting::AstNode& node, const std::string& container, bool member)
 	{
 		const std::string name = DeclarationText::NameOf(node);
-		if (walk.out.Count() >= kMaxResults || name.empty() || !Matches(name, walk.query))
+		if (walk.out.Count() >= walk.limit || name.empty() || !Matches(name, walk.query))
 			return;
 		const DeclarationText::NameLocation location = DeclarationText::NameLocationOf(node);
 		WorkspaceSymbol symbol;

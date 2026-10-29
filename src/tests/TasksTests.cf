@@ -191,4 +191,26 @@ class TasksTests {
 		assert_true(files.Member("src/b.cf").Member("c4/Game").At(0).Member("message").AsView() == "four", "the other file");
 		assert_true(Ied::RunProblemsJson(new Ied::TaskRun()).View() == "{}", "none");
 	}
+
+	// A build of an executable compiles its library's sources, and C4 names them from the library's own src folder
+	// ("Engine/Mesh.cf"): the run finds them under the other project, not only under its own.
+	[test("dependency_problems_resolve")]
+	public static void TestDependencyProblemsResolve() {
+		FS::Path root = FS::TempDirectory() / "ied-dependency-problems-test";
+		FS::RemoveAll(root.CStr());
+		assert_true(FS::MakeDirectories((root / "Game" / "src").CStr()) && FS::MakeDirectories((root / "Engine" / "src" / "Engine").CStr()), "made");
+		const char* text = "x";
+		assert_true(FS::WriteFileAtomically((root / "Engine" / "src" / "Engine" / "Mesh.cf").CStr(), text, 1), "the library's file");
+		assert_true(FS::WriteFileAtomically((root / "Game" / "src" / "main.cf").CStr(), text, 1), "the program's");
+		Core::Array<Core::String> projects = { Core::String((root / "Game").View()), Core::String((root / "Engine").View()) };
+		Core::Array<Core::String> roots = Ied::RunSearchRoots((root / "Game").View(), root.View(), projects);
+		assert_true(roots[0] == (root / "Game").View() && roots[1] == root.View(), "its own project, then the workspace, first");
+		assert_eq(4, roots.Count(), "then the other project and its src, not itself again");
+		Core::Array<Core::String> own = { Core::String((root / "Game" / "src").View()) };
+		for (const Core::String& root2 : roots) own.Push(root2);
+		assert_se("Engine/src/Engine/Mesh.cf", Ied::ResolveProblemFile(Core::StringView("Engine/Mesh.cf"), false, own, root.View()).CStr(), "the library's file found");
+		assert_se("Game/src/main.cf", Ied::ResolveProblemFile(Core::StringView("main.cf"), false, own, root.View()).CStr(), "its own still first");
+		assert_se("", Ied::ResolveProblemFile(Core::StringView("Nowhere/x.cf"), false, own, root.View()).CStr(), "nowhere: empty");
+		FS::RemoveAll(root.CStr());
+	}
 }

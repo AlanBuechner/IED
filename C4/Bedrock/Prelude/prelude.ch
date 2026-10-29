@@ -144,6 +144,7 @@
 [link("reflect_type_by_index")] void* reflect_type_by_index(int32 index) noexcept;
 [link("reflect_count")] uint32 reflect_count() noexcept;
 [link("c4_reflect_unload_source")] uint32 c4_reflect_unload_source(void* tag);
+[link("c4_reflect_generation")] uint64 c4_reflect_generation() noexcept;
 [link("reflect_name")] const char* reflect_name(void* handle) noexcept;
 [link("reflect_type_tag")] const char* reflect_type_tag(void* handle) noexcept;
 [link("reflect_size")] uint64 reflect_size(void* handle) noexcept;

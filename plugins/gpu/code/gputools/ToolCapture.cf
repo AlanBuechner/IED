@@ -1,5 +1,6 @@
 // gpu_capture (docs/13 T-GPU-1): the startup project built and launched for capture as Launch for Capture does it, the
-// next frame captured once the program's capture library answers, the program stopped, and the new capture's events.
+// next frame captured once the program's capture library answers (or `after_seconds` later, for a program that loads
+// its content first), the program stopped, and the new capture's events.
 include "ToolText.ch"
 
 namespace GpuDebug
@@ -8,6 +9,7 @@ namespace GpuDebug
 	const int64 c_CaptureWaitMs = 60000;
 	const int64 c_ExitWaitMs = 10000;
 	const int64 c_CapturePollNs = 100000000;
+	const double c_MaxAfterSeconds = 300.0;
 
 	static bool Exited(Target* target) { return target->m_State.View() == "exited"; }
 
@@ -42,6 +44,16 @@ namespace GpuDebug
 				throw IED::RpcError(IED::ErrorCode::Unavailable, why.View());
 			}
 			throw IED::RpcError(IED::ErrorCode::Timeout, Core::StringView("the program's capture library did not answer within 2 minutes: a D3D12 program loads it through Gpu::Capture (C4) or flashbang_app.h; a Vulkan program gets it from the loader"));
+		}
+		const double after = Math::Clamp(args.Member("after_seconds").IsValid() ? args.Member("after_seconds").AsFloat() : 0.0, 0.0, c_MaxAfterSeconds);
+		const int64 start = NowMs() + (int64)(after * 1000.0);
+		while (!Exited(target) && NowMs() < start) Threading::Thread::Sleep(c_CapturePollNs);
+		if (Exited(target)) {
+			Core::StringBuilder why;
+			why.Append("the program exited (code ");
+			why.AppendInt(target->m_ExitCode);
+			why.Append(") while waiting after_seconds before the capture");
+			throw IED::RpcError(IED::ErrorCode::Unavailable, why.View());
 		}
 		Core::String before = target->m_LastCapture;
 		RequestCapture(debugger, target, 1);

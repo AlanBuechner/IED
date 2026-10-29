@@ -8,6 +8,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Model/TypeHandle.h"
+#include <vector>
 
 namespace Scripting
 {
@@ -31,6 +32,31 @@ namespace Scripting
 			return MethodRole::Plain;
 		}
 
+		// The names a qualifier spells (`Lib::Base` is { Lib, Base }); none for anything but names.
+		std::vector<Core::String> QualifierNames(const AstNode* node)
+		{
+			if (const auto* name = dynamic_cast<const IdentifierExpressionNode*>(node)) return { name->GetName() };
+			const auto* access = dynamic_cast<const StaticAccessNode*>(node);
+			if (!access) return {};
+			std::vector<Core::String> names = QualifierNames(access->GetBaseType().Get());
+			if (names.empty()) return {};
+			names.push_back(access->GetMemberNameToken().GetText());
+			return names;
+		}
+
+		// `Base`, or `Base` with its namespaces before it as far out as the qualifier goes (`Lib::Base`, BUG-414).
+		bool NamesBase(const AstNode* qualifier, const ObjectType* base)
+		{
+			const std::vector<Core::String> names = QualifierNames(qualifier);
+			if (names.empty() || names.back() != base->GetName()) return false;
+			const auto& enclosing = base->GetEnclosingNames();
+			const size_t namespaces = names.size() - 1;
+			if (namespaces > enclosing.Count()) return false;
+			for (size_t i = 0; i < namespaces; ++i)
+				if (names[namespaces - 1 - i] != enclosing[enclosing.Count() - 1 - i]) return false;
+			return true;
+		}
+
 		// `Base::Name(...);` as the body's first statement, where Name is a method of the class base that
 		// carries `annotation`: the body constructs (or copies) the base itself.
 		bool FirstStatementCallsBase(LoweringContext& ctx, const CodeBlockNode* body, const ObjectType* base, const char* annotation)
@@ -39,8 +65,7 @@ namespace Scripting
 			const auto* stmt = dynamic_cast<const ExpressionStatementNode*>(body->GetStatements()[0].Get());
 			const auto* call = stmt ? dynamic_cast<const FunctionCallNode*>(stmt->GetExpression().Get()) : nullptr;
 			const auto* qualified = call ? dynamic_cast<const StaticAccessNode*>(call->GetCallee().Get()) : nullptr;
-			const auto* owner = qualified ? dynamic_cast<const IdentifierExpressionNode*>(qualified->GetBaseType().Get()) : nullptr;
-			if (!owner || owner->GetName() != base->GetName()) return false;
+			if (!qualified || !NamesBase(qualified->GetBaseType().Get(), base)) return false;
 			const Core::String method = qualified->GetMemberNameToken().GetText();
 			for (uint32 i = 0; i < base->GetMethodCount(); ++i)
 			{

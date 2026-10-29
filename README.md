@@ -22,6 +22,14 @@ source, rebuilds, and carries on (see "When the compiler is wrong" in [`Nuke/REA
 suite, fake model server). The C4 compiler cannot build the IED server yet - `docs/17` lists what is missing;
 the roadmap is `docs/18`.
 
+## Install in one command (Windows x64)
+
+In PowerShell (needs git and the Visual Studio C++ build tools): clones into `%USERPROFILE%\IED` (set `IED_DIR` to change it), runs setup, builds everything and installs IED. Re-running updates and continues.
+
+```powershell
+irm https://raw.githubusercontent.com/AlanBuechner/IED/master/install.ps1 | iex
+```
+
 ## Getting started (Windows x64)
 
 Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Nuke's C/C++ driver compiles the compiler

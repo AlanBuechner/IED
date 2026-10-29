@@ -14,6 +14,13 @@
 
 namespace Scripting::ImplicitConversion
 {
+	bool IsZeroConstant(const HIRNode* value)
+	{
+		const auto* constant = dynamic_cast<const ConstantNode*>(value);
+		return constant && constant->type && constant->type->IsIntegral() && constant->value.kind == ConstantValue::Kind::Int64 &&
+			constant->value.intValue == 0;
+	}
+
 	namespace
 	{
 		using Result = QueryResult<const HIRNode*>;
@@ -22,13 +29,6 @@ namespace Scripting::ImplicitConversion
 		bool Aggregate(const Type* t) { return t->GetKind() == TypeKind::Object || t->GetKind() == TypeKind::Array || t->GetKind() == TypeKind::Union; }
 		bool ScopedEnum(const Type* t) { return t->GetKind() == TypeKind::Enum && static_cast<const EnumType*>(t)->IsScoped(); }
 		Core::String Quoted(const Type* t) { return "'" + t->GetName() + "'"; }
-
-		bool IsZeroConstant(const HIRNode* value)
-		{
-			const auto* constant = dynamic_cast<const ConstantNode*>(value);
-			return constant && constant->type && constant->type->IsIntegral() && constant->value.kind == ConstantValue::Kind::Int64 &&
-				constant->value.intValue == 0;
-		}
 
 		// D-32: an enum class converts from and to integers (and other enums) only through a cast.
 		Core::String EnumProblem(const Type* from, const Type* to)

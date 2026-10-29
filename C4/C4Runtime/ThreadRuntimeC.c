@@ -112,7 +112,32 @@ static DWORD milliseconds(int64_t ns)
 	return ms >= (int64_t)INFINITE ? INFINITE - 1 : (DWORD)ms;
 }
 
-void c4_thread_sleep_ns(int64_t ns) { Sleep(milliseconds(ns < 0 ? 0 : ns)); }
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
+// Each thread sleeps on a high-resolution waitable timer of its own (Windows 10 1803 and later): it ends within about
+// half a millisecond of its time, where Sleep ends on the system's tick (15.6 ms unless a process raised the timer
+// resolution), so a frame limiter that waits 3 ms waited 15.6. Systems without such timers fall back to Sleep.
+static _Thread_local HANDLE t_sleepTimer;
+
+void c4_thread_sleep_ns(int64_t ns)
+{
+	if (ns <= 0)
+	{
+		Sleep(0);
+		return;
+	}
+	if (!t_sleepTimer) t_sleepTimer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+	LARGE_INTEGER due;
+	due.QuadPart = -((ns + 99) / 100); // relative, in 100 ns units
+	if (t_sleepTimer && SetWaitableTimer(t_sleepTimer, &due, 0, NULL, NULL, FALSE))
+	{
+		WaitForSingleObject(t_sleepTimer, INFINITE);
+		return;
+	}
+	Sleep(milliseconds(ns));
+}
 
 int32_t c4_thread_set_name(const char* name)
 {

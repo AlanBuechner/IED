@@ -454,6 +454,14 @@ namespace Scripting
 		CopyInto(root, BaseOf(This(type), type, base), BaseOf(other, type, base));
 	}
 
+	void Lifecycle::CopyUnionRegions(BlockNode* root, const ObjectType* type, const LValue* other)
+	{
+		LifecycleFacts::ForEachUnionRegion(type, [&](const ObjectType::FieldInfo& first) {
+			const LValue* source = UnionRegionOf(other, first);
+			root->stmts.push_back(m_Ctx.out->NewNode<StoreNode>(UnionRegionOf(This(type), first), m_Ctx.out->NewNode<LoadNode>(source->type, source)));
+		});
+	}
+
 	// --- helpers -----------------------------------------------------------------------------------------
 
 	const LValue* Lifecycle::This(const ObjectType* type)
@@ -471,6 +479,16 @@ namespace Scripting
 	const LValue* Lifecycle::BaseOf(const LValue* object, const ObjectType* type, const ObjectType* base)
 	{
 		return SubobjectLValue(m_Ctx, object, base, ClassHierarchy::LocateBase(type, base).offset);
+	}
+
+	const LValue* Lifecycle::UnionRegionOf(const LValue* object, const ObjectType::FieldInfo& first)
+	{
+		auto* types = m_Ctx.queries().TypeStore();
+		LValue lv; lv.kind = LValue::Kind::Base; lv.base = object;
+		lv.type = types->Array(types->Builtin(TypeKind::UInt8), first.m_UnionRegionSize);
+		lv.baseOffset = static_cast<int64>(first.m_Offset - first.m_UnionIntraOffset);
+		lv.ephemeral = object->ephemeral;
+		return m_Ctx.NewLValue(lv);
 	}
 
 	const HIRNode* Lifecycle::DirectCall(const FunctionRecord* rec, const LValue* receiver, std::vector<const HIRNode*> args)

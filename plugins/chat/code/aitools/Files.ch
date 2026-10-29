@@ -22,6 +22,12 @@ namespace Ai
 	// A path a tool call names, workspace-relative: its "." parts dropped ("." is the root, as models often write it),
 	// then normalized as every workspace path is ("..", a drive letter: bad_request).
 	Core::String ToolPath(Core::StringView path);
+	// The glob of the workspace's files named like `path` ("src/a/Renderer.ch": "**/Renderer.ch"): where an fs_read
+	// that missed most likely meant.
+	Core::String SameNamedGlob(Core::StringView path);
+	// The one path of `found` outside the folders the tools skip (build output, .git, ...), "" when none or several:
+	// the file an fs_read that missed meant, read in its place.
+	Core::String OnlySourceFile(const Core::Array<Core::String>& found);
 	// `text` with each edit's `old` replaced by its `new`, all or none; false with `error` naming the edit that failed.
 	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error);
 }

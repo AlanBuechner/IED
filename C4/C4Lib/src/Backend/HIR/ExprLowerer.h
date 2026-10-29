@@ -249,6 +249,8 @@ namespace Scripting
 		// The type a plain name in the body's own layers stands for: a template parameter's argument or a local
 		// type; null for anything else.
 		const Type* BoundTypeNamed(const AstNode* base) const;
+		// The template instance an alias qualifier names (`IntBox` for `alias IntBox = Box<int32>;`), or null.
+		const ObjectType* AliasedInstance(const AstNode* base) const;
 
 		// `p as T*`, `dynamic_cast<T*>(p)` and `p is T` on pointers to objects: an upcast converts, a
 		// downcast or cross-cast of a polymorphic object is a DynamicCastNode.

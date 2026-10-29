@@ -118,7 +118,9 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(description["root"], "Game")
 		game, engine = description["project"]
 		self.assertEqual(game["depends"], ["Engine"])
-		self.assertEqual(game["defines"], {"GAME": "1", "DEVELOPMENT": "1", "PROJECT_NAME": "Game"})
+		game_dir = '"' + self.path("Game").replace("\\", "/") + '"'
+		self.assertEqual(game["defines"], {"GAME": "1", "DEVELOPMENT": "1", "PROJECT_NAME": "Game", "PROJECT_DIR": game_dir})
+		self.assertEqual(engine["defines"]["PROJECT_DIR"], '"' + self.path("Engine").replace("\\", "/") + '"', "each project's own folder")
 		self.assertEqual(engine["sources"], [self.path("Engine", "src").replace("\\", "/")])
 		self.assertEqual(engine["includes"], [self.path("Engine", "third").replace("\\", "/")])
 
@@ -130,6 +132,16 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(options["toolchain"], "1.0.0")
 		self.assertEqual(options["target"], ["-march=x86-64-v3"])
 		self.assertIn(self.path("Engine", "third").replace("\\", "/"), options["includePaths"])
+
+	def test_the_options_of_a_project_gone_are_removed(self):
+		self.nuke("build")
+		stale = self.path(".ied", "local", "lsp-options", "OldTool.json")
+		with open(stale, "w", encoding="utf-8") as f:
+			f.write("{}")
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertFalse(os.path.exists(stale), "a project no longer in the workspace has no options left")
+		self.assertTrue(os.path.isfile(self.path(".ied", "local", "lsp-options", "Game.json")), "a live one keeps its own")
 
 	def test_a_compile_that_fails_still_writes_the_ide_options(self):
 		os.environ["FAKE_C4_FAIL"] = "1"
@@ -151,6 +163,16 @@ class C4BuildTests(WorkspaceTest):
 		later = time.time() + 5
 		os.utime(source, (later, later))
 		self.nuke("build")
+		self.assertEqual(len(self.compiles()), 2)
+
+	def test_a_new_cbind_rebuilds(self):
+		"""C4 binds a program's foreign headers again only when it runs: a toolchain whose CBind changed recompiles."""
+		self.nuke("build")
+		cbind = os.path.join(self.store.resolve("1.0.0", self.root).dir, "CBind", "CBind.exe")
+		later = time.time() + 5
+		os.utime(cbind, (later, later))
+		code, out = self.nuke("build")
+		self.assertNotIn("Game: up to date", out)
 		self.assertEqual(len(self.compiles()), 2)
 
 	def test_an_edit_made_while_compiling_rebuilds(self):
@@ -241,6 +263,17 @@ class C4TestHarnessTests(WorkspaceTest):
 		self.assertTrue(job.output.endswith("Engine/Engine-tests.exe"))
 		self.assertTrue(job.int_dir.endswith("Engine/tests"))
 		self.assertEqual(job.argv[job.argv.index("-test-json") + 1], job.test_results)
+
+	def test_a_test_harness_gets_the_copies_a_program_would(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n",
+			"Engine/nuke.toml": "[project]\nkind = \"module\"\n[[project.copy]]\nfrom = \"shaders\"\n",
+			"Engine/shaders/a.hlsl": "", "Engine/src/tests/engine_tests.cf": ""})
+		try:
+			self.nuke("test", "Engine")
+		except OSError:
+			pass        # the stub compiler's harness is no program; the copies come before it runs
+		copied = self.path("build", "bin", "Development-windows-x64", "Engine", "shaders", "a.hlsl")
+		self.assertTrue(os.path.isfile(copied), "the module's copies beside Engine-tests.exe")
 
 	def test_naming_a_project_without_tests_is_an_error(self):
 		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n", "Game/nuke.toml": "[project]\n", "Game/src/main.cf": ""})

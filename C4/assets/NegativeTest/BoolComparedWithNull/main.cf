@@ -1,0 +1,11 @@
+// BUG-428: a bool beside null was lifted to a pointer and null lowered to a bool: invalid IR instead of an error.
+class Mounts
+{
+	public bool Add(int32 x) { return x > 0; }
+}
+
+int32 main() {
+	Mounts* mounts = new Mounts();
+	if (mounts->Add(1) == null) return 1;
+	return 0;
+}

@@ -26,7 +26,8 @@ namespace C4LSP::Features
 	public:
 		/// Collects top-level and nested declarations from every compiled source whose name
 		/// matches `query` (case-insensitive substring). An empty query returns everything.
-		/// Results are capped so a large project never floods the client's symbol picker.
+		/// Results are capped so a large project never floods the client's symbol picker; a query's
+		/// best matches come first and are kept (the name itself, then a prefix; C4 sources before C headers).
 		static Core::Vector<WorkspaceSymbol> ForQuery(Server::CompilationSession& session, const std::string& query);
 
 	private:
@@ -36,6 +37,7 @@ namespace C4LSP::Features
 			const std::string& query;
 			std::unordered_set<std::string> namespaces; // every namespace path of the program
 			Core::Vector<WorkspaceSymbol> out;
+			size_t limit = 0; // where the walk stops collecting: a query collects every match to rank them
 		};
 
 		// Processes one declaration node: emits it when its name matches and recurses into any

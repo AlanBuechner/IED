@@ -99,6 +99,17 @@ namespace Scripting
 				if (Core::String why = ReadOnlyReason(ctx, arg.lvalue); !why.empty())
 					return QueryResult<const HIRNode*>::Fail(QueryError::NotAValue,
 						"cannot bind a non-const reference to a const object: " + why + " (take 'const " + referent->GetName() + "&')");
+			// A lane or run has no address (BUG-429): a const reference takes a copy of its value, a mutable one cannot bind.
+			if (arg.isLValue && !ReferenceBinding::Unaddressable(arg.lvalue).empty())
+			{
+				if (!ref->IsConstReferent())
+					return QueryResult<const HIRNode*>::Fail(QueryError::NotAValue,
+						"cannot bind a non-const reference to a vector's lane: " + ReferenceBinding::Unaddressable(arg.lvalue) + " (or take 'const " +
+						referent->GetName() + "&')");
+				auto copied = InitialValue(ctx, Value::R(loaded, loaded->type), referent);
+				if (!copied.Ok()) return copied;
+				return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, Lifecycle(ctx).Temporary(copied.value)));
+			}
 			// D-32: a const reference binds anything convertible to its referent, through a temporary of the referent.
 			const Type* argType = TypeHandle::UnwrapToValue(arg.type ? arg.type : loaded->type);
 			const auto* argObject = dynamic_cast<const ObjectType*>(argType);

@@ -22,7 +22,7 @@ namespace Reflection
 	bool HasRole(const char* roles, const char* role) {
 		if (roles == nullptr || role == nullptr) return false;
 		const uint64 length = strlen((void*)role);
-		for (const char* at = roles; *at != (char)0; ) {
+		for (const char* at = roles; *at != (char)0;) {
 			const char* end = at;
 			while (*end != (char)0 && *end != ',') end += 1;
 			if ((uint64)(end - at) == length && strncmp((void*)at, (void*)role, length) == 0) return true;
@@ -398,4 +398,7 @@ namespace Reflection
 		return c4_reflect_on_unload(tag, (void*)listener, user);
 	}
 	void RemoveUnloadListener(uint32 id) { c4_reflect_remove_listener(id); }
+	// Changes with every registration and unload: what a cache read from reflection (a type's size, its fields' offsets)
+	// is current while the generation it was read under is. A script loaded again refills its types in place.
+	uint64 Generation() { return c4_reflect_generation(); }
 }

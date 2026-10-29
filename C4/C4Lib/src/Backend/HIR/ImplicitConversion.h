@@ -24,5 +24,9 @@ namespace Scripting
 		/// Why a `type` value cannot be a condition (an `if`, a loop, `?:`, an operand of `&&` / `||`): a
 		/// condition is a bool, a number, an enum or a pointer (09 2). Empty when it can.
 		Core::String ConditionProblem(LoweringContext& ctx, const Type* type);
+
+		/// Whether `value` is the integer constant 0: the one integer that becomes a pointer (null), in a conversion or
+		/// beside a pointer in `==` / `!=`. A bool's `false` is not one.
+		bool IsZeroConstant(const HIRNode* value);
 	}
 } // namespace Scripting

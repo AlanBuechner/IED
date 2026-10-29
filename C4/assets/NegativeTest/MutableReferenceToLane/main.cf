@@ -1,0 +1,3 @@
+class NV { public union { packed float x, y, z, w; }; }
+void Set(float& value) { value = 1.0f; }
+int32 main() { NV v; Set(v.z); return 0; }

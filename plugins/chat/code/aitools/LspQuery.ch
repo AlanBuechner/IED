@@ -95,7 +95,8 @@ namespace Ai
 		// The innermost symbol of `path`'s outline whose range holds `line`; null for none.
 		public CodeSymbol* Enclosing(Core::StringView path, int64 line);
 		// The symbols `name` names - in `path` when given, else in the workspace - each with its whole range when its
-		// file's outline has it: definitions and declarations, overloads, same-named symbols of other owners.
+		// file's outline has it (a workspace symbol's own place when the outline does not come in the server's time):
+		// definitions and declarations, overloads, same-named symbols of other owners.
 		public Core::Array<CodeSymbol*> Find(Core::StringView name, Core::StringView path);
 
 	private:

@@ -216,4 +216,32 @@ namespace Testing
 		TEST_ASSERT(r.chosen == sig);
 		TEST_PASSED();
 	}
+
+	void OverloadResolutionTest::TestBug415SameTypesDifferentNamesIsOneFunction()
+	{
+		auto mk = [](const char* name) {
+			Core::Vector<Scripting::FunctionType::ParameterInfo> params;
+			Scripting::FunctionType::ParameterInfo p; p.mName = name; p.m_Type = SharedPrim(Scripting::TypeKind::Int32);
+			params.Push(p);
+			return new Scripting::FunctionType(SharedPrim(Scripting::TypeKind::Void), params);
+		};
+		const auto* derived = mk("value");   // Middle<Leaf>::Init(int32 value), made with the instance
+		const auto* base = mk("");           // Base::Init(int32), the interned one
+		Core::Vector<Scripting::OverloadCandidate> cands;
+		cands.Push({ derived, nullptr, 1 });
+		cands.Push({ base, nullptr, 1 });
+		auto args = MakeArgs({ Scripting::TypeKind::Int32 });
+
+		auto r = Scripting::OverloadResolver::Resolve(cands, args);
+		TEST_ASSERT(r.status == Scripting::OverloadResolution::Status::Resolved);
+		TEST_ASSERT(r.chosen == derived); // the first, most derived
+
+		// Different parameter types still tie as two functions.
+		Core::Vector<Scripting::OverloadCandidate> distinct;
+		distinct.Push({ MakeFn({ Scripting::TypeKind::Int32, Scripting::TypeKind::Float32 }), nullptr, 2 });
+		distinct.Push({ MakeFn({ Scripting::TypeKind::Float32, Scripting::TypeKind::Int32 }), nullptr, 2 });
+		auto r2 = Scripting::OverloadResolver::Resolve(distinct, MakeArgs({ Scripting::TypeKind::Int32, Scripting::TypeKind::Int32 }));
+		TEST_ASSERT(r2.status == Scripting::OverloadResolution::Status::Ambiguous);
+		TEST_PASSED();
+	}
 } // namespace Testing

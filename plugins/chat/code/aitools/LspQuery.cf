@@ -313,12 +313,20 @@ namespace Ai
 		}
 	}
 
-	// The outline's symbol `found` (a workspace symbol) is: its whole range, detail and kind.
+	// The outline's symbol `found` (a workspace symbol) is: its whole range, detail and kind. `found` itself when the
+	// outline cannot be had (the server busy past its time): its place is known, and a reader finds its body by braces.
 	CodeSymbol* CodeQuery::Refined(CodeSymbol* found) {
 		Core::Array<Core::String> parts = NameParts(found->m_Name.View());
 		if (parts.IsEmpty()) return found;
+		Core::Array<CodeSymbol*> outline;
+		try {
+			outline = Outline(found->m_Selection.m_Path.View());
+		}
+		catch (IED::RpcError& error) {
+			return found;
+		}
 		Core::Array<CodeSymbol*> named;
-		Collect(Outline(found->m_Selection.m_Path.View()), parts[parts.Count() - 1].View(), Core::StringView(""), named);
+		Collect(outline, parts[parts.Count() - 1].View(), Core::StringView(""), named);
 		for (CodeSymbol* symbol : named) {
 			if (Holds(symbol->m_Selection, found->m_Selection.m_StartLine) || symbol->m_Selection.m_StartLine == found->m_Selection.m_StartLine) {
 				if (symbol->m_Container.IsEmpty()) symbol->m_Container = found->m_Container;
@@ -478,6 +486,27 @@ namespace Ai
 		return own;
 	}
 
+	static bool IsC4File(Core::StringView extension) { return extension == ".cf" || extension == ".ch"; }
+
+	// What a file uses but does not declare - `path` named where the name is used, not where it is defined: the symbols
+	// named exactly so in files of the same language as `path` (not the C++ libraries' ToolInvocation for a C4 file's).
+	static Core::Array<CodeSymbol*> NamedSoElsewhere(CodeQuery& query, Core::StringView name, Core::StringView path) {
+		Core::Array<CodeSymbol*> found;
+		Core::Array<Core::String> parts = NameParts(name);
+		if (parts.IsEmpty()) return found;
+		FS::Path asked = FS::Path(path);
+		const bool c4 = IsC4File(asked.Extension());
+		Core::String suffix = Core::String("::") + name;
+		for (CodeSymbol* symbol : query.Search(parts[parts.Count() - 1].View())) {
+			Core::String qualified = symbol->Qualified();
+			if (!(qualified == name || qualified.View().EndsWith(suffix.View()))) continue;
+			FS::Path file = FS::Path(symbol->m_Selection.m_Path.View());
+			if (IsC4File(file.Extension()) != c4) continue;
+			found.Push(symbol);
+		}
+		return OwnFirst(WithoutMembersOfFound(found));
+	}
+
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) {
 		if (args.Member("line").IsValid()) return PlaceTarget(query, args);
 		Core::StringView name = args.Member("symbol").AsView();
@@ -485,8 +514,12 @@ namespace Ai
 		Core::String path = query.FileOf(args.Member("path").AsView());
 		CodeTarget target;
 		target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, path.View())));
+		// A server still indexing (just after a restart) answers a first search with nothing: look once more before saying so.
+		if (target.m_Symbols.IsEmpty()) target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, path.View())));
+		if (target.m_Symbols.IsEmpty() && !path.IsEmpty()) target.m_Symbols = NamedSoElsewhere(query, name, path.View());
 		if (target.m_Symbols.IsEmpty()) {
-			Core::String where = path.IsEmpty() ? Core::String(" in the workspace") : Core::String(" in ") + path.View();
+			// Without a path only the workspace's own code is searched: a file elsewhere (IED's, ied:/...) needs its path.
+			Core::String where = path.IsEmpty() ? Core::String(" in the workspace (code outside it, such as ied:/..., needs its path)") : Core::String(" in ") + path.View();
 			throw IED::RpcError(IED::ErrorCode::NotFound, ((((Core::String("no symbol ") + name) + where.View()) + Similar(query, name).View()) + "; code_symbols lists a file's symbols or searches by name").View());
 		}
 		Core::String first = target.m_Symbols[0]->Qualified();

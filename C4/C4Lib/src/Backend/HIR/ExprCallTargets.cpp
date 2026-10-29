@@ -176,6 +176,13 @@ namespace Scripting
 			target.name = sa->GetMemberNameToken().GetText();
 			return target;
 		}
+		if (const ObjectType* instance = AliasedInstance(sa->GetBaseType().Get()))
+		{
+			if (IsCallableField(instance, sa->GetMemberNameToken().GetText())) return ValueCallTarget(sa);
+			target.receiverType = instance;
+			target.name = sa->GetMemberNameToken().GetText();
+			return target;
+		}
 		// `Ns::handler(x)` with `handler` a variable calls its value, as the plain name does (BUG-316).
 		if (QualifiedCallName(sa, target.name)) return NamesVariable(target.name) ? ValueCallTarget(sa) : target;
 		// The base is a type (`TBox<int32>::MakeVal(...)`, `Outer<int32>::Inner::Make(...)`): the member is one of its

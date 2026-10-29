@@ -66,63 +66,69 @@ namespace CBind
 		       hex.substr(16,4) + "-" + hex.substr(20,12);
 	}
 
-	/// The canonical GUID string for a record declared with __declspec(uuid(...)) / MIDL_INTERFACE,
-	/// or "" if it has none.
+	namespace
+	{
+		bool HasUuidAttr(const clang::TagDecl* d)
+		{
+			for (const auto* attr : d->attrs())
+				if (attr->getKind() == clang::attr::Uuid) return true;
+			return false;
+		}
+
+		// The GUID a declaration of `name` at `loc` carries in its source: MIDL_INTERFACE("...") or __declspec(uuid("..."))
+		// just before the name, or dxcapi.h's CROSS_PLATFORM_UUIDOF(Name, "...") around it (a forward declaration made
+		// by a macro, apart from the definition); "" when neither is there.
+		std::string GuidNear(const clang::SourceManager& sm, clang::SourceLocation loc, const std::string& name)
+		{
+			if (loc.isInvalid()) return "";
+			loc = sm.getFileLoc(loc); // a declaration a macro made: where the macro was written
+			bool invalid = false;
+			llvm::StringRef buf = sm.getBufferData(sm.getFileID(loc), &invalid);
+			if (invalid || buf.empty()) return "";
+			unsigned off = sm.getFileOffset(loc);
+			if (off >= buf.size()) return "";
+
+			const unsigned before = 400;
+			const unsigned start = (off > before) ? (off - before) : 0u;
+			const std::string window(buf.substr(start, off - start).str());
+			// custom raw-string delimiter: the pattern itself ends with ")"
+			static const std::regex midlRe(
+				R"guid((?:MIDL_INTERFACE|uuid)\s*\(\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")guid");
+			std::smatch m;
+			if (std::regex_search(window, m, midlRe)) return CanonicalizeGuidString(m[1].str());
+
+			const unsigned after = 200;
+			const std::string around(buf.substr(start, (off - start) + after).str());
+			const std::regex uuidofRe("UUIDOF\\s*\\(\\s*" + name +
+				R"guid(\s*,\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")guid");
+			if (std::regex_search(around, m, uuidofRe)) return CanonicalizeGuidString(m[1].str());
+			return "";
+		}
+	}
+
+	/// The canonical GUID string for a record declared with __declspec(uuid(...)) / MIDL_INTERFACE /
+	/// CROSS_PLATFORM_UUIDOF, or "" if it has none.
 	///
 	/// Detection uses only INLINE libclang APIs: the vendored shared libclang does not export the
 	/// out-of-line UuidAttr::getGuid()/classof() methods (linking against them fails), so we
 	/// identify the attribute by its inline getKind() == attr::Uuid and then recover the GUID
-	/// text from the source. The MIDL_INTERFACE("...") / __declspec(uuid("...")) macro argument
-	/// is a plain 8-4-4-4-12 hex literal that immediately precedes the interface name in the
-	/// header, so we match it directly rather than scanning a loose window (which could grab an
+	/// text from the source next to the declaration that carries it (GuidNear), matching the
+	/// macro argument directly rather than scanning a loose window (which could grab an
 	/// unrelated GUID from a nearby declaration).
 	std::string GetRecordUuid(const clang::RecordDecl* rec)
 	{
 		if (!rec || !rec->isCompleteDefinition()) return "";
 
-		bool hasUuidAttr = false;
-		auto hasUuid = [](const clang::RecordDecl* d) {
-			for (const auto* attr : d->attrs())
-				if (attr->getKind() == clang::attr::Uuid) return true;
-			return false;
-		};
-		hasUuidAttr = hasUuid(rec);
-		const clang::TagDecl* canon = rec->getCanonicalDecl();
-		if (!hasUuidAttr && canon != rec)
-			hasUuidAttr = hasUuid(static_cast<const clang::RecordDecl*>(canon));
-		if (!hasUuidAttr) return "";
-
+		// The attribute may sit on any declaration of the type: dxcapi.h gives it to a forward declaration
+		// (CROSS_PLATFORM_UUIDOF) before the definition (BUG-419).
 		const clang::SourceManager& sm = rec->getASTContext().getSourceManager();
-		clang::SourceLocation loc = rec->getLocation(); // the interface name token
-		if (loc.isInvalid()) return "";
-		// NOTE: do NOT require isWrittenInMainFile here. The interface is almost always declared
-		// in an INCLUDED SDK header (e.g. d3d12.h), not the top-level file CBind was invoked on.
-		// The GUID text lives in that header's source buffer, which getBufferData(FileID) below
-		// fetches correctly for any parsed file. Requiring the main file would silently drop every
-		// real-world MIDL_INTERFACE/__declspec(uuid) declaration (the common case).
-
-		llvm::StringRef buf;
-		bool invalid = false;
-		buf = sm.getBufferData(sm.getFileID(loc), &invalid);
-		if (invalid || buf.empty()) return "";
-
-		unsigned off = sm.getFileOffset(loc); // byte offset of the name in the buffer
-		if (off >= buf.size()) return "";
-
-		// Look back a bounded window from the interface name for the macro that carries the GUID.
-		const unsigned win = 400;
-		unsigned start = (off > win) ? (off - win) : 0u;
-		std::string window(buf.substr(start, off - start).str());
-
-		// Match the GUID string as it appears in the macro argument, e.g.
-		//   MIDL_INTERFACE("905db94b-a00c-4140-9df5-2b64ca9ea357")  /  uuid("...")
-		// (custom raw-string delimiter: the pattern itself ends with ")")
-		static const std::regex guidRe(
-			R"guid((?:MIDL_INTERFACE|uuid)\s*\(\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")guid");
-		std::smatch m;
-		if (!std::regex_search(window, m, guidRe)) return "";
-
-		return CanonicalizeGuidString(m[1].str());
+		const std::string name = rec->getNameAsString();
+		for (const clang::TagDecl* d : rec->redecls())
+			if (HasUuidAttr(d))
+				if (std::string guid = GuidNear(sm, d->getLocation(), name); !guid.empty()) return guid;
+		// No GUID in the source of any declaration: the type keeps C4's name-based one. The search does not require
+		// isWrittenInMainFile: interfaces are almost always declared in an included SDK header (d3d12.h).
+		return "";
 	}
 
 		/// A free function is bindable (emitted as a C4 declaration + an extern "C" shim wrapper)

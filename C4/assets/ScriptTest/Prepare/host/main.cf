@@ -1,0 +1,69 @@
+// Compiling apart from loading (section 5.1): Host::Prepare compiles and links - on a worker here - and registers
+// nothing; Script::Load registers the script's types and starts its globals where the host chooses. A type's handle is
+// the same across versions and shows the version in front, so reflection's generation changes with every load and
+// unload (a cache of a layout reads it again), and not with a prepare.
+include "scripttest.ch"
+
+Scripting::Script* PrepareOnWorker(Scripting::Host* host, const Scripting::ScriptOptions& options)
+{
+	Scripting::Script* prepared = nullptr;
+	Scripting::Script** out = &prepared;
+	Scripting::ScriptOptions copy = options;
+	Threading::Thread worker = Threading::Thread::Run([host, copy, out]() -> void { *out = host->Prepare(copy); });
+	worker.Join();
+	return prepared;
+}
+
+void CheckPrepareThenLoad(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	uint64 before = Reflection::Generation();
+	Scripting::Script* first = PrepareOnWorker(host, ScriptTest::OptionsFor(checks, "counter#1", "counter_v1.cf"));
+	if (!first->Prepared()) printf("%s\n", first->Diagnostics());
+	checks.That(first->Prepared() && !first->Ok(), "prepared on a worker, not loaded");
+	checks.Equal((int64)before, (int64)Reflection::Generation(), "a prepare registers nothing");
+	checks.That(!Reflection::FindType("Shared::Counter").IsValid(), "its types are not there yet");
+	checks.That(first->Load(), "it loads");
+	checks.That(first->Ok() && !first->Prepared(), "and is loaded");
+	checks.That(Reflection::Generation() != before, "a load changes reflection's generation");
+	Reflection::Type counter = Reflection::FindType("Shared::Counter");
+	checks.Equal(4, (int64)counter.SizeOf(), "its type registered");
+	checks.That(!first->Load(), "a script loads once");
+
+	uint64 loaded = Reflection::Generation();
+	Scripting::Script* second = host->Prepare(ScriptTest::OptionsFor(checks, "counter#2", "counter_v2.cf"));
+	checks.That(second->Prepared() && second->Load(), "a new version prepared and loaded beside the first");
+	checks.Equal(16, (int64)counter.SizeOf(), "the type's handle shows the new layout");
+	checks.That(Reflection::Generation() != loaded, "the generation changed with it");
+	first->Unload();
+	checks.Equal(16, (int64)counter.SizeOf(), "unloading the hidden first version keeps it");
+	uint64 latest = Reflection::Generation();
+	second->Unload();
+	checks.That(Reflection::Generation() != latest, "an unload changes the generation");
+	checks.That(!Reflection::FindType("Shared::Counter").IsValid(), "both gone, the type is gone");
+}
+
+void CheckFailures(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* broken = host->Prepare(ScriptTest::OptionsFor(checks, "broken", "broken.cf"));
+	checks.That(!broken->Prepared() && !broken->Load(), "a script that does not compile is not prepared and does not load");
+	checks.Contains(broken->Diagnostics(), "broken.cf", "its diagnostics say where");
+
+	Scripting::Script* starts = host->Prepare(ScriptTest::OptionsFor(checks, "starts", "starts_badly.cf"));
+	checks.That(starts->Prepared(), "a script whose start faults compiles");
+	checks.That(!starts->Load() && !starts->Ok(), "its load fails");
+	checks.That(!Reflection::FindType("Starts::Marker").IsValid(), "and nothing of it stays registered");
+
+	Scripting::Script* unused = host->Prepare(ScriptTest::OptionsFor(checks, "unused", "counter_v1.cf"));
+	checks.That(unused->Prepared(), "a prepared script");
+	checks.Equal(0, unused->Unload(), "that never loads has nothing to unload");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Prepare");
+	CheckPrepareThenLoad(host, checks);
+	CheckFailures(host, checks);
+	return checks.End("Prepare");
+}

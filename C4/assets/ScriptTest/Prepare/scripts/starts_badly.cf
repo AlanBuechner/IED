@@ -1,0 +1,16 @@
+namespace Starts
+{
+	struct Marker
+	{
+		public int32 a;
+	}
+
+	int32 Fault()
+	{
+		int32* nowhere = nullptr;
+		*nowhere = 1;
+		return 1;
+	}
+
+	int32 g_started = Fault();
+}

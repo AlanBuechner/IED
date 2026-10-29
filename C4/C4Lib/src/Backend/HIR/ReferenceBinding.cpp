@@ -44,10 +44,22 @@ namespace Scripting::ReferenceBinding
 		return "cannot bind '" + ref->GetName() + "' to a '" + located->GetName() + "': a reference names a location of its own type";
 	}
 
+	Core::String Unaddressable(const LValue* location)
+	{
+		if (!location) return "";
+		if (location->kind == LValue::Kind::Lane || location->kind == LValue::Kind::VectorLaneDyn)
+			return "a lane of a packed vector has no address: copy it into a variable first, or name the whole vector";
+		if (location->kind == LValue::Kind::Swizzle) return "a swizzle run has no address: copy it into a 'packed' variable first";
+		return "";
+	}
+
 	QueryResult<const HIRNode*> Address(LoweringContext& ctx, const ReferenceType* ref, const Value& init, const Type* pointer,
 		const Core::String& name)
 	{
 		using Result = QueryResult<const HIRNode*>;
+		// BUG-429: binding to a lane took the vector's address, so the reference read its first lane.
+		if (init.isLValue)
+			if (Core::String why = Unaddressable(init.lvalue); !why.empty()) return Result::Fail(QueryError::NotAValue, "cannot bind '" + name + "': " + why);
 		if (!ref->IsConstReferent() && init.isLValue && IsReadOnly(ctx, init.lvalue))
 			return Result::Fail(QueryError::NotAValue,
 				"cannot bind a non-const reference to a const object: '" + name + "' would allow mutating read-only data");

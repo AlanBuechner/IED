@@ -8,6 +8,7 @@ include "fs/Search.ch"
 namespace Ai
 {
 	const int64 c_SearchToolMatches = 100;
+	const int64 c_SearchTooLargeShown = 5;   // files skipped for their size named in a search's answer
 	const int64 c_SearchLineShownBytes = 160;   // a longer matching line is cut, "..." after it
 	const int64 c_ShellTailLines = 200;
 	const int64 c_ShellTailBytes = 16 * 1024;
@@ -21,6 +22,11 @@ namespace Ai
 	// What search_text shows of `result`: each file's path once with its matching lines under it, numbered, a long
 	// line cut at kSearchLineShownBytes; then whether it stopped at kSearchToolMatches, or that nothing matched.
 	Core::String SearchListing(const IED::SearchResult& result);
+	// Whether `folder` is, or is in, a folder search skips by default (build output, .git): search_text naming one
+	// searches it whole.
+	bool InExcludedFolder(Core::StringView folder);
+	// search_text's error for a failed search; a broken regex says how to match its special characters as text.
+	Core::String SearchProblem(Core::StringView problem, bool regex);
 	// The last `lines` lines of `text`, at most `bytes` of them.
 	Core::String TailOf(Core::StringView text, int64 lines, int64 bytes);
 	// What a command started for a tool call needs: its argv or shell text, the folder it runs in (workspace-relative)

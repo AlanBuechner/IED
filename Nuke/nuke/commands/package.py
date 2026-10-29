@@ -11,7 +11,7 @@ from .. import packages
 from .. import workspace as workspaces
 from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, split_source
-from ..packages import bridge, git, index, install, lockfile, semver, writable
+from ..packages import bridge, git, index, install, lockfile, nuget, semver, writable
 from ..packages.repository import Repository
 from ..packages.store import Cache, repository_name, same_repository, url_key, web_url
 from . import base
@@ -163,6 +163,7 @@ def _status(cli, args):
 	roots = packages.workspace_roots(context.spec, workspace.projects)
 	body, _ = bridge.describe(context.spec, roots, context.state, context.lock(), context.state.checkouts(), joined)
 	_enrich(context, body, options.fetch)
+	body["nuget"] = _nuget_json(context, workspace)
 	if options.json:
 		if unfetched:
 			body["unfetched"] = unfetched
@@ -248,15 +249,33 @@ def _browse(cli, args):
 def _package_json(found, path):
 	info = found.packages[path]
 	return {"path": path, "description": info.description, "projects": [p.name for p in info.projects],
-		"dependencies": [{"name": d.name, "source": d.source, "url": d.url, "path": d.path if d.url else d.local,
-			"requirement": d.describe()} for d in info.dependencies]}
+		"dependencies": [_dependency_json(d) for d in info.dependencies]}
+
+
+def _dependency_json(d):
+	if d.nuget is not None:
+		return {"name": d.name, "nuget": d.nuget, "requirement": d.describe()}
+	return {"name": d.name, "source": d.source, "url": d.url, "path": d.path if d.url else d.local, "requirement": d.describe()}
+
+
+def _nuget_json(context, workspace):
+	"""Each NuGet package the lock holds: its id, version, hash, install folder and who names it (name, project, file)."""
+	users = nuget.needs(workspace.projects.values())
+	return [{"id": entry.id, "version": entry.version, "sha256": entry.sha256,
+		"folder": os.path.relpath(workspace.nuget.get(entry.id.lower(), ""), context.root).replace("\\", "/") if entry.id.lower() in workspace.nuget else None,
+		"requiredBy": [{"name": n.requirement.name, "project": n.project, "requirement": n.requirement.version, "file": n.requirement.origin}
+			for n in users.get(entry.id.lower(), [])]}
+		for entry in sorted(context.lock().nuget, key=lambda n: n.id.lower())]
 
 
 def _print_status(context, body):
 	log = context.log
-	if not body["packages"] and not body["checkouts"]:
+	if not body["packages"] and not body["checkouts"] and not body["nuget"]:
 		log.line("no packages (add one with `nuke package add SOURCE PACKAGE`)")
 		return
+	for item in body["nuget"]:
+		users = ", ".join(sorted({u["project"] for u in item["requiredBy"]}))
+		log.line(f"nuget:{item['id']}  {item['version']}  {item['folder'] or 'not installed'}  {users}")
 	for checkout in body["checkouts"]:
 		state = "may be edited" if checkout["writable"] else "read-only until pulled"
 		where = "builds from this checkout," if checkout.get("own") else "developing in"
@@ -284,6 +303,7 @@ def _update(cli, args):
 		known = {repository_name(r.url).lower() for r, _ in context.requirements()} | {r.path.lower() for r, _ in context.requirements()}
 		for entry in context.lock().packages:
 			known |= {entry.source.lower(), entry.line.lower(), f"{entry.source}:{entry.line}".lower()}
+		known |= {r.nuget.lower() for p in context.projects.values() for r in p.dependencies if r.nuget is not None}
 		unknown = [n for n in names if n.lower() not in known]
 		if unknown:
 			raise NukeError(f"nuke package update: '{unknown[0]}' names no source or package of the workspace")
@@ -291,7 +311,7 @@ def _update(cli, args):
 
 	def chosen(repo, line):
 		return not wanted or bool({repo.name.lower(), line.lower(), f"{repo.name}:{line}".lower()} & wanted)
-	context.load(update=chosen)
+	context.load(update=chosen, update_nuget=lambda package_id: not wanted or package_id.lower() in wanted)
 	context.log.note("packages are at the newest versions their requirements allow")
 
 

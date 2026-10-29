@@ -86,17 +86,15 @@ namespace Scripting
 				llvm::ConstantInt::get(llvm::Type::getInt64Ty(m_Ctx.mctx().context()), loc->baseOffset));
 		}
 		case LValue::Kind::Lane:
-			// A SIMD lane is NOT addressable (no memory element pointer); EmitLoad/EmitStore special-case
-			// it with extractelement / insertelement. Return the whole vector's address as a fallback so
-			// an accidental LValueAddress(lane) still yields something sane rather than null.
-			return LValueAddress(loc->base);
+			// HIR binds no reference to a lane (D-37, BUG-429); should anything ask, a packed view's lanes are contiguous
+			// elements with no padding, so a lane is at the vector's address plus its index - never the vector's first lane.
+			return B.CreateInBoundsGEP(m_Ctx.mctx().Lower(loc->type), LValueAddress(loc->base),
+				llvm::ConstantInt::get(llvm::Type::getInt64Ty(m_Ctx.mctx().context()), loc->laneIndex));
 		case LValue::Kind::Swizzle:
-			// A multi-lane run is also not a single memory element; Load/Store handle it per lane.
-			return LValueAddress(loc->base);
+			// A multi-lane run is a value of the expression, not storage: a reference to it is to a temporary holding its lanes.
+			return m_Ctx.Materialize(LoadRun(loc), m_Ctx.mctx().Lower(loc->type));
 		case LValue::Kind::VectorLaneDyn:
-			// A dynamically-indexed SIMD lane has no address either; Load/Store extract/insert at the
-			// runtime index. Return the whole vector's address as a fallback.
-			return LValueAddress(loc->base);
+			return DynamicLaneAddress(loc);
 		case LValue::Kind::IndexOp:
 			// A by-value indexer result has no storage of its own: its address is a temporary holding the
 			// getter's result (binding it to a const reference); HIR rejects writes through it.
@@ -155,6 +153,19 @@ namespace Scripting
 			result = B.CreateInsertElement(result, elem, llvm::ConstantInt::get(i32, i));
 		}
 		return result;
+	}
+
+	// `a.data[i]`, `v.zyx[i]`: the lane at the runtime index (through a run, the vector lane the run names there), at its
+	// place among the vector's contiguous elements.
+	llvm::Value* ExprEmitter::DynamicLaneAddress(const LValue* loc)
+	{
+		auto& B = m_Ctx.builder();
+		const LValue* run = loc->base->kind == LValue::Kind::Swizzle ? loc->base : nullptr;
+		const LValue* vector = run ? run->base : loc->base;
+		llvm::Value* lane = Emit(loc->index);
+		if (run) lane = B.CreateExtractElement(RunLaneTable(run), B.CreateIntCast(lane, llvm::Type::getInt32Ty(m_Ctx.mctx().context()), true));
+		lane = B.CreateIntCast(lane, llvm::Type::getInt64Ty(m_Ctx.mctx().context()), !run);
+		return B.CreateInBoundsGEP(m_Ctx.mctx().Lower(loc->type), LValueAddress(vector), lane);
 	}
 
 	// The lanes a run names, as a constant <K x i32>: element i is the vector lane the run's i-th lane is.

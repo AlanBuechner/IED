@@ -105,11 +105,16 @@ namespace Ied
 	}
 
 	// The text a search reads for a file: an open document's, else the file's when it is small and its first bytes say
-	// it is text; false to skip it.
-	static bool TextToSearch(const FS::Path& file, Core::StringView path, const Core::HashMap<Core::String, Core::String>& open, Core::String& text) {
+	// it is text; false to skip it (`tooLarge` set when its size was why).
+	static bool TextToSearch(const FS::Path& file, Core::StringView path, const Core::HashMap<Core::String, Core::String>& open, Core::String& text, bool& tooLarge) {
+		tooLarge = false;
 		if (open.TryGet(Core::String(path), text)) return true;
 		FS::FileInfo info;
-		if (!FS::GetInfo(file.CStr(), info) || info.size > c_SearchFileLimitBytes) return false;
+		if (!FS::GetInfo(file.CStr(), info)) return false;
+		if (info.size > c_SearchFileLimitBytes) {
+			tooLarge = true;
+			return false;
+		}
 		FS::File opened = FS::File(file.CStr(), "rb");
 		if (!opened.IsOpen()) return false;
 		char[c_SearchBinaryProbeBytes] probe;
@@ -133,8 +138,11 @@ namespace Ied
 		const SearchQuery* asked = &query;
 		const Core::HashMap<Core::String, Core::String>* texts = &open;
 		walk.Run([result, matcher, asked, texts, root](Core::StringView path) -> bool {
+			if (!IsSearched(path, *asked)) return true;
 			Core::String text;
-			if (IsSearched(path, *asked) && TextToSearch(root / path, path, *texts, text)) SearchText(path, text.View(), *matcher, asked->m_MaxResults, *result);
+			bool tooLarge = false;
+			if (TextToSearch(root / path, path, *texts, text, tooLarge)) SearchText(path, text.View(), *matcher, asked->m_MaxResults, *result);
+			else if (tooLarge) result->m_TooLarge.Push(Core::String(path));
 			return !result->m_Truncated;
 		});
 		return *result;

@@ -183,6 +183,9 @@ uint32_t                c4_reflect_unload_source(const char* tag);  // notify, t
 // run while its entities are registered and its objects alive; then its entities go.
 void                    c4_reflect_notify_unload(const char* tag);
 uint32_t                c4_reflect_remove_source(const char* tag);
+// Changes with every registration and every removal: what reflection says of an identity (a type's size, its fields)
+// may have changed since a cache read it under another generation (a script reloaded refills its types in place).
+uint64_t                c4_reflect_generation(void);
 
 // `fn(tag, user)` runs when c4_reflect_unload_source(tag) starts, while that tag's records are still valid;
 // a listener for "" hears every tag. Returns the listener's id, 0 when it could not be added.

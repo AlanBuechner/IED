@@ -1,5 +1,6 @@
 // search_text's listing (docs/13 T-SRCH-1): a file's path once with its lines under it, a long line cut where a
-// character starts, and what it says when it stopped early or found nothing.
+// character starts, and what it says when it stopped early or found nothing; the skipped folders a path searches whole,
+// and its errors.
 
 include "Work.ch"
 
@@ -39,5 +40,25 @@ class WorkToolsTests {
 
 		IED::SearchResult none;
 		assert_true(Ai::SearchListing(none).View().StartsWith(Core::StringView("[no matches;")), "nothing matched");
+
+		IED::SearchResult big;
+		big.m_TooLarge.Push(Core::String("Content/Scenes/Valley.cscene"));
+		Core::String said = Ai::SearchListing(big);
+		assert_true(said.View().StartsWith(Core::StringView("[no matches in the files searched; 1 file was not searched, over 4 MB: Content/Scenes/Valley.cscene")), "a file passed over for its size is named");
+		assert_true(said.View().Contains(Core::StringView("findstr")), "with how to search it");
+	}
+
+	[test("search_in_skipped_folders")]
+	public static void TestSearchInSkippedFolders() {
+		assert_true(Ai::InExcludedFolder(Core::StringView("build")) && Ai::InExcludedFolder(Core::StringView("build/int/Rhi/tests")), "build output, and a folder in it");
+		assert_true(Ai::InExcludedFolder(Core::StringView("web/node_modules/x")) && Ai::InExcludedFolder(Core::StringView(".git")), "any folder search skips");
+		assert_true(!Ai::InExcludedFolder(Core::StringView("")) && !Ai::InExcludedFolder(Core::StringView("src/builder")) && !Ai::InExcludedFolder(Core::StringView("Packages/Renderer")), "not the root, nor folders named like them");
+	}
+
+	[test("search_problem")]
+	public static void TestSearchProblem() {
+		Core::String broken = Ai::SearchProblem(Core::StringView("the pattern is not a valid regex: a '(' that is never closed"), true);
+		assert_true(broken.View().StartsWith(Core::StringView("search_text: the pattern is not a valid regex")) && broken.View().Contains(Core::StringView("put a backslash before it")), "a broken regex says how to match ( as text");
+		assert_se("search_text: no folder x", Ai::SearchProblem(Core::StringView("no folder x"), true).CStr(), "another problem as it is");
 	}
 }

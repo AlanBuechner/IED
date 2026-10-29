@@ -7,3 +7,4 @@ void TestPackedVectorAliasLanes();
 void TestPackedVectorEngineDesign();
 void TestPackedVectorStructOfVectors();
 void TestPackedVectorScalarArithmetic();
+void TestPackedVectorLaneReferences();

@@ -44,5 +44,10 @@ namespace Testing
 
 		TEST_FUNC(Semantic.OverloadResolution)
 		void TestAliasUnwrapsForMatching();
+
+		// BUG-415: a template instance's method and its base's method of the same parameter types are one function
+		// (the most derived wins), however each names its parameters.
+		TEST_FUNC(Semantic.OverloadResolution)
+		void TestBug415SameTypesDifferentNamesIsOneFunction();
 	};
 } // namespace Testing

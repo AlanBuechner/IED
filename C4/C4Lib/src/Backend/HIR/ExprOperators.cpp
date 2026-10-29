@@ -120,7 +120,6 @@ namespace Scripting
 		if (ik)
 		{
 			bool isCompare = tok == "==" || tok == "!=" || tok == "<" || tok == ">" || tok == "<=" || tok == ">=";
-			const Type* common = l;
 
 			// A pure packed vector object beside a run of its lanes is that vector (`v3.xy += v2`).
 			if (std::optional<Value> lanes = SameLanesAs(lhs, r)) { lhs = *lanes; l = TypeHandle::UnwrapToValue(lhs.type); }
@@ -135,20 +134,24 @@ namespace Scripting
 			if (IsPointerArithmetic(tok, l, r))
 				return m_Ctx.Fail(n, PointerArithmetic(m_Ctx, tok, lhs, rhs));
 
-			// Pointer compared to an integer (`p == 0` / `p != 0`, and funcptr/string forms): C4 only
-			// allows a pointer-like value against the integer zero, which means null. Lift the integral
-			// operand to the pointer side's type so the compare sees matching operand types - the same
-			// coercion as the void*-null case above, generalized to every pointer-like kind (pointer,
-			// funcptr, string) instead of only TypeKind::Pointer.
+			// Pointer compared to an integer (`p == 0` / `p != 0`, and funcptr forms): C4 allows a pointer-like
+			// value only against the integer constant zero, which means null; it is lifted to the pointer's type,
+			// as the void* null above. Any other integer, and a bool (`flag == null`), is left to BinaryProblem.
 			auto pointerLike = [](const Type* t) {
 				return t && (t->GetKind() == TypeKind::Pointer || t->GetKind() == TypeKind::FunPtr); };
-			if (isCompare && (tok == "==" || tok == "!="))
+			auto isNull = [](const Value& v) { return !v.isLValue && ImplicitConversion::IsZeroConstant(v.rvalue); };
+			if (tok == "==" || tok == "!=")
 			{
-				auto isInt = [](const Value& v) { const Type* t = TypeHandle::UnwrapToValue(v.type); return t && t->IsIntegral(); };
-				if (pointerLike(l) && isInt(rhs))
-					rhs = Value::R(m_Ctx.out->NewNode<ConvertNode>(m_Ctx.LoadIfNeeded(rhs), rhs.type, l), l);
-				else if (pointerLike(r) && isInt(lhs))
-					lhs = Value::R(m_Ctx.out->NewNode<ConvertNode>(m_Ctx.LoadIfNeeded(lhs), lhs.type, r), r);
+				if (pointerLike(l) && isNull(rhs))
+				{
+					rhs = Value::R(m_Ctx.out->NewNode<ConvertNode>(rhs.rvalue, rhs.type, l), l);
+					r = l;
+				}
+				else if (pointerLike(r) && isNull(lhs))
+				{
+					lhs = Value::R(m_Ctx.out->NewNode<ConvertNode>(lhs.rvalue, lhs.type, r), r);
+					l = r;
+				}
 			}
 			if (Core::String why = BuiltinOperators::BinaryProblem(tok, TypeHandle::UnwrapToValue(lhs.type), TypeHandle::UnwrapToValue(rhs.type));
 				!why.empty())
@@ -158,6 +161,7 @@ namespace Scripting
 			// Usual arithmetic conversions apply even for SAME-TYPE narrow operands: int16 + int16 promotes
 			// both to int32 (C integer promotions), so the op runs at >=32 bits and cannot wrap in 16. When
 			// the common type equals an operand's type no conversion is inserted (the `common != l` guard).
+			const Type* common = l;
 			if (l->IsNumeric() && r->IsNumeric())
 			{
 				TypeKind ck = Type::UsualArithmeticResultKind(l->GetKind(), r->GetKind());

@@ -1,0 +1,73 @@
+// OOP - Namespaced Base Create Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamespacedBaseCreate.ch"
+
+// BUG-414: a create's (or copy's) first statement may name its base with the base's namespaces, as a base in another
+// namespace must be named.
+namespace NbLib
+{
+	class NbBase
+	{
+		[operator("create")] public void Init(int32 value) { m_Value = value; }
+		// Counts on top of what the target holds: a second copy into the same base shows as 2.
+		[operator("copy")] public void CopyFrom(const NbBase& other) { m_Value = other.m_Value; m_Copies = m_Copies + other.m_Copies + 1; }
+		public int32 m_Value;
+		public int32 m_Copies;
+	}
+}
+
+namespace NbApp
+{
+	class NbDerived : NbLib::NbBase
+	{
+		[operator("create")] public void Init(int32 value) { NbLib::NbBase::Init(value + 1); m_Extra = 7; }
+		[operator("copy")] public void CopyFrom(const NbDerived& other) { NbLib::NbBase::CopyFrom(other); m_Extra = other.m_Extra; }
+		public int32 m_Extra;
+	}
+
+	class NbOutOfLine : NbLib::NbBase
+	{
+		[operator("create")] public void Init(int32 value);
+	}
+
+	void NbOutOfLine::Init(int32 value) {
+		NbLib::NbBase::Init(value * 2);
+	}
+}
+
+namespace NbOuter
+{
+	namespace NbInner
+	{
+		class NbDeep
+		{
+			[operator("create")] public void Init(int32 value) { m_Value = value; }
+			public int32 m_Value;
+		}
+	}
+
+	class NbFromDeep : NbInner::NbDeep
+	{
+		[operator("create")] public void Init(int32 value) { NbInner::NbDeep::Init(value + 3); }
+	}
+
+	class NbFromDeepFull : NbOuter::NbInner::NbDeep
+	{
+		[operator("create")] public void Init(int32 value) { NbOuter::NbInner::NbDeep::Init(value + 4); }
+	}
+}
+
+void TestNamespacedBaseCreate() {
+	NbApp::NbDerived derived(1);
+	Assert(derived.m_Value == 2 && derived.m_Extra == 7, "a namespace-qualified base create builds the base");
+	NbApp::NbDerived copied = derived;
+	Assert(copied.m_Value == 2 && copied.m_Extra == 7, "a namespace-qualified base copy copies the base");
+	Assert(copied.m_Copies == 1, "and only once: the compiler does not copy the base again");
+	Assert(derived.m_Copies == 0, "the source is copied, not moved (it is used here)");
+	NbApp::NbOutOfLine outOfLine(5);
+	Assert(outOfLine.m_Value == 10, "an out-of-line create names its base with its namespace");
+	NbOuter::NbFromDeep deep(1);
+	Assert(deep.m_Value == 4, "a base named from part of its namespaces");
+	NbOuter::NbFromDeepFull full(1);
+	Assert(full.m_Value == 5, "and from all of them");
+}

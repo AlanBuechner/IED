@@ -180,7 +180,22 @@ breadcrumb, cookie, consent, banner, share, dropdown, portlet, noprint (never on
 When the page has a `<main>`, only the first one is written; else its only `<article>`. `format: text` writes the same
 without Markdown marks; `raw` gives the body as received. A body declared `iso-8859-1`/`windows-1252` (its type or a
 `<meta>`), or not UTF-8 and saying nothing, is read as Windows-1252. JSON, XML and other `text/*` come back raw;
-anything else (PDF, images, archives) is refused with its type and size, and a hint (`browser_open` shows PDFs).
+anything else (images, archives) is refused with its type and size, and a hint (`browser_open` shows images).
+
+**PDFs** (`application/pdf`, or a body starting `%PDF-`) come back as their pages' text in every format
+(`plugins/webfetch/code/PdfDocument.ch`, `PdfText.ch`): the objects are read by scanning the file for `N G obj` (so a
+broken cross-reference table does not matter; a later definition replaces an earlier one), streams by `/Length` when
+`endstream` follows it, else up to `endstream`; object streams are unpacked; `FlateDecode` is the one filter (enough
+for content, CMaps and object streams; streams with predictors - images, xref streams - are skipped). Pages come from
+the catalog's page tree (resources inherited), else every `/Type /Page` object. Each page's content streams run for
+the text operators (`BT`, `Tf`, `Td`/`TD`/`T*`/`Tm`, `Tc`/`Tw`/`Tz`/`TL`, `Tj`, `TJ`, `'`, `"`), form XObjects three
+deep, inline images skipped. A string's codes (one byte, or the CMap's width for Type0 fonts) become text through the
+font's `ToUnicode` CMap (`bfchar`, `bfrange` with a string or an array), else a simple font's encoding: Windows-1252
+with its `/Differences` read as glyph names (`fi`, `quoteright`, `eacute` as a letter and a combining mark, `uniXXXX`,
+`f_f_i`, Greek and math names). Glyph widths (`/Widths`, a CID font's `/W` and `/DW`) move the text position, so a run
+that starts more than 0.15 em past where the last ended gets a space, a move of half a line up or down a line break,
+and a move of 1.9 lines down (or a line up: the next column) a blank line. Each page starts after `[Page N]`; the
+document's `/Title` is the result's title. Encrypted files are refused, as is a file with no pages.
 Pages drawn by scripts (GitHub's repository README, MDN's compatibility tables) have little or no text: the result says
 so, and `browser_open` renders them.
 
@@ -264,6 +279,5 @@ SearXNG (AGPL-3.0) runs unmodified as its own process; the launcher and the fetc
 ## Open items
 
 - Fetch through Tor (opt-in per call or per solution) and the general egress policy of `docs/04` - not wanted now.
-- PDF to text for `web_fetch`.
 - A `summary` format for `web_fetch` (the `summarizer` role, `docs/13`).
 - A readability-style score for pages with neither `<main>` nor one `<article>` (today: the whole body without chrome).

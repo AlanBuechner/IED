@@ -1,0 +1,105 @@
+// Types - Union Copies Tests (implementation)
+include "../Framework/Assert.ch"
+include "UnionCopies.ch"
+
+// BUG-413: an anonymous union is copied as its bytes - the whole region, whichever member wrote it last - both when
+// the object copies as plain data and when the compiler writes its copy for a member with a lifecycle.
+struct UcSmall { public uint8 a; public uint32 b; public uint8 c; public bool d; }   // 12 bytes, padding inside
+struct UcPair { public int32 w; public int32 h; }
+struct UcBig { public UcPair size; public UcPair frame; }                          // 16 bytes
+
+struct UcPlain
+{
+	public uint8 tag;
+	public union { public UcSmall small; public UcBig big; };
+}
+
+// A member with a copy operator makes the compiler write the object's copy.
+struct UcCounted
+{
+	public int32 value;
+	[operator("copy")] public void CopyFrom(const UcCounted& other) { value = other.value + 100; }
+	[operator("delete")] public void Destroy() {}
+}
+
+struct UcOwning
+{
+	public uint8 tag;
+	public union { public UcSmall small; public UcBig big; };
+	public UcCounted counted;
+	public union { public int64 wide; public uint8[3] bytes; };
+}
+
+struct UcDerived : UcOwning
+{
+	public union { public uint8 low; public UcPair pair; };
+}
+
+static UcBig MakeBig() {
+	UcBig big;
+	big.size.w = 1;
+	big.size.h = 2;
+	big.frame.w = 600;
+	big.frame.h = 400;
+	return big;
+}
+
+static bool HoldsBig(const UcBig& big) { return big.size.w == 1 && big.size.h == 2 && big.frame.w == 600 && big.frame.h == 400; }
+
+static UcPlain PassPlain(UcPlain plain) { return plain; }
+static UcOwning PassOwning(UcOwning owning) { return owning; }
+
+void TestUnionCopiesOfPlainData() {
+	UcPlain plain;
+	plain.tag = 3;
+	plain.big = MakeBig();
+	UcPlain copied = plain;
+	Assert(copied.tag == 3 && HoldsBig(copied.big), "a copy keeps the bytes past the first member");
+	UcPlain assigned;
+	assigned = plain;
+	Assert(HoldsBig(assigned.big), "an assignment keeps them");
+	Assert(HoldsBig(PassPlain(plain).big), "passing and returning by value keep them");
+	UcPlain[2] array;
+	array[1] = plain;
+	UcPlain[2] arrayCopy = array;
+	Assert(HoldsBig(arrayCopy[1].big), "an array's copy keeps them");
+}
+
+void TestUnionCopiesBesideALifecycle() {
+	UcOwning owning;
+	owning.tag = 5;
+	owning.big = MakeBig();
+	owning.wide = 0x0102030405060708;
+	owning.counted.value = 1;
+	UcOwning copied = owning;
+	Assert(HoldsBig(copied.big), "the compiler-written copy copies the union");
+	Assert(copied.wide == 0x0102030405060708, "every union of the object");
+	Assert(copied.counted.value == 101 && copied.tag == 5, "and the other members as before");
+	UcOwning assigned;
+	assigned = owning;
+	Assert(HoldsBig(assigned.big) && assigned.wide == 0x0102030405060708, "an assignment copies the unions");
+	UcOwning passed = PassOwning(owning);
+	Assert(HoldsBig(passed.big), "passing and returning by value copy them");
+
+	owning.small.a = 7;
+	owning.small.b = 9;
+	UcOwning rewritten = owning;
+	Assert(rewritten.small.a == 7 && rewritten.small.b == 9 && rewritten.big.frame.h == 400, "the bytes, whichever member wrote them");
+}
+
+void TestUnionCopiesThroughABase() {
+	UcDerived derived;
+	derived.big = MakeBig();
+	derived.wide = -2;
+	derived.pair.w = 11;
+	derived.pair.h = 12;
+	UcDerived copied = derived;
+	Assert(HoldsBig(copied.big) && copied.wide == -2, "the base's unions are copied");
+	Assert(copied.pair.w == 11 && copied.pair.h == 12, "and the derived type's");
+}
+
+void TestUnionCopies() {
+	TestUnionCopiesOfPlainData();
+	TestUnionCopiesBesideALifecycle();
+	TestUnionCopiesThroughABase();
+}

@@ -1,4 +1,5 @@
-// files: the paths the file tools take from a call - "." parts dropped, anything that leaves the workspace refused.
+// files: the paths the file tools take from a call - "." parts dropped, anything that leaves the workspace refused -
+// and edits matching a file's line breaks.
 
 include "Files.ch"
 
@@ -12,6 +13,23 @@ static bool Refused(const char* path) {
 	return false;
 }
 
+// `text` after fs_edit's one edit of `old` (JSON string text) to `replacement`.
+static Core::String Edited(const char* text, const char* old, const char* replacement, bool& applied) {
+	Core::StringBuilder json;
+	json.Append("[{\"old\": \"");
+	json.Append(old);
+	json.Append("\", \"new\": \"");
+	json.Append(replacement);
+	json.Append("\"}]");
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	Serialization::DomNode edits = Serialization::ReadJson(json.View(), *doc).root;
+	assert_eq((int64)1, edits.Count(), "the edit's JSON parses: old and new escape their breaks (\\\\n)");
+	Core::String result;
+	Core::String error;
+	applied = Ai::ApplyTextEdits(Core::StringView(text), edits, result, error);
+	return result;
+}
+
 [test("server.ai.files")]
 class FileToolTests {
 	[test("tool_paths")]
@@ -21,5 +39,64 @@ class FileToolTests {
 		assert_se("src/main.c", Ai::ToolPath(Core::StringView("src/./main.c")).CStr(), "a . inside");
 		assert_se("src/main.c", Ai::ToolPath(Core::StringView(".\\src\\main.c")).CStr(), "backslashes");
 		assert_true(Refused("..") && Refused("./../secret") && Refused("src/../../x") && Refused("C:/Windows"), "out of the workspace stays refused");
+	}
+
+	[test("same_named_glob")]
+	public static void TestSameNamedGlob() {
+		assert_se("**/Renderer.ch", Ai::SameNamedGlob(Core::StringView("Packages/Renderer/RHI/src/Rhi/Renderer.ch")).CStr(), "the file's name anywhere");
+		assert_se("**/Renderer.ch", Ai::SameNamedGlob(Core::StringView("Renderer.ch")).CStr(), "a bare name");
+		assert_se("**/main.cf", Ai::SameNamedGlob(Core::StringView("src\\main.cf")).CStr(), "backslashes");
+	}
+
+	[test("only_source_file")]
+	public static void TestOnlySourceFile() {
+		Core::Array<Core::String> built = { Core::String("Engine/Shaders/Sky.shader"), Core::String("build/bin/Client/Shaders/Sky.shader"), Core::String("Game/node_modules/x/Sky.shader") };
+		assert_se("Engine/Shaders/Sky.shader", Ai::OnlySourceFile(built).CStr(), "the copies in build output and skipped folders do not count");
+		Core::Array<Core::String> two = { Core::String("a/Sky.shader"), Core::String("b/Sky.shader") };
+		assert_true(Ai::OnlySourceFile(two).IsEmpty(), "two sources: no guess");
+		Core::Array<Core::String> none = { Core::String("build/Sky.shader") };
+		assert_true(Ai::OnlySourceFile(none).IsEmpty(), "only build output: none");
+		Core::Array<Core::String> rebuilt = { Core::String("src/build.cf") };
+		assert_se("src/build.cf", Ai::OnlySourceFile(rebuilt).CStr(), "a file named like a skipped folder is a source");
+	}
+
+	[test("edit_line_breaks")]
+	public static void TestEditLineBreaks() {
+		bool applied = false;
+		Core::String lf = Edited("a\nb\nc\n", "a\\nb", "a\\nx", applied);
+		assert_true(applied, "an edit of a \\n file applies");
+		assert_se("a\nx\nc\n", lf.CStr(), "with \\n breaks");
+
+		Core::String crlf = Edited("a\r\nb\r\nc\r\n", "a\\nb", "a\\nx", applied);
+		assert_true(applied, "an edit written with \\n applies to a \\r\\n file");
+		assert_se("a\r\nx\r\nc\r\n", crlf.CStr(), "and keeps its \\r\\n breaks");
+
+		Core::String mixed = Edited("a\r\nb\nc\nd\r\n", "b\\nc", "b\\ny", applied);
+		assert_true(applied, "an edit applies to the \\n lines of a file that has both breaks");
+		assert_se("a\r\nb\ny\nd\r\n", mixed.CStr(), "keeping the breaks those lines have");
+
+		Core::String spanning = Edited("// why\r\nf() {\n\tg();\n}\n", "// why\\nf() {\\n\\tg();", "// why\\nf() {\\n\\th();", applied);
+		assert_true(applied, "an edit across lines of both breaks applies");
+		assert_se("// why\nf() {\n\th();\n}\n", spanning.CStr(), "breaking as most of the lines it replaces");
+
+		Core::String written = Edited("a\nb\n", "a\\r\\nb", "a\\r\\nz", applied);
+		assert_true(applied, "old written with \\r\\n applies to a \\n file");
+		assert_se("a\nz\n", written.CStr(), "and new takes the file's breaks");
+
+		Edited("x;\r\nx;\nx;\r\n", "x;\\n", "y;\\n", applied);
+		assert_true(!applied, "old found in lines of either break is found more than once");
+
+		Edited("a\r\nb\r\n", "z", "y", applied);
+		assert_true(!applied, "text that is in neither form is not found");
+	}
+
+	[test("edit_replace_all_line_breaks")]
+	public static void TestEditReplaceAllLineBreaks() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode edits = Serialization::ReadJson(Core::StringView("[{\"old\": \"x;\\n\", \"new\": \"y;\\n\", \"replace_all\": true}]"), *doc).root;
+		Core::String result;
+		Core::String error;
+		assert_true(Ai::ApplyTextEdits(Core::StringView("x;\r\nx;\nx;\r\n"), edits, result, error), "replace_all applies");
+		assert_se("y;\r\ny;\ny;\r\n", result.CStr(), "each match keeps the break its line had");
 	}
 }

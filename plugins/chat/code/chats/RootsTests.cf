@@ -55,6 +55,17 @@ class RootsTests {
 		assert_true(!Ai::IsFolderRoot(IED::Workspace()), "a workspace is no plugin folder");
 	}
 
+	[test("plugin_short_names")]
+	public static void TestPluginShortNames() {
+		Core::Array<Core::String> ids = { Core::String("c4"), Core::String("ied.gpu"), Core::String("ied.nuke"), Core::String("ied.web"), Core::String("my.web") };
+		assert_eq((int64)0, Ai::FindPluginId(ids, Core::StringView("c4")), "an id as it is");
+		assert_eq((int64)1, Ai::FindPluginId(ids, Core::StringView("gpu")), "the skill's name for ied.gpu");
+		assert_eq((int64)2, Ai::FindPluginId(ids, Core::StringView("ied.nuke")), "the full id");
+		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("web")), "two end in .web: no guess");
+		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("pu")), "only after a dot");
+		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("")), "nothing names nothing");
+	}
+
 	[test("allowed_by_name")]
 	public static void TestAllowedByName() {
 		Ai::PermissionRules rules;

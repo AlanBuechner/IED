@@ -269,6 +269,7 @@ Manifest strings expand `${name}`; an unknown name is an error. `$${` is a liter
 | `nuke`, `nuke.home` | Nuke's package folder (`${python} ${nuke} ...` runs Nuke) and the repository holding it |
 | `toolchains`, `toolchain.dir`, `toolchain.version`, `c4` | the store, the workspace's toolchain and its `C4.exe` |
 | `env:NAME` | an environment variable (an error when unset) |
+| `nuget:NAME` | the folder of the NuGet package the project's `[dependencies]` entry `NAME` names (section 12) |
 | `args` | the words after `--`; only as a whole argument, where it splices them in |
 
 ## 8. Toolchains
@@ -307,7 +308,8 @@ without `--force`). `C4/MakeToolchain.py --out DIR` assembles an install from a 
 ## 9. C4 projects: compiling, tests, the IDE bridge
 
 For a program `P`, Nuke writes the build description `build/int/<cfg>/P/projects.toml` (P and every C4 module
-it depends on: sources, includes, defines with `<CONFIG>` = 1 and `PROJECT_NAME`, depends; see
+it depends on: sources, includes, defines with `<CONFIG>` = 1, `PROJECT_NAME` and `PROJECT_DIR` (the project's folder as a
+string literal, so a module finds its own files: `FS::Path(PROJECT_DIR).Join("Shaders")`), depends; see
 `C4/docs/language/15-projects.md`) and runs, from P's folder:
 
 ```text
@@ -457,7 +459,8 @@ standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for
   `b/Types.cpp`) are an error.
 - **Configurations.** The optimization is the configuration's (Debug `-O0`, Development and Dist `-O3`), with CodeView
   debug information and a `.pdb` when it keeps debug info. Every compile defines the configuration's name in capitals
-  (`DEVELOPMENT`), `UNICODE`, `_UNICODE`, `_CRT_SECURE_NO_WARNINGS`, `PROJECT_NAME=<name>` and the configuration's
+  (`DEVELOPMENT`), `UNICODE`, `_UNICODE`, `_CRT_SECURE_NO_WARNINGS`, `PROJECT_NAME=<name>`, `PROJECT_DIR` (the project's folder as a
+string literal, `/` separators) and the configuration's
   `defines`. Diagnostics are in MSVC's form, `file(line,col): error: ...` (the C/C++ plugin's `clang-msvc` matcher), at
   most 10 errors a file.
 - **Links** run when the output is missing, an object or library is newer, or the arguments changed, through a
@@ -559,6 +562,8 @@ Strings   = { source = "git@github.com:me/utils.git/Strings", rev = "1a2b3c4d" }
 # a local folder, written from the workspace's root: another project of the same package (or, for a project in no
 # package, of the workspace)
 Core      = { source = "Engine/Core" }
+# a NuGet package (a native SDK), at its exact version: its files are ${nuget:Agility} in this manifest
+Agility   = { nuget = "Microsoft.Direct3D.D3D12", version = "1.620.1" }
 ```
 
 `nuke.toml` is the only file you write. Any Nuke command (`nuke build`, `nuke init --ied`, ...) fetches what is missing,
@@ -680,6 +685,33 @@ package command) puts the packages' projects in the solution's `Packages/<source
 files naming the package's version and mode (`buildSystem.package`) and the packages each project uses (`packages`,
 its Dependencies node); a package manifest above its projects is an item of the solution folder it belongs to. IED's
 Package Manager (IED `docs/31` section 8) runs these commands for you.
+
+**NuGet packages.** Native SDKs published on NuGet - the D3D12 Agility SDK, DXC - are dependencies too: `Name = {
+nuget = "<package id>", version = "<version>" }`. NuGet versions carry no compatibility promise (four numbers,
+prereleases), so the version is exact; `"*"` (or no version) takes the feed's newest stable one, which the lock keeps
+until `nuke package update <id>`. Any Nuke command downloads a version once per machine into the package cache
+(`<cache>/nuget/<id>.<version>.nupkg`) from nuget.org's flat container - or `NUKE_NUGET_FEED`, another feed's URL or a
+folder laid out the same way - extracts it read-only into `packages/nuget/<id>@<version>/` (without NuGet's packaging
+files) and pins it in `packages/nuke.lock` as a `[[nuget]]` entry with the `.nupkg`'s SHA-256, which a later download
+must match. While the lock names a version and it is installed, nothing is fetched. A manifest that names the package
+reaches its files as `${nuget:<entry name>}` - in `includes`, `[[project.copy]]`, `links`, steps:
+
+```toml
+# Renderer/RHI/DX12/nuke.toml
+includes = ["${nuget:Agility}/build/native/include"]      # the SDK's d3d12.h, ahead of the Windows SDK's
+
+[[project.copy]]                                          # D3D12Core.dll beside every program that compiles this module
+from = "${nuget:Agility}/build/native/bin/x64"
+to = "D3D12"
+
+[dependencies]
+Agility = { nuget = "Microsoft.Direct3D.D3D12", version = "1.620.1" }
+```
+
+A package's NuGet dependency is installed by every workspace that uses the package. One program has one copy of an
+SDK, so two projects naming one package at two versions is an error that names both. `nuke package status` lists them
+(`--json`: `nuget`, each with its id, version, hash, folder and `requiredBy`). Code: `nuke/packages/nuget.py`, tests:
+`tests/test_nuget.py`.
 
 **Other package managers.** A Rust or Go project keeps its own manifest, lockfile and cache; Nuke never resolves
 crates or modules and never writes `go.mod`, `go.sum`, `Cargo.toml` or `Cargo.lock`. The tags are Go's, so a Go module

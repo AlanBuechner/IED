@@ -78,14 +78,59 @@ namespace Ai
 			out.AppendInt(c_SearchToolMatches);
 			out.Append(" matches; narrow the pattern or add a glob]\n");
 		}
-		if (result.m_Matches.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		if (result.m_Matches.IsEmpty() && result.m_TooLarge.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		if (!result.m_TooLarge.IsEmpty()) {
+			out.Append(result.m_Matches.IsEmpty() ? "[no matches in the files searched; " : "[");
+			out.AppendInt(result.m_TooLarge.Count());
+			out.Append(result.m_TooLarge.Count() == 1 ? " file was not searched, over 4 MB: " : " files were not searched, over 4 MB: ");
+			for (int64 i = 0; i < result.m_TooLarge.Count() && i < c_SearchTooLargeShown; ++i) {
+				if (i > 0) out.Append(", ");
+				out.Append(result.m_TooLarge[i].View());
+			}
+			if (result.m_TooLarge.Count() > c_SearchTooLargeShown) out.Append(", ...");
+			out.Append(" - search one with shell_run (findstr /n /c:\"text\" <file>)]\n");
+		}
 		return Core::String(out.View());
 	}
 
-	// A plugin's folder (plugins:/) is searched on the disk; a workspace with its open documents as edited.
-	static bool SearchIn(const IED::Workspace& ws, const IED::SearchQuery& query, const Threading::Atomic<bool>* cancel, IED::SearchResult& result, Core::String& problem) {
+	bool InExcludedFolder(Core::StringView folder) {
+		const Core::Array<Core::String> excludes = IED::DefaultExcludes();
+		for (int64 end = 1; end <= folder.ByteLength(); ++end) {
+			if (end < folder.ByteLength() && folder.ByteAt(end) != '/') continue;
+			for (const Core::String& glob : excludes)
+				if (IED::GlobMatch(glob.View(), folder.Substring(0, end))) return true;
+		}
+		return false;
+	}
+
+	// A plugin's folder (plugins:/) is searched on the disk; a workspace with its open documents as edited; a skipped
+	// folder the call names (`alone`), on the disk and whole.
+	static bool SearchIn(const IED::Workspace& ws, Core::StringView alone, const IED::SearchQuery& query, const Threading::Atomic<bool>* cancel, IED::SearchResult& result, Core::String& problem) {
+		if (!alone.IsEmpty()) return IED::SearchFolder(JoinPath(ws.m_Root.View(), alone).View(), query, cancel, result, problem);
 		if (IsFolderRoot(ws)) return IED::SearchFolder(ws.m_Root.View(), query, cancel, result, problem);
 		return IED::Search(ws, query, cancel, result, problem);
+	}
+
+	// The files a search keeps to: the workspace's but build output and ignored files, or all of a skipped folder the
+	// call names (`alone`, its glob relative to it).
+	static void ScopeSearch(const ToolInvocation& call, IED::SearchQuery& query, Core::String& alone) {
+		Core::String folder = ToolPath(call.m_Args.Member("path").AsView());
+		if (InExcludedFolder(folder.View())) {
+			alone = folder;
+			Core::StringView glob = call.m_Args.Member("glob").AsView();
+			if (!glob.IsEmpty()) query.m_Include.Push(Core::String(glob));
+			return;
+		}
+		Core::String glob = SearchGlob(call);
+		if (!glob.IsEmpty()) query.m_Include.Push(glob);
+		query.m_Exclude = IED::DefaultExcludes();
+		query.m_UseIgnoreFiles = true;
+	}
+
+	Core::String SearchProblem(Core::StringView problem, bool regex) {
+		Core::String said = Core::String("search_text: ") + problem;
+		if (!regex || !problem.Contains(Core::StringView("not a valid regex"))) return said;
+		return said + "; to match ( ) [ ] { } . * + ? | ^ $ or \\ as text put a backslash before it (\\(), or leave regex false";
 	}
 
 	static ToolOutcome SearchRun(const ToolInvocation& call) {
@@ -93,26 +138,26 @@ namespace Ai
 		query.m_Text = Core::String(call.m_Args.Member("pattern").AsView());
 		query.m_Regex = call.m_Args.Member("regex").AsBool();
 		query.m_CaseSensitive = call.m_Args.Member("case_sensitive").AsBool();
-		Core::String glob = SearchGlob(call);
-		if (!glob.IsEmpty()) query.m_Include.Push(glob);
-		query.m_Exclude = IED::DefaultExcludes();
-		query.m_UseIgnoreFiles = true;
+		Core::String alone;
+		ScopeSearch(call, query, alone);
 		query.m_MaxResults = c_SearchToolMatches;
 		Threading::Atomic<bool> never;
 		IED::SearchResult result;
 		Core::String problem;
-		if (!SearchIn(call.m_Ws, query, &never, result, problem)) return ToolError((Core::String("search_text: ") + problem.View()).View());
+		if (!SearchIn(call.m_Ws, alone.View(), query, &never, result, problem)) return ToolError(SearchProblem(problem.View(), query.m_Regex).View());
 		bool asRegex = false;
 		if (result.m_Matches.IsEmpty() && !query.m_Regex && LooksLikeRegex(query.m_Text.View())) {
 			query.m_Regex = true;
 			IED::SearchResult again;
 			Core::String ignored;
-			if (SearchIn(call.m_Ws, query, &never, again, ignored) && !again.m_Matches.IsEmpty()) {
+			if (SearchIn(call.m_Ws, alone.View(), query, &never, again, ignored) && !again.m_Matches.IsEmpty()) {
 				result = again;
 				asRegex = true;
 			}
 		}
-		for (int64 i = 0; i < result.m_Matches.Count(); ++i) result.m_Matches[i].m_Path = call.m_Shown + result.m_Matches[i].m_Path.View();
+		Core::String shown = alone.IsEmpty() ? Core::String(call.m_Shown) : (call.m_Shown + alone.View()) + "/";
+		for (int64 i = 0; i < result.m_Matches.Count(); ++i) result.m_Matches[i].m_Path = shown + result.m_Matches[i].m_Path.View();
+		for (int64 i = 0; i < result.m_TooLarge.Count(); ++i) result.m_TooLarge[i] = shown + result.m_TooLarge[i].View();
 		Core::StringBuilder out;
 		if (asRegex) out.Append("[nothing matched the pattern as text, so it was read as a regex; set regex true for one]\n");
 		out.Append(SearchListing(result).View());
@@ -557,27 +602,27 @@ namespace Ai
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output; the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under; plugins:/<plugin id>/ for a plugin's files\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output and ignored files unless path names a folder of them (build/...); the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under, workspace-relative (no drive letter, no ..), build output too; plugins:/<plugin id>/ for a plugin's files; ied:/ for IED's checkout in developer mode\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->m_Plan = SearchPlan;
 		search->m_Run = SearchRun;
 		search->m_FolderRoots = true;
 		registry.Add(search);
 		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
-			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out for the workspace root, not '.'\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		shell->m_Plan = ShellPlan;
 		shell->m_Run = ShellRun;
 		registry.Add(shell);
-		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
-			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
+		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it), in developer mode IED's own as ied:/build/bin/... (never a full C:/ path), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
+			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out for the workspace root, not '.'\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		program->m_Plan = ProgramPlan;
 		program->m_Run = ProgramRun;
 		registry.Add(program);
 		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). A test or program that might not end: give timeout_s. Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\", \"timeout_s\": 300})",
-			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"description\": \"a project of the solution; the startup project when left out (one without tests fails test: name the project that has them)\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once: you are told when it ends\"}}, \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\", \"description\": \"a project of the solution; the startup project when left out (one without tests fails test: name the project that has them). A project folder made since the solution was read is not one yet: project_import it first\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"stop the task after this many seconds\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once: you are told when it ends\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		build->m_Plan = BuildPlan;
 		build->m_Run = BuildRun;

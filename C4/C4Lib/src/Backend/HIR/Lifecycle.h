@@ -105,6 +105,8 @@ namespace Scripting
 		QueryResult<void> ConstructField(BlockNode* root, const LValue* field, const ObjectType::FieldInfo& info, const AstNode* site);
 		void ScheduleDestroyParts(BlockNode* root, const ObjectType* type);
 		void CopyBase(BlockNode* root, const ObjectType* type, const LValue* other);
+		/// Each anonymous-union region of `type` copied as its bytes: its members overlap and hold no lifecycle (BUG-413).
+		void CopyUnionRegions(BlockNode* root, const ObjectType* type, const LValue* other);
 		/// A thread_local global, static member or static local: each thread has its own copy.
 		bool HasThreadStorage(const LValue* object) const;
 
@@ -132,6 +134,8 @@ namespace Scripting
 		const LValue* This(const ObjectType* type);
 		const LValue* FieldOf(const LValue* object, const ObjectType::FieldInfo& field);
 		const LValue* BaseOf(const LValue* object, const ObjectType* type, const ObjectType* base);
+		/// The bytes of the anonymous-union region whose first member is `first`, in `object`.
+		const LValue* UnionRegionOf(const LValue* object, const ObjectType::FieldInfo& first);
 		const HIRNode* DirectCall(const FunctionRecord* rec, const LValue* receiver, std::vector<const HIRNode*> args);
 		void ForEachIndex(BlockNode* region, uint64 begin, uint64 end, bool reverse,
 			const std::function<void(BlockNode*, const HIRNode*)>& visit);

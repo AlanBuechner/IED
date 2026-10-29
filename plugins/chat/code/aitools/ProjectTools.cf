@@ -222,6 +222,18 @@ namespace Ai
 		return choices;
 	}
 
+	// The project of the solution whose folder is `relative`, when there is one: what an import there would make.
+	static bool ProjectIn(const IED::Workspace& ws, Core::StringView relative, IED::Project& found) {
+		Core::String wanted = Slashed(relative).ToLower();
+		while (wanted.View().EndsWith(Core::StringView("/"))) wanted = Core::String(wanted.View().Substring(0, wanted.ByteLength() - 1));
+		for (const IED::Project& project : ws.m_Projects) {
+			if (Slashed(project.m_Folder.View()).ToLower() != wanted) continue;
+			found = project;
+			return true;
+		}
+		return false;
+	}
+
 	static ToolOutcome ImportRun(const ToolInvocation& call) {
 		Core::StringView folder = Arg(call, "folder");
 		Core::String relative;
@@ -229,6 +241,22 @@ namespace Ai
 		Core::String problem;
 		const bool inside = InWorkspace(call, folder, relative);
 		if (inside && !relative.IsEmpty()) {
+			// A folder the solution has as a project already (a package's nuke.toml makes one): what was asked is done.
+			IED::Workspace ws;
+			IED::Project known;
+			if (IED::FindWorkspace(call.m_Ws.m_Id.View(), ws) && ProjectIn(ws, relative.View(), known)) {
+				Core::StringView name = Arg(call, "name");
+				if (!name.IsEmpty() && name != known.m_Name.View())
+					return Refused("project_import", ((((Core::String("the folder ") + relative.View()) + " is project ") + known.m_Name.View()) + " already; importing does not rename it").View());
+				Core::StringBuilder out;
+				out.Append("The folder ");
+				out.Append(relative.View());
+				out.Append(" is project ");
+				out.Append(known.m_Name.View());
+				out.Append(" of the solution already: nothing to do.\n");
+				DescribeWorkspace(out, ws);
+				return ToolResult(out.View(), ((Core::String("Already project ") + known.m_Name.View()) + ".").View());
+			}
 			if (!IED::AddProject(call.m_Ws.m_Id.View(), relative.View(), Choices(call), change, problem)) return Refused("project_import", problem.View());
 			return Changed(call, ((((Core::String("Added the folder ") + relative.View()) + " to the solution as project ") + change.m_Project.View()) + ".").View(), change);
 		}
@@ -363,7 +391,7 @@ namespace Ai
 		registry.Add(ProjectSpec("project_create", "Make a project from a template (key from project_templates): added to this solution, or with location (a full path) a new workspace <location>/<name> that opens beside this one. The Solution Explorer shows it at once. Example: project_create({\"template\": \"ied.cpp/console\", \"name\": \"Tools\"})",
 			"{\"type\": \"object\", \"properties\": {\"template\": {\"type\": \"string\", \"minLength\": 1}, \"name\": {\"type\": \"string\", \"pattern\": \"^[A-Za-z0-9_][A-Za-z0-9_.-]*$\", \"maxLength\": 64}, \"location\": {\"type\": \"string\", \"description\": \"a full path: make a new workspace there instead of adding to this solution\"}}, \"required\": [\"template\", \"name\"], \"additionalProperties\": false}",
 			ToolClass::Exec, CreatePlan, CreateRun));
-		registry.Add(ProjectSpec("project_import", "Make an existing folder an IED project: \".\" makes this workspace a solution; a folder of the workspace joins its solution as a project; a full path elsewhere becomes a solution of its own and opens. A .iedsln already in the folder (nuke init --ied wrote it) is opened as it is; else the build system's own project files are used when there is one (nuke.toml); else IED writes a .iedsln and .iedproj with the language and build preset found in the folder. Example: project_import({\"folder\": \"tools/packer\"})",
+		registry.Add(ProjectSpec("project_import", "Make an existing folder an IED project: \".\" makes this workspace a solution; a folder of the workspace joins its solution as a project; a full path elsewhere becomes a solution of its own and opens. A .iedsln already in the folder (nuke init --ied wrote it) is opened as it is; else the build system's own project files are used when there is one (nuke.toml); else IED writes a .iedsln and .iedproj with the language and build preset found in the folder. A folder that is a project of the solution already (a new package's nuke.toml makes it one) is left as it is. Example: project_import({\"folder\": \"tools/packer\"})",
 			"{\"type\": \"object\", \"properties\": {\"folder\": {\"type\": \"string\", \"description\": \"\\\".\\\", a workspace-relative folder, or a full path\"}, \"name\": {\"type\": \"string\", \"description\": \"default: the folder's name\"}, \"kind\": {\"enum\": [\"executable\", \"library\", \"module\", \"custom\", \"tests\", \"other\"]}, \"language\": {\"type\": \"string\", \"description\": \"a language id (cpp, c4, go, rust...); default: found from the files\"}}, \"required\": [\"folder\"], \"additionalProperties\": false}",
 			ToolClass::Exec, ImportPlan, ImportRun));
 		registry.Add(ProjectSpec("project_move", "Move a project of the solution to another folder of the workspace; its build files and the solution follow, and so do documents open in it. Example: project_move({\"project\": \"Engine\", \"to\": \"libs/Engine\"})",

@@ -126,7 +126,8 @@ zeroed storage. The base is copied first, by its own copy, unless the body's fir
 one `const T&`.
 
 - A type without a copy operator is copied member by member (a compiler-written `__c4_copy_T_<n>`); a type
-  with nothing to copy or destroy copies its bytes.
+  with nothing to copy or destroy copies its bytes. An anonymous union is copied as its bytes either way - the
+  whole region, whichever member wrote it last - since its members overlap and hold no lifecycle.
 - A type that has a `delete` (itself or in a part) but no copy operator is **not copyable**: copying it is
   `'T' cannot be copied: it has [operator("delete")] but no [operator("copy")]; add a copy operator, or move
   the value with take(x)`.

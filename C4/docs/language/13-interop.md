@@ -53,6 +53,13 @@ Rules:
   include-visibility rules of the [program model](01-program-model.md). They are added after the
   file's own text (file-scope declarations are order independent), so a diagnostic in the file keeps
   its line number.
+- Bindings may share declarations, as C translation units share headers: two projects binding `windows.h` (one
+  through its own `Win32.h`, one through `d3d12.h`), or one file binding two headers that include a third. A
+  binding's declaration that another binding has made already, with the same text, is that one: it is not defined
+  again, and every file whose binding repeats it sees it as its own and its project reaches it
+  ([15-projects.md](15-projects.md) rule 4). The same name declared differently is still a redefinition. The
+  wrappers a C++ header's shim makes are `inline`, so the linker keeps one of each when several shims make them
+  (BUG-420).
 - Every interop failure is a hard build error: unresolvable path, CBind missing, CBind rejecting
   the header, or the foreign source failing to compile.
 

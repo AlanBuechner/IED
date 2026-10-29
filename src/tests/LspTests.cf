@@ -226,6 +226,29 @@ class LspTests {
 		assert_se("null", Ied::FilterCodeActions(none, cursor).CStr(), "no actions");
 	}
 
+	[test("transient_eviction")]
+	public static void TestTransientEviction() {
+		Ied::LanguageServer* language = new Ied::LanguageServer();
+		const char*[3] paths = { "a.cf", "b.cf", "c.cf" };
+		for (const char* path : paths) {
+			Ied::TransientFile* file = new Ied::TransientFile();
+			file->m_Path = Core::String(path);
+			language->m_Transient.Push(file);
+			language->m_Documents.Insert(file->m_Path, true);
+		}
+		language->m_Published.Insert(Core::String("a.cf"), true);
+		language->m_Published.Insert(Core::String("c.cf"), true);
+
+		Core::Array<Ied::EvictedFile> evicted = Ied::EvictTransients(language, 1);
+		assert_eq(2, evicted.Count(), "the two oldest go");
+		assert_true(evicted[0].m_Path == "a.cf" && evicted[0].m_HadDiagnostics, "the oldest, whose diagnostics are withdrawn");
+		assert_true(evicted[1].m_Path == "b.cf" && !evicted[1].m_HadDiagnostics, "one the server said nothing of");
+		assert_true(!language->m_Documents.Contains(Core::String("a.cf")) && !language->m_Documents.Contains(Core::String("b.cf")), "no longer open on the server");
+		assert_true(!language->m_Published.Contains(Core::String("a.cf")), "nor counted as published");
+		assert_true(language->m_Transient.Count() == 1 && language->m_Published.Contains(Core::String("c.cf")), "the newest stays with its diagnostics");
+		assert_eq(0, Ied::EvictTransients(language, 1).Count(), "none past the limit: none go");
+	}
+
 	[test("server_errors")]
 	public static void TestServerErrors() {
 		Ied::RpcError modified = Ied::LspServerError(Core::StringView("{\"code\":-32801,\"message\":\"Request cancelled because the document was modified\"}"));

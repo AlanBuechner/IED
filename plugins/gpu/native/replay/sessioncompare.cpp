@@ -28,13 +28,31 @@ namespace fb::replay
 		}
 	}
 
+	// The first item of `items` (and their children: a root table's bindings) in `role`; a storage view only when it is a
+	// texture's.
+	static u64 FirstInRole(const JsonValue& items, const std::string& role) {
+		for (size_t i = 0; i < items.Count(); ++i) {
+			const JsonValue& item = items.At(i);
+			const bool texture = role != "uav" || item["value"].Str().find("TEXTURE") != std::string::npos;
+			if (item["role"].Str() == role && item.Has("resource") && texture) return item["resource"].Uint();
+			if (item.Has("children")) {
+				const u64 found = FirstInRole(item["children"], role);
+				if (found) return found;
+			}
+		}
+		return 0;
+	}
+
+	// The event's output: its first render target, else its depth target, else the first storage texture it writes (a
+	// dispatch's); 0 when it writes none of them.
 	u64 FirstTarget(const JsonValue& state) {
 		const JsonValue& groups = state["groups"];
-		for (size_t g = 0; g < groups.Count(); ++g) {
-			const JsonValue& items = groups.At(g)["items"];
-			for (size_t i = 0; i < items.Count(); ++i)
-				if (items.At(i)["role"].Str() == "rt" && items.At(i).Has("resource")) return items.At(i)["resource"].Uint();
-		}
+		const char* roles[3] = {"rt", "depth", "uav"};
+		for (const char* role : roles)
+			for (size_t g = 0; g < groups.Count(); ++g) {
+				const u64 found = FirstInRole(groups.At(g)["items"], role);
+				if (found) return found;
+			}
 		return 0;
 	}
 
@@ -149,7 +167,7 @@ namespace fb::replay
 		u64 id = params["id"].Uint(0), otherId = params["otherId"].Uint(0);
 		if (!id) id = FirstTarget(Parsed([&](JsonWriter& w) { replay_->State(eid, w); }));
 		if (!otherId) otherId = FirstTarget(Parsed([&](JsonWriter& w) { other.State(otherEid, w); }));
-		if (!id || !otherId) Fail("event %u or %u writes no render target: name the textures to compare (id, otherId)", eid, otherEid);
+		if (!id || !otherId) Fail("event %u or %u writes no render target, depth target or storage texture: name the textures to compare (id, otherId)", eid, otherEid);
 		auto request = [&](u64 texture, u32 at) {
 			JsonWriter w;
 			w.BeginObject().Uint("id", texture).Uint("eid", at).Uint("mip", params["mip"].Uint(0)).Uint("slice", params["slice"].Uint(0));

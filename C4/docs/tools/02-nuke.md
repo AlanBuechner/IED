@@ -68,7 +68,8 @@ both at the workspace root.
 
 - `projects.toml` (written into `<int>`; [../language/15-projects.md](../language/15-projects.md)) lists the
   program and every C4 module it depends on, directly or not: each one's `sources` (default `["src"]`),
-  `includes`, `defines` (plus `<CONFIG> = 1`, for example `DEVELOPMENT`, and `PROJECT_NAME`) and `depends`. So
+  `includes`, `defines` (plus `<CONFIG> = 1`, for example `DEVELOPMENT`, `PROJECT_NAME`, and `PROJECT_DIR`: the project's
+folder as a string literal, so a module finds its own files) and `depends`. So
   each module's files get its own defines, and a module cannot include or name anything of the project that
   depends on it. Every function is still visible to the optimizer across modules: the program is one compile.
 - The `links` of the program and of every module compiled into it (`"winmm.lib"`) become `-l` arguments; a
@@ -121,7 +122,7 @@ server for the workspace ([03-editor-lsp-dap.md](03-editor-lsp-dap.md#one-server
 | Key | Value |
 |---|---|
 | `includePaths` | the source and include folders of the program and its modules |
-| `defines` | the program's defines (with `<CONFIG>` and `PROJECT_NAME`) |
+| `defines` | the program's defines (with `<CONFIG>`, `PROJECT_NAME` and `PROJECT_DIR`) |
 | `c4Home` | the toolchain folder, whose Bedrock the server compiles with |
 | `toolchain` | the toolchain's version |
 | `projects` | the `projects.toml` of section 2 |

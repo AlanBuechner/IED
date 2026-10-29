@@ -134,6 +134,34 @@ class CppToolsTests(unittest.TestCase):
 		self.assertEqual(["CodeLLDB (vendor/llvm, vendor/codelldb)"], without["missing"], "what the checkout lacks is said")
 
 
+class GpuNativeTests(unittest.TestCase):
+	"""The GPU debugger's capture library and replayer go into its plugin's bin, where an installed IED looks for them,
+	and the mirror of plugins/ leaves them there."""
+
+	def test_the_gpu_plugin_gets_flashbang_and_keeps_it(self):
+		root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, root, True)
+		repo, bin_root, target = os.path.join(root, "repo"), os.path.join(root, "bin"), os.path.join(root, "IED")
+		for name in install_ied.GPU_NATIVE_FILES:
+			write(os.path.join(bin_root, "flashbang", name), name)
+		write(os.path.join(bin_root, "flashbang", "flashbang-tests.exe"), "not installed")
+		write(os.path.join(repo, "plugins", "gpu", "ied-plugin.json"), "{}")
+		done = dict(report(), missing=[])
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), done, keep=install_ied.KEPT_PLUGIN_FOLDERS)
+		install_ied.install_gpu_native(bin_root, target, done)
+		native = os.path.join(target, "plugins", "gpu", "bin")
+		self.assertEqual(sorted(install_ied.GPU_NATIVE_FILES), sorted(os.listdir(native)), "the library, its layer manifest and the replayer")
+		self.assertEqual([], done["missing"])
+		again = dict(report(), missing=[])
+		install_ied.mirror(os.path.join(repo, "plugins"), os.path.join(target, "plugins"), set(), again, keep=install_ied.KEPT_PLUGIN_FOLDERS)
+		install_ied.install_gpu_native(bin_root, target, again)
+		self.assertEqual((0, 0), (again["copied"], again["removed"]), "the next install leaves them as they are")
+		os.remove(os.path.join(bin_root, "flashbang", "flashbang-replay.exe"))
+		without = dict(report(), missing=[])
+		install_ied.install_gpu_native(bin_root, target, without)
+		self.assertEqual(["flashbang-replay.exe (nuke build flashbang)"], without["missing"], "what the build lacks is said")
+
+
 class RecordTests(unittest.TestCase):
 	def test_the_record_names_its_checkout(self):
 		root = tempfile.mkdtemp(prefix="ied-install-")

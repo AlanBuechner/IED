@@ -1,0 +1,14 @@
+// BUG-419: CBind gave an interface the GUID of its __declspec(uuid) only when the attribute sat right before the
+// definition; dxcapi.h puts it on a forward declaration made by a macro (CROSS_PLATFORM_UUIDOF), so __uuidof(IDxcUtils)
+// was a name-based GUID and DxcCreateInstance answered E_NOINTERFACE.
+extern "c++" include "forward.h"
+
+int32 main() {
+	_GUID* macro = __uuidof(IForwardMacro);
+	_GUID* written = __uuidof(IForwardWritten);
+	int32 failures = 0;
+	if (macro->Data1 != 0x4605c4cb || macro->Data2 != 0x2019 || macro->Data4[7] != 0x7f) { printf("FAIL CROSS_PLATFORM_UUIDOF\n"); failures++; }
+	if (written->Data1 != 0x228b4687 || written->Data3 != 0x4730 || written->Data4[0] != 0x90 || written->Data4[2] != 0x97) { printf("FAIL a forward __declspec(uuid)\n"); failures++; }
+	if (failures == 0) printf("BUG419 ok\n");
+	return failures;
+}

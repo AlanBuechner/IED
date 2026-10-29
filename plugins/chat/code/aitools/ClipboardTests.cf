@@ -73,6 +73,16 @@ class ClipboardTests {
 		assert_true(!Ai::CutClip(text, false, onlyTo, cut, error) && error.View() == "to \"a = 1\" is not in it", "within the lines given");
 	}
 
+	[test("copy_report_says_where_the_clip_ends")]
+	public static void TestCopyReport() {
+		Core::Array<Ai::Clip*> clips = Board();
+		Core::String lines = Ai::CopyReport(clips[0], clips[0]->m_Text.View(), Text("a.cf line 3"), false, Text(""));
+		assert_true(lines.View().StartsWith(Text("Copied 1 line (11 bytes) of a.cf line 3 to the clip block.")), lines.CStr());
+		assert_true(lines.View().Contains(Text("It ends with its last line's line break: write no \\n after it.")), "whole lines keep the last break, and it says so");
+		Core::String word = Ai::CopyReport(clips[1], clips[1]->m_Text.View(), Text("text"), false, Text(""));
+		assert_true(!word.View().Contains(Text("line break")), "a clip without a final break says nothing of it");
+	}
+
 	[test("paste_replaces_tokens")]
 	public static void TestPaste() {
 		Core::Array<Ai::Clip*> clips = Board();

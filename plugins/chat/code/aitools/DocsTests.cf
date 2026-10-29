@@ -32,6 +32,24 @@ class DocsTests {
 		assert_se("hashmap", words[2].CStr(), "a qualified name split at ::");
 	}
 
+	[test("closest_heading_for_a_guessed_name")]
+	public static void TestClosestHeading() {
+		Core::Array<Core::String> headings = { Core::String("Math::Mat3"), Core::String("Math::Mat4"), Core::String("Math::Quat"), Core::String("Core::HashMap") };
+		assert_eq((int64)1, Ai::ClosestHeading(headings, Core::StringView("Math::TMat4")), "a letter too many");
+		assert_eq((int64)3, Ai::ClosestHeading(headings, Core::StringView("core::hashmapp")), "case and a typo");
+		assert_eq((int64) - 1, Ai::ClosestHeading(headings, Core::StringView("Math::Mat")), "Mat3 and Mat4 as close: no guess");
+		assert_eq((int64) - 1, Ai::ClosestHeading(headings, Core::StringView("Threading::JobSystem")), "nothing near");
+	}
+
+	[test("a_workspace_page_is_sent_to_fs_read")]
+	public static void TestWorkspacePage() {
+		Core::String page = Ai::UnknownDocProblem(Core::StringView("docs/engine/rendering.md"), Core::StringView("- c4: C4"));
+		assert_true(page.View().Contains(Core::StringView("fs_read")), "a Markdown page of the workspace: fs_read reads it");
+		assert_true(page.View().Contains(Core::StringView("- c4: C4")), "with the docs names there are");
+		Core::String other = Ai::UnknownDocProblem(Core::StringView("nope/x"), Core::StringView("- c4: C4"));
+		assert_true(!other.View().Contains(Core::StringView("fs_read")), "another wrong path: only the docs names");
+	}
+
 	[test("scores")]
 	public static void TestScores() {
 		Core::Array<Core::String> words = Ai::QueryWords(Core::StringView("hashmap insert"));

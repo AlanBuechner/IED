@@ -111,6 +111,11 @@ float s = LaneSum4(q.wwww);    // repeated lanes read as a splat (w, w, w, w); a
 
 A run is a value computed for the current expression; it is not a separate object.
 
+A lane or a run has no address (`&v.x` is an error, section 3). Given to a `const T&` parameter (`Core::Format(&b, "{0}",
+v.z)`, `Sum(v.zx)`), it binds a copy of its value, as any value does; a mutable reference parameter, a reference local and
+a reference field cannot bind to it (`cannot bind 'z': a lane of a packed vector has no address`). (Until BUG-429 was
+fixed a reference bound to a lane named the vector's first lane.)
+
 ### 2.1 Arithmetic on runs
 
 **Status:** **Implemented**

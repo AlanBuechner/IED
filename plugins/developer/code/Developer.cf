@@ -26,7 +26,7 @@ namespace Developer
 		Core::StringBuilder text;
 		text.Append("# IED itself (developer mode)\n\nThis IED is built from its source checkout at ");
 		text.Append(source);
-		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); writes and commands there follow this chat's permission mode. ");
+		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run; program for program_run); writes and commands there follow this chat's permission mode. The git_* tools read only the workspace's repositories: for IED's checkout run git in shell_run with cwd ied:/ (git status --short, git diff -- <path>). ");
 		text.Append("The plugins' folders (plugins:/<plugin id>/: their skills, docs and manifests) are writable too: a write there goes to the plugin's folder in ied:/ (a built-in plugin's ied:/plugins/<name>/). The c4 plugin is built in (ied:/plugins/c4/), and a Nuke solution's is the toolchain's copy nuke build makes from it and ied:/C4/docs/: change those, then ied_rebuild. ");
 		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed. ");
 		text.Append("When the running IED needs the fix (its server, a plugin, the web client), ied_relaunch installs it and relaunches IED; this chat then continues on the new build.\n\n");
@@ -179,8 +179,8 @@ namespace Developer
 		return Core::String("[...]\n") + (line >= 0 ? tail.Substring(line + 1, tail.ByteLength() - line - 1) : tail);
 	}
 
-	// `nuke <verb>` in the source, its exit and the end of its output.
-	static IED::ToolResult Nuke(const char* verb) {
+	// `nuke <verb> [project]` in the source, its exit and the end of its output; an empty project: the default ones.
+	static IED::ToolResult Nuke(const char* verb, const char* project = "") {
 		IED::Workspace ws;
 		Core::String problem;
 		if (!SourceWorkspace(ws, problem)) return IED::ToolFailure(problem.View());
@@ -190,11 +190,15 @@ namespace Developer
 		argv.Push(Core::String("/c"));
 		argv.Push(Core::String((FS::Path(ws.m_Root.View()) / Core::StringView("nuke.bat")).View()));
 		argv.Push(Core::String(verb));
+		Core::String command = Core::String("nuke ") + verb;
+		if (project[0] != 0) {
+			argv.Push(Core::String(project));
+			command = (command + " ") + project;
+		}
 		IED::CommandResult ran = IED::RunCommand(ws, argv, Core::StringView(""), c_BuildSeconds);
-		if (!ran.m_Started || !ran.m_Problem.IsEmpty()) return IED::ToolFailure(((Core::String("nuke ") + verb) + ": " + ran.m_Problem.View()).View());
+		if (!ran.m_Started || !ran.m_Problem.IsEmpty()) return IED::ToolFailure((command + ": " + ran.m_Problem.View()).View());
 		Core::StringBuilder out;
-		out.Append("nuke ");
-		out.Append(verb);
+		out.Append(command.View());
 		out.Append(ran.m_ExitCode == 0 ? " succeeded" : " failed (exit ");
 		if (ran.m_ExitCode != 0) {
 			out.AppendInt(ran.m_ExitCode);
@@ -208,7 +212,12 @@ namespace Developer
 		return result;
 	}
 
-	IED::ToolResult RebuildTool(const IED::ToolCall& call) { return Nuke("build"); }
+	// The default projects (the C4 toolchain), then the server, which is none of them.
+	IED::ToolResult RebuildTool(const IED::ToolCall& call) {
+		IED::ToolResult toolchain = Nuke("build");
+		if (toolchain.m_IsError) return toolchain;
+		return Nuke("build", "ied-server");
+	}
 
 	IED::ToolResult GatesTool(const IED::ToolCall& call) { return Nuke("gates"); }
 

@@ -1,0 +1,26 @@
+// BUG-422: a static method called through an alias of a template instance (`alias IntBox = Box<int32>; IntBox::Size()`)
+// was "no function named IntBox::Size": the instance's methods are in its own scope, not under the alias's name.
+template<T> struct Box
+{
+	public static int32 Size() { return sizeof(T); }
+	public static int32 Twice(int32 v) { return v * 2; }
+	public static const int32 Kind = 3;
+	public int32 Own() { return Box::Size() + 100; }   // the injected name inside the body
+}
+template<...Ts> struct Pack { public static int64 Count() { return sizeof...(Ts); } }
+struct Plain { public static int32 Seven() { return 7; } }
+alias IntBox = Box<int32>;
+alias Same = Plain;
+alias Three = Pack<int8, int16, int32>;
+namespace Ns { alias LongBox = Box<int64>; }
+
+int32 main() {
+	Box<int32> box;
+	int32 through = IntBox::Size();
+	int32 twice = IntBox::Twice(21);
+	int32 nested = Ns::LongBox::Size();
+	int64 count = Three::Count();
+	printf("BUG422 direct=%d through=%d twice=%d plain=%d nested=%d count=%lld kind=%d own=%d\n", Box<int32>::Size(), through, twice, Same::Seven(), nested,
+		count, IntBox::Kind, box.Own());
+	return through == 4 && twice == 42 && Same::Seven() == 7 && nested == 8 && count == 3 && IntBox::Kind == 3 && box.Own() == 104 ? 0 : 1;
+}

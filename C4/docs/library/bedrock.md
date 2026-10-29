@@ -170,7 +170,8 @@ found in an eighth ([test suites 8](../tools/05-test-suites.md#8-benchmarks)). `
 
 `hash.ch` also has `Core::HashBytes(bytes, length)` (a 64-bit hash in the manner of wyhash: 16 bytes a step, 48 for
 long input, each pair of words folded through a 128-bit product, `Core::FoldedMultiply(a, b)`), `Core::HashInteger(uint64)`
-(the splitmix64 finalizer) and `Core::NextPowerOfTwo(int64)`. `sha1.ch` has the SHA-1 digest (FIPS 180-4) for
+(the splitmix64 finalizer), `Core::HashCombine(seed, value)` (a hash of several values: each value's hash mixed into
+the seed in turn, order counting) and `Core::NextPowerOfTwo(int64)`. `sha1.ch` has the SHA-1 digest (FIPS 180-4) for
 protocols that require it (the WebSocket handshake; not for anything that must resist a forger):
 `Core::Sha1(bytes, count)` or a `Core::Sha1Builder` fed in pieces (`Add`, then `Finish` once), giving a
 `Sha1Digest` (`bytes[20]`, `ToHex()`, `==`, `!=`).
@@ -854,7 +855,7 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 | Type | Meaning |
 |---|---|
 | `Atomic<T>` | one value of an integer, `bool`, enum, pointer or float type: `Load`, `Store`, `Exchange`, `CompareExchange(expected&, desired)`, `CompareExchangeWeak`, and for integers `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr`, `FetchXor`; each takes a `MemoryOrder` (default `SeqCst`). A copy is an atomic snapshot. |
-| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)`, `SetCurrentName(const char*)` (names the calling thread for debuggers, profilers and crash dumps; false when the system cannot) and `CurrentName()` (`""` when it has none). |
+| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)` (on a high-resolution timer of the thread's: it ends within about half a millisecond of its time, not on the system's 15.6 ms tick - a frame limiter can sleep), `SetCurrentName(const char*)` (names the calling thread for debuggers, profilers and crash dumps; false when the system cannot) and `CurrentName()` (`""` when it has none). |
 | `Mutex` | one word: free, locked, or locked with sleepers. `Lock` spins briefly, then parks; `TryLock`; `Unlock` wakes one sleeper only when there is one. Not copyable. |
 | `LockGuard` | locks a `Mutex` for its scope. |
 | `UnlockGuard` | lets go of a `Mutex` the thread holds for its scope and takes it back at the end, an exception's included: slow work inside a locked region that touches nothing the mutex guards. |
@@ -891,7 +892,14 @@ a thread C4 started is attached already.
   jobs that must finish this frame; `Background` is work that may take long (loading, decompression,
   pathfinding). A frame worker runs only frame work, `High` before `Normal`; a background worker runs
   background work, and frame work when it has none, so frame work has every worker but a long job holds only
-  background workers.
+  background workers. A `group` counts the job: `Submit` adds it to the group itself, so the caller never calls
+  `group.Add` for a submitted job (adding it too leaves `Wait` waiting forever).
+
+```c4
+Threading::WaitGroup group;
+for (int64 i = 0; i < parts; i++) jobs.Submit([i]() -> void { Work(i); }, Threading::JobPriority::Normal, &group);
+jobs.Wait(group);   // runs some of the parts itself
+```
 - `Wait(WaitGroup&)` helps: while the group is unfinished the waiting thread runs frame jobs itself (never a
   background one, whose length is unbounded), then spins briefly and parks. A frame job that waits on other
   frame jobs therefore never idles a worker.
@@ -914,9 +922,9 @@ script host: build it with --script-host`).
 
 | Type | Meaning |
 |---|---|
-| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open: no interface, another build's, or no `C4Script.dll` beside the program). `Compile(options)` compiles, links and loads a script; `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). `DebugScripts()` / `SetDebugScripts(bool)`: whether each script is linked into a DLL with a PDB, which debuggers read as any module's, instead of in memory (on at first when the program was built with `-g`; docs/runtime/04 section 6.4). Closed on delete. |
+| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open: no interface, another build's, or no `C4Script.dll` beside the program). `Compile(options)` compiles, links and loads a script; `Prepare(options)` compiles and links it without loading it (on any thread: `Script::Load()` loads it later, where nothing reads the reflection the load changes; docs/runtime/04 section 5.1); `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). `DebugScripts()` / `SetDebugScripts(bool)`: whether each script is linked into a DLL with a PDB, which debuggers read as any module's, instead of in memory (on at first when the program was built with `-g`; docs/runtime/04 section 6.4). Closed on delete. |
 | `ScriptOptions` | `name` (the script's name and reflection tag), `optimize` (`-O2`, default; false for `-O0`), `AddFile(path)`, `AddText(fileName, text)` (a file given whole; other files include it by that name), `Allow(projectOrPath)` (the host headers it may include; none: all), `Define("NAME=VALUE")`. |
-| `Script` | `Ok()`, `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Cached()` (linked from the host's cache), `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
+| `Script` | `Ok()`, `Prepared()` and `Load()` (a script `Host::Prepare` made), `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Cached()` (linked from the host's cache), `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
 | `Fault`, `Guard(fn, context, fault)` | runs any `fn(context)` under the structured-exception guard: false, with the fault's code, instruction and touched address, when a hardware fault stopped it. |
 
 ```c4

@@ -199,6 +199,8 @@ class Resolver:
 		for dependency in info.dependencies:
 			if dependency.local is not None:
 				continue        # a project of this package: it comes with it
+			if dependency.nuget is not None:
+				continue        # a NuGet package: installed by sync_nuget, not resolved here
 			target = self.repositories.get(dependency.url)
 			target_key = (target.key, target.line_of(dependency.path))
 			if target_key != key:

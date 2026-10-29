@@ -28,6 +28,9 @@ struct __C4sOptions
 [link("c4s_host_debug_scripts")] int32 c4s_host_debug_scripts(void* host, int32 on);
 [link("c4s_compile")] void* c4s_compile(void* host, __C4sOptions* options);
 [link("c4s_reload")] void* c4s_reload(void* host, void* old, __C4sOptions* options);
+[link("c4s_prepare")] void* c4s_prepare(void* host, __C4sOptions* options);
+[link("c4s_script_prepared")] int32 c4s_script_prepared(void* script);
+[link("c4s_script_load")] int32 c4s_script_load(void* script);
 [link("c4s_script_ok")] int32 c4s_script_ok(void* script);
 [link("c4s_script_diagnostics")] const char* c4s_script_diagnostics(void* script);
 [link("c4s_script_tag")] const char* c4s_script_tag(void* script);
@@ -91,6 +94,11 @@ namespace Scripting
 
 		// It compiled, linked and started, and no guarded call into it faulted.
 		public bool Ok() const { return c4s_script_ok(handle) != 0; }
+		// Host::Prepare compiled and linked it, and it waits for Load.
+		public bool Prepared() const { return c4s_script_prepared(handle) != 0; }
+		// Loads what Host::Prepare made (its reflection, roots and globals): false, with nothing of it loaded and the
+		// diagnostics saying why, when its globals' start fails or it is not prepared.
+		public bool Load() { return c4s_script_load(handle) != 0; }
 		public bool Faulted() const { return c4s_script_faulted(handle) != 0; }
 		public const char* Diagnostics() const { return c4s_script_diagnostics(handle); }
 		public const char* Tag() const { return c4s_script_tag(handle); }
@@ -155,6 +163,9 @@ namespace Scripting
 		public void SetDebugScripts(bool on) { c4s_host_debug_scripts(handle, on ? 1 : 0); }
 		// Compiles, links and loads a script; Ok() and Diagnostics() say how it went.
 		public Script* Compile(const ScriptOptions& options);
+		// Compile without the load (docs/runtime/04 section 5.1): Prepared() and Diagnostics() say how it went, and
+		// Script::Load loads it - compile on a worker, load where nothing reads the reflection a load changes.
+		public Script* Prepare(const ScriptOptions& options);
 		// Compiles `script`'s options again to replace it (docs/runtime/04 section 5): when the new one compiles, `script`
 		// unloads and the new one loads; when it does not, `script` stays loaded and the new one has the diagnostics.
 		public Script* Reload(Script* script);

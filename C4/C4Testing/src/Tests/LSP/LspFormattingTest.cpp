@@ -159,7 +159,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	void LspFormattingTest::TestCrlfLineEndingsNormalizedToLf()
+	void LspFormattingTest::TestCrlfFileFormatsKeepingItsBreaks()
 	{
 		std::string text = "void Run(){\r\n";
 		text += "     int x   = 1+2;\r\n"; // Windows line endings + messy indent/spacing
@@ -168,8 +168,9 @@ namespace Testing
 		auto edits = Features::Formatting::Format(text, {});
 		std::string out = Apply(text, edits);
 
-		TEST_ASSERT(out.find('\r') == std::string::npos); // no carriage returns survive: \r sits in the trailing-whitespace zone of every line
-		TEST_ASSERT(out == "void Run() {\n    int x = 1 + 2;\n}\n");
+		// The checkout's breaks are the platform's (.gitattributes): formatting fixes the code, never the breaks, which
+		// it could only change on the lines it touches.
+		TEST_ASSERT(out == "void Run() {\r\n    int x = 1 + 2;\r\n}\r\n");
 		TEST_PASSED();
 	}
 
@@ -209,6 +210,134 @@ namespace Testing
 		// generic delimiters (`Vector<u32>`); a lexer-only formatter cannot tell the two apart, so their spacing is
 		// preserved exactly as authored. `<=`/`>=` ARE unambiguous and do get spaced (see TestCompoundOperators).
 		TEST_ASSERT(Contains(out, "for (int32 i = 0; i<10; i = i + 1) {}"));
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestOperatorsAfterClosersAndParensAfterOperators()
+	{
+		std::string text = "bool Run() {\n";
+		text += "\tbool ok = Parse(uri, id) && id.View() == ws.Id();\n"; // already formatted: must not change
+		text += "\tproblem =(String(a) +uri) +\"tail\";\n";              // glued after a closer and before '(': spaced
+		text += "\tgrid[0]=-1;\n";                                           // binary '=' after ']', unary '-' after '='
+		text += "\ttry { Go(); } catch(Error& e) { return (ok); }\n";
+		text += "\treturn -x;\n}\n";
+		auto edits = Features::Formatting::Format(text, { 4, false });
+		std::string out = Apply(text, edits);
+
+		TEST_ASSERT(Contains(out, "bool ok = Parse(uri, id) && id.View() == ws.Id();"));
+		TEST_ASSERT(Contains(out, "problem = (String(a) + uri) + \"tail\";"));
+		TEST_ASSERT(Contains(out, "grid[0] = -1;"));
+		TEST_ASSERT(Contains(out, "catch (Error& e)"));
+		TEST_ASSERT(Contains(out, "return (ok);")); // a keyword's '(' is left as written
+		TEST_ASSERT(Contains(out, "return -x;"));   // unary after a keyword stays tight
+		TEST_ASSERT(Apply(out, Features::Formatting::Format(out, { 4, false })) == out); // idempotent
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestParenthesizedBodyAfterControlHeaderKeepsItsSpace()
+	{
+		std::string text = "void Run() {\n";
+		text += "\tif (ok) ((T*)p)->m = 1;\n";          // already right: must not change
+		text += "\twhile (n > 0)(*q)->Step();\n";        // glued: spaced
+		text += "\tfor (;;)((U*)r)->Go();\n";
+		text += "\tf(a)(b);\n}\n";                       // a call of a call stays tight
+		std::string out = Apply(text, Features::Formatting::Format(text, { 4, false }));
+		TEST_ASSERT(Contains(out, "if (ok) ((T*)p)->m = 1;"));
+		TEST_ASSERT(Contains(out, "while (n > 0) (*q)->Step();"));
+		TEST_ASSERT(Contains(out, "for (;;) ((U*)r)->Go();"));
+		TEST_ASSERT(Contains(out, "f(a)(b);"));
+		TEST_ASSERT(Apply(out, Features::Formatting::Format(out, { 4, false })) == out); // idempotent
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestGreaterThanBeforeParenIsNoTemplateCall()
+	{
+		std::string text = "bool Run() {\n";
+		text += "\tbool big = size > (uint64)Limit;\n";   // already right: must not change
+		text += "\tbool more = a >(b + 1);\n";            // glued after a spaced '>': spaced
+		text += "\tauto box = Make<Box>(2);\n";            // a template call stays tight
+		text += "\treturn big;\n}\n";
+		std::string out = Apply(text, Features::Formatting::Format(text, { 4, false }));
+		TEST_ASSERT(Contains(out, "bool big = size > (uint64)Limit;"));
+		TEST_ASSERT(Contains(out, "bool more = a > (b + 1);"));
+		TEST_ASSERT(Contains(out, "auto box = Make<Box>(2);"));
+		TEST_ASSERT(Apply(out, Features::Formatting::Format(out, { 4, false })) == out); // idempotent
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestCrlfBreaksAreKept()
+	{
+		std::string text = "// why\r\n";
+		text += "void Run() {  \r\n";          // trailing spaces go, the break stays
+		text += "\tint32 x = 1;\r\n";
+		text += "\t\t\r\n";                     // a blank line's indentation goes, the break stays
+		text += "\t// note\r\n}\r\n";
+		std::string out = Apply(text, Features::Formatting::Format(text, { 4, false }));
+		TEST_ASSERT(out == "// why\r\nvoid Run() {\r\n\tint32 x = 1;\r\n\r\n\t// note\r\n}\r\n");
+		TEST_ASSERT(Features::Formatting::Format(out, { 4, false }).empty()); // a formatted \r\n file is left as it is
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestLambdaReturnArrowKeepsItsSpaces()
+	{
+		std::string text = "void Run() {\n";
+		text += "\twalk.Run([files](Core::StringView path) -> bool { return true; });\n";
+		text += "\tauto f = [](int32 a)->Core::Array<int32>* { return nullptr; };\n";
+		text += "\tif (Get()->ok) { p->Next(); }\n}\n";
+		auto edits = Features::Formatting::Format(text, { 4, false });
+		std::string out = Apply(text, edits);
+
+		TEST_ASSERT(Contains(out, "(Core::StringView path) -> bool {"));      // kept
+		TEST_ASSERT(Contains(out, "(int32 a) -> Core::Array<int32>* {"));     // spaced
+		TEST_ASSERT(Contains(out, "if (Get()->ok) { p->Next(); }"));           // member access stays glued
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestBraceLessBodiesAndLambdasIndentOnce()
+	{
+		const std::string good =
+			"void Run()\n"
+			"{\n"
+			"\tfor (int32 t = 0; t < n; t++)\n"
+			"\t\tthreads[t] = Run([m]() {\n"
+			"\t\t\tGo(m);\n"
+			"\t\t});\n"
+			"\tif (a &&\n"
+			"\t\tb)\n"
+			"\t\tStop();\n"
+			"\telse if (c)\n"
+			"\t\tfor (x : xs)\n"
+			"\t\t\tif (x)\n"
+			"\t\t\t{\n"
+			"\t\t\t\tKeep(x);\n"
+			"\t\t\t}\n"
+			"\telse\n"
+			"\t\tDone();\n"
+			"\tworker = Run([&]() {\n"
+			"\t\tSay(1);\n"
+			"\t});\n"
+			"\tif (ok) {\n"
+			"\t\tSay(2);\n"
+			"\t} else {\n"
+			"\t\tSay(3);\n"
+			"\t}\n"
+			"\tcontext.Method(Name(\"a\"), [b]() -> int32 {\n" // BUG-418: a line closing part of what its opener left open
+			"\t\treturn 1;\n"
+			"\t}, problem);\n"
+			"\tif (Any([&]() {\n"
+			"\t\treturn ok;\n"
+			"\t}) && more) {\n"
+			"\t\tSay(4);\n"
+			"\t}\n"
+			"\tLast();\n"
+			"}\n";
+		TEST_ASSERT(Apply(good, Features::Formatting::Format(good, { 4, false })) == good); // already right: untouched
+
+		std::string flat; // the same text with every line's indentation taken away comes back as it was
+		for (size_t i = 0; i < good.size(); ++i)
+			if (good[i] != '\t')
+				flat += good[i];
+		TEST_ASSERT(Apply(flat, Features::Formatting::Format(flat, { 4, false })) == good);
 		TEST_PASSED();
 	}
 

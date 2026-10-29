@@ -147,7 +147,18 @@ class Session:
 		}
 		if with_output:
 			values["output"] = lambda: self.output(project) or _no_output(project)
+		for requirement in project.dependencies:
+			if requirement.nuget is not None:
+				values[f"nuget:{requirement.name}"] = lambda r=requirement: self._nuget_folder(r)
 		return (base or self.variables()).child(values)
+
+	def _nuget_folder(self, requirement):
+		"""${nuget:<entry name>}: the folder a NuGet package of the project's [dependencies] is installed in."""
+		folder = self.workspace.nuget.get(requirement.nuget.lower())
+		if folder is None:
+			raise NukeError(f"{requirement.origin}: NuGet package {requirement.nuget} is not installed (a package command "
+				f"that loads the workspace installs it)")
+		return folder
 
 	def _language_variable(self, name):
 		"""${<language>.<name>}: a value the language's driver gives (variables(ctx)); KeyError when none does."""

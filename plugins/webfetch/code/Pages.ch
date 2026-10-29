@@ -10,7 +10,7 @@ namespace WebFetch
 	const int64 c_KeptNs = 600000000000;
 	const int64 c_ErrorChars = 2000;
 
-	enum class PageKind { Html, Text, Other }
+	enum class PageKind { Html, Text, Pdf, Other }
 
 	struct FetchedPage
 	{
@@ -31,6 +31,8 @@ namespace WebFetch
 	// The body as UTF-8: read as Windows-1252 when it says it is Latin-1 or Windows-1252 (in its type or a <meta>), or
 	// says nothing and is not UTF-8.
 	Core::String AsUtf8(Core::StringView body, Core::StringView contentType);
+	// Windows-1252's character for a byte of 0x80-0x9F (the byte itself where it has none: kept as the C1 control).
+	int32 Cp1252High(int32 byte);
 	// Whether the page is a bot check (Cloudflare's "Just a moment...", a CAPTCHA) rather than what was asked for.
 	bool IsBotCheck(const FetchedPage& page);
 	// What the model reads: the page's header, characters [start, start + count) of its text, and how to read on.

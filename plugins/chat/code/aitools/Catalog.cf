@@ -41,7 +41,7 @@ namespace Ai
 		AddRunTool(*registry, "ask_user", "Ask the owner a question and wait for the answer; only for decisions that are theirs or when you are blocked. Example: ask_user({\"question\": \"Keep the old API?\", \"options\": [\"Keep it\", \"Remove it\"]})",
 			"{\"type\": \"object\", \"properties\": {\"question\": {\"type\": \"string\", \"minLength\": 1}, \"options\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"allow_text\": {\"type\": \"boolean\"}}, \"required\": [\"question\"], \"additionalProperties\": false}",
 			true, false);
-		AddRunTool(*registry, "finish", "End the turn: what was done and how it was verified (build and tests run, results seen). Only call it when the work is complete and verified. Example: finish({\"summary\": \"Ported Log\", \"verification\": \"build: 0 warnings; the log tests pass\"})",
+		AddRunTool(*registry, "finish", "End the turn: what was done and how it was verified (build and tests run, results seen). Only call it when the work is complete and verified, and every task of tasks_set is done or skipped (task_update first: finish refuses open tasks). Example: finish({\"summary\": \"Ported Log\", \"verification\": \"build: 0 warnings; the log tests pass\"})",
 			"{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"minLength\": 1}, \"verification\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"summary\", \"verification\"], \"additionalProperties\": false}",
 			false, true);
 		return registry;

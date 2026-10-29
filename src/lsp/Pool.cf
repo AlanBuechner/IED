@@ -131,10 +131,25 @@ namespace Ied
 		throw RpcError(ErrorCode::Unavailable, why.View());
 	}
 
+	// Just after IED starts, plugin code that computes language server profiles (the c4 plugin's) may still compile: a
+	// request for a file no profile serves yet waits for the code to start, the lock released, then looks again.
+	bool LspPool::AwaitPluginCode(Call& call) {
+		if (!m_Server->m_Code || !m_Server->m_Code->Starting()) return false;
+		const int64 deadline = clock_now_ns() + c_LspStartTimeoutMs * 1000000;
+		while (m_Server->m_Code->Starting() && !call.m_Cancel->IsCancelled() && clock_now_ns() < deadline) call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_LspIndexSliceNs);
+		if (call.m_Cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		return true;
+	}
+
+	Core::String NoServerMessage(Core::StringView path) {
+		return (Core::String("no language server serves ") + path) + ": read it with fs_read, or find a name in it with search_text";
+	}
+
 	// The server serving `doc`, running and with the document open; throws not_found or unavailable.
 	LanguageServer* LspPool::Ready(Call& call, Document* doc) {
 		LanguageServer* language = Serving(doc, true);
-		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + doc->m_Path.View()).View());
+		if (!language && AwaitPluginCode(call)) language = Serving(doc, true);
+		if (!language) throw RpcError(ErrorCode::NotFound, NoServerMessage(doc->m_Path.View()).View());
 		AwaitServer(call, language);
 		OpenOn(language, doc);
 		return language;
@@ -144,7 +159,8 @@ namespace Ied
 
 	LanguageServer* LspPool::ReadyFor(Call& call, Workspace* ws, Core::StringView path) {
 		LanguageServer* language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
-		if (!language) throw RpcError(ErrorCode::NotFound, (Core::String("no language server serves ") + path).View());
+		if (!language && AwaitPluginCode(call)) language = IsFileUri(path) ? NamerServing(ws, path, true) : ServingPath(ws, path, true);
+		if (!language) throw RpcError(ErrorCode::NotFound, NoServerMessage(path).View());
 		AwaitServer(call, language);
 		Document* doc = m_Server->m_Documents->Find(ws, path);
 		if (doc) OpenOn(language, doc);
@@ -212,11 +228,29 @@ namespace Ied
 		return -1;
 	}
 
+	static void SendClose(LanguageServer* language, Workspace* ws, Core::StringView path) {
+		if (language->m_State == LspState::Running) language->Notify(Core::StringView("textDocument/didClose"), TextDocumentJson(ServerUriOf(ws, path).View()).View());
+	}
+
 	static void CloseTransient(LanguageServer* language, Workspace* ws, int64 index) {
 		TransientFile* file = language->m_Transient[index];
 		language->m_Transient.RemoveAt(index);
 		language->m_Documents.Remove(file->m_Path);
-		if (language->m_State == LspState::Running) language->Notify(Core::StringView("textDocument/didClose"), TextDocumentJson(ServerUriOf(ws, file->m_Path.View()).View()).View());
+		SendClose(language, ws, file->m_Path.View());
+	}
+
+	Core::Array<EvictedFile> EvictTransients(LanguageServer* language, int64 most) {
+		Core::Array<EvictedFile> evicted;
+		while (language->m_Transient.Count() > most) {
+			EvictedFile file;
+			file.m_Path = language->m_Transient[0]->m_Path;
+			file.m_HadDiagnostics = language->m_Published.Contains(file.m_Path);
+			language->m_Transient.RemoveAt(0);
+			language->m_Documents.Remove(file.m_Path);
+			language->m_Published.Remove(file.m_Path);
+			evicted.Push(file);
+		}
+		return evicted;
 	}
 
 	void LspPool::OpenOn(LanguageServer* language, Document* doc) {
@@ -254,7 +288,10 @@ namespace Ied
 		language->m_Transient.Push(file);
 		language->m_Documents.Insert(file->m_Path, true);
 		SendOpen(language, ServerUriOf(ws, path).View(), m_Server->m_Plugins->LanguageOf(ws, path).View(), file->m_Version, text.View());
-		while (language->m_Transient.Count() > c_LspTransientMost) CloseTransient(language, ws, 0);
+		for (const EvictedFile& evicted : EvictTransients(language, c_LspTransientMost)) {
+			SendClose(language, ws, evicted.m_Path.View());
+			if (evicted.m_HadDiagnostics) m_Server->m_Diagnostics->Set(ws, evicted.m_Path.View(), language->Source().View(), Core::StringView("[]"));
+		}
 	}
 
 	// The servers that have `doc` open.

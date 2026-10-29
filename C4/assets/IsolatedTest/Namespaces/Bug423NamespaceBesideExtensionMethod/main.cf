@@ -1,0 +1,37 @@
+// BUG-423: an extension method is a member of the type it extends, so a namespace may have its name. A COM interface's
+// method bound from a C++ header (IPicture::Render) used to take the global name `Render`, refusing a project's
+// `namespace Render` ("redefinition of namespace 'Render': it is already a function"); a C4 extension method did the same.
+// Methods of a number's type are found through the number (`x.Bump()`), and a free function still beside them.
+include "parts.ch"
+
+namespace Draw
+{
+	int32 Twice(int32 v) { return v * 2; }
+}
+
+namespace Render
+{
+	int32 Thrice(int32 v) { return v * 3; }
+}
+
+// The extension method declared in parts.ch, defined here: the two still make one function.
+int32 Draw() extends Box { return this.v + 1; }
+
+float Bump() extends float { return *this + 3.0f; }
+int32 Bump() extends int32 { return *this + 4; }
+int32 Bump(int32 v) { return v + 100; }
+
+int32 main() {
+	Box box;
+	box.v = 4;
+	if (box.Draw() != 5) return 1;
+	if (Draw::Twice(4) != 8) return 2;
+	if (Render::Thrice(2) != 6) return 3;
+	if (box.Doubled() != 8) return 4;
+	float f = 1.0f;
+	int32 i = 1;
+	if (f.Bump() != 4.0f || i.Bump() != 5) return 5;
+	if (Bump(1) != 101) return 6;
+	printf("NAMESPACE BESIDE EXTENSION METHOD OK\n");
+	return 0;
+}

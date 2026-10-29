@@ -21,16 +21,74 @@ namespace fb::replay::d3d12
 
 	static bool Readable(D3D12_RESOURCE_STATES state) { return (state & D3D12_RESOURCE_STATE_COPY_SOURCE) != 0; }
 
+	// Whether ResolveSubresource can average a multisampled texture of `format` (float and normalized color formats; not
+	// depth, stencil or integers).
+	static bool Resolvable(DXGI_FORMAT format) {
+		const FormatInfo* info = DxgiFormat(DxgiDefaultView(format));
+		if (!info || info->depth || info->stencil || IsBlock(info->codec)) return false;
+		return info->component == Component::Float || info->component == Component::UNorm || info->component == Component::SNorm || info->component == Component::Srgb;
+	}
+
+	static void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource, u32 subresource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+		if (before == after) return;
+		D3D12_RESOURCE_BARRIER barrier = {};
+		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrier.Transition.pResource = resource;
+		barrier.Transition.Subresource = subresource;
+		barrier.Transition.StateBefore = before;
+		barrier.Transition.StateAfter = after;
+		list->ResourceBarrier(1, &barrier);
+	}
+
+	// A multisampled color subresource averaged into a new single-sampled texture of one mip and slice, left in
+	// COPY_SOURCE for reading back; `single` gets its description.
+	static ID3D12Resource* ResolveForReading(ReplayDevice& device, ID3D12Resource* resource, const D3D12_RESOURCE_DESC desc, u32 subresource,
+		D3D12_RESOURCE_STATES state, D3D12_RESOURCE_DESC& single) {
+		single = desc;
+		const u32 mip = subresource % desc.MipLevels;
+		single.Width = std::max<u64>(desc.Width >> mip, 1);
+		single.Height = std::max<u32>(desc.Height >> mip, 1);
+		single.DepthOrArraySize = 1;
+		single.MipLevels = 1;
+		single.SampleDesc = {1, 0};
+		single.Alignment = 0;
+		single.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		single.Flags = D3D12_RESOURCE_FLAG_NONE;
+		single.Format = DxgiDefaultView(desc.Format);
+		D3D12_HEAP_PROPERTIES heap = {D3D12_HEAP_TYPE_DEFAULT};
+		ID3D12Resource* resolved = nullptr;
+		if (FAILED(device.Device()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &single, D3D12_RESOURCE_STATE_RESOLVE_DEST, nullptr, __uuidof(ID3D12Resource), (void**)&resolved)))
+			Fail("not enough memory to resolve the multisampled texture");
+		ID3D12GraphicsCommandList* list = device.BeginUtility();
+		Transition(list, resource, subresource, state, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+		list->ResolveSubresource(resolved, 0, resource, subresource, single.Format);
+		Transition(list, resource, subresource, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, state);
+		Transition(list, resolved, 0, D3D12_RESOURCE_STATE_RESOLVE_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		device.RunUtility();
+		return resolved;
+	}
+
 	const Readback& D3D12Replay::Read(u32 eid, u64 id, u32 subresource) {
 		if (last_.valid && last_.eid == eid && last_.id == id && last_.subresource == subresource) return last_;
 		ReplayDevice& device = Device();
 		ID3D12Resource* resource = device.Resource(id);
 		if (!resource) Fail("resource %s is not in the replay", model_.NameOf(id).c_str());
-		const D3D12_RESOURCE_DESC desc = resource->GetDesc();
-		if (desc.SampleDesc.Count > 1) Fail("multisampled textures cannot be read yet");
+		D3D12_RESOURCE_DESC desc = resource->GetDesc();
+		const bool multisampled = desc.SampleDesc.Count > 1;
+		if (multisampled && !Resolvable(desc.Format))
+			Fail("multisampled %s textures cannot be read yet (only color formats are resolved for reading); read the program's own resolved copy",
+				DxgiFormatName(desc.Format) ? DxgiFormatName(desc.Format) : "depth or integer");
 		if (replayedTo_ != eid) {
 			device.ReplayTo(eid);
 			replayedTo_ = eid;
+		}
+		// A multisampled texture is read through its average, one sample per pixel.
+		const u32 asked = subresource;
+		ID3D12Resource* resolved = nullptr;
+		if (multisampled) {
+			resolved = ResolveForReading(device, resource, desc, subresource, device.StateOf(id, subresource), desc);
+			resource = resolved;
+			subresource = 0;
 		}
 		last_ = Readback();
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -44,7 +102,7 @@ namespace fb::replay::d3d12
 		else device.Device()->GetCopyableFootprints(&desc, subresource, 1, 0, &footprint, &rows, &rowBytes, &total);
 		ID3D12Resource* readback = MakeReadback(device.Device(), total);
 		ID3D12GraphicsCommandList* list = device.BeginUtility();
-		const D3D12_RESOURCE_STATES state = device.StateOf(id, subresource);
+		const D3D12_RESOURCE_STATES state = multisampled ? D3D12_RESOURCE_STATE_COPY_SOURCE : device.StateOf(id, subresource);
 		D3D12_RESOURCE_BARRIER barrier = {};
 		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 		barrier.Transition.pResource = resource;
@@ -70,6 +128,7 @@ namespace fb::replay::d3d12
 			list->ResourceBarrier(1, &barrier);
 		}
 		device.RunUtility();
+		if (resolved) resolved->Release();
 		u8* mapped = nullptr;
 		const D3D12_RANGE read = {0, (SIZE_T)total};
 		if (FAILED(readback->Map(0, &read, (void**)&mapped))) {
@@ -82,7 +141,7 @@ namespace fb::replay::d3d12
 		readback->Release();
 		last_.eid = eid;
 		last_.id = id;
-		last_.subresource = subresource;
+		last_.subresource = asked;
 		last_.footprint = footprint.Footprint;
 		last_.rows = rows;
 		last_.valid = true;

@@ -97,6 +97,10 @@ for the main executable). The tag is the unit of hot reload.
   behind removes only that one. Registering again under the same tag replaces its own registration in place.
   So two scripts that make the same template instance keep each other's entry, and a script never takes away
   a type its host registered. `UnloadSource` counts the entries the tag held in front.
+- **Generation.** `c4_reflect_generation()` (Bedrock: `Reflection::Generation()`) changes with every registration
+  and every removal. A handle is refilled in place when its identity registers again, so what it says (a type's size,
+  its fields' offsets) can change under a cache that read it: the cache keeps the generation it read under and reads
+  again when it differs.
 - **Unload listeners.** `Reflection::OnUnload(tag, listener, user)` registers
   `funcptr<void(const char* tag, void* user)>` for one tag, or for every tag with `""`, and returns an id
   for `Reflection::RemoveUnloadListener(id)`. A listener may add or remove listeners; it is the place to

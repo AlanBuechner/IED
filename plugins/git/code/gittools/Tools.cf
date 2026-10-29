@@ -53,6 +53,8 @@ namespace Git
 		Core::String folder = ToolPath(asked);
 		for (GitRepo* repo : found->m_Repos)
 			if (PlaceOf(repo).m_Folder == folder) return repo;
+		if (asked.StartsWith(Core::StringView("ied:/")))
+			throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("IED's checkout (ied:/) is no repository of this workspace; read its history with shell_run git, cwd ied:/; the workspace's are: ") + RepoNames(found).View()).View());
 		throw IED::RpcError(IED::ErrorCode::NotFound, (((Core::String("no repository at '") + asked) + "'; the workspace's are: ") + RepoNames(found).View()).View());
 	}
 

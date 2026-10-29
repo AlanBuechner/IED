@@ -108,6 +108,18 @@ extern "C"
 		return result;
 	}
 
+	c4s_script* c4s_prepare(c4s_host* host, const c4s_options* options)
+	{
+		auto* result = new c4s_script();
+		result->tag = options && options->name ? options->name : "script";
+		if (host && options) result->script = host->host->Prepare(OptionsOf(*options));
+		return result;
+	}
+
+	int32_t c4s_script_prepared(const c4s_script* script) { return script && script->script && script->script->Prepared() ? 1 : 0; }
+
+	int32_t c4s_script_load(c4s_script* script) { return script && script->script && script->script->LoadPrepared() ? 1 : 0; }
+
 	c4s_script* c4s_reload(c4s_host* host, c4s_script* old, const c4s_options* options)
 	{
 		if (!old || !old->script) return c4s_compile(host, options);

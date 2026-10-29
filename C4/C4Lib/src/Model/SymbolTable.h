@@ -139,6 +139,9 @@ namespace Scripting
 		bool isThreadLocal = false;
 		// The scope this symbol is registered in: a constant's initializer is folded there.
 		const Scope* declaringScope = nullptr;
+		// Units whose C bindings declare it again, the same (two projects binding one header, BUG-420): each sees and
+		// reaches it as its own. Last, so positional initializers of the fields above stay as they are.
+		Core::Vector<uint32> repeatedIn;
 		bool IsPack() const { return packElements != nullptr; }
 		/// A variable stored in a function's frame (a slot or a capture), as opposed to a type, a constant or a
 		/// function bound in a lowering layer.
@@ -222,6 +225,13 @@ namespace Scripting
 		std::unique_ptr<Symbols> m_Symbols;
 		Core::Vector<std::unique_ptr<Scope>> m_Children;
 	};
+
+	/// The name an extension method is registered under in its scope. It is a member of the type it extends (found
+	/// through that type's methods), so it must not take a name a namespace, type or free function of the scope can
+	/// have: a bound COM interface's `Render` method beside a project's `namespace Render` (BUG-423). The space keeps it
+	/// apart from every identifier.
+	inline Core::String ExtensionMethodKey(const Core::String& name) { return "extends " + name; }
+	inline bool IsExtensionMethodKey(const Core::String& key) { return key.rfind("extends ", 0) == 0; }
 
 	/// The namespaces and classes enclosing `scope` (itself included), outermost first.
 	inline Core::Vector<Core::String> EnclosingNames(const Scope* scope)

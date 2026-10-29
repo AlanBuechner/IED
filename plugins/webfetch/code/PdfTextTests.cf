@@ -1,0 +1,114 @@
+// webfetch's PDFs: glyph names, text strings, and whole files - a simple font with an encoding's differences, compressed
+// content and TJ spacing; a composite font with a ToUnicode CMap and widths, packed in an object stream.
+
+include "PdfText.ch"
+
+static void SameText(const char* expected, Core::StringView actual) {
+	Core::String text = Core::String(actual);
+	assert_se(expected, text.CStr(), "extracted text");
+}
+
+static void AppendBytes(Core::StringBuilder& out, const Core::Array<uint8>& bytes) {
+	out.Append(Core::StringView((const char*)(const void*)bytes.Data(), bytes.Count()));
+}
+
+// "N 0 obj <dictionary> stream ... endstream endobj" with `content` compressed (FlateDecode) or as it is.
+static void AppendStreamObject(Core::StringBuilder& out, int32 number, Core::StringView extra, Core::StringView content, bool compress) {
+	Core::Array<uint8> data;
+	if (compress) Compression::ZlibCompress((const uint8*)(const void*)content.Data(), content.ByteLength(), 6, data);
+	else
+		for (int64 i = 0; i < content.ByteLength(); ++i) data.Push((uint8)content.ByteAt(i));
+	Core::Format(&out, "{0} 0 obj\n<< /Length {1} {2}{3} >>\nstream\n", number, data.Count(), compress ? "/Filter /FlateDecode " : "", extra);
+	AppendBytes(out, data);
+	out.Append("\nendstream\nendobj\n");
+}
+
+[test("server.webfetch.pdf")]
+class WebFetchPdfTests {
+	[test("glyph_names")]
+	public static void TestGlyphNames() {
+		SameText("a", WebFetch::GlyphText(Core::StringView("a")).View());
+		SameText("\xE2\x80\x99", WebFetch::GlyphText(Core::StringView("quoteright")).View());
+		SameText("e\xCC\x81", WebFetch::GlyphText(Core::StringView("eacute")).View());
+		SameText("\xC3\xA9", WebFetch::GlyphText(Core::StringView("uni00E9")).View());
+		SameText("ffi", WebFetch::GlyphText(Core::StringView("f_f_i")).View());
+		SameText("fi", WebFetch::GlyphText(Core::StringView("fi")).View());
+		SameText("a", WebFetch::GlyphText(Core::StringView("a.sc")).View());
+		SameText("\xC3\x86", WebFetch::GlyphText(Core::StringView("AE")).View());
+		SameText("\xCE\xB1", WebFetch::GlyphText(Core::StringView("alpha")).View());
+		SameText("", WebFetch::GlyphText(Core::StringView("g31")).View());
+		SameText("", WebFetch::GlyphText(Core::StringView(".notdef")).View());
+	}
+
+	[test("text_strings")]
+	public static void TestTextStrings() {
+		SameText("Moments", WebFetch::PdfTextString(Core::StringView("Moments")).View());
+		SameText("T\xC3\xA9", WebFetch::PdfTextString(Core::StringView("\xFE\xFF\x00T\x00\xE9", 6)).View());
+		SameText("\xE2\x80\x9C", WebFetch::PdfTextString(Core::StringView("\x93")).View());
+	}
+
+	[test("a_simple_font_compressed_content_and_spacing")]
+	public static void TestSimpleFont() {
+		Core::StringBuilder pdf;
+		pdf.Append("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+		pdf.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+		pdf.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources << /Font << /F1 4 0 R >> >> >>\nendobj\n");
+		pdf.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents [5 0 R 6 0 R] >>\nendobj\n");
+		pdf.Append("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding << /Differences [ 2 /fi ] >> >>\nendobj\n");
+		AppendStreamObject(pdf, 5, Core::StringView(""), Core::StringView("BT /F1 12 Tf 72 700 Td (Moment \\002ltering \\(4MSM\\)) Tj 0 -14 Td [(Shadow) -333 (Ma) -20 (ps)] TJ ET"), true);
+		AppendStreamObject(pdf, 6, Core::StringView(""), Core::StringView("BT /F1 12 Tf 72 600 Td (Next paragraph) Tj ET"), false);
+		pdf.Append("7 0 obj\n<< /Title (Moment Shadow Mapping) >>\nendobj\n");
+		pdf.Append("trailer\n<< /Size 8 /Root 1 0 R /Info 7 0 R >>\n%%EOF\n");
+		Core::String text;
+		Core::String title;
+		Core::String error;
+		assert_true(WebFetch::PdfToText(pdf.View(), text, title, error), error.CStr());
+		SameText("[Page 1]\nMoment filtering (4MSM)\nShadow Maps\n\nNext paragraph", text.View());
+		SameText("Moment Shadow Mapping", title.View());
+	}
+
+	[test("a_composite_font_with_a_tounicode_cmap_in_an_object_stream")]
+	public static void TestCompositeFont() {
+		Core::StringView font = Core::StringView("<< /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [8 0 R] /ToUnicode 6 0 R >>");
+		Core::StringView cid = Core::StringView("<< /Type /Font /Subtype /CIDFontType2 /DW 1000 /W [1 [500 600] 3 4 250] >>");
+		Core::StringBuilder packed;
+		Core::Format(&packed, "4 0 8 {0} ", font.ByteLength() + 1);
+		const int64 first = packed.ByteLength();
+		packed.Append(font);
+		packed.Append(" ");
+		packed.Append(cid);
+		Core::StringBuilder extra;
+		Core::Format(&extra, "/Type /ObjStm /N 2 /First {0}", first);
+
+		Core::StringBuilder pdf;
+		pdf.Append("%PDF-1.5\n");
+		pdf.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+		pdf.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+		pdf.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F2 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
+		AppendStreamObject(pdf, 5, Core::StringView(""), Core::StringView("BT /F2 10 Tf 1 0 0 1 50 500 Tm <0001000200030004> Tj <0003> Tj 30 0 Td <0004> Tj ET"), true);
+		AppendStreamObject(pdf, 6, Core::StringView(""), Core::StringView("/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+			"1 begincodespacerange <0000> <FFFF> endcodespacerange\n2 beginbfchar <0001> <0048> <0002> <00E9> endbfchar\n"
+			"1 beginbfrange <0003> <0004> <0061> endbfrange\nendcmap CMapName currentdict /CMap defineresource pop end end"), false);
+		AppendStreamObject(pdf, 7, extra.View(), packed.View(), true);
+		pdf.Append("9 0 obj\n<< /Title <FEFF0054> >>\nendobj\n");
+		pdf.Append("trailer\n<< /Root 1 0 R /Info 9 0 R >>\n%%EOF\n");
+		Core::String text;
+		Core::String title;
+		Core::String error;
+		assert_true(WebFetch::PdfToText(pdf.View(), text, title, error), error.CStr());
+		// Widths 500, 600, 250, 250 of 10 units: the second run starts where the first ended; the Td jumps 30 past it.
+		SameText("[Page 1]\nH\xC3\xA9" "ab" "a b", text.View());
+		SameText("T", title.View());
+	}
+
+	[test("not_a_pdf_and_encrypted")]
+	public static void TestRefusals() {
+		Core::String text;
+		Core::String title;
+		Core::String error;
+		assert_true(!WebFetch::PdfToText(Core::StringView("<html></html>"), text, title, error), "no header");
+		assert_true(error.View().Contains(Core::StringView("not a PDF")), error.CStr());
+		assert_true(!WebFetch::PdfToText(Core::StringView("%PDF-1.4\n1 0 obj\n<< >>\nendobj\ntrailer\n<< /Root 1 0 R /Encrypt 2 0 R >>\n"), text, title, error), "encrypted");
+		assert_true(error.View().Contains(Core::StringView("encrypted")), error.CStr());
+	}
+}

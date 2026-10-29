@@ -252,13 +252,21 @@ namespace Ai
 		return nullptr;
 	}
 
+	Core::String UnknownDocProblem(Core::StringView path, Core::StringView index) {
+		Core::String problem = Core::String("docs_read: no reference doc ") + path + "; paths start with a docs name (" + index + "), as docs_search gives them";
+		// A workspace's own page (docs/engine/rendering.md) is no reference doc: say which tool reads it.
+		if (path.EndsWith(Core::StringView(".md")) || path.EndsWith(Core::StringView(".txt")))
+			problem += ". A file of the workspace (or ied:/...) is read with fs_read; docs_read reads only the languages' and libraries' reference docs";
+		return problem;
+	}
+
 	// The file `path` ("<id>/<path in the folder>") names; null with `problem` when it names none.
 	static DocFile* DocAt(const Core::Array<DocsFolder*>& folders, Core::StringView path, Core::String& problem) {
 		const int64 slash = path.IndexOf('/', 0);
 		DocsFolder* docs = slash > 0 ? FolderNamed(folders, path.Substring(0, slash)) : nullptr;
 		Core::StringView inside = slash > 0 ? path.Substring(slash + 1, path.ByteLength() - slash - 1) : Core::StringView("");
 		if (!docs || inside.IsEmpty() || inside.Contains(Core::StringView(".."))) {
-			problem = Core::String("docs_read: no reference doc ") + path + "; paths start with a docs name (" + DocsIndex(folders).View().Trimmed() + "), as docs_search gives them";
+			problem = UnknownDocProblem(path, DocsIndex(folders).View().Trimmed());
 			return nullptr;
 		}
 		DocFile* doc = ReadDocFile(docs->m_Folder / inside, path);
@@ -290,18 +298,89 @@ namespace Ai
 		return out.ToString();
 	}
 
-	static bool FindSection(const DocFile* doc, const Serialization::DomNode& args, DocSection& found) {
-		Core::String wanted = DocsLowered(args.Member("heading").AsView().Trimmed());
-		const int64 line = args.Member("line").IsValid() ? args.Member("line").AsInt() : 0;
-		for (const DocSection& section : SplitSections(doc->m_Text.View(), doc->m_Path.View())) {
-			const bool named = !wanted.IsEmpty() && DocsLowered(section.m_Heading.View()).View().Contains(wanted.View());
-			const bool holds = line > 0 && line >= section.m_First && line <= section.m_Last;
-			if (named || holds) {
-				found = section;
-				return true;
+	// How well a heading names what was asked: 3 it is the text, 2 it holds it as a whole name ("FS::Change" in
+	// "`FS::Change` (watch.ch)", not in "FS::ChangeKind"), 1 it holds it at all, 0 not.
+	static int32 HeadingMatch(Core::StringView heading, Core::StringView wanted) {
+		Core::String lowered = DocsLowered(heading.Trimmed());
+		if (lowered.View() == wanted) return 3;
+		int32 best = 0;
+		int64 at = lowered.View().IndexOf(wanted, 0);
+		while (at >= 0) {
+			const int64 end = at + wanted.ByteLength();
+			const bool startsName = at == 0 || !IsWordByte(lowered.View().ByteAt(at - 1));
+			const bool endsName = end >= lowered.ByteLength() || !IsWordByte(lowered.View().ByteAt(end));
+			best = startsName && endsName ? 2 : best > 1 ? best : 1;
+			at = lowered.View().IndexOf(wanted, at + 1);
+		}
+		return best;
+	}
+
+	static int64 EditDistance(Core::StringView a, Core::StringView b) {
+		Core::Array<int64> row;
+		row.Resize(b.ByteLength() + 1);
+		for (int64 j = 0; j <= b.ByteLength(); ++j) row[j] = j;
+		for (int64 i = 1; i <= a.ByteLength(); ++i) {
+			int64 diagonal = row[0];
+			row[0] = i;
+			for (int64 j = 1; j <= b.ByteLength(); ++j) {
+				const int64 above = row[j];
+				const int64 replace = diagonal + (a.ByteAt(i - 1) == b.ByteAt(j - 1) ? 0 : 1);
+				const int64 insert = row[j - 1] + 1;
+				const int64 remove = above + 1;
+				row[j] = replace < insert ? (replace < remove ? replace : remove) : (insert < remove ? insert : remove);
+				diagonal = above;
 			}
 		}
-		return false;
+		return row[b.ByteLength()];
+	}
+
+	int64 ClosestHeading(const Core::Array<Core::String>& headings, Core::StringView wanted) {
+		Core::String lowered = DocsLowered(wanted.Trimmed());
+		if (lowered.IsEmpty()) return -1;
+		const int64 allowed = lowered.ByteLength() / 4 > 2 ? lowered.ByteLength() / 4 : 2;
+		int64 best = -1;
+		int64 bestDistance = allowed + 1;
+		bool tied = false;
+		for (int64 i = 0; i < headings.Count(); ++i) {
+			const int64 distance = EditDistance(DocsLowered(headings[i].View().Trimmed()).View(), lowered.View());
+			if (distance < bestDistance) {
+				best = i;
+				bestDistance = distance;
+				tied = false;
+			}
+			else if (distance == bestDistance) tied = true;
+		}
+		return tied ? -1 : best;
+	}
+
+	// The section the heading names best (the first of the best), else the one holding the line, else the one whose
+	// heading is closest to the one asked for (`guessed` then says so).
+	static bool FindSection(const DocFile* doc, const Serialization::DomNode& args, DocSection& found, bool& guessed) {
+		Core::String wanted = DocsLowered(args.Member("heading").AsView().Trimmed());
+		const int64 line = args.Member("line").IsValid() ? args.Member("line").AsInt() : 0;
+		int32 bestMatch = 0;
+		bool holding = false;
+		guessed = false;
+		Core::Array<DocSection> sections = SplitSections(doc->m_Text.View(), doc->m_Path.View());
+		for (const DocSection& section : sections) {
+			const int32 match = wanted.IsEmpty() ? 0 : HeadingMatch(section.m_Heading.View(), wanted.View());
+			if (match > bestMatch) {
+				bestMatch = match;
+				found = section;
+			}
+			if (bestMatch == 0 && !holding && line > 0 && line >= section.m_First && line <= section.m_Last) {
+				holding = true;
+				found = section;
+			}
+		}
+		if (bestMatch > 0 || holding || wanted.IsEmpty()) return bestMatch > 0 || holding;
+		Core::Array<Core::String> headings;
+		for (const DocSection& section : sections) headings.Push(section.m_Heading);
+		const int64 closest = ClosestHeading(headings, wanted.View());
+		if (closest < 0) return false;
+		found = sections[closest];
+		guessed = true;
+		return true;
 	}
 
 	static Core::String SectionText(const DocFile* doc, const DocSection& section, int64 from) {
@@ -326,9 +405,12 @@ namespace Ai
 		if (!doc) return ToolError(problem.View());
 		if (!call.m_Args.Member("heading").IsValid() && !call.m_Args.Member("line").IsValid()) return ToolResult(HeadingList(doc).View(), doc->m_Path.View());
 		DocSection section;
-		if (!FindSection(doc, call.m_Args, section)) return ToolError(((Core::String("docs_read: no section of ") + doc->m_Path.View()) + " has that heading or line. " + HeadingList(doc).View()).View());
-		const int64 line = call.m_Args.Member("line").IsValid() ? call.m_Args.Member("line").AsInt() : section.m_First;
-		return ToolResult(SectionText(doc, section, line > section.m_First ? line : section.m_First).View(), section.m_Heading.View());
+		bool guessed = false;
+		if (!FindSection(doc, call.m_Args, section, guessed)) return ToolError(((Core::String("docs_read: no section of ") + doc->m_Path.View()) + " has that heading or line. " + HeadingList(doc).View()).View());
+		const int64 line = call.m_Args.Member("line").IsValid() && !guessed ? call.m_Args.Member("line").AsInt() : section.m_First;
+		Core::String text = SectionText(doc, section, line > section.m_First ? line : section.m_First);
+		if (guessed) text = ((((Core::String("[no heading holds '") + call.m_Args.Member("heading").AsView().Trimmed()) + "'; the closest is '") + section.m_Heading.View()) + "']\n") + text.View();
+		return ToolResult(text.View(), section.m_Heading.View());
 	}
 
 	static ToolSpec* DocsSpec(const char* name, const char* description, const char* parameters) {

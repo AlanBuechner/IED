@@ -1,0 +1,8 @@
+// BUG-428: only the constant 0 compares with a pointer (as null); an integer variable needs a cast.
+int32 main() {
+	int32 value = 3;
+	int32* p = &value;
+	int64 address = 5;
+	if (p == address) return 1;
+	return 0;
+}

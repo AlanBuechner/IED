@@ -245,6 +245,19 @@ namespace Scripting
 		{
 			return rec && rec->templateOrigin == TemplateOrigin::FunctionTemplate;
 		}
+
+		// One signature whatever the parameters are called: a method of a class template's instance keeps its
+		// parameter names in its FunctionType, so it is not the interned one its base's method of the same types has.
+		bool SameSignature(const FunctionType* a, const FunctionType* b)
+		{
+			if (a == b) return true;
+			if (!a || !b || a->GetReturnType() != b->GetReturnType() || a->IsVariadic() != b->IsVariadic() ||
+				a->GetParameterCount() != b->GetParameterCount())
+				return false;
+			for (uint32 i = 0; i < a->GetParameterCount(); ++i)
+				if (a->GetParameters()[i].m_Type != b->GetParameters()[i].m_Type) return false;
+			return true;
+		}
 	}
 
 	OverloadResolution OverloadResolver::Resolve(const Core::Vector<OverloadCandidate>& candidates,
@@ -283,7 +296,7 @@ namespace Scripting
 		const OverloadCandidate* chosen = finalists[0];
 		for (const OverloadCandidate* c : finalists)
 		{
-			const bool same = isTemplate(c) ? c->record == chosen->record : c->sig == chosen->sig;
+			const bool same = isTemplate(c) ? c->record == chosen->record : SameSignature(c->sig, chosen->sig);
 			if (!same)
 				return { OverloadResolution::Status::Ambiguous, nullptr, nullptr,
 					"ambiguous call - equally good overloads: " + chosen->sig->ToString() + " and " + c->sig->ToString() };

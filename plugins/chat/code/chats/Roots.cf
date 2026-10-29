@@ -2,10 +2,16 @@ include "Roots.ch"
 
 namespace Ai
 {
-	static const char*[3] c_RootKeys = { "path", "root", "cwd" };
+	// The arguments that name a place: program_run's program too, so "ied:/build/bin/..." runs in IED's checkout.
+	static const int64 c_RootKeyCount = 4;
+	static const char*[4] c_RootKeys = { "path", "root", "cwd", "program" };
 	static const char* c_FolderRootKind = "plugin";
 
-	static bool IsRootKey(Core::StringView key) { return key == c_RootKeys[0] || key == c_RootKeys[1] || key == c_RootKeys[2]; }
+	static bool IsRootKey(Core::StringView key) {
+		for (int64 i = 0; i < c_RootKeyCount; ++i)
+			if (key == c_RootKeys[i]) return true;
+		return false;
+	}
 
 	static Core::StringView AliasOf(Core::StringView value) {
 		const int64 colon = value.IndexOf(Core::StringView(":/"));
@@ -16,7 +22,7 @@ namespace Ai
 	}
 
 	Core::String RootAlias(const Serialization::DomNode& args) {
-		for (int64 i = 0; i < 3; ++i) {
+		for (int64 i = 0; i < c_RootKeyCount; ++i) {
 			Core::StringView rootAlias = AliasOf(args.Member(c_RootKeys[i]).AsView());
 			if (!rootAlias.IsEmpty()) return Core::String(rootAlias);
 		}
@@ -139,10 +145,24 @@ namespace Ai
 		return out.ToString();
 	}
 
+	int64 FindPluginId(const Core::Array<Core::String>& ids, Core::StringView name) {
+		for (int64 i = 0; i < ids.Count(); ++i)
+			if (ids[i].View() == name) return i;
+		if (name.IsEmpty()) return -1;
+		Core::String suffix = Core::String(".") + name;
+		int64 found = -1;
+		for (int64 i = 0; i < ids.Count(); ++i) {
+			if (!ids[i].View().EndsWith(suffix.View())) continue;
+			if (found >= 0) return -1;
+			found = i;
+		}
+		return found;
+	}
+
 	static int64 PluginIndex(const Core::Array<IED::PluginInfo>& plugins, Core::StringView id) {
-		for (int64 i = 0; i < plugins.Count(); ++i)
-			if (plugins[i].m_Id.View() == id) return i;
-		return -1;
+		Core::Array<Core::String> ids;
+		for (const IED::PluginInfo& plugin : plugins) ids.Push(plugin.m_Id);
+		return FindPluginId(ids, id);
 	}
 
 	// A plugin's folder as a tool's workspace: none of the server's, its root the folder.
@@ -157,7 +177,7 @@ namespace Ai
 
 	// The plugin id the call's first path names; "" for plugins:/ itself.
 	static Core::String NamedPlugin(const Serialization::DomNode& args) {
-		for (int64 i = 0; i < 3; ++i) {
+		for (int64 i = 0; i < c_RootKeyCount; ++i) {
 			Serialization::DomNode value = args.Member(c_RootKeys[i]);
 			if (value.Kind() != Serialization::DomKind::String) continue;
 			Core::String first;

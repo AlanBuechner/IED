@@ -14,6 +14,7 @@ namespace Scripting
 	void ModelBuilder::RegisterUnion(Context& ctx, const UnionDefinitionNode& un)
 	{
 		const Core::String& name = un.GetNameToken().GetText();
+		if (RepeatsBinding(ctx, un, name)) return; // BUG-420
 
 		UnionType* raw = new UnionType(name);
 		ctx.model->m_Types->Own(raw);

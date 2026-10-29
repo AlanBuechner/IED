@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass, replace
 
 from . import develop_files, fsutil, languages
+from .c4 import ide_bridge
 from .errors import NukeError
 from .packages.store import web_links
 
@@ -380,6 +381,10 @@ def refresh(workspace, store, log):
 	the solution would lose its C4 plugin. Returns the number of files written or removed. What the language servers
 	read of the develop checkouts is written for any workspace (develop_files.py)."""
 	develop_files.write(workspace, log)
+	if workspace.spec.ide:
+		pruned = ide_bridge.prune(workspace)
+		if pruned:
+			log.detail(f"removed the language-server options of {pruned} project(s) the workspace no longer has")
 	if not workspace.spec.ide or not generated_by_nuke(workspace):
 		return 0
 	try:

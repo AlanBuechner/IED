@@ -1,0 +1,39 @@
+// `T(this, ...)` makes a T whose create takes the receiver's address: `this` as a create's argument is the receiver's
+// pointer, as it is for any call. Regression: BUG-412 (its type was empty, so no create matched: "takes (void, int32)").
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what)
+{
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+class Ticket
+{
+	[operator("create")] public void Init(Desk* desk, int32 number) { m_Desk = desk; m_Number = number; }
+	public Desk* m_Desk;
+	public int32 m_Number;
+}
+
+class Desk
+{
+	public Ticket Issue(int32 number);
+	public Ticket IssueInline(int32 number) { return Ticket(this, number); }
+	public Ticket* IssueNew(int32 number) { return new Ticket(this, number); }
+	public int32 m_Id;
+}
+
+public Ticket Desk::Issue(int32 number) { return Ticket(this, number); }
+
+int32 main()
+{
+	Desk desk;
+	desk.m_Id = 7;
+	Ticket out = desk.Issue(1);
+	Ticket inline = desk.IssueInline(2);
+	Ticket* made = desk.IssueNew(3);
+	Check(out.m_Desk == &desk && out.m_Number == 1, "an out-of-line method's create call");
+	Check(inline.m_Desk == &desk && inline.m_Number == 2, "an inline method's");
+	Check(made->m_Desk == &desk && made->m_Number == 3, "new T(this, ...)");
+	if (g_failures == 0) printf("THIS IN CREATE CALL OK\n");
+	return g_failures;
+}

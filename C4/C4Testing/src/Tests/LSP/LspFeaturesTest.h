@@ -122,5 +122,9 @@ namespace Testing
 
 	TEST_FUNC(Lsp.Features.WorkspaceSymbols)
 	void TestWorkspaceSymbolsFindsDeclarationsInNonMatchingNamespace();
+
+	// BUG-427: past the cap the best matches are kept - the name itself is not crowded out by names holding it.
+	TEST_FUNC(Lsp.Features.WorkspaceSymbols)
+	void TestWorkspaceSymbolsKeepTheBestMatchesPastTheCap();
 	};
 } // namespace Testing

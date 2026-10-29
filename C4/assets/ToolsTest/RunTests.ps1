@@ -416,6 +416,30 @@ function Test-ProjectInterop {
     return @()
 }
 
+# Two projects of one program bind one C++ header, and one file binds two headers that include it (BUG-420): what they
+# share is declared once, each project reaches it as its own, and the wrappers every shim makes for it link.
+function Test-ProjectsShareABoundHeader {
+    $dir = New-Sources "projects-shared-binding" @{
+        "inc/shared.h" = "#pragma once`nstruct Point { int x; int y; Point() : x(1), y(2) {} };`nenum Mode { ModeA = 1, ModeB = 2 };`ntypedef int Code;`n#define SHARED_SCALE 3`ninline int Twice(int v) { return v * 2; }"
+        "inc/left.h" = "#pragma once`n#include ""shared.h""`ninline int Left() { return 5; }"
+        "inc/right.h" = "#pragma once`n#include ""shared.h""`ninline int Right() { return 6; }"
+        "Engine/src/engine_native.ch" = "extern ""c++"" include ""shared.h"""
+        "Engine/src/engine.ch" = "int32 EngineCode();"
+        "Engine/src/engine.cf" = "include ""engine.ch""`ninclude ""engine_native.ch""`nint32 EngineCode() { Point p; return p.x + Twice((int32)ModeB) + SHARED_SCALE; }"
+        "Window/src/window_native.ch" = "extern ""c++"" include ""left.h""`nextern ""c++"" include ""right.h"""
+        "Window/src/window.ch" = "int32 WindowCode();"
+        "Window/src/window.cf" = "include ""window.ch""`ninclude ""window_native.ch""`nint32 WindowCode() { Point p; Code code = p.y * 10; return code + Left() + Right(); }"
+        "Game/src/main.cf" = "include ""engine.ch""`ninclude ""window.ch""`nint32 main() { return EngineCode() + WindowCode(); }"
+        "int/projects.toml" = "root = ""Game""`n[[project]]`nname = ""Game""`nsources = [""../Game/src""]`ndepends = [""Engine"", ""Window""]`n[[project]]`nname = ""Engine""`nsources = [""../Engine/src""]`nincludes = [""../inc""]`n[[project]]`nname = ""Window""`nsources = [""../Window/src""]`nincludes = [""../inc""]"
+    }
+    $exe = Join-Path $dir "int/game.exe"
+    $build = Invoke-Compiler $compiler @("--projects", (Join-Path $dir "int/projects.toml"), "-o", $exe)
+    if ($build.exit -ne 0) { return @("two projects binding one header did not build: " + (($build.output -split "`n" | Select-String "error" | Select-Object -First 3) -join " | ")) }
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 39) { return @("the program returned $LASTEXITCODE, not 39 (the engine's 1 + 4 + 3, the window's 20 + 5 + 6)") }
+    return @()
+}
+
 # The rules of a build description: a project reaches only what it depends on, a path two dependencies have is
 # ambiguous, and a broken description names its line or its problem.
 function Test-ProjectBoundaries {
@@ -889,7 +913,7 @@ int32 main()
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
-    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
+    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
     "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput")
 $passed = 0
 $failed = 0

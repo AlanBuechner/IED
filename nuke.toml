@@ -59,7 +59,7 @@ steps = [
 [commands.install-ied]
 description = 'Build the IED server, the CLI and the desktop app, install them with the web client and the plugins into %LOCALAPPDATA%\Programs\IED, and put IED in the Start menu (tools/install; words after -- go to install_ied.py: --to <folder>, --no-register)'
 requires = ["build"]
-projects = ["ied-server", "ied", "ied-desktop"]
+projects = ["ied-server", "ied", "ied-desktop", "flashbang"]
 steps = [
 	{ name = "install", run = ["${python}", "-I", "tools/install/install_ied.py", "--bin", "${bin.root}", "${args}"] },
 ]

@@ -113,6 +113,7 @@ namespace Scripting
 				return;
 		}
 
+		if (!raw && RepeatsBinding(ctx, obj, name)) return; // a C type two bindings define (BUG-420): its body is the first's
 		if (!raw)
 		{
 			raw = new ObjectType(TypeKind::Object, name);
@@ -248,6 +249,7 @@ namespace Scripting
 	void ModelBuilder::RegisterEnum(Context& ctx, const EnumDefinitionNode& en)
 	{
 		const Core::String& name = en.GetNameToken().GetText();
+		if (RepeatsBinding(ctx, en, name)) return; // its members are the first's too (BUG-420)
 
 		// Shell with a default underlying type; the real one (and member values) resolve in pass 2.
 		EnumType* raw = new EnumType(name, ctx.model->m_Types->Builtin(TypeKind::Int32));
@@ -294,6 +296,8 @@ namespace Scripting
 			ctx.scope->Register(name, info);
 			return;
 		}
+
+		if (RepeatsBinding(ctx, alias, name)) return; // BUG-420
 
 		// Shell with a null target; the real target resolves in pass 2 (forward refs work).
 		AliasType* raw = new AliasType(name, nullptr);

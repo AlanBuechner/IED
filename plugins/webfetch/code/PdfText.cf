@@ -1,0 +1,573 @@
+include "PdfText.ch"
+include "Pages.ch"
+include "math.ch"
+
+namespace WebFetch
+{
+	const int32 c_PdfMaxFormDepth = 3;
+	const int32 c_PdfMaxPageDepth = 32;
+	const int64 c_PdfMaxRange = 65536;
+	const double c_SpaceGap = 0.15;       // of the font's size: a jump right this wide is a space
+	const double c_LineShift = 0.5;       // a move up or down this far is another line
+	const double c_ParagraphShift = 1.9;  // ...and this far down, or a line's height up (another column), a new paragraph
+
+	// Glyph names (the Adobe Glyph List's, those text and TeX's fonts use) and their code points in hex.
+	static const char* c_GlyphTable = ";space=20;exclam=21;quotedbl=22;numbersign=23;dollar=24;percent=25;ampersand=26;quotesingle=27;parenleft=28"
+	";parenright=29;asterisk=2A;plus=2B;comma=2C;hyphen=2D;period=2E;slash=2F;zero=30;one=31;two=32;three=33;four=34;five=35;six=36"
+	";seven=37;eight=38;nine=39;colon=3A;semicolon=3B;less=3C;equal=3D;greater=3E;question=3F;at=40;bracketleft=5B;backslash=5C"
+	";bracketright=5D;asciicircum=5E;underscore=5F;grave=60;braceleft=7B;bar=7C;braceright=7D;asciitilde=7E;quoteleft=2018;quoteright=2019"
+	";quotedblleft=201C;quotedblright=201D;quotesinglbase=201A;quotedblbase=201E;guillemotleft=AB;guillemotright=BB;guilsinglleft=2039"
+	";guilsinglright=203A;endash=2013;emdash=2014;bullet=2022;dagger=2020;daggerdbl=2021;ellipsis=2026;perthousand=2030;minus=2212"
+	";multiply=D7;divide=F7;plusminus=B1;degree=B0;section=A7;paragraph=B6;copyright=A9;registered=AE;trademark=2122;dotlessi=131"
+	";dotlessj=237;germandbls=DF;ae=E6;AE=C6;oe=153;OE=152;oslash=F8;Oslash=D8;lslash=142;Lslash=141;eth=F0;Eth=D0;thorn=FE;Thorn=DE"
+	";exclamdown=A1;questiondown=BF;cent=A2;sterling=A3;yen=A5;Euro=20AC;currency=A4;florin=192;periodcentered=B7;logicalnot=AC"
+	";onehalf=BD;onequarter=BC;threequarters=BE;ordfeminine=AA;ordmasculine=BA;nbspace=A0;sfthyphen=AD;fraction=2044"
+	";acute=B4;dieresis=A8;circumflex=2C6;tilde=2DC;macron=AF;breve=2D8;dotaccent=2D9;ring=2DA;cedilla=B8;caron=2C7;hungarumlaut=2DD"
+	";ogonek=2DB;alpha=3B1;beta=3B2;gamma=3B3;delta=3B4;epsilon=3B5;zeta=3B6;eta=3B7;theta=3B8;iota=3B9;kappa=3BA;lambda=3BB;mu=3BC"
+	";nu=3BD;xi=3BE;omicron=3BF;pi=3C0;rho=3C1;sigma=3C3;sigma1=3C2;tau=3C4;upsilon=3C5;phi=3C6;chi=3C7;psi=3C8;omega=3C9;Alpha=391"
+	";Beta=392;Gamma=393;Delta=394;Epsilon=395;Zeta=396;Eta=397;Theta=398;Iota=399;Kappa=39A;Lambda=39B;Mu=39C;Nu=39D;Xi=39E"
+	";Omicron=39F;Pi=3A0;Rho=3A1;Sigma=3A3;Tau=3A4;Upsilon=3A5;Phi=3A6;Chi=3A7;Psi=3A8;Omega=3A9;epsilon1=3F5;theta1=3D1;phi1=3D5"
+	";omega1=3D6;infinity=221E;summation=2211;product=220F;integral=222B;partialdiff=2202;nabla=2207;radical=221A;lessequal=2264"
+	";greaterequal=2265;notequal=2260;approxequal=2248;equivalence=2261;proportional=221D;element=2208;notelement=2209;arrowright=2192"
+	";arrowleft=2190;arrowup=2191;arrowdown=2193;arrowboth=2194;arrowdblright=21D2;arrowdblleft=21D0;arrowdblboth=21D4;universal=2200"
+	";existential=2203;emptyset=2205;intersection=2229;union=222A;propersubset=2282;propersuperset=2283;reflexsubset=2286"
+	";reflexsuperset=2287;logicaland=2227;logicalor=2228;angleleft=27E8;angleright=27E9;prime=2032;similar=223C;asteriskmath=2217"
+	";dotmath=22C5;circleplus=2295;circlemultiply=2297;perpendicular=22A5;angle=2220;therefore=2234;lozenge=25CA;";
+
+	// Accents a glyph name may end in ("eacute"), and the combining mark each adds.
+	static const char* c_AccentTable = ";acute=301;grave=300;circumflex=302;tilde=303;macron=304;breve=306;dotaccent=307;dieresis=308;ring=30A"
+	";hungarumlaut=30B;caron=30C;cedilla=327;ogonek=328;";
+
+	static bool Letter(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	// Hex digits as a number; -1 when any is not one.
+	static int64 HexNumber(Core::StringView digits) {
+		if (digits.IsEmpty()) return -1;
+		int64 value = 0;
+		for (int64 i = 0; i < digits.ByteLength(); ++i) {
+			const int32 digit = HexValue(digits.ByteAt(i));
+			if (digit < 0) return -1;
+			value = value * 16 + digit;
+		}
+		return value;
+	}
+
+	// The code point `table` gives `name` (";name=hex;"), or -1.
+	static int64 TableCode(const char* table, Core::StringView name) {
+		Core::StringView entries = Core::StringView(table);
+		const int64 at = entries.IndexOf((Core::String(";") + name + "=").View());
+		if (at < 0) return -1;
+		const int64 start = at + name.ByteLength() + 2;
+		const int64 end = entries.IndexOf(';', start);
+		return HexNumber(entries.Substring(start, end - start));
+	}
+
+	static Core::String CodePointText(int64 code) {
+		Core::StringBuilder text;
+		if (code > 0 && code <= 0x10FFFF && (code < 0xD800 || code > 0xDFFF)) text.AppendCodePoint((int32)code);
+		return text.ToString();
+	}
+
+	Core::String GlyphText(Core::StringView name) {
+		const int64 dot = name.IndexOf('.');
+		if (dot == 0) return Core::String();   // .notdef
+		if (dot > 0) name = name.Substring(0, dot);
+		if (name.IndexOf('_') >= 0) {
+			Core::StringBuilder joined;
+			for (Core::StringView part : name.Split('_')) joined.Append(GlyphText(part).View());
+			return joined.ToString();
+		}
+		if (name.ByteLength() == 1 && Letter(name.ByteAt(0))) return Core::String(name);
+		const int64 known = TableCode(c_GlyphTable, name);
+		if (known >= 0) return CodePointText(known);
+		if (name == "ff" || name == "fi" || name == "fl" || name == "ffi" || name == "ffl") return Core::String(name);
+		if (name.StartsWith(Core::StringView("uni")) && name.ByteLength() >= 7 && (name.ByteLength() - 3) % 4 == 0) {
+			Core::StringBuilder text;
+			for (int64 i = 3; i < name.ByteLength(); i += 4) {
+				const int64 unit = HexNumber(name.Substring(i, 4));
+				if (unit < 0) return Core::String();
+				text.Append(CodePointText(unit).View());
+			}
+			return text.ToString();
+		}
+		if (name.ByteLength() >= 5 && name.ByteLength() <= 7 && name.ByteAt(0) == 'u') {
+			const int64 code = HexNumber(name.Substring(1, name.ByteLength() - 1));
+			if (code >= 0) return CodePointText(code);
+		}
+		if (name.ByteLength() > 1 && Letter(name.ByteAt(0))) {
+			const int64 mark = TableCode(c_AccentTable, name.Substring(1, name.ByteLength() - 1));
+			if (mark >= 0) return Core::String(name.Substring(0, 1)) + CodePointText(mark).View();
+		}
+		return Core::String();
+	}
+
+	// UTF-16BE as UTF-8, `addToLast` added to the last code unit (a CMap's bfrange counts up from its first).
+	static Core::String Utf16Text(Core::StringView bytes, uint32 addToLast) {
+		Core::Array<uint32> units;
+		for (int64 i = 0; i + 1 < bytes.ByteLength(); i += 2) units.Push((uint32)(bytes.ByteAt(i) * 256 + bytes.ByteAt(i + 1)));
+		if (!units.IsEmpty()) units.Back() += addToLast;
+		Core::StringBuilder text;
+		for (int64 i = 0; i < units.Count(); ++i) {
+			uint32 unit = units[i];
+			if (unit >= 0xD800 && unit <= 0xDBFF && i + 1 < units.Count() && units[i + 1] >= 0xDC00 && units[i + 1] <= 0xDFFF) {
+				text.Append(CodePointText(0x10000 + ((int64)(unit - 0xD800) << 10) + (int64)(units[i + 1] - 0xDC00)).View());
+				i += 1;
+				continue;
+			}
+			text.Append(CodePointText((int64)unit).View());
+		}
+		return text.ToString();
+	}
+
+	Core::String PdfTextString(Core::StringView bytes) {
+		if (bytes.ByteLength() >= 2 && bytes.ByteAt(0) == 0xFE && bytes.ByteAt(1) == 0xFF) return Utf16Text(bytes.Substring(2, bytes.ByteLength() - 2), 0);
+		Core::StringBuilder text;
+		for (int64 i = 0; i < bytes.ByteLength(); ++i) {
+			const int32 c = bytes.ByteAt(i);
+			if (c >= 0x80 && c < 0xA0) text.AppendCodePoint(Cp1252High(c));
+			else if (c >= 0x20 || c == 9 || c == 10) text.AppendCodePoint(c);
+		}
+		return text.ToString();
+	}
+
+	static uint32 CodeOf(Core::StringView bytes) {
+		uint32 code = 0;
+		for (int64 i = 0; i < bytes.ByteLength(); ++i) code = code * 256 + (uint32)bytes.ByteAt(i);
+		return code;
+	}
+
+	static Core::StringView BytesOf(const Core::Array<uint8>& data) { return Core::StringView((const char*)(const void*)data.Data(), data.Count()); }
+
+	// --- PdfFont ----------------------------------------------------------------------------------------------------
+
+	// Standard and WinAnsi encodings agree on the letters; the rest is read as Windows-1252.
+	static Core::Array<Core::String> DefaultEncoding() {
+		Core::Array<Core::String> codes;
+		codes.Resize(256);
+		for (int32 code = 32; code < 256; ++code) {
+			if (code == 127) continue;
+			Core::StringBuilder text;
+			text.AppendCodePoint(code >= 0x80 && code < 0xA0 ? Cp1252High(code) : code);
+			codes[code] = text.ToString();
+		}
+		return codes;
+	}
+
+	public void PdfFont::Load(PdfDocument& document, const PdfValue* font) {
+		m_Simple = DefaultEncoding();
+		const PdfValue* dictionary = document.Resolve(font);
+		if (dictionary == null) return;
+		const PdfValue* subtype = dictionary->Get(Core::StringView("Subtype"));
+		const bool composite = subtype != null && subtype->IsName(Core::StringView("Type0"));
+		if (composite) {
+			m_CodeBytes = 2;
+			m_DefaultWidth = 1000.0;
+			const PdfValue* descendants = document.Lookup(dictionary, Core::StringView("DescendantFonts"));
+			if (descendants != null && descendants->m_Kind == PdfKind::Array && !descendants->m_Items.IsEmpty())
+				ReadCidWidths(document, document.Resolve(&descendants->m_Items[0]));
+		}
+		else {
+			ReadEncoding(document, document.Lookup(dictionary, Core::StringView("Encoding")));
+			ReadWidths(document, dictionary);
+		}
+		const Core::Array<uint8>* cmap = document.Stream(dictionary->Get(Core::StringView("ToUnicode")));
+		if (cmap != null) ReadCMap(BytesOf(*cmap));
+		if (!composite) m_CodeBytes = 1;
+	}
+
+	private void PdfFont::ReadEncoding(PdfDocument& document, const PdfValue* encoding) {
+		const PdfValue* differences = encoding != null ? document.Lookup(encoding, Core::StringView("Differences")) : null;
+		if (differences == null || differences->m_Kind != PdfKind::Array) return;
+		int64 code = 0;
+		for (const PdfValue& item : differences->m_Items) {
+			if (item.m_Kind == PdfKind::Number) code = (int64)item.m_Number;
+			else if (item.m_Kind == PdfKind::Name) {
+				if (code >= 0 && code < 256) m_Simple[code] = GlyphText(item.m_Text.View());
+				code += 1;
+			}
+		}
+	}
+
+	private void PdfFont::ReadWidths(PdfDocument& document, const PdfValue* font) {
+		const PdfValue* first = document.Lookup(font, Core::StringView("FirstChar"));
+		const PdfValue* widths = document.Lookup(font, Core::StringView("Widths"));
+		if (first == null || widths == null || first->m_Kind != PdfKind::Number || widths->m_Kind != PdfKind::Array) return;
+		m_FirstChar = (int64)first->m_Number;
+		for (const PdfValue& width : widths->m_Items) {
+			const PdfValue* value = document.Resolve(&width);
+			m_Widths.Push(value != null && value->m_Kind == PdfKind::Number ? value->m_Number : m_DefaultWidth);
+		}
+	}
+
+	private void PdfFont::ReadCidWidths(PdfDocument& document, const PdfValue* font) {
+		const PdfValue* fallback = document.Lookup(font, Core::StringView("DW"));
+		if (fallback != null && fallback->m_Kind == PdfKind::Number) m_DefaultWidth = fallback->m_Number;
+		const PdfValue* widths = document.Lookup(font, Core::StringView("W"));
+		if (widths == null || widths->m_Kind != PdfKind::Array) return;
+		const Core::Array<PdfValue>& items = widths->m_Items;
+		int64 i = 0;
+		while (i + 1 < items.Count()) {
+			const uint32 start = (uint32)items[i].m_Number;
+			const PdfValue* next = document.Resolve(&items[i + 1]);
+			if (next != null && next->m_Kind == PdfKind::Array) {
+				for (int64 k = 0; k < next->m_Items.Count(); ++k) m_CidWidths[start + (uint32)k] = next->m_Items[k].m_Number;
+				i += 2;
+				continue;
+			}
+			if (i + 2 >= items.Count()) break;
+			const int64 last = (int64)items[i + 1].m_Number;
+			for (int64 code = start; code <= last && code - start < c_PdfMaxRange; ++code) m_CidWidths[(uint32)code] = items[i + 2].m_Number;
+			i += 3;
+		}
+	}
+
+	private void PdfFont::ReadCMap(Core::StringView cmap) {
+		PdfParser parser = PdfParser(cmap, 0);
+		Core::Array<PdfValue> operands;
+		while (!parser.AtEnd()) {
+			PdfValue value;
+			Core::StringView keyword;
+			if (parser.Next(value, keyword, false)) {
+				operands.Push(value);
+				continue;
+			}
+			if (keyword == "endcodespacerange" && !operands.IsEmpty() && operands[0].m_Kind == PdfKind::String)
+				m_CodeBytes = (int32)Math::Clamp(operands[0].m_Text.ByteLength(), (int64)1, (int64)4);
+			else if (keyword == "endbfchar") {
+				for (int64 i = 0; i + 1 < operands.Count(); i += 2) {
+					const PdfValue& target = operands[i + 1];
+					m_ToUnicode[CodeOf(operands[i].m_Text.View())] = target.m_Kind == PdfKind::Name ? GlyphText(target.m_Text.View()) : Utf16Text(target.m_Text.View(), 0);
+				}
+			}
+			else if (keyword == "endbfrange") {
+				for (int64 i = 0; i + 2 < operands.Count(); i += 3) {
+					const uint32 low = CodeOf(operands[i].m_Text.View());
+					const uint32 high = CodeOf(operands[i + 1].m_Text.View());
+					const PdfValue& target = operands[i + 2];
+					for (uint32 code = low; code <= high && (int64)(code - low) < c_PdfMaxRange; ++code) {
+						const uint32 offset = code - low;
+						if (target.m_Kind == PdfKind::Array) {
+							if ((int64)offset >= target.m_Items.Count()) break;
+							m_ToUnicode[code] = Utf16Text(target.m_Items[offset].m_Text.View(), 0);
+						}
+						else m_ToUnicode[code] = Utf16Text(target.m_Text.View(), offset);
+						if (code == 0xFFFFFFFF) break;
+					}
+				}
+			}
+			operands.Clear();
+		}
+	}
+
+	private double PdfFont::WidthOf(uint32 code) const {
+		if (m_CodeBytes == 1) {
+			const int64 index = (int64)code - m_FirstChar;
+			return index >= 0 && index < m_Widths.Count() ? m_Widths[index] : m_DefaultWidth;
+		}
+		double width = m_DefaultWidth;
+		m_CidWidths.TryGet(code, width);
+		return width;
+	}
+
+	public void PdfFont::Show(Core::StringView bytes, Core::StringBuilder& out, double& width, int64& codes, int64& spaces) const {
+		const int64 step = m_CodeBytes;
+		for (int64 i = 0; i + step <= bytes.ByteLength(); i += step) {
+			const uint32 code = CodeOf(bytes.Substring(i, step));
+			Core::String text;
+			if (m_ToUnicode.TryGet(code, text)) out.Append(text.View());
+			else if (step == 1 && !m_Simple.IsEmpty()) out.Append(m_Simple[code].View());
+			width += WidthOf(code);
+			codes += 1;
+			if (step == 1 && code == 32) spaces += 1;
+		}
+	}
+
+	// --- the text of pages ------------------------------------------------------------------------------------------
+
+	struct PdfPage
+	{
+		public const PdfValue* m_Page;
+		public const PdfValue* m_Resources;
+	}
+
+	static void CollectPages(PdfDocument& document, const PdfValue* node, const PdfValue* inherited, Core::Array<PdfPage>& pages,
+		Core::HashSet<int64>& seen, int32 depth) {
+		if (node == null || depth > c_PdfMaxPageDepth) return;
+		if (node->m_Kind == PdfKind::Ref && !seen.Add(node->m_Object)) return;
+		const PdfValue* value = document.Resolve(node);
+		if (value == null || value->m_Kind != PdfKind::Dict) return;
+		const PdfValue* own = document.Lookup(value, Core::StringView("Resources"));
+		const PdfValue* resources = own != null ? own : inherited;
+		const PdfValue* kids = document.Lookup(value, Core::StringView("Kids"));
+		if (kids != null && kids->m_Kind == PdfKind::Array) {
+			for (const PdfValue& kid : kids->m_Items) CollectPages(document, &kid, resources, pages, seen, depth + 1);
+			return;
+		}
+		pages.Push(PdfPage{ value, resources });
+	}
+
+	// The pages from the catalog's page tree; without one, every /Type /Page object in object order.
+	static Core::Array<PdfPage> PagesOf(PdfDocument& document) {
+		Core::Array<PdfPage> pages;
+		Core::HashSet<int64> seen;
+		const PdfValue* catalog = document.Catalog();
+		if (catalog != null) CollectPages(document, catalog->Get(Core::StringView("Pages")), null, pages, seen, 0);
+		if (!pages.IsEmpty()) return pages;
+		for (int64 number : document.ObjectNumbers()) {
+			const PdfValue* value = &document.Object(number)->m_Value;
+			const PdfValue* type = value->Get(Core::StringView("Type"));
+			if (type == null || !type->IsName(Core::StringView("Page"))) continue;
+			const PdfValue* resources = document.Lookup(value, Core::StringView("Resources"));
+			for (const PdfValue* parent = document.Lookup(value, Core::StringView("Parent")); resources == null && parent != null && seen.Add((int64)(uint64)(const void*)parent);
+				parent = document.Lookup(parent, Core::StringView("Parent")))
+				resources = document.Lookup(parent, Core::StringView("Resources"));
+			pages.Push(PdfPage{ value, resources });
+		}
+		return pages;
+	}
+
+	// Runs content streams and writes what they show: fonts by object, the text and line matrices, where the last text ended.
+	class PdfTextWriter
+	{
+		[operator("create")] public void Init(PdfDocument* document) { m_Document = document; }
+
+		public void Page(int64 number, const PdfPage& page) {
+			if (m_Out.ByteLength() > 0) m_Out.Append("\n\n");
+			m_Out.Append("[Page ");
+			m_Out.AppendInt(number);
+			m_Out.Append("]\n");
+			m_Started = false;
+			Core::StringBuilder content;
+			const PdfValue* contents = m_Document->Resolve(page.m_Page->Get(Core::StringView("Contents")));
+			if (contents != null && contents->m_Kind == PdfKind::Array) {
+				for (const PdfValue& part : contents->m_Items) AppendStream(content, m_Document->Stream(&part));
+			}
+			else AppendStream(content, m_Document->Stream(page.m_Page->Get(Core::StringView("Contents"))));
+			Run(content.View(), page.m_Resources, 0);
+		}
+
+		public Core::String Text() const { return m_Out.ToString(); }
+
+		private static void AppendStream(Core::StringBuilder& content, const Core::Array<uint8>* data) {
+			if (data == null) return;
+			content.Append(BytesOf(*data));
+			content.Append("\n");
+		}
+
+		private void Run(Core::StringView content, const PdfValue* resources, int32 depth) {
+			PdfParser parser = PdfParser(content, 0);
+			Core::Array<PdfValue> operands;
+			while (!parser.AtEnd()) {
+				PdfValue value;
+				Core::StringView keyword;
+				if (parser.Next(value, keyword, false)) {
+					operands.Push(value);
+					continue;
+				}
+				if (!keyword.IsEmpty()) Operator(keyword, operands, resources, depth, parser);
+				operands.Clear();
+			}
+		}
+
+		private static double Operand(const Core::Array<PdfValue>& operands, int64 fromEnd) {
+			const int64 index = operands.Count() - fromEnd;
+			return index >= 0 && operands[index].m_Kind == PdfKind::Number ? operands[index].m_Number : 0.0;
+		}
+
+		private void Operator(Core::StringView op, const Core::Array<PdfValue>& operands, const PdfValue* resources, int32 depth, PdfParser& parser) {
+			if (op == "BT") {
+				Identity(m_Tm);
+				Identity(m_Tlm);
+			}
+			else if (op == "Tf" && operands.Count() >= 2) {
+				m_Font = FontOf(resources, operands[operands.Count() - 2].m_Text.View());
+				m_Size = Operand(operands, 1);
+			}
+			else if (op == "TL") m_Leading = Operand(operands, 1);
+			else if (op == "Tc") m_CharSpacing = Operand(operands, 1);
+			else if (op == "Tw") m_WordSpacing = Operand(operands, 1);
+			else if (op == "Tz") m_Scale = Operand(operands, 1) / 100.0;
+			else if (op == "Td") MoveLine(Operand(operands, 2), Operand(operands, 1));
+			else if (op == "TD") {
+				m_Leading = -Operand(operands, 1);
+				MoveLine(Operand(operands, 2), Operand(operands, 1));
+			}
+			else if (op == "T*") MoveLine(0.0, -m_Leading);
+			else if (op == "Tm" && operands.Count() >= 6) {
+				for (int32 i = 0; i < 6; ++i) m_Tlm[i] = Operand(operands, 6 - i);
+				for (int32 i = 0; i < 6; ++i) m_Tm[i] = m_Tlm[i];
+			}
+			else if (op == "Tj" && !operands.IsEmpty()) Show(operands.Back().m_Text.View());
+			else if (op == "'" && !operands.IsEmpty()) {
+				MoveLine(0.0, -m_Leading);
+				Show(operands.Back().m_Text.View());
+			}
+			else if (op == "\"" && operands.Count() >= 3) {
+				m_WordSpacing = Operand(operands, 3);
+				m_CharSpacing = Operand(operands, 2);
+				MoveLine(0.0, -m_Leading);
+				Show(operands.Back().m_Text.View());
+			}
+			else if (op == "TJ" && !operands.IsEmpty() && operands.Back().m_Kind == PdfKind::Array) {
+				for (const PdfValue& item : operands.Back().m_Items) {
+					if (item.m_Kind == PdfKind::String) Show(item.m_Text.View());
+					else if (item.m_Kind == PdfKind::Number) Advance(-item.m_Number / 1000.0 * m_Size * m_Scale);
+				}
+			}
+			else if (op == "BI") SkipInlineImage(parser);
+			else if (op == "Do" && !operands.IsEmpty() && depth < c_PdfMaxFormDepth) Form(operands.Back().m_Text.View(), resources, depth);
+		}
+
+		// An inline image's data is not PDF syntax: skip to its "EI".
+		private static void SkipInlineImage(PdfParser& parser) {
+			Core::StringView keyword;
+			PdfValue value;
+			while (!parser.AtEnd()) {
+				if (!parser.Next(value, keyword, false) && keyword == "ID") break;
+			}
+			// The data runs to "EI" between white space.
+			while (!parser.AtEnd()) {
+				parser.MoveTo(parser.Position() + 1);
+				PdfParser probe = parser;
+				probe.SkipSpace();
+				if (probe.Position() > parser.Position()) {
+					PdfValue ignored;
+					Core::StringView word;
+					if (!probe.Next(ignored, word, false) && word == "EI") {
+						parser.MoveTo(probe.Position());
+						return;
+					}
+				}
+			}
+		}
+
+		private void Form(Core::StringView name, const PdfValue* resources, int32 depth) {
+			const PdfValue* objects = m_Document->Lookup(resources, Core::StringView("XObject"));
+			const PdfValue* reference = objects != null ? objects->Get(name) : null;
+			const PdfValue* form = m_Document->Resolve(reference);
+			const PdfValue* subtype = form != null ? form->Get(Core::StringView("Subtype")) : null;
+			if (subtype == null || !subtype->IsName(Core::StringView("Form"))) return;
+			const Core::Array<uint8>* data = m_Document->Stream(reference);
+			if (data == null) return;
+			const PdfValue* own = m_Document->Lookup(form, Core::StringView("Resources"));
+			Run(BytesOf(*data), own != null ? own : resources, depth + 1);
+		}
+
+		private const PdfFont* FontOf(const PdfValue* resources, Core::StringView name) {
+			const PdfValue* fonts = m_Document->Lookup(resources, Core::StringView("Font"));
+			const PdfValue* reference = fonts != null ? fonts->Get(name) : null;
+			if (reference == null) return null;
+			if (reference->m_Kind == PdfKind::Ref) {
+				PdfFont* known = m_Fonts.Get(reference->m_Object);
+				if (known != null) return known;
+			}
+			PdfFont* font = new PdfFont();
+			font->Load(*m_Document, reference);
+			if (reference->m_Kind == PdfKind::Ref) m_Fonts[reference->m_Object] = font;
+			return font;
+		}
+
+		private static void Identity(double[6]& matrix) {
+			matrix[0] = 1.0;
+			matrix[1] = 0.0;
+			matrix[2] = 0.0;
+			matrix[3] = 1.0;
+			matrix[4] = 0.0;
+			matrix[5] = 0.0;
+		}
+
+		// Td: the next line, offset in the line matrix's space.
+		private void MoveLine(double tx, double ty) {
+			m_Tlm[4] = tx * m_Tlm[0] + ty * m_Tlm[2] + m_Tlm[4];
+			m_Tlm[5] = tx * m_Tlm[1] + ty * m_Tlm[3] + m_Tlm[5];
+			for (int32 i = 0; i < 6; ++i) m_Tm[i] = m_Tlm[i];
+		}
+
+		// Moves the text position along the line by `tx` in text space.
+		private void Advance(double tx) {
+			m_Tm[4] += tx * m_Tm[0];
+			m_Tm[5] += tx * m_Tm[1];
+		}
+
+		private void Show(Core::StringView bytes) {
+			if (m_Font == null) return;
+			Separate();
+			double width = 0.0;
+			int64 codes = 0;
+			int64 spaces = 0;
+			m_Font->Show(bytes, m_Out, width, codes, spaces);
+			Advance((width / 1000.0 * m_Size + m_CharSpacing * (double)codes + m_WordSpacing * (double)spaces) * m_Scale);
+			m_LastX = m_Tm[4];
+			m_LastY = m_Tm[5];
+		}
+
+		// Before a run: a line break when it is on another line, a space when it starts past where the last one ended.
+		private void Separate() {
+			const double emX = Math::Max(Math::Abs(m_Size) * Math::Sqrt(m_Tm[0] * m_Tm[0] + m_Tm[1] * m_Tm[1]), 0.001);
+			const double emY = Math::Max(Math::Abs(m_Size) * Math::Sqrt(m_Tm[2] * m_Tm[2] + m_Tm[3] * m_Tm[3]), 0.001);
+			const double x = m_Tm[4];
+			const double y = m_Tm[5];
+			if (!m_Started) {
+				m_Started = true;
+				return;
+			}
+			const double down = m_LastY - y;
+			if (Math::Abs(down) > c_LineShift * emY) {
+				LineBreak(down > c_ParagraphShift * emY || down < -emY ? 2 : 1);
+				return;
+			}
+			const double gap = x - m_LastX;
+			if (gap > c_SpaceGap * emX || gap < -emX) Space();
+		}
+
+		private int32 LastByte() const { return m_Out.ByteLength() == 0 ? '\n' : m_Out.View().ByteAt(m_Out.ByteLength() - 1); }
+
+		private void Space() {
+			if (LastByte() != ' ' && LastByte() != '\n') m_Out.Append(" ");
+		}
+
+		private void LineBreak(int32 count) {
+			int64 had = 0;
+			for (int64 i = m_Out.ByteLength() - 1; i >= 0 && had < 2 && m_Out.View().ByteAt(i) == '\n'; --i) had += 1;
+			for (int64 i = had; i < count; ++i) m_Out.Append("\n");
+		}
+
+		private PdfDocument* m_Document;
+		private Core::HashMap<int64, PdfFont*> m_Fonts;
+		private Core::StringBuilder m_Out;
+		private const PdfFont* m_Font;
+		private double m_Size;
+		private double m_Leading;
+		private double m_CharSpacing;
+		private double m_WordSpacing;
+		private double m_Scale = 1.0;
+		private double[6] m_Tm;
+		private double[6] m_Tlm;
+		private bool m_Started;
+		private double m_LastX;
+		private double m_LastY;
+	}
+
+	bool PdfToText(Core::StringView data, Core::String& text, Core::String& title, Core::String& error) {
+		PdfDocument document;
+		if (!document.Parse(data, error)) return false;
+		const PdfValue* titleValue = document.Lookup(document.Info(), Core::StringView("Title"));
+		title = titleValue != null && titleValue->m_Kind == PdfKind::String ? PdfTextString(titleValue->m_Text.View()) : Core::String();
+		Core::Array<PdfPage> pages = PagesOf(document);
+		if (pages.IsEmpty()) {
+			error = Core::String("the PDF has no pages");
+			return false;
+		}
+		PdfTextWriter writer = PdfTextWriter(&document);
+		for (int64 i = 0; i < pages.Count(); ++i) writer.Page(i + 1, pages[i]);
+		text = writer.Text();
+		return true;
+	}
+}

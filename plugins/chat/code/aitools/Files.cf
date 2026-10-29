@@ -1,6 +1,7 @@
 include "api/Plugin.ch"
 include "Files.ch"
 include "run/EditMiss.ch"
+include "run/EditIndent.ch"
 include "LineDiff.ch"
 include "LspQuery.ch"
 include "chats/Roots.ch"
@@ -59,48 +60,99 @@ namespace Ai
 
 	// --- Edits -------------------------------------------------------------------------------------------------------
 
-	static int64 Occurrences(Core::StringView text, Core::StringView part, int64& first) {
-		first = -1;
-		int64 count = 0;
-		int64 at = 0;
-		while (at <= text.ByteLength() - part.ByteLength()) {
-			const int64 found = text.Substring(at, text.ByteLength() - at).IndexOf(part);
-			if (found < 0) break;
-			if (first < 0) first = at + found;
-			count += 1;
-			at += found + part.ByteLength();
-		}
-		return count;
+	// Where `old` is in a file: a file may break lines with "\r\n", or with both (an editor added "\n" lines to a "\r\n"
+	// file), so each break of old matches either.
+	struct OldMatch
+	{
+		public int64 m_Start;
+		public int64 m_End;
 	}
 
-	// A model writes "\n"; a file may break lines with "\r\n".
+	// Where `old` read from `at` in `text` ends, or -1.
+	static int64 MatchEnd(Core::StringView text, int64 at, Core::StringView old) {
+		int64 t = at;
+		for (int64 o = 0; o < old.ByteLength(); ++o) {
+			const int32 c = old.ByteAt(o);
+			if (c == '\r' && o + 1 < old.ByteLength() && old.ByteAt(o + 1) == '\n') continue;
+			if (c == '\n' && t + 1 < text.ByteLength() && text.ByteAt(t) == '\r' && text.ByteAt(t + 1) == '\n') t += 1;
+			if (t >= text.ByteLength() || text.ByteAt(t) != c) return -1;
+			t += 1;
+		}
+		return t;
+	}
+
+	static Core::Array<OldMatch> FindOld(Core::StringView text, Core::StringView old) {
+		Core::Array<OldMatch> found;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int64 end = MatchEnd(text, at, old);
+			if (end < 0) {
+				at += 1;
+				continue;
+			}
+			OldMatch match;
+			match.m_Start = at;
+			match.m_End = end;
+			found.Push(match);
+			at = end;
+		}
+		return found;
+	}
+
+	// `text` with each line break "\r\n" (`crlf`) or "\n": a model writes "\n".
 	static Core::String WithBreaks(Core::StringView text, bool crlf) {
-		if (!crlf) return Core::String(text);
 		Core::StringBuilder out;
 		for (int64 i = 0; i < text.ByteLength(); ++i) {
-			if (text.ByteAt(i) == '\n' && (i == 0 || text.ByteAt(i - 1) != '\r')) out.AppendByte('\r');
-			out.AppendByte(text.ByteAt(i));
+			const int32 c = text.ByteAt(i);
+			if (c == '\r' && i + 1 < text.ByteLength() && text.ByteAt(i + 1) == '\n') continue;
+			if (c == '\n' && crlf) out.AppendByte('\r');
+			out.AppendByte(c);
 		}
 		return out.ToString();
 	}
 
-	static Core::String ReplaceAll(Core::StringView text, Core::StringView old, Core::StringView replacement) {
+	// Counts the breaks of `text` from `start` to `end`: "\r\n" ones and "\n" ones.
+	static void CountBreaks(Core::StringView text, int64 start, int64 end, int64& crlf, int64& lf) {
+		crlf = 0;
+		lf = 0;
+		for (int64 i = start; i < end; ++i) {
+			if (text.ByteAt(i) != '\n') continue;
+			if (i > 0 && text.ByteAt(i - 1) == '\r') crlf += 1;
+			else lf += 1;
+		}
+	}
+
+	static bool MostlyCrlf(Core::StringView text) {
+		int64 crlf = 0;
+		int64 lf = 0;
+		CountBreaks(text, 0, text.ByteLength(), crlf, lf);
+		return crlf > lf;
+	}
+
+	// Whether a replacement breaks with "\r\n": as most of the lines it replaces do, on a tie as most of the file's do.
+	static bool ReplacesCrlfLines(Core::StringView text, const OldMatch& match) {
+		const int64 lineEnd = text.IndexOf('\n', match.m_End - 1);
+		int64 crlf = 0;
+		int64 lf = 0;
+		CountBreaks(text, match.m_Start, lineEnd < 0 ? text.ByteLength() : lineEnd + 1, crlf, lf);
+		return crlf == lf ? MostlyCrlf(text) : crlf > lf;
+	}
+
+	static Core::String Replaced(Core::StringView text, const Core::Array<OldMatch>& found, Core::StringView replacement) {
 		Core::StringBuilder out;
 		int64 at = 0;
-		for (;;) {
-			const int64 found = text.Substring(at, text.ByteLength() - at).IndexOf(old);
-			if (found < 0) break;
-			out.Append(text.Substring(at, found));
-			out.Append(replacement);
-			at += found + old.ByteLength();
+		for (const OldMatch& match : found) {
+			out.Append(text.Substring(at, match.m_Start - at));
+			out.Append(WithBreaks(replacement, ReplacesCrlfLines(text, match)).View());
+			at = match.m_End;
 		}
 		out.Append(text.Substring(at, text.ByteLength() - at));
 		return out.ToString();
 	}
 
-	static bool ApplyOne(Core::String& text, const Serialization::DomNode& edit, int64 number, bool crlf, Core::String& error) {
-		Core::String old = WithBreaks(edit.Member("old").AsView(), crlf);
-		Core::String replacement = WithBreaks(edit.Member("new").AsView(), crlf);
+	static bool ApplyOne(Core::String& text, const Serialization::DomNode& edit, int64 number, Core::String& error) {
+		Core::StringView old = edit.Member("old").AsView();
+		Core::StringView replacement = edit.Member("new").AsView();
 		Core::StringBuilder which;
 		which.Append("edit ");
 		which.AppendInt(number);
@@ -108,33 +160,33 @@ namespace Ai
 			error = which.ToString() + ": old is empty; to create or overwrite a file use fs_write";
 			return false;
 		}
-		int64 first = -1;
-		const int64 count = Occurrences(text.View(), old.View(), first);
-		if (count == 0) {
-			Core::String miss = EditMiss(text.View(), old.View());
-			error = which.ToString() + ": old was not found" + (miss.IsEmpty() ? Core::String("; no part of it is in the file: is it the right file?") : Core::String("; ") + miss.View()) + "; copy the text from the file exactly, tabs included";
+		Core::Array<OldMatch> found = FindOld(text.View(), old);
+		if (found.IsEmpty()) {
+			const bool crlf = MostlyCrlf(text.View());
+			Core::String fileOld = WithBreaks(old, crlf);
+			if (ReplaceShifted(text.View(), fileOld.View(), WithBreaks(replacement, crlf).View(), text)) return true;
+			if (ReplaceReindented(text.View(), fileOld.View(), WithBreaks(replacement, crlf).View(), text)) return true;
+			Core::String miss = EditMiss(text.View(), fileOld.View());
+			error = which.ToString() + ": old was not found" + (miss.IsEmpty() ? Core::String("; no part of it is in the file: is it the right file?") : Core::String("; ") + miss.View()) + "; copy the text from the file exactly, tabs included - and read those lines again first if you copied them from an earlier read: the file may have changed since (another chat, the editor, a formatter)";
 			return false;
 		}
-		if (count > 1 && !edit.Member("replace_all").AsBool()) {
+		if (found.Count() > 1 && !edit.Member("replace_all").AsBool()) {
 			which.Append(": old is found ");
-			which.AppendInt(count);
+			which.AppendInt(found.Count());
 			which.Append(" times; add surrounding lines to make it unique, or set replace_all");
 			error = which.ToString();
 			return false;
 		}
-		if (count > 1) text = ReplaceAll(text.View(), old.View(), replacement.View());
-		else text = (Core::String(text.View().Substring(0, first)) + replacement.View()) + text.View().Substring(first + old.ByteLength(), text.ByteLength() - first - old.ByteLength());
+		text = Replaced(text.View(), found, replacement);
 		return true;
 	}
 
 	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error) {
-		const bool crlf = text.Contains(Core::StringView("\r\n"));
 		result = Core::String(text);
 		for (int64 i = 0; i < edits.Count(); ++i)
-			if (!ApplyOne(result, edits.At(i), i + 1, crlf, error)) return false;
+			if (!ApplyOne(result, edits.At(i), i + 1, error)) return false;
 		return true;
 	}
-
 	// --- The tools ---------------------------------------------------------------------------------------------------
 
 	Core::String ToolPath(Core::StringView path) {
@@ -166,20 +218,108 @@ namespace Ai
 		return plan;
 	}
 
+	const int64 c_SameNamedMostPaths = 5;
+
+	Core::String SameNamedGlob(Core::StringView path) {
+		int64 start = path.ByteLength();
+		while (start > 0 && path.ByteAt(start - 1) != '/' && path.ByteAt(start - 1) != '\\') start -= 1;
+		return Core::String("**/") + path.Substring(start, path.ByteLength() - start);
+	}
+
+	static bool Excluded(Core::StringView path) {
+		for (const Core::String& glob : IED::DefaultExcludes())
+			if (IED::GlobMatch(glob.View(), path)) return true;
+		return false;
+	}
+
+	static bool InSkippedFolder(Core::StringView path) {
+		for (int64 i = 0; i < path.ByteLength(); ++i)
+			if (path.ByteAt(i) == '/' && Excluded(path.Substring(0, i))) return true;
+		return false;
+	}
+
+	Core::String OnlySourceFile(const Core::Array<Core::String>& found) {
+		Core::String only;
+		for (const Core::String& path : found) {
+			if (InSkippedFolder(path.View())) continue;
+			if (!only.IsEmpty()) return Core::String();
+			only = path;
+		}
+		return only;
+	}
+
+	// The workspace's files named like the path that missed (`found`): where it most likely meant.
+	static Core::String MissedReadProblem(Core::StringView path, const Core::Array<Core::String>& found) {
+		Core::StringBuilder out;
+		out.Append("fs_read: no file ");
+		out.Append(path);
+		if (found.IsEmpty()) {
+			out.Append("; fs_glob finds files by name");
+			return out.ToString();
+		}
+		out.Append("; files of that name:");
+		for (int64 i = 0; i < found.Count() && i < c_SameNamedMostPaths; ++i) {
+			out.Append(" ");
+			out.Append(found[i].View());
+		}
+		if (found.Count() > c_SameNamedMostPaths) out.Append(" ...");
+		return out.ToString();
+	}
+
+	// The path with '/' separators and lowercase letters, for comparing Windows paths.
+	static Core::String ComparablePath(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) {
+			int32 c = path.ByteAt(i);
+			out.AppendByte(c == '\\' ? '/' : (c >= 'A' && c <= 'Z' ? c + 32 : c));
+		}
+		return out.ToString();
+	}
+
+	// "ied:/C4/Bedrock/a.cf" for an absolute path inside the root a plugin names "ied" (developer mode's IED source),
+	// "" when no such root holds it: such a file is read through its root, not as a file outside the workspace.
+	static Core::String RootFormOf(const ToolInvocation& call, Core::StringView requested) {
+		RootTarget root;
+		Core::String problem;
+		if (!OpenRoot(call.m_Ws.m_Id.View(), Core::StringView("ied"), root, problem)) return Core::String();
+		Core::String folder = ComparablePath(root.m_Ws.m_Root.View());
+		if (!folder.View().EndsWith(Core::StringView("/"))) folder += "/";
+		if (!ComparablePath(requested).View().StartsWith(folder.View())) return Core::String();
+		Core::StringView inside = requested.Substring(folder.ByteLength(), requested.ByteLength() - folder.ByteLength());
+		if (inside.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append(root.m_Shown.View());
+		for (int64 i = 0; i < inside.ByteLength(); ++i) out.AppendByte(inside.ByteAt(i) == '\\' ? '/' : inside.ByteAt(i));
+		return out.ToString();
+	}
+
 	static ToolOutcome ReadRun(const ToolInvocation& call) {
 		Core::String path = ReadPath(call);
 		Core::String text;
 		Core::String problem;
+		Core::String missed;
 		if (path.View().StartsWith(Core::StringView("file:"))) {
-			if (!IED::LspFileText(call.m_Ws, path.View(), text, problem)) return ToolError((Core::String("fs_read: ") + problem.View()).View());
+			if (!IED::LspFileText(call.m_Ws, path.View(), text, problem)) {
+				Core::String inRoot = RootFormOf(call, call.m_Args.Member("path").AsView());
+				if (!inRoot.IsEmpty()) return ToolError(((Core::String("fs_read: that file is in IED's source checkout: read it as ") + inRoot) + " (fs_read takes the root's paths)").View());
+				return ToolError((Core::String("fs_read: ") + problem.View()).View());
+			}
 		}
 		else {
 			IED::HostLock guard(*call.m_Context);
+			if (!IsFolderRoot(call.m_Ws) && !IED::Exists(call.m_Ws, path.View())) {
+				Core::Array<Core::String> found = IED::ExpandGlob(call.m_Ws.m_Root.View(), SameNamedGlob(path.View()).View());
+				Core::String only = OnlySourceFile(found);
+				if (only.IsEmpty()) return ToolError(MissedReadProblem(path.View(), found).View());
+				missed = path;
+				path = only;
+			}
 			text = TextAsEdited(call.m_Ws, path.View());
 		}
 		const int64 offset = call.m_Args.Member("offset").IsValid() ? call.m_Args.Member("offset").AsInt() : 1;
 		const int64 limit = call.m_Args.Member("limit").IsValid() ? call.m_Args.Member("limit").AsInt() : c_ReadMostLines;
 		Core::String numbered = NumberedLines(text.View(), offset, limit < c_ReadMostLines ? limit : c_ReadMostLines);
+		if (!missed.IsEmpty()) numbered = ((((Core::String("[no file ") + missed.View()) + "; read ") + path.View()) + ", the only file of that name outside build output]\n") + numbered.View();
 		Core::StringBuilder preview;
 		preview.Append(call.m_Shown.View());
 		preview.Append(path.View());
@@ -324,12 +464,6 @@ namespace Ai
 		return Written(call, path.View(), before.View(), after.View(), plan);
 	}
 
-	static bool Excluded(Core::StringView path) {
-		for (const Core::String& glob : IED::DefaultExcludes())
-			if (IED::GlobMatch(glob.View(), path)) return true;
-		return false;
-	}
-
 	// `shown` goes before each path: the root's alias, so the paths can be passed back ("ied:/").
 	static void ListFolder(const FS::Path& root, Core::StringView folder, Core::StringView shown, int64 depth, int64 most, Core::StringBuilder& out, int64& count) {
 		FS::Directory listing = FS::Directory((folder.IsEmpty() ? root : root / folder).CStr());
@@ -407,7 +541,7 @@ namespace Ai
 	}
 
 	void AddFileTools(ToolRegistry& registry) {
-		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers - a workspace file, or by its absolute path a file outside it that the code tools named. Up to 400 lines per call; use offset to read on. For one function or type, code_read_symbol reads just it. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
+		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers - a workspace file, or by its absolute path a file outside it that the code tools named (any other file outside the workspace: shell_run with type, or cat). Up to 400 lines per call; use offset to read on. A path that misses reads the one file of its name outside build output, and says so. For one function or type, code_read_symbol reads just it. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path; plugins:/<plugin id>/<path> for a plugin's files (read-only)\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		read->m_Plan = ReadPlan;
@@ -420,7 +554,7 @@ namespace Ai
 		write->m_Plan = WritePlan;
 		write->m_Run = WriteRun;
 		registry.Add(write);
-		ToolSpec* edit = Spec("fs_edit", "Replace exact text in a file: each edit's old text must occur once (or set replace_all); all edits apply or none. Copy old exactly from fs_read, without the line numbers; for a long block, clipboard_copy its lines and write old as {{clip:<name>}}. Example: fs_edit({\"path\": \"src/config.txt\", \"edits\": [{\"old\": \"count = 0\", \"new\": \"count = 1\"}]})",
+		ToolSpec* edit = Spec("fs_edit", "Replace exact text in a file: each edit's old text must occur once (or set replace_all; an old found nowhere but in one place indented by whole tabs more or less, or whose later lines are indented otherwise - the file was formatted since - is replaced there, new shifted as its first line); all edits apply or none. Copy old exactly from fs_read, without the line numbers; for a long block, clipboard_copy its lines and write old as {{clip:<name>}}. Example: fs_edit({\"path\": \"src/config.txt\", \"edits\": [{\"old\": \"count = 0\", \"new\": \"count = 1\"}]})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"edits\": {\"type\": \"array\", \"minItems\": 1, \"items\": {\"type\": \"object\", \"properties\": {\"old\": {\"type\": \"string\"}, \"new\": {\"type\": \"string\"}, \"replace_all\": {\"type\": \"boolean\"}}, \"required\": [\"old\", \"new\"], \"additionalProperties\": false}}}, \"required\": [\"path\", \"edits\"], \"additionalProperties\": false}",
 			ToolClass::Write, false);
 		edit->m_Plan = EditPlan;

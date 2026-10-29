@@ -340,6 +340,23 @@ namespace Scripting
 		return false;
 	}
 
+	// The template instance an alias names (`alias IntBox = Box<int32>;` for `IntBox::Size()`), or null: an instance's
+	// members are in its own scope, never under the alias's name, so a call through the alias takes the instance as its
+	// receiver (BUG-422). An alias of a plain type keeps the lookup by name, which finds its members.
+	const ObjectType* ExprLowerer::AliasedInstance(const AstNode* base) const
+	{
+		const Core::String path = QualifierPath(base);
+		if (path.empty()) return nullptr;
+		// Written without template arguments, a name that is an instance can only be an alias of one.
+		if (const auto* qualType = dynamic_cast<const QualTypeNode*>(base)) base = qualType->BaseName().Get();
+		if (const auto* written = dynamic_cast<const NamespaceQualifiedNameNode*>(base); written && HasTemplateArguments(*written)) return nullptr;
+		auto type = m_Ctx.queries().QueryType(path, m_Ctx.unitId, m_Ctx.scope);
+		if (!type.Ok() || !type.value) return nullptr;
+		const auto* instance = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(type.value));
+		return instance && !instance->GetTemplateArguments().Empty() ? instance : nullptr;
+	}
+
+
 	// The type a qualifier or a composite literal's prefix names (`E`, `Ns::C`, `Box<int32>`, `Outer<float>::Inner`,
 	// a bound `T`), or null when it names a namespace or no type. Naming an instance that cannot be made is an error.
 	QueryResult<const Type*> ExprLowerer::QualifierType(const AstNode* base) const

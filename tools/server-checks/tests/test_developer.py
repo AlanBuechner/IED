@@ -123,13 +123,18 @@ class DeveloperTests(SourceCase):
 		"""What developer mode is for (owner, 2026-10-23): an agent fixing IED or the C4 toolchain in auto mode edits and
 		builds without the owner approving each step."""
 		chat_id, topic = await self.chat(mode="agent", permission="auto")
+		os.makedirs(os.path.join(self.home, "bin"), exist_ok=True)
+		shutil.copy(os.path.join(os.environ["SystemRoot"], "System32", "hostname.exe"), os.path.join(self.home, "bin", "built.exe"))
 		self.model.queue(call_step("fs_write", {"path": "ied:/notes.txt", "content": "fixed\n"}, "w1"),
-			call_step("shell_run", {"command": "echo built", "cwd": "ied:/"}, "s1"), text_step("Written."))
+			call_step("shell_run", {"command": "echo built", "cwd": "ied:/"}, "s1"),
+			call_step("program_run", {"program": "ied:/bin/built.exe"}, "p1"), text_step("Written."))
 		await self.turn(chat_id, "write it")
 		self.assertFalse([f for f in self.frames if f.get("kind") == "approval.request"], "nothing asked")
 		with open(os.path.join(self.home, "notes.txt"), encoding="utf-8") as f:
 			self.assertEqual("fixed\n", f.read())
-		self.assertIn("built", self.tool_results()["s1"])
+		results = self.tool_results()
+		self.assertIn("built", results["s1"])
+		self.assertIn("exit 0 after", results["p1"], "program_run names a program of the source by its ied:/ path")
 
 	async def test_allow_for_this_chat_covers_the_writes_its_rule_names(self):
 		"""In ask mode a write into the source asks; the owner's "Allow for this chat" lets the chat's later writes its

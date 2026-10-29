@@ -1,7 +1,8 @@
 """Packages: versioned projects from git repositories (IED docs/31, Nuke/README.md section 12).
 
 Each project names the packages it uses in [dependencies] (a source - "<repository URL>/<folder>" - and a version);
-`sync` makes the packages' projects part of the workspace. While nuke.lock matches the manifests and every locked package is installed, sync only reads
+`sync` makes the packages' projects part of the workspace, and `sync_nuget` installs the NuGet packages the projects -
+the workspace's and the packages' - name (nuget.py). While nuke.lock matches the manifests and every locked package is installed, sync only reads
 files. Otherwise it resolves (resolve.py: one `git ls-remote` per source at most, manifests read from the machine's
 mirrors), installs what changed (install.py) and writes the lock. A source being developed (`nuke package develop`)
 builds from its checkout, and the lock follows the checkout's HEAD."""
@@ -16,7 +17,7 @@ from dataclasses import dataclass, replace
 from .. import fsutil
 from ..errors import NukeError
 from ..manifest import MANIFEST_NAME, is_url, load
-from . import bridge, git, index, install, lockfile, writable
+from . import bridge, git, index, install, lockfile, nuget, writable
 from .resolve import Repositories, Resolver, Root
 from .store import Cache, same_repository, url_key
 
@@ -26,6 +27,7 @@ class Options:
 	log: object
 	cache: Cache = None
 	update: object = None       # None; or a function (repository, line) -> whether to choose that package's version again
+	update_nuget: object = None # None; or a function (NuGet package id) -> whether to choose its version again
 	resolve: bool = False       # resolve even when the lock is current (develop, lock, status --fetch)
 
 
@@ -94,6 +96,12 @@ def _record_needs(spec, state, roots, wanted, local, checkouts, lock, digest, ca
 		return _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, options)
 	except NukeError:
 		return joined, lock
+
+
+def sync_nuget(spec, projects, options):
+	"""{package id, lower case: its install folder} of every NuGet package the projects name (nuget.py)."""
+	cache = options.cache or Cache()
+	return nuget.sync(spec, list(projects.values()), cache.root, options.log, options.update_nuget)
 
 
 def workspace_roots(spec, projects=None):
@@ -212,6 +220,8 @@ def link(spec, projects):
 	for name, project in projects.items():
 		names = []
 		for requirement in project.dependencies:
+			if requirement.nuget is not None:
+				continue        # files, not projects (nuget.py)
 			if requirement.local is not None:
 				target = local_target(spec, projects, project, requirement)
 				names += [target.name] if target is not None else []
@@ -288,7 +298,7 @@ def _resolve(spec, state, roots, wanted, local, checkouts, lock, digest, cache, 
 	result = resolver.solve()
 	for warning in result.warnings:
 		log.warn(warning)
-	new_lock = lockfile.Lock(digest=digest)
+	new_lock = lockfile.Lock(digest=digest, nuget=list(lock.nuget) if lock else [])   # sync_nuget keeps those
 	joined = []
 	wanted_installs = []
 	for selected in result.selected:

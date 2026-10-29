@@ -37,6 +37,12 @@ namespace Ai
 	int64 SectionScore(Core::StringView heading, Core::StringView loweredBody, const Core::Array<Core::String>& words, Core::StringView loweredQuery);
 	// The query's words, lowercased, without the small words that match everything.
 	Core::Array<Core::String> QueryWords(Core::StringView query);
+	// The one heading nearest to `wanted` by edit distance (ignoring case), for a heading no section holds - a typo or a
+	// guessed name ("Math::TMat4" for "Math::Mat4"); -1 when none is close or two are as close.
+	int64 ClosestHeading(const Core::Array<Core::String>& headings, Core::StringView wanted);
+	// docs_read's answer for a path no docs folder holds (`index`: the docs names there are); a Markdown or text path
+	// is told that fs_read reads the workspace's own files.
+	Core::String UnknownDocProblem(Core::StringView path, Core::StringView index);
 	// The system message's list of them: "- c4: C4 reference".
 	Core::String DocsIndex(const Core::Array<DocsFolder*>& folders);
 	// docs_search and docs_read, reading the folders `folders` gives for the call's workspace.

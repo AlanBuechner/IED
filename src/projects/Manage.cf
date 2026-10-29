@@ -283,13 +283,24 @@ namespace Ied
 			values->At(Core::String("name")) = options.m_Name;
 			values->At(Core::String("language")) = options.m_Language.IsEmpty() ? DetectFolder(m_Server, ws, dir).m_Language : options.m_Language;
 			values->At(Core::String("kind")) = options.m_Kind;
-			Core::Array<ProjectStep*> steps = Plan(ws, ws->m_Root, system, "add", values);
-			for (ProjectStep* step : Plan(ws, ws->m_Root, system, "generate", values)) steps.Push(step);
-			Run(steps, log);
+			Core::Array<ProjectStep*> adds = Plan(ws, ws->m_Root, system, "add", values);
+			Core::Array<ProjectStep*> generate = Plan(ws, ws->m_Root, system, "generate", values);
+			Core::String refused;
+			{
+				Threading::UnlockGuard released(m_Server->m_Lock);
+				refused = RunProjectSteps(adds, log);
+			}
+			// The add may refuse a folder the build system has as a project already (its manifest written by hand since the
+			// solution was): generated again, the solution lists it, and the import has done what it was asked.
+			Run(generate, log);
 			FS::Path file = ws->m_Solution ? FS::Path() : SolutionIn(ws->m_Root);
 			if (ws->m_Solution) m_Server->m_Workspaces->SolutionChanged(ws);
 			else if (file.IsEmpty()) throw RpcError(ErrorCode::Unavailable, ((Core::String("the ") + SystemLabel(system).View()) + " project system wrote no solution file: " + StepLogTail(log.View()).View()).View());
 			else m_Server->m_Workspaces->BecomeSolution(ws, file);
+			if (!refused.IsEmpty()) {
+				if (!RootedAt(ws, dir)) throw RpcError(ErrorCode::Unavailable, refused.View());
+				change->m_Notes.Push(Core::String("the build system had the folder as a project already: the solution was generated again and lists it"));
+			}
 		}
 		else {
 			if (ws->m_Solution) RefuseGenerated(ws->m_Solution);

@@ -176,6 +176,9 @@ namespace Scripting
 		auto asking = m_ProjectOfUnit.find(m_ReachUnit);
 		auto declaring = m_ProjectOfUnit.find(symbol.definingUnit);
 		if (asking == m_ProjectOfUnit.end() || declaring == m_ProjectOfUnit.end() || m_Projects->CanUse(asking->second, declaring->second)) return "";
+		// A C declaration the asking project's own bindings repeat is its own as much (BUG-420).
+		for (uint32 unit : symbol.repeatedIn)
+			if (auto repeating = m_ProjectOfUnit.find(unit); repeating != m_ProjectOfUnit.end() && m_Projects->CanUse(asking->second, repeating->second)) return "";
 		const std::string& user = m_Projects->At(asking->second).name;
 		const std::string& owner = m_Projects->At(declaring->second).name;
 		return "'" + name + "' is declared in project '" + Core::String(owner.c_str()) + "', and project '" + Core::String(user.c_str()) +

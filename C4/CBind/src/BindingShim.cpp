@@ -21,6 +21,10 @@
 
 namespace CBind
 {
+	// A C++ wrapper is inline and kept: two bindings whose headers share a type both emit its wrappers, and the linker
+	// keeps one (a COMDAT, BUG-420).
+	static const std::string kCxxWrapper = "extern \"C\" inline __attribute__((used)) ";
+
 	std::string BindingGenerator::GenerateShim(clang::ASTContext& ctx)
 	{
 		const auto* tu = ctx.getTranslationUnitDecl();
@@ -97,7 +101,7 @@ namespace CBind
 				params = paramList(fn, names);
 				const bool cxx = IsCxx(m_Opts);
 				const bool returns = !fn->getReturnType()->isVoidType();
-				out += "// free-function wrapper for " + prefix + name + "\n" + (cxx ? "extern \"C\" " : "")
+				out += "// free-function wrapper for " + prefix + name + "\n" + (cxx ? kCxxWrapper : std::string())
 					+ ret + " cbind_fn_" + name + "(";
 				out += params.empty() && !cxx ? "void" : params;
 				out += ") {\n\t" + std::string(returns ? "return " : "") + prefix + name + "(" + names + ");\n}\n\n";
@@ -145,7 +149,7 @@ namespace CBind
 	auto emitCtor = [&](const clang::CXXConstructorDecl* ctor, const std::string& c4Name) {
 			std::string params, names;
 			params = paramList(ctor, names);
-				out += "// ctor wrapper for " + cxxName + "\nextern \"C\" void "
+				out += "// ctor wrapper for " + cxxName + "\n" + kCxxWrapper + "void "
 					+ WrapperName(symBase, c4Name) + "(void* self";
 			if (!params.empty()) out += ", " + params;
 			out += ") {\n\tnew (self) " + cxxName + "(" + names + ");\n}\n\n";
@@ -159,7 +163,7 @@ namespace CBind
 				const auto* ctor = dyn_cast<clang::CXXConstructorDecl>(m);
 				if (ctor && !ctor->isDeleted() && ctor->getNumParams() == 0)
 				{
-					out += "// implicit default ctor wrapper for " + cxxName + "\nextern \"C\" void "
+					out += "// implicit default ctor wrapper for " + cxxName + "\n" + kCxxWrapper + "void "
 						+ WrapperName(symBase, "Construct") + "(void* self) {\n\tnew (self) "
 						+ cxxName + "();\n}\n\n";
 					break;
@@ -172,7 +176,7 @@ namespace CBind
 		// Destructor ([operator("delete")]): scope exit, delete and the GC each run it exactly once.
 		for (const auto* dtor : dtors)
 		{
-			out += "// dtor wrapper for " + cxxName + "\nextern \"C\" void "
+			out += "// dtor wrapper for " + cxxName + "\n" + kCxxWrapper + "void "
 				+ WrapperName(symBase, "Finalize") + "(void* self) {\n\tstatic_cast<" + cxxName
 				+ "*>(self)->~" + className + "();\n}\n\n";
 		}
@@ -188,7 +192,7 @@ namespace CBind
 					{
 					std::string params, names;
 					params = paramList(m, names);
-					out += "// static wrapper for " + cxxName + "::" + name + "\nextern \"C\" "
+					out += "// static wrapper for " + cxxName + "::" + name + "\n" + kCxxWrapper
 						+ typeStr(m->getReturnType()) + " " + WrapperName(symBase, "st_" + c4Name) + "(";
 					if (!params.empty()) out += params;
 					out += ") {\n\treturn " + cxxName + "::" + name + "(" + names + ");\n}\n\n";
@@ -201,7 +205,7 @@ namespace CBind
 					std::string params, names;
 					params = paramList(m, names);
 						out += "// method wrapper for " + cxxName + "::" + name
-							+ (m->isVirtual() || m->isPureVirtual() ? " [virtual]" : "") + "\nextern \"C\" "
+							+ (m->isVirtual() || m->isPureVirtual() ? " [virtual]" : "") + "\n" + kCxxWrapper
 							+ typeStr(m->getReturnType()) + " " + WrapperName(symBase, c4Name) + "(void* self";
 						if (!params.empty()) out += ", " + params;
 						out += ") {\n\treturn (*static_cast<" + cxxName + "*>(self))." + name + "(" + names + ");\n}\n\n";

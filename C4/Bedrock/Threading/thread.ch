@@ -27,6 +27,7 @@ namespace Threading
 		public static int32 HardwareCount() { return (int32)thread_hardware_count(); }
 		// Gives the rest of this thread's time slice to another thread that is ready to run.
 		public static void Yield() { thread_yield(); }
+		// Sleeps on a high-resolution timer: it ends within about half a millisecond of `nanoseconds`, not on the system's tick.
 		public static void Sleep(int64 nanoseconds) { thread_sleep_ns(nanoseconds); }
 		// Names the calling thread for debuggers, profilers and crash dumps; false when the system cannot.
 		public static bool SetCurrentName(const char* name) { return thread_set_name(name) == 0; }

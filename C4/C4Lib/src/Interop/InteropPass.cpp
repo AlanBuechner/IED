@@ -439,6 +439,7 @@ namespace Scripting
 			std::unordered_set<std::string> boundConstants;
 			bool changed = false;
 			size_t dirOffset = SIZE_MAX; // offset of the first directive whose bindings were appended
+			uint32_t bindingsLine = 0;   // where the first bindings start: the user's lines, then the "\n" before them
 
 			for (const auto& d : directives)
 			{
@@ -499,6 +500,7 @@ namespace Scripting
 					// Append: file-scope declarations are order independent (docs/language/01 1.7), and after the
 					// user's text no user line moves, so diagnostics keep their lines. Record the first bound
 					// directive's offset so the LSP can map F12 on a generated symbol to it.
+					if (bindingsLine == 0) bindingsLine = (uint32_t)std::count(transformed.begin(), transformed.end(), '\n') + 2;
 					transformed = transformed + "\n" + WithoutRepeatedConstants(ReadFileBytes(outFile), boundConstants);
 					if (dirOffset == SIZE_MAX) dirOffset = d.offset;
 					changed = true;
@@ -569,7 +571,7 @@ namespace Scripting
 			}
 
 		if (changed)
-			result.files.push_back({ name, f.absPath, transformed, dirOffset });
+			result.files.push_back({ name, f.absPath, transformed, dirOffset, bindingsLine });
 		}
 
 		return result;

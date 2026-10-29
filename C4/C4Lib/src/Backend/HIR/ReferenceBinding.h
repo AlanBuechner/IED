@@ -13,6 +13,8 @@ namespace Scripting
 		const ReferenceType* Of(const Type* t);
 		/// Why `ref` cannot name a location of type `located`, or "".
 		Core::String Problem(const ReferenceType* ref, const Type* located);
+		/// Why a reference cannot name `location` - a lane or a run of a packed vector, which has no address (D-37) - or "".
+		Core::String Unaddressable(const LValue* location);
 		/// The address `ref` binds to from `init`, as a `pointer`; `name` is what the messages call the reference.
 		QueryResult<const HIRNode*> Address(LoweringContext& ctx, const ReferenceType* ref, const Value& init, const Type* pointer,
 			const Core::String& name);

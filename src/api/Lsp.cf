@@ -193,7 +193,7 @@ namespace IED
 		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.m_Id.View(), "lsp", problem);
 		if (!found) return false;
 		if (server->m_Lsp->NamedText(found, Ied::CanonicalFileUri(uri).View(), text)) return true;
-		problem = (Core::String("no language server of the workspace named ") + uri) + "; only those files are readable from outside it";
+		problem = (Core::String("no language server of the workspace named ") + uri) + "; only those files are readable from outside it - read another file outside the workspace with shell_run (type on Windows, cat elsewhere)";
 		return false;
 	}
 }

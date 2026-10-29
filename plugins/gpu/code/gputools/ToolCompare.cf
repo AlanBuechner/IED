@@ -89,6 +89,17 @@ namespace GpuDebug
 		text.AppendInt(image.Member("width").AsInt());
 		text.Append("x");
 		text.AppendInt(image.Member("height").AsInt());
+		// A volume's or an array's slices scanned (Edit and Replay): the one shown is the one that changed most.
+		const int64 scanned = image.Member("slicesScanned").IsValid() ? image.Member("slicesScanned").AsInt() : 1;
+		if (scanned > 1) {
+			text.Append(", slice ");
+			text.AppendInt(image.Member("slice").AsInt());
+			text.Append(" - ");
+			text.AppendInt(image.Member("slicesChanged").AsInt());
+			text.Append(" of the ");
+			text.AppendInt(scanned);
+			text.Append(" slices changed, this one most");
+		}
 		text.Append("): ");
 		if (!changed) {
 			text.Append("the same in both (no channel differs by more than ");

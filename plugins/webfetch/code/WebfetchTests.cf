@@ -35,7 +35,7 @@ class WebFetchTokenTests {
 		assert_eq((int64)931, (int64)WebFetch::NamedEntity(Core::StringView("Sigma")), "Sigma after the gap at 930");
 		assert_eq((int64)969, (int64)WebFetch::NamedEntity(Core::StringView("omega")), "omega");
 		assert_eq((int64)8212, (int64)WebFetch::NamedEntity(Core::StringView("mdash")), "mdash");
-		assert_eq((int64)-1, (int64)WebFetch::NamedEntity(Core::StringView("nosuch")), "unknown");
+		assert_eq((int64) - 1, (int64)WebFetch::NamedEntity(Core::StringView("nosuch")), "unknown");
 		Same(Core::StringView("&nosuch; & &; AT&T"), WebFetch::DecodeEntities(Core::StringView("&nosuch; & &; AT&T")).View());
 		Same(Core::StringView("x&y"), WebFetch::DecodeEntities(Core::StringView("x&ampy")).View());
 		Core::String e = WebFetch::DecodeEntities(Core::StringView("caf&eacute; &#233;"));
@@ -159,7 +159,9 @@ class WebFetchPageTests {
 		assert_true(WebFetch::KindOf(Core::StringView("application/json"), Core::StringView("{}")) == WebFetch::PageKind::Text, "json");
 		assert_true(WebFetch::KindOf(Core::StringView("application/vnd.api+json"), Core::StringView("{}")) == WebFetch::PageKind::Text, "+json");
 		assert_true(WebFetch::KindOf(Core::StringView("text/plain"), Core::StringView("x")) == WebFetch::PageKind::Text, "text");
-		assert_true(WebFetch::KindOf(Core::StringView("application/pdf"), Core::StringView("%PDF")) == WebFetch::PageKind::Other, "pdf");
+		assert_true(WebFetch::KindOf(Core::StringView("application/pdf"), Core::StringView("%PDF")) == WebFetch::PageKind::Pdf, "pdf");
+		assert_true(WebFetch::KindOf(Core::StringView("application/octet-stream"), Core::StringView("%PDF-1.7\n")) == WebFetch::PageKind::Pdf, "sniffed pdf");
+		assert_true(WebFetch::KindOf(Core::StringView("image/png"), Core::StringView("x")) == WebFetch::PageKind::Other, "image");
 		assert_true(WebFetch::KindOf(Core::StringView(""), Core::StringView("  <!DOCTYPE HTML><p>")) == WebFetch::PageKind::Html, "sniffed html");
 		assert_true(WebFetch::KindOf(Core::StringView(""), Core::StringView("plain words")) == WebFetch::PageKind::Text, "untyped text");
 	}

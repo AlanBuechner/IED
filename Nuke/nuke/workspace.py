@@ -19,8 +19,9 @@ DISCOVERY_SKIP = {"build", "bin", "bin-int", "vendor", "third_party", "toolchain
 
 
 class Workspace:
-	def __init__(self, spec, projects, commands, steps, packages=None):
+	def __init__(self, spec, projects, commands, steps, packages=None, nuget=None):
 		self.spec = spec
+		self.nuget = nuget or {}         # NuGet package id, lower case -> its install folder (packages/nuget.py)
 		self.dir = spec.dir
 		self.name = spec.name
 		self.projects = projects          # name -> ProjectSpec, in load order
@@ -130,16 +131,18 @@ def load_workspace(root, package_options=None):
 	spec, projects = read_projects(root)
 	package_installs.ensure_ignored(spec.dir, spec.packages_dir)     # files only: what git skips matches the folder
 	packages_module.check_local(spec, projects)
+	nuget = {}
 	if packages_module.active(spec, projects):
 		options = package_options or packages_module.Options(Log(messages=sys.stderr))
 		for project in packages_module.sync(spec, projects, options):
 			projects[project.name] = project
 		projects = packages_module.link(spec, projects)
+		nuget = packages_module.sync_nuget(spec, projects, options)
 	packages = _complete_projects(spec, projects)
 	commands = {c.name: c for c in spec.commands}
 	steps = list(spec.steps) + [s for c in spec.commands for s in c.steps]
 	_apply_extensions(spec, projects, commands, steps)
-	return Workspace(spec, projects, commands, steps, packages)
+	return Workspace(spec, projects, commands, steps, packages, nuget)
 
 
 def _implicit_workspace(manifest):

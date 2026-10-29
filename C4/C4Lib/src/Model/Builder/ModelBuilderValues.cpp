@@ -18,6 +18,7 @@ namespace Scripting
 		for (const auto& d : var.GetDeclarators())
 		{
 			const Core::String& name = d.m_NameToken.GetText();
+			if (RepeatsBinding(ctx, var, name)) continue;   // a constant two bindings declare (BUG-420)
 
 			// Shell: the name exists now; the type resolves in pass 2 (forward refs work). The emitted symbol
 			// name is fixed here from the declaring scope - it is stable across any later qualified use.
@@ -112,24 +113,26 @@ namespace Scripting
 			marker.kind = SymbolKind::Function;
 			marker.definingUnit = ctx.unitId;
 			marker.declNode = &fn;
-			ctx.scope->Register(firstName, marker); // name exists; the set fills at instantiation
+			ctx.scope->Register(fn.IsExtensionMethod() ? ExtensionMethodKey(firstName) : firstName, marker); // name exists; the set fills at instantiation
 			return;
 		}
 
 		// Non-template free function / extension method: register the name now (so overloads and
-		// "no function named X" are correct), resolve the signature in pass 2.
+		// "no function named X" are correct), resolve the signature in pass 2. An extension method's name is its
+		// type's, kept apart from the scope's own names (BUG-423).
+		const Core::String key = fn.IsExtensionMethod() ? ExtensionMethodKey(firstName) : firstName;
 		SymbolInfo info;
 			info.kind = SymbolKind::Function;
 			info.definingUnit = ctx.unitId;
 			info.declNode = &fn;
-			if (!ctx.scope->Register(firstName, info)) ErrorAt(ctx, &fn, Redefinition(ctx, "function", firstName));
+			if (!ctx.scope->Register(key, info)) ErrorAt(ctx, &fn, Redefinition(ctx, "function", firstName));
 
 			// A body-less declaration in a HEADER: the entry may already exist with a different visibility
 			// unit (a definition in another file was visited first). Re-point it to THIS declaration's file so
 			// every unit that includes this header sees the symbol - the FunctionRecord keeps its own
 			// definingUnit for body lowering. A definition does not re-point (its file already owns the entry).
 			if (!fn.GetBody())
-				ctx.scope->SetFunctionVisibilityUnit(firstName, ctx.unitId);
+				ctx.scope->SetFunctionVisibilityUnit(key, ctx.unitId);
 
 			m_PendingFuncs.Push({ ctx.scope, firstName, &fn, ctx.unitId });
 	}

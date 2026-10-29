@@ -1,5 +1,5 @@
-"""nuke.lock: the exact commit of every versioned package a workspace uses, and a digest of the requirements it was
-chosen for. Generated, so it lives in the packages folder (packages/nuke.lock) and is ignored with it: nuke.toml is what
+"""nuke.lock: the exact commit of every versioned package a workspace uses, the exact version and hash of every NuGet
+package (nuget.py), and a digest of the requirements the packages were chosen for. Generated, so it lives in the packages folder (packages/nuke.lock) and is ignored with it: nuke.toml is what
 a workspace commits, and each checkout chooses its versions from it on its first command. Read on every command: while
 it matches the manifests and the packages are in place, nothing is resolved and no git process starts. A lock at the
 workspace's root (Nuke before 2026-10-27) moves into the folder the first time it is read."""
@@ -32,10 +32,21 @@ class Locked:
 		return (url_key(self.url), self.line)
 
 
+@dataclass(frozen=True)
+class LockedNuget:
+	id: str             # the NuGet package id as the manifests write it
+	version: str
+	sha256: str         # of the .nupkg, checked whenever it is downloaded again
+
+
 @dataclass
 class Lock:
 	digest: str = ""
 	packages: list = field(default_factory=list)
+	nuget: list = field(default_factory=list)      # LockedNuget, one per package id
+
+	def find_nuget(self, package_id):
+		return next((n for n in self.nuget if n.id.lower() == package_id.lower()), None)
 
 	def find(self, key):
 		return next((p for p in self.packages if p.key == key), None)
@@ -75,6 +86,11 @@ def read(spec):
 				entry["commit"], tuple(entry.get("uses", ()))))
 		except (KeyError, TypeError):
 			raise NukeError(f"{path}: a [[package]] entry lacks source, name, version or commit; `nuke package update` writes it again") from None
+	for entry in data.get("nuget", []):
+		try:
+			lock.nuget.append(LockedNuget(entry["id"], entry["version"], entry["sha256"]))
+		except (KeyError, TypeError):
+			raise NukeError(f"{path}: a [[nuget]] entry lacks id, version or sha256; `nuke package update` writes it again") from None
 	return lock
 
 
@@ -95,6 +111,8 @@ def render(lock):
 			"uses = [" + ", ".join(_string(u) for u in sorted(entry.uses)) + "]",
 			"",
 		]
+	for entry in sorted(lock.nuget, key=lambda n: n.id.lower()):
+		lines += ["[[nuget]]", f"id = {_string(entry.id)}", f"version = {_string(entry.version)}", f"sha256 = {_string(entry.sha256)}", ""]
 	return "\n".join(lines)
 
 

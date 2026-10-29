@@ -86,6 +86,7 @@ include "Types/AliasTemplate.ch"
 include "Types/AliasFields.ch"
 include "Core/ForwardConstUse.ch"
 include "Types/BraceSlots.ch"
+include "Types/UnionCopies.ch"
 include "Functions/BracedArguments.ch"
 include "Core/NestedNamespaceShorthand.ch"
 include "Types/NamedUnions.ch"
@@ -140,6 +141,7 @@ include "OOP/ThisArgument.ch"
 include "OOP/ExtensionMethodTests.ch"
 include "OOP/OverloadedExtensionCtor.ch"
 include "OOP/ProtectedFromDerived.ch"
+include "OOP/NamespacedBaseCreate.ch"
 include "OOP/AbstractAndFinal.ch"
 include "Operators/Power.ch"
 include "Operators/FloatRemainder.ch"
@@ -174,7 +176,7 @@ int32 main() {
 	printf("C4 Comprehensive Test Suite\n");
 	printf("========================================\n\n");
 	fflush(nullptr);
-	
+
 	printf("[DEBUG] Starting Core Tests...\n");
 	fflush(nullptr);
 	// Core Tests
@@ -199,9 +201,9 @@ int32 main() {
 	TestConstEval();
 	TestScopedConstants();
 	TestRuntimeConstants();
-TestEnumAsConstant();
-TestGlobalRuntimeInit();
-TestConstExprArraySizes();
+	TestEnumAsConstant();
+	TestGlobalRuntimeInit();
+	TestConstExprArraySizes();
 	TestBuiltinAliases();
 	TestLiteralTyping();
 	TestMacroConditions();
@@ -209,7 +211,7 @@ TestConstExprArraySizes();
 	TestSizeofForms();
 	TestHoldsPointers();
 	TestVirtualDispatchTemplateInheritance();
-	
+
 	printf("[DEBUG] Starting Operator Tests...\n");
 	fflush(nullptr);
 	// Operator Tests
@@ -231,7 +233,7 @@ TestConstExprArraySizes();
 	TestIncrementDecrement();
 	TestIncrementDecrementValue();
 	TestUnaryMinus();
-	
+
 	printf("[DEBUG] Starting Type Tests...\n");
 	fflush(nullptr);
 	// Type Tests
@@ -258,7 +260,7 @@ TestConstExprArraySizes();
 	TestObjectAssignFromRef();
 	TestObjectAssignTemplate();
 	TestCharPtrLiteral();
-TestCharPtrReturnParam();
+	TestCharPtrReturnParam();
 	TestEnumForwardRef();
 	TestEnumCrossUnit();
 	TestEnumValues();
@@ -290,6 +292,7 @@ TestCharPtrReturnParam();
 	TestAliasFields();
 	TestForwardConstUse();
 	TestBraceSlots();
+	TestUnionCopies();
 	TestBracedArguments();
 	TestNestedNamespaceShorthand();
 	TestNamedUnions();
@@ -309,6 +312,7 @@ TestCharPtrReturnParam();
 	TestPackedVectorEngineDesign();
 	TestPackedVectorStructOfVectors();
 	TestPackedVectorScalarArithmetic();
+	TestPackedVectorLaneReferences();
 	TestPackedArrayArithmetic();
 	TestPackedArrayIndexing();
 	TestPackedArrayAliases();
@@ -336,7 +340,7 @@ TestCharPtrReturnParam();
 	TestOrderIndependence();
 	TestTemplateCompleteness();
 	TestParity();
-	
+
 	printf("[DEBUG] Starting Control Flow Tests...\n");
 	fflush(nullptr);
 	// Control Flow Tests
@@ -352,6 +356,7 @@ TestCharPtrReturnParam();
 	TestRangeForIterator();
 	TestRangeForTemplateContainer();
 	TestRangeForByValueCall();
+	TestRangeForCallRooted();
 	TestDoWhileLoop();
 	TestSwitch();
 	TestSwitchStackedLabels();
@@ -373,7 +378,7 @@ TestCharPtrReturnParam();
 	// value-throw constructs in one function no longer corrupt the SEH frame handler at runtime).
 	TestTryCatch();
 	TestThrowRethrowMix();
-	
+
 	printf("[DEBUG] Starting OOP Tests...\n");
 	fflush(nullptr);
 	// OOP Tests
@@ -381,7 +386,7 @@ TestCharPtrReturnParam();
 	TestMultipleFunctions();
 	TestNamespace();
 	TestThisArgument();
-	
+
 	printf("[DEBUG] Starting Extension Method Tests...\n");
 	fflush(nullptr);
 	// Extension Method Tests (new `extends` syntax)
@@ -399,6 +404,7 @@ TestCharPtrReturnParam();
 	TestExtensionMethodCopyMove();
 	TestOverloadedExtensionCtor();
 	TestProtectedFromDerived();
+	TestNamespacedBaseCreate();
 	TestAbstractAndFinal();
 	TestPower();
 	TestFloatRemainder();
@@ -427,7 +433,7 @@ TestCharPtrReturnParam();
 	TestInheritanceBasic();
 	TestVirtualDispatch();
 	TestPolymorphism();
-	
+
 	printf("[DEBUG] Starting Operator Overload Tests...\\n");
 	// Operator Overload Tests
 	printf("[DEBUG] About to run TestArithmeticOperators...\\n");
@@ -490,7 +496,7 @@ TestCharPtrReturnParam();
 	TestCustomOperatorWithParams();
 	TestCustomOperatorExtensionMethod();
 	TestCustomOperatorBuiltInStillWorks();
-	
+
 	printf("[DEBUG] All tests completed!\n");
 	printf("\n========================================\n");
 	printf("TEST RESULTS\n");
@@ -499,12 +505,12 @@ TestCharPtrReturnParam();
 	printf("FAILED: %d\n", GetFailed());
 	printf("TOTAL:  %d\n", GetPassed() + GetFailed());
 	printf("========================================\n");
-	
+
 	if (GetFailed() == 0) {
 		printf("ALL TESTS PASSED!\n");
 	} else {
 		printf("SOME TESTS FAILED!\n");
 	}
-	
+
 	return GetFailed();
 }

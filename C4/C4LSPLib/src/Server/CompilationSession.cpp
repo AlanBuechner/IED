@@ -384,8 +384,9 @@ void CompilationSession::RunPreprocessPhase()
 			std::string effective;
 			bool hasBindings = false;
 			size_t directiveOffset = SIZE_MAX;
+			uint32 bindingsLine = 0;
 			for (const auto& ir : interop.files)
-				if (ir.absPath == identity) { effective = ir.text; hasBindings = true; directiveOffset = ir.directiveOffset; break; }
+				if (ir.absPath == identity) { effective = ir.text; hasBindings = true; directiveOffset = ir.directiveOffset; bindingsLine = ir.bindingsLine; break; }
 			if (!hasBindings)
 			for (const auto& mr : macroResults)
 				if (mr.absPath == identity) { effective = mr.text; break; }
@@ -393,6 +394,7 @@ void CompilationSession::RunPreprocessPhase()
 				continue;
 
 			m_Compiler->GetSourceManager().SetSourceText(id, effective);
+			m_Compiler->GetSourceManager().GetInfo(id).bindingsLine = bindingsLine;
 
 			if (hasBindings)
 			{

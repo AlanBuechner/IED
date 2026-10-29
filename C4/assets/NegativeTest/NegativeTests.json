@@ -1,4 +1,13 @@
 {
+    "BoolComparedWithNull": {
+        "expect": ["operator '==' cannot compare a 'bool' and a 'void*'"],
+        "reject": ["IR verification failed"],
+        "reason": "BUG-428: a bool is no pointer; it was lifted to one and the IR failed to verify."
+    },
+    "PointerComparedWithInteger": {
+        "expect": ["operator '==' cannot compare a 'int32*' and a 'int64'"],
+        "reason": "BUG-428: only the constant 0 compares with a pointer, as null."
+    },
     "HintLikelyArguments": {
         "expect": ["likely(c) takes one condition"],
         "reason": "likely and unlikely take the one condition they hint."
@@ -1266,6 +1275,14 @@
     "AddressOfVectorIndex": {
         "expect": ["a lane of a packed vector has no address"],
         "reason": "Indexing a packed value names a lane, which has no address (D-37)."
+    },
+    "MutableReferenceToLane": {
+        "expect": ["cannot bind a non-const reference to a vector's lane: a lane of a packed vector has no address"],
+        "reason": "A lane has no address for a mutable reference to name; it used to name the vector's first lane (BUG-429)."
+    },
+    "LocalReferenceToLane": {
+        "expect": ["cannot bind 'z': a lane of a packed vector has no address"],
+        "reason": "A reference local names a location; a lane has none, and used to bind the vector's first lane (BUG-429)."
     },
     "RepeatedLaneWrite": {
         "expect": ["this swizzle names a lane twice, so it cannot be written to: name each lane once (it can still be read, as a splat)"],

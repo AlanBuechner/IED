@@ -1,0 +1,111 @@
+include "EditIndent.ch"
+
+namespace Ai
+{
+	static int64 LeadingTabs(Core::StringView line) {
+		int64 tabs = 0;
+		while (tabs < line.ByteLength() && line.ByteAt(tabs) == '\t') tabs += 1;
+		return tabs;
+	}
+
+	static bool IsBlankLine(Core::StringView line) {
+		for (int64 i = 0; i < line.ByteLength(); ++i)
+			if (line.ByteAt(i) != ' ' && line.ByteAt(i) != '\t' && line.ByteAt(i) != '\r') return false;
+		return true;
+	}
+
+	static Core::StringView AfterTabs(Core::StringView line) {
+		const int64 tabs = LeadingTabs(line);
+		return line.Substring(tabs, line.ByteLength() - tabs);
+	}
+
+	// The line without its leading tabs and spaces.
+	static Core::StringView AfterIndent(Core::StringView line) {
+		int64 at = 0;
+		while (at < line.ByteLength() && (line.ByteAt(at) == '\t' || line.ByteAt(at) == ' ')) at += 1;
+		return line.Substring(at, line.ByteLength() - at);
+	}
+
+	// Whether old's lines match the text's from line `start`: the first `shift` tabs deeper, and the others the same
+	// (`loose`: whatever their indentation). The last old line may be the start of its text line. `end` is the byte after
+	// the match.
+	static bool MatchesAt(const Core::Array<Core::StringView>& lines, const Core::Array<int64>& starts, int64 start,
+		const Core::Array<Core::StringView>& olds, int64 shift, bool loose, int64& end) {
+		if (start + olds.Count() > lines.Count()) return false;
+		for (int64 k = 0; k < olds.Count(); ++k) {
+			Core::StringView line = lines[start + k];
+			Core::StringView old = olds[k];
+			const bool last = k + 1 == olds.Count();
+			if (last && old.IsEmpty()) {
+				end = starts[start + k];   // old ended with its line break
+				continue;
+			}
+			if (IsBlankLine(old) && !last) {
+				if (!IsBlankLine(line)) return false;
+				continue;
+			}
+			const bool anyIndent = loose && k > 0;
+			if (!anyIndent && LeadingTabs(line) != LeadingTabs(old) + shift) return false;
+			Core::StringView body = anyIndent ? AfterIndent(old) : AfterTabs(old);
+			Core::StringView lineBody = anyIndent ? AfterIndent(line) : AfterTabs(line);
+			if (last ? !lineBody.StartsWith(body) : lineBody != body) return false;
+			end = starts[start + k] + (line.ByteLength() - lineBody.ByteLength()) + body.ByteLength();
+		}
+		return true;
+	}
+
+	static bool Shifted(Core::StringView text, int64 shift, Core::StringBuilder& out) {
+		Core::Array<Core::StringView> lines = text.Split('\n');
+		for (int64 k = 0; k < lines.Count(); ++k) {
+			if (k > 0) out.Append("\n");
+			Core::StringView line = lines[k];
+			if (IsBlankLine(line)) out.Append(line);
+			else if (shift >= 0) {
+				for (int64 i = 0; i < shift; ++i) out.Append("\t");
+				out.Append(line);
+			}
+			else if (LeadingTabs(line) < -shift) return false;
+			else out.Append(line.Substring(-shift, line.ByteLength() + shift));
+		}
+		return true;
+	}
+
+	static bool ReplaceMatched(Core::StringView text, Core::StringView old, Core::StringView replacement, bool loose, Core::String& result) {
+		Core::Array<Core::StringView> olds = old.Split('\n');
+		if (olds.IsEmpty() || IsBlankLine(olds[0]) || AfterTabs(olds[0]).StartsWith(Core::StringView(" "))) return false;
+		Core::Array<Core::StringView> lines = text.Split('\n');
+		Core::Array<int64> starts;
+		int64 at = 0;
+		for (Core::StringView line : lines) {
+			starts.Push(at);
+			at += line.ByteLength() + 1;
+		}
+		int64 found = -1;
+		int64 foundShift = 0;
+		int64 foundEnd = 0;
+		for (int64 t = 0; t < lines.Count(); ++t) {
+			const int64 shift = LeadingTabs(lines[t]) - LeadingTabs(olds[0]);
+			int64 end = 0;
+			if ((shift == 0 && !loose) || !MatchesAt(lines, starts, t, olds, shift, loose, end)) continue;
+			if (found >= 0) return false;
+			found = t;
+			foundShift = shift;
+			foundEnd = end;
+		}
+		if (found < 0) return false;
+		Core::StringBuilder out;
+		out.Append(text.Substring(0, starts[found]));
+		if (!Shifted(replacement, foundShift, out)) return false;
+		out.Append(text.Substring(foundEnd, text.ByteLength() - foundEnd));
+		result = out.ToString();
+		return true;
+	}
+
+	bool ReplaceShifted(Core::StringView text, Core::StringView old, Core::StringView replacement, Core::String& result) {
+		return ReplaceMatched(text, old, replacement, false, result);
+	}
+
+	bool ReplaceReindented(Core::StringView text, Core::StringView old, Core::StringView replacement, Core::String& result) {
+		return ReplaceMatched(text, old, replacement, true, result);
+	}
+}

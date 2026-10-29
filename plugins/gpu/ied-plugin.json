@@ -63,10 +63,10 @@
 		"toolCalls": [
 			{
 				"name": "gpu_capture",
-				"description": "Captures a frame: builds the startup project and launches the program its debug configuration names for capture (as GPU > Launch for Capture does), captures the next frame once the program's capture library answers, stops the program, and returns the new capture's id and events. A D3D12 program must hand its device to the capture library (the gpu skill says how); a Vulkan program needs nothing.",
+				"description": "Captures a frame: builds the startup project and launches the program its debug configuration names for capture (as GPU > Launch for Capture does), captures the next frame once the program's capture library answers - or after_seconds later, for a program that loads its scene first (the first frames are often a loading screen) - stops the program, and returns the new capture's id and events. A D3D12 program must hand its device to the capture library (the gpu skill says how); a Vulkan program needs nothing.",
 				"class": "exec",
 				"group": "gpu",
-				"inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "configuration": { "type": "string", "description": "A debug configuration of the project; its default when left out." } }, "additionalProperties": false },
+				"inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "configuration": { "type": "string", "description": "A debug configuration of the project; its default when left out." }, "after_seconds": { "type": "number", "minimum": 0, "maximum": 300, "description": "Seconds to let the program run (load its content) after its capture library answers, before the frame is captured; 0 by default." } }, "additionalProperties": false },
 				"function": "GpuDebug::CaptureTool",
 				"timeoutSeconds": 900
 			},
@@ -90,7 +90,7 @@
 			},
 			{
 				"name": "gpu_resources",
-				"description": "A capture's resources: id, name, type, format, size, the first event that uses it and how many do. `filter` keeps names that hold it.",
+				"description": "A capture's resources: id, name, type, format, size, the first event that names it and how many do - as a target, a copy's end or a root argument; a texture sampled through a descriptor table is not counted (0 is not 'unused': gpu_event_state shows a draw's reads). `filter` keeps names that hold it.",
 				"class": "read",
 				"group": "gpu",
 				"parallelSafe": true,
@@ -174,7 +174,7 @@
 			},
 			{
 				"name": "gpu_replay_with_shader",
-				"description": "Edit and Replay: replaces a draw's or dispatch's shader stage with an edit and replays the frame with it - every pipeline using that shader gets the edit - then says how the output at the event differs from the captured frame (changed pixels, largest difference, where). The edit is a workspace file as the editor holds it (`path`, unsaved changes included) or `source`. D3D12 shaders in HLSL (entry and profile, e.g. PSMain and ps_5_1); Vulkan shaders as the SPIR-V listing gpu_shader shows (language spirv) or in HLSL. A compile error comes back with its lines. The captured shader is put back after, unless `keep` (then the UI shows the edit). Changes no file.",
+				"description": "Edit and Replay: replaces a draw's or dispatch's shader stage with an edit and replays the frame with it - every pipeline using that shader gets the edit - then says how the output at the event differs from the captured frame (changed pixels, largest difference, where; a volume's or an array's output: the slice that changed most, and how many did). The edit is a workspace file as the editor holds it (`path`, unsaved changes included) or `source`. D3D12 shaders in HLSL (entry and profile, e.g. PSMain and ps_5_1); Vulkan shaders as the SPIR-V listing gpu_shader shows (language spirv) or in HLSL. A compile error comes back with its lines. The captured shader is put back after, unless `keep` (then the UI shows the edit). Changes no file.",
 				"class": "read",
 				"group": "gpu",
 				"parallelSafe": false,

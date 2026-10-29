@@ -35,18 +35,23 @@ typedef struct rt_registry {
     uint32_t listenerCount, listenerCapacity, nextListenerId;
     rt_code_index code;            // functions by where their code starts, rebuilt when it is stale
     int codeStale;                 // set by every write: registrations and unloads change the functions
+    volatile LONG64 generation;    // counts registrations and removals (c4_reflect_generation)
 } rt_registry;
 
 // The C ABI carries no registry parameter: this is the process's one registry.
 static rt_registry g_registry = {
     SRWLOCK_INIT, { 0 }, { 0 }, { 0 },
     { 0, 0, type_name }, { 0, 0, variable_symbol }, { 0, 0, variable_name }, { 0, 0, function_symbol }, { 0, 0, function_name },
-    { 0 }, 0, 0, 0, 1, { 0 }, 0 };
+    { 0 }, 0, 0, 0, 1, { 0 }, 0, 0 };
 
 static rt_registry* reading(void) { AcquireSRWLockShared(&g_registry.lock); return &g_registry; }
 static void done_reading(rt_registry* r) { ReleaseSRWLockShared(&r->lock); }
 static rt_registry* writing(void) { AcquireSRWLockExclusive(&g_registry.lock); return &g_registry; }
 static void done_writing(rt_registry* r) { r->codeStale = 1; ReleaseSRWLockExclusive(&r->lock); }
+// A write that changed what an identity says: registered or removed records.
+static void done_changing(rt_registry* r) { InterlockedIncrement64(&r->generation); done_writing(r); }
+
+uint64_t c4_reflect_generation(void) { return (uint64_t)InterlockedCompareExchange64(&g_registry.generation, 0, 0); }
 
 // ------------------------------------------------------------------ registration
 
@@ -73,7 +78,7 @@ const c4_type_info* c4_reflect_register_type(const char* tag, const c4_type_info
     if (!info || !info->name || !info->name[0]) return 0;
     rt_registry* r = writing();
     const c4_type_info* registered = register_type(r, tag ? tag : "", info);
-    done_writing(r);
+    done_changing(r);
     return registered;
 }
 
@@ -110,7 +115,7 @@ const c4_variable_info* c4_reflect_register_variable(const char* tag, const c4_v
     if (!info || !info->symbol || !info->symbol[0]) return 0;
     rt_registry* r = writing();
     const c4_variable_info* registered = register_variable(r, tag ? tag : "", info, address);
-    done_writing(r);
+    done_changing(r);
     return registered;
 }
 
@@ -140,7 +145,7 @@ const c4_function_info* c4_reflect_register_function(const char* tag, const c4_f
     if (!info || !info->symbol || !info->symbol[0]) return 0;
     rt_registry* r = writing();
     const c4_function_info* registered = register_function(r, tag ? tag : "", info);
-    done_writing(r);
+    done_changing(r);
     return registered;
 }
 
@@ -203,7 +208,7 @@ void c4_reflect_register_image(const char* tag, const c4_reflect_image* image)
         if (image->variables[i].symbol && image->variables[i].symbol[0]) register_variable(r, tag, &image->variables[i], image->addresses[i]);
     for (uint32_t i = 0; i < image->functionCount; i++)
         if (image->functions[i].symbol && image->functions[i].symbol[0]) register_function(r, tag, &image->functions[i]);
-    done_writing(r);
+    done_changing(r);
 }
 
 // ------------------------------------------------------------------ unload listeners
@@ -328,7 +333,7 @@ uint32_t c4_reflect_remove_source(const char* tag)
     if (!tag || !tag[0]) return 0;
     rt_registry* r = writing();
     const uint32_t removed = remove_source(r, tag);
-    done_writing(r);
+    done_changing(r);
     return removed;
 }
 

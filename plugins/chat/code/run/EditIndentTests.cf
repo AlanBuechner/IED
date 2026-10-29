@@ -1,0 +1,53 @@
+// editindent: an edit whose old text differs from the file only by a whole-tab shift of every line finds its place.
+
+include "EditIndent.ch"
+
+static Core::StringView IndentView(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.editindent")]
+class EditIndentTests {
+	[test("one_tab_less_in_the_file")]
+	public static void TestOneTabLess() {
+		Core::String result;
+		const bool done = Ai::ReplaceShifted(IndentView("void F() {\n\tif (x)\n\t\tGo();\n\tDone();\n}\n"),
+			IndentView("\t\tif (x)\n\t\t\tGo();"), IndentView("\t\tif (x)\n\t\t\tStop();\n\t\tElse();"), result);
+		assert_true(done, "found one tab out");
+		assert_se("void F() {\n\tif (x)\n\t\tStop();\n\tElse();\n\tDone();\n}\n", result.CStr(), "new shifted the same");
+	}
+
+	[test("one_tab_more_in_the_file_and_a_blank_line")]
+	public static void TestOneTabMore() {
+		Core::String result;
+		const bool done = Ai::ReplaceShifted(IndentView("\t\ta();\n\n\t\tb();\n"), IndentView("\ta();\n\n\tb();\n"),
+			IndentView("\tc();\n"), result);
+		assert_true(done, "found");
+		assert_se("\t\tc();\n", result.CStr(), "replaced with the shift");
+	}
+
+	[test("two_places_or_none_is_no_match")]
+	public static void TestAmbiguousOrMissing() {
+		Core::String result;
+		assert_true(!Ai::ReplaceShifted(IndentView("\tGo();\n\t\tGo();\n"), IndentView("Go();"), IndentView("Stop();"), result), "two places");
+		assert_true(!Ai::ReplaceShifted(IndentView("\tGo();\n"), IndentView("\t\tRun();"), IndentView("Stop();"), result), "nothing alike");
+		assert_true(!Ai::ReplaceShifted(IndentView("\tGo();\n"), IndentView("\tGo();"), IndentView("Stop();"), result), "no shift is the exact match's job");
+	}
+
+	[test("continuation_lines_indented_otherwise")]
+	public static void TestReindentedContinuation() {
+		Core::String result;
+		const bool done = Ai::ReplaceReindented(IndentView("\tif (a\n\t\t\t|| b) {\n\t\tGo();\n\t}\n"), IndentView("\tif (a\n\t\t|| b) {\n\t\tGo();"),
+			IndentView("\tif (a || b) {\n\t\tStop();"), result);
+		assert_true(done, "found though the formatter moved the second line a tab deeper");
+		assert_se("\tif (a || b) {\n\t\tStop();\n\t}\n", result.CStr(), "replaced there");
+		assert_true(!Ai::ReplaceShifted(IndentView("\tif (a\n\t\t\t|| b) {\n"), IndentView("\tif (a\n\t\t|| b) {"), IndentView("x"), result), "the strict shift does not");
+		assert_true(!Ai::ReplaceReindented(IndentView("\tif (a\n\t|| b) {\n\tif (a\n\t\t|| b) {\n"), IndentView("\tif (a\n|| b) {"), IndentView("x"), result),
+			"two places: no match");
+		assert_true(!Ai::ReplaceReindented(IndentView("\t\tif (a\n\t\t|| b) {\n"), IndentView("if (a\n|| c) {"), IndentView("x"), result), "a different line");
+	}
+
+	[test("a_shift_new_cannot_take")]
+	public static void TestUnshiftable() {
+		Core::String result;
+		assert_true(!Ai::ReplaceShifted(IndentView("Go();\n"), IndentView("\tGo();"), IndentView("Stop();"), result), "new has no tab to remove");
+	}
+}

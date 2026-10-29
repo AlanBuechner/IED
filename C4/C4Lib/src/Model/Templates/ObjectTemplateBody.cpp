@@ -93,11 +93,13 @@ namespace Scripting
 
 	QueryResult<void> ObjectTemplateBody::AddAlias(const AliasDefinitionNode& alias)
 	{
-		// A member alias (`alias Type = T;`) is visible to the members after it.
+		// A member alias (`alias Type = T;`) is visible to the members after it, and is a member of the instance
+		// as a nested type is (BUG-416): `Box<int32>::Type` and, in a template, `A::Type` name it.
 		auto at = m_Model.ResolveTypeInternal(*alias.GetAliasedType(), m_UnitId, m_Binding, nullptr);
 		if (!at.Ok()) return Fail("alias: " + at.message);
 		SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = at.value; sym.definingUnit = 0;
 		m_Binding->Register(alias.GetNameToken().GetText(), sym);
+		m_Scope->Register(alias.GetNameToken().GetText(), sym);
 		return Result::Success();
 	}
 

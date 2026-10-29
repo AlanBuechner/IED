@@ -411,15 +411,20 @@ namespace
 			// user file and a default-library file sharing a basename would otherwise both receive the
 			// same (user) text, silently overwriting the library's definitions.
 			std::unordered_map<std::string, const std::string*> byAbs;
+			std::unordered_map<std::string, uint32> bindingsLine;
 			for (const auto& mr : macroResults)
 				byAbs[mr.absPath] = &mr.text;
 			for (const auto& ir : interopFiles)
+			{
 				byAbs[ir.absPath] = &ir.text; // interop text already includes the macro expansion
+				bindingsLine[ir.absPath] = ir.bindingsLine;
+			}
 
 			auto& sm = m_Compiler.GetSourceManager();
 			for (uint32 id = 1; id <= m_Compiler.SourceCount(); ++id)
 			{
-				const auto& info = sm.GetInfo(id);
+				auto& info = sm.GetInfo(id);
+				if (auto line = bindingsLine.find(Scripting::MacroIdentity(info)); line != bindingsLine.end()) info.bindingsLine = line->second;
 				auto it = byAbs.find(Scripting::MacroIdentity(info));
 				// Text the passes left as it was keeps its source and line table: no lexer has read one yet.
 				if (it != byAbs.end() && !(info.source && std::string_view(info.source->Data(), info.source->Size()) == *it->second))

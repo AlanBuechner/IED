@@ -115,6 +115,7 @@ namespace Scripting
 			file.prelude = id == sources.PreludeId();
 			Place(sources, info, file);
 			file.text = std::move(*text);
+			file.bindingsLine = info.bindingsLine;   // the interface text keeps every line in place
 			file.macros = Exported(exportedMacros, MacroIdentity(info));
 			host.files.push_back(std::move(file));
 		}

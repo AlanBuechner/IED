@@ -152,6 +152,16 @@ class ThreadTests {
 		Threading::Thread::Sleep(0);
 		Threading::Thread::Yield();
 	}
+
+	// Ten 2 ms sleeps take about 20 ms; on the system's 15.6 ms tick they took 156 (a frame limiter's sleep).
+	[test("sleep_is_precise")]
+	public static void TestSleepIsPrecise() {
+		const int64 start = clock_now_ns();
+		for (int32 i = 0; i < 10; i++) Threading::Thread::Sleep(2 * kMillisecond);
+		const int64 took = clock_now_ns() - start;
+		assert_true(took >= 20 * kMillisecond, "a sleep lasts at least its time");
+		assert_true(took < 80 * kMillisecond, "and ends near it, not on the next system tick");
+	}
 }
 
 [test("threading.mutex")]

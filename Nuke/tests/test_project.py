@@ -53,7 +53,12 @@ class ProjectCommandTests(WorkspaceTest):
 		tool = self.manifest_of("Tool").project
 		self.assertEqual(("Cli", "executable", (".",)), (tool.name, tool.kind, tool.sources), "a main.cf: an executable; no src: its own folder")
 		self.assertIn("Cli", self.listed())
-		self.assertEqual(1, self.nuke("project", "add", "Tool")[0], "a project already")
+		code, out = self.nuke("project", "add", "Tool")
+		self.assertEqual(0, code, "a project already: nothing to do")
+		self.assertIn("is project Cli already", out)
+		self.assertEqual("[project]\nname = \"Cli\"\nkind = \"executable\"\nsources = [\".\"]\n", read(self.path("Tool", "nuke.toml")), "left as it was")
+		self.assertEqual(0, self.nuke("project", "add", "Tool", "--name", "Cli")[0], "its own name")
+		self.assertEqual(1, self.nuke("project", "add", "Tool", "--name", "Other")[0], "add does not rename")
 		self.assertEqual(1, self.nuke("project", "add", "Missing")[0])
 		self.assertEqual(1, self.nuke("project", "add", ".")[0], "the workspace's own folder")
 

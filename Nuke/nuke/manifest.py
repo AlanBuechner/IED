@@ -15,6 +15,8 @@ SUBSYSTEMS = ("console", "windows")                     # a C4 executable's (C4.
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 VERSION = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
+NUGET_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+NUGET_VERSION = re.compile(r"^\d+(\.\d+){0,3}(-[0-9A-Za-z.-]+)?$")   # NuGet's: up to four numbers, a prerelease label
 PACKAGE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$")
 
 
@@ -126,7 +128,7 @@ class WorkspaceSpec:
 class PackageRequirement:
 	"""A [dependencies] entry. Its source as written is a package in a git repository - "<repository URL>/<the package's
 	folder there>": `url` and `path` - wanted at a version, a branch or a commit (none: any version), or a folder of the
-	project's own package (`local`)."""
+	project's own package (`local`); or a NuGet package (`nuget`: its id) at an exact version or `*` (packages/nuget.py)."""
 	name: str                       # its key in the manifest
 	origin: str                     # the manifest that names it
 	source: str                     # as written
@@ -137,6 +139,7 @@ class PackageRequirement:
 	branch: str = None
 	rev: str = None
 	writable: bool = False          # the workspace develops its repository: a git clone, not read-only installs
+	nuget: str = None               # a NuGet package's id (Microsoft.Direct3D.D3D12); its version is `version`
 
 	def describe(self):
 		if self.local is not None:
@@ -297,18 +300,24 @@ def parse(data, path):
 
 def _dependencies(t, path):
 	"""[dependencies]: name -> { source = "<repository URL>/<package folder>", version | branch | rev, writable } for a
-	package from git, or { source = "<folder from the workspace's root>" } for a project of the same package."""
+	package from git, { source = "<folder from the workspace's root>" } for a project of the same package, or
+	{ nuget = "<package id>", version = "<exact version>" } for a NuGet package."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
 		where = f"dependencies.{key}"
 		if not isinstance(value, dict):
 			raise NukeError(f"{path}: {where} must be a table: {{ source = \"https://host/owner/repo.git/Folder\", version = \"^1.0\" }}, "
-				f"or {{ source = \"Folder\" }} (from the workspace's root) for a project of the same package")
+				f"{{ source = \"Folder\" }} (from the workspace's root) for a project of the same package, or "
+				f"{{ nuget = \"Package.Id\", version = \"1.2.3\" }} for a NuGet package")
 		table = Table(value, where, path)
+		if "nuget" in value:
+			found.append(_nuget_dependency(key, table, path, where))
+			continue
 		source = table.string("source")
 		if not source:
-			raise NukeError(f"{path}: {where} needs its source: the package's repository URL and folder, or a local folder")
+			raise NukeError(f"{path}: {where} needs its source: the package's repository URL and folder, or a local folder "
+				f"(or nuget = \"Package.Id\" for a NuGet package)")
 		version, branch, rev = table.string("version"), table.string("branch"), table.string("rev")
 		writable = table.boolean("writable", False)
 		table.done()
@@ -333,6 +342,23 @@ def _dependencies(t, path):
 		found.append(PackageRequirement(key, path, source, url=url, path=folder,
 			version=version if (version or branch or rev) else "*", branch=branch, rev=rev, writable=writable))
 	return tuple(found)
+
+
+def _nuget_dependency(key, table, path, where):
+	"""{ nuget = "<package id>", version = "<exact version>" | "*" }: NuGet versions carry no compatibility promise (four
+	numbers, prereleases), so one is written exactly; `*` takes the feed's newest stable one, which the lock then keeps."""
+	package_id = table.string("nuget")
+	version = table.string("version", "*")
+	extra = sorted(k for k in table.data if k not in ("nuget", "version"))
+	if extra:
+		raise NukeError(f"{path}: {where}: a NuGet package takes nuget and version only (not {', '.join(extra)})")
+	table.done()
+	if not package_id or not NUGET_ID.match(package_id):
+		raise NukeError(f"{path}: {where}: '{package_id or ''}' is not a NuGet package id (like Microsoft.Direct3D.D3D12)")
+	if version != "*" and not NUGET_VERSION.match(version):
+		raise NukeError(f"{path}: {where}: '{version}' is not a NuGet version: write the exact one (1.620.1, 1.9.2609.5) or \"*\" "
+			f"for the newest stable one")
+	return PackageRequirement(key, path, f"nuget:{package_id}", version=version, nuget=package_id)
 
 
 REMOTE = re.compile(r"^([a-z][a-z0-9+.-]*://[^/]+/[^/]+/[^/]+|[\w.-]+@[\w.-]+:[^/]+/[^/]+)(/.*)?$", re.IGNORECASE)

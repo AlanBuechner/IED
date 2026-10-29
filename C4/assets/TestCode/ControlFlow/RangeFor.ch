@@ -7,6 +7,7 @@ void TestRangeForContinue();
 void TestRangeForIterator();
 void TestRangeForTemplateContainer();
 void TestRangeForByValueCall();
+void TestRangeForCallRooted();
 
 // User-defined iterator protocol types (declared before their extension methods).
 int32[8] g_rfi_data;

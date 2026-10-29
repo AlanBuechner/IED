@@ -8,6 +8,7 @@
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/Lifecycle.h"
 #include "Backend/HIR/MethodReceiver.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Parser/Nodes/Statements/WhileLoopNode.h"
 #include "Parser/Nodes/Statements/ForLoopNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
@@ -186,6 +187,43 @@ namespace Scripting
 		return slot;
 	}
 
+	// Whether evaluating `location` again reads the same place and runs nothing: a local, a global, `this`, and the
+	// fields and bases of those. A Deref's address is a node (a call, a temporary's sequence, a load) evaluated each time.
+	static bool IsStable(const LValue* location)
+	{
+		for (const LValue* at = location; at; at = at->base)
+		{
+			switch (at->kind)
+			{
+			case LValue::Kind::Slot: case LValue::Kind::Global: case LValue::Kind::This: return true;
+			case LValue::Kind::Field: case LValue::Kind::Base: continue;
+			default: return false;
+			}
+		}
+		return false;
+	}
+
+	// A location rooted in a call's result (`Make().list`, `Find()->items`) would call again for `end`, or for every
+	// element, were it used as it is: its address is taken once. The held location keeps the read-only-ness of the one
+	// it holds (through a pointer to const).
+	Value LoopLowerer::HoldRange(const Value& range, BlockNode* initBlock)
+	{
+		const Type* type = TypeHandle::UnwrapToValue(range.type);
+		if (range.isLValue)
+		{
+			if (IsStable(range.lvalue) || !ReferenceBinding::Unaddressable(range.lvalue).empty()) return range;
+			const Type* pointer = AddressType(m_Ctx, range.lvalue);
+			uint32 slot = DeclareHidden(initBlock, pointer, "__range_ref", m_Ctx.AddressAs(pointer, range.lvalue));
+			LValue held; held.kind = LValue::Kind::Deref; held.type = range.lvalue->type;
+			held.addr = m_Ctx.out->NewNode<LoadNode>(pointer, SlotLValue(m_Ctx, slot, pointer));
+			held.ephemeral = range.lvalue->ephemeral;
+			return Value::L(m_Ctx.NewLValue(held));
+		}
+		uint32 slot = DeclareHidden(initBlock, type, "__range_value", range.rvalue);
+		Lifecycle(m_Ctx).ScheduleDestroy(initBlock, SlotLValue(m_Ctx, slot, type));
+		return Value::L(SlotLValue(m_Ctx, slot, type));
+	}
+
 	QueryResult<void> LoopLowerer::LowerRangeFor(const ForLoopNode* n, BlockNode* region)
 	{
 		// for (Type v : range) over an array, a primitive pointer or an __init_list<T>:
@@ -229,6 +267,7 @@ namespace Scripting
 		node->initBlock = m_Ctx.out->NewNode<BlockNode>(nullptr);
 		RegionScope rangeScope(m_Ctx, node->initBlock, "range-for");
 		LoopLabels labels(m_Ctx, node->breakLabel, node->continueLabel);
+		const Value held = HoldRange(range.value, node->initBlock);
 
 		uint32 idxSlot = DeclareHidden(node->initBlock, intT, "__range_i", m_Ctx.out->NewNode<ConstantNode>(intT, ConstantValue::Int(0)));
 
@@ -239,13 +278,13 @@ namespace Scripting
 		{
 			ptrToElem = ts->Pointer(elemType);
 			LValue dataLv; dataLv.kind = LValue::Kind::Field; dataLv.type = ptrToElem;
-			dataLv.base = range.value.isLValue ? range.value.lvalue : nullptr;
+			dataLv.base = held.lvalue;
 			dataLv.field = il->FindMember("data");
 			dataSlot = DeclareHidden(node->initBlock, ptrToElem, "__range_data", m_Ctx.out->NewNode<LoadNode>(ptrToElem, m_Ctx.NewLValue(dataLv)));
 
 			const Type* sizeType = il->FindMember("size")->m_Type;
 			LValue sizeLv; sizeLv.kind = LValue::Kind::Field; sizeLv.type = sizeType;
-			sizeLv.base = range.value.isLValue ? range.value.lvalue : nullptr;
+			sizeLv.base = held.lvalue;
 			sizeLv.field = il->FindMember("size");
 			const HIRNode* szRaw = m_Ctx.out->NewNode<LoadNode>(sizeType, m_Ctx.NewLValue(sizeLv));
 			const HIRNode* szAsInt = (sizeType != intT) ? m_Ctx.out->NewNode<ConvertNode>(szRaw, sizeType, intT) : szRaw;
@@ -268,7 +307,7 @@ namespace Scripting
 			const HIRNode* bodyIdx = m_Ctx.out->NewNode<LoadNode>(intT, SlotLValue(m_Ctx, idxSlot, intT));
 			const LValue* elemLoc = il
 				? BuildIndexLValue(m_Ctx, Value::L(SlotLValue(m_Ctx, dataSlot, ptrToElem)), bodyIdx, elemType, elemSize)
-				: BuildIndexLValue(m_Ctx, range.value, bodyIdx, elemType, elemSize);
+				: BuildIndexLValue(m_Ctx, held, bodyIdx, elemType, elemSize);
 			if (auto r = DeclareLoopVariable(n, vt.value, Value::L(elemLoc), node->body); !r.Ok()) return r;
 			if (auto r = LowerLoopBody(n, node->body); !r.Ok()) return r;
 		}
@@ -333,26 +372,16 @@ namespace Scripting
 		RegionScope rangeScope(m_Ctx, node->initBlock, "range-for-iter");
 		LoopLabels labels(m_Ctx, node->breakLabel, node->continueLabel);
 
-		// The collection (`this` of begin/end). An rvalue range is materialized into a per-loop hidden local; a
-		// pointer range uses *ptr as the receiver.
-		LValue rangeL;
-		if (range.value.isLValue)
+		// The collection (`this` of begin/end), held once (an rvalue range in a per-loop hidden local); a pointer range
+		// uses *ptr as the receiver.
+		LValue rangeL = *HoldRange(range.value, node->initBlock).lvalue;
+		if (rangeL.type && rangeL.type->GetKind() == TypeKind::Pointer)
 		{
-			rangeL = *range.value.lvalue;
-			if (rangeL.type && rangeL.type->GetKind() == TypeKind::Pointer)
-			{
-				const LValue* slotLv = m_Ctx.NewLValue(rangeL);
-				LValue deref; deref.kind = LValue::Kind::Deref;
-				deref.type = TypeHandle::UnwrapToValue(static_cast<const PointerType*>(rangeL.type)->GetPointeeType());
-				deref.addr = m_Ctx.LoadIfNeeded(Value::L(slotLv));
-				rangeL = *m_Ctx.NewLValue(deref);
-			}
-		}
-		else
-		{
-			uint32 collSlot = DeclareHidden(node->initBlock, collType, "__range_coll", range.value.rvalue);
-			rangeL = *SlotLValue(m_Ctx, collSlot, collType);
-			Lifecycle(m_Ctx).ScheduleDestroy(node->initBlock, SlotLValue(m_Ctx, collSlot, collType));
+			const LValue* slotLv = m_Ctx.NewLValue(rangeL);
+			LValue deref; deref.kind = LValue::Kind::Deref;
+			deref.type = TypeHandle::UnwrapToValue(static_cast<const PointerType*>(rangeL.type)->GetPointeeType());
+			deref.addr = m_Ctx.LoadIfNeeded(Value::L(slotLv));
+			rangeL = *m_Ctx.NewLValue(deref);
 		}
 
 		auto protocolCall = [&](const FunctionRecord* rec, const LValue* receiver) {

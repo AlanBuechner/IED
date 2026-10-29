@@ -29,6 +29,7 @@ namespace Scripting
 			BlockNode* body = PartsGuard(root, type);
 			CopyBase(body, type, other);
 			LifecycleFacts::ForEachField(type, [&](const ObjectType::FieldInfo& f) { CopyInto(body, FieldOf(This(type), f), FieldOf(other, f)); });
+			CopyUnionRegions(body, type, other);
 			return QueryResult<void>::Success();
 		}
 		default:

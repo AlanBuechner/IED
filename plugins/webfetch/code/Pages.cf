@@ -1,6 +1,7 @@
 include "Pages.ch"
 include "Html.ch"
 include "Urls.ch"
+include "PdfText.ch"
 
 namespace WebFetch
 {
@@ -33,6 +34,7 @@ namespace WebFetch
 		Core::String media = MediaType(contentType);
 		Core::StringView type = media.View();
 		if (type == "text/html" || type == "application/xhtml+xml") return PageKind::Html;
+		if (type == "application/pdf" || type == "application/x-pdf" || body.StartsWith(Core::StringView("%PDF-"))) return PageKind::Pdf;
 		if (type.StartsWith(Core::StringView("text/")) || type.EndsWith(Core::StringView("+json")) || type.EndsWith(Core::StringView("+xml")) || type == "application/json"
 			|| type == "application/xml" || type == "application/javascript" || type == "application/x-javascript" || type == "application/yaml"
 			|| type == "application/x-yaml" || type == "application/toml" || type == "application/sql" || type == "application/x-sh")
@@ -61,8 +63,7 @@ namespace WebFetch
 		return Core::String(lower.View().Substring(start, end - start));
 	}
 
-	// Windows-1252's characters for 0x80-0x9F (0: none - kept as the C1 control).
-	static int32 Cp1252High(int32 byte) {
+	int32 Cp1252High(int32 byte) {
 		int32[32] table = { 0x20AC, 0, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0, 0x017D, 0,
 			0, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0, 0x017E, 0x0178 };
 		const int32 code = table[byte - 0x80];
@@ -88,8 +89,8 @@ namespace WebFetch
 		Core::String title = Lowercase(page.m_Title.View());
 		Core::StringView t = title.View();
 		return t.Contains(Core::StringView("just a moment")) || t.Contains(Core::StringView("attention required")) || t.Contains(Core::StringView("prove your humanity"))
-			|| t.Contains(Core::StringView("are you a robot")) || t.Contains(Core::StringView("verify you are human")) || t.Contains(Core::StringView("captcha"))
-			|| t.Contains(Core::StringView("ddos-guard")) || t.Contains(Core::StringView("security check"));
+		|| t.Contains(Core::StringView("are you a robot")) || t.Contains(Core::StringView("verify you are human")) || t.Contains(Core::StringView("captcha"))
+		|| t.Contains(Core::StringView("ddos-guard")) || t.Contains(Core::StringView("security check"));
 	}
 
 	// The byte where character `index` of `text` starts (the end when it has fewer).
@@ -212,9 +213,9 @@ namespace WebFetch
 		Core::String packages = home + "/vendor/searxng-packages";
 		const bool impersonate = browser != "off" && FS::FileExists(python.CStr()) && FS::IsDirectory((packages + "/curl_cffi").CStr());
 		Fetched fetched = impersonate
-			? RunFetcher(python.View(), ImpersonatorArguments(url, (Slashes(m_Context->Folder().View()) + "/service/fetch.py").View(), packages.View(),
-				browser.IsEmpty() ? Core::StringView("chrome") : browser, options), options)
-			: RunFetcher(CurlProgram(SettingNode(m_Context, "webfetch.curl").AsView()).View(), CurlArguments(url, options), options);
+		? RunFetcher(python.View(), ImpersonatorArguments(url, (Slashes(m_Context->Folder().View()) + "/service/fetch.py").View(), packages.View(),
+			browser.IsEmpty() ? Core::StringView("chrome") : browser, options), options)
+		: RunFetcher(CurlProgram(SettingNode(m_Context, "webfetch.curl").AsView()).View(), CurlArguments(url, options), options);
 		if (!fetched.m_Error.IsEmpty() && fetched.m_Status == 0) {
 			error = (Core::String("web_fetch could not fetch ") + url + ": ") + fetched.m_Error.View();
 			return null;
@@ -227,7 +228,7 @@ namespace WebFetch
 			text.Append(fetched.m_ContentType.IsEmpty() ? Core::StringView("binary") : fetched.m_ContentType.View());
 			text.Append(" (");
 			text.AppendInt(fetched.m_Body.ByteLength());
-			text.Append(" bytes), not a page or text: web_fetch reads HTML and text (browser_open shows PDFs and images)");
+			text.Append(" bytes), not a page, a PDF or text: web_fetch reads HTML, PDFs and text (browser_open shows images)");
 			error = text.ToString();
 			return null;
 		}
@@ -240,6 +241,15 @@ namespace WebFetch
 		page->m_Cut = fetched.m_Cut;
 		page->m_BodyBytes = fetched.m_Body.ByteLength();
 		page->m_FetchedNs = clock_now_ns();
+		if (kind == PageKind::Pdf) {
+			// A PDF's text in every format: its bytes are no use as text.
+			if (!PdfToText(fetched.m_Body.View(), page->m_Text, page->m_Title, error)) {
+				error = (Core::String("web_fetch could not read the PDF at ") + url + ": ") + error.View();
+				return null;
+			}
+			Keep(page);
+			return page;
+		}
 		Core::String body = AsUtf8(fetched.m_Body.View(), fetched.m_ContentType.View());
 		if (kind == PageKind::Html && format != "raw") page->m_Text = HtmlToText(body.View(), (page->m_FinalUrl.IsEmpty() ? page->m_Url : page->m_FinalUrl).View(), format == "text", page->m_Title);
 		else page->m_Text = body;

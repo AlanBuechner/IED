@@ -50,6 +50,8 @@ namespace Scripting
 		// whose bindings were appended. Lets the LSP map a go-to-definition on a generated symbol
 		// back to the directive line the user can actually see. SIZE_MAX when none was appended.
 		size_t directiveOffset = SIZE_MAX;
+		// The line (1-based) the appended bindings start on: every declaration from it on is a binding's (BUG-420).
+		uint32_t bindingsLine = 0;
 	};
 
 	/// Runs the C/C++ interop pre-pass over a set of macro-expanded C4 sources.

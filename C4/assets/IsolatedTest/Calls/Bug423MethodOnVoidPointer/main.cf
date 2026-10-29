@@ -1,0 +1,8 @@
+struct Leaf { public int32 v; }
+int32 Get() extends Leaf { return this.v; }
+
+int32 Read(void* p) {
+	return p->Get();
+}
+
+int32 main() { return 0; }

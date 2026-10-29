@@ -157,12 +157,12 @@ One binary file:
 
 | Section | Content |
 |---|---|
-| Header | magic `C4IF`, format version (4), build id, compiler version |
+| Header | magic `C4IF`, format version (5), build id, compiler version |
 | Target | the host's LLVM CPU name and feature string (D-62); a target the reading compiler does not know is refused |
 | Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
 | Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
 | Folders | how many source folders the host registered; each project names its own |
-| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text** and the macros it exports |
+| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, the line its C bindings start on (the interop pass appended them: a binding two files repeat is one declaration in a script's compile, as in the host's) and the macros it exports |
 | Symbols | the names of the table's entries, in table order |
 | Reflected types | the qualified names of the types the host registered, so a script does not register them again |
 | Inline bodies | chunks of LLVM bitcode of the host functions a script may inline (section 3.3) |
@@ -310,6 +310,19 @@ Rules:
   front; unloading a tag removes only its own, so the previous one is found again.
 - State that must survive a reload is the host's to carry (for example through `Serialization` and reflection,
   before unloading and after loading).
+- A type's reflection handle is the same in every version of a script (section 2, Reflection): once a new version
+  loads, the handle describes its layout, so objects of the old layout must be read before then.
+  `Reflection::Generation()` changes with every load and unload, so a cache of what reflection says (a codec, a
+  field's offset) knows to read it again.
+
+### 5.1 Prepare, then load
+
+`Host::Prepare(options)` (`c4s_prepare`) is `Compile` without its last step: the script compiles and links (on any
+thread, from the cache when it can) and `Prepared()` says so, but nothing of it is registered or started.
+`Script::Load()` (`c4s_script_load`) is that step: its reflection, roots and thread storage, then its globals' start;
+false, with nothing of it loaded and the diagnostics saying why, when the start fails. A host compiles on a worker and
+loads where nothing reads the reflection a load changes - an engine between two frames, after saving what the old
+version's objects hold. A prepared script that never loads has nothing to unload. ScriptTest `Prepare`.
 
 ---
 

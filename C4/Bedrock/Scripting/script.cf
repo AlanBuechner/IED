@@ -180,6 +180,12 @@ namespace Scripting
 		return new Script(c4s_compile(handle, &request.c), options);
 	}
 
+	Script* Host::Prepare(const ScriptOptions& options)
+	{
+		CompileRequest request(options);
+		return new Script(c4s_prepare(handle, &request.c), options);
+	}
+
 	Script* Host::Reload(Script* script)
 	{
 		CompileRequest request(script->Options());

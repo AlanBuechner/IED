@@ -33,7 +33,7 @@ def read(path):
 
 def make_install(folder, version="1.0.0", commit="abc123", dirty=False):
 	"""A folder that passes as a C4 install (its files are empty; the stub compiler does the work)."""
-	write_files(folder, {f: "" for f in ("C4.exe", "Bedrock/bedrock.ch", "C4Runtime/GC/GCApi.c",
+	write_files(folder, {f: "" for f in ("C4.exe", "Bedrock/bedrock.ch", "C4Runtime/GC/GCApi.c", "CBind/CBind.exe",
 		"toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe")})
 	write_files(folder, {"toolchain.json": json.dumps({"name": "c4", "version": version, "commit": commit, "dirty": dirty})})
 	return folder

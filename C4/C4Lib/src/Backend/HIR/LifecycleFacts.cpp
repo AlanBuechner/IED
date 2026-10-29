@@ -69,6 +69,12 @@ namespace Scripting
 				if (!f.m_IsStatic && !f.m_InUnionRegion && f.m_Type) visit(f);
 		}
 
+		void ForEachUnionRegion(const ObjectType* type, const std::function<void(const ObjectType::FieldInfo&)>& visit)
+		{
+			for (const auto& f : type->GetFields())
+				if (!f.m_IsStatic && f.m_InUnionRegion && f.m_UnionRegionId >= 0 && f.m_UnionRegionFirst && f.m_UnionRegionSize > 0) visit(f);
+		}
+
 		bool NeedsConstruct(const ModelQueries& q, const Type* t)
 		{
 			// A default create with something to run, or a field initializer, anywhere in the object.

@@ -19,7 +19,9 @@ ARGS_STAMP = "compile.args"
 DEPENDENCY_STAMP = "deps.d"
 DESCRIPTION_FILE = "projects.toml"
 TEST_RESULTS_FILE = "results.json"
-TOOLCHAIN_TRACKED = ("Bedrock", "C4Runtime")
+# The toolchain's parts a program is made from: a new CBind binds the program's foreign headers again (C4 keeps each
+# binding while CBind is unchanged), so a CBind fix reaches every program at its next build.
+TOOLCHAIN_TRACKED = ("Bedrock", "C4Runtime", "CBind")
 
 
 @dataclass(frozen=True)

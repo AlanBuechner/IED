@@ -14,9 +14,9 @@ namespace Ai
 	const char* c_PluginsAlias = "plugins";
 
 	// The alias a tool call's arguments name ("ied" for {"path": "ied:/src/a.cf"}), "" for none: a lowercase word of at
-	// least two letters before ":/" in its path, root or cwd ("C:/" is a drive, not an alias).
+	// least two letters before ":/" in its path, root, cwd or program ("C:/" is a drive, not an alias).
 	Core::String RootAlias(const Serialization::DomNode& args);
-	// The arguments (JSON) with "<alias>:/" taken off their path, root and cwd.
+	// The arguments (JSON) with "<alias>:/" taken off their path, root, cwd and program.
 	Core::String WithoutAlias(const Serialization::DomNode& args, Core::StringView rootAlias);
 	// A permission subject "kind(argument)" naming the root: "fs.write(ied:/src/a.cf)".
 	Core::String RootSubject(Core::StringView subject, Core::StringView rootAlias);
@@ -50,4 +50,7 @@ namespace Ai
 	void SplitFirst(Core::StringView path, Core::String& first, Core::String& rest);
 	// `path` joined under `folder` with "/" ("" stays out).
 	Core::String JoinPath(Core::StringView folder, Core::StringView path);
+	// Which of the plugins' `ids` plugins:/<name>/ names: the one that is `name`, else the only one ending in ".<name>"
+	// ("gpu" for ied.gpu, as its skill is named); -1 for none or several.
+	int64 FindPluginId(const Core::Array<Core::String>& ids, Core::StringView name);
 }

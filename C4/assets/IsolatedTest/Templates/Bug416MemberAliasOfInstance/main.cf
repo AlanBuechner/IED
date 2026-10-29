@@ -1,0 +1,25 @@
+// BUG-416: a template instance's member alias was visible only to the instance's own members: `Write<Point>::Component`
+// was "type not found", and through a parameter (`A::Component` in a template) "no static data member".
+struct Point { public float x; public float y; public float z; }
+
+template<T> struct Write { alias Component = T; }
+template<T> struct Read { alias Component = T; }
+template<T> struct Pair { alias First = T; alias Second = T*; public First value; }
+
+template<A> int64 SizeOfComponent() { return sizeof(A::Component); }
+template<A> A::Component* Same(A::Component* p) { return p; }
+template<A> alias ComponentOf = A::Component;
+template<...Ts> int64 SumOfSizes() { return (sizeof(Ts) + ... +0); }
+template<...Access> int64 SizesOfComponents() { return SumOfSizes<ComponentOf<Access>...>(); }
+
+int32 main() {
+	Write<Point>::Component written;
+	written.y = 2.0f;
+	Pair<int32>::First first = 7;
+	Pair<int32>::Second second = &first;
+	Point* same = Same<Read<Point>>(&written);
+	int64 through = SizeOfComponent<Write<Point>>();
+	int64 packed = SizesOfComponents<Write<Point>, Read<int64>>();
+	printf("BUG416 y=%f first=%d through=%lld packed=%lld\n", written.y, *second, through, packed);
+	return written.y == 2.0f && *second == 7 && same == &written && through == 12 && packed == 20 ? 0 : 1;
+}

@@ -235,7 +235,7 @@ class HashMapTests {
 		Core::HashMap<Core::String, int32> ages;
 		ages.Insert(Core::String("ada"), 36);
 		assert_eq((int64)36, HmAgeOf(ages, Core::StringView("ada")), "a const map found by a view");
-		assert_eq((int64)-1, HmAgeOf(ages, Core::StringView("alan")), "a const map without the key");
+		assert_eq((int64) - 1, HmAgeOf(ages, Core::StringView("alan")), "a const map without the key");
 	}
 
 	// A table smaller than a 16-byte control group probes its copies past the end.
@@ -307,5 +307,18 @@ class HashMapTests {
 		assert_true(flips, "one changed bit changes the hash, in every part of the input");
 		assert_true(Core::HashBytes(&bytes[1], 50) == Core::HashBytes(&bytes[1], 50), "unaligned input hashes alike");
 		assert_true(Core::StringView("same").Hash() == Core::String("same").Hash(), "a String hashes as its view");
+	}
+
+	[test("hash_combine")]
+	public static void TestHashCombine() {
+		uint64 ab = Core::HashCombine(Core::HashCombine(0u, 1u), 2u);
+		uint64 ba = Core::HashCombine(Core::HashCombine(0u, 2u), 1u);
+		assert_true(ab != ba, "the order of the values counts");
+		assert_true(ab == Core::HashCombine(Core::HashCombine(0u, 1u), 2u), "the same values hash alike");
+		assert_true(Core::HashCombine(0u, 0u) != Core::HashCombine(1u, 0u), "the seed counts");
+		Core::HashSet<uint64> hashes;
+		for (uint64 a = 0; a < 64; ++a)
+			for (uint64 b = 0; b < 64; ++b) hashes.Add(Core::HashCombine(Core::HashCombine(0u, a), b));
+		assert_eq((int64)4096, hashes.Count(), "every pair of small values hashes apart");
 	}
 }

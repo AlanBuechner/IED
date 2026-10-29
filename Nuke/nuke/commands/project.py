@@ -16,7 +16,8 @@ from .init import LANGUAGE, ied_solution
 USAGE = """nuke project add FOLDER [--name NAME] [--language ID] [--kind KIND] [--ied]
   make an existing folder a project of the workspace: its nuke.toml is written when it has none (the language C4 unless
   --language says; the kind from what is there: a C4 folder with a main.cf is an executable, without one a module, a
-  language Nuke builds through a driver an executable, any other a custom project) and the workspace lists it
+  language Nuke builds through a driver an executable, any other a custom project) and the workspace lists it; a
+  folder that is a project already is left as it is
 nuke project remove NAME [--deleting] [--ied]
   take a project out of the workspace, its folder kept (an entry of [workspace].projects goes, or the folder joins
   exclude); refused while another project depends on it; --deleting: the caller deletes the folder next, so nothing
@@ -104,9 +105,15 @@ def _add(cli, args):
 		raise NukeError(f"{options.folder} is not a folder inside workspace {workspace.name} ({workspace.dir})")
 	if not os.path.isdir(folder):
 		raise NukeError(f"no folder {folder}")
+	if options.kind and options.kind not in KINDS:
+		raise NukeError(f"--kind {options.kind}: one of {', '.join(KINDS)}")
 	known = next((p for p in workspace.projects.values() if fsutil.same_path(p.dir, folder)), None)
 	if known is not None:
-		raise NukeError(f"{_relative(folder, workspace.dir)} is project {known.name} already")
+		# What add makes is there already (a package's folder is found by its nuke.toml): nothing to do, unless asked to rename.
+		if options.name and options.name != known.name:
+			raise NukeError(f"{_relative(folder, workspace.dir)} is project {known.name} already; add cannot rename it to {options.name}")
+		cli.log.note(f"{_relative(folder, workspace.dir)} is project {known.name} already")
+		return workspace.dir
 	name = _write_project(workspace, folder, options)
 	relative = _relative(folder, workspace.dir)
 	_list(workspace, relative)

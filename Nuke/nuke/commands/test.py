@@ -6,6 +6,7 @@ from .. import engine, fsutil, process
 from ..c4 import compile as c4compile
 from ..c4 import ide_bridge
 from . import base
+from .build import copy_files
 
 
 class Test(base.Command):
@@ -35,6 +36,7 @@ class Test(base.Command):
 		finally:
 			if session.workspace.spec.ide and project.kind == "module":
 				ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
+		copy_files(session, project)    # beside the harness, as beside a program: DLLs, shaders, content its tests load
 		argv = [job.output] + (["--filter", session.test_filter] if session.test_filter else []) + session.args
 		session.log.header(f"tests: {project.name}")
 		code = process.run(argv, session.log, cwd=fsutil.join(project.dir, project.working_dir))

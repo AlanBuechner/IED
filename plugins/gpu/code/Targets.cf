@@ -49,7 +49,7 @@ namespace GpuDebug
 
 	Target* Debugger::Launch(const IED::Workspace& ws, Core::StringView program, const Core::Array<Core::String>& args, Core::StringView cwd, const Core::Array<Core::String>& environment) {
 		Core::String native = NativeFolder(ws.m_Id.View());
-		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the GPU debugger's native parts are not built: run nuke build flashbang"));
+		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView(c_NoNativeParts));
 		FS::Path captures = FS::Path(IED::WorkspaceFile(ws, Core::StringView(c_CaptureFolder)).View());
 		FS::MakeDirectories(captures.CStr());
 		Process::StartInfo info;

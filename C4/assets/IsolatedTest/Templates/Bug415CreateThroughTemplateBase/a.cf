@@ -1,0 +1,39 @@
+// BUG-415: a create that calls its template base's create of the same parameter types as the grand-base's was an
+// ambiguous call (the instance's signature keeps its parameter names, so it was not the base's interned one).
+class Base
+{
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(int32 value) { m_Value = value; }
+	public int32 m_Value;
+}
+
+template<Self> class Middle : Base
+{
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(int32 value) { Base::Init(value + 1); }
+}
+
+template<Self> class Upper : Middle<Self>
+{
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(int32 value) { Middle<Self>::Init(value + 100); }
+}
+
+class Leaf : Middle<Leaf>
+{
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(int32 value) { Middle<Leaf>::Init(value + 10); }
+}
+
+class Top : Upper<Top>
+{
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(int32 value) { Upper<Top>::Init(value + 1000); }
+}
+
+int32 main() {
+	Leaf leaf = Leaf(5);
+	Top top = Top(5);
+	printf("BUG415 leaf=%d top=%d\n", leaf.m_Value, top.m_Value);
+	return leaf.m_Value == 16 && top.m_Value == 1106 ? 0 : 1;
+}

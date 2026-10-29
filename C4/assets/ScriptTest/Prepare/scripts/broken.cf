@@ -1,0 +1,7 @@
+namespace Broken
+{
+	struct Half
+	{
+		public int32 a =;
+	}
+}

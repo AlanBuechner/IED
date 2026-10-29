@@ -138,8 +138,11 @@ Replaying to an event re-applies the initial contents and replays every submissi
    leave - a writer the candidates missed (a pixel shader's storage write, say).
 4. **Summary**: one sentence naming the writes by their markers, the draws kept out and why, and the final value.
 
-A draw's row opens the shader debugger at the pixel. Not yet: the shader's output before blending, multisampled
-targets (they cannot be read back yet), and D3D12 render passes' load clears (`BeginRenderPass`) as clears.
+A draw's row opens the shader debugger at the pixel. A multisampled color target (float or normalized) is read through
+its average: the replay resolves it into a temporary texture first (`inspect.cpp`, `ResolveForReading`), so the viewer,
+`gpu_texture` and the pixel's values show what a box resolve gives. Not yet: the shader's output before blending,
+multisampled depth and integer targets (they cannot be resolved; read the program's own resolved copy), and D3D12
+render passes' load clears (`BeginRenderPass`) as clears.
 
 ### Shader debugging
 
@@ -242,8 +245,11 @@ the captured frame.
   no longer fits answers `ok: false` with `diagnostics` (`[{line, column, severity, text}]`, read from fxc's, dxc's and
   glslang's logs and the assembler's), and the replay keeps what it had.
 - **Undoing and the diff**: `revertShader {key?}` puts one shader back, or all; `edits {}` lists them; `editDiff
-  {eid, id?, mip?, maxSize?}` reads the event's output with the captured shaders, then with the edits, and diffs them
-  texel by texel as compare does (`|captured - edited|`, changed pixels, largest and mean difference, the box).
+  {eid, id?, mip?, slice?, maxSize?}` reads the event's output (its render target, else its depth target, else the
+  first storage texture it writes: a dispatch's) with the captured shaders, then with the edits, and diffs them texel
+  by texel as compare does (`|captured - edited|`, changed pixels, largest and mean difference, the box). A volume's
+  or an array's output with no `slice` asked for is scanned slice by slice (up to 256, at most 512 on a side) and the
+  slice that changed most is diffed in full; `slicesScanned` and `slicesChanged` say how many.
 - **The server** (`code/Edits.cf`): `gpu.shaderSource {sessionId, eid, stage}` adds `link`, the workspace file the
   shader was last edited from with its entry, profile and language (kept per program and shader key in
   `.ied/local/gpu-captures/shader-links.json`, so the next capture's edit starts from the same file); `gpu.editShader

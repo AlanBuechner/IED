@@ -17,6 +17,20 @@ namespace Ied
 	const int64 c_LspSweepNs = 1000000000;    // how often idle servers are looked for (lsp.idleStopMinutes)
 	const char* c_LspIdleSetting = "lsp.idleStopMinutes";
 
+	// A transient file closed to keep its server under c_LspTransientMost: its path, and whether the server had published
+	// diagnostics of it - a server speaks only of the files it has open, so those go stale unless withdrawn.
+	class EvictedFile
+	{
+		public Core::String m_Path;
+		public bool m_HadDiagnostics;
+	}
+
+	// The not_found error for a file no language server serves, saying how to read it instead (a shader, a config file).
+	Core::String NoServerMessage(Core::StringView path);
+
+	// The oldest of `language`'s transient files past `most`, taken off its open documents and its published paths.
+	Core::Array<EvictedFile> EvictTransients(LanguageServer* language, int64 most);
+
 	// The server that named a file outside its workspace in a result passed to a client.
 	class NamedFile
 	{
@@ -130,12 +144,15 @@ namespace Ied
 		private LanguageServer* NamerServing(Workspace* ws, Core::StringView uri, bool start);
 		// The server running, or throws unavailable.
 		private void AwaitServer(Call& call, LanguageServer* language);
+		// While plugin code is still starting (it may compute the profiles that serve a file), waits for it with the lock
+		// released, at most a server's start timeout; false at once when none is starting.
+		private bool AwaitPluginCode(Call& call);
 		private LanguageServer* Ready(Call& call, Document* doc);
 		// The server serving plugin code's `path`, running, with the file open on it; throws not_found or unavailable.
 		private LanguageServer* ReadyFor(Call& call, Workspace* ws, Core::StringView path);
 		private void OpenOn(LanguageServer* language, Document* doc);
 		// `path`, held by no document, opened on `language` with its text on disk, or its copy there brought up to date;
-		// past kLspTransientMost the oldest is closed.
+		// past c_LspTransientMost the oldest is closed and what the server published of it withdrawn.
 		private void OpenTransient(LanguageServer* language, Workspace* ws, Core::StringView path);
 		// `method` with `params` (a client's: UTF-16, ied: URIs) to `language` about the file `clientUri` / `serverUri`:
 		// the result for clients.

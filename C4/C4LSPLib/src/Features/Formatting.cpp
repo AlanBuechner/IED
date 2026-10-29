@@ -31,7 +31,7 @@ namespace C4LSP::Features
 		{
 			switch (t)
 			{
-			case TokenType::If: case TokenType::For: case TokenType::While: case TokenType::Switch:
+			case TokenType::If: case TokenType::For: case TokenType::While: case TokenType::Switch: case TokenType::Catch:
 				return true;
 			default:
 				return false;
@@ -58,6 +58,29 @@ namespace C4LSP::Features
 		}
 
 		bool IsCloser(TokenType t) { return t == TokenType::CloseCurl || t == TokenType::CloseParen || t == TokenType::CloseBracket; }
+
+		// The last token of an operand: an operator after it is binary (`f(a) && b`, `x[0] = 1`), after anything
+		// else (`(`, `=`, `return`) it is unary and stays tight.
+		bool IsOperandEnd(TokenType t)
+		{
+			switch (t)
+			{
+			case TokenType::Identifier: case TokenType::Number: case TokenType::Char: case TokenType::Text:
+			case TokenType::True: case TokenType::False: case TokenType::Null: case TokenType::This:
+			case TokenType::CloseParen: case TokenType::CloseBracket:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		// What a `(` right after it calls or constructs, so the two stay tight: `f(`, `a[0](`, `g()(`, `Make<T>(`.
+		// After an operator or another keyword (`= (`, `return (`) the `(` only groups.
+		bool IsCallee(TokenType t)
+		{
+			return t == TokenType::Identifier || t == TokenType::CloseParen || t == TokenType::CloseBracket ||
+				t == TokenType::Greater || t == TokenType::This;
+		}
 
 		int Delta(const Tok& t)
 		{
@@ -151,56 +174,135 @@ namespace C4LSP::Features
 			}
 		}
 
+			// One indentation level per line that leaves openers unclosed, however many it leaves: `Run([&]() {` indents the
+			// lambda's body once, and `});` comes back once - so does a line that starts by closing only some of them
+			// (`}, problem);`, `}) && more) {`, BUG-418). `bonus` is what a level's opening line had (below).
+			struct Level
+			{
+				int open = 0;
+				int bonus = 0;
+			};
+
+			// Leading whitespace and trailing whitespace of every line. A brace-less control header (`if (x)`, `for (...)`,
+			// `else`) indents the next line once more - its bonus - and a `{` alone on the next line is the header's body, at
+			// the header's indentation.
 			void FixIndentationAndTrailing()
 			{
-				int depth = 0; // openers minus closers seen on all previous lines
+				std::vector<Level> levels;
+				int pending = 0;        // the next line's bonus
+				bool afterHeader = false;
+				size_t cursor = 0;      // tokens are in source order: each line's are found by walking on
 				for (uint32 li = 0; li < lineStarts.size(); ++li)
 				{
 					size_t ls = lineStarts[li];
 					size_t nl = text.find('\n', ls);
 					size_t lineEnd = (nl == std::string::npos) ? text.size() : nl;
+					if (lineEnd > ls && text[lineEnd - 1] == '\r')
+						--lineEnd; // a "\r\n" break is both bytes, not trailing whitespace: stripping it mixed a file's breaks (BUG-426)
 
-					// Non-comment token range on this line.
-					uint32 firstIdx = 0, lastIdx = 0; bool hasToken = false;
-					for (uint32 i = 0; i < tokens.size(); ++i)
-						if (LineOf(tokens[i].start) == li && !IsComment(tokens[i].type))
-						{ if (!hasToken) { firstIdx = i; hasToken = true; } lastIdx = i; }
-
-					const Tok* first = nullptr; const Tok* last = nullptr;
-					if (hasToken) { first = &tokens[firstIdx]; last = &tokens[lastIdx]; }
-
-				// Leading whitespace: only ever touched when it is pure whitespace, so a line
-				// whose content starts inside a multi-line comment (`... */ int x`) is left alone.
-				if (first && IsAllWhitespace(text.substr(ls, first->start - ls)))
-				{
-					uint32 target = depth;
-					if (IsCloser(first->type) || IsAccessLabel(firstIdx, lastIdx))
-						target = depth > 0 ? static_cast<uint32>(depth) - 1 : 0;
-					std::string want = IndentString(target);
-					if (text.substr(ls, first->start - ls) != want)
-						AddEdit(li, ls, first->start, want);
-				}
-
-			// A line with no non-comment token at all: collapse stray indentation on otherwise-blank
-			// lines to nothing. Comment-only lines are left alone (comments never get re-indented).
-			if (!first && !last)
-			{
-				std::string content = text.substr(ls, lineEnd - ls);
-				if (!content.empty() && IsAllWhitespace(content))
-					AddEdit(li, ls, lineEnd, "");
-			}
-
-					// Trailing whitespace after the last token: same comment-safety rule.
-					if (last)
+					size_t firstIdx = 0, lastIdx = 0; bool hasToken = false;
+					while (cursor < tokens.size() && tokens[cursor].start < lineEnd + (nl == std::string::npos ? 1 : 0))
 					{
-						size_t trailingLen = lineEnd - last->end;
-						if (trailingLen > 0 && IsAllWhitespace(text.substr(last->end, trailingLen)))
-							AddEdit(li, last->end, lineEnd, "");
+						if (tokens[cursor].start >= ls && !IsComment(tokens[cursor].type))
+						{ if (!hasToken) { firstIdx = cursor; hasToken = true; } lastIdx = cursor; }
+						++cursor;
 					}
 
-					for (uint32 i = firstIdx; hasToken && i <= lastIdx; ++i)
-						depth += Delta(tokens[i]);
+					if (!hasToken)
+					{
+						// No non-comment token: collapse stray indentation on a blank line; a comment-only line is left alone.
+						std::string content = text.substr(ls, lineEnd - ls);
+						if (!content.empty() && IsAllWhitespace(content))
+							AddEdit(li, ls, lineEnd, "");
+						continue;
+					}
+					const Tok& first = tokens[firstIdx];
+					const Tok& last = tokens[lastIdx];
+
+					// Where the line's leading closers return to, and the bonus of the level they close.
+					std::vector<Level> after = levels;
+					int bonus = (first.type == TokenType::OpenCurl && afterHeader && pending > 0) ? pending - 1 : pending;
+					bool partlyClosed = false; // the last leading closer left its level open
+					for (size_t i = firstIdx; i <= lastIdx && IsCloser(tokens[i].type) && !after.empty(); ++i)
+					{
+						partlyClosed = --after.back().open > 0;
+						if (!partlyClosed)
+						{
+							bonus = after.back().bonus;
+							after.pop_back();
+						}
+					}
+					if (partlyClosed) // indented as its level's opening line; the level stays open for the lines after it
+					{
+						bonus = after.back().bonus;
+						after.pop_back();
+					}
+
+					// Leading whitespace: only ever touched when it is pure whitespace, so a line
+					// whose content starts inside a multi-line comment (`... */ int x`) is left alone.
+					if (IsAllWhitespace(text.substr(ls, first.start - ls)))
+					{
+						uint32 target = static_cast<uint32>(bonus);
+						for (const Level& level : after)
+							target += 1 + static_cast<uint32>(level.bonus);
+						if (target > 0 && IsAccessLabel(firstIdx, lastIdx))
+							--target;
+						std::string want = IndentString(target);
+						if (text.substr(ls, first.start - ls) != want)
+							AddEdit(li, ls, first.start, want);
+					}
+
+					// Trailing whitespace after the last token: same comment-safety rule.
+					size_t trailingLen = lineEnd - last.end;
+					if (last.end < lineEnd && IsAllWhitespace(text.substr(last.end, trailingLen)))
+						AddEdit(li, last.end, lineEnd, "");
+
+					int opened = 0;
+					for (size_t i = firstIdx; i <= lastIdx; ++i)
+					{
+						int delta = Delta(tokens[i]);
+						if (delta > 0)
+							++opened;
+						else if (delta < 0 && opened > 0)
+							--opened;
+						else if (delta < 0 && !levels.empty() && --levels.back().open == 0)
+							levels.pop_back();
+					}
+					if (opened > 0)
+						levels.push_back({ opened, bonus });
+					afterHeader = opened == 0 && EndsWithControlHeader(lastIdx);
+					pending = afterHeader ? bonus + 1 : 0;
 				}
+			}
+
+			// Whether the line ending at token `lastIdx` is a control header whose body is on the next line: it ends with
+			// `else`, `do`, or the `)` of `if (`, `for (` or `while (` (a condition may span lines).
+			bool EndsWithControlHeader(size_t lastIdx) const
+			{
+				TokenType type = tokens[lastIdx].type;
+				if (type == TokenType::Else || type == TokenType::Do)
+					return true;
+				return ClosesControlHeader(lastIdx);
+			}
+
+			// Whether token `closeIdx` is the `)` that ends the condition of an `if (`, `for (` or `while (`: what follows
+			// it is the body, never a call of it (`if (x) (*p)->Run();`).
+			bool ClosesControlHeader(size_t closeIdx) const
+			{
+				if (tokens[closeIdx].type != TokenType::CloseParen)
+					return false;
+				int balance = 0;
+				for (size_t j = closeIdx + 1; j-- > 0;)
+				{
+					if (tokens[j].type == TokenType::CloseParen)
+						++balance;
+					else if (tokens[j].type == TokenType::OpenParen && --balance == 0)
+					{
+						TokenType before = j > 0 ? tokens[j - 1].type : TokenType::None;
+						return before == TokenType::If || before == TokenType::For || before == TokenType::While;
+					}
+				}
+				return false;
 			}
 
 			// `public:`, `private:`, `protected:` sit at their class's indentation, one level out from the members.
@@ -227,10 +329,37 @@ namespace C4LSP::Features
 					if (!IsAllWhitespace(gap))
 						continue; // defensive: adjacent tokens' gap is whitespace by construction
 
-					std::optional<std::string> desired = DesiredGap(a.type, b.type, i > 0 ? tokens[i - 1].type : TokenType::None);
+					// A `(` after a control header's `)` starts its body: spaced, not glued as a call would be.
+					bool bodyAfterHeader = b.type == TokenType::OpenParen && ClosesControlHeader(i);
+					// `a > (b)` compares: a template's `>` is never spaced from what it closes (`Make<T>(`), a comparison's is.
+					bool comparedParen = a.type == TokenType::Greater && b.type == TokenType::OpenParen && i > 0 && tokens[i - 1].end < a.start;
+					std::optional<std::string> desired = IsReturnTypeArrow(i) || IsReturnTypeArrow(i + 1) || bodyAfterHeader || comparedParen
+						? std::optional<std::string>(" ")
+						: DesiredGap(a.type, b.type, i > 0 ? tokens[i - 1].type : TokenType::None);
 					if (desired && *desired != gap)
 						AddEdit(LineOf(a.end), a.end, b.start, *desired);
 				}
+			}
+
+			// `) -> T {`: a lambda's return type, spaced on both sides. Member access never reaches a `{` through
+			// type tokens alone (`f()->x) {` meets the `)` first), so it stays glued.
+			bool IsReturnTypeArrow(size_t i) const
+			{
+				if (tokens[i].type != TokenType::Arrow || i == 0 || tokens[i - 1].type != TokenType::CloseParen)
+					return false;
+				for (size_t j = i + 1; j < tokens.size(); ++j)
+				{
+					switch (tokens[j].type)
+					{
+					case TokenType::OpenCurl: return j > i + 1;
+					case TokenType::Identifier: case TokenType::DoubleColon: case TokenType::Star: case TokenType::Ampersand:
+					case TokenType::Less: case TokenType::Greater: case TokenType::Comma: case TokenType::Const:
+						continue;
+					default:
+						return false;
+					}
+				}
+				return false;
 			}
 
 			/// nullopt = no rule for this pair: keep the existing gap untouched.
@@ -258,8 +387,8 @@ namespace C4LSP::Features
 
 			if (aType == TokenType::OpenParen || aType == TokenType::OpenBracket)
 				return ""; // `f(`, `[0]`, constructor calls and generic params (`Vector<int32>`) stay tight - including `{` right after them
-				if (bType == TokenType::OpenParen && !IsControlKeyword(aType))
-					return ""; // tighten `f (` to `f(`; control keywords keep their space via the rule below
+				if (bType == TokenType::OpenParen && IsCallee(aType))
+					return ""; // tighten `f (` to `f(`; after operators and keywords the rules below decide
 			if (aType == TokenType::OpenCurl)
 				return bType == TokenType::CloseCurl ? "" : " "; // `{ statement` house style, but an EMPTY block stays glued: `{}` not `{ }`
 
@@ -270,10 +399,10 @@ namespace C4LSP::Features
 					return " "; // `) {` and `} {` (anonymous bodies, lambdas) get one space
 
 				if (IsBinaryOp(aType))
-					// A binary op gets one space on each side; unary (prev is not a value token, e.g. after '(', ',', '=' or another operator) stays tight.
-					return IsWordLike(prevBeforeA) ? " " : "";
+					// A binary op gets one space on each side; unary (prev ends no operand, e.g. '(', ',', '=', `return` or another operator) stays tight.
+					return IsOperandEnd(prevBeforeA) ? " " : "";
 
-				if (IsBinaryOp(bType) && IsWordLike(aType))
+				if (IsBinaryOp(bType) && IsOperandEnd(aType))
 					return " "; // one space before the binary op too: `x = 1`, `a + b` (unary ops after '('/','/'=' stay tight via the rule above)
 
 				if (aType == TokenType::Else && bType == TokenType::OpenCurl)

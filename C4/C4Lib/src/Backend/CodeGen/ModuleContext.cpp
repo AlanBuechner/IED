@@ -438,17 +438,19 @@ namespace Scripting
 			llvm::Type* ty = base->IsPurePackedVector() ? llvm::ArrayType::get(llvm::Type::getInt8Ty(m_Context), base->GetSize()) : Lower(base);
 			pieces.push_back({ obj->GetBaseOffset(i), ty, base->GetSize() });
 		}
-		// Anonymous-union region members share a byte range: only the FIRST member of each region becomes a
-		// piece; the rest alias it.
-		int lastRegion = -2;
 		for (const auto& f : obj->GetFields())
 		{
 			if (f.m_IsStatic) continue;
-			bool inRegion = f.m_InUnionRegion && f.m_UnionRegionId >= 0;
-			bool alias = inRegion && f.m_UnionRegionId == lastRegion && !f.m_UnionRegionFirst;
-			lastRegion = inRegion ? f.m_UnionRegionId : -2;
-			if (alias) continue;
-			pieces.push_back({ f.m_Offset, Storage(f.m_Type), f.m_Type ? f.m_Type->GetSize() : 1 });
+			if (!f.m_InUnionRegion || f.m_UnionRegionId < 0)
+			{
+				pieces.push_back({ f.m_Offset, Storage(f.m_Type), f.m_Type ? f.m_Type->GetSize() : 1 });
+				continue;
+			}
+			// An anonymous-union region is its bytes, as a named union is: typed as one member, a copy of the object
+			// would carry only that member's fields (BUG-413). The first member stands for the region.
+			if (!f.m_UnionRegionFirst) continue;
+			size_t size = f.m_UnionRegionSize ? f.m_UnionRegionSize : 1;
+			pieces.push_back({ f.m_Offset - f.m_UnionIntraOffset, llvm::ArrayType::get(llvm::Type::getInt8Ty(m_Context), size), size });
 		}
 		return pieces;
 	}

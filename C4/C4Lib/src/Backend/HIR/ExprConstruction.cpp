@@ -162,7 +162,7 @@ namespace Scripting
 			if (!values.Ok()) return QueryResult<std::vector<ConstructionArgument>>::Fail(values.error, values.message);
 			for (const Value& value : values.value)
 			{
-				arg.value = value;
+				arg.value = ThisAsPointer(value);   // `this` is the receiver's address, as in a call (BUG-412)
 				args.push_back(arg);
 			}
 		}

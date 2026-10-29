@@ -101,6 +101,7 @@ namespace Scripting
 						std::to_string(id) + " (a damaged interface)");
 				if (file.prelude) prelude = id;
 				if (file.folder < 0 && !file.library) sources.GetInfo(id).byName = true; // given as text: found by its name, as in the host
+				sources.GetInfo(id).bindingsLine = file.bindingsLine;
 				if (!file.macros.empty()) units.interfaceMacros[id] = TableOf(file.macros);
 			}
 			sources.SetLibrary(LibraryPath(), prelude);

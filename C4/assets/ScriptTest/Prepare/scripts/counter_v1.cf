@@ -1,0 +1,7 @@
+namespace Shared
+{
+	struct Counter
+	{
+		public int32 a;
+	}
+}

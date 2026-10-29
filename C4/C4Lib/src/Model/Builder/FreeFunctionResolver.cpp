@@ -49,6 +49,12 @@ namespace Scripting
 			return fn.IsStatic() && !fn.IsExtensionMethod() && scope && scope->HoldsFileStatics();
 		}
 
+		// What the function is registered under in its scope: an extension method under a key of its own (BUG-423).
+		Core::String ScopeKey(const FunctionDefinitionNode& fn, const Core::String& name)
+		{
+			return fn.IsExtensionMethod() ? ExtensionMethodKey(name) : name;
+		}
+
 		// The ones left keep their order, moved down over the settled ones in one pass.
 		template<typename Pending, typename Settle>
 		bool SettleEach(Core::Vector<Pending>& pending, Settle settle)
@@ -182,7 +188,7 @@ namespace Scripting
 	// A declaration and its definition are one record: the same scope, interned signature and receiver.
 	const FunctionRecord* FreeFunctionResolver::MergeWithDeclaration(const ModelBuilder::PendingFunc& f, const Signature& sig, const Receiver& receiver) const
 	{
-		const SymbolInfo* existing = f.scope->Find(f.name);
+		const SymbolInfo* existing = f.scope->Find(ScopeKey(*f.fn, f.name));
 		if (!existing || existing->kind != SymbolKind::Function) return nullptr;
 		const bool fileStatic = IsFileStatic(*f.fn, f.scope);
 		for (const FunctionRecord* rec : existing->functions)
@@ -211,7 +217,7 @@ namespace Scripting
 		m_Ctx.model->m_RecordBySignature.emplace(sig.type, stored);
 		if (receiver.primitive) m_Ctx.model->m_PrimitiveExtensions[receiver.primitive].Push(stored);
 		if (receiver.object) AddExtensionMethod(f, sig, stored, *receiver.object);
-		f.scope->Register(f.name, SymbolInfo{ SymbolKind::Function }, stored); // grows the overload set (doc 08)
+		f.scope->Register(ScopeKey(*f.fn, f.name), SymbolInfo{ SymbolKind::Function }, stored); // grows the overload set (doc 08)
 		return stored;
 	}
 

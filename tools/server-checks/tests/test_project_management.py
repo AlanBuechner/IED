@@ -360,6 +360,17 @@ class NukeSolutionTests(ProjectManagementCase):
 		self.assertTrue(read(self.path("nuke.toml")).startswith("# the demo\n"), "the manifest's comments stay")
 		self.assertTrue(os.path.exists(self.path("Game", "nuke.toml")), "its files stay")
 
+	async def test_a_folder_nuke_has_already_joins_by_generating_the_solution_again(self):
+		await self.client.request("project.import", {"path": self.folder})
+		await self.shows(["Game"])
+		write(self.path("tools", "hand", "nuke.toml"), "[project]\nkind = \"custom\"\n")
+		added = await self.client.request("project.add", {"wsId": "w1", "folder": "tools/hand"})
+		self.assertEqual("hand", added["project"], added)
+		self.assertTrue(any("had the folder as a project already" in note for note in added["notes"]), added["notes"])
+		await self.shows(["Game", "hand"])
+		write(self.path("tools", "inner", "nuke.toml"), "[workspace]\nname = \"Inner\"\n")
+		await self.refused("unavailable", "is a workspace of its own", "project.add", {"wsId": "w1", "folder": "tools/inner"})
+
 
 class ProjectToolTests(ChatCase):
 	"""The chat's project tools on the same server operations."""

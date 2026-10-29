@@ -62,7 +62,8 @@ namespace Threading
 
 		public void Submit(func<void()> job) { Submit(job, JobPriority::Normal, nullptr); }
 		public void Submit(func<void()> job, JobPriority priority) { Submit(job, priority, nullptr); }
-		// `group`, when given, counts the job until it ends.
+		// `group`, when given, counts the job until it ends: Submit adds it to the group itself, so the caller does not
+		// Add for it (an Add of its own as well leaves the group waiting forever).
 		public void Submit(func<void()> job, JobPriority priority, WaitGroup* group) { Submit(job, priority, group, nullptr); }
 		// `name`, when given, is what a job observer (SetJobObserver) calls the job: a literal, or text that outlives it.
 		public void Submit(func<void()> job, JobPriority priority, WaitGroup* group, const char* name);

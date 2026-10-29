@@ -13,6 +13,8 @@ namespace GpuDebug
 {
 	// Where captures live, relative to a workspace's root.
 	const char* c_CaptureFolder = ".ied/local/gpu-captures";
+	// Where NativeFolder looks, and what puts the files there.
+	const char* c_NoNativeParts = "the GPU debugger's native parts (flashbang.dll, flashbang-replay.exe) are not in the plugin's bin, nor in a checkout's build: an installed IED gets them from nuke install-ied in its checkout, a checkout from nuke build flashbang; or set gpu.nativeFolder to their folder";
 	// A replay request waits this long for its answer (a timing run replays the frame many times).
 	const int64 c_ReplayWaitMs = 600000;
 	// A session nobody asked anything of for this long ends.

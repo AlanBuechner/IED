@@ -446,7 +446,7 @@ namespace Ai
 		return Shown(body.Substring(start, body.ByteLength() - start));
 	}
 
-	static Core::String Copied(const Clip* clip, Core::StringView added, Core::StringView source, bool appended, Core::StringView dropped) {
+	Core::String CopyReport(const Clip* clip, Core::StringView added, Core::StringView source, bool appended, Core::StringView dropped) {
 		Core::StringBuilder out;
 		out.Append(appended ? "Added " : "Copied ");
 		AppendSize(out, added);
@@ -461,6 +461,7 @@ namespace Ai
 		out.Append(". Write {{clip:");
 		out.Append(clip->m_Name.View());
 		out.Append("}} in any later call's arguments to paste it (as fs_edit's old to match it exactly, as new to put it elsewhere).");
+		if (clip->m_Text.View().EndsWith(Core::StringView("\n"))) out.Append(" It ends with its last line's line break: write no \\n after it.");
 		if (LineCount(added) == 1) {
 			out.Append("\nLine: ");
 			out.Append(FirstLine(added));
@@ -529,7 +530,7 @@ namespace Ai
 		preview.Append(name);
 		preview.Append("\n\n");
 		preview.Append(cut.View());
-		return ToolResult(Copied(clip, cut.View(), source.View(), append, dropped.View()).View(), preview.View());
+		return ToolResult(CopyReport(clip, cut.View(), source.View(), append, dropped.View()).View(), preview.View());
 	}
 
 	static ToolOutcome ListRun(Chat* chat, const ToolInvocation& call) {
@@ -573,7 +574,7 @@ namespace Ai
 	}
 
 	void AddClipboardTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
-		ToolSpec* copy = ClipboardTool("clipboard_copy", "Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. Use it to match a long block exactly (fs_edit old: \"{{clip:old}}\"), to move or repeat code, or to reuse output. Copy from path (the file as the editors have it), result (an earlier tool result: 1 the latest, the clipboard's own not counted; an fs_read result's line numbers are left out and start_line/end_line are the numbers it shows) or text; start_line/end_line take whole lines, from/to the text from the first from to the end of the first to after it. Example: clipboard_copy({\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62})",
+		ToolSpec* copy = ClipboardTool("clipboard_copy", "Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. Use it to match a long block exactly (fs_edit old: \"{{clip:old}}\"), to move or repeat code, or to reuse output. Copy from path (the file as the editors have it), result (an earlier tool result: 1 the latest, the clipboard's own not counted; an fs_read result's line numbers are left out and start_line/end_line are the numbers it shows) or text; start_line/end_line take whole lines, each with its line break (the last one's too: write nothing after the clip), from/to the text from the first from to the end of the first to after it. Example: clipboard_copy({\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62})",
 			"{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"pattern\": \"^[A-Za-z0-9_.-]{1,40}$\", \"description\": \"letters, digits, _ . -\"}, \"path\": {\"type\": \"string\", \"description\": \"copy from this workspace file\"}, \"result\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"copy from an earlier tool result: 1 the latest\"}, \"text\": {\"type\": \"string\", \"minLength\": 1}, \"start_line\": {\"type\": \"integer\", \"minimum\": 1}, \"end_line\": {\"type\": \"integer\", \"minimum\": 1}, \"from\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"start at the first occurrence of this text\"}, \"to\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"end after the first occurrence of this text after from\"}, \"append\": {\"type\": \"boolean\", \"description\": \"add to the end of the clip instead of replacing it\"}}, \"required\": [\"name\"], \"additionalProperties\": false}");
 		copy->m_Plan = CopyPlan;
 		copy->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CopyRun(chats, chat, call); };

@@ -28,6 +28,9 @@ def module_for(workspace, project, configuration, expand=_unexpanded):
 		defines.update(override.defines)
 	defines[configuration.name.upper()] = "1"
 	defines["PROJECT_NAME"] = project.name
+	# The project's folder as a string literal, '/' separators: a module finds its own files (a package's shaders) in a
+	# checkout or an install, where __FILE__ is only relative to its source folder.
+	defines["PROJECT_DIR"] = '"' + fsutil.norm(project.dir) + '"'
 	depends = tuple(d.name for d in (workspace.find_project(n) for n in project.depends) if d.is_c4)
 	return Module(
 		name=project.name,

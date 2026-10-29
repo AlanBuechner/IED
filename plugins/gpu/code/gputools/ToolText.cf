@@ -139,7 +139,7 @@ namespace GpuDebug
 		params.AppendInt(eid);
 		params.Append("}");
 		Serialization::DomNode groups = AskTool(debugger, target, "state", params.View()).Member("groups");
-		const char*[3] roles = {"rt", "depth", "uav"};
+		const char*[3] roles = { "rt", "depth", "uav"};
 		for (int64 r = 0; r < 3; r += 1)
 			for (int64 g = 0; g < groups.Count(); g += 1) {
 				const int64 id = ItemWithRole(groups.At(g).Member("items"), Core::StringView(roles[r]));
@@ -269,7 +269,7 @@ namespace GpuDebug
 		Serialization::DomNode resources = AskTool(debugger, target, "resources", Core::StringView("{}")).Member("resources");
 		Core::StringView filter = args.Member("filter").AsView();
 		Core::StringBuilder text;
-		text.Append("Resources (id | name | type | format | size | first use EID | uses):\n");
+		text.Append("Resources (id | name | type | format | size | first EID naming it | events naming it). An event names a resource as a target, a copy's source or destination, or a root argument; a texture read through a descriptor table (an SRV a shader samples) is not counted, so 0 does not mean unused: gpu_event_state lists what a draw reads.\n");
 		int64 shown = 0;
 		for (int64 i = 0; i < resources.Count() && shown < c_ResourceLines; i += 1) {
 			Serialization::DomNode r = resources.At(i);
@@ -391,7 +391,7 @@ namespace GpuDebug
 			text.AppendInt(eid);
 			text.Append(" | ");
 			text.Append(at ? events.At(*at).At(6).AsView() : Core::StringView("?"));
-			const int64[4] columns = {prims, ps, samples, cs};
+			const int64[4] columns = { prims, ps, samples, cs};
 			for (int64 c = 0; c < 4; c += 1) {
 				text.Append(" | ");
 				if (stat && columns[c] >= 0) text.AppendInt(stats.At(*stat).At(columns[c]).AsInt());

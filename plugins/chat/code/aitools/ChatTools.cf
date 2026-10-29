@@ -165,12 +165,13 @@ namespace Ai
 				}
 			}
 			if (call.m_Cancelled && *call.m_Cancelled) return ToolError(Core::StringView("chat_wait: stopped"));
+			// Running past the wait is an answer, not a failure: the other chat may reply by message meanwhile.
 			if (Platform::UnixTimeNs() >= deadline) {
 				Core::StringBuilder said;
-				said.Append("chat_wait: still running after ");
+				said.Append("The chat is still running after ");
 				said.AppendInt(seconds);
-				said.Append(" s; wait again, or chat_read what it has so far");
-				return ToolError(said.View());
+				said.Append(" s (its messages to this chat arrive as they are sent); wait again, or chat_read what it has so far.");
+				return ToolResult(said.View(), Core::StringView("Still running"));
 			}
 			Threading::Thread::Sleep(c_ChatWaitPollNs);
 		}
@@ -210,7 +211,7 @@ namespace Ai
 		read->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
 		read->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return ReadRun(chats, call); };
 		registry.Add(read);
-		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"The build is green; go on with the tests.\"})",
+		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Chats reply to each other at most 3 times in a row, counting the other chat's messages to this one too (an owner's message starts the count again): send only what the other chat needs, in as few messages as you can, and once it is told, answer the owner - what is left goes in your answer. Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"The build is green; go on with the tests.\"})",
 			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"text\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"chat\", \"text\"], \"additionalProperties\": false}", ToolClass::Exec);
 		send->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.send"); };
 		send->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SendRun(chats, chat, call); };

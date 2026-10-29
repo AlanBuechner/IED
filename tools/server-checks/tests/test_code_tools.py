@@ -413,6 +413,7 @@ class FakeServerCodeToolTests(CodeToolCase):
 		self.assertIn('"position":{"line":0,"character":12}', results["u1"], "and the place, at the symbol on the line")
 		self.assertIn("does not expose fake/nope; it exposes fake/expand, fake/echo", results["u2"])
 		self.assertIn("no language server serves src/main.c", results["n1"])
+		self.assertIn("read it with fs_read", results["n1"], "and how to read the file without one")
 		self.assertIn("0 references to a.fk:1", results["r1"])
 		self.assertIn("did not list these lines that use MAKE_IT", results["r1"], "a server that finds none: the lines using it, to check")
 		self.assertIn("  b.fk:2: again MAKE_IT(1)\n", results["r1"])

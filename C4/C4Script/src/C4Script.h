@@ -55,6 +55,14 @@ C4SCRIPT_API int32_t c4s_host_debug_scripts(c4s_host* host, int32_t on);
 
 // Compiles, links and loads a script. Never null: c4s_script_ok says whether it worked, the diagnostics why not.
 C4SCRIPT_API c4s_script* c4s_compile(c4s_host* host, const c4s_options* options);
+// c4s_compile without the load (docs/runtime/04 section 5.1): compiled and linked, the script waits for c4s_script_load,
+// so a host compiles on a worker and loads where nothing reads the reflection a load changes. Never null:
+// c4s_script_prepared says whether it got that far, the diagnostics why not.
+C4SCRIPT_API c4s_script* c4s_prepare(c4s_host* host, const c4s_options* options);
+C4SCRIPT_API int32_t c4s_script_prepared(const c4s_script* script);
+// Loads a prepared script: 1 when it loaded and its globals started; 0, with nothing of it loaded and the diagnostics
+// saying why, when they did not or it was not prepared.
+C4SCRIPT_API int32_t c4s_script_load(c4s_script* script);
 // Compiles `options` to replace `old` (docs/runtime/04 section 5): when it compiles and links, `old` unloads and then
 // the new script loads; when it does not, `old` stays loaded and the result has the diagnostics. Never null.
 C4SCRIPT_API c4s_script* c4s_reload(c4s_host* host, c4s_script* old, const c4s_options* options);

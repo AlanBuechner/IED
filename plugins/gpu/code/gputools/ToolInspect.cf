@@ -9,6 +9,8 @@ namespace GpuDebug
 	const int64 c_BufferBytes = 256;
 	const int64 c_BufferBytesMax = 4096;
 	const int64 c_ImageSize = 1024;
+	const int64 c_SmallestImage = 128;
+	const int64 c_ImageMaxBytes = 4 * 1024 * 1024;   // the most a chat sends a model an image of (the chat plugin's c_ToolImageMaxBytes)
 	const int64 c_ScanLinear = 64;
 	const char* c_ImageFolder = ".ied/local/gpu-captures/ai";
 
@@ -198,11 +200,20 @@ namespace GpuDebug
 		text.Append("\n");
 	}
 
+	// The error for an event that binds no texture to write (no action, or between passes).
+	static IED::RpcError NoTextureAt(int64 eid) {
+		Core::StringBuilder said;
+		said.Append("EID ");
+		said.AppendInt(eid);
+		said.Append(" binds no render target, depth or storage texture (it is no draw or dispatch, or comes between passes): give a draw's or dispatch's EID (gpu_events with kind:draw or kind:dispatch), or name the texture with resource (gpu_resources lists them)");
+		return IED::RpcError(IED::ErrorCode::BadRequest, said.View());
+	}
+
 	Core::String PixelText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args) {
 		const int64 eid = RequiredInt(args, "eid");
 		const int64 x = RequiredInt(args, "x"), y = RequiredInt(args, "y");
 		const int64 id = ResourceArg(debugger, target, args, eid);
-		if (!id) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("the event writes no texture: name one with resource"));
+		if (!id) throw NoTextureAt(eid);
 		Core::StringBuilder params;
 		params.Append("{\"id\":");
 		params.AppendInt(id);
@@ -315,7 +326,7 @@ namespace GpuDebug
 	ToolAnswer TextureAnswer(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args) {
 		const int64 eid = RequiredInt(args, "eid");
 		const int64 id = ResourceArg(debugger, target, args, eid);
-		if (!id) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("the event writes no texture: name one with resource"));
+		if (!id) throw NoTextureAt(eid);
 		const int64 mip = IntArg(args, "mip", 0), slice = IntArg(args, "slice", 0);
 		Core::StringBuilder file;
 		file.Append(c_ImageFolder);
@@ -333,16 +344,21 @@ namespace GpuDebug
 		FS::Path folder = FS::Path(IED::WorkspaceFile(target.m_Workspace, Core::StringView(c_ImageFolder)).View());
 		FS::MakeDirectories(folder.CStr());
 		FS::Path path = FS::Path(IED::WorkspaceFile(target.m_Workspace, file.View()).View());
-		IED::JsonWriter params;
-		params.BeginObject();
-		params.IntField("id", id);
-		params.IntField("eid", eid);
-		params.IntField("mip", mip);
-		params.IntField("slice", slice);
-		params.IntField("maxSize", c_ImageSize);
-		params.Field("path", path.View());
-		params.EndObject();
-		Serialization::DomNode answer = AskTool(debugger, target, "png", params.View());
+		// A noisy float texture's PNG can outgrow what a chat sends a model: smaller until it fits.
+		Serialization::DomNode answer;
+		for (int64 size = c_ImageSize; size >= c_SmallestImage; size /= 2) {
+			IED::JsonWriter params;
+			params.BeginObject();
+			params.IntField("id", id);
+			params.IntField("eid", eid);
+			params.IntField("mip", mip);
+			params.IntField("slice", slice);
+			params.IntField("maxSize", size);
+			params.Field("path", path.View());
+			params.EndObject();
+			answer = AskTool(debugger, target, "png", params.View());
+			if (FS::FileSize(path.CStr()) <= c_ImageMaxBytes) break;
+		}
 		Serialization::DomNode texture = answer.Member("texture");
 		Core::StringBuilder text;
 		text.Append(texture.Member("name").AsView());

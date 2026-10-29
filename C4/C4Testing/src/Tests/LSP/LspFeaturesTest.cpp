@@ -735,4 +735,22 @@ void Second(Drive d) {
 		TEST_ASSERT(hasMain);
 		TEST_PASSED();
 	}
+
+	void LspFeaturesTest::TestWorkspaceSymbolsKeepTheBestMatchesPastTheCap()
+	{
+		// More names holding "Context" than the cap, all before the class named so (as the Windows headers come first).
+		std::string source = "namespace Win\n{\n";
+		for (int i = 0; i < 700; ++i)
+			source += "    class Win" + std::to_string(i) + "Context { public int size; }\n";
+		source += "}\nnamespace Imm\n{\n    class ContextMenu { public int open; }\n    int context;\n    class Context { public int frame; }\n}\nint main() { return 0; }\n";
+		auto session = Testing::Lsp::MakeSession("LspManyContexts.cf", source.c_str());
+
+		auto symbols = WorkspaceSymbols::ForQuery(session, "Context");
+		TEST_ASSERT_EQ(symbols.Count(), 500u);
+		TEST_ASSERT(symbols[0].name == "Context" && symbols[0].containerName == "Imm");
+		TEST_ASSERT(symbols[1].name == "context"); // then the name in any case, a prefix, and parts in the order declared
+		TEST_ASSERT(symbols[2].name == "ContextMenu");
+		TEST_ASSERT(symbols[3].name == "Win0Context");
+		TEST_PASSED();
+	}
 } // namespace Testing

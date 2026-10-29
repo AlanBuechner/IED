@@ -256,6 +256,8 @@ namespace Scripting
 			for (auto& e : entries)
 			{
 			bool visible = IsVisible(e->definingUnit, askingUnit);
+			for (uint32 unit : e->repeatedIn)
+				if (!visible && IsVisible(unit, askingUnit)) visible = true;
 		if (!visible && e->kind == SymbolKind::Function)
 		{
 			// A merged overload set can hold records from several units; the entry's single

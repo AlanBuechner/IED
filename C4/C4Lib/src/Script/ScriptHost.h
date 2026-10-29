@@ -55,6 +55,11 @@ namespace Scripting
 
 		/// It compiled, linked and started, and no guarded call into it faulted.
 		bool Ok() const { return m_Linked && !Faulted(); }
+		/// ScriptHost::Prepare compiled and linked it, and it waits for LoadPrepared.
+		bool Prepared() const { return m_Prepared != nullptr; }
+		/// Loads what Prepare compiled and linked (section 4, step 7): its reflection, roots and globals. False, with nothing
+		/// of it loaded and the diagnostics saying why, when its start fails or it is not prepared.
+		bool LoadPrepared();
 		bool Faulted() const { return m_Faulted.load(std::memory_order_acquire); }
 		const std::string& Diagnostics() const { return m_Diagnostics; }
 		/// It was linked from the host's script cache (section 4.6), not compiled.
@@ -91,6 +96,8 @@ namespace Scripting
 		std::string m_Tag;
 		std::string m_Diagnostics;
 		std::unique_ptr<LinkedScript> m_Linked;
+		std::unique_ptr<LinkedScript> m_Prepared;         // linked by Prepare, until LoadPrepared
+		std::vector<std::string> m_PreparedThreadLocals;
 		ScriptImage m_Image;               // where its code was, for the fault text after it unloads
 		void* m_Record = nullptr;          // the script's c4_script_module
 		const void* m_Roots = nullptr;     // its __c4_gc_roots
@@ -113,6 +120,9 @@ namespace Scripting
 		/// Compiles, links and loads a script; the result says what went wrong when it did. Several may compile at once
 		/// on different threads (each with a target machine of its own).
 		std::unique_ptr<Script> Compile(const ScriptCompileOptions& options);
+		/// Compile without the load: the script compiled and linked (Prepared()), for Script::LoadPrepared to load later -
+		/// a host compiles on a worker and loads where nothing reads the reflection the load changes (between frames).
+		std::unique_ptr<Script> Prepare(const ScriptCompileOptions& options);
 		/// Compiles `options` to replace `old` (section 5): when it compiles and links, `old` unloads, then it loads;
 		/// when it does not, `old` stays loaded and the result has the diagnostics.
 		std::unique_ptr<Script> Reload(Script& old, const ScriptCompileOptions& options);

@@ -74,21 +74,39 @@ namespace Ied
 
 	// Where a matched file is, as a workspace path: as written when absolute, else under the step's folder or the
 	// run's search roots; empty when it is not in the workspace or nowhere to be found.
-	static Core::String ProblemPath(const TaskRun* run, const PlannedStep* step, const ProblemMatcher* matcher, Core::StringView file) {
+	Core::String ResolveProblemFile(Core::StringView file, bool absolute, const Core::Array<Core::String>& roots, Core::StringView workspaceRoot) {
 		FS::Path written = FS::Path(Slashed(file).View());
 		Core::Array<FS::Path> candidates;
-		if (written.IsAbsolute() || matcher->m_FileKind == "absolute") candidates.Push(written);
-		else {
-			candidates.Push(FS::Path(step->m_Cwd.View()) / written.View());
-			for (const Core::String& root : step->m_MatchRoots) candidates.Push(FS::Path(root.View()) / written.View());
-			for (const Core::String& root : run->m_SearchRoots) candidates.Push(FS::Path(root.View()) / written.View());
-		}
+		if (written.IsAbsolute() || absolute) candidates.Push(written);
+		else
+			for (const Core::String& root : roots) candidates.Push(FS::Path(root.View()) / written.View());
 		for (const FS::Path& candidate : candidates) {
 			FS::Path normalized = candidate.Normalized();
 			Core::String relative;
-			if (FS::FileExists(normalized.CStr()) && RelativeTo(run->m_Ws->m_Root.View(), normalized.View(), relative) && !relative.IsEmpty()) return relative;
+			if (FS::FileExists(normalized.CStr()) && RelativeTo(workspaceRoot, normalized.View(), relative) && !relative.IsEmpty()) return relative;
 		}
 		return Core::String();
+	}
+
+	Core::Array<Core::String> RunSearchRoots(Core::StringView projectRoot, Core::StringView workspaceRoot, const Core::Array<Core::String>& otherProjects) {
+		Core::Array<Core::String> roots;
+		roots.Push(Core::String(projectRoot));
+		roots.Push(Core::String(workspaceRoot));
+		for (const Core::String& other : otherProjects) {
+			if (other.View() == projectRoot) continue;
+			roots.Push(other);
+			roots.Push(Core::String((FS::Path(other.View()) / Core::StringView("src")).View()));
+		}
+		return roots;
+	}
+
+	// The step's folder and its matchers' roots first, then the run's.
+	static Core::String ProblemPath(const TaskRun* run, const PlannedStep* step, const ProblemMatcher* matcher, Core::StringView file) {
+		Core::Array<Core::String> roots;
+		roots.Push(step->m_Cwd);
+		for (const Core::String& root : step->m_MatchRoots) roots.Push(root);
+		for (const Core::String& root : run->m_SearchRoots) roots.Push(root);
+		return ResolveProblemFile(file, matcher->m_FileKind == "absolute", roots, run->m_Ws->m_Root.View());
 	}
 
 	static int64 SeverityNumber(Core::StringView severity) {

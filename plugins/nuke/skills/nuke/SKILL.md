@@ -59,7 +59,7 @@ A workspace adds commands with `[commands.kit]` (description, `requires = ["buil
 attach steps to them with `phase = "kit"`. Python steps: `python = "file.py:function"`; extension scripts
 listed in `scripts = [...]` define `register(nuke)` and call `nuke.command(...)` / `nuke.step(...)`.
 Variables: `${workspace.dir} ${project.dir} ${project.name} ${config} ${arch} ${bin} ${int} ${output}
-${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME}`, and `${args}` (the words after `--`).
+${python} ${nuke} ${toolchain.dir} ${c4} ${env:NAME} ${nuget:<dependency name>}`, and `${args}` (the words after `--`).
 
 ## Packages
 
@@ -72,6 +72,12 @@ Any Nuke command, a build first of all, pulls them and what they need; nothing b
 hand, and a dependency's projects are linked without `depends`. `packages/nuke.lock` (generated, not committed) pins
 each package's commit; installs live in `packages/` and are read-only, unless the dependency says `writable = true`:
 then the build clones the repository into `packages/<repository>/` to edit.
+
+Native SDKs from NuGet (the D3D12 Agility SDK, DXC) are dependencies too: `Agility = { nuget =
+"Microsoft.Direct3D.D3D12", version = "1.620.1" }` - an exact version (`"*"`: the newest stable, kept by the lock until
+`nuke package update <id>`). Nuke installs it read-only in `packages/nuget/<id>@<version>/`, locks its hash, and the
+manifest reaches its files as `${nuget:Agility}` (`includes`, `[[project.copy]]`, `links`, steps). `NUKE_NUGET_FEED`
+names another feed (a URL or a folder laid out like nuget.org's flat container).
 
     nuke package status [--fetch] [--json]   versions, commits, projects, locked or developed (tool: nuke_packages)
     nuke package update [NAME...]            newest versions the requirements allow

@@ -56,8 +56,28 @@ void TestNamedUnionInClass() {
 	AssertFloatEquals(0.5f, p.ratio, "a union declared in a class");
 }
 
+// BUG-432: a union is laid out as its fields resolve, before a struct member is: a union of structs (Win32's
+// RAWINPUT) had size 0, so a struct holding it was too small and the fields after it overlapped it.
+struct NuMouse { public uint16 flags; public int32 lastX; public int32 lastY; public uint32 extra; }
+struct NuKeys { public uint16 code; public uint16 flags; public uint32 message; }
+union NuInputData { public NuMouse mouse; public NuKeys keys; public NuLater later; }
+struct NuLater { public int64 a; public int64 b; public int64 c; }
+struct NuInput { public int64 header; public NuInputData data; public int32 after; }
+
+void TestNamedUnionOfStructs() {
+	Assert(sizeof(NuInputData) == 24, "a union of structs is as large as its largest (one declared after it too)");
+	Assert(sizeof(NuInput) == 40, "a struct holding it makes room for it");
+	NuInput input;
+	input.data.mouse.lastY = 7;
+	input.data.later.c = 11;
+	input.after = 5;
+	Assert(input.data.later.c == 11 && input.after == 5, "the field after the union is its own");
+	Assert((int64)((uint8*)&input.after - (uint8*)&input) == 32, "after the union's 24 bytes");
+}
+
 void TestNamedUnions() {
 	TestNamedUnionScopes();
 	TestNamedUnionViews();
 	TestNamedUnionInClass();
+	TestNamedUnionOfStructs();
 }

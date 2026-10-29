@@ -56,6 +56,39 @@ namespace Scripting
 		return message;
 	}
 
+	bool ModelBuilder::IsBinding(uint32 unitId, const AstNode& declaration) const
+	{
+		if (!m_Sources || unitId == 0 || !m_Sources->HasInfo(unitId)) return false;
+		const uint32 line = m_Sources->GetInfo(unitId).bindingsLine;
+		return line != 0 && declaration.startLocation.line >= line;
+	}
+
+	std::string_view ModelBuilder::DeclarationText(uint32 unitId, const AstNode& declaration) const
+	{
+		const SourceInfo& info = m_Sources->GetInfo(unitId);
+		const size_t start = declaration.startLocation.byteOffset;
+		const size_t end = declaration.endLocation.byteOffset;
+		if (!info.source || start >= end || end > info.source->Size()) return {};
+		return std::string_view(info.source->Data() + start, end - start);
+	}
+
+	bool ModelBuilder::RepeatsBinding(const Context& ctx, const AstNode& declaration, const Core::String& name)
+	{
+		if (!IsBinding(ctx.unitId, declaration)) return false;
+		const std::string_view text = DeclarationText(ctx.unitId, declaration);
+		if (text.empty()) return false;
+		for (const auto& entry : ctx.scope->Entries(name))
+		{
+			if (!entry->declNode || !IsBinding(entry->definingUnit, *entry->declNode)) continue;
+			if (DeclarationText(entry->definingUnit, *entry->declNode) != text) continue;
+			bool known = entry->definingUnit == ctx.unitId;
+			for (uint32 unit : entry->repeatedIn) known = known || unit == ctx.unitId;
+			if (!known) entry->repeatedIn.Push(ctx.unitId);
+			return true;
+		}
+		return false;
+	}
+
 	Core::String ModelBuilder::Why(const Context& ctx, const AstNode* type, uint32 unitId, const Scope* scope) const
 	{
 		// The failure of resolving `type` again, after every declaration has had its chance.
@@ -229,6 +262,7 @@ namespace Scripting
 		ctx.model = &model;
 		ctx.errors = m_Errors;
 		ctx.scope = model.Symbols()->GetRoot();
+		m_Sources = &compiler.GetSourceManager();
 
 		model.m_PreludeUnit = compiler.GetSourceManager().PreludeId();
 		model.SetProjects(&compiler.GetSourceManager().Projects(), ProjectOfEachUnit(compiler.GetSourceManager()));

@@ -19,12 +19,41 @@ namespace Scripting
 {
 	namespace
 	{
+		// The hidden prelude's own layer only: Find would walk on into the root and hand back what the asking file
+		// cannot see, or a type's extension methods with no receiver (BUG-423).
 		void CollectHiddenPrelude(const ProgramModel& model, const Core::String& name, Core::Vector<OverloadCandidate>& candidates)
 		{
-			const SymbolInfo* hidden = model.HiddenPrelude() ? model.HiddenPrelude()->Find(name) : nullptr;
-			if (!hidden || hidden->kind != SymbolKind::Function) return;
-			for (const FunctionRecord* rec : hidden->functions) candidates.Push({ rec->type, rec, rec->minArity });
+			if (!model.HiddenPrelude()) return;
+			for (const auto& entry : model.HiddenPrelude()->Entries(name))
+				if (entry->kind == SymbolKind::Function)
+					for (const FunctionRecord* rec : entry->functions) candidates.Push({ rec->type, rec, rec->minArity });
 		}
+	}
+
+	// `Derived::F(...)` naming a static method a base declares (BUG-417): as in C++, the type's name reaches its bases'
+	// static members; the nearest base that declares F wins.
+	void SymbolQueries::CollectInheritedStatics(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* scope,
+		Core::Vector<OverloadCandidate>& candidates)
+	{
+		const size_t separator = name.rfind("::");
+		if (separator == Core::String::npos) return;
+		const SymbolInfo* owner = model.FindVisibleQualified(name.substr(0, separator), unitId, scope);
+		const auto* type = owner && owner->kind == SymbolKind::Type ? TypeAs<ObjectType>(TypeHandle::UnwrapToValue(owner->type)) : nullptr;
+		if (!type) return;
+		const Core::String member = name.substr(separator + 2);
+		ClassHierarchy::ForEachSubobject(type, [&](const ObjectType* base, int64) {
+			if (base == type || !candidates.Empty()) return;
+			// A written class keeps its statics in its scope; a class template's instance among its method records.
+			if (const Scope* members = model.TypeScope(base))
+				for (const auto& entry : members->Entries(member))
+					if (entry->kind == SymbolKind::Function)
+						for (const FunctionRecord* rec : entry->functions)
+							if (rec->isStatic) candidates.Push({ rec->type, rec, rec->minArity });
+			auto records = model.m_MethodRecords.find(base);
+			if (records == model.m_MethodRecords.end()) return;
+			for (const FunctionRecord* rec : records->second)
+				if (rec && rec->isStatic && rec->name == member) candidates.Push({ rec->type, rec, rec->minArity });
+		});
 	}
 
 	namespace
@@ -170,6 +199,11 @@ namespace Scripting
 			}
 		}
 
+	// A receiver that is no object - a number (`2.0f.Squared()`), a void* (`p->F()`): the extension methods of its type
+	// (extends float), never the free functions of the name.
+	if (receiverType && !haveReceiver && !isOperatorName)
+		return QueryNonObjectReceiver(model, name, receiverType, argTypes, ctx, outRecord);
+
 	// Free functions (always for receiver==null without a member hit; the qualified form works too).
 	// A function declared in the body being lowered (doc 06) shadows globals for this name.
 	const SymbolInfo* sym = nullptr;
@@ -203,6 +237,8 @@ namespace Scripting
 		// not visible (BUG-320).
 		if (candidates.Empty() && !haveReceiver && !isOperatorName && name.find("::") == Core::String::npos)
 			CollectHiddenPrelude(model, name, candidates);
+		if (candidates.Empty() && !sym && !haveReceiver && !isOperatorName)
+			CollectInheritedStatics(model, name, ctx.unitId, ctx.scope, candidates);
 		if (!sym && name.find("::") == Core::String::npos)
 			if (const SymbolInfo* unseen = model.Symbols()->GetRoot()->Find(name); unseen && unseen->kind == SymbolKind::Function && !unseen->functions.Empty())
 				elsewhere = unseen->functions[0];
@@ -229,6 +265,19 @@ namespace Scripting
 		}
 
 		return ResolveAndReturn(model, candidates, argTypes, name, outRecord);
+	}
+
+	QueryResult<const FunctionType*> SymbolQueries::QueryNonObjectReceiver(const ProgramModel& model, const Core::String& name, const Type* receiverType,
+		const Core::Vector<const Type*>& argTypes, const LookupContext& ctx, const FunctionRecord** outRecord) const
+	{
+		Core::Vector<OverloadCandidate> candidates;
+		if (const auto* extensions = model.PrimitiveExtensions(receiverType))
+			for (const FunctionRecord* rec : *extensions)
+				if (rec->name == name && (rec->isBuiltin || model.Symbols()->DeclarationVisible(*rec, ctx.unitId))) candidates.Push({ rec->type, rec, rec->minArity });
+		if (!candidates.Empty()) return ResolveAndReturn(model, candidates, argTypes, name, outRecord);
+		Core::String message = "'" + receiverType->GetName() + "' has no method '" + name + "'";
+		if (receiverType->GetKind() == TypeKind::Void) message += ": a void* points at no type in particular; cast it to the type whose method '" + name + "' is";
+		return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, message);
 	}
 
 	QueryResult<const FunctionType*> SymbolQueries::ResolveAndReturn(const ProgramModel& model, const Core::Vector<OverloadCandidate>& candidates,

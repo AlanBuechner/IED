@@ -108,6 +108,12 @@ private:
 		void VisitDeclaration(Context& ctx, const AstNode* node);
 		void RegisterNamespace(Context& ctx, const NamespaceNode& ns);
 		static const AliasType* EarlierAlias(const Scope& scope, const Core::String& name);
+		/// A declaration of a C binding (what the interop pass appended to a file) that a binding has made already, the
+		/// same text: two projects binding one header, or two headers sharing one (BUG-420). It is not made again, and
+		/// its unit sees and reaches the first as its own.
+		bool RepeatsBinding(const Context& ctx, const AstNode& declaration, const Core::String& name);
+		bool IsBinding(uint32 unitId, const AstNode& declaration) const;
+		std::string_view DeclarationText(uint32 unitId, const AstNode& declaration) const;
 		void RegisterObject(Context& ctx, const ObjectDefinitionNode& obj);
 		void RegisterEnum(Context& ctx, const EnumDefinitionNode& en);
 		void RegisterAlias(Context& ctx, const AliasDefinitionNode& alias);
@@ -134,6 +140,7 @@ private:
 		friend class FreeFunctionResolver; // pass-2 free-function resolver reads the pending work-lists
 
 		ErrorTracker* m_Errors;
+		const SourceManager* m_Sources = nullptr; // during Build: the units' texts, for repeated bindings
 
 		// Pass-1 output: everything pass 2 must resolve. Items are removed as they settle.
 		Core::Vector<PendingVar> m_PendingVars;

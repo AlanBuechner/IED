@@ -47,7 +47,7 @@ namespace GpuDebug
 			return existing->m_Session;
 		}
 		Core::String native = NativeFolder(wsId);
-		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the GPU debugger's native parts are not built: run nuke build flashbang"));
+		if (native.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView(c_NoNativeParts));
 		Process::StartInfo info;
 		info.program = Core::String((FS::Path(native.View()) / "flashbang-replay.exe").View());
 		info.arguments.Push(Core::String("--rpc"));
