@@ -116,3 +116,15 @@ test("lspconvert: signature help, highlights, folding, edits and inlay hints", (
 	const [hint] = C.inlayHintsOf(monaco, [{ position: { line: 0, character: 4 }, label: [{ value: "a:" }], kind: 2, paddingRight: true }]);
 	assertEqual([hint.label, hint.position.lineNumber, hint.position.column, hint.kind, hint.paddingRight], [[{ label: "a:", tooltip: undefined }], 1, 5, 2, true]);
 });
+
+test("semantic tokens: an ask that outlived an edit is given up, as Monaco takes a cancelled request", async () => {
+	let version = 1;
+	const model = { getVersionId: () => version };
+	await C.settledForTokens(model, async () => {});
+	let thrown = null;
+	await C.settledForTokens(model, async () => { version = 2; }).catch((e) => { thrown = e; });
+	assertEqual(thrown && [thrown.name, thrown.message], ["Canceled", "Canceled"], "edits made while the text settled would count twice");
+	thrown = null;
+	await C.settledForTokens(model, async () => {}).catch((e) => { thrown = e; });
+	assertEqual(thrown, null, "edits made before it asked are not its business");
+});

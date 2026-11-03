@@ -195,3 +195,13 @@ export function inlayHintsOf(monaco, result) {
 		return out;
 	});
 }
+
+// Waits for what has been typed to reach the server (`settled`), before it is asked for a document's semantic tokens. Monaco
+// moves an answer over the edits made since it asked, and the server's answer already holds those made until now, so an answer
+// to an ask that outlived such an edit would have them twice, with tokens past the ends of their lines. It is given up as Monaco
+// takes a cancelled request: the colors stay as they are, and it asks again.
+export async function settledForTokens(model, settled) {
+	const version = model.getVersionId();
+	await settled();
+	if (model.getVersionId() !== version) throw Object.assign(new Error("Canceled"), { name: "Canceled" });
+}

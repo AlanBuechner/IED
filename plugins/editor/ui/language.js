@@ -193,6 +193,8 @@ export class LanguageFeatures {
 			onDidChange: this.refreshes.tokens.event,
 			getLegend: () => LEGEND,
 			provideDocumentSemanticTokens: async (model, lastResultId, token) => {
+				const editor = this.editorOf(model);
+				if (editor) await C.settledForTokens(model, () => editor.sync.settled());
 				const result = await this.ask(model, "textDocument/semanticTokens/full", {}, token);
 				return result && result.data ? { data: mapper.remap(result.data), resultId: result.resultId } : null;
 			},
