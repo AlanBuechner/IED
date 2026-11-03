@@ -97,8 +97,23 @@ namespace Desktop
 		MessageBoxW(null, body.Data(), caption.Data(), (uint32)MB_ICONERROR);
 	}
 
-	Window* App::NewWindow() {
-		return NewWindowAt(m_Windows.IsEmpty() ? LoadPlacement(m_Data) : Cascaded(m_Windows[m_Windows.Count() - 1]->CurrentPlacement()));
+	Window* App::NewWindow() { return NewWindowAt(NextPlacement()); }
+
+	Placement App::NextPlacement() {
+		return m_Windows.IsEmpty() ? LoadPlacement(m_Data) : Cascaded(m_Windows[m_Windows.Count() - 1]->CurrentPlacement());
+	}
+
+	Placement App::PlacementFor(Core::StringView url, bool atCursor) {
+		Core::String docked = DockWindowOf(url);
+		if (docked.IsEmpty()) return NextPlacement();
+		Placement kept = LoadDockedPlacement(m_Data, docked.View());
+		if (kept.m_Known && !atCursor) return kept;
+		Placement from = kept.m_Known ? kept : NextPlacement();
+		from.m_Maximized = false;
+		if (!atCursor) return from;
+		tagPOINT cursor;
+		GetCursorPos(&cursor);
+		return GrabbedAt(from, cursor.x, cursor.y);
 	}
 
 	Window* App::NewWindowAt(const Placement& placement) {
@@ -128,8 +143,8 @@ namespace Desktop
 		else if (!error.IsEmpty()) window->Alert((Core::String("IED could not open a folder: ") + error.View()).View());
 	}
 
-	void App::OpenUrl(Core::StringView url) {
-		Window* window = NewWindow();
+	void App::OpenUrl(Core::StringView url, bool atCursor) {
+		Window* window = NewWindowAt(PlacementFor(url, atCursor));
 		if (window != null) window->Show(url);
 	}
 
@@ -213,7 +228,10 @@ namespace Desktop
 
 	void App::Closing(Window* window) {
 		Placement placement = window->CurrentPlacement();
-		if (placement.m_Known) SavePlacement(m_Data, placement);
+		if (!placement.m_Known) return;
+		Core::String docked = DockWindowOf(window->CurrentUrl().View());
+		if (docked.IsEmpty()) SavePlacement(m_Data, placement);
+		else SaveDockedPlacement(m_Data, docked.View(), placement);
 	}
 
 	void App::Closed(Window* window, HWND__* hwnd) {
@@ -262,6 +280,7 @@ namespace Desktop
 			RelaunchWindow entry;
 			entry.m_Placement = window->CurrentPlacement();
 			entry.m_Root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+			entry.m_DockQuery = DockQueryOf(window->CurrentUrl().View());
 			kept.Push(entry);
 		}
 		FS::Path file = m_Data / "relaunch.json";
@@ -325,6 +344,7 @@ namespace Desktop
 		for (const RelaunchWindow& entry : relaunched) {
 			Window* window = NewWindowAt(entry.m_Placement.m_Known ? entry.m_Placement : LoadPlacement(m_Data));
 			if (window == null) continue;
+			window->m_DockQuery = entry.m_DockQuery;
 			if (entry.m_Root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
 			else Resolve(window, Core::StringView("open"), Launch::OpenParams(entry.m_Root.View(), 0, 0).View(), Arrival::First);
 		}
@@ -359,6 +379,7 @@ namespace Desktop
 			status = m_LastStatus;
 		}
 		Core::String root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+		window->m_DockQuery = DockQueryOf(window->CurrentUrl().View());
 		if (root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), arrival);
 		else Resolve(window, Core::StringView("open"), Launch::OpenParams(root.View(), 0, 0).View(), Arrival::Reopened);
 	}

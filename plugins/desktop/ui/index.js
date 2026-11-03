@@ -1,7 +1,8 @@
 // index.js - the desktop app's UI module (docs/27): window.iedDesktop is there only inside ied-desktop, which adds it
 // before the page's scripts, and the shell then sets the `desktopApp` context key that shows this plugin's commands
-// (and the shell's own File > Open Folder). A new window opens on the workspace this one shows; Open in Web opens it in
-// the system's default browser (the app asks the server for a fresh one-time sign-in URL for the workspace's root).
+// (and the shell's own File > Open Folder). A new window is one more window of the workspace this one shows, with a sidebar
+// of its own (the shell's, docs/15 "Windows"); Open in Web opens the workspace in the system's default browser (the app
+// asks the server for a fresh one-time sign-in URL for the workspace's root).
 // In a browser there is no app to ask, so Open in Web opens the same page in a window of the browser's own.
 
 export function activate(ied) {
@@ -10,7 +11,7 @@ export function activate(ied) {
 		ied.commands.handle("ied.desktop.openInWeb", () => openInThisBrowser(ied));
 		return;
 	}
-	ied.commands.handle("ied.desktop.newWindow", () => desktop.newWindow(workspaceUrl(location.origin, ied.workspace.wsId)));
+	ied.commands.handle("ied.desktop.newWindow", () => (ied.workspace.wsId ? ied.commands.run("shell.newWindow") : desktop.newWindow(workspaceUrl(location.origin, null))));
 	ied.commands.handle("ied.desktop.openInWeb", () => openInWeb(ied, desktop) || ied.toast("No workspace is shown, so there is nothing to open in a browser.", { level: "info" }));
 	ied.commands.handle("ied.desktop.devTools", () => desktop.devTools());
 }

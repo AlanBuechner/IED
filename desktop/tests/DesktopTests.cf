@@ -88,6 +88,7 @@ class DesktopTests {
 		assert_se("w2", Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/?ws=w2#open=w2/")).CStr(), "the workspace a window shows");
 		assert_se("w3", Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/?x=1&ws=w3")).CStr(), "among other parameters");
 		assert_true(Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/#start")).IsEmpty(), "the start page names none");
+		assert_se("w2", Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/?ws=w2&win=w-ied.chat")).CStr(), "a docked window's");
 		Core::StringView status = Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pid\":1,\"workspaces\":[{\"wsId\":\"w1\",\"root\":\"C:\\\\a\"},{\"wsId\":\"w2\",\"root\":\"C:\\\\Game\"}]}}");
 		assert_se("C:\\Game", Desktop::RootOf(status, Core::StringView("w2")).CStr(), "its folder");
 		assert_true(Desktop::RootOf(status, Core::StringView("w9")).IsEmpty(), "a workspace no longer open");
@@ -98,6 +99,7 @@ class DesktopTests {
 		Core::Array<Desktop::RelaunchWindow> windows;
 		Desktop::RelaunchWindow game;
 		game.m_Root = Core::String("C:\\Game");
+		game.m_DockQuery = Core::String("win=w-ied.chat");
 		game.m_Placement = Desktop::ParsePlacement(Core::StringView("{\"x\":40,\"y\":30,\"width\":1200,\"height\":800,\"maximized\":true}"));
 		windows.Push(game);
 		windows.Push(Desktop::RelaunchWindow());
@@ -107,8 +109,36 @@ class DesktopTests {
 		assert_true(pid == 4242 && read.Count() == 2, "the old process and both windows");
 		assert_true(read[0].m_Root == "C:\\Game" && read[0].m_Placement.m_Known && read[0].m_Placement.m_Width == 1200 && read[0].m_Placement.m_Maximized, "where the first was, on what");
 		assert_true(read[1].m_Root.IsEmpty() && !read[1].m_Placement.m_Known, "the second on the start page, placed by the system");
+		assert_se("win=w-ied.chat", read[0].m_DockQuery.CStr(), "the first a docked window");
+		assert_true(read[1].m_DockQuery.IsEmpty(), "the second a main window");
 		assert_true(!Desktop::ParseRelaunch(Core::StringView("{\"pid\":1}"), pid, read), "not a relaunch file");
 		assert_true(Desktop::AwaitExit(0, 100), "no process to wait for");
+	}
+
+	[test("docked_windows")]
+	public static void TestDockedWindows() {
+		Core::StringView docked = Core::StringView("http://127.0.0.1:8765/?ws=w2&win=w-ied.chat");
+		assert_se("w-ied.chat", Desktop::DockWindowOf(docked).CStr(), "the window a page's address names");
+		assert_se("win=w-ied.chat", Desktop::DockQueryOf(docked).CStr(), "what brings it back");
+		Core::StringView main = Core::StringView("http://127.0.0.1:8765/?ws=w2#open=w2/");
+		assert_true(Desktop::DockWindowOf(main).IsEmpty() && Desktop::DockQueryOf(main).IsEmpty(), "a main window names none");
+		assert_true(Desktop::DockWindowOf(Core::StringView("http://x/?win=..%2F..%2Fevil")).IsEmpty(), "no way out of the folder");
+		assert_true(Desktop::DockWindowOf(Core::StringView("http://x/?win=../evil")).IsEmpty(), "nor a path");
+		assert_true(Desktop::DockWindowOf(Core::StringView("http://x/?win=.hidden")).IsEmpty(), "nor a dot file");
+		Core::StringView launch = Core::StringView("http://127.0.0.1:8765/?t=ab#open=w2/");
+		assert_se("http://127.0.0.1:8765/?t=ab#open=w2/?win=w-a", Desktop::WithDockWindow(launch, Core::StringView("win=w-a")).CStr(), "through sign-in, in the fragment");
+		assert_se("http://127.0.0.1:8765/?t=ab#open=w2/", Desktop::WithDockWindow(launch, Core::StringView("")).CStr(), "a main window's stays");
+		assert_se("http://127.0.0.1:8765/?t=ab", Desktop::WithDockWindow(Core::StringView("http://127.0.0.1:8765/?t=ab"), Core::StringView("win=w-a")).CStr(), "nothing to bring back on the start page");
+		FS::Path data = FS::TempDirectory() / "ied-desktop-tests-docked";
+		Desktop::Placement placement = Desktop::ParsePlacement(Core::StringView("{\"x\":-1900,\"y\":40,\"width\":1600,\"height\":1000,\"maximized\":true}"));
+		assert_true(Desktop::SaveDockedPlacement(data, Core::StringView("w-chat"), placement), "kept");
+		Desktop::Placement again = Desktop::LoadDockedPlacement(data, Core::StringView("w-chat"));
+		assert_true(again.m_Known && again.m_X == -1900 && again.m_Maximized, "by its id");
+		assert_true(!Desktop::LoadDockedPlacement(data, Core::StringView("w-other")).m_Known, "another window has none");
+		assert_true(!Desktop::LoadPlacement(data).m_Known, "and the main window's is its own");
+		FS::RemoveFile((data / "windows" / "w-chat.json").CStr());
+		Desktop::Placement grabbed = Desktop::GrabbedAt(placement, 3000, 500);
+		assert_true(!grabbed.m_Maximized && grabbed.m_X < 3000 && grabbed.m_X > 2500 && grabbed.m_Y < 500 && grabbed.m_Width == 1600, "its caption under the pointer, on that monitor");
 	}
 
 	[test("placement")]
@@ -158,6 +188,8 @@ class DesktopTests {
 		assert_true(script.View().Contains(Core::StringView("relaunch: () => post(\"relaunch\")")) && script.View().Contains(Core::StringView("openInWeb: (path) => post(\"openInWeb\", { path: String(path) })")), "relaunch, open in web");
 		assert_true(script.View().Contains(Core::StringView("post(\"location\", { url: location.href })")), "the address told as history changes it");
 		assert_true(script.View().Contains(Core::StringView("focus: () => post(\"focus\")")), "a notification's click brings the window to the front");
+		assert_true(script.View().Contains(Core::StringView("closeWindow: () => post(\"closeWindow\")")), "a window that gave away its activities closes");
+		assert_true(script.View().Contains(Core::StringView("atCursor")), "a window dropped at the pointer");
 	}
 
 	[test("restart_budget")]

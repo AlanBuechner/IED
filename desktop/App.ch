@@ -28,8 +28,9 @@ namespace Desktop
 
 		public void OpenHome();
 		public void OpenLocation(Core::StringView path, int64 line, int64 col);
-		// A window straight on a URL of the server (the profile is signed in already).
-		public void OpenUrl(Core::StringView url);
+		// A window straight on a URL of the server (the profile is signed in already). A docked window opens where it last
+		// closed, or with `atCursor` (a sidebar tab let go outside every window, docs/15 "Windows") at the pointer.
+		public void OpenUrl(Core::StringView url, bool atCursor);
 		// File > Open Folder: the folder the person picks, opened on the server and shown in `window`.
 		public void OpenFolder(Window* window);
 		// The workspace rooted at `root` in the system's default browser, through a one-time sign-in URL.
@@ -72,6 +73,9 @@ namespace Desktop
 		private void EnvironmentReady(int32 error, void* created);
 		private Window* NewWindow();
 		private Window* NewWindowAt(const Placement& placement);
+		// Where a window on `url` opens (OpenUrl).
+		private Placement PlacementFor(Core::StringView url, bool atCursor);
+		private Placement NextPlacement();
 		// The windows a relaunch file names, once the process that wrote it is gone; none without one.
 		private Core::Array<RelaunchWindow> TakeRelaunch();
 		private void OpenRelaunched(const Core::Array<RelaunchWindow>& relaunched);

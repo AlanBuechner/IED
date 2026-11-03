@@ -126,8 +126,10 @@ namespace Desktop
 	}
 
 	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
+		Core::String docked = m_DockQuery;
+		m_DockQuery = Core::String();
 		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !m_ShowingStatus && OriginOf(url).View() == m_Origin.View()) return;
-		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : Core::String(url);
+		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : WithDockWindow(url, docked.View());
 		if (!url.IsEmpty()) Show(shown.View());
 		else if (arrival == Arrival::Folder) Alert((Core::String("IED could not open the folder: ") + error).View());
 		else ShowStatus(Core::StringView("IED could not start its server"), error);
@@ -173,7 +175,7 @@ namespace Desktop
 		Core::String url = TakeWide(raw);
 		args->put_Handled(1);
 		Destination where = NewWindowTarget(url.View(), m_Origin.View());
-		if (where == Destination::NewWindow) m_App->OpenUrl(url.View());
+		if (where == Destination::NewWindow) m_App->OpenUrl(url.View(), false);
 		else if (where == Destination::External) Launch::OpenExternal(url.View());
 		return c_Ok;
 	}
@@ -206,8 +208,10 @@ namespace Desktop
 		else if (type == "newWindow") {
 			Core::StringView url = parsed.root.Member("url").AsView();
 			if (url.IsEmpty()) m_App->OpenHome();
-			else if (NewWindowTarget(url, m_Origin.View()) == Destination::NewWindow) m_App->OpenUrl(url);
+			else if (NewWindowTarget(url, m_Origin.View()) == Destination::NewWindow) m_App->OpenUrl(url, parsed.root.Member("atCursor").AsBool());
 		}
+		// A window that gave away its last activity (docs/15 "Windows"): the page cannot close what no script opened.
+		else if (type == "closeWindow") Close();
 		return c_Ok;
 	}
 

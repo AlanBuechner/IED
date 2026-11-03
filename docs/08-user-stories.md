@@ -65,7 +65,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-SHL-1** `plan` `P0` - As Owner, a thin icon sidebar on the left switches the main view (chat on top, then editor, git, then plugin icons), with the settings icon pinned at the bottom.
 - **US-SHL-2** `plan` `P0` - As Owner, the terminal is an always-present collapsible panel across the full width at the bottom (minus the sidebar), in every view.
 - **US-SHL-3** `plan+` `P0` - As Owner, the editor view behaves like Visual Studio: menu bar, toolbar, Solution Explorer, document well with tabs, docked tool windows (Output, Error List, Find Results, Call Stack...).
-- **US-SHL-4** `plan` `P0` - As Owner, I can split and dock panes (chats and documents) side by side and stacked, but nothing ever floats in its own window.
+- **US-SHL-4** `plan` `P0` - As Owner, I can split and dock panes (chats and documents) side by side and stacked, but a single pane never floats in its own window (a whole sidebar tab can: US-SHL-12).
 - **US-SHL-5** `plan+` `P0` - As Owner, VS keyboard shortcuts work (F5, Ctrl+Shift+B, F9-F12, Ctrl+K chords, Ctrl+, / Ctrl+T go-to-all, Ctrl+Q feature search), and I can rebind any of them.
 - **US-SHL-6** `ext` `P0` - As Owner, a status bar shows build/AI/LSP state, cursor position, indentation mode, encoding, line endings, branch, and notifications.
 - **US-SHL-7** `ext` `P0` - As Owner, layout (pane sizes, open tool windows, splits) persists per workspace and per device class, so the phone layout does not wreck the desktop layout.
@@ -73,6 +73,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-SHL-9** `ext` `P1` - As Owner, a feature search box (VS Ctrl+Q) finds any command, setting, file, or tool window by name.
 - **US-SHL-10** `ext` `P1` - As Owner, a start page shows recent workspaces, clone-a-repo, open folder/solution, and new project.
 - **US-SHL-11** `ext` `P1` - As Owner, a notification center keeps a history of errors and long-running task results (nothing important is only a transient toast).
+- **US-SHL-12** `ext` `P1` - As Owner, each sidebar tab can be docked to another window, by dragging it there or out of every window, so the chat sits on one monitor and the code on another, each window with its own sidebar and showing what I chose, and the arrangement comes back next time.
 
 ### WSP - Workspaces: solutions, projects, folders, files
 

@@ -16,6 +16,8 @@ import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
 import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, withTethersMoved, partnersOf, followersOf } from "./layoutdoc.js";
+import { activitiesOf, shownIn, withShown } from "./windowdoc.js";
+import { DockWindows } from "./dockwindows.js";
 import { tabKindOf, dockFor } from "./dockplace.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
@@ -82,7 +84,8 @@ export class Shell {
 		this.wantedMode = DEFAULT_MODE;  // the layout mode the context keys ask for (docs/15 "Window layouts")
 		this.modeTimer = null;
 		this.modeSettled = false;
-		this.deviceClass = deviceClassOf(window.innerWidth);
+		this.windows = new DockWindows(this);   // this window among the device's (docs/15 "Windows")
+		this.deviceClass = this.classNow();
 		this.chrome = null;
 		this.focus = null;
 		this.lastWell = null;             // the document group used last, {activity, path}: where an open from a tool window goes
@@ -100,11 +103,13 @@ export class Shell {
 		registerShellCommands(this);
 		registerShellViews(this);
 		this.identity = await resolveIdentity(window);
+		this.identity.deviceClass = this.classNow();
+		this.windows.start();
 		// The master's socket and the shown workspace's server's (docs/10 "Routing").
 		this.client = new Router({ base: socketBase(), identity: this.identity, onLeave: (reason) => this.leave(reason) });
 		this.client.onState((state) => this.connectionChanged(state));
 		// The width again: the window may have been resized while the identity was read, before anything listened.
-		this.deviceClass = deviceClassOf(window.innerWidth);
+		this.deviceClass = this.classNow();
 		window.addEventListener("resize", () => this.resized());
 		window.addEventListener("hashchange", () => location.hash === "#start" && !this.showingStartPage && this.showStartPage());
 		this.context.set("deviceClass", this.deviceClass);
@@ -177,7 +182,10 @@ export class Shell {
 	serverEvent(kind, data) {
 		const s = this.server;
 		if (kind === "device.connected") s.clients = [...s.clients.filter((c) => c.clientId !== data.clientId), data];
-		else if (kind === "device.disconnected") s.clients = s.clients.filter((c) => c.clientId !== data.clientId);
+		else if (kind === "device.disconnected") {
+			s.clients = s.clients.filter((c) => c.clientId !== data.clientId);
+			this.windows.clientLeft(data);
+		}
 		else if (kind === "notification") {
 			s.notifications = [...s.notifications, data];
 			this.toasts.show(data.text, data.level);
@@ -254,10 +262,12 @@ export class Shell {
 
 	async showWorkspace(wsId) {
 		if (wsId === this.wsId && this.layout) return;
+		this.windows.showing(wsId);
 		this.leaveWorkspace();
 		this.lastWell = null;
 		if (wsId) this.startSettings.close(false);
 		this.wsId = wsId;
+		this.resized();
 		if (this.client.show) this.client.show(wsId);
 		try {
 			sessionStorage.setItem(WORKSPACE_KEY, wsId || "");
@@ -281,10 +291,7 @@ export class Shell {
 			this.startPageAsked = false;
 			history.replaceState(null, "", location.pathname + location.search);
 		}
-		// The address names the workspace shown (`?ws=`, which preferredWorkspace reads), so a reload, a bookmark or the
-		// desktop app's relaunch comes back to it.
-		const named = "?ws=" + encodeURIComponent(wsId);
-		if (location.search !== named) history.replaceState(null, "", location.pathname + named + location.hash);
+		this.nameInAddress(wsId);
 		this.wsTopic = this.client.subscribe("ws:" + wsId, {
 			snap: (data) => this.workspaceSnapshot(data),
 			evt: (kind, data) => this.workspaceEvent(kind, data),
@@ -295,7 +302,18 @@ export class Shell {
 			evt: (kind, data) => kind === "tools.changed" && this.toolsChanged(wsId, data),
 		});
 		await this.reloadContributions();
+		if (await this.windows.claim()) {
+			this.nameInAddress(wsId);
+			this.resized();
+		}
 		this.openLayout();
+	}
+
+	// The address names the workspace shown (`?ws=`, which preferredWorkspace reads) and a window docked to it, so a reload,
+	// a bookmark or the desktop app's relaunch comes back to them.
+	nameInAddress(wsId) {
+		const named = "?ws=" + encodeURIComponent(wsId) + this.windows.addressPart();
+		if (location.search !== named) history.replaceState(null, "", location.pathname + named + location.hash);
 	}
 
 	// The start page in this window (File > Start Page): the workspace stays open on the server.
@@ -330,6 +348,7 @@ export class Shell {
 		if (this.toolsTopic) this.toolsTopic();
 		this.toolsTopic = null;
 		this.tools = null;
+		this.windows.reset();
 		if (this.layout) this.layout.dispose();
 		this.layout = null;
 		this.views.releaseAll();
@@ -368,9 +387,15 @@ export class Shell {
 	workspaceChanged() {
 		this.context.set("workspaceTrusted", this.workspace.trusted);
 		this.context.set("workspaceKind", this.workspace.kind);
-		document.title = (this.workspace.name ? this.workspace.name + " - " : "") + "IED";
+		this.updateTitle();
 		for (const fn of [...this.workspace.listeners]) fn(this.workspace);
 		if (this.chrome) this.chrome.workspaceChanged();
+	}
+
+	// "<workspace> - IED"; a window of its own says which: "Chat - <workspace> - IED", for the taskbar.
+	updateTitle() {
+		const activity = this.windows.id ? this.contributions.activity(this.currentActivity()) : null;
+		document.title = (activity ? activity.title + " - " : "") + (this.workspace.name ? this.workspace.name + " - " : "") + "IED";
 	}
 
 	async reloadContributions() {
@@ -394,6 +419,7 @@ export class Shell {
 
 	openLayout() {
 		this.layout = new LayoutStore(this.client, this.wsId, this.deviceClass, (doc) => this.adopt(doc));
+		this.windows.reopen();
 	}
 
 	adopt(doc) {
@@ -402,6 +428,7 @@ export class Shell {
 		this.releaseUnused();
 		this.tabsChanged();
 		this.openLaunched();
+		this.windows.changed();
 	}
 
 	// The tabs open in this window's layout - every dock host's, a phone's pane and back stack - and those shown (each
@@ -457,8 +484,14 @@ export class Shell {
 		if (this.showingStartPage) this.chrome.startPage();
 	}
 
+	// The device class of this window now: a phone's, a tablet's or a desktop's by its width; with windows of its own
+	// (docs/15 "Windows"), a desktop's at any width.
+	classNow() {
+		return this.windows.pinnedClass || deviceClassOf(window.innerWidth);
+	}
+
 	resized() {
-		const next = deviceClassOf(window.innerWidth);
+		const next = this.classNow();
 		if (next === this.deviceClass) return;
 		const phoneChanged = (next === "phone") !== (this.deviceClass === "phone");
 		this.deviceClass = next;
@@ -476,6 +509,7 @@ export class Shell {
 		if (!this.chrome || !this.wsId) return;
 		this.context.set("activeActivity", this.currentActivity());
 		this.context.set("layoutMode", this.mode);
+		this.updateTitle();
 		this.chrome.render();
 	}
 
@@ -499,11 +533,20 @@ export class Shell {
 		return this.activityBadges.get(activityId) || null;
 	}
 
+	// The activities docked to this window (docs/15 "Windows"): on a phone, all of them.
+	activitiesHere() {
+		const all = this.contributions.activities;
+		if (this.deviceClass === "phone") return all;
+		const here = new Set(activitiesOf(this.doc, this.windows.device, this.windows.id, all.map((a) => a.id)));
+		return all.filter((a) => here.has(a.id));
+	}
+
+	isHere(activityId) {
+		return this.activitiesHere().some((a) => a.id === activityId);
+	}
+
 	currentActivity() {
-		const activities = this.contributions.activities;
-		const stored = this.doc.activity;
-		if (stored && activities.some((a) => a.id === stored)) return stored;
-		return activities.length ? activities[0].id : null;
+		return shownIn(this.doc, this.windows.device, this.windows.id, this.activitiesHere().map((a) => a.id));
 	}
 
 	isDockHost(activityId) {
@@ -512,9 +555,11 @@ export class Shell {
 	}
 
 	// The dock host a tab opens into: the current activity when it takes the tab, else the first that names its kind,
-	// else the first that takes any.
+	// else the first that takes any, this window's before another's.
 	dockActivity(ref) {
-		return dockFor(tabKindOf(ref), this.contributions.activity(this.currentActivity()), this.contributions.activities);
+		const here = this.activitiesHere();
+		const elsewhere = this.contributions.activities.filter((a) => !here.includes(a));
+		return dockFor(tabKindOf(ref), this.contributions.activity(this.currentActivity()), [...here, ...elsewhere]);
 	}
 
 	// The layout mode shown: the layout document's, which every window of the device class shows.
@@ -604,7 +649,13 @@ export class Shell {
 	showActivity(activityId) {
 		if (!this.layout || !this.contributions.activity(activityId)) return;
 		if (this.deviceClass === "phone") this.layout.update((doc) => withPhonePane(withActivity(doc, activityId), "activity:" + activityId));
-		else this.layout.update((doc) => withActivity(doc, activityId));
+		else this.showIn(activityId);
+		this.windows.revealElsewhere(activityId);
+	}
+
+	// `activityId` is what the window holding it shows, this one or another.
+	showIn(activityId) {
+		this.layout.update((doc) => withShown(doc, this.windows.device, activityId));
 	}
 
 	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given, with the tier it
@@ -649,10 +700,11 @@ export class Shell {
 		if (asked && where && where !== asked) this.changeTree(where, (tree) => T.closeTab(tree, ref));
 		const activityId = asked || where || this.dockActivity(ref);
 		const groupPath = this.documentGroupPath(activityId);
-		this.layout.update((doc) => withActivity(doc, activityId));
+		this.showIn(activityId);
 		this.openInTree(activityId, ref, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
 		this.slideOut(activityId, ref);
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
+		this.windows.revealElsewhere(activityId, ref);
 	}
 
 	// Opens `ref` beside `anchor` (ied.tabs.openBeside): in another document group, a new one to the right when there is
@@ -712,7 +764,7 @@ export class Shell {
 			this.layout.update((doc) => withPhonePane(doc, id));
 			return;
 		}
-		this.layout.update((doc) => withActivity(doc, tool.activity));
+		this.showIn(tool.activity);
 		// One that is not open goes where the mode's default puts it, auto-hidden when that hides it (and so slides out).
 		const place = this.contributions.placementOf(tool, this.mode);
 		this.changeTree(tool.activity, (tree) => {
@@ -721,6 +773,7 @@ export class Shell {
 		});
 		this.slideOut(tool.activity, id);
 		requestAnimationFrame(() => this.views.focus(id));
+		this.windows.revealElsewhere(tool.activity, id);
 	}
 
 	// An auto-hidden tab that is asked for slides out over the documents (VS).
@@ -740,6 +793,7 @@ export class Shell {
 		if (activityId) {
 			this.changeTree(activityId, (tree) => T.revealPartners(T.activateTab(tree, ref), ref, partnersOf(this.doc, ref)));
 			this.slideOut(activityId, ref);
+			this.windows.revealElsewhere(activityId, ref);
 		}
 		requestAnimationFrame(() => this.views.focus(ref));
 	}
@@ -888,10 +942,11 @@ export class Shell {
 		}));
 	}
 
-	// Views whose tabs left every tree (and the phone's pane and back stack) are disposed.
+	// Views whose tabs left every tree of this window (and the phone's pane and back stack) are disposed: an activity docked
+	// to another window has its views there.
 	releaseUnused() {
 		const keep = new Set();
-		for (const a of this.contributions.activities) {
+		for (const a of this.activitiesHere()) {
 			if (a.view) keep.add("activity:" + a.id);
 			else for (const ref of T.refsOf(this.treeOf(a.id))) keep.add(ref);
 		}
@@ -921,6 +976,12 @@ export class Shell {
 		this.focused(activityId, active, path, true);
 		const keys = this.keysOf(active);
 		this.showMenu("tabs/new", at, { ref: active || undefined, path: keys.resourcePath }, keys);
+	}
+
+	// The menu of a sidebar tab (docs/15 "Windows"): which window it goes to.
+	showActivityMenu(activityId, at) {
+		this.context.set("menuActivity", activityId);
+		return this.showMenu("shell/activity", at);
 	}
 
 	showMenu(menuId, at, args, keys) {

@@ -2,6 +2,9 @@ include "Placement.ch"
 
 namespace Desktop
 {
+	const int32 c_GrabFromLeft = 120;   // where on its caption a window dropped at the pointer hangs from it
+	const int32 c_GrabFromTop = 16;
+
 	Placement ParsePlacement(Core::StringView json) {
 		Placement placement;
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -41,16 +44,37 @@ namespace Desktop
 		return next;
 	}
 
-	Placement LoadPlacement(const FS::Path& folder) {
-		FS::Path file = folder / "window.json";
+	Placement GrabbedAt(const Placement& from, int32 x, int32 y) {
+		Placement next = from;
+		next.m_X = x - c_GrabFromLeft;
+		next.m_Y = y - c_GrabFromTop;
+		next.m_Maximized = false;
+		return next;
+	}
+
+	static Placement ReadPlacement(const FS::Path& file) {
 		if (!FS::FileExists(file.CStr())) return Placement();
 		FS::File opened = FS::File(file.CStr(), "rb");
 		return opened.IsOpen() ? ParsePlacement(opened.ReadText().View()) : Placement();
 	}
 
-	bool SavePlacement(const FS::Path& folder, const Placement& placement) {
+	static bool WritePlacement(const FS::Path& folder, const FS::Path& file, const Placement& placement) {
 		if (!FS::MakeDirectories(folder.CStr())) return false;
 		Core::String json = PlacementJson(placement);
-		return FS::WriteFileAtomically((folder / "window.json").CStr(), (const void*)json.CStr(), json.ByteLength());
+		return FS::WriteFileAtomically(file.CStr(), (const void*)json.CStr(), json.ByteLength());
+	}
+
+	static FS::Path DockedFile(const FS::Path& folder, Core::StringView id) {
+		return folder / "windows" / (Core::String(id) + ".json").View();
+	}
+
+	Placement LoadPlacement(const FS::Path& folder) { return ReadPlacement(folder / "window.json"); }
+
+	bool SavePlacement(const FS::Path& folder, const Placement& placement) { return WritePlacement(folder, folder / "window.json", placement); }
+
+	Placement LoadDockedPlacement(const FS::Path& folder, Core::StringView id) { return ReadPlacement(DockedFile(folder, id)); }
+
+	bool SaveDockedPlacement(const FS::Path& folder, Core::StringView id, const Placement& placement) {
+		return WritePlacement(folder / "windows", DockedFile(folder, id), placement);
 	}
 }

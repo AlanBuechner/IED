@@ -20,12 +20,13 @@ The shell is the web app's chrome. It owns no feature logic: every view in it is
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
-| F-SHL-10 | Layout tree per activity: rows/columns of tab groups; drag a tab to a dock target (left/right/top/bottom/center) with a preview overlay; no floating windows | P0 | US-SHL-4 | frontend |
+| F-SHL-10 | Layout tree per activity: rows/columns of tab groups; drag a tab to a dock target (left/right/top/bottom/center) with a preview overlay; a tab never floats (its whole activity can go to another window, F-SHL-16) | P0 | US-SHL-4 | frontend |
 | F-SHL-11 | Tool windows (VS): dock to left/right/bottom regions of the editor activity, auto-hide (pin/unpin) to the edge, tabbed together | P1 | US-SHL-3 | frontend |
 | F-SHL-12 | Document well: tabs with pinned tabs, preview tab (single-click opens italic preview, VS), dirty dot (yellow), close-all-but-this, tab overflow dropdown, tab position settings | P0 | US-SHL-3 | frontend, plugins/editor |
 | F-SHL-13 | Layout persistence on the server per workspace x device class; "reset window layout" command; named layouts (VS "Save Window Layout") P2 | P0 | US-SHL-7 | frontend, src/host |
 | F-SHL-14 | Cross-activity docking: a chat tab can be docked inside the editor activity (and vice versa: an editor beside chats) | P1 | US-SHL-4, US-CHT-1 | frontend |
 | F-SHL-15 | Focus management: one focused pane; keyboard navigation between panes (Ctrl+Tab window switcher, Alt+F7 tool windows), focus ring visible | P1 | US-SHL-5 | frontend |
+| F-SHL-16 | Windows: each sidebar tab (activity) docks to one window of the device, by dragging it onto another window or out of them all, or by its menu; each window has its own sidebar, shown activity and panel, and a device's windows come back with its layout (docs/15 "Windows") | P1 | US-SHL-12 | frontend, desktop |
 
 ## Commands, search and keyboard
 

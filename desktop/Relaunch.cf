@@ -5,6 +5,7 @@ namespace Desktop
 {
 	const uint32 c_Synchronize = 0x00100000;   // SYNCHRONIZE
 	const uint32 c_WaitTimeout = 0x102;        // WAIT_TIMEOUT
+	const int64 c_DockIdMaxBytes = 120;
 
 	Core::String RelaunchJson(int64 pid, const Core::Array<RelaunchWindow>& windows) {
 		Core::StringBuilder json;
@@ -15,6 +16,8 @@ namespace Desktop
 			if (i > 0) json.AppendByte(',');
 			json.Append("{\"root\":");
 			Serialization::WriteJsonString(windows[i].m_Root.View(), &json);
+			json.Append(",\"dock\":");
+			Serialization::WriteJsonString(windows[i].m_DockQuery.View(), &json);
 			json.Append(",\"placement\":");
 			json.Append(PlacementJson(windows[i].m_Placement).View());
 			json.AppendByte('}');
@@ -32,6 +35,7 @@ namespace Desktop
 		for (int64 i = 0; i < list.Count(); ++i) {
 			RelaunchWindow window;
 			window.m_Root = Core::String(list.At(i).Member("root").AsView());
+			window.m_DockQuery = Core::String(list.At(i).Member("dock").AsView());
 			Core::StringBuilder placement;
 			Serialization::WriteJson(list.At(i).Member("placement"), &placement, 0);
 			window.m_Placement = ParsePlacement(placement.View());
@@ -40,19 +44,47 @@ namespace Desktop
 		return true;
 	}
 
-	Core::String WorkspaceOf(Core::StringView url) {
+	static Core::String QueryValue(Core::StringView url, const char* name) {
 		const int64 fragment = url.IndexOf(Core::StringView("#"));
 		Core::StringView address = fragment < 0 ? url : url.Substring(0, fragment);
 		const int64 query = address.IndexOf(Core::StringView("?"));
 		if (query < 0) return Core::String();
+		Core::String wanted = Core::String(name) + "=";
 		Core::StringView rest = address.Substring(query + 1, address.ByteLength() - query - 1);
 		while (!rest.IsEmpty()) {
 			const int64 end = rest.IndexOf(Core::StringView("&"));
 			Core::StringView pair = end < 0 ? rest : rest.Substring(0, end);
-			if (pair.StartsWith(Core::StringView("ws="))) return Core::String(pair.Substring(3, pair.ByteLength() - 3));   // ids need no decoding
+			if (pair.StartsWith(wanted.View())) return Core::String(pair.Substring(wanted.ByteLength(), pair.ByteLength() - wanted.ByteLength()));   // these values need no decoding
 			rest = end < 0 ? Core::StringView("") : rest.Substring(end + 1, rest.ByteLength() - end - 1);
 		}
 		return Core::String();
+	}
+
+	Core::String WorkspaceOf(Core::StringView url) { return QueryValue(url, "ws"); }
+
+	static bool NamesAFile(Core::StringView id) {
+		if (id.IsEmpty() || id.ByteLength() > c_DockIdMaxBytes || id.ByteAt(0) == '.') return false;
+		for (int64 i = 0; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')) return false;
+		}
+		return true;
+	}
+
+	Core::String DockWindowOf(Core::StringView url) {
+		Core::String id = QueryValue(url, "win");
+		return NamesAFile(id.View()) ? id : Core::String();
+	}
+
+	Core::String DockQueryOf(Core::StringView url) {
+		Core::String id = DockWindowOf(url);
+		if (id.IsEmpty()) return Core::String();
+		return Core::String("win=") + id.View();
+	}
+
+	Core::String WithDockWindow(Core::StringView url, Core::StringView query) {
+		if (query.IsEmpty() || !url.Contains(Core::StringView("#open="))) return Core::String(url);
+		return (Core::String(url) + "?") + query;
 	}
 
 	Core::String RootOf(Core::StringView statusReply, Core::StringView wsId) {

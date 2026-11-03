@@ -4,6 +4,7 @@ import { run } from "./harness.js";
 import "./when.test.js";
 import "./keys.test.js";
 import "./layouttree.test.js";
+import "./windowdoc.test.js";
 import "./tabs.test.js";
 import "./dock.test.js";
 import "./dockplace.test.js";

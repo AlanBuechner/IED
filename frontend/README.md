@@ -18,7 +18,8 @@ frontend/
 |  +- ws/              client.js: protocol v1 (hello/resume, requests + opIds + cancellation, topics + cursors, gaps,
 |  |                   pings, backoff); identity.js: client id per tab, device id per browser, device class
 |  +- shell/           shell.js composes: commands, keybindings (chords, when), menus, views, contributions,
-|                      layouttree.js + layoutdoc.js (pure), layoutstore.js (server sync), dock.js (docking),
+|                      layouttree.js + layoutdoc.js + windowdoc.js + layoutmerge.js (pure), layoutstore.js (server
+|                      sync), dock.js (docking), dockwindows.js + activitydrag.js (sidebar tabs in other windows),
 |                      desktop.js / phone.js (chrome), statusbar, banners, toasts, palette, notifications,
 |                      workspaces (the start page), startsettings.js (Settings there, with no workspace),
 |                      hostcommands.js + hostviews.js (the shell's own commands and tabs)

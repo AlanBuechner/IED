@@ -63,6 +63,10 @@ const COMMANDS = [
 	{ id: "shell.nextTab", title: "Next Tab", category: "Window", run: (shell) => stepTab(shell, 1) },
 	{ id: "shell.previousTab", title: "Previous Tab", category: "Window", run: (shell) => stepTab(shell, -1) },
 	{ id: "shell.resetLayout", title: "Reset Window Layout", category: "Window", run: (shell) => shell.resetLayout() },
+	{ id: "shell.newWindow", title: "New Window", category: "Window", icon: "$(empty-window)", enablement: "workspaceKind && deviceClass != 'phone'", run: (shell) => shell.windows.newWindow() },
+	{ id: "shell.moveActivityToNewWindow", title: "Move to New Window", category: "Window", icon: "$(multiple-windows)", enablement: "workspaceKind && deviceClass != 'phone'", run: (shell, args) => shell.windows.moveToNewWindow((args && args.id) || shell.currentActivity()) },
+	{ id: "shell.moveActivityToWindow", title: "Move to Window", category: "Window", run: (shell, args) => args && args.id && shell.windows.moveTo(args.id, args.window || null) },
+	{ id: "shell.bringActivityHere", title: "Bring Here", category: "Window", run: (shell, args) => args && args.id && shell.windows.moveHere(args.id) },
 	{ id: "shell.togglePanel", title: "Show or Hide the Panel", category: "View", icon: "$(layout-panel)", run: (shell) => shell.chrome && shell.chrome.panel && shell.chrome.panel.mounted && shell.chrome.panel.setOpen(!shell.chrome.panel.isOpen()) },
 	{ id: "shell.showNotifications", title: "Notifications", category: "View", icon: "$(bell)", run: (shell, args) => showNotificationCenter(shell, args && args.at) },
 	{ id: "shell.clearNotifications", title: "Clear All Notifications", category: "View", run: (shell) => Promise.all(shell.server.notifications.map((n) => shell.client.request("server.dismiss", { id: n.id }))) },
@@ -105,6 +109,7 @@ const MENUS = {
 		{ command: "shell.autoHideTab", group: "3_dock", when: "tabInToolGroup && !tabAutoHidden" },
 		{ command: "shell.dockTab", group: "3_dock", order: 1, when: "tabAutoHidden" },
 		{ command: "shell.autoHideAll", group: "3_dock", order: 2 },
+		{ command: "shell.newWindow", group: "0_window", when: "!desktopApp" },
 		{ command: "shell.resetLayout", group: "9_layout" },
 	],
 	"menubar/extensions": [{ command: "shell.plugins", group: "1_manage" }],
@@ -163,6 +168,37 @@ export function registerShellCommands(shell) {
 	shell.menus.provide("menubar/view", () => toolWindowItems(shell));
 	shell.menus.provide("tab/context", () => moveToActivityItems(shell));
 	shell.menus.provide("tabs/new", () => newTabHereItems(shell));
+	shell.menus.provide("shell/activity", () => activityMenuItems(shell));
+	shell.menus.provide("menubar/window", () => windowMenuItems(shell));
+}
+
+// Whether an activity can leave this window for a new one: a window's only activity has a window of its own already.
+function canLeaveHere(shell) {
+	return !shell.windows.id || shell.activitiesHere().length > 1;
+}
+
+// What to call a window of the device in a menu: by what it holds.
+function windowName(shell, other) {
+	if (!other.id) return "Main Window";
+	const titles = other.activities.map((id) => shell.contributions.activity(id)).filter(Boolean).map((a) => a.title);
+	return titles.length ? titles.join(", ") + " Window" : "Empty Window";
+}
+
+// A sidebar tab's menu (docs/15 "Windows"): which window it goes to.
+function activityMenuItems(shell) {
+	const id = shell.context.get("menuActivity");
+	const here = canLeaveHere(shell) ? [{ command: "shell.moveActivityToNewWindow", args: { id }, group: "1_windows" }] : [];
+	const others = shell.windows.others().map((other, i) => ({ command: "shell.moveActivityToWindow", args: { id, window: other.id }, title: "Move to " + windowName(shell, other), group: "1_windows", order: 1 + i }));
+	return [...here, ...others];
+}
+
+// The Window menu's rows about windows: the shown activity to a new one, and what other windows hold brought here.
+function windowMenuItems(shell) {
+	if (!shell.wsId || shell.deviceClass === "phone") return [];
+	const current = shell.contributions.activity(shell.currentActivity());
+	const leave = current && canLeaveHere(shell) ? [{ command: "shell.moveActivityToNewWindow", args: { id: current.id }, title: "Move " + current.title + " to New Window", group: "4_windows" }] : [];
+	const bring = shell.contributions.activities.filter((a) => !shell.isHere(a.id)).map((a, i) => ({ command: "shell.bringActivityHere", args: { id: a.id }, title: "Bring " + a.title + " Here", group: "4_windows", order: 1 + i }));
+	return [...leave, ...bring];
 }
 
 // The first row of a "+" menu (the menu `tabs/new`, docs/15 "Docking"): the activity's own way to open a tab, the one a

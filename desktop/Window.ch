@@ -54,6 +54,7 @@ namespace Desktop
 		public ICoreWebView2* m_Webview;
 		public Core::String m_Origin;        // the server's origin this window shows
 		public Core::String m_PageUrl;       // the page's address as its script last told it (history changes included)
+		public Core::String m_DockQuery;     // "win=...": the docked window (docs/15 "Windows") a URL being resolved brings back
 		public Core::String m_ResolvedUrl;   // a resolver thread's result, under the app's lock
 		public Core::String m_ResolveError;
 		public Arrival m_ResolveArrival;

@@ -12,14 +12,23 @@ namespace Desktop
 	{
 		public Placement m_Placement;
 		public Core::String m_Root;   // the folder (or the one solution in it) its workspace opens from; "" for the start page
+		public Core::String m_DockQuery;   // "win=...": which docked window it is (docs/15 "Windows"); "" for a main window
 	}
 
-	// {"pid": <the old process>, "windows": [{"root": ..., "placement": {...}}]}
+	// {"pid": <the old process>, "windows": [{"root": ..., "dock": ..., "placement": {...}}]}
 	Core::String RelaunchJson(int64 pid, const Core::Array<RelaunchWindow>& windows);
 	// False when `text` is not a relaunch file.
 	bool ParseRelaunch(Core::StringView text, int64& pid, Core::Array<RelaunchWindow>& windows);
 	// The workspace a window's address names (`?ws=`, the web client keeps it there); "" for none.
 	Core::String WorkspaceOf(Core::StringView url);
+	// The id of the docked window a window's address names (`win=`, docs/15 "Windows"); "" for a main window, and for one
+	// that could not be a file's name (it names the file its placement is kept in).
+	Core::String DockWindowOf(Core::StringView url);
+	// "win=<id>" of a docked window's address; "" for a main window.
+	Core::String DockQueryOf(Core::StringView url);
+	// A launch URL ("...#open=<wsId>/...") that brings docked window `query` back: its query goes in the fragment, which
+	// sign-in keeps ("" leaves the URL as it is, and so does one with no such fragment).
+	Core::String WithDockWindow(Core::StringView url, Core::StringView query);
 	// The root of workspace `wsId` in the control channel's reply to `status` (Launch::Reply's line); "" when it is not
 	// open.
 	Core::String RootOf(Core::StringView statusReply, Core::StringView wsId);

@@ -1547,6 +1547,250 @@ def restore(run, page, original):
 	check(server_text(run) == original, "main.c is back as it was")
 
 
+def sidebar_of(page):
+	return page.eval_on_selector_all(".sidebar .sb-act[data-activity]", "els => els.map(e => e.dataset.activity)")
+
+
+def shown_activity(page):
+	return page.evaluate("ied_shell.currentActivity()")
+
+
+def written(page):
+	page.wait_for_function("!ied_shell.layout.dirty && !ied_shell.layout.saving", timeout=10000)
+
+
+def move_to_new_window(run, page, activity):
+	"""The sidebar tab's menu: Move to New Window, the page of the window that opens."""
+	page.click('.sb-act[data-activity="%s"]' % activity, button="right")
+	with page.context.expect_page() as opened:
+		page.click(".popup .row:has-text('Move to New Window'), .popup [role=menuitem]:has-text('Move to New Window')")
+	other = opened.value
+	other.on("pageerror", lambda e: run.errors.append("page error: %s" % e))
+	other.on("console", lambda m: run.errors.append("console %s: %s (%s)" % (m.type, m.text, m.location.get("url", ""))) if m.type == "error" else None)
+	other.wait_for_function("document.documentElement.dataset.ready === '1' && window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	other.wait_for_selector('.sb-act[data-activity="%s"]' % activity, timeout=10000)
+	return other
+
+
+def drop_activity(source, target, activity):
+	"""A sidebar tab dragged from `source` and dropped on `target`, by the events the browser sends: the two are separate
+	pages, which Playwright's mouse cannot cross (the real drag was checked on ied-desktop, docs/15 "Windows")."""
+	data = source.evaluate("""(activity) => {
+		const transfer = new DataTransfer();
+		const button = document.querySelector('.sb-act[data-activity="' + activity + '"]');
+		button.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+		return Object.fromEntries([...transfer.types].map((type) => [type, transfer.getData(type)]));
+	}""", activity)
+	target.evaluate("""(data) => {
+		const transfer = new DataTransfer();
+		for (const [type, value] of Object.entries(data)) transfer.setData(type, value);
+		const send = (el, type) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+		send(document.querySelector(".menubar"), "dragenter");
+		const zone = document.querySelector(".window-drop");
+		if (zone.hidden) throw new Error("the window does not offer itself as a drop target");
+		send(zone, "dragover");
+		send(zone, "drop");
+	}""", data)
+	source.evaluate("""(activity) => {
+		const transfer = new DataTransfer();
+		transfer.dropEffect = "move";
+		const button = document.querySelector('.sb-act[data-activity="' + activity + '"]');
+		button.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer, clientX: 5, clientY: 5 }));
+	}""", activity)
+
+
+@scenario(viewports=("desktop",))
+def sidebar_tab_docks_to_another_window(run):
+	main = run.open()
+	all_tabs = sidebar_of(main)
+	check("ied.chat" in all_tabs and "ied.git" in all_tabs, "the sidebar lists the activities: %s" % all_tabs)
+	open_main_c(run, main)
+	check(shown_activity(main) == "ied.editor", "the editor shows")
+	run.shot("before")
+
+	# Chat goes to a window of its own: one monitor for the chat, one for the code.
+	chat = move_to_new_window(run, main, "ied.chat")
+	main.wait_for_selector('.sb-act[data-activity="ied.chat"]', state="detached", timeout=10000)
+	check("ied.chat" not in sidebar_of(main), "the chat left this window's sidebar: %s" % sidebar_of(main))
+	check(sidebar_of(chat) == ["ied.chat"], "and is the new window's: %s" % sidebar_of(chat))
+	check(shown_activity(chat) == "ied.chat", "which shows it")
+	check(shown_activity(main) == "ied.editor", "the code stays where it was")
+	check(chat.is_visible(".dock-group:visible"), "the chat is on the new window's page")
+	check("win=" in chat.url and "ws=" in chat.url, "its address says which window it is: %s" % chat.url)
+	check(chat.title().startswith("Chat - "), "its title says which: %s" % chat.title())
+	check(chat.evaluate("ied_shell.deviceClass") == "desktop", "at any width it keeps the layout it left")
+	check(main.evaluate("ied_shell.windows.id") is None, "the first window stays the main one")
+	# Narrow, either stays in the layout that says who holds what (a tablet's would show the chat here too).
+	wide = main.viewport_size
+	main.set_viewport_size({"width": 900, "height": wide["height"]})
+	main.wait_for_timeout(500)
+	check(main.evaluate("ied_shell.deviceClass") == "desktop" and "ied.chat" not in sidebar_of(main), "the main window, narrowed: %s" % sidebar_of(main))
+	main.set_viewport_size(wide)
+	run.shot("main-without-chat")
+	run.page = chat
+	run.shot("chat-window")
+	run.page = main
+
+	# Each shows what it wants, and neither moves the other.
+	main.click('.sb-act[data-activity="ied.git"]')
+	main.wait_for_selector(".git-act", timeout=10000)
+	check(shown_activity(chat) == "ied.chat", "git in one window leaves the chat in the other")
+	main.click('.sb-act[data-activity="ied.editor"]')
+	written(main)
+	chat.wait_for_timeout(500)
+	check(shown_activity(chat) == "ied.chat", "and the editor")
+
+	# A tab opened from the chat's window shows in the window holding the editor.
+	chat.evaluate("ied_shell.openTab('doc:README.md')")
+	main.wait_for_function("ied_shell.tabsState().shown.includes('doc:README.md') && document.querySelector('.view[data-ref=\"doc:README.md\"]') !== null", timeout=10000)
+	check(chat.evaluate("document.querySelector('.view[data-ref=\"doc:README.md\"]') === null"), "its view is there, not here")
+	check(main.is_visible('.view[data-ref="doc:README.md"]'), "shown there")
+	written(chat)
+
+	# Two windows changing the layout at once keep each other's changes.
+	chat.evaluate("ied_shell.layout.update((doc) => Object.assign({}, doc, { mark: 'chat' }))")
+	main.evaluate("ied_shell.layout.update((doc) => Object.assign({}, doc, { other: 'main' }))")
+	main.wait_for_function("ied_shell.doc.mark === 'chat' && ied_shell.doc.other === 'main'", timeout=10000)
+	chat.wait_for_function("ied_shell.doc.mark === 'chat' && ied_shell.doc.other === 'main'", timeout=10000)
+
+	# A panel is its window's.
+	chat.evaluate("ied_shell.chrome.panel.setOpen(true)")
+	written(chat)
+	main.wait_for_timeout(500)
+	check(main.evaluate("ied_shell.chrome.panel.isOpen()") is False, "opening the chat window's panel leaves the main window's")
+	chat.evaluate("ied_shell.chrome.panel.setOpen(false)")
+
+	# Dragged to the other window: git joins the chat, and each window's menu names the other.
+	drop_activity(main, chat, "ied.git")
+	chat.wait_for_selector('.sb-act[data-activity="ied.git"]', timeout=10000)
+	main.wait_for_selector('.sb-act[data-activity="ied.git"]', state="detached", timeout=10000)
+	chat.wait_for_selector(".git-act", timeout=10000)
+	check(sidebar_of(chat) == ["ied.chat", "ied.git"], "git is docked to the chat's window: %s" % sidebar_of(chat))
+	run.page = chat
+	run.shot("two-in-the-window")
+	chat.click('.sb-act[data-activity="ied.git"]', button="right")
+	chat.wait_for_selector(".popup")
+	menu = run.texts(".popup [role=menuitem], .popup .row")
+	check(any("Move to New Window" in m for m in menu) and any("Move to Main Window" in m for m in menu), "the tab's menu: %s" % menu)
+	run.shot("tab-menu")
+	chat.click(".popup [role=menuitem]:has-text('Move to Main Window'), .popup .row:has-text('Move to Main Window')")
+	main.wait_for_selector('.sb-act[data-activity="ied.git"]', timeout=10000)
+	chat.wait_for_selector('.sb-act[data-activity="ied.git"]', state="detached", timeout=10000)
+	run.page = main
+
+	# Reloaded, each is the window it was, and the main window opens nothing again.
+	pages = len(main.context.pages)
+	chat.reload()
+	chat.wait_for_function("window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	chat.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=10000)
+	check(sidebar_of(chat) == ["ied.chat"], "the chat's window, reloaded: %s" % sidebar_of(chat))
+	main.reload()
+	main.wait_for_function("window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	main.wait_for_timeout(4000)
+	check(len(main.context.pages) == pages, "a live window is not opened again")
+	check("ied.chat" not in sidebar_of(main), "and the main window, reloaded, still lacks the chat: %s" % sidebar_of(main))
+
+	# The address the desktop app brings it back by after a server restart: sign-in keeps the fragment.
+	chat.goto(run.target.url + "/#open=" + chat.evaluate("ied_shell.wsId") + "/?win=w-ied.chat")
+	chat.wait_for_function("window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	chat.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=10000)
+	check("win=w-ied.chat" in chat.url and sidebar_of(chat) == ["ied.chat"], "the same window: %s" % chat.url)
+
+	# A second page claiming to be that window (a bookmark): the one that is, stays that; the other is a main window.
+	twin = main.context.new_page()
+	twin.goto(chat.url)
+	twin.wait_for_function("window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	check(twin.evaluate("ied_shell.windows.id") is None and "win=" not in twin.url, "a bookmark of it is no second one: %s" % twin.url)
+	twin.close()
+
+	# Closed, what it held comes back.
+	chat.close()
+	main.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=15000)
+	check(sidebar_of(main) == all_tabs, "every tab is back: %s" % sidebar_of(main))
+	written(main)
+	check(main.evaluate("(ied_shell.doc.windows || []).length") == 0, "and the window is forgotten")
+	narrow = main.viewport_size
+	main.set_viewport_size({"width": 900, "height": narrow["height"]})
+	main.wait_for_function("ied_shell.deviceClass === 'tablet'", timeout=10000)
+	main.set_viewport_size(narrow)
+	main.wait_for_function("ied_shell.deviceClass === 'desktop' && ied_shell.layout", timeout=10000)
+	# The next scenario starts on what this one leaves shown: Git, moved back, has no dock group to wait for.
+	run.show_activity("ied.editor")
+	run.shot("back-together")
+
+
+@scenario(viewports=("desktop",))
+def window_closed_at_once_gives_its_tab_back(run):
+	main = run.open()
+	chat = move_to_new_window(run, main, "ied.chat")
+	chat.close()
+	main.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=15000)
+	main.wait_for_function("!(ied_shell.doc.windows || []).length", timeout=10000)
+
+
+@scenario(viewports=("desktop",))
+def window_with_nothing_offers_every_activity(run):
+	main = run.open()
+	with main.context.expect_page() as opened:
+		main.evaluate("ied_shell.commands.run('shell.newWindow')")
+	other = opened.value
+	other.wait_for_selector(".empty-window", timeout=20000)
+	run.page = other
+	run.shot("empty")
+	check(other.is_visible(".empty-window button[data-bring='ied.chat']"), "it offers the chat")
+	check(sidebar_of(other) == [], "its sidebar has nothing yet")
+	other.click(".empty-window button[data-bring='ied.chat']")
+	other.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=10000)
+	main.wait_for_selector('.sb-act[data-activity="ied.chat"]', state="detached", timeout=10000)
+	check(other.locator(".empty-window").count() == 0, "and has it now")
+	run.page = main
+	# Giving away its last, it closes by itself.
+	main.click('.sb-act[data-activity="ied.editor"]', button="right")
+	main.keyboard.press("Escape")
+	other.evaluate("ied_shell.commands.run('shell.moveActivityToWindow', { id: 'ied.chat', window: null })")
+	main.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=10000)
+	deadline = time.time() + 10
+	while not other.is_closed() and time.time() < deadline:
+		time.sleep(0.1)
+	check(other.is_closed(), "a window that gave away its last activity closes")
+	main.wait_for_function("!(ied_shell.doc.windows || []).length", timeout=10000)
+
+
+@scenario(viewports=("desktop",))
+def windows_of_the_last_session_come_back(run):
+	main = run.open()
+	chat = move_to_new_window(run, main, "ied.chat")
+	url = chat.url
+	# The whole session ends with both open: nothing is left to take the chat back, so its window is still in the layout.
+	context = main.context
+	main.evaluate("ied_shell.windows.clientLeft = () => {}")
+	written(chat)
+	written(main)
+	main.close()
+	chat.close()
+	again = context.new_page()
+	again.on("pageerror", lambda e: run.errors.append("page error: %s" % e))
+	run.page = again
+	# Opening windows without a person's act is refused by a browser: Chromium here lets a test open them, so both paths
+	# are covered - opened again when allowed, and given back when refused.
+	with context.expect_page(timeout=15000) as opened:
+		again.goto(run.target.url + "/")
+		again.wait_for_function("window.ied_shell && ied_shell.layout && ied_shell.layout.doc && ied_shell.client.state === 'live'", timeout=20000)
+	reopened = opened.value
+	reopened.wait_for_selector('.sb-act[data-activity="ied.chat"]', timeout=20000)
+	check(reopened.url.split("?")[1] == url.split("?")[1], "the same window: %s" % reopened.url)
+	check("ied.chat" not in sidebar_of(again), "the main window still lacks the chat")
+
+
+@scenario(viewports=("phone",))
+def a_phone_has_no_windows_of_its_own(run):
+	page = run.open()
+	page.wait_for_selector(".phone-nav .pn")
+	check(page.locator("[draggable=true]").count() == 0, "nothing to drag")
+	enabled = page.evaluate("ied_shell.commands.isEnabled('shell.moveActivityToNewWindow')")
+	check(enabled is False, "and the commands say no")
+
+
 @scenario(viewports=("desktop",))
 def two_windows_share_a_document(run):
 	first = run.open()

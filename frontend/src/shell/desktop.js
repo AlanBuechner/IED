@@ -1,4 +1,5 @@
-// desktop.js - the desktop and tablet chrome (docs/15 "Desktop layout"): activity sidebar, menu bar with the title and
+// desktop.js - the desktop and tablet chrome (docs/15 "Desktop layout"): activity sidebar (the activities docked to this
+// window; a tab dragged or moved by its menu goes to another window, docs/15 "Windows"), menu bar with the title and
 // connection, the toolbar host, banners (connection, trust), the activity area (dock hosts and activity views), status bar.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
@@ -11,6 +12,11 @@ import { StatusBar } from "./statusbar.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
 import { banners } from "./banners.js";
+import { WindowDropZone, droppedOutside, startActivityDrag } from "./activitydrag.js";
+
+// A drag let go outside every window sooner than this is no tear-off: the system ended it, a flick out of the window having
+// beaten its start, with the button still down.
+const TEAR_OFF_AFTER_MS = 300;
 
 export class DesktopChrome {
 	constructor(shell, root) {
@@ -26,6 +32,9 @@ export class DesktopChrome {
 		this.app = h("div.app.desktop", null, this.sidebar, this.menubar, this.toolbar, this.banners, this.area, this.panel.el, this.status.el);
 		this.docks = new Map();
 		this.state = "connecting";
+		this.dragged = null;        // the sidebar tab being dragged: it stays on the page until the drag ends
+		this.draggedSince = 0;
+		this.dropZone = new WindowDropZone(shell);
 		replace(root, this.app);
 		this.stopContext = shell.context.onChange(() => this.renderToolbar());
 		this.renderSidebar();
@@ -38,6 +47,7 @@ export class DesktopChrome {
 		this.panel.release();
 		this.status.dispose();
 		this.dropDocks();
+		this.dropZone.dispose();
 		this.app.remove();
 	}
 
@@ -106,23 +116,62 @@ export class DesktopChrome {
 	// Sidebar
 
 	renderSidebar() {
+		if (this.dragged) return;
 		const shell = this.shell;
 		const current = shell.currentActivity();
 		const ws = shell.workspace;
 		const unread = shell.server.notifications.length;
 		const wsButton = h("button.sb-ws", { title: ws.name ? ws.name + " (" + (ws.kind || "folder") + ") - switch workspace" : "Workspaces", "aria-label": "Switch workspace", on: { click: (event) => shell.commands.run("shell.switchWorkspace", { at: event.currentTarget }) } }, initials(ws.name));
-		const activities = shell.contributions.activities.map((a) => {
+		const activities = shell.activitiesHere().map((a) => {
 			const badge = shell.activityBadge(a.id);
 			const title = badge && badge.title ? a.title + " - " + badge.title : a.title;
 			return h("button.sb-act" + (a.id === current ? ".on" : ""), {
-				title, "aria-label": title, "aria-pressed": a.id === current ? "true" : "false", dataset: { activity: a.id },
-				on: { click: () => shell.showActivity(a.id) },
+				title, "aria-label": title, "aria-pressed": a.id === current ? "true" : "false", dataset: { activity: a.id }, draggable: "true",
+				on: {
+					click: () => shell.showActivity(a.id),
+					contextmenu: (event) => {
+						event.preventDefault();
+						shell.showActivityMenu(a.id, event);
+					},
+					keydown: (event) => {
+						if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+						event.preventDefault();
+						shell.showActivityMenu(a.id, event.currentTarget);
+					},
+					dragstart: (event) => this.tabDragStarted(event, a.id),
+					dragend: (event) => this.tabDragEnded(event, a.id),
+				},
 			}, iconFrom(a.icon, a.plugin.base) || icon("window"), badgeElement(badge));
 		});
 		const bell = h("button.sb-act.sb-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } },
 			icon(unread ? "bell-dot" : "bell"), unread ? h("span.badge.info", null, String(unread)) : null);
 		const gear = h("button.sb-act", { title: "Manage", "aria-label": "Manage", on: { click: (event) => shell.showMenu("shell/manage", event.currentTarget) } }, icon("settings-gear"));
 		replace(this.sidebar, wsButton, h("div.sb-sep"), ...activities, h("div.sb-spacer"), bell, gear);
+	}
+
+	// A sidebar tab dragged: the layout holds still, and the sidebar is not drawn anew under it (a browser ends a drag whose
+	// element left the page), until it lands in another window, or leaves them all for a window of its own.
+	tabDragStarted(event, activityId) {
+		const { layout, wsId, windows } = this.shell;
+		if (!layout) {
+			event.preventDefault();
+			return;
+		}
+		startActivityDrag(event, { activity: activityId, wsId, device: windows.device });
+		this.dragged = activityId;
+		this.draggedSince = Date.now();
+		this.dropZone.own = true;
+		layout.hold(true);
+	}
+
+	tabDragEnded(event, activityId) {
+		const { layout, windows } = this.shell;
+		this.dragged = null;
+		this.dropZone.own = false;
+		if (layout) layout.hold(false);
+		this.renderSidebar();
+		const at = Date.now() - this.draggedSince >= TEAR_OFF_AFTER_MS ? droppedOutside(event) : null;
+		if (at) windows.tearOff(activityId, at);
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -225,7 +274,7 @@ export class DesktopChrome {
 		const shell = this.shell;
 		const activityId = shell.currentActivity();
 		for (const [id, dock] of [...this.docks]) {
-			if (!shell.contributions.activity(id)) {
+			if (!shell.isHere(id)) {
 				dock.dispose();
 				dock.container.remove();
 				this.docks.delete(id);
@@ -241,7 +290,8 @@ export class DesktopChrome {
 		}
 		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page, :scope > .start-settings")) empty.remove();
 		if (!activityId) {
-			this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
+			if (shell.contributions.activities.length) this.showEmptyWindow();
+			else this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
 			return;
 		}
 		if (shell.isDockHost(activityId)) this.dockFor(activityId).render(shell.treeOf(activityId));
@@ -253,6 +303,18 @@ export class DesktopChrome {
 				shell.views.setVisible(entry.ref, true);
 			}
 		}
+	}
+
+	// A window every activity has left, or one just opened to take some: what it can take. Nothing while its layout is on its
+	// way, when it may well hold some.
+	showEmptyWindow() {
+		const shell = this.shell;
+		if (!shell.layout || shell.layout.doc === null) return;
+		const offered = shell.contributions.activities.map((a) => h("button.btn", { dataset: { bring: a.id }, on: { click: () => shell.windows.moveHere(a.id) } }, iconFrom(a.icon, a.plugin.base) || icon("window"), a.title));
+		this.area.append(h("div.empty-area.empty-window", null, icon("empty-window", "lg"),
+			h("p", null, "No activity is docked to this window. Drag a tab here from another window's sidebar, or bring one here:"),
+			h("div.empty-window-list", null, ...offered),
+			shell.windows.id ? h("button.btn.flat", { on: { click: () => shell.windows.closeThisWindow() } }, "Close Window") : null));
 	}
 
 	dropDocks() {

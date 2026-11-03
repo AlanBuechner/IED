@@ -47,7 +47,8 @@ namespace Desktop
 		script.Append("\t\tversion: ");
 		Serialization::WriteJsonString(version, &script);
 		script.Append(",\n");
-		script.Append("\t\tnewWindow: (url) => post(\"newWindow\", { url: url ? String(url) : \"\" }),\n");
+		script.Append("\t\tnewWindow: (url, atCursor) => post(\"newWindow\", { url: url ? String(url) : \"\", atCursor: Boolean(atCursor) }),\n");
+		script.Append("\t\tcloseWindow: () => post(\"closeWindow\"),\n");
 		script.Append("\t\tdevTools: () => post(\"devTools\"),\n");
 		script.Append("\t\topenFolder: () => post(\"openFolder\"),\n");
 		script.Append("\t\trelaunch: () => post(\"relaunch\"),\n");
