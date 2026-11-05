@@ -37,6 +37,8 @@ manifest = json.load(open("fake.json")) if os.path.exists("fake.json") else {"pr
 projects = manifest["projects"]
 if verb == "add":
 	folder, name, language = args
+	if folder in projects.values():
+		print(folder, "is a project already"); sys.exit(4)
 	projects[name or os.path.basename(folder)] = folder
 	print("added", folder, "language", language)
 elif verb == "remove":
@@ -299,6 +301,19 @@ class ProjectSystemTests(ProjectManagementCase):
 		os.remove(self.path("fake.json"))
 		await self.refused("bad_request", "made by `fake generate`", "project.add", {"wsId": "w1", "folder": "docs"})
 
+	async def test_a_folder_the_build_system_has_already_joins_by_generating_the_solution_again(self):
+		"""A build system whose add refuses a folder it has already (its manifest edited by hand since the solution was
+		generated): generated again, the solution lists the folder, and the add has done what it was asked."""
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		await self.client.request("project.import", {"path": self.folder})
+		await self.solution_changed()
+		write(self.path("fake.json"), {"projects": {"Game": "src", "Hand": "docs"}})
+		added = await self.client.request("project.add", {"wsId": "w1", "folder": "docs"})
+		self.assertIn("docs is a project already", added["log"], "the build system's refusal")
+		self.assertEqual("Hand", added["project"], added)
+		self.assertTrue(any("had the folder as a project already" in note for note in added["notes"]), added["notes"])
+		await self.client.wait_for("ws:w1", lambda f: f.get("kind") == "solution.changed" and sorted(p["name"] for p in f["data"]["solution"]["projects"]) == ["Game", "Hand"])
+
 
 class StaleGeneratedSolutionTests(ProjectManagementCase):
 	"""A pull brought a generated solution whose groups name a project its generator never wrote a file for here (the
@@ -360,13 +375,15 @@ class NukeSolutionTests(ProjectManagementCase):
 		self.assertTrue(read(self.path("nuke.toml")).startswith("# the demo\n"), "the manifest's comments stay")
 		self.assertTrue(os.path.exists(self.path("Game", "nuke.toml")), "its files stay")
 
-	async def test_a_folder_nuke_has_already_joins_by_generating_the_solution_again(self):
+	async def test_a_folder_nuke_has_already_joins_the_solution(self):
+		"""Nuke's add leaves a folder that is a project already as it is and says so (Nuke/tests/test_project.py, since
+		2026-10-29); the solution, generated again, lists it."""
 		await self.client.request("project.import", {"path": self.folder})
 		await self.shows(["Game"])
 		write(self.path("tools", "hand", "nuke.toml"), "[project]\nkind = \"custom\"\n")
 		added = await self.client.request("project.add", {"wsId": "w1", "folder": "tools/hand"})
 		self.assertEqual("hand", added["project"], added)
-		self.assertTrue(any("had the folder as a project already" in note for note in added["notes"]), added["notes"])
+		self.assertIn("tools/hand is project hand already", added["log"])
 		await self.shows(["Game", "hand"])
 		write(self.path("tools", "inner", "nuke.toml"), "[workspace]\nname = \"Inner\"\n")
 		await self.refused("unavailable", "is a workspace of its own", "project.add", {"wsId": "w1", "folder": "tools/inner"})
