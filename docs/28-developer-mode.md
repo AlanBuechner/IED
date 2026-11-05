@@ -63,7 +63,7 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
 3. **A system message section** (`docs/14` item 5, "IED itself"): this IED is built from source at `<path>`; when a
    failure is in the compiler, Bedrock, Nuke or IED rather than in the workspace, fix it there - read
    `ied:/AGENTS.md` and `ied:/C4/AGENTS.md` first, record a C4 bug in `ied:/C4/docs/status/known-bugs.md`, add a test
-   that would have caught it, run `nuke build` and `nuke gates` in `ied:/`, and say in the chat what was fixed; when the
+   that would have caught it, run `ied_rebuild`, run `ied_gates` only for a change in `ied:/C4`, and say in the chat what was fixed; when the
    running IED needs the fix, `ied_relaunch` installs it and the chat continues on the new build. And every failing
    tool call is a chance to fix IED's tools (owner, 2026-10-23: "any time it has a failing tool call it should either
    fix the tool call or update the system prompt for that tool to correct the confusion"): the chat finds out why the
@@ -78,7 +78,13 @@ chat to be able to go and fix the bug where it lives, the way the sessions that 
 4. **Tools** (a deferred group `ied`, loaded with `tool_search`, `docs/13`):
    - `ied_rebuild()`: `nuke build` in the source, the end of its output; a compiler build refreshes the `dev`
      toolchain, so the workspace's next build uses the fix at once when it pins `dev`.
-   - `ied_gates()`: `nuke gates`, the C4 test suites, with a summary of what failed.
+   - `ied_gates()`: `nuke gates`, the C4 test suites, with a summary of what failed. Only after the chat changed files
+     in `ied:/C4` (owner, 2026-11-05: agents kept running it with nothing to check). Of 50 runs in the owner's chats, at
+     about 14 minutes each and with a compiler rebuild every chat shares, 13 followed a change only to IED's plugins,
+     server or docs, which the suites do not test, and 2 followed no change at all: the name and "or IED itself" read
+     as "IED's tests", and a deferred tool shows only its first sentence, which said nothing of when. So the rule is that
+     first sentence, and the rest of the description names what tests each other part: the workspace's `nuke test`,
+     `nuke test ied-server` and `nuke conformance`, `nuke e2e`, `Nuke/tests`.
    - `ied_relaunch()`: `nuke install-ied` through the settings page's build (one at a time; a build already running is
      the one it waits for, and the page and the status bar show it), then `IED::RelaunchServer`: the desktop app, or
      else the server itself, relaunches onto the new install (`docs/27` "Relaunch"). Its result says IED relaunches in a

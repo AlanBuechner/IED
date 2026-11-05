@@ -87,9 +87,14 @@ namespace Ai
 		// the content itself never changes. Empty: the content is sent.
 		public Core::String m_Shown;
 		public bool m_ImagesOut;             // compression left its images out of requests; the chat keeps them
+		// IED's word to the model with this message, sent after it: not the message's own, so what retells the chat leaves
+		// it out (docs/04 "Chat names").
+		public Core::String m_Note;
 
 		// The text a request sends: what compression shows, else the content.
 		public Core::StringView SentText() const;
+		// `text` with the note after it.
+		public Core::String WithNote(Core::StringView text) const;
 		// Whether a request sends its images.
 		public bool SendsImages() const;
 		// As the chat keeps it: the content whole, whatever compression shows of it.
@@ -264,6 +269,7 @@ namespace Ai
 		public Core::String m_ChatId;
 		public Core::String m_WsId;
 		public Core::String m_Title;
+		public bool m_TitledByAi;                       // chat_title named it, and it may again (docs/04 "Chat names")
 		public ChatMode m_Mode;
 		public PermissionMode m_Permission;
 		public Core::String m_Group;

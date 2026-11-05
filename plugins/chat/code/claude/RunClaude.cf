@@ -147,7 +147,8 @@ namespace Ai
 				ClaudeImage block;
 				if (ReadClaudeImage(m_Ws, image, block)) images.Push(block);
 			}
-			Core::String text = i == 0 && !history.IsEmpty() ? (history + "\n\n") + pending[i]->m_Content.View() : pending[i]->m_Content;
+			Core::String told = pending[i]->WithNote(pending[i]->m_Content.View());
+			Core::String text = i == 0 && !history.IsEmpty() ? (history + "\n\n") + told.View() : told;
 			m_Claude->m_Process->Send(UserMessageLine(text.View(), images).View());
 			m_Claude->m_Querying = true;
 		}
@@ -157,7 +158,7 @@ namespace Ai
 		for (int64 i = m_ClaudeSent; i < m_Turn->m_Messages.Count(); ++i) {
 			const ModelMessage* message = m_Turn->m_Messages[i];
 			if (message->m_Role != "user") continue;
-			m_ClaudeAside = (m_ClaudeAside.IsEmpty() ? Core::String() : m_ClaudeAside + "\n\n") + message->m_Content.View();
+			m_ClaudeAside = (m_ClaudeAside.IsEmpty() ? Core::String() : m_ClaudeAside + "\n\n") + message->WithNote(message->m_Content.View()).View();
 			for (const IED::ToolImage& image : message->m_Images) m_ClaudeAsideImages.Push(image);
 		}
 		m_ClaudeSent = m_Turn->m_Messages.Count();

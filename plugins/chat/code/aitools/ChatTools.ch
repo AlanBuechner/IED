@@ -1,7 +1,7 @@
 // Chats that talk to each other (docs/04 "Chats talk to each other"): the `chats` tool group - a chat lists its
 // workspace's chats, reads one's answers, sends one a message (it starts a turn there, or reaches the running one at its
 // next step), starts a helper chat and waits for an answer. A message carries where it came from; a chain of chats
-// messaging each other stops at kChatHopsMost.
+// messaging each other stops at kChatHopsMost. And chat_title, outside the group: a chat names itself (docs/04 "Chat names").
 
 include "ChatService.ch"
 

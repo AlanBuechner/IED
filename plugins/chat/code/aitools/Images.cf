@@ -125,7 +125,7 @@ namespace Ai
 		json.Field("role", "user");
 		json.Key(Core::StringView("content"));
 		json.BeginArray();
-		TextPart(json, message->SentText());
+		TextPart(json, message->WithNote(message->SentText()).View());
 		for (const IED::ToolImage& image : message->m_Images) {
 			Core::String url;
 			if (!DataUrl(ws, image, url)) {

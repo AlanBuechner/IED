@@ -112,6 +112,8 @@ class DeveloperTests(SourceCase):
 		self.assertIn("Then make the call again.", system, "the section reaches the model whole")
 		tools = {t["function"]["name"]: t["function"] for t in self.model.requests()[0]["body"]["tools"]}
 		self.assertTrue(tools["ied_known_bugs"]["description"].endswith("[deferred]"), "its tools are offered, deferred")
+		gates = tools["ied_gates"]["description"]
+		self.assertTrue(gates.startswith("Only after this chat changed files in ied:/C4") and gates.endswith("15 minutes). [deferred]"), "a deferred tool shows its first sentence alone, at most 120 bytes: when to call it is in it, whole: " + gates)
 		results = self.tool_results()
 		self.assertIn("BUG-007 A demo miscompile", results["k1"])
 		self.assertIn("**Severity:** High", results["k1"])

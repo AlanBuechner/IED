@@ -263,6 +263,19 @@ namespace Ai
 		return Core::String(line.Substring(0, cut)) + "...";
 	}
 
+	// Its title is still its first message's words: nobody chose one.
+	static bool Unnamed(const Chat* chat) {
+		return !chat->m_TitledByAi && !chat->m_Turns.IsEmpty() && chat->m_Title == TitleFrom(chat->m_Turns[0]->m_UserText.View());
+	}
+
+	bool Chats::NameByAi(Chat* chat, Core::StringView title) {
+		if (!chat->m_TitledByAi && !Unnamed(chat)) return false;
+		chat->m_Title = TitleFrom(title);
+		chat->m_TitledByAi = true;
+		Changed(chat);
+		return true;
+	}
+
 	Core::String ModelText(const Chat* to, const OwnerMessage& message) {
 		if (message.m_FromChatId.IsEmpty()) return message.m_Text;
 		Core::StringBuilder out;
@@ -312,6 +325,7 @@ namespace Ai
 		turn->m_Messages.Push(message);
 		chat->m_Turns.Push(turn);
 		if (chat->m_Title == c_NewChatTitle) chat->m_Title = TitleFrom(text);
+		if (Unnamed(chat)) message->m_Note = m_Prompts.Note("name_chat");
 		chat->m_Run = new ChatRun();
 		chat->m_Run->m_Turn = turn;
 		chat->m_State = ChatState::Running;
@@ -422,7 +436,10 @@ namespace Ai
 	}
 
 	static void ReadSettings(Chat* chat, const IED::Params& params) {
-		if (params.Has("title")) chat->m_Title = params.Str("title");
+		if (params.Has("title")) {
+			chat->m_Title = params.Str("title");
+			chat->m_TitledByAi = false;
+		}
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->m_Mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->m_Permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
 		if (params.Has("group")) chat->m_Group = params.Str("group");

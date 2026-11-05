@@ -163,7 +163,7 @@ class ClaudeTurnTests(ClaudeCase):
 	async def test_the_session_is_kept_between_turns_and_resumed_after_a_restart(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]}, {"blocks": [{"text": "Three."}]})
-		chat_id, _ = await self.chat()
+		chat_id, _ = await self.chat(title="Kept")
 		self.assertEqual("finished", (await self.turn(chat_id, "first"))["stop"])
 		self.assertEqual("finished", (await self.turn(chat_id, "second"))["stop"])
 		self.assertEqual(1, len(self.sessions_started()), "one process for both turns")
@@ -201,11 +201,12 @@ class ClaudeTurnTests(ClaudeCase):
 		self.assertIn("first", first)
 		self.assertIn("One.", first)
 		self.assertNotIn("Two.", first, "the dropped turn is not told")
-		self.assertTrue(first.rstrip().endswith("second, said again"), first)
+		self.assertIn("second, said again\n\nThis chat has no name yet", first, "a chat with no name is asked for one, on Claude too")
+		self.assertEqual(1, first.count("no name yet"), "what retells the chat leaves that out")
 
 	async def test_a_chat_that_started_on_another_model_tells_claude_what_happened(self):
 		await self.use_claude(groups={"local": {"primary": {"model": "fake"}}, "claude": {"primary": {"model": "claude-opus"}}}, default_group="local")
-		chat_id, _ = await self.chat()
+		chat_id, _ = await self.chat(title="Two models")
 		self.model.queue(text_step("Local answer."))
 		self.assertEqual("finished", (await self.turn(chat_id, "Hi local"))["stop"])
 		await self.client.request("chat.set", {"chatId": chat_id, "group": "claude"})

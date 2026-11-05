@@ -341,7 +341,7 @@ namespace Ai
 	static int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / c_ContextBytesPerToken); }
 
 	static int64 MessageTokens(const ModelMessage* message) {
-		return BytesToTokens(message->SentText().ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
+		return BytesToTokens(message->SentText().ByteLength() + message->m_Note.ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
 			+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
 	}
 

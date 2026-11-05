@@ -177,6 +177,18 @@ namespace Ai
 		}
 	}
 
+	static ToolOutcome TitleRun(Chats* chats, Chat* self, const ToolInvocation& call) {
+		Core::StringView title = call.m_Args.Member("title").AsView();
+		if (title.Trimmed().IsEmpty()) return ToolError(Core::StringView("chat_title: the title is empty"));
+		IED::HostLock guard(*call.m_Context);
+		const bool named = chats->NameByAi(self, title);
+		Core::StringBuilder said;
+		said.Append(named ? "This chat is now named \"" : "This chat keeps the name it was given: \"");
+		said.Append(self->m_Title.View());
+		said.Append("\".");
+		return ToolResult(said.View(), self->m_Title.View());
+	}
+
 	// --- The group ---------------------------------------------------------------------------------------------------------
 
 	static ToolPlan ChatPlan(const ToolInvocation& call, const char* kind) {
@@ -226,5 +238,14 @@ namespace Ai
 		wait->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
 		wait->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, call); };
 		registry.Add(wait);
+		// Not deferred and allowed in every mode: a chat with no name is asked for one with the first message of a turn.
+		ToolSpec* title = ChatTool("chat_title", "Name this chat: 3 to 6 words on what the work is, shown on its tab and in the chats list so the owner can find it. Call it when a note says the chat has no name, along with your first other calls; again only if the work becomes something else. A name someone else chose stays. Example: chat_title({\"title\": \"Fix edit mode wireframe clipping\"})",
+			"{\"type\": \"object\", \"properties\": {\"title\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"title\"], \"additionalProperties\": false}", ToolClass::Meta);
+		title->m_Deferred = false;
+		title->m_InPlan = true;
+		title->m_ParallelSafe = true;
+		title->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.title"); };
+		title->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return TitleRun(chats, chat, call); };
+		registry.Add(title);
 	}
 }

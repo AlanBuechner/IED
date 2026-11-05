@@ -155,10 +155,15 @@ namespace Ai
 		if (!m_ToolCallId.IsEmpty()) json.Field("tool_call_id", m_ToolCallId.View());
 		if (!m_Images.IsEmpty()) WriteToolImages(json, m_Images);
 		if (!m_Reasoning.IsEmpty()) json.Field("reasoning_content", m_Reasoning.View());
+		if (!m_Note.IsEmpty()) json.Field("note", m_Note.View());
 		json.EndObject();
 	}
 
 	Core::StringView ModelMessage::SentText() const { return m_Shown.IsEmpty() ? m_Content.View() : m_Shown.View(); }
+
+	Core::String ModelMessage::WithNote(Core::StringView text) const {
+		return m_Note.IsEmpty() ? Core::String(text) : (Core::String(text) + "\n\n") + m_Note.View();
+	}
 
 	bool ModelMessage::SendsImages() const { return !m_ImagesOut && !m_Images.IsEmpty(); }
 
@@ -166,7 +171,7 @@ namespace Ai
 		json.BeginObject();
 		json.Field("role", m_Role.View());
 		Core::String text = unsent.IsEmpty() ? Core::String(SentText()) : Core::String(SentText()) + ImagesAsText(m_Images, unsent).View();
-		json.Field("content", text.View());
+		json.Field("content", WithNote(text.View()).View());
 		if (withReasoning && !m_Reasoning.IsEmpty()) json.Field("reasoning_content", m_Reasoning.View());
 		if (!m_ToolCalls.IsEmpty()) json.RawField("tool_calls", m_ToolCalls.View());
 		if (!m_ToolCallId.IsEmpty()) json.Field("tool_call_id", m_ToolCallId.View());
@@ -180,6 +185,7 @@ namespace Ai
 		m_ToolCallId = Core::String(node.Member("tool_call_id").AsView());
 		ReadToolImages(node.Member("images"), m_Images);
 		m_Reasoning = Core::String(node.Member("reasoning_content").AsView());
+		m_Note = Core::String(node.Member("note").AsView());
 	}
 
 	// --- What an owner's message names ------------------------------------------------------------------------------

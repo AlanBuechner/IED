@@ -38,6 +38,7 @@ Permission handling per class is defined in `docs/11`.
 | T-META-2 | `ask_user(question, options?, allow_text?)` | meta | Structured question; the run waits for the answer. |
 | T-META-3 | `tools_enable(group)` | meta | Enable a tool group for the rest of the turn. |
 | T-META-4 | `finish(summary, verification)` | meta | Agent mode only: end the turn with what was done and how it was verified. |
+| T-META-5 | `chat_title(title)` | meta | Name this chat (`docs/04` "Chat names"). In every mode and not deferred; a chat with no name is asked for one with each turn's message. A name someone else chose stays, and the result says so. |
 
 ## Loading tools on demand (built, 2026-10-21)
 
@@ -366,7 +367,7 @@ From `ied.gpu` (`docs/22` "AI"). **Built** (2026-10-21): the tools below marked 
 | Mode | Core | Groups available | Notes |
 |---|---|---|---|
 | Ask | yes (writes need approval) | all | |
-| Plan | read-only core (`fs_read`, `fs_list`, `fs_glob`, `search_text`, `code_*`, `problems_list`, `ask_user`, `tasks_set`) | `code`, `git` (read), `web`, `knowledge`, `agents` (research only), `submit_plan` | no write/exec |
+| Plan | read-only core (`fs_read`, `fs_list`, `fs_glob`, `search_text`, `code_*`, `problems_list`, `ask_user`, `tasks_set`, `chat_title`) | `code`, `git` (read), `web`, `knowledge`, `agents` (research only), `submit_plan` | no write/exec |
 | Agent | yes | all | `finish` required |
 | Research sub-agent | read-only core | `code`, `web`, `knowledge` (read) | bounded report |
 | Worker sub-agent | core (writes limited to assigned paths) | `code`, `build`, `fs_more` | no git mutation, no spawning |

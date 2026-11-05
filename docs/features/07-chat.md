@@ -6,7 +6,7 @@ Owner: `plugins/chat` - its UI, its default tool set and the runtime (`code/`, a
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-CHT-1 | Browser-like tab strip per chat group: new tab (Ctrl+T inside the chat view where the browser allows; "+" button), close, reorder, middle-click close, tab title auto-generated then editable | P0 | US-CHT-1 |
+| F-CHT-1 | Browser-like tab strip per chat group: new tab (Ctrl+T inside the chat view where the browser allows; "+" button), close, reorder, middle-click close, tab title named by the AI (`chat_title`, `docs/04` "Chat names") then editable | P0 | US-CHT-1 |
 | F-CHT-2 | Tab state glyphs: running (animated), waiting for approval (attention), done-unread, error, interrupted; task progress `3/7` on the tab when a task list exists | P0 | US-CHT-1, US-CHT-9 |
 | F-CHT-3 | Dock chats side by side / stacked (shell docking, F-SHL-10); no floating windows | P0 | US-CHT-1 |
 | F-CHT-4 | Chat list / history panel: all chats of the workspace with search, filter (running, archived), pin, archive, delete (to trash) | P1 | US-CHT-16 |

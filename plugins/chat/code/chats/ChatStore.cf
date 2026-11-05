@@ -32,6 +32,7 @@ namespace Ai
 		json.BeginObject();
 		json.Field("chatId", chat->m_ChatId.View());
 		json.Field("title", chat->m_Title.View());
+		if (chat->m_TitledByAi) json.BoolField("titledByAi", true);
 		json.Field("mode", ChatModeName(chat->m_Mode));
 		json.Field("permission", PermissionModeName(chat->m_Permission));
 		json.Field("group", chat->m_Group.View());
@@ -165,6 +166,7 @@ namespace Ai
 
 	static void ReadHeader(Chat* chat, const Serialization::DomNode& header) {
 		chat->m_Title = Core::String(header.Member("title").AsView());
+		chat->m_TitledByAi = header.Member("titledByAi").AsBool();
 		ReadChatMode(header.Member("mode").AsView(), chat->m_Mode);
 		ReadPermissionMode(header.Member("permission").AsView(), chat->m_Permission);
 		chat->m_Group = Core::String(header.Member("group").AsView());

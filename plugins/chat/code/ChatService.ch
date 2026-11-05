@@ -58,6 +58,9 @@ namespace Ai
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
 		// A new chat in `ws`, published on its chats: topic.
 		public Chat* Create(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);
+		// chat_title: the chat named `title` by its own AI (docs/04 "Chat names"); false when it keeps a name someone else
+		// chose.
+		public bool NameByAi(Chat* chat, Core::StringView title);
 		// Another chat's message: true when it started a turn of `chat`, false when its running turn gets it at the next
 		// step. The model is told which chat sent it.
 		public bool Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops);

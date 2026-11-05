@@ -125,9 +125,18 @@ class MentionTests(ChatCase):
 			self.assertEqual("bad_request", refused.exception.code, mentions)
 		self.assertEqual(0, (await self.summary(chat_id))["turnCount"], "no turn for a refused message")
 
-	async def test_attachments_go_to_the_media_folder_and_the_model(self):
+	async def test_a_chat_with_no_name_is_asked_for_one_with_an_image_too(self):
 		await self.use_model({"vision": True})
 		chat_id, _ = await self.chat()
+		shot = self.upload(PNG, "image/png")
+		self.model.queue(text_step("A screen."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "And this?", "attachments": [{"blobId": shot, "name": "shot.png"}]})
+		await self.client.wait_for("chat:" + chat_id, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
+		self.assertIn("This chat has no name yet", self.first_user()["content"][0]["text"])
+
+	async def test_attachments_go_to_the_media_folder_and_the_model(self):
+		await self.use_model({"vision": True})
+		chat_id, _ = await self.chat(title="Attachments")
 		shot = self.upload(PNG, "image/png")
 		notes = self.upload(b"line one\nline two\n", "text/plain")
 		self.model.queue(text_step("A screen and notes."))

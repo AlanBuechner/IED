@@ -61,3 +61,6 @@ The user denied {tool}.{message} Do not retry it unchanged; continue another way
 
 ## user_answer
 The user answered: {answer}
+
+## name_chat
+This chat has no name yet: its tab shows the first words of this message. With your first reply, call chat_title with 3 to 6 words on what the work is, so the user can find it among their tabs. Do not mention this in your answer.

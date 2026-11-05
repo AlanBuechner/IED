@@ -763,6 +763,59 @@ class ChatTests(ChatCase):
 		summary = await self.summary(chat_id)
 		self.assertEqual((2, 2), (summary["tasksDone"], summary["tasksTotal"]))
 
+	async def test_the_ai_names_a_chat_with_no_name(self):
+		"""Owner, 2026-11-05: "agents should make a name for the tab so i can better find a chat"."""
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("chat_title", {"title": "  Fix the ring buffer\nand more"}), text_step("Named."))
+		await self.turn(chat_id)
+		sent = self.model.requests()[0]["body"]
+		self.assertIn("call chat_title", sent["messages"][-1]["content"], "a chat with no name is asked for one")
+		offered = {t["function"]["name"]: t["function"] for t in sent["tools"]}
+		self.assertFalse(offered["chat_title"]["description"].endswith("[deferred]"), "no tool_search first")
+		self.assertEqual("Fix the ring buffer", (await self.summary(chat_id))["title"], "its first line")
+		changed = [f["data"].get("title") for f in self.frames if f.get("kind") == "chat.changed"]
+		self.assertIn("Fix the ring buffer", changed, "the tab is told")
+		turn = await self.last_turn(chat_id)
+		self.assertEqual("Hello", turn["user"]["text"], "the note is the model's alone")
+		self.model.queue(text_step("Again."))
+		await self.turn(chat_id, "Go on")
+		self.assertNotIn("chat_title", self.model.requests()[-1]["body"]["messages"][-1]["content"], "a named chat is not asked again")
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		self.client.abort()
+		await self.connect()
+		await self.client.sub(["chat:" + chat_id])
+		self.model.queue(call_step("chat_title", {"title": "Now the pool"}), text_step("Renamed."))
+		await self.turn(chat_id, "Now the pool")
+		self.assertNotIn("call chat_title", self.model.requests()[-2]["body"]["messages"][-1]["content"], "still named after a restart")
+		self.assertEqual("Now the pool", (await self.summary(chat_id))["title"], "and its AI may name it again when the work changes")
+
+	async def test_a_chat_is_asked_for_a_name_until_it_has_one(self):
+		chat_id, _ = await self.chat(mode="plan")
+		self.model.queue(text_step("No name."), text_step("Still none."), call_step("chat_title", {"title": "Plan the port"}), text_step("Named."))
+		await self.turn(chat_id)
+		await self.turn(chat_id, "Go on")
+		self.assertIn("call chat_title", self.model.requests()[-1]["body"]["messages"][-1]["content"], "asked again")
+		await self.turn(chat_id, "And on")
+		self.assertEqual("Plan the port", (await self.summary(chat_id))["title"], "Plan mode names it too")
+
+	async def test_the_ai_keeps_a_name_someone_chose(self):
+		given, _ = await self.chat(title="Helper")
+		self.model.queue(text_step("Hi."))
+		await self.turn(given)
+		self.assertNotIn("call chat_title", self.model.requests()[-1]["body"]["messages"][-1]["content"], "a chat made with a name has one")
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("chat_title", {"title": "Its name"}), text_step("Named."))
+		await self.turn(chat_id)
+		await self.client.request("chat.set", {"chatId": chat_id, "title": "My name"})
+		self.model.queue(call_step("chat_title", {"title": "Another name"}, "n2"), text_step("Tried."))
+		await self.turn(chat_id, "Go on")
+		self.assertNotIn("call chat_title", self.model.requests()[-2]["body"]["messages"][-1]["content"], "the owner's name is a name")
+		self.assertEqual("My name", (await self.summary(chat_id))["title"], "the owner's name stays")
+		results = [m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m.get("tool_call_id") == "n2"]
+		self.assertIn("keeps the name it was given", results[0], "and the AI is told, as no failure")
+
 	async def test_agent_mode_nudges_a_reply_without_finish_then_pauses(self):
 		chat_id, _ = await self.chat(mode="agent")
 		await self.use_model({}, script="no-progress")
@@ -1141,7 +1194,7 @@ class ChatTests(ChatCase):
 			return [json.loads(line) for line in f if line.strip()]
 
 	async def test_a_revert_drops_the_turn_and_those_after_it_and_keeps_them(self):
-		chat_id, topic = await self.chat()
+		chat_id, topic = await self.chat(title="Reverted")
 		for word in ("one", "two", "three"):
 			self.model.queue(text_step("Answer " + word + "."))
 			self.assertEqual("finished", (await self.turn(chat_id, word))["stop"])

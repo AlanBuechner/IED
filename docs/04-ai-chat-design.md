@@ -566,6 +566,10 @@ Per chat, under `.ied/local/chats/<chatId>/` - the workspace's local state, `doc
 
 Only the active window of each chat stays in server memory; older turns load lazily on scroll.
 
+## Chat names (built, 2026-11-05)
+
+Owner, 2026-11-05: "agents should make a name for the tab so i can better find a chat". A new chat shows its first message's first line at once. While that is still its title, each turn's message carries the note `name_chat` for the model alone (`plugins/chat/prompts/harness-notes.md`; `note` in the turn's messages, sent after the message and its mentions and kept apart from them, so a new Claude session told the chat's history is not told an old note), and the model names the chat with `chat_title` (`docs/13` T-META-5), usually with its first calls: no second request, no cost when the chat already has a name, and an older chat gets its name on its next turn. It takes no approval and no `tool_search`. The chat's AI may name it again when the work becomes something else (`titledByAi` in `chat.json`). A name the owner gave it (`chat.set`, `chat.create`) or another chat gave it (`chat_create`, a sub-agent's) stays: the tool's result says so, as no failure.
+
 ## Deleting a chat (built, 2026-10-22)
 
 Deleting a chat keeps it (owner, 2026-10-22: "it will get archived for 30 days before it gets fully deleted that way you can recover it later"). `chat.delete` moves the chat's folder whole to `chats-deleted/<chatId>/` beside `chats/` in the local state, with `deleted.json {deletedMs}`; the chat leaves the workspace's chats (its topic and Claude Code session go) and is listed under `deleted` on `chats:<wsId>` with `purgeMs`, when it goes for good. `chat.restore` moves it back and loads it as it was - turns, tasks, queue, allowed rules, its Claude session id - and `chat.purge` removes it at once. The server purges a chat deleted `ai.chats.keepDeletedDays` (30 by default, app or solution tier) ago when its workspace opens and every hour after (`plugins/chat/code/chats/DeletedChats.cf`). A running chat cannot be deleted (`conflict`): stop it first.
