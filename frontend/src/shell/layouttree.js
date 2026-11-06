@@ -212,7 +212,8 @@ export function fixSizes(sizes, count) {
 // Tabs
 
 // Opens `ref` (or activates it when the tree has it) in the document group at `groupPath`, the first one by default.
-// A preview tab replaces the group's preview tab (VS); pinning a preview tab is `pinTab`.
+// A new tab opens after the group's active one, or with `end` at the end of its strip, beside its "+". A preview tab
+// replaces the group's preview tab (VS); pinning a preview tab is `pinTab`.
 export function openTab(tree, ref, options) {
 	const opts = options || {};
 	const next = clone(tree);
@@ -226,7 +227,7 @@ export function openTab(tree, ref, options) {
 	const target = isGroup(chosen) && chosen.well ? chosen : wellsOf(next)[0] || groupsOf(next)[0];
 	const previewAt = opts.preview && target.preview ? target.tabs.indexOf(target.preview) : -1;
 	if (previewAt >= 0) target.tabs[previewAt] = ref;
-	else target.tabs.splice(target.active ? target.tabs.indexOf(target.active) + 1 : target.tabs.length, 0, ref);
+	else target.tabs.splice(target.active && !opts.end ? target.tabs.indexOf(target.active) + 1 : target.tabs.length, 0, ref);
 	if (opts.preview) target.preview = ref;
 	target.active = ref;
 	return normalize(next);

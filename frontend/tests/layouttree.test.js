@@ -76,6 +76,15 @@ test("layout: open, activate and close tabs", () => {
 	assertEqual(shape(tree), "row(column(W[] G[output,errors|output]) G[props|props])", "an emptied tool group goes");
 });
 
+test("layout: a tab opened at the end goes beside the strip's +, not after the active tab", () => {
+	let tree = L.normalize(L.group(["doc:a", "doc:b", "doc:c"], { well: true, active: "doc:a" }));
+	tree = L.openTab(tree, "chat:new", { end: true });
+	assertEqual(shape(tree), "W[doc:a,doc:b,doc:c,chat:new|chat:new]", "last, and active");
+	tree = L.activateTab(tree, "doc:a");
+	tree = L.openTab(tree, "chat:new", { end: true });
+	assertEqual(tree.tabs, ["doc:a", "doc:b", "doc:c", "chat:new"], "one open already is shown where it is");
+});
+
 test("layout: a preview tab is replaced by the next preview until pinned", () => {
 	let tree = L.normalize(L.group([], { well: true }));
 	tree = L.openTab(tree, "doc:a", { preview: true });

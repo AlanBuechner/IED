@@ -34,7 +34,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.chat.show", () => ied.commands.run("shell.showActivity", { id: "ied.chat" }));
 	ied.commands.handle("ied.chat.new", async () => {
 		await ied.commands.run("shell.showActivity", { id: "ied.chat" });
-		ied.tabs.open("chat:" + DRAFT, { preview: false });
+		ied.tabs.open("chat:" + DRAFT, { preview: false, end: true });
 	});
 	ied.commands.handle("ied.chat.stop", (args) => tabOf(args) && tabOf(args).stop());
 	ied.commands.handle("ied.chat.rename", (args) => {

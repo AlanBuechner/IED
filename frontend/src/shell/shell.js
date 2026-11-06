@@ -685,7 +685,8 @@ export class Shell {
 	}
 
 	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone. A tab open
-	// already is shown where it is; with {activity}, it opens in that dock host, leaving another it was in.
+	// already is shown where it is; with {activity}, it opens in that dock host, leaving another it was in; with {end},
+	// a new one opens at the end of its strip.
 	openTab(ref, options) {
 		const opts = options || {};
 		if (!this.views.has(ref)) {
@@ -702,7 +703,7 @@ export class Shell {
 		const activityId = asked || where || this.dockActivity(ref);
 		const groupPath = this.documentGroupPath(activityId);
 		this.showIn(activityId);
-		this.openInTree(activityId, ref, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
+		this.openInTree(activityId, ref, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, end: opts.end, groupPath }), ref, partnersOf(this.doc, ref)));
 		this.slideOut(activityId, ref);
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
 		this.windows.revealElsewhere(activityId, ref);
