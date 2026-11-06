@@ -1,0 +1,479 @@
+include "Diagram.ch"
+
+namespace Boards
+{
+	Core::StringView Diagram::Key(Core::StringView id) const {
+		const Core::String* key = m_KeyOf.FindAs(id);
+		return key ? key->View() : Core::StringView("");
+	}
+
+	const DiagramNode* Diagram::Node(Core::StringView id) const {
+		for (const DiagramNode& node : m_Nodes)
+			if (node.m_Element->m_Id == id) return &node;
+		return nullptr;
+	}
+
+	Core::String KeyFromText(Core::StringView text) {
+		Core::StringBuilder key;
+		bool gap = false;
+		for (int64 i = 0; i < text.ByteLength() && key.ByteLength() < 32; ++i) {
+			int32 c = text.ByteAt(i);
+			if (c >= (int32)'A' && c <= (int32)'Z') c += 32;
+			const bool word = (c >= (int32)'a' && c <= (int32)'z') || (c >= (int32)'0' && c <= (int32)'9');
+			if (!word) {
+				gap = !key.IsEmpty();
+				continue;
+			}
+			if (key.IsEmpty() && c >= (int32)'0' && c <= (int32)'9') key.Append(Core::StringView("n"));
+			if (gap) key.AppendByte('_');
+			gap = false;
+			key.AppendByte(c);
+		}
+		return key.ToString();
+	}
+
+	static bool Included(const Board& board, const Core::Array<Core::String>& ids, const Element& element) {
+		return ids.IsEmpty() ? board.LayerVisible(element.m_Layer.View()) : ids.Contains(element.m_Id);
+	}
+
+	static Core::String UniqueKey(Core::HashMap<Core::String, bool>& taken, Core::String wanted) {
+		Core::String key = wanted;
+		for (int64 n = 2; taken.Contains(key); ++n) key = (wanted + "_") + NumberText((double)n).View();
+		taken.Insert(key, true);
+		return key;
+	}
+
+	// The smallest frame whose box holds `box`'s center, other than `self`.
+	static Element* InnermostFrame(const Core::Array<Element*>& frames, const Box& box, const Element* self) {
+		Element* best = nullptr;
+		double area = c_Far;
+		for (Element* frame : frames) {
+			if (frame == self) continue;
+			Box outer = frame->Frame();
+			if (!outer.Contains(box.CenterX(), box.CenterY())) continue;
+			if (self && !outer.ContainsBox(self->Frame())) continue;
+			const double size = outer.Width() * outer.Height();
+			if (size < area) {
+				area = size;
+				best = frame;
+			}
+		}
+		return best;
+	}
+
+	Diagram ExtractDiagram(const Board& board, const Core::Array<Core::String>& ids) {
+		Diagram diagram;
+		Core::Array<Element*> frames;
+		Core::Array<Element*> nodes;
+		for (Element* element : board.Drawn(false)) {
+			if (!Included(board, ids, *element)) continue;
+			if (IsNode(element->m_Kind)) nodes.Push(element);
+			else if (element->m_Kind == Kind::Frame) frames.Push(element);
+			else if (element->m_Kind == Kind::Note || element->m_Kind == Kind::Text) diagram.m_Notes.Push(element);
+			else if (element->m_Kind == Kind::Stroke) diagram.m_Strokes.Push(element);
+		}
+		funcptr<bool(Element*, Element*)> reading = [](Element* a, Element* b) -> bool {
+			const double rowA = Math::Floor(a->m_Y / 40.0);
+			const double rowB = Math::Floor(b->m_Y / 40.0);
+			return rowA < rowB || (rowA == rowB && a->m_X < b->m_X);
+		};
+		nodes.SortBy(reading);
+		frames.SortBy(reading);
+		Core::HashMap<Core::String, bool> taken;
+		// Keys the owner or an import gave come first, so a made-up key never takes one.
+		for (Element* element : nodes)
+			if (!element->m_Key.IsEmpty() && !taken.Contains(element->m_Key)) {
+				taken.Insert(element->m_Key, true);
+				diagram.m_KeyOf.Insert(element->m_Id, element->m_Key);
+			}
+		for (Element* element : frames)
+			if (!element->m_Key.IsEmpty() && !taken.Contains(element->m_Key)) {
+				taken.Insert(element->m_Key, true);
+				diagram.m_KeyOf.Insert(element->m_Id, element->m_Key);
+			}
+		for (Element* element : nodes) {
+			if (!diagram.m_KeyOf.Contains(element->m_Id)) {
+				Core::String wanted = KeyFromText(element->m_Text.View());
+				diagram.m_KeyOf.Insert(element->m_Id, UniqueKey(taken, wanted.IsEmpty() ? element->m_Id : wanted));
+			}
+			DiagramNode node;
+			node.m_Element = element;
+			node.m_Key = Core::String(diagram.Key(element->m_Id.View()));
+			Element* frame = InnermostFrame(frames, element->Frame(), nullptr);
+			if (frame) node.m_Frame = frame->m_Id;
+			diagram.m_Nodes.Push(node);
+		}
+		for (Element* element : frames) {
+			if (!diagram.m_KeyOf.Contains(element->m_Id)) {
+				Core::String wanted = KeyFromText(element->m_Text.View());
+				diagram.m_KeyOf.Insert(element->m_Id, UniqueKey(taken, wanted.IsEmpty() ? element->m_Id : wanted));
+			}
+			DiagramFrame frame;
+			frame.m_Element = element;
+			frame.m_Key = Core::String(diagram.Key(element->m_Id.View()));
+			Element* parent = InnermostFrame(frames, element->Frame(), element);
+			if (parent) frame.m_Parent = parent->m_Id;
+			diagram.m_Frames.Push(frame);
+		}
+		double across = 0.0;
+		double down = 0.0;
+		for (Element* element : board.m_Elements) {
+			if (element->m_Kind != Kind::Connector || !Included(board, ids, *element)) continue;
+			if (!diagram.Node(element->m_From.View()) || !diagram.Node(element->m_To.View())) continue;
+			diagram.m_Edges.Push(element);
+			Point a = CenterOf(*board.Find(element->m_From.View()));
+			Point b = CenterOf(*board.Find(element->m_To.View()));
+			// Counted by edges, not by length: a tree drawn top down spreads its children sideways.
+			if (Math::Abs(b.m_Y - a.m_Y) >= Math::Abs(b.m_X - a.m_X) * 0.5) down += 1.0;
+			else across += 1.0;
+		}
+		diagram.m_Horizontal = across > down;
+		return diagram;
+	}
+
+	// A label as Mermaid takes it: in quotes, with quotes and line breaks written its way.
+	static void Label(Core::StringBuilder& out, Core::StringView text) {
+		out.AppendByte('"');
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == (int32)'"') out.Append(Core::StringView("#quot;"));
+			else if (c == 10) out.Append(Core::StringView("<br/>"));
+			else if (c != 13) out.AppendByte(c);
+		}
+		out.AppendByte('"');
+	}
+
+	static void NodeLine(Core::StringBuilder& out, const DiagramNode& node, Core::StringView indent) {
+		const Element& element = *node.m_Element;
+		out.Append(indent);
+		out.Append(node.m_Key.View());
+		Core::StringView open = Core::StringView("[");
+		Core::StringView close = Core::StringView("]");
+		if (element.m_Kind == Kind::Round) { open = Core::StringView("("); close = Core::StringView(")"); }
+		else if (element.m_Kind == Kind::Ellipse) { open = Core::StringView("(("); close = Core::StringView("))"); }
+		else if (element.m_Kind == Kind::Diamond) { open = Core::StringView("{"); close = Core::StringView("}"); }
+		else if (element.m_Kind == Kind::Cylinder) { open = Core::StringView("[("); close = Core::StringView(")]"); }
+		else if (element.m_Kind == Kind::Hexagon) { open = Core::StringView("{{"); close = Core::StringView("}}"); }
+		else if (element.m_Kind == Kind::Parallelogram) { open = Core::StringView("[/"); close = Core::StringView("/]"); }
+		out.Append(open);
+		Label(out, element.m_Text.IsEmpty() ? node.m_Key.View() : element.m_Text.View());
+		out.Append(close);
+		out.AppendByte(10);
+	}
+
+	static void EdgeLine(Core::StringBuilder& out, const Diagram& diagram, const Element& edge) {
+		const bool dashed = edge.m_Style == "dashed" || edge.m_Style == "dotted";
+		const bool thick = edge.m_Width >= 4.0;
+		const bool end = edge.m_End != "none";
+		const bool start = !edge.m_Start.IsEmpty() && edge.m_Start != "none";
+		out.Append(Core::StringView("    "));
+		out.Append(diagram.Key(edge.m_From.View()));
+		out.AppendByte(' ');
+		if (start && end) out.AppendByte('<');
+		if (dashed) out.Append(end ? Core::StringView("-.->") : Core::StringView("-.-"));
+		else if (thick) out.Append(end ? Core::StringView("==>") : Core::StringView("==="));
+		else out.Append(end ? Core::StringView("-->") : Core::StringView("---"));
+		if (!edge.m_Text.IsEmpty()) {
+			out.AppendByte('|');
+			Label(out, edge.m_Text.View());
+			out.AppendByte('|');
+		}
+		out.AppendByte(' ');
+		out.Append(diagram.Key(edge.m_To.View()));
+		out.AppendByte(10);
+	}
+
+	static void FrameBlock(Core::StringBuilder& out, const Diagram& diagram, const DiagramFrame& frame, int32 depth) {
+		Core::StringBuilder indent;
+		for (int32 i = 0; i < depth + 1; ++i) indent.Append(Core::StringView("    "));
+		out.Append(indent.View());
+		out.Append(Core::StringView("subgraph "));
+		out.Append(frame.m_Key.View());
+		out.Append(Core::StringView(" ["));
+		Label(out, frame.m_Element->m_Text.IsEmpty() ? frame.m_Key.View() : frame.m_Element->m_Text.View());
+		out.Append(Core::StringView("]"));
+		out.AppendByte(10);
+		Core::StringBuilder inner;
+		inner.Append(indent.View());
+		inner.Append(Core::StringView("    "));
+		for (const DiagramFrame& child : diagram.m_Frames)
+			if (child.m_Parent == frame.m_Element->m_Id) FrameBlock(out, diagram, child, depth + 1);
+		for (const DiagramNode& node : diagram.m_Nodes)
+			if (node.m_Frame == frame.m_Element->m_Id) NodeLine(out, node, inner.View());
+		out.Append(indent.View());
+		out.Append(Core::StringView("end"));
+		out.AppendByte(10);
+	}
+
+	Core::String Counted(int64 count, const char* one, const char* many) {
+		Core::StringBuilder text;
+		text.AppendInt(count);
+		text.AppendByte(' ');
+		text.Append(Core::StringView(count == 1 ? one : many));
+		return text.ToString();
+	}
+
+	// The number in an id like e12, for the stable order.
+	static int64 Serial(Core::StringView id) {
+		int64 value = 0;
+		for (int64 i = 1; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (c >= (int32)'0' && c <= (int32)'9') value = value * 10 + (int64)(c - (int32)'0');
+		}
+		return value;
+	}
+
+	static void ClassLines(Core::StringBuilder& out, const Diagram& diagram, const Core::HashMap<Core::String, Core::String>& colors, bool fill) {
+		Core::Array<Core::String> names;
+		for (const DiagramNode& node : diagram.m_Nodes) {
+			if (node.m_Element->m_Color == node.m_Element->m_Fill && !fill) continue;
+			const Core::String name = fill ? node.m_Element->m_Fill : node.m_Element->m_Color;
+			if (name.IsEmpty() || name == "ink" || name == "none" || names.Contains(name) || !colors.ContainsAs(name.View())) continue;
+			names.Push(name);
+		}
+		for (const Core::String& name : names) {
+			// Fill pass: a node tinted in its own outline's color gets one class, <name>_fill, for both.
+			for (int32 both = 0; both < (fill ? 2 : 1); ++both) {
+			bool any = false;
+			for (const DiagramNode& node : diagram.m_Nodes) {
+				const bool same = node.m_Element->m_Color == node.m_Element->m_Fill;
+				if (!fill && same) continue;
+				if ((fill ? node.m_Element->m_Fill : node.m_Element->m_Color) == name && (!fill || (both == 1) == same)) any = true;
+			}
+			if (!any) continue;
+			out.Append(Core::StringView("    classDef "));
+			if (fill && both == 0) out.Append(Core::StringView("fill_"));
+			out.Append(name.View());
+			if (fill && both == 1) out.Append(Core::StringView("_fill"));
+			out.Append(fill ? (both == 1 ? Core::StringView(" stroke:") : Core::StringView(" fill:")) : Core::StringView(" stroke:"));
+			out.Append(colors.Get(name).View());
+			if (fill && both == 1) {
+				out.Append(Core::StringView(",fill:"));
+				out.Append(colors.Get(name).View());
+			}
+			if (fill) out.Append(Core::StringView("40"));
+			out.AppendByte(10);
+			out.Append(Core::StringView("    class "));
+			bool first = true;
+			for (const DiagramNode& node : diagram.m_Nodes) {
+				const Core::String mine = fill ? node.m_Element->m_Fill : node.m_Element->m_Color;
+				if (mine != name) continue;
+				if (fill && (both == 1) != (node.m_Element->m_Color == node.m_Element->m_Fill)) continue;
+				if (!fill && node.m_Element->m_Color == node.m_Element->m_Fill) continue;
+				if (!first) out.AppendByte(',');
+				out.Append(node.m_Key.View());
+				first = false;
+			}
+			out.AppendByte(' ');
+			if (fill && both == 0) out.Append(Core::StringView("fill_"));
+			out.Append(name.View());
+			if (fill && both == 1) out.Append(Core::StringView("_fill"));
+			out.AppendByte(10);
+			}
+		}
+	}
+
+	static const DiagramNode* NearestNode(const Diagram& diagram, const Element& note);
+
+	Core::String ExportMermaid(const Board& board, const Diagram& given, const Core::HashMap<Core::String, Core::String>& colors) {
+		Diagram diagram = given;
+		diagram.m_Nodes.SortBy([](const DiagramNode& a, const DiagramNode& b) -> bool { return Serial(a.m_Element->m_Id.View()) < Serial(b.m_Element->m_Id.View()); });
+		Core::HashMap<Core::String, int64> place;
+		for (int64 i = 0; i < diagram.m_Nodes.Count(); ++i) place.Insert(diagram.m_Nodes[i].m_Element->m_Id, i);
+		diagram.m_Edges.SortBy([&place](Element* a, Element* b) -> bool {
+			const int64 fa = place.Get(a->m_From);
+			const int64 fb = place.Get(b->m_From);
+			if (fa != fb) return fa < fb;
+			const int64 ta = place.Get(a->m_To);
+			const int64 tb = place.Get(b->m_To);
+			if (ta != tb) return ta < tb;
+			return Serial(a->m_Id.View()) < Serial(b->m_Id.View());
+		});
+		Core::StringBuilder out;
+		out.Append(diagram.m_Horizontal ? Core::StringView("flowchart LR") : Core::StringView("flowchart TD"));
+		out.AppendByte(10);
+		if (!board.m_Title.IsEmpty()) {
+			out.Append(Core::StringView("    %% "));
+			out.Append(board.m_Title.View());
+			out.AppendByte(10);
+		}
+		for (const DiagramFrame& frame : diagram.m_Frames)
+			if (frame.m_Parent.IsEmpty()) FrameBlock(out, diagram, frame, 0);
+		for (const DiagramNode& node : diagram.m_Nodes)
+			if (node.m_Frame.IsEmpty()) NodeLine(out, node, Core::StringView("    "));
+		for (Element* edge : diagram.m_Edges) EdgeLine(out, diagram, *edge);
+		if (!colors.IsEmpty()) {
+			ClassLines(out, diagram, colors, false);
+			ClassLines(out, diagram, colors, true);
+		}
+		for (const DiagramNode& node : diagram.m_Nodes) {
+			if (node.m_Element->m_Desc.IsEmpty()) continue;
+			out.Append(Core::StringView("    %% desc "));
+			out.Append(node.m_Key.View());
+			out.Append(Core::StringView(": "));
+			for (int64 i = 0; i < node.m_Element->m_Desc.ByteLength(); ++i) {
+				const int32 c = node.m_Element->m_Desc.View().ByteAt(i);
+				out.AppendByte(c == 10 || c == 13 ? (int32)' ' : c);
+			}
+			out.AppendByte(10);
+		}
+		for (Element* note : diagram.m_Notes) {
+			out.Append(Core::StringView("    %% note"));
+			const DiagramNode* near = NearestNode(diagram, *note);
+			if (near) {
+				out.Append(Core::StringView(" by "));
+				out.Append(near->m_Key.View());
+			}
+			out.Append(Core::StringView(": "));
+			for (int64 i = 0; i < note->m_Text.ByteLength(); ++i) {
+				const int32 c = note->m_Text.View().ByteAt(i);
+				out.AppendByte(c == 10 || c == 13 ? (int32)' ' : c);
+			}
+			out.AppendByte(10);
+		}
+		return out.ToString();
+	}
+
+	static Core::StringView NameOf(const Diagram& diagram, Core::StringView id) {
+		const DiagramNode* node = diagram.Node(id);
+		if (!node) return id;
+		return node->m_Element->m_Text.IsEmpty() ? node->m_Key.View() : node->m_Element->m_Text.View();
+	}
+
+	// The node nearest a note (within 250 units of its outline), null for none.
+	static const DiagramNode* NearestNode(const Diagram& diagram, const Element& note) {
+		if (!note.m_About.IsEmpty()) return diagram.Node(note.m_About.View());
+		const DiagramNode* best = nullptr;
+		double bestD = 250.0;
+		for (const DiagramNode& node : diagram.m_Nodes) {
+			const double d = BoxGap(node.m_Element->Frame(), note.Frame());
+			if (d < bestD) {
+				bestD = d;
+				best = &node;
+			}
+		}
+		return best;
+	}
+
+	static void OneLine(Core::StringBuilder& out, Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			out.AppendByte(c == 10 || c == 13 ? (int32)' ' : c);
+		}
+	}
+
+	static void Component(Core::StringBuilder& out, const Board& board, const Diagram& diagram, const DiagramNode& node) {
+		const Element& element = *node.m_Element;
+		out.Append(Core::StringView("### "));
+		OneLine(out, NameOf(diagram, element.m_Id.View()));
+		out.Append(Core::StringView(" (`"));
+		out.Append(node.m_Key.View());
+		out.Append(Core::StringView("`)"));
+		out.AppendByte(10);
+		out.AppendByte(10);
+		if (!element.m_Desc.IsEmpty()) {
+			out.Append(element.m_Desc.View());
+			out.AppendByte(10);
+			out.AppendByte(10);
+		}
+		if (!node.m_Frame.IsEmpty()) {
+			out.Append(Core::StringView("- Part of: "));
+			OneLine(out, board.Find(node.m_Frame.View())->m_Text.View());
+			out.AppendByte(10);
+		}
+		for (Element* edge : diagram.m_Edges) {
+			const bool outgoing = edge->m_From == element.m_Id;
+			if (!outgoing && edge->m_To != element.m_Id) continue;
+			out.Append(outgoing ? Core::StringView("- To ") : Core::StringView("- From "));
+			OneLine(out, NameOf(diagram, outgoing ? edge->m_To.View() : edge->m_From.View()));
+			if (!edge->m_Text.IsEmpty()) {
+				out.Append(Core::StringView(": "));
+				OneLine(out, edge->m_Text.View());
+			}
+			out.AppendByte(10);
+		}
+		for (Element* note : diagram.m_Notes)
+			if (NearestNode(diagram, *note) == &node) {
+				out.Append(Core::StringView("- Note: "));
+				OneLine(out, note->m_Text.View());
+				out.AppendByte(10);
+			}
+		out.AppendByte(10);
+	}
+
+	// The nodes in flow order: from the sources along the connectors, breadth first; nodes left over in the order made.
+	static Core::Array<const DiagramNode*> FlowOrder(const Diagram& diagram) {
+		Core::Array<const DiagramNode*> order;
+		Core::HashMap<Core::String, bool> seen;
+		Core::Array<const DiagramNode*> sorted;
+		for (const DiagramNode& node : diagram.m_Nodes) sorted.Push(&node);
+		sorted.SortBy([](const DiagramNode* a, const DiagramNode* b) -> bool { return Serial(a->m_Element->m_Id.View()) < Serial(b->m_Element->m_Id.View()); });
+		for (const DiagramNode* start : sorted) {
+			bool source = true;
+			for (Element* edge : diagram.m_Edges)
+				if (edge->m_To == start->m_Element->m_Id && edge->m_From != edge->m_To) source = false;
+			if (!source || seen.Contains(start->m_Element->m_Id)) continue;
+			Core::Array<const DiagramNode*> queue;
+			queue.Push(start);
+			seen.Insert(start->m_Element->m_Id, true);
+			for (int64 at = 0; at < queue.Count(); ++at) {
+				order.Push(queue[at]);
+				for (Element* edge : diagram.m_Edges) {
+					if (edge->m_From != queue[at]->m_Element->m_Id || seen.Contains(edge->m_To)) continue;
+					const DiagramNode* next = diagram.Node(edge->m_To.View());
+					if (!next) continue;
+					seen.Insert(edge->m_To, true);
+					queue.Push(next);
+				}
+			}
+		}
+		for (const DiagramNode* node : sorted)
+			if (!seen.Contains(node->m_Element->m_Id)) order.Push(node);
+		return order;
+	}
+
+	Core::String ExportOutline(const Board& board, const Diagram& diagram, const Core::HashMap<Core::String, Core::String>& colors) {
+		Core::StringBuilder out;
+		out.Append(Core::StringView("# "));
+		out.Append(board.m_Title.IsEmpty() ? Core::StringView("Design") : board.m_Title.View());
+		out.Append(Core::StringView("\n\n## Components\n\n"));
+		if (diagram.m_Nodes.IsEmpty()) out.Append(Core::StringView("(none yet: the board has no shapes)\n\n"));
+		for (const DiagramNode* node : FlowOrder(diagram)) Component(out, board, diagram, *node);
+		if (!diagram.m_Frames.IsEmpty()) {
+			out.Append(Core::StringView("## Groups\n\n"));
+			for (const DiagramFrame& frame : diagram.m_Frames) {
+				out.Append(Core::StringView("- **"));
+				OneLine(out, frame.m_Element->m_Text.IsEmpty() ? frame.m_Key.View() : frame.m_Element->m_Text.View());
+				out.Append(Core::StringView("**:"));
+				bool first = true;
+				for (const DiagramNode& node : diagram.m_Nodes)
+					if (node.m_Frame == frame.m_Element->m_Id) {
+						out.Append(first ? Core::StringView(" ") : Core::StringView(", "));
+						OneLine(out, NameOf(diagram, node.m_Element->m_Id.View()));
+						first = false;
+					}
+				out.AppendByte(10);
+			}
+			out.AppendByte(10);
+		}
+		bool loose = false;
+		for (Element* note : diagram.m_Notes)
+			if (!NearestNode(diagram, *note)) {
+				if (!loose) out.Append(Core::StringView("## Notes\n\n"));
+				loose = true;
+				out.Append(Core::StringView("- "));
+				OneLine(out, note->m_Text.View());
+				out.AppendByte(10);
+			}
+		if (loose) out.AppendByte(10);
+		out.Append(Core::StringView("## Diagram\n\n```mermaid\n"));
+		out.Append(ExportMermaid(board, diagram, colors).View());
+		out.Append(Core::StringView("```\n"));
+		if (!diagram.m_Strokes.IsEmpty()) {
+			out.Append(Core::StringView("\n## Not yet in the diagram\n\n"));
+			out.AppendInt(diagram.m_Strokes.Count());
+			out.Append(Core::StringView(" freehand strokes are not part of the diagram (board_recognize turns them into shapes).\n"));
+		}
+		return out.ToString();
+	}
+}

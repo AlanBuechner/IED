@@ -1,0 +1,40 @@
+// The board_* AI tools (the manifest's toolCalls): each goes through the board.query binding, so a tool, another
+// plugin and the evaluation harness get the same answer; board_view's picture rides along as an image.
+
+include "BoardService.ch"
+
+namespace Boards
+{
+	static IED::ToolResult Through(const char* tool, const IED::ToolCall& call) {
+		JsonOut args;
+		args.BeginObject();
+		args.StrField("wsId", call.m_Workspace.m_Id.View());
+		args.StrField("tool", Core::StringView(tool));
+		args.RawField("args", IED::NodeJson(call.m_Args).View());
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView("board.query"), args.View());
+		if (!answer.Ok()) return IED::ToolFailure(answer.m_Error.View());
+		Serialization::DomDoc doc;
+		Serialization::DomNode result = Serialization::ReadJson(answer.m_Json.View(), doc).root;
+		IED::ToolResult tool = IED::ToolText(result.Member("text").AsView());
+		if (result.Member("text").AsView().StartsWith(Core::StringView("Refused"))) tool.m_IsError = true;
+		if (result.Member("image").IsValid()) {
+			IED::ToolImage image;
+			image.m_Mime = Core::String("image/png");
+			image.m_Path = Core::String(result.Member("image").AsView());
+			tool.m_Images.Push(image);
+		}
+		return tool;
+	}
+
+	IED::ToolResult BoardListTool(const IED::ToolCall& call) { return Through("list", call); }
+	IED::ToolResult BoardCreateTool(const IED::ToolCall& call) { return Through("create", call); }
+	IED::ToolResult BoardReadTool(const IED::ToolCall& call) { return Through("read", call); }
+	IED::ToolResult BoardViewTool(const IED::ToolCall& call) { return Through("view", call); }
+	IED::ToolResult BoardEditTool(const IED::ToolCall& call) { return Through("edit", call); }
+	IED::ToolResult BoardRecognizeTool(const IED::ToolCall& call) { return Through("recognize", call); }
+	IED::ToolResult BoardExportTool(const IED::ToolCall& call) { return Through("export", call); }
+	IED::ToolResult BoardImportTool(const IED::ToolCall& call) { return Through("import", call); }
+	IED::ToolResult BoardPlanTool(const IED::ToolCall& call) { return Through("plan", call); }
+	IED::ToolResult BoardRevertTool(const IED::ToolCall& call) { return Through("revert", call); }
+}

@@ -1,0 +1,63 @@
+// The board's geometry and JSON helpers.
+
+include "Geometry.ch"
+include "Json.ch"
+
+[test("board.geometry")]
+class BoardGeometryTests
+{
+	[test("numbers_to_a_tenth")]
+	public static void Numbers() {
+		Boards::JsonOut json;
+		json.BeginArray();
+		json.Num(12.0);
+		json.Num(12.54);
+		json.Num(-0.31);
+		json.Str(Core::StringView("a\"b"));
+		json.EndArray();
+		assert_true(json.View() == "[12,12.5,-0.3,\"a\\\"b\"]", "numbers rounded to a tenth, strings escaped");
+	}
+
+	[test("segment_distance")]
+	public static void SegmentDistance() {
+		assert_true(Math::Abs(Boards::SegmentDistance(5.0, 5.0, 0.0, 0.0, 10.0, 0.0) - 5.0) < 1e-9, "perpendicular");
+		assert_true(Math::Abs(Boards::SegmentDistance(13.0, 4.0, 0.0, 0.0, 10.0, 0.0) - 5.0) < 1e-9, "past the end");
+	}
+
+	[test("simplify_keeps_corners")]
+	public static void SimplifyCorners() {
+		Core::Array<double> points;
+		for (int32 i = 0; i <= 10; ++i) { points.Push((double)i * 10.0); points.Push(0.0); }
+		for (int32 i = 1; i <= 10; ++i) { points.Push(100.0); points.Push((double)i * 10.0); }
+		Core::Array<double> simple = Boards::Simplify(points, 2.0);
+		assert_true(simple.Count() == 6, "an L keeps three points");
+		assert_true(simple[2] == 100.0 && simple[3] == 0.0, "the corner");
+	}
+
+	[test("hull_and_area")]
+	public static void HullArea() {
+		Core::Array<double> points;
+		points.Push(0.0); points.Push(0.0);
+		points.Push(10.0); points.Push(0.0);
+		points.Push(5.0); points.Push(5.0);
+		points.Push(10.0); points.Push(10.0);
+		points.Push(0.0); points.Push(10.0);
+		Core::Array<double> hull = Boards::ConvexHull(points);
+		assert_true(hull.Count() == 8, "the inner point is left out");
+		assert_true(Math::Abs(Boards::PolygonArea(hull) - 100.0) < 1e-9, "a 10 by 10 square");
+		assert_true(Boards::InsidePolygon(hull, 5.0, 5.0) && !Boards::InsidePolygon(hull, 15.0, 5.0), "inside and out");
+	}
+
+	[test("clip_to_outline")]
+	public static void Clip() {
+		Core::Array<double> square;
+		square.Push(0.0); square.Push(0.0);
+		square.Push(10.0); square.Push(0.0);
+		square.Push(10.0); square.Push(10.0);
+		square.Push(0.0); square.Push(10.0);
+		double x = 0.0;
+		double y = 0.0;
+		assert_true(Boards::ClipToOutline(square, 5.0, 5.0, 25.0, 5.0, x, y), "crosses");
+		assert_true(Math::Abs(x - 10.0) < 1e-9 && Math::Abs(y - 5.0) < 1e-9, "on the right edge");
+	}
+}

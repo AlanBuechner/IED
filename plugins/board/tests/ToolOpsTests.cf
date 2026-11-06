@@ -1,0 +1,134 @@
+// The ops the agent evaluations asked for (docs/32 "Evaluation results"): frames that hold what they were fitted
+// around, a layout that keeps them, place, insert, update of many, tidy rows, notes that follow their node, and
+// Mermaid that carries descriptions, notes and colors both ways.
+
+include "Mermaid.ch"
+
+static Boards::ChangeResult BtRun(Boards::Board& board, const char* json) {
+	Serialization::DomDoc doc;
+	Serialization::DomNode ops = Serialization::ReadJson(Core::StringView(json), doc).root;
+	return Boards::ApplyOps(board, ops, Core::StringView("ai"), Core::StringView(""), 0, nullptr);
+}
+
+static Boards::Element* BtNamed(Boards::Board& board, const char* text) {
+	for (Boards::Element* element : board.m_Elements)
+		if (element->m_Text == text) return element;
+	return nullptr;
+}
+
+static bool BtWarned(const Boards::ChangeResult& result, const char* words) {
+	for (const Core::String& line : result.m_Warnings)
+		if (line.View().Contains(Core::StringView(words))) return true;
+	return false;
+}
+
+[test("board.toolops")]
+class BoardToolOpsTests
+{
+	[test("a_frame_holds_what_it_was_fitted_around")]
+	public static void FrameAround() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"A\"},{\"op\":\"add\",\"type\":\"rect\",\"x\":300,\"y\":0,\"w\":100,\"h\":50,\"text\":\"B\"},{\"op\":\"add\",\"type\":\"rect\",\"x\":150,\"y\":10,\"w\":100,\"h\":30,\"text\":\"C\"}]");
+		Boards::ChangeResult result = BtRun(board, "[{\"op\":\"add\",\"type\":\"frame\",\"text\":\"G\",\"around\":[\"e1\",\"e2\"]}]");
+		Boards::Element* frame = BtNamed(board, "G");
+		Core::Array<Boards::Element*> members = board.MembersOf(*frame);
+		assert_true(members.Count() == 2, "the frame holds A and B alone");
+		assert_true(!frame->Frame().Contains(BtNamed(board, "C")->m_X + 50.0, BtNamed(board, "C")->m_Y + 15.0), "C was moved out of it");
+		assert_true(BtWarned(result, "out of the frame") && BtWarned(result, "holds e1 e2"), "and the answer says so");
+	}
+
+	[test("layout_keeps_frames_together_and_others_out")]
+	public static void LayoutFrames() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"ref\":\"w\",\"type\":\"rect\",\"text\":\"Web\"},{\"op\":\"add\",\"ref\":\"g\",\"type\":\"rect\",\"text\":\"Gateway\"},{\"op\":\"add\",\"ref\":\"o\",\"type\":\"rect\",\"text\":\"Orders\"},{\"op\":\"add\",\"ref\":\"p\",\"type\":\"rect\",\"text\":\"Payments\"},{\"op\":\"add\",\"ref\":\"d\",\"type\":\"cylinder\",\"text\":\"DB\"},{\"op\":\"add\",\"ref\":\"q\",\"type\":\"rect\",\"text\":\"Queue\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@w\",\"to\":\"@g\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@g\",\"to\":\"@o\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@g\",\"to\":\"@p\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@o\",\"to\":\"@d\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@o\",\"to\":\"@q\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@p\",\"to\":\"@q\"},{\"op\":\"layout\"},{\"op\":\"add\",\"type\":\"frame\",\"text\":\"Backend\",\"around\":[\"@o\",\"@p\",\"@q\"]},{\"op\":\"layout\",\"direction\":\"TD\"}]");
+		Boards::Element* frame = BtNamed(board, "Backend");
+		Core::Array<Boards::Element*> members = board.MembersOf(*frame);
+		assert_true(members.Count() == 3, "the frame still holds Orders, Payments and Queue");
+		for (Boards::Element* member : members) assert_true(member->m_Text != "DB" && member->m_Text != "Web" && member->m_Text != "Gateway", "and nothing else");
+	}
+
+	[test("place_insert_update_many")]
+	public static void PlaceInsert() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"ref\":\"a\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"A\"},{\"op\":\"add\",\"ref\":\"b\",\"type\":\"rect\",\"x\":0,\"y\":300,\"w\":100,\"h\":50,\"text\":\"B\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@b\",\"text\":\"reads\"},{\"op\":\"add\",\"ref\":\"n\",\"type\":\"note\",\"text\":\"n\"},{\"op\":\"place\",\"ids\":[\"@n\"],\"near\":\"@a\",\"side\":\"right\",\"gap\":40}]");
+		Boards::Element* note = BtNamed(board, "n");
+		assert_true(note->m_X == 140.0 && note->m_Y + note->m_H * 0.5 == 25.0, "the note right of A, centered on it");
+		Boards::ChangeResult result = BtRun(board, "[{\"op\":\"insert\",\"on\":\"e3\",\"type\":\"cylinder\",\"text\":\"Cache\",\"ref\":\"c\"}]");
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		Boards::Element* cache = BtNamed(board, "Cache");
+		Boards::Element* first = board.Find(Core::StringView("e3"));
+		assert_true(first->m_To == cache->m_Id && first->m_Text == "reads", "the connector now ends at the cache, its label kept");
+		int64 onward = 0;
+		for (Boards::Element* element : board.m_Elements)
+			if (element->m_Kind == Boards::Kind::Connector && element->m_From == cache->m_Id && element->m_To == "e2") onward += 1;
+		assert_true(onward == 1, "and one goes on from it to B");
+		assert_true(cache->m_Y > 50.0 && cache->m_Y + cache->m_H < 300.0, "placed on the path between them");
+		BtRun(board, "[{\"op\":\"update\",\"ids\":[\"e1\",\"e2\"],\"color\":\"blue\"}]");
+		assert_true(board.Find(Core::StringView("e1"))->m_Color == "blue" && board.Find(Core::StringView("e2"))->m_Color == "blue", "update with ids sets each");
+	}
+
+	[test("tidy_lines_rows_up_exactly")]
+	public static void Tidy() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":3,\"y\":0,\"w\":149,\"h\":71,\"text\":\"A\"},{\"op\":\"add\",\"type\":\"rect\",\"x\":203,\"y\":9,\"w\":146,\"h\":64,\"text\":\"B\"},{\"op\":\"add\",\"type\":\"rect\",\"x\":400,\"y\":4,\"w\":150,\"h\":60,\"text\":\"C\"},{\"op\":\"tidy\",\"same_size\":true}]");
+		Boards::Element* a = BtNamed(board, "A");
+		Boards::Element* b = BtNamed(board, "B");
+		Boards::Element* c = BtNamed(board, "C");
+		assert_true(a->m_Y == b->m_Y && b->m_Y == c->m_Y, "one row");
+		assert_true(a->m_W == b->m_W && a->m_H == c->m_H, "one size");
+	}
+
+	[test("notes_follow_their_node")]
+	public static void About() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"ref\":\"a\",\"type\":\"rect\",\"x\":0,\"y\":0,\"text\":\"A\"},{\"op\":\"add\",\"ref\":\"b\",\"type\":\"rect\",\"x\":0,\"y\":200,\"text\":\"B\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@b\"},{\"op\":\"add\",\"type\":\"note\",\"x\":600,\"y\":600,\"text\":\"about A\",\"about\":\"@a\"}]");
+		Boards::Element* note = BtNamed(board, "about A");
+		const double dx = note->m_X - BtNamed(board, "A")->m_X;
+		BtRun(board, "[{\"op\":\"layout\",\"direction\":\"LR\"}]");
+		assert_true(Math::Abs(note->m_X - BtNamed(board, "A")->m_X - dx) < 0.5, "the note moved with A, however far it was");
+	}
+
+	[test("mermaid_keeps_descs_notes_and_colors")]
+	public static void MermaidRoundTrip() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"ref\":\"a\",\"type\":\"rect\",\"text\":\"API\",\"desc\":\"routes requests\",\"color\":\"blue\",\"fill\":\"blue\"},{\"op\":\"add\",\"ref\":\"b\",\"type\":\"cylinder\",\"text\":\"DB\",\"color\":\"green\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@b\"},{\"op\":\"add\",\"type\":\"note\",\"text\":\"check auth\",\"about\":\"@a\"}]");
+		Core::HashMap<Core::String, Core::String> colors;
+		colors.Insert(Core::String("blue"), Core::String("#5b9bd5"));
+		colors.Insert(Core::String("green"), Core::String("#67b271"));
+		Core::String text = Boards::ExportMermaid(board, Boards::ExtractDiagram(board, Core::Array<Core::String>()), colors);
+		assert_true(text.View().Contains(Core::StringView("%% desc api: routes requests")), "the desc as a comment");
+		assert_true(text.View().Contains(Core::StringView("%% note by api: check auth")), "the note by its node");
+		assert_true(text.View().Contains(Core::StringView("class api blue_fill")) && text.View().Contains(Core::StringView("class db green")), "one class per color use");
+		Boards::Board fresh;
+		Boards::InitBoard(fresh, Core::StringView("T"));
+		Boards::MermaidChart chart;
+		Core::String problem;
+		assert_true(Boards::ParseMermaid(text.View(), chart, problem), problem.CStr());
+		Core::Array<Core::String> notes;
+		Core::String ops = Boards::ImportOps(fresh, chart, Core::StringView(""), false, notes);
+		Serialization::DomDoc doc;
+		Boards::ChangeResult result = Boards::ApplyOps(fresh, Serialization::ReadJson(ops.View(), doc).root, Core::StringView("ai"), Core::StringView(""), 0, nullptr);
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		Boards::Element* api = BtNamed(fresh, "API");
+		assert_true(api != nullptr && api->m_Desc == "routes requests" && api->m_Color == "blue" && api->m_Fill == "blue", "desc and colors back");
+		assert_true(BtNamed(fresh, "DB")->m_Color == "green" && BtNamed(fresh, "DB")->m_Fill.IsEmpty(), "an outline color alone");
+		Boards::Element* note = BtNamed(fresh, "check auth");
+		assert_true(note != nullptr && note->m_About == api->m_Id && note->m_X > api->m_X + api->m_W, "the note back, beside its node");
+	}
+
+	[test("dry_run_on_a_copy")]
+	public static void DryRun() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"text\":\"A\"}]");
+		Boards::Board* copy = Boards::CloneBoard(board);
+		BtRun(*copy, "[{\"op\":\"delete\",\"ids\":[\"e1\"]}]");
+		assert_true(copy->m_Elements.IsEmpty() && board.m_Elements.Count() == 1, "the copy changed, the board did not");
+	}
+}

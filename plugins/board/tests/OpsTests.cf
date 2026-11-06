@@ -1,0 +1,115 @@
+// Changing a board: ops with refs, refusals that change nothing, undo and redo by author, the file round trip, the
+// tile index and the layout.
+
+include "Ops.ch"
+
+static Boards::ChangeResult BtApply(Boards::Board& board, const char* json, const char* by) {
+	Serialization::DomDoc doc;
+	Serialization::DomNode ops = Serialization::ReadJson(Core::StringView(json), doc).root;
+	return Boards::ApplyOps(board, ops, Core::StringView(by), Core::StringView(""), 0, nullptr);
+}
+
+static Boards::Board* BtBoard() {
+	Boards::Board* board = new Boards::Board();
+	Boards::InitBoard(*board, Core::StringView("Test"));
+	return board;
+}
+
+[test("board.ops")]
+class BoardOpsTests
+{
+	[test("add_with_refs_and_connector")]
+	public static void AddRefs() {
+		Boards::Board* board = BtBoard();
+		Boards::ChangeResult result = BtApply(*board, "[{\"op\":\"add\",\"ref\":\"api\",\"type\":\"rect\",\"x\":0,\"y\":0,\"text\":\"API\"},{\"op\":\"add\",\"ref\":\"db\",\"type\":\"cylinder\",\"x\":300,\"y\":0,\"text\":\"DB\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@api\",\"to\":\"@db\",\"text\":\"writes\"}]", "ai");
+		assert_true(result.m_Error.IsEmpty(), "applied");
+		assert_true(board->m_Elements.Count() == 3, "three elements");
+		Boards::Element* connector = board->Find(Core::StringView("e3"));
+		assert_true(connector != nullptr && connector->m_From == "e1" && connector->m_To == "e2", "the connector binds the refs' ids");
+		assert_true(board->Find(Core::StringView("e1"))->m_W >= 120.0, "a node without w is sized for its text");
+		assert_true(result.m_Change != nullptr && result.m_Change->m_By == "ai", "one change by the ai");
+		Core::Array<double> route = board->RouteOf(*connector);
+		assert_true(route.Count() == 4 && route[0] >= 119.9 && route[2] <= 300.1, "the route runs between the outlines");
+	}
+
+	[test("a_refused_op_changes_nothing")]
+	public static void Refused() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50}]", "owner");
+		const int64 rev = board->m_Rev;
+		Boards::ChangeResult result = BtApply(*board, "[{\"op\":\"update\",\"id\":\"e1\",\"text\":\"moved\"},{\"op\":\"update\",\"id\":\"e99\",\"text\":\"x\"}]", "ai");
+		assert_true(!result.m_Error.IsEmpty() && result.m_Error.View().Contains(Core::StringView("op 2")), "the second op is named");
+		assert_true(board->Find(Core::StringView("e1"))->m_Text.IsEmpty(), "the first op was taken back");
+		assert_true(board->m_Rev == rev, "the revision did not move");
+		Boards::ChangeResult bad = BtApply(*board, "[{\"op\":\"update\",\"id\":\"e1\",\"colour\":\"red\"}]", "ai");
+		assert_true(bad.m_Error.View().Contains(Core::StringView("unknown field 'colour'")), "a typo is refused by name");
+	}
+
+	[test("undo_is_by_author")]
+	public static void UndoByAuthor() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50}]", "owner");
+		BtApply(*board, "[{\"op\":\"update\",\"id\":\"e1\",\"text\":\"AI\"}]", "ai");
+		BtApply(*board, "[{\"op\":\"add\",\"type\":\"ellipse\",\"x\":200,\"y\":0,\"w\":60,\"h\":60}]", "owner");
+		Boards::Change* undo = Boards::UndoTarget(*board, Core::StringView("owner"));
+		assert_true(undo != nullptr && undo->m_Id == "c3", "the owner's latest");
+		Boards::Rewind(*board, undo, true);
+		assert_true(board->Find(Core::StringView("e2")) == nullptr, "the ellipse is gone");
+		assert_true(board->Find(Core::StringView("e1"))->m_Text == "AI", "the ai's change stays");
+		Boards::Change* redo = Boards::RedoTarget(*board, Core::StringView("owner"));
+		assert_true(redo == undo, "redo repeats it");
+		Boards::Rewind(*board, redo, false);
+		assert_true(board->Find(Core::StringView("e2")) != nullptr, "the ellipse is back");
+		Boards::Rewind(*board, board->FindChange(Core::StringView("c2")), true);
+		assert_true(board->Find(Core::StringView("e1"))->m_Text.IsEmpty(), "reverting the ai's change alone");
+	}
+
+	[test("delete_takes_bound_connectors")]
+	public static void DeleteCascade() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"ref\":\"a\",\"type\":\"rect\",\"x\":0,\"y\":0},{\"op\":\"add\",\"ref\":\"b\",\"type\":\"rect\",\"x\":300,\"y\":0},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@b\"}]", "owner");
+		Boards::ChangeResult result = BtApply(*board, "[{\"op\":\"delete\",\"ids\":[\"e1\"]}]", "owner");
+		assert_true(board->m_Elements.Count() == 1, "the connector went with its end");
+		Boards::Rewind(*board, result.m_Change, true);
+		assert_true(board->m_Elements.Count() == 3 && board->m_Elements[2]->m_Id == "e3", "undo puts both back in order");
+	}
+
+	[test("file_round_trip")]
+	public static void RoundTrip() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add_layer\",\"name\":\"Diagram\",\"ref\":\"d\"},{\"op\":\"add\",\"type\":\"stroke\",\"layer\":\"Layer 1\",\"pts\":[0,0,10.25,5,20,10]},{\"op\":\"add\",\"type\":\"note\",\"layer\":\"@d\",\"x\":5,\"y\":5,\"text\":\"remember\"},{\"op\":\"add\",\"type\":\"image\",\"src\":\"a.png\",\"iw\":800,\"ih\":400,\"x\":0,\"y\":0,\"crop\":[100,0,400,400]}]", "owner");
+		Core::String text = Boards::WriteBoard(*board);
+		Boards::Board loaded;
+		Core::String problem;
+		assert_true(Boards::ReadBoard(text.View(), loaded, problem), "reads back");
+		assert_true(loaded.m_Layers.Count() == 2 && loaded.m_Layers[1].m_Name == "Diagram", "layers");
+		assert_true(loaded.m_Elements.Count() == 3 && loaded.Find(Core::StringView("e2"))->m_Layer == "L2", "elements on their layers");
+		assert_true(loaded.Find(Core::StringView("e1"))->m_Points[2] == 10.3 || loaded.Find(Core::StringView("e1"))->m_Points[2] == 10.2, "points to a tenth");
+		Boards::Element* image = loaded.Find(Core::StringView("e3"));
+		assert_true(image->m_Crop.Count() == 4 && image->m_W == 400.0 && image->m_H == 400.0, "an image sized from its crop");
+		assert_true(Boards::WriteBoard(loaded) == text, "the same text again");
+		assert_true(loaded.m_NextId == 4, "ids go on after the file's");
+	}
+
+	[test("tiles_find_what_is_near")]
+	public static void Tiles() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":50,\"h\":50},{\"op\":\"add\",\"type\":\"rect\",\"x\":5000,\"y\":5000,\"w\":50,\"h\":50}]", "owner");
+		assert_true(board->Near(Boards::BoxAt(-10.0, -10.0, 100.0, 100.0)).Count() == 1, "one near the origin");
+		BtApply(*board, "[{\"op\":\"move\",\"ids\":[\"e2\"],\"dx\":-4990,\"dy\":-4990}]", "owner");
+		assert_true(board->Near(Boards::BoxAt(-10.0, -10.0, 100.0, 100.0)).Count() == 2, "the moved one is found where it went");
+	}
+
+	[test("layout_ranks_follow_connectors")]
+	public static void Layout() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"ref\":\"a\",\"type\":\"rect\",\"x\":500,\"y\":500,\"text\":\"A\"},{\"op\":\"add\",\"ref\":\"b\",\"type\":\"rect\",\"x\":0,\"y\":0,\"text\":\"B\"},{\"op\":\"add\",\"ref\":\"c\",\"type\":\"rect\",\"x\":250,\"y\":0,\"text\":\"C\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@b\"},{\"op\":\"add\",\"type\":\"connector\",\"from\":\"@a\",\"to\":\"@c\"},{\"op\":\"layout\",\"direction\":\"TD\"}]", "ai");
+		Boards::Element* a = board->Find(Core::StringView("e1"));
+		Boards::Element* b = board->Find(Core::StringView("e2"));
+		Boards::Element* c = board->Find(Core::StringView("e3"));
+		assert_true(a->m_Y + a->m_H < b->m_Y && b->m_Y == c->m_Y, "A above B and C, which share a rank");
+		assert_true(b->m_X + b->m_W < c->m_X, "B left of C, as they stood");
+		const double middle = a->m_X + a->m_W * 0.5;
+		assert_true(middle > b->m_X + b->m_W && middle < c->m_X, "A centered over its children");
+	}
+}

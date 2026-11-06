@@ -1,0 +1,306 @@
+// The ops on layers, the title and placement (docs/32 "Changes"): add_layer, update_layer, delete_layer,
+// merge_layer, title, layout, align, distribute.
+
+include "OpContext.ch"
+
+namespace Boards
+{
+	static Core::String LayerLine(const char* verb, const Layer& layer) {
+		return ((((Core::String(verb) + " layer ") + layer.m_Id.View()) + " \"") + layer.m_Name.View()) + "\"";
+	}
+
+	bool AddLayerOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Board& board = *ctx.m_Board;
+		Layer layer;
+		layer.m_Id = board.NewLayerId();
+		layer.m_Name = op.Member("name").AsView().IsEmpty() ? Core::String("Layer ") + NumberText((double)board.m_Layers.Count() + 1.0).View() : Core::String(op.Member("name").AsView());
+		if (op.Member("visible").IsValid()) layer.m_Visible = op.Member("visible").AsBool();
+		if (op.Member("locked").IsValid()) layer.m_Locked = op.Member("locked").AsBool();
+		if (op.Member("opacity").IsValid()) layer.m_Opacity = Math::Clamp(op.Member("opacity").AsFloat(), 0.0, 1.0);
+		int64 at = board.m_Layers.Count();
+		if (op.Member("above").IsValid()) {
+			Layer* above = ResolveLayer(ctx, op.Member("above").AsView());
+			if (!above) return false;
+			at = board.LayerIndex(above->m_Id.View()) + 1;
+		}
+		ctx.m_Recorder.BeforeLayers();
+		board.m_Layers.Insert(at, layer);
+		Core::StringView ref = op.Member("ref").AsView();
+		if (!ref.IsEmpty()) {
+			Core::StringView name = ref.StartsWith(Core::StringView("@")) ? ref.Substring(1, ref.ByteLength() - 1) : ref;
+			ctx.m_Result->m_Refs.Insert(Core::String(name), layer.m_Id);
+			ctx.m_Result->m_RefNames.Push(Core::String(name));
+		}
+		ctx.Done(LayerLine("added", layer));
+		return true;
+	}
+
+	bool UpdateLayerOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Board& board = *ctx.m_Board;
+		Layer* found = ResolveLayer(ctx, op.Member("id").AsView());
+		if (!found) return false;
+		ctx.m_Recorder.BeforeLayers();
+		Layer layer = *found;
+		if (op.Member("name").IsValid()) layer.m_Name = Core::String(op.Member("name").AsView());
+		if (op.Member("visible").IsValid()) layer.m_Visible = op.Member("visible").AsBool();
+		if (op.Member("locked").IsValid()) layer.m_Locked = op.Member("locked").AsBool();
+		if (op.Member("opacity").IsValid()) layer.m_Opacity = Math::Clamp(op.Member("opacity").AsFloat(), 0.0, 1.0);
+		const int64 from = board.LayerIndex(layer.m_Id.View());
+		board.m_Layers[from] = layer;
+		if (op.Member("index").IsValid()) {
+			const int64 to = Math::Clamp(op.Member("index").AsInt(), (int64)0, board.m_Layers.Count() - 1);
+			board.m_Layers.RemoveAt(from);
+			board.m_Layers.Insert(to, layer);
+		}
+		ctx.Done(LayerLine("updated", layer));
+		return true;
+	}
+
+	bool DeleteLayerOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Board& board = *ctx.m_Board;
+		Layer* found = ResolveLayer(ctx, op.Member("id").AsView());
+		if (!found) return false;
+		if (board.m_Layers.Count() == 1) return ctx.Fail(Core::String("a board keeps at least one layer"));
+		Layer layer = *found;
+		Core::Array<Core::String> doomed;
+		for (Element* element : board.m_Elements)
+			if (element->m_Layer == layer.m_Id) doomed.Push(element->m_Id);
+		for (Element* element : board.m_Elements)
+			if (element->m_Kind == Kind::Connector && !doomed.Contains(element->m_Id) && (doomed.Contains(element->m_From) || doomed.Contains(element->m_To))) doomed.Push(element->m_Id);
+		for (const Core::String& id : doomed) {
+			ctx.m_Recorder.Before(id.View());
+			board.RemoveAt(board.IndexOf(id.View()));
+		}
+		ctx.m_Recorder.BeforeLayers();
+		board.m_Layers.RemoveAt(board.LayerIndex(layer.m_Id.View()));
+		ctx.Done((LayerLine("deleted", layer) + " and its ") + NumberText((double)doomed.Count()).View() + " elements");
+		return true;
+	}
+
+	bool MergeLayerOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Board& board = *ctx.m_Board;
+		Layer* found = ResolveLayer(ctx, op.Member("id").AsView());
+		if (!found) return false;
+		const int64 index = board.LayerIndex(found->m_Id.View());
+		if (index == 0) return ctx.Fail(Core::String("the bottom layer has no layer below to merge into"));
+		Layer layer = *found;
+		Layer below = board.m_Layers[index - 1];
+		for (Element* element : board.m_Elements) {
+			if (element->m_Layer != layer.m_Id) continue;
+			ctx.m_Recorder.Before(element->m_Id.View());
+			element->m_Layer = below.m_Id;
+		}
+		ctx.m_Recorder.BeforeLayers();
+		board.m_Layers.RemoveAt(index);
+		ctx.Done((LayerLine("merged", layer) + " into ") + below.m_Id.View());
+		return true;
+	}
+
+	bool TitleOp(OpContext& ctx, const Serialization::DomNode& op) {
+		ctx.m_Recorder.BeforeTitle();
+		ctx.m_Board->m_Title = Core::String(op.Member("title").AsView());
+		ctx.Done((Core::String("titled the board \"") + ctx.m_Board->m_Title.View()) + "\"");
+		return true;
+	}
+
+	// The ids a placement op works on: its `ids`, else the nodes of its `layer`, else every node on a visible layer.
+	static bool Targets(OpContext& ctx, const Serialization::DomNode& op, Core::Array<Core::String>& ids) {
+		if (op.Member("ids").IsValid()) return ResolveIds(ctx, op, "ids", ids);
+		Layer* layer = nullptr;
+		if (op.Member("layer").IsValid()) {
+			layer = ResolveLayer(ctx, op.Member("layer").AsView());
+			if (!layer) return false;
+		}
+		for (Element* element : ctx.m_Board->m_Elements) {
+			if (!IsNode(element->m_Kind)) continue;
+			if (layer ? element->m_Layer != layer->m_Id : !ctx.m_Board->LayerVisible(element->m_Layer.View())) continue;
+			ids.Push(element->m_Id);
+		}
+		return true;
+	}
+
+	// The frame each node is in (its innermost, on its layer), for a layout that keeps frames together.
+	static Core::HashMap<Core::String, Core::String> Clusters(const Board& board) {
+		Core::HashMap<Core::String, Core::String> clusterOf;
+		Core::HashMap<Core::String, double> area;
+		for (Element* frame : board.m_Elements) {
+			if (frame->m_Kind != Kind::Frame) continue;
+			const double size = frame->m_W * frame->m_H;
+			for (Element* member : board.MembersOf(*frame)) {
+				if (!IsBoxed(member->m_Kind) || member->m_Kind == Kind::Frame) continue;
+				const double* known = area.FindAs(member->m_Id.View());
+				if (known && *known <= size) continue;
+				area.Insert(member->m_Id, size);
+				clusterOf.Insert(member->m_Id, frame->m_Id);
+			}
+		}
+		return clusterOf;
+	}
+
+	// Notes and text near a node that moves move with it (an annotation stays by what it annotates).
+	static void Satellites(const Board& board, Core::HashMap<Core::String, Point>& moves) {
+		Core::Array<Element*> added;
+		for (Element* element : board.m_Elements) {
+			if ((element->m_Kind != Kind::Note && element->m_Kind != Kind::Text) || moves.Contains(element->m_Id) || !board.LayerVisible(element->m_Layer.View())) continue;
+			Element* nearest = nullptr;
+			double best = 150.0;
+			if (!element->m_About.IsEmpty() && moves.Contains(element->m_About)) {
+				added.Push(element);
+				added.Push(board.Find(element->m_About.View()));
+				continue;
+			}
+			if (!element->m_About.IsEmpty()) continue;
+			for (const Core::KeyValue<Core::String, Point>& move : moves) {
+				Element* node = board.Find(move.key.View());
+				if (!node || !IsNode(node->m_Kind)) continue;
+				const double gap = BoxGap(node->Frame(), element->Frame());
+				if (gap < best) {
+					best = gap;
+					nearest = node;
+				}
+			}
+			if (!nearest) continue;
+			added.Push(element);
+			added.Push(nearest);
+		}
+		for (int64 i = 0; i + 1 < added.Count(); i += 2) moves.Insert(added[i]->m_Id, moves.Get(added[i + 1]->m_Id));
+	}
+
+	bool LayoutOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!Targets(ctx, op, ids)) return false;
+		Core::StringView direction = op.Member("direction").AsView().IsEmpty() ? Core::StringView("TD") : op.Member("direction").AsView();
+		if (!IsDirection(direction)) return ctx.Fail(Core::String("'direction' is TD, LR, BT or RL"));
+		const double gap = op.Member("gap").IsValid() ? Math::Clamp(op.Member("gap").AsFloat(), 10.0, 1000.0) : c_LayoutGap;
+		Core::Array<Core::String> keep;
+		if (op.Member("keep").IsValid() && !ResolveIds(ctx, op, "keep", keep)) return false;
+		Core::HashMap<Core::String, Core::String> clusters = Clusters(*ctx.m_Board);
+		Core::HashMap<Core::String, Point> moves = keep.IsEmpty() ? LayeredLayout(*ctx.m_Board, ids, direction, gap, clusters) : StableLayout(*ctx.m_Board, ids, keep, direction, gap, clusters);
+		const int64 laid = moves.Count();
+		Satellites(*ctx.m_Board, moves);
+		ApplyMoves(ctx, moves);
+		Core::StringBuilder line;
+		line.Append(Core::StringView("laid out "));
+		line.AppendInt(laid);
+		line.Append(Core::StringView(" nodes "));
+		line.Append(direction);
+		if (!keep.IsEmpty()) line.Append(Core::StringView(" around the kept ones, which stayed where they were"));
+		if (moves.Count() > laid) {
+			line.Append(Core::StringView("; "));
+			line.AppendInt(moves.Count() - laid);
+			line.Append(Core::StringView(" notes and texts moved with the node beside them"));
+		}
+		line.Append(Core::StringView("; connectors follow, frames keep their members"));
+		ctx.Done(line.ToString());
+		return true;
+	}
+
+	bool PlaceOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, op.Member("ids").IsValid() ? "ids" : "id", ids)) return false;
+		Core::String near;
+		if (!ResolveId(ctx, op.Member("near").AsView(), near)) return false;
+		Core::StringView side = op.Member("side").AsView().IsEmpty() ? Core::StringView("right") : op.Member("side").AsView();
+		if (side != "right" && side != "left" && side != "above" && side != "below") return ctx.Fail(Core::String("'side' is right, left, above or below"));
+		Core::StringView align = op.Member("align").AsView().IsEmpty() ? Core::StringView("center") : op.Member("align").AsView();
+		if (align != "center" && align != "start" && align != "end") return ctx.Fail(Core::String("'align' is center, start or end"));
+		const double gap = op.Member("gap").IsValid() ? op.Member("gap").AsFloat() : 60.0;
+		Box target = ctx.m_Board->Find(near.View())->Frame();
+		Box moving;
+		for (const Core::String& id : ids) moving.AddBox(ctx.m_Board->Find(id.View())->Frame());
+		Point delta;
+		const bool sideways = side == "right" || side == "left";
+		if (side == "right") delta.m_X = target.m_X1 + gap - moving.m_X0;
+		else if (side == "left") delta.m_X = target.m_X0 - gap - moving.m_X1;
+		else if (side == "below") delta.m_Y = target.m_Y1 + gap - moving.m_Y0;
+		else delta.m_Y = target.m_Y0 - gap - moving.m_Y1;
+		if (sideways) delta.m_Y = align == "start" ? target.m_Y0 - moving.m_Y0 : (align == "end" ? target.m_Y1 - moving.m_Y1 : target.CenterY() - moving.CenterY());
+		else delta.m_X = align == "start" ? target.m_X0 - moving.m_X0 : (align == "end" ? target.m_X1 - moving.m_X1 : target.CenterX() - moving.CenterX());
+		Core::HashMap<Core::String, Point> moves;
+		for (const Core::String& id : ids) {
+			moves.Insert(id, delta);
+			Element* element = ctx.m_Board->Find(id.View());
+			if (element->m_Kind == Kind::Frame)
+				for (Element* member : ctx.m_Board->MembersOf(*element)) moves.Insert(member->m_Id, delta);
+		}
+		ApplyMoves(ctx, moves);
+		Core::StringBuilder line;
+		line.Append(Core::StringView("placed "));
+		for (int64 i = 0; i < ids.Count(); ++i) {
+			if (i > 0) line.Append(Core::StringView(", "));
+			line.Append(ids[i].View());
+		}
+		line.AppendByte(' ');
+		line.Append(side == "right" ? Core::StringView("right of ") : (side == "left" ? Core::StringView("left of ") : side == "above" ? Core::StringView("above ") : Core::StringView("below ")));
+		line.Append(near.View());
+		line.Append(Core::StringView(" (gap "));
+		AppendNumber(line, gap);
+		line.Append(Core::StringView(" between the boxes; a labeled connector between them wants about 120)"));
+		ctx.Done(line.ToString());
+		return true;
+	}
+
+	// Nodes of one shape given the middle size of them all (by area), each keeping its center.
+	static void SameSize(OpContext& ctx, const Core::Array<Core::String>& ids, double grid) {
+		Core::Array<double> widths;
+		Core::Array<double> heights;
+		for (const Core::String& id : ids) {
+			Element* element = ctx.m_Board->Find(id.View());
+			if (!element || !IsNode(element->m_Kind)) continue;
+			widths.Push(element->m_W);
+			heights.Push(element->m_H);
+		}
+		if (widths.Count() < 2) return;
+		widths.Sort();
+		heights.Sort();
+		const double w = Math::Max(grid, Math::Round(widths[widths.Count() / 2] / grid) * grid);
+		const double h = Math::Max(grid, Math::Round(heights[heights.Count() / 2] / grid) * grid);
+		for (const Core::String& id : ids) {
+			Element* element = ctx.m_Board->Find(id.View());
+			if (!element || !IsNode(element->m_Kind) || element->m_Kind == Kind::Diamond || element->m_Kind == Kind::Ellipse) continue;
+			ctx.m_Recorder.Before(id.View());
+			const double cx = element->m_X + element->m_W * 0.5;
+			const double cy = element->m_Y + element->m_H * 0.5;
+			element->m_W = Math::Max(w, element->m_Text.IsEmpty() ? w : element->m_W > w ? w : w);
+			element->m_H = h;
+			element->m_X = Tenth(cx - element->m_W * 0.5);
+			element->m_Y = Tenth(cy - element->m_H * 0.5);
+			ctx.m_Board->Touched(id.View());
+		}
+	}
+
+	bool TidyOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!Targets(ctx, op, ids)) return false;
+		const double grid = op.Member("grid").IsValid() ? Math::Clamp(op.Member("grid").AsFloat(), 1.0, 200.0) : 10.0;
+		if (op.Member("same_size").AsBool()) SameSize(ctx, ids, grid);
+		Core::HashMap<Core::String, Point> moves = Tidied(*ctx.m_Board, ids, grid);
+		Satellites(*ctx.m_Board, moves);
+		ApplyMoves(ctx, moves);
+		ctx.Done((Core::String("tidied ") + NumberText((double)ids.Count()).View()) + " elements: nodes nearly in a row share its center line, nearly in a column its center, the rest snapped to the grid");
+		return true;
+	}
+
+	bool AlignOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, "ids", ids)) return false;
+		Core::StringView edge = op.Member("edge").AsView();
+		if (edge != "left" && edge != "right" && edge != "top" && edge != "bottom" && edge != "centerx" && edge != "centery") return ctx.Fail(Core::String("'edge' is left, right, top, bottom, centerx or centery"));
+		Core::String to;
+		if (op.Member("to").IsValid() && !ResolveId(ctx, op.Member("to").AsView(), to)) return false;
+		ApplyMoves(ctx, Aligned(*ctx.m_Board, ids, edge, to.View()));
+		ctx.Done((((Core::String("aligned ") + NumberText((double)ids.Count()).View()) + " elements' ") + edge) + (to.IsEmpty() ? Core::String(" to the selection's") : (Core::String(" to ") + to.View() + "'s")).View());
+		return true;
+	}
+
+	bool DistributeOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, "ids", ids)) return false;
+		Core::StringView axis = op.Member("axis").AsView();
+		if (axis != "x" && axis != "y") return ctx.Fail(Core::String("'axis' is x or y"));
+		if (ids.Count() < 3) ctx.Warn(Core::String("distribute needs three or more elements; nothing moved"));
+		ApplyMoves(ctx, Distributed(*ctx.m_Board, ids, axis));
+		ctx.Done(((Core::String("distributed ") + NumberText((double)ids.Count()).View()) + " elements along ") + axis);
+		return true;
+	}
+}

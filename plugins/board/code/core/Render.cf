@@ -1,0 +1,372 @@
+include "Render.ch"
+
+namespace Boards
+{
+	const double c_MarginLeft = 46.0;
+	const double c_MarginTop = 22.0;
+	const double c_MarginEnd = 8.0;
+	const double c_TagSize = 11.0;
+
+	// Where world coordinates land in the picture.
+	class ViewTransform
+	{
+		public double m_Scale;
+		public double m_X0;
+		public double m_Y0;
+
+		public double X(double x) const { return c_MarginLeft + (x - m_X0) * m_Scale; }
+		public double Y(double y) const { return c_MarginTop + (y - m_Y0) * m_Scale; }
+		public Core::Array<double> Points(const Core::Array<double>& world) const {
+			Core::Array<double> points;
+			for (int64 i = 0; i + 1 < world.Count(); i += 2) {
+				points.Push(X(world[i]));
+				points.Push(Y(world[i + 1]));
+			}
+			return points;
+		}
+	}
+
+	Core::Array<double> RoundedOutline(double x, double y, double w, double h, double radius) {
+		Core::Array<double> points;
+		const double r = Math::Min(radius, Math::Min(w, h) * 0.5);
+		const double[4] cx = { x + w - r, x + w - r, x + r, x + r };
+		const double[4] cy = { y + r, y + h - r, y + h - r, y + r };
+		for (int32 corner = 0; corner < 4; ++corner)
+			for (int32 i = 0; i <= 6; ++i) {
+				const double a = ((double)corner - 1.0 + (double)i / 6.0) * (double)Math::kHalfPi;
+				points.Push(cx[corner] + Math::Cos(a) * r);
+				points.Push(cy[corner] + Math::Sin(a) * r);
+			}
+		return points;
+	}
+
+	static void Dash(const Element& element, double scale, double& dash, double& gap) {
+		dash = 0.0;
+		gap = 0.0;
+		const double width = Math::Max(1.0, element.m_Width * scale);
+		if (element.m_Style == "dashed") {
+			dash = width * 4.0 + 4.0;
+			gap = width * 3.0 + 3.0;
+		}
+		else if (element.m_Style == "dotted") {
+			dash = width;
+			gap = width * 2.0 + 2.0;
+		}
+	}
+
+	static void Head(Canvas& canvas, double tipX, double tipY, double fromX, double fromY, double length, Rgb color, double alpha, bool dot) {
+		const double d = Distance(fromX, fromY, tipX, tipY);
+		if (d <= 0.0) return;
+		const double ux = (tipX - fromX) / d;
+		const double uy = (tipY - fromY) / d;
+		Core::Array<double> polygon;
+		if (dot) {
+			for (int32 i = 0; i < 16; ++i) {
+				const double a = (double)i * 2.0 * (double)Math::kPi / 16.0;
+				polygon.Push(tipX + Math::Cos(a) * length * 0.3);
+				polygon.Push(tipY + Math::Sin(a) * length * 0.3);
+			}
+		}
+		else {
+			polygon.Push(tipX);
+			polygon.Push(tipY);
+			polygon.Push(tipX - ux * length - uy * length * 0.42);
+			polygon.Push(tipY - uy * length + ux * length * 0.42);
+			polygon.Push(tipX - ux * length + uy * length * 0.42);
+			polygon.Push(tipY - uy * length - ux * length * 0.42);
+		}
+		canvas.Fill(polygon, color, alpha);
+	}
+
+	// The point `back` along the polyline from its end (`fromEnd`) or its start, for an arrow head's direction.
+	static void Behind(const Core::Array<double>& points, bool fromEnd, double back, double& x, double& y) {
+		const int64 n = points.Count() / 2;
+		double left = back;
+		for (int64 k = 0; k + 1 < n; ++k) {
+			const int64 i = fromEnd ? n - 1 - k : k;
+			const int64 j = fromEnd ? i - 1 : i + 1;
+			const double length = Distance(points[i * 2], points[i * 2 + 1], points[j * 2], points[j * 2 + 1]);
+			if (length >= left || k + 2 == n) {
+				const double t = length > 0.0 ? Math::Min(1.0, left / length) : 0.0;
+				x = points[i * 2] + (points[j * 2] - points[i * 2]) * t;
+				y = points[i * 2 + 1] + (points[j * 2 + 1] - points[i * 2 + 1]) * t;
+				return;
+			}
+			left -= length;
+		}
+		x = points[0];
+		y = points[1];
+	}
+
+	static void Line(Canvas& canvas, const Element& element, const Core::Array<double>& points, double scale, Rgb color, double alpha, bool defaultEnd) {
+		if (points.Count() < 4) return;
+		double dash = 0.0;
+		double gap = 0.0;
+		Dash(element, scale, dash, gap);
+		const double width = Math::Max(1.0, element.m_Width * scale);
+		canvas.Stroke(points, width, color, alpha, dash, gap);
+		const double length = HeadLength(element.m_Width) * scale;
+		const Core::StringView end = element.m_End.IsEmpty() ? Core::StringView(defaultEnd ? "arrow" : "none") : element.m_End.View();
+		const Core::StringView start = element.m_Start.IsEmpty() ? Core::StringView("none") : element.m_Start.View();
+		double bx = 0.0;
+		double by = 0.0;
+		if (end != "none") {
+			Behind(points, true, length, bx, by);
+			Head(canvas, points[points.Count() - 2], points[points.Count() - 1], bx, by, length, color, alpha, end == "dot");
+		}
+		if (start != "none") {
+			Behind(points, false, length, bx, by);
+			Head(canvas, points[0], points[1], bx, by, length, color, alpha, start == "dot");
+		}
+	}
+
+	// Text lines centered in a box (wrapped to its width), or from its top left.
+	static void TextIn(Canvas& canvas, Core::StringView text, const Box& box, double size, Rgb color, double alpha, bool center, double pad) {
+		if (text.IsEmpty() || size < 3.0) return;
+		Core::Array<Core::String> lines = WrapText(text, size, Math::Max(size, box.Width() - pad * 2.0));
+		const double lineHeight = size * c_LineHeight;
+		const double total = lineHeight * (double)lines.Count();
+		double y = center ? box.CenterY() - total * 0.5 : box.m_Y0 + pad;
+		for (const Core::String& line : lines) {
+			const double width = TextWidth(line.View(), size);
+			const double x = center ? box.CenterX() - width * 0.5 : box.m_X0 + pad;
+			canvas.Text(line.View(), x, y + size * 0.1, size, color, alpha);
+			y += lineHeight;
+		}
+	}
+
+	static Core::Array<double> Closed(const Core::Array<double>& polygon) {
+		Core::Array<double> closed = polygon;
+		if (polygon.Count() >= 2) {
+			closed.Push(polygon[0]);
+			closed.Push(polygon[1]);
+		}
+		return closed;
+	}
+
+	static Core::Array<double> ArcPoints(double cx, double cy, double rx, double ry, double from, double to, int32 steps) {
+		Core::Array<double> points;
+		for (int32 i = 0; i <= steps; ++i) {
+			const double a = from + (to - from) * (double)i / (double)steps;
+			points.Push(cx + Math::Cos(a) * rx);
+			points.Push(cy + Math::Sin(a) * ry);
+		}
+		return points;
+	}
+
+	static void Node(Canvas& canvas, const Element& element, const ViewTransform& view, const Theme& theme, double alpha) {
+		const double x = view.X(element.m_X);
+		const double y = view.Y(element.m_Y);
+		const double w = element.m_W * view.m_Scale;
+		const double h = element.m_H * view.m_Scale;
+		const Rgb color = theme.Color(element.m_Color.View());
+		const double width = Math::Max(1.0, element.m_Width * view.m_Scale);
+		double dash = 0.0;
+		double gap = 0.0;
+		Dash(element, view.m_Scale, dash, gap);
+		Core::Array<double> outline;
+		if (element.m_Kind == Kind::Round) outline = RoundedOutline(x, y, w, h, 12.0 * view.m_Scale);
+		else if (element.m_Kind == Kind::Cylinder) {
+			const double ry = Math::Min(h * 0.15, 14.0 * view.m_Scale);
+			outline = ArcPoints(x + w * 0.5, y + ry, w * 0.5, ry, (double)Math::kPi, 2.0 * (double)Math::kPi, 20);
+			outline.Append(ArcPoints(x + w * 0.5, y + h - ry, w * 0.5, ry, 0.0, (double)Math::kPi, 20));
+		}
+		else {
+			Element placed = element;
+			placed.m_X = x;
+			placed.m_Y = y;
+			placed.m_W = w;
+			placed.m_H = h;
+			outline = Outline(placed);
+		}
+		if (!element.m_Fill.IsEmpty() && element.m_Fill != "none") canvas.Fill(outline, theme.Color(element.m_Fill.View()), alpha * 0.28);
+		if (element.m_Kind == Kind::Cylinder) {
+			const double ry = Math::Min(h * 0.15, 14.0 * view.m_Scale);
+			canvas.Stroke(ArcPoints(x + w * 0.5, y + ry, w * 0.5, ry, 0.0, 2.0 * (double)Math::kPi, 40), width, color, alpha, dash, gap);
+			canvas.Stroke(ArcPoints(x + w * 0.5, y + h - ry, w * 0.5, ry, 0.0, (double)Math::kPi, 20), width, color, alpha, dash, gap);
+			Core::Array<double> left;
+			left.Push(x); left.Push(y + ry); left.Push(x); left.Push(y + h - ry);
+			Core::Array<double> right;
+			right.Push(x + w); right.Push(y + ry); right.Push(x + w); right.Push(y + h - ry);
+			canvas.Stroke(left, width, color, alpha, dash, gap);
+			canvas.Stroke(right, width, color, alpha, dash, gap);
+		}
+		else canvas.Stroke(Closed(outline), width, color, alpha, dash, gap);
+		const double inset = element.m_Kind == Kind::Diamond || element.m_Kind == Kind::Ellipse ? w * 0.16 : 8.0 * view.m_Scale;
+		TextIn(canvas, element.m_Text.View(), BoxAt(x + inset, y, w - inset * 2.0, h), element.m_FontSize * view.m_Scale, theme.m_Ink, alpha, true, 0.0);
+	}
+
+	static void Draw(Canvas& canvas, const Board& board, const Element& element, const ViewTransform& view, const Theme& theme, double alpha, ImageLoader& loadImage, ViewResult& result) {
+		const double scale = view.m_Scale;
+		const Rgb color = theme.Color(element.m_Color.View());
+		const double opacity = alpha * element.m_Opacity;
+		if (element.m_Kind == Kind::Stroke) {
+			canvas.Stroke(view.Points(element.m_Points), Math::Max(0.6, element.m_Width * scale), color, opacity, 0.0, 0.0);
+			return;
+		}
+		if (element.m_Kind == Kind::Line || element.m_Kind == Kind::Arrow) {
+			Line(canvas, element, view.Points(element.m_Points), scale, color, opacity, element.m_Kind == Kind::Arrow);
+			return;
+		}
+		if (element.m_Kind == Kind::Connector) {
+			Core::Array<double> route = view.Points(board.RouteOf(element));
+			if (route.Count() < 4) return;
+			Line(canvas, element, route, scale, element.m_Color.IsEmpty() ? theme.m_GridText : color, opacity, true);
+			if (element.m_Text.IsEmpty()) return;
+			const double size = 13.0 * scale;
+			double cx = 0.0;
+			double cy = 0.0;
+			Behind(route, false, PolylineLength(route) * 0.5, cx, cy);
+			const double tw = TextWidth(element.m_Text.View(), size);
+			canvas.FillRect(cx - tw * 0.5 - 3.0, cy - size * 0.7, tw + 6.0, size * 1.4, theme.m_Background, alpha * 0.9);
+			canvas.Text(element.m_Text.View(), cx - tw * 0.5, cy - size * 0.6, size, theme.m_Ink, opacity);
+			return;
+		}
+		if (IsNode(element.m_Kind)) {
+			Node(canvas, element, view, theme, opacity);
+			return;
+		}
+		const double x = view.X(element.m_X);
+		const double y = view.Y(element.m_Y);
+		const double w = element.m_W * scale;
+		const double h = element.m_H * scale;
+		if (element.m_Kind == Kind::Text) {
+			TextIn(canvas, element.m_Text.View(), BoxAt(x, y, Math::Max(w, 1.0) + 4000.0 * scale, h), element.m_FontSize * scale, color, opacity, false, 0.0);
+			return;
+		}
+		if (element.m_Kind == Kind::Note) {
+			const Rgb fill = theme.Color(element.m_Fill.IsEmpty() ? Core::StringView("yellow") : element.m_Fill.View());
+			canvas.FillRect(x, y, w, h, fill, opacity * 0.3);
+			canvas.Stroke(Closed(RoundedOutline(x, y, w, h, 0.0)), Math::Max(1.0, scale), fill, opacity, 0.0, 0.0);
+			TextIn(canvas, element.m_Text.View(), BoxAt(x, y, w, h), element.m_FontSize * scale, theme.m_Ink, opacity, false, 10.0 * scale);
+			return;
+		}
+		if (element.m_Kind == Kind::Frame) {
+			const Rgb frameColor = element.m_Color.IsEmpty() ? theme.m_GridText : color;
+			canvas.Stroke(Closed(RoundedOutline(x, y, w, h, 6.0 * scale)), Math::Max(1.0, 1.5 * scale), frameColor, opacity, 6.0, 4.0);
+			if (!element.m_Fill.IsEmpty() && element.m_Fill != "none") canvas.Fill(RoundedOutline(x, y, w, h, 6.0 * scale), theme.Color(element.m_Fill.View()), opacity * 0.12);
+			canvas.Text(element.m_Text.View(), x + 10.0 * scale, y + 8.0 * scale, 15.0 * scale, frameColor, opacity);
+			return;
+		}
+		if (element.m_Kind == Kind::Image) {
+			Imaging::Rgba picture;
+			if (loadImage && loadImage(element.m_Src.View(), picture) && picture.width > 0) {
+				const bool cropped = element.m_Crop.Count() == 4;
+				canvas.Image(picture, cropped ? element.m_Crop[0] : 0.0, cropped ? element.m_Crop[1] : 0.0, cropped ? element.m_Crop[2] : (double)picture.width, cropped ? element.m_Crop[3] : (double)picture.height, x, y, w, h, opacity);
+				return;
+			}
+			result.m_Missing.Push(element.m_Id);
+			canvas.Stroke(Closed(RoundedOutline(x, y, w, h, 0.0)), 1.0, theme.m_GridText, opacity, 4.0, 4.0);
+			Core::Array<double> cross;
+			cross.Push(x); cross.Push(y); cross.Push(x + w); cross.Push(y + h);
+			canvas.Stroke(cross, 1.0, theme.m_GridText, opacity * 0.6, 0.0, 0.0);
+			canvas.Text(Core::StringView("image missing"), x + 6.0, y + 6.0, 12.0, theme.m_GridText, opacity);
+		}
+	}
+
+	static double GridStep(double scale) {
+		const double[12] steps = { 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 };
+		for (int32 i = 0; i < 12; ++i)
+			if (steps[i] * scale >= 64.0) return steps[i];
+		return 20000.0;
+	}
+
+	static void Grid(Canvas& canvas, const ViewTransform& view, const Box& region, const Theme& theme) {
+		const double step = GridStep(view.m_Scale);
+		const double right = view.X(region.m_X1);
+		const double bottom = view.Y(region.m_Y1);
+		canvas.FillRect(0.0, 0.0, (double)canvas.m_Width, c_MarginTop - 2.0, theme.m_TagBack, 1.0);
+		canvas.FillRect(0.0, 0.0, c_MarginLeft - 2.0, (double)canvas.m_Height, theme.m_TagBack, 1.0);
+		for (double gx = Math::Ceil(region.m_X0 / step) * step; gx <= region.m_X1; gx += step) {
+			Core::Array<double> line;
+			line.Push(view.X(gx)); line.Push(c_MarginTop); line.Push(view.X(gx)); line.Push(bottom);
+			canvas.Stroke(line, 1.0, theme.m_Grid, 1.0, 0.0, 0.0);
+			Core::String label = NumberText(gx);
+			canvas.Text(label.View(), view.X(gx) - TextWidth(label.View(), 10.0) * 0.5, 5.0, 10.0, theme.m_GridText, 1.0);
+		}
+		for (double gy = Math::Ceil(region.m_Y0 / step) * step; gy <= region.m_Y1; gy += step) {
+			Core::Array<double> line;
+			line.Push(c_MarginLeft); line.Push(view.Y(gy)); line.Push(right); line.Push(view.Y(gy));
+			canvas.Stroke(line, 1.0, theme.m_Grid, 1.0, 0.0, 0.0);
+			Core::String label = NumberText(gy);
+			canvas.Text(label.View(), Math::Max(1.0, c_MarginLeft - 4.0 - TextWidth(label.View(), 10.0)), view.Y(gy) - 7.0, 10.0, theme.m_GridText, 1.0);
+		}
+	}
+
+	// Places one tag near the box's top left, moved down past tags already placed.
+	static void Tag(Canvas& canvas, Core::StringView label, const Box& box, const Theme& theme, Core::Array<Box>& placed) {
+		const double w = TextWidth(label, c_TagSize) + 6.0;
+		const double h = c_TagSize * 1.35;
+		double x = Math::Max(c_MarginLeft, box.m_X0 - 2.0);
+		double y = Math::Max(c_MarginTop, box.m_Y0 - h - 1.0);
+		for (int32 tries = 0; tries < 6; ++tries) {
+			bool clash = false;
+			for (const Box& other : placed)
+				if (other.Overlaps(BoxAt(x, y, w, h))) clash = true;
+			if (!clash) break;
+			y += h + 1.0;
+		}
+		canvas.FillRect(x, y, w, h, theme.m_TagBack, 0.85);
+		canvas.Text(label, x + 3.0, y + 1.0, c_TagSize, theme.m_Tag, 1.0);
+		placed.Push(BoxAt(x, y, w, h));
+	}
+
+	static bool Drawn(const Board& board, const ViewAsk& ask, const Element& element) {
+		if (ask.m_Layers.IsEmpty()) return board.LayerVisible(element.m_Layer.View());
+		return ask.m_Layers.Contains(element.m_Layer);
+	}
+
+	ViewResult RenderBoard(const Board& board, const ViewAsk& ask, const Theme& theme, ImageLoader loadImage) {
+		ViewResult result;
+		Box region = ask.m_Region;
+		if (region.IsEmpty()) {
+			for (Element* element : board.m_Elements)
+				if (Drawn(board, ask, *element)) region.AddBox(board.Bounds(*element));
+			if (region.IsEmpty()) region = BoxAt(0.0, 0.0, 800.0, 600.0);
+			region = region.Inflated(Math::Max(30.0, Math::Max(region.Width(), region.Height()) * 0.04));
+		}
+		const double usableW = (double)ask.m_MaxSize - c_MarginLeft - c_MarginEnd;
+		const double usableH = (double)ask.m_MaxSize - c_MarginTop - c_MarginEnd;
+		double scale = Math::Min(usableW / Math::Max(1.0, region.Width()), usableH / Math::Max(1.0, region.Height()));
+		scale = Math::Min(scale, 4.0);
+		ViewTransform view;
+		view.m_Scale = scale;
+		view.m_X0 = region.m_X0;
+		view.m_Y0 = region.m_Y0;
+		const int32 width = (int32)Math::Ceil(c_MarginLeft + region.Width() * scale + c_MarginEnd);
+		const int32 height = (int32)Math::Ceil(c_MarginTop + region.Height() * scale + c_MarginEnd);
+		result.m_Canvas = Canvas(width, height, theme.m_Background);
+		result.m_Scale = scale;
+		result.m_Region = region;
+		if (ask.m_Grid) Grid(result.m_Canvas, view, region, theme);
+		Core::Array<Element*> near = board.Near(region);
+		for (const Layer& layer : board.m_Layers)
+			for (Element* element : near) {
+				if (element->m_Layer != layer.m_Id || !Drawn(board, ask, *element)) continue;
+				Draw(result.m_Canvas, board, *element, view, theme, layer.m_Opacity, loadImage, result);
+				result.m_Drawn += 1;
+			}
+		if (!ask.m_Labels) return result;
+		Core::Array<Box> placed;
+		for (const ViewTag& tag : ask.m_Tags) {
+			if (!tag.m_Box.Overlaps(region)) continue;
+			Tag(result.m_Canvas, tag.m_Label.View(), BoxAt(view.X(tag.m_Box.m_X0), view.Y(tag.m_Box.m_Y0), tag.m_Box.Width() * scale, tag.m_Box.Height() * scale), theme, placed);
+			result.m_Tagged.Push(tag.m_Label);
+		}
+		for (Element* element : near) {
+			if (!Drawn(board, ask, *element) || ask.m_Untagged.Contains(element->m_Id)) continue;
+			Box box = board.Bounds(*element);
+			if (element->m_Kind == Kind::Connector) {
+				Core::Array<double> route = board.RouteOf(*element);
+				double cx = 0.0;
+				double cy = 0.0;
+				Behind(route, false, PolylineLength(route) * 0.3, cx, cy);
+				box = BoxAt(cx + 6.0 / scale, cy + c_TagSize * 1.4 / scale, 0.0, 0.0);
+			}
+			else if (IsBoxed(element->m_Kind)) box = element->Frame();
+			Tag(result.m_Canvas, element->m_Id.View(), BoxAt(view.X(box.m_X0), view.Y(box.m_Y0), box.Width() * scale, box.Height() * scale), theme, placed);
+			result.m_Tagged.Push(element->m_Id);
+		}
+		return result;
+	}
+}

@@ -1,0 +1,713 @@
+include "OpContext.ch"
+
+namespace Boards
+{
+	const double c_FramePad = 24.0;
+	const double c_FrameTitle = 36.0;
+
+	bool ResolveId(OpContext& ctx, Core::StringView raw, Core::String& id) {
+		Core::StringView name = raw.StartsWith(Core::StringView("@")) ? raw.Substring(1, raw.ByteLength() - 1) : raw;
+		if (!raw.StartsWith(Core::StringView("@")) && ctx.m_Board->Find(raw)) {
+			id = Core::String(raw);
+			return true;
+		}
+		const Core::String* mapped = ctx.m_Result->m_Refs.FindAs(name);
+		if (mapped && ctx.m_Board->Find(mapped->View())) {
+			id = *mapped;
+			return true;
+		}
+		return ctx.Fail((Core::String("no element '") + raw) + "' (ids are e<n>; refs of this change are written @name)");
+	}
+
+	bool ResolveIds(OpContext& ctx, const Serialization::DomNode& op, const char* key, Core::Array<Core::String>& ids) {
+		Serialization::DomNode node = op.Member(key);
+		if (node.Kind() == Serialization::DomKind::String) {
+			Core::String id;
+			if (!ResolveId(ctx, node.AsView(), id)) return false;
+			ids.Push(id);
+			return true;
+		}
+		if (node.Kind() != Serialization::DomKind::Array) return ctx.Fail((Core::String("'") + key) + "' is an element id or an array of them");
+		for (int64 i = 0; i < node.Count(); ++i) {
+			Core::String id;
+			if (!ResolveId(ctx, node.At(i).AsView(), id)) return false;
+			if (!ids.Contains(id)) ids.Push(id);
+		}
+		return true;
+	}
+
+	Layer* ResolveLayer(OpContext& ctx, Core::StringView raw) {
+		Core::StringView name = raw.StartsWith(Core::StringView("@")) ? raw.Substring(1, raw.ByteLength() - 1) : raw;
+		const Core::String* mapped = ctx.m_Result->m_Refs.FindAs(name);
+		Layer* layer = mapped ? ctx.m_Board->FindLayer(mapped->View()) : nullptr;
+		if (!layer) layer = ctx.m_Board->LayerNamed(name);
+		if (!layer) {
+			Core::StringBuilder known;
+			for (const Layer& each : ctx.m_Board->m_Layers) {
+				if (!known.IsEmpty()) known.Append(Core::StringView(", "));
+				known.Append(each.m_Id.View());
+				known.Append(Core::StringView(" \""));
+				known.Append(each.m_Name.View());
+				known.AppendByte('"');
+			}
+			ctx.Fail((((Core::String("no layer '") + raw) + "' (layers: ") + known.View()) + ")");
+		}
+		return layer;
+	}
+
+	Core::String Where(const Element& element) {
+		Box box = element.Frame();
+		Core::StringBuilder text;
+		AppendNumber(text, box.m_X0);
+		text.AppendByte(',');
+		AppendNumber(text, box.m_Y0);
+		return text.ToString();
+	}
+
+	Core::String Brief(const Board& board, const Element& element) {
+		Core::StringBuilder text;
+		text.Append(element.m_Id.View());
+		text.AppendByte(' ');
+		text.Append(KindName(element.m_Kind));
+		if (!element.m_Key.IsEmpty()) {
+			text.Append(Core::StringView(" ["));
+			text.Append(element.m_Key.View());
+			text.AppendByte(']');
+		}
+		if (element.m_Kind == Kind::Connector) {
+			text.AppendByte(' ');
+			text.Append(element.m_From.View());
+			text.Append(Core::StringView(" -> "));
+			text.Append(element.m_To.View());
+		}
+		if (!element.m_Text.IsEmpty()) {
+			text.Append(Core::StringView(" \""));
+			text.Append(element.m_Text.View());
+			text.AppendByte('"');
+		}
+		if (!element.m_Style.IsEmpty() && element.m_Style != "solid") {
+			text.AppendByte(' ');
+			text.Append(element.m_Style.View());
+		}
+		if (!element.m_Color.IsEmpty() && element.m_Color != "ink") {
+			text.AppendByte(' ');
+			text.Append(element.m_Color.View());
+		}
+		Box box = board.Bounds(element);
+		if (IsBoxed(element.m_Kind)) box = element.Frame();
+		if (element.m_Kind != Kind::Connector && !box.IsEmpty()) {
+			text.Append(Core::StringView(" at "));
+			AppendNumber(text, box.m_X0);
+			text.AppendByte(',');
+			AppendNumber(text, box.m_Y0);
+			text.AppendByte(' ');
+			AppendNumber(text, box.Width());
+			text.AppendByte('x');
+			AppendNumber(text, box.Height());
+		}
+		return text.ToString();
+	}
+
+	void Offset(Element& element, double dx, double dy) {
+		if (IsBoxed(element.m_Kind)) {
+			element.m_X = Tenth(element.m_X + dx);
+			element.m_Y = Tenth(element.m_Y + dy);
+			return;
+		}
+		if (!IsPath(element.m_Kind)) return;
+		for (int64 i = 0; i + 1 < element.m_Points.Count(); i += 2) {
+			element.m_Points[i] = Tenth(element.m_Points[i] + dx);
+			element.m_Points[i + 1] = Tenth(element.m_Points[i + 1] + dy);
+		}
+	}
+
+	static void FitFrame(OpContext& ctx, Element* frame, const Core::Array<Element*>& members) {
+		Box box;
+		for (Element* member : members) box.AddBox(ctx.m_Board->Bounds(*member));
+		if (box.IsEmpty()) return;
+		ctx.m_Recorder.Before(frame->m_Id.View());
+		frame->m_X = Tenth(box.m_X0 - c_FramePad);
+		frame->m_Y = Tenth(box.m_Y0 - c_FrameTitle);
+		frame->m_W = Tenth(box.Width() + c_FramePad * 2.0);
+		frame->m_H = Tenth(box.Height() + c_FrameTitle + c_FramePad);
+		ctx.m_Board->Touched(frame->m_Id.View());
+	}
+
+	void ApplyMoves(OpContext& ctx, const Core::HashMap<Core::String, Point>& moves) {
+		// The frames whose members move, with their members as they stand now.
+		Core::Array<Element*> frames;
+		Core::Array<Core::Array<Element*>> members;
+		for (Element* element : ctx.m_Board->m_Elements) {
+			if (element->m_Kind != Kind::Frame || moves.Contains(element->m_Id)) continue;
+			Core::Array<Element*> inside = ctx.m_Board->MembersOf(*element);
+			bool moving = false;
+			for (Element* member : inside)
+				if (moves.Contains(member->m_Id)) moving = true;
+			if (!moving) continue;
+			frames.Push(element);
+			members.Push(inside);
+		}
+		for (const Core::KeyValue<Core::String, Point>& move : moves) {
+			Element* element = ctx.m_Board->Find(move.key.View());
+			if (!element || (move.value.m_X == 0.0 && move.value.m_Y == 0.0)) continue;
+			ctx.m_Recorder.Before(move.key.View());
+			Offset(*element, move.value.m_X, move.value.m_Y);
+			ctx.m_Board->Touched(move.key.View());
+		}
+		for (int64 i = 0; i < frames.Count(); ++i) FitFrame(ctx, frames[i], members[i]);
+	}
+
+	void AutoSize(Element& element) {
+		const double size = element.m_FontSize;
+		if (element.m_Kind == Kind::Text) {
+			double w = 0.0;
+			double h = 0.0;
+			MeasureText(element.m_Text.IsEmpty() ? Core::StringView(" ") : element.m_Text.View(), size, w, h);
+			if (element.m_W <= 0.0) element.m_W = Tenth(Math::Max(8.0, w));
+			if (element.m_H <= 0.0) element.m_H = Tenth(h);
+			return;
+		}
+		if (element.m_Kind == Kind::Note) {
+			if (element.m_W <= 0.0) element.m_W = 180.0;
+			const int64 lines = WrapText(element.m_Text.View(), size, element.m_W - 20.0).Count();
+			if (element.m_H <= 0.0) element.m_H = Tenth(Math::Max(120.0, (double)lines * size * c_LineHeight + 24.0));
+			return;
+		}
+		if (element.m_Kind == Kind::Image) {
+			const double sourceW = element.m_Crop.Count() == 4 ? element.m_Crop[2] : element.m_ImageW;
+			const double sourceH = element.m_Crop.Count() == 4 ? element.m_Crop[3] : element.m_ImageH;
+			if (sourceW <= 0.0 || sourceH <= 0.0) return;
+			if (element.m_W <= 0.0 && element.m_H <= 0.0) element.m_W = Math::Min(sourceW, 640.0);
+			if (element.m_W <= 0.0) element.m_W = Tenth(element.m_H * sourceW / sourceH);
+			if (element.m_H <= 0.0) element.m_H = Tenth(element.m_W * sourceH / sourceW);
+			return;
+		}
+		if (element.m_Kind == Kind::Frame) {
+			if (element.m_W <= 0.0) element.m_W = 400.0;
+			if (element.m_H <= 0.0) element.m_H = 300.0;
+			return;
+		}
+		if (!IsNode(element.m_Kind)) return;
+		double tw = 0.0;
+		double th = 0.0;
+		MeasureText(element.m_Text.View(), size, tw, th);
+		double w = Math::Max(120.0, tw + 40.0);
+		double h = Math::Max(56.0, th + 28.0);
+		if (element.m_Kind == Kind::Diamond) {
+			w = Math::Max(140.0, tw * 1.5 + 40.0);
+			h = Math::Max(80.0, th * 1.6 + 40.0);
+		}
+		else if (element.m_Kind == Kind::Ellipse) {
+			w *= 1.25;
+			h *= 1.3;
+		}
+		else if (element.m_Kind == Kind::Hexagon || element.m_Kind == Kind::Parallelogram) w += 40.0;
+		else if (element.m_Kind == Kind::Cylinder) h += 20.0;
+		if (element.m_W <= 0.0) element.m_W = Tenth(w);
+		if (element.m_H <= 0.0) element.m_H = Tenth(h);
+	}
+
+	// Grows a node so its text fits (never shrinks it).
+	static void FitText(Element& element) {
+		if (!IsNode(element.m_Kind) || element.m_Text.IsEmpty()) return;
+		Element wanted = element;
+		wanted.m_W = 0.0;
+		wanted.m_H = 0.0;
+		AutoSize(wanted);
+		if (wanted.m_W > element.m_W) element.m_W = wanted.m_W;
+		if (wanted.m_H > element.m_H) element.m_H = wanted.m_H;
+	}
+
+	// Where an element the op gave no x and y goes: in a column right of everything, wrapping every eight.
+	static void Place(OpContext& ctx, Element& element) {
+		if (!ctx.m_Placing) {
+			Box content = ctx.m_Board->ContentBounds(false);
+			ctx.m_Placing = true;
+			ctx.m_PlaceX = content.IsEmpty() ? 0.0 : Tenth(content.m_X1 + 120.0);
+			ctx.m_PlaceTop = content.IsEmpty() ? 0.0 : Tenth(content.m_Y0);
+			ctx.m_PlaceY = ctx.m_PlaceTop;
+			ctx.m_PlaceColumn = 0.0;
+		}
+		if (ctx.m_Placed > 0 && ctx.m_Placed % 8 == 0) {
+			ctx.m_PlaceX = Tenth(ctx.m_PlaceX + ctx.m_PlaceColumn + 80.0);
+			ctx.m_PlaceY = ctx.m_PlaceTop;
+			ctx.m_PlaceColumn = 0.0;
+		}
+		element.m_X = ctx.m_PlaceX;
+		element.m_Y = ctx.m_PlaceY;
+		ctx.m_PlaceY = Tenth(ctx.m_PlaceY + element.m_H + 50.0);
+		ctx.m_PlaceColumn = Math::Max(ctx.m_PlaceColumn, element.m_W);
+		ctx.m_Placed += 1;
+	}
+
+	static bool BindEnds(OpContext& ctx, Element& element) {
+		if (element.m_Kind != Kind::Connector) return true;
+		Core::String from;
+		Core::String to;
+		if (!ResolveId(ctx, element.m_From.View(), from) || !ResolveId(ctx, element.m_To.View(), to)) return false;
+		if (ctx.m_Board->Find(from.View())->m_Kind == Kind::Connector || ctx.m_Board->Find(to.View())->m_Kind == Kind::Connector) return ctx.Fail(Core::String("a connector binds two elements that are not connectors"));
+		if (from == to) return ctx.Fail((Core::String("a connector from '") + from.View()) + "' to itself");
+		element.m_From = from;
+		element.m_To = to;
+		return true;
+	}
+
+	// Moves what lies inside a frame's box on its layer but is not one of `members` out past the nearest edge, so the
+	// frame holds exactly what it was fitted around.
+	static void Eject(OpContext& ctx, const Element& frame, const Core::Array<Core::String>& members) {
+		Box box = frame.Frame();
+		for (Element* other : ctx.m_Board->m_Elements) {
+			if (other->m_Id == frame.m_Id || other->m_Layer != frame.m_Layer || other->m_Kind == Kind::Connector || members.Contains(other->m_Id)) continue;
+			Box inner = ctx.m_Board->Bounds(*other);
+			if (inner.IsEmpty() || !box.Contains(inner.CenterX(), inner.CenterY())) continue;
+			// A frame around this frame is not inside it.
+			if (other->m_Kind == Kind::Frame && other->Frame().ContainsBox(box)) continue;
+			const double left = inner.m_X1 - box.m_X0 + 24.0;
+			const double right = box.m_X1 - inner.m_X0 + 24.0;
+			const double up = inner.m_Y1 - box.m_Y0 + 24.0;
+			const double down = box.m_Y1 - inner.m_Y0 + 24.0;
+			const double least = Math::Min(Math::Min(left, right), Math::Min(up, down));
+			ctx.m_Recorder.Before(other->m_Id.View());
+			if (least == left) Offset(*other, -left, 0.0);
+			else if (least == right) Offset(*other, right, 0.0);
+			else if (least == up) Offset(*other, 0.0, -up);
+			else Offset(*other, 0.0, down);
+			ctx.m_Board->Touched(other->m_Id.View());
+			ctx.Warn((((Core::String("moved ") + other->m_Id.View()) + " out of the frame: it lay inside but was not in 'around' (now at ") + Where(*other).View()) + ")");
+		}
+	}
+
+	static bool FrameAround(OpContext& ctx, const Serialization::DomNode& op, Element& element) {
+		if (!op.Member("around").IsValid()) return true;
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, "around", ids)) return false;
+		Box box;
+		for (const Core::String& id : ids) box.AddBox(ctx.m_Board->Bounds(*ctx.m_Board->Find(id.View())));
+		element.m_X = Tenth(box.m_X0 - c_FramePad);
+		element.m_Y = Tenth(box.m_Y0 - c_FrameTitle);
+		element.m_W = Tenth(box.Width() + c_FramePad * 2.0);
+		element.m_H = Tenth(box.Height() + c_FrameTitle + c_FramePad);
+		Eject(ctx, element, ids);
+		return true;
+	}
+
+	static bool AddOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Element* element = new Element();
+		if (!ReadElementFields(op, *element, true, ctx.m_Problem)) return false;
+		if (element->m_Kind == Kind::Unknown) return ctx.Fail(Core::String("add needs a 'type': rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, text, note, frame, line, arrow, connector or stroke"));
+		Layer* layer = element->m_Layer.IsEmpty() ? &ctx.m_Board->m_Layers.Back() : ResolveLayer(ctx, element->m_Layer.View());
+		if (!layer) return false;
+		element->m_Layer = layer->m_Id;
+		if (!BindEnds(ctx, *element)) return false;
+		if (!element->m_About.IsEmpty()) {
+			Core::String about;
+			if (!ResolveId(ctx, element->m_About.View(), about)) return false;
+			element->m_About = about;
+		}
+		if (element->m_Kind == Kind::Frame && op.Member("around").IsValid() && !FrameAround(ctx, op, *element)) return false;
+		if (element->m_Kind == Kind::Image && !element->m_Src.IsEmpty() && (element->m_ImageW <= 0.0 || element->m_ImageH <= 0.0)) {
+			if (!ctx.m_ImageSize) return ctx.Fail(Core::String("an image needs 'iw' and 'ih', its size in pixels"));
+			if (!ctx.m_ImageSize(element->m_Src.View(), element->m_ImageW, element->m_ImageH, ctx.m_Problem)) return false;
+		}
+		AutoSize(*element);
+		if (IsBoxed(element->m_Kind) && !op.Member("x").IsValid() && !op.Member("y").IsValid() && !op.Member("around").IsValid()) Place(ctx, *element);
+		Core::String problem = ElementProblem(*element);
+		if (!problem.IsEmpty()) return ctx.Fail(problem);
+		element->m_X = Tenth(element->m_X);
+		element->m_Y = Tenth(element->m_Y);
+		element->m_W = Tenth(element->m_W);
+		element->m_H = Tenth(element->m_H);
+		for (int64 i = 0; i < element->m_Points.Count(); ++i) element->m_Points[i] = Tenth(element->m_Points[i]);
+		element->m_Id = ctx.m_Board->NewElementId();
+		element->m_By = ctx.m_By;
+		ctx.m_Recorder.Before(element->m_Id.View());
+		// A frame goes under what is on its layer, so what is inside it is what a click finds.
+		ctx.m_Board->Insert(element, element->m_Kind == Kind::Frame ? 0 : -1);
+		Core::StringView ref = op.Member("ref").AsView();
+		if (!ref.IsEmpty()) {
+			Core::StringView name = ref.StartsWith(Core::StringView("@")) ? ref.Substring(1, ref.ByteLength() - 1) : ref;
+			ctx.m_Result->m_Refs.Insert(Core::String(name), element->m_Id);
+			ctx.m_Result->m_RefNames.Push(Core::String(name));
+		}
+		ctx.Done(Core::String("added ") + Brief(*ctx.m_Board, *element).View());
+		return true;
+	}
+
+	static bool UpdateOne(OpContext& ctx, const Serialization::DomNode& op, Core::String id);
+
+	static bool UpdateOp(OpContext& ctx, const Serialization::DomNode& op) {
+		if (op.Member("ids").IsValid()) {
+			Core::Array<Core::String> ids;
+			if (!ResolveIds(ctx, op, "ids", ids)) return false;
+			for (const Core::String& id : ids)
+				if (!UpdateOne(ctx, op, id)) return false;
+			return true;
+		}
+		Core::String id;
+		if (!ResolveId(ctx, op.Member("id").AsView(), id)) return false;
+		return UpdateOne(ctx, op, id);
+	}
+
+	static bool UpdateOne(OpContext& ctx, const Serialization::DomNode& op, Core::String id) {
+		Element* element = ctx.m_Board->Find(id.View());
+		Element changed = *element;
+		if (!ReadElementFields(op, changed, true, ctx.m_Problem)) return false;
+		if (op.Member("layer").IsValid()) {
+			Layer* layer = ResolveLayer(ctx, changed.m_Layer.View());
+			if (!layer) return false;
+			changed.m_Layer = layer->m_Id;
+		}
+		if ((op.Member("from").IsValid() || op.Member("to").IsValid()) && !BindEnds(ctx, changed)) return false;
+		if (op.Member("about").IsValid() && !changed.m_About.IsEmpty()) {
+			Core::String about;
+			if (!ResolveId(ctx, changed.m_About.View(), about)) return false;
+			changed.m_About = about;
+		}
+		if (op.Member("around").IsValid()) {
+			if (changed.m_Kind != Kind::Frame) return ctx.Fail(Core::String("'around' fits a frame around elements; this is not a frame"));
+			if (!FrameAround(ctx, op, changed)) return false;
+		}
+		if (op.Member("fit").AsBool()) {
+			if (changed.m_Kind != Kind::Frame) return ctx.Fail(Core::String("'fit' refits a frame around what it holds; this is not a frame"));
+			Box members;
+			for (Element* member : ctx.m_Board->MembersOf(*element)) members.AddBox(ctx.m_Board->Bounds(*member));
+			if (!members.IsEmpty()) {
+				changed.m_X = Tenth(members.m_X0 - c_FramePad);
+				changed.m_Y = Tenth(members.m_Y0 - c_FrameTitle);
+				changed.m_W = Tenth(members.Width() + c_FramePad * 2.0);
+				changed.m_H = Tenth(members.Height() + c_FrameTitle + c_FramePad);
+			}
+		}
+		if (changed.m_Kind == Kind::Text && op.Member("text").IsValid() && !op.Member("w").IsValid()) {
+			changed.m_W = 0.0;
+			changed.m_H = 0.0;
+			AutoSize(changed);
+		}
+		if (op.Member("type").IsValid() && changed.m_Kind != element->m_Kind && !(IsNode(changed.m_Kind) && IsNode(element->m_Kind)) && !op.Member("w").IsValid() && !op.Member("h").IsValid()) {
+			changed.m_W = 0.0;
+			changed.m_H = 0.0;
+		}
+		if (op.Member("text").IsValid() && !op.Member("w").IsValid() && !op.Member("h").IsValid()) FitText(changed);
+		if (IsBoxed(changed.m_Kind) && (changed.m_W <= 0.0 || changed.m_H <= 0.0)) AutoSize(changed);
+		Core::String problem = ElementProblem(changed);
+		if (!problem.IsEmpty()) return ctx.Fail(problem);
+		ctx.m_Recorder.Before(id.View());
+		*element = changed;
+		ctx.m_Board->Touched(id.View());
+		Core::StringView ref = op.Member("ref").AsView();
+		if (!ref.IsEmpty()) {
+			Core::StringView name = ref.StartsWith(Core::StringView("@")) ? ref.Substring(1, ref.ByteLength() - 1) : ref;
+			ctx.m_Result->m_Refs.Insert(Core::String(name), id);
+		}
+		Core::StringBuilder fields;
+		for (int64 i = 0; i < op.Count(); ++i) {
+			Core::StringView key = op.KeyAt(i);
+			if (key == "op" || key == "id") continue;
+			if (!fields.IsEmpty()) fields.Append(Core::StringView(", "));
+			fields.Append(key);
+		}
+		ctx.Done(((Core::String("updated ") + id.View()) + " (") + fields.View() + ")");
+		return true;
+	}
+
+	static bool DeleteOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, op.Member("ids").IsValid() ? "ids" : "id", ids)) return false;
+		Core::Array<Core::String> also;
+		for (const Core::String& id : ids)
+			for (Element* connector : ctx.m_Board->ConnectorsOf(id.View()))
+				if (!ids.Contains(connector->m_Id) && !also.Contains(connector->m_Id)) also.Push(connector->m_Id);
+		Core::Array<Core::String> all = ids;
+		all.Append(also);
+		for (const Core::String& id : all) {
+			ctx.m_Recorder.Before(id.View());
+			const int64 index = ctx.m_Board->IndexOf(id.View());
+			if (index >= 0) ctx.m_Board->RemoveAt(index);
+		}
+		Core::StringBuilder line;
+		line.Append(Core::StringView("deleted "));
+		for (int64 i = 0; i < ids.Count(); ++i) {
+			if (i > 0) line.Append(Core::StringView(", "));
+			line.Append(ids[i].View());
+		}
+		if (!also.IsEmpty()) {
+			line.Append(Core::StringView(" and the connectors bound to them: "));
+			for (int64 i = 0; i < also.Count(); ++i) {
+				if (i > 0) line.Append(Core::StringView(", "));
+				line.Append(also[i].View());
+			}
+		}
+		ctx.Done(line.ToString());
+		return true;
+	}
+
+	static bool MoveOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (op.Member("layer").IsValid() && !op.Member("ids").IsValid() && !op.Member("id").IsValid()) {
+			Layer* layer = ResolveLayer(ctx, op.Member("layer").AsView());
+			if (!layer) return false;
+			for (Element* element : ctx.m_Board->m_Elements)
+				if (element->m_Layer == layer->m_Id) ids.Push(element->m_Id);
+		}
+		else if (!ResolveIds(ctx, op, op.Member("ids").IsValid() ? "ids" : "id", ids)) return false;
+		const double dx = op.Member("dx").AsFloat();
+		const double dy = op.Member("dy").AsFloat();
+		Core::HashMap<Core::String, Point> moves;
+		Point delta;
+		delta.m_X = dx;
+		delta.m_Y = dy;
+		for (const Core::String& id : ids) {
+			moves.Insert(id, delta);
+			Element* element = ctx.m_Board->Find(id.View());
+			if (element->m_Kind != Kind::Frame) continue;
+			for (Element* member : ctx.m_Board->MembersOf(*element)) moves.Insert(member->m_Id, delta);
+		}
+		ApplyMoves(ctx, moves);
+		ctx.Done(((((Core::String("moved ") + NumberText((double)moves.Count()).View()) + " elements by ") + NumberText(dx).View()) + ",") + NumberText(dy).View());
+		return true;
+	}
+
+	static bool OrderOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::Array<Core::String> ids;
+		if (!ResolveIds(ctx, op, op.Member("ids").IsValid() ? "ids" : "id", ids)) return false;
+		Core::StringView to = op.Member("to").AsView();
+		if (to != "front" && to != "back" && to != "forward" && to != "backward") return ctx.Fail(Core::String("'to' is front, back, forward or backward"));
+		for (const Core::String& id : ids) {
+			ctx.m_Recorder.Before(id.View());
+			const int64 at = ctx.m_Board->IndexOf(id.View());
+			const int64 last = ctx.m_Board->m_Elements.Count() - 1;
+			int64 target = at;
+			if (to == "front") target = last;
+			else if (to == "back") target = 0;
+			else if (to == "forward") target = at < last ? at + 1 : at;
+			else target = at > 0 ? at - 1 : at;
+			ctx.m_Board->Reorder(at, target);
+		}
+		ctx.Done((Core::String("brought ") + NumberText((double)ids.Count()).View()) + " elements " + to);
+		return true;
+	}
+
+	// A node put into a connector's path: the connector becomes two, from its start to the node and on to its end; the
+	// node is centered on the path and pushed sideways off anything it would cover.
+	static bool InsertOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::String on;
+		if (!ResolveId(ctx, op.Member("on").AsView(), on)) return false;
+		Element* connector = ctx.m_Board->Find(on.View());
+		if (connector->m_Kind != Kind::Connector) return ctx.Fail((Core::String("'on' names a connector; ") + on.View()) + " is not one");
+		Element* node = new Element();
+		if (!ReadElementFields(op, *node, true, ctx.m_Problem)) return false;
+		if (op.Member("on").IsValid() && node->m_Kind == Kind::Unknown) node->m_Kind = Kind::Rect;
+		if (!IsNode(node->m_Kind) && node->m_Kind != Kind::Note && node->m_Kind != Kind::Text) return ctx.Fail(Core::String("insert puts in a node (rect, round, ellipse, diamond, cylinder, hexagon, parallelogram), a note or a text"));
+		node->m_Layer = connector->m_Layer;
+		node->m_W = 0.0;
+		node->m_H = 0.0;
+		if (op.Member("w").IsValid()) node->m_W = op.Member("w").AsFloat();
+		if (op.Member("h").IsValid()) node->m_H = op.Member("h").AsFloat();
+		AutoSize(*node);
+		Core::Array<double> route = ctx.m_Board->RouteOf(*connector);
+		if (route.Count() < 4) return ctx.Fail(Core::String("that connector's ends are gone"));
+		const double cx = (route[0] + route[route.Count() - 2]) * 0.5;
+		const double cy = (route[1] + route[route.Count() - 1]) * 0.5;
+		Box placed = BoxAt(cx - node->m_W * 0.5, cy - node->m_H * 0.5, node->m_W, node->m_H);
+		const double dx = route[route.Count() - 2] - route[0];
+		const double dy = route[route.Count() - 1] - route[1];
+		const bool vertical = Math::Abs(dy) >= Math::Abs(dx);
+		for (int32 tries = 0; tries < 20; ++tries) {
+			bool clash = false;
+			for (Element* other : ctx.m_Board->Near(placed.Inflated(12.0)))
+				if (other->m_Id != connector->m_From && other->m_Id != connector->m_To && (IsNode(other->m_Kind) || other->m_Kind == Kind::Note || other->m_Kind == Kind::Text) && other->m_Layer == node->m_Layer) clash = true;
+			if (!clash) break;
+			placed = vertical ? BoxAt(placed.m_X0 + node->m_W * 0.6, placed.m_Y0, node->m_W, node->m_H) : BoxAt(placed.m_X0, placed.m_Y0 + node->m_H * 0.6, node->m_W, node->m_H);
+		}
+		node->m_X = Tenth(placed.m_X0);
+		node->m_Y = Tenth(placed.m_Y0);
+		node->m_Id = ctx.m_Board->NewElementId();
+		node->m_By = ctx.m_By;
+		ctx.m_Recorder.Before(node->m_Id.View());
+		ctx.m_Board->Insert(node, -1);
+		Element* second = new Element(*connector);
+		second->m_Id = ctx.m_Board->NewElementId();
+		second->m_From = node->m_Id;
+		second->m_Text = Core::String(op.Member("label_after").AsView());
+		ctx.m_Recorder.Before(second->m_Id.View());
+		ctx.m_Board->Insert(second, -1);
+		ctx.m_Recorder.Before(connector->m_Id.View());
+		connector->m_To = node->m_Id;
+		ctx.m_Board->Touched(connector->m_Id.View());
+		Core::StringView ref = op.Member("ref").AsView();
+		if (!ref.IsEmpty()) {
+			Core::StringView name = ref.StartsWith(Core::StringView("@")) ? ref.Substring(1, ref.ByteLength() - 1) : ref;
+			ctx.m_Result->m_Refs.Insert(Core::String(name), node->m_Id);
+			ctx.m_Result->m_RefNames.Push(Core::String(name));
+		}
+		ctx.Done(((((((Core::String("inserted ") + Brief(*ctx.m_Board, *node).View()) + " into ") + on.View()) + ": ") + on.View()) + " now ends at it, ") + second->m_Id.View() + " goes on to " + second->m_To.View());
+		return true;
+	}
+
+	static bool RunOp(OpContext& ctx, const Serialization::DomNode& op) {
+		Core::StringView name = op.Member("op").AsView();
+		if (name == "add") return AddOp(ctx, op);
+		if (name == "update") return UpdateOp(ctx, op);
+		if (name == "delete") return DeleteOp(ctx, op);
+		if (name == "move") return MoveOp(ctx, op);
+		if (name == "order") return OrderOp(ctx, op);
+		if (name == "add_layer") return AddLayerOp(ctx, op);
+		if (name == "update_layer") return UpdateLayerOp(ctx, op);
+		if (name == "delete_layer") return DeleteLayerOp(ctx, op);
+		if (name == "merge_layer") return MergeLayerOp(ctx, op);
+		if (name == "title") return TitleOp(ctx, op);
+		if (name == "layout") return LayoutOp(ctx, op);
+		if (name == "align") return AlignOp(ctx, op);
+		if (name == "distribute") return DistributeOp(ctx, op);
+		if (name == "place") return PlaceOp(ctx, op);
+		if (name == "insert") return InsertOp(ctx, op);
+		if (name == "tidy") return TidyOp(ctx, op);
+		return ctx.Fail((Core::String("unknown op '") + name) + "': add, update, delete, move, order, place, insert, layout, tidy, align, distribute, add_layer, update_layer, delete_layer, merge_layer, title");
+	}
+
+	// Where each box the change added or moved ended up, after every op (an add's own line says where it was put first).
+	static void Positions(OpContext& ctx, const Change& change) {
+		Core::StringBuilder line;
+		int32 listed = 0;
+		for (const ElementChange& entry : change.m_Elements) {
+			Element* element = ctx.m_Board->Find(entry.m_Id.View());
+			if (!element || !IsBoxed(element->m_Kind)) continue;
+			const bool moved = !entry.m_Before || entry.m_Before->m_X != element->m_X || entry.m_Before->m_Y != element->m_Y || entry.m_Before->m_W != element->m_W || entry.m_Before->m_H != element->m_H;
+			if (!moved) continue;
+			if (listed == 24) {
+				line.Append(Core::StringView(", ..."));
+				break;
+			}
+			line.Append(listed == 0 ? Core::StringView("now: ") : Core::StringView(", "));
+			line.Append(element->m_Id.View());
+			line.Append(Core::StringView(" at "));
+			AppendNumber(line, element->m_X);
+			line.AppendByte(',');
+			AppendNumber(line, element->m_Y);
+			line.AppendByte(' ');
+			AppendNumber(line, element->m_W);
+			line.AppendByte('x');
+			AppendNumber(line, element->m_H);
+			listed += 1;
+		}
+		if (listed > 1 || (listed == 1 && change.m_Elements.Count() > 1)) ctx.Done(line.ToString());
+	}
+
+	// Each frame's members as one line of ids.
+	static Core::HashMap<Core::String, Core::String> FrameMembers(const Board& board) {
+		Core::HashMap<Core::String, Core::String> members;
+		for (Element* element : board.m_Elements) {
+			if (element->m_Kind != Kind::Frame) continue;
+			Core::StringBuilder line;
+			for (Element* member : board.MembersOf(*element)) {
+				if (!line.IsEmpty()) line.AppendByte(' ');
+				line.Append(member->m_Id.View());
+			}
+			members.Insert(element->m_Id, line.ToString());
+		}
+		return members;
+	}
+
+	static bool Solid(Kind kind) {
+		return IsNode(kind) || kind == Kind::Note || kind == Kind::Text || kind == Kind::Image;
+	}
+
+	// What a change left that the model should know without looking: frames whose members changed, elements it placed
+	// over others, connectors that now run through a node.
+	static void Checks(OpContext& ctx, const Core::HashMap<Core::String, Core::String>& before, const Change& change) {
+		const Board& board = *ctx.m_Board;
+		Core::HashMap<Core::String, Core::String> after = FrameMembers(board);
+		for (const Core::KeyValue<Core::String, Core::String>& frame : after) {
+			const Core::String* was = before.FindAs(frame.key.View());
+			if (!was) {
+				ctx.Warn((Core::String("frame ") + frame.key.View()) + " holds " + (frame.value.IsEmpty() ? Core::StringView("nothing") : frame.value.View()));
+				continue;
+			}
+			if (*was == frame.value) continue;
+			Element* element = board.Find(frame.key.View());
+			ctx.Warn(((((Core::String("frame ") + frame.key.View()) + " \"") + element->m_Text.View()) + "\" now holds " + (frame.value.IsEmpty() ? Core::StringView("nothing") : frame.value.View())) + " (was " + (was->IsEmpty() ? Core::StringView("nothing") : was->View()) + ")");
+		}
+		int32 told = 0;
+		Core::HashMap<Core::String, bool> touched;
+		for (const ElementChange& entry : change.m_Elements) touched.Insert(entry.m_Id, true);
+		for (const ElementChange& entry : change.m_Elements) {
+			Element* element = board.Find(entry.m_Id.View());
+			if (!element || !Solid(element->m_Kind) || !board.LayerVisible(element->m_Layer.View()) || told >= 8) continue;
+			Box box = element->Frame();
+			for (Element* other : board.Near(box)) {
+				if (other == element || !Solid(other->m_Kind) || !board.LayerVisible(other->m_Layer.View())) continue;
+				if (touched.Contains(other->m_Id) && other->m_Id < element->m_Id) continue;
+				Box theirs = other->Frame();
+				const double smaller = Math::Min(box.Width() * box.Height(), theirs.Width() * theirs.Height());
+				if (box.OverlapArea(theirs) <= smaller * 0.1) continue;
+				ctx.Warn((((Core::String(element->m_Id.View()) + " overlaps ") + other->m_Id.View()) + "; move one (place puts an element beside another)"));
+				told += 1;
+				break;
+			}
+		}
+		for (Element* connector : board.m_Elements) {
+			if (connector->m_Kind != Kind::Connector || told >= 8) continue;
+			if (!touched.Contains(connector->m_Id) && !touched.Contains(connector->m_From) && !touched.Contains(connector->m_To)) continue;
+			Core::Array<double> route = board.RouteOf(*connector);
+			if (route.Count() < 4) continue;
+			for (Element* other : board.Near(PointsBox(route))) {
+				if (!IsNode(other->m_Kind) || other->m_Id == connector->m_From || other->m_Id == connector->m_To || !board.LayerVisible(other->m_Layer.View())) continue;
+				Box inner = other->Frame().Inflated(-4.0);
+				bool crosses = false;
+				for (int64 i = 0; i + 3 < route.Count() && !crosses; i += 2)
+					for (int32 k = 1; k < 20 && !crosses; ++k) {
+						const double t = (double)k / 20.0;
+						crosses = inner.Contains(route[i] + (route[i + 2] - route[i]) * t, route[i + 1] + (route[i + 3] - route[i + 1]) * t);
+					}
+				if (!crosses) continue;
+				if (false) break;
+				ctx.Warn(((((Core::String("connector ") + connector->m_Id.View()) + " runs through ") + other->m_Id.View()) + " \"" + other->m_Text.View()) + "\" (move a node, or route elbow)");
+				told += 1;
+				break;
+			}
+		}
+	}
+
+	ChangeResult ApplyOps(Board& board, const Serialization::DomNode& ops, Core::StringView by, Core::StringView label, int64 nowMs, func<bool(Core::StringView, double&, double&, Core::String&)> imageSize) {
+		ChangeResult result;
+		Change* change = new Change();
+		OpContext ctx;
+		ctx.m_Board = &board;
+		ctx.m_Recorder = Recorder(&board, change);
+		ctx.m_Result = &result;
+		ctx.m_By = Core::String(by);
+		ctx.m_ImageSize = imageSize;
+		const bool single = ops.Kind() == Serialization::DomKind::Object;
+		if (!single && ops.Kind() != Serialization::DomKind::Array) {
+			result.m_Error = Core::String("'ops' is an array of op objects");
+			return result;
+		}
+		const int64 count = single ? 1 : ops.Count();
+		const int64 revBefore = board.m_Rev;
+		Core::HashMap<Core::String, Core::String> membersBefore = FrameMembers(board);
+		for (int64 i = 0; i < count; ++i) {
+			Serialization::DomNode op = single ? ops : ops.At(i);
+			if (RunOp(ctx, op)) continue;
+			result.m_Error = ((((Core::String("op ") + NumberText((double)(i + 1)).View()) + " (") + op.Member("op").AsView()) + ") was refused, so nothing changed: ") + ctx.m_Problem.View();
+			ctx.m_Recorder.Finish();
+			Rewind(board, change, true);
+			board.m_Rev = revBefore;
+			result.m_Done.Clear();
+			result.m_Refs.Clear();
+			result.m_RefNames.Clear();
+			return result;
+		}
+		if (!ctx.m_Recorder.Finish()) return result;
+		Checks(ctx, membersBefore, *change);
+		Positions(ctx, *change);
+		change->m_Id = board.NewChangeId();
+		change->m_By = Core::String(by);
+		change->m_Label = Core::String(label);
+		change->m_TimeMs = nowMs;
+		board.m_Rev += 1;
+		change->m_Rev = board.m_Rev;
+		board.Record(change);
+		result.m_Change = change;
+		return result;
+	}
+}

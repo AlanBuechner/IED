@@ -1,0 +1,615 @@
+// The AI's board tools (docs/32 "AI tools"), answered through the board.query binding: {wsId, tool, args} ->
+// {text, image?}. Every board_* toolCalls entry, other plugins and the evaluation harness come here.
+
+include "BoardService.ch"
+
+namespace Boards
+{
+	const char* c_QueryBinding = "board.query";
+	const int32 c_ViewsKept = 60;
+
+	static Box RegionOf(const Serialization::DomNode& node) {
+		if (node.Kind() == Serialization::DomKind::Array && node.Count() == 4) return BoxAt(node.At(0).AsFloat(), node.At(1).AsFloat(), node.At(2).AsFloat(), node.At(3).AsFloat());
+		if (node.Kind() != Serialization::DomKind::Object) return Box();
+		if (node.Member("w").AsFloat() <= 0.0 || node.Member("h").AsFloat() <= 0.0) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'region' is {x, y, w, h} with a positive w and h"));
+		return BoxAt(node.Member("x").AsFloat(), node.Member("y").AsFloat(), node.Member("w").AsFloat(), node.Member("h").AsFloat());
+	}
+
+	static Core::Array<Core::String> Strings(const Serialization::DomNode& node) {
+		Core::Array<Core::String> list;
+		if (node.Kind() == Serialization::DomKind::String) list.Push(Core::String(node.AsView()));
+		for (int64 i = 0; i < node.Count() && node.Kind() == Serialization::DomKind::Array; ++i) list.Push(Core::String(node.At(i).AsView()));
+		return list;
+	}
+
+	Core::String ChangeText(const Board& board, const ChangeResult& result) {
+		Core::StringBuilder text;
+		if (!result.m_Error.IsEmpty()) {
+			text.Append(Core::StringView("Refused: "));
+			text.Append(result.m_Error.View());
+			text.AppendByte(10);
+			return text.ToString();
+		}
+		if (!result.m_Change) {
+			text.Append(Core::StringView("Nothing changed: the board already was that way.\n"));
+			return text.ToString();
+		}
+		text.Append(Core::StringView("Change "));
+		text.Append(result.m_Change->m_Id.View());
+		text.Append(Core::StringView(" done (board rev "));
+		text.AppendInt(board.m_Rev);
+		text.Append(Core::StringView("; board_revert takes it back):\n"));
+		for (const Core::String& line : result.m_Done) {
+			text.Append(Core::StringView("- "));
+			text.Append(line.View());
+			text.AppendByte(10);
+		}
+		if (!result.m_RefNames.IsEmpty()) {
+			text.Append(Core::StringView("Refs: "));
+			for (int64 i = 0; i < result.m_RefNames.Count(); ++i) {
+				if (i > 0) text.Append(Core::StringView(", "));
+				text.Append(result.m_RefNames[i].View());
+				text.AppendByte('=');
+				text.Append(result.m_Refs.Get(result.m_RefNames[i]).View());
+			}
+			text.AppendByte(10);
+		}
+		for (const Core::String& line : result.m_Warnings) {
+			text.Append(Core::StringView("Warning: "));
+			text.Append(line.View());
+			text.AppendByte(10);
+		}
+		return text.ToString();
+	}
+
+	static OpenBoard* BoardArg(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		Core::StringView path = args.Member("board").AsView();
+		if (path.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'board' names the board by its workspace path (board_list lists them)"));
+		return service->Open(ws.m_Id.View(), path);
+	}
+
+	static ToolAnswer Text(Core::String text) {
+		ToolAnswer answer;
+		answer.m_Text = text;
+		return answer;
+	}
+
+	static ToolAnswer ListTool(BoardService* service, const IED::Workspace& ws) {
+		Core::StringBuilder text;
+		Core::Array<Core::String> files = service->BoardFiles(ws);
+		if (files.IsEmpty()) return Text(Core::String("The workspace has no boards (.iedboard files). board_create makes one.\n"));
+		for (const Core::String& path : files) {
+			text.Append(path.View());
+			try {
+				OpenBoard* open = service->Open(ws.m_Id.View(), path.View());
+				Threading::LockGuard held(open->m_Lock);
+				const Board& board = *open->m_Board;
+				text.Append(Core::StringView(" \""));
+				text.Append(board.m_Title.View());
+				text.Append(Core::StringView("\": "));
+				text.AppendInt(board.m_Elements.Count());
+				text.Append(Core::StringView(" elements, "));
+				text.AppendInt(board.m_Layers.Count());
+				text.Append(Core::StringView(" layers, "));
+				text.AppendInt(board.m_Plans.Count());
+				text.Append(Core::StringView(" plans"));
+			}
+			catch (IED::RpcError failed) {
+				text.Append(Core::StringView(": cannot be read ("));
+				text.Append(failed.m_Message.View());
+				text.AppendByte(')');
+			}
+			text.AppendByte(10);
+		}
+		return Text(text.ToString());
+	}
+
+	static ToolAnswer CreateTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		OpenBoard* open = service->Create(ws.m_Id.View(), args.Member("board").AsView(), args.Member("title").AsView());
+		return Text((Core::String("Created ") + open->m_Path.View()) + " with one layer, L1 \"Layer 1\". Add to it with board_edit.\n");
+	}
+
+	static ToolAnswer ReadTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		Threading::LockGuard held(open->m_Lock);
+		ReadAsk ask;
+		ask.m_Region = RegionOf(args.Member("region"));
+		ask.m_Ids = Strings(args.Member("ids"));
+		if (args.Member("layer").IsValid()) {
+			Layer* layer = open->m_Board->LayerNamed(args.Member("layer").AsView());
+			if (!layer) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no layer ") + args.Member("layer").AsView()).View());
+			ask.m_Layer = layer->m_Id;
+		}
+		Core::Array<SketchGroup> groups = AnalyzeSketch(*open->m_Board, Core::Array<Core::String>());
+		return Text(DescribeBoard(*open->m_Board, open->m_Path.View(), ask, groups));
+	}
+
+	// Keeps the newest pictures of the views folder.
+	static void Prune(const FS::Path& folder) {
+		Core::Array<Core::String> names;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr()))
+			if (entry.kind == FS::EntryKind::File) names.Push(entry.name);
+		if (names.Count() <= (int64)c_ViewsKept) return;
+		names.Sort();
+		for (int64 i = 0; i + (int64)c_ViewsKept < names.Count(); ++i) FS::RemoveFile((folder / names[i].View()).CStr());
+	}
+
+	static ViewAsk ViewAskFor(const Board& board, const Serialization::DomNode& args) {
+		ViewAsk ask;
+		ask.m_Region = RegionOf(args.Member("region"));
+		for (const SketchGroup& group : AnalyzeSketch(board, Core::Array<Core::String>())) {
+			ViewTag tag;
+			tag.m_Label = group.m_Name;
+			tag.m_Box = group.m_Box;
+			if (group.m_Line.Count() == 4) tag.m_Box = BoxAt((group.m_Line[0] + group.m_Line[2]) * 0.5, (group.m_Line[1] + group.m_Line[3]) * 0.5 + 6.0, 0.0, 0.0);
+			ask.m_Tags.Push(tag);
+			for (const Core::String& id : group.m_Ids) ask.m_Untagged.Insert(id, true);
+		}
+		return ask;
+	}
+
+	// Renders `board` into a new picture of the views folder; its path. Adds a line to `text`.
+	static Core::String Picture(BoardService* service, const IED::Workspace& ws, const Board& board, const ViewAsk& ask, Core::String& text) {
+		Theme theme = service->LoadTheme();
+		ViewResult view = RenderBoard(board, ask, theme, [service, ws](Core::StringView src, Imaging::Rgba& image) -> bool { return service->LoadImage(ws, src, image); });
+		Core::Array<uint8> png;
+		view.m_Canvas.Encode(png);
+		service->m_ViewCount += 1;
+		Core::StringBuilder name;
+		name.Append(Core::StringView(".ied/local/boards/views/"));
+		name.AppendInt(NowMs());
+		name.AppendByte('-');
+		name.AppendInt(service->m_ViewCount);
+		name.Append(Core::StringView(".png"));
+		FS::Path file = FS::Path(IED::WorkspaceFile(ws, name.View()).View());
+		FS::MakeDirectories(file.Parent().CStr());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)png.Data(), png.Count())) return Core::String();
+		Prune(file.Parent());
+		text = text + "The picture shows the board after the change.\n";
+		return name.ToString();
+	}
+
+	static ToolAnswer ViewTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		Theme theme = service->LoadTheme();
+		ViewAsk ask;
+		ToolAnswer answer;
+		Core::StringBuilder text;
+		Core::Array<uint8> png;
+		{
+			Threading::LockGuard held(open->m_Lock);
+			const Board& board = *open->m_Board;
+			ask.m_Region = RegionOf(args.Member("region"));
+			Core::Array<Core::String> ids = Strings(args.Member("ids"));
+			if (!ids.IsEmpty() && ask.m_Region.IsEmpty()) {
+				Box around;
+				for (const Core::String& id : ids) {
+					Element* element = board.Find(id.View());
+					if (element) around.AddBox(board.Bounds(*element));
+				}
+				if (!around.IsEmpty()) ask.m_Region = around.Inflated(Math::Max(40.0, Math::Max(around.Width(), around.Height()) * 0.15));
+			}
+			for (const Core::String& name : Strings(args.Member("layers"))) {
+				Layer* layer = open->m_Board->LayerNamed(name.View());
+				if (!layer) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no layer ") + name.View()).View());
+				ask.m_Layers.Push(layer->m_Id);
+			}
+			if (args.Member("labels").IsValid()) ask.m_Labels = args.Member("labels").AsBool();
+			if (args.Member("grid").IsValid()) ask.m_Grid = args.Member("grid").AsBool();
+			if (args.Member("max_size").IsValid()) ask.m_MaxSize = (int32)Math::Clamp(args.Member("max_size").AsInt(), (int64)256, (int64)2048);
+			for (const SketchGroup& group : AnalyzeSketch(board, Core::Array<Core::String>())) {
+				ViewTag tag;
+				tag.m_Label = group.m_Name;
+				tag.m_Box = group.m_Box;
+				if (group.m_Line.Count() == 4) tag.m_Box = BoxAt((group.m_Line[0] + group.m_Line[2]) * 0.5, (group.m_Line[1] + group.m_Line[3]) * 0.5 + 6.0, 0.0, 0.0);
+				ask.m_Tags.Push(tag);
+				for (const Core::String& id : group.m_Ids) ask.m_Untagged.Insert(id, true);
+			}
+			ViewResult view = RenderBoard(board, ask, theme, [service, ws](Core::StringView src, Imaging::Rgba& image) -> bool { return service->LoadImage(ws, src, image); });
+			view.m_Canvas.Encode(png);
+			text.Append(Core::StringView("Picture of "));
+			text.Append(open->m_Path.View());
+			text.Append(Core::StringView(" (rev "));
+			text.AppendInt(board.m_Rev);
+			text.Append(Core::StringView("): the region at "));
+			AppendNumber(text, view.m_Region.m_X0);
+			text.AppendByte(',');
+			AppendNumber(text, view.m_Region.m_Y0);
+			text.Append(Core::StringView(" size "));
+			AppendNumber(text, view.m_Region.Width());
+			text.AppendByte('x');
+			AppendNumber(text, view.m_Region.Height());
+			text.Append(Core::StringView(" at "));
+			text.AppendDouble(view.m_Scale, 2);
+			text.Append(Core::StringView(" pixels per board unit; the margins' numbers are board coordinates. "));
+			text.AppendInt(view.m_Drawn);
+			text.Append(Core::StringView(" elements drawn"));
+			if (ask.m_Labels) text.Append(Core::StringView("; tags name elements (e<n>) and the sketch's groups (g<n>, as board_read lists them)"));
+			text.Append(Core::StringView(". Layers drawn:"));
+			Core::StringBuilder skipped;
+			for (const Layer& layer : board.m_Layers) {
+				const bool drawn = ask.m_Layers.IsEmpty() ? layer.m_Visible : ask.m_Layers.Contains(layer.m_Id);
+				Core::StringBuilder* into = drawn ? &text : &skipped;
+				into->Append(Core::StringView(" "));
+				into->Append(layer.m_Id.View());
+				into->Append(Core::StringView(" \""));
+				into->Append(layer.m_Name.View());
+				into->AppendByte('"');
+				if (!drawn && !layer.m_Visible) into->Append(Core::StringView(" (hidden)"));
+			}
+			if (!skipped.IsEmpty()) {
+				text.Append(Core::StringView("; not drawn:"));
+				text.Append(skipped.View());
+			}
+			text.AppendByte('.');
+			if (view.m_Scale < 0.45) text.Append(Core::StringView(" Small text may not be legible at this scale: pass a smaller region (or ids) to look closer."));
+			if (!view.m_Missing.IsEmpty()) {
+				text.Append(Core::StringView(" Not drawn (only PNG files are, or the file is gone):"));
+				for (const Core::String& id : view.m_Missing) {
+					text.AppendByte(' ');
+					text.Append(id.View());
+				}
+				text.AppendByte('.');
+			}
+			text.AppendByte(10);
+		}
+		service->m_ViewCount += 1;
+		Core::StringBuilder name;
+		name.Append(Core::StringView(".ied/local/boards/views/"));
+		name.AppendInt(NowMs());
+		name.AppendByte('-');
+		name.AppendInt(service->m_ViewCount);
+		name.Append(Core::StringView(".png"));
+		FS::Path file = FS::Path(IED::WorkspaceFile(ws, name.View()).View());
+		FS::MakeDirectories(file.Parent().CStr());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)png.Data(), png.Count())) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("cannot write the picture"));
+		Prune(file.Parent());
+		answer.m_Text = text.ToString();
+		answer.m_Image = name.ToString();
+		return answer;
+	}
+
+	static ToolAnswer EditTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		ChangeResult result;
+		if (args.Member("dry_run").AsBool()) {
+			Board* copy = nullptr;
+			{
+				Threading::LockGuard held(open->m_Lock);
+				copy = CloneBoard(*open->m_Board);
+			}
+			result = ApplyOps(*copy, args.Member("ops"), by, Core::StringView("dry run"), NowMs(), [service, ws](Core::StringView src, double& w, double& h, Core::String& problem) -> bool { return service->ImageSize(ws, src, w, h, problem); });
+			ToolAnswer answer = Text(Core::String("Dry run, nothing changed on the board. It would do:\n") + ChangeText(*copy, result).View());
+			if (args.Member("view").AsBool() && result.m_Error.IsEmpty()) answer.m_Image = Picture(service, ws, *copy, ViewAskFor(*copy, args), answer.m_Text);
+			return answer;
+		}
+		service->Edit(open, args.Member("ops"), by, args.Member("label").AsView(), Core::StringView(""), result);
+		ToolAnswer answer;
+		Threading::LockGuard held(open->m_Lock);
+		answer.m_Text = ChangeText(*open->m_Board, result);
+		if (args.Member("view").AsBool() && result.m_Change) answer.m_Image = Picture(service, ws, *open->m_Board, ViewAskFor(*open->m_Board, args), answer.m_Text);
+		return answer;
+	}
+
+	static Core::HashMap<Core::String, Core::String> Labels(const Serialization::DomNode& node) {
+		Core::HashMap<Core::String, Core::String> labels;
+		if (node.Kind() != Serialization::DomKind::Object) return labels;
+		for (int64 i = 0; i < node.Count(); ++i) labels.Insert(Core::String(node.KeyAt(i)), Core::String(node.ValueAt(i).AsView()));
+		return labels;
+	}
+
+	static ToolAnswer RecognizeTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		const bool apply = args.Member("apply").AsBool();
+		Core::StringView layerName = args.Member("layer").AsView().IsEmpty() ? Core::StringView("Diagram") : args.Member("layer").AsView();
+		Core::StringView sketch = args.Member("sketch").AsView().IsEmpty() ? Core::StringView("hide") : args.Member("sketch").AsView();
+		if (sketch != "hide" && sketch != "delete" && sketch != "keep") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'sketch' is hide, delete or keep"));
+		Core::StringView place = args.Member("place").AsView().IsEmpty() ? Core::StringView("over") : args.Member("place").AsView();
+		if (place != "over" && place != "beside") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'place' is over (the clean elements where the sketch is) or beside (to its right)"));
+		ProposalAsk ask;
+		ask.m_Labels = Labels(args.Member("labels"));
+		ask.m_Types = Labels(args.Member("types"));
+		for (const Core::KeyValue<Core::String, Core::String>& type : ask.m_Types) {
+			const Kind kind = KindOf(type.value.View());
+			if (!IsNode(kind) && kind != Kind::Frame && kind != Kind::Note && kind != Kind::Text && kind != Kind::Arrow && kind != Kind::Line && kind != Kind::Connector) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String("types: '") + type.value.View()) + "' for ") + type.key.View() + " is not one recognize makes: rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, frame, note, text, arrow, line, connector").View());
+		}
+		Serialization::DomNode ends = args.Member("ends");
+		for (int64 i = 0; i < ends.Count() && ends.Kind() == Serialization::DomKind::Object; ++i) {
+			Core::Array<Core::String> pair = Strings(ends.ValueAt(i));
+			if (pair.Count() != 2) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("ends: each is \"g<n>\": [from, to], a group name or an element id each"));
+			ask.m_Ends.Insert(Core::String(ends.KeyAt(i)), pair);
+		}
+		ask.m_Brief = apply;
+		Core::HashMap<Core::String, Core::String>& labels = ask.m_Labels;
+		JsonOut ops;
+		Core::StringBuilder text;
+		Core::Array<SketchGroup> picked;
+		{
+			Threading::LockGuard held(open->m_Lock);
+			const Board& board = *open->m_Board;
+			Core::Array<SketchGroup> groups = AnalyzeSketch(board, Core::Array<Core::String>());
+			picked = Picked(groups, Strings(args.Member("groups")));
+			if (picked.IsEmpty()) return Text(Core::String("No freehand strokes to recognize on the visible layers (or none in the groups named).\n"));
+			for (int32 kind = 0; kind < 3; ++kind) {
+				Core::Array<Core::String> keys;
+				if (kind == 0) for (const Core::KeyValue<Core::String, Core::String>& entry : ask.m_Labels) keys.Push(entry.key);
+				if (kind == 1) for (const Core::KeyValue<Core::String, Core::String>& entry : ask.m_Types) keys.Push(entry.key);
+				if (kind == 2) for (const Core::KeyValue<Core::String, Core::Array<Core::String>>& entry : ask.m_Ends) keys.Push(entry.key);
+				for (const Core::String& key : keys) {
+					bool known = false;
+					for (const SketchGroup& group : picked) if (group.m_Name == key) known = true;
+					if (known) continue;
+					text.Append(Core::StringView("Warning: "));
+					text.Append(kind == 0 ? Core::StringView("labels") : (kind == 1 ? Core::StringView("types") : Core::StringView("ends")));
+					text.Append(Core::StringView(" names "));
+					text.Append(key.View());
+					text.Append(Core::StringView(", which is no sketch group of these (board_read lists them); it did nothing\n"));
+				}
+			}
+			Layer* existing = open->m_Board->LayerNamed(layerName);
+			ops.BeginArray();
+			if (!existing) {
+				ops.BeginObject();
+				ops.StrField("op", Core::StringView("add_layer"));
+				ops.StrField("name", layerName);
+				ops.StrField("ref", Core::StringView("diagram"));
+				ops.EndObject();
+			}
+			ask.m_Layer = existing ? existing->m_Id : Core::String("@diagram");
+			if (place == "beside") {
+				Box sketch;
+				for (const SketchGroup& group : picked) sketch.AddBox(group.m_Box);
+				ask.m_Dx = Tenth(sketch.Width() + 160.0);
+			}
+			Proposals(board, picked, ask, ops, text);
+			if (apply && sketch != "keep") {
+				Core::Array<Core::String> used;
+				Core::Array<Core::String> sketchLayers;
+				for (const SketchGroup& group : picked) {
+					if (group.m_Guess == Guess::Scribble) continue;
+					if (group.m_Guess == Guess::Handwriting && labels.FindAs(group.m_Name.View()) == nullptr && group.m_Inside.IsEmpty()) continue;
+					for (const Core::String& id : group.m_Ids) {
+						used.Push(id);
+						Element* stroke = board.Find(id.View());
+						if (stroke && !sketchLayers.Contains(stroke->m_Layer)) sketchLayers.Push(stroke->m_Layer);
+					}
+				}
+				if (sketch == "delete" && !used.IsEmpty()) {
+					ops.BeginObject();
+					ops.StrField("op", Core::StringView("delete"));
+					ops.Key(Core::StringView("ids"));
+					ops.BeginArray();
+					for (const Core::String& id : used) ops.Str(id.View());
+					ops.EndArray();
+					ops.EndObject();
+				}
+				if (sketch == "hide")
+					for (const Core::String& layer : sketchLayers) {
+						if (existing && existing->m_Id == layer) continue;
+						ops.BeginObject();
+						ops.StrField("op", Core::StringView("update_layer"));
+						ops.StrField("id", layer.View());
+						ops.BoolField("visible", false);
+						ops.EndObject();
+					}
+			}
+			ops.EndArray();
+		}
+		if (!apply) {
+			Core::StringBuilder reply;
+			reply.Append(Core::StringView("Proposals (nothing changed yet; types and ends given are applied here too). Read the handwriting in board_view, then call board_recognize again with apply: true, labels {group: text}, and types / ends to correct any guess below:\n"));
+			reply.Append(text.View());
+			return Text(reply.ToString());
+		}
+		Serialization::DomDoc doc;
+		Serialization::DomNode parsed = Serialization::ReadJson(ops.View(), doc).root;
+		ChangeResult result;
+		service->Edit(open, parsed, by, Core::StringView("recognize"), Core::StringView(""), result);
+		Threading::LockGuard held(open->m_Lock);
+		Core::StringBuilder reply;
+		reply.Append(Core::StringView("Recognized:\n"));
+		reply.Append(text.View());
+		for (const SketchGroup& group : picked) {
+			if (group.m_Holds.IsEmpty() || ask.m_Labels.Contains(group.m_Name)) continue;
+			bool labeled = false;
+			for (const Core::String& held : group.m_Holds)
+				if (ask.m_Labels.Contains(held)) labeled = true;
+			if (labeled) continue;
+			reply.Append(Core::StringView("Warning: "));
+			reply.Append(group.m_Name.View());
+			reply.Append(Core::StringView(" holds handwriting but got no label: its element is unlabeled (board_edit update sets its text)\n"));
+		}
+		reply.Append(ChangeText(*open->m_Board, result).View());
+		if (result.m_Change && sketch == "hide") reply.Append(Core::StringView("The sketch's layer is hidden, not deleted: show it again to compare.\n"));
+		return Text(reply.ToString());
+	}
+
+	static ToolAnswer ExportTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		Threading::LockGuard held(open->m_Lock);
+		Diagram diagram = ExtractDiagram(*open->m_Board, Strings(args.Member("ids")));
+		Core::StringView format = args.Member("format").AsView();
+		if (format == "markdown") return Text(ExportOutline(*open->m_Board, diagram, service->HueHex()));
+		if (!format.IsEmpty() && format != "mermaid") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'format' is mermaid or markdown"));
+		Core::StringBuilder text;
+		text.Append(ExportMermaid(*open->m_Board, diagram, service->HueHex()).View());
+		Core::Array<SketchGroup> groups = AnalyzeSketch(*open->m_Board, Core::Array<Core::String>());
+		if (!groups.IsEmpty()) {
+			text.Append(Core::StringView("    %% not in the chart: "));
+			text.AppendInt(groups.Count());
+			text.Append(Core::StringView(" freehand sketch groups (board_recognize turns them into shapes)\n"));
+		}
+
+		return Text(text.ToString());
+	}
+
+	static ToolAnswer ImportTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		MermaidChart chart;
+		Core::String problem;
+		if (!ParseMermaid(args.Member("text").AsView(), chart, problem)) return Text((Core::String("Refused, nothing changed: ") + problem.View()) + "\n");
+		Core::StringView mode = args.Member("mode").AsView();
+		if (!mode.IsEmpty() && mode != "merge" && mode != "replace") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'mode' is merge or replace"));
+		Core::Array<Core::String> notes;
+		Core::String ops;
+		{
+			Threading::LockGuard held(open->m_Lock);
+			Core::String layer;
+			if (args.Member("layer").IsValid()) {
+				Layer* found = open->m_Board->LayerNamed(args.Member("layer").AsView());
+				if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no layer ") + args.Member("layer").AsView()).View());
+				layer = found->m_Id;
+			}
+			ops = ImportOps(*open->m_Board, chart, layer.View(), mode == "replace", notes);
+		}
+		Core::StringBuilder text;
+		for (const Core::String& note : notes) {
+			text.Append(Core::StringView("Note: "));
+			text.Append(note.View());
+			text.AppendByte(10);
+		}
+		if (args.Member("dry_run").AsBool()) {
+			text.Append(Core::StringView("Dry run: nothing changed. These ops would run:\n"));
+			text.Append(ops.View());
+			text.AppendByte(10);
+			return Text(text.ToString());
+		}
+		Serialization::DomDoc doc;
+		Serialization::DomNode parsed = Serialization::ReadJson(ops.View(), doc).root;
+		ChangeResult result;
+		service->Edit(open, parsed, by, Core::StringView("import mermaid"), Core::StringView(""), result);
+		result.m_RefNames.Clear();
+		Threading::LockGuard held(open->m_Lock);
+		text.Append(ChangeText(*open->m_Board, result).View());
+		return Text(text.ToString());
+	}
+
+	// The first ```mermaid block of Markdown, "" for none.
+	static Core::StringView MermaidBlock(Core::StringView text) {
+		const int64 open = text.IndexOf(Core::StringView("```mermaid"));
+		if (open < 0) return Core::StringView("");
+		const int64 start = open + 10;
+		Core::StringView rest = text.Substring(start, text.ByteLength() - start);
+		const int64 close = rest.IndexOf(Core::StringView("```"));
+		return close < 0 ? rest : rest.Substring(0, close);
+	}
+
+	// Whether two Mermaid texts are the same chart, spacing and comments aside.
+	static bool SameChart(Core::StringView a, Core::StringView b) {
+		Core::StringBuilder x;
+		Core::StringBuilder y;
+		for (int32 pass = 0; pass < 2; ++pass) {
+			Core::StringView text = pass == 0 ? a : b;
+			Core::StringBuilder* out = pass == 0 ? &x : &y;
+			int64 start = 0;
+			for (int64 i = 0; i <= text.ByteLength(); ++i) {
+				if (i < text.ByteLength() && text.ByteAt(i) != 10) continue;
+				Core::StringView line = text.Substring(start, i - start).Trimmed();
+				start = i + 1;
+				if (line.IsEmpty() || line.StartsWith(Core::StringView("%%"))) continue;
+				out->Append(line);
+				out->AppendByte(10);
+			}
+		}
+		return x.View() == y.View();
+	}
+
+	static ToolAnswer PlanTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		Core::StringView action = args.Member("action").AsView();
+		if (action.IsEmpty() || action == "read") {
+			Threading::LockGuard held(open->m_Lock);
+			Core::StringView id = args.Member("id").AsView();
+			Core::StringBuilder text;
+			for (const Plan& plan : open->m_Board->m_Plans) {
+				if (!id.IsEmpty() && plan.m_Id != id) continue;
+				text.Append(Core::StringView("--- plan "));
+				text.Append(plan.m_Id.View());
+				text.Append(Core::StringView(" \""));
+				text.Append(plan.m_Title.View());
+				text.Append(Core::StringView("\" ("));
+				text.Append(plan.m_Kind.View());
+				if (!plan.m_By.IsEmpty()) {
+					text.Append(Core::StringView(", last written by "));
+					text.Append(plan.m_By.View());
+				}
+				Core::StringView chart = plan.m_Kind == "mermaid" ? plan.m_Text.View() : MermaidBlock(plan.m_Text.View());
+				if (!chart.IsEmpty()) {
+					Core::String now = ExportMermaid(*open->m_Board, ExtractDiagram(*open->m_Board, Core::Array<Core::String>()), service->HueHex());
+					text.Append(SameChart(now.View(), chart) ? Core::StringView("; its Mermaid is in step with the board's diagram") : Core::StringView("; the board's diagram has changed since its Mermaid was written: board_export shows it now, board_import draws the plan's"));
+				}
+				text.Append(Core::StringView(")\n"));
+				text.Append(plan.m_Text.View());
+				text.AppendByte(10);
+			}
+			if (text.IsEmpty()) text.Append(id.IsEmpty() ? Core::StringView("The board has no plans yet: write one with action write.\n") : Core::StringView("No such plan.\n"));
+			return Text(text.ToString());
+		}
+		if (action != "write" && action != "delete") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'action' is read, write or delete"));
+		Serialization::DomDoc doc;
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("action", action == "write" ? Core::StringView("set") : Core::StringView("delete"));
+		Core::StringView from = args.Member("from").AsView();
+		if (action == "write" && !from.IsEmpty()) {
+			if (from != "mermaid" && from != "markdown") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'from' is mermaid or markdown: the plan written from board_export"));
+			Threading::LockGuard held(open->m_Lock);
+			Diagram diagram = ExtractDiagram(*open->m_Board, Core::Array<Core::String>());
+			json.StrField("text", (from == "mermaid" ? ExportMermaid(*open->m_Board, diagram, service->HueHex()) : ExportOutline(*open->m_Board, diagram, service->HueHex())).View());
+			json.StrField("kind", from);
+		}
+		for (int64 i = 0; i < args.Count(); ++i) {
+			Core::StringView key = args.KeyAt(i);
+			if (key == "id" || key == "title" || ((key == "kind" || key == "text") && from.IsEmpty())) json.StrField(Core::String(key).CStr(), args.ValueAt(i).AsView());
+		}
+		json.EndObject();
+		Serialization::DomNode plan = Serialization::ReadJson(json.View(), doc).root;
+		Core::String answer = service->SetPlan(open, plan, by);
+		Serialization::DomDoc answerDoc;
+		Core::StringView id = Serialization::ReadJson(answer.View(), answerDoc).root.Member("id").AsView();
+		return Text(action == "write" ? (Core::String("Wrote plan ") + id) + ". The owner sees it in the board's Plan panel.\n" : Core::String("Deleted the plan.\n"));
+	}
+
+	static ToolAnswer RevertTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
+		OpenBoard* open = BoardArg(service, ws, args);
+		Core::StringView change = args.Member("change").AsView();
+		if (change.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'change' is a change id (c<n>) as board_edit named it"));
+		service->Rewound(open, by, true, change);
+		return Text((Core::String("Reverted ") + change) + ": its elements, layers and title are as they were before it.\n");
+	}
+
+	ToolAnswer BoardService::RunTool(const IED::Workspace& ws, Core::StringView tool, const Serialization::DomNode& args, Core::StringView by) {
+		if (tool == "list") return ListTool(this, ws);
+		if (tool == "create") return CreateTool(this, ws, args);
+		if (tool == "read") return ReadTool(this, ws, args);
+		if (tool == "view") return ViewTool(this, ws, args);
+		if (tool == "edit") return EditTool(this, ws, args, by);
+		if (tool == "recognize") return RecognizeTool(this, ws, args, by);
+		if (tool == "export") return ExportTool(this, ws, args);
+		if (tool == "import") return ImportTool(this, ws, args, by);
+		if (tool == "plan") return PlanTool(this, ws, args, by);
+		if (tool == "revert") return RevertTool(this, ws, args, by);
+		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no board tool ") + tool).View());
+	}
+
+	void ProvideQuery(BoardService* service) {
+		service->m_Context->Provide(Core::StringView(c_QueryBinding), [service](const Serialization::DomNode& call) -> IED::Result {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(call.Member("wsId").AsView(), ws)) return IED::Refusal(Core::StringView("no such workspace"));
+			try {
+				// Who the change is by: the AI, unless the caller says the owner (the evaluation harness drawing a sketch).
+				Core::StringView by = call.Member("by").AsView() == "owner" ? Core::StringView("owner") : Core::StringView("ai");
+				ToolAnswer answer = service->RunTool(ws, call.Member("tool").AsView(), call.Member("args"), by);
+				JsonOut json;
+				json.BeginObject();
+				json.StrField("text", answer.m_Text.View());
+				if (!answer.m_Image.IsEmpty()) json.StrField("image", answer.m_Image.View());
+				json.EndObject();
+				return IED::Answer(json.View());
+			}
+			catch (IED::RpcError failed) {
+				return IED::Refusal(failed.m_Message.View());
+			}
+		});
+	}
+}

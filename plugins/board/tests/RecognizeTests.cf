@@ -1,0 +1,108 @@
+// The sketch recognizer on strokes drawn like a hand: jittered, overshooting, boxes in one stroke or four.
+
+include "Recognize.ch"
+
+// A repeatable wobble in -1..1.
+static double BtWobble(int64& seed) {
+	seed = (seed * 6364136223846793005 + 1442695040888963407);
+	return (double)((seed >> 33) % 2001) / 1000.0 - 1.0;
+}
+
+// A wobbly polyline through the corners, `step` apart.
+static Core::Array<double> BtHand(const Core::Array<double>& corners, double step, double jitter, int64& seed) {
+	Core::Array<double> points;
+	for (int64 i = 0; i + 3 < corners.Count(); i += 2) {
+		const double length = Boards::Distance(corners[i], corners[i + 1], corners[i + 2], corners[i + 3]);
+		const int64 n = (int64)(length / step) + 1;
+		for (int64 k = 0; k < n; ++k) {
+			const double t = (double)k / (double)n;
+			points.Push(corners[i] + (corners[i + 2] - corners[i]) * t + BtWobble(seed) * jitter);
+			points.Push(corners[i + 1] + (corners[i + 3] - corners[i + 1]) * t + BtWobble(seed) * jitter);
+		}
+	}
+	points.Push(corners[corners.Count() - 2]);
+	points.Push(corners[corners.Count() - 1]);
+	return points;
+}
+
+static Core::Array<double> BtPath(double ax, double ay, double bx, double by) {
+	Core::Array<double> path;
+	path.Push(ax); path.Push(ay); path.Push(bx); path.Push(by);
+	return path;
+}
+
+static void BtStroke(Boards::Board& board, const Core::Array<double>& points) {
+	Boards::Element* element = new Boards::Element();
+	element->m_Kind = Boards::Kind::Stroke;
+	element->m_Id = board.NewElementId();
+	element->m_Layer = board.m_Layers[0].m_Id;
+	element->m_Points = points;
+	board.Insert(element, -1);
+}
+
+static const Boards::SketchGroup* BtGroupOf(const Core::Array<Boards::SketchGroup>& groups, const char* id) {
+	for (const Boards::SketchGroup& group : groups)
+		if (group.m_Ids.Contains(Core::String(id))) return &group;
+	return nullptr;
+}
+
+[test("board.recognize")]
+class BoardRecognizeTests
+{
+	[test("hand_drawn_diagram")]
+	public static void Diagram() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("Sketch"));
+		int64 seed = 7;
+		// e1: a box in one stroke, overshooting its start.
+		Core::Array<double> box;
+		box.Push(100.0); box.Push(100.0); box.Push(300.0); box.Push(102.0); box.Push(298.0); box.Push(200.0); box.Push(101.0); box.Push(198.0); box.Push(104.0); box.Push(96.0);
+		BtStroke(board, BtHand(box, 6.0, 2.0, seed));
+		// e2..e5: a box drawn as four lines whose ends nearly meet.
+		BtStroke(board, BtHand(BtPath(500.0, 100.0, 700.0, 103.0), 6.0, 2.0, seed));
+		BtStroke(board, BtHand(BtPath(702.0, 98.0, 699.0, 200.0), 6.0, 2.0, seed));
+		BtStroke(board, BtHand(BtPath(703.0, 204.0, 498.0, 199.0), 6.0, 2.0, seed));
+		BtStroke(board, BtHand(BtPath(497.0, 203.0, 503.0, 97.0), 6.0, 2.0, seed));
+		// e6: the arrow's shaft from box 1 to box 2; e7: its head, a V at the right end.
+		BtStroke(board, BtHand(BtPath(305.0, 150.0, 490.0, 152.0), 6.0, 1.5, seed));
+		Core::Array<double> head;
+		head.Push(472.0); head.Push(138.0); head.Push(491.0); head.Push(152.0); head.Push(471.0); head.Push(166.0);
+		BtStroke(board, BtHand(head, 4.0, 1.0, seed));
+		// e8: an ellipse.
+		Core::Array<double> ellipse;
+		for (int32 i = 0; i <= 40; ++i) {
+			const double a = (double)i / 40.0 * 2.0 * 3.14159265;
+			ellipse.Push(200.0 + Math::Cos(a) * 90.0 + BtWobble(seed) * 2.0);
+			ellipse.Push(400.0 + Math::Sin(a) * 50.0 + BtWobble(seed) * 2.0);
+		}
+		BtStroke(board, ellipse);
+		// e9: a diamond.
+		Core::Array<double> diamond;
+		diamond.Push(600.0); diamond.Push(330.0); diamond.Push(700.0); diamond.Push(400.0); diamond.Push(600.0); diamond.Push(470.0); diamond.Push(500.0); diamond.Push(400.0); diamond.Push(601.0); diamond.Push(328.0);
+		BtStroke(board, BtHand(diamond, 6.0, 1.5, seed));
+		// e10..e12: three small squiggles - writing - inside box 1.
+		for (int32 k = 0; k < 3; ++k) {
+			Core::Array<double> letter;
+			const double x = 150.0 + (double)k * 18.0;
+			letter.Push(x); letter.Push(160.0); letter.Push(x + 5.0); letter.Push(140.0); letter.Push(x + 10.0); letter.Push(160.0); letter.Push(x + 12.0); letter.Push(150.0);
+			BtStroke(board, BtHand(letter, 3.0, 0.5, seed));
+		}
+		Core::Array<Boards::SketchGroup> groups = Boards::AnalyzeSketch(board, Core::Array<Core::String>());
+		const Boards::SketchGroup* one = BtGroupOf(groups, "e1");
+		const Boards::SketchGroup* four = BtGroupOf(groups, "e2");
+		const Boards::SketchGroup* arrow = BtGroupOf(groups, "e6");
+		const Boards::SketchGroup* ellipseGroup = BtGroupOf(groups, "e8");
+		const Boards::SketchGroup* diamondGroup = BtGroupOf(groups, "e9");
+		const Boards::SketchGroup* writing = BtGroupOf(groups, "e10");
+		assert_true(one != nullptr && one->m_Guess == Boards::Guess::Rectangle, "a box in one stroke");
+		assert_true(four != nullptr && four->m_Guess == Boards::Guess::Rectangle && four->m_Ids.Count() == 4, "a box in four strokes");
+		assert_true(arrow != nullptr && arrow->m_Guess == Boards::Guess::Arrow && arrow->m_HeadAtEnd && arrow->m_Ids.Count() == 2, "an arrow with its head");
+		assert_true(arrow->m_From == one->m_Name && arrow->m_To == four->m_Name, "the arrow joins the two boxes");
+		assert_true(ellipseGroup != nullptr && ellipseGroup->m_Guess == Boards::Guess::Ellipse, "an ellipse");
+		assert_true(diamondGroup != nullptr && diamondGroup->m_Guess == Boards::Guess::Diamond, "a diamond");
+		assert_true(writing != nullptr && writing->m_Guess == Boards::Guess::Handwriting && writing->m_Ids.Count() == 3, "writing in one group");
+		assert_true(writing->m_Inside == one->m_Name && one->m_Holds.Count() == 1, "the writing labels the box");
+		assert_true(groups.Count() == 6, "six groups in all");
+		assert_true(one->m_Name == "g1", "named in reading order");
+	}
+}

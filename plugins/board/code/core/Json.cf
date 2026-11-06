@@ -1,0 +1,105 @@
+include "Json.ch"
+
+namespace Boards
+{
+	double Tenth(double value) {
+		return Math::Round(value * 10.0) / 10.0;
+	}
+
+	void AppendNumber(Core::StringBuilder& out, double value) {
+		const double rounded = Tenth(value);
+		if (rounded != rounded || rounded > 1e15 || rounded < -1e15) {
+			out.AppendByte('0');
+			return;
+		}
+		const double whole = Math::Round(rounded);
+		if (whole == rounded) {
+			out.AppendInt((int64)whole);
+			return;
+		}
+		out.AppendDouble(rounded, 1);
+	}
+
+	Core::String NumberText(double value) {
+		Core::StringBuilder text;
+		AppendNumber(text, value);
+		return text.ToString();
+	}
+
+	void AppendJsonString(Core::StringBuilder& out, Core::StringView text) {
+		out.AppendByte('"');
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == (int32)'"') out.Append(Core::StringView("\\\""));
+			else if (c == 92) out.Append(Core::StringView("\\\\"));
+			else if (c == 10) out.Append(Core::StringView("\\n"));
+			else if (c == 13) out.Append(Core::StringView("\\r"));
+			else if (c == 9) out.Append(Core::StringView("\\t"));
+			else if (c >= 0 && c < 32) {
+				out.Append(Core::StringView("\\u00"));
+				out.AppendByte((c >> 4) < 10 ? (int32)'0' + (c >> 4) : (int32)'a' + (c >> 4) - 10);
+				out.AppendByte((c & 15) < 10 ? (int32)'0' + (c & 15) : (int32)'a' + (c & 15) - 10);
+			}
+			else out.AppendByte(c);
+		}
+		out.AppendByte('"');
+	}
+
+	void JsonOut::BeforeValue() {
+		if (m_AfterKey) {
+			m_AfterKey = false;
+			return;
+		}
+		if (m_Empty.IsEmpty()) return;
+		if (m_Empty.Back()) m_Empty.Back() = false;
+		else m_Text.AppendByte(',');
+	}
+
+	void JsonOut::Open(int32 bracket) {
+		BeforeValue();
+		m_Text.AppendByte(bracket);
+		m_Empty.Push(true);
+	}
+
+	void JsonOut::Close(int32 bracket) {
+		if (!m_Empty.IsEmpty()) m_Empty.Pop();
+		m_Text.AppendByte(bracket);
+	}
+
+	void JsonOut::Key(Core::StringView key) {
+		BeforeValue();
+		AppendJsonString(m_Text, key);
+		m_Text.AppendByte(':');
+		m_AfterKey = true;
+	}
+
+	void JsonOut::Str(Core::StringView value) {
+		BeforeValue();
+		AppendJsonString(m_Text, value);
+	}
+
+	void JsonOut::Num(double value) {
+		BeforeValue();
+		AppendNumber(m_Text, value);
+	}
+
+	void JsonOut::Int(int64 value) {
+		BeforeValue();
+		m_Text.AppendInt(value);
+	}
+
+	void JsonOut::Bool(bool value) {
+		BeforeValue();
+		m_Text.Append(Core::StringView(value ? "true" : "false"));
+	}
+
+	void JsonOut::Null() {
+		BeforeValue();
+		m_Text.Append(Core::StringView("null"));
+	}
+
+	void JsonOut::Raw(Core::StringView json) {
+		BeforeValue();
+		m_Text.Append(json);
+	}
+}

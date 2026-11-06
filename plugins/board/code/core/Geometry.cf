@@ -1,0 +1,190 @@
+include "Geometry.ch"
+
+namespace Boards
+{
+	Box BoxAt(double x, double y, double w, double h) {
+		Box box;
+		box.Add(x, y);
+		box.Add(x + w, y + h);
+		return box;
+	}
+
+	Box PointsBox(const Core::Array<double>& points) {
+		Box box;
+		for (int64 i = 0; i + 1 < points.Count(); i += 2) box.Add(points[i], points[i + 1]);
+		return box;
+	}
+
+	double BoxGap(const Box& a, const Box& b) {
+		const double dx = Math::Max(0.0, Math::Max(a.m_X0 - b.m_X1, b.m_X0 - a.m_X1));
+		const double dy = Math::Max(0.0, Math::Max(a.m_Y0 - b.m_Y1, b.m_Y0 - a.m_Y1));
+		return Math::Sqrt(dx * dx + dy * dy);
+	}
+
+	double Distance(double ax, double ay, double bx, double by) {
+		const double dx = bx - ax;
+		const double dy = by - ay;
+		return Math::Sqrt(dx * dx + dy * dy);
+	}
+
+	double SegmentDistance(double px, double py, double ax, double ay, double bx, double by) {
+		const double dx = bx - ax;
+		const double dy = by - ay;
+		const double length2 = dx * dx + dy * dy;
+		if (length2 <= 0.0) return Distance(px, py, ax, ay);
+		double t = ((px - ax) * dx + (py - ay) * dy) / length2;
+		t = Math::Clamp(t, 0.0, 1.0);
+		return Distance(px, py, ax + t * dx, ay + t * dy);
+	}
+
+	double PolylineDistance(const Core::Array<double>& points, double px, double py) {
+		if (points.Count() < 2) return c_Far;
+		if (points.Count() < 4) return Distance(px, py, points[0], points[1]);
+		double best = c_Far;
+		for (int64 i = 0; i + 3 < points.Count(); i += 2) {
+			const double d = SegmentDistance(px, py, points[i], points[i + 1], points[i + 2], points[i + 3]);
+			if (d < best) best = d;
+		}
+		return best;
+	}
+
+	double PolylineLength(const Core::Array<double>& points) {
+		double length = 0.0;
+		for (int64 i = 0; i + 3 < points.Count(); i += 2) length += Distance(points[i], points[i + 1], points[i + 2], points[i + 3]);
+		return length;
+	}
+
+	static void SimplifyRange(const Core::Array<double>& points, int64 first, int64 last, double epsilon, Core::Array<bool>& keep) {
+		if (last <= first + 1) return;
+		double worst = -1.0;
+		int64 at = -1;
+		for (int64 i = first + 1; i < last; ++i) {
+			const double d = SegmentDistance(points[i * 2], points[i * 2 + 1], points[first * 2], points[first * 2 + 1], points[last * 2], points[last * 2 + 1]);
+			if (d > worst) {
+				worst = d;
+				at = i;
+			}
+		}
+		if (worst <= epsilon) return;
+		keep[at] = true;
+		SimplifyRange(points, first, at, epsilon, keep);
+		SimplifyRange(points, at, last, epsilon, keep);
+	}
+
+	Core::Array<double> Simplify(const Core::Array<double>& points, double epsilon) {
+		const int64 count = points.Count() / 2;
+		Core::Array<double> result;
+		if (count <= 2) {
+			result.Append(points);
+			return result;
+		}
+		Core::Array<bool> keep;
+		keep.Resize(count);
+		for (int64 i = 0; i < count; ++i) keep[i] = false;
+		keep[0] = true;
+		keep[count - 1] = true;
+		SimplifyRange(points, 0, count - 1, epsilon, keep);
+		for (int64 i = 0; i < count; ++i)
+			if (keep[i]) {
+				result.Push(points[i * 2]);
+				result.Push(points[i * 2 + 1]);
+			}
+		return result;
+	}
+
+	static double Cross(const Point& o, const Point& a, const Point& b) {
+		return (a.m_X - o.m_X) * (b.m_Y - o.m_Y) - (a.m_Y - o.m_Y) * (b.m_X - o.m_X);
+	}
+
+	Core::Array<double> ConvexHull(const Core::Array<double>& points) {
+		Core::Array<Point> sorted;
+		for (int64 i = 0; i + 1 < points.Count(); i += 2) {
+			Point p;
+			p.m_X = points[i];
+			p.m_Y = points[i + 1];
+			sorted.Push(p);
+		}
+		sorted.SortBy([](const Point& a, const Point& b) -> bool { return a.m_X < b.m_X || (a.m_X == b.m_X && a.m_Y < b.m_Y); });
+		Core::Array<Point> hull;
+		for (int64 i = 0; i < sorted.Count(); ++i) {
+			while (hull.Count() >= 2 && Cross(hull[hull.Count() - 2], hull[hull.Count() - 1], sorted[i]) <= 0.0) hull.Pop();
+			hull.Push(sorted[i]);
+		}
+		const int64 lower = hull.Count() + 1;
+		for (int64 i = sorted.Count() - 2; i >= 0; --i) {
+			while (hull.Count() >= lower && Cross(hull[hull.Count() - 2], hull[hull.Count() - 1], sorted[i]) <= 0.0) hull.Pop();
+			hull.Push(sorted[i]);
+		}
+		if (hull.Count() > 1) hull.Pop();
+		Core::Array<double> result;
+		for (const Point& p : hull) {
+			result.Push(p.m_X);
+			result.Push(p.m_Y);
+		}
+		return result;
+	}
+
+	double PolygonArea(const Core::Array<double>& polygon) {
+		const int64 count = polygon.Count() / 2;
+		if (count < 3) return 0.0;
+		double twice = 0.0;
+		for (int64 i = 0; i < count; ++i) {
+			const int64 j = (i + 1) % count;
+			twice += polygon[i * 2] * polygon[j * 2 + 1] - polygon[j * 2] * polygon[i * 2 + 1];
+		}
+		return Math::Abs(twice) * 0.5;
+	}
+
+	bool InsidePolygon(const Core::Array<double>& polygon, double px, double py) {
+		const int64 count = polygon.Count() / 2;
+		bool inside = false;
+		for (int64 i = 0, j = count - 1; i < count; j = i++) {
+			const double xi = polygon[i * 2];
+			const double yi = polygon[i * 2 + 1];
+			const double xj = polygon[j * 2];
+			const double yj = polygon[j * 2 + 1];
+			if ((yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+		}
+		return inside;
+	}
+
+	bool ClipToOutline(const Core::Array<double>& polygon, double ax, double ay, double bx, double by, double& x, double& y) {
+		const int64 count = polygon.Count() / 2;
+		bool found = false;
+		double bestT = -1.0;
+		const double rx = bx - ax;
+		const double ry = by - ay;
+		for (int64 i = 0; i < count; ++i) {
+			const int64 j = (i + 1) % count;
+			const double cx = polygon[i * 2];
+			const double cy = polygon[i * 2 + 1];
+			const double sx = polygon[j * 2] - cx;
+			const double sy = polygon[j * 2 + 1] - cy;
+			const double denominator = rx * sy - ry * sx;
+			if (Math::Abs(denominator) < 1e-12) continue;
+			const double t = ((cx - ax) * sy - (cy - ay) * sx) / denominator;
+			const double u = ((cx - ax) * ry - (cy - ay) * rx) / denominator;
+			if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) continue;
+			if (t > bestT) {
+				bestT = t;
+				found = true;
+			}
+		}
+		if (!found) return false;
+		x = ax + rx * bestT;
+		y = ay + ry * bestT;
+		return true;
+	}
+
+	double TurnAngle(double ax, double ay, double bx, double by, double cx, double cy) {
+		const double ux = bx - ax;
+		const double uy = by - ay;
+		const double vx = cx - bx;
+		const double vy = cy - by;
+		const double lu = Math::Sqrt(ux * ux + uy * uy);
+		const double lv = Math::Sqrt(vx * vx + vy * vy);
+		if (lu <= 0.0 || lv <= 0.0) return 0.0;
+		const double cosine = Math::Clamp((ux * vx + uy * vy) / (lu * lv), -1.0, 1.0);
+		return Math::Acos(cosine);
+	}
+}

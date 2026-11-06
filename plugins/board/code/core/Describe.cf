@@ -1,0 +1,618 @@
+include "Describe.ch"
+include "Ops.ch"
+
+namespace Boards
+{
+	static void At(Core::StringBuilder& out, const Box& box) {
+		out.Append(Core::StringView(" at "));
+		AppendNumber(out, box.m_X0);
+		out.AppendByte(',');
+		AppendNumber(out, box.m_Y0);
+		out.AppendByte(' ');
+		AppendNumber(out, box.Width());
+		out.AppendByte('x');
+		AppendNumber(out, box.Height());
+	}
+
+	static void Quoted(Core::StringBuilder& out, Core::StringView text) {
+		out.AppendByte('"');
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == 10) out.Append(Core::StringView("\\n"));
+			else if (c != 13) out.AppendByte(c);
+		}
+		out.AppendByte('"');
+	}
+
+	// The number of an id like e12, -1 for any other.
+	static int64 IdNumber(Core::StringView id) {
+		if (id.ByteLength() < 2 || id.ByteAt(0) != (int32)'e') return -1;
+		int64 value = 0;
+		for (int64 i = 1; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (c < (int32)'0' || c > (int32)'9') return -1;
+			value = value * 10 + (int64)(c - (int32)'0');
+		}
+		return value;
+	}
+
+	void AppendIdRuns(Core::StringBuilder& out, const Core::Array<Core::String>& ids) {
+		Core::Array<int64> numbers;
+		for (const Core::String& id : ids) {
+			const int64 n = IdNumber(id.View());
+			if (n < 0) {
+				if (!out.IsEmpty() && out.View().ByteAt(out.ByteLength() - 1) != (int32)' ') out.AppendByte(' ');
+				out.Append(id.View());
+				continue;
+			}
+			numbers.Push(n);
+		}
+		numbers.Sort();
+		for (int64 i = 0; i < numbers.Count();) {
+			int64 end = i;
+			while (end + 1 < numbers.Count() && numbers[end + 1] == numbers[end] + 1) end += 1;
+			if (i > 0) out.AppendByte(' ');
+			out.AppendByte('e');
+			out.AppendInt(numbers[i]);
+			if (end > i) {
+				out.Append(end == i + 1 ? Core::StringView(" e") : Core::StringView("-e"));
+				out.AppendInt(numbers[end]);
+			}
+			i = end + 1;
+		}
+	}
+
+	Core::String GroupLine(const SketchGroup& group) {
+		Core::StringBuilder out;
+		out.Append(group.m_Name.View());
+		out.AppendByte(' ');
+		out.Append(GuessName(group.m_Guess));
+		if (group.m_Guess != Guess::Handwriting && group.m_Guess != Guess::Scribble) {
+			out.Append(Core::StringView(" (fit "));
+			out.AppendDouble(group.m_Fit, 2);
+			out.AppendByte(')');
+		}
+		At(out, group.m_Box);
+		if (group.m_Guess == Guess::Line || group.m_Guess == Guess::Arrow || (group.m_Guess == Guess::Scribble && (!group.m_From.IsEmpty() || !group.m_To.IsEmpty()))) {
+			out.Append(group.m_Guess == Guess::Scribble ? Core::StringView(": its longest stroke runs from ") : Core::StringView(": from "));
+			out.Append(group.m_From.IsEmpty() ? Core::StringView("nothing") : group.m_From.View());
+			out.Append(Core::StringView(" to "));
+			out.Append(group.m_To.IsEmpty() ? Core::StringView("nothing") : group.m_To.View());
+			if (group.m_Guess == Guess::Arrow) out.Append(group.m_HeadAtEnd && group.m_HeadAtStart ? Core::StringView(", heads at both ends") : (group.m_HeadAtEnd ? Core::StringView(", head at the 'to' end") : Core::StringView(", head at the 'from' end")));
+		}
+		if (!group.m_Inside.IsEmpty()) {
+			out.Append(Core::StringView(": inside "));
+			out.Append(group.m_Inside.View());
+		}
+		if (!group.m_Holds.IsEmpty()) {
+			out.Append(Core::StringView(": holds "));
+			for (int64 i = 0; i < group.m_Holds.Count(); ++i) {
+				if (i > 0) out.Append(Core::StringView(", "));
+				out.Append(group.m_Holds[i].View());
+			}
+		}
+		out.Append(Core::StringView("; strokes "));
+		AppendIdRuns(out, group.m_Ids);
+		return out.ToString();
+	}
+
+	static bool Wanted(const Board& board, const ReadAsk& ask, const Element& element) {
+		if (!ask.m_Ids.IsEmpty() && !ask.m_Ids.Contains(element.m_Id)) return false;
+		if (!ask.m_Layer.IsEmpty() && element.m_Layer != ask.m_Layer) return false;
+		if (!ask.m_Region.IsEmpty() && !board.Bounds(element).Overlaps(ask.m_Region)) return false;
+		return true;
+	}
+
+	static void Kinds(Core::StringBuilder& out, const Board& board, const Layer& layer) {
+		int64[7] counts = { 0, 0, 0, 0, 0, 0, 0 };
+		const char*[7] ones = { "stroke", "node", "connector", "frame", "note or text", "image", "line or arrow" };
+		const char*[7] many = { "strokes", "nodes", "connectors", "frames", "notes and texts", "images", "lines and arrows" };
+		int64 all = 0;
+		for (Element* element : board.m_Elements) {
+			if (element->m_Layer != layer.m_Id) continue;
+			all += 1;
+			const Kind kind = element->m_Kind;
+			const int32 at = kind == Kind::Stroke ? 0 : (IsNode(kind) ? 1 : (kind == Kind::Connector ? 2 : (kind == Kind::Frame ? 3 : ((kind == Kind::Note || kind == Kind::Text) ? 4 : (kind == Kind::Image ? 5 : 6)))));
+			counts[at] += 1;
+		}
+		out.Append(Counted(all, "element", "elements").View());
+		if (all == 0) return;
+		out.Append(Core::StringView(" ("));
+		bool first = true;
+		for (int32 i = 0; i < 7; ++i) {
+			if (counts[i] == 0) continue;
+			if (!first) out.Append(Core::StringView(", "));
+			out.Append(Counted(counts[i], ones[i], many[i]).View());
+			first = false;
+		}
+		out.AppendByte(')');
+	}
+
+	static void Style(Core::StringBuilder& out, const Element& element) {
+		if (!element.m_Color.IsEmpty() && element.m_Color != "ink") {
+			out.AppendByte(' ');
+			out.Append(element.m_Color.View());
+		}
+		if (!element.m_Fill.IsEmpty() && element.m_Fill != "none") {
+			out.Append(Core::StringView(" fill "));
+			out.Append(element.m_Fill.View());
+		}
+		if (!element.m_Style.IsEmpty() && element.m_Style != "solid") {
+			out.AppendByte(' ');
+			out.Append(element.m_Style.View());
+		}
+	}
+
+	static Core::StringView NameOf(const Board& board, Core::StringView id) {
+		Element* element = board.Find(id);
+		return element && !element->m_Text.IsEmpty() ? element->m_Text.View() : Core::StringView("");
+	}
+
+	static void NodeLine(Core::StringBuilder& out, const Board& board, const Element& element) {
+		out.Append(Core::StringView("  "));
+		out.Append(element.m_Id.View());
+		out.AppendByte(' ');
+		out.Append(KindName(element.m_Kind));
+		if (!element.m_Key.IsEmpty()) {
+			out.Append(Core::StringView(" ["));
+			out.Append(element.m_Key.View());
+			out.AppendByte(']');
+		}
+		if (!element.m_Text.IsEmpty() || IsNode(element.m_Kind)) {
+			out.AppendByte(' ');
+			Quoted(out, element.m_Text.View());
+		}
+		At(out, element.Frame());
+		Style(out, element);
+		out.Append(Core::StringView(" on "));
+		out.Append(element.m_Layer.View());
+		if (element.m_By == "ai") out.Append(Core::StringView(" (by ai)"));
+		if (!element.m_Desc.IsEmpty()) {
+			out.Append(Core::StringView(" - desc "));
+			Quoted(out, element.m_Desc.View());
+		}
+		out.AppendByte(10);
+	}
+
+	static void ConnectorLine(Core::StringBuilder& out, const Board& board, const Element& element) {
+		out.Append(Core::StringView("  "));
+		out.Append(element.m_Id.View());
+		out.AppendByte(' ');
+		out.Append(element.m_From.View());
+		Core::StringView from = NameOf(board, element.m_From.View());
+		if (!from.IsEmpty()) {
+			out.AppendByte(' ');
+			Quoted(out, from);
+		}
+		const bool start = !element.m_Start.IsEmpty() && element.m_Start != "none";
+		const bool end = element.m_End != "none";
+		out.Append(start && end ? Core::StringView(" <-> ") : (end ? Core::StringView(" -> ") : (start ? Core::StringView(" <- ") : Core::StringView(" -- "))));
+		out.Append(element.m_To.View());
+		Core::StringView to = NameOf(board, element.m_To.View());
+		if (!to.IsEmpty()) {
+			out.AppendByte(' ');
+			Quoted(out, to);
+		}
+		if (!element.m_Text.IsEmpty()) {
+			out.Append(Core::StringView(" label "));
+			Quoted(out, element.m_Text.View());
+		}
+		Style(out, element);
+		if (element.m_Route == "elbow") out.Append(Core::StringView(" elbow"));
+		if (!board.Find(element.m_From.View()) || !board.Find(element.m_To.View())) out.Append(Core::StringView(" (dangling: an end is gone)"));
+		out.AppendByte(10);
+	}
+
+	static void FrameLine(Core::StringBuilder& out, const Board& board, const Element& element) {
+		out.Append(Core::StringView("  "));
+		out.Append(element.m_Id.View());
+		out.Append(Core::StringView(" frame"));
+		if (!element.m_Key.IsEmpty()) {
+			out.Append(Core::StringView(" ["));
+			out.Append(element.m_Key.View());
+			out.AppendByte(']');
+		}
+		out.AppendByte(' ');
+		Quoted(out, element.m_Text.View());
+		At(out, element.Frame());
+		out.Append(Core::StringView(" holds"));
+		Core::Array<Element*> members = board.MembersOf(element);
+		if (members.IsEmpty()) out.Append(Core::StringView(" nothing"));
+		for (Element* member : members) {
+			out.AppendByte(' ');
+			out.Append(member->m_Id.View());
+		}
+		out.AppendByte(10);
+	}
+
+	static void OtherLine(Core::StringBuilder& out, const Board& board, const Element& element) {
+		out.Append(Core::StringView("  "));
+		out.Append(element.m_Id.View());
+		out.AppendByte(' ');
+		out.Append(KindName(element.m_Kind));
+		if (element.m_Kind == Kind::Image) {
+			out.AppendByte(' ');
+			Quoted(out, element.m_Src.View());
+		}
+		else if (!element.m_Text.IsEmpty()) {
+			out.AppendByte(' ');
+			Quoted(out, element.m_Text.View());
+		}
+		if (IsPath(element.m_Kind)) {
+			const Core::Array<double>& p = element.m_Points;
+			out.Append(Core::StringView(" from "));
+			AppendNumber(out, p[0]);
+			out.AppendByte(',');
+			AppendNumber(out, p[1]);
+			out.Append(Core::StringView(" to "));
+			AppendNumber(out, p[p.Count() - 2]);
+			out.AppendByte(',');
+			AppendNumber(out, p[p.Count() - 1]);
+			if (p.Count() > 4) {
+				out.Append(Core::StringView(" through "));
+				out.AppendInt(p.Count() / 2 - 2);
+				out.Append(Core::StringView(" points"));
+			}
+		}
+		else At(out, element.Frame());
+		if (element.m_Kind == Kind::Image) {
+			out.Append(Core::StringView(" of a "));
+			AppendNumber(out, element.m_ImageW);
+			out.AppendByte('x');
+			AppendNumber(out, element.m_ImageH);
+			out.Append(Core::StringView(" picture"));
+			if (element.m_Crop.Count() == 4) {
+				out.Append(Core::StringView(", cropped to "));
+				for (int32 i = 0; i < 4; ++i) {
+					if (i > 0) out.AppendByte(',');
+					AppendNumber(out, element.m_Crop[i]);
+				}
+			}
+		}
+		Style(out, element);
+		out.Append(Core::StringView(" on "));
+		out.Append(element.m_Layer.View());
+		if (!element.m_Desc.IsEmpty()) {
+			out.Append(Core::StringView(" - desc "));
+			Quoted(out, element.m_Desc.View());
+		}
+		out.AppendByte(10);
+	}
+
+	static int64 Section(Core::StringBuilder& out, const Board& board, const ReadAsk& ask, const char* title, funcptr<bool(Kind)> takes, funcptr<void(Core::StringBuilder&, const Board&, const Element&)> line, int64 budget, int64& left) {
+		bool any = false;
+		int64 listed = 0;
+		for (Element* element : board.Drawn(false)) {
+			if (!takes(element->m_Kind) || !Wanted(board, ask, *element)) continue;
+			if (!any) {
+				out.Append(Core::StringView(title));
+				out.AppendByte(10);
+				any = true;
+			}
+			if (listed >= budget) {
+				left += 1;
+				continue;
+			}
+			line(out, board, *element);
+			listed += 1;
+		}
+		return listed;
+	}
+
+	Core::String DescribeBoard(const Board& board, Core::StringView path, const ReadAsk& ask, const Core::Array<SketchGroup>& groups) {
+		Core::StringBuilder out;
+		out.Append(Core::StringView("Board "));
+		Quoted(out, board.m_Title.View());
+		out.Append(Core::StringView(" ("));
+		out.Append(path);
+		out.Append(Core::StringView("), rev "));
+		out.AppendInt(board.m_Rev);
+		out.Append(Core::StringView(": "));
+		out.AppendInt(board.m_Elements.Count());
+		out.Append(Core::StringView(" elements on "));
+		out.AppendInt(board.m_Layers.Count());
+		out.Append(Core::StringView(" layers"));
+		Box all = board.ContentBounds(true);
+		if (!all.IsEmpty()) {
+			out.Append(Core::StringView("; what the visible layers hold spans"));
+			At(out, all);
+		}
+		out.Append(Core::StringView(".\nPositions are x,y of the top left and wxh, in board units (y grows down).\n"));
+		if (!ask.m_Region.IsEmpty() || !ask.m_Layer.IsEmpty() || !ask.m_Ids.IsEmpty()) out.Append(Core::StringView("Listing only what the region, layer or ids pick.\n"));
+		out.Append(Core::StringView("Layers, bottom to top:\n"));
+		for (const Layer& layer : board.m_Layers) {
+			out.Append(Core::StringView("  "));
+			out.Append(layer.m_Id.View());
+			out.AppendByte(' ');
+			Quoted(out, layer.m_Name.View());
+			out.Append(Core::StringView(": "));
+			Kinds(out, board, layer);
+			if (!layer.m_Visible) out.Append(Core::StringView(" [hidden]"));
+			if (layer.m_Locked) out.Append(Core::StringView(" [locked]"));
+			if (layer.m_Opacity < 1.0) {
+				out.Append(Core::StringView(" [opacity "));
+				out.AppendDouble(layer.m_Opacity, 2);
+				out.AppendByte(']');
+			}
+			out.AppendByte(10);
+		}
+		int64 left = 0;
+		int64 budget = ask.m_Most;
+		budget -= Section(out, board, ask, "Nodes:", [](Kind kind) -> bool { return IsNode(kind); }, NodeLine, budget, left);
+		budget -= Section(out, board, ask, "Connectors:", [](Kind kind) -> bool { return kind == Kind::Connector; }, ConnectorLine, budget, left);
+		budget -= Section(out, board, ask, "Frames:", [](Kind kind) -> bool { return kind == Kind::Frame; }, FrameLine, budget, left);
+		budget -= Section(out, board, ask, "Notes, text and images:", [](Kind kind) -> bool { return kind == Kind::Note || kind == Kind::Text || kind == Kind::Image; }, OtherLine, budget, left);
+		budget -= Section(out, board, ask, "Free lines and arrows (bound to nothing):", [](Kind kind) -> bool { return kind == Kind::Line || kind == Kind::Arrow; }, OtherLine, budget, left);
+		if (!ask.m_Ids.IsEmpty()) budget -= Section(out, board, ask, "Strokes:", [](Kind kind) -> bool { return kind == Kind::Stroke; }, OtherLine, budget, left);
+		bool sketch = false;
+		for (const SketchGroup& group : groups) {
+			if (!ask.m_Region.IsEmpty() && !group.m_Box.Overlaps(ask.m_Region)) continue;
+			if (!sketch) {
+				out.Append(Core::StringView("Sketch (the owner's freehand strokes on visible layers, grouped and guessed; read handwriting in board_view; group names hold until the strokes change):\n"));
+				sketch = true;
+			}
+			if (budget <= 0) {
+				left += 1;
+				continue;
+			}
+			out.Append(Core::StringView("  "));
+			out.Append(GroupLine(group).View());
+			out.AppendByte(10);
+			budget -= 1;
+		}
+		if (left > 0) {
+			out.Append(Core::StringView("... and "));
+			out.AppendInt(left);
+			out.Append(Core::StringView(" more not listed: narrow with region, layer or ids.\n"));
+		}
+		if (!board.m_Plans.IsEmpty()) {
+			out.Append(Core::StringView("Plans (board_plan reads them):\n"));
+			for (const Plan& plan : board.m_Plans) {
+				int64 lines = 1;
+				for (int64 i = 0; i < plan.m_Text.ByteLength(); ++i)
+					if (plan.m_Text.View().ByteAt(i) == 10) lines += 1;
+				out.Append(Core::StringView("  "));
+				out.Append(plan.m_Id.View());
+				out.AppendByte(' ');
+				Quoted(out, plan.m_Title.View());
+				out.Append(Core::StringView(" ("));
+				out.Append(plan.m_Kind.View());
+				out.Append(Core::StringView(", "));
+				out.AppendInt(lines);
+				out.Append(Core::StringView(" lines)\n"));
+			}
+		}
+		if (board.m_Elements.IsEmpty()) out.Append(Core::StringView("The board is empty.\n"));
+		return out.ToString();
+	}
+
+	Core::Array<SketchGroup> Picked(const Core::Array<SketchGroup>& groups, const Core::Array<Core::String>& names) {
+		if (names.IsEmpty()) return groups;
+		Core::Array<SketchGroup> picked;
+		for (const SketchGroup& group : groups) {
+			bool wanted = names.Contains(group.m_Name);
+			for (const Core::String& id : group.m_Ids)
+				if (names.Contains(id)) wanted = true;
+			if (wanted) picked.Push(group);
+		}
+		return picked;
+	}
+
+	static const SketchGroup* GroupNamed(const Core::Array<SketchGroup>& groups, Core::StringView name) {
+		for (const SketchGroup& group : groups)
+			if (group.m_Name == name) return &group;
+		return nullptr;
+	}
+
+	// The label a group gets: its own in the labels, else that of the handwriting it holds.
+	static Core::String LabelOf(const SketchGroup& group, const ProposalAsk& ask) {
+		const Core::String* own = ask.m_Labels.FindAs(group.m_Name.View());
+		if (own) return *own;
+		Core::StringBuilder joined;
+		for (const Core::String& held : group.m_Holds) {
+			const Core::String* text = ask.m_Labels.FindAs(held.View());
+			if (!text) continue;
+			if (!joined.IsEmpty()) joined.AppendByte(' ');
+			joined.Append(text->View());
+		}
+		return joined.ToString();
+	}
+
+	// The element type a group becomes: the one `types` gives it, else its guess's.
+	static Core::String TypeOf(const SketchGroup& group, const ProposalAsk& ask) {
+		const Core::String* given = ask.m_Types.FindAs(group.m_Name.View());
+		if (given) return *given;
+		if (group.m_Guess == Guess::Ellipse) return Core::String("ellipse");
+		if (group.m_Guess == Guess::Diamond) return Core::String("diamond");
+		if (group.m_Guess == Guess::Frame) return Core::String("frame");
+		if (group.m_Guess == Guess::Handwriting) return Core::String("text");
+		if (group.m_Guess == Guess::Arrow) return Core::String("arrow");
+		if (group.m_Guess == Guess::Line) return Core::String("line");
+		return Core::String("rect");
+	}
+
+	static bool BecomesBox(const SketchGroup& group, const ProposalAsk& ask) {
+		const Kind kind = KindOf(TypeOf(group, ask).View());
+		return (IsShapeGuess(group.m_Guess) || group.m_Guess == Guess::Frame) && (IsNode(kind) || kind == Kind::Frame || kind == Kind::Note || kind == Kind::Text);
+	}
+
+	// An end of a line: "@g1" for a group of the proposal that becomes a box, an element's id, "" for none.
+	static Core::String EndRef(const Core::Array<SketchGroup>& picked, const ProposalAsk& ask, Core::StringView end) {
+		if (end.IsEmpty()) return Core::String();
+		const SketchGroup* group = GroupNamed(picked, end);
+		if (group) return BecomesBox(*group, ask) ? Core::String("@") + end : Core::String();
+		return Core::String(end);
+	}
+
+	static void Line(Core::StringBuilder& text, const SketchGroup& group, const ProposalAsk& ask) {
+		if (ask.m_Brief) {
+			text.Append(Core::StringView("- "));
+			text.Append(group.m_Name.View());
+			text.AppendByte(' ');
+			text.Append(GuessName(group.m_Guess));
+		}
+		else text.Append(GroupLine(group).View());
+		text.Append(ask.m_Brief ? Core::StringView(" -> ") : Core::StringView("\n    -> "));
+	}
+
+	static void Placed(JsonOut& ops, const ProposalAsk& ask, double x, double y) {
+		ops.NumField("x", x + ask.m_Dx);
+		ops.NumField("y", y);
+	}
+
+	static void Boxes(const Board& board, const Core::Array<SketchGroup>& groups, const ProposalAsk& ask, JsonOut& ops, Core::StringBuilder& text) {
+		for (const SketchGroup& group : groups) {
+			if (!BecomesBox(group, ask)) continue;
+			Core::String type = TypeOf(group, ask);
+			Core::String label = LabelOf(group, ask);
+			ops.BeginObject();
+			ops.StrField("op", Core::StringView("add"));
+			ops.StrField("ref", group.m_Name.View());
+			ops.StrField("type", type.View());
+			Placed(ops, ask, group.m_Box.m_X0, group.m_Box.m_Y0);
+			if (type != "text") {
+				ops.NumField("w", Math::Max(group.m_Box.Width(), 40.0));
+				ops.NumField("h", Math::Max(group.m_Box.Height(), 30.0));
+			}
+			ops.StrField("text", label.View());
+			if (!group.m_Color.IsEmpty() && group.m_Color != "ink") ops.StrField("color", group.m_Color.View());
+			if (!ask.m_Layer.IsEmpty()) ops.StrField("layer", ask.m_Layer.View());
+			ops.EndObject();
+			Line(text, group, ask);
+			text.Append(type.View());
+			if (!label.IsEmpty()) {
+				text.Append(Core::StringView(" labeled "));
+				Quoted(text, label.View());
+			}
+			else if (!group.m_Holds.IsEmpty()) {
+				text.Append(Core::StringView(" - NEEDS A LABEL: read the handwriting it holds ("));
+				for (int64 i = 0; i < group.m_Holds.Count(); ++i) {
+					if (i > 0) text.Append(Core::StringView(", "));
+					text.Append(group.m_Holds[i].View());
+				}
+				text.Append(Core::StringView(") in board_view and pass it in labels"));
+			}
+			else text.Append(Core::StringView(" with no label"));
+			if (group.m_Guess == Guess::Frame && !ask.m_Types.Contains(group.m_Name)) text.Append(((Core::String(" (a box drawn around other shapes: a group; types {\"") + group.m_Name.View()) + "\": \"rect\"} makes it a box)").View());
+			if (group.m_Guess == Guess::Ellipse && !ask.m_Types.Contains(group.m_Name)) text.Append(((Core::String(" (a data store? types {\"") + group.m_Name.View()) + "\": \"cylinder\"} draws Mermaid's database shape)").View());
+			text.AppendByte(10);
+		}
+	}
+
+	static void Writing(const Board& board, const Core::Array<SketchGroup>& groups, const ProposalAsk& ask, JsonOut& ops, Core::StringBuilder& text) {
+		for (const SketchGroup& group : groups) {
+			if (group.m_Guess != Guess::Handwriting) continue;
+			const Core::String* label = ask.m_Labels.FindAs(group.m_Name.View());
+			const SketchGroup* holder = GroupNamed(groups, group.m_Inside.View());
+			if (holder) continue;
+			if (!label) {
+				Line(text, group, ask);
+				text.Append(Core::StringView("needs its text in labels (read it in board_view) to become "));
+				text.Append(group.m_Inside.IsEmpty() ? Core::StringView("text (or a note: types {\"g<n>\": \"note\"})") : Core::StringView("that node's label"));
+				text.AppendByte(10);
+				continue;
+			}
+			ops.BeginObject();
+			Line(text, group, ask);
+			if (!group.m_Inside.IsEmpty() && board.Find(group.m_Inside.View())) {
+				ops.StrField("op", Core::StringView("update"));
+				ops.StrField("id", group.m_Inside.View());
+				ops.StrField("text", label->View());
+				text.Append(Core::StringView("the label of "));
+				text.Append(group.m_Inside.View());
+			}
+			else {
+				Core::String type = TypeOf(group, ask);
+				ops.StrField("op", Core::StringView("add"));
+				ops.StrField("ref", group.m_Name.View());
+				ops.StrField("type", type.View());
+				Placed(ops, ask, group.m_Box.m_X0, group.m_Box.m_Y0);
+				if (type == "text") ops.NumField("fontSize", Math::Clamp(group.m_Box.Height() * 0.75, 12.0, 40.0));
+				ops.StrField("text", label->View());
+				if (!ask.m_Layer.IsEmpty()) ops.StrField("layer", ask.m_Layer.View());
+				text.Append(type.View());
+				text.AppendByte(' ');
+				Quoted(text, label->View());
+			}
+			ops.EndObject();
+			text.AppendByte(10);
+		}
+	}
+
+	static void Lines(const Board& board, const Core::Array<SketchGroup>& groups, const ProposalAsk& ask, JsonOut& ops, Core::StringBuilder& text) {
+		for (const SketchGroup& group : groups) {
+			const Core::String* forced = ask.m_Types.FindAs(group.m_Name.View());
+			const bool asLine = forced && (*forced == "arrow" || *forced == "line" || *forced == "connector");
+			const bool hasEnds = ask.m_Ends.Contains(group.m_Name);
+			if (group.m_Guess != Guess::Line && group.m_Guess != Guess::Arrow && !asLine && !(hasEnds && group.m_Guess == Guess::Scribble)) continue;
+			if (group.m_Line.Count() != 4 && !hasEnds) continue;
+			Core::StringView fromName = group.m_From.View();
+			Core::StringView toName = group.m_To.View();
+			const Core::Array<Core::String>* ends = ask.m_Ends.FindAs(group.m_Name.View());
+			if (ends && ends->Count() == 2) {
+				fromName = (*ends)[0].View();
+				toName = (*ends)[1].View();
+			}
+			Core::String from = EndRef(groups, ask, fromName);
+			Core::String to = EndRef(groups, ask, toName);
+			const bool arrow = forced ? *forced != "line" : group.m_Guess != Guess::Line;
+			const bool reversed = group.m_Guess == Guess::Arrow && group.m_HeadAtStart && !group.m_HeadAtEnd && !ends;
+			Core::String label = LabelOf(group, ask);
+			ops.BeginObject();
+			ops.StrField("op", Core::StringView("add"));
+			Line(text, group, ask);
+			if (!from.IsEmpty() && !to.IsEmpty() && from != to) {
+				ops.StrField("type", Core::StringView("connector"));
+				ops.StrField("from", reversed ? to.View() : from.View());
+				ops.StrField("to", reversed ? from.View() : to.View());
+				ops.StrField("end", arrow ? Core::StringView("arrow") : Core::StringView("none"));
+				if (group.m_Guess == Guess::Arrow && group.m_HeadAtStart && group.m_HeadAtEnd) ops.StrField("start", Core::StringView("arrow"));
+				text.Append(Core::StringView("connector "));
+				text.Append(reversed ? to.View() : from.View());
+				text.Append(Core::StringView(" -> "));
+				text.Append(reversed ? from.View() : to.View());
+			}
+			else {
+				ops.StrField("type", arrow ? Core::StringView("arrow") : Core::StringView("line"));
+				ops.Key(Core::StringView("pts"));
+				ops.BeginArray();
+				for (int64 i = 0; i < group.m_Line.Count(); ++i) ops.Num(group.m_Line[i] + (i % 2 == 0 ? ask.m_Dx : 0.0));
+				ops.EndArray();
+				if (group.m_Guess == Guess::Arrow && group.m_HeadAtStart) ops.StrField("start", Core::StringView("arrow"));
+				if ((group.m_Guess == Guess::Arrow && !group.m_HeadAtEnd) || !arrow) ops.StrField("end", Core::StringView("none"));
+				text.Append(Core::StringView("a free "));
+				text.Append(arrow ? Core::StringView("arrow") : Core::StringView("line"));
+				text.Append(Core::StringView(" (an end touches no shape; ends {\"g<n>\": [from, to]} names them)"));
+			}
+			if (!label.IsEmpty()) {
+				ops.StrField("text", label.View());
+				text.Append(Core::StringView(" labeled "));
+				Quoted(text, label.View());
+			}
+			if (!group.m_Color.IsEmpty() && group.m_Color != "ink") ops.StrField("color", group.m_Color.View());
+			if (!ask.m_Layer.IsEmpty()) ops.StrField("layer", ask.m_Layer.View());
+			ops.EndObject();
+			text.AppendByte(10);
+		}
+	}
+
+	void Proposals(const Board& board, const Core::Array<SketchGroup>& groups, const ProposalAsk& ask, JsonOut& ops, Core::StringBuilder& text) {
+		Boxes(board, groups, ask, ops, text);
+		Writing(board, groups, ask, ops, text);
+		Lines(board, groups, ask, ops, text);
+		for (const SketchGroup& group : groups) {
+			if (group.m_Guess != Guess::Scribble || ask.m_Types.Contains(group.m_Name) || ask.m_Ends.Contains(group.m_Name)) continue;
+			Line(text, group, ask);
+			text.Append(Core::StringView("left as ink (no shape fits"));
+			if (!group.m_From.IsEmpty() && !group.m_To.IsEmpty()) {
+				text.Append(Core::StringView("; if it is an arrow, types {\""));
+				text.Append(group.m_Name.View());
+				text.Append(Core::StringView("\": \"arrow\"} makes it a connector from "));
+				text.Append(group.m_From.View());
+				text.Append(Core::StringView(" to "));
+				text.Append(group.m_To.View());
+			}
+			text.Append(Core::StringView(")\n"));
+		}
+	}
+}

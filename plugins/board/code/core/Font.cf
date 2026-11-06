@@ -1,0 +1,107 @@
+include "Font.ch"
+include "FontData.ch"
+
+namespace Boards
+{
+	// Hershey units per font size: the simplex capitals are 21 units tall, drawn at 0.7 of the font size.
+	const double c_UnitsPerSize = 30.0;
+	const double c_Baseline = 0.8;
+
+	// The glyph of a byte: '?' for anything outside printable ASCII.
+	static Core::StringView GlyphOf(int32 c) {
+		if (c < 32 || c > 126) c = (int32)'?';
+		return Core::StringView(c_Glyphs[c - 32]);
+	}
+
+	static double Advance(int32 c) {
+		Core::StringView glyph = GlyphOf(c);
+		return (double)(glyph.ByteAt(1) - glyph.ByteAt(0));
+	}
+
+	double TextWidth(Core::StringView line, double size) {
+		double units = 0.0;
+		for (int64 i = 0; i < line.ByteLength(); ++i) {
+			const int32 c = line.ByteAt(i);
+			// A UTF-8 character draws as one '?': only its first byte advances.
+			if (c >= 128 && c < 192) continue;
+			units += Advance(c);
+		}
+		return units * size / c_UnitsPerSize;
+	}
+
+	static Core::Array<Core::StringView> Lines(Core::StringView text) {
+		Core::Array<Core::StringView> lines;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i)
+			if (i == text.ByteLength() || text.ByteAt(i) == 10) {
+				int64 end = i;
+				if (end > start && text.ByteAt(end - 1) == 13) end -= 1;
+				lines.Push(text.Substring(start, end - start));
+				start = i + 1;
+			}
+		return lines;
+	}
+
+	void MeasureText(Core::StringView text, double size, double& width, double& height) {
+		Core::Array<Core::StringView> lines = Lines(text);
+		width = 0.0;
+		for (Core::StringView line : lines) width = Math::Max(width, TextWidth(line, size));
+		height = (double)lines.Count() * size * c_LineHeight;
+	}
+
+	static void WrapLine(Core::StringView line, double size, double width, Core::Array<Core::String>& out) {
+		Core::StringBuilder current;
+		int64 i = 0;
+		while (i < line.ByteLength()) {
+			int64 end = i;
+			while (end < line.ByteLength() && line.ByteAt(end) != (int32)' ') ++end;
+			Core::StringView word = line.Substring(i, end - i);
+			if (!current.IsEmpty()) {
+				Core::StringBuilder trial;
+				trial.Append(current.View());
+				trial.AppendByte(' ');
+				trial.Append(word);
+				if (TextWidth(trial.View(), size) > width) {
+					out.Push(current.ToString());
+					current.Clear();
+				}
+				else current.AppendByte(' ');
+			}
+			current.Append(word);
+			i = end + 1;
+		}
+		out.Push(current.ToString());
+	}
+
+	Core::Array<Core::String> WrapText(Core::StringView text, double size, double width) {
+		Core::Array<Core::String> out;
+		for (Core::StringView line : Lines(text)) WrapLine(line, size, width, out);
+		return out;
+	}
+
+	void LineStrokes(Core::StringView line, double x, double y, double size, Core::Array<Core::Array<double>>& strokes) {
+		const double scale = size / c_UnitsPerSize;
+		const double baseline = y + size * c_Baseline;
+		double penX = x;
+		for (int64 i = 0; i < line.ByteLength(); ++i) {
+			const int32 c = line.ByteAt(i);
+			if (c >= 128 && c < 192) continue;
+			Core::StringView glyph = GlyphOf(c);
+			const int32 left = glyph.ByteAt(0) - (int32)'R';
+			Core::Array<double> stroke;
+			for (int64 k = 2; k + 1 < glyph.ByteLength(); k += 2) {
+				if (glyph.ByteAt(k) == (int32)' ' && glyph.ByteAt(k + 1) == (int32)'R') {
+					if (stroke.Count() >= 4) strokes.Push(stroke);
+					stroke = Core::Array<double>();
+					continue;
+				}
+				const int32 gx = glyph.ByteAt(k) - (int32)'R';
+				const int32 gy = glyph.ByteAt(k + 1) - (int32)'R';
+				stroke.Push(penX + (double)(gx - left) * scale);
+				stroke.Push(baseline + (double)(gy - 9) * scale);
+			}
+			if (stroke.Count() >= 4) strokes.Push(stroke);
+			penX += Advance(c) * scale;
+		}
+	}
+}

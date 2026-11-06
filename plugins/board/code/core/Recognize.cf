@@ -1,0 +1,526 @@
+include "Recognize.ch"
+
+namespace Boards
+{
+	const double c_LeastShape = 40.0;
+
+	class StrokeInfo
+	{
+		public Element* m_Element;
+		public Box m_Box;
+		public double m_Length;
+		public double m_Chord;
+		public bool m_Closed;
+		public bool m_Used;
+	}
+
+	Core::StringView GuessName(Guess guess) {
+		if (guess == Guess::Rectangle) return Core::StringView("rectangle");
+		if (guess == Guess::Ellipse) return Core::StringView("ellipse");
+		if (guess == Guess::Diamond) return Core::StringView("diamond");
+		if (guess == Guess::Line) return Core::StringView("line");
+		if (guess == Guess::Arrow) return Core::StringView("arrow");
+		if (guess == Guess::Handwriting) return Core::StringView("handwriting");
+		if (guess == Guess::Frame) return Core::StringView("frame");
+		return Core::StringView("scribble");
+	}
+
+	bool IsShapeGuess(Guess guess) {
+		return guess == Guess::Rectangle || guess == Guess::Ellipse || guess == Guess::Diamond;
+	}
+
+	static StrokeInfo* Measure(Element* element) {
+		StrokeInfo* info = new StrokeInfo();
+		info->m_Element = element;
+		const Core::Array<double>& p = element->m_Points;
+		info->m_Box = PointsBox(p);
+		info->m_Length = PolylineLength(p);
+		info->m_Chord = p.Count() >= 4 ? Distance(p[0], p[1], p[p.Count() - 2], p[p.Count() - 1]) : 0.0;
+		const double diag = info->m_Box.Diagonal();
+		info->m_Closed = diag >= c_LeastShape && info->m_Chord < Math::Max(14.0, diag * 0.25) && info->m_Length > diag * 1.8;
+		return info;
+	}
+
+	// The least distance from (x, y) to any of the points.
+	static double Nearest(const Core::Array<double>& points, double x, double y) {
+		double best = c_Far;
+		for (int64 i = 0; i + 1 < points.Count(); i += 2) best = Math::Min(best, Distance(points[i], points[i + 1], x, y));
+		return best;
+	}
+
+	// Rectangle, ellipse or diamond for a closed outline, with a fit; false when it is too small or too thin.
+	static bool ClassifyClosed(const Core::Array<double>& points, Guess& guess, double& fit) {
+		Box box = PointsBox(points);
+		const double w = box.Width();
+		const double h = box.Height();
+		if (w < 20.0 || h < 20.0 || box.Diagonal() < c_LeastShape) return false;
+		const double side = Math::Min(w, h);
+		const double ratio = PolygonArea(ConvexHull(points)) / (w * h);
+		double corners = 0.0;
+		corners += Nearest(points, box.m_X0, box.m_Y0);
+		corners += Nearest(points, box.m_X1, box.m_Y0);
+		corners += Nearest(points, box.m_X1, box.m_Y1);
+		corners += Nearest(points, box.m_X0, box.m_Y1);
+		corners = corners / 4.0 / side;
+		double middles = 0.0;
+		middles += Nearest(points, box.CenterX(), box.m_Y0);
+		middles += Nearest(points, box.m_X1, box.CenterY());
+		middles += Nearest(points, box.CenterX(), box.m_Y1);
+		middles += Nearest(points, box.m_X0, box.CenterY());
+		middles = middles / 4.0 / side;
+		double deviation = 0.0;
+		int64 n = 0;
+		for (int64 i = 0; i + 1 < points.Count(); i += 2) {
+			const double dx = (points[i] - box.CenterX()) / (w * 0.5);
+			const double dy = (points[i + 1] - box.CenterY()) / (h * 0.5);
+			deviation += Math::Abs(Math::Sqrt(dx * dx + dy * dy) - 1.0);
+			n += 1;
+		}
+		deviation = n > 0 ? deviation / (double)n : 1.0;
+		if (corners < 0.12 && ratio > 0.8) {
+			guess = Guess::Rectangle;
+			fit = Math::Clamp(1.0 - corners / 0.24, 0.0, 1.0) * 0.5 + Math::Clamp((ratio - 0.7) / 0.3, 0.0, 1.0) * 0.5;
+			return true;
+		}
+		if (ratio < 0.68 && corners > 0.2) {
+			guess = Guess::Diamond;
+			fit = Math::Clamp(1.0 - middles / 0.2, 0.0, 1.0) * 0.6 + Math::Clamp((0.68 - ratio) / 0.18, 0.0, 1.0) * 0.4;
+			return true;
+		}
+		if (deviation < 0.2) {
+			guess = Guess::Ellipse;
+			fit = Math::Clamp(1.0 - deviation / 0.25, 0.0, 1.0);
+			return true;
+		}
+		guess = Guess::Rectangle;
+		fit = 0.3;
+		return true;
+	}
+
+	static void PushRange(Core::Array<double>& out, const Core::Array<double>& points, bool reversed) {
+		const int64 n = points.Count() / 2;
+		for (int64 k = 0; k < n; ++k) {
+			const int64 i = reversed ? n - 1 - k : k;
+			out.Push(points[i * 2]);
+			out.Push(points[i * 2 + 1]);
+		}
+	}
+
+	static double EndX(const StrokeInfo* info, int32 end) {
+		const Core::Array<double>& p = info->m_Element->m_Points;
+		return end == 0 ? p[0] : p[p.Count() - 2];
+	}
+
+	static double EndY(const StrokeInfo* info, int32 end) {
+		const Core::Array<double>& p = info->m_Element->m_Points;
+		return end == 0 ? p[1] : p[p.Count() - 1];
+	}
+
+	// Open strokes whose ends meet in a loop, joined into one outline; the strokes of each loop that makes a shape.
+	static void Loops(Core::Array<StrokeInfo*>& infos, Core::Array<SketchGroup>& groups) {
+		Core::Array<StrokeInfo*> open;
+		for (StrokeInfo* info : infos)
+			if (!info->m_Used && !info->m_Closed && info->m_Length >= 25.0) open.Push(info);
+		const int64 count = open.Count();
+		if (count < 2 || count > 400) return;
+		// link[i * 2 + end] = the other stroke end (j * 2 + end) it meets, -1 for none or more than one.
+		Core::Array<int64> link;
+		for (int64 i = 0; i < count * 2; ++i) link.Push(-2);
+		for (int64 i = 0; i < count; ++i)
+			for (int32 ei = 0; ei < 2; ++ei) {
+				int64 best = -1;
+				double bestD = c_Far;
+				for (int64 j = 0; j < count; ++j) {
+					if (j == i) continue;
+					const double tolerance = Math::Max(14.0, 0.15 * Math::Min(open[i]->m_Length, open[j]->m_Length));
+					for (int32 ej = 0; ej < 2; ++ej) {
+						const double d = Distance(EndX(open[i], ei), EndY(open[i], ei), EndX(open[j], ej), EndY(open[j], ej));
+						if (d < tolerance && d < bestD) {
+							bestD = d;
+							best = j * 2 + ej;
+						}
+					}
+				}
+				link[i * 2 + ei] = best;
+			}
+		Core::Array<bool> visited;
+		for (int64 i = 0; i < count; ++i) visited.Push(false);
+		for (int64 start = 0; start < count; ++start) {
+			if (visited[start] || link[start * 2] < 0 || link[start * 2 + 1] < 0) continue;
+			Core::Array<int64> chain;
+			Core::Array<bool> reversed;
+			int64 current = start;
+			bool flip = false;
+			bool closed = false;
+			for (int32 guard = 0; guard < 12; ++guard) {
+				chain.Push(current);
+				reversed.Push(flip);
+				const int64 exitEnd = flip ? 0 : 1;
+				const int64 next = link[current * 2 + exitEnd];
+				if (next < 0) break;
+				const int64 nextStroke = next / 2;
+				if (nextStroke == start) {
+					closed = true;
+					break;
+				}
+				if (chain.Contains(nextStroke)) break;
+				// The next stroke is entered at the end it meets: entered at its end 1 means it runs reversed.
+				flip = next % 2 == 1;
+				current = nextStroke;
+			}
+			if (!closed || chain.Count() < 2) continue;
+			Core::Array<double> outline;
+			for (int64 k = 0; k < chain.Count(); ++k) PushRange(outline, open[chain[k]]->m_Element->m_Points, reversed[k]);
+			Guess guess = Guess::Rectangle;
+			double fit = 0.0;
+			if (!ClassifyClosed(outline, guess, fit) || fit < 0.45) continue;
+			SketchGroup group;
+			group.m_Guess = guess;
+			group.m_Fit = fit;
+			group.m_Box = PointsBox(outline);
+			group.m_Color = open[chain[0]]->m_Element->m_Color;
+			for (int64 k : chain) {
+				visited[k] = true;
+				open[k]->m_Used = true;
+				group.m_Ids.Push(open[k]->m_Element->m_Id);
+			}
+			groups.Push(group);
+		}
+	}
+
+	static void Shapes(Core::Array<StrokeInfo*>& infos, Core::Array<SketchGroup>& groups) {
+		for (StrokeInfo* info : infos) {
+			if (info->m_Used || !info->m_Closed) continue;
+			Guess guess = Guess::Rectangle;
+			double fit = 0.0;
+			if (!ClassifyClosed(info->m_Element->m_Points, guess, fit)) continue;
+			SketchGroup group;
+			group.m_Guess = guess;
+			group.m_Fit = fit;
+			group.m_Box = info->m_Box;
+			group.m_Color = info->m_Element->m_Color;
+			group.m_Ids.Push(info->m_Element->m_Id);
+			info->m_Used = true;
+			groups.Push(group);
+		}
+	}
+
+	// A head drawn at the end of the stroke itself: the long first stretch, then a short hook back.
+	static bool HookHead(const StrokeInfo* info, Core::Array<double>& shaft) {
+		Core::Array<double> simple = Simplify(info->m_Element->m_Points, Math::Max(3.0, info->m_Box.Diagonal() * 0.04));
+		const int64 n = simple.Count() / 2;
+		if (n < 3) return false;
+		double longest = 0.0;
+		int64 at = 0;
+		for (int64 i = 0; i + 1 < n; ++i) {
+			const double d = Distance(simple[i * 2], simple[i * 2 + 1], simple[i * 2 + 2], simple[i * 2 + 3]);
+			if (d > longest) {
+				longest = d;
+				at = i;
+			}
+		}
+		if (at != 0 || longest < info->m_Length * 0.35 || longest < 30.0) return false;
+		const double tipX = simple[2];
+		const double tipY = simple[3];
+		for (int64 i = 2; i < n; ++i)
+			if (Distance(simple[i * 2], simple[i * 2 + 1], tipX, tipY) > Math::Max(30.0, longest * 0.5)) return false;
+		if (TurnAngle(simple[0], simple[1], simple[2], simple[3], simple[4], simple[5]) < 1.9) return false;
+		shaft.Push(simple[0]);
+		shaft.Push(simple[1]);
+		shaft.Push(tipX);
+		shaft.Push(tipY);
+		return true;
+	}
+
+	// The small strokes that make a head at (x, y), the tip of a shaft `length` long.
+	static Core::Array<StrokeInfo*> HeadStrokes(Core::Array<StrokeInfo*>& infos, const StrokeInfo* shaft, double x, double y, double length) {
+		Core::Array<StrokeInfo*> head;
+		const double reach = Math::Max(28.0, length * 0.3);
+		const double touch = Math::Max(14.0, length * 0.12);
+		for (StrokeInfo* info : infos) {
+			if (info == shaft || info->m_Used || info->m_Length > Math::Max(length * 0.6, 45.0) || info->m_Box.Diagonal() > Math::Max(reach * 1.5, 50.0)) continue;
+			const Core::Array<double>& p = info->m_Element->m_Points;
+			bool within = true;
+			for (int64 i = 0; i + 1 < p.Count(); i += 2)
+				if (Distance(p[i], p[i + 1], x, y) > reach) within = false;
+			if (within && Nearest(p, x, y) <= touch) head.Push(info);
+		}
+		return head;
+	}
+
+	static void Lines(Core::Array<StrokeInfo*>& infos, Core::Array<SketchGroup>& groups) {
+		// The longest strokes first, so a shaft claims its head before the head is mistaken for a line of its own.
+		Core::Array<StrokeInfo*> order = infos;
+		order.SortBy([](StrokeInfo* a, StrokeInfo* b) -> bool { return a->m_Length > b->m_Length; });
+		for (StrokeInfo* info : order) {
+			if (info->m_Used || info->m_Closed || info->m_Length < 40.0) continue;
+			const double straight = info->m_Chord / Math::Max(1.0, info->m_Length);
+			const Core::Array<double>& p = info->m_Element->m_Points;
+			Core::Array<double> shaft;
+			SketchGroup group;
+			group.m_Color = info->m_Element->m_Color;
+			group.m_Ids.Push(info->m_Element->m_Id);
+			if (HookHead(info, shaft)) {
+				group.m_Guess = Guess::Arrow;
+				group.m_HeadAtEnd = true;
+				group.m_Fit = 0.8;
+			}
+			else {
+				if (straight < 0.5) continue;
+				shaft.Push(p[0]);
+				shaft.Push(p[1]);
+				shaft.Push(p[p.Count() - 2]);
+				shaft.Push(p[p.Count() - 1]);
+				const double length = Distance(shaft[0], shaft[1], shaft[2], shaft[3]);
+				Core::Array<StrokeInfo*> atEnd = HeadStrokes(infos, info, shaft[2], shaft[3], length);
+				Core::Array<StrokeInfo*> atStart = HeadStrokes(infos, info, shaft[0], shaft[1], length);
+				if (!atEnd.IsEmpty() || !atStart.IsEmpty()) {
+					group.m_Guess = Guess::Arrow;
+					group.m_HeadAtEnd = !atEnd.IsEmpty();
+					group.m_HeadAtStart = !atStart.IsEmpty();
+					group.m_Fit = Math::Clamp(0.5 + straight * 0.45, 0.0, 0.95);
+					for (StrokeInfo* head : atEnd) {
+						head->m_Used = true;
+						group.m_Ids.Push(head->m_Element->m_Id);
+					}
+					for (StrokeInfo* head : atStart) {
+						head->m_Used = true;
+						group.m_Ids.Push(head->m_Element->m_Id);
+					}
+				}
+				else if (straight > 0.88) {
+					group.m_Guess = Guess::Line;
+					group.m_Fit = Math::Clamp((straight - 0.8) / 0.2, 0.0, 1.0);
+				}
+				else continue;
+			}
+			info->m_Used = true;
+			group.m_Line = shaft;
+			group.m_Box = PointsBox(p);
+			groups.Push(group);
+		}
+	}
+
+	// The rest, clustered by nearness: handwriting when small, else a scribble.
+	static void Clusters(Core::Array<StrokeInfo*>& infos, Core::Array<SketchGroup>& groups) {
+		Core::Array<StrokeInfo*> left;
+		for (StrokeInfo* info : infos)
+			if (!info->m_Used) left.Push(info);
+		const int64 count = left.Count();
+		Core::Array<int64> parent;
+		for (int64 i = 0; i < count; ++i) parent.Push(i);
+		for (int64 i = 0; i < count; ++i)
+			for (int64 j = i + 1; j < count; ++j) {
+				// Letters and words of one line join across a word's gap; lines join only when close.
+				const Box& first = left[i]->m_Box;
+				const Box& second = left[j]->m_Box;
+				const double tall = Math::Max(first.Height(), second.Height());
+				const double shared = Math::Min(first.m_Y1, second.m_Y1) - Math::Max(first.m_Y0, second.m_Y0);
+				const bool sameLine = shared > 0.4 * Math::Min(first.Height(), second.Height());
+				const double reach = sameLine ? Math::Clamp(1.1 * tall, 10.0, 40.0) : Math::Clamp(0.45 * tall, 6.0, 20.0);
+				if (BoxGap(first, second) > reach) continue;
+				int64 a = i;
+				while (parent[a] != a) a = parent[a];
+				int64 b = j;
+				while (parent[b] != b) b = parent[b];
+				if (a != b) parent[b] = a;
+			}
+		Core::HashMap<int64, int64> groupOf;
+		for (int64 i = 0; i < count; ++i) {
+			int64 root = i;
+			while (parent[root] != root) root = parent[root];
+			const int64* at = groupOf.FindAs(root);
+			if (!at) {
+				SketchGroup group;
+				group.m_Color = left[i]->m_Element->m_Color;
+				groupOf.Insert(root, groups.Count());
+				groups.Push(group);
+				at = groupOf.FindAs(root);
+			}
+			SketchGroup& group = groups[*at];
+			group.m_Ids.Push(left[i]->m_Element->m_Id);
+			group.m_Box.AddBox(left[i]->m_Box);
+			left[i]->m_Used = true;
+		}
+		for (const Core::KeyValue<int64, int64>& entry : groupOf) {
+			SketchGroup& group = groups[entry.value];
+			double sizes = 0.0;
+			for (StrokeInfo* info : left)
+				if (group.m_Ids.Contains(info->m_Element->m_Id)) sizes += info->m_Box.Diagonal();
+			const double mean = sizes / (double)group.m_Ids.Count();
+			const bool small = mean < 60.0 && group.m_Box.Height() < 110.0;
+			group.m_Guess = small ? Guess::Handwriting : Guess::Scribble;
+			group.m_Fit = small ? 0.6 : 0.3;
+		}
+	}
+
+	// How far (x, y) is from a box's outline: 0 on it, positive inside or out.
+	static double OutlineGap(const Box& box, double x, double y) {
+		if (!box.Contains(x, y)) return BoxGap(box, BoxAt(x, y, 0.0, 0.0));
+		return Math::Min(Math::Min(x - box.m_X0, box.m_X1 - x), Math::Min(y - box.m_Y0, box.m_Y1 - y));
+	}
+
+	// What the board has at (x, y) for a line's end: the shape group or node whose outline is nearest (an end deep inside
+	// a big box touches a shape in it, not the box), "" for nothing near.
+	static Core::String EndAt(const Board& board, const Core::Array<SketchGroup>& groups, double x, double y, double length) {
+		const double reach = Math::Max(24.0, length * 0.12);
+		Core::String best;
+		double bestD = reach;
+		for (const SketchGroup& group : groups) {
+			if (!IsShapeGuess(group.m_Guess) && group.m_Guess != Guess::Frame) continue;
+			const double d = OutlineGap(group.m_Box, x, y);
+			if (d <= bestD) {
+				bestD = d;
+				best = group.m_Name;
+			}
+		}
+		for (Element* element : board.Near(BoxAt(x - reach, y - reach, reach * 2.0, reach * 2.0))) {
+			if (!IsNode(element->m_Kind) && element->m_Kind != Kind::Note && element->m_Kind != Kind::Text && element->m_Kind != Kind::Image) continue;
+			if (!board.LayerVisible(element->m_Layer.View())) continue;
+			const double d = OutlineGap(element->Frame(), x, y);
+			if (d < bestD) {
+				bestD = d;
+				best = element->m_Id;
+			}
+		}
+		return best;
+	}
+
+	// A big rectangle with other shapes inside is a frame: a group the owner drew around them.
+	static void Frames(Core::Array<SketchGroup>& groups) {
+		for (SketchGroup& outer : groups) {
+			if (outer.m_Guess != Guess::Rectangle) continue;
+			for (const SketchGroup& inner : groups) {
+				if (&inner == &outer || !IsShapeGuess(inner.m_Guess)) continue;
+				if (outer.m_Box.Contains(inner.m_Box.CenterX(), inner.m_Box.CenterY()) && outer.m_Box.Width() * outer.m_Box.Height() > inner.m_Box.Width() * inner.m_Box.Height() * 2.0) {
+					outer.m_Guess = Guess::Frame;
+					break;
+				}
+			}
+		}
+	}
+
+	// Small "shapes" in a line of handwriting are letters (an o, a 0), not shapes.
+	static void Letters(Core::Array<SketchGroup>& groups) {
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			if (!IsShapeGuess(groups[i].m_Guess) || groups[i].m_Box.Diagonal() > 90.0) continue;
+			for (int64 j = 0; j < groups.Count(); ++j) {
+				SketchGroup& writing = groups[j];
+				if (writing.m_Guess != Guess::Handwriting || BoxGap(groups[i].m_Box, writing.m_Box) > 20.0) continue;
+				if (groups[i].m_Box.Height() > writing.m_Box.Height() * 1.6) continue;
+				writing.m_Ids.Append(groups[i].m_Ids);
+				writing.m_Box.AddBox(groups[i].m_Box);
+				groups.RemoveAt(i);
+				i -= 1;
+				break;
+			}
+		}
+	}
+
+	static void Name(Core::Array<SketchGroup>& groups) {
+		groups.SortBy([](const SketchGroup& a, const SketchGroup& b) -> bool {
+			const double rowA = Math::Floor(a.m_Box.m_Y0 / 60.0);
+			const double rowB = Math::Floor(b.m_Box.m_Y0 / 60.0);
+			if (rowA != rowB) return rowA < rowB;
+			if (a.m_Box.m_X0 != b.m_Box.m_X0) return a.m_Box.m_X0 < b.m_Box.m_X0;
+			return a.m_Ids[0] < b.m_Ids[0];
+		});
+		for (int64 i = 0; i < groups.Count(); ++i) groups[i].m_Name = Core::String("g") + NumberText((double)(i + 1)).View();
+	}
+
+	// Handwriting inside a shape group or a node is its label; in a frame's top band, its title; beside an arrow's middle,
+	// the arrow's label.
+	static void Labels(const Board& board, Core::Array<SketchGroup>& groups) {
+		for (SketchGroup& writing : groups) {
+			if (writing.m_Guess != Guess::Handwriting) continue;
+			const double cx = writing.m_Box.CenterX();
+			const double cy = writing.m_Box.CenterY();
+			double smallest = c_Far;
+			for (SketchGroup& shape : groups) {
+				if (!IsShapeGuess(shape.m_Guess) || !shape.m_Box.Contains(cx, cy)) continue;
+				const double area = shape.m_Box.Width() * shape.m_Box.Height();
+				if (area < smallest) {
+					smallest = area;
+					writing.m_Inside = shape.m_Name;
+				}
+			}
+			if (writing.m_Inside.IsEmpty())
+				for (SketchGroup& frame : groups)
+					if (frame.m_Guess == Guess::Frame && frame.m_Box.Contains(cx, cy) && writing.m_Box.m_Y0 - frame.m_Box.m_Y0 < 50.0 && frame.m_Holds.IsEmpty()) writing.m_Inside = frame.m_Name;
+			if (writing.m_Inside.IsEmpty() && writing.m_Box.Height() < 60.0)
+				for (SketchGroup& line : groups) {
+					if ((line.m_Guess != Guess::Line && line.m_Guess != Guess::Arrow) || line.m_Line.Count() < 4) continue;
+					const double mx = (line.m_Line[0] + line.m_Line[2]) * 0.5;
+					const double my = (line.m_Line[1] + line.m_Line[3]) * 0.5;
+					const double length = Distance(line.m_Line[0], line.m_Line[1], line.m_Line[2], line.m_Line[3]);
+					if (Distance(cx, cy, mx, my) < Math::Max(40.0, length * 0.3) && SegmentDistance(cx, cy, line.m_Line[0], line.m_Line[1], line.m_Line[2], line.m_Line[3]) < 40.0) {
+						writing.m_Inside = line.m_Name;
+						break;
+					}
+				}
+			if (!writing.m_Inside.IsEmpty()) {
+				for (SketchGroup& holder : groups)
+					if (holder.m_Name == writing.m_Inside) holder.m_Holds.Push(writing.m_Name);
+				continue;
+			}
+			for (Element* element : board.Near(BoxAt(cx, cy, 0.0, 0.0)))
+				if (IsNode(element->m_Kind) && element->Frame().Contains(cx, cy) && board.LayerVisible(element->m_Layer.View())) writing.m_Inside = element->m_Id;
+		}
+	}
+
+	Core::Array<double> LongestStrokeEnds(const Board& board, const SketchGroup& group) {
+		Core::Array<double> line;
+		double longest = -1.0;
+		for (const Core::String& id : group.m_Ids) {
+			Element* stroke = board.Find(id.View());
+			if (!stroke || stroke->m_Points.Count() < 4) continue;
+			const double length = PolylineLength(stroke->m_Points);
+			if (length <= longest) continue;
+			longest = length;
+			const Core::Array<double>& p = stroke->m_Points;
+			line.Clear();
+			line.Push(p[0]);
+			line.Push(p[1]);
+			line.Push(p[p.Count() - 2]);
+			line.Push(p[p.Count() - 1]);
+		}
+		return line;
+	}
+
+	Core::String EndOf(const Board& board, const Core::Array<SketchGroup>& groups, double x, double y, double length) {
+		return EndAt(board, groups, x, y, length);
+	}
+
+	Core::Array<SketchGroup> AnalyzeSketch(const Board& board, const Core::Array<Core::String>& ids) {
+		Core::Array<StrokeInfo*> infos;
+		for (Element* element : board.m_Elements) {
+			if (element->m_Kind != Kind::Stroke || element->m_Points.Count() < 4) continue;
+			if (ids.IsEmpty() ? !board.LayerVisible(element->m_Layer.View()) : !ids.Contains(element->m_Id)) continue;
+			infos.Push(Measure(element));
+		}
+		Core::Array<SketchGroup> groups;
+		Shapes(infos, groups);
+		Loops(infos, groups);
+		Lines(infos, groups);
+		Clusters(infos, groups);
+		Letters(groups);
+		Frames(groups);
+		Name(groups);
+		for (SketchGroup& group : groups) {
+			if (group.m_Guess == Guess::Scribble) group.m_Line = LongestStrokeEnds(board, group);
+			if (group.m_Line.Count() != 4) continue;
+			const double length = Distance(group.m_Line[0], group.m_Line[1], group.m_Line[2], group.m_Line[3]);
+			group.m_From = EndAt(board, groups, group.m_Line[0], group.m_Line[1], length);
+			group.m_To = EndAt(board, groups, group.m_Line[2], group.m_Line[3], length);
+			// An arrow from a shape to itself is not one: its far end touches nothing found.
+			if (!group.m_From.IsEmpty() && group.m_From == group.m_To) group.m_To = Core::String();
+			if (group.m_Guess == Guess::Scribble) continue;
+			for (const Core::String& id : group.m_Ids) {
+				Element* stroke = board.Find(id.View());
+				if (stroke) group.m_Box.AddBox(PointsBox(stroke->m_Points));
+			}
+		}
+		Labels(board, groups);
+		return groups;
+	}
+}

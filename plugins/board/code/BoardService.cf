@@ -1,0 +1,462 @@
+include "BoardService.ch"
+
+namespace Boards
+{
+	const int32 c_HistoryShown = 100;
+
+	int64 NowMs() {
+		return Platform::UnixTimeNs() / 1000000;
+	}
+
+	Core::String BoardIdFor(Core::StringView wsId, Core::StringView path) {
+		Core::StringBuilder id;
+		id.Append(wsId);
+		id.AppendByte(':');
+		id.AppendUIntBase(Core::String(path).Hash(), 16, 16);
+		return id.ToString();
+	}
+
+	Core::String BoardPath(Core::StringView path) {
+		Core::String normal = IED::NormalizePath(path);
+		if (normal.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("a board is named by its workspace path: design/plan.iedboard"));
+		if (!normal.View().EndsWith(Core::StringView(c_Extension))) normal = normal + c_Extension;
+		return normal;
+	}
+
+	void WriteChange(JsonOut& json, const Change& change) {
+		json.BeginObject();
+		json.StrField("id", change.m_Id.View());
+		json.StrField("by", change.m_By.View());
+		json.StrField("label", change.m_Label.View());
+		json.IntField("timeMs", change.m_TimeMs);
+		json.IntField("rev", change.m_Rev);
+		json.IntField("elements", change.m_Elements.Count());
+		json.BoolField("undone", change.m_Undone);
+		json.EndObject();
+	}
+
+	void WriteTouched(JsonOut& json, const Board& board, const Change& change) {
+		json.Key(Core::StringView("put"));
+		json.BeginArray();
+		Core::Array<int64> order;
+		for (const ElementChange& entry : change.m_Elements) {
+			const int64 at = board.IndexOf(entry.m_Id.View());
+			if (at >= 0) order.Push(at);
+		}
+		order.Sort();
+		for (int64 at : order) {
+			json.BeginObject();
+			json.IntField("at", at);
+			json.Key(Core::StringView("el"));
+			WriteElement(json, *board.m_Elements[at]);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("removed"));
+		json.BeginArray();
+		for (const ElementChange& entry : change.m_Elements)
+			if (!board.Find(entry.m_Id.View())) json.Str(entry.m_Id.View());
+		json.EndArray();
+		if (change.m_LayersChanged) {
+			json.Key(Core::StringView("layers"));
+			json.BeginArray();
+			for (const Layer& layer : board.m_Layers) WriteLayer(json, layer);
+			json.EndArray();
+		}
+		if (change.m_TitleChanged) json.StrField("title", board.m_Title.View());
+	}
+
+	void BoardService::Init(IED::PluginContext* context) {
+		m_Context = context;
+	}
+
+	static void Saver(BoardService* service) {
+		while (!service->m_Stopping) {
+			Threading::Thread::Sleep(250000000);
+			service->SaveDue();
+		}
+	}
+
+	void BoardService::Start() {
+		BoardService* self = this;
+		m_Context->StartThread([self]() { Saver(self); });
+	}
+
+	void BoardService::Stop() {
+		m_Stopping = true;
+		Core::Array<OpenBoard*> all;
+		{
+			Threading::LockGuard guard(m_Lock);
+			for (const Core::KeyValue<Core::String, OpenBoard*>& entry : m_Boards) all.Push(entry.value);
+		}
+		for (OpenBoard* open : all) Save(open);
+	}
+
+	void BoardService::SaveDue() {
+		Core::Array<OpenBoard*> all;
+		{
+			Threading::LockGuard guard(m_Lock);
+			for (const Core::KeyValue<Core::String, OpenBoard*>& entry : m_Boards) all.Push(entry.value);
+		}
+		const int64 now = clock_now_ns();
+		for (OpenBoard* open : all) {
+			bool due = false;
+			{
+				Threading::LockGuard held(open->m_Lock);
+				due = open->m_Dirty && now - open->m_ChangedNs >= c_SaveDelayNs;
+			}
+			if (due) Save(open);
+		}
+	}
+
+	void BoardService::Save(OpenBoard* open) {
+		Core::String text;
+		{
+			Threading::LockGuard held(open->m_Lock);
+			if (!open->m_Dirty) return;
+			text = WriteBoard(*open->m_Board);
+			open->m_Dirty = false;
+			open->m_Saved = text;
+		}
+		IED::Workspace ws;
+		Core::String problem;
+		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) return;
+		if (!IED::WriteFile(ws, open->m_Path.View(), text.View(), problem)) m_Context->Log((((Core::String("cannot save ") + open->m_Path.View()) + ": ") + problem.View()).View());
+	}
+
+	void BoardService::Opened(const IED::Workspace& ws) {
+		BoardService* self = this;
+		Core::String wsId = ws.m_Id;
+		m_Context->TopicFrom((Core::String("ied.board/ws:") + ws.m_Id.View()).View(), [self, wsId]() -> Core::String {
+			IED::Workspace found;
+			if (!IED::FindWorkspace(wsId.View(), found)) return Core::String("{\"boards\":[]}");
+			return self->ListJson(found);
+		});
+	}
+
+	static bool Skipped(Core::StringView name) {
+		return name.StartsWith(Core::StringView(".")) || name == "node_modules" || name == "build" || name == "vendor" || name == "toolchains" || name == "packages" || name == "third_party" || name == "bin" || name == "obj" || name == "target" || name == "__pycache__";
+	}
+
+	static void Walk(const FS::Path& root, Core::StringView relative, int32 depth, Core::Array<Core::String>& found) {
+		if (depth > 10 || found.Count() > 2000) return;
+		FS::Path folder = relative.IsEmpty() ? root : root / relative;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr())) {
+			Core::String path = relative.IsEmpty() ? entry.name : (Core::String(relative) + "/") + entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory) {
+				if (!Skipped(entry.name.View())) Walk(root, path.View(), depth + 1, found);
+			}
+			else if (entry.kind == FS::EntryKind::File && entry.name.View().EndsWith(Core::StringView(c_Extension))) found.Push(path);
+		}
+	}
+
+	Core::Array<Core::String> BoardService::BoardFiles(const IED::Workspace& ws) {
+		Core::Array<Core::String> found;
+		Walk(FS::Path(ws.m_Root.View()), Core::StringView(""), 0, found);
+		found.Sort();
+		return found;
+	}
+
+	Core::String BoardService::ListJson(const IED::Workspace& ws) {
+		JsonOut json;
+		json.BeginObject();
+		json.Key(Core::StringView("boards"));
+		json.BeginArray();
+		for (const Core::String& path : BoardFiles(ws)) {
+			json.BeginObject();
+			json.StrField("path", path.View());
+			json.StrField("boardId", BoardIdFor(ws.m_Id.View(), path.View()).View());
+			OpenBoard* open = nullptr;
+			{
+				Threading::LockGuard guard(m_Lock);
+				OpenBoard** found = m_Boards.Find(BoardIdFor(ws.m_Id.View(), path.View()));
+				if (found) open = *found;
+			}
+			if (open) {
+				Threading::LockGuard held(open->m_Lock);
+				json.StrField("title", open->m_Board->m_Title.View());
+				json.IntField("elements", open->m_Board->m_Elements.Count());
+				json.IntField("layers", open->m_Board->m_Layers.Count());
+				json.IntField("plans", open->m_Board->m_Plans.Count());
+			}
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void BoardService::PublishList(Core::StringView wsId) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) return;
+		m_Context->Publish((Core::String("ied.board/ws:") + wsId).View(), "boards.changed", ListJson(ws).View());
+	}
+
+	Core::String BoardService::SnapshotJson(OpenBoard* open) {
+		const Board& board = *open->m_Board;
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("boardId", open->m_Id.View());
+		json.StrField("path", open->m_Path.View());
+		json.IntField("rev", board.m_Rev);
+		json.StrField("title", board.m_Title.View());
+		json.Key(Core::StringView("layers"));
+		json.BeginArray();
+		for (const Layer& layer : board.m_Layers) WriteLayer(json, layer);
+		json.EndArray();
+		json.Key(Core::StringView("elements"));
+		json.BeginArray();
+		for (Element* element : board.m_Elements) WriteElement(json, *element);
+		json.EndArray();
+		json.Key(Core::StringView("plans"));
+		json.BeginArray();
+		for (const Plan& plan : board.m_Plans) WritePlan(json, plan);
+		json.EndArray();
+		json.Key(Core::StringView("history"));
+		json.BeginArray();
+		const int64 first = Math::Max((int64)0, board.m_History.Count() - (int64)c_HistoryShown);
+		for (int64 i = first; i < board.m_History.Count(); ++i) WriteChange(json, *board.m_History[i]);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static IED::Workspace WorkspaceOrThrow(Core::StringView wsId) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no open workspace ") + wsId).View());
+		return ws;
+	}
+
+	OpenBoard* BoardService::ById(Core::StringView boardId) {
+		Threading::LockGuard guard(m_Lock);
+		OpenBoard** found = m_Boards.Find(Core::String(boardId));
+		if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no open board ") + boardId).View());
+		return *found;
+	}
+
+	// Registers a board loaded from `text` (or a new one) and its topic.
+	static OpenBoard* Register(BoardService* service, Core::StringView wsId, Core::StringView path, Board* board, Core::StringView text) {
+		OpenBoard* open = new OpenBoard();
+		open->m_Id = BoardIdFor(wsId, path);
+		open->m_WsId = Core::String(wsId);
+		open->m_Path = Core::String(path);
+		open->m_Board = board;
+		open->m_Saved = Core::String(text);
+		{
+			Threading::LockGuard guard(service->m_Lock);
+			OpenBoard** raced = service->m_Boards.Find(open->m_Id);
+			if (raced) return *raced;
+			service->m_Boards.Insert(open->m_Id, open);
+		}
+		service->m_Context->TopicFrom(open->Topic().View(), [service, open]() -> Core::String { return service->SnapshotJson(open); });
+		return open;
+	}
+
+	OpenBoard* BoardService::Open(Core::StringView wsId, Core::StringView path) {
+		Core::String normal = BoardPath(path);
+		{
+			Threading::LockGuard guard(m_Lock);
+			OpenBoard** found = m_Boards.Find(BoardIdFor(wsId, normal.View()));
+			if (found) return *found;
+		}
+		IED::Workspace ws = WorkspaceOrThrow(wsId);
+		Core::String text;
+		Core::String problem;
+		if (!IED::ReadFile(ws, normal.View(), text, problem)) throw IED::RpcError(IED::ErrorCode::NotFound, (((Core::String("no board ") + normal.View()) + ": ") + problem.View()).View());
+		Board* board = new Board();
+		if (!ReadBoard(text.View(), *board, problem)) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String("cannot read ") + normal.View()) + ": ") + problem.View()).View());
+		return Register(this, wsId, normal.View(), board, text.View());
+	}
+
+	OpenBoard* BoardService::Create(Core::StringView wsId, Core::StringView path, Core::StringView title) {
+		Core::String normal = BoardPath(path);
+		IED::Workspace ws = WorkspaceOrThrow(wsId);
+		Core::String existing;
+		Core::String problem;
+		if (IED::ReadFile(ws, normal.View(), existing, problem)) throw IED::RpcError(IED::ErrorCode::Conflict, (Core::String("a board is already at ") + normal.View()).View());
+		Board* board = new Board();
+		Core::StringView name = normal.View();
+		const int64 slash = name.ByteLength() - 1;
+		int64 start = 0;
+		for (int64 i = 0; i <= slash; ++i)
+			if (name.ByteAt(i) == (int32)'/') start = i + 1;
+		Core::StringView base = name.Substring(start, name.ByteLength() - start - Core::StringView(c_Extension).ByteLength());
+		InitBoard(*board, title.IsEmpty() ? base : title);
+		Core::String text = WriteBoard(*board);
+		if (!IED::WriteFile(ws, normal.View(), text.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("cannot write ") + normal.View()) + ": ") + problem.View()).View());
+		OpenBoard* open = Register(this, wsId, normal.View(), board, text.View());
+		PublishList(wsId);
+		return open;
+	}
+
+	static void MarkChanged(OpenBoard* open) {
+		open->m_Dirty = true;
+		open->m_ChangedNs = clock_now_ns();
+	}
+
+	static Core::String EditAnswer(const Board& board, const ChangeResult& result) {
+		JsonOut json;
+		json.BeginObject();
+		json.IntField("rev", board.m_Rev);
+		if (result.m_Change) {
+			json.Key(Core::StringView("change"));
+			WriteChange(json, *result.m_Change);
+		}
+		json.Key(Core::StringView("refs"));
+		json.BeginObject();
+		for (const Core::String& name : result.m_RefNames) json.StrField(name.CStr(), result.m_Refs.Get(name).View());
+		json.EndObject();
+		json.Key(Core::StringView("done"));
+		json.BeginArray();
+		for (const Core::String& line : result.m_Done) json.Str(line.View());
+		json.EndArray();
+		json.Key(Core::StringView("warnings"));
+		json.BeginArray();
+		for (const Core::String& line : result.m_Warnings) json.Str(line.View());
+		json.EndArray();
+		if (!result.m_Error.IsEmpty()) json.StrField("error", result.m_Error.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String BoardService::Edit(OpenBoard* open, const Serialization::DomNode& ops, Core::StringView by, Core::StringView label, Core::StringView opId, ChangeResult& result) {
+		IED::Workspace ws;
+		IED::FindWorkspace(open->m_WsId.View(), ws);
+		BoardService* self = this;
+		func<bool(Core::StringView, double&, double&, Core::String&)> sizeOf = [self, ws](Core::StringView src, double& w, double& h, Core::String& problem) -> bool { return self->ImageSize(ws, src, w, h, problem); };
+		Threading::LockGuard held(open->m_Lock);
+		Core::String answer;
+		m_Context->Atomically([&](IED::Events& events) {
+			result = ApplyOps(*open->m_Board, ops, by, label, NowMs(), sizeOf);
+			answer = EditAnswer(*open->m_Board, result);
+			if (!result.m_Change) return;
+			MarkChanged(open);
+			JsonOut json;
+			json.BeginObject();
+			json.IntField("rev", open->m_Board->m_Rev);
+			json.Key(Core::StringView("change"));
+			WriteChange(json, *result.m_Change);
+			WriteTouched(json, *open->m_Board, *result.m_Change);
+			if (!opId.IsEmpty()) json.StrField("opId", opId);
+			json.Key(Core::StringView("refs"));
+			json.BeginObject();
+			for (const Core::String& name : result.m_RefNames) json.StrField(name.CStr(), result.m_Refs.Get(name).View());
+			json.EndObject();
+			json.EndObject();
+			events.Publish(open->Topic().View(), "changed", json.View());
+		});
+		return answer;
+	}
+
+	Core::String BoardService::Rewound(OpenBoard* open, Core::StringView by, bool undo, Core::StringView changeId) {
+		Threading::LockGuard held(open->m_Lock);
+		Change* target = !changeId.IsEmpty() ? open->m_Board->FindChange(changeId) : (undo ? UndoTarget(*open->m_Board, by) : RedoTarget(*open->m_Board, by));
+		if (!changeId.IsEmpty() && !target) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no change ") + changeId + " in the board's history (it keeps the last 500 since the board was opened)").View());
+		if (!changeId.IsEmpty() && target->m_Undone == undo) throw IED::RpcError(IED::ErrorCode::Conflict, (Core::String("change ") + changeId + (undo ? " is already undone" : " is not undone")).View());
+		if (!target) return Core::String("{\"nothing\":true}");
+		Core::String answer;
+		m_Context->Atomically([&](IED::Events& events) {
+			Rewind(*open->m_Board, target, undo);
+			MarkChanged(open);
+			JsonOut json;
+			json.BeginObject();
+			json.IntField("rev", open->m_Board->m_Rev);
+			json.Key(Core::StringView("change"));
+			WriteChange(json, *target);
+			WriteTouched(json, *open->m_Board, *target);
+			json.EndObject();
+			events.Publish(open->Topic().View(), "changed", json.View());
+			JsonOut reply;
+			reply.BeginObject();
+			reply.IntField("rev", open->m_Board->m_Rev);
+			reply.Key(Core::StringView("change"));
+			WriteChange(reply, *target);
+			reply.EndObject();
+			answer = reply.ToString();
+		});
+		return answer;
+	}
+
+	Core::String BoardService::SetPlan(OpenBoard* open, const Serialization::DomNode& args, Core::StringView by) {
+		Core::StringView action = args.Member("action").AsView();
+		Core::StringView id = args.Member("id").AsView();
+		Threading::LockGuard held(open->m_Lock);
+		Board& board = *open->m_Board;
+		int64 index = -1;
+		for (int64 i = 0; i < board.m_Plans.Count(); ++i)
+			if (board.m_Plans[i].m_Id == id) index = i;
+		if (action == "delete" && index < 0) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no plan ") + id).View());
+		if (action != "delete" && action != "set") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'action' is set or delete"));
+		Core::StringView kind = args.Member("kind").AsView();
+		if (!kind.IsEmpty() && kind != "markdown" && kind != "mermaid") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("a plan's 'kind' is markdown or mermaid"));
+		Core::String answerId;
+		m_Context->Atomically([&](IED::Events& events) {
+			if (action == "delete") board.m_Plans.RemoveAt(index);
+			else {
+				if (index < 0) {
+					Plan plan;
+					plan.m_Id = id.IsEmpty() ? board.NewPlanId() : Core::String(id);
+					plan.m_Title = Core::String("Plan");
+					plan.m_Kind = Core::String("markdown");
+					board.m_Plans.Push(plan);
+					index = board.m_Plans.Count() - 1;
+				}
+				Plan& plan = board.m_Plans[index];
+				if (args.Member("title").IsValid()) plan.m_Title = Core::String(args.Member("title").AsView());
+				if (!kind.IsEmpty()) plan.m_Kind = Core::String(kind);
+				if (args.Member("text").IsValid()) plan.m_Text = Core::String(args.Member("text").AsView());
+				plan.m_By = Core::String(by);
+				answerId = plan.m_Id;
+			}
+			MarkChanged(open);
+			JsonOut json;
+			json.BeginObject();
+			json.Key(Core::StringView("plans"));
+			json.BeginArray();
+			for (const Plan& plan : board.m_Plans) WritePlan(json, plan);
+			json.EndArray();
+			json.EndObject();
+			events.Publish(open->Topic().View(), "plans", json.View());
+		});
+		JsonOut reply;
+		reply.BeginObject();
+		reply.StrField("id", answerId.View());
+		reply.EndObject();
+		return reply.ToString();
+	}
+
+	void BoardService::FilesChanged(const IED::FileChanges& changes) {
+		bool listChanged = changes.m_Overflowed;
+		Core::Array<OpenBoard*> touched;
+		for (const IED::FileChange& change : changes.m_Changes) {
+			if (!change.m_Path.View().EndsWith(Core::StringView(c_Extension))) continue;
+			if (change.m_Change != "changed") listChanged = true;
+			Threading::LockGuard guard(m_Lock);
+			OpenBoard** found = m_Boards.Find(BoardIdFor(changes.m_WsId.View(), change.m_Path.View()));
+			if (found && !touched.Contains(*found)) touched.Push(*found);
+		}
+		if (listChanged) PublishList(changes.m_WsId.View());
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(changes.m_WsId.View(), ws)) return;
+		for (OpenBoard* open : touched) {
+			Core::String text;
+			Core::String problem;
+			if (!IED::ReadFile(ws, open->m_Path.View(), text, problem)) continue;
+			Board* fresh = new Board();
+			if (!ReadBoard(text.View(), *fresh, problem)) {
+				m_Context->Log((((Core::String("ignored a change to ") + open->m_Path.View()) + " that does not read: ") + problem.View()).View());
+				continue;
+			}
+			Threading::LockGuard held(open->m_Lock);
+			if (text == open->m_Saved) continue;
+			BoardService* self = this;
+			m_Context->Atomically([&](IED::Events& events) {
+				fresh->m_Rev = open->m_Board->m_Rev + 1;
+				open->m_Board = fresh;
+				open->m_Saved = text;
+				open->m_Dirty = false;
+				events.Publish(open->Topic().View(), "reloaded", self->SnapshotJson(open).View());
+			});
+		}
+	}
+}

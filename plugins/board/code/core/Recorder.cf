@@ -1,0 +1,124 @@
+include "Ops.ch"
+
+namespace Boards
+{
+	void Recorder::Init(Board* board, Change* change) {
+		m_Board = board;
+		m_Change = change;
+		for (int64 i = 0; i < board->m_Elements.Count(); ++i) m_StartIndex.Insert(board->m_Elements[i]->m_Id, i);
+	}
+
+	void Recorder::Before(Core::StringView id) {
+		if (m_Seen.ContainsAs(id)) return;
+		m_Seen.Insert(Core::String(id), true);
+		ElementChange entry;
+		entry.m_Id = Core::String(id);
+		Element* element = m_Board->Find(id);
+		if (element) {
+			entry.m_Before = new Element(*element);
+			const int64* index = m_StartIndex.FindAs(id);
+			entry.m_IndexBefore = index ? *index : m_Board->IndexOf(id);
+		}
+		m_Change->m_Elements.Push(entry);
+	}
+
+	void Recorder::BeforeLayers() {
+		if (m_Change->m_LayersChanged) return;
+		m_Change->m_LayersChanged = true;
+		m_Change->m_LayersBefore = m_Board->m_Layers;
+	}
+
+	void Recorder::BeforeTitle() {
+		if (m_Change->m_TitleChanged) return;
+		m_Change->m_TitleChanged = true;
+		m_Change->m_TitleBefore = m_Board->m_Title;
+	}
+
+	static bool SameLayers(const Core::Array<Layer>& a, const Core::Array<Layer>& b) {
+		if (a.Count() != b.Count()) return false;
+		for (int64 i = 0; i < a.Count(); ++i) {
+			const Layer& x = a[i];
+			const Layer& y = b[i];
+			if (x.m_Id != y.m_Id || x.m_Name != y.m_Name || x.m_Visible != y.m_Visible || x.m_Locked != y.m_Locked || x.m_Opacity != y.m_Opacity) return false;
+		}
+		return true;
+	}
+
+	static bool SameElement(const Element* a, const Element* b) {
+		if (!a || !b) return a == b;
+		JsonOut x;
+		JsonOut y;
+		WriteElement(x, *a);
+		WriteElement(y, *b);
+		return x.View() == y.View();
+	}
+
+	bool Recorder::Finish() {
+		Core::Array<ElementChange> kept;
+		for (ElementChange& entry : m_Change->m_Elements) {
+			Element* element = m_Board->Find(entry.m_Id.View());
+			if (element) {
+				entry.m_After = new Element(*element);
+				entry.m_IndexAfter = m_Board->IndexOf(entry.m_Id.View());
+			}
+			const bool moved = entry.m_Before && entry.m_After && entry.m_IndexBefore != entry.m_IndexAfter;
+			if (!SameElement(entry.m_Before, entry.m_After) || moved) kept.Push(entry);
+		}
+		m_Change->m_Elements = kept;
+		if (m_Change->m_LayersChanged) {
+			m_Change->m_LayersAfter = m_Board->m_Layers;
+			if (SameLayers(m_Change->m_LayersBefore, m_Change->m_LayersAfter)) m_Change->m_LayersChanged = false;
+		}
+		if (m_Change->m_TitleChanged) {
+			m_Change->m_TitleAfter = m_Board->m_Title;
+			if (m_Change->m_TitleAfter == m_Change->m_TitleBefore) m_Change->m_TitleChanged = false;
+		}
+		return !m_Change->m_Elements.IsEmpty() || m_Change->m_LayersChanged || m_Change->m_TitleChanged;
+	}
+
+	void Rewind(Board& board, Change* change, bool undo) {
+		for (const ElementChange& entry : change->m_Elements) {
+			const int64 index = board.IndexOf(entry.m_Id.View());
+			if (index >= 0) board.RemoveAt(index);
+		}
+		Core::Array<int64> order;
+		for (int64 i = 0; i < change->m_Elements.Count(); ++i)
+			if ((undo ? change->m_Elements[i].m_Before : change->m_Elements[i].m_After) != nullptr) order.Push(i);
+		order.SortBy([change, undo](int64 a, int64 b) -> bool {
+			const ElementChange& x = change->m_Elements[a];
+			const ElementChange& y = change->m_Elements[b];
+			return (undo ? x.m_IndexBefore : x.m_IndexAfter) < (undo ? y.m_IndexBefore : y.m_IndexAfter);
+		});
+		for (int64 i : order) {
+			const ElementChange& entry = change->m_Elements[i];
+			Element* state = undo ? entry.m_Before : entry.m_After;
+			board.Insert(new Element(*state), undo ? entry.m_IndexBefore : entry.m_IndexAfter);
+		}
+		if (change->m_LayersChanged) board.m_Layers = undo ? change->m_LayersBefore : change->m_LayersAfter;
+		if (change->m_TitleChanged) board.m_Title = undo ? change->m_TitleBefore : change->m_TitleAfter;
+		// An element whose layer the rewind took away goes to the bottom layer rather than nowhere.
+		for (Element* element : board.m_Elements)
+			if (board.LayerIndex(element->m_Layer.View()) < 0) element->m_Layer = board.m_Layers[0].m_Id;
+		change->m_Undone = undo;
+		board.m_Rev += 1;
+	}
+
+	Change* UndoTarget(const Board& board, Core::StringView by) {
+		for (int64 i = board.m_History.Count() - 1; i >= 0; --i) {
+			Change* change = board.m_History[i];
+			if (change->m_By == by && !change->m_Undone) return change;
+		}
+		return nullptr;
+	}
+
+	Change* RedoTarget(const Board& board, Core::StringView by) {
+		Change* found = nullptr;
+		for (int64 i = board.m_History.Count() - 1; i >= 0; --i) {
+			Change* change = board.m_History[i];
+			if (change->m_By != by) continue;
+			if (!change->m_Undone) break;
+			found = change;
+		}
+		return found;
+	}
+}

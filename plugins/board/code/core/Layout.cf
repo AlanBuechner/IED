@@ -1,0 +1,536 @@
+include "Layout.ch"
+include "Font.ch"
+
+namespace Boards
+{
+	class LayoutNode
+	{
+		public Core::String m_Id;
+		public Box m_Box;
+		public double m_MainSize;
+		public double m_CrossSize;
+		public double m_Cross;      // its center across the ranks: where it stands, then where it goes
+		public double m_Main;       // its center along the ranks
+		public int64 m_Rank;
+		public double m_Order;      // its place in its rank, for the barycenter sweeps
+		public Core::Array<int64> m_In;
+		public Core::Array<int64> m_Out;
+		public Core::String m_Cluster;   // the frame it is in, "" for none
+		public double m_LabelOut;        // the widest label on a connector it starts
+	}
+
+	bool IsDirection(Core::StringView direction) {
+		return direction == "TD" || direction == "TB" || direction == "LR" || direction == "BT" || direction == "RL";
+	}
+
+	static bool Horizontal(Core::StringView direction) {
+		return direction == "LR" || direction == "RL";
+	}
+
+	static Core::Array<LayoutNode*> Nodes(const Board& board, const Core::Array<Core::String>& ids, bool horizontal, Core::HashMap<Core::String, int64>& index) {
+		Core::Array<LayoutNode*> nodes;
+		for (const Core::String& id : ids) {
+			Element* element = board.Find(id.View());
+			if (!element || !IsBoxed(element->m_Kind) || element->m_Kind == Kind::Frame || index.Contains(id)) continue;
+			LayoutNode* node = new LayoutNode();
+			node->m_Id = id;
+			node->m_Box = element->Frame();
+			node->m_MainSize = horizontal ? node->m_Box.Width() : node->m_Box.Height();
+			node->m_CrossSize = horizontal ? node->m_Box.Height() : node->m_Box.Width();
+			node->m_Cross = horizontal ? node->m_Box.CenterY() : node->m_Box.CenterX();
+			node->m_Main = horizontal ? node->m_Box.CenterX() : node->m_Box.CenterY();
+			index.Insert(id, nodes.Count());
+			nodes.Push(node);
+		}
+		return nodes;
+	}
+
+	static void Edges(const Board& board, Core::Array<LayoutNode*>& nodes, const Core::HashMap<Core::String, int64>& index) {
+		for (Element* element : board.m_Elements) {
+			if (element->m_Kind != Kind::Connector) continue;
+			const int64* from = index.FindAs(element->m_From.View());
+			const int64* to = index.FindAs(element->m_To.View());
+			if (!from || !to || *from == *to) continue;
+			nodes[*from]->m_Out.Push(*to);
+			nodes[*to]->m_In.Push(*from);
+			if (!element->m_Text.IsEmpty()) {
+				double w = 0.0;
+				double h = 0.0;
+				MeasureText(element->m_Text.View(), 13.0, w, h);
+				nodes[*from]->m_LabelOut = Math::Max(nodes[*from]->m_LabelOut, w);
+			}
+		}
+	}
+
+	// Turns the edges that close a cycle around, visiting nodes from the one drawn first along the ranks.
+	static void BreakCycles(Core::Array<LayoutNode*>& nodes) {
+		Core::Array<int64> order;
+		for (int64 i = 0; i < nodes.Count(); ++i) order.Push(i);
+		order.SortBy([&nodes](int64 a, int64 b) -> bool { return nodes[a]->m_Main < nodes[b]->m_Main; });
+		Core::Array<int32> state;
+		state.Resize(nodes.Count());
+		for (int64 i = 0; i < nodes.Count(); ++i) state[i] = 0;
+		for (int64 root : order) {
+			if (state[root] != 0) continue;
+			Core::Array<int64> stack;
+			Core::Array<int64> next;
+			stack.Push(root);
+			next.Push(0);
+			state[root] = 1;
+			while (!stack.IsEmpty()) {
+				const int64 v = stack.Back();
+				const int64 k = next.Back();
+				if (k >= nodes[v]->m_Out.Count()) {
+					state[v] = 2;
+					stack.Pop();
+					next.Pop();
+					continue;
+				}
+				next.Back() = k + 1;
+				const int64 w = nodes[v]->m_Out[k];
+				if (state[w] == 1) {
+					// v -> w closes a cycle: make it w -> v.
+					nodes[v]->m_Out.RemoveAt(k);
+					next.Back() = k;
+					const int64 at = nodes[w]->m_In.IndexOf(v);
+					if (at >= 0) nodes[w]->m_In.RemoveAt(at);
+					nodes[w]->m_Out.Push(v);
+					nodes[v]->m_In.Push(w);
+				}
+				else if (state[w] == 0) {
+					state[w] = 1;
+					stack.Push(w);
+					next.Push(0);
+				}
+			}
+		}
+	}
+
+	static int64 Rank(Core::Array<LayoutNode*>& nodes) {
+		Core::Array<int64> waiting;
+		Core::Array<int64> ready;
+		for (int64 i = 0; i < nodes.Count(); ++i) {
+			waiting.Push(nodes[i]->m_In.Count());
+			nodes[i]->m_Rank = 0;
+			if (nodes[i]->m_In.IsEmpty()) ready.Push(i);
+		}
+		int64 most = 0;
+		while (!ready.IsEmpty()) {
+			const int64 v = ready.Pop();
+			for (int64 w : nodes[v]->m_Out) {
+				if (nodes[v]->m_Rank + 1 > nodes[w]->m_Rank) nodes[w]->m_Rank = nodes[v]->m_Rank + 1;
+				waiting[w] -= 1;
+				if (waiting[w] == 0) ready.Push(w);
+			}
+			if (nodes[v]->m_Rank > most) most = nodes[v]->m_Rank;
+		}
+		// Nodes with no connectors at all go in a rank of their own after the rest.
+		bool connected = false;
+		for (LayoutNode* node : nodes)
+			if (!node->m_In.IsEmpty() || !node->m_Out.IsEmpty()) connected = true;
+		if (!connected) return most;
+		bool loose = false;
+		for (LayoutNode* node : nodes)
+			if (node->m_In.IsEmpty() && node->m_Out.IsEmpty()) {
+				node->m_Rank = most + 1;
+				loose = true;
+			}
+		return loose ? most + 1 : most;
+	}
+
+	static Core::Array<Core::Array<int64>> Ranks(Core::Array<LayoutNode*>& nodes, int64 count) {
+		Core::Array<Core::Array<int64>> ranks;
+		for (int64 r = 0; r <= count; ++r) ranks.Push(Core::Array<int64>());
+		for (int64 i = 0; i < nodes.Count(); ++i) ranks[nodes[i]->m_Rank].Push(i);
+		for (int64 r = 0; r <= count; ++r) ranks[r].SortBy([&nodes](int64 a, int64 b) -> bool { return nodes[a]->m_Cross < nodes[b]->m_Cross; });
+		return ranks;
+	}
+
+	static void Number(Core::Array<LayoutNode*>& nodes, Core::Array<int64>& rank) {
+		for (int64 k = 0; k < rank.Count(); ++k) nodes[rank[k]]->m_Order = rank.Count() > 1 ? (double)k / (double)(rank.Count() - 1) : 0.5;
+	}
+
+	// One barycenter sweep: each rank ordered by the mean place of its neighbours on the side the sweep comes from.
+	static void Sweep(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, bool down) {
+		const int64 count = ranks.Count();
+		for (int64 step = 1; step < count; ++step) {
+			const int64 r = down ? step : count - 1 - step;
+			Core::Array<int64>& rank = ranks[r];
+			Core::Array<double> weight;
+			for (int64 v : rank) {
+				const Core::Array<int64>* neighbours = down ? &nodes[v]->m_In : &nodes[v]->m_Out;
+				double sum = 0.0;
+				for (int64 w : *neighbours) sum += nodes[w]->m_Order;
+				weight.Push(neighbours->IsEmpty() ? nodes[v]->m_Order : sum / (double)neighbours->Count());
+			}
+			// A frame's members sort by their frame's mean, so they stay side by side in the rank.
+			Core::Array<double> key;
+			for (int64 k = 0; k < rank.Count(); ++k) {
+				const Core::String& cluster = nodes[rank[k]]->m_Cluster;
+				if (cluster.IsEmpty()) {
+					key.Push(weight[k]);
+					continue;
+				}
+				double sum = 0.0;
+				int64 n = 0;
+				for (int64 j = 0; j < rank.Count(); ++j)
+					if (nodes[rank[j]]->m_Cluster == cluster) {
+						sum += weight[j];
+						n += 1;
+					}
+				key.Push(sum / (double)n);
+			}
+			Core::Array<int64> places;
+			for (int64 k = 0; k < rank.Count(); ++k) places.Push(k);
+			places.SortBy([&weight, &key](int64 a, int64 b) -> bool { return key[a] < key[b] || (key[a] == key[b] && (weight[a] < weight[b] || (weight[a] == weight[b] && a < b))); });
+			Core::Array<int64> sorted;
+			for (int64 k : places) sorted.Push(rank[k]);
+			ranks[r] = sorted;
+			Number(nodes, ranks[r]);
+		}
+	}
+
+	// Places a rank's nodes across, each as near `wanted` as their order and the gap allow.
+	static void Pack(Core::Array<LayoutNode*>& nodes, const Core::Array<int64>& rank, const Core::Array<double>& wanted, double gap) {
+		const int64 count = rank.Count();
+		if (count == 0) return;
+		Core::Array<double> at;
+		for (int64 k = 0; k < count; ++k) at.Push(wanted[k]);
+		for (int64 k = 1; k < count; ++k) {
+			const double least = at[k - 1] + (nodes[rank[k - 1]]->m_CrossSize + nodes[rank[k]]->m_CrossSize) * 0.5 + gap;
+			if (at[k] < least) at[k] = least;
+		}
+		// Shift the run back so its middle sits where its middle was wanted.
+		double wantedMid = 0.0;
+		double atMid = 0.0;
+		for (int64 k = 0; k < count; ++k) {
+			wantedMid += wanted[k];
+			atMid += at[k];
+		}
+		const double shift = (atMid - wantedMid) / (double)count;
+		for (int64 k = 0; k < count; ++k) nodes[rank[k]]->m_Cross = at[k] - shift;
+	}
+
+	static void PlaceAcross(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, double gap) {
+		for (Core::Array<int64>& rank : ranks) {
+			Core::Array<double> wanted;
+			double cursor = 0.0;
+			for (int64 k = 0; k < rank.Count(); ++k) {
+				const double size = nodes[rank[k]]->m_CrossSize;
+				wanted.Push(cursor + size * 0.5);
+				cursor += size + gap;
+			}
+			const double middle = (cursor - gap) * 0.5;
+			for (int64 k = 0; k < wanted.Count(); ++k) wanted[k] -= middle;
+			Pack(nodes, rank, wanted, gap);
+		}
+		for (int32 pass = 0; pass < 8; ++pass) {
+			const bool down = pass % 2 == 0;
+			for (int64 step = 0; step < ranks.Count(); ++step) {
+				const int64 r = down ? step : ranks.Count() - 1 - step;
+				Core::Array<double> wanted;
+				for (int64 v : ranks[r]) {
+					double sum = 0.0;
+					int64 n = 0;
+					for (int64 w : nodes[v]->m_In) { sum += nodes[w]->m_Cross; n += 1; }
+					for (int64 w : nodes[v]->m_Out) { sum += nodes[w]->m_Cross; n += 1; }
+					wanted.Push(n > 0 ? sum / (double)n : nodes[v]->m_Cross);
+				}
+				Pack(nodes, ranks[r], wanted, gap);
+			}
+		}
+	}
+
+	// Pushes nodes that are not a frame's members out of the span its members take in the ranks they are in.
+	static void ClearFrames(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, double gap) {
+		const double pad = 40.0;
+		Core::Array<Core::String> clusters;
+		for (LayoutNode* node : nodes)
+			if (!node->m_Cluster.IsEmpty() && !clusters.Contains(node->m_Cluster)) clusters.Push(node->m_Cluster);
+		for (int32 pass = 0; pass < 3; ++pass)
+			for (const Core::String& cluster : clusters) {
+				double lo = c_Far;
+				double hi = -c_Far;
+				int64 first = ranks.Count();
+				int64 last = -1;
+				for (int64 r = 0; r < ranks.Count(); ++r)
+					for (int64 v : ranks[r]) {
+						if (nodes[v]->m_Cluster != cluster) continue;
+						lo = Math::Min(lo, nodes[v]->m_Cross - nodes[v]->m_CrossSize * 0.5 - pad);
+						hi = Math::Max(hi, nodes[v]->m_Cross + nodes[v]->m_CrossSize * 0.5 + pad);
+						first = Math::Min(first, r);
+						last = Math::Max(last, r);
+					}
+				for (int64 r = first; r <= last; ++r) {
+					Core::Array<double> wanted;
+					bool moved = false;
+					for (int64 v : ranks[r]) {
+						LayoutNode* node = nodes[v];
+						double at = node->m_Cross;
+						const double half = node->m_CrossSize * 0.5;
+						if (node->m_Cluster != cluster && at + half > lo && at - half < hi) {
+							at = at < (lo + hi) * 0.5 ? lo - half - gap * 0.25 : hi + half + gap * 0.25;
+							moved = true;
+						}
+						wanted.Push(at);
+					}
+					if (!moved) continue;
+					// Keep the rank's order consistent with the new places, then space it.
+					Core::Array<int64> order;
+					for (int64 k = 0; k < ranks[r].Count(); ++k) order.Push(k);
+					order.SortBy([&wanted](int64 a, int64 b) -> bool { return wanted[a] < wanted[b]; });
+					Core::Array<int64> rank;
+					Core::Array<double> sortedWanted;
+					for (int64 k : order) {
+						rank.Push(ranks[r][k]);
+						sortedWanted.Push(wanted[k]);
+					}
+					ranks[r] = rank;
+					for (int64 k = 0; k < rank.Count(); ++k) nodes[rank[k]]->m_Cross = sortedWanted[k];
+					for (int64 k = 1; k < rank.Count(); ++k) {
+						const double least = nodes[rank[k - 1]]->m_Cross + (nodes[rank[k - 1]]->m_CrossSize + nodes[rank[k]]->m_CrossSize) * 0.5 + gap * 0.25;
+						if (nodes[rank[k]]->m_Cross < least) nodes[rank[k]]->m_Cross = least;
+					}
+				}
+			}
+	}
+
+	// Ranks one after another; across a horizontal layout the gap after a rank leaves room for its connectors' labels.
+	static void PlaceAlong(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, double gap, bool horizontal) {
+		double cursor = 0.0;
+		for (Core::Array<int64>& rank : ranks) {
+			double thickness = 0.0;
+			double label = 0.0;
+			for (int64 v : rank) {
+				thickness = Math::Max(thickness, nodes[v]->m_MainSize);
+				label = Math::Max(label, nodes[v]->m_LabelOut);
+			}
+			for (int64 v : rank) nodes[v]->m_Main = cursor + thickness * 0.5;
+			cursor += thickness + (horizontal ? Math::Max(gap, label + 50.0) : (label > 0.0 ? Math::Max(gap, 80.0) : gap));
+		}
+	}
+
+	// Nodes with no connectors between them at all: a grid in reading order.
+	static void Grid(Core::Array<LayoutNode*>& nodes, double gap) {
+		Core::Array<int64> order;
+		for (int64 i = 0; i < nodes.Count(); ++i) order.Push(i);
+		order.SortBy([&nodes](int64 a, int64 b) -> bool {
+			const double rowA = Math::Floor(nodes[a]->m_Box.m_Y0 / 80.0);
+			const double rowB = Math::Floor(nodes[b]->m_Box.m_Y0 / 80.0);
+			return rowA < rowB || (rowA == rowB && nodes[a]->m_Box.m_X0 < nodes[b]->m_Box.m_X0);
+		});
+		const int64 columns = (int64)Math::Ceil(Math::Sqrt((double)nodes.Count()));
+		double y = 0.0;
+		for (int64 start = 0; start < order.Count(); start += columns) {
+			double x = 0.0;
+			double tallest = 0.0;
+			for (int64 k = start; k < start + columns && k < order.Count(); ++k) {
+				LayoutNode* node = nodes[order[k]];
+				node->m_Cross = x + node->m_Box.Width() * 0.5;
+				node->m_Main = y + node->m_Box.Height() * 0.5;
+				x += node->m_Box.Width() + gap;
+				tallest = Math::Max(tallest, node->m_Box.Height());
+			}
+			y += tallest + gap;
+		}
+	}
+
+	Core::HashMap<Core::String, Point> LayeredLayout(const Board& board, const Core::Array<Core::String>& ids, Core::StringView direction, double gap, const Core::HashMap<Core::String, Core::String>& clusters) {
+		Core::HashMap<Core::String, Point> moves;
+		const bool horizontal = Horizontal(direction);
+		const bool reversed = direction == "BT" || direction == "RL";
+		Core::HashMap<Core::String, int64> index;
+		Core::Array<LayoutNode*> nodes = Nodes(board, ids, horizontal, index);
+		if (nodes.IsEmpty()) return moves;
+		Box before;
+		for (LayoutNode* node : nodes) {
+			before.AddBox(node->m_Box);
+			const Core::String* cluster = clusters.FindAs(node->m_Id.View());
+			if (cluster) node->m_Cluster = *cluster;
+		}
+		Edges(board, nodes, index);
+		bool connected = false;
+		for (LayoutNode* node : nodes)
+			if (!node->m_Out.IsEmpty()) connected = true;
+		bool grid = false;
+		if (connected) {
+			BreakCycles(nodes);
+			Core::Array<Core::Array<int64>> ranks = Ranks(nodes, Rank(nodes));
+			for (Core::Array<int64>& rank : ranks) Number(nodes, rank);
+			for (int32 i = 0; i < 4; ++i) Sweep(nodes, ranks, i % 2 == 0);
+			PlaceAlong(nodes, ranks, gap, horizontal);
+			PlaceAcross(nodes, ranks, gap * 0.75);
+			ClearFrames(nodes, ranks, gap);
+		}
+		else {
+			Grid(nodes, gap * 0.75);
+			grid = true;
+		}
+		Box after;
+		for (LayoutNode* node : nodes) {
+			const double main = reversed ? -node->m_Main : node->m_Main;
+			const double x = grid ? node->m_Cross : (horizontal ? main : node->m_Cross);
+			const double y = grid ? node->m_Main : (horizontal ? node->m_Cross : main);
+			node->m_Box = BoxAt(x - node->m_Box.Width() * 0.5, y - node->m_Box.Height() * 0.5, node->m_Box.Width(), node->m_Box.Height());
+			after.AddBox(node->m_Box);
+		}
+		for (LayoutNode* node : nodes) {
+			Element* element = board.Find(node->m_Id.View());
+			Point move;
+			move.m_X = Tenth(node->m_Box.m_X0 - after.m_X0 + before.m_X0) - element->m_X;
+			move.m_Y = Tenth(node->m_Box.m_Y0 - after.m_Y0 + before.m_Y0) - element->m_Y;
+			moves.Insert(node->m_Id, move);
+		}
+		return moves;
+	}
+
+	static Core::Array<Element*> Found(const Board& board, const Core::Array<Core::String>& ids) {
+		Core::Array<Element*> found;
+		for (const Core::String& id : ids) {
+			Element* element = board.Find(id.View());
+			if (element && element->m_Kind != Kind::Connector) found.Push(element);
+		}
+		return found;
+	}
+
+	Core::HashMap<Core::String, Point> Aligned(const Board& board, const Core::Array<Core::String>& ids, Core::StringView edge, Core::StringView to) {
+		Core::HashMap<Core::String, Point> moves;
+		Core::Array<Element*> elements = Found(board, ids);
+		Box all;
+		Element* reference = to.IsEmpty() ? nullptr : board.Find(to);
+		if (reference) all = reference->Frame();
+		else
+			for (Element* element : elements) all.AddBox(element->Frame());
+		for (Element* element : elements) {
+			Box box = element->Frame();
+			Point move;
+			move.m_X = 0.0;
+			move.m_Y = 0.0;
+			if (edge == "left") move.m_X = all.m_X0 - box.m_X0;
+			else if (edge == "right") move.m_X = all.m_X1 - box.m_X1;
+			else if (edge == "centerx") move.m_X = all.CenterX() - box.CenterX();
+			else if (edge == "top") move.m_Y = all.m_Y0 - box.m_Y0;
+			else if (edge == "bottom") move.m_Y = all.m_Y1 - box.m_Y1;
+			else if (edge == "centery") move.m_Y = all.CenterY() - box.CenterY();
+			moves.Insert(element->m_Id, move);
+		}
+		return moves;
+	}
+
+	Core::HashMap<Core::String, Point> Distributed(const Board& board, const Core::Array<Core::String>& ids, Core::StringView axis) {
+		Core::HashMap<Core::String, Point> moves;
+		Core::Array<Element*> elements = Found(board, ids);
+		if (elements.Count() < 3) return moves;
+		const bool alongX = axis != "y";
+		elements.SortBy([alongX](Element* a, Element* b) -> bool {
+			return alongX ? a->Frame().CenterX() < b->Frame().CenterX() : a->Frame().CenterY() < b->Frame().CenterY();
+		});
+		double sizes = 0.0;
+		for (Element* element : elements) sizes += alongX ? element->Frame().Width() : element->Frame().Height();
+		Box first = elements[0]->Frame();
+		Box last = elements.Back()->Frame();
+		const double span = alongX ? last.m_X1 - first.m_X0 : last.m_Y1 - first.m_Y0;
+		const double gap = (span - sizes) / (double)(elements.Count() - 1);
+		double cursor = alongX ? first.m_X0 : first.m_Y0;
+		for (Element* element : elements) {
+			Box box = element->Frame();
+			Point move;
+			move.m_X = alongX ? cursor - box.m_X0 : 0.0;
+			move.m_Y = alongX ? 0.0 : cursor - box.m_Y0;
+			cursor += (alongX ? box.Width() : box.Height()) + gap;
+			moves.Insert(element->m_Id, move);
+		}
+		return moves;
+	}
+
+	Core::HashMap<Core::String, Point> StableLayout(const Board& board, const Core::Array<Core::String>& ids, const Core::Array<Core::String>& keep, Core::StringView direction, double gap, const Core::HashMap<Core::String, Core::String>& clusters) {
+		Core::Array<Core::String> all = keep;
+		for (const Core::String& id : ids)
+			if (!all.Contains(id)) all.Push(id);
+		Core::HashMap<Core::String, Point> laid = LayeredLayout(board, all, direction, gap, clusters);
+		double dx = 0.0;
+		double dy = 0.0;
+		int64 n = 0;
+		for (const Core::String& id : keep) {
+			const Point* move = laid.FindAs(id.View());
+			if (!move) continue;
+			dx -= move->m_X;
+			dy -= move->m_Y;
+			n += 1;
+		}
+		if (n > 0) {
+			dx /= (double)n;
+			dy /= (double)n;
+		}
+		const bool horizontal = direction == "LR" || direction == "RL";
+		Core::HashMap<Core::String, Point> moves;
+		Core::Array<Box> taken;
+		for (const Core::String& id : ids) {
+			if (keep.Contains(id)) continue;
+			const Point* move = laid.FindAs(id.View());
+			Element* element = board.Find(id.View());
+			if (!move || !element) continue;
+			Box box = BoxAt(Tenth(element->m_X + move->m_X + dx), Tenth(element->m_Y + move->m_Y + dy), element->m_W, element->m_H);
+			for (int32 tries = 0; tries < 40; ++tries) {
+				bool clash = false;
+				for (Element* other : board.Near(box.Inflated(16.0)))
+					if (other != element && !ids.Contains(other->m_Id) && other->m_Kind != Kind::Connector && other->m_Kind != Kind::Frame && board.LayerVisible(other->m_Layer.View())) clash = true;
+				for (const Box& other : taken)
+					if (other.Inflated(16.0).Overlaps(box)) clash = true;
+				if (!clash) break;
+				const double step = (horizontal ? box.Height() : box.Width()) + 30.0;
+				box = horizontal ? BoxAt(box.m_X0, box.m_Y0 + step, box.Width(), box.Height()) : BoxAt(box.m_X0 + step, box.m_Y0, box.Width(), box.Height());
+			}
+			taken.Push(box);
+			Point delta;
+			delta.m_X = box.m_X0 - element->m_X;
+			delta.m_Y = box.m_Y0 - element->m_Y;
+			moves.Insert(id, delta);
+		}
+		return moves;
+	}
+
+	// Groups of values within `tolerance` of their group's first, each group's mean.
+	static Core::HashMap<int64, double> Lines(const Core::Array<double>& values, double tolerance) {
+		Core::Array<int64> order;
+		for (int64 i = 0; i < values.Count(); ++i) order.Push(i);
+		order.SortBy([&values](int64 a, int64 b) -> bool { return values[a] < values[b]; });
+		Core::HashMap<int64, double> mean;
+		int64 start = 0;
+		while (start < order.Count()) {
+			int64 end = start;
+			while (end + 1 < order.Count() && values[order[end + 1]] - values[order[start]] <= tolerance) end += 1;
+			double sum = 0.0;
+			for (int64 k = start; k <= end; ++k) sum += values[order[k]];
+			for (int64 k = start; k <= end; ++k) mean.Insert(order[k], sum / (double)(end - start + 1));
+			start = end + 1;
+		}
+		return mean;
+	}
+
+	Core::HashMap<Core::String, Point> Tidied(const Board& board, const Core::Array<Core::String>& ids, double grid) {
+		Core::HashMap<Core::String, Point> moves;
+		Core::Array<Element*> elements;
+		Core::Array<double> rows;
+		Core::Array<double> columns;
+		for (const Core::String& id : ids) {
+			Element* element = board.Find(id.View());
+			if (!element || !IsBoxed(element->m_Kind) || element->m_Kind == Kind::Frame) continue;
+			elements.Push(element);
+			rows.Push(element->m_Y + element->m_H * 0.5);
+			columns.Push(element->m_X + element->m_W * 0.5);
+		}
+		Core::HashMap<int64, double> row = Lines(rows, 24.0);
+		Core::HashMap<int64, double> column = Lines(columns, 24.0);
+		for (int64 i = 0; i < elements.Count(); ++i) {
+			Element* element = elements[i];
+			const double x = Math::Round(column.Get(i) / grid) * grid - element->m_W * 0.5;
+			const double y = Math::Round(row.Get(i) / grid) * grid - element->m_H * 0.5;
+			Point move;
+			move.m_X = Tenth(x - element->m_X);
+			move.m_Y = Tenth(y - element->m_Y);
+			moves.Insert(element->m_Id, move);
+		}
+		return moves;
+	}
+}

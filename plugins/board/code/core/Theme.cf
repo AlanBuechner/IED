@@ -1,0 +1,62 @@
+// The theme's colors for the server's pictures, read from frontend/css/theme.css so the board's palette has one source
+// (docs/07): the grayscale defaults stand in only for a token the file lacks.
+
+include "Render.ch"
+
+namespace Boards
+{
+	void Theme::Init() {
+		m_Background = RgbOf(0.1, 0.1, 0.1);
+		m_Ink = RgbOf(0.91, 0.91, 0.91);
+		m_Grid = RgbOf(0.15, 0.15, 0.15);
+		m_GridText = RgbOf(0.5, 0.5, 0.5);
+		m_Tag = RgbOf(0.6, 0.52, 0.81);
+		m_TagBack = RgbOf(0.05, 0.05, 0.05);
+	}
+
+	Rgb Theme::Color(Core::StringView name) const {
+		if (name.IsEmpty() || name == "ink") return m_Ink;
+		const Rgb* hue = m_Hues.FindAs(name);
+		return hue ? *hue : m_Ink;
+	}
+
+	// The value of `--<token>:` in the css, "" when it is not there.
+	static Core::StringView TokenValue(Core::StringView css, Core::StringView token) {
+		Core::StringBuilder key;
+		key.Append(Core::StringView("--"));
+		key.Append(token);
+		key.AppendByte(':');
+		const int64 at = css.IndexOf(key.View());
+		if (at < 0) return Core::StringView("");
+		int64 start = at + key.ByteLength();
+		while (start < css.ByteLength() && css.ByteAt(start) == (int32)' ') ++start;
+		int64 end = start;
+		while (end < css.ByteLength() && css.ByteAt(end) != (int32)';' && css.ByteAt(end) != (int32)' ') ++end;
+		return css.Substring(start, end - start);
+	}
+
+	static void Read(Core::StringView css, const char* token, Rgb& color) {
+		Rgb parsed;
+		if (ParseHex(TokenValue(css, Core::StringView(token)), parsed)) color = parsed;
+	}
+
+	Theme ReadTheme(Core::StringView css) {
+		Theme theme;
+		Read(css, "bg-2", theme.m_Background);
+		Read(css, "text-0", theme.m_Ink);
+		Read(css, "border-0", theme.m_Grid);
+		Read(css, "text-2", theme.m_GridText);
+		Read(css, "accent-ai", theme.m_Tag);
+		Read(css, "bg-0", theme.m_TagBack);
+		const char*[13] hues = { "gray", "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "violet", "pink" };
+		for (int32 i = 0; i < 13; ++i) {
+			Rgb color = theme.m_GridText;
+			Core::StringBuilder token;
+			token.Append(Core::StringView("hue-"));
+			token.Append(Core::StringView(hues[i]));
+			Read(css, token.CStr(), color);
+			theme.m_Hues.Insert(Core::String(hues[i]), color);
+		}
+		return theme;
+	}
+}

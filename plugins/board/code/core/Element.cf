@@ -1,0 +1,281 @@
+include "Element.ch"
+
+namespace Boards
+{
+	const char*[15] c_KindNames = { "stroke", "rect", "round", "ellipse", "diamond", "cylinder", "hexagon", "parallelogram", "text", "note", "frame", "line", "arrow", "connector", "image" };
+	const int32 c_KindCount = 15;
+	const char*[14] c_ColorNames = { "ink", "gray", "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "violet", "pink" };
+	const int32 c_ColorCount = 14;
+
+	Core::StringView KindName(Kind kind) {
+		const int32 index = (int32)kind;
+		return index >= 0 && index < c_KindCount ? Core::StringView(c_KindNames[index]) : Core::StringView("unknown");
+	}
+
+	Kind KindOf(Core::StringView name) {
+		for (int32 i = 0; i < c_KindCount; ++i)
+			if (name == c_KindNames[i]) return (Kind)i;
+		if (name == "rectangle" || name == "box") return Kind::Rect;
+		if (name == "circle" || name == "oval") return Kind::Ellipse;
+		if (name == "rounded") return Kind::Round;
+		if (name == "database" || name == "db") return Kind::Cylinder;
+		if (name == "sticky") return Kind::Note;
+		if (name == "edge") return Kind::Connector;
+		if (name == "picture" || name == "screenshot") return Kind::Image;
+		return Kind::Unknown;
+	}
+
+	bool IsNode(Kind kind) {
+		return kind == Kind::Rect || kind == Kind::Round || kind == Kind::Ellipse || kind == Kind::Diamond || kind == Kind::Cylinder || kind == Kind::Hexagon || kind == Kind::Parallelogram;
+	}
+
+	bool IsBoxed(Kind kind) {
+		return IsNode(kind) || kind == Kind::Text || kind == Kind::Note || kind == Kind::Frame || kind == Kind::Image;
+	}
+
+	bool IsPath(Kind kind) {
+		return kind == Kind::Stroke || kind == Kind::Line || kind == Kind::Arrow;
+	}
+
+	bool IsColorName(Core::StringView name, bool allowNone) {
+		if (allowNone && name == "none") return true;
+		for (int32 i = 0; i < c_ColorCount; ++i)
+			if (name == c_ColorNames[i]) return true;
+		return false;
+	}
+
+	Box Element::Frame() const {
+		if (IsBoxed(m_Kind)) return BoxAt(m_X, m_Y, m_W, m_H);
+		if (IsPath(m_Kind)) return PointsBox(m_Points);
+		return Box();
+	}
+
+	static void WriteText(JsonOut& json, const char* key, const Core::String& value) {
+		if (!value.IsEmpty()) json.StrField(key, value.View());
+	}
+
+	void WriteElement(JsonOut& json, const Element& element) {
+		json.BeginObject();
+		json.StrField("id", element.m_Id.View());
+		json.StrField("layer", element.m_Layer.View());
+		json.StrField("type", KindName(element.m_Kind));
+		if (IsBoxed(element.m_Kind)) {
+			json.NumField("x", element.m_X);
+			json.NumField("y", element.m_Y);
+			json.NumField("w", element.m_W);
+			json.NumField("h", element.m_H);
+		}
+		WriteText(json, "from", element.m_From);
+		WriteText(json, "to", element.m_To);
+		WriteText(json, "text", element.m_Text);
+		WriteText(json, "key", element.m_Key);
+		WriteText(json, "color", element.m_Color);
+		WriteText(json, "fill", element.m_Fill);
+		WriteText(json, "style", element.m_Style);
+		if (element.m_Width != c_DefaultWidth) json.NumField("width", element.m_Width);
+		if (element.m_Opacity != 1.0) json.NumField("opacity", element.m_Opacity);
+		if (element.m_FontSize != c_DefaultFontSize) json.NumField("fontSize", element.m_FontSize);
+		WriteText(json, "start", element.m_Start);
+		WriteText(json, "end", element.m_End);
+		WriteText(json, "route", element.m_Route);
+		WriteText(json, "desc", element.m_Desc);
+		WriteText(json, "about", element.m_About);
+		WriteText(json, "by", element.m_By);
+		if (element.m_Kind == Kind::Image) {
+			WriteText(json, "src", element.m_Src);
+			json.NumField("iw", element.m_ImageW);
+			json.NumField("ih", element.m_ImageH);
+			if (element.m_Crop.Count() == 4) {
+				json.Key(Core::StringView("crop"));
+				json.BeginArray();
+				for (double value : element.m_Crop) json.Num(value);
+				json.EndArray();
+			}
+		}
+		if (IsPath(element.m_Kind)) {
+			json.Key(Core::StringView("pts"));
+			json.BeginArray();
+			for (double value : element.m_Points) json.Num(value);
+			json.EndArray();
+		}
+		json.EndObject();
+	}
+
+	static bool IsOpKey(Core::StringView key) {
+		return key == "op" || key == "ref" || key == "id" || key == "ids" || key == "around" || key == "fit" || key == "on" || key == "label_after";
+	}
+
+	static bool ReadNumber(const Serialization::DomNode& value, Core::StringView key, double& field, Core::String& problem) {
+		const Serialization::DomKind kind = value.Kind();
+		if (kind == Serialization::DomKind::Int || kind == Serialization::DomKind::Float) {
+			field = value.AsFloat();
+			return true;
+		}
+		problem = (Core::String("'") + key) + "' is a number";
+		return false;
+	}
+
+	static bool ReadString(const Serialization::DomNode& value, Core::StringView key, Core::String& field, Core::String& problem) {
+		if (value.IsNull()) {
+			field = Core::String();
+			return true;
+		}
+		if (value.Kind() == Serialization::DomKind::String) {
+			field = Core::String(value.AsView());
+			return true;
+		}
+		if (value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float) {
+			Core::StringBuilder text;
+			AppendNumber(text, value.AsFloat());
+			field = text.ToString();
+			return true;
+		}
+		problem = (Core::String("'") + key) + "' is a string";
+		return false;
+	}
+
+	static bool ReadPoints(const Serialization::DomNode& value, Element& element, Core::String& problem) {
+		if (value.Kind() != Serialization::DomKind::Array) {
+			problem = Core::String("'pts' is an array of numbers: x1, y1, x2, y2, ...");
+			return false;
+		}
+		Core::Array<double> points;
+		for (int64 i = 0; i < value.Count(); ++i) {
+			Serialization::DomNode item = value.At(i);
+			if (item.Kind() == Serialization::DomKind::Array && item.Count() == 2) {
+				points.Push(item.At(0).AsFloat());
+				points.Push(item.At(1).AsFloat());
+				continue;
+			}
+			if (item.Kind() != Serialization::DomKind::Int && item.Kind() != Serialization::DomKind::Float) {
+				problem = Core::String("'pts' is an array of numbers: x1, y1, x2, y2, ... (or of [x, y] pairs)");
+				return false;
+			}
+			points.Push(item.AsFloat());
+		}
+		if (points.Count() % 2 != 0) {
+			problem = Core::String("'pts' has an odd count of numbers: it holds x, y pairs");
+			return false;
+		}
+		element.m_Points = points;
+		return true;
+	}
+
+	static bool ReadCrop(const Serialization::DomNode& value, Element& element, Core::String& problem) {
+		if (value.IsNull()) {
+			element.m_Crop.Clear();
+			return true;
+		}
+		if (value.Kind() != Serialization::DomKind::Array || value.Count() != 4) {
+			problem = Core::String("'crop' is [x, y, w, h] in the image's pixels, or null for all of it");
+			return false;
+		}
+		Core::Array<double> crop;
+		for (int64 i = 0; i < 4; ++i) crop.Push(value.At(i).AsFloat());
+		if (crop[2] <= 0.0 || crop[3] <= 0.0) {
+			problem = Core::String("'crop' needs a positive width and height");
+			return false;
+		}
+		element.m_Crop = crop;
+		return true;
+	}
+
+	static bool ReadEnum(Core::StringView key, const Core::String& value, Core::String& problem) {
+		if (value.IsEmpty()) return true;
+		const Core::StringView v = value.View();
+		bool ok = true;
+		if (key == "color") ok = IsColorName(v, false);
+		else if (key == "fill") ok = IsColorName(v, true);
+		else if (key == "style") ok = v == "solid" || v == "dashed" || v == "dotted";
+		else if (key == "start" || key == "end") ok = v == "none" || v == "arrow" || v == "dot";
+		else if (key == "route") ok = v == "straight" || v == "elbow";
+		if (ok) return true;
+		if (key == "color" || key == "fill") problem = (((Core::String("'") + key) + "' is a palette name: ink, gray, red, orange, amber, yellow, lime, green, teal, cyan, blue, indigo, violet, pink") + (key == "fill" ? ", none" : "")) + "; not '" + v + "'";
+		else if (key == "style") problem = (Core::String("'style' is solid, dashed or dotted; not '") + v) + "'";
+		else if (key == "route") problem = (Core::String("'route' is straight or elbow; not '") + v) + "'";
+		else problem = (((Core::String("'") + key) + "' is none, arrow or dot; not '") + v) + "'";
+		return false;
+	}
+
+	static bool ReadField(Core::StringView key, const Serialization::DomNode& value, Element& element, bool strict, Core::String& problem) {
+		if (key == "type") {
+			const Kind kind = KindOf(value.AsView());
+			if (kind == Kind::Unknown) {
+				problem = (Core::String("unknown type '") + value.AsView()) + "': stroke, rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, text, note, frame, line, arrow, connector, image";
+				return false;
+			}
+			element.m_Kind = kind;
+			return true;
+		}
+		if (key == "x") return ReadNumber(value, key, element.m_X, problem);
+		if (key == "y") return ReadNumber(value, key, element.m_Y, problem);
+		// A null size is fitted to the text again (AutoSize).
+		if ((key == "w" || key == "h") && value.IsNull()) {
+			if (key == "w") element.m_W = 0.0;
+			else element.m_H = 0.0;
+			return true;
+		}
+		if (key == "w") return ReadNumber(value, key, element.m_W, problem);
+		if (key == "h") return ReadNumber(value, key, element.m_H, problem);
+		if (key == "width" && value.IsNull()) {
+			element.m_Width = c_DefaultWidth;
+			return true;
+		}
+		if (key == "width") return ReadNumber(value, key, element.m_Width, problem);
+		if (key == "opacity" && value.IsNull()) {
+			element.m_Opacity = 1.0;
+			return true;
+		}
+		if (key == "opacity") return ReadNumber(value, key, element.m_Opacity, problem);
+		if (key == "fontSize" && value.IsNull()) {
+			element.m_FontSize = c_DefaultFontSize;
+			return true;
+		}
+		if (key == "fontSize") return ReadNumber(value, key, element.m_FontSize, problem);
+		if (key == "pts" || key == "points") return ReadPoints(value, element, problem);
+		if (key == "src") return ReadString(value, key, element.m_Src, problem);
+		if (key == "iw") return ReadNumber(value, key, element.m_ImageW, problem);
+		if (key == "ih") return ReadNumber(value, key, element.m_ImageH, problem);
+		if (key == "crop") return ReadCrop(value, element, problem);
+		if (key == "layer") return ReadString(value, key, element.m_Layer, problem);
+		if (key == "text" || key == "label") return ReadString(value, key, element.m_Text, problem);
+		if (key == "key") return ReadString(value, key, element.m_Key, problem);
+		if (key == "desc") return ReadString(value, key, element.m_Desc, problem);
+		if (key == "about") return ReadString(value, key, element.m_About, problem);
+		if (key == "by") return ReadString(value, key, element.m_By, problem);
+		if (key == "from") return ReadString(value, key, element.m_From, problem);
+		if (key == "to") return ReadString(value, key, element.m_To, problem);
+		if (key == "color") return ReadString(value, key, element.m_Color, problem) && ReadEnum(key, element.m_Color, problem);
+		if (key == "fill") return ReadString(value, key, element.m_Fill, problem) && ReadEnum(key, element.m_Fill, problem);
+		if (key == "style") return ReadString(value, key, element.m_Style, problem) && ReadEnum(key, element.m_Style, problem);
+		if (key == "start") return ReadString(value, key, element.m_Start, problem) && ReadEnum(key, element.m_Start, problem);
+		if (key == "end") return ReadString(value, key, element.m_End, problem) && ReadEnum(key, element.m_End, problem);
+		if (key == "route") return ReadString(value, key, element.m_Route, problem) && ReadEnum(key, element.m_Route, problem);
+		if (!strict) return true;
+		problem = (Core::String("unknown field '") + key) + "': type, layer, x, y, w, h, pts, text, key, desc, color, fill, style, width, opacity, fontSize, from, to, start, end, route, src, crop, about";
+		return false;
+	}
+
+	bool ReadElementFields(const Serialization::DomNode& node, Element& element, bool strict, Core::String& problem) {
+		if (node.Kind() != Serialization::DomKind::Object) {
+			problem = Core::String("an element is an object of fields");
+			return false;
+		}
+		for (int64 i = 0; i < node.Count(); ++i) {
+			const Core::StringView key = node.KeyAt(i);
+			if (IsOpKey(key)) continue;
+			if (!ReadField(key, node.ValueAt(i), element, strict, problem)) return false;
+		}
+		return true;
+	}
+
+	Core::String ElementProblem(const Element& element) {
+		if (element.m_Kind == Kind::Unknown) return Core::String("it needs a 'type'");
+		if (IsPath(element.m_Kind) && element.m_Points.Count() < 4) return Core::String("a ") + KindName(element.m_Kind) + " needs 'pts' with at least two points";
+		if (element.m_Kind == Kind::Connector && (element.m_From.IsEmpty() || element.m_To.IsEmpty())) return Core::String("a connector needs 'from' and 'to' (element ids)");
+		if (element.m_Kind == Kind::Image && element.m_Src.IsEmpty()) return Core::String("an image needs 'src': a PNG or JPEG file of the workspace");
+		if (element.m_Kind == Kind::Image && element.m_Crop.Count() == 4 && (element.m_Crop[0] < 0.0 || element.m_Crop[1] < 0.0 || element.m_Crop[0] + element.m_Crop[2] > element.m_ImageW + 0.5 || element.m_Crop[1] + element.m_Crop[3] > element.m_ImageH + 0.5)) return Core::String("'crop' reaches outside the image");
+		if (IsBoxed(element.m_Kind) && element.m_Kind != Kind::Text && (element.m_W <= 0.0 || element.m_H <= 0.0)) return Core::String("a ") + KindName(element.m_Kind) + " needs a positive 'w' and 'h'";
+		return Core::String();
+	}
+}

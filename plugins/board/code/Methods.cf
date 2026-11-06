@@ -1,0 +1,133 @@
+// The ied.board/* protocol methods the board's UI calls (docs/32 "Protocol").
+
+include "BoardService.ch"
+
+namespace Boards
+{
+	static void Method(BoardService* service, const char* name, func<Core::String(BoardService*, const IED::Request&)> method) {
+		Core::String problem;
+		if (!service->m_Context->Method(Core::StringView(name), [service, method](const IED::Request& request) -> Core::String { return method(service, request); }, problem))
+			service->m_Context->Log((((Core::String("cannot answer ") + name) + ": ") + problem.View()).View());
+	}
+
+	static Core::String Opened(OpenBoard* open) {
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("boardId", open->m_Id.View());
+		json.StrField("path", open->m_Path.View());
+		json.StrField("topic", open->Topic().View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String ListMethod(BoardService* service, const IED::Request& request) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(request.m_Params.Str("wsId").View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+		return service->ListJson(ws);
+	}
+
+	static Core::String OpenMethod(BoardService* service, const IED::Request& request) {
+		return Opened(service->Open(request.m_Params.Str("wsId").View(), request.m_Params.Str("path").View()));
+	}
+
+	static Core::String CreateMethod(BoardService* service, const IED::Request& request) {
+		return Opened(service->Create(request.m_Params.Str("wsId").View(), request.m_Params.Str("path").View(), request.m_Params.Str("title", Core::StringView("")).View()));
+	}
+
+	static Core::String EditMethod(BoardService* service, const IED::Request& request) {
+		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
+		ChangeResult result;
+		Core::String answer = service->Edit(open, request.m_Params.Field("ops"), Core::StringView("owner"), request.m_Params.Str("label", Core::StringView("")).View(), request.m_Params.Str("opId", Core::StringView("")).View(), result);
+		if (!result.m_Error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, result.m_Error.View());
+		return answer;
+	}
+
+	static Core::String UndoMethod(BoardService* service, const IED::Request& request) {
+		return service->Rewound(service->ById(request.m_Params.Str("boardId").View()), Core::StringView("owner"), true, Core::StringView(""));
+	}
+
+	static Core::String RedoMethod(BoardService* service, const IED::Request& request) {
+		return service->Rewound(service->ById(request.m_Params.Str("boardId").View()), Core::StringView("owner"), false, Core::StringView(""));
+	}
+
+	static Core::String RevertMethod(BoardService* service, const IED::Request& request) {
+		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
+		return service->Rewound(open, Core::StringView("owner"), !request.m_Params.Bool("redo", false), request.m_Params.Str("change").View());
+	}
+
+	static Core::String PlanMethod(BoardService* service, const IED::Request& request) {
+		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
+		JsonOut json;
+		json.BeginObject();
+		const char*[5] keys = { "action", "id", "title", "kind", "text" };
+		for (int32 i = 0; i < 5; ++i)
+			if (request.m_Params.Has(keys[i])) json.StrField(keys[i], request.m_Params.Str(keys[i]).View());
+		json.EndObject();
+		Serialization::DomDoc doc;
+		Serialization::DomNode args = Serialization::ReadJson(json.View(), doc).root;
+		return service->SetPlan(open, args, Core::StringView("owner"));
+	}
+
+	static Core::String ImageMethod(BoardService* service, const IED::Request& request) {
+		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
+		double w = 0.0;
+		double h = 0.0;
+		Core::String src = service->StoreImage(open, request.m_Params.Str("blobId").View(), w, h);
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("src", src.View());
+		json.NumField("iw", w);
+		json.NumField("ih", h);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// A board tool for the UI's own use (export, import, recognize): the AI's answer, run as the owner.
+	static Core::String ToolMethod(BoardService* service, const IED::Request& request) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(request.m_Params.Str("wsId").View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+		Core::String tool = request.m_Params.Str("tool");
+		if (tool != "export" && tool != "import" && tool != "recognize" && tool != "read" && tool != "view") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("the UI runs export, import, recognize, read and view"));
+		ToolAnswer answer = service->RunTool(ws, tool.View(), request.m_Params.Field("args"), Core::StringView("owner"));
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("text", answer.m_Text.View());
+		if (!answer.m_Image.IsEmpty()) json.StrField("image", answer.m_Image.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The board's per-machine state (the chat it talks to): read, and written when `set` is given.
+	static Core::String LocalMethod(BoardService* service, const IED::Request& request) {
+		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+		Core::StringBuilder file;
+		file.Append(Core::StringView(".ied/local/boards/"));
+		file.AppendUIntBase(Core::String(open->m_Path.View()).Hash(), 16, 16);
+		file.Append(Core::StringView(".json"));
+		Core::String problem;
+		if (request.m_Params.Has("set")) {
+			Core::String text = IED::NodeJson(request.m_Params.Field("set"));
+			if (!IED::WriteFile(ws, file.View(), text.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+			return text;
+		}
+		Core::String text;
+		if (!IED::ReadFile(ws, file.View(), text, problem)) return Core::String("{}");
+		return text;
+	}
+
+	void RegisterMethods(BoardService* service) {
+		Method(service, "ied.board/list", ListMethod);
+		Method(service, "ied.board/open", OpenMethod);
+		Method(service, "ied.board/create", CreateMethod);
+		Method(service, "ied.board/edit", EditMethod);
+		Method(service, "ied.board/undo", UndoMethod);
+		Method(service, "ied.board/redo", RedoMethod);
+		Method(service, "ied.board/revert", RevertMethod);
+		Method(service, "ied.board/plan", PlanMethod);
+		Method(service, "ied.board/image", ImageMethod);
+		Method(service, "ied.board/tool", ToolMethod);
+		Method(service, "ied.board/local", LocalMethod);
+	}
+}

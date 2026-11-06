@@ -1,0 +1,127 @@
+// Images on boards (docs/32 "Elements": image): an upload kept beside its board as <board>.assets/<digest>.<ext>, an
+// image file's size read from its header (PNG, JPEG), PNGs decoded for the AI's pictures; and the theme's colors read
+// from the install's theme.css.
+
+include "BoardService.ch"
+include "Crypto/sha256.ch"
+include "api/Blobs.ch"
+
+namespace Boards
+{
+	const int64 c_MostImageBytes = 67108864;
+
+	static bool ReadBytes(const char* path, Core::Array<uint8>& bytes) {
+		const int64 size = FS::FileSize(path);
+		if (size <= 0 || size > c_MostImageBytes) return false;
+		FS::File file = FS::File(path, "rb");
+		if (!file.IsOpen()) return false;
+		bytes.Resize(size);
+		return file.ReadAll((void*)bytes.Data(), size) == size;
+	}
+
+	static bool IsPng(const Core::Array<uint8>& bytes) {
+		return bytes.Count() >= 24 && bytes[0] == (uint8)137 && bytes[1] == (uint8)80 && bytes[2] == (uint8)78 && bytes[3] == (uint8)71;
+	}
+
+	static bool IsJpeg(const Core::Array<uint8>& bytes) {
+		return bytes.Count() >= 4 && bytes[0] == (uint8)255 && bytes[1] == (uint8)216;
+	}
+
+	static int64 BigEndian(const Core::Array<uint8>& bytes, int64 at, int32 count) {
+		int64 value = 0;
+		for (int32 i = 0; i < count; ++i) value = (value << 8) | (int64)bytes[at + i];
+		return value;
+	}
+
+	// The pixel size a PNG's IHDR or a JPEG's start-of-frame states.
+	static bool HeaderSize(const Core::Array<uint8>& bytes, double& w, double& h) {
+		if (IsPng(bytes)) {
+			w = (double)BigEndian(bytes, 16, 4);
+			h = (double)BigEndian(bytes, 20, 4);
+			return w > 0.0 && h > 0.0;
+		}
+		if (!IsJpeg(bytes)) return false;
+		int64 at = 2;
+		while (at + 9 < bytes.Count()) {
+			if (bytes[at] != (uint8)255) return false;
+			const int32 marker = (int32)bytes[at + 1];
+			const int64 length = BigEndian(bytes, at + 2, 2);
+			const bool frame = marker >= 192 && marker <= 207 && marker != 196 && marker != 200 && marker != 204;
+			if (frame) {
+				h = (double)BigEndian(bytes, at + 5, 2);
+				w = (double)BigEndian(bytes, at + 7, 2);
+				return w > 0.0 && h > 0.0;
+			}
+			at += 2 + length;
+		}
+		return false;
+	}
+
+	bool BoardService::ImageSize(const IED::Workspace& ws, Core::StringView path, double& w, double& h, Core::String& problem) {
+		Core::String normal = IED::NormalizePath(path);
+		Core::Array<uint8> bytes;
+		if (!ReadBytes(IED::WorkspaceFile(ws, normal.View()).CStr(), bytes)) {
+			problem = (Core::String("cannot read the image ") + normal.View()) + " (a PNG or JPEG file of the workspace, at most 64 MiB)";
+			return false;
+		}
+		if (!HeaderSize(bytes, w, h)) {
+			problem = (Core::String("'") + normal.View()) + "' is not a PNG or JPEG image";
+			return false;
+		}
+		return true;
+	}
+
+	bool BoardService::LoadImage(const IED::Workspace& ws, Core::StringView path, Imaging::Rgba& image) {
+		Core::Array<uint8> bytes;
+		if (!ReadBytes(IED::WorkspaceFile(ws, path).CStr(), bytes) || !IsPng(bytes)) return false;
+		Imaging::ReadResult read = Imaging::DecodePng(bytes.Data(), bytes.Count(), image);
+		return read.ok;
+	}
+
+	Core::String BoardService::StoreImage(OpenBoard* open, Core::StringView blobId, double& w, double& h) {
+		Core::String contentType;
+		Core::Array<uint8> bytes;
+		Core::String problem;
+		if (!IED::ReadBlob(blobId, contentType, bytes, problem)) throw IED::RpcError(IED::ErrorCode::NotFound, problem.View());
+		if (!HeaderSize(bytes, w, h)) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("the upload is not a PNG or JPEG image"));
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("the board's workspace is closed"));
+		Crypto::Sha256Digest digest = Crypto::Sha256((const void*)bytes.Data(), bytes.Count());
+		Core::StringView path = open->m_Path.View();
+		Core::StringView stem = path.Substring(0, path.ByteLength() - Core::StringView(c_Extension).ByteLength());
+		Core::String relative = (((Core::String(stem) + ".assets/") + digest.ToHex().View().Substring(0, 16)) + (IsPng(bytes) ? ".png" : ".jpg"));
+		FS::Path file = FS::Path(IED::WorkspaceFile(ws, relative.View()).View());
+		FS::MakeDirectories(file.Parent().CStr());
+		if (!FS::FileExists(file.CStr()) && !FS::WriteFileAtomically(file.CStr(), (const void*)bytes.Data(), bytes.Count())) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("cannot write ") + relative.View()).View());
+		return relative;
+	}
+
+	static void HexByte(Core::StringBuilder& out, double channel) {
+		const int32 value = (int32)Math::Round(Math::Saturate(channel) * 255.0);
+		const char* digits = "0123456789abcdef";
+		out.AppendByte((int32)digits[value >> 4]);
+		out.AppendByte((int32)digits[value & 15]);
+	}
+
+	Core::HashMap<Core::String, Core::String> BoardService::HueHex() {
+		Theme theme = LoadTheme();
+		Core::HashMap<Core::String, Core::String> hex;
+		for (const Core::KeyValue<Core::String, Rgb>& hue : theme.m_Hues) {
+			Core::StringBuilder text;
+			text.AppendByte('#');
+			HexByte(text, hue.value.m_R);
+			HexByte(text, hue.value.m_G);
+			HexByte(text, hue.value.m_B);
+			hex.Insert(hue.key, text.ToString());
+		}
+		return hex;
+	}
+
+	Theme BoardService::LoadTheme() {
+		Core::String path = Core::String(m_Context->Folder().View()) + "/../../frontend/css/theme.css";
+		FS::File file = FS::File(path.CStr(), "rb");
+		if (!file.IsOpen()) return Theme();
+		Core::String css = file.ReadText();
+		return ReadTheme(css.View());
+	}
+}

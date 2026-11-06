@@ -1,0 +1,411 @@
+// A parsed flowchart as board ops: matched nodes kept where they stand, new ones laid out beside them, connectors
+// made to match the chart, subgraphs as frames fitted around their members.
+
+include "Mermaid.ch"
+
+namespace Boards
+{
+	static bool SameText(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i) {
+			int32 x = a.ByteAt(i);
+			int32 y = b.ByteAt(i);
+			if (x >= (int32)'A' && x <= (int32)'Z') x += 32;
+			if (y >= (int32)'A' && y <= (int32)'Z') y += 32;
+			if (x != y) return false;
+		}
+		return true;
+	}
+
+	static Core::String RefOf(Core::StringView key) {
+		return Core::String("@m_") + key;
+	}
+
+	// The existing element each chart node is: by key, then by a label only one node has.
+	static Core::HashMap<Core::String, Core::String> Match(const Board& board, const MermaidChart& chart, const Diagram& diagram, Core::Array<Core::String>& notes) {
+		Core::HashMap<Core::String, Core::String> matched;
+		Core::HashMap<Core::String, bool> used;
+		for (const MermaidNode& node : chart.m_Nodes)
+			for (const DiagramNode& existing : diagram.m_Nodes)
+				if (existing.m_Key == node.m_Key && !used.Contains(existing.m_Element->m_Id)) {
+					matched.Insert(node.m_Key, existing.m_Element->m_Id);
+					used.Insert(existing.m_Element->m_Id, true);
+					break;
+				}
+		for (const MermaidNode& node : chart.m_Nodes) {
+			if (matched.Contains(node.m_Key)) continue;
+			Element* only = nullptr;
+			int32 count = 0;
+			for (const DiagramNode& existing : diagram.m_Nodes)
+				if (!used.Contains(existing.m_Element->m_Id) && SameText(existing.m_Element->m_Text.View(), node.m_Label.View())) {
+					only = existing.m_Element;
+					count += 1;
+				}
+			if (count != 1) continue;
+			matched.Insert(node.m_Key, only->m_Id);
+			used.Insert(only->m_Id, true);
+			notes.Push((((Core::String("matched ") + node.m_Key.View()) + " to ") + only->m_Id.View()) + " by its label");
+		}
+		return matched;
+	}
+
+	// Where new nodes go when some are matched: the chart laid out on its own, moved so its matched nodes sit where
+	// they stand on the board on average, each new one then pushed clear of what is already there.
+	static Core::HashMap<Core::String, Point> Placements(const Board& board, const MermaidChart& chart, const Core::HashMap<Core::String, Core::String>& matched) {
+		Board scratch;
+		InitBoard(scratch, Core::StringView(""));
+		Core::Array<Core::String> ids;
+		Core::HashMap<Core::String, Core::String> idOf;
+		for (const MermaidNode& node : chart.m_Nodes) {
+			Element* element = new Element();
+			element->m_Kind = node.m_Kind;
+			element->m_Text = node.m_Label;
+			element->m_Layer = scratch.m_Layers[0].m_Id;
+			element->m_Id = scratch.NewElementId();
+			const Core::String* existing = matched.FindAs(node.m_Key.View());
+			if (existing) {
+				Element* on = board.Find(existing->View());
+				element->m_X = on->m_X;
+				element->m_Y = on->m_Y;
+				element->m_W = on->m_W;
+				element->m_H = on->m_H;
+			}
+			else AutoSize(*element);
+			scratch.Insert(element, -1);
+			ids.Push(element->m_Id);
+			idOf.Insert(node.m_Key, element->m_Id);
+		}
+		for (const MermaidEdge& edge : chart.m_Edges) {
+			Element* connector = new Element();
+			connector->m_Kind = Kind::Connector;
+			connector->m_Id = scratch.NewElementId();
+			connector->m_Layer = scratch.m_Layers[0].m_Id;
+			connector->m_From = idOf.Get(edge.m_From);
+			connector->m_To = idOf.Get(edge.m_To);
+			scratch.Insert(connector, -1);
+		}
+		Core::HashMap<Core::String, Point> moves = LayeredLayout(scratch, ids, chart.m_Direction.View(), c_LayoutGap, Core::HashMap<Core::String, Core::String>());
+		double dx = 0.0;
+		double dy = 0.0;
+		int64 n = 0;
+		for (const MermaidNode& node : chart.m_Nodes) {
+			const Core::String* existing = matched.FindAs(node.m_Key.View());
+			if (!existing) continue;
+			Element* laid = scratch.Find(idOf.Get(node.m_Key).View());
+			const Point* move = moves.FindAs(laid->m_Id.View());
+			Element* on = board.Find(existing->View());
+			dx += on->m_X - (laid->m_X + (move ? move->m_X : 0.0));
+			dy += on->m_Y - (laid->m_Y + (move ? move->m_Y : 0.0));
+			n += 1;
+		}
+		dx = n > 0 ? dx / (double)n : 0.0;
+		dy = n > 0 ? dy / (double)n : 0.0;
+		const bool horizontal = chart.m_Direction == "LR" || chart.m_Direction == "RL";
+		Core::HashMap<Core::String, Point> places;
+		Core::Array<Box> taken;
+		for (const MermaidNode& node : chart.m_Nodes) {
+			if (matched.Contains(node.m_Key)) continue;
+			Element* laid = scratch.Find(idOf.Get(node.m_Key).View());
+			const Point* move = moves.FindAs(laid->m_Id.View());
+			Box box = BoxAt(Tenth(laid->m_X + (move ? move->m_X : 0.0) + dx), Tenth(laid->m_Y + (move ? move->m_Y : 0.0) + dy), laid->m_W, laid->m_H);
+			// A node joined to one the board has goes on that node's row (or column) beside it, not between rows.
+			Element* anchor = nullptr;
+			for (const MermaidEdge& edge : chart.m_Edges) {
+				const Core::String* kept = nullptr;
+				if (edge.m_To == node.m_Key) kept = matched.FindAs(edge.m_From.View());
+				if (!kept && edge.m_From == node.m_Key) kept = matched.FindAs(edge.m_To.View());
+				if (kept) {
+					anchor = board.Find(kept->View());
+					break;
+				}
+			}
+			if (anchor) {
+				if (horizontal) box = BoxAt(box.m_X0, anchor->m_Y + anchor->m_H * 0.5 - laid->m_H * 0.5, laid->m_W, laid->m_H);
+				else box = BoxAt(anchor->m_X + anchor->m_W + 120.0, anchor->m_Y + anchor->m_H * 0.5 - laid->m_H * 0.5, laid->m_W, laid->m_H);
+			}
+			for (int32 tries = 0; tries < 40; ++tries) {
+				bool clash = !board.Near(box.Inflated(16.0)).IsEmpty();
+				for (const Box& other : taken)
+					if (other.Inflated(16.0).Overlaps(box)) clash = true;
+				if (!clash) break;
+				const double step = (horizontal ? box.Height() : box.Width()) + 30.0;
+				box = horizontal ? BoxAt(box.m_X0, box.m_Y0 + step, box.Width(), box.Height()) : BoxAt(box.m_X0 + step, box.m_Y0, box.Width(), box.Height());
+			}
+			taken.Push(box);
+			Point place;
+			place.m_X = Math::Round(box.m_X0 / 10.0) * 10.0;
+			place.m_Y = Math::Round(box.m_Y0 / 10.0) * 10.0;
+			places.Insert(node.m_Key, place);
+		}
+		return places;
+	}
+
+	static Core::StringView EndOf(const MermaidEdge& edge, bool start) {
+		if (start) return edge.m_Start ? Core::StringView("arrow") : Core::StringView("none");
+		return edge.m_End ? Core::StringView("arrow") : Core::StringView("none");
+	}
+
+	static void EdgeFields(JsonOut& json, const MermaidEdge& edge) {
+		json.StrField("text", edge.m_Label.View());
+		json.StrField("style", edge.m_Dashed ? Core::StringView("dashed") : Core::StringView("solid"));
+		json.NumField("width", edge.m_Thick ? 4.0 : c_DefaultWidth);
+		json.StrField("end", EndOf(edge, false));
+		json.StrField("start", EndOf(edge, true));
+	}
+
+	static int32 Depth(const MermaidChart& chart, const MermaidSubgraph& subgraph) {
+		int32 depth = 0;
+		Core::String parent = subgraph.m_Parent;
+		while (!parent.IsEmpty() && depth < 32) {
+			depth += 1;
+			Core::String next;
+			for (const MermaidSubgraph& each : chart.m_Subgraphs)
+				if (each.m_Key == parent) next = each.m_Parent;
+			parent = next;
+		}
+		return depth;
+	}
+
+	static void Frames(JsonOut& json, const Board& board, const MermaidChart& chart, const Diagram& diagram, const Core::HashMap<Core::String, Core::String>& matched, Core::StringView layer, Core::Array<Core::String>& notes) {
+		Core::Array<MermaidSubgraph> order = chart.m_Subgraphs;
+		order.SortBy([&chart](const MermaidSubgraph& a, const MermaidSubgraph& b) -> bool { return Depth(chart, a) > Depth(chart, b); });
+		for (const MermaidSubgraph& subgraph : order) {
+			Core::Array<Core::String> members;
+			for (const MermaidNode& node : chart.m_Nodes)
+				if (node.m_Subgraph == subgraph.m_Key) {
+					const Core::String* existing = matched.FindAs(node.m_Key.View());
+					members.Push(existing ? *existing : RefOf(node.m_Key.View()));
+				}
+			for (const MermaidSubgraph& child : chart.m_Subgraphs)
+				if (child.m_Parent == subgraph.m_Key) members.Push(Core::String("@f_") + child.m_Key.View());
+			if (members.IsEmpty()) {
+				notes.Push((Core::String("subgraph ") + subgraph.m_Key.View()) + " is empty: no frame made");
+				continue;
+			}
+			Element* existing = nullptr;
+			for (const DiagramFrame& frame : diagram.m_Frames)
+				if (frame.m_Key == subgraph.m_Key || SameText(frame.m_Element->m_Text.View(), subgraph.m_Title.View())) existing = frame.m_Element;
+			if (existing && existing->m_Text == subgraph.m_Title && existing->m_Key == subgraph.m_Key) {
+				bool same = true;
+				Core::Array<Element*> holds = board.MembersOf(*existing);
+				for (const Core::String& member : members)
+					if (member.View().StartsWith(Core::StringView("@"))) same = false;
+				int64 nodesHeld = 0;
+				for (Element* held : holds)
+					if (IsNode(held->m_Kind) || held->m_Kind == Kind::Frame) {
+						nodesHeld += 1;
+						if (!members.Contains(held->m_Id)) same = false;
+					}
+				if (same && nodesHeld == members.Count()) continue;
+			}
+			json.BeginObject();
+			if (existing) {
+				json.StrField("op", Core::StringView("update"));
+				json.StrField("id", existing->m_Id.View());
+			}
+			else {
+				json.StrField("op", Core::StringView("add"));
+				json.StrField("type", Core::StringView("frame"));
+				if (!layer.IsEmpty()) json.StrField("layer", layer);
+			}
+			json.StrField("ref", (Core::String("f_") + subgraph.m_Key.View()).View());
+			json.StrField("key", subgraph.m_Key.View());
+			json.StrField("text", subgraph.m_Title.View());
+			json.Key(Core::StringView("around"));
+			json.BeginArray();
+			for (const Core::String& member : members) json.Str(member.View());
+			json.EndArray();
+			json.EndObject();
+		}
+	}
+
+	Core::String ImportOps(const Board& board, const MermaidChart& chart, Core::StringView layer, bool replace, Core::Array<Core::String>& notes) {
+		Diagram diagram = ExtractDiagram(board, Core::Array<Core::String>());
+		JsonOut json;
+		json.BeginArray();
+		Core::HashMap<Core::String, Core::String> matched;
+		if (replace) {
+			Core::Array<Core::String> doomed;
+			for (Element* element : board.m_Elements)
+				if ((IsNode(element->m_Kind) || element->m_Kind == Kind::Frame || element->m_Kind == Kind::Connector) && (layer.IsEmpty() || element->m_Layer == layer)) doomed.Push(element->m_Id);
+			if (!doomed.IsEmpty()) {
+				json.BeginObject();
+				json.StrField("op", Core::StringView("delete"));
+				json.Key(Core::StringView("ids"));
+				json.BeginArray();
+				for (const Core::String& id : doomed) json.Str(id.View());
+				json.EndArray();
+				json.EndObject();
+				notes.Push((Core::String("replaced the diagram: ") + NumberText((double)doomed.Count()).View()) + " nodes, frames and connectors removed first");
+			}
+			diagram = Diagram();
+		}
+		else matched = Match(board, chart, diagram, notes);
+		Core::HashMap<Core::String, Point> places;
+		const bool laidOut = matched.IsEmpty();
+		if (!laidOut) places = Placements(board, chart, matched);
+		int64 added = 0;
+		int64 updated = 0;
+		for (const MermaidNode& node : chart.m_Nodes) {
+			const Core::String* existing = matched.FindAs(node.m_Key.View());
+			if (existing) {
+				Element* on = board.Find(existing->View());
+				const bool kindChanged = node.m_Shaped && on->m_Kind != node.m_Kind;
+				const bool textChanged = node.m_Shaped && on->m_Text != node.m_Label;
+				const Core::String* color = chart.m_Colors.FindAs(node.m_Key.View());
+				const Core::String* fill = chart.m_Fills.FindAs(node.m_Key.View());
+				const bool colorChanged = (color && on->m_Color != *color) || (fill && on->m_Fill != *fill);
+				const Core::String* desc = chart.m_Descs.FindAs(node.m_Key.View());
+				const bool descChanged = desc && on->m_Desc != *desc;
+				if (!kindChanged && !textChanged && !colorChanged && !descChanged && on->m_Key == node.m_Key) continue;
+				json.BeginObject();
+				json.StrField("op", Core::StringView("update"));
+				json.StrField("id", existing->View());
+				json.StrField("key", node.m_Key.View());
+				if (kindChanged) json.StrField("type", KindName(node.m_Kind));
+				if (textChanged) json.StrField("text", node.m_Label.View());
+				if (color) json.StrField("color", color->View());
+				if (fill) json.StrField("fill", fill->View());
+				if (descChanged) json.StrField("desc", desc->View());
+				json.EndObject();
+				if (kindChanged || textChanged || colorChanged || descChanged) updated += 1;
+				continue;
+			}
+			json.BeginObject();
+			json.StrField("op", Core::StringView("add"));
+			json.StrField("ref", (Core::String("m_") + node.m_Key.View()).View());
+			json.StrField("type", KindName(node.m_Kind));
+			json.StrField("key", node.m_Key.View());
+			json.StrField("text", node.m_Label.View());
+			const Core::String* color = chart.m_Colors.FindAs(node.m_Key.View());
+			const Core::String* fill = chart.m_Fills.FindAs(node.m_Key.View());
+			if (color) json.StrField("color", color->View());
+			if (fill) json.StrField("fill", fill->View());
+			const Core::String* desc = chart.m_Descs.FindAs(node.m_Key.View());
+			if (desc) json.StrField("desc", desc->View());
+			if (!layer.IsEmpty()) json.StrField("layer", layer);
+			const Point* place = places.FindAs(node.m_Key.View());
+			if (place) {
+				json.NumField("x", place->m_X);
+				json.NumField("y", place->m_Y);
+			}
+			json.EndObject();
+			added += 1;
+		}
+		// Connectors: the chart's edges, matched to ones already between the same nodes; others among the chart's
+		// matched nodes go.
+		Core::HashMap<Core::String, bool> kept;
+		for (const MermaidEdge& edge : chart.m_Edges) {
+			const Core::String* from = matched.FindAs(edge.m_From.View());
+			const Core::String* to = matched.FindAs(edge.m_To.View());
+			Element* same = nullptr;
+			if (from && to)
+				for (Element* existing : diagram.m_Edges)
+					if (!kept.Contains(existing->m_Id) && existing->m_From == *from && existing->m_To == *to) same = existing;
+			if (same) {
+				kept.Insert(same->m_Id, true);
+				const bool unchanged = same->m_Text == edge.m_Label && (same->m_Style == "dashed") == edge.m_Dashed && (same->m_Width >= 4.0) == edge.m_Thick && (same->m_End != "none") == edge.m_End && (!same->m_Start.IsEmpty() && same->m_Start != "none") == edge.m_Start;
+				if (unchanged) continue;
+			}
+			json.BeginObject();
+			if (same) {
+				json.StrField("op", Core::StringView("update"));
+				json.StrField("id", same->m_Id.View());
+				if (same->m_Text != edge.m_Label) json.StrField("text", edge.m_Label.View());
+				if ((same->m_Style == "dashed") != edge.m_Dashed) json.StrField("style", edge.m_Dashed ? Core::StringView("dashed") : Core::StringView("solid"));
+				if ((same->m_Width >= 4.0) != edge.m_Thick) json.NumField("width", edge.m_Thick ? 4.0 : c_DefaultWidth);
+				if ((same->m_End != "none") != edge.m_End) json.StrField("end", EndOf(edge, false));
+				if ((!same->m_Start.IsEmpty() && same->m_Start != "none") != edge.m_Start) json.StrField("start", EndOf(edge, true));
+			}
+			else {
+				json.StrField("op", Core::StringView("add"));
+				json.StrField("type", Core::StringView("connector"));
+				json.StrField("from", from ? from->View() : RefOf(edge.m_From.View()).View());
+				json.StrField("to", to ? to->View() : RefOf(edge.m_To.View()).View());
+				if (!layer.IsEmpty()) json.StrField("layer", layer);
+				EdgeFields(json, edge);
+			}
+			json.EndObject();
+		}
+		Core::Array<Core::String> dropped;
+		for (Element* existing : diagram.m_Edges) {
+			if (kept.Contains(existing->m_Id)) continue;
+			bool fromChart = false;
+			bool toChart = false;
+			for (const Core::KeyValue<Core::String, Core::String>& pair : matched) {
+				if (pair.value == existing->m_From) fromChart = true;
+				if (pair.value == existing->m_To) toChart = true;
+			}
+			if (fromChart && toChart) dropped.Push(existing->m_Id);
+		}
+		if (!dropped.IsEmpty()) {
+			json.BeginObject();
+			json.StrField("op", Core::StringView("delete"));
+			json.Key(Core::StringView("ids"));
+			json.BeginArray();
+			for (const Core::String& id : dropped) json.Str(id.View());
+			json.EndArray();
+			json.EndObject();
+			notes.Push((Core::String("removed ") + Counted(dropped.Count(), "connector", "connectors").View()) + " between the chart's nodes that the chart no longer has");
+		}
+		if (laidOut && added > 0) {
+			json.BeginObject();
+			json.StrField("op", Core::StringView("layout"));
+			json.StrField("direction", chart.m_Direction.View());
+			json.Key(Core::StringView("ids"));
+			json.BeginArray();
+			for (const MermaidNode& node : chart.m_Nodes) json.Str(RefOf(node.m_Key.View()).View());
+			json.EndArray();
+			json.EndObject();
+		}
+		Frames(json, board, chart, diagram, matched, layer, notes);
+		for (int64 i = 0; i < chart.m_NoteTexts.Count(); ++i) {
+			bool known = false;
+			for (Element* element : board.m_Elements)
+				if ((element->m_Kind == Kind::Note || element->m_Kind == Kind::Text) && element->m_Text == chart.m_NoteTexts[i]) known = true;
+			if (known) continue;
+			Core::String about;
+			if (!chart.m_NoteAbout[i].IsEmpty()) {
+				const Core::String* existing = matched.FindAs(chart.m_NoteAbout[i].View());
+				if (existing) about = *existing;
+				else
+					for (const MermaidNode& known : chart.m_Nodes)
+						if (known.m_Key == chart.m_NoteAbout[i]) about = RefOf(known.m_Key.View());
+			}
+			json.BeginObject();
+			json.StrField("op", Core::StringView("add"));
+			json.StrField("ref", (Core::String("n_") + NumberText((double)i).View()).View());
+			json.StrField("type", Core::StringView("note"));
+			json.StrField("text", chart.m_NoteTexts[i].View());
+			if (!about.IsEmpty()) json.StrField("about", about.View());
+			if (!layer.IsEmpty()) json.StrField("layer", layer);
+			json.EndObject();
+			if (!about.IsEmpty()) {
+				json.BeginObject();
+				json.StrField("op", Core::StringView("place"));
+				json.StrField("id", (Core::String("@n_") + NumberText((double)i).View()).View());
+				json.StrField("near", about.View());
+				json.StrField("side", Core::StringView("right"));
+				json.NumField("gap", 40.0);
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		notes.Push((((((Core::String("nodes: ") + NumberText((double)matched.Count()).View()) + " kept in place, ") + NumberText((double)added).View()) + " added, ") + NumberText((double)updated).View()) + " relabeled, reshaped or recolored");
+		Core::StringBuilder untouched;
+		for (const DiagramNode& node : diagram.m_Nodes) {
+			bool inChart = false;
+			for (const Core::KeyValue<Core::String, Core::String>& pair : matched)
+				if (pair.value == node.m_Element->m_Id) inChart = true;
+			if (inChart) continue;
+			if (!untouched.IsEmpty()) untouched.Append(Core::StringView(", "));
+			untouched.Append(node.m_Element->m_Id.View());
+			untouched.Append(Core::StringView(" ["));
+			untouched.Append(node.m_Key.View());
+			untouched.AppendByte(']');
+		}
+		if (!untouched.IsEmpty()) notes.Push((Core::String("left alone, not in the chart: ") + untouched.View()) + " (delete them with board_edit if they should go)");
+		for (const Core::String& note : chart.m_Notes) notes.Push(note);
+		return json.ToString();
+	}
+}

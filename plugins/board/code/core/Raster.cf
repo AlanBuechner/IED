@@ -1,0 +1,280 @@
+include "Raster.ch"
+
+namespace Boards
+{
+	Rgb RgbOf(double r, double g, double b) {
+		Rgb color;
+		color.m_R = r;
+		color.m_G = g;
+		color.m_B = b;
+		return color;
+	}
+
+	static int32 HexDigit(int32 c) {
+		if (c >= (int32)'0' && c <= (int32)'9') return c - (int32)'0';
+		if (c >= (int32)'a' && c <= (int32)'f') return c - (int32)'a' + 10;
+		if (c >= (int32)'A' && c <= (int32)'F') return c - (int32)'A' + 10;
+		return -1;
+	}
+
+	bool ParseHex(Core::StringView text, Rgb& color) {
+		if (text.ByteLength() != 7 && text.ByteLength() != 4) return false;
+		if (text.ByteAt(0) != (int32)'#') return false;
+		const bool shortForm = text.ByteLength() == 4;
+		double[3] channels;
+		for (int32 i = 0; i < 3; ++i) {
+			const int32 hi = HexDigit(text.ByteAt(shortForm ? 1 + i : 1 + i * 2));
+			const int32 lo = HexDigit(text.ByteAt(shortForm ? 1 + i : 2 + i * 2));
+			if (hi < 0 || lo < 0) return false;
+			channels[i] = (double)(hi * 16 + lo) / 255.0;
+		}
+		color = RgbOf(channels[0], channels[1], channels[2]);
+		return true;
+	}
+
+	void Canvas::Init(int32 width, int32 height, Rgb background) {
+		m_Width = width;
+		m_Height = height;
+		m_Pixels.width = width;
+		m_Pixels.height = height;
+		m_Pixels.pixels.Resize((int64)width * (int64)height * 4);
+		const uint8 r = (uint8)Math::Round(Math::Saturate(background.m_R) * 255.0);
+		const uint8 g = (uint8)Math::Round(Math::Saturate(background.m_G) * 255.0);
+		const uint8 b = (uint8)Math::Round(Math::Saturate(background.m_B) * 255.0);
+		for (int64 i = 0; i < (int64)width * (int64)height; ++i) {
+			m_Pixels.pixels[i * 4] = r;
+			m_Pixels.pixels[i * 4 + 1] = g;
+			m_Pixels.pixels[i * 4 + 2] = b;
+			m_Pixels.pixels[i * 4 + 3] = (uint8)255;
+		}
+	}
+
+	void Canvas::Blend(int32 x, int32 y, Rgb color, double alpha) {
+		if (x < 0 || y < 0 || x >= m_Width || y >= m_Height || alpha <= 0.0) return;
+		const double a = Math::Min(alpha, 1.0);
+		const int64 at = ((int64)y * (int64)m_Width + (int64)x) * 4;
+		const double r = (double)m_Pixels.pixels[at] / 255.0;
+		const double g = (double)m_Pixels.pixels[at + 1] / 255.0;
+		const double b = (double)m_Pixels.pixels[at + 2] / 255.0;
+		m_Pixels.pixels[at] = (uint8)Math::Round(Math::Saturate(r + (color.m_R - r) * a) * 255.0);
+		m_Pixels.pixels[at + 1] = (uint8)Math::Round(Math::Saturate(g + (color.m_G - g) * a) * 255.0);
+		m_Pixels.pixels[at + 2] = (uint8)Math::Round(Math::Saturate(b + (color.m_B - b) * a) * 255.0);
+	}
+
+	// A coverage mask over a box of the canvas, the most coverage each pixel got kept.
+	class Mask
+	{
+		public int32 m_X0;
+		public int32 m_Y0;
+		public int32 m_W;
+		public int32 m_H;
+		public Core::Array<float> m_Cover;
+	}
+
+	static bool MaskFor(const Canvas& canvas, const Box& box, Mask& mask) {
+		mask.m_X0 = (int32)Math::Max(0.0, Math::Floor(box.m_X0));
+		mask.m_Y0 = (int32)Math::Max(0.0, Math::Floor(box.m_Y0));
+		const int32 x1 = (int32)Math::Min((double)canvas.m_Width, Math::Ceil(box.m_X1) + 1.0);
+		const int32 y1 = (int32)Math::Min((double)canvas.m_Height, Math::Ceil(box.m_Y1) + 1.0);
+		mask.m_W = x1 - mask.m_X0;
+		mask.m_H = y1 - mask.m_Y0;
+		if (mask.m_W <= 0 || mask.m_H <= 0 || box.IsEmpty()) return false;
+		mask.m_Cover.Resize((int64)mask.m_W * (int64)mask.m_H);
+		for (int64 i = 0; i < mask.m_Cover.Count(); ++i) mask.m_Cover[i] = 0.0f;
+		return true;
+	}
+
+	static void Segment(Mask& mask, double ax, double ay, double bx, double by, double width) {
+		const double half = Math::Max(width, 1.0) * 0.5;
+		const double scale = width < 1.0 ? width : 1.0;
+		const int32 x0 = Math::Max(mask.m_X0, (int32)Math::Floor(Math::Min(ax, bx) - half - 1.0));
+		const int32 y0 = Math::Max(mask.m_Y0, (int32)Math::Floor(Math::Min(ay, by) - half - 1.0));
+		const int32 x1 = Math::Min(mask.m_X0 + mask.m_W - 1, (int32)Math::Ceil(Math::Max(ax, bx) + half + 1.0));
+		const int32 y1 = Math::Min(mask.m_Y0 + mask.m_H - 1, (int32)Math::Ceil(Math::Max(ay, by) + half + 1.0));
+		for (int32 y = y0; y <= y1; ++y)
+			for (int32 x = x0; x <= x1; ++x) {
+				const double d = SegmentDistance((double)x + 0.5, (double)y + 0.5, ax, ay, bx, by);
+				const double cover = Math::Clamp(half + 0.5 - d, 0.0, 1.0) * scale;
+				if (cover <= 0.0) continue;
+				const int64 at = (int64)(y - mask.m_Y0) * (int64)mask.m_W + (int64)(x - mask.m_X0);
+				if ((float)cover > mask.m_Cover[at]) mask.m_Cover[at] = (float)cover;
+			}
+	}
+
+	static void Composite(Canvas& canvas, const Mask& mask, Rgb color, double alpha) {
+		for (int32 y = 0; y < mask.m_H; ++y)
+			for (int32 x = 0; x < mask.m_W; ++x) {
+				const float cover = mask.m_Cover[(int64)y * (int64)mask.m_W + (int64)x];
+				if (cover > 0.0f) canvas.Blend(mask.m_X0 + x, mask.m_Y0 + y, color, alpha * (double)cover);
+			}
+	}
+
+	// The polyline cut into dashes: each a polyline of its own.
+	static Core::Array<Core::Array<double>> Dashes(const Core::Array<double>& points, double dash, double gap) {
+		Core::Array<Core::Array<double>> pieces;
+		Core::Array<double> current;
+		bool on = true;
+		double left = dash;
+		for (int64 i = 0; i + 3 < points.Count(); i += 2) {
+			double ax = points[i];
+			double ay = points[i + 1];
+			const double bx = points[i + 2];
+			const double by = points[i + 3];
+			double length = Distance(ax, ay, bx, by);
+			while (length > 0.0) {
+				const double step = Math::Min(left, length);
+				const double t = step / length;
+				const double nx = ax + (bx - ax) * t;
+				const double ny = ay + (by - ay) * t;
+				if (on) {
+					if (current.IsEmpty()) {
+						current.Push(ax);
+						current.Push(ay);
+					}
+					current.Push(nx);
+					current.Push(ny);
+				}
+				ax = nx;
+				ay = ny;
+				length -= step;
+				left -= step;
+				if (left <= 1e-9) {
+					if (on && current.Count() >= 4) pieces.Push(current);
+					current = Core::Array<double>();
+					on = !on;
+					left = on ? dash : gap;
+				}
+			}
+		}
+		if (on && current.Count() >= 4) pieces.Push(current);
+		return pieces;
+	}
+
+	void Canvas::Stroke(const Core::Array<double>& points, double width, Rgb color, double alpha, double dash, double gap) {
+		if (points.Count() < 2) return;
+		Mask mask;
+		if (!MaskFor(*this, PointsBox(points).Inflated(width * 0.5 + 2.0), mask)) return;
+		if (points.Count() < 4) Segment(mask, points[0], points[1], points[0], points[1], width);
+		else if (dash > 0.0 && gap > 0.0) {
+			for (const Core::Array<double>& piece : Dashes(points, dash, gap))
+				for (int64 i = 0; i + 3 < piece.Count(); i += 2) Segment(mask, piece[i], piece[i + 1], piece[i + 2], piece[i + 3], width);
+		}
+		else
+			for (int64 i = 0; i + 3 < points.Count(); i += 2) Segment(mask, points[i], points[i + 1], points[i + 2], points[i + 3], width);
+		Composite(*this, mask, color, alpha);
+	}
+
+	void Canvas::Fill(const Core::Array<double>& polygon, Rgb color, double alpha) {
+		const int64 count = polygon.Count() / 2;
+		if (count < 3) return;
+		Mask mask;
+		if (!MaskFor(*this, PointsBox(polygon), mask)) return;
+		Core::Array<double> crossings;
+		for (int32 row = 0; row < mask.m_H; ++row) {
+			for (int32 s = 0; s < 4; ++s) {
+				const double sy = (double)(mask.m_Y0 + row) + ((double)s + 0.5) / 4.0;
+				crossings.Clear();
+				for (int64 i = 0; i < count; ++i) {
+					const int64 j = (i + 1) % count;
+					const double y0 = polygon[i * 2 + 1];
+					const double y1 = polygon[j * 2 + 1];
+					if ((y0 <= sy && y1 > sy) || (y1 <= sy && y0 > sy)) {
+						const double x0 = polygon[i * 2];
+						const double x1 = polygon[j * 2];
+						crossings.Push(x0 + (sy - y0) / (y1 - y0) * (x1 - x0));
+					}
+				}
+				crossings.Sort();
+				for (int64 k = 0; k + 1 < crossings.Count(); k += 2) {
+					const double xa = Math::Max(crossings[k], (double)mask.m_X0);
+					const double xb = Math::Min(crossings[k + 1], (double)(mask.m_X0 + mask.m_W));
+					if (xb <= xa) continue;
+					for (int32 px = (int32)Math::Floor(xa); px < (int32)Math::Ceil(xb); ++px) {
+						const double overlap = Math::Min(xb, (double)px + 1.0) - Math::Max(xa, (double)px);
+						if (overlap <= 0.0) continue;
+						const int64 at = (int64)row * (int64)mask.m_W + (int64)(px - mask.m_X0);
+						mask.m_Cover[at] = mask.m_Cover[at] + (float)(overlap * 0.25);
+					}
+				}
+			}
+		}
+		Composite(*this, mask, color, alpha);
+	}
+
+	void Canvas::FillRect(double x, double y, double w, double h, Rgb color, double alpha) {
+		Core::Array<double> polygon;
+		polygon.Push(x);
+		polygon.Push(y);
+		polygon.Push(x + w);
+		polygon.Push(y);
+		polygon.Push(x + w);
+		polygon.Push(y + h);
+		polygon.Push(x);
+		polygon.Push(y + h);
+		Fill(polygon, color, alpha);
+	}
+
+	void Canvas::Text(Core::StringView line, double x, double y, double size, Rgb color, double alpha) {
+		Core::Array<Core::Array<double>> strokes;
+		LineStrokes(line, x, y, size, strokes);
+		const double width = Math::Max(1.0, size * 0.085);
+		for (const Core::Array<double>& stroke : strokes) Stroke(stroke, width, color, alpha, 0.0, 0.0);
+	}
+
+	// The source's color at (sx, sy) averaged over a footprint fw by fh pixels (bilinear when it is one pixel or less).
+	static void Sample(const Imaging::Rgba& source, double sx, double sy, double fw, double fh, double* rgba) {
+		for (int32 c = 0; c < 4; ++c) rgba[c] = 0.0;
+		if (fw <= 1.0 && fh <= 1.0) {
+			const double fx = Math::Clamp(sx - 0.5, 0.0, (double)(source.width - 1));
+			const double fy = Math::Clamp(sy - 0.5, 0.0, (double)(source.height - 1));
+			const int32 x0 = (int32)Math::Floor(fx);
+			const int32 y0 = (int32)Math::Floor(fy);
+			const int32 x1 = Math::Min(x0 + 1, source.width - 1);
+			const int32 y1 = Math::Min(y0 + 1, source.height - 1);
+			const double tx = fx - (double)x0;
+			const double ty = fy - (double)y0;
+			for (int32 c = 0; c < 4; ++c) {
+				const double a = (double)source.pixels[((int64)y0 * source.width + x0) * 4 + c];
+				const double b = (double)source.pixels[((int64)y0 * source.width + x1) * 4 + c];
+				const double d = (double)source.pixels[((int64)y1 * source.width + x0) * 4 + c];
+				const double e = (double)source.pixels[((int64)y1 * source.width + x1) * 4 + c];
+				rgba[c] = ((a + (b - a) * tx) + ((d + (e - d) * tx) - (a + (b - a) * tx)) * ty) / 255.0;
+			}
+			return;
+		}
+		const int32 x0 = (int32)Math::Clamp(Math::Floor(sx - fw * 0.5), 0.0, (double)(source.width - 1));
+		const int32 y0 = (int32)Math::Clamp(Math::Floor(sy - fh * 0.5), 0.0, (double)(source.height - 1));
+		const int32 x1 = (int32)Math::Clamp(Math::Ceil(sx + fw * 0.5), (double)(x0 + 1), (double)source.width);
+		const int32 y1 = (int32)Math::Clamp(Math::Ceil(sy + fh * 0.5), (double)(y0 + 1), (double)source.height);
+		double n = 0.0;
+		for (int32 y = y0; y < y1; ++y)
+			for (int32 x = x0; x < x1; ++x) {
+				for (int32 c = 0; c < 4; ++c) rgba[c] += (double)source.pixels[((int64)y * source.width + x) * 4 + c];
+				n += 1.0;
+			}
+		for (int32 c = 0; c < 4; ++c) rgba[c] = rgba[c] / (n * 255.0);
+	}
+
+	void Canvas::Image(const Imaging::Rgba& source, double cx, double cy, double cw, double ch, double x, double y, double w, double h, double alpha) {
+		if (source.width <= 0 || source.height <= 0 || w <= 0.0 || h <= 0.0 || cw <= 0.0 || ch <= 0.0) return;
+		const int32 x0 = (int32)Math::Max(0.0, Math::Floor(x));
+		const int32 y0 = (int32)Math::Max(0.0, Math::Floor(y));
+		const int32 x1 = (int32)Math::Min((double)m_Width, Math::Ceil(x + w));
+		const int32 y1 = (int32)Math::Min((double)m_Height, Math::Ceil(y + h));
+		const double fw = cw / w;
+		const double fh = ch / h;
+		double[4] rgba;
+		for (int32 py = y0; py < y1; ++py)
+			for (int32 px = x0; px < x1; ++px) {
+				const double u = ((double)px + 0.5 - x) / w;
+				const double v = ((double)py + 0.5 - y) / h;
+				if (u < 0.0 || v < 0.0 || u > 1.0 || v > 1.0) continue;
+				Sample(source, cx + u * cw, cy + v * ch, fw, fh, rgba);
+				Blend(px, py, RgbOf(rgba[0], rgba[1], rgba[2]), alpha * rgba[3]);
+			}
+	}
+
+	void Canvas::Encode(Core::Array<uint8>& png) const {
+		Imaging::EncodePng(m_Pixels, Compression::kDefaultLevel, png);
+	}
+}

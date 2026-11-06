@@ -1,0 +1,138 @@
+// The planning board (docs/32): an infinite, tiled, layered board to sketch software on - pen, highlighter, eraser,
+// shapes, connectors, text, notes, frames and pasted images - that an AI looks at (a picture with ids and a grid, or
+// the elements as text), cleans up (freehand recognized as shapes), turns into Mermaid and a written plan, iterates
+// on with the owner, and hands to an agent to build. Boards are .iedboard files; the server owns them.
+{
+	"manifestVersion": 1,
+	"id": "ied.board",
+	"name": "Planning Board",
+	"version": "0.1.0",
+	"description": "An infinite board to draw software designs on, with layers, an eraser, shapes, images and an AI that cleans the drawing up, converts it to Mermaid and a plan, and builds it.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Boards::Activate", "ui": "ui/index.js" },
+	"activation": ["onWorkspaceOpen"],
+	"permissions": ["fs.read", "fs.write", "ai.tools"],
+	"contributes": {
+		"skills": ["skills"],
+		"bindings": {
+			"provides": [
+				{ "name": "board.query", "version": "1", "kind": "function", "description": "A board_* tool's answer: {wsId, tool: list|create|read|view|edit|recognize|export|import|plan|revert, args} -> {text, image?} (image: a workspace path of a PNG)." }
+			],
+			"consumes": [
+				{ "name": "board.query", "version": "1" }
+			]
+		},
+		"activities": [
+			{ "id": "ied.board", "title": "Boards", "icon": "$(edit)", "order": 35, "documents": ["board", "chat"], "emptyWell": ["ied.board.new"], "newTab": "ied.board.new" }
+		],
+		"toolWindows": [
+			{ "id": "ied.board.list", "title": "Boards", "icon": "$(edit)", "view": "BoardList", "defaultDock": "left", "activity": "ied.board" }
+		],
+		"fileIcons": [
+			{ "extensions": [".iedboard"], "icon": "$(edit)", "color": "--hue-violet" }
+		],
+		"commands": [
+			{ "id": "ied.board.show", "title": "Boards", "category": "View", "icon": "$(edit)" },
+			{ "id": "ied.board.new", "title": "New Board...", "category": "Board", "icon": "$(add)" },
+			{ "id": "ied.board.open", "title": "Open Board", "category": "Solution Explorer", "icon": "$(edit)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.board.show", "group": "2_windows" }
+			],
+			"explorer/context": [
+				{ "command": "ied.board.open", "group": "1_open", "when": "explorerItemKind == 'file' && explorerItemExtension == '.iedboard'" }
+			]
+		},
+		"systemMessageSections": [
+			{ "id": "board", "text": "Planning boards (.iedboard files) hold the owner's software designs: freehand sketches, shapes, connectors, notes, frames and images on layers, plus written plans (Markdown or Mermaid). The board_* tools work on them by workspace path. board_view is a picture with each element's id (e<n>) and each sketch group's name (g<n>) tagged and a grid in board coordinates; board_read is the same as text, with a guess for every group of the owner's strokes; board_recognize turns strokes into clean shapes, frames and connectors (read the handwriting off the picture and pass it as labels); board_edit makes any change in one call (refs, place, layout, tidy, align); board_export and board_import convert to and from Mermaid; board_plan keeps the written plan. Read the board skill (skill_read board) before working on a board. Never delete the owner's sketch: clean work goes on a layer of its own." }
+		],
+		"toolCalls": [
+			{
+				"name": "board_list",
+				"description": "The workspace's planning boards (.iedboard files): path, title, element, layer and plan counts.",
+				"class": "read",
+				"group": "board",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+				"function": "Boards::BoardListTool"
+			},
+			{
+				"name": "board_create",
+				"description": "Makes a new board file at a workspace path (design/checkout.iedboard; the extension is added when missing) with one layer.",
+				"class": "write",
+				"group": "board",
+				"inputSchema": { "type": "object", "properties": { "board": { "type": "string", "description": "The new board's workspace path." }, "title": { "type": "string" } }, "required": ["board"], "additionalProperties": false },
+				"function": "Boards::BoardCreateTool"
+			},
+			{
+				"name": "board_read",
+				"description": "A board as text: its layers (bottom to top, hidden or locked); nodes (id, shape, [mermaid key], \"label\", x,y of the top left and wxh, color, layer, desc); connectors (from -> to, label, style); frames and what they hold; notes, text and images; free lines and arrows; the owner's freehand strokes grouped into sketch groups g1, g2, ... each with a guess (rectangle, ellipse, diamond, line, arrow, handwriting, scribble), its fit, what its ends touch and what handwriting is inside; and its plans. Narrow it with region {x, y, w, h}, layer (id or name) or ids. Coordinates are board units, y down - the same ones board_view's grid shows and board_edit takes.",
+				"class": "read",
+				"group": "board",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "board": { "type": "string" }, "region": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" } }, "required": ["x", "y", "w", "h"] }, "layer": { "type": "string" }, "ids": { "type": "array", "items": { "type": "string" } } }, "required": ["board"], "additionalProperties": false },
+				"function": "Boards::BoardReadTool"
+			},
+			{
+				"name": "board_view",
+				"description": "A picture (PNG) of a board as the owner sees it - the whole board, a region {x, y, w, h}, or the area around ids - with every element's id (e<n>) and every sketch group's name (g<n>; an arrow's at its middle) on a small tag, and a grid whose margins are labeled in board coordinates. Use it to read the owner's handwriting and to check your changes; zoom in with a smaller region when text is small. layers picks the layers drawn (default: the visible ones; the answer names those not drawn); labels: false and grid: false draw it plain; max_size is the longest side in pixels (default 1280).",
+				"class": "read",
+				"group": "board",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "board": { "type": "string" }, "region": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" } }, "required": ["x", "y", "w", "h"] }, "ids": { "type": "array", "items": { "type": "string" } }, "layers": { "type": "array", "items": { "type": "string" } }, "labels": { "type": "boolean" }, "grid": { "type": "boolean" }, "max_size": { "type": "integer", "minimum": 256, "maximum": 2048 } }, "required": ["board"], "additionalProperties": false },
+				"function": "Boards::BoardViewTool"
+			},
+			{
+				"name": "board_recognize",
+				"description": "Turns the owner's freehand sketch into clean elements. Without apply it proposes and changes nothing: each sketch group (all, or the ones `groups` names - g<n> or stroke ids) with the element that would replace it - rect, ellipse or diamond for a shape (its label: the handwriting inside), a frame for a big box drawn around other shapes (its title: the handwriting in its top band), a connector for a line or arrow between two shapes (its label: handwriting beside its middle; a free arrow when an end touches nothing), text for loose handwriting. Read the handwriting in board_view, then call again with apply: true and labels {\"g2\": \"API Gateway\"} - give a shape, frame or arrow its label under its own name or under the handwriting group it holds. Correct any guess - in the proposal too, to check it: types {\"g5\": \"frame\", \"g15\": \"cylinder\", \"g12\": \"note\", \"g21\": \"arrow\"} (rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, frame, note, text; arrow, line or connector for a stroke that is one) and ends {\"g3\": [\"g1\", \"g7\"]} (a line's from and to: groups or element ids). A label, type or end naming no group is said. Applied, the clean elements go on the layer `layer` (default \"Diagram\", made above the sketch when missing), where the sketch is (place: over) or to its right (place: beside, to compare side by side); the sketch's layer is hidden with every stroke kept (sketch: hide, the default), its recognized strokes deleted (delete) or left visible (keep). One change: board_revert takes it back. Then tidy with board_edit (tidy keeps the arrangement; layout redoes it).",
+				"class": "write",
+				"group": "board",
+				"inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "groups": {"type": "array", "items": {"type": "string"}}, "labels": {"type": "object", "additionalProperties": {"type": "string"}}, "types": {"type": "object", "additionalProperties": {"type": "string"}}, "ends": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}, "apply": {"type": "boolean"}, "layer": {"type": "string"}, "place": {"enum": ["over", "beside"]}, "sketch": {"enum": ["hide", "delete", "keep"]}}, "required": ["board"], "additionalProperties": false},
+				"function": "Boards::BoardRecognizeTool"
+			},
+			{
+				"name": "board_edit",
+				"description": "Changes a board in one step: one undo, all or nothing (a refused op changes nothing and says why). `ops` is a list; each has \"op\":\n- add - an element's fields at the top level: type (rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, text, note, frame, line, arrow, connector, stroke, image), x and y (its top left; leave both out to place it beside the board's content, then use place or layout), w and h (left out: fitted to its text), text (a node's label, a frame's title, a connector's label), key (its Mermaid id), desc (what it is for; goes into the plan and the Mermaid), color (outline and ink) and fill (a tint inside) as palette names - ink, gray, red, orange, amber, yellow, lime, green, teal, cyan, blue, indigo, violet, pink, fill also none - style (solid, dashed, dotted), width, fontSize, layer (id or name; default the top layer). line, arrow and stroke take pts [x1, y1, x2, y2, ...]; a connector from and to (element ids), start and end (none, arrow, dot; end is arrow unless given), route (straight, elbow); a frame around [ids] (it is fitted around them, and anything else inside is moved out); a note or text about (the element it annotates: it moves with it and exports by it); an image src (a PNG or JPEG of the workspace) and crop [x, y, w, h] in its pixels. ref names the new element (or layer) for later ops of the call: \"@name\". {\"op\": \"add\", \"ref\": \"cache\", \"type\": \"cylinder\", \"text\": \"Redis\", \"color\": \"blue\"}, {\"op\": \"add\", \"type\": \"connector\", \"from\": \"e3\", \"to\": \"@cache\", \"text\": \"reads\"}\n- update - id (or ids: the same fields on each) and the fields to set: type too (a rect becomes a cylinder; a text becomes a note and is refitted), from and to (a connector's ends), key, about; null clears a field, and w: null, h: null fit a box to its text again; a node grows to fit new text; a frame takes around (fit it around these) or fit: true (around what it holds now). {\"op\": \"update\", \"id\": \"e7\", \"type\": \"round\", \"text\": \"Notifications\", \"key\": \"notifications\"}\n- insert - a node put into a connector's path: on (the connector) and the node's fields; the connector ends at the node and a new one goes on to the old end (label_after labels it). {\"op\": \"insert\", \"on\": \"e11\", \"type\": \"cylinder\", \"text\": \"Cache\", \"ref\": \"cache\"}\n- delete - ids (connectors bound to them go too). move - ids (or layer: every element of a layer), dx, dy; a frame takes its members along. order - ids, to (front, back, forward, backward).\n- place - ids next to another element: near (an id), side (right, left, above, below), gap between the boxes (default 60; a labeled connector between them wants about 120), align (center, start, end). {\"op\": \"place\", \"ids\": [\"@cache\"], \"near\": \"e3\", \"side\": \"below\"}\n- layout - ids (default: the nodes of `layer`, else of every visible layer) in ranks by their connectors: direction (TD, LR, BT, RL), gap (widened for connector labels); keep [ids] stay where they are and the rest is placed around them; frames keep their members together and others out; notes move with their node. tidy - the arrangement kept: nodes nearly in a row share its center line, nearly in a column its center, on the grid (default 10); same_size: true gives the nodes their middle size. align - ids, edge (left, right, top, bottom, centerx, centery) to that edge of the selection's bounds, or of `to` (an id). distribute - ids, axis (x, y): equal gaps between first and last.\n- add_layer - name, ref, above (a layer). update_layer - id (or name), name, visible, locked, opacity, index (0 is the bottom). delete_layer - id (with its elements). merge_layer - id (into the layer below). title - title.\nA frame holds the elements of its own layer whose centers are inside it. dry_run: true tries the change on a copy and says what it would do; view: true adds a picture of the board after it (or after the dry run). The answer has each op's result, where the boxes it touched are now, the ids the refs got, the change's id (for board_revert) and warnings: frames and what they hold, elements placed over others, connectors that run through a node.",
+				"class": "write",
+				"group": "board",
+				"inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "ops": {"type": "array", "items": {"type": "object", "properties": {"op": {"enum": ["add", "update", "insert", "delete", "move", "order", "place", "layout", "tidy", "align", "distribute", "add_layer", "update_layer", "delete_layer", "merge_layer", "title"]}}, "required": ["op"]}, "minItems": 1}, "label": {"type": "string", "description": "A few words for the board's History panel."}, "dry_run": {"type": "boolean"}, "view": {"type": "boolean"}}, "required": ["board", "ops"], "additionalProperties": false},
+				"function": "Boards::BoardEditTool"
+			},
+			{
+				"name": "board_export",
+				"description": "The board's diagram as text. format mermaid (default): a flowchart of its nodes (by shape: [rect], (round), ((ellipse)), {diamond}, [(cylinder)], {{hexagon}}, [/parallelogram/]), connectors (-->, -.-> dashed, ==> wide, |label|) and frames as subgraphs, keyed by each node's key (made from its label when it has none, the same every time), in a stable order (nodes as they were made, edges by their ends), node colors as classDef/class lines, descs and notes as %% comments (a note by the node it is about, else its nearest) - all of which board_import reads back. format markdown: an outline in flow order - each component with its desc, connections and the notes beside it, the groups, loose notes, the flowchart. Only nodes, connectors and frames are in the chart: recognize the sketch first. ids narrows it.",
+				"class": "read",
+				"group": "board",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "board": { "type": "string" }, "format": { "enum": ["mermaid", "markdown"] }, "ids": { "type": "array", "items": { "type": "string" } } }, "required": ["board"], "additionalProperties": false },
+				"function": "Boards::BoardExportTool"
+			},
+			{
+				"name": "board_import",
+				"description": "Draws a Mermaid flowchart (flowchart/graph TD|LR|BT|RL; nodes in any shape, quoted labels, edges -->, ---, -.->, ==>, <-->, -->|label|, -- label -->, chains a --> b --> c, a & b --> c; subgraph ... end; class lines naming palette colors - class a,b blue (outline), class a fill_blue (tint), class a blue_fill (both); %% desc key: text and %% note by key: text comments, as board_export writes them) onto the board. mode merge (default): nodes the board has - by key, then by a label only one node has - keep their places and take the chart's label, shape and color; new ones are placed beside them, clear of what is there; connectors among the chart's nodes become the chart's (ones it no longer has go); nodes the chart leaves out stay. mode replace: the board's nodes, connectors and frames (of `layer`, when given) go and the chart is laid out anew. dry_run: true says what it would do and changes nothing. One change: board_revert takes it back.",
+				"class": "write",
+				"group": "board",
+				"inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "text": {"type": "string"}, "mode": {"enum": ["merge", "replace"]}, "layer": {"type": "string"}, "dry_run": {"type": "boolean"}}, "required": ["board", "text"], "additionalProperties": false},
+				"function": "Boards::BoardImportTool"
+			},
+			{
+				"name": "board_plan",
+				"description": "The board's plans: the written design kept with the drawing, which the owner reads and edits in the board's Plan panel and an agent builds from. action read (all, or one by id; a plan with Mermaid in it says whether it is in step with the board's diagram), write (text, title, kind markdown or mermaid; a new plan without id, an existing one by id; from: mermaid or markdown writes the board's export instead of text, to start from) or delete (id).",
+				"class": "write",
+				"group": "board",
+				"inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "action": {"enum": ["read", "write", "delete"]}, "id": {"type": "string"}, "title": {"type": "string"}, "kind": {"enum": ["markdown", "mermaid"]}, "text": {"type": "string"}, "from": {"enum": ["mermaid", "markdown"]}}, "required": ["board"], "additionalProperties": false},
+				"function": "Boards::BoardPlanTool"
+			},
+			{
+				"name": "board_revert",
+				"description": "Takes back one change (c<n>, as board_edit, board_recognize or board_import named it): its elements, layers and title as they were before it, whoever made it.",
+				"class": "write",
+				"group": "board",
+				"inputSchema": { "type": "object", "properties": { "board": { "type": "string" }, "change": { "type": "string" } }, "required": ["board", "change"], "additionalProperties": false },
+				"function": "Boards::BoardRevertTool"
+			}
+		]
+	}
+}

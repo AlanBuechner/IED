@@ -1,0 +1,385 @@
+// Reading a Mermaid flowchart: statements split at line breaks and top-level ';', node chains with '&', every link form.
+
+include "Mermaid.ch"
+
+namespace Boards
+{
+	MermaidNode* MermaidChart::Find(Core::StringView key) {
+		for (int64 i = 0; i < m_Nodes.Count(); ++i)
+			if (m_Nodes[i].m_Key == key) return &m_Nodes[i];
+		return nullptr;
+	}
+
+	class MermaidReader
+	{
+		public Core::StringView m_Text;
+		public int64 m_At;
+		public MermaidChart* m_Chart;
+		public Core::Array<Core::String> m_Open;   // the subgraphs the statement is inside
+		public Core::String m_Problem;
+
+		public bool AtEnd() const { return m_At >= m_Text.ByteLength(); }
+		public int32 Peek() const { return AtEnd() ? 0 : m_Text.ByteAt(m_At); }
+		public void Spaces() {
+			while (!AtEnd() && (Peek() == (int32)' ' || Peek() == 9)) m_At += 1;
+		}
+		public bool Next(Core::StringView word) const {
+			return m_Text.ByteLength() - m_At >= word.ByteLength() && m_Text.Substring(m_At, word.ByteLength()) == word;
+		}
+		public Core::StringView Rest() const { return m_Text.Substring(m_At, m_Text.ByteLength() - m_At); }
+	}
+
+	static bool IdChar(int32 c) {
+		return (c >= (int32)'a' && c <= (int32)'z') || (c >= (int32)'A' && c <= (int32)'Z') || (c >= (int32)'0' && c <= (int32)'9') || c == (int32)'_';
+	}
+
+	static Core::String Unescape(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			Core::StringView rest = text.Substring(i, text.ByteLength() - i);
+			if (rest.StartsWith(Core::StringView("#quot;"))) {
+				out.AppendByte('"');
+				i += 5;
+			}
+			else if (rest.StartsWith(Core::StringView("<br/>")) || rest.StartsWith(Core::StringView("<br>"))) {
+				out.AppendByte(10);
+				i += rest.StartsWith(Core::StringView("<br/>")) ? 4 : 3;
+			}
+			else out.AppendByte(text.ByteAt(i));
+		}
+		return Core::String(out.View().Trimmed());
+	}
+
+	struct ShapeForm
+	{
+		public const char* m_Open;
+		public const char* m_Close;
+		public Kind m_Kind;
+	}
+
+	static bool ReadShape(MermaidReader& reader, MermaidNode& node) {
+		const ShapeForm[12] forms = {
+			{ "[[", "]]", Kind::Rect }, { "[(", ")]", Kind::Cylinder }, { "[/", "/]", Kind::Parallelogram }, { "[/", "\\]", Kind::Parallelogram },
+			{ "[\\", "\\]", Kind::Parallelogram }, { "[", "]", Kind::Rect }, { "((", "))", Kind::Ellipse }, { "([", "])", Kind::Round },
+			{ "(", ")", Kind::Round }, { "{{", "}}", Kind::Hexagon }, { "{", "}", Kind::Diamond }, { ">", "]", Kind::Rect }
+		};
+		for (int32 f = 0; f < 12; ++f) {
+			Core::StringView open = Core::StringView(forms[f].m_Open);
+			Core::StringView close = Core::StringView(forms[f].m_Close);
+			if (!reader.Next(open)) continue;
+			int64 at = reader.m_At + open.ByteLength();
+			Core::StringView rest = reader.m_Text.Substring(at, reader.m_Text.ByteLength() - at);
+			Core::StringView label;
+			int64 after = -1;
+			Core::StringView trimmed = rest.Trimmed();
+			if (trimmed.StartsWith(Core::StringView("\""))) {
+				const int64 quote = rest.IndexOf(Core::StringView("\""));
+				Core::StringView inside = rest.Substring(quote + 1, rest.ByteLength() - quote - 1);
+				const int64 end = inside.IndexOf(Core::StringView("\""));
+				if (end < 0) continue;
+				label = inside.Substring(0, end);
+				Core::StringView tail = inside.Substring(end + 1, inside.ByteLength() - end - 1);
+				const int64 closeAt = tail.IndexOf(close);
+				if (closeAt < 0 || !tail.Substring(0, closeAt).Trimmed().IsEmpty()) continue;
+				after = at + quote + 1 + end + 1 + closeAt + close.ByteLength();
+			}
+			else {
+				const int64 closeAt = rest.IndexOf(close);
+				if (closeAt < 0) continue;
+				label = rest.Substring(0, closeAt);
+				after = at + closeAt + close.ByteLength();
+			}
+			node.m_Kind = forms[f].m_Kind;
+			node.m_Label = Unescape(label);
+			node.m_Shaped = true;
+			reader.m_At = after;
+			return true;
+		}
+		return false;
+	}
+
+	// One node: an id and, maybe, its shape and label. Registers it with the chart; its key in `key`.
+	static bool ReadNode(MermaidReader& reader, Core::String& key) {
+		reader.Spaces();
+		const int64 start = reader.m_At;
+		while (!reader.AtEnd() && IdChar(reader.Peek())) reader.m_At += 1;
+		if (reader.m_At == start) {
+			reader.m_Problem = (Core::String("expected a node id at '") + reader.Rest()) + "'";
+			return false;
+		}
+		key = Core::String(reader.m_Text.Substring(start, reader.m_At - start));
+		MermaidNode node;
+		node.m_Key = key;
+		ReadShape(reader, node);
+		MermaidNode* known = reader.m_Chart->Find(key.View());
+		if (!known) {
+			if (!node.m_Shaped) node.m_Label = key;
+			if (!reader.m_Open.IsEmpty()) node.m_Subgraph = reader.m_Open.Back();
+			reader.m_Chart->m_Nodes.Push(node);
+			return true;
+		}
+		if (node.m_Shaped) {
+			known->m_Kind = node.m_Kind;
+			known->m_Label = node.m_Label;
+			known->m_Shaped = true;
+			if (!reader.m_Open.IsEmpty() && known->m_Subgraph.IsEmpty()) known->m_Subgraph = reader.m_Open.Back();
+		}
+		return true;
+	}
+
+	static bool ReadGroup(MermaidReader& reader, Core::Array<Core::String>& keys) {
+		for (;;) {
+			Core::String key;
+			if (!ReadNode(reader, key)) return false;
+			keys.Push(key);
+			reader.Spaces();
+			if (reader.Peek() != (int32)'&') return true;
+			reader.m_At += 1;
+		}
+	}
+
+	static bool LinkChar(int32 c) {
+		return c == (int32)'-' || c == (int32)'=' || c == (int32)'.' || c == (int32)'>' || c == (int32)'<';
+	}
+
+	// A link, its label and its style; false when the statement has none here (`found` false) or it is broken.
+	static bool ReadLink(MermaidReader& reader, MermaidEdge& edge, bool& found) {
+		found = false;
+		reader.Spaces();
+		const int64 start = reader.m_At;
+		while (!reader.AtEnd() && LinkChar(reader.Peek())) reader.m_At += 1;
+		if (!reader.AtEnd() && (reader.Peek() == (int32)'o' || reader.Peek() == (int32)'x') && reader.m_At > start && reader.m_At + 1 <= reader.m_Text.ByteLength()) {
+			const int32 after = reader.m_At + 1 < reader.m_Text.ByteLength() ? reader.m_Text.ByteAt(reader.m_At + 1) : (int32)' ';
+			if (after == (int32)' ' || after == 9) reader.m_At += 1;
+		}
+		Core::StringView run = reader.m_Text.Substring(start, reader.m_At - start);
+		if (run.IsEmpty()) return true;
+		found = true;
+		Core::StringBuilder all;
+		all.Append(run);
+		const bool complete = run.EndsWith(Core::StringView(">")) || run.ByteLength() >= 3 || run.EndsWith(Core::StringView("o")) || run.EndsWith(Core::StringView("x"));
+		if (!complete) {
+			// "-- text -->", "== text ==>", "-. text .->": the label runs to the closing link.
+			Core::StringView rest = reader.Rest();
+			const char*[8] closers = { "-->", "---", "==>", "===", ".->", ".-", "->", "=>" };
+			int64 best = -1;
+			int64 bestLength = 0;
+			for (int32 c = 0; c < 8; ++c) {
+				const int64 at = rest.IndexOf(Core::StringView(closers[c]));
+				if (at >= 0 && (best < 0 || at < best)) {
+					best = at;
+					bestLength = Core::StringView(closers[c]).ByteLength();
+				}
+			}
+			if (best < 0) {
+				reader.m_Problem = (Core::String("a link '") + run) + "' with no end";
+				return false;
+			}
+			edge.m_Label = Unescape(rest.Substring(0, best));
+			reader.m_At += best;
+			const int64 closeStart = reader.m_At;
+			reader.m_At += bestLength;
+			while (!reader.AtEnd() && LinkChar(reader.Peek())) reader.m_At += 1;
+			all.Append(reader.m_Text.Substring(closeStart, reader.m_At - closeStart));
+		}
+		Core::StringView link = all.View();
+		edge.m_Dashed = link.Contains(Core::StringView("."));
+		edge.m_Thick = link.Contains(Core::StringView("="));
+		edge.m_Start = link.StartsWith(Core::StringView("<"));
+		edge.m_End = link.EndsWith(Core::StringView(">")) || link.EndsWith(Core::StringView("o")) || link.EndsWith(Core::StringView("x"));
+		reader.Spaces();
+		if (reader.Peek() == (int32)'|') {
+			Core::StringView rest = reader.m_Text.Substring(reader.m_At + 1, reader.m_Text.ByteLength() - reader.m_At - 1);
+			const int64 end = rest.IndexOf(Core::StringView("|"));
+			if (end < 0) {
+				reader.m_Problem = Core::String("a link label '|...' with no closing '|'");
+				return false;
+			}
+			Core::StringView label = rest.Substring(0, end).Trimmed();
+			if (label.StartsWith(Core::StringView("\"")) && label.EndsWith(Core::StringView("\"")) && label.ByteLength() >= 2) label = label.Substring(1, label.ByteLength() - 2);
+			edge.m_Label = Unescape(label);
+			reader.m_At += end + 2;
+		}
+		return true;
+	}
+
+	static bool ReadChain(MermaidReader& reader) {
+		Core::Array<Core::String> left;
+		if (!ReadGroup(reader, left)) return false;
+		for (;;) {
+			MermaidEdge edge;
+			bool found = false;
+			if (!ReadLink(reader, edge, found)) return false;
+			if (!found) break;
+			Core::Array<Core::String> right;
+			if (!ReadGroup(reader, right)) return false;
+			for (const Core::String& a : left)
+				for (const Core::String& b : right) {
+					MermaidEdge each = edge;
+					each.m_From = a;
+					each.m_To = b;
+					reader.m_Chart->m_Edges.Push(each);
+				}
+			left = right;
+		}
+		reader.Spaces();
+		if (!reader.AtEnd()) {
+			reader.m_Problem = (Core::String("cannot read '") + reader.Rest()) + "'";
+			return false;
+		}
+		return true;
+	}
+
+	static Core::StringView FirstWord(Core::StringView line) {
+		int64 end = 0;
+		while (end < line.ByteLength() && line.ByteAt(end) != (int32)' ' && line.ByteAt(end) != 9) ++end;
+		return line.Substring(0, end);
+	}
+
+	static void Subgraph(MermaidReader& reader, Core::StringView rest) {
+		MermaidSubgraph subgraph;
+		const int64 bracket = rest.IndexOf(Core::StringView("["));
+		if (bracket >= 0 && rest.EndsWith(Core::StringView("]"))) {
+			subgraph.m_Key = Core::String(rest.Substring(0, bracket).Trimmed());
+			Core::StringView title = rest.Substring(bracket + 1, rest.ByteLength() - bracket - 2).Trimmed();
+			if (title.StartsWith(Core::StringView("\"")) && title.EndsWith(Core::StringView("\"")) && title.ByteLength() >= 2) title = title.Substring(1, title.ByteLength() - 2);
+			subgraph.m_Title = Unescape(title);
+		}
+		else {
+			Core::StringView title = rest;
+			if (title.StartsWith(Core::StringView("\"")) && title.EndsWith(Core::StringView("\"")) && title.ByteLength() >= 2) title = title.Substring(1, title.ByteLength() - 2);
+			subgraph.m_Title = Unescape(title);
+			subgraph.m_Key = title.Contains(Core::StringView(" ")) || title.IsEmpty() ? KeyFromText(title) : Core::String(title);
+		}
+		if (subgraph.m_Key.IsEmpty()) subgraph.m_Key = Core::String("group") + NumberText((double)reader.m_Chart->m_Subgraphs.Count() + 1.0).View();
+		if (!reader.m_Open.IsEmpty()) subgraph.m_Parent = reader.m_Open.Back();
+		reader.m_Chart->m_Subgraphs.Push(subgraph);
+		reader.m_Open.Push(subgraph.m_Key);
+	}
+
+	// The statements of a line: split at ';' outside quotes and brackets.
+	static Core::Array<Core::StringView> Statements(Core::StringView line) {
+		Core::Array<Core::StringView> parts;
+		int32 depth = 0;
+		bool quoted = false;
+		int64 start = 0;
+		for (int64 i = 0; i < line.ByteLength(); ++i) {
+			const int32 c = line.ByteAt(i);
+			if (c == (int32)'"') quoted = !quoted;
+			else if (!quoted && (c == (int32)'[' || c == (int32)'(' || c == (int32)'{')) depth += 1;
+			else if (!quoted && (c == (int32)']' || c == (int32)')' || c == (int32)'}')) depth -= 1;
+			else if (!quoted && depth <= 0 && c == (int32)';') {
+				parts.Push(line.Substring(start, i - start));
+				start = i + 1;
+			}
+		}
+		parts.Push(line.Substring(start, line.ByteLength() - start));
+		return parts;
+	}
+
+	// "class a,b blue": the palette's names (and fill_<name>) the board's own export writes become colors.
+	static void Classes(MermaidChart& chart, Core::StringView rest) {
+		int64 space = rest.ByteLength() - 1;
+		while (space >= 0 && rest.ByteAt(space) != (int32)' ') --space;
+		if (space <= 0) return;
+		Core::StringView keys = rest.Substring(0, space).Trimmed();
+		Core::StringView name = rest.Substring(space + 1, rest.ByteLength() - space - 1).Trimmed();
+		const bool both = name.EndsWith(Core::StringView("_fill"));
+		const bool fill = name.StartsWith(Core::StringView("fill_"));
+		Core::StringView color = fill ? name.Substring(5, name.ByteLength() - 5) : (both ? name.Substring(0, name.ByteLength() - 5) : name);
+		if (!IsColorName(color, false)) {
+			chart.m_Notes.Push((Core::String("left out class ") + name) + ": the board colors with its palette's names");
+			return;
+		}
+		int64 start = 0;
+		for (int64 i = 0; i <= keys.ByteLength(); ++i) {
+			if (i < keys.ByteLength() && keys.ByteAt(i) != (int32)',') continue;
+			Core::StringView key = keys.Substring(start, i - start).Trimmed();
+			start = i + 1;
+			if (key.IsEmpty()) continue;
+			if (fill || both) chart.m_Fills.Insert(Core::String(key), Core::String(color));
+			if (!fill) chart.m_Colors.Insert(Core::String(key), Core::String(color));
+		}
+	}
+
+	// The board's own comments: "%% desc key: text", "%% note by key: text", "%% note: text".
+	static void Comment(MermaidChart& chart, Core::StringView comment) {
+		const int64 colon = comment.IndexOf(Core::StringView(":"));
+		if (colon < 0) return;
+		Core::StringView head = comment.Substring(0, colon).Trimmed();
+		Core::String text = Core::String(comment.Substring(colon + 1, comment.ByteLength() - colon - 1).Trimmed());
+		if (head.StartsWith(Core::StringView("desc ")))
+			chart.m_Descs.Insert(Core::String(head.Substring(5, head.ByteLength() - 5).Trimmed()), text);
+		else if (head == "note") {
+			chart.m_NoteTexts.Push(text);
+			chart.m_NoteAbout.Push(Core::String());
+		}
+		else if (head.StartsWith(Core::StringView("note by "))) {
+			chart.m_NoteTexts.Push(text);
+			chart.m_NoteAbout.Push(Core::String(head.Substring(8, head.ByteLength() - 8).Trimmed()));
+		}
+	}
+
+	bool ParseMermaid(Core::StringView text, MermaidChart& chart, Core::String& problem) {
+		MermaidReader reader;
+		reader.m_Chart = &chart;
+		bool header = false;
+		int64 lineNumber = 0;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && text.ByteAt(i) != 10) continue;
+			lineNumber += 1;
+			Core::StringView line = text.Substring(start, i - start);
+			start = i + 1;
+			for (Core::StringView statement : Statements(line)) {
+				Core::StringView s = statement.Trimmed();
+				if (s.StartsWith(Core::StringView("%%"))) {
+					Comment(chart, s.Substring(2, s.ByteLength() - 2).Trimmed());
+					continue;
+				}
+				if (s.IsEmpty() || s.StartsWith(Core::StringView("```"))) continue;
+				Core::StringView word = FirstWord(s);
+				if (!header && (word == "flowchart" || word == "graph")) {
+					header = true;
+					Core::StringView direction = s.Substring(word.ByteLength(), s.ByteLength() - word.ByteLength()).Trimmed();
+					if (direction == "TB" || direction == "TD" || direction.IsEmpty()) chart.m_Direction = Core::String("TD");
+					else chart.m_Direction = Core::String(direction);
+					continue;
+				}
+				if (!header) {
+					problem = (Core::String("line ") + NumberText((double)lineNumber).View()) + ": a Mermaid flowchart starts with 'flowchart TD' (or LR, BT, RL), or 'graph TD'; other diagram kinds are not boards";
+					return false;
+				}
+				if (word == "subgraph") {
+					Subgraph(reader, s.Substring(word.ByteLength(), s.ByteLength() - word.ByteLength()).Trimmed());
+					continue;
+				}
+				if (s == "end") {
+					if (!reader.m_Open.IsEmpty()) reader.m_Open.Pop();
+					continue;
+				}
+				if (word == "direction") continue;
+				if (word == "classDef") continue;
+				if (word == "class") {
+					Classes(chart, s.Substring(word.ByteLength(), s.ByteLength() - word.ByteLength()).Trimmed());
+					continue;
+				}
+				if (word == "style" || word == "linkStyle" || word == "click") {
+					chart.m_Notes.Push((Core::String("left out (the board keeps its own styles): ") + s));
+					continue;
+				}
+				reader.m_Text = s;
+				reader.m_At = 0;
+				if (!ReadChain(reader)) {
+					problem = (((Core::String("line ") + NumberText((double)lineNumber).View()) + ": ") + reader.m_Problem.View());
+					return false;
+				}
+			}
+		}
+		if (!header) {
+			problem = Core::String("no 'flowchart TD' (or 'graph TD') line: is it Mermaid?");
+			return false;
+		}
+		return true;
+	}
+}

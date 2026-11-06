@@ -1,0 +1,161 @@
+include "Shapes.ch"
+
+namespace Boards
+{
+	const int32 c_EllipseSteps = 48;
+
+	static void PushPoint(Core::Array<double>& points, double x, double y) {
+		points.Push(x);
+		points.Push(y);
+	}
+
+	Core::Array<double> Outline(const Element& element) {
+		Core::Array<double> points;
+		const double x = element.m_X;
+		const double y = element.m_Y;
+		const double w = element.m_W;
+		const double h = element.m_H;
+		if (element.m_Kind == Kind::Ellipse) {
+			for (int32 i = 0; i < c_EllipseSteps; ++i) {
+				const double a = (double)i * 2.0 * (double)Math::kPi / (double)c_EllipseSteps;
+				PushPoint(points, x + w * 0.5 + Math::Cos(a) * w * 0.5, y + h * 0.5 + Math::Sin(a) * h * 0.5);
+			}
+			return points;
+		}
+		if (element.m_Kind == Kind::Diamond) {
+			PushPoint(points, x + w * 0.5, y);
+			PushPoint(points, x + w, y + h * 0.5);
+			PushPoint(points, x + w * 0.5, y + h);
+			PushPoint(points, x, y + h * 0.5);
+			return points;
+		}
+		if (element.m_Kind == Kind::Hexagon) {
+			const double inset = Math::Min(w * 0.25, h * 0.5);
+			PushPoint(points, x + inset, y);
+			PushPoint(points, x + w - inset, y);
+			PushPoint(points, x + w, y + h * 0.5);
+			PushPoint(points, x + w - inset, y + h);
+			PushPoint(points, x + inset, y + h);
+			PushPoint(points, x, y + h * 0.5);
+			return points;
+		}
+		if (element.m_Kind == Kind::Parallelogram) {
+			const double slant = Math::Min(w * 0.2, h * 0.6);
+			PushPoint(points, x + slant, y);
+			PushPoint(points, x + w, y);
+			PushPoint(points, x + w - slant, y + h);
+			PushPoint(points, x, y + h);
+			return points;
+		}
+		PushPoint(points, x, y);
+		PushPoint(points, x + w, y);
+		PushPoint(points, x + w, y + h);
+		PushPoint(points, x, y + h);
+		return points;
+	}
+
+	Point CenterOf(const Element& element) {
+		Box box = element.Frame();
+		Point center;
+		center.m_X = box.IsEmpty() ? 0.0 : box.CenterX();
+		center.m_Y = box.IsEmpty() ? 0.0 : box.CenterY();
+		return center;
+	}
+
+	// Where the line from `inside` toward `outside` leaves the element (its center when it does not).
+	static Point Exit(const Element& element, double insideX, double insideY, double outsideX, double outsideY) {
+		Point at;
+		at.m_X = insideX;
+		at.m_Y = insideY;
+		if (!IsBoxed(element.m_Kind)) {
+			Box box = element.Frame().Inflated(4.0);
+			Core::Array<double> outline;
+			PushPoint(outline, box.m_X0, box.m_Y0);
+			PushPoint(outline, box.m_X1, box.m_Y0);
+			PushPoint(outline, box.m_X1, box.m_Y1);
+			PushPoint(outline, box.m_X0, box.m_Y1);
+			ClipToOutline(outline, outsideX, outsideY, insideX, insideY, at.m_X, at.m_Y);
+			return at;
+		}
+		ClipToOutline(Outline(element), outsideX, outsideY, insideX, insideY, at.m_X, at.m_Y);
+		return at;
+	}
+
+	static Core::Array<double> ElbowRoute(const Element& from, const Element& to) {
+		Box a = from.Frame();
+		Box b = to.Frame();
+		Core::Array<double> points;
+		const double dx = b.CenterX() - a.CenterX();
+		const double dy = b.CenterY() - a.CenterY();
+		if (Math::Abs(dx) >= Math::Abs(dy)) {
+			const double startX = dx >= 0.0 ? a.m_X1 : a.m_X0;
+			const double endX = dx >= 0.0 ? b.m_X0 : b.m_X1;
+			const double midX = (startX + endX) * 0.5;
+			PushPoint(points, startX, a.CenterY());
+			if (Math::Abs(a.CenterY() - b.CenterY()) > 0.5) {
+				PushPoint(points, midX, a.CenterY());
+				PushPoint(points, midX, b.CenterY());
+			}
+			PushPoint(points, endX, b.CenterY());
+			return points;
+		}
+		const double startY = dy >= 0.0 ? a.m_Y1 : a.m_Y0;
+		const double endY = dy >= 0.0 ? b.m_Y0 : b.m_Y1;
+		const double midY = (startY + endY) * 0.5;
+		PushPoint(points, a.CenterX(), startY);
+		if (Math::Abs(a.CenterX() - b.CenterX()) > 0.5) {
+			PushPoint(points, a.CenterX(), midY);
+			PushPoint(points, b.CenterX(), midY);
+		}
+		PushPoint(points, b.CenterX(), endY);
+		return points;
+	}
+
+	Core::Array<double> ConnectorRoute(const Element& connector, const Element& from, const Element& to) {
+		if (connector.m_Route == "elbow" && IsBoxed(from.m_Kind) && IsBoxed(to.m_Kind)) return ElbowRoute(from, to);
+		const Point a = CenterOf(from);
+		const Point b = CenterOf(to);
+		Core::Array<double> points;
+		const Point start = Exit(from, a.m_X, a.m_Y, b.m_X, b.m_Y);
+		const Point end = Exit(to, b.m_X, b.m_Y, a.m_X, a.m_Y);
+		PushPoint(points, start.m_X, start.m_Y);
+		PushPoint(points, end.m_X, end.m_Y);
+		return points;
+	}
+
+	double HeadLength(double width) {
+		return 10.0 + width * 2.0;
+	}
+
+	Box ElementBounds(const Element& element, const Core::Array<double>& route) {
+		const double pad = element.m_Width * 0.5 + 1.0;
+		if (element.m_Kind == Kind::Connector) {
+			Box box = PointsBox(route);
+			return box.Inflated(pad + HeadLength(element.m_Width) * 0.6);
+		}
+		if (IsPath(element.m_Kind)) {
+			const bool heads = element.m_Kind == Kind::Arrow || (!element.m_Start.IsEmpty() && element.m_Start != "none") || (!element.m_End.IsEmpty() && element.m_End != "none");
+			return PointsBox(element.m_Points).Inflated(pad + (heads ? HeadLength(element.m_Width) * 0.6 : 0.0));
+		}
+		return element.Frame().Inflated(pad);
+	}
+
+	double HitDistance(const Element& element, const Core::Array<double>& route, double px, double py) {
+		if (element.m_Kind == Kind::Connector) return Math::Max(0.0, PolylineDistance(route, px, py) - element.m_Width * 0.5);
+		if (IsPath(element.m_Kind)) return Math::Max(0.0, PolylineDistance(element.m_Points, px, py) - element.m_Width * 0.5);
+		Box box = element.Frame();
+		if (element.m_Kind == Kind::Frame) {
+			Core::Array<double> outline = Outline(element);
+			outline.Push(outline[0]);
+			outline.Push(outline[1]);
+			const bool inTitle = px >= box.m_X0 && px <= box.m_X1 && py >= box.m_Y0 - 24.0 && py <= box.m_Y0 + 4.0;
+			return inTitle ? 0.0 : PolylineDistance(outline, px, py);
+		}
+		if (element.m_Kind == Kind::Text || element.m_Kind == Kind::Note) return box.Contains(px, py) ? 0.0 : BoxGap(box, BoxAt(px, py, 0.0, 0.0));
+		Core::Array<double> outline = Outline(element);
+		if (InsidePolygon(outline, px, py)) return 0.0;
+		outline.Push(outline[0]);
+		outline.Push(outline[1]);
+		return PolylineDistance(outline, px, py);
+	}
+}

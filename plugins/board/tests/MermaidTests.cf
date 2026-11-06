@@ -1,0 +1,93 @@
+// Mermaid both ways: the parser's forms, export, import onto an empty board (laid out), and an import of an edited
+// chart that keeps the owner's positions, relabels, adds beside and drops a removed edge.
+
+include "Mermaid.ch"
+
+static Boards::ChangeResult BtMermaidApply(Boards::Board& board, Core::StringView json) {
+	Serialization::DomDoc doc;
+	Serialization::DomNode ops = Serialization::ReadJson(json, doc).root;
+	return Boards::ApplyOps(board, ops, Core::StringView("ai"), Core::StringView("import"), 0, nullptr);
+}
+
+static Boards::ChangeResult BtImport(Boards::Board& board, const char* text, Core::Array<Core::String>& notes) {
+	Boards::MermaidChart chart;
+	Core::String problem;
+	if (!Boards::ParseMermaid(Core::StringView(text), chart, problem)) {
+		Boards::ChangeResult failed;
+		failed.m_Error = problem;
+		return failed;
+	}
+	Core::String ops = Boards::ImportOps(board, chart, Core::StringView(""), false, notes);
+	return BtMermaidApply(board, ops.View());
+}
+
+static Boards::Element* BtKeyed(Boards::Board& board, const char* key) {
+	for (Boards::Element* element : board.m_Elements)
+		if (element->m_Key == key) return element;
+	return nullptr;
+}
+
+[test("board.mermaid")]
+class BoardMermaidTests
+{
+	[test("parses_shapes_links_and_subgraphs")]
+	public static void Parse() {
+		Boards::MermaidChart chart;
+		Core::String problem;
+		const char* text = "flowchart LR\n  %% a comment\n  subgraph back [\"Back end\"]\n    api[API Gateway] -->|writes| db[(Orders DB)]\n  end\n  user((User)) -.-> api\n  api -- checks --> q{Paid?}; q ==> done([Done])\n  a & b --> c\n  style api fill:#f00\n";
+		assert_true(Boards::ParseMermaid(Core::StringView(text), chart, problem), problem.CStr());
+		assert_true(chart.m_Direction == "LR", "the direction");
+		assert_true(chart.Find(Core::StringView("db"))->m_Kind == Boards::Kind::Cylinder && chart.Find(Core::StringView("db"))->m_Label == "Orders DB", "a cylinder");
+		assert_true(chart.Find(Core::StringView("user"))->m_Kind == Boards::Kind::Ellipse, "a circle");
+		assert_true(chart.Find(Core::StringView("q"))->m_Kind == Boards::Kind::Diamond, "a diamond");
+		assert_true(chart.Find(Core::StringView("done"))->m_Kind == Boards::Kind::Round, "a stadium");
+		assert_true(chart.Find(Core::StringView("api"))->m_Subgraph == "back" && chart.m_Subgraphs[0].m_Title == "Back end", "the subgraph and its title");
+		assert_true(chart.m_Edges.Count() == 6, "edges, two from the & group");
+		assert_true(chart.m_Edges[0].m_Label == "writes" && chart.m_Edges[1].m_Dashed && chart.m_Edges[2].m_Label == "checks" && chart.m_Edges[3].m_Thick, "labels and styles");
+		assert_true(chart.m_Notes.Count() == 1, "the style line is noted, not drawn");
+		Boards::MermaidChart broken;
+		assert_true(!Boards::ParseMermaid(Core::StringView("flowchart TD\n a --> \n"), broken, problem) && problem.View().Contains(Core::StringView("line 2")), "a broken line is named");
+	}
+
+	[test("import_lays_out_then_export_reads_it_back")]
+	public static void RoundTrip() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("Shop"));
+		Core::Array<Core::String> notes;
+		Boards::ChangeResult result = BtImport(board, "flowchart TD\n subgraph back [Backend]\n  api[API] --> db[(DB)]\n end\n web(Web) --> api\n", notes);
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		Boards::Element* web = BtKeyed(board, "web");
+		Boards::Element* api = BtKeyed(board, "api");
+		Boards::Element* db = BtKeyed(board, "db");
+		assert_true(web && api && db && web->m_Y < api->m_Y && api->m_Y < db->m_Y, "laid out top down");
+		Boards::Element* frame = BtKeyed(board, "back");
+		assert_true(frame != nullptr && frame->Frame().ContainsBox(api->Frame()) && frame->Frame().ContainsBox(db->Frame()) && !frame->Frame().ContainsBox(web->Frame()), "the frame holds its members only");
+		Core::String text = Boards::ExportMermaid(board, Boards::ExtractDiagram(board, Core::Array<Core::String>()), Core::HashMap<Core::String, Core::String>());
+		assert_true(text.View().Contains(Core::StringView("subgraph back [\"Backend\"]")), "the subgraph back");
+		assert_true(text.View().Contains(Core::StringView("db[(\"DB\")]")) && text.View().Contains(Core::StringView("web --> api")), "shapes and edges back");
+	}
+
+	[test("an_edited_chart_keeps_positions")]
+	public static void Edit() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("Shop"));
+		Core::Array<Core::String> notes;
+		BtImport(board, "flowchart TD\n web(Web) --> api[API]\n api --> db[(DB)]\n web --> db\n", notes);
+		Boards::Element* api = BtKeyed(board, "api");
+		BtMermaidApply(board, Core::StringView("[{\"op\":\"move\",\"ids\":[\"e2\"],\"dx\":500,\"dy\":0}]"));
+		const double x = api->m_X;
+		const double y = api->m_Y;
+		Core::Array<Core::String> second;
+		Boards::ChangeResult result = BtImport(board, "flowchart TD\n web(Web) --> api[API Gateway]\n api --> cache{{Cache}}\n api --> db[(DB)]\n", second);
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		assert_true(api->m_X == x && api->m_Y == y && api->m_Text == "API Gateway", "kept where the owner moved it, relabeled");
+		Boards::Element* cache = BtKeyed(board, "cache");
+		assert_true(cache != nullptr && cache->m_Kind == Boards::Kind::Hexagon, "the new node added");
+		for (Boards::Element* element : board.m_Elements)
+			if (element != cache) assert_true(!element->Frame().Overlaps(cache->Frame()) || element->m_Kind == Boards::Kind::Connector, "placed clear of the rest");
+		int64 webToDb = 0;
+		for (Boards::Element* element : board.m_Elements)
+			if (element->m_Kind == Boards::Kind::Connector && element->m_From == "e1" && element->m_To == "e3") webToDb += 1;
+		assert_true(webToDb == 0, "the edge the chart dropped is gone");
+	}
+}

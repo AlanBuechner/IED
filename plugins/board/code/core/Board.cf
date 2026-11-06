@@ -1,0 +1,417 @@
+include "Board.ch"
+
+namespace Boards
+{
+	int64 TileOf(double coordinate) {
+		return (int64)Math::Floor(coordinate / c_TileSize);
+	}
+
+	static int64 TileKey(int64 tx, int64 ty) {
+		return (tx << 32) ^ (ty & 4294967295);
+	}
+
+	static Core::String Numbered(const char* prefix, int64& next) {
+		Core::StringBuilder id;
+		id.Append(Core::StringView(prefix));
+		id.AppendInt(next);
+		next += 1;
+		return id.ToString();
+	}
+
+	Element* Board::Find(Core::StringView id) const {
+		Element const* const* found = m_ById.FindAs(id);
+		return found ? const_cast<Element*>(*found) : nullptr;
+	}
+
+	int64 Board::IndexOf(Core::StringView id) const {
+		for (int64 i = 0; i < m_Elements.Count(); ++i)
+			if (m_Elements[i]->m_Id == id) return i;
+		return -1;
+	}
+
+	Layer* Board::FindLayer(Core::StringView id) {
+		for (int64 i = 0; i < m_Layers.Count(); ++i)
+			if (m_Layers[i].m_Id == id) return &m_Layers[i];
+		return nullptr;
+	}
+
+	int64 Board::LayerIndex(Core::StringView id) const {
+		for (int64 i = 0; i < m_Layers.Count(); ++i)
+			if (m_Layers[i].m_Id == id) return i;
+		return -1;
+	}
+
+	static bool SameIgnoringCase(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i) {
+			int32 x = a.ByteAt(i);
+			int32 y = b.ByteAt(i);
+			if (x >= (int32)'A' && x <= (int32)'Z') x += 32;
+			if (y >= (int32)'A' && y <= (int32)'Z') y += 32;
+			if (x != y) return false;
+		}
+		return true;
+	}
+
+	Layer* Board::LayerNamed(Core::StringView idOrName) {
+		Layer* layer = FindLayer(idOrName);
+		if (layer) return layer;
+		for (int64 i = 0; i < m_Layers.Count(); ++i)
+			if (SameIgnoringCase(m_Layers[i].m_Name.View(), idOrName)) return &m_Layers[i];
+		return nullptr;
+	}
+
+	Core::String Board::NewElementId() { return Numbered("e", m_NextId); }
+	Core::String Board::NewLayerId() { return Numbered("L", m_NextLayer); }
+	Core::String Board::NewPlanId() { return Numbered("p", m_NextPlan); }
+	Core::String Board::NewChangeId() { return Numbered("c", m_NextChange); }
+
+	Core::Array<double> Board::RouteOf(const Element& element) const {
+		if (element.m_Kind != Kind::Connector) return Core::Array<double>();
+		Element* from = Find(element.m_From.View());
+		Element* to = Find(element.m_To.View());
+		if (!from || !to || from->m_Kind == Kind::Connector || to->m_Kind == Kind::Connector) return Core::Array<double>();
+		return ConnectorRoute(element, *from, *to);
+	}
+
+	Box Board::Bounds(const Element& element) const {
+		return ElementBounds(element, RouteOf(element));
+	}
+
+	Box Board::ContentBounds(bool visibleOnly) const {
+		Box box;
+		for (Element* element : m_Elements)
+			if (!visibleOnly || LayerVisible(element->m_Layer.View())) box.AddBox(Bounds(*element));
+		return box;
+	}
+
+	void Board::Index(Element* element) {
+		Box box = Bounds(*element);
+		if (box.IsEmpty()) return;
+		TileSpan span;
+		span.m_X0 = TileOf(box.m_X0);
+		span.m_Y0 = TileOf(box.m_Y0);
+		span.m_X1 = TileOf(box.m_X1);
+		span.m_Y1 = TileOf(box.m_Y1);
+		// A runaway element (a typo of 1e9) is indexed in its corner tiles alone rather than in millions.
+		if ((span.m_X1 - span.m_X0 + 1) * (span.m_Y1 - span.m_Y0 + 1) > 4096) {
+			span.m_X1 = span.m_X0;
+			span.m_Y1 = span.m_Y0;
+		}
+		for (int64 tx = span.m_X0; tx <= span.m_X1; ++tx)
+			for (int64 ty = span.m_Y0; ty <= span.m_Y1; ++ty) m_Tiles[TileKey(tx, ty)].Push(element->m_Id);
+		m_Spans.Insert(element->m_Id, span);
+	}
+
+	void Board::Unindex(Core::StringView id) {
+		const TileSpan* span = m_Spans.FindAs(id);
+		if (!span) return;
+		for (int64 tx = span->m_X0; tx <= span->m_X1; ++tx)
+			for (int64 ty = span->m_Y0; ty <= span->m_Y1; ++ty) {
+				Core::Array<Core::String>* ids = m_Tiles.Find(TileKey(tx, ty));
+				if (!ids) continue;
+				for (int64 i = 0; i < ids->Count(); ++i)
+					if ((*ids)[i] == id) {
+						ids->RemoveSwap(i);
+						break;
+					}
+				if (ids->IsEmpty()) m_Tiles.Remove(TileKey(tx, ty));
+			}
+		m_Spans.RemoveAs(id);
+	}
+
+	void Board::Insert(Element* element, int64 index) {
+		if (index < 0 || index > m_Elements.Count()) m_Elements.Push(element);
+		else m_Elements.Insert(index, element);
+		m_ById.Insert(element->m_Id, element);
+		Index(element);
+		for (Element* connector : ConnectorsOf(element->m_Id.View())) {
+			Unindex(connector->m_Id.View());
+			Index(connector);
+		}
+	}
+
+	void Board::RemoveAt(int64 index) {
+		Element* element = m_Elements[index];
+		Unindex(element->m_Id.View());
+		m_ById.RemoveAs(element->m_Id.View());
+		m_Elements.RemoveAt(index);
+		for (Element* connector : ConnectorsOf(element->m_Id.View())) {
+			Unindex(connector->m_Id.View());
+			Index(connector);
+		}
+	}
+
+	void Board::Reorder(int64 from, int64 to) {
+		if (from == to || from < 0 || from >= m_Elements.Count()) return;
+		Element* element = m_Elements[from];
+		m_Elements.RemoveAt(from);
+		if (to < 0 || to > m_Elements.Count()) m_Elements.Push(element);
+		else m_Elements.Insert(to, element);
+	}
+
+	void Board::Touched(Core::StringView id) {
+		Element* element = Find(id);
+		if (!element) return;
+		Unindex(id);
+		Index(element);
+		for (Element* connector : ConnectorsOf(id)) {
+			Unindex(connector->m_Id.View());
+			Index(connector);
+		}
+	}
+
+	void Board::ReindexAll() {
+		m_Tiles.Clear();
+		m_Spans.Clear();
+		for (Element* element : m_Elements) Index(element);
+	}
+
+	bool Board::LayerVisible(Core::StringView id) const {
+		for (const Layer& layer : m_Layers)
+			if (layer.m_Id == id) return layer.m_Visible;
+		return true;
+	}
+
+	Core::Array<Element*> Board::Drawn(bool visibleOnly) const {
+		Core::Array<Element*> drawn;
+		for (const Layer& layer : m_Layers) {
+			if (visibleOnly && !layer.m_Visible) continue;
+			for (Element* element : m_Elements)
+				if (element->m_Layer == layer.m_Id) drawn.Push(element);
+		}
+		return drawn;
+	}
+
+	Core::Array<Element*> Board::Near(const Box& region) const {
+		Core::HashMap<Core::String, bool> seen;
+		if (!region.IsEmpty()) {
+			const int64 x0 = TileOf(region.m_X0);
+			const int64 y0 = TileOf(region.m_Y0);
+			const int64 x1 = TileOf(region.m_X1);
+			const int64 y1 = TileOf(region.m_Y1);
+			if ((x1 - x0 + 1) * (y1 - y0 + 1) > (int64)m_Tiles.Count()) {
+				for (const Core::KeyValue<int64, Core::Array<Core::String>>& tile : m_Tiles)
+					for (const Core::String& id : tile.value) seen.Insert(id, true);
+			}
+			else {
+				for (int64 tx = x0; tx <= x1; ++tx)
+					for (int64 ty = y0; ty <= y1; ++ty) {
+						const Core::Array<Core::String>* ids = m_Tiles.FindAs(TileKey(tx, ty));
+						if (!ids) continue;
+						for (const Core::String& id : *ids) seen.Insert(id, true);
+					}
+			}
+		}
+		Core::Array<Element*> near;
+		for (const Layer& layer : m_Layers)
+			for (Element* element : m_Elements)
+				if (element->m_Layer == layer.m_Id && seen.Contains(element->m_Id) && Bounds(*element).Overlaps(region)) near.Push(element);
+		return near;
+	}
+
+	Core::Array<Element*> Board::ConnectorsOf(Core::StringView id) const {
+		Core::Array<Element*> connectors;
+		for (Element* element : m_Elements)
+			if (element->m_Kind == Kind::Connector && (element->m_From == id || element->m_To == id)) connectors.Push(element);
+		return connectors;
+	}
+
+	Core::Array<Element*> Board::MembersOf(const Element& frame) const {
+		Core::Array<Element*> members;
+		Box box = frame.Frame();
+		for (Element* element : m_Elements) {
+			if (element == &frame || element->m_Kind == Kind::Connector || element->m_Layer != frame.m_Layer) continue;
+			Box inner = Bounds(*element);
+			if (inner.IsEmpty() || !box.Contains(inner.CenterX(), inner.CenterY())) continue;
+			// A frame inside a frame is a member; the outer frame of this one is not.
+			if (element->m_Kind == Kind::Frame && element->Frame().ContainsBox(box)) continue;
+			members.Push(element);
+		}
+		return members;
+	}
+
+	void Board::Record(Change* change) {
+		m_History.Push(change);
+		if (m_History.Count() > (int64)c_HistoryLimit) m_History.RemoveAt(0);
+	}
+
+	Change* Board::FindChange(Core::StringView id) const {
+		for (Change* change : m_History)
+			if (change->m_Id == id) return change;
+		return nullptr;
+	}
+
+	Board* CloneBoard(const Board& board) {
+		Board* copy = new Board();
+		copy->m_Title = board.m_Title;
+		copy->m_Layers = board.m_Layers;
+		copy->m_Plans = board.m_Plans;
+		copy->m_NextId = board.m_NextId;
+		copy->m_NextLayer = board.m_NextLayer;
+		copy->m_NextPlan = board.m_NextPlan;
+		copy->m_NextChange = board.m_NextChange;
+		copy->m_Rev = board.m_Rev;
+		for (Element* element : board.m_Elements) {
+			Element* clone = new Element(*element);
+			copy->m_Elements.Push(clone);
+			copy->m_ById.Insert(clone->m_Id, clone);
+		}
+		copy->ReindexAll();
+		return copy;
+	}
+
+	void InitBoard(Board& board, Core::StringView title) {
+		board.m_Title = Core::String(title);
+		Layer layer;
+		layer.m_Id = board.NewLayerId();
+		layer.m_Name = Core::String("Layer 1");
+		board.m_Layers.Push(layer);
+	}
+
+	// The number after a one-letter prefix ("e12" -> 12), 0 when the id is not so.
+	static int64 Numbering(Core::StringView id) {
+		if (id.ByteLength() < 2) return 0;
+		int64 value = 0;
+		for (int64 i = 1; i < id.ByteLength(); ++i) {
+			const int32 c = id.ByteAt(i);
+			if (c < (int32)'0' || c > (int32)'9') return 0;
+			value = value * 10 + (int64)(c - (int32)'0');
+		}
+		return value;
+	}
+
+	static void ReadLayers(const Serialization::DomNode& list, Board& board) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode node = list.At(i);
+			Layer layer;
+			layer.m_Id = Core::String(node.Member("id").AsView());
+			if (layer.m_Id.IsEmpty()) continue;
+			layer.m_Name = Core::String(node.Member("name").AsView());
+			if (node.Member("visible").IsValid()) layer.m_Visible = node.Member("visible").AsBool();
+			layer.m_Locked = node.Member("locked").AsBool();
+			if (node.Member("opacity").IsValid()) layer.m_Opacity = node.Member("opacity").AsFloat();
+			board.m_Layers.Push(layer);
+			const int64 n = Numbering(layer.m_Id.View());
+			if (n >= board.m_NextLayer) board.m_NextLayer = n + 1;
+		}
+	}
+
+	static void ReadPlans(const Serialization::DomNode& list, Board& board) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode node = list.At(i);
+			Plan plan;
+			plan.m_Id = Core::String(node.Member("id").AsView());
+			if (plan.m_Id.IsEmpty()) continue;
+			plan.m_Title = Core::String(node.Member("title").AsView());
+			plan.m_Kind = Core::String(node.Member("kind").AsView().IsEmpty() ? Core::StringView("markdown") : node.Member("kind").AsView());
+			plan.m_Text = Core::String(node.Member("text").AsView());
+			plan.m_By = Core::String(node.Member("by").AsView());
+			board.m_Plans.Push(plan);
+			const int64 n = Numbering(plan.m_Id.View());
+			if (n >= board.m_NextPlan) board.m_NextPlan = n + 1;
+		}
+	}
+
+	bool ReadBoard(Core::StringView text, Board& board, Core::String& problem) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(text, doc);
+		if (read.error != nullptr) {
+			problem = Core::String("the board file is not JSON: ") + read.error;
+			return false;
+		}
+		Serialization::DomNode root = read.root;
+		if (root.Kind() != Serialization::DomKind::Object) {
+			problem = Core::String("the board file is not a JSON object");
+			return false;
+		}
+		board.m_Title = Core::String(root.Member("title").AsView());
+		ReadLayers(root.Member("layers"), board);
+		if (board.m_Layers.IsEmpty()) {
+			Layer layer;
+			layer.m_Id = board.NewLayerId();
+			layer.m_Name = Core::String("Layer 1");
+			board.m_Layers.Push(layer);
+		}
+		Serialization::DomNode elements = root.Member("elements");
+		for (int64 i = 0; i < elements.Count(); ++i) {
+			Element* element = new Element();
+			Core::String ignored;
+			if (!ReadElementFields(elements.At(i), *element, false, ignored)) continue;
+			element->m_Id = Core::String(elements.At(i).Member("id").AsView());
+			if (element->m_Id.IsEmpty() || board.m_ById.Contains(element->m_Id) || element->m_Kind == Kind::Unknown) continue;
+			if (board.LayerIndex(element->m_Layer.View()) < 0) element->m_Layer = board.m_Layers[0].m_Id;
+			board.m_Elements.Push(element);
+			board.m_ById.Insert(element->m_Id, element);
+			const int64 n = Numbering(element->m_Id.View());
+			if (n >= board.m_NextId) board.m_NextId = n + 1;
+		}
+		const int64 next = root.Member("nextId").AsInt();
+		if (next > board.m_NextId) board.m_NextId = next;
+		ReadPlans(root.Member("plans"), board);
+		board.ReindexAll();
+		return true;
+	}
+
+	void WriteLayer(JsonOut& json, const Layer& layer) {
+		json.BeginObject();
+		json.StrField("id", layer.m_Id.View());
+		json.StrField("name", layer.m_Name.View());
+		json.BoolField("visible", layer.m_Visible);
+		json.BoolField("locked", layer.m_Locked);
+		json.NumField("opacity", layer.m_Opacity);
+		json.EndObject();
+	}
+
+	void WritePlan(JsonOut& json, const Plan& plan) {
+		json.BeginObject();
+		json.StrField("id", plan.m_Id.View());
+		json.StrField("title", plan.m_Title.View());
+		json.StrField("kind", plan.m_Kind.View());
+		json.StrField("text", plan.m_Text.View());
+		if (!plan.m_By.IsEmpty()) json.StrField("by", plan.m_By.View());
+		json.EndObject();
+	}
+
+	Core::String WriteBoard(const Board& board) {
+		JsonOut json;
+		json.BeginObject();
+		json.Newline();
+		json.StrField("format", Core::StringView("ied.board/1"));
+		json.Newline();
+		json.StrField("title", board.m_Title.View());
+		json.Newline();
+		json.IntField("nextId", board.m_NextId);
+		json.Newline();
+		json.Key(Core::StringView("layers"));
+		json.BeginArray();
+		for (const Layer& layer : board.m_Layers) {
+			json.Newline();
+			WriteLayer(json, layer);
+		}
+		json.Newline();
+		json.EndArray();
+		json.Newline();
+		json.Key(Core::StringView("elements"));
+		json.BeginArray();
+		for (Element* element : board.m_Elements) {
+			json.Newline();
+			WriteElement(json, *element);
+		}
+		json.Newline();
+		json.EndArray();
+		json.Newline();
+		json.Key(Core::StringView("plans"));
+		json.BeginArray();
+		for (const Plan& plan : board.m_Plans) {
+			json.Newline();
+			WritePlan(json, plan);
+		}
+		json.Newline();
+		json.EndArray();
+		json.Newline();
+		json.EndObject();
+		json.Newline();
+		return json.ToString();
+	}
+}

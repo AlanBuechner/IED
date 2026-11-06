@@ -1,0 +1,17 @@
+// The ied.board plugin's entry (docs/32, docs/26 section 2).
+
+include "BoardService.ch"
+
+namespace Boards
+{
+	void Activate(IED::PluginContext& context)
+	{
+		BoardService* service = new BoardService(&context);
+		service->Start();
+		RegisterMethods(service);
+		ProvideQuery(service);
+		context.OnWorkspace([service](const IED::Workspace& ws) { service->Opened(ws); });
+		context.OnFilesChanged([service](const IED::FileChanges& changes) { service->FilesChanged(changes); });
+		context.OnDeactivate([service]() { service->Stop(); });
+	}
+}
