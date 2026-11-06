@@ -150,7 +150,7 @@ one header with different include folders evicted each other's cached binding (B
 include closure spliced in (1.2 s, and every walk skipped it again); each open or close of an unchanged file, and each
 request, waited for a whole analysis. Left: parsing 1.4 s (one file at a time, "C4LSP memory, measured"), the model
 0.55 s, the bodies 0.55 s. Each analysis is one line in the server log (`C4LSP: ClaymoreEngine analyzed in 3019 ms
-(1624 files: read 135, macros and bindings 355, parse 1442, model 554, bodies 533)`).
+(1624 files: read 135, macros and bindings 355, parse 1442, model 554, bodies 533, symbols 96)`).
 
 ## Open items
 

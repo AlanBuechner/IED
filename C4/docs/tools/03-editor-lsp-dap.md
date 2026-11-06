@@ -164,7 +164,8 @@ analyzed every program (25 s, the request's whole budget). Now:
   holds other text (git, a build, another tool or session writing it) is made again and its documents' diagnostics
   published. A file whose time changed but whose text did not (a checkout of the same text) is taken as it is.
 - **Each analysis is one line in the server's log**: `C4LSP: ClaymoreEngine analyzed in 3019 ms (1624 files: read 135,
-  macros and bindings 355, parse 1442, model 554, bodies 533)` - IED's server log shows it.
+  macros and bindings 355, parse 1442, model 554, bodies 533,
+  symbols 96)` - IED's server log shows it.
 - **What an analysis costs** (Claymore's engine, warm): reading 0.1 s, macros and C bindings 0.35 s, parsing 1.4 s (one
   file at a time, see "Memory"), the model 0.55 s, the bodies 0.55 s. Two costs it no longer has: the C bindings of the
   D3D12 and Win32 headers were made again by CBind on every analysis (2.8 s), because two programs binding one header
