@@ -75,6 +75,18 @@ namespace C4LSP::Server
 		m_OpenDocuments.erase(uri);
 	}
 
+	namespace
+	{
+		// How long `step` takes, in milliseconds.
+		template <typename Step>
+		double Timed(Step&& step)
+		{
+			const auto start = std::chrono::steady_clock::now();
+			step();
+			return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		}
+	}
+
 	bool CompilationSession::Recompile()
 	{
 		if (m_ScriptHost) return RecompileScript();
@@ -82,34 +94,20 @@ namespace C4LSP::Server
 		// observe a stale tree after an edit.
 		m_Compiler = NewCompiler();
 		m_Compiler->SetTarget(m_Target);
-
-		if (!RegisterProjects())
-			RegisterLooseSources();
-
-		for (const auto& [name, text] : m_InMemorySources)
-			m_Compiler->RegisterInMemory(name, text);
-
-		ApplyOpenDocumentOverrides();
-		std::vector<fs::path> openLibraryFiles;
-		for (const std::string& path : OpenLibraryDocuments()) openLibraryFiles.push_back(fs::path(path));
-		m_Compiler->RegisterIncludedLibraryFiles(fs::path(m_LibraryFolder), openLibraryFiles); // as C4.exe does: after the program's own sources
-		ApplyOpenDocumentOverrides(); // the library's files open in the editor have units now
-		RunPreprocessPhase();
-
-		m_Compiler->CompileAll();
-
-		// Semantic analysis is a single program-wide pass: ONE analyzer over all units' own declarations.
-		// The LSP serves diagnostics and semantic information from that one result - the same source of
-		// truth the compiler uses - so it can never report errors the build does not produce. Each unit's
-		// includes are spliced into its root AST for navigation.
-		m_Compiler->AnalyzeProgram();
-		m_Compiler->MergeIncludes();
-
-		// Body-level type checking: run the compiler's OWN HIR lowering over every complete body and
-		// collect its diagnostics (RunLoweringPass). Together with GetAllDiagnostics() these are exactly
-		// the errors C4.exe reports for the project - parse + program-model + body-lowering. The LSP
-		// surfaces all three, computed by the compiler itself, so there is no separate error logic here.
-		RunLoweringPass();
+		m_Timings = Timings{};
+		m_Timings.read = Timed([this] { RegisterSources(); });
+		m_Timings.preprocess = Timed([this] { RunPreprocessPhase(); });
+		m_Timings.parse = Timed([this] { m_Compiler->CompileAll(); });
+		// Semantic analysis is a single program-wide pass: ONE analyzer over all units' own declarations, the same source
+		// of truth the compiler uses, so the LSP can never report errors the build does not produce. Each unit's tree
+		// stays its own file's: a feature that needs what an included header declares asks the model, or walks that
+		// header's unit (splicing every header into every includer took a second on a large program, and each walk then
+		// skipped it).
+		m_Timings.model = Timed([this] { m_Compiler->AnalyzeProgram(); });
+		// Body-level type checking: the compiler's OWN HIR lowering over every complete body (RunLoweringPass). With
+		// GetAllDiagnostics() these are exactly the errors C4.exe reports - parse + program-model + body-lowering.
+		m_Timings.bodies = Timed([this] { RunLoweringPass(); });
+		m_Timings.files = m_Compiler->SourceCount();
 
 		// A fresh resolver bound to the new model: stale node facts from the previous compile are dropped,
 		// and any template instantiations registered while lowering above are already visible to it.
@@ -117,6 +115,62 @@ namespace C4LSP::Server
 
 		m_Compiled = true;
 		return true;
+	}
+
+	void CompilationSession::RegisterSources()
+	{
+		if (!RegisterProjects())
+			RegisterLooseSources();
+		for (const auto& [name, text] : m_InMemorySources)
+			m_Compiler->RegisterInMemory(name, text);
+		ApplyOpenDocumentOverrides();
+		std::vector<fs::path> openLibraryFiles;
+		for (const std::string& path : OpenLibraryDocuments()) openLibraryFiles.push_back(fs::path(path));
+		m_Compiler->RegisterIncludedLibraryFiles(fs::path(m_LibraryFolder), openLibraryFiles); // as C4.exe does: after the program's own sources
+		ApplyOpenDocumentOverrides(); // the library's files open in the editor have units now
+		RecordDiskFiles();
+	}
+
+	void CompilationSession::RecordDiskFiles()
+	{
+		m_DiskFiles.clear();
+		const auto& sources = m_Compiler->GetSourceManager();
+		for (uint32 id = 1; id <= sources.Count(); ++id)
+		{
+			if (!sources.HasInfo(id) || sources.GetInfo(id).absPath.empty()) continue;
+			const std::string& path = sources.GetInfo(id).absPath;
+			if (const std::optional<Scripting::FileStamp> stamp = Scripting::StampOf(path))
+				m_DiskFiles.push_back({ path, id, *stamp }); // just after the read: a change from now on shows
+		}
+	}
+
+	std::vector<std::pair<std::string, Scripting::FileStamp>> CompilationSession::DiskStamps() const
+	{
+		std::vector<std::pair<std::string, Scripting::FileStamp>> stamps;
+		stamps.reserve(m_DiskFiles.size());
+		for (const DiskFile& file : m_DiskFiles) stamps.emplace_back(file.path, file.stamp);
+		return stamps;
+	}
+
+	bool CompilationSession::ChangedOnDisk(const StampLookup& stampOf)
+	{
+		for (DiskFile& file : m_DiskFiles)
+		{
+			const std::optional<Scripting::FileStamp> now = stampOf(file.path);
+			if (!now) return true;
+			if (now->size == file.stamp.size && now->modified == file.stamp.modified) continue;
+			if (TextDiffersOnDisk(file.path, file.sourceId)) return true;
+			file.stamp = *now; // touched, not changed (a checkout of the same text)
+		}
+		return false;
+	}
+
+	bool CompilationSession::TextDiffersOnDisk(const std::string& path, uint32 sourceId) const
+	{
+		std::string text = Scripting::ReadFileBytes(path);
+		constexpr std::string_view kUtf8Bom = "\xEF\xBB\xBF"; // the compiler reads a file without it
+		if (std::string_view(text).substr(0, kUtf8Bom.size()) == kUtf8Bom) text.erase(0, kUtf8Bom.size());
+		return text != RawTextOf(sourceId);
 	}
 
 	bool CompilationSession::RecompileScript()
@@ -214,6 +268,7 @@ namespace C4LSP::Server
 	void CompilationSession::RunLoweringPass(uint32 interfaceUnits)
 	{
 		m_LoweringErrors.Clear();
+		m_LoweredBodies = false;
 		if (!m_Compiler->GetProgramModel().IsValid())
 			return; // a broken front end already reports its own errors; C4.exe never lowers then either
 
@@ -251,6 +306,31 @@ namespace C4LSP::Server
 		}
 		for (const auto& err : loweringErrors.GetErrors())
 			m_LoweringErrors.Push(err);
+		m_LoweredBodies = true;
+	}
+
+	void CompilationSession::KeepBodyDiagnosticsOf(const CompilationSession& earlier)
+	{
+		if (m_LoweredBodies || m_ScriptHost) return;
+		std::set<uint32> broken; // the files this compile found a front-end error in
+		for (const auto& err : m_Compiler->GetAllDiagnostics())
+			if (err.severity != Scripting::ErrorSeverity::Warning) broken.insert(err.location.sourceId);
+		std::map<uint32, uint32> same; // a file of `earlier` -> the same file here, 0 when its text or its errors differ
+		for (const auto& err : earlier.GetLoweringDiagnostics())
+		{
+			auto known = same.find(err.location.sourceId);
+			if (known == same.end())
+			{
+				const std::string uri = earlier.UriForSourceId(err.location.sourceId);
+				const uint32 id = uri.empty() ? 0 : FindSourceIdByUri(uri);
+				const bool kept = id != 0 && !broken.count(id) && RawTextOf(id) == earlier.RawTextOf(err.location.sourceId);
+				known = same.emplace(err.location.sourceId, kept ? id : 0).first;
+			}
+			if (known->second == 0) continue;
+			Scripting::CompilationError carried = err;
+			carried.location.sourceId = known->second;
+			m_LoweringErrors.Push(carried);
+		}
 	}
 
 	void CompilationSession::ApplyOpenDocumentOverrides()
@@ -355,19 +435,19 @@ void CompilationSession::RunPreprocessPhase()
 
 		auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), texts, m_IncludePaths, objDir, m_Target.Flags(), false, true);
 
-		std::map<std::string, std::string> macroByAbs;
-		for (const auto& mr : macroResults)
-			macroByAbs[mr.absPath] = mr.text;
+		std::unordered_map<std::string, const Scripting::MacroPass::FileResult*> macroOf;
+		for (const auto& mr : macroResults) macroOf[mr.absPath] = &mr;
+		std::unordered_map<std::string, const Scripting::InteropFileResult*> boundOf;
+		for (const auto& ir : interop.files) boundOf[ir.absPath] = &ir;
 
 		m_BindingStartLine.clear();
 		m_BindingDirectiveLine.clear();
 		m_MacroTables.clear();
 		m_RawTexts.clear();
-		// Replace each source's text with its effective form (macro-expanded + bindings) so the
-		// parser sees exactly what the compiler would parse. The bindings follow the user's text, so
-		// the user's lines are the editor's; record where the bindings start and the editor line of the
-		// `extern ... include` directive that produced them (the only place a generated symbol's
-		// definition is visible to the user).
+		// Replace each source's text with its effective form (macro-expanded + bindings) so the parser sees exactly what
+		// the compiler would parse, its locations still the file's own columns (BUG-446). The bindings follow the user's
+		// text, so the user's lines are the editor's; record where the bindings start and the editor line of the
+		// `extern ... include` directive that produced them (the only place a generated symbol's definition is visible).
 		for (uint32 id = 1; id <= m_Compiler->SourceCount(); ++id)
 		{
 			const auto& info = m_Compiler->GetSourceManager().GetInfo(id);
@@ -375,35 +455,28 @@ void CompilationSession::RunPreprocessPhase()
 			const std::string identity = Scripting::MacroIdentity(info);
 			if (info.source)
 				m_RawTexts[id] = std::string(info.source->Data(), info.source->Size());
-			for (const auto& mr : macroResults)
-				if (mr.absPath == identity && !mr.table.Empty())
-				{
-					m_MacroTables[id] = mr.table;
-					break;
-				}
-			std::string effective;
-			bool hasBindings = false;
-			size_t directiveOffset = SIZE_MAX;
-			uint32 bindingsLine = 0;
-			for (const auto& ir : interop.files)
-				if (ir.absPath == identity) { effective = ir.text; hasBindings = true; directiveOffset = ir.directiveOffset; bindingsLine = ir.bindingsLine; break; }
-			if (!hasBindings)
-			for (const auto& mr : macroResults)
-				if (mr.absPath == identity) { effective = mr.text; break; }
+			const auto macro = macroOf.find(identity);
+			const Scripting::MacroPass::FileResult* expanded = macro != macroOf.end() ? macro->second : nullptr;
+			if (expanded && !expanded->table.Empty())
+				m_MacroTables[id] = expanded->table;
+			const auto bound = boundOf.find(identity);
+			const Scripting::InteropFileResult* bindings = bound != boundOf.end() ? bound->second : nullptr;
+			if (!bindings && !expanded)
+				continue;
+			const std::string& effective = bindings ? bindings->text : expanded->text;
 			if (effective.empty())
 				continue;
 
-			m_Compiler->GetSourceManager().SetSourceText(id, effective);
-			m_Compiler->GetSourceManager().GetInfo(id).bindingsLine = bindingsLine;
+			m_Compiler->GetSourceManager().SetExpandedText(id, effective, expanded ? expanded->columns : Scripting::ColumnMap());
+			m_Compiler->GetSourceManager().GetInfo(id).bindingsLine = bindings ? bindings->bindingsLine : 0;
 
-			if (hasBindings)
+			if (bindings)
 			{
-				auto it = macroByAbs.find(identity);
-				m_BindingStartLine[id] = (it != macroByAbs.end() ? CountLines(it->second) : 0) + 1;
+				m_BindingStartLine[id] = (expanded ? CountLines(expanded->text) : 0) + 1;
 
 				// Editor line (1-based) of the directive, computed against the original text.
-				if (directiveOffset != SIZE_MAX && it != macroByAbs.end())
-					m_BindingDirectiveLine[id] = static_cast<uint32>(std::count(it->second.begin(), it->second.begin() + directiveOffset, '\n')) + 1;
+				if (bindings->directiveOffset != SIZE_MAX && expanded)
+					m_BindingDirectiveLine[id] = static_cast<uint32>(std::count(expanded->text.begin(), expanded->text.begin() + bindings->directiveOffset, '\n')) + 1;
 			}
 		}
 	}
@@ -418,6 +491,14 @@ void CompilationSession::RunPreprocessPhase()
 	{
 		auto found = m_RawTexts.find(sourceId);
 		return found == m_RawTexts.end() ? std::string_view() : std::string_view(found->second);
+	}
+
+	std::optional<size_t> CompilationSession::CompiledTextHash(const std::string& uri) const
+	{
+		const uint32 id = FindSourceIdByUri(uri);
+		auto found = id == 0 ? m_RawTexts.end() : m_RawTexts.find(id);
+		if (found == m_RawTexts.end()) return std::nullopt;
+		return std::hash<std::string_view>{}(found->second);
 	}
 
 	Protocol::Range CompilationSession::ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const

@@ -49,7 +49,7 @@ namespace C4LSP::Features
 		// `Add()` without its semicolon) is syntactically incomplete and produces no call node at all - but that is
 		// EXACTLY when VS2022 / Visual Assist show parameter hints (on the instant you type '('). Recover the callee
 		// from raw text instead of the AST.
-		size_t caretOffset = source.LineToByteOffset(position.line + 1) + position.character;
+		size_t caretOffset = source.LineColumnToByteOffset(position.line + 1, position.character + 1);
 		std::string calleeName;
 		uint32 lexicalArg = 0;
 		if (LexicalCall(source, std::min(caretOffset, source.Size()), calleeName, lexicalArg))
@@ -81,8 +81,7 @@ namespace C4LSP::Features
 				return false;
 
 			// Which argument the caret is in: count argument subtrees that start before it.
-			size_t offset = source.LineToByteOffset(position.line + 1) + position.character;
-			offset = std::min(offset, source.Size());
+			const size_t offset = source.LineColumnToByteOffset(position.line + 1, position.character + 1);
 			activeArg = 0;
 			for (const auto& arg : call.GetArguments())
 				if (arg && arg->startLocation.byteOffset < offset)

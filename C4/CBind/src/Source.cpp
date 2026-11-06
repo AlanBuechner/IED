@@ -55,6 +55,20 @@ namespace
 		return !out.header.empty() && !out.outFile.empty();
 	}
 
+	// Every file the parse of the header read, one absolute path a line: the header, the headers it includes and theirs. A
+	// cached binding is current while none of them changed (BUG-451).
+	void WriteFilesRead(const SourceManager& sources, const std::string& path)
+	{
+		std::error_code ec;
+		llvm::raw_fd_ostream out(path, ec, llvm::sys::fs::OF_Text);
+		for (auto it = sources.fileinfo_begin(); it != sources.fileinfo_end(); ++it)
+		{
+			llvm::SmallString<260> file(it->getFirst().getName());
+			llvm::sys::fs::make_absolute(file);
+			out << file << "\n";
+		}
+	}
+
 		class BindingConsumer : public ASTConsumer
 	{
 	public:
@@ -78,6 +92,7 @@ namespace
 			std::error_code ec;
 			llvm::raw_fd_ostream f(outPath.string(), ec, llvm::sys::fs::OF_TextWithCRLF);
 			f << text;
+			WriteFilesRead(ctx.getSourceManager(), outPath.string() + ".deps");
 
 			// C++ virtual dispatch: emit a companion C++ shim with one vtable trampoline per
 			// virtual method. InteropPass compiles it as a foreign object and links it in.

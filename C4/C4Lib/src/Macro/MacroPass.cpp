@@ -54,6 +54,7 @@ namespace Scripting
 		PreprocessedFile processed = MacroPreprocessor::Process(input.text, result.name, result.table, inheritMacros);
 		result.text = std::move(processed.text);
 		result.diagnostics = std::move(processed.diagnostics);
+		result.columns = std::move(processed.columns);
 		result.exported = result.table.Without(input.predefined);
 		return done.emplace(absPath, std::move(result)).first->second;
 	}

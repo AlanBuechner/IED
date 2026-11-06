@@ -129,19 +129,32 @@ namespace C4LSP::Server
 
 	void LspServer::HandleDocumentSymbol(const Json::Value& id, const Json::Value& params)
 	{
-		auto session = SnapshotForRequest(ExtractUri(params));
+		auto session = SnapshotForRequest(ExtractUri(params), Freshness::Document); // its own file's declarations
 		auto symbols = Features::DocumentSymbols::ForDocument(*session, ExtractUri(params));
 		SendResponse(id, Protocol::LspJson::DocumentSymbols(symbols));
 	}
 
-	// Every program's symbols (scripts are not in workspace symbols).
+	// Every program's symbols (scripts are not in workspace symbols): the analyses there are, then what the others left.
 	void LspServer::HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params)
 	{
 		const std::string query = params.Member("query").GetString(""); // {query: "..."} per the LSP spec
 		AwaitWork(std::chrono::milliseconds(10'000));
+		const SymbolSources sources = WorkspaceSymbolSources();
 		Core::Vector<Features::WorkspaceSymbol> symbols;
-		for (const auto& session : AllAnalyses())
+		for (const auto& session : sources.analyses)
 			AppendNew(symbols, Features::WorkspaceSymbols::ForQuery(*session, query), SymbolKey);
+		std::set<std::string> open; // an open document's symbols are its analysis's, as the editor has it, not its file's
+		{
+			std::lock_guard<std::mutex> lock(m_DocMutex);
+			m_Documents.ForEachDocument([&open](const std::string& uri, const std::string&) { open.insert(ComparablePath(Protocol::DocumentUri::FromUri(uri))); });
+		}
+		std::vector<const Core::Vector<Features::WorkspaceSymbol>*> files; // a file several programs hold, once
+		std::set<const FileSymbols*> taken;
+		for (const auto& index : sources.indexes)
+			for (const auto& file : index->symbols)
+				if (!file->symbols.Empty() && taken.insert(file.get()).second && !open.count(ComparablePath(Protocol::DocumentUri::FromUri(file->symbols[0].location.uri))))
+					files.push_back(&file->symbols);
+		AppendNew(symbols, Features::WorkspaceSymbols::Matching(files, query), SymbolKey);
 		SendResponse(id, Protocol::LspJson::WorkspaceSymbols(symbols));
 	}
 

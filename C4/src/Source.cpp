@@ -411,9 +411,13 @@ namespace
 			// user file and a default-library file sharing a basename would otherwise both receive the
 			// same (user) text, silently overwriting the library's definitions.
 			std::unordered_map<std::string, const std::string*> byAbs;
+			std::unordered_map<std::string, const Scripting::ColumnMap*> columnsOf; // the bindings follow the user's lines: same columns
 			std::unordered_map<std::string, uint32> bindingsLine;
 			for (const auto& mr : macroResults)
+			{
 				byAbs[mr.absPath] = &mr.text;
+				columnsOf[mr.absPath] = &mr.columns;
+			}
 			for (const auto& ir : interopFiles)
 			{
 				byAbs[ir.absPath] = &ir.text; // interop text already includes the macro expansion
@@ -428,7 +432,10 @@ namespace
 				auto it = byAbs.find(Scripting::MacroIdentity(info));
 				// Text the passes left as it was keeps its source and line table: no lexer has read one yet.
 				if (it != byAbs.end() && !(info.source && std::string_view(info.source->Data(), info.source->Size()) == *it->second))
-					sm.SetSourceText(id, *it->second);
+				{
+					const auto columns = columnsOf.find(Scripting::MacroIdentity(info));
+					sm.SetExpandedText(id, *it->second, columns != columnsOf.end() ? *columns->second : Scripting::ColumnMap());
+				}
 			}
 		}
 

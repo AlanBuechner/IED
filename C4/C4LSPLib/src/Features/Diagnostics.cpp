@@ -13,12 +13,11 @@ namespace C4LSP::Features
 	// the editor even though they reach the client. Widen such ranges to the full token at that position:
 	// an identifier run, or a whole string literal when the point lands on or inside it. Parse errors
 	// already carry real spans and pass through untouched (their range is non-zero-width).
-	static void WidenToTokenSpan(Server::CompilationSession& session, const std::string& uri, Protocol::Diagnostic& diag)
+	static void WidenToTokenSpan(const std::string& text, Protocol::Diagnostic& diag)
 	{
 		if (diag.range.start.line != diag.range.end.line || diag.range.start.character != diag.range.end.character)
 			return;
 
-		std::string text = session.GetEditorText(uri);
 		size_t lineIndex = 0; // index of the first character on diag.range.start.line (0-based)
 		for (uint32 i = 0; i < diag.range.start.line; ++i) {
 			size_t nl = text.find('\n', lineIndex); // newline ending this line
@@ -97,6 +96,7 @@ namespace C4LSP::Features
 		// The include-merge can surface the same error under more than one unit, so dedupe by
 		// (line, column, message) to avoid showing every squiggle twice.
 		std::set<std::tuple<uint32, uint32, std::string>> seen;
+		const std::string text = session.GetEditorText(uri); // read once: every diagnostic widens against it
 
 		// The compiler's complete diagnostic surface for this file: parse + program-model errors
 		// (GetAllDiagnostics) plus body-level HIR-lowering type errors (GetLoweringDiagnostics). Both are
@@ -106,7 +106,7 @@ namespace C4LSP::Features
 			if (error.location.sourceId != targetId)
 				return;
 			Protocol::Diagnostic diag = ToLsp(session, error, targetId);
-			WidenToTokenSpan(session, uri, diag);
+			WidenToTokenSpan(text, diag);
 			uint32 line = diag.range.start.line;
 			uint32 col = diag.range.start.character;
 			if (!seen.insert(std::make_tuple(line, col, diag.message)).second)

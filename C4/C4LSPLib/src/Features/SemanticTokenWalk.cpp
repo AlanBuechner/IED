@@ -24,6 +24,9 @@
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/LambdaNode.h"
+#include "Parser/Nodes/Declarations/IncludeDeclarationNode.h"
+#include "Compiler/CompilerInstance.h"
+#include "Compiler/CompilationUnit.h"
 #include "Server/WrittenChildren.h"
 #include <algorithm>
 #include <cctype>
@@ -361,5 +364,65 @@ namespace C4LSP::Features::TokenWalk
 			childDepth = objectDepth + 1;
 
 		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { Walk(child, ctx, path, childDepth, childDirectMember); });
+	}
+
+	// --- What the included headers declare --------------------------------------------------------------------------------
+
+	namespace
+	{
+		// A header's type names and its objects' fields, as Walk records them; function bodies and initializers declare
+		// neither.
+		void CollectDeclared(const Scripting::AstNode& node, Ctx& ctx, bool directMember)
+		{
+			switch (node.Type())
+			{
+			case Scripting::NodeType::ObjectDefinition: {
+				const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
+				ctx.typeNames.emplace(obj.GetNameToken().GetText(), ObjectKindToToken(obj.Kind())); // first declaration wins
+				break;
+			}
+			case Scripting::NodeType::EnumDefinition:
+				ctx.typeNames.emplace(static_cast<const Scripting::EnumDefinitionNode&>(node).GetNameToken().GetText(), K(SemanticTokenKind::Enum));
+				break;
+			case Scripting::NodeType::VariableDefinition:
+				if (directMember)
+					ctx.fields.insert(&node);
+				return;
+			case Scripting::NodeType::FunctionDefinition:
+				return;
+			default:
+				break;
+			}
+			const bool childDirectMember = directMember || node.Type() == Scripting::NodeType::ObjectDefinition;
+			Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { CollectDeclared(child, ctx, childDirectMember); });
+		}
+
+		// The headers `unitId` includes, each in the place of its include (as the compiler's include merge splices them);
+		// the unit's own declarations too when `own`.
+		void CollectIncludes(Scripting::CompilerInstance& compiler, uint32 unitId, bool own, std::unordered_set<uint32>& seen, Ctx& ctx)
+		{
+			const Ref<Scripting::CompilationUnit> unit = compiler.GetCompilationUnit(unitId);
+			if (!unit)
+				return;
+			for (const auto& child : unit->GetOriginalChildren())
+			{
+				if (!child)
+					continue;
+				if (const auto include = child.PointerCast<Scripting::IncludeDeclarationNode>())
+				{
+					const uint32 header = compiler.GetSourceManager().ResolveIncludePath(include->FilePath(), unitId);
+					if (header != 0 && seen.insert(header).second)
+						CollectIncludes(compiler, header, true, seen, ctx);
+				}
+				else if (own)
+					CollectDeclared(*child.Get(), ctx, false);
+			}
+		}
+	}
+
+	void CollectIncludedDeclarations(Scripting::CompilerInstance& compiler, Ctx& ctx)
+	{
+		std::unordered_set<uint32> seen{ ctx.sourceId };
+		CollectIncludes(compiler, ctx.sourceId, false, seen, ctx);
 	}
 } // namespace C4LSP::Features::TokenWalk

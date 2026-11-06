@@ -122,6 +122,36 @@ What dominated, and what changed (C4 `docs/tools/03` "Memory"):
 - Still per program: each analysis is double-buffered while it is redone (twice its size at the peak of an edit), and
   two programs that share modules each parse them (sharing a parsed module across programs is C4 roadmap work).
 
+## C4LSP speed, measured (2026-11-06)
+
+The owner: "it takes a long time for it to load up symbols for documents and makes it slow for the AI to query for
+symbols". C4LSP over stdio from a scratch client that drives it as IED does (`initializationOptions.programs` from
+`.ied/local/lsp-options`, UTF-16, a document opened before its outline as the AI's code tools open one), Claymore's
+41 programs, warm disk; this machine was building Claymore at the same time.
+
+| Claymore, the engine program (1618 files) | Before | After |
+|---|---|---|
+| A file of it opened in the editor: outline and colors | 6.7 s (8.7 s under load) | 3.0 - 3.3 s |
+| The AI's outline of another file of it (opened transiently, unchanged) | 6.8 s (a whole analysis) | 4 - 6 ms |
+| The AI's outline after a file of it closed | 6.8 s | 5 ms |
+| An edit: the edited file's outline and diagnostics again | 6.9 - 10 s | 3.5 s |
+| Its semantic tokens (8.4k) | 97 ms | 55 ms |
+| A hover in one program while another program's file is edited | up to 10 s | at once |
+| `workspace/symbol`, the first search after the server starts | 25 s (the budget; results missing) | 17.8 s; 0.1 - 0.25 s once the background index is made, about 30 s after start |
+| `workspace/symbol`, later searches | 7 - 25 s (consulted analyses kept three minutes, then made again) | 0.08 - 0.25 s |
+| Memory after a search | 5.7 GB | 2.2 GB (as after an edit: an analysis is double-buffered while it is redone) |
+
+IED's own server program (674 files): an open, a close or an edit analyzed it again (1.5 s each, every outline waiting
+for it); an unchanged open or close now costs nothing, an edit 1.4 s.
+
+Where an analysis of the engine program spent its time, and what changed (C4 `docs/tools/03` "When a program is
+analyzed"): CBind ran again over the D3D12 and Win32 SDK headers on every analysis (2.8 s), because two programs binding
+one header with different include folders evicted each other's cached binding (BUG-445); every unit's tree had its whole
+include closure spliced in (1.2 s, and every walk skipped it again); each open or close of an unchanged file, and each
+request, waited for a whole analysis. Left: parsing 1.4 s (one file at a time, "C4LSP memory, measured"), the model
+0.55 s, the bodies 0.55 s. Each analysis is one line in the server log (`C4LSP: ClaymoreEngine analyzed in 3019 ms
+(1624 files: read 135, macros and bindings 355, parse 1442, model 554, bodies 533)`).
+
 ## Open items
 
 - Incremental `didChange` for servers that ask for it (C4LSP takes full text).

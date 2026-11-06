@@ -101,8 +101,8 @@ extern "c" source "helpers.c";
 
 - `include`: runs `CBind.exe` (`$C4_HOME/CBind/CBind.exe`, else `<dir of C4.exe>/../CBind/CBind.exe`) on the
   header as a subprocess, which uses clang libtooling to generate C4 declarations. The generated text is
-  appended to the including file and cached as `<hash>_<name>.c4bind`, keyed on the header and CBind
-  timestamps. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
+  appended to the including file and cached as `<hash>_<name>.<flags>.c4bind` (one per way of parsing the header),
+  keyed on the header and CBind timestamps. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
   constructor, destructor, method and C++-linkage function, compiled and linked as a foreign object, so
   C4 calls them (virtuals dispatch through a typed pointer in the wrapper).
 - `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`, the build's `-O` and `-g`) and

@@ -201,6 +201,7 @@ namespace C4LSP::Features
 		BuildNamespacePaths(ctx); // namespace prefixes for qualified-chain classification (Win::Test::...)
 		if (unit && unit->GetRootAST())
 		{
+			CollectIncludedDeclarations(session.GetCompiler(), ctx);
 			Core::Vector<const Scripting::AstNode*> path;
 			Walk(*unit->GetRootAST().Get(), ctx, path, /*objectDepth=*/0, /*directMember=*/false);
 		}

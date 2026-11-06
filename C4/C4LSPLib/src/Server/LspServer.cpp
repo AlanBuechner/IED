@@ -6,9 +6,15 @@
 #include "Json/JsonWriter.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <set>
+#include <utility>
+#include <unordered_map>
 #include "Features/Diagnostics.h"
 #include "Features/Tidy.h"
+#ifdef _WIN32
+#include <malloc.h> // _heapmin
+#endif
 
 namespace C4LSP::Server
 {
@@ -20,8 +26,51 @@ namespace C4LSP::Server
 		constexpr auto kRequestBudget = std::chrono::seconds(25);
 		// How long a request waits for the edits before it to be analyzed.
 		constexpr auto kFreshWait = std::chrono::seconds(10);
-		// How often the worker looks for analyses it may let go while nothing changes.
-		constexpr auto kReleaseEvery = std::chrono::seconds(30);
+		// How often the worker, while nothing changes, looks at the disk for files an analysis read that something besides
+		// the editor changed (git, a build, another tool), and for analyses it may let go.
+		constexpr auto kIdleLookEvery = std::chrono::seconds(2);
+
+		// The workspace symbols of `analysis`, with the files they were read from; a file's the copy `shared` has already.
+		std::shared_ptr<const SymbolIndex> IndexOf(CompilationSession& analysis, SharedFileSymbols& shared)
+		{
+			auto index = std::make_shared<SymbolIndex>();
+			index->symbols = shared.Share(Features::WorkspaceSymbols::All(analysis));
+			index->files = analysis.DiskStamps();
+			return index;
+		}
+
+		// What a let-go analysis took goes back to the system: the heap keeps freed memory for the next allocation, and a
+		// program's analysis is hundreds of megabytes the server may not need again (docs/tools/03 "Memory").
+		void ReturnFreedMemory()
+		{
+#ifdef _WIN32
+			_heapmin();
+#endif
+		}
+
+		// Whether a file `files` names has another size or time now (`stampOf`), or is gone.
+		bool StampsDiffer(const DiskStamps& files, const CompilationSession::StampLookup& stampOf)
+		{
+			for (const auto& [path, stamp] : files)
+			{
+				const std::optional<Scripting::FileStamp> now = stampOf(path);
+				if (!now || now->size != stamp.size || now->modified != stamp.modified) return true;
+			}
+			return false;
+		}
+
+		// One line in the server's log for each analysis: where a slow one spends its time (`symbols`: its index, ms).
+		void LogAnalysis(const ProgramOptions& options, const CompilationSession::Timings& t, double symbols)
+		{
+			const std::string name = options.library ? "the default library" : options.name.empty() ? "the workspace" : options.name;
+			std::fprintf(stderr, "C4LSP: %s analyzed in %.0f ms (%u files: read %.0f, macros and bindings %.0f, parse %.0f, model %.0f, bodies %.0f, symbols %.0f)\n",
+				name.c_str(), t.Total() + symbols, t.files, t.read, t.preprocess, t.parse, t.model, t.bodies, symbols);
+		}
+
+		double MillisecondsSince(std::chrono::steady_clock::time_point start)
+		{
+			return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		}
 
 		// The library a program builds with: its options', else the server's own.
 		std::string LibraryOf(const ProgramOptions& options)
@@ -105,14 +154,54 @@ namespace C4LSP::Server
 		return program->session ? program->session : m_Unanalyzed;
 	}
 
-	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest(const std::string& uri)
+	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest(const std::string& uri, Freshness freshness)
 	{
-		// Wait for pending work (bounded), then snapshot: didChange is applied to m_Documents and analyzed on the worker,
-		// so answering before that swap-in would answer for stale text (completion after typing "x." would offer globals
-		// instead of x's members). On a very large program one analysis can outlive any client's request timeout, so past
-		// the deadline the current snapshot answers.
-		AwaitWork(kFreshWait);
+		// didChange is applied to m_Documents and analyzed on the worker, so answering before that swap-in would answer for
+		// stale text (completion after typing "x." would offer globals instead of x's members). An analysis of another
+		// program (an edit elsewhere in the workspace) changes nothing this answer reads, so it is not waited for.
+		const auto current = [&] {
+			std::map<std::string, size_t> open;
+			{
+				std::lock_guard<std::mutex> lock(m_DocMutex);
+				open = m_Documents.TextHashes();
+			}
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			return IsCurrentLocked(uri, open, freshness);
+		};
+		if (!current())
+		{
+			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
+			QueryReleased waiting(m_QueryMutex);
+			std::unique_lock<std::mutex> lock(m_WorkMutex);
+			m_WorkCv.wait_for(lock, std::max(std::chrono::milliseconds(0), std::min<std::chrono::milliseconds>(kFreshWait, left)),
+				[&] { return (!m_Working && !m_Dirty) || current(); });
+		}
 		return GetSnapshot(uri);
+	}
+
+	bool LspServer::IsCurrentLocked(const std::string& uri, const std::map<std::string, size_t>& open, Freshness freshness) const
+	{
+		if (ScopeOfUri(uri) >= 0) return false; // a script scope's analysis is waited for as a whole
+		const std::shared_ptr<Program> program = ProgramOfLocked(uri);
+		if (!program->session) return false;
+		if (freshness == Freshness::Program) return program->AnalysisIsOf(TakenByLocked(*program, open));
+		const auto document = open.find(uri);
+		return document == open.end() || program->session->CompiledTextHash(uri) == document->second;
+	}
+
+	std::map<std::string, size_t> LspServer::TakenByLocked(const Program& program, const std::map<std::string, size_t>& open) const
+	{
+		const bool own = m_Programs.front().get() == &program;
+		std::map<std::string, size_t> taken;
+		for (const auto& [uri, hash] : open)
+		{
+			if (ScopeOfUri(uri) >= 0) continue;
+			const std::string path = PathOfUri(uri);
+			const bool held = program.Owns(path);
+			if (held || (own && std::none_of(m_Programs.begin(), m_Programs.end(), [&path](const std::shared_ptr<Program>& other) { return other->Owns(path); })))
+				taken.emplace(uri, hash);
+		}
+		return taken;
 	}
 
 	void LspServer::AwaitWork(std::chrono::milliseconds most)
@@ -120,6 +209,14 @@ namespace C4LSP::Server
 		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
 		QueryReleased waiting(m_QueryMutex);
 		WaitForPendingWork(std::max(std::chrono::milliseconds(0), std::min(most, left)));
+	}
+
+	void LspServer::NotifyAnalyzed()
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_WorkMutex); // a request between its check and its wait sees the swap or the wake
+		}
+		m_WorkCv.notify_all();
 	}
 
 	int32 LspServer::ScopeOfUri(const std::string& uri) const
@@ -134,6 +231,14 @@ namespace C4LSP::Server
 		for (const auto& program : m_Programs)
 			if (program->session) ++count;
 		return count;
+	}
+
+	size_t LspServer::AnalysesMade() const { return m_AnalysesMade.load(); }
+
+	size_t LspServer::IndexedProgramCount() const
+	{
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		return static_cast<size_t>(std::count_if(m_Programs.begin(), m_Programs.end(), [](const std::shared_ptr<Program>& program) { return program->symbols != nullptr; }));
 	}
 
 	std::shared_ptr<CompilationSession> LspServer::BuildScriptSession(size_t scope, const EditorDocuments& docs)
@@ -320,28 +425,83 @@ namespace C4LSP::Server
 		const auto inputs = InputsOf(taken);
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			if (program.session && !program.stale && program.analyzedWith == inputs) return false;
+			if (program.AnalysisIsOf(inputs))
+			{
+				program.analyzedWith = inputs;
+				return false;
+			}
 		}
 		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken);
-		std::lock_guard<std::mutex> lock(m_SessionMutex);
-		program.session = fresh;
-		program.analyzedWith = inputs;
-		program.stale = false;
+		++m_AnalysesMade;
+		// The worker alone swaps analyses: reading the last one here (what requests never change of it) needs no lock.
+		if (program.session) fresh->KeepBodyDiagnosticsOf(*program.session);
+		// Its symbols outlive it: a search after it is let go answers from them (no request sees it yet, so no lock).
+		const auto indexing = std::chrono::steady_clock::now();
+		std::shared_ptr<const SymbolIndex> symbols = program.Options().library ? nullptr : IndexOf(*fresh, m_SharedSymbols);
+		LogAnalysis(program.Options(), fresh->GetTimings(), MillisecondsSince(indexing));
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			program.session = fresh;
+			program.analyzedWith = inputs;
+			program.stale = false;
+			program.symbols = std::move(symbols);
+		}
+		NotifyAnalyzed();
 		return true;
+	}
+
+	void LspServer::NoticeDiskChanges()
+	{
+		std::vector<std::shared_ptr<Program>> analyzed, indexed;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			for (const auto& program : m_Programs)
+				if (program->session && !program->stale) analyzed.push_back(program);
+				else if (!program->session && program->symbols) indexed.push_back(program);
+		}
+		std::unordered_map<std::string, std::optional<Scripting::FileStamp>> looked; // each file once, whoever read it
+		const CompilationSession::StampLookup stampOf = [&looked](const std::string& path) {
+			auto known = looked.find(path);
+			return known != looked.end() ? known->second : looked.emplace(path, Scripting::StampOf(path)).first->second;
+		};
+		bool changed = false;
+		for (const auto& program : analyzed)
+		{
+			// The worker is the only one that swaps analyses, and requests never read what ChangedOnDisk keeps.
+			if (!program->session->ChangedOnDisk(stampOf)) continue;
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			program->stale = true;
+			program->symbols.reset();
+			changed = true;
+		}
+		for (const auto& program : indexed)
+		{
+			if (!StampsDiffer(program->symbols->files, stampOf)) continue;
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			program->symbols.reset(); // made again in the background, or by the next search
+		}
+		if (changed) PostRecompile();
 	}
 
 	void LspServer::ReleaseUnneeded()
 	{
 		const auto now = std::chrono::steady_clock::now();
-		std::lock_guard<std::mutex> lock(m_SessionMutex);
-		std::set<Program*> analyzing;
-		for (const auto& [uri, program] : m_Analyzing) analyzing.insert(program.get());
-		for (const auto& program : m_Programs)
-			if (program->session && !analyzing.count(program.get()) && program->wantedUntil <= now)
-			{
-				program->session.reset();
-				program->analyzedWith.clear();
-			}
+		std::vector<std::shared_ptr<CompilationSession>> released;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			std::set<Program*> analyzing;
+			for (const auto& [uri, program] : m_Analyzing) analyzing.insert(program.get());
+			for (const auto& program : m_Programs)
+				if (program->session && !analyzing.count(program.get()) && program->wantedUntil <= now)
+				{
+					released.push_back(std::move(program->session));
+					program->session.reset();
+					program->analyzedWith.clear();
+				}
+		}
+		if (released.empty()) return;
+		released.clear(); // the analyses go here, outside the lock (a request may still hold one: it goes with it)
+		ReturnFreedMemory();
 	}
 
 	// --- Across programs -----------------------------------------------------------------------------------------------
@@ -370,26 +530,87 @@ namespace C4LSP::Server
 		return Consult(consulted);
 	}
 
-	std::vector<std::shared_ptr<CompilationSession>> LspServer::AllAnalyses()
+	std::vector<std::shared_ptr<Program>> LspServer::SearchedProgramsLocked() const
 	{
-		std::vector<std::shared_ptr<Program>> consulted;
+		// The workspace's own programs: a library's program is not analyzed for this (the toolchain's library would flood
+		// every search). One with an analysis or an index is chosen before one without.
+		std::vector<std::shared_ptr<Program>> own;
+		std::vector<ReachFacts> facts;
+		for (const auto& program : m_Programs)
+			if (!program->Options().library)
+			{
+				own.push_back(program);
+				facts.push_back({ program->ProjectNames(), program->ProjectNames(), program->session != nullptr || program->symbols != nullptr });
+			}
+		std::vector<std::shared_ptr<Program>> searched;
+		for (size_t p : ProgramsToConsult(facts, -1)) searched.push_back(own[p]);
+		return searched;
+	}
+
+	LspServer::SymbolSources LspServer::WorkspaceSymbolSources()
+	{
+		// A searched program with neither an analysis nor symbols is indexed for the search, its analysis let go at once
+		// (keeping each for the next search held several at a time: 5.7 GB on Claymore).
+		bool missing = false;
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			// The workspace's own programs: a library's program is not analyzed for this (the toolchain's library would flood
-			// every search), though one analyzed already is read.
-			std::vector<std::shared_ptr<Program>> own;
-			std::vector<ReachFacts> facts;
-			for (const auto& program : m_Programs)
-				if (!program->Options().library)
+			for (const auto& program : SearchedProgramsLocked())
+				if (!program->session && !program->symbols)
 				{
-					own.push_back(program);
-					facts.push_back({ program->ProjectNames(), program->ProjectNames(), program->session != nullptr });
+					program->symbolsWanted = true;
+					missing = true;
 				}
-			for (size_t p : ProgramsToConsult(facts, -1)) consulted.push_back(own[p]);
-			for (const auto& program : m_Programs)
-				if (program->session && std::find(consulted.begin(), consulted.end(), program) == consulted.end()) consulted.push_back(program);
 		}
-		return Consult(consulted);
+		if (missing)
+		{
+			PostRecompile();
+			AwaitWork(std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget));
+		}
+		SymbolSources sources;
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		for (const auto& program : SearchedProgramsLocked())
+			if (!program->session && program->symbols) sources.indexes.push_back(program->symbols);
+		for (const auto& program : m_Programs) // every analysis there is, a library's analyzed already too
+			if (program->session) sources.analyses.push_back(program->session);
+		return sources;
+	}
+
+	void LspServer::IndexWantedPrograms()
+	{
+		std::vector<std::shared_ptr<Program>> wanted;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			for (const auto& program : m_Programs)
+				if (std::exchange(program->symbolsWanted, false) && !program->session && !program->symbols) wanted.push_back(program);
+		}
+		for (const auto& program : wanted) Index(*program);
+	}
+
+	void LspServer::IndexNextProgram()
+	{
+		std::shared_ptr<Program> next;
+		{
+			std::lock_guard<std::mutex> lock(m_SessionMutex);
+			for (const auto& program : SearchedProgramsLocked())
+				if (!program->session && !program->symbols)
+				{
+					next = program;
+					break;
+				}
+		}
+		if (next) Index(*next);
+	}
+
+	void LspServer::Index(Program& program)
+	{
+		std::shared_ptr<CompilationSession> analysis = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), {});
+		const auto indexing = std::chrono::steady_clock::now();
+		std::shared_ptr<const SymbolIndex> index = IndexOf(*analysis, m_SharedSymbols);
+		LogAnalysis(program.Options(), analysis->GetTimings(), MillisecondsSince(indexing));
+		analysis.reset();
+		ReturnFreedMemory();
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		if (!program.symbols) program.symbols = std::move(index);
 	}
 
 	std::vector<std::shared_ptr<CompilationSession>> LspServer::Consult(const std::vector<std::shared_ptr<Program>>& programs)
@@ -436,13 +657,17 @@ namespace C4LSP::Server
 		{
 			{
 				std::unique_lock<std::mutex> lock(m_WorkMutex);
-				const bool woken = m_WorkCv.wait_for(lock, kReleaseEvery, [this] { return m_Dirty || m_WorkShutdown; });
+				const bool woken = m_WorkCv.wait_for(lock, kIdleLookEvery, [this] { return (m_Dirty && !m_AnalysisHeld) || m_WorkShutdown; });
 				if (m_WorkShutdown && !m_Dirty)
 					return;
 				if (!woken)
 				{
+					const bool held = m_AnalysisHeld;
 					lock.unlock();
 					ReleaseUnneeded(); // a query's analyses outlive it a while, then go
+					if (held) continue;
+					NoticeDiskChanges();
+					IndexNextProgram(); // one at a time, between the passes the editor asks for
 					continue;
 				}
 				m_Dirty = false;
@@ -459,6 +684,13 @@ namespace C4LSP::Server
 			}
 			m_WorkCv.notify_all();
 		}
+	}
+
+	void LspServer::HoldAnalysis(bool held)
+	{
+		std::lock_guard<std::mutex> lock(m_WorkMutex);
+		m_AnalysisHeld = held;
+		m_WorkCv.notify_all();
 	}
 
 	void LspServer::WaitForCurrentWork()
@@ -496,6 +728,7 @@ namespace C4LSP::Server
 		if (everyDocument)
 			for (const auto& [uri, text] : docs) analyzed.push_back(uri);
 		Publish(analyzed);
+		IndexWantedPrograms(); // a search waiting for programs' symbols, after what the editor shows
 	}
 
 	void LspServer::Publish(const std::vector<std::string>& uris)

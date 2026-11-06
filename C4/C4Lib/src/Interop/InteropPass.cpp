@@ -58,10 +58,31 @@ namespace Scripting
 			return cbind.empty() ? std::string() : Norm(cbind.string());
 		}
 
-		// A binding is reusable when the header and CBind.exe are unchanged since it was written.
+		// "modified size path" of a file, as the cache records each one the header's parse read.
+		std::string StampLine(const std::string& path, const FileStamp& stamp)
+		{
+			return std::to_string(stamp.modified) + " " + std::to_string(stamp.size) + " " + path;
+		}
+
+		// Whether each file of `lines` (StampLine's) is as it was: a header the bound one includes changed, the binding did
+		// too (BUG-451).
+		bool StampsHold(const std::vector<std::string>& lines)
+		{
+			for (const std::string& line : lines)
+			{
+				const size_t first = line.find(' '), second = first == std::string::npos ? first : line.find(' ', first + 1);
+				if (second == std::string::npos) return false;
+				const std::string path = line.substr(second + 1);
+				const std::optional<FileStamp> now = StampOf(path);
+				if (!now || StampLine(path, *now) != line) return false;
+			}
+			return true;
+		}
+
+		// A binding is reusable when the header, every file its parse read and CBind.exe are unchanged since it was written.
 		// This turns the LSP's per-recompile interop pass from "CBind every file every time"
 		// (~minutes for SDK headers) into a cache hit, without ever serving stale bindings: any
-		// edit to the header or a rebuild of CBind changes one of the stamps.
+		// edit to the header, a header it includes, or a rebuild of CBind changes one of the stamps.
 		bool BindingIsCached(const std::string& outFile, const std::string& headerAbs, const std::string& cbindExe, const BindingFlags& flags)
 		{
 			const std::optional<FileStamp> h = StampOf(headerAbs), cb = StampOf(cbindExe);
@@ -91,11 +112,26 @@ namespace Scripting
 				}
 				return true;
 			};
-			std::vector<std::string> d, inc, target;
-			if (!readCountedList(d) || !readCountedList(inc) || !readCountedList(target)) return false;
+			std::vector<std::string> d, inc, target, read;
+			if (!readCountedList(d) || !readCountedList(inc) || !readCountedList(target) || !readCountedList(read)) return false;
 
 			return hm == h->modified && hs == h->size && cm == cb->modified && cs == cb->size && d == flags.defines && inc == flags.includeDirs &&
-				target == flags.targetFlags;
+				target == flags.targetFlags && StampsHold(read);
+		}
+
+		// The files CBind's parse of a header read (`<binding>.deps`, a path a line), each with its size and time now.
+		std::vector<std::string> FilesReadStamps(const std::string& outFile)
+		{
+			std::vector<std::string> stamps;
+			std::istringstream paths(ReadFileBytes(outFile + ".deps"));
+			std::string path;
+			while (std::getline(paths, path))
+			{
+				if (!path.empty() && path.back() == '\r') path.pop_back();
+				if (path.empty()) continue;
+				if (const std::optional<FileStamp> stamp = StampOf(path)) stamps.push_back(StampLine(path, *stamp));
+			}
+			return stamps;
 		}
 
 		void WriteCountedList(std::ostream& f, const std::vector<std::string>& list)
@@ -113,6 +149,7 @@ namespace Scripting
 			WriteCountedList(f, flags.defines);
 			WriteCountedList(f, flags.includeDirs);
 			WriteCountedList(f, flags.targetFlags);
+			WriteCountedList(f, FilesReadStamps(outFile));
 			WriteFileBytes(outFile + ".cache", f.str());
 		}
 
@@ -387,6 +424,22 @@ namespace Scripting
 			return std::string(buf) + "_" + fs::path(absPath).filename().string();
 		}
 
+		// What a header's bindings are named after: its path tag, then a hash of how CBind parses it. Programs that bind
+		// one header with different include folders or defines keep a binding each, instead of each one's build (or
+		// C4LSP's analysis) evicting the other's and running CBind over the header again.
+		std::string BindingTag(const std::string& absPath, const BindingFlags& flags)
+		{
+			std::string how = flags.language;
+			for (const auto* list : { &flags.defines, &flags.includeDirs, &flags.targetFlags })
+			{
+				how += '\n';
+				for (const std::string& entry : *list) how += entry + '\x1f';
+			}
+			char buf[24];
+			snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)std::hash<std::string>{}(how));
+			return PathTag(absPath) + "." + buf;
+		}
+
 	bool InteropPass::ResolveForeignHeader(const std::string& headerPath, const std::string& fileDir,
 		const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, std::string& outAbs)
 	{
@@ -517,9 +570,10 @@ namespace Scripting
 						"' referenced in " + name + ". Install the CBind tool next to the compiler.");
 					continue;
 				}
-				std::string outFile = Norm(objDir + "/" + PathTag(absPath) + ".c4bind");
-				bool haveBindings = false;
 				const BindingFlags flags{ d.language, d.defines, includeDirs, targetFlags };
+				const std::string bindingTag = BindingTag(absPath, flags);
+				std::string outFile = Norm(objDir + "/" + bindingTag + ".c4bind");
+				bool haveBindings = false;
 				if (FileExists(outFile) && BindingIsCached(outFile, absPath, cbindExe, flags))
 				{
 					if (verbose) CORE_INFO("Interop: using cached bindings for {0}", absPath);
@@ -560,7 +614,7 @@ namespace Scripting
 					{
 						ForeignObject fo;
 						fo.srcPath = Norm(shimPath.string());
-						fo.objPath = Norm(objDir + "/" + PathTag(absPath) + ".shim.obj");
+						fo.objPath = Norm(objDir + "/" + bindingTag + ".shim.obj");
 						fo.language = cxxShim ? "c++" : "c";
 						fo.defines = d.defines;
 						fo.targetFlags = targetFlags;

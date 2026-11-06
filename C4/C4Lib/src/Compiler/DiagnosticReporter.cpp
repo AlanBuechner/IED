@@ -82,7 +82,8 @@ namespace Scripting
 		const bool known = compiler && compiler->GetSourceManager().HasInfo(err.location.sourceId);
 		const std::string filePath = known ? compiler->GetSourceManager().GetInfo(err.location.sourceId).displayName : "unknown";
 		out << filePath << " (" << err.location.line << ":" << err.location.column << ") " << SeverityName(err.severity) << ": " << err.message << "\n";
-		const std::string lineText = known ? std::string(compiler->GetSourceManager().GetLineText(err.location.sourceId, err.location.line).c_str()) : "";
+		// The line as the file has it: the column is the file's, also on a line its macro uses changed (BUG-446).
+		const std::string lineText = known ? std::string(compiler->GetSourceManager().GetWrittenLineText(err.location.sourceId, err.location.line).c_str()) : "";
 		if (!lineText.empty())
 		{
 			std::string caretLine("  ");

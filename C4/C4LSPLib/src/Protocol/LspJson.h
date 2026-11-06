@@ -40,15 +40,15 @@ namespace C4LSP::Protocol
 		static Json::Value HierarchyCalls(const Core::Vector<Features::HierarchyCall>& calls, const char* itemKey); // [{from|to, fromRanges}]
 		static Json::Value ExpandedMacro(const Features::MacroUses::Use& use);                         // {name, expansion} or null (c4/expandMacro)
 		static Features::HierarchyItem HierarchyItemFrom(const Json::Value& item);                    // a client's item back
+		static Range RangeFrom(const Json::Value& range);                                             // a client's range back
 
-private:
+	private:
 		static Json::Value DiagnosticObject(const Diagnostic& diagnostic);
 		static Json::Value LocationObject(const Location& location);
 		static Json::Value RangeObject(const Range& range);
 		static Json::Value PositionObject(const Position& position);
 		static Json::Value DocumentSymbolObject(const Features::DocumentSymbol& symbol);
 		static Json::Value HierarchyItemObject(const Features::HierarchyItem& item);
-		static Range RangeFrom(const Json::Value& range);
 		static Json::Value DocumentHighlightObject(const DocumentHighlight& highlight);
 	};
 } // namespace C4LSP::Protocol

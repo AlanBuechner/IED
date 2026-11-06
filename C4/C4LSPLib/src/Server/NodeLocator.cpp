@@ -20,12 +20,8 @@ namespace C4LSP::Server
 
 	size_t NodeLocator::PositionToByteOffset(const Scripting::Source& source, const Protocol::Position& position)
 	{
-		if (position.line == 0)
-			return std::min<size_t>(position.character, source.Size());
-
-		size_t lineStart = source.LineToByteOffset(position.line + 1); // LSP 0-based -> 1-based
-		size_t offset = lineStart + position.character;
-		return std::min(offset, source.Size());
+		// The editor's column is the file's: on a line its macro uses changed, the compiled text's column differs (BUG-446).
+		return source.LineColumnToByteOffset(position.line + 1, position.character + 1); // LSP 0-based -> 1-based
 	}
 
 	bool NodeLocator::IsRootNamespace(const Scripting::AstNode& node)

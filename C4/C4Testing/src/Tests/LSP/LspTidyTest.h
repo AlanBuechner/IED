@@ -43,5 +43,9 @@ namespace Testing
 
 		TEST_FUNC(Lsp.Features.Tidy)
 		void TestParseErrorDocumentYieldsNoTidyFindings();
+
+		// BUG-448: a finding in a header is the header's, never also reported at its line and column in each includer.
+		TEST_FUNC(Lsp.Features.Tidy)
+		void TestAHeadersFindingsStayInTheHeader();
 };
 } // namespace Testing

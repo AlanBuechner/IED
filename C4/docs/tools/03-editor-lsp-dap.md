@@ -24,7 +24,11 @@ pipeline as C4.exe, and answers every request from the compiler's own data:
 - **Diagnostics**: parse errors per file plus ProgramModel errors, plus the errors from running the same
   HIR lowering pass C4.exe runs over every function body. Lowering is skipped when the front end already
   has hard errors (exactly like C4.exe). Results are de-duplicated by (line, column, message), so the
-  editor shows exactly what a build would print.
+  editor shows exactly what a build would print. While a front-end error stops an analysis short of the bodies (every
+  keystroke of an edit makes one), each other file whose text is unchanged and has no front-end error of its own keeps
+  the body errors the last analysis that lowered found for it: a typo in one file does not make every other file look
+  fixed (BUG-450). A diagnostic's column is the file's own, also after a macro use on its line (BUG-446: the compiler
+  reported the expanded text's columns, C4.exe too).
 - **Semantic queries** go through `Server/SemanticResolver`, which drives the ProgramModel's own query
   verbs (qualified lookup, type resolution in a unit's context, variable and member queries) using
   scope context derived from the AST path.
@@ -54,7 +58,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Area | Methods |
 |---|---|
 | Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
-| Sync | `didOpen`, `didChange`, `didClose`, `publishDiagnostics` |
+| Sync | `didOpen`, `didChange` (the whole text, which the server asks for, or ranged changes applied in order, their columns in the agreed encoding's units), `didClose`, `publishDiagnostics` |
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one; at a declaration's own name, a function's other declarations - its declaration in its type or header from its definition, its definition from a declaration - else the declaration itself, and the type qualifying an out-of-line definition, `FileWalk` of `FileWalk::Folder`, is that type), `declaration`, `typeDefinition` (the named type of a value: a variable's or a parameter's at its declaration or a use, through references, pointers and aliases), `implementation` (from a type, the types deriving from it; from a method, the methods of derived types that override it), `references` and `documentHighlight` (asked at a use, at a declaration's own name or at a type written in a declaration - `Push` of `void Ring::Push()` is the method, its `Ring` the type, `Ring` of `Ring* ring` the type; every file, the declarations first with `context.includeDeclaration`; a type's references include where it is written as a type, `Ring&` of a parameter, a field's type in another header, `new Ring(...)`, the `Ring::` of each out-of-line definition, and each base list naming it, `class Square : IShape`; a create operator's references are the constructions that call it, `new Ring(args)`, `Ring r(args)`, `Ring r;` and `Ring(args)`, by its count of arguments; a member reached with `->` through a pointer resolves like one reached with `.`; a name outside any function, a field's type in `namespace N { class C { ... } }`, resolves from its type's and namespace's scope); `rename` renames a type's qualifiers too but leaves a constructor's constructions, which spell the type's name; `prepareCallHierarchy`, `callHierarchy/incomingCalls` and `outgoingCalls` (the function named or called at a position; its callers, each with its calls; the functions its body calls; a function's declaration in its type and its out-of-line definition are one function; a construction is a call of the create operator it fits); `prepareTypeHierarchy`, `typeHierarchy/supertypes` and `subtypes` (direct bases and direct derived types) |
 | Information | `hover` (markdown `MarkupContent`: a `c4` block with the declaration as written - annotations, access, modifiers, return type, parameters with their defaults, trailing qualifiers - its name qualified with its owner, `public int64 Ai::ToolRegistry::Find(const Span& text, int64 start = 0) const`, then the comment above it, or after it on a field's line; a method's out-of-line definition hovers as its declaration in the type; a parameter or a local is labeled as one; a type written in a declaration shows that type; on a macro use, the `#define` and what the use expands to), `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members), `c4/expandMacro` (`TextDocumentPositionParams` -> `{name, expansion}`, null off a macro use; `experimental.expandMacro` in the capabilities, as rust-analyzer's `rust-analyzer/expandMacro`) |
 | Symbols | `documentSymbol` (kinds Namespace, Class, Struct, Interface, Enum, EnumMember, Method, Constructor - an `[operator("create")]` method - Field, Function, Variable, Constant - a `const` global; `detail` is the declaration without its annotations, access and name, `static int64 (const Span& text) const`; an out-of-line definition is named with its owner, `ToolRegistry::Add`, as clangd names one; a range covers the doc comment above and the annotations; each `#define` is a symbol of kind Function with detail `macro`), `workspace/symbol` (names containing the query, any case, inside namespaces and types too; `containerName` is the `::`-joined owner, `Ai::ToolRegistry`, and an out-of-line method's is its type; every `#define`, kind Function, where it is defined) |
@@ -125,12 +129,13 @@ a module's files are compiled only inside the programs that use it. One server s
   same in every program that holds it, so a module's file reads the same in any of them (and gets what a build of that
   program prints). A document no program holds goes to the options' own program (the loose files beside it). Script
   documents are their scope's, as before.
-- **An analysis is redone when what it took changed**: the open documents it holds (their text), its build
-  description file, its options. An edit redoes the programs holding the edited document; the others keep theirs. A
-  program no open document needs any more lets its analysis go.
+- **An analysis is redone when what it compiled changed** ("When a program is analyzed" below): the text of an open
+  document it holds, a file it read changed on disk, its build description file, its options. An edit redoes the
+  programs holding the edited document; the others keep theirs. A program no open document needs any more lets its
+  analysis go, and keeps its workspace symbols.
 - **A query about a declaration asks every program that reaches it**: `references`, `implementation` (every override
-  of a virtual method, in every project that includes the declaring one), `rename`, `callHierarchy/incomingCalls`,
-  `typeHierarchy/subtypes` and `workspace/symbol`. Besides the document's own program, as few programs as hold every
+  of a virtual method, in every project that includes the declaring one), `rename`, `callHierarchy/incomingCalls` and
+  `typeHierarchy/subtypes` (`workspace/symbol` reads every program too, from its symbols: "Workspace symbols"). Besides the document's own program, as few programs as hold every
   project that uses the declaring one (every project, for a file of the default library) are asked - at the same place
   when they compile the document, else at the declaration - analyzed for the query when they were not (a request waits
   25 s at most in all, under IED's 30 s), and kept three minutes after; answers are merged, each place once. A
@@ -138,9 +143,60 @@ a module's files are compiled only inside the programs that use it. One server s
 - **Threads.** Analyses are made on the worker; a request reads them on the reading thread while the worker publishes
   diagnostics from them, so the two take turns (the resolver's caches and the model's query-time instantiations are not
   thread-safe): a request holds them but while it waits for the worker. A setting that changes what the diagnostics say
-  (`tidy`) republishes them on the worker, after any older publish. `workspace/symbol` asks programs that
-  hold every project, so a search of the workspace's symbols costs every program's analysis for those three
-  minutes.
+  (`tidy`) republishes them on the worker, after any older publish. `workspace/symbol` reads programs that hold every
+  project, from their analyses or the symbols they left ("Workspace symbols" below).
+
+### When a program is analyzed
+
+Measured on Claymore's engine program (1615 files) before these rules: every open, close or edit of one of its files
+analyzed it again (6.8 s), an outline the AI asked for waited for that, and a search of the workspace's symbols
+analyzed every program (25 s, the request's whole budget). Now:
+
+- **An unchanged file costs nothing.** An analysis is redone only when the text it compiled for a document differs from
+  the editor's now, or the file of a document it took from the editor and that closed differs from what it compiled
+  (`Program::AnalysisIsOf`, by the hash of the text). Opening a file (an editor tab, the AI's transient open of a file
+  it asks about) or closing it unchanged keeps the analysis: an outline answers in milliseconds.
+- **A request waits for its own program alone**, and only until its analysis has the editor's current text of every
+  open document that program holds (`SnapshotForRequest`, 10 s at most): an edit in another program is never waited
+  for. An outline (`documentSymbol`) waits only until its own document's text is analyzed.
+- **Changes on disk are noticed.** An analysis records the size and time of each file it read; while nothing else is
+  to do, every 2 s the worker looks at them (each file once for all analyses), and an analysis one of whose files now
+  holds other text (git, a build, another tool or session writing it) is made again and its documents' diagnostics
+  published. A file whose time changed but whose text did not (a checkout of the same text) is taken as it is.
+- **Each analysis is one line in the server's log**: `C4LSP: ClaymoreEngine analyzed in 3019 ms (1624 files: read 135,
+  macros and bindings 355, parse 1442, model 554, bodies 533)` - IED's server log shows it.
+- **What an analysis costs** (Claymore's engine, warm): reading 0.1 s, macros and C bindings 0.35 s, parsing 1.4 s (one
+  file at a time, see "Memory"), the model 0.55 s, the bodies 0.55 s. Two costs it no longer has: the C bindings of the
+  D3D12 and Win32 headers were made again by CBind on every analysis (2.8 s), because two programs binding one header
+  with other include folders evicted each other's cached binding (BUG-445; a binding is now kept per way of parsing the
+  header, `docs/language/13-interop.md` 2.1); and every unit's tree had its whole include closure spliced in (1.2 s, and
+  every walk then skipped it): a unit's tree is now its own file's, and the semantic tokens take what the included
+  headers declare (type names, fields) from the headers' units.
+
+### Workspace symbols
+
+A search of the workspace's symbols (`workspace/symbol`, the AI's search by name) reads the programs that hold every
+project between them:
+
+- **From an analysis when there is one**, else **from the symbols an analysis left** (`SymbolIndex`: every declaration
+  and macro with its place, kept when the analysis is let go; small beside the analysis).
+- **Made in the background.** While the worker has nothing else to do it analyzes, one at a time, each searched program
+  that has neither, keeps its symbols and lets the analysis go at once: the first search of a large workspace does not
+  wait for every program (on Claymore a search answers in 0.1 - 0.25 s once they are made, about 30 s after the server
+  starts). A search that finds a program without them has the worker make them the same way, after the pass the editor
+  waits for, and waits for that (the request's budget): no analysis is kept for a search (keeping each for three minutes
+  held several at a time: 5.7 GB on Claymore).
+- **Small.** A file's symbols are kept once however many programs hold the file (Claymore's programs share the engine,
+  its C bindings and the default library): `SharedFileSymbols`. What a let-go analysis took is handed back to the
+  system (`_heapmin`), which the heap otherwise keeps for the next allocation ("Memory").
+- **Kept current**: the symbols of a program a file of which changed on disk are dropped (made again in the background,
+  or by the next search), and a document open in the editor is searched in its analysis, which has its text, never in
+  another program's symbols of its file.
+
+Checks: `Lsp.Analyses` (C4Testing) - an unchanged open or close analyzes nothing, an edited document's close analyzes
+its file again, a request does not wait for another program nor an outline for another document, a change on disk
+republishes, a search answers from the background symbols and takes an open document's from its analysis, a ranged
+`didChange` edits where it says (BUG-447), and a broken file keeps the others' body errors (BUG-450).
 
 ### The default library's own program
 
@@ -179,6 +235,8 @@ and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 G
   once and exits.
 - **Tokens go after the parse.** A file's tokens (as many bytes as its AST: the AST keeps copies of the ones it needs)
   are released when its parse ends (`Lexer::ReleaseTokens`), in C4.exe too.
+- **No include splice.** A unit's tree holds its own file's declarations alone; the include closure is no longer
+  spliced into every includer's tree (`CompilationUnit::MergeIncludes`, which C4.exe calls only to pretty-print).
 - An analysis is double-buffered while it is redone: requests answer from the last one meanwhile.
 
 ### Open items

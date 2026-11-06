@@ -46,10 +46,11 @@ namespace Scripting
 			SourceManager& sources = compiler.GetSourceManager();
 			const std::vector<MacroPass::FileResult> results = ExpandSourceMacros(sources, PredefinedMacros(false, target, {}), units.interfaceMacros);
 			compiler.AddMacroDiagnostics(results);
-			std::unordered_map<std::string, const std::string*> textOf;
-			for (const MacroPass::FileResult& result : results) textOf[result.absPath] = &result.text;
+			std::unordered_map<std::string, const MacroPass::FileResult*> resultOf;
+			for (const MacroPass::FileResult& result : results) resultOf[result.absPath] = &result;
 			for (uint32 id : units.scriptUnits)
-				if (auto it = textOf.find(MacroIdentity(sources.GetInfo(id))); it != textOf.end()) sources.SetSourceText(id, *it->second);
+				if (auto it = resultOf.find(MacroIdentity(sources.GetInfo(id))); it != resultOf.end())
+					sources.SetExpandedText(id, it->second->text, it->second->columns);
 		}
 
 		// A script reaches C and C++ through the bindings its host imported: importing needs CBind and clang.

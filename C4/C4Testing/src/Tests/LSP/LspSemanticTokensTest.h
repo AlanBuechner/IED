@@ -136,5 +136,10 @@ namespace Testing
 	// BUG-335: a scoped enum constant through `Owner::` is a variable (an enum constant), as unscoped ones are.
 	TEST_FUNC(Lsp.Features.SemanticTokens)
 	void TestScopedEnumConstantThroughOwnerIsVariable();
+
+	// A unit's tree holds its own file alone (no include splice): what the header it includes declares - a field used
+	// bare in a method defined in the .cf, a type nested in a class named as an owner - still reads with its own kind.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestAnIncludedHeadersFieldsAndTypesKeepTheirKinds();
 	};
 } // namespace Testing

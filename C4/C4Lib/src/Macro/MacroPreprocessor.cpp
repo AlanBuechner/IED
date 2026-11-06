@@ -2,6 +2,7 @@
 #include "Macro/Preprocessor.h"
 #include "Macro/MacroExpander.h"
 #include "Macro/MacroText.h"
+#include <algorithm>
 
 namespace Scripting
 {
@@ -55,7 +56,7 @@ namespace Scripting
 		}
 		for (unsigned open : m_Conditions.OpenLines())
 			Report(open, ErrorSeverity::Error, "this #if has no #endif");
-		return { std::move(m_Out), std::move(m_Diagnostics) };
+		return { std::move(m_Out), std::move(m_Diagnostics), std::move(m_Columns) };
 	}
 
 	std::string Preprocessor::PeekPhysicalLine() const
@@ -109,9 +110,21 @@ namespace Scripting
 		const ExpansionResult expanded = MacroExpander::Expand(code, m_Table, { m_FileName, number });
 		for (const std::string& error : expanded.errors)
 			Report(number, ErrorSeverity::Error, error);
+		m_Columns.Add(number, SpansOnLine(expanded.spans, codeStart, line.size()));
 		m_Out += line.substr(0, codeStart);
 		m_Out += expanded.text;
 		m_Out.append(lines, '\n');
+	}
+
+	std::vector<ExpandedSpan> Preprocessor::SpansOnLine(const std::vector<ExpandedSpan>& expanded, size_t codeStart, size_t lineLength)
+	{
+		const auto onLine = [&](uint32 column) { return static_cast<uint32>(std::min(codeStart + column, lineLength)); };
+		std::vector<ExpandedSpan> spans;
+		spans.reserve(expanded.size());
+		for (const ExpandedSpan& span : expanded)
+			spans.push_back({ onLine(span.writtenStart), onLine(span.writtenEnd), static_cast<uint32>(codeStart + span.expandedStart),
+				static_cast<uint32>(codeStart + span.expandedEnd) });
+		return spans;
 	}
 
 	// A macro call that continues on later lines is read whole; the lines it took stay empty in the output.

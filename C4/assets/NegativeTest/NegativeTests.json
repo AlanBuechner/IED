@@ -28,6 +28,10 @@
         "expect": ["no variable named y"],
         "reason": "Using an undeclared variable must name the identifier."
     },
+    "MacroUseBeforeAnError": {
+        "expect": ["main.cf (5:47) error: cannot initialize 'int64' from 'char8*'", "\tint32 a = LONG_MACRO_NAME + LONG_MACRO_NAME; int64 b = \"text\";"],
+        "reason": "BUG-446: an error after a macro use on its line is at the column it is written at (it was the expanded text's, 5:19), and the line shown is the file's."
+    },
     "OutOfScopeBlockVariable": {
         "expect": ["no variable named x"],
         "reason": "A local declared in a braced statement body is scoped to that block; using it after the closing brace must be a clear undefined-identifier error, not malformed IR."

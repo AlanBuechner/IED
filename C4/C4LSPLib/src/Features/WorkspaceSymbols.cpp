@@ -70,8 +70,35 @@ namespace C4LSP::Features
 
 	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::ForQuery(Server::CompilationSession& session, const std::string& query)
 	{
+		Core::Vector<WorkspaceSymbol> symbols = Collect(session, query, query.empty() ? kMaxResults : SIZE_MAX);
+		if (!query.empty())
+			KeepBest(symbols, query);
+		return symbols;
+	}
+
+	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::All(Server::CompilationSession& session)
+	{
+		return Collect(session, "", SIZE_MAX);
+	}
+
+	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::Matching(const std::vector<const Core::Vector<WorkspaceSymbol>*>& lists, const std::string& query)
+	{
+		const std::string lowerQuery = ToLower(query);
+		const size_t limit = query.empty() ? kMaxResults : SIZE_MAX;
+		Core::Vector<WorkspaceSymbol> matching;
+		for (const Core::Vector<WorkspaceSymbol>* symbols : lists)
+			for (const WorkspaceSymbol& symbol : *symbols)
+				if (matching.Count() < limit && ToLower(symbol.name).find(lowerQuery) != std::string::npos)
+					matching.Push(symbol);
+		if (!query.empty())
+			KeepBest(matching, query);
+		return matching;
+	}
+
+	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::Collect(Server::CompilationSession& session, const std::string& query, size_t limit)
+	{
 		Walk walk{ session, query };
-		walk.limit = query.empty() ? kMaxResults : SIZE_MAX;
+		walk.limit = limit;
 		session.GetResolver().CollectNamespacePaths(walk.namespaces);
 		auto& compiler = session.GetCompiler();
 		for (uint32 sourceId = 1; sourceId <= compiler.SourceCount() && walk.out.Count() < walk.limit; ++sourceId)
@@ -85,8 +112,6 @@ namespace C4LSP::Features
 						AddDeclaration(walk, *child.Get(), sourceId, "", false);
 		}
 		AddMacros(walk);
-		if (!query.empty())
-			KeepBest(walk.out, query);
 		return walk.out;
 	}
 

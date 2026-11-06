@@ -1,0 +1,7 @@
+#define LONG_MACRO_NAME 2
+
+int32 main()
+{
+	int32 a = LONG_MACRO_NAME + LONG_MACRO_NAME; int64 b = "text";
+	return a;
+}

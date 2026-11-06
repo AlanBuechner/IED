@@ -1,6 +1,7 @@
 #pragma once
 #include "MacroTable.h"
 #include "Macro/MacroDiagnostic.h"
+#include "SourceManager/ColumnMap.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -12,6 +13,7 @@ namespace Scripting
 	{
 		std::string text;
 		std::vector<MacroDiagnostic> diagnostics;
+		ColumnMap columns; // where the macro uses of the lines it expanded were: the file's own columns (BUG-446)
 	};
 
 	/// The directive processor (docs/language/02). Given one file's text and a running MacroTable it runs

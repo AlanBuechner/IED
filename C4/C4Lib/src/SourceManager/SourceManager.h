@@ -122,11 +122,34 @@ namespace Scripting
 			it->second.source = Source::FromMemory(text);
 		}
 
+		/// Replace a registered source's text with its macro-expanded form: `columns` says where its macro uses were, so
+		/// its locations stay the columns of its text as it is now (BUG-446).
+		void SetExpandedText(uint32 id, const std::string& expanded, ColumnMap columns)
+		{
+			auto it = m_Sources.find(id);
+			if (it == m_Sources.end()) return;
+			if (columns.Empty() || !it->second.source)
+			{
+				it->second.source = Source::FromMemory(expanded); // no use was expanded: its columns are the file's
+				return;
+			}
+			std::string written(it->second.source->Data(), it->second.source->Size());
+			it->second.source = Source::FromExpansion(expanded, std::move(written), std::move(columns));
+		}
+
 		Core::String GetLineText(uint32 id, uint32 line) const
 		{
 			auto it = m_Sources.find(id);
 			if (it == m_Sources.end() || line == 0 || !it->second.source) return Core::String();
 			return it->second.source->GetLineText(line);
+		}
+
+		/// A line as the file has it, before its macro uses were expanded.
+		Core::String GetWrittenLineText(uint32 id, uint32 line) const
+		{
+			auto it = m_Sources.find(id);
+			if (it == m_Sources.end() || line == 0 || !it->second.source) return Core::String();
+			return it->second.source->GetWrittenLineText(line);
 		}
 
 	private:

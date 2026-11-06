@@ -1,6 +1,7 @@
 #pragma once
 #include "MacroTable.h"
 #include "Macro/MacroDiagnostic.h"
+#include "SourceManager/ColumnMap.h"
 #include <functional>
 #include <string>
 #include <map>
@@ -25,6 +26,7 @@ namespace Scripting
 			MacroTable table;   // final effective macro state
 			MacroTable exported; // what an includer receives: the table without the macros the file started with (its project's, D-59)
 			std::vector<MacroDiagnostic> diagnostics; // the errors and warnings of its directives
+			ColumnMap columns;  // where the macro uses `text` expanded were (SourceManager::SetExpandedText)
 		};
 
 		/// One file for RunFiles.

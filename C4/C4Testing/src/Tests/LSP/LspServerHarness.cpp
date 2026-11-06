@@ -60,6 +60,21 @@ namespace Testing::Lsp
 		m_Server->WaitForCurrentWork();
 	}
 
+	void ServerHarness::Change(const std::string& uri, const std::string& text)
+	{
+		Value document = Value::MakeObject();
+		document.SetMember("uri", Value::String(Core::String(uri)));
+		document.SetMember("version", Value::Int(m_NextId));
+		Value change = Value::MakeObject();
+		change.SetMember("text", Value::String(Core::String(text)));
+		Value changes = Value::MakeArray();
+		changes.Append(change);
+		Value params = Value::MakeObject();
+		params.SetMember("textDocument", document);
+		params.SetMember("contentChanges", changes);
+		Notify("textDocument/didChange", params);
+	}
+
 	void ServerHarness::Notify(const std::string& method, const Value& params)
 	{
 		m_Server->HandleMessage(Message(method, params));

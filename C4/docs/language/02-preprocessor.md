@@ -103,7 +103,11 @@ Errors: an empty or malformed condition, division or remainder by zero, a shift 
 **Status:** **Implemented**
 
 - A directive continues on the next line after a trailing `\`. Every line of the file stays one line of
-  the expanded text, so error locations are unchanged.
+  the expanded text, so error locations keep their lines. Their columns are the file's too: the macro pass records
+  where each use it expanded was written (`ColumnMap`), and a location on such a line - a diagnostic, an editor's
+  position, a symbol's range - is the column as written (one inside an expansion is its use's), and C4.exe shows the
+  line as the file has it (BUG-446: the columns were the expanded text's). A call that continues on later lines maps
+  what follows it on the first line's end.
 - A `#` line inside a `/* ... */` comment that spans lines is comment text, not a directive.
 - `#error message` stops the build with the message; `#warning message` reports a warning.
 - `#pragma` is accepted and ignored (`#pragma once` is a no-op: every file is parsed once anyway).

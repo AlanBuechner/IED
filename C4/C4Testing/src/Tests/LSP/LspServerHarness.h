@@ -21,6 +21,8 @@ namespace Testing::Lsp
 		// didOpen of `uri` with `text`; returns once its analysis is published.
 		void Open(const std::string& uri, const std::string& text);
 		void Close(const std::string& uri);
+		// didChange of `uri` to `text` (the whole document), without waiting for its analysis.
+		void Change(const std::string& uri, const std::string& text);
 		void Notify(const std::string& method, const Json::Value& params);
 		// A request's result (null when it failed). Requests are answered on the calling thread.
 		Json::Value Request(const std::string& method, const Json::Value& params);

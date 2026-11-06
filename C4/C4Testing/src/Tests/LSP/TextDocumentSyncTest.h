@@ -28,6 +28,12 @@ namespace Testing
 		TEST_FUNC(Lsp.TextSync)
 		void TestReplaceWholeBufferViaFullRange();
 
+		TEST_FUNC(Lsp.TextSync)
+		void TestAChangeWithoutARangeReplacesTheDocument();
+
+		TEST_FUNC(Lsp.TextSync)
+		void TestColumnsCountTheAgreedEncoding();
+
 	private:
 		C4LSP::Protocol::TextContentChangeEvent MakeChange(uint32 startLine, uint32 startChar,
 			uint32 endLine, uint32 endChar, const std::string& text);

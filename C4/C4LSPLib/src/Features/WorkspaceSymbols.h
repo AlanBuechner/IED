@@ -3,6 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace Scripting { struct AstNode; }
 
@@ -30,6 +31,12 @@ namespace C4LSP::Features
 		/// best matches come first and are kept (the name itself, then a prefix; C4 sources before C headers).
 		static Core::Vector<WorkspaceSymbol> ForQuery(Server::CompilationSession& session, const std::string& query);
 
+		/// Every declaration and macro of the session's sources, uncapped and unranked: what a program's symbol index keeps
+		/// once its analysis is let go.
+		static Core::Vector<WorkspaceSymbol> All(Server::CompilationSession& session);
+		/// Of `lists` (All's, file by file), the symbols `query` matches, ranked and capped as ForQuery ranks and caps them.
+		static Core::Vector<WorkspaceSymbol> Matching(const std::vector<const Core::Vector<WorkspaceSymbol>*>& lists, const std::string& query);
+
 	private:
 		struct Walk
 		{
@@ -40,6 +47,8 @@ namespace C4LSP::Features
 			size_t limit = 0; // where the walk stops collecting: a query collects every match to rank them
 		};
 
+		/// The declarations and macros `query` matches, in source order, at most `limit`.
+		static Core::Vector<WorkspaceSymbol> Collect(Server::CompilationSession& session, const std::string& query, size_t limit);
 		// Processes one declaration node: emits it when its name matches and recurses into any
 		// nested scopes (namespace/object bodies) so a query finds members of non-matching parents.
 		static void AddDeclaration(Walk& walk, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, bool member);

@@ -42,7 +42,7 @@ namespace Scripting
 		MacroExpander expander(table, site);
 		ExpansionResult result;
 		result.text.reserve(text.size());
-		expander.ExpandInto(text, result.text);
+		expander.ExpandInto(text, result.text, &result.spans);
 		result.errors = std::move(expander.m_Errors);
 		return result;
 	}
@@ -69,7 +69,7 @@ namespace Scripting
 		return false;
 	}
 
-	void MacroExpander::ExpandInto(const std::string& src, std::string& out)
+	void MacroExpander::ExpandInto(const std::string& src, std::string& out, std::vector<ExpandedSpan>* spans)
 	{
 		for (size_t i = 0; i < src.size();)
 		{
@@ -82,7 +82,12 @@ namespace Scripting
 			}
 			if (IsIdentStart(src[i]))
 			{
-				i = ExpandIdentifier(src, i, IdentifierEnd(src, i), out);
+				const size_t written = out.size();
+				const size_t end = ExpandIdentifier(src, i, IdentifierEnd(src, i), out);
+				const bool expanded = out.size() - written != end - i || out.compare(written, end - i, src, i, end - i) != 0;
+				if (spans && expanded)
+					spans->push_back({ static_cast<uint32>(i), static_cast<uint32>(end), static_cast<uint32>(written), static_cast<uint32>(out.size()) });
+				i = end;
 				continue;
 			}
 			out += src[i++];

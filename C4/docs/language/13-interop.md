@@ -119,9 +119,13 @@ void TestCounter() {
 
 ### 2.1 Caching
 
-Generated bindings are cached as `<hash>_<header>.c4bind` files (the hash is of the header's
-absolute path). A cached binding is reused while the header, CBind.exe, the language, the defines,
-the include dirs and the build's target flags are unchanged. The bindings, their stamps, the shims and the foreign
+Generated bindings are cached as `<hash>_<header>.<flags>.c4bind` files (the hash is of the header's
+absolute path, `<flags>` of how CBind parses it: the language, the defines, the include dirs and the target flags), so
+programs that bind one header with different include folders keep a binding each (BUG-445: they evicted each other's,
+and C4LSP ran CBind over the D3D12 and Win32 headers on every analysis). A cached binding is reused while the header,
+every file CBind's parse of it read (the headers it includes and theirs, which CBind lists in `<binding>.deps`;
+BUG-451: a change to one of them kept the old binding), CBind.exe, the language, the defines, the include dirs and the
+build's target flags are unchanged. The bindings, their stamps, the shims and the foreign
 objects' records are read and written with LLVM's file calls (`Compiler/FileIo`), so a build or project folder deep
 enough that their paths pass `MAX_PATH` works.
 

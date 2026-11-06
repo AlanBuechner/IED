@@ -5,8 +5,11 @@
 #include "Server/SemanticResolver.h" // owned by value (unique_ptr) - the complete type is needed at destruction
 #include "Server/ScriptScopes.h"
 #include "Macro/MacroTable.h"
+#include "Compiler/FileIo.h"
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -76,10 +79,33 @@ namespace C4LSP::Server
 		// function BODY produces. Together they are the compiler's complete error output for the project,
 		// so the LSP reports exactly what the build would - no separate/duplicated error logic in the LSP.
 		const Core::Vector<Scripting::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
+		// Whether the last compile lowered the bodies: its front end found no error (C4.exe lowers only then).
+		bool LoweredBodies() const { return m_LoweredBodies; }
+		// When this compile stopped short of the bodies for an error in the front end: the body diagnostics `earlier` had for
+		// each file this one compiled the same text of and found no front-end error in. A file being edited elsewhere, broken
+		// for a moment, does not make every other file's body errors look fixed (BUG-450).
+		void KeepBodyDiagnosticsOf(const CompilationSession& earlier);
 
 		std::string UriForSourceId(uint32 sourceId) const; // empty for a script host's interface file (in memory)
 		uint32 FindSourceIdByUri(const std::string& uri) const; // 0 when the file is unknown
 		bool IsCompiled() const { return m_Compiled; }
+
+		// Whether a file the last compile read from disk is different there now, or gone: something besides the editor
+		// (git, a build, another tool) changed it. A file whose time changed but whose text did not is taken as it is now.
+		// `stampOf` gives a file's size and time now. The worker's alone: requests never call it.
+		using StampLookup = std::function<std::optional<Scripting::FileStamp>(const std::string& path)>;
+		bool ChangedOnDisk(const StampLookup& stampOf);
+		// The files the last compile read from disk, each with its size and time then.
+		std::vector<std::pair<std::string, Scripting::FileStamp>> DiskStamps() const;
+
+		// How long the steps of the last compile took, in milliseconds, for the server's log.
+		struct Timings
+		{
+			uint32 files = 0;
+			double read = 0, preprocess = 0, parse = 0, model = 0, bodies = 0;
+			double Total() const { return read + preprocess + parse + model + bodies; }
+		};
+		const Timings& GetTimings() const { return m_Timings; }
 
 		// The text the editor currently shows for a document: unsaved contents, else an
 		// in-memory source, else the on-disk file. Features that re-lex (semantic tokens) must
@@ -92,6 +118,9 @@ namespace C4LSP::Server
 		// A source's text as the last compile read it, before its macros were expanded (its `#define` lines are there);
 		// empty for one it has not read.
 		std::string_view RawTextOf(uint32 sourceId) const;
+		// The hash (std::hash of the text) of what the last compile read for the document `uri`: its editor text, else its
+		// file's; none when it compiled no such file.
+		std::optional<size_t> CompiledTextHash(const std::string& uri) const;
 
 		// CBind appends generated bindings to interop files' text before parsing, so the user's lines keep
 		// their numbers; a location inside the bindings maps to the directive that produced them.
@@ -108,6 +137,9 @@ namespace C4LSP::Server
 		bool IsLibraryDocument(const std::string& uri) const;
 		// The library's files the editor has open, as absolute paths.
 		std::vector<std::string> OpenLibraryDocuments() const;
+		// Every file the program compiles - its projects' (else the loose files'), the in-memory ones, the default library's
+		// it includes - with the open documents' text over theirs.
+		void RegisterSources();
 		// The described projects' sources; false when there is no usable description.
 		bool RegisterProjects();
 		void RegisterLooseSources();
@@ -123,6 +155,17 @@ namespace C4LSP::Server
 		bool RecompileScript();
 		// The scope's files, each open one with the editor's text, as a script compile takes them.
 		Scripting::ScriptCompileOptions ScriptOptions() const;
+		// Each registered file on disk with its size and time now, right after the compile read it (ChangedOnDisk).
+		void RecordDiskFiles();
+		// Whether the file of `sourceId` now holds other text than the compile read.
+		bool TextDiffersOnDisk(const std::string& path, uint32 sourceId) const;
+
+		struct DiskFile
+		{
+			std::string path;
+			uint32 sourceId = 0;
+			Scripting::FileStamp stamp;
+		};
 
 		std::unique_ptr<Scripting::CompilerInstance> m_Compiler;
 		std::unique_ptr<SemanticResolver> m_Resolver; // rebuilt on Recompile() to track the current model
@@ -139,6 +182,9 @@ namespace C4LSP::Server
 		std::map<uint32, std::string> m_RawTexts;              // sourceId -> its text before macro expansion (RunPreprocessPhase)
 		std::map<uint32, uint32> m_BindingStartLine;          // sourceId -> 1-based effective line where the bindings start
 		std::map<uint32, uint32> m_BindingDirectiveLine;      // sourceId -> 1-based line of the extern include directive
+		std::vector<DiskFile> m_DiskFiles;                     // the files the last compile read from disk (RecordDiskFiles)
+		Timings m_Timings;
+		bool m_LoweredBodies = false;
 		bool m_Compiled = false;
 		ScriptScope m_Script;
 		std::shared_ptr<const LoadedInterface> m_ScriptHost; // set in script mode

@@ -17,6 +17,7 @@
 namespace Scripting
 {
 	class QualTypeNode;
+	class CompilerInstance;
 }
 
 namespace C4LSP::Features::TokenWalk
@@ -90,4 +91,7 @@ namespace C4LSP::Features::TokenWalk
 	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
 	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);
 	void Walk(const Scripting::AstNode& node, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& pathIn, int objectDepth, bool directMember);
+	/// The type names and member fields the headers `ctx.sourceId` includes (all of them, through their own includes)
+	/// declare, for references to them: `m_Count` in a method defined in the .cf reads as the field its header declares.
+	void CollectIncludedDeclarations(Scripting::CompilerInstance& compiler, Ctx& ctx);
 } // namespace C4LSP::Features::TokenWalk

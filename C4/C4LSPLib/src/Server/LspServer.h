@@ -4,6 +4,7 @@
 #include "Protocol/TextDocumentStore.h"
 #include "Protocol/PositionCodec.h"
 #include "Json/JsonValue.h"
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -51,16 +52,37 @@ namespace C4LSP::Server
 		// Same as above but bounded: returns false when the deadline passes with work still pending.
 		bool WaitForPendingWork(std::chrono::milliseconds timeout);
 
+		// Tests: while held, queued analyses wait, as on a program too large to analyze between two requests.
+		void HoldAnalysis(bool held);
+
 		// How many programs hold an analysis now (tests: only what the open documents and recent queries need).
 		size_t AnalyzedProgramCount() const;
+		// How many analyses of programs the worker has made so far, and how many programs hold workspace symbols (tests:
+		// what an open, a close or a change on disk costs; what a search can answer from).
+		size_t AnalysesMade() const;
+		size_t IndexedProgramCount() const;
 
 	private:
+		// What a request's answer must have been analyzed from: the editor's text of its own document (an outline), or of
+		// every open document its program holds (anything that resolves a name declared elsewhere).
+		enum class Freshness { Document, Program };
+
 		// The analysis that answers about `uri`: its script scope's (initializationOptions.scripts), else its program's.
 		std::shared_ptr<CompilationSession> GetSnapshot(const std::string& uri) const;
-		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri);
+		// The analysis answering about `uri` once it is as current as `freshness` asks; analyses of other programs are not
+		// waited for. Bounded: on a program too large to analyze in time, the last analysis answers.
+		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri, Freshness freshness = Freshness::Program);
+		// Whether the analysis answering `uri` compiled what `freshness` asks of `open` (uri -> hash of each open document's
+		// text); the session lock held.
+		bool IsCurrentLocked(const std::string& uri, const std::map<std::string, size_t>& open, Freshness freshness) const;
+		// Of `open`, the documents `program` takes as the worker places them: those it holds, and for the options' own
+		// program those no program holds (the session lock held).
+		std::map<std::string, size_t> TakenByLocked(const Program& program, const std::map<std::string, size_t>& open) const;
 		// A request waits for the worker: at most `most`, and never past the request's budget; the analyses are the
 		// worker's meanwhile (the query lock released).
 		void AwaitWork(std::chrono::milliseconds most);
+		// Wakes the requests waiting for an analysis (after one is swapped in).
+		void NotifyAnalyzed();
 		// The program answering about `uri` (the session lock held): the one its document is analyzed in, else one whose
 		// analysis compiled the file, else the options' own.
 		std::shared_ptr<Program> ProgramOfLocked(const std::string& uri) const;
@@ -73,9 +95,28 @@ namespace C4LSP::Server
 		// as reach every project it reaches that the program of `uri` lacks; analyzed for it when they were not (waited
 		// for, a bounded time).
 		std::vector<std::shared_ptr<CompilationSession>> OtherAnalyses(const std::string& uri, const std::string& declarationUri);
-		// Every program's analysis, made for the query when missing (workspace symbols).
-		std::vector<std::shared_ptr<CompilationSession>> AllAnalyses();
 		std::vector<std::shared_ptr<CompilationSession>> Consult(const std::vector<std::shared_ptr<Program>>& programs);
+
+		// --- Workspace symbols -------------------------------------------------------------------------------------------
+		// What a search of the workspace's symbols reads: every analysis there is, and the symbols an analysis let go of
+		// left (docs/tools/03 "Workspace symbols").
+		struct SymbolSources
+		{
+			std::vector<std::shared_ptr<CompilationSession>> analyses;
+			std::vector<std::shared_ptr<const SymbolIndex>> indexes;
+		};
+		// The workspace's own programs a search reads, as few as hold every project (the session lock held).
+		std::vector<std::shared_ptr<Program>> SearchedProgramsLocked() const;
+		// The sources of a search: a searched program with neither an analysis nor symbols is analyzed for it (waited for,
+		// a bounded time).
+		SymbolSources WorkspaceSymbolSources();
+		// The worker, idle: the symbols of one searched program that has none, from an analysis it lets go at once, so the
+		// first search of a large workspace does not analyze every program while it waits.
+		void IndexNextProgram();
+		// The worker, after a pass: the symbols of each program a search asked for (Program::symbolsWanted).
+		void IndexWantedPrograms();
+		// `program`'s symbols from an analysis of its files as they are on disk, let go at once.
+		void Index(Program& program);
 
 		// --- Programs ----------------------------------------------------------------------------------------------------
 		// The programs: `own` (the options' own fields) first, then those `programs` names (initializationOptions.programs),
@@ -99,6 +140,9 @@ namespace C4LSP::Server
 		std::vector<std::string> AnalyzeScripts(const EditorDocuments& docs);
 		// Analyses neither the open documents nor a recent query need, let go.
 		void ReleaseUnneeded();
+		// The analyses of which a file changed on disk besides the editor (ChangedOnDisk) made again in a pass; the symbols
+		// left of one whose file changed, dropped.
+		void NoticeDiskChanges();
 
 		void HandleRequest(const Json::Value& message);
 		void HandleNotification(const Json::Value& message);
@@ -167,6 +211,7 @@ namespace C4LSP::Server
 		std::shared_ptr<CompilationSession> m_Unanalyzed;   // what answers before any analysis: an empty session
 		std::vector<ScriptScope> m_Scripts;            // initializationOptions.scripts: folders of scripts and their hosts
 		InterfaceCache m_Interfaces;                   // the scopes' host interfaces (the worker's)
+		SharedFileSymbols m_SharedSymbols;             // the files' symbols the programs' indexes share (the worker's)
 		std::vector<std::shared_ptr<CompilationSession>> m_ScriptSessions; // per scope, null while none of its documents is open
 		std::vector<std::map<std::string, size_t>> m_ScriptInputs;         // per scope, the documents its session took (the worker's)
 		std::vector<std::shared_ptr<const LoadedInterface>> m_ScriptHosts; // per scope, the interface its session took (the worker's)
@@ -188,6 +233,8 @@ namespace C4LSP::Server
 		bool m_WorkerStarted = false;
 		bool m_Working = false;  // a pass is currently running on the worker
 		bool m_Dirty = false;    // a pass is queued
+		bool m_AnalysisHeld = false;   // HoldAnalysis
+		std::atomic<size_t> m_AnalysesMade{ 0 }; // AnalysesMade
 		bool m_RepublishAll = false; // the next pass publishes every open document (a setting changed what they show)
 		bool m_WorkShutdown = false;
 	};

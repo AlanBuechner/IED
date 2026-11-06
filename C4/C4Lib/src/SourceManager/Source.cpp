@@ -46,6 +46,15 @@ namespace Scripting
 		return Ref<Source>(new Source(content));
 	}
 
+	Ref<Source> Source::FromExpansion(const std::string& expanded, std::string written, ColumnMap columns)
+	{
+		Ref<Source> source(new Source(expanded));
+		if (columns.Empty()) return source;
+		source->m_Written = std::move(written);
+		source->m_Columns = std::move(columns);
+		return source;
+	}
+
 	void Source::BuildLineTable()
 	{
 		m_LineTable.Clear();
@@ -150,6 +159,28 @@ namespace Scripting
 
 		// lo is now the index of the line containing byteOffset.
 		line = static_cast<uint32>(lo + 1); // convert to 1-based
-		column = static_cast<uint32>(byteOffset - m_LineTable[lo] + 1); // 1-based column
+		column = m_Columns.Written(line, static_cast<uint32>(byteOffset - m_LineTable[lo] + 1)); // 1-based column, as written
+	}
+
+	size_t Source::LineColumnToByteOffset(uint32 line, uint32 column) const
+	{
+		const size_t offset = LineToByteOffset(line) + (column > 0 ? m_Columns.Expanded(line, column) - 1 : 0);
+		return std::min(offset, m_Size);
+	}
+
+	Core::String Source::GetWrittenLineText(uint32 line) const
+	{
+		if (m_Written.empty()) return GetLineText(line);
+		size_t start = 0;
+		for (uint32 at = 1; at < line && start != std::string::npos; ++at)
+		{
+			start = m_Written.find('\n', start);
+			if (start != std::string::npos) ++start;
+		}
+		if (line == 0 || start == std::string::npos) return Core::String();
+		size_t end = m_Written.find('\n', start);
+		if (end == std::string::npos) end = m_Written.size();
+		if (end > start && m_Written[end - 1] == '\r') --end;
+		return Core::String(m_Written.data() + start, end - start);
 	}
 }

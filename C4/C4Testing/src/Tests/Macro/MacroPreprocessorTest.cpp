@@ -115,6 +115,29 @@ namespace Testing
 		TEST_ASSERT(Process("#define C 3 /* three */\n").table.Get("C")->body == "3");
 	}
 
+	void MacroPreprocessorTest::ColumnsMapToTheFilesOwn()
+	{
+		const Run run = Process(
+			"#define LONG_NAME 2\n"
+			"#define EMPTY\n"
+			"int32 a = LONG_NAME + LONG_NAME; int64 b = 1;\n" // expanded: "int32 a = 2 + 2; int64 b = 1;"
+			"EMPTY int32 c;\n"                                 // expanded: " int32 c;"
+			"/* a\n b */ int32 d = LONG_NAME;\n"               // a use after a comment that closes on its line
+			"int32 e;\n");
+		const ColumnMap& columns = run.file.columns;
+		TEST_ASSERT_EQ(columns.Written(3, 5), (uint32)5);   // before the first use
+		TEST_ASSERT_EQ(columns.Written(3, 11), (uint32)11); // the first use's expansion: its use
+		TEST_ASSERT_EQ(columns.Written(3, 15), (uint32)23); // the second's
+		TEST_ASSERT_EQ(columns.Written(3, 18), (uint32)34); // `int64`, after both
+		TEST_ASSERT_EQ(columns.Expanded(3, 34), (uint32)18);
+		TEST_ASSERT_EQ(columns.Expanded(3, 25), (uint32)15); // inside the second use: its expansion
+		TEST_ASSERT_EQ(columns.Written(4, 2), (uint32)7);   // `int32` after an empty expansion
+		TEST_ASSERT_EQ(columns.Expanded(4, 7), (uint32)2);
+		TEST_ASSERT_EQ(columns.Written(6, 17), (uint32)17); // " b */ int32 d = 2;": the use, where it is written
+		TEST_ASSERT_EQ(columns.Written(6, 18), (uint32)26); // the `;` after it
+		TEST_ASSERT_EQ(columns.Written(7, 3), (uint32)3);   // a line no use changed
+	}
+
 	void MacroPreprocessorTest::ConditionalGroups()
 	{
 		const Run run = Process(

@@ -166,4 +166,18 @@ namespace Testing
 		SetTidy(true);
 		TEST_PASSED();
 	}
+
+	void LspTidyTest::TestAHeadersFindingsStayInTheHeader()
+	{
+		C4LSP::Server::CompilationSession session;
+		session.RegisterInMemorySource("tidy_helper.ch", "int32 g_sink;\nvoid Helper()\n{\n\tint32 left_over;\n}\n");
+		session.RegisterInMemorySource("tidy_main.cf", "include \"tidy_helper.ch\"\n\nvoid Run()\n{\n\tHelper();\n}\n");
+		session.Recompile();
+		SetTidy(true);
+		const auto header = C4LSP::Features::Tidy::ForDocument(session, Testing::Lsp::UriFor("tidy_helper.ch"));
+		const auto includer = C4LSP::Features::Tidy::ForDocument(session, Testing::Lsp::UriFor("tidy_main.cf"));
+		TEST_ASSERT(HasMessage(header, "unused local variable 'left_over'"));
+		TEST_ASSERT_EQ(CountWith(includer, "unused local variable"), (uint32)0);
+		TEST_PASSED();
+	}
 } // namespace Testing

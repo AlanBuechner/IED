@@ -780,4 +780,38 @@ int32 main() {
 		TEST_ASSERT_EQ(owner.kind, (uint32)SemanticTokenKind::Enum);
 		TEST_PASSED();
 	}
+
+	void LspSemanticTokensTest::TestAnIncludedHeadersFieldsAndTypesKeepTheirKinds()
+	{
+		const std::string header =
+			R"(class Counter
+{
+	public struct Step { int32 by; }
+	public int32 m_Count;
+	public void Bump(Counter::Step step);
+}
+)";
+		const std::string source =
+			R"(include "counter.ch"
+
+void Counter::Bump(Counter::Step step)
+{
+	m_Count = m_Count + step.by;
+}
+)";
+		C4LSP::Server::CompilationSession session;
+		session.RegisterInMemorySource("counter.ch", header);
+		session.RegisterInMemorySource("counter.cf", source);
+		session.Recompile();
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("counter.cf"));
+
+		auto field = TokenAt(result, source, "m_Count", 1); // bare, through the implicit `this`
+		TEST_ASSERT(field.found);
+		TEST_ASSERT_EQ(field.kind, (uint32)SemanticTokenKind::Field);
+
+		auto nested = TokenAt(result, source, "Step", 1); // `Counter::Step`: the struct the header nests in Counter
+		TEST_ASSERT(nested.found);
+		TEST_ASSERT_EQ(nested.kind, (uint32)SemanticTokenKind::Struct);
+		TEST_PASSED();
+	}
 } // namespace Testing

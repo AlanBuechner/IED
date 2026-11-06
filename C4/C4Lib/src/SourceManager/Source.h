@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Core.h"
+#include "SourceManager/ColumnMap.h"
 #include <string>
 #include <cstddef>
 
@@ -13,6 +14,9 @@ namespace Scripting
 	public:
 		explicit Source(const fs::path& path);
 		static Ref<Source> FromMemory(const std::string& content);
+		/// Text the macro pass expanded: `expanded` is what the compiler reads, `written` the file's text and `columns`
+		/// where its macro uses were - its locations are the file's own (BUG-446).
+		static Ref<Source> FromExpansion(const std::string& expanded, std::string written, ColumnMap columns);
 		~Source() = default;
 
 		Source(const Source&)            = delete;
@@ -42,11 +46,17 @@ namespace Scripting
 		/// Byte offset where the given 1-based line starts. Returns size for out-of-range lines.
 		size_t LineToByteOffset(uint32 line) const;
 
-		/// Convert a byte offset to 1-based line and column using the precomputed line table.
+		/// Convert a byte offset to 1-based line and column using the precomputed line table; the column as the file has it
+		/// on a line its macro uses changed.
 		void ByteOffsetToLineColumn(size_t byteOffset, uint32& line, uint32& column) const;
+		/// The byte offset of 1-based `line` and `column` as the file has them (an editor's position); on a line its macro
+		/// uses changed, a column inside a use is its expansion's first byte. Clamped to the text.
+		size_t LineColumnToByteOffset(uint32 line, uint32 column) const;
 
 		/// Text content of the given 1-based line (excluding the trailing newline).
 		Core::String GetLineText(uint32 line) const;
+		/// The line as the file has it, before its macro uses were expanded: what a diagnostic shows.
+		Core::String GetWrittenLineText(uint32 line) const;
 
 	private:
 		explicit Source(const std::string& content);
@@ -57,5 +67,7 @@ namespace Scripting
 		size_t m_Size = 0;
 		mutable Core::Vector<size_t> m_LineTable;
 		size_t m_ReadPosition = 0;
+		std::string m_Written; // FromExpansion: the file's own text
+		ColumnMap m_Columns;   // FromExpansion: where its macro uses were
 	};
 }

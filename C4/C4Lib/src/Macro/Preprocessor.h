@@ -22,6 +22,9 @@ namespace Scripting
 		std::string NextPhysicalLine();
 		std::string JoinContinuations(std::string line);
 		void CodeLine(const std::string& line, unsigned number);
+		// The uses `expanded` (of `line`'s code from `codeStart`) expanded, in the line's columns: those of a call joined
+		// from the next lines end at the line's end.
+		static std::vector<ExpandedSpan> SpansOnLine(const std::vector<ExpandedSpan>& expanded, size_t codeStart, size_t lineLength);
 		size_t JoinOpenCall(std::string& code);
 		void InheritInclude(const std::string& code);
 		void TrackComments(const std::string& line);
@@ -46,5 +49,6 @@ namespace Scripting
 		bool m_InComment = false; // a /* comment is open at the start of the next line
 		std::string m_Out;
 		std::vector<MacroDiagnostic> m_Diagnostics;
+		ColumnMap m_Columns;
 	};
 }

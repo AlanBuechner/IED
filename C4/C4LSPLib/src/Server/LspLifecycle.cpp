@@ -174,9 +174,11 @@ namespace C4LSP::Server
 	void LspServer::HandleDidOpen(const Json::Value& params)
 	{
 		const Json::Value& doc = params.Member("textDocument");
-		std::lock_guard<std::mutex> lock(m_DocMutex);
-		m_Documents.Open(doc.Member("uri").GetString(), doc.Member("text").GetString(),
-			static_cast<int>(doc.Member("version").GetInt(0)));
+		{
+			std::lock_guard<std::mutex> lock(m_DocMutex);
+			m_Documents.Open(doc.Member("uri").GetString(), doc.Member("text").GetString(),
+				static_cast<int>(doc.Member("version").GetInt(0)));
+		}
 		PostRecompile();
 	}
 
@@ -187,21 +189,20 @@ namespace C4LSP::Server
 		int version = static_cast<int>(doc.Member("version").GetInt(0));
 
 		std::vector<Protocol::TextContentChangeEvent> changes;
-		bool fullSync = true;
 		const Json::Value& contentChanges = params.Member("contentChanges");
 		for (uint32 i = 0; i < contentChanges.Size(); ++i)
 		{
-			const Json::Value& change = contentChanges.At(i);
+			const Json::Value change = contentChanges.At(i);
 			Protocol::TextContentChangeEvent event;
 			event.text = change.Member("text").GetString();
-			if (change.HasMember("range"))
-				fullSync = false; // an incremental edit was sent
+			if (change.Member("range").IsObject()) // a splice; without a range the text is the whole document
+				event.range = Protocol::LspJson::RangeFrom(change.Member("range"));
 			changes.push_back(std::move(event));
 		}
 
 		{
 			std::lock_guard<std::mutex> lock(m_DocMutex);
-			m_Documents.Change(uri, changes, fullSync);
+			m_Documents.Change(uri, changes, m_Encoding); // a notification's columns are the client's: the store converts them
 		}
 		PostRecompile();
 	}

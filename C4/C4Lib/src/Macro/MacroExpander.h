@@ -1,5 +1,6 @@
 #pragma once
 #include "MacroTable.h"
+#include "SourceManager/ColumnMap.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@ namespace Scripting
 	{
 		std::string text;
 		std::vector<std::string> errors; // e.g. a call with the wrong number of arguments
+		std::vector<ExpandedSpan> spans; // each use the text expanded, where it was and what it became, in order
 	};
 
 	/// The error in a macro body (`##` at either end, `#` before a name that is not a parameter), or empty.
@@ -36,7 +38,8 @@ namespace Scripting
 	private:
 		MacroExpander(const MacroTable& table, const ExpansionSite& site) : m_Table(table), m_Site(site) {}
 
-		void ExpandInto(const std::string& src, std::string& out);
+		// `spans`, when given, gets each use of `src` that expanded (the text's own uses; not those inside an expansion).
+		void ExpandInto(const std::string& src, std::string& out, std::vector<ExpandedSpan>* spans = nullptr);
 		size_t ExpandIdentifier(const std::string& src, size_t start, size_t end, std::string& out);
 		size_t ExpandCall(const MacroDefinition& def, const std::string& src, size_t start, size_t open, std::string& out);
 		std::string Substitute(const MacroDefinition& def, const std::vector<std::string>& args);

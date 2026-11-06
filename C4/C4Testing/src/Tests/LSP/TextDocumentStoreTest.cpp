@@ -25,7 +25,7 @@ namespace Testing
 		// Full sync: a single change with no range carries the entire new text.
 		std::vector<TextContentChangeEvent> changes(1);
 		changes[0].text = "int b = 2;";
-		store.Change("file:///a.cf", changes, /*fullSync=*/true);
+		store.Change("file:///a.cf", changes, PositionEncoding::Utf8);
 
 		TEST_ASSERT_EQ(*store.GetText("file:///a.cf"), std::string("int b = 2;"));
 		TEST_ASSERT_EQ(store.GetVersion("file:///a.cf"), (int)2);
@@ -39,12 +39,14 @@ namespace Testing
 
 		// Insert "y = " after "int " (column 4).
 		std::vector<TextContentChangeEvent> changes(1);
-		changes[0].range.start.line = 0;
-		changes[0].range.start.character = 4;
-		changes[0].range.end.line = 0;
-		changes[0].range.end.character = 4;
+		Range at;
+		at.start.line = 0;
+		at.start.character = 4;
+		at.end.line = 0;
+		at.end.character = 4;
+		changes[0].range = at;
 		changes[0].text = "y = ";
-		store.Change("file:///a.cf", changes, /*fullSync=*/false);
+		store.Change("file:///a.cf", changes, PositionEncoding::Utf8);
 
 		TEST_ASSERT_EQ(*store.GetText("file:///a.cf"), std::string("int y = x;"));
 		TEST_PASSED();

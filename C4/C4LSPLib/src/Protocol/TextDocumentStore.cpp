@@ -7,24 +7,18 @@ namespace C4LSP::Protocol
 		Document doc;
 		doc.text = text;
 		doc.version = version;
+		doc.hash = std::hash<std::string>{}(doc.text);
 		m_Documents[uri] = std::move(doc);
 	}
 
-	void TextDocumentStore::Change(const std::string& uri, const std::vector<TextContentChangeEvent>& changes, bool fullSync)
+	void TextDocumentStore::Change(const std::string& uri, const std::vector<TextContentChangeEvent>& changes, PositionEncoding encoding)
 	{
 		Document& doc = m_Documents[uri];
-		if (fullSync)
-		{
-			// The single change carries the entire new text; the range is ignored.
-			doc.text = changes.empty() ? doc.text : changes.front().text;
-		}
-		else
-		{
-			TextDocumentSync sync;
-			sync.SetFullText(doc.text);
-			sync.ApplyChanges(changes);
-			doc.text = sync.GetText();
-		}
+		TextDocumentSync sync;
+		sync.SetFullText(doc.text);
+		sync.ApplyChanges(changes, encoding);
+		doc.text = sync.GetText();
+		doc.hash = std::hash<std::string>{}(doc.text);
 		++doc.version;
 	}
 
@@ -43,5 +37,13 @@ namespace C4LSP::Protocol
 	{
 		for (const auto& [uri, doc] : m_Documents)
 			apply(uri, doc.text);
+	}
+
+	std::map<std::string, size_t> TextDocumentStore::TextHashes() const
+	{
+		std::map<std::string, size_t> hashes;
+		for (const auto& [uri, doc] : m_Documents)
+			hashes.emplace(uri, doc.hash);
+		return hashes;
 	}
 } // namespace C4LSP::Protocol

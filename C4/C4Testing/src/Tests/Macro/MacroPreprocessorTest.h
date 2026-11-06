@@ -23,6 +23,10 @@ namespace Testing
 		void ContinuationsAndCallsAcrossLines();
 		TEST_FUNC(Macro.Preprocessor.Lines)
 		void EveryLineStaysInPlace();
+		// BUG-446: the columns of a line a macro use changed map back to the file's: before, inside and after each use, an
+		// empty expansion and a use inside a comment's tail.
+		TEST_FUNC(Macro.Preprocessor.Lines)
+		void ColumnsMapToTheFilesOwn();
 		TEST_FUNC(Macro.Preprocessor.Conditions)
 		void ConditionalGroups();
 		TEST_FUNC(Macro.Preprocessor.Conditions)
