@@ -38,6 +38,9 @@ namespace Boards
 		public Element* m_After;
 		public int64 m_IndexBefore = -1;
 		public int64 m_IndexAfter = -1;
+		// What the element was when the change was last undone (null: absent), for a redo that keeps what others did.
+		public Element* m_AtUndo;
+		public bool m_Rewound;
 	}
 
 	class Change

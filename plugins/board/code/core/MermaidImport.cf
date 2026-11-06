@@ -185,7 +185,8 @@ namespace Boards
 			Element* existing = nullptr;
 			for (const DiagramFrame& frame : diagram.m_Frames)
 				if (frame.m_Key == subgraph.m_Key || SameText(frame.m_Element->m_Text.View(), subgraph.m_Title.View())) existing = frame.m_Element;
-			if (existing && existing->m_Text == subgraph.m_Title && existing->m_Key == subgraph.m_Key) {
+			const Core::String* wantedDesc = chart.m_Descs.FindAs(subgraph.m_Key.View());
+			if (existing && existing->m_Text == subgraph.m_Title && existing->m_Key == subgraph.m_Key && (!wantedDesc || *wantedDesc == existing->m_Desc)) {
 				bool same = true;
 				Core::Array<Element*> holds = board.MembersOf(*existing);
 				for (const Core::String& member : members)
@@ -211,6 +212,8 @@ namespace Boards
 			json.StrField("ref", (Core::String("f_") + subgraph.m_Key.View()).View());
 			json.StrField("key", subgraph.m_Key.View());
 			json.StrField("text", subgraph.m_Title.View());
+			const Core::String* desc = chart.m_Descs.FindAs(subgraph.m_Key.View());
+			if (desc) json.StrField("desc", desc->View());
 			json.Key(Core::StringView("around"));
 			json.BeginArray();
 			for (const Core::String& member : members) json.Str(member.View());

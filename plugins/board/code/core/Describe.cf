@@ -215,6 +215,10 @@ namespace Boards
 		out.AppendByte(' ');
 		Quoted(out, element.m_Text.View());
 		At(out, element.Frame());
+		if (!element.m_Desc.IsEmpty()) {
+			out.Append(Core::StringView(" - desc "));
+			Quoted(out, element.m_Desc.View());
+		}
 		out.Append(Core::StringView(" holds"));
 		Core::Array<Element*> members = board.MembersOf(element);
 		if (members.IsEmpty()) out.Append(Core::StringView(" nothing"));
@@ -299,6 +303,42 @@ namespace Boards
 		return listed;
 	}
 
+	// Things a reader of the design would stumble on: decisions without two ways out, connectors whose ends are gone,
+	// nodes without a label.
+	static void Lint(Core::StringBuilder& out, const Board& board) {
+		Core::StringBuilder found;
+		for (Element* element : board.m_Elements) {
+			if (!board.LayerVisible(element->m_Layer.View())) continue;
+			if (element->m_Kind == Kind::Diamond) {
+				int64 ways = 0;
+				for (Element* connector : board.ConnectorsOf(element->m_Id.View()))
+					if (connector->m_From == element->m_Id) ways += 1;
+				if (ways < 2) {
+					found.Append(Core::StringView("  "));
+					found.Append(element->m_Id.View());
+					found.Append(Core::StringView(" (diamond "));
+					Quoted(found, element->m_Text.View());
+					found.Append(Core::StringView(") is a decision with "));
+					found.Append(Counted(ways, "way out", "ways out").View());
+					found.AppendByte(10);
+				}
+			}
+			else if (element->m_Kind == Kind::Connector && (!board.Find(element->m_From.View()) || !board.Find(element->m_To.View()))) {
+				found.Append(Core::StringView("  "));
+				found.Append(element->m_Id.View());
+				found.Append(Core::StringView(" is a connector whose end is gone\n"));
+			}
+			else if (IsNode(element->m_Kind) && element->m_Text.IsEmpty()) {
+				found.Append(Core::StringView("  "));
+				found.Append(element->m_Id.View());
+				found.Append(Core::StringView(" is a node with no label\n"));
+			}
+		}
+		if (found.IsEmpty()) return;
+		out.Append(Core::StringView("Checks:\n"));
+		out.Append(found.View());
+	}
+
 	Core::String DescribeBoard(const Board& board, Core::StringView path, const ReadAsk& ask, const Core::Array<SketchGroup>& groups) {
 		Core::StringBuilder out;
 		out.Append(Core::StringView("Board "));
@@ -360,6 +400,7 @@ namespace Boards
 			out.AppendByte(10);
 			budget -= 1;
 		}
+		Lint(out, board);
 		if (left > 0) {
 			out.Append(Core::StringView("... and "));
 			out.AppendInt(left);

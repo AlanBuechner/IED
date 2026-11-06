@@ -42,8 +42,9 @@ namespace Boards
 	Core::String Brief(const Board& board, const Element& element);
 	// Moves an element (not a connector: it follows its ends) by dx, dy.
 	void Offset(Element& element, double dx, double dy);
-	// Moves each element by its delta, recorded; frames whose members moved are fitted around them again.
-	void ApplyMoves(OpContext& ctx, const Core::HashMap<Core::String, Point>& moves);
+	// Moves each element by its delta, recorded. With `refit` (a layout, a tidy) frames whose members moved are fitted
+	// around them again; without, a member moved out of its frame leaves it.
+	void ApplyMoves(OpContext& ctx, const Core::HashMap<Core::String, Point>& moves, bool refit);
 
 	bool AddLayerOp(OpContext& ctx, const Serialization::DomNode& op);
 	bool UpdateLayerOp(OpContext& ctx, const Serialization::DomNode& op);

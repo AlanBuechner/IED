@@ -112,4 +112,19 @@ class BoardOpsTests
 		const double middle = a->m_X + a->m_W * 0.5;
 		assert_true(middle > b->m_X + b->m_W && middle < c->m_X, "A centered over its children");
 	}
+
+	[test("undo_and_redo_keep_what_others_did_since")]
+	public static void UndoKeepsOthers() {
+		Boards::Board* board = BtBoard();
+		BtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"API\"}]", "owner");
+		Boards::ChangeResult moved = BtApply(*board, "[{\"op\":\"move\",\"ids\":[\"e1\"],\"dx\":40,\"dy\":0}]", "owner");
+		BtApply(*board, "[{\"op\":\"update\",\"id\":\"e1\",\"text\":\"Gateway\"}]", "ai");
+		Boards::Rewind(*board, moved.m_Change, true);
+		Boards::Element* e1 = board->Find(Core::StringView("e1"));
+		assert_true(e1->m_X == 0.0 && e1->m_Text == "Gateway", "the owner's move is undone, the ai's later text stays");
+		Boards::Rewind(*board, board->FindChange(Core::StringView("c1")), true);
+		assert_true(board->Find(Core::StringView("e1")) == nullptr, "the add undone");
+		Boards::Rewind(*board, board->FindChange(Core::StringView("c1")), false);
+		assert_true(board->Find(Core::StringView("e1"))->m_Text == "Gateway", "redone as it was when undone, the ai's text with it");
+	}
 }

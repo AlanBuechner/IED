@@ -178,7 +178,7 @@ namespace Boards
 		Core::HashMap<Core::String, Point> moves = keep.IsEmpty() ? LayeredLayout(*ctx.m_Board, ids, direction, gap, clusters) : StableLayout(*ctx.m_Board, ids, keep, direction, gap, clusters);
 		const int64 laid = moves.Count();
 		Satellites(*ctx.m_Board, moves);
-		ApplyMoves(ctx, moves);
+		ApplyMoves(ctx, moves, true);
 		Core::StringBuilder line;
 		line.Append(Core::StringView("laid out "));
 		line.AppendInt(laid);
@@ -195,9 +195,29 @@ namespace Boards
 		return true;
 	}
 
+	// The elements centered on the midpoint of two others.
+	static bool PlaceBetween(OpContext& ctx, const Serialization::DomNode& op, const Core::Array<Core::String>& ids) {
+		Core::Array<Core::String> pair;
+		if (!ResolveIds(ctx, op, "between", pair)) return false;
+		if (pair.Count() != 2) return ctx.Fail(Core::String("'between' names two elements"));
+		Box a = ctx.m_Board->Find(pair[0].View())->Frame();
+		Box b = ctx.m_Board->Find(pair[1].View())->Frame();
+		Box moving;
+		for (const Core::String& id : ids) moving.AddBox(ctx.m_Board->Find(id.View())->Frame());
+		Point delta;
+		delta.m_X = Tenth((a.CenterX() + b.CenterX()) * 0.5 - moving.CenterX());
+		delta.m_Y = Tenth((a.CenterY() + b.CenterY()) * 0.5 - moving.CenterY());
+		Core::HashMap<Core::String, Point> moves;
+		for (const Core::String& id : ids) moves.Insert(id, delta);
+		ApplyMoves(ctx, moves, false);
+		ctx.Done((((Core::String("placed them between ") + pair[0].View()) + " and ") + pair[1].View()) + " (when there is no room, insert on their connector makes it)");
+		return true;
+	}
+
 	bool PlaceOp(OpContext& ctx, const Serialization::DomNode& op) {
 		Core::Array<Core::String> ids;
 		if (!ResolveIds(ctx, op, op.Member("ids").IsValid() ? "ids" : "id", ids)) return false;
+		if (op.Member("between").IsValid()) return PlaceBetween(ctx, op, ids);
 		Core::String near;
 		if (!ResolveId(ctx, op.Member("near").AsView(), near)) return false;
 		Core::StringView side = op.Member("side").AsView().IsEmpty() ? Core::StringView("right") : op.Member("side").AsView();
@@ -223,7 +243,7 @@ namespace Boards
 			if (element->m_Kind == Kind::Frame)
 				for (Element* member : ctx.m_Board->MembersOf(*element)) moves.Insert(member->m_Id, delta);
 		}
-		ApplyMoves(ctx, moves);
+		ApplyMoves(ctx, moves, false);
 		Core::StringBuilder line;
 		line.Append(Core::StringView("placed "));
 		for (int64 i = 0; i < ids.Count(); ++i) {
@@ -276,7 +296,7 @@ namespace Boards
 		if (op.Member("same_size").AsBool()) SameSize(ctx, ids, grid);
 		Core::HashMap<Core::String, Point> moves = Tidied(*ctx.m_Board, ids, grid);
 		Satellites(*ctx.m_Board, moves);
-		ApplyMoves(ctx, moves);
+		ApplyMoves(ctx, moves, true);
 		ctx.Done((Core::String("tidied ") + NumberText((double)ids.Count()).View()) + " elements: nodes nearly in a row share its center line, nearly in a column its center, the rest snapped to the grid");
 		return true;
 	}
@@ -288,7 +308,7 @@ namespace Boards
 		if (edge != "left" && edge != "right" && edge != "top" && edge != "bottom" && edge != "centerx" && edge != "centery") return ctx.Fail(Core::String("'edge' is left, right, top, bottom, centerx or centery"));
 		Core::String to;
 		if (op.Member("to").IsValid() && !ResolveId(ctx, op.Member("to").AsView(), to)) return false;
-		ApplyMoves(ctx, Aligned(*ctx.m_Board, ids, edge, to.View()));
+		ApplyMoves(ctx, Aligned(*ctx.m_Board, ids, edge, to.View()), false);
 		ctx.Done((((Core::String("aligned ") + NumberText((double)ids.Count()).View()) + " elements' ") + edge) + (to.IsEmpty() ? Core::String(" to the selection's") : (Core::String(" to ") + to.View() + "'s")).View());
 		return true;
 	}
@@ -299,7 +319,7 @@ namespace Boards
 		Core::StringView axis = op.Member("axis").AsView();
 		if (axis != "x" && axis != "y") return ctx.Fail(Core::String("'axis' is x or y"));
 		if (ids.Count() < 3) ctx.Warn(Core::String("distribute needs three or more elements; nothing moved"));
-		ApplyMoves(ctx, Distributed(*ctx.m_Board, ids, axis));
+		ApplyMoves(ctx, Distributed(*ctx.m_Board, ids, axis), false);
 		ctx.Done(((Core::String("distributed ") + NumberText((double)ids.Count()).View()) + " elements along ") + axis);
 		return true;
 	}

@@ -76,14 +76,73 @@ namespace Boards
 		return !m_Change->m_Elements.IsEmpty() || m_Change->m_LayersChanged || m_Change->m_TitleChanged;
 	}
 
+	static bool SameNumbers(const Core::Array<double>& a, const Core::Array<double>& b) {
+		if (a.Count() != b.Count()) return false;
+		for (int64 i = 0; i < a.Count(); ++i)
+			if (a[i] != b[i]) return false;
+		return true;
+	}
+
+	// `into` with every field that differs between `from` and `to` set to `to`'s: a change's own fields taken back (or
+	// done again) over what others have changed since in the other fields.
+	static void MergeFields(Element& into, const Element& from, const Element& to) {
+		if (from.m_Kind != to.m_Kind) into.m_Kind = to.m_Kind;
+		if (from.m_Layer != to.m_Layer) into.m_Layer = to.m_Layer;
+		if (from.m_X != to.m_X) into.m_X = to.m_X;
+		if (from.m_Y != to.m_Y) into.m_Y = to.m_Y;
+		if (from.m_W != to.m_W) into.m_W = to.m_W;
+		if (from.m_H != to.m_H) into.m_H = to.m_H;
+		if (from.m_Width != to.m_Width) into.m_Width = to.m_Width;
+		if (from.m_Opacity != to.m_Opacity) into.m_Opacity = to.m_Opacity;
+		if (from.m_FontSize != to.m_FontSize) into.m_FontSize = to.m_FontSize;
+		if (from.m_ImageW != to.m_ImageW) into.m_ImageW = to.m_ImageW;
+		if (from.m_ImageH != to.m_ImageH) into.m_ImageH = to.m_ImageH;
+		if (from.m_Color != to.m_Color) into.m_Color = to.m_Color;
+		if (from.m_Fill != to.m_Fill) into.m_Fill = to.m_Fill;
+		if (from.m_Style != to.m_Style) into.m_Style = to.m_Style;
+		if (from.m_Text != to.m_Text) into.m_Text = to.m_Text;
+		if (from.m_Key != to.m_Key) into.m_Key = to.m_Key;
+		if (from.m_Desc != to.m_Desc) into.m_Desc = to.m_Desc;
+		if (from.m_From != to.m_From) into.m_From = to.m_From;
+		if (from.m_To != to.m_To) into.m_To = to.m_To;
+		if (from.m_Start != to.m_Start) into.m_Start = to.m_Start;
+		if (from.m_End != to.m_End) into.m_End = to.m_End;
+		if (from.m_Route != to.m_Route) into.m_Route = to.m_Route;
+		if (from.m_Src != to.m_Src) into.m_Src = to.m_Src;
+		if (from.m_About != to.m_About) into.m_About = to.m_About;
+		if (!SameNumbers(from.m_Points, to.m_Points)) into.m_Points = to.m_Points;
+		if (!SameNumbers(from.m_Crop, to.m_Crop)) into.m_Crop = to.m_Crop;
+	}
+
+	// What an element becomes when `change` is undone or redone, given what it is now: null for absent.
+	static Element* Target(ElementChange& entry, Element* current, bool undo) {
+		if (undo) {
+			entry.m_AtUndo = current ? new Element(*current) : nullptr;
+			entry.m_Rewound = true;
+			if (!entry.m_Before) return nullptr;
+			if (!entry.m_After || !current) return new Element(*entry.m_Before);
+			Element* merged = new Element(*current);
+			MergeFields(*merged, *entry.m_After, *entry.m_Before);
+			return merged;
+		}
+		Element* wanted = entry.m_Rewound ? entry.m_AtUndo : entry.m_After;
+		if (!wanted) return nullptr;
+		if (!current || !entry.m_Before) return new Element(*wanted);
+		Element* merged = new Element(*current);
+		MergeFields(*merged, *entry.m_Before, *wanted);
+		return merged;
+	}
+
 	void Rewind(Board& board, Change* change, bool undo) {
+		Core::Array<Element*> targets;
+		for (ElementChange& entry : change->m_Elements) targets.Push(Target(entry, board.Find(entry.m_Id.View()), undo));
 		for (const ElementChange& entry : change->m_Elements) {
 			const int64 index = board.IndexOf(entry.m_Id.View());
 			if (index >= 0) board.RemoveAt(index);
 		}
 		Core::Array<int64> order;
 		for (int64 i = 0; i < change->m_Elements.Count(); ++i)
-			if ((undo ? change->m_Elements[i].m_Before : change->m_Elements[i].m_After) != nullptr) order.Push(i);
+			if (targets[i] != nullptr) order.Push(i);
 		order.SortBy([change, undo](int64 a, int64 b) -> bool {
 			const ElementChange& x = change->m_Elements[a];
 			const ElementChange& y = change->m_Elements[b];
@@ -91,8 +150,7 @@ namespace Boards
 		});
 		for (int64 i : order) {
 			const ElementChange& entry = change->m_Elements[i];
-			Element* state = undo ? entry.m_Before : entry.m_After;
-			board.Insert(new Element(*state), undo ? entry.m_IndexBefore : entry.m_IndexAfter);
+			board.Insert(targets[i], undo ? entry.m_IndexBefore : entry.m_IndexAfter);
 		}
 		if (change->m_LayersChanged) board.m_Layers = undo ? change->m_LayersBefore : change->m_LayersAfter;
 		if (change->m_TitleChanged) board.m_Title = undo ? change->m_TitleBefore : change->m_TitleAfter;

@@ -520,8 +520,12 @@ namespace Boards
 			rows.Push(element->m_Y + element->m_H * 0.5);
 			columns.Push(element->m_X + element->m_W * 0.5);
 		}
-		Core::HashMap<int64, double> row = Lines(rows, 24.0);
-		Core::HashMap<int64, double> column = Lines(columns, 24.0);
+		Core::Array<double> sizes;
+		for (Element* element : elements) sizes.Push(Math::Min(element->m_W, element->m_H));
+		sizes.Sort();
+		const double tolerance = Math::Max(30.0, sizes.IsEmpty() ? 0.0 : sizes[sizes.Count() / 2] * 0.5);
+		Core::HashMap<int64, double> row = Lines(rows, tolerance);
+		Core::HashMap<int64, double> column = Lines(columns, tolerance);
 		for (int64 i = 0; i < elements.Count(); ++i) {
 			Element* element = elements[i];
 			const double x = Math::Round(column.Get(i) / grid) * grid - element->m_W * 0.5;

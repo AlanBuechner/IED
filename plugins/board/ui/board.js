@@ -96,7 +96,7 @@ export class BoardView {
 			h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", on: { click: () => this.zoomBy(1.25) } }, icon("zoom-in")),
 			h("button.ib", { title: "Show everything (Shift+1)", "aria-label": "Fit", on: { click: () => this.canvas.show(this.canvas.contentBox()) } }, icon("screen-full")),
 			h("button.btn.flat.board-ai-button", { title: "The board's AI", on: { click: () => this.showPanel("ai", true) } }, icon("sparkle", "c-ai"), h("span.lbl", null, "AI")),
-			h("button.ib", { title: "Side panel", "aria-label": "Side panel", on: { click: () => this.togglePanel() } }, icon("layout-sidebar-right")));
+			h("button.ib.board-panel-toggle", { title: "Side panel", "aria-label": "Side panel", on: { click: () => this.togglePanel() } }, icon("layout-sidebar-right")));
 		this.toolChanged();
 		this.styleChanged();
 		this.canvas.overlays.push(() => this.updateZoom());
@@ -336,17 +336,17 @@ export class BoardView {
 			const png = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 			const reply = await fetch("/w/" + encodeURIComponent(this.ctx.wsId) + "/api/upload", { method: "PUT", body: png, headers: { "Content-Type": "image/png" }, credentials: "same-origin" });
 			if (!reply.ok) throw new Error("upload failed (" + reply.status + ")");
-			const { id } = await reply.json();
-			const stored = await this.ied.client.request("ied.board/image", { boardId: this.model.boardId, blobId: id });
+			const { blobId } = await reply.json();
+			const stored = await this.ied.client.request("ied.board/image", { boardId: this.model.boardId, blobId });
 			const [cx, cy] = x !== undefined ? [x, y] : this.canvas.toWorld(this.canvas.width / 2, this.canvas.height / 2);
 			const most = 640 / this.canvas.camera.zoom;
 			const fit = Math.min(1, most / Math.max(stored.iw, stored.ih));
 			const w = Math.round(stored.iw * fit), h2 = Math.round(stored.ih * fit);
 			const layer = this.activeLayer();
-			await this.model.edit([{ op: "add", type: "image", layer: layer.id, src: stored.src, iw: stored.iw, ih: stored.ih, x: Math.round(cx - w / 2), y: Math.round(cy - h2 / 2), w, h: h2 }], "image");
-			const temp = this.model.temps[this.model.temps.length - 1];
+			const added = await this.model.edit([{ op: "add", type: "image", layer: layer.id, src: stored.src, iw: stored.iw, ih: stored.ih, x: Math.round(cx - w / 2), y: Math.round(cy - h2 / 2), w, h: h2 }], "image");
 			this.input.setTool("select");
-			if (temp) this.input.select([temp.id], false);
+			const id = added && Object.values(added.refs || {})[0];
+			if (id) this.input.select([id], false);
 			this.status("");
 		}
 		catch (e) {

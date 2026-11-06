@@ -32,8 +32,9 @@ and you can take back with `board_revert`.
    ends may be wrong.
 3. `board_recognize` with `apply: true`, `labels` for every handwriting group you read (`{"g3": "API Gateway"}` - the
    shape that holds it gets it), and corrections in `types` (`{"g5": "frame", "g15": "cylinder", "g12": "note"}`) and
-   `ends` (`{"g9": ["g4", "g7"]}`). Clean elements go on a "Diagram" layer and the sketch layer is hidden - never
-   delete the owner's drawing. `place: "beside"` puts the clean copy to the right of the sketch, for comparing.
+   `ends` (`{"g9": ["g4", "g7"]}`). A one-stroke arrow guessed a scribble takes `{"g21": "arrow"}`. Clean elements go
+   on a "Diagram" layer and the sketch layer is hidden: every stroke kept, the owner shows the layer again to compare -
+   never delete the owner's drawing. `place: "beside"` puts the clean copy to the right of the sketch instead.
 4. Tidy: `board_edit` with `{"op": "tidy"}` keeps the owner's arrangement and lines up near rows and columns;
    `{"op": "layout", "direction": "TD"}` arranges everything anew by the connectors (frames stay together, notes move
    with their node). Prefer tidy when the owner placed things on purpose.
@@ -50,8 +51,11 @@ your own judgment (an ellipse made a cylinder, a note's wording).
 - Put things where they belong without arithmetic: `place` (`{"op": "place", "ids": ["@cache"], "near": "e3", "side":
   "below"}`), `align` (to the selection or `to` an element), `distribute`, `layout` with `keep` (the nodes that stay)
   so only new nodes are placed around the owner's arrangement.
-- Groups are frames: `{"op": "add", "type": "frame", "text": "Backend", "around": ["e3", "e4", "e6"]}`. A frame holds
-  what on its own layer has its center inside it; the answer warns when a change moved something in or out.
+- Groups are frames: `{"op": "add", "type": "frame", "text": "Backend", "around": ["e3", "e4", "e6"]}` (anything else
+  inside is moved out). A frame holds what on its own layer has its center inside it: `place` something outside to take
+  it out (moves never grow a frame; `layout` and `tidy` refit them, `update` with `around` or `fit: true` refits one).
+  The answer says when a change moved something in or out.
+- A node between two others: `insert` on their connector (it makes room), or `place` with `between`.
 - Read the answer's warnings (overlaps, connectors through nodes, frame membership) and fix them in the next call.
 - `color` is the outline and ink, `fill` a tint inside; both take the palette's names.
 
@@ -68,8 +72,10 @@ your own judgment (an ellipse made a cylinder, a note's wording).
 
 The plan is what an agent builds from. Write it with `board_plan` (`action: "write"`, `kind: "markdown"`), starting from
 `board_export` with `format: "markdown"`: one section per component (what it does, its interface, what it talks to and
-how), the flows, the data, open questions - and the Mermaid diagram. Give nodes a `desc` with `board_edit` as you learn
-what they are for: descriptions flow into the export. Mark assumptions as assumptions.
+how), the flows, the data, open questions - and the Mermaid diagram. Give nodes and frames a `desc` with `board_edit` as you
+learn what they are for: descriptions flow into the export. Put `{{board:mermaid}}` where the diagram goes rather than
+pasting it: it is filled in from the board each time the plan is read, so it never drifts. Mark assumptions as
+assumptions. `board_read`'s checks list loose ends worth raising (a decision with one way out).
 
 ## Building
 

@@ -133,11 +133,12 @@ namespace Boards
 		ctx.m_Board->Touched(frame->m_Id.View());
 	}
 
-	void ApplyMoves(OpContext& ctx, const Core::HashMap<Core::String, Point>& moves) {
+	void ApplyMoves(OpContext& ctx, const Core::HashMap<Core::String, Point>& moves, bool refit) {
 		// The frames whose members move, with their members as they stand now.
 		Core::Array<Element*> frames;
 		Core::Array<Core::Array<Element*>> members;
 		for (Element* element : ctx.m_Board->m_Elements) {
+			if (!refit) break;
 			if (element->m_Kind != Kind::Frame || moves.Contains(element->m_Id)) continue;
 			Core::Array<Element*> inside = ctx.m_Board->MembersOf(*element);
 			bool moving = false;
@@ -462,7 +463,7 @@ namespace Boards
 			if (element->m_Kind != Kind::Frame) continue;
 			for (Element* member : ctx.m_Board->MembersOf(*element)) moves.Insert(member->m_Id, delta);
 		}
-		ApplyMoves(ctx, moves);
+		ApplyMoves(ctx, moves, false);
 		ctx.Done(((((Core::String("moved ") + NumberText((double)moves.Count()).View()) + " elements by ") + NumberText(dx).View()) + ",") + NumberText(dy).View());
 		return true;
 	}
@@ -485,6 +486,30 @@ namespace Boards
 		}
 		ctx.Done((Core::String("brought ") + NumberText((double)ids.Count()).View()) + " elements " + to);
 		return true;
+	}
+
+	// Pushes the connector's end - and everything at or past it along the axis, on its layer - on by what the new
+	// node needs, so the node does not sit on it.
+	static void MakeRoom(OpContext& ctx, const Element& node, const Element& end, bool vertical, bool down, bool right) {
+		const double gap = 50.0;
+		Box nodeBox = node.Frame();
+		Box endBox = end.Frame();
+		double room = 0.0;
+		if (vertical) room = down ? nodeBox.m_Y1 + gap - endBox.m_Y0 : endBox.m_Y1 - (nodeBox.m_Y0 - gap);
+		else room = right ? nodeBox.m_X1 + gap - endBox.m_X0 : endBox.m_X1 - (nodeBox.m_X0 - gap);
+		if (room <= 0.0) return;
+		Core::HashMap<Core::String, Point> moves;
+		Point delta;
+		delta.m_X = vertical ? 0.0 : (right ? room : -room);
+		delta.m_Y = vertical ? (down ? room : -room) : 0.0;
+		for (Element* other : ctx.m_Board->m_Elements) {
+			if (other->m_Layer != end.m_Layer || other->m_Kind == Kind::Connector) continue;
+			Box box = other->Frame();
+			const bool past = vertical ? (down ? box.m_Y0 >= endBox.m_Y0 - 1.0 : box.m_Y1 <= endBox.m_Y1 + 1.0) : (right ? box.m_X0 >= endBox.m_X0 - 1.0 : box.m_X1 <= endBox.m_X1 + 1.0);
+			if (past) moves.Insert(other->m_Id, delta);
+		}
+		ApplyMoves(ctx, moves, true);
+		ctx.Done((Core::String("made room for it: moved ") + NumberText((double)moves.Count()).View()) + " elements on by " + NumberText(room).View());
 	}
 
 	// A node put into a connector's path: the connector becomes two, from its start to the node and on to its end; the
@@ -521,6 +546,7 @@ namespace Boards
 		}
 		node->m_X = Tenth(placed.m_X0);
 		node->m_Y = Tenth(placed.m_Y0);
+		MakeRoom(ctx, *node, *ctx.m_Board->Find(connector->m_To.View()), vertical, dy >= 0.0, dx >= 0.0);
 		node->m_Id = ctx.m_Board->NewElementId();
 		node->m_By = ctx.m_By;
 		ctx.m_Recorder.Before(node->m_Id.View());

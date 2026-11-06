@@ -274,6 +274,7 @@ namespace Boards
 	}
 
 	static const DiagramNode* NearestNode(const Diagram& diagram, const Element& note);
+	static void OneLine(Core::StringBuilder& out, Core::StringView text);
 
 	Core::String ExportMermaid(const Board& board, const Diagram& given, const Core::HashMap<Core::String, Core::String>& colors) {
 		Diagram diagram = given;
@@ -305,6 +306,14 @@ namespace Boards
 		if (!colors.IsEmpty()) {
 			ClassLines(out, diagram, colors, false);
 			ClassLines(out, diagram, colors, true);
+		}
+		for (const DiagramFrame& frame : diagram.m_Frames) {
+			if (frame.m_Element->m_Desc.IsEmpty()) continue;
+			out.Append(Core::StringView("    %% desc "));
+			out.Append(frame.m_Key.View());
+			out.Append(Core::StringView(": "));
+			OneLine(out, frame.m_Element->m_Desc.View());
+			out.AppendByte(10);
 		}
 		for (const DiagramNode& node : diagram.m_Nodes) {
 			if (node.m_Element->m_Desc.IsEmpty()) continue;
@@ -444,7 +453,12 @@ namespace Boards
 			for (const DiagramFrame& frame : diagram.m_Frames) {
 				out.Append(Core::StringView("- **"));
 				OneLine(out, frame.m_Element->m_Text.IsEmpty() ? frame.m_Key.View() : frame.m_Element->m_Text.View());
-				out.Append(Core::StringView("**:"));
+				out.Append(Core::StringView("**"));
+				if (!frame.m_Element->m_Desc.IsEmpty()) {
+					out.Append(Core::StringView(" - "));
+					OneLine(out, frame.m_Element->m_Desc.View());
+				}
+				out.Append(Core::StringView(". Holds:"));
 				bool first = true;
 				for (const DiagramNode& node : diagram.m_Nodes)
 					if (node.m_Frame == frame.m_Element->m_Id) {

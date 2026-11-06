@@ -15,6 +15,7 @@ One folder per built-in plugin: its `ied-plugin.json` manifest, UI modules, skil
 | `tor/` | Tor on demand for other plugins: the SOCKS proxy web search uses, new circuits (`docs/29`) |
 | `mcp/` | The MCP client: servers' tools as the AI's tools, resources as `@` mentions, Settings > AI > MCP Servers (`docs/04` "MCP") |
 | `c4/` | The C4 language: grammar, icons, matchers, the `c4.nuke` preset, templates, skills, and C4LSP / C4DAP of the workspace's toolchain (`code/` finds it); every C4 toolchain ships its own copy. Its Nuke package (`nuke/`, `libraries/C4Api`) gives tools the compiler's C API; `samples/c4-outline` is one (`docs/26` "The c4 plugin and its toolchains") |
+| `board/` | The planning board: `.iedboard` files drawn on with pen, shapes, connectors, text, notes, frames and images on layers; the AI's `board_*` tools (see, recognize a sketch, edit, Mermaid both ways, plans) and the board's chat (`docs/32`) |
 
 IED's own solution lists every folder here as a project of the "IED Plugins" folder (`ied-plugins` in the root `nuke.toml`, `nuke init --ied`).
 
