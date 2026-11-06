@@ -13,6 +13,7 @@
 // board's is taken.
 
 include "core/Describe.ch"
+include "core/History.ch"
 include "core/Mermaid.ch"
 include "core/Render.ch"
 include "api/Plugin.ch"
@@ -35,6 +36,10 @@ namespace Boards
 
 		public Core::String Topic() const { return Core::String("ied.board/b:") + m_Id.View(); }
 	}
+
+	// A board's per-machine file: ".ied/local/boards/<16 hex digits of its path's hash><suffix>" - ".json" its local
+	// state (the chat it talks to, the camera), ".history.json" its history (core/History.ch).
+	Core::String LocalFile(Core::StringView boardPath, Core::StringView suffix);
 
 	// What a tool answers: its text and, for board_view, the picture's workspace path.
 	class ToolAnswer

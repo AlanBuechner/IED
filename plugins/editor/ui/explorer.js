@@ -444,7 +444,7 @@ export class Explorer {
 	// Actions
 
 	open(node, options) {
-		if (node.kind === "file") this.ied.tabs.open("doc:" + node.path, { preview: options.preview });
+		if (node.kind === "file") this.ied.files.open(node.path, { preview: options.preview });
 		else if (node.kind === "package" && node.pkg.link) this.ied.commands.run("ied.browser.open", { url: node.pkg.link });
 	}
 
@@ -490,7 +490,7 @@ export class Explorer {
 		const request = kind === "folder" ? ["fs.mkdir", { wsId: this.ctx.wsId, path }] : ["fs.write", { wsId: this.ctx.wsId, path, text: "", expectedRevision: 0 }];
 		try {
 			await this.ied.client.request(request[0], request[1]);
-			if (kind === "file") this.ied.tabs.open("doc:" + path, { preview: false });
+			if (kind === "file") this.ied.files.open(path, { preview: false });
 		}
 		catch (e) {
 			this.ied.report(e.code === "conflict" ? "'" + path + "' already exists." : "Could not create '" + path + "': " + e.message, e);

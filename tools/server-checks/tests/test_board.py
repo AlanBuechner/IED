@@ -1,11 +1,14 @@
 """The planning board (docs/32): boards made and opened through ied.board/*, changes pushed on the board's topic with
 undo by author, the file written one element per line and read again when it changes on disk, images kept beside the
-board, the board tools answering through board.query (a picture on disk for board_view), and the tools in a chat turn
-against the fake model - the picture reaching a model that sees images, an edit marked as the AI's."""
+board, the history kept across a restart (and dropped when the file changed while the server was down), an empty
+.iedboard opening as a new board, the board tools answering through board.query (a picture on disk for board_view),
+and the tools in a chat turn against the fake model - the picture reaching a model that sees images, an edit marked as
+the AI's."""
 
 import asyncio
 import json
 import os
+import re
 import struct
 import tempfile
 import time
@@ -117,6 +120,81 @@ class BoardTests(ServerTestCase):
 		self.assertEqual("c1", answer["change"]["id"])
 		view = await self.query("view", {"board": "design/pics.iedboard"})
 		self.assertNotIn("Not drawn", view["text"], "the picture draws the image")
+
+	def history(self):
+		"""The board's kept history (a folder workspace keeps it in the app data), or None before the first save."""
+		for folder, _, names in os.walk(self.root):
+			for name in names:
+				if name.endswith(".history.json"):
+					with open(os.path.join(folder, name), encoding="utf-8") as f:
+						return json.load(f)
+		return None
+
+	async def until(self, check, what):
+		deadline = time.monotonic() + WAIT
+		while time.monotonic() < deadline:
+			if check():
+				return
+			await asyncio.sleep(0.2)
+		self.fail(what)
+
+	async def restart(self, while_down=None):
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		if while_down:
+			while_down()
+		self.server = IedServer(data=os.path.join(self.root, "data"), extra=("--workspace", self.ws))
+		self.addCleanup(self.server.stop)
+		self.assertTrue(self.server.started, self.server.error)
+		self.cookie = self.server.sign_in()
+		self.client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+
+	async def reopen(self, path):
+		opened = await self.client.request("ied.board/open", {"wsId": "w1", "path": path}, timeout=WAIT)
+		await self.client.sub([opened["topic"]])
+		snap = (await self.client.wait_for(opened["topic"], lambda f: f["t"] == "snap", timeout=WAIT))[-1]["data"]
+		return opened, snap
+
+	async def test_the_history_is_kept_across_a_restart(self):
+		opened, _ = await self.open_board("design/kept")
+		await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "add", "type": "rect", "x": 0, "y": 0, "w": 100, "h": 50, "text": "API"}]})
+		await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "move", "ids": ["e1"], "dx": 40, "dy": 0}]})
+		await self.query("edit", {"board": "design/kept.iedboard", "ops": [{"op": "update", "id": "e1", "text": "Gateway"}]})
+		await self.client.request("ied.board/undo", {"boardId": opened["boardId"]})
+		await self.until(lambda: [c["undone"] for c in (self.history() or {}).get("changes", [])] == [False, True, False], "the history is kept with the board's file")
+		await self.restart()
+		opened, snap = await self.reopen("design/kept.iedboard")
+		self.assertEqual(["c1", "c2", "c3"], [c["id"] for c in snap["history"]])
+		self.assertEqual([False, True, False], [bool(c.get("undone")) for c in snap["history"]], "with what was undone")
+		redone = await self.client.request("ied.board/redo", {"boardId": opened["boardId"]})
+		self.assertEqual("c2", redone["change"]["id"], "the owner's redo after the restart")
+		read = await self.query("read", {"board": "design/kept.iedboard", "ids": ["e1"]})
+		line = [l for l in read["text"].splitlines() if l.lstrip().startswith('e1 rect "Gateway"')]
+		at = re.search(r" at (-?[0-9.]+),", line[0]) if line else None
+		self.assertTrue(at, read["text"])
+		self.assertAlmostEqual(40, float(at.group(1)), delta=3, msg="the move back, the AI's later text kept")
+		later = await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "add", "type": "note", "text": "later"}]})
+		self.assertEqual("c4", later["change"]["id"], "new changes are numbered after the kept ones")
+		await self.until(lambda: any(c["id"] == "c4" for c in (self.history() or {}).get("changes", [])), "the new change is kept")
+		path = os.path.join(self.ws, "design", "kept.iedboard")
+		def edit_outside():
+			with open(path, encoding="utf-8") as f:
+				text = f.read()
+			with open(path, "w", encoding="utf-8") as f:
+				f.write(text.replace("Gateway", "Edge"))
+		await self.restart(edit_outside)
+		_, snap = await self.reopen("design/kept.iedboard")
+		self.assertEqual([], snap["history"], "a file changed while the server was down starts its history empty")
+		self.assertIn("Edge", [e.get("text") for e in snap["elements"]])
+
+	async def test_an_empty_board_file_opens_as_a_new_board(self):
+		path = os.path.join(self.ws, "design", "empty.iedboard")
+		with open(path, "w", encoding="utf-8") as f:
+			f.write("")
+		_, snap = await self.reopen("design/empty.iedboard")
+		self.assertEqual(("empty", ["Layer 1"], []), (snap["title"], [l["name"] for l in snap["layers"]], snap["elements"]))
+		with open(path, encoding="utf-8") as f:
+			self.assertEqual("ied.board/1", json.load(f)["format"], "and the file is a board now")
 
 	async def test_the_tools_answer_through_the_binding(self):
 		await self.open_board("design/tools")

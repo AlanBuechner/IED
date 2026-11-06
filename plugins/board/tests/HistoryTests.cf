@@ -1,0 +1,69 @@
+// A board's history across a restart: written with the board's text, read back into the board read from that text,
+// where undo, redo and revert work as before; refused for any other text.
+
+include "Ops.ch"
+include "History.ch"
+
+static Boards::ChangeResult HtApply(Boards::Board& board, const char* json, const char* by) {
+	Serialization::DomDoc doc;
+	Serialization::DomNode ops = Serialization::ReadJson(Core::StringView(json), doc).root;
+	return Boards::ApplyOps(board, ops, Core::StringView(by), Core::StringView(""), 0, nullptr);
+}
+
+// The board as a restarted server has it: read from its saved text, with its history read back.
+static Boards::Board* HtReopened(const Boards::Board& board, bool& restored) {
+	Core::String text = Boards::WriteBoard(board);
+	Core::String history = Boards::WriteHistory(board, text.View());
+	Boards::Board* again = new Boards::Board();
+	Core::String problem;
+	Boards::ReadBoard(text.View(), *again, problem);
+	restored = Boards::ReadHistory(history.View(), text.View(), *again);
+	return again;
+}
+
+[test("board.history")]
+class BoardHistoryTests
+{
+	[test("undo_redo_and_revert_after_a_restart")]
+	public static void AfterRestart() {
+		Boards::Board* board = new Boards::Board();
+		Boards::InitBoard(*board, Core::StringView("Test"));
+		HtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"API\"}]", "owner");
+		HtApply(*board, "[{\"op\":\"move\",\"ids\":[\"e1\"],\"dx\":40,\"dy\":0}]", "owner");
+		HtApply(*board, "[{\"op\":\"update\",\"id\":\"e1\",\"text\":\"Gateway\"},{\"op\":\"add_layer\",\"name\":\"Diagram\"},{\"op\":\"title\",\"title\":\"Shop\"}]", "ai");
+		Boards::Rewind(*board, board->FindChange(Core::StringView("c2")), true);
+		bool restored = false;
+		Boards::Board* again = HtReopened(*board, restored);
+		assert_true(restored, "the history goes with the text it was written for");
+		assert_true(again->m_History.Count() == 3, "every change, in order");
+		assert_true(again->FindChange(Core::StringView("c2"))->m_Undone, "and which are undone");
+		assert_true(again->m_NextChange == board->m_NextChange && again->m_Rev >= 3, "new changes are numbered after them");
+		Boards::Rewind(*again, Boards::RedoTarget(*again, Core::StringView("owner")), false);
+		Boards::Element* e1 = again->Find(Core::StringView("e1"));
+		assert_true(e1->m_X == 40.0 && e1->m_Text == "Gateway", "the owner's redo after the restart keeps the ai's text");
+		Boards::Rewind(*again, Boards::UndoTarget(*again, Core::StringView("ai")), true);
+		assert_true(again->Find(Core::StringView("e1"))->m_Text == "API" && again->m_Layers.Count() == 1 && again->m_Title == "Test",
+			"the ai's change undone: its text, its layer and the title");
+		Boards::Rewind(*again, again->FindChange(Core::StringView("c1")), true);
+		assert_true(again->Find(Core::StringView("e1")) == nullptr, "the first change reverted: the add");
+		Boards::ChangeResult next = HtApply(*again, "[{\"op\":\"add\",\"type\":\"note\",\"text\":\"later\"}]", "owner");
+		assert_true(next.m_Change->m_Id == "c4", "a new change takes the next id");
+	}
+
+	[test("another_text_starts_empty")]
+	public static void OtherText() {
+		Boards::Board* board = new Boards::Board();
+		Boards::InitBoard(*board, Core::StringView("Test"));
+		HtApply(*board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"API\"}]", "owner");
+		Core::String text = Boards::WriteBoard(*board);
+		Core::String history = Boards::WriteHistory(*board, text.View());
+		HtApply(*board, "[{\"op\":\"move\",\"ids\":[\"e1\"],\"dx\":40,\"dy\":0}]", "owner");
+		Core::String edited = Boards::WriteBoard(*board);
+		Boards::Board* again = new Boards::Board();
+		Core::String problem;
+		Boards::ReadBoard(edited.View(), *again, problem);
+		assert_true(!Boards::ReadHistory(history.View(), edited.View(), *again), "a history written for other text is refused");
+		assert_true(again->m_History.IsEmpty(), "the board's history stays empty");
+		assert_true(!Boards::ReadHistory(Core::StringView("not json"), edited.View(), *again), "and one that does not read");
+	}
+}

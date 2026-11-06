@@ -6,6 +6,7 @@ import { Router } from "../ws/router.js";
 import { parseOpenFragment } from "./launch.js";
 import { resolveIdentity, deviceClassOf } from "../ws/identity.js";
 import { MenuHost } from "/ui-kit/menu.js";
+import { fileTabRef, viewersFor } from "/ui-kit/fileviewers.js";
 import { isTextInput } from "/ui-kit/dom.js";
 import { ContextKeys } from "./context.js";
 import { Commands } from "./commands.js";
@@ -707,6 +708,16 @@ export class Shell {
 		this.windows.revealElsewhere(activityId, ref);
 	}
 
+	// The viewers the loaded plugins contribute for the workspace file `path` (fileViewers, docs/02), the default last.
+	fileViewers(path) {
+		return viewersFor(path, this.contributions.of("fileViewers"), (kind) => this.views.has(kind + ":" + path));
+	}
+
+	// The tab that opens `path`: its default viewer's, else the text editor's.
+	fileRef(path) {
+		return fileTabRef(path, this.contributions.of("fileViewers"), (kind) => this.views.has(kind + ":" + path));
+	}
+
 	// Opens `ref` beside `anchor` (ied.tabs.openBeside): in another document group, a new one to the right when there is
 	// none; with `tether`, the two are tethered (`closes`: `ref` closes with `anchor`).
 	openBeside(anchor, ref, options) {
@@ -1058,6 +1069,15 @@ export class Shell {
 					shell.tabListeners.add(fn);
 					return () => shell.tabListeners.delete(fn);
 				},
+			},
+			// Files and the tabs that show them (docs/02 "fileViewers"): a plugin's viewer for its files, else the text editor.
+			files: {
+				// [{id, title, view, priority, plugin}]: the viewers of `path` whose plugins are loaded, the default last.
+				viewers: (path) => shell.fileViewers(path),
+				// "<view>:<path>" of its default viewer, else "doc:<path>".
+				refFor: (path) => shell.fileRef(path),
+				// Opens `path` in its default viewer, or in `options.view` ("doc" for text), with the tabs' options.
+				open: (path, options) => shell.openTab(options && options.view ? options.view + ":" + path : shell.fileRef(path), options),
 			},
 			// A badge on the button of one of this plugin's activities: {count?, tone?: "info" | "warn", title?}, null to clear.
 			activities: { badge: (activityId, badge) => shell.setActivityBadge(plugin.id, activityId, badge) },

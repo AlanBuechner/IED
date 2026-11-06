@@ -139,6 +139,8 @@ namespace Boards
 	// The board as a .iedboard file's text.
 	Core::String WriteBoard(const Board& board);
 	void WriteLayer(JsonOut& json, const Layer& layer);
+	// A layer as WriteLayer writes it; its id empty when the node has none.
+	Layer ReadLayer(const Serialization::DomNode& node);
 	void WritePlan(JsonOut& json, const Plan& plan);
 	// The tile of a world coordinate.
 	int64 TileOf(double coordinate);

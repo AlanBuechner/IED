@@ -77,8 +77,9 @@ export function activate(ied) {
 	ied.commands.handle("ied.editor.toggleAllOutlining", () => toggleAllOutlining(ied));
 	ied.commands.handle("ied.explorer.open", (args) => {
 		const path = pathOf(args);
-		if (path) ied.tabs.open("doc:" + path, { preview: false });
+		if (path) ied.files.open(path, { preview: false });
 	});
+	ied.commands.handle("ied.explorer.openWith", (args) => openWith(ied, pathOf(args)));
 	ied.commands.handle("ied.explorer.refresh", () => Promise.all([...explorers].map((e) => e.reload())));
 	ied.commands.handle("ied.explorer.collapseAll", () => explorers.forEach((e) => e.tree.collapseAll()));
 	ied.commands.handle("ied.explorer.copyPath", (args) => copy(fullPath(ied, pathOf(args))));
@@ -305,6 +306,20 @@ async function openCounterpartBeside(ied, args) {
 	ied.tabs.openBeside("doc:" + path, "doc:" + found, { tether: true });
 }
 
+// Open With... (VS): the file in the text editor or in a viewer a plugin has for it; the one a plain open uses is marked.
+function openWith(ied, path) {
+	if (!path) return;
+	const viewers = ied.files.viewers(path);
+	const usual = ied.files.refFor(path);
+	const choices = [{ label: "Text Editor", view: "doc" }].concat(viewers.slice().reverse().map((v) => ({ label: v.title, view: v.view })));
+	for (const choice of choices) choice.detail = choice.view + ":" + path === usual ? "the default" : "";
+	showPicker({
+		placeholder: "Open " + fileName(path) + " with",
+		provide: async (text) => choices.filter((c) => c.label.toLowerCase().includes(text.toLowerCase())),
+		pick: (choice) => ied.files.open(path, { preview: false, view: choice.view }),
+	});
+}
+
 // Set as Startup Project from the palette: which project, of those that can run.
 function pickStartup(ied) {
 	const offer = tasks.offer;
@@ -345,6 +360,10 @@ async function showOutput(ied, sourceId) {
 // preview, J10; docs/15 "Tethered tabs").
 async function openFromOutside(ied, args) {
 	if (!args || !args.path) return;
+	if (!ied.files.refFor(args.path).startsWith("doc:")) {
+		ied.files.open(args.path, { preview: false });
+		return;
+	}
 	await goTo(ied, { path: args.path, line: args.line > 0 ? args.line - 1 : undefined, col: args.col > 0 ? args.col - 1 : 0 });
 	const language = languageOf(ied.contributions("languages").map((c) => c.value), args.path);
 	for (const { value } of ied.contributions("companionTabs")) {
@@ -352,9 +371,14 @@ async function openFromOutside(ied, args) {
 	}
 }
 
-// Opens a document at a place: {path, line, col} (0-based, UTF-16).
+// Opens a document at a place: {path, line, col} (0-based, UTF-16). A file with no place opens in its viewer, when a
+// plugin has one for it (a board), else as text.
 async function goTo(ied, args) {
 	if (!args || !args.path) return;
+	if (args.line === undefined && !ied.files.refFor(args.path).startsWith("doc:")) {
+		ied.files.open(args.path, { preview: false });
+		return;
+	}
 	const ref = "doc:" + args.path;
 	ied.tabs.open(ref, { preview: false });
 	const editor = await editors.whenReady(ref);

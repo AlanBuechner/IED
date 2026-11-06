@@ -66,6 +66,14 @@ namespace Boards
 		if (change.m_TitleChanged) json.StrField("title", board.m_Title.View());
 	}
 
+	Core::String LocalFile(Core::StringView boardPath, Core::StringView suffix) {
+		Core::StringBuilder file;
+		file.Append(Core::StringView(".ied/local/boards/"));
+		file.AppendUIntBase(Core::String(boardPath).Hash(), 16, 16);
+		file.Append(suffix);
+		return file.ToString();
+	}
+
 	void BoardService::Init(IED::PluginContext* context) {
 		m_Context = context;
 	}
@@ -109,19 +117,27 @@ namespace Boards
 		}
 	}
 
+	// Writes the board's file and then its history, which names the text it goes with.
 	void BoardService::Save(OpenBoard* open) {
 		Core::String text;
+		Core::String history;
 		{
 			Threading::LockGuard held(open->m_Lock);
 			if (!open->m_Dirty) return;
 			text = WriteBoard(*open->m_Board);
+			history = WriteHistory(*open->m_Board, text.View());
 			open->m_Dirty = false;
 			open->m_Saved = text;
 		}
 		IED::Workspace ws;
 		Core::String problem;
 		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) return;
-		if (!IED::WriteFile(ws, open->m_Path.View(), text.View(), problem)) m_Context->Log((((Core::String("cannot save ") + open->m_Path.View()) + ": ") + problem.View()).View());
+		if (!IED::WriteFile(ws, open->m_Path.View(), text.View(), problem)) {
+			m_Context->Log((((Core::String("cannot save ") + open->m_Path.View()) + ": ") + problem.View()).View());
+			return;
+		}
+		if (!IED::WriteFile(ws, LocalFile(open->m_Path.View(), Core::StringView(".history.json")).View(), history.View(), problem))
+			m_Context->Log((((Core::String("cannot keep the history of ") + open->m_Path.View()) + ": ") + problem.View()).View());
 	}
 
 	void BoardService::Opened(const IED::Workspace& ws) {
@@ -252,6 +268,23 @@ namespace Boards
 		return open;
 	}
 
+	// "checkout" of "design/checkout.iedboard": a new board's title.
+	static Core::StringView BaseName(Core::StringView normal) {
+		int64 start = 0;
+		for (int64 i = 0; i < normal.ByteLength(); ++i)
+			if (normal.ByteAt(i) == (int32)'/') start = i + 1;
+		return normal.Substring(start, normal.ByteLength() - start - Core::StringView(c_Extension).ByteLength());
+	}
+
+	// Whether `text` holds nothing but white space: a file made empty (New File) that becomes a board when opened.
+	static bool Blank(Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c != (int32)' ' && c != 9 && c != 10 && c != 13) return false;
+		}
+		return true;
+	}
+
 	OpenBoard* BoardService::Open(Core::StringView wsId, Core::StringView path) {
 		Core::String normal = BoardPath(path);
 		{
@@ -264,7 +297,17 @@ namespace Boards
 		Core::String problem;
 		if (!IED::ReadFile(ws, normal.View(), text, problem)) throw IED::RpcError(IED::ErrorCode::NotFound, (((Core::String("no board ") + normal.View()) + ": ") + problem.View()).View());
 		Board* board = new Board();
-		if (!ReadBoard(text.View(), *board, problem)) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String("cannot read ") + normal.View()) + ": ") + problem.View()).View());
+		if (Blank(text.View())) {
+			InitBoard(*board, BaseName(normal.View()));
+			text = WriteBoard(*board);
+			if (!IED::WriteFile(ws, normal.View(), text.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("cannot write ") + normal.View()) + ": ") + problem.View()).View());
+		}
+		else if (!ReadBoard(text.View(), *board, problem)) throw IED::RpcError(IED::ErrorCode::BadRequest, (((Core::String("cannot read ") + normal.View()) + ": ") + problem.View()).View());
+		else {
+			Core::String history;
+			if (IED::ReadFile(ws, LocalFile(normal.View(), Core::StringView(".history.json")).View(), history, problem) && !ReadHistory(history.View(), text.View(), *board))
+				m_Context->Log(((Core::String("the history of ") + normal.View()) + " starts empty: the board's file changed after it was kept").View());
+		}
 		return Register(this, wsId, normal.View(), board, text.View());
 	}
 
@@ -275,13 +318,7 @@ namespace Boards
 		Core::String problem;
 		if (IED::ReadFile(ws, normal.View(), existing, problem)) throw IED::RpcError(IED::ErrorCode::Conflict, (Core::String("a board is already at ") + normal.View()).View());
 		Board* board = new Board();
-		Core::StringView name = normal.View();
-		const int64 slash = name.ByteLength() - 1;
-		int64 start = 0;
-		for (int64 i = 0; i <= slash; ++i)
-			if (name.ByteAt(i) == (int32)'/') start = i + 1;
-		Core::StringView base = name.Substring(start, name.ByteLength() - start - Core::StringView(c_Extension).ByteLength());
-		InitBoard(*board, title.IsEmpty() ? base : title);
+		InitBoard(*board, title.IsEmpty() ? BaseName(normal.View()) : title);
 		Core::String text = WriteBoard(*board);
 		if (!IED::WriteFile(ws, normal.View(), text.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("cannot write ") + normal.View()) + ": ") + problem.View()).View());
 		OpenBoard* open = Register(this, wsId, normal.View(), board, text.View());

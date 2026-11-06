@@ -431,6 +431,31 @@ class PluginCodeTests(ServerTestCase):
 		code = await self.settled("mygame.dialogue")
 		self.assertEqual("active", code["state"], code)
 
+	async def test_a_script_includes_its_own_headers(self):
+		"""Every .cf and .ch under the plugin's sources is its script: a header beside its file, one in a subfolder and one
+		named from the source folder all resolve (a script of .cf files alone found none of them); an edit rebuilds."""
+		probe = PROBE.replace('include "api/Plugin.ch"', 'include "api/Plugin.ch"\ninclude "Numbers.ch"', 1)
+		probe = probe.replace(r'out.Append(",\"version\":VERSION}");', r'out.Append(",\"version\":");' + '\n\t\tout.AppendInt(Version());\n\t\tout.Append("}");')
+		self.assertNotIn("VERSION", probe)
+		twice = 'include "Twice.ch"\ninclude "Numbers.ch"\n\nnamespace Probe\n{\n\tint64 Twice(int64 value) { return value * FACTOR; }\n}\n'
+		folder = self.builtin(probe_manifest(), {
+			"code/probe.cf": probe,
+			"code/Numbers.ch": 'include "core/Twice.ch"\n\nnamespace Probe\n{\n\tint64 Version();\n}\n',
+			"code/Numbers.cf": 'include "Numbers.ch"\n\nnamespace Probe\n{\n\tint64 Version() { return Twice(4); }\n}\n',
+			"code/core/Twice.ch": 'namespace Probe\n{\n\tint64 Twice(int64 value);\n}\n',
+			"code/core/Twice.cf": twice.replace("FACTOR", "2"),
+		})
+		self.start()
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual("active", code["state"], code)
+		self.assertEqual(8, (await self.echo("v"))["version"])
+		write(os.path.join(folder, "code", "core", "Twice.cf"), twice.replace("FACTOR", "3"))
+		await self.client.request("plugins.reload")
+		rebuilt = await self.settled("test.probe", after=code)
+		self.assertEqual("active", rebuilt["state"], rebuilt)
+		self.assertEqual(12, (await self.echo("v"))["version"])
+
 	async def test_a_project_plugin_runs_only_in_a_trusted_workspace(self):
 		self.add(os.path.join(self.repo, ".ied", "plugins", "probe"), probe_manifest("game.probe"), {"code/probe.cf": PROBE.replace("VERSION", "3")})
 		self.start()

@@ -281,16 +281,20 @@ namespace Boards
 		return value;
 	}
 
+	Layer ReadLayer(const Serialization::DomNode& node) {
+		Layer layer;
+		layer.m_Id = Core::String(node.Member("id").AsView());
+		layer.m_Name = Core::String(node.Member("name").AsView());
+		if (node.Member("visible").IsValid()) layer.m_Visible = node.Member("visible").AsBool();
+		layer.m_Locked = node.Member("locked").AsBool();
+		if (node.Member("opacity").IsValid()) layer.m_Opacity = node.Member("opacity").AsFloat();
+		return layer;
+	}
+
 	static void ReadLayers(const Serialization::DomNode& list, Board& board) {
 		for (int64 i = 0; i < list.Count(); ++i) {
-			Serialization::DomNode node = list.At(i);
-			Layer layer;
-			layer.m_Id = Core::String(node.Member("id").AsView());
+			Layer layer = ReadLayer(list.At(i));
 			if (layer.m_Id.IsEmpty()) continue;
-			layer.m_Name = Core::String(node.Member("name").AsView());
-			if (node.Member("visible").IsValid()) layer.m_Visible = node.Member("visible").AsBool();
-			layer.m_Locked = node.Member("locked").AsBool();
-			if (node.Member("opacity").IsValid()) layer.m_Opacity = node.Member("opacity").AsFloat();
 			board.m_Layers.Push(layer);
 			const int64 n = Numbering(layer.m_Id.View());
 			if (n >= board.m_NextLayer) board.m_NextLayer = n + 1;

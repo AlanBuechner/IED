@@ -1,0 +1,160 @@
+include "History.ch"
+include "Crypto/sha256.ch"
+
+namespace Boards
+{
+	const char* c_HistoryFormat = "ied.board.history/1";
+
+	static Core::String Digest(Core::StringView text) {
+		return Crypto::Sha256((const void*)text.Data(), text.ByteLength()).ToHex();
+	}
+
+	static void WriteState(JsonOut& json, const char* key, const Element* element) {
+		json.Key(Core::StringView(key));
+		if (element) WriteElement(json, *element);
+		else json.Null();
+	}
+
+	static void WriteLayers(JsonOut& json, const char* key, const Core::Array<Layer>& layers) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Layer& layer : layers) WriteLayer(json, layer);
+		json.EndArray();
+	}
+
+	static void WriteElementChange(JsonOut& json, const ElementChange& entry) {
+		json.BeginObject();
+		json.StrField("id", entry.m_Id.View());
+		WriteState(json, "before", entry.m_Before);
+		WriteState(json, "after", entry.m_After);
+		json.IntField("indexBefore", entry.m_IndexBefore);
+		json.IntField("indexAfter", entry.m_IndexAfter);
+		if (entry.m_Rewound) {
+			json.BoolField("rewound", true);
+			WriteState(json, "atUndo", entry.m_AtUndo);
+		}
+		json.EndObject();
+	}
+
+	static void WriteRecord(JsonOut& json, const Change& change) {
+		json.BeginObject();
+		json.StrField("id", change.m_Id.View());
+		json.IntField("rev", change.m_Rev);
+		json.StrField("by", change.m_By.View());
+		json.StrField("label", change.m_Label.View());
+		json.IntField("time", change.m_TimeMs);
+		json.BoolField("undone", change.m_Undone);
+		json.Key(Core::StringView("elements"));
+		json.BeginArray();
+		for (const ElementChange& entry : change.m_Elements) WriteElementChange(json, entry);
+		json.EndArray();
+		if (change.m_LayersChanged) {
+			WriteLayers(json, "layersBefore", change.m_LayersBefore);
+			WriteLayers(json, "layersAfter", change.m_LayersAfter);
+		}
+		if (change.m_TitleChanged) {
+			json.StrField("titleBefore", change.m_TitleBefore.View());
+			json.StrField("titleAfter", change.m_TitleAfter.View());
+		}
+		json.EndObject();
+	}
+
+	Core::String WriteHistory(const Board& board, Core::StringView boardText) {
+		JsonOut json;
+		json.BeginObject();
+		json.Newline();
+		json.StrField("format", Core::StringView(c_HistoryFormat));
+		json.Newline();
+		json.StrField("board", Digest(boardText).View());
+		json.Newline();
+		json.IntField("nextChange", board.m_NextChange);
+		json.Newline();
+		json.Key(Core::StringView("changes"));
+		json.BeginArray();
+		for (Change* change : board.m_History) {
+			json.Newline();
+			WriteRecord(json, *change);
+		}
+		json.Newline();
+		json.EndArray();
+		json.Newline();
+		json.EndObject();
+		json.Newline();
+		return json.ToString();
+	}
+
+	// An element as a change recorded it; null where it did not exist.
+	static Element* StateFrom(const Serialization::DomNode& node) {
+		if (!node.IsValid() || node.Kind() != Serialization::DomKind::Object) return nullptr;
+		Element* element = new Element();
+		Core::String ignored;
+		ReadElementFields(node, *element, false, ignored);
+		element->m_Id = Core::String(node.Member("id").AsView());
+		return element;
+	}
+
+	static Core::Array<Layer> LayersFrom(const Serialization::DomNode& list) {
+		Core::Array<Layer> layers;
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Layer layer = ReadLayer(list.At(i));
+			if (!layer.m_Id.IsEmpty()) layers.Push(layer);
+		}
+		return layers;
+	}
+
+	static ElementChange ElementChangeFrom(const Serialization::DomNode& node) {
+		ElementChange entry;
+		entry.m_Id = Core::String(node.Member("id").AsView());
+		entry.m_Before = StateFrom(node.Member("before"));
+		entry.m_After = StateFrom(node.Member("after"));
+		entry.m_IndexBefore = node.Member("indexBefore").IsValid() ? node.Member("indexBefore").AsInt() : -1;
+		entry.m_IndexAfter = node.Member("indexAfter").IsValid() ? node.Member("indexAfter").AsInt() : -1;
+		entry.m_Rewound = node.Member("rewound").AsBool();
+		entry.m_AtUndo = entry.m_Rewound ? StateFrom(node.Member("atUndo")) : nullptr;
+		return entry;
+	}
+
+	static Change* RecordFrom(const Serialization::DomNode& node) {
+		Change* change = new Change();
+		change->m_Id = Core::String(node.Member("id").AsView());
+		change->m_Rev = node.Member("rev").AsInt();
+		change->m_By = Core::String(node.Member("by").AsView());
+		change->m_Label = Core::String(node.Member("label").AsView());
+		change->m_TimeMs = node.Member("time").AsInt();
+		change->m_Undone = node.Member("undone").AsBool();
+		Serialization::DomNode elements = node.Member("elements");
+		for (int64 i = 0; i < elements.Count(); ++i) change->m_Elements.Push(ElementChangeFrom(elements.At(i)));
+		if (node.Member("layersBefore").IsValid()) {
+			change->m_LayersChanged = true;
+			change->m_LayersBefore = LayersFrom(node.Member("layersBefore"));
+			change->m_LayersAfter = LayersFrom(node.Member("layersAfter"));
+		}
+		if (node.Member("titleBefore").IsValid()) {
+			change->m_TitleChanged = true;
+			change->m_TitleBefore = Core::String(node.Member("titleBefore").AsView());
+			change->m_TitleAfter = Core::String(node.Member("titleAfter").AsView());
+		}
+		return change;
+	}
+
+	bool ReadHistory(Core::StringView text, Core::StringView boardText, Board& board) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(text, doc);
+		if (read.error != nullptr || read.root.Kind() != Serialization::DomKind::Object) return false;
+		Serialization::DomNode root = read.root;
+		if (!(root.Member("format").AsView() == Core::StringView(c_HistoryFormat))) return false;
+		if (!(root.Member("board").AsView() == Digest(boardText).View())) return false;
+		Core::Array<Change*> history;
+		Serialization::DomNode changes = root.Member("changes");
+		for (int64 i = 0; i < changes.Count(); ++i) {
+			Change* change = RecordFrom(changes.At(i));
+			if (change->m_Id.IsEmpty()) continue;
+			history.Push(change);
+			if (change->m_Rev > board.m_Rev) board.m_Rev = change->m_Rev;
+		}
+		board.m_History = history;
+		const int64 next = root.Member("nextChange").AsInt();
+		if (next > board.m_NextChange) board.m_NextChange = next;
+		return true;
+	}
+}

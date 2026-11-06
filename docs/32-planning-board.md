@@ -41,7 +41,7 @@ A board is a file, `*.iedboard`, anywhere in the workspace (committed like any d
 }
 ```
 
-Images live beside their board: `design/checkout.assets/<16 hex digits of the image's SHA-256>.png`. Per-machine state - the chat a board talks to, the camera - lives in `.ied/local/boards/<hash>.json`, never in the file; the pictures the AI's tools render go to `.ied/local/boards/views/` (the newest 60 kept).
+Images live beside their board: `design/checkout.assets/<16 hex digits of the image's SHA-256>.png`. Per-machine state - the chat a board talks to, the camera - lives in `.ied/local/boards/<hash>.json`, never in the file, and the board's history beside it in `<hash>.history.json` ("Changes" below); the pictures the AI's tools render go to `.ied/local/boards/views/` (the newest 60 kept).
 
 ## Coordinates and tiles
 
@@ -94,7 +94,7 @@ A **change** is a list of operations applied at once - all of them or, when one 
 
 Only `layout` and `tidy` refit frames around their members; a member moved, placed or aligned out of its frame leaves it. A change's answer lists each op's result, where every box it touched ended up, the ids its refs got, its id, and warnings: frames and what they hold now, elements placed over others, connectors that run through a node.
 
-Every change records each element's state before and after. `undo` takes back the latest change of its author that is not undone (the owner's Ctrl+Z never undoes the AI's work), `redo` repeats it, and `board_revert` / the History panel's Revert take back any one change. Undo merges by field: it sets back only the fields the change set, so what others changed since in other fields stays; redo restores what the element was when it was undone, merged the same way. History is kept in memory while the server runs (the last 500 changes); a restart starts it empty.
+Every change records each element's state before and after. `undo` takes back the latest change of its author that is not undone (the owner's Ctrl+Z never undoes the AI's work), `redo` repeats it, and `board_revert` / the History panel's Revert take back any one change. Undo merges by field: it sets back only the fields the change set, so what others changed since in other fields stays; redo restores what the element was when it was undone, merged the same way. History keeps the last 500 changes. It survives a restart: each time the board's file is written, the history is written after it (`code/core/History.cf`: every change's element states, layers and title, which are undone, the next change's number) with the SHA-256 of the board text it goes with, and a board opened again takes it back when its file is still that text - a file changed while the server was not running (an edit, a checkout) starts its history empty, since the recorded states would no longer be what is on the board. A board read again while the server runs because its file changed on disk starts an empty history too.
 
 The client applies its own `add`, `update`, `delete` and `move` at once and keeps them pending until the server's event for them arrives (`opId`); new elements get temporary ids (`t<n>`) the event maps to the board's, and a later edit naming a temporary id waits for that mapping.
 
@@ -119,7 +119,7 @@ Topics: `ied.board/ws:<wsId>` - `{boards}`, event `boards.changed`; `ied.board/b
 
 ## The board in the UI
 
-The Boards activity has the Boards tool window (the workspace's boards, live; New board) and takes `board:<path>` documents (opened from the list, the Solution Explorer's Open Board on a `.iedboard`, or New Board). A board document:
+The Boards activity has the Boards tool window (the workspace's boards, live; New board; on a phone the Boards pane under More, so the bar keeps the Solution Explorer) and takes `board:<path>` documents: a `.iedboard` opens as a board wherever a file opens - the Boards list, the Solution Explorer, Go To All, `ied open` - through the `fileViewers` point (`docs/02`), and Open With... shows its JSON in the text editor instead; a new empty `.iedboard` (New File) opens as an empty board named after its file. A board document:
 
 - **The toolbar**: Select (V), Hand (H), Pen (P), Highlighter (I), Eraser (E; Partial cuts through strokes, Whole takes strokes and shapes; its size), Rectangle (R), Ellipse (O), Diamond (D), Line (L), Arrow (A), Connector (C), Text (T), Note (N), Frame (F); the palette (Shift+click: the fill alone) and Fill; line widths; Insert image; Undo, Redo; zoom out, zoom (click: 100%), zoom in, show everything; AI; the side panel.
 - **The canvas**: wheel pans, Ctrl+wheel and pinch zoom, space-drag, the middle or right button or the Hand pan; a dot grid. Click or box to select (Shift adds), drag to move (a frame takes its members), handles resize (an image keeps its aspect unless Shift), Delete, Ctrl+D, Ctrl+C/X/V (board elements, images, text), arrows nudge (Shift: 10), [ and ] order, Ctrl+A, Shift+1 fit, Shift+2 the selection; double click types into a node, note, frame, text or connector (Escape or Ctrl+Enter keeps it), double click an image to crop it (drag its edges; Enter keeps, Escape cancels), double click the empty board for text. A new shape opens its label at once. Images are pasted, dropped or inserted: converted to PNG in the browser (at most 4096 pixels a side), uploaded and kept beside the board.
@@ -209,8 +209,5 @@ What the runs changed, by what they hit:
 
 ## Open items
 
-- Double click on a `.iedboard` in the Solution Explorer opens its JSON; the board opens from its menu (Open Board) or the Boards list. The manifest schema's `fileViewers` point is not built in the shell.
-- History does not survive a server restart.
-- A c4-kind (script) plugin's headers beside their file are "not found" (C4 BUG-444); the board is a built-in and unaffected.
 - Other Mermaid diagram kinds (sequence, class, state) as plans; the board draws flowcharts.
 - Live cursors of other devices; links from nodes to code (`file:line`).

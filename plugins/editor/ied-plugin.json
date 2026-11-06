@@ -62,6 +62,7 @@
 		],
 		"commands": [
 			{ "id": "ied.explorer.open", "title": "Open", "category": "Solution Explorer", "icon": "$(go-to-file)" },
+			{ "id": "ied.explorer.openWith", "title": "Open With...", "category": "Solution Explorer" },
 			{ "id": "ied.explorer.refresh", "title": "Refresh", "category": "Solution Explorer", "icon": "$(refresh)" },
 			{ "id": "ied.explorer.collapseAll", "title": "Collapse All", "category": "Solution Explorer", "icon": "$(collapse-all)" },
 			{ "id": "ied.explorer.copyPath", "title": "Copy Full Path", "category": "Solution Explorer" },
@@ -237,6 +238,7 @@
 				{ "command": "ied.task.pickStartup", "group": "1_startup", "when": "explorerItemKind == 'solution'" },
 				{ "command": "ied.task.setStartup", "group": "1_startup", "when": "explorerItemKind == 'project' && explorerProjectKind != 'library' && explorerProjectKind != 'plugin'" },
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
+				{ "command": "ied.explorer.openWith", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.newFile", "group": "2_new", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.newFolder", "group": "2_new", "order": 1, "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.rename", "group": "4_edit", "when": "explorerItemKind == 'file' || explorerItemKind == 'folder'" },

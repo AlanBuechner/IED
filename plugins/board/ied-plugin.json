@@ -26,11 +26,17 @@
 		"activities": [
 			{ "id": "ied.board", "title": "Boards", "icon": "$(edit)", "order": 35, "documents": ["board", "chat"], "emptyWell": ["ied.board.new"], "newTab": "ied.board.new" }
 		],
+		// The list keeps its place in the Boards activity: on a phone it would take the Solution Explorer's slot.
 		"toolWindows": [
-			{ "id": "ied.board.list", "title": "Boards", "icon": "$(edit)", "view": "BoardList", "defaultDock": "left", "activity": "ied.board" }
+			{ "id": "ied.board.list", "title": "Boards", "icon": "$(edit)", "view": "BoardList", "defaultDock": "left", "activity": "ied.board", "phoneNav": false }
 		],
 		"fileIcons": [
 			{ "extensions": [".iedboard"], "icon": "$(edit)", "color": "--hue-violet" }
+		],
+		// A .iedboard opens as a board wherever a file opens (the Solution Explorer, Go To All, `ied open`); Open With...
+		// shows its JSON in the text editor.
+		"fileViewers": [
+			{ "id": "ied.board", "title": "Planning Board", "patterns": ["*.iedboard"], "view": "board", "priority": "default", "editable": true }
 		],
 		"commands": [
 			{ "id": "ied.board.show", "title": "Boards", "category": "View", "icon": "$(edit)" },
@@ -40,9 +46,6 @@
 		"menus": {
 			"menubar/view": [
 				{ "command": "ied.board.show", "group": "2_windows" }
-			],
-			"explorer/context": [
-				{ "command": "ied.board.open", "group": "1_open", "when": "explorerItemKind == 'file' && explorerItemExtension == '.iedboard'" }
 			]
 		},
 		"systemMessageSections": [
@@ -86,7 +89,7 @@
 			},
 			{
 				"name": "board_recognize",
-				"description": "Turns the owner's freehand sketch into clean elements. Without apply it proposes and changes nothing: each sketch group (all, or the ones `groups` names - g<n> or stroke ids) with the element that would replace it - rect, ellipse or diamond for a shape (its label: the handwriting inside), a frame for a big box drawn around other shapes (its title: the handwriting in its top band), a connector for a line or arrow between two shapes (its label: handwriting beside its middle; a free arrow when an end touches nothing), text for loose handwriting. Read the handwriting in board_view, then call again with apply: true and labels {\"g2\": \"API Gateway\"} - give a shape, frame or arrow its label under its own name or under the handwriting group it holds. Correct any guess - in the proposal too, to check it: types {\"g5\": \"frame\", \"g15\": \"cylinder\", \"g12\": \"note\", \"g21\": \"arrow\"} (rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, frame, note, text; arrow, line or connector for a stroke that is one) and ends {\"g3\": [\"g1\", \"g7\"]} (a line's from and to: groups or element ids). A label, type or end naming no group is said. Applied, the clean elements go on the layer `layer` (default \"Diagram\", made above the sketch when missing), where the sketch is (place: over) or to its right (place: beside, to compare side by side); the sketch's layer is hidden with every stroke kept (sketch: hide, the default), its recognized strokes deleted (delete) or left visible (keep). One change: board_revert takes it back. Then tidy with board_edit (tidy keeps the arrangement; layout redoes it).",
+				"description": "Turns the owner's freehand sketch into clean elements. Without apply it proposes and changes nothing: each sketch group (all, or the ones `groups` names - g<n> or stroke ids) with the element that would replace it - rect, ellipse or diamond for a shape (its label: the handwriting inside), a frame for a big box drawn around other shapes (its title: the handwriting in its top band), a connector for a line or arrow between two shapes (its label: handwriting beside its middle; a free arrow when an end touches nothing), text for loose handwriting. Read the handwriting in board_view, then call again with apply: true and labels {\"g2\": \"API Gateway\"} - give a shape, frame or arrow its label under its own name or under the handwriting group it holds. Correct any guess - in the proposal too, to check it: types {\"g5\": \"frame\", \"g15\": \"cylinder\", \"g12\": \"note\", \"g21\": \"arrow\"} (rect, round, ellipse, diamond, cylinder, hexagon, parallelogram, frame, note, text; arrow, line or connector for a stroke that is one) and ends {\"g3\": [\"g1\", \"g7\"]} (a line's from and to: groups or element ids). A label, type or end naming no group is said. Applied, the clean elements go on the layer `layer` (default \"Diagram\", made above the sketch when missing), where the sketch is (place: over) or to its right (place: beside, to compare side by side); the sketch's layer is hidden with every stroke kept (sketch: hide, the default; when that layer also holds shapes, the recognized strokes move to a hidden \"Sketch\" layer instead), its recognized strokes deleted (delete) or left visible (keep). One change: board_revert takes it back. Then tidy with board_edit (tidy keeps the arrangement; layout redoes it).",
 				"class": "write",
 				"group": "board",
 				"inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "groups": {"type": "array", "items": {"type": "string"}}, "labels": {"type": "object", "additionalProperties": {"type": "string"}}, "types": {"type": "object", "additionalProperties": {"type": "string"}}, "ends": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}, "apply": {"type": "boolean"}, "layer": {"type": "string"}, "place": {"enum": ["over", "beside"]}, "sketch": {"enum": ["hide", "delete", "keep"]}}, "required": ["board"], "additionalProperties": false},

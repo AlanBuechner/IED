@@ -40,10 +40,11 @@ namespace Ied
 
 	// --- Sources -------------------------------------------------------------------------------------------------------
 
-	// The .cf files under `path` (itself, when it is one), in name order.
+	// The .cf and .ch files under `path` (itself, when it is one), in name order: a script is every file it is made of,
+	// its headers too, or an include of one finds nothing.
 	static void CodeFiles(const FS::Path& path, Core::Array<Core::String>& into) {
 		if (FS::FileExists(path.CStr())) {
-			if (path.View().EndsWith(Core::StringView(".cf"))) into.Push(Core::String(path.View()));
+			if (path.View().EndsWith(Core::StringView(".cf")) || path.View().EndsWith(Core::StringView(".ch"))) into.Push(Core::String(path.View()));
 			return;
 		}
 		if (!FS::IsDirectory(path.CStr())) return;
@@ -504,8 +505,16 @@ namespace Ied
 			digest = BuildDigest(instance->m_Folder, instance->m_Entry.View(), instance->m_Sources);
 			instance->m_Builds += 1;
 			options.name = ScriptName(instance);
-			for (const Core::String& file : CodeFilesOf(instance)) options.AddFile(file.CStr());
-			if (options.paths.IsEmpty() && problem.IsEmpty()) problem = Core::String("its sources hold no .cf file");
+			bool compiled = false;
+			for (const Core::String& file : CodeFilesOf(instance)) {
+				options.AddFile(file.CStr());
+				if (file.View().EndsWith(Core::StringView(".cf"))) compiled = true;
+			}
+			for (const Core::String& source : instance->m_Sources) {
+				FS::Path folder = instance->m_Folder / source.View();
+				if (FS::IsDirectory(folder.CStr())) options.AddRoot(folder.CStr());
+			}
+			if (!compiled && problem.IsEmpty()) problem = Core::String("its sources hold no .cf file");
 		}
 		options.Allow(c_CodeAllowed);
 		if (!problem.IsEmpty()) {

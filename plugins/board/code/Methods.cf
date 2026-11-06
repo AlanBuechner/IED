@@ -102,10 +102,7 @@ namespace Boards
 		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
 		IED::Workspace ws;
 		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
-		Core::StringBuilder file;
-		file.Append(Core::StringView(".ied/local/boards/"));
-		file.AppendUIntBase(Core::String(open->m_Path.View()).Hash(), 16, 16);
-		file.Append(Core::StringView(".json"));
+		Core::String file = LocalFile(open->m_Path.View(), Core::StringView(".json"));
 		Core::String problem;
 		if (request.m_Params.Has("set")) {
 			Core::String text = IED::NodeJson(request.m_Params.Field("set"));
