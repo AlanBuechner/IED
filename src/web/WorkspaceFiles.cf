@@ -1,0 +1,174 @@
+include "WorkspaceFiles.ch"
+
+namespace Ied
+{
+	const int32 c_FileTypeCount = 38;
+	const char* c_PdfType = "application/pdf";
+	const char* c_BytesType = "application/octet-stream";
+	// A picture's own styles and embedded pictures still draw when an SVG is opened by itself; its scripts never run.
+	const char* c_SandboxPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src 'self'; sandbox";
+
+	static Core::String LowerCased(Core::StringView text) {
+		Core::StringBuilder lower;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			lower.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return lower.ToString();
+	}
+
+	const char* WorkspaceFileType(Core::StringView extension) {
+		const char*[c_FileTypeCount] extensions = {
+			".png", ".apng", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".avif", ".svg",
+			".mp3", ".wav", ".ogg", ".oga", ".opus", ".flac", ".m4a", ".aac", ".weba",
+			".mp4", ".m4v", ".webm", ".ogv", ".mov", ".mkv", ".avi", ".wmv",
+			".pdf", ".ttf", ".otf", ".woff", ".woff2",
+			".txt", ".md", ".json", ".csv", ".log", ".xml" };
+		const char*[c_FileTypeCount] types = {
+			"image/png", "image/apng", "image/jpeg", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/x-icon", "image/avif", "image/svg+xml",
+			"audio/mpeg", "audio/wav", "audio/ogg", "audio/ogg", "audio/ogg", "audio/flac", "audio/mp4", "audio/aac", "audio/webm",
+			"video/mp4", "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-matroska", "video/x-msvideo", "video/x-ms-wmv",
+			c_PdfType, "font/ttf", "font/otf", "font/woff", "font/woff2",
+			"text/plain; charset=utf-8", "text/plain; charset=utf-8", "text/plain; charset=utf-8", "text/plain; charset=utf-8", "text/plain; charset=utf-8", "text/plain; charset=utf-8" };
+		Core::String lowered = LowerCased(extension);
+		for (int32 i = 0; i < c_FileTypeCount; ++i)
+			if (lowered.View() == Core::StringView(extensions[i])) return types[i];
+		return c_BytesType;
+	}
+
+	static bool ParseCount(Core::StringView text, int64& value) { return !text.IsEmpty() && Core::ParseInt64(text, value) && value >= 0 && text.ByteAt(0) != '-'; }
+
+	RangeAsked ParseByteRange(Core::StringView header, int64 size, int64& first, int64& last) {
+		Core::StringView text = header.Trimmed();
+		if (!text.StartsWith(Core::StringView("bytes=")) || text.IndexOf(',', 0) >= 0) return RangeAsked::Whole;
+		Core::StringView spec = text.Substring(6, -1).Trimmed();
+		const int64 dash = spec.IndexOf('-', 0);
+		if (dash < 0) return RangeAsked::Whole;
+		Core::StringView from = spec.Substring(0, dash).Trimmed();
+		Core::StringView to = spec.Substring(dash + 1, -1).Trimmed();
+		int64 start = 0;
+		int64 end = 0;
+		if (from.IsEmpty()) {
+			int64 suffix = 0;
+			if (!ParseCount(to, suffix)) return RangeAsked::Whole;
+			if (suffix == 0 || size == 0) return RangeAsked::Unsatisfiable;
+			start = suffix >= size ? 0 : size - suffix;
+			end = size - 1;
+		}
+		else {
+			if (!ParseCount(from, start)) return RangeAsked::Whole;
+			if (to.IsEmpty()) end = size - 1;
+			else if (!ParseCount(to, end) || end < start) return RangeAsked::Whole;
+			if (start >= size) return RangeAsked::Unsatisfiable;
+			if (end >= size) end = size - 1;
+		}
+		if (end - start + 1 > c_FileRangeMostBytes) end = start + c_FileRangeMostBytes - 1;
+		first = start;
+		last = end;
+		return RangeAsked::Part;
+	}
+
+	static bool IsUnreserved(int32 c) {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~';
+	}
+
+	// RFC 6266's attachment, the name in RFC 8187's UTF-8 form: any name, quotes and non-ASCII letters included.
+	static Core::String Attachment(Core::StringView name) {
+		const char* digits = "0123456789ABCDEF";
+		Core::StringBuilder value;
+		value.Append("attachment; filename*=UTF-8''");
+		for (int64 i = 0; i < name.ByteLength(); ++i) {
+			const int32 c = name.ByteAt(i);
+			if (IsUnreserved(c)) {
+				value.AppendByte(c);
+				continue;
+			}
+			value.AppendByte('%');
+			value.AppendByte(digits[c >> 4]);
+			value.AppendByte(digits[c & 15]);
+		}
+		return value.ToString();
+	}
+
+	static Core::String EntityTag(const FS::FileInfo& info) {
+		Core::StringBuilder tag;
+		tag.AppendByte('"');
+		tag.AppendInt(info.size);
+		tag.AppendByte('-');
+		tag.AppendInt(info.modifiedNs);
+		tag.AppendByte('"');
+		return tag.ToString();
+	}
+
+	static bool ReadPart(const FS::Path& file, int64 first, int64 count, Core::Array<uint8>& bytes) {
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen() || opened.Seek(first) != first) return false;
+		bytes.ResizeUninitialized(count);
+		return count == 0 || opened.ReadAll((void*)bytes.Data(), count) == count;
+	}
+
+	static void AnswerText(Http::Response& response, int32 status, Core::StringView text) {
+		response.status = status;
+		response.SetText(Core::StringView("text/plain; charset=utf-8"), text);
+	}
+
+	static void Describe(const FS::Path& file, const char* type, Core::StringView tag, bool download, Http::Response& response) {
+		response.headers.Set(Core::StringView("Content-Type"), Core::StringView(type));
+		response.headers.Set(Core::StringView("Accept-Ranges"), Core::StringView("bytes"));
+		response.headers.Set(Core::StringView("ETag"), tag);
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-cache"));
+		response.headers.Set(Core::StringView("X-Content-Type-Options"), Core::StringView("nosniff"));
+		response.headers.Set(Core::StringView("Referrer-Policy"), Core::StringView("no-referrer"));
+		// A sandboxed PDF is refused by Chromium's viewer; a PDF's own scripts run in the viewer, never in the page.
+		if (Core::StringView(type) != Core::StringView(c_PdfType)) response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView(c_SandboxPolicy));
+		if (download || Core::StringView(type) == Core::StringView(c_BytesType)) response.headers.Set(Core::StringView("Content-Disposition"), Attachment(file.FileName()).View());
+	}
+
+	static Core::String ContentRange(int64 first, int64 last, int64 size) {
+		Core::StringBuilder range;
+		range.Append("bytes ");
+		if (first < 0) range.AppendByte('*');
+		else {
+			range.AppendInt(first);
+			range.AppendByte('-');
+			range.AppendInt(last);
+		}
+		range.AppendByte('/');
+		range.AppendInt(size);
+		return range.ToString();
+	}
+
+	void ServeWorkspaceFile(const FS::Path& file, const Http::Request& request, bool download, Http::Response& response) {
+		FS::FileInfo info;
+		if (!FS::GetInfo(file.CStr(), info) || info.kind != FS::EntryKind::File) {
+			AnswerText(response, 404, Core::StringView("not found"));
+			return;
+		}
+		Core::String tag = EntityTag(info);
+		const Core::String* ifNoneMatch = request.headers.Find(Core::StringView("If-None-Match"));
+		const Core::String* ifRange = request.headers.Find(Core::StringView("If-Range"));
+		const Core::String* rangeHeader = request.headers.Find(Core::StringView("Range"));
+		int64 first = 0;
+		int64 last = info.size - 1;
+		RangeAsked asked = rangeHeader && (!ifRange || ifRange->View() == tag.View()) ? ParseByteRange(rangeHeader->View(), info.size, first, last) : RangeAsked::Whole;
+		const bool unchanged = asked == RangeAsked::Whole && ifNoneMatch && ifNoneMatch->View() == tag.View();
+		if (asked == RangeAsked::Whole && !unchanged && info.size > c_FileWholeMostBytes) {
+			AnswerText(response, 413, Core::StringView("the file is larger than 256 MiB: ask for it a range at a time (Range: bytes=...)"));
+			return;
+		}
+		if (asked != RangeAsked::Unsatisfiable && !unchanged && !ReadPart(file, first, last - first + 1, response.body)) {
+			AnswerText(response, 500, Core::StringView("the file could not be read"));
+			return;
+		}
+		Describe(file, WorkspaceFileType(file.Extension()), tag.View(), download, response);
+		if (unchanged) response.status = 304;
+		else if (asked == RangeAsked::Unsatisfiable) {
+			response.status = 416;
+			response.headers.Set(Core::StringView("Content-Range"), ContentRange(-1, -1, info.size).View());
+		}
+		else if (asked == RangeAsked::Part) {
+			response.status = 206;
+			response.headers.Set(Core::StringView("Content-Range"), ContentRange(first, last, info.size).View());
+		}
+	}
+}

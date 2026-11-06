@@ -1183,6 +1183,49 @@ def markdown_image_opens_in_the_viewer(run):
 	run.request("fs.delete", {"wsId": ws, "path": path})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def files_open_in_their_viewers(run):
+	"""Files that are not text open in their viewers (docs/33): a TGA in the image viewer, its size and format in the
+	toolbar and the texel under a tap in the status line; a binary the text editor is asked for offers the hex view in
+	its place, which shows its bytes (the server's byte ranges, docs/10)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	picture = "art/tiny-%s.tga" % run.viewport
+	blob = "data/blob-%s.xyz" % run.viewport
+	# A 2 x 2 top-down 24-bit TGA whose bytes are all ASCII, so fs.write's text carries them as they are.
+	tga = [0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 24, 32, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
+	run.request("fs.write", {"wsId": ws, "path": picture, "text": "".join(chr(b) for b in tga)})
+	run.request("fs.write", {"wsId": ws, "path": blob, "text": "head\u0000tail"})
+	page.wait_for_function("ied_shell.views.kinds.has('image') && ied_shell.views.kinds.has('hex')", timeout=20000)
+	check(page.evaluate("(p) => ied_shell.fileRef(p)", picture) == "image:" + picture, "a TGA opens in the image viewer")
+	page.evaluate("(p) => ied_shell.openTab(ied_shell.fileRef(p), { preview: false })", picture)
+	view = "div.view[data-ref='image:%s']" % picture
+	page.wait_for_function("(v) => (document.querySelector(v + ' .ft-info') || {}).textContent === '2 x 2TGA 24-bit30 B'", arg=view, timeout=20000)
+	stage = page.query_selector(view + " .ft-stage")
+	stage.focus()
+	page.keyboard.press("+", delay=10)
+	for _ in range(9):
+		page.keyboard.press("+")
+	page.wait_for_function("(v) => document.querySelector(v + ' .ft-zoom').textContent === '3200%'", arg=view, timeout=5000)
+	box = stage.bounding_box()
+	page.mouse.click(box["x"] + box["width"] / 2 + 16, box["y"] + box["height"] / 2 + 16)
+	page.wait_for_function("(v) => document.querySelector(v + ' .ft-readout').textContent.startsWith('X 1  Y 1   R 120  G 110  B 100')", arg=view, timeout=5000)
+	run.shot("image")
+	page.evaluate("(p) => ied_shell.openTab(ied_shell.fileRef(p), { preview: false })", blob)
+	page.wait_for_selector("div.view[data-ref='doc:%s'] .ed-binary" % blob, timeout=20000)
+	run.shot("binary")
+	page.click("div.view[data-ref='doc:%s'] .ed-binary button:has-text('Open in Hex Viewer')" % blob)
+	row = "div.view[data-ref='hex:%s'] .ft-hex-row .ft-hx" % blob
+	page.wait_for_selector(row, timeout=20000)
+	check("".join(run.texts(row)[:2]).replace(" ", "").startswith("68656164007461696C"), "the hex view shows the file's bytes: %r" % run.texts(row)[:2])
+	check(not page.query_selector("div.view[data-ref='doc:%s']" % blob), "the text editor's tab gave way to the hex view")
+	run.shot("hex")
+	for ref in ("image:" + picture, "hex:" + blob):
+		page.evaluate("(r) => ied_shell.closeTab(r)", ref)
+	for path in (picture, blob):
+		run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 @scenario(viewports=("desktop",))
 def launched_markdown_opens_with_its_preview(run):
 	"""A launch URL's #open= (what `ied open notes.md` gives, docs/10): the file opens at its place with its preview

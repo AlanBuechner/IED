@@ -13,6 +13,34 @@ namespace Ied
 		throw RpcError(ErrorCode::Conflict, message, data.View());
 	}
 
+	// A NUL among a file's first bytes marks it binary, as for search (fs/Search.ch) and git.
+	static bool HoldsNul(Core::StringView text) {
+		const int64 count = text.ByteLength() < c_SearchBinaryProbeBytes ? text.ByteLength() : c_SearchBinaryProbeBytes;
+		for (int64 i = 0; i < count; ++i)
+			if (text.ByteAt(i) == 0) return true;
+		return false;
+	}
+
+	static bool IsBinaryFile(const FS::Path& file) {
+		FS::File opened = FS::File(file.CStr(), "rb");
+		if (!opened.IsOpen()) return false;
+		char[c_SearchBinaryProbeBytes] probe;
+		const int64 got = opened.Read((void*)&probe[0], c_SearchBinaryProbeBytes);
+		return got > 0 && HoldsNul(Core::StringView(&probe[0], got));
+	}
+
+	// doc.open of a binary file without `binary: true`: the client shows it in a viewer, or asks again to see its text.
+	static void RefuseBinary(const FS::Path& file) {
+		FS::FileInfo info;
+		FS::GetInfo(file.CStr(), info);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("reason", "binary");
+		data.IntField("size", info.size);
+		data.EndObject();
+		throw RpcError(ErrorCode::BadRequest, "the file is binary: open it in a viewer, or with binary: true as read-only text", data.View());
+	}
+
 	Core::Array<Change> ChangesParam(const Params& params) {
 		Core::Array<Change> changes;
 		Core::String error;
@@ -59,6 +87,7 @@ namespace Ied
 		json.BoolField("dirty", doc->m_Dirty);
 		json.BoolField("readOnly", doc->IsReadOnly());
 		if (!doc->m_ReadOnlyReason.IsEmpty()) json.Field("readOnlyReason", doc->m_ReadOnlyReason.View());
+		else if (doc->m_Binary) json.Field("readOnlyReason", "a binary file: its text is only shown");
 		json.Field("languageId", m_Server->m_Plugins->LanguageOf(doc->m_Ws, doc->m_Path.View()).View());
 		json.EndObject();
 		return json.ToString();
@@ -96,6 +125,7 @@ namespace Ied
 		doc->m_Path = Core::String(path);
 		doc->m_External = external;
 		if (!external) doc->m_ReadOnlyReason = m_Server->m_Workspaces->ReadOnlyReason(ws, path);
+		doc->m_Binary = HoldsNul(text.View());
 		doc->m_Text = take(text);
 		doc->m_Saved = doc->m_Text;
 		doc->m_Opened = doc->m_Text;
@@ -245,7 +275,14 @@ namespace Ied
 
 	Core::String Documents::OpenMethod(Call& call, const Params& params) {
 		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
-		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, NormalizePath(params.Str("path").View()).View());
+		const bool binary = params.Bool("binary", false);
+		Core::String path;
+		if (!params.Has("uri")) {
+			path = NormalizePath(params.Str("path").View());
+			Document* known = Find(ws, path.View());
+			if (!binary && (known ? known->m_Binary : IsBinaryFile(ws->At(path.View())))) RefuseBinary(ws->At(path.View()));
+		}
+		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, path.View());
 		if (doc->m_Holder.IsEmpty() && !doc->IsReadOnly()) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
@@ -257,6 +294,7 @@ namespace Ied
 		else json.String(doc->m_Holder.View());
 		json.BoolField("readOnly", doc->IsReadOnly());
 		if (!doc->m_ReadOnlyReason.IsEmpty()) json.Field("readOnlyReason", doc->m_ReadOnlyReason.View());
+		else if (doc->m_Binary) json.Field("readOnlyReason", "a binary file: its text is only shown");
 		json.EndObject();
 		return json.ToString();
 	}
@@ -268,7 +306,8 @@ namespace Ied
 		data.BeginObject();
 		data.Field("reason", "read_only");
 		data.EndObject();
-		Core::String message = doc->m_External ? Core::String("the file is outside the workspace and read-only") : Core::String("read-only: ") + doc->m_ReadOnlyReason.View();
+		Core::String message = doc->m_External ? Core::String("the file is outside the workspace and read-only")
+			: doc->m_ReadOnlyReason.IsEmpty() ? Core::String("the file is binary: its text is only shown") : Core::String("read-only: ") + doc->m_ReadOnlyReason.View();
 		throw RpcError(ErrorCode::Forbidden, message.View(), data.View());
 	}
 

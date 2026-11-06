@@ -1,4 +1,5 @@
 include "Front.ch"
+include "WorkspaceFiles.ch"
 include "host/Server.ch"
 
 namespace Ied
@@ -117,10 +118,11 @@ namespace Ied
 	}
 
 	// Text the client accepts gzipped goes gzipped (the web client's scripts, Monaco's above all, on a phone's first load);
-	// the fastest level, since most bodies are read from disk for each request.
+	// the fastest level, since most bodies are read from disk for each request. A byte range goes as it is: its
+	// Content-Range counts the file's bytes, not the coded ones.
 	void Front::Handle(const Http::Request& request, Http::Response& response) {
 		Respond(request, response);
-		Http::CompressResponse(request, response, Compression::kFastestLevel);
+		if (response.status != 206) Http::CompressResponse(request, response, Compression::kFastestLevel);
 	}
 
 	// A workspace server's: the secret the master gave it (the header, or on a WebSocket upgrade the query) - anything
@@ -152,7 +154,7 @@ namespace Ied
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
 		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, rest)) PluginFile(wsId, rest, response);
-		else if (WorkspacePath(path, Core::StringView("files"), wsId, rest)) WorkspaceImage(wsId, rest, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, rest)) WorkspaceFile(wsId, rest, request, response);
 		else Answer(response, 404, Core::StringView("not found"));
 	}
 
@@ -190,13 +192,6 @@ namespace Ied
 		return true;
 	}
 
-	// The image types a workspace file is served as: none that is markup, so nothing a repository holds runs script here.
-	static bool IsServedImage(Core::StringView extension) {
-		Core::String lowered = Lowered(extension);
-		Core::StringView e = lowered.View();
-		return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".gif" || e == ".webp" || e == ".bmp" || e == ".ico";
-	}
-
 	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
 		Core::StringView wsId;
 		Core::StringView pluginPath;
@@ -211,7 +206,7 @@ namespace Ied
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
 		else if (path.StartsWith(Core::StringView("/plugins/"))) PluginFile(Core::StringView(), path.Substring(9, path.ByteLength()), response);
 		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
-		else if (WorkspacePath(path, Core::StringView("files"), wsId, pluginPath)) WorkspaceImage(wsId, pluginPath, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, pluginPath)) WorkspaceFile(wsId, pluginPath, request, response);
 		else if (path.StartsWith(Core::StringView("/ui-kit/"))) FolderFile(FS::Path(m_Server->m_Config.m_HomeDir.View()) / "shared" / "ui-kit", path.Substring(7, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/codicons/"))) Codicon(path.Substring(10, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/vendor/"))) VendorFile(path.Substring(7, path.ByteLength()), response);
@@ -321,7 +316,7 @@ namespace Ied
 		else SendFile(file, response);
 	}
 
-	void Front::WorkspaceImage(Core::StringView wsId, Core::StringView path, Http::Response& response) {
+	void Front::WorkspaceFile(Core::StringView wsId, Core::StringView path, const Http::Request& request, Http::Response& response) {
 		Core::String decoded;
 		Core::String relative;
 		if (!PercentDecode(path, decoded)) {
@@ -341,13 +336,8 @@ namespace Ied
 			Workspace* ws = m_Server->m_Workspaces->Find(wsId);
 			if (ws && !relative.IsEmpty()) file = ws->At(relative.View());
 		}
-		if (file.IsEmpty() || !IsServedImage(Core::StringView(file.Extension())) || !FS::FileExists(file.CStr())) {
-			Answer(response, 404, Core::StringView("not found"));
-			return;
-		}
-		SendFile(file, response);
-		response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView("default-src 'none'; sandbox"));
-		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-cache"));
+		if (file.IsEmpty()) Answer(response, 404, Core::StringView("not found"));
+		else ServeWorkspaceFile(file, request, QueryValue(request.query.View(), Core::StringView("download")) == "1", response);
 	}
 
 	// /codicons/<name>.svg: one codicon from the install's third_party/codicons.

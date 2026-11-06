@@ -41,9 +41,12 @@ export class DocumentSync {
 
 	// Opens the document and follows it; resolves with the first snapshot applied, or null when disposed before the
 	// document opened (its view closed: nothing follows it then). A `file:` URI is a file outside the workspace a language
-	// server named: shown read-only (docs/10).
-	async open(wsId, path) {
-		const opened = await this.client.request("doc.open", /^file:\/\//i.test(path) ? { wsId, uri: path } : { wsId, path });
+	// server named: shown read-only (docs/10). A binary file is refused (an RpcError whose data.reason is "binary") unless
+	// `options.binary`: then its text is shown read-only.
+	async open(wsId, path, options) {
+		const params = /^file:\/\//i.test(path) ? { wsId, uri: path } : { wsId, path };
+		if (options && options.binary) params.binary = true;
+		const opened = await this.client.request("doc.open", params);
 		if (this.disposed) return null;
 		this.docId = opened.docId;
 		this.awaitingSnapshot = true;

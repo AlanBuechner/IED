@@ -311,7 +311,8 @@ function openWith(ied, path) {
 	if (!path) return;
 	const viewers = ied.files.viewers(path);
 	const usual = ied.files.refFor(path);
-	const choices = [{ label: "Text Editor", view: "doc" }].concat(viewers.slice().reverse().map((v) => ({ label: v.title, view: v.view })));
+	const views = new Set(["doc"]);
+	const choices = [{ label: "Text Editor", view: "doc" }].concat(viewers.slice().reverse().filter((v) => !views.has(v.view) && views.add(v.view)).map((v) => ({ label: v.title, view: v.view })));
 	for (const choice of choices) choice.detail = choice.view + ":" + path === usual ? "the default" : "";
 	showPicker({
 		placeholder: "Open " + fileName(path) + " with",

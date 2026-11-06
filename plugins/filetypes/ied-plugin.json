@@ -1,26 +1,57 @@
-// File types that are not languages (docs/26 "Language plugins"): plain text and logs, and the icons of pictures, sound,
-// video, fonts, archives, binaries and licenses.
+// File types that are not languages (docs/26 "Language plugins", docs/33): plain text and logs, the icons of pictures,
+// sound, video, fonts, archives, binaries and licenses, and the viewers that open them wherever a file opens (the
+// shell's fileViewers, docs/02) - pictures (and game textures: DDS, TGA, Radiance HDR) with zoom, channels and the
+// pixel under the pointer, sound and video, PDFs, fonts, and every other binary as hex. A file the text editor is
+// asked to show that holds binary bytes offers the hex view instead (the editor's doc.open, docs/10).
 {
 	"manifestVersion": 1,
 	"id": "ied.filetypes",
 	"name": "File Types",
-	"version": "0.1.0",
-	"description": "Plain text, and the icons of media, archives, binaries and licenses.",
+	"version": "0.2.0",
+	"description": "Plain text, the icons of media, archives and binaries, and viewers for pictures, textures, sound, video, PDFs, fonts and hex.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "declarative" },
+	"runtime": { "kind": "declarative", "ui": "ui/index.js" },
 	"contributes": {
 		"languages": [
 			{ "id": "plaintext", "aliases": ["Plain Text"], "extensions": [".txt", ".log"], "fileNames": [".gitignore", ".gitattributes", "LICENSE"], "fences": ["text", "txt", "plaintext"] }
 		],
 		"fileIcons": [
-			{ "extensions": [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".dds", ".ico", ".webp", ".svg", ".psd", ".exr", ".hdr"], "icon": "$(file-media)", "color": "--hue-teal" },
-			{ "extensions": [".wav", ".mp3", ".ogg", ".flac"], "icon": "$(unmute)", "color": "--hue-teal" },
-			{ "extensions": [".mp4", ".webm", ".mov"], "icon": "$(device-camera-video)", "color": "--hue-teal" },
-			{ "extensions": [".ttf", ".otf", ".woff", ".woff2"], "icon": "$(text-size)", "color": "--hue-gray" },
+			{ "extensions": [".png", ".apng", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".dds", ".ico", ".webp", ".avif", ".svg", ".psd", ".exr", ".hdr"], "icon": "$(file-media)", "color": "--hue-teal" },
+			{ "extensions": [".wav", ".mp3", ".ogg", ".oga", ".opus", ".flac", ".m4a", ".aac", ".weba"], "icon": "$(unmute)", "color": "--hue-teal" },
+			{ "extensions": [".mp4", ".m4v", ".webm", ".ogv", ".mov", ".mkv", ".avi", ".wmv"], "icon": "$(device-camera-video)", "color": "--hue-teal" },
+			{ "extensions": [".pdf"], "icon": "$(file-pdf)", "color": "--hue-red" },
+			{ "extensions": [".ttf", ".ttc", ".otf", ".woff", ".woff2"], "icon": "$(text-size)", "color": "--hue-gray" },
 			{ "extensions": [".zip", ".7z", ".tar", ".gz", ".rar"], "icon": "$(file-zip)", "color": "--hue-amber" },
-			{ "extensions": [".exe", ".dll", ".lib", ".a", ".so", ".obj", ".o", ".pdb"], "icon": "$(file-binary)", "color": "--hue-gray" },
+			{ "extensions": [".exe", ".dll", ".lib", ".a", ".so", ".dylib", ".obj", ".o", ".pdb", ".bin", ".dat", ".wasm", ".class", ".pyc"], "icon": "$(file-binary)", "color": "--hue-gray" },
 			{ "fileNames": ["LICENSE", "LICENSE.txt", "LICENSE.md"], "icon": "$(law)", "color": "--hue-amber" }
-		]
+		],
+		// The default viewer of each type; Open With... also offers the text editor and the hex view of any file. An SVG
+		// is text first (as in Visual Studio), its picture beside it on the tab strip's button.
+		"fileViewers": [
+			{ "id": "ied.filetypes.image", "title": "Image Viewer", "patterns": ["*.png", "*.apng", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.avif", "*.tga", "*.dds", "*.hdr"], "view": "image", "priority": "default" },
+			{ "id": "ied.filetypes.svg", "title": "Image Viewer", "patterns": ["*.svg"], "view": "image", "priority": "option" },
+			{ "id": "ied.filetypes.media", "title": "Media Player", "patterns": ["*.mp3", "*.wav", "*.ogg", "*.oga", "*.opus", "*.flac", "*.m4a", "*.aac", "*.weba", "*.mp4", "*.m4v", "*.webm", "*.ogv", "*.mov", "*.mkv", "*.avi", "*.wmv"], "view": "media", "priority": "default" },
+			{ "id": "ied.filetypes.pdf", "title": "PDF Viewer", "patterns": ["*.pdf"], "view": "pdf", "priority": "default" },
+			{ "id": "ied.filetypes.font", "title": "Font Viewer", "patterns": ["*.ttf", "*.ttc", "*.otf", "*.woff", "*.woff2"], "view": "font", "priority": "default" },
+			{ "id": "ied.filetypes.binary", "title": "Hex Viewer", "patterns": ["*.exe", "*.dll", "*.lib", "*.a", "*.so", "*.dylib", "*.obj", "*.o", "*.pdb", "*.bin", "*.dat", "*.wasm", "*.class", "*.pyc", "*.zip", "*.7z", "*.tar", "*.gz", "*.rar", "*.psd", "*.exr"], "view": "hex", "priority": "default" },
+			{ "id": "ied.filetypes.hex", "title": "Hex Viewer", "patterns": ["*"], "view": "hex", "priority": "option" }
+		],
+		"commands": [
+			{ "id": "ied.filetypes.previewBeside", "title": "Open Preview to the Side", "category": "Image", "icon": "$(open-preview)" },
+			{ "id": "ied.filetypes.openHex", "title": "Open in Hex Viewer", "category": "File", "icon": "$(file-binary)" },
+			{ "id": "ied.filetypes.download", "title": "Download", "category": "File", "icon": "$(cloud-download)" }
+		],
+		"menus": {
+			"tab/title": [
+				{ "command": "ied.filetypes.previewBeside", "group": "1_preview", "when": "tabKind == 'doc' && resourceExtname == '.svg'" }
+			],
+			"tabs/new": [
+				{ "command": "ied.filetypes.previewBeside", "group": "2_view", "when": "tabKind == 'doc' && resourceExtname == '.svg'" }
+			],
+			"explorer/context": [
+				{ "command": "ied.filetypes.download", "group": "5_copy", "order": 9, "when": "explorerItemKind == 'file'" }
+			]
+		}
 	}
 }

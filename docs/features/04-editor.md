@@ -112,10 +112,10 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | F-EDT-92 | Interactive markdown: clicking a checkbox (list or table cell) edits the source via the document store (undoable); links open in the editor or browser pane | P1 | US-EDT-9 | plugins/editor |
 | F-EDT-93 | ~~Browser pane: iframe for same-origin/proxied content (F-SRV-50)~~ superseded by F-EDT-94 for every page (owner, 2026-10-21; `docs/27`): URL bar, reload, viewport presets, console | P1 | US-EDT-10 | plugins/browser |
 | F-EDT-94 | Browser tab: server-side headless Edge via CDP, frames pulled into the tab and input forwarded, for every site and every client (phones too); shared with the AI browser tools, whose actions are drawn over the page (built 2026-10-21, `docs/27`) | P1 | US-EDT-10, US-TOOL-5 | plugins/browser |
-| F-EDT-95 | Image viewer (zoom, pixel grid, alpha checkerboard, info: size/format), video and audio players | P1 | US-EDT-11 | plugins/editor |
-| F-EDT-96 | Hex viewer for binary files; "open with..." chooser listing all viewers that accept the file | P1 | US-EDT-11 | plugins/editor |
+| F-EDT-95 | Image viewer (zoom, pixel grid, alpha checkerboard, info: size/format), video and audio players. **Built 2026-11-06** (`docs/33`): also channels, the texel under the pointer, game textures (DDS BC1-BC7 with mips, faces and slices; TGA; Radiance HDR with exposure), a sound's waveform, PDF and font viewers | P1 | US-EDT-11 | plugins/filetypes |
+| F-EDT-96 | Hex viewer for binary files; "open with..." chooser listing all viewers that accept the file. **Built 2026-11-06** (`docs/33`): read-only, ranges fetched as rows come into sight (files of gigabytes), data inspector, Go To; a binary the text editor is asked for offers its viewers | P1 | US-EDT-11 | plugins/filetypes, plugins/editor |
 | F-EDT-97 | Custom editors/viewers contributed by plugins for file patterns (profiler traces, `.c4scene`, etc.) (gen) | P1 | US-EDT-11 | plugins/editor |
-| F-EDT-98 | SVG preview (source + rendered), JSON/YAML tree view toggle | P2 | US-EDT-11 | plugins/editor |
+| F-EDT-98 | SVG preview (source + rendered), JSON/YAML tree view toggle. SVG preview **built 2026-11-06** (`docs/33`: to the side, following the text as it is typed); the tree view not yet | P2 | US-EDT-11 | plugins/filetypes |
 
 ## Inline AI
 

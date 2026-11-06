@@ -35,8 +35,9 @@ namespace Ied
 		private void StaticFile(Core::StringView path, Http::Response& response);
 		private void FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response);
 		private void PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response);
-		// "/w/<wsId>/files/<path>": a workspace's image for a preview (docs/10); 404 for any other type.
-		private void WorkspaceImage(Core::StringView wsId, Core::StringView path, Http::Response& response);
+		// "/w/<wsId>/files/<path>[?download=1]": a workspace's file for its viewer, a byte range of it, or to save
+		// (docs/10, WorkspaceFiles.ch).
+		private void WorkspaceFile(Core::StringView wsId, Core::StringView path, const Http::Request& request, Http::Response& response);
 		private void Codicon(Core::StringView file, Http::Response& response);
 		private void VendorFile(Core::StringView path, Http::Response& response);
 		private void SendFile(const FS::Path& file, Http::Response& response);

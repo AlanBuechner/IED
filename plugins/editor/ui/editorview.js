@@ -57,7 +57,36 @@ export class CodeEditor {
 		});
 		this.sync = new DocumentSync(this.ied.client, this.target(), { onState: (state) => this.stateChanged(state) });
 		editors.add(this);
-		this.sync.open(ctx.wsId, path).catch((e) => this.problem(e.code === "not_found" ? "There is no file " + path + "." : "The document could not be opened: " + e.message));
+		this.sync.open(ctx.wsId, path).catch((e) => this.openFailed(e));
+	}
+
+	openFailed(e) {
+		if (e.data && e.data.reason === "binary") return this.binary(e.data.size);
+		return this.problem(e.code === "not_found" ? "There is no file " + this.path + "." : "The document could not be opened: " + e.message);
+	}
+
+	// A binary file is not loaded as text (docs/10 "doc.open"): the viewers plugins have for it are offered in its place
+	// (the hex view of any file), or its text read-only.
+	binary(size) {
+		const views = new Set(["doc"]);
+		const viewers = this.ied.files.viewers(this.path).reverse().filter((v) => !views.has(v.view) && views.add(v.view));
+		const openIn = (view) => {
+			this.ied.files.open(this.path, { preview: false, view });
+			this.ctx.tab.close();
+		};
+		const overlay = h("div.ed-binary", { role: "status" },
+			h("div", null, (isFileUri(this.path) ? displayPath(this.path) : this.path) + " is a binary file" + (size >= 0 ? " (" + sizeText(size) + ")" : "") + "; the text editor shows text."),
+			h("div.ed-binary-buttons", null,
+				viewers.map((v, i) => h("button.btn" + (i === 0 ? ".primary" : ""), { on: { click: () => openIn(v.view) } }, "Open in " + v.title)),
+				h("button.btn", {
+					on: {
+						click: () => {
+							overlay.remove();
+							this.sync.open(this.ctx.wsId, this.path, { binary: true }).catch((err) => this.openFailed(err));
+						},
+					},
+				}, "Show Its Text, Read-only")));
+		this.host.append(overlay);
 	}
 
 	dispose() {
@@ -310,6 +339,12 @@ function toRange(monaco, range) {
 
 function fromRange(range) {
 	return { start: { line: range.startLineNumber - 1, col: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, col: range.endColumn - 1 } };
+}
+
+function sizeText(bytes) {
+	if (bytes < 1024) return bytes + " bytes";
+	const mb = bytes / (1024 * 1024);
+	return mb < 1 ? Math.round(bytes / 1024) + " KB" : (mb < 100 ? mb.toFixed(1) : Math.round(mb)) + " MB";
 }
 
 // The theme's code font and whether the page is a phone's (the settings' defaults in editorsettings.js).

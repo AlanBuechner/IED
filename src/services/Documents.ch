@@ -30,11 +30,12 @@ namespace Ied
 		public Core::String m_Opened;   // the text when the server opened it: the track-changes margin's baseline
 		public bool m_External;         // a file outside the workspace, read-only; `path` is its file: URI (docs/10)
 		public Core::String m_ReadOnlyReason;   // why a file of a read-only folder is read-only (ReadOnly.ch); empty for none
+		public bool m_Binary;           // a NUL among its first bytes: only shown, as text never round-trips its bytes
 		public Core::String m_LanguageId;   // the language its clients were last told
 		public Core::Queue<VersionChanges*> m_History;
 
 		public Core::String Topic() const { return Core::String("doc:") + m_DocId.View(); }
-		public bool IsReadOnly() const { return m_External || !m_ReadOnlyReason.IsEmpty(); }
+		public bool IsReadOnly() const { return m_External || m_Binary || !m_ReadOnlyReason.IsEmpty(); }
 	}
 
 	class Documents
