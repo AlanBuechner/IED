@@ -196,11 +196,16 @@ export class BoardInput {
 		this.finish(a, this.point(e), e);
 	}
 
+	// The wheel zooms about the pointer (owner, 2026-11-10: "scroll should zoom in and out"), a touchpad's pinch
+	// (Ctrl+wheel to the browser) faster per pixel; Shift+wheel, a sideways wheel or swipe pans sideways.
 	wheel(e) {
 		e.preventDefault();
+		const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+		const dx = e.deltaX * unit, dy = e.deltaY * unit;
+		if (e.shiftKey) return this.canvas.pan(-(dx || dy), 0);
+		if (Math.abs(dx) > Math.abs(dy)) return this.canvas.pan(-dx, 0);
 		const p = this.point(e);
-		if (e.ctrlKey || e.metaKey) this.canvas.zoomAt(p.sx, p.sy, Math.exp(-e.deltaY * 0.0025));
-		else this.canvas.pan(-(e.shiftKey ? e.deltaY : e.deltaX), -(e.shiftKey ? 0 : e.deltaY));
+		this.canvas.zoomAt(p.sx, p.sy, Math.pow(2, -dy / (e.ctrlKey || e.metaKey ? 100 : 300)));
 	}
 
 	cancel() {

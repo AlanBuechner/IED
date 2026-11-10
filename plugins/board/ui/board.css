@@ -18,7 +18,7 @@
 
 .board-main { display: flex; flex: 1; min-height: 0; position: relative; }
 .board-stage { flex: 1; min-width: 0; position: relative; overflow: hidden; touch-action: none; }
-.board-canvas { display: block; outline: none; cursor: default; }
+.board-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: default; }
 .board-stage[data-tool="hand"] .board-canvas { cursor: grab; }
 .board-stage[data-tool="pen"] .board-canvas, .board-stage[data-tool="highlighter"] .board-canvas { cursor: crosshair; }
 .board-stage[data-tool="eraser"] .board-canvas { cursor: none; }
