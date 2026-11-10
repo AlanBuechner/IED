@@ -16,7 +16,6 @@ include "context/ContextMeter.ch"
 
 namespace Ai
 {
-	const int64 c_ChatSnapshotTurns = 20;
 	const char* c_NewChatTitle = "New chat";
 	// What a call a restart interrupted gets as its result (ChatStore.ch LoadChats).
 	const char* c_InterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
@@ -169,7 +168,7 @@ namespace Ai
 		private void ClaudeKeeper();
 		// Stops the Claude sessions no turn used for kClaudeIdleMs; the lock is held.
 		private void StopIdleSessions();
-		// Offloads the chats no client watched and no turn used for ai.chats.offloadAfterMinutes; the lock is held.
+		// Offloads the chats no turn used for ai.chats.offloadAfterMinutes, and lets go of turns pages read; the lock is held.
 		private void OffloadIdle();
 		private void Offload(Chat* chat, const IED::Workspace& ws);
 		// The thread that offloads idle chats every kOffloadTickNs.

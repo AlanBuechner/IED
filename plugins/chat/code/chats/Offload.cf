@@ -1,15 +1,18 @@
-// Offloading idle chats (docs/04 "Offloading idle chats"): a chat no client watches - no tab has its chat:<chatId> topic
-// open - and no turn runs lets its turns go once ai.chats.offloadAfterMinutes (10 by default) pass, with the events its
-// topic kept for replay; only its header stays in memory. Whatever reads or changes its turns - a client opening it,
-// chat.history, a turn starting, chat_read - calls Chats::Loaded first, which reads them back from disk.
+// Offloading idle chats (docs/04 "What stays in memory"): a chat no turn runs in lets its turns go once
+// ai.chats.offloadAfterMinutes (10 by default) pass since a turn ran or something read them, with the events its topic
+// kept for replay; only its header stays in memory. A tab showing it does not keep it: clients get its turns a page at
+// a time from disk (Pages.ch). Whatever needs its turns in memory - a turn starting, a revert, Claude's count -
+// calls Chats::Loaded first, which reads them back.
 
 include "api/Plugin.ch"
 include "ChatService.ch"
+include "Pages.ch"
 
 namespace Ai
 {
 	const double c_OffloadAfterMinutesDefault = 10.0;
 	const int64 c_OffloadTickNs = 15000000000;   // how often the keeper looks
+	const int64 c_ForgetNowMs = 9223372036854775807;   // a time past any page's: ForgetPageTurn lets it go now
 
 	// ai.chats.offloadAfterMinutes of the workspace in ms; 0: chats stay loaded.
 	static int64 OffloadAfterMs(IED::PluginContext* context, Core::StringView wsId) {
@@ -39,6 +42,7 @@ namespace Ai
 	void Chats::Offload(Chat* chat, const IED::Workspace& ws) {
 		const int64 turns = chat->m_Turns.Count();
 		OffloadTurns(chat);
+		ForgetPageTurn(chat, c_ForgetNowMs);
 		SaveChatHeader(LocalStateOf(ws), chat);
 		m_Context->DropReplay(chat->Topic().View());
 		Core::StringBuilder line;
@@ -47,15 +51,16 @@ namespace Ai
 		line.Append(" offloaded: ");
 		line.AppendInt(turns);
 		line.Append(turns == 1 ? " turn" : " turns");
-		line.Append(" left on disk, nobody watched it");
+		line.Append(" left on disk");
 		m_Context->Log(line.View());
 	}
 
 	void Chats::OffloadIdle() {
 		const int64 now = ChatNowMs();
 		for (Chat* chat : m_Chats) {
+			ForgetPageTurn(chat, now);
 			if (chat->m_Offloaded) continue;
-			if (chat->m_UsedMs == 0 || chat->m_Run || m_Context->Watched(chat->Topic().View())) {
+			if (chat->m_UsedMs == 0 || chat->m_Run) {
 				chat->m_UsedMs = now;
 				continue;
 			}

@@ -299,7 +299,17 @@ namespace Ai
 
 	Core::String Chat::LastAnswerLine() const {
 		if (m_Offloaded) return m_OffloadedAnswer;
-		return Current() ? FirstLineOf(Current()->Answer().View()) : Core::String();
+		return Current() ? Current()->AnswerLine() : Core::String();
+	}
+
+	Core::String Turn::AnswerLine() const { return m_Shed ? m_AnswerLine : FirstLineOf(Answer().View()); }
+
+	void Turn::Shed() {
+		if (m_Shed) return;
+		m_AnswerLine = FirstLineOf(Answer().View());
+		m_ShedSegments = m_Segments.Count();
+		m_Segments = Core::Array<Segment*>();
+		m_Shed = true;
 	}
 
 	void Turn::WriteUser(IED::JsonWriter& json) const {
@@ -325,42 +335,67 @@ namespace Ai
 		json.EndObject();
 	}
 
+	// A turn's members before its segments.
+	static void WriteHead(const Turn* turn, IED::JsonWriter& json) {
+		json.Field("turnId", turn->m_TurnId.View());
+		json.Key(Core::StringView("user"));
+		turn->WriteUser(json);
+		if (turn->m_Hops > 0) json.IntField("hops", turn->m_Hops);
+		json.Field("mode", ChatModeName(turn->m_Mode));
+		json.Field("model", turn->m_Model.View());
+		json.Field("group", turn->m_Group.View());
+		if (!turn->m_Effort.IsEmpty()) json.Field("effort", turn->m_Effort.View());
+	}
+
+	// A turn's members after its segments; the messages with `withMessages`, else its prompt's progress.
+	static void WriteTail(const Turn* turn, IED::JsonWriter& json, bool withMessages) {
+		if (turn->m_Stop.IsEmpty()) {
+			json.Key(Core::StringView("stop"));
+			json.Null();
+		}
+		else json.Field("stop", turn->m_Stop.View());
+		json.Key(Core::StringView("recoveries"));
+		json.BeginArray();
+		for (const Core::String& recovery : turn->m_Recoveries) json.String(recovery.View());
+		json.EndArray();
+		json.IntField("tokensIn", turn->m_TokensIn);
+		json.IntField("tokensOut", turn->m_TokensOut);
+		if (turn->m_TtftMs > 0) json.IntField("ttftMs", turn->m_TtftMs);
+		if (turn->m_GenMs > 0) json.IntField("genMs", turn->m_GenMs);
+		json.IntField("startedMs", turn->m_StartedMs);
+		if (turn->m_EndedMs > 0) json.IntField("endedMs", turn->m_EndedMs);
+		if (!turn->m_Prefill.IsEmpty() && !withMessages) json.RawField("prefill", turn->m_Prefill.View());
+		if (withMessages) {
+			json.Key(Core::StringView("messages"));
+			json.BeginArray();
+			for (ModelMessage* message : turn->m_Messages) message->WriteJson(json);
+			json.EndArray();
+		}
+	}
+
 	void Turn::WriteJson(IED::JsonWriter& json, bool withMessages) const {
 		json.BeginObject();
-		json.Field("turnId", m_TurnId.View());
-		json.Key(Core::StringView("user"));
-		WriteUser(json);
-		if (m_Hops > 0) json.IntField("hops", m_Hops);
-		json.Field("mode", ChatModeName(m_Mode));
-		json.Field("model", m_Model.View());
-		json.Field("group", m_Group.View());
-		if (!m_Effort.IsEmpty()) json.Field("effort", m_Effort.View());
+		WriteHead(this, json);
 		json.Key(Core::StringView("segments"));
 		json.BeginArray();
 		for (Segment* segment : m_Segments) segment->WriteJson(json);
 		json.EndArray();
-		if (m_Stop.IsEmpty()) {
-			json.Key(Core::StringView("stop"));
-			json.Null();
+		WriteTail(this, json, withMessages);
+		json.EndObject();
+	}
+
+	void Turn::WritePage(IED::JsonWriter& json, int64 from, int64 to) const {
+		json.BeginObject();
+		WriteHead(this, json);
+		if (from > 0 || to < m_Segments.Count()) {
+			json.IntField("firstSeg", from);
+			json.IntField("segmentCount", m_Segments.Count());
 		}
-		else json.Field("stop", m_Stop.View());
-		json.Key(Core::StringView("recoveries"));
+		json.Key(Core::StringView("segments"));
 		json.BeginArray();
-		for (const Core::String& recovery : m_Recoveries) json.String(recovery.View());
+		for (int64 i = from; i < to; ++i) m_Segments[i]->WriteJson(json);
 		json.EndArray();
-		json.IntField("tokensIn", m_TokensIn);
-		json.IntField("tokensOut", m_TokensOut);
-		if (m_TtftMs > 0) json.IntField("ttftMs", m_TtftMs);
-		if (m_GenMs > 0) json.IntField("genMs", m_GenMs);
-		json.IntField("startedMs", m_StartedMs);
-		if (m_EndedMs > 0) json.IntField("endedMs", m_EndedMs);
-		if (!m_Prefill.IsEmpty() && !withMessages) json.RawField("prefill", m_Prefill.View());
-		if (withMessages) {
-			json.Key(Core::StringView("messages"));
-			json.BeginArray();
-			for (ModelMessage* message : m_Messages) message->WriteJson(json);
-			json.EndArray();
-		}
+		WriteTail(this, json, false);
 		json.EndObject();
 	}
 
@@ -617,7 +652,7 @@ namespace Ai
 		return json.ToString();
 	}
 
-	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const {
+	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, const TurnPage& page) const {
 		IED::JsonWriter json;
 		json.BeginObject();
 		WriteSummary(json);
@@ -639,12 +674,8 @@ namespace Ai
 		json.Key(Core::StringView("context"));
 		if (m_Context.IsEmpty()) json.Null();
 		else json.Raw(m_Context.View());
-		const int64 first = m_Turns.Count() > recent ? m_Turns.Count() - recent : 0;
-		json.BoolField("hasMore", first > 0);
-		json.Key(Core::StringView("turns"));
-		json.BeginArray();
-		for (int64 i = first; i < m_Turns.Count(); ++i) m_Turns[i]->WriteJson(json, false);
-		json.EndArray();
+		json.BoolField("hasMore", page.m_HasMore);
+		json.RawField("turns", page.m_Turns.View());
 		json.Key(Core::StringView("pendingApprovals"));
 		json.BeginArray();
 		for (Approval* approval : m_Approvals)

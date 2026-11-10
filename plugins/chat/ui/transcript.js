@@ -8,7 +8,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
 import { showImage } from "/ui-kit/imageview.js";
 import { answerLinks } from "/ui-kit/linkclicks.js";
-import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
+import { argsLine, compact, diffRows, duration, tokensPerSecond, turnEndHeld, turnStartHeld } from "./chatmodel.js";
 import { userChips } from "./userchips.js";
 
 // The streaming thinking's preview (owner, 2026-10-26: "just show the last few lines with a fixed size block"): the last
@@ -55,12 +55,17 @@ export class TranscriptView {
 		else this.actions.openAddress(target);
 	}
 
+	// The window of the chat the model holds (chatmodel.js): a row before it while there is more before, which scrolling
+	// up to it loads, and one after it while the chat's end is not held, which goes back to the end.
 	render() {
 		this.turnEls.clear();
 		this.segmentEls.clear();
-		const earlier = this.model.hasMore ? h("div.chat-harness", null, icon("history"), h("span", null, "Earlier turns"), h("button.btn.flat", { on: { click: () => this.actions.loadEarlier() } }, "Show")) : null;
+		const earlier = this.model.hasMore ? h("div.chat-harness.chat-more", { dataset: { more: "earlier" } }, icon("history"), h("span", null, "Earlier in this chat"),
+			h("button.btn.flat", { on: { click: () => this.actions.loadEarlier() } }, "Load")) : null;
+		const newer = this.model.hasNewer ? h("div.chat-harness.chat-more", { dataset: { more: "newer" } }, icon("arrow-down"), h("span", null, "Later in this chat"),
+			h("button.btn.flat", { on: { click: () => this.actions.loadNewer() } }, "Load"), h("button.btn.flat", { on: { click: () => this.actions.toLatest() } }, "Go to the latest")) : null;
 		const turns = this.model.turns.map((turn) => this.turnEl(turn));
-		replace(this.el, earlier, ...turns, this.model.turns.length ? null : this.emptyEl());
+		replace(this.el, earlier, ...turns, newer, this.model.turns.length ? null : this.emptyEl());
 	}
 
 	emptyEl() {
@@ -86,7 +91,7 @@ export class TranscriptView {
 		replace(existing.agentHead, ...this.agentHeadParts(turn));
 		this.showPrefill(existing.prefill, turn);
 		replace(existing.foot, ...this.footParts(turn));
-		existing.foot.hidden = !turn.stop;
+		existing.foot.hidden = !turn.stop || !turnEndHeld(turn);
 	}
 
 	segmentChanged(segment, turn) {
@@ -131,8 +136,10 @@ export class TranscriptView {
 		this.showPrefill(prefill, turn);
 		const foot = h("div.chat-foot");
 		replace(foot, ...this.footParts(turn));
-		foot.hidden = !turn.stop;
-		const el = h("section.chat-turn", { dataset: { turn: turn.turnId } }, this.userHead(turn), user, agentHead, body, prefill, foot);
+		foot.hidden = !turn.stop || !turnEndHeld(turn);
+		// A turn whose start is before the window shows from its first segment held: its message is not this window's.
+		const start = turnStartHeld(turn) ? [this.userHead(turn), user, agentHead] : [];
+		const el = h("section.chat-turn", { dataset: { turn: turn.turnId } }, ...start, body, prefill, foot);
 		this.turnEls.set(turn.turnId, { el, agentHead, body, prefill, foot });
 		return el;
 	}
@@ -223,7 +230,7 @@ export class TranscriptView {
 		if (turn.recoveries && turn.recoveries.length) parts.push(h("span.chat-recoveries", { title: "What the harness did to keep the run going" }, "harness: " + turn.recoveries.join("; ")));
 		const speed = tokensPerSecond(turn);
 		parts.push(h("span.meta", null, compact(turn.tokensIn) + " in / " + compact(turn.tokensOut) + " out" + (turn.ttftMs ? " \u00b7 TTFT " + duration(turn.ttftMs) : "") + (speed ? " \u00b7 " + speed + " tok/s" : "")));
-		const reply = replyText(turn);
+		const reply = turnStartHeld(turn) ? replyText(turn) : "";
 		if (reply) parts.push(messageTools(toolButton("copy", "Copy the reply (Markdown)", () => this.actions.copy(reply, "reply"))));
 		return parts;
 	}

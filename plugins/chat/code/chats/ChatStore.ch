@@ -4,8 +4,9 @@
 // tool boundary. A running.json found at load is a turn a restart interrupted (docs/12 "Restart behavior"): it ends
 // "interrupted", a call that was running gets a result saying its effect is unknown, and the chat waits paused.
 // context.json is what compression shows of the messages in place of their content (docs/04 "Context management"), so a
-// chat loaded again sends exactly what it sent before; the turns' files always keep the messages whole. A chat nobody
-// watches is offloaded: only its header stays in memory (docs/04 "Offloading idle chats").
+// chat loaded again sends exactly what it sent before; the turns' files always keep the messages whole. A chat no turn
+// has used for a while is offloaded: only its header stays in memory (docs/04 "What stays in memory"). A turn read from turns.jsonl
+// keeps no segments in memory (Turn::Shed): clients read them in pages (Pages.ch).
 
 include "Chat.ch"
 

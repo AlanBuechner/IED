@@ -1,0 +1,333 @@
+include "Pages.ch"
+
+namespace Ai
+{
+	const int64 c_ReadChunkBytes = 16384;
+	const int64 c_TurnIdPrefixBytes = 160;   // a line's start that names its turn: {"turnId":"u12",...
+	const int64 c_AllSegments = 9223372036854775807;
+
+	static FS::Path TurnsFile(const FS::Path& state, const Chat* chat) { return ChatFolder(state, chat->m_ChatId.View()) / "turns.jsonl"; }
+
+	// `length` bytes of `file` from `start`.
+	static Core::String ReadRange(FS::File& file, int64 start, int64 length) {
+		Core::String text = Core::String(length);
+		if (file.Seek(start) != start) return text;
+		char[c_ReadChunkBytes] chunk;
+		int64 left = length;
+		while (left > 0) {
+			const int64 got = file.Read(&chunk[0], left < c_ReadChunkBytes ? left : c_ReadChunkBytes);
+			if (got <= 0) break;
+			text.Append(Core::StringView(&chunk[0], got));
+			left -= got;
+		}
+		return text;
+	}
+
+	static int64 SkipSpace(Core::StringView text, int64 at) {
+		while (at < text.ByteLength() && (text.ByteAt(at) == ' ' || text.ByteAt(at) == '\t')) at += 1;
+		return at;
+	}
+
+	// The turn a line's start names ({"turnId": "u12", ...}, spaces or none); "" when it names none.
+	static Core::String TurnIdOf(Core::StringView start) {
+		Core::StringView key = Core::StringView("\"turnId\"");
+		const int64 at = start.IndexOf(key, 0);
+		if (at < 0) return Core::String();
+		int64 from = SkipSpace(start, at + key.ByteLength());
+		if (from >= start.ByteLength() || start.ByteAt(from) != ':') return Core::String();
+		from = SkipSpace(start, from + 1);
+		if (from >= start.ByteLength() || start.ByteAt(from) != '"') return Core::String();
+		from += 1;
+		const int64 end = start.IndexOf('"', from);
+		return end < 0 ? Core::String() : Core::String(start.Substring(from, end - from));
+	}
+
+	static void IndexLine(TurnLines* lines, FS::File& file, int64 start, int64 length) {
+		if (length <= 0) return;
+		lines->m_Starts.Push(start);
+		lines->m_Lengths.Push(length);
+		Core::String prefix = ReadRange(file, start, length < c_TurnIdPrefixBytes ? length : c_TurnIdPrefixBytes);
+		lines->m_TurnIds.Push(TurnIdOf(prefix.View()));
+	}
+
+	// The chat's turns.jsonl indexed as it is now: only what was appended since, when it grew.
+	static TurnLines* LinesOf(const FS::Path& state, Chat* chat) {
+		if (!chat->m_Lines) {
+			chat->m_Lines = new TurnLines();
+			chat->m_Lines->m_CachedLine = -1;
+		}
+		TurnLines* lines = chat->m_Lines;
+		FS::Path path = TurnsFile(state, chat);
+		const int64 size = FS::FileSize(path.CStr());
+		if (size == lines->m_FileBytes) return lines;
+		const int64 count = lines->m_Starts.Count();
+		const bool grew = size > lines->m_FileBytes && count > 0 && lines->m_Starts[count - 1] + lines->m_Lengths[count - 1] + 1 == lines->m_FileBytes;
+		int64 from = grew ? lines->m_FileBytes : 0;
+		if (!grew) {
+			lines->m_Starts = Core::Array<int64>();
+			lines->m_Lengths = Core::Array<int64>();
+			lines->m_TurnIds = Core::Array<Core::String>();
+			lines->m_Cached = nullptr;
+			lines->m_CachedLine = -1;
+		}
+		lines->m_FileBytes = size < 0 ? 0 : size;
+		if (size <= 0) return lines;
+		FS::File file = FS::File(path.CStr(), "rb");
+		if (!file.IsOpen()) return lines;
+		Core::Array<int64> starts;
+		Core::Array<int64> lengths;
+		char[c_ReadChunkBytes] chunk;
+		int64 at = from;
+		int64 lineStart = from;
+		file.Seek(from);
+		for (;;) {
+			const int64 got = file.Read(&chunk[0], c_ReadChunkBytes);
+			if (got <= 0) break;
+			for (int64 i = 0; i < got; ++i) {
+				if (chunk[i] != '\n') continue;
+				starts.Push(lineStart);
+				lengths.Push(at + i - lineStart);
+				lineStart = at + i + 1;
+			}
+			at += got;
+		}
+		if (lineStart < at) {
+			starts.Push(lineStart);
+			lengths.Push(at - lineStart);
+		}
+		for (int64 i = 0; i < starts.Count(); ++i) IndexLine(lines, file, starts[i], lengths[i]);
+		return lines;
+	}
+
+	// The number of turns a page can show: the finished ones of turns.jsonl, then the running one.
+	static int64 TurnTotal(const TurnLines* lines, const Chat* chat) { return lines->m_Starts.Count() + (chat->m_Run ? 1 : 0); }
+
+	// Turn `index` of the transcript, segments and all: a finished one read from its line (null when it does not
+	// parse), the running one as it is.
+	static Turn* PageTurn(const FS::Path& state, Chat* chat, TurnLines* lines, int64 index) {
+		if (index == lines->m_Starts.Count()) return chat->m_Run ? chat->m_Run->m_Turn : nullptr;
+		if (lines->m_CachedLine == index && lines->m_Cached) {
+			lines->m_CachedMs = ChatNowMs();
+			return lines->m_Cached;
+		}
+		FS::File file = FS::File(TurnsFile(state, chat).CStr(), "rb");
+		if (!file.IsOpen()) return nullptr;
+		Core::String text = ReadRange(file, lines->m_Starts[index], lines->m_Lengths[index]);
+		if (!text.View().IsValidUtf8()) text = Core::ValidUtf8(text.View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) return nullptr;
+		Turn* turn = new Turn();
+		turn->Read(read.root);
+		turn->m_Messages = Core::Array<ModelMessage*>();
+		lines->m_Cached = turn;
+		lines->m_CachedLine = index;
+		lines->m_CachedMs = ChatNowMs();
+		return turn;
+	}
+
+	// Where turn `turnId` is in the transcript; -1 when it is not.
+	static int64 TurnIndex(const TurnLines* lines, const Chat* chat, Core::StringView turnId) {
+		if (chat->m_Run && chat->m_Run->m_Turn->m_TurnId.View() == turnId) return lines->m_Starts.Count();
+		for (int64 i = lines->m_Starts.Count() - 1; i >= 0; --i)
+			if (lines->m_TurnIds[i].View() == turnId) return i;
+		return -1;
+	}
+
+	static int64 SegmentBytes(const Segment* segment) {
+		IED::JsonWriter json;
+		segment->WriteJson(json);
+		return json.View().ByteLength();
+	}
+
+	// A page's turns, oldest first: each its segments [from, to).
+	class PageParts
+	{
+		public Core::Array<Turn*> m_Turns;
+		public Core::Array<int64> m_From;
+		public Core::Array<int64> m_To;
+
+		public void Add(Turn* turn, int64 from, int64 to) {
+			m_Turns.Push(turn);
+			m_From.Push(from);
+			m_To.Push(to);
+		}
+
+		public Core::String Json(bool newestFirst) const {
+			IED::JsonWriter json;
+			json.BeginArray();
+			for (int64 n = 0; n < m_Turns.Count(); ++n) {
+				const int64 i = newestFirst ? m_Turns.Count() - 1 - n : n;
+				m_Turns[i]->WritePage(json, m_From[i], m_To[i]);
+			}
+			json.EndArray();
+			return json.ToString();
+		}
+	}
+
+	// What a page holds yet: segments, and bytes of them and of the messages that begin turns. A page holds one
+	// segment at least, however big.
+	class PageRoom
+	{
+		public int64 m_Segments;
+		public int64 m_Bytes;
+		public bool m_Took;
+
+		public bool Fits(int64 bytes) const { return !m_Took || (m_Segments > 0 && bytes <= m_Bytes); }
+		public bool Full() const { return m_Took && (m_Segments <= 0 || m_Bytes <= 0); }
+
+		public void Take(int64 bytes) {
+			m_Segments -= 1;
+			m_Bytes -= bytes;
+			m_Took = true;
+		}
+
+		// A turn's message: it counts against the room, but a segment still fits after it, so a page always moves on.
+		public void TakeMessage(int64 bytes) {
+			m_Segments -= 1;
+			m_Bytes -= bytes;
+		}
+	}
+
+	static PageRoom NewRoom() {
+		PageRoom room;
+		room.m_Segments = c_PageSegments;
+		room.m_Bytes = c_PageBytes;
+		return room;
+	}
+
+	// The page ending before segment `seg` of turn `index` (c_AllSegments: after its last).
+	static TurnPage Backward(const FS::Path& state, Chat* chat, TurnLines* lines, int64 index, int64 seg) {
+		PageParts parts;
+		PageRoom room = NewRoom();
+		bool cut = false;
+		int64 hi = seg;
+		if (hi == 0) {
+			index -= 1;
+			hi = c_AllSegments;
+		}
+		while (index >= 0 && !room.Full()) {
+			Turn* turn = PageTurn(state, chat, lines, index);
+			if (!turn) {
+				index -= 1;
+				hi = c_AllSegments;
+				continue;
+			}
+			const int64 count = turn->m_Segments.Count();
+			if (hi > count) hi = count;
+			int64 lo = hi;
+			while (lo > 0) {
+				const int64 bytes = SegmentBytes(turn->m_Segments[lo - 1]);
+				if (!room.Fits(bytes)) break;
+				room.Take(bytes);
+				lo -= 1;
+			}
+			if (lo > 0 && lo == hi) {
+				cut = true;
+				break;
+			}
+			parts.Add(turn, lo, hi);
+			if (lo > 0) {
+				cut = true;
+				break;
+			}
+			room.TakeMessage(turn->m_UserText.ByteLength());
+			index -= 1;
+			hi = c_AllSegments;
+		}
+		TurnPage page;
+		page.m_Turns = parts.Json(true);
+		page.m_HasMore = cut || index >= 0;
+		return page;
+	}
+
+	// The page beginning at segment `seg` of turn `index`.
+	static TurnPage Forward(const FS::Path& state, Chat* chat, TurnLines* lines, int64 index, int64 seg) {
+		PageParts parts;
+		PageRoom room = NewRoom();
+		const int64 total = TurnTotal(lines, chat);
+		bool cut = false;
+		int64 lo = seg;
+		while (index < total && !room.Full()) {
+			Turn* turn = PageTurn(state, chat, lines, index);
+			const int64 count = turn ? turn->m_Segments.Count() : 0;
+			if (!turn || (lo > 0 && lo >= count)) {
+				index += 1;
+				lo = 0;
+				continue;
+			}
+			if (lo == 0) room.TakeMessage(turn->m_UserText.ByteLength());
+			int64 hi = lo;
+			while (hi < count) {
+				const int64 bytes = SegmentBytes(turn->m_Segments[hi]);
+				if (!room.Fits(bytes)) break;
+				room.Take(bytes);
+				hi += 1;
+			}
+			parts.Add(turn, lo, hi);
+			if (hi < count) {
+				cut = true;
+				break;
+			}
+			index += 1;
+			lo = 0;
+		}
+		TurnPage page;
+		page.m_Turns = parts.Json(false);
+		page.m_HasNewer = cut || index < total;
+		return page;
+	}
+
+	TurnPage LastPage(const FS::Path& state, Chat* chat) {
+		TurnLines* lines = LinesOf(state, chat);
+		const int64 total = TurnTotal(lines, chat);
+		if (total == 0) {
+			TurnPage empty;
+			empty.m_Turns = Core::String("[]");
+			return empty;
+		}
+		return Backward(state, chat, lines, total - 1, c_AllSegments);
+	}
+
+	bool PageBefore(const FS::Path& state, Chat* chat, Core::StringView turnId, int64 seg, TurnPage& page, Core::String& problem) {
+		TurnLines* lines = LinesOf(state, chat);
+		const int64 index = TurnIndex(lines, chat, turnId);
+		if (index < 0) {
+			problem = (Core::String("chat ") + chat->m_ChatId.View()) + " has no turn " + turnId;
+			return false;
+		}
+		page = Backward(state, chat, lines, index, seg < 0 ? 0 : seg);
+		page.m_HasNewer = true;
+		return true;
+	}
+
+	bool PageAfter(const FS::Path& state, Chat* chat, Core::StringView turnId, int64 seg, TurnPage& page, Core::String& problem) {
+		TurnLines* lines = LinesOf(state, chat);
+		const int64 index = TurnIndex(lines, chat, turnId);
+		if (index < 0) {
+			problem = (Core::String("chat ") + chat->m_ChatId.View()) + " has no turn " + turnId;
+			return false;
+		}
+		page = Forward(state, chat, lines, index, seg < 0 ? 0 : seg);
+		page.m_HasMore = true;
+		return true;
+	}
+
+	Core::Array<Turn*> LastTurnsWhole(const FS::Path& state, Chat* chat, int64 count) {
+		TurnLines* lines = LinesOf(state, chat);
+		const int64 total = TurnTotal(lines, chat);
+		Core::Array<Turn*> turns;
+		for (int64 i = total > count ? total - count : 0; i < total; ++i) {
+			Turn* turn = PageTurn(state, chat, lines, i);
+			if (turn) turns.Push(turn);
+		}
+		return turns;
+	}
+
+	void ForgetPageTurn(Chat* chat, int64 nowMs) {
+		TurnLines* lines = chat->m_Lines;
+		if (!lines || !lines->m_Cached || nowMs - lines->m_CachedMs < c_PageKeptMs) return;
+		lines->m_Cached = nullptr;
+		lines->m_CachedLine = -1;
+	}
+}

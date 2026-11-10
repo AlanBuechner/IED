@@ -178,7 +178,7 @@
 			"minimum": 0,
 			"default": 10,
 			"x-ied-tiers": ["app", "solution"],
-			"description": "Minutes a chat no tab shows and no turn runs keeps its turns in the server's memory; then they are left on disk and read back when the chat is opened, its turn starts or another chat reads it. 0 keeps every chat loaded (docs/04 Offloading idle chats)."
+			"description": "Minutes an idle chat keeps its turns in the server's memory after a turn ran in it, whether a tab shows it or not (a tab reads it a page at a time from disk); then only its header stays, and its turns are read back when its next turn starts. 0 keeps every chat loaded (docs/04 What stays in memory)."
 		},
 		"ai.chats.notify": {
 			"type": "string",

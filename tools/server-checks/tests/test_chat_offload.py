@@ -1,15 +1,17 @@
-"""Offloading idle chats (docs/04 "Offloading idle chats"): a chat no client watches lets its turns go once
-ai.chats.offloadAfterMinutes pass - the workspace server's live heap drops by what they held, its summary still counts
-them - and opening it again, chat.history and its next turn read them back as they were; a chat a client watches stays
-loaded however long it idles. After a restart a chat starts offloaded: only its header is read."""
+"""What stays in memory of a chat (docs/04 "What stays in memory", docs/10 "Chats"): an idle chat lets its turns go once
+ai.chats.offloadAfterMinutes pass, a tab showing it or not - the workspace server's memory drops by what they held, its
+summary still counts them - and its tab goes on paging from disk without loading it; its next turn reads them back as
+they were. A client gets a long turn a page at a time, never whole. After a restart a chat starts offloaded."""
 
 import asyncio
 import ctypes
 import ctypes.wintypes
 import hashlib
+import json
+import os
 import time
 
-from server import workspace_log
+from server import local_state, workspace_log
 from test_chat import ChatCase, inline, text_step
 from test_servers import workspace_status
 
@@ -17,6 +19,8 @@ MB = 1024 * 1024
 BIG = 4 * MB                 # bytes of the long answer: the turn keeps it twice (its text segment, the model's message)
 KEEPER_SECONDS = 40          # the keeper looks every 15 s
 FIRST_LINE = "First line of a long answer."
+PAGE_SEGMENTS = 120          # c_PageSegments (plugins/chat/code/chats/Pages.ch)
+LONG_TURN = 300
 
 
 def long_answer():
@@ -72,32 +76,66 @@ class OffloadTests(ChatCase):
 	async def offload_soon(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.offloadAfterMinutes", "value": 0.005})
 
-	async def test_an_unwatched_chat_lets_its_turns_go_and_reads_them_back(self):
+	async def test_an_idle_chat_lets_its_turns_go_while_its_tab_pages_from_disk(self):
 		chat_id, topic = await self.chat()
 		self.model.queue(inline({"text": long_answer(), "chunk": 65536, "delayMs": 0}, {"finish": "stop"}))
 		self.assertEqual("finished", (await self.turn(chat_id, "Write a lot"))["stop"])
-		self.assertEqual(len(long_answer()), len(self.segments(await self.last_turn(chat_id), "text")[0]["text"]), "the answer arrived whole")
+		loaded = await self.private_bytes()
 		await self.offload_soon()
-		await asyncio.sleep(17)
-		self.assertNotIn("chat %s offloaded" % chat_id, self.log(), "a chat a client watches stays loaded")
-		watched = await self.private_bytes()
-
-		await self.client.unsub([topic])
 		await self.wait_for_log("chat %s offloaded: 1 turn" % chat_id)
 		offloaded = await self.private_bytes()
-		self.assertGreater(watched - offloaded, BIG, "its turns and the events its topic kept let go: %.1f MB private before, %.1f MB after" % (watched / MB, offloaded / MB))
+		self.assertGreater(loaded - offloaded, BIG, "its turns and the events its topic kept let go, its tab open: %.1f MB private before, %.1f MB after" % (loaded / MB, offloaded / MB))
 		summary = await self.summary(chat_id)
 		self.assertEqual((1, "finished"), (summary["turnCount"], summary["lastStop"]), "the summary still counts its turns")
 
+		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
+		self.assertEqual(long_answer(), self.segments(history[0], "text")[0]["text"], "a page of it read from disk, as it was")
 		snapshot = await self.opened(topic)
-		await self.wait_for_log("chat %s loaded from disk: 1 turn" % chat_id, timeout=5)
 		self.assertEqual(["Write a lot"], [t["user"]["text"] for t in snapshot["turns"]])
-		self.assertEqual(long_answer(), self.segments(snapshot["turns"][0], "text")[0]["text"], "the answer whole, as it was")
+		await asyncio.sleep(1)
+		self.assertNotIn("chat %s loaded from disk" % chat_id, self.log(), "paging and opening it load nothing")
 
 		self.model.queue(text_step("Short."))
 		self.assertEqual("finished", (await self.turn(chat_id, "And now briefly"))["stop"])
-		history = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"]
-		self.assertEqual(["Write a lot", "And now briefly"], [t["user"]["text"] for t in history])
+		await self.wait_for_log("chat %s loaded from disk: 1 turn" % chat_id, timeout=5)
+		last = await self.client.request("chat.history", {"chatId": chat_id})
+		self.assertEqual((["And now briefly"], True), ([t["user"]["text"] for t in last["turns"]], last["hasMore"]), "the 4 MB answer does not fit the last page's room")
+		before = await self.client.request("chat.history", {"chatId": chat_id, "before": last["turns"][0]["turnId"]})
+		self.assertEqual(["Write a lot"], [t["user"]["text"] for t in before["turns"]], "the page before has it")
+
+	async def test_a_long_turn_comes_a_page_at_a_time(self):
+		chat_id, topic = await self.chat()
+		self.model.queue(text_step("Ready."))
+		await self.turn(chat_id, "One")
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		turn = {"turnId": "u900", "user": {"text": "Long"}, "mode": "ask", "model": "fake", "group": "", "stop": "finished", "recoveries": [], "tokensIn": 0, "tokensOut": 0,
+			"startedMs": 1, "endedMs": 2, "segments": [{"segId": "g%d" % i, "type": "text", "text": "segment %d" % i, "done": True} for i in range(LONG_TURN)],
+			"messages": [{"role": "user", "content": "Long"}, {"role": "assistant", "content": "ok"}]}
+		with open(os.path.join(local_state(self.data, self.repo), "chats", chat_id, "turns.jsonl"), "a", encoding="utf-8", newline="\n") as f:
+			f.write(json.dumps(turn) + "\n")
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+
+		snapshot = await self.opened(topic)
+		last = snapshot["turns"][-1]
+		self.assertEqual(("u900", LONG_TURN), (last["turnId"], last["segmentCount"]), "the long turn, cut")
+		self.assertLessEqual(sum(len(t["segments"]) for t in snapshot["turns"]), PAGE_SEGMENTS, "a page of it, not all of it")
+		self.assertTrue(snapshot["hasMore"])
+		seen = [s["segId"] for t in snapshot["turns"] for s in t["segments"]]
+		first = snapshot["turns"][0]
+		page = snapshot
+		while page["hasMore"]:
+			page = await self.client.request("chat.history", {"chatId": chat_id, "before": first["turnId"], "beforeSeg": first.get("firstSeg", 0)})
+			self.assertLessEqual(sum(len(t["segments"]) for t in page["turns"]), PAGE_SEGMENTS)
+			seen = [s["segId"] for t in page["turns"] for s in t["segments"]] + seen
+			first = page["turns"][0]
+		self.assertEqual(["g%d" % i for i in range(LONG_TURN)], [s for s in seen if s.startswith("g")], "paging back gives every segment once, in order")
+		self.assertEqual("One", page["turns"][0]["user"]["text"], "back to the first turn")
+		ahead = await self.client.request("chat.history", {"chatId": chat_id, "after": "u900", "afterSeg": 250})
+		self.assertEqual(["g%d" % i for i in range(250, LONG_TURN)], [s["segId"] for s in ahead["turns"][0]["segments"]])
+		self.assertFalse(ahead["hasNewer"], "the chat's end")
 
 	async def test_history_reads_an_offloaded_chat_and_a_restart_starts_it_offloaded(self):
 		chat_id, topic = await self.chat()
@@ -121,6 +159,8 @@ class OffloadTests(ChatCase):
 		self.assertNotIn("chat %s loaded from disk" % chat_id, self.log()[restarted:], "listing it reads no turn")
 		snapshot = await self.opened(topic)
 		self.assertEqual(["One"], [t["user"]["text"] for t in snapshot["turns"]])
+		await asyncio.sleep(1)
+		self.assertNotIn("chat %s loaded from disk" % chat_id, self.log()[restarted:], "opening it reads a page, not the chat")
 		self.model.queue(text_step("Two."))
 		self.assertEqual("finished", (await self.turn(chat_id, "Two"))["stop"])
 		sent = [(m["role"], m.get("content")) for m in self.model.requests()[-1]["body"]["messages"] if m["role"] != "system"]

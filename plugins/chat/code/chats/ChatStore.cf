@@ -263,6 +263,7 @@ namespace Ai
 			if (node.Kind() == Serialization::DomKind::Object) {
 				Turn* turn = new Turn();
 				turn->Read(node);
+				turn->Shed();
 				chat->m_Turns.Push(turn);
 			}
 			at = end + 1;
@@ -307,6 +308,7 @@ namespace Ai
 		chat->m_StateReason = Core::String("interrupted");
 		AppendTurn(state, chat, turn);
 		ForgetRunningTurn(state, chat);
+		turn->Shed();
 	}
 
 	static Core::Array<Core::String> StringsOf(const Serialization::DomNode& list) {

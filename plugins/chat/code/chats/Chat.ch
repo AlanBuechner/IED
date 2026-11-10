@@ -153,16 +153,50 @@ namespace Ai
 		public Core::String m_Prefill;                  // while a request's prompt is read: its server's progress, JSON
 		public Core::Array<ModelMessage*> m_Messages;   // what the model is sent of this turn, in order
 		public bool m_Compressed;                       // left out of requests to fit the context (kept on disk)
+		// Shed (docs/04 "What stays in memory"): a turn that ended keeps its segments in turns.jsonl only - clients read
+		// them in pages (Pages.ch) - with their count and its answer's first line.
+		public bool m_Shed;
+		public int64 m_ShedSegments;
+		public Core::String m_AnswerLine;
 
 		public Segment* FindSegment(Core::StringView segId) const;
 		public Segment* ToolSegment(Core::StringView callId) const;
-		// Its answer: its text segments, a line break between.
+		// Its answer: its text segments, a line break between ("" once shed).
 		public Core::String Answer() const;
+		// The first line of its answer, shed or not.
+		public Core::String AnswerLine() const;
+		public int64 SegmentCount() const { return m_Shed ? m_ShedSegments : m_Segments.Count(); }
+		// Lets its segments go (it ended and turns.jsonl has it).
+		public void Shed();
 		// The owner's message as the clients get it: {text, from?, resumed?, mentions?, attachments?}.
 		public void WriteUser(IED::JsonWriter& json) const;
 		// The clients' view; with `messages` the stored form, the model's messages too.
 		public void WriteJson(IED::JsonWriter& json, bool withMessages) const;
+		// The clients' view of segments [from, to) only; a part of the turn says which (`firstSeg`, `segmentCount`).
+		public void WritePage(IED::JsonWriter& json, int64 from, int64 to) const;
 		public void Read(const Serialization::DomNode& node);
+	}
+
+	// Where each turn of turns.jsonl is, so a page of a chat is read from its own lines (Pages.ch), and the turn a page
+	// read last, kept while pages are asked of it.
+	class TurnLines
+	{
+		public int64 m_FileBytes;                   // turns.jsonl's size when it was indexed
+		public Core::Array<int64> m_Starts;         // each turn's line: where it starts and its bytes, without the break
+		public Core::Array<int64> m_Lengths;
+		public Core::Array<Core::String> m_TurnIds;
+		public int64 m_CachedLine;                  // the line `cached` was read from; -1: none
+		public Turn* m_Cached;
+		public int64 m_CachedMs;
+	}
+
+	// A page of a chat's transcript (docs/10 "Chats"): its turns as the clients get them - the first and the last may be
+	// parts - and whether there is more before and after it.
+	class TurnPage
+	{
+		public Core::String m_Turns;   // a JSON array
+		public bool m_HasMore;
+		public bool m_HasNewer;
 	}
 
 	class ModifiedFile
@@ -319,7 +353,8 @@ namespace Ai
 		public Core::String m_OffloadedStop;            // its last turn's stop
 		public Core::String m_OffloadedAnswer;          // the first line of its last turn's answer
 		public Core::Array<Core::String> m_OffloadedCompressed;   // its compressed turns
-		public int64 m_UsedMs;                          // when a client last watched it, a turn ran or its turns were read
+		public int64 m_UsedMs;                          // when a turn last ran or its turns were read
+		public TurnLines* m_Lines;                      // its turns.jsonl indexed for pages; null until a page is read
 
 		public Turn* Current() const { return m_Turns.IsEmpty() ? nullptr : m_Turns[m_Turns.Count() - 1]; }
 		// What the summary says of its turns, offloaded or not.
@@ -345,8 +380,8 @@ namespace Ai
 		// The clips as the clients show them: [{name, source, lines, bytes, text}], each text cut to kClipShownBytes.
 		public void WriteClips(IED::JsonWriter& json) const;
 		// The chat:<chatId> snapshot: the summary, the model and group in use and its role's effort, tasks, queued messages,
-		// the clips, the last `recent` turns and what it waits on.
-		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, int64 recent) const;
+		// the clips, `page` (its last, Pages.ch) and what it waits on.
+		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, const TurnPage& page) const;
 		// The chat topic's chat.changed: the summary, the model and group in use and its role's effort.
 		public Core::String ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const;
 	}

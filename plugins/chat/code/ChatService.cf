@@ -3,6 +3,7 @@ include "ChatService.ch"
 include "claude/Pacing.ch"
 include "run/Run.ch"
 include "chats/Sent.ch"
+include "chats/Pages.ch"
 
 namespace Ai
 {
@@ -157,17 +158,20 @@ namespace Ai
 		return NextModel(chat, WorkspaceOf(chat), group, roleEffort);
 	}
 
-	// A chat with turns always has a meter: one kept none is made from its turns (MeterFromTurns).
+	// A chat with turns always has a meter: one kept none is made from its turns (MeterFromTurns), which are read for it
+	// then; otherwise opening a chat reads only its last page (Pages.ch).
 	Core::String Chats::Snapshot(Chat* chat) {
 		Core::String group;
 		Core::String roleEffort;
 		IED::Workspace ws = WorkspaceOf(chat);
-		Loaded(chat);
-		if (chat->m_Context.IsEmpty() && !chat->m_Turns.IsEmpty()) chat->m_Context = MeterFromTurns(this, chat, ws);
-		else if (!chat->m_Context.IsEmpty() && !HasIedParts(chat->m_Context.View())) chat->m_Context = ResplitContext(this, chat, ws);
+		const bool unmetered = chat->m_Context.IsEmpty() && chat->TurnCount() > 0;
+		const bool unsplit = !chat->m_Context.IsEmpty() && !HasIedParts(chat->m_Context.View());
+		if (unmetered || unsplit) Loaded(chat);
+		if (unmetered) chat->m_Context = MeterFromTurns(this, chat, ws);
+		else if (unsplit) chat->m_Context = ResplitContext(this, chat, ws);
 		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude") CountClaude(chat, ws);
 		Core::String model = NextModel(chat, ws, group, roleEffort);
-		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), c_ChatSnapshotTurns);
+		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), LastPage(LocalStateOf(ws), chat));
 	}
 
 	void Chats::Changed(Chat* chat) {
@@ -628,23 +632,25 @@ namespace Ai
 		return Core::String("{}");
 	}
 
+	// chat.history {chatId, before?, beforeSeg?, after?, afterSeg?}: a page of the transcript read from disk (Pages.ch) -
+	// the one ending before segment `beforeSeg` (0) of turn `before`, the one beginning at segment `afterSeg` of turn
+	// `after`, or with neither the last.
 	Core::String Chats::HistoryMethod(const IED::Request& request) {
 		const IED::Params& params = request.m_Params;
 		Chat* chat = Get(params.Str("chatId").View());
-		Loaded(chat);
-		Core::String before = params.Str("before", Core::StringView(""));
-		const int64 limit = params.Int("limit", c_ChatSnapshotTurns);
-		int64 end = chat->m_Turns.Count();
-		for (int64 i = 0; i < chat->m_Turns.Count(); ++i)
-			if (chat->m_Turns[i]->m_TurnId == before) end = i;
-		const int64 start = end - limit > 0 ? end - limit : 0;
+		FS::Path state = LocalStateOf(WorkspaceOf(chat));
+		TurnPage page;
+		Core::String problem;
+		bool found = true;
+		if (params.Has("after")) found = PageAfter(state, chat, params.Str("after").View(), params.Int("afterSeg", 0), page, problem);
+		else if (params.Has("before")) found = PageBefore(state, chat, params.Str("before").View(), params.Int("beforeSeg", 0), page, problem);
+		else page = LastPage(state, chat);
+		if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, problem.View());
 		IED::JsonWriter json;
 		json.BeginObject();
-		json.Key(Core::StringView("turns"));
-		json.BeginArray();
-		for (int64 i = start; i < end; ++i) chat->m_Turns[i]->WriteJson(json, false);
-		json.EndArray();
-		json.BoolField("hasMore", start > 0);
+		json.RawField("turns", page.m_Turns.View());
+		json.BoolField("hasMore", page.m_HasMore);
+		json.BoolField("hasNewer", page.m_HasNewer);
 		json.EndObject();
 		return json.ToString();
 	}

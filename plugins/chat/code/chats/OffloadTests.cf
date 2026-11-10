@@ -87,7 +87,9 @@ class OffloadTests {
 		assert_true(!chat->m_Turns[1]->m_Compressed, "the others do not");
 		assert_se("[shortened]", chat->m_Turns[0]->m_Messages[1]->m_Shown.CStr(), "what compression shows of a message (context.json)");
 		assert_se("A long first answer.", chat->m_Turns[0]->m_Messages[1]->m_Content.CStr(), "its content whole");
-		assert_se("Done.\nThe rest of it.", chat->m_Turns[2]->Answer().CStr(), "the last turn's answer");
+		assert_true(chat->m_Turns[2]->m_Shed, "a turn read back keeps no segments in memory (pages read them)");
+		assert_eq(1, chat->m_Turns[2]->SegmentCount(), "but counts them");
+		assert_se("Done.", chat->m_Turns[2]->AnswerLine().CStr(), "and its answer's first line");
 		FS::RemoveAll(state.CStr());
 	}
 

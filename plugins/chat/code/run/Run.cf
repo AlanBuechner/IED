@@ -664,5 +664,6 @@ namespace Ai
 		m_Chats->Publish(m_Chat, "turn.end", data.View());
 		m_Chats->Changed(m_Chat);
 		m_Chats->TurnEnded(m_Chat);
+		m_Turn->Shed();   // turns.jsonl has its segments; clients read them in pages (Pages.ch)
 	}
 }

@@ -1,0 +1,184 @@
+// Pages of a chat's transcript (Pages.ch): the last page holds a chat's newest segments only, a long turn cut where the
+// page ends; walking pages back from the last, or forward from the first, gives every segment once, in order; a page
+// holds about c_PageBytes, one segment at least however big; the running turn is the one in memory; a turn appended
+// after a page was read shows in the next.
+
+include "Pages.ch"
+
+static Ai::Turn* LongTurn(Core::StringView turnId, int64 segments, int64 textBytes) {
+	Ai::Turn* turn = new Ai::Turn();
+	turn->m_TurnId = Core::String(turnId);
+	turn->m_UserText = (Core::String("asked ") + turnId);
+	turn->m_Stop = Core::String("finished");
+	Core::StringBuilder text;
+	for (int64 i = 0; i < textBytes; ++i) text.Append("x");
+	for (int64 i = 0; i < segments; ++i) {
+		Ai::Segment* segment = new Ai::Segment();
+		Core::StringBuilder id;
+		id.Append(turnId);
+		id.Append("-s");
+		id.AppendInt(i);
+		segment->m_SegId = id.ToString();
+		segment->m_Type = Core::String("text");
+		segment->m_Text = text.ToString();
+		segment->m_Done = true;
+		turn->m_Segments.Push(segment);
+	}
+	return turn;
+}
+
+static Ai::Chat* PagedChat(const FS::Path& state, const char* name) {
+	FS::RemoveAll(state.CStr());
+	Ai::Chat* chat = new Ai::Chat();
+	chat->m_ChatId = Core::String(name);
+	chat->m_WsId = Core::String("w1");
+	return chat;
+}
+
+// A page's turns as {turnId, firstSeg, count, segIds}.
+static Serialization::DomNode PageTurns(const Ai::TurnPage& page) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(page.m_Turns.View(), *doc).root;
+}
+
+static int64 SegmentsOf(const Serialization::DomNode& turns) {
+	int64 count = 0;
+	for (int64 i = 0; i < turns.Count(); ++i) count += turns.At(i).Member("segments").Count();
+	return count;
+}
+
+// Every segment id of a page's turns, in order, joined by spaces.
+static Core::String SegIds(const Serialization::DomNode& turns) {
+	Core::StringBuilder out;
+	for (int64 i = 0; i < turns.Count(); ++i) {
+		Serialization::DomNode segments = turns.At(i).Member("segments");
+		for (int64 j = 0; j < segments.Count(); ++j) {
+			out.Append(segments.At(j).Member("segId").AsView());
+			out.Append(" ");
+		}
+	}
+	return out.ToString();
+}
+
+[test("server.ai.pages")]
+class PagesTests {
+	[test("the_last_page_cuts_a_long_turn")]
+	public static void TestLastPage() {
+		FS::Path state = FS::TempDirectory() / "ied-pages-last";
+		Ai::Chat* chat = PagedChat(state, "c1");
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u1"), 5, 10));
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u2"), 300, 10));
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u3"), 2, 10));
+		Ai::TurnPage page = Ai::LastPage(state, chat);
+		Serialization::DomNode turns = PageTurns(page);
+		assert_eq(2, turns.Count(), "the last turn whole and the one before it in part");
+		assert_se("u3", Core::String(turns.At(1).Member("turnId").AsView()).CStr(), "the newest last");
+		assert_true(!turns.At(1).Member("firstSeg").IsValid(), "a whole turn says nothing of parts");
+		assert_eq(2, turns.At(1).Member("segments").Count(), "u3's segments");
+		Serialization::DomNode cut = turns.At(0);
+		assert_se("u2", Core::String(cut.Member("turnId").AsView()).CStr(), "then u2");
+		assert_eq(300, cut.Member("segmentCount").AsInt(), "a part says how many segments its turn has");
+		assert_eq(300, cut.Member("firstSeg").AsInt() + cut.Member("segments").Count(), "and its part runs to the turn's end");
+		assert_true(SegmentsOf(turns) <= Ai::c_PageSegments, "at most a page of segments");
+		assert_true(page.m_HasMore && !page.m_HasNewer, "more before, nothing after");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("pages_back_and_forth_give_every_segment_once")]
+	public static void TestWalk() {
+		FS::Path state = FS::TempDirectory() / "ied-pages-walk";
+		Ai::Chat* chat = PagedChat(state, "c1");
+		Core::StringBuilder expected;
+		Core::Array<int64> sizes;
+		sizes.Push(3);
+		sizes.Push(250);
+		sizes.Push(0);
+		sizes.Push(130);
+		for (int64 t = 0; t < sizes.Count(); ++t) {
+			Core::StringBuilder id;
+			id.Append("u");
+			id.AppendInt(t + 1);
+			Ai::Turn* turn = LongTurn(id.View(), sizes[t], 40);
+			for (Ai::Segment* segment : turn->m_Segments) {
+				expected.Append(segment->m_SegId.View());
+				expected.Append(" ");
+			}
+			Ai::AppendTurn(state, chat, turn);
+		}
+		// Back from the last page: each page's segments go before what was read.
+		Ai::TurnPage page = Ai::LastPage(state, chat);
+		Serialization::DomNode turns = PageTurns(page);
+		Core::String back = SegIds(turns);
+		int64 pages = 1;
+		Core::String problem;
+		while (page.m_HasMore) {
+			Serialization::DomNode first = turns.At(0);
+			const int64 seg = first.Member("firstSeg").IsValid() ? first.Member("firstSeg").AsInt() : 0;
+			assert_true(Ai::PageBefore(state, chat, first.Member("turnId").AsView(), seg, page, problem), problem.CStr());
+			turns = PageTurns(page);
+			back = SegIds(turns) + back.View();
+			pages += 1;
+			assert_true(pages < 20, "the pages end");
+		}
+		assert_se(expected.ToString().CStr(), back.CStr(), "every segment once, in order, going back");
+		assert_se("u1", Core::String(turns.At(0).Member("turnId").AsView()).CStr(), "the first page begins with the first turn");
+		// Forward from the first turn.
+		Core::String ahead;
+		assert_true(Ai::PageAfter(state, chat, Core::StringView("u1"), 0, page, problem), problem.CStr());
+		turns = PageTurns(page);
+		ahead = SegIds(turns);
+		while (page.m_HasNewer) {
+			Serialization::DomNode last = turns.At(turns.Count() - 1);
+			const int64 seg = (last.Member("firstSeg").IsValid() ? last.Member("firstSeg").AsInt() : 0) + last.Member("segments").Count();
+			assert_true(Ai::PageAfter(state, chat, last.Member("turnId").AsView(), seg, page, problem), problem.CStr());
+			turns = PageTurns(page);
+			ahead = ahead + SegIds(turns).View();
+			pages += 1;
+			assert_true(pages < 40, "the pages end");
+		}
+		assert_se(expected.ToString().CStr(), ahead.CStr(), "every segment once, in order, going forward");
+		assert_true(!Ai::PageBefore(state, chat, Core::StringView("u9"), 0, page, problem), "a turn the chat does not have");
+		assert_true(problem.View().Contains(Core::StringView("u9")), "says which");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("bytes_bound_a_page_and_one_segment_always_fits")]
+	public static void TestBytes() {
+		FS::Path state = FS::TempDirectory() / "ied-pages-bytes";
+		Ai::Chat* chat = PagedChat(state, "c1");
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u1"), 10, 100000));
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u2"), 1, 1000000));
+		Ai::TurnPage page = Ai::LastPage(state, chat);
+		Serialization::DomNode turns = PageTurns(page);
+		assert_eq(1, SegmentsOf(turns), "a segment bigger than a page is a page of its own");
+		Core::String problem;
+		assert_true(Ai::PageBefore(state, chat, Core::StringView("u2"), 0, page, problem), problem.CStr());
+		const int64 held = SegmentsOf(PageTurns(page));
+		assert_true(held >= 2 && held <= 3, "100 KB segments: two or three to a 256 KB page");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("the_running_turn_and_a_turn_appended_later")]
+	public static void TestRunningAndAppended() {
+		FS::Path state = FS::TempDirectory() / "ied-pages-running";
+		Ai::Chat* chat = PagedChat(state, "c1");
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u1"), 2, 10));
+		Ai::TurnPage page = Ai::LastPage(state, chat);
+		assert_se("u1-s0 u1-s1 ", SegIds(PageTurns(page)).CStr(), "the one turn");
+		Ai::AppendTurn(state, chat, LongTurn(Core::StringView("u2"), 1, 10));
+		page = Ai::LastPage(state, chat);
+		assert_se("u1-s0 u1-s1 u2-s0 ", SegIds(PageTurns(page)).CStr(), "a turn appended since shows");
+		chat->m_Run = new Ai::ChatRun();
+		chat->m_Run->m_Turn = LongTurn(Core::StringView("u3"), 1, 10);
+		chat->m_Run->m_Turn->m_Stop = Core::String();
+		page = Ai::LastPage(state, chat);
+		Serialization::DomNode turns = PageTurns(page);
+		assert_se("u1-s0 u1-s1 u2-s0 u3-s0 ", SegIds(turns).CStr(), "the running turn, from memory, last");
+		assert_true(turns.At(turns.Count() - 1).Member("stop").Kind() == Serialization::DomKind::Null, "still running");
+		Core::Array<Ai::Turn*> whole = Ai::LastTurnsWhole(state, chat, 2);
+		assert_eq(2, whole.Count(), "the last two turns whole");
+		assert_se("u2", whole[0]->m_TurnId.CStr(), "oldest first");
+		assert_eq(1, whole[0]->m_Segments.Count(), "with their segments");
+		FS::RemoveAll(state.CStr());
+	}
+}

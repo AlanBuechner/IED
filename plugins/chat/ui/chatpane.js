@@ -18,6 +18,10 @@ import { choicesFrom } from "./modelpicker.js";
 import { askToNotify, notifySetting } from "./turnnotices.js";
 
 const NEAR_BOTTOM_PX = 80;
+// The window a chat's transcript holds (docs/10 "Chats"): about three of the server's pages of segments. Past it by
+// TRIM_SLACK, the side away from what the owner reads is let go, and scrolling toward it loads it again.
+const WINDOW_SEGMENTS = 360;
+const TRIM_SLACK = 60;
 const OWNER_SCROLL_MS = 800;   // a scroll this soon after the owner's wheel, touch or key is theirs
 const CLAMPED_PX = 2;          // a transcript that shrank under its end is scrolled up by the browser, this close to it
 const PANEL_MIN_PX = 200;
@@ -148,6 +152,8 @@ export class ChatPane {
 			stopTask: (taskId) => this.request("chat.stopTask", { chatId: this.chatId, taskId }),
 			fileIcon: (path) => this.ied.icons.file(path),
 			loadEarlier: () => this.loadEarlier(),
+			loadNewer: () => this.loadNewer(),
+			toLatest: () => this.toLatest(),
 			codeBlock: (code, fence, closed) => this.codeColors.element(code, fence, closed),
 			colorDiff: (path, spans) => this.codeColors.diff(path, spans),
 			runCommand: (id, args) => this.ied.commands.run(id, args),
@@ -173,7 +179,9 @@ export class ChatPane {
 
 	// Whenever the chat is shown (its tab opened or chosen, its activity back), it opens at its end.
 	visible(shown) {
-		if (shown) this.scrollToEnd();
+		if (!shown) return;
+		if (this.model.hasNewer) this.toLatest();
+		else this.scrollToEnd();
 	}
 
 	// --- The chat shown ----------------------------------------------------------------------------------------------
@@ -182,6 +190,7 @@ export class ChatPane {
 	show(chatId) {
 		if (this.stopChat) this.stopChat();
 		this.stopChat = null;
+		this.loading = false;
 		if (this.composer.editing && chatId !== this.chatId) this.composer.stopEditing(true);
 		this.chatId = chatId;
 		this.model = new ChatModel();
@@ -214,6 +223,7 @@ export class ChatPane {
 		this.composer.update(this.model);
 		this.panel.update(this.model);
 		this.scrollToEnd();
+		requestAnimationFrame(() => this.loadInSight());
 		if (this.host.shown) this.host.shown(this.model.summary);
 	}
 
@@ -221,6 +231,7 @@ export class ChatPane {
 		const change = this.model.event(kind, data);
 		if (change.all) return this.reverted();
 		this.transcript.update(change);
+		if (kind === "segment.start" && change.segment && this.model.held() > WINDOW_SEGMENTS + TRIM_SLACK) this.trimStreamed();
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
 		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips || change.background) this.panel.update(this.model);
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
@@ -250,8 +261,51 @@ export class ChatPane {
 		const top = this.scroller.scrollTop;
 		const up = top < this.lastTop;
 		if (up && this.ownerScrolls() && this.gap() > CLAMPED_PX) this.atEnd = false;
-		else if (!up && this.gap() < NEAR_BOTTOM_PX) this.atEnd = true;
+		else if (!up && this.gap() < NEAR_BOTTOM_PX && !this.model.hasNewer) this.atEnd = true;
 		this.lastTop = top;
+		this.loadInSight();
+	}
+
+	// Within a screen of the window's edge and there is more past it: that is loaded.
+	loadInSight() {
+		const s = this.scroller;
+		if (!this.chatId || this.loading) return;
+		if (this.model.hasMore && s.scrollTop < s.clientHeight) this.loadEarlier();
+		else if (this.model.hasNewer && this.gap() < s.clientHeight) this.loadNewer();
+	}
+
+	// Where the owner reads: the first segment in sight and how far below the transcript's top it is.
+	anchor() {
+		const top = this.scroller.getBoundingClientRect().top;
+		for (const el of this.transcript.el.querySelectorAll(".chat-seg")) {
+			const box = el.getBoundingClientRect();
+			if (box.bottom > top) return { seg: el.dataset.seg, offset: box.top - top };
+		}
+		return null;
+	}
+
+	// The transcript scrolled so the anchor's segment is where it was.
+	keep(anchor) {
+		const el = anchor && [...this.transcript.el.querySelectorAll(".chat-seg")].find((each) => each.dataset.seg === anchor.seg);
+		if (!el) return;
+		this.scroller.scrollTop += el.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - anchor.offset;
+		this.lastTop = this.scroller.scrollTop;
+	}
+
+	// The window changed by `change` (a page joined, a side let go) and drawn again, what the owner reads kept in place.
+	redraw(change) {
+		const anchor = this.atEnd ? null : this.anchor();
+		change();
+		this.transcript.render();
+		if (this.atEnd) this.toEnd();
+		else this.keep(anchor);
+	}
+
+	// A stream past the window: the side away from where the owner reads is let go.
+	trimStreamed() {
+		const s = this.scroller;
+		const lower = this.atEnd || s.scrollTop > (s.scrollHeight - s.clientHeight) / 2;
+		this.redraw(() => (lower ? this.model.trimOlder(WINDOW_SEGMENTS) : this.model.trimNewer(WINDOW_SEGMENTS)));
 	}
 
 	ownerScrolls() {
@@ -286,13 +340,45 @@ export class ChatPane {
 		this.lastTop = this.scroller.scrollTop;
 	}
 
+	// The page before the window (chat.history), read back from the server's disk; reading back, what is far below is let
+	// go once the window is past its size.
 	async loadEarlier() {
-		const first = this.model.turns[0];
-		const older = await this.request("chat.history", { chatId: this.chatId, before: first ? first.turnId : undefined });
-		if (!older) return;
-		const height = this.scroller.scrollHeight;
-		this.transcript.update(this.model.prepend(older.turns, older.hasMore));
-		this.scroller.scrollTop += this.scroller.scrollHeight - height;
+		if (this.loading || !this.model.hasMore) return;
+		const model = this.model;
+		const first = model.turns[0];
+		this.loading = true;
+		const page = await this.request("chat.history", first ? { chatId: this.chatId, before: first.turnId, beforeSeg: first.firstSeg || 0 } : { chatId: this.chatId });
+		this.loading = false;
+		if (!page || model !== this.model || model.turns[0] !== first) return;
+		this.redraw(() => {
+			model.prepend(page);
+			if (!this.atEnd) model.trimNewer(WINDOW_SEGMENTS);
+		});
+		requestAnimationFrame(() => this.loadInSight());
+	}
+
+	// The page after the window. At the chat's end while a turn runs, the chat is taken afresh (its snapshot, then its
+	// events), so nothing streamed while the end was not held is missed.
+	async loadNewer() {
+		if (this.loading || !this.model.hasNewer) return;
+		const model = this.model;
+		const last = model.lastTurn();
+		if (!last) return this.toLatest();
+		this.loading = true;
+		const page = await this.request("chat.history", { chatId: this.chatId, after: last.turnId, afterSeg: (last.firstSeg || 0) + last.segments.length });
+		this.loading = false;
+		if (!page || model !== this.model || model.lastTurn() !== last) return;
+		if (!page.hasNewer && model.running()) return this.toLatest();
+		this.redraw(() => {
+			model.append(page);
+			model.trimOlder(WINDOW_SEGMENTS);
+		});
+		requestAnimationFrame(() => this.loadInSight());
+	}
+
+	// The chat's end, as a tab opening it shows it.
+	toLatest() {
+		if (this.chatId) this.show(this.chatId);
 	}
 
 	// --- What the owner does -----------------------------------------------------------------------------------------
@@ -324,6 +410,8 @@ export class ChatPane {
 		const params = { chatId: this.chatId, text, as };
 		if (extras && extras.mentions.length) params.mentions = extras.mentions;
 		if (extras && extras.attachments.length) params.attachments = extras.attachments;
+		// Sent from far back in the chat (its end not held): the chat's end is shown, where the message goes.
+		if (this.model.hasNewer) this.toLatest();
 		return (await this.request("chat.send", params)) !== null;
 	}
 
@@ -356,7 +444,8 @@ export class ChatPane {
 	async revertTo(turnId, title = "Edit and send") {
 		const at = this.model.turns.findIndex((turn) => turn.turnId === turnId);
 		const after = at < 0 ? 0 : this.model.turns.length - at - 1;
-		const going = after ? "This message, its reply and the " + (after === 1 ? "turn" : after + " turns") + " after it leave the chat" : "This message and its reply leave the chat";
+		const going = this.model.hasNewer ? "This message, its reply and every turn after it leave the chat"
+			: after ? "This message, its reply and the " + (after === 1 ? "turn" : after + " turns") + " after it leave the chat" : "This message and its reply leave the chat";
 		const message = going + "; they are kept in the chat's folder (reverted/). Files they changed are not changed back."
 			+ (this.model.running() ? " The turn running now stops first." : "");
 		if (!(await confirmDialog({ title: title + ": revert the chat to before this message?", message, confirm: title === "Resend" ? "Revert and resend" : "Revert and send" }))) return false;

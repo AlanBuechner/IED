@@ -50,6 +50,7 @@ export class ChatModel {
 		this.roleEffort = null;     // the group's effort for this chat, once a snapshot says
 		this.turns = [];
 		this.hasMore = false;
+		this.hasNewer = false;
 		this.approvals = [];
 		this.question = null;
 		this.tasks = [];
@@ -68,6 +69,7 @@ export class ChatModel {
 		this.choose(data);
 		this.turns = (data.turns || []).map(normalTurn);
 		this.hasMore = Boolean(data.hasMore);
+		this.hasNewer = false;
 		this.approvals = data.pendingApprovals || [];
 		this.question = data.pendingQuestion || null;
 		this.tasks = data.tasks || [];
@@ -89,11 +91,89 @@ export class ChatModel {
 		this.roleEffort = data.roleEffort || "";
 	}
 
-	// Older turns from chat.history go first.
-	prepend(turns, hasMore) {
-		this.turns = turns.map(normalTurn).concat(this.turns);
-		this.hasMore = Boolean(hasMore);
+	// --- The window (docs/10 "Chats"): the client holds a few pages of the transcript, never the whole of a long chat.
+	// A turn of it can be a part: `firstSeg` its first segment held (0: from its start), `segmentCount` the segments it
+	// has. `hasMore` there is more before the window, `hasNewer` after it - then what streams at the chat's end is not
+	// the window's and is passed over until the owner scrolls back there.
+
+	// The page before the window (chat.history's): it goes first, a part of the window's first turn joined to it.
+	prepend(page) {
+		const turns = (page.turns || []).map(normalTurn);
+		const joined = turns.length && this.turns.length && turns[turns.length - 1].turnId === this.turns[0].turnId;
+		if (joined) {
+			const piece = turns.pop();
+			const first = this.turns[0];
+			first.segments = piece.segments.concat(first.segments);
+			first.firstSeg = piece.firstSeg || 0;
+			if (piece.segmentCount !== undefined) first.segmentCount = piece.segmentCount;
+		}
+		this.turns = turns.concat(this.turns);
+		this.hasMore = Boolean(page.hasMore);
 		return { all: true };
+	}
+
+	// The page after the window: it goes last, a part of the window's last turn joined to it.
+	append(page) {
+		const turns = (page.turns || []).map(normalTurn);
+		const last = this.lastTurn();
+		if (turns.length && last && turns[0].turnId === last.turnId) {
+			const piece = turns.shift();
+			last.segments = last.segments.concat(piece.segments);
+			Object.assign(last, piece, { segments: last.segments, firstSeg: last.firstSeg || 0 });
+			if (piece.segmentCount === undefined) delete last.segmentCount;
+		}
+		this.turns = this.turns.concat(turns);
+		this.hasNewer = Boolean(page.hasNewer);
+		return { all: true };
+	}
+
+	// The segments the window holds.
+	held() {
+		return this.turns.reduce((count, turn) => count + turn.segments.length, 0);
+	}
+
+	// The window cut to `most` segments from its start: what is let go is before it again. Whether it was cut.
+	// A long turn alone is cut inside; the window keeps one segment at least.
+	trimOlder(most) {
+		let extra = this.held() - most;
+		if (extra <= 0) return false;
+		while (extra > 0 && this.turns.length) {
+			const first = this.turns[0];
+			const total = segmentsOf(first);
+			if (first.segments.length <= extra && this.turns.length > 1) {
+				extra -= first.segments.length;
+				this.turns.shift();
+				continue;
+			}
+			const cut = Math.min(extra, first.segments.length - 1);
+			first.segments = first.segments.slice(cut);
+			first.firstSeg = (first.firstSeg || 0) + cut;
+			first.segmentCount = total;
+			extra = 0;
+		}
+		this.hasMore = true;
+		return true;
+	}
+
+	// The window cut to `most` segments from its end: what is let go is after it again. Whether it was cut.
+	trimNewer(most) {
+		let extra = this.held() - most;
+		if (extra <= 0) return false;
+		while (extra > 0 && this.turns.length) {
+			const last = this.turns[this.turns.length - 1];
+			const total = segmentsOf(last);
+			if (last.segments.length <= extra && this.turns.length > 1) {
+				extra -= last.segments.length;
+				this.turns.pop();
+				continue;
+			}
+			const cut = Math.min(extra, last.segments.length - 1);
+			last.segments = last.segments.slice(0, last.segments.length - cut);
+			last.segmentCount = total;
+			extra = 0;
+		}
+		this.hasNewer = true;
+		return true;
 	}
 
 	// Folds one event in; what changed: {turn}, {segment, turn}, {summary}, {tasks}, {queued}, {modified}, {clips},
@@ -109,6 +189,7 @@ export class ChatModel {
 				return { summary: true };
 			}
 			case "turn.start": {
+				if (this.hasNewer) return {};
 				const turn = normalTurn({ turnId: data.turnId, user: data.user, mode: data.mode, model: data.model, group: data.group, startedMs: data.startedMs, segments: [], stop: null, recoveries: [] });
 				this.turns.push(turn);
 				// what the turn uses is what the chat uses now: the settings may have changed since the snapshot
@@ -118,7 +199,7 @@ export class ChatModel {
 			}
 			case "segment.start": {
 				const turn = this.turn(data.turnId);
-				if (!turn) return {};
+				if (!turn || this.hasNewer) return {};
 				const segment = Object.assign({ text: "", argsText: "" }, data);
 				delete segment.turnId;
 				turn.segments.push(segment);
@@ -247,6 +328,21 @@ function summaryOf(data) {
 
 function normalTurn(turn) {
 	return Object.assign({ segments: [], recoveries: [], stop: null, tokensIn: 0, tokensOut: 0 }, turn, { segments: (turn.segments || []).map((s) => Object.assign({ text: "", argsText: "" }, s)) });
+}
+
+// The segments a turn has, held or not.
+function segmentsOf(turn) {
+	const held = (turn.firstSeg || 0) + turn.segments.length;
+	return turn.segmentCount !== undefined && turn.segmentCount > held ? turn.segmentCount : held;
+}
+
+// Whether the window holds a turn's start (its message) and its end (its footer).
+export function turnStartHeld(turn) {
+	return !turn.firstSeg;
+}
+
+export function turnEndHeld(turn) {
+	return turn.segmentCount === undefined || (turn.firstSeg || 0) + turn.segments.length >= turn.segmentCount;
 }
 
 // The chats of a workspace (chats:<wsId>), most recently active first, and its deleted chats (docs/04 "Deleting a

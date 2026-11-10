@@ -1,5 +1,6 @@
 include "api/Plugin.ch"
 include "ChatTools.ch"
+include "chats/Pages.ch"
 
 namespace Ai
 {
@@ -76,13 +77,10 @@ namespace Ai
 		Core::String problem;
 		Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
 		if (!chat) return ToolError((Core::String("chat_read: ") + problem.View()).View());
-		chats->Loaded(chat);
 		Core::StringBuilder out;
 		Describe(out, chat);
 		out.Append("\n");
-		const int64 from = chat->m_Turns.Count() > most ? chat->m_Turns.Count() - most : 0;
-		for (int64 i = from; i < chat->m_Turns.Count(); ++i) {
-			const Turn* turn = chat->m_Turns[i];
+		for (const Turn* turn : LastTurnsWhole(LocalStateOf(call.m_Ws), chat, most)) {
 			out.Append("\n## Turn ");
 			out.Append(turn->m_TurnId.View());
 			out.Append((turn->m_Stop.IsEmpty() ? Core::String(" (running)") : (Core::String(" (") + turn->m_Stop.View()) + ")").View());
@@ -144,8 +142,8 @@ namespace Ai
 				Core::String problem;
 				Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
 				if (!chat) return ToolError((Core::String("chat_wait: ") + problem.View()).View());
-				if (!chat->m_Run) chats->Loaded(chat);
-				const Turn* last = chat->Current();
+				Core::Array<Turn*> lastTurns = chat->m_Run ? Core::Array<Turn*>() : LastTurnsWhole(LocalStateOf(call.m_Ws), chat, 1);
+				const Turn* last = lastTurns.IsEmpty() ? nullptr : lastTurns[0];
 				if (!chat->m_Run && last) {
 					Core::StringBuilder said;
 					Describe(said, chat);
