@@ -59,9 +59,15 @@ namespace Ai
 		}
 		json.Key(Core::StringView("compressedTurns"));
 		json.BeginArray();
+		if (chat->m_Offloaded)
+			for (const Core::String& turnId : chat->m_OffloadedCompressed) json.String(turnId.View());
 		for (const Turn* turn : chat->m_Turns)
 			if (turn->m_Compressed) json.String(turn->m_TurnId.View());
 		json.EndArray();
+		// What its summary says of its turns, so it starts offloaded (docs/04 "Offloading idle chats").
+		json.IntField("turnCount", chat->TurnCount());
+		json.Field("lastStop", chat->LastStop().View());
+		json.Field("lastAnswer", chat->LastAnswerLine().View());
 		json.IntField("createdMs", chat->m_CreatedMs);
 		json.IntField("updatedMs", chat->m_UpdatedMs);
 		json.IntField("counter", chat->m_Counter);
@@ -124,6 +130,7 @@ namespace Ai
 	void ForgetRunningTurn(const FS::Path& state, const Chat* chat) { FS::RemoveFile((ChatFolder(state, chat->m_ChatId.View()) / "running.json").CStr()); }
 
 	void SaveContextView(const FS::Path& state, const Chat* chat) {
+		if (chat->m_Offloaded) return;   // context.json holds what it had: nothing changed since it was offloaded
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("messages"));
@@ -302,7 +309,27 @@ namespace Ai
 		ForgetRunningTurn(state, chat);
 	}
 
-	Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
+	static Core::Array<Core::String> StringsOf(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	static void MarkCompressed(Chat* chat, const Core::Array<Core::String>& compressed) {
+		for (const Core::String& turnId : compressed) {
+			Turn* turn = TurnNamed(chat, turnId.View());
+			if (turn) turn->m_Compressed = true;
+		}
+	}
+
+	// Whether a chat can start offloaded: its header says what its turns are (one written before 2026-11-10 does not),
+	// the last of them ended, and no turn was cut off running.
+	static bool StartsOffloaded(const FS::Path& folder, const Serialization::DomNode& header) {
+		if (!header.Member("turnCount").IsValid() || FS::FileExists((folder / "running.json").CStr())) return false;
+		return header.Member("turnCount").AsInt() == 0 || !header.Member("lastStop").AsView().IsEmpty();
+	}
+
+	Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems, bool mayOffload) {
 		FS::Path folder = ChatFolder(state, chatId);
 		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
 		if (header.Kind() != Serialization::DomKind::Object) {
@@ -313,11 +340,16 @@ namespace Ai
 		chat->m_ChatId = Core::String(chatId);
 		chat->m_WsId = Core::String(wsId);
 		ReadHeader(chat, header);
+		if (mayOffload && StartsOffloaded(folder, header)) {
+			chat->m_Offloaded = true;
+			chat->m_OffloadedTurns = header.Member("turnCount").AsInt();
+			chat->m_OffloadedStop = Core::String(header.Member("lastStop").AsView());
+			chat->m_OffloadedAnswer = Core::String(header.Member("lastAnswer").AsView());
+			chat->m_OffloadedCompressed = StringsOf(header.Member("compressedTurns"));
+			return chat;
+		}
 		ReadTurns(chat, ReadWhole(folder / "turns.jsonl").View());
-		Serialization::DomNode compressed = header.Member("compressedTurns");
-		for (int64 i = 0; i < compressed.Count(); ++i)
-			for (Turn* turn : chat->m_Turns)
-				if (turn->m_TurnId.View() == compressed.At(i).AsView()) turn->m_Compressed = true;
+		MarkCompressed(chat, StringsOf(header.Member("compressedTurns")));
 		Serialization::DomNode running = ParseJson(ReadWhole(folder / "running.json").View());
 		if (running.Kind() == Serialization::DomKind::Object) {
 			Turn* turn = new Turn();
@@ -334,10 +366,39 @@ namespace Ai
 		if (!folder.IsOpen()) return chats;
 		for (FS::DirectoryEntry& entry : folder) {
 			if (entry.kind != FS::EntryKind::Directory) continue;
-			Chat* chat = LoadChat(state, wsId, entry.name.View(), interruptedNote, problems);
+			Chat* chat = LoadChat(state, wsId, entry.name.View(), interruptedNote, problems, true);
 			if (chat) chats.Push(chat);
 		}
 		return chats;
+	}
+
+	// --- Offloading ---------------------------------------------------------------------------------------------------
+
+	void OffloadTurns(Chat* chat) {
+		if (chat->m_Offloaded) return;
+		chat->m_OffloadedTurns = chat->m_Turns.Count();
+		chat->m_OffloadedStop = chat->LastStop();
+		chat->m_OffloadedAnswer = chat->LastAnswerLine();
+		Core::Array<Core::String> compressed;
+		for (const Turn* turn : chat->m_Turns)
+			if (turn->m_Compressed) compressed.Push(turn->m_TurnId);
+		chat->m_OffloadedCompressed = compressed;
+		chat->m_Turns = Core::Array<Turn*>();
+		chat->m_Offloaded = true;
+	}
+
+	void LoadTurns(const FS::Path& state, Chat* chat) {
+		if (!chat->m_Offloaded) return;
+		FS::Path folder = ChatFolder(state, chat->m_ChatId.View());
+		chat->m_Turns = Core::Array<Turn*>();
+		ReadTurns(chat, ReadWhole(folder / "turns.jsonl").View());
+		MarkCompressed(chat, chat->m_OffloadedCompressed);
+		ReadContextView(chat, ParseJson(ReadWhole(folder / "context.json").View()));
+		chat->m_Offloaded = false;
+		chat->m_OffloadedTurns = 0;
+		chat->m_OffloadedStop = Core::String();
+		chat->m_OffloadedAnswer = Core::String();
+		chat->m_OffloadedCompressed = Core::Array<Core::String>();
 	}
 
 	// --- Deleted chats ------------------------------------------------------------------------------------------------

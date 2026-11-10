@@ -117,7 +117,7 @@ Each socket resumes on its own ("Routing" above): the master's after the master 
 3. Otherwise, for each topic: if the ring buffer still holds `cursor+1`, the server replays events from there (`"ok"`); if not, it sends a `snap` (`"snapshot"`).
 4. After resume, live events flow. The client never shows duplicate tokens: events with `seq <= cursor` are ignored.
 
-**Ring buffers:** per topic, bounded by count and bytes (defaults: chat 20k events / 8 MB, run 50k lines / 16 MB, terminal 5 MB, others 2k events). Chat token deltas are **coalesced into persisted segments** at segment end, so an old chat never needs its deltas replayed - the snapshot holds completed segments, and only the in-flight segment's deltas live in the ring.
+**Ring buffers:** per topic, bounded by count and bytes (defaults: chat 20k events / 8 MB, run 50k lines / 16 MB, terminal 5 MB, others 2k events). Chat token deltas are **coalesced into persisted segments** at segment end, so an old chat never needs its deltas replayed - the snapshot holds completed segments, and only the in-flight segment's deltas live in the ring. A topic's owner may also empty its ring (a chat offloaded while nobody watches it, `docs/04` "Offloading idle chats"): a client resuming it then gets the snapshot.
 
 ## Backpressure and floods
 

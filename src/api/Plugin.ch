@@ -98,6 +98,12 @@ namespace IED
 		// it or none. `change` is quick and calls nothing of the API but `events`. Any thread.
 		public void Atomically(func<void(Events& events)> change);
 		public void RemoveTopic(Core::StringView key);
+		// Whether a client subscribes to the plugin's topic `key` now: what a plugin unloads while nobody watches it
+		// (docs/04 "Offloading idle chats") asks this. Any thread.
+		public bool Watched(Core::StringView key) const;
+		// Drops the events the plugin's topic `key` keeps for replay (docs/10 "Resume"): a client that comes back to it
+		// gets its snapshot rather than the events it missed; numbering goes on. Any thread.
+		public void DropReplay(Core::StringView key);
 		// Text for the output source `source` (one the manifest's outputSources declares) of workspace `wsId`. Any thread.
 		public void Output(Core::StringView wsId, Core::StringView source, Core::StringView text);
 		// The plugin's computed entries of a contribution point (docs/26 section 3) in workspace `wsId` ("": every

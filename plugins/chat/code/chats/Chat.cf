@@ -269,6 +269,39 @@ namespace Ai
 		return nullptr;
 	}
 
+	Core::String Turn::Answer() const {
+		Core::StringBuilder out;
+		for (const Segment* segment : m_Segments) {
+			if (segment->m_Type != "text" || segment->m_Text.IsEmpty()) continue;
+			if (!out.IsEmpty()) out.Append("\n");
+			out.Append(segment->m_Text.View());
+		}
+		return out.ToString();
+	}
+
+	const int64 c_AnswerLineMostBytes = 400;   // of the last answer's first line, what an offloaded chat keeps
+
+	// The first line of `text`, cut at a character's start within c_AnswerLineMostBytes.
+	static Core::String FirstLineOf(Core::StringView text) {
+		int64 end = text.IndexOf('\n', 0);
+		if (end < 0) end = text.ByteLength();
+		if (end > c_AnswerLineMostBytes) {
+			end = c_AnswerLineMostBytes;
+			while (end > 0 && ((uint8)text.ByteAt(end) & 0xC0) == 0x80) end -= 1;
+		}
+		return Core::String(text.Substring(0, end));
+	}
+
+	Core::String Chat::LastStop() const {
+		if (m_Offloaded) return m_OffloadedStop;
+		return Current() ? Current()->m_Stop : Core::String();
+	}
+
+	Core::String Chat::LastAnswerLine() const {
+		if (m_Offloaded) return m_OffloadedAnswer;
+		return Current() ? FirstLineOf(Current()->Answer().View()) : Core::String();
+	}
+
 	void Turn::WriteUser(IED::JsonWriter& json) const {
 		json.BeginObject();
 		json.Field("text", m_UserText.View());
@@ -426,8 +459,9 @@ namespace Ai
 		json.Field("pinnedModel", m_PinnedModel.View());
 		json.Field("state", ChatStateName(m_State));
 		if (!m_StateReason.IsEmpty()) json.Field("stateReason", m_StateReason.View());
-		if (!m_Turns.IsEmpty() && !Current()->m_Stop.IsEmpty()) json.Field("lastStop", Current()->m_Stop.View());
-		json.IntField("turnCount", m_Turns.Count());
+		Core::String lastStop = LastStop();
+		if (!lastStop.IsEmpty()) json.Field("lastStop", lastStop.View());
+		json.IntField("turnCount", TurnCount());
 		json.IntField("updatedMs", m_UpdatedMs);
 		int64 done = 0;
 		for (ChatTask* task : m_Tasks)

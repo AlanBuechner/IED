@@ -173,6 +173,13 @@
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Days a deleted chat is kept, whole and restorable from the Chats list's Deleted section, before it is removed for good (docs/04 Deleting a chat)."
 		},
+		"ai.chats.offloadAfterMinutes": {
+			"type": "number",
+			"minimum": 0,
+			"default": 10,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Minutes a chat no tab shows and no turn runs keeps its turns in the server's memory; then they are left on disk and read back when the chat is opened, its turn starts or another chat reads it. 0 keeps every chat loaded (docs/04 Offloading idle chats)."
+		},
 		"ai.chats.notify": {
 			"type": "string",
 			"enum": ["all", "toasts", "off"],

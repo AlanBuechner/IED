@@ -564,7 +564,11 @@ Per chat, under `.ied/local/chats/<chatId>/` - the workspace's local state, `doc
 | `reverted/` | `<ms>-<turnId>.jsonl`: the lines of `turns.jsonl` a revert took out of the chat, whole ("Reverting a chat") |
 | `checkpoints/` | content-addressed pre-edit file snapshots for rewind |
 
-Only the active window of each chat stays in server memory; older turns load lazily on scroll.
+### Offloading idle chats (built, 2026-11-10)
+
+Owner, 2026-11-10: "chats should be offloaded to disk if they are not actively being viewed to save on memory for long chats". A workspace server keeps a chat's turns in memory only while something uses them. A chat no client watches (no tab on any device has its `chat:<chatId>` topic open, `PluginContext::Watched` in `docs/26`) and no turn runs is **offloaded** once `ai.chats.offloadAfterMinutes` pass (10 by default, app or solution tier; 0 keeps every chat loaded). Its turns are let go, and so are the events its topic kept for replay (`PluginContext::DropReplay`: a client that comes back gets the snapshot). Only its header stays: title, settings, tasks, queue, background tasks, the clipboard, and what its summary says of its turns. Those are `turnCount`, `lastStop` and `lastAnswer` (the first line of its last answer, for `chat_list`), kept in `chat.json` as well, so after a restart a chat starts offloaded and only its `chat.json` is read.
+
+Whatever needs the turns reads them back first, from `turns.jsonl`, `context.json` and the header's `compressedTurns` (`Chats::Loaded`, `plugins/chat/code/chats/Offload.cf`): a client opening the chat, `chat.history`, a turn starting (the owner's message, another chat's, a background task's end, a resume after a restart), `chat.revert`, `chat_read`, `chat_wait` and Claude's context count. What is read back is what was saved, so the next request is the one the chat would have sent anyway and a model server's prefix cache still holds it. A chat whose `chat.json` predates offloading, or one a restart cut a turn off in, loads whole at start and is offloaded like any other. The server log says when a chat is offloaded and how long reading it back took. On a copy of 17 real chats (100 MB on disk, 97 turns) the workspace server's private memory was 172 MB with every chat loaded, 82 MB once they were offloaded, and 58 MB after a restart with none opened.
 
 ## Chat names (built, 2026-11-05)
 

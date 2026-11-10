@@ -44,6 +44,7 @@ namespace Ai
 		LoadWindows();
 		context->StartThread([self]() { self->ClaudeKeeper(); });
 		context->StartThread([self]() { self->DeletedKeeper(); });
+		context->StartThread([self]() { self->OffloadKeeper(); });
 		context->OnDeactivate([self]() {
 			IED::HostLock guard(*self->m_Context);
 			self->m_Stopping = true;
@@ -97,6 +98,7 @@ namespace Ai
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Core::String policy = Core::String(Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.resumeInterrupted"), wsId).View(), *doc).root.AsView());
 		for (Chat* chat : InWorkspace(wsId)) {
+			if (chat->LastStop() == "interrupted" || !chat->m_Resume.IsEmpty()) Loaded(chat);
 			Core::String reason = ResumeReason(chat, policy.View());
 			if (reason.IsEmpty()) continue;
 			OwnerMessage message;
@@ -160,6 +162,7 @@ namespace Ai
 		Core::String group;
 		Core::String roleEffort;
 		IED::Workspace ws = WorkspaceOf(chat);
+		Loaded(chat);
 		if (chat->m_Context.IsEmpty() && !chat->m_Turns.IsEmpty()) chat->m_Context = MeterFromTurns(this, chat, ws);
 		else if (!chat->m_Context.IsEmpty() && !HasIedParts(chat->m_Context.View())) chat->m_Context = ResplitContext(this, chat, ws);
 		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude") CountClaude(chat, ws);
@@ -303,6 +306,7 @@ namespace Ai
 
 	void Chats::StartTurn(Chat* chat, const OwnerMessage& sent, int64 hops, const char* resumed, const char* origin) {
 		IED::Workspace ws = WorkspaceOf(chat);
+		Loaded(chat);
 		Core::StringView text = sent.m_Text.View();
 		Turn* turn = new Turn();
 		turn->m_TurnId = chat->NextId("u");
@@ -627,6 +631,7 @@ namespace Ai
 	Core::String Chats::HistoryMethod(const IED::Request& request) {
 		const IED::Params& params = request.m_Params;
 		Chat* chat = Get(params.Str("chatId").View());
+		Loaded(chat);
 		Core::String before = params.Str("before", Core::StringView(""));
 		const int64 limit = params.Int("limit", c_ChatSnapshotTurns);
 		int64 end = chat->m_Turns.Count();

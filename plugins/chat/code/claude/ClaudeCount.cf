@@ -33,6 +33,7 @@ namespace Ai
 		if (!start.m_Profile || !start.m_Profile->IsClaude()) return nullptr;
 		ClaudeSession* session = SessionOf(chat);
 		if (session->m_InUse) return nullptr;
+		Loaded(chat);
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(this, chat, ws, contributed);
 		start.m_System = TurnSystem(this, chat, ws, tools, chat->Current() ? chat->Current()->m_UserText.View() : Core::StringView(""), models, contributed);

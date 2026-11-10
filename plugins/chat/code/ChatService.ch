@@ -90,6 +90,9 @@ namespace Ai
 		// Claude's own count of an idle Claude chat's context asked of its resumed session, on a thread of its own; once
 		// per server run (ClaudeCount.cf). Inside the host lock.
 		public void CountClaude(Chat* chat, const IED::Workspace& ws);
+		// The chat's turns in memory - read back from disk when it was offloaded (Offload.cf, docs/04 "Offloading idle
+		// chats") - and it counted as used now. Whatever reads or changes its turns calls it first. Inside the host lock.
+		public void Loaded(Chat* chat);
 
 		// Background tasks (Background.cf, docs/04 "Background tasks"); inside the host lock. A new running task of
 		// `chat`, published.
@@ -166,6 +169,11 @@ namespace Ai
 		private void ClaudeKeeper();
 		// Stops the Claude sessions no turn used for kClaudeIdleMs; the lock is held.
 		private void StopIdleSessions();
+		// Offloads the chats no client watched and no turn used for ai.chats.offloadAfterMinutes; the lock is held.
+		private void OffloadIdle();
+		private void Offload(Chat* chat, const IED::Workspace& ws);
+		// The thread that offloads idle chats every kOffloadTickNs.
+		private void OffloadKeeper();
 		// The workspace's chats that go on by themselves after a restart (Resume.ch), kResumeDelayNs after it opened.
 		private void ResumeLater(Core::StringView wsId);
 		private void Resume(Core::StringView wsId);

@@ -60,6 +60,7 @@ namespace Ai
 		Chat* chat = Get(params.Str("chatId").View());
 		Core::String turnId = params.Str("turnId");
 		if (chat->m_Run) StopForRevert(chat, request);
+		Loaded(chat);
 		int64 at = -1;
 		for (int64 i = 0; i < chat->m_Turns.Count(); ++i)
 			if (chat->m_Turns[i]->m_TurnId == turnId) at = i;

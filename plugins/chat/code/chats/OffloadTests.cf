@@ -1,0 +1,143 @@
+// Offloading a chat (ChatStore.ch, docs/04 "Offloading idle chats"): a chat whose header says what its turns are starts
+// offloaded, with only chat.json read; its turns read back are what was saved - compressed turns and what compression
+// shows of their messages included - and a header saved while it is offloaded keeps them. A header from before
+// offloading, or one written while a turn ran, loads the chat whole.
+
+include "ChatStore.ch"
+
+static Ai::Turn* MadeTurn(Core::StringView turnId, Core::StringView user, Core::StringView answer) {
+	Ai::Turn* turn = new Ai::Turn();
+	turn->m_TurnId = Core::String(turnId);
+	turn->m_UserText = Core::String(user);
+	turn->m_Stop = Core::String("finished");
+	Ai::Segment* text = new Ai::Segment();
+	text->m_SegId = Core::String("s1");
+	text->m_Type = Core::String("text");
+	text->m_Text = Core::String(answer);
+	text->m_Done = true;
+	turn->m_Segments.Push(text);
+	Ai::ModelMessage* asked = new Ai::ModelMessage();
+	asked->m_Role = Core::String("user");
+	asked->m_Content = Core::String(user);
+	turn->m_Messages.Push(asked);
+	Ai::ModelMessage* answered = new Ai::ModelMessage();
+	answered->m_Role = Core::String("assistant");
+	answered->m_Content = Core::String(answer);
+	turn->m_Messages.Push(answered);
+	return turn;
+}
+
+// A chat of three finished turns saved under `state`, its first turn compressed with its answer shown shorter.
+static Ai::Chat* SavedChat(const FS::Path& state) {
+	Ai::Chat* chat = new Ai::Chat();
+	chat->m_ChatId = Core::String("c1");
+	chat->m_WsId = Core::String("w1");
+	chat->m_Title = Core::String("Offload test");
+	chat->m_Turns.Push(MadeTurn(Core::StringView("u1"), Core::StringView("first"), Core::StringView("A long first answer.")));
+	chat->m_Turns.Push(MadeTurn(Core::StringView("u2"), Core::StringView("second"), Core::StringView("Second.")));
+	chat->m_Turns.Push(MadeTurn(Core::StringView("u3"), Core::StringView("third"), Core::StringView("Done.\nThe rest of it.")));
+	chat->m_Turns[0]->m_Compressed = true;
+	chat->m_Turns[0]->m_Messages[1]->m_Shown = Core::String("[shortened]");
+	for (Ai::Turn* turn : chat->m_Turns) Ai::AppendTurn(state, chat, turn);
+	Ai::SaveContextView(state, chat);
+	Ai::SaveChatHeader(state, chat);
+	return chat;
+}
+
+static void WriteText(const FS::Path& file, Core::StringView text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+}
+
+static FS::Path FreshState(const char* name) {
+	FS::Path state = FS::TempDirectory() / name;
+	FS::RemoveAll(state.CStr());
+	return state;
+}
+
+[test("server.ai.offload")]
+class OffloadTests {
+	[test("starts_offloaded")]
+	public static void TestStartsOffloaded() {
+		FS::Path state = FreshState("ied-offload-start");
+		SavedChat(state);
+		Core::Array<Core::String> problems;
+		Ai::Chat* chat = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems, true);
+		assert_true(chat != nullptr, "the chat loads");
+		assert_true(chat->m_Offloaded, "offloaded: its header says what its turns are");
+		assert_true(chat->m_Turns.IsEmpty(), "no turn read");
+		assert_eq(3, chat->TurnCount(), "its summary's turn count, from the header");
+		assert_se("finished", chat->LastStop().CStr(), "and its last stop");
+		assert_se("Done.", chat->LastAnswerLine().CStr(), "the first line of its last answer");
+		assert_se("Offload test", chat->m_Title.CStr(), "the header itself is read");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("reads_back_what_was_saved")]
+	public static void TestReadsBack() {
+		FS::Path state = FreshState("ied-offload-back");
+		SavedChat(state);
+		Core::Array<Core::String> problems;
+		Ai::Chat* chat = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems, true);
+		Ai::LoadTurns(state, chat);
+		assert_true(!chat->m_Offloaded, "loaded");
+		assert_eq(3, chat->m_Turns.Count(), "every turn");
+		assert_eq(3, chat->TurnCount(), "counted from the turns now");
+		assert_true(chat->m_Turns[0]->m_Compressed, "the compressed turn stays compressed");
+		assert_true(!chat->m_Turns[1]->m_Compressed, "the others do not");
+		assert_se("[shortened]", chat->m_Turns[0]->m_Messages[1]->m_Shown.CStr(), "what compression shows of a message (context.json)");
+		assert_se("A long first answer.", chat->m_Turns[0]->m_Messages[1]->m_Content.CStr(), "its content whole");
+		assert_se("Done.\nThe rest of it.", chat->m_Turns[2]->Answer().CStr(), "the last turn's answer");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("offloaded_header_keeps_compression")]
+	public static void TestOffloadedHeader() {
+		FS::Path state = FreshState("ied-offload-header");
+		Ai::Chat* chat = SavedChat(state);
+		Ai::OffloadTurns(chat);
+		assert_true(chat->m_Offloaded && chat->m_Turns.IsEmpty(), "its turns let go");
+		assert_eq(3, chat->TurnCount(), "still counted");
+		assert_se("Done.", chat->LastAnswerLine().CStr(), "its last answer's first line kept");
+		chat->m_Title = Core::String("Renamed while offloaded");
+		Ai::SaveChatHeader(state, chat);
+		Ai::SaveContextView(state, chat);
+		Core::Array<Core::String> problems;
+		Ai::Chat* whole = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems);
+		assert_true(!whole->m_Offloaded, "without mayOffload, whole");
+		assert_se("Renamed while offloaded", whole->m_Title.CStr(), "the header saved while offloaded");
+		assert_eq(3, whole->m_Turns.Count(), "every turn");
+		assert_true(whole->m_Turns[0]->m_Compressed, "the compressed turn kept by a header saved while offloaded");
+		assert_se("[shortened]", whole->m_Turns[0]->m_Messages[1]->m_Shown.CStr(), "context.json not written over while offloaded");
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("loads_whole_when_it_must")]
+	public static void TestLoadsWhole() {
+		FS::Path state = FreshState("ied-offload-whole");
+		FS::Path folder = Ai::ChatFolder(state, Core::StringView("c1"));
+		Ai::Chat* chat = SavedChat(state);
+		Core::Array<Core::String> problems;
+		// A header from before offloading says nothing of its turns.
+		WriteText(folder / "chat.json", Core::StringView("{\"chatId\":\"c1\",\"title\":\"Old\",\"compressedTurns\":[\"u1\"]}"));
+		Ai::Chat* old = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems, true);
+		assert_true(!old->m_Offloaded, "an old header: loaded whole");
+		assert_eq(3, old->m_Turns.Count(), "its turns read");
+		assert_true(old->m_Turns[0]->m_Compressed, "compressed as its header says");
+		// A header written while a turn ran: its last stop is empty.
+		WriteText(folder / "chat.json", Core::StringView("{\"chatId\":\"c1\",\"title\":\"Ran\",\"turnCount\":4,\"lastStop\":\"\"}"));
+		Ai::Chat* ran = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems, true);
+		assert_true(!ran->m_Offloaded, "a turn ran when the header was written: loaded whole");
+		assert_eq(3, ran->m_Turns.Count(), "turns.jsonl says how many");
+		// A turn a restart cut off.
+		Ai::SaveChatHeader(state, chat);
+		Ai::Turn* cut = MadeTurn(Core::StringView("u4"), Core::StringView("fourth"), Core::StringView("half"));
+		cut->m_Stop = Core::String();
+		Ai::SaveRunningTurn(state, chat, cut);
+		Ai::Chat* resumed = Ai::LoadChat(state, Core::StringView("w1"), Core::StringView("c1"), Core::StringView("cut off"), problems, true);
+		assert_true(!resumed->m_Offloaded, "running.json: loaded whole");
+		assert_eq(4, resumed->m_Turns.Count(), "the cut-off turn ends interrupted");
+		assert_se("interrupted", resumed->LastStop().CStr(), "and says so");
+		FS::RemoveAll(state.CStr());
+	}
+}

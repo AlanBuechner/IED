@@ -6,15 +6,7 @@ namespace Ai
 	const int64 c_ChatWaitPollNs = 250000000;
 	const int64 c_ChatLineBytes = 160;
 
-	Core::String AnswerOf(const Turn* turn) {
-		Core::StringBuilder out;
-		for (const Segment* segment : turn->m_Segments) {
-			if (segment->m_Type != "text" || segment->m_Text.IsEmpty()) continue;
-			if (!out.IsEmpty()) out.Append("\n");
-			out.Append(segment->m_Text.View());
-		}
-		return out.ToString();
-	}
+	Core::String AnswerOf(const Turn* turn) { return turn->Answer(); }
 
 	static Core::StringView FirstLine(Core::StringView text) {
 		int64 end = text.IndexOf('\n', 0);
@@ -39,8 +31,8 @@ namespace Ai
 		out.Append(", ");
 		out.Append(ChatStateName(chat->m_State));
 		out.Append(", ");
-		out.AppendInt(chat->m_Turns.Count());
-		out.Append(chat->m_Turns.Count() == 1 ? " turn)" : " turns)");
+		out.AppendInt(chat->TurnCount());
+		out.Append(chat->TurnCount() == 1 ? " turn)" : " turns)");
 	}
 
 	// The hops of a message this chat sends now: one more than the turn it is in got.
@@ -63,8 +55,7 @@ namespace Ai
 		for (Chat* each : chats->InWorkspace(call.m_Ws.m_Id.View())) {
 			Describe(out, each);
 			if (each == self) out.Append(" - this chat");
-			Turn* last = each->Current();
-			Core::String answer = last ? AnswerOf(last) : Core::String();
+			Core::String answer = each->LastAnswerLine();
 			if (!answer.IsEmpty()) {
 				out.Append(": ");
 				out.Append(FirstLine(answer.View()));
@@ -85,6 +76,7 @@ namespace Ai
 		Core::String problem;
 		Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
 		if (!chat) return ToolError((Core::String("chat_read: ") + problem.View()).View());
+		chats->Loaded(chat);
 		Core::StringBuilder out;
 		Describe(out, chat);
 		out.Append("\n");
@@ -152,6 +144,7 @@ namespace Ai
 				Core::String problem;
 				Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
 				if (!chat) return ToolError((Core::String("chat_wait: ") + problem.View()).View());
+				if (!chat->m_Run) chats->Loaded(chat);
 				const Turn* last = chat->Current();
 				if (!chat->m_Run && last) {
 					Core::StringBuilder said;

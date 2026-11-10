@@ -156,6 +156,8 @@ namespace Ai
 
 		public Segment* FindSegment(Core::StringView segId) const;
 		public Segment* ToolSegment(Core::StringView callId) const;
+		// Its answer: its text segments, a line break between.
+		public Core::String Answer() const;
 		// The owner's message as the clients get it: {text, from?, resumed?, mentions?, attachments?}.
 		public void WriteUser(IED::JsonWriter& json) const;
 		// The clients' view; with `messages` the stored form, the model's messages too.
@@ -309,8 +311,21 @@ namespace Ai
 		public Core::String m_Resume;                   // a call of this tool restarts the server: the chat goes on once it is back (Resume.ch)
 		public ChatRun* m_Run;                          // the running turn, or null
 		public int64 m_Counter;
+		// Offloaded (docs/04 "Offloading idle chats"): its turns are on disk only - m_Turns is empty until Chats::Loaded
+		// reads them back - and what its summary and chat_list need of them is kept here. Kept in chat.json too, so a
+		// chat starts offloaded.
+		public bool m_Offloaded;
+		public int64 m_OffloadedTurns;                  // how many turns it has
+		public Core::String m_OffloadedStop;            // its last turn's stop
+		public Core::String m_OffloadedAnswer;          // the first line of its last turn's answer
+		public Core::Array<Core::String> m_OffloadedCompressed;   // its compressed turns
+		public int64 m_UsedMs;                          // when a client last watched it, a turn ran or its turns were read
 
 		public Turn* Current() const { return m_Turns.IsEmpty() ? nullptr : m_Turns[m_Turns.Count() - 1]; }
+		// What the summary says of its turns, offloaded or not.
+		public int64 TurnCount() const { return m_Offloaded ? m_OffloadedTurns : m_Turns.Count(); }
+		public Core::String LastStop() const;
+		public Core::String LastAnswerLine() const;
 		// It runs on a single model of its own, not a group (docs/04 "One choice per chat"): no group's effort applies.
 		public bool RunsAlone() const { return !m_PinnedModel.IsEmpty() && m_Group.IsEmpty() && m_Agent.IsEmpty(); }
 		public Core::String NextId(const char* prefix);

@@ -281,6 +281,24 @@ namespace IED
 			}
 	}
 
+	bool PluginContext::Watched(Core::StringView key) const {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		if (!instance->m_Runtime->TopicOf(instance, key)) return false;
+		Ied::Topic* topic = server->m_Hub.Find(key);
+		return topic && !topic->m_Subscribers.IsEmpty();
+	}
+
+	void PluginContext::DropReplay(Core::StringView key) {
+		Ied::CodeInstance* instance = Of(m_Host);
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		Ied::ApiLock guard(server);
+		if (!instance->m_Runtime->TopicOf(instance, key)) return;
+		Ied::Topic* topic = server->m_Hub.Find(key);
+		if (topic) topic->ClearRing();
+	}
+
 	void PluginContext::Output(Core::StringView wsId, Core::StringView source, Core::StringView text) {
 		Ied::CodeInstance* instance = Of(m_Host);
 		Ied::Server* server = instance->m_Runtime->m_Server;

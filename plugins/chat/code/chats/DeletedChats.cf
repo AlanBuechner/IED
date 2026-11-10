@@ -73,7 +73,7 @@ namespace Ai
 		gone->m_Title = chat->m_Title;
 		gone->m_UpdatedMs = chat->m_UpdatedMs;
 		gone->m_DeletedMs = ChatNowMs();
-		gone->m_TurnCount = chat->m_Turns.Count();
+		gone->m_TurnCount = chat->TurnCount();
 		Core::String problem;
 		if (!MoveToDeleted(LocalStateOf(ws), chat->m_ChatId.View(), gone->m_DeletedMs, problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
 		for (int64 i = 0; i < m_Chats.Count(); ++i)
