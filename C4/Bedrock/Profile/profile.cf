@@ -311,6 +311,12 @@ namespace Profile
 		if (running) ThreadEvent(running, Event::ThreadName, Interned(running, name));
 	}
 
+	void SetThreadOrder(Core::InitList<const char*> names) {
+		Core::Array<Core::String> list;
+		for (const char* name : names) list.Push(Core::String(name));
+		KeepThreadOrder(list);
+	}
+
 	// --- Tasks ----------------------------------------------------------------------------------------------------
 
 	uint64 TaskBegin(Core::StringView name, uint64 parent) {

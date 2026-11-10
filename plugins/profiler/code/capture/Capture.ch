@@ -314,6 +314,7 @@ namespace Profiler
 		public Core::HashMap<uint64, SrcLoc> m_Srclocs;
 		public Core::HashMap<uint64, int32> m_TrackOf;        // client thread id -> index in tracks
 		public Core::Array<ThreadTrack*> m_Tracks;
+		public Core::Array<uint64> m_ThreadOrder;             // the program's thread lane order (ThreadOrder): names and patterns, as string ids
 		public Core::HashMap<uint64, SiteStats*> m_Sites;
 		public Core::HashMap<uint64, FrameSet*> m_FrameSetOf;
 		public Core::Array<FrameSet*> m_FrameSets;

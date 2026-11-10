@@ -86,6 +86,7 @@ namespace Profile
 		public uint64 nextGpuContext;
 		public Core::Array<EventBuffer*> threads;
 		public EventBuffer global;
+		public Core::Array<uint8> threadOrder;   // a ThreadOrder waiting for the flusher (under global.lock), sent as a chunk of its own
 		public int32 stopping;           // atomic
 		public Threading::Thread* flusher;
 		public int64 lastCalibration;
@@ -140,4 +141,7 @@ namespace Profile
 	// Every JobSystem's jobs as tasks (Threading::SetJobObserver), named as they were submitted: on while a session
 	// runs.
 	void ObserveJobs(bool on);
+	// Keeps the program's thread lane order (SetThreadOrder) for this session and those that start later, and queues it
+	// to the running one.
+	void KeepThreadOrder(const Core::Array<Core::String>& names);
 }

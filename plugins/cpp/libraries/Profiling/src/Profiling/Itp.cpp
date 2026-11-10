@@ -59,7 +59,7 @@ namespace
 	enum class Event : uint8_t
 	{
 		Hello = 0x01, Calibration = 0x02, Bye = 0x03,
-		StringDef = 0x10, SrcLocDef = 0x11, ThreadDef = 0x12, ThreadName = 0x13,
+		StringDef = 0x10, SrcLocDef = 0x11, ThreadDef = 0x12, ThreadName = 0x13, ThreadOrder = 0x14,
 		ZoneBegin = 0x20, ZoneBeginNamed = 0x21, ZoneEnd = 0x22, ZoneText = 0x23, ZoneValue = 0x24,
 		TaskBegin = 0x30, TaskEnd = 0x31, TaskSuspend = 0x32, TaskResume = 0x33,
 		FrameMark = 0x40, FrameBegin = 0x41, FrameEnd = 0x42,
@@ -213,6 +213,7 @@ namespace
 		std::atomic<uint64_t> nextTask{ 0 };
 		std::vector<std::shared_ptr<Buffer>> threads;
 		Buffer global;
+		Bytes threadOrder;                     // a ThreadOrder waiting for the flusher (under global.lock), sent as a chunk of its own
 		std::atomic<bool> stopping{ false };
 		std::thread flusher;
 		int64_t lastCalibration = 0;
@@ -259,6 +260,8 @@ namespace
 	std::mutex g_startLock;
 	Session* g_session = nullptr;
 	int64_t g_sessions = 0;
+	std::mutex g_threadOrderLock;
+	std::vector<std::string> g_threadOrder;   // the program's thread lane order (itp_thread_order), kept for later sessions
 
 	struct ThreadSlot
 	{
@@ -322,6 +325,27 @@ namespace
 		PutVarint(session->global.bytes, (uint64_t)UnixNs());
 	}
 
+	// Queues the kept thread order (with its names' StringDefs) for the flusher; an empty one only with `evenEmpty`.
+	void QueueThreadOrder(Session* session, bool evenEmpty)
+	{
+		std::vector<std::string> names;
+		{
+			std::lock_guard<std::mutex> held(g_threadOrderLock);
+			names = g_threadOrder;
+		}
+		if (names.empty() && !evenEmpty) return;
+		std::vector<uint64_t> ids;
+		{
+			std::lock_guard<std::mutex> held(session->lock);
+			for (const std::string& name : names) ids.push_back(session->Intern(name.data(), name.size()));
+		}
+		std::lock_guard<std::mutex> global(session->global.lock);
+		session->threadOrder.clear();
+		PutEvent(session->threadOrder, Event::ThreadOrder);
+		PutVarint(session->threadOrder, ids.size());
+		for (uint64_t id : ids) PutVarint(session->threadOrder, id);
+	}
+
 	bool FlushOnce(Session* session)
 	{
 		const int64_t now = Now();
@@ -346,6 +370,13 @@ namespace
 		Bytes globalBody;
 		int64_t globalBase;
 		if (Take(session->global, globalBody, globalBase)) PutChunk(out, kGlobalChunk, 0, globalBase, globalBody);
+		// The thread order in a chunk of its own: a profiler that does not know the event loses only that chunk.
+		Bytes order;
+		{
+			std::lock_guard<std::mutex> held(session->global.lock);
+			order.swap(session->threadOrder);
+		}
+		if (!order.empty()) PutChunk(out, kGlobalChunk, 0, session->startTicks, order);
 		out.insert(out.end(), threads.begin(), threads.end());
 		const bool sent = session->Send(out);
 		std::lock_guard<std::mutex> held(session->lock);
@@ -498,6 +529,7 @@ namespace
 			return false;
 		}
 		QueueCalibration(session.get(), session->startTicks);
+		QueueThreadOrder(session.get(), false);
 		Session* started = session.release();
 		started->flusher = std::thread(FlushLoop, started);
 		g_session = started;
@@ -809,6 +841,19 @@ extern "C" void itp_thread_name(const char* name)
 	Inside inside;
 	Session* session = Running();
 	if (session && name) ThreadEvent(session, Event::ThreadName, Interned(session, name));
+}
+
+extern "C" void itp_thread_order(const char* const* names, int count)
+{
+	Inside inside;
+	{
+		std::lock_guard<std::mutex> held(g_threadOrderLock);
+		g_threadOrder.clear();
+		for (int i = 0; i < count; ++i)
+			if (names && names[i]) g_threadOrder.emplace_back(names[i]);
+	}
+	Session* session = Running();
+	if (session) QueueThreadOrder(session, true);
 }
 
 extern "C" uint64_t itp_task_begin(const char* name, uint64_t parent)

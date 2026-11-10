@@ -25,6 +25,7 @@ EVENTS = {
 	0x11: ("SrcLocDef", [("id", "v"), ("nameStr", "v"), ("functionStr", "v"), ("fileStr", "v"), ("line", "v"), ("color", "v")]),
 	0x12: ("ThreadDef", [("threadId", "v"), ("osThreadId", "v"), ("groupHint", "v")]),
 	0x13: ("ThreadName", [("dt", "dt"), ("nameStr", "v")]),
+	0x14: ("ThreadOrder", [("names", "list")]),
 	0x20: ("ZoneBegin", [("dt", "dt"), ("srcLocId", "v")]),
 	0x21: ("ZoneBeginNamed", [("dt", "dt"), ("srcLocId", "v"), ("nameStr", "v")]),
 	0x22: ("ZoneEnd", [("dt", "dt")]),

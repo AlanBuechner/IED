@@ -524,6 +524,10 @@ namespace Profiler
 			track->m_OsId = event.m_Fields[1];
 			track->m_GroupStr = event.m_Fields[2];
 		}
+		else if (event.m_Type == EventType::ThreadOrder) {
+			capture.m_ThreadOrder.Clear();
+			if (event.m_List) capture.m_ThreadOrder.Append(*event.m_List);
+		}
 		else if (event.m_Type == EventType::PlotDef) {
 			Plot* plot = PlotFor(capture, event.m_Fields[0]);
 			plot->m_NameStr = event.m_Fields[1];
@@ -601,7 +605,7 @@ namespace Profiler
 	// --- Dispatch -----------------------------------------------------------------------------------------------------
 
 	static bool IsDefinition(EventType type) {
-		return type == EventType::StringDef || type == EventType::SrcLocDef || type == EventType::ThreadDef || type == EventType::PlotDef || type == EventType::PoolDef || type == EventType::LockDef || type == EventType::ModuleDef || type == EventType::CallstackDef || type == EventType::SymbolDef;
+		return type == EventType::StringDef || type == EventType::SrcLocDef || type == EventType::ThreadDef || type == EventType::ThreadOrder || type == EventType::PlotDef || type == EventType::PoolDef || type == EventType::LockDef || type == EventType::ModuleDef || type == EventType::CallstackDef || type == EventType::SymbolDef;
 	}
 
 	static bool Within(EventType type, EventType first, EventType last) {

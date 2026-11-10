@@ -14,6 +14,8 @@ namespace Profile
 	int32 g_state = 0;
 	Session* g_session = null;
 	int64 g_sessions = 0;
+	Threading::Mutex g_threadOrderLock;
+	Core::Array<Core::String> g_threadOrder;   // the program's thread lane order (SetThreadOrder), kept for later sessions
 	thread_local EventBuffer* t_buffer = null;
 	thread_local int64 t_bufferSession = 0;
 
@@ -152,6 +154,40 @@ namespace Profile
 		return buffer;
 	}
 
+	// --- The thread lane order ------------------------------------------------------------------------------------
+
+	// Queues the kept order (with its names' StringDefs) for the flusher; an empty one only with `evenEmpty` (the
+	// program took its order back while the session ran).
+	static void QueueThreadOrder(Session* session, bool evenEmpty) {
+		Core::Array<Core::String> names;
+		{
+			Threading::LockGuard held(g_threadOrderLock);
+			names.Append(g_threadOrder);
+		}
+		if (names.IsEmpty() && !evenEmpty) return;
+		ProfilerWork work;
+		Core::Array<uint64> ids;
+		{
+			Threading::LockGuard held(session->lock);
+			for (const Core::String& name : names) ids.Push(session->Intern(name.View()));
+		}
+		Threading::LockGuard global(session->global.lock);
+		session->threadOrder.Clear();
+		PutEvent(session->threadOrder, Event::ThreadOrder);
+		PutVarint(session->threadOrder, (uint64)ids.Count());
+		for (uint64 id : ids) PutVarint(session->threadOrder, id);
+	}
+
+	void KeepThreadOrder(const Core::Array<Core::String>& names) {
+		{
+			Threading::LockGuard held(g_threadOrderLock);
+			g_threadOrder.Clear();
+			g_threadOrder.Append(names);
+		}
+		Session* running = Running();
+		if (running) QueueThreadOrder(running, true);
+	}
+
 	// --- Flushing -------------------------------------------------------------------------------------------------
 
 	static void QueueCalibration(Session* session, int64 now) {
@@ -243,6 +279,13 @@ namespace Profile
 		Core::Array<uint8> globalBody;
 		int64 globalBase;
 		if (Take(&session->global, globalBody, globalBase)) PutChunk(out, kGlobalChunk, 0, globalBase, globalBody);
+		// The thread order in a chunk of its own: a profiler that does not know the event loses only that chunk.
+		Core::Array<uint8> order;
+		{
+			Threading::LockGuard held(session->global.lock);
+			order.Swap(session->threadOrder);
+		}
+		if (!order.IsEmpty()) PutChunk(out, kGlobalChunk, 0, session->startTicks, order);
 		out.Append(threads);
 		const bool sent = session->Send(out);
 		Threading::LockGuard held(session->lock);
@@ -347,6 +390,7 @@ namespace Profile
 		DefineMemoryPlot(session, session->processPlot, "Process memory");
 		DefineMemoryPlot(session, session->nativePlot, "Native memory");
 		QueueCalibration(session, session->startTicks);
+		QueueThreadOrder(session, false);
 		g_session = session;
 		WatchCollector(session);
 		session->flusher = new Threading::Thread(Threading::Thread::Run([session]() { FlushLoop(session); }));

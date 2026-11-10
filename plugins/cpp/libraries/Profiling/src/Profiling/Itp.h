@@ -69,6 +69,10 @@ void itp_plot(const char* name, double value);
 void itp_message(int severity, const char* text, size_t length);
 // Names the calling thread from now on; call it again whenever the thread takes another role.
 void itp_thread_name(const char* name);
+// The order of the profiler's thread lanes, top to bottom: `count` names or patterns (* any text, ? one character,
+// case ignored). A thread goes at the first entry other than "*" that one of its names matches, else where "*" is,
+// else after every entry. Kept for sessions that start later; the last one given wins (count 0 takes it back).
+void itp_thread_order(const char* const* names, int count);
 
 // Tasks: units of work grouped by name, which may suspend on one thread and resume on another. 0 when off.
 uint64_t itp_task_begin(const char* name, uint64_t parent);

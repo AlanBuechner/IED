@@ -149,68 +149,16 @@ export function fetchRange(view, durationNs) {
 	return { from: Math.max(0, view.from - span), to: Math.min(Math.max(durationNs, view.to), view.to + span) };
 }
 
-// --- Lane order (the settings profiler.threadOrder and profiler.gpuQueueOrder) -------------------------------------
-
 // The GPU queues' group lane: its id is what `collapsed` holds while the group is folded.
 export const GPU_GROUP = "group:gpu";
 
-// Whether `name` is matched by `pattern`: the whole name, case ignored, `*` any run of characters, `?` one.
-export function nameMatches(pattern, name) {
-	const p = String(pattern).toLowerCase();
-	const s = String(name).toLowerCase();
-	let i = 0;
-	let j = 0;
-	let star = -1;
-	let mark = 0;
-	while (j < s.length) {
-		if (i < p.length && (p[i] === "?" || p[i] === s[j])) {
-			i++;
-			j++;
-		}
-		else if (i < p.length && p[i] === "*") {
-			star = i++;
-			mark = j;
-		}
-		else if (star >= 0) {
-			i = star + 1;
-			j = ++mark;
-		}
-		else return false;
-	}
-	while (i < p.length && p[i] === "*") i++;
-	return i === p.length;
-}
-
-// Where a lane goes in an order (a list of names and patterns): at the first entry other than "*" that one of its
-// names matches, its names tried in the order it had them (a worker named "Job Worker 2" and later "Render" stays a
-// worker); else where "*" is; else after every entry.
-export function orderRank(names, order) {
-	const list = Array.isArray(order) ? order : [];
-	for (const name of names) {
-		const at = list.findIndex((pattern) => pattern !== "*" && nameMatches(pattern, name));
-		if (at >= 0) return at;
-	}
-	const rest = list.indexOf("*");
-	return rest >= 0 ? rest : list.length;
-}
-
-// `lanes` in an order: by rank, lanes of one rank in the order they came (the order the program made them).
-export function orderLanes(lanes, order, namesOf) {
-	return lanes.map((lane, i) => ({ lane, i, rank: orderRank(namesOf(lane), order) }))
-		.sort((a, b) => a.rank - b.rank || a.i - b.i)
-		.map((entry) => entry.lane);
-}
-
-function threadNames(lane) {
-	return lane.names && lane.names.length ? lane.names : [lane.label];
-}
-
 // The lanes of an answer from top to bottom with their place: {kind, id, label, sub, y, height, rows, lockTop,
 // lockRows, group, source}. The GPU queues come first, under their group lane (kind "group", folded while
-// `collapsed` holds GPU_GROUP), in `gpuOrder`; then the threads in `threadOrder` (task lanes as they came); then the
-// messages and the plots. A thread's lock rows (`lockRowHeight` each) come under its zone rows, from `lockTop` down.
+// `collapsed` holds GPU_GROUP); then the threads or tasks; then the messages and the plots - each in the order the
+// server sent them (docs/16 "Lane order": the queues by kind, the threads in the program's order). A thread's lock
+// rows (`lockRowHeight` each) come under its zone rows, from `lockTop` down.
 export function layoutLanes(answer, options) {
-	const { rowHeight, pad, collapsed = new Set(), messageHeight, plotHeight, lockRowHeight = rowHeight, threadOrder, gpuOrder } = options;
+	const { rowHeight, pad, collapsed = new Set(), messageHeight, plotHeight, lockRowHeight = rowHeight } = options;
 	const lanes = [];
 	let y = 0;
 	const add = (lane, rows, lockRows = 0) => {
@@ -223,7 +171,7 @@ export function layoutLanes(answer, options) {
 		y += lane.height;
 		lanes.push(lane);
 	};
-	const gpus = orderLanes(answer.gpu || [], gpuOrder, (gpu) => [gpu.label]);
+	const gpus = answer.gpu || [];
 	if (gpus.length) {
 		const folded = collapsed.has(GPU_GROUP);
 		const sub = gpus.length + (gpus.length === 1 ? " queue" : " queues");
@@ -231,9 +179,7 @@ export function layoutLanes(answer, options) {
 		y += rowHeight + pad * 2;
 		if (!folded) for (const gpu of gpus) add({ kind: "gpu", id: gpu.id, label: gpu.label, sub: "", group: GPU_GROUP, source: gpu }, gpu.depth);
 	}
-	const threadLanes = answer.lanes || [];
-	const ordered = threadLanes.every((lane) => lane.kind === "thread") ? orderLanes(threadLanes, threadOrder, threadNames) : threadLanes;
-	for (const lane of ordered) {
+	for (const lane of answer.lanes || []) {
 		const sub = lane.kind === "task"
 			? lane.runs + (lane.runs === 1 ? " run" : " runs") + " on " + lane.threads + (lane.threads === 1 ? " thread" : " threads")
 			: lane.renamed ? "renamed " + lane.renamed + "x" : "";

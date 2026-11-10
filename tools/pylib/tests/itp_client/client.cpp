@@ -96,6 +96,8 @@ int main(int argc, char** argv)
 		}
 	}
 	ITP_THREAD_NAME("Main");
+	const char* order[] = { "Main", "Worker" };
+	itp_thread_order(order, 2);
 	itp_frame_begin("Loading");
 	Spin(1000);
 	itp_frame_end("Loading");

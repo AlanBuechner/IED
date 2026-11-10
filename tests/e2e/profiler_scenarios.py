@@ -183,7 +183,7 @@ ORDERED_THREADS = [(6, "Job Worker 0"), (7, "Job Worker 1"), (5, "Cleanup"), (8,
 
 
 def send_ordered_game(env, frames=600):
-	"""A finished capture of a game's threads, made in another order than the timeline shows them (the workers first),
+	"""A finished capture of a game's threads, made in another order than its ThreadOrder gives them (the workers first),
 	and its renderer's GPU queues defined Copy, Direct, Compute (1 ns ticks, the GPU's clock the CPU's): `frames`
 	frames of 16 ms, every 50th 40 ms; Frame on Main, a zone on each other thread, and on the queues Upload, Culling,
 	Shadows and Lighting recorded by the GPU thread."""
@@ -200,6 +200,9 @@ def send_ordered_game(env, frames=600):
 	for name, ctx in queues.items():
 		defs.event("GpuContextDef", ctxId=ctx, api=1, queueNameStr=w.string(name, defs), periodPicoseconds=1000)
 	w.add(defs)
+	lanes = w.chunk(itp.GLOBAL_CHUNK)
+	order = [w.string(name, lanes) for name in ("Main", "Input", "Render", "GPU", "Cleanup", "*", "Job Worker*")]
+	w.add(lanes.event("ThreadOrder", names=order))
 	chunks = {tid: w.chunk(itp.THREAD_CHUNK, tid, 0).event("ThreadName", 0, nameStr=names[tid]) for tid, _ in ORDERED_THREADS}
 	for ctx in queues.values():
 		chunks[4].event("GpuCalibration", ctxId=ctx, cpuTicks=0, gpuTicks=0)
@@ -232,9 +235,9 @@ def send_ordered_game(env, frames=600):
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))
 def profiler_lane_order_and_frame_zoom(run):
-	"""The timeline's lanes in order (profiler.threadOrder, profiler.gpuQueueOrder): the GPU queues on top in a group
-	that folds (and stays folded on reload), then Main, Input, Render, GPU, Cleanup, the rest, the workers; the frame
-	time graph zooms in and out, pans, and shows every frame again."""
+	"""The timeline's lanes in order: the GPU queues on top in a group that folds (kept per device), by kind; then the
+	threads in the order the program gave (Main, Input, Render, GPU, Cleanup, the rest, the workers); the frame time
+	graph zooms in and out, pans, and shows every frame again."""
 	page = run.open()
 	ws = page.evaluate("() => ied_shell.wsId")
 	listed = run.request("prof.captures", {"wsId": ws})

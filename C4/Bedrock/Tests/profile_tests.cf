@@ -1,7 +1,8 @@
 // Profile: a session recorded to a trace file (IED_PROFILER=file:...) and read back event by event - the preamble and
 // Hello, definitions before their first use, zones on two threads with times that only grow, frames, plots, messages,
-// thread renames and the names the system knows, tasks, memory, each stop of a collection, censuses and sampled
-// allocations, GPU contexts, calibrations, zones and their times, and Bye; nothing recorded outside a session.
+// thread renames and the names the system knows, the thread lane order, tasks, memory, each stop of a collection,
+// censuses and sampled allocations, GPU contexts, calibrations, zones and their times, and Bye; nothing recorded
+// outside a session.
 
 include "bedrock.ch"
 include "profile.ch"
@@ -60,6 +61,7 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x6C) return "vvv";
 	if (type == 0x6D) return "vvvv";
 	if (type == 0x81) return "vl";
+	if (type == 0x14) return "l";
 	if (type == 0x82) return "tvvvv";
 	if (type == 0x83) return "vvvv";
 	if (type == 0x13 || type == 0x20 || type == 0x31 || type == 0x32 || type == 0x33 || type == 0x40 || type == 0x41 || type == 0x42) return "tv";
@@ -308,6 +310,27 @@ class ProfileTests {
 		const TracedEvent* text = First(events, 0x23);
 		assert_true(text && *strings.Find(text->fields[0]) == "bodies=12", "the zone's text");
 		assert_true(First(events, 0x24)->fields[0] == 42, "and its value");
+		FS::RemoveFile(path.CStr());
+	}
+
+	// The program's thread lane order, given before its session starts, reaches the trace once the session does: one
+	// ThreadOrder of the names, after the StringDefs that name them.
+	[test("the_thread_order_is_kept_for_a_session_that_starts_later")]
+	public static void TestThreadOrder() {
+		Profile::SetThreadOrder({ "Main", "Render", "Job Worker*" });
+		Core::String path = TracePath("bedrock-profile-order.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "a session to a file starts");
+		Profile::SetThreadName(Core::StringView("Main"));
+		Profile::Stop();
+		Profile::SetThreadOrder({});
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "every chunk reads whole");
+		assert_eq(1, CountOf(events, 0x14), "one ThreadOrder");
+		const TracedEvent* order = First(events, 0x14);
+		assert_true(order->fields[0] == 3 && strings.Find(order->fields[1]) && *strings.Find(order->fields[1]) == "Main", "its three entries, the first Main, defined before it");
 		FS::RemoveFile(path.CStr());
 	}
 

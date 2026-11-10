@@ -205,8 +205,6 @@ export class CaptureView {
 		this.frameGraph.setBudget(this.budgetNs);
 		const follow = values["profiler.followLive"];
 		if (follow && follow.value === false) this.timeline.follow = false;
-		const list = (key) => (values[key] && Array.isArray(values[key].value) ? values[key].value : undefined);
-		this.timeline.setOrder(list("profiler.threadOrder"), list("profiler.gpuQueueOrder"));
 		this.timeline.schedulePaint();
 	}
 

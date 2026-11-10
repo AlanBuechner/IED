@@ -45,8 +45,6 @@ export class TimelineView {
 		this.selected = null;
 		this.range = null;
 		this.collapsed = new Set(folded || []);
-		this.threadOrder = undefined;
-		this.gpuOrder = undefined;
 		this.painter = new TimelinePainter();
 		this.canvas = h("canvas.prof-canvas", { tabindex: "0", "aria-label": "Timeline" });
 		this.tip = h("div.prof-tip", { hidden: true });
@@ -73,19 +71,7 @@ export class TimelineView {
 
 	options() {
 		const rowHeight = rowHeightFor(this.phone);
-		return {
-			rowHeight, lockRowHeight: this.phone ? 14 : 12, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2,
-			threadOrder: this.threadOrder, gpuOrder: this.gpuOrder,
-		};
-	}
-
-	// The lanes' order (profiler.threadOrder, profiler.gpuQueueOrder): lists of names and patterns, or undefined for
-	// the order they came in.
-	setOrder(threadOrder, gpuOrder) {
-		if (JSON.stringify([threadOrder, gpuOrder]) === JSON.stringify([this.threadOrder, this.gpuOrder])) return;
-		this.threadOrder = threadOrder;
-		this.gpuOrder = gpuOrder;
-		if (this.answer) this.relayout();
+		return { rowHeight, lockRowHeight: this.phone ? 14 : 12, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2 };
 	}
 
 	// The ruler, the frame row and the notes row when there are notes.

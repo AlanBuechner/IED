@@ -4,7 +4,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { duration, ms, bytes, tickStep, tickLabel, instant } from "/plugins/ied.profiler/ui/format.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, nameMatches, orderRank, FrameSpan, barsServe, barsFetch, MIN_FRAMES } from "/plugins/ied.profiler/ui/model.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, FrameSpan, barsServe, barsFetch, MIN_FRAMES } from "/plugins/ied.profiler/ui/model.js";
 import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
 import { noteRange } from "/plugins/ied.profiler/ui/notes.js";
 
@@ -88,47 +88,19 @@ test("profiler: a point hits the zone under it, the narrowest when they overlap"
 	assertEqual(zoneAt(layout.lanes[0], view, 1000, 50, 5, OPTIONS), null, "nor the GPU group's");
 });
 
-test("profiler: lane names match patterns, the whole name and case ignored", () => {
-	assertTrue(nameMatches("Main*", "Main Thread") && nameMatches("main*", "MAIN"), "a prefix");
-	assertTrue(nameMatches("*Worker*", "Job Worker 3") && nameMatches("*worker*", "worker"), "anywhere in it");
-	assertTrue(nameMatches("Render", "render") && !nameMatches("Render", "Render 2"), "a plain name is the whole name");
-	assertTrue(nameMatches("Job ? *", "Job A x") && !nameMatches("Job ?", "Job AB"), "? is one character");
-	assertTrue(nameMatches("*", "") && !nameMatches("Main*", "The Main"), "a pattern starts where the name does");
-	assertTrue(nameMatches("a*b*c", "aXXbYYc") && !nameMatches("a*b*c", "aXXbYY"), "stars backtrack");
-});
-
-const ORDER = ["Main*", "Input*", "Render*", "GPU*", "Cleanup*", "*", "*Worker*"];
-
-test("profiler: a lane ranks at its first name an entry other than * matches", () => {
-	assertEqual(orderRank(["Main Thread"], ORDER), 0);
-	assertEqual(orderRank(["Cleanup"], ORDER), 4);
-	assertEqual(orderRank(["Job Worker 2"], ORDER), 6, "after the rest");
-	assertEqual(orderRank(["Audio"], ORDER), 5, "the rest go where * is");
-	assertEqual(orderRank(["Job Worker 2", "Render"], ORDER), 6, "a worker renamed later stays a worker");
-	assertEqual(orderRank(["Thread 7", "Input"], ORDER), 1, "an entry beats * whichever name it matches");
-	assertEqual(orderRank(["Audio"], ["Main*"]), 1, "without *, after every entry");
-	assertEqual(orderRank(["Audio"], undefined), 0, "no order: all alike");
-});
-
-test("profiler: threads in the order, the GPU queues in theirs under a group that folds", () => {
-	const thread = (track, names) => ({ id: "thread:" + track, kind: "thread", label: names[names.length - 1], names, track, depth: 1, zones: [] });
+test("profiler: the GPU queues sit under a group that folds, every lane in the server's order", () => {
+	const thread = (track, name) => ({ id: "thread:" + track, kind: "thread", label: name, track, depth: 1, zones: [] });
 	const answer = {
-		lanes: [thread(0, ["Job Worker 0"]), thread(1, ["Cleanup"]), thread(2, ["Main"]), thread(3, ["Audio"]), thread(4, ["Render"]), thread(5, ["Job Worker 1"]), thread(6, ["GPU"]), thread(7, ["Input"])],
-		gpu: [{ id: "gpu:3", label: "Copy queue", depth: 1, zones: [] }, { id: "gpu:1", label: "Direct queue", depth: 2, zones: [] }, { id: "gpu:2", label: "Compute queue", depth: 1, zones: [] }],
+		lanes: [thread(4, "Main"), thread(1, "Render"), thread(0, "Job Worker 0")],
+		gpu: [{ id: "gpu:1", label: "Direct", depth: 2, zones: [] }, { id: "gpu:2", label: "Compute", depth: 1, zones: [] }, { id: "gpu:3", label: "Copy", depth: 1, zones: [] }],
 	};
-	const options = { ...OPTIONS, threadOrder: ORDER, gpuOrder: ["*Direct*", "*Compute*", "*Copy*", "*"] };
-	const layout = layoutLanes(answer, options);
-	assertEqual(layout.lanes.map((l) => l.label), ["GPU", "Direct queue", "Compute queue", "Copy queue", "Main", "Input", "Render", "GPU", "Cleanup", "Audio", "Job Worker 0", "Job Worker 1"]);
-	assertEqual(layout.lanes[0].sub, "3 queues");
-	assertEqual(layout.lanes[2].y, 24 + 42, "a queue under the deeper one before it");
-	const folded = layoutLanes(answer, { ...options, collapsed: new Set([GPU_GROUP]) });
-	assertEqual(folded.lanes.map((l) => l.label).slice(0, 2), ["GPU", "Main"], "a folded group hides its queues");
+	const layout = layoutLanes(answer, OPTIONS);
+	assertEqual(layout.lanes.map((l) => l.label), ["GPU", "Direct", "Compute", "Copy", "Main", "Render", "Job Worker 0"]);
+	assertEqual([layout.lanes[0].sub, layout.lanes[2].y], ["3 queues", 24 + 42], "a queue under the deeper one before it");
+	const folded = layoutLanes(answer, { ...OPTIONS, collapsed: new Set([GPU_GROUP]) });
+	assertEqual(folded.lanes.map((l) => l.label), ["GPU", "Main", "Render", "Job Worker 0"], "a folded group hides its queues");
 	assertTrue(folded.lanes[0].collapsed && folded.lanes[0].source.length === 3, "and keeps them for its strips");
 	assertEqual(folded.lanes[1].y, 24, "the threads move up");
-	const unordered = layoutLanes(answer, OPTIONS);
-	assertEqual(unordered.lanes.slice(4).map((l) => l.label)[0], "Job Worker 0", "no order: as the server sent them");
-	const tasks = layoutLanes({ lanes: [{ id: "task:B", kind: "task", label: "Main", depth: 1, runs: 1, threads: 1 }, { id: "task:A", kind: "task", label: "Job Worker 0", depth: 1, runs: 1, threads: 1 }] }, options);
-	assertEqual(tasks.lanes.map((l) => l.id), ["task:B", "task:A"], "task lanes keep their order");
 });
 
 test("profiler: the frame graph zooms and pans inside the capture's frames", () => {

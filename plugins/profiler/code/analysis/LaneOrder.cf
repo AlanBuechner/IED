@@ -1,0 +1,93 @@
+include "LaneOrder.ch"
+include "Analysis.ch"
+
+namespace Profiler
+{
+	static int32 LowerByte(int32 c) { return c >= (int32)'A' && c <= (int32)'Z' ? c + 32 : c; }
+
+	bool NameMatches(Core::StringView pattern, Core::StringView name) {
+		int64 p = 0;
+		int64 n = 0;
+		int64 star = -1;
+		int64 mark = 0;
+		const int64 patternLength = pattern.ByteLength();
+		const int64 nameLength = name.ByteLength();
+		while (n < nameLength) {
+			const int32 want = p < patternLength ? pattern.ByteAt(p) : -1;
+			if (want == (int32)'?' || (want >= 0 && want != (int32)'*' && LowerByte(want) == LowerByte(name.ByteAt(n)))) {
+				p += 1;
+				n += 1;
+			}
+			else if (want == (int32)'*') {
+				star = p;
+				p += 1;
+				mark = n;
+			}
+			else if (star >= 0) {
+				p = star + 1;
+				mark += 1;
+				n = mark;
+			}
+			else return false;
+		}
+		while (p < patternLength && pattern.ByteAt(p) == (int32)'*') p += 1;
+		return p == patternLength;
+	}
+
+	int64 ThreadRank(const Capture& capture, const ThreadTrack* track) {
+		const Core::Array<uint64>& order = capture.m_ThreadOrder;
+		if (order.IsEmpty()) return 0;
+		for (uint64 nameStr : track->m_NameStrs) {
+			const Core::StringView name = capture.Text(nameStr);
+			if (name.IsEmpty()) continue;
+			for (int64 i = 0; i < order.Count(); ++i) {
+				const Core::StringView entry = capture.Text(order[i]);
+				if (entry != "*" && NameMatches(entry, name)) return i;
+			}
+		}
+		for (int64 i = 0; i < order.Count(); ++i)
+			if (capture.Text(order[i]) == "*") return i;
+		return order.Count();
+	}
+
+	struct RankedLane
+	{
+		public int64 m_Rank;
+		public int64 m_Index;
+	}
+
+	static RankedLane Ranked(int64 rank, int64 index) {
+		RankedLane lane;
+		lane.m_Rank = rank;
+		lane.m_Index = index;
+		return lane;
+	}
+
+	static void SortRanked(Core::Array<RankedLane>& lanes) {
+		lanes.SortBy([](const RankedLane& a, const RankedLane& b) -> bool { return a.m_Rank != b.m_Rank ? a.m_Rank < b.m_Rank : a.m_Index < b.m_Index; });
+	}
+
+	void OrderThreads(const Capture& capture, Core::Array<int64>& tracks) {
+		if (capture.m_ThreadOrder.IsEmpty()) return;
+		Core::Array<RankedLane> lanes;
+		for (int64 track : tracks) lanes.Push(Ranked(ThreadRank(capture, capture.m_Tracks[track]), track));
+		SortRanked(lanes);
+		for (int64 i = 0; i < lanes.Count(); ++i) tracks[i] = lanes[i].m_Index;
+	}
+
+	int32 GpuQueueRank(Core::StringView name) {
+		if (ContainsNoCase(name, Core::StringView("direct")) || ContainsNoCase(name, Core::StringView("graphics"))) return 0;
+		if (ContainsNoCase(name, Core::StringView("compute"))) return 1;
+		if (ContainsNoCase(name, Core::StringView("copy")) || ContainsNoCase(name, Core::StringView("transfer"))) return 2;
+		return 3;
+	}
+
+	Core::Array<int64> OrderedGpus(const Capture& capture) {
+		Core::Array<RankedLane> lanes;
+		for (int64 i = 0; i < capture.m_Gpus.Count(); ++i) lanes.Push(Ranked((int64)GpuQueueRank(capture.Text(capture.m_Gpus[i]->m_NameStr)), i));
+		SortRanked(lanes);
+		Core::Array<int64> out;
+		for (const RankedLane& lane : lanes) out.Push(lane.m_Index);
+		return out;
+	}
+}

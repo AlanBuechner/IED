@@ -20,7 +20,7 @@ namespace Profiler
 		public double m_Number;
 		public Core::StringView m_Text;
 		public Core::StringView m_Text2;
-		public const Core::Array<uint64>* m_List;   // CallstackDef's addresses
+		public const Core::Array<uint64>* m_List;   // CallstackDef's addresses, ThreadOrder's names
 	}
 
 	alias EventVisitor = func<void(const Event& event)>;

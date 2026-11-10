@@ -80,6 +80,7 @@ class FileTraceTests(unittest.TestCase):
 
 	def test_threads_frames_plots_messages_and_tasks(self):
 		self.assertEqual(["Main"] + ["Worker"] * 5, clients.thread_names(self.events))
+		self.assertEqual([["Main", "Worker"]], [[self.strings[n] for n in e["names"]] for e in of(self.events, "ThreadOrder")], "the program's thread lane order")
 		self.assertEqual([0] * 5, [e["frameSetStr"] for e in of(self.events, "FrameMark")])
 		self.assertEqual(["Loading"], [self.strings[e["frameSetStr"]] for e in of(self.events, "FrameBegin")])
 		self.assertEqual(["Loading"], [self.strings[e["frameSetStr"]] for e in of(self.events, "FrameEnd")])

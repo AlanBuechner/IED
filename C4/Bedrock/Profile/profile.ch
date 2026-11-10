@@ -65,6 +65,14 @@ namespace Profile
 	// Names the calling thread from now on; call it again whenever the thread takes another role (a pooled worker
 	// running "Physics") - the profiler keeps every name with the time it was given.
 	void SetThreadName(Core::StringView name);
+	// The order of the profiler's thread lanes, top to bottom (IED docs/16 "Lane order"): each entry a thread's name
+	// or a pattern (`*` any text, `?` one character, case ignored). A thread goes at the first entry other than "*"
+	// that one of its names matches, else where "*" is, else after every entry; threads in one place keep the order
+	// they started in. The program says it once, from what it knows of its threads; it is kept for sessions that
+	// start later, and the last one given wins ({} takes it back). Without one, lanes are in the order the threads
+	// started.
+	//     Profile::SetThreadOrder({ "Main", "Input", "Render", "*", "Job Worker*" });
+	void SetThreadOrder(Core::InitList<const char*> names);
 
 	// A task (IED docs/16 "by-task view"): a unit of work that may suspend on one thread and resume on another. The
 	// profiler groups tasks by name. TaskBegin returns its id; 0 when profiling is off. While a session runs, every

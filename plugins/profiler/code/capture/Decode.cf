@@ -14,6 +14,7 @@ namespace Profiler
 			case EventType::SrcLocDef: return "vvvvvv";
 			case EventType::ThreadDef: return "vvv";
 			case EventType::ThreadName: return "tv";
+			case EventType::ThreadOrder: return "l";
 			case EventType::ZoneBegin: return "tv";
 			case EventType::ZoneBeginNamed: return "tvv";
 			case EventType::ZoneEnd: return "t";

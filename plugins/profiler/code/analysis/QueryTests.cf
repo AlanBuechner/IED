@@ -3,6 +3,7 @@
 
 include "Timeline.ch"
 include "Analysis.ch"
+include "LaneOrder.ch"
 include "capture/Ingest.ch"
 
 // A capture writer that keeps the chunk bookkeeping out of the tests.
@@ -39,6 +40,18 @@ class TraceBuilder
 		m_W.Varint(id * 10);
 		m_W.Varint(0);
 		m_W.EndChunk();
+	}
+
+	public void DefineString(uint64 id, const char* text) {
+		m_W.Type(Profiler::EventType::StringDef);
+		m_W.Varint(id);
+		m_W.Text(Core::StringView(text));
+	}
+
+	public void Name(int64 at, uint64 text) {
+		m_W.Type(Profiler::EventType::ThreadName);
+		m_W.Time(at);
+		m_W.Varint(text);
 	}
 
 	public void Thread(uint64 thread) { m_W.BeginChunk(Profiler::c_ThreadChunk, thread, 0); }
@@ -188,13 +201,62 @@ class ProfilerQueryTests {
 		Serialization::DomNode lanes = Parse(Profiler::Timeline(*capture, ask)).Member("lanes");
 		assert_true(lanes.Count() == 2 && lanes.At(0).Member("label").AsView() == "Physics" && lanes.At(1).Member("label").AsView() == "Audio", "a renamed thread's segments become task lanes");
 		assert_true(lanes.At(0).Member("zones").Count() == 1 && lanes.At(0).Member("slices").Count() == 1, "with the zones of their segment");
-		ask.m_Mode = Profiler::LaneMode::Threads;
-		ask.m_FromNs = 32;
-		ask.m_ToNs = 40;
-		Serialization::DomNode thread = Parse(Profiler::Timeline(*capture, ask)).Member("lanes").At(0);
-		assert_true(thread.Member("label").AsView() == "Audio", "a thread lane is labeled by its name where the view starts");
-		Serialization::DomNode names = thread.Member("names");
-		assert_true(names.Count() == 2 && names.At(0).AsView() == "Physics" && names.At(1).AsView() == "Audio", "and lists every name it had, in order");
+	}
+
+	[test("lane_names_match_patterns")]
+	public static void TestNameMatches() {
+		assert_true(Profiler::NameMatches(Core::StringView("Main*"), Core::StringView("main thread")), "a prefix, case ignored");
+		assert_true(Profiler::NameMatches(Core::StringView("*Worker*"), Core::StringView("Job Worker 3")), "anywhere in the name");
+		assert_true(!Profiler::NameMatches(Core::StringView("Render"), Core::StringView("RenderGpu")), "a plain name is the whole name");
+		assert_true(Profiler::NameMatches(Core::StringView("Job ?"), Core::StringView("Job 7")) && !Profiler::NameMatches(Core::StringView("Job ?"), Core::StringView("Job 77")), "? is one character");
+		assert_true(Profiler::NameMatches(Core::StringView("a*b*c"), Core::StringView("aXbYc")) && !Profiler::NameMatches(Core::StringView("a*b*c"), Core::StringView("aXbY")), "stars backtrack");
+		assert_true(Profiler::GpuQueueRank(Core::StringView("Direct queue")) == 0 && Profiler::GpuQueueRank(Core::StringView("Async Compute")) == 1, "a queue's kind from its name");
+		assert_true(Profiler::GpuQueueRank(Core::StringView("Transfer")) == 2 && Profiler::GpuQueueRank(Core::StringView("Video")) == 3, "and any other last");
+	}
+
+	// Threads appear Job Worker 0, Cleanup, Main, Audio, Render, Job Worker 1, then Job Worker 2, renamed Render
+	// later; GPU queues are defined Copy, Direct, Compute. Without an order from the program the lanes come as they
+	// appeared; with one - Main, Render, Cleanup, the rest, Job Worker* - in that order. The GPU queues go by kind.
+	[test("timeline_lane_order")]
+	public static void TestLaneOrder() {
+		Core::Array<const char*> names = { "Job Worker 0", "Cleanup", "Main", "Audio", "Render", "Job Worker 1", "Job Worker 2" };
+		TraceBuilder b;
+		b.Global();
+		for (int64 i = 0; i < names.Count(); ++i) b.DefineString((uint64)(50 + i), names[i]);
+		b.DefineString(60, "*");
+		b.DefineString(61, "Job Worker*");
+		Core::Array<const char*> queues = { "Copy queue", "Direct queue", "Compute" };
+		for (int64 i = 0; i < queues.Count(); ++i) {
+			b.DefineString((uint64)(70 + i), queues[i]);
+			b.m_W.Type(Profiler::EventType::GpuContextDef);
+			b.m_W.Varint((uint64)(i + 1));
+			b.m_W.Varint(1);
+			b.m_W.Varint((uint64)(70 + i));
+			b.m_W.Varint(1000);
+		}
+		b.Done();
+		for (int64 i = 0; i < names.Count(); ++i) {
+			b.Thread((uint64)(i + 1));
+			b.Name(0, (uint64)(50 + i));
+			if (i == 6) b.Name(10, 54);
+			b.Done();
+		}
+		Profiler::TimelineAsk ask;
+		Serialization::DomNode answer = Parse(Profiler::Timeline(*b.Read(), ask));
+		Serialization::DomNode lanes = answer.Member("lanes");
+		assert_true(lanes.Count() == 7, "a lane per thread");
+		for (int64 i = 0; i < 7; ++i) assert_true(lanes.At(i).Member("label").AsView() == names[i], "no order from the program: as they appeared");
+		Serialization::DomNode gpus = answer.Member("gpu");
+		assert_true(gpus.Count() == 3 && gpus.At(0).Member("label").AsView() == "Direct queue" && gpus.At(1).Member("label").AsView() == "Compute" && gpus.At(2).Member("label").AsView() == "Copy queue", "the GPU queues by kind");
+		b.Global();
+		Core::Array<uint64> order = { 52, 54, 51, 60, 61 };
+		b.m_W.Type(Profiler::EventType::ThreadOrder);
+		b.m_W.Varint((uint64)order.Count());
+		for (uint64 entry : order) b.m_W.Varint(entry);
+		b.Done();
+		lanes = Parse(Profiler::Timeline(*b.Read(), ask)).Member("lanes");
+		Core::Array<const char*> expected = { "Main", "Render", "Cleanup", "Audio", "Job Worker 0", "Job Worker 1", "Job Worker 2" };
+		for (int64 i = 0; i < 7; ++i) assert_true(lanes.At(i).Member("label").AsView() == expected[i], "the program's order; a worker renamed Render stays a worker");
 	}
 
 	[test("stats")]

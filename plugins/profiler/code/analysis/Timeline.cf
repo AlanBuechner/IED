@@ -1,6 +1,7 @@
 include "Timeline.ch"
 include "Analysis.ch"
 include "Locks.ch"
+include "LaneOrder.ch"
 
 namespace Profiler
 {
@@ -8,7 +9,6 @@ namespace Profiler
 	const int32 c_FramesPerPixelShown = 3;
 	const int64 c_PixelsPerRename = 4;
 	const int32 c_MostLockRows = 12;
-	const int32 c_LaneNames = 8;
 
 	// What every lane of one answer shares.
 	class TimelineWriter
@@ -198,25 +198,6 @@ namespace Profiler
 		json.EndArray();
 	}
 
-	// Every name the thread had, in the order it took them, each once (the first c_LaneNames): the client orders lanes
-	// by them, so a lane keeps its place wherever the view starts.
-	static void WriteThreadNames(TimelineWriter& w, const ThreadTrack* track) {
-		IED::JsonWriter& json = *w.m_Json;
-		json.Key(Core::StringView("names"));
-		json.BeginArray();
-		Core::Array<uint64> written;
-		for (int64 i = 0; i < track->m_NameStrs.Count() && written.Count() < (int64)c_LaneNames; ++i) {
-			const uint64 name = track->m_NameStrs[i];
-			if (w.m_Capture->Text(name).IsEmpty()) continue;
-			bool seen = false;
-			for (int64 k = 0; k < written.Count() && !seen; ++k) seen = written[k] == name;
-			if (seen) continue;
-			json.String(w.m_Capture->Text(name));
-			written.Push(name);
-		}
-		json.EndArray();
-	}
-
 	static void WriteThreadLane(TimelineWriter& w, int64 trackIndex) {
 		const ThreadTrack* track = w.m_Capture->m_Tracks[trackIndex];
 		IED::JsonWriter& json = *w.m_Json;
@@ -230,7 +211,6 @@ namespace Profiler
 		json.IntField("track", trackIndex);
 		json.IntField("osId", (int64)track->m_OsId);
 		json.Field("group", w.m_Capture->Text(track->m_GroupStr));
-		WriteThreadNames(w, track);
 		json.IntField("renamed", track->m_NameTimes.Count() > 1 ? track->m_NameTimes.Count() - 1 : 0);
 		json.IntField("depth", track->m_Levels.Count() < (int64)w.m_MostDepth ? track->m_Levels.Count() : (int64)w.m_MostDepth);
 		WriteRenames(w, track);
@@ -414,7 +394,8 @@ namespace Profiler
 		IED::JsonWriter& json = *w.m_Json;
 		json.Key(Core::StringView("gpu"));
 		json.BeginArray();
-		for (const GpuContext* gpu : w.m_Capture->m_Gpus) {
+		for (int64 index : OrderedGpus(*w.m_Capture)) {
+			const GpuContext* gpu = w.m_Capture->m_Gpus[index];
 			json.BeginObject();
 			Core::StringBuilder id;
 			id.Append("gpu:");
@@ -613,9 +594,13 @@ namespace Profiler
 		json.Key(Core::StringView("lanes"));
 		json.BeginArray();
 		if (ask.m_Mode == LaneMode::Tasks) WriteTaskModeLanes(w);
-		else
+		else {
+			Core::Array<int64> tracks;
 			for (int64 t = 0; t < capture.m_Tracks.Count(); ++t)
-				if (capture.m_Tracks[t]->m_Zones > 0 || capture.m_Tracks[t]->m_NameTimes.Count() > 0) WriteThreadLane(w, t);
+				if (capture.m_Tracks[t]->m_Zones > 0 || capture.m_Tracks[t]->m_NameTimes.Count() > 0) tracks.Push(t);
+			OrderThreads(capture, tracks);
+			for (int64 t : tracks) WriteThreadLane(w, t);
+		}
 		json.EndArray();
 		WriteGpuLanes(w);
 		WriteFrames(w);
