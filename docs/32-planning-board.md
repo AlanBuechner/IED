@@ -121,10 +121,21 @@ Topics: `ied.board/ws:<wsId>` - `{boards}`, event `boards.changed`; `ied.board/b
 
 The Boards activity has the Boards tool window (the workspace's boards, live; New board; on a phone the Boards pane under More, so the bar keeps the Solution Explorer) and takes `board:<path>` documents: a `.iedboard` opens as a board wherever a file opens - the Boards list, the Solution Explorer, Go To All, `ied open` - through the `fileViewers` point (`docs/02`), and Open With... shows its JSON in the text editor instead; a new empty `.iedboard` (New File) opens as an empty board named after its file. A board document:
 
-- **The toolbar**: Select (V), Hand (H), Pen (P), Highlighter (I), Eraser (E; Partial cuts through strokes, Whole takes strokes and shapes; its size), Rectangle (R), Ellipse (O), Diamond (D), Line (L), Arrow (A), Connector (C), Text (T), Note (N), Frame (F); the palette (Shift+click: the fill alone) and Fill; line widths; Insert image; Undo, Redo; zoom out, zoom (click: 100%), zoom in, show everything; AI; the side panel.
+- **The toolbar**: Select (V), Hand (H), Pen (P), Highlighter (I), Eraser (E; Partial cuts through strokes, Whole takes strokes and shapes; its size), Rectangle (R), Ellipse (O), Diamond (D), Line (L), Arrow (A), Connector (C), Text (T), Note (N), Frame (F); the palette (Shift+click: the fill alone) and Fill; line widths; Insert image; Undo, Redo; Snap to alignment (the magnet: `board.snap`, "Snapping" below); zoom out, zoom (click: 100%), zoom in, show everything; AI; the side panel.
 - **The canvas**: the wheel and pinch zoom about the pointer; Shift+wheel or a sideways wheel pans sideways, space-drag, the middle or right button or the Hand pan; a dot grid. Click or box to select (Shift adds), drag to move (a frame takes its members), handles resize (an image keeps its aspect unless Shift), Delete, Ctrl+D, Ctrl+C/X/V (board elements, images, text), arrows nudge (Shift: 10), [ and ] order, Ctrl+A, Shift+1 fit, Shift+2 the selection; double click types into a node, note, frame, text or connector (Escape or Ctrl+Enter keeps it), double click an image to crop it (drag its edges; Enter keeps, Escape cancels), double click the empty board for text. A new shape opens its label at once. Images are pasted, dropped or inserted: converted to PNG in the browser (at most 4096 pixels a side), uploaded and kept beside the board.
 - **The side panel** (a sheet over the lower half on a phone): **Layers**, **Plan** (the plans; edit in place, saved as you type; From board writes the Mermaid export as a plan, To board draws a plan's Mermaid), **AI**, **History** (each change with its author, Revert or Redo).
 - **The AI**: "Open the board's chat" opens the board's chat beside the board, tethered (a new chat the first time, named after the board and told which board it is about; the same one after). Clean up the sketch, Convert to Mermaid, Write the plan and Review the design send it a message naming the board and the selection. **Build it** asks first, then starts an Agent chat told to implement the board's plan in the workspace. The AI's changes arrive live, flash, and are marked in History.
+
+### Snapping
+
+Owner, 2026-11-10: "it would be nice if the planning tools had alignment snapping." What the pointer moves, resizes or draws snaps, as Visual Studio's designer snaplines do (`ui/snap.js`, pure functions of boxes; `ui/tools.js` gives the targets and draws the guides):
+
+- **Targets**: the boxed elements (nodes, text, notes, frames, images) of the visible layers on the screen when the drag starts, but for what is being dragged and its connectors. Strokes, lines and connectors are not targets: a sketch's bounds line up nothing.
+- **Lines**: a target's two edges and its center on each axis. Within 6 screen pixels (so at any zoom it feels the same), the dragged thing's nearest edge or center goes onto the nearest line; each axis snaps on its own.
+- **Moving** a selection (a frame with its members) snaps its bounds' edges and center, and to **equal gaps**: centered between its nearest neighbours in its row (column), or at the gap a neighbour already keeps to the one beyond it, so a row of boxes stays evenly spaced.
+- **Resizing** snaps the edges the handle moves (an image's aspect, or Shift's, is kept after); **drawing** a rectangle, ellipse, diamond, frame, line or arrow snaps its first corner (end) at the press and the other as it is dragged.
+- **Guides**, in the info accent: a line through each edge or center the dragged thing shares, from end to end of the boxes on it; an equal gap as a span with end ticks and its size. They show only while dragging.
+- **Off**: hold Alt while dragging to place freely (pressing or letting go of Alt takes effect at once, without moving); the toolbar's magnet turns snapping off and on for every board - the `board.snap` setting (User tier, default on; Settings > Planning Board). Arrow-key nudges and the AI's ops do not snap: the AI has `align`, `distribute` and `tidy`.
 
 ## AI tools
 
@@ -205,7 +216,8 @@ What the runs changed, by what they hit:
 
 - C4 unit tests (`plugins/board/tests`, 24 cases): geometry, the op engine (refs, refusals, undo by author and by field, the file round trip, tiles), layout, recognition, Mermaid both ways, the evaluation-driven ops. `toolchains/c4/dev/C4.exe -test plugins/board/code/core plugins/board/tests`.
 - Server checks (`tools/server-checks/tests/test_board.py`): changes on the topic with undo by author, the file written and read back after an outside change, an uploaded image kept and drawn, the tools through the binding, a chat turn (fake model) whose `board_edit` is the AI's and whose `board_view` picture reaches the model.
-- The UI, driven in the browser pane at 1440x880 and 375x812: pen, rectangle with its label, connector, partial eraser splitting a stroke, pasted image and crop, the panels, the board's chat opened beside the board.
+- Frontend unit tests (`frontend/tests/boardsnap.test.js`): snapping to edges and centers within the tolerance and not past it, the nearest line winning, equal gaps between neighbours and after a pair, the guides for given edges.
+- The UI, driven in the browser pane at 1440x880 and 375x812: pen, rectangle with its label, connector, partial eraser splitting a stroke, pasted image and crop, the panels, the board's chat opened beside the board; snapping a moved box to two edges, to a row's equal gap, a resized edge and a drawn rectangle's corners, Alt mid-drag, the magnet off, a touch drag at phone width.
 
 ## Open items
 

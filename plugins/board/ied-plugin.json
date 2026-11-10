@@ -14,6 +14,7 @@
 	"activation": ["onWorkspaceOpen"],
 	"permissions": ["fs.read", "fs.write", "ai.tools"],
 	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Planning Board" },
 		"skills": ["skills"],
 		"bindings": {
 			"provides": [

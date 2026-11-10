@@ -67,8 +67,10 @@ export class BoardCanvas {
 		const rect = this.canvas.getBoundingClientRect();
 		const w = Math.max(1, rect.width);
 		const h = Math.max(1, rect.height);
+		// The browser's own count, when it is of this size at this pixel ratio (an emulated device can report its CSS
+		// pixels there, and a ratio change can come before the count does).
 		const d = this.devicePx;
-		const exact = d && Math.abs(d.cssW - w) < 0.5 && Math.abs(d.cssH - h) < 0.5;
+		const exact = d && Math.abs(d.cssW - w) < 0.5 && Math.abs(d.cssH - h) < 0.5 && Math.abs(d.w - w * dpr) < 2 && Math.abs(d.h - h * dpr) < 2;
 		const pw = exact ? Math.max(1, d.w) : Math.max(1, Math.round(w * dpr));
 		const ph = exact ? Math.max(1, d.h) : Math.max(1, Math.round(h * dpr));
 		if (dpr !== this.dpr) this.tiles.clear();

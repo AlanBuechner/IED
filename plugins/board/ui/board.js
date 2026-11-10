@@ -39,6 +39,10 @@ export class BoardView {
 		this.buildToolbar();
 		this.buildPanel();
 		this.stopModel = this.model.on((change) => this.changed(change));
+		this.stopSettings = this.ied.client.subscribe("settings:" + ctx.wsId, {
+			snap: (data) => this.settings(data.values || {}),
+			evt: (kind, data) => { if (kind === "settings.changed" && data.values) this.settings(data.values); },
+		});
 		this.paste = (e) => this.onPaste(e);
 		document.addEventListener("paste", this.paste);
 		this.stage.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.items || [])].some((i) => i.kind === "file")) e.preventDefault(); });
@@ -52,6 +56,7 @@ export class BoardView {
 		document.removeEventListener("paste", this.paste);
 		this.panels.plan.save();
 		this.stopModel();
+		if (this.stopSettings) this.stopSettings();
 		this.input.dispose();
 		this.canvas.dispose();
 		this.model.dispose();
@@ -76,6 +81,7 @@ export class BoardView {
 		this.eraserMode = h("button.btn.flat.board-eraser-mode", { title: "Eraser: cut through strokes, or take whole strokes and shapes", on: { click: () => this.toggleEraser() } }, "Partial");
 		this.eraserSize = h("input.board-eraser-size", { type: "range", min: "6", max: "80", value: "16", title: "Eraser size", "aria-label": "Eraser size", on: { input: (e) => { this.input.eraser.size = Number(e.target.value); } } });
 		this.eraserGroup = h("span.board-group.board-eraser", { hidden: true }, this.eraserMode, this.eraserSize);
+		this.snapButton = h("button.ib.board-snap", { title: "Snap to alignment: edges, centers and equal gaps (hold Alt while dragging to place freely)", "aria-label": "Snap to alignment", "aria-pressed": "true", on: { click: () => this.setSnap(!this.input.snap) } }, icon("magnet"));
 		this.zoomLabel = h("button.btn.flat.board-zoom", { title: "Zoom: click for 100%", on: { click: () => { this.canvas.camera.zoom = 1; this.canvas.request(); this.updateZoom(); } } }, "100%");
 		const sep = () => h("span.board-sep");
 		replace(this.toolbar,
@@ -89,6 +95,7 @@ export class BoardView {
 			h("button.ib", { title: "Insert an image (or paste or drop one)", "aria-label": "Insert image", on: { click: () => this.pickImage() } }, icon("file-media")),
 			h("button.ib", { title: "Undo (Ctrl+Z)", "aria-label": "Undo", on: { click: () => this.model.undo() } }, icon("discard")),
 			h("button.ib", { title: "Redo (Ctrl+Y)", "aria-label": "Redo", on: { click: () => this.model.redo() } }, icon("redo")),
+			this.snapButton,
 			h("span.grow"),
 			this.statusText,
 			h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", on: { click: () => this.zoomBy(0.8) } }, icon("zoom-out")),
@@ -100,6 +107,25 @@ export class BoardView {
 		this.toolChanged();
 		this.styleChanged();
 		this.canvas.overlays.push(() => this.updateZoom());
+	}
+
+	// The board's settings: board.snap (docs/32 "Snapping").
+	settings(values) {
+		const snap = values["board.snap"];
+		this.input.snap = !snap || snap.value !== false;
+		this.snapButton.setAttribute("aria-pressed", String(this.input.snap));
+	}
+
+	// The magnet: board.snap for every board, at the User tier.
+	async setSnap(on) {
+		this.input.snap = on;
+		this.snapButton.setAttribute("aria-pressed", String(on));
+		try {
+			await this.ied.client.request("settings.set", { tier: "app", key: "board.snap", value: on, wsId: this.ctx.wsId });
+		}
+		catch (e) {
+			this.ied.toast("Cannot save the snapping setting: " + (e.message || e), { level: "error" });
+		}
 	}
 
 	zoomBy(factor) {

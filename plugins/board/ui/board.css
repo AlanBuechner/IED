@@ -5,7 +5,7 @@
 .board-toolbar::-webkit-scrollbar { display: none; }
 .board-group { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .board-sep { width: var(--border-width); height: 18px; background: var(--border-1); margin: 0 var(--space-2); flex: none; }
-.board-tool[aria-pressed="true"], .board-width[aria-pressed="true"], .board-fill[aria-pressed="true"] { background: var(--selection-active); color: var(--text-0); }
+.board-tool[aria-pressed="true"], .board-width[aria-pressed="true"], .board-fill[aria-pressed="true"], .board-snap[aria-pressed="true"] { background: var(--selection-active); color: var(--text-0); }
 .board-swatch { width: 16px; height: 16px; border-radius: var(--radius-round); background: var(--swatch); border: 2px solid transparent; margin: 0 1px; flex: none; }
 .board-swatch.on { border-color: var(--focus); }
 .board-swatch:hover { border-color: var(--text-2); }

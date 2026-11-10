@@ -1,0 +1,11 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"board.snap": {
+			"type": "boolean",
+			"default": true,
+			"description": "Shapes moved, resized or drawn on a planning board snap to the edges and centers of the elements on the screen, and a moved selection to equal gaps between its neighbours, with guides showing what lined up. Hold Alt while dragging to place freely; the toolbar's magnet turns it off and on."
+		}
+	}
+}

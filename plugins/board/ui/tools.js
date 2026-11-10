@@ -4,6 +4,7 @@
 
 import { isBoxed, isNode, isPath, frameOf, hitDistance, overlaps, contains, inflate, union, EMPTY, isEmpty, box, simplify, roundPts, erase, tenth, segDist } from "./geom.js";
 import { drawElement, fontOf, wrap } from "./render.js";
+import { SNAP_PX, snapTargets, snapBox, snapValue, guidesFor } from "./snap.js";
 
 const HANDLE = 7;
 const CLICK = 4;
@@ -40,6 +41,8 @@ export class BoardInput {
 		this.space = false;
 		this.clipboard = null;
 		this.editor = null;
+		this.snap = true;              // the board.snap setting: alignment snapping (Alt holds it off while dragging)
+		this.guides = null;            // what the dragged thing snapped to, drawn while it is dragged
 		const el = this.canvas.canvas;
 		this.handlers = {
 			pointerdown: (e) => this.down(e),
@@ -49,7 +52,10 @@ export class BoardInput {
 			wheel: (e) => this.wheel(e),
 			dblclick: (e) => this.dblclick(e),
 			keydown: (e) => this.key(e),
-			keyup: (e) => { if (e.code === "Space") this.space = false; },
+			keyup: (e) => {
+				if (e.code === "Space") this.space = false;
+				if (e.key === "Alt") this.altChanged(e, false);
+			},
 			contextmenu: (e) => e.preventDefault(),
 		};
 		for (const [type, fn] of Object.entries(this.handlers)) el.addEventListener(type, fn, type === "wheel" ? { passive: false } : undefined);
@@ -132,6 +138,48 @@ export class BoardInput {
 		const sy = e.clientY - r.top;
 		const [wx, wy] = this.canvas.toWorld(sx, sy);
 		return { sx, sy, wx, wy };
+	}
+
+	// --- snapping (docs/32 "Snapping") ----------------------------------------------------------------------------
+
+	snapping(e) {
+		return this.snap && !(e && e.altKey);
+	}
+
+	// What a drag snaps to: the boxed elements of the visible layers on the screen, but for `except` (ids).
+	snapTargetsExcept(except) {
+		const view = this.canvas.viewBox();
+		const boxes = [];
+		for (const el of this.model.drawn(true)) {
+			if (except.has(el.id) || !isBoxed(el.type) || el._new) continue;
+			const b = frameOf(el);
+			if (overlaps(b, view)) boxes.push(b);
+		}
+		return snapTargets(boxes);
+	}
+
+	snapTolerance() {
+		return SNAP_PX / this.canvas.camera.zoom;
+	}
+
+	// How near counts as lined up for the guides: half a screen pixel (positions are kept to a tenth).
+	snapEpsilon() {
+		return Math.max(0.06, 0.5 / this.canvas.camera.zoom);
+	}
+
+	// A point snapped to the targets' edges and centers, with the guides through it.
+	snapPoint(p, targets, e) {
+		if (!targets || !this.snapping(e)) return p;
+		const tol = this.snapTolerance();
+		return { ...p, wx: snapValue(p.wx, targets, "x", tol), wy: snapValue(p.wy, targets, "y", tol) };
+	}
+
+	// Alt pressed or let go mid-drag: the drag again where the pointer is, snapped or not.
+	altChanged(e, down) {
+		const a = this.action;
+		if (!a || !a.lastP || !["move", "resize", "shape"].includes(a.kind)) return;
+		e.preventDefault();
+		this.drag(a.lastP, { ...a.mods, altKey: down });
 	}
 
 	down(e) {
@@ -220,7 +268,13 @@ export class BoardInput {
 		if (t === "select") return this.startSelect(p, e);
 		if (t === "pen" || t === "highlighter") return (this.action = { kind: "ink", pts: [p.wx, p.wy], last: p });
 		if (t === "eraser") return this.startErase(p);
-		if (["rect", "ellipse", "diamond", "frame", "line", "arrow"].includes(t)) return (this.action = { kind: "shape", type: t, from: p, to: p });
+		if (["rect", "ellipse", "diamond", "frame", "line", "arrow"].includes(t)) {
+			const targets = this.snapTargetsExcept(new Set());
+			const from = this.snapPoint(p, targets, e);
+			this.action = { kind: "shape", type: t, from, to: from, targets };
+			this.shapeGuides(this.action, e);
+			return;
+		}
 		if (t === "connector") {
 			const from = this.hit(p.wx, p.wy);
 			if (from && from.type !== "connector" && !isPath(from.type)) this.action = { kind: "connect", from, to: p };
@@ -234,8 +288,9 @@ export class BoardInput {
 		const handle = this.handleAt(p.sx, p.sy);
 		if (handle) {
 			const el = this.selected()[0];
-			this.action = { kind: "resize", handle, el, from: p, original: { x: el.x, y: el.y, w: el.w, h: el.h, fontSize: el.fontSize } };
-			this.hide([el.id, ...this.model.connectorsOf(el.id).map((c) => c.id)]);
+			const connectors = this.model.connectorsOf(el.id).map((c) => c.id);
+			this.action = { kind: "resize", handle, el, from: p, original: { x: el.x, y: el.y, w: el.w, h: el.h, fontSize: el.fontSize }, targets: this.snapTargetsExcept(new Set([el.id])) };
+			this.hide([el.id, ...connectors]);
 			return;
 		}
 		const el = this.hit(p.wx, p.wy);
@@ -274,7 +329,11 @@ export class BoardInput {
 		const original = new Map(ids.map((id) => { const el = this.model.get(id); return [id, { x: el.x, y: el.y, pts: el.pts && el.pts.slice() }]; }));
 		const connectors = new Set();
 		for (const id of ids) for (const c of this.model.connectorsOf(id)) connectors.add(c.id);
-		this.action = { kind: "move", from: p, ids, original, dx: 0, dy: 0 };
+		// The box that snaps: everything moving, as it is now.
+		let moving = EMPTY;
+		for (const id of ids) moving = union(moving, frameOf(this.model.get(id)));
+		const targets = isEmpty(moving) ? null : this.snapTargetsExcept(new Set([...ids, ...connectors]));
+		this.action = { kind: "move", from: p, ids, original, dx: 0, dy: 0, box: moving, targets };
 		this.hide([...ids, ...connectors]);
 	}
 
@@ -321,20 +380,44 @@ export class BoardInput {
 			return;
 		}
 		if (a.kind === "erase") return this.dragErase(p);
+		a.lastP = p;
+		a.mods = { altKey: !!e.altKey, shiftKey: !!e.shiftKey };
 		if (a.kind === "move") {
-			a.dx = tenth(p.wx - a.from.wx);
-			a.dy = tenth(p.wy - a.from.wy);
+			let dx = p.wx - a.from.wx, dy = p.wy - a.from.wy;
+			this.guides = null;
+			if (a.targets && this.snapping(e)) {
+				const b = a.box;
+				const s = snapBox({ x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy }, a.targets, this.snapTolerance(), this.snapEpsilon());
+				dx += s.dx;
+				dy += s.dy;
+				this.guides = s.guides;
+			}
+			a.dx = tenth(dx);
+			a.dy = tenth(dy);
 			this.placeMoved(a);
 			this.canvas.request();
 			return;
 		}
 		if (a.kind === "resize") return this.dragResize(a, p, e);
 		if (a.kind === "crop") return this.dragCrop(a, p);
-		a.to = p;
+		if (a.kind === "shape") {
+			a.to = this.snapPoint(p, a.targets, e);
+			this.shapeGuides(a, e);
+		}
+		else a.to = p;
 		this.canvas.request();
 	}
 
+	// The guides of a shape being drawn: through its corners (a line's ends).
+	shapeGuides(a, e) {
+		this.guides = null;
+		if (!a.targets || !this.snapping(e)) return;
+		const b = box(a.from.wx, a.from.wy, a.to.wx, a.to.wy);
+		this.guides = guidesFor(b, a.targets, this.snapEpsilon(), { x: [a.from.wx, a.to.wx], y: [a.from.wy, a.to.wy] }, false);
+	}
+
 	abandon(a) {
+		this.guides = null;
 		if (a.kind === "move") {
 			a.dx = 0;
 			a.dy = 0;
@@ -346,6 +429,7 @@ export class BoardInput {
 	}
 
 	finish(a, p, e) {
+		this.guides = null;
 		if (a.kind === "pan") return;
 		if (a.kind === "ink") return this.finishInk(a);
 		if (a.kind === "erase") return this.finishErase(a);
@@ -640,10 +724,15 @@ export class BoardInput {
 		const el = a.el, o = a.original;
 		let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
 		const h = a.handle;
-		if (h.includes("w")) x0 = Math.min(p.wx, x1 - 8);
-		if (h.includes("e")) x1 = Math.max(p.wx, x0 + 8);
-		if (h.includes("n")) y0 = Math.min(p.wy, y1 - 8);
-		if (h.includes("s")) y1 = Math.max(p.wy, y0 + 8);
+		// The edges the handle moves snap to the edges and centers around them.
+		const snap = this.snapping(e) && a.targets;
+		const tol = this.snapTolerance();
+		const px = snap && (h.includes("w") || h.includes("e")) ? snapValue(p.wx, a.targets, "x", tol) : p.wx;
+		const py = snap && (h.includes("n") || h.includes("s")) ? snapValue(p.wy, a.targets, "y", tol) : p.wy;
+		if (h.includes("w")) x0 = Math.min(px, x1 - 8);
+		if (h.includes("e")) x1 = Math.max(px, x0 + 8);
+		if (h.includes("n")) y0 = Math.min(py, y1 - 8);
+		if (h.includes("s")) y1 = Math.max(py, y0 + 8);
 		// Images keep their aspect unless Shift frees them; Shift keeps it for the rest.
 		const keep = (el.type === "image") !== e.shiftKey && h.length === 2;
 		if (keep) {
@@ -654,6 +743,12 @@ export class BoardInput {
 		}
 		el.x = tenth(x0); el.y = tenth(y0); el.w = tenth(x1 - x0); el.h = tenth(y1 - y0);
 		if (el.type === "text") el.fontSize = Math.max(6, tenth((o.fontSize ?? 16) * el.h / o.h));
+		this.guides = null;
+		if (snap) {
+			const b = frameOf(el);
+			const values = { x: [h.includes("w") ? b.x0 : null, h.includes("e") ? b.x1 : null].filter((v) => v !== null), y: [h.includes("n") ? b.y0 : null, h.includes("s") ? b.y1 : null].filter((v) => v !== null) };
+			this.guides = guidesFor(b, a.targets, this.snapEpsilon(), values, false);
+		}
 		this.canvas.request();
 	}
 
@@ -729,6 +824,7 @@ export class BoardInput {
 	// --- keys -----------------------------------------------------------------------------------------------------
 
 	key(e) {
+		if (e.key === "Alt") return this.altChanged(e, true);
 		if (this.editor) return;
 		const ctrl = e.ctrlKey || e.metaKey;
 		const k = e.key.toLowerCase();
@@ -873,6 +969,64 @@ export class BoardInput {
 		}
 		if (this.cropping) return this.cropOverlay(ctx);
 		this.selectionOverlay(ctx);
+		if (a && this.guides) this.guidesOverlay(ctx);
+	}
+
+	// What a drag snapped to: a line through the edges or centers it shares, past the boxes at both ends; equal gaps
+	// as spans with end ticks.
+	guidesOverlay(ctx) {
+		const z = this.canvas.camera.zoom;
+		const pal = this.canvas.palette;
+		const over = 8 / z, tick = 4 / z;
+		ctx.save();
+		ctx.strokeStyle = pal.info;
+		ctx.lineWidth = 1 / z;
+		ctx.setLineDash([]);
+		ctx.beginPath();
+		for (const g of this.guides) {
+			const line = (a0, a1, c) => {
+				if (g.axis === "x") { ctx.moveTo(c, a0); ctx.lineTo(c, a1); }
+				else { ctx.moveTo(a0, c); ctx.lineTo(a1, c); }
+			};
+			if (!g.gaps) {
+				line(g.from - over, g.to + over, g.v);
+				continue;
+			}
+			// A gap along the axis, drawn across it at `c`.
+			for (const [from, to, c] of g.gaps) {
+				if (g.axis === "x") {
+					ctx.moveTo(from, c); ctx.lineTo(to, c);
+					ctx.moveTo(from, c - tick); ctx.lineTo(from, c + tick);
+					ctx.moveTo(to, c - tick); ctx.lineTo(to, c + tick);
+				}
+				else {
+					ctx.moveTo(c, from); ctx.lineTo(c, to);
+					ctx.moveTo(c - tick, from); ctx.lineTo(c + tick, from);
+					ctx.moveTo(c - tick, to); ctx.lineTo(c + tick, to);
+				}
+			}
+		}
+		ctx.stroke();
+		// Each equal gap's size, beside its span.
+		ctx.fillStyle = pal.info;
+		ctx.font = fontOf(pal, 11 / z);
+		for (const g of this.guides) {
+			if (!g.gaps) continue;
+			for (const [from, to, c] of g.gaps) {
+				const text = String(Math.round(to - from));
+				if (g.axis === "x") {
+					ctx.textAlign = "center";
+					ctx.textBaseline = "bottom";
+					ctx.fillText(text, (from + to) / 2, c - tick - 1 / z);
+				}
+				else {
+					ctx.textAlign = "left";
+					ctx.textBaseline = "middle";
+					ctx.fillText(text, c + tick + 2 / z, (from + to) / 2);
+				}
+			}
+		}
+		ctx.restore();
 	}
 
 	selectionOverlay(ctx) {
