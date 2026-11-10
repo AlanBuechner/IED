@@ -33,26 +33,38 @@ namespace Profiler
 		json.IntField("minNs", durations.IsEmpty() ? 0 : capture.m_Clock.Ns(durations[0]));
 	}
 
-	Core::String FrameGraph(const Capture& capture, int32 width) {
+	// The graph's bars over frames `first` to `last` of the main set (-1: from the first, to the last completed): a bar
+	// per frame, or the worst of each run of frames when there are more than `width`. A bar is [the worst frame, its
+	// time, the run's start, the run's end, the run's first frame, its last]; the frame statistics are the capture's.
+	Core::String FrameGraph(const Capture& capture, int32 width, int64 first, int64 last) {
 		const FrameSet* set = MainFrameSet(capture);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("set", set && !capture.Text(set->m_NameStr).IsEmpty() ? capture.Text(set->m_NameStr) : Core::StringView("Frame"));
 		WriteFrameStats(json, capture, set);
+		const int64 total = set ? set->Completed() : 0;
+		const int64 from = first < 0 ? 0 : (first > total ? total : first);
+		const int64 to = last < 0 || last >= total ? total - 1 : last;
+		const int64 count = to >= from ? to - from + 1 : 0;
+		const int64 perBar = count <= (int64)width ? 1 : (count + (int64)width - 1) / (int64)width;
+		json.IntField("total", total);
+		json.IntField("first", from);
+		json.IntField("last", from + count - 1);
+		json.IntField("perBar", perBar);
 		json.Key(Core::StringView("bars"));
 		json.BeginArray();
-		const int64 count = set ? set->Completed() : 0;
-		const int64 perBar = count <= (int64)width ? 1 : (count + (int64)width - 1) / (int64)width;
-		for (int64 first = 0; first < count; first += perBar) {
-			int64 worst = first;
-			for (int64 i = first; i < first + perBar && i < count; ++i)
+		for (int64 run = from; run < from + count; run += perBar) {
+			const int64 end = run + perBar - 1 < to ? run + perBar - 1 : to;
+			int64 worst = run;
+			for (int64 i = run; i <= end; ++i)
 				if (set->m_Ends[i] - set->m_Starts[i] > set->m_Ends[worst] - set->m_Starts[worst]) worst = i;
-			const int64 last = first + perBar < count ? first + perBar - 1 : count - 1;
 			json.BeginArray();
 			json.Int(worst);
 			json.Int(capture.m_Clock.Ns(set->m_Ends[worst] - set->m_Starts[worst]));
-			json.Int(capture.m_Clock.Ns(set->m_Starts[first]));
-			json.Int(capture.m_Clock.Ns(set->m_Ends[last]));
+			json.Int(capture.m_Clock.Ns(set->m_Starts[run]));
+			json.Int(capture.m_Clock.Ns(set->m_Ends[end]));
+			json.Int(run);
+			json.Int(end);
 			json.EndArray();
 		}
 		json.EndArray();

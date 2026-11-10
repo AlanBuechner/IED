@@ -33,9 +33,11 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 
 .prof-doc .fg { position: relative; height: 54px; flex: none; border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); }
 .prof-doc.no-frames .fg { display: none; }
-.prof-fg-canvas { position: absolute; inset: 0; display: block; cursor: pointer; }
-.prof-fg-budget { position: absolute; right: var(--space-4); top: 2px; font-size: var(--font-size-xs); color: var(--text-2); background: var(--bg-1); padding: 0 var(--space-2); pointer-events: none; }
-
+.prof-fg-canvas { position: absolute; inset: 0; display: block; cursor: pointer; outline: none; }
+.prof-fg-tools { position: absolute; right: var(--space-3); top: 1px; display: flex; align-items: center; gap: 1px; background: var(--bg-1); padding-left: var(--space-2); }
+.prof-fg-tools .ib { width: 20px; height: 18px; }
+.prof-fg-budget { font-size: var(--font-size-xs); color: var(--text-2); padding: 0 var(--space-2); pointer-events: none; white-space: nowrap; }
+.prof-fg-range { position: absolute; left: var(--space-3); top: 2px; font-size: var(--font-size-xs); color: var(--text-1); background: var(--bg-1); padding: 0 var(--space-2); pointer-events: none; white-space: nowrap; }
 .prof-main { flex: 1; display: flex; min-height: 0; }
 .prof-doc .tl { position: relative; flex: 1; min-width: 0; overflow: hidden; }
 .prof-canvas { position: absolute; inset: 0; display: block; outline: none; cursor: grab; }
@@ -169,6 +171,8 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 	.prof-bar { height: 44px; gap: var(--space-2); }
 	.prof-bar .tb-sep, .prof-bar .legend, .prof-bar .rec .muted { display: none; }
 	.prof-doc .fg { height: 46px; }
+	.prof-fg-tools .ib { width: 28px; height: 22px; }
+	.prof-fg-budget { display: none; }
 	.prof-main { flex-direction: column; }
 	.prof-side.phone-sheet { width: auto; max-height: 38%; border-left: 0; border-top: var(--border-width) solid var(--border-1); border-radius: var(--radius-3) var(--radius-3) 0 0; display: none; }
 	.prof-doc.zone-shown .prof-side.phone-sheet { display: flex; }

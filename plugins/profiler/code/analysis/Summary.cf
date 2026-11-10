@@ -101,7 +101,7 @@ namespace Profiler
 		const FrameSet* set = MainFrameSet(capture);
 		if (!set) json.Null();
 		else {
-			Core::String frames = FrameGraph(capture, 1);
+			Core::String frames = FrameGraph(capture, 1, -1, -1);
 			json.Raw(frames.View());
 		}
 		WriteThreads(json, capture);
@@ -217,8 +217,8 @@ namespace Profiler
 		json.BeginObject();
 		json.Key(Core::StringView("frames"));
 		json.BeginObject();
-		json.RawField("a", FrameGraph(a, 1).View());
-		json.RawField("b", FrameGraph(b, 1).View());
+		json.RawField("a", FrameGraph(a, 1, -1, -1).View());
+		json.RawField("b", FrameGraph(b, 1, -1, -1).View());
 		json.EndObject();
 		json.IntField("durationANs", a.DurationNs());
 		json.IntField("durationBNs", b.DurationNs());

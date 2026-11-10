@@ -263,7 +263,9 @@ namespace Profiler
 
 	static Core::String FramesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
 		const int32 width = Width(params, 1000);
-		return Answer(profiler, params, [width](const Capture& capture) -> Core::String { return FrameGraph(capture, width); });
+		const int64 first = params.Int("first", -1);
+		const int64 last = params.Int("last", -1);
+		return Answer(profiler, params, [width, first, last](const Capture& capture) -> Core::String { return FrameGraph(capture, width, first, last); });
 	}
 
 	static Core::String FrameMethod(ProfilerPlugin* profiler, const IED::Params& params) {

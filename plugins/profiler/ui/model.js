@@ -60,6 +60,80 @@ export class TimeView {
 	}
 }
 
+// --- The frame time graph's range --------------------------------------------------------------------------------
+
+// The fewest frames the frame time graph zooms in to.
+export const MIN_FRAMES = 4;
+
+// The frames the frame time graph shows: [from, to) in frame numbers, fractional while zooming.
+export class FrameSpan {
+	constructor(from = 0, to = 1) {
+		this.from = from;
+		this.to = to;
+	}
+
+	get count() {
+		return this.to - this.from;
+	}
+
+	// Zooms by `factor` (< 1 in) keeping the frame at `anchor` where it is on screen; never past `total` frames.
+	zoomAt(anchor, factor, total) {
+		const most = Math.max(total, 1);
+		const count = Math.min(Math.max(this.count * factor, Math.min(MIN_FRAMES, most)), most);
+		const at = this.count > 0 ? (anchor - this.from) / this.count : 0.5;
+		this.from = anchor - at * count;
+		this.to = this.from + count;
+		return this.clamp(total);
+	}
+
+	panBy(frames, total) {
+		this.from += frames;
+		this.to += frames;
+		return this.clamp(total);
+	}
+
+	// Keeps the span inside the capture's frames: one longer than them shows all of them.
+	clamp(total) {
+		const count = Math.min(this.count, Math.max(total, 1));
+		this.from = Math.max(0, Math.min(this.from, total - count));
+		this.to = this.from + count;
+		return this;
+	}
+
+	// Whether it shows every one of `total` frames.
+	whole(total) {
+		return this.from <= 0 && this.to >= total;
+	}
+
+	x(frame, width) {
+		return (frame - this.from) / this.count * width;
+	}
+
+	frame(x, width) {
+		return this.from + x / width * this.count;
+	}
+}
+
+// Whether a prof.frames answer still serves a span `width` pixels wide: it holds the span's frames, and its runs of
+// frames per bar are about the size the pixels need.
+export function barsServe(graph, span, width) {
+	if (!graph || graph.first === undefined) return false;
+	const first = Math.max(0, Math.floor(span.from));
+	const last = Math.min(graph.total, Math.ceil(span.to)) - 1;
+	if (first < graph.first || last > graph.last) return false;
+	const need = Math.max(1, Math.ceil(span.count / Math.max(1, width)));
+	return graph.perBar <= need * 1.6 && graph.perBar >= need / 1.6;
+}
+
+// What to ask prof.frames for a span `width` pixels wide: a span more on each side (so panning has bars before the
+// answer comes), at the span's pixel size.
+export function barsFetch(span, total, width) {
+	const count = Math.max(1, span.count);
+	const first = Math.max(0, Math.floor(span.from - count));
+	const last = Math.max(first, Math.min(total, Math.ceil(span.to + count)) - 1);
+	return { first, last, width: Math.max(1, Math.round(width * (last - first + 1) / count)) };
+}
+
 // Whether a fetched answer still serves the view: it covers it and its pixels are not much coarser or finer.
 export function answerServes(answer, view, width) {
 	if (!answer) return false;
@@ -75,10 +149,68 @@ export function fetchRange(view, durationNs) {
 	return { from: Math.max(0, view.from - span), to: Math.min(Math.max(durationNs, view.to), view.to + span) };
 }
 
+// --- Lane order (the settings profiler.threadOrder and profiler.gpuQueueOrder) -------------------------------------
+
+// The GPU queues' group lane: its id is what `collapsed` holds while the group is folded.
+export const GPU_GROUP = "group:gpu";
+
+// Whether `name` is matched by `pattern`: the whole name, case ignored, `*` any run of characters, `?` one.
+export function nameMatches(pattern, name) {
+	const p = String(pattern).toLowerCase();
+	const s = String(name).toLowerCase();
+	let i = 0;
+	let j = 0;
+	let star = -1;
+	let mark = 0;
+	while (j < s.length) {
+		if (i < p.length && (p[i] === "?" || p[i] === s[j])) {
+			i++;
+			j++;
+		}
+		else if (i < p.length && p[i] === "*") {
+			star = i++;
+			mark = j;
+		}
+		else if (star >= 0) {
+			i = star + 1;
+			j = ++mark;
+		}
+		else return false;
+	}
+	while (i < p.length && p[i] === "*") i++;
+	return i === p.length;
+}
+
+// Where a lane goes in an order (a list of names and patterns): at the first entry other than "*" that one of its
+// names matches, its names tried in the order it had them (a worker named "Job Worker 2" and later "Render" stays a
+// worker); else where "*" is; else after every entry.
+export function orderRank(names, order) {
+	const list = Array.isArray(order) ? order : [];
+	for (const name of names) {
+		const at = list.findIndex((pattern) => pattern !== "*" && nameMatches(pattern, name));
+		if (at >= 0) return at;
+	}
+	const rest = list.indexOf("*");
+	return rest >= 0 ? rest : list.length;
+}
+
+// `lanes` in an order: by rank, lanes of one rank in the order they came (the order the program made them).
+export function orderLanes(lanes, order, namesOf) {
+	return lanes.map((lane, i) => ({ lane, i, rank: orderRank(namesOf(lane), order) }))
+		.sort((a, b) => a.rank - b.rank || a.i - b.i)
+		.map((entry) => entry.lane);
+}
+
+function threadNames(lane) {
+	return lane.names && lane.names.length ? lane.names : [lane.label];
+}
+
 // The lanes of an answer from top to bottom with their place: {kind, id, label, sub, y, height, rows, lockTop,
-// lockRows, source}. A thread's lock rows (`lockRowHeight` each) come under its zone rows, from `lockTop` down.
+// lockRows, group, source}. The GPU queues come first, under their group lane (kind "group", folded while
+// `collapsed` holds GPU_GROUP), in `gpuOrder`; then the threads in `threadOrder` (task lanes as they came); then the
+// messages and the plots. A thread's lock rows (`lockRowHeight` each) come under its zone rows, from `lockTop` down.
 export function layoutLanes(answer, options) {
-	const { rowHeight, pad, collapsed = new Set(), messageHeight, plotHeight, lockRowHeight = rowHeight } = options;
+	const { rowHeight, pad, collapsed = new Set(), messageHeight, plotHeight, lockRowHeight = rowHeight, threadOrder, gpuOrder } = options;
 	const lanes = [];
 	let y = 0;
 	const add = (lane, rows, lockRows = 0) => {
@@ -91,13 +223,22 @@ export function layoutLanes(answer, options) {
 		y += lane.height;
 		lanes.push(lane);
 	};
-	for (const lane of answer.lanes || []) {
+	const gpus = orderLanes(answer.gpu || [], gpuOrder, (gpu) => [gpu.label]);
+	if (gpus.length) {
+		const folded = collapsed.has(GPU_GROUP);
+		const sub = gpus.length + (gpus.length === 1 ? " queue" : " queues");
+		lanes.push({ kind: "group", id: GPU_GROUP, label: "GPU", sub, collapsed: folded, y, height: rowHeight + pad * 2, rows: 1, lockRows: 0, source: gpus });
+		y += rowHeight + pad * 2;
+		if (!folded) for (const gpu of gpus) add({ kind: "gpu", id: gpu.id, label: gpu.label, sub: "", group: GPU_GROUP, source: gpu }, gpu.depth);
+	}
+	const threadLanes = answer.lanes || [];
+	const ordered = threadLanes.every((lane) => lane.kind === "thread") ? orderLanes(threadLanes, threadOrder, threadNames) : threadLanes;
+	for (const lane of ordered) {
 		const sub = lane.kind === "task"
 			? lane.runs + (lane.runs === 1 ? " run" : " runs") + " on " + lane.threads + (lane.threads === 1 ? " thread" : " threads")
 			: lane.renamed ? "renamed " + lane.renamed + "x" : "";
 		add({ kind: lane.kind, id: lane.id, label: lane.label, sub, source: lane }, lane.depth, (lane.locks || []).length);
 	}
-	for (const gpu of answer.gpu || []) add({ kind: "gpu", id: gpu.id, label: gpu.label, sub: "", source: gpu }, gpu.depth);
 	if ((answer.messages || []).length || answer.messagesInRange) {
 		lanes.push({ kind: "messages", id: "messages", label: "Messages", sub: "", y, height: messageHeight, rows: 1, source: answer.messages });
 		y += messageHeight;

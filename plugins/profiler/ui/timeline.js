@@ -22,11 +22,12 @@ function rowHeightFor(phone) {
 
 export class TimelineView {
 	// `host` is the element to fill; `fetch(from, to, width)` resolves to a prof.timeline answer.
-	constructor(host, { fetch, onSelect, onRange, onView, onNote, budgetNs }) {
+	constructor(host, { fetch, onSelect, onRange, onView, onNote, onFold, folded, budgetNs }) {
 		this.host = host;
 		this.fetch = fetch;
 		this.onSelect = onSelect || (() => {});
 		this.onNote = onNote || (() => {});
+		this.onFold = onFold || (() => {});
 		this.notes = [];
 		this.selectedNote = null;
 		this.selectedLock = null;
@@ -43,7 +44,9 @@ export class TimelineView {
 		this.scrollY = 0;
 		this.selected = null;
 		this.range = null;
-		this.collapsed = new Set();
+		this.collapsed = new Set(folded || []);
+		this.threadOrder = undefined;
+		this.gpuOrder = undefined;
 		this.painter = new TimelinePainter();
 		this.canvas = h("canvas.prof-canvas", { tabindex: "0", "aria-label": "Timeline" });
 		this.tip = h("div.prof-tip", { hidden: true });
@@ -70,7 +73,19 @@ export class TimelineView {
 
 	options() {
 		const rowHeight = rowHeightFor(this.phone);
-		return { rowHeight, lockRowHeight: this.phone ? 14 : 12, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2 };
+		return {
+			rowHeight, lockRowHeight: this.phone ? 14 : 12, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2,
+			threadOrder: this.threadOrder, gpuOrder: this.gpuOrder,
+		};
+	}
+
+	// The lanes' order (profiler.threadOrder, profiler.gpuQueueOrder): lists of names and patterns, or undefined for
+	// the order they came in.
+	setOrder(threadOrder, gpuOrder) {
+		if (JSON.stringify([threadOrder, gpuOrder]) === JSON.stringify([this.threadOrder, this.gpuOrder])) return;
+		this.threadOrder = threadOrder;
+		this.gpuOrder = gpuOrder;
+		if (this.answer) this.relayout();
 	}
 
 	// The ruler, the frame row and the notes row when there are notes.
@@ -215,7 +230,7 @@ export class TimelineView {
 		const ly = y - this.header + this.scrollY;
 		const lane = laneAt(this.layout, ly);
 		if (!lane) return null;
-		if (x < this.labelWidth) return { lane, label: true };
+		if (x < this.labelWidth || lane.kind === "group") return { lane, label: true };
 		const options = this.options();
 		const lock = lockAt(lane, this.view, this.trackWidth(), x - this.labelWidth, ly, options);
 		if (lock) return { lane, lock };
@@ -363,6 +378,7 @@ export class TimelineView {
 			if (this.collapsed.has(hit.lane.id)) this.collapsed.delete(hit.lane.id);
 			else this.collapsed.add(hit.lane.id);
 			this.relayout();
+			this.onFold(this.collapsed);
 			return;
 		}
 		if (hit && hit.lock) {

@@ -188,6 +188,13 @@ class ProfilerQueryTests {
 		Serialization::DomNode lanes = Parse(Profiler::Timeline(*capture, ask)).Member("lanes");
 		assert_true(lanes.Count() == 2 && lanes.At(0).Member("label").AsView() == "Physics" && lanes.At(1).Member("label").AsView() == "Audio", "a renamed thread's segments become task lanes");
 		assert_true(lanes.At(0).Member("zones").Count() == 1 && lanes.At(0).Member("slices").Count() == 1, "with the zones of their segment");
+		ask.m_Mode = Profiler::LaneMode::Threads;
+		ask.m_FromNs = 32;
+		ask.m_ToNs = 40;
+		Serialization::DomNode thread = Parse(Profiler::Timeline(*capture, ask)).Member("lanes").At(0);
+		assert_true(thread.Member("label").AsView() == "Audio", "a thread lane is labeled by its name where the view starts");
+		Serialization::DomNode names = thread.Member("names");
+		assert_true(names.Count() == 2 && names.At(0).AsView() == "Physics" && names.At(1).AsView() == "Audio", "and lists every name it had, in order");
 	}
 
 	[test("stats")]
@@ -254,12 +261,37 @@ class ProfilerQueryTests {
 	[test("frames")]
 	public static void TestFrames() {
 		Profiler::Capture* capture = Sample();
-		Serialization::DomNode graph = Parse(Profiler::FrameGraph(*capture, 100));
+		Serialization::DomNode graph = Parse(Profiler::FrameGraph(*capture, 100, -1, -1));
 		assert_true(graph.Member("count").AsInt() == 2 && graph.Member("maxNs").AsInt() == 200 && graph.Member("bars").Count() == 2, "a bar per frame");
+		assert_true(graph.Member("total").AsInt() == 2 && graph.Member("bars").At(1).At(4).AsInt() == 1 && graph.Member("bars").At(1).At(5).AsInt() == 1, "each bar's frames");
 		Serialization::DomNode worst = Parse(Profiler::FrameBreakdown(*capture, -1));
 		assert_true(worst.Member("index").AsInt() == 1 && worst.Member("durationNs").AsInt() == 200, "the longest frame");
 		assert_true(worst.Member("topZones").Member("rows").At(0).Member("name").AsView() == "Physics", "its costliest zone by self time");
 		assert_true(Profiler::FrameBreakdown(*capture, 9).IsEmpty(), "no such frame");
+	}
+
+	// Ten frames, frame i (10 + i) long; the graph zoomed in to frames 2 to 7 at two bars, then past the end.
+	[test("frames_range")]
+	public static void TestFrameRange() {
+		TraceBuilder b;
+		b.Thread(1);
+		int64 at = 0;
+		for (int64 i = 0; i < 10; ++i) {
+			b.Frame(at);
+			at += 10 + i;
+		}
+		b.Frame(at);
+		b.Done();
+		Profiler::Capture* capture = b.Read();
+		Serialization::DomNode graph = Parse(Profiler::FrameGraph(*capture, 2, 2, 7));
+		assert_true(graph.Member("total").AsInt() == 10 && graph.Member("first").AsInt() == 2 && graph.Member("last").AsInt() == 7, "the range asked for");
+		assert_true(graph.Member("perBar").AsInt() == 3 && graph.Member("bars").Count() == 2, "three frames a bar");
+		Serialization::DomNode bar = graph.Member("bars").At(1);
+		assert_true(bar.At(0).AsInt() == 7 && bar.At(1).AsInt() == 17 && bar.At(4).AsInt() == 5 && bar.At(5).AsInt() == 7, "the run's worst frame and its frames");
+		assert_true(bar.At(2).AsInt() == 10 + 11 + 12 + 13 + 14 && bar.At(3).AsInt() == 10 + 11 + 12 + 13 + 14 + 15 + 16 + 17, "from the run's start to its end");
+		Serialization::DomNode tail = Parse(Profiler::FrameGraph(*capture, 100, 8, 40));
+		assert_true(tail.Member("last").AsInt() == 9 && tail.Member("bars").Count() == 2, "not past the last frame");
+		assert_true(Parse(Profiler::FrameGraph(*capture, 100, 12, -1)).Member("bars").Count() == 0, "a range after the frames is empty");
 	}
 
 	[test("leaks")]

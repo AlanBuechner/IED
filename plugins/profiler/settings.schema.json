@@ -21,6 +21,20 @@
 			"type": "boolean",
 			"default": true,
 			"description": "A live capture's timeline scrolls with the newest data until you zoom or pan."
+		},
+		"profiler.threadOrder": {
+			"type": "array",
+			"items": { "type": "string", "minLength": 1 },
+			"default": ["Main*", "Input*", "Render*", "GPU*", "Cleanup*", "*", "*Worker*"],
+			"description": "The order of the timeline's thread lanes, top to bottom: each entry a thread's name or a pattern (* any text, ? one character, case ignored). A thread goes where the first entry other than \"*\" that one of its names matches is, else where \"*\" is (after every entry without it); threads in one place keep the order they started in. A solution can set its own program's order.",
+			"x-ied-tiers": ["app", "solution"]
+		},
+		"profiler.gpuQueueOrder": {
+			"type": "array",
+			"items": { "type": "string", "minLength": 1 },
+			"default": ["*Direct*", "*Graphics*", "*Compute*", "*Copy*", "*Transfer*", "*"],
+			"description": "The order of the GPU queues' lanes in the GPU group at the top of the timeline, as profiler.threadOrder orders threads: each entry a queue's name or a pattern.",
+			"x-ied-tiers": ["app", "solution"]
 		}
 	}
 }

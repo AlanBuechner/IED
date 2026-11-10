@@ -99,7 +99,8 @@ namespace Profiler
 	Core::String Leaks(const Capture& capture, const LeakAsk& ask);
 	// One frame of the main frame set: `index`, or the longest with -1. Empty when there is no such frame.
 	Core::String FrameBreakdown(const Capture& capture, int64 index);
-	Core::String FrameGraph(const Capture& capture, int32 width);
+	// The frame time graph's bars over frames `first` to `last` (-1: the first, the last) at `width` bars at most.
+	Core::String FrameGraph(const Capture& capture, int32 width, int64 first, int64 last);
 	Core::String Summary(const Capture& capture);
 	Core::String Compare(const Capture& a, const Capture& b, int32 limit);
 	Core::String Messages(const Capture& capture, int64 fromNs, int64 toNs, int32 leastSeverity, Core::StringView text, int64 offset, int32 limit);

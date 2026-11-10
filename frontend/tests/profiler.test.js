@@ -4,7 +4,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { duration, ms, bytes, tickStep, tickLabel, instant } from "/plugins/ied.profiler/ui/format.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED } from "/plugins/ied.profiler/ui/model.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, nameMatches, orderRank, FrameSpan, barsServe, barsFetch, MIN_FRAMES } from "/plugins/ied.profiler/ui/model.js";
 import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
 import { noteRange } from "/plugins/ied.profiler/ui/notes.js";
 
@@ -62,26 +62,101 @@ const ANSWER = {
 };
 const OPTIONS = { rowHeight: 18, pad: 3, messageHeight: 26, plotHeight: 36 };
 
-test("profiler: lanes stack by their depth", () => {
+test("profiler: lanes stack by their depth, the GPU group first", () => {
 	const layout = layoutLanes(ANSWER, OPTIONS);
-	assertEqual(layout.lanes.map((l) => [l.kind, l.y, l.height]), [["thread", 0, 42], ["task", 42, 24], ["gpu", 66, 24], ["messages", 90, 26], ["plot", 116, 36]]);
-	assertEqual(layout.height, 152);
-	assertEqual(layout.lanes[1].sub, "3 runs on 2 threads");
+	assertEqual(layout.lanes.map((l) => [l.kind, l.y, l.height]), [["group", 0, 24], ["gpu", 24, 24], ["thread", 48, 42], ["task", 90, 24], ["messages", 114, 26], ["plot", 140, 36]]);
+	assertEqual(layout.height, 176);
+	assertEqual([layout.lanes[0].label, layout.lanes[0].sub, layout.lanes[1].group], ["GPU", "1 queue", GPU_GROUP]);
+	assertEqual(layout.lanes[3].sub, "3 runs on 2 threads");
 	const folded = layoutLanes(ANSWER, Object.assign({ collapsed: new Set(["thread:0"]) }, OPTIONS));
-	assertEqual(folded.lanes[0].height, 24, "a folded lane is one row");
-	assertEqual(laneAt(layout, 50).id, "task:Physics");
+	assertEqual(folded.lanes[2].height, 24, "a folded lane is one row");
+	assertEqual(laneAt(layout, 50).id, "thread:0");
 	assertEqual(laneAt(layout, 500), null);
 });
 
 test("profiler: a point hits the zone under it, the narrowest when they overlap", () => {
 	const layout = layoutLanes(ANSWER, OPTIONS);
 	const view = new TimeView(0, 100);
-	const main = layout.lanes[0];
-	assertEqual(zoneAt(main, view, 1000, 500, 3 + 5, OPTIONS)[4], "0:0:0", "depth 0");
-	assertEqual(zoneAt(main, view, 1000, 150, 3 + 18 + 5, OPTIONS)[4], "0:1:0", "depth 1");
-	assertEqual(zoneAt(main, view, 1000, 305, 3 + 18 + 5, OPTIONS)[4], 5, "a merged run");
-	assertEqual(zoneAt(main, view, 1000, 900, 3 + 18 + 5, OPTIONS), null, "nothing there");
-	assertEqual(zoneAt(layout.lanes[3], view, 1000, 50, 95, OPTIONS), null, "the messages lane has no zones");
+	const main = layout.lanes.find((l) => l.id === "thread:0");
+	const at = (y) => main.y + y;
+	assertEqual(zoneAt(main, view, 1000, 500, at(3 + 5), OPTIONS)[4], "0:0:0", "depth 0");
+	assertEqual(zoneAt(main, view, 1000, 150, at(3 + 18 + 5), OPTIONS)[4], "0:1:0", "depth 1");
+	assertEqual(zoneAt(main, view, 1000, 305, at(3 + 18 + 5), OPTIONS)[4], 5, "a merged run");
+	assertEqual(zoneAt(main, view, 1000, 900, at(3 + 18 + 5), OPTIONS), null, "nothing there");
+	const messages = layout.lanes.find((l) => l.kind === "messages");
+	assertEqual(zoneAt(messages, view, 1000, 50, messages.y + 5, OPTIONS), null, "the messages lane has no zones");
+	assertEqual(zoneAt(layout.lanes[0], view, 1000, 50, 5, OPTIONS), null, "nor the GPU group's");
+});
+
+test("profiler: lane names match patterns, the whole name and case ignored", () => {
+	assertTrue(nameMatches("Main*", "Main Thread") && nameMatches("main*", "MAIN"), "a prefix");
+	assertTrue(nameMatches("*Worker*", "Job Worker 3") && nameMatches("*worker*", "worker"), "anywhere in it");
+	assertTrue(nameMatches("Render", "render") && !nameMatches("Render", "Render 2"), "a plain name is the whole name");
+	assertTrue(nameMatches("Job ? *", "Job A x") && !nameMatches("Job ?", "Job AB"), "? is one character");
+	assertTrue(nameMatches("*", "") && !nameMatches("Main*", "The Main"), "a pattern starts where the name does");
+	assertTrue(nameMatches("a*b*c", "aXXbYYc") && !nameMatches("a*b*c", "aXXbYY"), "stars backtrack");
+});
+
+const ORDER = ["Main*", "Input*", "Render*", "GPU*", "Cleanup*", "*", "*Worker*"];
+
+test("profiler: a lane ranks at its first name an entry other than * matches", () => {
+	assertEqual(orderRank(["Main Thread"], ORDER), 0);
+	assertEqual(orderRank(["Cleanup"], ORDER), 4);
+	assertEqual(orderRank(["Job Worker 2"], ORDER), 6, "after the rest");
+	assertEqual(orderRank(["Audio"], ORDER), 5, "the rest go where * is");
+	assertEqual(orderRank(["Job Worker 2", "Render"], ORDER), 6, "a worker renamed later stays a worker");
+	assertEqual(orderRank(["Thread 7", "Input"], ORDER), 1, "an entry beats * whichever name it matches");
+	assertEqual(orderRank(["Audio"], ["Main*"]), 1, "without *, after every entry");
+	assertEqual(orderRank(["Audio"], undefined), 0, "no order: all alike");
+});
+
+test("profiler: threads in the order, the GPU queues in theirs under a group that folds", () => {
+	const thread = (track, names) => ({ id: "thread:" + track, kind: "thread", label: names[names.length - 1], names, track, depth: 1, zones: [] });
+	const answer = {
+		lanes: [thread(0, ["Job Worker 0"]), thread(1, ["Cleanup"]), thread(2, ["Main"]), thread(3, ["Audio"]), thread(4, ["Render"]), thread(5, ["Job Worker 1"]), thread(6, ["GPU"]), thread(7, ["Input"])],
+		gpu: [{ id: "gpu:3", label: "Copy queue", depth: 1, zones: [] }, { id: "gpu:1", label: "Direct queue", depth: 2, zones: [] }, { id: "gpu:2", label: "Compute queue", depth: 1, zones: [] }],
+	};
+	const options = { ...OPTIONS, threadOrder: ORDER, gpuOrder: ["*Direct*", "*Compute*", "*Copy*", "*"] };
+	const layout = layoutLanes(answer, options);
+	assertEqual(layout.lanes.map((l) => l.label), ["GPU", "Direct queue", "Compute queue", "Copy queue", "Main", "Input", "Render", "GPU", "Cleanup", "Audio", "Job Worker 0", "Job Worker 1"]);
+	assertEqual(layout.lanes[0].sub, "3 queues");
+	assertEqual(layout.lanes[2].y, 24 + 42, "a queue under the deeper one before it");
+	const folded = layoutLanes(answer, { ...options, collapsed: new Set([GPU_GROUP]) });
+	assertEqual(folded.lanes.map((l) => l.label).slice(0, 2), ["GPU", "Main"], "a folded group hides its queues");
+	assertTrue(folded.lanes[0].collapsed && folded.lanes[0].source.length === 3, "and keeps them for its strips");
+	assertEqual(folded.lanes[1].y, 24, "the threads move up");
+	const unordered = layoutLanes(answer, OPTIONS);
+	assertEqual(unordered.lanes.slice(4).map((l) => l.label)[0], "Job Worker 0", "no order: as the server sent them");
+	const tasks = layoutLanes({ lanes: [{ id: "task:B", kind: "task", label: "Main", depth: 1, runs: 1, threads: 1 }, { id: "task:A", kind: "task", label: "Job Worker 0", depth: 1, runs: 1, threads: 1 }] }, options);
+	assertEqual(tasks.lanes.map((l) => l.id), ["task:B", "task:A"], "task lanes keep their order");
+});
+
+test("profiler: the frame graph zooms and pans inside the capture's frames", () => {
+	const span = new FrameSpan(0, 1000);
+	span.zoomAt(500, 0.1, 1000);
+	assertEqual([span.from, span.to], [450, 550], "about the anchor");
+	span.panBy(-500, 1000);
+	assertEqual([span.from, span.to], [0, 100], "not before the first frame");
+	span.panBy(5000, 1000);
+	assertEqual([span.from, span.to], [900, 1000], "nor after the last");
+	span.zoomAt(950, 0.001, 1000);
+	assertEqual(span.count, MIN_FRAMES, "never fewer than a few frames");
+	span.zoomAt(950, 1e6, 1000);
+	assertTrue(span.whole(1000) && span.count === 1000, "never more than all of them");
+	assertEqual(new FrameSpan(0, 3).zoomAt(1, 0.5, 3).count, 3, "a capture of fewer frames shows them all");
+	assertEqual(new FrameSpan(10, 20).frame(new FrameSpan(10, 20).x(15, 400), 400), 15);
+});
+
+test("profiler: fetched bars serve a span they hold at about its frames per pixel", () => {
+	const graph = { total: 10000, first: 1000, last: 3999, perBar: 1 };
+	assertTrue(barsServe(graph, new FrameSpan(2000, 2800), 1000), "a frame a bar, more pixels than frames");
+	assertTrue(!barsServe(graph, new FrameSpan(3500, 4500), 1000), "runs past what was fetched");
+	assertTrue(!barsServe(graph, new FrameSpan(1000, 3999), 300), "zoomed out: ten frames a pixel");
+	assertTrue(barsServe({ total: 10000, first: 0, last: 9999, perBar: 10 }, new FrameSpan(0, 10000), 1000), "every frame, ten a bar");
+	assertTrue(!barsServe({ total: 10000, first: 0, last: 9999, perBar: 10 }, new FrameSpan(0, 1000), 1000), "zoomed in: the runs are too coarse");
+	assertTrue(!barsServe(null, new FrameSpan(0, 1), 10) && !barsServe({ bars: [] }, new FrameSpan(0, 1), 10), "nothing fetched, or an older answer");
+	assertEqual(barsFetch(new FrameSpan(2000, 2500), 10000, 1000), { first: 1500, last: 2999, width: 3000 }, "a span more each side at its pixel size");
+	assertEqual(barsFetch(new FrameSpan(9800, 10000), 10000, 1000), { first: 9600, last: 9999, width: 2000 }, "not past the last frame");
 });
 
 test("profiler: thread colors and frames over the budget", () => {

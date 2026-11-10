@@ -179,7 +179,7 @@ export class TimelinePainter {
 		for (const lane of layout.lanes) {
 			const top = state.header + lane.y - scrollY;
 			if (top > height || top + lane.height < state.header) continue;
-			ctx.fillStyle = lane.kind === "gpu" ? theme.bg1 : theme.bg2;
+			ctx.fillStyle = lane.kind === "gpu" || lane.kind === "group" ? theme.bg1 : theme.bg2;
 			ctx.fillRect(labelWidth, top, width - labelWidth, lane.height);
 			ctx.save();
 			ctx.beginPath();
@@ -189,6 +189,7 @@ export class TimelinePainter {
 			if (lane.kind === "task") this.slices(state, lane, top);
 			if (!lane.collapsed && (lane.kind === "thread" || lane.kind === "task" || lane.kind === "gpu")) this.zones(state, lane, top);
 			if (lane.lockRows) this.lockRows(state, lane, top);
+			if (lane.kind === "group" && lane.collapsed) this.groupStrips(state, lane, top);
 			if (lane.kind === "messages") this.messages(state, lane, top);
 			if (lane.kind === "plot") this.plot(state, lane, top);
 			ctx.restore();
@@ -204,7 +205,11 @@ export class TimelinePainter {
 		ctx.fillRect(0, top, labelWidth - 1, lane.height);
 		ctx.textBaseline = "middle";
 		const line = top + options.pad + options.rowHeight / 2;
-		let x = 6;
+		let x = lane.group ? 18 : 6;
+		if (lane.kind === "group") {
+			this.groupLabel(state, lane, line);
+			return;
+		}
 		if (lane.kind === "thread" || lane.kind === "task" || lane.kind === "gpu") {
 			ctx.fillStyle = theme.text2;
 			ctx.font = theme.fontXs + "px " + theme.fontUi;
@@ -218,7 +223,7 @@ export class TimelinePainter {
 		}
 		ctx.fillStyle = theme.text0;
 		ctx.font = theme.fontSm + "px " + theme.fontUi;
-		const prefix = lane.kind === "gpu" ? "GPU: " : "";
+		const prefix = lane.kind === "gpu" && !lane.group ? "GPU: " : "";
 		ctx.fillText(this.fitter.fit(ctx, prefix + lane.label, labelWidth - x - 8), x, line);
 		if (lane.sub && lane.height - lane.lockRows * options.lockRowHeight >= options.rowHeight * 2 && !state.phone) {
 			ctx.fillStyle = theme.text2;
@@ -226,6 +231,44 @@ export class TimelinePainter {
 			ctx.fillText(this.fitter.fit(ctx, lane.sub, labelWidth - x - 8), x, line + options.rowHeight);
 		}
 		this.lockLabels(state, lane, top);
+	}
+
+	// A group's label: its fold arrow, its name and how many lanes it holds.
+	groupLabel(state, lane, line) {
+		const { ctx, theme, labelWidth } = state;
+		ctx.fillStyle = theme.text2;
+		ctx.font = theme.fontXs + "px " + theme.fontUi;
+		ctx.fillText(lane.collapsed ? "\u25b8" : "\u25be", 6, line);
+		ctx.fillStyle = theme.text0;
+		ctx.font = "600 " + theme.fontSm + "px " + theme.fontUi;
+		const name = this.fitter.fit(ctx, lane.label, labelWidth - 26);
+		ctx.fillText(name, 18, line);
+		const after = 18 + this.fitter.width(ctx, name) + 6;
+		ctx.fillStyle = theme.text2;
+		ctx.font = theme.fontXs + "px " + theme.fontUi;
+		ctx.fillText(this.fitter.fit(ctx, lane.sub, labelWidth - after - 6), after, line);
+	}
+
+	// A folded group's lanes in its one row: each lane's top-level zones as a thin strip, so the work still shows.
+	groupStrips(state, lane, top) {
+		const { ctx, theme, options } = state;
+		const queues = lane.source || [];
+		if (!queues.length) return;
+		const room = options.rowHeight - 2;
+		const strip = Math.max(2, Math.floor(room / queues.length));
+		queues.forEach((queue, i) => {
+			const y = top + options.pad + 1 + i * strip;
+			if (y + strip > top + lane.height) return;
+			ctx.fillStyle = theme.zones[i % 4];
+			for (const zone of queue.zones || []) {
+				if (zone[0] !== 0) continue;
+				const x0 = this.x(state, zone[1]);
+				if (x0 > state.width) continue;
+				const x1 = Math.max(this.x(state, zone[2]), x0 + 1);
+				if (x1 < state.labelWidth) continue;
+				ctx.fillRect(x0, y, x1 - x0, strip - 1);
+			}
+		});
 	}
 
 	// Each lock row's name beside it, under the thread's label.

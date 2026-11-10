@@ -132,7 +132,13 @@ export class CaptureView {
 			h("div.prof-main", null, this.tlHost, this.details.el),
 			this.bottom);
 		replace(this.ctx.el, this.root);
-		this.frameGraph = new FrameGraph(this.fgHost, { onPick: (from, to) => this.timeline.zoomTo(from, to) });
+		this.frameGraph = new FrameGraph(this.fgHost, {
+			fetch: (first, last, width) => this.request("prof.frames", { captureId: this.captureId, first, last, width }).then((graph) => {
+				this.root.classList.toggle("no-frames", !graph || !graph.count);
+				return graph;
+			}),
+			onPick: (from, to) => this.timeline.zoomTo(from, to),
+		});
 		this.timeline = new TimelineView(this.tlHost, {
 			fetch: (from, to, width) => this.request("prof.timeline", { captureId: this.captureId, from: Math.floor(from), to: Math.ceil(to), width, mode: this.mode }).then((a) => this.answered(a)),
 			onSelect: (selected) => this.selected(selected),
@@ -142,6 +148,8 @@ export class CaptureView {
 				this.frameGraph.setView(view);
 				this.scopeChanged();
 			},
+			onFold: (collapsed) => store("ied.profiler.foldedGroups", [...collapsed].filter((id) => id.startsWith("group:"))),
+			folded: stored("ied.profiler.foldedGroups", []),
 			budgetNs: this.budgetNs,
 		});
 		this.showPanel(this.phone ? null : this.panel);
@@ -194,9 +202,11 @@ export class CaptureView {
 		const fps = values["profiler.targetFps"] ? values["profiler.targetFps"].value : 60;
 		this.budgetNs = 1e9 / Math.max(1, fps || 60);
 		this.timeline.budgetNs = this.budgetNs;
+		this.frameGraph.setBudget(this.budgetNs);
 		const follow = values["profiler.followLive"];
 		if (follow && follow.value === false) this.timeline.follow = false;
-		this.refreshFrames();
+		const list = (key) => (values[key] && Array.isArray(values[key].value) ? values[key].value : undefined);
+		this.timeline.setOrder(list("profiler.threadOrder"), list("profiler.gpuQueueOrder"));
 		this.timeline.schedulePaint();
 	}
 
@@ -256,10 +266,8 @@ export class CaptureView {
 		await this.request("prof.stop", { captureId: this.captureId });
 	}
 
-	async refreshFrames() {
-		const graph = await this.request("prof.frames", { captureId: this.captureId, width: Math.max(100, this.fgHost.clientWidth || 800) });
-		if (graph) this.frameGraph.set(graph, this.budgetNs);
-		this.root.classList.toggle("no-frames", !graph || !graph.count);
+	refreshFrames() {
+		this.frameGraph.refresh();
 	}
 
 	// --- Selection, scope and panels --------------------------------------------------------------------------------

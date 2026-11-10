@@ -179,6 +179,112 @@ def profiler_locks_and_notes(run):
 	check(run.request("prof.annotations", {"captureId": capture})["annotations"] == [], "deleted on the server")
 
 
+ORDERED_THREADS = [(6, "Job Worker 0"), (7, "Job Worker 1"), (5, "Cleanup"), (8, "Audio"), (1, "Main"), (4, "GPU"), (2, "Input"), (3, "Render")]
+
+
+def send_ordered_game(env, frames=600):
+	"""A finished capture of a game's threads, made in another order than the timeline shows them (the workers first),
+	and its renderer's GPU queues defined Copy, Direct, Compute (1 ns ticks, the GPU's clock the CPU's): `frames`
+	frames of 16 ms, every 50th 40 ms; Frame on Main, a zone on each other thread, and on the queues Upload, Culling,
+	Shadows and Lighting recorded by the GPU thread."""
+	address, token = env.split(";token=")
+	host, port = address.split(":")
+	w = itp.Writer().hello(app="Ordered Game", pid=779, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK)
+	sites = {name: w.srcloc(name, defs, file="src/game.c", line=10 + i) for i, name in enumerate(
+		["Frame", "Poll", "Draw lists", "Submit", "Release", "Mix", "Job", "Upload", "Culling", "Shadows", "Lighting"])}
+	names = {tid: w.string(name, defs) for tid, name in ORDERED_THREADS}
+	for tid, _ in ORDERED_THREADS:
+		defs.event("ThreadDef", threadId=tid, osThreadId=100 + tid, groupHint=0)
+	queues = {name: ctx for ctx, name in ((3, "Copy"), (1, "Direct"), (2, "Compute"))}
+	for name, ctx in queues.items():
+		defs.event("GpuContextDef", ctxId=ctx, api=1, queueNameStr=w.string(name, defs), periodPicoseconds=1000)
+	w.add(defs)
+	chunks = {tid: w.chunk(itp.THREAD_CHUNK, tid, 0).event("ThreadName", 0, nameStr=names[tid]) for tid, _ in ORDERED_THREADS}
+	for ctx in queues.values():
+		chunks[4].event("GpuCalibration", ctxId=ctx, cpuTicks=0, gpuTicks=0)
+	other = {2: "Poll", 3: "Draw lists", 5: "Release", 8: "Mix", 6: "Job", 7: "Job"}
+	times = []
+	query = 0
+	start = 0
+	for i in range(frames):
+		length = 40 * MS if i % 50 == 25 else 16 * MS
+		chunks[1].event("FrameMark", start, frameSetStr=0).event("ZoneBegin", start, srcLocId=sites["Frame"]).event("ZoneEnd", start + length - MS)
+		for tid, name in other.items():
+			chunks[tid].event("ZoneBegin", start + MS, srcLocId=sites[name]).event("ZoneEnd", start + 5 * MS)
+		gpu = chunks[4].event("ZoneBegin", start + 6 * MS, srcLocId=sites["Submit"])
+		for k, (queue, name, a, b) in enumerate((("Copy", "Upload", 1, 3), ("Compute", "Culling", 2, 5), ("Direct", "Shadows", 5, 9), ("Direct", "Lighting", 9, 14))):
+			gpu.event("GpuZoneBegin", start + 6 * MS + k * 100_000, ctxId=queues[queue], queryId=query, srcLocId=sites[name])
+			gpu.event("GpuZoneEnd", start + 6 * MS + k * 100_000 + 50_000, ctxId=queues[queue], queryId=query + 1)
+			times += [(queues[queue], query, start + 6 * MS + a * MS), (queues[queue], query + 1, start + 6 * MS + b * MS)]
+			query += 2
+		gpu.event("ZoneEnd", start + 7 * MS)
+		start += length
+	chunks[1].event("FrameMark", start, frameSetStr=0)
+	for ctx, slot, ticks in times:
+		chunks[4].event("GpuTime", ctxId=ctx, queryId=slot, gpuTicks=ticks)
+	for tid, _ in ORDERED_THREADS:
+		w.add(chunks[tid])
+	w.add(w.chunk(itp.GLOBAL_CHUNK).event("Bye", reason=0))
+	with socket.create_connection((host, int(port))) as sock:
+		sock.sendall(w.bytes())
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def profiler_lane_order_and_frame_zoom(run):
+	"""The timeline's lanes in order (profiler.threadOrder, profiler.gpuQueueOrder): the GPU queues on top in a group
+	that folds (and stays folded on reload), then Main, Input, Render, GPU, Cleanup, the rest, the workers; the frame
+	time graph zooms in and out, pans, and shows every frame again."""
+	page = run.open()
+	ws = page.evaluate("() => ied_shell.wsId")
+	listed = run.request("prof.captures", {"wsId": ws})
+	send_ordered_game(listed["connect"]["env"])
+	capture = new_capture(run, ws, {c["captureId"] for c in listed["captures"]})
+	open_capture(run, page, capture)
+	doc = ".prof-doc[data-capture='%s']" % capture
+	if run.phone and page.query_selector(doc + ".panel-open"):
+		page.click(doc + " .prof-bar button.phone-only")
+	page.wait_for_selector(doc + " .prof-fg-tools", state="visible", timeout=10000)
+	page.mouse.click(*canvas_point(page, doc + " .fg", 0.004, 30))
+	time.sleep(1.0)
+	run.shot("lanes")
+	header = 22 + 20
+	page.mouse.click(*canvas_point(page, doc + " .tl", 0.6, header + 12))
+	time.sleep(0.4)
+	folded = page.evaluate("() => localStorage.getItem('ied.profiler.foldedGroups')")
+	check(folded == '["group:gpu"]', "a click on the GPU group folds it, kept per device: %s" % folded)
+	run.shot("gpu-folded")
+	page.mouse.click(*canvas_point(page, doc + " .tl", 0.5, header + 24 + 3 + 9))
+	run.wait_text(doc + " .prof-side .zname", "Frame", timeout=10000)
+	check("Main" in page.inner_text(doc + " .prof-side"), "under the folded group, the first thread is Main though the workers came first")
+	if run.phone:
+		page.keyboard.press("Escape")
+	page.mouse.click(*canvas_point(page, doc + " .tl", 0.6, header + 12))
+	time.sleep(0.4)
+	check(page.evaluate("() => localStorage.getItem('ied.profiler.foldedGroups')") == "[]", "and a second click opens it")
+	zoom_in = doc + " .prof-fg-tools button[aria-label='Zoom in']"
+	page.click(zoom_in)
+	page.click(zoom_in)
+	run.wait_text(doc + " .prof-fg-range", "of 600")
+	shown = page.inner_text(doc + " .prof-fg-range")
+	check(page.is_visible(doc + " .prof-fg-range") and shown.startswith("Frames "), "zoomed in, the graph says which frames it shows: %s" % shown)
+	if not run.phone:
+		x, y = canvas_point(page, doc + " .fg", 0.5, 30)
+		page.mouse.move(x, y)
+		page.mouse.wheel(0, -500)
+		time.sleep(0.6)
+		closer = page.inner_text(doc + " .prof-fg-range")
+		check(closer != shown, "the wheel zooms in further: %s" % closer)
+		page.mouse.down(button="right")
+		page.mouse.move(x - 200, y, steps=5)
+		page.mouse.up(button="right")
+		time.sleep(0.6)
+		check(page.inner_text(doc + " .prof-fg-range") != closer, "a right drag pans: %s" % page.inner_text(doc + " .prof-fg-range"))
+	run.shot("zoomed")
+	page.click(doc + " .prof-fg-tools button[aria-label='Show every frame']")
+	page.wait_for_selector(doc + " .prof-fg-range", state="hidden", timeout=5000)
+
+
 def send_collected_game(env):
 	"""A collected program's finished capture (1 ns ticks, ten 16 ms frames) that counts its allocations instead of
 	sending each one: Frame holds Particles::Spawn (300 objects, 7200 bytes) and Cache::Remember (one of 32 bytes, and
