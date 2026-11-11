@@ -2,8 +2,9 @@
 
 `ied.exe` opens folders and files in IED from a terminal or Explorer, and asks the running server about itself. It
 talks to the user's `ied-server` over the control pipe (`docs/10` "Local control channel"), never HTTP, and starts the
-server when none runs. A folder or file opens in the desktop app when `ied-desktop.exe` sits beside `ied.exe`
-(`docs/27`), else in the default browser.
+server when none runs. A file opens in the solution nearest above it (`docs/03` "Opening"). When a window has that
+workspace open already, the file is shown there and the window comes to the front (`open` with `reveal`); otherwise
+it opens in the desktop app when `ied-desktop.exe` sits beside `ied.exe` (`docs/27`), else in the default browser.
 
 ```bat
 ied                      open this folder

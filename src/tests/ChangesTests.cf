@@ -64,6 +64,18 @@ class ChangeTests {
 		assert_true(!batch.IsEmpty() && batch.Overflowed() && batch.Changes().IsEmpty(), "an overflow alone still asks for a look");
 	}
 
+	[test("prefixed")]
+	public static void TestPrefixed() {
+		Ied::ChangeBatch batch;
+		batch.Add(Raw(FS::ChangeKind::Modified, "src\\a.cf"));
+		batch.Add(Raw(FS::ChangeKind::Added, "b.txt"));
+		Ied::ChangeBatch linked = batch.Prefixed(Core::StringView("@Engine"));
+		assert_se("@Engine/src/a.cf=changed @Engine/b.txt=created", Folded(linked).CStr(), "a linked folder's changes by their workspace paths");
+		assert_se("src/a.cf=changed b.txt=created", Folded(batch).CStr(), "the watcher's own batch as it was");
+		batch.Add(Raw(FS::ChangeKind::Overflow, ""));
+		assert_true(batch.Prefixed(Core::StringView("@Engine")).Overflowed(), "an overflow stays one");
+	}
+
 	[test("burst")]
 	public static void TestBurst() {
 		Ied::ChangeBatch batch;

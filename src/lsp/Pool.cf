@@ -681,6 +681,8 @@ namespace Ied
 			Log(language, (Core::String("stopped: no window showed one of its documents for ") + DurationText(limitNs).View() + " (" + c_LspIdleSetting + "); it starts again when one is shown").View());
 			language->Stop();
 			m_Languages.RemoveAt(i);
+			// Its workspace is scanned again on the next workspace/symbol, which starts it: else that asks no server and finds nothing.
+			m_Scanned.Remove(language->m_Ws->m_WsId);
 		}
 	}
 
@@ -699,7 +701,7 @@ namespace Ied
 		Workspace* ws = language->m_Ws;
 		Core::String absolute;
 		Core::String path;
-		if (!PathOfFileUri(params.Member("uri").AsView(), absolute) || !RelativeTo(ws->m_Root.View(), absolute.View(), path)) return;
+		if (!PathOfFileUri(params.Member("uri").AsView(), absolute) || !ws->PathOf(FS::Path(absolute.View()), path)) return;
 		Serialization::DomNode list = params.Member("diagnostics");
 		m_LineCache.Clear();
 		Core::String items = list.Kind() == Serialization::DomKind::Array ? RewriteJson(list, RewriteFor(language, params.Member("uri").AsView(), false)) : Core::String("[]");
@@ -789,7 +791,7 @@ namespace Ied
 			if (!owner) return false;
 			absolute = Core::String(owner->At(relative.View()).View());
 		}
-		else if (PathOfFileUri(uri, absolute) && RelativeTo(ws->m_Root.View(), absolute.View(), relative)) owner = ws;
+		else if (PathOfFileUri(uri, absolute) && ws->PathOf(FS::Path(absolute.View()), relative)) owner = ws;
 		else if (absolute.IsEmpty()) return false;
 		Document* doc = owner ? m_Server->m_Documents->Find(owner, relative.View()) : nullptr;
 		if (doc) {
@@ -817,7 +819,7 @@ namespace Ied
 		Core::String absolute;
 		Core::String relative;
 		if (!PathOfFileUri(uri, absolute)) return Core::String(uri);
-		if (RelativeTo(ws->m_Root.View(), absolute.View(), relative)) return IedUriOf(ws->m_WsId.View(), relative.View());
+		if (ws->PathOf(FS::Path(absolute.View()), relative)) return IedUriOf(ws->m_WsId.View(), relative.View());
 		Core::String canonical = CanonicalFileUri(uri);
 		NameFile(ws, canonical.View(), language->m_Profile->m_Id.View(), language->m_Project.View());
 		return canonical;
@@ -888,10 +890,14 @@ namespace Ied
 
 	// --- Methods -----------------------------------------------------------------------------------------------------
 
+	static bool SearchesWorkspace(Core::StringView method) {
+		return method == "textDocument/references" || method == "textDocument/implementation" || method == "callHierarchy/incomingCalls" || method == "typeHierarchy/subtypes";
+	}
+
 	Core::String LspPool::Asked(Call& call, LanguageServer* language, Core::StringView clientUri, Core::StringView serverUri, Core::StringView method, Core::StringView params) {
 		m_LineCache.Clear();
 		Core::String sent = RewriteText(params, RewriteFor(language, clientUri, true));
-		Core::String result = language->Request(call, method, sent.View(), c_LspRequestTimeoutMs);
+		Core::String result = language->Request(call, method, sent.View(), SearchesWorkspace(method) ? c_LspWorkspaceRequestTimeoutMs : c_LspRequestTimeoutMs);
 		m_LineCache.Clear();
 		if (!IsSemanticTokensRequest(method)) return RewriteText(result.View(), RewriteFor(language, serverUri, false));
 		Core::String text;
@@ -1069,7 +1075,7 @@ namespace Ied
 		asked.EndObject();
 		Core::String result;
 		try {
-			result = language->Request(call, Core::StringView("workspace/symbol"), asked.View(), c_LspRequestTimeoutMs);
+			result = language->Request(call, Core::StringView("workspace/symbol"), asked.View(), c_LspWorkspaceRequestTimeoutMs);
 		}
 		catch (RpcError& failed) {
 			if (failed.m_Code == ErrorCode::Cancelled) throw failed;

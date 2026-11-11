@@ -38,6 +38,12 @@ namespace Launch
 		return parsed.Ok() ? Core::String(parsed.root.Member("result").Member(name).AsView()) : Core::String();
 	}
 
+	bool ResultFlag(const Reply& reply, const char* name) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(reply.m_Result.View(), *doc);
+		return parsed.Ok() && parsed.root.Member("result").Member(name).AsBool();
+	}
+
 	// One line from the stream: false when it closed or went quiet first.
 	static bool ReadLine(Net::LocalStream& stream, Core::String& line, int32 timeoutMs) {
 		Core::StringBuilder text;

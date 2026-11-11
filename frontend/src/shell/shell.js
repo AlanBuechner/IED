@@ -378,6 +378,10 @@ export class Shell {
 			this.workspace.readOnly = data.readOnly || [];
 			return;
 		}
+		if (kind === "workspace.reveal") {
+			this.revealed(data);
+			return;
+		}
 		if (kind === "trust.changed") this.workspace.trusted = data.trusted !== false;
 		else if (kind === "solution.changed") Object.assign(this.workspace, { solution: data.solution || null, kind: data.kind || this.workspace.kind, name: data.name || this.workspace.name });
 		else return;
@@ -468,10 +472,29 @@ export class Shell {
 		if (!open || open.wsId !== this.wsId) return;
 		this.pendingOpen = null;
 		history.replaceState(null, "", location.pathname + location.search);
-		if (!open.path) return;
+		if (open.path) this.openFile(open.path, open.line, open.col);
+	}
+
+	// A file shown by the command of the last loaded plugin that contributes `fileOpener`, with {path, line, col}.
+	openFile(path, line, col) {
 		const opener = this.contributions.plugins.flatMap((p) => (p.contributes.fileOpener ? [p.contributes.fileOpener] : [])).pop();
-		if (opener) this.commands.run(opener.command, { path: open.path, line: open.line, col: open.col });
-		else this.toasts.show("No plugin opens files, so " + open.path + " is not shown.", "warn");
+		if (opener) this.commands.run(opener.command, { path, line, col });
+		else this.toasts.show("No plugin opens files, so " + path + " is not shown.", "warn");
+	}
+
+	// `ied <file>` for a workspace this window shows (docs/10 control `open` with reveal): the first window to claim it
+	// shows the file and comes to the front, so a workspace open already is not opened in a second window.
+	async revealed(data) {
+		try {
+			const answer = await this.client.request("ws.claimReveal", { wsId: this.wsId, id: data.id });
+			if (!answer.claimed) return;
+		}
+		catch (e) {
+			return;
+		}
+		if (data.path) this.openFile(data.path, data.line || 0, data.col || 0);
+		if (window.iedDesktop && window.iedDesktop.focus) window.iedDesktop.focus();
+		else window.focus();
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------

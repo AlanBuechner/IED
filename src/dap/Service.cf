@@ -259,7 +259,7 @@ namespace Ied
 		json.Field("name", source.Member("name").AsView());
 		Core::StringView path = source.Member("path").AsView();
 		Core::String relative;
-		if (!path.IsEmpty() && RelativeTo(session->m_Ws->m_Root.View(), path, relative) && !relative.IsEmpty()) json.Field("path", relative.View());
+		if (!path.IsEmpty() && session->m_Ws->PathOf(FS::Path(path), relative) && !relative.IsEmpty()) json.Field("path", relative.View());
 		else if (!path.IsEmpty() && FS::FileExists(Core::String(path).CStr())) {
 			Core::String uri = CanonicalFileUri(FileUriOf(path).View());
 			m_Server->m_Lsp->NameFile(session->m_Ws, uri.View(), (Core::String("dap:") + session->m_Launch.m_Type.View()).View(), session->m_Launch.m_Project.View());

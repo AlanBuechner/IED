@@ -3,6 +3,9 @@
 // channel", docs/27).
 
 include "Command.ch"
+extern "c" include "foreground.h"
+
+static const uint32 c_AnyProcess = 0xFFFFFFFFu;   // ASFW_ANY
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -56,9 +59,14 @@ static bool OpenInDesktop(const Cli::Command& command) {
 
 static int32 Run(const Cli::Command& command, Net::LocalStream& stream) {
 	if (command.m_Verb == Cli::Verb::Open) {
+		// A window that shows the workspace already shows the file and comes to the front: no second window on it.
+		const bool reveal = !command.m_NoBrowser;
+		if (reveal) AllowSetForegroundWindow(c_AnyProcess);
+		Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(command.m_Path.View(), command.m_Line, command.m_Col, reveal).View());
+		if (!reply.m_Ok) return Fail(reply.m_Error.View());
+		if (Launch::ResultFlag(reply, "revealed")) return 0;
 		if (!command.m_NoBrowser && !command.m_Browser && OpenInDesktop(command)) return 0;
-		Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(command.m_Path.View(), command.m_Line, command.m_Col).View());
-		return reply.m_Ok ? Show(command, Launch::ResultField(reply, "url").View()) : Fail(reply.m_Error.View());
+		return Show(command, Launch::ResultField(reply, "url").View());
 	}
 	if (command.m_Verb == Cli::Verb::Url) {
 		Launch::Reply reply = Launch::Ask(stream, Core::StringView("url"), Core::StringView(""));

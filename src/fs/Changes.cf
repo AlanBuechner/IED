@@ -71,6 +71,20 @@ namespace Ied
 		Fold(WatchedPath(change.path.View()).View(), FS::ChangeKind::Added);
 	}
 
+	public ChangeBatch ChangeBatch::Prefixed(Core::StringView prefix) const {
+		ChangeBatch moved;
+		moved.m_Overflow = m_Overflow;
+		for (const TreeChange& change : Changes()) {
+			TreeChange under = change;
+			under.m_Path = change.m_Path.IsEmpty() ? Core::String(prefix) : (Core::String(prefix) + "/") + change.m_Path;
+			moved.m_Index.Insert(under.m_Path, moved.m_Entries.Count());
+			moved.m_Entries.Push(under);
+			moved.m_Live.Push(true);
+			moved.m_LiveCount += 1;
+		}
+		return moved;
+	}
+
 	void ChangeBatch::Clear() {
 		m_Entries.Clear();
 		m_Live.Clear();

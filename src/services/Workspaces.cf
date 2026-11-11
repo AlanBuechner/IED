@@ -9,7 +9,7 @@ namespace Ied
 {
 	static RpcError BadPath(Core::StringView path) {
 		Core::StringBuilder message;
-		message.Append("path must be workspace-relative without '.' or '..': '");
+		message.Append("path must be workspace-relative without '..': '");
 		message.Append(path);
 		message.Append("'");
 		// A full path: say what to give instead (the test matches the message's start).
@@ -43,8 +43,9 @@ namespace Ied
 			int64 end = at;
 			while (end < path.ByteLength() && path.ByteAt(end) != '/' && path.ByteAt(end) != '\\') end += 1;
 			Core::StringView part = path.Substring(at, end - at);
-			if (part == "." || part == "..") throw BadPath(path);
-			if (!part.IsEmpty()) {
+			if (part == "..") throw BadPath(path);
+			// "." is the folder it is in: "." alone the workspace's root, as tools are often given it.
+			if (!part.IsEmpty() && part != ".") {
 				if (!clean.IsEmpty()) clean.AppendByte('/');
 				clean.Append(part);
 			}
@@ -53,7 +54,20 @@ namespace Ied
 		return clean.ToString();
 	}
 
-	FS::Path Workspace::At(Core::StringView path) const { return LocalOrRootFile(m_Root, m_LocalState, path); }
+	// A link reaches outside the folder, so only a trusted workspace's solution's links are followed: an untrusted one's
+	// "@x" paths are plain paths in the folder.
+	FS::Path Workspace::At(Core::StringView path) const {
+		if (m_Trusted && m_Solution) {
+			FS::Path linked = m_Solution->LinkedFile(path);
+			if (!linked.IsEmpty()) return linked;
+		}
+		return LocalOrRootFile(m_Root, m_LocalState, path);
+	}
+
+	bool Workspace::PathOf(const FS::Path& file, Core::String& path) const {
+		if (RelativeTo(m_Root.View(), file.View(), path)) return true;
+		return m_Trusted && m_Solution && m_Solution->LinkedPath(file, path);
+	}
 
 	Core::String TextDigest(Core::StringView text) { return Crypto::Sha256((const void*)text.Data(), text.ByteLength()).ToHex(); }
 
@@ -110,6 +124,19 @@ namespace Ied
 		return true;
 	}
 
+	// The solution file of the nearest folder at or above `folder` that holds exactly one; empty when none does.
+	FS::Path NearestSolution(const FS::Path& folder) {
+		FS::Path at = folder;
+		while (!at.IsEmpty()) {
+			FS::Path solution = SolutionIn(at);
+			if (!solution.IsEmpty()) return solution;
+			FS::Path up = at.Parent();
+			if (up.View() == at.View()) break;
+			at = up;
+		}
+		return FS::Path();
+	}
+
 	Workspace* Workspaces::OpenFor(const FS::Path& target, Core::String& relative) {
 		if (!m_Server->IsMaster() && !m_Items.IsEmpty() && !Holds(target, relative)) return OpenElsewhere(target);
 		Workspace* ws = OpenOrFind(target, relative);
@@ -121,7 +148,7 @@ namespace Ied
 	bool Workspaces::Holds(const FS::Path& target, Core::String& relative) const {
 		for (Workspace* ws : m_Items) {
 			if (ws->m_Solution && TrustKey(ws->m_Solution->m_File.View()).View() == TrustKey(target.View()).View()) return true;
-			if (RelativeTo(ws->m_Root.View(), target.View(), relative)) return true;
+			if (ws->PathOf(target, relative)) return true;
 		}
 		return false;
 	}
@@ -159,9 +186,21 @@ namespace Ied
 			}
 			return OpenSolution(target);
 		}
-		for (Workspace* ws : m_Items)
-			if (RelativeTo(ws->m_Root.View(), target.View(), relative)) return ws;
 		const bool folder = FS::IsDirectory(target.CStr());
+		// A file opens in the solution nearest above it - the one whose projects it belongs to - even where a folder that holds
+		// that solution is open (a game's project inside its engine's repository); a workspace opened inside that solution's
+		// folder, nearer the file, keeps it.
+		FS::Path nearest = folder ? FS::Path() : NearestSolution(target.Parent());
+		if (!nearest.IsEmpty()) {
+			for (Workspace* ws : m_Items)
+				if (RelativeTo(ws->m_Root.View(), target.View(), relative) && ws->m_Root.View().ByteLength() > nearest.Parent().View().ByteLength()) return ws;
+			Core::String none;
+			Workspace* solution = OpenOrFind(nearest, none);
+			if (!solution->PathOf(target, relative)) relative = Core::String(target.FileName());
+			return solution;
+		}
+		for (Workspace* ws : m_Items)
+			if (ws->PathOf(target, relative)) return ws;
 		// A folder holding one solution file opens as that solution (docs/03); its Solution Explorer still shows the
 		// folder on request.
 		FS::Path solution = folder ? SolutionIn(target) : FS::Path();
@@ -219,6 +258,7 @@ namespace Ied
 		else {
 			LogProblems(m_Server, ws->m_Solution);
 			m_Server->m_Settings->SolutionChanged(ws);
+			WatchLinks(ws);
 		}
 		m_Server->m_Hub.Publish(Core::StringView("server"), "workspace.opened", ws->SummaryJson().View());
 		return ws;
@@ -227,6 +267,7 @@ namespace Ied
 	// A solution file or a project file changed, appeared or went: the model is read again and told.
 	void Workspaces::SolutionChanged(Workspace* ws) {
 		ws->m_Solution = ReadSolution(ws->m_Solution->m_File, m_Server->m_Schemas);
+		WatchLinks(ws);
 		PublishSolution(ws);
 	}
 
@@ -242,6 +283,7 @@ namespace Ied
 			m_Server->m_Servers->Restart(ws->m_WsId.View());
 		}
 		else {
+			WatchLinks(ws);
 			PublishSolution(ws);
 			TellMaster(ws, file.View());
 		}
@@ -422,6 +464,29 @@ namespace Ied
 		Watch(ws);
 		m_Server->Log((((Core::String("opened ") + ws->m_WsId.View()) + ": ") + ws->m_Root.View()).View());
 		return ws;
+	}
+
+	// Each linked project's root is watched as the folder is, its changes named by their workspace paths ("@Engine/...").
+	// A link the solution no longer has keeps its watch: what it reports reaches no file any more. Only a trusted
+	// workspace reaches its links (docs/03 "Linked projects"): an untrusted one's solution names no folder outside it
+	// that the server watches, and a watch started before trust was taken back reports nothing.
+	void Workspaces::WatchLinks(Workspace* ws) {
+		if (m_Server->IsMaster() || !ws->m_Solution || !ws->m_Trusted) return;
+		Server* shared = m_Server;
+		Workspaces* self = this;
+		for (ProjectModel* project : ws->m_Solution->m_Projects) {
+			if (project->m_Link.IsEmpty() || ws->m_LinkWatches.Contains(project->m_Link) || !FS::IsDirectory(project->m_Root.CStr())) continue;
+			Core::String link = project->m_Link;
+			FolderWatch* watch = new FolderWatch();
+			Core::String error;
+			const bool watching = watch->Start(project->m_Root, [shared, self, ws, link](const ChangeBatch& batch) {
+				Threading::LockGuard guard(shared->m_Lock);
+				if (!ws->m_Trusted) return;
+				self->ApplyExternal(ws, batch.Prefixed(link.View()));
+			}, error);
+			if (watching) ws->m_LinkWatches.Insert(link, watch);
+			else m_Server->Log((Core::String("not watching ") + project->m_Root.View() + ": " + error.View()).View());
+		}
 	}
 
 	void Workspaces::Watch(Workspace* ws) {
@@ -890,6 +955,34 @@ namespace Ied
 		return json.ToString();
 	}
 
+	public bool Workspaces::Reveal(const FS::Path& file, int64 line, int64 col) {
+		Workspace* ws = First();
+		if (!ws) return false;
+		Core::String path;
+		if (!file.IsEmpty() && !ws->PathOf(file, path)) return false;
+		Core::String topic = Core::String("ws:") + ws->m_WsId.View();
+		Topic* shown = m_Server->m_Hub.Find(topic.View());
+		if (!shown || shown->m_Subscribers.IsEmpty()) return false;
+		m_RevealSeq += 1;
+		m_Reveals.Push(m_RevealSeq);
+		JsonWriter data;
+		data.BeginObject();
+		data.IntField("id", m_RevealSeq);
+		data.Field("path", path.View());
+		data.IntField("line", line);
+		data.IntField("col", col);
+		data.EndObject();
+		m_Server->m_Hub.Publish(topic.View(), "workspace.reveal", data.View());
+		return true;
+	}
+
+	// {id}: {claimed}, true for the first client to ask - the one that shows the file and comes to the front.
+	Core::String Workspaces::ClaimRevealMethod(Call& call, const Params& params) {
+		const int64 at = m_Reveals.IndexOf(params.Int("id"));
+		if (at >= 0) m_Reveals.RemoveAt(at);
+		return Core::String(at >= 0 ? "{\"claimed\":true}" : "{\"claimed\":false}");
+	}
+
 	Core::String Workspaces::SetTrustMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
 		const bool trusted = params.Bool("trusted", ws->m_Trusted);
@@ -904,6 +997,7 @@ namespace Ied
 
 	void Workspaces::ApplyTrust(Workspace* ws, bool trusted) {
 		ws->m_Trusted = trusted;
+		if (trusted) WatchLinks(ws);
 		m_Server->m_Settings->TrustChanged(ws);
 		m_Server->m_Lsp->TrustChanged(ws);
 		m_Server->m_Code->Reconcile(ws);
@@ -980,6 +1074,7 @@ namespace Ied
 			return (Core::String("{\"workspaces\":") + self->SummariesJson().View()) + "}";
 		});
 		if (!m_Server->IsMaster()) m_Server->m_Rpc.Register("ws.setTrust", [self](Call& call, const Params& params) -> Core::String { return self->SetTrustMethod(call, params); });
+		if (!m_Server->IsMaster()) m_Server->m_Rpc.Register("ws.claimReveal", [self](Call& call, const Params& params) -> Core::String { return self->ClaimRevealMethod(call, params); });
 		m_Server->m_Rpc.Register("ws.openRecent", [self](Call& call, const Params& params) -> Core::String { return self->OpenRecentMethod(call, params); });
 		m_Server->m_Rpc.Register("ws.setFavorite", [self](Call& call, const Params& params) -> Core::String { return self->RecentChangeMethod(call, params, false); });
 		m_Server->m_Rpc.Register("ws.forgetRecent", [self](Call& call, const Params& params) -> Core::String { return self->RecentChangeMethod(call, params, true); });

@@ -24,8 +24,11 @@ class WorkspaceTests {
 		assert_se("src/main.cf", Ied::NormalizePath(Core::StringView("src\\main.cf")).CStr(), "backslashes");
 		assert_se("a/b", Ied::NormalizePath(Core::StringView("/a//b/")).CStr(), "empty parts dropped");
 		assert_true(Ied::NormalizePath(Core::StringView("")).IsEmpty(), "the root");
-		const char*[5] bad = { "..", "a/../b", "./a", "C:/Windows", "a/." };
-		for (int32 i = 0; i < 5; ++i) assert_true(Refused(bad[i]), bad[i]);
+		assert_se("a", Ied::NormalizePath(Core::StringView("./a")).CStr(), "'.' is the folder it is in");
+		assert_se("a/b", Ied::NormalizePath(Core::StringView("a/./b/.")).CStr(), "anywhere in the path");
+		assert_true(Ied::NormalizePath(Core::StringView(".")).IsEmpty(), "'.' alone the root");
+		const char*[4] bad = { "..", "a/../b", "C:/Windows", "./.." };
+		for (int32 i = 0; i < 4; ++i) assert_true(Refused(bad[i]), bad[i]);
 	}
 
 	[test("hidden_paths")]
@@ -62,6 +65,62 @@ class WorkspaceTests {
 		Ied::SolutionModel* plain = new Ied::SolutionModel();
 		plain->m_Data = Serialization::ReadJson(Core::StringView("{\"projects\": []}"), *doc).root;
 		assert_true(plain->UngivenProjects().IsEmpty(), "no groups, nothing ungiven");
+	}
+
+	static Ied::ProjectModel* ProjectAt(const char* name, const FS::Path& root) {
+		Ied::ProjectModel* project = new Ied::ProjectModel();
+		project->m_Name = Core::String(name);
+		project->m_Root = root;
+		return project;
+	}
+
+	[test("linked_projects")]
+	public static void TestLinkedProjects() {
+		FS::Path games = FS::Path("C:/Games/Mine");
+		Ied::SolutionModel* solution = new Ied::SolutionModel();
+		solution->m_Folder = games;
+		solution->m_Projects.Push(ProjectAt("Game", games / "Game"));
+		solution->m_Projects.Push(ProjectAt("Mine", games));
+		solution->m_Projects.Push(ProjectAt("Engine", FS::Path("D:/Claymore/Engine")));
+		solution->m_Projects.Push(ProjectAt("Anime", FS::Path("D:/Claymore/Plugins/Anime")));
+		Ied::PlaceRoots(solution);
+		assert_true(solution->m_Projects[0]->m_Path == "Game" && solution->m_Projects[0]->m_Link.IsEmpty(), "inside: a path of the folder");
+		assert_true(solution->m_Projects[1]->m_Path.IsEmpty(), "the folder itself");
+		assert_true(solution->m_Projects[2]->m_Link == "@Engine" && solution->m_Projects[2]->m_Path == "@Engine", "outside: a link of its name");
+		assert_true(solution->LinkedFile(Core::StringView("@Engine/src/a.cf")).View() == FS::Path("D:/Claymore/Engine/src/a.cf").View(), "a link's file");
+		assert_true(solution->LinkedFile(Core::StringView("@Anime")).View() == FS::Path("D:/Claymore/Plugins/Anime").View(), "the link itself is the root");
+		assert_true(solution->LinkedFile(Core::StringView("@Nothing/a.cf")).IsEmpty() && solution->LinkedFile(Core::StringView("Game/a.cf")).IsEmpty(), "no such link, or none at all");
+		Core::String path;
+		assert_true(solution->LinkedPath(FS::Path("d:\\claymore\\plugins\\anime\\src\\b.cf"), path) && path == "@Anime/src/b.cf", path.CStr());
+		assert_true(!solution->LinkedPath(FS::Path("D:/Claymore/Other/c.cf"), path), "under no linked root");
+		assert_true(!solution->LinkedPath(FS::Path("C:/Games/Mine/Game/a.cf"), path), "a file of the folder is no link's");
+
+		Ied::Workspace* ws = new Ied::Workspace();
+		ws->m_Root = games;
+		ws->m_LocalState = FS::Path("C:/Local/State");
+		ws->m_Solution = solution;
+		ws->m_Trusted = true;
+		assert_true(ws->At(Core::StringView("@Engine/src/a.cf")).View() == FS::Path("D:/Claymore/Engine/src/a.cf").View(), "a trusted solution follows its links");
+		assert_true(ws->At(Core::StringView("Game/a.cf")).View() == (games / "Game/a.cf").View(), "and the folder's own paths stay");
+		assert_true(ws->PathOf(FS::Path("D:/Claymore/Engine/src/a.cf"), path) && path == "@Engine/src/a.cf", "and back");
+		assert_true(ws->PathOf(FS::Path("C:/Games/Mine/Game/a.cf"), path) && path == "Game/a.cf", "a file of the folder");
+		ws->m_Trusted = false;
+		assert_true(ws->At(Core::StringView("@Engine/src/a.cf")).View() == (games / "@Engine/src/a.cf").View(), "an untrusted one reaches nothing outside");
+		assert_true(!ws->PathOf(FS::Path("D:/Claymore/Engine/src/a.cf"), path), "nor names it");
+	}
+
+	[test("nearest_solution")]
+	public static void TestNearestSolution() {
+		FS::Path root = FS::TempDirectory() / "ied-nearest-solution-test";
+		FS::RemoveAll(root.CStr());
+		FS::MakeDirectories((root / "Projects" / "Valley" / "Game" / "Content").CStr());
+		const char* text = "{}";
+		FS::WriteFileAtomically((root / "Engine.iedsln").CStr(), (const void*)text, 2);
+		assert_true(Ied::NearestSolution(root / "Projects" / "Valley" / "Game" / "Content").View().EndsWith(Core::StringView("Engine.iedsln")), "the engine's, with none nearer");
+		FS::WriteFileAtomically((root / "Projects" / "Valley" / "Valley.iedsln").CStr(), (const void*)text, 2);
+		assert_true(Ied::NearestSolution(root / "Projects" / "Valley" / "Game" / "Content").View().EndsWith(Core::StringView("Valley.iedsln")), "the project's own, nearer");
+		assert_true(Ied::NearestSolution(root / "Projects").View().EndsWith(Core::StringView("Engine.iedsln")), "from beside it, the one above");
+		FS::RemoveAll(root.CStr());
 	}
 
 	[test("solution_files")]

@@ -6,4 +6,5 @@ kind = "executable"
 description = "The IED command line: talks to the user's ied-server over its control pipe, starting it when needed"
 depends = ["launcher"]
 sources = ["."]
+links = ["user32"]
 working-dir = ".."

@@ -2,7 +2,7 @@
 // and the parts of a name it marks.
 
 import { test, assertEqual, assertTrue } from "./harness.js";
-import { SearchState, holds, markedParts, searchPaths } from "/plugins/ied.editor/ui/explorersearch.js";
+import { SearchState, holds, markedParts, projectPath, relativeTo, searchPaths } from "/plugins/ied.editor/ui/explorersearch.js";
 
 const FILES = ["src/engine/core.c", "src/engine/core.h", "src/game/game.c", "src/main.c", "docs/notes.md", "README.md", "tools/coremark/run.py"];
 
@@ -35,6 +35,17 @@ test("explorer search: projects and groups of a solution", () => {
 	const groups = new SearchState("libs", FILES, solution, false);
 	assertTrue(groups.keepsGroup(solution.groups[0].groups[0], pathOf) && !groups.opensGroup(solution.groups[0].groups[0], pathOf), "a group by its name, not opened");
 	assertEqual([state.count, groups.count], [4, 1], "what matched: files, folders, projects and groups");
+});
+
+test("explorer: a project's files by its root in the folder, or by its link outside it", () => {
+	const workspace = { root: "C:\\Games\\Mine" };
+	assertEqual(relativeTo(workspace.root, "C:/games/mine/Game"), "Game", "any case, either slash");
+	assertEqual(relativeTo(workspace.root, "C:/Games/Mine"), "", "the folder itself");
+	assertEqual(relativeTo(workspace.root, "D:/Claymore/Engine"), null, "outside");
+	assertEqual(projectPath(workspace, { root: "D:/Claymore/Engine", path: "@Engine", link: "@Engine" }), "@Engine", "the server's link for a root outside");
+	assertEqual(projectPath(workspace, { root: "C:/Games/Mine/Game", path: "Game" }), "Game");
+	assertEqual(projectPath(workspace, { root: "C:/Games/Mine", path: "" }), "", "the folder's own project: its path is empty, not missing");
+	assertEqual(projectPath(workspace, { root: "D:/Claymore/Engine" }), null, "an older server gives no path: outside stays unlisted");
 });
 
 test("explorer search: the parts of a name that hold the query are marked", () => {

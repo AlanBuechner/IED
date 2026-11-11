@@ -103,6 +103,18 @@ namespace Ied
 					solution->m_Problems.Push((Core::String("two projects are named ") + solution->m_Projects[i]->m_Name.View()));
 	}
 
+	void PlaceRoots(SolutionModel* solution) {
+		for (ProjectModel* project : solution->m_Projects) {
+			Core::String inside;
+			if (RelativeTo(solution->m_Folder.View(), project->m_Root.View(), inside)) {
+				project->m_Path = inside;
+				continue;
+			}
+			project->m_Link = Core::String(c_LinkPrefix) + project->m_Name;
+			project->m_Path = project->m_Link;
+		}
+	}
+
 	static void ReadLocalPlugins(SolutionModel* solution) {
 		Serialization::DomNode list = solution->m_Data.Member("localPlugins");
 		for (int64 i = 0; i < list.Count(); ++i) {
@@ -129,6 +141,7 @@ namespace Ied
 		Serialization::DomNode entries = solution->m_Data.Member("projects");
 		for (int64 i = 0; i < entries.Count(); ++i) ReadEntry(solution, entries.At(i), schemas);
 		CheckNames(solution);
+		PlaceRoots(solution);
 		ReadLocalPlugins(solution);
 		return solution;
 	}
@@ -164,6 +177,32 @@ namespace Ied
 		return best;
 	}
 
+	public FS::Path SolutionModel::LinkedFile(Core::StringView path) const {
+		if (!path.StartsWith(Core::StringView(c_LinkPrefix))) return FS::Path();
+		const int64 slash = path.IndexOf('/', 0);
+		Core::StringView link = slash < 0 ? path : path.Substring(0, slash);
+		for (ProjectModel* project : m_Projects) {
+			if (project->m_Link.IsEmpty() || project->m_Link.View() != link) continue;
+			return slash < 0 ? project->m_Root : project->m_Root / path.Substring(slash + 1, path.ByteLength() - slash - 1);
+		}
+		return FS::Path();
+	}
+
+	public bool SolutionModel::LinkedPath(const FS::Path& file, Core::String& path) const {
+		ProjectModel* best = nullptr;
+		Core::String bestInside;
+		for (ProjectModel* project : m_Projects) {
+			Core::String inside;
+			if (project->m_Link.IsEmpty() || !RelativeTo(project->m_Root.View(), file.View(), inside)) continue;
+			if (best && project->m_Root.View().ByteLength() <= best->m_Root.View().ByteLength()) continue;
+			best = project;
+			bestInside = inside;
+		}
+		if (!best) return false;
+		path = bestInside.IsEmpty() ? best->m_Link : (best->m_Link + "/") + bestInside;
+		return true;
+	}
+
 	static void Strings(JsonWriter& json, const char* key, const Core::Array<Core::String>& items) {
 		json.Key(Core::StringView(key));
 		json.BeginArray();
@@ -177,6 +216,8 @@ namespace Ied
 		json.Field("name", m_Name.View());
 		json.Field("file", m_File.View());
 		json.Field("root", m_Root.View());
+		json.Field("path", m_Path.View());
+		if (!m_Link.IsEmpty()) json.Field("link", m_Link.View());
 		json.Field("kind", m_Kind.View());
 		Strings(json, "problems", m_Problems);
 		json.RawField("data", m_Data.IsValid() ? NodeJson(m_Data).View() : Core::StringView("null"));

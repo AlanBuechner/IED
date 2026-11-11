@@ -60,8 +60,10 @@ def folded(path):
 
 def normalize(path):
 	clean = path.replace("\\", "/").strip("/")
-	if re.match(r"^[A-Za-z]:", clean) or any(part in ("..", ".") for part in clean.split("/") if part):
-		raise RpcError("bad_request", "path must be workspace-relative without '.' or '..': %r" % path)
+	if re.match(r"^[A-Za-z]:", clean) or any(part == ".." for part in clean.split("/") if part):
+		raise RpcError("bad_request", "path must be workspace-relative without '..': %r" % path)
+	# "." is the folder it is in: "." alone the workspace's root, as the server takes it.
+	clean = "/".join(part for part in clean.split("/") if part and part != ".")
 	return posixpath.normpath(clean) if clean else ""
 
 

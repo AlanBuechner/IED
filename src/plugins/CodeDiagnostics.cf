@@ -58,7 +58,7 @@ namespace Ied
 	static Core::String CodePath(Workspace* ws, const Core::Array<Core::String>& files, Core::StringView name) {
 		for (const Core::String& file : files) {
 			Core::String relative;
-			if (!RelativeTo(ws->m_Root.View(), file.View(), relative)) continue;
+			if (!ws->PathOf(FS::Path(file.View()), relative)) continue;
 			Core::StringView view = relative.View();
 			if (view == name || (view.EndsWith(name) && view.ByteAt(view.ByteLength() - name.ByteLength() - 1) == '/')) return relative;
 		}

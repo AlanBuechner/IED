@@ -1,5 +1,6 @@
 include "Control.ch"
 include "Server.ch"
+include "Programs.ch"
 
 namespace Ied
 {
@@ -142,6 +143,12 @@ namespace Ied
 
 	Core::String Control::WorkspaceCall(Core::StringView method, const Serialization::DomNode& params) {
 		if (method == "status") return WorkspaceStatus();
+		// The master's `open` for a workspace a window shows already: that window shows the file (docs/10 "Local control channel").
+		if (method == "reveal") {
+			Threading::LockGuard guard(m_Server->m_Lock);
+			const bool revealed = m_Server->m_Workspaces->Reveal(FS::Path(params.Member("file").AsView()), params.Member("line").AsInt(), params.Member("col").AsInt());
+			return Core::String(revealed ? "{\"revealed\":true}" : "{\"revealed\":false}");
+		}
 		if (method == "stop") return Core::String("{}");
 		// The master wrote plugins.json: read it again now, before the master answers (its watcher would, a moment later).
 		if (method == "choices.changed") {
@@ -279,14 +286,44 @@ namespace Ied
 			Threading::LockGuard guard(m_Server->m_Lock);
 			wsId = m_Server->m_Workspaces->OpenFor(target, relative)->m_WsId;
 		}
+		const bool revealed = params.Member("reveal").AsBool() && RevealIn(wsId.View(), relative.IsEmpty() ? FS::Path() : target, params.Member("line").AsInt(), params.Member("col").AsInt());
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("wsId", wsId.View());
 		json.Field("path", relative.View());
+		if (params.Member("reveal").AsBool()) json.BoolField("revealed", revealed);
 		Core::String fragment = OpenFragment(wsId.View(), relative.View(), params.Member("line").AsInt(), params.Member("col").AsInt());
 		json.Field("url", Launch(fragment.View()).View());
 		json.EndObject();
 		return json.ToString();
+	}
+
+	// `reveal` asked of a workspace server's pipe (the lock not held): whether a window of it shows the file.
+	static bool AskToReveal(Core::StringView control, const FS::Path& file, int64 line, int64 col) {
+		Core::String name = Core::String(control);
+		Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), c_RevealConnectMs);
+		if (!stream.IsOpen()) return false;
+		JsonWriter params;
+		params.BeginObject();
+		params.Field("file", file.View());
+		params.IntField("line", line);
+		params.IntField("col", col);
+		params.EndObject();
+		Launch::Reply reply = Launch::AskWithin(stream, Core::StringView("reveal"), params.View(), c_RevealMs);
+		return reply.m_Ok && Launch::ResultFlag(reply, "revealed");
+	}
+
+	// Asks the workspace's server to show `file` (empty: only the window) in a window that has it open; false when its
+	// server is not ready or no window shows it, and then the caller opens one.
+	bool Control::RevealIn(Core::StringView wsId, const FS::Path& file, int64 line, int64 col) {
+		Core::String control;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			WorkspaceServer* record = m_Server->m_Servers->Find(wsId);
+			if (!record || record->m_State != ServerState::Ready || record->m_Closing) return false;
+			control = record->m_Control;
+		}
+		return AskToReveal(control.View(), file, line, col);
 	}
 
 	// Every client is told and closed, then the HTTP server stops, and with it the process.

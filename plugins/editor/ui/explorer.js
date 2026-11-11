@@ -10,7 +10,7 @@
 import { h, icon } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
 import { choiceDialog, confirmDialog, promptDialog } from "/ui-kit/dialog.js";
-import { SEARCH_LIMIT, SearchState, holds, markedParts } from "./explorersearch.js";
+import { SEARCH_LIMIT, SearchState, holds, markedParts, projectPath } from "./explorersearch.js";
 
 const SEARCH_DELAY_MS = 200;
 
@@ -44,16 +44,6 @@ function writeFolderView(root, folderView) {
 	catch {
 		// a page without storage forgets the choice
 	}
-}
-
-// `root`'s path inside the workspace `wsRoot` ("" for the root itself), or null when it is outside.
-export function relativeTo(wsRoot, root) {
-	const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-	const a = norm(wsRoot);
-	const b = norm(root);
-	if (a.toLowerCase() === b.toLowerCase()) return "";
-	if (!b.toLowerCase().startsWith(a.toLowerCase() + "/")) return null;
-	return b.slice(a.length + 1);
 }
 
 export class Explorer {
@@ -231,8 +221,8 @@ export class Explorer {
 	}
 
 	projectNode(project, parentId) {
-		const path = relativeTo(this.ied.workspace.root, project.root);
-		const node = { id: parentId + "/project:" + project.name, kind: "project", name: project.name, path, expandable: path !== null, project, problem: project.problems.length ? project.problems.join("; ") : path === null ? "its root is outside the solution's folder" : null };
+		const path = projectPath(this.ied.workspace, project);
+		const node = { id: parentId + "/project:" + project.name, kind: "project", name: project.name, path, linked: Boolean(project.link), expandable: path !== null, project, problem: project.problems.length ? project.problems.join("; ") : path === null ? "its root is outside the solution's folder" : null };
 		if (path !== null) this.remember(node);
 		return node;
 	}
@@ -406,7 +396,7 @@ export class Explorer {
 		const solution = this.ied.workspace.solution;
 		const pathOf = (name) => {
 			const project = solution ? solution.projects.find((p) => p.name === name) : null;
-			return project ? relativeTo(this.ied.workspace.root, project.root) : null;
+			return project ? projectPath(this.ied.workspace, project) : null;
 		};
 		const kept = [];
 		for (const node of nodes) {
@@ -564,8 +554,8 @@ export class Explorer {
 
 	async moveProject(node) {
 		if (!node || node.kind !== "project") return;
-		if (!node.path) {
-			this.ied.report("'" + node.name + "' " + (node.path === null ? "lies outside the solution's folder" : "is the solution's own folder") + ": it cannot move.");
+		if (!node.path || node.linked) {
+			this.ied.report("'" + node.name + "' " + (node.path === null || node.linked ? "lies outside the solution's folder" : "is the solution's own folder") + ": it cannot move.");
 			return;
 		}
 		const to = await promptDialog({ title: "Move Project", message: "Move '" + node.name + "' to the folder (relative to the solution's folder):", value: node.path, confirm: "Move",
@@ -576,8 +566,9 @@ export class Explorer {
 	async removeProject(node) {
 		if (!node || node.kind !== "project") return;
 		const choices = [{ label: "Remove", value: "remove", primary: true }];
-		if (node.path) choices.push({ label: "Delete", value: "delete", danger: true });
-		const message = "'" + node.name + "' will be removed from the solution." + (node.path ? " Remove keeps its files; Delete moves its folder to the trash." : "");
+		const deletable = node.path && !node.linked;
+		if (deletable) choices.push({ label: "Delete", value: "delete", danger: true });
+		const message = "'" + node.name + "' will be removed from the solution." + (deletable ? " Remove keeps its files; Delete moves its folder to the trash." : "");
 		const choice = await choiceDialog({ title: "Remove Project", message, choices });
 		if (!choice) return;
 		await this.project("project.remove", { project: node.name, deleteFiles: choice === "delete" },

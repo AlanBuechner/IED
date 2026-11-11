@@ -23,6 +23,7 @@ namespace Ied
 
 	const int64 c_LspStartTimeoutMs = 20000;
 	const int64 c_LspRequestTimeoutMs = 30000;
+	const int64 c_LspWorkspaceRequestTimeoutMs = 120000;   // a request over the whole workspace: a cold server indexes all of it first
 	const int64 c_LspRestartWindowNs = 300000000000;   // three exits in five minutes and it stays down
 	const int32 c_LspMostRestarts = 3;
 	const int32 c_LspExitGraceMs = 2000;

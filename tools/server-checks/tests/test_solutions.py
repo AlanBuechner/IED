@@ -222,6 +222,95 @@ class SolutionTests(ServerTestCase):
 		self.assertEqual(("solution", "OneSolution"), (listed[solution["wsId"]]["kind"], listed[solution["wsId"]]["name"]))
 		self.assertEqual("folder", listed[folder["wsId"]]["kind"], "two solutions: no choice made for the owner")
 
+	async def test_a_project_rooted_outside_the_folder_is_linked(self):
+		"""docs/03 "Linked projects": a project whose root lies outside the solution's folder (a package built from a
+		checkout elsewhere) is reached at "@<name>" in a trusted workspace - listed, read, written and watched as the
+		folder's own files are, and named by that path when a process names its file."""
+		engine = os.path.join(self.root, "Engine")
+		write(os.path.join(engine, "src", "e.cf"), "int32 Engine() { return 1; }\n")
+		write(os.path.join(self.repo, "build", "ied", "Engine.iedproj"), project("Engine", engine.replace("\\", "/"), kind="library"))
+		frames = await self.client.wait_for("ws:w1", lambda f: f["t"] == "evt" and f["kind"] == "solution.changed" and "Engine" in [p["name"] for p in f["data"]["solution"]["projects"]], 10)
+		projects = {p["name"]: p for p in frames[-1]["data"]["solution"]["projects"]}
+		self.assertEqual(("@Engine", "@Engine", []), (projects["Engine"]["path"], projects["Engine"]["link"], projects["Engine"]["problems"]))
+		self.assertEqual("src/Game", projects["Game"]["path"], "a project in the folder: its path there")
+		with self.assertRaises(Exception, msg="an untrusted workspace reaches nothing outside its folder"):
+			await self.client.request("fs.read", {"wsId": "w1", "path": "@Engine/src/e.cf"})
+		with open(os.path.join(engine, "src", "early.cf"), "w", encoding="utf-8") as f:
+			f.write("\n")
+		await asyncio.sleep(1.5)
+		early = [c["path"] for f in self.client.drain("ws:w1") if f.get("kind") == "tree.changed" for c in f["data"]["changes"]]
+		self.assertNotIn("@Engine/src/early.cf", early, "nor does the server watch its links for it")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		listed = await self.client.request("fs.list", {"wsId": "w1", "path": "@Engine"})
+		self.assertEqual(["src"], [e["name"] for e in listed["entries"]])
+		read = await self.client.request("fs.read", {"wsId": "w1", "path": "@Engine/src/e.cf"})
+		self.assertIn("int32 Engine", read["text"])
+		await self.client.request("fs.write", {"wsId": "w1", "path": "@Engine/src/e.cf", "text": "int32 Engine() { return 2; }\n", "expectedRevision": read["revision"]})
+		with open(os.path.join(engine, "src", "e.cf"), encoding="utf-8") as f:
+			self.assertIn("return 2", f.read(), "written in the project's own folder")
+		with open(os.path.join(engine, "src", "new.cf"), "w", encoding="utf-8") as f:
+			f.write("\n")
+		frames = await self.client.wait_for("ws:w1", lambda f: f["t"] == "evt" and f["kind"] == "tree.changed" and any(c["path"] == "@Engine/src/new.cf" for c in f["data"]["changes"]), 10)
+		self.assertTrue(frames, "a change made behind the server's back, named by its linked path")
+		pipe = ControlPipe(self.server.control)
+		try:
+			opened = pipe.call("open", {"path": os.path.join(engine, "src", "e.cf")})["result"]
+		finally:
+			pipe.close()
+		self.assertNotEqual("w1", opened["wsId"], "a file of the checkout opened alone is not this solution's: no solution is above it")
+
+	async def test_a_file_opens_in_the_solution_nearest_above_it(self):
+		"""A game's project inside its engine's repository, the repository's solution open: a file of the game opens in
+		the game's own solution, the one whose projects it belongs to."""
+		outer = os.path.join(self.root, "Repo")
+		write(os.path.join(outer, "Repo.iedsln"), {"version": 1, "name": "Repo", "projects": []})
+		game = os.path.join(outer, "Projects", "Valley")
+		write(os.path.join(game, "Valley.iedsln"), {"version": 1, "name": "Valley", "projects": []})
+		write(os.path.join(game, "Game", "Content", "Hover.cf"), "\n")
+		write(os.path.join(outer, "README.md"), "\n")
+		pipe = ControlPipe(self.server.control)
+		try:
+			repo = pipe.call("open", {"path": outer})["result"]
+			readme = pipe.call("open", {"path": os.path.join(outer, "README.md")})["result"]
+			script = pipe.call("open", {"path": os.path.join(game, "Game", "Content", "Hover.cf"), "line": 4})["result"]
+			again = pipe.call("open", {"path": os.path.join(game, "Game", "Content", "Hover.cf")})["result"]
+		finally:
+			pipe.close()
+		self.assertEqual((repo["wsId"], "README.md"), (readme["wsId"], readme["path"]), "a file of the repository: its solution")
+		self.assertNotEqual(repo["wsId"], script["wsId"], "the game's file: not the repository's solution")
+		self.assertEqual("Game/Content/Hover.cf", script["path"])
+		self.assertTrue(script["url"].endswith("/Game/Content/Hover.cf:4"), script["url"])
+		self.assertEqual(script["wsId"], again["wsId"], "and the same solution again")
+		listed = {w["wsId"]: w for w in (await self.client.request("ws.list"))["workspaces"]}
+		self.assertEqual(("solution", "Valley"), (listed[script["wsId"]]["kind"], listed[script["wsId"]]["name"]))
+
+	async def test_open_with_reveal_goes_to_a_window_that_shows_the_workspace(self):
+		"""docs/10 control `open` with reveal: a client that has the workspace open is told to show the file
+		(workspace.reveal), the first to claim it does, and no second window is needed; with no such client, revealed is
+		false and the caller opens a window."""
+		game = os.path.join(self.root, "Shown")
+		write(os.path.join(game, "Shown.iedsln"), {"version": 1, "name": "Shown", "projects": []})
+		write(os.path.join(game, "a.cf"), "\n")
+		pipe = ControlPipe(self.server.control)
+		try:
+			first = await asyncio.to_thread(lambda: pipe.call("open", {"path": os.path.join(game, "a.cf"), "reveal": True})["result"])
+			self.assertFalse(first["revealed"], "no window shows it")
+			topic = "ws:" + first["wsId"]
+			await self.client.sub([topic])
+			await self.client.wait_for(topic, lambda f: f["t"] == "snap")
+			shown = await asyncio.to_thread(lambda: pipe.call("open", {"path": os.path.join(game, "a.cf"), "line": 3, "reveal": True})["result"])
+			plain = await asyncio.to_thread(lambda: pipe.call("open", {"path": os.path.join(game, "a.cf")})["result"])
+		finally:
+			pipe.close()
+		self.assertTrue(shown["revealed"], "a client has it open")
+		self.assertNotIn("revealed", plain, "nothing revealed unless asked")
+		frames = await self.client.wait_for(topic, lambda f: f["t"] == "evt" and f["kind"] == "workspace.reveal", 10)
+		data = frames[-1]["data"]
+		self.assertEqual(("a.cf", 3, 0), (data["path"], data["line"], data["col"]))
+		claimed = await self.client.request("ws.claimReveal", {"wsId": first["wsId"], "id": data["id"]})
+		again = await self.client.request("ws.claimReveal", {"wsId": first["wsId"], "id": data["id"]})
+		self.assertEqual((True, False), (claimed["claimed"], again["claimed"]), "one window shows it")
+
 	async def test_the_names_before_still_open(self):
 		"""docs/03 "Files": a .ied.sln and its .ied.proj, from before the rename, open as a solution with its project."""
 		old = os.path.join(self.root, "Old")

@@ -32,6 +32,18 @@ class LauncherTests {
 		Launch::Reply bad = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"no such file\"}}"));
 		assert_true(!bad.m_Ok && bad.m_Error.View() == "no such file", "an error's message");
 		assert_true(!Launch::ParseReply(Core::StringView("garbage")).m_Ok, "not JSON");
+		Launch::Reply flagged = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"revealed\":true,\"url\":\"u\"}}"));
+		assert_true(Launch::ResultFlag(flagged, "revealed"), "a result's flag");
+		assert_true(!Launch::ResultFlag(flagged, "missing") && !Launch::ResultFlag(good, "url"), "one it lacks, or not a flag, is false");
+	}
+
+	[test("open_params")]
+	public static void TestOpenParams() {
+		Core::String plain = Launch::OpenParams(Core::StringView("C:/src/a.cf"), 4, 2);
+		assert_true(plain.View().Contains(Core::StringView("\"line\":4,\"col\":2}")), plain.CStr());
+		assert_true(!plain.View().Contains(Core::StringView("reveal")), "nothing to reveal unless asked");
+		Core::String revealed = Launch::OpenParams(Core::StringView("C:/src/a.cf"), 4, 0, true);
+		assert_true(revealed.View().EndsWith(Core::StringView(",\"reveal\":true}")), revealed.CStr());
 	}
 
 	[test("external_urls")]

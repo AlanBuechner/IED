@@ -31,7 +31,7 @@ namespace Launch
 		path = Core::String(rest);
 	}
 
-	Core::String OpenParams(Core::StringView path, int64 line, int64 col) {
+	Core::String OpenParams(Core::StringView path, int64 line, int64 col, bool reveal) {
 		Core::String text = Core::String(path);
 		Core::StringBuilder params;
 		params.Append("{\"path\":");
@@ -40,6 +40,7 @@ namespace Launch
 		params.AppendInt(line);
 		params.Append(",\"col\":");
 		params.AppendInt(col);
+		if (reveal) params.Append(",\"reveal\":true");
 		params.AppendByte('}');
 		return params.ToString();
 	}

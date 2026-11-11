@@ -9,6 +9,8 @@ namespace Ied
 {
 	const int64 c_ControlLineBytes = 1048576;
 	const int32 c_AcceptSliceMs = 250;   // how soon the pipe closes once the server stops
+	const int32 c_RevealMs = 5000;       // how long `open` waits for a workspace server to say a window shows the file
+	const int32 c_RevealConnectMs = 2000;
 
 	alias StopServer = func<void()>;
 
@@ -46,6 +48,7 @@ namespace Ied
 		private Core::String Status();
 		private Core::String WorkspaceStatus();
 		private Core::String Open(const Serialization::DomNode& params);
+		private bool RevealIn(Core::StringView wsId, const FS::Path& file, int64 line, int64 col);
 		private Core::String ClaimRelaunch();
 		// A relaunch no desktop app took (Relaunch.ch): the server stops, and main starts it again.
 		private bool RelaunchDue();

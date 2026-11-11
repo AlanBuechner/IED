@@ -25,6 +25,8 @@ namespace Ied
 		// The system dropped changes: the folder must be looked at again.
 		public bool Overflowed() const { return m_Overflow; }
 		public void Clear();
+		// The same changes under `prefix` ("@Engine"): a linked folder's, as the workspace names them.
+		public ChangeBatch Prefixed(Core::StringView prefix) const;
 
 		private void Fold(Core::StringView path, FS::ChangeKind kind);
 

@@ -4,6 +4,23 @@
 // it. The files come from the server's list of the workspace's files (fs.files, docs/10), so folders never opened are
 // searched too; what that list skips (build outputs, vendored code, what .gitignore ignores) is not.
 
+// `root`'s path inside the workspace `wsRoot` ("" for the root itself), or null when it is outside.
+export function relativeTo(wsRoot, root) {
+	const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+	const a = norm(wsRoot);
+	const b = norm(root);
+	if (a.toLowerCase() === b.toLowerCase()) return "";
+	if (!b.toLowerCase().startsWith(a.toLowerCase() + "/")) return null;
+	return b.slice(a.length + 1);
+}
+
+// The workspace path a project's files are listed by: its root in the folder, or for a root outside it the link the
+// server reaches it by ("@Engine", docs/03 "Linked projects"); null when neither - an older server's model.
+export function projectPath(workspace, project) {
+	if (typeof project.path === "string") return project.path;
+	return relativeTo(workspace.root, project.root);
+}
+
 // The most files one search asks the server for: past it, the box says to type more.
 export const SEARCH_LIMIT = 500;
 

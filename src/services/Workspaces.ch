@@ -32,9 +32,14 @@ namespace Ied
 		public Core::HashMap<Core::String, bool> m_OwnDirectories;    // folders the server made, until the watcher reports them
 		public ReadOnlyRules m_ReadOnly;     // the folders tools named read-only (ReadOnly.ch)
 		public FolderWatch m_Watch;
+		public Core::HashMap<Core::String, FolderWatch*> m_LinkWatches;   // a linked project's root, by its link (docs/03 "Linked projects")
 
-		// The file at a workspace-relative path; under .ied/local, in its local state.
+		// The file at a workspace-relative path; under .ied/local, in its local state; under a link ("@Engine/...") of a
+		// trusted solution, in that project's root outside the folder.
 		public FS::Path At(Core::StringView path) const;
+		// The workspace path of a file (an absolute path): in the folder, or under a linked project's root; false when the
+		// workspace holds no such file.
+		public bool PathOf(const FS::Path& file, Core::String& path) const;
 		public Core::String SummaryJson() const;
 	}
 
@@ -103,6 +108,10 @@ namespace Ied
 		// A folder of `ws` moved with what is in it: revisions and digests follow, and so do the documents open under
 		// it; throws conflict when `to` is there, unavailable when something holds a file in it open.
 		public void MoveFolder(Workspace* ws, Core::StringView from, Core::StringView to);
+		// A workspace server: `file` (empty: only the window) shown by a client that has the workspace open - workspace.reveal
+		// {id, path, line, col} on ws:<wsId>, the first client to claim it (ws.claimReveal) showing it; false when no client
+		// has it open, or the workspace holds no such file.
+		public bool Reveal(const FS::Path& file, int64 line, int64 col);
 		// A folder of `ws` with everything in it to the trash; its trash entry's id.
 		public Core::String TrashFolder(Workspace* ws, Core::StringView path);
 		// A file of `ws` to the trash; its trash entry's id.
@@ -127,6 +136,7 @@ namespace Ied
 		// The read-only folders read again; when they changed and `tell`, readonly.changed and the open documents told.
 		private void LoadReadOnly(Workspace* ws, bool tell);
 		private void Watch(Workspace* ws);
+		private void WatchLinks(Workspace* ws);
 		private Core::String ListMethod(Call& call, const Params& params);
 		private Core::String ReadMethod(Call& call, const Params& params);
 		private Core::String WriteMethod(Call& call, const Params& params);
@@ -136,6 +146,7 @@ namespace Ied
 		// fs.reveal: the path in the server machine's file manager, for a client on that machine.
 		private Core::String RevealMethod(Call& call, const Params& params);
 		private Core::String SetTrustMethod(Call& call, const Params& params);
+		private Core::String ClaimRevealMethod(Call& call, const Params& params);
 		private Core::String OpenRecentMethod(Call& call, const Params& params);
 		// ws.setFavorite, or ws.forgetRecent when `forget`.
 		private Core::String RecentChangeMethod(Call& call, const Params& params, bool forget);
@@ -157,9 +168,12 @@ namespace Ied
 		private Core::Array<Workspace*> m_None;
 		private bool m_Master;    // this is the master's list of records
 		private int64 m_Opened;   // ids handed out
+		private Core::Array<int64> m_Reveals;   // reveals no client has claimed yet
+		private int64 m_RevealSeq;
 	}
 
-	// A workspace-relative path with '/' separators and no '.' or '..'; throws bad_request.
+	// A workspace-relative path with '/' separators and no '..' ('.' parts are dropped: "." alone is the root); throws
+	// bad_request.
 	Core::String NormalizePath(Core::StringView path);
 	// The SHA-256 of a file's text, hex.
 	Core::String TextDigest(Core::StringView text);
@@ -168,4 +182,6 @@ namespace Ied
 	// `path` relative to `root` with '/' separators, comparing without regard to ASCII case or separator kind (Windows
 	// paths); false when it is not `root` or under it.
 	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative);
+	// The solution file of the nearest folder at or above `folder` that holds exactly one; empty when none does.
+	FS::Path NearestSolution(const FS::Path& folder);
 }
