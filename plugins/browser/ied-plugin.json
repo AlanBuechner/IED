@@ -114,7 +114,7 @@
 			},
 			{
 				"name": "browser_act",
-				"description": "Act on a page as a person would: click, hover, type (text into a field), press (a key: Enter, Tab, Escape, ArrowDown, a character), select (an option's value) or scroll (to an element, or the page with text up/down/pixels). Name the element by a ref from browser_snapshot or a CSS selector. The user sees each action drawn on the page.",
+				"description": "Act on a page as a person would: click, hover, type (text into a field), press (a key: Enter, Tab, Escape, ArrowDown, a character), select (an option's value) or scroll (to an element, or the page with text up/down/pixels). Name the element by a ref from browser_snapshot (the way to name one by its text) or a CSS selector - CSS only: Playwright's text= and :has-text() are refused. The user sees each action drawn on the page.",
 				"class": "net",
 				"group": "browser",
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "action": { "enum": ["click", "type", "press", "select", "scroll", "hover"] }, "ref": { "type": "string" }, "selector": { "type": "string" }, "text": { "type": "string" } }, "required": ["page", "action"], "additionalProperties": false },
