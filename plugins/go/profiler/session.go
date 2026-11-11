@@ -108,7 +108,13 @@ func running() *session {
 		return nil
 	}
 	if state.CompareAndSwap(stateUnknown, stateOff) {
-		if target := os.Getenv("IED_PROFILER"); target != "" {
+		target := os.Getenv("IED_PROFILER")
+		// IED_PROFILER=off: no session, and nothing for IED to attach to either (attach_windows.go).
+		if target == "off" {
+			return nil
+		}
+		listenForAttach(programName())
+		if target != "" {
 			startSession(target, programName())
 		}
 	}

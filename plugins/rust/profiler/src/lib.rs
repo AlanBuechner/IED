@@ -22,6 +22,7 @@
 //! allocation of the program's global allocator; the `tracing` feature turns spans and events of the `tracing`
 //! ecosystem into zones and messages. The session ends at exit (or with `stop`).
 
+mod attach;
 mod encode;
 mod locks;
 mod session;

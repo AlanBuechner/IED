@@ -154,10 +154,14 @@ pub fn running() -> Option<&'static Session> {
         _ => {}
     }
     if STATE.compare_exchange(UNKNOWN, OFF, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-        if let Ok(target) = std::env::var("IED_PROFILER") {
-            if !target.is_empty() {
-                let _ = start_session(&target, &program_name());
-            }
+        let target = std::env::var("IED_PROFILER").unwrap_or_default();
+        // IED_PROFILER=off: no session, and nothing for IED to attach to either (attach.rs).
+        if target == "off" {
+            return None;
+        }
+        crate::attach::listen_for_attach(program_name());
+        if !target.is_empty() {
+            let _ = start_session(&target, &program_name());
         }
     }
     if STATE.load(Ordering::Acquire) == ON {
@@ -165,6 +169,11 @@ pub fn running() -> Option<&'static Session> {
     } else {
         None
     }
+}
+
+/// Whether a session records now (attach.rs).
+pub fn is_on() -> bool {
+    STATE.load(Ordering::Acquire) == ON
 }
 
 fn current() -> Option<&'static Session> {
