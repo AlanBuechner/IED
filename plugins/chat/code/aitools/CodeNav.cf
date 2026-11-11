@@ -444,6 +444,14 @@ namespace Ai
 
 	static const int64 c_ReadSymbolNamesMost = 3;   // a plain name of this many qualified ones shows them all
 
+	// The qualified names among `symbols` one of whose places has a body.
+	static Core::HashSet<Core::String> NamesWithBodies(CodeQuery& query, const Core::Array<CodeSymbol*>& symbols) {
+		Core::HashSet<Core::String> names;
+		for (CodeSymbol* symbol : symbols)
+			if (HasBody(query, symbol)) names.Add(symbol->Qualified());
+		return names;
+	}
+
 	static ToolOutcome ReadSymbol(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.m_Ws);
 		CodeTarget target = TargetsOf(query, call.m_Args, c_ReadSymbolNamesMost);
@@ -456,12 +464,13 @@ namespace Ai
 		const bool declaration = call.m_Args.Member("declaration").AsBool();
 		AddCounterparts(query, candidates, declaration);
 		AddCounterparts(query, candidates, !declaration);
+		// Each symbol by its own places: its definition (with declaration, its declaration), the rest listed after; a symbol
+		// with no body anywhere - a pure virtual method beside an override - is shown, never taken for another's declaration.
+		Core::HashSet<Core::String> withBodies = NamesWithBodies(query, candidates);
 		Core::Array<CodeSymbol*> shown;
 		Core::Array<CodeSymbol*> others;
-		bool anyBody = false;
-		for (CodeSymbol* symbol : candidates) anyBody = anyBody || HasBody(query, symbol);
 		for (CodeSymbol* symbol : candidates) {
-			if (!anyBody || HasBody(query, symbol) != declaration) shown.Push(symbol);
+			if (!withBodies.Contains(symbol->Qualified()) || HasBody(query, symbol) != declaration) shown.Push(symbol);
 			else others.Push(symbol);
 		}
 		if (shown.IsEmpty()) shown = candidates;
