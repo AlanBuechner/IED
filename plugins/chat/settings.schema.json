@@ -8,7 +8,9 @@
 			"properties": {
 				"provider": { "enum": ["openai", "claude-code"], "default": "openai", "description": "What serves it: an OpenAI-compatible endpoint, or your own signed-in Claude Code CLI on your Claude subscription (docs/04 The Claude Code provider; never an API key)." },
 				"endpoint": { "type": "string", "pattern": "^https?://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1), or https:// (the server's certificate checked against the system's roots). Not for claude-code." },
-				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: opus, sonnet, haiku, fable or a full id; default: the CLI's. Which Claude model a turn uses as the plan runs ahead of pace is a group's chain (ai.groups, docs/04 Pacing)." },
+				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: an alias the CLI knows (opus, sonnet, haiku, fable) or a full id (claude-fable-5-2); IED adds the models the CLI offers as they come (docs/04 The Claude models). Which Claude model a turn uses as the plan runs ahead of pace is the default chain's (ai.defaultModel, ai.claude.stepDown, docs/04 Pacing)." },
+				"label": { "type": "string", "description": "The name the Model menu shows (\"Fable 5.2\"); the profile's name when unset. IED writes the CLI's own name for the Claude models it adds." },
+				"efforts": { "type": "array", "items": { "enum": ["low", "medium", "high", "xhigh", "max"] }, "uniqueItems": true, "description": "The efforts the model takes, as its server says (the Claude CLI's supportedEffortLevels); left out: every one." },
 				"pacing": {
 					"type": "object",
 					"description": "Gone with model auto (the first pacing design): the server moves it into ai.groups once, as paced places of each role that named the profile (docs/04 Pacing).",
@@ -94,7 +96,7 @@
 		},
 		"agent": {
 			"type": "object",
-			"description": "A sub-agent of the group (docs/04 A group is a topology): a role, what it is for, the mode its chat runs in and the agents it may run itself.",
+			"description": "A sub-agent (docs/04 Sub-agents): a model with its pace, temperature, effort and fallbacks, what it is for, the mode its chat runs in and the agents it may run itself.",
 			"properties": {
 				"model": { "type": "string", "minLength": 1 },
 				"pace": { "$ref": "#/$defs/pace" },
@@ -127,19 +129,39 @@
 			"description": "Model profiles by name: where each model is served and how to talk to it (docs/04 Providers).",
 			"additionalProperties": { "$ref": "#/$defs/model" }
 		},
-		"ai.groups": {
+		"ai.defaultModel": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The model a chat runs on when it names none (a profile of ai.models). Empty: Claude when it is set up - Opus, stepping down to lighter Claude models while the plan runs ahead of its pace (ai.claude.stepDown) - else the first model (docs/04 Which model a turn uses)."
+		},
+		"ai.fallbackModel": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The model a turn goes on with when the chat's model cannot answer - Claude's own refusal when the plan's limits are reached, a server that is not there. Empty: behind a Claude model, the first model that is not Claude's; none: no fallback."
+		},
+		"ai.agents": {
 			"type": "object",
 			"default": {},
 			"x-ied-tiers": ["app"],
 			"x-ied-merge": "merge",
-			"description": "Model groups by name, each a topology: an orchestrator - per role (primary, planning, implementation) a model, temperature, effort and fallbacks; a Claude model in a chain may have a pace; a chat's mode picks the role: Ask primary, Plan planning, Agent implementation, a role left off is primary - and its sub-agents, agents, which the orchestrator runs with agent_run (docs/04 Model groups, A group is a topology, Pacing).",
-			"additionalProperties": { "$ref": "#/$defs/group" }
+			"description": "Sub-agents by name: the agents a chat may run with agent_run, each a model with what it is for, the mode its chat runs in and the agents it may run itself (docs/04 Sub-agents).",
+			"additionalProperties": { "$ref": "#/$defs/agent" }
+		},
+		"ai.groups": {
+			"type": "object",
+			"default": {},
+			"x-ied-tiers": ["app"],
+			"x-ied-hidden": true,
+			"description": "No longer used: model groups were removed (owner, 2026-11-11). Their sub-agents moved to ai.agents once; a chat runs on its model or the default chain (ai.defaultModel)."
 		},
 		"ai.defaultGroup": {
 			"type": "string",
 			"default": "",
 			"x-ied-tiers": ["app", "solution"],
-			"description": "The group a new chat uses; empty: the first group."
+			"x-ied-hidden": true,
+			"description": "No longer used: model groups were removed (owner, 2026-11-11); see ai.defaultModel."
 		},
 		"ai.permissions": {
 			"type": "object",
@@ -228,6 +250,12 @@
 			"default": 1500,
 			"x-ied-tiers": ["app", "solution"],
 			"description": "How long an AI write waits for the language server's diagnostics of the file (and for a starting server) before it returns without them; problems_list has them later."
+		},
+		"ai.claude.stepDown": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "While the plan runs ahead of its pace, a chat on the default model steps down to lighter Claude models - Opus to 1.00x the pace, Sonnet to 1.25x, Haiku to 1.50x, then Fable on its own weekly limit - before the fallback model (docs/04 Pacing). A model chosen for a chat is kept whatever the pace."
 		},
 		"ai.claude.paceDays": {
 			"enum": ["week", "workweek"],

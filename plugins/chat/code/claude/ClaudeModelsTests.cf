@@ -1,0 +1,85 @@
+// claudemodels: the models the CLI offers that IED adds to ai.models (docs/04 "The Claude models"), and the default
+// chain a chat with no model of its own runs on now that model groups are gone (docs/04 "Which model a turn uses").
+
+include "api/Plugin.ch"
+include "ClaudeModels.ch"
+include "chats/DefaultChain.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+static Serialization::DomNode Parse(Core::StringView json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(json, *doc).root;
+}
+
+// The catalog the CLI 2.1.317 offered (its initialize answer's models), shortened.
+const char* c_Catalog = "["
+	"{\"value\":\"default\",\"resolvedModel\":\"claude-opus-5-5\",\"displayName\":\"Default (recommended)\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"opus\",\"resolvedModel\":\"claude-opus-5-5\",\"displayName\":\"Opus 5.5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"claude-fable-5-2\",\"resolvedModel\":\"claude-fable-5-2\",\"displayName\":\"Fable 5.2\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"sonnet\",\"resolvedModel\":\"claude-sonnet-5-5\",\"displayName\":\"Sonnet 5.5\"},"
+	"{\"value\":\"haiku\",\"resolvedModel\":\"claude-haiku-5-5\",\"displayName\":\"Haiku 5.5\"},"
+	"{\"value\":\"fable\",\"resolvedModel\":\"claude-fable-5-1\",\"displayName\":\"Fable 5.1\"},"
+	"{\"value\":\"claude-haiku-4-5-20251001\",\"resolvedModel\":\"claude-haiku-4-5-20251001\",\"displayName\":\"Haiku 4.5\"},"
+	"{\"value\":\"claude-opus-5\",\"resolvedModel\":\"claude-opus-5\",\"displayName\":\"Opus 5\"},"
+	"{\"value\":\"claude-fable-5\",\"resolvedModel\":\"claude-fable-5\",\"displayName\":\"Fable 5\"},"
+	"{\"value\":\"claude-opus-4-6\",\"resolvedModel\":\"claude-opus-4-6\",\"displayName\":\"Opus 4.6\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"max\"]},"
+	"{\"value\":\"claude-mythos-6\",\"resolvedModel\":\"claude-mythos-6\",\"displayName\":\"Mythos 6\"},"
+	"{\"value\":\"claude-mythos-5-2\",\"resolvedModel\":\"claude-mythos-5-2\",\"displayName\":\"Mythos 5.2\"}"
+	"]";
+
+const char* c_Ladder = "{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\"},\"claude-sonnet\":{\"provider\":\"claude-code\",\"model\":\"sonnet\"},"
+	"\"claude-haiku\":{\"provider\":\"claude-code\",\"model\":\"haiku\"},\"claude-fable\":{\"provider\":\"claude-code\",\"model\":\"fable\"},"
+	"\"qwen\":{\"endpoint\":\"http://q/v1\",\"model\":\"qwen\"}}";
+
+[test("server.ai.claude.models")]
+class ClaudeModelsTests {
+	[test("current")]
+	public static void TestCurrent() {
+		Core::StringBuilder values;
+		for (Ai::ClaudeCatalogModel* model : Ai::CurrentClaudeModels(Parse(Text(c_Catalog)))) {
+			values.Append(model->m_Value.View());
+			values.Append(" ");
+		}
+		assert_se("opus claude-fable-5-2 sonnet haiku fable claude-mythos-6 ", values.ToString().CStr(),
+			"the aliases, a full id newer than its family's alias (Fable 5.2), the newest of a family with none; never default or the older ids");
+		assert_se("claude-fable-5-2", Ai::ClaudeProfileName(Text("claude-fable-5-2")).CStr(), "a full id names its profile");
+		assert_se("claude-opus", Ai::ClaudeProfileName(Text("opus")).CStr(), "an alias as IED named it");
+	}
+
+	[test("added_once")]
+	public static void TestAdded() {
+		Core::Array<Core::String> seen;
+		Core::String out;
+		Core::Array<Core::String> added;
+		assert_true(Ai::WithCatalogModels(Text(c_Ladder), Parse(Text(c_Catalog)), seen, out, added), "something new");
+		Serialization::DomNode models = Parse(out.View());
+		assert_true(added.Count() == 2 && added[0] == "claude-fable-5-2" && added[1] == "claude-mythos-6", "the models no profile serves");
+		assert_true(models.Member("claude-fable-5-2").Member("model").AsView() == "claude-fable-5-2" && models.Member("claude-fable-5-2").Member("label").AsView() == "Fable 5.2", "named by its id, labelled by the CLI's name");
+		assert_true(!models.Member("claude-fable-5-2").Member("efforts").IsValid(), "every effort: none listed");
+		assert_true(models.Member("claude-opus").Member("label").AsView() == "Opus 5.5" && models.Member("claude-fable").Member("label").AsView() == "Fable 5.1", "IED's own Claude profiles get the CLI's names");
+		assert_true(models.Member("qwen").Member("endpoint").AsView() == "http://q/v1", "the others as they were");
+		assert_true(seen.Contains(Core::String("claude-fable-5-2")) && seen.Contains(Core::String("opus")), "what was seen kept");
+		Core::String again;
+		Core::Array<Core::String> none;
+		assert_true(!Ai::WithCatalogModels(Text("{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\",\"label\":\"Opus 5.5\"}}"), Parse(Text(c_Catalog)), seen, again, none) && none.IsEmpty(),
+			"a model seen before and taken out of ai.models stays out");
+	}
+
+	[test("default_chain")]
+	public static void TestDefaultChain() {
+		Serialization::DomNode chain = Parse(Ai::DefaultGroupsFrom(Text(c_Ladder), Text("\"\""), Text("\"\""), Text("true"), Text("{}")).View()).Member("default").Member("primary");
+		assert_true(chain.Member("model").AsView() == "claude-opus" && chain.Member("pace").Member("max").AsFloat() == 1.0, "Claude first, to the pace");
+		Serialization::DomNode fallback = chain.Member("fallback");
+		assert_true(fallback.Count() == 4 && fallback.At(0).Member("model").AsView() == "claude-sonnet" && fallback.At(1).Member("pace").Member("max").AsFloat() == 1.5, "stepping down as the plan runs ahead of pace");
+		assert_true(fallback.At(2).Member("model").AsView() == "claude-fable" && fallback.At(3).AsView() == "qwen", "then Fable on its own week, then the first model not Claude's");
+		Serialization::DomNode flat = Parse(Ai::DefaultGroupsFrom(Text(c_Ladder), Text("\"\""), Text("\"none\""), Text("false"), Text("{}")).View()).Member("default").Member("primary");
+		assert_true(flat.Member("model").AsView() == "claude-opus" && !flat.Member("pace").IsValid() && !flat.Member("fallback").IsValid(), "no stepping down, no fallback");
+		Serialization::DomNode chosen = Parse(Ai::DefaultGroupsFrom(Text(c_Ladder), Text("\"qwen\""), Text("\"claude-haiku\""), Text("true"), Text("{\"coder\":{\"model\":\"qwen\"}}")).View()).Member("default");
+		assert_true(chosen.Member("primary").Member("model").AsView() == "qwen" && chosen.Member("primary").Member("fallback").At(0).AsView() == "claude-haiku", "ai.defaultModel, then ai.fallbackModel");
+		assert_true(chosen.Member("agents").Member("coder").Member("model").AsView() == "qwen", "the sub-agents of ai.agents");
+		Serialization::DomNode local = Parse(Ai::DefaultGroupsFrom(Text("{\"qwen\":{\"endpoint\":\"http://q/v1\"}}"), Text("\"\""), Text("\"\""), Text("true"), Text("{}")).View()).Member("default").Member("primary");
+		assert_true(local.Member("model").AsView() == "qwen" && !local.Member("fallback").IsValid(), "without Claude: the first model alone");
+		assert_se("{\"default\":{}}", Ai::DefaultGroupsFrom(Text("{}"), Text("\"\""), Text("\"\""), Text("true"), Text("{}")).CStr(), "no model at all");
+	}
+}

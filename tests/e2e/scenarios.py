@@ -2048,26 +2048,27 @@ def chat_clipboard(run):
 @scenario(viewports=("desktop", "phone"))
 def chat_effort(run):
 	"""A chat's effort in the Model menu (owner, 2026-10-26: "move the effort from the dropdown and put it into the model
-	selection with a slider at the bottom"): each group says the model a turn uses now and its default effort; the slider
-	starts on the group's default and its pick goes with the next request (the fake model is a llama.cpp server, so as its
-	chat template reads it); a single model has no group default. At phone width the menu is a bottom sheet."""
+	selection with a slider at the bottom"): Default - the default chain, ai.defaultModel here - says the model a turn
+	uses now; the slider starts on the model's own default and its pick goes with the next request (the fake model is a
+	llama.cpp server, so as its chat template reads it); a model chosen shows its own levels. Model groups are gone
+	(owner, 2026-11-11). At phone width the menu is a bottom sheet."""
 	page = open_chat(run)
 	model = "fake" if run.target.kind == "real" else "mock-model@local"
 	models = {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}} if run.target.kind == "real" else {model: {"endpoint": "http://127.0.0.1:8080/v1"}}
 	models["small"] = {"endpoint": "http://127.0.0.1:9/v1", "effort": {"low": {"chat_template_kwargs": {"enable_thinking": False}}, "high": {}}}
 	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": models})
-	run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"local": {"primary": {"model": model, "effort": "medium"}}}})
-	run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": "local"})
+	run.request("settings.set", {"tier": "app", "key": "ai.defaultModel", "value": model})
 	try:
 		run.reload()
 		show_chat(run)
-		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Medium (group)")
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Default")
 		check(page.query_selector(".chat-selectors .chat-dd[title='Effort']") is None, "no Effort dropdown beside the Model menu")
 		page.click(".chat-selectors .chat-model-dd")
 		page.wait_for_selector(".chat-picker" + (".sheet" if run.phone else "") + " .chat-picker-effort .chat-effort-slider")
-		check(run.texts(".chat-picker .chat-picker-row.grp .sub") == ["now %s - effort Medium - no agents" % model], "the group: the model a turn uses now and its default effort")
-		check(run.texts(".chat-picker .chat-effort-tick") == ["Group", "Low", "Med", "High", "XHigh", "Max"], "the group's default, then the levels")
-		check(run.texts(".chat-picker .chat-effort-value") == ["Group default (Medium)"], "the slider starts on the group's default")
+		check(run.texts(".chat-picker .chat-picker-row.grp .sub") == ["now %s" % model], "Default: the model a turn on the default chain uses now: %r" % run.texts(".chat-picker .chat-picker-row.grp .sub"))
+		check(page.query_selector(".chat-picker .chat-picker-head:has-text('Groups')") is None, "no groups")
+		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "Med", "High", "XHigh", "Max"], "the model's own default, then the levels")
+		check(run.texts(".chat-picker .chat-effort-value") == ["Default (the model's own)"], "the slider starts on the model's own default")
 		run.shot("menu")
 		page.click(".chat-picker .chat-effort-tick[data-effort='max']")
 		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Max")
@@ -2092,13 +2093,12 @@ def chat_effort(run):
 		run.wait_text(".chat-selectors .chat-model-dd", "small")
 		page.click(".chat-selectors .chat-model-dd")
 		page.wait_for_selector(".chat-picker .chat-effort-tick")
-		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "High", "Max"], "a single model: no group default, its own levels, the chat's pick kept: %s" % run.texts(".chat-picker .chat-effort-tick"))
+		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "High", "Max"], "a model chosen: its own levels, the chat's pick kept: %s" % run.texts(".chat-picker .chat-effort-tick"))
 		run.shot("single")
 		page.keyboard.press("Escape")
 	finally:
 		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
-		run.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {}})
-		run.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": ""})
+		run.request("settings.reset", {"tier": "app", "key": "ai.defaultModel"})
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
@@ -2368,6 +2368,9 @@ def claude_week_paced_over_work_days(run):
 		page.locator(".claude-pace-days").scroll_into_view_if_needed()
 		run.shot("page")
 		if not run.phone:
+			# Settings is over the shell (docs/07): closed, the status bar is there again.
+			page.click(".settings-overlay-close")
+			page.wait_for_selector(".settings-overlay", state="detached")
 			item = ".statusbar [data-item='ied.chat.claude']"
 			page.hover(item)
 			page.wait_for_selector(".hover-card .claude-bars .claude-bar .off")
@@ -2790,28 +2793,17 @@ def model_settings(run):
 	run.shot("tested")
 	page.click(".set-model.editing button:has-text('Save')")
 	page.wait_for_selector(".set-model[data-model='local-test']:not(.editing)")
-	page.click(".set-node[data-page='custom:ied.chat.groups']")
-	page.click(".set-bar button:has-text('New')")
-	page.wait_for_selector(".set-role[data-role='primary'][data-state='on']")
-	check(page.is_visible(".set-role[data-role='planning'][data-state='off']"), "a new group turns on primary alone")
-	page.click(".set-role[data-role='planning'] .set-role-toggle")
-	page.wait_for_selector(".set-role[data-role='planning'][data-state='on']")
-	primary = page.eval_on_selector(".set-role[data-role='primary'] .set-role-model", "e => e.value")
-	check(primary and page.eval_on_selector(".set-role[data-role='planning'] .set-role-model", "e => e.value") == primary, "a role turned on gets the primary's model")
-	page.select_option(".set-role[data-role='primary'] .set-role-effort", "xhigh")
-	page.select_option(".set-role[data-role='planning'] .set-role-effort", "max")
-	page.click(".set-bar button:has-text('Make default')")
-	page.wait_for_selector(".set-group.on .ci")
-	run.shot("groups")
-	deadline = time.time() + 10
-	while True:
-		groups = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
-		roles = groups["ai.groups"]["value"]["group"]
-		if roles["planning"].get("effort") == "max" or time.time() > deadline:
-			break
-		time.sleep(0.1)
-	check(groups["ai.defaultGroup"]["value"] == "group" and roles["planning"]["model"] == primary, "written to the User tier: %s" % groups["ai.groups"])
-	check((roles["primary"].get("effort"), roles["planning"].get("effort")) == ("xhigh", "max"), "Claude's levels: %s" % roles)
+	# A chat's Default (no Model Groups any more, owner 2026-11-11): ai.defaultModel on the AI page.
+	check(page.query_selector(".set-node[data-page='custom:ied.chat.groups']") is None, "no Model Groups page")
+	page.click(".set-node[data-page='page:AI']")
+	field = ".set-row[data-key='ai.defaultModel'] input"
+	page.fill(field, "local-test")
+	page.press(field, "Enter")
+	page.wait_for_selector(".set-row[data-key='ai.defaultModel'] .set-source.set")
+	values = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
+	check(values["ai.defaultModel"]["value"] == "local-test", "written to the User tier: %s" % values["ai.defaultModel"])
+	run.shot("default-model")
+	run.request("settings.reset", {"tier": "app", "key": "ai.defaultModel"})
 
 
 FAKE_MCP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "fake-mcp", "fake_mcp.py")
@@ -3126,6 +3118,9 @@ def editor_keys_and_keyboard_page(run):
 	run.shot("changed")
 	values = run.request("settings.get", {})["values"]["keyboard.bindings"]["value"]
 	check(values == [{"command": "ied.editor.duplicate", "key": "ctrl+d", "remove": True}, {"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc'"}], "keyboard.bindings: %s" % values)
+	# Settings is over the shell (docs/07): closed, the editor is there again.
+	page.click(".settings-overlay-close")
+	page.wait_for_selector(".settings-overlay", state="detached")
 	page.click(".tab:has-text('README.md')")
 	take_lease(page)
 	page.click(".monaco-editor .view-lines")

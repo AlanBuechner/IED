@@ -1,4 +1,5 @@
 include "Agents.ch"
+include "chats/DefaultChain.ch"
 
 namespace Ai
 {
@@ -44,10 +45,11 @@ namespace Ai
 		return callable;
 	}
 
+	// The sub-agents of ai.agents (docs/04 "Sub-agents") the chat may run: every one for a chat of the owner's, those its
+	// `calls` names for a sub-agent's.
 	Core::Array<AgentSpec*> AgentsOf(Chats* chats, const Chat* chat, const IED::Workspace& ws) {
-		if (chat->m_Group.IsEmpty() && !chat->m_PinnedModel.IsEmpty()) return Core::Array<AgentSpec*>();
-		Core::String groups = chats->m_Context->Setting(Core::StringView("ai.groups"), WsId(ws));
-		return CallableAgents(GroupAgents(groups.View(), chats->GroupOfChat(chat, ws).View()), chat->m_Agent.View());
+		Core::String groups = DefaultGroupsJson(chats->m_Context, WsId(ws));
+		return CallableAgents(GroupAgents(groups.View(), Core::StringView(c_DefaultChain)), chat->m_Agent.View());
 	}
 
 	static void AgentLine(Core::StringBuilder& out, const AgentSpec* agent, const Core::Array<ModelProfile*>& models) {

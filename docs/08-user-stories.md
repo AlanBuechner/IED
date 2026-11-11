@@ -164,7 +164,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 ### MDL - Models, routing and privacy
 
 - **US-MDL-1** `plan` `P0` - As Owner, I configure model endpoints (OpenAI-compatible: llama.cpp, vLLM, LM Studio, Ollama...) with context size, capabilities, default sampling and privacy class.
-- **US-MDL-2** `plan` `P0` - As Owner, I define model groups that assign a model + temperature (+ effort) per role: primary, planning, implementation, research sub-agent, worker sub-agent, summarizer.
+- **US-MDL-2** `dropped` - (Removed 2026-11-11, owner: "i dont realy use the model groups": a chat runs on its model or the default chain, docs/04 "Which model a turn uses".) As Owner, I define model groups that assign a model + temperature (+ effort) per role: primary, planning, implementation, research sub-agent, worker sub-agent, summarizer.
 - **US-MDL-3** `plan` `P1` - As Owner, requests reroute when a model hits token/rate limits, with a visible note.
 - **US-MDL-4** `plan` `P1` - As Owner, routing prefers idle models and respects each local server's parallel-slot count.
 - **US-MDL-5** `plan` `P0` - As Owner, private requests never go to cloud models: per-chat private toggle, per-solution local-only policy, and automatic "this chat touched a sensitive file, it is now local-only" tainting.

@@ -1,6 +1,7 @@
 include "api/Plugin.ch"
 include "ModelTools.ch"
 include "claude/Pacing.ch"
+include "chats/DefaultChain.ch"
 
 namespace Ai
 {
@@ -92,13 +93,9 @@ namespace Ai
 		for (const ModelProfile* profile : models) ProfileLine(out, profile);
 		Core::Array<RoleChain*> chains = ClaudeChains(models, groupsJson, account, now);
 		if (chains.IsEmpty()) return out.ToString();
-		out.Append("Chains with Claude (ai.groups; a chat's mode picks the role - ask: primary, plan: planning, agent: implementation; a role left off is primary):\n");
+		out.Append("The default chain (a chat with no model of its own runs on it; ai.defaultModel, ai.claude.stepDown, ai.fallbackModel):\n");
 		for (const RoleChain* chain : chains) {
 			out.Append("- ");
-			out.Append(chain->m_Group.View());
-			out.Append(" / ");
-			out.Append(chain->m_Role.View());
-			out.Append(": ");
 			out.Append(ChainText(*chain).View());
 			out.Append("\n");
 		}
@@ -114,12 +111,12 @@ namespace Ai
 		if (call.m_Args.Member("refresh").AsBool()) chats->m_Claude->Refresh(false);
 		else chats->m_Claude->SyncIfStale();
 		Core::Array<ModelProfile*> models = ModelsOf(call);
-		Core::String groups = call.m_Context->Setting(Core::StringView("ai.groups"), WsId(call.m_Ws));
+		Core::String groups = DefaultGroupsJson(call.m_Context, WsId(call.m_Ws));
 		IED::HostLock guard(*call.m_Context);
 		Core::StringBuilder out;
 		out.Append(UsageText(*chats->m_Claude, models, groups.View(), ToolsNowMs()).View());
 		out.Append("This chat: ");
-		out.Append(call.m_Chat->m_PinnedModel.IsEmpty() ? Core::StringView("its group's model") : (Core::String("pinned to ") + call.m_Chat->m_PinnedModel.View()).View());
+		out.Append(call.m_Chat->m_PinnedModel.IsEmpty() ? Core::StringView("the default chain") : (Core::String("pinned to ") + call.m_Chat->m_PinnedModel.View()).View());
 		out.Append(" (chat_set_model changes it for the next turns)\n");
 		return ToolResult(out.View(), Core::StringView("Claude usage"));
 	}
@@ -154,9 +151,9 @@ namespace Ai
 		Core::StringBuilder said;
 		said.Append(chat == self ? "This chat's" : "That chat's");
 		said.Append(" next turns use ");
-		said.Append(name.IsEmpty() ? Core::StringView("its group's model again") : name);
+		said.Append(name.IsEmpty() ? Core::StringView("the default chain again") : name);
 		said.Append(chat == self ? "; this turn goes on with the model it started on." : ".");
-		return ToolResult(said.View(), (Core::String("Model: ") + (name.IsEmpty() ? Core::StringView("the group's") : name)).View());
+		return ToolResult(said.View(), (Core::String("Model: ") + (name.IsEmpty() ? Core::StringView("the default") : name)).View());
 	}
 
 	static ToolSpec* ModelTool(const char* name, const char* description, const char* parameters, ToolClass toolClass) {
@@ -183,13 +180,13 @@ namespace Ai
 		};
 		usage->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return UsageRun(chats, call); };
 		registry.Add(usage);
-		ToolSpec* pin = ModelTool("chat_set_model", "Pin a model of ai.models for a chat's next turns (this chat's, or another chat's by id), over its group's primary; \"\" goes back to the group's. Use a cheaper model for routine work to stretch Claude's usage, the strongest while it is under pace. Example: chat_set_model({\"model\": \"claude-sonnet\", \"chat\": \"c18f2a\"})",
+		ToolSpec* pin = ModelTool("chat_set_model", "Pin a model of ai.models for a chat's next turns (this chat's, or another chat's by id), over the default chain; \"\" goes back to the default chain. Use a cheaper model for routine work to stretch Claude's usage, the strongest while it is under pace. Example: chat_set_model({\"model\": \"claude-sonnet\", \"chat\": \"c18f2a\"})",
 			"{\"type\": \"object\", \"properties\": {\"model\": {\"type\": \"string\"}, \"chat\": {\"type\": \"string\"}}, \"required\": [\"model\"], \"additionalProperties\": false}", ToolClass::Exec);
 		pin->m_Plan = [](const ToolInvocation& call) -> ToolPlan {
 			ToolPlan plan;
 			Core::StringView name = call.m_Args.Member("model").AsView();
 			plan.m_Subject = (Core::String("chat.model(") + (name.IsEmpty() ? Core::StringView("*") : name)) + ")";
-			plan.m_Summary = (Core::String("Use ") + (name.IsEmpty() ? Core::StringView("the group's model") : name)) + " for the next turns";
+			plan.m_Summary = (Core::String("Use ") + (name.IsEmpty() ? Core::StringView("the default chain") : name)) + " for the next turns";
 			return plan;
 		};
 		pin->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SetModelRun(chats, chat, call); };

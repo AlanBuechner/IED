@@ -7,6 +7,7 @@ include "aitools/ChatTools.ch"
 include "chats/Pages.ch"
 include "chats/Replies.ch"
 include "chats/Drafts.ch"
+include "chats/DefaultChain.ch"
 
 namespace Ai
 {
@@ -134,14 +135,10 @@ namespace Ai
 
 	void Chats::PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge) { m_Context->PublishMergeable(chat->Topic().View(), kind, merge); }
 
-	// The chat's group: its own, else ai.defaultGroup, else the first group.
+	// The chain a chat's turns run on: the default chain (DefaultChain.ch) - model groups are gone (owner, 2026-11-11), a
+	// chat runs on its model or on that chain, and a chat a group was kept for runs on it too.
 	static Core::String GroupOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws) {
-		if (!chat->m_Group.IsEmpty()) return chat->m_Group;
-		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		Core::String fallback = Core::String(Serialization::ReadJson(context->Setting(Core::StringView("ai.defaultGroup"), WsId(ws)).View(), *doc).root.AsView());
-		if (!fallback.IsEmpty()) return fallback;
-		Core::Array<Core::String> names = GroupNames(context->Setting(Core::StringView("ai.groups"), WsId(ws)).View());
-		return names.IsEmpty() ? Core::String() : names[0];
+		return Core::String(c_DefaultChain);
 	}
 
 	Core::String Chats::GroupOfChat(const Chat* chat, const IED::Workspace& ws) const { return GroupOf(m_Context, chat, ws); }
@@ -151,7 +148,7 @@ namespace Ai
 	static Core::Array<ModelProfile*> CandidatesOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
-		return TurnCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
+		return TurnCandidates(models, DefaultGroupsJson(context, WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
 			Core::StringView(ChatModeName(chat->m_Mode)), chat->m_PinnedModel.View(), role);
 	}
 
@@ -487,7 +484,7 @@ namespace Ai
 		}
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->m_Mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->m_Permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
-		if (params.Has("group")) chat->m_Group = params.Str("group");
+		// `group` is no longer offered (model groups are gone): a chat runs on its model or the default chain.
 		// A plugin's own chats (a board's) in a section of their own in the Chats list (docs/04 "Chat sections").
 		if (params.Has("section")) chat->m_Section = params.Str("section");
 		if (params.Has("endless")) chat->m_Endless = params.Bool("endless", false);
@@ -520,15 +517,12 @@ namespace Ai
 		return chat->SummaryJson();
 	}
 
-	// A chat runs on a group or on one model (docs/04 "One choice per chat"): a group alone clears the model, a model
-	// alone the group.
+	// A chat runs on a model of its own or on the default chain (docs/04 "Which model a turn uses"); `group` is ignored.
 	Core::String Chats::SetMethod(const IED::Request& request) {
 		const IED::Params& params = request.m_Params;
 		Chat* chat = Get(params.Str("chatId").View());
 		ReadPinnedModel(m_Context, WorkspaceOf(chat), chat, params);
 		ReadSettings(chat, params);
-		if (params.Has("group") && !params.Has("model")) chat->m_PinnedModel = Core::String();
-		if (params.Has("model") && !params.Str("model").IsEmpty() && !params.Has("group")) chat->m_Group = Core::String();
 		Changed(chat);
 		return chat->SummaryJson();
 	}

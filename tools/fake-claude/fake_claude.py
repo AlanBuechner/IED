@@ -6,8 +6,9 @@ mcp_message: initialize, tools/list, tools/call), stream_event partial messages,
     python fake_claude.py --state <folder> [the CLI's own arguments]
 
 The state folder scripts it and records what it saw (README.md): script.json (the responses, taken in order),
-usage.json (get_usage's answer), context.json (get_context_usage's), auth.json (`auth status`), log.jsonl (what it was started with and every line it
-read), sessions/ (the session ids --resume finds)."""
+usage.json (get_usage's answer), context.json (get_context_usage's), auth.json (`auth status`), models.json (the models
+initialize offers), log.jsonl (what it was started with and every line it read), sessions/ (the session ids --resume
+finds)."""
 
 import json
 import os
@@ -23,6 +24,18 @@ CONTEXT_USAGE = {"totalTokens": 41234, "maxTokens": 1000000, "rawMaxTokens": 100
 	{"name": "System prompt", "tokens": 6100, "color": "promptBorder", "kind": "used"}, {"name": "MCP tools", "tokens": 17900, "color": "cyan_FOR_SUBAGENTS_ONLY", "kind": "used"},
 	{"name": "Messages", "tokens": 17234, "color": "purple_FOR_SUBAGENTS_ONLY", "kind": "used"}, {"name": "Free space", "tokens": 913766, "color": "promptBorder", "kind": "free"},
 	{"name": "Autocompact buffer", "tokens": 45000, "color": "inactive", "kind": "buffer"}]}
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# initialize's `models` unless models.json says others, as Claude Code 2.1.317 lists them: "default" first, the aliases
+# with the model each resolves to, a full id newer than its alias's (Fable 5.2 beside fable at 5.1) and an older one the
+# CLI keeps offering (Opus 4.6). --model and set_model take any value; resolved() maps it to its model.
+MODELS = [
+	{"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)"},
+	{"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5", "supportedEffortLevels": EFFORTS},
+	{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5", "supportedEffortLevels": EFFORTS},
+	{"value": "haiku", "resolvedModel": "claude-haiku-5-5", "displayName": "Haiku 5.5", "supportedEffortLevels": EFFORTS},
+	{"value": "claude-fable-5-2", "resolvedModel": "claude-fable-5-2", "displayName": "Fable 5.2", "supportedEffortLevels": EFFORTS},
+	{"value": "fable", "resolvedModel": "claude-fable-5-1", "displayName": "Fable 5.1", "supportedEffortLevels": EFFORTS},
+	{"value": "claude-opus-4-6", "resolvedModel": "claude-opus-4-6", "displayName": "Opus 4.6", "supportedEffortLevels": ["low", "medium", "high", "max"]}]
 
 
 class State:
@@ -148,7 +161,7 @@ class Cli:
 		if subtype == "initialize":
 			if "ied" in request.get("sdkMcpServers", []):
 				self.connect_ied()
-			self.answer(message, {"commands": [], "models": [{"value": "opus", "resolvedModel": "claude-opus-5-5"}, {"value": "sonnet", "resolvedModel": "claude-sonnet-5-5"}, {"value": "haiku", "resolvedModel": "claude-haiku-5-5"}]})
+			self.answer(message, {"commands": [], "models": self.models()})
 		elif subtype == "get_usage":
 			self.answer(message, self.state.read("usage.json", {"session": {}, "subscription_type": None, "rate_limits_available": False, "rate_limits": None, "behaviors": None}))
 		elif subtype == "get_context_usage":
@@ -168,8 +181,14 @@ class Cli:
 
 	# --- A query -----------------------------------------------------------------------------------------------------
 
+	def models(self):
+		"""The models the CLI offers: models.json's list, else MODELS."""
+		return self.state.read("models.json", MODELS)
+
 	def resolved(self):
-		return {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-1", "default": "claude-opus-5-5"}.get(self.model, self.model)
+		"""The model the current --model or set_model value resolves to, as the offered list says; a value it does not
+		list is a full id already."""
+		return next((m.get("resolvedModel", self.model) for m in self.models() if m.get("value") == self.model), self.model)
 
 	def event(self, event):
 		out({"type": "stream_event", "event": event, "session_id": self.session, "parent_tool_use_id": None, "uuid": str(uuid.uuid4())})
@@ -182,6 +201,8 @@ class Cli:
 		"""One model response as stream events; the tool calls it makes, or None when it ends the query."""
 		if response.get("rateLimit"):
 			out({"type": "rate_limit_event", "rate_limit_info": response["rateLimit"], "uuid": str(uuid.uuid4()), "session_id": self.session})
+		for system in response.get("system", []):
+			out(dict(system, type="system", uuid=str(uuid.uuid4()), session_id=self.session))
 		if response.get("error"):
 			out({"type": "assistant", "message": {"id": str(uuid.uuid4()), "model": "<synthetic>", "role": "assistant", "stop_reason": "stop_sequence", "type": "message", "content": [{"type": "text", "text": response.get("text", "")}]},
 				"parent_tool_use_id": None, "session_id": self.session, "uuid": str(uuid.uuid4()), "error": response["error"], "is_api_error_message": True})

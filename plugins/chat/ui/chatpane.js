@@ -301,16 +301,6 @@ export class ChatPane {
 		this.composer.update(this.model);
 		this.panel.update(this.model);
 		this.applyPanel();
-		if (!chatId) this.nameDraftGroup();
-	}
-
-	// A draft's Model menu names the default group a chat made now would run on.
-	async nameDraftGroup() {
-		const choices = await this.choices();
-		const group = choices && choices.groups.find((g) => g.isDefault);
-		if (this.chatId || !group) return;
-		this.model.groupInUse = group.name;
-		this.composer.update(this.model);
 	}
 
 	shown(data) {
@@ -593,8 +583,8 @@ export class ChatPane {
 		if (await this.request("settings.set", { tier: "app", key: "ai.permissions", value: Object.assign({}, current, { allow }) })) await this.approve(approval, "allow");
 	}
 
-	// What the Model menu lists: the groups and the models of the settings, and the chains pacing has now - the model a turn
-	// of each group's Claude chain uses (aiusage; none when the server cannot say) (modelpicker.js).
+	// What the Model menu lists: the models of the settings, and the default chain as pacing has it now - the model a turn
+	// on it uses (aiusage; none when the server cannot say) (modelpicker.js).
 	async choices() {
 		const [settings, usage] = await Promise.all([this.request("settings.get", { wsId: this.wsId }), this.ied.client.request("ai.usage", {}).catch(() => null)]);
 		const chains = usage && usage.claude && usage.claude.chains ? usage.claude.chains : [];

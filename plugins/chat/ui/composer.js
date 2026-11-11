@@ -269,16 +269,24 @@ export class Composer {
 		} } }, h("span", null, label), icon("chevron-down"));
 	}
 
-	// The Model menu: a group (an orchestrator and its agents) or one model (docs/04 "One choice per chat"), and the effort
-	// slider at its bottom; the button says the choice and its effort.
+	// The Model menu: Default (the default chain) or one model (docs/04 "Which model a turn uses"), and the effort slider
+	// at its bottom; the button says the choice by its label ("Opus 5.5", once the models are known) and its effort.
 	modelButton(summary, model) {
-		const label = choiceLabel(summary, model.groupInUse);
-		const alone = !!summary.pinnedModel && !summary.group;
-		const effort = effortLabel(summary.effort, alone ? "" : model.roleEffort);
-		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on a group or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
+		if (!this.choices && !this.choicesAsked && this.actions.choices) {
+			this.choicesAsked = true;
+			this.actions.choices().then((choices) => {
+				this.choices = choices;
+				if (choices && this.lastSelectors) this.renderSelectors(...this.lastSelectors);
+			});
+		}
+		this.lastSelectors = [summary, model];
+		const label = choiceLabel(summary, this.choices);
+		const effort = effortLabel(summary.effort, "");
+		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on the default chain or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
 			const at = event.currentTarget;
 			const choices = await this.actions.choices();
-			const current = { group: summary.group || "", model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", roleEffort: model.roleEffort };
+			if (choices) this.choices = choices;
+			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "" };
 			if (choices) showModelPicker(at, choices, current, (change) => this.actions.set(change), (value) => this.actions.set({ effort: value }));
 		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" }, effort), icon("chevron-down"));
 	}

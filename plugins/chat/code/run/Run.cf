@@ -7,6 +7,7 @@ include "aitools/Clipboard.ch"
 include "aitools/ModelTools.ch"
 include "chats/Mentions.ch"
 include "aitools/Agents.ch"
+include "chats/DefaultChain.ch"
 
 namespace Ai
 {
@@ -119,7 +120,8 @@ namespace Ai
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), WsId(m_Ws)).View(), problems);
 		for (const Core::String& problem : problems) m_Context->Log(problem.View());
-		Core::String groups = m_Context->Setting(Core::StringView("ai.groups"), WsId(m_Ws));
+		// The default chain behind the chat's own model (DefaultChain.ch): model groups are gone.
+		Core::String groups = DefaultGroupsJson(m_Context, WsId(m_Ws));
 		m_Candidates = TurnCandidates(models, groups.View(), m_Turn->m_Group.View(), m_Chat->m_Agent.View(), Core::StringView(ChatModeName(m_Turn->m_Mode)), m_Chat->m_PinnedModel.View(), m_Role);
 		if (m_Chat->RunsAlone()) m_Role.m_Effort = Core::String();
 		m_Rules = ReadPermissionRules(m_Context->Setting(Core::StringView("ai.permissions"), WsId(m_Ws)).View());

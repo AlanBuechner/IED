@@ -3,8 +3,7 @@
 // sub-agent's chat under its parent in the Chats list; a task's time.
 
 import { test, assertEqual } from "./harness.js";
-import { choiceLabel, choicesFrom, familyOf, groupTurn, modelFamilies, roleOfMode } from "/plugins/ied.chat/ui/modelpicker.js";
-import { withAgent, withAgentRenamed, withoutAgent } from "/plugins/ied.chat/ui/groupsettings.js";
+import { choiceLabel, choicesFrom, defaultNow, familyOf, modelFamilies } from "/plugins/ied.chat/ui/modelpicker.js";
 import { keptBySection, nestAgents, rootsOf } from "/plugins/ied.chat/ui/chatsview.js";
 import { taskTime } from "/plugins/ied.chat/ui/sidepanel.js";
 
@@ -17,55 +16,25 @@ test("model menu: models by family, Claude's under one heading", () => {
 	assertEqual(modelFamilies(models).map((f) => [f.name, f.models.map((m) => m.name)]), [["Claude", ["claude-opus", "claude-haiku"]], ["spark", ["qwen", "coder"]], ["Other", ["odd"]]]);
 });
 
-test("model menu: the label says what the chat runs on", () => {
-	assertEqual(choiceLabel({ group: "", pinnedModel: "qwen" }, "team"), "qwen", "a model of its own");
-	assertEqual(choiceLabel({ group: "team", pinnedModel: "" }, "team"), "team", "a group");
-	assertEqual(choiceLabel({ group: "", pinnedModel: "" }, "team"), "team (default)", "the default group");
-	assertEqual(choiceLabel({ group: "", pinnedModel: "" }, ""), "Default", "a draft before its group is known");
-	assertEqual(choiceLabel({ group: "team", pinnedModel: "qwen" }, "team"), "qwen in team", "the AI pinned a model over the group");
+test("model menu: the label says what the chat runs on, by the model's label", () => {
+	const choices = choicesFrom({ "ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1" }, "claude-fable-5-2": { provider: "claude-code", model: "claude-fable-5-2", label: "Fable 5.2" } } } });
+	assertEqual(choiceLabel({ pinnedModel: "claude-fable-5-2" }, choices), "Fable 5.2", "a model of its own, by its label");
+	assertEqual(choiceLabel({ pinnedModel: "qwen" }, choices), "qwen", "a profile without a label, by its name");
+	assertEqual(choiceLabel({ pinnedModel: "qwen" }, null), "qwen", "before the models are known");
+	assertEqual(choiceLabel({ pinnedModel: "" }, choices), "Default", "the default chain");
 });
 
-test("model menu: groups and models from the settings", () => {
-	const choices = choicesFrom({
-		"ai.groups": { value: { solo: { primary: { model: "qwen" } }, team: { description: "Opus leads", primary: { model: "claude-opus" }, agents: { coder: { model: "qwen" }, reviewer: { model: "claude-haiku" } } } } },
-		"ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1" }, "claude-opus": { provider: "claude-code" } } },
-		"ai.defaultGroup": { value: "team" },
-	});
-	assertEqual(choices.groups.map((g) => [g.name, g.isDefault, g.orchestrator, g.agents]), [["solo", false, "qwen", 0], ["team", true, "claude-opus", 2]]);
-	assertEqual(choices.models.map((m) => [m.name, m.claude]), [["qwen", false], ["claude-opus", true]]);
-	assertEqual(choicesFrom({ "ai.groups": { value: { a: {}, b: {} } }, "ai.defaultGroup": { value: "gone" } }).groups.map((g) => g.isDefault), [true, false], "the first group when the default names none");
-});
-
-test("model menu: what a group gives a turn of the chat's mode now - its chain's model and its role's effort", () => {
-	const choices = choicesFrom({
-		"ai.groups": { value: {
-			claude: { primary: { model: "claude-opus", effort: "high", pace: { max: 1 }, fallback: [{ model: "claude-sonnet", pace: { max: 1.25 } }, "qwen"] } },
-			split: { primary: { model: "gone", fallback: ["qwen"] }, planning: { model: "claude-opus", effort: "max" } },
-		} },
-		"ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1", effort: { low: {} } }, "claude-opus": { provider: "claude-code" }, "claude-sonnet": { provider: "claude-code" } } },
-	}, [{ group: "claude", role: "primary", now: "claude-sonnet", places: [] }, { group: "split", role: "planning", now: "claude-opus", places: [] }]);
-	const [claude, split] = choices.groups;
-	assertEqual(groupTurn(choices, claude, "agent"), { role: "primary", model: "claude-sonnet", effort: "high" }, "a role left off is primary; pacing's chain says the model now");
-	assertEqual(groupTurn(choices, split, "plan"), { role: "planning", model: "claude-opus", effort: "max" }, "Plan mode: planning");
-	assertEqual(groupTurn(choices, split, "ask"), { role: "primary", model: "qwen", effort: "" }, "a chain without Claude: its first model ai.models has");
-	assertEqual([roleOfMode("ask"), roleOfMode("plan"), roleOfMode("agent")], ["primary", "planning", "implementation"]);
-	assertEqual(choices.models.map((m) => [m.name, m.efforts.length]), [["qwen", 1], ["claude-opus", 5], ["claude-sonnet", 5]], "the efforts each model takes");
-});
-
-test("model groups: sub-agents added, changed, renamed and removed", () => {
-	let group = { primary: { model: "big" } };
-	group = withAgent(group, "coder", { model: "small", description: "Edits code", mode: undefined });
-	group = withAgent(group, "reviewer", { model: "big", mode: "ask", calls: ["coder"] });
-	assertEqual(group.agents, { coder: { model: "small", description: "Edits code" }, reviewer: { model: "big", mode: "ask", calls: ["coder"] } });
-	group = withAgent(group, "coder", { description: "" });
-	assertEqual(group.agents.coder, { model: "small" }, "an emptied field goes");
-	const renamed = withAgentRenamed(group, "coder", "writer");
-	assertEqual([Object.keys(renamed.agents), renamed.agents.reviewer.calls], [["writer", "reviewer"], ["writer"]], "in its place and in its callers");
-	assertEqual(withAgentRenamed(group, "coder", "reviewer"), group, "a taken name changes nothing");
-	const removed = withoutAgent(group, "coder");
-	assertEqual(removed.agents, { reviewer: { model: "big", mode: "ask" } }, "nobody calls it any more");
-	assertEqual("agents" in withoutAgent(removed, "reviewer"), false, "no agents left, no agents key");
-	assertEqual(group.primary, { model: "big" }, "the orchestrator is untouched");
+test("model menu: the models, the default chain and what a turn on it uses now", () => {
+	const values = {
+		"ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1", effort: { low: {} } }, "claude-opus": { provider: "claude-code", label: "Opus 5.5" }, "claude-opus-4-6": { provider: "claude-code", efforts: ["low", "medium", "high", "max"] } } },
+		"ai.defaultModel": { value: "" },
+	};
+	const choices = choicesFrom(values, [{ group: "default", role: "primary", now: "claude-sonnet", places: [] }]);
+	assertEqual(choices.models.map((m) => [m.name, m.label, m.claude, m.efforts]), [["qwen", "qwen", false, ["low"]], ["claude-opus", "Opus 5.5", true, ["low", "medium", "high", "xhigh", "max"]], ["claude-opus-4-6", "claude-opus-4-6", true, ["low", "medium", "high", "max"]]],
+		"labels, Claude's, and the efforts each takes (a Claude model's own list)");
+	assertEqual(defaultNow(choices), "claude-sonnet", "pacing says which model the default chain uses now");
+	assertEqual(defaultNow(choicesFrom(Object.assign({}, values, { "ai.defaultModel": { value: "qwen" } }), [])), "qwen", "else ai.defaultModel");
+	assertEqual(defaultNow(choicesFrom(values, [])), "qwen", "else the first model");
 });
 
 test("chats list: a sub-agent's chat under the chat that ran it", () => {

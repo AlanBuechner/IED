@@ -22,67 +22,51 @@ The AI is a first-class citizen of IED. This doc covers the AI runtime's cross-c
 
 **Dialects** normalize what local servers actually emit: reasoning fields (`reasoning_content`, `reasoning`, `thinking`, `<think>` tags), tool calls as text (Hermes, Qwen, Mistral, harmony, fenced JSON), parallel call deltas (merge by id then index), finish reasons. Details and the reasons they matter: `docs/12`.
 
-## Model groups and roles
+## Which model a turn uses (2026-11-11)
 
-A **model group** assigns, per **role**, a model + temperature + effort + fallback list:
+Model groups are gone (owner, 2026-11-11: "i dont realy use the model groups so we can get rid of that"). A chat runs on
+**a model of its own** - `chat.set {model}`, the Model menu, the AI's `chat_set_model` - or on **the default chain**:
+
+- **`ai.defaultModel`** (app, solution): the model a chat with none of its own runs on. Empty: Claude when it is set up -
+  Opus to 1.00x the plan's pace, stepping down to Sonnet (1.25x), Haiku (1.50x) and Fable (on its own weekly limit) while
+  the plan runs ahead of its pace, as the `claude` group the setup made did ("Pacing" below) - else the first model.
+- **`ai.claude.stepDown`** (app, default on): off, the Claude default is Opus alone, whatever the pace.
+- **`ai.fallbackModel`** (app, solution): what a turn goes on with when the chain's models cannot answer - Claude's own
+  refusal at the plan's limits, a server that is not there. Empty: behind a Claude chain, the first model that is not
+  Claude's (the owner's local model); `none`: nothing.
+
+A model of the chat's own is tried first, with the default chain behind it; it is never passed over for pace (a turn on it
+notes none of the chain's places). Ask, Plan and Agent all run on it - there are no roles any more. The Model menu
+(`modelpicker.js`) lists **Default**, with the model a turn on the chain uses now (the `aiusage` chain's `now`), then the
+models by family by their labels ("Opus 5.5"), and the effort slider. Built so the routing, the pace and the sub-agents run
+as they did: `DefaultChain.ch` writes the chain and `ai.agents` as the one group they read (`{"default": {"primary": <the
+chain>, "agents": <ai.agents>}}`); a turn's and a snapshot's `group` is always `default`, and `chat.set {group}` is ignored.
+
+Old settings: `ai.groups` and `ai.defaultGroup` are kept in the schema, hidden (`"x-ied-hidden": true`, which the settings
+window leaves out), so a settings file that names them still reads. Once, the master's Claude refresh moves a group's
+sub-agents into `ai.agents`, a default group that was not `claude` gives its primary model to `ai.defaultModel`, and both
+are emptied (`ClaudeAccount::MigrateGroups`). The Model Groups settings page is gone.
+
+**Effort** is how much a reasoning model thinks before it answers: `low`, `medium`, `high`, `xhigh` or `max` (Claude's five), or unset for what its server does by default. A turn's effort is its chat's, when the chat picked one (the Model menu's effort slider, `chat.set`), else what the model does by default (with groups gone there is no group's effort). The slider offers the levels the model takes: a profile's `efforts` (a Claude model's own list, from the CLI - Opus 4.6 has no `xhigh`), else those its `effort` mapping names, else all five. A model profile says what each effort adds to the chat completion request in its `effort` (`{"low": {<fields>}, "medium": {...}, ..., "max": {...}}`, the fields written into the request; a level it leaves out adds nothing, so `{}` never sends one). Without one, a llama.cpp server is sent `chat_template_kwargs: {"reasoning_effort": <effort>}`, which its chat template reads, and any other server OpenAI's top-level `reasoning_effort`: llama.cpp (b10222) ignores the top-level field, and a template that does not read the variable ignores it too. A template that reads only `enable_thinking` (Qwen3's) takes `"effort": {"low": {"chat_template_kwargs": {"enable_thinking": false}}}`. Qwen3.8's template reads both: unset is its `xhigh`, which `high` also means, and an effort it does not know fails the request (400), so a level its server does not take is mapped to one it does (`"max": {"chat_template_kwargs": {"reasoning_effort": "xhigh"}}`). A turn records the effort it used. Measured with `tools/ai-evals` on Qwen3.8 27B at temperature 0: its default (xhigh) took 730 s for the eight questions, `medium` 494 s and `low` 458 s, every answer keeping its facts; medium thinks least per step and keeps reading by symbol, low takes fewer steps by reading whole files.
+
+## Sub-agents (2026-10-23; in `ai.agents` since 2026-11-11)
+
+Owner, 2026-10-23: "model groups are topologys of an orcistrator and sub agents that can call each other". With groups gone
+the sub-agents live in **`ai.agents`** (app), and any chat - the orchestrator - may run them:
 
 ```jsonc
-"ai.groups": {
-	"plan-claude/impl-local": {
-		"primary":        { "model": "qwen3.8-27b@spark", "temperature": 0.3, "effort": "medium", "fallback": ["qwen-coder-32b@desk"] },
-		"planning":       { "model": "claude-opus-5-5",   "temperature": 0.3, "effort": "high",   "fallback": ["qwen3.8-27b@spark"] },
-		"implementation": { "model": "qwen-coder-32b@desk","temperature": 0.0 },
-		"worker":         { "model": "qwen-coder-32b@desk","temperature": 0.0 },
-		"research":       { "model": "qwen3.8-27b@spark", "temperature": 0.2 },
-		"verifier":       { "model": "qwen3.8-27b@spark", "temperature": 0.0 },
-		"summarizer":     { "model": "qwen-small@desk",   "temperature": 0.1 },
-		"titler":         { "model": "qwen-small@desk",   "temperature": 0.2 },
-		"vision":         { "model": "qwen-vl@spark" },
-		"completion":     { "model": "qwen-coder-fim@desk" },
-		"inline":         { "model": "qwen-coder-32b@desk", "temperature": 0.1 }
-	}
+"ai.agents": {
+	"coder":    { "model": "qwen-coder@desk", "temperature": 0, "mode": "agent", "calls": ["reviewer"],
+	              "description": "Fast local implementer for well-specified edits in a few files" },
+	"reviewer": { "model": "claude-sonnet", "mode": "ask", "description": "Reviews a diff for bugs and missed cases" }
 }
 ```
 
-Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). A role a group leaves unset is **off** and uses the group's `primary` (a group without `primary` uses the first model in `ai.models`); a new group turns on `primary` alone, so the finer roles stay off until the owner gives one its own model. This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
+An agent is a model with its pace, temperature, effort and fallbacks, `description` (what the orchestrator is told it is
+for), `mode` (`agent` by default, `ask`, `plan`) and `calls`, the agents it may run itself (none by default; `["*"]` every
+one).
 
-A role's **chain** is its model, then its fallbacks in order. A fallback is a model's name, or `{"model": <name>, "pace": {...}}`
-for a Claude model that is used only while the plan's usage is on pace (see Pacing under Claude); the role's own model takes a
-`pace` beside it the same way.
-
-**Which role a turn uses** (owner, 2026-10-22: "have the local ai be the primary then have opus as the planning always then have
-fallback for the implementation so it would use haiku then fall back to local"): the chat's mode picks it - Ask uses `primary`,
-Plan uses `planning`, Agent uses `implementation` - and a role the group leaves off is `primary`. So one chat plans on one chain
-and implements on another as it switches modes, and a group without `planning` and `implementation` behaves as one model did
-before. The other roles (worker, research, summarizer, titler, ...) wait for the features that use them.
-
-**Effort** is how much a reasoning model thinks before it answers: `low`, `medium`, `high`, `xhigh` or `max` (Claude's five), or unset for what its server does by default. A turn's effort is its chat's, when the chat picked one (the Model menu's effort slider, `chat.set`), else its role's (`ai.groups`) - for a chat on a group; a chat on a single model has no group's effort (owner, 2026-10-26: "the groupd default only applys to groups not single models"): its own pick, else what the model does by default. A model profile says what each effort adds to the chat completion request in its `effort` (`{"low": {<fields>}, "medium": {...}, ..., "max": {...}}`, the fields written into the request; a level it leaves out adds nothing, so `{}` never sends one). Without one, a llama.cpp server is sent `chat_template_kwargs: {"reasoning_effort": <effort>}`, which its chat template reads, and any other server OpenAI's top-level `reasoning_effort`: llama.cpp (b10222) ignores the top-level field, and a template that does not read the variable ignores it too. A template that reads only `enable_thinking` (Qwen3's) takes `"effort": {"low": {"chat_template_kwargs": {"enable_thinking": false}}}`. Qwen3.8's template reads both: unset is its `xhigh`, which `high` also means, and an effort it does not know fails the request (400), so a level its server does not take is mapped to one it does (`"max": {"chat_template_kwargs": {"reasoning_effort": "xhigh"}}`). A turn records the effort it used. Measured with `tools/ai-evals` on Qwen3.8 27B at temperature 0: its default (xhigh) took 730 s for the eight questions, `medium` 494 s and `low` 458 s, every answer keeping its facts; medium thinks least per step and keeps reading by symbol, low takes fewer steps by reading whole files.
-
-## A group is a topology: an orchestrator and its sub-agents (2026-10-23)
-
-Owner, 2026-10-23: "model groups are topologys of an orcistrator and sub agents that can call each other. there is no need for a group and model selection they both become one. we should also have the tools and info for the AI to make sure that the sub agents are usfaul and not just makeing things more complex", and "in the chat we should be able to select from eather a grop or an ai directly ... in the menu we should have groups on the left and individual ai's on the right".
-
-**The shape.** A group's `primary` chain is its orchestrator - the chat's own model - with `planning` and `implementation` for Plan and Agent mode as above; `agents` are its sub-agents:
-
-```jsonc
-"ai.groups": {
-	"claude leads, local hands": {
-		"description": "Opus orchestrates; a local coder edits, Sonnet reviews",
-		"primary": { "model": "claude-opus", "fallback": ["qwen3.8-27b@lan"] },
-		"agents": {
-			"coder":    { "model": "qwen-coder@desk", "temperature": 0, "mode": "agent", "calls": ["reviewer"],
-			              "description": "Fast local implementer for well-specified edits in a few files" },
-			"reviewer": { "model": "claude-sonnet", "mode": "ask", "description": "Reviews a diff for bugs and missed cases" }
-		}
-	}
-}
-```
-
-An agent is a role (model, pace, temperature, effort, fallbacks) with `description` (what the orchestrator is told it is for), `mode` (`agent` by default, `ask`, `plan`) and `calls`, the agents it may run itself (none by default; `["*"]` every one). The orchestrator may run every agent of its group. The finer roles of the first design (worker, research, verifier, summarizer, titler, vision, completion, inline) are no longer offered: a group that names them keeps them, unused.
-
-**One choice per chat.** A chat runs on a group or on a single model: `chat.set {group}` clears the chat's model and `{model}` its group (`docs/10`). A single model runs alone, with no sub-agents; when it fails, the default group's chain is tried behind it, as a pinned model's was. The composer's one Model menu shows the groups on the left - each with the model a turn of the chat's mode uses now (its chain as fallbacks and pace have it: the `aiusage` chains' `now`, a chain without Claude its first model in `ai.models`; for the chat's own group the model its snapshot names), the role's default effort and its number of agents, the default marked - and the models on the right, by family: Claude's under one heading, each other server's under its host, a family folded unless it holds the chat's choice; a phone shows the two lists one above the other, as a bottom sheet. Under both is the chat's **effort slider** (owner, 2026-10-26: "move the effort from the dropdown and put it into the model selection with a slider at the bottom"): on a group its first stop is the group's default (the role's `effort`, named; none, the model's own), on a single model the model's own default - a single model has no group default -, then the levels the model a turn uses takes (a profile with an `effort` mapping the levels it names, any other all five; a pick that model does not take stays, marked so). A stop's label is a button too (a tap on a phone); the keys move the slider; the menu stays open while the effort changes and closes when a group or a model is picked. The Model button names the choice and its effort (`High (group)`, `Max`, `Default`); there is no Effort dropdown beside it.
-
-**Running a sub-agent.** `agent_run {agent, task, chat?}` starts the agent as a chat of its own - `agent` its name, `parent` the chat that ran it - in the same group, on the agent's chain, in the agent's mode, with its parent's permission; `chat` sends the task to a sub-agent chat that ran before, which keeps what it learned. It is a background task of its parent ("Background tasks" below): the parent goes on, and hears the agent's answer when the agent's turn ends (or waits for it with `background_wait`). A sub-agent runs the agents its `calls` names; chats in a row stop at 3 hops as before, and a chat runs at most 4 agents at once. The Chats list shows a sub-agent's chat under its parent.
+**Running a sub-agent.** `agent_run {agent, task, chat?}` starts the agent as a chat of its own - `agent` its name, `parent` the chat that ran it - on the agent's chain, in the agent's mode, with its parent's permission; `chat` sends the task to a sub-agent chat that ran before, which keeps what it learned. It is a background task of its parent ("Background tasks" below): the parent goes on, and hears the agent's answer when the agent's turn ends (or waits for it with `background_wait`). A sub-agent runs the agents its `calls` names; chats in a row stop at 3 hops as before, and a chat runs at most 4 agents at once. The Chats list shows a sub-agent's chat under its parent.
 
 **What keeps them useful.**
 
@@ -122,7 +106,7 @@ Flags and event shapes must be re-verified against the installed CLI version whe
 `{provider: "claude-code", model: "opus" | "sonnet" | "haiku" | "fable" | a full id, contextWindow?}`. It has no endpoint and
 its privacy is always `cloud`. Effort goes to the CLI as `--effort`, each of the five as it is; a chat that picks another one
 restarts its session with it (`--resume` keeps the conversation). Which Claude model a turn uses, and when it steps down to a
-cheaper one or a local model, is the group's chain (Pacing, below).
+cheaper one or a local model, is the default chain's (Pacing, below).
 
 **The CLI.** `ai.claude.command` (app tier) is the program and its leading arguments; empty, IED looks for `claude` on PATH, then
 `%USERPROFILE%\.local\bin\claude.exe` (the native installer), then the newest copy the Claude desktop app keeps
@@ -166,13 +150,23 @@ with the CLI's own windows - IED never sees what is typed into them:
   the CLI needs its own, and this is it (one click, and an Authorize in the browser where claude.ai is usually signed in).
 - **Set up by itself.** The first time the server finds the CLI signed in to a subscription - after Sign in, or a login made
   anywhere else (the keeper asks every 5 minutes while no Claude model is set up) - it adds the Claude profiles
-  (`claude-opus`, `claude-sonnet`, `claude-haiku`, `claude-fable`) and a `claude` group whose primary chain steps down as the
-  plan runs ahead of pace - `claude-opus` (pace 1.0), `claude-sonnet` (1.25), `claude-haiku` (1.5), `claude-fable` (1.0,
-  against the worse of the session, the shared week and its own week - owner, 2026-10-23: "add claude-fable to my claude
-  group's chain ahead of qwen, and make the automatic Claude setup put it there too"), then the default group's primary
-  when that is not Claude - to the app settings, through the plugin API's `PluginContext::SetSetting` (`docs/26`).
-  With no other model, `claude` is the only group, so chats use it at once. It does so once (a mark in the plugin's state
+  (`claude-opus`, `claude-sonnet`, `claude-haiku`, `claude-fable`) to the app settings, through the plugin API's
+  `PluginContext::SetSetting` (`docs/26`); the default chain is made of them ("Which model a turn uses"): Opus stepping down
+  to Sonnet, Haiku and Fable (owner, 2026-10-23: "add claude-fable to my claude group's chain ahead of qwen") as the plan
+  runs ahead of pace, then the local model. It does so once (a mark in the plugin's state
   folder): Claude models the owner removes stay removed; Add Claude models adds them again.
+
+**The Claude models** (owner, 2026-11-11: "thre were also some updates to claude that we should update for as well as make
+sure we properly support future models automaticly"). The CLI's `initialize` answer lists the models it offers - each an
+alias (`opus`, `sonnet`, `haiku`, `fable`) or a full id, with the model it resolves to, its name, what it is for and the
+efforts it takes (CLI 2.1.317: Opus, Sonnet and Haiku 5.5, Fable 5.2 as `claude-fable-5-2` while the `fable` alias still
+meant 5.1, and the older versions). Each refresh of the master's account reads it (`AskUsage`) and adds to `ai.models` each
+*current* model it has not seen before: an alias (profile `claude-<alias>`), a full id newer than every other model of its
+family the CLI lists (`claude-fable-5-2`), or the newest of a family with no alias - never `default` or the older versions.
+An added profile has the CLI's name as its `label` and the efforts it takes when not every one (`efforts`); IED's own
+`claude-<alias>` profiles without a label get the CLI's name. The values seen are kept in the plugin's state
+(`claude-models.json`), so a model the owner takes out of `ai.models` stays out. A model released after this build of IED
+appears as soon as the CLI offers it (`plugins/chat/code/claude/ClaudeModels.cf`; unit `server.ai.claude.models`).
 
 **Distributed builds.** Anthropic's terms (the Agent SDK overview, checked 2026-10-22): "Unless previously approved, Anthropic
 does not allow third party developers to offer claude.ai login or rate limits for their products." The owner's own builds
@@ -260,23 +254,11 @@ be "left out", is now asked.
 `p = u / (100 e)`: 1.0 is the even line that runs out exactly at the reset, 2.0 is spending twice as fast. Early in a window
 (under 5% through and under 5% used) its pace counts as 0.
 
-Pacing is part of a group's chains (owner, 2026-10-22: "the stretch it over the week should use the fallback models in the
-group ... there are lots of other ways to build out the topology that we should give the user control over"). Any Claude model
-in a role's chain - its model or a fallback - may have a pace:
-
-    "ai.groups": {
-      "local, claude plans": {
-        "primary":        { "model": "qwen3.8-27b@lan" },
-        "planning":       { "model": "claude-opus" },
-        "implementation": { "model": "claude-haiku", "pace": { "max": 1.0, "target": "week" },
-                            "fallback": ["qwen3.8-27b@lan"] }
-      },
-      "claude": {
-        "primary": { "model": "claude-opus", "pace": { "max": 1.0 },
-                     "fallback": [{ "model": "claude-sonnet", "pace": { "max": 1.25 } },
-                                  { "model": "claude-haiku", "pace": { "max": 1.5 } }, "qwen3.8-27b@lan"] }
-      }
-    }
+Pacing works on the default chain (owner, 2026-10-22: "the stretch it over the week should use the fallback models"): a
+Claude model of the chain may have a pace - `{"max": 1.25, "target": "both"}` - and is used while the plan's pace against
+`target` (session, week, both) is at most `max`; over it, a turn goes on down the chain. The chain Claude's default makes is
+Opus to 1.00x, Sonnet to 1.25x, Haiku to 1.50x, then Fable against the worse of the session, the shared week and its own
+week, then the fallback model; `ai.claude.stepDown` off leaves Opus alone, without a pace. A model a chat chose keeps no pace.
 
 A turn skips a paced Claude model while its pace against `target` is over `max`, and goes on down the chain - to a cheaper
 Claude model or a local one - with a routing note ("claude-opus skipped for pace: the week is at 1.85x pace, over its 1.00x").
@@ -308,9 +290,9 @@ is the `claude` chain above now, and the owner edits it like any other. An `auto
 the profile goes, each role that named it gets its ladder as paced places (1.0, 1.25, 1.5 down the ladder, against its target),
 and a `claude-<model>` profile is added for a rung that had none.
 
-**Switching models.** A chat may pin a model of `ai.models` over its group's primary (`chat.set {model}`, the composer's Model
-menu, `""` back to the group's): the group's fallbacks stay behind it, so a turn on the pin notes none of them, and one tries
-them only when the pin fails. The Model button names the pin or the group and the effort, and the model chip under the composer
+**Switching models.** A chat may pin a model of `ai.models` over the default chain (`chat.set {model}`, the composer's Model
+menu, `""` back to Default): the chain stays behind it, so a turn on the pin notes none of its places, and one tries them
+only when the pin fails. The Model button names the pin (by its label) or Default and the effort, and the model chip under the composer
 the model the next turn starts on: both follow `chat.changed`, which carries that model on the chat's topic (`docs/10`
 "Chats"), whoever pinned it - the owner here or on another device, or the AI's `chat_set_model`. The AI has two tools (group `models`, `docs/13`):
 `ai_usage` (the plan's windows with their pace and resets, and for each paced chain which model a turn uses now and why) and
@@ -328,8 +310,8 @@ into it, Escape, a click outside it or the item again closes it, and it follows 
 clicks to its view's `click()`, `docs/02`). Settings > AI > Claude (the command Chat: Claude Usage, the card's button) shows the CLI (where it is, its
 version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, each paced chain with
 every place's state (used now, over its pace) and the model a turn uses now, the **Weekly pace** (Every day or Work days
-only, and the work days), Refresh, Add Claude models (the automatic setup's profiles and `claude` group), and the rows of
-`ai.claude.command` and `ai.claude.usageRefreshMinutes`. Settings > AI > Model Groups edits the chains: a role's model and its pace, the
+only, and the work days), Refresh, Add Claude models (the automatic setup's profiles), and the rows of
+`ai.claude.command` and `ai.claude.usageRefreshMinutes`. The default chain is made by `ai.defaultModel`, `ai.claude.stepDown` and `ai.fallbackModel` on the AI page (Model Groups, which edited chains, is gone).
 fallbacks in order (moved up, removed) each with its own pace - always, or at most 0.75x to 2x against the session, the week or
 both - and says which mode uses each role. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
 bar, from the command palette).
@@ -345,7 +327,7 @@ sessions by chat, the keeper thread: the periodic usage ask, idle sessions stopp
 the turn's end, Claude's refusals routed down the chain, the chain ordered by pace), `modeltools` (`ai_usage`, `chat_set_model`);
 `models` reads `provider`, a role's chain with its paces and the role a mode uses, a chat's `pinnedModel` and its session
 (`claude: {session, turns}`) are kept in `chat.json`. Client (`plugins/chat/ui/`): `claudeusage.js` (the status item, Settings >
-AI > Claude with its Pacing card, Add Claude models), `groupsettings.js` and `pacing.js` (Model Groups: each role's mode, a
+AI > Claude with its Pacing card, Add Claude models), `pacing.js` (a pace's words), `modelpicker.js` (the Model menu: Default and the models by label).
 Claude model's pace, fallbacks moved earlier), the composer's Model menu. Tests: unit `server.ai.claude`
 (`ClaudeWireTests.cf`, 17), `server.ai.workweek` (`WorkWeekTests.cf`: a mid-week reset, one on a weekend, a zone ahead of
 UTC, a daylight saving change) and `server.ai.models` (`AiTests.cf`), server checks `test_claude.py` (29, against
@@ -737,7 +719,7 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 | Wire | `wire/sse`, `wire/request`, `wire/completion`, `wire/dialect` | SSE events and comments; streaming requests (a POST, or a GET) over Bedrock `Net::`/`Http::`; a completion put together from chunks (reasoning fields, calls merged by id then index, usage and llama.cpp timings, errors in the stream, malformed chunks counted and skipped); `<think>` blocks split from content across chunks and calls written as text in six dialects |
 | Step | `step` | one request under the watchdogs, text released with a held tail so a call's markup never shows as prose |
 | Classification | `classify` | the stop taxonomy of `docs/12`, `announced_no_action` from the reply's last sentence |
-| Models | `models`, `probe` | profiles (`ai.models`) and a group's role candidates (`ai.groups`): the role's model, then its fallbacks, an off role the primary; what a model's server says of itself |
+| Models | `models`, `probe` | profiles (`ai.models`) and the default chain's candidates (`DefaultChain.ch`): a chat's model, then the chain; what a model's server says of itself |
 | Permissions | `permissions` | `ai.permissions` rules and the chat's mode (`docs/11`) |
 | Tools | `tools/` | the core toolset (`docs/13` "As built") |
 | Prompts | `prompts` | the system message from `plugins/chat/prompts/` (base, style, mode, the workspace's `AGENTS.md`, a workspace summary) and the harness notes by name |
@@ -753,8 +735,11 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 | `ai.claude.usageRefreshMinutes` | app | how often the plan's usage is asked while a `claude-code` profile is set up (10; 0: only when asked and after Claude turns) |
 | `ai.claude.paceDays` | app | what a weekly window's pace counts: `week` (every day, the default) or `workweek` (the work days, in the server's local time zone; "The work week" under Pacing) |
 | `ai.claude.workDays` | app | the work days `workweek` counts: `["mon", "tue", "wed", "thu", "fri"]` by default; none named, every day |
-| `ai.groups` | app | `{<group>: {description?, <role>: {model, temperature?, effort?, fallback?: [names]}, agents?: {<name>: {model, description?, mode?, calls?, temperature?, effort?, fallback?}}}}`; a turn uses its mode's role, with the chat's effort when it picked one (a chat on a single model takes no role's effort); `agents` are the orchestrator's sub-agents ("A group is a topology") |
-| `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
+| `ai.defaultModel` | app, solution | the model a chat with none of its own runs on; empty: Claude's chain when Claude is set up (Opus stepping down while the plan runs ahead of pace, `ai.claude.stepDown`), else the first model |
+| `ai.fallbackModel` | app, solution | behind the chain: empty, the first model that is not Claude's (behind a Claude chain); `none`; or a model |
+| `ai.agents` | app | sub-agents: `{<name>: {model, description?, mode?, calls?, temperature?, effort?, fallback?}}` |
+| `ai.claude.stepDown` | app | the Claude default steps down to lighter models as the plan runs ahead of pace (default on) |
+| `ai.groups`, `ai.defaultGroup` | app | hidden, no longer used: kept so old settings files read; moved once into `ai.agents` and `ai.defaultModel` |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
 | `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |
 | `ai.tools.loadAll` | app, solution | send every tool's definition with every request; off, the default, plugin tools and tool groups are listed by name and loaded on demand (`tool_search`, `docs/13`) |

@@ -50,8 +50,8 @@ test("claude: the status bar says the session and the week", () => {
 		{ model: "claude-sonnet", claude: true, pace: { max: 1.25, target: "both" }, state: "use" },
 		{ model: "qwen", claude: false, state: "use" }] };
 	const paced = usageStatus(claude([window("seven_day", "Week", 60, 1.2)], { chains: [chain] }));
-	assertEqual(paced.tooltip.includes("claude / primary: claude-sonnet now (claude-opus over its pace)"), true);
-	assertEqual(chainLine(Object.assign({}, chain, { now: "claude-opus", places: [{ model: "claude-opus", state: "use" }, { model: "qwen", state: "use" }] })), "claude / primary: claude-opus now", "a place is in use or over its pace, never left out");
+	assertEqual(paced.tooltip.includes("Default: claude-sonnet now (claude-opus over its pace)"), true);
+	assertEqual(chainLine(Object.assign({}, chain, { now: "claude-opus", places: [{ model: "claude-opus", state: "use" }, { model: "qwen", state: "use" }] })), "Default: claude-opus now", "a place is in use or over its pace, never left out");
 });
 
 test("claude: the status item's click card draws each window's bar, its pace and the chains, and opens the settings", () => {

@@ -22,7 +22,7 @@ FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 MAIN = "int main(void)\n{\n\treturn 0;\n}\n"
 TURN_SECONDS = 60
 # A Claude CLI that is never signed in: a check's server never finds the owner's own and sets Claude up behind it
-# (docs/04 "Setting it up"), which would send a chat of the group it adds to their subscription.
+# (docs/04 "Setting it up"), which would send a chat on the default chain - Claude, once it is set up - to their subscription.
 SIGNED_OUT_CLAUDE = [sys.executable, "-I", "-c", "raise SystemExit(1)"]
 DAY_MS = 24 * 60 * 60 * 1000
 
@@ -410,12 +410,11 @@ class ChatTests(ChatCase):
 		self.assertFalse(any("reasoning_content" in m for m in self.model.requests()[-1]["body"]["messages"]), "the profile turns it off")
 
 	async def test_a_turn_sends_its_effort_as_a_llamacpp_template_reads_it(self):
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "fake", "effort": "medium"}}}})
-		chat_id, topic = await self.chat(group="g")
+		chat_id, topic = await self.chat(effort="medium")
 		self.model.queue(text_step("Thought some."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		body = self.model.requests()[-1]["body"]
-		self.assertEqual({"reasoning_effort": "medium"}, body.get("chat_template_kwargs"), "the role's effort, as the chat template reads it")
+		self.assertEqual({"reasoning_effort": "medium"}, body.get("chat_template_kwargs"), "the chat's effort, as the chat template reads it")
 		self.assertNotIn("reasoning_effort", body, "llama.cpp ignores OpenAI's field")
 		self.assertEqual("medium", (await self.last_turn(chat_id)).get("effort"), "the turn says what it used")
 		with self.assertRaises(RpcFailure) as refused:
@@ -429,7 +428,7 @@ class ChatTests(ChatCase):
 		self.assertEqual("low", (await self.summary(chat_id))["effort"])
 		self.model.queue(text_step("Thought less."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
-		self.assertEqual({"reasoning_effort": "low"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "the chat's pick over its role's")
+		self.assertEqual({"reasoning_effort": "low"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "the chat's new pick")
 		self.client.abort()
 		self.server.stop(remove_data=False)
 		self.server = self.start_server()
@@ -438,17 +437,18 @@ class ChatTests(ChatCase):
 		self.assertEqual("low", (await self.summary(chat_id))["effort"], "kept across a restart")
 		await self.client.sub([topic])
 		snapshot = (await self.client.next_frame(topic))["data"]
-		self.assertEqual(("low", "medium"), (snapshot["effort"], snapshot["roleEffort"]), "the snapshot has both, for the composer")
+		self.assertEqual(("low", ""), (snapshot["effort"], snapshot["roleEffort"]), "the chat's own, and none from the default chain (it has no roles)")
 		await self.client.request("chat.set", {"chatId": chat_id, "effort": ""})
-		self.model.queue(text_step("As the role says."))
+		self.model.queue(text_step("As the model likes."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
-		self.assertEqual({"reasoning_effort": "medium"}, self.model.requests()[-1]["body"].get("chat_template_kwargs"), "empty is the role's again")
+		body = self.model.requests()[-1]["body"]
+		self.assertFalse("chat_template_kwargs" in body or "reasoning_effort" in body, "no effort: none is sent: %s" % sorted(body))
+		self.assertEqual(None, (await self.last_turn(chat_id)).get("effort"))
 
 	async def test_a_profile_maps_effort_and_other_servers_get_openais_field(self):
 		self.model.post("/_fake/config", {"props": False})
 		await self.use_model({"effort": {"low": {"chat_template_kwargs": {"enable_thinking": False}}}})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "fake", "effort": "low"}}}})
-		chat_id, _ = await self.chat(group="g")
+		chat_id, _ = await self.chat(effort="low")
 		self.model.queue(text_step("No thinking."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		body = self.model.requests()[-1]["body"]
@@ -576,10 +576,9 @@ class ChatTests(ChatCase):
 	async def test_chats_talk_to_each_other(self):
 		model = {"endpoint": self.model.url + "/v1", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model, "fixed": dict(model, model="script:ok-text")}})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"lead": {"primary": {"model": "fake"}}, "helper": {"primary": {"model": "fixed"}}}})
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.permissions", "value": {"allow": ["chat.send(*)"]}})
-		helper = (await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "group": "helper", "title": "Helper"}))["chatId"]
-		chat_id, _ = await self.chat(mode="ask", group="lead")
+		helper = (await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "model": "fixed", "title": "Helper"}))["chatId"]
+		chat_id, _ = await self.chat(mode="ask")
 		self.model.queue(call_step("chat_send", {"chat": helper, "text": "ping"}, "s1"), call_step("chat_wait", {"chat": helper, "seconds": 30}, "w1"),
 			call_step("chat_list", {}, "l1"), text_step("Done."))
 		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
@@ -1019,7 +1018,8 @@ class ChatTests(ChatCase):
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {
 			"gone": {"endpoint": "http://127.0.0.1:9/v1", "watchdog": {"connectS": 1}},
 			"fake": {"endpoint": self.model.url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"g": {"primary": {"model": "gone", "fallback": ["fake"]}}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.defaultModel", "value": "gone"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.fallbackModel", "value": "fake"})
 		chat_id, _ = await self.chat()
 		self.model.queue("ok-text")
 		end = await self.turn(chat_id)

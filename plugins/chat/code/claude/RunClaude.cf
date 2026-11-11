@@ -319,6 +319,23 @@ namespace Ai
 			UiNote(Core::StringView("context_compressed"), Core::StringView("Claude Code compacted the conversation to fit its context."));
 			m_ClaudeCompacted = true;
 		}
+		else if (subtype == "model_fallback" || subtype == "model_refusal_fallback") {
+			// The CLI moved the request to another model itself (CLI 2.1.31x): its primary was not there, overloaded or
+			// refused - a safety classifier's refusal names its category (docs/04 "The Claude models").
+			Core::StringView why = subtype == "model_refusal_fallback" ? line->m_Root.Member("api_refusal_category").AsView() : line->m_Root.Member("trigger").AsView();
+			Core::StringBuilder note;
+			note.Append("Claude Code moved the request from ");
+			note.Append(line->m_Root.Member("original_model").AsView());
+			note.Append(" to ");
+			note.Append(line->m_Root.Member("fallback_model").AsView());
+			note.Append(subtype == "model_refusal_fallback" ? Core::StringView(" after a refusal") : Core::StringView(""));
+			if (!why.IsEmpty()) {
+				note.Append(" (");
+				note.Append(why);
+				note.Append(")");
+			}
+			UiNote(Core::StringView("routing"), note.View());
+		}
 	}
 
 	// Why a turn moves off a Claude model the CLI refused for its usage limit: what the CLI said, and when it frees as the

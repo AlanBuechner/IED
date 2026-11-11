@@ -63,7 +63,7 @@ export function usedUpLine(claude) {
 // A chain as the tooltip says it: "claude / primary: claude-sonnet now (claude-opus over its pace)".
 export function chainLine(chain) {
 	const why = (chain.places || []).filter((place) => place.state === "over").map((place) => place.model + " over its pace").join(", ");
-	return chain.group + " / " + chain.role + ": " + (chain.now || "nothing") + " now" + (why ? " (" + why + ")" : "");
+	return "Default: " + (chain.now || "nothing") + " now" + (why ? " (" + why + ")" : "");
 }
 
 // A day off's start or end as a bar's title says it: "Sat 00:00".
@@ -211,7 +211,7 @@ function usageNotes(claude, usage, now) {
 function hoverChain(chain) {
 	const passed = (chain.places || []).filter((place) => place.state === "over" && place.why);
 	return h("div.claude-hover-chain", { dataset: { group: chain.group, role: chain.role } },
-		h("div.claude-hover-line", null, h("span", null, h("b", null, chain.group), " / " + chain.role), h("span.muted", null, "now ", h("b", null, chain.now || "nothing"))),
+		h("div.claude-hover-line", null, h("span", null, h("b", null, "Default")), h("span.muted", null, "now ", h("b", null, chain.now || "nothing"))),
 		h("span.claude-places", null, ...(chain.places || []).map((place, i) => placeChip(place, i, chain.now, true))),
 		...passed.map((place) => h("div.claude-hover-why", null, place.model + ": " + place.why)));
 }
@@ -371,17 +371,17 @@ export class ClaudePage {
 			...notes);
 	}
 
-	// Each group role whose chain has a Claude model: its places in order - the one a turn uses now marked, those over their
-	// pace with why - and the way to Model Groups, where the chains are edited.
+	// The default chain when it has a Claude model: its places in order - the one a turn uses now marked, those over their
+	// pace with why - and the settings that make it.
 	pacingCard(claude) {
 		const chains = claude.chains || [];
 		if (!chains.length) return null;
 		return h("div.set-model.claude-pacing", null,
 			h("div.set-model-head", null, h("b", null, "Pacing"), h("span.grow"),
-				h("button.btn", { on: { click: () => this.ctx.ied.commands.run("shell.settings", { page: "custom:ied.chat.groups" }) } }, icon("edit"), "Edit in Model Groups")),
-			h("p.muted", null, "A turn tries its role's chain in order. A Claude model with a pace is passed over while your plan runs ahead of it, so the session or the week lasts; one without is used whatever the pace. A window used up keeps no model out: Claude itself refuses a request it has no room for, and the turn goes on down the chain. A chat's mode picks the role: Ask primary, Plan planning, Agent implementation."),
+				h("button.btn", { on: { click: () => this.ctx.ied.commands.run("shell.settings", { page: "page:AI" }) } }, icon("edit"), "Default model and fallback")),
+			h("p.muted", null, "A chat on Default tries the default chain in order. A Claude model with a pace is passed over while your plan runs ahead of it, so the session or the week lasts; one without is used whatever the pace. A window used up keeps no model out: Claude itself refuses a request it has no room for, and the turn goes on down the chain. A chat with a model of its own keeps it whatever the pace, with the chain behind it."),
 			...chains.map((chain) => h("div.claude-chain", { dataset: { group: chain.group, role: chain.role } },
-				h("span.claude-chain-name", null, h("b", null, chain.group), " / " + chain.role),
+				h("span.claude-chain-name", null, h("b", null, "Default")),
 				h("span.claude-places", null, ...(chain.places || []).map((place, i) => placeChip(place, i, chain.now))),
 				h("span.claude-chain-now", null, "now ", h("b", null, chain.now || "nothing")))));
 	}
@@ -392,7 +392,7 @@ export class ClaudePage {
 		const missing = CLAUDE_PROFILE_NAMES.filter((name) => !models[name]);
 		return h("div.set-bar", null,
 			missing.length ? h("button.btn" + (claude.configured ? "" : ".primary"), { on: { click: () => this.addModels() } }, icon("add"), claude.configured ? "Add the other Claude models" : "Add Claude models") : null,
-			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; their chains and paces in Model Groups." : "Adds claude-opus, claude-sonnet, claude-haiku and claude-fable to ai.models and a claude group whose chain steps down from Opus as your plan runs ahead of pace, then to Fable."));
+			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models, and the newest the CLI offers are added as they come. A chat on Default steps down from Opus as your plan runs ahead of pace (ai.claude.stepDown)." : "Adds Opus, Sonnet, Haiku and Fable to ai.models - and the newest models the CLI offers as they come. A chat on Default steps down from Opus as your plan runs ahead of pace, then to Fable."));
 	}
 
 	async refresh() {

@@ -9,6 +9,7 @@ include "api/Plugin.ch"
 include "ClaudeWire.ch"
 include "ClaudeCli.ch"
 include "chats/Models.ch"
+include "ClaudeModels.ch"
 
 namespace Ai
 {
@@ -35,6 +36,13 @@ namespace Ai
 		// The first pacing design's `model: "auto"` profiles in the app settings rewritten into ai.groups (WithoutAutoProfiles).
 		// Any thread, without the host lock.
 		public void MigrateAuto();
+		// Model groups are gone (owner, 2026-11-11): once, the app settings' ai.groups give their sub-agents to ai.agents and
+		// a default group that was not Claude's its primary model to ai.defaultModel, then are emptied with ai.defaultGroup.
+		// Any thread, without the host lock.
+		public void MigrateGroups();
+		// The models the CLI's initialize answer offers (`models`) that IED has not seen added to ai.models (WithCatalogModels),
+		// while Claude is set up. Any thread, without the host lock.
+		public void SyncCatalog(const Serialization::DomNode& models);
 		// Inside the host lock: a session's get_usage answer, a rate_limit_event's rate_limit_info.
 		public void TookUsage(const Serialization::DomNode& response);
 		public void TookRateLimit(const Serialization::DomNode& info);

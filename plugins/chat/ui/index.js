@@ -2,7 +2,7 @@
 // a draft) in the Chat activity's document well, the Chats tool window (every chat and its state, the deleted ones),
 // the status bar's "AI: 1 running, 1 needs you", the Chat activity's badge and the toasts of a turn that ended or waits
 // on the owner (from chats:<wsId>), Claude's plan usage
-// (from aiusage), Settings > AI > Models, Model Groups and Claude, and the commands that open the activity, start, stop,
+// (from aiusage), Settings > AI > Models and Claude, and the commands that open the activity, start, stop,
 // rename and delete chats and show Claude's usage.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
@@ -11,7 +11,6 @@ import { ChatsView } from "./chatsview.js";
 import { ChatList } from "./chatmodel.js";
 import { archiveChat, deleteChat, renameChat } from "./chatactions.js";
 import { ModelsPage } from "./modelsettings.js";
-import { ModelGroupsPage } from "./groupsettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 import { TurnNotices, notifySetting } from "./turnnotices.js";
 
@@ -146,16 +145,12 @@ export function ChatsList(ctx) {
 	return new ChatsView(ctx);
 }
 
-// Settings > AI > Models and Model Groups (the settingsPages of the manifest).
+// Settings > AI > Models (a settingsPage of the manifest).
 export function ModelsSettings(ctx) {
 	addStyles(ctx.ied);
 	return new ModelsPage(ctx);
 }
 
-export function ModelGroupsSettings(ctx) {
-	addStyles(ctx.ied);
-	return new ModelGroupsPage(ctx);
-}
 
 export function ClaudeSettings(ctx) {
 	addStyles(ctx.ied);

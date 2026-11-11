@@ -5,7 +5,6 @@ import { test, assertEqual, assertThrows } from "./harness.js";
 import { controlKind, findPage, groupOf, inputText, isModified, matches, pageGroups, pageOwning, parseInput, problemsFor, searchByPage, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
 import { refusal } from "../src/shell/settingsview.js";
 import { probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
-import { freshName, movedEarlier, roleDefault, withRole } from "/plugins/ied.chat/ui/groupsettings.js";
 import { fallbackPlaces, paceFromValue, paceLabel, paceValue, storedFallback } from "/plugins/ied.chat/ui/pacing.js";
 
 const SETTINGS = {
@@ -65,26 +64,18 @@ test("settings: a model profile from its form", () => {
 	assertEqual(probeLine({ ok: false, error: "connection refused", models: [] }), "Not reachable: connection refused");
 });
 
-test("settings: group roles", () => {
-	const group = { primary: { model: "a", temperature: 0.3 } };
-	assertEqual(withRole(group, "primary", { temperature: undefined }), { primary: { model: "a" } }, "an emptied field goes");
-	assertEqual(withRole(group, "primary", { model: "" }), {}, "a role without a model goes");
-	assertEqual(withRole(group, "worker", { model: "b", fallback: ["a"] }), { primary: { model: "a", temperature: 0.3 }, worker: { model: "b", fallback: ["a"] } });
-	assertEqual(withRole(group, "primary", { fallback: [] }), group, "an empty fallback list goes");
-	assertEqual([freshName({}, "group"), freshName({ group: {}, "group 2": {} }, "group")], ["group", "group 3"]);
-	assertEqual([roleDefault(group, ["b", "a"]), roleDefault({}, ["b", "a"]), roleDefault(group, ["b"]), roleDefault({}, [])], ["a", "b", "b", ""], "a role turned on gets the primary's model, else the first");
-});
-
-test("settings: a Claude model's pace in a chain", () => {
+test("settings: a Claude model's pace", () => {
 	assertEqual([paceLabel(undefined), paceLabel({ max: 1.25 }), paceLabel({ max: 1, target: "week" })], ["always", "up to 1.25x, session and week", "up to 1.00x, week"]);
 	assertEqual([paceValue(undefined), paceValue({ max: 1.25 }), paceValue({ max: 1.5, target: "session" })], ["", "1.25|both", "1.5|session"]);
 	assertEqual([paceFromValue(""), paceFromValue("1.25|both"), paceFromValue("2|week")], [undefined, { max: 1.25 }, { max: 2, target: "week" }], "both is left out");
 	const role = { model: "claude-opus", pace: { max: 1 }, fallback: [{ model: "claude-haiku", pace: { max: 1.5 } }, "qwen"] };
-	const places = fallbackPlaces(role);
-	assertEqual(places, [{ model: "claude-haiku", pace: { max: 1.5 } }, { model: "qwen", pace: undefined }]);
-	assertEqual(storedFallback(movedEarlier(places, 1)), ["qwen", { model: "claude-haiku", pace: { max: 1.5 } }], "moved earlier, a place without a pace kept as a name");
-	assertEqual(movedEarlier(places, 0), places, "the first stays");
-	assertEqual(withRole({ primary: role }, "primary", { pace: undefined }).primary, { model: "claude-opus", fallback: role.fallback }, "always: the pace goes");
+	assertEqual(fallbackPlaces(role), [{ model: "claude-haiku", pace: { max: 1.5 } }, { model: "qwen", pace: undefined }]);
+	assertEqual(storedFallback(fallbackPlaces(role)), [{ model: "claude-haiku", pace: { max: 1.5 } }, "qwen"], "a place without a pace kept as a name");
+});
+
+test("settings: a key kept only for old files is not shown", () => {
+	const pages = settingsPages({ "ai.groups": { page: "AI", schema: { type: "object", "x-ied-hidden": true } }, "ai.maxSteps": { page: "AI", schema: { type: "integer" } } }, []);
+	assertEqual(pages[0].keys, ["ai.maxSteps"]);
 });
 
 test("settings: a page's settings in groups that fold", () => {

@@ -1,7 +1,7 @@
-"""Background tasks and sub-agents (docs/04 "Background tasks", "A group is a topology"): a command started in the
-background answers at once and its chat is told when it ends - an idle chat by a turn of its own - background_wait and
-chat.stopTask, and a group's agent run with agent_run as a chat of its own whose answer comes back to the chat that ran
-it, with the system section and agent_list's record."""
+"""Background tasks and sub-agents (docs/04 "Background tasks", "Sub-agents"): a command started in the background answers
+at once and its chat is told when it ends - an idle chat by a turn of its own - background_wait and chat.stopTask, and an
+agent of ai.agents run with agent_run as a chat of its own whose answer comes back to the chat that ran it, with the
+system section and agent_list's record; a chat on a model of its own runs the agents too."""
 
 import asyncio
 import sys
@@ -83,9 +83,8 @@ class BackgroundTests(ChatCase):
 	async def test_an_agent_runs_as_a_chat_and_its_answer_comes_back(self):
 		model = {"endpoint": self.model.url + "/v1", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model, "fixed": dict(model, model="script:ok-text")}})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"team": {"primary": {"model": "fake"},
-			"agents": {"helper": {"model": "fixed", "mode": "ask", "description": "Answers small questions"}}}}})
-		chat_id, topic = await self.chat(permission="auto", group="team")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.agents", "value": {"helper": {"model": "fixed", "mode": "ask", "description": "Answers small questions"}}})
+		chat_id, topic = await self.chat(permission="auto")
 		self.model.queue(call_step("agent_list", {}, "a0"), call_step("agent_run", {"agent": "helper", "task": "Say hello"}, "a1"), text_step("Asked the helper."),
 			text_step("The helper said hello."))
 		self.assertEqual("finished", (await self.turn(chat_id, "Ask the helper"))["stop"])
@@ -104,23 +103,27 @@ class BackgroundTests(ChatCase):
 		chats = (await self.client.request("chat.list", {"wsId": "w1"}))["chats"]
 		agent = [c for c in chats if c.get("agent") == "helper"]
 		self.assertEqual(1, len(agent), chats)
-		self.assertEqual((chat_id, "ask", "auto", "team"), (agent[0]["parentChatId"], agent[0]["mode"], agent[0]["permission"], agent[0]["group"]))
+		self.assertEqual((chat_id, "ask", "auto"), (agent[0]["parentChatId"], agent[0]["mode"], agent[0]["permission"]))
 		helper_turn = (await self.client.request("chat.history", {"chatId": agent[0]["chatId"]}))["turns"][-1]
 		self.assertEqual(chat_id, helper_turn["user"]["from"]["chatId"])
+		self.assertEqual(("fixed", "default"), (helper_turn["model"], helper_turn["group"]), "the agent's model; the routing knows its chain as the default one")
+		helper_system = [r for r in self.model.requests() if r["body"].get("model") == "script:ok-text"][-1]["body"]["messages"][0]["content"]
+		self.assertNotIn("# Sub-agents", helper_system, "an agent runs only the agents its calls names: none here")
 		self.model.queue(call_step("agent_list", {}, "a2"), text_step("Listed."))
 		self.assertEqual("finished", (await self.turn(chat_id, "How did it do?"))["stop"])
 		self.assertIn("1 run - 1 finished, 0 failed, 0 stopped", (await self.results())["a2"])
 
-	async def test_a_chat_on_a_single_model_runs_no_agents(self):
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"team": {"primary": {"model": "fake"},
-			"agents": {"helper": {"model": "fake", "description": "Answers"}}}}})
-		chat_id, topic = await self.chat(permission="auto", group="team")
+	async def test_a_chat_on_a_model_of_its_own_runs_the_agents_too(self):
+		"""The agents of ai.agents are every chat's of the owner's: one pinned to a model has them as one on the default
+		chain does (model groups, which a pinned model left, are gone)."""
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.agents", "value": {"helper": {"model": "fake", "description": "Answers"}}})
+		chat_id, topic = await self.chat(permission="auto")
 		summary = await self.client.request("chat.set", {"chatId": chat_id, "model": "fake"})
-		self.assertEqual(("", "fake"), (summary["group"], summary["pinnedModel"]), "a model alone clears the group")
-		self.model.queue(text_step("Alone."))
+		self.assertEqual("fake", summary["pinnedModel"])
+		self.model.queue(text_step("With a helper."))
 		await self.turn(chat_id)
-		system = self.model.requests()[-1]["body"]["messages"][0]["content"]
-		self.assertNotIn("# Sub-agents", system)
-		self.assertNotIn("agent_run", [t["function"]["name"] for t in self.model.requests()[-1]["body"].get("tools", [])])
-		summary = await self.client.request("chat.set", {"chatId": chat_id, "group": "team"})
-		self.assertEqual(("team", ""), (summary["group"], summary["pinnedModel"]), "a group alone clears the model")
+		self.assertEqual("fake", (await self.last_turn(chat_id))["model"])
+		sent = self.model.requests()[-1]["body"]
+		self.assertIn("# Sub-agents", sent["messages"][0]["content"])
+		self.assertIn("- helper (fake", sent["messages"][0]["content"])
+		self.assertIn("agent_run", [t["function"]["name"] for t in sent.get("tools", [])])

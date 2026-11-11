@@ -1,0 +1,134 @@
+// The default chain: see DefaultChain.ch.
+
+include "DefaultChain.ch"
+
+namespace Ai
+{
+	// The ladder a chat on Claude steps down while the plan runs ahead of its pace, strongest first, each used to the pace
+	// beside it; Fable after it, on its own weekly limit.
+	const int64 c_LadderRungs = 3;
+	const char*[3] c_LadderAliases = { "opus", "sonnet", "haiku" };
+	const double[3] c_LadderPaces = { 1.0, 1.25, 1.5 };
+	const char* c_ApartAlias = "fable";
+	const double c_FablePace = 1.0;
+
+	static Serialization::DomNode Parsed(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	static bool IsClaudeProfile(const Serialization::DomNode& profile) { return profile.Member("provider").AsView() == "claude-code"; }
+
+	// The claude-code profile serving `alias`: the one named claude-<alias> when it is Claude's, else the first whose model
+	// is the alias; empty when there is none.
+	static Core::String ClaudeProfileFor(const Serialization::DomNode& models, Core::StringView shortName) {
+		Core::String named = Core::String("claude-") + shortName;
+		if (IsClaudeProfile(models.Member(named.CStr()))) return named;
+		for (int64 i = 0; models.Kind() == Serialization::DomKind::Object && i < models.Count(); ++i)
+			if (IsClaudeProfile(models.ValueAt(i)) && models.ValueAt(i).Member("model").AsView() == shortName) return Core::String(models.KeyAt(i));
+		return Core::String();
+	}
+
+	class ChainPlaceOut
+	{
+		public Core::String m_Model;
+		public double m_Pace;   // 0: always
+	}
+
+	static void Add(Core::Array<ChainPlaceOut*>& chain, Core::StringView model, double pace) {
+		if (model.IsEmpty()) return;
+		for (ChainPlaceOut* place : chain)
+			if (place->m_Model.View() == model) return;
+		ChainPlaceOut* place = new ChainPlaceOut();
+		place->m_Model = Core::String(model);
+		place->m_Pace = pace;
+		chain.Push(place);
+	}
+
+	static void WritePace(IED::JsonWriter& json, double pace) {
+		Core::StringBuilder out;
+		out.Append("{\"max\": ");
+		out.AppendDouble(pace, 2);
+		out.Append(", \"target\": \"both\"}");
+		json.Raw(out.View());
+	}
+
+	Core::String DefaultGroupsFrom(Core::StringView modelsJson, Core::StringView defaultModelJson, Core::StringView fallbackModelJson, Core::StringView stepDownJson, Core::StringView agentsJson) {
+		Serialization::DomNode models = Parsed(modelsJson);
+		Core::String chosen = Core::String(Parsed(defaultModelJson).AsView().Trimmed());
+		Core::String fallback = Core::String(Parsed(fallbackModelJson).AsView().Trimmed());
+		Serialization::DomNode stepDownNode = Parsed(stepDownJson);
+		const bool stepDown = stepDownNode.Kind() != Serialization::DomKind::Bool || stepDownNode.AsBool();
+		Core::Array<ChainPlaceOut*> chain;
+		bool claudeChain = false;
+		if (!chosen.IsEmpty() && models.Member(chosen.CStr()).IsValid()) {
+			Add(chain, chosen.View(), 0);
+			claudeChain = IsClaudeProfile(models.Member(chosen.CStr()));
+		}
+		else {
+			// Claude's ladder when Claude is set up: its first rung always, the others only to step down to.
+			for (int64 rung = 0; rung < c_LadderRungs; ++rung) {
+				Core::String profile = ClaudeProfileFor(models, Core::StringView(c_LadderAliases[rung]));
+				if (profile.IsEmpty() || (!stepDown && !chain.IsEmpty())) continue;
+				Add(chain, profile.View(), stepDown ? c_LadderPaces[rung] : 0);
+			}
+			if (stepDown && !chain.IsEmpty()) Add(chain, ClaudeProfileFor(models, Core::StringView(c_ApartAlias)).View(), c_FablePace);
+			claudeChain = !chain.IsEmpty();
+			if (chain.IsEmpty() && models.Kind() == Serialization::DomKind::Object && models.Count() > 0) Add(chain, models.KeyAt(0), 0);
+		}
+		if (fallback == "none") {
+			// no fallback
+		}
+		else if (!fallback.IsEmpty()) {
+			if (models.Member(fallback.CStr()).IsValid()) Add(chain, fallback.View(), 0);
+		}
+		else if (claudeChain) {
+			for (int64 i = 0; models.Kind() == Serialization::DomKind::Object && i < models.Count(); ++i)
+				if (!IsClaudeProfile(models.ValueAt(i))) {
+					Add(chain, models.KeyAt(i), 0);
+					break;
+				}
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView(c_DefaultChain));
+		json.BeginObject();
+		if (!chain.IsEmpty()) {
+			json.Key(Core::StringView("primary"));
+			json.BeginObject();
+			json.Field("model", chain[0]->m_Model.View());
+			if (chain[0]->m_Pace > 0) {
+				json.Key(Core::StringView("pace"));
+				WritePace(json, chain[0]->m_Pace);
+			}
+			if (chain.Count() > 1) {
+				json.Key(Core::StringView("fallback"));
+				json.BeginArray();
+				for (int64 i = 1; i < chain.Count(); ++i) {
+					if (chain[i]->m_Pace <= 0) {
+						json.String(chain[i]->m_Model.View());
+						continue;
+					}
+					json.BeginObject();
+					json.Field("model", chain[i]->m_Model.View());
+					json.Key(Core::StringView("pace"));
+					WritePace(json, chain[i]->m_Pace);
+					json.EndObject();
+				}
+				json.EndArray();
+			}
+			json.EndObject();
+		}
+		Serialization::DomNode agents = Parsed(agentsJson);
+		if (agents.Kind() == Serialization::DomKind::Object && agents.Count() > 0) json.RawField("agents", IED::NodeJson(agents).View());
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String DefaultGroupsJson(const IED::PluginContext* context, Core::StringView wsId) {
+		return DefaultGroupsFrom(context->Setting(Core::StringView("ai.models"), wsId).View(), context->Setting(Core::StringView("ai.defaultModel"), wsId).View(),
+			context->Setting(Core::StringView("ai.fallbackModel"), wsId).View(), context->Setting(Core::StringView("ai.claude.stepDown"), wsId).View(),
+			context->Setting(Core::StringView("ai.agents"), wsId).View());
+	}
+}

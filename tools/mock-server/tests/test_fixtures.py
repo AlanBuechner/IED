@@ -10,7 +10,7 @@ class ChatTests(MockCase):
 	async def test_default_script_streams_segments_tools_and_ends_finished(self):
 		client = await self.client()
 		snap = await self.subscribed(client, "chat:c1")
-		self.assertEqual((2, "mock-model@local", "mock-group"), (len(snap["turns"]), snap["model"], snap["groupInUse"]))
+		self.assertEqual((2, "mock-model@local", "default"), (len(snap["turns"]), snap["model"], snap["groupInUse"]))
 		result = await client.request("chat.send", {"chatId": "c1", "text": "how does the player move?"}, op_id="op-1")
 		frames = await client.wait_for("chat:c1", lambda f: f.get("kind") == "turn.end")
 		kinds = self.kinds(frames)

@@ -16,10 +16,16 @@ leading arguments the setting names come before IED's own.
 ## What it speaks
 
 - **Control requests from IED:** `initialize` (with `sdkMcpServers: ["ied"]` it connects to IED's in-process MCP server
-  first: `initialize`, `notifications/initialized`, `tools/list`), `get_usage` (answers `usage.json`), `get_context_usage` (answers `context.json`, else a 1,000,000 window with 41,234
+  first: `initialize`, `notifications/initialized`, `tools/list`; it answers the models it offers, below), `get_usage` (answers `usage.json`), `get_context_usage` (answers `context.json`, else a 1,000,000 window with 41,234
   tokens in three `used` rows and the `free` and `buffer` rows), `set_model`,
   `interrupt`, `mcp_message` (a `notifications/tools/list_changed` makes it list the tools again); anything else is an
   error answer, as the real CLI's.
+- **The models it offers** (`initialize`'s `models`, `MODELS` in `fake_claude.py`), as Claude Code 2.1.317 lists them:
+  each `{value, resolvedModel, displayName, supportedEffortLevels?}` - `default` (Opus 5.5) first, the aliases `opus`,
+  `sonnet`, `haiku` (5.5 each) and `fable` (Fable 5.1), `claude-fable-5-2` (newer than its alias's model) and the older
+  `claude-opus-4-6` (four effort levels). `models.json` replaces the list, so a check can offer a model released later.
+  The model a `--model` or `set_model` value resolves to (in `system/init`, `message_start` and the result's
+  `modelUsage`) is the list's `resolvedModel` for it; a value it does not list is taken as a full id.
 - **A user message** starts a query: `system/init` first (the session id, the tools as `mcp__ied__<name>`, `apiKeySource`),
   then the next scripted response as `stream_event`s (`message_start`, the content blocks, `message_delta` with the stop
   reason, `message_stop`). A response with tool calls asks IED for each with an `mcp_message` `tools/call` (its
@@ -39,10 +45,12 @@ leading arguments the setting names come before IED's own.
 | `usage.json` | the test | `get_usage`'s answer (default: not signed in to a plan) |
 | `context.json` | the test | `get_context_usage`'s answer (default: `CONTEXT_USAGE` in `fake_claude.py`) |
 | `auth.json` | the test | `auth status`'s answer (default: signed in with `claude.ai`), plus `apiKeySource` for `system/init` |
+| `models.json` | the test | the list `initialize` answers as `models` (default: `MODELS` in `fake_claude.py`) |
 | `log.jsonl` | the fake | each start (`argv`, `cwd`, the `CLAUDE_CODE_DISABLE_*` it got, `billed`: the names of billing variables it saw), every line it read (`in`), each tool list (`tools`), each query's content (`query`) and tool result (`toolResult`) |
 | `sessions/` | the fake | one file per session id it made, for `--resume` |
 
-A response is `{"blocks": [...], "stop"?, "delayMs"?, "rateLimit"?, "error"?, "text"?}`: blocks are `{"thinking": text}`,
+A response is `{"blocks": [...], "stop"?, "delayMs"?, "rateLimit"?, "system"?, "error"?, "text"?}`: blocks are `{"thinking": text}`,
 `{"text": text}` (streamed a word per delta, `delayMs` apart) or `{"tool": name, "input": {...}, "id"?}`; `stop` defaults to
 `tool_use` when there is a tool block, else `end_turn`; `rateLimit` is a `rate_limit_info` sent as a `rate_limit_event` first;
+`system` is a list of `system` messages sent next (`{"subtype": "model_fallback", "original_model": ..., ...}`);
 `error` (`rate_limit`, `authentication_failed`, ...) with `text` replaces the response with the CLI's error message.

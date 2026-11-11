@@ -13,7 +13,7 @@ SNAPSHOT_TURNS = 20
 DELTA_SECONDS = 0.03
 CHUNK = re.compile(r"\S*\s*")
 MODEL = "mock-model@local"
-GROUP = "mock-group"
+GROUP = "default"   # the default chain: model groups are gone (docs/04 "Which model a turn uses")
 MODES = ("ask", "plan", "agent")
 PERMISSIONS = ("plan", "ask", "acceptEdits", "auto")
 MENTION_KINDS = ("file", "folder", "symbol", "terminal", "output", "problems", "diff", "chat")
@@ -189,7 +189,7 @@ def claude_usage(now, pace_days="week"):
 		{"model": "claude-sonnet", "claude": True, "pace": {"max": 1.5, "target": "both"}, "state": "use", "why": ""},
 		{"model": "claude-haiku", "claude": True, "state": "use", "why": ""}]
 	return {"claude": {"offered": True, "configured": True, "cli": {"asked": True, "path": "C:/Users/me/.local/bin/claude.exe", "version": "2.1.304", "signIn": "signed_in", "authMethod": "claude.ai", "subscription": True, "signingIn": False, "installing": False},
-		"refreshing": False, "nowMs": now, "chains": [{"group": "claude", "role": "primary", "now": "claude-sonnet", "places": places}],
+		"refreshing": False, "nowMs": now, "chains": [{"group": "default", "role": "primary", "now": "claude-sonnet", "places": places}],
 		"usage": {"known": True, "available": True, "plan": "max", "status": "allowed", "limitedBy": "", "limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": now - 90000, "paceDays": pace_days, "windows": windows}}}
 
 
@@ -243,18 +243,13 @@ class Chats:
 		)
 
 	def in_use(self, chat):
-		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed - its model,
-		its group and that group's effort for its mode's role (none for a chat on a single model)."""
+		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed - its model
+		of its own, else the default chain's first (ai.defaultModel, else the mock's model). Model groups are gone: the
+		group is always the default chain and no role gives an effort."""
 		values = self.server.settings.values(None)
-		groups = values.get("ai.groups", {}).get("value") or {}
-		named = values.get("ai.defaultGroup", {}).get("value") or ""
-		group_in_use = chat.group or (named if named in groups else next(iter(groups), GROUP))
-		roles = groups.get(group_in_use) or {}
-		role = {"plan": "planning", "agent": "implementation"}.get(chat.mode, "primary")
-		entry = roles.get(role) if isinstance(roles.get(role), dict) else roles.get("primary") or {}
-		alone = bool(chat.pinned_model) and not chat.group
-		model = chat.pinned_model or (entry.get("model") if isinstance(entry, dict) and entry.get("model") else MODEL)
-		return {"model": model, "groupInUse": group_in_use, "roleEffort": "" if alone or not isinstance(entry, dict) else entry.get("effort", "")}
+		named = values.get("ai.defaultModel", {}).get("value") or ""
+		model = chat.pinned_model or named or MODEL
+		return {"model": model, "groupInUse": GROUP, "roleEffort": ""}
 
 	def get(self, chat_id):
 		chat = self.items.get(chat_id)
@@ -316,8 +311,7 @@ class Chats:
 			if p.str("permission") not in PERMISSIONS:
 				raise RpcError("bad_request", "permission must be plan, ask, acceptEdits or auto")
 			chat.permission = p.str("permission")
-		if "group" in p.raw:
-			chat.group = p.str("group")
+		# `group` is no longer offered (model groups are gone): a chat runs on its model or the default chain.
 		if "model" in p.raw:
 			chat.pinned_model = p.str("model")
 		if "endless" in p.raw:
@@ -340,11 +334,6 @@ class Chats:
 	async def m_chat_set(self, call, p):
 		chat = self.get(p.str("chatId"))
 		self._settings(chat, p)
-		# A chat runs on a group or on one model (docs/04 "One choice per chat"): each alone clears the other.
-		if "group" in p.raw and "model" not in p.raw:
-			chat.pinned_model = ""
-		if "model" in p.raw and p.str("model") and "group" not in p.raw:
-			chat.group = ""
 		self.changed(chat)
 		return chat.summary()
 

@@ -41,9 +41,11 @@ export function effortLabel(effort, roleEffort) {
 	return roleEffort ? effortName(roleEffort) + " (group)" : "Default";
 }
 
-// The efforts a model profile (ai.models' entry) takes: those its `effort` mapping names - a level it leaves out sends
-// nothing - else all five (a Claude model, a server told reasoning_effort).
+// The efforts a model profile (ai.models' entry) takes: those its `efforts` lists (a Claude model's, as the CLI says),
+// else those its `effort` mapping names - a level it leaves out sends nothing - else all five (a Claude model, a server
+// told reasoning_effort).
 export function effortsOf(profile) {
+	if (profile && Array.isArray(profile.efforts) && profile.efforts.length) return EFFORTS.map(([id]) => id).filter((id) => profile.efforts.includes(id));
 	const mapping = profile && profile.effort;
 	if (!mapping || typeof mapping !== "object") return EFFORTS.map(([id]) => id);
 	return EFFORTS.map(([id]) => id).filter((id) => mapping[id]);

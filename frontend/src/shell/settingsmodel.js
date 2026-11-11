@@ -11,6 +11,10 @@ export function settingTitle(key) {
 	return rest.map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2")).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
+function hidden(entry) {
+	return Boolean(entry && entry.schema && entry.schema["x-ied-hidden"]);
+}
+
 function pageOf(key, entry) {
 	if (entry.page) return entry.page;
 	const head = key.split(".")[0];
@@ -42,7 +46,8 @@ export function settingsPages(settings, contributed) {
 		page(value.page).children.push({ id: "custom:" + value.id, title: value.title, keys: value.keys.slice(), view: value.view, plugin });
 		for (const key of value.keys) claimed.add(key);
 	}
-	for (const key of Object.keys(settings).sort()) if (!claimed.has(key)) page(pageOf(key, settings[key])).keys.push(key);
+	// A key whose schema says "x-ied-hidden" (one kept only so old settings files still read, ai.groups) is not shown.
+	for (const key of Object.keys(settings).sort()) if (!claimed.has(key) && !hidden(settings[key])) page(pageOf(key, settings[key])).keys.push(key);
 	const sorted = [...pages.values()].sort((a, b) => a.title.localeCompare(b.title));
 	for (const p of sorted) p.children.sort((a, b) => Number(Boolean(b.view)) - Number(Boolean(a.view)) || (a.view ? 0 : a.title.localeCompare(b.title)));
 	return sorted;
