@@ -58,12 +58,13 @@ export class ChatTabView {
 	// never merely for missing it (a plugin still starting lists nothing).
 	listed(data) {
 		this.keepsDeleted = Array.isArray(data.deleted);
-		if ((data.deleted || []).some((d) => d.chatId === this.chatId)) this.ctx.tab.close();
+		this.archives = Array.isArray(data.archived);
+		if ([...(data.deleted || []), ...(data.archived || [])].some((d) => d.chatId === this.chatId)) this.ctx.tab.close();
 	}
 
-	// The chat was deleted (here or on another device): its tab closes.
+	// The chat was deleted or archived (here or on another device): its tab closes.
 	listChanged(kind, data) {
-		if ((kind === "chat.deleted" || kind === "chat.purged") && data.chatId === this.chatId) this.ctx.tab.close();
+		if ((kind === "chat.deleted" || kind === "chat.purged" || kind === "chat.archived") && data.chatId === this.chatId) this.ctx.tab.close();
 	}
 
 	focus() {

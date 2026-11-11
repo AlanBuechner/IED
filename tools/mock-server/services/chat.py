@@ -38,6 +38,11 @@ def now_ms():
 	return int(time.time() * 1000)
 
 
+def archived_entry(chat, archived_ms):
+	"""An archived chat as chats:<wsId> lists it (docs/10 "Chats")."""
+	return {"chatId": chat.chat_id, "wsId": chat.ws_id, "title": chat.title, "updatedMs": chat.updated_ms, "archivedMs": archived_ms, "turnCount": len(chat.turns)}
+
+
 def deleted_entry(chat, deleted_ms):
 	"""A deleted chat as chats:<wsId> lists it (docs/10 "Chats")."""
 	return {"chatId": chat.chat_id, "wsId": chat.ws_id, "title": chat.title, "updatedMs": chat.updated_ms, "deletedMs": deleted_ms,
@@ -193,6 +198,7 @@ class Chats:
 		self.server = server
 		self.items = {}
 		self.deleted = {}   # chatId -> (chat, deletedMs)
+		self.archived = {}  # chatId -> (chat, archivedMs)
 		self.made = 0       # chats made, so an id is never used twice
 		ws_id = next(iter(server.workspace.items))
 		server.hub.add("chats:" + ws_id, lambda: self.list_snapshot(ws_id))
@@ -202,7 +208,7 @@ class Chats:
 		server.rpc.register("ai.probe", self.m_ai_probe)
 		server.hub.add("aiusage", self.usage_snapshot)
 		server.rpc.register("ai.usage", self.m_ai_usage)
-		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete", "chat.restore", "chat.purge", "chat.revert"):
+		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete", "chat.restore", "chat.purge", "chat.archive", "chat.unarchive", "chat.revert"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def _create(self, ws_id, title, mode):
@@ -223,7 +229,9 @@ class Chats:
 
 	def list_snapshot(self, ws_id):
 		deleted = sorted((d for d in self.deleted.values() if d[0].ws_id == ws_id), key=lambda d: -d[1])
-		return {"chats": [c.summary() for c in self.items.values() if c.ws_id == ws_id], "deleted": [deleted_entry(chat, ms) for chat, ms in deleted]}
+		archived = sorted((a for a in self.archived.values() if a[0].ws_id == ws_id), key=lambda a: -a[1])
+		return {"chats": [c.summary() for c in self.items.values() if c.ws_id == ws_id], "deleted": [deleted_entry(chat, ms) for chat, ms in deleted],
+			"archived": [archived_entry(chat, ms) for chat, ms in archived]}
 
 	def snapshot(self, chat):
 		recent = chat.turns[-SNAPSHOT_TURNS:]
@@ -503,6 +511,12 @@ class Chats:
 		return deleted_entry(chat, deleted_ms)
 
 	async def m_chat_delete(self, call, p):
+		if p.str("chatId") in self.archived:
+			chat = self.archived.pop(p.str("chatId"))[0]
+			data = {"chatId": chat.chat_id, "deleted": deleted_entry(chat, now_ms())}
+			self.deleted[chat.chat_id] = (chat, data["deleted"]["deletedMs"])
+			self.server.hub.publish("chats:" + chat.ws_id, "chat.deleted", data)
+			return data
 		chat = self.get(p.str("chatId"))
 		if chat.runner is not None:
 			raise RpcError("conflict", "the chat is running a turn: stop it first")
@@ -517,6 +531,29 @@ class Chats:
 
 	async def m_chat_restore(self, call, p):
 		chat = self._deleted(p.str("chatId"))
+		self.items[chat.chat_id] = chat
+		self.server.hub.add(chat.topic, lambda: self.snapshot(chat))
+		self.server.hub.publish("chats:" + chat.ws_id, "chat.restored", chat.summary())
+		return chat.summary()
+
+	# --- archived chats (docs/04 "Archiving a chat"): set aside as deleted ones are, kept until brought back ---------
+
+	async def m_chat_archive(self, call, p):
+		chat = self.get(p.str("chatId"))
+		if chat.runner is not None:
+			raise RpcError("conflict", "the chat is running a turn: stop it first")
+		del self.items[chat.chat_id]
+		self.server.hub.remove(chat.topic)
+		archived_ms = now_ms()
+		self.archived[chat.chat_id] = (chat, archived_ms)
+		data = {"chatId": chat.chat_id, "archived": archived_entry(chat, archived_ms)}
+		self.server.hub.publish("chats:" + chat.ws_id, "chat.archived", data)
+		return data
+
+	async def m_chat_unarchive(self, call, p):
+		if p.str("chatId") not in self.archived:
+			raise RpcError("not_found", "no archived chat %r" % p.str("chatId"))
+		chat = self.archived.pop(p.str("chatId"))[0]
 		self.items[chat.chat_id] = chat
 		self.server.hub.add(chat.topic, lambda: self.snapshot(chat))
 		self.server.hub.publish("chats:" + chat.ws_id, "chat.restored", chat.summary())

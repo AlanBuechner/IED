@@ -1325,6 +1325,57 @@ class ChatTests(ChatCase):
 		self.assertEqual(2 * DAY_MS, deleted[0]["purgeMs"] - deleted[0]["deletedMs"])
 		self.assertFalse(os.path.exists(os.path.join(state, "chats-deleted", old_id)))
 
+	async def test_an_archived_chat_is_kept_apart_for_good_until_unarchived_or_deleted(self):
+		chat_id, topic = await self.chat()
+		self.model.queue("ok-text")
+		await self.turn(chat_id)
+		state = local_state(self.data, self.repo)
+		archived_folder = os.path.join(state, "chats-archived", chat_id)
+		await self.client.sub(["chats:w1"])
+		await self.client.next_frame("chats:w1")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.keepDeletedDays", "value": 1})
+		reply = await self.client.request("chat.archive", {"chatId": chat_id})
+		self.assertTrue(os.path.exists(os.path.join(archived_folder, "turns.jsonl")), "kept whole among the archived chats")
+		self.assertFalse(os.path.exists(os.path.join(state, "chats", chat_id)))
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual(([], [], [chat_id]), ([c["chatId"] for c in listed["chats"]], listed["deleted"], [a["chatId"] for a in listed["archived"]]))
+		self.assertEqual(listed["archived"][0], reply["archived"])
+		self.assertNotIn("purgeMs", reply["archived"], "no time limit")
+		# Archived long ago, it is still there after a restart: the keeper purges only the deleted.
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		marker = os.path.join(archived_folder, "archived.json")
+		with open(marker, encoding="utf-8") as f:
+			archived_ms = json.load(f)["archivedMs"]
+		write(marker, json.dumps({"archivedMs": archived_ms - 400 * DAY_MS}))
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual(([chat_id], 1), ([a["chatId"] for a in listed["archived"]], listed["archived"][0]["turnCount"]), "kept past ai.chats.keepDeletedDays")
+		await self.client.sub(["chats:w1"])
+		await self.client.next_frame("chats:w1")
+		back = await self.client.request("chat.unarchive", {"chatId": chat_id})
+		self.assertEqual((chat_id, 1), (back["chatId"], back["turnCount"]))
+		self.assertFalse(os.path.exists(archived_folder))
+		await self.client.sub([topic])
+		await self.client.next_frame(topic)
+		self.model.queue("ok-text")
+		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"], "an unarchived chat goes on")
+		await self.client.request("chat.archive", {"chatId": chat_id})
+		deleted = (await self.client.request("chat.delete", {"chatId": chat_id}))["deleted"]
+		self.assertEqual((chat_id, 1 * DAY_MS), (deleted["chatId"], deleted["purgeMs"] - deleted["deletedMs"]), "deleted from the archive: kept its days among the deleted")
+		listed = await self.client.request("chat.list", {"wsId": "w1"})
+		self.assertEqual(([], [chat_id]), (listed["archived"], [d["chatId"] for d in listed["deleted"]]))
+		self.assertTrue(os.path.exists(os.path.join(state, "chats-deleted", chat_id, "deleted.json")))
+		self.assertFalse(os.path.exists(os.path.join(state, "chats-deleted", chat_id, "archived.json")))
+		frames = await self.client.wait_for("chats:w1", lambda f: f.get("kind") == "chat.deleted")
+		kinds = [f["kind"] for f in frames if f.get("kind") in ("chat.archived", "chat.restored", "chat.deleted")]
+		self.assertEqual(["chat.restored", "chat.archived", "chat.deleted"], kinds)
+		with self.assertRaises(RpcFailure) as gone:
+			await self.client.request("chat.unarchive", {"chatId": chat_id})
+		self.assertEqual("not_found", gone.exception.code)
+
 	async def test_chats_an_older_server_left_in_the_folder_move_to_the_app_data(self):
 		chat_id, _ = await self.chat()
 		self.model.queue("ok-text")

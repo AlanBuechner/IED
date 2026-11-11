@@ -116,6 +116,20 @@ test("chat: deleted chats are kept apart, restored and purged", () => {
 	assertEqual(list.keepsDeleted, false, "an older server lists no deleted chats: it deletes for good");
 });
 
+test("chat: archived chats are kept apart from the deleted, brought back, or deleted in their turn", () => {
+	const list = new ChatList();
+	list.snapshot({ chats: [{ chatId: "c1", updatedMs: 1 }, { chatId: "c2", updatedMs: 5 }], deleted: [], archived: [{ chatId: "c8", archivedMs: 2 }] });
+	assertEqual(list.archives, true);
+	list.event("chat.archived", { chatId: "c1", archived: { chatId: "c1", archivedMs: 7 } });
+	assertEqual([list.chats.map((c) => c.chatId), list.archived.map((a) => a.chatId), list.deleted], [["c2"], ["c1", "c8"], []], "the latest archived first, none deleted");
+	list.event("chat.restored", { chatId: "c1", updatedMs: 9 });
+	assertEqual([list.chats.map((c) => c.chatId), list.archived.map((a) => a.chatId)], [["c1", "c2"], ["c8"]], "unarchived");
+	list.event("chat.deleted", { chatId: "c8", deleted: { chatId: "c8", deletedMs: 10 } });
+	assertEqual([list.archived, list.deleted.map((d) => d.chatId)], [[], ["c8"]], "an archived chat deleted moves among the deleted");
+	list.snapshot({ chats: [], deleted: [] });
+	assertEqual(list.archives, false, "an older server archives nothing");
+});
+
 test("chat: when a chat was active, and how long a deleted one is kept", () => {
 	const now = Date.UTC(2026, 9, 22, 12, 0, 0);
 	assertEqual([ago(now - 20000, now), ago(now - 5 * 60000, now), ago(now - 3 * 3600000, now), ago(now - 2 * 86400000, now)], ["now", "5m", "3h", "2d"]);

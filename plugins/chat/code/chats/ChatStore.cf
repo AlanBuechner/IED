@@ -443,20 +443,50 @@ namespace Ai
 		return false;
 	}
 
+	// `folder` gets the marker `name` ({<field>: nowMs}) saying when it was set aside.
+	static void WriteMarker(const FS::Path& folder, const char* name, const char* field, int64 nowMs) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField(field, nowMs);
+		json.EndObject();
+		WriteWhole(folder / name, json.View());
+	}
+
 	bool MoveToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem) {
 		FS::Path folder = DeletedChatFolder(state, chatId);
 		if (!MoveFolder(ChatFolder(state, chatId), folder, problem)) return false;
-		IED::JsonWriter json;
-		json.BeginObject();
-		json.IntField("deletedMs", nowMs);
-		json.EndObject();
-		WriteWhole(folder / "deleted.json", json.View());
+		WriteMarker(folder, "deleted.json", "deletedMs", nowMs);
 		return true;
 	}
 
 	bool MoveFromDeleted(const FS::Path& state, Core::StringView chatId, Core::String& problem) {
 		if (!MoveFolder(DeletedChatFolder(state, chatId), ChatFolder(state, chatId), problem)) return false;
 		FS::RemoveFile((ChatFolder(state, chatId) / "deleted.json").CStr());
+		return true;
+	}
+
+	// --- Archived chats -----------------------------------------------------------------------------------------------
+
+	FS::Path ArchivedChatFolder(const FS::Path& state, Core::StringView chatId) { return state / "chats-archived" / chatId; }
+
+	bool MoveToArchived(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem) {
+		FS::Path folder = ArchivedChatFolder(state, chatId);
+		if (!MoveFolder(ChatFolder(state, chatId), folder, problem)) return false;
+		WriteMarker(folder, "archived.json", "archivedMs", nowMs);
+		return true;
+	}
+
+	bool MoveFromArchived(const FS::Path& state, Core::StringView chatId, Core::String& problem) {
+		if (!MoveFolder(ArchivedChatFolder(state, chatId), ChatFolder(state, chatId), problem)) return false;
+		FS::RemoveFile((ChatFolder(state, chatId) / "archived.json").CStr());
+		return true;
+	}
+
+	bool MoveArchivedToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem) {
+		FS::Path folder = DeletedChatFolder(state, chatId);
+		if (!MoveFolder(ArchivedChatFolder(state, chatId), folder, problem)) return false;
+		FS::RemoveFile((folder / "archived.json").CStr());
+		WriteMarker(folder, "deleted.json", "deletedMs", nowMs);
 		return true;
 	}
 
@@ -467,12 +497,14 @@ namespace Ai
 		return lines;
 	}
 
-	static DeletedChat* LoadDeletedChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::Array<Core::String>& problems) {
-		FS::Path folder = DeletedChatFolder(state, chatId);
+	// A set-aside chat's record from its folder under `shelf` ("chats-deleted", "chats-archived"), whose `marker` file
+	// says when (`field`).
+	static DeletedChat* LoadSetAside(const FS::Path& state, const char* shelf, const char* marker, const char* field, Core::StringView wsId, Core::StringView chatId, Core::Array<Core::String>& problems) {
+		FS::Path folder = state / shelf / chatId;
 		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
-		Serialization::DomNode deleted = ParseJson(ReadWhole(folder / "deleted.json").View());
-		if (header.Kind() != Serialization::DomKind::Object || deleted.Kind() != Serialization::DomKind::Object) {
-			problems.Push((Core::String("deleted chat ") + chatId) + ": chat.json or deleted.json is missing or not JSON");
+		Serialization::DomNode when = ParseJson(ReadWhole(folder / marker).View());
+		if (header.Kind() != Serialization::DomKind::Object || when.Kind() != Serialization::DomKind::Object) {
+			problems.Push((((Core::String(shelf) + " chat ") + chatId) + ": chat.json or ") + marker + " is missing or not JSON");
 			return nullptr;
 		}
 		DeletedChat* chat = new DeletedChat();
@@ -480,21 +512,29 @@ namespace Ai
 		chat->m_WsId = Core::String(wsId);
 		chat->m_Title = Core::String(header.Member("title").AsView());
 		chat->m_UpdatedMs = header.Member("updatedMs").AsInt();
-		chat->m_DeletedMs = deleted.Member("deletedMs").AsInt();
+		chat->m_DeletedMs = when.Member(field).AsInt();
 		chat->m_TurnCount = CountLines(ReadWhole(folder / "turns.jsonl").View());
 		return chat;
 	}
 
-	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems) {
+	static Core::Array<DeletedChat*> LoadShelf(const FS::Path& state, const char* shelf, const char* marker, const char* field, Core::StringView wsId, Core::Array<Core::String>& problems) {
 		Core::Array<DeletedChat*> chats;
-		FS::Directory folder = FS::Directory((state / "chats-deleted").CStr());
+		FS::Directory folder = FS::Directory((state / shelf).CStr());
 		if (!folder.IsOpen()) return chats;
 		for (FS::DirectoryEntry& entry : folder) {
 			if (entry.kind != FS::EntryKind::Directory) continue;
-			DeletedChat* chat = LoadDeletedChat(state, wsId, entry.name.View(), problems);
+			DeletedChat* chat = LoadSetAside(state, shelf, marker, field, wsId, entry.name.View(), problems);
 			if (chat) chats.Push(chat);
 		}
 		return chats;
+	}
+
+	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems) {
+		return LoadShelf(state, "chats-deleted", "deleted.json", "deletedMs", wsId, problems);
+	}
+
+	Core::Array<DeletedChat*> LoadArchivedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems) {
+		return LoadShelf(state, "chats-archived", "archived.json", "archivedMs", wsId, problems);
 	}
 
 	void PurgeDeletedChat(const FS::Path& state, Core::StringView chatId) { FS::RemoveAll(DeletedChatFolder(state, chatId).CStr()); }

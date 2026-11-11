@@ -53,6 +53,16 @@ namespace Ai
 	bool MoveFromDeleted(const FS::Path& state, Core::StringView chatId, Core::String& problem);
 	Core::Array<DeletedChat*> LoadDeletedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems);
 	void PurgeDeletedChat(const FS::Path& state, Core::StringView chatId);
+
+	// Archived chats (docs/04 "Archiving a chat"): set aside as a deleted chat is - out of the list, no topic, no
+	// session - but in the local state's chats-archived/<chatId>/ with archived.json saying when, kept until the owner
+	// brings it back or deletes it; never purged. The record is a DeletedChat whose m_DeletedMs is when it was archived.
+	FS::Path ArchivedChatFolder(const FS::Path& state, Core::StringView chatId);
+	bool MoveToArchived(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem);
+	bool MoveFromArchived(const FS::Path& state, Core::StringView chatId, Core::String& problem);
+	// An archived chat deleted: its folder moved among the deleted ones, deleted at `nowMs`.
+	bool MoveArchivedToDeleted(const FS::Path& state, Core::StringView chatId, int64 nowMs, Core::String& problem);
+	Core::Array<DeletedChat*> LoadArchivedChats(const FS::Path& state, Core::StringView wsId, Core::Array<Core::String>& problems);
 	// Every call of the turn's messages that has no result gets `note` as its result, so the conversation stays one a
 	// model accepts (each call answered).
 	void CloseOpenCalls(Turn* turn, Core::StringView note);

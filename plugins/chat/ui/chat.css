@@ -48,6 +48,8 @@
 .chats-restore { width: 20px; height: 20px; visibility: hidden; flex: none; }
 .chats-restore .ci { width: 14px; height: 14px; }
 .chats-row.deleted:hover .chats-restore, .chats-row.deleted:focus-visible .chats-restore { visibility: visible; }
+.chats-row.archived { color: var(--text-1); }
+.chats-row.archived:hover .chats-restore, .chats-row.archived:focus-visible .chats-restore { visibility: visible; }
 .chats-rename { flex: 1; min-width: 0; height: calc(var(--row-h) - 4px); }
 .chats-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); padding: var(--space-5) var(--space-5); font-size: var(--font-size-sm); }
 .chats-empty p { margin: 0; }

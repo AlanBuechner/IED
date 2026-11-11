@@ -1,14 +1,15 @@
 // chatsview.js - the Chats tool window (docs/15 "Chat activity"): every chat of the workspace (chats:<wsId>) with its
-// state, those open as tabs in this window first, then the rest, then the deleted ones, kept for a while and restorable
+// state, those open as tabs in this window first, then the rest, then the archived ones, kept until the owner brings
+// them back or deletes them (docs/04 "Archiving a chat"), then the deleted ones, kept for a while and restorable
 // (docs/04 "Deleting a chat"); a sub-agent's chat sits under the chat that ran it (docs/04 "A group is a topology"). A
-// click opens a chat as a tab; its menu renames, closes or deletes it. Deleting needs no confirmation: the toast offers
-// Undo and the Deleted section keeps the chat.
+// click opens a chat as a tab; its menu renames, closes, archives or deletes it. Neither needs a confirmation: the toast
+// offers Undo and the Archived or Deleted section keeps the chat.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
 import { ChatList, STATE_LABELS, ago, chatLook, keptFor } from "./chatmodel.js";
-import { chatRequest, deleteChat, restoreChat } from "./chatactions.js";
+import { archiveChat, chatRequest, deleteChat, restoreChat, unarchiveChat } from "./chatactions.js";
 import { stored, store } from "./stored.js";
 
 const menus = new MenuHost();
@@ -22,6 +23,12 @@ export class ChatsView {
 		this.tabs = this.ied.tabs.state();
 		this.query = "";
 		this.closed = new Set(stored("ied.chat.listClosed", ["deleted"]));
+		// Archived starts folded as Deleted does, also for a list folded before there was an Archived section.
+		if (!stored("ied.chat.archivedSeen", false)) {
+			this.closed.add("archived");
+			store("ied.chat.listClosed", [...this.closed]);
+			store("ied.chat.archivedSeen", true);
+		}
 		this.opened = new Set(stored("ied.chat.listOpened", []));
 		this.renaming = null;
 		this.filter = h("input.input-field.chats-filter", { type: "search", placeholder: "Search chats", "aria-label": "Search chats", spellcheck: "false", on: {
@@ -77,12 +84,14 @@ export class ChatsView {
 		const own = chats.filter((c) => !kept.of.has(c.chatId));
 		const open = own.filter((c) => this.isOpen(root.get(c.chatId)));
 		const rest = own.filter((c) => !this.isOpen(root.get(c.chatId)));
+		const archived = this.list.archived.filter((a) => this.matches(a.title));
 		const deleted = this.list.deleted.filter((d) => this.matches(d.title));
 		const rows = (list) => nestAgents(list).map(({ chat, depth }) => this.chatRow(chat, now, depth));
 		const sections = [
 			open.length ? this.section("open", "Open", rows(open)) : null,
 			rest.length ? this.section("recent", open.length ? "Recent" : "Chats", rows(rest)) : null,
 			...kept.sections.map(([name, list]) => this.section("s:" + name, name, rows(list), true)),
+			archived.length ? this.section("archived", "Archived", archived.map((a) => this.archivedRow(a, now))) : null,
 			deleted.length ? this.section("deleted", "Deleted", deleted.map((d) => this.deletedRow(d, now))) : null,
 		].filter(Boolean);
 		if (!sections.length) sections.push(this.emptyEl());
@@ -144,6 +153,18 @@ export class ChatsView {
 		} } }, icon("discard")));
 	}
 
+	archivedRow(entry, now) {
+		return h("div.chats-row.archived", {
+			role: "treeitem", tabindex: "-1", title: entry.title + " - archived " + new Date(entry.archivedMs).toLocaleDateString() + "; double-click to bring it back", dataset: { chat: entry.chatId, archived: "1" },
+			on: { contextmenu: (event) => this.archivedMenu(event, entry), dblclick: () => this.unarchive(entry) },
+		},
+		icon("archive", "chats-state"), h("span.name", null, entry.title), h("span.meta", null, ago(entry.archivedMs || now, now)),
+		h("button.ib.chats-restore", { title: "Unarchive", "aria-label": "Unarchive " + entry.title, on: { click: (event) => {
+			event.stopPropagation();
+			this.unarchive(entry);
+		} } }, icon("discard")));
+	}
+
 	// --- What the owner does -----------------------------------------------------------------------------------------
 
 	open(chatId) {
@@ -158,13 +179,32 @@ export class ChatsView {
 			{ kind: "item", label: "Rename", id: "rename", enabled: true, keys: "F2" },
 			{ kind: "item", label: "Close Tab", id: "close", enabled: open },
 			{ kind: "separator" },
+			this.list.archives ? { kind: "item", label: "Archive", id: "archive", enabled: summary.state !== "running", keys: "Shift+Del" } : null,
 			{ kind: "item", label: "Delete", id: "delete", enabled: summary.state !== "running", keys: "Del" },
-		], pick: (row) => {
+		].filter(Boolean), pick: (row) => {
 			if (row.id === "open") this.open(summary.chatId);
 			else if (row.id === "rename") this.rename(summary);
 			else if (row.id === "close") this.ied.tabs.close("chat:" + summary.chatId);
+			else if (row.id === "archive") this.archive(summary);
 			else if (row.id === "delete") this.remove(summary);
 		} });
+	}
+
+	archivedMenu(event, entry) {
+		event.preventDefault();
+		menus.show({ at: event, label: entry.title, rows: [
+			{ kind: "item", label: "Unarchive", id: "unarchive", enabled: true },
+			{ kind: "separator" },
+			{ kind: "item", label: "Delete", id: "delete", enabled: true, keys: "Del" },
+		], pick: (row) => (row.id === "unarchive" ? this.unarchive(entry) : this.remove(entry)) });
+	}
+
+	archive(summary) {
+		return archiveChat(this.ied, summary.chatId, summary.title);
+	}
+
+	unarchive(entry) {
+		return unarchiveChat(this.ied, entry.chatId);
 	}
 
 	deletedMenu(event, entry) {
@@ -235,17 +275,22 @@ export class ChatsView {
 		if (event.key === "ArrowDown" || event.key === "ArrowUp") return this.step(event, event.key === "ArrowDown" ? 1 : -1);
 		if (!row || event.target !== row) return null;
 		const chatId = row.dataset.chat;
-		const entry = row.dataset.deleted ? this.list.deleted.find((d) => d.chatId === chatId) : this.list.find(chatId);
+		const entry = row.dataset.deleted ? this.list.deleted.find((d) => d.chatId === chatId)
+			: row.dataset.archived ? this.list.archived.find((a) => a.chatId === chatId) : this.list.find(chatId);
 		if (!entry) return null;
 		if (event.key === "Enter") {
 			event.preventDefault();
-			return row.dataset.deleted ? this.restore(entry) : this.open(chatId);
+			return row.dataset.deleted ? this.restore(entry) : row.dataset.archived ? this.unarchive(entry) : this.open(chatId);
+		}
+		if (event.key === "Delete" && event.shiftKey && !row.dataset.deleted && !row.dataset.archived) {
+			event.preventDefault();
+			return this.list.archives && entry.state !== "running" && this.archive(entry);
 		}
 		if (event.key === "Delete") {
 			event.preventDefault();
-			return row.dataset.deleted ? this.purge(entry) : entry.state !== "running" && this.remove(entry);
+			return row.dataset.deleted ? this.purge(entry) : row.dataset.archived ? this.remove(entry) : entry.state !== "running" && this.remove(entry);
 		}
-		if (event.key === "F2" && !row.dataset.deleted) {
+		if (event.key === "F2" && !row.dataset.deleted && !row.dataset.archived) {
 			event.preventDefault();
 			this.rename(entry);
 		}

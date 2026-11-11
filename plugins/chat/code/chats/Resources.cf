@@ -39,8 +39,9 @@ namespace Ai
 	}
 
 	// {chatId} -> {state, running}: `running` while a turn is in flight, waiting on an approval or answer included; a
-	// deleted chat (kept among the deleted until purged) is {state: "deleted", running: false, deleted: true}, so what a
-	// plugin kept open for it can close (docs/27).
+	// deleted chat (kept among the deleted until purged) is {state: "deleted", running: false, deleted: true}, an
+	// archived one {state: "archived", running: false, deleted: true, archived: true}, so what a plugin kept open for it
+	// can close (docs/27).
 	static IED::Result ChatStateCall(IED::PluginContext* context, Chats* chats, const Serialization::DomNode& args) {
 		IED::HostLock guard(*context);
 		Chat* chat = nullptr;
@@ -49,6 +50,7 @@ namespace Ai
 		}
 		catch (IED::RpcError& error) {
 			if (chats->IsDeleted(args.Member("chatId").AsView())) return IED::Answer(Core::StringView("{\"state\":\"deleted\",\"running\":false,\"deleted\":true}"));
+			if (chats->IsArchived(args.Member("chatId").AsView())) return IED::Answer(Core::StringView("{\"state\":\"archived\",\"running\":false,\"deleted\":true,\"archived\":true}"));
 			return IED::Refusal(error.m_Message.View());
 		}
 		IED::JsonWriter data;

@@ -45,6 +45,8 @@ namespace Ai
 		Register("chat.delete", [self](const IED::Request& request) -> Core::String { return self->DeleteMethod(request); });
 		Register("chat.restore", [self](const IED::Request& request) -> Core::String { return self->RestoreMethod(request); });
 		Register("chat.purge", [self](const IED::Request& request) -> Core::String { return self->PurgeMethod(request); });
+		Register("chat.archive", [self](const IED::Request& request) -> Core::String { return self->ArchiveMethod(request); });
+		Register("chat.unarchive", [self](const IED::Request& request) -> Core::String { return self->UnarchiveMethod(request); });
 		m_Claude = new ClaudeAccount(context);
 		LoadWindows();
 		context->StartThread([self]() { self->ClaudeKeeper(); });
@@ -260,6 +262,8 @@ namespace Ai
 		json.EndArray();
 		json.Key(Core::StringView("deleted"));
 		WriteDeleted(json, wsId);
+		json.Key(Core::StringView("archived"));
+		WriteArchived(json, wsId);
 		json.EndObject();
 		return json.ToString();
 	}

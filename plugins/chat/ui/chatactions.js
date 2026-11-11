@@ -35,6 +35,19 @@ export async function restoreChat(ied, chatId) {
 	if (restored) ied.tabs.open("chat:" + restored.chatId, { preview: false });
 }
 
+// Archived (docs/04 "Archiving a chat"): out of the list like a deleted chat, but kept under Archived for as long as the
+// owner wants it; the toast offers Undo.
+export async function archiveChat(ied, chatId, title) {
+	const done = await chatRequest(ied, "chat.archive", { chatId });
+	if (done) ied.toast("Archived “" + title + "”. It is kept under Archived.", { level: "info", action: { label: "Undo", run: () => unarchiveChat(ied, chatId, false) } });
+}
+
+// Back among the chats; opened as a tab unless `open` is false (Undo of an archive leaves the tabs as they were).
+export async function unarchiveChat(ied, chatId, open = true) {
+	const back = await chatRequest(ied, "chat.unarchive", { chatId });
+	if (back && open) ied.tabs.open("chat:" + back.chatId, { preview: false });
+}
+
 export async function renameChat(ied, chatId, title) {
 	const name = await promptDialog({ title: "Rename chat", value: title, confirm: "Rename" });
 	if (name && name !== title) await chatRequest(ied, "chat.set", { chatId, title: name });

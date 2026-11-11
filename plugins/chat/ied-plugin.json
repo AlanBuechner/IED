@@ -70,6 +70,7 @@
 			{ "id": "ied.chat.show", "title": "Chat", "category": "View", "icon": "$(comment-discussion)" },
 			{ "id": "ied.chat.stop", "title": "Stop the Turn", "category": "Chat", "icon": "$(debug-stop)" },
 			{ "id": "ied.chat.rename", "title": "Rename Chat...", "category": "Chat", "icon": "$(edit)" },
+			{ "id": "ied.chat.archive", "title": "Archive Chat", "category": "Chat", "icon": "$(archive)" },
 			{ "id": "ied.chat.delete", "title": "Delete Chat", "category": "Chat", "icon": "$(trash)" },
 			{ "id": "ied.chat.focusInput", "title": "Focus the Message Box", "category": "Chat", "icon": "$(comment-discussion)" },
 			{ "id": "ied.chat.claudeUsage", "title": "Claude Usage", "category": "Chat", "icon": "$(pulse)" }
@@ -77,7 +78,8 @@
 		"menus": {
 			"tab/context": [
 				{ "command": "ied.chat.rename", "group": "0_chat", "when": "tabKind == 'chat' && tabRef != 'chat:new'" },
-				{ "command": "ied.chat.delete", "group": "0_chat", "order": 1, "when": "tabKind == 'chat' && tabRef != 'chat:new'" }
+				{ "command": "ied.chat.archive", "group": "0_chat", "order": 1, "when": "tabKind == 'chat' && tabRef != 'chat:new'" },
+				{ "command": "ied.chat.delete", "group": "0_chat", "order": 2, "when": "tabKind == 'chat' && tabRef != 'chat:new'" }
 			]
 		},
 		"keybindings": [

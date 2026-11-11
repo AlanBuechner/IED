@@ -370,30 +370,41 @@ export function turnEndHeld(turn) {
 	return turn.segmentCount === undefined || (turn.firstSeg || 0) + turn.segments.length >= turn.segmentCount;
 }
 
-// The chats of a workspace (chats:<wsId>), most recently active first, and its deleted chats (docs/04 "Deleting a
-// chat"), the latest deleted first.
+// The chats of a workspace (chats:<wsId>), most recently active first, its archived chats (docs/04 "Archiving a chat"),
+// the latest archived first, and its deleted chats (docs/04 "Deleting a chat"), the latest deleted first.
 export class ChatList {
 	constructor() {
 		this.chats = [];
+		this.archived = [];
 		this.deleted = [];
 		this.keepsDeleted = false;   // the server keeps deleted chats (an older one lists no `deleted`)
+		this.archives = false;       // the server archives chats (an older one lists no `archived`)
 	}
 
 	snapshot(data) {
 		this.chats = (data.chats || []).slice();
+		this.archived = (data.archived || []).slice();
 		this.deleted = (data.deleted || []).slice();
 		this.keepsDeleted = Array.isArray(data.deleted);
+		this.archives = Array.isArray(data.archived);
 		this.sort();
 	}
 
 	event(kind, data) {
+		const others = (list) => list.filter((d) => d.chatId !== data.chatId);
 		if (kind === "chat.deleted") {
-			this.chats = this.chats.filter((c) => c.chatId !== data.chatId);
-			if (data.deleted) this.deleted = [data.deleted, ...this.deleted.filter((d) => d.chatId !== data.chatId)];
+			this.chats = others(this.chats);
+			this.archived = others(this.archived);
+			if (data.deleted) this.deleted = [data.deleted, ...others(this.deleted)];
 		}
-		else if (kind === "chat.purged") this.deleted = this.deleted.filter((d) => d.chatId !== data.chatId);
+		else if (kind === "chat.archived") {
+			this.chats = others(this.chats);
+			if (data.archived) this.archived = [data.archived, ...others(this.archived)];
+		}
+		else if (kind === "chat.purged") this.deleted = others(this.deleted);
 		else if (kind === "chat.created" || kind === "chat.changed" || kind === "chat.restored") {
-			this.deleted = this.deleted.filter((d) => d.chatId !== data.chatId);
+			this.deleted = others(this.deleted);
+			this.archived = others(this.archived);
 			const index = this.chats.findIndex((c) => c.chatId === data.chatId);
 			if (index >= 0) this.chats[index] = data;
 			else this.chats.push(data);
@@ -403,6 +414,7 @@ export class ChatList {
 
 	sort() {
 		this.chats.sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0));
+		this.archived.sort((a, b) => (b.archivedMs || 0) - (a.archivedMs || 0));
 		this.deleted.sort((a, b) => (b.deletedMs || 0) - (a.deletedMs || 0));
 	}
 

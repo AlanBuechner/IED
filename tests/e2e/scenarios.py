@@ -2224,6 +2224,43 @@ def chat_delete_and_restore(run):
 	run.shot("restored")
 
 
+@scenario(viewports=("desktop", "phone"))
+def chat_archive_and_unarchive(run):
+	"""Archiving a chat sets it aside like deleting it, but for good (owner, 2026-11-11: "like they are deleted but they
+	don't have a time limit, organized separately from the deleted chats"): its tab closes, it moves under Archived - its
+	own section, before Deleted, with no time left on it - and the toast offers Undo. Unarchive brings it back and opens
+	it; Delete on an archived chat moves it under Deleted, kept its 30 days."""
+	page = open_chat(run)
+	chat_id = run.chat_id
+	run.request("chat.set", {"chatId": chat_id, "title": "Shelved"})
+	run.show_activity("ied.chat")
+	row = ".chats-row[data-chat='%s']" % chat_id
+	page.click(row + ":not(.archived)", button="right")
+	page.click(".menu .menu-item:has-text('Archive')")
+	page.wait_for_selector(".toast:has-text('Shelved') .toast-action:has-text('Undo')")
+	page.wait_for_selector(".tab[data-ref='chat:%s']" % chat_id, state="detached")
+	if not page.is_visible(row + ".archived"):
+		page.click(".chats-sec-head:has-text('Archived')")
+	page.wait_for_selector(row + ".archived")
+	sections = page.evaluate("[...document.querySelectorAll('.chats-sec')].map((s) => s.dataset.section)")
+	check("archived" in sections and ("deleted" not in sections or sections.index("archived") < sections.index("deleted")), "Archived is its own section, before Deleted: %r" % sections)
+	check("left" not in page.inner_text(row + ".archived"), "an archived chat has no time limit")
+	listed = run.request("chat.list", {"wsId": page.evaluate("ied_shell.wsId")})
+	check(any(a["chatId"] == chat_id for a in listed.get("archived", [])) and not any(d["chatId"] == chat_id for d in listed["deleted"]), "listed as archived, not deleted")
+	run.shot("archived")
+	page.hover(row + ".archived")
+	page.click(row + ".archived .chats-restore")
+	page.wait_for_selector(".view[data-ref='chat:%s'] .chat-input" % chat_id)
+	run.show_activity("ied.chat")
+	check(not page.is_visible(row + ".archived"), "unarchived: no longer under Archived")
+	run.request("chat.archive", {"chatId": chat_id})
+	run.request("chat.delete", {"chatId": chat_id})
+	listed = run.request("chat.list", {"wsId": page.evaluate("ied_shell.wsId")})
+	check(not listed["archived"] and any(d["chatId"] == chat_id for d in listed["deleted"]), "an archived chat deleted is kept under Deleted")
+	run.request("chat.restore", {"chatId": chat_id})
+	run.shot("restored")
+
+
 @scenario(viewports=("desktop",), targets=("mock",))
 def claude_usage_bars_and_card(run):
 	"""The status bar's Claude usage (owner, 2026-10-26): resting the pointer on it shows a simple bar per window; a click

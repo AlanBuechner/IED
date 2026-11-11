@@ -40,6 +40,7 @@ namespace Ai
 		public Chat* Get(Core::StringView chatId) const;
 		// Whether `chatId` is a deleted chat, kept until it is purged (DeletedChats.cf).
 		public bool IsDeleted(Core::StringView chatId) const;
+		public bool IsArchived(Core::StringView chatId) const;
 		// The workspace `chat` belongs to; throws not_found when it is not open.
 		public IED::Workspace WorkspaceOf(const Chat* chat) const;
 
@@ -174,9 +175,20 @@ namespace Ai
 		private Core::String DeleteMethod(const IED::Request& request);
 		private Core::String RestoreMethod(const IED::Request& request);
 		private Core::String PurgeMethod(const IED::Request& request);
+		// Archived chats (docs/04 "Archiving a chat"): chat.archive sets a chat aside as deleting does, kept until
+		// chat.unarchive brings it back or chat.delete moves it among the deleted; the keeper never purges them.
+		private Core::String ArchiveMethod(const IED::Request& request);
+		private Core::String UnarchiveMethod(const IED::Request& request);
+		private DeletedChat* SetAside(Chat* chat, func<bool(const FS::Path&, Core::StringView, int64, Core::String&)> move);
+		private Core::String BringBack(DeletedChat* gone, func<bool(const FS::Path&, Core::StringView, Core::String&)> moveBack);
+		private Core::String PublishDeleted(DeletedChat* gone);
+		// Loads the workspace's deleted and archived chats.
 		private void LoadDeleted(const IED::Workspace& ws);
 		private void WriteDeleted(IED::JsonWriter& json, Core::StringView wsId) const;
+		private void WriteArchived(IED::JsonWriter& json, Core::StringView wsId) const;
 		private DeletedChat* DeletedOf(Core::StringView chatId) const;
+		// The archived chat `chatId`, null when there is none.
+		private DeletedChat* ArchivedOf(Core::StringView chatId) const;
 		private void Purge(DeletedChat* chat);
 		// The deleted chats kept past ai.chats.keepDeletedDays, purged; the lock is held.
 		private void PurgeExpired();
@@ -197,6 +209,7 @@ namespace Ai
 
 		private Core::Array<Chat*> m_Chats;
 		private Core::Array<DeletedChat*> m_Deleted;
+		private Core::Array<DeletedChat*> m_Archived;   // m_DeletedMs: when it was archived
 		private Core::HashMap<Core::String, ClaudeSession*> m_ClaudeSessions;   // by chat
 		private bool m_Stopping;
 	}

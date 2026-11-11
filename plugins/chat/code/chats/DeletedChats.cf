@@ -1,6 +1,8 @@
-// Deleted chats (docs/04 "Deleting a chat", docs/10 "Chats"): chat.delete moves a chat's folder among the deleted ones
-// and lists it on chats:<wsId> as deleted; chat.restore brings it back whole; chat.purge removes it for good, as the
-// keeper does once it has been kept ai.chats.keepDeletedDays (30 by default) - at a workspace's load and every hour.
+// Deleted and archived chats (docs/04 "Deleting a chat", "Archiving a chat", docs/10 "Chats"): chat.delete moves a
+// chat's folder among the deleted ones and lists it on chats:<wsId> as deleted; chat.restore brings it back whole;
+// chat.purge removes it for good, as the keeper does once it has been kept ai.chats.keepDeletedDays (30 by default) - at
+// a workspace's load and every hour. chat.archive sets a chat aside the same way among the archived ones, listed apart
+// and kept until chat.unarchive brings it back or chat.delete moves it among the deleted.
 
 include "api/Plugin.ch"
 include "ChatService.ch"
@@ -16,6 +18,26 @@ namespace Ai
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Serialization::DomNode days = Serialization::ReadJson(context->Setting(Core::StringView("ai.chats.keepDeletedDays"), wsId).View(), *doc).root;
 		return days.Kind() == Serialization::DomKind::Int && days.AsInt() > 0 ? days.AsInt() : c_KeepDeletedDaysDefault;
+	}
+
+	// {chatId, wsId, title, updatedMs, archivedMs, turnCount}.
+	static void WriteArchivedChat(IED::JsonWriter& json, const DeletedChat* chat) {
+		json.BeginObject();
+		json.Field("chatId", chat->m_ChatId.View());
+		json.Field("wsId", chat->m_WsId.View());
+		json.Field("title", chat->m_Title.View());
+		json.IntField("updatedMs", chat->m_UpdatedMs);
+		json.IntField("archivedMs", chat->m_DeletedMs);
+		json.IntField("turnCount", chat->m_TurnCount);
+		json.EndObject();
+	}
+
+	static void Unlist(Core::Array<DeletedChat*>& list, DeletedChat* chat) {
+		for (int64 i = 0; i < list.Count(); ++i)
+			if (list[i] == chat) {
+				list.RemoveAt(i);
+				return;
+			}
 	}
 
 	// {chatId, wsId, title, updatedMs, deletedMs, purgeMs, turnCount}: purgeMs when the keeper removes it for good.
@@ -34,7 +56,29 @@ namespace Ai
 	void Chats::LoadDeleted(const IED::Workspace& ws) {
 		Core::Array<Core::String> problems;
 		for (DeletedChat* chat : LoadDeletedChats(LocalStateOf(ws), ws.m_Id.View(), problems)) m_Deleted.Push(chat);
+		for (DeletedChat* chat : LoadArchivedChats(LocalStateOf(ws), ws.m_Id.View(), problems)) m_Archived.Push(chat);
 		for (const Core::String& problem : problems) m_Context->Log(problem.View());
+	}
+
+	// The workspace's archived chats, the latest archived first.
+	void Chats::WriteArchived(IED::JsonWriter& json, Core::StringView wsId) const {
+		Core::Array<DeletedChat*> listed;
+		for (DeletedChat* chat : m_Archived)
+			if (chat->m_WsId.View() == wsId) listed.Push(chat);
+		listed.SortBy([](DeletedChat* a, DeletedChat* b) -> bool { return a->m_DeletedMs > b->m_DeletedMs; });
+		json.BeginArray();
+		for (DeletedChat* chat : listed) WriteArchivedChat(json, chat);
+		json.EndArray();
+	}
+
+	bool Chats::IsArchived(Core::StringView chatId) const {
+		return ArchivedOf(chatId) != nullptr;
+	}
+
+	DeletedChat* Chats::ArchivedOf(Core::StringView chatId) const {
+		for (DeletedChat* chat : m_Archived)
+			if (chat->m_ChatId.View() == chatId) return chat;
+		return nullptr;
 	}
 
 	// The workspace's deleted chats, the latest deleted first.
@@ -61,8 +105,10 @@ namespace Ai
 		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no deleted chat ") + chatId).View());
 	}
 
-	Core::String Chats::DeleteMethod(const IED::Request& request) {
-		Chat* chat = Get(request.m_Params.Str("chatId").View());
+	// What deleting and archiving share: the chat's tasks stopped, its debts dropped, its header saved and its folder
+	// moved by `move` (a MoveTo... of ChatStore), then it leaves the list - no topic, no Claude session. The record of
+	// it, set aside now.
+	DeletedChat* Chats::SetAside(Chat* chat, func<bool(const FS::Path&, Core::StringView, int64, Core::String&)> move) {
 		if (chat->m_Run) throw IED::RpcError(IED::ErrorCode::Conflict, "the chat is running a turn: stop it first");
 		for (BackgroundTask* task : chat->m_Background)
 			if (task->Running()) StopBackground(task);
@@ -78,7 +124,7 @@ namespace Ai
 		gone->m_DeletedMs = ChatNowMs();
 		gone->m_TurnCount = chat->TurnCount();
 		Core::String problem;
-		if (!MoveToDeleted(LocalStateOf(ws), chat->m_ChatId.View(), gone->m_DeletedMs, problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+		if (!move(LocalStateOf(ws), chat->m_ChatId.View(), gone->m_DeletedMs, problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
 		for (int64 i = 0; i < m_Chats.Count(); ++i)
 			if (m_Chats[i] == chat) {
 				m_Chats.RemoveAt(i);
@@ -90,37 +136,86 @@ namespace Ai
 			m_ClaudeSessions.Remove(chat->m_ChatId);
 		}
 		m_Context->RemoveTopic(chat->Topic().View());
-		m_Deleted.Push(gone);
 		RepliesChanged(ws.m_Id.View());
+		return gone;
+	}
+
+	// chat.deleted {chatId, deleted} on the chat's workspace's chats: topic; the answer is the same.
+	Core::String Chats::PublishDeleted(DeletedChat* gone) {
 		IED::JsonWriter entry;
-		WriteDeletedChat(entry, gone, KeepDeletedDays(m_Context, WsId(ws)));
+		WriteDeletedChat(entry, gone, KeepDeletedDays(m_Context, gone->m_WsId.View()));
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("chatId", gone->m_ChatId.View());
 		data.RawField("deleted", entry.View());
 		data.EndObject();
-		m_Context->Publish(ChatsTopic(ws.m_Id.View()).View(), "chat.deleted", data.View());
+		m_Context->Publish(ChatsTopic(gone->m_WsId.View()).View(), "chat.deleted", data.View());
 		return data.ToString();
 	}
 
-	Core::String Chats::RestoreMethod(const IED::Request& request) {
-		DeletedChat* gone = DeletedOf(request.m_Params.Str("chatId").View());
+	Core::String Chats::DeleteMethod(const IED::Request& request) {
+		Core::String chatId = request.m_Params.Str("chatId");
+		// An archived chat goes among the deleted, to be purged in its time like any other.
+		DeletedChat* archived = ArchivedOf(chatId.View());
+		if (archived) {
+			IED::Workspace ws = OpenWorkspace(archived->m_WsId.View());
+			const int64 now = ChatNowMs();
+			Core::String problem;
+			if (!MoveArchivedToDeleted(LocalStateOf(ws), chatId.View(), now, problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+			Unlist(m_Archived, archived);
+			archived->m_DeletedMs = now;
+			m_Deleted.Push(archived);
+			return PublishDeleted(archived);
+		}
+		DeletedChat* gone = SetAside(Get(chatId.View()), [](const FS::Path& state, Core::StringView id, int64 now, Core::String& problem) -> bool { return MoveToDeleted(state, id, now, problem); });
+		m_Deleted.Push(gone);
+		return PublishDeleted(gone);
+	}
+
+	Core::String Chats::ArchiveMethod(const IED::Request& request) {
+		DeletedChat* gone = SetAside(Get(request.m_Params.Str("chatId").View()), [](const FS::Path& state, Core::StringView id, int64 now, Core::String& problem) -> bool { return MoveToArchived(state, id, now, problem); });
+		m_Archived.Push(gone);
+		IED::JsonWriter entry;
+		WriteArchivedChat(entry, gone);
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("chatId", gone->m_ChatId.View());
+		data.RawField("archived", entry.View());
+		data.EndObject();
+		m_Context->Publish(ChatsTopic(gone->m_WsId.View()).View(), "chat.archived", data.View());
+		return data.ToString();
+	}
+
+	// The chat whose folder `moveBack` brought back among the chats, read, listed and given its topic again:
+	// chat.restored with its summary, which is the answer too.
+	Core::String Chats::BringBack(DeletedChat* gone, func<bool(const FS::Path&, Core::StringView, Core::String&)> moveBack) {
 		IED::Workspace ws = OpenWorkspace(gone->m_WsId.View());
 		FS::Path state = LocalStateOf(ws);
 		Core::String problem;
-		if (!MoveFromDeleted(state, gone->m_ChatId.View(), problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
+		if (!moveBack(state, gone->m_ChatId.View(), problem)) throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
 		Core::Array<Core::String> problems;
 		Chat* chat = LoadChat(state, gone->m_WsId.View(), gone->m_ChatId.View(), Core::StringView(c_InterruptedNote), problems);
 		if (!chat) throw IED::RpcError(IED::ErrorCode::Internal, problems.IsEmpty() ? Core::StringView("the chat could not be read") : problems[0].View());
-		for (int64 i = 0; i < m_Deleted.Count(); ++i)
-			if (m_Deleted[i] == gone) {
-				m_Deleted.RemoveAt(i);
-				break;
-			}
 		m_Chats.Push(chat);
 		AddTopic(chat);
 		Core::String summary = chat->SummaryJson();
 		m_Context->Publish(ChatsTopic(ws.m_Id.View()).View(), "chat.restored", summary.View());
+		return summary;
+	}
+
+	Core::String Chats::RestoreMethod(const IED::Request& request) {
+		DeletedChat* gone = DeletedOf(request.m_Params.Str("chatId").View());
+		Core::String summary = BringBack(gone, [](const FS::Path& state, Core::StringView id, Core::String& problem) -> bool { return MoveFromDeleted(state, id, problem); });
+		Unlist(m_Deleted, gone);
+		return summary;
+	}
+
+	Core::String Chats::UnarchiveMethod(const IED::Request& request) {
+		Core::String chatId = request.m_Params.Str("chatId");
+		DeletedChat* gone = ArchivedOf(chatId.View());
+		if (!gone) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no archived chat ") + chatId.View()).View());
+		Core::String summary = BringBack(gone, [](const FS::Path& state, Core::StringView id, Core::String& problem) -> bool { return MoveFromArchived(state, id, problem); });
+		Unlist(m_Archived, gone);
 		return summary;
 	}
 
@@ -133,11 +228,7 @@ namespace Ai
 	void Chats::Purge(DeletedChat* chat) {
 		IED::Workspace ws;
 		if (IED::FindWorkspace(chat->m_WsId.View(), ws)) PurgeDeletedChat(LocalStateOf(ws), chat->m_ChatId.View());
-		for (int64 i = 0; i < m_Deleted.Count(); ++i)
-			if (m_Deleted[i] == chat) {
-				m_Deleted.RemoveAt(i);
-				break;
-			}
+		Unlist(m_Deleted, chat);
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("chatId", chat->m_ChatId.View());

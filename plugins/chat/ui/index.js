@@ -9,7 +9,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { ChatTabView, DRAFT } from "./chattab.js";
 import { ChatsView } from "./chatsview.js";
 import { ChatList } from "./chatmodel.js";
-import { deleteChat, renameChat } from "./chatactions.js";
+import { archiveChat, deleteChat, renameChat } from "./chatactions.js";
 import { ModelsPage } from "./modelsettings.js";
 import { ModelGroupsPage } from "./groupsettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
@@ -56,6 +56,10 @@ export function activate(ied) {
 	ied.commands.handle("ied.chat.delete", (args) => {
 		const view = tabOf(args);
 		if (view && view.summary) deleteChat(ied, view.chatId, view.summary.title, view.keepsDeleted);
+	});
+	ied.commands.handle("ied.chat.archive", (args) => {
+		const view = tabOf(args);
+		if (view && view.summary) archiveChat(ied, view.chatId, view.summary.title);
 	});
 	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
 	ied.commands.handle("ied.chat.focusInput", (args) => focusInput(args));
