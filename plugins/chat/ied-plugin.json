@@ -71,6 +71,7 @@
 			{ "id": "ied.chat.stop", "title": "Stop the Turn", "category": "Chat", "icon": "$(debug-stop)" },
 			{ "id": "ied.chat.rename", "title": "Rename Chat...", "category": "Chat", "icon": "$(edit)" },
 			{ "id": "ied.chat.delete", "title": "Delete Chat", "category": "Chat", "icon": "$(trash)" },
+			{ "id": "ied.chat.focusInput", "title": "Focus the Message Box", "category": "Chat", "icon": "$(comment-discussion)" },
 			{ "id": "ied.chat.claudeUsage", "title": "Claude Usage", "category": "Chat", "icon": "$(pulse)" }
 		],
 		"menus": {

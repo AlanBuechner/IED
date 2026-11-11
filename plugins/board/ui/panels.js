@@ -1,4 +1,4 @@
-// panels.js - the board's side panel (docs/32 "The board in the UI"): Layers, Plan, AI and History.
+// panels.js - the board's side panel (docs/32 "The board in the UI"): Layers, Plan and History.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
@@ -155,27 +155,6 @@ export class PlanPanel {
 }
 
 // The board's AI: its chat beside the board, and actions that ask it for the common work.
-export class AiPanel {
-	constructor(view) {
-		this.view = view;
-		this.el = h("div.board-panel-body.board-ai", null,
-			h("div.board-ai-intro.muted", null, "The board's AI sees the board, its layers, your selection and its plans, and changes them live. Its changes are marked in History and undo like yours."),
-			h("button.btn.primary.board-ai-open", { on: { click: () => this.view.openChat() } }, icon("comment-discussion"), "Open the board's chat"),
-			h("div.board-ai-actions", null,
-				this.action("wand", "Clean up the sketch", "Turn the freehand drawing into clean shapes, frames and connectors on their own layer; your strokes stay, hidden", "cleanup"),
-				this.action("type-hierarchy", "Convert to Mermaid", "Write the diagram as a Mermaid flowchart and keep it as a plan", "mermaid"),
-				this.action("book", "Write the plan", "Write a plan an engineer can build from: components, interfaces, flows, open questions", "plan"),
-				this.action("eye", "Review the design", "Point out gaps, risks and open questions, as notes on the board", "review"),
-				this.action("tools", "Build it", "Start an agent that implements the plan in this workspace", "build")));
-	}
-
-	action(iconName, title, detail, kind) {
-		return h("button.board-ai-action", { title: detail, on: { click: () => this.view.askAi(kind) } }, icon(iconName, "c-ai"), h("span.t", null, title), h("span.d.muted", null, detail));
-	}
-
-	render() {}
-}
-
 export class HistoryPanel {
 	constructor(view) {
 		this.view = view;

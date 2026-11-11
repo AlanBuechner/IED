@@ -1,13 +1,13 @@
 // board.js - a board as a document (docs/32 "The board in the UI"): the toolbar (tools, colors, widths, eraser,
-// undo, zoom, image), the canvas, and the side panel (Layers, Plan, AI, History) - a pane of its own on a phone.
+// undo, zoom, image, the AI button that opens the board's chat), the canvas, and the side panel (Layers, Plan,
+// History) - a pane of its own on a phone.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { confirmDialog } from "/ui-kit/dialog.js";
 import { BoardModel } from "./model.js";
 import { BoardCanvas } from "./canvas.js";
 import { BoardInput, TOOLS } from "./tools.js";
 import { PALETTE_NAMES } from "./render.js";
-import { LayersPanel, PlanPanel, AiPanel, HistoryPanel } from "./panels.js";
+import { LayersPanel, PlanPanel, HistoryPanel } from "./panels.js";
 import { union, EMPTY, isEmpty } from "./geom.js";
 
 const WIDTHS = [1, 2, 4, 8];
@@ -33,7 +33,7 @@ export class BoardView {
 		replace(ctx.el, this.toolbar, h("div.board-main", null, this.stage, this.panel), this.message);
 		this.canvas = new BoardCanvas(this.stage, this.model, (src) => this.image(src));
 		this.input = new BoardInput(this);
-		this.panels = { layers: new LayersPanel(this), plan: new PlanPanel(this), ai: new AiPanel(this), history: new HistoryPanel(this) };
+		this.panels = { layers: new LayersPanel(this), plan: new PlanPanel(this), history: new HistoryPanel(this) };
 		this.panelName = "layers";
 		this.panelOpen = window.innerWidth >= PHONE;
 		this.buildToolbar();
@@ -102,7 +102,7 @@ export class BoardView {
 			this.zoomLabel,
 			h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", on: { click: () => this.zoomBy(1.25) } }, icon("zoom-in")),
 			h("button.ib", { title: "Show everything (Shift+1)", "aria-label": "Fit", on: { click: () => this.canvas.show(this.canvas.contentBox()) } }, icon("screen-full")),
-			h("button.btn.flat.board-ai-button", { title: "The board's AI", on: { click: () => this.showPanel("ai", true) } }, icon("sparkle", "c-ai"), h("span.lbl", null, "AI")),
+			h("button.btn.flat.board-ai-button", { title: "Open the board's chat: it sees the board, its layers, your selection and its plans, and changes them live", on: { click: () => this.openChat() } }, icon("sparkle", "c-ai"), h("span.lbl", null, "AI")),
 			h("button.ib.board-panel-toggle", { title: "Side panel", "aria-label": "Side panel", on: { click: () => this.togglePanel() } }, icon("layout-sidebar-right")));
 		this.toolChanged();
 		this.styleChanged();
@@ -211,8 +211,8 @@ export class BoardView {
 	// --- panel -----------------------------------------------------------------------------------------------------
 
 	buildPanel() {
-		const names = [["layers", "Layers", "layers"], ["plan", "Plan", "book"], ["ai", "AI", "sparkle"], ["history", "History", "history"]];
-		replace(this.panelTabs, names.map(([id, title, iconName]) => h("button.board-panel-tab", { role: "tab", dataset: { panel: id }, on: { click: () => this.showPanel(id, true) } }, icon(iconName, id === "ai" ? "c-ai" : undefined), h("span", null, title))));
+		const names = [["layers", "Layers", "layers"], ["plan", "Plan", "book"], ["history", "History", "history"]];
+		replace(this.panelTabs, names.map(([id, title, iconName]) => h("button.board-panel-tab", { role: "tab", dataset: { panel: id }, on: { click: () => this.showPanel(id, true) } }, icon(iconName), h("span", null, title))));
 		this.showPanel(this.panelName, this.panelOpen);
 	}
 
@@ -403,54 +403,19 @@ export class BoardView {
 		else this.ied.tabs.openBeside(this.ctx.ref, ref, { tether: true });
 	}
 
+	// The AI button (owner, 2026-11-11: "i should be able to open the chat window without it auto sending a message"):
+	// the board's chat beside the board, nothing sent. A chat that has no turns yet gets the board (and the selection)
+	// written in its empty message box, for the owner to finish or clear.
 	async openChat() {
-		const fresh = !this.local.chatId;
 		const chatId = await this.chat(true);
 		if (!chatId) return;
-		if (fresh) await this.send(chatId, "I am working on the planning board " + this.path + ". Look at it (board_view, board_read) and wait for what I ask.");
 		this.showChat(chatId);
-	}
-
-	context() {
+		const list = await this.ied.client.request("chat.list", { wsId: this.ctx.wsId }).catch(() => null);
+		const summary = list && (list.chats || []).find((c) => c.chatId === chatId);
+		const fresh = !summary || !summary.turnCount;
 		const ids = [...this.input.selection].filter((id) => !id.startsWith("t"));
-		const where = "the planning board " + this.path;
-		return ids.length ? where + " (I have selected " + ids.join(", ") + ": work on those)" : where;
-	}
-
-	async askAi(kind) {
-		const where = this.context();
-		const texts = {
-			cleanup: "Clean up the sketch on " + where + ": turn my freehand drawing into clean shapes, frames and connectors with board_recognize (read my handwriting in board_view first), keep my strokes on their own hidden layer, and tidy the result. Tell me anything you guessed.",
-			mermaid: "Convert the diagram on " + where + " to Mermaid: clean up any sketch first, then save the export as a Mermaid plan on the board (board_plan with from: mermaid) and show it to me.",
-			plan: "Write the plan for the design on " + where + ": one section per component (what it does, its interface, what it talks to and how), the flows, the data, open questions and the Mermaid diagram, kept on the board with board_plan. Give the nodes a desc as you go. Mark assumptions as assumptions.",
-			review: "Review the design on " + where + ": point out gaps, risks, missing pieces and open questions. Put the important ones on the board as sticky notes about the element they concern (board_edit add note with about), and summarize them here.",
-		};
-		if (kind === "build") return this.build();
-		const chatId = await this.chat(true);
-		if (!chatId) return;
-		await this.send(chatId, texts[kind]);
-		this.showChat(chatId);
-	}
-
-	async send(chatId, text) {
-		await this.ied.client.request("chat.send", { chatId, text, as: "message" }).catch((e) => this.ied.toast("Cannot send to the chat: " + e.message, { level: "error" }));
-	}
-
-	// An agent that builds the plan: asked first, as it changes the workspace.
-	async build() {
-		if (!this.model.plans.length) {
-			const go = await confirmDialog({ title: "Build without a plan?", message: "The board has no plan yet. The agent will work from the diagram alone. Ask the AI to write the plan first for a better result.", confirm: "Build anyway" });
-			if (!go) return;
-		}
-		else {
-			const go = await confirmDialog({ title: "Build the design", message: "Start an agent chat that implements the board's plan in this workspace? It writes code; you can follow and stop it in its chat.", confirm: "Start building" });
-			if (!go) return;
-		}
-		const title = "Build: " + (this.model.title || this.path.split("/").pop().replace(/\.iedboard$/, ""));
-		const made = await this.ied.client.request("chat.create", { wsId: this.ctx.wsId, title, mode: "agent" }).catch((e) => { this.ied.toast("Cannot start the agent: " + e.message, { level: "error" }); return null; });
-		if (!made) return;
-		await this.send(made.chatId, "Build the design on the planning board " + this.path + ". Read its plan (board_plan read) and its diagram (board_export, board_view), then implement it in this workspace, step by step, with tests. When something in the plan is unclear or wrong, say so before guessing. When you finish a component, give its node on the board a green color (board_edit) so I can follow progress.");
-		this.showChat(made.chatId);
+		const text = fresh ? "On the planning board " + this.path + (ids.length ? " (selected: " + ids.join(", ") + ")" : "") + ": " : undefined;
+		this.ied.commands.run("ied.chat.focusInput", { chatId, text });
 	}
 }
 

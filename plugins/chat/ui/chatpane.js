@@ -177,6 +177,15 @@ export class ChatPane {
 		this.composer.focus();
 	}
 
+	// The message box focused, `text` put in it first when it is empty (never over what the owner was writing), the caret
+	// after it; nothing is sent (ied.chat.focusInput).
+	focusInput(text) {
+		const input = this.composer.input;
+		if (text && !input.value.trim()) this.composer.setText(text);
+		this.composer.focus();
+		input.setSelectionRange(input.value.length, input.value.length);
+	}
+
 	// Whenever the chat is shown (its tab opened or chosen, its activity back), it opens at its end.
 	visible(shown) {
 		if (!shown) return;

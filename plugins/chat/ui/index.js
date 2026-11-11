@@ -16,11 +16,23 @@ import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 import { TurnNotices, notifySetting } from "./turnnotices.js";
 
 const tabViews = new Set();   // this window's chat tabs, the one focused last at the end
+const pendingInput = new Map();   // chatId -> {text, untilMs}: ied.chat.focusInput for a chat whose tab is still opening
+const PENDING_MS = 10000;
 
 // The chat tab a command means: the one its menu was opened on ({ref}), else the one focused last.
 function tabOf(args) {
 	const views = [...tabViews];
 	return args && args.ref ? views.find((view) => view.ctx.ref === args.ref) || null : views.pop() || null;
+}
+
+// Chat: Focus the Message Box - the chat tab focused last; with {chatId, text} (another plugin opening a chat about
+// something, the planning board's AI button) that chat's box, `text` put in it when it is empty, unsent. The caller
+// opens the tab where it wants it; a tab still opening takes it when it comes.
+function focusInput(args) {
+	const chatId = args && args.chatId;
+	const view = chatId ? [...tabViews].reverse().find((v) => v.chatId === chatId) : tabOf(null);
+	if (view) return view.pane.focusInput(args && args.text);
+	if (chatId) pendingInput.set(chatId, { text: args.text, untilMs: Date.now() + PENDING_MS });
 }
 
 // The plugin's stylesheet, once: activate() adds it, and so does a settings page shown with no workspace, where nothing
@@ -46,6 +58,7 @@ export function activate(ied) {
 		if (view && view.summary) deleteChat(ied, view.chatId, view.summary.title, view.keepsDeleted);
 	});
 	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
+	ied.commands.handle("ied.chat.focusInput", (args) => focusInput(args));
 	ied.tabs.kind("chat", { view: "ChatTab", title: (arg) => (arg === DRAFT ? "New chat" : "Chat"), icon: (arg) => (arg === DRAFT ? "$(add)" : "$(comment-discussion)") });
 	badgeActiveChats(ied);
 }
@@ -106,6 +119,11 @@ export function chatBadge(chats) {
 export function ChatTab(ctx) {
 	const view = new ChatTabView(ctx, ctx.ref.slice("chat:".length));
 	tabViews.add(view);
+	const pending = view.chatId ? pendingInput.get(view.chatId) : null;
+	if (pending) {
+		pendingInput.delete(view.chatId);
+		if (pending.untilMs > Date.now()) view.pane.focusInput(pending.text);
+	}
 	ctx.el.addEventListener("focusin", () => {
 		tabViews.delete(view);
 		tabViews.add(view);
