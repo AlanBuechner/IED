@@ -148,4 +148,20 @@ class WatchTests {
 		moved.Close();
 		FS::RemoveAll(folder.CStr());
 	}
+
+	// BUG-455: a watcher opened by a thread that then ended (a server's request thread) stopped watching - Windows
+	// cancels the I/O a thread leaves pending when it exits. It goes on watching, an Overflow first: what changed while
+	// no request was pending is not known.
+	[test("opened_by_a_thread_that_ended")]
+	public static void TestOpenerEnded() {
+		FS::Path folder = WatchScratch("opener_ended");
+		FS::Watcher* watcher = null;
+		Threading::Thread opener = Threading::Thread::Run([folder, &watcher]() { watcher = new FS::Watcher(folder.CStr()); });
+		opener.Join();
+		assert_true(watcher != null && watcher->IsOpen(), "opened on the other thread");
+		WriteWatchedFile(folder / "late.txt", "written after the thread that opened the watcher ended");
+		assert_true(WaitForChange(*watcher, FS::ChangeKind::Added, "late.txt", ""), "still watching");
+		watcher->Close();
+		FS::RemoveAll(folder.CStr());
+	}
 }

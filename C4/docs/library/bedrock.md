@@ -518,7 +518,8 @@ next `Change`: `kind` (`Added`, `Removed`, `Modified`, `Renamed`, `Overflow`), `
 directory as the system writes it, and `oldPath` for a rename. It is false when none comes in time (`TimedOut()`)
 or watching failed (`Error()`: the directory was removed, or the watcher is closed). Every change made after the
 watcher opened comes out of `Next`, or an `Overflow` in its place when too many came at once to keep: then look at
-the directory again. Changes come as the system reports them: saving a file is often several `Modified`, and an
+the directory again. A watcher may be opened on one thread and read on another; when the opening thread ends
+before the first `Next`, the system drops what it was waiting for, and `Next` gives an `Overflow` and goes on. Changes come as the system reports them: saving a file is often several `Modified`, and an
 editor's safe save a `Renamed` or a `Removed` and an `Added`, so coalesce them before acting. A watched directory
 can still be removed; it goes once the watcher closes.
 

@@ -1,7 +1,8 @@
 // Watching a folder for Bedrock's FS::Watcher (FileSystemRuntimeC.h) with ReadDirectoryChangesW. A request is kept
 // pending from c4_fs_watch_open on: when one completes, the next starts at once into the other of two buffers while
 // the first is handed out record by record, and between requests the system keeps what changes. A rename arrives as
-// two records, the old name then the new, which become one change.
+// two records, the old name then the new, which become one change. The first request is the opening thread's: when
+// that thread ends, Windows cancels it, and the watching thread asks again and reports an overflow (BUG-455).
 
 #include "FileSystemWin32.h"
 #include "PathRuntimeC.h"
@@ -168,6 +169,17 @@ static int32_t Receive(Watch* watch, int32_t timeoutMs)
 	DWORD bytes = 0;
 	const BOOL done = GetOverlappedResult(watch->folder, &watch->overlapped, &bytes, FALSE);
 	watch->pending = false;
+	if (!done && GetLastError() == ERROR_OPERATION_ABORTED)
+	{
+		// The thread that issued the request ended - c4_fs_watch_open's caller, a server's request thread: Windows
+		// cancels the I/O a thread leaves pending when it exits. This thread asks again, and the caller hears of an
+		// overflow, since what changed while nothing was pending is not known (BUG-455).
+		watch->overflowed = true;
+		watch->hasOld = false;
+		watch->next = NULL;
+		Request(watch);   // when it fails, the next call reports why once the overflow is handed out
+		return 1;
+	}
 	if (!done && GetLastError() != ERROR_NOTIFY_ENUM_DIR) return -1;
 	const int completed = watch->requested;
 	watch->overflowed = !done || bytes == 0;
