@@ -543,6 +543,36 @@ class ChatTests(ChatCase):
 		await self.client.request("chat.set", {"chatId": mine, "section": ""})
 		self.assertNotIn("section", await self.summary(mine), "and leaves it")
 
+	async def test_an_unsent_message_is_kept_until_it_is_sent(self):
+		chat_id, topic = await self.chat()
+		mentions = [{"kind": "file", "ref": "notes.md", "label": "notes.md"}]
+		kept = await self.client.request("chat.draft", {"chatId": chat_id, "text": "Read @notes.md and", "mentions": mentions})
+		self.assertEqual({"text": "Read @notes.md and", "mentions": mentions}, kept)
+		told = await self.client.wait_for(topic, lambda f: f.get("kind") == "draft.changed")
+		self.assertEqual("Read @notes.md and", told[-1]["data"]["text"], "its viewers are told")
+		self.assertNotIn("updatedMs", told[-1]["data"])
+		before = (await self.summary(chat_id))["updatedMs"]
+		self.assertEqual("Read @notes.md and", (await self.client.request("chat.draft", {"chatId": chat_id}))["text"])
+		new = await self.client.request("chat.draft", {"wsId": "w1", "text": "A new chat about"})
+		self.assertEqual("A new chat about", new["text"])
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub([topic])
+		snapshot = (await self.client.next_frame(topic))["data"]
+		self.assertEqual({"text": "Read @notes.md and", "mentions": mentions}, snapshot["draft"], "kept across a restart")
+		self.assertEqual(before, (await self.summary(chat_id))["updatedMs"], "typing does not move the chat in the list")
+		self.assertEqual("A new chat about", (await self.client.request("chat.draft", {"wsId": "w1"}))["text"], "the New chat draft too")
+		self.model.queue(text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id, text="Read @notes.md and say hi"))["stop"])
+		self.assertEqual("", (await self.client.request("chat.draft", {"chatId": chat_id}))["text"], "sent: no longer unsent")
+		await self.client.request("chat.draft", {"wsId": "w1", "text": ""})
+		self.assertEqual("", (await self.client.request("chat.draft", {"wsId": "w1"}))["text"])
+		with self.assertRaises(Exception):
+			await self.client.request("chat.draft", {"chatId": chat_id, "text": "x" * (256 * 1024 + 1)})
+
 	async def test_chats_talk_to_each_other(self):
 		model = {"endpoint": self.model.url + "/v1", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model, "fixed": dict(model, model="script:ok-text")}})

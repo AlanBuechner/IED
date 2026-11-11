@@ -153,6 +153,7 @@ namespace Ai
 		private Core::String CreateMethod(const IED::Request& request);
 		private Core::String SetMethod(const IED::Request& request);
 		private Core::String SendMethod(const IED::Request& request);
+		private Core::String DraftMethod(const IED::Request& request);
 		private Core::String UnqueueMethod(const IED::Request& request);
 		private Core::String StopMethod(const IED::Request& request);
 		private Core::String StopTaskMethod(const IED::Request& request);

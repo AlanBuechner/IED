@@ -16,7 +16,7 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, withTethersMoved, partnersOf, followersOf } from "./layoutdoc.js";
+import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, withTethersMoved, partnersOf, followersClosing } from "./layoutdoc.js";
 import { activitiesOf, shownIn, withShown } from "./windowdoc.js";
 import { DockWindows } from "./dockwindows.js";
 import { tabKindOf, dockFor } from "./dockplace.js";
@@ -836,7 +836,7 @@ export class Shell {
 		const after = fn(before);
 		const closed = T.closedBy(before, after);
 		const kept = new Set(T.refsOf(after));
-		const followers = closed.flatMap((ref) => followersOf(this.doc, ref)).filter((ref) => kept.has(ref));
+		const followers = followersClosing(this.doc, closed, kept);
 		this.closeInTree(activityId, (tree) => followers.reduce((t, ref) => T.closeTab(t, ref), fn(tree)));
 		for (const ref of closed.concat(followers)) this.tabClosed(ref);
 	}

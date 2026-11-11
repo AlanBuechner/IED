@@ -1,0 +1,51 @@
+include "Drafts.ch"
+include "Sent.ch"
+
+namespace Ai
+{
+	static FS::Path NewDraftFile(const FS::Path& state) { return state / "chats" / "draft.json"; }
+
+	void WriteDraft(IED::JsonWriter& json, const Draft& draft) {
+		json.BeginObject();
+		json.Field("text", draft.m_Text.View());
+		json.Key(Core::StringView("mentions"));
+		WriteMentions(json, draft.m_Mentions);
+		json.EndObject();
+	}
+
+	Draft ReadDraft(const IED::Params& params) {
+		Draft draft;
+		draft.m_Text = params.Str("text");
+		if (draft.m_Text.ByteLength() > c_MostDraftBytes) throw IED::RpcError(IED::ErrorCode::BadRequest, "the unsent message is longer than 256 KiB");
+		if (!draft.m_Text.View().Trimmed().IsEmpty()) draft.m_Mentions = SentMentions(params.Field("mentions"));
+		return draft;
+	}
+
+	Draft LoadNewDraft(const FS::Path& state) {
+		Draft draft;
+		FS::Path file = NewDraftFile(state);
+		if (!FS::FileExists(file.CStr())) return draft;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+		if (!read.Ok()) return draft;
+		draft.m_Text = Core::String(read.root.Member("text").AsView());
+		ReadMentions(read.root.Member("mentions"), draft.m_Mentions);
+		return draft;
+	}
+
+	void SaveNewDraft(const FS::Path& state, const Draft& draft) {
+		FS::Path file = NewDraftFile(state);
+		if (draft.m_Text.View().Trimmed().IsEmpty()) {
+			if (FS::FileExists(file.CStr())) FS::RemoveFile(file.CStr());
+			return;
+		}
+		FS::MakeDirectories((state / "chats").CStr());
+		IED::JsonWriter json;
+		WriteDraft(json, draft);
+		Core::String written = json.ToString();
+		Core::StringView text = written.View();
+		FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+	}
+}

@@ -1,6 +1,7 @@
 include "api/Plugin.ch"
 include "Chat.ch"
 include "aitools/Images.ch"
+include "Drafts.ch"
 
 namespace Ai
 {
@@ -707,6 +708,10 @@ namespace Ai
 		json.BeginObject();
 		WriteSummary(json);
 		WriteInUse(json, model, groupInUse, roleEffort);
+		if (!m_Draft.m_Text.IsEmpty()) {
+			json.Key(Core::StringView("draft"));
+			WriteDraft(json, m_Draft);
+		}
 		json.Key(Core::StringView("tasks"));
 		WriteTasks(json);
 		json.Key(Core::StringView("queued"));

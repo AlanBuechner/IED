@@ -335,6 +335,21 @@ test("layout: activating a tab shows its tethered partners in their groups", () 
 	assertEqual(L.revealPartners(same, "doc:a.h", ["doc:a.cf"]).tabs.length, 2, "a partner in the same group stays behind");
 	assertEqual(L.groupOf(L.revealPartners(same, "doc:a.h", ["doc:a.cf"]), "doc:a.h").active, "doc:a.h");
 	assertEqual(L.revealPartners(tree, "doc:a.h", []), tree);
+	let boards = L.normalize(L.group(["board:a", "board:b"], { well: true, active: "board:b" }));
+	boards = L.openBeside(boards, "board:b", "chat:c");
+	const kept = L.revealPartners(L.activateTab(boards, "chat:c"), "chat:c", ["board:a", "board:b"]);
+	assertEqual(L.groupOf(kept, "board:a").active, "board:b", "a group showing one of several partners keeps it");
+});
+
+test("layout doc: a tab tethered to several leads closes with the last of them", () => {
+	let doc = D.emptyDocument();
+	doc = D.withTether(doc, "board:a", "chat:c", true);
+	doc = D.withTether(doc, "board:b", "chat:c", true);
+	doc = D.withTether(doc, "doc:a.md", "mdpreview:a.md", true);
+	assertEqual(D.followersClosing(doc, ["board:a"], new Set(["board:b", "chat:c", "doc:a.md", "mdpreview:a.md"])), [], "board b keeps it open");
+	assertEqual(D.followersClosing(doc, ["board:a", "board:b"], new Set(["chat:c"])), ["chat:c"], "the last board takes it");
+	assertEqual(D.followersClosing(doc, ["doc:a.md"], new Set(["mdpreview:a.md"])), ["mdpreview:a.md"], "one lead, as before");
+	assertEqual(D.followersClosing(doc, ["board:a"], new Set(["board:b"])), [], "one closed already");
 });
 
 test("layout doc: tethers pair tabs, and a follower closes with its lead", () => {

@@ -403,7 +403,9 @@ test("chat pane: Edit puts the message in the composer; sending it asks, reverts
 		pane.composer.send("message");
 		await confirmShown(true);
 		await frames(2);
-		assertEqual(ied.calls.filter(([m]) => m.startsWith("chat.")).map(([m, p]) => [m, p.turnId || p.text]), [["chat.revert", "u1"], ["chat.send", "Question 1, better"]], "reverted, then the edited text sent");
+		const calls = ied.calls.filter(([m]) => m.startsWith("chat."));
+		assertEqual(calls.filter(([m]) => m !== "chat.draft").map(([m, p]) => [m, p.turnId || p.text]), [["chat.revert", "u1"], ["chat.send", "Question 1, better"]], "reverted, then the edited text sent");
+		assertEqual([calls.find(([m]) => m === "chat.send")[1].keepDraft, calls[calls.length - 1][0]], [true, "chat.draft"], "what the box held before the edit stays kept, and comes back");
 	}
 	finally {
 		closePane(pane);
@@ -588,6 +590,60 @@ test("chat: the thinking preview keeps its size, and its text only moves up - ne
 		assertTrue(Math.abs(tail.getBoundingClientRect().height - height) < 1, "four lines tall");
 		assertTrue(lines.scrollWidth <= tail.clientWidth + 1, "long lines wrap: nothing reaches past the box's right edge");
 		assertTrue(!lines.textContent.includes("w110 ") || wordLeft(110) === before, "a line kept stays where it was");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("chat pane: what is typed and not sent is kept by the server, back in the box when the chat is shown again", async () => {
+	const kept = { c1: { text: "", mentions: [] }, c2: { text: "Second thought", mentions: [] } };
+	const ied = answering(fakeIed(), { "chat.draft": (p) => {
+		if (p.text !== undefined) kept[p.chatId] = { text: p.text, mentions: p.mentions };
+		return kept[p.chatId];
+	} });
+	const pane = await openPane(ied, 1);
+	try {
+		pane.composer.input.value = "Half a question";
+		pane.composer.input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+		assertEqual(ied.calls.filter(([m]) => m === "chat.draft").length, 0, "not at every key");
+		await wait(650);
+		assertEqual(kept.c1.text, "Half a question", "kept a moment after typing stops");
+		pane.show("c2");
+		assertEqual(pane.composer.input.value, "", "the next chat's box is its own");
+		ied.topics.get("chat:c2").snap(Object.assign(snapshotOf(1), { chatId: "c2", draft: kept.c2 }));
+		assertEqual(pane.composer.input.value, "Second thought", "its unsent message back");
+		pane.composer.input.value = "Second thought, longer";
+		pane.composer.input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+		pane.show("c1");
+		assertEqual(kept.c2.text, "Second thought, longer", "switching away keeps it at once");
+		ied.topics.get("chat:c1").snap(Object.assign(snapshotOf(1), { draft: kept.c1 }));
+		assertEqual(pane.composer.input.value, "Half a question");
+		pane.composer.input.blur();
+		ied.topics.get("chat:c1").evt("draft.changed", { text: "Written on the phone", mentions: [] });
+		assertEqual(pane.composer.input.value, "Written on the phone", "another device's text, while this box is not in use");
+	}
+	finally {
+		closePane(pane);
+	}
+});
+
+test("chat pane: a plugin's text waits for the chat's own unsent message and never replaces it", async () => {
+	const ied = answering(fakeIed(), {});
+	const pane = new ChatPane(ied, "w1", { created: () => {}, openChat: () => {}, shown: () => {} });
+	document.body.append(pane.el);
+	try {
+		pane.show("c1");
+		pane.focusInput("On the planning board x: ");
+		assertEqual(pane.composer.input.value, "", "not before the chat's own has come");
+		ied.topics.get("chat:c1").snap(Object.assign(snapshotOf(0), { draft: { text: "My words", mentions: [] } }));
+		assertEqual(pane.composer.input.value, "My words", "the owner's unsent message wins");
+		pane.show("c2");
+		pane.focusInput("On the planning board y: ");
+		ied.topics.get("chat:c2").snap(Object.assign(snapshotOf(0), { chatId: "c2" }));
+		assertEqual(pane.composer.input.value, "On the planning board y: ", "an empty chat takes the plugin's text");
 	}
 	finally {
 		closePane(pane);

@@ -439,39 +439,80 @@ export class BoardView {
 		return made;
 	}
 
-	// Beside the boards, a narrow group of its own the first time (owner, 2026-11-11: "by default the chat should show
-	// up in a smaller window"), tethered to the board: it shows whenever the board does, and closes with it.
-	showChat(chatId) {
-		const ref = "chat:" + chatId;
-		if (window.innerWidth < PHONE || !this.ied.tabs.openBeside) this.ied.tabs.open(ref, { preview: false });
-		else this.ied.tabs.openBeside(this.ctx.ref, ref, { tether: true, closes: true, size: CHAT_SHARE });
+	// The boards' chat tab (owner, 2026-11-11: "in the planning board it should be a single chat tab that will switch as
+	// you switch boards"): the chat tabs open in this board's activity that are boards' chats (in the Boards section, or
+	// tethered with a board) - one, once this has run; [] when none is open, or this board is in no group.
+	async boardChatTabs() {
+		const before = this.ied.tabs.state();
+		const home = (before.groups || []).find((g) => g.tabs.includes(this.ctx.ref));
+		if (!home || !before.open.some((ref) => ref.startsWith("chat:"))) return [];
+		const list = await this.ied.client.request("chat.list", { wsId: this.ctx.wsId }).catch(() => null);
+		const boards = new Set(((list && list.chats) || []).filter((c) => c.section === CHAT_SECTION).map((c) => "chat:" + c.chatId));
+		const state = this.ied.tabs.state();
+		return (state.groups || []).filter((g) => g.activity === home.activity).flatMap((g) => g.tabs.filter((ref) => ref.startsWith("chat:")
+			&& (boards.has(ref) || this.ied.tabs.partners(ref).some((p) => p.startsWith("board:")))).map((ref) => ({ ref, group: g })));
 	}
 
-	// The board's chat follows the board (owner, 2026-11-11: "when i switch the board it will switch to the
-	// corresponding chat"): its tab, tethered to the board, shows whenever the board does; a board whose chat is not open
-	// brings it - the one it talked to before, else a new one - when another board's chat shows beside the boards.
+	// The boards' chat tab shows this board's chat `chatId`: the tab of another board's chat becomes it in its place
+	// (its group, position and tethers kept), any other board chat tab here closes, and every board open here is
+	// tethered to it - so it shows with each, closes with the last of them (docs/15 "Tethered tabs"), and a board opened
+	// from the list goes in among the boards, not into the chat's group.
+	useChatTab(chatId, tabs) {
+		const ref = "chat:" + chatId;
+		let tab = tabs.find((t) => t.ref === ref);
+		if (!tab) {
+			tab = tabs.find((t) => t.group.active === t.ref) || tabs[0];
+			if (this.ied.tabs.state().open.includes(ref)) this.ied.tabs.close(ref);   // shown elsewhere: it moves here
+			this.ied.tabs.replace(tab.ref, ref);
+		}
+		for (const other of tabs) if (other !== tab && other.ref !== ref) this.ied.tabs.close(other.ref);
+		this.tetherBoards(ref);
+	}
+
+	tetherBoards(chatRef) {
+		const state = this.ied.tabs.state();
+		const home = (state.groups || []).find((g) => g.tabs.includes(this.ctx.ref));
+		if (!home) return;
+		const tethered = this.ied.tabs.partners(chatRef);
+		const boards = state.groups.filter((g) => g.activity === home.activity).flatMap((g) => g.tabs.filter((ref) => ref.startsWith("board:")));
+		for (const board of boards) if (!tethered.includes(board)) this.ied.tabs.tether(board, chatRef, { closes: true });
+	}
+
+	// The board's chat in the boards' chat tab, which opens - beside the boards, a narrow group of its own (owner,
+	// 2026-11-11: "by default the chat should show up in a smaller window") - when there is none.
+	async showChat(chatId) {
+		const ref = "chat:" + chatId;
+		if (window.innerWidth < PHONE || !this.ied.tabs.openBeside || !this.ied.tabs.replace) {
+			this.ied.tabs.open(ref, { preview: false });
+			return;
+		}
+		const tabs = await this.boardChatTabs();
+		if (tabs.length) {
+			this.useChatTab(chatId, tabs);
+			this.ied.tabs.open(ref, { preview: false });
+			return;
+		}
+		this.ied.tabs.openBeside(this.ctx.ref, ref, { tether: true, closes: true, size: CHAT_SHARE });
+		this.tetherBoards(ref);
+	}
+
+	// The chat follows the board (owner, 2026-11-11: "when i switch the board it will switch to the corresponding
+	// chat"): a board shown while the boards' chat tab is open puts its own chat there - the one it talked to before,
+	// else a new one. Nothing opens when that tab is closed. What was typed in each stays with its chat (docs/04
+	// "Unsent messages").
 	async followChat() {
-		if (window.innerWidth < PHONE || !this.ied.tabs.openBeside) return;
+		if (window.innerWidth < PHONE || !this.ied.tabs.replace) return;
 		await this.localReady;
 		if (this.local.chatId && !this.sectionChecked) {
 			this.sectionChecked = true;
 			this.chat(false);
 		}
-		if (this.disposed || (this.local.chatId && this.ied.tabs.state().open.includes("chat:" + this.local.chatId))) return;
-		if (!this.boardChatBeside(this.ied.tabs.state())) return;
+		const tabs = await this.boardChatTabs();
+		if (!tabs.length || this.disposed) return;
 		const summary = await this.chat(true);
-		if (!summary || this.disposed) return;
-		const state = this.ied.tabs.state();
-		if (state.shown.includes(this.ctx.ref) && this.boardChatBeside(state)) this.showChat(summary.chatId);
-	}
-
-	// Another board's chat is the tab shown in a group of this board's activity other than this board's.
-	boardChatBeside(state) {
-		const groups = state.groups || [];
-		const home = groups.find((g) => g.tabs.includes(this.ctx.ref));
-		if (!home) return false;
-		return groups.some((g) => g !== home && g.activity === home.activity && g.active && g.active.startsWith("chat:")
-			&& this.ied.tabs.partners(g.active).some((ref) => ref.startsWith("board:") && ref !== this.ctx.ref));
+		if (!summary || this.disposed || !this.ied.tabs.state().shown.includes(this.ctx.ref)) return;
+		const now = await this.boardChatTabs();
+		if (now.length) this.useChatTab(summary.chatId, now);
 	}
 
 	// The AI button (owner, 2026-11-11: "i should be able to open the chat window without it auto sending a message"):
@@ -480,7 +521,7 @@ export class BoardView {
 	async openChat() {
 		const summary = await this.chat(true);
 		if (!summary) return;
-		this.showChat(summary.chatId);
+		await this.showChat(summary.chatId);
 		const ids = [...this.input.selection].filter((id) => !id.startsWith("t"));
 		const text = !summary.turnCount ? "On the planning board " + this.path + (ids.length ? " (selected: " + ids.join(", ") + ")" : "") + ": " : undefined;
 		this.ied.commands.run("ied.chat.focusInput", { chatId: summary.chatId, text });

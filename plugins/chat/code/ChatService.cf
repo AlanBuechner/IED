@@ -6,6 +6,7 @@ include "chats/Sent.ch"
 include "aitools/ChatTools.ch"
 include "chats/Pages.ch"
 include "chats/Replies.ch"
+include "chats/Drafts.ch"
 
 namespace Ai
 {
@@ -32,6 +33,7 @@ namespace Ai
 		Register("chat.create", [self](const IED::Request& request) -> Core::String { return self->CreateMethod(request); });
 		Register("chat.set", [self](const IED::Request& request) -> Core::String { return self->SetMethod(request); });
 		Register("chat.send", [self](const IED::Request& request) -> Core::String { return self->SendMethod(request); });
+		Register("chat.draft", [self](const IED::Request& request) -> Core::String { return self->DraftMethod(request); });
 		Register("chat.unqueue", [self](const IED::Request& request) -> Core::String { return self->UnqueueMethod(request); });
 		Register("chat.stop", [self](const IED::Request& request) -> Core::String { return self->StopMethod(request); });
 		Register("chat.stopTask", [self](const IED::Request& request) -> Core::String { return self->StopTaskMethod(request); });
@@ -527,6 +529,36 @@ namespace Ai
 		return chat->SummaryJson();
 	}
 
+	// chat.draft {chatId | wsId, text?, mentions?} (docs/04 "Unsent messages"): with text, the owner's unsent message in
+	// the chat's box - or, with wsId alone, the New chat draft - kept (an empty text keeps none) and the chat's viewers
+	// told (draft.changed); without, the one kept. Either way it answers {text, mentions}. It changes neither when the
+	// chat was last used nor the Chats list.
+	Core::String Chats::DraftMethod(const IED::Request& request) {
+		const IED::Params& params = request.m_Params;
+		IED::JsonWriter json;
+		if (!params.Has("chatId")) {
+			FS::Path state = LocalStateOf(OpenWorkspace(params.Str("wsId").View()));
+			if (!params.Has("text")) {
+				WriteDraft(json, LoadNewDraft(state));
+				return json.ToString();
+			}
+			Draft draft = ReadDraft(params);
+			SaveNewDraft(state, draft);
+			WriteDraft(json, draft);
+			return json.ToString();
+		}
+		Chat* chat = Get(params.Str("chatId").View());
+		if (params.Has("text")) {
+			chat->m_Draft = ReadDraft(params);
+			SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
+			IED::JsonWriter changed;
+			WriteDraft(changed, chat->m_Draft);
+			Publish(chat, "draft.changed", changed.ToString().View());
+		}
+		WriteDraft(json, chat->m_Draft);
+		return json.ToString();
+	}
+
 	// chat.stopTask {chatId, taskId}: one of the chat's background tasks stopped (docs/04 "Background tasks").
 	Core::String Chats::StopTaskMethod(const IED::Request& request) {
 		const IED::Params& params = request.m_Params;
@@ -551,6 +583,15 @@ namespace Ai
 		if (delivery != "message" && delivery != "queue") throw IED::RpcError(IED::ErrorCode::BadRequest, "as must be message or queue");
 		message->m_Mentions = SentMentions(params.Field("mentions"));
 		message->m_Attachments = KeepAttachments(chat, WorkspaceOf(chat), params.Field("attachments"));
+		// What the box held is sent: it is no longer unsent (docs/04 "Unsent messages"); an edited or resent message
+		// (keepDraft) leaves what waits in the box.
+		if (!chat->m_Draft.m_Text.IsEmpty() && !params.Bool("keepDraft", false)) {
+			chat->m_Draft = Draft();
+			IED::JsonWriter cleared;
+			WriteDraft(cleared, chat->m_Draft);
+			Publish(chat, "draft.changed", cleared.ToString().View());
+			SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
+		}
 		IED::JsonWriter json;
 		json.BeginObject();
 		if (!chat->m_Run) {

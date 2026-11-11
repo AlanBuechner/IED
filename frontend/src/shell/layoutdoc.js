@@ -96,6 +96,15 @@ export function followersOf(doc, ref) {
 	return (doc.tethers || []).filter((t) => t.lead === ref && t.closes).map((t) => t.follower);
 }
 
+// The tabs that close with `closed`, those still open being `open` (a Set): each follower of a closed tab, unless
+// another tab it closes with stays open - a tab tethered to several closes with the last of them (docs/15 "Tethered
+// tabs": a board's chat with the boards).
+export function followersClosing(doc, closed, open) {
+	const leadsOf = (ref) => (doc.tethers || []).filter((t) => t.follower === ref && t.closes).map((t) => t.lead);
+	const followers = [...new Set(closed.flatMap((ref) => followersOf(doc, ref)))];
+	return followers.filter((ref) => open.has(ref) && !leadsOf(ref).some((lead) => open.has(lead)));
+}
+
 const BACK_LIMIT = 20;
 
 // The phone shows `pane` (an activity id or a tab ref); the pane it leaves goes on the back stack.

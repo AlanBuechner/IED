@@ -11,7 +11,7 @@ import { TranscriptView } from "./transcript.js";
 import { CodeColors } from "./codecolors.js";
 import { Composer } from "./composer.js";
 import { PREVIEW_ROWS, SidePanel } from "./sidepanel.js";
-import { MentionSource } from "./mentions.js";
+import { MentionSource, keptMentions } from "./mentions.js";
 import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
 import { choicesFrom } from "./modelpicker.js";
@@ -25,6 +25,7 @@ const TRIM_SLACK = 60;
 const OWNER_SCROLL_MS = 800;   // a scroll this soon after the owner's wheel, touch or key is theirs
 const CLAMPED_PX = 2;          // a transcript that shrank under its end is scrolled up by the browser, this close to it
 const PANEL_MIN_PX = 200;
+const DRAFT_MS = 500;   // how long the box rests before what it holds is kept
 const PANEL_OF_KEY = "ied.chat.panelOf";   // {chatId: open} for the chats kept in a section
 const PANEL_OF_MOST = 200;
 const TRANSCRIPT_MIN_PX = 360;   // what a wide panel leaves the transcript
@@ -82,6 +83,13 @@ export class ChatPane {
 		this.stopChat = null;
 		this.draft = newDraft();
 		this.model.summary = draftSummary(this.draft);
+		this.draftTimer = 0;      // the box changed and is not kept yet
+		this.draftLoaded = false; // the server's unsent message for the chat shown has come (until then nothing is kept)
+		this.draftKept = null;    // what the server has, as [text, mentions] JSON
+		this.prefill = null;      // focusInput's text, waiting for the chat's own unsent message
+		this.leaving = () => this.flushDraft();
+		window.addEventListener("pagehide", this.leaving);
+		document.addEventListener("visibilitychange", this.leaving);
 		this.codeColors = new CodeColors(ied);
 		const actions = this.actions();
 		this.transcript = new TranscriptView(this.model, actions);
@@ -162,6 +170,8 @@ export class ChatPane {
 			copy: (text, what) => this.copy(text, what),
 			editMessage: (turn) => this.editMessage(turn),
 			resend: (turn) => this.resend(turn),
+			typed: () => this.typed(),
+			editEnded: () => this.editEnded(),
 		};
 	}
 
@@ -179,13 +189,78 @@ export class ChatPane {
 		this.composer.focus();
 	}
 
-	// The message box focused, `text` put in it first when it is empty (never over what the owner was writing), the caret
-	// after it; nothing is sent (ied.chat.focusInput).
+	// The message box focused, `text` put in it first when it is empty (never over what the owner was writing, nor over
+	// an unsent message the chat kept: it waits for the chat's snapshot), the caret after it; nothing is sent
+	// (ied.chat.focusInput).
 	focusInput(text) {
 		const input = this.composer.input;
-		if (text && !input.value.trim()) this.composer.setText(text);
+		if (text && !this.draftLoaded) this.prefill = text;
+		else if (text && !input.value.trim()) this.composer.setText(text);
 		this.composer.focus();
 		input.setSelectionRange(input.value.length, input.value.length);
+	}
+
+	// --- Unsent messages (docs/04 "Unsent messages") -----------------------------------------------------------------
+
+	// The owner changed the box: what it holds is kept on the server a moment later, for this chat or as the New chat
+	// draft, so switching chats or boards, closing the tab, another device and a restart all find it again. A message
+	// being edited is not kept (the box's own comes back when the edit ends).
+	typed() {
+		if (this.composer.editing) return;
+		clearTimeout(this.draftTimer);
+		this.draftTimer = setTimeout(() => this.saveDraft(), DRAFT_MS);
+	}
+
+	saveDraft() {
+		clearTimeout(this.draftTimer);
+		this.draftTimer = 0;
+		const text = this.composer.input.value;
+		// Before the chat's own has come, only what the owner wrote is kept: an empty box must not clear it.
+		if (this.composer.editing || (!this.draftLoaded && !text.trim())) return;
+		const mentions = keptMentions(text, this.composer.mentions);
+		const key = JSON.stringify([text, mentions]);
+		if (key === this.draftKept) return;
+		this.draftKept = key;
+		const params = this.chatId ? { chatId: this.chatId, text, mentions } : { wsId: this.wsId, text, mentions };
+		this.ied.client.request("chat.draft", params).catch(() => { this.draftKept = null; });
+	}
+
+	flushDraft() {
+		if (this.draftTimer) this.saveDraft();
+	}
+
+	// The unsent message the server kept, in an empty box (never over what the owner is writing: that is kept instead).
+	restoreDraft(draft) {
+		const text = draft && draft.text ? draft.text : "";
+		const mentions = draft && Array.isArray(draft.mentions) ? draft.mentions : [];
+		this.draftLoaded = true;
+		this.draftKept = JSON.stringify([text, mentions]);
+		if (this.composer.editing) return;
+		if (this.composer.input.value.trim()) this.typed();
+		else if (text) {
+			this.composer.mentions = mentions.slice();
+			this.composer.setText(text);
+		}
+		else if (this.prefill) this.composer.setText(this.prefill);
+		this.prefill = null;
+	}
+
+	// Another viewer of the chat (a device, a window) changed its unsent message: shown here unless this box is in use.
+	draftArrived(draft) {
+		const text = draft.text || "";
+		const mentions = Array.isArray(draft.mentions) ? draft.mentions : [];
+		const key = JSON.stringify([text, mentions]);
+		if (key === this.draftKept || this.draftTimer || this.composer.editing || document.activeElement === this.composer.input) return;
+		this.draftKept = key;
+		this.composer.mentions = mentions.slice();
+		this.composer.setText(text);
+	}
+
+	// An edit ended (sent or cancelled): the message the box held before it comes back.
+	async editEnded() {
+		const chatId = this.chatId;
+		const draft = chatId ? await this.ied.client.request("chat.draft", { chatId }).catch(() => null) : null;
+		if (draft && chatId === this.chatId && this.draftLoaded && !this.composer.editing) this.restoreDraft(draft);
 	}
 
 	// Whenever the chat is shown (its tab opened or chosen, its activity back), it opens at its end.
@@ -199,11 +274,20 @@ export class ChatPane {
 
 	// Shows `chatId`, or a draft for null.
 	show(chatId) {
+		this.flushDraft();
 		if (this.stopChat) this.stopChat();
 		this.stopChat = null;
 		this.loading = false;
 		if (this.composer.editing && chatId !== this.chatId) this.composer.stopEditing(true);
+		// Each chat has its own unsent message: the box takes the next chat's when its snapshot comes.
+		if (chatId !== this.chatId) {
+			this.composer.mentions = [];
+			this.composer.setText("");
+		}
+		this.draftLoaded = false;
+		this.draftKept = null;
 		this.chatId = chatId;
+		if (!chatId) this.ied.client.request("chat.draft", { wsId: this.wsId }).then((draft) => { if (!this.chatId) this.restoreDraft(draft); }, () => { this.draftLoaded = true; });
 		this.model = new ChatModel();
 		this.transcript.model = this.model;
 		if (!chatId) this.model.summary = draftSummary(this.draft);
@@ -235,12 +319,14 @@ export class ChatPane {
 		this.composer.update(this.model);
 		this.panel.update(this.model);
 		this.applyPanel();
+		if (!this.draftLoaded) this.restoreDraft(data.draft);
 		this.scrollToEnd();
 		requestAnimationFrame(() => this.loadInSight());
 		if (this.host.shown) this.host.shown(this.model.summary);
 	}
 
 	changed(kind, data) {
+		if (kind === "draft.changed") return this.draftArrived(data);
 		const change = this.model.event(kind, data);
 		if (change.all) return this.reverted();
 		this.transcript.update(change);
@@ -412,6 +498,8 @@ export class ChatPane {
 		if (!created) return false;
 		this.draft = newDraft();
 		this.host.created(created);
+		// The New chat draft became this chat's first message.
+		this.ied.client.request("chat.draft", { wsId: this.wsId, text: "" }).catch(() => null);
 		return true;
 	}
 
@@ -422,6 +510,8 @@ export class ChatPane {
 		if (extras && extras.revertTo && !(await this.revertTo(extras.revertTo))) return false;
 		if (!this.chatId && !(await this.createChat())) return false;
 		const params = { chatId: this.chatId, text, as };
+		// An edited or resent message is not the box's text: what the owner has unsent there stays.
+		if (extras && (extras.revertTo || extras.resent)) params.keepDraft = true;
 		if (extras && extras.mentions.length) params.mentions = extras.mentions;
 		if (extras && extras.attachments.length) params.attachments = extras.attachments;
 		// Sent from far back in the chat (its end not held): the chat's end is shown, where the message goes.
@@ -442,6 +532,7 @@ export class ChatPane {
 
 	// The owner's message back in the composer, with what it named and carried; sending it reverts the chat to before it.
 	editMessage(turn) {
+		this.flushDraft();
 		const user = turn.user || {};
 		this.composer.edit(turn.turnId, turn.startedMs, { text: user.text || "", mentions: user.mentions || [], attachments: user.attachments || [] });
 	}
@@ -450,7 +541,7 @@ export class ChatPane {
 	async resend(turn) {
 		const user = turn.user || {};
 		if (!(await this.revertTo(turn.turnId, "Resend"))) return;
-		await this.send(user.text || "", "message", { mentions: user.mentions || [], attachments: keptAttachments(user.attachments) });
+		await this.send(user.text || "", "message", { mentions: user.mentions || [], attachments: keptAttachments(user.attachments), resent: true });
 	}
 
 	// chat.revert to before `turnId`, once the owner confirms: what goes, that it is kept, that files stay as they are, and
@@ -622,6 +713,9 @@ export class ChatPane {
 	}
 
 	dispose() {
+		this.flushDraft();
+		window.removeEventListener("pagehide", this.leaving);
+		document.removeEventListener("visibilitychange", this.leaving);
 		this.resizer.disconnect();
 		this.stopSettings();
 		if (this.stopChat) this.stopChat();

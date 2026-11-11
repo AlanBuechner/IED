@@ -28,6 +28,13 @@ namespace Ai
 		public Core::String m_Label;   // as the message writes it, after its @
 	}
 
+	// What the owner typed in a chat's box and has not sent (docs/04 "Unsent messages", Drafts.ch).
+	class Draft
+	{
+		public Core::String m_Text;
+		public Core::Array<Mention> m_Mentions;
+	}
+
 	// A file sent with a message, kept in the chat's media folder.
 	class Attachment
 	{
@@ -341,6 +348,7 @@ namespace Ai
 		public Core::String m_Title;
 		public bool m_TitledByAi;                       // chat_title named it, and it may again (docs/04 "Chat names")
 		public Core::String m_Section;                  // the Chats list's section it is kept in (docs/04 "Chat sections"); empty: the owner's own
+		public Draft m_Draft;                           // the owner's unsent message (docs/04 "Unsent messages")
 		public ChatMode m_Mode;
 		public PermissionMode m_Permission;
 		public Core::String m_Group;

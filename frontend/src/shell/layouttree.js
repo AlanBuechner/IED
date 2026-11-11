@@ -247,14 +247,16 @@ function show(owner, ref) {
 }
 
 // Shows each of `partners` that is open in a group other than `ref`'s in its group (tethered tabs, docs/15): one tab of
-// a group shows at a time, so a partner in `ref`'s own group stays behind it.
+// a group shows at a time, so a partner in `ref`'s own group stays behind it, and a group that shows one of the partners
+// already keeps it (a tab tethered with several - a board's chat with every board - never flips the one shown).
 export function revealPartners(tree, ref, partners) {
 	if (!partners.length) return tree;
 	const next = clone(tree);
 	const home = groupOf(next, ref);
+	const showing = new Set(groupsOf(next).filter((g) => g !== home && partners.includes(g.active)));
 	for (const partner of partners) {
 		const owner = groupOf(next, partner);
-		if (owner && owner !== home) show(owner, partner);
+		if (owner && owner !== home && !showing.has(owner)) show(owner, partner);
 	}
 	return normalize(next);
 }

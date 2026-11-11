@@ -37,6 +37,7 @@ export class Composer {
 		this.input.addEventListener("input", () => {
 			this.textChanged();
 			this.list.follow();
+			this.typed();
 		});
 		this.input.addEventListener("click", () => this.list.follow());
 		this.input.addEventListener("paste", (event) => this.pasted(event));
@@ -89,6 +90,11 @@ export class Composer {
 		this.textChanged();
 	}
 
+	// The owner changed what the box holds (typed, pasted, dropped, a mention picked): kept as the chat's unsent message.
+	typed() {
+		if (this.actions.typed) this.actions.typed();
+	}
+
 	key(event) {
 		if (this.list.key(event)) return;
 		if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -125,6 +131,7 @@ export class Composer {
 		const extras = editing ? { mentions, attachments, revertTo: editing.turnId } : { mentions, attachments };
 		if (!(await this.actions.send(text, as, extras))) {
 			this.setText(text);
+			this.typed();
 			return;
 		}
 		this.mentions = [];
@@ -136,6 +143,7 @@ export class Composer {
 	mentioned(row) {
 		this.mentions.push({ kind: row.kind, ref: row.ref, label: row.label });
 		this.textChanged();
+		this.typed();
 	}
 
 	// "@" typed at the caret, as if by the key.
@@ -182,10 +190,12 @@ export class Composer {
 	stopEditing(clear) {
 		this.editing = null;
 		this.renderEditing();
-		if (!clear) return;
-		this.mentions = [];
-		this.attached.clear();
-		this.setText("");
+		if (clear) {
+			this.mentions = [];
+			this.attached.clear();
+			this.setText("");
+		}
+		if (this.actions.editEnded) this.actions.editEnded();
 	}
 
 	renderEditing() {
