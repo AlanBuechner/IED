@@ -1366,7 +1366,10 @@ salts, ten malformed strings, a changed tag).
 **Status:** **Implemented** (IED docs/16): the client of the IED Trace Protocol. A program run with `IED_PROFILER`
 set streams its zones, frames, plots, messages, thread names, tasks, locks, allocations and collections to the IED profiler
 (the IED Profile task sets it to `127.0.0.1:<port>;token=<t>`) or, with `file:<path>`, to a trace file; without it each
-call costs one relaxed load. Opt-in like `math.ch`: `bedrock.ch` does not include it.
+call costs one relaxed load. Started without `IED_PROFILER`, it listens from its first profiling call on the local pipe
+`ied-itp-<pid>` for IED's Attach to Process (`Profile/attach.cf`; IED docs/16 "Attaching to a running program"): an
+attach starts a session as `IED_PROFILER` would, and the programs it starts after inherit it; `IED_PROFILER=off` turns
+that off too. Opt-in like `math.ch`: `bedrock.ch` does not include it.
 
 ```c4
 include "profile.ch"

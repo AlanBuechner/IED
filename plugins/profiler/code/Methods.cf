@@ -1,6 +1,7 @@
 // The prof.* methods (docs/16 "The server does the heavy lifting", docs/10). Every query names a capture, loads it if
 // it is not in memory, and answers from it under the capture's lock; times are nanoseconds since the capture started.
 include "ProfilerService.ch"
+include "attach/Attach.ch"
 include "analysis/Timeline.ch"
 include "analysis/Analysis.ch"
 include "importers/Importers.ch"
@@ -343,5 +344,6 @@ namespace Profiler
 		RegisterMethod(profiler, "prof.lockHold", LockHoldMethod);
 		RegisterAnnotationMethods(profiler);
 		RegisterInvestigationMethods(profiler);
+		RegisterAttachMethods(profiler);
 	}
 }

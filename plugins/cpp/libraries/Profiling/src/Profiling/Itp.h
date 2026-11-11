@@ -1,8 +1,9 @@
 // Itp.h - the C and C++ client of the IED Trace Protocol (IED docs/16): a program run with IED_PROFILER set streams
 // its zones, frames, plots, messages, thread names, tasks, locks and allocations to the IED profiler (the Profile task sets
 // it to "127.0.0.1:<port>;token=<t>"), or with "file:<path>" to a trace file. Without it every call costs one relaxed
-// atomic load. Two files, Itp.h and Itp.cpp, with no dependency but the C++ standard library and the system's sockets:
-// copy them into any C or C++ project.
+// atomic load. Started without it, on Windows it listens on the local pipe ied-itp-<pid> for IED's Attach to Process
+// (IED docs/16 "Attaching to a running program"); IED_PROFILER=off turns that off too. Two files, Itp.h and Itp.cpp, with
+// no dependency but the C++ standard library and the system's sockets: copy them into any C or C++ project.
 //
 //     void Update() {
 //         ITP_ZONE("Update");                 // a zone to the end of the scope, with its function, file and line

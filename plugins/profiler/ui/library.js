@@ -20,6 +20,7 @@ export class CaptureLibraryView {
 		replace(ctx.el,
 			h("div.panel-tools", null,
 				h("button.btn.flat", { title: "Run the startup project's Profile task (Alt+F2)", on: { click: () => this.ied.commands.run("ied.profiler.profile") } }, icon("pulse"), "Profile"),
+				h("button.btn.flat", { title: "Attach to a program that profiles and is running already, with its child processes", on: { click: () => this.ied.commands.run("ied.profiler.attach") } }, icon("debug-alt"), "Attach"),
 				h("button.btn.flat", { title: "Import a Chrome trace, pprof profile or .iedtrace from the workspace", on: { click: () => this.importFile() } }, icon("cloud-upload"), "Import"),
 				h("span.grow"),
 				h("button.ib", { title: "Refresh", "aria-label": "Refresh", on: { click: () => this.refresh() } }, icon("refresh"))),

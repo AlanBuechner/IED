@@ -7,6 +7,7 @@ import { duration, ms, bytes, tickStep, tickLabel, instant } from "/plugins/ied.
 import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, FrameSpan, barsServe, barsFetch, MIN_FRAMES, plotValueAt, plotText, cursorReadout, frameAtTime, guideSpan } from "/plugins/ied.profiler/ui/model.js";
 import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
 import { noteRange } from "/plugins/ied.profiler/ui/notes.js";
+import { processMatches, processRows } from "/plugins/ied.profiler/ui/attach.js";
 
 const MICRO = String.fromCharCode(0xb5) + "s";
 
@@ -243,4 +244,18 @@ test("profiler: the frame under the cursor, and what the guides mark", () => {
 	assertEqual(guideSpan({ zone: [0, 10, 25, 3, "r"] }, null), { from: 10, to: 25 }, "a zone's start and end");
 	assertEqual(guideSpan(null, { item: [30, 70, 1, 2] }), { from: 30, to: 70 }, "else a lock hold's");
 	assertEqual(guideSpan(null, null), null);
+});
+
+test("profiler: Attach to Process lists each process under its nearest attachable ancestor", () => {
+	const processes = [
+		{ pid: 30, under: 10, app: "Worker", exe: "Worker.exe" },
+		{ pid: 10, under: 0, app: "Game", exe: "Game.exe" },
+		{ pid: 20, under: 10, app: "Shader", exe: "ShaderCompiler.exe" },
+		{ pid: 40, under: 20, app: "Deep", exe: "Deep.exe" },
+		{ pid: 50, under: 99, app: "Orphan", exe: "Orphan.exe" },
+	];
+	assertEqual(processRows(processes).map(({ process, depth }) => [process.pid, depth]), [[10, 0], [20, 1], [40, 2], [30, 1], [50, 0]], "depth first, by pid; one whose ancestor is not listed is a root");
+	assertEqual(processes.filter((p) => processMatches(p, "shader")).map((p) => p.pid), [20], "by its program's file");
+	assertEqual(processes.filter((p) => processMatches(p, "40")).map((p) => p.pid), [40], "by pid");
+	assertEqual(processes.filter((p) => processMatches(p, " ")).length, 5, "an empty filter keeps them all");
 });

@@ -671,6 +671,70 @@ def importer_plugin(home):
 			"profilerImporters": [{"id": "upper", "extensions": [".up"], "magic": "UP", "run": [PY, "-I", "${pluginFolder}/convert.py", "${input}", "${output}", "${config:importer.scale}"]}]}})
 
 
+FAKE_ATTACHABLE = os.path.join(REPO, "tools", "server-checks", "fake_attachable.py")
+
+
+def ask_pipe(pid, line):
+	"""One line asked of a process's attach pipe, its answer's line."""
+	with open("\\\\.\\pipe\\ied-itp-%d" % pid, "r+b", buffering=0) as f:
+		f.write((line + "\n").encode())
+		return f.read(4096).decode().strip()
+
+
+class AttachTests(ProfilerServer):
+	"""docs/16 "Attaching to a running program": the programs that profile but were started without IED_PROFILER listen
+	on ied-itp-<pid>; prof.processes lists them under their nearest attachable ancestor, prof.attach tells one where to
+	connect - with its children, those under it now and those that start under it later."""
+
+	def start_fake(self):
+		proc = subprocess.Popen([PY, "-I", FAKE_ATTACHABLE, "Parent", "--child", "Kid"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+		self.addCleanup(lambda: (proc.stdin.close(), proc.wait(10)))
+		child = int(proc.stdout.readline().split()[1])
+		parent = int(proc.stdout.readline().split()[1])
+		return parent, child
+
+	async def live_apps(self, count):
+		frame = (await self.client.wait_for("profs:w1", lambda f: f.get("kind") == "captures.changed" and sum(1 for c in f["data"]["captures"] if c["live"]) >= count, timeout=20))[-1]
+		return sorted(os.path.basename(c["path"]).split("-")[0] for c in frame["data"]["captures"] if c["live"])
+
+	async def test_a_running_program_and_its_children_are_attached(self):
+		parent, child = self.start_fake()
+		self.assertEqual("itp-attach 1 idle Parent", ask_pipe(parent, "hello"))
+		listed = {}
+		for _ in range(50):
+			listed = {p["pid"]: p for p in (await self.query("prof.processes", wsId="w1"))["processes"]}
+			if parent in listed and child in listed:
+				break
+			await asyncio.sleep(0.1)
+		self.assertEqual(("Parent", "idle", 0), (listed[parent]["app"], listed[parent]["state"], listed[parent]["under"]), listed)
+		self.assertEqual(("Kid", parent), (listed[child]["app"], listed[child]["under"]), "the child under its parent")
+		self.assertTrue(listed[parent]["exe"].lower().startswith("python"), listed[parent])
+		answer = await self.query("prof.attach", wsId="w1", pid=parent, children=True)
+		self.assertEqual([(parent, True), (child, True)], [(a["pid"], a["attached"]) for a in answer["attached"]], answer)
+		self.assertTrue(answer["following"])
+		self.assertEqual(["Kid", "Parent"], await self.live_apps(2), "each streams a live capture of its own")
+		self.assertEqual("itp-attach 1 attached Parent", ask_pipe(parent, "hello"))
+		# A child that starts under the parent later is attached by the follower.
+		late = int(ask_pipe(parent, "spawn Late").split()[1])
+		self.assertGreater(late, 0)
+		self.assertEqual(["Kid", "Late", "Parent"], await self.live_apps(3), "the child started later, attached by itself")
+		with self.assertRaises(RpcFailure) as refused:
+			await self.query("prof.attach", wsId="w1", pid=4, children=False)
+		self.assertEqual("not_found", refused.exception.code, "a process that does not profile")
+
+	async def test_attach_without_children_leaves_them_alone(self):
+		parent, child = self.start_fake()
+		for _ in range(50):
+			pids = {p["pid"] for p in (await self.query("prof.processes", wsId="w1"))["processes"]}
+			if {parent, child} <= pids:
+				break
+			await asyncio.sleep(0.1)
+		answer = await self.query("prof.attach", wsId="w1", pid=parent, children=False)
+		self.assertEqual([parent], [a["pid"] for a in answer["attached"]])
+		self.assertEqual(["Parent"], await self.live_apps(1))
+		self.assertEqual("itp-attach 1 idle Kid", ask_pipe(child, "hello"), "the child was not attached")
+
+
 class ImporterTests(ProfilerServer):
 	"""profilerImporters: another plugin's command converts its files, then the profiler reads what it wrote."""
 

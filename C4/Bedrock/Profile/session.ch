@@ -88,6 +88,7 @@ namespace Profile
 		public EventBuffer global;
 		public Core::Array<uint8> threadOrder;   // a ThreadOrder waiting for the flusher (under global.lock), sent as a chunk of its own
 		public int32 stopping;           // atomic
+		public int32 released;           // its collector watch, job observer and flusher let go (StopSession, or a new session)
 		public Threading::Thread* flusher;
 		public int64 lastCalibration;
 		public int64 lastHeapPlot;

@@ -49,6 +49,16 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-readout-row .k { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .prof-readout-row .v { color: var(--text-0); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .prof-range-mode.on { background: var(--bg-4); color: var(--text-0); }
+.popup.dialog.prof-attach:not(.sheet) { width: min(620px, calc(100vw - 32px)); }
+.prof-attach-bar { display: flex; gap: var(--space-2); margin: var(--space-3) 0 var(--space-2); }
+.prof-attach-filter { flex: 1; min-width: 0; }
+.prof-attach-list { height: 260px; overflow-y: auto; border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); background: var(--bg-1); }
+.prof-attach-row { display: flex; align-items: center; gap: var(--space-3); height: var(--row-h); padding: 0 var(--space-3) 0 calc(var(--space-3) + var(--depth) * 16px); cursor: pointer; white-space: nowrap; outline: none; }
+.prof-attach-row:hover { background: var(--veil); }
+.prof-attach-row.on { background: var(--selection-active); color: var(--text-0); }
+.prof-attach-row .muted, .prof-attach-row .meta { font-size: var(--font-size-xs); color: var(--text-2); }
+.prof-attach-empty { padding: var(--space-4); }
+.prof-attach-children { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); font-size: var(--font-size-sm); color: var(--text-1); }
 .prof-tip { position: absolute; z-index: 5; max-width: 420px; padding: var(--space-2) var(--space-3); background: var(--bg-4); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); color: var(--text-0); font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 
 .prof-side { width: 330px; flex: none; border-left: var(--border-width) solid var(--border-0); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; overflow: auto; font-size: var(--font-size-sm); }

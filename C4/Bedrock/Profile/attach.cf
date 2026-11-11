@@ -1,0 +1,102 @@
+// attach.cf - IED's Attach to Process (IED docs/16 "Attaching to a running program"): a program that profiles but was
+// started without IED_PROFILER listens on the local pipe "ied-itp-<pid>" (this user's alone: Net::LocalListener), so IED
+// finds it among \\.\pipe\'s names and starts a session to it there, as if the program had been started to be profiled.
+// One line each way, then the pipe is closed:
+//     hello              -> "itp-attach 1 <idle|attached> <app>"
+//     attach <target>    -> "ok", "busy" (a session runs), or "error <why>": the target as IED_PROFILER takes it, on
+//                           this machine ("127.0.0.1:<port>;token=<t>"); the programs it starts after inherit it in
+//                           IED_PROFILER and connect by themselves
+//     detach             -> "ok": the session stopped, the program goes on
+// IED_PROFILER=off: no pipe.
+
+include "attach.ch"
+include "session.ch"
+include "Net/local.ch"
+include "Platform/system.ch"
+include "Threading/thread.ch"
+
+namespace Profile
+{
+	const int32 kAttachReadMs = 2000;
+	const int32 kAttachSendMs = 2000;
+	const int64 kAttachLineMax = 4096;
+
+	int32 g_attachListening = 0;   // atomic: the listener was started
+
+	static Core::String AttachPipeName() {
+		Core::StringBuilder name;
+		name.Append("ied-itp-");
+		name.AppendInt((int64)Platform::ProcessId());
+		return name.ToString();
+	}
+
+	// The request's line (without its end), or empty when none came in time.
+	static Core::String ReadRequest(Net::LocalStream& stream) {
+		Core::StringBuilder line;
+		char[256] buffer;
+		while (line.View().ByteLength() < kAttachLineMax) {
+			const int64 got = stream.Receive((void*)&buffer[0], 256, kAttachReadMs);
+			if (got <= 0) break;
+			Core::StringView part = Core::StringView((const char*)&buffer[0], got);
+			const int64 end = part.IndexOf('\n');
+			if (end >= 0) {
+				line.Append(part.Substring(0, end));
+				break;
+			}
+			line.Append(part);
+		}
+		return Core::String(line.View().Trimmed());
+	}
+
+	// A target on this machine: an attach never sends a program's profile anywhere else.
+	static bool IsLocalTarget(Core::StringView target) {
+		return target.StartsWith(Core::StringView("127.0.0.1:")) || target.StartsWith(Core::StringView("localhost:")) || target.StartsWith(Core::StringView("[::1]:"));
+	}
+
+	static Core::String Answer(Core::StringView line, Core::StringView app) {
+		if (line == Core::StringView("hello")) {
+			const bool on = Running() != null;
+			return (Core::String("itp-attach 1 ") + (on ? "attached " : "idle ")) + app;
+		}
+		if (line.StartsWith(Core::StringView("attach "))) {
+			Core::StringView target = line.Substring(7, line.ByteLength() - 7).Trimmed();
+			if (!IsLocalTarget(target)) return Core::String("error the target is not on this machine");
+			if (Running() != null) return Core::String("busy");
+			Core::String problem;
+			if (!StartSession(target, app, problem)) return Core::String("error ") + problem.View();
+			Core::String inherited = Core::String(target);
+			Platform::SetEnvironmentVariable("IED_PROFILER", inherited.CStr());
+			return Core::String("ok");
+		}
+		if (line == Core::StringView("detach")) {
+			StopSession();
+			Platform::RemoveEnvironmentVariable("IED_PROFILER");
+			return Core::String("ok");
+		}
+		return Core::String("error not a request: hello, attach <target> or detach");
+	}
+
+	static void AttachLoop(Core::String app) {
+		Net::LocalListener listener;
+		if (!listener.Listen(AttachPipeName().CStr())) return;
+		for (;;) {
+			Net::LocalStream client = listener.Accept();
+			if (!client.IsOpen()) {
+				if (!listener.IsOpen()) return;
+				continue;
+			}
+			Core::String line = ReadRequest(client);
+			if (line.IsEmpty()) continue;
+			Core::String answer = Answer(line.View(), app.View()) + "\n";
+			client.SendText(answer.View(), kAttachSendMs);
+			client.Close();
+		}
+	}
+
+	void ListenForAttach(Core::StringView app) {
+		int32 off = 0;
+		if (!atomic_compare_exchange(&g_attachListening, &off, 1, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return;
+		Core::String name = Core::String(app);
+		Threading::Thread::Run([name]() { AttachLoop(name); }).Detach();
+	}
+}

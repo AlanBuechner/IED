@@ -4,6 +4,7 @@ a frame zooms the timeline, a zone's details name its source; and the capture is
 
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -469,3 +470,44 @@ def profiler_cursor_range_and_guides(run):
 	run.shot("range")
 	page.keyboard.press("Escape")
 	check(page.evaluate("(sel) => document.querySelector(sel + ' .tl').timeline.normalizedRange()", doc) is None, "Esc clears the range")
+
+
+FAKE_ATTACHABLE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "server-checks", "fake_attachable.py")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def profiler_attach_to_process(run):
+	"""Attach to Process (owner, 2026-11-11: "attatch to an already running process including child processes"): the
+	Captures window's Attach lists the programs that profile and run without IED_PROFILER, each child under its parent;
+	Attach with Include child processes connects both, and their live captures come (the first one opens)."""
+	page = run.open()
+	ws = page.evaluate("() => ied_shell.wsId")
+	known = {c["captureId"] for c in run.request("prof.captures", {"wsId": ws})["captures"]}
+	fake = subprocess.Popen([sys.executable, "-I", FAKE_ATTACHABLE, "Arena", "--child", "Baker"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+	try:
+		child = int(fake.stdout.readline().split()[1])
+		parent = int(fake.stdout.readline().split()[1])
+		page.evaluate("() => ied_shell.commands.run('ied.profiler.attach')")
+		row = ".prof-attach-row[data-pid='%d']" % parent
+		page.wait_for_selector(row, timeout=15000)
+		page.wait_for_selector(".prof-attach-row[data-pid='%d']" % child)
+		depths = page.evaluate("(pids) => pids.map((pid) => getComputedStyle(document.querySelector(`.prof-attach-row[data-pid='${pid}']`)).getPropertyValue('--depth').trim())", [parent, child])
+		check(depths == ["0", "1"], "the child under its parent: %r" % depths)
+		check(page.is_checked(".prof-attach-children input"), "Include child processes is on")
+		page.click(row)
+		run.shot("dialog")
+		page.click(".prof-attach .dialog-buttons button:has-text('Attach')")
+		page.wait_for_selector(".prof-attach", state="detached")
+		deadline = time.monotonic() + 20
+		live = []
+		while time.monotonic() < deadline:
+			live = [c for c in run.request("prof.captures", {"wsId": ws})["captures"] if c["live"] and c["captureId"] not in known]
+			if len(live) >= 2:
+				break
+			time.sleep(0.3)
+		check(sorted(os.path.basename(c["path"]).split("-")[0] for c in live) == ["Arena", "Baker"], "both stream: %r" % [c["path"] for c in live])
+		page.wait_for_selector(".prof-doc .prof-canvas", timeout=20000)
+		run.shot("attached")
+	finally:
+		fake.stdin.close()
+		fake.wait(10)

@@ -215,6 +215,7 @@ namespace
 		Buffer global;
 		Bytes threadOrder;                     // a ThreadOrder waiting for the flusher (under global.lock), sent as a chunk of its own
 		std::atomic<bool> stopping{ false };
+		bool released = false;                 // its flusher joined and its connection closed (itp_stop, or a new session)
 		std::thread flusher;
 		int64_t lastCalibration = 0;
 
@@ -506,6 +507,18 @@ namespace
 
 	void StopAtExit() { itp_stop(); }
 
+	// A session that ended by itself (IED stopped recording: its connection closed): its flusher joined, its connection
+	// closed. g_startLock is held.
+	void ReleaseEnded()
+	{
+		Session* ended = g_session;
+		if (!ended || ended->released || g_state.load(std::memory_order_acquire) == kOn) return;
+		ended->released = true;
+		ended->stopping.store(true, std::memory_order_release);
+		if (ended->flusher.joinable()) ended->flusher.join();
+		Close(ended);
+	}
+
 	bool StartSession(const std::string& target, const std::string& app, std::string& problem)
 	{
 		std::lock_guard<std::mutex> starting(g_startLock);
@@ -514,6 +527,7 @@ namespace
 			problem = "a profiling session is running";
 			return false;
 		}
+		ReleaseEnded();
 		auto session = std::make_unique<Session>();
 		std::string token;
 		if (!Open(session.get(), target, token, problem)) return false;
@@ -558,6 +572,84 @@ namespace
 		return dot == std::string::npos ? name : name.substr(0, dot);
 	}
 
+#if defined(_WIN32)
+	// IED's Attach to Process (IED docs/16 "Attaching to a running program"), as Bedrock's Profile/attach.cf: a program
+	// started without IED_PROFILER listens on the local pipe ied-itp-<pid>, one line each way - hello ("itp-attach 1
+	// <idle|attached> <app>"), attach <target> ("ok", "busy", "error <why>"; a target on this machine; the programs it
+	// starts after inherit it), detach ("ok").
+	std::atomic<bool> g_attachListening{ false };
+
+	bool IsLocalTarget(const std::string& target)
+	{
+		return target.rfind("127.0.0.1:", 0) == 0 || target.rfind("localhost:", 0) == 0 || target.rfind("[::1]:", 0) == 0;
+	}
+
+	std::string AttachAnswer(const std::string& line, const std::string& app)
+	{
+		if (line == "hello") return std::string("itp-attach 1 ") + (g_state.load(std::memory_order_acquire) == kOn ? "attached " : "idle ") + app;
+		if (line.rfind("attach ", 0) == 0)
+		{
+			std::string target = line.substr(7);
+			while (!target.empty() && (target.back() == ' ' || target.back() == '\r')) target.pop_back();
+			if (!IsLocalTarget(target)) return "error the target is not on this machine";
+			if (g_state.load(std::memory_order_acquire) == kOn) return "busy";
+			std::string problem;
+			if (!StartSession(target, app, problem)) return "error " + problem;
+			_putenv_s("IED_PROFILER", target.c_str());
+			return "ok";
+		}
+		if (line == "detach")
+		{
+			itp_stop();
+			_putenv_s("IED_PROFILER", "");
+			return "ok";
+		}
+		return "error not a request: hello, attach <target> or detach";
+	}
+
+	void AttachLoop(std::string app)
+	{
+		const std::string name = "\\\\.\\pipe\\ied-itp-" + std::to_string(GetCurrentProcessId());
+		for (;;)
+		{
+			HANDLE pipe = CreateNamedPipeA(name.c_str(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+				PIPE_UNLIMITED_INSTANCES, 4096, 4096, 0, nullptr);
+			if (pipe == INVALID_HANDLE_VALUE) return;
+			if (!ConnectNamedPipe(pipe, nullptr) && GetLastError() != ERROR_PIPE_CONNECTED)
+			{
+				CloseHandle(pipe);
+				continue;
+			}
+			std::string line;
+			char buffer[256];
+			DWORD got = 0;
+			while (line.size() < 4096 && ReadFile(pipe, buffer, sizeof(buffer), &got, nullptr) && got > 0)
+			{
+				line.append(buffer, got);
+				if (line.find('\n') != std::string::npos) break;
+			}
+			const size_t end = line.find('\n');
+			if (end != std::string::npos) line.resize(end);
+			while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+			if (!line.empty())
+			{
+				const std::string answer = AttachAnswer(line, app) + "\n";
+				DWORD wrote = 0;
+				WriteFile(pipe, answer.data(), (DWORD)answer.size(), &wrote, nullptr);
+				FlushFileBuffers(pipe);
+			}
+			DisconnectNamedPipe(pipe);
+			CloseHandle(pipe);
+		}
+	}
+
+	void ListenForAttach(const std::string& app)
+	{
+		if (g_attachListening.exchange(true)) return;
+		std::thread(AttachLoop, app).detach();
+	}
+#endif
+
 	Session* Running()
 	{
 		int state = g_state.load(std::memory_order_acquire);
@@ -565,8 +657,14 @@ namespace
 		if (state != kUnknown) return nullptr;
 		if (!g_state.compare_exchange_strong(state, kOff, std::memory_order_acq_rel)) return g_state.load() == kOn ? g_session : nullptr;
 		const char* target = std::getenv("IED_PROFILER");
+		const bool named = target && *target;
+		// IED_PROFILER=off: no session, and nothing for IED to attach to either.
+		if (named && std::strcmp(target, "off") == 0) return nullptr;
+#if defined(_WIN32)
+		ListenForAttach(ProgramName());
+#endif
 		std::string problem;
-		if (target && *target) StartSession(target, ProgramName(), problem);
+		if (named) StartSession(target, ProgramName(), problem);
 		return g_state.load(std::memory_order_acquire) == kOn ? g_session : nullptr;
 	}
 
@@ -693,6 +791,7 @@ extern "C" void itp_stop(void)
 	PutChunk(bye, kGlobalChunk, 0, session->startTicks, body);
 	session->Send(bye);
 	Close(session);
+	session->released = true;
 }
 
 extern "C" int itp_active(void)

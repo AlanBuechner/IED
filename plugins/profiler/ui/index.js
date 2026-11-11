@@ -1,12 +1,13 @@
 // index.js - the profiler's UI module (docs/16, mockup 06): the Profiler activity with its Captures tool window, each
 // capture a document (prof:<captureId>), the status bar's "Capturing" while a program records, and the commands -
-// Start Profiling (the Profile task, Alt+F2), Stop, open and import a trace from the Solution Explorer, and how to
-// connect a program started elsewhere.
+// Start Profiling (the Profile task, Alt+F2), Stop, Attach to Process (attach.js), open and import a trace from the
+// Solution Explorer, and how to connect a program started elsewhere.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { promptDialog } from "/ui-kit/dialog.js";
 import { CaptureView } from "./capture.js";
 import { CaptureLibraryView } from "./library.js";
+import { showAttach } from "./attach.js";
 
 const names = new Map();
 // How long Start Profiling waits for its program to connect (a build may come first).
@@ -75,6 +76,22 @@ async function stopProfiling(ied) {
 	for (const capture of live) await ied.client.request("prof.stop", { captureId: capture.captureId }).catch(failed(ied, "Cannot stop the capture"));
 }
 
+// Attach to Process: the programs that profile and run without IED_PROFILER, attached with their children; the first
+// capture that comes is opened.
+async function attachToProcess(ied) {
+	const wsId = ied.workspace.wsId;
+	const library = await ied.client.request("prof.captures", { wsId }).catch(failed(ied, "Cannot ask the profiler"));
+	if (!library) return;
+	const known = new Set(library.captures.map((c) => c.captureId));
+	showAttach(ied, wsId, (answer) => {
+		const attached = (answer.attached || []).filter((a) => a.attached);
+		const refused = (answer.attached || []).filter((a) => !a.attached);
+		ied.toast("Attached to " + attached.length + (attached.length === 1 ? " process" : " processes") + (answer.following ? "; its child processes are followed while it runs" : "") + (refused.length ? " (" + refused.length + " did not answer)" : "") + ".", { level: refused.length ? "warning" : "info" });
+		openNextCapture(ied, wsId, known);
+		ied.commands.run("shell.showActivity", { id: "ied.profiler" });
+	});
+}
+
 async function showConnect(ied) {
 	const library = await ied.client.request("prof.captures", { wsId: ied.workspace.wsId }).catch(failed(ied, "Cannot ask the profiler"));
 	if (!library) return;
@@ -93,6 +110,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.profiler.profile", () => startProfiling(ied));
 	ied.commands.handle("ied.profiler.stop", () => stopProfiling(ied));
 	ied.commands.handle("ied.profiler.connect", () => showConnect(ied));
+	ied.commands.handle("ied.profiler.attach", () => attachToProcess(ied));
 	ied.commands.handle("ied.profiler.open", async (args) => {
 		const path = args && args.path ? args.path : ied.context.get("resourcePath");
 		if (!path) return;

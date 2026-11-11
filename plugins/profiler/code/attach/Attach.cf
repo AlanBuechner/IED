@@ -1,0 +1,264 @@
+// Attach to Process: see Attach.ch.
+
+include "Attach.ch"
+include "api/Plugin.ch"
+
+// The system's process snapshot (kernel32's Toolhelp): PROCESSENTRY32W in its x64 layout.
+struct ToolhelpProcessEntry
+{
+	public uint32 dwSize;
+	public uint32 cntUsage;
+	public uint32 th32ProcessID;
+	public uint64 th32DefaultHeapID;
+	public uint32 th32ModuleID;
+	public uint32 cntThreads;
+	public uint32 th32ParentProcessID;
+	public int32 pcPriClassBase;
+	public uint32 dwFlags;
+	public char16[260] szExeFile;
+}
+
+[link("CreateToolhelp32Snapshot")] void* ToolhelpSnapshot(uint32 flags, uint32 pid) noexcept;
+[link("Process32FirstW")] int32 ToolhelpFirst(void* snapshot, ToolhelpProcessEntry* entry) noexcept;
+[link("Process32NextW")] int32 ToolhelpNext(void* snapshot, ToolhelpProcessEntry* entry) noexcept;
+[link("CloseHandle")] int32 ToolhelpClose(void* handle) noexcept;
+
+namespace Profiler
+{
+	const uint32 c_SnapProcesses = 2;          // TH32CS_SNAPPROCESS
+	const int64 c_InvalidHandle = -1;
+	const int64 c_AncestorsMax = 64;
+
+	static int64 Length16(const char16* text, int64 most) {
+		int64 n = 0;
+		while (n < most && text[n] != 0) ++n;
+		return n;
+	}
+
+	Core::Array<SystemProcess*> SystemProcesses() {
+		Core::Array<SystemProcess*> processes;
+		void* snapshot = ToolhelpSnapshot(c_SnapProcesses, 0);
+		if ((int64)snapshot == c_InvalidHandle || snapshot == nullptr) return processes;
+		ToolhelpProcessEntry entry;
+		entry.dwSize = (uint32)sizeof(ToolhelpProcessEntry);
+		for (int32 more = ToolhelpFirst(snapshot, &entry); more != 0; more = ToolhelpNext(snapshot, &entry)) {
+			SystemProcess* process = new SystemProcess();
+			process->m_Pid = (int64)entry.th32ProcessID;
+			process->m_ParentPid = (int64)entry.th32ParentProcessID;
+			process->m_Exe = Core::FromUtf16(&entry.szExeFile[0], Length16(&entry.szExeFile[0], 260));
+			processes.Push(process);
+			entry.dwSize = (uint32)sizeof(ToolhelpProcessEntry);
+		}
+		ToolhelpClose(snapshot);
+		return processes;
+	}
+
+	static SystemProcess* ProcessOf(const Core::Array<SystemProcess*>& processes, int64 pid) {
+		for (SystemProcess* process : processes)
+			if (process->m_Pid == pid) return process;
+		return nullptr;
+	}
+
+	Core::Array<int64> AttachPipePids() {
+		Core::Array<int64> pids;
+		Core::StringView prefix = Core::StringView(c_AttachPipePrefix);
+		for (FS::DirectoryEntry& entry : FS::Directory("\\\\.\\pipe\\")) {
+			Core::StringView name = entry.name.View();
+			if (!name.StartsWith(prefix)) continue;
+			int64 pid = 0;
+			bool digits = name.ByteLength() > prefix.ByteLength();
+			for (int64 i = prefix.ByteLength(); i < name.ByteLength(); ++i) {
+				const char c = name.Data()[i];
+				if (c < '0' || c > '9') {
+					digits = false;
+					break;
+				}
+				pid = pid * 10 + (c - '0');
+			}
+			if (digits && pid > 0 && !pids.Contains(pid)) pids.Push(pid);
+		}
+		return pids;
+	}
+
+	Core::String AskAttachPipe(int64 pid, Core::StringView line) {
+		Core::StringBuilder name;
+		name.Append(c_AttachPipePrefix);
+		name.AppendInt(pid);
+		Core::String pipe = name.ToString();
+		Net::LocalStream stream = Net::LocalStream::Connect(pipe.CStr(), c_AttachAskMs);
+		if (!stream.IsOpen()) return Core::String();
+		Core::String request = Core::String(line) + "\n";
+		if (!stream.SendText(request.View(), c_AttachAskMs)) return Core::String();
+		Core::StringBuilder answer;
+		char[512] buffer;
+		for (;;) {
+			const int64 got = stream.Receive((void*)&buffer[0], 512, c_AttachAskMs);
+			if (got <= 0) break;
+			Core::StringView part = Core::StringView((const char*)&buffer[0], got);
+			const int64 end = part.IndexOf('\n');
+			if (end >= 0) {
+				answer.Append(part.Substring(0, end));
+				break;
+			}
+			answer.Append(part);
+		}
+		stream.Close();
+		return Core::String(answer.View().Trimmed());
+	}
+
+	bool IsUnder(const Core::Array<SystemProcess*>& processes, int64 pid, int64 ancestor) {
+		int64 at = pid;
+		for (int64 depth = 0; depth < c_AncestorsMax && at > 0; ++depth) {
+			if (at == ancestor) return true;
+			SystemProcess* process = ProcessOf(processes, at);
+			if (!process || process->m_ParentPid == at) return false;
+			at = process->m_ParentPid;
+		}
+		return false;
+	}
+
+	Core::Array<AttachableProcess*> AttachableProcesses() {
+		Core::Array<SystemProcess*> processes = SystemProcesses();
+		Core::Array<int64> pids = AttachPipePids();
+		Core::Array<AttachableProcess*> found;
+		for (int64 pid : pids) {
+			AttachableProcess* process = new AttachableProcess();
+			process->m_Pid = pid;
+			SystemProcess* system = ProcessOf(processes, pid);
+			if (system) {
+				process->m_ParentPid = system->m_ParentPid;
+				process->m_Exe = system->m_Exe;
+			}
+			// "itp-attach 1 <idle|attached> <app>"
+			Core::String hello = AskAttachPipe(pid, Core::StringView("hello"));
+			process->m_State = Core::String("unknown");
+			if (hello.View().StartsWith(Core::StringView("itp-attach "))) {
+				Core::StringView rest = hello.View().Substring(11, hello.ByteLength() - 11);
+				const int64 version = rest.IndexOf(' ');
+				Core::StringView after = version >= 0 ? rest.Substring(version + 1, rest.ByteLength() - version - 1) : Core::StringView("");
+				const int64 state = after.IndexOf(' ');
+				process->m_State = Core::String(state >= 0 ? after.Substring(0, state) : after);
+				process->m_App = Core::String(state >= 0 ? after.Substring(state + 1, after.ByteLength() - state - 1) : Core::StringView(""));
+			}
+			found.Push(process);
+		}
+		// The nearest attachable ancestor of each: the tree the Attach dialog draws.
+		for (AttachableProcess* process : found) {
+			int64 at = process->m_ParentPid;
+			for (int64 depth = 0; depth < c_AncestorsMax && at > 0 && process->m_Under == 0; ++depth) {
+				for (AttachableProcess* other : found)
+					if (other != process && other->m_Pid == at) process->m_Under = at;
+				SystemProcess* system = ProcessOf(processes, at);
+				if (!system || system->m_ParentPid == at) break;
+				at = system->m_ParentPid;
+			}
+		}
+		return found;
+	}
+
+	// --- Methods --------------------------------------------------------------------------------------------------------
+
+	static Core::String ProcessesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Core::Array<AttachableProcess*> processes = AttachableProcesses();
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("processes"));
+		json.BeginArray();
+		for (AttachableProcess* process : processes) {
+			json.BeginObject();
+			json.IntField("pid", process->m_Pid);
+			json.IntField("ppid", process->m_ParentPid);
+			json.IntField("under", process->m_Under);
+			json.Field("exe", process->m_Exe.View());
+			json.Field("app", process->m_App.View());
+			json.Field("state", process->m_State.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Attaches `pid` to `target`: its answer ("ok", "busy", "error ...", or "" when it did not answer).
+	static Core::String AttachOne(int64 pid, Core::StringView target) {
+		return AskAttachPipe(pid, (Core::String("attach ") + target).View());
+	}
+
+	static void WriteAttached(IED::JsonWriter& json, int64 pid, Core::StringView answer) {
+		json.BeginObject();
+		json.IntField("pid", pid);
+		json.BoolField("attached", answer == Core::StringView("ok") || answer == Core::StringView("busy"));
+		json.Field("answer", answer.IsEmpty() ? Core::StringView("no answer") : answer);
+		json.EndObject();
+	}
+
+	// While `root` runs, every attachable process that starts under it is attached too (once).
+	static void Follow(ProfilerPlugin* profiler, int64 root, Core::String target, Core::Array<int64> tried) {
+		while (!profiler->m_Stopping) {
+			Threading::Thread::Sleep(c_FollowEveryNs);
+			Core::Array<int64> pids = AttachPipePids();
+			if (!pids.Contains(root)) return;
+			Core::Array<SystemProcess*> processes;
+			for (int64 pid : pids) {
+				if (tried.Contains(pid)) continue;
+				if (processes.IsEmpty()) processes = SystemProcesses();
+				if (!IsUnder(processes, pid, root)) continue;
+				tried.Push(pid);
+				Core::String answer = AttachOne(pid, target.View());
+				Core::StringBuilder said;
+				said.Append("attached ");
+				said.AppendInt(pid);
+				said.Append(", a child of ");
+				said.AppendInt(root);
+				said.Append(": ");
+				said.Append(answer.IsEmpty() ? Core::StringView("no answer") : answer.View());
+				profiler->m_Context->Log(said.View());
+			}
+		}
+	}
+
+	static Core::String AttachMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Core::String wsId = params.Str("wsId");
+		const int64 pid = params.Int("pid");
+		const bool children = params.Bool("children", true);
+		Core::String target;
+		{
+			Threading::LockGuard guard(profiler->m_Lock);
+			ProfWorkspace* ws = profiler->Workspace(wsId.View());
+			if (!ws) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+			target = profiler->ConnectEnvironment(ws);
+		}
+		Core::Array<int64> pids = AttachPipePids();
+		if (!pids.Contains(pid)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("that process does not take an attach: it does not profile (built without IED's profiling), it was started with IED_PROFILER=off, or it has ended"));
+		Core::String first = AttachOne(pid, target.View());
+		if (first.View().StartsWith(Core::StringView("error "))) throw IED::RpcError(IED::ErrorCode::Unavailable, first.View().Substring(6, first.ByteLength() - 6));
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("attached"));
+		json.BeginArray();
+		WriteAttached(json, pid, first.View());
+		Core::Array<int64> tried;
+		tried.Push(pid);
+		if (children) {
+			Core::Array<SystemProcess*> processes = SystemProcesses();
+			for (int64 other : pids) {
+				if (other == pid || !IsUnder(processes, other, pid)) continue;
+				tried.Push(other);
+				WriteAttached(json, other, AttachOne(other, target.View()).View());
+			}
+		}
+		json.EndArray();
+		json.BoolField("following", children);
+		json.EndObject();
+		if (children) {
+			Core::String follow = target;
+			profiler->m_Context->StartThread([profiler, pid, follow, tried]() { Follow(profiler, pid, follow, tried); });
+		}
+		return json.ToString();
+	}
+
+	void RegisterAttachMethods(ProfilerPlugin* profiler) {
+		RegisterMethod(profiler, "prof.processes", ProcessesMethod);
+		RegisterMethod(profiler, "prof.attach", AttachMethod);
+	}
+}

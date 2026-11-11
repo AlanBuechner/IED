@@ -42,7 +42,8 @@
 			{ "id": "ied.profiler.stop", "title": "Stop Profiling", "category": "Debug", "icon": "$(debug-stop)" },
 			{ "id": "ied.profiler.open", "title": "Open in Profiler", "category": "Solution Explorer", "icon": "$(pulse)" },
 			{ "id": "ied.profiler.import", "title": "Import into Profiler", "category": "Solution Explorer", "icon": "$(pulse)" },
-			{ "id": "ied.profiler.connect", "title": "Connect a Program to the Profiler...", "category": "Debug", "icon": "$(plug)" }
+			{ "id": "ied.profiler.connect", "title": "Connect a Program to the Profiler...", "category": "Debug", "icon": "$(plug)" },
+			{ "id": "ied.profiler.attach", "title": "Attach Profiler to Process...", "category": "Debug", "icon": "$(debug-alt)" }
 		],
 		"menus": {
 			"menubar/view": [
@@ -51,6 +52,7 @@
 			"menubar/debug": [
 				{ "command": "ied.profiler.profile", "group": "5_profile" },
 				{ "command": "ied.profiler.stop", "group": "5_profile" },
+				{ "command": "ied.profiler.attach", "group": "5_profile" },
 				{ "command": "ied.profiler.connect", "group": "5_profile" }
 			],
 			"explorer/context": [

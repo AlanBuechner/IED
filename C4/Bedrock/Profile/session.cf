@@ -1,5 +1,6 @@
 include "session.ch"
 include "collector.ch"
+include "attach.ch"
 include "Platform/time.ch"
 include "Platform/system.ch"
 include "Memory/gc.ch"
@@ -361,11 +362,25 @@ namespace Profile
 		return out;
 	}
 
+	// A session that ended by itself (IED stopped recording: its connection closed) let go of what it held.
+	static void ReleaseEnded() {
+		Session* ended = g_session;
+		if (!ended || ended->released != 0 || atomic_load(&g_state, MemoryOrder::Acquire) == kStateOn) return;
+		ended->released = 1;
+		ObserveJobs(false);
+		UnwatchCollector(ended);
+		atomic_store(&ended->stopping, 1, MemoryOrder::Release);
+		if (ended->flusher) ended->flusher->Join();
+		if (ended->stream) ended->stream->Close();
+		if (ended->file) ended->file->Close();
+	}
+
 	bool StartSession(Core::StringView target, Core::StringView app, Core::String& problem) {
 		if (atomic_load(&g_state, MemoryOrder::Acquire) == kStateOn) {
 			problem = Core::String("a profiling session is running");
 			return false;
 		}
+		ReleaseEnded();
 		Session* session = new Session();
 		Core::String token;
 		if (!Open(session, target, token, problem)) return false;
@@ -403,6 +418,7 @@ namespace Profile
 		int32 on = kStateOn;
 		if (!atomic_compare_exchange(&g_state, &on, kStateOff, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return;
 		Session* session = g_session;
+		session->released = 1;
 		ObserveJobs(false);
 		UnwatchCollector(session);
 		atomic_store(&session->stopping, 1, MemoryOrder::Release);
@@ -420,12 +436,16 @@ namespace Profile
 
 	// --- The first use --------------------------------------------------------------------------------------------
 
-	// Reads IED_PROFILER once: a session starts when it names a target, profiling stays off otherwise.
+	// Reads IED_PROFILER once: a session starts when it names a target, profiling stays off otherwise - and IED can
+	// attach later (attach.cf) unless it says off.
 	static void StartFromEnvironment() {
 		Core::String target;
-		if (!Platform::TryGetEnvironmentVariable("IED_PROFILER", target) || target.IsEmpty()) return;
-		Core::String problem;
+		const bool named = Platform::TryGetEnvironmentVariable("IED_PROFILER", target) && !target.IsEmpty();
+		if (named && target == "off") return;
 		FS::Path program = Platform::ExecutablePath();
+		ListenForAttach(program.Stem());
+		if (!named) return;
+		Core::String problem;
 		StartSession(target.View(), program.Stem(), problem);
 	}
 
