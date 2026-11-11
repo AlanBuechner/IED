@@ -16,7 +16,7 @@ Owner: `src/settings` (store, schemas, merge) + `frontend/` (settings window). D
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-SET-10 | Opened from the bottom sidebar icon; a docked view (not a modal) with a VS Options-style tree on the left: Environment, Keyboard, Text Editor (per language), Projects and Solutions, Build and Run, Debugging, AI (Models, Groups, Routing, Privacy, Prompts, Skills, MCP), Web and Egress, Source Control, Terminal, Sandbox, Profiler, Plugins, Accounts, Remote Access, Diagnostics | P0 | US-SET-1 |
+| F-SET-10 | Opened from the bottom sidebar icon; an overlay over the shell (owner, 2026-11-11; it was a docked view) with a VS Options-style tree on the left whose branches fold, each page's settings in groups that fold: Environment, Keyboard, Text Editor (per language), Projects and Solutions, Build and Run, Debugging, AI (Models, Groups, Routing, Privacy, Prompts, Skills, MCP), Web and Egress, Source Control, Terminal, Sandbox, Profiler, Plugins, Accounts, Remote Access, Diagnostics | P0 | US-SET-1 |
 | F-SET-11 | Tier selector (User / Solution / Project) at the top; each setting shows the effective value, which tier set it, "override here" and "reset" actions | P0 | US-SET-1 |
 | F-SET-12 | Schema-driven rendering: plugins contribute schemas and get pages without UI code; custom pages allowed for complex editors (model groups, keybindings) | P0 | US-SET-1 |
 | F-SET-13 | Search across all settings (titles, descriptions, keys) | P1 | US-SET-5 |

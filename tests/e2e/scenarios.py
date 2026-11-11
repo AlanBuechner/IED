@@ -3434,42 +3434,88 @@ import profiler_scenarios  # noqa: E402,F401  (the profiler's scenarios register
 @scenario(viewports=("desktop", "phone"))
 def settings_without_a_workspace(run):
 	"""The User settings with no project open (owner, 2026-10-26: "we should be able to edit user settings without
-	haveing a project open"): the start page's Settings shows the settings window in the start page's place, on the User
-	tier alone, with the plugins' own pages (AI > Models, its module imported though no workspace activated it); a value
-	set there is the app tier's, Reset takes it away, and Start Page goes back. Ctrl+, opens it there too, where Go To
-	All has nothing to go to (docs/07 "The settings window")."""
+	haveing a project open"): the start page's Settings shows the settings over it, on the User tier alone, with the
+	plugins' own pages (AI > Models, its module imported though no workspace activated it); a value set there is the app
+	tier's, Reset takes it away, and Close goes back. Ctrl+, opens it there too, where Go To All has nothing to go to
+	(docs/07 "The settings window")."""
 	page = run.open()
 	page.goto(run.target.url + "/#start")
 	page.wait_for_function("window.ied_shell && ied_shell.client && ied_shell.client.state === 'live' && document.querySelector('.start-page .sp-settings')", timeout=20000)
 	page.click(".sp-settings")
-	page.wait_for_selector(".start-settings .settings-window .set-node")
-	check(run.texts(".start-settings .set-seg button") == ["User"], "the User tier alone: %s" % run.texts(".start-settings .set-seg button"))
-	pages = run.texts(".start-settings .set-node .name")
+	overlay = ".settings-overlay"
+	page.wait_for_selector(overlay + " .settings-window .set-node")
+	check(run.texts(overlay + " .set-seg button") == ["User"], "the User tier alone: %s" % run.texts(overlay + " .set-seg button"))
+	pages = run.texts(overlay + " .set-node .name")
 	check("Text Editor" in pages and "Models" in pages and "Keyboard" in pages, "the schema's pages and the plugins' own: %s" % pages)
-	page.click(".start-settings .set-node:has-text('Text Editor')")
-	page.select_option(".start-settings select[aria-label='editor.wordWrap']", label="on")
+	page.click(overlay + " .set-node:has-text('Text Editor')")
+	page.select_option(overlay + " select[aria-label='editor.wordWrap']", label="on")
 	page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['editor.wordWrap'].value === 'on' && s.values['editor.wordWrap'].source === 'app')", timeout=10000)
-	page.wait_for_selector(".start-settings .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
+	page.wait_for_selector(overlay + " .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
 	run.shot("user-tier")
-	page.click(".start-settings .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
+	page.click(overlay + " .set-row[data-key='editor.wordWrap'] button:has-text('Reset')")
 	page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['editor.wordWrap'].source === 'default')", timeout=10000)
-	page.click(".start-settings .set-node:has-text('Models')")
-	page.wait_for_selector(".start-settings .set-custom h1:has-text('Models')")
+	page.click(overlay + " .set-node:has-text('Models')")
+	page.wait_for_selector(overlay + " .set-custom h1:has-text('Models')")
 	check(page.query_selector("link[href$='ui/chat.css']") is not None, "the page's own styles came with it")
 	run.shot("models")
-	page.click(".start-settings-head button:has-text('Start Page')")
+	page.click(overlay + " .settings-overlay-close")
 	page.wait_for_selector(".start-page .sp-settings")
 	check(page.query_selector(".settings-window") is None, "the settings went with it")
 	if not run.phone:
 		page.keyboard.press("Control+,")
 	else:
 		page.click(".sp-settings")
-	page.wait_for_selector(".start-settings .settings-window")
+	page.wait_for_selector(overlay + " .set-node.sel:has-text('Models')", timeout=10000)   # it opens again on the page it was left on
 	page.evaluate("() => ied_shell.showWorkspace(ied_shell.server.workspaces[0].wsId)")
-	page.wait_for_selector(".start-settings", state="detached", timeout=10000)
+	page.wait_for_selector(overlay, state="detached", timeout=10000)
 	check(page.evaluate("() => ied_shell.settingsViews.size") == 0, "opening a workspace closes the start page's settings")
 	page.goto(run.target.url + "/")
 	run.wait_ready()
+
+
+@scenario(viewports=("desktop", "phone"))
+def settings_overlay_groups(run):
+	"""Settings is shown over the shell (owner, 2026-11-11: "re work the settings to be an overlay rather then a tab in
+	the text editor. we should also be able to colapse the groups"): no tab opens for it, a page's settings are in groups
+	that fold (and stay folded on this device), Expand all and Collapse all fold every group, the tree's branches fold,
+	Modified only leaves the settings set in some tier, search lists its finds by page, and Esc closes it with the focus
+	back where it was."""
+	page = run.open()
+	tabs = page.evaluate("[...document.querySelectorAll('.tab')].length")
+	open_settings(run, page)
+	overlay = ".settings-overlay"
+	page.wait_for_selector(overlay + " .set-node")
+	check(page.evaluate("[...document.querySelectorAll('.tab')].length") == tabs and page.query_selector(".tab[data-ref='shell:settings']") is None, "no tab opened for Settings")
+	page.click(overlay + " .set-node[data-page='page:AI']")
+	page.wait_for_selector(overlay + " .set-sec[data-group='chats'] .set-row[data-key='ai.chats.keepDeletedDays']")
+	groups = run.texts(overlay + " .set-sec-title")
+	check(groups[0] == "General" and "Chats" in groups and "Claude" in groups, "the AI page's settings in groups, General first: %r" % groups)
+	run.shot("groups")
+	page.click(overlay + " .set-sec[data-group='chats'] .set-sec-head")
+	page.wait_for_selector(overlay + " .set-sec.folded[data-group='chats']")
+	check(page.query_selector(overlay + " .set-row[data-key='ai.chats.keepDeletedDays']") is None, "a folded group hides its settings")
+	page.click(overlay + " button[aria-label='Expand all groups']" if not run.phone else overlay + " .set-sec[data-group='chats'] .set-sec-head")
+	page.wait_for_selector(overlay + " .set-row[data-key='ai.chats.keepDeletedDays']")
+	if not run.phone:
+		page.click(overlay + " button[aria-label='Collapse all groups']")
+		check(page.query_selector(overlay + " .set-row") is None, "Collapse all folds every group")
+		page.click(overlay + " button[aria-label='Expand all groups']")
+	run.request("settings.set", {"tier": "app", "key": "ai.maxSteps", "value": 77})
+	try:
+		page.wait_for_selector(overlay + " .set-row.modified[data-key='ai.maxSteps']")
+		page.click(overlay + " .set-modified-only")
+		page.wait_for_function("(sel) => [...document.querySelectorAll(sel + ' .set-row')].map((r) => r.dataset.key).join() === 'ai.maxSteps'", arg=overlay)
+		run.shot("modified-only")
+		page.click(overlay + " .set-modified-only")
+		page.fill(overlay + " .set-search", "keep deleted")
+		page.wait_for_selector(overlay + " .set-found[data-page='page:AI'] .set-row[data-key='ai.chats.keepDeletedDays']")
+		check(run.texts(overlay + " .set-found-head")[0].startswith("AI"), "finds by page: %r" % run.texts(overlay + " .set-found-head"))
+		page.fill(overlay + " .set-search", "")
+	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.maxSteps"})
+	page.keyboard.press("Escape")
+	page.wait_for_selector(overlay, state="detached", timeout=5000)
+	check(page.evaluate("() => ied_shell.settingsViews.size") == 0, "closed")
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))

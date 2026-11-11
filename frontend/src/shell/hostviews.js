@@ -1,18 +1,26 @@
-// hostviews.js - the shell's own tabs ("shell:<name>"): Plugins (the plugin host's state, docs/02), Settings
-// (settingsview.js, docs/07; Keyboard Shortcuts is its Environment > Keyboard page) and About.
+// hostviews.js - the shell's own tabs ("shell:<name>"): Plugins (the plugin host's state, docs/02) and About. Settings
+// and Keyboard Shortcuts were tabs once and are shown over the shell now (settingsoverlay.js, docs/07): a layout that
+// kept such a tab opens the settings and lets the tab go.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { formatBinding } from "./keys.js";
-import { settingsView } from "./settingsview.js";
 import { serversView } from "./servers.js";
 
+// A tab a layout kept from when Settings was a tab: Settings is shown over the shell, and the tab closes.
+function formerSettingsTab(page) {
+	return (shell, ctx) => {
+		queueMicrotask(() => {
+			shell.closeTab(ctx.ref);
+			shell.openSettings(page);
+		});
+		return { dispose: () => {} };
+	};
+}
+
 const VIEWS = {
-	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: (shell, ctx) => {
-		shell.nextSettingsPage = "custom:shell.keyboard";
-		return settingsView(shell, ctx);
-	} },
+	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: formerSettingsTab("custom:shell.keyboard") },
 	plugins: { title: "Plugins", icon: "$(extensions)", view: pluginsView },
-	settings: { title: "Settings", icon: "$(settings-gear)", view: (shell, ctx) => settingsView(shell, ctx) },
+	settings: { title: "Settings", icon: "$(settings-gear)", view: formerSettingsTab(null) },
 	about: { title: "About IED", icon: "$(info)", view: aboutView },
 	servers: { title: "Workspace Servers", icon: "$(server-process)", view: serversView },
 };

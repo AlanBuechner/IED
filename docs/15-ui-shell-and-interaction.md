@@ -184,7 +184,7 @@ Default bindings (subset; full table generated from the command registry):
 
 ## Interaction rules
 
-- **No modal dialogs** except destructive confirmations and first-run (F-SHL-32). Settings, plugin pages, find-in-files, etc. are docked views.
+- **No modal dialogs** except destructive confirmations and first-run (F-SHL-32). Plugin pages, find-in-files, etc. are docked views. Settings is the exception the owner asked for (2026-11-11): an overlay over the shell (`docs/07` "The settings window") - its changes apply as they are made, so it closes with Esc, Close or a click outside and never asks to save.
 - **Never lose input:** typed text in chat input, find boxes and commit messages is kept server-side as draft UI state (per client) and survives reloads.
 - **Everything has a keyboard path and a context-menu path**; nothing important is hover-only (phones).
 - **Long work shows progress where it was started** (button spinner) and globally (status bar), and finishes with a notification if the page is hidden.

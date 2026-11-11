@@ -120,3 +120,50 @@ export function problemsFor(tiers, key) {
 	for (const [tier, state] of Object.entries(tiers || {})) for (const problem of (state && state.problems) || []) if (problem.key === key) out.push(Object.assign({ tier }, problem));
 	return out;
 }
+
+// --- Groups inside a page (owner, 2026-11-11: "we should also be able to colapse the groups") ----------------------
+
+// The group of a page `key` is drawn in: the schema's "x-ied-group" when it names one, else the key's middle part
+// ("ai.chats.keepDeletedDays" -> "Chats", "cpp.clangd.path" -> "Clangd"); a key of two parts ("ai.maxSteps") is in the
+// page's general group, "".
+export function groupOf(key, entry) {
+	const named = entry && entry.schema && entry.schema["x-ied-group"];
+	if (typeof named === "string" && named.trim()) return named.trim();
+	const parts = key.split(".");
+	if (parts.length < 3) return "";
+	return parts.slice(1, -1).map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2")).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+// A page's keys in its groups: [{id, title, keys}], the general group ("General") first, then the others by title; a
+// page whose keys are all in one group has that group alone.
+export function pageGroups(keys, settings) {
+	const groups = new Map();
+	for (const key of keys) {
+		const name = groupOf(key, settings[key]);
+		if (!groups.has(name)) groups.set(name, []);
+		groups.get(name).push(key);
+	}
+	return [...groups.entries()]
+		.sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+		.map(([name, list]) => ({ id: (name || "general").toLowerCase().replace(/[^a-z0-9]+/g, "-"), title: name || "General", keys: list }));
+}
+
+// Whether `key` has a value set in some tier (its value is not the default).
+export function isModified(values, key) {
+	const current = values && values[key];
+	return Boolean(current && current.source && current.source !== "default");
+}
+
+// What a search finds, by page: [{page, keys}] in the tree's order, a key under the page that shows it.
+export function searchByPage(pages, settings, query) {
+	const out = [];
+	const words = query.trim().toLowerCase();
+	for (const top of pages) {
+		for (const node of [top, ...top.children]) {
+			const titled = words && (node.title.toLowerCase().includes(words) || (node !== top && top.title.toLowerCase().includes(words)));
+			const keys = node.keys.filter((key) => (settings[key] && matches(key, settings[key], query)) || (titled && !node.view));
+			if (keys.length || (titled && node.view)) out.push({ page: node, parent: node === top ? null : top, keys });
+		}
+	}
+	return out;
+}

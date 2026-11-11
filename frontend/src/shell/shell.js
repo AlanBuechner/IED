@@ -24,7 +24,7 @@ import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
 import { registerShellViews } from "./hostviews.js";
-import { StartSettings } from "./startsettings.js";
+import { SettingsOverlay } from "./settingsoverlay.js";
 import { DesktopChrome } from "./desktop.js";
 import { PhoneChrome } from "./phone.js";
 
@@ -35,7 +35,6 @@ const AUTH_PROBE_AFTER_MS = 1500;
 const MODE_SETTLE_MS = 2000;
 const WORKSPACE_KEY = "ied.wsId";
 
-const SETTINGS_TAB = "shell:settings";   // the one settings window a page can have open (hostviews.js)
 
 export class Shell {
 	constructor(root) {
@@ -58,13 +57,11 @@ export class Shell {
 		this.contributions.on(() => this.views.mountWaiting());
 		this.modules = new Map();
 		this.apis = new Map();
-		this.nextSettingsPage = null;     // the page the next settings window opens on
 		this.nextSettingsPage = null;     // the page the next settings window opens on, its tier and project
 		this.nextSettingsTier = null;
 		this.nextSettingsProject = null;
 		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
-		this.startSettings = new StartSettings(this);   // Settings on the start page, with no workspace
-		this.nextSettingsTier = null;     // and the tier it edits, with the project whose tier that is
+		this.settingsOverlay = new SettingsOverlay(this);   // Settings over the shell (settingsoverlay.js)
 		this.bindings = new Bindings((id) => {
 			const plugin = this.contributions.plugins.find((p) => p.id === id);
 			return plugin ? plugin.contributes.bindings || {} : null;
@@ -119,7 +116,8 @@ export class Shell {
 		// Inside IED's desktop app (docs/27), which adds window.iedDesktop before the page's scripts.
 		this.context.set("desktopApp", Boolean(window.iedDesktop));
 		this.mountChrome();
-		window.addEventListener("keydown", (event) => this.keybindings.handle(event), true);
+		// The shell's keys wait while Settings is up over it (its own keys work).
+		window.addEventListener("keydown", (event) => this.settingsOverlay.shown || this.keybindings.handle(event), true);
 		document.addEventListener("focusin", (event) => this.context.set("inputFocus", isTextInput(event.target)));
 		// docs/15 "Links": the page never follows a link no view answered, nor opens itself again in a window of its own
 		// (a middle click's default; in the desktop app a second IED window), unless the link is marked to open beside it.
@@ -266,7 +264,7 @@ export class Shell {
 		this.windows.showing(wsId);
 		this.leaveWorkspace();
 		this.lastWell = null;
-		if (wsId) this.startSettings.close(false);
+		if (this.settingsOverlay.shown && (wsId || null) !== this.settingsOverlay.open.wsId) this.settingsOverlay.close();
 		this.wsId = wsId;
 		this.resized();
 		if (this.client.show) this.client.show(wsId);
@@ -682,29 +680,12 @@ export class Shell {
 		this.layout.update((doc) => withShown(doc, this.windows.device, activityId));
 	}
 
-	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given, with the tier it
-	// edits (`tier`: "app", "solution", "project") and, for a project's, which project (`project`). One open already is
-	// shown and moved to that page. A window with no workspace (the start page) has no layout to open a tab in: the start
-	// page shows the settings in its place, on the User tier (startsettings.js).
+	// The settings window over the shell (settingsoverlay.js), on the page `page` ("custom:shell.keyboard", "page:AI")
+	// when one is given, with the tier it edits (`tier`: "app", "solution", "project") and, for a project's, which
+	// project (`project`). Shown already, it moves to that page. Without a workspace (the start page) it edits the User
+	// tier alone.
 	openSettings(page, tier, project) {
-		if (!this.wsId) {
-			this.startSettings.show(page);
-			return;
-		}
-		const open = [...this.settingsViews].pop();
-		if (open) {
-			if (page || tier || project) open.show(page, tier, project);
-			if (this.layout) this.openTab(SETTINGS_TAB);
-			return;
-		}
-		this.nextSettingsPage = page || null;
-		this.nextSettingsTier = tier || null;
-		this.nextSettingsProject = project || null;
-		if (!this.layout) {
-			this.toasts.show("The workspace is still opening: try Settings again in a moment.", "info");
-			return;
-		}
-		this.openTab(SETTINGS_TAB);
+		this.settingsOverlay.show(page, tier, project);
 	}
 
 	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone. A tab open

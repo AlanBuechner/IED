@@ -1,13 +1,38 @@
-// settingsview.js - the settings window (docs/07 "The settings window", mockup 04): Visual Studio's Tools > Options as
-// a tab - a tree of pages, the tier being edited (User, Solution, Project), search, and a row per setting with its
-// effective value, the tier that set it, a control from its schema and Reset; a plugin's settingsPages draw their own
-// editor under their page. Values come from settings:<wsId> (a project's from settings.get), writes are settings.set and
-// settings.reset (docs/07 "Settings on the wire"); the server checks every value against its schema.
+// settingsview.js - the settings window (docs/07 "The settings window", mockup 04): Visual Studio's Tools > Options,
+// shown over the shell (settingsoverlay.js) - a tree of pages whose branches fold, the tier being edited (User, Solution,
+// Project), search (its finds by page), Modified only, and on a page its settings in groups that fold, each a row with
+// its effective value, the tier that set it, a control from its schema, Reset and a menu; a plugin's settingsPages draw
+// their own editor under their page. Values come from settings:<wsId> (a project's from settings.get), writes are
+// settings.set and settings.reset (docs/07 "Settings on the wire"); the server checks every value against its schema.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { TIERS, controlKind, findPage, inputText, matches, pageOwning, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
+import { MenuHost } from "/ui-kit/menu.js";
+import { TIERS, controlKind, findPage, inputText, isModified, pageGroups, pageOwning, parseInput, problemsFor, searchByPage, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
 import { KeyboardPage } from "./keyboardpage.js";
 import { LanguageToolsPage } from "./languagetools.js";
+
+const menus = new MenuHost();
+const FOLDED_KEY = "ied.settings.folded";           // the groups folded, "<page id>|<group id>"
+const TREE_FOLDED_KEY = "ied.settings.treeFolded";  // the tree's pages whose children are folded
+
+function stored(key, fallback) {
+	try {
+		const value = localStorage.getItem(key);
+		return value === null ? fallback : JSON.parse(value);
+	}
+	catch {
+		return fallback;
+	}
+}
+
+function store(key, value) {
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	}
+	catch {
+		// a private window: the choice lasts as long as the page
+	}
+}
 
 export function settingsView(shell, ctx) {
 	return new SettingsView(shell, ctx);
@@ -44,17 +69,24 @@ class SettingsView {
 		this.loaded = false;
 		this.mounted = new Map();
 		this.listeners = new Set();
-		this.searchField = h("input.input-field.set-search", { placeholder: "Search settings", "aria-label": "Search settings", spellcheck: "false" });
+		this.modifiedOnly = false;
+		this.folded = new Set(stored(FOLDED_KEY, []));
+		this.treeFolded = new Set(stored(TREE_FOLDED_KEY, []));
+		this.searchField = h("input.input-field.set-search", { type: "search", placeholder: "Search settings (Ctrl+E)", "aria-label": "Search settings", spellcheck: "false" });
 		this.searchField.addEventListener("input", () => {
 			this.query = this.searchField.value;
 			this.renderPage();
 		});
+		this.modifiedButton = h("button.btn.flat.set-modified-only", { "aria-pressed": "false", title: "Show only the settings set in some tier", on: { click: () => this.setModifiedOnly(!this.modifiedOnly) } }, icon("filter"), "Modified only");
+		this.foldButtons = h("span.set-folds", null,
+			h("button.ib", { title: "Expand all groups", "aria-label": "Expand all groups", on: { click: () => this.foldAll(false) } }, icon("expand-all")),
+			h("button.ib", { title: "Collapse all groups", "aria-label": "Collapse all groups", on: { click: () => this.foldAll(true) } }, icon("collapse-all")));
 		this.tiersEl = h("span.set-seg", { role: "radiogroup", "aria-label": "Editing tier" });
 		this.where = h("span.muted.set-where");
 		this.tree = h("nav.set-tree", { "aria-label": "Settings pages" });
 		this.page = h("div.set-page");
 		this.el = h("div.settings-window", null,
-			h("div.set-top", null, this.searchField, h("span.muted", null, "Editing tier"), this.tiersEl, this.where),
+			h("div.set-top", null, this.searchField, this.modifiedButton, this.foldButtons, h("span.grow"), h("span.muted", null, "Editing tier"), this.tiersEl, this.where),
 			h("div.set-body", null, this.tree, this.page));
 		ctx.el.append(this.el);
 		ctx.el.addEventListener("keydown", (event) => {
@@ -63,7 +95,7 @@ class SettingsView {
 				this.searchField.focus();
 			}
 		});
-		// Without a workspace (the start page, startsettings.js) there is the User tier alone: settings:app, the global
+		// Without a workspace (the start page) there is the User tier alone: settings:app, the global
 		// plugins' schema, and their own pages, imported here since no workspace loaded them.
 		this.plugins = null;
 		this.stop = shell.client.subscribe(ctx.wsId ? "settings:" + ctx.wsId : "settings:app", {
@@ -154,16 +186,77 @@ class SettingsView {
 	}
 
 	renderTree(pages) {
-		const row = (node, depth) => h("button.set-node" + (node.id === this.pageId ? ".sel" : ""), {
-			style: { "--d": String(depth) }, dataset: { page: node.id },
-			on: { click: () => {
-				this.pageId = node.id;
-				this.query = "";
-				this.searchField.value = "";
-				this.render();
-			} },
-		}, h("span.name", null, node.title), this.problemCount(node.keys) ? h("span.meta", null, icon("warning", "c-warn")) : null);
-		replace(this.tree, ...pages.flatMap((p) => [row(p, 0), ...p.children.map((c) => row(c, 1))]));
+		const go = (node) => {
+			this.pageId = node.id;
+			this.query = "";
+			this.searchField.value = "";
+			this.render();
+			this.page.scrollTop = 0;
+		};
+		const row = (node, depth, parent) => {
+			const branch = depth === 0 && node.children.length > 0;
+			const folded = branch && this.treeFolded.has(node.id) && !node.children.some((c) => c.id === this.pageId);
+			const chevron = branch ? h("span.set-twisty", { title: folded ? "Expand" : "Collapse", on: { click: (event) => {
+				event.stopPropagation();
+				this.toggleTree(node.id);
+			} } }, icon(folded ? "chevron-right" : "chevron-down")) : h("span.set-twisty");
+			const modified = this.modifiedCount(node.keys);
+			return h("button.set-node" + (node.id === this.pageId ? ".sel" : ""), {
+				style: { "--d": String(depth) }, dataset: { page: node.id }, "aria-expanded": branch ? String(!folded) : null,
+				on: {
+					click: () => go(node),
+					keydown: (event) => {
+						if (!branch) return;
+						if (event.key === "ArrowLeft" && !folded) this.toggleTree(node.id);
+						else if (event.key === "ArrowRight" && folded) this.toggleTree(node.id);
+					},
+				},
+			}, chevron, h("span.name", null, node.title),
+			this.problemCount(node.keys) ? h("span.meta", null, icon("warning", "c-warn")) : modified ? h("span.meta.set-count", { title: modified + " set" }, String(modified)) : null);
+		};
+		replace(this.tree, ...pages.flatMap((p) => {
+			const folded = this.treeFolded.has(p.id) && !p.children.some((c) => c.id === this.pageId);
+			return [row(p, 0), ...(folded ? [] : p.children.map((c) => row(c, 1, p)))];
+		}));
+	}
+
+	toggleTree(id) {
+		if (this.treeFolded.has(id)) this.treeFolded.delete(id);
+		else this.treeFolded.add(id);
+		store(TREE_FOLDED_KEY, [...this.treeFolded]);
+		this.renderTree(this.pages());
+	}
+
+	modifiedCount(keys) {
+		const values = this.values();
+		return keys.reduce((n, key) => n + (isModified(values, key) ? 1 : 0), 0);
+	}
+
+	setModifiedOnly(on) {
+		this.modifiedOnly = on;
+		this.modifiedButton.classList.toggle("on", on);
+		this.modifiedButton.setAttribute("aria-pressed", on ? "true" : "false");
+		this.renderPage();
+	}
+
+	// Every group of the page shown folded, or none.
+	foldAll(fold) {
+		const node = findPage(this.pages(), this.pageId);
+		if (!node) return;
+		for (const group of pageGroups(node.keys, this.schema)) {
+			const id = node.id + "|" + group.id;
+			if (fold) this.folded.add(id);
+			else this.folded.delete(id);
+		}
+		store(FOLDED_KEY, [...this.folded]);
+		this.renderPage();
+	}
+
+	toggleGroup(id) {
+		if (this.folded.has(id)) this.folded.delete(id);
+		else this.folded.add(id);
+		store(FOLDED_KEY, [...this.folded]);
+		this.renderPage();
 	}
 
 	problemCount(keys) {
@@ -172,12 +265,20 @@ class SettingsView {
 
 	renderPage() {
 		const pages = this.pages();
+		const values = this.values();
+		const shown = (key) => !this.modifiedOnly || isModified(values, key);
+		this.foldButtons.hidden = Boolean(this.query.trim());
 		if (this.query.trim()) {
-			const found = Object.keys(this.schema).sort().filter((key) => matches(key, this.schema[key], this.query));
-			replace(this.page, h("div.set-crumbs", null, found.length + (found.length === 1 ? " setting matches" : " settings match")), ...found.map((key) => {
-				const owner = pageOwning(pages, key);
-				return owner ? this.pageLink(key, owner) : this.row(key);
-			}));
+			// What the search finds, by page: a page's head opens it, a key a plugin's own page edits links there.
+			const found = searchByPage(pages, this.schema, this.query).map((hit) => Object.assign(hit, { keys: hit.keys.filter(shown) })).filter((hit) => hit.keys.length || (hit.page.view && !this.modifiedOnly));
+			const count = found.reduce((n, hit) => n + hit.keys.length, 0);
+			replace(this.page, h("div.set-crumbs", null, count + (count === 1 ? " setting matches" : " settings match") + (this.modifiedOnly ? " (modified only)" : "")),
+				...found.map((hit) => h("section.set-found", { dataset: { page: hit.page.id } },
+					h("button.set-found-head", { on: { click: () => this.openPage(hit.page.id) } }, hit.parent ? hit.parent.title + " \u203a " + hit.page.title : hit.page.title, icon("arrow-right")),
+					...hit.keys.map((key) => {
+						const owner = pageOwning(pages, key);
+						return owner ? this.pageLink(key, owner) : this.row(key);
+					}))));
 			return;
 		}
 		const node = findPage(pages, this.pageId);
@@ -190,8 +291,40 @@ class SettingsView {
 			return;
 		}
 		const parent = pages.find((p) => p.children.includes(node));
+		const groups = pageGroups(node.keys.filter(shown), this.schema);
+		const sections = groups.length > 1 || (groups.length === 1 && groups[0].title !== "General")
+			? groups.map((group) => this.groupSection(node, group))
+			: groups.flatMap((group) => group.keys.map((key) => this.row(key)));
+		const empty = this.modifiedOnly && node.keys.length && !groups.length ? h("p.muted", null, "Nothing on this page is set: every setting here has its default.") : null;
 		replace(this.page, h("div.set-crumbs", null, parent ? parent.title + " \u203a " + node.title : node.title), h("h1", null, node.title),
-			...node.keys.map((key) => this.row(key)), node.children.length && !node.keys.length ? h("p.muted", null, "Choose a page under " + node.title + ".") : null);
+			...sections, empty,
+			node.children.length && !node.keys.length ? h("div.set-children", null, h("p.muted", null, "Pages under " + node.title + ":"),
+				...node.children.map((child) => h("button.btn.flat", { on: { click: () => this.openPage(child.id) } }, icon("chevron-right"), child.title))) : null);
+	}
+
+	// A group of a page's settings, folded as the owner left it on this device: its head says how many it has, and how
+	// many of them are set.
+	groupSection(node, group) {
+		const id = node.id + "|" + group.id;
+		const folded = this.folded.has(id);
+		const modified = this.modifiedCount(group.keys);
+		return h("section.set-sec" + (folded ? ".folded" : ""), { dataset: { group: group.id } },
+			h("button.set-sec-head", { "aria-expanded": folded ? "false" : "true", on: { click: () => this.toggleGroup(id) } },
+				icon(folded ? "chevron-right" : "chevron-down"), h("span.set-sec-title", null, group.title),
+				h("span.meta", null, group.keys.length + (group.keys.length === 1 ? " setting" : " settings") + (modified ? " \u00b7 " + modified + " set" : ""))),
+			folded ? null : h("div.set-sec-rows", null, ...group.keys.map((key) => this.row(key))));
+	}
+
+	openPage(id) {
+		this.pageId = id;
+		this.query = "";
+		this.searchField.value = "";
+		this.render();
+		this.page.scrollTop = 0;
+	}
+
+	focus() {
+		this.searchField.focus();
 	}
 
 	// A setting a plugin's own page edits: found here, set there, where the page decides whether it can be.
@@ -260,7 +393,8 @@ class SettingsView {
 		const message = h("div.set-message.c-error", { hidden: true });
 		const control = this.control(key, kind, entry.schema, current.value, allowed, message);
 		const problems = problemsFor(this.state.tiers, key);
-		return h("div.set-row", { dataset: { key } },
+		const modified = current.source && current.source !== "default";
+		return h("div.set-row" + (modified ? ".modified" : ""), { dataset: { key }, on: { contextmenu: (event) => this.rowMenu(event, key, current, editingSet && allowed) } },
 			h("div.set-label", null, h("span.set-title", null, settingTitle(key)), h("span.mono.muted", null, key)),
 			entry.schema && entry.schema.description ? h("div.set-desc", null, entry.schema.description) : null,
 			h("div.set-edit", null, control,
@@ -269,6 +403,31 @@ class SettingsView {
 				allowed ? null : h("span.muted", null, "set in: " + (entry.tiers || []).map(sourceLabel).join(", "))),
 			message,
 			...problems.map((p) => h("div.set-message.c-error", null, sourceLabel(p.tier) + " file, line " + p.line + ": " + p.message)));
+	}
+
+	// A row's menu: copy its id or its value as JSON, Reset it in the tier being edited.
+	rowMenu(event, key, current, resettable) {
+		if (event.target.closest("input, textarea, select")) return;
+		event.preventDefault();
+		menus.show({ at: event, label: settingTitle(key), rows: [
+			{ kind: "item", label: "Copy Setting ID", id: "id", enabled: true },
+			{ kind: "item", label: "Copy Value as JSON", id: "value", enabled: true },
+			{ kind: "separator" },
+			{ kind: "item", label: "Reset in " + sourceLabel(this.tier), id: "reset", enabled: resettable },
+		], pick: (row) => {
+			if (row.id === "id") this.copy(key);
+			else if (row.id === "value") this.copy(JSON.stringify(current.value === undefined ? null : current.value, null, 2));
+			else if (row.id === "reset") this.clear(key);
+		} });
+	}
+
+	async copy(text) {
+		try {
+			await navigator.clipboard.writeText(text);
+		}
+		catch (e) {
+			this.shell.report("The clipboard refused the text: " + e.message, e);
+		}
 	}
 
 	control(key, kind, schema, value, allowed, message) {

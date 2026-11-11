@@ -72,10 +72,9 @@ function pickRow(shell, row) {
 	return shell.showWorkspace(row.wsId);
 }
 
-// IED's start page: the projects to go back to, how to open another, and the User settings - or those settings, in its
-// place, while they are shown (startsettings.js).
+// IED's start page: the projects to go back to, how to open another, and the User settings (shown over it,
+// settingsoverlay.js).
 export function startPageView(shell, now) {
-	if (shell.startSettings && shell.startSettings.shown) return shell.startSettings.element();
 	const groups = projectGroups(shell.server);
 	const sections = [
 		section("Open", groups.open.map(({ ws, project }) => projectRow(shell, project, ws, now))),

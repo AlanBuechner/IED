@@ -397,14 +397,6 @@ a { color: var(--link); text-decoration: none; }
 .sp-row.gone { cursor: not-allowed; }
 .sp-row.gone .sp-name, .sp-row.gone .sp-when { color: var(--text-2); }
 .sp-start h2 + .btn { margin-top: calc(-1 * var(--space-2)); }
-/* Settings without a workspace, in the start page's place (startsettings.js) */
-.start-settings { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
-.start-settings-head { flex: none; display: flex; align-items: center; gap: var(--space-4); min-height: 32px; padding: 0 var(--space-4); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; }
-.start-settings-head .muted { overflow: hidden; text-overflow: ellipsis; }
-.start-settings-title { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-0); }
-.start-settings-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
-.app.phone .start-settings-head { min-height: var(--row-h-touch); }
-.app.phone .start-settings-head .muted { display: none; }
 .app.phone .start-page { padding: var(--space-5) var(--space-4); gap: var(--space-5); justify-content: flex-start; }
 .app.phone .sp-projects, .app.phone .sp-start { flex: 1 1 100%; }
 .app.phone .sp-row { min-height: var(--row-h-touch); }
@@ -582,8 +574,33 @@ dl.facts dd { margin: 0; }
 	.toasts { top: 56px; bottom: auto; left: var(--space-4); right: var(--space-4); max-width: none; }
 }
 
-/* ---------- the settings window (docs/07, mockup 04) ---------- */
+/* ---------- the settings window (docs/07, mockup 04), over the shell (settingsoverlay.js) ---------- */
+.settings-veil { position: fixed; inset: 0; z-index: 35; display: flex; align-items: center; justify-content: center; background: var(--scrim); }
+.settings-overlay { display: flex; flex-direction: column; width: min(1180px, calc(100vw - 64px)); height: min(820px, calc(100vh - 64px)); background: var(--bg-2); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-3, 4px); box-shadow: var(--shadow-popup); overflow: hidden; }
+.settings-overlay-head { flex: none; display: flex; align-items: center; gap: var(--space-4); height: 34px; padding: 0 var(--space-2) 0 var(--space-5); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); white-space: nowrap; }
+.settings-overlay-title { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--text-0); font-weight: var(--font-weight-semibold); }
+.settings-overlay-where { overflow: hidden; text-overflow: ellipsis; font-size: var(--font-size-sm); }
+.settings-overlay-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .settings-window { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-2); }
+.set-top .grow { flex: 1; }
+.set-modified-only.on { background: var(--bg-4); color: var(--text-0); }
+.set-folds { display: inline-flex; gap: 1px; }
+.set-folds[hidden] { display: none; }
+.set-twisty { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: var(--space-1); flex: none; color: var(--text-2); }
+.set-twisty:hover { color: var(--text-0); }
+.set-count { font-size: var(--font-size-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.set-sec { max-width: 900px; margin-top: var(--space-3); }
+.set-sec-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 28px; padding: 0 var(--space-2); border: 0; border-bottom: var(--border-width) solid var(--border-1); background: none; color: var(--text-0); font: inherit; font-weight: var(--font-weight-semibold); text-align: left; cursor: pointer; }
+.set-sec-head:hover { background: var(--veil); }
+.set-sec-head .ci { width: 14px; height: 14px; color: var(--text-2); }
+.set-sec-head .meta { margin-left: auto; color: var(--text-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-normal); }
+.set-sec-rows { padding-left: var(--space-5); }
+.set-row.modified { box-shadow: inset 2px 0 0 var(--text-2); padding-left: var(--space-4); }
+.set-found { max-width: 900px; margin-top: var(--space-4); }
+.set-found-head { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; border: 0; background: none; color: var(--text-1); font: inherit; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); cursor: pointer; }
+.set-found-head:hover { color: var(--text-0); text-decoration: underline; }
+.set-found-head .ci { width: 12px; height: 12px; }
+.set-children { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
 .set-top { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: var(--border-width) solid var(--border-0); flex: none; flex-wrap: wrap; font-size: var(--font-size-sm); }
 .set-search { width: min(360px, 100%); }
 .set-seg { display: inline-flex; border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); overflow: hidden; }
@@ -674,6 +691,12 @@ dl.facts dd { margin: 0; }
 }
 
 @media (max-width: 719px) {
+	.settings-veil { align-items: stretch; justify-content: stretch; }
+	.settings-overlay { width: 100vw; height: 100%; border: 0; border-radius: 0; }
+	.settings-overlay-head { height: var(--row-h-touch); }
+	.settings-overlay-where { display: none; }
+	.set-folds, .set-top .grow { display: none; }
+	.set-sec-rows { padding-left: 0; }
 	.set-top { padding: var(--space-3) var(--space-4); }
 	.set-body { flex-direction: column; }
 	.set-tree { width: auto; display: flex; overflow-x: auto; padding: var(--space-2) var(--space-3); border-right: 0; border-bottom: var(--border-width) solid var(--border-0); }

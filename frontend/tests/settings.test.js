@@ -2,7 +2,7 @@
 // draw, titles, controls and search; a refused write's message; and the Models and Model Groups pages' helpers.
 
 import { test, assertEqual, assertThrows } from "./harness.js";
-import { controlKind, findPage, inputText, matches, pageOwning, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
+import { controlKind, findPage, groupOf, inputText, isModified, matches, pageGroups, pageOwning, parseInput, problemsFor, searchByPage, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
 import { refusal } from "../src/shell/settingsview.js";
 import { probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
 import { freshName, movedEarlier, roleDefault, withRole } from "/plugins/ied.chat/ui/groupsettings.js";
@@ -85,4 +85,23 @@ test("settings: a Claude model's pace in a chain", () => {
 	assertEqual(storedFallback(movedEarlier(places, 1)), ["qwen", { model: "claude-haiku", pace: { max: 1.5 } }], "moved earlier, a place without a pace kept as a name");
 	assertEqual(movedEarlier(places, 0), places, "the first stays");
 	assertEqual(withRole({ primary: role }, "primary", { pace: undefined }).primary, { model: "claude-opus", fallback: role.fallback }, "always: the pace goes");
+});
+
+test("settings: a page's settings in groups that fold", () => {
+	assertEqual([groupOf("ai.maxSteps", {}), groupOf("ai.chats.keepDeletedDays", {}), groupOf("cpp.clangd.path", {}), groupOf("ai.edits.formatOnWrite", { schema: { "x-ied-group": "Writing" } })],
+		["", "Chats", "Clangd", "Writing"], "the key's middle part, or the schema's own group");
+	const settings = { "ai.maxSteps": {}, "ai.chats.notify": {}, "ai.chats.keepDeletedDays": {}, "ai.claude.command": {} };
+	assertEqual(pageGroups(Object.keys(settings), settings).map((g) => [g.id, g.title, g.keys]), [
+		["general", "General", ["ai.maxSteps"]],
+		["chats", "Chats", ["ai.chats.notify", "ai.chats.keepDeletedDays"]],
+		["claude", "Claude", ["ai.claude.command"]],
+	], "General first, then the others by title");
+	assertEqual([isModified({ a: { source: "app" } }, "a"), isModified({ a: { source: "default" } }, "a"), isModified({}, "a")], [true, false, false]);
+});
+
+test("settings: search finds by page, a page's title too", () => {
+	const pages = settingsPages(SETTINGS, []);
+	const hits = searchByPage(pages, SETTINGS, "steps");
+	assertEqual(hits.map((hit) => [hit.page.title, hit.keys]), [["AI", ["ai.maxSteps"]]]);
+	assertEqual(searchByPage(pages, SETTINGS, "zzz"), [], "nothing");
 });

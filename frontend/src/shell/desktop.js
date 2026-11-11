@@ -288,7 +288,7 @@ export class DesktopChrome {
 			el.hidden = el.dataset.ref !== "activity:" + activityId;
 			shell.views.setVisible(el.dataset.ref, !el.hidden);
 		}
-		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page, :scope > .start-settings")) empty.remove();
+		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page")) empty.remove();
 		if (!activityId) {
 			if (shell.contributions.activities.length) this.showEmptyWindow();
 			else this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
