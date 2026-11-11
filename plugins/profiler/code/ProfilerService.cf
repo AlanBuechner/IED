@@ -114,6 +114,7 @@ namespace Profiler
 			if (info.size == entry->m_SizeBytes && info.modifiedNs == entry->m_ModifiedNs) continue;
 			entry->m_SizeBytes = info.size;
 			entry->m_ModifiedNs = info.modifiedNs;
+			entry->m_Capture = nullptr;   // what is loaded is the old file's, and these numbers no longer say so
 			TraceLayout layout;
 			Core::String problem;
 			entry->m_Metadata = ReadLayout(path.CStr(), layout, problem) ? layout.m_Metadata : Core::String();
@@ -209,7 +210,17 @@ namespace Profiler
 			if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
 			m_Clock += 1;
 			entry->m_LastUsed = m_Clock;
-			if (entry->m_Capture) return entry->m_Capture;
+			FS::FileInfo info;
+			bool onDisk = !entry->m_Live && FS::GetInfo(entry->m_Path.CStr(), info);
+			if (entry->m_Capture) {
+				if (!onDisk || (info.size == entry->m_SizeBytes && info.modifiedNs == entry->m_ModifiedNs)) return entry->m_Capture;
+				// The file was written again (a run to the same IED_PROFILER=file: path): what is loaded is the old run's.
+				entry->m_Capture = null;
+			}
+			if (onDisk) {
+				entry->m_SizeBytes = info.size;
+				entry->m_ModifiedNs = info.modifiedNs;
+			}
 			path = entry->m_Path;
 			const ProfWorkspace* ws = Workspace(entry->m_WsId.View());
 			if (ws) sourceRoot = ws->m_Workspace.m_Root;

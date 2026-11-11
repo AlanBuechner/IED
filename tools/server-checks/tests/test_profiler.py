@@ -630,6 +630,23 @@ class ProfilerTests(ProfilerServer):
 		with self.assertRaises(RpcFailure):
 			await ask("summary", capture="no-such-capture")
 
+	async def test_a_trace_written_again_is_read_again(self):
+		"""A second run to one IED_PROFILER=file: path writes over the file: the tools answer for the new run, whether the
+		file is only named by a tool or is in the library, which a rescan looks at first."""
+		async def ask(tool, **args):
+			return (await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": tool, "args": args}}))["result"]["text"]
+		first = await self.capture_that_ends(game_stream(self.token(), frames=3))
+		second = await self.capture_that_ends(game_stream(self.token(), frames=5))
+		paths = {c["captureId"]: workspace_file(self.data, self.ws, c["path"]) for c in (await self.query("prof.captures", wsId="w1"))["captures"]}
+		run = os.path.join(self.ws, "run.iedtrace")
+		shutil.copyfile(paths[first], run)
+		self.assertIn("Frames: 3", await ask("summary", capture="run.iedtrace"))
+		shutil.copyfile(paths[second], run)
+		self.assertIn("Frames: 5", await ask("summary", capture="run.iedtrace"), "the file named by a tool")
+		self.assertIn("Frames: 3", await ask("summary", capture=first))
+		shutil.copyfile(paths[second], paths[first])
+		self.assertIn("Frames: 5", await ask("summary", capture=first), "the file in the library")
+
 
 CONVERTER = (
 	"import json, sys\n"

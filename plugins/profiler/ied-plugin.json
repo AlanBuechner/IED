@@ -77,7 +77,7 @@
 			},
 			{
 				"name": "profile_summary",
-				"description": "One capture at a glance: duration, frame times (mean, median, p95, max), threads, the costliest zones by self and by total time, tasks, memory and GC, warnings. `capture` is a capture id from profile_list, a .iedtrace path, or \"latest\" (the default).",
+				"description": "One capture at a glance: duration, frame times (mean, median, p95, max), threads, the costliest zones by self and by total time, tasks, memory and GC, warnings. `capture` is a capture id from profile_list, a .iedtrace file's path relative to the workspace (build/run.iedtrace, not a full path), or \"latest\" (the default).",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,
