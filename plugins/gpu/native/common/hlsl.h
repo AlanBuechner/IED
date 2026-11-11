@@ -11,8 +11,10 @@ namespace fb
 	enum class HlslTarget { Dxbc, Dxil, Spirv };
 
 	// Compiles `entry` of `source` for `profile` ("ps_5_1", "vs_6_0"); `log` gets the compiler's messages, warnings too.
-	// False when it did not compile, or when no compiler for the target is there (`log` says so).
-	bool CompileHlsl(const std::string& source, const std::string& entry, const std::string& profile, HlslTarget target, std::vector<u8>& code, std::string& log);
+	// Its #include lines are looked up in `includes` (absolute folders, in order). False when it did not compile, or when
+	// no compiler for the target is there (`log` says so).
+	bool CompileHlsl(const std::string& source, const std::string& entry, const std::string& profile, HlslTarget target, std::vector<u8>& code, std::string& log,
+		const std::vector<std::string>& includes = {});
 
 	// The compilers' modules (HMODULEs), null when not there: d3dcompiler_47.dll; the Windows SDK's newest
 	// dxcompiler.dll (FLASHBANG_DXCOMPILER names another); one with SPIR-V code generation (FLASHBANG_SPIRV_DXCOMPILER

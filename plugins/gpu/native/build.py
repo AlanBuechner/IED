@@ -22,7 +22,7 @@ TARGETS = {
 	"flashbang-replay": ("exe", COMMON + ["replay", "replay/d3d12", "replay/vulkan"], ["kernel32", "user32", "advapi32", "d3d12", "dxgi", "dxguid", "ole32"]),
 	"fb-sample-d3d12": ("exe", ["samples/d3d12"], ["kernel32", "user32", "d3d12", "dxgi", "d3dcompiler"]),
 	"fb-sample-vulkan": ("exe", ["samples/vulkan"], ["kernel32", "user32"]),
-	"flashbang-tests": ("exe", COMMON + ["tests", "replay/vulkan/vkspirv.cpp", "replay/vulkan/vkassemble.cpp"], ["kernel32", "user32", "advapi32", "ole32"]),
+	"flashbang-tests": ("exe", COMMON + ["tests", "replay/vulkan/vkspirv.cpp", "replay/vulkan/vkassemble.cpp", "capture/d3d12/tracker.cpp"], ["kernel32", "user32", "advapi32", "ole32"]),
 }
 
 # Headers a target's sources include that a script writes first (into the target's int folder, on its include path).

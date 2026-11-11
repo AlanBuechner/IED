@@ -112,6 +112,8 @@ namespace fb::replay::d3d12
 		void Execute(ID3D12CommandQueue* queue, ID3D12GraphicsCommandList* list);
 		void WaitQueue(ID3D12CommandQueue* queue);
 		void CollectMessages(u32 eid);
+		// The debug layer's stored errors (and corruptions), joined: what a failed Close or a removed device says why.
+		std::string StoredErrors() const;
 		ListSet& ListsFor(D3D12_COMMAND_LIST_TYPE type);
 		const QueueInfo* QueueOf(u64 id) const;
 

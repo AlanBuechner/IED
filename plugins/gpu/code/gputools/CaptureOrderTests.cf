@@ -1,0 +1,16 @@
+// The capture library's order (Library.cf): newest first by the time in a capture's id, whatever program made it.
+
+include "Gpu.ch"
+
+[test("server.gpu.captureorder")]
+class GpuCaptureOrderTests {
+	static bool Later(const char* a, const char* b) { return GpuDebug::CapturedLater(Core::StringView(a), Core::StringView(b)); }
+
+	[test("newest_first_whatever_the_program")]
+	public static void TestNewestFirst() {
+		assert_true(Later("ClaymoreClient_20261105-234233_f215", "ClaymoreEditor_20261030-194121_f654"), "a later client capture before an older editor one");
+		assert_true(!Later("ClaymoreEditor_20261030-194121_f654", "ClaymoreClient_20261105-234233_f215"), "and not the other way");
+		assert_true(Later("My_Game_20261105-100000_f9", "Other_20261105-095959_f9"), "a program's name may hold '_'");
+		assert_true(Later("Game_20261105-100000_f9", "Game_20261105-100000_f8"), "the same second: by frame");
+	}
+}

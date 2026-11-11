@@ -25,6 +25,16 @@ namespace GpuDebug
 		}
 	}
 
+	static void AppendLog(Core::StringBuilder& text, Core::StringView log) {
+		if (log.Trimmed().IsEmpty()) {
+			text.Append("  (the compiler said nothing)\n");
+			return;
+		}
+		text.Append("The compiler's log:\n");
+		text.Append(log.Trimmed());
+		text.Append("\n");
+	}
+
 	Core::String ReplayWithShaderText(Debugger* debugger, const IED::Workspace& ws, const ToolCapture& target, const Serialization::DomNode& args) {
 		ShaderEditRequest edit;
 		edit.m_Eid = IntArg(args, "eid", 0);
@@ -34,6 +44,8 @@ namespace GpuDebug
 		edit.m_Entry = Core::String(args.Member("entry").AsView());
 		edit.m_Profile = Core::String(args.Member("profile").AsView());
 		edit.m_Language = Core::String(args.Member("language").AsView());
+		Serialization::DomNode includes = args.Member("includes");
+		for (int64 i = 0; i < includes.Count(); i += 1) edit.m_Includes.Push(Core::String(includes.At(i).AsView()));
 		if (!edit.m_Eid || edit.m_Stage.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("eid and stage are required"));
 		if (edit.m_Path.IsEmpty() == edit.m_Text.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give the edit as path (a workspace file) or as source, one of them"));
 		if (edit.m_Language.IsEmpty()) edit.m_Language = Core::String(target.m_Api.View() == "Vulkan" && !edit.m_Path.View().EndsWith(Core::StringView(".hlsl")) ? "spirv" : "hlsl");
@@ -43,6 +55,8 @@ namespace GpuDebug
 		if (!result.Member("ok").AsBool()) {
 			text.Append("The edit did not go in: it did not compile, or does not fit the pipeline. The capture's shader stays.\n");
 			AppendDiagnostics(text, result.Member("diagnostics"), where);
+			// What the compiler said, whole, when none of it reads as a line's message: never a refusal without a reason.
+			if (result.Member("diagnostics").Count() == 0) AppendLog(text, result.Member("log").AsView());
 			return text.ToString();
 		}
 		Serialization::DomNode pipelines = result.Member("pipelines");

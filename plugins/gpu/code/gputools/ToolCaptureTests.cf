@@ -1,0 +1,21 @@
+// gpu_capture's answer when no frame came (ToolCapture.cf): it says which of the ways it went.
+
+include "ToolText.ch"
+
+[test("server.gpu.toolcapture")]
+class GpuToolCaptureTests {
+	static bool Says(const Core::String& text, const char* part) { return text.View().Contains(Core::StringView(part)); }
+
+	[test("no_capture_says_why")]
+	public static void TestNoCaptureWhy() {
+		GpuDebug::Target* target = new GpuDebug::Target();
+		target->m_ExitCode = 3;
+		assert_true(Says(GpuDebug::NoCaptureWhy(target, true, false), "exited (code 3) during the capture"), "the program ended");
+		target->m_LastError = Core::String("disk full");
+		assert_true(Says(GpuDebug::NoCaptureWhy(target, false, false), "the capture failed: disk full"), "the library's own reason");
+		target->m_LastError.Clear();
+		Core::String timedOut = GpuDebug::NoCaptureWhy(target, false, true);
+		assert_true(Says(timedOut, "within 10 minutes") && Says(timedOut, "still capturing"), timedOut.CStr());
+		assert_true(Says(GpuDebug::NoCaptureWhy(target, false, false), "stopped capturing without writing one"), "else: it stopped without one");
+	}
+}

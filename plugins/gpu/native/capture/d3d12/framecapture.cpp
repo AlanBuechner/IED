@@ -213,11 +213,12 @@ namespace fb::capture::d3d12
 				for (size_t page = 0; page < object->heap->pages.size(); ++page) {
 					if (!object->heap->pages[page]) continue;
 					for (u32 i = 0; i < DescriptorHeapTrack::kPage; ++i) {
-						DescriptorWrite& slot = object->heap->pages[page][i];
-						if (slot.kind == ViewKind::None) continue;
+						TrackedView& slot = object->heap->pages[page][i];
+						// A view of a dead resource is one the frame cannot use; its pointer may name another resource now.
+						if (slot.view.kind == ViewKind::None || !tracker.IsCurrentLocked(slot)) continue;
 						ByteWriter payload;
 						Ser s(payload, &tracker);
-						Serialize(s, slot);
+						Serialize(s, slot.view);
 						file_.Record(kDescriptor, payload);
 					}
 				}

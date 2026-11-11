@@ -6,7 +6,9 @@ include "ToolText.ch"
 namespace GpuDebug
 {
 	const int64 c_ConnectWaitMs = 120000;
-	const int64 c_CaptureWaitMs = 60000;
+	// A large frame (the Valley's: 1.7 GB of resources) takes more than a minute to read back and write; the library says
+	// when it is done (captured or error), so this only bounds a program that hangs.
+	const int64 c_CaptureWaitMs = 600000;
 	const int64 c_ExitWaitMs = 10000;
 	const int64 c_CapturePollNs = 100000000;
 	const double c_MaxAfterSeconds = 300.0;
@@ -19,6 +21,26 @@ namespace GpuDebug
 		if (target->m_Child) target->m_Child->Kill();
 		const int64 deadline = NowMs() + c_ExitWaitMs;
 		while (!Exited(target) && NowMs() < deadline) Threading::Thread::Sleep(c_CapturePollNs);
+	}
+
+	Core::String NoCaptureWhy(const Target* target, bool exited, bool timedOut) {
+		Core::StringBuilder why;
+		if (exited) {
+			why.Append("no frame was captured: the program exited (code ");
+			why.AppendInt(target->m_ExitCode);
+			why.Append(") during the capture");
+		}
+		else if (!target->m_LastError.IsEmpty()) {
+			why.Append("the capture failed: ");
+			why.Append(target->m_LastError.View());
+		}
+		else if (timedOut) {
+			why.Append("no frame was captured within ");
+			why.AppendInt(c_CaptureWaitMs / 60000);
+			why.Append(" minutes: the library was still capturing or writing the frame (the program is stopped)");
+		}
+		else why.Append("no frame was captured: the library stopped capturing without writing one (Output > GPU says why); a program that stopped presenting never reaches the frame's end");
+		return why.ToString();
 	}
 
 	// The library's capture written at `path`, after the rescan the captured event started.
@@ -56,12 +78,15 @@ namespace GpuDebug
 			throw IED::RpcError(IED::ErrorCode::Unavailable, why.View());
 		}
 		Core::String before = target->m_LastCapture;
+		target->m_LastError.Clear();
 		RequestCapture(debugger, target, 1);
 		deadline = NowMs() + c_CaptureWaitMs;
 		while (target->m_LastCapture == before && target->m_Capturing && !Exited(target) && NowMs() < deadline) Threading::Thread::Sleep(c_CapturePollNs);
 		Core::String path = target->m_LastCapture;
+		const bool exited = Exited(target);
+		const bool timedOut = path == before && target->m_Capturing && !exited;
 		Stop(target);
-		if (path == before) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("no frame was captured: the program stopped presenting, or its capture failed (Output > GPU says why)"));
+		if (path == before) throw IED::RpcError(IED::ErrorCode::Unavailable, NoCaptureWhy(target, exited, timedOut).View());
 		Core::String id = CaptureIdOf(debugger, ws.m_Id.View(), path.View());
 		IED::JsonWriter named;
 		named.BeginObject();

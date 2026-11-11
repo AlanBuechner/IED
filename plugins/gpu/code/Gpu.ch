@@ -47,8 +47,10 @@ namespace GpuDebug
 		public Core::String Json() const;
 	}
 
-	// The captures of `root`'s library as they are on disk.
+	// The captures of `root`'s library as they are on disk, newest first.
 	Core::Array<Capture*> ScanCaptures(const FS::Path& folder);
+	// Whether the capture `a` was made after `b`, by the time and frame their ids end in, whatever program made them.
+	bool CapturedLater(Core::StringView a, Core::StringView b);
 
 	class Target
 	{
@@ -64,6 +66,7 @@ namespace GpuDebug
 		public int64 m_Frame;
 		public bool m_Capturing;
 		public Core::String m_LastCapture; // the path of the last capture it wrote
+		public Core::String m_LastError;   // what the library's last "error" event said
 		public Process::Child* m_Child;
 		public Net::LocalStream* m_Pipe;
 		public Threading::Mutex m_SendLock;
@@ -128,6 +131,7 @@ namespace GpuDebug
 		public Core::String m_Text;
 		public Core::String m_Entry;
 		public Core::String m_Profile;
+		public Core::Array<Core::String> m_Includes;   // workspace folders its #include lines are looked up in; none: m_Path's folder
 	}
 
 	class Debugger

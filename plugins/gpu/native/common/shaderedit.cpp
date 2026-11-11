@@ -21,9 +21,11 @@ namespace fb
 			return text.substr(a, b - a);
 		}
 
-		// After the location: "error X3000: text", "error: text", "warning: text".
+		// After the location: "error X3000: text", "error: text", "warning: text", dxc's "fatal error: text" (an include
+		// not found: an error).
 		bool Message(const std::string& rest, Diagnostic& d) {
 			std::string text = Trimmed(rest);
+			if (text.compare(0, 6, "fatal ") == 0) text = text.substr(6);
 			for (const char* severity : {"error", "warning", "note"}) {
 				const size_t n = strlen(severity);
 				if (text.compare(0, n, severity) != 0) continue;
@@ -74,6 +76,15 @@ namespace fb
 		u64 hash = 14695981039346656037ull;
 		for (size_t i = 0; i < size; ++i) hash = (hash ^ ((const u8*)bytes)[i]) * 1099511628211ull;
 		return Format("%016llx", (unsigned long long)hash);
+	}
+
+	std::vector<std::string> IncludeFoldersOf(const JsonValue& params) {
+		std::vector<std::string> folders;
+		const JsonValue& list = params["includes"];
+		if (list.kind != JsonKind::Array) return folders;
+		for (size_t i = 0; i < list.Count(); ++i)
+			if (!list.At(i).Str().empty()) folders.push_back(list.At(i).Str());
+		return folders;
 	}
 
 	void WriteDiagnostics(JsonWriter& out, const std::string& log) {

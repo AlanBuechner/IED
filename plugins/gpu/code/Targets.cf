@@ -189,6 +189,7 @@ namespace GpuDebug
 		}
 		else if (event == "error") {
 			target->m_Capturing = false;
+			target->m_LastError = Core::String(message.Member("message").AsView());
 			m_Context->Output(target->m_WsId.View(), Core::StringView("gpu"), ((Core::String("Capture failed: ") + message.Member("message").AsView()) + "\r\n").View());
 			Changed(target);
 		}

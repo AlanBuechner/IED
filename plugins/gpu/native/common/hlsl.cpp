@@ -33,15 +33,50 @@ namespace fb
 			return newest;
 		}
 
-		bool CompileDxbc(const std::string& source, const std::string& entry, const std::string& profile, std::vector<u8>& code, std::string& log) {
+		// fxc's #include: the first of the folders holding the name.
+		class FolderInclude : public ID3DInclude
+		{
+		public:
+			explicit FolderInclude(const std::vector<std::string>& folders) : folders_(folders) {}
+
+			HRESULT __stdcall Open(D3D_INCLUDE_TYPE, LPCSTR name, LPCVOID, LPCVOID* data, UINT* bytes) noexcept override {
+				for (const std::string& folder : folders_) {
+					FILE* file = _wfopen(Widen(folder + "\\" + name).c_str(), L"rb");
+					if (!file) continue;
+					std::vector<char> text;
+					char chunk[4096];
+					for (size_t got; (got = fread(chunk, 1, sizeof(chunk), file)) > 0;) text.insert(text.end(), chunk, chunk + got);
+					fclose(file);
+					char* copy = new char[text.size() + 1];
+					memcpy(copy, text.data(), text.size());
+					*data = copy;
+					*bytes = (UINT)text.size();
+					return S_OK;
+				}
+				return E_FAIL;
+			}
+
+			HRESULT __stdcall Close(LPCVOID data) noexcept override {
+				delete[] (const char*)data;
+				return S_OK;
+			}
+
+		private:
+			const std::vector<std::string>& folders_;
+		};
+
+		bool CompileDxbc(const std::string& source, const std::string& entry, const std::string& profile, std::vector<u8>& code, std::string& log,
+			const std::vector<std::string>& includes) {
 			auto compile = Compiler47() ? (pD3DCompile)GetProcAddress((HMODULE)Compiler47(), "D3DCompile") : nullptr;
 			if (!compile) {
 				log = "d3dcompiler_47.dll is not there";
 				return false;
 			}
+			FolderInclude folders(includes);
+			ID3DInclude* include = includes.empty() ? D3D_COMPILE_STANDARD_FILE_INCLUDE : &folders;
 			ID3DBlob* object = nullptr;
 			ID3DBlob* errors = nullptr;
-			const HRESULT hr = compile(source.data(), source.size(), "edited.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, entry.c_str(), profile.c_str(), 0, 0, &object, &errors);
+			const HRESULT hr = compile(source.data(), source.size(), "edited.hlsl", nullptr, include, entry.c_str(), profile.c_str(), 0, 0, &object, &errors);
 			if (errors) log.assign((const char*)errors->GetBufferPointer(), errors->GetBufferSize());
 			if (object) code.assign((const u8*)object->GetBufferPointer(), (const u8*)object->GetBufferPointer() + object->GetBufferSize());
 			if (object) object->Release();
@@ -50,7 +85,8 @@ namespace fb
 			return SUCCEEDED(hr) && !code.empty();
 		}
 
-		bool CompileDxc(HMODULE module, bool spirv, const std::string& source, const std::string& entry, const std::string& profile, std::vector<u8>& code, std::string& log) {
+		bool CompileDxc(HMODULE module, bool spirv, const std::string& source, const std::string& entry, const std::string& profile, std::vector<u8>& code, std::string& log,
+			const std::vector<std::string>& includes) {
 			auto create = module ? (DxcCreateInstanceProc)GetProcAddress(module, "DxcCreateInstance") : nullptr;
 			IDxcCompiler3* compiler = nullptr;
 			if (!create || FAILED(create(CLSID_DxcCompiler, __uuidof(IDxcCompiler3), (void**)&compiler))) {
@@ -58,13 +94,20 @@ namespace fb
 					: "dxcompiler.dll is not there (the Windows SDK has it; FLASHBANG_DXCOMPILER names one)";
 				return false;
 			}
+			// #include: the files dxc finds through -I, read by its default handler (without one it reads none).
+			IDxcUtils* utils = nullptr;
+			IDxcIncludeHandler* handler = nullptr;
+			if (SUCCEEDED(create(CLSID_DxcUtils, __uuidof(IDxcUtils), (void**)&utils)) && utils) utils->CreateDefaultIncludeHandler(&handler);
 			const std::wstring wideEntry = Widen(entry), wideProfile = Widen(profile);
+			std::vector<std::wstring> wideIncludes;
+			for (const std::string& folder : includes) wideIncludes.push_back(Widen(folder));
 			std::vector<LPCWSTR> args = {L"edited.hlsl", L"-E", wideEntry.c_str(), L"-T", wideProfile.c_str()};
+			for (const std::wstring& folder : wideIncludes) args.insert(args.end(), {L"-I", folder.c_str()});
 			if (spirv) args.insert(args.end(), {L"-spirv", L"-fspv-target-env=vulkan1.1"});
 			const DxcBuffer buffer = {source.data(), source.size(), DXC_CP_UTF8};
 			IDxcResult* result = nullptr;
 			bool built = false;
-			if (SUCCEEDED(compiler->Compile(&buffer, args.data(), (UINT32)args.size(), nullptr, __uuidof(IDxcResult), (void**)&result)) && result) {
+			if (SUCCEEDED(compiler->Compile(&buffer, args.data(), (UINT32)args.size(), handler, __uuidof(IDxcResult), (void**)&result)) && result) {
 				IDxcBlobUtf8* errors = nullptr;
 				if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, __uuidof(IDxcBlobUtf8), (void**)&errors, nullptr)) && errors) {
 					log.assign(errors->GetStringPointer(), errors->GetStringLength());
@@ -80,6 +123,8 @@ namespace fb
 				}
 				result->Release();
 			}
+			if (handler) handler->Release();
+			if (utils) utils->Release();
 			compiler->Release();
 			return built;
 		}
@@ -110,13 +155,14 @@ namespace fb
 		return module;
 	}
 
-	bool CompileHlsl(const std::string& source, const std::string& entry, const std::string& profile, HlslTarget target, std::vector<u8>& code, std::string& log) {
+	bool CompileHlsl(const std::string& source, const std::string& entry, const std::string& profile, HlslTarget target, std::vector<u8>& code, std::string& log,
+		const std::vector<std::string>& includes) {
 		code.clear();
 		log.clear();
 		switch (target) {
-			case HlslTarget::Dxbc: return CompileDxbc(source, entry, profile, code, log);
-			case HlslTarget::Dxil: return CompileDxc((HMODULE)DxCompiler(), false, source, entry, profile, code, log);
-			default: return CompileDxc((HMODULE)SpirvDxCompiler(), true, source, entry, profile, code, log);
+			case HlslTarget::Dxbc: return CompileDxbc(source, entry, profile, code, log, includes);
+			case HlslTarget::Dxil: return CompileDxc((HMODULE)DxCompiler(), false, source, entry, profile, code, log, includes);
+			default: return CompileDxc((HMODULE)SpirvDxCompiler(), true, source, entry, profile, code, log, includes);
 		}
 	}
 }

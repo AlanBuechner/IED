@@ -1,4 +1,5 @@
 #include "device.h"
+#include "formats.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -346,12 +347,43 @@ namespace fb::replay::d3d12
 
 	// --- Descriptors ---------------------------------------------------------------------------------------------------
 
+	// The bytes a buffer view's elements reach, or 0 when the element size is unknown.
+	static u64 BufferViewEnd(u64 first, u32 count, u32 stride, DXGI_FORMAT format) {
+		u64 element = stride;
+		if (!element) {
+			const FormatInfo* info = DxgiFormat(format);
+			element = info && !IsBlock(info->codec) ? info->bytes : 0;
+		}
+		return (first + count) * element;
+	}
+
+	// A buffer view past its buffer's end: a slot left from a resource that died, its pointer since given to a smaller
+	// one (captures made before the capture library dropped such slots). The runtime removes the device for it.
+	static bool ReachesPastBuffer(const DescriptorWrite& write) {
+		if (!write.resource || !write.hasDesc) return false;
+		u64 end = 0;
+		if (write.kind == ViewKind::Srv && write.srv.ViewDimension == D3D12_SRV_DIMENSION_BUFFER)
+			end = BufferViewEnd(write.srv.Buffer.FirstElement, write.srv.Buffer.NumElements, write.srv.Buffer.StructureByteStride, write.srv.Format);
+		else if (write.kind == ViewKind::Uav && write.uav.ViewDimension == D3D12_UAV_DIMENSION_BUFFER)
+			end = BufferViewEnd(write.uav.Buffer.FirstElement, write.uav.Buffer.NumElements, write.uav.Buffer.StructureByteStride, write.uav.Format);
+		else return false;
+		return end > write.resource->GetDesc().Width;
+	}
+
 	void ReplayDevice::WriteDescriptor(const u8* data, u64 size) {
 		DescriptorWrite write = {};
 		if (!model_.Decode(data, size, write, this)) return;
 		auto heap = heaps_.find(write.heap);
 		if (heap == heaps_.end()) return;
 		const D3D12_CPU_DESCRIPTOR_HANDLE handle = {(SIZE_T)(heap->second.cpu + (u64)write.index * heap->second.increment)};
+		if (ReachesPastBuffer(write)) {
+			auto id = ids_.find(write.resource);
+			const std::string warning = Format("a stale view in %s[%u] reaches past the end of %s; it replays as a null view", model_.NameOf(write.heap).c_str(), write.index,
+				id == ids_.end() ? "its buffer" : model_.NameOf(id->second).c_str());
+			if (std::find(warnings.begin(), warnings.end(), warning) == warnings.end()) warnings.push_back(warning);
+			write.resource = nullptr;
+			write.counter = nullptr;
+		}
 		switch (write.kind) {
 			case ViewKind::Cbv: device_->CreateConstantBufferView(write.hasDesc ? &write.cbv : nullptr, handle); break;
 			case ViewKind::Srv:
@@ -383,6 +415,14 @@ namespace fb::replay::d3d12
 			}
 			default: break;
 		}
+		// A view the replay device refuses can remove it; say which, not the next call that fails.
+		const HRESULT removed = device_->GetDeviceRemovedReason();
+		if (FAILED(removed)) {
+			auto id = ids_.find(write.resource);
+			const std::string resource = id == ids_.end() ? std::string("no resource") : model_.NameOf(id->second);
+			Fail("the replay device was removed (0x%08lx) by a %s of %s written to %s[%u]", (unsigned long)removed, ViewKindName(write.kind), resource.c_str(),
+				model_.NameOf(write.heap).c_str(), write.index);
+		}
 	}
 
 	void ReplayDevice::CopyDescriptors(const u8* data, u64 size) {
@@ -395,6 +435,10 @@ namespace fb::replay::d3d12
 		const D3D12_CPU_DESCRIPTOR_HANDLE to = {(SIZE_T)(dst->second.cpu + (u64)copy.dstIndex * dst->second.increment)};
 		const D3D12_CPU_DESCRIPTOR_HANDLE from = {(SIZE_T)(src->second.cpu + (u64)copy.srcIndex * src->second.increment)};
 		device_->CopyDescriptorsSimple(copy.count, to, from, type);
+		const HRESULT removed = device_->GetDeviceRemovedReason();
+		if (FAILED(removed))
+			Fail("the replay device was removed (0x%08lx) by copying %u descriptors from %s[%u] to %s[%u]", (unsigned long)removed, copy.count,
+				model_.NameOf(copy.srcHeap).c_str(), copy.srcIndex, model_.NameOf(copy.dstHeap).c_str(), copy.dstIndex);
 	}
 
 	// --- Initial contents ---------------------------------------------------------------------------------------------
@@ -514,9 +558,13 @@ namespace fb::replay::d3d12
 	ReplayDevice::ListSet& ReplayDevice::ListsFor(D3D12_COMMAND_LIST_TYPE type) {
 		ListSet& set = lists_[(int)type];
 		if (!set.list) {
-			if (FAILED(device_->CreateCommandAllocator(type, __uuidof(ID3D12CommandAllocator), (void**)&set.allocator)) ||
-				FAILED(device_->CreateCommandList(0, type, set.allocator, nullptr, __uuidof(ID3D12GraphicsCommandList), (void**)&set.list)))
-				Fail("cannot make a command list of type %d", (int)type);
+			HRESULT made = device_->CreateCommandAllocator(type, __uuidof(ID3D12CommandAllocator), (void**)&set.allocator);
+			if (SUCCEEDED(made)) made = device_->CreateCommandList(0, type, set.allocator, nullptr, __uuidof(ID3D12GraphicsCommandList), (void**)&set.list);
+			if (FAILED(made)) {
+				const HRESULT removed = device_->GetDeviceRemovedReason();
+				if (FAILED(removed)) Fail("the replay device was removed (0x%08lx) before a command list of type %d could be made", (unsigned long)removed, (int)type);
+				Fail("cannot make a command list of type %d (0x%08lx)", (int)type, (unsigned long)made);
+			}
 			set.list->Close();
 		}
 		return set;
@@ -558,7 +606,11 @@ namespace fb::replay::d3d12
 
 	void ReplayDevice::Execute(ID3D12CommandQueue* queue, ID3D12GraphicsCommandList* list) {
 		const HRESULT closed = list->Close();
-		if (FAILED(closed)) Fail("a replayed command list did not close (0x%08lx); see Messages", (unsigned long)closed);
+		if (FAILED(closed)) {
+			const std::string why = StoredErrors();
+			if (why.empty()) Fail("a replayed command list of type %d did not close (0x%08lx); the debug layer said nothing (no info queue?)", (int)list->GetType(), (unsigned long)closed);
+			Fail("a replayed command list of type %d did not close (0x%08lx): %s", (int)list->GetType(), (unsigned long)closed, why.c_str());
+		}
 		ID3D12CommandList* lists[] = {list};
 		queue->ExecuteCommandLists(1, lists);
 		WaitQueue(queue);
@@ -603,6 +655,22 @@ namespace fb::replay::d3d12
 	u64 ReplayDevice::GpuDescriptor(u64 heap, u32 index) {
 		auto found = heaps_.find(heap);
 		return found == heaps_.end() || !found->second.gpu ? 0 : found->second.gpu + (u64)index * found->second.increment;
+	}
+
+	std::string ReplayDevice::StoredErrors() const {
+		std::string joined;
+		if (!infoQueue_) return joined;
+		const UINT64 count = infoQueue_->GetNumStoredMessages();
+		for (UINT64 i = 0; i < count; ++i) {
+			SIZE_T length = 0;
+			if (FAILED(infoQueue_->GetMessage(i, nullptr, &length)) || !length) continue;
+			std::vector<u8> bytes(length);
+			D3D12_MESSAGE* message = (D3D12_MESSAGE*)bytes.data();
+			if (FAILED(infoQueue_->GetMessage(i, message, &length)) || message->Severity > D3D12_MESSAGE_SEVERITY_ERROR) continue;
+			if (!joined.empty()) joined += " | ";
+			joined.append(message->pDescription, message->DescriptionByteLength ? message->DescriptionByteLength - 1 : 0);
+		}
+		return joined;
 	}
 
 	void ReplayDevice::CollectMessages(u32 eid) {

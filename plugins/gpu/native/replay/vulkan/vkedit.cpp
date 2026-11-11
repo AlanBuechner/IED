@@ -225,7 +225,7 @@ namespace fb::replay::vulkan
 		if (edit.language == "spirv") built = AssembleSpirv(edit.source, original.data(), original.size(), edit.words, log);
 		else if (edit.language == "hlsl") {
 			std::vector<u8> code;
-			built = CompileHlsl(edit.source, edit.entry, edit.profile, HlslTarget::Spirv, code, log) && code.size() % 4 == 0;
+			built = CompileHlsl(edit.source, edit.entry, edit.profile, HlslTarget::Spirv, code, log, IncludeFoldersOf(params)) && code.size() % 4 == 0;
 			edit.words.assign((const u32*)code.data(), (const u32*)code.data() + code.size() / 4);
 		}
 		else Fail("Vulkan shaders are edited as SPIR-V assembly (spirv) or HLSL");

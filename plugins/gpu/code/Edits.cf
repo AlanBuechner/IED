@@ -79,6 +79,14 @@ namespace GpuDebug
 		return text.ToString();
 	}
 
+	// The folders (absolute) an edit's #include lines are looked up in: the ones it names, else its file's own.
+	static Core::Array<Core::String> IncludeFolders(const IED::Workspace& ws, const ShaderEditRequest& edit) {
+		Core::Array<Core::String> folders;
+		for (const Core::String& folder : edit.m_Includes) folders.Push(IED::WorkspaceFile(ws, IED::NormalizePath(folder.View()).View()));
+		if (folders.IsEmpty() && !edit.m_Path.IsEmpty()) folders.Push(Core::String(FS::Path(IED::WorkspaceFile(ws, IED::NormalizePath(edit.m_Path.View()).View()).View()).Parent().View()));
+		return folders;
+	}
+
 	Core::String Debugger::EditShader(Session* session, const IED::Workspace& ws, Capture* capture, const ShaderEditRequest& edit) {
 		Core::String source = edit.m_Text;
 		if (!edit.m_Path.IsEmpty()) {
@@ -93,6 +101,10 @@ namespace GpuDebug
 		params.Field("source", source.View());
 		if (!edit.m_Entry.IsEmpty()) params.Field("entry", edit.m_Entry.View());
 		if (!edit.m_Profile.IsEmpty()) params.Field("profile", edit.m_Profile.View());
+		params.Key(Core::StringView("includes"));
+		params.BeginArray();
+		for (const Core::String& folder : IncludeFolders(ws, edit)) params.String(folder.View());
+		params.EndArray();
 		params.EndObject();
 		Core::String blob;
 		Core::String answer = Call(session, Core::StringView("editShader"), params.View(), blob);

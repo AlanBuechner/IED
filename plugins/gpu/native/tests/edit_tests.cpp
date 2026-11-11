@@ -8,6 +8,8 @@
 #include "shaderedit.h"
 #include "shaders.h"
 
+#include <windows.h>
+
 using namespace fb;
 using namespace fb::replay::vulkan;
 
@@ -85,6 +87,9 @@ TEST(compiler_logs_read_into_diagnostics) {
 	CHECK(dxc.size() == 2);
 	CHECK(dxc.size() == 2 && dxc[0].line == 7 && dxc[0].column == 14 && dxc[0].text == "use of undeclared identifier 'colr'");
 	CHECK(dxc.size() == 2 && dxc[1].line == 2 && dxc[1].column == 0);
+	// An include dxc cannot find is a fatal error: an error, not a line left out.
+	const std::vector<Diagnostic> fatal = ParseCompilerLog("edited.hlsl:3:10: fatal error: 'SceneCommon.hlsl' file not found\n");
+	CHECK(fatal.size() == 1 && fatal[0].line == 3 && fatal[0].severity == "error" && fatal[0].text == "'SceneCommon.hlsl' file not found");
 	CHECK(ShaderKey("abc", 3) == ShaderKey("abc", 3) && ShaderKey("abc", 3) != ShaderKey("abd", 3) && ShaderKey("", 0) == "cbf29ce484222325");
 }
 
@@ -105,4 +110,41 @@ TEST(hlsl_compiles_through_windows_compilers) {
 		CHECK(CompileHlsl(source, "PSMain", "ps_6_0", HlslTarget::Spirv, code, log));
 		CHECK(code.size() > 20 && *(const u32*)code.data() == 0x07230203);
 	}
+}
+
+TEST(hlsl_includes_are_found_in_the_folders_given) {
+	// Two folders, as an engine's shaders and its renderer's: the edit includes one, which includes the other.
+	wchar_t temp[MAX_PATH] = {};
+	GetTempPathW(MAX_PATH, temp);
+	const std::string root = Narrow(temp) + Format("fb-includes-%lu", (unsigned long)GetCurrentProcessId());
+	const std::string engine = root + "\\engine", renderer = root + "\\renderer";
+	CreateDirectoryW(Widen(root).c_str(), nullptr);
+	CreateDirectoryW(Widen(engine).c_str(), nullptr);
+	CreateDirectoryW(Widen(renderer).c_str(), nullptr);
+	auto write = [](const std::string& path, const char* text) {
+		FILE* file = _wfopen(Widen(path).c_str(), L"wb");
+		fwrite(text, 1, strlen(text), file);
+		fclose(file);
+	};
+	write(engine + "\\Scene.hlsl", "#include \"Common.hlsl\"\nfloat4 Tint(float4 c) { return c * c_Half; }\n");
+	write(renderer + "\\Common.hlsl", "static const float c_Half = 0.5;\n");
+	const std::string source = "#include \"Scene.hlsl\"\nfloat4 PSMain(float4 p : SV_Position) : SV_Target { return Tint(p); }\n";
+	const std::vector<std::string> folders = {engine, renderer};
+	std::vector<u8> code;
+	std::string log;
+	CHECK(CompileHlsl(source, "PSMain", "ps_5_1", HlslTarget::Dxbc, code, log, folders));
+	CHECK(!CompileHlsl(source, "PSMain", "ps_5_1", HlslTarget::Dxbc, code, log, {engine}));
+	CHECK(!ParseCompilerLog(log).empty());
+	if (DxCompiler()) {
+		CHECK(CompileHlsl(source, "PSMain", "ps_6_0", HlslTarget::Dxil, code, log, folders));
+		if (!log.empty() && code.empty()) printf("  dxc: %s\n", log.c_str());
+		CHECK(!CompileHlsl(source, "PSMain", "ps_6_0", HlslTarget::Dxil, code, log));
+		const std::vector<Diagnostic> problems = ParseCompilerLog(log);
+		CHECK(!problems.empty() && problems[0].severity == "error");
+	}
+	DeleteFileW(Widen(engine + "\\Scene.hlsl").c_str());
+	DeleteFileW(Widen(renderer + "\\Common.hlsl").c_str());
+	RemoveDirectoryW(Widen(engine).c_str());
+	RemoveDirectoryW(Widen(renderer).c_str());
+	RemoveDirectoryW(Widen(root).c_str());
 }

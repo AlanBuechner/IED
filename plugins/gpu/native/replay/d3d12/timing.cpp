@@ -45,7 +45,7 @@ namespace fb::replay::d3d12
 				auto slot = slots_.find(command.eid);
 				if (slot == slots_.end() || !Timed(list)) return;
 				list->EndQuery(times_, D3D12_QUERY_TYPE_TIMESTAMP, slot->second * 2);
-				if (counting_ && Counted(command)) list->BeginQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
+				if (counting_ && Counted(command) && Direct(list)) list->BeginQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
 				if (counting_ && ClassOf(command.command) == CmdClass::Draw) list->BeginQuery(samples_, D3D12_QUERY_TYPE_OCCLUSION, slot->second);
 				used_.push_back(slot->second);
 			}
@@ -58,7 +58,7 @@ namespace fb::replay::d3d12
 					drawn_.push_back(slot->second);
 					drawnEids_.insert(command.eid);
 				}
-				if (counting_ && Counted(command)) {
+				if (counting_ && Counted(command) && Direct(list)) {
 					list->EndQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
 					counted_.push_back(slot->second);
 				}
@@ -145,6 +145,8 @@ namespace fb::replay::d3d12
 				const D3D12_RANGE none = {0, 0};
 				buffer->Unmap(0, &none);
 			}
+			// Pipeline statistics and occlusion queries exist only on direct lists: one on a compute list fails its Close.
+			static bool Direct(ID3D12GraphicsCommandList* list) { return list->GetType() == D3D12_COMMAND_LIST_TYPE_DIRECT; }
 			bool Timed(ID3D12GraphicsCommandList* list) const { return list->GetType() == D3D12_COMMAND_LIST_TYPE_DIRECT || list->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE; }
 			static bool Counted(const CommandRef& command) {
 				const CmdClass c = ClassOf(command.command);

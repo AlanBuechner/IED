@@ -33,17 +33,26 @@ namespace fb::capture::d3d12
 		void SetState(u32 subresource, D3D12_RESOURCE_STATES state);
 	};
 
+	// A heap slot's view and the ids of the resources it named when it was written: once one of them dies the view is
+	// stale, and the runtime may hand its pointer to a new resource the view was never made for.
+	struct TrackedView
+	{
+		DescriptorWrite view = {};
+		u64 resource = 0;
+		u64 counter = 0;
+	};
+
 	struct DescriptorHeapTrack
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 		u64 cpuStart = 0;
 		u64 gpuStart = 0;
 		u32 increment = 0;
-		std::vector<std::unique_ptr<DescriptorWrite[]>> pages;
+		std::vector<std::unique_ptr<TrackedView[]>> pages;
 
 		static constexpr u32 kPage = 1024;
 		// The slot's view; null when `create` is false and nothing was ever written there.
-		DescriptorWrite* Slot(u32 index, bool create);
+		TrackedView* Slot(u32 index, bool create);
 	};
 
 	struct Object
@@ -96,6 +105,8 @@ namespace fb::capture::d3d12
 		// CopyDescriptors(Simple): copies the shadow slots; calls `each` with every (dst heap, dst index, src heap, src
 		// index, count) run it copied.
 		void CopyDescriptors(SIZE_T dst, SIZE_T src, u32 count, D3D12_DESCRIPTOR_HEAP_TYPE type, std::vector<DescriptorCopy>* runs);
+		// Whether the resources a slot's view named are all still alive; the caller holds `lock`.
+		bool IsCurrentLocked(const TrackedView& slot) const;
 
 		// SerWriteMap
 		u64 Id(const void* object) override;
@@ -111,6 +122,7 @@ namespace fb::capture::d3d12
 	private:
 		Object* HeapOfCpu(u64 ptr, u32& index);
 		Object* HeapOfGpu(u64 ptr, u32& index);
+		u64 IdLocked(const void* real) const;
 
 		std::unordered_map<const void*, Object*> byReal_;
 		std::map<u64, std::unique_ptr<Object>> byId_;

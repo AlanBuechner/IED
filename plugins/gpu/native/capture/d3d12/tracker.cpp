@@ -27,7 +27,7 @@ namespace fb::capture::d3d12
 		if (same && states.size() > 1) states.resize(1);
 	}
 
-	DescriptorWrite* DescriptorHeapTrack::Slot(u32 index, bool create) {
+	TrackedView* DescriptorHeapTrack::Slot(u32 index, bool create) {
 		if (index >= desc.NumDescriptors) return nullptr;
 		const u32 page = index / kPage;
 		if (page >= pages.size()) {
@@ -36,7 +36,7 @@ namespace fb::capture::d3d12
 		}
 		if (!pages[page]) {
 			if (!create) return nullptr;
-			pages[page].reset(new DescriptorWrite[kPage]());
+			pages[page].reset(new TrackedView[kPage]());
 		}
 		return &pages[page][index % kPage];
 	}
@@ -193,12 +193,24 @@ namespace fb::capture::d3d12
 		u32 index = 0;
 		Object* heap = HeapOfCpu(handle, index);
 		if (!heap) return {0, 0};
-		DescriptorWrite* slot = heap->heap->Slot(index, true);
+		TrackedView* slot = heap->heap->Slot(index, true);
 		if (!slot) return {0, 0};
-		*slot = view;
-		slot->heap = heap->id;
-		slot->index = index;
+		slot->view = view;
+		slot->view.heap = heap->id;
+		slot->view.index = index;
+		slot->resource = IdLocked(view.resource);
+		slot->counter = IdLocked(view.counter);
 		return {heap->id, index};
+	}
+
+	u64 Tracker::IdLocked(const void* real) const {
+		if (!real) return 0;
+		auto found = byReal_.find(real);
+		return found == byReal_.end() ? 0 : found->second->id;
+	}
+
+	bool Tracker::IsCurrentLocked(const TrackedView& slot) const {
+		return IdLocked(slot.view.resource) == slot.resource && IdLocked(slot.view.counter) == slot.counter;
 	}
 
 	void Tracker::CopyDescriptors(SIZE_T dst, SIZE_T src, u32 count, D3D12_DESCRIPTOR_HEAP_TYPE type, std::vector<DescriptorCopy>* runs) {
@@ -214,13 +226,13 @@ namespace fb::capture::d3d12
 			run = std::min(run, dstHeap->heap->desc.NumDescriptors - dstIndex);
 			if (srcHeap) run = std::min(run, srcHeap->heap->desc.NumDescriptors - srcIndex);
 			for (u32 i = 0; i < run; ++i) {
-				DescriptorWrite* from = srcHeap ? srcHeap->heap->Slot(srcIndex + i, false) : nullptr;
-				DescriptorWrite* to = dstHeap->heap->Slot(dstIndex + i, from != nullptr);
+				TrackedView* from = srcHeap ? srcHeap->heap->Slot(srcIndex + i, false) : nullptr;
+				TrackedView* to = dstHeap->heap->Slot(dstIndex + i, from != nullptr);
 				if (!to) continue;
 				if (from) *to = *from;
-				else *to = DescriptorWrite();
-				to->heap = dstHeap->id;
-				to->index = dstIndex + i;
+				else *to = TrackedView();
+				to->view.heap = dstHeap->id;
+				to->view.index = dstIndex + i;
 			}
 			if (runs) runs->push_back({dstHeap->id, dstIndex, srcHeap ? srcHeap->id : 0, srcIndex, run});
 			done += run;

@@ -148,7 +148,7 @@ namespace fb::replay::d3d12
 		edit.entry = params["entry"].Str("main");
 		edit.source = params["source"].Str();
 		std::string log;
-		const bool built = CompileHlsl(edit.source, edit.entry, edit.profile, TargetOf(edit.profile), edit.code, log);
+		const bool built = CompileHlsl(edit.source, edit.entry, edit.profile, TargetOf(edit.profile), edit.code, log, IncludeFoldersOf(params));
 		out.String("key", edit.key).String("stage", edit.stage).String("profile", edit.profile).String("entry", edit.entry);
 		if (!built) {
 			WriteDiagnostics(out, log.empty() ? "edited.hlsl(1,1): error: it did not compile" : log);

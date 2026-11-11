@@ -52,6 +52,9 @@ namespace GpuDebug
 
 	Core::String CapturesText(Debugger* debugger, const IED::Workspace& ws);
 	Core::String CaptureText(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args);
+	// Why gpu_capture's requested frame never came (ToolCapture.cf): `target` exited, its library said the capture failed
+	// (m_LastError), the wait ran out while it was capturing (`timedOut`), or the library stopped without one.
+	Core::String NoCaptureWhy(const Target* target, bool exited, bool timedOut);
 	Core::String EventsText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String ResourcesText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String TimingText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);

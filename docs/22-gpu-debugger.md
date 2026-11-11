@@ -234,9 +234,12 @@ the captured frame.
   reads back: no SPIR-V tools dependency), the source a module embeds (OpSource) as `embedded`, or the current edit's
   own text. A compiled DXBC or DXIL shader keeps no source unless built with debug information: its edit starts from
   a file.
-- **Compiling** (`editShader {eid, stage, language, source, entry?, profile?}`): `hlsl` through Windows' compilers
-  (`common/hlsl.cpp`): d3dcompiler_47 for Shader Model 5.x, the Windows SDK's dxcompiler for 6.x, and for Vulkan a
-  dxcompiler with SPIR-V code generation (the Vulkan SDK's; `FLASHBANG_SPIRV_DXCOMPILER` names one); `spirv` through
+- **Compiling** (`editShader {eid, stage, language, source, entry?, profile?, includes?}`): `hlsl` through Windows'
+  compilers (`common/hlsl.cpp`): d3dcompiler_47 for Shader Model 5.x, the Windows SDK's dxcompiler for 6.x, and for
+  Vulkan a dxcompiler with SPIR-V code generation (the Vulkan SDK's; `FLASHBANG_SPIRV_DXCOMPILER` names one), its
+  `#include` lines looked up in `includes` (absolute folders, in order: dxc's `-I` with its default include handler,
+  fxc a handler searching them) - the server passes the folders `gpu_replay_with_shader` names, else the edited
+  file's own; an include not found is dxc's `fatal error`, read as an error; `spirv` through
   the assembler (`replay/vulkan/vkassemble.cpp`): the listing's names keep the ids the captured module had, so a number
   the listing prints for an id still means it, and a new name gets a new id; constants read by their type (0.5 for a
   float). The edit goes into every pipeline that used the same shader in that stage - D3D12 pipeline states by the
@@ -327,7 +330,7 @@ timeline's counter plots; Analysis findings.
 | `gpu.open {wsId, captureId}` | the capture's replay session (started, or the running one): `{sessionId}`; its state on `gpurs:<sessionId>` |
 | `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`); not `initialize`, `png`, `compareOpen` or `compareClose`, which name files |
 | `gpu.compare {sessionId, captureId}` | the session's capture compared with another capture of its workspace ("Compare" above; `""` stops): `{session, result}` |
-| `gpu.shaderSource {sessionId, eid, stage}`, `gpu.editShader {sessionId, eid, stage, language, path?, text?, entry?, profile?}`, `gpu.revertShader {sessionId, key?}` | Edit and Replay ("Edit and Replay" above): the source with the file it was last edited from, an edit compiled (a workspace file as the editor holds it, or text), one or all put back |
+| `gpu.shaderSource {sessionId, eid, stage}`, `gpu.editShader {sessionId, eid, stage, language, path?, text?, entry?, profile?}` (includes: the path's folder), `gpu.revertShader {sessionId, key?}` | Edit and Replay ("Edit and Replay" above): the source with the file it was last edited from, an edit compiled (a workspace file as the editor holds it, or text), one or all put back |
 | `gpu.measurements {sessionId}` | what the session keeps measured ("Performance" above): `{timing?, timingStale, compareTiming?, experiments}` |
 | `gpu.close {sessionId}` | ends the session for everyone |
 

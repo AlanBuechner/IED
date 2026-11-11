@@ -22,8 +22,11 @@ namespace fb
 	};
 
 	// The diagnostics of a compiler's log: fxc's "name(line,col-col): error X3000: text", dxc's and glslang's
-	// "name:line:col: error: text", and Flashbang's assembler's "line N: text"; lines it cannot read are left out.
+	// "name:line:col: error: text" ("fatal error" read as an error), and Flashbang's assembler's "line N: text"; lines
+	// it cannot read are left out.
 	std::vector<Diagnostic> ParseCompilerLog(const std::string& log);
+	// An edit's `includes`: the folders (absolute) its #include lines are looked up in, in order; none when not given.
+	std::vector<std::string> IncludeFoldersOf(const JsonValue& params);
 	// `log` and its `diagnostics` ([{line, column, severity, text}]) into an answer.
 	void WriteDiagnostics(JsonWriter& out, const std::string& log);
 }

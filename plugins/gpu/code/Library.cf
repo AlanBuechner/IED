@@ -23,6 +23,24 @@ namespace GpuDebug
 		return text;
 	}
 
+	// When a capture was made, from its id "<program>_<yyyymmdd-hhmmss>_f<frame>": its last two parts (a program's name
+	// may hold '_'); the whole id when it has fewer.
+	static Core::StringView CapturedAt(Core::StringView id) {
+		int64 seen = 0;
+		for (int64 i = id.ByteLength() - 1; i >= 0; --i) {
+			if (id.ByteAt(i) != '_') continue;
+			seen += 1;
+			if (seen == 2) return id.Substring(i + 1, id.ByteLength() - i - 1);
+		}
+		return id;
+	}
+
+	bool CapturedLater(Core::StringView a, Core::StringView b) {
+		Core::StringView whenA = CapturedAt(a);
+		Core::StringView whenB = CapturedAt(b);
+		return whenA == whenB ? a > b : whenA > whenB;
+	}
+
 	Core::Array<Capture*> ScanCaptures(const FS::Path& folder) {
 		Core::Array<Capture*> found;
 		FS::Directory directory = FS::Directory(folder.CStr());
@@ -39,11 +57,11 @@ namespace GpuDebug
 			capture->m_Thumbnail = FS::FileExists(file.WithExtension(Core::StringView(".png")).CStr());
 			found.Push(capture);
 		}
-		// Newest first: names end in their time and frame, so the reverse of name order.
+		// Newest first, by the time in their names - not the whole name, whose program would come first.
 		for (int64 i = 1; i < found.Count(); ++i) {
 			Capture* moving = found[i];
 			int64 j = i - 1;
-			while (j >= 0 && found[j]->m_Id.View() < moving->m_Id.View()) {
+			while (j >= 0 && CapturedLater(moving->m_Id.View(), found[j]->m_Id.View())) {
 				found[j + 1] = found[j];
 				--j;
 			}
