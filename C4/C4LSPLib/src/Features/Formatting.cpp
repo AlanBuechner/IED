@@ -6,6 +6,8 @@
 #include <cctype>
 #include <map>
 #include <optional>
+#include <set>
+#include <string_view>
 #include <vector>
 
 namespace C4LSP::Features
@@ -58,6 +60,8 @@ namespace C4LSP::Features
 		}
 
 		bool IsCloser(TokenType t) { return t == TokenType::CloseCurl || t == TokenType::CloseParen || t == TokenType::CloseBracket; }
+
+		bool IsSign(TokenType t) { return t == TokenType::Plus || t == TokenType::Minus; }
 
 		// The last token of an operand: an operator after it is binary (`f(a) && b`, `x[0] = 1`), after anything
 		// else (`(`, `=`, `return`) it is unary and stays tight.
@@ -324,21 +328,53 @@ namespace C4LSP::Features
 						continue; // never re-flow into or out of comments
 
 					std::string gap = text.substr(a.end, b.start - a.end);
-				if (gap.find('\n') != std::string::npos)
-					continue; // gaps that span lines are newline layout, not spacing: never touched
+					if (gap.find('\n') != std::string::npos)
+						continue; // gaps that span lines are newline layout, not spacing: never touched
 					if (!IsAllWhitespace(gap))
 						continue; // defensive: adjacent tokens' gap is whitespace by construction
+					const std::string_view directive = DirectiveOf(a);
+					if (directive == "error" || directive == "warning")
+						continue; // the message is text, not code: `only (see docs/x.md)` stays as written
+					if (b.type == TokenType::OpenParen && directive == "define")
+						continue; // `#define X (y)` is a constant and `#define X(y)` takes a parameter: this gap is the program's
 
 					// A `(` after a control header's `)` starts its body: spaced, not glued as a call would be.
 					bool bodyAfterHeader = b.type == TokenType::OpenParen && ClosesControlHeader(i);
 					// `a > (b)` compares: a template's `>` is never spaced from what it closes (`Make<T>(`), a comparison's is.
 					bool comparedParen = a.type == TokenType::Greater && b.type == TokenType::OpenParen && i > 0 && tokens[i - 1].end < a.start;
-					std::optional<std::string> desired = IsReturnTypeArrow(i) || IsReturnTypeArrow(i + 1) || bodyAfterHeader || comparedParen
+					bool castSign = (IsSign(b.type) && ClosesBuiltInCast(i)) || (IsSign(a.type) && i > 0 && ClosesBuiltInCast(i - 1));
+					std::optional<std::string> desired = castSign
+						? std::optional<std::string>("")
+						: IsReturnTypeArrow(i) || IsReturnTypeArrow(i + 1) || bodyAfterHeader || comparedParen
 						? std::optional<std::string>(" ")
 						: DesiredGap(a.type, b.type, i > 0 ? tokens[i - 1].type : TokenType::None);
 					if (desired && *desired != gap)
 						AddEdit(LineOf(a.end), a.end, b.start, *desired);
 				}
+			}
+
+			// The directive of the token's line - `define` of `#define X 1`, `error` of `# error ...` - or empty when the line is no
+			// directive.
+			std::string_view DirectiveOf(const Tok& token) const
+			{
+				size_t at = lineStarts[LineOf(token.start)];
+				while (at < token.start && (text[at] == ' ' || text[at] == '\t')) ++at;
+				if (text[at] != '#') return {};   // the line's first token is the `#` itself (`at` is the token) or comes before it
+				++at;
+				while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) ++at;
+				size_t end = at;
+				while (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) || text[end] == '_')) ++end;
+				return std::string_view(text).substr(at, end - at);
+			}
+
+			// `(int64)-1`: the `)` of a cast to a built-in type, after which a sign is unary. `(a) - 1` stays binary: a name in
+			// parentheses may be a value, a built-in type never is.
+			bool ClosesBuiltInCast(size_t i) const
+			{
+				if (i < 2 || tokens[i].type != TokenType::CloseParen || tokens[i - 2].type != TokenType::OpenParen)
+					return false;
+				static const std::set<std::string> builtIn = { "int", "uint", "char", "bool", "float", "double", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "char8", "char16", "char32" };
+				return builtIn.count(text.substr(tokens[i - 1].start, tokens[i - 1].end - tokens[i - 1].start)) > 0;
 			}
 
 			// `) -> T {`: a lambda's return type, spaced on both sides. Member access never reaches a `{` through

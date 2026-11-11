@@ -186,16 +186,21 @@ namespace Scripting
 			if (!args.nodes[i]) continue;
 			const Type* param = sig.GetParameters()[i].m_Type;
 			const Value original = i < args.values.size() ? args.values[i] : Value();
+			const AstNode* writtenAt = written ? n->GetArguments()[(uint32)i].Get() : n->GetCallee().Get();
 			if (written && !args.braced[i])
-				ImplicitConversion::WarnIfNarrowing(m_Ctx, n->GetArguments()[(uint32)i].Get(),
-					original.type ? original : Value::R(args.nodes[i], args.nodes[i]->type), param);
-			auto bound = BindArgument(m_Ctx, original, args.nodes[i], param);
-			if (!bound.Ok()) return m_Ctx.Fail(n->GetCallee().Get(), QueryResult<void>::Fail(bound.error, bound.message));
+				ImplicitConversion::WarnIfNarrowing(m_Ctx, writtenAt, original.type ? original : Value::R(args.nodes[i], args.nodes[i]->type), param);
+			auto bound = BindArgument(m_Ctx, original, args.nodes[i], param, writtenAt);
+			if (!bound.Ok()) return m_Ctx.Fail(n->GetCallee().Get(), QueryResult<void>::Fail(bound.error, bound.message, bound.loc));
 			args.nodes[i] = bound.value;
 		}
 		for (size_t i = sig.GetParameterCount(); i < args.nodes.size(); ++i)
+		{
+			// `...` takes an array as its first element's address, as C does: its bytes by value fit no argument slot.
+			if (i < args.values.size() && args.values[i].isLValue && args.nodes[i] && TypeHandle::UnwrapToValue(args.values[i].type)->GetKind() == TypeKind::Array)
+				args.nodes[i] = m_Ctx.LoadIfNeeded(ArrayAsPointer(args.values[i]));
 			if (auto passed = VarArgs::CheckPassed(m_Ctx, args.nodes[i] ? args.nodes[i]->type : nullptr, i, foreign); !passed.Ok())
 				return m_Ctx.Fail(n->GetCallee().Get(), passed);
+		}
 		return QueryResult<void>::Success();
 	}
 
@@ -213,7 +218,7 @@ namespace Scripting
 					"too few arguments for '" + name + "': parameter " + std::to_string((int)(i + 1)) + " has no default value"));
 			auto value = DefaultArgument(rec, i);
 			if (!value.Ok()) return m_Ctx.Fail(callee, QueryResult<void>::Fail(value.error, value.message));
-			auto bound = BindArgument(m_Ctx, value.value, m_Ctx.LoadIfNeeded(value.value), param.m_Type);
+			auto bound = BindArgument(m_Ctx, value.value, m_Ctx.LoadIfNeeded(value.value), param.m_Type, callee);
 			if (!bound.Ok()) return m_Ctx.Fail(callee, QueryResult<void>::Fail(bound.error, bound.message));
 			nodes.push_back(bound.value);
 		}

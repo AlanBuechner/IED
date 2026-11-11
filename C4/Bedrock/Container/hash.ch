@@ -90,6 +90,11 @@ namespace Core
 		public static uint64 Hash(T* key) { return HashInteger((uint64)key); }
 		public static bool Equal(T* a, T* b) { return a == b; }
 	}
+	// T cannot stand for `const X`, so `T*` alone would leave pointers to const to the primary.
+	template<T> struct KeyTraits<const T*> {
+		public static uint64 Hash(const T* key) { return HashInteger((uint64)key); }
+		public static bool Equal(const T* a, const T* b) { return a == b; }
+	}
 
 	// How a lookup by a key of another type Q (HashMap::FindAs, HashSet::ContainsAs) hashes it for a table of K keys:
 	// as Q's KeyTraits do, which must agree with K's (a StringView for String keys). A C string looking up String keys

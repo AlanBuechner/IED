@@ -44,22 +44,29 @@ namespace Scripting
 			return nullptr;
 		}
 
-		// The variable a location is part of, or kNoOwner.
-		uint32 RootSlot(const LValue* lv)
+		// The variables a location may be part of, into `slots`: both branches' of a choice between locations (BUG-453).
+		void AddRootSlots(const LValue* lv, std::unordered_set<uint32>& slots)
 		{
 			while (lv)
 			{
 				switch (lv->kind)
 				{
-				case LValue::Kind::Slot: return lv->slot;
+				case LValue::Kind::Slot: slots.insert(lv->slot); return;
 				case LValue::Kind::Field: case LValue::Kind::Base: case LValue::Kind::Lane: case LValue::Kind::Swizzle:
 				case LValue::Kind::VectorLaneDyn: lv = lv->base; break;
 				case LValue::Kind::IndexOp: lv = lv->receiver; break;
-				case LValue::Kind::Deref: lv = AddressedLocation(lv->addr); break;
-				default: return kNoOwner;
+				case LValue::Kind::Deref:
+					if (lv->addr && lv->addr->kind == HIRNode::Kind::Ternary)
+					{
+						const auto* choice = static_cast<const TernaryNode*>(lv->addr);
+						AddRootSlots(AddressedLocation(choice->thenExpr), slots);
+						lv = AddressedLocation(choice->elseExpr);
+					}
+					else lv = AddressedLocation(lv->addr);
+					break;
+				default: return;
 				}
 			}
-			return kNoOwner;
 		}
 
 		// One walk of a function's HIR in evaluation order.
@@ -173,8 +180,7 @@ namespace Scripting
 			void Address(const AddressOfNode& address)
 			{
 				Location(address.loc);
-				if (address.transient) return;
-				if (const uint32 slot = RootSlot(address.loc); slot != kNoOwner) m_Facts.escaped.insert(slot);
+				if (!address.transient) AddRootSlots(address.loc, m_Facts.escaped);
 			}
 
 			void Site(const TransferNode* transfer)

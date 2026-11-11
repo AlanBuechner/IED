@@ -1,0 +1,15 @@
+// A warning earlier in the function must not hide why its lowering failed: the program would reach the assembler with
+// the function declared and never defined.
+static int32 Crossing(int64 wide)
+{
+	int32 narrow = wide;
+	if (narrow > 0) goto after;
+	int32 crossed = 1;
+	after:
+	return narrow;
+}
+
+int32 main()
+{
+	return Crossing(3);
+}

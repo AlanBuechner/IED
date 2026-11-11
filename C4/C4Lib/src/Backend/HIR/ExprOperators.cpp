@@ -86,6 +86,13 @@ namespace Scripting
 			rhs = FuncCode(m_Ctx, rhs);
 		}
 
+		// An array in pointer arithmetic or a comparison is the address of its first element, as in C++.
+		if (tok == "+" || tok == "-" || tok == "==" || tok == "!=" || tok == "<" || tok == ">" || tok == "<=" || tok == ">=")
+		{
+			lhs = ArrayAsPointer(lhs);
+			rhs = ArrayAsPointer(rhs);
+		}
+
 		const Type* l = TypeHandle::UnwrapToValue(lhs.type);
 		const Type* r = TypeHandle::UnwrapToValue(rhs.type);
 
@@ -258,7 +265,7 @@ namespace Scripting
 		// operand. Binary ones pass the other operand.
 		if (rec->type && rec->type->GetParameterCount() > 0)
 		{
-			auto arg = BindArgument(m_Ctx, rhs, m_Ctx.LoadIfNeeded(rhs), rec->type->GetParameters()[0].m_Type);
+			auto arg = BindArgument(m_Ctx, rhs, m_Ctx.LoadIfNeeded(rhs), rec->type->GetParameters()[0].m_Type, n);
 			if (!arg.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(arg.error, arg.message));
 			call->args.push_back(arg.value);
 		}
@@ -323,9 +330,10 @@ namespace Scripting
 
 		if (tok == "*") // dereference: pointer rvalue -> lvalue of the pointee
 		{
-			const Type* pointee = m_Ctx.queries().ElementOf(t);
+			const Value address = ArrayAsPointer(operand.value); // `*array` is its first element, as in C++
+			const Type* pointee = m_Ctx.queries().ElementOf(TypeHandle::UnwrapToValue(address.type));
 			if (!pointee) return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "cannot dereference a non-pointer"));
-			LValue lv; lv.kind = LValue::Kind::Deref; lv.type = pointee; lv.addr = m_Ctx.LoadIfNeeded(operand.value);
+			LValue lv; lv.kind = LValue::Kind::Deref; lv.type = pointee; lv.addr = m_Ctx.LoadIfNeeded(address);
 			return Value::L(m_Ctx.NewLValue(lv));
 		}
 		if (tok == "&")

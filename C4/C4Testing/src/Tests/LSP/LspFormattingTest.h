@@ -100,6 +100,14 @@ namespace Testing
 		TEST_FUNC(Lsp.Features.Formatting)
 		void TestAccessLabelOutsideAnyBlockStaysAtColumnZero();
 
+		// `#define X (y)` is a constant and `#define X(y)` takes a parameter: the gap after the name is never closed.
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestDefineKeepsTheGapAfterItsName();
+
+		// `#error` and `#warning` print their message as written: its gaps are text, not code.
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestErrorAndWarningKeepTheirMessage();
+
 	private:
 		// Apply a set of TextEdits (0-based line/char, LSP semantics) to `text` and return the result.
 		static std::string Apply(const std::string& text, const std::vector<C4LSP::Protocol::TextEdit>& edits);

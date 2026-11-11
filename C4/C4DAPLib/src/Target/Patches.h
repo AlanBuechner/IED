@@ -18,6 +18,10 @@ namespace C4DAP::Target
 		void Lift(const Process& process, uint64_t address);
 		void Restore(const Process& process, uint64_t address);
 
+		/// The code in `size` bytes from `base` is gone (its module unloaded): nothing to put back, and no patch left for
+		/// what loads there next.
+		void ForgetRange(uint64_t base, uint64_t size);
+
 	private:
 		struct Patch
 		{

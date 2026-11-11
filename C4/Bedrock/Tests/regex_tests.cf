@@ -131,7 +131,13 @@ class RegexTests {
 		assert_se("1: a count above 1000", ErrorOf("a{1001}").CStr(), "too many");
 		assert_se("2: a repetition cannot be repeated: put it in a group", ErrorOf("a**").CStr(), "a**");
 		assert_se("0: an escape that means nothing here", ErrorOf("\\q").CStr(), "an unknown escape");
+		assert_se("3: backreferences are not supported: the engine matches in linear time", ErrorOf("(a)\\1").CStr(), "a backreference");
 		assert_se("2: an unknown flag: the flags are i, m and s", ErrorOf("(?x)").CStr(), "an unknown flag");
+		assert_se("1: lookahead and lookbehind are not supported: the engine matches in linear time", ErrorOf("a(?!b)").CStr(), "a negative lookahead");
+		assert_se("0: lookahead and lookbehind are not supported: the engine matches in linear time", ErrorOf("(?=a)").CStr(), "a lookahead");
+		assert_se("0: lookahead and lookbehind are not supported: the engine matches in linear time", ErrorOf("(?<=a)b").CStr(), "a lookbehind");
+		assert_se("0: lookahead and lookbehind are not supported: the engine matches in linear time", ErrorOf("(?<!a)b").CStr(), "a negative lookbehind");
+		assert_se("<valid>", ErrorOf("(?<n>a)").CStr(), "a named group is still one");
 		assert_se("1: a range whose end comes before its start", ErrorOf("[z-a]").CStr(), "a range backwards");
 		assert_se("12: two groups have the same name", ErrorOf("(?P<n>a)(?P<n>b)").CStr(), "a name twice");
 		assert_true(ErrorOf("((a{100}){100}){100}").View().Contains(Core::StringView("too large")), "a pattern that would be a million instructions");

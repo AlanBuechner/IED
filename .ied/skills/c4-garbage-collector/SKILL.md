@@ -61,6 +61,10 @@ size limit, and hooks may (un)register hooks while they run.
   wrote (Windows write watch, so no write barrier), a final stop to finish. Stops stay under ~1 ms; `Collect()`
   stops the world after finishing a running cycle; finalizers of a cycle run on the collector's thread.
   `C4_GC_CONCURRENT=always|never|<bytes>`, `C4_GC_VERIFY=1` (check every cycle), `C4_GC_TRACE=1` (a line a cycle).
+- **Use after free**: `GC::SetPoison(true)` / `C4_GC_POISON=1` fills every object a sweep or `delete` ends with `0xDB`
+  bytes, so a pointer read from a freed object faults at its use. A crash in a finalizer (`__c4_delete_...` under
+  `c4_gc_run_finalizer`) is usually the program's own: an object finalized after something it reaches was `delete`d
+  (a GPU resource outliving its renderer), not the collector freeing a live object.
 - **Pools** (`GC::Pool`, `include "Memory/pool.ch"`; D-78): a custom allocator's block of same-size objects that the
   collector tracks one by one. `Take()` a zeroed slot, `Give(object)` it back; a collection ends taken objects
   nothing reaches and frees their slots (`options.released` hears of each; `Take` collects once before saying the

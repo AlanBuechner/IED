@@ -31,7 +31,8 @@ static const char* g_caseName = "";
 static const char* g_caseFile = "";
 static int32_t     g_caseLine = 0;
 
-// The `--filter <glob>` of this run (`*` any run of characters, `?` one); null runs every case.
+// The `--filter <glob>` of this run (`*` any run of characters, `?` one; without either, a case's or a group's name);
+// null runs every case.
 static const char* g_filter = 0;
 
 // Every finished case, for the JSON summary.
@@ -40,9 +41,13 @@ static CaseResult* g_cases = 0;
 static int32_t g_caseCount = 0;
 static int32_t g_caseCapacity = 0;
 
-// Each run starts from nothing: a program that runs its scripts' tests runs the harness more than once.
+void c4_report_faults(void); // Platform/CrashReportWin32.c
+
+// Each run starts from nothing: a program that runs its scripts' tests runs the harness more than once. A case that
+// faults is reported with its stack, after its [TEST] line.
 void c4_test_configure(int32_t argc, char** argv)
 {
+	c4_report_faults();
 	g_fail = g_pass = g_total = g_passCases = 0;
 	g_caseCount = 0;
 	g_filter = 0;
@@ -58,9 +63,19 @@ static int32_t globMatch(const char* pattern, const char* text)
 	return 0;
 }
 
+// "math.vector" names the case of that name and every case under it (math.vector.add), not math.vectors.add.
+static int32_t namesCaseOrGroup(const char* filter, const char* name)
+{
+	const size_t length = strlen(filter);
+	return strncmp(filter, name, length) == 0 && (name[length] == '\0' || name[length] == '.');
+}
+
 int32_t c4_test_selected(const char* name)
 {
-	return !g_filter || globMatch(g_filter, name ? name : "");
+	if (!g_filter) return 1;
+	const char* text = name ? name : "";
+	if (strchr(g_filter, '*') || strchr(g_filter, '?')) return globMatch(g_filter, text);
+	return namesCaseOrGroup(g_filter, text);
 }
 
 int64_t c4_clock_now_ns(void); // ClockRuntimeC.c
@@ -95,6 +110,7 @@ static int32_t fail(const char* file, int32_t line, const char* msg, const char*
 	else
 		printf("FAIL: ");
 	printf("%s%s%s\n", msg ? msg : "(no message)", detail[0] ? " " : "", detail);
+	fflush(stdout);   // an assertion goes on after failing: if the test then crashes, the log still says what failed first
 	return 0;
 }
 

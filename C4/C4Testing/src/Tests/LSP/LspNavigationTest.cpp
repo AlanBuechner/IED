@@ -162,10 +162,11 @@ int32 main() { return 0; }
 		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
 		auto symbols = DocumentSymbols::ForDocument(session, Testing::Lsp::UriFor("Registry.cf"));
 		const DocumentSymbol* registry = Named(Named(symbols, "Ai")->children, "ToolRegistry");
-		TEST_ASSERT_EQ(Named(registry->children, "Find")->detail, std::string("int64 (const Span& text, int64 start = 0) const"));
-		TEST_ASSERT_EQ(Named(registry->children, "Count")->detail, std::string("static int32 ()"));
-		TEST_ASSERT_EQ(Named(registry->children, "Init")->detail, std::string("void ()")); // no annotation, no access
-		TEST_ASSERT_EQ(Named(registry->children, "size")->detail, std::string("int32"));
+		// A member's access first (what an edit written from the outline needs), never its annotations.
+		TEST_ASSERT_EQ(Named(registry->children, "Find")->detail, std::string("public int64 (const Span& text, int64 start = 0) const"));
+		TEST_ASSERT_EQ(Named(registry->children, "Count")->detail, std::string("public static int32 ()"));
+		TEST_ASSERT_EQ(Named(registry->children, "Init")->detail, std::string("public void ()"));
+		TEST_ASSERT_EQ(Named(registry->children, "size")->detail, std::string("public int32"));
 		TEST_ASSERT_EQ(registry->detail, std::string("class"));
 		TEST_ASSERT_EQ(Named(symbols, "Ai")->detail, std::string("namespace"));
 		TEST_PASSED();

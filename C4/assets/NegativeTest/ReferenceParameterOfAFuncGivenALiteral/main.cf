@@ -1,0 +1,8 @@
+void Fill(int32& x) { x = 7; }
+
+int32 main()
+{
+	func<void(int32&)> fill = Fill;
+	fill(4);
+	return 0;
+}

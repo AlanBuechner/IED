@@ -1,0 +1,45 @@
+// BUG-453: a non-const reference parameter takes only a location that lasts (NegativeTest Reference*); a `const T&` parameter
+// still takes anything that converts - a literal, what a call returns, a by-value indexer's copy, part of a temporary - each
+// living through the call. A copy made into a variable first is a location to write.
+struct Bag { public int32 m_Count; }
+struct Holder { public Bag m_Bag; }
+struct ByValue { public int32[4] data; }
+[operator("index")]
+int32 Get(int32 i) extends ByValue { return this.data[i]; }
+[operator("index_assign")]
+void Set(int32 i, int32 v) extends ByValue { this.data[i] = v; }
+
+int32 Read(const int32& x) { return x; }
+int32 Count(const Bag& bag) { return bag.m_Count; }
+void Fill(int32& x) { x = 7; }
+
+Bag Made(int32 count)
+{
+	Bag bag;
+	bag.m_Count = count;
+	return bag;
+}
+
+Holder MadeHolder(int32 count)
+{
+	Holder holder;
+	holder.m_Bag.m_Count = count;
+	return holder;
+}
+
+int32 main()
+{
+	int32 failed = 0;
+	if (Read(3) != 3) failed += 1;
+	if (Count(Made(4)) != 4) failed += 1;
+	if (Count(MadeHolder(5).m_Bag) != 5) failed += 1;
+	ByValue values;
+	values.data[1] = 6;
+	if (Read(values[1]) != 6) failed += 1;
+	int32 kept = values[1];
+	Fill(kept);
+	if (kept != 7 || values.data[1] != 6) failed += 1;
+	values[1] = kept;
+	if (values.data[1] != 7) failed += 1;
+	return failed;
+}

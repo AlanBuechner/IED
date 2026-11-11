@@ -23,6 +23,7 @@ typedef struct GCThread
 	c4_gc_root_range* locals;         // this thread's copies of the program's thread_local roots
 	size_t localCount;
 	volatile long inAllocator;        // inside the cache fast path
+	volatile long noStop;             // inside c4_gc_nostop_enter's regions: how deep
 	c4_gc_alloc_counts allocated;     // since it registered, never reset; only the thread itself writes it
 	GCSampler sampler;                // its countdown to the next sampled allocation
 	int64_t nativeInUse;              // native bytes it took less those it gave back (others' blocks included)

@@ -45,6 +45,14 @@ namespace Scripting
 			missing.loc = body->GetCloseBraceToken().GetStartLocation();
 			return missing;
 		}
+
+		bool HasErrorSince(const ErrorTracker& errors, size_t first)
+		{
+			const Core::Vector<CompilationError>& reported = errors.GetErrors();
+			for (size_t i = first; i < reported.Count(); ++i)
+				if (reported[static_cast<uint32>(i)].severity != ErrorSeverity::Warning) return true;
+			return false;
+		}
 	}
 
 	HIRFunction LowerFunction(ProgramModel& model, ErrorTracker& errors, const FunctionRecord* record)
@@ -114,8 +122,8 @@ namespace Scripting
 		if (!r.Ok())
 		{
 			// Contract: an incomplete lowering ALWAYS reports why. Some paths return a raw Fail without
-			// recording it; guarantee this function contributed at least one diagnostic.
-			if (errors.GetErrors().Count() == errorsBefore)
+			// recording it; guarantee this function contributed at least one error (a warning does not say why).
+			if (!HasErrorSince(errors, errorsBefore))
 				errors.AddError(r.loc.line ? r.loc : (body ? body->startLocation : SourceLocation()), r.message);
 			return fn; // incomplete tree, codegen skips it
 		}

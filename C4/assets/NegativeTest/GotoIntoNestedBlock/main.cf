@@ -1,8 +1,9 @@
 int32 main() {
 	goto inner;
 	{
-	inner:
-		return 1;
+		int32 x = 1;
+		inner:
+		return x;
 	}
 	return 0;
 }

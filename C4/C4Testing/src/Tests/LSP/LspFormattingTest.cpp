@@ -220,10 +220,14 @@ namespace Testing
 		text += "\tproblem =(String(a) +uri) +\"tail\";\n";              // glued after a closer and before '(': spaced
 		text += "\tgrid[0]=-1;\n";                                           // binary '=' after ']', unary '-' after '='
 		text += "\ttry { Go(); } catch(Error& e) { return (ok); }\n";
+		text += "\tint64 cast = (int64)-1;\n";                                 // a cast's '-' is unary
+		text += "\tint64 less = (a)-1 + (uint8) - 2;\n";                       // a parenthesized name's is binary; a cast is told by its type
 		text += "\treturn -x;\n}\n";
 		auto edits = Features::Formatting::Format(text, { 4, false });
 		std::string out = Apply(text, edits);
 
+		TEST_ASSERT(Contains(out, "int64 cast = (int64)-1;"));
+		TEST_ASSERT(Contains(out, "int64 less = (a) - 1 + (uint8)-2;"));
 		TEST_ASSERT(Contains(out, "bool ok = Parse(uri, id) && id.View() == ws.Id();"));
 		TEST_ASSERT(Contains(out, "problem = (String(a) + uri) + \"tail\";"));
 		TEST_ASSERT(Contains(out, "grid[0] = -1;"));
@@ -450,6 +454,28 @@ namespace Testing
 
 		std::string spaced = "class SomeClass{\n    public:\n    int x;\n}\n";
 		TEST_ASSERT(Apply(spaced, Features::Formatting::Format(spaced, {})) == "class SomeClass{\npublic:\n    int x;\n}\n");
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestDefineKeepsTheGapAfterItsName()
+	{
+		std::string constant = "#define NAME ((int32)1)\n#define OTHER (2)\n";
+		TEST_ASSERT(Features::Formatting::Format(constant, { 4, false }).empty());
+		std::string spaced = "#  define  SPACED (3)\n";
+		TEST_ASSERT(Apply(spaced, Features::Formatting::Format(spaced, { 4, false })).find("SPACED (3)") != std::string::npos);
+		std::string parameter = "#define TWICE(x) ((x) + (x))\n";
+		TEST_ASSERT(Features::Formatting::Format(parameter, { 4, false }).empty());
+		std::string call = "void F() {\n    define (1);\n}\n";
+		TEST_ASSERT(Apply(call, Features::Formatting::Format(call, {})) == "void F() {\n    define(1);\n}\n");
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestErrorAndWarningKeepTheirMessage()
+	{
+		std::string message = "#error runs on x64 only (docs/framework/lua.md, section 5)\n#  warning  a/b ( c )\n";
+		TEST_ASSERT(Features::Formatting::Format(message, { 4, false }).empty());
+		std::string code = "#if A&&B\nint32 x=1;\n#endif\n";
+		TEST_ASSERT(Apply(code, Features::Formatting::Format(code, { 4, false })).find("int32 x = 1;") != std::string::npos);
 		TEST_PASSED();
 	}
 

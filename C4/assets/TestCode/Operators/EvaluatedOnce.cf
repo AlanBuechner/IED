@@ -41,6 +41,51 @@ EoHolder g_eoHolder;
 EoHolder* EoHolderPtr() { g_eoCalls++; return &g_eoHolder; }
 EoHolder& EoHolderRef() { g_eoCalls++; return g_eoHolder; }
 
+// BUG-438: what f() returns held once is a reference - a pointer - even when it refers to a polymorphic object: no vptr
+// is stored into it, before the call or after.
+class EoShape
+{
+public:
+	public virtual int32 Sides() { return 0; }
+}
+class EoSquare : EoShape
+{
+public:
+	public int32 Sides() override { return 4; }
+	public int32 n;
+	public EoAssigned assigned;
+}
+class EoPolygon
+{
+public:
+	public virtual int32 Sides() { return 5; }
+	public int32 n;
+}
+EoSquare g_eoSquare;
+EoPolygon g_eoPolygon;
+EoSquare& EoSquareRef() { g_eoCalls++; return g_eoSquare; }
+EoSquare* EoSquarePtr() { g_eoCalls++; return &g_eoSquare; }
+EoPolygon& EoPolygonRef() { g_eoCalls++; return g_eoPolygon; }
+
+static void TestPolymorphicHeldOnce() {
+	const int32 before = g_eoCalls;
+	EoSquareRef().n += 6;
+	AssertIntEquals(6, g_eoSquare.n, "BUG-438: f().x += v on an object with a virtual base adds to it");
+	EoPolygonRef().n += 2;
+	AssertIntEquals(2, g_eoPolygon.n, "BUG-438: f().x += v on an object with virtual methods of its own adds to it");
+	EoAssigned other;
+	other.v = 8;
+	EoSquareRef().assigned = other;
+	AssertIntEquals(8, g_eoSquare.assigned.v, "BUG-438: f().x = v, x with its own =, on a polymorphic object assigns it");
+	EoSquarePtr()->n *= 2;
+	AssertIntEquals(12, g_eoSquare.n, "BUG-438: f()->x *= v on a polymorphic object multiplies it");
+	++EoSquareRef().n;
+	AssertIntEquals(13, g_eoSquare.n, "BUG-438: ++f().x on a polymorphic object increments it");
+	AssertIntEquals(before + 5, g_eoCalls, "BUG-438: each calls f once");
+	AssertIntEquals(4, EoSquareRef().Sides(), "BUG-438: the object's vptr is still its own");
+	AssertIntEquals(5, EoPolygonRef().Sides(), "BUG-438: and so is the other's");
+}
+
 void TestEvaluatedOnce() {
 	EoCellRef().n += 5;
 	AssertIntEquals(1, g_eoCalls, "f().x += v calls f once");
@@ -95,4 +140,6 @@ void TestEvaluatedOnce() {
 	EoHolderRef().assigned = other;
 	AssertIntEquals(before + 2, g_eoCalls, "f().x = v, x with its own =, calls f once");
 	AssertIntEquals(4, g_eoHolder.assigned.v, "f().x = v assigns the value");
+
+	TestPolymorphicHeldOnce();
 }

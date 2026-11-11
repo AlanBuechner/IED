@@ -99,6 +99,9 @@ namespace GC
 	[link("c4_gc_set_concurrent")] int64 SetConcurrent(int64 bytes) noexcept;
 	// Checks every concurrent mark against a fresh mark from the roots; a missed object is a fatal error (tests; slow).
 	[link("c4_gc_set_verify")] void SetVerify(bool on) noexcept;
+	// Fills each object a collection or a delete ends with 0xDB bytes, so a later read of it faults where it happens
+	// (finding a use after free; C4_GC_POISON=1 at startup).
+	[link("c4_gc_set_poison")] void SetPoison(bool on) noexcept;
 
 	// Suppress / resume automatic collection (not counted). Collect() still works while disabled. Disable finishes a
 	// concurrent cycle under way first, so no automatic collection completes until Enable.
@@ -111,6 +114,28 @@ namespace GC
 
 	// Whether `object` points into a live object; meaningful in a collection callback.
 	[link("c4_gc_is_reachable")] bool IsReachable(void* object) noexcept;
+
+	// Storage for a hash table's entries, three words each: a value, a key and a chain link inside the same object (a
+	// Lua table's nodes). A collection reads an entry by what the table holds strongly, and a value of all ones is nil,
+	// an empty entry whose key may be long dead, so it keeps nothing alive.
+	enum class Entries : int32 { Strong, WeakKeys, WeakValues, Weak }
+	[link("c4_alloc_entries")] void* AllocEntries(uint64 size, uint64 align, Entries kind) noexcept;
+
+	// A mark-end hook runs in each collection once marking and finalizer selection are done, right before the sweep:
+	// what is unmarked now ends with this collection, so a hook drops its weak references to it. Every other thread is
+	// stopped wherever it was, and the collector holds its lock: a hook allocates nothing and takes no lock.
+	alias MarkEndHook = funcptr<void(void*, void*)>;
+	[link("c4_gc_register_mark_end")] void RegisterMarkEnd(void* key, MarkEndHook hook, void* userData) noexcept;
+	[link("c4_gc_unregister_mark_end")] void UnregisterMarkEnd(void* key) noexcept;
+	// In a hook, with the marker it was given: whether `object` is marked (a pointer to no object counts as marked), and
+	// marking it with everything it reaches, so it survives this collection.
+	[link("c4_gc_is_marked")] bool IsMarked(void* marker, const void* object) noexcept;
+	[link("c4_gc_mark_now")] void MarkNow(void* marker, const void* object) noexcept;
+
+	// A region of this thread that no collection stops it in, for a change to a structure a mark-end hook reads. Counted.
+	// Short, and it allocates nothing and takes no lock: the collector waits at its stop, holding its own.
+	[link("c4_gc_nostop_enter")] void NoStopEnter() noexcept;
+	[link("c4_gc_nostop_leave")] void NoStopLeave() noexcept;
 
 	// Raw memory that may hold managed pointers.
 	[link("c4_gc_register_region")] void RegisterRegion(void* start, uint64 size) noexcept;

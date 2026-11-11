@@ -1,0 +1,11 @@
+include "Kernel/Shapes.ch"
+
+namespace Kernel
+{
+	public int32 Square::Area() const { return side * side + World::HostValue() - 13; }
+	public int32 Square::AreaPlus(int32 extra) const { return Area() + extra; }
+
+	int32 BumpCounter() { g_Counter += 1; return g_Counter; }
+	int32 Version() { return KERNEL_VERSION; }
+	void ThrowOops(int32 code) { throw Oops(code); }
+}

@@ -1,6 +1,7 @@
 #include "Script/ScriptCompiler.h"
 #include "Backend/CodeGen/CodeGenDriver.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
+#include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/AggregateCopies.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/DiagnosticReporter.h"
@@ -8,7 +9,9 @@
 #include "Macro/PredefinedMacros.h"
 #include "Parser/Nodes/Declarations/ExternDeclarationNode.h"
 #include "Parser/Nodes/Declarations/IncludeDeclarationNode.h"
+#include "Script/HostTable.h"
 #include "Script/InlineImport.h"
+#include "Script/InterfaceBuilder.h"
 #include "Script/ScriptModulePasses.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -41,7 +44,7 @@ namespace Scripting
 		}
 
 		// The script's files as the macro pass expands them; the interface's are final already.
-		void Preprocess(CompilerInstance& compiler, const ScriptUnits& units, const CpuTarget& target)
+		void Preprocess(CompilerInstance& compiler, ScriptUnits& units, const CpuTarget& target)
 		{
 			SourceManager& sources = compiler.GetSourceManager();
 			const std::vector<MacroPass::FileResult> results = ExpandSourceMacros(sources, PredefinedMacros(false, target, {}), units.interfaceMacros);
@@ -50,7 +53,10 @@ namespace Scripting
 			for (const MacroPass::FileResult& result : results) resultOf[result.absPath] = &result;
 			for (uint32 id : units.scriptUnits)
 				if (auto it = resultOf.find(MacroIdentity(sources.GetInfo(id))); it != resultOf.end())
+				{
 					sources.SetExpandedText(id, it->second->text, it->second->columns);
+					units.exportedMacros[id] = it->second->exported;
+				}
 		}
 
 		// A script reaches C and C++ through the bindings its host imported: importing needs CBind and clang.
@@ -62,7 +68,24 @@ namespace Scripting
 						errors.AddError(node->startLocation, "a script cannot import C or C++ ('extern' include or source): it uses the bindings its host imported");
 		}
 
-		void CheckIncludes(CompilerInstance& compiler, const HostInterface& host, const ScriptUnits& units, const std::vector<std::string>& allow,
+		// Whether a script file may include the interface unit `target`: the host's by IncludeAllowed, a layer's by its
+		// project or its path, as the host's.
+		bool UnitAllowed(const HostInterface& host, const ScriptChain* base, uint32 target, const std::vector<std::string>& allow)
+		{
+			if (target <= host.files.size()) return IncludeAllowed(host, host.files[target - 1], allow);
+			if (allow.empty()) return true;
+			for (const ScriptChain* at : LayersOf(base))
+				for (const InterfaceFile& file : at->layer.files)
+				{
+					if (file.unitId != target) continue;
+					for (const std::string& entry : allow)
+						if (at->layer.project == entry || file.path.compare(0, entry.size(), entry) == 0) return true;
+					return false;
+				}
+			return false;
+		}
+
+		void CheckIncludes(CompilerInstance& compiler, const HostInterface& host, const ScriptUnits& units, const ScriptCompileOptions& options,
 			ErrorTracker& errors)
 		{
 			const SourceManager& sources = compiler.GetSourceManager();
@@ -72,7 +95,7 @@ namespace Scripting
 					const auto* include = dynamic_cast<const IncludeDeclarationNode*>(node.Get());
 					if (!include) continue;
 					const uint32 target = sources.ResolveInclude(include->FilePath().c_str(), id).id;
-					if (target >= 1 && target <= units.interfaceUnits && !IncludeAllowed(host, host.files[target - 1], allow))
+					if (target >= 1 && target <= units.interfaceUnits && !UnitAllowed(host, options.base.get(), target, options.allow))
 						errors.AddError(include->startLocation, "a script may not include '" + include->FilePath() + "': it is not on the allow-list");
 				}
 		}
@@ -143,7 +166,8 @@ namespace Scripting
 	std::optional<ScriptUnits> AnalyzeScript(CompilerInstance& compiler, const HostInterface& host, const HostIndex& index,
 		const ScriptCompileOptions& options, ErrorTracker& checks, std::string* error)
 	{
-		std::optional<ScriptUnits> units = RegisterScriptSources(compiler, host, options.name, options.files, options.defines, error);
+		const ScriptSourcesDesc desc{ options.name, options.files, options.defines, options.project, options.roots, options.base.get() };
+		std::optional<ScriptUnits> units = RegisterScriptSources(compiler, host, desc, error);
 		if (!units) return std::nullopt;
 		compiler.SetTarget(index.target);
 		Preprocess(compiler, *units, index.target);
@@ -151,7 +175,7 @@ namespace Scripting
 		compiler.CompileAll();
 		compiler.AnalyzeProgram();
 		CheckImports(compiler, *units, checks);
-		CheckIncludes(compiler, host, *units, options.allow, checks);
+		CheckIncludes(compiler, host, *units, options, checks);
 		CheckDefinitions(compiler.GetProgramModel(), index, *units, checks);
 		return units;
 	}
@@ -187,7 +211,7 @@ namespace Scripting
 			if (options.debugInfo) driver.EnableDebugInfo();
 			TestHarnessOptions tests;
 			tests.entry = kScriptTestsSymbol;
-			tests.hostUnits = units.interfaceUnits;
+			tests.ownUnit = [host = units.interfaceUnits](uint32 unit) { return unit > host; }; // units 1..host are the host's, tests and all
 			tests.fileOf = [&compiler](uint32 sourceId) { return std::string(compiler.GetSourceManager().GetInfo(sourceId).displayName); };
 			if (!driver.Lower(compiler.GetProgramModelForLowering(), "", &error, &tests))
 			{
@@ -199,6 +223,23 @@ namespace Scripting
 			out.diagnostics += Format(driver.LoweringErrors(), compiler); // warnings
 			module = driver.TakeModule();
 		}
+		if (options.extensible)
+		{
+			ScriptLayer layer;
+			layer.project = compiler.GetSourceManager().Projects().At(units.scriptProject).name;
+			layer.folders = units.scriptFolders;
+			std::optional<std::vector<InterfaceFile>> files = LayerFiles(compiler, units.scriptUnits, units.exportedMacros, layer.folders, &error);
+			if (!files)
+			{
+				out.diagnostics += "error: " + error + "\n";
+				return out;
+			}
+			layer.files = std::move(*files);
+			for (std::string& type : ReflectedTypeNames(compiler.GetProgramModelForLowering()))
+				if (!index.types.count(type)) layer.reflectedTypes.push_back(std::move(type));
+			out.layer = std::move(layer);
+			ExportLayerDefinitions(*module);
+		}
 		out.threadLocals = ThreadLocals(*module);
 		// The host's bodies are only for inlining (docs/runtime/04 section 3.3): an unoptimized script takes none.
 		if (options.optimize && !ImportInlineBodies(*module, host.inlineBodies, error))
@@ -208,6 +249,7 @@ namespace Scripting
 		}
 		Optimize(*module, machine, options.optimize);
 		KeepImageOffsetsInImage(*module);
+		if (out.layer) out.layer->symbols = LayerSymbols(*module);
 		out.module = std::move(module);
 		return out;
 	}

@@ -98,7 +98,7 @@ Everything in the language works in a script as in the host. Across the boundary
 | Script templates | Ordinary templates of the script. | **Done** (ScriptTest `Templates`) |
 | Lambdas, `func<R(A)>`, function pointers | Pass both ways; a pointer to a script function is valid until the script unloads. | **Done** (ScriptTest `Callbacks`) |
 | Exceptions | Thrown and caught across the boundary in both directions, by type, with the host's and the script's types alike. | **Done** (ScriptTest `Exceptions`) |
-| GC | One heap: script allocations, script globals and thread_locals are roots and are scanned like the host's; finalizers of script types run as usual. | **Done** (ScriptTest `GC`) |
+| GC | One heap: script allocations, script globals and thread_locals are roots and are scanned like the host's; finalizers of script types run as usual. A script calls the collector's API whether its host does or not (its mark-end hooks, entries, pins). | **Done** (ScriptTest `GC`) |
 | Reflection | The script registers its own types, enums, globals and functions under its tag (the script's name); the host finds them like its own; host entities are not registered again. | **Done** (ScriptTest `Reflection`) |
 | Globals and static locals of a script | Started when the script loads (in declaration order, as in a program), destroyed in reverse order when it unloads. | **Done** (ScriptTest `Lifecycle`) |
 | `thread_local` in a script | Per thread; one whose start is not a constant starts on its first use on each thread; destroyed when the thread ends or the script unloads. | **Done** (ScriptTest `ThreadLocals`) |
@@ -108,7 +108,8 @@ Everything in the language works in a script as in the host. Across the boundary
 | Projects (D-59) | A script is its own project, depending on the host projects the allow-list names. | **Done** (ScriptTest `MultiFile`, `Diagnostics`) |
 | `[test]` functions in a script | Ordinary functions; `Script::RunTests` runs them with the test harness. | **Done** (ScriptTest `ScriptTests`) |
 | C/C++ interop in a script | A script uses every binding the host imported (they are part of the interface). A script cannot import a new header: that needs CBind and clang, which a shipped program does not have. | **Done** (ScriptTest `Interop`) |
-| Debugging a script | Not yet: JIT code has no PDB. | **Planned** (later) |
+| Debugging a script | A debug script is a DLL with a PDB (section 6.4). | **Done** (ScriptTest `DebugScripts`) |
+| A script over a script | A script extends another, as it does its host (section 5.2). | **Done** (ScriptTest `Layers`) |
 
 ---
 
@@ -132,7 +133,9 @@ of its own (with their once guards; not the private constants such as strings an
 makes for itself), every declaration the host's code uses (runtime and C functions), the C functions the prelude
 declares, every function and global the host's C and C++ objects define (its
 `extern "c" source` files and binding shims, read from the objects, so a script reaches every binding, not only the
-ones the host calls), every runtime entry point script code may call (`ScriptRuntimeEntryPoints`), and an accessor
+ones the host calls), every runtime function Bedrock declares by `[link("c4_...")]` (`LibraryRuntimeSymbols`: a script
+may call a Bedrock API its host never does - a VM's collector hooks, `GC::RegisterMarkEnd`), every runtime entry point
+script code may call (`ScriptRuntimeEntryPoints`), and an accessor
 per host `thread_local` (`__c4_tls_<sym>`, which returns the calling thread's address). A host build gives every
 class with virtual methods its vtables (`__c4_vtable_<type>_<offset>`) and lists them, so a script's objects of
 the host's classes use the host's vtables and outlive the script. Type descriptors (`??_R0...`) are not listed:
@@ -204,6 +207,10 @@ scripts' own files are the program's data. The program loads `C4Script.dll` on i
 delay-loads it), so one shipped without the DLL still starts, and `Host::Open` reports the missing DLL as its error.
 `Host::Open` loads the DLL from beside the program by its full path, never through the search path: another
 build's `C4Script.dll` on `PATH` (an installed program's) would compile against an interface it was not made for.
+
+A build while the program runs (an IDE rebuilding itself) cannot write over the `C4Script.dll` the program has loaded:
+the build renames it to `C4Script.dll.<ms>.old`, which Windows allows, and copies the new one in; a later build removes
+what it set aside once nothing has it open (`UpdateFile`, C4Testing `Compiler.FileIo`).
 
 ---
 
@@ -324,6 +331,51 @@ false, with nothing of it loaded and the diagnostics saying why, when the start 
 loads where nothing reads the reflection a load changes - an engine between two frames, after saving what the old
 version's objects hold. A prepared script that never loads has nothing to unload. ScriptTest `Prepare`.
 
+### 5.2 Layers: a script over a script
+
+A script compiled `extensible` is to the scripts over it what the host is to it: they include its headers, derive from its
+classes, use its templates, globals, thread_locals, macros and exceptions, and call its code directly, so one body of code
+can stand on another - a game's scripts on a package of the engine, and that package on a package below it. Scripts over a
+script form a **chain**: a script extends one script, which may extend another, down to the host.
+
+```c4
+Scripting::ScriptOptions kernel;
+kernel.name = Core::String("Kernel#1");
+kernel.project = Core::String("Kernel");            // what a script over it names on its allow-list
+kernel.extensible = true;
+kernel.AddRoot("packages/Kernel/src");              // include "Kernel/Shapes.ch", as a project's sources
+kernel.AddFile("packages/Kernel/src/Kernel/Shapes.ch");
+kernel.AddFile("packages/Kernel/src/Kernel/Shapes.cf");
+Scripting::Script* low = host->Prepare(kernel);     // on any thread
+
+Scripting::ScriptOptions game;
+game.name = Core::String("Game#1");
+game.Extend(low);
+game.Allow("Kernel");
+game.AddFile("scripts/game.cf");
+Scripting::Script* high = host->Prepare(game);      // links to `low`, which has not loaded yet
+
+low->Load();                                        // the lowest first
+high->Load();
+high->Unload();                                     // the highest first
+low->Unload();
+```
+
+| Rule | Status |
+|---|---|
+| What a script over a layer compiles against is the layer's interface: its files' interface text (section 3.2) under the unit ids they had, its exported macros, and the project it names (`ScriptOptions::project`), which depends on the layer below or the host's root. It is a script of the host's interface otherwise: section 4.2 applies to the layer's entities as to the host's. | **Done** (ScriptTest `Layers`) |
+| What it links to is the names the layer defines, through the layer below and the host's table (`HostSymbolTable::Extended`): a layer's locals a script over it may name - file-static functions and globals, vtables, static locals and their guards - are external in an extensible script's module, and it has an accessor per `thread_local` (`ExportLayerDefinitions`). Its bodies are not imported for inlining. | **Done** (ScriptTest `Layers`, at `-O0`, `-O2`, as debug scripts and over a host in partitions) |
+| A script over a layer links to it from the layer's `Prepare`, loaded or not: a host prepares a whole chain on a worker, then loads it lowest first. | **Done** (ScriptTest `Layers`) |
+| A layer stays loaded while a loaded script extends it: `Unload` then leaves it as it is, and its diagnostics say why; a `Script` destroyed anyway keeps its code until what stands on it is gone. | **Done** (ScriptTest `Layers`) |
+| The allow-list (section 4.5) takes a layer's project or a prefix of its paths: a layer off the list cannot be included, as a host header cannot. | **Done** (ScriptTest `Layers`) |
+| A chain is one order: a script extends a chain, not two. Two scripts over the same layer share it, but neither can name the other. A host with several unrelated bodies of code loads them in one order (dependencies first); the allow-list keeps each to what it declared. | By design: unit ids follow from what is registered before a file, so what a script links to must have been compiled over the same files. |
+| The compiled-script cache (section 4.6) keeps the layer with the machine code. A script's entry is keyed by the digest of the layers below it (`LayerDigest`): their interface text and the names they define, not their bodies. A layer that compiled again with the same interface leaves the scripts over it linking their kept code, to its new code. | **Done** (ScriptTest `Layers`) |
+| `ScriptOptions::debug` (1 or 0) makes one script a debug script (section 6.4) or not, whatever the host's setting says: a game's own script as a DLL with a PDB over an engine's packages in memory, kept in the cache. Each links to the other's kind. | **Done** (ScriptTest `Layers`) |
+
+`ScriptOptions::AddRoot` names the folders a script's includes resolve from, as a project's sources do (`src` for
+`include "Kernel/Shapes.ch"`); without one each file's own folder is one. A script so laid out compiles the same files
+into a program as a module of that name: the same sources run in a host as a layer and in a shipped program compiled in.
+
 ---
 
 ## 6. Linking and the JIT
@@ -385,6 +437,8 @@ across host and script frames, and crash dumps name its functions.
 - C4Script links the DLL in the process with lld's COFF driver, one link at a time (`/manifest:no`: the vendored LLVM
   has no libxml2 for manifests, and C4Script stands in for it at link time). Throws use `c4_script_throw` with the
   module's base, as an in-memory script's do; the loader registers the unwind tables.
+- C4DAP binds a breakpoint in a module when it loads and lets go when it unloads, so one set before the script is compiled stops in it,
+  and in its next build, on the line that build has for what was asked (`Dap.Session.AScriptsBreakpointBindsWhenItsDllLoadsAndInItsNextBuild`).
 - A fault in a debug script names the module, the function and the offset (`ied.git#3-1!WritesNull+0x12`), read from
   its PDB on a DbgHelp session of C4Script's own.
 - Debug scripts are not kept in the compiled-script cache (section 4.6): each load compiles and links.
@@ -450,3 +504,4 @@ a faulted script is not trusted to run again.
 | Guarded calls (in `C4Script.dll`; ScriptTest `CrashIsolation`) | **Done** |
 | `Bedrock/Scripting` (ScriptTest) | **Done** |
 | Debugging scripts: DLLs with PDBs (section 6.4; ScriptTest `DebugScripts`, and every case with `-DebugScripts`) | **Done** |
+| Layers: a script over a script (section 5.2; ScriptTest `Layers`) | **Done** |

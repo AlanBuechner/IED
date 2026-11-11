@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 
@@ -62,6 +63,7 @@ DOCS = [
 	"language/07-functions-and-lambdas.md", "language/08-templates.md", "language/09-statements-and-control-flow.md",
 	"language/10-expressions.md", "language/11-vectors-and-swizzling.md", "language/12-annotations.md",
 	"language/13-interop.md", "language/14-builtins.md", "language/15-projects.md",
+	"language/16-inline-assembly.md",
 	"library/bedrock.md",
 	"runtime/01-memory-and-gc.md", "runtime/02-reflection.md", "runtime/03-testing.md", "runtime/04-scripting.md",
 	"tools/01-compiler-cli.md", "tools/02-nuke.md", "tools/03-editor-lsp-dap.md", "tools/06-c4-api.md",
@@ -177,9 +179,21 @@ def copy_if_newer(source, dest):
 		return False
 	os.makedirs(os.path.dirname(dest), exist_ok=True)
 	if os.path.exists(dest):
-		os.remove(dest)
+		discard(dest)
 	shutil.copy2(source, dest)
 	return True
+
+
+def discard(path):
+	"""Removes `path`. Windows will not remove a running program's file (C4.exe while a build compiles with it) but lets it
+	be renamed: it becomes <path>.<ms>.old, which a later refresh removes once nothing runs it. False when it stays."""
+	try:
+		os.remove(path)
+		return True
+	except PermissionError:
+		if not path.endswith(".old"):
+			os.replace(path, "%s.%d.old" % (path, int(time.time() * 1000)))
+		return False
 
 
 def mirror(files, out):
@@ -188,8 +202,7 @@ def mirror(files, out):
 	removed = 0
 	for rel in files_below(out) if os.path.isdir(out) else []:
 		if os.path.normcase(rel) not in wanted:
-			os.remove(os.path.join(out, rel))
-			removed += 1
+			removed += discard(os.path.join(out, rel))
 	for base, dirs, _ in os.walk(out, topdown=False):
 		if base != out and not os.listdir(base):
 			os.rmdir(base)

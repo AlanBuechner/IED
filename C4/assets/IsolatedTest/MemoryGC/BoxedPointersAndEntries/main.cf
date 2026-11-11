@@ -1,0 +1,204 @@
+// What a VM with NaN-boxed values and weak hash tables stands on (D-85): a pointer boxed in a NaN keeps its object alive
+// in scanned memory, on the stack and in registers; hash entries keep alive what their kind says, and a nil value's key
+// keeps nothing; a mark-end hook sees what dies and can keep it; a no-stop region holds a collection off.
+include "Memory/gc.ch"
+
+const int32 c_Objects = 64;
+const uint64 c_TableTag = 0xFFFA000000000000ull;   // LuaJIT's tag of a table, over 47 bits of pointer
+const uint64 c_Nil = 0xFFFFFFFFFFFFFFFFull;
+
+struct Tracked
+{
+	public int64 m_Id;
+	public int64[6] m_Payload;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Entry
+{
+	public uint64 m_Value;
+	public uint64 m_Key;
+	public uint64 m_Chain;
+}
+
+int32 g_finalized = 0;
+
+uint64 Boxed(Tracked* object) { return (uint64)object | c_TableTag; }
+
+// Stale copies of pointers in dead frames would keep objects alive.
+int64 Scrub(int32 depth)
+{
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void CollectClean()
+{
+	for (int32 round = 0; round < 3; round++)
+	{
+		Scrub(8);
+		GC::Collect();
+	}
+}
+
+// How many objects die of the ones `make` makes, once what the last one made has gone.
+int32 Finalized(funcptr<void()> make)
+{
+	g_Entries = null;
+	CollectClean();
+	g_finalized = 0;
+	make();
+	CollectClean();
+	return g_finalized;
+}
+
+// --- A boxed pointer in scanned memory -----------------------------------------------------------------------------
+
+void** g_Boxes;
+
+void MakeBoxed()
+{
+	g_Boxes = new void*[(int64)c_Objects];
+	for (int32 i = 0; i < c_Objects; i++) g_Boxes[i] = (void*)Boxed(new Tracked);
+}
+
+void DropBoxed()
+{
+	for (int32 i = 0; i < c_Objects; i++) g_Boxes[i] = null;
+}
+
+// --- Hash entries ---------------------------------------------------------------------------------------------------
+
+Entry* g_Entries;
+
+Entry* NewEntries(GC::Entries kind)
+{
+	return (Entry*)GC::AllocEntries((uint64)(c_Objects * sizeof(Entry)), 8, kind);
+}
+
+void FillEntries(GC::Entries kind)
+{
+	g_Entries = NewEntries(kind);
+	for (int32 i = 0; i < c_Objects; i++)
+	{
+		g_Entries[i].m_Value = Boxed(new Tracked);
+		g_Entries[i].m_Key = Boxed(new Tracked);
+	}
+}
+
+void FillEntriesStrong() { FillEntries(GC::Entries::Strong); }
+void FillEntriesWeakKeys() { FillEntries(GC::Entries::WeakKeys); }
+void FillEntriesWeakValues() { FillEntries(GC::Entries::WeakValues); }
+void FillEntriesWeak() { FillEntries(GC::Entries::Weak); }
+
+void NilEveryValue()
+{
+	for (int32 i = 0; i < c_Objects; i++) g_Entries[i].m_Value = c_Nil;
+}
+
+// --- The mark-end hook: clears the entries of what died, and keeps the objects in g_Kept ------------------------------
+
+uint64[8] g_Hidden;   // integers: no roots
+int32 g_Cleared = 0;
+int32 g_HookRuns = 0;
+bool g_KeepHidden = false;
+
+void OnMarkEnd(void* user, void* marker)
+{
+	g_HookRuns++;
+	for (int32 i = 0; i < 8; i++)
+	{
+		if (!g_Hidden[i] || GC::IsMarked(marker, (void*)g_Hidden[i])) continue;
+		if (g_KeepHidden) GC::MarkNow(marker, (void*)g_Hidden[i]);
+		else { g_Hidden[i] = 0; g_Cleared++; }
+	}
+}
+
+void HideObjects()
+{
+	for (int32 i = 0; i < 8; i++)
+	{
+		Tracked* t = new Tracked;
+		t->m_Id = 100 + i;
+		g_Hidden[i] = (uint64)t;
+	}
+}
+
+// --- A no-stop region ------------------------------------------------------------------------------------------------
+
+int64 g_Spinning = 0;
+int64 g_SeenInRegion = 0;
+
+void OnMarkEndSeeRegion(void* user, void* marker)
+{
+	if (atomic_load(&g_Spinning, MemoryOrder::Acquire) != 0) g_SeenInRegion++;
+}
+
+void SpinInRegions(void* state)
+{
+	for (int32 i = 0; i < 2000; i++)
+	{
+		GC::NoStopEnter();
+		atomic_store(&g_Spinning, 1, MemoryOrder::Release);
+		for (int32 k = 0; k < 2000; k++) { int64 unused = atomic_load(&g_SeenInRegion, MemoryOrder::Relaxed); }
+		atomic_store(&g_Spinning, 0, MemoryOrder::Release);
+		GC::NoStopLeave();
+	}
+}
+
+int32 main()
+{
+	// Boxed pointers keep their objects while they are there, and not after.
+	MakeBoxed();
+	CollectClean();
+	if (g_finalized > 4) return 1;
+	DropBoxed();
+	CollectClean();
+	if (g_finalized < c_Objects - 4) return 2;
+
+	// A strong entry keeps both, a weak-keys entry its value, a weak-values entry its key, a weak entry nothing.
+	if (Finalized(FillEntriesStrong) > 4) return 3;
+	NilEveryValue();
+	int32 afterNil = g_finalized;
+	CollectClean();
+	if (g_finalized - afterNil < 2 * c_Objects - 4) return 4;
+
+	int32 keys = Finalized(FillEntriesWeakKeys);
+	if (keys < c_Objects - 4 || keys > c_Objects) return 5;
+	int32 values = Finalized(FillEntriesWeakValues);
+	if (values < c_Objects - 4 || values > c_Objects) return 6;
+	if (Finalized(FillEntriesWeak) < 2 * c_Objects - 4) return 7;
+	g_Entries = null;
+	CollectClean();
+
+	// The hook sees what dies, and may keep it.
+	GC::RegisterMarkEnd((void*)&g_Hidden, OnMarkEnd, null);
+	g_KeepHidden = true;
+	HideObjects();
+	g_finalized = 0;
+	CollectClean();
+	if (g_HookRuns < 3) return 8;
+	for (int32 i = 0; i < 8; i++)
+		if (((Tracked*)g_Hidden[i])->m_Id != 100 + i) return 9;
+	g_KeepHidden = false;
+	CollectClean();
+	if (g_Cleared < 4) return 10;
+	GC::UnregisterMarkEnd((void*)&g_Hidden);
+	int32 runs = g_HookRuns;
+	GC::Collect();
+	if (g_HookRuns != runs) return 11;
+
+	// No collection stops a thread inside a no-stop region.
+	GC::RegisterMarkEnd((void*)&g_Spinning, OnMarkEndSeeRegion, null);
+	void* thread = thread_start(SpinInRegions, null);
+	for (int32 i = 0; i < 400; i++) GC::Collect();
+	thread_join(thread);
+	GC::UnregisterMarkEnd((void*)&g_Spinning);
+	if (g_SeenInRegion != 0) return 12;
+
+	printf("BOXED AND ENTRIES OK\n");
+	return 0;
+}

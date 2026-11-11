@@ -1,4 +1,5 @@
 include "pool.ch"
+include "Memory/gc.ch"
 
 // Finalizable objects that refer to each other are finalized one per collection, so the list's nodes are plain and
 // each carries a finalizable tag.
@@ -75,6 +76,23 @@ void KeepHolding(int32 count)
 		node->bytes.Reserve(100);
 		Pool::Keep(node);
 	}
+}
+
+// Runtime functions of Bedrock the host never calls: its table lists every one, so a script (a VM's collector hooks) links.
+int32 g_markEnds = 0;
+static void CountMarkEnd(void* user, void* marker) { g_markEnds++; }
+
+int32 UsesTheCollectorsHooks()
+{
+	GC::RegisterMarkEnd((void*)&g_markEnds, CountMarkEnd, nullptr);
+	GC::NoStopEnter();
+	GC::NoStopLeave();
+	void* entries = GC::AllocEntries(48, 16, GC::Entries::WeakKeys);
+	GC::Pin(entries);
+	GC::Unpin(entries);
+	GC::Collect();
+	GC::UnregisterMarkEnd((void*)&g_markEnds);
+	return g_markEnds;
 }
 
 void MakeGarbage(int32 count)

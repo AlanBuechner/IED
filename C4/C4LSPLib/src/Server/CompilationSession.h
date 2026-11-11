@@ -147,9 +147,9 @@ namespace C4LSP::Server
 		void RunPreprocessPhase();
 		// Root folders the preprocess passes run over: the project root plus any -I dirs that exist.
 		std::vector<std::string> BuildPreprocessRoots() const;
-		// Lower every complete function body through the compiler's OWN HIR lowering (LowerFunction),
-		// exactly as CodeGenDriver::Lower does, to collect the body-level type diagnostics. No LLVM is
-		// emitted - only the diagnostics matter here. Gated on a valid model, mirroring C4.exe which
+		// Lower every complete function body and every global's start through the compiler's OWN HIR lowering
+		// (LowerFunction, LowerGlobalInit), exactly as CodeGenDriver does, to collect the body-level type diagnostics.
+		// No LLVM is emitted - only the diagnostics matter here. Gated on a valid model, mirroring C4.exe which
 		// lowers only after a clean front end.
 		void RunLoweringPass(uint32 interfaceUnits = 0);
 		bool RecompileScript();

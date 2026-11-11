@@ -42,6 +42,7 @@ typedef struct GCState
 	GCPtrMap rootTables;                // another image's root table (key)
 	GCPtrMap enumerators;               // key -> enumerator (a), user data (b)
 	GCPtrMap results;                   // key -> callback (a), user data (b)
+	GCPtrMap markEnds;                  // key -> mark-end hook (a), user data (b)
 	GCConcurrent concurrent;            // concurrent marking (GCConcurrent.h)
 	int (*startCollectorThread)(void);  // starts the thread that runs concurrent cycles; 0 when none starts
 	GCPool* pools;                      // every pool (GCPools.h)
@@ -90,6 +91,9 @@ c4_gc_stats gc_stats(const GCState* gc);
 void* gc_release_begin(GCState* gc, void* ptr, gc_finalizer_fn* finalizer);
 void gc_release_end(GCState* gc, const GCThread* self, void* base);
 void gc_register_finalizer(GCState* gc, void* ptr, gc_finalizer_fn fn);
+
+// Runs the mark-end hooks: marking and finalizer selection are done, the sweep is next, every other thread is stopped.
+void gc_mark_end_run(GCMarker* marker, const GCPtrMap* hooks);
 
 // --- roots (GCRoots.c) ---
 void gc_mark_roots(GCMarker* marker, const GCState* gc, const GCThread* self);

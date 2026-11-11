@@ -53,10 +53,10 @@ namespace Scripting
 			return chunks;
 		}
 
-		// Written beside its name and moved there once complete, as an object is.
+		// Written beside its name and moved there once complete, as an object is: under a name of this process's own.
 		bool Kept(const std::string& path, const std::vector<std::string>& chunks)
 		{
-			const std::string unfinished = path + ".tmp";
+			const std::string unfinished = PrivatePartialPath(path);
 			if (WriteFileBytes(unfinished, Packed(chunks)) && !RenameFile(unfinished, path)) return true;
 			RemoveFile(unfinished);
 			return false;

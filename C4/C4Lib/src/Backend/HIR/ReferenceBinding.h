@@ -15,6 +15,9 @@ namespace Scripting
 		Core::String Problem(const ReferenceType* ref, const Type* located);
 		/// Why a reference cannot name `location` - a lane or a run of a packed vector, which has no address (D-37) - or "".
 		Core::String Unaddressable(const LValue* location);
+		/// What `location` is when it does not last as a variable does - the copy a by-value indexer gives, or part of the
+		/// temporary a call returned - or "" (BUG-453).
+		Core::String Passing(const LValue* location);
 		/// The address `ref` binds to from `init`, as a `pointer`; `name` is what the messages call the reference.
 		QueryResult<const HIRNode*> Address(LoweringContext& ctx, const ReferenceType* ref, const Value& init, const Type* pointer,
 			const Core::String& name);

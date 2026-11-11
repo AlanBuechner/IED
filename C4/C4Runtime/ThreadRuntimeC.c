@@ -95,10 +95,60 @@ void c4_thread_detach(void* thread)
 
 uint64_t c4_thread_current_id(void) { return GetCurrentThreadId(); }
 
+enum { kMostCores = 64 };   // one processor group's
+
+// The logical processors of its group this process may run on (its affinity); 0 on a system of several groups, where a process may span them.
+static ULONG_PTR ProcessProcessors(void)
+{
+	if (GetActiveProcessorGroupCount() != 1) return 0;
+	DWORD_PTR process = 0;
+	DWORD_PTR system = 0;
+	return GetProcessAffinityMask(GetCurrentProcess(), &process, &system) ? (ULONG_PTR)process : 0;
+}
+
+static uint32_t CountBits(ULONG_PTR bits)
+{
+	uint32_t count = 0;
+	for (; bits; bits &= bits - 1) count += 1;
+	return count;
+}
+
+// Each core's logical processors this process may run on, in the system's order (a core with none left out); how many cores.
+static int32_t UsableCores(ULONG_PTR cores[kMostCores])
+{
+	DWORD bytes = 0;
+	GetLogicalProcessorInformation(NULL, &bytes);
+	SYSTEM_LOGICAL_PROCESSOR_INFORMATION* infos = bytes ? (SYSTEM_LOGICAL_PROCESSOR_INFORMATION*)malloc(bytes) : NULL;
+	int32_t found = 0;
+	if (infos && GetLogicalProcessorInformation(infos, &bytes))
+	{
+		const ULONG_PTR mine = ProcessProcessors();
+		const DWORD count = bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+		for (DWORD i = 0; i < count && found < kMostCores; i += 1)
+		{
+			if (infos[i].Relationship != RelationProcessorCore) continue;
+			const ULONG_PTR usable = mine ? infos[i].ProcessorMask & mine : infos[i].ProcessorMask;
+			if (usable) cores[found++] = usable;
+		}
+	}
+	free(infos);
+	return found;
+}
+
+// The processors this process may run on: a pool sized by the system's puts more threads than processors on a process kept to fewer (BUG-454).
 uint32_t c4_thread_hardware_count(void)
 {
+	const ULONG_PTR mine = ProcessProcessors();
+	if (mine) return CountBits(mine);
 	const DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 	return count ? (uint32_t)count : 1u;
+}
+
+uint32_t c4_thread_core_count(void)
+{
+	ULONG_PTR cores[kMostCores];
+	const int32_t found = UsableCores(cores);
+	return found > 0 ? (uint32_t)found : c4_thread_hardware_count();
 }
 
 void c4_thread_yield(void) { SwitchToThread(); }
@@ -137,6 +187,17 @@ void c4_thread_sleep_ns(int64_t ns)
 		return;
 	}
 	Sleep(milliseconds(ns));
+}
+
+// The calling thread on one logical processor of core number `core` of those this process may run on, so that no two threads pinned to
+// different cores share one through its hyperthreads. -1 when there is no such core.
+int32_t c4_thread_pin_to_core(int32_t core)
+{
+	if (core < 0) return -1;
+	ULONG_PTR cores[kMostCores];
+	if (core >= UsableCores(cores)) return -1;
+	const ULONG_PTR mask = cores[core];
+	return SetThreadAffinityMask(GetCurrentThread(), mask & (~mask + 1)) ? 0 : -1;
 }
 
 int32_t c4_thread_set_name(const char* name)

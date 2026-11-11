@@ -1,0 +1,46 @@
+// A signature's parameter list takes a pack: one parameter per element, written or deduced.
+template<R, ...Ts> struct Holder
+{
+	public func<R(Ts...)> m_Target;
+}
+
+template<R, ...Ts> R Apply(func<R(Ts...)> target, Ts... args)
+{
+	return target(args...);
+}
+
+template<R, ...Ts> int64 CountParameters(func<R(Ts...)> target)
+{
+	return sizeof...(Ts);
+}
+
+template<...Ts> int64 CountPointerParameters(funcptr<void(int32, Ts...)> target)
+{
+	return sizeof...(Ts);
+}
+
+template<T> struct Kind { static const int32 V = 0; }
+template<R, ...Ts> struct Kind<func<R(Ts...)>> { static const int32 V = 1 + (int32)sizeof...(Ts); }
+
+static int32 Add(int32 a, int32 b) { return a + b; }
+static void Note(int32 a, float b, double c) {}
+
+int32 main()
+{
+	func<int32(int32, int32)> add = Add;
+	if (Apply<int32, int32, int32>(add, 2, 3) != 5) return 1;
+	if (Apply(add, 4, 5) != 9) return 2;
+	if (CountParameters(add) != 2) return 3;
+	func<int32()> none = []() -> int32 { return 7; };
+	if (Apply(none) != 7) return 4;
+	if (CountParameters(none) != 0) return 5;
+	Holder<int32, int32, int32> holder;
+	holder.m_Target = add;
+	if (holder.m_Target(1, 2) != 3) return 6;
+	funcptr<void(int32, float, double)> pointer = Note;
+	if (CountPointerParameters(pointer) != 2) return 7;
+	if (Kind<int32>::V != 0) return 8;
+	if (Kind<func<int32(int32, int32)>>::V != 3) return 9;
+	printf("PACK IN SIGNATURE OK\n");
+	return 0;
+}

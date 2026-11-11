@@ -58,6 +58,8 @@ namespace Core
 		private int32 Fail(const char* why, int64 offset);
 		private bool AtEnd() const { return at >= pattern.ByteLength(); }
 		private int32 Peek() const { return AtEnd() ? -1 : pattern.ByteAt(at); }
+		private int32 PeekAfter() const { return at + 1 >= pattern.ByteLength() ? -1 : pattern.ByteAt(at + 1); }
+		private bool AtLookaround() const;
 		private int32 Next();   // the code point at `at`, moving past it
 
 		private StringView pattern;

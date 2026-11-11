@@ -63,6 +63,8 @@ void CheckGc(Scripting::Script* script, ScriptTest::Checks& checks)
 	Collect();
 	Collect();
 	checks.That(Pool::g_finalized - before >= 990, "dropping the script global frees its list");
+
+	checks.That(Call(script, "UsesTheCollectorsHooks") >= 1, "a script calls runtime functions of Bedrock its host never calls");
 }
 
 // The last census's entry for `type` (nullptr: of no known type), or an empty one.

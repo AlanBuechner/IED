@@ -27,6 +27,11 @@ namespace C4DAP::Target
 			Patches& patches);
 		/// Binds the breakpoints set before the program's code was loaded; returns every one it tried.
 		std::vector<BoundBreakpoint> BindPending(const Symbols& symbols, const Process& process, Patches& patches);
+		/// A module has loaded (a script's DLL, its next build): each breakpoint of a source it holds binds in it too, on the
+		/// line it has for what was asked. Returns the breakpoints whose binding the client has to hear of.
+		std::vector<BoundBreakpoint> BindInModule(uint64_t module, const Symbols& symbols, const Process& process, Patches& patches);
+		/// `size` bytes from `base` have unloaded: what was bound only there waits for the code to come back. Returns those.
+		std::vector<BoundBreakpoint> ForgetRange(uint64_t base, uint64_t size);
 		/// The client's ids of the breakpoints at `address`.
 		std::vector<uint32_t> IdsAt(uint64_t address) const;
 		/// Whether a breakpoint at `address` is on `position`'s line.

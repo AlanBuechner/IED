@@ -52,7 +52,7 @@ namespace Scripting
 		private:
 			void* Resolve(const std::string& name) const { return ResolveScriptSymbol(m_Host, name); }
 
-			const HostSymbolTable& m_Host;
+			HostSymbolTable m_Host; // its own copy: the layers it names stay as long as this script's JIT
 		};
 
 		// One block per object, code first, within reach of its data (the image-relative tables need it). Its .pdata
@@ -228,15 +228,30 @@ namespace Scripting
 			Fail(error, "the program's symbol table has " + std::to_string(image->count) + " entries, its interface names " + std::to_string(host.symbols.size()));
 			return std::nullopt;
 		}
+		auto addresses = std::make_shared<std::unordered_map<std::string, void*>>();
+		for (size_t i = 0; i < host.symbols.size(); ++i) (*addresses)[host.symbols[i]] = image->entries[i];
 		HostSymbolTable symbols;
-		for (size_t i = 0; i < host.symbols.size(); ++i) symbols.m_Addresses[host.symbols[i]] = image->entries[i];
+		symbols.m_Addresses = std::move(addresses);
 		return symbols;
 	}
 
 	void* HostSymbolTable::Find(const std::string& name) const
 	{
-		auto it = m_Addresses.find(name);
-		return it == m_Addresses.end() ? nullptr : it->second;
+		auto it = m_Addresses->find(name);
+		if (it != m_Addresses->end()) return it->second;
+		for (auto layer = m_Layers.rbegin(); layer != m_Layers.rend(); ++layer)
+			if ((*layer)->names.count(name)) return (*layer)->script->Find(name);
+		return nullptr;
+	}
+
+	HostSymbolTable HostSymbolTable::Extended(std::shared_ptr<const LinkedScript> script, const std::vector<std::string>& names) const
+	{
+		auto layer = std::make_shared<Layer>();
+		layer->script = std::move(script);
+		layer->names.insert(names.begin(), names.end());
+		HostSymbolTable extended = *this;
+		extended.m_Layers.push_back(std::move(layer));
+		return extended;
 	}
 
 

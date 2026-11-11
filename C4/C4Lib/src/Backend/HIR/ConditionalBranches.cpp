@@ -1,6 +1,8 @@
 #include "Backend/HIR/ConditionalBranches.h"
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/PointerConversion.h"
+#include "Backend/HIR/ReadOnly.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/EnumType.h"
@@ -33,6 +35,17 @@ namespace Scripting
 			if (target->GetKind() != TypeKind::Pointer || from->GetKind() != TypeKind::Pointer) return false;
 			return CheckPointerConversion(target, ctx.LoadIfNeeded(branch)).Ok();
 		}
+
+		// A branch naming memory of `type` that a choice can hold the address of.
+		bool Addressable(const Value& branch, const Type* type)
+		{
+			if (!branch.isLValue) return false;
+			const LValue* at = branch.lvalue;
+			if (!ReferenceBinding::Unaddressable(at).empty() || at->kind == LValue::Kind::IndexOp || at->ephemeral) return false;
+			if (at->kind == LValue::Kind::Global && at->sym && at->sym->IsFoldedConstant()) return false;
+			// An object type is the common type of objects of it and of types derived from it only.
+			return TypeHandle::UnwrapToValue(branch.type) == type || type->GetKind() == TypeKind::Object;
+		}
 	}
 
 	QueryResult<const Type*> ConditionalBranches::CommonType(LoweringContext& ctx, const Value& a, const Value& b)
@@ -59,5 +72,16 @@ namespace Scripting
 		const HIRNode* loaded = ctx.LoadIfNeeded(branch);
 		if (loaded->type == type) return loaded;
 		return static_cast<const HIRNode*>(ctx.out->NewNode<ConvertNode>(loaded, loaded->type, type));
+	}
+
+	const LValue* ConditionalBranches::ChosenLocation(LoweringContext& ctx, const HIRNode* condition, const Value& a, const Value& b, const Type* type)
+	{
+		if (!Addressable(a, type) || !Addressable(b, type)) return nullptr;
+		const bool readOnly = IsReadOnly(ctx, a.lvalue) || IsReadOnly(ctx, b.lvalue);
+		const Type* pointer = ctx.queries().TypeStore()->Pointer(type, readOnly);
+		// The branches' addresses live while the choice is used; an address taken of the choice escapes both (LastUseMoves).
+		LValue chosen; chosen.kind = LValue::Kind::Deref; chosen.type = type;
+		chosen.addr = ctx.out->NewNode<TernaryNode>(pointer, condition, ctx.AddressAs(pointer, a.lvalue, true), ctx.AddressAs(pointer, b.lvalue, true));
+		return ctx.NewLValue(chosen);
 	}
 } // namespace Scripting

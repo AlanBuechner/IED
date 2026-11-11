@@ -42,6 +42,15 @@ namespace Scripting
 		}
 	}
 
+	Value ExprLowerer::ArrayAsPointer(const Value& value)
+	{
+		const Type* type = TypeHandle::UnwrapToValue(value.type);
+		if (!value.isLValue || !type || type->GetKind() != TypeKind::Array) return value;
+		const Type* element = static_cast<const ArrayType*>(type)->GetElementType();
+		const Type* pointer = m_Ctx.queries().TypeStore()->Pointer(TypeHandle::UnwrapToValue(element));
+		return Value::R(m_Ctx.out->NewNode<AddressOfNode>(pointer, value.lvalue), pointer);
+	}
+
 	QueryResult<void> ExprLowerer::CheckAccessOperator(const MemberAccessNode* n, const Value& base) const
 	{
 		const Type* value = TypeHandle::UnwrapToValue(base.type);
@@ -118,6 +127,7 @@ namespace Scripting
 
 		auto base = ResolveExpr(n->GetBaseObject().Get());
 		if (!base.Ok()) return base;
+		if (n->IsArrowAccess()) base.value = ArrayAsPointer(base.value);   // `array->x` is its first element's x, as in C++
 		if (auto spelled = CheckAccessOperator(n, base.value); !spelled.Ok())
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(spelled.error, spelled.message));
 		const Type* baseType = nullptr; const LValue* baseLoc = nullptr;

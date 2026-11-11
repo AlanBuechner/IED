@@ -367,6 +367,11 @@ Count(1, 2.0f, 'c');      // Ts = int32, float, char
 Count<int32, int64>(1, 2) // written
 ```
 
+A method of a class template takes the class's pack the same way, its elements fixed by the instance: in
+`template<R, ...Ts> struct Holder { public R Call(Ts... args); }`, `Holder<int32, int32, float>::Call` takes an `int32` and
+a `float`. A `create`, a static method and an out-of-line definition (which may name the pack and the parameter
+anew: `template<R, ...Ws> R Holder<R, Ws...>::Call(Ws... values)`) take one too.
+
 ### 6.1 Expansions
 
 `pattern...` stands for the pattern once per element, each pack it names meaning that element. It may
@@ -382,6 +387,9 @@ template<...Ts> int32 Sum(Ts... args) { int32[sizeof...(Ts)] v = { args... }; ..
 template<...Ts> int64 Boxed() { return List<Box<Ts>...>::Size; }
 template<T, ...Rest> struct Tuple<T, Rest...> { public T head; public Tuple<Rest...> tail; }
 ```
+
+A signature's parameter list takes one too: `func<R(Ts...)>` and `funcptr<R(int32, Ts...)>` have a parameter per
+element, and deduce the pack from the signature they are given (`template<R, ...Ts> void Bind(func<R(Ts...)> f)`).
 
 - Packs named in one pattern expand together and must have one length:
   `the packs 'us' (1) and 'Ts' (2) in one expansion have different lengths`.
@@ -447,7 +455,8 @@ template<> int32 Identity<int32>(int32 v) { return v + 1000; }    // the body fo
   primary. "More specialized" is C++ partial ordering: a pattern that matches every argument list another
   matches (and not the reverse) is more specialized. `const T*` is more specialized than `T*`, a written
   type than a parameter, and a pattern without a trailing pack than one with it (`Shape<T>` beats
-  `Shape<T, R...>` for one argument).
+  `Shape<T, R...>` for one argument). `T` cannot stand for `const X`: `const float*` does not match `T*`, only
+  `const T*`, so a template taking every pointer specializes both (`Core::KeyTraits` does).
 - Two matching specializations neither more specialized than the other are an error naming both:
   `ambiguous specializations of 'S': ...`.
 - A top-level `const` is not part of a type (D-30), so `Kind<T const*>` is the pattern `Kind<T*>`:

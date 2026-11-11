@@ -136,6 +136,8 @@ namespace C4DAP::Target
 
 		void Handle(const DEBUG_EVENT& event);
 		void ProcessCreated(const DEBUG_EVENT& event);
+		void ModuleLoaded(const DEBUG_EVENT& event);
+		void ModuleUnloaded(const DEBUG_EVENT& event);
 		void ThreadCreated(const DEBUG_EVENT& event);
 		void ProcessExited(const DEBUG_EVENT& event);
 		void DebugOutput(const DEBUG_EVENT& event);

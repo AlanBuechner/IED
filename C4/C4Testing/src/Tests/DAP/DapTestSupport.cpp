@@ -48,6 +48,24 @@ namespace Testing::Dap
 		return program;
 	}
 
+	DebugProgram BuildScriptHost(const std::string& name, const std::string& hostSource, const std::string& scriptSource)
+	{
+		const fs::path folder = fs::temp_directory_path() / "c4dap_tests" / name;
+		std::error_code ignored;
+		fs::remove_all(folder, ignored);
+		fs::create_directories(folder / "host");
+		DebugProgram program;
+		program.source = folder / "script.cf";
+		program.exe = folder / "app.exe";
+		std::ofstream(program.source, std::ios::binary) << scriptSource;
+		std::string host = hostSource;
+		const std::string token = "@SCRIPT@";
+		for (size_t at = host.find(token); at != std::string::npos; at = host.find(token, at)) host.replace(at, token.size(), program.source.generic_string());
+		std::ofstream(folder / "host" / "main.cf", std::ios::binary) << host;
+		program.built = Run(C4DAP::Target::CommandLine(Compiler().string(), { (folder / "host").string(), "-g", "-O0", "--script-host", "-o", program.exe.string() }));
+		return program;
+	}
+
 	uint32_t LineOf(const std::string& source, const std::string& marker)
 	{
 		std::istringstream lines(source);

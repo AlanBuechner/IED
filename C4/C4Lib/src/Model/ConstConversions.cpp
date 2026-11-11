@@ -101,6 +101,14 @@ namespace Scripting
 		return Result::Fail(QueryError::NotAValue, "a pointer starts as a constant only from null or a string");
 	}
 
+	QueryResult<ConstantValue> ConstEvaluator::InOperandType(const ConstantValue& value, const AstNode* operand, uint32 unitId) const
+	{
+		auto type = ExpressionType(operand, unitId);
+		if (!type.Ok() || !type.value) return Result::Success(value);
+		auto converted = ConvertConstant(value, type.value);
+		return converted.Ok() ? converted : Result::Success(value);
+	}
+
 	// A C-style cast or a static_cast folds through ConvertConstant; the checked and reinterpreting casts never do.
 	QueryResult<ConstantValue> ConstEvaluator::FoldCast(const CastExpressionNode& cast, uint32 unitId, Visiting& visiting, Scope* bindingScope) const
 	{

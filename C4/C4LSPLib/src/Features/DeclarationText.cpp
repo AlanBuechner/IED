@@ -353,6 +353,27 @@ namespace C4LSP::Features
 		return OneLine(kept);
 	}
 
+	std::string DeclarationText::AccessOf(const Scripting::AstNode& decl)
+	{
+		switch (decl.Type())
+		{
+		case NodeType::FunctionDefinition: {
+			const auto& token = static_cast<const Scripting::FunctionDefinitionNode&>(decl).GetAccessModifierToken();
+			return Present(token) ? std::string(token.GetText()) : std::string();
+		}
+		case NodeType::VariableDefinition: {
+			const auto& token = static_cast<const Scripting::VariableDefinitionNode&>(decl).GetAccessModifierToken();
+			return Present(token) ? std::string(token.GetText()) : std::string();
+		}
+		case NodeType::ObjectDefinition: {
+			const auto& token = static_cast<const Scripting::ObjectDefinitionNode&>(decl).GetAccessModifierToken();
+			return Present(token) ? std::string(token.GetText()) : std::string();
+		}
+		default:
+			return std::string();
+		}
+	}
+
 	std::string DeclarationText::OwnerOf(Server::CompilationSession& session, const Scripting::AstNode& decl)
 	{
 		if (decl.Type() == NodeType::Parameter)

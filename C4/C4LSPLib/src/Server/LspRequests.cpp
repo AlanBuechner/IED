@@ -253,7 +253,6 @@ namespace C4LSP::Server
 		void LspServer::HandleFormatting(const Json::Value& id, const Json::Value& params)
 		{
 			std::string uri = ExtractUri(params);
-			auto session = SnapshotForRequest(ExtractUri(params)); // format the document as the client last sent it
 
 			const Json::Value options = params.Member("options");
 			Features::Formatting::Options fmt;
@@ -262,9 +261,9 @@ namespace C4LSP::Server
 				fmt.insertSpaces = !options.HasMember("insertSpaces") || options.Member("insertSpaces").GetBool(true);
 			}
 
-			std::string text;
-			if (session)
-				text = session->GetEditorText(uri); // open document, in-memory source, or on-disk file
+			// As the client last sent it, not as analyzed: an analysis lags on a large program, and edits made for older text
+			// land elsewhere in the new. The lexer-driven formatter needs no analysis, so nothing here waits for one.
+			std::string text = TextOf(uri);
 
 			auto edits = Features::Formatting::Format(text, fmt);
 

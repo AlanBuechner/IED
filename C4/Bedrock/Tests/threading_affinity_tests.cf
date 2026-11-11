@@ -1,0 +1,112 @@
+// Threading::Thread's counts and pinning, and a job system's workers, on a process kept to fewer processors than the system has
+// (`start /affinity`, a launcher's or a tool's): BUG-454, where a job system started a worker for every processor of the system,
+// more threads than the process could run, and pinned some to processors it may not run on.
+
+include "bedrock.ch"
+
+const int32 kFewProcessors = 3;
+
+[link("GetCurrentProcess")] void* GetCurrentProcess() noexcept;
+[link("GetCurrentThread")] void* GetCurrentThread() noexcept;
+[link("GetProcessAffinityMask")] int32 GetProcessAffinityMask(void* process, uint64* processMask, uint64* systemMask) noexcept;
+[link("SetProcessAffinityMask")] int32 SetProcessAffinityMask(void* process, uint64 mask) noexcept;
+[link("SetThreadAffinityMask")] uint64 SetThreadAffinityMask(void* thread, uint64 mask) noexcept;
+
+uint64 ProcessProcessors() {
+	uint64 process = 0;
+	uint64 system = 0;
+	GetProcessAffinityMask(GetCurrentProcess(), &process, &system);
+	return process;
+}
+
+int32 CountProcessors(uint64 mask) {
+	int32 count = 0;
+	for (; mask != 0; mask &= mask - 1) count += 1;
+	return count;
+}
+
+// The lowest `count` processors of `mask`.
+uint64 LowestProcessors(uint64 mask, int32 count) {
+	uint64 kept = 0;
+	for (int32 i = 0; i < count && mask != 0; i += 1) {
+		uint64 lowest = mask & (~mask + 1);
+		kept |= lowest;
+		mask &= ~lowest;
+	}
+	return kept;
+}
+
+// The process on `mask` while this lives, then on the processors it had, as every thread of it is then.
+class ProcessorsKept {
+	[operator("create")] public void Init(uint64 mask) {
+		before = ProcessProcessors();
+		kept = SetProcessAffinityMask(GetCurrentProcess(), mask) != 0;
+	}
+	[operator("delete")] public void Delete() { SetProcessAffinityMask(GetCurrentProcess(), before); }
+
+	public uint64 before;
+	public bool kept;
+}
+
+Threading::JobSystemDesc DefaultFrameWorkers(bool pinned) {
+	Threading::JobSystemDesc desc;
+	desc.backgroundWorkers = 0;
+	desc.pinToCores = pinned;
+	return desc;
+}
+
+int64 LessTheMakers(int32 count) { return count > 1 ? (int64)count - 1 : 1; }
+
+[test("threading.affinity")]
+class AffinityTests {
+	[test("bug454_counts_the_processors_the_process_may_run_on")]
+	public static void TestCounts() {
+		Platform::ProcessorInfo system = Platform::GetProcessorInfo();
+		int32 cores = Threading::Thread::CoreCount();
+		assert_eq((int64)CountProcessors(ProcessProcessors()), (int64)Threading::Thread::HardwareCount(), "one for each processor it may run on");
+		assert_true(Threading::Thread::HardwareCount() <= system.logicalProcessors, "no more than the system has");
+		assert_true(cores >= 1 && cores <= Threading::Thread::HardwareCount(), "each core counted has one of them");
+		assert_true(cores <= system.cores, "no more cores than the system has");
+	}
+
+	[test("bug454_kept_to_one_processor_it_counts_one_and_pins_to_it")]
+	public static void TestOneProcessor() {
+		uint64 one = LowestProcessors(ProcessProcessors(), 1);
+		ProcessorsKept keep = ProcessorsKept(one);
+		assert_true(keep.kept, "the process is kept to one processor");
+		assert_eq(1, Threading::Thread::HardwareCount(), "one processor to run on");
+		assert_eq(1, Threading::Thread::CoreCount(), "on one core");
+		assert_true(Threading::Thread::PinCurrentToCore(0), "its core is the first");
+		assert_eq((int64)one, (int64)SetThreadAffinityMask(GetCurrentThread(), one), "pinned to that processor");
+		assert_true(!Threading::Thread::PinCurrentToCore(1), "and there is no second");
+	}
+
+	[test("bug454_each_core_pins_to_a_processor_of_its_own_the_process_may_run_on")]
+	public static void TestPinsWithin() {
+		uint64 mine = ProcessProcessors();
+		uint64 taken = 0;
+		for (int32 core = 0; core < Threading::Thread::CoreCount(); core += 1) {
+			assert_true(Threading::Thread::PinCurrentToCore(core), "each core it may run on");
+			uint64 pinned = SetThreadAffinityMask(GetCurrentThread(), mine);
+			assert_true(pinned != 0 && (pinned & (pinned - 1)) == 0, "on one processor");
+			assert_true((pinned & mine) == pinned, "one it may run on");
+			assert_true((pinned & taken) == 0, "not another core's");
+			taken |= pinned;
+		}
+		assert_true(!Threading::Thread::PinCurrentToCore(Threading::Thread::CoreCount()), "no core past them");
+	}
+
+	[test("bug454_a_job_system_starts_workers_for_the_processors_the_process_may_run_on")]
+	public static void TestJobWorkers() {
+		int32 few = CountProcessors(ProcessProcessors()) < kFewProcessors ? CountProcessors(ProcessProcessors()) : kFewProcessors;
+		ProcessorsKept keep = ProcessorsKept(LowestProcessors(ProcessProcessors(), few));
+		assert_true(keep.kept, "the process is kept to a few processors");
+		{
+			Threading::JobSystem jobs = Threading::JobSystem(DefaultFrameWorkers(false));
+			assert_eq(LessTheMakers(few), (int64)jobs.FrameWorkerCount(), "the processors it may run on less the maker's");
+		}
+		int32 cores = Threading::Thread::CoreCount();
+		Threading::JobSystem pinned = Threading::JobSystem(DefaultFrameWorkers(true));
+		assert_eq(LessTheMakers(cores), (int64)pinned.FrameWorkerCount(), "pinned: the cores it may run on less the maker's");
+	}
+}

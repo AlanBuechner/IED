@@ -1,0 +1,15 @@
+struct Bag { public int32 m_Count; }
+
+void Add(Bag& bag) { bag.m_Count += 1; }
+
+Bag Made()
+{
+	Bag bag;
+	return bag;
+}
+
+int32 main()
+{
+	Add(Made());
+	return 0;
+}

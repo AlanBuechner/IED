@@ -189,8 +189,12 @@
         "reason": "Unrelated object pointers are not assignable. Documents that the pointer-assignment compatibility check only allows a real derived->base relationship (plus null/const conversion), not arbitrary object pointers."
     },
     "GotoIntoNestedBlock": {
-        "expect": ["jumps into a nested block"],
-        "reason": "A goto may only target a label in its own block or an enclosing one; jumping into a nested block would skip its scope entry."
+        "expect": ["crosses the declaration of 'x'"],
+        "reason": "A goto may enter a block (C++'s rule) but not skip a declaration in it: the variable would be in scope, unconstructed."
+    },
+    "GotoCrossingAfterWarning": {
+        "expect": ["crosses the declaration of 'crossed'"],
+        "reason": "A warning earlier in a function must not stand in for the error that failed its lowering: the function was left declared and undefined, and only IR verification noticed."
     },
     "GotoCrossesDeclaration": {
         "expect": ["crosses the declaration of 'x'"],
@@ -647,6 +651,18 @@
     "DestructuringNonList": {
         "expect": ["only a return list destructures: 'P' is not one"],
         "reason": "Destructuring takes the values of a return list (D-34)."
+    },
+    "DestructuringTwoPacks": {
+        "expect": ["a destructuring takes at most one pack element"],
+        "reason": "A pack element takes the values the others leave: two would not know how to share them (D-34)."
+    },
+    "DestructuringPackLength": {
+        "expect": ["the pack 'rest' takes 2 value(s) of '[int32, int32, int32]', but 'Ts' has 1 element(s)"],
+        "reason": "A pack element whose type names a pack takes a value per element of it (D-34)."
+    },
+    "DestructuringPackTooManyValues": {
+        "expect": ["the destructuring names 3 values besides its pack, but '[int32, int32]' has 2"],
+        "reason": "A pack element may take no values, never fewer (D-34)."
     },
     "ValueListAsScalar": {
         "expect": ["a value list starts only a return list, not 'int32'"],
@@ -2832,5 +2848,45 @@
     "ReferenceReturnOfChosenLocal": {
         "expect": ["cannot return a reference to the local 'local'"],
         "reason": "BUG-398: each branch of a conditional a reference return gives is checked as a returned location is."
+    },
+    "TernaryLocationConstBranchWrite": {
+        "expect": ["cannot write through this location: a branch of the '?:' is read-only: 'a' is const"],
+        "reason": "BUG-453: `c ? a : b` of two locations is the one chosen, read-only when either branch is: an assignment through it is refused and says which branch."
+    },
+    "TernaryLocationConstBranchReference": {
+        "expect": ["cannot bind a non-const reference to a const object: a branch of the '?:' is read-only: 'a' is const (take 'const int32&')"],
+        "reason": "BUG-453: a non-const reference parameter cannot name a choice with a const branch."
+    },
+    "ReferenceParameterGivenALiteral": {
+        "expect": ["main.cf (5:7) error: cannot bind a non-const reference to a temporary: the argument is a value, not a location, so what the callee writes through it would be lost; pass a variable, or take 'const int32&'"],
+        "reason": "BUG-453: a non-const reference parameter given a value bound a hidden temporary, and the callee's writes were lost; C++ refuses it. The error is at the argument."
+    },
+    "ReferenceParameterGivenACallsResult": {
+        "expect": ["the argument is a value, not a location, so what the callee writes through it would be lost; pass a variable, or take 'const Bag&'"],
+        "reason": "BUG-453: what a by-value call returns is a temporary, not a location."
+    },
+    "ReferenceParameterGivenAChoiceWithAValue": {
+        "expect": ["cannot bind a non-const reference to a temporary: the argument is a value, not a location"],
+        "reason": "BUG-453: a ?: with a branch that is no location is a value."
+    },
+    "ReferenceParameterGivenAnIndexersCopy": {
+        "expect": ["cannot bind a non-const reference to a temporary: the argument is the copy a by-value indexer gives"],
+        "reason": "BUG-453: an indexer that returns by value gives a copy; Fill wrote into it and the element kept its value."
+    },
+    "ReferenceParameterGivenPartOfATemporary": {
+        "expect": ["cannot bind a non-const reference to a temporary: the argument is part of the temporary a call returned"],
+        "reason": "BUG-453: a field of what a by-value call returns ends with the temporary."
+    },
+    "ReferenceParameterOfAFuncGivenALiteral": {
+        "expect": ["cannot bind a non-const reference to a temporary: the argument is a value, not a location"],
+        "reason": "BUG-453: a func's or function pointer's reference parameter binds as a function's does."
+    },
+    "ReferenceVariableBoundToAnIndexersCopy": {
+        "expect": ["cannot bind 'r' to the copy a by-value indexer gives: a reference names a location that lasts; copy it into a variable"],
+        "reason": "BUG-453: the reference named a copy, so `r = 9` left the element as it was."
+    },
+    "ReferenceVariableBoundToPartOfATemporary": {
+        "expect": ["cannot bind 'kept' to part of the temporary a call returned: a reference names a location that lasts; copy it into a variable"],
+        "reason": "BUG-453: a reference bound to part of a call's temporary named an object that ends with its statement."
     }
 }

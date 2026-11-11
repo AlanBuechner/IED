@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-452**
+Next ID: **BUG-455**
 
 ## Rules for this file
 
@@ -44,13 +44,66 @@ Next ID: **BUG-452**
 | ID | Title | Area | Severity |
 |---|---|---|---|
 | BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
-| BUG-433 | C4LSP does not report an unknown name in a file-scope variable's initializer | Tools | Low |
+| BUG-435 | Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program | Codegen | High |
+| BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
 
 ---
 
 ## Parser, lexer and preprocessor
 
 ## Model, templates and semantics
+
+### BUG-441 `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick
+- **Area:** Runtime
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-11-05
+- **Symptom:** In `nuke gates` (the `bedrock` step, and again under `gc-concurrent`) the fastest of three runs of ten 2 ms
+  `Threading::Thread::Sleep`s took 238 ms (714 ms for the case), the system tick's 15.6 ms each, and the case failed
+  (`threading_tests.cf:172`). Run alone right after (`BedrockTests.exe --filter "threading.thread.*"`) it took 82 ms
+  and passed. Several other chats were building and testing on the machine at the time.
+- **Where:** `Threading::Thread::Sleep` (Bedrock's precise sleep), `Bedrock/Tests/threading_tests.cf`.
+- **Notes:** a frame limiter sleeping on the tick would cap a game well under its target, so this matters beyond the
+  test: find whether the precise timer is lost under load (a waitable timer refused, a resolution request dropped),
+  or whether the case asks more than a loaded machine can give.
+
+### BUG-435 Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program
+- **Area:** Codegen
+- **Severity:** High
+- **Status:** Needs re-test (most likely not a compiler bug: the machine's memory corrupts, see Notes)
+- **Found:** 2026-10-31
+- **Symptom:** Compiling Claymore's `ClaymoreEditor` (1080 files, `-O3 -g --incremental --script-host`, the default
+  threads) fails about 4 times in 8 with no change between runs: `C4: internal compiler error: exception 0xc0000005`
+  at a different address each time, or `error: cannot read a partition of the module back: Invalid ID`. The next run
+  of the same command usually succeeds. Symbolized against the toolchain's `C4.pdb`, the crashes were in
+  `llvm::formLCSSAForInstructions` under `RunPipeline` / `AssemblePartition` on a `ParallelFor` worker
+  (`Compiler/ObjectEmission.cpp`), in `Scripting::CallEmitter::Emit`, and in `llvm::ValueEnumerator::ValueEnumerator`
+  (bitcode writing): three phases, which with the unreadable bitcode points at a module corrupted earlier, during the
+  parallel emission of the partitions (D-81), rather than a fault in any one of them.
+- **Repro:** in `C:/GameDev/Claymore/Claymore/ClaymoreEditor`: `C:/GameDev/IED/toolchains/c4/dev/C4.exe --projects
+  C:/GameDev/Claymore/build/int/Development-windows-x64/ClaymoreEditor/projects.toml -O3 -g --incremental -l user32
+  -l gdi32 -l dwmapi -l imm32 -l shell32 -l shcore -l advapi32 -l d3d12 -l dxgi -l kernel32 --script-host --int-dir
+  <a scratch folder> -o <scratch>/ClaymoreEditor.exe`, run several times (touch a source between runs or use a fresh
+  int dir, so the partitions are assembled again).
+- **Where:** suspects: `ProgramModel`'s `mutable` caches filled lazily by const getters (`m_LifecycleMethods`,
+  `m_TypeScopes`, `m_MethodRecords`, `m_RecordBySignature`, `m_ReturnLists`, `m_TypeInstantiations`, ...) reached by
+  the partitions' emitters at once in `CodeGenDriver::EmitPlaced` / `EmitImports` (`m_Lowering.Pool().Run`), where
+  only `QueryFunction` and `CensusCounterType` take `m_ModelLock` (`Backend/CodeGen/ModuleContext.cpp`); or any
+  cache that hands one partition's thread an `llvm::Type`/`Constant` of another partition's context (each
+  `PartitionEmitter` has an `LLVMContext` of its own, and a value of another context in a module writes bitcode the
+  reader rejects with "Invalid ID").
+- **Notes:** 2026-10-31 investigation: the build machine (Ryzen 7 7800X3D, 2x32 GB DDR5) bugchecked 6 times in 12 days
+  (System log: `0x1A` MEMORY_MANAGEMENT x4, `0x12B` FAULTY_HARDWARE_CORRUPTED_PAGE, `0xBE`), once at 09:43 under a
+  parallel clang build. In 38 compiles of snapshots of the repro (HEAD and the working tree, fresh and incremental,
+  up to 3 at once) C4 never crashed; the one failure was in the front end, `type not found: LPCWSTr` for the
+  `LPCWSTR` of WindowingWin32's translated `Native.ch`: one bit (0x20) flipped. clang itself crashed with access
+  violations on 3 files of a 14-way parallel compile (and the C++ driver retries clang crashes for the same reason,
+  `plugins/cpp/nuke/driver/objects.py`), and C4LSP's 6 crashes since 10/30 are at 6 different places of AST
+  teardown. Random faults in unrelated programs under memory load point at the hardware, not at C4. Re-test once
+  the memory passes a memory test (or on another machine): the repro above, 10 runs; if it still fails, build C4
+  with AddressSanitizer (`-fsanitize=address` on C4, C4Lib and Core) and run it there. Found on the way and fixed:
+  BUG-436, a parked parser thread could take its include response on a spurious wakeup before the scheduler
+  dispatched it (`CompilerMessageQueue` now hands a response over only when it is released).
 
 ## Interop, runtime and Bedrock
 
@@ -83,19 +136,3 @@ Next ID: **BUG-452**
   either the pool's `SendOptionsFilesIfChanged` did not fire for that rewrite, or C4LSP took the new programs without
   re-resolving the includes of files it had analyzed: check `LspProgramsTest`'s configuration-change case with a
   dependency added to a program that already holds the file.
-
-### BUG-433 C4LSP does not report an unknown name in a file-scope variable's initializer
-- **Area:** Tools
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-10-28
-- **Symptom:** `static int32 s_ProbeBroken = UndefinedProbeName;` appended to a source of a library project
-  (Claymore's `Packages/DCC/Geometry/src/Geometry/Primitives.cf`) gets no diagnostic from C4LSP - a hover on it answers
-  from the new text, and nothing is published within 6 s - while C4.exe rejects it (`no variable named
-  UndefinedProbeName`). The same line as `static UndefinedProbeType s_ProbeBroken;` is reported within 4 s, and errors
-  inside function bodies of the same file are reported.
-- **Repro:** append the first line above to any `.cf` of a project, open it in the editor: no squiggle; `nuke build`
-  of a program using it fails.
-- **Where:** C4LSPLib's analysis of a program (`Program::Analyze`, the session's semantic pass): file-scope variable
-  initializers seem to be left unchecked where function bodies are checked.
-- **Notes:** check whether namespace-scope `const` initializers are skipped too.

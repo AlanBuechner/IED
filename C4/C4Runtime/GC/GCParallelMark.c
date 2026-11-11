@@ -97,7 +97,7 @@ static void drain_shared(GCMarker* marker, GCMarkShare* share)
 		while (marker->count)
 		{
 			const GCScanItem item = marker->stack[--marker->count];
-			gc_mark_range(marker, item.start, item.start + item.size);
+			gc_mark_scan_item(marker, item);
 			donate(marker, share);
 		}
 		if (!refill(marker, share)) return;

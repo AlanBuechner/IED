@@ -204,9 +204,8 @@ skip:
 Labels are function-scoped and must be unique in the function. The rules (C++ rules, made strict
 because every C4 declaration initializes):
 
-- A `goto` may target a label in its own block or in any enclosing block. Jumping into a nested block
-  is an error: `goto 'x' jumps into a nested block`.
-- A forward jump may not cross a declaration or a `defer` of the label's block:
+- A `goto` may target any label of its function, as in C++, but may not skip a declaration or a `defer`: of the
+  block the goto and the label are both in when the jump is forward, or of a block it enters before the label:
   `jump to label 'x' crosses the declaration of 'y'` / `... crosses a defer`. Static locals do not count.
 - A backward jump, or any jump out of a block, runs the defers and destructors of everything it leaves,
   exactly like `break`.

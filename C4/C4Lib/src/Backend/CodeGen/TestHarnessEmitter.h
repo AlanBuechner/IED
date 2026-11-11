@@ -14,7 +14,7 @@ namespace Scripting
 		std::string jsonPath;                              // -test-json: where the summary is written; empty for none
 		std::function<std::string(uint32 sourceId)> fileOf; // a test's source file, as failures print it
 		std::string entry = "main";                         // the harness's name; a script's is kScriptTestsSymbol
-		uint32 hostUnits = 0;                               // a script's: units 1..hostUnits are its host's, tests and all
+		std::function<bool(uint32 unit)> ownUnit;           // whether the tests and fixtures `unit` declares run; null: every unit's
 	};
 
 	/// A script's test harness (docs/runtime/04 section 2), which Script::RunTests calls.
@@ -31,7 +31,7 @@ namespace Scripting
 		bool Emit();
 
 	private:
-		bool Own(const FunctionRecord* function) const { return function && function->declUnit > m_Options.hostUnits; }
+		bool Own(const FunctionRecord* function) const { return function && (!m_Options.ownUnit || m_Options.ownUnit(function->declUnit)); }
 		void RunFixture(const FunctionRecord* fixture);
 		void RunCase(const TestRegistry::Test& test);
 		void RunClass(const ObjectType* owner, const std::vector<const TestRegistry::Test*>& tests);

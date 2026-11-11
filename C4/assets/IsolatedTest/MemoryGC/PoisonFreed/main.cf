@@ -1,0 +1,70 @@
+// BUG-437: GC::SetPoison fills each object a delete or a collection ends with 0xDB bytes, so a use after free reads a
+// pointer that faults where it is used. The ended objects are read back through addresses kept as integers in a
+// pointer-free global, which keeps nothing alive.
+include "Memory/gc.ch"
+
+const int32 kCells = 200;
+const uint64 kPoison = 0xDBDBDBDBDBDBDBDB;
+
+struct Cell { public uint64 first; public Cell* next; public uint64 last; }
+
+uint64[200] g_addresses;
+
+static Cell* At(uint64 address) { return (Cell*)address; }
+
+static bool Poisoned(uint64 address) { return At(address)->first == kPoison && At(address)->last == kPoison; }
+
+// A deleted object reads as poison, all of it, only while poisoning is on.
+static int32 CheckDelete() {
+	Cell* kept = new Cell;
+	kept->first = 7;
+	kept->last = 9;
+	uint64 address = (uint64)kept;
+	delete kept;
+	if (At(address)->first != 7 || At(address)->last != 9) return 1;
+	GC::SetPoison(true);
+	Cell* ended = new Cell;
+	ended->first = 7;
+	ended->last = 9;
+	address = (uint64)ended;
+	delete ended;
+	return Poisoned(address) && (uint64)At(address)->next == kPoison ? 0 : 2;
+}
+
+void Fill() {
+	for (int32 i = 0; i < kCells; i++) {
+		Cell* cell = new Cell;
+		cell->first = (uint64)i;
+		cell->last = (uint64)i;
+		g_addresses[i] = (uint64)cell;
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+// The objects a collection ends read as poison (a stale copy of an address may keep a few).
+static int32 CheckSweep() {
+	Fill();
+	Scrub(8);
+	GC::Collect();
+	int32 poisoned = 0;
+	for (int32 i = 0; i < kCells; i++)
+		if (Poisoned(g_addresses[i])) poisoned++;
+	return poisoned >= kCells - 5 ? 0 : 3;
+}
+
+int32 main() {
+	int32 failed = CheckDelete();
+	if (failed != 0) return failed;
+	failed = CheckSweep();
+	if (failed != 0) return failed;
+	GC::SetPoison(false);
+	printf("POISON OK\n");
+	return 0;
+}

@@ -125,8 +125,9 @@ namespace Scripting
 		// Both a binary operator and a prefix one: after `(v)` it continues an expression.
 		bool IsBinaryOrPrefix(TokenType type)
 		{
+			// `(ir)[1]` is an element of ir: a list is a value to no cast.
 			return type == TokenType::Plus || type == TokenType::Minus || type == TokenType::Star || type == TokenType::DoubleStar ||
-				type == TokenType::Ampersand || type == TokenType::DoubleAmpersand;
+				type == TokenType::Ampersand || type == TokenType::DoubleAmpersand || type == TokenType::OpenBracket;
 		}
 	}
 
@@ -144,7 +145,8 @@ namespace Scripting
 
 		Token afterType = lexer.PeekCompound();
 
-		if (parsedType && afterType.GetType() == TokenType::CloseParen)
+		// `(a < 29) + 1` reads as a type only until the template arguments do not close.
+		if (parsedType && !state.GetErrorTracker().SpeculationFailed() && afterType.GetType() == TokenType::CloseParen)
 		{
 			// Possible C-style cast: (Type)expr
 			lexer.NextCompoundToken(); // consume )
@@ -152,9 +154,11 @@ namespace Scripting
 			// A parenthesized name followed by `+ - * ** & &&` is an operand of that operator (C#'s rule): `(v) * (v)`
 			// multiplies; a cast of such an operand is written `(T)(-x)`.
 			const bool operandOfOperator = CouldBeAValue(state, *parsedType) && IsBinaryOrPrefix(lexer.PeekCompound().GetType());
+			// Nothing is cast to an array type: `(table[i])(x)` calls an element.
+			const bool subscripted = CouldBeAValue(state, *parsedType) && !parsedType->GetIndirections().Empty();
 
 			// A cast is a prefix operator: `(int)f + 1` is `((int)f) + 1`.
-			auto operand = operandOfOperator ? nullptr : ParseExpression(state, BindPower::PrefixOperand);
+			auto operand = operandOfOperator || subscripted ? nullptr : ParseExpression(state, BindPower::PrefixOperand);
 
 			if (operand)
 			{

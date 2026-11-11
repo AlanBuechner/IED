@@ -18,8 +18,11 @@ namespace Threading
 
 	struct JobSystemDesc
 	{
-		public int32 frameWorkers = -1;        // -1: the processors minus one, at least 1
+		public int32 frameWorkers = -1;        // -1: the processors this process may run on minus one, at least 1
 		public int32 backgroundWorkers = -1;   // -1: one; 0: frame workers run background jobs after frame work
+		// One physical core a thread: the thread making the system on core 0, frame worker i on core i + 1, frameWorkers -1 then being the cores minus one.
+		// For work that spins and shares data, where two workers on one core's hyperthreads run far slower than either alone. Background workers stay free.
+		public bool pinToCores = false;
 	}
 
 	// One frame worker's own queues, by priority: the jobs it submits go there first.

@@ -1,0 +1,83 @@
+// BUG-434: keep-all pools opened, filled with objects that hold new ones, half given back and closed while automatic
+// collections mark beside the program (Scene's chunk memory: a world's components, its entities destroyed, the world gone),
+// with Collect() finishing a cycle under way now and then. Every concurrent mark is checked against a fresh one from the
+// roots, and every object a collection ends is poisoned, so a pool's slot marked after its pool closed, or an object lost,
+// fails where it happens. Claymore's engine tests ended in an access violation there once the heap was big enough.
+include "bedrock.ch"
+
+const int32 kRounds = 600;
+const int32 kSlots = 512;
+const int32 kBallast = 32768;   // about 18 MiB live: a mark lasts while several pools close
+const int32 kCollectEvery = 50;
+const int32 kLeastAutomatic = 4;
+
+struct Target {
+	public int64 id;
+	public int64 check;
+	public int64[64] filler;   // the object's own bytes, on the collector's heap: what starts automatic collections
+}
+
+struct Entry {
+	public int64 id;
+	public Target* target;
+}
+
+Target* MakeTarget(int64 id) {
+	Target* target = new Target;
+	target->id = id;
+	target->check = id * 7 + 3;
+	target->filler[0] = id;
+	target->filler[63] = id;
+	return target;
+}
+
+bool Good(const Target* target, int64 id) {
+	return target != nullptr && target->id == id && target->check == id * 7 + 3 && target->filler[0] == id && target->filler[63] == id;
+}
+
+// A heap that lives the whole run, so each mark takes a while.
+Core::Array<Target*> g_ballast;
+
+bool CollectsInside(int32 round) { return round % kCollectEvery == kCollectEvery - 1; }
+
+// Fills a pool, gives half back, checks the rest, and closes it as it goes: how many entries were wrong.
+int32 Round(int32 round) {
+	GC::PoolOptions options;
+	options.keepAll = true;
+	GC::Pool pool = GC::Pool(sizeof(Entry), kSlots, options);
+	const int64 first = (int64)round * kSlots;
+	for (int32 i = 0; i < kSlots; i += 1) {
+		Entry* entry = (Entry*)pool.Take();
+		entry->id = first + i;
+		entry->target = MakeTarget(first + i);
+	}
+	for (int32 i = 0; i < kSlots; i += 2) pool.Give(pool.At(i));
+	if (CollectsInside(round)) GC::Collect();   // finishes a cycle under way, then collects with the world stopped
+	int32 wrong = 0;
+	for (int32 i = 1; i < kSlots; i += 2) {
+		const Entry* entry = (const Entry*)pool.At(i);
+		if (!pool.Holds(entry) || !Good(entry->target, first + i)) wrong += 1;
+	}
+	return wrong;
+}
+
+int32 main() {
+	GC::SetConcurrent(0);
+	GC::SetVerify(true);
+	GC::SetPoison(true);
+	GC::SetPercent(10);
+	for (int32 i = 0; i < kBallast; i += 1) g_ballast.Push(MakeTarget(-1 - i));
+	const uint64 collectionsBefore = GC::GetStats().collections;
+	int32 explicitCollections = 0;
+	int32 wrong = 0;
+	for (int32 round = 0; round < kRounds; round += 1) {
+		wrong += Round(round);
+		if (CollectsInside(round)) explicitCollections += 1;
+	}
+	for (int32 i = 0; i < kBallast; i += 1)
+		if (!Good(g_ballast[i], -1 - i)) wrong += 1;
+	const int64 automatic = (int64)(GC::GetStats().collections - collectionsBefore) - explicitCollections;
+	printf("pools: %d rounds, %lld automatic collections beside them, %d wrong\n", kRounds, automatic, wrong);
+	if (automatic < kLeastAutomatic) return 100;   // the rounds must have run beside concurrent marking
+	return wrong;
+}

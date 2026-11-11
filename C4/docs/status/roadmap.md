@@ -70,10 +70,15 @@ Every question that used to be listed here has been decided. The decisions are i
 | 3.12 The `loop` keyword | D-04: removed |
 
 Still open, for the project owner: whether the GC becomes optional per program, whether the test
-framework grows parameterized tests and benchmarks, and whether C4 exports data from the executable itself
+framework grows parameterized tests and benchmarks, whether C4 exports data from the executable itself
 (`[export("D3D12SDKVersion")]` on a constant; today a foreign C source does it,
-[interop 5.1](../language/13-interop.md#51-exporting-data-from-the-executable), plan B74). None blocks a work
-package.
+[interop 5.1](../language/13-interop.md#51-exporting-data-from-the-executable), plan B74), and whether a declaration -
+a field's type, a parameter's or the return type, a base class - must see the types it names through its file's
+includes, as a body must. Today a declaration resolves program-wide by design
+([program model 1.4](../language/01-program-model.md#14-visibility-declarations-vs-bodies)): `int32 Count(N::Widget&
+widget)` compiles in a file that includes nothing declaring `N::Widget`, until the header that does leaves the program.
+The body's rule would close that, and refuse the headers that lean on it (filed as BUG-440, 2026-11-05; not a bug of
+the rules as written). None blocks a work package.
 
 ---
 

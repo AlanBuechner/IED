@@ -68,6 +68,8 @@ namespace Scripting
 		QueryResult<ConstantValue> FoldQuery(const TypeOfExpressionNode& query, uint32 unitId, Scope* bindingScope) const;
 		QueryResult<const Type*> QueryOperandType(const TypeOfExpressionNode& query, uint32 unitId, Scope* bindingScope) const;
 		QueryResult<const Type*> ExpressionType(const AstNode* expr, uint32 unitId) const;
+		/// `~x` and `-x` have x's type, as at run time: `~13u` is 32 bits wide, not 64. An operand whose type a constant cannot tell (a sum) stays wide.
+		QueryResult<ConstantValue> InOperandType(const ConstantValue& value, const AstNode* operand, uint32 unitId) const;
 		QueryResult<const Type*> LiteralType(const LiteralNode& literal) const;
 		QueryResult<ConstantValue> EvaluateNamed(const Core::String& name, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
 		QueryResult<ConstantValue> FoldSymbol(const Core::String& name, const SymbolInfo& symbol, uint32 unitId, Visiting& visiting) const;

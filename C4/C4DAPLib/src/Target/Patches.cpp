@@ -45,4 +45,9 @@ namespace C4DAP::Target
 		process.Write(address, &kInt3, 1);
 		found->second.lifted = false;
 	}
+
+	void Patches::ForgetRange(uint64_t base, uint64_t size)
+	{
+		std::erase_if(m_Patches, [base, size](const auto& patch) { return patch.first >= base && patch.first - base < size; });
+	}
 } // namespace C4DAP::Target

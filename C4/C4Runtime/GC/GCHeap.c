@@ -45,13 +45,13 @@ static size_t pages_for_slots(uint32_t size)
 
 static GCSpan* new_small_span(GCHeap* heap, uint32_t spanClass)
 {
-	const uint32_t size = gc_class_size(spanClass >> 1);
+	const uint32_t size = gc_class_size(spanClass / (uint32_t)GC_SCAN_KINDS);
 	const size_t npages = pages_for_slots(size);
 	GCSpan* span = gc_pages_alloc(&heap->pages, npages);
 	if (!span) return NULL;
 	span->state = GC_SPAN_SMALL;
 	span->spanClass = (uint16_t)spanClass;
-	span->noscan = (uint8_t)(spanClass & 1u);
+	span->scanKind = (uint8_t)(spanClass % (uint32_t)GC_SCAN_KINDS);
 	span->elemSize = size;
 	span->nelems = (uint32_t)((npages << GC_PAGE_SHIFT) / size);
 	span->divMagic = (uint32_t)(0xFFFFFFFFu / size) + 1u;
@@ -91,7 +91,7 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request)
 	GCSpan* span = gc_pages_alloc(&heap->pages, (size + GC_PAGE_SIZE - 1) >> GC_PAGE_SHIFT);
 	if (!span) return NULL;
 	span->state = GC_SPAN_LARGE;
-	span->noscan = (uint8_t)(request.noscan != 0);
+	span->scanKind = (uint8_t)request.scanKind;
 	span->elemSize = size;
 	span->nelems = 1;
 	span->allocCount = 1;
@@ -103,10 +103,21 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request)
 	return span->base;
 }
 
+static void poison_slots(const GCHeap* heap, GCSpan* span, uint64_t ended, uint32_t word)
+{
+	if (!heap->poison) return;
+	for (; ended; ended &= ended - 1)
+	{
+		const uint32_t slot = (word << 6) + (uint32_t)__builtin_ctzll(ended);
+		memset(gc_span_slot_base(span, slot), GC_POISON_BYTE, span->elemSize);
+	}
+}
+
 void gc_heap_release(GCHeap* heap, GCObject object, uint64_t epoch, const void* releaser)
 {
 	GCSpan* span = object.span;
 	heap->liveBytes -= (int64_t)span->elemSize;
+	poison_slots(heap, span, (uint64_t)1 << (object.slot & 63u), object.slot >> 6);
 	if (span->state == GC_SPAN_LARGE)
 	{
 		list_remove(&heap->large, span);
@@ -127,13 +138,15 @@ void gc_heap_release(GCHeap* heap, GCObject object, uint64_t epoch, const void* 
 // Sweep
 
 // The marked slots become the allocated ones; returns how many there are.
-static uint32_t keep_marked(GCSpan* span)
+static uint32_t keep_marked(const GCHeap* heap, GCSpan* span)
 {
 	uint32_t live = 0;
 	uint64_t ended = 0;
 	for (uint32_t w = 0; w < GC_SPAN_WORDS; ++w)
 	{
-		ended |= span->allocBits[w] & ~span->markBits[w];
+		const uint64_t endedHere = span->allocBits[w] & ~span->markBits[w];
+		poison_slots(heap, span, endedHere, w);
+		ended |= endedHere;
 		span->allocBits[w] = span->markBits[w];
 		span->markBits[w] = 0;
 		live += (uint32_t)__builtin_popcountll(span->allocBits[w]);
@@ -152,7 +165,7 @@ static void sweep_class(GCHeap* heap, GCClassSpans* spans, uint64_t epoch)
 	for (GCSpan* span = spans->all; span;)
 	{
 		GCSpan* next = span->next;
-		const uint32_t live = keep_marked(span);
+		const uint32_t live = keep_marked(heap, span);
 		if (live == 0)
 		{
 			list_remove(&spans->all, span);
@@ -179,6 +192,7 @@ static void sweep_large(GCHeap* heap, uint64_t epoch)
 		}
 		else
 		{
+			poison_slots(heap, span, 1u, 0u);
 			list_remove(&heap->large, span);
 			gc_pages_free(&heap->pages, span, epoch);
 		}

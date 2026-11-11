@@ -1,0 +1,13 @@
+struct ByValue { public int32[4] data; }
+[operator("index")]
+int32 Get(int32 i) extends ByValue { return this.data[i]; }
+[operator("index_assign")]
+void Set(int32 i, int32 v) extends ByValue { this.data[i] = v; }
+
+int32 main()
+{
+	ByValue values;
+	int32& r = values[2];
+	r = 9;
+	return values.data[2];
+}

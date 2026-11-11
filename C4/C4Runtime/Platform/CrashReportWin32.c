@@ -1,7 +1,8 @@
 // Crash reports (PlatformRuntimeC.h). A report is "C4: fatal: <what>", the thread, and the stack that reached the
 // error, a frame a line, named from the PDBs of the process's modules through DbgHelp (loaded only when a report is
 // written). It goes to standard error and, once a program named a crash log, is appended there after the time and the
-// process id. With a crash log named, faults nothing handles and bad arguments to the C runtime are reported too.
+// process id. With a crash log named, or in a test run (c4_report_faults), faults nothing handles and bad arguments to
+// the C runtime are reported too.
 //
 // The stack is taken on the failing thread; the names are found and the text written by a thread of its own, whose
 // stack is whole even when the failing one's is not. The failing thread waits for it a while: a fatal error of the
@@ -380,13 +381,18 @@ static void OnInvalidParameter(const wchar_t* expression, const wchar_t* functio
 	c4_fatal("a C runtime function was called with an invalid argument");
 }
 
+void c4_report_faults(void)
+{
+	if (InterlockedExchange(&g_filterInstalled, 1)) return;
+	g_previous = SetUnhandledExceptionFilter(OnUnhandledFault);
+	_set_invalid_parameter_handler(OnInvalidParameter);
+}
+
 void c4_crash_log(const char* path)
 {
 	AcquireSRWLockExclusive(&g_reporting);
 	g_log[0] = 0;
 	if (path && path[0] && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, g_log, kLogUnits) <= 0) g_log[0] = 0;
 	ReleaseSRWLockExclusive(&g_reporting);
-	if (!g_log[0] || InterlockedExchange(&g_filterInstalled, 1)) return;
-	g_previous = SetUnhandledExceptionFilter(OnUnhandledFault);
-	_set_invalid_parameter_handler(OnInvalidParameter);
+	if (g_log[0]) c4_report_faults();
 }

@@ -53,6 +53,16 @@ namespace Scripting::ReferenceBinding
 		return "";
 	}
 
+	Core::String Passing(const LValue* location)
+	{
+		if (!location) return "";
+		if (location->kind == LValue::Kind::IndexOp) return "the copy a by-value indexer gives";
+		// The temporary marks the root of its chain.
+		for (const LValue* p = location; p; p = p->kind == LValue::Kind::Field || p->kind == LValue::Kind::Base ? p->base : nullptr)
+			if (p->ephemeral) return "part of the temporary a call returned";
+		return "";
+	}
+
 	QueryResult<const HIRNode*> Address(LoweringContext& ctx, const ReferenceType* ref, const Value& init, const Type* pointer,
 		const Core::String& name)
 	{
@@ -60,6 +70,11 @@ namespace Scripting::ReferenceBinding
 		// BUG-429: binding to a lane took the vector's address, so the reference read its first lane.
 		if (init.isLValue)
 			if (Core::String why = Unaddressable(init.lvalue); !why.empty()) return Result::Fail(QueryError::NotAValue, "cannot bind '" + name + "': " + why);
+		// BUG-453: a copy kept nothing written through the reference, and a call's temporary ends with its statement.
+		if (init.isLValue)
+			if (Core::String what = Passing(init.lvalue); !what.empty())
+				return Result::Fail(QueryError::NotAValue, "cannot bind '" + name + "' to " + what + ": a reference names a location "
+					"that lasts; copy it into a variable");
 		if (!ref->IsConstReferent() && init.isLValue && IsReadOnly(ctx, init.lvalue))
 			return Result::Fail(QueryError::NotAValue,
 				"cannot bind a non-const reference to a const object: '" + name + "' would allow mutating read-only data");

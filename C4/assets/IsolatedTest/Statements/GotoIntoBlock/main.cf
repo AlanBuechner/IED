@@ -1,0 +1,58 @@
+// As in C++, a goto may enter a block when it skips no declaration of it.
+int32 Sibling(int32 x)
+{
+	int32 r = 0;
+	if (x < 0) {
+		r = -1;
+		goto done;
+	}
+	if (x == 0) {
+		r = 1;
+	} else {
+		r = 2;
+		done:
+		r += 10;
+	}
+	return r;
+}
+
+int32 IntoLoop(int32 n)
+{
+	int32 i;
+	int32 sum = 0;
+	i = n;
+	goto middle;
+	for (i = 0; i < 3; i++) {
+		sum += 100;
+		middle:
+		sum += i;
+	}
+	return sum;
+}
+
+int32 Out()
+{
+	int32 total = 0;
+	for (int32 i = 0; i < 3; i++) {
+		{
+			int32 inner = i * 2;
+			if (inner == 2) goto again;
+			total += inner;
+		}
+		continue;
+		again:
+		total += 100;
+	}
+	return total;
+}
+
+int32 main()
+{
+	if (Sibling(-1) != 9) return 1;
+	if (Sibling(0) != 1) return 2;
+	if (Sibling(5) != 12) return 3;
+	if (IntoLoop(1) != 1 + 100 + 2) return 4;
+	if (Out() != 104) return 5;
+	printf("GOTO INTO BLOCK OK\n");
+	return 0;
+}

@@ -47,7 +47,7 @@ namespace Scripting
 		{
 			auto value = ExprLowerer(m_Ctx).DefaultArgument(*create, i);
 			if (!value.Ok()) { m_Ctx.Fail(create->paramDefaults[i], value); break; }
-			auto bound = BindArgument(m_Ctx, value.value, m_Ctx.LoadIfNeeded(value.value), params[i].m_Type);
+			auto bound = BindArgument(m_Ctx, value.value, m_Ctx.LoadIfNeeded(value.value), params[i].m_Type, create->paramDefaults[i]);
 			if (!bound.Ok()) { m_Ctx.Fail(create->paramDefaults[i], bound); break; }
 			args.push_back(bound.value);
 		}
@@ -328,7 +328,7 @@ namespace Scripting
 		return LifecycleFacts::NeedsDestroy(m_Ctx.queries(), v) || LifecycleFacts::NeedsCopy(m_Ctx.queries(), v);
 	}
 
-	QueryResult<const LValue*> Lifecycle::Assign(const LValue* named, const Value& source)
+	QueryResult<const LValue*> Lifecycle::Assign(const LValue* named, const Value& source, const AstNode* site)
 	{
 		const Type* t = TypeHandle::UnwrapToValue(named->type);
 		const ObjectType* obj = AsObject(t);
@@ -338,7 +338,7 @@ namespace Scripting
 		const FunctionRecord* assign = obj ? LifecycleFacts::Own(m_Ctx.queries(), obj).assign : nullptr;
 		if (assign)
 		{
-			auto arg = BindArgument(m_Ctx, source, m_Ctx.LoadIfNeeded(source), assign->type->GetParameters()[0].m_Type);
+			auto arg = BindArgument(m_Ctx, source, m_Ctx.LoadIfNeeded(source), assign->type->GetParameters()[0].m_Type, site);
 			if (!arg.Ok()) return QueryResult<const LValue*>::Fail(arg.error, arg.message);
 			seq->steps.push_back(DirectCall(assign, target, { arg.value }));
 		}

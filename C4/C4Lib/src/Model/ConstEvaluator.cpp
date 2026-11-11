@@ -199,12 +199,12 @@ namespace Scripting
 			const Core::String& op = unary->GetOperatorToken().GetText();
 			const bool integral = IsIntKind(inner.value.kind);
 			if (op == "-") {
-				if (integral) return QueryResult<ConstantValue>::Success(ConstantValue::Int(static_cast<int64>(0 - static_cast<uint64>(inner.value.AsInt()))));
+				if (integral) return InOperandType(ConstantValue::Int(static_cast<int64>(0 - static_cast<uint64>(inner.value.AsInt()))), unary->GetOperand().Get(), unitId);
 				return QueryResult<ConstantValue>::Success(ConstantValue::Float(-inner.value.floatValue));
 			}
 			if (op == "+") return inner;
 			if (op == "!") return QueryResult<ConstantValue>::Success(ConstantValue::Bool(integral ? inner.value.AsInt() == 0 : inner.value.floatValue == 0.0));
-			if (op == "~" && integral) return QueryResult<ConstantValue>::Success(ConstantValue::Int(~inner.value.AsInt()));
+			if (op == "~" && integral) return InOperandType(ConstantValue::Int(~inner.value.AsInt()), unary->GetOperand().Get(), unitId);
 			if (op == "~") return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'~' needs an integer operand in a constant");
 			return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "unsupported unary op in const expr: " + op);
 		}

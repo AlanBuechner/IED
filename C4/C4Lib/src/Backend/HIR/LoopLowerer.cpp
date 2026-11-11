@@ -422,7 +422,7 @@ namespace Scripting
 		const HIRNode* next = protocolCall(incRec, it);
 		if (life.AssignmentNeedsLifecycle(itType))
 		{
-			auto assigned = life.Assign(it, Value::R(next, itType));
+			auto assigned = life.Assign(it, Value::R(next, itType), n);
 			if (!assigned.Ok()) return m_Ctx.Fail(n, QueryResult<void>::Fail(assigned.error, assigned.message));
 			node->step = m_Ctx.out->NewNode<AddressOfNode>(m_Ctx.queries().TypeStore()->Pointer(itType), assigned.value);
 		}

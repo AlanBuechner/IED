@@ -1,0 +1,189 @@
+// Script layers (section 5.2): a script compiled extensible is to the scripts over it what the host is - they include its
+// headers, derive from its classes, use its templates, globals, macros and exceptions, and call its code directly - and
+// the host loads them in order and unloads them in reverse. `scripts/kernel/src` and `scripts/game/src` are roots, so
+// their files include each other by module path, as a project's sources do.
+include "scripttest.ch"
+include "world.ch"
+
+namespace World
+{
+	int32 HostValue() { return 7; }
+}
+
+Scripting::ScriptOptions KernelOptions(const ScriptTest::Checks& checks, const char* name)
+{
+	Scripting::ScriptOptions options;
+	options.name = Core::String(name);
+	options.optimize = checks.optimize;
+	options.project = Core::String("Kernel");
+	options.extensible = true;
+	options.AddRoot("scripts/kernel/src");
+	options.AddFile("scripts/kernel/src/Kernel/Shapes.ch");
+	options.AddFile("scripts/kernel/src/Kernel/Shapes.cf");
+	options.Define("KERNEL_VERSION=3");
+	return options;
+}
+
+Scripting::ScriptOptions GameOptions(const ScriptTest::Checks& checks, const char* name, Scripting::Script* base)
+{
+	Scripting::ScriptOptions options;
+	options.name = Core::String(name);
+	options.optimize = checks.optimize;
+	options.project = Core::String("Game");
+	options.Extend(base);
+	options.AddRoot("scripts/game/src");
+	options.AddFile("scripts/game/src/Game/Play.cf");
+	return options;
+}
+
+void CheckCalls(Scripting::Script* game, ScriptTest::Checks& checks)
+{
+	checks.Equal(30, ((funcptr<int32()>)game->Address("Game::SquareArea"))(), "a class of the layer below, made and called from the script over it");
+	checks.Equal(106, ((funcptr<int32()>)game->Address("Game::OverrideArea"))(), "a class derived across layers: its vtable, its override and the layer's own virtual call");
+	checks.Equal(3, ((funcptr<int32()>)game->Address("Game::BoxOfInts"))(), "a template of the layer below, instantiated over it");
+	checks.Equal(21, ((funcptr<int32()>)game->Address("Game::BoxOfOwn"))(), "the template with the script's own type");
+	checks.Equal(42, ((funcptr<int32()>)game->Address("Game::Twice"))(), "a macro of the layer's header");
+	checks.Equal(3, ((funcptr<int32()>)game->Address("Game::Version"))(), "the layer's code sees its own defines");
+	checks.Equal(5, ((funcptr<int32()>)game->Address("Game::Bump"))(), "a global of the layer: one storage for both");
+	checks.Equal(9, ((funcptr<int32()>)game->Address("Game::ThreadValue"))(), "a thread_local of the layer, through its accessor");
+	checks.Equal(55, ((funcptr<int32()>)game->Address("Game::Caught"))(), "the layer's exception thrown from its code, caught over it by type");
+	checks.Equal(13, ((funcptr<int32()>)game->Address("Game::FileStatic"))(), "a file-static helper a header's template names");
+	checks.Equal(7, ((funcptr<int32()>)game->Address("Game::ThroughHost"))(), "the host, from the script over the layer");
+	checks.Equal(8, ((funcptr<int32()>)game->Address("Game::Inline"))(), "a method defined in its class, which nothing in the layer calls");
+}
+
+void CheckReflection(Scripting::Script* kernel, Scripting::Script* game, ScriptTest::Checks& checks)
+{
+	Reflection::Type square = Reflection::FindType("Kernel::Square");
+	checks.That(square.IsValid() && ScriptTest::SameText(square.Tag(), kernel->Tag()), "the layer's type is the layer's");
+	Reflection::Type big = Reflection::FindType("Game::Big");
+	checks.That(big.IsValid() && ScriptTest::SameText(big.Tag(), game->Tag()), "the type over it, the script's own");
+}
+
+void CheckAllowList(Scripting::Host* host, Scripting::Script* kernel, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions off = GameOptions(checks, "off-list", kernel);
+	off.Allow("NotKernel");
+	Scripting::Script* refused = host->Prepare(off);
+	checks.That(!refused->Prepared(), "a layer off the allow-list cannot be included");
+	checks.Contains(refused->Diagnostics(), "not on the allow-list", "and the diagnostics say so");
+
+	Scripting::ScriptOptions on = GameOptions(checks, "on-list", kernel);
+	on.Allow("Kernel");
+	Scripting::Script* allowed = host->Prepare(on);
+	if (!allowed->Prepared()) printf("%s\n", allowed->Diagnostics());
+	checks.That(allowed->Prepared(), "a layer on the allow-list can");
+	allowed->Unload();
+}
+
+void CheckUnloadOrder(Scripting::Script* kernel, Scripting::Script* game, ScriptTest::Checks& checks)
+{
+	kernel->Unload();
+	checks.That(kernel->Ok(), "a layer stays loaded while a script over it does");
+	checks.Contains(kernel->Diagnostics(), "extend it", "and says why");
+	checks.Equal(30, ((funcptr<int32()>)game->Address("Game::SquareArea"))(), "and what stands on it runs on");
+	game->Unload();
+	checks.That(!Reflection::FindType("Game::Big").IsValid(), "the script over it goes first");
+	kernel->Unload();
+	checks.That(!kernel->Ok(), "then the layer unloads");
+	checks.That(!Reflection::FindType("Kernel::Square").IsValid(), "and its types go");
+}
+
+// A script that was asked to extend one that cannot be extended says so.
+void CheckNotExtensible(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions closed = KernelOptions(checks, "closed");
+	closed.extensible = false;
+	Scripting::Script* base = host->Prepare(closed);
+	checks.That(base->Prepared(), "a closed script");
+	Scripting::Script* over = host->Prepare(GameOptions(checks, "over-closed", base));
+	checks.That(!over->Prepared(), "cannot be extended");
+	checks.Contains(over->Diagnostics(), "not compiled extensible", "and the diagnostics say so");
+	base->Unload();
+}
+
+// Prepared on a thread and loaded later: the script over a prepared layer links to it before it has loaded.
+void CheckPrepared(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* kernel = host->Prepare(KernelOptions(checks, "kernel#p"));
+	if (!kernel->Prepared()) printf("%s\n", kernel->Diagnostics());
+	checks.That(kernel->Prepared(), "the layer prepared");
+	Scripting::Script* game = host->Prepare(GameOptions(checks, "game#p", kernel));
+	if (!game->Prepared()) printf("%s\n", game->Diagnostics());
+	checks.That(game->Prepared(), "the script over it prepared, nothing loaded yet");
+	checks.That(!Reflection::FindType("Kernel::Square").IsValid(), "nothing registered");
+	checks.That(kernel->Load() && game->Load(), "both load, lowest first");
+	if (game->Ok()) CheckCalls(game, checks);
+	game->Unload();
+	kernel->Unload();
+}
+
+// A new layer whose headers are the same: the script over it links its kept machine code to the layer's new code.
+void CheckCache(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	if (host->DebugScripts()) return; // debug scripts are never cached
+	host->UseCache("scriptcache");
+	Scripting::Script* kernel = ScriptTest::Load(host, checks, KernelOptions(checks, "kernel"));
+	Scripting::Script* game = ScriptTest::Load(host, checks, GameOptions(checks, "game", kernel));
+	checks.That(!kernel->Cached() && !game->Cached(), "the first compile keeps them");
+	game->Unload();
+	kernel->Unload();
+
+	kernel = ScriptTest::Load(host, checks, KernelOptions(checks, "kernel"));
+	game = ScriptTest::Load(host, checks, GameOptions(checks, "game", kernel));
+	checks.That(kernel->Cached() && game->Cached(), "the second links both from the cache");
+	if (game->Ok()) CheckCalls(game, checks);
+	game->Unload();
+	kernel->Unload();
+
+	// The same headers over another body: the kernel compiles again and the script over it does not.
+	FS::File next("scripts/kernel_v2/Shapes.cf", "rb");
+	Core::String body = next.ReadText();
+	next.Close();
+	FS::File written("scripts/kernel/src/Kernel/Shapes.cf", "wb");
+	written.Write((const void*)body.CStr(), body.ByteLength());
+	written.Close();
+	kernel = ScriptTest::Load(host, checks, KernelOptions(checks, "kernel"));
+	game = ScriptTest::Load(host, checks, GameOptions(checks, "game", kernel));
+	checks.That(!kernel->Cached(), "a changed body compiles the layer again");
+	checks.That(game->Cached(), "the script over it, its interface the same, links from the cache");
+	if (game->Ok()) checks.Equal(36, ((funcptr<int32()>)game->Address("Game::SquareArea"))(), "and runs the layer's new code");
+	game->Unload();
+	kernel->Unload();
+}
+
+// One debug script over a layer in memory, whatever the host's own setting: a game's own script on an engine's packages.
+void CheckMixedDebug(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions low = KernelOptions(checks, "kernel#m");
+	low.debug = 0;
+	Scripting::Script* kernel = ScriptTest::Load(host, checks, low);
+	Scripting::ScriptOptions high = GameOptions(checks, "game#m", kernel);
+	high.debug = 1;
+	Scripting::Script* game = ScriptTest::Load(host, checks, high);
+	if (game->Ok()) CheckCalls(game, checks);
+	game->Unload();
+	kernel->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Layers");
+	Scripting::Script* kernel = ScriptTest::Load(host, checks, KernelOptions(checks, "kernel#1"));
+	if (!kernel->Ok()) return checks.End("Layers");
+	Scripting::Script* game = ScriptTest::Load(host, checks, GameOptions(checks, "game#1", kernel));
+	if (game->Ok())
+	{
+		CheckCalls(game, checks);
+		CheckReflection(kernel, game, checks);
+		CheckAllowList(host, kernel, checks);
+		CheckUnloadOrder(kernel, game, checks);
+	}
+	CheckNotExtensible(host, checks);
+	CheckPrepared(host, checks);
+	CheckMixedDebug(host, checks);
+	CheckCache(host, checks);
+	return checks.End("Layers");
+}

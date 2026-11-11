@@ -729,6 +729,7 @@ as `[link]` declarations, with no wrappers.
 | `Disable()`, `Enable()` | suppress / resume automatic collection |
 | `SetConcurrent(int64 bytes)` | automatic collections of a live heap of at least `bytes` mark beside the program, with stops under about a millisecond (D-79): -1 never, 0 always, default 16 MiB; returns the previous value. `Collect()` always stops the world |
 | `SetVerify(bool)` | check every concurrent mark against a fresh one; a missed object is a fatal error (tests; slow) |
+| `SetPoison(bool)` | fill each object a collection or a `delete` ends with `0xDB` bytes, so a use after free faults where it reads (diagnosis; `C4_GC_POISON=1` at startup) |
 | `Pin(void*)`, `Unpin(void*)` | keep an object and what it refers to alive (counted; any pointer into it) |
 | `IsReachable(void*)` | whether a pointer is into a live object (for collection callbacks) |
 | `RegisterRegion`, `UnregisterRegion` | raw memory scanned for pointers |
@@ -855,7 +856,7 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 | Type | Meaning |
 |---|---|
 | `Atomic<T>` | one value of an integer, `bool`, enum, pointer or float type: `Load`, `Store`, `Exchange`, `CompareExchange(expected&, desired)`, `CompareExchangeWeak`, and for integers `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr`, `FetchXor`; each takes a `MemoryOrder` (default `SeqCst`). A copy is an atomic snapshot. |
-| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)` (on a high-resolution timer of the thread's: it ends within about half a millisecond of its time, not on the system's 15.6 ms tick - a frame limiter can sleep), `SetCurrentName(const char*)` (names the calling thread for debuggers, profilers and crash dumps; false when the system cannot) and `CurrentName()` (`""` when it has none). |
+| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()` (the logical processors this process may run on: its affinity, which a pool sized by the system's count would overfill), `CoreCount()` (the cores with one of them), `PinCurrentToCore(core)` (one logical processor of the core-th of those cores; false when there is none), `Yield()`, `Sleep(int64 ns)` (on a high-resolution timer of the thread's: it ends within about half a millisecond of its time, not on the system's 15.6 ms tick - a frame limiter can sleep), `SetCurrentName(const char*)` (names the calling thread for debuggers, profilers and crash dumps; false when the system cannot) and `CurrentName()` (`""` when it has none). |
 | `Mutex` | one word: free, locked, or locked with sleepers. `Lock` spins briefly, then parks; `TryLock`; `Unlock` wakes one sleeper only when there is one. Not copyable. |
 | `LockGuard` | locks a `Mutex` for its scope. |
 | `UnlockGuard` | lets go of a `Mutex` the thread holds for its scope and takes it back at the end, an exception's included: slow work inside a locked region that touches nothing the mutex guards. |
@@ -866,9 +867,11 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 
 **The job system** is tuned so a time-critical job never waits for a worker behind long work:
 
-- `JobSystem(JobSystemDesc desc)` starts `desc.frameWorkers` frame workers (default: the processors minus one,
-  at least 1) and `desc.backgroundWorkers` background workers (default 1; with 0, frame workers run background
-  jobs after their frame work); destroying it finishes the queued jobs and joins them. A zero (moved-from)
+- `JobSystem(JobSystemDesc desc)` starts `desc.frameWorkers` frame workers (default: the processors the process may run
+  on minus one, at least 1: `Thread::HardwareCount`) and `desc.backgroundWorkers` background workers (default 1; with 0, frame workers run background
+  jobs after their frame work); `desc.pinToCores` keeps the making thread on core 0 and frame worker i on core i + 1, one logical
+  processor a core (`Thread::PinCurrentToCore`), with the cores minus one as the default count (`Thread::CoreCount`) - a process kept to
+  fewer processors (`start /affinity`) gets workers for those alone, each pinned within them; destroying it finishes the queued jobs and joins them. A zero (moved-from)
   system runs a submitted job at once on the submitting thread. Each worker names its thread ("Job Worker 0",
   "Background Worker 0"), which debuggers, crash dumps and the profiler show.
 - `SetJobObserver(JobObserver)` tells a profiler of every job in the process: `begin(name)` on the worker before a
@@ -922,8 +925,8 @@ script host: build it with --script-host`).
 
 | Type | Meaning |
 |---|---|
-| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open: no interface, another build's, or no `C4Script.dll` beside the program). `Compile(options)` compiles, links and loads a script; `Prepare(options)` compiles and links it without loading it (on any thread: `Script::Load()` loads it later, where nothing reads the reflection the load changes; docs/runtime/04 section 5.1); `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). `DebugScripts()` / `SetDebugScripts(bool)`: whether each script is linked into a DLL with a PDB, which debuggers read as any module's, instead of in memory (on at first when the program was built with `-g`; docs/runtime/04 section 6.4). Closed on delete. |
-| `ScriptOptions` | `name` (the script's name and reflection tag), `optimize` (`-O2`, default; false for `-O0`), `AddFile(path)`, `AddText(fileName, text)` (a file given whole; other files include it by that name), `Allow(projectOrPath)` (the host headers it may include; none: all), `Define("NAME=VALUE")`. |
+| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open: no interface, another build's, or no `C4Script.dll` beside the program). `Compile(options)` compiles, links and loads a script; `Prepare(options)` compiles and links it without loading it (on any thread: `Script::Load()` loads it later, where nothing reads the reflection the load changes; docs/runtime/04 section 5.1); `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). `DebugScripts()` / `SetDebugScripts(bool)`: whether each script is linked into a DLL with a PDB, which debuggers read as any module's, instead of in memory (on at first when the program was built with `-g`; docs/runtime/04 section 6.4). `HasProject(name)`: whether the program's interface has that project, whose headers a script need not bring. Closed on delete. |
+| `ScriptOptions` | `name` (the script's name and reflection tag), `optimize` (`-O2`, default; false for `-O0`), `AddFile(path)`, `AddText(fileName, text)` (a file given whole; other files include it by that name), `Allow(projectOrPath)` (the host headers it may include; none: all), `Define("NAME=VALUE")`, `debug` (-1 as the host says, 1 a debug script, 0 not), `AddRoot(folder)` (a folder includes resolve from, as a project's sources; none: each file's own), and for a script over a script (docs/runtime/04 section 5.2): `extensible` (others may extend it), `project` (the project its files are in, which a script over it names on its allow-list), `Extend(script)` (it compiles against and links to that extensible script, loaded or prepared). |
 | `Script` | `Ok()`, `Prepared()` and `Load()` (a script `Host::Prepare` made), `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Cached()` (linked from the host's cache), `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
 | `Fault`, `Guard(fn, context, fault)` | runs any `fn(context)` under the structured-exception guard: false, with the fault's code, instruction and touched address, when a hardware fault stopped it. |
 
@@ -1036,8 +1039,10 @@ A program nobody watches the console of (a server, a windowed app) names a crash
 the program writes in that form reads on into its report. With a log named, a fault nothing handles (an access
 violation, a stack overflow, a division by zero) is reported there too, from its faulting instruction, before the
 system ends the program with the fault's code (Windows Error Reporting still sees it), and a C runtime function
-given an invalid argument is a fatal error instead of a fail-fast. `assets/RuntimeTest/CrashLog` runs a child
-that fails each way and reads its stderr and log.
+given an invalid argument is a fatal error instead of a fail-fast. A `-test` program reports faults the same way
+without a log (its harness calls `c4_report_faults`), so a case that faults is named by its `[TEST]` line and followed
+by the fault's report and stack. `assets/RuntimeTest/CrashLog` runs a child that fails each way and reads its stderr
+and log.
 
 `Platform::StackText()` is the same stack for a report of the program's own (`c4_stack_text`). In a catch handler it
 is the stack of the throw being handled - `thrown: class Ns::Error` and the frames from the `throw` outward, read from

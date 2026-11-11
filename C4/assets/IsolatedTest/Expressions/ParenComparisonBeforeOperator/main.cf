@@ -1,0 +1,21 @@
+// `(a < 29) + 1` is a comparison: its `<` opens no template arguments, however a cast may look until the `)`.
+const int32 c_Limit = 30;
+
+int32 One(int32 a) { return (a < 29) + 1; }
+int32 Two(int32 a) { return 1 + (a < 29) + (a > 3); }
+int32 Three(int32 a) { return 1 + (c_Limit < 29) + (a >= 0 && !(~a << 12)); }
+
+int32 Doubled(int32 x) { return x * 2; }
+const funcptr<int32(int32)>[1] g_Table = { Doubled };
+
+int32 main()
+{
+	if ((g_Table[0])(4) != 8) return 4;   // `(a[i])(x)` calls: nothing is cast to an array type
+	int32[2] values = { 3, 4 };
+	if ((values)[1] != 4) return 5;       // `(a)[i]` indexes: a list is a value to no cast
+	if (One(1) != 2) return 1;
+	if (Two(5) != 3) return 2;
+	if (Three(1) != 1) return 3;
+	printf("PAREN COMPARISON OK\n");
+	return 0;
+}

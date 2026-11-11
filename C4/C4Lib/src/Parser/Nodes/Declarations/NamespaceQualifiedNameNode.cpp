@@ -32,10 +32,31 @@ namespace Scripting
 		return m_Segments.Back().nameToken;
 	}
 
+	// A return list as a template argument (`F<[int32, bool]>`, `Returns<[Ts...]>`, D-34): `[` ... `]` closing the argument.
+	static bool ReturnListArgumentAhead(const Lexer& lexer)
+	{
+		constexpr uint32 kMaxLookahead = 256;
+		if (lexer.PeekCompound().GetType() != TokenType::OpenBracket || lexer.PeekCompound(1).GetType() == TokenType::CloseBracket) return false;
+		int32 depth = 0;
+		for (uint32 i = 0; i < kMaxLookahead; ++i)
+		{
+			const TokenType type = lexer.PeekCompound(i).GetType();
+			if (type == TokenType::EndOfFile) return false;
+			if (type == TokenType::OpenBracket || type == TokenType::OpenParen || type == TokenType::OpenCurl) ++depth;
+			else if ((type == TokenType::CloseBracket || type == TokenType::CloseParen || type == TokenType::CloseCurl) && --depth == 0)
+			{
+				const TokenType after = lexer.PeekCompound(i + 1).GetType();
+				return after == TokenType::Comma || after == TokenType::Greater || after == TokenType::Ellipsis;
+			}
+		}
+		return false;
+	}
+
 	static Ref<AstNode> ParseTemplateArgument(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();
 		Token next = lexer.PeekCompound();
+		if (ReturnListArgumentAhead(lexer)) return PrattParser::ExpandIfPack(state, QualTypeNode::ParseReturnList(state));
 
 		// Inside template args we know something must be parsed. Peek to decide
 		// what kind, then parse directly without TryParse/undo speculation.

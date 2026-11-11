@@ -59,6 +59,9 @@ Highest binds tightest. This is C++'s table with two C4 additions: `**` and `is`
 - Qualified names: `Ns::f()`, `Type::StaticMethod()`, `Enum::Member`, `Outer::Inner`,
   `Tpl<int32>::Static()`.
 - Function names used as values decay to `funcptr` ([07](07-functions-and-lambdas.md)).
+- An array is the address of its first element, as in C++, where an address is what the expression wants: `a + 1`,
+  `a - b`, a comparison, `a->x`, `*a`, a cast to a pointer or an integer, and an argument through `...`. It stays an
+  array in `sizeof` and when assigned or copied.
 - Lambdas `[](int32 x) -> int32 { ... }` ([07](07-functions-and-lambdas.md)).
 
 ## 3. Postfix expressions
@@ -145,6 +148,7 @@ int64 d = offsetof(Outer, inner.value);
   `sizeof(Tick())` does not call `Tick`. `sizeof x * 2` is `(sizeof x) * 2`.
 - `sizeof(x)` with a name means the type `x` when one exists, else the value `x`.
 - A reference measures what it refers to. `sizeof(void)` and an incomplete type are errors.
+- A string literal measures its array, the terminator too, as in C++: `sizeof("ab")` is 3, `sizeof(u"ab")` is 6.
 - `offsetof` names a non-static field, through nested fields with `.`: an unknown or static field is an
   error.
 - `holds_native_bytes(T)` and `holds_pointers(T)` take a type only, and are `bool` constants
@@ -192,10 +196,19 @@ int64 d = offsetof(Outer, inner.value);
 
 `c ? a : b` evaluates only the chosen branch. Both branches become one type: the type they share, the usual
 arithmetic result of two numbers (an enum counts as its underlying integer), or the type one branch converts to
-implicitly (a derived object or pointer to its base, `null` to the other branch's pointer or funcptr). An object
-result is a new object, copied from a branch that names one. Anything else is an error (`the branches of '?:'
-have no common type: 'int32*' and 'float*'`). A function returning a reference returns the location a conditional
-of locations chooses, not a copy ([04 4.4](04-types.md#44-references)).
+implicitly (a derived object or pointer to its base, `null` to the other branch's pointer or funcptr). Anything else
+is an error (`the branches of '?:' have no common type: 'int32*' and 'float*'`).
+
+When both branches are locations of that type - variables, fields, elements, what a pointer or reference names, a
+derived object for its base - the conditional is the location it chooses, as in C++: `(c ? a : b) = 1` assigns `a`
+or `b`, `F(c ? a : b)` hands a `T&` parameter the variable itself, and `(c ? one : two).Add()`, `+=`, `++`, `&` and a
+reference local all reach the variable chosen. It is read-only when either branch is (`cannot write through this
+location: a branch of the '?:' is read-only: 'a' is const`). Reading it reads the variable chosen, and an object
+initialized from it is a copy, as from a variable. Otherwise - a branch that is a value, a lane or run of a packed
+vector, a by-value indexer's element, a named constant, part of a temporary, or two different types such as `int32`
+and `int64` - the result is a value: an object result is a new object, copied from a branch that names one. A
+function returning a reference returns the location a conditional of locations chooses, not a copy
+([04 4.4](04-types.md#44-references)).
 
 ## 7. Type tests: `is` and `as`
 

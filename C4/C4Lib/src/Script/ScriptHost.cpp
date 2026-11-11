@@ -62,7 +62,17 @@ namespace Scripting
 
 	// --- a script ----------------------------------------------------------------------------------------------------
 
-	Script::~Script() { Unload(); }
+	Script::~Script()
+	{
+		UnloadLoaded(); // whatever stands on it keeps its code through its chain (ScriptChain)
+		LeaveBase();
+	}
+
+	void Script::LeaveBase()
+	{
+		if (m_Base) m_Base->extenders->fetch_sub(1);
+		m_Base.reset();
+	}
 
 	const std::string& Script::FaultText() const
 	{
@@ -125,7 +135,7 @@ namespace Scripting
 		return false;
 	}
 
-	bool Script::Load(std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals)
+	bool Script::Load(std::shared_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals)
 	{
 		std::lock_guard<std::recursive_mutex> loading(*m_Loading);
 		m_Linked = std::move(linked);
@@ -144,7 +154,28 @@ namespace Scripting
 	uint64 Script::Unload()
 	{
 		std::lock_guard<std::recursive_mutex> loading(*m_Loading);
-		if (!m_Linked) return 0;
+		if (m_Chain && m_Chain->extenders->load() > 0)
+		{
+			m_Diagnostics += "error: the script '" + m_Tag + "' stays loaded: " + std::to_string(m_Chain->extenders->load()) + " script(s) extend it, which unload first\n";
+			return 0;
+		}
+		if (!m_Linked)
+		{
+			m_Prepared.reset(); // prepared and never loaded
+			m_Chain.reset();
+			LeaveBase();
+			return 0;
+		}
+		UnloadLoaded();
+		LeaveBase();
+		return m_Dropped;
+	}
+
+	void Script::UnloadLoaded()
+	{
+		std::lock_guard<std::recursive_mutex> loading(*m_Loading);
+		m_Dropped = 0;
+		if (!m_Linked) return;
 		m_Runtime.notifyUnload(m_Tag.c_str());
 		Finish finish{ m_Runtime.moduleFinish, m_Record };
 		try
@@ -159,15 +190,15 @@ namespace Scripting
 		if (!m_TlsControls.empty()) m_Runtime.tlsRelease(m_TlsControls.data(), static_cast<uint32>(m_TlsControls.size()));
 		if (m_Roots) m_Runtime.removeRootTable(m_Roots);
 		const ScriptImage image = m_Linked->Image();
-		const uint64 dropped = m_Runtime.dropFinalizersIn(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
+		m_Dropped = m_Runtime.dropFinalizersIn(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
 		m_Runtime.forgetTypesIn(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
 		m_Runtime.removeSource(m_Tag.c_str());
 		m_Runtime.moduleDestroy(m_Record);
 		m_Linked.reset();
+		m_Chain.reset(); // the code goes with the last of what stands on it
 		m_Record = nullptr;
 		m_Roots = nullptr;
 		m_TlsControls.clear();
-		return dropped;
 	}
 
 	// --- the host ------------------------------------------------------------------------------------------------------
@@ -204,14 +235,37 @@ namespace Scripting
 
 	ScriptHost::Built ScriptHost::Build(const ScriptCompileOptions& options)
 	{
-		if (m_DebugScripts) return CompileAndLink(options, nullptr); // a debug script's module is not cached
+		if (options.baseMissing)
+		{
+			Built built = NewBuilt(options);
+			built.script->m_Diagnostics = "error: the script '" + options.name + "' extends one that was not compiled extensible, or has unloaded\n";
+			return built;
+		}
+		if (Debugged(options)) return CompileAndLink(options, nullptr, nullptr); // a debug script's module is not cached
 		const std::string entry = m_Cache ? m_Cache->EntryFor(m_Interface, options) : "";
 		if (std::optional<CachedScript> cached = entry.empty() ? std::nullopt : m_Cache->Read(entry))
 			if (Built built = LinkCached(options, std::move(*cached)); built.linked) return built;
 		std::string generated;
-		Built built = CompileAndLink(options, entry.empty() ? nullptr : &generated);
-		if (built.linked && !generated.empty()) m_Cache->Write(entry, { std::move(generated), built.script->m_Diagnostics, built.threadLocals });
+		std::string layer;
+		Built built = CompileAndLink(options, entry.empty() ? nullptr : &generated, &layer);
+		if (built.linked && !generated.empty()) m_Cache->Write(entry, { std::move(generated), built.script->m_Diagnostics, built.threadLocals, std::move(layer) });
 		return built;
+	}
+
+	void ScriptHost::Settle(Built& built, const ScriptCompileOptions& options, std::optional<ScriptLayer> layer)
+	{
+		if (!built.linked) return;
+		built.script->m_Base = options.base;
+		if (options.base) options.base->extenders->fetch_add(1);
+		if (!layer) return;
+		HostIndex index = IndexFor(options);
+		index.symbols.insert(layer->symbols.begin(), layer->symbols.end());
+		index.types.insert(layer->reflectedTypes.begin(), layer->reflectedTypes.end());
+		auto chain = std::make_shared<ScriptChain>(std::move(index), TableFor(options).Extended(built.linked, layer->symbols));
+		chain->parent = options.base;
+		chain->digest = LayerDigest(options.base ? options.base->digest : std::string(), SerializeLayer(*layer));
+		chain->layer = std::move(*layer);
+		built.script->m_Chain = std::move(chain);
 	}
 
 	ScriptHost::Built ScriptHost::NewBuilt(const ScriptCompileOptions& options) const
@@ -224,17 +278,24 @@ namespace Scripting
 	ScriptHost::Built ScriptHost::LinkCached(const ScriptCompileOptions& options, CachedScript cached)
 	{
 		Built built = NewBuilt(options);
+		std::optional<ScriptLayer> layer;
+		if (options.extensible)
+		{
+			layer.emplace();
+			if (!DeserializeLayer(cached.layer, *layer)) return built; // a damaged entry: compiled again
+		}
 		ScriptCode code;
 		code.object = std::move(cached.object);
 		std::string error;
-		built.linked = LinkScript(std::move(code), m_Table, m_Index.target, nullptr, &error);
+		built.linked = LinkScript(std::move(code), TableFor(options), m_Index.target, nullptr, &error);
 		built.script->m_Cached = true;
 		built.script->m_Diagnostics = std::move(cached.diagnostics);
 		built.threadLocals = std::move(cached.threadLocals);
+		Settle(built, options, std::move(layer));
 		return built;
 	}
 
-	ScriptHost::Built ScriptHost::CompileAndLink(const ScriptCompileOptions& options, std::string* generated)
+	ScriptHost::Built ScriptHost::CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer)
 	{
 		Built built = NewBuilt(options);
 		std::string error;
@@ -245,25 +306,27 @@ namespace Scripting
 			return built;
 		}
 		ScriptCompileOptions compileOptions = options;
-		compileOptions.debugInfo = m_DebugScripts;
-		CompiledScript compiled = CompileScript(m_Interface, m_Index, compileOptions, *machine);
+		compileOptions.debugInfo = Debugged(options);
+		CompiledScript compiled = CompileScript(m_Interface, IndexFor(options), compileOptions, *machine);
 		built.script->m_Diagnostics = compiled.diagnostics;
 		if (!compiled.module) return built;
 		ScriptCode code;
 		code.context = std::move(compiled.context);
 		code.module = std::move(compiled.module);
 		code.optimize = options.optimize;
-		built.linked = Link(std::move(code), options.name, generated, &error);
+		built.linked = Link(std::move(code), options, generated, &error);
 		if (!built.linked) built.script->m_Diagnostics += "error: " + error + "\n";
 		built.threadLocals = std::move(compiled.threadLocals);
+		if (layer && compiled.layer) *layer = SerializeLayer(*compiled.layer);
+		Settle(built, options, std::move(compiled.layer));
 		return built;
 	}
 
-	std::unique_ptr<LinkedScript> ScriptHost::Link(ScriptCode code, const std::string& name, std::string* generated, std::string* error)
+	std::unique_ptr<LinkedScript> ScriptHost::Link(ScriptCode code, const ScriptCompileOptions& options, std::string* generated, std::string* error)
 	{
-		if (!code.module || !m_DebugScripts) return LinkScript(std::move(code), m_Table, m_Index.target, generated, error);
+		if (!code.module || !Debugged(options)) return LinkScript(std::move(code), TableFor(options), m_Index.target, generated, error);
 		std::call_once(m_DllFolderMade, [this] { m_DllFolder = ScriptDllFolder(m_DllRoot); });
-		return LinkScriptDll(std::move(code), m_Table, m_Index.target, { m_DllFolder, ScriptDllName(name, ++m_DllLoads) }, error);
+		return LinkScriptDll(std::move(code), TableFor(options), m_Index.target, { m_DllFolder, ScriptDllName(options.name, ++m_DllLoads) }, error);
 	}
 
 	std::unique_ptr<Script> ScriptHost::Compile(const ScriptCompileOptions& options)
@@ -288,14 +351,14 @@ namespace Scripting
 			m_Diagnostics += "error: the script is not prepared: it did not compile and link, or it loaded already\n";
 			return false;
 		}
-		std::unique_ptr<LinkedScript> linked = std::move(m_Prepared);
+		std::shared_ptr<LinkedScript> linked = std::move(m_Prepared);
 		const std::vector<std::string> threadLocals = std::move(m_PreparedThreadLocals);
 		if (Load(std::move(linked), threadLocals)) return true;
 		Unload(); // nothing of a script that failed stays loaded
 		return false;
 	}
 
-	void ScriptHost::LoadOrUndo(Script& script, std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals)
+	void ScriptHost::LoadOrUndo(Script& script, std::shared_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals)
 	{
 		if (!script.Load(std::move(linked), threadLocals)) script.Unload(); // nothing of a script that failed stays loaded
 	}
@@ -305,6 +368,12 @@ namespace Scripting
 		Built built = Build(options);
 		if (!built.linked) return std::move(built.script);
 		std::lock_guard<std::recursive_mutex> loading(*m_Loading); // nothing loads between the old going and the new
+		if (old.Chain() && old.Chain()->extenders->load() > 0)
+		{
+			built.linked.reset();
+			built.script->m_Diagnostics += "error: the script '" + old.Tag() + "' cannot be replaced while scripts extend it: they unload first\n";
+			return std::move(built.script);
+		}
 		old.Unload();
 		LoadOrUndo(*built.script, std::move(built.linked), built.threadLocals);
 		return std::move(built.script);

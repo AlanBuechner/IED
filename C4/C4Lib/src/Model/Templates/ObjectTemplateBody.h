@@ -1,6 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 #include "Model/Templates/TemplateArguments.h"
+#include "Model/TemplateInstantiator.h"
 
 namespace Scripting
 {
@@ -55,15 +56,16 @@ namespace Scripting
 		/// owner's) and its own name.
 		InstantiationBindings OwnBindings() const;
 
-		/// The out-of-line definition of `method` whose parameters resolve to `parameters`, with the binding
-		/// layer its own template parameter names resolve in (null when there is none).
-		struct OutOfLine { const FunctionDefinitionNode* fn = nullptr; Scope* binding = nullptr; };
-		OutOfLine FindOutOfLine(const Core::String& method, const Core::Vector<const Type*>& parameters, bool isConst) const;
+		/// The out-of-line definition of `method`, with `written` parameters as declared, whose parameters resolve to
+		/// `parameters`; with the binding layer its own template parameter names resolve in (null when there is none) and
+		/// its parameters, a pack expanded under its own names.
+		struct OutOfLine { const FunctionDefinitionNode* fn = nullptr; Scope* binding = nullptr; TemplateInstantiator::Parameters parameters; };
+		OutOfLine FindOutOfLine(const Core::String& method, uint32 written, const Core::Vector<const Type*>& parameters, bool isConst) const;
 		bool Defines(const ProgramModel::TemplateMethodDef& def) const;
 		/// Whether an out-of-line definition's qualifier (`Box<T>::` / `Box<T*>::`) names this definition.
 		bool QualifierFits(const FunctionDefinitionNode& definition) const;
 		Scope* BindingFor(const FunctionDefinitionNode& definition) const;
-		bool SameParameters(const FunctionDefinitionNode& definition, Scope* binding, const Core::Vector<const Type*>& parameters) const;
+		static bool SameParameters(const TemplateInstantiator::Parameters& definition, const Core::Vector<const Type*>& parameters);
 		void RecordOwnBindings(const FunctionRecord* rec, const FunctionDefinitionNode& definition) const;
 		/// The out-of-line definitions of this instance's member templates (`template<T> template<U> R S<T>::F(U u)`).
 		void AddMemberTemplateDefinitions() const;

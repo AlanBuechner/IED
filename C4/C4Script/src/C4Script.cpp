@@ -66,6 +66,15 @@ namespace
 			options.defines[define.substr(0, equals)] = equals == std::string::npos ? "1" : define.substr(equals + 1);
 		}
 		options.optimize = from.optimize != 0;
+		if (from.debug >= 0) options.debug = from.debug != 0;
+		if (from.project) options.project = from.project;
+		for (uint32_t i = 0; i < from.rootCount; ++i) options.roots.push_back(from.roots[i]);
+		options.extensible = from.extensible != 0;
+		if (from.base)
+		{
+			if (from.base->script) options.base = from.base->script->Chain();
+			options.baseMissing = !options.base;
+		}
 		return options;
 	}
 }
@@ -98,6 +107,14 @@ extern "C"
 		const bool before = host->host->DebugScripts();
 		if (on >= 0) host->host->SetDebugScripts(on != 0);
 		return before ? 1 : 0;
+	}
+
+	int32_t c4s_host_has_project(const c4s_host* host, const char* project)
+	{
+		if (!host || !project) return 0;
+		for (const Scripting::InterfaceProject& known : host->host->Interface().projects)
+			if (known.name == project) return 1;
+		return 0;
 	}
 
 	c4s_script* c4s_compile(c4s_host* host, const c4s_options* options)

@@ -26,7 +26,7 @@ class SystemTests {
 	[test("processors")]
 	public static void TestProcessors() {
 		Platform::ProcessorInfo cpu = Platform::GetProcessorInfo();
-		assert_eq((int64)Threading::Thread::HardwareCount(), (int64)cpu.logicalProcessors, "the threads the system runs");
+		assert_true(Threading::Thread::HardwareCount() >= 1 && Threading::Thread::HardwareCount() <= cpu.logicalProcessors, "the threads the system runs, of which the process may use some");
 		assert_true(cpu.cores >= 1 && cpu.cores <= cpu.logicalProcessors, "at least one core, no more than the threads");
 		assert_true(cpu.packages >= 1 && cpu.packages <= cpu.cores, "at least one socket");
 		assert_true(IsCacheLine(cpu.cacheLineBytes), "a cache line of 16 to 256 bytes");

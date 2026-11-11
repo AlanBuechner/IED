@@ -113,20 +113,35 @@ namespace C4DAP::Target
 			if (!m_BreakInThreads.erase(event.dwThreadId)) m_Events.thread(event.dwThreadId, false);
 			PassOn(event, DBG_CONTINUE);
 			break;
-		case LOAD_DLL_DEBUG_EVENT:
-			m_Symbols.ModuleLoaded(event.u.LoadDll.hFile, reinterpret_cast<uint64_t>(event.u.LoadDll.lpBaseOfDll));
-			if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile);
-			PassOn(event, DBG_CONTINUE);
-			break;
-		case UNLOAD_DLL_DEBUG_EVENT:
-			m_Symbols.ModuleUnloaded(reinterpret_cast<uint64_t>(event.u.UnloadDll.lpBaseOfDll));
-			PassOn(event, DBG_CONTINUE);
-			break;
+		case LOAD_DLL_DEBUG_EVENT: ModuleLoaded(event); break;
+		case UNLOAD_DLL_DEBUG_EVENT: ModuleUnloaded(event); break;
 		case OUTPUT_DEBUG_STRING_EVENT: DebugOutput(event); break;
 		case EXCEPTION_DEBUG_EVENT: ExceptionRaised(event); break;
 		case EXIT_PROCESS_DEBUG_EVENT: ProcessExited(event); break;
 		default: PassOn(event, DBG_CONTINUE); break;
 		}
+	}
+
+	void Engine::ModuleLoaded(const DEBUG_EVENT& event)
+	{
+		const uint64_t base = reinterpret_cast<uint64_t>(event.u.LoadDll.lpBaseOfDll);
+		m_Symbols.ModuleLoaded(event.u.LoadDll.hFile, base);
+		if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile);
+		// What loads while the program runs - a script's DLL, its next build - takes the breakpoints set on its sources.
+		if (m_SymbolsLoaded)
+			for (const BoundBreakpoint& breakpoint : m_Breakpoints.BindInModule(base, m_Symbols, m_Process, m_Patches))
+				m_Events.breakpointChanged(breakpoint);
+		PassOn(event, DBG_CONTINUE);
+	}
+
+	void Engine::ModuleUnloaded(const DEBUG_EVENT& event)
+	{
+		const uint64_t base = reinterpret_cast<uint64_t>(event.u.UnloadDll.lpBaseOfDll);
+		const uint64_t size = m_Symbols.ModuleSize(base);
+		m_Symbols.ModuleUnloaded(base);
+		m_Patches.ForgetRange(base, size);
+		for (const BoundBreakpoint& breakpoint : m_Breakpoints.ForgetRange(base, size)) m_Events.breakpointChanged(breakpoint);
+		PassOn(event, DBG_CONTINUE);
 	}
 
 	void Engine::ProcessCreated(const DEBUG_EVENT& event)

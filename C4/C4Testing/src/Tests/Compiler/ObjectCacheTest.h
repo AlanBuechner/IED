@@ -20,6 +20,12 @@ namespace Testing
 		TEST_FUNC(Compiler.ObjectCache)
 		void KeepOnlyRemovesEverythingElse();
 		TEST_FUNC(Compiler.ObjectCache)
+		void Bug442KeepOnlySparesWhatAnotherBuildJustWrote();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug443KeepOnlySparesWhatAnotherBuildClaimed();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug442EachWriteHasAPartialNameOfItsOwn();
+		TEST_FUNC(Compiler.ObjectCache)
 		void ADeepFolderKeepsAndReusesItsObjects();
 		TEST_FUNC(Compiler.ObjectCache)
 		void InvalidCodeIsReportedWhenItsPartitionIsAssembled();

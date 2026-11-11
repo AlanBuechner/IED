@@ -37,6 +37,24 @@ namespace Scripting
 			return false;
 		}
 
+		// The location an address names when it is one's address (converted to a base or to const, or not).
+		const LValue* Addressed(const HIRNode* address)
+		{
+			if (address && address->kind == HIRNode::Kind::Convert) address = static_cast<const ConvertNode*>(address)->src;
+			return address && address->kind == HIRNode::Kind::AddressOf ? static_cast<const AddressOfNode*>(address)->loc : nullptr;
+		}
+
+		// Why the location `c ? a : b` chooses between two locations is read-only (BUG-453): a branch is.
+		Core::String ChoiceReason(const LoweringContext& ctx, const HIRNode* address)
+		{
+			if (!address || address->kind != HIRNode::Kind::Ternary) return "";
+			const auto* choice = static_cast<const TernaryNode*>(address);
+			for (const HIRNode* branch : { choice->thenExpr, choice->elseExpr })
+				if (const LValue* named = Addressed(branch))
+					if (Core::String why = ReadOnlyReason(ctx, named); !why.empty()) return "a branch of the '?:' is read-only: " + why;
+			return "";
+		}
+
 		// A create, copy or delete - written or compiler-written - works on an object that is not complete.
 		bool BuildsOrEndsReceiver(const FunctionRecord* fn)
 		{
@@ -58,6 +76,7 @@ namespace Scripting
 			case LValue::Kind::Deref:
 				if (const LValue* array = IndexedArray(p))
 					if (Core::String why = ReadOnlyReason(ctx, array); !why.empty()) return why;
+				if (Core::String why = ChoiceReason(ctx, p->addr); !why.empty()) return why;
 				return p->readOnly || PointsAtConst(p->addr) ? "it is reached through a pointer or reference to const" : "";
 			case LValue::Kind::This:
 				if (!ctx.fn || !ctx.fn->isConst) return "";

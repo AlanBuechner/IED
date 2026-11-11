@@ -61,7 +61,10 @@ namespace Testing
 		llvm::Module& module = *driver.module();
 		EmitThreadLocalAccessors(module);
 		HostBuild build;
-		build.symbols = HostSymbols(module, PreludeFunctionSymbols(compiler.GetProgramModel()));
+		std::vector<std::string> listed = PreludeFunctionSymbols(compiler.GetProgramModel());
+		const std::vector<std::string> runtime = LibraryRuntimeSymbols(compiler.GetProgramModel(), compiler.GetSourceManager());
+		listed.insert(listed.end(), runtime.begin(), runtime.end());
+		build.symbols = HostSymbols(module, listed);
 		build.inlineBodies = InlineBodies(module, build.symbols);
 		build.reflectedTypes = ReflectedTypeNames(compiler.GetProgramModel());
 		std::optional<HostInterface> built = BuildInterface(compiler, exports, std::move(build), &error);

@@ -1,0 +1,12 @@
+[int32, int32, int32] Three() { return [1, 2, 3]; }
+
+template<...Ts> int64 Take()
+{
+	[int32 first, Ts... rest] = Three();
+	return sizeof...(rest);
+}
+
+int32 main()
+{
+	return (int32)Take<int32>();
+}

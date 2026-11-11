@@ -1,0 +1,75 @@
+include "Kernel/Shapes.ch"
+
+namespace Game
+{
+	class Big : public Kernel::Square
+	{
+	public:
+		[operator("create")] public void Init() { side = 10; }
+		public override int32 Area() const { return 100; }
+	}
+
+	class Own
+	{
+	public:
+		public int32 value = 21;
+	}
+
+	int32 SquareArea()
+	{
+		Kernel::Square* square = new Kernel::Square(6);
+		return square->Area();
+	}
+
+	int32 OverrideArea()
+	{
+		Kernel::Square* big = new Big();
+		return big->AreaPlus(6);
+	}
+
+	int32 BoxOfInts()
+	{
+		Kernel::Box<int32> box;
+		box.Put(1);
+		box.Put(2);
+		box.Put(3);
+		return (int32)box.Count();
+	}
+
+	int32 BoxOfOwn()
+	{
+		Kernel::Box<Own*> box;
+		box.Put(new Own());
+		return box.items[0]->value;
+	}
+
+	int32 Twice() { return KERNEL_TWICE(21); }
+	int32 Version() { return Kernel::Version(); }
+
+	int32 Bump()
+	{
+		Kernel::g_Counter = 3;
+		Kernel::BumpCounter();
+		Kernel::g_Counter += 1;
+		return Kernel::g_Counter;
+	}
+
+	int32 ThreadValue() { return Kernel::t_Slot; }
+
+	int32 Caught()
+	{
+		try
+		{
+			Kernel::ThrowOops(55);
+		}
+		catch (Kernel::Oops& oops)
+		{
+			return oops.code;
+		}
+		return -1;
+	}
+
+	int32 FileStatic() { return Kernel::UsesHelper(12); }
+	int32 ThroughHost() { return World::HostValue(); }
+	int32 Inline() { Kernel::Square square(4); return square.Doubled(); }
+}

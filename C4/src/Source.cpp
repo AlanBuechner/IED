@@ -164,6 +164,7 @@ namespace
 			Scripting::TestHarnessOptions tests;
 			tests.jsonPath = m_Options.testJsonPath.c_str();
 			tests.fileOf = [this](uint32 sourceId) { return m_Compiler.GetSourceManager().GetInfo(sourceId).displayName; };
+			if (!m_Options.projectsFile.empty()) tests.ownUnit = [this](uint32 unit) { return InRootProject(unit); };
 			if (m_Options.debugInfo) driver.EnableDebugInfo();
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.scriptHost) driver.ShareVtables();
@@ -190,6 +191,15 @@ namespace
 			const Scripting::KeyedModule image{ driver.ReflectionImageKey(),
 				[&driver](llvm::LLVMContext& context) { return driver.BuildReflectionModule(context); } };
 			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions, image);
+		}
+
+		// A described build's harness runs the root project's tests; each dependency's own harness runs its (docs/language/15-projects.md rule 7).
+		bool InRootProject(uint32 unit)
+		{
+			const Scripting::SourceManager& sources = m_Compiler.GetSourceManager();
+			if (!sources.HasInfo(unit)) return false;
+			const Scripting::SourceInfo& info = sources.GetInfo(unit);
+			return !info.library && info.project == sources.Projects().Root();
 		}
 
 		// -ftime: how many bodies were lowered at once, and what stopped the others (ParallelLowering).

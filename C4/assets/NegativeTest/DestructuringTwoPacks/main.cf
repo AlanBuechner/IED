@@ -1,0 +1,7 @@
+[int32, int32, int32] Three() { return [1, 2, 3]; }
+
+int32 main()
+{
+	[int32... a, int32... b] = Three();
+	return 0;
+}

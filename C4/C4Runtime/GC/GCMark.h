@@ -1,7 +1,8 @@
 #pragma once
 // Marking with an explicit stack (no recursion). Scanning is conservative: every aligned word in a scanned
-// range that points into an object (anywhere inside it) marks that object. While several markers drain
-// together (GCParallelMark.h) a mark bit is claimed atomically, so each object is scanned once.
+// range that points into an object (anywhere inside it) marks that object, also a pointer boxed in a NaN (a tag over
+// its 47 bits: a Lua value, D-85). While several markers drain together (GCParallelMark.h) a mark bit is claimed
+// atomically, so each object is scanned once.
 
 #include "GC/GCHeap.h"
 #include "GC/GCPtrMap.h"
@@ -10,6 +11,7 @@ typedef struct GCScanItem
 {
 	const uint8_t* start;
 	size_t size;
+	GCScanKind kind;          // GC_SCAN_ALL, or the kind of the hash entries it covers, whole ones
 } GCScanItem;
 
 struct GCMarkShare;
@@ -38,6 +40,12 @@ void gc_mark_range(GCMarker* marker, const void* lo, const void* hi);
 
 // Queues [lo, hi) to be scanned by the drain, in chunks the markers share; the memory must stay as it is until then.
 void gc_mark_range_later(GCMarker* marker, const void* lo, const void* hi);
+
+// Queues the part [from, to) of the hash entries of an object starting at `base`, rounded out to whole entries.
+void gc_mark_entries_later(GCMarker* marker, const uint8_t* base, const uint8_t* from, const uint8_t* to, GCScanKind kind);
+
+// Scans one item of a marker's stack.
+void gc_mark_scan_item(GCMarker* marker, GCScanItem item);
 
 // gc_mark_range and gc_mark_range_later in the shape of gc_scan_range_fn (ctx is the marker).
 void gc_mark_range_callback(void* marker, const void* lo, const void* hi);

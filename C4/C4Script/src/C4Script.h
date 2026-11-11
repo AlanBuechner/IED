@@ -39,6 +39,12 @@ typedef struct c4s_options
 	const char* const* defines;      // NAME or NAME=VALUE, as after -D
 	uint32_t defineCount;
 	int32_t optimize;                // 1: -O2, 0: -O0
+	int32_t debug;                   // 1: a debug script, 0: not, -1: as the host says (c4s_host_debug_scripts)
+	const char* project;             // the project its files are in, what a script over it allows (null: "script")
+	const char* const* roots;        // the folders its includes resolve from (none: each file's own folder)
+	uint32_t rootCount;
+	int32_t extensible;              // 1: other scripts may extend it (docs/runtime/04 section 5.2)
+	const c4s_script* base;          // the extensible script it compiles against and links to; null: its host alone
 } c4s_options;
 
 // The program's script host: its interface at `interfacePath` (null: <the executable>.c4i) against its symbol table
@@ -52,6 +58,9 @@ C4SCRIPT_API int32_t c4s_host_use_cache(c4s_host* host, const char* folder);
 // read, instead of in memory. `on` 1 or 0 sets it, -1 only reads it; returns the setting it had. A host built with -g
 // starts with it on.
 C4SCRIPT_API int32_t c4s_host_debug_scripts(c4s_host* host, int32_t on);
+
+// Whether the host's interface has a project of that name: its headers are the host's, and a script need not bring them.
+C4SCRIPT_API int32_t c4s_host_has_project(const c4s_host* host, const char* project);
 
 // Compiles, links and loads a script. Never null: c4s_script_ok says whether it worked, the diagnostics why not.
 C4SCRIPT_API c4s_script* c4s_compile(c4s_host* host, const c4s_options* options);

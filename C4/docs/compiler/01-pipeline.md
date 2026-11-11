@@ -230,7 +230,10 @@ straight from the module in memory).
   by a key of its own, the hash of what it is made of, and built only when that object is missing (D-82). Partitions
   with the same code (empty ones, in a small program split into many) share one object, assembled once and linked
   once. An object is written beside its name and moved into place when complete; the folder keeps only the latest
-  build's objects. `-v` says how many were reused.
+  build's objects. `-v` says how many were reused. Two compilers can build one project at once (two IED chats, each
+  from its own sources): each claims the objects it names, before it looks for them, in the folder's `.claim.<pid>`, and
+  a build's pruning spares what a running compiler claimed and its unfinished writes, and removes an ended one's claims;
+  an object pruned in the moment before a claim was there to read is assembled again before the link (BUG-442, BUG-443).
   The cache's files are handled with LLVM's file calls, which take paths longer than `MAX_PATH` (a deep build folder);
   the interop pass's and CBind's files are too (`Compiler/FileIo`).
   Names do not depend on the order code is generated in (`Backend/CodeGen/StableNames`: literals, test-runner strings

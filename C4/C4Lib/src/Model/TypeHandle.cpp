@@ -26,6 +26,13 @@ namespace Scripting
 		return t;
 	}
 
+	const Type* TypeHandle::UnwrapAliases(const Type* t)
+	{
+		while (t && t->GetKind() == TypeKind::Alias)
+			t = static_cast<const AliasType*>(t)->GetAliasedType();
+		return t;
+	}
+
 	const Type* TypeHandle::UnwrapToValue(const Type* t)
 	{
 		while (t) {
@@ -148,10 +155,7 @@ namespace Scripting
 
 	TypeHandle TypeHandle::ResolveAlias() const
 	{
-		TypeHandle h = *this;
-		while (h.m_Type && h.m_Type->GetKind() == TypeKind::Alias)
-			h = static_cast<const AliasType*>(h.m_Type)->GetAliasedType();
-		return h;
+		return TypeHandle(UnwrapAliases(m_Type));
 	}
 
 	bool TypeHandle::SupportsIndexing() const

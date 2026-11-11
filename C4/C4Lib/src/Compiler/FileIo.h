@@ -33,7 +33,9 @@ namespace Scripting
 	std::error_code CreateFolders(const std::string& path);
 	/// `from` renamed to `to`, replacing a file there.
 	std::error_code RenameFile(const std::string& from, const std::string& to);
-	/// `from` copied over `to` unless `to` is at least as new.
+	/// `from` copied over `to` unless `to` is at least as new. A `to` that cannot be written because a running program has
+	/// it loaded (C4Script.dll beside a host that runs) is renamed to `<to>.<ms>.old` and the copy made again; such copies
+	/// are removed by a later call once nothing has them open.
 	std::error_code UpdateFile(const std::string& from, const std::string& to);
 
 	struct FileStamp

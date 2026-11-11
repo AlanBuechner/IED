@@ -38,6 +38,13 @@ namespace Scripting
 		/// The type template `name` a use in `declScope` names: the one declared innermost on its lookup chain.
 		const ProgramModel::TemplateDef* ChooseTypeDefinition(const ProgramModel& model, const Core::String& name, const Scope* declScope) const;
 
+		/// A declaration's parameters resolved in `binding`, a parameter pack (`Ts... args`) as one parameter per element
+		/// named `args#0`, `args#1`, ... (D-19); and for each, the declared parameter it comes from.
+		struct Parameters { Core::Vector<FunctionType::ParameterInfo> list; std::vector<uint32> source; };
+		static QueryResult<Parameters> ExpandParameters(const ProgramModel& model, const FunctionDefinitionNode& fn, Scope* binding, uint32 unitId);
+		/// `args` of `Ts... args` on `rec`: the parameters `source` says come from it.
+		static void RecordParameterPacks(FunctionRecord& rec, const FunctionDefinitionNode& fn, const std::vector<uint32>& source);
+
 	private:
 		static Core::String FunctionKey(const Core::String& name, const ProgramModel::TemplateDef& def, const TemplateArgs& args, const Type* receiver);
 		static Scope* BodyParent(const ProgramModel& model, const ProgramModel::TemplateDef& def);
@@ -49,12 +56,11 @@ namespace Scripting
 		/// An instance's signature, and for each of its parameters the declared parameter it comes from (a
 		/// parameter pack is several).
 		struct Signature { const FunctionType* type = nullptr; std::vector<uint32> source; };
-		QueryResult<Signature> FunctionSignature(const ProgramModel& model, const FunctionDefinitionNode& fn, Scope* binding, uint32 unitId) const;
+		static QueryResult<Signature> FunctionSignature(const ProgramModel& model, const FunctionDefinitionNode& fn, Scope* binding, uint32 unitId);
 		/// The class layer of a new object instance.
 		static Scope* InstanceScope(const ProgramModel& model, const ObjectType& instance, const ProgramModel::TemplateDef& def,
 			const Core::String& name);
 		/// A member template instance's bindings plus the names its out-of-line definition gives its owner's parameters.
 		static InstantiationBindings WithOwnerNames(InstantiationBindings own, const InstantiationBindings& ownerNames);
-		static void RecordParameterPacks(FunctionRecord& rec, const FunctionDefinitionNode& fn, const Signature& signature);
 	};
 } // namespace Scripting

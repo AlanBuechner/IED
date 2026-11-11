@@ -82,6 +82,11 @@ namespace Testing
 		TEST_FUNC(Lsp.Server)
 		void TestFormattingCapabilityAndRequest();
 
+		// Its edits are for the text the client last sent, not the last analyzed: IED applies them to that text, and edits
+		// for an older version corrupted a word of a large program's file.
+		TEST_FUNC(Lsp.Server)
+		void TestFormattingAnswersForTheLastChangeWhileAnalysisIsBehind();
+
 		TEST_FUNC(Lsp.Server)
 		void TestTidyFindingsPublishWithCompilerDiagnosticsWhenEnabled();
 

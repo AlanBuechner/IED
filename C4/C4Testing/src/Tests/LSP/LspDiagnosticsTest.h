@@ -18,5 +18,10 @@ namespace Testing
 		// The other way: a position the editor names after a macro use reaches the token written there.
 		TEST_FUNC(Lsp.Features.Diagnostics)
 		void TestAPositionAfterAMacroUseFindsItsToken();
+
+		// BUG-433: a file-scope variable's initializer was never lowered, so a name nothing declares in it was not reported,
+		// while C4.exe refuses the file.
+		TEST_FUNC(Lsp.Features.Diagnostics)
+		void TestAnUnknownNameInAGlobalsStartIsReported();
 	};
 } // namespace Testing

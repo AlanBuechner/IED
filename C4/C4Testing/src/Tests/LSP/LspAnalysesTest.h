@@ -43,5 +43,9 @@ namespace Testing
 		// BUG-447: a didChange's range was dropped, so a client sending incremental changes had its document spliced at 0:0.
 		TEST_FUNC(Lsp.Analyses)
 		void TestARangedChangeEditsWhereItSays();
+
+		// BUG-452: a file wrapped in `#ifdef TEST` (every test file of Claymore) had no symbols: TEST was never defined.
+		TEST_FUNC(Lsp.Analyses)
+		void TestTestCodeIsAnalyzed();
 	};
 } // namespace Testing

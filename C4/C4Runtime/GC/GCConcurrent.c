@@ -46,11 +46,14 @@ typedef struct Rescan
 	size_t pages;
 } Rescan;
 
-static void rescan_part(GCMarker* marker, const uint8_t* lo, const uint8_t* hi, const uint8_t* page, const uint8_t* end)
+static void rescan_part(GCMarker* marker, const GCSpan* span, const uint8_t* lo, const uint8_t* page, const uint8_t* end)
 {
+	const uint8_t* hi = lo + span->elemSize;
 	const uint8_t* from = lo > page ? lo : page;
 	const uint8_t* to = hi < end ? hi : end;
-	if (from < to) gc_mark_range_later(marker, from, to);
+	if (from >= to) return;
+	if (span->scanKind == GC_SCAN_ALL) gc_mark_range_later(marker, from, to);
+	else gc_mark_entries_later(marker, lo, from, to, (GCScanKind)span->scanKind);
 }
 
 // The marked objects on a written page are scanned again (the part on the page): the program may have stored a pointer
@@ -61,17 +64,17 @@ static void rescan_page(void* ctx, uint8_t* page, size_t size)
 	rescan->pages++;
 	const uint8_t* end = page + size;
 	GCSpan* span = gc_pages_span_of(&rescan->heap->pages, (uintptr_t)page);
-	if (!span || span->state == GC_SPAN_FREE || span->noscan) return;
+	if (!span || span->state == GC_SPAN_FREE || span->scanKind == GC_SCAN_NONE) return;
 	if (span->state == GC_SPAN_LARGE)
 	{
-		if (gc_bit(span->markBits, 0)) rescan_part(rescan->marker, span->base, span->base + span->elemSize, page, end);
+		if (gc_bit(span->markBits, 0)) rescan_part(rescan->marker, span, span->base, page, end);
 		return;
 	}
 	const uint32_t first = gc_span_slot(span, (size_t)(page - span->base));
 	const uint32_t last = gc_span_slot(span, (size_t)(end - 1 - span->base));
 	for (uint32_t slot = first; slot <= last && slot < span->nelems; ++slot)
 		if (gc_bit(span->allocBits, slot) && gc_bit(span->markBits, slot))
-			rescan_part(rescan->marker, gc_span_slot_base(span, slot), gc_span_slot_base(span, slot) + span->elemSize, page, end);
+			rescan_part(rescan->marker, span, gc_span_slot_base(span, slot), page, end);
 }
 
 static GCMapping* mappings(GCState* gc, size_t* count)
@@ -216,6 +219,7 @@ static void final_stop(GCState* gc, GCThread* self, CycleTrace* trace)
 	if (c->verify) verify_marks(gc, self);
 	gc_pools_decide(&c->marker, gc->pools);
 	gc_finalize_select(&c->marker, &gc->finalizers, &gc->ready);
+	gc_mark_end_run(&c->marker, &gc->markEnds);
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs);
 	gc_reclaim(gc);
 	const uint64_t end = gc_os_now_ns();

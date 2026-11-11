@@ -171,6 +171,11 @@
     "mustContain": ["FAIL: main.cf:4: one is not two (expected 1, got 2)", "FAILED failing.case"],
     "reason": "A failure names its assertion's file and line (B37), and the exit code is the failed-assertion count (BUG-038)."
   },
+  "TestingFramework/FailureBeforeACrash": {
+    "exit": -1073741819,
+    "mustContain": ["FAIL: main.cf:7: what failed first", "an access violation"],
+    "reason": "An assertion goes on after failing, so a crash can follow it: the failure is flushed at once, or a redirected log loses it and blames the crash."
+  },
   "TestingFramework/AssertionLine": {
     "exit": 5,
     "mustContain": ["FAIL: main.cf:10: first", "FAIL: main.cf:12: second (expected 2, got 1)", "FAIL: main.cf:4: inner",
@@ -196,6 +201,13 @@
     "mustContain": ["[TEST] keep.one", "[TEST] keep.two", "Cases:    2 passed, 0 failed (of 2)"],
     "mustNotContain": ["drop.one"],
     "reason": "--filter runs only the matching cases; the fixtures still run."
+  },
+  "TestingFramework/GroupNameFilter": {
+    "exit": 0,
+    "runArgs": ["--filter", "keep"],
+    "mustContain": ["[TEST] keep.one", "[TEST] keep.two", "Cases:    2 passed, 0 failed (of 2)"],
+    "mustNotContain": ["keeper.one", "drop.one"],
+    "reason": "--filter without a wildcard names a case or a group: the group's cases run, a longer name beside it does not."
   },
   "Simd/WideVectorsAvx2": {
     "exit": 0,

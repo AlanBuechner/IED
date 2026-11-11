@@ -66,11 +66,42 @@ namespace Scripting
 
 	std::error_code RenameFile(const std::string& from, const std::string& to) { return llvm::sys::fs::rename(from, to); }
 
+	namespace
+	{
+		const char* kAsideSuffix = ".old";
+
+		// `<to>.<n>.old`: where a file in use goes so a new one can take its name.
+		std::string AsidePath(const std::string& to)
+		{
+			const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+			return to + "." + std::to_string(now.count()) + kAsideSuffix;
+		}
+
+		// The copies of `to` moved aside earlier that nothing has open now.
+		void RemoveSetAside(const std::string& to)
+		{
+			const std::filesystem::path file = std::filesystem::path(std::u8string(to.begin(), to.end()));
+			const std::string prefix = PathText(file.filename()) + ".";
+			std::error_code ec;
+			for (const auto& entry : std::filesystem::directory_iterator(ExtendedPath(file.parent_path()), ec))
+			{
+				const std::string name = PathText(entry.path().filename());
+				const bool aside = name.size() > prefix.size() + 4 && name.rfind(prefix, 0) == 0 && name.compare(name.size() - 4, 4, kAsideSuffix) == 0;
+				if (aside) RemoveFile(PathText(PlainPath(entry.path())));
+			}
+		}
+	}
+
 	std::error_code UpdateFile(const std::string& from, const std::string& to)
 	{
 		const std::optional<FileStamp> source = StampOf(from), existing = StampOf(to);
 		if (!source) return std::make_error_code(std::errc::no_such_file_or_directory);
+		RemoveSetAside(to);
 		if (existing && existing->modified >= source->modified) return {};
+		const std::error_code copied = llvm::sys::fs::copy_file(from, to);
+		if (!copied || !existing) return copied;
+		// A running program has it loaded (a DLL beside it): Windows will not write it, but renames it.
+		if (RenameFile(to, AsidePath(to))) return copied;
 		return llvm::sys::fs::copy_file(from, to);
 	}
 

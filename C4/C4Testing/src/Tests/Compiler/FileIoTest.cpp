@@ -4,6 +4,13 @@
 #include <optional>
 #include <process.h>
 #include <string>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
 
 namespace Testing
 {
@@ -90,6 +97,35 @@ namespace Testing
 		for (fs::directory_iterator it(ExtendedPath(folder), ec), end; !ec && it != end; it.increment(ec))
 			listed += PlainPath(it->path()) == folder / "kinds.cf" ? 1 : 0;
 		TEST_ASSERT_EQ(listed, std::size_t(1));
+		RemoveRoot();
+	}
+
+	void FileIoTest::AFileInUseIsSetAsideAndReplaced()
+	{
+		RemoveRoot();
+		fs::create_directories(Root());
+		const std::string from = PathText(Root() / "C4Script.new");
+		const std::string to = PathText(Root() / "C4Script.dll");
+		TEST_ASSERT(WriteFileBytes(to, "old library"));
+		TEST_ASSERT(WriteFileBytes(from, "new library"));
+		const auto later = fs::last_write_time(Root() / "C4Script.dll") + std::chrono::seconds(5);
+		fs::last_write_time(Root() / "C4Script.new", later);
+		// What a loaded DLL is to others: no writes, but it may be renamed.
+		HANDLE held = CreateFileW((Root() / "C4Script.dll").wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		TEST_ASSERT(held != INVALID_HANDLE_VALUE);
+		TEST_ASSERT(!UpdateFile(from, to));
+		TEST_ASSERT_EQ(ReadFileBytes(to), std::string("new library"));
+		std::size_t aside = 0;
+		for (const auto& entry : fs::directory_iterator(Root()))
+			aside += entry.path().extension() == ".old" ? 1 : 0;
+		TEST_ASSERT_EQ(aside, std::size_t(1)); // the one in use, kept under another name
+		CloseHandle(held);
+		TEST_ASSERT(!UpdateFile(from, to)); // up to date: nothing copied, and what was set aside is free now
+		aside = 0;
+		for (const auto& entry : fs::directory_iterator(Root()))
+			aside += entry.path().extension() == ".old" ? 1 : 0;
+		TEST_ASSERT_EQ(aside, std::size_t(0));
 		RemoveRoot();
 	}
 

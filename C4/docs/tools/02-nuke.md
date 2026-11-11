@@ -105,9 +105,12 @@ A C4 project is test-bearing when one of its source folders has a `tests/` folde
   program, where the `[test]` functions are inert code; an executable still needs its `main`.
 - `nuke test` compiles each test-bearing project on its own with `-test -test-json <int>/tests/results.json`
   into `<bin>/<Project>-tests.exe` (intermediates in `<int>/tests/`, same rebuild rules), runs it from the project
-  folder (with `--filter GLOB` when given), runs every harness even after one fails, prints a summary, and exits
-  1 if any failed. Without project names it tests every test-bearing project.
-- A module with tests is compiled with the modules it depends on and needs no `main`.
+  folder (with `--filter GLOB` when given: a glob, or a case's or group's name), runs every harness even after one
+  fails, prints a summary (and says so when the filter matched no case), and exits 1 if any failed. Without
+  project names it tests every test-bearing project.
+- A module with tests is compiled with the modules it depends on and needs no `main`. A harness runs its own
+  project's cases only: the modules' are compiled into it and run in their own harnesses
+  ([15-projects.md](../language/15-projects.md) rule 7), so a `nuke test` runs each case once.
 
 See [runtime/03-testing.md](../runtime/03-testing.md).
 

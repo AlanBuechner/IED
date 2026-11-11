@@ -22,5 +22,8 @@ namespace Testing
 		void DeepFilesAndFoldersAreTold();
 		TEST_FUNC(Compiler.FileIo)
 		void ExtendedPathsAreSpelledForStdFilesystem();
+		// UpdateFile over a file a running program has loaded (C4Script.dll beside a host): set aside, replaced, then removed.
+		TEST_FUNC(Compiler.FileIo)
+		void AFileInUseIsSetAsideAndReplaced();
 	};
 } // namespace Testing

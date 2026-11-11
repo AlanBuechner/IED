@@ -85,6 +85,7 @@ namespace Scripting
 					return Bind(variable, Render(s, sLayers, true));
 				}
 				if (sLayers != 0 || (!topLevel && g.IsLeadingConst() != s.IsLeadingConst())) return false;
+				if (g.IsReturnList() || s.IsReturnList()) return g.IsReturnList() && s.IsReturnList() && List(g, s);
 				const auto* gf = dynamic_cast<const FunPtrTypeNode*>(g.FuncPtrType().Get());
 				const auto* sf = dynamic_cast<const FunPtrTypeNode*>(s.FuncPtrType().Get());
 				if (gf || sf) return gf && sf && Signature(*gf, *sf);
@@ -115,6 +116,24 @@ namespace Scripting
 				for (uint32 i = 0; i < g.ParameterCount(); ++i)
 					if (!Pattern(g.GetParameters()[i]->GetType().Get(), s.GetParameters()[i]->GetType().Get())) return false;
 				return true;
+			}
+
+			// Return lists (D-34) as template arguments: `g`'s values one by one against `s`'s, a trailing expansion of `g` taking
+			// each of the rest, as a template argument list's trailing expansion does.
+			bool List(const QualTypeNode& g, const QualTypeNode& s)
+			{
+				const auto& gv = g.GetReturnList();
+				const auto& sv = s.GetReturnList();
+				const bool gExpands = gv.Back()->ExpandsPack();
+				const bool sExpands = sv.Back()->ExpandsPack();
+				const uint32 fixed = gv.Count() - (gExpands ? 1u : 0u);
+				const uint32 sFixed = sv.Count() - (sExpands ? 1u : 0u);
+				if (sFixed < fixed || (!gExpands && (sFixed != fixed || sExpands))) return false;
+				for (uint32 i = 0; i < fixed; ++i)
+					if (!Pattern(gv[i].Get(), sv[i].Get())) return false;
+				for (uint32 i = fixed; i < sFixed; ++i)
+					if (!Element(gv.Back().Get(), sv[i].Get(), "#" + std::to_string(i - fixed))) return false;
+				return !sExpands || Element(gv.Back().Get(), sv.Back().Get(), "#...");
 			}
 
 			bool Bind(const Core::String& variable, const Core::String& rendering)
@@ -152,7 +171,14 @@ namespace Scripting
 			Core::String Render(const QualTypeNode& s, uint32 layers, bool withLeadingConst, bool topLevel = false) const
 			{
 				Core::String out = withLeadingConst && s.IsLeadingConst() ? "const " : "";
-				if (s.FuncPtrType()) out += s.FuncPtrType()->ToString();
+				if (s.IsReturnList())
+				{
+					out += "[";
+					for (uint32 i = 0; i < s.GetReturnList().Count(); ++i)
+						out += (i ? "," : "") + Render(s.GetReturnList()[i].Get()) + (s.GetReturnList()[i]->ExpandsPack() ? "..." : "");
+					out += "]";
+				}
+				else if (s.FuncPtrType()) out += s.FuncPtrType()->ToString();
 				else if (s.BaseName())
 					for (uint32 i = 0; i < s.BaseName()->SegmentCount(); ++i)
 					{

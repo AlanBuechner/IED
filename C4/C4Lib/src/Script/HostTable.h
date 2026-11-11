@@ -29,6 +29,16 @@ namespace Scripting
 	/// module's own tables (reflection image, GC roots). In module order, deterministic.
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed);
 
+	/// What makes a script's module one others extend (docs/runtime/04 section 5.2), before it is optimized: thread_local
+	/// accessors, and every local a script over it may name - its file-static functions and globals, its vtables, static
+	/// locals and their guards - made external, as a host's table reaches them.
+	void ExportLayerDefinitions(llvm::Module& module);
+
+	/// What a script's module, once optimized, defines that a script over it may name: the functions and globals
+	/// HostSymbols would list of it, but what it only declares and the script's own tables (its loader's, its reflection's
+	/// and its GC's, which each script has for itself).
+	std::vector<std::string> LayerSymbols(llvm::Module& module);
+
 	/// A name the table of a program emitted in partitions lists (D-81): the name scripts know (ProgramName), and what
 	/// the table's own module declares to take its address: the partition's symbol, a function or data, hidden for a
 	/// local of the program.

@@ -71,7 +71,7 @@ namespace Scripting
 		void ParseBody(ParserState& state);
 
 		/// A return list `[float, bool]` (D-34): the types of the values a function returns together. It is written
-		/// only as a return type, and a node that is one has no base name, signature type or layers.
+		/// as a return type or a template argument, and a node that is one has no base name, signature type or layers.
 		bool IsReturnList() const { return !m_ReturnList.Empty(); }
 		const Core::Vector<Ref<QualTypeNode>>& GetReturnList() const { return m_ReturnList; }
 		/// An element of a return list written `Ts...`: one element per element of the packs it names (D-19).

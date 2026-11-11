@@ -40,6 +40,104 @@ namespace Testing
 		}
 	}
 
+	void DapSessionTest::AMethodsFieldsReadByTheirBareNames()
+	{
+		const char* const source =
+			"class Counter\n"
+			"{\n"
+			"public:\n"
+			"\tpublic int32 m_Count = 7;\n"
+			"\tpublic int32 Read(int32 m_Shadow) {\n"
+			"\t\tint32 read = m_Count + m_Shadow; // read-body\n"
+			"\t\treturn read;\n"
+			"\t}\n"
+			"\tpublic int32 m_Shadow = 100;\n"
+			"}\n"
+			"int32 main() {\n"
+			"\tCounter counter;\n"
+			"\treturn counter.Read(2) - 9;\n"
+			"}\n";
+		const DebugProgram program = BuildProgram("barefield", source);
+		TEST_ASSERT(program.built);
+		DapClient client;
+		const Json::Value stop = client.Start(program, { Dap::LineOf(source, "read-body") });
+		TEST_ASSERT(!stop.IsNull());
+		const int64 frame = client.TopFrame(ThreadOf(stop)).Member("id").GetInt();
+		TEST_ASSERT_EQ(client.Evaluate("m_Count", frame), std::string("7"));
+		TEST_ASSERT_EQ(client.Evaluate("this->m_Count", frame), std::string("7"));
+		TEST_ASSERT_EQ(client.Evaluate("m_Shadow", frame), std::string("2")); // the parameter hides the field, as in the code
+		TEST_ASSERT_EQ(client.Evaluate("m_Nothing", frame), std::string("error: no variable named m_Nothing"));
+	}
+
+	void DapSessionTest::AScriptsBreakpointBindsWhenItsDllLoadsAndInItsNextBuild()
+	{
+		const char* const script =
+			"int32 Run()\n"
+			"{\n"
+			"\tint32 result = 20; // script-body\n"
+			"\treturn result;\n"
+			"}\n";
+		// The host saves the script's next version over the first, a comment where the statement was, and reloads it.
+		const char* const host = R"(
+include "bedrock.ch"
+include "scripting.ch"
+
+const char* c_ScriptPath = "@SCRIPT@";
+const char* c_NextBuild = "int32 Run()\n{\n\t// where the statement was\n\tint32 result = 22;\n\treturn result;\n}\n";
+
+int32 Called(Scripting::Script* script) {
+	funcptr<int32()> run = (funcptr<int32()>)script->Address("Run");
+	return run();
+}
+
+int32 main() {
+	Scripting::Host* host = Scripting::Host::Open();
+	if (!host->IsOpen() || !host->DebugScripts()) return 10;
+	Scripting::ScriptOptions options;
+	options.name = Core::String("debugged");
+	options.optimize = false;
+	options.AddFile(c_ScriptPath);
+	Scripting::Script* first = host->Compile(options);
+	if (!first->Ok()) return 11;
+	int32 total = Called(first);
+	Core::StringView next = Core::StringView(c_NextBuild);
+	FS::WriteFileAtomically(c_ScriptPath, (const void*)next.Data(), next.ByteLength());
+	Scripting::Script* second = host->Reload(first);
+	if (second == null || !second->Ok()) return 12;
+	total += Called(second);
+	return total - 42;
+}
+)";
+		const DebugProgram program = BuildScriptHost("scriptbreak", host, script);
+		TEST_ASSERT(program.built);
+		const uint32_t line = Dap::LineOf(script, "script-body");
+		DapClient client;
+		const Json::Value first = client.Start(program, { line });
+		TEST_ASSERT(!first.IsNull());
+		TEST_ASSERT_EQ(ReasonOf(first), std::string("breakpoint"));
+		const Json::Value frame = client.TopFrame(ThreadOf(first));
+		TEST_ASSERT_EQ(NameOf(frame), std::string("Run"));
+		TEST_ASSERT_EQ(LineOf(frame), int64(line));
+		TEST_ASSERT(frame.Member("source").Member("path").GetString().find("script.cf") != std::string::npos);
+		const std::vector<Json::Value> bound = client.History("breakpoint");
+		TEST_ASSERT(!bound.empty());
+		TEST_ASSERT(bound.back().Member("body").Member("breakpoint").Member("verified").GetBool());
+
+		client.Request("continue", Object({ { "threadId", Num(ThreadOf(first)) } }));
+		const Json::Value second = client.WaitEvent("stopped");
+		TEST_ASSERT(!second.IsNull());
+		TEST_ASSERT_EQ(ReasonOf(second), std::string("breakpoint"));
+		const Json::Value moved = client.TopFrame(ThreadOf(second));
+		TEST_ASSERT_EQ(NameOf(moved), std::string("Run"));
+		TEST_ASSERT_EQ(LineOf(moved), int64(line + 1)); // the line has no code in the new build: its next line's
+		TEST_ASSERT_EQ(client.Evaluate("result", moved.Member("id").GetInt()).empty(), false);
+
+		client.Request("continue", Object({ { "threadId", Num(ThreadOf(second)) } }));
+		const Json::Value exited = client.WaitEvent("exited");
+		TEST_ASSERT(!exited.IsNull());
+		TEST_ASSERT_EQ(exited.Member("body").Member("exitCode").GetInt(), int64(0));
+	}
+
 	void DapSessionTest::ABreakpointStopsWithTheStackAndLocals()
 	{
 		const DebugProgram program = BuildProgram("stack", kBasic);

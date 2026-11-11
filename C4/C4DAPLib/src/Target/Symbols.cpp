@@ -125,7 +125,7 @@ namespace C4DAP::Target
 		std::erase(m_Modules, base);
 	}
 
-	std::vector<uint64_t> Symbols::ExactLine(const std::wstring& path, uint32_t line) const
+	std::vector<uint64_t> Symbols::ExactLine(const std::vector<uint64_t>& modules, const std::wstring& path, uint32_t line) const
 	{
 		struct Found { uint32_t line; std::vector<uint64_t> addresses; } found{ line, {} };
 		const auto collect = [](PSRCCODEINFOW info, PVOID context) -> BOOL {
@@ -133,7 +133,7 @@ namespace C4DAP::Target
 			if (info->LineNumber == found->line) found->addresses.push_back(info->Address);
 			return TRUE;
 		};
-		for (uint64_t module : m_Modules)
+		for (uint64_t module : modules)
 			for (DWORD search : kLineSearches) SymEnumSourceLinesW(m_Process, module, nullptr, path.c_str(), line, search, collect, &found);
 		std::sort(found.addresses.begin(), found.addresses.end());
 		found.addresses.erase(std::unique(found.addresses.begin(), found.addresses.end()), found.addresses.end());
@@ -178,12 +178,29 @@ namespace C4DAP::Target
 
 	std::vector<uint64_t> Symbols::AddressesOfLine(const std::string& path, uint32_t line, uint32_t& bound) const
 	{
+		return FirstLineWithCode(m_Modules, path, line, bound);
+	}
+
+	std::vector<uint64_t> Symbols::AddressesOfLineIn(uint64_t module, const std::string& path, uint32_t line, uint32_t& bound) const
+	{
+		return FirstLineWithCode({ module }, path, line, bound);
+	}
+
+	uint64_t Symbols::ModuleSize(uint64_t base) const
+	{
+		IMAGEHLP_MODULEW64 info{};
+		info.SizeOfStruct = sizeof(info);
+		return m_Process && SymGetModuleInfoW64(m_Process, base, &info) ? info.ImageSize : 0;
+	}
+
+	std::vector<uint64_t> Symbols::FirstLineWithCode(const std::vector<uint64_t>& modules, const std::string& path, uint32_t line, uint32_t& bound) const
+	{
 		bound = 0;
 		if (!m_Process || line == 0) return {};
 		const std::wstring file = PlatformPath(path);
 		for (uint32_t candidate = line; candidate < line + kNextLineSearch; ++candidate)
 		{
-			std::vector<uint64_t> addresses = ExactLine(file, candidate);
+			std::vector<uint64_t> addresses = ExactLine(modules, file, candidate);
 			if (!addresses.empty())
 			{
 				bound = candidate;

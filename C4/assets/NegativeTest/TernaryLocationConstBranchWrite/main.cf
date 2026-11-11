@@ -1,0 +1,8 @@
+int32 main()
+{
+	const int32 a = 1;
+	int32 b = 2;
+	bool first = b > 1;
+	(first ? b : a) = 3;
+	return b;
+}

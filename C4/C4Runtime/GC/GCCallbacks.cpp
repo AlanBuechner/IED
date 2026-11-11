@@ -37,6 +37,18 @@ extern "C" void c4_gc_run_collection_result(void (*fn)(void*), void* userData)
 	}
 }
 
+extern "C" void c4_gc_run_mark_end(void (*fn)(void*, void*), void* userData, void* marker)
+{
+	try
+	{
+		fn(userData, marker);
+	}
+	catch (...)
+	{
+		Escaped("a mark-end hook (GC::RegisterMarkEnd)");
+	}
+}
+
 extern "C" void c4_gc_run_root_enumerator(void (*fn)(void*, void (*)(void*, void*), void*), void* userData,
 	void (*visit)(void*, void*), void* visitContext)
 {

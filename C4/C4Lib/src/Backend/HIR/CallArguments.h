@@ -15,6 +15,8 @@ namespace Scripting
 	/// One argument bound to its parameter: a reference parameter receives the argument's address (moved to
 	/// the base sub-object for a derived argument; a fresh object that needs destruction becomes a statement
 	/// temporary, a plain rvalue is materialized by codegen); anything else is the InitialValue of the
-	/// parameter. `loaded` is the argument's rvalue (after any null-literal retyping or init-list build).
-	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param);
+	/// parameter. `loaded` is the argument's rvalue (after any null-literal retyping or init-list build); `site` is
+	/// where the argument is written, for what is said about it.
+	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param,
+		const AstNode* site = nullptr);
 } // namespace Scripting

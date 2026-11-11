@@ -19,7 +19,7 @@ namespace Scripting
 
 	namespace
 	{
-		constexpr char kEntryMagic[] = "C4SCRIPT1";
+		constexpr char kEntryMagic[] = "C4SCRIPT2";
 		constexpr const char* kEntryExtension = ".c4so";
 
 		// Each input goes in with its length, so no two lists of inputs hash alike.
@@ -78,6 +78,11 @@ namespace Scripting
 			digest.Add("|");
 			for (const auto& [name, value] : options.defines) { digest.Add(name); digest.Add(value); }
 			digest.Add("|");
+			digest.Add(options.project);
+			for (const std::string& root : options.roots) digest.Add(fs::absolute(root).lexically_normal().generic_string());
+			digest.Add(options.extensible ? "extensible" : "closed");
+			digest.Add(options.base ? options.base->digest : std::string());
+			digest.Add("|");
 			for (const ScriptFile& file : options.files)
 			{
 				std::string text;
@@ -116,6 +121,7 @@ namespace Scripting
 			PutPart(out, script.diagnostics);
 			PutPart(out, std::to_string(script.threadLocals.size()));
 			for (const std::string& name : script.threadLocals) PutPart(out, name);
+			PutPart(out, script.layer);
 			PutPart(out, script.object);
 			return out;
 		}
@@ -129,7 +135,7 @@ namespace Scripting
 			const uint64 locals = std::strtoull(count.c_str(), nullptr, 10);
 			for (uint64 i = 0; i < locals; ++i)
 				if (!TakePart(in, script.threadLocals.emplace_back())) return std::nullopt;
-			if (!TakePart(in, script.object) || !in.empty() || script.object.empty()) return std::nullopt;
+			if (!TakePart(in, script.layer) || !TakePart(in, script.object) || !in.empty() || script.object.empty()) return std::nullopt;
 			return script;
 		}
 
@@ -143,6 +149,14 @@ namespace Scripting
 				if (name != kept && name.rfind(prefix, 0) == 0 && path.extension() == kEntryExtension) RemoveFile(entry->path());
 			}
 		}
+	}
+
+	std::string LayerDigest(const std::string& below, const std::string& serializedLayer)
+	{
+		Digest digest;
+		digest.Add(below);
+		digest.Add(serializedLayer);
+		return digest.Hex();
 	}
 
 	std::string ScriptCache::EntryFor(const HostInterface& host, const ScriptCompileOptions& options) const

@@ -28,7 +28,7 @@ static void init_chunk(GCSpan* chunk, GCPool* pool, uint32_t slots)
 	chunk->elemSize = pool->desc.slot_size;
 	chunk->nelems = slots;
 	chunk->divMagic = (uint32_t)(0xFFFFFFFFu / pool->desc.slot_size) + 1u;
-	chunk->noscan = pool->desc.noscan ? 1u : 0u;
+	chunk->scanKind = (uint8_t)(pool->desc.noscan ? GC_SCAN_NONE : GC_SCAN_ALL);
 }
 
 // The pool's run split into spans of GC_POOL_CHUNK_SLOTS slots (whole pages, as slots are multiples of 16 bytes);

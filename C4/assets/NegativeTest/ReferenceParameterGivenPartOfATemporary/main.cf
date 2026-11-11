@@ -1,0 +1,16 @@
+struct Bag { public int32 m_Count; }
+struct Holder { public Bag m_Bag; }
+
+void Add(Bag& bag) { bag.m_Count += 1; }
+
+Holder MadeHolder()
+{
+	Holder holder;
+	return holder;
+}
+
+int32 main()
+{
+	Add(MadeHolder().m_Bag);
+	return 0;
+}

@@ -193,6 +193,13 @@ class HashMapTests {
 		pointers.Insert(&x, 1);
 		pointers.Insert(&y, 2);
 		assert_eq(2, pointers.Get(&y), "pointer keys");
+		Core::HashMap<const int32*, int32> toConst;
+		toConst.Insert(&x, 3);
+		assert_eq(3, toConst.Get(&x), "pointers to const are keys too");
+		Core::HashMap<const void*, int32> toAnything;
+		toAnything.Insert(&y, 4);
+		assert_eq(4, toAnything.Get(&y), "and to const void");
+		assert_true(!toAnything.Contains(&x), "by address");
 	}
 
 	[test("gc")]
@@ -235,7 +242,7 @@ class HashMapTests {
 		Core::HashMap<Core::String, int32> ages;
 		ages.Insert(Core::String("ada"), 36);
 		assert_eq((int64)36, HmAgeOf(ages, Core::StringView("ada")), "a const map found by a view");
-		assert_eq((int64) - 1, HmAgeOf(ages, Core::StringView("alan")), "a const map without the key");
+		assert_eq((int64)-1, HmAgeOf(ages, Core::StringView("alan")), "a const map without the key");
 	}
 
 	// A table smaller than a 16-byte control group probes its copies past the end.

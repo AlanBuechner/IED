@@ -117,4 +117,29 @@ namespace Testing
 		TEST_ASSERT(block && block->GetStatements().Count() == 1);
 		TEST_ASSERT(As<DestructuringNode>(block->GetStatements()[0]) == nullptr);
 	}
+
+	void ReturnListTest::DestructuringIntoAPack()
+	{
+		Source4 s("{ [int32 first, Ts... rest, _] = F(); }");
+		auto block = CodeBlockNode::TryParse(*s.state);
+		TEST_ASSERT(block && block->GetStatements().Count() == 1);
+		const auto* d = As<DestructuringNode>(block->GetStatements()[0]);
+		TEST_ASSERT(d && d->GetElements().Count() == 3);
+		using Kind = DestructuringNode::Element::Kind;
+		TEST_ASSERT(d->GetElements()[0].kind == Kind::Declare && !d->GetElements()[0].isPack);
+		TEST_ASSERT(d->GetElements()[1].kind == Kind::Declare && d->GetElements()[1].isPack && d->GetElements()[1].name.GetText() == "rest");
+		TEST_ASSERT(d->GetElements()[2].kind == Kind::Discard);
+		TEST_ASSERT(d->ToString() == "[int32 first, Ts... rest, _] = F();");
+		TEST_ASSERT(s.errors.GetErrors().Empty());
+	}
+
+	void ReturnListTest::ListAsTemplateArgument()
+	{
+		Source4 s("Returns<[int32, Ts...], bool>");
+		auto type = QualTypeNode::TryParse(*s.state);
+		TEST_ASSERT(type && type->TemplateArgCount() == 2);
+		const auto* list = As<QualTypeNode>(type->GetTemplateArg(0));
+		TEST_ASSERT(list && list->IsReturnList() && list->GetReturnList().Count() == 2 && list->GetReturnList()[1]->ExpandsPack());
+		TEST_ASSERT(s.errors.GetErrors().Empty());
+	}
 } // namespace Testing

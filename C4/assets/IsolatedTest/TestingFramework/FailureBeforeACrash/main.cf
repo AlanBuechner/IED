@@ -1,0 +1,9 @@
+// A failed assertion is in the log at once: when the test then crashes, a redirected log still says what failed first.
+// The pointer comes from a volatile variable: a store through a null the optimizer can see is a trap at -O2, not a fault.
+volatile int32* g_nowhere;
+
+[test("failing.then_crashes")]
+void TestFailsThenCrashes() {
+	assert_true(false, "what failed first");
+	*g_nowhere = 1;
+}

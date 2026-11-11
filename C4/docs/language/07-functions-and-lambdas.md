@@ -227,7 +227,8 @@ int32 s = SumInts(3, 1, 2, 3);
 - An argument passes through `...` as its bytes: a scalar, a pointer or plain data (a struct without a lifecycle)
   can; an object that copies or destroys itself (`Core::String`, anything with `[operator("copy")]` or
   `[operator("delete")]`) is an error, as in C++, and `va_arg` cannot read one. A string goes to `printf` as
-  `name.CStr()`; `Core::Format` takes strings and numbers as they are.
+  `name.CStr()`; `Core::Format` takes strings and numbers as they are. An array passes as its first element's
+  address, as in C: `printf("%s", buffer)` with a `char[N]`.
 - The arguments are read through a `va_list` (D-35): `va_start(ap)` opens them (only in a variadic
   function), `va_arg(ap, T)` reads the next one as a `T`, `va_copy(dst, src)` copies a list so its arguments
   can be read again, and `va_end(ap)` closes it ([14-builtins](14-builtins.md#8-variadic-argument-access)).
@@ -272,9 +273,12 @@ float a;
 ```
 
 - **Return lists.** `[T1, T2, ...]` with at least two types is written where a return type is: a function's
-  or method's, a `funcptr<[T1, T2](A)>` or `func<...>` signature's, a lambda's `-> [T1, T2]`. A pack may
-  expand in it (`template<...Ts> [Ts...] F(Ts... args)`). An element is a value (no reference, no
-  `void`).
+  or method's, a `funcptr<[T1, T2](A)>` or `func<...>` signature's, a lambda's `-> [T1, T2]`; and as a template
+  argument (`Returns<[int32, bool]>`). A pack may expand in it (`template<...Ts> [Ts...] F(Ts... args)`). An
+  element is a value (no reference, no `void`).
+- **In templates.** A specialization's pattern may be a list (`template<...Ts> struct Returns<[Ts...]>`,
+  `template<A, B> struct Returns<[A, B]>`; the more specialized wins), and a pack deduces from one in a
+  signature (`template<...Ts> void F(func<[Ts...]()> f)`).
 - **The type.** One anonymous struct per list of element types, laid out like a C struct, and returned by the
   C ABI rules for a struct of that layout (in registers when small, through a hidden pointer otherwise).
   `[int32, bool]` written twice is one type. Return lists do not take part in overloading (a function's
@@ -288,7 +292,11 @@ float a;
   - `Type name` - a new variable of the enclosing block, starting from the value (it converts as a
     declaration's initializer does; `const` is allowed; a reference is not);
   - an assignable location (`a`, `p.x`, `items[i]`) - assigned the value;
-  - `_` - the value is discarded (destroyed).
+  - `_` - the value is discarded (destroyed);
+  - at most one pack, `Type... name`, anywhere in the list - new variables for the values the other elements
+    leave (none, or any number), which `name` names as a pack (`name...`, `sizeof...(name)`, folds): one per
+    element of the packs `Type` names, each its element's type (`[Ts... values] = list;` in a template
+    specialized on `[Ts...]`), or, when `Type` names none, each of that type (`[int32 head, int32... rest]`).
 - **Order and cost.** The right side is evaluated once, completely, before any element is touched; then the
   elements are handled left to right. Each value is moved out of the list (an object relocates, it is never
   copied); a value that is discarded, or left when an element fails, is destroyed when the statement ends.

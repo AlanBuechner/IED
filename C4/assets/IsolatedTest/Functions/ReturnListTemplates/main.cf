@@ -1,0 +1,69 @@
+// Return lists through templates (D-34): a list is a template argument, written (`Returns<[int32, bool]>`) or
+// deduced, a specialization's pattern matches one (`[Ts...]`, `[A, B]`, the more specialized winning), and a
+// destructuring hands the values a pack element takes to a pack of variables.
+int32 g_failures = 0;
+void Check(bool ok, const char* what) { if (!ok) { printf("FAIL %s\n", what); g_failures++; } }
+
+template<R> struct Returns { public static const int32 Count = 1; }
+template<...Ts> struct Returns<[Ts...]>
+{
+	public static const int32 Count = (int32)sizeof...(Ts);
+	template<L> public static int64 Sum(const L& list)
+	{
+		[Ts... values] = list;
+		return (0 + ... +(int64)values);
+	}
+	public static [Ts...] From(int32 from)
+	{
+		int32 at = from;
+		return [(Ts)(at++)...];
+	}
+}
+template<A, B> struct Returns<[A, B]> { public static const int32 Count = 20; }
+template<T, ...Rest> struct Returns<[bool, T, Rest...]> { public static const int32 Count = 30; }
+
+template<R> int32 CountOf(func<R()> f) { return Returns<R>::Count; }
+template<...Ts> int64 Values(func<[Ts...]()> f) { return sizeof...(Ts); }
+
+[int32, int64, int8] Three() { return [1, 2, (int8)3]; }
+[int32, int32, int32, int32] Four() { return [1, 2, 3, 4]; }
+[bool, int32, int32] Flagged() { return [true, 2, 3]; }
+
+struct Res
+{
+	public int32 id;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("copy")] public void Copy(const Res& o) { id = o.id; g_copies = g_copies + 1; }
+	[operator("delete")] public void Delete() { if (id != 0) g_deletes = g_deletes + 1; }
+}
+int32 g_copies = 0;
+int32 g_deletes = 0;
+[int32, Res, Res] TwoRes() { return [0, Res(1), Res(2)]; }
+
+int32 main()
+{
+	Check(Returns<int32>::Count == 1, "not a list: the primary");
+	Check(Returns<[int32, float]>::Count == 20, "two values: [A, B] is more specialized than [Ts...]");
+	Check(Returns<[int32, float, bool]>::Count == 3, "three: [Ts...]");
+	Check(Returns<[bool, float, bool]>::Count == 30, "a fixed first value and a pack");
+	func<[int32, int64, int8]()> three = Three;
+	Check(CountOf(three) == 3, "a list deduced from a signature picks the specialization");
+	Check(Values(three) == 3, "a pack deduced from a list in a signature");
+	Check(Returns<[int32, int64, int8]>::Sum(Three()) == 6, "a pack destructured from a list");
+	[int32 a, int64 b, int8 c] = Returns<[int32, int64, int8]>::From(5);
+	Check(a == 5 && b == 6 && c == 7, "a list of the pack's values returned");
+	[int32 head, int64... rest] = Three();
+	Check(head == 1 && sizeof...(rest) == 2 && (0 + ... +rest) == 5, "a typed rest");
+	[int32 first, int32... middle, int32 last] = Four();
+	Check(first == 1 && last == 4 && sizeof...(middle) == 2 && (0 + ... +middle) == 5, "a pack between values");
+	[bool flag, int32 x, int32 y, int32... none] = Flagged();
+	Check(flag && x == 2 && y == 3 && sizeof...(none) == 0, "an empty pack");
+	{
+		[_, Res... both] = TwoRes();
+		Check(sizeof...(both) == 2 && (0 + ... +both.id) == 3, "objects move into a pack");
+	}
+	Check(g_copies == 0, "no copies");
+	Check(g_deletes == 2, "each destroyed once");
+	if (g_failures == 0) printf("RETURN LIST TEMPLATES OK\n");
+	return g_failures;
+}

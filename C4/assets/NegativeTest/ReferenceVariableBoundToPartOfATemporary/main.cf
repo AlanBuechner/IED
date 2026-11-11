@@ -1,0 +1,15 @@
+struct Bag { public int32 m_Count; }
+struct Holder { public Bag m_Bag; }
+
+Holder MadeHolder()
+{
+	Holder holder;
+	holder.m_Bag.m_Count = 4;
+	return holder;
+}
+
+int32 main()
+{
+	const Bag& kept = MadeHolder().m_Bag;
+	return kept.m_Count;
+}

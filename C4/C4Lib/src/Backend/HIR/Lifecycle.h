@@ -56,8 +56,9 @@ namespace Scripting
 
 		/// `target = source` for such a type (D-06): the type's `=` when declared; otherwise the new value is
 		/// made first (a copy of an lvalue, or the fresh object itself), then the old value is destroyed and
-		/// the new one relocated in - safe when both name the same object. The result names the target.
-		QueryResult<const LValue*> Assign(const LValue* target, const Value& source);
+		/// the new one relocated in - safe when both name the same object. The result names the target; `site` is
+		/// where the assignment is written.
+		QueryResult<const LValue*> Assign(const LValue* target, const Value& source, const AstNode* site = nullptr);
 
 		/// A new object the consumer owns: a by-value call result, `T(...)`, a copy, `take(x)`, an object
 		/// `?:`. Anything else of object type is a view of an existing object (a load).

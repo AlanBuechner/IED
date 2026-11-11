@@ -1,0 +1,137 @@
+// BUG-453: `c ? a : b` of two locations of one type is the location it chooses, as in C++: a non-const reference
+// parameter, an assignment, a compound assignment, an increment, a method call, a member, `&` and a reference local
+// reach the variable chosen. A value use still reads or copies it, and a branch that is no location gives a value.
+struct Bag
+{
+	public int32 m_Count;
+	public void Add() { m_Count += 1; }
+}
+
+class Shape
+{
+public:
+	public int32 m_Sides;
+}
+
+class Square : public Shape
+{
+public:
+	public int32 m_Size;
+}
+
+int32 g_Copies = 0;
+
+class Counted
+{
+public:
+	public int32 m_Value;
+	[operator("copy")] public void CopyFrom(const Counted& other) { m_Value = other.m_Value; g_Copies += 1; }
+}
+
+const int32 c_Small = 2;
+const int32 c_Large = 9;
+
+void Fill(int32& x) { x = 7; }
+void AddTo(Bag& bag) { bag.m_Count += 1; }
+int32 Read(const int32& x) { return x; }
+
+int32 g_Choices = 0;
+bool Chosen(bool value) { g_Choices += 1; return value; }
+
+int32 Writes()
+{
+	int32 failed = 0;
+	int32 a = 0;
+	int32 b = 0;
+	bool first = true;
+	Fill(first ? a : b);
+	if (a != 7 || b != 0) failed += 1;
+	Fill(!first ? a : b);
+	if (b != 7) failed += 1;
+	(first ? a : b) = 3;
+	if (a != 3) failed += 1;
+	(Chosen(false) ? a : b) += 5;
+	if (b != 12 || g_Choices != 1) failed += 1;   // the choice is made once
+	++(first ? a : b);
+	(first ? a : b)++;
+	if (a != 5) failed += 1;
+	int32& chosen = first ? a : b;
+	chosen = 40;
+	if (a != 40) failed += 1;
+	int32* address = &(first ? a : b);
+	*address = 41;
+	if (a != 41) failed += 1;
+	return failed;
+}
+
+int32 Objects()
+{
+	int32 failed = 0;
+	bool first = true;
+	Bag one;
+	Bag two;
+	AddTo(first ? one : two);
+	(first ? one : two).Add();
+	(first ? one : two).m_Count += 10;
+	if (one.m_Count != 12 || two.m_Count != 0) failed += 1;
+	Bag copied = first ? one : two;   // a copy, as from a variable
+	copied.m_Count = 100;
+	if (one.m_Count != 12) failed += 1;
+	Square square;
+	Shape shape;
+	(first ? square : shape).m_Sides = 4;   // the base part of the derived object
+	if (square.m_Sides != 4 || shape.m_Sides != 0) failed += 1;
+	int32[3] values = { 1, 2, 3 };
+	int32 i = 0;
+	(first ? values[i] : values[2]) = 10;
+	if (values[0] != 10 || values[2] != 3) failed += 1;
+	return failed;
+}
+
+int32 Reads()
+{
+	int32 failed = 0;
+	bool first = true;
+	int32 a = 41;
+	int32 b = 2;
+	const int32 fixedValue = 9;
+	if (Read(first ? fixedValue : b) != 9) failed += 1;   // a const branch reads
+	int32 copy = first ? a : b;
+	copy += 1;
+	if (copy != 42 || a != 41) failed += 1;
+	int64 wide = 5;
+	int64 mixed = first ? a : wide;   // two types: a value of the common one
+	if (mixed != 41) failed += 1;
+	if ((first ? c_Small : c_Large) != 2) failed += 1;
+	packed float[4] lanes = { 1.0f, 2.0f, 3.0f, 4.0f };
+	if ((first ? lanes[1] : lanes[2]) != 2.0f) failed += 1;   // a lane has no address: its value
+	return failed;
+}
+
+// A variable at its last use moves (D-05) unless an address of it lives on: a choice it is a branch of is no such address,
+// a reference bound to the choice is.
+int32 Moves()
+{
+	int32 failed = 0;
+	bool first = true;
+	Counted x;
+	Counted y;
+	x.m_Value = 1;
+	y.m_Value = 2;
+	Counted chosen = first ? x : y;
+	Counted last = y;
+	if (g_Copies != 1 || chosen.m_Value != 1 || last.m_Value != 2) failed += 1;
+	Counted p;
+	Counted q;
+	p.m_Value = 3;
+	Counted& held = first ? p : q;
+	Counted kept = p;   // p's last use by its name, but held still names it: a copy
+	held.m_Value = 4;
+	if (g_Copies != 2 || kept.m_Value != 3 || held.m_Value != 4) failed += 1;
+	return failed;
+}
+
+int32 main()
+{
+	return Writes() + Objects() + Reads() + Moves();
+}

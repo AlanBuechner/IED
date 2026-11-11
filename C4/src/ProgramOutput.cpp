@@ -385,6 +385,8 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 		return false;
 	}
 	const std::vector<std::string> prelude = Scripting::PreludeFunctionSymbols(model);
+	const std::vector<std::string> runtime = Scripting::LibraryRuntimeSymbols(model, m_In.compiler.GetSourceManager());
+	listed->insert(listed->begin(), runtime.begin(), runtime.end());
 	listed->insert(listed->begin(), prelude.begin(), prelude.end());
 	m_HostBuild.emplace();
 	m_HostBuild->reflectedTypes = Scripting::ReflectedTypeNames(model);

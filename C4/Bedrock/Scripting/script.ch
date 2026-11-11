@@ -20,12 +20,19 @@ struct __C4sOptions
 	public const char** defines;
 	public uint32 defineCount;
 	public int32 optimize;
+	public int32 debug;
+	public const char* project;
+	public const char** roots;
+	public uint32 rootCount;
+	public int32 extensible;
+	public void* base;
 }
 
 [link("c4s_host_open")] void* c4s_host_open(const char* interfacePath, void* table, char* error, uint64 errorSize);
 [link("c4s_host_close")] void c4s_host_close(void* host);
 [link("c4s_host_use_cache")] int32 c4s_host_use_cache(void* host, const char* folder);
 [link("c4s_host_debug_scripts")] int32 c4s_host_debug_scripts(void* host, int32 on);
+[link("c4s_host_has_project")] int32 c4s_host_has_project(void* host, const char* project);
 [link("c4s_compile")] void* c4s_compile(void* host, __C4sOptions* options);
 [link("c4s_reload")] void* c4s_reload(void* host, void* old, __C4sOptions* options);
 [link("c4s_prepare")] void* c4s_prepare(void* host, __C4sOptions* options);
@@ -64,6 +71,18 @@ namespace Scripting
 	public:
 		public Core::String name = Core::String("script"); // the script's name, also its reflection tag
 		public bool optimize = true;                         // -O2; false: -O0
+		// -1 as the host says (Host::SetDebugScripts), else this script linked as a debug script (1) or in memory (0).
+		public int32 debug = -1;
+		// The project its files are in: what a script over it names on its allow-list (docs/runtime/04 section 5.2).
+		public Core::String project;
+		// Other scripts may compile against and link to it, as to its host.
+		public bool extensible = false;
+		// It compiles against and links to `base` (extensible, and loaded or prepared) and what `base` stands on. Its load
+		// comes after `base`'s, its unload before.
+		public void Extend(Script* script) { base = script; }
+		// A folder its includes resolve from (`src` for `include "Module/File.ch"`, as a project's sources); none: each
+		// file's own folder.
+		public void AddRoot(const char* folder);
 		// A file on disk.
 		public void AddFile(const char* path);
 		// A file given as text, under `name` (another file of the script includes it by that name).
@@ -78,6 +97,8 @@ namespace Scripting
 		public Core::Array<bool> given;
 		public Core::Array<Core::String> allowed;
 		public Core::Array<Core::String> defines;
+		public Core::Array<Core::String> roots;
+		public Script* base = nullptr;
 	}
 
 	// One compiled script. Unload ends it; a Script that is collected unloads first.
@@ -134,7 +155,8 @@ namespace Scripting
 		public int32 RunTests(const char* filter);
 
 		// Ends the script (docs/runtime/04 section 5): its exits run, its thread storage, roots, reflection entries and
-		// code go. Returns how many finalizers of its objects still alive it dropped.
+		// code go. Returns how many finalizers of its objects still alive it dropped. A script others extend stays loaded
+		// until they have unloaded, and Diagnostics says so.
 		public int64 Unload() { return (int64)c4s_script_unload(handle); }
 
 	private:
@@ -161,6 +183,8 @@ namespace Scripting
 		// read as any module's, instead of in memory. A host built with -g starts with it on.
 		public bool DebugScripts() const { return c4s_host_debug_scripts(handle, -1) != 0; }
 		public void SetDebugScripts(bool on) { c4s_host_debug_scripts(handle, on ? 1 : 0); }
+		// Whether the program's interface has a project of that name: its headers are the host's, and a script need not bring them.
+		public bool HasProject(const char* project) const { return c4s_host_has_project(handle, project) != 0; }
 		// Compiles, links and loads a script; Ok() and Diagnostics() say how it went.
 		public Script* Compile(const ScriptOptions& options);
 		// Compile without the load (docs/runtime/04 section 5.1): Prepared() and Diagnostics() say how it went, and

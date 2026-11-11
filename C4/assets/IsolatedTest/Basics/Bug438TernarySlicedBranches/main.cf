@@ -1,0 +1,50 @@
+// BUG-438: `(Base)derived` by value was a conversion that kept the derived type, so `c ? (Base)a : (Base)b` joined two values of
+// that type under the base's PHI: an LLVM assertion, or bad bitcode where a partition is written out. It is the copy of the base
+// part that `Base b = derived;` makes.
+class Handle
+{
+public:
+	public int32 m_Value = 1;
+	public void* m_Pointer;
+}
+
+class Target : public Handle
+{
+public:
+	public int32 m_More = 2;
+}
+
+class Other : public Handle
+{
+public:
+	public double m_Wider = 3.0;
+}
+
+Target Made()
+{
+	Target target;
+	target.m_Value = 7;
+	return target;
+}
+
+Handle Pick(bool first, Target& a, Other& b)
+{
+	return first ? (Handle)a : (Handle)b;
+}
+
+int32 main()
+{
+	Target a;
+	a.m_Value = 4;
+	Other b;
+	b.m_Value = 5;
+	if (Pick(true, a, b).m_Value != 4) return 1;
+	if (Pick(false, a, b).m_Value != 5) return 2;
+	Handle fromTemporary = (Handle)Made();
+	if (fromTemporary.m_Value != 7) return 3;
+	Handle copy = (Handle)a;
+	copy.m_Value = 9;
+	if (a.m_Value != 4) return 4;   // a copy: the original stays
+	if (((Handle)b).m_Value != 5) return 5;
+	return 0;
+}

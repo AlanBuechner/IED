@@ -94,6 +94,10 @@ namespace C4LSP::Features
 		DocumentSymbol symbol;
 		symbol.name = DeclarationText::WrittenName(node);
 		symbol.detail = DeclarationText::Detail(walk.session, node);
+		// A member's access is part of what an outline says of it: an edit written from the outline gets it right.
+		const std::string access = member ? DeclarationText::AccessOf(node) : std::string();
+		if (!access.empty())
+			symbol.detail = access + " " + symbol.detail;
 		symbol.kind = DeclarationText::SymbolKindOf(node, member);
 		symbol.range = walk.session.ToEditorRange(walk.sourceId, DocComment::Start(walk.session, node), node.endLocation);
 		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(node);

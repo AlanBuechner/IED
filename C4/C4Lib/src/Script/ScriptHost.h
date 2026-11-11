@@ -70,19 +70,26 @@ namespace Scripting
 		/// on other threads fault (BUG-396).
 		const std::string& FaultText() const;
 
+		/// The layer a script compiled extensible leaves for those over it (section 5.2); null for any other, and once it
+		/// has unloaded.
+		std::shared_ptr<const ScriptChain> Chain() const { return m_Chain; }
 		/// The address of the script's symbol `name`; null when it has none or is not loaded.
 		void* Find(const std::string& name) const;
 		/// Runs fn(context) guarded; a fault marks the script faulted, and a faulted script refuses further calls.
 		bool Call(void (*fn)(void*), void* context);
 		/// Runs the script's exits, frees its thread storage, roots, reflection entries and code (section 5). Returns
-		/// how many finalizers of objects still alive it dropped. Nothing of it may run afterwards.
+		/// how many finalizers of objects still alive it dropped. Nothing of it may run afterwards. A script that scripts
+		/// loaded over it still extend stays loaded, and its diagnostics say so (section 5.2).
 		uint64 Unload();
 
 	private:
 		friend class ScriptHost;
 		Script(const HostRuntime& runtime, GuardedCall guard, std::shared_ptr<std::recursive_mutex> loading, std::string tag)
 			: m_Runtime(runtime), m_Guard(guard), m_Loading(std::move(loading)), m_Tag(std::move(tag)) {}
-		bool Load(std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
+		bool Load(std::shared_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
+		/// It no longer stands on the layer it extended.
+		void LeaveBase();
+		void UnloadLoaded();
 		bool CallStart(void (*start)());
 		/// The script faulted: the first fault, of the calls that fault on several threads at once, is the one kept.
 		void RecordFault(const ScriptFault& fault);
@@ -95,9 +102,12 @@ namespace Scripting
 		std::shared_ptr<std::recursive_mutex> m_Loading; // the host's: one load or unload at a time
 		std::string m_Tag;
 		std::string m_Diagnostics;
-		std::unique_ptr<LinkedScript> m_Linked;
-		std::unique_ptr<LinkedScript> m_Prepared;         // linked by Prepare, until LoadPrepared
+		std::shared_ptr<LinkedScript> m_Linked;
+		std::shared_ptr<LinkedScript> m_Prepared;         // linked by Prepare, until LoadPrepared
+		std::shared_ptr<const ScriptChain> m_Chain;       // its layer, when it is extensible
+		std::shared_ptr<const ScriptChain> m_Base;        // the layer it extends, while it stands on it
 		std::vector<std::string> m_PreparedThreadLocals;
+		uint64 m_Dropped = 0;              // the finalizers its last unload dropped
 		ScriptImage m_Image;               // where its code was, for the fault text after it unloads
 		void* m_Record = nullptr;          // the script's c4_script_module
 		const void* m_Roots = nullptr;     // its __c4_gc_roots
@@ -147,19 +157,26 @@ namespace Scripting
 		struct Built
 		{
 			std::unique_ptr<Script> script;
-			std::unique_ptr<LinkedScript> linked; // null when it did not compile or link
+			std::shared_ptr<LinkedScript> linked; // null when it did not compile or link
 			std::vector<std::string> threadLocals;
 		};
 		Built Build(const ScriptCompileOptions& options);
 		Built NewBuilt(const ScriptCompileOptions& options) const;
+		/// Whether `options` is debugged: its own say, else the host's.
+		bool Debugged(const ScriptCompileOptions& options) const { return options.debug.value_or(m_DebugScripts.load()); }
+		const HostIndex& IndexFor(const ScriptCompileOptions& options) const { return options.base ? options.base->index : m_Index; }
+		const HostSymbolTable& TableFor(const ScriptCompileOptions& options) const { return options.base ? options.base->table : m_Table; }
+		/// What a built script stands on and leaves for those over it (section 5.2): false, with its diagnostics, when its
+		/// layer is not what a layer holds.
+		void Settle(Built& built, const ScriptCompileOptions& options, std::optional<ScriptLayer> layer);
 		/// Links an earlier compile's machine code; nothing linked when it does not link.
 		Built LinkCached(const ScriptCompileOptions& options, CachedScript cached);
-		/// Compiles and links; `generated`, when given, gets the machine code.
-		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated);
-		static void LoadOrUndo(Script& script, std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
+		/// Compiles and links; `generated`, when given, gets the machine code and `layer` the serialized layer.
+		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer);
+		static void LoadOrUndo(Script& script, std::shared_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 
 		/// Links a compiled script: into a DLL when scripts are debugged, else in memory.
-		std::unique_ptr<LinkedScript> Link(ScriptCode code, const std::string& name, std::string* generated, std::string* error);
+		std::unique_ptr<LinkedScript> Link(ScriptCode code, const ScriptCompileOptions& options, std::string* generated, std::string* error);
 
 		HostInterface m_Interface;
 		HostIndex m_Index;

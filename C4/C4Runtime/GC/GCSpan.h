@@ -9,6 +9,17 @@
 #define GC_PAGE_SIZE ((size_t)1 << GC_PAGE_SHIFT)
 #define GC_SPAN_WORDS 8u   // bitmap words: a span holds at most 512 slots (one page of 16-byte slots)
 
+// What marking reads of a span's objects: every word, nothing, or hash entries (c4_alloc_entries).
+typedef enum GCScanKind
+{
+	GC_SCAN_ALL,
+	GC_SCAN_NONE,
+	GC_SCAN_ENTRIES,
+	GC_SCAN_ENTRIES_WEAK_KEYS,
+	GC_SCAN_ENTRIES_WEAK_VALUES,
+	GC_SCAN_KINDS
+} GCScanKind;
+
 typedef enum GCSpanState
 {
 	GC_SPAN_FREE,
@@ -28,9 +39,9 @@ typedef struct GCSpan
 	uint32_t divMagic;        // slot of an offset: (offset * divMagic) >> 32, corrected by one
 	uint32_t freeIndex;       // where the search for a free slot starts
 	uint32_t allocCount;
-	uint16_t spanClass;       // small spans: class * 2 + noscan
+	uint16_t spanClass;       // small spans: class * GC_SCAN_KINDS + scanKind
 	uint8_t state;
-	uint8_t noscan;           // slots hold no pointers: marking does not scan them
+	uint8_t scanKind;         // GCScanKind: what marking reads of the slots
 	uint8_t needsZero;        // the memory may hold old bytes
 	uint8_t onPartial;
 	uint8_t decommitted;      // free runs: the pages were returned to the OS

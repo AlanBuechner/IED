@@ -141,6 +141,9 @@ void c4_fatal_report(const char* what);
 // handles (an access violation, a stack overflow) is reported before the system ends the process with its code, and a
 // C runtime function given an invalid argument is a fatal error.
 void c4_crash_log(const char* path);
+// Faults nothing handles and invalid C runtime arguments are reported (on standard error, and in the crash log once one is
+// named) without naming a log: what a test run does, so a case that faults says where.
+void c4_report_faults(void);
 // The calling thread's stack as a report writes it, a frame a line, the `skip` frames above the caller left out, into
 // `out` (terminated; what fits): its length. In a catch handler it runs on the stack of the throw, so the frames go on
 // from where the exception was thrown. It reads the PDBs the first time: for reports, not a hot path.

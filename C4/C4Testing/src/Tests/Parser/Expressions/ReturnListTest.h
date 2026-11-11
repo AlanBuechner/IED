@@ -30,5 +30,9 @@ namespace Testing
 		void DestructuringElementKinds();
 		TEST_FUNC(Parser.ReturnLists)
 		void ComparisonIsNoDestructuring();
+		TEST_FUNC(Parser.ReturnLists)
+		void DestructuringIntoAPack();
+		TEST_FUNC(Parser.ReturnLists)
+		void ListAsTemplateArgument();
 	};
 } // namespace Testing

@@ -108,6 +108,10 @@ namespace C4DAP::Target
 		/// of its function was inlined). When the line has no code, those of the next line that has some; `bound` is
 		/// the line they belong to (0: none).
 		std::vector<uint64_t> AddressesOfLine(const std::string& path, uint32_t line, uint32_t& bound) const;
+		/// The same, in the one module loaded at `module`.
+		std::vector<uint64_t> AddressesOfLineIn(uint64_t module, const std::string& path, uint32_t line, uint32_t& bound) const;
+		/// How many bytes the module at `base` takes; 0 for one with no symbols loaded.
+		uint64_t ModuleSize(uint64_t base) const;
 		SourcePosition PositionOf(CodePlace place) const;
 		/// `address` when a line's code starts there, else where the next line's code starts. Code with no line of
 		/// its own (a catch funclet's prologue) belongs to the line before it in the line table, which is not its.
@@ -127,7 +131,8 @@ namespace C4DAP::Target
 		std::vector<Enumerator> Enumerators(TypeRef type) const;
 
 	private:
-		std::vector<uint64_t> ExactLine(const std::wstring& path, uint32_t line) const;
+		std::vector<uint64_t> ExactLine(const std::vector<uint64_t>& modules, const std::wstring& path, uint32_t line) const;
+		std::vector<uint64_t> FirstLineWithCode(const std::vector<uint64_t>& modules, const std::string& path, uint32_t line, uint32_t& bound) const;
 		std::vector<uint64_t> OwnCode(const std::vector<uint64_t>& addresses, const std::wstring& path, uint32_t line) const;
 		bool OnLineItself(uint64_t address, const std::wstring& path, uint32_t line) const;
 		uint64_t FunctionStart(uint64_t address) const;

@@ -3,7 +3,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
-#include "Model/Types/FunPtrType.h"
+#include "Model/Types/SignatureType.h"
 #include "Parser/Nodes/Declarations/TemplateDefinitionNode.h"
 #include "Parser/Nodes/Declarations/TemplateParameterNode.h"
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
@@ -116,6 +116,7 @@ namespace Scripting
 	QueryResult<void> TemplateDeduction::MatchBase(const QualTypeNode& pattern, const Type* argument, bool decay)
 	{
 		if (const auto* fp = dynamic_cast<const FunPtrTypeNode*>(pattern.FuncPtrType().Get())) return MatchFunPtr(*fp, argument);
+		if (pattern.IsReturnList()) return MatchReturnList(pattern, argument);
 		if (!pattern.BaseName()) return Nothing();
 		return MatchNamed(*pattern.BaseName(), argument, decay);
 	}
@@ -171,16 +172,48 @@ namespace Scripting
 
 	QueryResult<void> TemplateDeduction::MatchFunPtr(const FunPtrTypeNode& pattern, const Type* argument)
 	{
-		if (!argument || argument->GetKind() != TypeKind::FunPtr) return Nothing();
-		const auto* fp = static_cast<const FunPtrType*>(argument);
+		if (!argument || argument->GetKind() != (pattern.IsFunc() ? TypeKind::Func : TypeKind::FunPtr)) return Nothing();
+		const auto* fp = static_cast<const SignatureType*>(argument);
 		if (pattern.GetReturnType())
 			if (auto r = MatchLayers(*pattern.GetReturnType(), pattern.GetReturnType()->IndirectionCount(), fp->GetReturnType(), false); !r.Ok()) return r;
-		const uint32 count = pattern.ParameterCount() < fp->GetParameterCount() ? pattern.ParameterCount() : fp->GetParameterCount();
-		for (uint32 i = 0; i < count; ++i)
+		for (uint32 i = 0; i < pattern.ParameterCount() && i < fp->GetParameterCount(); ++i)
 		{
-			const QualTypeNode* p = pattern.GetParameters()[i]->GetType().Get();
-			if (p)
-				if (auto r = MatchLayers(*p, p->IndirectionCount(), fp->GetParameterTypes()[i], false); !r.Ok()) return r;
+			const ParameterNode& parameter = *pattern.GetParameters()[i];
+			const QualTypeNode* p = parameter.GetType().Get();
+			if (!p) continue;
+			if (parameter.IsPack())
+			{
+				for (uint32 element = i; element < fp->GetParameterCount(); ++element)
+					if (auto r = FromPackArgument(*p, fp->GetParameterTypes()[element], element - i); !r.Ok()) return r;
+				return Nothing();
+			}
+			if (auto r = MatchLayers(*p, p->IndirectionCount(), fp->GetParameterTypes()[i], false); !r.Ok()) return r;
+		}
+		return Nothing();
+	}
+
+	QueryResult<void> TemplateDeduction::MatchReturnList(const QualTypeNode& pattern, const Type* argument)
+	{
+		const ObjectType* list = AsObject(argument);
+		if (!list || !list->IsReturnList()) return Nothing();
+		const auto& values = list->GetFields();
+		const auto& written = pattern.GetReturnList();
+		for (uint32 i = 0; i < written.Count(); ++i)
+		{
+			const QualTypeNode& element = *written[i];
+			if (element.ExpandsPack())
+			{
+				if (i + 1 != written.Count()) return Nothing(); // only a trailing expansion deduces
+				for (uint32 e = i; e < values.Count(); ++e)
+				{
+					TemplateArg value;
+					value.type = values[e].m_Type;
+					if (auto r = FromPackTemplateArgument(&element, value, e - i); !r.Ok()) return r;
+				}
+				return Nothing();
+			}
+			if (i >= values.Count()) return Nothing();
+			if (auto r = MatchLayers(element, element.IndirectionCount(), values[i].m_Type, false); !r.Ok()) return r;
 		}
 		return Nothing();
 	}

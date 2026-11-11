@@ -12,6 +12,7 @@ namespace C4DAP::Target
 		constexpr const char* kOptimizedAway = "<optimized away>";
 		// A local in a register the adapter cannot read.
 		constexpr const char* kUnreadable = "<unreadable>";
+		constexpr const char* kThisName = "this";
 
 		bool OptimizedAway(const VariableSymbol& symbol) { return symbol.storage.kind == SymbolStorage::Kind::OptimizedAway; }
 	}
@@ -126,8 +127,16 @@ namespace C4DAP::Target
 	std::optional<ValueRef> Engine::Variable(const std::string& name, const FrameRecord* frame) const
 	{
 		if (frame)
-			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(frame->Place()))
+		{
+			const std::vector<VariableSymbol> locals = m_Symbols.VariablesAt(frame->Place());
+			for (const VariableSymbol& symbol : locals)
 				if (symbol.name == name) return VariableValue(symbol, frame->frame);
+			// A method's code names its object's fields bare, and so does whoever reads it.
+			for (const VariableSymbol& symbol : locals)
+				if (symbol.name == kThisName)
+					if (const std::optional<ValueRef> self = VariableValue(symbol, frame->frame))
+						if (const std::optional<ValueRef> field = m_Values.Member(*self, name)) return field;
+		}
 		if (const std::optional<VariableSymbol> global = m_Symbols.Global(name)) return ValueRef{ global->type, static_cast<uint64_t>(global->storage.offset) };
 		return std::nullopt;
 	}

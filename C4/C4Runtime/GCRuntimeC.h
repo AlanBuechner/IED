@@ -21,6 +21,19 @@ void* c4_alloc(size_t size, size_t align);
 // collector never scans it, so a pointer stored in it as an integer does not keep anything alive.
 void* c4_alloc_noscan(size_t size, size_t align);
 
+// Storage for a hash table's entries, three words each: a value, a key and a chain link inside the same object (a
+// Lua table's nodes, D-85). A collection reads an entry by what the table holds strongly, and a value of all ones
+// is nil, an empty entry whose key may be long dead, so it keeps nothing alive. A weak table's owner clears the
+// entries of what died in a mark-end hook.
+typedef enum c4_gc_entries
+{
+	c4_gc_entries_strong,
+	c4_gc_entries_weak_keys,    // the values are read, the keys are not
+	c4_gc_entries_weak_values,  // the keys are read, the values are not
+	c4_gc_entries_weak          // nothing is read
+} c4_gc_entries;
+void* c4_alloc_entries(size_t size, size_t align, c4_gc_entries kind);
+
 // Ends an object now (`delete p`): runs its finalizer, then frees its memory. `ptr` may point anywhere
 // inside the object; NULL and pointers outside the heap are ignored.
 void c4_free(void* ptr);
@@ -53,6 +66,9 @@ int64_t c4_gc_set_concurrent(int64_t bytes);
 // Checks every concurrent cycle's marks against a fresh mark from the roots, a fatal error naming any object it missed
 // (tests and diagnosis; slow). C4_GC_VERIFY=1 sets it at startup.
 void c4_gc_set_verify(bool on);
+// Fills every object a collection or a delete ends with 0xDB bytes, so a read of a freed object faults at its use
+// (diagnosis of use after free; costs a write of each ended object). C4_GC_POISON=1 sets it at startup.
+void c4_gc_set_poison(bool on);
 
 // Suppress / resume automatic collection (not counted: one enable resumes it).
 void c4_gc_disable(void);
@@ -117,6 +133,24 @@ void c4_gc_unregister_collection_result(void* key);
 
 // Whether `ptr` points into a live object: one that survived the last collection or was allocated since.
 bool c4_gc_is_reachable(const void* ptr);
+
+// --- The end of marking ----------------------------------------------------------------------------
+// A hook runs in each collection once marking and finalizer selection are done, right before the sweep: what is
+// unmarked now ends with this collection, so a hook drops its weak references to it (D-85). Every other thread is
+// stopped wherever it was (c4_gc_nostop_enter keeps a thread out of such a place), and the collector holds its lock,
+// so a hook allocates nothing, takes no lock another thread may hold and registers no hook.
+typedef void (*c4_gc_mark_end_fn)(void* user_data, void* marker);
+void c4_gc_register_mark_end(void* key, c4_gc_mark_end_fn fn, void* user_data);
+void c4_gc_unregister_mark_end(void* key);
+// In a hook: whether `ptr`'s object is marked (a pointer to no object counts as marked), and marking it with
+// everything it reaches, so it survives this collection.
+bool c4_gc_is_marked(void* marker, const void* ptr);
+void c4_gc_mark_now(void* marker, const void* ptr);
+
+// A region of the calling thread that no collection stops it in, for a change to a structure a mark-end hook reads.
+// Counted. Short, and it allocates nothing and takes no lock: the collector waits at its stop, holding its own.
+void c4_gc_nostop_enter(void);
+void c4_gc_nostop_leave(void);
 
 // --- Statistics ---------------------------------------------------------------------------------
 typedef struct c4_gc_stats

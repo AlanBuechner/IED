@@ -18,6 +18,25 @@
 
 namespace Scripting
 {
+	namespace
+	{
+		// A type declared again in another unit - a forward declaration and its definition, either first, or two forward
+		// declarations - is visible there too: a file sees what the headers it includes declare, whichever of them was
+		// registered first (BUG-439).
+		void AlsoVisibleIn(const Scope& scope, const Core::String& name, const Type* type, uint32 unitId)
+		{
+			for (const auto& entry : scope.Entries(name))
+			{
+				if (entry->kind != SymbolKind::Type || entry->type != type) continue;
+				if (entry->definingUnit == unitId) return;
+				for (uint32 unit : entry->repeatedIn)
+					if (unit == unitId) return;
+				entry->repeatedIn.Push(unitId);
+				return;
+			}
+		}
+	}
+
 	void ModelBuilder::RegisterNamespace(Context& ctx, const NamespaceNode& ns)
 	{
 		const Core::String& name = ns.Name();
@@ -92,9 +111,17 @@ namespace Scripting
 		}
 		if (obj.IsDeclaration())
 		{
-			if (raw) return; // duplicate fwd-decl: the incomplete shell already exists
+			if (raw)
+			{
+				AlsoVisibleIn(*ctx.scope, name, raw, ctx.unitId); // duplicate fwd-decl: the incomplete shell already exists
+				return;
+			}
 			const SymbolInfo* existing = ctx.scope->Find(name);
-			if (existing && existing->kind == SymbolKind::Type) return; // defined elsewhere: no-op re-declaration
+			if (existing && existing->kind == SymbolKind::Type)
+			{
+				AlsoVisibleIn(*ctx.scope, name, existing->type, ctx.unitId); // defined elsewhere: no-op re-declaration
+				return;
+			}
 
 			raw = new ObjectType(TypeKind::Object, name); // incomplete shell - no layout until a definition
 			ApplyDeclaredIdentity(*raw, obj, ctx.scope);
@@ -127,6 +154,7 @@ namespace Scripting
 				if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &obj, Redefinition(ctx, "type", name));
 				createdNew = true;
 		}
+		else AlsoVisibleIn(*ctx.scope, name, raw, ctx.unitId); // the definition of a type forward-declared elsewhere first
 
 		if (const TestRegistry::Annotation test = TestRegistry::Find(obj.GetAnnotations()); test.kind == "test")
 			ctx.model->MutableTests().SetClassGroup(raw, test.group);

@@ -19,8 +19,12 @@ static void Throw(int32 depth) {
 
 static int32* Nowhere(int64 n) { return n > 1000 ? new int32 : nullptr; }
 
+// What a -test program's harness calls first (C4Runtime/TestRuntimeC.c).
+[link("c4_test_configure")] void c4_test_configure(int32 argc, char8** argv) noexcept;
+
 // The child: fails as `how` says, with `log` its crash log unless `how` is "unlogged"; "caught" prints what StackText
-// says in a handler and exits 0.
+// says in a handler and exits 0; "test-fault" faults in a test run, which names no log (BUG-437: a case that faulted said
+// nothing of where).
 static int32 Fail(Core::StringView how, Core::StringView log) {
 	if (how == "caught") {
 		try {
@@ -30,6 +34,10 @@ static int32 Fail(Core::StringView how, Core::StringView log) {
 			printf("%s", Platform::StackText().CStr());
 		}
 		return 0;
+	}
+	if (how == "test-fault") {
+		c4_test_configure(0, nullptr);
+		*Nowhere(how.ByteLength()) = 1;
 	}
 	if (how != "unlogged") Platform::SetCrashLog(log);
 	if (how == "fault") *Nowhere(how.ByteLength()) = 1;
@@ -103,6 +111,7 @@ int32 main(int32 argc, char8** argv) {
 	ok = Holds(thrown.View(), Core::StringView("\"thrower\""), "throw", "the crash log") && ok;
 	ok = Reported("fault", kAccessViolation, "an access violation (0xC0000005) writing address 0x0", true) && ok;
 	ok = Reported("unlogged", 1, "an exception was thrown and not caught", false) && ok;
+	ok = Reported("test-fault", kAccessViolation, "an access violation (0xC0000005) writing address 0x0", false) && ok;
 	ok = Caught() && ok;
 	if (ok) printf("crash reports: ok\n");
 	return ok ? 0 : 1;

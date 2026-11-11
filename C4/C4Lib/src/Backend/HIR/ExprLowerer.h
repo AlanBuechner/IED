@@ -83,6 +83,8 @@ namespace Scripting
 		QueryResult<Value> ResolveIdentifier(const IdentifierExpressionNode* n);
 		/// A function's name as a value: the address of a free function or a static method (an instance method has none).
 		QueryResult<Value> DecayedFunction(const AstNode* n, const Core::String& name, const FunctionRecord& rec, const FunctionType* sig);
+		/// An array lvalue as the address of its first element; anything else as it is.
+		Value ArrayAsPointer(const Value& value);
 		/// `owner`'s method `member` as a value (DecayedFunction); NotFound when `owner` has no method of that name.
 		QueryResult<Value> MethodValue(const AstNode* n, const ObjectType* owner, const Core::String& member);
 		/// The function `name` (plain or namespace-qualified), or the instance `tmplArgs` name of the function template

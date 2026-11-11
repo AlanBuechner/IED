@@ -70,6 +70,8 @@ namespace Scripting
 		/// member access and field resolution: a missed alias silently degrades to an ambiguous all-types-
 		/// by-name scan that binds the wrong template instantiation, so no call site may roll its own loop.
 		static const Type* UnwrapToValue(const Type* t);
+		/// Strip Alias layers only: the type as it is stored. A reference stays a reference (its storage is a pointer).
+		static const Type* UnwrapAliases(const Type* t);
 		/// Whether a value of this type has a well-defined truth value usable in a boolean context
 		/// (if/while condition, && / || operand): numbers, enums, pointers and function pointers do -
 		/// `if (ptr)`, `if (i)` and C-API BOOL returns are valid idioms. A reference has its referent's.

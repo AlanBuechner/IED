@@ -373,6 +373,38 @@ function Test-NukeToolchainProject {
     } finally { Remove-Item Env:\NUKE_TOOLCHAINS -ErrorAction SilentlyContinue }
 }
 
+# A toolchain refreshed while one of its programs runs (the dev toolchain's C4.exe compiling another build) moves that
+# program aside as <name>.<ms>.old instead of failing, and the next refresh removes it once nothing runs it.
+function Test-ToolchainRefreshWhileRunning {
+    $image = Join-Path $env:TEMP "c4-toolstest/refresh"
+    if (Test-Path $image) { Remove-Item $image -Recurse -Force }
+    $python = Join-Path (Split-Path $repoRoot) "vendor/python/python.exe"
+    if (-not (Test-Path $python)) { $python = "python" }
+    $make = Join-Path $repoRoot "MakeToolchain.py"
+    & $python $make --out $image | Out-Null
+    if ($LASTEXITCODE -ne 0) { return @("MakeToolchain.py did not assemble a toolchain") }
+    $lsp = Join-Path $image "tools/C4LSP/C4LSP.exe"
+    # Older than any build's, however long ago C4LSP was built: the refresh copies it again, and the copy keeps the build's time.
+    $stale = [DateTime]::new(2000, 1, 1)
+    (Get-Item $lsp).LastWriteTime = $stale
+    $start = New-Object System.Diagnostics.ProcessStartInfo $lsp
+    $start.RedirectStandardInput = $true   # held open: the server waits for its first message
+    $start.UseShellExecute = $false
+    $server = [System.Diagnostics.Process]::Start($start)
+    $failures = @()
+    try {
+        Start-Sleep -Milliseconds 300
+        if ($server.HasExited) { return @("C4LSP.exe did not keep running with its input held open (exit $($server.ExitCode))") }
+        $refresh = (& $python $make --out $image 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { $failures += "a refresh while C4LSP.exe runs failed: $refresh" }
+        if (@(Get-ChildItem (Split-Path $lsp) -Filter "C4LSP.exe.*.old").Count -ne 1) { $failures += "the running C4LSP.exe was not moved aside as C4LSP.exe.<ms>.old" }
+        if ((Get-Item $lsp).LastWriteTime -le $stale.AddDays(1)) { $failures += "the refresh did not copy the new C4LSP.exe" }
+    } finally { $server.Kill(); $server.WaitForExit() }
+    & $python $make --out $image | Out-Null
+    if (@(Get-ChildItem (Split-Path $lsp) -Filter "C4LSP.exe.*.old").Count -ne 0) { $failures += "the next refresh left the .old copy nothing runs any more" }
+    return $failures
+}
+
 # A build description (--projects, docs/language/15-projects.md): each project's files get its defines, and an include
 # carries what a header defines, not its project's settings.
 function Test-ProjectDefines {
@@ -395,6 +427,37 @@ function Test-ProjectDefines {
     $main = (& $objdump -d --no-show-raw-insn (Join-Path $dir "int/inlined.obj") | Out-String) -split "`r?`n`r?`n" | Where-Object { $_ -match "<main>:" }
     if (-not $main -or $main -match "call") { return @("at -O2 the game's main still calls the engine: $main") }
     return @()
+}
+
+# A -test build of a description runs the root project's tests and fixtures; a project it depends on runs its own in
+# its own harness (docs/language/15-projects.md rule 7). A root without tests of its own runs its main.
+function Test-ProjectTests {
+    $dir = New-Sources "projects-tests" @{
+        "Engine/src/engine.ch" = "int32 EngineValue();"
+        "Engine/src/engine.cf" = "include ""engine.ch""`nint32 EngineValue() { return 1; }`n[test_setup]`nvoid EngineSetup() { printf(""engine setup\n""); }`n[test(""engine.value"")]`nvoid EngineValueTest() { assert_eq(1, EngineValue(), ""the engine's value""); }"
+        "Game/src/main.cf" = "include ""engine.ch""`n[test(""game.value"")]`nvoid GameValueTest() { assert_eq(1, EngineValue(), ""the game sees the engine""); }"
+        "Tool/src/main.cf" = "include ""engine.ch""`nint32 main() { return EngineValue() + 4; }"
+        "int/game.toml" = "root = ""Game""`n[[project]]`nname = ""Game""`nsources = [""../Game/src""]`ndepends = [""Engine""]`n[[project]]`nname = ""Engine""`nsources = [""../Engine/src""]"
+        "int/engine.toml" = "root = ""Engine""`n[[project]]`nname = ""Engine""`nsources = [""../Engine/src""]"
+        "int/tool.toml" = "root = ""Tool""`n[[project]]`nname = ""Tool""`nsources = [""../Tool/src""]`ndepends = [""Engine""]`n[[project]]`nname = ""Engine""`nsources = [""../Engine/src""]"
+    }
+    $harness = {
+        param($root)
+        $exe = Join-Path $dir "int/$root.exe"
+        $build = Invoke-Compiler $compiler @("--projects", (Join-Path $dir "int/$root.toml"), "-test", "-o", $exe)
+        if ($build.exit -ne 0) { return @{ exit = -1; output = "the $root harness did not build: $($build.output)" } }
+        $output = (& $exe 2>&1 | ForEach-Object { [string]$_ }) -join "`n"
+        return @{ exit = $LASTEXITCODE; output = $output }
+    }
+    $failures = @()
+    $game = & $harness "game"
+    if ($game.exit -ne 0 -or $game.output -notmatch "\[TEST\] game\.value") { $failures += "the game's harness did not run its test: exit $($game.exit): $($game.output)" }
+    if ($game.output -match "engine\.value|engine setup") { $failures += "the game's harness ran the engine's test or setup: $($game.output)" }
+    $engine = & $harness "engine"
+    if ($engine.exit -ne 0 -or $engine.output -notmatch "engine setup" -or $engine.output -notmatch "\[TEST\] engine\.value") { $failures += "the engine's harness did not run its setup and test: exit $($engine.exit): $($engine.output)" }
+    $tool = & $harness "tool"
+    if ($tool.exit -ne 5) { $failures += "a root with no tests of its own exited $($tool.exit), not its main's 5: $($tool.output)" }
+    return $failures
 }
 
 # A project's `includes` folder reaches CBind and the foreign C compile (BUG-317), and a relative --int-dir still gets
@@ -437,6 +500,27 @@ function Test-ProjectsShareABoundHeader {
     if ($build.exit -ne 0) { return @("two projects binding one header did not build: " + (($build.output -split "`n" | Select-String "error" | Select-Object -First 3) -join " | ")) }
     & $exe | Out-Null
     if ($LASTEXITCODE -ne 39) { return @("the program returned $LASTEXITCODE, not 39 (the engine's 1 + 4 + 3, the window's 20 + 5 + 6)") }
+    return @()
+}
+
+# A C header one project binds may declare a name C4 builds in (vadefs.h's va_list): a project that does not depend on it
+# still names the built-in, which the binding's declaration does not hide.
+function Test-ABindingDoesNotHideABuiltin {
+    $dir = New-Sources "projects-binding-builtin" @{
+        "inc/args.h" = "#pragma once`ntypedef char* va_list;`ninline int Three() { return 3; }"
+        "Window/src/window_native.ch" = "extern ""c++"" include ""args.h"""
+        "Window/src/window.ch" = "int32 WindowValue();"
+        "Window/src/window.cf" = "include ""window.ch""`ninclude ""window_native.ch""`nint32 WindowValue() { return Three(); }"
+        "Lua/src/lua.ch" = "int32 Sum(int32 count, ...);`nint32 SumList(int32 count, va_list ap);"
+        "Lua/src/lua.cf" = "include ""lua.ch""`nint32 SumList(int32 count, va_list ap) { int32 total = 0; for (int32 i = 0; i < count; i++) total += va_arg(ap, int32); return total; }`nint32 Sum(int32 count, ...) { va_list ap; va_start(ap); int32 total = SumList(count, ap); va_end(ap); return total; }"
+        "Game/src/main.cf" = "include ""lua.ch""`ninclude ""window.ch""`nint32 main() { return Sum(2, 30, 6) + WindowValue(); }"
+        "int/projects.toml" = "root = ""Game""`n[[project]]`nname = ""Game""`nsources = [""../Game/src""]`ndepends = [""Lua"", ""Window""]`n[[project]]`nname = ""Lua""`nsources = [""../Lua/src""]`n[[project]]`nname = ""Window""`nsources = [""../Window/src""]`nincludes = [""../inc""]"
+    }
+    $exe = Join-Path $dir "int/game.exe"
+    $build = Invoke-Compiler $compiler @("--projects", (Join-Path $dir "int/projects.toml"), "-o", $exe)
+    if ($build.exit -ne 0) { return @("a project naming va_list beside one whose binding declares it did not build: " + (($build.output -split "`n" | Select-String "error" | Select-Object -First 2) -join " | ")) }
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 39) { return @("the program returned $LASTEXITCODE, not 39 (Sum's 36 and the window's 3)") }
     return @()
 }
 
@@ -913,7 +997,7 @@ int32 main()
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
-    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
+    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ToolchainRefreshWhileRunning", "Test-ProjectDefines", "Test-ProjectTests", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-ABindingDoesNotHideABuiltin", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
     "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput")
 $passed = 0
 $failed = 0

@@ -1,0 +1,7 @@
+void Fill(int32& x) { x = 7; }
+
+int32 main()
+{
+	Fill(3);
+	return 0;
+}

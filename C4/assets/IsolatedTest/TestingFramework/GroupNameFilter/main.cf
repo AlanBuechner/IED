@@ -1,0 +1,5 @@
+// --filter without a wildcard names a case or a group: "keep" runs keep.one and keep.two, not keeper.one.
+[test("keep.one")] void TestKeepOne() { assert_true(1, "kept"); }
+[test("keep.two")] void TestKeepTwo() { assert_true(1, "kept"); }
+[test("keeper.one")] void TestKeeper() { assert_true(0, "a longer name is not under the group and must not run"); }
+[test("drop.one")] void TestDrop() { assert_true(0, "this case is filtered out and must not run"); }

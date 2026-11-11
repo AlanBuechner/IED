@@ -40,6 +40,8 @@ namespace C4LSP::Features
 		static std::string Qualified(Server::CompilationSession& session, const Scripting::AstNode& decl);
 		/// The declaration without its annotations, access and name, on one line: `static int64 (const StringView& text) const`.
 		static std::string Detail(Server::CompilationSession& session, const Scripting::AstNode& decl);
+		/// The access the declaration is written with: "public", "private", "protected", or empty for none.
+		static std::string AccessOf(const Scripting::AstNode& decl);
 		/// The namespaces and types around the declaration and the qualifier it is written with, "::"-joined:
 		/// `Ai::ToolRegistry` for `ToolRegistry::Add` defined in `namespace Ai`. Empty at file scope.
 		static std::string OwnerOf(Server::CompilationSession& session, const Scripting::AstNode& decl);

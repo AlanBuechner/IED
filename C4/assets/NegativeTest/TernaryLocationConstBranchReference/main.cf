@@ -1,0 +1,9 @@
+void Fill(int32& x) { x = 7; }
+
+int32 main()
+{
+	const int32 a = 1;
+	int32 b = 2;
+	Fill(b > 1 ? a : b);
+	return b;
+}

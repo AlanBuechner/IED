@@ -1,0 +1,31 @@
+// ~ and unary - of a constant have the operand's width and sign when they fold, as they do at run time: LuaJIT's type
+// tags (~13u) index tables through ~tag + 1.
+const uint32 c_Tag = (~13u);
+const uint32 c_Thirteen = ~c_Tag;
+const int32 c_Sum = 1 + ~c_Tag;
+const int32[~c_Tag + 1] g_Table = { 0 };
+const uint8 c_Byte = 0xf0;
+const uint32 c_NegOne = -1u;
+
+int32 Runtime(uint32 tag) { return (int32)(~tag); }
+
+int32 Label(uint32 x)
+{
+	switch (x) {
+		case ~c_Tag: return 1;
+		default: return 0;
+	}
+}
+
+int32 main()
+{
+	if (c_Tag != 4294967282u) return 1;
+	if (c_Thirteen != 13u) return 2;
+	if (c_Sum != 14) return 3;
+	if (sizeof(g_Table) != 14 * sizeof(int32)) return 4;
+	if (c_Thirteen != (uint32)Runtime(c_Tag)) return 5;
+	if (Label(13u) != 1) return 6;
+	if (c_NegOne != 4294967295u) return 7;
+	printf("COMPLEMENT OK\n");
+	return 0;
+}

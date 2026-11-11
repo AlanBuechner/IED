@@ -57,6 +57,15 @@ uint32_t gc_mark_helpers_wanted(const GCState* gc)
 	return spare < GC_DEFAULT_MARK_HELPERS ? spare : GC_DEFAULT_MARK_HELPERS;
 }
 
+void gc_mark_end_run(GCMarker* marker, const GCPtrMap* hooks)
+{
+	for (size_t i = 0; i < hooks->capacity; ++i)
+	{
+		if (hooks->slots[i].key) c4_gc_run_mark_end((c4_gc_mark_end_fn)hooks->slots[i].a, hooks->slots[i].b, marker);
+	}
+	gc_mark_drain(marker);
+}
+
 // Roots and finalizer selection mark on this thread alone (an enumerator may allocate); the bulk drains together.
 static void mark(GCState* gc, const GCThread* self)
 {
@@ -67,6 +76,7 @@ static void mark(GCState* gc, const GCThread* self)
 	else gc_mark_drain(&gc->marker);
 	gc_pools_decide(&gc->marker, gc->pools);
 	gc_finalize_select(&gc->marker, &gc->finalizers, &gc->ready);
+	gc_mark_end_run(&gc->marker, &gc->markEnds);
 }
 
 void gc_reclaim(GCState* gc)

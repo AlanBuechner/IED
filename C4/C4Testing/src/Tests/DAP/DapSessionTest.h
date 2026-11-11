@@ -26,6 +26,10 @@ namespace Testing
 		void ALineWithoutCodeBindsToTheNextLine();
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)
 		void ACallThatFirstNeedsACleanupKeepsItsLine();
+		TEST_FUNC_TIMEOUT(Dap.Session, 240)
+		void AScriptsBreakpointBindsWhenItsDllLoadsAndInItsNextBuild();
+		TEST_FUNC_TIMEOUT(Dap.Session, 60)
+		void AMethodsFieldsReadByTheirBareNames();
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)
 		void ATemplateBreakpointStopsInEveryInstance();
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)

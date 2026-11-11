@@ -1,0 +1,21 @@
+// `sizeof` of a string literal is its array's size, the terminator too, as in C++; a pointer to one stays a pointer.
+#define LENGTH_OF(text)(sizeof(text) - 1)
+
+const int32 c_Extent = sizeof("abc");
+int32[sizeof("ab")] s_Sized;
+
+int32 main()
+{
+	if (sizeof("_G") != 3) return 1;
+	if (LENGTH_OF("hello") != 5) return 2;
+	if (sizeof("") != 1) return 3;
+	if (sizeof("a\n") != 3) return 4;
+	if (sizeof(("abc")) != 4) return 5;
+	if (c_Extent != 4) return 6;
+	if (sizeof(s_Sized) != 3 * sizeof(int32)) return 7;
+	const char* pointer = "abcdefghijkl";
+	if (sizeof(pointer) != sizeof(void*)) return 8;
+	if (sizeof(u"ab") != 6) return 9;
+	printf("SIZEOF LITERAL OK\n");
+	return 0;
+}

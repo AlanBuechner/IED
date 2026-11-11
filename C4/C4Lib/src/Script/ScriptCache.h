@@ -15,7 +15,12 @@ namespace Scripting
 		std::string object;                    // the COFF object the JIT generated
 		std::string diagnostics;               // its warnings
 		std::vector<std::string> threadLocals; // as CompiledScript's
+		std::string layer;                     // an extensible script's layer (SerializeLayer); empty for none
 	};
+
+	/// What code compiled over a layer depends on: its interface and those below it, not its bodies (section 5.2). A script
+	/// over it whose layer's digest is the same links its kept machine code to the new layer.
+	std::string LayerDigest(const std::string& below, const std::string& serializedLayer);
 
 	/// Compiled scripts kept in a folder (docs/runtime/04 section 4.6): a script whose files, options, host build and
 	/// compiler are those of an earlier compile links from that compile's machine code. One entry is kept per script

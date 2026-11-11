@@ -146,7 +146,10 @@ automatically, reference locals alias a location, functions may return reference
 
 Rules enforced today:
 - A non-const reference cannot bind to a const object: `cannot bind a non-const reference to a const object`.
-- A reference cannot bind to a prvalue (a temporary): `cannot bind a reference to a prvalue`.
+- A reference cannot bind to a prvalue (a temporary): `cannot bind a reference to a prvalue`. Nor can it bind what
+  does not last as a variable does: the copy a by-value indexer gives (`v[i]` behind `T Lane(int64) const`), or part of
+  the temporary a call returned (`Made().m_Bag`): `cannot bind 'r' to the copy a by-value indexer gives: a reference
+  names a location that lasts; copy it into a variable`.
 - A reference local binds only a location of its referent type, or a derived object through its base
   sub-object; a conversion would make a temporary it cannot hold (`cannot bind 'int32&' to a 'float': a
   reference names a location of its own type`).
@@ -155,9 +158,13 @@ Rules enforced today:
   a reference to a temporary from 'F'`). It may return a conditional of locations, `return flag ? none :
   items;`: the location the condition chooses, each branch checked as a returned location is.
 - A non-const reference binds only an argument of its referent type (or a derived object, through its
-  base sub-object). A `const T&` binds anything that converts to `T` implicitly (4.9): the value is
-  converted into a temporary, destroyed at the end of the full expression (D-32). `const float&` accepts an
-  `int32`; `float&` does not.
+  base sub-object), and only a location the callee's writes land in, as in C++: a value - a literal, what a
+  by-value call returns, a `?:` with a branch that is no location - the copy a by-value indexer gives and part of a
+  call's temporary are refused at the argument (`cannot bind a non-const reference to a temporary: the argument is a
+  value, not a location, so what the callee writes through it would be lost; pass a variable, or take 'const
+  int32&'`). A `?:` of two locations is a location (10, section 6). A `const T&` binds anything that converts to `T`
+  implicitly (4.9): the value is converted into a temporary, destroyed at the end of the full expression (D-32).
+  `const float&` accepts an `int32`; `float&` does not.
 - Writes through a value returned by a function are rejected (`access chain is rooted in a function-call
   result that returns by value`), and so are writes through a const access chain (`access chain is rooted
   in a read-only location`).

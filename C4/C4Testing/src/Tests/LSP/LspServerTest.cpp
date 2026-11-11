@@ -992,6 +992,50 @@ int32 main() {
 		TEST_PASSED();
 	}
 
+	void LspServerTest::TestFormattingAnswersForTheLastChangeWhileAnalysisIsBehind()
+	{
+		std::string uri = Testing::Lsp::UriFor("FmtBehind.cf");
+		Reset("file:///root");
+		Value init = Value::MakeObject();
+		init.SetMember("rootUri", Value::String(Core::String("file:///root")));
+		FeedRequest("initialize", 1, init);
+		FeedNotification("initialized", Value::Null());
+		FeedNotification("textDocument/didOpen", MakeTextDocParams(uri, "int32 a;\n"));
+		m_Server->WaitForCurrentWork();
+
+		// The change comes while the analysis is behind: only the new text has a second line, and it needs an edit.
+		m_Server->HoldAnalysis(true);
+		Value changed = Value::MakeObject();
+		changed.SetMember("uri", Value::String(Core::String(uri)));
+		changed.SetMember("version", Value::Int(2));
+		Value changes = Value::MakeArray();
+		Value whole = Value::MakeObject();
+		whole.SetMember("text", Value::String(Core::String("int32 a;\nint32 b=1;\n")));
+		changes.Append(whole);
+		Value changeParams = Value::MakeObject();
+		changeParams.SetMember("textDocument", changed);
+		changeParams.SetMember("contentChanges", changes);
+		FeedNotification("textDocument/didChange", changeParams);
+
+		Value params = Value::MakeObject();
+		Value doc = Value::MakeObject();
+		doc.SetMember("uri", Value::String(Core::String(uri)));
+		params.SetMember("textDocument", doc);
+		FeedRequest("textDocument/formatting", 9, params);
+		const Value* resp = ResponseForId(9);
+		TEST_ASSERT_NOT_NULL(resp);
+		Value result = resp->Member("result");
+		TEST_ASSERT(result.IsArray());
+		bool onSecondLine = false;
+		for (uint32 i = 0; i < result.Size(); ++i)
+			onSecondLine |= result.At(i).Member("range").Member("start").Member("line").GetInt(0) == 1;
+		TEST_ASSERT(onSecondLine);
+
+		m_Server->HoldAnalysis(false);
+		m_Server->WaitForCurrentWork();
+		TEST_PASSED();
+	}
+
 	void LspServerTest::TestFormattingCapabilityAndRequest()
 	{
 		const std::string program = "void Run(){\n     int x   = 1+2;\n}\n"; // needs: `{`->space, `x = 1 + 2`, indent normalized to exactly 4 spaces

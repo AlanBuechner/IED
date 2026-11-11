@@ -1,5 +1,6 @@
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/AccessCheck.h"
+#include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/CastRules.h"
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/SimdOperands.h"
@@ -194,8 +195,20 @@ namespace Scripting
 			return ResolveReferenceCast(n, operand.value, static_cast<const ReferenceType*>(target.value));
 		if (n->GetKind() == CastExpressionNode::CastKind::DynamicCast)
 			return ResolveDynamicCast(n, operand.value, target.value, false);
+		// An array cast to a pointer or an integer is the address of its first element, as in C++.
+		if (TypeHandle::UnwrapToValue(target.value)->GetKind() != TypeKind::Array) operand.value = ArrayAsPointer(operand.value);
 		if (Core::String why = CastRules::WhyRejected(n->GetKind(), operand.value.type, target.value); !why.empty())
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, why));
+		// A derived object to its base by value is what `Base b = derived;` does: a copy of the base part, of the base's own
+		// type, which a ConvertNode would not make (`c ? (Base)a : (Base)b` joined two values of the derived type).
+		const auto* toObject = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(target.value));
+		const auto* fromObject = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(operand.value.type));
+		if (toObject && fromObject && toObject != fromObject && ClassHierarchy::DerivesFrom(fromObject, toObject))
+		{
+			auto sliced = InitialValue(m_Ctx, operand.value, target.value);
+			if (!sliced.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(sliced.error, sliced.message));
+			return Value::R(sliced.value, target.value);
+		}
 		const bool keepsBits = CastRules::KeepsBits(n->GetKind(), operand.value.type, target.value);
 		if (const auto* lanes = dynamic_cast<const SwizzleType*>(TypeHandle::UnwrapToValue(target.value)))
 			return m_Ctx.Fail(n, VectorCast(m_Ctx.LoadIfNeeded(operand.value), lanes, keepsBits));

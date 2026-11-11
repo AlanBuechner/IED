@@ -78,13 +78,14 @@ namespace Scripting
 			auto& cv = m_SourceCVs[sourceId];
 			if (!cv)
 				cv = std::make_shared<std::condition_variable>();
+			// Only a released response wakes it: one merely pushed belongs to a unit not dispatched yet, and a spurious
+			// wakeup must not let that unit's thread run beside the scheduler (BUG-436).
 			cv->wait(lock, [this, sourceId]() {
-				return m_PendingResponses.count(sourceId);
+				return m_ReleasedResponses.count(sourceId);
 			});
 
-			// Remove and return the response
-			CompilerResponse response = m_PendingResponses[sourceId];
-			m_PendingResponses.erase(sourceId);
+			CompilerResponse response = std::move(m_ReleasedResponses[sourceId]);
+			m_ReleasedResponses.erase(sourceId);
 			return response;
 		}
 
@@ -108,8 +109,11 @@ namespace Scripting
 		bool FlushPendingResponse(uint32 sourceId)
 		{
 			std::lock_guard<std::mutex> lock(m_Mutex);
-			if (m_PendingResponses.count(sourceId))
+			auto pending = m_PendingResponses.find(sourceId);
+			if (pending != m_PendingResponses.end())
 			{
+				m_ReleasedResponses[sourceId] = std::move(pending->second);
+				m_PendingResponses.erase(pending);
 				auto& cv = m_SourceCVs[sourceId];
 				if (cv)
 					cv->notify_one(); // wake only the thread waiting for this sourceId
@@ -155,7 +159,8 @@ namespace Scripting
 		std::unordered_map<uint32, std::shared_ptr<std::condition_variable>> m_SourceCVs;  // per-sourceId CV for targeted response delivery
 
 		Core::Vector<CompilerMessage> m_RequestQueue;       // messages sent TO the compiler instance
-		std::unordered_map<uint32, CompilerResponse> m_PendingResponses;  // sourceId -> pending response (one per unit)
+		std::unordered_map<uint32, CompilerResponse> m_PendingResponses;  // sourceId -> response pushed, not yet released (one per unit)
+		std::unordered_map<uint32, CompilerResponse> m_ReleasedResponses; // sourceId -> response its waiting thread may take
 	};
 
 }

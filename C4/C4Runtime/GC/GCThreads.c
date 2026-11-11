@@ -35,13 +35,14 @@ void gc_threads_remove(GCThreads* threads, GCThread* thread)
 	gc_mem_free(thread);
 }
 
-// A thread stopped inside its allocation fast path would leave its cache half changed: let it finish first.
+// A thread stopped inside its allocation fast path would leave its cache half changed, one inside a no-stop region its
+// own structures: let it finish first.
 static void stop(GCThread* thread)
 {
 	for (;;)
 	{
 		if (!gc_os_suspend(&thread->os)) gc_os_fatal("the collector could not stop a thread");
-		if (!__atomic_load_n(&thread->inAllocator, __ATOMIC_ACQUIRE)) return;
+		if (!__atomic_load_n(&thread->inAllocator, __ATOMIC_ACQUIRE) && !__atomic_load_n(&thread->noStop, __ATOMIC_ACQUIRE)) return;
 		gc_os_resume(&thread->os);
 		gc_os_yield();
 	}

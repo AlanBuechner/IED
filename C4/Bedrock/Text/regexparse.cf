@@ -176,6 +176,7 @@ namespace Core
 		}
 		else {
 			at += 1;
+			if (AtLookaround()) return Fail("lookahead and lookbehind are not supported: the engine matches in linear time", start);
 			if (Peek() == 'P' || Peek() == '<') {
 				number = GroupName();
 				if (number < 0) return -1;
@@ -222,6 +223,12 @@ namespace Core
 		groups += 1;
 		names.Push(name);
 		return groups;
+	}
+
+	// (?= (?! (?<= (?<!, past the '(?'.
+	bool RegexParser::AtLookaround() const {
+		const int32 c = Peek() == '<' ? PeekAfter() : Peek();
+		return c == '=' || c == '!';
 	}
 
 	// i, m and s, turned off after a '-', up to a ':' or ')'.
@@ -403,6 +410,7 @@ namespace Core
 		if (letter == 'a') return 7;
 		if (letter == 'x') return HexEscape(start);
 		if (letter < 128 && !IsAsciiAlnum(letter)) return letter;
+		if (letter >= '1' && letter <= '9') return Fail("backreferences are not supported: the engine matches in linear time", start);
 		return Fail("an escape that means nothing here", start);
 	}
 

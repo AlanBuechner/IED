@@ -162,7 +162,7 @@ namespace Scripting
 			}
 			auto part = AssignedPart(n, targetT, source);
 			if (!part.Ok()) return QueryResult<Value>::Fail(part.error, part.message);
-			auto assigned = Lifecycle(m_Ctx).Assign(target.lvalue, part.value);
+			auto assigned = Lifecycle(m_Ctx).Assign(target.lvalue, part.value, n);
 			if (!assigned.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(assigned.error, assigned.message));
 			return Value::L(assigned.value);
 		}

@@ -90,10 +90,12 @@
 [link("c4_thread_detach")] void thread_detach(void* thread) noexcept;
 [link("c4_thread_current_id")] uint64 thread_current_id() noexcept;
 [link("c4_thread_hardware_count")] uint32 thread_hardware_count() noexcept;
+[link("c4_thread_core_count")] uint32 thread_core_count() noexcept;
 [link("c4_thread_yield")] void thread_yield() noexcept;
 [link("c4_cpu_relax")] void cpu_relax() noexcept;
 [link("c4_thread_sleep_ns")] void thread_sleep_ns(int64 ns) noexcept;
 [link("c4_thread_set_name")] int32 thread_set_name(const char* name) noexcept;
+[link("c4_thread_pin_to_core")] int32 thread_pin_to_core(int32 core) noexcept;
 [link("c4_thread_name")] int32 thread_name(char* out, int32 cap) noexcept;
 [link("c4_wait_on_address")] bool wait_on_address(void* address, void* expected, uint64 size, int64 timeoutNs) noexcept;
 [link("c4_wake_one")] void wake_one(void* address) noexcept;

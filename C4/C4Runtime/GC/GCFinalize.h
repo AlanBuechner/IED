@@ -37,6 +37,7 @@ uint64_t gc_finalize_drop_in(GCPtrMap* registry, GCFinalizerQueue* ready, const 
 // Run a finalizer or a callback C4 code registered; an exception escaping one is a fatal error (GCCallbacks.cpp).
 void c4_gc_run_finalizer(gc_finalizer_fn fn, void* object);
 void c4_gc_run_collection_result(void (*fn)(void*), void* userData);
+void c4_gc_run_mark_end(void (*fn)(void*, void*), void* userData, void* marker);
 void c4_gc_run_root_enumerator(void (*fn)(void*, void (*)(void*, void*), void*), void* userData, void (*visit)(void*, void*), void* visitContext);
 bool c4_gc_run_pool_keep(bool (*fn)(void*, void*), void* userData, void* object);
 void c4_gc_run_pool_release(void (*fn)(void*, void*), void* userData, void* object);

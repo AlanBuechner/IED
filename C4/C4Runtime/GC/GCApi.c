@@ -20,7 +20,7 @@ static int start_collector_thread(void);
 // C4_GC_CONCURRENT: "always", "never" or the live bytes from which automatic collections mark concurrently;
 // C4_GC_VERIFY=1 checks every concurrent mark (D-79); C4_GC_TRACE=1 prints a line about each concurrent cycle;
 // C4_GC_MIN_TRIGGER: the fewest live bytes that start an automatic collection (default 4 MiB), so small test programs
-// collect often. For tests and diagnosis.
+// collect often; C4_GC_POISON=1 fills each ended object with 0xDB bytes. For tests and diagnosis.
 static void configure_from_environment(GCState* gc)
 {
 	const char* trigger = getenv("C4_GC_MIN_TRIGGER");
@@ -33,6 +33,8 @@ static void configure_from_environment(GCState* gc)
 	gc->concurrent.verify = verify && verify[0] == '1';
 	const char* trace = getenv("C4_GC_TRACE");
 	gc->concurrent.trace = trace && trace[0] == '1';
+	const char* poison = getenv("C4_GC_POISON");
+	gc->heap.poison = poison && poison[0] == '1';
 }
 
 // The lock is held.
@@ -273,23 +275,41 @@ static inline __attribute__((always_inline)) void* allocate(GCAllocRequest reque
 	return p;
 }
 
-static GCAllocRequest request_of(size_t size, size_t align, int noscan)
+static GCAllocRequest request_of(size_t size, size_t align, GCScanKind scanKind)
 {
-	GCAllocRequest request = { size, align, noscan };
+	GCAllocRequest request = { size, align, scanKind };
 	return request;
 }
 
-void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0), __builtin_return_address(0), NULL); }
-void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1), __builtin_return_address(0), NULL); }
+void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, GC_SCAN_ALL), __builtin_return_address(0), NULL); }
+void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, GC_SCAN_NONE), __builtin_return_address(0), NULL); }
+
+static GCScanKind entries_scan_kind(c4_gc_entries kind)
+{
+	switch (kind)
+	{
+	case c4_gc_entries_strong: return GC_SCAN_ENTRIES;
+	case c4_gc_entries_weak_keys: return GC_SCAN_ENTRIES_WEAK_KEYS;
+	case c4_gc_entries_weak_values: return GC_SCAN_ENTRIES_WEAK_VALUES;
+	case c4_gc_entries_weak: return GC_SCAN_NONE;
+	}
+	gc_os_fatal("c4_alloc_entries: no such kind of entries");
+	return GC_SCAN_NONE;
+}
+
+void* c4_alloc_entries(size_t size, size_t align, c4_gc_entries kind)
+{
+	return allocate(request_of(size, align, entries_scan_kind(kind)), __builtin_return_address(0), NULL);
+}
 
 void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type)
 {
-	return allocate(request_of(size, align, 0), __builtin_return_address(0), type);
+	return allocate(request_of(size, align, GC_SCAN_ALL), __builtin_return_address(0), type);
 }
 
 void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type)
 {
-	return allocate(request_of(size, align, 1), __builtin_return_address(0), type);
+	return allocate(request_of(size, align, GC_SCAN_NONE), __builtin_return_address(0), type);
 }
 
 void c4_free(void* ptr)
@@ -353,6 +373,13 @@ void c4_gc_set_verify(bool on)
 {
 	gc_os_lock();
 	collector()->concurrent.verify = on ? 1 : 0;
+	gc_os_unlock();
+}
+
+void c4_gc_set_poison(bool on)
+{
+	gc_os_lock();
+	collector()->heap.poison = on ? 1 : 0;
 	gc_os_unlock();
 }
 
@@ -485,6 +512,53 @@ void c4_gc_unregister_collection_result(void* key)
 	gc_os_lock();
 	gc_map_remove(&collector()->results, key);
 	gc_os_unlock();
+}
+
+void c4_gc_register_mark_end(void* key, c4_gc_mark_end_fn fn, void* user_data)
+{
+	if (!key || !fn) return;
+	gc_os_lock();
+	GCEntry* entry = gc_map_upsert(&collector()->markEnds, key);
+	entry->a = (void*)fn;
+	entry->b = user_data;
+	gc_os_unlock();
+}
+
+void c4_gc_unregister_mark_end(void* key)
+{
+	gc_os_lock();
+	gc_map_remove(&collector()->markEnds, key);
+	gc_os_unlock();
+}
+
+bool c4_gc_is_marked(void* marker, const void* ptr)
+{
+	const GCMarker* m = (const GCMarker*)marker;
+	GCObject object = gc_heap_find(m->heap, ptr);
+	return !object.span || gc_object_marked(object);
+}
+
+void c4_gc_mark_now(void* marker, const void* ptr)
+{
+	GCMarker* m = (GCMarker*)marker;
+	GCObject object = gc_heap_find(m->heap, ptr);
+	if (!object.span) return;
+	gc_mark_object(m, object);
+	gc_mark_drain(m);
+}
+
+void c4_gc_nostop_enter(void)
+{
+	GCThread* self = this_thread();
+	__atomic_store_n(&self->noStop, self->noStop + 1, __ATOMIC_RELAXED);
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+}
+
+void c4_gc_nostop_leave(void)
+{
+	GCThread* self = this_thread();
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+	__atomic_store_n(&self->noStop, self->noStop - 1, __ATOMIC_RELAXED);
 }
 
 void c4_gc_pin(void* obj) { gc_os_lock(); gc_pin(collector(), obj); gc_os_unlock(); }

@@ -1,0 +1,60 @@
+// An array is the address of its first element where C++ decays it: pointer arithmetic, comparisons, `->`, `*`, casts and `...`.
+struct Pair
+{
+	public int32 m_A;
+	public int32 m_B;
+}
+
+struct Holder
+{
+	public char[8] m_Buffer;
+	public Pair[2] m_Pairs;
+	public char* m_At;
+}
+
+static char* FirstVariadicPointer(int32 unused, ...)
+{
+	va_list arguments;
+	va_start(arguments);
+	char* first = va_arg(arguments, char*);
+	va_end(arguments);
+	return first;
+}
+
+const char[4] c_Text = { 'a', 'b', 'c', 0 };
+
+int32 main()
+{
+	Holder h;
+	h.m_At = h.m_Buffer + 3;
+	if (h.m_At - h.m_Buffer != 3) return 1;
+	if (!(h.m_At > h.m_Buffer)) return 2;
+	if (h.m_Buffer == h.m_At) return 3;
+	h.m_Pairs[0].m_B = 7;
+	if (h.m_Pairs->m_B != 7) return 4;
+	h.m_Pairs->m_A = 9;
+	if (h.m_Pairs[0].m_A != 9) return 5;
+	uint64 address = (uint64)h.m_Buffer;
+	if (address != (uint64)&h.m_Buffer[0]) return 6;
+	char* cast = (char*)h.m_Buffer;
+	if (cast != &h.m_Buffer[0]) return 7;
+	int32[4] local = { 1, 2, 3, 4 };
+	int32* end = local + 4;
+	int32 sum = 0;
+	for (int32* p = local; p < end; p++) sum += *p;
+	if (sum != 10) return 8;
+	if (*(local + 2) != 3) return 9;
+	if (*local != 1) return 10;
+	*local = 5;
+	if (local[0] != 5) return 11;
+	*h.m_Pairs = h.m_Pairs[0];
+	if ((*h.m_Pairs).m_B != 7) return 12;
+	Pair[2] copies;
+	*copies = *h.m_Pairs;
+	if (copies[0].m_B != 7) return 13;
+	if (FirstVariadicPointer(0, h.m_Buffer) != &h.m_Buffer[0]) return 14;
+	if (FirstVariadicPointer(0, c_Text)[1] != 'b') return 15;
+	printf("%s %s\n", "ARRAY DECAY", c_Text);
+	printf("ARRAY DECAY OK\n");
+	return 0;
+}

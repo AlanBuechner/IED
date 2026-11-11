@@ -332,12 +332,15 @@ namespace Scripting
 
 		auto common = ConditionalBranches::CommonType(m_Ctx, thenV.value, elseV.value);
 		if (!common.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(common.error, common.message));
-		auto thenN = ConditionalBranches::BranchValue(m_Ctx, thenV.value, common.value);
-		if (!thenN.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(thenN.error, thenN.message));
-		auto elseN = ConditionalBranches::BranchValue(m_Ctx, elseV.value, common.value);
-		if (!elseN.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(elseN.error, elseN.message));
 		const Type* t = common.value;
-		return Value::R(m_Ctx.out->NewNode<TernaryNode>(t, m_Ctx.LoadIfNeeded(cond.value), thenN.value, elseN.value), t);
+		const HIRNode* condition = m_Ctx.LoadIfNeeded(cond.value);
+		// BUG-453: as in C++, a choice between two locations is the location chosen, so writes through it land.
+		if (const LValue* chosen = ConditionalBranches::ChosenLocation(m_Ctx, condition, thenV.value, elseV.value, t)) return Value::L(chosen);
+		auto thenN = ConditionalBranches::BranchValue(m_Ctx, thenV.value, t);
+		if (!thenN.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(thenN.error, thenN.message));
+		auto elseN = ConditionalBranches::BranchValue(m_Ctx, elseV.value, t);
+		if (!elseN.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(elseN.error, elseN.message));
+		return Value::R(m_Ctx.out->NewNode<TernaryNode>(t, condition, thenN.value, elseN.value), t);
 	}
 
 	QueryResult<Value> ExprLowerer::ResolveParen(const ParenthesizedExpressionNode* n)

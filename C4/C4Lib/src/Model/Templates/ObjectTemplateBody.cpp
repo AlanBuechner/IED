@@ -197,18 +197,13 @@ namespace Scripting
 	{
 		auto rt = m_Model.ResolveTypeInternal(*fn.GetReturnType(), m_UnitId, m_Binding, nullptr);
 		if (!rt.Ok()) return Fail("return type: " + rt.message);
+		// A parameter of the class's pack (`R Call(Ts... args)`) is one parameter per element, as a function template's is.
+		auto expanded = TemplateInstantiator::ExpandParameters(m_Model, fn, m_Binding, m_UnitId);
+		if (!expanded.Ok()) return Fail("parameter: " + expanded.message);
 		ObjectType::MethodInfo m;
 		m.mName = fn.GetName()->GetFirstIdentifierToken().GetText();
 		m.m_ReturnType = rt.value;
-		Core::Vector<FunctionType::ParameterInfo> params;
-		for (const auto& p : fn.GetParameters())
-		{
-			auto pt = m_Model.ResolveTypeInternal(*p->GetType(), m_UnitId, m_Binding, nullptr);
-			if (!pt.Ok()) return Fail("parameter: " + pt.message);
-			m.m_ParameterTypes.Push(pt.value);
-			FunctionType::ParameterInfo pi; pi.mName = p->GetNameToken().GetText(); pi.m_Type = pt.value;
-			params.Push(pi);
-		}
+		for (const auto& p : expanded.value.list) m.m_ParameterTypes.Push(p.m_Type);
 
 		// A declaration without a body takes the body of its out-of-line definition, matched by name and
 		// parameter types; the body's parameter names are the definition's (C++ lets them differ).
@@ -216,12 +211,13 @@ namespace Scripting
 		OutOfLine ool;
 		if (!body)
 		{
-			ool = FindOutOfLine(m.mName, m.m_ParameterTypes, fn.IsConstMethod());
+			ool = FindOutOfLine(m.mName, fn.GetParameters().Count(), m.m_ParameterTypes, fn.IsConstMethod());
 			if (ool.fn) body = ool.fn->GetBody().Get();
 		}
 		const FunctionDefinitionNode& named = ool.fn ? *ool.fn : fn;
+		const TemplateInstantiator::Parameters& namedParameters = ool.fn ? ool.parameters : expanded.value;
 
-		FunctionType* sig = new FunctionType(rt.value, params, fn.IsVariadic());
+		FunctionType* sig = new FunctionType(rt.value, expanded.value.list, fn.IsVariadic());
 		FunctionRecord rec;
 		rec.type = m_Model.m_Types->Own(sig);
 		rec.scope = m_Scope;
@@ -238,10 +234,16 @@ namespace Scripting
 		rec.definingUnit = 0;
 		rec.mangledName = MethodSymbol(m_Scope, m_Instance, m.mName, *sig, rec.isConst);
 		rec.name = m.mName;
-		rec.minArity = params.Count() - fn.TrailingDefaultCount();
-		for (const auto& p : named.GetParameters()) rec.paramNames.Push(p->HasName() ? p->GetNameToken().GetText() : "arg");
-		rec.paramIsConst = named.ParameterConstness();
-		for (const auto& p : fn.GetParameters()) rec.paramDefaults.Push(p->GetDefaultValue().Get());
+		rec.minArity = expanded.value.list.Count() - fn.TrailingDefaultCount();
+		const std::vector<bool> written = named.ParameterConstness();
+		for (uint32 i = 0; i < namedParameters.list.Count(); ++i)
+		{
+			const Core::String& name = namedParameters.list[i].mName;
+			rec.paramNames.Push(!name.empty() ? name : Core::String("arg"));
+			rec.paramIsConst.push_back(written[namedParameters.source[i]]);
+			rec.paramDefaults.Push(fn.GetParameters()[expanded.value.source[i]]->GetDefaultValue().Get());
+		}
+		TemplateInstantiator::RecordParameterPacks(rec, named, namedParameters.source);
 		for (const auto& ann : fn.GetAnnotations()) CollectOperatorAnnotations(ann.Get(), fn.GetParameters().Count(), rec.operatorAnnotations);
 		if (auto lifecycle = CheckLifecycleOperators(rec); !lifecycle.Ok()) return Fail(lifecycle.message);
 
@@ -263,15 +265,17 @@ namespace Scripting
 		return Result::Success();
 	}
 
-	ObjectTemplateBody::OutOfLine ObjectTemplateBody::FindOutOfLine(const Core::String& method, const Core::Vector<const Type*>& parameters, bool isConst) const
+	ObjectTemplateBody::OutOfLine ObjectTemplateBody::FindOutOfLine(const Core::String& method, uint32 written, const Core::Vector<const Type*>& parameters,
+		bool isConst) const
 	{
 		if (!m_Def.params) return {}; // a member type of an instance defines its methods in its body
 		for (const auto& def : m_Model.m_TemplateMethodDefs)
 		{
-			if (def.name != method || def.arity != parameters.Count() || def.definition->IsConstMethod() != isConst) continue;
+			if (def.name != method || def.arity != written || def.definition->IsConstMethod() != isConst) continue;
 			if (def.definition->GetOwnerTemplateDefinition() || !Defines(def)) continue; // a member template's definition
 			Scope* binding = BindingFor(*def.definition);
-			if (SameParameters(*def.definition, binding, parameters)) return { def.definition, binding };
+			auto theirs = TemplateInstantiator::ExpandParameters(m_Model, *def.definition, binding, m_UnitId);
+			if (theirs.Ok() && SameParameters(theirs.value, parameters)) return { def.definition, binding, theirs.value };
 		}
 		return {};
 	}
@@ -315,13 +319,11 @@ namespace Scripting
 		return binding;
 	}
 
-	bool ObjectTemplateBody::SameParameters(const FunctionDefinitionNode& definition, Scope* binding, const Core::Vector<const Type*>& parameters) const
+	bool ObjectTemplateBody::SameParameters(const TemplateInstantiator::Parameters& definition, const Core::Vector<const Type*>& parameters)
 	{
+		if (definition.list.Count() != parameters.Count()) return false;
 		for (uint32 i = 0; i < parameters.Count(); ++i)
-		{
-			auto t = m_Model.ResolveTypeInternal(*definition.GetParameters()[i]->GetType(), m_UnitId, binding, nullptr);
-			if (!t.Ok() || t.value != parameters[i]) return false;
-		}
+			if (definition.list[i].m_Type != parameters[i]) return false;
 		return true;
 	}
 

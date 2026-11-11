@@ -84,6 +84,10 @@ Note: the test runtime is linked into **every** executable, so the assertions al
    `[test]`; with none, the normal entry point is required). The program does not need a `main`;
    if it has one, it is used for normal builds and ignored under `-test`.
 
+With a build description (`--projects`), the harness runs the root project's tests and fixtures only: a project it
+depends on is compiled with it, and its own `-test` build runs its tests
+([15-projects.md](../language/15-projects.md) rule 7). A root with no test of its own keeps its `main`.
+
 The generated harness runs, in order:
 
 1. the global `[test_setup]`;
@@ -94,14 +98,17 @@ The generated harness runs, in order:
 5. a summary, then `return` the number of **failed assertions** (0 = all pass).
 
 Each case prints `[TEST] <name>`, then `ok <name> (0.012 ms)` or `FAILED <name> (...)` with its wall-clock
-time. A failed assertion prints `FAIL: <file>:<line>: <message>`, where file and line are the assertion's.
+time. A failed assertion prints `FAIL: <file>:<line>: <message>`, where file and line are the assertion's,
+and flushes it: the test goes on after a failure, so if it then crashes a redirected log still has what failed first.
 Each case runs inside a catch-all: an exception that leaves it prints `FAIL: <name>: an exception left the
 test`, counts as a failed assertion, and the run goes on with the next case.
 
 - `-test-json <path>` (a compiler option) makes the run write a JSON summary: the case and assertion
   counts and a `cases` array of `{ name, file, line, passed, milliseconds }`.
 - `--filter <glob>` (an argument of the test executable) runs only the cases whose name matches: `*` is any
-  run of characters, `?` one character (`tests.exe --filter "math.*"`). The fixtures still run.
+  run of characters, `?` one character (`tests.exe --filter "math.*"`). Without either it names a case or a
+  group: `--filter math.vector` runs `math.vector` and every `math.vector.*`, not `math.vectors.add`. The
+  fixtures still run.
 
 C4.exe does not run the executable; you (or Nuke) run it and read the exit code.
 
@@ -118,6 +125,8 @@ A project carries its tests in an in-source `src/tests/` folder. A project with 
   `-test -test-json <int>/tests/results.json` into `build/bin/<Config>-windows-x64/<Project>/<Project>-tests.exe`
   (intermediates in `<int>/tests/`), runs it from the
   project folder (passing `--filter` on), runs every harness even after one fails, and exits 1 if any failed.
+  A filter that no harness ran a case of is said so (`no test case matches --filter "..."`), not passed in
+  silence.
 
 See [tools/02-nuke.md](../tools/02-nuke.md#3-tests).
 

@@ -1,4 +1,5 @@
 #include "Script/HostInterface.h"
+#include "Script/ScriptLayer.h"
 #include "Compiler/CpuTarget.h"
 #include "Compiler/FileIo.h"
 #include <llvm/Support/MemoryBuffer.h>
@@ -182,6 +183,33 @@ namespace Scripting
 			if (error) *error = why;
 			return false;
 		}
+	}
+
+	std::string SerializeLayer(const ScriptLayer& layer)
+	{
+		Writer out;
+		out.Text(layer.project);
+		out.Texts(layer.folders);
+		out.U32(static_cast<uint32>(layer.files.size()));
+		for (const InterfaceFile& file : layer.files) WriteFile(out, file);
+		out.Texts(layer.symbols);
+		out.Texts(layer.reflectedTypes);
+		return out.Take();
+	}
+
+	bool DeserializeLayer(std::string_view bytes, ScriptLayer& layer)
+	{
+		Reader in(bytes);
+		ScriptLayer read;
+		read.project = in.Text();
+		read.folders = in.Texts();
+		const uint32 files = in.U32();
+		for (uint32 i = 0; i < files && in.Ok(); ++i) read.files.push_back(ReadFile(in));
+		read.symbols = in.Texts();
+		read.reflectedTypes = in.Texts();
+		if (!in.Ok() || !in.AtEnd()) return false;
+		layer = std::move(read);
+		return true;
 	}
 
 	std::string SerializeInterface(const HostInterface& host)

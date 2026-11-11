@@ -47,6 +47,13 @@ namespace Scripting
 			return Lifecycle(ctx).CopyOf(part);
 		}
 
+		// What `arg` is when it is no location a non-const reference can keep: a value, or a temporary.
+		Core::String NoLocation(const Value& arg)
+		{
+			if (!arg.isLValue) return "a value, not a location";
+			return ReferenceBinding::Passing(arg.lvalue);
+		}
+
 		// `this` names the receiver object; where a pointer is wanted it is the receiver's address, as C++'s `this` is.
 		Value ReceiverAsPointer(LoweringContext& ctx, const Value& source, const Type* target)
 		{
@@ -85,7 +92,8 @@ namespace Scripting
 			(from ? from->GetName() : Core::String("?")) + "': " + converted.message);
 	}
 
-	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param)
+	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param,
+		const AstNode* site)
 	{
 		if (!param || !loaded) return QueryResult<const HIRNode*>(loaded);
 		const Type* declared = param;
@@ -121,6 +129,12 @@ namespace Scripting
 				if (!converted.Ok()) return converted;
 				return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, Lifecycle(ctx).Temporary(converted.value)));
 			}
+			// BUG-453: as in C++, what the callee writes through a non-const reference must land in a location that lasts.
+			if (!ref->IsConstReferent())
+				if (Core::String what = NoLocation(arg); !what.empty())
+					return QueryResult<const HIRNode*>::Fail(QueryError::NotAValue, "cannot bind a non-const reference to a temporary: the "
+						"argument is " + what + ", so what the callee writes through it would be lost; pass a variable, or take 'const " +
+						referent->GetName() + "&'", site ? site->startLocation : SourceLocation());
 			if (arg.isLValue) return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, arg.lvalue, true)); // for the call only
 			// An address the program computes (`&x` bound to a `const T*&`) is a value like any other: codegen takes an
 			// AddressOf argument as the bound address itself, so the value goes through a temporary (BUG-278).

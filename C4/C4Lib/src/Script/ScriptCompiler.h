@@ -2,9 +2,11 @@
 #include "Core/Core.h"
 #include "Compiler/CpuTarget.h"
 #include "Script/HostInterface.h"
+#include "Script/ScriptLayer.h"
 #include "Script/ScriptSources.h"
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -21,15 +23,6 @@ namespace Scripting
 	class CompilerInstance;
 	class ErrorTracker;
 
-	/// A host interface's lookups, made once for every compile against it.
-	struct HostIndex
-	{
-		explicit HostIndex(const HostInterface& host);
-		std::unordered_set<std::string> symbols; // the table's entries
-		std::unordered_set<std::string> types;   // the types the host's reflection registered
-		CpuTarget target;                        // the host's processor: every script compiles for it (D-62)
-	};
-
 	struct ScriptCompileOptions
 	{
 		std::string name;                           // the script's name, also its reflection tag
@@ -38,6 +31,12 @@ namespace Scripting
 		std::map<std::string, std::string> defines;
 		bool optimize = true;                       // -O2; false: -O0
 		bool debugInfo = false;                     // CodeView for a debug script's PDB (section 6.4)
+		std::optional<bool> debug;                  // this script debugged or not, whatever the host's setting says
+		std::string project;                        // the project its files are in (section 5.2); empty: "script"
+		std::vector<std::string> roots;             // the folders its includes resolve from; none: each file's own folder
+		bool extensible = false;                    // other scripts may compile against and link to it (section 5.2)
+		std::shared_ptr<const ScriptChain> base;    // the script it extends; null: its host alone
+		bool baseMissing = false;                   // it was asked to extend a script that is not extensible
 	};
 
 	/// A compiled script, ready to link: its module (null when it did not compile) and its context, which outlives it.
@@ -47,6 +46,7 @@ namespace Scripting
 		std::unique_ptr<llvm::Module> module;
 		std::vector<std::string> threadLocals; // the script's thread_local globals; LLVM's emulated TLS controls them through `__emutls_v.<name>`
 		std::string diagnostics;               // every error and warning, as the compiler prints them
+		std::optional<ScriptLayer> layer;      // an extensible script's (section 5.2)
 	};
 
 	/// Compiles a script against its host (docs/runtime/04 section 4): registers the interface and the script,

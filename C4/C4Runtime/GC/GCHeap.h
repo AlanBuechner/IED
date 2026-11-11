@@ -1,15 +1,15 @@
 #pragma once
 // Objects: small ones in slots of size-class spans, large ones (over GC_SMALL_MAX, or aligned beyond
-// GC_SMALL_ALIGN_MAX) in a span of their own. Spans of a class that holds pointers and one that does not
-// ("noscan") are kept apart, so marking can skip the noscan ones whole. A thread allocates small objects from
-// spans it owns (GCThreads.h) without the collector's lock; everything else here runs under it.
+// GC_SMALL_ALIGN_MAX) in a span of their own. Spans of each scan kind are kept apart, so marking reads a span's
+// objects one way (and skips the noscan ones whole). A thread allocates small objects from spans it owns
+// (GCThreads.h) without the collector's lock; everything else here runs under it.
 
 #include "GC/GCPageHeap.h"
 #include "GC/GCSizeClasses.h"
 #include <string.h>
 
 #define GC_SMALL_ALIGN_MAX 64u
-#define GC_SPAN_CLASSES (GC_CLASS_COUNT * 2u)
+#define GC_SPAN_CLASSES (GC_CLASS_COUNT * (uint32_t)GC_SCAN_KINDS)
 
 typedef struct GCClassSpans
 {
@@ -24,7 +24,10 @@ typedef struct GCHeap
 	GCSpan* large;            // every large span (doubly linked)
 	int64_t liveBytes;        // bytes of slots holding objects, as far as the heap has heard (thread caches report late)
 	int allocateMarked;       // set while a collection marks (also beside the program): new objects count as reached
+	int poison;               // C4_GC_POISON=1: ended objects are filled with GC_POISON_BYTE, so a later read faults
 } GCHeap;
+
+#define GC_POISON_BYTE 0xDBu  // 0xDBDB... is no canonical address: a pointer read from a freed object faults at its use
 
 typedef struct GCObject
 {
@@ -36,16 +39,16 @@ typedef struct GCAllocRequest
 {
 	size_t size;
 	size_t align;
-	int noscan;
+	GCScanKind scanKind;
 } GCAllocRequest;
 
-// A small request's size class span index (class * 2 + noscan), or -1 for a large one.
+// A small request's span class (class * GC_SCAN_KINDS + scanKind), or -1 for a large one.
 static inline int gc_heap_small_class(GCAllocRequest request)
 {
 	const size_t align = request.align < GC_MIN_ALIGN ? GC_MIN_ALIGN : request.align;
 	const size_t size = ((request.size ? request.size : 1) + align - 1) & ~(align - 1);
 	if (size > GC_SMALL_MAX || align > GC_SMALL_ALIGN_MAX) return -1;
-	return (int)(gc_class_of(size) * 2u + (request.noscan ? 1u : 0u));
+	return (int)(gc_class_of(size) * (uint32_t)GC_SCAN_KINDS + (uint32_t)request.scanKind);
 }
 
 // Zeroed storage for one large object; NULL when the OS gives no more memory.

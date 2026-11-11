@@ -196,18 +196,20 @@ namespace Scripting
 			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
 
-		// Written beside its final name and moved there once complete, so an interrupted build never leaves a partial
-		// object where a later build would take it for a finished one. LLVM's file calls take paths longer than
+		// Written beside its final name under a name of this process's own and moved there once complete, so an
+		// interrupted build never leaves a partial object where a later build would take it for a finished one, and two
+		// compilers making the same object at once never take each other's (BUG-442); a rename that fails because the
+		// other put its copy - the same bytes - in place first is no error. LLVM's file calls take paths longer than
 		// MAX_PATH (a deep build folder), std::filesystem's do not.
 		void AssembleInto(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
 		{
-			const std::string unfinished = objPath + ".tmp";
+			const std::string unfinished = PrivatePartialPath(objPath);
 			const size_t before = diagnostics.size();
 			Assemble(module, settings, unfinished, diagnostics);
 			std::error_code ec;
 			if (diagnostics.size() == before) ec = llvm::sys::fs::rename(unfinished, objPath);
-			if (ec) diagnostics.push_back({ 0, "cannot move the object '" + unfinished + "' into place: " + ec.message() });
-			if (diagnostics.size() != before) llvm::sys::fs::remove(unfinished);
+			if (ec && !llvm::sys::fs::exists(objPath)) diagnostics.push_back({ 0, "cannot move the object '" + unfinished + "' into place: " + ec.message() });
+			if (ec || diagnostics.size() != before) llvm::sys::fs::remove(unfinished);
 		}
 
 		// One partition of the module and the object its code is kept as: its bitcode, or a keyed module's builder.
@@ -277,6 +279,7 @@ namespace Scripting
 			{
 				partitions[i].objPath = cache.ObjectFor(split.partitions[i]).string();
 				partitions[i].bitcode = std::move(split.partitions[i]);
+				cache.Claim(partitions[i].objPath); // before it is looked for, so another build's pruning spares it (BUG-443)
 			}
 			extracted = std::move(split.extracted);
 			return partitions;
@@ -321,6 +324,16 @@ namespace Scripting
 			}
 			else AssembleInParallel(missing, settings);
 			return missing;
+		}
+
+		// An object another build pruned after this one found it, before its claim was there to be read (BUG-443), is
+		// assembled again.
+		void AssembleVanished(std::vector<Partition>& parts, const ObjectSettings& settings)
+		{
+			std::unordered_set<std::string> looked;
+			for (Partition& part : parts)
+				if (looked.insert(part.objPath).second && part.diagnostics.empty() && !llvm::sys::fs::exists(part.objPath))
+					AssemblePartition(part, settings); // a partition that failed has its diagnostics already
 		}
 
 		// The objects of `parts`, or none, with every partition's diagnostics, when one failed; the cache keeps only them.
@@ -392,6 +405,7 @@ namespace Scripting
 		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache, extracts, extracted);
 		const double splitSeconds = SecondsSince(start);
 		const std::vector<Partition*> assembled = AssembleMissing(module, parts, settings);
+		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, assembled, cache, diagnostics);
 		objects.splitSeconds = splitSeconds;
 		objects.extracted = std::move(extracted);
@@ -436,6 +450,7 @@ namespace Scripting
 			{
 				const std::lock_guard<std::mutex> held(lock);
 				if (!claimed.insert(part.objPath).second) return;
+				cache.Claim(part.objPath); // before it is looked for, so another build's pruning spares it (BUG-443)
 			}
 			if (llvm::sys::fs::exists(part.objPath)) return;
 			AssemblePartition(part, settings);
@@ -444,6 +459,7 @@ namespace Scripting
 		std::vector<Partition*> made;
 		for (size_t i = 0; i < parts.size(); ++i)
 			if (assembled[i]) made.push_back(&parts[i]);
+		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, made, cache, diagnostics);
 		written.clear();
 		for (size_t i = 0; i < partitions; ++i) written.push_back(std::move(parts[i].bitcode));

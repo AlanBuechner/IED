@@ -1,0 +1,9 @@
+void Fill(int32& x) { x = 7; }
+
+int32 main()
+{
+	int32 a = 0;
+	bool first = a == 0;
+	Fill(first ? a : 3);
+	return a;
+}

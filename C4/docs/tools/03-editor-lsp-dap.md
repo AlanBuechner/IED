@@ -22,7 +22,8 @@ The server never re-implements language rules. It links C4Lib, compiles the work
 pipeline as C4.exe, and answers every request from the compiler's own data:
 
 - **Diagnostics**: parse errors per file plus ProgramModel errors, plus the errors from running the same
-  HIR lowering pass C4.exe runs over every function body. Lowering is skipped when the front end already
+  HIR lowering pass C4.exe runs over every function body and every global's start (its initializer, or its
+  construction: BUG-433 left those unchecked). Lowering is skipped when the front end already
   has hard errors (exactly like C4.exe). Results are de-duplicated by (line, column, message), so the
   editor shows exactly what a build would print. While a front-end error stops an analysis short of the bodies (every
   keystroke of an edit makes one), each other file whose text is unchanged and has no front-end error of its own keeps
@@ -89,6 +90,8 @@ A qualified name is looked up from the namespace or class it is written in, then
   before). With a usable description a program compiles its projects, each with its own defines and boundary
   ([../language/15-projects.md](../language/15-projects.md)); without one, the files beside each open document it
   takes (not the folders under them: a workspace folder can hold many programs) and everything under `includePaths`.
+  A program is analyzed as its `-test` build sees it, `TEST` defined: the tests under `#ifdef TEST` have their
+  outline, navigation and diagnostics as the rest of its code does (BUG-452).
   `workspace/didChangeConfiguration` with `{settings: {programs}}` replaces the programs (an options file changed); a
   program whose options are the same keeps its analysis, and one whose build description file changed is analyzed
   again.
@@ -346,7 +349,8 @@ handles.)
   reports that line. A function's line table gives an inlined call's code the call's line all the way through, so
   a line binds to its own code (where the innermost frame is on it), and only where a function has none of that, to
   the first of the inlined code; a stop there shows the caller's frame on the line, outside the inlined calls. Breakpoints set before the program starts bind when
-  the program's module loads (a `breakpoint` event says so). Resuming from a breakpoint steps the original
+  the program's module loads (a `breakpoint` event says so). A module that loads later (a debug script's DLL, its next build) takes the breakpoints on its
+  sources, on the line it has for what was asked; one that unloads lets go of its own, a breakpoint left with none waiting unverified for the code to come back. Resuming from a breakpoint steps the original
   instruction with the trap flag, then puts the patch back.
 - **Stepping** is by source line, single-stepping instructions:
   - `next` runs a call it reaches to its return address (a temporary breakpoint that only counts when the
@@ -401,7 +405,7 @@ handles.)
 | `setBreakpoints`, `setExceptionBreakpoints` | Replace a source's breakpoints / the exception filters. |
 | `configurationDone` | Lets the program run. |
 | `threads`, `stackTrace`, `scopes`, `variables` | The program's threads; a thread's frames with their function, source and line; a frame's `Locals` scope; a value's children. |
-| `evaluate` | A variable of the frame or a global, then any chain of `.field`, `->field`, `[index]` and a leading `*` (hover and watch). |
+| `evaluate` | A variable of the frame, a field of its `this` by its bare name (a local of that name hides it, as in the code) or a global, then any chain of `.field`, `->field`, `[index]` and a leading `*` (hover and watch). |
 | `continue`, `next`, `stepIn`, `stepOut`, `pause` | Run and step; `pause` breaks into the running program. |
 | `disconnect`, `terminate` | End the program and the session. |
 

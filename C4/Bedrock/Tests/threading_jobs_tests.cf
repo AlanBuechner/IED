@@ -12,6 +12,26 @@ Threading::JobSystemDesc Workers(int32 frame, int32 background) {
 	return desc;
 }
 
+[test("threading.jobs.pinned_workers_run_jobs_on_a_core_each")]
+void PinnedWorkersRun() {
+	assert_true(Threading::Thread::PinCurrentToCore(0), "core 0 is always there");
+	assert_true(!Threading::Thread::PinCurrentToCore(100000), "a core that is not there says so");
+	assert_true(!Threading::Thread::PinCurrentToCore(-1), "nor is a negative one");
+	Threading::JobSystemDesc desc;
+	desc.pinToCores = true;
+	desc.backgroundWorkers = 0;
+	Threading::Atomic<int32> ran;
+	{
+		Threading::JobSystem jobs = Threading::JobSystem(desc);
+		int32 cores = Threading::Thread::CoreCount();
+		assert_eq(cores > 1 ? cores - 1 : 1, jobs.FrameWorkerCount(), "by default the cores less the maker's");
+		Threading::WaitGroup group;
+		for (int32 j = 0; j < 64; j += 1) jobs.Submit([&ran]() -> void { ran.FetchAdd(1); }, Threading::JobPriority::High, &group);
+		jobs.Wait(group);
+	}
+	assert_eq((int32)64, ran.Load(), "every job ran");
+}
+
 // A job that holds its worker until the gate opens.
 class Gate {
 	public Threading::Atomic<int32> open;

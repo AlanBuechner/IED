@@ -12,13 +12,14 @@ namespace Scripting
 			return signature->GetKind() == TypeKind::Func ? "func" : "function pointer";
 		}
 
-		QueryResult<const HIRNode*> Argument(LoweringContext& ctx, const SignatureType* fp, const Type* param, const HIRNode* arg, const Value& value, size_t index)
+		QueryResult<const HIRNode*> Argument(LoweringContext& ctx, const SignatureType* fp, const Type* param, const HIRNode* arg, const Value& value,
+			size_t index, const AstNode* site)
 		{
 			auto fail = [&](const Core::String& why) {
 				return QueryResult<const HIRNode*>::Fail(QueryError::NotAValue, "argument " + std::to_string(index + 1) + " of the " + Former(fp) + " call " + why);
 			};
 			if (!arg) return fail("cannot be a braced list");
-			if (param->GetKind() == TypeKind::Reference) return BindArgument(ctx, value, arg, param);
+			if (param->GetKind() == TypeKind::Reference) return BindArgument(ctx, value, arg, param, site);
 			auto converted = ConvertedValue(ctx, value.isLValue ? value : Value::R(arg, arg->type), param);
 			if (converted.Ok()) return converted;
 			const Type* actual = arg->type ? TypeHandle::UnwrapToValue(arg->type) : nullptr;
@@ -37,7 +38,7 @@ namespace Scripting
 		call->target = target;
 		for (size_t i = 0; i < args.size(); ++i)
 		{
-			auto arg = Argument(ctx, fp, fp->GetParameterTypes()[static_cast<uint32>(i)], args[i], values[i], i);
+			auto arg = Argument(ctx, fp, fp->GetParameterTypes()[static_cast<uint32>(i)], args[i], values[i], i, site);
 			if (!arg.Ok()) return ctx.Fail(site, QueryResult<Value>::Fail(arg.error, arg.message));
 			call->args.push_back(arg.value);
 		}

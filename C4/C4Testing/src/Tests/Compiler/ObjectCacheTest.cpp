@@ -241,6 +241,61 @@ namespace Testing
 		fs::remove_all(folder.parent_path());
 	}
 
+	// BUG-442: two compilers building one project at once - the first to finish pruned the other's unfinished objects,
+	// and its rename failed ("cannot move the object ... into place").
+	void ObjectCacheTest::Bug442KeepOnlySparesWhatAnotherBuildJustWrote()
+	{
+		const fs::path folder = FreshFolder("keep-partials");
+		const ObjectCache cache(folder, "salt");
+		const std::string object = cache.ObjectFor("being-written").string();
+		const fs::path running = object + ".4-0.tmp";            // the System process's: running, whoever asks
+		const fs::path ended = object + ".4294967290-0.tmp";      // no process has that id
+		const fs::path ours = PrivatePartialPath(object);         // this process's: none of it is in flight here
+		for (const fs::path& path : { running, ended, ours }) std::ofstream(path) << "x";
+		TEST_ASSERT(IsAnotherBuildsPartial(running.string()));
+		TEST_ASSERT(!IsAnotherBuildsPartial(ended.string()));
+		TEST_ASSERT(!IsAnotherBuildsPartial(ours.string()));
+		TEST_ASSERT(!IsAnotherBuildsPartial(object));
+		cache.KeepOnly({});
+		TEST_ASSERT(fs::exists(running));
+		TEST_ASSERT(!fs::exists(ended));
+		TEST_ASSERT(!fs::exists(ours));
+		fs::remove_all(folder.parent_path());
+	}
+
+	// BUG-443: a build that finished pruned the objects another build of the project, from other sources, was about to
+	// link. What a running process claimed stays; an ended one's claims go, and a process's own do not keep what its own
+	// build no longer uses.
+	void ObjectCacheTest::Bug443KeepOnlySparesWhatAnotherBuildClaimed()
+	{
+		const fs::path folder = FreshFolder("keep-claims");
+		const ObjectCache cache(folder, "salt");
+		const fs::path running = cache.ObjectFor("claimed-by-a-running-build");
+		const fs::path ended = cache.ObjectFor("claimed-by-an-ended-build");
+		const fs::path ours = cache.ObjectFor("claimed-by-this-process");
+		for (const fs::path& path : { running, ended, ours }) std::ofstream(path) << "x";
+		std::ofstream(folder / ".claim.4") << running.filename().string() << "\n";          // the System process's: running
+		std::ofstream(folder / ".claim.4294967290") << ended.filename().string() << "\n";   // no process has that id
+		cache.Claim(ours);
+		cache.KeepOnly({});
+		TEST_ASSERT(fs::exists(running));
+		TEST_ASSERT(fs::exists(folder / ".claim.4"));
+		TEST_ASSERT(!fs::exists(ended));
+		TEST_ASSERT(!fs::exists(folder / ".claim.4294967290"));
+		TEST_ASSERT(!fs::exists(ours));
+		fs::remove_all(folder.parent_path());
+	}
+
+	void ObjectCacheTest::Bug442EachWriteHasAPartialNameOfItsOwn()
+	{
+		const std::string object = "C:/cache/abc-123.obj";
+		const std::string first = PrivatePartialPath(object);
+		const std::string second = PrivatePartialPath(object);
+		TEST_ASSERT(first != second);
+		TEST_ASSERT(first.rfind(object + ".", 0) == 0);
+		TEST_ASSERT(first.size() > 4 && first.substr(first.size() - 4) == ".tmp");
+	}
+
 	// BUG-354: objects whose paths are longer than MAX_PATH are moved into place, found again and pruned. BUG-355: the
 	// first build of a process names its objects as the next does (the partition with the file-scope assembly lists its
 	// symbols whether or not the backend was set up before).

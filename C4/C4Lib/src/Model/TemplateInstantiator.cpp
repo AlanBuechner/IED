@@ -302,7 +302,7 @@ namespace Scripting
 			rec.paramDefaults.Push(p->GetDefaultValue().Get());
 		}
 		rec.isConst = (receiver || def.memberOf) && fn.IsConstMethod();
-		RecordParameterPacks(rec, fn, expanded.value);
+		RecordParameterPacks(rec, fn, expanded.value.source);
 		for (const auto& ann : fn.GetAnnotations()) CollectOperatorAnnotations(ann.Get(), fn.GetParameters().Count(), rec.operatorAnnotations);
 		if (def.memberOf)
 		{
@@ -334,29 +334,25 @@ namespace Scripting
 		return own;
 	}
 
-	void TemplateInstantiator::RecordParameterPacks(FunctionRecord& rec, const FunctionDefinitionNode& fn, const Signature& signature)
+	void TemplateInstantiator::RecordParameterPacks(FunctionRecord& rec, const FunctionDefinitionNode& fn, const std::vector<uint32>& source)
 	{
 		for (uint32 index = 0; index < fn.GetParameters().Count(); ++index)
 		{
 			if (!fn.GetParameters()[index]->IsPack()) continue;
 			FunctionRecord::ParameterPack pack;
 			pack.name = fn.GetParameters()[index]->GetNameToken().GetText();
-			pack.first = static_cast<uint32>(signature.source.size());
-			for (uint32 i = 0; i < signature.source.size(); ++i)
-				if (signature.source[i] == index) { pack.first = std::min(pack.first, i); ++pack.count; }
+			pack.first = static_cast<uint32>(source.size());
+			for (uint32 i = 0; i < source.size(); ++i)
+				if (source[i] == index) { pack.first = std::min(pack.first, i); ++pack.count; }
 			rec.parameterPacks.Push(pack);
 		}
 	}
 
-	QueryResult<TemplateInstantiator::Signature> TemplateInstantiator::FunctionSignature(const ProgramModel& model, const FunctionDefinitionNode& fn,
-		Scope* binding, uint32 unitId) const
+	QueryResult<TemplateInstantiator::Parameters> TemplateInstantiator::ExpandParameters(const ProgramModel& model, const FunctionDefinitionNode& fn,
+		Scope* binding, uint32 unitId)
 	{
-		// A parameter pack (`Ts... args`) is one parameter per element, named `args#0`, `args#1`, ... (D-19).
-		using Result = QueryResult<Signature>;
-		auto rt = model.ResolveTypeInternal(*fn.GetReturnType(), unitId, binding, nullptr);
-		if (!rt.Ok()) return Result::Fail(rt.error, rt.message);
-		Signature out;
-		Core::Vector<FunctionType::ParameterInfo> params;
+		using Result = QueryResult<Parameters>;
+		Parameters out;
 		for (uint32 index = 0; index < fn.GetParameters().Count(); ++index)
 		{
 			const auto& p = fn.GetParameters()[index];
@@ -365,7 +361,7 @@ namespace Scripting
 				auto pt = model.ResolveTypeInternal(*p->GetType(), unitId, binding, nullptr);
 				if (!pt.Ok()) return Result::Fail(pt.error, pt.message);
 				FunctionType::ParameterInfo pi; pi.mName = p->GetNameToken().GetText(); pi.m_Type = pt.value;
-				params.Push(pi);
+				out.list.Push(pi);
 				out.source.push_back(index);
 				continue;
 			}
@@ -376,13 +372,26 @@ namespace Scripting
 				auto pt = model.ResolveTypeInternal(*p->GetType(), unitId, Packs::ElementScope(model, packs.value, e, binding), nullptr);
 				if (!pt.Ok()) return Result::Fail(pt.error, pt.message);
 				FunctionType::ParameterInfo pi; pi.mName = p->GetNameToken().GetText() + "#" + std::to_string(e); pi.m_Type = pt.value;
-				params.Push(pi);
+				out.list.Push(pi);
 				out.source.push_back(index);
 			}
 		}
+		return Result::Success(out);
+	}
+
+	QueryResult<TemplateInstantiator::Signature> TemplateInstantiator::FunctionSignature(const ProgramModel& model, const FunctionDefinitionNode& fn,
+		Scope* binding, uint32 unitId)
+	{
+		using Result = QueryResult<Signature>;
+		auto rt = model.ResolveTypeInternal(*fn.GetReturnType(), unitId, binding, nullptr);
+		if (!rt.Ok()) return Result::Fail(rt.error, rt.message);
+		auto params = ExpandParameters(model, fn, binding, unitId);
+		if (!params.Ok()) return Result::Fail(params.error, params.message);
 		model.Writes().Ask("a function template instance's signature");
-		FunctionType* sig = new FunctionType(rt.value, params, fn.IsVariadic());
+		FunctionType* sig = new FunctionType(rt.value, params.value.list, fn.IsVariadic());
+		Signature out;
 		out.type = model.m_Types->Own(sig);
+		out.source = std::move(params.value.source);
 		return Result::Success(out);
 	}
 

@@ -1,0 +1,7 @@
+[int32, int32] Two() { return [1, 2]; }
+
+int32 main()
+{
+	[int32 a, int32 b, int32 c, int32... rest] = Two();
+	return 0;
+}

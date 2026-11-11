@@ -185,7 +185,7 @@ namespace Scripting
 			return plan;
 		}
 
-		Plan CallPlan(LoweringContext& ctx, ExprLowerer& expr, const FunctionRecord* create, const Args& args)
+		Plan CallPlan(LoweringContext& ctx, ExprLowerer& expr, const FunctionRecord* create, const Args& args, const AstNode* site)
 		{
 			ConstructionPlan plan;
 			plan.create = create;
@@ -209,7 +209,7 @@ namespace Scripting
 					if (!dv.Ok()) return Plan::Fail(dv.error, dv.message);
 					arg = dv.value;
 				}
-				auto bound = BindArgument(ctx, arg, ctx.LoadIfNeeded(arg), params[(uint32)i].m_Type);
+				auto bound = BindArgument(ctx, arg, ctx.LoadIfNeeded(arg), params[(uint32)i].m_Type, site);
 				if (!bound.Ok()) return Plan::Fail(bound.error, bound.message);
 				plan.args.push_back(bound.value);
 			}
@@ -274,7 +274,7 @@ namespace Scripting
 		if (resolved.status != OverloadResolution::Status::Resolved || !resolved.chosenRecord)
 			return ctx.Fail(site, Plan::Fail(QueryError::NotFound,
 				NoCreateMessage(type, argTypes, own.creates, resolved.status == OverloadResolution::Status::Ambiguous)));
-		return ctx.Fail(site, CallPlan(ctx, expr, resolved.chosenRecord, args));
+		return ctx.Fail(site, CallPlan(ctx, expr, resolved.chosenRecord, args, site));
 	}
 
 	QueryResult<ConstructionPlan> PlanConstruction(LoweringContext& ctx, ExprLowerer& expr, const ObjectType* type,

@@ -9,7 +9,8 @@ namespace Scripting
 {
 	/// `[float a, b, _] = value;` (D-34): each value of a return list goes to its element, in order - a new
 	/// variable (`float a`), an existing location (`b`, `p.x`), or nowhere (`_`). The right side is evaluated
-	/// first, so `[a, b] = [b, a];` swaps.
+	/// first, so `[a, b] = [b, a];` swaps. One element may be a pack (`Ts... values`): new variables for the values
+	/// the others leave, one per element of the packs its type names.
 	struct DestructuringNode : public AstNode
 	{
 		struct Element
@@ -19,6 +20,7 @@ namespace Scripting
 			Ref<QualTypeNode> type; // Declare
 			Token name;             // Declare; the `_` of a Discard
 			Ref<AstNode> target;    // Assign
+			bool isPack = false;    // Declare: `Ts... values`
 		};
 
 		static Ref<DestructuringNode> TryParse(ParserState& state);

@@ -323,4 +323,21 @@ namespace Testing
 		TEST_ASSERT_EQ(server.MessagesFor(uri), std::string());
 		TEST_PASSED();
 	}
+
+	void LspAnalysesTest::TestTestCodeIsAnalyzed()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_analyses_test_code");
+		const Removed removed{ ws.root }; // after the server is gone: its worker may be reading the folder
+		const std::string text = "#ifdef TEST\ninclude \"Runtime/module.ch\"\n\nnamespace Engine\n{\n\t[test(\"engine.value\")]\n\tstatic void ValueIsSeven() { assert_eq(7, EngineValue(), \"seven\"); }\n}\n#endif\n";
+		WriteFile(ws.root / "Engine/src/tests/EngineTests.cf", text);
+		const std::string uri = FileUri(ws.root / "Engine/src/tests/EngineTests.cf");
+		ServerHarness server(FileUri(ws.root));
+		server.Initialize(ws.WithPrograms());
+		server.Open(uri, text);
+		const Value outline = server.Request("textDocument/documentSymbol", Document(uri));
+		TEST_ASSERT_EQ(NamesOf(outline), std::string("Engine\n"));
+		TEST_ASSERT(Contains(NamesOf(outline.At(0).Member("children")), "ValueIsSeven"));
+		TEST_ASSERT_EQ(server.MessagesFor(uri), std::string());
+		TEST_PASSED();
+	}
 } // namespace Testing

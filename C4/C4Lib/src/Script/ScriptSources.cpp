@@ -29,21 +29,24 @@ namespace Scripting
 			return text;
 		}
 
-		// "script", or "script<n>" when the host has a project of that name.
-		std::string ScriptProjectName(const HostInterface& host)
+		// `wanted`, else "script", or "script<n>" when the host or a layer has a project of that name.
+		std::string ScriptProjectName(const HostInterface& host, const std::vector<const ScriptChain*>& layers, const std::string& wanted)
 		{
+			if (!wanted.empty()) return wanted;
 			auto taken = [&](const std::string& name) {
-				return std::any_of(host.projects.begin(), host.projects.end(), [&](const InterfaceProject& p) { return p.name == name; });
+				return std::any_of(host.projects.begin(), host.projects.end(), [&](const InterfaceProject& p) { return p.name == name; }) ||
+					std::any_of(layers.begin(), layers.end(), [&](const ScriptChain* at) { return at->layer.project == name; });
 			};
 			std::string name = "script";
 			for (uint32 n = 1; taken(name); ++n) name = "script" + std::to_string(n);
 			return name;
 		}
 
-		// The projects name only the script's folders on disk as sources: the interface's folders and the script given
-		// as text are in memory, where RegisterInterface and RegisterScriptSources add them (a project set asks the
-		// file system about its sources, and "//c4i" is a network path to Windows).
-		ProjectList Projects(const HostInterface& host, const std::vector<std::string>& scriptFolders, const std::map<std::string, std::string>& defines)
+		// The projects name only the script's folders on disk as sources: the interface's folders, the layers' and the
+		// script given as text are in memory, where RegisterInterface, RegisterLayers and RegisterScriptSources add them (a
+		// project set asks the file system about its sources, and "//c4i" is a network path to Windows).
+		ProjectList Projects(const HostInterface& host, const std::vector<const ScriptChain*>& layers, const ScriptSourcesDesc& desc,
+			const std::vector<std::string>& scriptFolders)
 		{
 			ProjectList list;
 			for (const InterfaceProject& written : host.projects)
@@ -53,11 +56,20 @@ namespace Scripting
 				for (uint32 used : written.dependencies) project.depends.push_back(host.projects[used].name);
 				list.projects.push_back(std::move(project));
 			}
+			std::string below = host.projects[host.rootProject].name;
+			for (const ScriptChain* at : layers)
+			{
+				Project project;
+				project.name = at->layer.project;
+				project.depends.push_back(below);
+				below = project.name;
+				list.projects.push_back(std::move(project));
+			}
 			Project script;
-			script.name = ScriptProjectName(host);
+			script.name = ScriptProjectName(host, layers, desc.project);
 			for (const std::string& folder : scriptFolders) script.sources.push_back(folder);
-			script.defines = defines;
-			script.depends.push_back(host.projects[host.rootProject].name);
+			script.defines = desc.defines;
+			script.depends.push_back(below);
 			list.root = script.name;
 			list.projects.push_back(std::move(script));
 			return list;
@@ -109,6 +121,32 @@ namespace Scripting
 			return true;
 		}
 
+		// Each layer's files, under the ids they had when it compiled: its compile registered what comes before them here.
+		bool RegisterLayers(SourceManager& sources, const HostInterface& host, const std::vector<const ScriptChain*>& layers, ScriptUnits& units,
+			std::string* error)
+		{
+			uint32 project = static_cast<uint32>(host.projects.size());
+			for (const ScriptChain* at : layers)
+			{
+				for (const std::string& folder : at->layer.folders) sources.AddFolder(folder, project);
+				for (const InterfaceFile& file : at->layer.files)
+				{
+					const bool given = file.folder < 0;
+					const std::string absPath = given ? std::string(kInterfaceRoot) + "/text/" + at->layer.project + "/" + file.path :
+						Normalized(fs::path(at->layer.folders[static_cast<size_t>(file.folder)]) / file.path);
+					const uint32 id = sources.RegisterVirtual(absPath, file.path, file.text, project, false);
+					if (id != file.unitId)
+						return Fail(error, "the file '" + file.path + "' of the script '" + at->layer.project + "' was unit " + std::to_string(file.unitId) +
+							" where it compiled but registers as " + std::to_string(id) + ": a script extends the host and the layers it was compiled over");
+					if (given) sources.GetInfo(id).byName = true;
+					if (!file.macros.empty()) units.interfaceMacros[id] = TableOf(file.macros);
+				}
+				units.interfaceUnits += static_cast<uint32>(at->layer.files.size());
+				++project;
+			}
+			return true;
+		}
+
 		// The folder every one of `folders` is in: the script's own folder.
 		std::string CommonFolder(const std::vector<std::string>& folders)
 		{
@@ -149,32 +187,37 @@ namespace Scripting
 		}
 	}
 
-	std::optional<ScriptUnits> RegisterScriptSources(CompilerInstance& compiler, const HostInterface& host, const std::string& name,
-		const std::vector<ScriptFile>& files, const std::map<std::string, std::string>& defines, std::string* error)
+	std::optional<ScriptUnits> RegisterScriptSources(CompilerInstance& compiler, const HostInterface& host, const ScriptSourcesDesc& desc, std::string* error)
 	{
+		const std::vector<ScriptFile>& files = desc.files;
+		const std::vector<const ScriptChain*> layers = LayersOf(desc.base);
 		if (host.projects.empty() || host.rootProject >= host.projects.size())
 		{
 			Fail(error, "the interface describes no root project (a damaged interface)");
 			return std::nullopt;
 		}
 		std::vector<std::string> scriptFolders;
-		for (const ScriptFile& file : files)
-			if (!file.text)
-			{
-				const std::string folder = Normalized(fs::absolute(file.path).parent_path());
-				if (std::find(scriptFolders.begin(), scriptFolders.end(), folder) == scriptFolders.end()) scriptFolders.push_back(folder);
-			}
-		ProjectSetResult checked = ProjectSet::Check(Projects(host, scriptFolders, defines));
+		for (const std::string& root : desc.roots) scriptFolders.push_back(Normalized(fs::absolute(root)));
+		if (desc.roots.empty())
+			for (const ScriptFile& file : files)
+				if (!file.text)
+				{
+					const std::string folder = Normalized(fs::absolute(file.path).parent_path());
+					if (std::find(scriptFolders.begin(), scriptFolders.end(), folder) == scriptFolders.end()) scriptFolders.push_back(folder);
+				}
+		ProjectSetResult checked = ProjectSet::Check(Projects(host, layers, desc, scriptFolders));
 		if (!checked.set)
 		{
-			Fail(error, "the script '" + name + "' cannot be laid out over its host's projects: " + checked.error);
+			Fail(error, "the script '" + desc.name + "' cannot be laid out over its host's projects: " + checked.error);
 			return std::nullopt;
 		}
 		SourceManager& sources = compiler.GetSourceManager();
 		sources.SetProjects(std::move(*checked.set));
 		ScriptUnits units;
-		units.scriptProject = static_cast<uint32>(host.projects.size());
+		units.scriptProject = static_cast<uint32>(host.projects.size() + layers.size());
+		units.scriptFolders = scriptFolders;
 		if (!RegisterInterface(sources, host, units, error)) return std::nullopt;
+		if (!RegisterLayers(sources, host, layers, units, error)) return std::nullopt;
 		for (const std::string& folder : scriptFolders) sources.AddFolder(folder, units.scriptProject);
 		sources.AddFolder(TextFolder(), units.scriptProject);
 		if (!RegisterScript(sources, files, CommonFolder(scriptFolders), units, error)) return std::nullopt;

@@ -132,6 +132,45 @@ namespace Scripting
 		}
 	}
 
+	namespace
+	{
+		// A name each script has for itself: its loader's, reflection's and GC's tables and helpers, the personality routine
+		// it keeps in its image. A vtable and a thread_local's accessor are the compiler's names a script over it shares.
+		bool ScriptsOwn(llvm::StringRef name)
+		{
+			if (name.starts_with("__c4_vtable_") || name.starts_with(kAccessorPrefix)) return false;
+			return name.starts_with("__c4_") || name.starts_with("__emutls_") || name.starts_with("c4.image.") || name == "__CxxFrameHandler3" ||
+				name == "_fltused" || OwnTable(name);
+		}
+
+		bool LayerFunction(const llvm::Function& f) { return !f.isIntrinsic() && f.hasName() && !ScriptsOwn(f.getName()); }
+
+		bool LayerGlobal(const llvm::GlobalVariable& g)
+		{
+			return g.hasName() && !g.getName().starts_with("llvm.") && !g.isThreadLocal() && !g.hasPrivateLinkage() && !IsTypeDescriptor(g.getName()) &&
+				!ScriptsOwn(g.getName());
+		}
+	}
+
+	void ExportLayerDefinitions(llvm::Module& module)
+	{
+		EmitThreadLocalAccessors(module);
+		for (llvm::Function& f : module)
+			if (!f.isDeclaration() && f.hasLocalLinkage() && LayerFunction(f)) f.setLinkage(llvm::GlobalValue::ExternalLinkage);
+		for (llvm::GlobalVariable& g : module.globals())
+			if (!g.isDeclaration() && g.hasInternalLinkage() && LayerGlobal(g)) g.setLinkage(llvm::GlobalValue::ExternalLinkage);
+	}
+
+	std::vector<std::string> LayerSymbols(llvm::Module& module)
+	{
+		std::vector<std::string> names;
+		for (const llvm::Function& f : module)
+			if (!f.isDeclaration() && !f.hasLocalLinkage() && !f.hasAvailableExternallyLinkage() && LayerFunction(f)) names.push_back(f.getName().str());
+		for (const llvm::GlobalVariable& g : module.globals())
+			if (!g.isDeclaration() && !g.hasLocalLinkage() && !g.hasAvailableExternallyLinkage() && LayerGlobal(g)) names.push_back(g.getName().str());
+		return names;
+	}
+
 	// The table is in the module, so its locals are listed too.
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed)
 	{

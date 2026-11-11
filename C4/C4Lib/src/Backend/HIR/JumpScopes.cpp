@@ -47,17 +47,28 @@ namespace Scripting
 	QueryResult<void> JumpScopes::CheckGoto(const Point& jump, const Point& label) const
 	{
 		if (label.path.empty()) return QueryResult<void>::Success();
-		size_t level = label.path.size() - 1;
-		if (level >= jump.path.size() || jump.path[level].block != label.path[level].block)
-			return QueryResult<void>::Fail(QueryError::NotAValue,
-				"goto '" + jump.name + "' jumps into a nested block; a label must be in the goto's block or an enclosing one", jump.loc);
 
-		uint32 atLabel = label.path[level].declarations;
-		uint32 atJump = jump.path[level].declarations;
-		if (atLabel <= atJump) return QueryResult<void>::Success();
+		// The deepest block both are in: a declaration there before the label and after the goto is crossed.
+		size_t shared = 0;
+		while (shared < label.path.size() && shared < jump.path.size() && label.path[shared].block == jump.path[shared].block) shared++;
+		if (shared > 0)
+		{
+			const size_t level = shared - 1;
+			const uint32 atLabel = label.path[level].declarations;
+			const uint32 atJump = jump.path[level].declarations;
+			if (atLabel > atJump) return Crossed(jump, label.path[level].block, atJump);
+		}
 
-		auto names = m_Declarations.find(label.path[level].block);
-		Core::String crossed = (names != m_Declarations.end() && atJump < names->second.size()) ? names->second[atJump] : "a declaration";
+		// The blocks the jump enters: as in C++, entering one is fine while no declaration before the label is skipped.
+		for (size_t level = shared; level < label.path.size(); ++level)
+			if (label.path[level].declarations > 0) return Crossed(jump, label.path[level].block, 0);
+		return QueryResult<void>::Success();
+	}
+
+	QueryResult<void> JumpScopes::Crossed(const Point& jump, const BlockNode* block, uint32 firstCrossed) const
+	{
+		auto names = m_Declarations.find(block);
+		Core::String crossed = (names != m_Declarations.end() && firstCrossed < names->second.size()) ? names->second[firstCrossed] : "a declaration";
 		return QueryResult<void>::Fail(QueryError::NotAValue, "jump to label '" + jump.name + "' crosses " + crossed, jump.loc);
 	}
 } // namespace Scripting

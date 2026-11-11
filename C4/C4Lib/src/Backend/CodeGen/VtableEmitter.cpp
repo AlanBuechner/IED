@@ -18,8 +18,9 @@ namespace Scripting
 	std::vector<VtableEmitter::VptrSite> VtableEmitter::CollectSites(const Type* t)
 	{
 		std::vector<VptrSite> sites;
-		const Type* value = TypeHandle::UnwrapToValue(t);
-		if (!value) return sites;
+		const Type* value = TypeHandle::UnwrapAliases(t);
+		// A reference is stored as a pointer: the vptrs are the referred object's, not its storage's (BUG-438).
+		if (!value || value->GetKind() == TypeKind::Reference) return sites;
 		if (value->GetKind() == TypeKind::Object)
 			AppendObjectSites(static_cast<const ObjectType*>(value), 0, sites);
 		else if (value->GetKind() == TypeKind::Array)

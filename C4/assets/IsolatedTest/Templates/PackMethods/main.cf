@@ -1,0 +1,40 @@
+// A class template's method may take the class's own pack: one parameter per element, as a function template's.
+template<R, ...Ts> struct Holder
+{
+	public func<R(Ts...)> m_Target;
+
+	public R Call(Ts... args) { return m_Target(args...); }
+	public R CallLater(Ts... args);
+	public int64 Count() const { return sizeof...(Ts); }
+	template<...Us> public int64 CountMore(Us... more) const { return sizeof...(Ts) + sizeof...(Us); }
+}
+
+// Its out-of-line definition may name the pack and its parameter differently.
+template<R, ...Ws> R Holder<R, Ws...>::CallLater(Ws... values) { return m_Target(values...); }
+
+template<...Ts> struct Pack
+{
+	public int64 m_Sum;
+	[operator("create")] public void Init(Ts... values) { m_Sum = (0 + ... +(int64)values); }
+	public static int64 Total(int32 first, Ts... rest) { return first + (0 + ... +(int64)rest); }
+}
+
+static int32 Add(int32 a, int32 b) { return a + b; }
+
+int32 main()
+{
+	Holder<int32, int32, int32> holder;
+	holder.m_Target = Add;
+	if (holder.Call(1, 2) != 3) return 1;
+	if (holder.CallLater(3, 4) != 7) return 2;
+	if (holder.Count() != 2) return 3;
+	if (holder.CountMore(1.0, 'c', 3) != 5) return 4;
+	Pack<int32, int64, int32> pack(1, 2, 3);
+	if (pack.m_Sum != 6) return 5;
+	if (Pack<int32, int32>::Total(1, 2, 3) != 6) return 6;
+	Holder<int32> none;
+	none.m_Target = []() -> int32 { return 9; };
+	if (none.Call() != 9) return 7;
+	printf("PACK METHODS OK\n");
+	return 0;
+}

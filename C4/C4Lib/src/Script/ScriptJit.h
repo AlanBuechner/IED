@@ -6,6 +6,8 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace llvm
 {
@@ -17,7 +19,10 @@ namespace llvm
 
 namespace Scripting
 {
-	/// The addresses of a host's symbols under the interface's names (docs/runtime/04 section 6.1).
+	class LinkedScript;
+
+	/// The addresses of a host's symbols under the interface's names (docs/runtime/04 section 6.1), and those of the
+	/// layers over it (section 5.2). A copy shares the host's addresses and keeps its layers' code alive.
 	class HostSymbolTable
 	{
 	public:
@@ -25,12 +30,22 @@ namespace Scripting
 		/// reason, when the build ids or the counts differ (the interface is another build's).
 		static std::optional<HostSymbolTable> Read(const HostInterface& host, const void* table, std::string* error);
 
-		/// The address of `name`, or null when the host has no such symbol.
+		/// The address of `name`, or null when neither the host nor a layer has such a symbol.
 		void* Find(const std::string& name) const;
 		template <typename F> F Function(const std::string& name) const { return reinterpret_cast<F>(Find(name)); }
 
+		/// This table with `script` over it, answering for `names`.
+		HostSymbolTable Extended(std::shared_ptr<const LinkedScript> script, const std::vector<std::string>& names) const;
+
 	private:
-		std::unordered_map<std::string, void*> m_Addresses;
+		struct Layer
+		{
+			std::shared_ptr<const LinkedScript> script;
+			std::unordered_set<std::string> names;
+		};
+
+		std::shared_ptr<const std::unordered_map<std::string, void*>> m_Addresses;
+		std::vector<std::shared_ptr<const Layer>> m_Layers;
 	};
 
 	/// The memory a linked script's code and data occupy: its image base is `low`.

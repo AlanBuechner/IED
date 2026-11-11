@@ -89,13 +89,18 @@ ENGINE_EDITOR = "1"
    declaration (a field's type, a base class, a signature), where names resolve program-wide, a name from a project
    the declaration's project does not depend on is an error: `'Player' is declared in project 'Game', and project
    'Engine' does not depend on 'Game'`. So a reusable project can never call into the project that uses it. A
-   template argument is not a name the template wrote: an engine template used with a game type works.
+   template argument is not a name the template wrote: an engine template used with a game type works. A name C4
+   builds in that another project's C bindings declare too (a header's `typedef char* va_list;`) is the built-in to a
+   project out of that one's reach: the declaration it cannot use hides nothing.
 5. **Dependencies form no cycle**; a cycle is an error that prints it (`Game -> Engine -> Game`).
 6. **One program.** Code generation sees one module, so inlining crosses projects, and the one-definition rule
    holds across them: two projects defining the same global name is a redefinition, as linking two C++ libraries
    with the same symbol would be. Declarations two projects' C bindings repeat are one, each project's
    ([13-interop.md](13-interop.md#1-extern-declarations)), as two C libraries share the headers they include.
-7. **Tests.** A `-test` build runs the `[test]` functions of every project in the build.
+7. **Tests.** A `-test` build runs the root project's `[test]` functions and fixtures. Those of the projects it depends on
+   are compiled with it but do not run: each project's own `-test` build runs them (Nuke builds one harness per
+   test-bearing project), so a program's harness does not run again what its modules' harnesses ran. A root with no
+   tests of its own runs its `main`.
 
 ## 15.4 How the compiler does it
 
@@ -116,7 +121,10 @@ ENGINE_EDITOR = "1"
 - C4Testing `SourceManager.Projects`: owners, the resolution order, the ambiguity and boundary errors, each file's
   defines, what an include carries.
 - C4Testing `Lsp.Server`: the editor gets the projects' defines and the boundary error.
+- ToolsTest `ProjectTests` (a game's harness runs the game's tests and not the engine's, the engine's runs its own
+  with its setup, a root without tests runs its `main`).
 - ToolsTest `ProjectDefines` (each project's defines, and at `-O2` the engine function inlined into the game),
   `ProjectBoundaries` (an include and a declaration across the boundary, an ambiguous path, a cycle, a misspelled
   key, inputs with `--projects`), `ProjectsShareABoundHeader` (two projects binding one C++ header, one file
-  binding two headers that share it), `NukeToolchainProject` (a module's own define reaches only the module).
+  binding two headers that share it), `ABindingDoesNotHideABuiltin` (a `va_list` in a signature beside a project whose
+  binding declares one), `NukeToolchainProject` (a module's own define reaches only the module).

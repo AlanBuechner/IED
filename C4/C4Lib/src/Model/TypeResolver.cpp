@@ -88,6 +88,19 @@ namespace Scripting
 			Core::Vector<const Type*> params;
 			for (const auto& p : fp->GetParameters())
 			{
+				if (p->IsPack())
+				{
+					// `func<R(Ts...)>`: the parameter once per element of the packs it names.
+					auto packs = Packs::In(model, p->GetType().Get(), bindingScope);
+					if (!packs.Ok()) return QueryResult<const Type*>::Fail(packs.error, packs.message);
+					for (uint32 i = 0; i < Packs::Length(packs.value); ++i)
+					{
+						auto element = ResolveTypeInternal(model, *p->GetType(), unitId, Packs::ElementScope(model, packs.value, i, bindingScope), context);
+						if (!element.Ok()) return element;
+						params.Push(element.value);
+					}
+					continue;
+				}
 				auto pt = ResolveTypeInternal(model, *p->GetType(), unitId, bindingScope, context);
 				if (!pt.Ok()) return pt;
 				params.Push(pt.value);
@@ -167,7 +180,12 @@ namespace Scripting
 				info = model.m_Symbols->FindVisible(lookupFrom, name, unitId);
 				if (info)
 					if (Core::String why = model.OutOfProjectReach(*info, name); !why.empty())
-						return QueryResult<const Type*>::Fail(QueryError::NotVisible, why);
+					{
+						// Another project's C bindings may declare a name C4 builds in (vadefs.h's va_list): out of this
+						// project's reach, the declaration hides nothing, and the name is the built-in.
+						if (i != 0 || !isFinal || !model.m_Types->FindBuiltin(name)) return QueryResult<const Type*>::Fail(QueryError::NotVisible, why);
+						info = nullptr;
+					}
 			}
 			if (!info)
 			{

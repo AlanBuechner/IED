@@ -71,7 +71,7 @@ namespace Scripting
 
 	DestructuringNode::Element DestructuringNode::ParseElement(ParserState& state)
 	{
-		// `_` discards; `Type name` declares; anything else is a location to assign.
+		// `_` discards; `Type name` declares, `Ts... name` a pack; anything else is a location to assign.
 		Lexer& lexer = state.GetLexer();
 		Element element;
 		const Token first = lexer.PeekCompound();
@@ -85,15 +85,19 @@ namespace Scripting
 			auto undo = LexerUndoScope(lexer);
 			state.GetErrorTracker().SuppressErrors();
 			auto type = QualTypeNode::TryParse(state);
-			const Token name = lexer.PeekCompound();
-			if (type && name.GetType() == TokenType::Identifier && EndsElement(lexer.PeekCompound(1).GetType()))
+			const bool pack = lexer.PeekCompound().GetType() == TokenType::Ellipsis;
+			const uint32 at = pack ? 1u : 0u;
+			const Token name = lexer.PeekCompound(at);
+			if (type && name.GetType() == TokenType::Identifier && EndsElement(lexer.PeekCompound(at + 1).GetType()))
 			{
+				if (pack) lexer.NextCompoundToken();
 				lexer.NextCompoundToken();
 				state.GetErrorTracker().CommitSuppressedErrors();
 				undo.Commit();
 				element.kind = Element::Kind::Declare;
 				element.type = type;
 				element.name = name;
+				element.isPack = pack;
 				return element;
 			}
 			state.GetErrorTracker().DiscardSuppressedErrors();
@@ -110,7 +114,7 @@ namespace Scripting
 		{
 			const Element& e = m_Elements[i];
 			result += i ? ", " : "";
-			if (e.kind == Element::Kind::Declare) result += e.type->ToString() + " " + e.name.GetText();
+			if (e.kind == Element::Kind::Declare) result += e.type->ToString() + (e.isPack ? "... " : " ") + e.name.GetText();
 			else if (e.kind == Element::Kind::Assign) result += e.target ? e.target->ToString() : Core::String();
 			else result += kDiscard;
 		}

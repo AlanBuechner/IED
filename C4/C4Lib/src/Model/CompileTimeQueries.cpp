@@ -6,6 +6,8 @@
 #include "Model/Types/UnionType.h"
 #include "Model/Types/ArrayType.h"
 #include <unordered_set>
+#include "Parser/Nodes/Expressions/LiteralNode.h"
+#include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 
 namespace Scripting
@@ -143,6 +145,16 @@ namespace Scripting
 			if (!measured.Ok()) return QueryResult<ConstantValue>::Fail(measured.error, measured.message);
 			return QueryResult<ConstantValue>::Success(ConstantValue::Int(measured.value));
 		}
+	}
+
+	std::optional<int64> SizeOfStringLiteral(const TypeOfExpressionNode& query)
+	{
+		if (query.GetKind() != TypeOfExpressionNode::Kind::SizeOf) return std::nullopt;
+		const AstNode* operand = query.GetOperand().Get();
+		while (const auto* paren = dynamic_cast<const ParenthesizedExpressionNode*>(operand)) operand = paren->GetExpression().Get();
+		const auto* literal = dynamic_cast<const LiteralNode*>(operand);
+		if (!literal || literal->GetKind() != LiteralNode::LiteralKind::String) return std::nullopt;
+		return static_cast<int64>(literal->GetValue().size()) + literal->GetUnitWidth();
 	}
 
 	QueryResult<ConstantValue> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType)

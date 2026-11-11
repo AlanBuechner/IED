@@ -62,6 +62,46 @@ namespace C4DAP::Target
 		return tried;
 	}
 
+	std::vector<BoundBreakpoint> SourceBreakpoints::BindInModule(uint64_t module, const Symbols& symbols, const Process& process, Patches& patches)
+	{
+		std::vector<BoundBreakpoint> changed;
+		for (auto& [key, entries] : m_BySource)
+			for (Entry& entry : entries)
+			{
+				uint32_t bound = 0;
+				bool added = false;
+				for (uint64_t address : symbols.AddressesOfLineIn(module, entry.reported.source, entry.requested, bound))
+					if (patches.Add(process, address))
+					{
+						entry.addresses.push_back(address);
+						added = true;
+					}
+				if (!added || (entry.reported.verified && entry.reported.line == bound)) continue;
+				entry.reported.verified = true;
+				entry.reported.line = bound;
+				entry.reported.message.clear();
+				changed.push_back(entry.reported);
+			}
+		return changed;
+	}
+
+	std::vector<BoundBreakpoint> SourceBreakpoints::ForgetRange(uint64_t base, uint64_t size)
+	{
+		std::vector<BoundBreakpoint> changed;
+		for (auto& [key, entries] : m_BySource)
+			for (Entry& entry : entries)
+			{
+				const size_t had = entry.addresses.size();
+				std::erase_if(entry.addresses, [base, size](uint64_t address) { return address >= base && address - base < size; });
+				if (entry.addresses.size() == had || !entry.addresses.empty()) continue;
+				entry.reported.verified = false;
+				entry.reported.line = entry.requested;
+				entry.reported.message = kNotLoaded;
+				changed.push_back(entry.reported);
+			}
+		return changed;
+	}
+
 	std::vector<uint32_t> SourceBreakpoints::IdsAt(uint64_t address) const
 	{
 		std::vector<uint32_t> ids;

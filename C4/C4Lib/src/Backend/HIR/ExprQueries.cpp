@@ -21,6 +21,8 @@ namespace Scripting
 		if (n->GetKind() == TypeOfExpressionNode::Kind::UuidOf) return ResolveUuidOf(n);
 		if (n->GetKind() == TypeOfExpressionNode::Kind::NameOf) return ResolveNameOf(n);
 		if (CallsProgramFunction(m_Ctx.model(), *n, m_Ctx.unitId, m_Ctx.scope)) return ResolveExpr(n->GetCall().Get());
+		if (const std::optional<int64> bytes = SizeOfStringLiteral(*n))
+			return Constant(m_Ctx.queries().TypeStore()->Builtin(TypeKind::Int64), ConstantValue::Int(*bytes));
 		auto operand = QueryOperandType(n);
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, operand.message));
 		auto value = CompileTimeQueryValue(*n, operand.value);

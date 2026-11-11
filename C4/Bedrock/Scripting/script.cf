@@ -26,6 +26,8 @@ namespace Scripting
 
 	void ScriptOptions::Define(const char* define) { defines.Push(Core::String(define)); }
 
+	void ScriptOptions::AddRoot(const char* folder) { roots.Push(Core::String(folder)); }
+
 	// --- a script ----------------------------------------------------------------------------------------------------
 
 	void Script::Destroy()
@@ -151,6 +153,7 @@ namespace Scripting
 		public Core::Array<const char*> texts;
 		public Core::Array<const char*> allowed;
 		public Core::Array<const char*> defines;
+		public Core::Array<const char*> roots;
 		public __C4sOptions c;
 
 		[operator("create")] public void Init(const ScriptOptions& options)
@@ -171,6 +174,13 @@ namespace Scripting
 			c.defines = FirstOf(defines);
 			c.defineCount = (uint32)defines.Count();
 			c.optimize = options.optimize ? 1 : 0;
+			c.debug = options.debug;
+			c.project = options.project.IsEmpty() ? nullptr : options.project.CStr();
+			for (int64 i = 0; i < options.roots.Count(); i++) roots.Push(options.roots[i].CStr());
+			c.roots = FirstOf(roots);
+			c.rootCount = (uint32)roots.Count();
+			c.extensible = options.extensible ? 1 : 0;
+			c.base = options.base == nullptr ? nullptr : options.base->Handle();
 		}
 	}
 

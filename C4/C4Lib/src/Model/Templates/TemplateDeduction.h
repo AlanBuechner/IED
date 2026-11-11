@@ -41,6 +41,8 @@ namespace Scripting
 		QueryResult<void> MatchInstance(const NamespaceQualifiedNameNode& name, const ObjectType* object);
 		QueryResult<void> MatchTemplateArgument(const AstNode* pattern, const TemplateArg& argument);
 		QueryResult<void> MatchFunPtr(const FunPtrTypeNode& pattern, const Type* argument);
+		/// `[A, B]`, `[T, Ts...]` against a return list's values in order; a trailing expansion takes the rest, one element each.
+		QueryResult<void> MatchReturnList(const QualTypeNode& pattern, const Type* argument);
 		QueryResult<void> MatchValue(const AstNode* pattern, const ConstantValue& value);
 		QueryResult<void> Decide(uint32 index, const TemplateArg& argument);
 		int ParameterIndex(const Core::String& name) const;

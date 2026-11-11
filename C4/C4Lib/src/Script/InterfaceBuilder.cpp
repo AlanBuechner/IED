@@ -128,6 +128,38 @@ namespace Scripting
 		return host;
 	}
 
+	std::optional<std::vector<InterfaceFile>> LayerFiles(CompilerInstance& compiler, const std::vector<uint32>& units,
+		const std::unordered_map<uint32, MacroTable>& exportedMacros, const std::vector<std::string>& folders, std::string* error)
+	{
+		const SourceManager& sources = compiler.GetSourceManager();
+		const std::unordered_set<const AstNode*> declaredElsewhere = DeclaredElsewhere(compiler.GetProgramModel());
+		std::vector<std::pair<std::string, uint32>> places;
+		for (const std::string& folder : folders) places.emplace_back(folder, 0);
+		std::vector<InterfaceFile> files;
+		for (uint32 id : units)
+		{
+			const SourceInfo& info = sources.GetInfo(id);
+			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
+			std::optional<std::string> text = unit && info.source ? InterfaceText(std::string(info.source->Data()), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
+			if (!text)
+			{
+				if (error) *error = "cannot write the interface of " + info.displayName + ": its declarations do not fit its text";
+				return std::nullopt;
+			}
+			InterfaceFile file;
+			file.unitId = id;
+			file.path = info.displayName;
+			const std::string absPath = Normalized(info.absPath);
+			file.folder = FolderOf(places, absPath);
+			if (file.folder >= 0) file.path = absPath.substr(Normalized(folders[static_cast<size_t>(file.folder)]).size() + 1);
+			file.text = std::move(*text);
+			if (auto macros = exportedMacros.find(id); macros != exportedMacros.end())
+				for (const auto& [name, macro] : macros->second.All()) file.macros.push_back(macro);
+			files.push_back(std::move(file));
+		}
+		return files;
+	}
+
 	std::vector<std::string> PreludeFunctionSymbols(const ProgramModel& model)
 	{
 		Core::Vector<const FunctionRecord*> records;
@@ -136,6 +168,22 @@ namespace Scripting
 		std::set<std::string> seen;
 		for (const FunctionRecord* record : records)
 			if (record->isBuiltin && record->isLinked && seen.insert(record->mangledName.c_str()).second) symbols.push_back(record->mangledName.c_str());
+		return symbols;
+	}
+
+	std::vector<std::string> LibraryRuntimeSymbols(const ProgramModel& model, const SourceManager& sources)
+	{
+		Core::Vector<const FunctionRecord*> records;
+		model.AllFunctionRecords(records);
+		std::vector<std::string> symbols;
+		std::set<std::string> seen;
+		for (const FunctionRecord* record : records)
+		{
+			const std::string symbol = record->mangledName.c_str();
+			if (!record->isLinked || HasBody(*record) || symbol.rfind("c4_", 0) != 0) continue;
+			if (!sources.HasInfo(record->declUnit) || !sources.GetInfo(record->declUnit).library) continue;
+			if (seen.insert(symbol).second) symbols.push_back(symbol);
+		}
 		return symbols;
 	}
 } // namespace Scripting
