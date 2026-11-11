@@ -302,6 +302,64 @@ namespace Boards
 		return labels;
 	}
 
+	static void HideLayerOp(JsonOut& ops, Core::StringView layer) {
+		ops.BeginObject();
+		ops.StrField("op", Core::StringView("update_layer"));
+		ops.StrField("id", layer);
+		ops.BoolField("visible", false);
+		ops.EndObject();
+	}
+
+	static bool HoldsOnlyStrokes(const Board& board, Core::StringView layer) {
+		for (const Element* element : board.m_Elements)
+			if (element->m_Layer == layer && element->m_Kind != Kind::Stroke) return false;
+		return true;
+	}
+
+	const char* c_SketchLayer = "Sketch";
+
+	// A stroke layer that also holds shapes keeps them visible: its used strokes move to a hidden "Sketch" layer of their own.
+	static bool HideSketchOps(const Board& board, const Core::Array<Core::String>& used, Core::StringView diagramLayer, JsonOut& ops) {
+		Core::Array<Core::String> layers;
+		for (const Core::String& id : used) {
+			const Element* stroke = board.Find(id.View());
+			if (stroke && stroke->m_Layer != diagramLayer && !layers.Contains(stroke->m_Layer)) layers.Push(stroke->m_Layer);
+		}
+		Core::Array<Core::String> moved;
+		for (const Core::String& layer : layers) {
+			if (HoldsOnlyStrokes(board, layer.View())) {
+				HideLayerOp(ops, layer.View());
+				continue;
+			}
+			for (const Core::String& id : used) {
+				const Element* stroke = board.Find(id.View());
+				if (stroke && stroke->m_Layer == layer) moved.Push(id);
+			}
+		}
+		if (!moved.IsEmpty()) {
+			Core::String target("@sketch");
+			for (const Layer& layer : board.m_Layers)
+				if (layer.m_Name == c_SketchLayer && layer.m_Id != diagramLayer) target = layer.m_Id;
+			if (target == "@sketch") {
+				ops.BeginObject();
+				ops.StrField("op", Core::StringView("add_layer"));
+				ops.StrField("name", Core::StringView(c_SketchLayer));
+				ops.StrField("ref", Core::StringView("sketch"));
+				ops.EndObject();
+			}
+			ops.BeginObject();
+			ops.StrField("op", Core::StringView("update"));
+			ops.Key(Core::StringView("ids"));
+			ops.BeginArray();
+			for (const Core::String& id : moved) ops.Str(id.View());
+			ops.EndArray();
+			ops.StrField("layer", target.View());
+			ops.EndObject();
+			HideLayerOp(ops, target.View());
+		}
+		return !layers.IsEmpty();
+	}
+
 	static ToolAnswer RecognizeTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args, Core::StringView by) {
 		OpenBoard* open = BoardArg(service, ws, args);
 		const bool apply = args.Member("apply").AsBool();
@@ -328,6 +386,7 @@ namespace Boards
 		JsonOut ops;
 		Core::StringBuilder text;
 		Core::Array<SketchGroup> picked;
+		bool hidden = false;
 		{
 			Threading::LockGuard held(open->m_Lock);
 			const Board& board = *open->m_Board;
@@ -368,15 +427,11 @@ namespace Boards
 			Proposals(board, picked, ask, ops, text);
 			if (apply && sketch != "keep") {
 				Core::Array<Core::String> used;
-				Core::Array<Core::String> sketchLayers;
 				for (const SketchGroup& group : picked) {
-					if (group.m_Guess == Guess::Scribble) continue;
-					if (group.m_Guess == Guess::Handwriting && labels.FindAs(group.m_Name.View()) == nullptr && group.m_Inside.IsEmpty()) continue;
-					for (const Core::String& id : group.m_Ids) {
-						used.Push(id);
-						Element* stroke = board.Find(id.View());
-						if (stroke && !sketchLayers.Contains(stroke->m_Layer)) sketchLayers.Push(stroke->m_Layer);
-					}
+					const bool typed = ask.m_Types.Contains(group.m_Name);
+					if (group.m_Guess == Guess::Scribble && !typed) continue;
+					if (group.m_Guess == Guess::Handwriting && !typed && labels.FindAs(group.m_Name.View()) == nullptr && group.m_Inside.IsEmpty()) continue;
+					for (const Core::String& id : group.m_Ids) used.Push(id);
 				}
 				if (sketch == "delete" && !used.IsEmpty()) {
 					ops.BeginObject();
@@ -387,15 +442,7 @@ namespace Boards
 					ops.EndArray();
 					ops.EndObject();
 				}
-				if (sketch == "hide")
-					for (const Core::String& layer : sketchLayers) {
-						if (existing && existing->m_Id == layer) continue;
-						ops.BeginObject();
-						ops.StrField("op", Core::StringView("update_layer"));
-						ops.StrField("id", layer.View());
-						ops.BoolField("visible", false);
-						ops.EndObject();
-					}
+				if (sketch == "hide") hidden = HideSketchOps(board, used, existing ? existing->m_Id.View() : Core::StringView(""), ops);
 			}
 			ops.EndArray();
 		}
@@ -424,7 +471,7 @@ namespace Boards
 			reply.Append(Core::StringView(" holds handwriting but got no label: its element is unlabeled (board_edit update sets its text)\n"));
 		}
 		reply.Append(ChangeText(*open->m_Board, result).View());
-		if (result.m_Change && sketch == "hide") reply.Append(Core::StringView("The sketch's layer is hidden, not deleted: show it again to compare.\n"));
+		if (result.m_Change && hidden) reply.Append(Core::StringView("The recognized strokes are hidden, not deleted (on their layer, or on a hidden \"Sketch\" layer when theirs also holds shapes): show it again to compare.\n"));
 		return Text(reply.ToString());
 	}
 

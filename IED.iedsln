@@ -47,6 +47,7 @@
 			"name": "IED Plugins",
 			"projects": [
 				"c4 plugin",
+				"ied.board",
 				"ied.browser",
 				"ied.chat",
 				"ied.cpp",

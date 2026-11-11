@@ -33,8 +33,9 @@ and you can take back with `board_revert`.
 3. `board_recognize` with `apply: true`, `labels` for every handwriting group you read (`{"g3": "API Gateway"}` - the
    shape that holds it gets it), and corrections in `types` (`{"g5": "frame", "g15": "cylinder", "g12": "note"}`) and
    `ends` (`{"g9": ["g4", "g7"]}`). A one-stroke arrow guessed a scribble takes `{"g21": "arrow"}`. Clean elements go
-   on a "Diagram" layer and the sketch layer is hidden: every stroke kept, the owner shows the layer again to compare -
-   never delete the owner's drawing. `place: "beside"` puts the clean copy to the right of the sketch instead.
+   on a "Diagram" layer and the sketch layer is hidden (when it also holds shapes, the recognized strokes move to a
+   hidden "Sketch" layer and the shapes stay seen): every stroke kept, the owner shows the layer again to compare - never
+   delete the owner's drawing. `place: "beside"` puts the clean copy to the right of the sketch instead.
 4. Tidy: `board_edit` with `{"op": "tidy"}` keeps the owner's arrangement and lines up near rows and columns;
    `{"op": "layout", "direction": "TD"}` arranges everything anew by the connectors (frames stay together, notes move
    with their node). Prefer tidy when the owner placed things on purpose.
