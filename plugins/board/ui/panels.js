@@ -1,7 +1,62 @@
-// panels.js - the board's side panel (docs/32 "The board in the UI"): Layers, Plan and History.
+// panels.js - the board's side panel (docs/32 "The board in the UI"): Layers, Plan and History, and the frame that
+// shows one of them - in the Board tool window under the board list, or in a phone board's sheet.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
+
+const PANELS = [["layers", "Layers", "layers"], ["plan", "Plan", "book"], ["history", "History", "history"]];
+const PANEL_KEY = "ied.board.panel";
+
+function storedPanel() {
+	try {
+		const name = localStorage.getItem(PANEL_KEY);
+		return PANELS.some(([id]) => id === name) ? name : "layers";
+	}
+	catch {
+		return "layers";
+	}
+}
+
+// The panel's tabs over the one shown, of the board `attach` gives it (each board keeps its own panels); the tab
+// chosen is this device's, the same for every board.
+export class PanelFrame {
+	constructor() {
+		this.view = null;
+		this.name = storedPanel();
+		this.tabs = h("div.board-panel-tabs", { role: "tablist" }, PANELS.map(([id, title, iconName]) => h("button.board-panel-tab", { role: "tab", dataset: { panel: id }, on: { click: () => this.show(id) } }, icon(iconName), h("span", null, title))));
+		this.host = h("div.board-panel-host");
+		this.el = h("div.board-panel", null, this.tabs, this.host);
+	}
+
+	attach(view) {
+		if (this.view && this.view !== view) this.view.panels.plan.save();
+		this.view = view;
+		this.render();
+	}
+
+	show(name) {
+		if (this.view && this.name === "plan") this.view.panels.plan.save();
+		this.name = name;
+		try {
+			localStorage.setItem(PANEL_KEY, name);
+		}
+		catch {
+			// a private window: the tab lasts as long as the page
+		}
+		this.render();
+	}
+
+	render() {
+		for (const b of this.tabs.children) b.setAttribute("aria-selected", String(b.dataset.panel === this.name));
+		if (!this.view) {
+			replace(this.host, h("div.muted.board-empty", null, "Open a board to see its layers, plan and history here."));
+			return;
+		}
+		const panel = this.view.panels[this.name];
+		if (panel.el.parentNode !== this.host) replace(this.host, panel.el);
+		panel.render();
+	}
+}
 
 export class LayersPanel {
 	constructor(view) {
@@ -154,7 +209,7 @@ export class PlanPanel {
 	}
 }
 
-// The board's AI: its chat beside the board, and actions that ask it for the common work.
+// The board's changes this session, newest first, each revertible.
 export class HistoryPanel {
 	constructor(view) {
 		this.view = view;

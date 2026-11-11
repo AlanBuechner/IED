@@ -720,7 +720,8 @@ export class Shell {
 	}
 
 	// Opens `ref` beside `anchor` (ied.tabs.openBeside): in another document group, a new one to the right when there is
-	// none; with `tether`, the two are tethered (`closes`: `ref` closes with `anchor`).
+	// none, taking `size` of the width (a share; half by default); with `tether`, the two are tethered (`closes`: `ref`
+	// closes with `anchor`).
 	openBeside(anchor, ref, options) {
 		const opts = options || {};
 		if (this.deviceClass === "phone" || !this.activityOf(anchor)) {
@@ -732,7 +733,7 @@ export class Shell {
 			this.report("Nothing can show '" + ref + "': no loaded plugin renders tabs of its kind.");
 			return;
 		}
-		this.changeTree(this.activityOf(anchor), (tree) => T.openBeside(tree, anchor, ref));
+		this.changeTree(this.activityOf(anchor), (tree) => T.openBeside(tree, anchor, ref, opts.size));
 		if (opts.tether) this.tether(anchor, ref, opts);
 	}
 
@@ -1051,7 +1052,8 @@ export class Shell {
 			tabs: {
 				kind: (kind, spec) => shell.views.registerKind(kind, Object.assign({}, spec, { plugin: plugin.id === "shell" ? null : plugin.id })),
 				open: (ref, options) => shell.openTab(ref, options),
-				// `ref` beside `anchor`; {tether, closes} tethers them (docs/15 "Tethered tabs").
+				// `ref` beside `anchor`, a new group taking `size` of the width when it needs one; {tether, closes} tethers
+				// them (docs/15 "Tethered tabs").
 				openBeside: (anchor, ref, options) => shell.openBeside(anchor, ref, options),
 				tether: (lead, follower, options) => shell.tether(lead, follower, options),
 				untether: (ref) => shell.untether(ref),

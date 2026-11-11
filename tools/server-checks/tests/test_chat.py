@@ -527,6 +527,22 @@ class ChatTests(ChatCase):
 		self.assertIn("call c2, shots/screen.png", parts[0]["text"])
 		self.assertEqual("data:image/png;base64," + base64.b64encode(png).decode(), parts[1]["image_url"]["url"], "the file's bytes")
 
+	async def test_a_plugins_chat_is_kept_in_its_section(self):
+		made = await self.client.request("chat.create", {"wsId": "w1", "title": "Board: Login", "section": "Boards"})
+		self.assertEqual("Boards", made["section"], "the summary names it")
+		mine = (await self.client.request("chat.create", {"wsId": "w1"}))["chatId"]
+		self.assertNotIn("section", await self.summary(mine), "the owner's own chat has none")
+		await self.client.request("chat.set", {"chatId": mine, "section": "Boards"})
+		self.assertEqual("Boards", (await self.summary(mine))["section"], "a chat made before sections moves into one")
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		self.assertEqual("Boards", (await self.summary(made["chatId"]))["section"], "kept across a restart")
+		await self.client.request("chat.set", {"chatId": mine, "section": ""})
+		self.assertNotIn("section", await self.summary(mine), "and leaves it")
+
 	async def test_chats_talk_to_each_other(self):
 		model = {"endpoint": self.model.url + "/v1", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model, "fixed": dict(model, model="script:ok-text")}})

@@ -340,6 +340,7 @@ namespace Ai
 		public Core::String m_WsId;
 		public Core::String m_Title;
 		public bool m_TitledByAi;                       // chat_title named it, and it may again (docs/04 "Chat names")
+		public Core::String m_Section;                  // the Chats list's section it is kept in (docs/04 "Chat sections"); empty: the owner's own
 		public ChatMode m_Mode;
 		public PermissionMode m_Permission;
 		public Core::String m_Group;

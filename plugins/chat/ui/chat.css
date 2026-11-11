@@ -11,6 +11,7 @@
 	.chat-act.phone-panel .chat-panel { display: flex; position: absolute; inset: 0; width: auto; max-width: none; z-index: 3; border-left: none; }
 	.chat-act .chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-panel-title .chat-phone-only { display: inline-flex; }
+	.chat-act .chat-selectors { flex-wrap: wrap; }
 }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-col { max-width: 940px; margin: 0 auto; padding: 0 var(--space-7); }
@@ -238,7 +239,8 @@ button.chat-chip, a.chat-chip { cursor: pointer; }
 button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: var(--text-2); }
 .chat-chip.image { height: auto; padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); cursor: zoom-in; }
 .chat-chip.image img { display: block; max-width: 96px; max-height: 64px; border-radius: var(--radius-1); background: var(--bg-0); }
-.chat-selectors { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; }
+.chat-selectors { display: flex; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-3); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; }
+.chat-sel { display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .chat-dd { display: inline-flex; align-items: center; gap: var(--space-2); height: 20px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); background: var(--bg-3); color: var(--text-0); font: inherit; font-size: var(--font-size-sm); }
 .chat-dd .ci { width: 12px; height: 12px; color: var(--text-2); }
 .chat-dd:hover { background: var(--bg-4); }

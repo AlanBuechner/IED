@@ -245,10 +245,11 @@ export class Composer {
 	renderSelectors(summary, model) {
 		const mode = modeChoice(summary);
 		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS.find(([id]) => id === "auto");
+		// Each label with its menu, so a narrow chat (a board's, beside it) wraps them as pairs.
 		replace(this.selectors,
-			h("span.muted", null, "Model"), this.modelButton(summary, model),
-			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODE_CHOICES, mode[0]), (row) => this.actions.set(modeChange(row.value))),
-			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
+			h("span.chat-sel", null, h("span.muted", null, "Model"), this.modelButton(summary, model)),
+			h("span.chat-sel", null, h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODE_CHOICES, mode[0]), (row) => this.actions.set(modeChange(row.value)))),
+			h("span.chat-sel", null, h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value }))));
 	}
 
 	dropdown(label, title, rows, pick) {

@@ -260,8 +260,9 @@ export function revealPartners(tree, ref, partners) {
 }
 
 // Opens `ref` beside `anchor`: in another document group (the first that is not `anchor`'s), or in a new group to the
-// right of `anchor`'s when there is none; a `ref` already open in another group is activated where it is.
-export function openBeside(tree, anchor, ref) {
+// right of `anchor`'s when there is none, taking `share` of its width (half by default); a `ref` already open in
+// another group is activated where it is.
+export function openBeside(tree, anchor, ref, share) {
 	const home = groupOf(tree, anchor);
 	if (!home) return openTab(tree, ref, {});
 	const existing = groupOf(tree, ref);
@@ -270,7 +271,7 @@ export function openBeside(tree, anchor, ref) {
 	if (other && existing) return moveTab(tree, ref, pathOf(tree, other), "center");
 	if (other) return openTab(tree, ref, { groupPath: pathOf(tree, other) });
 	const opened = existing ? tree : openTab(tree, ref, { groupPath: pathOf(tree, home) });
-	return activateTab(moveTab(opened, ref, pathOf(opened, groupOf(opened, anchor)), "right"), anchor);
+	return activateTab(moveTab(opened, ref, pathOf(opened, groupOf(opened, anchor)), "right", undefined, share), anchor);
 }
 
 // Keeps a preview tab open (it was edited or double-clicked).
@@ -326,8 +327,9 @@ function removeRef(owner, ref) {
 // Docking
 
 // Moves `ref` to the group at `targetPath`: `zone` "center" joins it at `index` (the end by default); "left", "right",
-// "top", "bottom" split it with a new group. An empty `targetPath` with an edge zone docks at the activity's edge.
-export function moveTab(tree, ref, targetPath, zone, index) {
+// "top", "bottom" split it with a new group, which takes `share` of the target's room (half by default). An empty
+// `targetPath` with an edge zone docks at the activity's edge.
+export function moveTab(tree, ref, targetPath, zone, index, share) {
 	const next = clone(tree);
 	const source = groupOf(next, ref);
 	const target = nodeAt(next, targetPath || []);
@@ -346,7 +348,8 @@ export function moveTab(tree, ref, targetPath, zone, index) {
 	removeRef(source, ref);
 	const made = group([ref], source.well ? { well: true } : {});
 	const atEdge = (targetPath || []).length === 0 && isSplit(target);
-	return normalize(atEdge ? withEdge(next, made, zone, EDGE_SIZES[zone]) : beside(next, target, made, zone));
+	const part = share > 0 && share < 1 ? share : undefined;
+	return normalize(atEdge ? withEdge(next, made, zone, part || EDGE_SIZES[zone]) : beside(next, target, made, zone, part));
 }
 
 const ZONE_DIR = { left: "row", right: "row", top: "column", bottom: "column" };

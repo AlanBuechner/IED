@@ -1,17 +1,25 @@
 // board.js - a board as a document (docs/32 "The board in the UI"): the toolbar (tools, colors, widths, eraser,
-// undo, zoom, image, the AI button that opens the board's chat), the canvas, and the side panel (Layers, Plan,
-// History) - a pane of its own on a phone.
+// undo, zoom, image, the AI button that opens the board's chat) and the canvas. Its side panel (Layers, Plan,
+// History) shows in the Board tool window under the board list, or in a sheet over the board on a phone; its chat,
+// beside the boards, follows the board shown.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { BoardModel } from "./model.js";
 import { BoardCanvas } from "./canvas.js";
 import { BoardInput, TOOLS } from "./tools.js";
 import { PALETTE_NAMES } from "./render.js";
-import { LayersPanel, PlanPanel, HistoryPanel } from "./panels.js";
+import { LayersPanel, PlanPanel, HistoryPanel, PanelFrame } from "./panels.js";
+import { addBoard, removeBoard, setCurrentBoard } from "./current.js";
 import { union, EMPTY, isEmpty } from "./geom.js";
 
 const WIDTHS = [1, 2, 4, 8];
 const PHONE = 720;
+// The Board tool window (Layers, Plan, History), the chat list's section for the boards' chats, and the share of the
+// width a board's chat takes when it opens a group of its own beside the boards.
+const PANEL_WINDOW = "ied.board.panel";
+const CHAT_SECTION = "Boards";
+const CHAT_SHARE = 0.3;
+const PANEL_PLACED_KEY = "ied.board.panelPlaced";
 
 export class BoardView {
 	constructor(ctx, path) {
@@ -25,19 +33,20 @@ export class BoardView {
 		this.statusText = h("span.board-status.muted");
 		this.stage = h("div.board-stage");
 		this.toolbar = h("div.board-toolbar", { role: "toolbar", "aria-label": "Board tools" });
-		this.panelTabs = h("div.board-panel-tabs", { role: "tablist" });
-		this.panelHost = h("div.board-panel-host");
-		this.panel = h("aside.board-panel", { "aria-label": "Board panel" }, this.panelTabs, this.panelHost);
+		this.sheetFrame = new PanelFrame();
+		this.sheet = h("aside.board-sheet", { "aria-label": "Layers, plan and history", hidden: true }, this.sheetFrame.el);
 		this.message = h("div.board-message", { hidden: true });
 		ctx.el.classList.add("board-doc");
-		replace(ctx.el, this.toolbar, h("div.board-main", null, this.stage, this.panel), this.message);
+		replace(ctx.el, this.toolbar, h("div.board-main", null, this.stage, this.sheet), this.message);
 		this.canvas = new BoardCanvas(this.stage, this.model, (src) => this.image(src));
 		this.input = new BoardInput(this);
 		this.panels = { layers: new LayersPanel(this), plan: new PlanPanel(this), history: new HistoryPanel(this) };
-		this.panelName = "layers";
-		this.panelOpen = window.innerWidth >= PHONE;
 		this.buildToolbar();
-		this.buildPanel();
+		this.localReady = new Promise((resolve) => { this.localLoaded = resolve; });
+		addBoard(this);
+		const touched = () => setCurrentBoard(this);
+		ctx.el.addEventListener("pointerdown", touched, true);
+		ctx.el.addEventListener("focusin", touched);
 		this.stopModel = this.model.on((change) => this.changed(change));
 		this.stopSettings = this.ied.client.subscribe("settings:" + ctx.wsId, {
 			snap: (data) => this.settings(data.values || {}),
@@ -55,6 +64,8 @@ export class BoardView {
 	dispose() {
 		document.removeEventListener("paste", this.paste);
 		this.panels.plan.save();
+		this.disposed = true;
+		removeBoard(this);
 		this.stopModel();
 		if (this.stopSettings) this.stopSettings();
 		this.input.dispose();
@@ -97,13 +108,15 @@ export class BoardView {
 			h("button.ib", { title: "Redo (Ctrl+Y)", "aria-label": "Redo", on: { click: () => this.model.redo() } }, icon("redo")),
 			this.snapButton,
 			h("span.grow"),
-			this.statusText,
-			h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", on: { click: () => this.zoomBy(0.8) } }, icon("zoom-out")),
-			this.zoomLabel,
-			h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", on: { click: () => this.zoomBy(1.25) } }, icon("zoom-in")),
-			h("button.ib", { title: "Show everything (Shift+1)", "aria-label": "Fit", on: { click: () => this.canvas.show(this.canvas.contentBox()) } }, icon("screen-full")),
-			h("button.btn.flat.board-ai-button", { title: "Open the board's chat: it sees the board, its layers, your selection and its plans, and changes them live", on: { click: () => this.openChat() } }, icon("sparkle", "c-ai"), h("span.lbl", null, "AI")),
-			h("button.ib.board-panel-toggle", { title: "Side panel", "aria-label": "Side panel", on: { click: () => this.togglePanel() } }, icon("layout-sidebar-right")));
+			// The view's end of the toolbar keeps together when a narrow board (its chat beside it) wraps the toolbar.
+			h("span.board-group.board-end", null,
+				this.statusText,
+				h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", on: { click: () => this.zoomBy(0.8) } }, icon("zoom-out")),
+				this.zoomLabel,
+				h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", on: { click: () => this.zoomBy(1.25) } }, icon("zoom-in")),
+				h("button.ib", { title: "Show everything (Shift+1)", "aria-label": "Fit", on: { click: () => this.canvas.show(this.canvas.contentBox()) } }, icon("screen-full")),
+				h("button.btn.flat.board-ai-button", { title: "Open the board's chat: it sees the board, its layers, your selection and its plans, and changes them live", on: { click: () => this.openChat() } }, icon("sparkle", "c-ai"), h("span.lbl", null, "AI")),
+				h("button.ib.board-panel-toggle", { title: "Layers, plan and history", "aria-label": "Layers, plan and history", on: { click: () => this.showPanels() } }, icon("layers"))));
 		this.toolChanged();
 		this.styleChanged();
 		this.canvas.overlays.push(() => this.updateZoom());
@@ -210,25 +223,44 @@ export class BoardView {
 
 	// --- panel -----------------------------------------------------------------------------------------------------
 
-	buildPanel() {
-		const names = [["layers", "Layers", "layers"], ["plan", "Plan", "book"], ["history", "History", "history"]];
-		replace(this.panelTabs, names.map(([id, title, iconName]) => h("button.board-panel-tab", { role: "tab", dataset: { panel: id }, on: { click: () => this.showPanel(id, true) } }, icon(iconName), h("span", null, title))));
-		this.showPanel(this.panelName, this.panelOpen);
+	// Layers, Plan and History (owner, 2026-11-11: "the side panel with the layers and the history etc could be moved
+	// to a panel under the list of boards"): the Board tool window, which shows the board worked on now; on a phone, a
+	// sheet over the lower half of the board, which the button opens and closes.
+	showPanels() {
+		if (window.innerWidth < PHONE) {
+			const open = this.sheet.hidden;
+			this.sheet.hidden = !open;
+			this.ctx.el.classList.toggle("panel-open", open);
+			if (open) this.sheetFrame.attach(this);
+			return;
+		}
+		setCurrentBoard(this);
+		this.ied.commands.run("shell.showView", { id: PANEL_WINDOW });
 	}
 
-	showPanel(name, open) {
-		this.panelName = name;
-		this.panelOpen = open;
-		this.panel.hidden = !open;
-		this.ctx.el.classList.toggle("panel-open", open);
-		for (const b of this.panelTabs.children) b.setAttribute("aria-selected", String(b.dataset.panel === name));
-		replace(this.panelHost, this.panels[name].el);
-		this.panels[name].render();
-		requestAnimationFrame(() => this.canvas.fit());
+	// The Board tool window joins a layout saved before it existed, once per device, when a board shows in the Boards
+	// activity: under the board list, where the default layout has it.
+	placePanelWindow(state) {
+		if (window.innerWidth < PHONE || state.open.includes(PANEL_WINDOW)) return;
+		const home = (state.groups || []).find((g) => g.tabs.includes(this.ctx.ref));
+		if (!home || home.activity !== "ied.board") return;
+		try {
+			if (localStorage.getItem(PANEL_PLACED_KEY)) return;
+			localStorage.setItem(PANEL_PLACED_KEY, "1");
+		}
+		catch {
+			return;
+		}
+		this.ied.commands.run("shell.showView", { id: PANEL_WINDOW });
+		requestAnimationFrame(() => requestAnimationFrame(() => this.focus()));
 	}
 
-	togglePanel() {
-		this.showPanel(this.panelName, !this.panelOpen);
+	// The board's tab was shown: it is the board worked on now, and its chat comes beside it.
+	shown() {
+		setCurrentBoard(this);
+		const state = this.ied.tabs.state();
+		this.placePanelWindow(state);
+		this.followChat();
 	}
 
 	// --- the model's changes ---------------------------------------------------------------------------------------
@@ -260,9 +292,7 @@ export class BoardView {
 			for (const id of [...this.input.selection]) if (!this.model.get(id)) this.input.selection.delete(id);
 			if (change.kind === "changed" && change.by === "ai") this.canvas.flash((change.ids || []).filter((id) => this.model.get(id)));
 		}
-		if (change.kind === "plans") this.panels.plan.render();
-		else this.panels[this.panelName].render();
-		if (this.panelName !== "layers") this.panels.layers.render();
+		for (const [name, panel] of Object.entries(this.panels)) if (panel.el.isConnected && (change.kind !== "plans" || name === "plan")) panel.render();
 		this.ctx.tab.setTitle(this.model.title || this.path.split("/").pop().replace(/\.iedboard$/, ""));
 		this.canvas.request();
 	}
@@ -273,8 +303,9 @@ export class BoardView {
 	}
 
 	async restoreLocal() {
-		const local = await this.model.request("ied.board/local", {});
+		const local = await this.model.request("ied.board/local", {}).catch(() => null);
 		this.local = local || {};
+		this.localLoaded();
 		if (this.local.camera) {
 			this.canvas.camera = this.local.camera;
 			this.canvas.request();
@@ -383,39 +414,76 @@ export class BoardView {
 
 	// --- the AI ----------------------------------------------------------------------------------------------------
 
-	// The board's chat: the one it talked to before, else a new one; shown beside the board.
+	// The board's chat - the one it talked to before, else a new one with `create` - as its summary. It is kept in the
+	// chat list's Boards section (docs/04 "Chat sections"), out of the way of the owner's other chats; one made before
+	// sections existed moves there now.
 	async chat(create) {
+		await this.localReady;
 		if (this.local.chatId) {
 			const list = await this.ied.client.request("chat.list", { wsId: this.ctx.wsId }).catch(() => null);
-			if (list && (list.chats || []).some((c) => c.chatId === this.local.chatId)) return this.local.chatId;
+			const summary = list && (list.chats || []).find((c) => c.chatId === this.local.chatId);
+			if (summary) {
+				if (summary.section !== CHAT_SECTION) this.ied.client.request("chat.set", { chatId: summary.chatId, section: CHAT_SECTION }).catch(() => null);
+				return summary;
+			}
 		}
 		if (!create) return null;
-		const title = "Board: " + (this.model.title || this.path.split("/").pop().replace(/\.iedboard$/, ""));
-		const made = await this.ied.client.request("chat.create", { wsId: this.ctx.wsId, title }).catch((e) => { this.ied.toast("Cannot start a chat: " + e.message, { level: "error" }); return null; });
-		if (!made) return null;
-		this.saveLocal({ chatId: made.chatId });
-		return made.chatId;
+		if (!this.creatingChat) this.creatingChat = this.createChat().finally(() => { this.creatingChat = null; });
+		return this.creatingChat;
 	}
 
+	async createChat() {
+		const title = "Board: " + (this.model.title || this.path.split("/").pop().replace(/\.iedboard$/, ""));
+		const made = await this.ied.client.request("chat.create", { wsId: this.ctx.wsId, title, section: CHAT_SECTION }).catch((e) => { this.ied.toast("Cannot start a chat: " + e.message, { level: "error" }); return null; });
+		if (made) this.saveLocal({ chatId: made.chatId });
+		return made;
+	}
+
+	// Beside the boards, a narrow group of its own the first time (owner, 2026-11-11: "by default the chat should show
+	// up in a smaller window"), tethered to the board: it shows whenever the board does, and closes with it.
 	showChat(chatId) {
 		const ref = "chat:" + chatId;
 		if (window.innerWidth < PHONE || !this.ied.tabs.openBeside) this.ied.tabs.open(ref, { preview: false });
-		else this.ied.tabs.openBeside(this.ctx.ref, ref, { tether: true });
+		else this.ied.tabs.openBeside(this.ctx.ref, ref, { tether: true, closes: true, size: CHAT_SHARE });
+	}
+
+	// The board's chat follows the board (owner, 2026-11-11: "when i switch the board it will switch to the
+	// corresponding chat"): its tab, tethered to the board, shows whenever the board does; a board whose chat is not open
+	// brings it - the one it talked to before, else a new one - when another board's chat shows beside the boards.
+	async followChat() {
+		if (window.innerWidth < PHONE || !this.ied.tabs.openBeside) return;
+		await this.localReady;
+		if (this.local.chatId && !this.sectionChecked) {
+			this.sectionChecked = true;
+			this.chat(false);
+		}
+		if (this.disposed || (this.local.chatId && this.ied.tabs.state().open.includes("chat:" + this.local.chatId))) return;
+		if (!this.boardChatBeside(this.ied.tabs.state())) return;
+		const summary = await this.chat(true);
+		if (!summary || this.disposed) return;
+		const state = this.ied.tabs.state();
+		if (state.shown.includes(this.ctx.ref) && this.boardChatBeside(state)) this.showChat(summary.chatId);
+	}
+
+	// Another board's chat is the tab shown in a group of this board's activity other than this board's.
+	boardChatBeside(state) {
+		const groups = state.groups || [];
+		const home = groups.find((g) => g.tabs.includes(this.ctx.ref));
+		if (!home) return false;
+		return groups.some((g) => g !== home && g.activity === home.activity && g.active && g.active.startsWith("chat:")
+			&& this.ied.tabs.partners(g.active).some((ref) => ref.startsWith("board:") && ref !== this.ctx.ref));
 	}
 
 	// The AI button (owner, 2026-11-11: "i should be able to open the chat window without it auto sending a message"):
 	// the board's chat beside the board, nothing sent. A chat that has no turns yet gets the board (and the selection)
 	// written in its empty message box, for the owner to finish or clear.
 	async openChat() {
-		const chatId = await this.chat(true);
-		if (!chatId) return;
-		this.showChat(chatId);
-		const list = await this.ied.client.request("chat.list", { wsId: this.ctx.wsId }).catch(() => null);
-		const summary = list && (list.chats || []).find((c) => c.chatId === chatId);
-		const fresh = !summary || !summary.turnCount;
+		const summary = await this.chat(true);
+		if (!summary) return;
+		this.showChat(summary.chatId);
 		const ids = [...this.input.selection].filter((id) => !id.startsWith("t"));
-		const text = fresh ? "On the planning board " + this.path + (ids.length ? " (selected: " + ids.join(", ") + ")" : "") + ": " : undefined;
-		this.ied.commands.run("ied.chat.focusInput", { chatId, text });
+		const text = !summary.turnCount ? "On the planning board " + this.path + (ids.length ? " (selected: " + ids.join(", ") + ")" : "") + ": " : undefined;
+		this.ied.commands.run("ied.chat.focusInput", { chatId: summary.chatId, text });
 	}
 }
 

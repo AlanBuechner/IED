@@ -344,7 +344,7 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
+	const keys = ["chatId", "wsId", "title", "section", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
 		"backgroundRunning", "agent", "parentChatId", "owes", "awaits"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];

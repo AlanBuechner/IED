@@ -482,6 +482,8 @@ namespace Ai
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->m_Mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->m_Permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
 		if (params.Has("group")) chat->m_Group = params.Str("group");
+		// A plugin's own chats (a board's) in a section of their own in the Chats list (docs/04 "Chat sections").
+		if (params.Has("section")) chat->m_Section = params.Str("section");
 		if (params.Has("endless")) chat->m_Endless = params.Bool("endless", false);
 		if (params.Has("effort")) {
 			Core::String effort = params.Str("effort");

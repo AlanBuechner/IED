@@ -5,7 +5,7 @@
 import { test, assertEqual } from "./harness.js";
 import { choiceLabel, choicesFrom, familyOf, groupTurn, modelFamilies, roleOfMode } from "/plugins/ied.chat/ui/modelpicker.js";
 import { withAgent, withAgentRenamed, withoutAgent } from "/plugins/ied.chat/ui/groupsettings.js";
-import { nestAgents, rootsOf } from "/plugins/ied.chat/ui/chatsview.js";
+import { keptBySection, nestAgents, rootsOf } from "/plugins/ied.chat/ui/chatsview.js";
 import { taskTime } from "/plugins/ied.chat/ui/sidepanel.js";
 
 test("model menu: models by family, Claude's under one heading", () => {
@@ -77,6 +77,16 @@ test("chats list: a sub-agent's chat under the chat that ran it", () => {
 	const roots = rootsOf(chats);
 	assertEqual([roots.get("d"), roots.get("c"), roots.get("b"), roots.get("e")], ["a", "a", "b", "e"], "a sub-agent goes in its orchestrator's section");
 	assertEqual(nestAgents([{ chatId: "x", parentChatId: "y" }, { chatId: "y", parentChatId: "x" }]).length, 2, "a loop still lists both");
+});
+
+test("chats list: a plugin's chats in a section of their own, a sub-agent's with its orchestrator", () => {
+	const chats = [
+		{ chatId: "a", title: "Mine" }, { chatId: "b", title: "Board: Login", section: "Boards" }, { chatId: "c", title: "coder", parentChatId: "b" },
+		{ chatId: "d", title: "Board: Sync", section: "Boards" }, { chatId: "e", title: "Notes", section: "  " }, { chatId: "f", title: "Plan", section: "Agents" },
+	];
+	const kept = keptBySection(chats, rootsOf(chats));
+	assertEqual(kept.sections.map(([name, list]) => name + ":" + list.map((c) => c.chatId).join("")), ["Agents:f", "Boards:bcd"], "by name");
+	assertEqual([...kept.of].sort(), ["b", "c", "d", "f"], "a blank section is the owner's own");
 });
 
 test("background tasks: how long one ran", () => {

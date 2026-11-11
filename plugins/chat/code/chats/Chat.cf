@@ -494,6 +494,7 @@ namespace Ai
 		json.Field("chatId", m_ChatId.View());
 		json.Field("wsId", m_WsId.View());
 		json.Field("title", m_Title.View());
+		if (!m_Section.IsEmpty()) json.Field("section", m_Section.View());
 		json.Field("mode", ChatModeName(m_Mode));
 		json.Field("permission", PermissionModeName(m_Permission));
 		json.Field("group", m_Group.View());

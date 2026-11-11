@@ -318,6 +318,9 @@ test("layout: a tab opens beside another, in a new group when there is no other"
 	const moved = L.openBeside(L.normalize(L.group(["doc:a", "doc:b"], { well: true, active: "doc:a" })), "doc:a", "doc:b");
 	assertEqual(shape(moved), "row(W[doc:a|doc:a] W[doc:b|doc:b])", "one in the anchor's group moves beside it");
 	assertEqual(L.openBeside(tree, "doc:a.md", "mdpreview:a.md"), tree, "already beside");
+	const narrow = L.openBeside(L.normalize(L.group(["board:a"], { well: true, active: "board:a" })), "board:a", "chat:c1", 0.3);
+	assertEqual(shape(narrow), "row(W[board:a|board:a] W[chat:c1|chat:c1])", "a narrow group of its own");
+	assertEqual(narrow.sizes.map((s) => Math.round(s * 10) / 10), [0.7, 0.3], "taking the share asked for");
 });
 
 test("layout: activating a tab shows its tethered partners in their groups", () => {

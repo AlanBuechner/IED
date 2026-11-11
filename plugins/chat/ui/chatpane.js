@@ -25,6 +25,8 @@ const TRIM_SLACK = 60;
 const OWNER_SCROLL_MS = 800;   // a scroll this soon after the owner's wheel, touch or key is theirs
 const CLAMPED_PX = 2;          // a transcript that shrank under its end is scrolled up by the browser, this close to it
 const PANEL_MIN_PX = 200;
+const PANEL_OF_KEY = "ied.chat.panelOf";   // {chatId: open} for the chats kept in a section
+const PANEL_OF_MOST = 200;
 const TRANSCRIPT_MIN_PX = 360;   // what a wide panel leaves the transcript
 const PANEL_STEP_PX = 16;        // an arrow key on the panel's edge
 
@@ -214,6 +216,7 @@ export class ChatPane {
 		this.transcript.render();
 		this.composer.update(this.model);
 		this.panel.update(this.model);
+		this.applyPanel();
 		if (!chatId) this.nameDraftGroup();
 	}
 
@@ -231,6 +234,7 @@ export class ChatPane {
 		this.transcript.render();
 		this.composer.update(this.model);
 		this.panel.update(this.model);
+		this.applyPanel();
 		this.scrollToEnd();
 		requestAnimationFrame(() => this.loadInSight());
 		if (this.host.shown) this.host.shown(this.model.summary);
@@ -243,6 +247,7 @@ export class ChatPane {
 		if (kind === "segment.start" && change.segment && this.model.held() > WINDOW_SEGMENTS + TRIM_SLACK) this.trimStreamed();
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
 		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips || change.background) this.panel.update(this.model);
+		if (change.summary) this.applyPanel();
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
 	}
 
@@ -523,9 +528,32 @@ export class ChatPane {
 		this.el.classList.toggle("phone-panel", on);
 	}
 
+	// The details panel is open or closed as the owner left it on this device; a chat kept in a section (a board's,
+	// docs/04 "Chat sections") starts with it closed (owner, 2026-11-11: "collapsed by default so it is not taking up
+	// space") and keeps the owner's choice for itself.
+	panelWanted() {
+		const own = stored(PANEL_OF_KEY, {});
+		if (this.chatId && typeof own[this.chatId] === "boolean") return own[this.chatId];
+		if (this.chatId && this.model.summary && this.model.summary.section) return false;
+		return stored("ied.chat.panel", true);
+	}
+
+	applyPanel() {
+		this.showPanel = this.panelWanted();
+		this.el.classList.toggle("no-panel", !this.showPanel);
+	}
+
 	togglePanel() {
 		this.showPanel = !this.showPanel;
-		store("ied.chat.panel", this.showPanel);
+		if (this.chatId && this.model.summary && this.model.summary.section) {
+			const own = stored(PANEL_OF_KEY, {});
+			delete own[this.chatId];
+			own[this.chatId] = this.showPanel;
+			const ids = Object.keys(own);
+			for (const id of ids.slice(0, Math.max(0, ids.length - PANEL_OF_MOST))) delete own[id];
+			store(PANEL_OF_KEY, own);
+		}
+		else store("ied.chat.panel", this.showPanel);
 		this.el.classList.toggle("no-panel", !this.showPanel);
 	}
 

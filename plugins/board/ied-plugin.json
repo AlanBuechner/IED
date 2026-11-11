@@ -28,8 +28,11 @@
 			{ "id": "ied.board", "title": "Boards", "icon": "$(edit)", "order": 35, "documents": ["board", "chat"], "emptyWell": ["ied.board.new"], "newTab": "ied.board.new" }
 		],
 		// The list keeps its place in the Boards activity: on a phone it would take the Solution Explorer's slot.
+		// The Board window - the layers, plan and history of the board worked on now - is under the list (owner,
+		// 2026-11-11), leaving the board its whole width; a phone's board shows them in a sheet of its own.
 		"toolWindows": [
-			{ "id": "ied.board.list", "title": "Boards", "icon": "$(edit)", "view": "BoardList", "defaultDock": "left", "activity": "ied.board", "phoneNav": false }
+			{ "id": "ied.board.list", "title": "Boards", "icon": "$(edit)", "view": "BoardList", "defaultDock": "left", "activity": "ied.board", "phoneNav": false },
+			{ "id": "ied.board.panel", "title": "Board", "icon": "$(layers)", "view": "BoardPanel", "defaultDock": "left", "dockGroup": "board", "activity": "ied.board", "phoneNav": false }
 		],
 		"fileIcons": [
 			{ "extensions": [".iedboard"], "icon": "$(edit)", "color": "--hue-violet" }

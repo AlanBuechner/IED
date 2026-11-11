@@ -1,9 +1,12 @@
-// index.js - the planning board's UI module (docs/32): boards as documents ("board:<path>"), the Boards tool window,
-// and the commands - New Board, Open Board (the Solution Explorer's menu on a .iedboard), View > Boards.
+// index.js - the planning board's UI module (docs/32): boards as documents ("board:<path>"), the Boards tool window
+// and the Board tool window under it, and the commands - New Board, Open Board (the Solution Explorer's menu on a
+// .iedboard), View > Boards.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { promptDialog } from "/ui-kit/dialog.js";
 import { BoardView } from "./board.js";
+import { PanelFrame } from "./panels.js";
+import { currentBoard, onCurrentBoard } from "./current.js";
 
 const name = (path) => path.split("/").pop().replace(/\.iedboard$/, "");
 
@@ -42,7 +45,26 @@ export function BoardDocument(ctx) {
 	const view = new BoardView(ctx, ctx.ref.slice("board:".length));
 	// For the e2e checks and the browser's console: the view behind a board tab.
 	ctx.el.boardView = view;
-	return { dispose: () => view.dispose(), focus: () => view.focus(), visible: (shown) => { if (shown) view.canvas.fit(); } };
+	return {
+		dispose: () => view.dispose(),
+		focus: () => view.focus(),
+		visible: (shown) => {
+			if (!shown) return;
+			view.canvas.fit();
+			view.shown();
+		},
+	};
+}
+
+// The Board tool window, under the list (docs/32 "The board in the UI"): the layers, plan and history of the board
+// worked on now - the one shown or touched last.
+export function BoardPanel(ctx) {
+	const frame = new PanelFrame();
+	ctx.el.classList.add("board-panel-window");
+	replace(ctx.el, frame.el);
+	const stop = onCurrentBoard((view) => frame.attach(view));
+	frame.attach(currentBoard());
+	return { dispose: () => stop(), visible: (shown) => { if (shown) frame.attach(currentBoard()); } };
 }
 
 // The Boards tool window: the workspace's boards, live; a click opens one.

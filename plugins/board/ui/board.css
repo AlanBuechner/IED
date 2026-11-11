@@ -1,7 +1,9 @@
 /* board.css - the planning board (docs/32). Theme tokens only (frontend/css/theme.css). */
 
 .board-doc { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-2); color: var(--text-0); position: relative; }
-.board-toolbar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); overflow-x: auto; scrollbar-width: none; flex: none; }
+/* a board narrower than its toolbar (its chat beside it) wraps it; a phone's scrolls instead */
+.board-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); scrollbar-width: none; flex: none; }
+.board-end { margin-left: auto; gap: var(--space-1); }
 .board-toolbar::-webkit-scrollbar { display: none; }
 .board-group { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .board-sep { width: var(--border-width); height: 18px; background: var(--border-1); margin: 0 var(--space-2); flex: none; }
@@ -29,8 +31,10 @@
 .board-editor.centered { text-align: center; display: flex; }
 .board-editor-note { background: color-mix(in srgb, var(--hue-yellow) 22%, var(--bg-2)); padding: 10px; }
 
-.board-panel { width: 280px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-0); background: var(--bg-1); }
-.board-panel[hidden] { display: none; }
+/* the side panel: in the Board tool window under the list, or a phone board's sheet */
+.board-panel-window { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-1); }
+.board-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg-1); }
+.board-sheet { display: none; }
 .board-panel-tabs { display: flex; border-bottom: var(--border-width) solid var(--border-0); flex: none; }
 .board-panel-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); height: 28px; color: var(--text-1); font-size: var(--font-size-sm); border-bottom: 2px solid transparent; }
 .board-panel-tab:hover { color: var(--text-0); background: var(--veil); }
@@ -70,8 +74,9 @@
 
 /* phone: the panel is a sheet over the lower half of the board */
 @media (max-width: 719px) {
-	.board-panel { position: absolute; left: 0; right: 0; bottom: 0; width: auto; height: 55%; border-left: 0; border-top: var(--border-width) solid var(--border-1); box-shadow: var(--shadow-popup); z-index: 3; }
-	.board-toolbar { padding: var(--space-2); gap: var(--space-2); }
+	.board-sheet:not([hidden]) { display: flex; position: absolute; left: 0; right: 0; bottom: 0; height: 55%; border-top: var(--border-width) solid var(--border-1); box-shadow: var(--shadow-popup); z-index: 3; }
+	.board-toolbar { padding: var(--space-2); gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; }
+	.board-end { display: contents; }
 	.board-toolbar .ib { width: 36px; height: 36px; }
 	.board-swatch { width: 22px; height: 22px; }
 	.board-sep { height: 26px; }

@@ -22,6 +22,7 @@ export class ChatsView {
 		this.tabs = this.ied.tabs.state();
 		this.query = "";
 		this.closed = new Set(stored("ied.chat.listClosed", ["deleted"]));
+		this.opened = new Set(stored("ied.chat.listOpened", []));
 		this.renaming = null;
 		this.filter = h("input.input-field.chats-filter", { type: "search", placeholder: "Search chats", "aria-label": "Search chats", spellcheck: "false", on: {
 			input: () => {
@@ -72,12 +73,16 @@ export class ChatsView {
 		const now = Date.now();
 		const chats = this.list.chats.filter((c) => this.matches(c.title));
 		const root = rootsOf(chats);
-		const open = chats.filter((c) => this.isOpen(root.get(c.chatId)));
-		const rest = chats.filter((c) => !this.isOpen(root.get(c.chatId)));
+		const kept = keptBySection(chats, root);
+		const own = chats.filter((c) => !kept.of.has(c.chatId));
+		const open = own.filter((c) => this.isOpen(root.get(c.chatId)));
+		const rest = own.filter((c) => !this.isOpen(root.get(c.chatId)));
 		const deleted = this.list.deleted.filter((d) => this.matches(d.title));
+		const rows = (list) => nestAgents(list).map(({ chat, depth }) => this.chatRow(chat, now, depth));
 		const sections = [
-			open.length ? this.section("open", "Open", nestAgents(open).map(({ chat, depth }) => this.chatRow(chat, now, depth))) : null,
-			rest.length ? this.section("recent", open.length ? "Recent" : "Chats", nestAgents(rest).map(({ chat, depth }) => this.chatRow(chat, now, depth))) : null,
+			open.length ? this.section("open", "Open", rows(open)) : null,
+			rest.length ? this.section("recent", open.length ? "Recent" : "Chats", rows(rest)) : null,
+			...kept.sections.map(([name, list]) => this.section("s:" + name, name, rows(list), true)),
 			deleted.length ? this.section("deleted", "Deleted", deleted.map((d) => this.deletedRow(d, now))) : null,
 		].filter(Boolean);
 		if (!sections.length) sections.push(this.emptyEl());
@@ -92,12 +97,16 @@ export class ChatsView {
 			h("button.btn", { on: { click: () => this.ied.commands.run("ied.chat.new") } }, icon("add"), "New chat"));
 	}
 
-	section(id, title, rows) {
-		const closed = this.closed.has(id) && !this.query;
+	// A section of the list, open or closed as the owner left it on this device; a plugin's (`shut`: a board's chats)
+	// starts closed, out of the way of the owner's own chats (docs/04 "Chat sections").
+	section(id, title, rows, shut) {
+		const kept = shut ? this.opened : this.closed;
+		const closed = (shut ? !kept.has(id) : kept.has(id)) && !this.query;
 		const toggle = () => {
-			if (this.closed.has(id)) this.closed.delete(id);
-			else this.closed.add(id);
-			store("ied.chat.listClosed", [...this.closed]);
+			if (kept.has(id)) kept.delete(id);
+			else kept.add(id);
+			if (shut) store("ied.chat.listOpened", [...kept]);
+			else store("ied.chat.listClosed", [...kept]);
 			this.render();
 		};
 		return h("section.chats-sec" + (closed ? ".closed" : ""), { dataset: { section: id } },
@@ -271,6 +280,23 @@ export function rootsOf(chats) {
 		roots.set(chat.chatId, at.chatId);
 	}
 	return roots;
+}
+
+// The chats a plugin keeps in a section of its own (summary.section; docs/04 "Chat sections"), a sub-agent's with its
+// orchestrator's: {of: Set of their chatIds, sections: [[name, chats]] by name}.
+export function keptBySection(chats, roots) {
+	const byId = new Map(chats.map((c) => [c.chatId, c]));
+	const named = new Map();
+	const of = new Set();
+	for (const chat of chats) {
+		const top = byId.get(roots.get(chat.chatId)) || chat;
+		const name = typeof top.section === "string" ? top.section.trim() : "";
+		if (!name) continue;
+		if (!named.has(name)) named.set(name, []);
+		named.get(name).push(chat);
+		of.add(chat.chatId);
+	}
+	return { of, sections: [...named].sort((a, b) => a[0].localeCompare(b[0])) };
 }
 
 // The chats in order with each sub-agent's chat right under the chat that ran it ([{chat, depth}]); one whose parent is
