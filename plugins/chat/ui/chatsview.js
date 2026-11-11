@@ -110,7 +110,7 @@ export class ChatsView {
 		const shown = this.tabs.shown.includes("chat:" + summary.chatId);
 		const state = STATE_LABELS[summary.state] || summary.state;
 		return h("div.chats-row" + (shown ? ".shown" : "") + (look.attention ? ".attn" : "") + (depth ? ".sub" : ""), {
-			role: "treeitem", tabindex: "-1", title: (summary.agent ? "Agent " + summary.agent + ": " : "") + summary.title + " - " + state,
+			role: "treeitem", tabindex: "-1", title: (summary.agent ? "Agent " + summary.agent + ": " : "") + summary.title + " - " + state + (summary.state === "suspended" && summary.stateReason ? ": " + summary.stateReason : ""),
 			"aria-level": String((depth || 0) + 1), style: { "--depth": String(depth || 0) }, dataset: { chat: summary.chatId, state: summary.state },
 			on: {
 				click: () => this.open(summary.chatId),

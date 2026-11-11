@@ -1,9 +1,12 @@
 include "api/Plugin.ch"
 include "LspQuery.ch"
+include "Files.ch"
 
 namespace Ai
 {
 	const int64 c_CodeSuggestionsMost = 8;
+	static const int64 c_MissedFileNames = 5;
+	static const int64 c_FilesWritingNameMost = 4;   // files whose text writes a lost symbol's name, asked for its outline
 
 	static const char*[27] c_SymbolKinds = { "symbol", "file", "module", "namespace", "package", "class", "method", "property", "field", "constructor", "enum",
 		"interface", "function", "variable", "constant", "string", "number", "boolean", "array", "object", "key", "null", "enum member", "struct", "event",
@@ -208,7 +211,7 @@ namespace Ai
 	Serialization::DomNode CodeQuery::Request(Core::StringView path, Core::StringView method, Core::StringView params, bool withDocument) {
 		Core::String result;
 		Core::String problem;
-		if (!IED::LspRequest(m_Ws, path, method, params, withDocument, result, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String(method) + " on ") + Shown(path).View()) + ": " + problem.View()).View());
+		if (!IED::LspRequest(m_Ws, path, method, params, withDocument, result, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, ((((Core::String(method) + " on ") + Shown(path).View()) + ": " + problem.View()) + MissedFileHint(path).View()).View());
 		return ParsedJson(result.View());
 	}
 
@@ -338,6 +341,35 @@ namespace Ai
 
 	static bool SamePlace(const CodeSymbol* a, const CodeSymbol* b) { return a->m_Selection.m_Path == b->m_Selection.m_Path && a->m_Selection.m_StartLine == b->m_Selection.m_StartLine; }
 
+	// The searched symbols named `last` and, when `name` is qualified, so qualified.
+	static void CollectSearched(const Core::Array<CodeSymbol*>& searched, Core::StringView last, Core::StringView name, bool qualified, Core::Array<CodeSymbol*>& found) {
+		for (CodeSymbol* symbol : searched)
+			if (NameMatches(symbol->m_Name.View(), last) && (!qualified || QualifiedMatches(symbol->Qualified().View(), name))) found.Push(symbol);
+	}
+
+	// `qualifier::last` found through its scope, for a `last` so common that the server's capped answer to it left this one
+	// out (one Destroy among a large workspace's hundreds): the scope's search finds an out-of-line definition named
+	// "Scope::last", and the outline of the scope's own file its member.
+	void CodeQuery::FindInScope(Core::StringView last, Core::StringView qualifier, Core::StringView name, Core::Array<CodeSymbol*>& found) {
+		Core::Array<Core::String> scope = NameParts(qualifier);
+		Core::Array<CodeSymbol*> searched = Search(scope[scope.Count() - 1].View());
+		CollectSearched(searched, last, name, true, found);
+		for (CodeSymbol* symbol : searched)
+			if (HoldsMembers(symbol->m_Kind) && QualifiedMatches(symbol->Qualified().View(), qualifier))
+				Collect(Outline(symbol->m_Selection.m_Path.View()), last, qualifier, found);
+	}
+
+	Core::Array<CodeSymbol*> CodeQuery::MembersOf(Core::StringView qualifier) {
+		Core::Array<Core::String> scope = NameParts(qualifier);
+		if (scope.IsEmpty()) return Core::Array<CodeSymbol*>();
+		for (CodeSymbol* symbol : Search(scope[scope.Count() - 1].View())) {
+			if (!HoldsMembers(symbol->m_Kind) || !QualifiedMatches(symbol->Qualified().View(), qualifier)) continue;
+			CodeSymbol* whole = Refined(symbol);
+			if (!whole->m_Children.IsEmpty()) return whole->m_Children;
+		}
+		return Core::Array<CodeSymbol*>();
+	}
+
 	Core::Array<CodeSymbol*> CodeQuery::Find(Core::StringView name, Core::StringView path) {
 		Core::Array<Core::String> parts = NameParts(name);
 		Core::Array<CodeSymbol*> found;
@@ -350,9 +382,10 @@ namespace Ai
 		}
 		Core::Array<CodeSymbol*> named;
 		if (!path.IsEmpty()) Collect(Outline(path), last.View(), qualifier.View(), named);
-		else
-			for (CodeSymbol* symbol : Search(last.View()))
-				if (NameMatches(symbol->m_Name.View(), last.View()) && (qualifier.IsEmpty() || QualifiedMatches(symbol->Qualified().View(), name))) named.Push(symbol);
+		else {
+			CollectSearched(Search(last.View()), last.View(), name, !qualifier.IsEmpty(), named);
+			if (named.IsEmpty() && !qualifier.IsEmpty()) FindInScope(last.View(), qualifier.View(), name, named);
+		}
 		for (CodeSymbol* symbol : named) {
 			CodeSymbol* whole = path.IsEmpty() ? Refined(symbol) : symbol;
 			bool seen = false;
@@ -376,6 +409,45 @@ namespace Ai
 		if (IsAbsolute(given) && IED::RelativeTo(m_Ws.m_Root.View(), given, relative)) return IED::NormalizePath(relative.View());
 		if (IsAbsolute(given)) return IED::FileUriOfPath(given);
 		return IED::NormalizePath(given);
+	}
+
+	Core::String CodeQuery::ExistingFileOf(Core::StringView given) const {
+		Core::String path = FileOf(given);
+		if (path.IsEmpty() || path.View().StartsWith(Core::StringView("file:"))) return path;
+		FS::Path onDisk = FS::Path(m_Ws.m_Root.View()) / path.View();
+		if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr()) || IED::Exists(m_Ws, path.View())) return path;
+		Core::String only = OnlySourceFile(IED::ExpandGlob(m_Ws.m_Root.View(), SameNamedGlob(path.View()).View()));
+		return only.IsEmpty() ? path : only;
+	}
+
+	Core::String CodeQuery::MissedFileHint(Core::StringView path) const {
+		if (path.IsEmpty() || path.StartsWith(Core::StringView("file:"))) return Core::String();
+		FS::Path onDisk = FS::Path(m_Ws.m_Root.View()) / path;
+		if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr()) || IED::Exists(m_Ws, path)) return Core::String();
+		Core::Array<Core::String> named = IED::ExpandGlob(m_Ws.m_Root.View(), SameNamedGlob(path).View());
+		if (named.IsEmpty()) return Core::String("; no file of that name is in the workspace: fs_glob finds one by part of its name (**/*Part*), code_symbols with a query the file a symbol is in");
+		Core::StringBuilder out;
+		out.Append("; files of that name:");
+		for (int64 i = 0; i < named.Count() && i < c_MissedFileNames; i += 1) {
+			out.Append(" ");
+			out.Append(named[i].View());
+		}
+		if (named.Count() > c_MissedFileNames) out.Append(" ...");
+		return out.ToString();
+	}
+
+	Core::String CodeQuery::FileNamedHint(Core::StringView name) const {
+		if (name.IsEmpty() || name.Contains(Core::StringView("::")) || name.Contains(Core::StringView("."))) return Core::String();
+		Core::Array<Core::String> named = IED::ExpandGlob(m_Ws.m_Root.View(), (Core::String("**/") + name + ".*").View());
+		if (named.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("; files are named so (code_symbols with a path gives a file's outline):");
+		for (int64 i = 0; i < named.Count() && i < c_MissedFileNames; i += 1) {
+			out.Append(" ");
+			out.Append(named[i].View());
+		}
+		if (named.Count() > c_MissedFileNames) out.Append(" ...");
+		return out.ToString();
 	}
 
 	static bool IsWordByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 0x80; }
@@ -417,7 +489,7 @@ namespace Ai
 
 	static CodeTarget PlaceTarget(CodeQuery& query, const Serialization::DomNode& args) {
 		CodeTarget target;
-		Core::String path = query.FileOf(args.Member("path").AsView());
+		Core::String path = query.ExistingFileOf(args.Member("path").AsView());
 		if (path.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("line needs path"));
 		const int64 line = args.Member("line").AsInt() - 1;
 		Core::StringView text = query.Line(path.View(), line);
@@ -447,10 +519,60 @@ namespace Ai
 		return target;
 	}
 
-	// What the workspace has named like the last part of `name`, for an answer that found nothing.
+	static const int64 c_MembersListedMost = 60;
+
+	// For `Type::Missing` where Type is a type: what it has instead, the names a next call can take.
+	static Core::String MembersInstead(CodeQuery& query, const Core::Array<Core::String>& parts) {
+		if (parts.Count() < 2) return Core::String();
+		Core::StringBuilder qualifier;
+		for (int64 i = 0; i + 1 < parts.Count(); ++i) {
+			if (i > 0) qualifier.Append("::");
+			qualifier.Append(parts[i].View());
+		}
+		return MembersSaid(qualifier.View(), parts[parts.Count() - 1].View(), query.MembersOf(qualifier.View()));
+	}
+
+	Core::String MembersSaid(Core::StringView type, Core::StringView missing, const Core::Array<CodeSymbol*>& members) {
+		if (members.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("; ");
+		out.Append(type);
+		out.Append(" has no ");
+		out.Append(missing);
+		out.Append(" - its members: ");
+		Core::HashSet<Core::String> listed;
+		for (CodeSymbol* member : members) {
+			if (listed.Count() >= c_MembersListedMost) {
+				out.Append(", ...");
+				break;
+			}
+			if (!listed.Add(member->m_Name)) continue;   // overloads once
+			if (listed.Count() > 1) out.Append(", ");
+			out.Append(member->m_Name.View());
+		}
+		return out.ToString();
+	}
+
+	Core::String NamedElsewhereSaid(Core::StringView missing, const Core::Array<CodeSymbol*>& found) {
+		Core::StringBuilder out;
+		int64 count = 0;
+		for (CodeSymbol* symbol : found) {
+			if (count >= c_CodeSuggestionsMost) break;
+			if (symbol->m_Name.View() != missing) continue;
+			out.Append(count == 0 ? "; named so elsewhere: " : ", ");
+			out.Append(symbol->Qualified().View());
+			count += 1;
+		}
+		return out.ToString();
+	}
+
+	// What the workspace has named like the last part of `name`, for an answer that found nothing: for `Type::Missing`, the
+	// type's own members first, then what is named so outside it.
 	static Core::String Similar(CodeQuery& query, Core::StringView name) {
 		Core::Array<Core::String> parts = NameParts(name);
 		if (parts.IsEmpty()) return Core::String();
+		Core::String members = MembersInstead(query, parts);
+		if (!members.IsEmpty()) return members + NamedElsewhereSaid(parts[parts.Count() - 1].View(), query.Search(parts[parts.Count() - 1].View())).View();
 		Core::StringBuilder out;
 		int64 count = 0;
 		for (CodeSymbol* symbol : query.Search(parts[parts.Count() - 1].View())) {
@@ -486,6 +608,20 @@ namespace Ai
 		return own;
 	}
 
+	bool DeclaresAlias(Core::StringView line) {
+		Core::StringView trimmed = line.Trimmed();
+		return trimmed.StartsWith(Core::StringView("alias ")) || (trimmed.StartsWith(Core::StringView("using ")) && trimmed.Contains(Core::StringView("=")));
+	}
+
+	// `symbols` without the aliases when something else is named so too: a package's `alias ViewportController =
+	// Claymore::ViewportController` names what it stands for, not a second symbol to choose between.
+	static Core::Array<CodeSymbol*> WithoutAliases(CodeQuery& query, const Core::Array<CodeSymbol*>& symbols) {
+		Core::Array<CodeSymbol*> kept;
+		for (CodeSymbol* symbol : symbols)
+			if (!DeclaresAlias(query.Line(symbol->m_Selection.m_Path.View(), symbol->m_Selection.m_StartLine))) kept.Push(symbol);
+		return kept.IsEmpty() ? symbols : kept;
+	}
+
 	static bool IsC4File(Core::StringView extension) { return extension == ".cf" || extension == ".ch"; }
 
 	// What a file uses but does not declare - `path` named where the name is used, not where it is defined: the symbols
@@ -507,22 +643,74 @@ namespace Ai
 		return OwnFirst(WithoutMembersOfFound(found));
 	}
 
-	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) {
+	Core::String WrittenOwnerAndName(Core::StringView name) {
+		Core::Array<Core::String> parts = NameParts(name);
+		if (parts.Count() < 2) return Core::String();
+		return (parts[parts.Count() - 2] + "::") + parts[parts.Count() - 1].View();
+	}
+
+	// The files whose text writes a qualified name's owner and name ("Crowd::GrabAt"), at most `most`, build output and ignored files
+	// left out: where a symbol the servers' workspace index does not have is likely defined - a file of a project with a workspace of its
+	// own inside this one is indexed only once opened, and its outline still answers.
+	static Core::Array<Core::String> FilesWritingName(const IED::Workspace& ws, Core::StringView name, int64 most) {
+		Core::Array<Core::String> files;
+		Core::String written = WrittenOwnerAndName(name);
+		if (written.IsEmpty()) return files;
+		IED::SearchQuery search;
+		search.m_Text = written;
+		search.m_CaseSensitive = true;
+		search.m_Exclude = IED::DefaultExcludes();
+		search.m_UseIgnoreFiles = true;
+		IED::SearchResult result;
+		Core::String problem;
+		if (!IED::Search(ws, search, null, result, problem)) return files;
+		for (const IED::SearchMatch& match : result.m_Matches) {
+			if (files.Count() == most) break;
+			if (!files.Contains(match.m_Path)) files.Push(match.m_Path);
+		}
+		return files;
+	}
+
+	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) { return TargetsOf(query, args, 1); }
+
+	static int64 DistinctNames(const Core::Array<CodeSymbol*>& symbols) {
+		Core::Array<Core::String> names;
+		for (CodeSymbol* symbol : symbols) {
+			Core::String qualified = symbol->Qualified();
+			if (!names.Contains(qualified)) names.Push(qualified);
+		}
+		return names.Count();
+	}
+
+	CodeTarget TargetsOf(CodeQuery& query, const Serialization::DomNode& args, int64 mostNames) {
 		if (args.Member("line").IsValid()) return PlaceTarget(query, args);
 		Core::StringView name = args.Member("symbol").AsView();
 		if (name.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give symbol (a name; Ring::Push narrows it), or path and line; code_symbols with a path lists a file's symbols"));
-		Core::String path = query.FileOf(args.Member("path").AsView());
+		Core::String path = query.ExistingFileOf(args.Member("path").AsView());
 		CodeTarget target;
 		target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, path.View())));
 		// A server still indexing (just after a restart) answers a first search with nothing: look once more before saying so.
 		if (target.m_Symbols.IsEmpty()) target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, path.View())));
 		if (target.m_Symbols.IsEmpty() && !path.IsEmpty()) target.m_Symbols = NamedSoElsewhere(query, name, path.View());
+		if (target.m_Symbols.IsEmpty() && path.IsEmpty()) {
+			for (const Core::String& file : FilesWritingName(query.m_Ws, name, c_FilesWritingNameMost)) {
+				target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, file.View())));
+				if (!target.m_Symbols.IsEmpty()) break;
+			}
+		}
 		if (target.m_Symbols.IsEmpty()) {
 			// Without a path only the workspace's own code is searched: a file elsewhere (IED's, ied:/...) needs its path.
 			Core::String where = path.IsEmpty() ? Core::String(" in the workspace (code outside it, such as ied:/..., needs its path)") : Core::String(" in ") + path.View();
-			throw IED::RpcError(IED::ErrorCode::NotFound, ((((Core::String("no symbol ") + name) + where.View()) + Similar(query, name).View()) + "; code_symbols lists a file's symbols or searches by name").View());
+			throw IED::RpcError(IED::ErrorCode::NotFound, (((((Core::String("no symbol ") + name) + where.View()) + Similar(query, name).View()) + query.FileNamedHint(name).View()) + "; code_symbols lists a file's symbols or searches by name").View());
 		}
+		target.m_Symbols = WithoutAliases(query, target.m_Symbols);
 		Core::String first = target.m_Symbols[0]->Qualified();
+		int64 names = DistinctNames(target.m_Symbols);
+		if (names > 1 && names <= mostNames) {
+			target.m_At = target.m_Symbols[0]->m_Selection;
+			target.m_Label = Core::String(name);
+			return target;
+		}
 		for (CodeSymbol* symbol : target.m_Symbols) {
 			if (symbol->Qualified() == first) continue;
 			Core::StringBuilder listed;

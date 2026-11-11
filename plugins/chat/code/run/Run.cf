@@ -168,6 +168,7 @@ namespace Ai
 		prompt.m_Docs = DocsIndex(DocsOf(context, ws, contributed));
 		prompt.m_Deferred = tools->HasDeferred(chat->m_Mode);
 		prompt.m_Agents = AgentsSection(AgentsOf(chats, chat, ws), models);
+		prompt.m_Endless = chat->m_Endless;
 		return chats->m_Prompts.System(chat->m_Mode, prompt);
 	}
 
@@ -176,7 +177,7 @@ namespace Ai
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
 		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->m_UserText.View() : Core::StringView(""), models, contributed);
-		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat->m_Mode, claude).ByteLength());
+		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat, claude).ByteLength());
 	}
 
 	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {
@@ -290,7 +291,8 @@ namespace Ai
 				Finish(Core::StringView("user_cancelled"));
 				return;
 			}
-			if (m_MaxSteps > 0 && m_Steps >= m_MaxSteps) {
+			// A chat that runs until stopped has no step budget: the owner ends it.
+			if (m_MaxSteps > 0 && m_Steps >= m_MaxSteps && !m_Chat->m_Endless) {
 				Pause(Core::StringView("budget"), Core::StringView("the turn used its step budget (ai.maxSteps); send a message to continue"));
 				return;
 			}
@@ -301,7 +303,7 @@ namespace Ai
 		int64 estimateBefore = 0;
 		{
 			IED::HostLock guard(*m_Context);
-			if (m_MaxSteps > 0 && m_Steps == m_MaxSteps * 8 / 10 && m_Steps > 0) {
+			if (m_MaxSteps > 0 && m_Steps == m_MaxSteps * 8 / 10 && m_Steps > 0 && !m_Chat->m_Endless) {
 				Core::Array<Core::String> values;
 				values.Push(Core::String("percent"));
 				values.Push(Core::String("80"));
@@ -311,6 +313,7 @@ namespace Ai
 			}
 			Core::String ended = m_Chats->TellEnded(m_Chat);
 			if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
+			if (m_ClaudeCompacted) TellTasksAfterCompaction();
 			if (!onClaude) {
 				if (Window() > 0 && CalibratedTokens() * 100 > Window() * c_ContextCompressAtPercent && Compress()) m_Turn->m_Recoveries.Push(CompressedAt());
 				request = Request();
@@ -475,6 +478,11 @@ namespace Ai
 		m_NoProgress += 1;
 		if (m_NoProgress > c_RunNoProgressBound) {
 			Pause(Core::StringView("no_progress"), Core::StringView("the model replied several times without a tool call or finish"));
+			return;
+		}
+		if (m_Chat->m_Endless) {
+			HarnessNote(Core::StringView("endless_no_finish"), m_Chats->m_Prompts.Note("endless_no_finish").View());
+			m_Turn->m_Recoveries.Push(Counted(Core::StringView("nudged on, running until stopped"), m_NoProgress));
 			return;
 		}
 		HarnessNote(Core::StringView("agent_no_finish"), m_Chats->m_Prompts.Note("agent_no_finish").View());
@@ -642,8 +650,9 @@ namespace Ai
 		m_Turn->m_Stop = m_Stop;
 		m_Turn->m_EndedMs = RunNowMs();
 		m_Chat->m_Run = nullptr;
-		m_Chat->m_State = m_Pausing ? ChatState::Paused : ChatState::Idle;
-		m_Chat->m_StateReason = m_Pausing ? m_Stop : Core::String();
+		const bool suspended = !m_Pausing && m_Stop == "suspended";
+		m_Chat->m_State = m_Pausing ? ChatState::Paused : suspended ? ChatState::Suspended : ChatState::Idle;
+		m_Chat->m_StateReason = m_Pausing ? m_Stop : suspended ? m_SuspendReason : Core::String();
 		m_Chat->m_UpdatedMs = m_Turn->m_EndedMs;
 		AppendTurn(LocalStateOf(m_Ws), m_Chat, m_Turn);
 		ForgetRunningTurn(LocalStateOf(m_Ws), m_Chat);

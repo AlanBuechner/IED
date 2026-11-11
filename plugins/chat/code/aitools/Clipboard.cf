@@ -99,43 +99,165 @@ namespace Ai
 		return out.ToString();
 	}
 
+	static Core::StringView WithoutIndent(Core::StringView line) {
+		int64 at = 0;
+		while (at < line.ByteLength() && (line.ByteAt(at) == ' ' || line.ByteAt(at) == '\t')) at += 1;
+		return line.Substring(at, line.ByteLength() - at);
+	}
+
+	// Whether `lines` from `first` on hold `wanted` when every line's leading whitespace is left out: its first line ending
+	// one of them, its last starting the one it reaches, the ones between equal.
+	static bool MatchesUnindented(const Core::Array<ClipLine>& lines, int64 first, const Core::Array<Core::StringView>& wanted) {
+		if (first + wanted.Count() > lines.Count()) return false;
+		for (int64 k = 0; k < wanted.Count(); k += 1) {
+			Core::StringView have = WithoutIndent(lines[first + k].m_Text);
+			Core::StringView want = WithoutIndent(wanted[k]);
+			const bool last = k + 1 == wanted.Count();
+			const bool fits = k == 0 ? (wanted.Count() == 1 ? have.Contains(want) : have.EndsWith(want)) : last ? have.StartsWith(want) : have == want;
+			if (!fits) return false;
+		}
+		return true;
+	}
+
+	static Core::Array<Core::StringView> LinesOfWanted(Core::StringView wanted) {
+		Core::Array<Core::StringView> parts;
+		int64 at = 0;
+		while (at <= wanted.ByteLength()) {
+			int64 end = wanted.IndexOf('\n', at);
+			if (end < 0) end = wanted.ByteLength();
+			int64 cut = end > at && wanted.ByteAt(end - 1) == '\r' ? end - 1 : end;
+			parts.Push(wanted.Substring(at, cut - at));
+			at = end + 1;
+		}
+		return parts;
+	}
+
+	// Where a from or to that differs from the text only in its lines' indentation is (as fs_edit matches): the byte span in
+	// the cut lines' text (`starts`: each line's offset there) of each place it fits starting at `notBefore` or later. A part
+	// that starts at its line's indentation takes the line's own; the spans' first lines' numbers in `numbers`.
+	static void UnindentedSpans(const Core::Array<ClipLine>& lines, const Core::Array<int64>& starts, Core::StringView wanted, int64 notBefore,
+		Core::Array<int64>& begins, Core::Array<int64>& ends, Core::Array<int64>& numbers) {
+		Core::Array<Core::StringView> parts = LinesOfWanted(wanted);
+		if (WithoutIndent(parts[0]).IsEmpty()) return;
+		const int64 last = parts.Count() - 1;
+		for (int64 i = 0; i < lines.Count(); i += 1) {
+			if (!MatchesUnindented(lines, i, parts)) continue;
+			Core::StringView first = lines[i].m_Text;
+			Core::StringView firstWant = WithoutIndent(parts[0]);
+			const int64 firstIndent = first.ByteLength() - WithoutIndent(first).ByteLength();
+			const int64 inLine = last == 0 ? WithoutIndent(first).IndexOf(firstWant, 0) + firstIndent : first.ByteLength() - firstWant.ByteLength();
+			const bool wholeLine = parts[0].ByteLength() > firstWant.ByteLength() && inLine == firstIndent;
+			const int64 begin = starts[i] + (wholeLine ? 0 : inLine);
+			int64 end = starts[i] + inLine + firstWant.ByteLength();
+			if (last > 0) {
+				Core::StringView lastLine = lines[i + last].m_Text;
+				Core::StringView lastWant = WithoutIndent(parts[last]);
+				const int64 lastIndent = lastLine.ByteLength() - WithoutIndent(lastLine).ByteLength();
+				end = starts[i + last] + (lastWant.IsEmpty() ? 0 : lastIndent + lastWant.ByteLength());
+			}
+			if (begin < notBefore) continue;
+			begins.Push(begin);
+			ends.Push(end);
+			numbers.Push(lines[i].m_Number);
+		}
+	}
+
+	// A from or to not in the text as written: the one place it fits but for its lines' indentation, as [begin, end), or
+	// false with `error` saying so - and, when it fits in several, which lines.
+	static bool FindUnindented(const Core::Array<ClipLine>& lines, const Core::Array<int64>& starts, Core::StringView wanted, int64 notBefore,
+		int64& begin, int64& end, Core::String& error) {
+		Core::Array<int64> begins;
+		Core::Array<int64> ends;
+		Core::Array<int64> numbers;
+		UnindentedSpans(lines, starts, wanted, notBefore, begins, ends, numbers);
+		if (begins.Count() == 1) {
+			begin = begins[0];
+			end = ends[0];
+			return true;
+		}
+		if (begins.Count() > 1) {
+			Core::StringBuilder out;
+			out.Append(error.View());
+			out.Append("; lines ");
+			for (int64 k = 0; k < numbers.Count(); k += 1) {
+				if (k > 0) out.Append(k + 1 == numbers.Count() ? " and " : ", ");
+				out.AppendInt(numbers[k]);
+			}
+			out.Append(" have it with other indentation: copy its text as the file has it, or give start_line and end_line");
+			error = out.ToString();
+		}
+		return false;
+	}
+
+	// A from or to whose tabs and line breaks were written as the escapes \t and \n: the text it means; empty when it has none.
+	static Core::String WithEscapesRead(Core::StringView text) {
+		if (!text.Contains(Core::StringView("\\t")) && !text.Contains(Core::StringView("\\n"))) return Core::String();
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const bool escape = text.ByteAt(at) == '\\' && at + 1 < text.ByteLength() && (text.ByteAt(at + 1) == 't' || text.ByteAt(at + 1) == 'n');
+			if (escape) {
+				out.Append(text.ByteAt(at + 1) == 't' ? "\t" : "\n");
+				at += 2;
+				continue;
+			}
+			out.Append(text.Substring(at, 1));
+			at += 1;
+		}
+		return out.ToString();
+	}
+
+	// Where `wanted` is in the cut lines' text `whole` at `notBefore` or later, as [begin, end): as written, else but for its
+	// lines' indentation, else with its \t and \n read as a tab and a line break; false with `error` saying so.
+	static bool Locate(Core::StringView whole, const Core::Array<ClipLine>& lines, const Core::Array<int64>& starts, Core::StringView wanted,
+		int64 notBefore, int64& begin, int64& end, Core::String& error) {
+		const int64 found = whole.Substring(notBefore, whole.ByteLength() - notBefore).IndexOf(wanted);
+		if (found >= 0) {
+			begin = notBefore + found;
+			end = begin + wanted.ByteLength();
+			return true;
+		}
+		if (FindUnindented(lines, starts, wanted, notBefore, begin, end, error)) return true;
+		Core::String read = WithEscapesRead(wanted);
+		if (read.IsEmpty()) return false;
+		Core::String readError = error;
+		return Locate(whole, lines, starts, read.View(), notBefore, begin, end, readError);
+	}
+
 	bool CutClip(Core::StringView text, bool numbered, const ClipRange& range, Core::String& cut, Core::String& error) {
 		if (range.m_StartLine > 0 && range.m_EndLine > 0 && range.m_EndLine < range.m_StartLine) {
 			error = Core::String("end_line is before start_line");
 			return false;
 		}
 		Core::Array<ClipLine> lines = LinesOf(text, numbered);
+		Core::Array<ClipLine> inRange;
+		Core::Array<int64> starts;   // each line's offset in `taken`
 		Core::StringBuilder taken;
-		int64 count = 0;
 		for (const ClipLine& line : lines) {
 			if ((range.m_StartLine > 0 && line.m_Number < range.m_StartLine) || (range.m_EndLine > 0 && line.m_Number > range.m_EndLine)) continue;
+			starts.Push(taken.ByteLength());
 			taken.Append(line.m_Text);
 			if (line.m_Broken) taken.Append("\n");
-			count += 1;
+			inRange.Push(line);
 		}
-		if (count == 0) {
+		if (inRange.IsEmpty()) {
 			error = MissingLines(lines, range);
 			return false;
 		}
 		Core::StringView whole = taken.View();
 		int64 begin = 0;
 		int64 end = whole.ByteLength();
+		int64 after = 0;   // where to is looked for: past from
 		if (!range.m_From.IsEmpty()) {
-			begin = whole.IndexOf(range.m_From.View());
-			if (begin < 0) {
-				error = (Core::String("from ") + Quoted(range.m_From.View()).View()) + " is not in it";
-				return false;
-			}
+			error = (Core::String("from ") + Quoted(range.m_From.View()).View()) + " is not in it";
+			if (!Locate(whole, inRange, starts, range.m_From.View(), 0, begin, after, error)) return false;
 		}
 		if (!range.m_To.IsEmpty()) {
-			const int64 after = range.m_From.IsEmpty() ? begin : begin + range.m_From.ByteLength();
-			const int64 found = whole.Substring(after, whole.ByteLength() - after).IndexOf(range.m_To.View());
-			if (found < 0) {
-				error = (Core::String("to ") + Quoted(range.m_To.View()).View()) + (range.m_From.IsEmpty() ? " is not in it" : " is not in it after from");
-				return false;
-			}
-			end = after + found + range.m_To.ByteLength();
+			error = (Core::String("to ") + Quoted(range.m_To.View()).View()) + (range.m_From.IsEmpty() ? " is not in it" : " is not in it after from");
+			int64 toBegin = 0;
+			if (!Locate(whole, inRange, starts, range.m_To.View(), after, toBegin, end, error)) return false;
 		}
+		error.Clear();
 		cut = Core::String(whole.Substring(begin, end - begin));
 		if (cut.IsEmpty()) {
 			error = Core::String("there is nothing to copy");
@@ -574,7 +696,7 @@ namespace Ai
 	}
 
 	void AddClipboardTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
-		ToolSpec* copy = ClipboardTool("clipboard_copy", "Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. Use it to match a long block exactly (fs_edit old: \"{{clip:old}}\"), to move or repeat code, or to reuse output. Copy from path (the file as the editors have it), result (an earlier tool result: 1 the latest, the clipboard's own not counted; an fs_read result's line numbers are left out and start_line/end_line are the numbers it shows) or text; start_line/end_line take whole lines, each with its line break (the last one's too: write nothing after the clip), from/to the text from the first from to the end of the first to after it. Example: clipboard_copy({\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62})",
+		ToolSpec* copy = ClipboardTool("clipboard_copy", "Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. Use it to match a long block exactly (fs_edit old: \"{{clip:old}}\"), to move or repeat code, or to reuse output. Copy from path (the file as the editors have it), result (an earlier tool result: 1 the latest, the clipboard's own not counted; an fs_read result's line numbers are left out and start_line/end_line are the numbers it shows) or text; start_line/end_line take whole lines, each with its line break (the last one's too: write nothing after the clip), from/to the text from the first from to the end of the first to after it (one that differs only in its lines' indentation is found where it fits but for that, when it fits in one place, as fs_edit does; one not there as written whose \\t and \\n are escapes is read with a tab and a line break for them). Example: clipboard_copy({\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62})",
 			"{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"pattern\": \"^[A-Za-z0-9_.-]{1,40}$\", \"description\": \"letters, digits, _ . -\"}, \"path\": {\"type\": \"string\", \"description\": \"copy from this workspace file\"}, \"result\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"copy from an earlier tool result: 1 the latest\"}, \"text\": {\"type\": \"string\", \"minLength\": 1}, \"start_line\": {\"type\": \"integer\", \"minimum\": 1}, \"end_line\": {\"type\": \"integer\", \"minimum\": 1}, \"from\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"start at the first occurrence of this text\"}, \"to\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"end after the first occurrence of this text after from\"}, \"append\": {\"type\": \"boolean\", \"description\": \"add to the end of the clip instead of replacing it\"}}, \"required\": [\"name\"], \"additionalProperties\": false}");
 		copy->m_Plan = CopyPlan;
 		copy->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CopyRun(chats, chat, call); };

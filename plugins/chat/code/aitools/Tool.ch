@@ -68,9 +68,11 @@ namespace Ai
 		public bool m_ParallelSafe;
 		public bool m_InPlan;               // offered in Plan mode (docs/13 "Mode presets")
 		public bool m_AgentOnly;            // offered only in Agent mode (finish)
+		public bool m_EndsTurn;             // ends the turn (finish): withheld from a chat that runs until stopped
 		public bool m_Deferred;             // listed by name until loaded for the chat
 		public Core::String m_Group;        // "media", a plugin tool's group or else its plugin id
 		public bool m_FolderRoots;          // works in a plugin's folder (plugins:/), which is no workspace: reads it from the disk
+		public bool m_OwnPaths;             // its path names no workspace's file (docs_read's "c4/library/x.md"): no root alias takes it
 		public bool m_Asks;                 // every call asks until a rule allows it (a toolCalls entry's approval "ask")
 		public ToolPlanner m_Plan;
 		public ToolDetailer m_Detail;       // null: the card shows the plan as it is
@@ -83,10 +85,11 @@ namespace Ai
 
 		public void Add(ToolSpec* spec);
 		public ToolSpec* Find(Core::StringView name) const;
-		public bool Offered(const ToolSpec* spec, ChatMode mode) const;
+		// Whether a chat in `mode` is offered the tool; one that runs until stopped (`endless`) has none that ends its turn.
+		public bool Offered(const ToolSpec* spec, ChatMode mode, bool endless = false) const;
 		// The request's "tools" array for a chat in `mode`: every tool offered, a deferred one as its stub unless `whole`
 		// (Claude takes every schema; the setting ai.tools.loadAll makes none deferred).
-		public Core::String RequestTools(ChatMode mode, bool whole) const;
+		public Core::String RequestTools(ChatMode mode, bool whole, bool endless = false) const;
 		// Whether a tool offered in `mode` is deferred.
 		public bool HasDeferred(ChatMode mode) const;
 		// The deferred tools that best match `query` - words, or "select:a,b" naming them - at most `most`.

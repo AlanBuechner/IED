@@ -4,8 +4,26 @@
 // chats:<wsId> list and the small facts the views show (a tool call's one-line arguments, a tab's glyphs, tokens per
 // second).
 
-export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approval: "Needs approval", awaiting_answer: "Needs an answer", paused: "Paused" };
+export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approval: "Needs approval", awaiting_answer: "Needs an answer", paused: "Paused", suspended: "Suspended" };
+// The tools that wait on something that goes on without them: a message to the running turn stops them (docs/04 "Chats
+// waiting on each other").
+export const WAIT_TOOLS = new Set(["chat_wait", "background_wait"]);
 export const MODES = [["ask", "Ask"], ["plan", "Plan"], ["agent", "Agent"]];
+
+// The Mode menu's choices: the modes, and Agent until stopped - Agent with no finish, its turn going on until the owner
+// stops it (docs/04 "Until stopped").
+export const MODE_CHOICES = MODES.concat([["endless", "Agent, until stopped"]]);
+
+// The choice a chat's summary is on: [id, label].
+export function modeChoice(summary) {
+	const id = summary.mode === "agent" && summary.endless ? "endless" : summary.mode;
+	return MODE_CHOICES.find(([choice]) => choice === id) || MODE_CHOICES[2];
+}
+
+// What chat.set takes for a choice of the Mode menu.
+export function modeChange(choice) {
+	return choice === "endless" ? { mode: "agent", endless: true } : { mode: choice, endless: false };
+}
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
 export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
 // The summary's fields that change which model a chat's next turn starts on.
@@ -310,7 +328,14 @@ export class ChatModel {
 	}
 
 	running() {
-		return Boolean(this.summary) && this.summary.state !== "idle" && this.summary.state !== "paused";
+		return Boolean(this.summary) && this.summary.state !== "idle" && this.summary.state !== "paused" && this.summary.state !== "suspended";
+	}
+
+	// The wait tool the running turn is in (WAIT_TOOLS), its segment; null when it waits on none.
+	runningWait() {
+		const turn = this.lastTurn();
+		if (!turn || turn.stop) return null;
+		return turn.segments.find((s) => s.type === "tool" && WAIT_TOOLS.has(s.tool) && s.state === "running") || null;
 	}
 
 	lastTurn() {
@@ -319,8 +344,8 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
-		"backgroundRunning", "agent", "parentChatId"];
+	const keys = ["chatId", "wsId", "title", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
+		"backgroundRunning", "agent", "parentChatId", "owes", "awaits"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];
 	return summary;
@@ -392,6 +417,7 @@ const STATE_LOOKS = {
 	awaiting_approval: { icon: "$(shield)", tone: "c-warn", attention: true },
 	awaiting_answer: { icon: "$(question)", tone: "c-warn", attention: true },
 	paused: { icon: "$(debug-pause)", tone: "c-warn", attention: true },
+	suspended: { icon: "$(clock)", tone: "", attention: false },
 };
 
 // How a chat's state shows on its tab and in the Chats list: a manifest-style icon, its color class, whether the chat

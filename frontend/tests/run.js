@@ -40,6 +40,7 @@ import "./chatmentions.test.js";
 import "./chatpane.test.js";
 import "./chatcomposer.test.js";
 import "./chatnotices.test.js";
+import "./chatreplies.test.js";
 import "./chatwindow.test.js";
 import "./agents.test.js";
 import "./claude.test.js";

@@ -116,6 +116,7 @@ class Chat:
 		self.group = ""
 		self.pinned_model = ""
 		self.effort = ""
+		self.endless = False   # Agent, until stopped (docs/04): no finish
 		self.state = "idle"
 		self.state_reason = ""
 		self.turns = []
@@ -150,7 +151,7 @@ class Chat:
 		done = sum(1 for t in self.tasks if t["status"] in ("done", "skipped"))
 		out = {
 			"chatId": self.chat_id, "wsId": self.ws_id, "title": self.title, "mode": self.mode, "permission": self.permission, "group": self.group,
-			"pinnedModel": self.pinned_model, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
+			"pinnedModel": self.pinned_model, "endless": self.endless, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
 			"approvalsWaiting": sum(1 for a in self.approvals.values() if a.decision is None),
 		}
 		if self.effort:
@@ -311,6 +312,8 @@ class Chats:
 			chat.group = p.str("group")
 		if "model" in p.raw:
 			chat.pinned_model = p.str("model")
+		if "endless" in p.raw:
+			chat.endless = bool(p.raw["endless"])
 		if "effort" in p.raw:
 			if p.str("effort") not in ("", "low", "medium", "high", "xhigh", "max"):
 				raise RpcError("bad_request", "effort must be low, medium, high, xhigh, max or empty")

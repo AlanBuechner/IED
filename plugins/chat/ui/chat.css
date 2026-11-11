@@ -135,6 +135,7 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-tool-head .targs { font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .chat-tool-head .tstat { margin-left: auto; color: var(--text-2); display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-4); flex: none; }
 .chat-tool-head .src { color: var(--text-3); }
+.chat-tool-head .chat-wait-hint { color: var(--accent-info); font-size: var(--font-size-xs); }
 .chat-tool-out { font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); line-height: 17px; color: var(--text-1); padding: var(--space-3) var(--space-5) var(--space-3) 30px; white-space: pre-wrap; overflow: auto; max-height: 360px; border-top: var(--border-width) solid var(--border-0); }
 .chat-tool-images { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-5) var(--space-2) 30px; }
 .chat-tool-images a { cursor: zoom-in; }
@@ -289,6 +290,11 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-bar { display: inline-block; width: 90px; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
 .chat-bar i { display: block; height: 100%; background: var(--text-2); }
 .chat-head.from .chat-from-link { background: none; border: none; padding: 0; color: var(--text-0); cursor: pointer; font: inherit; text-decoration: underline; text-decoration-color: var(--border-1); }
+/* A message's part in a reply one chat required of another (docs/04 "Chats waiting on each other"): a reply that is
+	owed is info, IED's word that none came a warning. */
+.chat-reply-chip { padding: 0 var(--space-2); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); color: var(--text-1); font-size: var(--font-size-xs); line-height: 16px; }
+.chat-reply-chip[data-reply="required"] { color: var(--accent-info); border-color: var(--accent-info); }
+.chat-reply-chip[data-reply="notice"] { color: var(--accent-warn); border-color: var(--accent-warn); }
 .chat-prefill { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; color: var(--text-1); font-size: var(--font-size-sm); padding: var(--space-2) 0; }
 .chat-prefill .meta { color: var(--text-2); }
 

@@ -8,7 +8,9 @@ namespace Ai
 {
 	enum class ChatMode { Ask, Plan, Agent }
 	enum class PermissionMode { Plan, Ask, AcceptEdits, Auto }
-	enum class ChatState { Idle, Running, AwaitingApproval, AwaitingAnswer, Paused }
+	// Suspended: its AI ended the turn with suspend to wait for a reply or a background task (docs/04 "Chats waiting on
+	// each other"); it goes on by itself when one comes.
+	enum class ChatState { Idle, Running, AwaitingApproval, AwaitingAnswer, Paused, Suspended }
 
 	const char* ChatModeName(ChatMode mode);
 	bool ReadChatMode(Core::StringView text, ChatMode& mode);
@@ -63,6 +65,7 @@ namespace Ai
 		public Core::Array<Attachment> m_Attachments;
 		public Core::String m_FromChatId;    // another chat sent it; empty: the owner
 		public Core::String m_FromTitle;
+		public Core::String m_Reply;         // "required": it requires a reply; "answer": it is one this chat required
 		public int64 m_AtMs;                 // when the model was given it
 
 		public void WriteJson(IED::JsonWriter& json) const;
@@ -114,8 +117,12 @@ namespace Ai
 		public Core::Array<Attachment> m_Attachments;
 		public Core::String m_FromChatId;    // the chat that sent it; empty: the owner
 		public Core::String m_FromTitle;
+		public int64 m_Hops;                 // another chat's: chats in a row that messaged each other with it
+		// Another chat's: "required" - the receiver owes it a reply now; "answer" - it is the reply the receiver required
+		// (docs/04 "Chats waiting on each other"); empty for neither.
+		public Core::String m_Reply;
 
-		// {text, from?, mentions?, attachments?}, as the chat's header keeps it.
+		// {text, from?: {chatId, title, reply?}, hops?, mentions?, attachments?}, as the chat's header keeps it.
 		public void WriteJson(IED::JsonWriter& json) const;
 		// From that, or from the plain text an older header kept.
 		public void Read(const Serialization::DomNode& node);
@@ -134,6 +141,7 @@ namespace Ai
 		public Core::Array<Attachment> m_Attachments;   // what was sent with it
 		public Core::String m_FromChatId;               // another chat sent the message (ChatTools.ch); empty: the owner
 		public Core::String m_FromTitle;
+		public Core::String m_Reply;                    // its message's: "required" or "answer" (OwnerMessage)
 		public int64 m_Hops;                            // chats in a row that messaged each other up to this turn
 		public Core::String m_Resumed;                  // IED started it after a restart (Resume.ch): "relaunch" or "interrupted"
 		public Core::String m_Origin;                   // "background": IED started it to tell of background tasks that ended
@@ -257,7 +265,33 @@ namespace Ai
 		public Core::String m_Title;
 		public Core::String m_Status;        // pending, in_progress, done, skipped
 		public Core::String m_Note;
+
+		// Pending or in progress: finish refuses while one is.
+		public bool IsOpen() const { return m_Status == "pending" || m_Status == "in_progress"; }
 	}
+
+	// A reply one chat owes another (docs/04 "Chats waiting on each other"): chat_send or chat_create with require_reply.
+	// The debtor keeps it, naming its creditor; the creditor's `awaits` holds the same, naming the debtor.
+	class ReplyOwed
+	{
+		public Core::String m_ChatId;        // the other chat: the creditor in a debtor's list, the debtor in a creditor's
+		public Core::String m_Title;
+		public int64 m_SinceMs;              // when it was asked for: the newest debt acts (Replies.ch)
+		public int64 m_Hops;                 // the request's hops: the reply carries them, outside the chain's cut
+		// A question back: the creditor owed the debtor a reply when it asked, so answering it puts the creditor back in
+		// that debt (Chats::Pay).
+		public bool m_Question;
+
+		// {chatId, title, sinceMs, hops?, question?}
+		public void WriteJson(IED::JsonWriter& json) const;
+		public void Read(const Serialization::DomNode& node);
+	}
+
+	// A list of them as the summary and chat.json have them: [{chatId, title, sinceMs, hops?}].
+	void WriteReplies(IED::JsonWriter& json, const Core::Array<ReplyOwed*>& replies);
+
+	// The tasks a line each, as the model is shown them: "t2 Port Log.h (in_progress)".
+	Core::String TaskLines(const Core::Array<ChatTask*>& tasks);
 
 	class Approval
 	{
@@ -311,6 +345,7 @@ namespace Ai
 		public Core::String m_Group;
 		public Core::String m_Effort;                   // low, medium, high, xhigh or max; empty: its role's
 		public Core::String m_PinnedModel;              // a model of ai.models over its group's primary; empty: the group's
+		public bool m_Endless;                          // Agent, until stopped (docs/04 "Until stopped"): no finish, the turn goes on until the owner stops it
 		public Core::String m_ClaudeSession;            // the Claude Code session holding its conversation (docs/04)
 		public Core::Array<Core::String> m_ClaudeTurns; // the turns that session has
 		public ChatState m_State;
@@ -329,6 +364,8 @@ namespace Ai
 		public Core::Array<ChatResource*> m_Resources;  // tabs it uses that plugins reported (chat.resource), this run only
 		public Core::Array<Clip*> m_Clips;              // the AI's clipboard, oldest first (Clipboard.ch)
 		public Core::Array<BackgroundTask*> m_Background;   // its AI's background tasks, oldest first (Background.ch)
+		public Core::Array<ReplyOwed*> m_Owes;          // the replies it owes other chats, oldest first (kept in chat.json)
+		public Core::Array<ReplyOwed*> m_Awaits;        // the replies other chats owe it: their m_Owes seen from here (Replies.cf)
 		public Core::String m_Agent;                    // the group's sub-agent this chat runs as; "" for an orchestrator
 		public Core::String m_ParentChatId;             // the chat that ran it as a sub-agent; ""
 		public Core::String m_Context;                  // the context meter (ContextMeter.ch); empty before a request

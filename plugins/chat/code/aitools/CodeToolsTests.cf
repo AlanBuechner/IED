@@ -11,9 +11,15 @@ class CodeToolsTests {
 	public static void TestNames() {
 		Core::Array<Core::String> parts = Ai::NameParts(Text("Ai::Ring.Push"));
 		assert_true(parts.Count() == 3 && parts[0].View() == "Ai" && parts[2].View() == "Push", "split at :: and .");
+		assert_se("Ring::Push", Ai::WrittenOwnerAndName(Text("Ai::Ring::Push")).CStr(), "a lost symbol is looked for as its definition writes it");
+		assert_se("Ring::Push", Ai::WrittenOwnerAndName(Text("Ring.Push")).CStr(), "dots read as ::");
+		assert_true(Ai::WrittenOwnerAndName(Text("Push")).IsEmpty(), "a plain name has no owner to write");
 		assert_true(Ai::QualifiedMatches(Text("game::Ring::Push"), Text("Ring::Push")), "a suffix of whole parts");
 		assert_true(Ai::QualifiedMatches(Text("game::Ring::Push"), Text("game.Ring.Push")), "dots read as ::");
 		assert_true(!Ai::QualifiedMatches(Text("game::BigRing::Push"), Text("Ring::Push")), "not part of a name");
+		assert_true(Ai::DeclaresAlias(Text("\talias ViewportController = Claymore::ViewportController;")), "C4's alias, indented");
+		assert_true(Ai::DeclaresAlias(Text("using Ring = game::Ring;")), "C++'s");
+		assert_true(!Ai::DeclaresAlias(Text("using namespace game;")) && !Ai::DeclaresAlias(Text("class aliased {")), "not another declaration");
 		Ai::CodeSymbol symbol;
 		symbol.m_Name = Core::String("Ring::Push");
 		symbol.m_Container = Core::String("game");
@@ -26,6 +32,37 @@ class CodeToolsTests {
 		assert_true(words.Count() == 3 && words[0].View() == "LSP" && words[1].View() == "Pool" && words[2].View() == "the", "an acronym, spaces and underscores; short words left out");
 	}
 
+	[test("a_missing_member_lists_its_types_members")]
+	public static void TestMissingMember() {
+		Core::Array<Ai::CodeSymbol*> members;
+		const char*[4] names = { "Click", "Box", "Click", "GetDraw" };
+		for (const char* name : names) {
+			Ai::CodeSymbol* member = new Ai::CodeSymbol();
+			member->m_Name = Core::String(name);
+			members.Push(member);
+		}
+		Core::String said = Ai::MembersSaid(Text("MeshEditor"), Text("Begin"), members);
+		assert_se("; MeshEditor has no Begin - its members: Click, Box, GetDraw", said.CStr(), "the type's members, an overload once");
+		assert_true(Ai::MembersSaid(Text("MeshEditor"), Text("Begin"), Core::Array<Ai::CodeSymbol*>()).IsEmpty(), "no type, nothing said");
+	}
+
+	// SolidWorld::WholeItemsEach asked for a file's free function beside the class: the answer names it too.
+	[test("a_missing_member_names_what_is_named_so_elsewhere")]
+	public static void TestNamedElsewhere() {
+		Core::Array<Ai::CodeSymbol*> found;
+		const char*[3] names = { "WholeItemsEach", "WholeItems", "WholeItemsEach" };
+		const char*[3] containers = { "SoftBodyPhysics", "SoftBodyPhysics", "Physics" };
+		for (int32 i = 0; i < 3; i += 1) {
+			Ai::CodeSymbol* symbol = new Ai::CodeSymbol();
+			symbol->m_Name = Core::String(names[i]);
+			symbol->m_Container = Core::String(containers[i]);
+			found.Push(symbol);
+		}
+		Core::String said = Ai::NamedElsewhereSaid(Text("WholeItemsEach"), found);
+		assert_se("; named so elsewhere: SoftBodyPhysics::WholeItemsEach, Physics::WholeItemsEach", said.CStr(), "those named exactly so, not the similar");
+		assert_true(Ai::NamedElsewhereSaid(Text("Begin"), found).IsEmpty(), "none named so: nothing said");
+	}
+
 	[test("paths_given")]
 	public static void TestPaths() {
 		IED::Workspace ws;
@@ -36,6 +73,37 @@ class CodeToolsTests {
 		Core::String outside = query.FileOf(Text("C:\\Lib\\Bedrock\\core.ch"));
 		assert_true(outside.View().StartsWith(Text("file:")) && outside.View().EndsWith(Text("/Lib/Bedrock/core.ch")), outside.CStr());
 		assert_true(query.FileOf(Text("file:///C:/Lib/x.ch")).View() == "file:///C:/Lib/x.ch", "a file: URI as it is");
+	}
+
+	[test("a_path_that_missed")]
+	public static void TestMissedPath() {
+		Core::StringBuilder folder;
+		folder.Append("ied-codetools-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "src/Scene/Pipeline").CStr());
+		FS::MakeDirectories((root / "build/src").CStr());
+		FS::WriteFileAtomically((root / "src/Scene/Pipeline/Maps.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "build/src/Maps.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "src/A.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "src/Scene/A.cf").CStr(), (const void*)"x", 1);
+		IED::Workspace ws;
+		ws.m_Root = Core::String(root.View());
+		Ai::CodeQuery query = Ai::CodeQuery(ws);
+		assert_se("src/Scene/Pipeline/Maps.cf", query.ExistingFileOf(Text("src/Pipeline/Maps.cf")).CStr(), "the only source file of its name; build output's copy does not count");
+		assert_se("src/Scene/A.cf", query.ExistingFileOf(Text("src/Scene/A.cf")).CStr(), "a file there is kept");
+		assert_se("src/Pipeline/A.cf", query.ExistingFileOf(Text("src/Pipeline/A.cf")).CStr(), "two of that name: no guess");
+		assert_se("src/Scene", query.ExistingFileOf(Text("src/Scene")).CStr(), "a folder is kept");
+		assert_true(query.ExistingFileOf(Text("")).IsEmpty(), "no path, none");
+		assert_true(query.MissedFileHint(Text("src/Scene/A.cf")).IsEmpty(), "a file there needs no hint");
+		assert_true(query.MissedFileHint(Text("src/Scene")).IsEmpty(), "nor a folder");
+		Core::String two = query.MissedFileHint(Text("src/Pipeline/A.cf"));
+		assert_true(two.View().Contains(Text("src/A.cf")) && two.View().Contains(Text("src/Scene/A.cf")), "a miss names the files of its name");
+		assert_true(query.MissedFileHint(Text("src/Nowhere.cf")).View().Contains(Text("fs_glob")), "and with none of its name, how to find one");
+		Core::String maps = query.FileNamedHint(Text("Maps"));
+		assert_true(maps.View().Contains(Text("src/Scene/Pipeline/Maps.cf")) && maps.View().Contains(Text("code_symbols")), "a name no symbol has but a file does: the file, and how to outline it");
+		assert_true(query.FileNamedHint(Text("Nowhere")).IsEmpty(), "no file of the name: nothing");
+		assert_true(query.FileNamedHint(Text("Scene::Maps")).IsEmpty(), "a qualified name is no file's");
 	}
 
 	[test("numbered_spans")]

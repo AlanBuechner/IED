@@ -1,6 +1,6 @@
 // The media tools (docs/13 `media`): image_view shows the model an image of the workspace the way a tool result's
 // images do (Images.ch), a model that does not take images is told its path; image_info says what an image file is
-// (ImageInfo.ch) - textures included. The group's other tools are to come.
+// (ImageInfo.ch) - textures included; video_view watches a recording of frames over time (Video.ch).
 
 include "Tool.ch"
 

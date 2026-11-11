@@ -42,7 +42,7 @@ namespace Ai
 				m_Claude = m_Chats->SessionOf(m_Chat);
 				m_Claude->m_InUse = true;
 			}
-			toolList = McpToolsResult(m_Tools->RequestTools(m_Chat->m_Mode, true).View());
+			toolList = McpToolsResult(m_Tools->RequestTools(m_Chat->m_Mode, true, m_Chat->m_Endless).View());
 			effort = Core::String(EffortOf(m_Chat->m_Effort.View(), m_Role.m_Effort.View()));
 			m_Turn->m_Effort = effort;
 		}
@@ -315,7 +315,10 @@ namespace Ai
 			note.Append(")");
 			UiNote(Core::StringView("routing"), note.View());
 		}
-		else if (subtype == "compact_boundary") UiNote(Core::StringView("context_compressed"), Core::StringView("Claude Code compacted the conversation to fit its context."));
+		else if (subtype == "compact_boundary") {
+			UiNote(Core::StringView("context_compressed"), Core::StringView("Claude Code compacted the conversation to fit its context."));
+			m_ClaudeCompacted = true;
+		}
 	}
 
 	// Why a turn moves off a Claude model the CLI refused for its usage limit: what the CLI said, and when it frees as the
@@ -451,7 +454,7 @@ namespace Ai
 	void TurnRun::EndClaude() {
 		if (!m_Claude) return;
 		TurnRun* self = this;
-		if (m_Claude->Running() && m_Claude->m_Querying && m_Stop == "finished" && !m_Run->m_Cancelled) {
+		if (m_Claude->Running() && m_Claude->m_Querying && (m_Stop == "finished" || m_Stop == "suspended") && !m_Run->m_Cancelled) {
 			StepEvents events = [self](StepEventKind kind, Core::StringView delta, int64 call) { self->OnEvent(kind, delta, call); };
 			int64 estimateBefore = 0;
 			{

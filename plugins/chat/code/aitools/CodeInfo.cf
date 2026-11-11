@@ -547,7 +547,7 @@ namespace Ai
 
 	static ToolOutcome CustomRun(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.m_Ws);
-		Core::String path = query.FileOf(call.m_Args.Member("path").AsView());
+		Core::String path = query.ExistingFileOf(call.m_Args.Member("path").AsView());
 		Core::StringView method = call.m_Args.Member("method").AsView();
 		Serialization::DomNode requests = query.Serving(path.View()).Member("aiRequests");
 		bool exposed = false;

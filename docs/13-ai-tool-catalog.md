@@ -24,7 +24,7 @@ Permission handling per class is defined in `docs/11`.
 | T-FS-2 | `fs_write(path, content)` | write | Create or overwrite a file (through the document store; checkpointed). **Built** with `fs_edit`: where the file's language plugin asks for it, the file is formatted by its language server and the result carries the server's diagnostics of it and the other files it finds problems in - never a failure of the call (`docs/24` "After an AI edit"). A plugin's folder (`plugins:/`, "Plugin folders" above) refuses both. |
 | T-FS-3 | `fs_edit(path, edits: [{old, new, replace_all?}])` | write | Exact-match replacements, all-or-nothing; an `old` not in the file is answered with where it differs (**built**: the line where the file agrees longest with the start or the end of `old`, and what the file has there against what `old` has, line breaks and tabs shown as escapes). |
 | T-FS-4 | `fs_list(path, depth?, glob?)` | read | Directory listing (respects ignore rules). |
-| T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob (`*`, `?`, `**`, `{a,b}`; `src/fs/glob`). |
+| T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob (`*`, `?`, `[ch]`, `**`, `{a,b}`; `src/fs/glob`). |
 | T-SRCH-1 | `search_text(pattern, regex?, glob?, path?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. **Built**: `path` a folder to search under (`glob` then relative to it), `ied:/...` or `plugins:/<id>/...` for those roots. |
 | T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` starts it as a background task and answers at once with its id (built 2026-10-23, `background` below). |
 | T-LSP-1 | `code_symbols(path or query, kind?, depth?)` | read | Outline of a file (kinds, signatures, line ranges), or the workspace's symbols named like `query`. **Built**, "Navigating code". |
@@ -37,7 +37,8 @@ Permission handling per class is defined in `docs/11`.
 | T-META-1 | `tasks_set(items)` / `task_update(id, status, note?)` | meta | Chat task list (F-CHT-80). |
 | T-META-2 | `ask_user(question, options?, allow_text?)` | meta | Structured question; the run waits for the answer. |
 | T-META-3 | `tools_enable(group)` | meta | Enable a tool group for the rest of the turn. |
-| T-META-4 | `finish(summary, verification)` | meta | Agent mode only: end the turn with what was done and how it was verified. |
+| T-META-4 | `finish(summary, verification)` | meta | Agent mode only: end the turn with what was done and how it was verified. Refused, every time, while the chat owes another a reply (`docs/04` "Chats waiting on each other"). |
+| T-META-6 | `suspend(reason)` | meta | Agent mode only, not deferred: end the turn to wait, the task list left as it is; the chat (state `suspended`) goes on by itself when a reply it required, one of its background tasks or a message comes. Refused while it owes a reply and waits on nothing asked for after it, and in a chat that runs until stopped when nothing would wake it (`docs/04` "Chats waiting on each other"). |
 | T-META-5 | `chat_title(title)` | meta | Name this chat (`docs/04` "Chat names"). In every mode and not deferred; a chat with no name is asked for one with each turn's message. A name someone else chose stays, and the result says so. |
 
 ## Loading tools on demand (built, 2026-10-21)
@@ -54,7 +55,8 @@ developer mode is enabled", and the same for the other docs a plugin carries (th
 - **`plugins:/<plugin id>/<path>`** names `<path>` in the folder of a plugin loaded for the chat's workspace - a root
   alias like developer mode's `ied:/` (`docs/28`), one alias for every plugin, the plugin's id its first part
   (`plugins:/c4/docs/library/bedrock-api.md`, `plugins:/ied.nuke/skills/nuke/SKILL.md`). `fs_read`, `fs_list`,
-  `fs_glob`, `search_text` (its new `path`: the folder it searches under) and `image_info` read there, from the disk
+  `fs_glob`, `search_text` (its new `path`: the folder it searches under, or one file it searches alone - read as edited, an
+  ignored or skipped one too) and `image_info` read there, from the disk
   (a plugin's folder is no workspace: the tools that need one, `code_*` and the others, say they do not work there);
   `fs_list({"path": "plugins:/"})` lists the plugins (`plugins:/<id>/  <name> (builtin|app|project)`). Paths in their
   results carry the alias, so the model passes them back as they are; the same now holds in `ied:/`. The permission
@@ -192,7 +194,7 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | ID | Tool | Class | Notes |
 |---|---|---|---|
 | T-MED-1 | `image_view(path or url)` | read | Sends the image to a vision model; non-vision groups get a text description from the `vision` role. **Built** for a workspace path (`plugins/chat/code/aitools/Media.cf`): offered with the core tools until groups and `tools_enable` exist; a model that does not take images is told the path. Not yet: a URL, the `vision` role's description. |
-| T-MED-2 | `video_frames(path, every_s? or count?, range?)` | read | Extracts frames (bundled ffmpeg or Media Foundation) and sends them as images. |
+| T-MED-2 | `video_view(path, from?, count?, sheet?, region?)` | read | How a recording changes over time. **Built** (`plugins/chat/code/aitools/Video.cf`, the analysis in `VideoFrames.cf`) for a folder of PNG frames in name order (what a program saves frame by frame: Claymore's `--record`): a contact sheet of evenly picked frames and a heat map of the mean frame-to-frame change over the mean frame, written to `.ied/local/video/` and shown as images; the text gives the change and brightness by frame and the 16 x 9 grid's most changing cells with their brightness over time (flicker against a pulse or drift); `region` crops every frame. Not yet: video files (decoding, the bundled ffmpeg or Media Foundation) - the tool says how to extract their frames. |
 | T-MED-3 | `image_compare(a, b, threshold?)` | read | Pixel diff: changed-pixel %, bounding boxes, diff image - for visual regression in games/UI. |
 | T-MED-4 | `image_info(path)` | read | Dimensions, format, mips, alpha, color space where detectable. **Built** (`plugins/chat/code/aitools/ImageInfo.cf`): PNG, JPEG, GIF, WebP, BMP and DDS from the first 256 KB - "DDS, 1024x2048, 12 mips, cube, BC7_UNORM_SRGB (sRGB)"; with the core tools until groups exist. |
 | T-MED-5 | `screenshot_window(process or title)` | read | Capture a running app's window (Windows Graphics Capture) - e.g. the game being developed. |
@@ -236,7 +238,7 @@ What `shell_run` and `build_run` with `background`, and `agent_run`, started (`d
 | Tool | Class | Notes |
 |---|---|---|
 | `background_status(id?)` | read | the chat's tasks (state, time, how each ended), or one with the end of its output (an agent's answer) |
-| `background_wait(id?, seconds?)` | read | until that task, or any of the chat's, ends (120 s by default, at most 600); an ended task it shows is told |
+| `background_wait(id?, seconds?)` | read | until that task, or any of the chat's, ends (120 s by default, at most 600); an ended task it shows is told. A message for this turn stops the wait at once; the task goes on |
 | `background_stop(id)` | meta | a command killed, a project's task cancelled, an agent's turn stopped |
 
 ### `chats` (built, 2026-10-21; deferred)
@@ -247,9 +249,9 @@ Chats of one workspace talking to each other (`docs/04` "Chats talk to each othe
 |---|---|---|
 | `chat_list()` | read | id, title, mode, state, the first line of each last answer; this chat marked |
 | `chat_read(chat, turns?)` | read | the last turns (at most 5): messages and answers, no tool calls |
-| `chat_send(chat, text)` | exec | starts a turn there or reaches its running turn; subject `chat.send(<id>)`; at most 3 hops |
-| `chat_create(text, title?, mode?, model?)` | exec | a new chat started with `text`, on this chat's group and pinned model or `model` (a cheaper one for routine work); subject `chat.create(*)` |
-| `chat_wait(chat, seconds?)` | read | until its turn ends (default 120, at most 600 s); returns the answer |
+| `chat_send(chat, text, require_reply?)` | exec | starts a turn there or reaches its running turn; subject `chat.send(<id>)`; at most 3 hops. `require_reply`: the other chat owes this one a reply (`docs/04` "Chats waiting on each other"). To a chat that required this one's reply it pays the debt: without `require_reply` it is the reply, outside the 3 hops |
+| `chat_create(text, title?, mode?, model?, require_reply?)` | exec | a new chat started with `text`, on this chat's group and pinned model or `model` (a cheaper one for routine work); subject `chat.create(*)`; `require_reply` as for `chat_send` |
+| `chat_wait(chat, seconds?)` | read | until its turn ends (default 120, at most 600 s); returns the answer. A message for this turn stops the wait at once |
 
 ### `models` (built, 2026-10-22; deferred)
 

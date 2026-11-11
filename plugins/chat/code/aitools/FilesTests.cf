@@ -26,7 +26,8 @@ static Core::String Edited(const char* text, const char* old, const char* replac
 	assert_eq((int64)1, edits.Count(), "the edit's JSON parses: old and new escape their breaks (\\\\n)");
 	Core::String result;
 	Core::String error;
-	applied = Ai::ApplyTextEdits(Core::StringView(text), edits, result, error);
+	Core::String unchanged;
+	applied = Ai::ApplyTextEdits(Core::StringView(text), edits, result, error, unchanged);
 	return result;
 }
 
@@ -46,6 +47,52 @@ class FileToolTests {
 		assert_se("**/Renderer.ch", Ai::SameNamedGlob(Core::StringView("Packages/Renderer/RHI/src/Rhi/Renderer.ch")).CStr(), "the file's name anywhere");
 		assert_se("**/Renderer.ch", Ai::SameNamedGlob(Core::StringView("Renderer.ch")).CStr(), "a bare name");
 		assert_se("**/main.cf", Ai::SameNamedGlob(Core::StringView("src\\main.cf")).CStr(), "backslashes");
+	}
+
+	[test("a_missing_folder_names_its_parents_folders")]
+	public static void TestMissingFolder() {
+		Core::StringBuilder folder;
+		folder.Append("ied-files-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "C4/src/compiler").CStr());
+		FS::MakeDirectories((root / "C4/docs").CStr());
+		FS::WriteFileAtomically((root / "C4/readme.md").CStr(), (const void*)"x", 1);
+		Core::String said = Ai::NearestFoldersHint(root, Core::StringView("C4/tests/unit"), Core::StringView("ied:/"));
+		assert_true(said.View().Contains(Core::StringView("ied:/C4 holds the folders:")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView(" src/")) && said.View().Contains(Core::StringView(" docs/")), "its folders");
+		assert_true(!said.View().Contains(Core::StringView("readme")), "not its files");
+		assert_true(Ai::NearestFoldersHint(root, Core::StringView("Nowhere"), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: C4/")), "up to the root");
+	}
+
+	[test("a_missing_folder_names_where_one_like_it_went")]
+	public static void TestMovedFolder() {
+		Core::StringBuilder folder;
+		folder.Append("ied-moved-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Claymore/Plugins/SoftBodyPhysics/src/SoftBodyPhysics").CStr());
+		FS::MakeDirectories((root / "Packages/Physics/Kernel").CStr());
+		FS::MakeDirectories((root / "build/SoftBodyOut").CStr());
+		Core::String said = Ai::MovedFoldersHint(root, Core::StringView("Packages/Physics/SoftBody"), Core::StringView(""));
+		assert_true(said.View().Contains(Core::StringView("folders named like SoftBody elsewhere:")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView(" Claymore/Plugins/SoftBodyPhysics/")), "where it went, nearest the root first");
+		assert_true(said.View().Contains(Core::StringView(" Claymore/Plugins/SoftBodyPhysics/src/SoftBodyPhysics/")), "and deeper");
+		assert_true(!said.View().Contains(Core::StringView("build/")), "not in build output");
+		assert_true(Ai::MovedFoldersHint(root, Core::StringView("Nothing/Like/Zebra"), Core::StringView("")).IsEmpty(), "none: nothing said");
+		assert_true(Ai::MovedFoldersHint(root, Core::StringView("softbody"), Core::StringView("ied:/")).View().Contains(Core::StringView(" ied:/Claymore/Plugins/SoftBodyPhysics/")), "any case, with the root's alias");
+	}
+
+	[test("glob_root_hint")]
+	public static void TestGlobRootHint() {
+		assert_true(Ai::GlobRootHint(Core::StringView("src/**/*.cf")).IsEmpty(), "a pattern of the workspace's paths is no mistake");
+		assert_true(Ai::GlobRootHint(Core::StringView("C:/x/*.cf")).IsEmpty(), "a drive is no alias");
+		Core::String ied = Ai::GlobRootHint(Core::StringView("ied:/plugins/chat/**/*Tests.cf"));
+		assert_true(ied.View().Contains(Core::StringView("{\"root\": \"ied:/plugins/chat\", \"pattern\": \"**/*Tests.cf\"}")), ied.CStr());
+		Core::String plugin = Ai::GlobRootHint(Core::StringView("plugins:/c4/docs/*.md"));
+		assert_true(plugin.View().Contains(Core::StringView("{\"root\": \"plugins:/c4/docs\", \"pattern\": \"*.md\"}")), plugin.CStr());
+		Core::String top = Ai::GlobRootHint(Core::StringView("ied:/**/*.md"));
+		assert_true(top.View().Contains(Core::StringView("{\"root\": \"ied:/\", \"pattern\": \"**/*.md\"}")), top.CStr());
 	}
 
 	[test("only_source_file")]
@@ -96,7 +143,40 @@ class FileToolTests {
 		Serialization::DomNode edits = Serialization::ReadJson(Core::StringView("[{\"old\": \"x;\\n\", \"new\": \"y;\\n\", \"replace_all\": true}]"), *doc).root;
 		Core::String result;
 		Core::String error;
-		assert_true(Ai::ApplyTextEdits(Core::StringView("x;\r\nx;\nx;\r\n"), edits, result, error), "replace_all applies");
+		Core::String unchanged;
+		assert_true(Ai::ApplyTextEdits(Core::StringView("x;\r\nx;\nx;\r\n"), edits, result, error, unchanged), "replace_all applies");
 		assert_se("y;\r\ny;\ny;\r\n", result.CStr(), "each match keeps the break its line had");
+	}
+
+	[test("edit_found_more_than_once_says_where")]
+	public static void TestEditFoundMoreThanOnce() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode edits = Serialization::ReadJson(Core::StringView("[{\"old\": \"x;\", \"new\": \"y;\"}]"), *doc).root;
+		Core::String result;
+		Core::String error;
+		Core::String unchanged;
+		assert_true(!Ai::ApplyTextEdits(Core::StringView("a\nx;\nb\nx;\n"), edits, result, error, unchanged), "twice: refused");
+		assert_true(error.View().Contains(Core::StringView("found 2 times, at lines 2 and 4;")), error.CStr());
+		assert_true(!Ai::ApplyTextEdits(Core::StringView("x;x;\nx;\nx;\nx;\nx;\n"), edits, result, error, unchanged), "six times: refused");
+		assert_true(error.View().Contains(Core::StringView("found 6 times, at lines 1, 1, 2, 3 and 2 more;")), error.CStr());
+	}
+
+	[test("edit_that_changes_nothing")]
+	public static void TestEditThatChangesNothing() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode edits = Serialization::ReadJson(Core::StringView("[{\"old\": \"x;\\n\", \"new\": \"x;\\n\"}]"), *doc).root;
+		Core::String result;
+		Core::String error;
+		Core::String unchanged;
+		assert_true(!Ai::ApplyTextEdits(Core::StringView("y;\nx;\n"), edits, result, error, unchanged), "alone: refused, its change left out of new");
+		assert_true(error.View().Contains(Core::StringView("the same")), error.CStr());
+
+		// Among edits that change something: left out and named, the others applied.
+		Serialization::DomNode batch = Serialization::ReadJson(Core::StringView("[{\"old\": \"a\", \"new\": \"b\"}, {\"old\": \"x;\", \"new\": \"x;\"}, {\"old\": \"c\", \"new\": \"d\"}]"), *doc).root;
+		assert_true(Ai::ApplyTextEdits(Core::StringView("a\nx;\nc\n"), batch, result, error, unchanged), error.CStr());
+		assert_se("b\nx;\nd\n", result.CStr(), "the others applied");
+		assert_true(unchanged.View().StartsWith(Core::StringView("edit 2:")), unchanged.CStr());
+		Serialization::DomNode missing = Serialization::ReadJson(Core::StringView("[{\"old\": \"a\", \"new\": \"b\"}, {\"old\": \"q\", \"new\": \"q\"}]"), *doc).root;
+		assert_true(Ai::ApplyTextEdits(Core::StringView("a\n"), missing, result, error, unchanged) && unchanged.View().StartsWith(Core::StringView("edit 2:")), "a leftover need not be in the file: it changes nothing either way");
 	}
 }

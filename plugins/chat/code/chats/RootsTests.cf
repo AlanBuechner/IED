@@ -28,6 +28,27 @@ class RootsTests {
 		assert_se("{\"root\":\"\"}", Ai::WithoutAlias(RootArgs("{\"root\": \"ied:/\"}"), Core::StringView("ied")).CStr(), "the root itself");
 	}
 
+	[test("full_paths")]
+	public static void TestFullPaths() {
+		Core::Array<Ai::RootFolder> folders;
+		folders.Push(Ai::RootFolder{ Core::String(""), Core::String("C:/GameDev/Claymore") });
+		folders.Push(Ai::RootFolder{ Core::String("ied"), Core::String("C:/GameDev/IED") });
+		folders.Push(Ai::RootFolder{ Core::String("deep"), Core::String("C:/GameDev/IED/toolchains") });
+		assert_se("ied:/C4/docs/a.md", Ai::AliasedPath(folders, Core::StringView("C:\\GameDev\\IED\\C4\\docs\\a.md")).CStr(), "in a root, as the code tools print it");
+		assert_se("deep:/c4/dev/b.ch", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IED/toolchains/c4/dev/b.ch")).CStr(), "the deepest folder names it");
+		assert_se("Claymore/Plugins/a.cf", Ai::AliasedPath(folders, Core::StringView("c:/gamedev/claymore/Claymore/Plugins/a.cf")).CStr(), "in the workspace: relative, any case");
+		assert_se("ied:/", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IED")).CStr(), "a root's folder itself");
+		assert_se("C:/GameDev/IEDX/a.cf", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IEDX/a.cf")).CStr(), "a folder of a longer name is no root's");
+		assert_se("D:/Other/a.cf", Ai::AliasedPath(folders, Core::StringView("D:/Other/a.cf")).CStr(), "outside every folder: as it is");
+		assert_se("src/a.cf", Ai::AliasedPath(folders, Core::StringView("src/a.cf")).CStr(), "a relative path: as it is");
+		assert_se("ied:/C4", Ai::AliasedPath(folders, Core::StringView("ied:/C4")).CStr(), "an alias: as it is");
+		Serialization::DomNode call = RootArgs("{\"pattern\": \"C:/GameDev/IED\", \"path\": \"C:/GameDev/IED/C4\"}");
+		assert_true(Ai::NamesFullPath(call), "a full path in its place");
+		assert_se("{\"pattern\":\"C:/GameDev/IED\",\"path\":\"ied:/C4\"}", Ai::WithFullPathsAliased(folders, call).CStr(), "the place only");
+		assert_true(!Ai::NamesFullPath(RootArgs("{\"pattern\": \"C:/x\", \"path\": \"src\"}")), "none in a place");
+		assert_se("", Ai::WithFullPathsAliased(folders, RootArgs("{\"path\": \"D:/Other\"}")).CStr(), "nothing to change: nothing");
+	}
+
 	[test("subjects")]
 	public static void TestSubjects() {
 		assert_se("fs.write(ied:/C4/a.cf)", Ai::RootSubject(Core::StringView("fs.write(C4/a.cf)"), Core::StringView("ied")).CStr(), "a write");
@@ -61,9 +82,9 @@ class RootsTests {
 		assert_eq((int64)0, Ai::FindPluginId(ids, Core::StringView("c4")), "an id as it is");
 		assert_eq((int64)1, Ai::FindPluginId(ids, Core::StringView("gpu")), "the skill's name for ied.gpu");
 		assert_eq((int64)2, Ai::FindPluginId(ids, Core::StringView("ied.nuke")), "the full id");
-		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("web")), "two end in .web: no guess");
-		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("pu")), "only after a dot");
-		assert_eq((int64) - 1, Ai::FindPluginId(ids, Core::StringView("")), "nothing names nothing");
+		assert_eq((int64)-1, Ai::FindPluginId(ids, Core::StringView("web")), "two end in .web: no guess");
+		assert_eq((int64)-1, Ai::FindPluginId(ids, Core::StringView("pu")), "only after a dot");
+		assert_eq((int64)-1, Ai::FindPluginId(ids, Core::StringView("")), "nothing names nothing");
 	}
 
 	[test("allowed_by_name")]

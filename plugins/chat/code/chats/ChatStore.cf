@@ -38,6 +38,7 @@ namespace Ai
 		json.Field("group", chat->m_Group.View());
 		if (!chat->m_Effort.IsEmpty()) json.Field("effort", chat->m_Effort.View());
 		if (!chat->m_PinnedModel.IsEmpty()) json.Field("pinnedModel", chat->m_PinnedModel.View());
+		if (chat->m_Endless) json.BoolField("endless", true);
 		if (!chat->m_ClaudeSession.IsEmpty()) {
 			json.Key(Core::StringView("claude"));
 			json.BeginObject();
@@ -106,6 +107,12 @@ namespace Ai
 		chat->WriteBackground(json);
 		if (!chat->m_Agent.IsEmpty()) json.Field("agent", chat->m_Agent.View());
 		if (!chat->m_ParentChatId.IsEmpty()) json.Field("parentChatId", chat->m_ParentChatId.View());
+		// The replies it owes (docs/04 "Chats waiting on each other"); a creditor's list is made again from them.
+		if (!chat->m_Owes.IsEmpty()) {
+			json.Key(Core::StringView("owes"));
+			WriteReplies(json, chat->m_Owes);
+		}
+		if (chat->m_State == ChatState::Suspended) json.Field("suspended", chat->m_StateReason.View());
 		json.EndObject();
 		WriteWhole(ChatFolder(state, chat->m_ChatId.View()) / "chat.json", json.View());
 	}
@@ -179,6 +186,7 @@ namespace Ai
 		chat->m_Group = Core::String(header.Member("group").AsView());
 		if (IsEffort(header.Member("effort").AsView())) chat->m_Effort = Core::String(header.Member("effort").AsView());
 		chat->m_PinnedModel = Core::String(header.Member("pinnedModel").AsView());
+		chat->m_Endless = header.Member("endless").AsBool();
 		chat->m_ClaudeSession = Core::String(header.Member("claude").Member("session").AsView());
 		Serialization::DomNode claudeTurns = header.Member("claude").Member("turns");
 		for (int64 i = 0; i < claudeTurns.Count(); ++i) chat->m_ClaudeTurns.Push(Core::String(claudeTurns.At(i).AsView()));
@@ -252,6 +260,17 @@ namespace Ai
 		}
 		chat->m_Agent = Core::String(header.Member("agent").AsView());
 		chat->m_ParentChatId = Core::String(header.Member("parentChatId").AsView());
+		Serialization::DomNode owes = header.Member("owes");
+		for (int64 i = 0; i < owes.Count(); ++i) {
+			ReplyOwed* owed = new ReplyOwed();
+			owed->Read(owes.At(i));
+			chat->m_Owes.Push(owed);
+		}
+		// A chat that suspended stays so until something wakes it; a turn a restart cut off (running.json) makes it paused.
+		if (header.Member("suspended").IsValid()) {
+			chat->m_State = ChatState::Suspended;
+			chat->m_StateReason = Core::String(header.Member("suspended").AsView());
+		}
 	}
 
 	static void ReadTurns(Chat* chat, Core::StringView text) {

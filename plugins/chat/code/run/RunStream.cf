@@ -97,7 +97,7 @@ namespace Ai
 		for (Turn* each : m_Chat->m_Turns)
 			if (!each->m_Compressed) WriteMessages(json, m_Ws, each->m_Messages, images, keepThinking && each == m_Turn);
 		json.EndArray();
-		json.RawField("tools", m_Tools->RequestTools(m_Chat->m_Mode, false).View());
+		json.RawField("tools", m_Tools->RequestTools(m_Chat->m_Mode, false, m_Chat->m_Endless).View());
 		json.BoolField("stream", true);
 		if (llamaCpp) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
@@ -121,7 +121,7 @@ namespace Ai
 		Core::String key;
 		if (!profile->m_ApiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->m_ApiKeyEnv.CStr(), key)) request.m_Headers.Push(Core::String("Authorization: Bearer ") + key.View());
 		request.m_Body = RequestBody(request.m_PromptTokens);
-		m_RequestHead = (int64)(m_System.View().Hash() ^ m_Tools->RequestTools(m_Chat->m_Mode, false).View().Hash());
+		m_RequestHead = (int64)(m_System.View().Hash() ^ m_Tools->RequestTools(m_Chat->m_Mode, false, m_Chat->m_Endless).View().Hash());
 		request.m_ReadTokens = ExpectedRead(request.m_PromptTokens, m_RequestHead);
 		m_RequestRead = request.m_ReadTokens;
 		double rate = profile->m_PrefillRate;
@@ -139,7 +139,7 @@ namespace Ai
 
 	int64 TurnRun::ExpectedRead(int64 promptTokens, int64 head) const {
 		const bool sameFront = !m_Chat->m_PromptRewritten && m_Chat->m_PromptHead == head && m_Chat->m_LastPromptTokens > 0
-			&& m_Chat->m_EstimateModel.View() == m_Candidates[m_Candidate]->m_Name.View();
+		&& m_Chat->m_EstimateModel.View() == m_Candidates[m_Candidate]->m_Name.View();
 		if (!sameFront) return promptTokens;
 		const int64 added = CalibratedTokens() - m_Chat->m_LastPromptTokens;
 		if (added < 0) return 0;
@@ -323,6 +323,7 @@ namespace Ai
 			segment->m_Attachments = arrived[i]->m_Attachments;
 			segment->m_FromChatId = arrived[i]->m_FromChatId;
 			segment->m_FromTitle = arrived[i]->m_FromTitle;
+			segment->m_Reply = arrived[i]->m_Reply;
 			segment->m_AtMs = StreamNowMs();
 			Close(Begin(segment));
 			m_Turn->m_Messages.Push(messages[i]);
@@ -342,7 +343,7 @@ namespace Ai
 
 	static int64 MessageTokens(const ModelMessage* message) {
 		return BytesToTokens(message->SentText().ByteLength() + message->m_Note.ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
-			+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
+		+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
 	}
 
 	int64 TurnRun::EstimateTokens() const {
@@ -372,9 +373,9 @@ namespace Ai
 		return part;
 	}
 
-	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, bool claude) { return tools->RequestTools(mode, claude); }
+	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool claude) { return tools->RequestTools(chat->m_Mode, claude, chat->m_Endless); }
 
-	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat->m_Mode, m_Candidates[m_Candidate]->IsClaude()); }
+	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat, m_Candidates[m_Candidate]->IsClaude()); }
 
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
 		int64 messages = 0;
@@ -407,7 +408,7 @@ namespace Ai
 		// nothing: the meter keeps the last step's count.
 		if (completion->m_PromptTokens <= 0 && result->m_Text.IsEmpty() && result->m_Thinking.IsEmpty() && result->m_Calls.IsEmpty()) return;
 		const int64 output = completion->m_CompletionTokens > 0 ? completion->m_CompletionTokens
-			: BytesToTokens(result->m_Text.ByteLength() + result->m_Thinking.ByteLength());
+		: BytesToTokens(result->m_Text.ByteLength() + result->m_Thinking.ByteLength());
 		if (completion->m_PromptTokens > 0) {
 			m_Turn->m_TokensIn = completion->m_PromptTokens;
 			m_Chat->m_EstimateOffset = completion->m_PromptTokens - estimateBefore;

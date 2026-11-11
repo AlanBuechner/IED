@@ -7,8 +7,10 @@ namespace Ai
 {
 	const int64 c_EditMissShownBytes = 48;
 	const int64 c_EditMissLeast = 12;   // a shorter agreement is a coincidence, not the place meant
+	const int64 c_EditMissLineBytes = 240;   // the file's line shown whole up to this
 
-	// "line N: ... the file has `x` where old has `y`"; empty when no part of `old` of kEditMissLeast bytes is in `text`.
+	// "line N: ... the file has `x` where old has `y`; the file's line N is `...`" (the whole line, to copy); empty when no
+	// part of `old` of c_EditMissLeast bytes is in `text`.
 	Core::String EditMiss(Core::StringView text, Core::StringView old);
 
 	// `text` with its line breaks, tabs and other control bytes written as escapes, so the difference is visible.

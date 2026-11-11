@@ -256,8 +256,17 @@ namespace Ai
 		Core::String problem = Core::String("docs_read: no reference doc ") + path + "; paths start with a docs name (" + index + "), as docs_search gives them";
 		// A workspace's own page (docs/engine/rendering.md) is no reference doc: say which tool reads it.
 		if (path.EndsWith(Core::StringView(".md")) || path.EndsWith(Core::StringView(".txt")))
-			problem += ". A file of the workspace (or ied:/...) is read with fs_read; docs_read reads only the languages' and libraries' reference docs";
+			problem += ". A file of the workspace (or ied:/...) is read with fs_read, a skill's guide with skill_read; docs_read reads only the languages' and libraries' reference docs";
 		return problem;
+	}
+
+	Core::String DocsPathOf(const Core::Array<DocsFolder*>& folders, Core::StringView path) {
+		for (const DocsFolder* docs : folders) {
+			Core::String prefix = docs->m_Shown + "/";
+			if (!docs->m_Shown.IsEmpty() && path.StartsWith(prefix.View()))
+				return (docs->m_Id + "/") + path.Substring(prefix.ByteLength(), path.ByteLength() - prefix.ByteLength());
+		}
+		return Core::String(path);
 	}
 
 	// The file `path` ("<id>/<path in the folder>") names; null with `problem` when it names none.
@@ -401,7 +410,7 @@ namespace Ai
 
 	static ToolOutcome DocsReadRun(const ToolInvocation& call, const Core::Array<DocsFolder*>& folders) {
 		Core::String problem;
-		DocFile* doc = DocAt(folders, call.m_Args.Member("path").AsView(), problem);
+		DocFile* doc = DocAt(folders, DocsPathOf(folders, call.m_Args.Member("path").AsView()).View(), problem);
 		if (!doc) return ToolError(problem.View());
 		if (!call.m_Args.Member("heading").IsValid() && !call.m_Args.Member("line").IsValid()) return ToolResult(HeadingList(doc).View(), doc->m_Path.View());
 		DocSection section;
@@ -421,6 +430,7 @@ namespace Ai
 		spec->m_ToolClass = ToolClass::Read;
 		spec->m_ParallelSafe = true;
 		spec->m_InPlan = true;
+		spec->m_OwnPaths = true;
 		spec->m_Plan = DocsPlan;
 		return spec;
 	}
@@ -430,7 +440,7 @@ namespace Ai
 			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}");
 		search->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsSearchRun(call, folders(call)); };
 		registry.Add(search);
-		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them; a path alone lists the file's headings. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
+		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them (a docs file's plugins:/ path works too); a path alone lists the file's headings. Only the languages' and libraries' docs: a workspace's own docs (docs/...) are read with fs_read. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"minLength\": 1}, \"heading\": {\"type\": \"string\"}, \"line\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}");
 		read->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsReadRun(call, folders(call)); };
 		registry.Add(read);

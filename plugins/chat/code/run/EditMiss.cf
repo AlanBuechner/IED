@@ -47,6 +47,15 @@ namespace Ai
 		return text.Substring(start, length < 0 ? 0 : length);
 	}
 
+	// The whole line of `text` holding byte `at` (without its line break), cut to c_EditMissLineBytes.
+	static Core::StringView LineAround(Core::StringView text, int64 at) {
+		int64 start = at;
+		while (start > 0 && text.ByteAt(start - 1) != '\n') start -= 1;
+		int64 end = at;
+		while (end < text.ByteLength() && text.ByteAt(end) != '\n') end += 1;
+		return text.Substring(start, end - start < c_EditMissLineBytes ? end - start : c_EditMissLineBytes);
+	}
+
 	Core::String EditMiss(Core::StringView text, Core::StringView old) {
 		int64 headAt = -1;
 		int64 tailAt = -1;
@@ -59,12 +68,15 @@ namespace Ai
 			Core::Format(&out, "line {0}: the file agrees with the start of old up to `{1}`, then has `{2}` where old has `{3}`",
 				LineOf(text, split), Visible(Clipped(text, split - c_EditMissShownBytes, c_EditMissShownBytes)), Visible(text.Substring(split, c_EditMissShownBytes)),
 				Visible(old.Substring(head, c_EditMissShownBytes)));
+			// The whole line, to copy from rather than recall.
+			Core::Format(&out, "; the file's line {0} is `{1}`", LineOf(text, split), Visible(LineAround(text, split)));
 		}
 		else {
 			const int64 cut = old.ByteLength() - tail;
 			Core::Format(&out, "line {0}: the file agrees with the end of old from `{1}`, but before it has `{2}` where old has `{3}`",
 				LineOf(text, tailAt), Visible(text.Substring(tailAt, c_EditMissShownBytes)), Visible(Clipped(text, tailAt - c_EditMissShownBytes, c_EditMissShownBytes)),
 				Visible(Clipped(old, cut - c_EditMissShownBytes, c_EditMissShownBytes)));
+			Core::Format(&out, "; the file's line {0} is `{1}`", LineOf(text, tailAt), Visible(LineAround(text, tailAt)));
 		}
 		return out.ToString();
 	}

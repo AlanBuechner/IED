@@ -25,9 +25,19 @@ namespace Ai
 	// The glob of the workspace's files named like `path` ("src/a/Renderer.ch": "**/Renderer.ch"): where an fs_read
 	// that missed most likely meant.
 	Core::String SameNamedGlob(Core::StringView path);
+	// For fs_list's `path` that is no folder: "; <its nearest existing parent> holds the folders: a/ b/ ..." (`shown` before
+	// the parent: a root's alias).
+	Core::String NearestFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown);
+	// For the same path: "; folders named like <its last part> elsewhere: a/ b/", those whose names begin as its last part
+	// does, anywhere in the root (where it was moved or renamed to); "" when there are none.
+	Core::String MovedFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown);
 	// The one path of `found` outside the folders the tools skip (build output, .git, ...), "" when none or several:
 	// the file an fs_read that missed meant, read in its place.
 	Core::String OnlySourceFile(const Core::Array<Core::String>& found);
-	// `text` with each edit's `old` replaced by its `new`, all or none; false with `error` naming the edit that failed.
-	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error);
+	// Why fs_glob refuses a pattern that starts with a root's alias ("ied:/plugins/**/*.cf" matches nothing: only root
+	// takes one), with the call that means it - the folders before its first wildcard as root; "" for any other pattern.
+	Core::String GlobRootHint(Core::StringView pattern);
+	// `text` with each edit's `old` replaced by its `new`, all or none; false with `error` naming the edit that failed. An
+	// edit whose new is its old is left out when another changes something, and named in `unchanged`; alone it fails.
+	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error, Core::String& unchanged);
 }

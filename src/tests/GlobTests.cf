@@ -1,4 +1,4 @@
-// fs/glob: '*', '?', "**" and {a,b} sets against paths, case folded; what counts as a glob.
+// fs/glob: '*', '?', [...] classes, "**" and {a,b} sets against paths, case folded; what counts as a glob.
 
 include "fs/Glob.ch"
 
@@ -35,6 +35,17 @@ class GlobTests {
 		assert_true(Match("a{b", "a{b") && !Match("a{b", "ab"), "a set that never closes is plain text");
 	}
 
+	[test("classes")]
+	public static void TestClasses() {
+		assert_true(Match("src/*.c[hf]", "src/a.ch") && Match("src/*.c[hf]", "src/a.cf") && !Match("src/*.c[hf]", "src/a.cpp"), "one of its characters");
+		assert_true(Match("**/*.c[hf]", "a/b/x.CF"), "case folded, under any folder");
+		assert_true(Match("v[0-9].txt", "v7.txt") && !Match("v[0-9].txt", "vx.txt"), "a range");
+		assert_true(Match("x[!a].md", "xb.md") && !Match("x[!a].md", "xa.md") && Match("x[^a].md", "xb.md"), "negated");
+		assert_true(Match("[]]x", "]x") && Match("[a-]", "-"), "a ']' first and a '-' last are characters");
+		assert_true(Match("a*[0-9]", "abc5") && !Match("a*[0-9]", "abc"), "after a star that backs up");
+		assert_true(Match("a[b", "a[b") && !Match("a[b", "ab"), "a class that never closes is plain text");
+	}
+
 	[test("expand_sets")]
 	public static void TestExpandSets() {
 		FS::Path root = FS::TempDirectory() / "ied-glob-sets-test";
@@ -51,6 +62,7 @@ class GlobTests {
 	public static void TestIsGlob() {
 		assert_true(Ied::IsGlob(Core::StringView("a/*.x")) && Ied::IsGlob(Core::StringView("?")), "wildcards");
 		assert_true(Ied::IsGlob(Core::StringView("src/{a,b}.iedproj")), "a set");
+		assert_true(Ied::IsGlob(Core::StringView("src/*.c[hf]")) && Ied::IsGlob(Core::StringView("[ab]/x")) && !Ied::IsGlob(Core::StringView("a[b")), "a class, one that closes");
 		assert_true(!Ied::IsGlob(Core::StringView("tools/Tool.iedproj")), "a plain path");
 	}
 }

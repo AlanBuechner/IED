@@ -18,6 +18,7 @@ export function turnNotice(before, after) {
 	if (after.state === "awaiting_approval" && was !== "awaiting_approval") return { kind: "approval", text: name + " needs your approval", level: "attention" };
 	if (after.state === "awaiting_answer" && was !== "awaiting_answer") return { kind: "question", text: name + " asks you a question", level: "attention" };
 	if (!IN_A_TURN.has(was) || IN_A_TURN.has(after.state)) return null;
+	if (after.state === "suspended") return after.parentChatId ? null : { kind: "suspended", text: name + " suspended: " + (after.stateReason || "it waits"), level: "info" };
 	if (after.state === "paused") return { kind: "paused", text: name + " paused: " + String(after.stateReason || "it stopped").replace(/_/g, " "), level: "warning" };
 	const stop = after.lastStop || "finished";
 	if (stop === "user_cancelled" || after.parentChatId) return null;

@@ -2,6 +2,7 @@ include "api/Plugin.ch"
 include "Files.ch"
 include "run/EditMiss.ch"
 include "run/EditIndent.ch"
+include "run/EditSpacing.ch"
 include "LineDiff.ch"
 include "LspQuery.ch"
 include "chats/Roots.ch"
@@ -150,6 +151,28 @@ namespace Ai
 		return out.ToString();
 	}
 
+	static const int64 c_MatchLinesShown = 4;
+
+	// Where the matches start, by line from 1, the first few: "at lines 12 and 40", "at lines 3, 9, 15, 21 and 2 more".
+	static Core::String MatchLines(Core::StringView text, const Core::Array<OldMatch>& found) {
+		Core::StringBuilder said;
+		said.Append("at lines ");
+		int64 shown = Math::Min(found.Count(), c_MatchLinesShown);
+		int64 line = 1;
+		int64 at = 0;
+		for (int64 k = 0; k < shown; k += 1) {
+			for (; at < found[k].m_Start; at += 1) if (text.ByteAt(at) == '\n') line += 1;
+			if (k > 0) said.Append(k + 1 == shown && found.Count() == shown ? " and " : ", ");
+			said.AppendInt(line);
+		}
+		if (found.Count() > shown) {
+			said.Append(" and ");
+			said.AppendInt(found.Count() - shown);
+			said.Append(" more");
+		}
+		return said.ToString();
+	}
+
 	static bool ApplyOne(Core::String& text, const Serialization::DomNode& edit, int64 number, Core::String& error) {
 		Core::StringView old = edit.Member("old").AsView();
 		Core::StringView replacement = edit.Member("new").AsView();
@@ -160,12 +183,17 @@ namespace Ai
 			error = which.ToString() + ": old is empty; to create or overwrite a file use fs_write";
 			return false;
 		}
+		if (old == replacement) {
+			error = which.ToString() + ": old and new are the same - it would change nothing; leave the edit out, or put the change in new";
+			return false;
+		}
 		Core::Array<OldMatch> found = FindOld(text.View(), old);
 		if (found.IsEmpty()) {
 			const bool crlf = MostlyCrlf(text.View());
 			Core::String fileOld = WithBreaks(old, crlf);
 			if (ReplaceShifted(text.View(), fileOld.View(), WithBreaks(replacement, crlf).View(), text)) return true;
 			if (ReplaceReindented(text.View(), fileOld.View(), WithBreaks(replacement, crlf).View(), text)) return true;
+			if (ReplaceRespaced(text.View(), fileOld.View(), WithBreaks(replacement, crlf).View(), text)) return true;
 			Core::String miss = EditMiss(text.View(), fileOld.View());
 			error = which.ToString() + ": old was not found" + (miss.IsEmpty() ? Core::String("; no part of it is in the file: is it the right file?") : Core::String("; ") + miss.View()) + "; copy the text from the file exactly, tabs included - and read those lines again first if you copied them from an earlier read: the file may have changed since (another chat, the editor, a formatter)";
 			return false;
@@ -173,7 +201,9 @@ namespace Ai
 		if (found.Count() > 1 && !edit.Member("replace_all").AsBool()) {
 			which.Append(": old is found ");
 			which.AppendInt(found.Count());
-			which.Append(" times; add surrounding lines to make it unique, or set replace_all");
+			which.Append(" times, ");
+			which.Append(MatchLines(text.View(), found).View());
+			which.Append("; add surrounding lines to make it unique, or set replace_all");
 			error = which.ToString();
 			return false;
 		}
@@ -181,10 +211,28 @@ namespace Ai
 		return true;
 	}
 
-	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error) {
+	static bool ChangesNothing(const Serialization::DomNode& edit) {
+		Core::StringView old = edit.Member("old").AsView();
+		return !old.IsEmpty() && old == edit.Member("new").AsView();
+	}
+
+	// An edit whose new is its old among edits that change something is left out and named in `unchanged` (a leftover of
+	// the batch, not worth losing the others for); alone, ApplyOne refuses it (the change was left out of new).
+	bool ApplyTextEdits(Core::StringView text, const Serialization::DomNode& edits, Core::String& result, Core::String& error, Core::String& unchanged) {
 		result = Core::String(text);
-		for (int64 i = 0; i < edits.Count(); ++i)
+		unchanged.Clear();
+		bool anyChange = false;
+		for (int64 i = 0; i < edits.Count(); ++i) anyChange = anyChange || !ChangesNothing(edits.At(i));
+		Core::StringBuilder skipped;
+		for (int64 i = 0; i < edits.Count(); ++i) {
+			if (anyChange && ChangesNothing(edits.At(i))) {
+				skipped.Append(skipped.ByteLength() == 0 ? "edit " : ", ");
+				skipped.AppendInt(i + 1);
+				continue;
+			}
 			if (!ApplyOne(result, edits.At(i), i + 1, error)) return false;
+		}
+		if (skipped.ByteLength() > 0) unchanged = skipped.ToString() + ": old and new the same - left out; the other edits were applied";
 		return true;
 	}
 	// --- The tools ---------------------------------------------------------------------------------------------------
@@ -356,6 +404,8 @@ namespace Ai
 		return WritePlanFor(call, Core::StringView("Overwrite"), call.m_Args.Member("content").AsView(), before.View(), existed);
 	}
 
+	static const int64 c_FormatChangesShown = 16;
+
 	// The file as its language server formats it, written over `text` (AfterWrite.ch); `text` when it is not formatted,
 	// with why in `note`, and `note` saying how much formatting changed. The diagnostics wanted are then the formatted
 	// text's: `after.mark` moves past those of `text`.
@@ -382,6 +432,11 @@ namespace Ai
 		said.Append(": it changed ");
 		said.AppendInt(change.m_Plus > change.m_Minus ? change.m_Plus : change.m_Minus);
 		said.Append(" of the lines you wrote, so read them again before an fs_edit near them.");
+		// A few changed lines are shown, so the next fs_edit can copy them as they are now without reading the file.
+		if (change.m_Plus + change.m_Minus <= c_FormatChangesShown) {
+			said.Append(" What it changed (- yours, + now):\n");
+			said.Append(change.m_Unified.View());
+		}
 		note = said.ToString();
 		return formatted;
 	}
@@ -444,7 +499,8 @@ namespace Ai
 		}
 		Core::String after;
 		Core::String error;
-		if (!ApplyTextEdits(before.View(), call.m_Args.Member("edits"), after, error)) {
+		Core::String unchanged;
+		if (!ApplyTextEdits(before.View(), call.m_Args.Member("edits"), after, error, unchanged)) {
 			ToolPlan failed;
 			failed.m_Error = (Core::String("fs_edit ") + path.View()) + ": " + error.View() + "; nothing was changed";
 			return failed;
@@ -460,8 +516,11 @@ namespace Ai
 		CurrentText(call, path.View(), before);
 		Core::String after;
 		Core::String error;
-		ApplyTextEdits(before.View(), call.m_Args.Member("edits"), after, error);
-		return Written(call, path.View(), before.View(), after.View(), plan);
+		Core::String unchanged;
+		ApplyTextEdits(before.View(), call.m_Args.Member("edits"), after, error, unchanged);
+		ToolOutcome outcome = Written(call, path.View(), before.View(), after.View(), plan);
+		if (!unchanged.IsEmpty()) outcome.m_Content = (outcome.m_Content + "\n") + unchanged.View();
+		return outcome;
 	}
 
 	// `shown` goes before each path: the root's alias, so the paths can be passed back ("ied:/").
@@ -487,10 +546,87 @@ namespace Ai
 		return plan;
 	}
 
+	static const int64 c_MissedFolderSiblings = 24;
+
+	// For a folder that is not there: the folders of its nearest parent that is, which the path most likely meant one of.
+	Core::String NearestFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+		Core::String parent = Core::String(path);
+		while (!parent.IsEmpty() && !FS::IsDirectory((root / parent.View()).CStr())) {
+			int64 slash = parent.ByteLength() - 1;
+			while (slash >= 0 && parent.View().ByteAt(slash) != '/') slash -= 1;
+			parent = slash < 0 ? Core::String() : Core::String(parent.View().Substring(0, slash));
+		}
+		Core::StringBuilder out;
+		out.Append("; ");
+		out.Append(shown);
+		out.Append(parent.IsEmpty() ? Core::StringView("(the root)") : parent.View());
+		out.Append(" holds the folders:");
+		int64 count = 0;
+		FS::Directory listing = FS::Directory((parent.IsEmpty() ? root : root / parent.View()).CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			if (entry.kind != FS::EntryKind::Directory) continue;
+			Core::String child = parent.IsEmpty() ? entry.name : (parent + "/") + entry.name.View();
+			if (Excluded(child.View())) continue;
+			if (count == c_MissedFolderSiblings) {
+				out.Append(" ...");
+				break;
+			}
+			out.Append(" ");
+			out.Append(entry.name.View());
+			out.Append("/");
+			count += 1;
+		}
+		if (count == 0) out.Append(" none");
+		return out.ToString();
+	}
+
+	static const int64 c_MovedFoldersShown = 4;
+	static const int64 c_MovedFoldersWalked = 20000;   // folders looked through at most: a large workspace answers in milliseconds still
+
+	// For a folder that is not there, the folders elsewhere named as its last part begins: where it was moved or renamed to
+	// ("Packages/Physics/SoftBody" moved to "Claymore/Plugins/SoftBodyPhysics"). "" when none.
+	Core::String MovedFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+		int64 start = path.ByteLength();
+		while (start > 0 && path.ByteAt(start - 1) != '/' && path.ByteAt(start - 1) != '\\') start -= 1;
+		Core::StringView last = path.Substring(start, path.ByteLength() - start);
+		if (last.IsEmpty()) return Core::String();
+		Core::String wanted = last.ToLower();
+		Core::Array<Core::String> found;
+		Core::Array<Core::String> waiting;
+		waiting.Push(Core::String());
+		int64 walked = 0;
+		for (int64 next = 0; next < waiting.Count() && found.Count() < c_MovedFoldersShown && walked < c_MovedFoldersWalked; next += 1) {
+			Core::String folder = waiting[next];
+			FS::Directory listing = FS::Directory((folder.IsEmpty() ? root : root / folder.View()).CStr());
+			for (FS::DirectoryEntry& entry : listing) {
+				if (entry.kind != FS::EntryKind::Directory) continue;
+				Core::String child = folder.IsEmpty() ? entry.name : (folder + "/") + entry.name.View();
+				if (Excluded(child.View())) continue;
+				walked += 1;
+				waiting.Push(child);
+				if (found.Count() < c_MovedFoldersShown && entry.name.View().ToLower().View().StartsWith(wanted.View())) found.Push(child);
+			}
+		}
+		if (found.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("; folders named like ");
+		out.Append(last);
+		out.Append(" elsewhere:");
+		for (const Core::String& folder : found) {
+			out.Append(" ");
+			out.Append(shown);
+			out.Append(folder.View());
+			out.Append("/");
+		}
+		return out.ToString();
+	}
+
 	static ToolOutcome ListRun(const ToolInvocation& call) {
 		Core::String path = PathArgument(call, "path");
 		const int64 depth = call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 2;
-		if (!FS::IsDirectory((FS::Path(call.m_Ws.m_Root.View()) / path.View()).CStr())) return ToolError((Core::String("fs_list: no folder ") + path.View() + "; use fs_glob to find files by name").View());
+		FS::Path root = FS::Path(call.m_Ws.m_Root.View());
+		if (!FS::IsDirectory((root / path.View()).CStr()))
+			return ToolError(((((Core::String("fs_list: no folder ") + path.View()) + NearestFoldersHint(root, path.View(), call.m_Shown.View()).View()) + MovedFoldersHint(root, path.View(), call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
 		Core::StringBuilder out;
 		int64 count = 0;
 		ListFolder(FS::Path(call.m_Ws.m_Root.View()), path.View(), call.m_Shown.View(), depth < 1 ? 1 : depth > 6 ? 6 : depth, c_ListMostEntries, out, count);
@@ -508,7 +644,31 @@ namespace Ai
 		return plan;
 	}
 
+	Core::String GlobRootHint(Core::StringView pattern) {
+		if (PathAlias(pattern).IsEmpty()) return Core::String();
+		int64 wildcard = pattern.ByteLength();
+		for (int64 i = 0; i < pattern.ByteLength() && wildcard == pattern.ByteLength(); ++i) {
+			const int32 c = pattern.ByteAt(i);
+			if (c == '*' || c == '?' || c == '[' || c == '{') wildcard = i;
+		}
+		int64 slash = -1;
+		for (int64 i = 0; i < wildcard; ++i)
+			if (pattern.ByteAt(i) == '/') slash = i;
+		Core::String root = Core::String(pattern.Substring(0, slash));
+		if (root.View().EndsWith(Core::StringView(":"))) root = root + "/";
+		Core::StringView rest = pattern.Substring(slash + 1, pattern.ByteLength() - slash - 1);
+		Core::StringBuilder hint;
+		hint.Append("fs_glob: the pattern is relative to root, and only root takes an alias such as ied:/ - call fs_glob({\"root\": \"");
+		hint.Append(root.View());
+		hint.Append("\", \"pattern\": \"");
+		hint.Append(rest);
+		hint.Append("\"})");
+		return hint.ToString();
+	}
+
 	static ToolOutcome GlobRun(const ToolInvocation& call) {
+		Core::String hint = GlobRootHint(call.m_Args.Member("pattern").AsView());
+		if (!hint.IsEmpty()) return ToolError(hint.View());
 		Core::String root = ToolPath(call.m_Args.Member("root").AsView());
 		Core::Array<Core::String> found = IED::ExpandGlob((FS::Path(call.m_Ws.m_Root.View()) / root.View()).View(), call.m_Args.Member("pattern").AsView());
 		Core::StringBuilder out;
@@ -554,7 +714,7 @@ namespace Ai
 		write->m_Plan = WritePlan;
 		write->m_Run = WriteRun;
 		registry.Add(write);
-		ToolSpec* edit = Spec("fs_edit", "Replace exact text in a file: each edit's old text must occur once (or set replace_all; an old found nowhere but in one place indented by whole tabs more or less, or whose later lines are indented otherwise - the file was formatted since - is replaced there, new shifted as its first line); all edits apply or none. Copy old exactly from fs_read, without the line numbers; for a long block, clipboard_copy its lines and write old as {{clip:<name>}}. Example: fs_edit({\"path\": \"src/config.txt\", \"edits\": [{\"old\": \"count = 0\", \"new\": \"count = 1\"}]})",
+		ToolSpec* edit = Spec("fs_edit", "Replace exact text in a file: each edit's old text must occur once (or set replace_all; an old found nowhere but in one place indented by whole tabs more or less, or whose later lines are indented otherwise, or spaced otherwise within its lines - the file was formatted since - is replaced there, new shifted as its first line); all edits apply or none, but for an edit whose new is its old, which is left out (and said) when others change something. Copy old exactly from fs_read, without the line numbers; for a long block, clipboard_copy its lines and write old as {{clip:<name>}}. Example: fs_edit({\"path\": \"src/config.txt\", \"edits\": [{\"old\": \"count = 0\", \"new\": \"count = 1\"}]})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"edits\": {\"type\": \"array\", \"minItems\": 1, \"items\": {\"type\": \"object\", \"properties\": {\"old\": {\"type\": \"string\"}, \"new\": {\"type\": \"string\"}, \"replace_all\": {\"type\": \"boolean\"}}, \"required\": [\"old\", \"new\"], \"additionalProperties\": false}}}, \"required\": [\"path\", \"edits\"], \"additionalProperties\": false}",
 			ToolClass::Write, false);
 		edit->m_Plan = EditPlan;
@@ -567,8 +727,8 @@ namespace Ai
 		list->m_Run = ListRun;
 		list->m_FolderRoots = true;
 		registry.Add(list);
-		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either). Example: fs_glob({\"pattern\": \"**/*Log*\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either, [ch] one character of). Example: fs_glob({\"pattern\": \"**/*Log*\"})",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under; a root's alias (plugins:/<plugin id>/, ied:/) goes here, never in pattern\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		glob->m_Plan = GlobPlan;
 		glob->m_Run = GlobRun;

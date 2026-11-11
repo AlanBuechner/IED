@@ -1,6 +1,7 @@
 include "api/Plugin.ch"
 include "ChatTools.ch"
 include "chats/Pages.ch"
+include "chats/Replies.ch"
 
 namespace Ai
 {
@@ -8,6 +9,8 @@ namespace Ai
 	const int64 c_ChatLineBytes = 160;
 
 	Core::String AnswerOf(const Turn* turn) { return turn->Answer(); }
+
+	bool WaitInterrupted(const Chat* chat) { return chat && !chat->m_Pending.IsEmpty(); }
 
 	static Core::StringView FirstLine(Core::StringView text) {
 		int64 end = text.IndexOf('\n', 0);
@@ -39,6 +42,23 @@ namespace Ai
 	// The hops of a message this chat sends now: one more than the turn it is in got.
 	static int64 NextHops(const Chat* self) { return self->Current() ? self->Current()->m_Hops + 1 : 1; }
 
+	Core::String ChainNote(int64 hops) {
+		Core::StringBuilder out;
+		out.Append("message ");
+		out.AppendInt(hops);
+		out.Append(" of at most ");
+		out.AppendInt(c_ChatHopsMost);
+		out.Append(" in a row between chats (the owner's next message starts the count again)");
+		return out.ToString();
+	}
+
+	Core::String SentNote(int64 hops) {
+		Core::StringBuilder out;
+		out.Append(ChainNote(hops).View());
+		if (!CanAnswer(hops)) out.Append(" - the last: it cannot chat_send an answer back to this chat, so do not ask it to; read what it did with chat_wait or chat_read");
+		return out.ToString();
+	}
+
 	static Core::String TooDeep() {
 		Core::StringBuilder out;
 		out.Append("chats have messaged each other ");
@@ -56,6 +76,12 @@ namespace Ai
 		for (Chat* each : chats->InWorkspace(call.m_Ws.m_Id.View())) {
 			Describe(out, each);
 			if (each == self) out.Append(" - this chat");
+			if (each->m_State == ChatState::Suspended) {
+				out.Append(" - suspended: ");
+				out.Append(each->m_StateReason.View());
+			}
+			if (DebtTo(each, self->m_ChatId.View())) out.Append(" - owes this chat a reply");
+			if (DebtTo(self, each->m_ChatId.View())) out.Append(" - this chat owes it a reply");
 			Core::String answer = each->LastAnswerLine();
 			if (!answer.IsEmpty()) {
 				out.Append(": ");
@@ -94,21 +120,52 @@ namespace Ai
 		return ToolResult(out.View(), (Core::String("Read ") + chat->m_Title.View()).View());
 	}
 
+	// What a send that requires a reply tells its sender.
+	static void AppendRequired(Core::StringBuilder& said, int64 hops) {
+		said.Append(" It owes this chat a reply now: its finish waits for it, and if its turn ends without one IED tells this chat. Suspend to wait for it (it wakes this chat), or chat_wait. It is ");
+		said.Append(ChainNote(hops).View());
+		said.Append(", and its reply is outside that count.");
+	}
+
 	static ToolOutcome SendRun(Chats* chats, Chat* self, const ToolInvocation& call) {
 		IED::HostLock guard(*call.m_Context);
 		Core::String problem;
 		Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
 		if (!chat) return ToolError((Core::String("chat_send: ") + problem.View()).View());
 		if (chat == self) return ToolError(Core::StringView("chat_send: that is this chat"));
-		const int64 hops = NextHops(self);
-		if (hops > c_ChatHopsMost) return ToolError((Core::String("chat_send: ") + TooDeep().View()).View());
-		const bool started = chats->Deliver(chat, call.m_Args.Member("text").AsView(), self, hops);
+		const bool requires = call.m_Args.Member("require_reply").AsBool();
+		// Any message to a chat this one owes pays the debt: the other chat is woken by it. One that asks nothing back is the
+		// reply, outside the chain's cut with the hops of the request it answers; one that requires a reply is a question
+		// back, counted as any message is.
+		ReplyOwed* debt = DebtTo(self, chat->m_ChatId.View());
+		const bool answers = debt && !requires;
+		const bool questionBack = debt && requires && !debt->m_Question;
+		const int64 hops = answers ? debt->m_Hops : NextHops(self);
+		if (hops > c_ChatHopsMost) {
+			Core::String deep = (Core::String("chat_send: ") + TooDeep().View());
+			if (debt) deep = deep + "; send your reply without require_reply: a reply is outside the count";
+			return ToolError(deep.View());
+		}
+		if (debt) chats->Pay(self, chat->m_ChatId.View());
+		if (requires) chats->Owe(chat, self, hops, questionBack);
+		const bool started = chats->Deliver(chat, call.m_Args.Member("text").AsView(), self, hops, requires ? "required" : answers ? "answer" : "");
 		Core::StringBuilder said;
-		said.Append("Sent to ");
+		said.Append(answers ? "Sent your reply to " : "Sent to ");
 		Describe(said, chat);
 		said.Append(started ? ": it started a turn for it." : ": its running turn gets it at its next step.");
-		said.Append(" chat_wait returns its answer.");
-		return ToolResult(said.View(), (Core::String("Sent to ") + chat->m_Title.View()).View());
+		if (answers) said.Append(" You no longer owe it a reply.");
+		else if (debt) said.Append(" It also pays the reply you owed it; once it answers your question, you owe it the reply again.");
+		if (requires) AppendRequired(said, hops);
+		else if (!answers) {
+			said.Append(" chat_wait returns its answer. It is ");
+			said.Append(SentNote(hops).View());
+			said.Append(".");
+		}
+		if (!self->m_Owes.IsEmpty()) {
+			said.Append("\nThis chat still owes a reply to:\n");
+			said.Append(ReplyLines(self->m_Owes, ChatNowMs()).View());
+		}
+		return ToolResult(said.View(), ((answers ? Core::String("Replied to ") : Core::String("Sent to ")) + chat->m_Title.View()).View());
 	}
 
 	static ToolOutcome CreateRun(Chats* chats, Chat* self, const ToolInvocation& call) {
@@ -124,15 +181,25 @@ namespace Ai
 			return ToolError(((Core::String("chat_create: there is no model ") + model) + " in ai.models; ai_usage lists them").View());
 		Chat* made = chats->Create(call.m_Ws, title.IsEmpty() ? Core::StringView(c_NewChatTitle) : title, mode, self->m_Group.View());
 		made->m_PinnedModel = model.IsEmpty() ? self->m_PinnedModel : Core::String(model);
-		chats->Deliver(made, call.m_Args.Member("text").AsView(), self, hops);
+		const bool requires = call.m_Args.Member("require_reply").AsBool();
+		if (requires) chats->Owe(made, self, hops, false);
+		chats->Deliver(made, call.m_Args.Member("text").AsView(), self, hops, requires ? "required" : "");
 		Core::StringBuilder said;
 		said.Append("Started ");
 		Describe(said, made);
-		said.Append(". chat_wait returns its answer; chat_send tells it more.");
+		if (requires) {
+			said.Append(". chat_send tells it more.");
+			AppendRequired(said, hops);
+		}
+		else {
+			said.Append(". chat_wait returns its answer; chat_send tells it more. Its task is ");
+			said.Append(SentNote(hops).View());
+			said.Append(".");
+		}
 		return ToolResult(said.View(), (Core::String("Started ") + made->m_Title.View()).View());
 	}
 
-	static ToolOutcome WaitRun(Chats* chats, const ToolInvocation& call) {
+	static ToolOutcome WaitRun(Chats* chats, Chat* self, const ToolInvocation& call) {
 		int64 seconds = call.m_Args.Member("seconds").IsValid() ? call.m_Args.Member("seconds").AsInt() : c_ChatWaitDefaultSeconds;
 		seconds = seconds < 1 ? 1 : seconds > c_ChatWaitMostSeconds ? c_ChatWaitMostSeconds : seconds;
 		const int64 deadline = Platform::UnixTimeNs() + seconds * 1000000000;
@@ -149,10 +216,24 @@ namespace Ai
 					Describe(said, chat);
 					said.Append(", its last turn ");
 					said.Append(last->m_Stop.View());
+					if (chat->m_State == ChatState::Suspended) {
+						said.Append(" (");
+						said.Append(chat->m_StateReason.View());
+						said.Append(")");
+					}
 					said.Append(":\n\n");
 					Core::String answer = AnswerOf(last);
 					said.Append(answer.IsEmpty() ? Core::StringView("(no answer)") : answer.View());
 					return ToolResult(said.View(), (Core::String("Answer from ") + chat->m_Title.View()).View());
+				}
+				// A message for this turn - the owner's, or another chat's - stops the wait (docs/04 "Chats waiting on each
+				// other"); the chat waited on goes on.
+				if (WaitInterrupted(self)) {
+					Core::StringBuilder said;
+					said.Append("Stopped waiting for ");
+					Describe(said, chat);
+					said.Append(": a message came for this turn, and it follows now. That chat goes on; chat_wait again to wait more, or chat_read what it has so far.");
+					return ToolResult(said.View(), Core::StringView("Stopped waiting: a message came"));
 				}
 			}
 			if (call.m_Cancelled && *call.m_Cancelled) return ToolError(Core::StringView("chat_wait: stopped"));
@@ -214,20 +295,20 @@ namespace Ai
 		read->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
 		read->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return ReadRun(chats, call); };
 		registry.Add(read);
-		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Chats reply to each other at most 3 times in a row, counting the other chat's messages to this one too (an owner's message starts the count again): send only what the other chat needs, in as few messages as you can, and once it is told, answer the owner - what is left goes in your answer. Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"The build is green; go on with the tests.\"})",
-			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"text\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"chat\", \"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Chats reply to each other at most 3 times in a row, counting the other chat's messages to this one too (an owner's message starts the count again): send only what the other chat needs, in as few messages as you can, and once it is told, answer the owner - what is left goes in your answer. require_reply: the other chat owes this one a reply - it cannot finish before it sends one, and IED tells this chat if its turn ends without one - so this chat can suspend until it comes. A message to a chat that required your reply is that reply (outside the count of 3). Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"Port Ring.h and its tests, then tell me what changed.\", \"require_reply\": true})",
+			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"text\": {\"type\": \"string\", \"minLength\": 1}, \"require_reply\": {\"type\": \"boolean\"}}, \"required\": [\"chat\", \"text\"], \"additionalProperties\": false}", ToolClass::Exec);
 		send->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.send"); };
 		send->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SendRun(chats, chat, call); };
 		registry.Add(send);
-		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. It uses this chat's model group and model, or `model` (one of ai.models: a cheaper one for routine work stretches Claude's usage). Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\", \"model\": \"claude-sonnet\"})",
-			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}, \"model\": {\"type\": \"string\"}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. It uses this chat's model group and model, or `model` (one of ai.models: a cheaper one for routine work stretches Claude's usage). Its message counts in this chat's chain of chats messaging each other (chat_send says how): started from a turn another chat's message began, it may be the chain's last, and then it cannot message this chat back - the result says so - unless require_reply: then it owes this chat a reply, which it can always send, cannot finish before it does, and this chat can suspend until it comes. Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\", \"model\": \"claude-sonnet\", \"require_reply\": true})",
+			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}, \"model\": {\"type\": \"string\"}, \"require_reply\": {\"type\": \"boolean\"}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
 		create->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.create"); };
 		create->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CreateRun(chats, chat, call); };
 		registry.Add(create);
-		ToolSpec* wait = ChatTool("chat_wait", "Wait until another chat's turn ends and get its answer (at most 600 s; default 120). Example: chat_wait({\"chat\": \"c18f2a\", \"seconds\": 300})",
+		ToolSpec* wait = ChatTool("chat_wait", "Wait until another chat's turn ends and get its answer (at most 600 s; default 120). A message for this turn stops the wait at once. To wait longer for a reply you required, suspend instead. Example: chat_wait({\"chat\": \"c18f2a\", \"seconds\": 300})",
 			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"seconds\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 600}}, \"required\": [\"chat\"], \"additionalProperties\": false}", ToolClass::Read);
 		wait->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
-		wait->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, call); };
+		wait->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, chat, call); };
 		registry.Add(wait);
 		// Not deferred and allowed in every mode: a chat with no name is asked for one with the first message of a turn.
 		ToolSpec* title = ChatTool("chat_title", "Name this chat: 3 to 6 words on what the work is, shown on its tab and in the chats list so the owner can find it. Call it when a note says the chat has no name, along with your first other calls; again only if the work becomes something else. A name someone else chose stays. Example: chat_title({\"title\": \"Fix edit mode wireframe clipping\"})",

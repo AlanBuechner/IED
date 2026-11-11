@@ -50,6 +50,18 @@ class DocsTests {
 		assert_true(!other.View().Contains(Core::StringView("fs_read")), "another wrong path: only the docs names");
 	}
 
+	[test("a_docs_file_by_its_plugin_path")]
+	public static void TestPluginPath() {
+		Ai::DocsFolder* c4 = new Ai::DocsFolder();
+		c4->m_Id = Core::String("c4");
+		c4->m_Shown = Core::String("plugins:/c4/docs");
+		Core::Array<Ai::DocsFolder*> folders = { c4 };
+		assert_se("c4/library/bedrock.md", Ai::DocsPathOf(folders, Core::StringView("plugins:/c4/docs/library/bedrock.md")).CStr(), "the file the file tools name");
+		assert_se("c4/library/bedrock.md", Ai::DocsPathOf(folders, Core::StringView("c4/library/bedrock.md")).CStr(), "a docs path as it is");
+		assert_se("plugins:/gpu/skills/a.md", Ai::DocsPathOf(folders, Core::StringView("plugins:/gpu/skills/a.md")).CStr(), "another plugin's file as it is");
+		assert_se("plugins:/c4/docsx/a.md", Ai::DocsPathOf(folders, Core::StringView("plugins:/c4/docsx/a.md")).CStr(), "only the folder itself");
+	}
+
 	[test("scores")]
 	public static void TestScores() {
 		Core::Array<Core::String> words = Ai::QueryWords(Core::StringView("hashmap insert"));

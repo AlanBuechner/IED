@@ -13,7 +13,7 @@ namespace Ai
 		return false;
 	}
 
-	static Core::StringView AliasOf(Core::StringView value) {
+	Core::StringView PathAlias(Core::StringView value) {
 		const int64 colon = value.IndexOf(Core::StringView(":/"));
 		if (colon < 2) return Core::StringView();
 		for (int64 i = 0; i < colon; ++i)
@@ -23,7 +23,7 @@ namespace Ai
 
 	Core::String RootAlias(const Serialization::DomNode& args) {
 		for (int64 i = 0; i < c_RootKeyCount; ++i) {
-			Core::StringView rootAlias = AliasOf(args.Member(c_RootKeys[i]).AsView());
+			Core::StringView rootAlias = PathAlias(args.Member(c_RootKeys[i]).AsView());
 			if (!rootAlias.IsEmpty()) return Core::String(rootAlias);
 		}
 		return Core::String();
@@ -269,6 +269,58 @@ namespace Ai
 		if (!OpenRoot(ws.m_Id.View(), rootAlias, target, problem)) return false;
 		target.m_Args = IED::NodeJson(stripped);
 		return true;
+	}
+
+	// --- Full paths --------------------------------------------------------------------------------------------------
+
+	static bool IsFullPath(Core::StringView value) {
+		return value.ByteLength() >= 3 && value.ByteAt(1) == ':' && (value.ByteAt(2) == '/' || value.ByteAt(2) == '\\');
+	}
+
+	Core::Array<RootFolder> RootFolders(const IED::Workspace& ws) {
+		Core::Array<RootFolder> folders;
+		folders.Push(RootFolder{ Core::String(), ws.m_Root });
+		Core::String ignored;
+		Serialization::DomNode roots = AskRoots(ws.m_Id.View(), Core::StringView(""), ignored);
+		for (int64 i = 0; i < roots.Count(); ++i) {
+			Serialization::DomNode root = roots.At(i);
+			if (root.Member("folder").AsView().IsEmpty() || root.Member("alias").AsView().IsEmpty()) continue;
+			folders.Push(RootFolder{ Core::String(root.Member("alias").AsView()), Core::String(root.Member("folder").AsView()) });
+		}
+		return folders;
+	}
+
+	Core::String AliasedPath(const Core::Array<RootFolder>& folders, Core::StringView value) {
+		if (!IsFullPath(value)) return Core::String(value);
+		int64 deepest = -1;
+		Core::String inside;
+		for (int64 i = 0; i < folders.Count(); ++i) {
+			Core::String relative;
+			if (folders[i].m_Folder.IsEmpty() || !IED::RelativeTo(folders[i].m_Folder.View(), value, relative)) continue;
+			if (deepest >= 0 && folders[i].m_Folder.ByteLength() <= folders[deepest].m_Folder.ByteLength()) continue;
+			deepest = i;
+			inside = relative;
+		}
+		if (deepest < 0) return Core::String(value);
+		if (folders[deepest].m_Alias.IsEmpty()) return inside;
+		return (folders[deepest].m_Alias + ":/") + inside.View();
+	}
+
+	bool NamesFullPath(const Serialization::DomNode& args) {
+		for (int64 i = 0; i < c_RootKeyCount; ++i)
+			if (IsFullPath(args.Member(c_RootKeys[i]).AsView())) return true;
+		return false;
+	}
+
+	Core::String WithFullPathsAliased(const Core::Array<RootFolder>& folders, const Serialization::DomNode& args) {
+		bool changed = false;
+		for (int64 i = 0; i < c_RootKeyCount; ++i) {
+			Core::StringView value = args.Member(c_RootKeys[i]).AsView();
+			if (IsFullPath(value) && AliasedPath(folders, value).View() != value) changed = true;
+		}
+		if (!changed) return Core::String();
+		const Core::Array<RootFolder>* known = &folders;
+		return WithRootValues(args, [known](Core::StringView value) -> Core::String { return AliasedPath(*known, value); });
 	}
 
 	bool MayWriteThere(const IED::Workspace& ws, const Serialization::DomNode& args, Core::String& problem) {

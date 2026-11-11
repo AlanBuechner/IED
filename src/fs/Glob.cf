@@ -19,7 +19,45 @@ namespace Ied
 		return parts;
 	}
 
-	// One segment against a pattern with '*' and '?': the last '*' is where a mismatch backs up to.
+	// A `[...]` class at `open`: just past its ']', or -1 when it never closes (the '[' is then plain text). A ']' first,
+	// or after the '!' or '^' that negates it, is one of its characters.
+	static int64 ClassEnd(Core::StringView pattern, int64 open) {
+		int64 i = open + 1;
+		if (i < pattern.ByteLength() && (pattern.ByteAt(i) == '!' || pattern.ByteAt(i) == '^')) i += 1;
+		if (i < pattern.ByteLength() && pattern.ByteAt(i) == ']') i += 1;
+		for (; i < pattern.ByteLength(); ++i)
+			if (pattern.ByteAt(i) == ']') return i + 1;
+		return -1;
+	}
+
+	// Whether `c` is one of the class `pattern[open, end)`: its characters and a-z ranges, or none of them after '!' or '^'.
+	static bool ClassHas(Core::StringView pattern, int64 open, int64 end, int32 c) {
+		int64 i = open + 1;
+		const bool negated = pattern.ByteAt(i) == '!' || pattern.ByteAt(i) == '^';
+		if (negated) i += 1;
+		const int64 close = end - 1;
+		const int32 folded = Folded(c);
+		bool found = false;
+		while (i < close) {
+			const int32 low = Folded(pattern.ByteAt(i));
+			const bool range = i + 2 < close && pattern.ByteAt(i + 1) == '-';
+			found = found || (range ? folded >= low && folded <= Folded(pattern.ByteAt(i + 2)) : folded == low);
+			i += range ? 3 : 1;
+		}
+		return found != negated;
+	}
+
+	// Where the pattern goes on when its piece at `p` - a character, '?' or a `[...]` class - matches `c`; -1 when it does not.
+	static int64 PieceMatch(Core::StringView pattern, int64 p, int32 c) {
+		if (p >= pattern.ByteLength()) return -1;
+		const int32 piece = pattern.ByteAt(p);
+		if (piece == '?') return p + 1;
+		const int64 end = piece == '[' ? ClassEnd(pattern, p) : -1;
+		if (end > 0) return ClassHas(pattern, p, end, c) ? end : -1;
+		return Folded(piece) == Folded(c) ? p + 1 : -1;
+	}
+
+	// One segment against a pattern with '*', '?' and `[...]` classes: the last '*' is where a mismatch backs up to.
 	static bool SegmentMatch(Core::StringView pattern, Core::StringView text) {
 		int64 p = 0;
 		int64 t = 0;
@@ -27,13 +65,14 @@ namespace Ied
 		int64 resume = 0;
 		while (t < text.ByteLength()) {
 			const int32 c = p < pattern.ByteLength() ? pattern.ByteAt(p) : -1;
+			const int64 next = c == '*' ? -1 : PieceMatch(pattern, p, text.ByteAt(t));
 			if (c == '*') {
 				star = p;
 				resume = t;
 				p += 1;
 			}
-			else if (c == '?' || (c >= 0 && Folded(c) == Folded(text.ByteAt(t)))) {
-				p += 1;
+			else if (next >= 0) {
+				p = next;
 				t += 1;
 			}
 			else if (star >= 0) {
@@ -117,7 +156,12 @@ namespace Ied
 		return false;
 	}
 
-	bool IsGlob(Core::StringView pattern) { return pattern.IndexOf('*', 0) >= 0 || pattern.IndexOf('?', 0) >= 0 || HasSet(pattern); }
+	static bool HasClass(Core::StringView pattern) {
+		const int64 open = pattern.IndexOf('[', 0);
+		return open >= 0 && ClassEnd(pattern, open) > 0;
+	}
+
+	bool IsGlob(Core::StringView pattern) { return pattern.IndexOf('*', 0) >= 0 || pattern.IndexOf('?', 0) >= 0 || HasSet(pattern) || HasClass(pattern); }
 
 	static void Walk(const FS::Path& folder, Core::StringView relative, Core::StringView pattern, Core::Array<Core::String>& found) {
 		FS::Directory listing = FS::Directory(folder.CStr());

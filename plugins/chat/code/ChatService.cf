@@ -3,7 +3,9 @@ include "ChatService.ch"
 include "claude/Pacing.ch"
 include "run/Run.ch"
 include "chats/Sent.ch"
+include "aitools/ChatTools.ch"
 include "chats/Pages.ch"
+include "chats/Replies.ch"
 
 namespace Ai
 {
@@ -78,6 +80,7 @@ namespace Ai
 			AddTopic(chat);
 		}
 		for (const Core::String& problem : problems) m_Context->Log(problem.View());
+		RepliesChanged(wsId.View());
 		LoadDeleted(ws);
 		PurgeExpired();
 		ResumeLater(wsId.View());
@@ -101,7 +104,13 @@ namespace Ai
 		for (Chat* chat : InWorkspace(wsId)) {
 			if (chat->LastStop() == "interrupted" || !chat->m_Resume.IsEmpty()) Loaded(chat);
 			Core::String reason = ResumeReason(chat, policy.View());
-			if (reason.IsEmpty()) continue;
+			if (reason.IsEmpty()) {
+				// A chat that waits for the owner after the restart: the chats it owes replies are told, and a suspended one
+				// whose background tasks the restart lost goes on to hear of them (docs/04 "Chats waiting on each other").
+				if (chat->LastStop() == "interrupted") TellCreditors(chat);
+				if (chat->m_State == ChatState::Suspended) WakeForBackground(chat);
+				continue;
+			}
 			OwnerMessage message;
 			message.m_Text = ResumeText(reason.View(), chat->m_Resume.View());
 			m_Context->Log((((Core::String("chat ") + chat->m_ChatId.View()) + " goes on after the restart (") + reason.View() + ")").View());
@@ -286,7 +295,16 @@ namespace Ai
 	Core::String ModelText(const Chat* to, const OwnerMessage& message) {
 		if (message.m_FromChatId.IsEmpty()) return message.m_Text;
 		Core::StringBuilder out;
-		if (!to->m_Agent.IsEmpty() && to->m_ParentChatId == message.m_FromChatId) {
+		if (message.m_Reply == "answer" || message.m_Reply == "notice") {
+			out.Append(message.m_Reply == "answer" ? "Reply from chat \"" : "IED, for chat \"");
+			out.Append(message.m_FromTitle.View());
+			out.Append("\" (");
+			out.Append(message.m_FromChatId.View());
+			out.Append(message.m_Reply == "answer" ? "), which owed this chat a reply:\n\n" : "), which owes this chat a reply:\n\n");
+			out.Append(message.m_Text.View());
+			return out.ToString();
+		}
+		if (!to->m_Agent.IsEmpty() && to->m_ParentChatId == message.m_FromChatId && message.m_Reply.IsEmpty()) {
 			out.Append("You are the sub-agent \"");
 			out.Append(to->m_Agent.View());
 			out.Append("\" of chat \"");
@@ -301,7 +319,15 @@ namespace Ai
 		out.Append(message.m_FromTitle.View());
 		out.Append("\" (");
 		out.Append(message.m_FromChatId.View());
-		out.Append("); answer it with chat_send if it asks for an answer:\n\n");
+		out.Append("), ");
+		out.Append(ChainNote(message.m_Hops).View());
+		if (message.m_Reply == "required") {
+			// A reply is outside the chain's cut: it can always be sent.
+			out.Append("; it requires your reply: send it with ");
+			out.Append(ReplyCall(message.m_FromChatId.View()).View());
+			out.Append(" - what you did, what you found, what is left - before you finish (finish refuses until you do):\n\n");
+		}
+		else out.Append(CanAnswer(message.m_Hops) ? "; answer it with chat_send if it asks for an answer:\n\n" : "; no chat_send can answer it: say what is left in your own answer:\n\n");
 		out.Append(message.m_Text.View());
 		return out.ToString();
 	}
@@ -323,6 +349,7 @@ namespace Ai
 		chat->m_Resume = Core::String();
 		turn->m_FromChatId = sent.m_FromChatId;
 		turn->m_FromTitle = sent.m_FromTitle;
+		turn->m_Reply = sent.m_Reply;
 		turn->m_Mode = chat->m_Mode;
 		turn->m_Group = GroupOf(m_Context, chat, ws);
 		turn->m_Model = ModelOf(chat);
@@ -361,11 +388,13 @@ namespace Ai
 		return found;
 	}
 
-	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
+	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops, const char* reply) {
 		OwnerMessage* message = new OwnerMessage();
 		message->m_Text = Core::String(text);
 		message->m_FromChatId = from->m_ChatId;
 		message->m_FromTitle = from->m_Title;
+		message->m_Hops = hops;
+		message->m_Reply = Core::String(reply);
 		if (!chat->m_Run) {
 			StartTurn(chat, *message, hops);
 			return true;
@@ -414,7 +443,9 @@ namespace Ai
 
 	void Chats::TurnEnded(Chat* chat) {
 		AgentTurnEnded(chat);
-		if (chat->Current()->m_Stop != "finished") return;
+		TellCreditors(chat);
+		// A turn that suspended goes on like one that finished: what was queued for after it starts now.
+		if (chat->Current()->m_Stop != "finished" && chat->Current()->m_Stop != "suspended") return;
 		if (chat->m_Queued.IsEmpty()) {
 			WakeForBackground(chat);
 			return;
@@ -451,6 +482,7 @@ namespace Ai
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->m_Mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->m_Permission)) throw IED::RpcError(IED::ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
 		if (params.Has("group")) chat->m_Group = params.Str("group");
+		if (params.Has("endless")) chat->m_Endless = params.Bool("endless", false);
 		if (params.Has("effort")) {
 			Core::String effort = params.Str("effort");
 			if (!effort.IsEmpty() && !IsEffort(effort.View())) throw IED::RpcError(IED::ErrorCode::BadRequest, "effort must be low, medium, high, xhigh, max or empty (its role's)");

@@ -272,12 +272,61 @@ namespace Ai
 		return ToolResult(out.View(), preview.View());
 	}
 
+	// A file's symbols, none when no language server serves it (a C file beside C4 code): a folder's other files are still outlined.
+	static Core::Array<CodeSymbol*> OutlineIfServed(CodeQuery& query, Core::StringView file) {
+		try {
+			return query.Outline(file);
+		}
+		catch (IED::RpcError& error) {
+			if (!error.m_Message.View().Contains(Core::StringView("no language server serves"))) throw error;
+			return Core::Array<CodeSymbol*>();
+		}
+	}
+
+	// A folder asked for whole: each of its files (not its subfolders') with its symbols to `depth`, files the language servers give
+	// none for left out, the whole within the outline's lines.
+	static ToolOutcome FolderOutlineRun(CodeQuery& query, const FS::Path& root, Core::StringView folder, int64 depth) {
+		Core::Array<Core::String> files;
+		for (FS::DirectoryEntry& entry : FS::Directory((root / folder).CStr()))
+			if (entry.kind == FS::EntryKind::File) files.Push((Core::String(folder) + "/") + entry.name.View());
+		files.Sort();
+		Core::StringBuilder out;
+		int64 count = 0;
+		int64 outlined = 0;
+		int64 unshown = 0;
+		for (const Core::String& file : files) {
+			Core::Array<CodeSymbol*> symbols = OutlineIfServed(query, file.View());
+			if (symbols.IsEmpty()) continue;
+			if (count >= c_CodeOutlineMost) {
+				unshown += 1;
+				continue;
+			}
+			out.Append(query.Shown(file.View()).View());
+			out.Append(":\n");
+			AppendOutline(out, symbols, 0, depth, count);
+			outlined += 1;
+		}
+		if (unshown > 0) {
+			out.Append("[");
+			out.AppendInt(unshown);
+			out.Append(" more files not shown: give one of them as path, or a smaller depth]\n");
+		}
+		if (outlined == 0) out.Append("[no file of this folder has symbols the language servers give; fs_list lists its files and subfolders]\n");
+		Core::StringBuilder preview;
+		preview.Append(folder);
+		preview.Append(": ");
+		preview.AppendInt(outlined);
+		preview.Append(" files");
+		return ToolResult(out.View(), preview.View());
+	}
+
 	static ToolOutcome SymbolsRun(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.m_Ws);
-		Core::String path = query.FileOf(call.m_Args.Member("path").AsView());
+		Core::String path = query.ExistingFileOf(call.m_Args.Member("path").AsView());
 		Core::StringView text = call.m_Args.Member("query").AsView();
-		const bool folder = !path.IsEmpty() && FS::IsDirectory((FS::Path(call.m_Ws.m_Root.View()) / path.View()).CStr());
-		if (folder && text.IsEmpty()) return ToolError((Core::String("code_symbols: ") + path.View() + " is a folder; give one of its files (fs_list lists them) for its outline, or a query with it to search the folder by name").View());
+		const FS::Path root = FS::Path(call.m_Ws.m_Root.View());
+		const bool folder = !path.IsEmpty() && FS::IsDirectory((root / path.View()).CStr());
+		if (folder && text.IsEmpty()) return FolderOutlineRun(query, root, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 2);
 		if (!path.IsEmpty() && !folder) return OutlineRun(query, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 100);
 		if (text.IsEmpty()) return ToolError(Core::StringView("code_symbols: give path (a file's outline) or query (symbols named like it across the workspace)"));
 		return SearchRun(query, text, call.m_Args.Member("kind").AsView(), folder ? path.View() : Core::StringView(""));
@@ -360,9 +409,44 @@ namespace Ai
 		}
 	}
 
-	static ToolOutcome ReadSymbolRun(const ToolInvocation& call) {
+	static const int64 c_NameLinesShown = 8;
+
+	// For a file no language server serves (a shader): where `symbol` (its last name part) appears in it, so the next read
+	// is one fs_read; empty when it was not asked by path and symbol, or appears nowhere.
+	static Core::String NameLinesInFile(const ToolInvocation& call) {
+		Core::StringView path = call.m_Args.Member("path").AsView();
+		Core::StringView symbol = call.m_Args.Member("symbol").AsView();
+		if (path.IsEmpty() || symbol.IsEmpty()) return Core::String();
+		Core::StringView name = symbol;
+		for (int64 colons = name.IndexOf(Core::StringView("::")); colons >= 0; colons = name.IndexOf(Core::StringView("::")))
+			name = name.Substring(colons + 2, name.ByteLength() - colons - 2);
+		Core::String text;
+		Core::String problem;
+		if (name.IsEmpty() || !IED::ReadFile(call.m_Ws, IED::NormalizePath(path).View(), text, problem)) return Core::String();
+		Core::StringView all = text.View();
+		Core::StringBuilder lines;
+		int64 found = 0;
+		int64 line = 1;
+		int64 start = 0;
+		for (int64 i = 0; i <= all.ByteLength() && found < c_NameLinesShown; i += 1) {
+			if (i < all.ByteLength() && all.ByteAt(i) != 10) continue;
+			if (all.Substring(start, i - start).Contains(name)) {
+				if (found > 0) lines.Append(", ");
+				lines.AppendInt(line);
+				found += 1;
+			}
+			line += 1;
+			start = i + 1;
+		}
+		if (found == 0) return Core::String();
+		return (((Core::String("; '") + name) + "' is on its line ") + lines.View()) + ": fs_read it there (offset a few lines before)";
+	}
+
+	static const int64 c_ReadSymbolNamesMost = 3;   // a plain name of this many qualified ones shows them all
+
+	static ToolOutcome ReadSymbol(const ToolInvocation& call) {
 		CodeQuery query = CodeQuery(call.m_Ws);
-		CodeTarget target = TargetOf(query, call.m_Args);
+		CodeTarget target = TargetsOf(query, call.m_Args, c_ReadSymbolNamesMost);
 		Core::Array<CodeSymbol*> candidates = target.m_Symbols;
 		if (candidates.IsEmpty()) {
 			CodeSymbol* enclosing = query.Enclosing(target.m_At.m_Path.View(), target.m_At.m_StartLine);
@@ -404,6 +488,17 @@ namespace Ai
 		preview.Append(LinesOf(WholeSpan(query, shown[0])).View());
 		preview.Append(")");
 		return ToolResult(out.View(), preview.View());
+	}
+
+	static ToolOutcome ReadSymbolRun(const ToolInvocation& call) {
+		try {
+			return ReadSymbol(call);
+		}
+		catch (IED::RpcError& error) {
+			Core::String where = error.m_Message.View().Contains(Core::StringView("no language server serves")) ? NameLinesInFile(call) : Core::String();
+			if (where.IsEmpty()) throw error;
+			return ToolError(((Core::String("code_read_symbol: ") + error.m_Message.View()) + where.View()).View());
+		}
 	}
 
 	// --- code_definition -----------------------------------------------------------------------------------------------------
@@ -646,13 +741,13 @@ namespace Ai
 	}
 
 	void AddCodeNavTools(ToolRegistry& registry) {
-		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query (only a folder's when path is that folder; the only one, when short, with its source), from the language servers (a file none serves - a shader, a config file - is read with fs_read). Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
-			Core::StringView("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"query\": {\"type\": \"string\", \"minLength\": 1}, \"kind\": {\"type\": \"string\", \"description\": \"only symbols of this kind: class, method, function, field, variable, enum, ...\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"levels of an outline\"}}, \"additionalProperties\": false}"),
+		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path; a folder: each of its files' symbols, 2 levels unless depth), or the workspace's symbols named like query (only a folder's when path is that folder; the only one, when short, with its source), from the language servers (a file none serves - a shader, a config file - is read with fs_read). Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
+			Core::StringView("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"query\": {\"type\": \"string\", \"minLength\": 1}, \"kind\": {\"type\": \"string\", \"description\": \"only symbols of this kind, as the server names them: class (not a struct), struct, method, function, field, variable, enum, ...\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"levels of an outline\"}}, \"additionalProperties\": false}"),
 			false);
 		symbols->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List symbols of"); };
 		symbols->m_Run = SymbolsRun;
 		registry.Add(symbols);
-		ToolSpec* read = CodeToolSpec("code_read_symbol", "The whole source of one symbol - a function with its body, a type with its members, a macro - numbered, with the comment above it; a definition before its declaration. Example: code_read_symbol({\"symbol\": \"Ring::Push\"}) or code_read_symbol({\"path\": \"src/ring.cf\", \"line\": 120})",
+		ToolSpec* read = CodeToolSpec("code_read_symbol", "The whole source of one symbol - a function with its body, a type with its members, a macro - numbered, with the comment above it; a definition before its declaration; a plain name that up to three symbols of different namespaces have shows each. A line names the symbol holding it, and a file's comments and includes hold none: to read those, or a file no language server serves (a shader, a config file), use fs_read. Example: code_read_symbol({\"symbol\": \"Ring::Push\"}) or code_read_symbol({\"path\": \"src/ring.cf\", \"line\": 120})",
 			CodeTargetSchema(", \"declaration\": {\"type\": \"boolean\", \"description\": \"the declaration (a header's) instead of the definition\"}").View(), false);
 		read->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Read"); };
 		read->m_Run = ReadSymbolRun;

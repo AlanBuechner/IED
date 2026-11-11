@@ -1,11 +1,15 @@
 // A unified diff of two texts by lines (what an approval card and a write's result show, docs/04): the common head and
-// tail set aside, the middle by longest common subsequence when it is small enough, else as removed then added.
+// tail set aside, the middle by longest common subsequence when it is small enough, else by the shortest edit script
+// (Myers) when it has few enough edits - two edits far apart in a long file - and only else as removed then added.
 
 include "bedrock.ch"
 
 namespace Ai
 {
 	const int64 c_LineDiffMostCells = 1000000;
+	// Lines added and removed past which a middle too big for the cells is shown removed then added: its edit script's
+	// trace keeps (edits + 1)^2 entries, as many as the cells.
+	const int64 c_LineDiffMostEdits = 999;
 
 	class LineDiff
 	{

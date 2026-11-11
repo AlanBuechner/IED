@@ -44,6 +44,12 @@ namespace Ai
 		AddRunTool(*registry, "finish", "End the turn: what was done and how it was verified (build and tests run, results seen). Only call it when the work is complete and verified, and every task of tasks_set is done or skipped (task_update first: finish refuses open tasks). Example: finish({\"summary\": \"Ported Log\", \"verification\": \"build: 0 warnings; the log tests pass\"})",
 			"{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"minLength\": 1}, \"verification\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"summary\", \"verification\"], \"additionalProperties\": false}",
 			false, true);
+		registry->Find(Core::StringView("finish"))->m_EndsTurn = true;
+		// Not m_EndsTurn: a chat that runs until stopped may suspend to wait for a helper or a background task, never to stop
+		// (docs/04 "Chats waiting on each other").
+		AddRunTool(*registry, "suspend", "End the turn to wait, with the tasks left as they are: the chat goes on by itself when a reply it required (chat_send or chat_create with require_reply), one of its background tasks, or the owner's message comes. Use it instead of chat_wait or background_wait when you cannot go on until then. A chat that owes a reply sends it first. Example: suspend({\"reason\": \"Waiting for the Port Ring.h chat's reply\"})",
+			"{\"type\": \"object\", \"properties\": {\"reason\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"reason\"], \"additionalProperties\": false}",
+			false, true);
 		return registry;
 	}
 }

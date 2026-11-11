@@ -1,6 +1,6 @@
-// Globs (docs/03 solution projects): '*' is any run of characters within one path segment, '?' one character, a
-// "**" segment any number of whole segments, and `{a,b}` either alternative (sets may nest: "{src,tests}/**/*.{cf,ch}");
-// '/' (or '\') separates segments. Matching ignores ASCII case, as Windows paths do.
+// Globs (docs/03 solution projects): '*' is any run of characters within one path segment, '?' one character, `[ch]`
+// one character of a class (ranges `[0-9]`, `[!x]` or `[^x]` none of them), a "**" segment any number of whole segments,
+// and `{a,b}` either alternative (sets may nest: "{src,tests}/**/*.{cf,ch}"); '/' (or '\') separates segments. Matching ignores ASCII case, as Windows paths do.
 //     Ied::GlobMatch(Core::StringView("build/**/*.iedproj"), Core::StringView("build/ied/Game.iedproj"))   // true
 
 include "bedrock.ch"

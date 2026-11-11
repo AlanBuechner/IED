@@ -126,4 +126,21 @@ namespace IED
 		result = Ied::SearchFolder(FS::Path(folder), query, none, cancel);
 		return true;
 	}
+
+	bool SearchFileText(Core::StringView path, Core::StringView text, const SearchQuery& query, SearchResult& result, Core::String& problem) {
+		Ied::LineMatcher matcher = Ied::LineMatcher(query);
+		if (!matcher.IsValid()) {
+			problem = Core::String("the pattern is not a valid regex: ") + matcher.Error();
+			return false;
+		}
+		if (text.ByteLength() > Ied::c_SearchFileLimitBytes) {
+			result.m_TooLarge.Push(Core::String(path));
+			return true;
+		}
+		Core::StringView probe = text.Substring(0, Ied::c_SearchBinaryProbeBytes);
+		for (int64 i = 0; i < probe.ByteLength(); ++i)
+			if (probe.ByteAt(i) == 0) return true;   // a binary file: nothing to show
+		Ied::SearchText(path, text, matcher, query.m_MaxResults, result);
+		return true;
+	}
 }

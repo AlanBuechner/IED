@@ -3,6 +3,7 @@ include "Run.ch"
 include "chats/Roots.ch"
 include "aitools/Clipboard.ch"
 include "prompts/Contributed.ch"
+include "chats/Replies.ch"
 
 namespace Ai
 {
@@ -159,8 +160,17 @@ namespace Ai
 		return ToolError(m_Chats->m_Prompts.Note("unknown_clip", values).View());
 	}
 
-	ToolOutcome TurnRun::RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args) {
-		if (!spec->m_Run) return RunMeta(spec, segment, args);
+	ToolOutcome TurnRun::RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& given) {
+		if (!spec->m_Run) return RunMeta(spec, segment, given);
+		// A full path the code tools printed reaches any tool as the root holding it names it: a read's, an edit's, a command's cwd.
+		Serialization::DomNode args = given;
+		if (!spec->m_OwnPaths && NamesFullPath(given)) {
+			Core::String aliased = WithFullPathsAliased(RootFolders(m_Ws), given);
+			if (!aliased.IsEmpty()) {
+				Serialization::DomDoc* aliasedDoc = new Serialization::DomDoc();
+				args = Serialization::ReadJson(aliased.View(), *aliasedDoc).root;
+			}
+		}
 		ToolInvocation invocation;
 		invocation.m_Context = m_Context;
 		invocation.m_Ws = m_Ws;
@@ -168,7 +178,7 @@ namespace Ai
 		invocation.m_CallId = segment->m_CallId;
 		invocation.m_Args = args;
 		invocation.m_Cancelled = &m_Run->m_Cancelled;
-		Core::String rootAlias = RootAlias(args);
+		Core::String rootAlias = spec->m_OwnPaths ? Core::String() : RootAlias(args);
 		RootTarget root;
 		if (!rootAlias.IsEmpty()) {
 			Core::String problem;
@@ -270,6 +280,7 @@ namespace Ai
 		if (spec->m_Name == "tasks_set") return SetTasks(args);
 		if (spec->m_Name == "tool_search") return SearchTools(args);
 		if (spec->m_Name == "task_update") return UpdateTask(args);
+		if (spec->m_Name == "suspend") return SuspendCall(args);
 		return FinishCall(args);
 	}
 
@@ -352,19 +363,6 @@ namespace Ai
 
 	// --- The run's own tools -----------------------------------------------------------------------------------------
 
-	static Core::String TaskLines(const Chat* chat) {
-		Core::StringBuilder out;
-		for (ChatTask* task : chat->m_Tasks) {
-			out.Append(task->m_Id.View());
-			out.Append(" ");
-			out.Append(task->m_Title.View());
-			out.Append(" (");
-			out.Append(task->m_Status.View());
-			out.Append(")\n");
-		}
-		return out.ToString();
-	}
-
 	static void PublishTasks(Chats* chats, Chat* chat) {
 		IED::JsonWriter data;
 		data.BeginObject();
@@ -392,7 +390,7 @@ namespace Ai
 		Core::StringBuilder preview;
 		preview.AppendInt(m_Chat->m_Tasks.Count());
 		preview.Append(" tasks");
-		return ToolResult((Core::String("The task list is now:\n") + TaskLines(m_Chat).View()).View(), preview.View());
+		return ToolResult((Core::String("The task list is now:\n") + TaskLines(m_Chat->m_Tasks).View()).View(), preview.View());
 	}
 
 	ToolOutcome TurnRun::UpdateTask(const Serialization::DomNode& args) {
@@ -405,13 +403,17 @@ namespace Ai
 		}
 		if (m_Chat->m_Tasks.IsEmpty())
 			return ToolError(Core::StringView("task_update: the chat has no tasks yet; make the list first with tasks_set({\"items\": [{\"title\": \"...\", \"status\": \"in_progress\"}, {\"title\": \"...\"}]})"));
-		return ToolError(((Core::String("task_update: there is no task ") + args.Member("id").AsView()) + "; the tasks are:\n" + TaskLines(m_Chat).View()).View());
+		return ToolError(((Core::String("task_update: there is no task ") + args.Member("id").AsView()) + "; the tasks are:\n" + TaskLines(m_Chat->m_Tasks).View()).View());
 	}
 
 	ToolOutcome TurnRun::FinishCall(const Serialization::DomNode& args) {
+		// A chat that runs until stopped is offered no finish; one called from memory is refused, and the turn goes on.
+		if (m_Chat->m_Endless) return ToolError(m_Chats->m_Prompts.Note("endless_finish_refused").View());
+		// A chat that owes a reply never finishes before it sends it: the chat that required it may be suspended on it.
+		if (!m_Chat->m_Owes.IsEmpty()) return ToolError(OwedNote("owes_reply_on_finish", m_Chats, m_Chat).View());
 		Core::Array<Core::String> open;
 		for (ChatTask* task : m_Chat->m_Tasks)
-			if (task->m_Status == "pending" || task->m_Status == "in_progress") open.Push(task->m_Title);
+			if (task->IsOpen()) open.Push(((task->m_Id + " \"") + task->m_Title.View()) + "\"");
 		if (!open.IsEmpty() && !m_FinishNudged) {
 			m_FinishNudged = true;
 			Core::Array<Core::String> values;
@@ -421,6 +423,47 @@ namespace Ai
 		}
 		Finish(Core::StringView("finished"));
 		return ToolResult(Core::StringView("The turn is finished."), args.Member("summary").AsView());
+	}
+
+	// A note naming the replies `chat` owes ({chats}) and how to send the first ({call}).
+	static Core::String OwedNote(const char* name, Chats* chats, Chat* chat) {
+		Core::Array<Core::String> values;
+		values.Push(Core::String("chats"));
+		values.Push(ReplyLines(chat->m_Owes, ChatNowMs()));
+		values.Push(Core::String("call"));
+		values.Push(chat->m_Owes.IsEmpty() ? Core::String() : ReplyCall(chat->m_Owes[0]->m_ChatId.View()));
+		return chats->m_Prompts.Note(name, values);
+	}
+
+	ToolOutcome TurnRun::SuspendCall(const Serialization::DomNode& args) {
+		// What came for the turn meanwhile is read first: suspending past it would leave it unread until the next wake.
+		if (!m_Chat->m_Pending.IsEmpty() || !m_ClaudeAside.IsEmpty() || m_Chats->HasUntold(m_Chat))
+			return ToolResult(Core::StringView("Not suspended: a message or the end of a background task came for this turn, and it follows now. Read it and go on; suspend again if you still need to wait."), Core::StringView("Not suspended: something came"));
+		SuspendBlock block = SuspendBlockOf(m_Chat);
+		if (block == SuspendBlock::OwesReply) return ToolError(OwedNote("owes_reply_on_suspend", m_Chats, m_Chat).View());
+		if (block == SuspendBlock::NothingWakes) return ToolError(m_Chats->m_Prompts.Note("endless_suspend_refused").View());
+		m_SuspendReason = Core::String(args.Member("reason").AsView().Trimmed());
+		Finish(Core::StringView("suspended"));
+		Core::String wakes = WhatWakes(m_Chat);
+		Core::StringBuilder said;
+		if (wakes.IsEmpty()) said.Append("Suspended, with the tasks as they are. Nothing IED knows of will wake this chat: it goes on with the owner's next message.");
+		else {
+			said.Append("Suspended, with the tasks as they are. This chat goes on by itself when one of these comes:\n");
+			said.Append(wakes.View());
+			said.Append("- a message from the owner or another chat");
+		}
+		return ToolResult(said.View(), m_SuspendReason.View());
+	}
+
+	void TurnRun::TellTasksAfterCompaction() {
+		m_ClaudeCompacted = false;
+		bool open = false;
+		for (ChatTask* task : m_Chat->m_Tasks) open = open || task->IsOpen();
+		if (!open) return;
+		Core::Array<Core::String> values;
+		values.Push(Core::String("tasks"));
+		values.Push(TaskLines(m_Chat->m_Tasks));
+		HarnessNote(Core::StringView("tasks_after_compaction"), m_Chats->m_Prompts.Note("tasks_after_compaction", values).View());
 	}
 
 	// --- Cards -------------------------------------------------------------------------------------------------------

@@ -13,6 +13,7 @@ class EditMissTests {
 		assert_true(said.View().StartsWith(MissView("line 2: the file agrees with the start of old up to `")), "the line and the agreeing start");
 		assert_true(said.View().Contains(MissView("then has `erage 0.33")), "what the file has");
 		assert_true(said.View().Contains(MissView("where old has `g 0.33")), "against what old has");
+		assert_true(said.View().Contains(MissView("; the file's line 2 is `\\tassert_se(\"orders 3\\naverage 0.33\\n\", Report());`")), said.CStr());
 	}
 
 	[test("a_wrong_start")]
@@ -20,6 +21,7 @@ class EditMissTests {
 		Core::String said = Ai::EditMiss(MissView("one\n\treturn total + shipping;\n"), MissView("    return total + shipping;"));
 		assert_true(said.View().StartsWith(MissView("line 2: the file agrees with the end of old from `return total")), "the end agrees");
 		assert_true(said.View().Contains(MissView("has `one\\n\\t` where old has `    `")), "the tab is shown, against old's spaces");
+		assert_true(said.View().EndsWith(MissView("; the file's line 2 is `\\treturn total + shipping;`")), "the whole line, to copy");
 	}
 
 	[test("nothing_alike")]

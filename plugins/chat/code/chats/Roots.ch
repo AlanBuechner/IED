@@ -16,12 +16,31 @@ namespace Ai
 	// The alias a tool call's arguments name ("ied" for {"path": "ied:/src/a.cf"}), "" for none: a lowercase word of at
 	// least two letters before ":/" in its path, root, cwd or program ("C:/" is a drive, not an alias).
 	Core::String RootAlias(const Serialization::DomNode& args);
+	// The alias one argument starts with ("ied" for "ied:/src/a.cf"), empty for none.
+	Core::StringView PathAlias(Core::StringView value);
 	// The arguments (JSON) with "<alias>:/" taken off their path, root, cwd and program.
 	Core::String WithoutAlias(const Serialization::DomNode& args, Core::StringView rootAlias);
 	// A permission subject "kind(argument)" naming the root: "fs.write(ied:/src/a.cf)".
 	Core::String RootSubject(Core::StringView subject, Core::StringView rootAlias);
 	// The same with the argument after `prefix`: "fs.read(plugins:/c4/docs/a.md)" for "plugins:/c4/".
 	Core::String PrefixedSubject(Core::StringView subject, Core::StringView prefix);
+
+	// A folder a chat reaches: its own workspace's (alias "") or a root's.
+	struct RootFolder
+	{
+		public Core::String m_Alias;
+		public Core::String m_Folder;
+	}
+
+	// The chat's workspace's folder and every ai.roots root's that has one. Without the server lock.
+	Core::Array<RootFolder> RootFolders(const IED::Workspace& ws);
+	// A full path (C:/... or C:\..., as the code tools print a file's) in one of `folders` as the folder holding it names it - relative in
+	// the workspace, "<alias>:/..." in a root, the deepest folder winning; anything else as it is.
+	Core::String AliasedPath(const Core::Array<RootFolder>& folders, Core::StringView value);
+	// Whether any of the call's path, root, cwd or program is a full path.
+	bool NamesFullPath(const Serialization::DomNode& args);
+	// The arguments (JSON) with each of those AliasedPath gave another name; empty when none changed.
+	Core::String WithFullPathsAliased(const Core::Array<RootFolder>& folders, const Serialization::DomNode& args);
 
 	class RootTarget
 	{

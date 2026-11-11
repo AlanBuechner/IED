@@ -1,0 +1,93 @@
+// video: what the frames of a recording made pixel by pixel show over time - a pixel that flickers, a cell that pulses
+// slowly, a steady background - and the images made from it.
+
+include "VideoFrames.ch"
+include "Video.ch"
+
+// A frame of `width` x `height` grey pixels of `grey`.
+static Imaging::Rgba Flat(int32 width, int32 height, uint8 grey) {
+	Imaging::Rgba frame;
+	frame.width = width;
+	frame.height = height;
+	frame.pixels.Resize((int64)width * height * 4);
+	for (int64 i = 0; i < (int64)width * height; i += 1) {
+		for (int32 k = 0; k < 3; k += 1) frame.pixels[i * 4 + k] = grey;
+		frame.pixels[i * 4 + 3] = 255;
+	}
+	return frame;
+}
+
+static void SetPixel(Imaging::Rgba& frame, int32 x, int32 y, uint8 grey) {
+	int64 at = ((int64)y * frame.width + x) * 4;
+	for (int32 k = 0; k < 3; k += 1) frame.pixels[at + k] = grey;
+}
+
+[test("server.ai.video")]
+class VideoTests {
+	[test("a_flickering_pixel_and_a_steady_background")]
+	public static void FlickerAndSteady() {
+		// 32 x 18: one pixel at (3, 2) flips between 0 and 200 every frame; the rest stays at 100.
+		Ai::VideoAccumulator video;
+		for (int32 f = 0; f < 10; f += 1) {
+			Imaging::Rgba frame = Flat(32, 18, 100);
+			SetPixel(frame, 3, 2, f % 2 == 0 ? 0 : 200);
+			assert_true(video.Add(frame), "a frame of the first's size");
+		}
+		assert_true(!video.Add(Flat(16, 9, 100)), "one of another size is refused");
+		Ai::VideoAnalysis analysis = video.Finish();
+		assert_eq((int64)10, analysis.m_Frames, "ten frames");
+		assert_eq((int64)9, analysis.m_ChangeByFrame.Count(), "a change for each frame after the first");
+		assert_feq(200.0, (double)analysis.m_Change[2 * 32 + 3], 0.01, "the flickering pixel changes by 200 every frame");
+		assert_feq(0.0, (double)analysis.m_Change[0], 0.0, "the background not at all");
+		assert_feq(100.0, (double)analysis.m_Spread[2 * 32 + 3], 0.01, "it strays 100 from its mean of 100");
+		assert_true(analysis.m_Cells[0].m_X <= 3 && analysis.m_Cells[0].m_X + analysis.m_Cells[0].m_Width > 3 &&
+			analysis.m_Cells[0].m_Y <= 2 && analysis.m_Cells[0].m_Y + analysis.m_Cells[0].m_Height > 2, "its cell ranks first");
+		assert_eq((int64)10, analysis.m_Cells[0].m_Brightness.Count(), "with its brightness in every frame");
+		Imaging::Rgba heat = Ai::ChangeHeatMap(analysis, 2.0f);
+		assert_true(heat.pixels[(2 * 32 + 3) * 4] == 255 && heat.pixels[(2 * 32 + 3) * 4 + 2] == 255, "the flicker is white hot");
+		assert_true(heat.pixels[0] == 35 && heat.pixels[1] == 35, "the steady background is its dimmed grey");
+	}
+
+	[test("a_slow_pulse_strays_without_flickering")]
+	public static void SlowPulse() {
+		// The whole frame rises and falls by 1 a frame between 90 and 110: a little change, a large spread.
+		Ai::VideoAccumulator video;
+		for (int32 f = 0; f < 40; f += 1) {
+			int32 phase = f % 40;
+			int32 grey = phase < 20 ? 90 + phase : 130 - phase;
+			video.Add(Flat(16, 9, (uint8)grey));
+		}
+		Ai::VideoAnalysis analysis = video.Finish();
+		assert_true(analysis.m_Change[0] <= 1.001f, "at most 1 from frame to frame (the luma weights round)");
+		assert_true(analysis.m_Spread[0] > 5.0f, "yet it strays from its mean");
+		assert_feq(90.0, analysis.m_BrightnessByFrame[0], 0.01, "the brightness by frame follows it");
+		assert_feq(109.0, analysis.m_BrightnessByFrame[19], 0.01, "to its top");
+	}
+
+	[test("images_shrink_crop_and_sit_side_by_side")]
+	public static void Images() {
+		Imaging::Rgba frame = Flat(8, 4, 0);
+		for (int32 x = 4; x < 8; x += 1)
+			for (int32 y = 0; y < 4; y += 1) SetPixel(frame, x, y, 200);
+		Imaging::Rgba half = Ai::Downscaled(frame, 4);
+		assert_true(half.width == 4 && half.height == 2, "half as wide, the aspect kept");
+		assert_true(half.pixels[0] == 0 && half.pixels[3 * 4] == 200, "each pixel the mean of those it covers");
+		Imaging::Rgba right = Ai::Cropped(frame, 4, 1, 10, 10);
+		assert_true(right.width == 4 && right.height == 3 && right.pixels[0] == 200, "a crop clipped to the frame");
+		Core::Array<Imaging::Rgba> frames = { frame, frame, frame };
+		Imaging::Rgba sheet = Ai::ContactSheet(frames, 2, 8);
+		assert_true(sheet.width == 8 * 2 + 4 && sheet.height == 4 * 2 + 4, "two to a row, a gap between");
+		assert_true(sheet.pixels[(1 * sheet.width + 9) * 4] == 40, "the gap is grey");
+	}
+
+	[test("frames_spread_and_series_shown")]
+	public static void Spread() {
+		Core::Array<int64> picked = Ai::EvenlySpread(10, 4);
+		assert_true(picked.Count() == 4 && picked[0] == 0 && picked[3] == 9, "the first and the last among them");
+		assert_eq((int64)3, Ai::EvenlySpread(3, 8).Count(), "no more than there are");
+		Core::Array<double> series = { 1.0, 2.25, 3.5 };
+		assert_se("1.0 2.3 3.5", Ai::SeriesText(series, 10).CStr(), "one decimal each");
+		assert_true(Ai::SeriesText(series, 2).View().Contains(Core::StringView("evenly picked")), "says when it picks");
+		assert_true(Ai::FrameFiles(Core::StringView("C:/no/such/folder")).IsEmpty(), "no folder, no frames");
+	}
+}

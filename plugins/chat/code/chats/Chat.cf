@@ -36,7 +36,7 @@ namespace Ai
 	}
 
 	const char* ChatStateName(ChatState state) {
-		const char*[5] names = { "idle", "running", "awaiting_approval", "awaiting_answer", "paused" };
+		const char*[6] names = { "idle", "running", "awaiting_approval", "awaiting_answer", "paused", "suspended" };
 		return names[(int32)state];
 	}
 
@@ -65,14 +65,15 @@ namespace Ai
 		}
 	}
 
-	// A message's from?, mentions? and attachments?, each only when it has one.
-	static void WriteMessageFields(IED::JsonWriter& json, Core::StringView fromChatId, Core::StringView fromTitle, const Core::Array<Mention>& mentions,
+	// A message's from? ({chatId, title, reply?}), mentions? and attachments?, each only when it has one.
+	static void WriteMessageFields(IED::JsonWriter& json, Core::StringView fromChatId, Core::StringView fromTitle, Core::StringView reply, const Core::Array<Mention>& mentions,
 		const Core::Array<Attachment>& attachments) {
 		if (!fromChatId.IsEmpty()) {
 			json.Key(Core::StringView("from"));
 			json.BeginObject();
 			json.Field("chatId", fromChatId);
 			json.Field("title", fromTitle);
+			if (!reply.IsEmpty()) json.Field("reply", reply);
 			json.EndObject();
 		}
 		if (!mentions.IsEmpty()) {
@@ -115,7 +116,7 @@ namespace Ai
 			}
 		}
 		else json.Field("text", m_Text.View());
-		if (m_Type == "message") WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Mentions, m_Attachments);
+		if (m_Type == "message") WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Reply.View(), m_Mentions, m_Attachments);
 		if (m_AtMs > 0) json.IntField("atMs", m_AtMs);
 		if (!m_Kind.IsEmpty()) json.Field("kind", m_Kind.View());
 		if (m_Tokens > 0) json.IntField("tokens", m_Tokens);
@@ -144,6 +145,7 @@ namespace Ai
 		ReadAttachments(node.Member("attachments"), m_Attachments);
 		m_FromChatId = Core::String(node.Member("from").Member("chatId").AsView());
 		m_FromTitle = Core::String(node.Member("from").Member("title").AsView());
+		m_Reply = Core::String(node.Member("from").Member("reply").AsView());
 		m_AtMs = node.Member("atMs").AsInt();
 	}
 
@@ -239,7 +241,8 @@ namespace Ai
 	void OwnerMessage::WriteJson(IED::JsonWriter& json) const {
 		json.BeginObject();
 		json.Field("text", m_Text.View());
-		WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Mentions, m_Attachments);
+		if (m_Hops > 0) json.IntField("hops", m_Hops);
+		WriteMessageFields(json, m_FromChatId.View(), m_FromTitle.View(), m_Reply.View(), m_Mentions, m_Attachments);
 		json.EndObject();
 	}
 
@@ -251,6 +254,8 @@ namespace Ai
 		m_Text = Core::String(node.Member("text").AsView());
 		m_FromChatId = Core::String(node.Member("from").Member("chatId").AsView());
 		m_FromTitle = Core::String(node.Member("from").Member("title").AsView());
+		m_Hops = node.Member("hops").IsValid() ? node.Member("hops").AsInt() : 0;
+		m_Reply = Core::String(node.Member("from").Member("reply").AsView());
 		ReadMentions(node.Member("mentions"), m_Mentions);
 		ReadAttachments(node.Member("attachments"), m_Attachments);
 	}
@@ -320,6 +325,7 @@ namespace Ai
 			json.BeginObject();
 			json.Field("chatId", m_FromChatId.View());
 			json.Field("title", m_FromTitle.View());
+			if (!m_Reply.IsEmpty()) json.Field("reply", m_Reply.View());
 			json.EndObject();
 		}
 		if (!m_Resumed.IsEmpty()) json.Field("resumed", m_Resumed.View());
@@ -404,6 +410,7 @@ namespace Ai
 		m_UserText = Core::String(node.Member("user").Member("text").AsView());
 		m_FromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
 		m_FromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
+		m_Reply = Core::String(node.Member("user").Member("from").Member("reply").AsView());
 		m_Resumed = Core::String(node.Member("user").Member("resumed").AsView());
 		m_Origin = Core::String(node.Member("user").Member("origin").AsView());
 		ReadMentions(node.Member("user").Member("mentions"), m_Mentions);
@@ -492,6 +499,7 @@ namespace Ai
 		json.Field("group", m_Group.View());
 		json.Field("effort", m_Effort.View());
 		json.Field("pinnedModel", m_PinnedModel.View());
+		json.BoolField("endless", m_Endless);
 		json.Field("state", ChatStateName(m_State));
 		if (!m_StateReason.IsEmpty()) json.Field("stateReason", m_StateReason.View());
 		Core::String lastStop = LastStop();
@@ -510,6 +518,34 @@ namespace Ai
 		json.IntField("backgroundRunning", running);
 		if (!m_Agent.IsEmpty()) json.Field("agent", m_Agent.View());
 		if (!m_ParentChatId.IsEmpty()) json.Field("parentChatId", m_ParentChatId.View());
+		json.Key(Core::StringView("owes"));
+		WriteReplies(json, m_Owes);
+		json.Key(Core::StringView("awaits"));
+		WriteReplies(json, m_Awaits);
+	}
+
+	void ReplyOwed::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("chatId", m_ChatId.View());
+		json.Field("title", m_Title.View());
+		json.IntField("sinceMs", m_SinceMs);
+		if (m_Hops > 0) json.IntField("hops", m_Hops);
+		if (m_Question) json.BoolField("question", true);
+		json.EndObject();
+	}
+
+	void ReplyOwed::Read(const Serialization::DomNode& node) {
+		m_ChatId = Core::String(node.Member("chatId").AsView());
+		m_Title = Core::String(node.Member("title").AsView());
+		m_SinceMs = node.Member("sinceMs").AsInt();
+		m_Hops = node.Member("hops").AsInt();
+		m_Question = node.Member("question").AsBool();
+	}
+
+	void WriteReplies(IED::JsonWriter& json, const Core::Array<ReplyOwed*>& replies) {
+		json.BeginArray();
+		for (const ReplyOwed* reply : replies) reply->WriteJson(json);
+		json.EndArray();
 	}
 
 	Core::String Chat::SummaryJson() const {
@@ -518,6 +554,19 @@ namespace Ai
 		WriteSummary(json);
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String TaskLines(const Core::Array<ChatTask*>& tasks) {
+		Core::StringBuilder out;
+		for (ChatTask* task : tasks) {
+			out.Append(task->m_Id.View());
+			out.Append(" ");
+			out.Append(task->m_Title.View());
+			out.Append(" (");
+			out.Append(task->m_Status.View());
+			out.Append(")\n");
+		}
+		return out.ToString();
 	}
 
 	void Chat::WriteTasks(IED::JsonWriter& json) const {

@@ -1,0 +1,208 @@
+include "VideoFrames.ch"
+
+namespace Ai
+{
+	static const uint8 c_SheetGap = 40;   // the grey between a contact sheet's frames
+	static const int32 c_SheetGapPixels = 4;
+	static const float c_HeatGreyShare = 0.35f;   // how bright the mean frame shows under the heat
+
+	float Brightness(const Imaging::Rgba& frame, int64 pixel) {
+		int64 at = pixel * 4;
+		return 0.2126f * (float)frame.pixels[at] + 0.7152f * (float)frame.pixels[at + 1] + 0.0722f * (float)frame.pixels[at + 2];
+	}
+
+	static int32 CellOf(int32 x, int32 y, int32 width, int32 height) {
+		int32 column = (int32)((int64)x * c_VideoGridColumns / width);
+		int32 row = (int32)((int64)y * c_VideoGridRows / height);
+		return row * c_VideoGridColumns + column;
+	}
+
+	public bool VideoAccumulator::Add(const Imaging::Rgba& frame) {
+		if (frame.width <= 0 || frame.height <= 0) return false;
+		if (m_Frames == 0) {
+			m_Width = frame.width;
+			m_Height = frame.height;
+			int64 pixels = (int64)m_Width * m_Height;
+			m_Previous.Resize(pixels);
+			m_ChangeSum.Resize(pixels);
+			m_Sum.Resize(pixels);
+			m_SquareSum.Resize(pixels);
+			m_CellBrightness.Resize((int64)c_VideoGridColumns * c_VideoGridRows);
+		}
+		else if (frame.width != m_Width || frame.height != m_Height) return false;
+		int64 cells = (int64)c_VideoGridColumns * c_VideoGridRows;
+		Core::Array<double> cellSums = Core::Array<double>(cells);
+		Core::Array<int64> cellCounts = Core::Array<int64>(cells);
+		cellSums.Resize(cells);
+		cellCounts.Resize(cells);
+		double frameChange = 0.0;
+		double frameBrightness = 0.0;
+		for (int32 y = 0; y < m_Height; y += 1) {
+			for (int32 x = 0; x < m_Width; x += 1) {
+				int64 i = (int64)y * m_Width + x;
+				float b = Brightness(frame, i);
+				if (m_Frames > 0) {
+					double change = (double)Math::Abs(b - m_Previous[i]);
+					m_ChangeSum[i] += change;
+					frameChange += change;
+				}
+				m_Previous[i] = b;
+				m_Sum[i] += (double)b;
+				m_SquareSum[i] += (double)b * (double)b;
+				frameBrightness += (double)b;
+				int32 cell = CellOf(x, y, m_Width, m_Height);
+				cellSums[cell] += (double)b;
+				cellCounts[cell] += 1;
+			}
+		}
+		double pixels = (double)m_Width * (double)m_Height;
+		if (m_Frames > 0) m_ChangeByFrame.Push(frameChange / pixels);
+		m_BrightnessByFrame.Push(frameBrightness / pixels);
+		for (int64 c = 0; c < cells; c += 1) m_CellBrightness[c].Push(cellCounts[c] > 0 ? cellSums[c] / (double)cellCounts[c] : 0.0);
+		m_Frames += 1;
+		return true;
+	}
+
+	public VideoAnalysis VideoAccumulator::Finish() {
+		VideoAnalysis analysis;
+		analysis.m_Width = m_Width;
+		analysis.m_Height = m_Height;
+		analysis.m_Frames = m_Frames;
+		analysis.m_ChangeByFrame = take(m_ChangeByFrame);
+		analysis.m_BrightnessByFrame = take(m_BrightnessByFrame);
+		if (m_Frames == 0) return analysis;
+		int64 pixels = (int64)m_Width * m_Height;
+		analysis.m_Change.Resize(pixels);
+		analysis.m_Spread.Resize(pixels);
+		analysis.m_Mean.Resize(pixels);
+		double pairs = (double)(m_Frames - 1);
+		int64 cells = (int64)c_VideoGridColumns * c_VideoGridRows;
+		Core::Array<double> cellChange = Core::Array<double>(cells);
+		Core::Array<double> cellSpread = Core::Array<double>(cells);
+		Core::Array<int64> cellCounts = Core::Array<int64>(cells);
+		cellChange.Resize(cells);
+		cellSpread.Resize(cells);
+		cellCounts.Resize(cells);
+		for (int32 y = 0; y < m_Height; y += 1) {
+			for (int32 x = 0; x < m_Width; x += 1) {
+				int64 i = (int64)y * m_Width + x;
+				double mean = m_Sum[i] / (double)m_Frames;
+				double variance = Math::Max(m_SquareSum[i] / (double)m_Frames - mean * mean, 0.0);
+				analysis.m_Mean[i] = (float)mean;
+				analysis.m_Spread[i] = Math::Sqrt((float)variance);
+				analysis.m_Change[i] = pairs > 0.0 ? (float)(m_ChangeSum[i] / pairs) : 0.0f;
+				int32 cell = CellOf(x, y, m_Width, m_Height);
+				cellChange[cell] += (double)analysis.m_Change[i];
+				cellSpread[cell] += (double)analysis.m_Spread[i];
+				cellCounts[cell] += 1;
+			}
+		}
+		for (int32 row = 0; row < c_VideoGridRows; row += 1) {
+			for (int32 column = 0; column < c_VideoGridColumns; column += 1) {
+				int64 c = (int64)row * c_VideoGridColumns + column;
+				VideoCell cell;
+				cell.m_X = (int32)((int64)column * m_Width / c_VideoGridColumns);
+				cell.m_Y = (int32)((int64)row * m_Height / c_VideoGridRows);
+				cell.m_Width = (int32)((int64)(column + 1) * m_Width / c_VideoGridColumns) - cell.m_X;
+				cell.m_Height = (int32)((int64)(row + 1) * m_Height / c_VideoGridRows) - cell.m_Y;
+				double count = (double)Math::Max(cellCounts[c], (int64)1);
+				cell.m_Change = cellChange[c] / count;
+				cell.m_Spread = cellSpread[c] / count;
+				cell.m_Brightness = take(m_CellBrightness[c]);
+				analysis.m_Cells.Push(take(cell));
+			}
+		}
+		analysis.m_Cells.SortBy([](const VideoCell& a, const VideoCell& b) -> bool { return a.m_Change > b.m_Change; });
+		return analysis;
+	}
+
+	public Imaging::Rgba Downscaled(const Imaging::Rgba& image, int32 width) {
+		if (width <= 0 || image.width <= width) return image;
+		int32 height = Math::Max((int32)((int64)image.height * width / image.width), 1);
+		Imaging::Rgba out;
+		out.width = width;
+		out.height = height;
+		out.pixels.Resize((int64)width * height * 4);
+		for (int32 y = 0; y < height; y += 1) {
+			int32 y0 = (int32)((int64)y * image.height / height);
+			int32 y1 = Math::Max((int32)((int64)(y + 1) * image.height / height), y0 + 1);
+			for (int32 x = 0; x < width; x += 1) {
+				int32 x0 = (int32)((int64)x * image.width / width);
+				int32 x1 = Math::Max((int32)((int64)(x + 1) * image.width / width), x0 + 1);
+				int64[4] sum = { 0, 0, 0, 0 };
+				for (int32 sy = y0; sy < y1; sy += 1)
+					for (int32 sx = x0; sx < x1; sx += 1)
+						for (int32 k = 0; k < 4; k += 1) sum[k] += (int64)image.pixels[((int64)sy * image.width + sx) * 4 + k];
+				int64 count = (int64)(x1 - x0) * (y1 - y0);
+				for (int32 k = 0; k < 4; k += 1) out.pixels[((int64)y * width + x) * 4 + k] = (uint8)(sum[k] / count);
+			}
+		}
+		return out;
+	}
+
+	public Imaging::Rgba Cropped(const Imaging::Rgba& image, int32 x, int32 y, int32 width, int32 height) {
+		int32 left = Math::Clamp(x, 0, image.width);
+		int32 top = Math::Clamp(y, 0, image.height);
+		int32 right = Math::Clamp(x + width, left, image.width);
+		int32 bottom = Math::Clamp(y + height, top, image.height);
+		Imaging::Rgba out;
+		out.width = right - left;
+		out.height = bottom - top;
+		out.pixels.Resize((int64)out.width * out.height * 4);
+		for (int32 row = 0; row < out.height; row += 1)
+			for (int64 k = 0; k < (int64)out.width * 4; k += 1)
+				out.pixels[(int64)row * out.width * 4 + k] = image.pixels[((int64)(top + row) * image.width + left) * 4 + k];
+		return out;
+	}
+
+	public float Percentile(const Core::Array<float>& values, double share) {
+		if (values.IsEmpty()) return 0.0f;
+		Core::Array<float> sorted = values;
+		sorted.Sort();
+		int64 at = Math::Clamp((int64)(share * (double)(sorted.Count() - 1)), (int64)0, sorted.Count() - 1);
+		return sorted[at];
+	}
+
+	public Imaging::Rgba ChangeHeatMap(const VideoAnalysis& analysis, float full) {
+		Imaging::Rgba out;
+		out.width = analysis.m_Width;
+		out.height = analysis.m_Height;
+		int64 pixels = (int64)out.width * out.height;
+		out.pixels.Resize(pixels * 4);
+		float scale = Math::Max(Math::Max(Percentile(analysis.m_Change, 0.995), full), 1.0e-6f);
+		for (int64 i = 0; i < pixels; i += 1) {
+			float heat = Math::Min(analysis.m_Change[i] / scale, 1.0f) * 3.0f;
+			float grey = analysis.m_Mean[i] * c_HeatGreyShare;
+			float[3] ramp = { Math::Clamp(heat, 0.0f, 1.0f), Math::Clamp(heat - 1.0f, 0.0f, 1.0f), Math::Clamp(heat - 2.0f, 0.0f, 1.0f) };
+			for (int32 k = 0; k < 3; k += 1) out.pixels[i * 4 + k] = (uint8)Math::Min(grey + ramp[k] * 255.0f, 255.0f);
+			out.pixels[i * 4 + 3] = 255;
+		}
+		return out;
+	}
+
+	public Imaging::Rgba ContactSheet(const Core::Array<Imaging::Rgba>& frames, int32 columns, int32 cellWidth) {
+		Imaging::Rgba sheet;
+		if (frames.IsEmpty() || columns <= 0) return sheet;
+		int32 cellHeight = Math::Max((int32)((int64)frames[0].height * cellWidth / Math::Max(frames[0].width, 1)), 1);
+		int32 used = (int32)Math::Min((int64)columns, frames.Count());
+		int32 rows = (int32)((frames.Count() + columns - 1) / columns);
+		sheet.width = used * cellWidth + (used - 1) * c_SheetGapPixels;
+		sheet.height = rows * cellHeight + (rows - 1) * c_SheetGapPixels;
+		sheet.pixels.Resize((int64)sheet.width * sheet.height * 4);
+		for (int64 i = 0; i < (int64)sheet.width * sheet.height; i += 1) {
+			for (int32 k = 0; k < 3; k += 1) sheet.pixels[i * 4 + k] = c_SheetGap;
+			sheet.pixels[i * 4 + 3] = 255;
+		}
+		for (int64 f = 0; f < frames.Count(); f += 1) {
+			Imaging::Rgba thumb = Downscaled(frames[f], cellWidth);
+			int32 left = (int32)(f % columns) * (cellWidth + c_SheetGapPixels);
+			int32 top = (int32)(f / columns) * (cellHeight + c_SheetGapPixels);
+			int32 width = Math::Min(thumb.width, cellWidth);
+			int32 height = Math::Min(thumb.height, cellHeight);
+			for (int32 y = 0; y < height; y += 1)
+				for (int64 k = 0; k < (int64)width * 4; k += 1)
+					sheet.pixels[((int64)(top + y) * sheet.width + left) * 4 + k] = thumb.pixels[(int64)y * thumb.width * 4 + k];
+		}
+		return sheet;
+	}
+}

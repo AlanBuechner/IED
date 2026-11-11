@@ -15,8 +15,9 @@ namespace Ai
 		return nullptr;
 	}
 
-	bool ToolRegistry::Offered(const ToolSpec* spec, ChatMode mode) const {
+	bool ToolRegistry::Offered(const ToolSpec* spec, ChatMode mode, bool endless) const {
 		if (spec->m_AgentOnly && mode != ChatMode::Agent) return false;
+		if (spec->m_EndsTurn && endless) return false;
 		return mode != ChatMode::Plan || spec->m_InPlan;
 	}
 
@@ -27,11 +28,11 @@ namespace Ai
 		return text.Substring(0, end < c_ToolIndexLineBytes ? end : c_ToolIndexLineBytes);
 	}
 
-	Core::String ToolRegistry::RequestTools(ChatMode mode, bool whole) const {
+	Core::String ToolRegistry::RequestTools(ChatMode mode, bool whole, bool endless) const {
 		IED::JsonWriter json;
 		json.BeginArray();
 		for (ToolSpec* spec : m_Tools) {
-			if (!Offered(spec, mode)) continue;
+			if (!Offered(spec, mode, endless)) continue;
 			const bool stub = spec->m_Deferred && !whole;
 			json.BeginObject();
 			json.Field("type", "function");

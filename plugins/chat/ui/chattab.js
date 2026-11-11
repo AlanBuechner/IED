@@ -46,9 +46,12 @@ export class ChatTabView {
 		const look = chatLook(summary);
 		this.ctx.tab.setTitle(summary.title);
 		this.ctx.tab.setIcon(look.icon);
-		const label = look.attention || summary.state === "running" ? STATE_LABELS[summary.state] || summary.state : "";
+		const label = look.attention || summary.state === "running" || summary.state === "suspended" ? STATE_LABELS[summary.state] || summary.state : "";
 		this.state.className = "chat-tabhead-state" + (look.tone ? " " + look.tone : "");
-		this.state.textContent = label;
+		// A suspended chat says what it waits for (docs/04 "Chats waiting on each other").
+		const reason = summary.state === "suspended" && summary.stateReason ? summary.stateReason : "";
+		this.state.textContent = reason ? label + ": " + reason : label;
+		this.state.title = reason ? "Suspended: " + reason + " - it goes on by itself when that comes, or with your message" : "";
 	}
 
 	// A tab the layout kept for a chat deleted while this window was away closes too - when the list says it is deleted,

@@ -67,6 +67,9 @@ namespace Ai
 		for (BackgroundTask* task : chat->m_Background)
 			if (task->Running()) StopBackground(task);
 		IED::Workspace ws = WorkspaceOf(chat);
+		// The chats it owes replies hear none will come; kept without its debts, a restored chat owes nothing.
+		DebtorGone(chat);
+		SaveChatHeader(LocalStateOf(ws), chat);
 		DeletedChat* gone = new DeletedChat();
 		gone->m_ChatId = chat->m_ChatId;
 		gone->m_WsId = chat->m_WsId;
@@ -88,6 +91,7 @@ namespace Ai
 		}
 		m_Context->RemoveTopic(chat->Topic().View());
 		m_Deleted.Push(gone);
+		RepliesChanged(ws.m_Id.View());
 		IED::JsonWriter entry;
 		WriteDeletedChat(entry, gone, KeepDeletedDays(m_Context, WsId(ws)));
 		IED::JsonWriter data;

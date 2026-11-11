@@ -89,6 +89,14 @@ int32 main() {
 }
 """
 
+# Two methods of one name in two classes, which nothing else names so.
+ECHOES_CH = "namespace Game\n{\n\tclass Hall { public int32 Ululate() { return 1; } }\n\tclass Cave { public int32 Ululate() { return 2; } }\n}\n"
+
+# More methods named Drop than C4LSP's workspace/symbol answers (500): Game::Target's comes last, so a search for the
+# bare name leaves it out and code_read_symbol finds Target::Drop through Target.
+MANY_DROPS_CH = "namespace Game\n{\n" + "".join("\tclass Filler%d { public void Drop() {} }\n" % i for i in range(600)) + \
+	"\tclass Target\n\t{\n\t\t// Lets go of what it holds.\n\t\tpublic void Drop() {}\n\t}\n}\n"
+
 RING_TESTS_CF = """include "ring.ch"
 
 [test("ring.push")]
@@ -243,7 +251,8 @@ class ClangdCodeToolTests(CodeToolCase):
 			("y1", "code_type_hierarchy", {"symbol": "Sink", "direction": "subtypes"}),
 			("x1", "code_expand_macro", {"path": "src/game.cpp", "line": 4, "symbol": "TWICE"}),
 			("n1", "code_read_symbol", {"symbol": "Pop"}),
-			("a1", "code_hover", {"symbol": "Write"}))
+			("a1", "code_hover", {"symbol": "Write"}),
+			("a2", "code_read_symbol", {"symbol": "Write"}))
 		for call_id in ("s1", "o1", "r1", "r2", "r3", "d1", "f1", "h1", "m1", "t1", "i1", "c1", "c2", "y1", "x1"):
 			self.assertNotIn("did not run", results[call_id], call_id)
 		self.assertIn("method game::Ring::Push  src/ring.cpp:8", results["s1"], "the servers started and indexed for the first search")
@@ -280,6 +289,9 @@ class ClangdCodeToolTests(CodeToolCase):
 		self.assertIn("Defined at src/ring.h:3", results["x1"])
 		self.assertIn("no symbol Pop", results["n1"])
 		self.assertIn("names several symbols", results["a1"], "Sink::Write and Ring::Write")
+		self.assertIn("Ring::Write", results["a2"], "reading a name two symbols have shows both")
+		self.assertIn("Sink::Write", results["a2"])
+		self.assertNotIn("names several symbols", results["a2"])
 
 
 @unittest.skipUnless(os.path.exists(C4LSP), "no dev C4 toolchain (nuke build makes it)")
@@ -297,6 +309,8 @@ class C4CodeToolTests(CodeToolCase):
 		write(os.path.join(self.repo, "src", "ring.ch"), RING_CH)
 		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)
 		write(os.path.join(self.repo, "src", "main.cf"), MAIN_CF)
+		write(os.path.join(self.repo, "src", "drops.ch"), MANY_DROPS_CH)
+		write(os.path.join(self.repo, "src", "echoes.ch"), ECHOES_CH)
 		nuke("build")
 
 	async def test_building_testing_and_running_through_build_run(self):
@@ -339,14 +353,22 @@ class C4CodeToolTests(CodeToolCase):
 			("b2", "fs_read", {"path": BEDROCK_QUEUE, "limit": 5}),
 			("g1", "code_symbols", {"path": "src"}),
 			("g2", "code_symbols", {"path": "src", "query": "Push"}),
-			("g3", "code_symbols", {"path": "src", "query": "PriorityQueue"}))
+			("g3", "code_symbols", {"path": "src", "query": "PriorityQueue"}),
+			("w1", "code_read_symbol", {"symbol": "Target::Drop"}),
+			("a2", "code_read_symbol", {"symbol": "Ululate"}),
+			("a3", "code_read_symbol", {"symbol": "Write"}))
+		self.assertIn("Game::Hall::Ululate", results["a2"], "reading a name two symbols have shows both")
+		self.assertIn("Game::Cave::Ululate", results["a2"])
+		self.assertIn("return 2;", results["a2"], "each with its body")
+		self.assertNotIn("names several symbols", results["a2"])
+		self.assertIn("names several symbols", results["a3"], "more names than that (Bedrock's too) are listed to choose from")
 		self.assertIn("method Game::Ring::Push  src/ring.cf:6\nmethod Game::Ring::Push  src/ring.ch:21\n", results["s1"], "the project's first, Bedrock's after")
 		self.assertNotIn("Its source", results["s1"], "a name several symbols have is only listed")
 		self.assertIn("1 symbol for \"ISink\"\ninterface Game::ISink  src/ring.ch:10\nIts source, src/ring.ch:\n9\t\t// Something values can be written to.\n10\t\tinterface ISink\n", results["s2"], "the only one, with its source")
 		self.assertIn("function TWICE: macro  [5]", results["o1"], "a macro is a symbol")
 		self.assertIn("  class Ring: class : ISink  [16-30]", results["o1"])
-		self.assertIn("    method Capacity: static int32 ()  [24]", results["o1"], "a member's kind and signature")
-		self.assertIn("    field kLimit: static const int32  [29]", results["o1"])
+		self.assertIn("    method Capacity: public static int32 ()  [24]", results["o1"], "a member's kind, visibility and signature")
+		self.assertIn("    field kLimit: public static const int32  [29]", results["o1"])
 		self.assertIn("5\t\t// Adds the value at the end.\n6\t\tvoid Ring::Push(int32 value) {", results["r1"], "the definition with its comment")
 		self.assertIn("Also declared at src/ring.ch:21", results["r1"])
 		self.assertIn("20\t\t\t// Pushes one value; drops it when full.\n21\t\t\tpublic void Push(int32 value);", results["r2"], "the declaration when asked")
@@ -365,9 +387,12 @@ class C4CodeToolTests(CodeToolCase):
 		self.assertIn("#define TWICE(x) ((x) * 2)", results["p1"], "a macro read by name")
 		self.assertIn(BEDROCK_QUEUE, results["b1"], "a library's file shown by its absolute path")
 		self.assertTrue(results["b2"].startswith("1\t"), "and fs_read takes that path: %s" % results["b2"][:200])
-		self.assertIn("src is a folder", results["g1"])
+		self.assertIn("src/drops.ch:\nnamespace Game  [1-608]\n", results["g1"], "a folder: each served file's symbols")
+		self.assertIn("more files not shown", results["g1"], "its 600 classes fill the outline, and the files after it are named as left out")
+		self.assertNotIn("no language server serves", results["g1"], "a file no server serves is left out, not an error")
 		self.assertIn("method Game::Ring::Push  src/ring.cf:6", results["g2"], "a query with a folder searches it")
 		self.assertIn("[nothing", results["g3"], "and only it: Bedrock's PriorityQueue is outside src")
+		self.assertIn("// Lets go of what it holds.\n", results["w1"], "a member whose name the server's capped search leaves out, found through its class: %s" % results["w1"][:300])
 		self.assertIn("public int32 Game::Ring::Count() const", results["h1"])
 		self.assertIn("How many values it holds.", results["h1"])
 		self.assertIn("  L24  method  public static int32 Capacity()", results["m1"], "static")

@@ -34,7 +34,7 @@ namespace Ai
 	void Prompts::Load(const FS::Path& folder, Core::Array<Core::String>& problems) {
 		m_Base = ReadPrompt(folder / "base-system.md", problems);
 		m_Style = ReadPrompt(folder / "style-default.md", problems);
-		const char*[3] names = { "ask", "plan", "agent" };
+		const char*[4] names = { "ask", "plan", "agent", "agent-endless" };
 		for (const char* name : names) m_Modes.Insert(Core::String(name), ReadPrompt(folder / ((Core::String("mode-") + name) + ".md").View(), problems));
 		m_Notes = MarkdownSections(ReadPrompt(folder / "harness-notes.md", problems).View());
 	}
@@ -45,7 +45,8 @@ namespace Ai
 		out.Append("\n\n");
 		out.Append(m_Style.View());
 		out.Append("\n\n");
-		out.Append(m_Modes.Get(Core::String(ChatModeName(mode))).View());
+		const bool endless = context.m_Endless && mode == ChatMode::Agent;
+		out.Append(m_Modes.Get(Core::String(endless ? "agent-endless" : ChatModeName(mode))).View());
 		Core::StringView agentsMd = context.m_AgentsMd.View();
 		if (!agentsMd.IsEmpty()) {
 			out.Append("\n\n# The project's AGENTS.md\n\n");
@@ -69,7 +70,7 @@ namespace Ai
 			out.Append("\n\n# Deferred tools\n\nTools whose description ends in [deferred] are listed with their first sentence only, to keep the context small. tool_search gives a deferred tool's whole description and parameters (words for what you need, or select: and their names). You may also call one directly: if its arguments are wrong, the error shows its parameters.");
 		}
 		if (!context.m_Docs.IsEmpty()) {
-			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language. The files are in their plugins' folders, which docs_read names (plugins:/<plugin id>/..., read-only).\n\n");
+			out.Append("\n\n# Reference docs\n\nThe workspace's languages and libraries document themselves here. Look a name up with docs_search (words of what you need) and read the section with docs_read, instead of guessing it from another language. docs_read takes the paths docs_search gives (c4/library/bedrock.md); the files are in their plugins' folders (plugins:/<plugin id>/..., read-only), where fs_read and search_text read them.\n\n");
 			out.Append(context.m_Docs.View());
 		}
 		if (!context.m_Skills.IsEmpty()) {

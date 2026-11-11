@@ -60,9 +60,10 @@ namespace Ai
 		// chat_title: the chat named `title` by its own AI (docs/04 "Chat names"); false when it keeps a name someone else
 		// chose.
 		public bool NameByAi(Chat* chat, Core::StringView title);
-		// Another chat's message: true when it started a turn of `chat`, false when its running turn gets it at the next
-		// step. The model is told which chat sent it.
-		public bool Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops);
+		// Another chat's message: true when it started a turn of `chat` (idle, paused or suspended), false when its running
+		// turn gets it at the next step (a wait in it stops). The model is told which chat sent it; `reply` is the message's
+		// (OwnerMessage): "required", "answer" or IED's "notice" of a debtor.
+		public bool Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops, const char* reply = "");
 		// A message for the running turn's next step (docs/12 "Messages while a turn runs"), told to the clients and kept.
 		public void Pend(Chat* chat, OwnerMessage* message);
 		// queue.changed: the queued and the pending messages.
@@ -92,6 +93,22 @@ namespace Ai
 		// The chat's turns in memory - read back from disk when it was offloaded (Offload.cf, docs/04 "Offloading idle
 		// chats") - and it counted as used now. Whatever reads or changes its turns calls it first. Inside the host lock.
 		public void Loaded(Chat* chat);
+
+		// Replies chats owe each other (Replies.cf, docs/04 "Chats waiting on each other"); inside the host lock. `debtor`
+		// owes `creditor` a reply from now, for a request `hops` long; `question`: a question back from a chat that owed
+		// `debtor` one.
+		public void Owe(Chat* debtor, const Chat* creditor, int64 hops, bool question);
+		// `debtor` messaged `creditorId`: what it owed it, taken off, or null when it owed nothing. The answer to a question
+		// back puts the chat that asked back in its debt.
+		public ReplyOwed* Pay(Chat* debtor, Core::StringView creditorId);
+		// The workspace's chats' `awaits` made again from their debts (a deleted creditor's dropped, titles current), and
+		// chat.changed for each chat whose lists changed.
+		public void RepliesChanged(Core::StringView wsId);
+		// `debtor`'s turn ended: IED speaks for it to each chat it still owes - its answer is the reply, a stop by its owner
+		// drops the debt, a pause keeps it - unless it suspended.
+		public void TellCreditors(Chat* debtor);
+		// `debtor` is deleted: its creditors are told no reply will come.
+		public void DebtorGone(Chat* debtor);
 
 		// Background tasks (Background.cf, docs/04 "Background tasks"); inside the host lock. A new running task of
 		// `chat`, published.

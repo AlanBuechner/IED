@@ -2,7 +2,7 @@
 // segments, tool states and what the chat waits on; the list of chats; and the small facts the views show.
 
 import { test, assertEqual } from "./harness.js";
-import { ChatList, ChatModel, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortStops, effortsOf, keptFor, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
+import { ChatList, ChatModel, MODE_CHOICES, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortLabel, effortStops, effortsOf, keptFor, modeChange, modeChoice, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
 import { chatBadge, chatStatusText } from "/plugins/ied.chat/ui/index.js";
 import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
@@ -29,6 +29,18 @@ test("chat: a snapshot, then a turn streamed in", () => {
 	const ended = model.event("turn.end", { turnId: "u3", stop: "finished", recoveries: ["retried after http_error 503 (1x)"], tokensIn: 3000, tokensOut: 40, genMs: 1000 });
 	assertEqual([ended.ended, model.lastTurn().stop, model.lastTurn().recoveries.length], [true, "finished", 1]);
 	assertEqual(model.event("unknown.kind", {}), {});
+});
+
+test("chat: the Mode menu's Agent until stopped is Agent with the endless flag", () => {
+	assertEqual(MODE_CHOICES.map(([id]) => id), ["ask", "plan", "agent", "endless"]);
+	assertEqual(modeChoice({ mode: "agent", endless: true })[1], "Agent, until stopped");
+	assertEqual(modeChoice({ mode: "agent" })[0], "agent");
+	assertEqual(modeChoice({ mode: "plan", endless: true })[0], "plan", "the flag counts only in Agent mode");
+	assertEqual(modeChange("endless"), { mode: "agent", endless: true });
+	assertEqual(modeChange("ask"), { mode: "ask", endless: false }, "another mode clears it");
+	const model = new ChatModel();
+	model.snapshot(Object.assign(snapshot(), { endless: true }));
+	assertEqual(model.summary.endless, true, "the summary keeps it");
 });
 
 test("chat: tool calls, approvals and the question", () => {

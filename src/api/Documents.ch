@@ -26,4 +26,8 @@ namespace IED
 	// workspace's; false with `problem` when the plugin may not read (fs.read), it is no folder or the pattern is not a
 	// valid regex. Without the lock.
 	bool SearchFolder(Core::StringView folder, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem);
+	// The matches of `text` - the file at `path`, read by the caller (TextAsEdited) - as Search finds a file's, whatever the
+	// query's include and exclude globs and ignore files say: none for a binary text, `path` in m_TooLarge for one past the
+	// size Search reads. False with `problem` when the pattern is not a valid regex. Honest: it reads nothing.
+	bool SearchFileText(Core::StringView path, Core::StringView text, const SearchQuery& query, SearchResult& result, Core::String& problem);
 }

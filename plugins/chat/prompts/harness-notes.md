@@ -26,8 +26,25 @@ You said you would {action} but did not call a tool. Make the tool call now, or 
 ## agent_no_finish
 You stopped without calling finish. If the work is complete and verified, call finish(summary, verification). Otherwise continue with the next step.
 
+## endless_no_finish
+This chat runs until the owner stops it: there is no finish. Record what the last step gave if you have not, then go on with the next step toward the goal - the next thing to try, measure, refine or fix - with a tool call.
+
+## endless_finish_refused
+This chat runs until the owner stops it: there is no finish. Record what was done (a commit, a note), report it in a few words, and go on with the next step toward the goal.
+
 ## open_tasks_on_finish
-Tasks {tasks} are still open. Complete them, or mark them skipped with a reason, before finishing.
+Tasks {tasks} are still open (by id and title). Complete them, or mark them skipped with a reason - task_update({"id": ..., "status": "done"}) or "skipped" with a note - before finishing.
+
+## owes_reply_on_finish
+Not finished: this chat owes a reply to the chats below - each required one (require_reply) and may be suspended until it comes. Send each its reply first with {call}: what you did, what you found and what is left. Then finish.
+{chats}
+
+## owes_reply_on_suspend
+Not suspended: this chat owes a reply to the chats below, and nothing you would wait on was asked for after it, so both chats could end up waiting on each other. Send the reply first with {call}, then suspend if you still need to wait - or wait here with chat_wait or background_wait.
+{chats}
+
+## endless_suspend_refused
+Not suspended: this chat runs until the owner stops it, and nothing would wake it - no chat owes it a reply and none of its background tasks runs. Suspend only to wait for those; go on with the next step.
 
 ## invalid_tool_args
 The arguments for {tool} were invalid: {error}. Expected schema: {schema_excerpt}. Call it again with corrected arguments.
@@ -49,6 +66,11 @@ You have used {percent}% of this run's {budget} budget. Wrap up: finish the curr
 
 ## context_compressed
 Earlier parts of this conversation were left out of your requests to save space - not summarized and not lost: they are still in this chat, whole, and a restart does not empty it. `history_search` finds where anything was said and `history_read` gives a turn back; read the files or symbols again if you need their exact contents.
+
+## tasks_after_compaction
+The conversation was compacted to fit the context, and its summary may leave out your task list. The chat's tasks, as they stand:
+{tasks}
+Keep them current with task_update - finish refuses while any is pending or in_progress.
 
 ## unparsed_tool_call
 Your reply wrote a tool call as text that could not be read. Call the tool again in the tool-calling format, with complete JSON arguments.

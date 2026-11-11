@@ -30,17 +30,31 @@ namespace Ai
 
 	// --- search_text -------------------------------------------------------------------------------------------------
 
-	// The glob a search keeps to: its glob under its folder (`path`), or the folder's files.
-	static Core::String SearchGlob(const ToolInvocation& call) {
-		Core::String folder = ToolPath(call.m_Args.Member("path").AsView());
-		Core::StringView glob = call.m_Args.Member("glob").AsView();
-		if (folder.IsEmpty()) return Core::String(glob);
-		return JoinPath(folder.View(), glob.IsEmpty() ? Core::StringView("**") : glob);
+	SearchScope ScopeOfSearch(Core::StringView path, Core::StringView glob, bool isFile) {
+		SearchScope scope;
+		if (isFile) scope.m_File = Core::String(path);
+		else if (!path.IsEmpty() && InExcludedFolder(path)) {
+			scope.m_Alone = Core::String(path);
+			scope.m_Glob = Core::String(glob);
+		}
+		else if (path.IsEmpty()) scope.m_Glob = Core::String(glob);
+		else scope.m_Glob = JoinPath(path, glob.IsEmpty() ? Core::StringView("**") : glob);
+		return scope;
+	}
+
+	// The call's scope; its path names one file when there is a file of that name in the workspace's folder.
+	static SearchScope ScopeOfCall(const ToolInvocation& call) {
+		Core::String path = ToolPath(call.m_Args.Member("path").AsView());
+		Core::String full = JoinPath(call.m_Ws.m_Root.View(), path.View());
+		bool isFile = !path.IsEmpty() && FS::FileExists(full.CStr()) && !FS::IsDirectory(full.CStr());
+		return ScopeOfSearch(path.View(), call.m_Args.Member("glob").AsView(), isFile);
 	}
 
 	static ToolPlan SearchPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		Core::String glob = SearchGlob(call);
+		SearchScope scope = ScopeOfCall(call);
+		Core::String glob = !scope.m_File.IsEmpty() ? scope.m_File
+		: scope.m_Alone.IsEmpty() ? scope.m_Glob : JoinPath(scope.m_Alone.View(), scope.m_Glob.IsEmpty() ? Core::StringView("**") : scope.m_Glob.View());
 		plan.m_Subject = (Core::String("fs.read(") + (glob.IsEmpty() ? Core::StringView("**") : glob.View())) + ")";
 		plan.m_Summary = Core::String("Search for ") + call.m_Args.Member("pattern").AsView();
 		return plan;
@@ -103,26 +117,29 @@ namespace Ai
 		return false;
 	}
 
-	// A plugin's folder (plugins:/) is searched on the disk; a workspace with its open documents as edited; a skipped
-	// folder the call names (`alone`), on the disk and whole.
-	static bool SearchIn(const IED::Workspace& ws, Core::StringView alone, const IED::SearchQuery& query, const Threading::Atomic<bool>* cancel, IED::SearchResult& result, Core::String& problem) {
-		if (!alone.IsEmpty()) return IED::SearchFolder(JoinPath(ws.m_Root.View(), alone).View(), query, cancel, result, problem);
+	// One file named alone: as edited, whatever ignore files say. A plugin's folder (plugins:/) is searched on the disk; a
+	// workspace with its open documents as edited; a skipped folder the call names (m_Alone), on the disk and whole.
+	static bool SearchIn(const IED::Workspace& ws, const SearchScope& scope, const IED::SearchQuery& query, const Threading::Atomic<bool>* cancel, IED::SearchResult& result, Core::String& problem) {
+		if (!scope.m_File.IsEmpty()) {
+			try {
+				Core::String text = TextAsEdited(ws, scope.m_File.View());
+				return IED::SearchFileText(scope.m_File.View(), text.View(), query, result, problem);
+			}
+			catch (IED::RpcError& error) {
+				problem = error.m_Message;
+				return false;
+			}
+		}
+		if (!scope.m_Alone.IsEmpty()) return IED::SearchFolder(JoinPath(ws.m_Root.View(), scope.m_Alone.View()).View(), query, cancel, result, problem);
 		if (IsFolderRoot(ws)) return IED::SearchFolder(ws.m_Root.View(), query, cancel, result, problem);
 		return IED::Search(ws, query, cancel, result, problem);
 	}
 
 	// The files a search keeps to: the workspace's but build output and ignored files, or all of a skipped folder the
-	// call names (`alone`, its glob relative to it).
-	static void ScopeSearch(const ToolInvocation& call, IED::SearchQuery& query, Core::String& alone) {
-		Core::String folder = ToolPath(call.m_Args.Member("path").AsView());
-		if (InExcludedFolder(folder.View())) {
-			alone = folder;
-			Core::StringView glob = call.m_Args.Member("glob").AsView();
-			if (!glob.IsEmpty()) query.m_Include.Push(Core::String(glob));
-			return;
-		}
-		Core::String glob = SearchGlob(call);
-		if (!glob.IsEmpty()) query.m_Include.Push(glob);
+	// call names (its glob relative to it); a file named alone needs neither.
+	static void ApplyScope(const SearchScope& scope, IED::SearchQuery& query) {
+		if (!scope.m_Glob.IsEmpty()) query.m_Include.Push(scope.m_Glob);
+		if (!scope.m_Alone.IsEmpty() || !scope.m_File.IsEmpty()) return;
 		query.m_Exclude = IED::DefaultExcludes();
 		query.m_UseIgnoreFiles = true;
 	}
@@ -138,24 +155,24 @@ namespace Ai
 		query.m_Text = Core::String(call.m_Args.Member("pattern").AsView());
 		query.m_Regex = call.m_Args.Member("regex").AsBool();
 		query.m_CaseSensitive = call.m_Args.Member("case_sensitive").AsBool();
-		Core::String alone;
-		ScopeSearch(call, query, alone);
+		SearchScope scope = ScopeOfCall(call);
+		ApplyScope(scope, query);
 		query.m_MaxResults = c_SearchToolMatches;
 		Threading::Atomic<bool> never;
 		IED::SearchResult result;
 		Core::String problem;
-		if (!SearchIn(call.m_Ws, alone.View(), query, &never, result, problem)) return ToolError(SearchProblem(problem.View(), query.m_Regex).View());
+		if (!SearchIn(call.m_Ws, scope, query, &never, result, problem)) return ToolError(SearchProblem(problem.View(), query.m_Regex).View());
 		bool asRegex = false;
 		if (result.m_Matches.IsEmpty() && !query.m_Regex && LooksLikeRegex(query.m_Text.View())) {
 			query.m_Regex = true;
 			IED::SearchResult again;
 			Core::String ignored;
-			if (SearchIn(call.m_Ws, alone.View(), query, &never, again, ignored) && !again.m_Matches.IsEmpty()) {
+			if (SearchIn(call.m_Ws, scope, query, &never, again, ignored) && !again.m_Matches.IsEmpty()) {
 				result = again;
 				asRegex = true;
 			}
 		}
-		Core::String shown = alone.IsEmpty() ? Core::String(call.m_Shown) : (call.m_Shown + alone.View()) + "/";
+		Core::String shown = scope.m_Alone.IsEmpty() ? Core::String(call.m_Shown) : (call.m_Shown + scope.m_Alone.View()) + "/";
 		for (int64 i = 0; i < result.m_Matches.Count(); ++i) result.m_Matches[i].m_Path = shown + result.m_Matches[i].m_Path.View();
 		for (int64 i = 0; i < result.m_TooLarge.Count(); ++i) result.m_TooLarge[i] = shown + result.m_TooLarge[i].View();
 		Core::StringBuilder out;
@@ -434,7 +451,12 @@ namespace Ai
 		info.errors = Process::Redirect::Pipe;
 		Process::Child child = Process::Child::Start(info);
 		if (!child.IsOpen()) {
-			problem = Core::String("program_run: ") + info.program.View() + " did not start: " + child.Error() + "; a program of the workspace is named by its path (build/bin/...), another by its name on PATH";
+			// A path that names no file now: often a build replacing the program (another chat's), worth saying plainly.
+			bool path = info.program.View().Contains(Core::StringView("/")) || info.program.View().Contains(Core::StringView("\\"));
+			if (path && !FS::FileExists(info.program.CStr()))
+				problem = Core::String("program_run: ") + info.program.View() + " does not exist now (a build may be replacing it: build it, or wait and run it again)";
+			else
+				problem = Core::String("program_run: ") + info.program.View() + " did not start: " + child.Error() + "; a program of the workspace is named by its path (build/bin/...), another by its name on PATH";
 			return result;
 		}
 		if (!input.IsEmpty()) child.WriteAll((const void*)input.CStr(), input.ByteLength(), 10000);
@@ -602,21 +624,21 @@ namespace Ai
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output and ignored files unless path names a folder of them (build/...); the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under, workspace-relative (no drive letter, no ..), build output too; plugins:/<plugin id>/ for a plugin's files; ied:/ for IED's checkout in developer mode\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output and ignored files unless path names a folder of them (build/...) or one file (searched whatever the ignore rules say); the pattern is literal unless regex is true. Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\", \"description\": \"the pattern is a regular expression, matched in linear time (RE2's kind): classes, groups, alternation, repeats, (?i) - no lookahead, lookbehind or backreferences\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either, [ch] one character of\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under, or one file to search, workspace-relative (no ..), build output too; plugins:/<plugin id>/ for a plugin's files; ied:/ for IED's checkout in developer mode; a full path inside the workspace or a root, as the code tools print a file's, is taken as that\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->m_Plan = SearchPlan;
 		search->m_Run = SearchRun;
 		search->m_FolderRoots = true;
 		registry.Add(search);
 		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
-			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out for the workspace root, not '.'\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out (or '.') for the workspace root\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"at most 1800 unless in the background\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		shell->m_Plan = ShellPlan;
 		shell->m_Run = ShellRun;
 		registry.Add(shell);
 		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it), in developer mode IED's own as ied:/build/bin/... (never a full C:/ path), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
-			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out for the workspace root, not '.'\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out (or '.') for the workspace root\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		program->m_Plan = ProgramPlan;
 		program->m_Run = ProgramRun;

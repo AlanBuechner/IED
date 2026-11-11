@@ -8,7 +8,7 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { MODES, PERMISSIONS, compact, contextBar, duration, effortLabel, tokensPerSecond } from "./chatmodel.js";
+import { MODE_CHOICES, PERMISSIONS, compact, contextBar, duration, effortLabel, modeChange, modeChoice, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
 import { choiceLabel, showModelPicker } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
@@ -205,9 +205,13 @@ export class Composer {
 	update(model) {
 		const summary = model.summary || {};
 		this.running = model.running();
-		this.input.placeholder = window.matchMedia(PHONE).matches ? "Message\u2026"
-			: "Message " + (summary.title || "the chat") + (this.running ? " - Enter sends it into the running turn, Ctrl+Enter queues it for after" : " - Enter sends, Shift+Enter breaks the line");
-		this.sendButton.title = this.running ? "Send it into the running turn: the AI gets it after its current step (Enter)" : "Send (Enter)";
+		// A turn waiting on a chat or a background task stops waiting for a message (docs/04 "Chats waiting on each other").
+		const waiting = this.running && Boolean(model.runningWait && model.runningWait());
+		this.input.placeholder = window.matchMedia(PHONE).matches ? (waiting ? "Message - stops the wait\u2026" : "Message\u2026")
+			: "Message " + (summary.title || "the chat") + (waiting ? " - it is waiting: Enter stops the wait and sends it, Ctrl+Enter queues it for after"
+				: this.running ? " - Enter sends it into the running turn, Ctrl+Enter queues it for after" : " - Enter sends, Shift+Enter breaks the line");
+		this.sendButton.title = waiting ? "Stop the wait and send it: the AI reads it at once; what it waited on goes on (Enter)"
+			: this.running ? "Send it into the running turn: the AI gets it after its current step (Enter)" : "Send (Enter)";
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.pending.map((text) => this.pendingRow(text)), ...model.queued.map((text, index) => this.queuedRow(text, index)));
 		this.renderSelectors(summary, model);
@@ -216,7 +220,7 @@ export class Composer {
 
 	// A message sent to the running turn, until the turn takes it at its next step.
 	pendingRow(text) {
-		return h("div.chat-queued.pending", { title: "The AI gets it after its current step: once the tools it runs now return" }, icon("arrow-right"), h("span.muted", null, "At the next step:"), h("span.ellip", null, text));
+		return h("div.chat-queued.pending", { title: "The AI gets it after its current step: once the tools it runs now return (a wait for a chat or a background task stops at once)" }, icon("arrow-right"), h("span.muted", null, "At the next step:"), h("span.ellip", null, text));
 	}
 
 	// A queued message: edit it (back into the box with what it names and carries), send it now when no turn runs, or
@@ -239,11 +243,11 @@ export class Composer {
 	}
 
 	renderSelectors(summary, model) {
-		const mode = MODES.find(([id]) => id === summary.mode) || MODES[2];
+		const mode = modeChoice(summary);
 		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS.find(([id]) => id === "auto");
 		replace(this.selectors,
 			h("span.muted", null, "Model"), this.modelButton(summary, model),
-			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODES, summary.mode), (row) => this.actions.set({ mode: row.value })),
+			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODE_CHOICES, mode[0]), (row) => this.actions.set(modeChange(row.value))),
 			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
 	}
 

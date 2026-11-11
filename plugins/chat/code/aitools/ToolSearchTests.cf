@@ -48,6 +48,18 @@ class ToolSearchTests {
 		assert_eq((int64)0, registry->SearchDeferred(Core::StringView("select:fs_read"), Ai::ChatMode::Ask, 5).Count(), "a loaded tool is not searched");
 	}
 
+	// Agent, until stopped (docs/04): no tool that ends the turn; every other one as Agent mode has it.
+	[test("until_stopped_has_no_finish")]
+	public static void TestUntilStopped() {
+		Ai::ToolRegistry* registry = SearchRegistry();
+		Core::String agent = registry->RequestTools(Ai::ChatMode::Agent, true);
+		Core::String endless = registry->RequestTools(Ai::ChatMode::Agent, true, true);
+		assert_true(agent.View().Contains(Core::StringView("\"name\":\"finish\"")), "Agent mode ends its turn with finish");
+		assert_true(!endless.View().Contains(Core::StringView("\"name\":\"finish\"")), "until stopped, there is none");
+		assert_true(endless.View().Contains(Core::StringView("\"name\":\"tasks_set\"")) && endless.View().Contains(Core::StringView("\"name\":\"fs_read\"")), "and the rest as Agent's");
+		assert_true(!registry->RequestTools(Ai::ChatMode::Ask, true, true).View().Contains(Core::StringView("\"name\":\"finish\"")), "Ask mode never had it");
+	}
+
 	[test("load_all")]
 	public static void TestLoadAll() {
 		Ai::ToolRegistry* registry = SearchRegistry();

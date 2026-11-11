@@ -1,0 +1,60 @@
+// A chat's task list as the model is shown it (tasks_set, task_update, and again after Claude's CLI compacts the
+// conversation), and which tasks keep finish from ending the turn.
+
+include "chats/Chat.ch"
+include "aitools/ChatTools.ch"
+
+static Ai::ChatTask* NewTask(const char* id, const char* title, const char* status) {
+	Ai::ChatTask* task = new Ai::ChatTask();
+	task->m_Id = Core::String(id);
+	task->m_Title = Core::String(title);
+	task->m_Status = Core::String(status);
+	return task;
+}
+
+[test("server.ai.tasks")]
+class ChatTasksTests {
+	[test("open_while_pending_or_in_progress")]
+	public static void TestOpen() {
+		assert_true(NewTask("t1", "Port", "pending")->IsOpen(), "pending is open");
+		assert_true(NewTask("t1", "Port", "in_progress")->IsOpen(), "in progress is open");
+		assert_true(!NewTask("t1", "Port", "done")->IsOpen(), "done is not");
+		assert_true(!NewTask("t1", "Port", "skipped")->IsOpen(), "skipped is not");
+	}
+
+	[test("a_chain_of_chats_says_where_it_stands")]
+	public static void TestChainNote() {
+		Core::String second = Ai::ChainNote(2);
+		assert_true(second.View().Contains(Core::StringView("message 2 of at most 3")), second.CStr());
+		assert_true(Ai::CanAnswer(2) && !Ai::CanAnswer(3), "a message can be answered until the chain is at its most");
+		Ai::OwnerMessage sent;
+		sent.m_Text = Core::String("hi");
+		sent.m_FromChatId = Core::String("c1");
+		sent.m_FromTitle = Core::String("Helper");
+		sent.m_Hops = 3;
+		Ai::Chat* to = new Ai::Chat();
+		Core::String told = Ai::ModelText(to, sent);
+		assert_true(told.View().Contains(Core::StringView("message 3 of at most 3")) && told.View().Contains(Core::StringView("no chat_send can answer it")), told.CStr());
+		sent.m_Hops = 1;
+		assert_true(Ai::ModelText(to, sent).View().Contains(Core::StringView("answer it with chat_send")), "a short chain can be answered");
+	}
+
+	// A hand-off at the chain's last is told to its sender: asked to report back, the other chat could not.
+	[test("the_sender_is_told_when_the_other_cannot_answer")]
+	public static void TestSentNote() {
+		Core::String early = Ai::SentNote(2);
+		assert_true(early.View().Contains(Core::StringView("message 2 of at most 3")) && !early.View().Contains(Core::StringView("cannot chat_send")), early.CStr());
+		Core::String last = Ai::SentNote(3);
+		assert_true(last.View().Contains(Core::StringView("message 3 of at most 3")) && last.View().Contains(Core::StringView("cannot chat_send an answer back")), last.CStr());
+	}
+
+	[test("lines_name_id_title_and_status")]
+	public static void TestLines() {
+		Core::Array<Ai::ChatTask*> tasks;
+		assert_true(Ai::TaskLines(tasks).IsEmpty(), "no tasks, no lines");
+		tasks.Push(NewTask("t1", "Find what changed", "done"));
+		tasks.Push(NewTask("t2", "Port Log.h", "in_progress"));
+		Core::String lines = Ai::TaskLines(tasks);
+		assert_true(lines == "t1 Find what changed (done)\nt2 Port Log.h (in_progress)\n", lines.CStr());
+	}
+}

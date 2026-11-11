@@ -116,6 +116,9 @@ namespace Ai
 		private ToolOutcome SetTasks(const Serialization::DomNode& args);
 		private ToolOutcome UpdateTask(const Serialization::DomNode& args);
 		private ToolOutcome FinishCall(const Serialization::DomNode& args);
+		// suspend: the turn ends with the tasks as they are, the chat suspended until a reply, a background task's end or
+		// the owner's message wakes it (docs/04 "Chats waiting on each other"); refused while that could leave it asleep.
+		private ToolOutcome SuspendCall(const Serialization::DomNode& args);
 		// tool_search: the deferred tools the query names loaded for the chat, their definitions told the model.
 		private ToolOutcome SearchTools(const Serialization::DomNode& args);
 		// The deferred tool loaded for the chat, inside the host lock.
@@ -165,6 +168,10 @@ namespace Ai
 		private Core::Array<IED::ToolImage> m_ClaudeAsideImages;       // and their images
 		private Core::String m_ClaudeBlocked;                          // why Claude cannot serve this turn; empty while it can
 		private Core::String m_ClaudeBlockedStop;                      // the stop a pause for it records: usage_limit, not_subscription
+		private bool m_ClaudeCompacted;                                // the CLI compacted the conversation since the last step
+		// After the CLI compacted the conversation - its summary may leave the task list out - the tasks told again while
+		// any is open (tasks_after_compaction). The lock is held.
+		private void TellTasksAfterCompaction();
 
 		// The models to try in order, the one in use, and the attempts on it.
 		private Core::Array<ModelProfile*> m_Candidates;
@@ -188,6 +195,7 @@ namespace Ai
 		private int64 m_RequestHead;      // the step's request's system message and tools, hashed (ExpectedRead)
 		private int64 m_RequestRead;      // what its server was expected to read of it
 		private bool m_FinishNudged;
+		private Core::String m_SuspendReason;   // suspend's reason: the chat's stateReason once the turn ends
 		// How the turn ends: set once, then the loop stops.
 		private bool m_Ending;
 		private Core::String m_Stop;
@@ -210,7 +218,7 @@ namespace Ai
 	Core::String TurnSystem(Chats* chats, Chat* chat, const IED::Workspace& ws, ToolRegistry* tools, Core::StringView userText, const Core::Array<ModelProfile*>& models,
 		Core::Array<Core::String>& contributed);
 	// The tool definitions a request sends: a local model the chat's loaded ones, Claude's session every tool.
-	Core::String ToolsSent(const ToolRegistry* tools, ChatMode mode, bool claude);
+	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool claude);
 	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
 	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);

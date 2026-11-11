@@ -1,0 +1,269 @@
+include "api/Plugin.ch"
+include "Video.ch"
+include "VideoFrames.ch"
+include "Images.ch"
+
+namespace Ai
+{
+	static const char* c_VideoFolder = ".ied/local/video";
+
+	public Core::Array<Core::String> FrameFiles(Core::StringView folder) {
+		Core::Array<Core::String> files;
+		Core::String path = Core::String(folder);
+		if (!FS::IsDirectory(path.CStr())) return files;
+		for (FS::DirectoryEntry& entry : FS::Directory(path.CStr())) {
+			if (entry.kind != FS::EntryKind::File) continue;
+			Core::String lower = Core::String(entry.name.View()).ToLower();
+			if (lower.View().EndsWith(Core::StringView(".png"))) files.Push(Core::String(entry.name.View()));
+		}
+		files.Sort();
+		return files;
+	}
+
+	public Core::Array<int64> EvenlySpread(int64 total, int64 count) {
+		Core::Array<int64> picked;
+		if (total <= 0 || count <= 0) return picked;
+		if (count >= total) {
+			for (int64 i = 0; i < total; i += 1) picked.Push(i);
+			return picked;
+		}
+		if (count == 1) {
+			picked.Push(0);
+			return picked;
+		}
+		for (int64 i = 0; i < count; i += 1) picked.Push(i * (total - 1) / (count - 1));
+		return picked;
+	}
+
+	static void AppendTenths(Core::StringBuilder& out, double value) {
+		int64 tenths = (int64)(value * 10.0 + (value >= 0.0 ? 0.5 : -0.5));
+		if (tenths < 0) {
+			out.Append("-");
+			tenths = -tenths;
+		}
+		out.AppendInt(tenths / 10);
+		out.Append(".");
+		out.AppendInt(tenths % 10);
+	}
+
+	public Core::String SeriesText(const Core::Array<double>& series, int64 values) {
+		Core::StringBuilder out;
+		Core::Array<int64> picked = EvenlySpread(series.Count(), values);
+		for (int64 i = 0; i < picked.Count(); i += 1) {
+			if (i > 0) out.Append(" ");
+			AppendTenths(out, series[picked[i]]);
+		}
+		if (picked.Count() < series.Count()) out.Append(" (evenly picked)");
+		return out.ToString();
+	}
+
+	static bool IsVideoFile(Core::StringView path) {
+		Core::String lower = Core::String(path).ToLower();
+		const char*[6] extensions = { ".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif" };
+		for (int32 i = 0; i < 6; i += 1)
+			if (lower.View().EndsWith(Core::StringView(extensions[i]))) return true;
+		return false;
+	}
+
+	static bool ReadFrame(Core::StringView file, Imaging::Rgba& image, Core::String& problem) {
+		Core::String path = Core::String(file);
+		int64 size = FS::FileSize(path.CStr());
+		Core::Array<uint8> bytes;
+		bytes.Resize(size > 0 ? size : 0);
+		FS::File opened = FS::File(path.CStr(), "rb");
+		if (size <= 0 || !opened.IsOpen() || opened.ReadAll((void*)bytes.Data(), size) != size) {
+			problem = Core::String("cannot read ") + file;
+			return false;
+		}
+		Imaging::ReadResult read = Imaging::DecodePng(bytes.Data(), bytes.Count(), image);
+		if (!read.ok) problem = (Core::String(file) + ": ") + read.error;
+		return read.ok;
+	}
+
+	static bool WriteImage(const IED::Workspace& ws, const Imaging::Rgba& image, Core::StringView relative) {
+		Core::Array<uint8> png;
+		Imaging::EncodePng(image, 6, png);
+		Core::String absolute = IED::WorkspaceFile(ws, relative);
+		FS::Path file = FS::Path(absolute.View());
+		if (!file.Parent().IsEmpty()) FS::MakeDirectories(file.Parent().CStr());
+		return FS::WriteFileAtomically(absolute.CStr(), (const void*)png.Data(), png.Count());
+	}
+
+	static Core::String Slug(Core::StringView path) {
+		Core::StringBuilder slug;
+		for (int64 i = 0; i < path.ByteLength(); i += 1) {
+			int32 c = path.ByteAt(i);
+			bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+			slug.AppendByte(plain ? c : '_');
+		}
+		return slug.ToString();
+	}
+
+	struct VideoRequest
+	{
+	public:
+		public int64 m_From;
+		public int64 m_Count;
+		public int64 m_Sheet;
+		public bool m_Crop;
+		public int32[4] m_Region;   // x, y, width, height
+	}
+
+	static bool ReadRequest(const Serialization::DomNode& args, VideoRequest& request, Core::String& problem) {
+		request.m_From = args.Member("from").IsValid() ? args.Member("from").AsInt() : 0;
+		request.m_Count = args.Member("count").IsValid() ? args.Member("count").AsInt() : c_VideoMostFrames;
+		request.m_Sheet = args.Member("sheet").IsValid() ? args.Member("sheet").AsInt() : c_VideoSheetFrames;
+		Serialization::DomNode region = args.Member("region");
+		request.m_Crop = region.IsValid();
+		if (request.m_Crop) {
+			if (region.Count() != 4) {
+				problem = Core::String("region is [x, y, width, height] in pixels");
+				return false;
+			}
+			for (int64 i = 0; i < 4; i += 1) request.m_Region[i] = (int32)region.At(i).AsInt();
+			if (request.m_Region[2] <= 0 || request.m_Region[3] <= 0) {
+				problem = Core::String("region's width and height must be above 0");
+				return false;
+			}
+		}
+		if (request.m_From < 0 || request.m_Count < 2) {
+			problem = Core::String("from is 0 or more and count at least 2: change is between frames");
+			return false;
+		}
+		request.m_Count = Math::Min(request.m_Count, c_VideoMostFrames);
+		request.m_Sheet = Math::Clamp(request.m_Sheet, (int64)1, c_VideoMostSheetFrames);
+		return true;
+	}
+
+	static void DescribeCell(Core::StringBuilder& out, const VideoCell& cell) {
+		out.Append("  x ");
+		out.AppendInt(cell.m_X);
+		out.Append("-");
+		out.AppendInt(cell.m_X + cell.m_Width);
+		out.Append(", y ");
+		out.AppendInt(cell.m_Y);
+		out.Append("-");
+		out.AppendInt(cell.m_Y + cell.m_Height);
+		out.Append(": change ");
+		AppendTenths(out, cell.m_Change);
+		out.Append(", spread ");
+		AppendTenths(out, cell.m_Spread);
+		out.Append("; its brightness by frame: ");
+		out.Append(SeriesText(cell.m_Brightness, c_VideoSeriesShown).View());
+		out.Append("\n");
+	}
+
+	static ToolPlan VideoPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Summary = Core::String("Watch ") + call.m_Args.Member("path").AsView();
+		return plan;
+	}
+
+	static ToolOutcome VideoRun(const ToolInvocation& call) {
+		Core::String path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		Core::String folder = IED::WorkspaceFile(call.m_Ws, path.View());
+		if (IsVideoFile(path.View()))
+			return ToolError(((Core::String("video_view: ") + path.View()) + " is a video file; video_view reads a recording as a folder of PNG frames (IED has no video decoder yet): "
+				"have the program save its frames (Claymore: --record FOLDER), or extract them with ffmpeg -i <video> <folder>/%05d.png where it is installed").View());
+		VideoRequest request;
+		Core::String problem;
+		if (!ReadRequest(call.m_Args, request, problem)) return ToolError((Core::String("video_view: ") + problem.View()).View());
+		Core::Array<Core::String> files = FrameFiles(folder.View());
+		if (files.Count() < 2)
+			return ToolError(((Core::String("video_view: ") + path.View()) + " holds fewer than two PNG frames; a recording is a folder of them, in name order").View());
+		int64 first = Math::Min(request.m_From, files.Count());
+		int64 count = Math::Min(request.m_Count, files.Count() - first);
+		if (count < 2) return ToolError(Core::StringView("video_view: fewer than two frames from frame `from` on"));
+		Core::Array<int64> sheetAt = EvenlySpread(count, request.m_Sheet);
+		int32 cellWidth = (c_VideoSheetWidth - (c_VideoSheetColumns - 1) * 4) / c_VideoSheetColumns;
+		VideoAccumulator video;
+		Core::Array<Imaging::Rgba> sheetFrames;
+		int64 nextSheet = 0;
+		for (int64 i = 0; i < count; i += 1) {
+			Imaging::Rgba frame;
+			Core::String framePath = (folder + "/") + files[first + i].View();
+			if (!ReadFrame(framePath.View(), frame, problem)) return ToolError((Core::String("video_view: ") + problem.View()).View());
+			if (request.m_Crop) frame = Cropped(frame, request.m_Region[0], request.m_Region[1], request.m_Region[2], request.m_Region[3]);
+			if (!video.Add(frame))
+				return ToolError(((Core::String("video_view: ") + files[first + i].View()) + " is not the size of the first frame (or is empty)").View());
+			if (nextSheet < sheetAt.Count() && sheetAt[nextSheet] == i) {
+				sheetFrames.Push(Downscaled(frame, cellWidth));
+				nextSheet += 1;
+			}
+		}
+		VideoAnalysis analysis = video.Finish();
+		Core::String slug = Slug(path.View());
+		Core::String sheetPath = ((Core::String(c_VideoFolder) + "/") + slug.View()) + "-sheet.png";
+		Core::String heatPath = ((Core::String(c_VideoFolder) + "/") + slug.View()) + "-change.png";
+		bool written = WriteImage(call.m_Ws, ContactSheet(sheetFrames, c_VideoSheetColumns, cellWidth), sheetPath.View());
+		written = WriteImage(call.m_Ws, Downscaled(ChangeHeatMap(analysis, c_VideoSteadyChange), c_VideoHeatWidth), heatPath.View()) && written;
+		if (!written) return ToolError((Core::String("video_view: cannot write its images into ") + c_VideoFolder).View());
+
+		Core::StringBuilder said;
+		said.Append(path.View());
+		said.Append(": frames ");
+		said.AppendInt(first);
+		said.Append("-");
+		said.AppendInt(first + count - 1);
+		said.Append(" of ");
+		said.AppendInt(files.Count());
+		said.Append(" (");
+		said.Append(files[first].View());
+		said.Append(" - ");
+		said.Append(files[first + count - 1].View());
+		said.Append("), ");
+		said.AppendInt(analysis.m_Width);
+		said.Append("x");
+		said.AppendInt(analysis.m_Height);
+		if (request.m_Crop) said.Append(" (the region asked for)");
+		said.Append(". Brightness is luma 0-255.\n");
+		said.Append("The first image: frames ");
+		for (int64 i = 0; i < sheetAt.Count(); i += 1) {
+			if (i > 0) said.Append(", ");
+			said.AppendInt(first + sheetAt[i]);
+		}
+		said.Append(" left to right, top to bottom. The second: where the brightness changes from frame to frame (heat over the mean frame; full heat at the change's 99.5th percentile, ");
+		AppendTenths(said, (double)Math::Max(Percentile(analysis.m_Change, 0.995), c_VideoSteadyChange));
+		said.Append(").\n");
+		said.Append("Mean change from the frame before, by frame: ");
+		said.Append(SeriesText(analysis.m_ChangeByFrame, c_VideoSeriesShown).View());
+		said.Append("\nMean brightness by frame: ");
+		said.Append(SeriesText(analysis.m_BrightnessByFrame, c_VideoSeriesShown).View());
+		said.Append("\nThe most changing of ");
+		said.AppendInt(c_VideoGridColumns);
+		said.Append("x");
+		said.AppendInt(c_VideoGridRows);
+		said.Append(" cells (change: mean |change| between frames; spread: how far a pixel strays from its mean - a pulse or drift):\n");
+		for (int64 i = 0; i < analysis.m_Cells.Count() && i < c_VideoCellsReported; i += 1) DescribeCell(said, analysis.m_Cells[i]);
+		said.Append("A camera that moves changes everything it sees: flicker shows on a still camera, or where the change is far above what is around it.");
+
+		Core::Array<IED::ToolImage> named;
+		Core::Array<Core::String> images = { sheetPath, heatPath };
+		for (const Core::String& image : images) {
+			IED::ToolImage shown;
+			shown.m_Path = image;
+			shown.m_Mime = Core::String("image/png");
+			named.Push(shown);
+		}
+		Core::Array<Core::String> notes;
+		ToolOutcome outcome = ToolResult(said.View(), ((Core::String("[video ") + path.View()) + "]").View());
+		outcome.m_Images = AcceptedImages(call.m_Ws, named, notes);
+		return outcome;
+	}
+
+	void AddVideoTool(ToolRegistry& registry) {
+		ToolSpec* view = new ToolSpec();
+		view->m_Name = Core::String("video_view");
+		view->m_Description = Core::String("Watch a recording - a folder of PNG frames in name order, as a program saves them frame by frame (Claymore: --record FOLDER): a contact sheet of its frames, a heat map of where the brightness flickers from frame to frame, the change and brightness by frame, and the cells that change most with their brightness over time (flicker, pulsing, popping). Video files are not decoded yet: extract their frames first. Example: video_view({\"path\": \".ied/local/rec/trees\", \"region\": [400, 200, 320, 240]})");
+		view->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"a workspace folder of PNG frames\"}, \"from\": {\"type\": \"integer\", \"minimum\": 0, \"description\": \"the first frame (an index into the sorted files)\"}, \"count\": {\"type\": \"integer\", \"minimum\": 2, \"maximum\": 600, \"description\": \"frames to read (all, up to 600)\"}, \"sheet\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 16, \"description\": \"frames on the contact sheet (8)\"}, \"region\": {\"type\": \"array\", \"items\": {\"type\": \"integer\"}, \"minItems\": 4, \"maxItems\": 4, \"description\": \"[x, y, width, height]: only this part of each frame, at full resolution\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
+		view->m_ToolClass = ToolClass::Read;
+		view->m_ParallelSafe = true;
+		view->m_InPlan = true;
+		view->m_Deferred = true;
+		view->m_Group = Core::String("media");
+		view->m_Plan = VideoPlan;
+		view->m_Run = VideoRun;
+		registry.Add(view);
+	}
+}

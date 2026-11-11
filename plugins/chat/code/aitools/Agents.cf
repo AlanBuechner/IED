@@ -200,7 +200,8 @@ namespace Ai
 	// --- A sub-agent's turn ended --------------------------------------------------------------------------------------
 
 	void Chats::AgentTurnEnded(Chat* chat) {
-		if (chat->m_ParentChatId.IsEmpty() || !chat->Current()) return;
+		// A sub-agent that suspended goes on later: its parent's task runs until a turn of it ends some other way.
+		if (chat->m_ParentChatId.IsEmpty() || !chat->Current() || chat->Current()->m_Stop == "suspended") return;
 		Chat* parent = nullptr;
 		for (Chat* each : m_Chats)
 			if (each->m_ChatId == chat->m_ParentChatId) parent = each;

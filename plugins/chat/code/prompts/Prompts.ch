@@ -19,6 +19,7 @@ namespace Ai
 		public Core::String m_Docs;        // its plugins' reference docs, one line each
 		public bool m_Deferred;            // some tools are sent as stubs tool_search shows whole (item 7, docs/13)
 		public Core::String m_Agents;      // the sub-agents it may run and when delegating pays (docs/04); "" for none
+		public bool m_Endless;             // the chat runs until the owner stops it: Agent mode's instructions without finish
 	}
 
 	class Prompts
@@ -35,7 +36,7 @@ namespace Ai
 
 		private Core::String m_Base;
 		private Core::String m_Style;
-		private Core::HashMap<Core::String, Core::String> m_Modes;   // "ask" -> its instructions
+		private Core::HashMap<Core::String, Core::String> m_Modes;   // "ask" -> its instructions; "agent-endless" Agent's until stopped
 		private Core::HashMap<Core::String, Core::String> m_Notes;   // "continue_after_max_tokens" -> its text
 	}
 

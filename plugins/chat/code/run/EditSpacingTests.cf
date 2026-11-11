@@ -1,0 +1,47 @@
+// editspacing: an edit whose old text differs from the file only by spaces within its lines (a formatter's) finds its
+// place, when it is the only one.
+
+include "EditSpacing.ch"
+
+static Core::StringView SpacingView(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.editspacing")]
+class EditSpacingTests {
+	[test("a_space_the_formatter_put_in")]
+	public static void TestSpacePutIn() {
+		Core::String result;
+		const bool done = Ai::ReplaceRespaced(SpacingView("void F() {\n\tRun([]() { return 1; }, x);\n}\n"),
+			SpacingView("\tRun([](){ return 1; }, x);"), SpacingView("\tRun([]() -> int32 { return 1; }, x);"), result);
+		assert_true(done, "found despite the space");
+		assert_se("void F() {\n\tRun([]() -> int32 { return 1; }, x);\n}\n", result.CStr(), "replaced, the file's indentation kept");
+	}
+
+	[test("a_space_taken_out_across_lines")]
+	public static void TestSpaceTakenOut() {
+		Core::String result;
+		const bool done = Ai::ReplaceRespaced(SpacingView("a(1,2);\nb( 3 );\n"), SpacingView("a(1, 2);\nb(3);"), SpacingView("c();"), result);
+		assert_true(done, "found over two lines");
+		assert_se("c();\n", result.CStr(), "both lines replaced");
+	}
+
+	// Old written a tab deeper than the file, its new with lines at the file's depth: respaced, new's later lines went in a tab
+	// too deep. Indentation is the block a line is in, and matches as written.
+	[test("a_line_indented_otherwise_is_no_spacing")]
+	public static void TestIndentedOtherwise() {
+		Core::String result;
+		assert_true(!Ai::ReplaceRespaced(SpacingView("void F() {\n\tA();\n\tB();\n}\n"), SpacingView("\t\tA();\n\t\tB();\n\t}\n"),
+			SpacingView("\t\tA();\n\t\tB();\n\t}\n\nvoid G() {}\n"), result), "its lines a tab deeper: no place");
+		assert_true(Ai::ReplaceRespaced(SpacingView("void F() {\n\tA( 1 );\n\tB();\n}\n"), SpacingView("\tA(1);\n\tB();"), SpacingView("\tA(2);\n\tB();"), result),
+			"spaced otherwise within a line, its lines at the file's depth: found");
+		assert_se("void F() {\n\tA(2);\n\tB();\n}\n", result.CStr(), "replaced as written");
+	}
+
+	[test("two_places_or_none")]
+	public static void TestTwoPlacesOrNone() {
+		Core::String result;
+		assert_true(!Ai::ReplaceRespaced(SpacingView("f( x );\nf(x);\n"), SpacingView("f(x );"), SpacingView("g();"), result), "two places: none chosen");
+		assert_true(!Ai::ReplaceRespaced(SpacingView("f(x);\n"), SpacingView("f(y);"), SpacingView("g();"), result), "other text: no place");
+		assert_true(!Ai::ReplaceRespaced(SpacingView("f(x);\n"), SpacingView(" \t "), SpacingView("g();"), result), "blanks alone match nothing");
+		assert_true(!Ai::ReplaceRespaced(SpacingView("a\nb;\n"), SpacingView("ab;"), SpacingView("g();"), result), "a line break is no blank");
+	}
+}

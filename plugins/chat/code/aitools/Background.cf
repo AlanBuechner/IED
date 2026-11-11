@@ -1,4 +1,5 @@
 include "Background.ch"
+include "ChatTools.ch"
 
 namespace Ai
 {
@@ -112,10 +113,10 @@ namespace Ai
 		WakeForBackground(chat);
 	}
 
-	// An idle chat starts a turn to hear of its ended tasks; a running one hears them at its next step, a paused or
-	// waiting one with its next turn.
+	// An idle or suspended chat starts a turn to hear of its ended tasks; a running one hears them at its next step, a
+	// paused or waiting one with its next turn.
 	void Chats::WakeForBackground(Chat* chat) {
-		if (chat->m_Run || chat->m_State != ChatState::Idle) return;
+		if (chat->m_Run || (chat->m_State != ChatState::Idle && chat->m_State != ChatState::Suspended)) return;
 		Core::String told = TellEnded(chat);
 		if (told.IsEmpty()) return;
 		OwnerMessage message;
@@ -287,6 +288,22 @@ namespace Ai
 		return out.ToString();
 	}
 
+	// "<tool>: this chat has no task <id>" and the chat's tasks with their ids (an id is the one its start answered; a guess
+	// made in the same reply as the start misses).
+	static Core::String NoTask(const char* tool, Chat* chat, Core::StringView id) {
+		Core::StringBuilder out;
+		out.Append(tool);
+		out.Append(": this chat has no task ");
+		out.Append(id);
+		if (chat->m_Background.IsEmpty()) {
+			out.Append("; it has started none.");
+			return out.ToString();
+		}
+		out.Append("; its tasks (the id is the one the call that started it answered):\n");
+		for (BackgroundTask* task : chat->m_Background) StatusLine(out, task);
+		return out.ToString();
+	}
+
 	static ToolPlan BackgroundPlan(const ToolInvocation& call, const char* kind) {
 		ToolPlan plan;
 		Core::StringView id = call.m_Args.Member("id").AsView();
@@ -300,7 +317,7 @@ namespace Ai
 		Core::StringView id = call.m_Args.Member("id").AsView();
 		if (!id.IsEmpty()) {
 			BackgroundTask* task = chat->FindBackground(id);
-			if (!task) return ToolError((Core::String("background_status: this chat has no task ") + id).View());
+			if (!task) return ToolError(NoTask("background_status", chat, id).View());
 			Core::String text = TaskText(task);
 			chats->BackgroundChanged(chat);
 			return ToolResult(text.View(), (task->m_TaskId + " " + task->m_State.View()).View());
@@ -324,7 +341,7 @@ namespace Ai
 	static BackgroundTask* Awaited(Chat* chat, Core::StringView id, Core::String& problem) {
 		if (!id.IsEmpty()) {
 			BackgroundTask* task = chat->FindBackground(id);
-			if (!task) problem = Core::String("background_wait: this chat has no task ") + id;
+			if (!task) problem = NoTask("background_wait", chat, id);
 			return task;
 		}
 		for (BackgroundTask* task : chat->m_Background)
@@ -355,6 +372,15 @@ namespace Ai
 					return ToolResult(text.View(), (task->m_TaskId + " " + task->m_State.View()).View());
 				}
 				if (*call.m_Cancelled) return ToolError(Core::StringView("background_wait: the run was stopped"));
+				// A message for this turn stops the wait; the task goes on (docs/04 "Chats waiting on each other").
+				if (WaitInterrupted(chat)) {
+					Core::StringBuilder out;
+					out.Append("Stopped waiting for ");
+					out.Append(task->m_TaskId.View());
+					out.Append(": a message came for this turn, and it follows now. The task goes on - you are told when it ends; background_wait again to wait more.\n");
+					StatusLine(out, task);
+					return ToolResult(out.View(), Core::StringView("Stopped waiting: a message came"));
+				}
 				if (ChatNowMs() > deadline) {
 					Core::StringBuilder out;
 					out.Append("background_wait: ");
@@ -372,7 +398,7 @@ namespace Ai
 		IED::HostLock guard(*call.m_Context);
 		Core::StringView id = call.m_Args.Member("id").AsView();
 		BackgroundTask* task = chat->FindBackground(id);
-		if (!task) return ToolError((Core::String("background_stop: this chat has no task ") + id).View());
+		if (!task) return ToolError(NoTask("background_stop", chat, id).View());
 		if (!task->Running()) return ToolResult((task->m_TaskId + " already ended: " + task->m_Summary.View()).View(), (task->m_TaskId + " ended").View());
 		chats->StopBackground(task);
 		return ToolResult((Core::String("Stopping ") + task->m_TaskId.View() + "; you are told when it has ended.").View(), (Core::String("stopping ") + task->m_TaskId.View()).View());
@@ -408,7 +434,7 @@ namespace Ai
 			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
 		status->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StatusRun(chats, chat, call); };
 		registry.Add(status);
-		ToolSpec* wait = BackgroundTool("background_wait", "Wait for a background task to end (id), or for any of this chat's; returns how it ended with the end of its output. seconds: at most 600, 120 by default. You are told when a task ends anyway: wait only when you cannot go on without it. Example: background_wait({\"id\": \"bg-3\", \"seconds\": 300})",
+		ToolSpec* wait = BackgroundTool("background_wait", "Wait for a background task to end (id), or for any of this chat's; returns how it ended with the end of its output. seconds: at most 600, 120 by default. You are told when a task ends anyway: wait only when you cannot go on without it, and to wait long, suspend instead. A message for this turn stops the wait at once. Example: background_wait({\"id\": \"bg-3\", \"seconds\": 300})",
 			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"seconds\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 600}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
 		wait->m_ParallelSafe = false;
 		wait->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, chat, call); };

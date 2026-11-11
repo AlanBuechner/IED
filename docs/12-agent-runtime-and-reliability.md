@@ -79,6 +79,7 @@ A stop is classified into exactly one **stop reason**, shown in the turn footer 
 | Context | `context_overflow` | provider error mentioning context length, or prompt > discovered `n_ctx` |
 | Agent | `loop_detected`, `no_progress`, `budget` | runtime checks |
 | User | `user_cancelled` | stop button |
+| Agent | `suspended` | the model called `suspend`: the turn ends to wait, not a failure; the chat goes on by itself when what it waits on comes (`docs/04` "Chats waiting on each other") |
 | Harness | `harness_error` | the turn's own code let an exception escape: the turn ends with a note saying so, and the server's log has the message and where it was thrown (`Logs` below) |
 
 ### Recovery policy (defaults; per-model overrides in the model profile)

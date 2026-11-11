@@ -1,0 +1,207 @@
+include "Replies.ch"
+include "ChatService.ch"
+include "aitools/Background.ch"
+include "aitools/ChatTools.ch"
+
+namespace Ai
+{
+	// --- When a chat may suspend ---------------------------------------------------------------------------------------
+
+	SuspendBlock SuspendBlockOf(const Chat* chat) {
+		int64 newestOwed = -1;
+		for (const ReplyOwed* owed : chat->m_Owes)
+			if (owed->m_SinceMs > newestOwed) newestOwed = owed->m_SinceMs;
+		bool wakes = !chat->m_Awaits.IsEmpty();
+		bool wakesLater = false;   // something asked for after the newest reply it owes
+		for (const ReplyOwed* awaited : chat->m_Awaits)
+			if (awaited->m_SinceMs > newestOwed) wakesLater = true;
+		for (const BackgroundTask* task : chat->m_Background) {
+			if (!task->Running()) continue;
+			wakes = true;
+			// A command or a project's task ends by itself; a sub-agent's chat is a chat, so it counts from when it started.
+			if (task->m_Kind != "agent" || task->m_StartedMs > newestOwed) wakesLater = true;
+		}
+		if (newestOwed >= 0) return wakesLater ? SuspendBlock::None : SuspendBlock::OwesReply;
+		if (chat->m_Endless && !wakes) return SuspendBlock::NothingWakes;
+		return SuspendBlock::None;
+	}
+
+	Core::String WhatWakes(const Chat* chat) {
+		Core::StringBuilder out;
+		for (const ReplyOwed* awaited : chat->m_Awaits) {
+			out.Append("- the reply chat ");
+			out.Append(awaited->m_ChatId.View());
+			out.Append(" \"");
+			out.Append(awaited->m_Title.View());
+			out.Append("\" owes this chat\n");
+		}
+		for (const BackgroundTask* task : chat->m_Background) {
+			if (!task->Running()) continue;
+			out.Append("- the end of ");
+			out.Append(task->m_TaskId.View());
+			out.Append(" (");
+			out.Append(task->m_Kind.View());
+			out.Append(": ");
+			out.Append(task->m_Title.View());
+			out.Append(")\n");
+		}
+		return out.ToString();
+	}
+
+	ReplyOwed* DebtTo(const Chat* debtor, Core::StringView creditorId) {
+		for (ReplyOwed* owed : debtor->m_Owes)
+			if (owed->m_ChatId.View() == creditorId) return owed;
+		return nullptr;
+	}
+
+	Core::String ReplyLines(const Core::Array<ReplyOwed*>& replies, int64 nowMs) {
+		Core::StringBuilder out;
+		for (const ReplyOwed* reply : replies) {
+			out.Append("- ");
+			out.Append(reply->m_ChatId.View());
+			out.Append(" \"");
+			out.Append(reply->m_Title.View());
+			out.Append("\", asked ");
+			out.Append(TaskDuration(nowMs - reply->m_SinceMs).View());
+			out.Append(" ago\n");
+		}
+		return out.ToString();
+	}
+
+	Core::String ReplyCall(Core::StringView chatId) { return (Core::String("chat_send({\"chat\": \"") + chatId) + "\", \"text\": \"...\"})"; }
+
+	// --- Debts (Chats members) -------------------------------------------------------------------------------------------
+
+	static Chat* ChatNamed(const Core::Array<Chat*>& chats, Core::StringView chatId) {
+		for (Chat* chat : chats)
+			if (chat->m_ChatId.View() == chatId) return chat;
+		return nullptr;
+	}
+
+	void Chats::Owe(Chat* debtor, const Chat* creditor, int64 hops, bool question) {
+		ReplyOwed* owed = DebtTo(debtor, creditor->m_ChatId.View());
+		if (!owed) {
+			owed = new ReplyOwed();
+			owed->m_ChatId = creditor->m_ChatId;
+			debtor->m_Owes.Push(owed);
+		}
+		// Asked again: the newest ask is when it was asked for (the newest debt acts).
+		owed->m_Title = creditor->m_Title;
+		owed->m_SinceMs = ChatNowMs();
+		owed->m_Hops = hops;
+		owed->m_Question = owed->m_Question || question;
+		RepliesChanged(debtor->m_WsId.View());
+	}
+
+	ReplyOwed* Chats::Pay(Chat* debtor, Core::StringView creditorId) {
+		for (int64 i = 0; i < debtor->m_Owes.Count(); ++i) {
+			ReplyOwed* owed = debtor->m_Owes[i];
+			if (owed->m_ChatId.View() != creditorId) continue;
+			debtor->m_Owes.RemoveAt(i);
+			// The answer to a question back: the chat that asked owed this one a reply when it asked, and owes it again.
+			Chat* creditor = ChatNamed(m_Chats, creditorId);
+			if (owed->m_Question && creditor) Owe(creditor, debtor, owed->m_Hops, false);
+			RepliesChanged(debtor->m_WsId.View());
+			return owed;
+		}
+		return nullptr;
+	}
+
+	void Chats::RepliesChanged(Core::StringView wsId) {
+		Core::Array<Chat*> chats = InWorkspace(wsId);
+		Core::HashMap<Core::String, Core::String> before;
+		for (Chat* chat : chats) {
+			IED::JsonWriter json;
+			WriteReplies(json, chat->m_Owes);
+			WriteReplies(json, chat->m_Awaits);
+			before.At(chat->m_ChatId) = json.ToString();
+			chat->m_Awaits.Clear();
+		}
+		for (Chat* debtor : chats) {
+			int64 at = 0;
+			while (at < debtor->m_Owes.Count()) {
+				ReplyOwed* owed = debtor->m_Owes[at];
+				Chat* creditor = ChatNamed(chats, owed->m_ChatId.View());
+				// A creditor that is gone - deleted - is owed nothing.
+				if (!creditor) {
+					debtor->m_Owes.RemoveAt(at);
+					continue;
+				}
+				owed->m_Title = creditor->m_Title;
+				ReplyOwed* awaited = new ReplyOwed();
+				awaited->m_ChatId = debtor->m_ChatId;
+				awaited->m_Title = debtor->m_Title;
+				awaited->m_SinceMs = owed->m_SinceMs;
+				awaited->m_Hops = owed->m_Hops;
+				awaited->m_Question = owed->m_Question;
+				creditor->m_Awaits.Push(awaited);
+				at += 1;
+			}
+		}
+		for (Chat* chat : chats) {
+			IED::JsonWriter json;
+			WriteReplies(json, chat->m_Owes);
+			WriteReplies(json, chat->m_Awaits);
+			Core::String was;
+			before.TryGet(chat->m_ChatId, was);
+			if (was != json.ToString()) Changed(chat);
+		}
+	}
+
+	// What IED tells a creditor of a debtor's turn that ended without the reply: `stop` the turn's, `answer` what it
+	// answered. "" for a turn that leaves nothing to tell (it suspended: it may, so it waits on something).
+	static Core::String EndedWithoutReply(Core::StringView stop, Core::StringView answer, bool& paid, const char*& reply) {
+		Core::StringBuilder out;
+		Core::StringView said = answer.Trimmed().IsEmpty() ? Core::StringView("(no answer)") : answer;
+		if (stop == "suspended") return Core::String();
+		if (stop == "finished") {
+			paid = true;
+			reply = "answer";
+			out.Append("Its turn ended with this answer, without a chat_send to this chat; the answer is its reply:\n\n");
+			out.Append(said);
+			return out.ToString();
+		}
+		reply = "notice";
+		if (stop == "user_cancelled") {
+			paid = true;
+			out.Append("Its owner stopped its turn before it replied, so it owes this chat nothing now; send it a new request with require_reply if you still need one. What it had answered:\n\n");
+			out.Append(said);
+			return out.ToString();
+		}
+		paid = false;
+		out.Append("Its turn stopped (");
+		out.Append(stop);
+		out.Append(") before it replied. It still owes this chat the reply and goes on when its owner sends it a message; chat_read shows where it got. What it had answered:\n\n");
+		out.Append(said);
+		return out.ToString();
+	}
+
+	void Chats::TellCreditors(Chat* debtor) {
+		if (debtor->m_Owes.IsEmpty() || !debtor->Current()) return;
+		const Turn* turn = debtor->Current();
+		Core::String answer = AnswerOf(turn);
+		Core::Array<ReplyOwed*> owes = debtor->m_Owes;
+		for (ReplyOwed* owed : owes) {
+			Chat* creditor = ChatNamed(m_Chats, owed->m_ChatId.View());
+			if (!creditor) continue;
+			bool paid = false;
+			const char* reply = "";
+			Core::String text = EndedWithoutReply(turn->m_Stop.View(), answer.View(), paid, reply);
+			if (text.IsEmpty()) continue;
+			const int64 hops = owed->m_Hops;
+			if (paid) Pay(debtor, owed->m_ChatId.View());
+			Deliver(creditor, text.View(), debtor, hops, reply);
+		}
+		RepliesChanged(debtor->m_WsId.View());
+	}
+
+	void Chats::DebtorGone(Chat* debtor) {
+		Core::Array<ReplyOwed*> owes = debtor->m_Owes;
+		debtor->m_Owes.Clear();
+		for (ReplyOwed* owed : owes) {
+			Chat* creditor = ChatNamed(m_Chats, owed->m_ChatId.View());
+			if (!creditor || creditor == debtor) continue;
+			Deliver(creditor, Core::StringView("It was deleted before it replied, so no reply will come from it."), debtor, owed->m_Hops, "notice");
+		}
+	}
+}

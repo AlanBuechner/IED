@@ -25,6 +25,18 @@ namespace Ai
 	// Whether `folder` is, or is in, a folder search skips by default (build output, .git): search_text naming one
 	// searches it whole.
 	bool InExcludedFolder(Core::StringView folder);
+	// Where search_text looks: m_File one file, read as edited and searched whatever ignore files and the skipped folders
+	// say; else m_Alone a skipped folder searched whole on the disk ("" for the workspace as edited, which skips build
+	// output and ignored files), and the glob its files must match (relative to m_Alone when it is set).
+	struct SearchScope
+	{
+		public Core::String m_File;
+		public Core::String m_Alone;
+		public Core::String m_Glob;
+	}
+	// The scope of a search whose `path` is a folder - or one file, when `isFile` - and whose `glob` (under the folder) is
+	// given or empty; a file's search is that file alone, its glob left out.
+	SearchScope ScopeOfSearch(Core::StringView path, Core::StringView glob, bool isFile);
 	// search_text's error for a failed search; a broken regex says how to match its special characters as text.
 	Core::String SearchProblem(Core::StringView problem, bool regex);
 	// The last `lines` lines of `text`, at most `bytes` of them.

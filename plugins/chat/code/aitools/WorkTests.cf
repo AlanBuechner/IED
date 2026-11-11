@@ -55,6 +55,42 @@ class WorkToolsTests {
 		assert_true(!Ai::InExcludedFolder(Core::StringView("")) && !Ai::InExcludedFolder(Core::StringView("src/builder")) && !Ai::InExcludedFolder(Core::StringView("Packages/Renderer")), "not the root, nor folders named like them");
 	}
 
+	[test("search_scope_of_a_folder_or_a_file")]
+	public static void TestSearchScope() {
+		Ai::SearchScope folder = Ai::ScopeOfSearch(Core::StringView("src"), Core::StringView("*.cf"), false);
+		assert_true(folder.m_Alone.IsEmpty() && folder.m_Glob == "src/*.cf", "a folder: its glob under it, the workspace as edited");
+		Ai::SearchScope whole = Ai::ScopeOfSearch(Core::StringView("src"), Core::StringView(""), false);
+		assert_se("src/**", whole.m_Glob.CStr(), "without a glob, all of it");
+		assert_true(folder.m_File.IsEmpty() && whole.m_File.IsEmpty(), "a folder is no file");
+		Ai::SearchScope file = Ai::ScopeOfSearch(Core::StringView("src/a.cf"), Core::StringView("*.ch"), true);
+		assert_true(file.m_File == "src/a.cf" && file.m_Alone.IsEmpty() && file.m_Glob.IsEmpty(), "a file: that file alone, the glob left out");
+		Ai::SearchScope ignored = Ai::ScopeOfSearch(Core::StringView(".ied/local/check/full-test.log"), Core::StringView(""), true);
+		assert_se(".ied/local/check/full-test.log", ignored.m_File.CStr(), "an ignored file named alone is searched all the same");
+		Ai::SearchScope built = Ai::ScopeOfSearch(Core::StringView("build/int/Rhi/tests/results.json"), Core::StringView(""), true);
+		assert_true(built.m_File == "build/int/Rhi/tests/results.json" && built.m_Alone.IsEmpty(), "and one in a skipped folder");
+		Ai::SearchScope skipped = Ai::ScopeOfSearch(Core::StringView("build/int"), Core::StringView("**/*.json"), false);
+		assert_true(skipped.m_Alone == "build/int" && skipped.m_Glob == "**/*.json", "a skipped folder: whole, its glob relative to it");
+	}
+
+	[test("search_one_files_text")]
+	public static void TestSearchFileText() {
+		IED::SearchQuery query;
+		query.m_Text = Core::String("passed");
+		query.m_MaxResults = 10;
+		query.m_Exclude.Push(Core::String("**"));   // what would skip the file in a walk does not here
+		IED::SearchResult result;
+		Core::String problem;
+		assert_true(IED::SearchFileText(Core::StringView("logs/run.log"), Core::StringView("one\n  passed  A\nthree passed\n"), query, result, problem), problem.CStr());
+		assert_eq((int64)2, result.m_Matches.Count(), "its matching lines");
+		assert_true(result.m_Matches[0].m_Path == "logs/run.log" && result.m_Matches[0].m_Line == 1, "by the path given, from line 0");
+		IED::SearchResult binary;
+		Core::String withNul = Core::String("passed") + Core::StringView("\0x", 2);
+		assert_true(IED::SearchFileText(Core::StringView("a.bin"), withNul.View(), query, binary, problem) && binary.m_Matches.IsEmpty(), "a binary text shows nothing");
+		query.m_Regex = true;
+		query.m_Text = Core::String("(");
+		assert_true(!IED::SearchFileText(Core::StringView("a.txt"), Core::StringView("("), query, result, problem) && problem.View().Contains(Core::StringView("not a valid regex")), "a broken regex is refused");
+	}
+
 	[test("search_problem")]
 	public static void TestSearchProblem() {
 		Core::String broken = Ai::SearchProblem(Core::StringView("the pattern is not a valid regex: a '(' that is never closed"), true);

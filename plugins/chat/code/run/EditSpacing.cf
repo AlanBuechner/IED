@@ -1,0 +1,62 @@
+include "EditSpacing.ch"
+
+namespace Ai
+{
+	static bool IsBlank(int32 c) { return c == ' ' || c == '\t'; }
+
+	// Past the spaces and tabs from `at` on.
+	static int64 PastBlanks(Core::StringView text, int64 at) {
+		while (at < text.ByteLength() && IsBlank(text.ByteAt(at))) at += 1;
+		return at;
+	}
+
+	// Where `old` read from `at` in `text` ends, spaces and tabs within its lines skipped on either side; -1 when it does not
+	// match. The match starts and ends on something else than a blank. A line's indentation after a break is no spacing - it
+	// says which block the line is in - and matches as written: an old indented otherwise is ReplaceShifted's or a miss, else
+	// new's later lines would go in at old's depth, not the file's.
+	static int64 RespacedEnd(Core::StringView text, int64 at, Core::StringView old) {
+		int64 o = PastBlanks(old, 0);
+		int64 t = at;
+		while (o < old.ByteLength()) {
+			if (t >= text.ByteLength() || text.ByteAt(t) != old.ByteAt(o)) return -1;
+			const bool lineBreak = old.ByteAt(o) == '\n';
+			const int64 oNext = PastBlanks(old, o + 1);
+			t += 1;
+			if (lineBreak && oNext < old.ByteLength()) {
+				const int64 tNext = PastBlanks(text, t);
+				if (old.Substring(o + 1, oNext - o - 1) != text.Substring(t, tNext - t)) return -1;
+				o = oNext;
+				t = tNext;
+				continue;
+			}
+			o = oNext;
+			if (o < old.ByteLength()) t = PastBlanks(text, t);
+		}
+		return t;
+	}
+
+	bool ReplaceRespaced(Core::StringView text, Core::StringView old, Core::StringView replacement, Core::String& result) {
+		int64 first = PastBlanks(old, 0);
+		if (first >= old.ByteLength()) return false;
+		int64 found = -1;
+		int64 foundEnd = -1;
+		for (int64 at = 0; at < text.ByteLength(); at += 1) {
+			if (text.ByteAt(at) != old.ByteAt(first)) continue;
+			int64 end = RespacedEnd(text, at, old);
+			if (end < 0) continue;
+			if (found >= 0) return false;   // more than one place
+			found = at;
+			foundEnd = end;
+		}
+		if (found < 0) return false;
+		// The file keeps its own indentation before the place: the replacement goes in without the blanks old began with.
+		bool sameLead = replacement.ByteLength() >= first && replacement.Substring(0, first) == old.Substring(0, first);
+		int64 from = sameLead ? first : 0;
+		Core::StringBuilder out;
+		out.Append(text.Substring(0, found));
+		out.Append(replacement.Substring(from, replacement.ByteLength() - from));
+		out.Append(text.Substring(foundEnd, text.ByteLength() - foundEnd));
+		result = out.ToString();
+		return true;
+	}
+}

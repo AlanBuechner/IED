@@ -1,0 +1,130 @@
+// Chats waiting on each other (docs/04 "Chats waiting on each other"): when a chat may suspend - the newest debt acts -
+// what wakes it, what the model is told of a message that requires a reply or is one, and a debt kept in chat.json.
+
+include "Replies.ch"
+include "ChatService.ch"
+
+static Ai::ReplyOwed* Debt(const char* chatId, int64 sinceMs) {
+	Ai::ReplyOwed* owed = new Ai::ReplyOwed();
+	owed->m_ChatId = Core::String(chatId);
+	owed->m_Title = Core::String(chatId);
+	owed->m_SinceMs = sinceMs;
+	return owed;
+}
+
+static Ai::BackgroundTask* Task(const char* kind, int64 startedMs) {
+	Ai::BackgroundTask* task = new Ai::BackgroundTask();
+	task->m_TaskId = Core::String("bg-1");
+	task->m_Kind = Core::String(kind);
+	task->m_Title = Core::String("npm test");
+	task->m_State = Core::String("running");
+	task->m_StartedMs = startedMs;
+	return task;
+}
+
+[test("server.ai.replies")]
+class RepliesTests {
+	[test("a_chat_that_owes_nothing_may_suspend")]
+	public static void TestFree() {
+		Ai::Chat* chat = new Ai::Chat();
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::None, "nothing owed: the owner's message wakes it");
+		assert_true(Ai::WhatWakes(chat).IsEmpty(), "nothing IED knows of wakes it");
+		chat->m_Awaits.Push(Debt("c2", 100));
+		assert_true(Ai::WhatWakes(chat).View().Contains(Core::StringView("the reply chat c2")), Ai::WhatWakes(chat).CStr());
+	}
+
+	[test("a_chat_that_runs_until_stopped_suspends_only_to_wait")]
+	public static void TestEndless() {
+		Ai::Chat* chat = new Ai::Chat();
+		chat->m_Endless = true;
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::NothingWakes, "nothing would wake it");
+		chat->m_Background.Push(Task("command", 50));
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::None, "a running task wakes it");
+		Ai::Chat* waiting = new Ai::Chat();
+		waiting->m_Endless = true;
+		waiting->m_Awaits.Push(Debt("c2", 100));
+		assert_true(Ai::SuspendBlockOf(waiting) == Ai::SuspendBlock::None, "a reply it required wakes it");
+	}
+
+	// The newest debt acts: a chat that owes may sleep only on something asked for after the newest reply it owes.
+	[test("a_debtor_suspends_only_on_something_newer")]
+	public static void TestNewestActs() {
+		Ai::Chat* chat = new Ai::Chat();
+		chat->m_Owes.Push(Debt("c1", 100));
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::OwesReply, "owes and waits on nothing");
+		chat->m_Awaits.Push(Debt("c1", 90));
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::OwesReply, "what it waits on was asked before: the other chat may wait on it");
+		chat->m_Awaits.Push(Debt("c3", 100));
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::OwesReply, "asked at the same time is not after");
+		chat->m_Awaits.Push(Debt("c3", 120));
+		assert_true(Ai::SuspendBlockOf(chat) == Ai::SuspendBlock::None, "a helper it asked since");
+		Ai::Chat* building = new Ai::Chat();
+		building->m_Owes.Push(Debt("c1", 100));
+		building->m_Background.Push(Task("command", 10));
+		assert_true(Ai::SuspendBlockOf(building) == Ai::SuspendBlock::None, "a command ends by itself, whenever it started");
+		Ai::Chat* delegating = new Ai::Chat();
+		delegating->m_Owes.Push(Debt("c1", 100));
+		delegating->m_Background.Push(Task("agent", 10));
+		assert_true(Ai::SuspendBlockOf(delegating) == Ai::SuspendBlock::OwesReply, "a sub-agent run before the debt is a chat that may wait on it");
+		delegating->m_Background.Push(Task("agent", 150));
+		assert_true(Ai::SuspendBlockOf(delegating) == Ai::SuspendBlock::None, "one run since");
+	}
+
+	// Two chats owing each other: only the one asked last may not sleep, so they never both do.
+	[test("of_two_chats_owing_each_other_one_stays_awake")]
+	public static void TestCycle() {
+		Ai::Chat* lead = new Ai::Chat();
+		Ai::Chat* helper = new Ai::Chat();
+		helper->m_Owes.Push(Debt("lead", 100));     // the lead's task
+		lead->m_Awaits.Push(Debt("helper", 100));
+		lead->m_Owes.Push(Debt("helper", 200));     // the helper's question back
+		helper->m_Awaits.Push(Debt("lead", 200));
+		const bool leadSleeps = Ai::SuspendBlockOf(lead) == Ai::SuspendBlock::None;
+		const bool helperSleeps = Ai::SuspendBlockOf(helper) == Ai::SuspendBlock::None;
+		assert_true(helperSleeps && !leadSleeps, "the helper waits for the answer; the lead must give it");
+	}
+
+	[test("a_message_says_it_requires_a_reply_or_is_one")]
+	public static void TestModelText() {
+		Ai::Chat* to = new Ai::Chat();
+		Ai::OwnerMessage sent;
+		sent.m_Text = Core::String("Port Ring.h");
+		sent.m_FromChatId = Core::String("c1");
+		sent.m_FromTitle = Core::String("Lead");
+		sent.m_Hops = 3;
+		sent.m_Reply = Core::String("required");
+		Core::String required = Ai::ModelText(to, sent);
+		assert_true(required.View().Contains(Core::StringView("it requires your reply")) && required.View().Contains(Core::StringView("chat_send({\"chat\": \"c1\"")), required.CStr());
+		assert_true(!required.View().Contains(Core::StringView("no chat_send can answer it")), "a required reply can always be sent, even at the chain's last");
+		sent.m_Reply = Core::String("answer");
+		Core::String answer = Ai::ModelText(to, sent);
+		assert_true(answer.View().StartsWith(Core::StringView("Reply from chat \"Lead\" (c1)")) && answer.View().EndsWith(Core::StringView("Port Ring.h")), answer.CStr());
+		sent.m_Reply = Core::String("notice");
+		assert_true(Ai::ModelText(to, sent).View().StartsWith(Core::StringView("IED, for chat \"Lead\" (c1), which owes this chat a reply")), Ai::ModelText(to, sent).CStr());
+	}
+
+	[test("a_debt_and_a_reply_are_kept_as_json")]
+	public static void TestJson() {
+		Ai::ReplyOwed* owed = Debt("c1", 1234);
+		owed->m_Hops = 2;
+		owed->m_Question = true;
+		IED::JsonWriter json;
+		owed->WriteJson(json);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Ai::ReplyOwed read;
+		read.Read(Serialization::ReadJson(json.View(), *doc).root);
+		assert_true(read.m_ChatId == "c1" && read.m_SinceMs == 1234 && read.m_Hops == 2 && read.m_Question, json.ToString().CStr());
+		Ai::OwnerMessage message;
+		message.m_Text = Core::String("hi");
+		message.m_FromChatId = Core::String("c1");
+		message.m_FromTitle = Core::String("Lead");
+		message.m_Reply = Core::String("required");
+		IED::JsonWriter kept;
+		message.WriteJson(kept);
+		Serialization::DomDoc* keptDoc = new Serialization::DomDoc();
+		Ai::OwnerMessage back;
+		back.Read(Serialization::ReadJson(kept.View(), *keptDoc).root);
+		assert_true(back.m_Reply == "required" && back.m_FromChatId == "c1", kept.ToString().CStr());
+		assert_true(Core::StringView(Ai::ChatStateName(Ai::ChatState::Suspended)) == "suspended", "the state's name");
+	}
+}

@@ -73,6 +73,52 @@ class ClipboardTests {
 		assert_true(!Ai::CutClip(text, false, onlyTo, cut, error) && error.View() == "to \"a = 1\" is not in it", "within the lines given");
 	}
 
+	[test("a_miss_by_indentation_alone_is_found_where_it_fits")]
+	public static void TestIndentationMatch() {
+		Core::StringView text = Text("void f()\n{\n\tif (a)\n\t\tg();\n}\n");
+		Ai::ClipRange range;
+		range.m_From = Core::String("void");
+		range.m_To = Core::String("\t\t\tg();\n}");
+		Core::String cut;
+		Core::String error;
+		assert_true(Ai::CutClip(text, false, range, cut, error), error.CStr());
+		assert_true(cut.View() == "void f()\n{\n\tif (a)\n\t\tg();\n}", "a to with a tab too many: ends where it fits");
+		range.m_From = Core::String("\t\t\tif (a)");
+		range.m_To = Core::String("g();\n");
+		assert_true(Ai::CutClip(text, false, range, cut, error) && cut.View() == "\tif (a)\n\t\tg();\n", "a from at its line's indentation takes the line's own");
+		range.m_From = Core::String("void");
+		range.m_To = Core::String("nowhere();");
+		assert_true(!Ai::CutClip(text, false, range, cut, error) && !error.View().Contains(Text("indentation")), "what is nowhere is still a miss");
+	}
+
+	[test("a_tab_or_break_written_as_an_escape_is_read_as_one")]
+	public static void TestEscapesRead() {
+		Core::StringView text = Text("void f()\n{\n\tif (a)\n\t\tg(\"\\t\");\n}\n");
+		Ai::ClipRange range;
+		range.m_From = Core::String("void");
+		range.m_To = Core::String("\\tif (a)\\n");
+		Core::String cut;
+		Core::String error;
+		assert_true(Ai::CutClip(text, false, range, cut, error), error.CStr());
+		assert_true(cut.View() == "void f()\n{\n\tif (a)\n", "a to whose tab and break are escapes");
+		range.m_From = Core::String("g(\"\\t");
+		range.m_To = Core::String("}");
+		assert_true(Ai::CutClip(text, false, range, cut, error) && cut.View() == "g(\"\\t\");\n}", "an escape the text has is taken as written");
+		range.m_From = Core::String("\\tnowhere");
+		assert_true(!Ai::CutClip(text, false, range, cut, error) && error.View() == "from \"\\tnowhere\" is not in it", error.CStr());
+	}
+
+	[test("a_miss_by_indentation_in_two_places_says_where")]
+	public static void TestIndentationTwice() {
+		Core::StringView text = Text("\tg();\n\t\tg();\n");
+		Ai::ClipRange range;
+		range.m_From = Core::String("\t\t\tg();");
+		Core::String cut;
+		Core::String error;
+		assert_true(!Ai::CutClip(text, false, range, cut, error), "two places fit: none is taken");
+		assert_true(error.View().Contains(Text("lines 1 and 2 have it with other indentation")), error.CStr());
+	}
+
 	[test("copy_report_says_where_the_clip_ends")]
 	public static void TestCopyReport() {
 		Core::Array<Ai::Clip*> clips = Board();

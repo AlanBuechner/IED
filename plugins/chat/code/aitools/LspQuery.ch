@@ -49,11 +49,22 @@ namespace Ai
 	Core::String NumberedSpan(Core::StringView text, int64 first, int64 last, int64 most);
 	// `name` split at "::" and "." into its parts.
 	Core::Array<Core::String> NameParts(Core::StringView name);
+	// What a lookup of `type`::`missing` that found nothing says instead: the type's members, each name once (overloads),
+	// at most 60; empty without members.
+	Core::String MembersSaid(Core::StringView type, Core::StringView missing, const Core::Array<CodeSymbol*>& members);
+	// What else of `found` is named exactly `missing`, for `Type::Missing` whose type has no such member: a free function beside
+	// the type is often what was meant. Empty when none is.
+	Core::String NamedElsewhereSaid(Core::StringView missing, const Core::Array<CodeSymbol*>& found);
 	// The words of a name or phrase: split at anything but letters and digits and where a lower-case letter meets an
 	// upper-case one ("LanguageServerPool" -> Language, Server, Pool; "LSPPool" -> LSP, Pool), each at least 3 bytes.
 	Core::Array<Core::String> NameWords(Core::StringView text);
+	// A qualified name as code writes it where it is defined out of its owner: its last two parts ("Ring::Push" of
+	// "Ai::Ring::Push"); empty for a plain name.
+	Core::String WrittenOwnerAndName(Core::StringView name);
 	// Whether `qualified` ("Ai::Ring::Push") is `want` ("Ring::Push") or ends with "::" and it; "." counts as "::".
 	bool QualifiedMatches(Core::StringView qualified, Core::StringView want);
+	// Whether a declaration's line only gives another name to a type: C4's `alias A = B;`, C++'s `using A = B;`.
+	bool DeclaresAlias(Core::StringView line);
 
 	// One tool call's conversation with the workspace's language servers. Its failures throw IED::RpcError with what
 	// the model should do instead.
@@ -85,6 +96,15 @@ namespace Ai
 		// The file a tool's `path` argument names: a workspace path, normalized (also when given as its absolute path); a
 		// file outside the workspace - by its absolute path, as the tools show one, or its file: URI - as its file: URI.
 		public Core::String FileOf(Core::StringView given) const;
+		// FileOf's file; when the workspace has none there, the only source file of its name, which a path that missed most
+		// likely meant (as fs_read reads it); else FileOf's, for the caller's "no file".
+		public Core::String ExistingFileOf(Core::StringView given) const;
+		// What to try when `path` (as FileOf gives it) names no file or folder: the files of its name, or how to find one;
+		// empty when it names one.
+		public Core::String MissedFileHint(Core::StringView path) const;
+		// For a plain name no symbol has: the workspace's files named so (RenderShaders.ch for RenderShaders), whose outline
+		// was likely meant; empty when there are none.
+		public Core::String FileNamedHint(Core::StringView name) const;
 		// A Location {uri, range} or LocationLink {targetUri, targetRange, targetSelectionRange}: its name's span with
 		// `selection`, else its whole one.
 		public CodeSpan SpanOf(const Serialization::DomNode& location, bool selection) const;
@@ -98,9 +118,13 @@ namespace Ai
 		// file's outline has it (a workspace symbol's own place when the outline does not come in the server's time):
 		// definitions and declarations, overloads, same-named symbols of other owners.
 		public Core::Array<CodeSymbol*> Find(Core::StringView name, Core::StringView path);
+		// The members of the type `qualifier` names ("MeshEditor", "Geometry::Mesh"): its outline's children; empty when no type
+		// is named so.
+		public Core::Array<CodeSymbol*> MembersOf(Core::StringView qualifier);
 
 	private:
 		private CodeSymbol* Refined(CodeSymbol* found);
+		private void FindInScope(Core::StringView last, Core::StringView qualifier, Core::StringView name, Core::Array<CodeSymbol*>& found);
 		private Core::HashMap<Core::String, Core::String> m_Texts;
 		private Core::HashMap<Core::String, Core::Array<CodeSymbol*>*> m_Outlines;
 		private Core::HashMap<Core::String, Serialization::DomNode> m_Servers;
@@ -117,6 +141,9 @@ namespace Ai
 	// The target of a call's `symbol`, `path`, `line` and `column`; one symbol's when `symbol` names several of one
 	// qualified name (its declaration and definition, overloads), else it fails listing them.
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args);
+	// As TargetOf, but a plain name that symbols of up to `mostNames` qualified names have keeps them all, its label the name asked:
+	// code_read_symbol shows each rather than ask which (GatherCandidates of two packages).
+	CodeTarget TargetsOf(CodeQuery& query, const Serialization::DomNode& args, int64 mostNames);
 	// The schema properties every code tool's target takes, for a tool's parameters.
-	const char* c_CodeTargetProperties = "\"symbol\": {\"type\": \"string\", \"description\": \"a name, qualified to narrow it: Ring::Push\"}, \"path\": {\"type\": \"string\", \"description\": \"the file: narrows symbol, or with line names a place\"}, \"line\": {\"type\": \"integer\", \"minimum\": 1}, \"column\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"without it, symbol's place on the line, else its first word\"}";
+	const char* c_CodeTargetProperties = "\"symbol\": {\"type\": \"string\", \"description\": \"a name, qualified to narrow it: Ring::Push\"}, \"path\": {\"type\": \"string\", \"description\": \"the file: narrows symbol, or with line names a place; needed for code outside the workspace (ied:/..., a package's), whose symbols are known only by their file\"}, \"line\": {\"type\": \"integer\", \"minimum\": 1}, \"column\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"without it, symbol's place on the line, else its first word\"}";
 }

@@ -41,7 +41,7 @@ export class SidePanel {
 	update(model) {
 		replace(this.title, h("span.ellip", null, "Details"),
 			h("button.ib.chat-phone-only", { title: "Close details", "aria-label": "Close details", on: { click: () => this.actions.closeDetails() } }, icon("close")));
-		replace(this.body, this.contextSection(model), this.tasksSection(model), this.backgroundSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
+		replace(this.body, this.contextSection(model), this.tasksSection(model), this.repliesSection(model), this.backgroundSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
 	}
 
 	// The panel drawn again after a fold or unfold.
@@ -143,6 +143,22 @@ export class SidePanel {
 			this.actions.fileIcon(file.path), h("span.name", null, file.path.split("/").pop()), h("span.dir.muted", null, file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
 			h("span.meta", null, file.plus ? h("span.plus", null, "+" + file.plus) : null, file.minus ? h("span.minus", null, " -" + file.minus) : null)));
 		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? this.limited("files", rows) : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
+	}
+
+	// The replies this chat waits for and those it owes (docs/04 "Chats waiting on each other"): shown only when there is
+	// one; a row opens the other chat.
+	repliesSection(model) {
+		const summary = model.summary || {};
+		const awaits = summary.awaits || [];
+		const owes = summary.owes || [];
+		if (!awaits.length && !owes.length) return null;
+		const now = Date.now();
+		const row = (reply, glyph, what) => h("button.chat-sec-row.reply", { title: (reply.title || reply.chatId) + " " + (what === "owed a reply" ? "is owed a reply by this chat" : "owes this chat a reply") + ", asked at " + clockOf(reply.sinceMs) + " - open it",
+			dataset: { chat: reply.chatId }, on: { click: () => this.actions.openChat(reply.chatId) } },
+			icon(glyph), h("span.name", null, reply.title || reply.chatId), h("span.dir.muted", null, what), h("span.meta", null, taskTime(now - reply.sinceMs)));
+		const rows = [...awaits.map((r) => row(r, "clock", "owes a reply")), ...owes.map((r) => row(r, "reply", "owed a reply"))];
+		const meta = [awaits.length ? awaits.length + " awaited" : "", owes.length ? owes.length + " owed" : ""].filter(Boolean).join(", ");
+		return this.section("replies", "Replies", meta, this.limited("replies", rows));
 	}
 
 	// The background tasks the AI started: shown only when it started one; the newest first.

@@ -8,7 +8,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
 import { showImage } from "/ui-kit/imageview.js";
 import { answerLinks } from "/ui-kit/linkclicks.js";
-import { argsLine, compact, diffRows, duration, tokensPerSecond, turnEndHeld, turnStartHeld } from "./chatmodel.js";
+import { WAIT_TOOLS, argsLine, compact, diffRows, duration, tokensPerSecond, turnEndHeld, turnStartHeld } from "./chatmodel.js";
 import { userChips } from "./userchips.js";
 
 // The streaming thinking's preview (owner, 2026-10-26: "just show the last few lines with a fixed size block"): the last
@@ -20,8 +20,15 @@ export function thinkingTail(text) {
 	return String(text || "").split("\n").slice(-THINK_TAIL_LINES).join("\n");
 }
 
-const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
-const STOP_LABELS = { finished: "Finished", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model", harness_error: "Stopped by an error in IED" };
+const QUIET_STOPS = new Set(["finished", "user_cancelled", "suspended"]);
+const STOP_LABELS = { finished: "Finished", suspended: "Suspended", user_cancelled: "Stopped", interrupted: "Interrupted by a restart", no_model: "No model", harness_error: "Stopped by an error in IED" };
+// What a message from another chat is in a reply one chat required of the other (docs/04 "Chats waiting on each other"):
+// [label, tooltip].
+const REPLY_CHIPS = {
+	required: ["reply required", "That chat requires a reply: this one cannot finish before it messages it back"],
+	answer: ["reply", "The reply this chat required of that one"],
+	notice: ["no reply", "IED, for that chat: its turn ended without the reply it owes this one"],
+};
 
 function clock(ms) {
 	if (!ms) return "";
@@ -164,8 +171,10 @@ export class TranscriptView {
 	// The owner, or another chat (docs/04 "Chats talk to each other"), which a click opens; `tools` the message's buttons.
 	senderHead(from, ms, tools) {
 		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(ms)), tools || null);
+		const reply = REPLY_CHIPS[from.reply];
 		return h("div.chat-head.from", null, icon("comment-discussion"), h("b", null, "From chat"),
 			h("button.chat-from-link", { title: "Open " + from.title, on: { click: () => this.actions.openChat(from.chatId) } }, from.title || from.chatId),
+			reply ? h("span.chat-reply-chip", { title: reply[1], dataset: { reply: from.reply } }, reply[0]) : null,
 			h("span.muted", null, clock(ms)), tools || null);
 	}
 
@@ -332,6 +341,7 @@ export class TranscriptView {
 			h("span.tstat", null,
 				segment.plus ? h("span.plus", null, "+" + segment.plus) : null, segment.minus ? h("span.minus", null, "-" + segment.minus) : null,
 				segment.source ? h("span.src", null, segment.source) : null,
+				segment.state === "running" && WAIT_TOOLS.has(segment.tool) ? h("span.chat-wait-hint", { title: "Send a message (Enter) and the AI stops waiting and reads it; what it waits on goes on" }, "a message stops the wait") : null,
 				segment.ms !== undefined && segment.state !== "running" && segment.state !== "streaming" ? h("span", null, duration(segment.ms)) : null,
 				icon(open ? "chevron-down" : "chevron-right")));
 		const out = open ? this.toolResult(segment, result) : null;
