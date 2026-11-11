@@ -104,7 +104,7 @@ class WorkToolTests(CodeToolCase):
 		self.assertIn("filled 2", results["p1"], "its output")
 		self.assertIn("--- stderr: nothing", results["p1"], "the streams apart")
 		self.assertIn("median", results["p2"], "repeated runs for timing")
-		self.assertIn("did not start", results["p3"], results["p3"])
+		self.assertIn("does not exist now", results["p3"], "a path that names no file: said plainly (a build may be replacing it)")
 
 	async def test_a_task_update_before_any_task(self):
 		results = await self.results(("u1", "task_update", {"id": "t1", "status": "in_progress"}))
