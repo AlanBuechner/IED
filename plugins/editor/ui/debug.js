@@ -332,7 +332,15 @@ export function DebugToolbar(ctx, state, tasks) {
 		if (!state.live()) {
 			const debug = tasks && tasks.offer ? tasks.offer.debug : null;
 			const name = debug && debug.configurations.length ? debug.default || debug.configurations[0] : null;
-			return name ? replace(ctx.el, h("button.ib.tb-start", { title: "Start Debugging (F5)", "aria-label": "Start Debugging", on: { click: () => state.start() } }, icon("debug-start", "c-saved"), h("span.tb-label", null, name))) : replace(ctx.el);
+			const parts = name ? [h("button.ib.tb-start", { title: "Start Debugging (F5)", "aria-label": "Start Debugging", on: { click: () => state.start() } }, icon("debug-start", "c-saved"), h("span.tb-label", null, name))] : [];
+			// A run without the debugger (Ctrl+F5, a task's button) gets VS's Stop and Restart while it goes on.
+			const what = tasks ? tasks.liveLabel() : "";
+			if (what) {
+				parts.push(
+					h("button.ib.tb-stop", { title: "Stop " + what + " (Shift+F5)", "aria-label": "Stop " + what, on: { click: () => tasks.stopAll() } }, icon("debug-stop", "c-error")),
+					h("button.ib.tb-restart", { title: "Restart " + what + " (Ctrl+Shift+F5)", "aria-label": "Restart " + what, on: { click: () => tasks.restart() } }, icon("debug-restart")));
+			}
+			return replace(ctx.el, ...parts);
 		}
 		const stopped = state.stopped();
 		replace(ctx.el,

@@ -69,7 +69,7 @@ Problem matchers apply line by line to a step's output (both streams); a match b
 
 - Every process step runs through the host supervisor (`src/terminal`): a job object per task (cancel kills the whole tree), streamed stdout/stderr, exit codes. The AI's `build_run`/`task_run` tools run the very same tasks (tagged with the chat).
 - Steps write to **output sources** (`build`, `run`, `debug`, `test`, or plugin-contributed); the Output window selects a source from a dropdown (VS) and renders ANSI colors.
-- Running state: spinner on the button, status bar "Building <project>... 0:12", Build > Cancel (Ctrl+Break); failure turns the status bar red with the first error; clicking jumps to it.
+- Running state: spinner on the button, status bar "Building <project>... 0:12", Build > Cancel (Ctrl+Break), and while a run goes on without the debugger the toolbar's Stop (Shift+F5) and Restart (Ctrl+Shift+F5) beside Start Debugging; failure turns the status bar red with the first error; clicking jumps to it.
 
 ## Errors: problem matchers and structured diagnostics
 

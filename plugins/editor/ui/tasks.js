@@ -111,7 +111,52 @@ export class TaskState {
 	async cancelAll() {
 		for (const run of [...this.runs.values()]) await this.ied.client.request("task.cancel", { runId: run.runId }).catch(() => {});
 	}
+
+	// The runs going on, the latest first.
+	live() {
+		return [...this.runs.values()].sort((a, b) => (b.startedMs || 0) - (a.startedMs || 0));
+	}
+
+	// What Stop and Restart name: "Run Game", "Build Engine", or how many runs when there are several.
+	liveLabel() {
+		const runs = this.live();
+		if (!runs.length) return "";
+		if (runs.length > 1) return runs.length + " runs";
+		return [runs[0].label, runs[0].project].filter(Boolean).join(" ");
+	}
+
+	// The toolbar's Stop (Shift+F5 while no debug session lives): every run of the workspace is cancelled, its process
+	// trees killed by the server.
+	async stopAll() {
+		const runs = this.live();
+		if (!runs.length) return false;
+		await this.cancelAll();
+		return true;
+	}
+
+	// Restart (Ctrl+Shift+F5 while no debug session lives): the latest run is cancelled and, once it has ended, its task
+	// runs again; the other runs are stopped.
+	async restart() {
+		const runs = this.live();
+		if (!runs.length) return null;
+		const again = runs[0];
+		const ids = new Set(runs.map((r) => r.runId));
+		const ended = new Promise((resolve) => {
+			const timer = setTimeout(() => { stop(); resolve(); }, RESTART_WAIT_MS);
+			const stop = this.on((state) => {
+				if ([...ids].some((id) => state.runs.has(id))) return;
+				clearTimeout(timer);
+				queueMicrotask(() => stop());
+				resolve();
+			});
+		});
+		await this.cancelAll();
+		await ended;
+		return this.run({ project: again.project, task: again.task });
+	}
 }
+
+const RESTART_WAIT_MS = 10000;
 
 // The toolbar's part: the startup project when there are several, then the offer's toolbar.
 export function TaskToolbar(ctx, state) {

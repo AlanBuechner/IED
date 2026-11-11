@@ -1431,6 +1431,42 @@ def debug_on_a_phone(run):
 	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
 
 
+def latest_runs(run):
+	"""The workspace's runs, the latest started first (the mock lists them oldest first)."""
+	return sorted(run.request("task.runs", {"wsId": "w1"})["runs"], key=lambda r: -r["startedMs"])
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def run_stop_and_restart(run):
+	"""A run without the debugger (Ctrl+F5, the toolbar's Run) gets VS's Stop and Restart beside Start Debugging while it
+	goes on: Restart cancels it and runs the task again, Stop cancels it, and both go once nothing runs."""
+	page = run.open()
+	bar = ".phone-toolbar" if run.phone else ".toolbar"
+	run.request("task.run", {"wsId": "w1", "task": "run"})
+	stop = bar + " button.tb-stop"
+	page.wait_for_selector(stop, timeout=10000)
+	label = page.get_attribute(stop, "aria-label")
+	check(label.startswith("Stop Run "), "Stop names the run: %r" % label)
+	check(page.is_visible(bar + " button.tb-restart"), "Restart shows too")
+	run.shot("running")
+	runs = latest_runs(run)
+	before = runs[0]["runId"]
+	(page.tap if run.phone else page.click)(bar + " button.tb-restart")
+	deadline = time.monotonic() + 10
+	while time.monotonic() < deadline:
+		runs = latest_runs(run)
+		if runs[0]["runId"] != before and runs[0]["status"] == "running":
+			break
+		time.sleep(0.2)
+	check(runs[0]["runId"] != before and runs[0]["status"] == "running", "Restart ran the task again: %r" % runs)
+	check(any(r["runId"] == before and r["status"] == "cancelled" for r in runs), "the first run was cancelled")
+	page.wait_for_selector(stop, timeout=10000)
+	(page.tap if run.phone else page.click)(stop)
+	page.wait_for_selector(stop, state="detached", timeout=10000)
+	check(latest_runs(run)[0]["status"] == "cancelled", "Stop cancelled the run")
+	run.shot("stopped")
+
+
 def terminal_text(page):
 	"""What the shown terminal's screen says (xterm's rows)."""
 	return page.evaluate("[...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].map((r) => r.textContent).join('\n')")

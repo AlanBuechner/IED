@@ -49,7 +49,10 @@ export function activate(ied) {
 	debug = new DebugState(ied);
 	breakpoints = new BreakpointState(ied);
 	debug.onStop = (frame) => goTo(ied, { path: framePath(frame), line: frame.line, col: frame.column });
-	const status = () => ied.context.set("statusState", statusState(tasks, debug));
+	const status = () => {
+		ied.context.set("statusState", statusState(tasks, debug));
+		ied.context.set("taskRunning", tasks.runs.size > 0 || undefined);
+	};
 	tasks.on(status);
 	debug.on(status);
 	const settings = new EditorSettings(ied, editorEnvironment);
@@ -131,6 +134,8 @@ export function activate(ied) {
 	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
 	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test", solution: true }));
 	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
+	ied.commands.handle("ied.task.stop", () => tasks.stopAll());
+	ied.commands.handle("ied.task.restart", () => tasks.restart());
 	ied.commands.handle("ied.task.setStartup", (args) => (args && args.name && args.kind !== "solution" ? tasks.setStartup(args.name) : pickStartup(ied)));
 	ied.commands.handle("ied.task.showResult", () => (tasks.ended && tasks.ended.status === "failed" && !tasks.runs.size ? ied.commands.run("shell.showView", { id: "ied.errors" }) : ied.commands.run("shell.showView", { id: "ied.output" })));
 	ied.commands.handle("ied.output.show", (args) => showOutput(ied, args && args.sourceId));
