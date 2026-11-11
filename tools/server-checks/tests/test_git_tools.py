@@ -134,6 +134,18 @@ class GitToolTests(GitToolCase):
 		self.assertEqual(["notes.txt"], git_out(self.repo, "show", "--name-only", "--format=", "HEAD").split())
 		self.assertIn(" M a.txt", git(self.repo, "status", "--porcelain"), "the rest left as it was")
 
+	async def test_a_deletion_staged_already_is_staged_and_committed_by_its_path(self):
+		git(self.repo, "rm", "-q", "src/main.c")
+		write(os.path.join(self.repo, "notes.txt"), "remember\n")
+		staged = await self.ask("stage", paths=["src/main.c"])
+		self.assertIn("deleted: src/main.c", staged, "staging it again changes nothing")
+		committed = await self.ask("commit", message="Drop main, add the notes", paths=["src/main.c", "notes.txt"])
+		self.assertTrue(committed.startswith("committed "), committed)
+		self.assertEqual(["notes.txt", "src/main.c"], sorted(git_out(self.repo, "show", "--name-only", "--format=", "HEAD").split()))
+		self.assertNotIn("src/main.c", git_out(self.repo, "ls-tree", "-r", "--name-only", "HEAD"), "the deletion is in the commit")
+		self.assertEqual("", git(self.repo, "status", "--porcelain"))
+		self.assertIn("did not match any file", await self.refused("commit", message="Nothing there", paths=["src/never.c"]), "a path git knows nowhere is still refused")
+
 	async def test_commits_need_something_and_amends_stay_unpushed(self):
 		self.assertIn("nothing is staged", await self.refused("commit", message="Nothing"))
 		self.assertIn("a commit needs a message", await self.refused("commit", message="   ", paths=["a.txt"]))

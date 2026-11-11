@@ -68,6 +68,24 @@ namespace Git
 		return arguments;
 	}
 
+	// The paths git add can take. One whose deletion is staged already is in neither the work tree nor the index, and git add refuses the
+	// whole call for it: staging it again changes nothing, and git commit --only takes it from HEAD.
+	static Core::Array<Core::String> PathsToAdd(GitPlugin* git, GitRepo* repo, const Core::Array<Core::String>& inside) {
+		Core::Array<Core::String> kept;
+		for (const Core::String& path : inside) {
+			const FS::Path onDisk = repo->m_Root / path.View();
+			if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr())) {
+				kept.Push(path);
+				continue;
+			}
+			Core::Array<Core::String> one;
+			one.Push(path);
+			GitRun listed = TryRun(git, repo, WithPaths(GitArgs("ls-files", "--cached"), one));
+			if (!listed.Ok() || !listed.m_Output.View().Trimmed().IsEmpty()) kept.Push(path);
+		}
+		return kept;
+	}
+
 	Core::String StageAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args, bool stage) {
 		Core::Array<Core::String> paths = ListArg(args, "paths");
 		if (paths.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "name the paths; \".\" is the whole workspace");
@@ -77,7 +95,10 @@ namespace Git
 			if (paths.Count() != 1) throw IED::RpcError(IED::ErrorCode::BadRequest, "hunks are of one file: name one path with them");
 			ApplyHunks(git, target, paths[0].View(), inside[0].View(), args, !stage);
 		}
-		else if (stage) git->RunChange(target.m_Repo, WithPaths(GitArgs("add", "-A"), inside), IED::ErrorCode::BadRequest);
+		else if (stage) {
+			Core::Array<Core::String> added = PathsToAdd(git, target.m_Repo, inside);
+			if (!added.IsEmpty()) git->RunChange(target.m_Repo, WithPaths(GitArgs("add", "-A"), added), IED::ErrorCode::BadRequest);
+		}
 		else if (IsUnborn(git, target.m_Repo)) git->RunChange(target.m_Repo, WithPaths(GitArgs("rm", "--cached", "-r", "--quiet"), inside), IED::ErrorCode::BadRequest);
 		else git->RunChange(target.m_Repo, WithPaths(GitArgs("restore", "--staged"), inside), IED::ErrorCode::BadRequest);
 		return Done(git, target.m_Repo, WhatStaged(stage, paths, args.Member("hunks")).View());
@@ -115,8 +136,9 @@ namespace Git
 		if (message.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "a commit needs a message");
 		if (amend) RequireUnpushed(git, target.m_Repo);
 		Core::Array<Core::String> inside = RepoPaths(target, paths);
-		if (!inside.IsEmpty()) git->RunChange(target.m_Repo, WithPaths(GitArgs("add", "-A"), inside), IED::ErrorCode::BadRequest);
-		else if (!amend && TryRun(git, target.m_Repo, GitArgs("diff", "--cached", "--quiet")).Ok())
+		Core::Array<Core::String> added = PathsToAdd(git, target.m_Repo, inside);
+		if (!added.IsEmpty()) git->RunChange(target.m_Repo, WithPaths(GitArgs("add", "-A"), added), IED::ErrorCode::BadRequest);
+		if (inside.IsEmpty() && !amend && TryRun(git, target.m_Repo, GitArgs("diff", "--cached", "--quiet")).Ok())
 			throw IED::RpcError(IED::ErrorCode::BadRequest, "nothing is staged: git_stage the changes first, or name them in paths");
 		Commit(git, target.m_Repo, message.View(), amend, inside);
 		Core::Array<Core::String> stat = GitArgs("show", "--stat", "--format=committed %h: %s");
