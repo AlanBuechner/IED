@@ -71,6 +71,16 @@
 .board-list-row { display: flex; align-items: center; gap: var(--space-3); height: var(--row-h); padding: 0 var(--space-4); cursor: pointer; }
 .board-list-row:hover, .board-list-row:focus { background: var(--veil); outline: none; }
 .board-list-row .muted { font-size: var(--font-size-xs); max-width: 45%; }
+.board-list-window .panel-tools { gap: var(--space-2); }
+.board-list-filter { flex: 1; min-width: 0; height: 22px; }
+.board-set-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 24px; padding: 0 var(--space-4) 0 var(--space-2); background: none; border: 0; color: var(--text-1); font: inherit; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); cursor: pointer; text-align: left; }
+.board-set-head:hover { background: var(--veil); color: var(--text-0); }
+.board-set-head .ci { width: 14px; height: 14px; flex: none; }
+.board-set-head .meta { margin-left: auto; color: var(--text-2); font-weight: var(--font-weight-normal); font-variant-numeric: tabular-nums; }
+.board-set .board-list-row { padding-left: var(--space-8); }
+.board-set-empty { padding: var(--space-1) var(--space-4) var(--space-2) var(--space-8); font-size: var(--font-size-xs); }
+.board-set-head.drop, .board-list-rows.drop, .board-list-row.drop { background: var(--tint-info); outline: var(--border-width) dashed var(--accent-info); outline-offset: -1px; }
+.board-list-row[draggable="true"]:active { cursor: grabbing; }
 
 /* phone: the panel is a sheet over the lower half of the board */
 @media (max-width: 719px) {

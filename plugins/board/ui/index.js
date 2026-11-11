@@ -2,11 +2,12 @@
 // and the Board tool window under it, and the commands - New Board, Open Board (the Solution Explorer's menu on a
 // .iedboard), View > Boards.
 
-import { h, icon, replace } from "/ui-kit/dom.js";
+import { h, replace } from "/ui-kit/dom.js";
 import { promptDialog } from "/ui-kit/dialog.js";
 import { BoardView } from "./board.js";
 import { PanelFrame } from "./panels.js";
 import { currentBoard, onCurrentBoard } from "./current.js";
+import { BoardListView } from "./boardlist.js";
 
 const name = (path) => path.split("/").pop().replace(/\.iedboard$/, "");
 
@@ -14,6 +15,7 @@ function openBoard(ied, path) {
 	ied.tabs.open("board:" + path, { preview: false });
 }
 
+// A new board file, opened; its path, or null when none was made.
 async function newBoard(ied) {
 	const path = await promptDialog({
 		title: "New board",
@@ -22,12 +24,14 @@ async function newBoard(ied) {
 		confirm: "Create",
 		check: (value) => (value.trim() ? "" : "Name the board's file"),
 	});
-	if (!path) return;
+	if (!path) return null;
 	const made = await ied.client.request("ied.board/create", { wsId: ied.workspace.wsId, path: path.trim() }).catch((e) => {
 		ied.toast("Cannot create the board: " + (e.message || e), { level: "error" });
 		return null;
 	});
-	if (made) openBoard(ied, made.path);
+	if (!made) return null;
+	openBoard(ied, made.path);
+	return made.path;
 }
 
 export function activate(ied) {
@@ -67,21 +71,8 @@ export function BoardPanel(ctx) {
 	return { dispose: () => stop(), visible: (shown) => { if (shown) frame.attach(currentBoard()); } };
 }
 
-// The Boards tool window: the workspace's boards, live; a click opens one.
+// The Boards tool window: the workspace's boards in the owner's groups, live (boardlist.js).
 export function BoardList(ctx) {
-	const list = h("div.board-list", { role: "listbox", "aria-label": "Boards" });
-	ctx.el.classList.add("board-list-window");
-	replace(ctx.el,
-		h("div.panel-tools", null,
-			h("button.btn.flat", { title: "New board", on: { click: () => newBoard(ctx.ied) } }, icon("add"), "New board")),
-		h("div.scroll", null, list));
-	const render = (data) => {
-		const boards = data.boards || [];
-		replace(list, boards.length ? boards.map((b) => h("div.board-list-row", { role: "option", tabindex: "0", title: b.path, on: { click: () => openBoard(ctx.ied, b.path), keydown: (e) => { if (e.key === "Enter") openBoard(ctx.ied, b.path); } } },
-			icon("edit"),
-			h("span.ellip.grow", null, b.title || name(b.path)),
-			h("span.muted.ellip", null, b.path.includes("/") ? b.path.slice(0, b.path.lastIndexOf("/")) : ""))) : [h("div.muted.board-empty", null, "No boards yet. A board is where you sketch a design before it is built.")]);
-	};
-	const stop = ctx.ied.client.subscribe("ied.board/ws:" + ctx.wsId, { snap: render, evt: (kind, data) => render(data) });
-	return { dispose: () => stop() };
+	const view = new BoardListView(ctx, (path) => openBoard(ctx.ied, path), () => newBoard(ctx.ied));
+	return { dispose: () => view.dispose() };
 }

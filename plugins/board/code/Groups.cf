@@ -1,0 +1,111 @@
+// Board groups (docs/32 "Groups"): the Boards window's sections, kept in the workspace's committed .ied/boards.json -
+// {"groups": [{"name", "boards": [path]}]}, in the owner's order - so a board stays a plain file and grouping never
+// touches it. A board belongs to one group at most (the first that names it); a board in none is ungrouped. The list
+// (ied.board/list, the ied.board/ws:<wsId> topic) carries the groups with the boards that exist; ied.board/groups writes
+// the whole arrangement.
+
+include "BoardService.ch"
+
+namespace Boards
+{
+	const char* c_GroupsFile = ".ied/boards.json";
+	const int64 c_GroupNameMax = 80;
+
+	class BoardGroup
+	{
+		public Core::String m_Name;
+		public Core::Array<Core::String> m_Boards;
+	}
+
+	// The groups `list` ([{name, boards}]) holds: named, each name once, each board once; what is not so is skipped.
+	static Core::Array<BoardGroup*> GroupsFrom(const Serialization::DomNode& list) {
+		Core::Array<BoardGroup*> groups;
+		Core::Array<Core::String> seen;
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Serialization::DomNode entry = list.At(i);
+			Core::String name = Core::String(entry.Member("name").AsView().Trimmed());
+			bool taken = false;
+			for (BoardGroup* group : groups)
+				if (group->m_Name == name) taken = true;
+			if (name.IsEmpty() || taken) continue;
+			BoardGroup* group = new BoardGroup();
+			group->m_Name = name;
+			Serialization::DomNode boards = entry.Member("boards");
+			for (int64 b = 0; b < boards.Count(); ++b) {
+				Core::String path = BoardPath(boards.At(b).AsView());
+				if (path.IsEmpty() || seen.Contains(path)) continue;
+				seen.Push(path);
+				group->m_Boards.Push(path);
+			}
+			groups.Push(group);
+		}
+		return groups;
+	}
+
+	static Core::Array<BoardGroup*> ReadGroups(const IED::Workspace& ws) {
+		Core::String text;
+		Core::String problem;
+		if (!IED::ReadFile(ws, Core::StringView(c_GroupsFile), text, problem)) return Core::Array<BoardGroup*>();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(text.View(), *doc);
+		if (!parsed.Ok() || parsed.root.Kind() != Serialization::DomKind::Object) return Core::Array<BoardGroup*>();
+		return GroupsFrom(parsed.root.Member("groups"));
+	}
+
+	// The groups as the list carries them: [{name, boards: [path]}], only the boards in `existing`.
+	void WriteGroups(JsonOut& json, const IED::Workspace& ws, const Core::Array<Core::String>& existing) {
+		json.BeginArray();
+		for (BoardGroup* group : ReadGroups(ws)) {
+			json.BeginObject();
+			json.StrField("name", group->m_Name.View());
+			json.Key(Core::StringView("boards"));
+			json.BeginArray();
+			for (const Core::String& path : group->m_Boards)
+				if (existing.Contains(path)) json.Str(path.View());
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	bool IsGroupsFile(Core::StringView path) {
+		return path == Core::StringView(c_GroupsFile);
+	}
+
+	// ied.board/groups {wsId, groups: [{name, boards: [path]}]}: the whole arrangement written to .ied/boards.json (boards
+	// that are gone kept, so a board back from the trash finds its group); the list as ied.board/list answers.
+	Core::String SetGroups(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& list) {
+		if (list.Kind() != Serialization::DomKind::Array) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("groups: an array of {name, boards}"));
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Core::StringView name = list.At(i).Member("name").AsView();
+			if (name.Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("a group needs a name"));
+			if (name.ByteLength() > c_GroupNameMax) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("a group's name is at most 80 characters"));
+		}
+		Core::Array<BoardGroup*> groups = GroupsFrom(list);
+		if (groups.Count() != list.Count()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("two groups have the same name"));
+		JsonOut json;
+		json.BeginObject();
+		json.Newline();
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (BoardGroup* group : groups) {
+			json.Newline();
+			json.BeginObject();
+			json.StrField("name", group->m_Name.View());
+			json.Key(Core::StringView("boards"));
+			json.BeginArray();
+			for (const Core::String& path : group->m_Boards) json.Str(path.View());
+			json.EndArray();
+			json.EndObject();
+		}
+		json.Newline();
+		json.EndArray();
+		json.Newline();
+		json.EndObject();
+		json.Newline();
+		Core::String problem;
+		if (!IED::WriteFile(ws, Core::StringView(c_GroupsFile), json.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("cannot write .ied/boards.json: ") + problem.View()).View());
+		service->PublishList(ws.m_Id.View());
+		return service->ListJson(ws);
+	}
+}

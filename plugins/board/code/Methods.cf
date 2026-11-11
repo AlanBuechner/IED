@@ -26,6 +26,12 @@ namespace Boards
 		return service->ListJson(ws);
 	}
 
+	static Core::String GroupsMethod(BoardService* service, const IED::Request& request) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(request.m_Params.Str("wsId").View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+		return SetGroups(service, ws, request.m_Params.Field("groups"));
+	}
+
 	static Core::String OpenMethod(BoardService* service, const IED::Request& request) {
 		return Opened(service->Open(request.m_Params.Str("wsId").View(), request.m_Params.Str("path").View()));
 	}
@@ -116,6 +122,7 @@ namespace Boards
 
 	void RegisterMethods(BoardService* service) {
 		Method(service, "ied.board/list", ListMethod);
+		Method(service, "ied.board/groups", GroupsMethod);
 		Method(service, "ied.board/open", OpenMethod);
 		Method(service, "ied.board/create", CreateMethod);
 		Method(service, "ied.board/edit", EditMethod);

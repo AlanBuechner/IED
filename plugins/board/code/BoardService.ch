@@ -107,6 +107,11 @@ namespace Boards
 	// The elements a change touched as they are now ({at, el}) and those it left absent.
 	void WriteTouched(JsonOut& json, const Board& board, const Change& change);
 	void RegisterMethods(BoardService* service);
+	// Board groups (Groups.cf, docs/32 "Groups"): the list's groups of the boards in `existing`; whether `path` is the
+	// workspace's groups file; ied.board/groups.
+	void WriteGroups(JsonOut& json, const IED::Workspace& ws, const Core::Array<Core::String>& existing);
+	bool IsGroupsFile(Core::StringView path);
+	Core::String SetGroups(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& groups);
 	void ProvideQuery(BoardService* service);
 	// The tool's reply text for a change: what it did, its warnings, its refs.
 	Core::String ChangeText(const Board& board, const ChangeResult& result);

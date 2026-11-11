@@ -2224,6 +2224,44 @@ def chat_delete_and_restore(run):
 	run.shot("restored")
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def board_groups(run):
+	"""The Boards window groups boards (owner, 2026-11-11: "grouping boards in the planer"): a group is a folding section
+	of the list, in the order the owner keeps, kept in the workspace's .ied/boards.json; a board dragged onto a group (or
+	moved from its menu on a phone) goes into it, and the boards in no group come last."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	for path in ("plans/alpha", "plans/beta", "plans/gamma"):
+		try:
+			run.request("ied.board/create", {"wsId": ws, "path": path})
+		except Exception:
+			pass   # left by the other viewport's run
+	run.request("ied.board/groups", {"wsId": ws, "groups": [{"name": "Sprint 3", "boards": ["plans/alpha.iedboard"]}, {"name": "Later", "boards": []}]})
+	run.show_activity("ied.board")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.list' })")
+	page.wait_for_selector(".board-set[data-group='Sprint 3'] .board-list-row[data-path='plans/alpha.iedboard']", timeout=20000)
+	heads = run.texts(".board-set-head span.grow")
+	check(heads == ["Sprint 3", "Later", "Ungrouped"], "groups in order, then the ungrouped: %r" % heads)
+	beta = ".board-list-row[data-path='plans/beta.iedboard']"
+	if run.phone:
+		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: 40, clientY: 200}))" % beta.replace('"', '\\"'))
+		page.click(".menu .menu-item:has-text('Move to Group')")
+		page.click(".menu .menu-item:has-text('Later')")
+	else:
+		page.drag_and_drop(beta, ".board-set-head[data-group='Later']")
+	page.wait_for_selector(".board-set[data-group='Later'] " + beta, timeout=10000)
+	listed = run.request("ied.board/list", {"wsId": ws})
+	check(listed["groups"][1] == {"name": "Later", "boards": ["plans/beta.iedboard"]}, "moved into Later: %r" % listed["groups"])
+	run.shot("grouped")
+	page.click(".board-set-head[data-group='Sprint 3']")
+	page.wait_for_selector(".board-set.closed[data-group='Sprint 3']")
+	check(not page.is_visible(".board-list-row[data-path='plans/alpha.iedboard']"), "a folded group hides its boards")
+	run.shot("folded")
+	page.click(".board-set-head[data-group='Sprint 3']")
+	run.request("ied.board/groups", {"wsId": ws, "groups": []})
+
+
 @scenario(viewports=("desktop", "phone"))
 def chat_archive_and_unarchive(run):
 	"""Archiving a chat sets it aside like deleting it, but for good (owner, 2026-11-11: "like they are deleted but they

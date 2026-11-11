@@ -187,6 +187,34 @@ class BoardTests(ServerTestCase):
 		self.assertEqual([], snap["history"], "a file changed while the server was down starts its history empty")
 		self.assertIn("Edge", [e.get("text") for e in snap["elements"]])
 
+	async def test_boards_are_grouped_in_the_workspaces_boards_file(self):
+		for path in ("design/a", "design/b", "notes/c"):
+			await self.client.request("ied.board/create", {"wsId": "w1", "path": path}, timeout=WAIT)
+		topic = "ied.board/ws:w1"
+		await self.client.sub([topic])
+		snap = (await self.client.wait_for(topic, lambda f: f["t"] == "snap", timeout=WAIT))[-1]["data"]
+		self.assertEqual(([], ["design/a.iedboard", "design/b.iedboard", "notes/c.iedboard"]), (snap["groups"], [b["path"] for b in snap["boards"]]))
+		listed = await self.client.request("ied.board/groups", {"wsId": "w1", "groups": [
+			{"name": " Sprint 3 ", "boards": ["notes/c.iedboard", "design/a"]},
+			{"name": "Later", "boards": ["design/a.iedboard", "gone/x.iedboard"]},
+		]}, timeout=WAIT)
+		self.assertEqual([{"name": "Sprint 3", "boards": ["notes/c.iedboard", "design/a.iedboard"]}, {"name": "Later", "boards": []}], listed["groups"],
+			"names trimmed, paths made board paths, a board in one group (the first), boards that are gone left out of the list")
+		with open(os.path.join(self.ws, ".ied", "boards.json"), encoding="utf-8") as f:
+			kept = json.load(f)
+		self.assertEqual(["notes/c.iedboard", "design/a.iedboard"], kept["groups"][0]["boards"])
+		self.assertEqual(["gone/x.iedboard"], kept["groups"][1]["boards"], "a board that is gone keeps its place in the file")
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "boards.changed", timeout=WAIT)
+		self.assertEqual(listed["groups"], frames[-1]["data"]["groups"], "every window hears it")
+		# Written by hand (a pull, another editor), the file changes the list too.
+		with open(os.path.join(self.ws, ".ied", "boards.json"), "w", encoding="utf-8") as f:
+			json.dump({"groups": [{"name": "Hand", "boards": ["design/b.iedboard"]}]}, f)
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "boards.changed" and f["data"]["groups"][:1] == [{"name": "Hand", "boards": ["design/b.iedboard"]}], timeout=WAIT)
+		for bad, why in (([{"name": "", "boards": []}], "a group needs a name"), ([{"name": "A", "boards": []}, {"name": "A", "boards": []}], "two groups have the same name"), ({"name": "A"}, "an array")):
+			with self.assertRaises(Exception, msg=why) as refused:
+				await self.client.request("ied.board/groups", {"wsId": "w1", "groups": bad}, timeout=WAIT)
+			self.assertIn(why, str(refused.exception))
+
 	async def test_an_empty_board_file_opens_as_a_new_board(self):
 		path = os.path.join(self.ws, "design", "empty.iedboard")
 		with open(path, "w", encoding="utf-8") as f:
