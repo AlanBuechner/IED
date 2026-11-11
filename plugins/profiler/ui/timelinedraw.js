@@ -4,8 +4,8 @@
 // collections, notes' bands and the selection. Colors are the theme's tokens, read once per paint from the document;
 // translucent ones are drawn with globalAlpha rather than computed colors.
 
-import { duration, tickLabel, tickStep, bytes } from "./format.js";
-import { frameBands, seriesOf, LOCK_BLOCKED } from "./model.js";
+import { duration, instant, tickLabel, tickStep, bytes } from "./format.js";
+import { frameBands, seriesOf, guideSpan, plotValueAt, plotText, LOCK_BLOCKED } from "./model.js";
 
 export const RULER_HEIGHT = 22;
 export const FRAME_ROW_HEIGHT = 20;
@@ -95,12 +95,120 @@ export class TimelinePainter {
 		this.lanes(state);
 		this.collections(state);
 		this.noteBands(state);
+		this.guides(state);
 		this.selection(state);
 		ctx.restore();
 		this.ruler(state);
 		this.frames(state);
 		this.noteRow(state);
 		this.labelEdge(state);
+		this.guideMarks(state);
+	}
+
+	// The selected zone's or lock hold's start and end as dashed lines down every lane, with a faint band between, so
+	// what the other threads, the GPU queues and the plots did in that span lines up with it.
+	guides(state) {
+		const span = guideSpan(state.selected, state.selectedLock);
+		if (!span) return;
+		const { ctx, theme, height } = state;
+		const x0 = this.x(state, span.from);
+		const x1 = this.x(state, span.to);
+		if (x1 < state.labelWidth || x0 > state.width) return;
+		const top = state.header;
+		ctx.globalAlpha = 0.05;
+		ctx.fillStyle = theme.focus;
+		const left = Math.max(state.labelWidth, x0);
+		if (x1 - left >= 1) ctx.fillRect(left, top, x1 - left, height - top);
+		ctx.globalAlpha = 0.75;
+		ctx.strokeStyle = theme.focus;
+		ctx.lineWidth = 1;
+		ctx.setLineDash([4, 3]);
+		ctx.beginPath();
+		for (const x of x1 - x0 >= 2 ? [x0, x1] : [x0]) {
+			if (x < state.labelWidth || x > state.width) continue;
+			ctx.moveTo(Math.round(x) + 0.5, top);
+			ctx.lineTo(Math.round(x) + 0.5, height);
+		}
+		ctx.stroke();
+		ctx.setLineDash([]);
+		ctx.globalAlpha = 1;
+	}
+
+	// The guides' span on the ruler: its ends marked and its length between them.
+	guideMarks(state) {
+		const span = guideSpan(state.selected, state.selectedLock);
+		if (!span) return;
+		const { ctx, theme } = state;
+		const x0 = this.x(state, span.from);
+		const x1 = this.x(state, span.to);
+		if (x1 < state.labelWidth || x0 > state.width) return;
+		ctx.fillStyle = theme.focus;
+		const left = Math.max(state.labelWidth, x0);
+		ctx.globalAlpha = 0.25;
+		ctx.fillRect(left, RULER_HEIGHT - 4, Math.max(1, Math.min(state.width, x1) - left), 3);
+		ctx.globalAlpha = 1;
+		if (x0 >= state.labelWidth) ctx.fillRect(Math.round(x0), RULER_HEIGHT - 8, 1, 8);
+		if (x1 <= state.width && x1 - x0 >= 2) ctx.fillRect(Math.round(x1), RULER_HEIGHT - 8, 1, 8);
+	}
+
+	// The cursor (on the overlay canvas, drawn alone as the pointer moves): a line down the lanes at `t`, its time on the
+	// ruler, and the value of each plot lane in view where the line crosses it.
+	cursor(state, t) {
+		const { ctx, theme, height, width } = state;
+		const header = headerHeight(state.notes);
+		const x = Math.round(this.x(state, t)) + 0.5;
+		if (x < state.labelWidth || x > width) return;
+		ctx.globalAlpha = 0.55;
+		ctx.fillStyle = theme.text1;
+		ctx.fillRect(x - 0.5, 0, 1, height);
+		ctx.globalAlpha = 1;
+		ctx.font = theme.fontXs + "px " + theme.fontUi;
+		ctx.textBaseline = "middle";
+		const label = instant(t, state.view.span);
+		const w = this.fitter.width(ctx, label) + 8;
+		const lx = Math.min(width - w - 1, Math.max(state.labelWidth, x - w / 2));
+		ctx.fillStyle = theme.bg4;
+		ctx.fillRect(lx, 2, w, RULER_HEIGHT - 4);
+		ctx.fillStyle = theme.text0;
+		ctx.fillText(label, lx + 4, RULER_HEIGHT / 2);
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(state.labelWidth, header, width - state.labelWidth, height - header);
+		ctx.clip();
+		for (const lane of state.layout.lanes) {
+			if (lane.kind !== "plot") continue;
+			const top = header + lane.y - state.scrollY;
+			if (top + lane.height < header || top > height) continue;
+			const value = plotValueAt(lane.source.points, t);
+			if (!value) continue;
+			const scale = this.plotScale(lane);
+			const y = top + lane.height - 4 - (value[1] - scale.low) / (scale.high - scale.low) * (lane.height - 10);
+			ctx.fillStyle = theme.focus;
+			ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+			const text = plotText(lane.source.kind, value[1], bytes);
+			const tw = this.fitter.width(ctx, text) + 8;
+			const tx = x + 6 + tw > width ? x - 6 - tw : x + 6;
+			ctx.fillStyle = theme.bg4;
+			ctx.fillRect(tx, y - 8, tw, 16);
+			ctx.fillStyle = theme.text0;
+			ctx.fillText(text, tx + 4, y);
+		}
+		ctx.restore();
+	}
+
+	// The low and high a plot lane draws between (every fetched point, margins included).
+	plotScale(lane) {
+		let low = Infinity;
+		let high = -Infinity;
+		for (const [, a, b] of lane.source.points || []) {
+			if (a < low) low = a;
+			if (b > high) high = b;
+		}
+		if (high === low) {
+			high += 1;
+			low -= 1;
+		}
+		return { low, high };
 	}
 
 	trackWidth(state) {
@@ -471,16 +579,7 @@ export class TimelinePainter {
 		const { ctx, theme } = state;
 		const points = lane.source.points || [];
 		if (!points.length) return;
-		let low = Infinity;
-		let high = -Infinity;
-		for (const [, a, b] of points) {
-			if (a < low) low = a;
-			if (b > high) high = b;
-		}
-		if (high === low) {
-			high += 1;
-			low -= 1;
-		}
+		const { low, high } = this.plotScale(lane);
 		const y = (v) => top + lane.height - 4 - (v - low) / (high - low) * (lane.height - 10);
 		ctx.strokeStyle = theme.text1;
 		ctx.lineWidth = 1.2;
@@ -535,7 +634,13 @@ export class TimelinePainter {
 		ctx.fillRect(x1, top, 1, height - top);
 		ctx.font = theme.fontXs + "px " + theme.fontUi;
 		ctx.textBaseline = "top";
-		const text = duration(Math.abs(range.to - range.from));
+		// Its length, and where it starts and ends when there is room (a measurement, as Tracy's range shows it).
+		const from = Math.min(range.from, range.to);
+		const to = Math.max(range.from, range.to);
+		const length = duration(to - from);
+		const ends = instant(from, to - from) + " → " + instant(to, to - from);
+		const full = length + "  (" + ends + ")";
+		const text = this.fitter.width(ctx, full) + 16 <= x1 - x0 ? full : length;
 		ctx.fillStyle = theme.bg4;
 		const w = this.fitter.width(ctx, text) + 8;
 		ctx.fillRect((x0 + x1) / 2 - w / 2, top + 2, w, 16);

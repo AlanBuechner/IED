@@ -101,6 +101,7 @@ export class CaptureView {
 		this.modeSeg = h("span.seg", null, [["threads", "Threads", "list-flat"], ["tasks", "Tasks", "symbol-event"]].map(([key, title, glyph]) =>
 			h("span" + (key === this.mode ? ".on" : ""), { dataset: { mode: key }, title, on: { click: () => this.setMode(key) } }, icon(glyph), h("span.lbl", null, title))));
 		this.legend = h("span.legend");
+		this.rangeButton = h("button.btn.flat.prof-range-mode", { title: "Range: a drag measures a range instead of panning (R); a drag on the time ruler or Shift+drag always does", "aria-pressed": "false", on: { click: () => this.timeline.setRangeMode(!this.timeline.rangeMode) } }, icon("arrow-both"), h("span.lbl", null, "Range"));
 		this.panelButtons = PANELS.map(([key, title, glyph]) => h("button.btn.flat", { dataset: { panel: key }, title, on: { click: () => this.togglePanel(key) } }, icon(glyph), h("span.lbl", null, title)));
 		this.fgHost = h("div.fg");
 		this.tlHost = h("div.tl");
@@ -124,6 +125,7 @@ export class CaptureView {
 			{ dataset: { mode: this.mode, capture: this.captureId } },
 			h("div.prof-bar", null, this.recLabel, h("span.tb-sep"), this.followButton, this.stopButton, h("span.tb-sep"), this.modeSeg, this.legend, h("span.grow"),
 				h("button.btn.flat", { title: "Show the whole capture (Home)", on: { click: () => this.timeline.showAll() } }, icon("screen-full"), h("span.lbl", null, "All")),
+				this.rangeButton,
 				h("button.btn.flat", { title: "Add a note on the selection or the selected zone", on: { click: () => this.addNote() } }, icon("note"), h("span.lbl", null, "Note")),
 				this.panelButtons, h("span.tb-sep"),
 				h("button.btn.flat", { title: "Ask the AI about the selection", on: { click: () => this.askAi(this.details.zone) } }, icon("sparkle", "c-ai"), h("span.lbl", null, "Ask AI about selection")),
@@ -152,6 +154,12 @@ export class CaptureView {
 			folded: stored("ied.profiler.foldedGroups", []),
 			budgetNs: this.budgetNs,
 		});
+		// For the e2e checks and the browser's console: the view behind a capture's timeline.
+		this.tlHost.timeline = this.timeline;
+		this.timeline.onRangeMode = (on) => {
+			this.rangeButton.classList.toggle("on", on);
+			this.rangeButton.setAttribute("aria-pressed", on ? "true" : "false");
+		};
 		this.showPanel(this.phone ? null : this.panel);
 	}
 

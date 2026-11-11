@@ -4,7 +4,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { duration, ms, bytes, tickStep, tickLabel, instant } from "/plugins/ied.profiler/ui/format.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, FrameSpan, barsServe, barsFetch, MIN_FRAMES } from "/plugins/ied.profiler/ui/model.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED, GPU_GROUP, FrameSpan, barsServe, barsFetch, MIN_FRAMES, plotValueAt, plotText, cursorReadout, frameAtTime, guideSpan } from "/plugins/ied.profiler/ui/model.js";
 import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
 import { noteRange } from "/plugins/ied.profiler/ui/notes.js";
 
@@ -220,4 +220,27 @@ test("profiler: a point on the notes row hits the narrowest note there", () => {
 test("profiler: a point in time is as precise as its range needs", () => {
 	assertEqual([instant(1290050000, 400000), instant(1290450000, 400000)], ["1290.05 ms", "1290.45 ms"], "a short range's ends apart");
 	assertEqual([instant(2000000000, 5e9), instant(2000000000, 1e11), instant(1290050000, 0)], ["2.0 s", "2 s", "1290.050 ms"]);
+});
+
+test("profiler: the cursor reads each graph's value where it stands", () => {
+	const points = [[100, 5, 5], [200, 7, 9], [300, 2, 2]];
+	assertEqual([plotValueAt(points, 50), plotValueAt(points, 100), plotValueAt(points, 250), plotValueAt(points, 999), plotValueAt([], 5)],
+		[null, [5, 5], [7, 9], [2, 2], null], "the bucket at or before the time; nothing before the first");
+	assertEqual([plotText(0, 12.3456, bytes), plotText(0, 1234.5, bytes), plotText(1, 3 * 1048576, bytes), plotText(2, 42.5, bytes)], ["12.35", "1235", "3.0 MiB", "42.5%"]);
+	const layout = { lanes: [
+		{ kind: "thread", id: "t1", label: "Main", source: {} },
+		{ kind: "plot", id: "plot:1", label: "GC heap", source: { kind: 1, points: [[0, 1024, 1024], [100, 2048, 4096]] } },
+		{ kind: "plot", id: "plot:2", label: "Load", source: { kind: 2, points: [[50, 10, 10]] } },
+		{ kind: "plot", id: "plot:3", label: "Later", source: { kind: 0, points: [[900, 1, 1]] } },
+	] };
+	assertEqual(cursorReadout(layout, 120, bytes).map((r) => [r.label, r.text]), [["GC heap", "2.0 KiB – 4.0 KiB"], ["Load", "10%"]],
+		"every plot lane, a merged bucket as its low and high, one not begun yet left out");
+});
+
+test("profiler: the frame under the cursor, and what the guides mark", () => {
+	const frames = { dense: false, items: [[1, 0, 16], [2, 16, 40]] };
+	assertEqual([frameAtTime(frames, 20), frameAtTime(frames, 40), frameAtTime({ dense: true, items: [] }, 5)], [[2, 16, 40], null, null]);
+	assertEqual(guideSpan({ zone: [0, 10, 25, 3, "r"] }, null), { from: 10, to: 25 }, "a zone's start and end");
+	assertEqual(guideSpan(null, { item: [30, 70, 1, 2] }), { from: 30, to: 70 }, "else a lock hold's");
+	assertEqual(guideSpan(null, null), null);
 });

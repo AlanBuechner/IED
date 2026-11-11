@@ -265,3 +265,54 @@ export function frameBands(frames, budgetNs) {
 		return { index, start, end, length, over: length > budgetNs, spike: length > budgetNs * 2 };
 	});
 }
+
+// --- The cursor and the guides -------------------------------------------------------------------------------------
+
+// A plot's value at `t`: the bucket the server merged at or before it ([low, high]; equal when one sample), null before
+// its first point. The same value the server's ValueAt gives, to the pixel the answer was fetched at.
+export function plotValueAt(points, t) {
+	if (!points || !points.length || t < points[0][0]) return null;
+	let low = 0;
+	let high = points.length - 1;
+	while (low < high) {
+		const mid = (low + high + 1) >> 1;
+		if (points[mid][0] <= t) low = mid;
+		else high = mid - 1;
+	}
+	return [points[low][1], points[low][2]];
+}
+
+// A plot value as its kind shows it: 0 a number, 1 bytes, 2 a percent; `format` is format.js's bytes().
+export function plotText(kind, value, format) {
+	if (kind === 1) return format(Math.round(value));
+	const rounded = Math.abs(value) >= 100 ? Math.round(value).toString() : (Math.round(value * 100) / 100).toString();
+	return kind === 2 ? rounded + "%" : rounded;
+}
+
+// What the cursor at `t` reads off every plot of the answer (scrolled out of view or not): [{label, text, kind,
+// value}], a merged bucket as "low - high".
+export function cursorReadout(layout, t, format) {
+	const rows = [];
+	for (const lane of (layout && layout.lanes) || []) {
+		if (lane.kind !== "plot") continue;
+		const value = plotValueAt(lane.source.points, t);
+		if (!value) continue;
+		const [low, high] = value;
+		const text = low === high ? plotText(lane.source.kind, high, format) : plotText(lane.source.kind, low, format) + " – " + plotText(lane.source.kind, high, format);
+		rows.push({ label: lane.label, text, kind: lane.source.kind, value: high, laneId: lane.id });
+	}
+	return rows;
+}
+
+// The frame `t` falls in, [index, start, end], or null (none, or the answer drew them dense).
+export function frameAtTime(frames, t) {
+	if (!frames || frames.dense) return null;
+	return (frames.items || []).find(([, start, end]) => t >= start && t < end) || null;
+}
+
+// The span the guides mark across every lane: the selected zone's or lock hold's, else null.
+export function guideSpan(selected, selectedLock) {
+	if (selected && selected.zone) return { from: selected.zone[1], to: selected.zone[2] };
+	if (selectedLock && selectedLock.item) return { from: selectedLock.item[0], to: selectedLock.item[1] };
+	return null;
+}

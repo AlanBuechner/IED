@@ -420,3 +420,52 @@ def profiler_collected_memory(run):
 	live = run.texts(doc + " .prof-memory-right .prof-leak summary")
 	check(len(live) == 1 and "2x" in live[0] and "512 B" in live[0], "the two blocks still live: %s" % live)
 	run.shot("native")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def profiler_cursor_range_and_guides(run):
+	"""Tools to see how things line up (owner, 2026-11-11: "a bar where the mouse is that will show numaric values for
+	the graphs or being able to select a rang to see how long some section took or selecting a bar to see how other
+	tracs line up"): a line follows the pointer with its time, and the readout lists every graph's value there; a zone
+	picked draws its start and end down every lane and the readout says how far the pointer is from its start; a drag
+	on the time ruler (or in Range mode, the phone's way) measures a range, its length on it."""
+	page = run.open()
+	ws = page.evaluate("() => ied_shell.wsId")
+	listed = run.request("prof.captures", {"wsId": ws})
+	known = {c["captureId"] for c in listed["captures"]}
+	send_collected_game(listed["connect"]["env"])
+	capture = new_capture(run, ws, known)
+	open_capture(run, page, capture)
+	doc = ".prof-doc[data-capture='%s']" % capture
+	if run.phone and page.is_visible(doc + " .prof-bar button.phone-only"):
+		page.click(doc + " .prof-bar button.phone-only")
+	time.sleep(0.8)
+	readout = doc + " .prof-readout"
+	if not run.phone:
+		page.mouse.move(*canvas_point(page, doc + " .tl", 0.5, 120))
+		page.wait_for_selector(readout, state="visible", timeout=5000)
+		rows = run.texts(readout + " .prof-readout-row .k")
+		check(rows[0] == "Time" and "GC heap" in rows and "Process memory" in rows, "the time, then every graph: %r" % rows)
+		values = run.texts(readout + " .prof-readout-row .v")
+		check(any(v.endswith("iB") or v.endswith(" B") for v in values), "memory graphs read in bytes: %r" % values)
+		run.shot("cursor")
+		page.mouse.click(*canvas_point(page, doc + " .tl", 0.6, 52))
+		run.wait_text(doc + " .prof-side .zname", "Frame", timeout=10000)
+		page.mouse.move(*canvas_point(page, doc + " .tl", 0.8, 120))
+		run.wait_text(readout, "From selection", timeout=5000)
+		run.shot("guides")
+	else:
+		page.tap(doc + " .prof-range-mode")
+		check(page.get_attribute(doc + " .prof-range-mode", "aria-pressed") == "true", "Range mode is on")
+	start = canvas_point(page, doc + " .tl", 0.3, 10 if not run.phone else 120)
+	end = canvas_point(page, doc + " .tl", 0.7, 10 if not run.phone else 120)
+	page.mouse.move(*start)
+	page.mouse.down()
+	page.mouse.move(start[0] + 20, start[1], steps=3)
+	page.mouse.move(*end, steps=6)
+	page.mouse.up()
+	measured = page.evaluate("(sel) => { const t = document.querySelector(sel + ' .tl').timeline; const r = t.normalizedRange(); return r && { length: r.to - r.from, span: t.view.span }; }", doc)
+	check(measured and 0.3 < measured["length"] / measured["span"] < 0.7, "the drag measured what it crossed: %r" % measured)
+	run.shot("range")
+	page.keyboard.press("Escape")
+	check(page.evaluate("(sel) => document.querySelector(sel + ' .tl').timeline.normalizedRange()", doc) is None, "Esc clears the range")

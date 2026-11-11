@@ -42,6 +42,13 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-doc .tl { position: relative; flex: 1; min-width: 0; overflow: hidden; }
 .prof-canvas { position: absolute; inset: 0; display: block; outline: none; cursor: grab; }
 .prof-canvas:active { cursor: grabbing; }
+.prof-canvas.ranging, .prof-canvas.on-ruler { cursor: col-resize; }
+.prof-overlay { position: absolute; inset: 0; display: block; pointer-events: none; }
+.prof-readout { position: absolute; right: var(--space-3); z-index: 4; min-width: 150px; max-width: 280px; padding: var(--space-2) var(--space-3); background: var(--bg-1); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); font-size: var(--font-size-xs); pointer-events: none; }
+.prof-readout-row { display: flex; gap: var(--space-4); line-height: 16px; }
+.prof-readout-row .k { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.prof-readout-row .v { color: var(--text-0); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prof-range-mode.on { background: var(--bg-4); color: var(--text-0); }
 .prof-tip { position: absolute; z-index: 5; max-width: 420px; padding: var(--space-2) var(--space-3); background: var(--bg-4); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); color: var(--text-0); font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 
 .prof-side { width: 330px; flex: none; border-left: var(--border-width) solid var(--border-0); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; overflow: auto; font-size: var(--font-size-sm); }

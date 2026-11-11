@@ -1,14 +1,15 @@
 // timeline.js - the timeline view (docs/16, mockup 06): asks the server for what a range shows at the canvas's width
 // (prof.timeline merges sub-pixel zones), keeps the last answer drawn while a new one is on its way, and turns input
-// into view changes. Wheel zooms at the pointer, a drag pans (time and lanes), Shift+drag selects a range, a click
-// selects a zone or a lock hold (or folds a lane from its label, zooms to a frame from the frame row, picks a note from
-// the notes row), a double click zooms to it; two fingers pinch. Keys: arrows pan and zoom, Home shows everything, F
-// fits the selection, Esc clears it.
+// into view changes. Wheel zooms at the pointer, a drag pans (time and lanes), a drag on the time ruler, Shift+drag or
+// a drag in Range mode measures a range, a click selects a zone or a lock hold (or folds a lane from its label, zooms to
+// a frame from the frame row, picks a note from the notes row) and draws its guides down every lane, a double click
+// zooms to it; two fingers pinch. A line follows the pointer with its time, and the readout lists every graph's value
+// there. Keys: arrows pan and zoom, Home shows everything, F fits the selection, R toggles Range mode, Esc clears.
 
-import { h } from "/ui-kit/dom.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel } from "./model.js";
+import { h, replace } from "/ui-kit/dom.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, cursorReadout, frameAtTime, guideSpan } from "./model.js";
 import { TimelinePainter, readTheme, headerHeight, HEADER_HEIGHT, RULER_HEIGHT } from "./timelinedraw.js";
-import { duration } from "./format.js";
+import { bytes, duration, instant } from "./format.js";
 
 const PHONE = "(max-width: 719px)";
 const CLICK_SLOP_PX = 4;
@@ -47,8 +48,14 @@ export class TimelineView {
 		this.collapsed = new Set(folded || []);
 		this.painter = new TimelinePainter();
 		this.canvas = h("canvas.prof-canvas", { tabindex: "0", "aria-label": "Timeline" });
+		// The cursor is drawn alone on a canvas over the timeline, so following the pointer repaints no lane.
+		this.overlay = h("canvas.prof-overlay", { "aria-hidden": "true" });
+		this.cursorX = null;
+		this.rangeMode = false;
+		this.onRangeMode = () => {};
 		this.tip = h("div.prof-tip", { hidden: true });
-		host.append(this.canvas, this.tip);
+		this.readout = h("div.prof-readout", { hidden: true, "aria-live": "off" });
+		host.append(this.canvas, this.overlay, this.readout, this.tip);
 		this.pointers = new Map();
 		this.bind();
 		this.resizer = new ResizeObserver(() => this.resize());
@@ -168,6 +175,10 @@ export class TimelineView {
 		this.canvas.height = Math.floor(this.height * ratio);
 		this.canvas.style.width = this.width + "px";
 		this.canvas.style.height = this.height + "px";
+		this.overlay.width = this.canvas.width;
+		this.overlay.height = this.canvas.height;
+		this.overlay.style.width = this.width + "px";
+		this.overlay.style.height = this.height + "px";
 		this.theme = readTheme();
 		if (this.answer) this.relayout();
 		this.ensure();
@@ -193,6 +204,60 @@ export class TimelineView {
 			selected: this.selected, range: this.range, budgetNs: this.budgetNs, phone: this.phone,
 			notes: this.notes, selectedNote: this.selectedNote, selectedLock: this.selectedLock,
 		});
+		this.paintCursor();
+	}
+
+	// The cursor line, its time and the plots' values where it crosses them; the readout beside it.
+	paintCursor() {
+		if (this.disposed || !this.theme) return;
+		const ratio = window.devicePixelRatio || 1;
+		const ctx = this.overlay.getContext("2d");
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+		const t = this.cursorTime();
+		if (t === null || !this.answer) {
+			this.readout.hidden = true;
+			return;
+		}
+		ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+		this.painter.cursor({ ctx, width: this.width, height: this.height, labelWidth: this.labelWidth, view: this.view, theme: this.theme, layout: this.layout || { lanes: [] }, scrollY: this.scrollY, notes: this.notes }, t);
+		this.showReadout(t);
+	}
+
+	scheduleCursor() {
+		if (this.cursorQueued) return;
+		this.cursorQueued = true;
+		requestAnimationFrame(() => {
+			this.cursorQueued = false;
+			this.paintCursor();
+		});
+	}
+
+	// The time under the pointer, null while it is not over the lanes' track area.
+	cursorTime() {
+		if (this.cursorX === null || this.cursorX < this.labelWidth || this.cursorX > this.width) return null;
+		return this.timeAt(this.cursorX);
+	}
+
+	// What the cursor reads (docs/16 "The UI"): its time, the frame it falls in, how far it is from the selected zone's
+	// start (or the range's) and every graph's value there - those scrolled out of view too.
+	readoutRows(t) {
+		const rows = [["Time", instant(t, this.view.span)]];
+		const frame = frameAtTime(this.answer && this.answer.frames, t);
+		if (frame) rows.push(["Frame", frame[0] + " · " + duration(frame[2] - frame[1])]);
+		const guide = guideSpan(this.selected, this.selectedLock);
+		const range = this.normalizedRange();
+		if (guide) rows.push(["From selection", (t >= guide.from ? "+" : "") + duration(t - guide.from)]);
+		else if (range) rows.push(["From range", (t >= range.from ? "+" : "") + duration(t - range.from)]);
+		for (const row of cursorReadout(this.layout, t, bytes)) rows.push([row.label, row.text, row.laneId]);
+		return rows;
+	}
+
+	showReadout(t) {
+		const rows = this.readoutRows(t);
+		replace(this.readout, ...rows.map(([label, value, laneId]) => h("div.prof-readout-row", { dataset: laneId ? { lane: laneId } : {} }, h("span.k", null, label), h("span.v", null, value))));
+		this.readout.hidden = false;
+		this.readout.style.top = (this.header + 4) + "px";
 	}
 
 	clampScroll() {
@@ -244,7 +309,12 @@ export class TimelineView {
 		c.addEventListener("pointermove", (e) => this.move(e));
 		c.addEventListener("pointerup", (e) => this.up(e));
 		c.addEventListener("pointercancel", (e) => this.pointers.delete(e.pointerId));
-		c.addEventListener("pointerleave", () => this.hideTip());
+		c.addEventListener("pointerleave", () => {
+			this.hideTip();
+			if (this.drag) return;
+			this.cursorX = null;
+			this.scheduleCursor();
+		});
 		c.addEventListener("dblclick", (e) => this.doubleClick(e));
 		c.addEventListener("keydown", (e) => this.key(e));
 		c.style.touchAction = "none";
@@ -280,14 +350,28 @@ export class TimelineView {
 			this.drag = null;
 			return;
 		}
-		const selecting = e.shiftKey && p.x >= this.labelWidth;
-		this.drag = { start: p, from: this.view.from, scrollY: this.scrollY, moved: false, selecting };
+		// A drag on the time ruler, with Shift, or in Range mode measures a range; elsewhere it pans.
+		const selecting = p.x >= this.labelWidth && (e.shiftKey || this.rangeMode || p.y < RULER_HEIGHT);
+		this.drag = { start: p, from: this.view.from, scrollY: this.scrollY, moved: false, selecting, previous: this.range };
 		if (selecting) this.range = { from: this.timeAt(p.x), to: this.timeAt(p.x) };
+	}
+
+	// Range mode (the toolbar's Range, R): a drag anywhere on the lanes measures a range instead of panning - on a
+	// phone, where there is no Shift, the way to measure.
+	setRangeMode(on) {
+		this.rangeMode = !!on;
+		this.canvas.classList.toggle("ranging", this.rangeMode);
+		this.onRangeMode(this.rangeMode);
 	}
 
 	move(e) {
 		const p = this.point(e);
 		if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, p);
+		if (e.pointerType !== "touch" || this.drag) {
+			this.cursorX = p.x;
+			this.scheduleCursor();
+		}
+		this.canvas.classList.toggle("on-ruler", p.y < RULER_HEIGHT && p.x >= this.labelWidth);
 		if (this.pinch && this.pointers.size === 2) {
 			const [a, b] = [...this.pointers.values()];
 			const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
@@ -322,6 +406,11 @@ export class TimelineView {
 
 	up(e) {
 		this.pointers.delete(e.pointerId);
+		// A finger's cursor goes with the finger.
+		if (e.pointerType === "touch") {
+			this.cursorX = null;
+			this.scheduleCursor();
+		}
 		if (this.pinch) {
 			if (this.pointers.size < 2) this.pinch = null;
 			this.drag = null;
@@ -334,7 +423,12 @@ export class TimelineView {
 			if (drag.moved && Math.abs(this.range.to - this.range.from) > 0) {
 				this.onRange(this.normalizedRange());
 			}
-			else this.range = null;
+			else {
+				// A click (no drag) on the ruler or in Range mode clears the range; Range mode's click still picks.
+				this.range = null;
+				if (drag.previous) this.onRange(null);
+				if (this.rangeMode && drag.start.y >= this.header) this.click(this.point(e));
+			}
 			this.schedulePaint();
 			return;
 		}
@@ -418,10 +512,14 @@ export class TimelineView {
 			ArrowDown: () => this.view.zoomAt(center, KEY_ZOOM, Math.max(this.durationNs * 1.2, 1)),
 			Home: () => this.view.fit(0, Math.max(this.durationNs, 1), 0.01),
 			f: () => this.fitSelection(),
+			r: () => this.setRangeMode(!this.rangeMode),
 			Escape: () => {
+				const hadRange = !!this.range;
 				this.range = null;
+				if (hadRange) this.onRange(null);
 				this.select(null);
 				this.selectNote(null);
+				if (this.rangeMode) this.setRangeMode(false);
 			},
 		}[e.key];
 		if (!handled) return;
