@@ -1,11 +1,11 @@
 // settings.test.js - the settings window's model (docs/07): pages from the settings plugins declare and the pages they
-// draw, titles, controls and search; a refused write's message; and the Models and Model Groups pages' helpers.
+// draw, titles, controls and search; a refused write's message; and the Models page and its helpers.
 
 import { test, assertEqual, assertThrows } from "./harness.js";
 import { controlKind, findPage, groupOf, inputText, isModified, matches, pageGroups, pageOwning, parseInput, problemsFor, searchByPage, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
 import { refusal } from "../src/shell/settingsview.js";
-import { probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
-import { fallbackPlaces, paceFromValue, paceLabel, paceValue, storedFallback } from "/plugins/ied.chat/ui/pacing.js";
+import { ModelsPage, probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
+import { paceLabel } from "/plugins/ied.chat/ui/pacing.js";
 
 const SETTINGS = {
 	"ai.maxSteps": { page: "AI", schema: { type: "integer", description: "Model requests per turn" } },
@@ -66,11 +66,26 @@ test("settings: a model profile from its form", () => {
 
 test("settings: a Claude model's pace", () => {
 	assertEqual([paceLabel(undefined), paceLabel({ max: 1.25 }), paceLabel({ max: 1, target: "week" })], ["always", "up to 1.25x, session and week", "up to 1.00x, week"]);
-	assertEqual([paceValue(undefined), paceValue({ max: 1.25 }), paceValue({ max: 1.5, target: "session" })], ["", "1.25|both", "1.5|session"]);
-	assertEqual([paceFromValue(""), paceFromValue("1.25|both"), paceFromValue("2|week")], [undefined, { max: 1.25 }, { max: 2, target: "week" }], "both is left out");
-	const role = { model: "claude-opus", pace: { max: 1 }, fallback: [{ model: "claude-haiku", pace: { max: 1.5 } }, "qwen"] };
-	assertEqual(fallbackPlaces(role), [{ model: "claude-haiku", pace: { max: 1.5 } }, { model: "qwen", pace: undefined }]);
-	assertEqual(storedFallback(fallbackPlaces(role)), [{ model: "claude-haiku", pace: { max: 1.5 } }, "qwen"], "a place without a pace kept as a name");
+});
+
+test("settings: the Models page shows a Claude model as Claude Code's, with nothing to test or edit", () => {
+	const models = {
+		"claude-fable-5-2": { provider: "claude-code", model: "claude-fable-5-2", label: "Fable 5.2", efforts: ["low", "medium", "high"] },
+		"claude-opus": { provider: "claude-code", model: "opus" },
+		desk: { endpoint: "http://10.0.0.2:8080/v1", privacy: "lan" },
+	};
+	const el = document.createElement("div");
+	const page = new ModelsPage({ el, settings: { value: () => ({ value: models }), onChange: () => () => {} }, ied: {} });
+	const card = (name) => el.querySelector(".set-model[data-model='" + name + "']");
+	const fable = card("claude-fable-5-2");
+	assertEqual([fable.classList.contains("claude-model"), fable.querySelector(".set-model-head b").textContent, fable.querySelector(".chip").textContent],
+		[true, "Fable 5.2", "Claude Code"], "the CLI's name, then the id");
+	assertEqual([...fable.querySelectorAll(".set-model-facts span")].map((s) => s.textContent), ["model claude-fable-5-2", "effort low, medium, high", "on your subscription"]);
+	assertEqual([...fable.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Remove claude-fable-5-2"], "no Test connection or Edit: Claude Code has no endpoint");
+	assertEqual([...card("claude-opus").querySelectorAll(".set-model-facts span")].map((s) => s.textContent), ["model opus", "on your subscription"], "every effort: none listed");
+	assertEqual([card("desk").classList.contains("claude-model"), card("desk").querySelector(".chip").textContent, card("desk").querySelectorAll("button").length], [false, "lan", 3], "an endpoint's card as before");
+	assertEqual(el.querySelector(".set-lead").textContent.includes("Groups"), false);
+	page.dispose();
 });
 
 test("settings: a key kept only for old files is not shown", () => {

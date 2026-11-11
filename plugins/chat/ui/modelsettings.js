@@ -53,7 +53,7 @@ export class ModelsPage {
 		replace(ctx.el,
 			h("div.set-crumbs", null, "AI \u203a Models \u00b7 ", h("span.mono", null, "ai.models")),
 			h("h1", null, "Models"),
-			h("p.set-lead", null, "Where each model is served and how to talk to it: an OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, Ollama's /v1). Groups give models to roles. Models are kept in your User settings, never in a repository."),
+			h("p.set-lead", null, "Where each model is served and how to talk to it: an OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, Ollama's /v1), or Claude Code on your subscription - its models are added as the CLI offers them (AI > Claude). Models are kept in your User settings, never in a repository."),
 			h("div.set-bar", null, h("button.btn", { on: { click: () => this.edit("") } }, icon("add"), "Add model")),
 			this.list);
 		this.stop = this.settings.onChange(() => this.render());
@@ -73,6 +73,7 @@ export class ModelsPage {
 	}
 
 	card(name, profile) {
+		if (profile.provider === "claude-code") return this.claudeCard(name, profile);
 		const probe = this.probes.get(name);
 		return h("div.set-model", { dataset: { model: name } },
 			h("div.set-model-head", null, h("b", null, name), h("span.chip" + (profile.privacy === "cloud" ? ".warn" : ""), null, profile.privacy || "local"),
@@ -90,8 +91,24 @@ export class ModelsPage {
 				probe.ok && probe.models.length && !probe.modelServed ? " - it does not serve " + (profile.model || name) : "") : null);
 	}
 
+	// A Claude model (provider claude-code, docs/04 "The Claude models"): Claude Code runs it on the owner's subscription,
+	// so there is no endpoint to test or edit; added as the CLI offers it, and one removed stays removed.
+	claudeCard(name, profile) {
+		const efforts = Array.isArray(profile.efforts) && profile.efforts.length ? profile.efforts : null;
+		return h("div.set-model.claude-model", { dataset: { model: name } },
+			h("div.set-model-head", null, h("b", null, profile.label || name), profile.label ? h("span.mono.muted", null, name) : null,
+				h("span.chip", null, "Claude Code"),
+				h("span.grow"),
+				h("button.btn.flat", { title: "Remove " + name, "aria-label": "Remove " + name, on: { click: () => this.remove(name) } }, icon("trash"))),
+			h("div.set-model-facts", null,
+				h("span", null, "model " + (profile.model || name)),
+				efforts ? h("span", null, "effort " + efforts.join(", ")) : null,
+				profile.contextWindow ? h("span", null, compact(profile.contextWindow) + " context") : null,
+				h("span", null, "on your subscription")));
+	}
+
 	form(name, profile) {
-		const field = (label, key, value, extra) => {
+		const field =(label, key, value, extra) => {
 			const input = h("input.input-field", Object.assign({ "aria-label": label, spellcheck: "false", value: value === undefined ? "" : String(value) }, extra || {}));
 			fields[key] = input;
 			return h("label.set-field", null, h("span", null, label), input);
@@ -193,7 +210,9 @@ export class ModelsPage {
 	}
 
 	async remove(name) {
-		if (!(await confirmDialog({ title: "Remove model", message: "Remove " + name + " from ai.models? Groups that name it fall back to their next model.", confirm: "Remove", danger: true }))) return;
+		const claude = (this.models()[name] || {}).provider === "claude-code";
+		const message = "Remove " + name + " from ai.models? A chat on it goes on with the default chain" + (claude ? "; Claude Code's models are not added back by themselves (AI > Claude: Add Claude models)." : ".");
+		if (!(await confirmDialog({ title: "Remove model", message, confirm: "Remove", danger: true }))) return;
 		const models = this.models();
 		delete models[name];
 		const error = await this.settings.set("ai.models", models, "app");

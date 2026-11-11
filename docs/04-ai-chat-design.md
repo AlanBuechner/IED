@@ -311,9 +311,10 @@ clicks to its view's `click()`, `docs/02`). Settings > AI > Claude (the command 
 version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, each paced chain with
 every place's state (used now, over its pace) and the model a turn uses now, the **Weekly pace** (Every day or Work days
 only, and the work days), Refresh, Add Claude models (the automatic setup's profiles), and the rows of
-`ai.claude.command` and `ai.claude.usageRefreshMinutes`. The default chain is made by `ai.defaultModel`, `ai.claude.stepDown` and `ai.fallbackModel` on the AI page (Model Groups, which edited chains, is gone).
-fallbacks in order (moved up, removed) each with its own pace - always, or at most 0.75x to 2x against the session, the week or
-both - and says which mode uses each role. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
+`ai.claude.command` and `ai.claude.usageRefreshMinutes`. The default chain is made by `ai.defaultModel`, `ai.claude.stepDown`
+and `ai.fallbackModel` on the AI page (Model Groups, which edited chains, is gone). Settings > AI > Models shows a Claude
+model as what it is - its name, the CLI's alias or id, the efforts it takes when not every one - with no endpoint to test or
+edit; removing one keeps it out. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
 bar, from the command palette).
 
 **As built.** Server (`plugins/chat/code/`): `claudewire` (usage windows from `get_usage` and `rate_limit_event`, a model's pace
